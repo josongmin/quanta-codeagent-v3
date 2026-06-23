@@ -1,7 +1,14 @@
 # Jun 23 — Trajectory Fork-Experiment (counterfactual troubleshooting)
 
-Status: **RFC** — foundational seam LANDED + proven; per-branch replay isolation
-invariant LANDED + pinned (§4.1); ergonomics/fan-out driver (§6/§7) pending decision.
+Status: **LANDED (complete)** — seam (Phase 0) + per-branch replay isolation
+(§4.1) + registry/fan-out driver (Phase 1/2) + mutator-less fork-at-N
+(`QUANTA_BENCH_REPLAY_LIMIT` replay cap + `truncateCassette` file helper) all
+implemented and hellgate-proven. Self-describing registry
+(`describeForkExperiments`) + operator guide shipped. Live end-to-end smoke
+passed (record → replay fan-out → table). No remaining items.
+
+**Operator guide (LLM-readable):** [`docs/trajectory-fork-experiments.md`](../../trajectory-fork-experiments.md)
+— record → replay+experiment → read-table workflow, env reference, catalog, limits.
 
 Related:
 

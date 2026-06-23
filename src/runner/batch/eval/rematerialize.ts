@@ -31,7 +31,7 @@
  * at base for the next call regardless of how the probe exits.
  */
 
-import { readFile, writeFile } from "node:fs/promises"
+import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { type ProjectEnvSandboxFs, prepareProjectEnvSandbox } from "../corpus/project-env"
 import { exec } from "./exec"
@@ -50,6 +50,14 @@ const rematerializeFsPort: ProjectEnvSandboxFs = {
     try {
       await readFile(p)
       return true
+    } catch {
+      return false
+    }
+  },
+  readdir: (p) => readdir(p),
+  isDirectory: async (p) => {
+    try {
+      return (await lstat(p)).isDirectory()
     } catch {
       return false
     }

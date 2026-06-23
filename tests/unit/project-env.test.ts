@@ -20,18 +20,27 @@ import { buildProjectEnvUvRunArgv } from "@/runner/batch/corpus/project-env"
 
 const hasWithDep = (argv: readonly string[], dep: string): boolean =>
   argv.some((arg, idx) => arg === "--with" && argv[idx + 1] === dep)
+const uvRunIndex = (argv: readonly string[]): number =>
+  argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
 
 describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07 / P0 mechanism)", () => {
   test("astropy/astropy argv carries the base env but NOT the broken build flags", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
     // uv must not switch into the repo's own project env, which would hide
     // the `--with` pins behind the project layer.
+    expect(uvRunIndex(argv)).toBeGreaterThanOrEqual(0)
     expect(argv).toContain("--no-project")
     // The build dep moved to pyproject materialization; the broken `--with`
     // pins + isolation toggle are GONE (they never reached the build backend).
     expect(hasWithDep(argv, "setuptools<60")).toBe(false)
     expect(hasWithDep(argv, "extension_helpers")).toBe(false)
     expect(argv).not.toContain("--no-build-isolation")
+    expect(hasWithDep(argv, "numpy<2")).toBe(true)
+    expect(hasWithDep(argv, "hypothesis")).toBe(true)
+    expect(hasWithDep(argv, "pytest-astropy")).toBe(true)
+    expect(argv).toContain(
+      "CFLAGS=-Wno-error=incompatible-function-pointer-types -Wno-incompatible-function-pointer-types",
+    )
     // The repo itself is installed editable from the sandbox cwd.
     expect(argv).toContain("--with-editable")
     expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".")
@@ -88,7 +97,7 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
   test("xarray pins numpy<2 (np.unicode_ removed in numpy 2) and NO build-isolation flag", () => {
     const argv = buildProjectEnvUvRunArgv("pydata/xarray", "2022.03")
     expect(hasWithDep(argv, "numpy<2")).toBe(true)
-    // xarray gets NO build-flag override (only astropy disables isolation).
+    // xarray gets NO build-env override; its repo-specific fix is runtime-only.
     expect(argv).not.toContain("--no-build-isolation")
     // ...still inherits the shared base env (control not vacuous).
     expect(argv).toContain("--no-project")
@@ -101,6 +110,9 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
     expect(hasWithDep(argv, "setuptools<60")).toBe(false)
     expect(hasWithDep(argv, "extension_helpers")).toBe(false)
     expect(hasWithDep(argv, "extension-helpers")).toBe(false)
+    expect(argv).toContain(
+      "CFLAGS=-Wno-error=incompatible-function-pointer-types -Wno-incompatible-function-pointer-types",
+    )
     expect(argv).not.toContain("--no-build-isolation")
   })
 
@@ -118,10 +130,12 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
   // `--no-project … --python v --with <dep> … --with-editable .`.
   test("argv shape preserved: base flags → --with deps → --with-editable .", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
+    const uvIdx = uvRunIndex(argv)
     const noProjIdx = argv.indexOf("--no-project")
     const firstWith = argv.indexOf("--with")
     const editIdx = argv.indexOf("--with-editable")
-    expect(noProjIdx).toBeGreaterThanOrEqual(0)
+    expect(uvIdx).toBeGreaterThanOrEqual(0)
+    expect(noProjIdx).toBeGreaterThan(uvIdx)
     expect(firstWith).toBeGreaterThan(noProjIdx)
     expect(editIdx).toBeGreaterThan(firstWith)
     expect(argv[editIdx + 1]).toBe(".")

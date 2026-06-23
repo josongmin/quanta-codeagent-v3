@@ -43,8 +43,11 @@ describe("parseTestNameList", () => {
   test("absent field ⇒ undefined", () => {
     expect(parseTestNameList({}, "PASS_TO_PASS")).toBeUndefined()
   })
-  test("non-string field ⇒ undefined", () => {
-    expect(parseTestNameList({ PASS_TO_PASS: ["already", "array"] }, "PASS_TO_PASS")).toBeUndefined()
+  test("already-decoded array field ⇒ parsed", () => {
+    expect(parseTestNameList({ PASS_TO_PASS: ["already", "array"] }, "PASS_TO_PASS")).toEqual([
+      "already",
+      "array",
+    ])
   })
   test("malformed JSON ⇒ undefined", () => {
     expect(parseTestNameList({ PASS_TO_PASS: "{not json" }, "PASS_TO_PASS")).toBeUndefined()
@@ -103,6 +106,19 @@ describe("toInstance — PASS_TO_PASS threading", () => {
     expect(inst.testCmd).toContain("--with setuptools")
     expect(inst.testCmd).toContain("--no-project")
     expect(inst.testCmd).toContain("--with-editable . pytest -x --no-header")
+  })
+
+  test("already-decoded FAIL_TO_PASS array still synthesizes a real pytest command", () => {
+    const inst = toInstance(
+      taskWith({
+        FAIL_TO_PASS: ["tests/test_x.py::test_y"],
+        version: "1.5",
+      }),
+      "/tmp/repo",
+    )
+    expect(inst.testCmd).not.toBe("true")
+    expect(inst.testCmd).toContain("pytest -x --no-header")
+    expect(inst.testCmd).toContain("'tests/test_x.py::test_y'")
   })
 
   test("xarray testCmd shell-quotes the numpy<2 guard instead of redirecting it", () => {

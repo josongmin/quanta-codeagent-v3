@@ -7,7 +7,7 @@
  * via `getCachePathspecs`).
  */
 
-import { readFile, writeFile } from "node:fs/promises"
+import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
 import { isTestFilePath, type SandboxData } from "@/shared"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
 import {
@@ -27,6 +27,14 @@ const snapshotFsPort: ProjectEnvSandboxFs = {
     try {
       await readFile(p)
       return true
+    } catch {
+      return false
+    }
+  },
+  readdir: (p) => readdir(p),
+  isDirectory: async (p) => {
+    try {
+      return (await lstat(p)).isDirectory()
     } catch {
       return false
     }

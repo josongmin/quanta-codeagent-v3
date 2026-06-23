@@ -399,12 +399,18 @@ describe("primitives", () => {
     expect(readFileSync(join(repo, "pyproject.toml"), "utf8")).toBe(before)
   })
 
-  test("materializeBuildEnv injects the astropy block when pyproject exists", async () => {
+  test("materializeBuildEnv injects the astropy block and dep_util shim when legacy setup files exist", async () => {
     writeFileSync(join(repo, "pyproject.toml"), "[project]\nname='astropy'\n")
+    writeFileSync(join(repo, "setup.py"), "from setuptools import setup\n")
+    writeFileSync(
+      join(repo, "setup_package.py"),
+      "from setuptools.dep_util import newer_group\nVALUE = newer_group\n",
+    )
     expect(await materializeBuildEnv(repo, "astropy/astropy")).toBe(true)
     const after = readFileSync(join(repo, "pyproject.toml"), "utf8")
     expect(after).toContain("[tool.uv.extra-build-dependencies]")
     expect(after).toContain("extension-helpers")
+    expect(readFileSync(join(repo, "setup_package.py"), "utf8")).toContain("distutils.dep_util")
     // the repo's own table is preserved (merge-safe append, not clobber)
     expect(after).toContain("[project]")
   })
@@ -454,6 +460,7 @@ describe("primitives", () => {
 describe("withCandidatePatch — proof build-env materialization (repo set vs undefined)", () => {
   const PY = "[project]\nname = 'astropy'\nversion = '0.0'\n"
   const BLOCK = "[tool.uv.extra-build-dependencies]"
+  const LEGACY_SETUP = "from setuptools.dep_util import newer_group\nVALUE = newer_group\n"
   // Re-commit a pyproject.toml INTO base so the leading resetToBase keeps it
   // (materialization needs a pyproject present; the harness base has none).
   const commitPyproject = (): void => {
@@ -461,14 +468,21 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
     git("add", "-A")
     git("commit", "-q", "-m", "add pyproject")
   }
+  const commitLegacySetup = (): void => {
+    writeFileSync(join(repo, "setup.py"), "from setuptools import setup\n")
+    writeFileSync(join(repo, "setup_package.py"), LEGACY_SETUP)
+    git("add", "-A")
+    git("commit", "-q", "-m", "add legacy setup files")
+  }
   // A SOURCE-ONLY candidate diff (touches foo.txt only — mirrors the real
   // captured candidate where the env block was stripped before capture).
   const sourceCandidate = (): string =>
     diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nfix\n"))
 
-  test("repo=astropy ⇒ the probe OBSERVES the injected build-dep block (red-on-injection)", async () => {
+  test("repo=astropy ⇒ the probe OBSERVES the injected build-dep block and dep_util shim (red-on-injection)", async () => {
     commitPyproject()
-    const obs: { py: string } = { py: "" }
+    commitLegacySetup()
+    const obs: { py: string; setupPackage: string } = { py: "", setupPackage: "" }
     const ret = await withCandidatePatch({
       sandbox: repo,
       patch: sourceCandidate(),
@@ -477,6 +491,7 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
       repo: "astropy/astropy",
       probe: async (sb) => {
         obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        obs.setupPackage = readFileSync(join(sb, "setup_package.py"), "utf8")
         return "probed"
       },
     })
@@ -485,13 +500,15 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
     // and the probe sees the bare base pyproject → no block → this fails.
     expect(obs.py).toContain(BLOCK)
     expect(obs.py).toContain("extension-helpers")
+    expect(obs.setupPackage).toContain("distutils.dep_util")
     // The candidate's source edit is ALSO present (materialize did not clobber it).
     expect(readFileSync(join(repo, "foo.txt"), "utf8")).toBe("base\n") // reset after
   })
 
   test("repo=undefined ⇒ the probe sees NO block (paired control = byte-identical to before)", async () => {
     commitPyproject()
-    const obs: { py: string } = { py: "" }
+    commitLegacySetup()
+    const obs: { py: string; setupPackage: string } = { py: "", setupPackage: "" }
     await withCandidatePatch({
       sandbox: repo,
       patch: sourceCandidate(),
@@ -500,16 +517,19 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
       // repo intentionally omitted
       probe: async (sb) => {
         obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        obs.setupPackage = readFileSync(join(sb, "setup_package.py"), "utf8")
         return null
       },
     })
     // No materialization when repo is undefined → the bare committed pyproject.
     expect(obs.py).toBe(PY)
     expect(obs.py.includes(BLOCK)).toBe(false)
+    expect(obs.setupPackage).toBe(LEGACY_SETUP)
   })
 
   test("materialize runs AFTER apply: a candidate that EDITS pyproject still gets the block appended", async () => {
     commitPyproject()
+    commitLegacySetup()
     // The candidate itself edits pyproject (its own table) — materialize must
     // append the env block WITHOUT clobbering the candidate's edit, proving the
     // ordering is apply→materialize (not materialize→apply, which apply'd over it).
@@ -537,6 +557,7 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
 
   test("NO LEAK: the trailing reset wipes the block — a SUBSEQUENT capture sees clean base", async () => {
     commitPyproject()
+    commitLegacySetup()
     await withCandidatePatch({
       sandbox: repo,
       patch: sourceCandidate(),
@@ -550,6 +571,7 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
     // leak the env-only mutation into the submitted diff).
     expect(readFileSync(join(repo, "pyproject.toml"), "utf8")).toBe(PY)
     expect(readFileSync(join(repo, "pyproject.toml"), "utf8").includes(BLOCK)).toBe(false)
+    expect(readFileSync(join(repo, "setup_package.py"), "utf8")).toBe(LEGACY_SETUP)
     expect(git("status", "--porcelain")).toBe("")
     // Belt-and-braces: a fresh staged-diff capture from this resting tree is empty.
     expect(execFileSync("git", ["diff", "HEAD"], { cwd: repo, encoding: "utf8" })).toBe("")
@@ -577,7 +599,8 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
 
   test("django (no override) ⇒ clean no-op: probe sees the bare pyproject even with repo set", async () => {
     commitPyproject()
-    const obs: { py: string } = { py: "" }
+    commitLegacySetup()
+    const obs: { py: string; setupPackage: string } = { py: "", setupPackage: "" }
     await withCandidatePatch({
       sandbox: repo,
       patch: sourceCandidate(),
@@ -586,11 +609,13 @@ describe("withCandidatePatch — proof build-env materialization (repo set vs un
       repo: "django/django",
       probe: async (sb) => {
         obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        obs.setupPackage = readFileSync(join(sb, "setup_package.py"), "utf8")
         return null
       },
     })
     // django has no build-dep override → no block, byte-identical to base.
     expect(obs.py).toBe(PY)
     expect(obs.py.includes(BLOCK)).toBe(false)
+    expect(obs.setupPackage).toBe(LEGACY_SETUP)
   })
 })

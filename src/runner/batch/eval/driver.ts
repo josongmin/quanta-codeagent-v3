@@ -85,7 +85,7 @@ import type {
   InstanceResult,
   ReproOracleCalibration,
 } from "../types"
-import { runAdaptiveBenchAttempt } from "./adaptive-escalation"
+import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
@@ -123,8 +123,10 @@ import {
   type LlmEvidencePacket,
   type LlmEvidencePacketStage,
   type MissingEvidenceFact,
+  ownerTestResultReceipt,
   type ProofReceiptFact,
   recordLlmEvidencePacket,
+  toPhaseRoutingContract,
   type VerificationTargetFact,
   verificationTargetFromPlan,
 } from "./llm-evidence-packet"
@@ -144,7 +146,12 @@ import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
 import { runRepairRounds } from "./repair/index"
 import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
-import { makeReproVoteValidate } from "./repair/repro-vote"
+import {
+  drainReproVoteOutcomes,
+  makeReproVoteValidate,
+  resetReproVoteOutcomes,
+  summarizeReproVoteOutcomes,
+} from "./repair/repro-vote"
 import {
   makePatchedResolvedConsensus,
   makePatchedResolvedConsensusProof,
@@ -213,6 +220,13 @@ export interface RunInstanceDeps {
   maxTurns: number
   /** Wall-clock budget (ms) for the whole instance. */
   timeoutMs: number
+  /**
+   * Trajectory fork-experiment seam (troubleshooting). Threaded straight onto
+   * `AgentConfig.turnContextMutator` so a named experiment can vary the per-turn
+   * LLM input at a chosen turn. ABSENT (default) ⇒ not set on the config ⇒
+   * byte-identical prompt. Wired by index.ts from `QUANTA_FORK_EXPERIMENT`.
+   */
+  turnContextMutator?: AgentConfig["turnContextMutator"]
   /**
    * Optional hard-budget factory for a single agent invocation. The factory is
    * called fresh for each solve / repair round / verify-select candidate so
@@ -1934,6 +1948,11 @@ export const buildConfig = (
     maxTurns: deps.maxTurns,
     signal,
     ...(budgetMeter !== undefined ? { budgetMeter } : {}),
+    // Fork-experiment seam: present only when an experiment is wired ⇒
+    // byte-identical default-OFF (RFC jun-23 §3).
+    ...(deps.turnContextMutator !== undefined
+      ? { turnContextMutator: deps.turnContextMutator }
+      : {}),
     onConfirm: async () => false,
     // Real SWE-bench repos blow the context window over a long trajectory.
     // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
@@ -4095,10 +4114,53 @@ const adaptiveSelectionProofReceipts = (
       receipts.push({ source: "repro_consensus", state: "static_only", baseValidatedRed: true })
       break
   }
+  // B5 — surface the executed module-smoke (public issue-smoke) HARD-gate RESULT
+  // as a proof receipt the model/router sees. RESULT ONLY: `ownerTestResultReceipt`
+  // builds it with `cmdWithheld:true` and never carries the command/selector
+  // (C3 anti-gaming fence). Absent ⇒ the smoke gate did not run (FAIL-OPEN).
+  if (proofSummary.moduleSmokeState !== undefined) {
+    receipts.push(
+      ownerTestResultReceipt({
+        kind: "module_smoke",
+        result: proofSummary.moduleSmokeState,
+      }),
+    )
+  }
   return receipts
 }
 
+/**
+ * A10 — the closed ROUTING action menu the router prompt enumerates. Passed into
+ * {@link toPhaseRoutingContract} so the router-input packet's `allowedActions`
+ * MATCH the router instruction's `ADAPTIVE_ACTIONS` (one coherent action menu),
+ * instead of the source packet's stale "explain_*" / post-review actions.
+ */
+const ROUTING_ACTION_MENU: readonly string[] = [...ADAPTIVE_ACTIONS]
+
+/**
+ * Build the evidence packet the adaptive PHASE ROUTER sees for this phase. The
+ * evidence BODY is the selection-explanation packet (when selection telemetry
+ * exists) or a post-exec review packet (thin path); EITHER way the consumer is
+ * the router asking "choose the next phase", so the packet is re-contracted via
+ * {@link toPhaseRoutingContract} (A10): the model sees `stage:"phase_routing"`,
+ * a phase-decision question, and the closed routing action menu — never the
+ * stale "explain_*" / post-review contract. Only the stage/question/action menu
+ * change; all evidence is preserved and re-blindness-checked. The report keeps
+ * using the honest `selection_explanation`/`candidate_post_review` packet built
+ * separately in `attachLlmEvidenceArtifacts`.
+ */
 export const buildAdaptivePhasePacket = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+  readonly sandbox: string
+}): LlmEvidencePacket =>
+  toPhaseRoutingContract(buildAdaptivePhaseEvidence(args), ROUTING_ACTION_MENU)
+
+/** The evidence BODY for the router packet, before the A10 routing re-contract
+ *  ({@link buildAdaptivePhasePacket} applies the contract). Kept separate so the
+ *  evidence assembly is unit-testable independent of the stage rewrite. */
+const buildAdaptivePhaseEvidence = (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly prepared: PreparedAttemptContext
@@ -4701,10 +4763,33 @@ const runV5AdaptiveAttempt = async (args: {
   }
 }
 
+/**
+ * A5 — drain the per-instance repro-vote outcome sink and attach the typed
+ * telemetry to the result. Drained EXACTLY ONCE per instance (the drain is
+ * consuming), so a later read can never double-count. Returns the result
+ * unchanged when no vote round was recorded (knob off / no reproducing set) so
+ * the report stays byte-identical. The sink is RESET at instance start (see
+ * `runInstanceOnce`), guaranteeing no cross-instance accumulation.
+ */
+export const attachReproVoteOutcomes = (result: InstanceResult): InstanceResult => {
+  const summary = summarizeReproVoteOutcomes(drainReproVoteOutcomes())
+  return summary === undefined ? result : { ...result, reproVoteOutcomes: summary }
+}
+
+/** A5 — reset the per-instance repro-vote sink at instance START. Re-exported so
+ *  the apps/bench driver resets the SAME module sink (one SSOT) before its run,
+ *  preventing cross-instance accumulation on either driver. */
+export { resetReproVoteOutcomes } from "./repair/repro-vote"
+
 export const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
+  // A5: reset the repro-vote sink at instance START so vote outcomes recorded by
+  // the validator during THIS instance's repair/selection rounds cannot leak
+  // into the next instance's telemetry (the audit's cross-instance accumulation
+  // risk). Drained per result via `attachReproVoteOutcomes`.
+  resetReproVoteOutcomes()
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
   let deadline: ReturnType<typeof setTimeout> | undefined
@@ -4723,20 +4808,22 @@ export const runInstanceOnce = async (
     reproTest = preparedContext.reproTest
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
     if (v5AdaptiveEnabledForState(preparedContext.state, process.env)) {
-      return await runV5AdaptiveAttempt({
-        instance,
-        deps,
-        sandbox,
-        signal: abort.signal,
-        wiring: w,
-        prepared: preparedContext,
-        reproTest,
-        startedAt,
-        onFinals: (p, pr) => {
-          phase = p
-          prepared = pr
-        },
-      })
+      return attachReproVoteOutcomes(
+        await runV5AdaptiveAttempt({
+          instance,
+          deps,
+          sandbox,
+          signal: abort.signal,
+          wiring: w,
+          prepared: preparedContext,
+          reproTest,
+          startedAt,
+          onFinals: (p, pr) => {
+            phase = p
+            prepared = pr
+          },
+        }),
+      )
     }
     phase = await runMainPhase({
       instance,
@@ -4757,33 +4844,37 @@ export const runInstanceOnce = async (
       prepared: preparedContext,
       sandbox,
     })
-    if (terminal !== undefined) return terminal
+    if (terminal !== undefined) return attachReproVoteOutcomes(terminal)
     // NOTE (jun-21): no strict patch-budget terminal-discard here anymore — an
     // over-budget patch ESCALATES to grading (telemetry recorded on the result),
     // never a hard reject. See the removal note above the old fn site.
     // Await inside the try so sandbox cleanup in `finally` cannot race the
     // final verifier. A bare `return promise` here would run `finally`
     // immediately and tear down the sandbox while verify is still spawning.
-    return await verifyAndFinalizeResult({
-      instance,
-      phase,
-      deps,
-      sandbox,
-      signal: abort.signal,
-      reproTest,
-      wiring: w,
-      startedAt,
-      prepared: preparedContext,
-    })
+    return attachReproVoteOutcomes(
+      await verifyAndFinalizeResult({
+        instance,
+        phase,
+        deps,
+        sandbox,
+        signal: abort.signal,
+        reproTest,
+        wiring: w,
+        startedAt,
+        prepared: preparedContext,
+      }),
+    )
   } catch (e) {
-    return latePhaseFailureResultFromError({
-      instance,
-      phase,
-      reproTest,
-      error: e,
-      prepared,
-      sandbox,
-    })
+    return attachReproVoteOutcomes(
+      latePhaseFailureResultFromError({
+        instance,
+        phase,
+        reproTest,
+        error: e,
+        prepared,
+        sandbox,
+      }),
+    )
   } finally {
     if (deadline !== undefined) clearTimeout(deadline)
     w.observer?.close()

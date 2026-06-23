@@ -20,6 +20,7 @@
  * live model output. Operators who intentionally want "replay until the fork
  * point, then diverge live" opt into `record-and-passthrough`.
  */
+import { resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 
@@ -38,10 +39,25 @@ const replayOnMissFromRaw = (raw: string | undefined): OnMissPolicy => {
   )
 }
 
+/** Parse `QUANTA_BENCH_REPLAY_LIMIT` — a non-negative integer cap on how many
+ *  recorded interactions are eligible to replay (fork-at-N without a mutator).
+ *  Absent/"" ⇒ undefined (whole cassette). Invalid (non-int / negative) THROWS
+ *  loudly so an operator/agent sees the typo instead of a silently-ignored cap. */
+const replayLimitFromRaw = (raw: string | undefined): number | undefined => {
+  if (raw === undefined || raw.trim() === "") return undefined
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(
+      `invalid QUANTA_BENCH_REPLAY_LIMIT=${JSON.stringify(raw)} — expected a non-negative integer`,
+    )
+  }
+  return n
+}
+
 export type BenchTrajectoryMode =
   | { kind: "off" }
   | { kind: "record"; path: string }
-  | { kind: "replay"; path: string; onMiss: OnMissPolicy }
+  | { kind: "replay"; path: string; onMiss: OnMissPolicy; limit?: number }
 
 export const resolveBenchTrajectoryMode = (): BenchTrajectoryMode => {
   const recordPath = trajectoryPathFromRaw(process.env.QUANTA_BENCH_RECORD_TRAJECTORY)
@@ -52,10 +68,12 @@ export const resolveBenchTrajectoryMode = (): BenchTrajectoryMode => {
     )
   }
   if (replayPath !== undefined) {
+    const limit = replayLimitFromRaw(process.env.QUANTA_BENCH_REPLAY_LIMIT)
     return {
       kind: "replay",
       path: replayPath,
       onMiss: replayOnMissFromRaw(process.env.QUANTA_BENCH_REPLAY_ON_MISS),
+      ...(limit !== undefined ? { limit } : {}),
     }
   }
   if (recordPath !== undefined) return { kind: "record", path: recordPath }
@@ -65,6 +83,7 @@ export const resolveBenchTrajectoryMode = (): BenchTrajectoryMode => {
 export const replayTrajectoryPort = (args: {
   path: string
   onMiss: OnMissPolicy
+  limit?: number
   fallback?: LLMPort
   provider?: string
   model?: string
@@ -73,7 +92,7 @@ export const replayTrajectoryPort = (args: {
     throw new Error(`QUANTA_BENCH_REPLAY_ON_MISS=${args.onMiss} requires a live fallback LLMPort`)
   }
   return replayLlmPort({
-    store: jsonlReplayStore({ path: args.path }),
+    store: jsonlReplayStore({ path: args.path, ...(args.limit !== undefined ? { limit: args.limit } : {}) }),
     onMiss: args.onMiss,
     ...(args.fallback !== undefined ? { fallback: args.fallback } : {}),
     ...(args.provider !== undefined ? { provider: args.provider } : {}),
@@ -134,8 +153,33 @@ export const applyBenchTrajectoryMode = (
   return replayTrajectoryPort({
     path: mode.path,
     onMiss: mode.onMiss,
+    ...(mode.limit !== undefined ? { limit: mode.limit } : {}),
     ...(mode.onMiss === "throw" ? {} : { fallback: llm }),
     provider: identity.provider,
     model: identity.model,
   })
+}
+
+/**
+ * Produce a TRUNCATED copy of a cassette — the first `keep` recorded
+ * interactions only — at `dest`, WITHOUT mutating the source. A shareable file
+ * artifact for "replay the prefix, diverge after N" when you want a smaller
+ * cassette on disk rather than the in-place {@link replayLimitFromRaw} cap
+ * (`QUANTA_BENCH_REPLAY_LIMIT`), which needs no copy. Reuses the store's
+ * load/save so the round-trip is byte-faithful (same normalization). `keep <= 0`
+ * ⇒ an empty cassette; `keep >= total` ⇒ a full copy. Returns the counts.
+ */
+export const truncateCassette = async (
+  src: string,
+  keep: number,
+  dest: string,
+): Promise<{ dest: string; kept: number; total: number }> => {
+  if (resolve(dest) === resolve(src)) {
+    // Refuse to overwrite the source — truncation is non-destructive by contract.
+    throw new Error(`truncateCassette: dest must differ from src (got ${JSON.stringify(src)})`)
+  }
+  const all = await jsonlReplayStore({ path: src }).load()
+  const kept = all.slice(0, Math.max(0, keep))
+  await jsonlReplayStore({ path: dest }).save(kept)
+  return { dest, kept: kept.length, total: all.length }
 }

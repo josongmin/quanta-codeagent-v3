@@ -26,6 +26,15 @@ import type { MatchPolicy, RecordedInteraction, ReplayMatchOpts, ReplayStore } f
 export interface JsonlReplayStoreOpts {
   /** Absolute path to the `.jsonl` cassette. Parent dir is created on demand. */
   readonly path: string
+  /**
+   * Cap `match` to the FIRST `limit` recorded interactions — anything that would
+   * only match index `>= limit` MISSES (returns null), so a replay of the prefix
+   * diverges at exactly the `limit`-th interaction. This is the "fork at turn N
+   * WITHOUT a mutator" lever (re-sample / temperature-vary the tail from a chosen
+   * point). Absent ⇒ the whole cassette is eligible (unchanged). `0` ⇒ nothing
+   * replays (every request misses). Negative is clamped to `0`.
+   */
+  readonly limit?: number
   /** Default match policy when callers don't override per-call. */
   readonly defaultPolicy?: MatchPolicy
   /** Override the request → hash function. Default: stable sorted-key JSON →
@@ -157,7 +166,11 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
       const policy: MatchPolicy = matchOpts?.policy ?? defaultPolicy
       const key = hashFn(request, policy)
       const list = await ensureLoaded()
-      for (let i = 0; i < list.length; i++) {
+      // Eligible window: the first `limit` interactions (fork-at-N without a
+      // mutator). Absent ⇒ the whole list; negative clamps to 0.
+      const bound =
+        opts.limit !== undefined ? Math.min(list.length, Math.max(0, opts.limit)) : list.length
+      for (let i = 0; i < bound; i++) {
         if (used.has(i)) continue
         const rec = list[i]
         if (rec === undefined) continue

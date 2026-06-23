@@ -159,6 +159,28 @@ export type PublicRegressionProofState =
 export type ReproConsensusProofState =
   import("./eval/repair/resolved-consensus").ReproConsensusProofState
 export type LlmEvidenceArtifacts = import("./eval/llm-evidence-packet").LlmEvidenceArtifacts
+export type ReproVoteOutcomeRecord =
+  import("./eval/repair/repro-vote").ReproVoteOutcomeRecord
+
+/**
+ * A5 — per-instance repro-vote outcome telemetry, drained from the module sink
+ * after the repair/selection rounds complete. Each `round` preserves the EXACT
+ * {@link ReproVoteOutcomeRecord} (outcome + optional tally), so an analyst can
+ * distinguish VOTE-DECIDED rounds (`vote_resolved` / `vote_unresolved` /
+ * `vote_inconclusive` — for which `primary_false_red_rate` is structurally
+ * suppressed; see the repro-vote.ts MEASUREMENT NOTE) from rounds DEFERRED to
+ * the legacy gate (`empty_sources` / `exec_failed`). The two are never
+ * collapsed. `tally` rolls up the per-outcome round counts for quick reading.
+ * The sink is RESET at instance start, so these counts never leak across
+ * instances. ABSENT ⇒ no repro-vote validator ran this instance (byte-identical
+ * report when the knob is off).
+ */
+export interface ReproVoteTelemetry {
+  readonly rounds: readonly ReproVoteOutcomeRecord[]
+  readonly tally: Readonly<
+    Record<import("./eval/repair/repro-vote").ReproVoteOutcome, number>
+  >
+}
 
 export interface AdaptiveRouteTelemetry {
   outcome: import("./eval/adaptive-escalation").AdaptiveOutcome
@@ -375,6 +397,15 @@ export interface InstanceResult {
   /** v5 adaptive-controller trace: which routed phases ran, what terminal
    *  action was chosen, and which packet revisions the router actually saw. */
   adaptiveRoute?: AdaptiveRouteTelemetry
+  /**
+   * A5 — repro-vote outcome telemetry drained from the module sink after the
+   * repair/selection rounds finish. Present only when a repro-vote validator
+   * actually recorded ≥1 round this instance (knob on AND a reproducing set
+   * existed); ABSENT ⇒ byte-identical report. See {@link ReproVoteTelemetry}:
+   * vote-decided vs legacy-deferred rounds stay distinguishable, and the sink
+   * is reset per-instance so counts never accumulate across instances.
+   */
+  reproVoteOutcomes?: ReproVoteTelemetry
   /**
    * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
    * with a structured reason). Emitted only when the `repair-escalation` knob is

@@ -136,6 +136,31 @@ export const resetReproVoteOutcomes = (): void => {
   reproVoteOutcomeSink.length = 0
 }
 
+/** A5 telemetry projection of drained records — the per-round detail (kept
+ *  verbatim so vote-decided vs legacy-deferred stays distinguishable, per the
+ *  MEASUREMENT NOTE) PLUS a per-outcome tally for quick reading. Returns
+ *  `undefined` for an empty drain so the driver can omit the report field
+ *  (byte-identical when no repro-vote validator ran). Pure; no answer-key. */
+export const summarizeReproVoteOutcomes = (
+  records: readonly ReproVoteOutcomeRecord[],
+):
+  | {
+      readonly rounds: readonly ReproVoteOutcomeRecord[]
+      readonly tally: Readonly<Record<ReproVoteOutcome, number>>
+    }
+  | undefined => {
+  if (records.length === 0) return undefined
+  const tally: Record<ReproVoteOutcome, number> = {
+    empty_sources: 0,
+    exec_failed: 0,
+    vote_resolved: 0,
+    vote_unresolved: 0,
+    vote_inconclusive: 0,
+  }
+  for (const r of records) tally[r.outcome] += 1
+  return { rounds: records, tally }
+}
+
 export interface ReproVoteValidateDeps {
   /** Reproducing scripts (outcome === "reproduced" on the un-patched tree). The
    *  vote is meaningless without them, so an empty set ⇒ pure fallback. */

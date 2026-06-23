@@ -207,6 +207,16 @@ const summarizeProof = (result: SelectionResult): SelectionProofSummary | undefi
       })
       return state === undefined ? {} : { reproConsensusState: state }
     })(),
+    // B5 — surface the executed module-smoke (public issue-smoke) HARD-gate
+    // RESULT for the focus candidate. `null` ⇒ no smoke source ran (FAIL-OPEN),
+    // so the field is omitted; true/false project to the green/red result the
+    // downstream `ownerTestResultReceipt` shows the model (command always
+    // withheld, C3 fence).
+    ...(focusEntry.hard.smokeGreen === null
+      ? {}
+      : {
+          moduleSmokeState: (focusEntry.hard.smokeGreen ? "green" : "red") as "green" | "red",
+        }),
     repairOnlyCandidates,
     submittedCandidateProof,
   }

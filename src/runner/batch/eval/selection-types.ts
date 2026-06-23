@@ -135,6 +135,15 @@ export interface SelectionProofSummary {
   readonly publicMweState?: MweProofState
   readonly publicRegressionState?: PublicRegressionProofState
   readonly reproConsensusState?: ReproConsensusProofState
+  /**
+   * B5 — the focus candidate's module-smoke (public issue-smoke) HARD-gate
+   * RESULT, projected from `HardGateSignals.smokeGreen` (true⇒green / false⇒red).
+   * Present only when the smoke gate actually ran (`smokeGreen !== null`); absent
+   * ⇒ no smoke source existed (FAIL-OPEN). RESULT ONLY — the command/selector is
+   * never carried here (C3 fence); the downstream `ownerTestResultReceipt`
+   * surfaces this state to the model with `cmdWithheld:true`.
+   */
+  readonly moduleSmokeState?: "green" | "red"
   readonly repairOnlyCandidates: number
   readonly submittedCandidateProof: boolean
 }

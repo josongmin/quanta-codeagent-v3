@@ -2,26 +2,28 @@
  * ★ P0 HELLGATE — SWE-bench project-env build-env materialization.
  *
  * The astropy bench failure (`astropy__astropy-13033`, preset
- * `agentless-v4-proof-clean` 0/3) was NOT a model miss: astropy's `setup.py`
- * does a build-time `import extension_helpers`, and the editable build under uv
- * raised ModuleNotFoundError. The PROVEN-BROKEN fix was `uv run --with
- * extension_helpers --with-editable .` (uv builds `.` before `--with` packages
- * reach the build backend). The VALIDATED fix injects a
- * `[tool.uv.extra-build-dependencies]` table into the repo's `pyproject.toml`.
+ * `agentless-v4-proof-clean` 0/3) was NOT a model miss: astropy's build path
+ * first does a build-time `import extension_helpers`, then imports nested
+ * `setup_package.py` modules that still do `from setuptools.dep_util import ...`.
+ * The PROVEN-BROKEN fix was `uv run --with extension_helpers --with-editable .`
+ * (uv builds `.` before `--with` packages reach the build backend). The
+ * VALIDATED closure is:
+ *
+ *   1. inject `[tool.uv.extra-build-dependencies]` into `pyproject.toml`
+ *      so `extension_helpers` is importable to the build backend, and
+ *   2. apply an env-only source shim `setuptools.dep_util` ->
+ *      `distutils.dep_util` in legacy setup files, reverted before diff capture.
  *
  * This file proves, in order:
  *
  *   ★ REAL-BUILD red-on-injection (gated on a real `uv` on PATH): a synthetic
- *     package whose `setup.py` does `import extension_helpers` at build time —
- *     mirroring the box validation exactly — FAILS the `uv run --with-editable .`
- *     build WITHOUT materialization, and BUILD-OKs WITH it. The `--with`
- *     mechanism is asserted to STILL fail (so we're proving the new mechanism is
- *     the one that works, not that any flag works).
+ *     package mirroring astropy's two-stage failure. Without materialization the
+ *     editable build FAILS. With ONLY the pyproject build deps it still FAILS on
+ *     `setuptools.dep_util`. With build deps + source shim it BUILD-OKs.
  *
- *   ★ DIFF-EXCLUSION proof (real git): the injected block does NOT appear in the
- *     `git add -A && git diff --cached` candidate capture after the surgical
- *     revert, while a genuine concurrent agent edit to the SAME pyproject.toml
- *     DOES survive in the diff. (red-on-injection: drop the revert → block leaks.)
+ *   ★ DIFF-EXCLUSION proof (real git): neither the injected pyproject block NOR
+ *     the env-only source shim appear in the captured candidate diff after the
+ *     surgical revert, while genuine concurrent edits to the SAME files survive.
  *
  *   ★ Unit teeth: correct dist-name table key, hyphenated PyPI dep name,
  *     idempotent re-prep (no duplicate table), merge-safe over an existing
@@ -31,19 +33,32 @@
 
 import { describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   buildProjectEnvUvRunArgv,
   hasProjectEnvSandboxBlock,
   materializeProjectEnvPyproject,
+  materializeProjectEnvSourceShimFile,
   PROJECT_ENV_SANDBOX_BEGIN,
   PROJECT_ENV_SANDBOX_END,
+  PROJECT_ENV_SOURCE_SHIM_BEGIN,
+  PROJECT_ENV_SOURCE_SHIM_END,
   type ProjectEnvSandboxFs,
+  hasProjectEnvSourceShimBlock,
   prepareProjectEnvSandbox,
   revertProjectEnvSandbox,
   stripProjectEnvSandboxBlock,
+  stripProjectEnvSourceShimBlocks,
 } from "@/runner/batch/corpus/project-env"
 
 // ---------------------------------------------------------------------------
@@ -59,12 +74,9 @@ const HAS_GIT = hasBin("git")
 
 const mkTmp = (label: string): string => mkdtempSync(join(tmpdir(), `proj-env-${label}-`))
 
-/** A synthetic package whose `setup.py` imports `extension_helpers` AT BUILD
- *  TIME — a faithful proxy for astropy's legacy setup.py. The package's dist
- *  name is `astropy` so the override's table key matches. */
+/** Minimal synthetic package for the FIRST astropy failure only: build-time
+ *  `import extension_helpers` from setup.py. */
 const writeBuildTimeImportPackage = (dir: string, pyproject: string): void => {
-  // setup.py raises at build time unless `extension_helpers` is importable in
-  // the BUILD env — exactly the failure mode the materialization fixes.
   writeFileSync(
     join(dir, "setup.py"),
     [
@@ -78,11 +90,42 @@ const writeBuildTimeImportPackage = (dir: string, pyproject: string): void => {
   writeFileSync(join(dir, "pyproject.toml"), pyproject)
 }
 
+/** Synthetic package mirroring astropy's full legacy build path:
+ *  setup.py imports `extension_helpers`, then imports a nested
+ *  `astropy/wcs/setup_package.py` that still uses `setuptools.dep_util`. */
+const writeNestedDepUtilPackage = (dir: string, pyproject: string): void => {
+  mkdirSync(join(dir, "astropy", "wcs"), { recursive: true })
+  writeFileSync(join(dir, "astropy", "__init__.py"), "")
+  writeFileSync(join(dir, "astropy", "wcs", "__init__.py"), "")
+  writeFileSync(
+    join(dir, "setup.py"),
+    [
+      "import extension_helpers  # build-time import (mirrors astropy legacy setup.py)",
+      "import importlib.util",
+      "from pathlib import Path",
+      "setup_package = Path(__file__).parent / 'astropy' / 'wcs' / 'setup_package.py'",
+      "spec = importlib.util.spec_from_file_location('astropy.wcs.setup_package', setup_package)",
+      "module = importlib.util.module_from_spec(spec)",
+      "assert spec is not None and spec.loader is not None",
+      "spec.loader.exec_module(module)",
+      "from setuptools import setup",
+      "setup(name='astropy', version='0.0.0', py_modules=['astropy_stub'])",
+      "",
+    ].join("\n"),
+  )
+  writeFileSync(
+    join(dir, "astropy", "wcs", "setup_package.py"),
+    ["from setuptools.dep_util import newer_group", "NEEDS_DEP_UTIL = newer_group", ""].join(
+      "\n",
+    ),
+  )
+  writeFileSync(join(dir, "astropy_stub.py"), "VALUE = 1\n")
+  writeFileSync(join(dir, "pyproject.toml"), pyproject)
+}
+
 // Minimal pyproject that drives setuptools as the build backend so setup.py runs.
 const SETUPTOOLS_PYPROJECT = [
   "[build-system]",
-  // Unpinned so the materialized `setuptools<60` build-dep coexists (astropy's
-  // legacy snapshot is likewise unpinned and needs setuptools<60 for dep_util).
   'requires = ["setuptools"]',
   'build-backend = "setuptools.build_meta"',
   "",
@@ -175,7 +218,7 @@ describe("project-env real-build materialization (uv) [gated on uv]", () => {
   )
 
   test.if(HAS_UV)(
-    "WITH materialized [tool.uv.extra-build-dependencies] the build is BUILT-OK",
+    "WITH materialized [tool.uv.extra-build-dependencies] the extension_helpers-only build is BUILT-OK",
     () => {
       const dir = mkTmp("fix")
       try {
@@ -186,6 +229,48 @@ describe("project-env real-build materialization (uv) [gated on uv]", () => {
         writeFileSync(join(dir, "pyproject.toml"), injected as string)
         // No --with for the build dep, no --no-build-isolation: the pyproject
         // table works WITH normal isolation.
+        expect(uvEditableBuilds(dir, [])).toBe(true)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    240_000,
+  )
+
+  test.if(HAS_UV)(
+    "build-deps alone still FAIL on nested `setuptools.dep_util` imports",
+    () => {
+      const dir = mkTmp("dep-util-red")
+      try {
+        writeNestedDepUtilPackage(dir, SETUPTOOLS_PYPROJECT)
+        const injected = materializeProjectEnvPyproject("astropy/astropy", SETUPTOOLS_PYPROJECT)
+        expect(injected).toBeDefined()
+        writeFileSync(join(dir, "pyproject.toml"), injected as string)
+        expect(uvEditableBuilds(dir, [])).toBe(false)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    240_000,
+  )
+
+  test.if(HAS_UV)(
+    "build-deps plus env-only source shim close the astropy-style build path",
+    () => {
+      const dir = mkTmp("dep-util-green")
+      try {
+        writeNestedDepUtilPackage(dir, SETUPTOOLS_PYPROJECT)
+        const injected = materializeProjectEnvPyproject("astropy/astropy", SETUPTOOLS_PYPROJECT)
+        expect(injected).toBeDefined()
+        writeFileSync(join(dir, "pyproject.toml"), injected as string)
+        const setupPackagePath = join(dir, "astropy", "wcs", "setup_package.py")
+        const shimmed = materializeProjectEnvSourceShimFile(
+          "astropy/astropy",
+          setupPackagePath,
+          readFileSync(setupPackagePath, "utf8"),
+        )
+        expect(shimmed).toBeDefined()
+        writeFileSync(setupPackagePath, shimmed as string)
         expect(uvEditableBuilds(dir, [])).toBe(true)
       } finally {
         rmSync(dir, { recursive: true, force: true })
@@ -218,11 +303,19 @@ const realFs: ProjectEnvSandboxFs = {
       return false
     }
   },
+  readdir: async (p) => readdirSync(p),
+  isDirectory: async (p) => {
+    try {
+      return lstatSync(p).isDirectory()
+    } catch {
+      return false
+    }
+  },
 }
 
 describe("project-env diff-exclusion through real git capture [gated on git]", () => {
   test.if(HAS_GIT)(
-    "injected block is stripped from the captured diff, but a real agent edit survives",
+    "env-only pyproject block and source shim are stripped from the captured diff, but real edits survive",
     async () => {
       const dir = mkTmp("diff")
       try {
@@ -236,6 +329,11 @@ describe("project-env diff-exclusion through real git capture [gated on git]", (
           "",
         ].join("\n")
         writeFileSync(join(dir, "pyproject.toml"), basePyproject)
+        mkdirSync(join(dir, "astropy", "wcs"), { recursive: true })
+        writeFileSync(
+          join(dir, "astropy", "wcs", "setup_package.py"),
+          ["from setuptools.dep_util import newer_group", "VALUE = 1", ""].join("\n"),
+        )
         writeFileSync(join(dir, "src.py"), "x = 1\n")
         git(dir, ["init", "-q"])
         git(dir, ["add", "-A"])
@@ -247,14 +345,20 @@ describe("project-env diff-exclusion through real git capture [gated on git]", (
         expect(readFileSync(join(dir, "pyproject.toml"), "utf8")).toContain(
           PROJECT_ENV_SANDBOX_BEGIN,
         )
+        expect(readFileSync(join(dir, "astropy", "wcs", "setup_package.py"), "utf8")).toContain(
+          PROJECT_ENV_SOURCE_SHIM_BEGIN,
+        )
 
-        // 2) A genuine agent edit lands in the SAME pyproject (a real source fix)
-        //    plus an edit to another file.
+        // 2) Genuine agent edits land in the SAME files plus another file.
         const withAgentEdit = readFileSync(join(dir, "pyproject.toml"), "utf8").replace(
           'name = "astropy"',
           'name = "astropy"\nrequires-python = ">=3.9"  # AGENT-FIX',
         )
         writeFileSync(join(dir, "pyproject.toml"), withAgentEdit)
+        writeFileSync(
+          join(dir, "astropy", "wcs", "setup_package.py"),
+          `${readFileSync(join(dir, "astropy", "wcs", "setup_package.py"), "utf8")}HELPER = 2  # AGENT-FIX\n`,
+        )
         writeFileSync(join(dir, "src.py"), "x = 2  # AGENT-FIX\n")
 
         // 3) Diff-exclusion: revert the env-only block before capture.
@@ -267,10 +371,13 @@ describe("project-env diff-exclusion through real git capture [gated on git]", (
 
         // The env-only mutation MUST NOT leak.
         expect(diff).not.toContain(PROJECT_ENV_SANDBOX_BEGIN)
+        expect(diff).not.toContain(PROJECT_ENV_SOURCE_SHIM_BEGIN)
         expect(diff).not.toContain("extra-build-dependencies")
         expect(diff).not.toContain("extension-helpers")
-        // The genuine agent edits to BOTH files MUST survive.
+        expect(diff).not.toContain("distutils.dep_util")
+        // The genuine agent edits to ALL touched files MUST survive.
         expect(diff).toContain("requires-python")
+        expect(diff).toContain("HELPER = 2  # AGENT-FIX")
         expect(diff).toContain("x = 2  # AGENT-FIX")
         // The repo's own pre-existing [tool.uv] index-url is untouched (not a hunk).
         expect(diff).not.toContain("-index-url")
@@ -286,6 +393,11 @@ describe("project-env diff-exclusion through real git capture [gated on git]", (
     const dir = mkTmp("leak")
     try {
       writeFileSync(join(dir, "pyproject.toml"), '[project]\nname = "astropy"\n')
+      mkdirSync(join(dir, "astropy", "wcs"), { recursive: true })
+      writeFileSync(
+        join(dir, "astropy", "wcs", "setup_package.py"),
+        "from setuptools.dep_util import newer_group\n",
+      )
       git(dir, ["init", "-q"])
       git(dir, ["add", "-A"])
       git(dir, ["commit", "-q", "-m", "base"])
@@ -294,6 +406,7 @@ describe("project-env diff-exclusion through real git capture [gated on git]", (
       git(dir, ["add", "-A"])
       const diff = git(dir, ["diff", "--cached", "--no-color"])
       expect(diff).toContain("extra-build-dependencies")
+      expect(diff).toContain("distutils.dep_util")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -399,6 +512,55 @@ describe("stripProjectEnvSandboxBlock — surgical revert", () => {
   })
 })
 
+describe("materializeProjectEnvSourceShimFile / stripProjectEnvSourceShimBlocks", () => {
+  test("targeted astropy setup files get the env-only dep_util shim", () => {
+    const base = ["from setuptools.dep_util import newer_group", "VALUE = 1", ""].join("\n")
+    const out = materializeProjectEnvSourceShimFile(
+      "astropy/astropy",
+      "/tmp/astropy/wcs/setup_package.py",
+      base,
+    )
+    expect(out).toBeDefined()
+    expect(out).toContain(PROJECT_ENV_SOURCE_SHIM_BEGIN)
+    expect(out).toContain("from distutils.dep_util import newer_group")
+  })
+
+  test("non-target files / repos get NO source shim", () => {
+    const base = "from setuptools.dep_util import newer_group\n"
+    expect(materializeProjectEnvSourceShimFile("django/django", "/tmp/setup_package.py", base)).toBe(
+      undefined,
+    )
+    expect(materializeProjectEnvSourceShimFile("astropy/astropy", "/tmp/module.py", base)).toBe(
+      undefined,
+    )
+  })
+
+  test("round-trips: shim then strip restores byte-identical original", () => {
+    const base = ["from setuptools.dep_util import newer_group", "VALUE = 1", ""].join("\n")
+    const shimmed = materializeProjectEnvSourceShimFile(
+      "astropy/astropy",
+      "/tmp/astropy/wcs/setup_package.py",
+      base,
+    ) as string
+    expect(hasProjectEnvSourceShimBlock(shimmed)).toBe(true)
+    expect(stripProjectEnvSourceShimBlocks(shimmed)).toBe(base)
+  })
+
+  test("preserves agent edits outside the shimmed import when stripping", () => {
+    const base = ["from setuptools.dep_util import newer_group", "VALUE = 1", ""].join("\n")
+    const shimmed = materializeProjectEnvSourceShimFile(
+      "astropy/astropy",
+      "/tmp/astropy/wcs/setup_package.py",
+      base,
+    ) as string
+    const edited = `${shimmed}HELPER = 2\n`
+    const stripped = stripProjectEnvSourceShimBlocks(edited)
+    expect(stripped).not.toContain(PROJECT_ENV_SOURCE_SHIM_END)
+    expect(stripped).toContain("from setuptools.dep_util import newer_group")
+    expect(stripped).toContain("HELPER = 2")
+  })
+})
+
 // ===========================================================================
 // ★ prepareProjectEnvSandbox — no-pyproject guard (never fabricate a leak)
 // ===========================================================================
@@ -413,6 +575,8 @@ describe("prepareProjectEnvSandbox — fs-port behavior", () => {
         writes.push(p)
       },
       exists: async () => false,
+      readdir: async () => [],
+      isDirectory: async () => false,
     }
     const r = await prepareProjectEnvSandbox("/sbx", "astropy/astropy", fakeFs)
     expect(r.materialized).toBe(false)
@@ -427,6 +591,8 @@ describe("prepareProjectEnvSandbox — fs-port behavior", () => {
         writes.push(p)
       },
       exists: async () => true,
+      readdir: async () => [],
+      isDirectory: async () => false,
     }
     const r = await prepareProjectEnvSandbox("/sbx", "pydata/xarray", fakeFs)
     expect(r.materialized).toBe(false)
@@ -441,6 +607,8 @@ describe("prepareProjectEnvSandbox — fs-port behavior", () => {
         written = { path: p, content: c }
       },
       exists: async () => true,
+      readdir: async () => [],
+      isDirectory: async () => false,
     }
     const r = await prepareProjectEnvSandbox("/sbx", "astropy/astropy", fakeFs)
     expect(r.materialized).toBe(true)
@@ -458,6 +626,8 @@ describe("prepareProjectEnvSandbox — fs-port behavior", () => {
         writeCount += 1
       },
       exists: async () => true,
+      readdir: async () => [],
+      isDirectory: async () => false,
     }
     const r = await prepareProjectEnvSandbox("/sbx", "astropy/astropy", fakeFs)
     // Already materialized → next === existing → no write, materialized:false.
@@ -471,15 +641,24 @@ describe("prepareProjectEnvSandbox — fs-port behavior", () => {
 // ===========================================================================
 const hasWithDep = (argv: readonly string[], dep: string): boolean =>
   argv.some((arg, idx) => arg === "--with" && argv[idx + 1] === dep)
+const uvRunIndex = (argv: readonly string[]): number =>
+  argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
 
 describe("buildProjectEnvUvRunArgv — build-dep mechanism moved to pyproject", () => {
   test("astropy argv NO LONGER carries --no-build-isolation or the build --with", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
     // The broken mechanism is GONE.
+    expect(uvRunIndex(argv)).toBeGreaterThanOrEqual(0)
     expect(argv).not.toContain("--no-build-isolation")
     expect(hasWithDep(argv, "extension_helpers")).toBe(false)
     expect(hasWithDep(argv, "extension-helpers")).toBe(false)
     expect(hasWithDep(argv, "setuptools<60")).toBe(false)
+    expect(hasWithDep(argv, "numpy<2")).toBe(true)
+    expect(hasWithDep(argv, "hypothesis")).toBe(true)
+    expect(hasWithDep(argv, "pytest-astropy")).toBe(true)
+    expect(argv).toContain(
+      "CFLAGS=-Wno-error=incompatible-function-pointer-types -Wno-incompatible-function-pointer-types",
+    )
     // ...but the shared base env is intact (control not vacuous).
     expect(argv).toContain("--no-project")
     expect(hasWithDep(argv, "setuptools")).toBe(true)
@@ -496,6 +675,7 @@ describe("buildProjectEnvUvRunArgv — build-dep mechanism moved to pyproject", 
   test("an unlisted repo gets only the base env", () => {
     const argv = buildProjectEnvUvRunArgv("django/django", "4.1")
     expect(hasWithDep(argv, "numpy<2")).toBe(false)
+    expect(hasWithDep(argv, "hypothesis")).toBe(false)
     expect(argv).not.toContain("--no-build-isolation")
     expect(hasWithDep(argv, "setuptools")).toBe(true)
   })

@@ -232,17 +232,8 @@ export const reproRunArgv = (
 }
 
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
-  const f2p = raw.FAIL_TO_PASS
-  if (typeof f2p !== "string") return "true"
-  let tests: unknown
-  try {
-    tests = JSON.parse(f2p)
-  } catch {
-    return "true"
-  }
-  if (!Array.isArray(tests) || tests.length === 0) return "true"
-  const names = tests.filter((t): t is string => typeof t === "string" && t.length > 0)
-  if (names.length === 0) return "true"
+  const names = decodeTestNameList(raw.FAIL_TO_PASS)
+  if (names === undefined) return "true"
   // FAIL_TO_PASS values vary by repo:
   //   - "tests/test_x.py::test_y"           → pytest node id (use as path)
   //   - "tests/test_x.py::TestClass::test_y" → also a node id
@@ -277,25 +268,32 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   return `${prefix} pytest -x --no-header ${parts.join(" ")}`
 }
 
-/** Parse a SWE-bench test-name array field (`PASS_TO_PASS` / `FAIL_TO_PASS`) —
- *  a JSON-encoded string array of pytest node-ids / bare names. Returns the
- *  non-empty string entries, or `undefined` when the field is absent, malformed,
- *  or empty (so callers omit it rather than threading `[]`). EVAL-ONLY use. */
-export const parseTestNameList = (
-  raw: Record<string, unknown>,
-  key: string,
-): readonly string[] | undefined => {
-  const v = raw[key]
-  if (typeof v !== "string") return undefined
+const decodeTestNameList = (value: unknown): readonly string[] | undefined => {
   let parsed: unknown
-  try {
-    parsed = JSON.parse(v)
-  } catch {
-    return undefined
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return undefined
+    }
+  } else {
+    parsed = value
   }
   if (!Array.isArray(parsed)) return undefined
   const names = parsed.filter((t): t is string => typeof t === "string" && t.length > 0)
   return names.length > 0 ? names : undefined
+}
+
+/** Parse a SWE-bench test-name array field (`PASS_TO_PASS` / `FAIL_TO_PASS`) —
+ *  a JSON-encoded string array OR an already-decoded array of pytest node-ids /
+ *  bare names. Returns the non-empty string entries, or `undefined` when the
+ *  field is absent, malformed, or empty (so callers omit it rather than
+ *  threading `[]`). EVAL-ONLY use. */
+export const parseTestNameList = (
+  raw: Record<string, unknown>,
+  key: string,
+): readonly string[] | undefined => {
+  return decodeTestNameList(raw[key])
 }
 
 export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {

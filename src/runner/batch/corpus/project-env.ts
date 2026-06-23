@@ -1,7 +1,8 @@
-import { join } from "node:path"
+import { basename, join } from "node:path"
 import { pythonForRepoVersion } from "./repo-version-python"
 
 const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 /**
  * Per-repo env-prep override (NOT answer-key logic): each entry compensates for
@@ -36,6 +37,8 @@ const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
 interface RepoEnvOverride {
   /** Runtime `--with <dep>` pins forced into the uv `run` env. */
   readonly pinnedDeps?: readonly string[]
+  /** Per-command env assignments prefixed via `env KEY=VALUE uv run ...`. */
+  readonly execEnv?: Readonly<Record<string, string>>
   /**
    * Build-time deps materialized into `pyproject.toml`'s
    * `[tool.uv.extra-build-dependencies]` table. Requires {@link distName}.
@@ -47,6 +50,17 @@ interface RepoEnvOverride {
    * This is the dist name (`astropy`), NOT the import name of the build dep.
    */
   readonly distName?: string
+  /** Env-only source import rewrites materialized into matching repo files. */
+  readonly sourceImportShims?: readonly RepoSourceImportShim[]
+}
+
+interface RepoSourceImportShim {
+  /** Apply to files whose basename matches one of these names. */
+  readonly targetBasenames: readonly string[]
+  /** Import source module to rewrite FROM. */
+  readonly fromModule: string
+  /** Import source module to rewrite TO. */
+  readonly toModule: string
 }
 
 const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
@@ -57,18 +71,33 @@ const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
   // into the repo's pyproject `[tool.uv.extra-build-dependencies]` instead. PyPI
   // name is the HYPHENATED `extension-helpers`; table key is the dist name `astropy`.
   //
-  // 🔴 KNOWN-UNSOLVED (box re-measure jun-23): extension-helpers gets the build PAST
-  // that import, but astropy's setup.py THEN needs `setuptools.dep_util` (removed in
-  // setuptools 60). The naive fix `setuptools<60` is a DEAD END under uv: setuptools
-  // <60 has no PEP-660 `build_editable`, so `uv run --with-editable .` fails with
-  // `build_meta has no attribute build_editable` (verified A/B/C combos). dep_util
-  // (needs <60) vs editable build (needs >=64) is a hard contradiction for uv's
-  // PEP-517 path. Real fix is a separate change (pip legacy `develop` install, or a
-  // `setuptools/dep_util` → `distutils.dep_util` shim materialized into the sandbox)
-  // — NOT a version pin. astropy-13033 stays build-blocked until then.
+  // Astropy's legacy setup graph then imports nested `setup_package.py` modules
+  // that still do `from setuptools.dep_util import ...`. Modern editable builds
+  // need setuptools >=64, but setuptools 60+ removed `dep_util`; pinning
+  // `setuptools<60` is a dead end because old setuptools has no `build_editable`.
+  // The env-only closure is therefore a sandbox source shim:
+  // `setuptools.dep_util` → `distutils.dep_util` in `setup.py`/`setup_package.py`
+  // files, reverted before diff capture so it never leaks into the candidate.
+  //
+  // On this macOS arm64 host, clang also rejects several legacy C extension
+  // signatures in astropy's editable build as incompatible function pointers.
+  // The repo-local fix is a command-local CFLAGS demotion (NOT ambient process
+  // env) plus the test/runtime pins the repo's pytest entry path needs.
   "astropy/astropy": {
+    pinnedDeps: ["numpy<2", "hypothesis", "pytest-astropy"],
+    execEnv: {
+      CFLAGS:
+        "-Wno-error=incompatible-function-pointer-types -Wno-incompatible-function-pointer-types",
+    },
     buildDeps: ["extension-helpers"],
     distName: "astropy",
+    sourceImportShims: [
+      {
+        targetBasenames: ["setup.py", "setup_package.py"],
+        fromModule: "setuptools.dep_util",
+        toModule: "distutils.dep_util",
+      },
+    ],
   },
   // xarray still imports `np.unicode_` on older bench snapshots; numpy 2 removed
   // it. This is a RUNTIME import (module code, not the build backend), so a
@@ -81,11 +110,20 @@ const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
 const repoPinnedDeps = (repo: string): readonly string[] =>
   REPO_ENV_OVERRIDES[repo]?.pinnedDeps ?? []
 
+const repoExecEnv = (repo: string): Readonly<Record<string, string>> =>
+  REPO_ENV_OVERRIDES[repo]?.execEnv ?? {}
+
+const repoSourceImportShims = (repo: string): readonly RepoSourceImportShim[] =>
+  REPO_ENV_OVERRIDES[repo]?.sourceImportShims ?? []
+
 const repoBuildDeps = (repo: string): RepoEnvOverride | undefined => {
   const ov = REPO_ENV_OVERRIDES[repo]
   if (ov?.buildDeps === undefined || ov.buildDeps.length === 0) return undefined
   return ov
 }
+
+const repoNeedsProjectEnvMaterialization = (repo: string): boolean =>
+  repoBuildDeps(repo) !== undefined || repoSourceImportShims(repo).length > 0
 
 /**
  * Shared SWE-bench project env prefix for repo-local repro / verifier commands.
@@ -95,6 +133,9 @@ const repoBuildDeps = (repo: string): RepoEnvOverride | undefined => {
  * `--no-project` keeps uv from switching into the repo's own project-managed
  * environment, which otherwise hides `--with` dependencies behind the project
  * layer; we install the repo explicitly via `--with-editable .` instead.
+ * Repo-local compiler flags (e.g. astropy on clang) are prefixed via
+ * `env KEY=VALUE uv run ...` so EVERY rail (testCmd/repro/regression) sees the
+ * same command-local build env without mutating the host process.
  *
  * BUILD-time deps (e.g. astropy's `extension_helpers`) are NOT emitted here —
  * they are materialized into `pyproject.toml` by {@link prepareProjectEnvSandbox}
@@ -108,13 +149,12 @@ export const buildProjectEnvUvRunArgv = (
   extraWith: readonly string[] = [],
 ): readonly string[] => {
   const deps = [...new Set([...extraWith, ...repoPinnedDeps(repo), ...BASE_PROJECT_ENV_DEPS])]
-  const argv = [
-    "uv",
-    "run",
-    "--no-project",
-    "--python",
-    pythonForRepoVersion(repo, version),
-  ] as string[]
+  const argv = [] as string[]
+  for (const [name, value] of Object.entries(repoExecEnv(repo))) {
+    if (argv.length === 0) argv.push("env")
+    argv.push(`${name}=${value}`)
+  }
+  argv.push("uv", "run", "--no-project", "--python", pythonForRepoVersion(repo, version))
   for (const dep of deps) argv.push("--with", dep)
   argv.push("--with-editable", ".")
   return argv
@@ -137,6 +177,10 @@ export const buildProjectEnvUvRunArgv = (
 export const PROJECT_ENV_SANDBOX_BEGIN =
   "# >>> quanta-bench project-env build deps (env-only, excluded from patch) >>>"
 export const PROJECT_ENV_SANDBOX_END = "# <<< quanta-bench project-env build deps <<<"
+export const PROJECT_ENV_SOURCE_SHIM_BEGIN =
+  "# >>> quanta-bench project-env source shim (env-only, excluded from patch) >>>"
+export const PROJECT_ENV_SOURCE_SHIM_END = "# <<< quanta-bench project-env source shim <<<"
+const PROJECT_ENV_SOURCE_SHIM_ORIGINAL = "# quanta-bench original: "
 
 /** Build the fenced TOML block for a repo's build deps. The table KEY is the
  *  project's dist name; values are PyPI requirement strings. */
@@ -180,6 +224,113 @@ export const stripProjectEnvSandboxBlock = (content: string): string => {
 export const hasProjectEnvSandboxBlock = (content: string): boolean =>
   content.includes(PROJECT_ENV_SANDBOX_BEGIN) && content.includes(PROJECT_ENV_SANDBOX_END)
 
+/** True iff the file currently carries one of our env-only source shim blocks. */
+export const hasProjectEnvSourceShimBlock = (content: string): boolean =>
+  content.includes(PROJECT_ENV_SOURCE_SHIM_BEGIN) && content.includes(PROJECT_ENV_SOURCE_SHIM_END)
+
+/** Strip every previously-injected env-only source shim block back to its
+ * original import line. Idempotent: malformed / absent blocks are left intact. */
+export const stripProjectEnvSourceShimBlocks = (content: string): string => {
+  const lines = content.split("\n")
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? ""
+    if (line.trimStart() !== PROJECT_ENV_SOURCE_SHIM_BEGIN) {
+      out.push(line)
+      continue
+    }
+    const original = lines[i + 1]
+    if (original === undefined) {
+      out.push(line)
+      continue
+    }
+    const trimmedOriginal = original.trimStart()
+    if (!trimmedOriginal.startsWith(PROJECT_ENV_SOURCE_SHIM_ORIGINAL)) {
+      out.push(line)
+      continue
+    }
+    let end = i + 2
+    while (end < lines.length && (lines[end] ?? "").trimStart() !== PROJECT_ENV_SOURCE_SHIM_END) {
+      end += 1
+    }
+    if (end >= lines.length) {
+      out.push(line)
+      continue
+    }
+    out.push(trimmedOriginal.slice(PROJECT_ENV_SOURCE_SHIM_ORIGINAL.length))
+    i = end
+  }
+  return out.join("\n")
+}
+
+const renderProjectEnvSourceShimBlock = (originalLine: string, replacementLine: string): string => {
+  const indent = originalLine.match(/^\s*/)?.[0] ?? ""
+  return [
+    `${indent}${PROJECT_ENV_SOURCE_SHIM_BEGIN}`,
+    `${indent}${PROJECT_ENV_SOURCE_SHIM_ORIGINAL}${originalLine}`,
+    replacementLine,
+    `${indent}${PROJECT_ENV_SOURCE_SHIM_END}`,
+  ].join("\n")
+}
+
+const rewriteSourceImportShim = (
+  content: string,
+  fromModule: string,
+  toModule: string,
+): string => {
+  const lineRe = new RegExp(
+    `^([ \\t]*from ${escapeRegExp(fromModule)} import [^\\n]+)$`,
+    "gm",
+  )
+  const fromClause = `from ${fromModule} import`
+  const toClause = `from ${toModule} import`
+  return content.replace(lineRe, (originalLine: string) =>
+    renderProjectEnvSourceShimBlock(originalLine, originalLine.replace(fromClause, toClause)),
+  )
+}
+
+/** Pure transform: materialize this repo's env-only source shim(s) into the
+ * given file when its basename is one of the repo's targeted setup files. */
+export const materializeProjectEnvSourceShimFile = (
+  repo: string,
+  filePath: string,
+  existing: string,
+): string | undefined => {
+  const shims = repoSourceImportShims(repo).filter((shim) =>
+    shim.targetBasenames.includes(basename(filePath)),
+  )
+  if (shims.length === 0) return undefined
+  let next = stripProjectEnvSourceShimBlocks(existing)
+  for (const shim of shims) {
+    next = rewriteSourceImportShim(next, shim.fromModule, shim.toModule)
+  }
+  return next === existing ? undefined : next
+}
+
+const collectProjectEnvSourceShimPaths = async (
+  sandbox: string,
+  repo: string,
+  fs: ProjectEnvSandboxFs,
+): Promise<readonly string[]> => {
+  const wanted = new Set(repoSourceImportShims(repo).flatMap((shim) => shim.targetBasenames))
+  if (wanted.size === 0) return []
+  const paths: string[] = []
+  const pending = [sandbox]
+  while (pending.length > 0) {
+    const dir = pending.pop() as string
+    for (const name of await fs.readdir(dir)) {
+      if (name === ".git") continue
+      const path = join(dir, name)
+      if (await fs.isDirectory(path)) {
+        pending.push(path)
+        continue
+      }
+      if (wanted.has(name)) paths.push(path)
+    }
+  }
+  return paths
+}
+
 /** Pure transform: given the existing pyproject text (possibly ""), return the
  *  text with the repo's build-dep block injected idempotently, or `undefined`
  *  when the repo needs no build deps. Stripping any prior block first makes a
@@ -212,29 +363,35 @@ export interface ProjectEnvSandboxFs {
   readFile: (path: string) => Promise<string>
   writeFile: (path: string, content: string) => Promise<void>
   exists: (path: string) => Promise<boolean>
+  readdir: (path: string) => Promise<readonly string[]>
+  isDirectory: (path: string) => Promise<boolean>
 }
 
 export interface PrepareProjectEnvResult {
-  /** True iff this repo needed build-dep materialization. */
+  /** True iff this repo needed any env-only materialization. */
   readonly materialized: boolean
-  /** Absolute path written, when `materialized`. */
+  /** Absolute pyproject path written, when build deps were materialized. */
   readonly pyprojectPath?: string
+  /** Absolute setup file paths written, when source shims were materialized. */
+  readonly sourceShimPaths?: readonly string[]
 }
 
 /**
- * Sandbox build-env materialization (P0). For repos whose build backend imports
- * a dep at BUILD time, inject the uv `[tool.uv.extra-build-dependencies]` table
- * into the checked-out repo's `pyproject.toml` BEFORE any repro/test exec.
+ * Sandbox build-env materialization (P0). For repos whose build path needs env
+ * help, inject the uv `[tool.uv.extra-build-dependencies]` table and/or apply
+ * env-only source import shims BEFORE any repro/test exec.
  *
  * Contract:
- *  - ENV-ONLY: mutates only `pyproject.toml`, and only the fenced block.
+ *  - ENV-ONLY: mutates only the targeted build files, and only sentinel-fenced
+ *    regions whose revert path restores the original bytes.
  *  - IDEMPOTENT: safe to call repeatedly; a re-prep replaces the fenced block
- *    rather than appending a duplicate table.
+ *    / shim rather than appending a duplicate copy.
  *  - MERGE-SAFE: any pre-existing `[tool.uv]` / pyproject content is preserved
- *    verbatim; the block is appended, never clobbering the repo's own tables.
+ *    verbatim; the block is appended, never clobbering the repo's own tables,
+ *    and non-shimmed source lines are left byte-identical.
  *  - DIFF-EXCLUDED: the block is sentinel-fenced so the candidate-capture seam
  *    strips it (see {@link revertProjectEnvSandbox} / the integrator wiring
- *    note) — this mutation must NEVER reach the submitted patch.
+ *    note) — these env-only mutations must NEVER reach the submitted patch.
  *
  * No-op (returns `{materialized:false}`) for repos without build deps, or when
  * the repo has no `pyproject.toml` (uv `extra-build-dependencies` requires one;
@@ -246,14 +403,38 @@ export const prepareProjectEnvSandbox = async (
   repo: string,
   fs: ProjectEnvSandboxFs,
 ): Promise<PrepareProjectEnvResult> => {
-  if (repoBuildDeps(repo) === undefined) return { materialized: false }
-  const pyprojectPath = join(sandbox, "pyproject.toml")
-  if (!(await fs.exists(pyprojectPath))) return { materialized: false }
-  const existing = await fs.readFile(pyprojectPath)
-  const next = materializeProjectEnvPyproject(repo, existing)
-  if (next === undefined || next === existing) return { materialized: false }
-  await fs.writeFile(pyprojectPath, next)
-  return { materialized: true, pyprojectPath }
+  if (!repoNeedsProjectEnvMaterialization(repo)) return { materialized: false }
+  let materialized = false
+  let pyprojectPath: string | undefined
+  const sourceShimPaths: string[] = []
+
+  if (repoBuildDeps(repo) !== undefined) {
+    const candidatePyprojectPath = join(sandbox, "pyproject.toml")
+    if (await fs.exists(candidatePyprojectPath)) {
+      const existing = await fs.readFile(candidatePyprojectPath)
+      const next = materializeProjectEnvPyproject(repo, existing)
+      if (next !== undefined && next !== existing) {
+        await fs.writeFile(candidatePyprojectPath, next)
+        pyprojectPath = candidatePyprojectPath
+        materialized = true
+      }
+    }
+  }
+
+  for (const filePath of await collectProjectEnvSourceShimPaths(sandbox, repo, fs)) {
+    const existing = await fs.readFile(filePath)
+    const next = materializeProjectEnvSourceShimFile(repo, filePath, existing)
+    if (next === undefined || next === existing) continue
+    await fs.writeFile(filePath, next)
+    sourceShimPaths.push(filePath)
+    materialized = true
+  }
+
+  return {
+    materialized,
+    ...(pyprojectPath !== undefined ? { pyprojectPath } : {}),
+    ...(sourceShimPaths.length > 0 ? { sourceShimPaths } : {}),
+  }
 }
 
 /**
@@ -274,11 +455,26 @@ export const revertProjectEnvSandbox = async (
   repo: string,
   fs: ProjectEnvSandboxFs,
 ): Promise<boolean> => {
-  if (repoBuildDeps(repo) === undefined) return false
-  const pyprojectPath = join(sandbox, "pyproject.toml")
-  if (!(await fs.exists(pyprojectPath))) return false
-  const existing = await fs.readFile(pyprojectPath)
-  if (!hasProjectEnvSandboxBlock(existing)) return false
-  await fs.writeFile(pyprojectPath, stripProjectEnvSandboxBlock(existing))
-  return true
+  if (!repoNeedsProjectEnvMaterialization(repo)) return false
+  let reverted = false
+
+  if (repoBuildDeps(repo) !== undefined) {
+    const pyprojectPath = join(sandbox, "pyproject.toml")
+    if (await fs.exists(pyprojectPath)) {
+      const existing = await fs.readFile(pyprojectPath)
+      if (hasProjectEnvSandboxBlock(existing)) {
+        await fs.writeFile(pyprojectPath, stripProjectEnvSandboxBlock(existing))
+        reverted = true
+      }
+    }
+  }
+
+  for (const filePath of await collectProjectEnvSourceShimPaths(sandbox, repo, fs)) {
+    const existing = await fs.readFile(filePath)
+    if (!hasProjectEnvSourceShimBlock(existing)) continue
+    await fs.writeFile(filePath, stripProjectEnvSourceShimBlocks(existing))
+    reverted = true
+  }
+
+  return reverted
 }

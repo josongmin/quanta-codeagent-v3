@@ -16,11 +16,13 @@ import {
 const pyOf = (argv: readonly string[]): string => argv[argv.indexOf("--python") + 1] as string
 const hasWithDep = (argv: readonly string[], dep: string): boolean =>
   argv.some((arg, idx) => arg === "--with" && argv[idx + 1] === dep)
+const uvRunIndex = (argv: readonly string[]): number =>
+  argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
 
 describe("reproRunArgv", () => {
   test("wraps the script in a uv-run editable-install env (not a bare python)", () => {
     const argv = reproRunArgv("sympy/sympy", "1.5", "/sandbox/__repro_0.py")
-    expect(argv.slice(0, 2)).toEqual(["uv", "run"])
+    expect(uvRunIndex(argv)).toBeGreaterThanOrEqual(0)
     expect(argv).toContain("--no-project")
     expect(hasWithDep(argv, "setuptools")).toBe(true)
     expect(argv).toContain("--with-editable")
@@ -60,6 +62,12 @@ describe("reproRunArgv", () => {
     expect(hasWithDep(argv, "extension_helpers")).toBe(false)
     expect(hasWithDep(argv, "extension-helpers")).toBe(false)
     expect(argv).not.toContain("--no-build-isolation")
+    expect(hasWithDep(argv, "numpy<2")).toBe(true)
+    expect(hasWithDep(argv, "hypothesis")).toBe(true)
+    expect(hasWithDep(argv, "pytest-astropy")).toBe(true)
+    expect(argv).toContain(
+      "CFLAGS=-Wno-error=incompatible-function-pointer-types -Wno-incompatible-function-pointer-types",
+    )
     // ...but the shared base repro env is intact (control — not vacuous).
     expect(hasWithDep(argv, "setuptools")).toBe(true)
     expect(argv).toContain("--with-editable")

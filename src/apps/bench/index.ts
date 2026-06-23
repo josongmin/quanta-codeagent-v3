@@ -99,6 +99,11 @@ import {
 } from "./corpus"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { finalizeRun, runInstance } from "./eval"
+import {
+  type ForkBranchOutcome,
+  formatForkBranchReport,
+} from "./eval/fork-branch-report"
+import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals, scoreTotals } from "./observe"
@@ -345,18 +350,70 @@ const withObserve = (base: RunCfg, o: AttemptObservation | undefined): RunCfg =>
 /** Run one instance n times via Best-of-N; pick passing run, then majority
  *  patch vote as a tiebreak among equally-scored runs. Each attempt gets its
  *  own 0-based observe file (RFC §8 Best-of-N: one file per attempt). */
+/** Fork-experiment fan-out (RFC jun-23): run each named experiment as its own
+ *  branch over the SAME instance, each with a FRESH llm port (replay isolation)
+ *  and its own `turnContextMutator`, then print a comparison table. Returns the
+ *  baseline (first) branch's result so the surrounding pipeline keeps one result
+ *  per instance. Branches run sequentially — replay branches are ~free and live
+ *  branches must not fan out concurrently (throttle). */
+const runForkBranches = async (
+  instance: Instance,
+  base: Omit<RunCfg, never>,
+  experiments: readonly ForkExperiment[],
+  freshLlm: () => LLMPort,
+  obs?: ObserveCtx,
+): Promise<InstanceResult> => {
+  // Footgun guard: fan-out is a TROUBLESHOOTING mode. The pipeline keeps ONE
+  // result per instance (the baseline branch), so predictions.jsonl / report.json
+  // reflect ONLY the baseline — the other branches live in the printed table.
+  // Say so loudly so a fan-out run is never mistaken for a real benchmark number.
+  logger.info(
+    `[fork] ${instance.id}: ${experiments.length}-branch experiment (${experiments
+      .map((e) => e.name)
+      .join(", ")}) — predictions/report record the BASELINE branch only; see the table below.`,
+  )
+  const outcomes: ForkBranchOutcome[] = []
+  let baseline: InstanceResult | undefined
+  let attempt = 0
+  for (const exp of experiments) {
+    const branchBase: RunCfg = { ...base, llm: freshLlm(), turnContextMutator: exp.mutator }
+    const result = await runInstance(instance, withObserve(branchBase, attemptObs(obs, attempt++)))
+    if (baseline === undefined) baseline = result
+    outcomes.push({
+      name: exp.name,
+      passed: result.passed,
+      patchBytes: Buffer.byteLength(result.patch ?? "", "utf8"),
+      turns: result.turns,
+    })
+  }
+  logger.info(`\n${formatForkBranchReport(instance.id, outcomes)}`)
+  return baseline ?? { id: instance.id, passed: false, patch: "", turns: 0 }
+}
+
 const resolveInstance = async (
   instance: Instance,
   base: Omit<RunCfg, never>,
   n: number,
   obs?: ObserveCtx,
+  freshLlm?: () => LLMPort,
 ): Promise<InstanceResult> => {
-  if (n <= 1) return runInstance(instance, withObserve(base, attemptObs(obs, 0)))
+  // Fork-experiment seam (DEFAULT-OFF: QUANTA_FORK_EXPERIMENT unset ⇒ [] ⇒
+  // byte-identical). ≥2 names ⇒ branch fan-out; exactly 1 ⇒ single run with that
+  // mutator wired onto the config.
+  const experiments = resolveForkExperiments(process.env)
+  if (experiments.length >= 2) {
+    return runForkBranches(instance, base, experiments, freshLlm ?? (() => base.llm), obs)
+  }
+  const only = experiments[0]
+  const effBase: Omit<RunCfg, never> =
+    only !== undefined ? { ...base, turnContextMutator: only.mutator } : base
+
+  if (n <= 1) return runInstance(instance, withObserve(effBase, attemptObs(obs, 0)))
 
   let attempt = 0
   const out = await sampleBestOfN<InstanceResult>({
     n,
-    makeAttempt: () => runInstance(instance, withObserve(base, attemptObs(obs, attempt++))),
+    makeAttempt: () => runInstance(instance, withObserve(effBase, attemptObs(obs, attempt++))),
     score: (r) => (r.passed ? 1 : 0),
   })
 
@@ -389,6 +446,8 @@ const resolveInstance = async (
  *  than aborting the batch. */
 type SwebenchTaskDeps = {
   llm: LLMPort
+  /** Fresh-port factory for fork-branch replay isolation (RFC jun-23 §4.1). */
+  freshLlm: () => LLMPort
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number }
   pythonSwebench: Awaited<ReturnType<typeof buildPythonSwebench>>
   repair: { maxRounds: number } | undefined
@@ -419,6 +478,7 @@ const runSwebenchTask = async (
       },
       deps.cfg.n,
       deps.obs,
+      deps.freshLlm,
     )
   } catch (e) {
     return {
@@ -470,6 +530,9 @@ const filterSwebenchTasks = (parsed: readonly SwebenchTask[]): SwebenchTask[] =>
 const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
+  /** Builds a fresh, independent llm port — used by the fork-branch fan-out for
+   *  per-branch replay isolation (RFC jun-23 §4.1). */
+  freshLlm: () => LLMPort,
   meta: { provider: string; model: string },
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
   // Pre-parsed by the single caller (`maybeRunDatasetMode`) so the dataset file
@@ -516,7 +579,7 @@ const runDatasetMode = async (
   }
 
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
-  const taskDeps = { llm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
+  const taskDeps = { llm, freshLlm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
   // Concurrency>1 overlaps patch-gen across tasks. Docker grading is ALWAYS
   // SERIAL (python-swebench withGradingLock mutex) — concurrent grading
   // false-negatives correct patches (2026-06-19).
@@ -595,7 +658,9 @@ const finalizeObserve = async (
  *  through the injectable `exitFn`; in production this is `process.exit`
  *  (truly `never`) so the post-exit code is unreachable. A test that injects
  *  a no-op exit gets `null` back and the caller bails. */
-const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLMPort } | null => {
+const resolveLLM = (
+  noun: string,
+): { provider: Provider; model: string; llm: LLMPort; freshLlm: () => LLMPort } | null => {
   const provider = pickProvider(process.env)
   // `--model` > `QUANTA_MODEL` > canonical DEFAULT_MODEL[provider] (the factory
   // fills the default when `model` is omitted). Provider pick, key lookup, and
@@ -604,16 +669,18 @@ const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLM
   const model = modelArg ?? DEFAULT_MODEL[provider]
   const trajectory = resolveBenchTrajectoryMode()
   if (trajectory.kind === "replay" && trajectory.onMiss === "throw") {
-    return {
-      provider,
-      model,
-      llm: replayTrajectoryPort({
+    // `freshLlm` builds an INDEPENDENT replay port (fresh `used` set) per call —
+    // the fork-branch fan-out needs this so each branch re-replays the full
+    // prefix instead of sharing a consumed cassette (RFC jun-23 §4.1).
+    const freshLlm = (): LLMPort =>
+      replayTrajectoryPort({
         path: trajectory.path,
         onMiss: trajectory.onMiss,
+        ...(trajectory.limit !== undefined ? { limit: trajectory.limit } : {}),
         provider,
         model,
-      }),
-    }
+      })
+    return { provider, model, llm: freshLlm(), freshLlm }
   }
   const llm = tryCreateLLM(provider, modelArg !== undefined ? { model: modelArg } : {}, process.env)
   if (!llm) {
@@ -623,7 +690,11 @@ const resolveLLM = (noun: string): { provider: Provider; model: string; llm: LLM
     exitFn(0)
     return null
   }
-  return { provider, model, llm: applyBenchTrajectoryMode(llm, trajectory, { provider, model }) }
+  // Live LLM is stateless across calls, so off/live mode can share it; replay
+  // mode re-wraps a fresh store each call (applyBenchTrajectoryMode → fresh
+  // replayTrajectoryPort) so branches stay isolated.
+  const freshLlm = (): LLMPort => applyBenchTrajectoryMode(llm, trajectory, { provider, model })
+  return { provider, model, llm: freshLlm(), freshLlm }
 }
 
 /** Official-dataset entrypoint. Returns true when it handled the run (so main
@@ -664,10 +735,11 @@ const maybeRunDatasetMode = async (
   }
   const resolved = resolveLLM("a dataset")
   if (resolved === null) return true
-  const { provider, model, llm } = resolved
+  const { provider, model, llm, freshLlm } = resolved
   await runDatasetMode(
     datasetFile,
     llm,
+    freshLlm,
     { provider, model },
     {
       n: cfg.n,
@@ -785,7 +857,7 @@ const runCustomCorpusMode = async (
   }
   const { results } = await runBatch({
     instances,
-    runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs),
+    runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs, resolved.freshLlm),
     concurrency: resolveConcurrency(),
   })
   // D-fix: write `--predictions` / `--report` from BOTH bench modes.

@@ -56,6 +56,8 @@ import {
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
+  attachReproVoteOutcomes,
+  resetReproVoteOutcomes,
   selectionGenerationEnvCaveats,
   selectionReproPrepK,
   UsageTap,
@@ -1249,6 +1251,11 @@ const runInstanceOnce = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
+  // A5: reset the repro-vote sink at instance START so this instance's vote
+  // outcomes cannot leak into the next instance's telemetry (the audit's
+  // cross-instance accumulation risk). Drained per result via
+  // `attachReproVoteOutcomes`.
+  resetReproVoteOutcomes()
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
   // The per-instance wall-clock deadline bounds the AGENT SOLVE only — NOT env
@@ -1278,22 +1285,24 @@ const runInstanceOnce = async (
     // `timeoutMs` of think time (see note where `deadline` is declared).
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
     if (v5AdaptiveEnabled({ preset: preparedContext.state.preset, envVars: process.env })) {
-      return await runAdaptiveAttempt({
-        instance,
-        deps,
-        sandbox,
-        signal: abort.signal,
-        wiring: w,
-        prepared: preparedContext,
-        reproTest,
-        startedAt,
-        onPhase: (p) => {
-          phase = p
-        },
-        onPrepared: (p) => {
-          prepared = p
-        },
-      })
+      return attachReproVoteOutcomes(
+        await runAdaptiveAttempt({
+          instance,
+          deps,
+          sandbox,
+          signal: abort.signal,
+          wiring: w,
+          prepared: preparedContext,
+          reproTest,
+          startedAt,
+          onPhase: (p) => {
+            phase = p
+          },
+          onPrepared: (p) => {
+            prepared = p
+          },
+        }),
+      )
     }
 
     phase = await runAppMainPhase({
@@ -1316,32 +1325,36 @@ const runInstanceOnce = async (
       prepared: preparedContext,
       sandbox,
     })
-    if (terminal !== undefined) return terminal
+    if (terminal !== undefined) return attachReproVoteOutcomes(terminal)
 
     // Await inside the try so sandbox cleanup in `finally` cannot race the
     // final verifier. A bare `return promise` here would run `finally`
     // immediately and tear down the sandbox while verify is still spawning.
-    return await verifyAndFinalizeResult({
-      instance,
-      phase,
-      deps,
-      sandbox,
-      signal: abort.signal,
-      reproTest,
-      wiring: w,
-      startedAt,
-      prepared: preparedContext,
-    })
-  } catch (error) {
-    if (error instanceof ObservationError) {
-      return latePhaseFailureResultOf({
+    return attachReproVoteOutcomes(
+      await verifyAndFinalizeResult({
         instance,
         phase,
+        deps,
+        sandbox,
+        signal: abort.signal,
         reproTest,
-        verdict: "degraded",
-        error: `observation failed (strict): ${error.message}`,
-        ...(prepared !== undefined ? { prepared, sandbox } : {}),
-      })
+        wiring: w,
+        startedAt,
+        prepared: preparedContext,
+      }),
+    )
+  } catch (error) {
+    if (error instanceof ObservationError) {
+      return attachReproVoteOutcomes(
+        latePhaseFailureResultOf({
+          instance,
+          phase,
+          reproTest,
+          verdict: "degraded",
+          error: `observation failed (strict): ${error.message}`,
+          ...(prepared !== undefined ? { prepared, sandbox } : {}),
+        }),
+      )
     }
     if (error instanceof StrictLspGroundingDegradedError) {
       const degraded = latePhaseFailureResultOf({
@@ -1358,29 +1371,35 @@ const runInstanceOnce = async (
       // outcome enum, not just the error string.
       const status =
         error.receipt !== undefined ? foldGroundingReceipts([error.receipt]) : undefined
-      return status !== undefined ? { ...degraded, lspGrounding: status } : degraded
+      return attachReproVoteOutcomes(
+        status !== undefined ? { ...degraded, lspGrounding: status } : degraded,
+      )
     }
     if (error instanceof PacketBlindnessViolation) {
       // A blindness-guard throw means an evidence packet was built from a
       // forbidden source — a CONSTRUCTION bug, not a candidate miss. Classify
       // `degraded` (excluded from resolved/total) so it can never silently
       // confound a measurement run as a real failure.
-      return latePhaseFailureResultOf({
+      return attachReproVoteOutcomes(
+        latePhaseFailureResultOf({
+          instance,
+          phase,
+          reproTest,
+          verdict: "degraded",
+          error: `evidence packet blindness violation (build aborted): ${error.message}`,
+          ...(prepared !== undefined ? { prepared, sandbox } : {}),
+        }),
+      )
+    }
+    return attachReproVoteOutcomes(
+      latePhaseFailureResultOf({
         instance,
         phase,
         reproTest,
-        verdict: "degraded",
-        error: `evidence packet blindness violation (build aborted): ${error.message}`,
+        error: errMessage(error),
         ...(prepared !== undefined ? { prepared, sandbox } : {}),
-      })
-    }
-    return latePhaseFailureResultOf({
-      instance,
-      phase,
-      reproTest,
-      error: errMessage(error),
-      ...(prepared !== undefined ? { prepared, sandbox } : {}),
-    })
+      }),
+    )
   } finally {
     clearTimeout(deadline)
     w.observer?.close()

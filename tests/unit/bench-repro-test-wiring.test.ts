@@ -58,6 +58,9 @@ const mkInstance = (overrides: Partial<Instance> = {}): Instance => ({
   ...overrides,
 })
 
+const uvRunIndex = (argv: readonly string[]): number =>
+  argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
+
 const ENV_KEYS = ["QUANTA_BENCH_REPRO_TEST", "QUANTA_BENCH_ISSUE_HINT"] as const
 
 const snapshot = (): Map<string, string | undefined> => {
@@ -251,7 +254,7 @@ describe("prepareReproTest", () => {
     )
     // The exec argv must be the uv-run env wrapper — a bare `python3` here is the
     // ModuleNotFoundError bug that made primary_rail_present_rate = 0.
-    expect(seen[0]?.slice(0, 2)).toEqual(["uv", "run"])
+    expect(uvRunIndex(seen[0] ?? [])).toBeGreaterThanOrEqual(0)
     expect(seen[0]).toContain("--no-project")
     expect(seen[0]).toContain("setuptools")
     expect(seen[0]).toContain("--with-editable")

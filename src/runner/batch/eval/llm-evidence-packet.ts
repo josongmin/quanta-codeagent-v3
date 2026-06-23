@@ -41,6 +41,18 @@ export type LlmEvidencePacketStage =
   | "candidate_post_review"
   | "repair_seed"
   | "selection_explanation"
+  /**
+   * A10 — TRANSIENT router-input stage. NOT a stored artifact stage: it is the
+   * `selection_explanation` evidence body RE-CONTRACTED for the adaptive PHASE
+   * ROUTER (which asks "choose the next phase", not "explain the outcome"). A
+   * packet wearing this stage carries a phase-DECISION question + the closed
+   * routing action menu, so the model sees ONE coherent stage/question/action
+   * contract matching its real consumer (the router prompt). It is never recorded
+   * into {@link LlmEvidenceArtifacts} (report storage ignores it) — the report
+   * keeps using the honest `selection_explanation` packet. See
+   * {@link toPhaseRoutingContract}.
+   */
+  | "phase_routing"
 
 /**
  * A narrowed owner/fault site. `sourceSlice` is the EXACT definition/symbol
@@ -1458,6 +1470,9 @@ export interface SelectionExplanationProofSummaryInput {
   readonly publicMweState?: MweProofState
   readonly publicRegressionState?: PublicRegressionProofState
   readonly reproConsensusState?: ReproConsensusProofState
+  /** B5 — executed module-smoke (public issue-smoke) HARD-gate RESULT for the
+   *  focus candidate (green/red). Absent ⇒ the smoke gate did not run. */
+  readonly moduleSmokeState?: "green" | "red"
   readonly repairOnlyCandidates: number
   readonly submittedCandidateProof: boolean
 }
@@ -1556,6 +1571,12 @@ const proofSummaryReceipts = (
       const state = reproConsensusReceiptState(summary.reproConsensusState)
       return state === undefined ? [] : [withPolicy("repro_consensus", state)]
     })(),
+    // B5 — the executed module-smoke RESULT as a proof receipt the model sees.
+    // `ownerTestResultReceipt` enforces `cmdWithheld:true` (RESULT ONLY, C3
+    // fence): the LLM/router learns green/red, never the smoke command/selector.
+    ...(summary.moduleSmokeState === undefined
+      ? []
+      : [ownerTestResultReceipt({ kind: "module_smoke", result: summary.moduleSmokeState })]),
   ]
 }
 
@@ -1623,3 +1644,34 @@ export const buildSelectionExplanationPacket = (
     missingEvidence,
   })
 }
+
+/** The phase-DECISION question the router actually asks. Mirrors the router
+ *  instruction ("choose the single best next PHASE") so the packet contract and
+ *  the surrounding prompt agree. */
+export const PHASE_ROUTING_QUESTION =
+  "Choose the single best NEXT PHASE for this bounded fix controller, given the bounded evidence below. You are ROUTING (selecting a phase), not explaining a past outcome and not submitting."
+
+/**
+ * A10 — re-contract an evidence packet for the adaptive PHASE ROUTER. The router
+ * consumes the `selection_explanation` evidence BODY but asks a phase-DECISION
+ * question, so the original packet's `stage:"selection_explanation"` /
+ * `question:"Explain…"` / `allowedActions:["explain_…"]` are a STALE, misleading
+ * contract for that consumer. This rewrites exactly those three fields to the
+ * routing contract — `stage:"phase_routing"`, the phase-decision
+ * {@link PHASE_ROUTING_QUESTION}, and the closed routing action menu (`routingActions`,
+ * supplied by the caller so this module need not couple to the router's action
+ * union) — while preserving every EVIDENCE field (issue facts, owner evidence,
+ * proof receipts, etc.) byte-for-byte. The result is re-cleaned, so blindness
+ * still holds. The original (report-RCA) packet is untouched: callers build a
+ * separate packet for the report.
+ */
+export const toPhaseRoutingContract = (
+  packet: LlmEvidencePacket,
+  routingActions: readonly string[],
+): LlmEvidencePacket =>
+  cleanPacket({
+    ...packet,
+    stage: "phase_routing",
+    question: PHASE_ROUTING_QUESTION,
+    allowedActions: routingActions,
+  })
