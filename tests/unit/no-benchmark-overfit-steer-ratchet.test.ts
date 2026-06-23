@@ -115,24 +115,23 @@ const detectOverfitSignals = (text: string): string[] => {
   return reasons
 }
 
-/** Bodies of every `*_STEER` / `*_DIRECTIVE` constant across the steer sources
- *  (concatenated "..." literals and [...] arrays joined). */
-const steerBodies = (): { name: string; body: string; file: string }[] => {
-  const out: { name: string; body: string; file: string }[] = []
-  // Name CONTAINS _STEER/_DIRECTIVE (not just ends with it) so the lean/noexec/
-  // repro DIRECTIVE variants (…_DIRECTIVE_LEAN_HEAD, …_DIRECTIVE_NOEXEC) are caught.
+/** Bodies of every `*_STEER` / `*_DIRECTIVE` constant in one source string
+ *  (concatenated "..." / `...` literals and [...] arrays joined, lowercased).
+ *  Name CONTAINS _STEER/_DIRECTIVE (not just ends with it) so the lean/noexec/
+ *  repro DIRECTIVE variants (…_DIRECTIVE_LEAN_HEAD, …_DIRECTIVE_NOEXEC) are caught. */
+const extractSteerBodies = (src: string): { name: string; body: string }[] => {
+  const out: { name: string; body: string }[] = []
   const re =
     /(?:const|export const)\s+([A-Za-z_]*(?:_STEER|_DIRECTIVE)[A-Za-z_]*)\b\s*=\s*((?:"(?:[^"\\]|\\.)*"\s*\+?\s*|`(?:[^`\\]|\\.)*`\s*\+?\s*|\[[\s\S]*?\]\s*)+)/g
-  for (const file of STEER_SOURCES) {
-    const src = read(file)
-    for (let m = re.exec(src); m !== null; m = re.exec(src)) {
-      const lits = m[2]?.match(/"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g) ?? []
-      out.push({ name: m[1] ?? "", body: lits.join(" ").toLowerCase(), file })
-    }
-    re.lastIndex = 0
+  for (let m = re.exec(src); m !== null; m = re.exec(src)) {
+    const lits = m[2]?.match(/"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g) ?? []
+    out.push({ name: m[1] ?? "", body: lits.join(" ").toLowerCase() })
   }
   return out
 }
+
+const steerBodies = (): { name: string; body: string; file: string }[] =>
+  STEER_SOURCES.flatMap((file) => extractSteerBodies(read(file)).map((s) => ({ ...s, file })))
 
 describe("no-benchmark-overfit-steer ratchet", () => {
   const steers = steerBodies()
@@ -170,6 +169,21 @@ describe("no-benchmark-overfit-steer ratchet", () => {
     // merely NAMES a framework as a tool-performance example (the find-refs case).
     const benign = "prefer find_references over lsp_references which times out on large repos like sympy/django"
     expect(detectOverfitSignals(benign)).toEqual([])
+  })
+
+  it("end-to-end: a NEW overfit steer injected into the scanned surface is caught", () => {
+    // The v1 failure mode: a freshly-added steer constant slipped through. Prove
+    // the SCAN+DETECT pipeline (not just the detector) catches one. Synthetic
+    // source — the real driver.ts is left untouched.
+    const injected = [
+      "const SIMPLICITY_STEER = \"prefer the simplest existing mechanism.\"",
+      "const COLORMAP_STEER =",
+      "  \"for the matplotlib colormap issue, edit lib/mpl/cm.py register() and colors.py __eq__\"",
+    ].join("\n")
+    const found = extractSteerBodies(injected)
+    expect(found.map((s) => s.name).sort()).toEqual(["COLORMAP_STEER", "SIMPLICITY_STEER"])
+    const dirty = found.filter((s) => detectOverfitSignals(s.body).length > 0).map((s) => s.name)
+    expect(dirty).toEqual(["COLORMAP_STEER"]) // the generic one passes, the overfit one is flagged
   })
 
   it("the removed overfit steer symbols + keyword matchers stay gone", () => {
