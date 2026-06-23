@@ -65,11 +65,53 @@ For a chosen target set (e.g. the SWE-bench grounding-preset slice):
   on a live measurement run on the user's box (offline harness here cannot
   produce a fair latency distribution), filled into the table below.
 
-## Measurement report (fill on a live run)
+## Measurement A — local real-pyright ready-proof (token-free, no EC2)
+
+Run via `proveStrictLspReady` directly against a small-but-real Python package
+(cross-file imports + stdlib that pyright must index to resolve). Real installed
+pyright-langserver; no LLM, no clone, no EC2. This VALIDATES the instrumentation
+end-to-end with real timings and isolates the cold-vs-warm question; it is NOT a
+substitute for the SWE-bench-repo distribution (Measurement B, below).
+
+| arm | n | ready_ok | ready_timeout | fatal_transport | ready ms (min/med/max) |
+|-----|---|----------|---------------|-----------------|------------------------|
+| cold (fresh cwd each run) | 5 | 5 | 0 | 0 | 14236 / 16909 / 19202 |
+| cold→warm, same cwd reuse | 1+1 | ok / ok | 0 | 0 | cold 9576 → **warm 5** |
+
+Findings:
+- Cold ready proof on a TRIVIAL 4-file package is already ~14–19 s — pyright
+  cold-start + initial index + first-definition resolve dominates.
+- Warm reuse (the pool keeps the entry warm: `proveReady` releases, never evicts)
+  is ~5 ms — a **~1900× speedup**. This empirically confirms prewarm/warm-pool is
+  the dominant latency lever, and that the strict gate adds ~no cold overhead to
+  the solve WHEN prewarm has already warmed the cwd.
+- 0 ready_timeout / 0 fatal_transport here — the 90 s budget is not stressed by a
+  small package. A large repo (django/sympy) cold-index will be far slower and is
+  exactly where `ready_timeout` becomes plausible → that is Measurement B.
+
+## Measurement B — SWE-bench grounding-preset slice (operator-run, pending)
+
+The distribution that gates any budget/anchor change. Run a grounding preset
+(e.g. `agentless-v3-thin-strict`) over a real pick slice (local or EC2 full-remote),
+then aggregate the report(s):
+
+```
+bun run tools/dev/lsp-grounding-summary.ts <report.json> [more-runs.json ...]
+```
 
 | arm | runs | n | ready_ok | ready_timeout | expected_cancel | fatal_transport | ready ms (min/med/max) |
 |-----|------|---|----------|---------------|-----------------|-----------------|------------------------|
 | baseline (current budgets) | — | — | — | — | — | — | — |
 | candidate (if any) | — | — | — | — | — | — | — |
 
-Decision: _record here only after the table is populated from repeated runs._
+NOT auto-run: it spends LLM tokens / EC2 and must not collide with a live bench
+(throttle/pkill hazard). Operator triggers it; the aggregator fills the table.
+
+## Status
+
+- Instrumentation: LANDED (typed receipts + report/box-ls surfacing + summary + aggregator).
+- Measurement A: DONE (above) — pipeline validated, warm-pool lever quantified (~1900×).
+- Measurement B: PENDING an operator-run grounding bench.
+- Budget/anchor change: **NONE** — `PYRIGHT_READY_TIMEOUT_MS` / `PYRIGHT_READY_RETRY_MS`
+  and the anchor selector are UNCHANGED. Measurement A does not justify a change
+  (small package, 0 timeouts); a change waits on Measurement B's distribution.
