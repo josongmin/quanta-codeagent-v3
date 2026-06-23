@@ -1,21 +1,8 @@
-import {
-  type AgentMode,
-  EFFORT_LEVELS,
-  effortToTokenBudget,
-  resolveAgentMode,
-  type SkillScopeView,
-  type WorkingState,
-} from "@/agent"
+import { EFFORT_LEVELS, effortToTokenBudget, type SkillScopeView, type WorkingState } from "@/agent"
 import {
   defaultGranularRegistry,
   type GranularRegistryPort,
 } from "@/agent/checkpoint/granular-registry"
-import {
-  buildUsageBreakdownDefault,
-  type ContextUsageBreakdown,
-  type PromptAssembledSnapshot,
-  snapshotToBreakdownInput,
-} from "@/agent/context/usage-breakdown"
 import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
@@ -29,65 +16,30 @@ import {
 } from "@/agent/plan-queue"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
-import type { StickyModelStore } from "@/agent/sticky-model"
-import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
-import {
-  type Message,
-  type ModelCandidate,
-  type Provider,
-  type StreamEvent,
-  type StreamInput,
-  tryCreateLLM,
-} from "@/llm"
-import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
-import { PATCH_SENTINELS } from "@/patch/types"
-import { InMemoryRadarStore, JsonlFileRadarStore, type RadarStore } from "@/radar"
+import type { Message, StreamInput } from "@/llm"
+import type { RadarStore } from "@/radar"
 import { parseEnvFlag } from "@/runner/assemble"
 import type {
   RuntimeFacadeComposeOptions,
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import {
-  loadSessionById,
-  type SavedSession,
-  type SessionEnvelopeRecord,
-  saveSessionById,
-} from "@/session"
-import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import { defaultShadowOdb, type ShadowOdb } from "@/storage"
-import {
-  type AtCandidateProvider,
-  atAutocompleteEnabled,
-  createCompositeAtProvider,
-} from "../at-autocomplete"
 import type { DreamSlashState } from "../dream-cmd"
 import { DEFAULT_IDLE_MS } from "../idle-monitor"
-import { runImageCmd } from "../image-cmd"
-import type { ImageQueue } from "../image-queue"
-import { loadKeybindings } from "../keybindings/load"
-import type { KeybindingMap } from "../keybindings/types"
 import type { MemorySlashState } from "../memory-cmd"
 import {
   createModeCycleStore,
-  formatPostureMeta,
   MODE_CYCLE,
   type ModeCycleStore,
   modeCycleEnabled,
 } from "../mode-cycle"
-import { createPromptHistory, type PromptHistory } from "../prompt-history"
-import { buildExternalEditor, type ExternalEditorPort } from "../raw-line-reader-editor"
-import type { RetryWithSessionState } from "../retry-with"
-import type { RewindSlashState } from "../rewind-cmd"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
 import type { SessionIoState } from "../session-cmd"
-import { isSlashCommand, runSlashCommand, type SlashContext } from "../slash-commands"
-import type { StatusBar } from "../status-bar"
-import type { SegmentedUsageView } from "../status-line"
+import type { SlashContext } from "../slash-commands"
 import { createTextInbox, type TextInbox } from "../text-inbox"
-import type { VoiceLiveCtx } from "../voice-live-cmd"
 import { type BackgroundTurnPortal, createBackgroundTurnPortal } from "./background-turn-portal"
-import type { CliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import {
@@ -95,51 +47,41 @@ import {
   createConversationActionSurface,
 } from "./conversation-action-surface"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
-import { buildModelAdapter } from "./ctx-adapters/model-adapter"
 import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
 import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
 import {
   createPlaybookTriggerSurfaceSeam,
   type PlaybookTriggerSurfaceSeam,
 } from "./playbook-trigger-surface-seam"
-import type { SessionLoopSinks } from "./session-loop"
 import type { SessionSetupResult } from "./session-setup"
 import { buildSkillsCallback } from "./skills-surface"
+import { buildReplSlashCtx, type ReplSlashCtx } from "./slash-surface"
+import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./surface-compose/dispatch"
+import type { SurfaceState } from "./surface-compose/turn-sinks"
 import {
-  buildReplSlashCtx,
-  projectSlashCtx,
-  type ReplaySlashState,
-  type ReplSlashCtx,
-} from "./slash-surface"
-import { buildVoiceLiveCtx, voiceLiveEnabled } from "./voice-live-wire"
+  buildDefaultSessionIo,
+  buildModelAdapterWire,
+  buildRadarStore,
+  buildReplaySlashState,
+  buildRetryCandidates,
+  createPromptAssembledHolder,
+  extractApplyPatchPaths,
+  radarTaskDurationThresholdMs,
+  renderRetryEvent,
+} from "./surface-compose/wire-builders"
 
-export interface PromptUxOpts {
-  readonly promptHistory?: PromptHistory
-  readonly multiline?: boolean
-  readonly atProvider?: AtCandidateProvider
-  /** RFC-08 / ADR-0443 — the turn-boundary mode store, present iff
-   *  `QUANTA_MODE_CYCLE=1`. The host (session-loop) reads `.current()
-   *  .permissionMode` for the next `createSession`; the prompt pipeline reads
-   *  `modeMeta` + `onCycleMode` (derived from the same store) for the pill +
-   *  shift+tab hook. Absent ⇒ no pill, shift+tab ignored (byte-identical). */
-  readonly modeCycle?: ModeCycleStore
-  readonly modeMeta?: string
-  readonly onCycleMode?: () => { meta?: string } | undefined
-  /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. Present iff
-   *  `QUANTA_EXTERNAL_EDITOR=1`. Absent ⇒ ctrl-x ctrl-e inert (byte-identical). */
-  readonly openEditor?: ExternalEditorPort
-  /** RFC-11 / ADR-0447 — loaded `~/.quanta/keybindings.json` map (merged over
-   *  defaults). Present iff `QUANTA_KEYBINDINGS=1`. Absent ⇒ hardcoded keys
-   *  (byte-identical). */
-  readonly keybindings?: KeybindingMap
-  /** jun-6 (Codex paste-burst) — large-paste coalescing threshold. Present iff
-   *  `QUANTA_PASTE_BURST` is a positive integer (read via `runtimeConfig`).
-   *  Absent ⇒ paste echoes inline (byte-identical). */
-  readonly pasteBurst?: { readonly minChars: number }
-  /** #10 (jun-11) — bracketed-paste mode. Present iff `QUANTA_BRACKETED_PASTE`
-   *  is on (CLI-default-ON). Absent ⇒ byte-identical (pasted newline early-submits). */
-  readonly bracketedPaste?: boolean
-}
+// ── Public-surface re-exports ────────────────────────────────────────────────
+// The cohesive clusters below were extracted into siblings under
+// `surface-compose/` to keep this module under the god-module line budget. The
+// ORIGINAL public surface is re-exported verbatim here so every importer stays
+// byte-compatible (the split is structural only). Names this module also
+// CONSUMES locally (`buildModelAdapterWire`/`buildRetryCandidates`/
+// `extractApplyPatchPaths`/`SurfaceState`) are re-exported from their local
+// imports below the import block to avoid a duplicate-binding conflict.
+export { buildPromptUx, type PromptUxOpts } from "./surface-compose/prompt-ux"
+export { composeTurnSinks, createSurfaceState } from "./surface-compose/turn-sinks"
+export type { SurfaceState }
+export { buildModelAdapterWire, buildRetryCandidates, extractApplyPatchPaths }
 
 /** Opt-in env gate for this surface's feature knobs (QUANTA_WORKING_STATE /
  *  QUANTA_SHADOW / QUANTA_PER_TOOL_CHECKPOINT / etc.). Thin alias over the
@@ -147,321 +89,6 @@ export interface PromptUxOpts {
  *  longer reimplements the env-flag semantics inline — the prior local copy
  *  diverged (unknown values were treated as truthy). One source of truth now. */
 const isEnvTruthy = (raw: string | undefined): boolean => parseEnvFlag(raw, false)
-
-/** ADR-0231 — default long-task threshold (ms) the radar idle/long-task
- *  heuristic uses when `QUANTA_RADAR_TASK_MS` is unset. 30s mirrors the
- *  "this turn took a while, a review may help" intent of the sample heuristic. */
-const DEFAULT_RADAR_TASK_DURATION_MS = 30_000
-
-/** ADR-0231 — resolve the long-task threshold (ms) from `QUANTA_RADAR_TASK_MS`.
- *  Invalid / unset ⇒ {@link DEFAULT_RADAR_TASK_DURATION_MS}. */
-const radarTaskDurationThresholdMs = (env: NodeJS.ProcessEnv): number => {
-  const raw = env.QUANTA_RADAR_TASK_MS
-  if (raw === undefined) return DEFAULT_RADAR_TASK_DURATION_MS
-  const n = Number(raw)
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_RADAR_TASK_DURATION_MS
-}
-
-/** ADR-0231 — build the gated radar proposal-queue store. Returns `undefined`
- *  when `QUANTA_RADAR` is off (default-OFF byte-identical: neither the slash
- *  slot nor the producer block is wired). When on, a `JsonlFileRadarStore`
- *  (persistent, 0600) iff `QUANTA_RADAR_FILE` is set, else an
- *  `InMemoryRadarStore`. `crypto.randomUUID` ids in production (stable across
- *  restarts is not required for the in-memory adapter). */
-const buildRadarStore = (env: NodeJS.ProcessEnv): RadarStore | undefined => {
-  if (!gateOn(env, "QUANTA_RADAR")) return undefined
-  const filePath = env.QUANTA_RADAR_FILE
-  if (filePath !== undefined && filePath.length > 0) {
-    return new JsonlFileRadarStore({
-      filePath,
-      mintId: () => crypto.randomUUID(),
-      onWarn: (msg) => logger.warn(msg),
-    })
-  }
-  return new InMemoryRadarStore({ mintId: () => crypto.randomUUID() })
-}
-
-/** `/retry-with` — parse `QUANTA_RETRY_MODELS` (comma-separated model ids) into
- *  {@link ModelCandidate}s for the current provider. The current model is
- *  prepended so `resolveRetryModel` can escalate past it. Each port is built
- *  via {@link tryCreateLLM}; a candidate whose provider key is missing is
- *  dropped (null) rather than crashing the surface. Returns `[]` when the env
- *  knob is unset/empty ⇒ the slot is omitted ⇒ `/retry-with` prints
- *  "no model candidates configured" (default-OFF). */
-export const buildRetryCandidates = (
-  env: NodeJS.ProcessEnv,
-  provider: Provider,
-  currentModelId: string,
-): ModelCandidate[] => {
-  const raw = env.QUANTA_RETRY_MODELS
-  if (raw === undefined || raw.trim() === "") return []
-  const ids = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-  if (ids.length === 0) return []
-  // De-dup while keeping the current model first.
-  const ordered = [currentModelId, ...ids.filter((id) => id !== currentModelId)]
-  const out: ModelCandidate[] = []
-  for (const id of ordered) {
-    const port = tryCreateLLM(provider, { model: id }, env)
-    if (port !== null) out.push({ id, port })
-  }
-  return out
-}
-
-/**
- * Ticket 14 (§11.6) — build the `/model` picker adapter wire from the narrow
- * slice the surface owns. Extracted from the inline compose IIFE so the
- * mode-implicit SET binding is REGRESSION-TESTABLE in isolation (the inline
- * version had no test driving `composeSurfaceWires`, so the `currentMode`
- * fix could silently revert to `() => "default"` and stay green).
- *
- * Binds the SET to the SAME mode derivation the consume side reads (skill-gate
- * `readStickyModelForMode` → `resolveAgentMode(config.mode, config.planMode)`;
- * on this CLI surface `config.mode` is unset and `config.planMode === planMode`),
- * so under `--plan` the SET lands on the `'plan'` key the loop will read (else
- * `'default'`). Binding to the literal `"default"` (or the mode-cycle/posture
- * store, which drives permissionMode not config.mode) would phantom under
- * `--plan`. Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
- *
- * NO `currentModel` getter is supplied (residual, ticket-14 finding #2). The
- * adapter's `current()` is SYNCHRONOUS, but the ONLY cross-session source of an
- * effective model is the sticky store, whose entire port surface is ASYNC by
- * contract (`get`/`set`/`load` return Promises — the fs-backed impl does disk
- * IO) — and `runtimeContext` exposes no synchronous effective-model snapshot
- * accessor. A store-reading getter could therefore only return a Promise, which
- * a sync `current()` cannot use. So `current()` anchors to the boot model until
- * the first IN-SESSION set (after which the adapter's own per-mode SYNC SHADOW
- * reflects it). Cross-session reflection of a previously-persisted sticky model
- * on a FRESH session would require a sync sticky-snapshot accessor that does not
- * exist at this seam; faking it with the async store is intentionally NOT done.
- */
-export const buildModelAdapterWire = (args: {
-  readonly stickyStore: { readonly store: StickyModelStore } | undefined
-  readonly bootModel: string
-  readonly planMode: boolean
-  readonly candidateIds: readonly string[]
-}): { modelAdapter?: SlashContext["model"] } => {
-  if (args.stickyStore === undefined) return {}
-  return {
-    modelAdapter: buildModelAdapter({
-      store: args.stickyStore.store,
-      bootModel: args.bootModel,
-      currentMode: () => resolveAgentMode(undefined, args.planMode),
-      candidateIds: args.candidateIds,
-    }),
-  }
-}
-
-/** `/retry-with` onEvent renderer — print the alternate model's streamed text
- *  to stdout (read-only preview; the live transcript is never mutated). Only
- *  text deltas surface; control events are ignored. */
-const renderRetryEvent = (ev: StreamEvent): void => {
-  if (ev.type === "text_delta") process.stdout.write(ev.delta)
-  else if (ev.type === "message_stop") process.stdout.write("\n")
-}
-
-/** RFC-08 / ADR-0443 — build the mode-cycle store + its derived pill/hook when
- *  `QUANTA_MODE_CYCLE=1`. The store is the single source of truth: the pill
- *  meta and the shift+tab `onCycleMode` both project from it, and session-loop
- *  reads its `.current().permissionMode` for the next session. Absent knob ⇒
- *  `undefined` everywhere ⇒ byte-identical. */
-const buildModeCycle = (
-  env: NodeJS.ProcessEnv,
-  onPosture?: (agentMode: AgentMode) => void,
-  // #13 — when the surface already built a mode-cycle store (so `/mode` mutates
-  // the SAME instance the shift+tab pill + session-loop projection read), reuse
-  // it instead of minting a second one (two stores would diverge). Absent ⇒
-  // create one locally (legacy path for callers without the shared store).
-  sharedStore?: ModeCycleStore,
-): Pick<PromptUxOpts, "modeCycle" | "modeMeta" | "onCycleMode"> => {
-  if (!modeCycleEnabled(env)) return {}
-  const store = sharedStore ?? createModeCycleStore()
-  // Paint the bottom status-bar pill at start too, so BOTH surfaces (the
-  // input meta row + the status bar) agree from the first render (RFC-08 §4.3).
-  onPosture?.(store.current().agentMode)
-  return {
-    modeCycle: store,
-    modeMeta: formatPostureMeta(store.current()),
-    onCycleMode: () => {
-      const p = store.cycle()
-      // Mirror the new posture's AgentMode onto the bottom status bar (the
-      // existing `formatMode` pill renders plan/review/audit; default ⇒ hidden).
-      onPosture?.(p.agentMode)
-      return { meta: formatPostureMeta(p) }
-    },
-  }
-}
-
-/** RFC-12 / ADR-0439 — build the `@`-mention autocomplete provider when the
- *  feature is enabled (`QUANTA_AT_AUTOCOMPLETE=1`). File listing is live (cwd
- *  jail = the resolver root); symbol listing reuses the SAME lazy union-LSP
- *  port the agent loop's `@symbol` resolver uses (`buildMentionSymbolDeps`),
- *  so an installed language server lights both surfaces with one wire. Absent
- *  knob ⇒ `undefined` ⇒ `readLine` byte-identical. */
-const buildAtProvider = (cwd: string, env: NodeJS.ProcessEnv): AtCandidateProvider | undefined => {
-  if (!atAutocompleteEnabled(env)) return undefined
-  const symbolDeps = buildMentionSymbolDeps(cwd, env)
-  return createCompositeAtProvider({
-    fileRoot: cwd,
-    ...(symbolDeps.lsp !== undefined ? { symbolLookup: symbolDeps.lsp } : {}),
-  })
-}
-
-/** Slice-C: UX opts (history + multiline + `@`-autocomplete) the prompt
- *  pipeline consumes. Default-ON history when the env knob is unset; explicit
- *  `=0` reverts to the no-history single-line path. ADR-0297: consumes the
- *  typed surface feature record + an INJECTED `cwd`/`env` (no `process.*`
- *  reads survive here — the host passes both). `@`-autocomplete is default-OFF
- *  (its own env knob, read off the injected `env`). */
-export const buildPromptUx = async (
-  featureCfg: CliFeatureConfig,
-  cwd: string,
-  env: NodeJS.ProcessEnv,
-  /** RFC-08 — optional sink the host wires to `pills.update({mode})` so a
-   *  shift+tab posture change also repaints the bottom status-bar pill. Absent
-   *  ⇒ only the input meta-row pill updates (still correct, just one surface). */
-  onPosture?: (agentMode: AgentMode) => void,
-  // #13 — the surface-owned mode-cycle store (from `composeSurfaceWires`) so the
-  // shift+tab cycle and `/mode` share ONE instance. Absent ⇒ buildModeCycle
-  // mints its own (legacy / test path).
-  modeCycleStore?: ModeCycleStore,
-): Promise<PromptUxOpts> => {
-  const { history, multiline } = featureCfg
-  const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
-    maxLines: history.maxLines,
-    ...(history.filePath !== undefined ? { filePath: history.filePath } : {}),
-  }
-  const promptHistory = history.enabled ? createPromptHistory(promptHistoryOpts) : undefined
-  const atProvider = buildAtProvider(cwd, env)
-  // RFC-11 — external editor (A) + keybindings (B). Both default-OFF; each
-  // gated on its own env knob, read off the injected `env` (no `process.*`).
-  const openEditor = externalEditorEnabled(env)
-    ? buildExternalEditor({ env, onWarn: (line) => process.stderr.write(`${line}\n`) })
-    : undefined
-  const keybindings = await buildKeybindingMap(env)
-  // jun-6 paste-burst — read the threshold from the frozen runtime-config (the
-  // SINGLE env touchpoint; no new `env.QUANTA_*` gate here). Absent / invalid ⇒
-  // undefined ⇒ the reader echoes a paste inline (byte-identical).
-  const pasteBurstMinChars = runtimeConfig().pasteBurstMinChars
-  // #10 — bracketed-paste gate (CLI-default-ON via CLI_FEATURE_GATES). Read off
-  // the injected `env` (no `process.*`); OFF ⇒ slot omitted ⇒ byte-identical.
-  const bracketedPaste = gateOn(env, "QUANTA_BRACKETED_PASTE")
-  return {
-    ...(promptHistory !== undefined ? { promptHistory } : {}),
-    multiline: multiline.enabled,
-    ...(atProvider !== undefined ? { atProvider } : {}),
-    ...buildModeCycle(env, onPosture, modeCycleStore),
-    ...(openEditor !== undefined ? { openEditor } : {}),
-    ...(keybindings !== undefined ? { keybindings } : {}),
-    ...(pasteBurstMinChars !== undefined ? { pasteBurst: { minChars: pasteBurstMinChars } } : {}),
-    ...(bracketedPaste ? { bracketedPaste: true } : {}), // #10
-  }
-}
-
-/** RFC-11 / ADR-0446 — `QUANTA_EXTERNAL_EDITOR=1` gate. Default OFF; only the
- *  literal `"1"` enables (mirrors the strict opt-in posture of the new RFC-11
- *  layers — bad/absent value ⇒ off ⇒ byte-identical). */
-const externalEditorEnabled = (env: NodeJS.ProcessEnv): boolean =>
-  gateOn(env, "QUANTA_EXTERNAL_EDITOR")
-
-/** RFC-11 / ADR-0447 — `QUANTA_KEYBINDINGS=1` gate. When set, load + merge
- *  `~/.quanta/keybindings.json` over the defaults; any load defect degrades to
- *  the default map (no-throw) and warnings are echoed to stderr. Absent ⇒
- *  `undefined` ⇒ the reader runs its hardcoded if-chain (byte-identical). */
-const buildKeybindingMap = async (env: NodeJS.ProcessEnv): Promise<KeybindingMap | undefined> => {
-  if (!gateOn(env, "QUANTA_KEYBINDINGS")) return undefined
-  const { map, warnings } = await loadKeybindings()
-  for (const w of warnings) process.stderr.write(`keybindings: ${w}\n`)
-  return map
-}
-
-interface CostPanelDeltaBaseline {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-}
-
-export interface SurfaceState {
-  readonly imageQueue: ImageQueue | undefined
-  readonly rewindState: RewindSlashState | undefined
-  history: readonly Message[]
-  readonly costDeltaPrev: CostPanelDeltaBaseline
-}
-
-export const createSurfaceState = (args: {
-  readonly imageQueue: ImageQueue | undefined
-  readonly rewindState: RewindSlashState | undefined
-  readonly history: readonly Message[]
-}): SurfaceState => ({
-  imageQueue: args.imageQueue,
-  rewindState: args.rewindState,
-  history: args.history,
-  costDeltaPrev: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
-})
-
-/** Track R — build the `/replay` resolver+iterator pair. Default reader is
- *  lazy-imported so `@/session` is not pulled into the boot path for users
- *  who never type `/replay`. The composer un-wraps the {@link iterateSessionFile}
- *  `Result` shape into a bare `AsyncIterable<SessionEnvelopeRecord>` — decode
- *  errors are silently skipped (the projector inside `/inspect` surfaces
- *  warnings; `/replay` is a one-line-per-event view that simply omits the bad
- *  row). The resolver returns `undefined` when the path doesn't exist so the
- *  command renders "session <id> not found" + exit 1. */
-const buildReplaySlashState = (): ReplaySlashState => ({
-  resolveSession: async (id: string): Promise<string | undefined> => {
-    const { sessionEnvelopePath } = await import("@/session")
-    const path = sessionEnvelopePath(id)
-    const file = Bun.file(path)
-    return (await file.exists()) ? path : undefined
-  },
-  iterate: (path: string): AsyncIterable<SessionEnvelopeRecord> => {
-    const inner = async function* (): AsyncIterable<SessionEnvelopeRecord> {
-      const { iterateSessionFile } = await import("@/session")
-      for await (const r of iterateSessionFile(path)) {
-        if (r.ok) yield r.value
-      }
-    }
-    return inner()
-  },
-})
-
-/** ADR-0310/0294 — session-io adapter for `/session export|import`. Default
- *  adapter delegates to the existing `loadSessionById`/`saveSessionById`
- *  primitives (id-addressable V2 store). Every method is no-throw on the
- *  public surface — read failure surfaces as `null`; write failures bubble
- *  up to the slash, which already wraps them in typed `ctx.err` + exit 1. */
-const buildDefaultSessionIo = (): SessionIoState => ({
-  readSession: async (id: string): Promise<SavedSession | null> => {
-    try {
-      const found = await loadSessionById(id)
-      return found ?? null
-    } catch (e) {
-      logger.warn(`sessionIo.readSession failed: ${errMessage(e)}`)
-      return null
-    }
-  },
-  writeSession: async (id: string, session: SavedSession): Promise<void> => {
-    try {
-      // saveSessionById takes (meta, payload, provider). Reconstruct the
-      // payload from the SavedSession the slash hands us. The slash rewrites
-      // `meta.id` to `id` before calling so the two MUST agree here.
-      const meta = session.meta.id === id ? session.meta : { ...session.meta, id }
-      await saveSessionById(meta, {
-        reason: session.reason,
-        turns: session.turns,
-        messages: session.messages,
-      })
-    } catch (e) {
-      // Rethrow so the slash surfaces the error message — this matches the
-      // contract documented in session-cmd.ts (the slash wraps in try/catch
-      // and prints to ctx.err + exit 1).
-      throw e instanceof Error ? e : new Error(String(e))
-    }
-  },
-  mintNewId: (): string => crypto.randomUUID(),
-})
 
 /** ADR-0310 — bundle of REPL-side wires constructed once per session. The
  *  surface (`runRepl`) keeps the references alive so the loop can:
@@ -561,258 +188,6 @@ export interface ReplSurfaceWires {
    *  the `/background` slot above. Absent ⇒ Ctrl+B + `/background` are unwired
    *  (default-OFF byte-identical). */
   readonly backgroundPortal?: BackgroundTurnPortal
-}
-
-/** Project the legacy + ADR-0291 ReplSlashCtx slots onto the
- *  `SlashContext` shape. Delegates to the SSOT {@link projectSlashCtx} in
- *  `slash-surface.ts` — the SAME projector the test-harness `dispatchReplSlash`
- *  uses — so the legacy + ADR-0291 slot mapping can never drift out of sync
- *  between the two files (there is now ONE copy, not two byte-synced ones).
- *  This slice then layers its ADR-0292/0294 augmentations (`convCheckpoint`,
- *  `sessionIo`, …) on top in {@link buildSurfaceDispatch}. */
-const projectReplSlashCtxToContract = (c: ReplSlashCtx): Record<string, unknown> =>
-  projectSlashCtx(c)
-
-/** Build the surface's slash dispatch closure: routes `/image` directly to
- *  the image-queue command (same fast-path the legacy `dispatchReplSlash`
- *  did) and forwards all others to `runSlashCommand` with the FULL
- *  augmented `SlashContext`. Default-OFF: when the convCheckpoint /
- *  sessionIo slots are absent, the spread omits them ⇒ the slash command
- *  itself prints "not wired" (byte-identical with the pre-wire path). */
-const buildSurfaceDispatch = (args: {
-  readonly slashCtx: ReplSlashCtx
-  readonly convCheckpointSlot: ConvCheckpointSlashState | undefined
-  readonly sessionIo: SessionIoState
-  /** Live `/context` seam — returns the latest assembled-prompt breakdown
-   *  (written by the loop's `onPromptAssembled` sink) or `undefined` before
-   *  the first turn assembles a prompt. */
-  readonly contextUsage?: () => SegmentedUsageView | undefined
-  /** ADR-0442 `/voice-live` builder. Present only when the opt-in gate is set
-   *  (`QUANTA_VOICE_LIVE`); resolves a constructed live `VoiceLiveCtx` (or
-   *  `undefined` on a non-TTY host). Absent ⇒ slot omitted ⇒ the slash prints
-   *  "not wired" (byte-identical default-OFF). */
-  readonly voiceLive?: () => Promise<VoiceLiveCtx | undefined>
-  /** `/memory` store slot. Present iff a durable store was built (default-ON
-   *  volatile `InMemoryStore`); absent ⇒ the slash prints "not wired". */
-  readonly memory?: MemorySlashState | undefined
-  /** `/dream` (H16) manual-trigger slot. Present iff the host wired the live
-   *  cross-session dream trigger (`QUANTA_AUTO_DREAM=1`); REUSES the SAME trigger
-   *  instance the session-end auto path fires (no duplicated consolidation
-   *  logic). Absent ⇒ the slash prints "not wired" (default-OFF byte-identical). */
-  readonly dream?: DreamSlashState | undefined
-  /** `/queue` plan-queue store. Surface-owned; always present in the REPL so
-   *  inspect/mutate/sendNow resolve (empty until a producer enqueues). */
-  readonly planQueue?: PlanQueueStore | undefined
-  /** `/state` working-state snapshot getter. Always wired (returns undefined
-   *  when `QUANTA_WORKING_STATE` is off ⇒ `/state` renders an empty panel). */
-  readonly workingState?: (() => WorkingState | undefined) | undefined
-  /** ADR-0512 P3 — `/state` skill-scope getter. Returns the active skill's
-   *  visible/hidden tool partition, or undefined when `QUANTA_SKILL_SCOPE_V2` is
-   *  off / no skill is scoping ⇒ `/state` omits the skill-scope section. */
-  readonly skillScope?: (() => SkillScopeView | undefined) | undefined
-  /** `/retry-with` session-state factory. Returns the live re-stream state
-   *  (candidates + last stream input + stdout renderer) or undefined when the
-   *  feature is off or no turn has streamed yet ⇒ slot omitted. */
-  readonly retry?: (() => RetryWithSessionState | undefined) | undefined
-  /** `/snapshot` shadow object-DB (SAME instance the loop checkpoints into).
-   *  Present only when `QUANTA_SHADOW` is on ⇒ otherwise slot omitted and the
-   *  slash prints "shadow store not configured". */
-  readonly shadowOdb?: ShadowOdb | undefined
-  /** ADR-0071 mid-turn control surface. Present only when
-   *  QUANTA_CONVERSATION_ACTIONS is on; absent ⇒ /cancel + /summarize-now
-   *  print "not wired". */
-  readonly conversationActions?: ConversationActionSurface | undefined
-  /** §steer — the session-mutable inbound delivery mode ref, so `/inbound`
-   *  reads/sets it (the SAME ref the session loop reads per mid-turn line).
-   *  Always present (the REPL seeds it `queue`). */
-  readonly inboundMode: { current: InboundMode }
-  /** #13 — `/mode` posture wire over the shared mode-cycle store. Present iff
-   *  `QUANTA_MODE_CYCLE` is on; absent ⇒ slot omitted ⇒ `/mode` prints "not
-   *  wired" (default-OFF byte-identical). */
-  readonly mode?: SlashContext["mode"]
-  /** Ticket 14 (§11.6) — `/model` interactive-picker adapter over the SAME
-   *  sticky-model store the loop reads. Present iff a sticky store was wired;
-   *  absent ⇒ `/model` prints "not wired in this surface" (default-OFF). */
-  readonly modelAdapter?: SlashContext["model"]
-  /** Ticket 18 (§V1) — READ-ONLY background-turn portal view for `/background`.
-   *  Present iff `QUANTA_BG_TURN` is on; absent ⇒ slot omitted ⇒ `/background`
-   *  prints "not wired" (default-OFF byte-identical). */
-  readonly background?: SlashContext["background"]
-}): ((input: string) => Promise<boolean>) => {
-  return async (input: string): Promise<boolean> => {
-    const head = input.split(/\s+/)[0] ?? ""
-    if (!isSlashCommand(head)) return false
-    if (head === "/image" && args.slashCtx.imageQueue !== undefined) {
-      runImageCmd(input, {
-        out: (s) => process.stdout.write(s),
-        err: (s) => process.stderr.write(s),
-        cwd: process.cwd(),
-        queue: args.slashCtx.imageQueue,
-      })
-      return true
-    }
-    const projected = projectReplSlashCtxToContract(args.slashCtx)
-    const ctx: SlashContext = {
-      out: (s) => process.stdout.write(s),
-      err: (s) => process.stderr.write(s),
-      cwd: process.cwd(),
-      ...projected,
-      // ADR-0292/0294 augmentations: spread by presence so absence omits the
-      // slot entirely (default-OFF byte-identical under
-      // exactOptionalPropertyTypes).
-      // Ticket 14 (§11.6) — `/model` picker adapter. Absent ⇒ slot omitted ⇒
-      // the command prints "not wired" (parity with /sticky-model default-OFF).
-      ...(args.modelAdapter !== undefined ? { model: args.modelAdapter } : {}),
-      ...(args.convCheckpointSlot !== undefined ? { convCheckpoint: args.convCheckpointSlot } : {}),
-      sessionIo: args.sessionIo,
-      // Live `/context` seam (Track D): when present, `/context` renders the
-      // segmented breakdown from the latest assembled prompt instead of the
-      // legacy placeholder. Absent ⇒ slot omitted ⇒ legacy fallback.
-      ...(args.contextUsage !== undefined ? { contextUsage: args.contextUsage } : {}),
-      // ADR-0442 `/voice-live` builder. Present only when the opt-in gate is
-      // set; absent ⇒ slot omitted ⇒ the slash prints "not wired" (byte-
-      // identical default-OFF).
-      ...(args.voiceLive !== undefined ? { voiceLive: args.voiceLive } : {}),
-      // `/memory` store slot: present iff a durable store was built. Absent ⇒
-      // slot omitted ⇒ the slash prints "memory store not wired".
-      ...(args.memory !== undefined ? { memory: args.memory } : {}),
-      // `/dream` (H16) manual-trigger slot: present iff the host wired the live
-      // cross-session dream trigger. Absent ⇒ slot omitted ⇒ the slash prints
-      // "auto-dream not wired in this surface" (default-OFF byte-identical).
-      ...(args.dream !== undefined ? { dream: args.dream } : {}),
-      // `/queue` plan-queue store: surface-owned, always present in the REPL.
-      ...(args.planQueue !== undefined ? { planQueue: args.planQueue } : {}),
-      // `/state` working-state snapshot getter: always wired (empty when the
-      // feature is off ⇒ renders an empty panel instead of "not wired").
-      ...(args.workingState !== undefined ? { workingState: args.workingState } : {}),
-      // ADR-0512 P3 — `/state` skill-scope getter: wired only when v2 is on (the
-      // getter yields undefined until the loop publishes ⇒ section omitted,
-      // byte-identical).
-      ...(args.skillScope !== undefined ? { skillScope: args.skillScope } : {}),
-      // `/retry-with` re-stream state: present only when the feature is on AND a
-      // turn has streamed (so there is a stream input to replay).
-      ...(() => {
-        const retry = args.retry?.()
-        return retry !== undefined ? { retry } : {}
-      })(),
-      // `/snapshot` shadow store: present only when QUANTA_SHADOW is on.
-      ...(args.shadowOdb !== undefined ? { shadowOdb: args.shadowOdb } : {}),
-      // `/cancel` + `/summarize-now` mid-turn control surface.
-      ...(args.conversationActions !== undefined
-        ? { conversationActions: args.conversationActions }
-        : {}),
-      // `/inbound` mode ref (always present in the REPL — seeded queue).
-      inboundMode: args.inboundMode,
-      // #13 — `/mode` posture wire. Present only when QUANTA_MODE_CYCLE is on;
-      // absent ⇒ slot omitted ⇒ `/mode` prints "not wired" (default-OFF).
-      ...(args.mode !== undefined ? { mode: args.mode } : {}),
-      // Ticket 18 (§V1) — `/background` read-only portal view. Present only when
-      // QUANTA_BG_TURN is on; absent ⇒ slot omitted ⇒ "not wired" (default-OFF).
-      ...(args.background !== undefined ? { background: args.background } : {}),
-    }
-    await runSlashCommand(input, ctx)
-    return true
-  }
-}
-
-/** ADR-0442 — build the `/voice-live` ctx builder when the opt-in gate is set
- *  (`QUANTA_VOICE_LIVE`). Returns `undefined` (so the slot is omitted, default-
- *  OFF byte-identical) when the knob is unset. When set, returns a thunk that
- *  constructs a live `VoiceLiveCtx` on demand — the actual `@/realtime` /
- *  `@/voice` / `@/auth` composition is owned by `voice-live-wire.ts`; this just
- *  injects the production clock, the TTY probe, and the raw-mode keypress stdin
- *  (built lazily inside the wire only on a TTY host). Construction is deferred
- *  to first `/voice-live` so the boot path never spawns a recorder/transport
- *  for a user who never types the command. The OpenAI bearer is resolved INSIDE
- *  the wire (composition root) and threaded into the session as a value — the
- *  realtime slice never reads env/auth itself. */
-const buildVoiceLiveSlot = (
-  envSource: NodeJS.ProcessEnv,
-): (() => Promise<VoiceLiveCtx | undefined>) | undefined => {
-  if (!voiceLiveEnabled(envSource)) return undefined
-  return () => {
-    // A raw-mode keypress reader requires an interactive STDIN; that is the
-    // relevant TTY probe for live voice (the recorder + the key loop both bind
-    // to stdin). `process.stdin.isTTY` is the injected host signal here — the
-    // surface fence bans `process.stdout/stderr.isTTY` + `process.env`, neither
-    // of which this reads (the env is the injected `envSource` parameter).
-    const isTty = process.stdin.isTTY === true
-    return buildVoiceLiveCtx({
-      env: envSource,
-      isTty,
-      now: () => Date.now(),
-      ...(isTty
-        ? { keypressStdin: process.stdin as unknown as import("./voice-live-wire").KeypressStdin }
-        : {}),
-    })
-  }
-}
-
-/** Holder for the latest `/context` segmented breakdown. The loop's
- *  `onPromptAssembled` sink writes here each turn; the slash command reads via
- *  `current()`. Null until the first turn assembles a prompt (so `/context`
- *  shows its legacy "no prompt assembled yet" fallback at session start). */
-interface PromptAssembledHolder {
-  readonly sink: NonNullable<RuntimeFacadeComposeOptions["onPromptAssembled"]>
-  current(): ContextUsageBreakdown | undefined
-}
-
-/** Convert the loop's canonical {@link PromptAssembledSnapshot} (assembled
- *  `SystemBlock[]` + the turn's `promptPolicy` presence flags + model) into a
- *  segmented {@link ContextUsageBreakdown} via the SSOT `snapshotToBreakdownInput`
- *  + `buildUsageBreakdownDefault` (the loop's OWN token estimator — NO second
- *  heuristic). `max` rides through the snapshot (0 ⇒ unknown window ⇒ the
- *  renderer degrades to a `?`-percent bar; segments + totals still render). */
-const breakdownFromSnapshot = (snapshot: PromptAssembledSnapshot): ContextUsageBreakdown =>
-  buildUsageBreakdownDefault(snapshotToBreakdownInput(snapshot))
-
-/** Build the prompt-assembled holder + sink. Surface-owned mutable cell that
- *  the loop writes (via `onPromptAssembled`) and `/context` reads. */
-const createPromptAssembledHolder = (model?: string): PromptAssembledHolder => {
-  let latest: ContextUsageBreakdown | undefined
-  return {
-    sink: (snapshot) => {
-      // Prefer the snapshot's own model id; fall back to the session model the
-      // holder was built with (the loop passes `max: 0` + may omit model).
-      const withModel: PromptAssembledSnapshot =
-        snapshot.model === undefined && model !== undefined ? { ...snapshot, model } : snapshot
-      latest = breakdownFromSnapshot(withModel)
-    },
-    current: () => latest,
-  }
-}
-
-/** Extract the file paths a V4A `apply_patch` would touch, by scanning the
- *  patch text for `*** Add File:` / `*** Update File:` / `*** Delete File:` /
- *  `*** Move to:` directive headers (the SSOT sentinels from `@/patch/types`).
- *
- *  The per-tool snapshot recorder needs a `filesBefore` set so `/rewind-tool`
- *  can revert a mutation. `apply_patch` input is `{ patch }` (NOT `{ path }`),
- *  so the conservative `path`-only extractor below would capture NOTHING and
- *  silently leave apply_patch un-restorable. Both the Update *source* AND the
- *  `Move to:` *destination* are captured: the source must be snapshotted (its
- *  prior contents), and the move destination is created — capturing it lets a
- *  restore delete the moved-in file. Deduped, order-preserving. */
-export const extractApplyPatchPaths = (patch: string): readonly string[] => {
-  const seen = new Set<string>()
-  const out: string[] = []
-  const push = (raw: string): void => {
-    const p = raw.trim()
-    if (p.length > 0 && !seen.has(p)) {
-      seen.add(p)
-      out.push(p)
-    }
-  }
-  for (const line of patch.split("\n")) {
-    if (line.startsWith(PATCH_SENTINELS.addFile)) push(line.slice(PATCH_SENTINELS.addFile.length))
-    else if (line.startsWith(PATCH_SENTINELS.updateFile))
-      push(line.slice(PATCH_SENTINELS.updateFile.length))
-    else if (line.startsWith(PATCH_SENTINELS.deleteFile))
-      push(line.slice(PATCH_SENTINELS.deleteFile.length))
-    else if (line.startsWith(PATCH_SENTINELS.moveTo))
-      push(line.slice(PATCH_SENTINELS.moveTo.length))
-  }
-  return out
 }
 
 /** Build a fresh per-session wire bundle. Pure — no I/O, no env reads beyond
@@ -1029,9 +404,7 @@ export const composeSurfaceWires = (
             idleThresholdMs: setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS,
             taskDurationThresholdMs: radarTaskDurationThresholdMs(envSource),
             idleMsForTurn: () =>
-              setup.idleMonitor.isIdle()
-                ? (setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS)
-                : 0,
+              setup.idleMonitor.isIdle() ? (setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS) : 0,
           } satisfies RuntimeFacadeComposeOptions["radar"],
         }
       : {}),
@@ -1401,87 +774,3 @@ export const composeSurfaceSlashCtx = (
   state: SurfaceState,
   envSource: NodeJS.ProcessEnv,
 ): ReturnType<typeof buildReplSlashCtx> => composeSurfaceWires(setup, state, envSource).slashCtx
-
-const foldCostPanelDelta = (
-  panel: {
-    incrementTurn: (delta: {
-      inputTokens: number
-      outputTokens: number
-      cacheReadTokens: number
-    }) => void
-  },
-  snap: { counters: Record<string, number> },
-  prev: CostPanelDeltaBaseline,
-): void => {
-  const curIn = snap.counters[GEN_AI_ATTRS.usage.inputTokens] ?? 0
-  const curOut = snap.counters[GEN_AI_ATTRS.usage.outputTokens] ?? 0
-  const curCache = snap.counters[GEN_AI_ATTRS.usage.cacheReadInputTokens] ?? 0
-  const dIn = Math.max(0, curIn - prev.inputTokens)
-  const dOut = Math.max(0, curOut - prev.outputTokens)
-  const dCache = Math.max(0, curCache - prev.cacheReadTokens)
-  prev.inputTokens = curIn
-  prev.outputTokens = curOut
-  prev.cacheReadTokens = curCache
-  panel.incrementTurn({ inputTokens: dIn, outputTokens: dOut, cacheReadTokens: dCache })
-}
-
-const foldCostPanelIfWired = (
-  panel:
-    | {
-        incrementTurn: (delta: {
-          inputTokens: number
-          outputTokens: number
-          cacheReadTokens: number
-        }) => void
-      }
-    | undefined,
-  metrics: { snapshot: () => { counters: Record<string, number> } } | undefined,
-  prev: CostPanelDeltaBaseline,
-): void => {
-  if (panel === undefined || metrics === undefined) return
-  foldCostPanelDelta(panel, metrics.snapshot(), prev)
-}
-
-const snapshotAndFlushLifecyclePills = (setup: SessionSetupResult): void => {
-  if (setup.lifecycleTaskRegistry !== undefined) {
-    const running = setup.lifecycleTaskRegistry.pendingIds().length
-    const total = setup.lifecycleTaskRegistry.list().length
-    setup.lifecyclePills.update({ subagent: { running, total } })
-  }
-  if (setup.lifecycleFollowUpQueue !== undefined) {
-    setup.lifecyclePills.update({ followUp: { queued: setup.lifecycleFollowUpQueue.size() } })
-  }
-  setup.lifecyclePills.flush()
-}
-
-const renderTurnError = (error: unknown, statusBar: StatusBar): void => {
-  const msg = errMessage(error)
-  process.stderr.write(`\n\x1b[31merror:\x1b[0m ${msg}\n`)
-  statusBar.transient(`error: ${msg.slice(0, 120)}`, 4000)
-}
-
-export const composeTurnSinks = (
-  setup: SessionSetupResult,
-  state: SurfaceState,
-): SessionLoopSinks => {
-  const { model, slog, metrics, turnSummary, statusBar } = setup
-  return {
-    renderTurnDashboard: (): void => {
-      if (!metrics) return
-      const snap = metrics.snapshot()
-      slog.info("metrics.snapshot", { snapshot: snap })
-      process.stderr.write(`${renderDashboardText(buildCostDashboard(snap, { model }))}\n`)
-      foldCostPanelIfWired(setup.costPanel, metrics, state.costDeltaPrev)
-    },
-    renderAndResetSummary: (outcome): void => {
-      state.history = outcome.messages
-      const summary = turnSummary.render(outcome as Parameters<typeof turnSummary.render>[0])
-      if (summary !== "") process.stderr.write(summary)
-      turnSummary.reset()
-    },
-    flushLifecyclePills: (): void => {
-      snapshotAndFlushLifecyclePills(setup)
-    },
-    renderTurnError: (error): void => renderTurnError(error, statusBar),
-  }
-}
