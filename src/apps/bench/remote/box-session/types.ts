@@ -1,0 +1,288 @@
+/**
+ * Shared type surface + constants for the box-session cluster. Extracted from the
+ * (god-sized) `box-session.ts` so each sibling concern (dataset preflight, auth,
+ * snapshot, lifecycle, grade) imports ONE canonical set of interfaces instead of
+ * re-deriving them. PURE types + plain constants — no IO, no behavior.
+ */
+
+import type { LspGroundingStatus } from "@/shared"
+import { CURRENT_BENCH_BASE_PRESET } from "../../preset"
+import type { SpawnFn, SpawnResult } from "../backend"
+
+export interface FullRemoteConfig {
+  /** Local quanta repo to rsync to the box (excludes node_modules/.git). */
+  readonly repoDir: string
+  /** RAW chatgpt.json content (the caller reads it; we strip it here). */
+  readonly authJson: string
+  /** Local swebench instances.jsonl. */
+  readonly datasetPath: string
+  /** Subset to run (default: all rows in the dataset). */
+  readonly instanceIds?: readonly string[]
+  /** Bench preset. Default current base profile. */
+  readonly preset?: string
+  /** Model id (predictions/report naming). Default `gpt-5.4`. */
+  readonly model?: string
+  /** Launch-time metadata tag so operators can distinguish pool/full/warm boxes
+   *  even before the box-side runtime snapshot exists. */
+  readonly launchMode?: "full-remote" | "pool" | "warm-box"
+  readonly dryRun?: boolean
+  readonly spawn?: SpawnFn
+  /** Progress sink — called at each stage so a long run isn't a silent black box. */
+  readonly onLog?: (msg: string) => void
+  /** Injectable sleep (test seam — default real setTimeout). */
+  readonly sleep?: (ms: number) => Promise<void>
+  /** Max cloud-init readiness polls (test seam — default 30 × 10s ≈ 5min). */
+  readonly maxReadyPolls?: number
+  readonly region?: string
+  readonly ami?: string
+  readonly instanceType?: string
+  readonly keyName?: string
+  readonly keyPath?: string
+  readonly subnetId?: string
+  readonly vpcId?: string
+  readonly sgName?: string
+  readonly diskGb?: number
+  readonly ttlMinutes?: number
+  readonly keep?: boolean
+  /** Launch ON-DEMAND instead of spot. Spot is ~3× cheaper but AWS reclaims it
+   *  on capacity pressure — observed in ap-northeast-2 reclaiming c7i boxes in
+   *  4–17 min, killing runs faster than relaunch can recover. On-demand has no
+   *  reclaim. Default false (spot). */
+  readonly onDemand?: boolean
+  /** Fail-closed single-box guard: if another quanta-bench box is already
+   *  running, callers must opt in before launching a fresh one. */
+  readonly allowExtraBoxes?: boolean
+  /** Override the local single-box owner guard dir (test seam). */
+  readonly singleBoxGuardDir?: string
+  /** Override the cross-process patch-gen budget lease dir (test seam). */
+  readonly tokenBudgetDir?: string
+  /** Max wait for the global patch-gen budget lease. */
+  readonly tokenBudgetWaitMs?: number
+  /** Poll cadence while waiting for the global patch-gen budget lease. */
+  readonly tokenBudgetPollMs?: number
+}
+
+export const D = {
+  region: "ap-northeast-2",
+  // PREBAKED AMI (quanta-bench-easydjango, 2026-06-17): docker + uv + the swebench
+  // easy-django eval images already pulled. Skips the cold cloud-init image-pull
+  // that dominated bootstrap (the stock ubuntu-22.04 ami-0afe1fd15675c3f15 re-pulled
+  // GB of swebench images every launch). userData stays idempotent (re-running
+  // present installs is fast; bun is still installed there). Override via cfg.ami.
+  ami: "ami-04c2cdd2e17b15779",
+  instanceType: "c7i.8xlarge",
+  keyName: "pickinstead_korea.pem",
+  keyPath: "~/Downloads/pickinstead_korea.pem",
+  subnetId: "subnet-9c13f1e7",
+  vpcId: "vpc-4340a92a",
+  sgName: "quanta-bench-sg",
+  diskGb: 600,
+  ttlMinutes: 180,
+  preset: CURRENT_BENCH_BASE_PRESET,
+  model: "gpt-5.4",
+} as const
+
+export interface FullRemoteResult {
+  readonly reportPath?: string
+  readonly resolved?: readonly string[]
+  readonly unresolved?: readonly string[]
+  readonly errored?: readonly string[]
+  readonly emptyPatch?: readonly string[]
+  readonly dryRun?: boolean
+  readonly plan?: readonly string[]
+  /** The box run hit the shared OAuth rate limit (a `generation_error` / 429 was
+   *  observed in the run log). A pool uses this to BACK OFF before the next chunk
+   *  instead of hammering the throttled login. Absent ⇒ not detected. */
+  readonly rateLimited?: boolean
+}
+
+/**
+ * A live, bootstrapped EC2 box. The connection primitives (`ssh`, `aws`, raw
+ * `spawn`) are bound to the resolved host/region/key so a caller never re-derives
+ * them. `terminate` is a fail-closed cleanup boundary for launched boxes:
+ * callers must see a failed AWS terminate instead of silently assuming the box
+ * was cleaned up. Created ONLY by {@link provisionBox}.
+ */
+export interface BoxSession {
+  readonly iid: string
+  readonly ip: string
+  readonly host: string
+  readonly keyPath: string
+  readonly region: string
+  readonly spawn: SpawnFn
+  readonly log: (msg: string) => void
+  /** ssh to this box. Token/stdin goes over `input` (never an argv). `onData`
+   *  streams stdout live. */
+  ssh(remoteCmd: string, input?: string, onData?: (chunk: string) => void): Promise<SpawnResult>
+  aws(args: readonly string[]): Promise<SpawnResult>
+  /** Terminate the box (no-op when `keep` or attach). Throws when launched-box
+   *  cleanup fails. */
+  terminate(): Promise<void>
+}
+
+/** Box-side paths for one grading chunk. Defaults reproduce the historical fixed
+ *  paths (so a single full-remote run is byte-identical); a pool overrides them
+ *  with runId-scoped paths so concurrent/sequential chunks never collide on the
+ *  shared `~/report.json` / `~/instances.jsonl`. */
+export interface ChunkPaths {
+  readonly dataset: string
+  readonly preds: string
+  readonly report: string
+  readonly runLog: string
+  readonly observeDir: string
+  readonly trajectory: string
+}
+
+// NOTE on `~` vs `$HOME`: every path below is interpolated UNQUOTED into the
+// remote command (cat/tee/--flag), where tilde-expansion works — EXCEPT
+// `trajectory`, which is also placed inside DOUBLE QUOTES in the record env
+// (`QUANTA_BENCH_RECORD_TRAJECTORY="…"`), where bash does NOT expand `~`. So
+// trajectory MUST use `$HOME` (which expands in both contexts). A pool building
+// runId-scoped overrides must follow the same rule for its trajectory path.
+export const DEFAULT_CHUNK_PATHS: ChunkPaths = {
+  dataset: "~/instances.jsonl",
+  preds: "~/preds.jsonl",
+  report: "~/report.json",
+  runLog: "~/run.log",
+  observeDir: "~/observe",
+  trajectory: "$HOME/quanta/bench-trajectory.jsonl",
+}
+
+/** Parameters for one patch-gen+grading chunk on an already-provisioned box. */
+export interface GradeChunkParams {
+  /** Local dataset file to scp up for THIS chunk. */
+  readonly datasetPath: string
+  /** RAW chatgpt.json — re-stripped + re-shipped per chunk (a pool refreshes the
+   *  token between chunks so a long-lived run never runs on a stale access_token). */
+  readonly authJson: string
+  readonly instanceIds?: readonly string[]
+  readonly preset: string
+  readonly model: string
+  readonly concurrency: number
+  /** Box-side paths. Default {@link DEFAULT_CHUNK_PATHS}. */
+  readonly paths?: ChunkPaths
+  /** Suffix for LOCAL artifact filenames (`report-<suffix>.json`). Single run ⇒
+   *  iid; pool ⇒ runId so chunks don't overwrite each other's local artifacts. */
+  readonly artifactSuffix: string
+  /** Whether to record + fetch the LLM-trajectory cassette (operator opt-in). */
+  readonly recordTrajectory: boolean
+  /** Forwarded `QUANTA_BENCH_*` env prefix (already built via
+   *  {@link buildForwardedBenchEnv}). */
+  readonly forwardedBenchEnv: string
+  /** jun-20 multi-auth (T-6): auth-pool account that leased this chunk. Surfaced
+   *  in the box status snapshot for operator attribution. Omitted in single-auth. */
+  readonly accountLabel?: string
+  /** Test seam — injectable sleep for the detached run+poll loop (default real). */
+  readonly pollSleep?: (ms: number) => Promise<void>
+  /** Test seam — detached run+poll cadence (default {@link RUN_POLL_INTERVAL_MS}). */
+  readonly pollIntervalMs?: number
+  /** Test seam — injectable clock for the detached run+poll wall-clock ceiling. */
+  readonly pollNow?: () => number
+}
+
+export interface BoxStatusSnapshot {
+  readonly phase: "running" | "fetching" | "idle"
+  readonly mode: "pool" | "full-remote"
+  readonly runId?: string
+  /** jun-20 multi-auth (T-6): which auth-pool account last owned this chunk, so
+   *  `box ls` / postmortems can attribute a 429 to a specific account. Absent in
+   *  single-auth mode. Never a token — just the operator-facing label. */
+  readonly accountLabel?: string
+  readonly workload: string
+  readonly dataset: string
+  readonly instanceCount: number
+  readonly instancePreview?: readonly string[]
+  readonly preset: string
+  readonly model: string
+  readonly concurrency: number
+  readonly startedAt?: string
+  readonly updatedAt: string
+  readonly runLogPath?: string
+  readonly reportPath?: string
+  readonly predictionsPath?: string
+  readonly observeDir?: string
+  readonly trajectoryPath?: string
+  readonly resolvedCount?: number
+  readonly unresolvedCount?: number
+  readonly erroredCount?: number
+  readonly emptyPatchCount?: number
+  readonly rateLimited?: boolean
+  readonly lastExitCode?: number
+  readonly lastLogLine?: string
+  /** LSP-02 — typed grounding status for THIS box at grade time (launch proof
+   *  of the task language server). Lets `box ls` distinguish missing_binary vs
+   *  ready vs degraded WITHOUT parsing `lastLogLine`. Absent for non-grounding
+   *  presets / when the probe was skipped. */
+  readonly lspGrounding?: LspGroundingStatus
+  /** #9: the report bytes were present but failed to parse (truncated / corrupt
+   *  fetch) — distinct from a genuinely-empty box-loss. Surfaced as machine-
+   *  readable telemetry (not just a log) so `box ls` / postmortems can attribute
+   *  a zero-verdict chunk to a corrupt fetch rather than a real miss. */
+  readonly reportUnparseable?: boolean
+}
+
+export interface BoxRuntimeProbe {
+  readonly activeRunDetected: boolean
+  readonly runLogPath?: string
+  readonly runLogUpdatedAt?: string
+  readonly reportPath?: string
+  readonly reportExists?: boolean
+  readonly predictionsPath?: string
+  readonly predictionsLines?: number
+  readonly observeDir?: string
+  readonly runExitPath?: string
+  readonly runExitExists?: boolean
+  readonly lastLogLine?: string
+}
+
+export type BoxSnapshotState =
+  | "ok"
+  | "missing"
+  | "write-failed"
+  | "invalid"
+  | "read-failed"
+  | "not-ready"
+
+export interface BoxInspection {
+  readonly lifecycle: "bootstrapping" | "idle" | "busy" | "unreachable"
+  readonly bootstrapped: boolean
+  readonly busy: boolean
+  readonly snapshotHealthy: boolean
+  readonly snapshotState: BoxSnapshotState
+  readonly snapshot?: BoxStatusSnapshot
+  readonly probe?: BoxRuntimeProbe
+}
+
+export interface GradeChunkVerdicts {
+  readonly resolved: string[]
+  readonly unresolved: string[]
+  readonly errored: string[]
+  readonly emptyPatch: string[]
+}
+
+/** #9: distinguish a GENUINELY-ABSENT report (`empty`) from a report that WAS
+ *  written but arrived truncated/half-flushed/corrupt (`unparseable`). The
+ *  pre-fix code collapsed both into `emptyVerdicts()`, so a successful grade
+ *  whose report suffered a transport/flush glitch was silently reclassified as a
+ *  box-loss (and re-graded on a fresh box, wasting it — or eventually marked
+ *  lost despite grading having succeeded). The caller treats `unparseable`
+ *  loudly + (a fetch-retry, not a whole-grade discard). */
+export type ReportTextStatus = "empty" | "unparseable" | "ok"
+
+/** Box-side directory used as an ATOMIC grade lock (`mkdir` is atomic + fails if
+ *  it exists). Held for the duration of one chunk's grade so a reused box can
+ *  never run two grades at once. */
+export const GRADE_LOCK_DIR = "~/.pool-grade.lock"
+export const BOX_STATUS_PATH = "~/.quanta/bench-box-status.json"
+export const BOX_STATUS_TMP_PATH = "~/.quanta/bench-box-status.json.tmp"
+
+/** Thrown by {@link gradeChunkOnBox} when the box is already grading (lock held).
+ *  The pool drops the box WITHOUT terminating it (it belongs to the other run). */
+export const POOL_BUSY_ERROR = "POOL_BOX_BUSY"
+export const GRADE_LOCK_RELEASE_ERROR = "GRADE_LOCK_RELEASE_FAILED"
+/** Stable marker the detached run+poll loop stamps into a {@link BoxDiedDuringRunError}
+ *  so the pool can route it to the dead-box REQUEUE path even when a SECONDARY
+ *  grade-lock-release failure (the dead box's ssh also 255s) gets wrapped around
+ *  it — otherwise the lock-release substring would mis-route a real box death to
+ *  the abort branch. */
+export const BOX_DIED_DURING_RUN_ERROR = "BOX_DIED_DURING_RUN"
