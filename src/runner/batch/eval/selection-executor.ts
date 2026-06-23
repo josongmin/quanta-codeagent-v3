@@ -597,6 +597,10 @@ export const runSelection = async (args: {
           : {}),
       })
     if (seed === undefined) {
+      // `missing_seed` telemetry is INTENTIONALLY proofRequired-only: there a
+      // repair was expected so "no derivable seed" is a notable diagnostic. In
+      // plain clean mode a missing seed is the ordinary "nothing to repair"
+      // resting state, so tagging it would be telemetry noise. Do NOT ungate.
       return {
         rawCandidates,
         appended: false,
