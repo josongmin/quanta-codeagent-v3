@@ -65,7 +65,6 @@
     "src/observability/prompt-cache/default.ts::defaultPromptCacheObserver",
     "src/permission/trust-scope-store.ts::createPersistentTrustScopeRegistry",
     "src/realtime/default-adapter.ts::createBunWebSocketAdapter",
-    "src/realtime/voice-session/default-session.ts::createDefaultVoiceSession",
     "src/retrieval/batching/default-batcher.ts::createDefaultBatcher",
     "src/runner/batch/eval/selection-executor.ts::finalize",
     "src/runner/batch/eval/selection-executor.ts::runSelection",
