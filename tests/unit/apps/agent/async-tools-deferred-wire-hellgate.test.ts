@@ -63,10 +63,13 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 // ADR-0303 thin-surface relocation — the agent composition-root base builder
 // (`buildBaseFromArgs` + its `buildBaseRegistry` / `buildAsyncDeferredTools`
 // async-tools gate) moved DOWN out of `apps/agent/index.ts` into
-// `@/host/runtime/agent-arg-builder.ts`. The gate text now lives there; the
-// `apps/agent` surface entry just re-exports the builder.
+// `@/host/runtime/agent-arg-builder.ts`. The god-module split then extracted the
+// gated-tool registry (incl. the `buildBaseRegistry` / `buildAsyncDeferredTools`
+// async-tools gate) into the `agent-arg-builder/gated-tool-ports.ts` sibling,
+// which `agent-arg-builder.ts` re-exports byte-compatibly. The gate text now
+// lives in that sibling; the `apps/agent` surface entry just re-exports the builder.
 const AGENT_INDEX = readFileSync(
-  join(REPO_ROOT, "src", "host", "runtime", "agent-arg-builder.ts"),
+  join(REPO_ROOT, "src", "host", "runtime", "agent-arg-builder", "gated-tool-ports.ts"),
   "utf8",
 )
 const CLI_INTERNAL = readFileSync(join(REPO_ROOT, "src", "apps", "cli", "internal.ts"), "utf8")

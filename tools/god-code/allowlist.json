@@ -19,7 +19,6 @@
     "src/apps/cli/slash/registry-surface.ts",
     "src/apps/web-daemon/server.ts",
     "src/config/knob-inventory.ts",
-    "src/host/runtime/agent-arg-builder.ts",
     "src/host/runtime/internal/context-binding.ts",
     "src/lsp/adapters/base.ts",
     "src/runner/batch/eval/driver.ts",
