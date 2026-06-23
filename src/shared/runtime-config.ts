@@ -361,6 +361,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
     benchTimeoutMs: parsePositiveInt(env["QUANTA_BENCH_TIMEOUT_MS"], "QUANTA_BENCH_TIMEOUT_MS"),
     maxTurnsBatch: parsePositiveInt(env["QUANTA_MAX_TURNS"], "QUANTA_MAX_TURNS"),
+    lspReadyTimeoutMs: parsePositiveInt(
+      env["QUANTA_LSP_READY_TIMEOUT_MS"],
+      "QUANTA_LSP_READY_TIMEOUT_MS",
+    ),
     fullRemoteRelaunch:
       parsePositiveInt(
         env["QUANTA_BENCH_FULL_REMOTE_RELAUNCH"],

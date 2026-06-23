@@ -115,6 +115,14 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     describe: "Max turns per instance (bench).",
   },
   {
+    envKey: "QUANTA_LSP_READY_TIMEOUT_MS",
+    kind: "int",
+    default: undefined,
+    group: "tool",
+    describe:
+      "LSP strict-ready/warm readiness-probe budget (ms); default 90000. Only used on the LSP grounding path.",
+  },
+  {
     envKey: "QUANTA_RUN_ID",
     kind: "string",
     default: undefined,

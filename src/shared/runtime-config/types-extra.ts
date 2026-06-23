@@ -109,6 +109,15 @@ export interface RuntimeConfigPaths {
   /** Max turns per instance for the bench runner (`QUANTA_MAX_TURNS`).
    *  Absent ⇒ batch mode default from BUDGET_PRESETS.batch. */
   readonly maxTurnsBatch: number | undefined
+  /** Readiness-probe budget (ms) for the LSP warm/strict-ready proof
+   *  (`QUANTA_LSP_READY_TIMEOUT_MS`). The wall-clock cap `ensurePyrightFileReady`
+   *  polls `definition` against before declaring `ready_timeout`. Absent ⇒ the
+   *  hardcoded default (90_000). ONLY consumed on the LSP grounding/ready path,
+   *  so raising it costs nothing when LSP is not used. Raise per-run to test
+   *  whether slow-but-resolvable repos (large codebases) are being false-timed-
+   *  out — verify with `tools/dev/lsp-grounding-summary.ts` before changing the
+   *  default (jun-23 LSP-03: no budget change without receipt evidence). */
+  readonly lspReadyTimeoutMs: number | undefined
   /** Extra full-remote box relaunches on an empty result
    *  (`QUANTA_BENCH_FULL_REMOTE_RELAUNCH`). A spot reclaim / ssh-255 drop loses
    *  the whole run; default 1 ⇒ up to 2 attempts. `--keep` forces 0 (a kept box

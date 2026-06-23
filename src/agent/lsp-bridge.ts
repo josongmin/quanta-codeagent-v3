@@ -22,7 +22,7 @@ import {
   TYPESCRIPT_LANGUAGE_SERVER_BIN,
   TypescriptAdapter,
 } from "@/lsp"
-import { errMessage, type LspGroundingReceipt, logger } from "@/shared"
+import { errMessage, type LspGroundingReceipt, logger, runtimeConfig } from "@/shared"
 import type { StaticEvidence as EvidenceStatic } from "@/tool"
 import {
   lspNavTools as buildLspNavTools,
@@ -363,7 +363,14 @@ const ensurePyrightFileReady = async (
   // must NOT be marked verified-ready (audit #21) — return false so the pool
   // re-attempts instead of falsely claiming a warm-verified, maybe-cold server.
   if (probe === null) return !scan.truncated
-  const budgetMs = pyrightWarmupTimingForTest?.budgetMs ?? PYRIGHT_READY_TIMEOUT_MS
+  // Budget precedence: test override → `QUANTA_LSP_READY_TIMEOUT_MS` runtime knob
+  // (raise it for slow-but-resolvable large repos; only this LSP path reads it) →
+  // the hardcoded default. Default UNCHANGED (jun-23 LSP-03: no budget change
+  // without receipt evidence — the knob lets the operator A/B it first).
+  const budgetMs =
+    pyrightWarmupTimingForTest?.budgetMs ??
+    runtimeConfig().lspReadyTimeoutMs ??
+    PYRIGHT_READY_TIMEOUT_MS
   const retryMs = pyrightWarmupTimingForTest?.retryMs ?? PYRIGHT_READY_RETRY_MS
   const deadline = Date.now() + budgetMs
   while (Date.now() < deadline) {
