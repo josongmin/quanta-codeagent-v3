@@ -12,19 +12,20 @@
  *   3. `Your patch so far (cumulative):` + truncated cumulative diff.
  *   4. `Validation gate:` + the exact command/source that kept the loop red.
  *   5. `Typed rail note:` when a typed predicate mismatched (advisory in v1).
- *   6. `Validation failed. Tail of failing output:` + tail-truncated failTail.
+ *   6. `Validation failed. Tail of failing output:` + tail-truncated canonical
+ *      validator failure evidence (or the legacy `failTail` projection).
  *   7. Forceful next-step instruction (do NOT revert; fix source; re-verify).
  *
  * Truncation order to fit `maxBytes` (default 12000):
- *   failTail first (keep TAIL), then cumulativeDiff (drop middle hunks, keep
- *   `diff --git` headers + first+last hunks), then trim the problem if still
- *   over budget. The validation-gate section is structurally bounded (command
- *   string head-kept). If the fixed prose still leaves the composed prompt over
- *   budget, a final whole-message squeeze enforces the hard cap while keeping
- *   both the opening context and the tail instructions. Each truncation leaves
- *   a marker `… <N bytes truncated>`.
+ *   failure tail first (keep TAIL), then cumulativeDiff (drop middle hunks,
+ *   keep `diff --git` headers + first+last hunks), then trim the problem if
+ *   still over budget. The validation-gate section is structurally bounded
+ *   (command string head-kept). If the fixed prose still leaves the composed
+ *   prompt over budget, a final whole-message squeeze enforces the hard cap
+ *   while keeping both the opening context and the tail instructions. Each
+ *   truncation leaves a marker `… <N bytes truncated>`.
  */
-import type { BuildRepairContextArgs } from "./types"
+import { combinedFailureTailOf, type BuildRepairContextArgs } from "./types"
 
 const DEFAULT_MAX = 12000
 
@@ -115,7 +116,7 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
   const header = `Repair round ${args.round}.`
   let problem = args.problem
   let diff = args.cumulativeDiff
-  let failTail = args.failTail
+  let failTail = combinedFailureTailOf(args)
   const validationGate = renderValidationGate({
     source: args.validationSource,
     kind: args.validationStepKind,

@@ -9,6 +9,7 @@ describe("authoritativeIssueOwnerContracts (T-OWN-12 clean slice)", () => {
     ])
     expect(cs.map((c) => c.subjectFiles[0]).sort()).toEqual(["pkg/named.py", "pkg/other.py"])
     expect(cs.every((c) => c.kind === "owner-must-touch" && c.strength === "required")).toBe(true)
+    expect(cs.every((c) => c.provenance === "public-issue-text")).toBe(true)
   })
 
   it("RED-ON-INJECTION: heuristic stage1 / owner-resolve owners are EXCLUDED (no scored authority)", () => {

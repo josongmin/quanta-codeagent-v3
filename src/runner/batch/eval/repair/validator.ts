@@ -21,9 +21,8 @@
  * Bun and Node `string.slice`. The tail is taken from the END (the failure
  * tends to be at the tail of test runner output).
  */
-import { classifyPytest } from "@/agent/repro-test/execute"
-import type { ValidateArgs, ValidatorResult } from "./types"
-import { classifyReproOutcome } from "./repro-outcome"
+import { buildValidationFailureEvidence, type ValidateArgs, type ValidatorResult } from "./types"
+import { classifyPytestReproOutcome, classifyReproOutcome } from "./repro-outcome"
 
 const DEFAULT_TAIL = 2000
 const HAS_PYTEST_SUMMARY = /\b(?:\d+\s+failed|\d+\s+errors?|\d+\s+passed|no tests ran)\b/
@@ -49,15 +48,25 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
       ? args.evaluatePredicate(observed, args.successPredicate)
       : undefined
 
-  const combined = `${r.stdout}\n${r.stderr}`
-  const failTail = combined.length > tailBound ? combined.slice(-tailBound) : combined
+  const failureEvidence = buildValidationFailureEvidence({
+    stdout: r.stdout,
+    stderr: r.stderr,
+    tailBytes: tailBound,
+  })
   const reproOutcome = picked.reproAuthority
     ? classifyValidationReproOutcome(r.stdout, r.stderr, r.code)
     : classifyReproOutcome(r.stdout, r.code)
   const ok = (result: boolean): ValidatorResult =>
     result
       ? { ok: true, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
-      : { ok: false, failTail, observed, reproOutcome, ...(predicate !== undefined ? { predicate } : {}) }
+      : {
+          ok: false,
+          failTail: failureEvidence.combinedTail,
+          failureEvidence,
+          observed,
+          reproOutcome,
+          ...(predicate !== undefined ? { predicate } : {}),
+        }
 
   // P1 (jun-23): a repro is now an execution-grounded pytest test, so the
   // patched resolution check must read the SAME signal as the base-side oracle:
@@ -76,8 +85,7 @@ export const validate = async (args: ValidateArgs): Promise<ValidatorResult> => 
 const classifyValidationReproOutcome = (stdout: string, stderr: string, code: number) => {
   const combined = `${stdout}\n${stderr}`
   if (!HAS_PYTEST_SUMMARY.test(combined)) return classifyReproOutcome(stdout, code)
-  const pytestOutcome = classifyPytest(stdout, stderr, code)
-  return pytestOutcome
+  return classifyPytestReproOutcome(stdout, stderr, code)
 }
 
 const pickCmd = (

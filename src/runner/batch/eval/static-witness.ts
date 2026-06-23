@@ -10,9 +10,10 @@
  * benchmark-shaped authority: the provenance union below EXCLUDES gold-patch /
  * fail-to-pass / pass-to-pass / instance-id / known-file-regex / issue-family-regex.
  * Downstream tickets feed these witnesses into generation, candidate families, and
- * repair/review evidence; they are not, by themselves, a required public-contract
- * authority. "Clean authority" is decided from `authority + provenance + kind`,
- * never from a magic threshold or a benchmark string match.
+ * repair/review evidence; they are not, by themselves, submit authority or a
+ * required public-contract authority. The `authority + provenance + kind` lattice
+ * only says whether a witness is structurally admissible for downstream consumers,
+ * never that it may by itself admit an owner or veto a proof-positive candidate.
  *
  * No-source-body invariant: a witness carries path/symbol NAMES only. There is no
  * field for raw source text anywhere in this IR.
@@ -155,11 +156,12 @@ export function makeStaticWitness(args: MakeStaticWitnessArgs): StaticWitness {
 }
 
 /**
- * Runtime guard: can this witness legitimately confer CLEAN authority?
+ * Runtime guard: is this witness structurally admissible on the clean path?
  *
  * True only when the witness is authoritative, its provenance is an allowed
  * (non-forbidden) source, and — for owner/family kinds — it names at least one file.
  * A witness whose provenance was cast in from an `unknown` string fails here.
+ * This is NOT owner-admission or submit authority by itself.
  */
 export function canBeCleanAuthority(witness: StaticWitness): boolean {
   if (witness.authority !== "authoritative") return false
@@ -177,9 +179,9 @@ export function canBeMultiSiteObligation(witness: StaticWitness): boolean {
 }
 
 /**
- * Kinds whose AUTHORITATIVE witness promotes its files to CLEAN owner authority
- * (SCAFF-03 owner-evidence lattice). Conservative — TYPED-RELATION provenance
- * only: a unique symbol definer, a COMPLETE override family, or a both-ends
+ * Kinds whose structurally admissible witness may contribute OWNER CANDIDATE files
+ * to downstream evidence packets. Conservative typed-relation provenance only:
+ * a unique symbol definer, a COMPLETE override family, or a both-ends
  * producer/consumer. `registration-callback` may shape public contracts but does
  * NOT, on its own, confer owner-admission authority.
  */
@@ -195,17 +197,20 @@ export interface WitnessOwner {
 }
 
 /**
- * Authoritative owner files derived from typed-relation witnesses (SCAFF-03).
+ * Owner candidate files derived from structurally admissible typed-relation
+ * witnesses (SCAFF-03).
  *
- * A witness contributes owner authority ONLY when it `canBeCleanAuthority`, its
- * kind is a clean-owner-authority kind, and — for the multi-file family kinds —
- * it is a COMPLETE obligation (>= 2 named files). `unique-symbol-definer` admits
- * a single owner; `override-family` / `producer-consumer` contribute EVERY family
- * file, so two-plus authoritative owners become cross-owner/family state
- * downstream rather than an arbitrary single pick. Advisory witnesses and bare
- * heuristic streams contribute NOTHING here. Stable, deduped, path-sorted.
+ * A witness contributes owner candidates only when it `canBeCleanAuthority`, its
+ * kind is a candidate-bearing kind, and — for the multi-file family kinds — it is
+ * a COMPLETE obligation (>= 2 named files). `unique-symbol-definer` contributes
+ * one file; `override-family` / `producer-consumer` contribute EVERY family file,
+ * so downstream consumers can reason about cross-owner/family state rather than an
+ * arbitrary single pick. Advisory witnesses and bare heuristic streams contribute
+ * NOTHING here. Stable, deduped, path-sorted.
  */
-export function witnessAuthoritativeOwners(witnesses: readonly StaticWitness[]): WitnessOwner[] {
+export function witnessStructuralOwnerCandidates(
+  witnesses: readonly StaticWitness[],
+): WitnessOwner[] {
   const byFile = new Map<string, WitnessOwner>()
   for (const w of witnesses) {
     if (!canBeCleanAuthority(w)) continue
@@ -221,6 +226,13 @@ export function witnessAuthoritativeOwners(witnesses: readonly StaticWitness[]):
   }
   return [...byFile.values()].sort((a, b) => a.file.localeCompare(b.file))
 }
+
+/**
+ * Back-compat alias. Prefer `witnessStructuralOwnerCandidates`; the old name
+ * overstates authority now that static witnesses are advisory-only for clean
+ * owner admission.
+ */
+export const witnessAuthoritativeOwners = witnessStructuralOwnerCandidates
 
 /** Collapse witnesses sharing a `witnessId` to one, preserving first-seen stable order. */
 export function dedupeWitnesses(list: readonly StaticWitness[]): StaticWitness[] {

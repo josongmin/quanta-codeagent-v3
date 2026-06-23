@@ -215,7 +215,7 @@ import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
-import { witnessAuthoritativeOwners } from "./static-witness"
+import { witnessStructuralOwnerCandidates } from "./static-witness"
 import {
   buildAstStaticWitnesses,
   type StaticWitnessDiagnostic,
@@ -4045,14 +4045,14 @@ export const prepareAttemptContext = async (
     sandbox,
     signal,
   })
-  // SCAFF-03: digest typed-relation static witnesses into AUTHORITATIVE owner
-  // files so clean owner admission rests on structural provenance (unique
-  // definer / complete override family / both-ends producer-consumer), not a
-  // heuristic score. Empty for non-swebench / advisory-only ⇒ no change.
+  // SCAFF-03: digest typed-relation static witnesses into structural owner
+  // candidate files. These stay advisory in clean owner admission; they seed
+  // localization / repair evidence and owner-near test discovery, but they do
+  // NOT by themselves admit a clean owner or mint required contracts.
   const witnessOwners =
     instance.swebench === undefined
       ? []
-      : witnessAuthoritativeOwners(
+      : witnessStructuralOwnerCandidates(
           buildAstStaticWitnesses({
             problemStatement: instance.problemStatement,
             ownerCandidates: stage1Files.map((f) => f.file),

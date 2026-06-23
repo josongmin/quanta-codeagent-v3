@@ -21,6 +21,11 @@ describe("runRepairRounds — validation gate context", () => {
     const validate = async (_args: ValidateArgs): Promise<ValidatorResult> => ({
       ok: false,
       failTail: "Issue reproduced\n",
+      failureEvidence: {
+        stdoutTail: "Issue reproduced\n",
+        stderrTail: "",
+        combinedTail: "Issue reproduced\n",
+      },
       observed: { exitCode: 1, stdout: "Issue reproduced\n", stderr: "" },
     })
 
@@ -47,6 +52,7 @@ describe("runRepairRounds — validation gate context", () => {
     expect(captured?.validationSource).toBe("primary_rail")
     expect(captured?.validationCmd).toBe('python "reproduce_issue.py"')
     expect(captured?.validationExitCode).toBe(1)
+    expect(captured?.failureEvidence?.combinedTail).toBe("Issue reproduced\n")
   })
 
   test("owner-test primary rail preserves kind and withholds the hidden selector command", async () => {
@@ -60,6 +66,11 @@ describe("runRepairRounds — validation gate context", () => {
     const validate = async (_args: ValidateArgs): Promise<ValidatorResult> => ({
       ok: false,
       failTail: "AssertionError\n",
+      failureEvidence: {
+        stdoutTail: "",
+        stderrTail: "AssertionError\n",
+        combinedTail: "\nAssertionError\n",
+      },
       observed: { exitCode: 1, stdout: "", stderr: "AssertionError\n" },
     })
 
@@ -88,6 +99,7 @@ describe("runRepairRounds — validation gate context", () => {
     expect(captured?.validationCmdWithheld).toBe(true)
     expect(captured?.validationCmd).toBeUndefined()
     expect(captured?.validationExitCode).toBe(1)
+    expect(captured?.failureEvidence?.stderrTail).toBe("AssertionError\n")
   })
 
   test("missing verify signal is called out explicitly in the repair seed context", async () => {

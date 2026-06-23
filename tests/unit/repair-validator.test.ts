@@ -45,6 +45,11 @@ describe("validate (non-leaking repair validator)", () => {
     })
     expect(r.ok).toBe(false)
     expect(r.failTail).toBe("x\ny")
+    expect(r.failureEvidence).toEqual({
+      stdoutTail: "x",
+      stderrTail: "y",
+      combinedTail: "x\ny",
+    })
   })
 
   test("tail bound: huge stdout/stderr ⇒ failTail length ≤ tailBytes", async () => {
@@ -61,8 +66,12 @@ describe("validate (non-leaking repair validator)", () => {
     expect(r.ok).toBe(false)
     expect(r.failTail).toBeDefined()
     expect((r.failTail ?? "").length).toBeLessThanOrEqual(1024)
+    expect(r.failureEvidence?.combinedTail).toBe(r.failTail)
+    expect((r.failureEvidence?.stdoutTail ?? "").length).toBeLessThanOrEqual(1024)
+    expect((r.failureEvidence?.stderrTail ?? "").length).toBeLessThanOrEqual(1024)
     // tail preserved: end of stderr ("B"s) should appear
     expect((r.failTail ?? "").endsWith("B")).toBe(true)
+    expect((r.failureEvidence?.stderrTail ?? "").endsWith("B")).toBe(true)
   })
 
   test("default tail bound is 2000", async () => {

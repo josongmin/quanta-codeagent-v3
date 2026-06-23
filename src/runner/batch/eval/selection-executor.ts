@@ -308,13 +308,13 @@ export const runSelection = async (args: {
   const proofRequired = mode === "clean" && args.proofRequired === true
   // Clean contract-dominance tier is fed ONLY by genuinely-sourced public
   // contracts the caller supplies (T-CON-10: public issue text / public tests /
-  // validated repros / AUTHORITATIVE static-witness owners). We intentionally do
-  // NOT auto-derive an owner-must-touch contract from the closure owner list:
+  // validated repros). We intentionally do NOT auto-derive an owner-must-touch
+  // contract from the closure owner list:
   // those owners come from the additive heuristic score ranking (ISSUE_FILE_BOOST
   // etc.), so promoting them into a `required` dominance tier would smuggle the
   // very heuristic authority this clean path removes back in via a mislabeled
-  // contract. Until T-OWN-12 distinguishes authoritative (LSP-definition) owners
-  // from advisory (scored) ones, the tier stays empty unless explicitly fed.
+  // contract. Structural static-witness evidence is advisory too; it may steer
+  // generation/repair, but it does not mint required clean contracts here.
   const contractBundle: PublicContractBundle = args.publicContracts ?? { contracts: [] }
   const limit = Math.max(1, Math.floor(args.concurrency ?? 1))
   if (args.counterfactual === true && limit > 1) {

@@ -32,6 +32,20 @@ export interface RepairConfig {
   maxRounds?: number
 }
 
+/**
+ * Canonical validator failure payload. The validator is the sole owner of how
+ * failing output is bounded; downstream repair seed builders must consume these
+ * tails as-is rather than re-deriving head-vs-tail policy from raw strings.
+ */
+export interface ValidationFailureEvidence {
+  /** Tail-bounded stdout captured from the failing validation gate. */
+  stdoutTail: string
+  /** Tail-bounded stderr captured from the failing validation gate. */
+  stderrTail: string
+  /** Tail-bounded combined stdout+stderr rendered for legacy seed prose. */
+  combinedTail: string
+}
+
 /** Outcome of the non-leaking validator (the per-round gate). */
 export interface ValidatorResult {
   /** True ⇒ agent's own verification command (or its repro) now passes in the
@@ -42,6 +56,10 @@ export interface ValidatorResult {
    *  the next-round seed message. Empty when ok or when no command was
    *  available to validate. */
   failTail?: string
+  /** Authoritative structured failure payload. When present, downstream repair
+   *  seed builders must prefer this over the legacy `failTail` projection so
+   *  tail semantics are preserved end-to-end. */
+  failureEvidence?: ValidationFailureEvidence
   /** T-1 OBSERVE-ONLY: what the validator command produced, and the typed
    *  predicate verdict over it (when a `successPredicate` was supplied). These
    *  are RECORDED for diagnostics / repair-seed pressure; in v1 they do NOT
@@ -131,6 +149,34 @@ export type RepairReproOutcome = "reproduced" | "resolved" | "other" | "exec_fai
 
 export type RepairValidationSource = "primary_rail" | "verify_cmd" | "repro" | "none"
 
+const boundTail = (s: string, maxChars: number): string =>
+  s.length > maxChars ? s.slice(-maxChars) : s
+
+/**
+ * Build the canonical structured validator failure payload. The caller provides
+ * the raw stdout/stderr and the tail bound once; downstream consumers only read
+ * the resulting tails.
+ */
+export const buildValidationFailureEvidence = (args: {
+  stdout: string
+  stderr: string
+  tailBytes: number
+}): ValidationFailureEvidence => ({
+  stdoutTail: boundTail(args.stdout, args.tailBytes),
+  stderrTail: boundTail(args.stderr, args.tailBytes),
+  combinedTail: boundTail(`${args.stdout}\n${args.stderr}`, args.tailBytes),
+})
+
+/**
+ * Compatibility projection for legacy repair seed builders/tests that still
+ * pass only `failTail`. When structured evidence exists, its combined tail is
+ * authoritative.
+ */
+export const combinedFailureTailOf = (args: {
+  failureEvidence?: ValidationFailureEvidence
+  failTail?: string
+}): string => args.failureEvidence?.combinedTail ?? args.failTail ?? ""
+
 /** Pure-function context builder: given the running diff + the latest
  *  validator failure, produce the seed user message for the next round.
  *  No instance/dataset reads — same no-leak structural guarantee. */
@@ -139,8 +185,12 @@ export interface BuildRepairContextArgs {
   problem: string
   /** Cumulative unified diff across rounds so far (source-only). */
   cumulativeDiff: string
-  /** Bounded tail from the validator's failure (≤ ~2000 chars). */
+  /** Legacy compatibility projection of the failing output tail. When
+   *  `failureEvidence` is present, that structured payload is authoritative. */
   failTail: string
+  /** Canonical structured failure payload from the validator. Downstream repair
+   *  context/packet builders must prefer this over `failTail`. */
+  failureEvidence?: ValidationFailureEvidence
   /** The exact gate the validator used for the previous round. Exposes WHY the
    *  loop stayed red: primary rail, agent verify cmd, repro script, or no
    *  runnable signal at all. */

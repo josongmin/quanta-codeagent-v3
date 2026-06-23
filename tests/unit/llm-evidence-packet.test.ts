@@ -684,6 +684,25 @@ describe("llm evidence packet — intake (typed, public-only)", () => {
     )
     expect(packet.proofReceipts.some((r) => r.source === "public_mwe")).toBe(true)
   })
+
+  test("infra repro sample tails keep the tail end when bounded", () => {
+    const tailMarker = "TAIL_IMPORT_ERROR_END"
+    const intake = buildIntakeLlmEvidencePacket({
+      problemStatement: "Importing the package crashes.",
+      localizeCandidates: ["pkg/core.py"],
+      reproTest: {
+        installed: false,
+        reason: "env_exec_failed",
+        sampleStdoutTail: `STDOUT_HEAD\n${"o".repeat(900)}${tailMarker}`,
+        sampleStderrTail: `STDERR_HEAD\n${"e".repeat(900)}${tailMarker}`,
+      },
+    })
+    const receipt = intake.proofReceipts.find((r) => r.sourcePolicy === "infra")
+    expect(receipt?.stdoutTail).toContain(tailMarker)
+    expect(receipt?.stdoutTail).not.toContain("STDOUT_HEAD")
+    expect(receipt?.stderrTail).toContain(tailMarker)
+    expect(receipt?.stderrTail).not.toContain("STDERR_HEAD")
+  })
 })
 
 describe("llm evidence packet — generation (self-contained, bounded)", () => {

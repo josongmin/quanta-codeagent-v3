@@ -46,7 +46,11 @@ import {
 } from "@/agent/repro-test/execute"
 import type { ReproTestConfig, ReproTestSample } from "@/agent/repro-test/types"
 import { voteResolved } from "@/agent/repro-test/vote"
-import type { ValidateArgs, ValidatorResult } from "./types"
+import {
+  buildValidationFailureEvidence,
+  type ValidateArgs,
+  type ValidatorResult,
+} from "./types"
 
 const DEFAULT_TAIL = 2000
 
@@ -237,8 +241,20 @@ export const makeReproVoteValidate =
     }
     if (vote.verdict === "reproduced") {
       record("vote_unresolved", detail)
-      const failTail = reproducedTail(samples, args.tailBytes ?? DEFAULT_TAIL)
-      return { ok: false, failTail }
+      const rep = samples.find((s) => s.outcome === "reproduced")
+      const failureEvidence =
+        rep === undefined
+          ? undefined
+          : buildValidationFailureEvidence({
+              stdout: rep.stdout,
+              stderr: rep.stderr ?? "",
+              tailBytes: args.tailBytes ?? DEFAULT_TAIL,
+            })
+      return {
+        ok: false,
+        failTail: failureEvidence?.combinedTail ?? reproducedTail(samples, args.tailBytes ?? DEFAULT_TAIL),
+        ...(failureEvidence !== undefined ? { failureEvidence } : {}),
+      }
     }
     // Inconclusive (tie / all-noisy): don't guess — fall back to the legacy gate.
     record("vote_inconclusive", detail)

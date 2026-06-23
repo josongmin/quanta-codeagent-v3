@@ -68,6 +68,11 @@ describe("validator — observe-only predicate", () => {
     const r = await validate(base({ exec: fakeExec(1, "out", "boom") }))
     expect(r.ok).toBe(false)
     expect(r.failTail).toContain("boom")
+    expect(r.failureEvidence).toEqual({
+      stdoutTail: "out",
+      stderrTail: "boom",
+      combinedTail: "out\nboom",
+    })
     expect(r.observed).toEqual({ exitCode: 1, stdout: "out", stderr: "boom" })
   })
 

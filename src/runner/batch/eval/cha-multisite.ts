@@ -60,10 +60,48 @@ import ast, json, os, sys
 
 repo, target_rel, method = sys.argv[1], sys.argv[2], sys.argv[3]
 
-# registry: list of {file, cls, line(def of method or class), bases:set, has_method:bool}
-classes = []
+# ---------------------------------------------------------------------------
+# Real CHA (NOT a base-NAME heuristic): resolve each base to the CLASS IDENTITY
+# it refers to (via the file's imports + same-file defs), build a qualified
+# class graph, and compute the TRANSITIVE ancestor set per class. Two classes
+# are siblings iff their ancestor sets SHARE A CLASS IDENTITY — this catches
+# intermediate-base hierarchies (oracle.DatabaseOperations(_OracleBase) where
+# _OracleBase(BaseDatabaseOperations)) AND rejects same-NAMED-but-different
+# bases (two unrelated 'BaseOps' in different modules resolve to different ids).
+# ---------------------------------------------------------------------------
+
+def mod_to_rel(mod):
+    # 'a.b.c' -> candidate rel files 'a/b/c.py' / 'a/b/c/__init__.py'
+    p = mod.replace(".", "/")
+    for cand in (p + ".py", p + "/__init__.py"):
+        if os.path.exists(os.path.join(repo, cand)):
+            return cand
+    return None
+
+def rel_import_to_rel(cur_rel, mod, level):
+    # Resolve absolute or relative ImportFrom targets to repo-relative files.
+    if level <= 0:
+        return mod_to_rel(mod) if mod else None
+    if cur_rel.endswith("/__init__.py"):
+        pkg_parts = cur_rel[:-12].split("/") if cur_rel[:-12] else []
+    else:
+        pkg_parts = cur_rel[:-3].split("/")[:-1]
+    up = max(0, level - 1)
+    base_parts = pkg_parts[: max(0, len(pkg_parts) - up)]
+    mod_parts = [] if not mod else mod.split(".")
+    parts = [p for p in (base_parts + mod_parts) if p]
+    if not parts:
+        return None
+    return mod_to_rel(".".join(parts))
+
+# Per-file: import map (local name -> "relfile::Name") + class list.
+# classes registry keyed by qualified id "relfile::Name".
+classes = {}       # qid -> {file, cls, line, method_line, raw_bases:[node]}
+file_imports = {}  # relfile -> { localname -> qid_or_namefallback }
+file_classes = {}  # relfile -> set(class names defined here)
+
+trees = {}
 for root, dirs, files in os.walk(repo):
-    # skip vendored / VCS / cache dirs to keep the walk bounded
     dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "__pycache__", ".tox", ".venv", "build", "dist")]
     for fn in files:
         if not fn.endswith(".py"):
@@ -75,62 +113,89 @@ for root, dirs, files in os.walk(repo):
         except Exception:
             continue
         rel = os.path.relpath(path, repo)
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ClassDef):
-                continue
-            base_names = set()
-            for b in node.bases:
-                # last attribute/name component (e.g. db.X -> X), import-agnostic
-                cur = b
-                while isinstance(cur, ast.Attribute):
-                    cur = cur.attr
-                    break
-                if isinstance(b, ast.Name):
-                    base_names.add(b.id)
-                elif isinstance(b, ast.Attribute):
-                    base_names.add(b.attr)
-            method_line = None
-            for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == method:
-                    method_line = item.lineno
-                    break
-            classes.append({
-                "file": rel, "cls": node.name, "bases": base_names,
-                "class_line": node.lineno,
-                "method_line": method_line,
-            })
+        trees[rel] = tree
+        imap = {}
+        cset = set()
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                tgt = rel_import_to_rel(rel, node.module, node.level)
+                for a in node.names:
+                    local = a.asname or a.name
+                    imap[local] = (tgt + "::" + a.name) if tgt else ("::" + a.name)
+            if isinstance(node, ast.ClassDef):
+                cset.add(node.name)
+        file_imports[rel] = imap
+        file_classes[rel] = cset
 
-# target = the class in target_rel that defines the method
+def base_to_qid(rel, b):
+    # last identifier component of the base expression
+    if isinstance(b, ast.Name):
+        name = b.id
+    elif isinstance(b, ast.Attribute):
+        name = b.attr
+    else:
+        return None
+    imap = file_imports.get(rel, {})
+    if name in imap:
+        return imap[name]            # imported -> resolved identity
+    if name in file_classes.get(rel, set()):
+        return rel + "::" + name      # same-file class
+    return "::" + name                # unresolved -> name-only id (degrade, never miss)
+
+for rel, tree in trees.items():
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        qid = rel + "::" + node.name
+        method_line = None
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == method:
+                method_line = item.lineno
+                break
+        bqids = set()
+        for b in node.bases:
+            r = base_to_qid(rel, b)
+            if r:
+                bqids.add(r)
+        classes[qid] = {"file": rel, "cls": node.name, "line": node.lineno,
+                        "method_line": method_line, "bases": bqids}
+
+def ancestors(qid):
+    seen = set()
+    stack = list(classes.get(qid, {}).get("bases", set()))
+    while stack:
+        a = stack.pop()
+        if a in seen:
+            continue
+        seen.add(a)
+        stack.extend(classes.get(a, {}).get("bases", set()))
+    return seen
+
+# target = the class in target_rel that defines the method (fallback: any in file)
 target = None
-for c in classes:
+for qid, c in classes.items():
     if c["file"] == target_rel and c["method_line"] is not None:
-        target = c
-        break
-# fallback: any class in target_rel (method may be inherited, still anchor on the file)
+        target = qid; break
 if target is None:
-    for c in classes:
+    for qid, c in classes.items():
         if c["file"] == target_rel:
-            target = c
-            break
+            target = qid; break
 
 sites = []
 if target is not None:
-    tbases = target["bases"]
-    for c in classes:
-        if c["method_line"] is None:
+    tanc = ancestors(target)
+    for qid, c in classes.items():
+        if qid == target or c["method_line"] is None:
             continue
-        if c["file"] == target["file"] and c["cls"] == target["cls"]:
-            continue  # exclude the target itself
-        # sibling iff shares >=1 base name with the target class
-        if tbases and (c["bases"] & tbases):
+        # sibling iff ancestor sets share a class IDENTITY (transitive)
+        if tanc and (ancestors(qid) & tanc):
             sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"]})
 
-# stable order: by file then line
 sites.sort(key=lambda s: (s["file"], s["line"]))
 print(json.dumps({
     "sites": sites,
-    "targetClass": None if target is None else target["cls"],
-    "bases": [] if target is None else sorted(target["bases"]),
+    "targetClass": None if target is None else classes[target]["cls"],
+    "bases": [] if target is None else sorted(classes[target]["bases"]),
 }))
 `
 

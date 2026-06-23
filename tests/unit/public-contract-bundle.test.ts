@@ -147,15 +147,25 @@ describe("clean selection public contracts", () => {
       "exact-output:stdout",
       "owner-must-touch:pkg/root.py",
     ])
+    expect(bundle?.contracts.find((c) => c.kind === "owner-must-touch")?.provenance).toBe(
+      "public-issue-text",
+    )
   })
 
-  it("includes an explicit typed multi-site family contract when supplied", () => {
+  it("clean mode emits only issue/output/api contracts, never a static-only multi-site family", () => {
     const bundle = buildCleanSelectionPublicContracts({
-      multiSiteFamily: ["pkg/base.py", "pkg/backend.py"],
+      declaredExpected: { kind: "stdout", value: "expected text" },
+      candidates: [{ file: "pkg/root.py", sources: ["issue-file"] }],
+      apiSymbols: ["pkg.fn"],
     })
-    expect(bundle?.contracts).toHaveLength(1)
-    expect(bundle?.contracts[0]?.kind).toBe("multi-site-family")
-    expect(bundle?.contracts[0]?.subjectFiles).toEqual(["pkg/base.py", "pkg/backend.py"])
+    expect(bundle?.contracts.map((c) => c.kind).sort()).toEqual([
+      "api-surface",
+      "exact-output",
+      "owner-must-touch",
+    ])
+    expect(bundle?.contracts.find((c) => c.kind === "api-surface")?.provenance).toBe(
+      "public-issue-text",
+    )
   })
 
   it("returns undefined when no clean-authority contracts exist", () => {

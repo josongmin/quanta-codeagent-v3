@@ -4,7 +4,7 @@
  * witnesses still feed localization/repair evidence, but they do NOT, by
  * themselves, become clean owner-admission authority. Drives the REAL chain:
  *
- *   makeStaticWitness → witnessAuthoritativeOwners → buildFaultEvidencePacket
+ *   makeStaticWitness → witnessStructuralOwnerCandidates → buildFaultEvidencePacket
  *     → decideOwnerAdmission({clean}) / assembleClosureBundle
  *
  * No instance id / gold path / FAIL_TO_PASS regex anywhere — needles for the
@@ -15,7 +15,10 @@ import { assembleClosureBundle } from "@/agent/closure/bundle"
 import { buildFaultEvidencePacket, ownerStrength } from "@/agent/fault-evidence/build"
 import { decideOwnerAdmission } from "@/agent/owner-admission"
 import { buildClosureSession } from "@/runner/batch/eval/closure-session"
-import { makeStaticWitness, witnessAuthoritativeOwners } from "@/runner/batch/eval/static-witness"
+import {
+  makeStaticWitness,
+  witnessStructuralOwnerCandidates,
+} from "@/runner/batch/eval/static-witness"
 
 const A = "pkg/base/client.py"
 const B = "pkg/postgres/client.py"
@@ -41,13 +44,15 @@ const overrideFamily = makeStaticWitness({
 const cleanAdmit = (input: Parameters<typeof buildFaultEvidencePacket>[0]) =>
   decideOwnerAdmission({ packet: buildFaultEvidencePacket(input), clean: true })
 
-describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only)", () => {
+describe("SCAFF-03 — witnessStructuralOwnerCandidates extractor (typed-relation only)", () => {
   it("a unique-symbol-definer yields its single owner file", () => {
-    expect(witnessAuthoritativeOwners([uniqueDefiner])).toEqual([{ file: A, forSymbol: SYM }])
+    expect(witnessStructuralOwnerCandidates([uniqueDefiner])).toEqual([
+      { file: A, forSymbol: SYM },
+    ])
   })
 
   it("a COMPLETE override-family yields EVERY family file (not an arbitrary one)", () => {
-    expect(witnessAuthoritativeOwners([overrideFamily]).map((o) => o.file)).toEqual([A, B])
+    expect(witnessStructuralOwnerCandidates([overrideFamily]).map((o) => o.file)).toEqual([A, B])
   })
 
   it("RED-ON-INJECTION: an ADVISORY witness yields NO owner (no fake authority)", () => {
@@ -59,7 +64,7 @@ describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only
       subjectSymbols: [SYM],
       reason: "ripgrep sibling — not structurally proven",
     })
-    expect(witnessAuthoritativeOwners([advisory])).toEqual([])
+    expect(witnessStructuralOwnerCandidates([advisory])).toEqual([])
   })
 
   it("a SINGLE-file override-family is an incomplete obligation ⇒ NO owner", () => {
@@ -71,7 +76,7 @@ describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only
       subjectSymbols: [SYM],
       reason: "only one family file known",
     })
-    expect(witnessAuthoritativeOwners([single])).toEqual([])
+    expect(witnessStructuralOwnerCandidates([single])).toEqual([])
   })
 
   it("registration-callback does NOT confer owner-admission authority", () => {
@@ -83,7 +88,7 @@ describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only
       subjectSymbols: ["register"],
       reason: "callback registration",
     })
-    expect(witnessAuthoritativeOwners([reg])).toEqual([])
+    expect(witnessStructuralOwnerCandidates([reg])).toEqual([])
   })
 })
 
@@ -121,7 +126,7 @@ describe("SCAFF-03 — static witness evidence stays advisory in clean owner adm
     const r = cleanAdmit({
       issueText: `${SYM} bug`,
       stage1Files: [{ file: A, score: 1 }],
-      witnessOwners: witnessAuthoritativeOwners([uniqueDefiner]),
+      witnessOwners: witnessStructuralOwnerCandidates([uniqueDefiner]),
     })
     expect(r.admit).toBe(false)
     expect(r.owner).toBeNull()
@@ -133,7 +138,7 @@ describe("SCAFF-03 — static witness evidence stays advisory in clean owner adm
     const r = cleanAdmit({
       issueText: `${SYM} bug`,
       stage1Files: [{ file: A, score: 1 }],
-      witnessOwners: witnessAuthoritativeOwners([overrideFamily]),
+      witnessOwners: witnessStructuralOwnerCandidates([overrideFamily]),
     })
     expect(r.admit).toBe(false)
     expect(r.owner).toBeNull()
@@ -142,7 +147,7 @@ describe("SCAFF-03 — static witness evidence stays advisory in clean owner adm
   })
 })
 
-const bundleFor = (witnessOwners: ReturnType<typeof witnessAuthoritativeOwners>) =>
+const bundleFor = (witnessOwners: ReturnType<typeof witnessStructuralOwnerCandidates>) =>
   assembleClosureBundle({
     evidence: { issueText: `${SYM} bug`, stage1Files: [{ file: A, score: 1 }], witnessOwners },
     ownerClean: true,
@@ -160,7 +165,7 @@ describe("SCAFF-03 — witness owners feed ONLY the clean path (research byte-id
     buildClosureSession({
       problemStatement: `${SYM} bug`,
       stage1Files: [{ file: A, score: 1 }],
-      witnessOwners: witnessAuthoritativeOwners([uniqueDefiner]),
+      witnessOwners: witnessStructuralOwnerCandidates([uniqueDefiner]),
       posture: { lspNav: false, primaryRail: false, faultEvidence: true },
       ownerClean,
     })
@@ -188,13 +193,13 @@ describe("SCAFF-03 — FAMILY authority forces verification (no single-site comm
     // value so the tooth is not vacuous. Two authoritative owners ⇒ cross-owner
     // ⇒ uncertain ⇒ a single-site edit must NOT commit-fast; it must verify the
     // co-change. This is the exact django-RCA safety property SCAFF-03 protects.
-    const bundle = bundleFor(witnessAuthoritativeOwners([overrideFamily]))
+    const bundle = bundleFor(witnessStructuralOwnerCandidates([overrideFamily]))
     expect(bundle.owner.coverageExpectation).toBe("cross-owner")
     expect(bundle.gate.action).toBe("verify")
   })
 
   it("PAIRED CONTROL: a single unique-definer witness also stays verify-first without public owner authority", () => {
-    const bundle = bundleFor(witnessAuthoritativeOwners([uniqueDefiner]))
+    const bundle = bundleFor(witnessStructuralOwnerCandidates([uniqueDefiner]))
     expect(bundle.owner.admit).toBe(false)
     expect(bundle.owner.coverageExpectation).toBe("cross-owner")
     expect(bundle.gate.action).toBe("verify")

@@ -11,7 +11,7 @@
  * responsible for NOT resetting the sandbox between rounds):
  *
  *   round 0:        runOnce(undefined) → validate → record
- *   round i ≥ 1:    seed = buildContext(prev diff + failTail)
+ *   round i ≥ 1:    seed = buildContext(prev diff + validator failure evidence)
  *                   runOnce(seed) → validate → record
  *   stop early when validator returns ok, OR after maxRounds repair rounds.
  *
@@ -74,6 +74,9 @@ export const runRepairRounds = async (
       problem: args.problem,
       cumulativeDiff: prevRun.patch,
       failTail: prevValidator.failTail ?? "",
+      ...(prevValidator.failureEvidence !== undefined
+        ? { failureEvidence: prevValidator.failureEvidence }
+        : {}),
       ...validationGate,
       ...(predicateSummary !== undefined ? { predicateSummary } : {}),
       round: i,

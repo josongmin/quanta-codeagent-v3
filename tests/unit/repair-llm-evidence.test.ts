@@ -57,6 +57,29 @@ describe("repair-round llm evidence", () => {
     expect(out.seedMsg).toContain("CUSTOM_REPAIR_CONTEXT")
   })
 
+  test("structured failureEvidence preserves the tail end in both static facts and proof receipts", () => {
+    const tailMarker = "TAIL_ASSERTION_END"
+    const packet = buildRepairRoundLlmEvidencePacket({
+      problem: "Fix add().",
+      cumulativeDiff: "",
+      failTail: "STALE_HEAD_ONLY",
+      failureEvidence: {
+        stdoutTail: "",
+        stderrTail: `HEAD_MARKER\n${"M".repeat(1400)}${tailMarker}`,
+        combinedTail: `HEAD_MARKER\n${"M".repeat(1400)}${tailMarker}`,
+      },
+      validationSource: "verify_cmd",
+      validationCmd: "python -m pytest",
+      validationExitCode: 1,
+      round: 1,
+    })
+    const failFact = packet.staticFacts.find((fact) => fact.kind === "validation_fail_tail")
+    expect(failFact?.value).toContain(tailMarker)
+    expect(failFact?.value).not.toContain("HEAD_MARKER")
+    expect(packet.proofReceipts[0]?.stderrTail).toContain(tailMarker)
+    expect(packet.proofReceipts[0]?.stderrTail).not.toContain("HEAD_MARKER")
+  })
+
   // ── A3: infra/exec failure must NOT be coerced to candidate_red ───────────────
   describe("A3 — proof state separates infra failure from correctness", () => {
     test("an explicit exec-failure outcome maps to execution_failed, not candidate_red", () => {

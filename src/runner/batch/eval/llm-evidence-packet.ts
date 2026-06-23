@@ -693,6 +693,9 @@ const firstNonEmptyLine = (text: string): string | undefined =>
 const boundHead = (text: string, max = 220): string =>
   text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`
 
+const boundTail = (text: string, max = 220): string =>
+  text.length <= max ? text : `…${text.slice(-(Math.max(0, max - 1)))}`
+
 const fmtList = (values: readonly string[], empty = "<none>"): string =>
   values.length === 0 ? empty : values.join(", ")
 
@@ -1043,10 +1046,10 @@ const reproReceipts = (repro: IntakeReproTelemetry | undefined): ProofReceiptFac
       sourcePolicy: "infra",
       state: repro.reason.includes("env") ? "env_prep_failed" : "execution_failed",
       ...(repro.sampleStdoutTail !== undefined
-        ? { stdoutTail: boundHead(repro.sampleStdoutTail, 600) }
+        ? { stdoutTail: boundTail(repro.sampleStdoutTail, 600) }
         : {}),
       ...(repro.sampleStderrTail !== undefined
-        ? { stderrTail: boundHead(repro.sampleStderrTail, 600) }
+        ? { stderrTail: boundTail(repro.sampleStderrTail, 600) }
         : {}),
     },
   ]

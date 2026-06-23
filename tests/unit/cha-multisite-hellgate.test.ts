@@ -161,6 +161,108 @@ describe("CHA multi-site — real-python sibling resolution [gated on python3]",
     },
     60_000,
   )
+
+  // ── Self-audit reinforcement (real CHA, not a base-NAME heuristic) ──────────
+  // Builds an INTERMEDIATE-base hierarchy + a same-NAMED-but-different base, to
+  // pin that the resolver works on class IDENTITY (transitive ancestor share),
+  // not on raw base-name string matching.
+  const writeHierarchyRepo = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "cha-hier-"))
+    for (const p of ["base", "mysql", "oracle", "other"])
+      mkdirSync(join(dir, "pkg", p), { recursive: true })
+    writeFileSync(
+      join(dir, "pkg", "base", "o.py"),
+      "class BaseOps:\n    def conv(self):\n        return 1\n",
+    )
+    // direct sibling
+    writeFileSync(
+      join(dir, "pkg", "mysql", "o.py"),
+      "from pkg.base.o import BaseOps\nclass DatabaseOperations(BaseOps):\n    def conv(self):\n        return 2\n",
+    )
+    // TRANSITIVE sibling: DatabaseOperations -> _OracleBase -> BaseOps
+    writeFileSync(
+      join(dir, "pkg", "oracle", "o.py"),
+      [
+        "from pkg.base.o import BaseOps",
+        "class _OracleBase(BaseOps):",
+        "    pass",
+        "class DatabaseOperations(_OracleBase):",
+        "    def conv(self):",
+        "        return 3",
+        "",
+      ].join("\n"),
+    )
+    // FALSE sibling: base named `BaseOps` but a DIFFERENT class (same-file def),
+    // not the imported one ⇒ different identity ⇒ excluded.
+    writeFileSync(
+      join(dir, "pkg", "other", "o.py"),
+      "class BaseOps:\n    pass\nclass Thing(BaseOps):\n    def conv(self):\n        return 99\n",
+    )
+    return dir
+  }
+
+  test.if(hasPython)(
+    "TRANSITIVE sibling (via intermediate base) IS found; same-NAMED-different base is NOT",
+    async () => {
+      const dir = writeHierarchyRepo()
+      try {
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "pkg/mysql/o.py",
+          method: "conv",
+        })
+        const files = sites.map((s) => s.file).sort()
+        // oracle (transitive via _OracleBase) IS a sibling — the false-NEGATIVE the
+        // base-name heuristic missed.
+        expect(files).toContain("pkg/oracle/o.py")
+        // pkg/other.Thing extends a SAME-NAMED but DIFFERENT `BaseOps` ⇒ excluded
+        // (the false-POSITIVE the base-name heuristic wrongly included).
+        expect(files).not.toContain("pkg/other/o.py")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
+  test.if(hasPython)(
+    "relative-imported bases resolve by module identity, not collapsed bare names",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cha-rel-"))
+      try {
+        for (const p of ["pkg/shared", "pkg/shadow", "pkg/mysql", "pkg/oracle", "pkg/other"])
+          mkdirSync(join(dir, p), { recursive: true })
+        writeFileSync(join(dir, "pkg/shared/base.py"), "class BaseOps:\n    pass\n")
+        writeFileSync(join(dir, "pkg/shadow/base.py"), "class BaseOps:\n    pass\n")
+        writeFileSync(
+          join(dir, "pkg/mysql/o.py"),
+          "from ..shared.base import BaseOps\nclass DatabaseOperations(BaseOps):\n    def conv(self):\n        return 1\n",
+        )
+        writeFileSync(
+          join(dir, "pkg/oracle/o.py"),
+          "from ..shared.base import BaseOps\nclass DatabaseOperations(BaseOps):\n    def conv(self):\n        return 2\n",
+        )
+        writeFileSync(
+          join(dir, "pkg/other/o.py"),
+          "from ..shadow.base import BaseOps\nclass Thing(BaseOps):\n    def conv(self):\n        return 3\n",
+        )
+
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "pkg/mysql/o.py",
+          method: "conv",
+        })
+        const files = sites.map((s) => s.file).sort()
+        expect(files).toContain("pkg/oracle/o.py")
+        expect(files).not.toContain("pkg/other/o.py")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
 })
 
 describe("CHA multi-site — pure unit teeth (always run)", () => {

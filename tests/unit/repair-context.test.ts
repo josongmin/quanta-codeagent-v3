@@ -120,6 +120,22 @@ describe("buildRepairContext (pure repair seed builder)", () => {
     expect(out.length).toBeLessThanOrEqual(4000)
   })
 
+  test("structured failureEvidence is authoritative over a stale failTail projection", () => {
+    const out = buildRepairContext({
+      problem: SMALL_PROBLEM,
+      cumulativeDiff: "",
+      failTail: "STALE_HEAD_ONLY",
+      failureEvidence: {
+        stdoutTail: "",
+        stderrTail: "",
+        combinedTail: "REAL_FAILURE_TAIL",
+      },
+      round: 1,
+    })
+    expect(out).toContain("REAL_FAILURE_TAIL")
+    expect(out).not.toContain("STALE_HEAD_ONLY")
+  })
+
   test("diff truncation: drops middle hunks, keeps `diff --git` headers + first+last hunks", () => {
     const head =
       "diff --git a/src/foo.py b/src/foo.py\nindex aaa..bbb 100644\n--- a/src/foo.py\n+++ b/src/foo.py\n"

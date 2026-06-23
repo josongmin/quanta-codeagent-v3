@@ -116,6 +116,22 @@ export const buildOwnerMustTouchContracts = (ownerFiles: readonly string[]): Pub
   )
 
 /**
+ * owner-must-touch contract(s) from owner files the PUBLIC ISSUE TEXT named.
+ * These are the clean-path owner obligations: issue-file authority only, never
+ * stage1 / owner-resolve / static-only structure.
+ */
+const buildIssueOwnerMustTouchContracts = (ownerFiles: readonly string[]): PublicContract[] =>
+  cleanList(ownerFiles).map((file) =>
+    mkContract({
+      kind: "owner-must-touch",
+      strength: "required",
+      provenance: "public-issue-text",
+      subjectFiles: [file],
+      discriminator: file,
+    }),
+  )
+
+/**
  * AUTHORITATIVE owner-must-touch contracts (T-OWN-12 clean slice): only owner
  * files the PUBLIC ISSUE TEXT named (`issue-file` evidence source) become a
  * `required` contract. The additive-score `stage1` / `owner-resolve` proposals
@@ -126,7 +142,7 @@ export const buildOwnerMustTouchContracts = (ownerFiles: readonly string[]): Pub
 export const authoritativeIssueOwnerContracts = (
   candidates: readonly { readonly file: string; readonly sources: readonly string[] }[],
 ): PublicContract[] =>
-  buildOwnerMustTouchContracts([
+  buildIssueOwnerMustTouchContracts([
     ...new Set(candidates.filter((c) => c.sources.includes("issue-file")).map((c) => c.file)),
   ])
 
@@ -136,10 +152,11 @@ export const authoritativeIssueOwnerContracts = (
  *   - owner-must-touch only for files the issue text explicitly named,
  *   - api-surface from the issue's named symbols (a candidate that touches the
  *     symbol the issue is about beats one that does not; `supporting` so it ranks
- *     below the required owner contract).
+ *     below the required owner contract, with `public-issue-text` provenance).
  *
- * Stage1-only and owner-resolve-only files remain exploration evidence and are
- * deliberately excluded from contract authority. Empty inputs => `undefined`.
+ * Stage1-only, owner-resolve-only, and static-only multi-site families remain
+ * exploration evidence and are deliberately excluded from contract authority.
+ * Empty inputs => `undefined`.
  */
 export const buildCleanSelectionPublicContracts = (args: {
   readonly declaredExpected?:
@@ -149,13 +166,11 @@ export const buildCleanSelectionPublicContracts = (args: {
     | readonly { readonly file: string; readonly sources: readonly string[] }[]
     | undefined
   readonly apiSymbols?: readonly string[] | undefined
-  readonly multiSiteFamily?: readonly string[] | undefined
 }): PublicContractBundle | undefined => {
   const contracts = [
     ...buildExactOutputContract(args.declaredExpected),
     ...authoritativeIssueOwnerContracts(args.candidates ?? []),
-    ...buildApiSurfaceContracts(args.apiSymbols ?? []),
-    ...buildMultiSiteFamilyContract(args.multiSiteFamily ?? []),
+    ...buildIssueApiSurfaceContracts(args.apiSymbols ?? []),
   ]
   if (contracts.length === 0) return undefined
   const byId = new Map<string, PublicContract>()
@@ -164,6 +179,18 @@ export const buildCleanSelectionPublicContracts = (args: {
   }
   return { contracts: [...byId.values()] }
 }
+
+/** Clean-path api-surface contracts sourced from issue text, not static witness. */
+const buildIssueApiSurfaceContracts = (apiSymbols: readonly string[]): PublicContract[] =>
+  cleanList(apiSymbols).map((symbol) =>
+    mkContract({
+      kind: "api-surface",
+      strength: "supporting",
+      provenance: "public-issue-text",
+      subjectSymbols: [symbol],
+      discriminator: symbol,
+    }),
+  )
 
 /**
  * lifecycle-owner contract(s) from static-witness lifecycle files (setup /

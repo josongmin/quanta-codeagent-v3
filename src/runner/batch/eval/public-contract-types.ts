@@ -41,7 +41,8 @@ export type PublicContractStrength = "required" | "supporting"
  * Where the obligation came from. Provenance is carried through so the clean
  * selector can NAME, in telemetry, which public evidence backs each obligation —
  * and so an auditor can confirm no obligation traces to a forbidden source.
- *  - `public-issue-text`: declared expectation extracted from the problem statement.
+ *  - `public-issue-text`: declared expectation, named API symbols, or explicit
+ *    owner files extracted from the problem statement.
  *  - `public-test`: a test name already present in the repo.
  *  - `validated-repro`: presence of a validated reproduction script.
  *  - `static-witness`: owner files/symbols from the static witness bundle.

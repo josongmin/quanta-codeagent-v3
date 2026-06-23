@@ -20,12 +20,19 @@ import type {
   RepairReproOutcome,
   RepairValidationSource,
 } from "@/runner/batch/eval/repair/types"
+import { combinedFailureTailOf } from "@/runner/batch/eval/repair/types"
 import { filesFromUnifiedDiff } from "@/shared"
 
 const boundHeadMarker = (s: string | undefined, n = 1200): string => {
   const v = s?.trim() ?? ""
   if (v === "") return ""
   return v.length > n ? `${v.slice(0, n)}\n... <${v.length - n} bytes truncated>` : v
+}
+
+const boundTailMarker = (s: string | undefined, n = 1200): string => {
+  const v = s?.trim() ?? ""
+  if (v === "") return ""
+  return v.length > n ? `... <${v.length - n} bytes truncated>\n${v.slice(-n)}` : v
 }
 
 /**
@@ -130,12 +137,19 @@ const proofReceiptsOf = (args: BuildRepairContextArgs): readonly ProofReceiptFac
     ...(args.validationCmd !== undefined && args.validationCmd !== ""
       ? { command: args.validationCmd }
       : {}),
+    ...(args.failureEvidence?.stdoutTail !== undefined && args.failureEvidence.stdoutTail.trim() !== ""
+      ? { stdoutTail: boundTailMarker(args.failureEvidence.stdoutTail, 600) }
+      : {}),
+    ...(args.failureEvidence?.stderrTail !== undefined && args.failureEvidence.stderrTail.trim() !== ""
+      ? { stderrTail: boundTailMarker(args.failureEvidence.stderrTail, 600) }
+      : {}),
   }
   return [receipt]
 }
 
 const staticFactsOf = (args: BuildRepairContextArgs): readonly StaticFact[] => {
   const touchedFiles = filesFromUnifiedDiff(args.cumulativeDiff)
+  const validationFailTail = combinedFailureTailOf(args)
   return [
     { kind: "repair_round", value: String(args.round) },
     {
@@ -145,8 +159,8 @@ const staticFactsOf = (args: BuildRepairContextArgs): readonly StaticFact[] => {
     ...(args.cumulativeDiff.trim() !== ""
       ? [{ kind: "cumulative_patch_excerpt", value: boundHeadMarker(args.cumulativeDiff, 1600) }]
       : []),
-    ...(args.failTail.trim() !== ""
-      ? [{ kind: "validation_fail_tail", value: boundHeadMarker(args.failTail, 1000) }]
+    ...(validationFailTail.trim() !== ""
+      ? [{ kind: "validation_fail_tail", value: boundTailMarker(validationFailTail, 1000) }]
       : []),
     ...(args.validationSource !== undefined
       ? [{ kind: "validation_source", value: args.validationSource }]
