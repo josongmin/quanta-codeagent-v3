@@ -1,60 +1,12 @@
-import { spawn as spawnChild } from "node:child_process"
-import { chmod, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
-import { join as joinPath } from "node:path"
-import type { ElicitationPrompterFactory, SamplingWiringInput } from "@/agent"
 import {
   type AgentConfig,
-  applyMcpClientWiring,
-  loadMcpTools,
   lspDiagnosticsTool,
   lspNavToolList,
-  type McpStoppable,
   type PersonaKind,
   resolvePersona,
 } from "@/agent"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
-import {
-  createCliOAuthCallback,
-  deriveChallengeS256,
-  generateCodeVerifier,
-  generateState,
-  resolveQuantaHome,
-} from "@/auth/chatgpt-oauth"
-import {
-  canonicalizeTrustedPaths,
-  filterMcpServersByPolicy,
-  type McpLaunchPolicy,
-  mergeDiskLayers,
-  osManagedSettingsPath,
-  parseSettingSources,
-  readDiskLayers,
-  type TrustRecord,
-  TrustStore,
-} from "@/config"
-import type { FetchPort, TokenRecord, TokenStorePort } from "@/connectors"
-import {
-  buildMcpOAuthWiring,
-  buildRootsWiring,
-  buildSamplingWiring,
-  type McpBrowserFlowResult,
-  type McpOAuthDeps,
-  pickMcpNegotiator,
-  resolveMcpOAuthKeyringOption,
-} from "@/host/runtime"
 import type { CredentialSource, LLMPort } from "@/llm"
-import {
-  type CapabilityNegotiator,
-  DEFAULT_BACKOFF_POLICY,
-  type ElicitationPrompter,
-  McpClient,
-  type McpClientTransport,
-  type McpOAuthProviderPort,
-  type McpServerConfig,
-  type RootsProviderPort,
-  type SamplingHandlerPort,
-  type SupervisableMcpClient,
-  type SupervisorDeps,
-} from "@/mcp"
 import { Metrics, type StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import {
@@ -75,7 +27,6 @@ import {
   composeLLMCore,
   DEFAULT_MODEL,
   type MainLlmAssembleInput,
-  parseEnvFlag,
   parseFallbackModels,
   parseRecallTiers,
   pickProviderCore,
@@ -86,32 +37,39 @@ import {
 import type { Tooling } from "@/runner/assemble/tooling"
 import { type AutoTitlePort, createAutoTitlePort } from "@/runner/session-ops/auto-title"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
-import type { ProxyEnvInput } from "@/runtime/network-proxy"
-import {
-  createBunSpawner,
-  createShellSnapshotPort,
-  type ShellSnapshotPort,
-} from "@/runtime/shell-snapshot"
-import type { ShellSnapshotMetric } from "@/runtime/shell-snapshot/metric-port"
 import { loadSessionById, renameSession } from "@/session"
-import { logger, quantaHomeDir, type RunContext, runtimeConfig } from "@/shared"
-import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
+import { logger, type RunContext, runtimeConfig } from "@/shared"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
-import {
-  astGrepTool,
-  gitTools,
-  mcpResourcesTools,
-  pollDeferredTool,
-  type ResourcesHandle,
-  type Tool,
-} from "@/tool"
+import { astGrepTool, gitTools, pollDeferredTool, type Tool } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
 import { buildCliFetchRulesTool } from "./fetch-rules-wire"
+import {
+  astGrepEnabled,
+  gitCoChangeEnabled,
+  gitToolsEnabled,
+  hasArg,
+  lspEnabled,
+  lspNavEnabled,
+  planEnabled,
+  resumePath,
+  statePath,
+} from "./internal/argv"
+import {
+  buildMcpLoadOpts,
+  buildMcpResourceTools,
+  type Features,
+  type LoadFeaturesOpts,
+  loadMcpToolsOrEmpty,
+  mcpAutoRestartEnabled,
+  readMcpConfig,
+  resolveMcpInboundWiring,
+  resolveMcpLaunchPolicy,
+  resolveMcpOAuthProvider,
+} from "./internal/mcp"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
-import { isPathLikeToken } from "./resume"
 import { isIndicatorEnabled } from "./turn-indicator"
 
 /**
@@ -592,863 +550,6 @@ export const buildLLMWithByok = async (
  */
 export const fallbackModels = (): string[] => parseFallbackModels(process.env.QUANTA_MODEL_FALLBACK)
 
-export const hasArg = (flag: string): boolean => process.argv.slice(2).includes(flag)
-
-/** Resolve the state-file path: `--state <p>` / `QUANTA_STATE_PATH`. Default OFF. */
-export const statePath = (): string | undefined => {
-  const idx = process.argv.indexOf("--state")
-  if (idx >= 0) return process.argv[idx + 1]
-  return process.env.QUANTA_STATE_PATH
-}
-
-/** Resolve the resume token: `--resume <token>` / `QUANTA_RESUME`. Default OFF.
- *  The token is EITHER a filesystem path (V1 path-mode) OR an opaque session
- *  id (V2 id-mode). Classification is done by {@link isPathLikeToken} at the
- *  call-site so this helper stays a pure env/argv accessor. */
-export const resumePath = (): string | undefined => {
-  const idx = process.argv.indexOf("--resume")
-  if (idx >= 0) return process.argv[idx + 1]
-  return process.env.QUANTA_RESUME
-}
-
-// `isPathLikeToken` moved to `./resume`; re-exported via the barrel block at
-//  the bottom of this file so existing importers still resolve it from
-//  `internal`. The local `idModeEnabled` below uses the imported binding.
-
-/** True when the run is in id-mode: a `--resume <id>` whose token is NOT
- *  path-like, OR `--new-session` was passed (mints a fresh id). The CLI uses
- *  this to auto-save to the session store after each turn. */
-export const idModeEnabled = (): boolean => {
-  if (hasArg("--new-session")) return true
-  const token = resumePath()
-  if (token === undefined) return false
-  return !isPathLikeToken(token)
-}
-
-/** Resolve the `--new-session` flag for id-mode startup. */
-export const newSessionFlag = (): boolean => hasArg("--new-session")
-
-/** ADR-0301 — Resolve the `--playbook-trigger` CLI flag echo. Boolean (no
- *  value); presence ⇒ `true`, absence ⇒ `false`. The wire helper enforces
- *  the env-on-wins precedence — this is just the surface-side argv scan.
- *  Mirrors `newSessionFlag()` for SOLID/SRP. */
-export const playbookTriggerFlag = (): boolean => hasArg("--playbook-trigger")
-
-/** Resolve the `--title <t>` flag (used by `--new-session`). */
-export const titleFlag = (): string | undefined => {
-  const idx = process.argv.indexOf("--title")
-  if (idx >= 0) return process.argv[idx + 1]
-  return undefined
-}
-
-/** Resolve the observe dir: `--observe-dir <d>` / `QUANTA_OBSERVE_DIR`.
- *  Default OFF (undefined) → current behavior byte-identical. */
-export const observeDir = (): string | undefined => {
-  const idx = process.argv.indexOf("--observe-dir")
-  if (idx >= 0) return process.argv[idx + 1]
-  return process.env.QUANTA_OBSERVE_DIR
-}
-
-/** Plan mode is on when `QUANTA_PLAN=1` or `--plan` is present. */
-export const planEnabled = (): boolean =>
-  (readCliKnob("QUANTA_PLAN", "bool") ?? false) || hasArg("--plan")
-
-/** LSP diagnostics tool is on when `QUANTA_LSP=1` or `--lsp` is present.
- *  Default OFF: `defaultTools` already registers a no-op `diagnostics`; this
- *  only swaps in the real language-server-backed provider when asked. The
- *  bridge itself still degrades gracefully if a server binary is absent. */
-export const lspEnabled = (): boolean =>
-  (readCliKnob("QUANTA_LSP", "bool") ?? false) || hasArg("--lsp")
-
-/** Codex `may-20-codex-lsp.md` absorption (ADR-0015). LSP NAV tools
- *  (definition / references / hover / type_definition / implementation /
- *  document_symbol / workspace_symbol / rename_preview) are NOT in
- *  `defaultTools` — they expand the tool surface, so opt-in only via
- *  `QUANTA_LSP_TOOLS=full`. With the knob unset the registry is byte-identical. */
-export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "full"
-
-/** Structural AST search via ast-grep (opt-in via `QUANTA_AST_GREP=1` or
- *  `QUANTA_AST_GREP=full`). Requires `ast-grep` CLI (`brew install ast-grep`).
- *  Default-OFF: with the knob unset the tool surface is byte-identical.
- *
- *  NOTE: `"full"` is accepted as an alias for parity with `QUANTA_LSP_TOOLS=full`
- *  (see `lspNavEnabled`). It is NOT in GATE_TRUTHY so it would silently resolve
- *  to `false` via `readCliKnob("bool")`; the explicit OR guard below captures it. */
-export const astGrepEnabled = (): boolean =>
-  process.env.QUANTA_AST_GREP === "full" || (readCliKnob("QUANTA_AST_GREP", "bool") ?? false)
-
-/** Codex `may-20-codex-signal.md` absorption (ADR-0016). First-class
- *  git tools (diff/status/log/blame) are NOT in `defaultTools` to keep the
- *  default registry byte-identical. Opt-in via `QUANTA_GIT_TOOLS=1`. */
-export const gitToolsEnabled = (): boolean => readCliKnob("QUANTA_GIT_TOOLS", "bool") ?? false
-
-/** §7.2 long-tail — co-change / related-files tool gate. Default-OFF; opt-in via
- *  `QUANTA_GIT_CO_CHANGE=1`. Rides the git-tools surface (so it ALSO requires
- *  QUANTA_GIT_TOOLS — the co-change tool is appended to the git tool set). */
-export const gitCoChangeEnabled = (): boolean =>
-  (readCliKnob("QUANTA_GIT_CO_CHANGE", "bool") ?? false) === true
-
-/** MCP crash-detection + auto-restart (ADR-0435). Default-OFF: when unset,
- *  `loadMcpTools` runs the single-client path and MCP behavior is
- *  byte-identical. `QUANTA_MCP_AUTORESTART=1` wraps every server in a
- *  {@link McpReconnectSupervisor} (2-phase exponential backoff + full-jitter,
- *  stability reset, storm cap → DEGRADED). */
-export const mcpAutoRestartEnabled = (): boolean =>
-  parseEnvFlag(process.env.QUANTA_MCP_AUTORESTART, false)
-
-/** Build the injected {@link SupervisorDeps} for one MCP server. The real
- *  clock/timer/RNG are injected ONLY here, at the composition root — the
- *  supervisor core itself never reaches for a global. The factory picks the
- *  legacy `McpClient`; the isolated client is selected by its own env knob
- *  inside `McpClient` construction is out of scope (the isolated path keeps its
- *  separate wire), so we use the default client here.
- *
- *  B1 + H19 — the inbound-capability wiring bundle (`{ negotiator, handler?,
- *  rootsProvider? }`) is BAKED into the restart factory via the SAME
- *  `applyMcpClientWiring` helper the single-client path uses, so the supervisor —
- *  which owns the lifecycle, not the policy — re-applies it to EVERY (re)connected
- *  client. A reconnected client therefore re-advertises `sampling`/`roots` and
- *  re-handles inbound `sampling/createMessage` + `roots/list`. Absent ⇒ a vanilla
- *  `new McpClient(c)` (byte-identical to the pre-wire supervised path).
- *
- *  `transportFor` is the optional test seam (mirrors the single-client path) so a
- *  supervised client can be driven by a scripted transport without a real spawn;
- *  production omits it (the client builds its default carrier). */
-const mcpSupervisorDepsFor = (
-  slog: StructuredLogger,
-  wiring: SamplingWiringInput | undefined,
-  transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
-  oauthProvider: McpOAuthProviderPort | undefined,
-  proxyEnv: ProxyEnvInput | undefined,
-) => {
-  return (_config: McpServerConfig): SupervisorDeps => ({
-    factory: (c): SupervisableMcpClient => {
-      const clientOpts: NonNullable<ConstructorParameters<typeof McpClient>[1]> = {}
-      if (transportFor !== undefined) clientOpts.transport = transportFor(c)
-      // H18 (jun-06 live-wire) — bake the OAuth provider into the restart factory
-      // via the SAME helper the single-client path uses, so a reconnected client
-      // RE-resolves a bearer for an `oauth:true` server. Absent ⇒ headless
-      // rejecter (byte-identical to the pre-wire supervised path).
-      // H3 (jun-10) — `proxyEnv` rides the same helper so a RECONNECTED MCP server
-      // child re-injects the session egress proxy (the bypass cannot reopen on a
-      // restart). Absent ⇒ no keys (byte-identical).
-      applyMcpClientWiring(clientOpts, wiring, oauthProvider, proxyEnv)
-      return new McpClient(c, clientOpts)
-    },
-    policy: DEFAULT_BACKOFF_POLICY,
-    now: () => Date.now(),
-    setTimer: (fn, ms) => {
-      const t = setTimeout(fn, ms)
-      return () => clearTimeout(t)
-    },
-    onStateChange: (s) =>
-      slog.info("mcp.supervisor.state", { server: s.serverName, state: s.state }),
-  })
-}
-
-// ── H18 (jun-06) — live-wire the MCP OAuth provider at the composition root ──
-//
-// The keyring slice + `buildMcpOAuthWiring` + `resolveMcpOAuthKeyringOption`
-// were sealed but had NO LIVE CALLER (the bridge never set
-// `clientOpts.oauthProvider`). The block below assembles the connectors-backed
-// provider — file token store (0600) + injected fetch/clock/browser-flow/issuer
-// — and threads it (with the keyring composition baked into its token store)
-// into BOTH MCP-load paths. Default-OFF: `QUANTA_MCP_OAUTH` unset ⇒
-// `buildMcpOAuthWiring` returns `{ provider: undefined }` ⇒ no provider wired ⇒
-// byte-identical to today's no-auth load.
-
-/** A file-backed, multi-server `TokenStorePort` (one 0600 JSON file per server
- *  under `<quanta-home>/mcp-oauth/`). This is the H18 default token store the
- *  keyring DECORATOR (`composeTokenStore`) wraps when
- *  `QUANTA_MCP_OAUTH_KEYRING=1`; OFF ⇒ it is used directly (byte-identical to
- *  the documented "0600 file by default" H18 store). Tokens are NEVER logged —
- *  they live only in the 0600 file and the in-memory record. NO-THROW reads
- *  (a corrupt/absent file ⇒ `undefined` ⇒ the provider re-auths) so a bad file
- *  never crashes the MCP load. */
-const createFileMcpTokenStore = (dir: string): TokenStorePort => {
-  const safe = (id: string): string => id.replace(/[^A-Za-z0-9_.-]+/g, "_")
-  const fileFor = (id: string): string => joinPath(dir, `${safe(id)}.json`)
-  return {
-    async read(id: string): Promise<TokenRecord | undefined> {
-      try {
-        const raw = await readFile(fileFor(id), "utf8")
-        const parsed = JSON.parse(raw) as unknown
-        if (parsed === null || typeof parsed !== "object") return undefined
-        const o = parsed as Record<string, unknown>
-        if (typeof o.accessToken !== "string" || typeof o.tokenType !== "string") return undefined
-        return o as unknown as TokenRecord
-      } catch {
-        // Absent / unreadable / malformed ⇒ treat as "no token" (re-auth path).
-        return undefined
-      }
-    },
-    async write(id: string, record: TokenRecord): Promise<void> {
-      await mkdir(dir, { recursive: true })
-      const path = fileFor(id)
-      const tmp = `${path}.tmp`
-      await writeFile(tmp, `${JSON.stringify(record)}\n`, "utf8")
-      if (process.platform !== "win32") await chmod(tmp, 0o600)
-      await rename(tmp, path)
-    },
-    async delete(id: string): Promise<void> {
-      try {
-        await unlink(fileFor(id))
-      } catch {
-        // Idempotent — an absent file is fine.
-      }
-    },
-  }
-}
-
-/** The production `FetchPort` for OAuth discovery / DCR / token exchange: a thin
- *  shape adapter over `globalThis.fetch` (read at the root only). */
-const realMcpFetchPort: FetchPort = async (url, init) => {
-  const res = await fetch(url, {
-    ...(init?.method !== undefined ? { method: init.method } : {}),
-    ...(init?.headers !== undefined ? { headers: init.headers as Record<string, string> } : {}),
-    ...(init?.body !== undefined ? { body: init.body } : {}),
-    ...(init?.signal !== undefined ? { signal: init.signal } : {}),
-  })
-  return { status: res.status, ok: res.ok, text: () => res.text() }
-}
-
-/** A generic RFC 6749 §4.1 authorization-code + PKCE browser flow for an MCP
- *  server, REUSING the surface-agnostic loopback callback receiver
- *  (`createCliOAuthCallback`, the SAME seam the chatgpt-oauth `/login` flow uses)
- *  and the chatgpt-oauth PKCE helpers. It builds a STANDARD authorize URL
- *  against the DISCOVERED `authorizeEndpoint` (not the OpenAI-specific URL that
- *  `runBrowserFlow` hard-codes), so it works against any RFC-8414 issuer the H18
- *  provider discovered. Returns `{ code, verifier, redirectUri }` for the host
- *  provider to exchange (the exchange + refresh live in the connectors-backed
- *  provider; this only obtains the code). The authorization code is NEVER
- *  logged. */
-const runMcpBrowserFlow = async (input: {
-  readonly authorizeEndpoint: string
-  readonly clientId: string
-  readonly serverName: string
-}): Promise<McpBrowserFlowResult> => {
-  const verifier = generateCodeVerifier()
-  const challenge = deriveChallengeS256(verifier)
-  const state = generateState()
-  const callback = createCliOAuthCallback()
-  const handle = await callback.start({ expectedState: state })
-  const url = new URL(input.authorizeEndpoint)
-  url.searchParams.set("response_type", "code")
-  url.searchParams.set("client_id", input.clientId)
-  url.searchParams.set("redirect_uri", handle.redirectUri)
-  url.searchParams.set("code_challenge", challenge)
-  url.searchParams.set("code_challenge_method", "S256")
-  url.searchParams.set("state", state)
-  logger.info("mcp-oauth: opening browser for authorization", { server: input.serverName })
-  // Open the user's browser (best-effort — a headless box can paste the URL the
-  // callback receiver printed). Failure to open is non-fatal; the loopback
-  // receiver still awaits the redirect.
-  try {
-    const opener =
-      process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
-    spawnChild(opener, [url.toString()], { stdio: "ignore", detached: true }).unref()
-  } catch {
-    // Opener unavailable ⇒ the receiver's printed URL is the fallback.
-  }
-  const result = await handle.received
-  return { code: result.code, verifier, redirectUri: handle.redirectUri }
-}
-
-/** Resolve the per-server OAuth issuer from its config `url` origin (the
- *  standard MCP pattern: RFC 8414 discovery runs against the resource server's
- *  origin). A server without a `url` (stdio carrier) or without `oauth:true`
- *  yields `undefined` ⇒ the provider obtains no token for it (unauthenticated). */
-const mcpIssuerResolver =
-  (servers: ReadonlyArray<McpServerConfig>) =>
-  (serverName: string): string | undefined => {
-    const server = servers.find((s) => s.name === serverName)
-    if (server?.oauth !== true || server.url === undefined) return undefined
-    try {
-      return new URL(server.url).origin
-    } catch {
-      return undefined
-    }
-  }
-
-/** H18 (jun-06) — assemble the connectors-backed `McpOAuthProviderPort` for the
- *  CLI MCP load, or `undefined` when OFF. `buildMcpOAuthWiring` is the single
- *  gate: it returns a provider ONLY when `QUANTA_MCP_OAUTH=1` AND deps are
- *  present (the per-server `oauth:true` flag is the second gate, applied inside
- *  the `McpClient`). The keyring composition (`QUANTA_MCP_OAUTH_KEYRING`) is
- *  resolved here via `resolveMcpOAuthKeyringOption()` (the ONLY `process.platform`
- *  read for the keyring decision) and BAKED into the provider's token store, so
- *  the bridge never reaches for the keyring. When NO server opts into `oauth`,
- *  the deps are omitted ⇒ no provider (byte-identical, no file store created).
- *
- *  `opts.fetchPort` / `opts.browserFlow` / `opts.tokenStoreDir` / `opts.keyring`
- *  are test seams (inject a fake auth server + scripted browser flow + a tmp
- *  store dir + a fake-exec keyring option); production omits them. */
-export const resolveMcpOAuthProvider = (
-  servers: ReadonlyArray<McpServerConfig>,
-  opts: {
-    readonly fetchPort?: FetchPort
-    readonly browserFlow?: typeof runMcpBrowserFlow
-    readonly tokenStoreDir?: string
-    readonly keyring?: ReturnType<typeof resolveMcpOAuthKeyringOption>
-  } = {},
-): McpOAuthProviderPort | undefined => {
-  const enabled = runtimeConfig().mcpOAuth
-  // Cheap short-circuit: no server opts into OAuth ⇒ no deps ⇒ no provider, and
-  // crucially no file store directory created (byte-identical when the knob is
-  // on but unused). Still routes through the gate so the OFF path is the
-  // documented single decision point (returns `{ provider: undefined }`).
-  const anyOAuth = servers.some((s) => s.oauth === true && s.url !== undefined)
-  if (!enabled || !anyOAuth) return buildMcpOAuthWiring(enabled, undefined).provider
-  const dir = opts.tokenStoreDir ?? joinPath(resolveQuantaHome(process.env), "mcp-oauth")
-  const deps: McpOAuthDeps = {
-    fetchPort: opts.fetchPort ?? realMcpFetchPort,
-    tokenStore: createFileMcpTokenStore(dir),
-    clockPort: { now: () => Date.now() },
-    runBrowserFlow: opts.browserFlow ?? runMcpBrowserFlow,
-    issuerFor: mcpIssuerResolver(servers),
-  }
-  return buildMcpOAuthWiring(enabled, deps, opts.keyring ?? resolveMcpOAuthKeyringOption()).provider
-}
-
-/**
- * ADR-0237 — per-turn shell-snapshot CLI composition.
- *
- * Default-OFF byte-identical: unless `QUANTA_SHELL_SNAPSHOT=1` (or the
- * `--shell-snapshot` flag) is set, this returns `undefined`. The assembled
- * `AgentConfig` then omits `shellSnapshot` entirely (RFC §1.2 default-OFF),
- * and every `runShell` spawn is the legacy `["bash","-lc",cmd]` argv. With
- * the knob set, a production {@link ShellSnapshotPort} is built with a
- * `Bun.spawn`-backed adapter ({@link createBunSpawner}) and the 5-knob block
- * is populated from sibling env vars:
- *
- *   QUANTA_SHELL_SNAPSHOT          1 → opt-in (also: `--shell-snapshot` arg)
- *   QUANTA_SHELL_SNAPSHOT_SHELL    auto | zsh | bash   (default "auto" =
- *                                   `$SHELL` basename detection)
- *   QUANTA_SHELL_SNAPSHOT_TURN     "0" → one-shot at session start (default
- *                                   on → capture at every turn-start)
- *   QUANTA_SHELL_SNAPSHOT_CLEANUP  int ms cutoff for the age-based prune
- *                                   (default 864e5*10 = 10 days)
- *   QUANTA_SHELL_SNAPSHOT_MAX_MB   int MB ceiling for the directory; over
- *                                   budget ⇒ oldest-first eviction at
- *                                   session-start prune (default 100MB)
- *   QUANTA_SHELL_SNAPSHOT_TIMEOUT  int ms cap on each `Bun.spawn` capture
- *                                   call (the {@link createBunSpawner}
- *                                   `defaultTimeoutMs`; default 10 000)
- *
- * The current `$SHELL` is forwarded as `shellEnv` so `resolveShell("auto")`
- * can pick the right adapter without violating the @/agent slice invariant
- * (no `process.env` reads inside the loop).
- *
- * Returns the literal `AgentConfig["shellSnapshot"]` shape so the caller
- * can spread it conditionally into `SessionDeps.shellSnapshot`.
- */
-/** Optional dependencies for {@link buildShellSnapshotConfig}. */
-export interface BuildShellSnapshotConfigOpts {
-  /** ADR-0222 — wired shell-snapshot metric port. Caller produces this via
-   *  `wireShellSnapshotMetric(metrics)` (or the bundle helper
-   *  `wireNewSlices(metrics).shellSnapshot`). Absent ⇒ no metric injection
-   *  (byte-identical legacy). */
-  readonly metric?: ShellSnapshotMetric
-}
-
-export const buildShellSnapshotConfig = (
-  opts: BuildShellSnapshotConfigOpts = {},
-): AgentConfig["shellSnapshot"] | undefined => {
-  const enabled =
-    (readCliKnob("QUANTA_SHELL_SNAPSHOT", "bool") ?? false) || hasArg("--shell-snapshot")
-  if (!enabled) return undefined
-  const intEnv = (key: string): number | undefined => {
-    const raw = process.env[key]
-    if (raw === undefined) return undefined
-    const n = Number.parseInt(raw, 10)
-    return Number.isFinite(n) && n > 0 ? n : undefined
-  }
-  const timeoutMs = intEnv("QUANTA_SHELL_SNAPSHOT_TIMEOUT")
-  // Spawner timeout: pass-through ONLY when set (the factory has its own
-  // safe default that mirrors the capture adapter default).
-  const spawner = createBunSpawner(timeoutMs !== undefined ? { defaultTimeoutMs: timeoutMs } : {})
-  // ADR-0222 wire — optional metric port. Absent ⇒ no allocation, byte-
-  // identical to legacy (the factory checks `metric === undefined`).
-  const port: ShellSnapshotPort = createShellSnapshotPort(
-    spawner,
-    opts.metric !== undefined ? { metric: opts.metric } : undefined,
-  )
-  const rawShell = process.env.QUANTA_SHELL_SNAPSHOT_SHELL
-  const shell: "auto" | "zsh" | "bash" =
-    rawShell === "zsh" || rawShell === "bash" || rawShell === "auto" ? rawShell : "auto"
-  const cleanupOlderThanMs = intEnv("QUANTA_SHELL_SNAPSHOT_CLEANUP")
-  const maxMb = intEnv("QUANTA_SHELL_SNAPSHOT_MAX_MB")
-  const maxSizeBytes = maxMb !== undefined ? maxMb * 1024 * 1024 : undefined
-  // QUANTA_SHELL_SNAPSHOT_TURN: "0" ⇒ one-shot capture at session start, any
-  // other value (including unset / "1") ⇒ per-turn capture (the helper
-  // default). Explicit literal so a typo (e.g. "off", "false") falls through
-  // to the safer per-turn default.
-  const captureAtTurnStart = process.env.QUANTA_SHELL_SNAPSHOT_TURN !== "0"
-  // shellEnv: pass through $SHELL ONCE so resolveShell can do basename
-  // detection without the agent slice peeking at process.env (ADR-0144).
-  const shellEnv = process.env.SHELL
-  return {
-    port,
-    shell,
-    captureAtTurnStart,
-    ...(cleanupOlderThanMs !== undefined ? { cleanupOlderThanMs } : {}),
-    ...(maxSizeBytes !== undefined ? { maxSizeBytes } : {}),
-    ...(shellEnv !== undefined ? { shellEnv } : {}),
-  }
-}
-
-/** MCP config path resolver. Supports the legacy wrapper file
- *  (`QUANTA_MCP_CONFIG`) and the thinner browser/plugin bridge:
- *    - `QUANTA_BROWSER_MCP_CONFIG` → direct path to a plugin-style `.mcp.json`
- *    - `QUANTA_BROWSER_MCP_PLUGIN_DIR` → plugin root; we append `/.mcp.json`
- *  Precedence is explicit config first so existing callers stay byte-identical. */
-export const resolveMcpConfigPath = (
-  envSource: NodeJS.ProcessEnv = process.env,
-): string | undefined => {
-  const explicit = envSource.QUANTA_MCP_CONFIG?.trim()
-  if (explicit) return explicit
-  const browserConfig = envSource.QUANTA_BROWSER_MCP_CONFIG?.trim()
-  if (browserConfig) return browserConfig
-  const browserPluginDir = envSource.QUANTA_BROWSER_MCP_PLUGIN_DIR?.trim()
-  if (browserPluginDir) return `${browserPluginDir.replace(/\/+$/, "")}/${PLUGIN_MCP_FILE}`
-  return undefined
-}
-
-const pluginSpecToServerConfig = (
-  name: string,
-  spec: {
-    command: string
-    args: string[]
-    env?: Record<string, string> | undefined
-    url?: string | undefined
-    headers?: Record<string, string> | undefined
-  },
-): McpServerConfig => ({
-  name,
-  command: spec.command.length > 0 ? [spec.command, ...spec.args] : [],
-  ...(spec.env !== undefined ? { env: spec.env } : {}),
-  ...(spec.url !== undefined ? { url: spec.url } : {}),
-  ...(spec.headers !== undefined ? { headers: spec.headers } : {}),
-})
-
-/** Read MCP server configs from a config file. Accepts BOTH:
- *    - CLI wrapper format: `{ "servers": [{ "name": "...", "command": ["..."] }] }`
- *    - plugin/browser format: `{ "mcpServers": { "browser": { "command": "...", "args": [...] } } }`
- *  OFF when no resolver yields a path. */
-export const readMcpConfig = async (
-  slog: StructuredLogger,
-  envSource: NodeJS.ProcessEnv = process.env,
-  // §12.4 LIVE-wire — central-config MCP launch policy (E2 denylist + E1-sub
-  // managed-only enforcement). `undefined` ⇒ no filtering (legacy byte-identical:
-  // the gate-OFF path and the no-policy-configured path both pass undefined).
-  policy?: McpLaunchPolicy,
-): Promise<McpServerConfig[]> => {
-  // Observable governance: every dropped server is slog'd — never a silent
-  // disappearance the operator can't diagnose.
-  const applyPolicy = (servers: McpServerConfig[]): McpServerConfig[] => {
-    if (policy === undefined) return servers
-    const { kept, dropped } = filterMcpServersByPolicy(servers, policy)
-    for (const d of dropped)
-      slog.warn("mcp.governance.dropped", { server: d.name, reason: d.reason })
-    return [...kept]
-  }
-  const path = resolveMcpConfigPath(envSource)
-  if (!path) return []
-  try {
-    const raw = await Bun.file(path).text()
-    const parsed = JSON.parse(raw) as unknown
-    const pluginStyle = MCPRootSchema.safeParse(parsed)
-    if (pluginStyle.success) {
-      return applyPolicy(
-        Object.entries(pluginStyle.data.mcpServers).map(([name, spec]) =>
-          pluginSpecToServerConfig(name, spec),
-        ),
-      )
-    }
-    const legacy = parsed as { servers?: McpServerConfig[] }
-    if (Array.isArray(legacy.servers)) return applyPolicy(legacy.servers)
-    slog.warn("mcp.config.error", {
-      path,
-      error: "expected {servers:[...]} or {mcpServers:{...}}",
-    })
-    return []
-  } catch (e) {
-    slog.warn("mcp.config.error", { path, error: (e as Error).message })
-    return []
-  }
-}
-
-/** §12.4 LIVE-wire — resolve the central-config MCP launch policy at the CLI
- *  composition root. NON-INTERACTIVE mirror of the hooks path in
- *  `apps/agent/index.ts#resolveCommandHookBindings` (same trust inputs:
- *  `~/.quanta/trust.json` + `QUANTA_TRUSTED_PATHS`; NO trust prompt — MCP load
- *  must never block boot on stdin; the hooks path owns interactive elevation).
- *
- *  Returns `undefined` (⇒ no filtering, legacy byte-identical) when:
- *    - `runtimeConfig().centralConfig` is OFF (strict default-OFF), or
- *    - resolution succeeded but NO layer configured `mcp.enabledServers` /
- *      `mcp.deniedServers` (avoids the behavior cliff: enabling central-config
- *      without MCP policy keeps existing `.mcp.json` servers untouched), or
- *    - resolution faulted (FAIL-SOFT availability: a corrupt local settings
- *      file must not kill every MCP server; the fault is slog'd). */
-export const resolveMcpLaunchPolicy = async (
-  slog: StructuredLogger,
-  envSource: NodeJS.ProcessEnv = process.env,
-): Promise<McpLaunchPolicy | undefined> => {
-  const rc = runtimeConfig()
-  if (!rc.centralConfig) return undefined
-  try {
-    let realCwd: string
-    try {
-      realCwd = await realpath(process.cwd())
-    } catch {
-      realCwd = process.cwd()
-    }
-    const userConfigDir = quantaHomeDir()
-    // Read-only trust persistence: `save` is a no-op — this path NEVER grants
-    // trust (no prompt), it only honors grants the hooks flow / user persisted.
-    const trustFile = joinPath(userConfigDir, "trust.json")
-    const store = await TrustStore.load({
-      load: async () => {
-        try {
-          const text = await readFile(trustFile, "utf8")
-          const parsed = JSON.parse(text) as unknown
-          return typeof parsed === "object" && parsed !== null
-            ? (parsed as Record<string, TrustRecord>)
-            : undefined
-        } catch {
-          return undefined
-        }
-      },
-      save: async () => {},
-    })
-    const trustedFromEnv = canonicalizeTrustedPaths(
-      (rc.trustedPaths ?? "").split(",").map((s) => s.trim()),
-    )
-    const trusted = store.isTrusted(realCwd) || trustedFromEnv.has(realCwd)
-    const layers = await readDiskLayers({
-      cwd: realCwd,
-      userConfigDir,
-      managedPath: osManagedSettingsPath(
-        process.platform,
-        rc.managedSettingsPath,
-        envSource.PROGRAMDATA,
-      ),
-      trusted,
-      sources: parseSettingSources(rc.centralConfigSources),
-      read: async (p: string) => {
-        try {
-          return await readFile(p, "utf8")
-        } catch {
-          // ENOENT/EACCES/… ⇒ layer absent (fail-soft, same posture as the
-          // hooks path's fsReadText).
-          return undefined
-        }
-      },
-      warn: (m: string) => slog.warn("mcp.governance.layer", { warn: m }),
-    })
-    const resolved = mergeDiskLayers(layers, trusted)
-    if (resolved.mcpEnabledServers.length === 0 && resolved.mcpDeniedServers.length === 0) {
-      return undefined
-    }
-    return {
-      enabledServers: resolved.mcpEnabledServers,
-      deniedServers: resolved.mcpDeniedServers,
-    }
-  } catch (e) {
-    slog.warn("mcp.governance.resolve_failed", { error: (e as Error).message })
-    return undefined
-  }
-}
-
-/**
- * Flags that consume the FOLLOWING argv token as their value (`--flag <value>`).
- * Their value must never become part of the prompt — e.g. `--state foo` must
- * drop both `--state` and `foo`. This list is the single source of truth shared
- * by {@link argvPrompt} (so the value is skipped, not treated as a positional)
- * and {@link argvImages} (which extracts `--image` values).
- */
-const VALUED_FLAGS = ["--state", "--resume", "--observe-dir", "--title", "--image"] as const
-
-/**
- * Build the seed prompt from positional (non-flag) argv tokens.
- *
- * ALLOWLIST semantics (inverted from the prior denylist, which leaked any
- * unknown flag into the LLM prompt — e.g. a mistyped `--worktree` was sent to
- * the model verbatim because it wasn't in the strip-list): a token becomes part
- * of the prompt ONLY when it is a positional argument — i.e. it does NOT start
- * with `-` AND it is not the value consumed by a {@link VALUED_FLAGS} flag.
- * Every `-`/`--`-prefixed token (known or not, including the `--flag=value`
- * form) is excluded by construction, so no new top-level flag can ever leak.
- *
- * Byte-identical for the common case: a plain `quanta "fix the bug"` (or any
- * mix of recognized flags + a positional prompt) yields exactly the same joined
- * positional text as before. The only behavior change is for tokens that begin
- * with `-` and were previously NOT in the denylist — those used to leak into
- * the prompt and are now correctly dropped.
- */
-export const argvPrompt = (): string => {
-  const argv = process.argv.slice(2)
-  const positionals: string[] = []
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]
-    if (a === undefined) continue
-    if (a.startsWith("-")) {
-      // A valued flag also consumes its following token, so skip the value too
-      // (prevents `--state foo` from leaving `foo` as a stray positional).
-      if ((VALUED_FLAGS as readonly string[]).includes(a)) i += 1
-      continue
-    }
-    positionals.push(a)
-  }
-  return positionals.join(" ").trim()
-}
-
-/** ADR-0083 multi-modal — extract every `--image <path>` value from argv (the
- *  flag is repeatable). Empty when no `--image` is passed (byte-identical: the
- *  CLI seed message stays text-only). */
-export const argvImages = (): string[] => {
-  const argv = process.argv.slice(2)
-  const out: string[] = []
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--image" && argv[i + 1] !== undefined) {
-      out.push(argv[i + 1] as string)
-    }
-  }
-  return out
-}
-
-export interface Features {
-  planMode: boolean
-  metrics: Metrics | undefined
-  state: string | undefined
-  resume: string | undefined
-  mcpTools: Tool[]
-  /** Stoppable handles for every loaded server. Without auto-restart these are
-   *  `McpClient` instances; with `QUANTA_MCP_AUTORESTART=1` (ADR-0435) they are
-   *  `McpReconnectSupervisor` instances — both expose a compatible `stop()`. */
-  mcpClients: McpStoppable[]
-  /** Raw configs from `QUANTA_MCP_CONFIG` — the SSOT for the `/mcp` slash
-   *  command. `loadMcpTools` drops failed entries from `mcpClients`, so
-   *  this is the only place where the surface can see all configured
-   *  servers (incl. those that failed to spawn). */
-  mcpConfigs: McpServerConfig[]
-  lspTools: Tool[]
-  /** ADR-0015: LSP nav tools (8). Default-OFF; appended to registry
-   *  when `QUANTA_LSP_TOOLS=full`. */
-  lspNavTools: Tool[]
-  /** ADR-0016: first-class git tools (4). Default-OFF; appended to
-   *  registry when `QUANTA_GIT_TOOLS=1`. */
-  gitToolList: Tool[]
-  /** Structural AST search via ast-grep (`QUANTA_AST_GREP=1`). Default-OFF;
-   *  appended to extraTools when the gate is on. */
-  astGrepTools: Tool[]
-}
-
-/** B1 (jun-04) — the stable elicitation-lease context id the inbound-sampling
- *  consent prompt binds to. Distinct from any real MCP `serverId` so a sampling
- *  consent prompt never coalesces with a server's own `elicitation/create`
- *  prompt. (The `__` prefix is not a legal MCP server name, so no collision.) */
-const SAMPLING_CONSENT_CONTEXT = "__sampling_consent__"
-
-/** B1 (jun-04) — build the OPTIONAL injectable seams for {@link loadFeatures}. */
-export interface LoadFeaturesOpts {
-  /** The assembled `LLMPort` an inbound `sampling/createMessage` delegates to.
-   *  Threaded from the host bootstrap (`finalLLM`), which builds it just before
-   *  it calls `loadFeatures`. Absent ⇒ inbound sampling is impossible regardless
-   *  of the knob (no LLM to spend ⇒ `buildSamplingWiring` returns OFF). */
-  readonly llm?: LLMPort
-  /** Test seam — inject a per-server transport factory (mirrors `McpClient`'s
-   *  `transport` option) so the e2e can drive the constructed client's inbound
-   *  path without spawning a real process. Production omits it. */
-  readonly mcpTransportFor?: (config: McpServerConfig) => McpClientTransport
-  /** Test seam — force the elicitation prompter factory interactive (mirrors
-   *  {@link buildCliElicitationPrompterFactory}'s `interactive` override) so the
-   *  consent prompter + sampling wiring are exercised without a real TTY.
-   *  Production omits it (the factory reads `process.stdin.isTTY`). */
-  readonly elicitationPrompterFor?: ElicitationPrompterFactory
-  /** H18 (jun-06 live-wire) — test seam for the MCP OAuth provider assembly: a
-   *  fake auth-server `fetchPort`, a scripted `browserFlow`, a tmp
-   *  `tokenStoreDir`, and a fake-exec `keyring` option. Forwarded verbatim to
-   *  {@link resolveMcpOAuthProvider}. Production omits it (real `globalThis.fetch`,
-   *  loopback browser flow, `<quanta-home>/mcp-oauth/`, live keyring). */
-  readonly mcpOAuthDeps?: Parameters<typeof resolveMcpOAuthProvider>[1]
-  /** H3 (jun-10 session-scoped egress) — the SESSION-SCOPED egress proxy env the
-   *  host bootstrap opened (`openSessionEgressProxy`) BEFORE this call, live for
-   *  the whole session. Threaded DOWN to `loadMcpTools` so every stdio MCP server
-   *  child's own sockets are forced through the loopback allowlist (closing the
-   *  bypass per-turn `withEgressProxy` cannot — an MCP child outlives a turn).
-   *  Absent / proxy OFF ⇒ `{}` ⇒ no proxy keys injected (byte-identical load). */
-  readonly proxyEnv?: ProxyEnvInput
-}
-
-/** B1 (jun-04) — compute the advertise-iff-able inbound-sampling wiring for the
- *  CLI MCP load. The DECISION lives HERE (the surface), not in `@/agent/mcp-bridge`
- *  (which stays a pure consumer and never imports `@/host`): only the surface
- *  has both the assembled `LLMPort` AND the interactive consent prompter.
- *
- *  ONE gate ({@link buildSamplingWiring}) yields BOTH the advertise flag (fed to
- *  {@link pickMcpNegotiator}) and the handler (fed to the `McpClient`), so the
- *  capability advertisement and the handler can never drift. Returns `undefined`
- *  (⇒ the load is byte-identical) whenever ANY of the three preconditions is
- *  absent: the knob is off (`runtimeConfig().mcpSampling`), no LLM was threaded,
- *  or no interactive consent prompter is available (headless / piped run — a
- *  remote server must never silently spend inference unattended).
- *
- *  The consent prompter REUSES the existing CLI elicitation prompter seam (the
- *  SAME `promptBoolean` an inbound `elicitation/create` routes through), bound to
- *  a dedicated {@link SAMPLING_CONSENT_CONTEXT} lease so it never coalesces with
- *  a real server's prompt. */
-/** B1 + H19 (jun-04) — the unified MCP inbound-capability wiring bundle the
- *  surface hands DOWN to `loadMcpTools` (consumed IDENTICALLY by the
- *  single-client and the supervised path). Mirrors `@/agent`'s
- *  `SamplingWiringInput`: ONE negotiator reflecting BOTH sampling AND roots, plus
- *  the answering ports — each present IFF its capability is advertised. */
-type McpInboundWiring = {
-  negotiator: CapabilityNegotiator
-  handler?: SamplingHandlerPort
-  rootsProvider?: RootsProviderPort
-}
-
-/** B1 + H19 (jun-04) — compute the advertise-iff-able inbound-capability wiring
- *  for the CLI MCP load, unifying sampling (B1) and roots (H19) into ONE bundle.
- *  The DECISION lives HERE (the surface), not in `@/agent/mcp-bridge` (which
- *  stays a pure consumer and never imports `@/host`): only the surface has the
- *  assembled `LLMPort`, the interactive consent prompter, AND the workspace cwd.
- *
- *  Two INDEPENDENT advertise-iff-able gates, each returning its `advertise` flag
- *  and the answering port from the SAME branch so they can never drift:
- *   - sampling (`buildSamplingWiring`): ON iff `QUANTA_MCP_SAMPLING=1` AND an LLM
- *     AND an interactive consent prompter (a remote server must never silently
- *     spend inference unattended);
- *   - roots (`buildRootsWiring`): ON iff `QUANTA_MCP_ROOTS=1` (the provider is the
- *     workspace cwd — always available, no extra dep).
- *
- *  The negotiator is computed ONCE from BOTH advertise flags, then VERIFIED
- *  against its compiled record so we NEVER advertise a capability we would
- *  answer with `-32601` (the base `QUANTA_MCP_CAPS=full` must be on for ANY
- *  inbound capability — `pickMcpNegotiator` returns the `{}` default otherwise,
- *  in which case both flags collapse to OFF). Returns `undefined` (⇒ the load is
- *  byte-identical) when NEITHER capability ends up advertised. */
-const resolveMcpInboundWiring = (
-  llm: LLMPort | undefined,
-  elicitationPrompterFor: ElicitationPrompterFactory | undefined,
-): McpInboundWiring | undefined => {
-  // --- sampling gate (B1) ---
-  const consent: ElicitationPrompter | undefined =
-    elicitationPrompterFor !== undefined
-      ? elicitationPrompterFor(SAMPLING_CONSENT_CONTEXT)
-      : undefined
-  const samplingDeps = llm !== undefined && consent !== undefined ? { llm, consent } : undefined
-  const sampling = buildSamplingWiring(runtimeConfig().mcpSampling, samplingDeps)
-
-  // --- roots gate (H19) — provider is the session workspace cwd ---
-  const roots = buildRootsWiring(runtimeConfig().mcpRoots, process.cwd())
-
-  // The negotiator reflects BOTH capabilities, computed ONCE. `pickMcpNegotiator`
-  // only advertises either under `QUANTA_MCP_CAPS=full`; absent ⇒ the `{}`
-  // default ⇒ neither is advertised (both flags collapse to OFF below).
-  const negotiator = pickMcpNegotiator(process.env, {
-    ...(sampling.advertise ? { sampling: true } : {}),
-    ...(roots.advertise ? { roots: true } : {}),
-  })
-  const compiled = negotiator.compile()
-  // VERIFY each handler/provider against the compiled record so a handler/
-  // provider is wired IFF the negotiator will actually advertise it (guards the
-  // inverse drift: `QUANTA_MCP_SAMPLING=1` / `QUANTA_MCP_ROOTS=1` WITHOUT
-  // `QUANTA_MCP_CAPS=full` ⇒ the capability is NOT advertised ⇒ no port wired).
-  const handler =
-    sampling.advertise && sampling.handler !== undefined && compiled.sampling !== undefined
-      ? sampling.handler
-      : undefined
-  const rootsProvider =
-    roots.advertise && roots.provider !== undefined && compiled.roots !== undefined
-      ? roots.provider
-      : undefined
-  // Nothing advertised ⇒ omit the bundle entirely (byte-identical load).
-  if (handler === undefined && rootsProvider === undefined) return undefined
-  return {
-    negotiator,
-    ...(handler !== undefined ? { handler } : {}),
-    ...(rootsProvider !== undefined ? { rootsProvider } : {}),
-  }
-}
-
-/** Assemble the optional `loadMcpTools` opts bag from the resolved feature
- *  gates. Extracted from {@link loadFeatures} so the spread branches do not push
- *  that function over biome's cognitive-complexity cap. Every field is
- *  presence-only: an empty bag is byte-identical to passing `undefined` (every
- *  field is read via `opts?.x` in the bridge). */
-const buildMcpLoadOpts = (
-  slog: StructuredLogger,
-  args: {
-    readonly autoRestart: boolean
-    readonly inboundWiring: ReturnType<typeof resolveMcpInboundWiring>
-    readonly oauthProvider: McpOAuthProviderPort | undefined
-    readonly opts: LoadFeaturesOpts
-  },
-): Parameters<typeof loadMcpTools>[2] => ({
-  // B1 + H19 — the SAME unified `{ negotiator, handler?, rootsProvider? }` bundle
-  // feeds BOTH paths. On the supervised path it is BAKED into the restart factory
-  // (so a reconnected client re-advertises); on the single-client path it is the
-  // `samplingWiring` opt the bridge applies to the one client. The transport seam
-  // (test-only) is threaded into the supervisor factory too so a supervised
-  // client can be driven by a scripted transport. H18 (jun-06) — the OAuth
-  // provider rides BOTH paths identically: baked into the supervisor factory AND
-  // passed as the single-client `oauthProvider` opt.
-  ...(args.autoRestart
-    ? {
-        supervisorDepsFor: mcpSupervisorDepsFor(
-          slog,
-          args.inboundWiring,
-          args.opts.mcpTransportFor,
-          args.oauthProvider,
-          args.opts.proxyEnv,
-        ),
-      }
-    : {}),
-  ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
-  ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
-  ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
-  // H3 (jun-10 session-scoped egress) — the session proxy env (opened once at
-  // bootstrap, BEFORE any MCP spawn) rides BOTH the single-client and the
-  // supervised path so every stdio server child's own sockets are forced through
-  // the loopback allowlist. Absent / proxy OFF ⇒ slot omitted ⇒ byte-identical.
-  ...(args.opts.proxyEnv !== undefined ? { proxyEnv: args.opts.proxyEnv } : {}),
-  // §19.1 (QUANTA_MCP_TOOL_ANNOTATIONS) — the global default-OFF master switch.
-  // OFF (default) ⇒ slot omitted ⇒ the bridge's `annotationsHonored` stays false
-  // ⇒ `honored = annotationsHonored && trusted` is false for EVERY tool, so the
-  // read/concurrency predicates keep their conservative classification
-  // (byte-identical). ON ⇒ a TRUSTED server's annotations may elevate them.
-  ...(runtimeConfig().mcpToolAnnotations ? { annotationsHonored: true } : {}),
-})
-
-/** Start the configured MCP servers (or short-circuit to an empty bundle when
- *  none are configured), returning the same `{ tools, clients, resources? }`
- *  shape `loadMcpTools` produces. Extracted so {@link loadFeatures} carries no
- *  inline ternary branch over the load (keeps it under biome's cognitive-
- *  complexity cap). Zero configs ⇒ no client started (byte-identical). */
-const loadMcpToolsOrEmpty = async (
-  mcpConfigs: McpServerConfig[],
-  elicitationPrompterFor: ElicitationPrompterFactory | undefined,
-  mcpLoadOpts: Parameters<typeof loadMcpTools>[2],
-): Promise<{ tools: Tool[]; clients: McpStoppable[]; resources?: ResourcesHandle }> => {
-  if (mcpConfigs.length === 0) return { tools: [], clients: [] }
-  return loadMcpTools(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
-}
-
-/** N3 (QUANTA_MCP_RESOURCES) — build the four `mcp_*` resource/prompt tools when
- *  the knob is ON AND the bridge produced an aggregate `ResourcesHandle` (i.e. at
- *  least one connected server advertised `resources`/`prompts`). They register
- *  through the mcp-origin `mcpTools` array (NOT `DefaultToolPorts`) so the
- *  registry tags them `mcp` ⇒ `deriveProvenance(name,"mcp")` ⇒ the H2/ADR-0471
- *  `<untrusted-source>` envelope wraps their output at dispatch (the documented
- *  security invariant for these tools). Knob off OR no capable server ⇒ `[]` ⇒
- *  the tools are absent + the registry is byte-identical. Extracted so
- *  {@link loadFeatures} stays under biome's cognitive-complexity cap. */
-const buildMcpResourceTools = (resources: ResourcesHandle | undefined): Tool[] =>
-  runtimeConfig().mcpResources && resources !== undefined ? mcpResourcesTools(resources) : []
-
 /** Resolve all default-OFF feature flags from env/argv and start MCP servers.
  *  Logs each enabled feature via the structured logger (minimal).
  *
@@ -1752,6 +853,38 @@ export const buildTooling = (
   })
 }
 
+// ── ADR-0024 god-module split: the argv / flag-gate accessors, the MCP plumbing,
+//    and the per-turn shell-snapshot composition now live in `./internal/*`.
+//    Re-exported here verbatim so every existing importer keeps resolving the
+//    complete original public surface from `./internal`.
+export {
+  argvImages,
+  argvPrompt,
+  astGrepEnabled,
+  gitCoChangeEnabled,
+  gitToolsEnabled,
+  hasArg,
+  idModeEnabled,
+  lspEnabled,
+  lspNavEnabled,
+  newSessionFlag,
+  observeDir,
+  planEnabled,
+  playbookTriggerFlag,
+  resumePath,
+  statePath,
+  titleFlag,
+} from "./internal/argv"
+export type { Features, LoadFeaturesOpts } from "./internal/mcp"
+export {
+  mcpAutoRestartEnabled,
+  readMcpConfig,
+  resolveMcpConfigPath,
+  resolveMcpLaunchPolicy,
+  resolveMcpOAuthProvider,
+} from "./internal/mcp"
+export type { BuildShellSnapshotConfigOpts } from "./internal/shell-snapshot"
+export { buildShellSnapshotConfig } from "./internal/shell-snapshot"
 export type { ResolveResumeInput, ResumeResolution } from "./resume"
 // ── Resume state machine (`isPathLikeToken`, `defaultUntitled`, `resolveResume`
 //    + types) lives in `./resume` (ADR-0024 split). Re-exported here so existing
