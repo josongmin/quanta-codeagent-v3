@@ -10,7 +10,8 @@
  * benchmark-shaped authority: the provenance union below EXCLUDES gold-patch /
  * fail-to-pass / pass-to-pass / instance-id / known-file-regex / issue-family-regex.
  * Downstream tickets feed these witnesses into generation, candidate families, and
- * public contracts; "clean authority" is decided from `authority + provenance + kind`,
+ * repair/review evidence; they are not, by themselves, a required public-contract
+ * authority. "Clean authority" is decided from `authority + provenance + kind`,
  * never from a magic threshold or a benchmark string match.
  *
  * No-source-body invariant: a witness carries path/symbol NAMES only. There is no

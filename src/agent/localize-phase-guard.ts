@@ -47,6 +47,11 @@ export interface LocalizePhaseConfig {
    *  `benchPostureFromState`); suppressed by `QUANTA_BENCH_LSP_STEER=off` (the
    *  A/B baseline). Absent here ⇒ the original (pre-steer) message. */
   lspGroundingSteer?: boolean
+  /** Optional dynamic CHA steer block naming sibling override sites of the
+   *  localized method. Bench wires this per-instance only when the
+   *  `cha-multisite-steer` knob is on and static analysis found concrete
+   *  siblings; absent/empty ⇒ the original message. */
+  chaMultisiteSteer?: string
 }
 
 /**
@@ -139,13 +144,15 @@ export const SPEC_FIDELITY_STEER =
 /** The forcing nudge injected when a mutating tool is attempted in Phase 1.
  *  Builder, not constant — the turn header `(turn N/M)` needs interpolation.
  *  `lspSteer` (default false) appends {@link LSP_GROUNDING_STEER}; false keeps
- *  the byte-identical frozen-`agentless-v1` message. */
+ *  the byte-identical frozen-`agentless-v1` message. `chaMultisiteSteer`
+ *  appends a separate concrete multi-site block when present. */
 export const buildLocalizePhaseForceMessage = (
   turn: number,
   phase1Turns: number,
   lspSteer = false,
+  chaMultisiteSteer?: string,
 ): string =>
-  `Phase 1 (localization, turn ${turn + 1}/${phase1Turns}): edits are blocked until you have identified the exact file and function to modify. Use \`search_codebase\` for broad repo search, \`localize\` for fault localization, then \`read\`, \`grep\`, or \`glob\` to confirm the candidate location.${lspSteer ? LSP_GROUNDING_STEER : ""} Re-confirm by reading the candidate location, then proceed.`
+  `Phase 1 (localization, turn ${turn + 1}/${phase1Turns}): edits are blocked until you have identified the exact file and function to modify. Use \`search_codebase\` for broad repo search, \`localize\` for fault localization, then \`read\`, \`grep\`, or \`glob\` to confirm the candidate location.${lspSteer ? LSP_GROUNDING_STEER : ""}${typeof chaMultisiteSteer === "string" && chaMultisiteSteer !== "" ? `\n\n${chaMultisiteSteer}` : ""}\n\nRe-confirm by reading the candidate location, then proceed.`
 
 /** Is `phase1Turns` a positive integer (the only ACTIVE configuration)? Any
  *  other value (undefined, 0, negative, NaN, Infinity, non-integer) ⇒ FALSE
@@ -194,6 +201,11 @@ export const decideLocalizePhase = (args: {
   if (!MUTATING_TOOL_NAMES.has(toolName)) return { block: false }
   return {
     block: true,
-    text: buildLocalizePhaseForceMessage(state.turn, phase1Turns, cfg.lspGroundingSteer === true),
+    text: buildLocalizePhaseForceMessage(
+      state.turn,
+      phase1Turns,
+      cfg.lspGroundingSteer === true,
+      cfg.chaMultisiteSteer,
+    ),
   }
 }

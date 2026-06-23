@@ -8,8 +8,8 @@ import type { MweProofState } from "./mwe-proof"
 import type { ReproConsensusProofState } from "./repair/resolved-consensus"
 import type { PublicRegressionProofState } from "./repo-regression-discovery-adapter"
 import type { SelectionProofSource, SelectionProofState } from "./selection-types"
-import type { StaticWitnessDiagnostic } from "./static-witness-adapter"
 import type { StaticWitness } from "./static-witness"
+import type { StaticWitnessDiagnostic } from "./static-witness-adapter"
 
 /**
  * OPC-07 — typed, stage-scoped LLM evidence packet.
@@ -639,9 +639,18 @@ export const recordLlmEvidencePacket = (
  */
 export const ownerSliceMissingEvidence = (
   ownerEvidence: readonly OwnerEvidenceFact[],
-): MissingEvidenceFact[] =>
-  ownerEvidence
-    .filter((o) => o.sourceSlice === undefined)
+): MissingEvidenceFact[] => {
+  const filesWithSlice = new Set(
+    ownerEvidence.filter((o) => o.sourceSlice !== undefined).map((o) => o.file),
+  )
+  const seenMissing = new Set<string>()
+  return ownerEvidence
+    .filter((o) => o.sourceSlice === undefined && !filesWithSlice.has(o.file))
+    .filter((o) => {
+      if (seenMissing.has(o.file)) return false
+      seenMissing.add(o.file)
+      return true
+    })
     .map((o) => ({
       kind: "owner_slice",
       // B4: distinguish a binary/non-source file from a genuine symbol-not-found.
@@ -652,10 +661,14 @@ export const ownerSliceMissingEvidence = (
           ? `non_source_file:${o.file}`
           : `no_resolvable_slice:${o.file}`,
     }))
+}
 
 export const staticWitnessDiagnosticsFacts = (
   diagnostics: readonly StaticWitnessDiagnostic[] | undefined,
-): { readonly staticFacts: readonly StaticFact[]; readonly missingEvidence: readonly MissingEvidenceFact[] } => {
+): {
+  readonly staticFacts: readonly StaticFact[]
+  readonly missingEvidence: readonly MissingEvidenceFact[]
+} => {
   if (diagnostics === undefined || diagnostics.length === 0) {
     return { staticFacts: [], missingEvidence: [] }
   }

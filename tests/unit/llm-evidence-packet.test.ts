@@ -293,8 +293,7 @@ describe("llm evidence packet — stage builders", () => {
     )
     expect(parsed.staticFacts).toContainEqual({
       kind: "static_witness_unsupported_language",
-      value:
-        "widget.ts: static-witness is Python-only and found no recognizable Python structure",
+      value: "widget.ts: static-witness is Python-only and found no recognizable Python structure",
     })
     expect(parsed.missingEvidence).toContainEqual({
       kind: "static_witness",
@@ -718,6 +717,24 @@ describe("llm evidence packet — generation (self-contained, bounded)", () => {
       contracts: [],
     })
     expect(rendered).toContain("no_resolvable_slice:pkg/owner.py")
+  })
+
+  test("path-only owner stub does not create missingEvidence when the same file has a static-witness slice", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Some public issue.",
+      ownerEvidence: [
+        { file: "pkg/owner.py", symbols: [], provenance: "selection-owner" },
+        {
+          file: "pkg/owner.py",
+          symbols: ["run"],
+          provenance: "static-witness:override-family/ast/authoritative",
+          sourceSlice: "def run():\n    return 1",
+        },
+      ],
+      contracts: [],
+    })
+    expect(rendered).toContain("def run")
+    expect(rendered).not.toContain("no_resolvable_slice:pkg/owner.py")
   })
 })
 

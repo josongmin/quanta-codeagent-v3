@@ -35,9 +35,9 @@ export const buildClosureSession = (args: {
   stage1Files: readonly Stage1RankedFile[]
   issueFiles?: readonly string[]
   ownerResolved?: readonly { file: string; forSymbol: string }[]
-  /** SCAFF-03 — authoritative owner files digested from typed-relation static
-   *  witnesses (see `witnessAuthoritativeOwners`). Omitted/empty ⇒ no witness
-   *  owners (byte-identical to before SCAFF-03). */
+  /** SCAFF-03 — structural owner candidates digested from typed-relation static
+   *  witnesses. They stay advisory in clean owner admission; omitted/empty ⇒ no
+   *  witness owner evidence (byte-identical to before SCAFF-03). */
   witnessOwners?: readonly { file: string; forSymbol?: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean }
   ownerNearTests?: readonly string[]
@@ -55,10 +55,10 @@ export const buildClosureSession = (args: {
       stage1Files: args.stage1Files,
       ...(issueFiles.length > 0 ? { issueFiles } : {}),
       ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-      // SCAFF-03: witness owners feed ONLY the rule-based CLEAN path. In legacy/
-      // research mode (ownerClean falsy) they are withheld so the scored owner
-      // packet stays BYTE-IDENTICAL — a `static-witness` source would otherwise
-      // perturb legacy score/corroboration (T-OWN-12 "research unchanged").
+      // SCAFF-03: witness owners feed ONLY the rule-based CLEAN path as advisory
+      // structural evidence. In legacy/research mode (ownerClean falsy) they are
+      // withheld so the scored owner packet stays BYTE-IDENTICAL (T-OWN-12
+      // "research unchanged").
       ...(args.ownerClean === true && args.witnessOwners && args.witnessOwners.length > 0
         ? { witnessOwners: args.witnessOwners }
         : {}),

@@ -27,6 +27,7 @@ import { adversarialReproKnob } from "@/runner/knobs/knobs/adversarial-repro"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
+import { chaMultisiteSteerKnob } from "@/runner/knobs/knobs/cha-multisite-steer"
 import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { closureRepairKnob } from "@/runner/knobs/knobs/closure-repair"
@@ -87,6 +88,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
   asAnyKnob(benchInLoopExecKnob),
   asAnyKnob(branchSearchKnob),
+  asAnyKnob(chaMultisiteSteerKnob),
   asAnyKnob(closeoutCriticKnob),
   asAnyKnob(closeoutGuardKnob),
   asAnyKnob(closureRepairKnob),

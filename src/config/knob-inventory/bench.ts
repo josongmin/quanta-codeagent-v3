@@ -243,6 +243,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
+    envKey: "QUANTA_BENCH_CHA_MULTISITE_STEER",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (gap-C): when a localized Python method has sibling overrides under the same base class, append a concrete CHA-derived multi-site steer naming the sibling file:line sites (django-11138 class). Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_CLOSURE_REPAIR",
     kind: "int",
     default: undefined,

@@ -376,6 +376,10 @@ export interface BenchPosture {
   /** gap-B: spec-fidelity steer (minimal-literal-fix; fires only when the issue
    *  declares an exact expected output). */
   readonly specFidelitySteer: boolean
+  /** jun-24 django-11138: when a localized Python method has sibling overrides
+   *  under the same base class, append a concrete CHA-derived multi-site steer
+   *  naming each sibling file:line. */
+  readonly chaMultisiteSteer: boolean
   /** WS1 mini-parity: thin the round-0 prompt — suppress the repro directive
    *  prose at round 0 (the agent's first attempt), re-attaching it only on
    *  repair rounds ≥1. The one-line closure (first-edit) hint is kept. */
@@ -493,7 +497,7 @@ export const benchPostureFromState = (
   // resolves them: QUANTA_BENCH_FAULT_EVIDENCE, QUANTA_BENCH_VERIFICATION_PLAN,
   // QUANTA_BENCH_PRIMARY_RAIL, QUANTA_BENCH_PATCH_HYGIENE,
   // QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
-  // QUANTA_BENCH_SPEC_FIDELITY_STEER.
+  // QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -504,6 +508,7 @@ export const benchPostureFromState = (
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
+  const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
@@ -552,6 +557,7 @@ export const benchPostureFromState = (
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,
+    chaMultisiteSteer,
     round0Minimal,
   }
 }

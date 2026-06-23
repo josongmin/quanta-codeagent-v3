@@ -218,7 +218,14 @@ const cleanDriftRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
   )
 }
 
-const bestMissingFamily = (scored: readonly ScoredEntry[]): CandidateFamily | undefined => {
+interface MissingFamilyRepairTarget {
+  readonly family: CandidateFamily
+  readonly missingFiles: readonly string[]
+}
+
+const bestMissingFamily = (
+  scored: readonly ScoredEntry[],
+): MissingFamilyRepairTarget | undefined => {
   const ranked = scored
     .map((entry, order) => ({
       family: candidateFamilyOf(entry.candidate),
@@ -238,14 +245,18 @@ const bestMissingFamily = (scored: readonly ScoredEntry[]): CandidateFamily | un
       } => entry.family !== undefined && entry.missing.length > 0,
     )
     .sort((a, b) => a.family.ownerFiles.length - b.family.ownerFiles.length || a.order - b.order)
-  return ranked[0]?.family
+  const best = ranked[0]
+  return best === undefined ? undefined : { family: best.family, missingFiles: best.missing }
 }
 
 const familyRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
-  const family = bestMissingFamily(scored)
-  if (family === undefined) return undefined
-  return seedForCandidateFamilyCoverageRepair(family, candidateFamilyCoverageMissing(family, []))
+  const target = bestMissingFamily(scored)
+  if (target === undefined) return undefined
+  return seedForCandidateFamilyCoverageRepair(target.family, target.missingFiles)
 }
+
+const familyCoverageRepairRequired = (scored: readonly ScoredEntry[]): boolean =>
+  scored.some(hasNonEmptyPatch) && bestMissingFamily(scored) !== undefined
 
 const staticSanityReasons = (entry: ScoredEntry): readonly string[] =>
   entry.verdict.reasons.filter((reason) => reason.startsWith("hard:staticSanity="))
@@ -393,6 +404,22 @@ const REPAIR_PLAN_RULES: readonly {
     },
   },
   {
+    when: (c) =>
+      c.proofRequired &&
+      c.patched.length > 0 &&
+      !c.proofStates.some((state) => state === "proof_positive") &&
+      familyCoverageRepairRequired(c.scored),
+    plan: {
+      summary:
+        "Selector feedback: at least one generated candidate selected a typed static family but edited only a partial family surface.",
+      directive:
+        "Regenerate from the base tree. Complete the missing family owner files named below if public source evidence confirms the family relation; otherwise produce no patch for that family rather than a partial single-site edit. The next candidate still must satisfy positive executed public proof before submit.",
+      includeFamilyRepair: true,
+      includeReproFailureTrace: true,
+      includeOracleFailureSeed: true,
+    },
+  },
+  {
     when: (c) => cleanDriftRepairRequired(c.scored),
     plan: {
       summary:
@@ -465,6 +492,10 @@ export const buildRepairPacketText = (args: {
    *  evidence carries the exact symbol slice instead of a path-only stub; absent
    *  ⇒ path-only (B2 surfaces the gap as `owner_slice` missingEvidence). */
   readonly readSource?: (rel: string) => string | null
+  /** Candidate-generation owner evidence, including static-witness exact slices.
+   *  Repair packets filter this to the current focus family/files and reuse it as
+   *  public source context only; it never changes selector admission authority. */
+  readonly structuralOwnerEvidence?: readonly OwnerEvidenceFact[]
   readonly recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
 }): string => {
   const latestNonEmpty = [...args.scored].reverse().find(hasNonEmptyPatch)?.candidate
@@ -490,15 +521,13 @@ export const buildRepairPacketText = (args: {
         : (focusCandidate.familyOwnerFiles ?? focusCandidate.files),
     ),
   ]
-  // B1: REUSE the slice-capable factory so a readable owner + issue symbols
-  // attaches the EXACT symbol slice (was a path-only `symbols:[]` stub that
-  // forced the router's localizationCertain=false in every repair phase). No
-  // reader / no resolvable symbol ⇒ path-only (B2 surfaces the gap downstream).
-  const ownerEvidence: OwnerEvidenceFact[] = assembleOwnerEvidence({
+  const ownerEvidence = repairOwnerEvidence({
     ownerFiles,
-    provenance: "repair-owner",
     ...(args.issueSymbols !== undefined ? { issueSymbols: args.issueSymbols } : {}),
     ...(args.readSource !== undefined ? { readSource: args.readSource } : {}),
+    ...(args.structuralOwnerEvidence !== undefined
+      ? { structuralOwnerEvidence: args.structuralOwnerEvidence }
+      : {}),
   })
   // B7: the focus candidate's SOURCE-ONLY edit surface (touched files/symbols
   // from its OWN diff). Never a hidden-test path / command. Empty patch ⇒ none.
@@ -556,4 +585,43 @@ export const buildRepairPacketText = (args: {
   args.recordLlmEvidencePacket?.(reviewPacket)
   args.recordLlmEvidencePacket?.(packet)
   return `${renderLlmEvidencePacket(reviewPacket)}\n\n${renderLlmEvidencePacket(packet)}`
+}
+
+const dedupeOwnerEvidence = (facts: readonly OwnerEvidenceFact[]): OwnerEvidenceFact[] => {
+  const byKey = new Map<string, OwnerEvidenceFact>()
+  for (const fact of facts) {
+    const key = JSON.stringify({
+      file: fact.file,
+      symbols: fact.symbols,
+      provenance: fact.provenance,
+      sourceSlice: fact.sourceSlice,
+      sliceMiss: fact.sliceMiss,
+      ambiguousSliceMatch: fact.ambiguousSliceMatch,
+    })
+    if (!byKey.has(key)) byKey.set(key, fact)
+  }
+  return [...byKey.values()]
+}
+
+const repairOwnerEvidence = (args: {
+  readonly ownerFiles: readonly string[]
+  readonly issueSymbols?: readonly string[]
+  readonly readSource?: (rel: string) => string | null
+  readonly structuralOwnerEvidence?: readonly OwnerEvidenceFact[]
+}): OwnerEvidenceFact[] => {
+  // B1: REUSE the slice-capable factory so a readable owner + issue symbols
+  // attaches the EXACT symbol slice. Structural evidence from generation carries
+  // static-witness slices for issue-symbol-empty cases; both are public source
+  // context and neither changes selector admission authority.
+  const direct = assembleOwnerEvidence({
+    ownerFiles: args.ownerFiles,
+    provenance: "repair-owner",
+    ...(args.issueSymbols !== undefined ? { issueSymbols: args.issueSymbols } : {}),
+    ...(args.readSource !== undefined ? { readSource: args.readSource } : {}),
+  })
+  const ownerFileSet = new Set(args.ownerFiles)
+  const structural = (args.structuralOwnerEvidence ?? []).filter((fact) =>
+    ownerFileSet.has(fact.file),
+  )
+  return dedupeOwnerEvidence([...direct, ...structural])
 }

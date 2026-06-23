@@ -76,6 +76,7 @@ import { setKnobOverride } from "@/shared/knob-overrides"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { Tool } from "@/tool"
 import { astGrepTool, buildDefaultTools, findReferencesTool, ToolRegistry } from "@/tool"
+import { localizeTool } from "@/tool/localize"
 import { testRunnerTool } from "@/tool/test-runner"
 import { reproRunArgv } from "../corpus/dataset"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
@@ -91,14 +92,22 @@ import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-c
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
   buildCandidateFamilyBundleFromWitness,
+  type CandidateFamily,
   type CandidateFamilyBundle,
+  candidateFamilyCoverageMissing,
   withStaticWitnessFamilies,
 } from "./candidate-families"
+import {
+  buildMultisiteSteer,
+  findEnclosingPythonMethod,
+  findSiblingOverrideSites,
+} from "./cha-multisite"
 import {
   buildClosureSession,
   buildPhasePatchHygiene,
   type ClosureSessionState,
 } from "./closure-session"
+import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { validateGoldPatch } from "./gold-sanity"
@@ -137,11 +146,7 @@ import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import {
-  buildCleanSelectionPublicContracts,
-  buildMultiSiteFamilyContract,
-  mergePublicContractBundles,
-} from "./public-contract-bundle"
+import { buildCleanSelectionPublicContracts } from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
@@ -184,10 +189,7 @@ import {
   ObservationError,
   type Wiring,
 } from "./report"
-import {
-  calibrateReproOracle,
-  unavailableReproOracleCalibration,
-} from "./repro-oracle-calibration"
+import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -210,15 +212,14 @@ import {
   summarizeSelection,
 } from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
-import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessAuthoritativeOwners } from "./static-witness"
 import {
   buildAstStaticWitnesses,
-  staticWitnessLanguageDiagnostics,
   type StaticWitnessDiagnostic,
+  staticWitnessLanguageDiagnostics,
 } from "./static-witness-adapter"
 import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
@@ -990,6 +991,8 @@ export interface PrepareIssueHintDeps {
 }
 
 const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
+const CHA_MULTISITE_MAX_FILES = 3
+const CHA_MULTISITE_LOCALIZE_MAX_RESULTS = 5
 
 const cleanUniqueList = (values: readonly string[]): string[] => {
   const seen = new Set<string>()
@@ -1118,6 +1121,105 @@ export const prepareIssueHint = async (
   // LLM call. Pure observation; the returned hint is unchanged.
   deps.onCandidates?.(result.files)
   return composeAgentlessHint(result)
+}
+
+/** Parse ranked `path:line` rows from the localize tool output. Group headers,
+ *  malformed rows, and duplicate lines are ignored. */
+export const parseLocalizeRankedLines = (output: string): readonly number[] => {
+  const seen = new Set<number>()
+  const out: number[] = []
+  for (const row of output.split("\n")) {
+    const m = row.match(/^\s{2}.+?:(\d+)\s{2}/)
+    if (!m) continue
+    const line = Number(m[1])
+    if (!Number.isInteger(line) || line < 1 || seen.has(line)) continue
+    seen.add(line)
+    out.push(line)
+  }
+  return out
+}
+
+const runScopedLocalize = async (args: {
+  readonly sandbox: string
+  readonly targetRelFile: string
+  readonly query: string
+  readonly timeoutMs?: number
+}): Promise<string | undefined> => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs ?? DEFAULT_PREPARE_TIMEOUT_MS)
+  let result: { ok: boolean; output: string } | undefined
+  try {
+    for await (const event of localizeTool.execute(
+      {
+        query: args.query,
+        path: args.targetRelFile,
+        max_results: CHA_MULTISITE_LOCALIZE_MAX_RESULTS,
+      },
+      { cwd: args.sandbox, signal: controller.signal },
+    )) {
+      if (event.type === "result") result = event.result
+    }
+  } catch {
+    return undefined
+  } finally {
+    clearTimeout(timer)
+  }
+  return result?.ok === true ? result.output : undefined
+}
+
+const resolveLocalizedPythonMethod = async (args: {
+  readonly sandbox: string
+  readonly targetRelFile: string
+  readonly query: string
+}): Promise<string | undefined> => {
+  if (!args.targetRelFile.endsWith(".py")) return undefined
+  const output = await runScopedLocalize(args)
+  if (output === undefined) return undefined
+  for (const line of parseLocalizeRankedLines(output)) {
+    const method = await findEnclosingPythonMethod({
+      exec,
+      repoRoot: args.sandbox,
+      targetRelFile: args.targetRelFile,
+      line,
+      timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
+    })
+    if (method !== undefined) return method
+  }
+  return undefined
+}
+
+const resolveChaMultisiteSteer = async (args: {
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly posture: BenchPosture
+  readonly localizeCandidates: readonly string[]
+}): Promise<string | undefined> => {
+  if (!args.posture.chaMultisiteSteer || args.instance.swebench === undefined) return undefined
+  const query = normalizePublicIssueText(args.instance.problemStatement) ?? args.instance.problemStatement
+  if (typeof query !== "string" || query.trim() === "") return undefined
+  const candidates = cleanUniqueList(args.localizeCandidates)
+    .filter((file) => file.endsWith(".py"))
+    .slice(0, CHA_MULTISITE_MAX_FILES)
+  for (const targetRelFile of candidates) {
+    const method = await resolveLocalizedPythonMethod({
+      sandbox: args.sandbox,
+      targetRelFile,
+      query,
+    })
+    if (method === undefined) continue
+    const steer = buildMultisiteSteer(
+      method,
+      await findSiblingOverrideSites({
+        exec,
+        repoRoot: args.sandbox,
+        targetRelFile,
+        method,
+        timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
+      }),
+    )
+    if (steer !== undefined) return steer
+  }
+  return undefined
 }
 
 /**
@@ -1775,6 +1877,9 @@ const resolveIssueHintText = (
   )
 }
 
+const joinPromptBlocks = (...blocks: readonly (string | undefined)[]): string =>
+  blocks.filter((block): block is string => block !== undefined && block !== "").join("\n\n")
+
 const buildPromptText = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -1783,6 +1888,7 @@ const buildPromptText = (args: {
   readonly precomputedHint?: string
   readonly reproHint?: string
   readonly closureHint?: string
+  readonly chaMultisiteSteer?: string
 }): string => {
   const leanPrompt = gateOn(process.env, "QUANTA_BENCH_LEAN_PROMPT")
   const baseText = composeBaseText(
@@ -1795,7 +1901,10 @@ const buildPromptText = (args: {
   const round0ReproSuppressed = args.opt.round0Minimal === true && args.seedMsg === undefined
   const effectiveReproHint = round0ReproSuppressed ? undefined : args.reproHint
   return composePromptText({
-    issueHint: resolveIssueHintText(args.instance, args.opt, args.precomputedHint),
+    issueHint: joinPromptBlocks(
+      resolveIssueHintText(args.instance, args.opt, args.precomputedHint),
+      args.chaMultisiteSteer,
+    ),
     baseText,
     ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
     ...(effectiveReproHint !== undefined ? { reproHint: effectiveReproHint } : {}),
@@ -1864,6 +1973,8 @@ export const buildConfig = (
   postureOverride?: BenchPosture,
   /** Optional injected per-phase knob state (must match `postureOverride`). */
   stateOverride?: BenchKnobState,
+  /** Optional dynamic concrete multi-site steer naming sibling override sites. */
+  chaMultisiteSteer?: string,
 ) => {
   // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
   // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
@@ -1931,6 +2042,7 @@ export const buildConfig = (
     ...(precomputedHint !== undefined ? { precomputedHint } : {}),
     ...(reproHint !== undefined ? { reproHint } : {}),
     ...(closureHint !== undefined ? { closureHint } : {}),
+    ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
   const messages: Message[] = [
     {
@@ -1998,12 +2110,21 @@ export const buildConfig = (
   const noPatchApplied = opt.noPatchBreaker
     ? wireNoPatchBreaker(knobApplied, opt.noPatchForceFraction)
     : knobApplied
+  const localizePhase =
+    opt.localizePhase !== undefined
+      ? {
+          ...opt.localizePhase,
+          ...(chaMultisiteSteer !== undefined && chaMultisiteSteer !== ""
+            ? { chaMultisiteSteer }
+            : {}),
+        }
+      : undefined
   return wireOptionalAgentPorts(
     {
       ...noPatchApplied,
       ...(opt.subagent !== undefined ? { subagent: opt.subagent } : {}),
       ...(opt.skills !== undefined ? { skills: opt.skills } : {}),
-      ...(opt.localizePhase !== undefined ? { localizePhase: opt.localizePhase } : {}),
+      ...(localizePhase !== undefined ? { localizePhase } : {}),
       ...(opt.branchSearch !== undefined ? { branchSearch: opt.branchSearch } : {}),
     },
     process.env,
@@ -2132,6 +2253,7 @@ const runAgentOnce = async (
   closureHint: string | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaMultisiteSteer?: string,
 ): Promise<RunOnceResult> => {
   const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
   // Knob telemetry (2026-05-26): emit ONE `knobs_applied` event per
@@ -2153,6 +2275,7 @@ const runAgentOnce = async (
       closureHint,
       postureOverride,
       stateOverride,
+      chaMultisiteSteer,
     ),
   )
   // Capture the cumulative diff CURRENTLY in the worktree (without resetting
@@ -2179,6 +2302,7 @@ const runAgentPhase = async (
   closureHint: string | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaMultisiteSteer?: string,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: StopReason | undefined
@@ -2220,6 +2344,7 @@ const runAgentPhase = async (
           closureHint,
           postureOverride,
           stateOverride,
+          chaMultisiteSteer,
         ),
       )
       turns = outcome.turns
@@ -2425,6 +2550,7 @@ const runRepairPhase = async (
   verificationTarget: VerificationTargetFact | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaMultisiteSteer?: string,
 ): Promise<Phase> => {
   // B1/B3: thread the slice-resolving inputs into the classic-repair packet so
   // its owner evidence carries exact slices (paired with issue symbols) and it
@@ -2470,6 +2596,7 @@ const runRepairPhase = async (
             closureHint,
             postureOverride,
             stateOverride,
+            chaMultisiteSteer,
           ),
         validate,
         buildContext: (ctxArgs) => {
@@ -2696,6 +2823,7 @@ const generateSelectionCandidate = async (args: {
   readonly mergeHint: (seed: string | undefined) => string | undefined
   readonly postureOverride: BenchPosture | undefined
   readonly stateOverride: BenchKnobState | undefined
+  readonly chaMultisiteSteer: string | undefined
   readonly concurrency: number | undefined
   readonly baseValidatedRed: boolean | null
   readonly generationErrors: Map<number, string>
@@ -2717,6 +2845,7 @@ const generateSelectionCandidate = async (args: {
       args.mergeHint(args.seed),
       args.postureOverride,
       args.stateOverride,
+      args.chaMultisiteSteer,
     )
     args.addTurns(phase.turns)
     const generationError = selectionGenerationErrorOf({
@@ -2993,6 +3122,7 @@ const buildSelectionExecutorPorts = (args: {
   readonly closureHint: string | undefined
   readonly postureOverride: BenchPosture | undefined
   readonly stateOverride: BenchKnobState | undefined
+  readonly chaMultisiteSteer: string | undefined
   readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
@@ -3053,6 +3183,7 @@ const buildSelectionExecutorPorts = (args: {
         reproHint: args.reproHint,
         postureOverride: args.postureOverride,
         stateOverride: args.stateOverride,
+        chaMultisiteSteer: args.chaMultisiteSteer,
         mergeHint: (seedHint) =>
           args.verifySelectProofRequired && args.selectorMode === "clean"
             ? seedHint
@@ -3176,6 +3307,7 @@ const runSelectionPhase = async (
   hardeningReproSources: readonly string[],
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaMultisiteSteer?: string,
 ): Promise<Phase> => {
   const { effectivePublicContracts, selectionInputs, staticWitnesses, staticWitnessDiagnostics } =
     buildSelectionPhaseContracts({
@@ -3245,6 +3377,7 @@ const runSelectionPhase = async (
     // path-only stub — mirrors the generation/classic-repair owner evidence.
     repairReadSource: (rel) => readSandboxSource(sandbox, rel),
     repairIssueSymbols: extractIssueHint(instance.problemStatement).symbols,
+    repairOwnerEvidence: selectionOwnerEvidence,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
@@ -3276,6 +3409,7 @@ const runSelectionPhase = async (
       closureHint,
       postureOverride,
       stateOverride,
+      chaMultisiteSteer,
       concurrency,
       generationErrors,
       addTurns: (turns) => {
@@ -3498,6 +3632,7 @@ type RepairConfig = NonNullable<RunInstanceDeps["repair"]>
 interface HintReproContext {
   readonly posture: BenchPosture
   readonly precomputedHint: string
+  readonly chaMultisiteSteer: string | undefined
   readonly localizeCandidates: readonly string[]
   readonly reproHint: string | undefined
   readonly reproTest: BenchReproTestTelemetry | undefined
@@ -3577,6 +3712,59 @@ export const buildSelectionCandidateFamilyBundle = (args: {
   })
 }
 
+const betterRepairFamily = (
+  candidateFiles: readonly string[],
+  left: CandidateFamily | undefined,
+  right: CandidateFamily,
+): CandidateFamily => {
+  if (left === undefined) return right
+  const leftMissing = candidateFamilyCoverageMissing(left, candidateFiles).length
+  const rightMissing = candidateFamilyCoverageMissing(right, candidateFiles).length
+  if (rightMissing !== leftMissing) return rightMissing > leftMissing ? right : left
+  if (right.ownerFiles.length !== left.ownerFiles.length)
+    return right.ownerFiles.length > left.ownerFiles.length ? right : left
+  return left
+}
+
+const deriveChaOverrideFamily = async (args: {
+  readonly instance: Instance
+  readonly candidate: Candidate
+  readonly sandbox: string
+}): Promise<CandidateFamily | undefined> => {
+  if (args.candidate.patch.trim() === "" || args.candidate.files.length === 0) return undefined
+  const touchedSymbols = diffTouchedSymbols(args.candidate.patch)
+  if (touchedSymbols.length === 0) return undefined
+  const chaExec = (cmd: string, cwd: string, timeoutMs: number) =>
+    exec(
+      cmd,
+      cwd,
+      timeoutMs,
+      args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : undefined,
+    )
+  let best: CandidateFamily | undefined
+  for (const targetFile of args.candidate.files) {
+    for (const symbol of touchedSymbols) {
+      const sites = await findSiblingOverrideSites({
+        exec: chaExec,
+        repoRoot: args.sandbox,
+        targetRelFile: targetFile,
+        method: symbol,
+      })
+      if (sites.length === 0) continue
+      const family: CandidateFamily = {
+        familyId: "override-family",
+        ownerFiles: cleanUniqueList([targetFile, ...sites.map((site) => site.file)]),
+        reason: `override-family (CHA sibling override): \`${symbol}\` overridden by sibling classes sharing a base`,
+        seed: buildMultisiteSteer(symbol, sites),
+        sourceEvidence: ["cha-multisite:python-ast"],
+      }
+      if (candidateFamilyCoverageMissing(family, args.candidate.files).length === 0) continue
+      best = betterRepairFamily(args.candidate.files, best, family)
+    }
+  }
+  return best
+}
+
 export const deriveCandidateStructuralRepair = async (args: {
   readonly instance: Instance
   readonly candidate: Candidate
@@ -3603,7 +3791,15 @@ export const deriveCandidateStructuralRepair = async (args: {
     publicContracts: undefined,
     n: 2,
   })
-  const family = structural.selectionInputs.candidateFamilies[1]
+  const chaFamily = await deriveChaOverrideFamily(args)
+  const family =
+    chaFamily === undefined
+      ? structural.selectionInputs.candidateFamilies[1]
+      : betterRepairFamily(
+          args.candidate.files,
+          structural.selectionInputs.candidateFamilies[1],
+          chaFamily,
+        )
   if (family === undefined && structural.effectivePublicContracts === undefined) return undefined
   return {
     ...(family !== undefined ? { family } : {}),
@@ -3615,16 +3811,12 @@ export const deriveCandidateStructuralRepair = async (args: {
 
 export const withCandidateFamilyPublicContracts = (
   publicContracts: PublicContractBundle | undefined,
-  candidateFamilyBundle: CandidateFamilyBundle | undefined,
-): PublicContractBundle | undefined => {
-  const familyContracts = candidateFamilyBundle?.families.flatMap((family) =>
-    family.familyId === "multi-site" ? buildMultiSiteFamilyContract(family.ownerFiles) : [],
-  )
-  return mergePublicContractBundles(
-    publicContracts,
-    familyContracts === undefined ? undefined : { contracts: familyContracts },
-  )
-}
+  _candidateFamilyBundle: CandidateFamilyBundle | undefined,
+): PublicContractBundle | undefined =>
+  // Candidate families are structural search hints only. They may seed
+  // localization/generation/repair, but they do not mint required contracts
+  // without executable public proof.
+  publicContracts
 
 export const makeSelectionRegressionPort = (args: {
   readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
@@ -3700,6 +3892,12 @@ const prepareHintAndReproContext = async (
       localizeCandidates = files
     },
   })
+  const chaMultisiteSteer = await resolveChaMultisiteSteer({
+    instance,
+    sandbox,
+    posture,
+    localizeCandidates,
+  })
   const reproInstall = benchInstallsReproHint(posture.inLoopExecMode)
     ? await installReproTestHint(instance, sandbox, posture, llm)
     : { hint: undefined, telemetry: undefined }
@@ -3714,6 +3912,7 @@ const prepareHintAndReproContext = async (
   return {
     posture,
     precomputedHint,
+    chaMultisiteSteer,
     localizeCandidates,
     reproHint: reproInstall.hint,
     reproTest: selectionRepro.telemetry,
@@ -3784,9 +3983,10 @@ const buildClosureAttemptState = (args: {
           faultEvidence: args.posture.faultEvidence,
         },
         // T-OWN-12 activation: clean presets use rule-based AUTHORITATIVE owner
-        // admission (issue-named owners only), bypassing the additive heuristic
-        // score/lead-gap. Research mode passes false ⇒ legacy admission is
-        // byte-identical (closure-session applies the clean rule only on `true`).
+        // admission (public issue-named owners only), bypassing the additive
+        // heuristic score/lead-gap. Structural static-witness evidence stays
+        // advisory. Research mode passes false ⇒ legacy admission is byte-identical
+        // (closure-session applies the clean rule only on `true`).
         ownerClean: args.posture.selectorMode === "clean",
       })
 
@@ -3962,6 +4162,7 @@ const runMainPhase = async (args: {
       args.prepared.hardeningReproSources,
       args.prepared.posture,
       args.prepared.state,
+      args.prepared.chaMultisiteSteer,
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
@@ -3981,6 +4182,7 @@ const runMainPhase = async (args: {
       verificationTargetFromPlan(args.prepared.verificationPlan),
       args.prepared.posture,
       args.prepared.state,
+      args.prepared.chaMultisiteSteer,
     )
   }
   return runAgentPhase(
@@ -3994,6 +4196,7 @@ const runMainPhase = async (args: {
     args.prepared.closureHint,
     args.prepared.posture,
     args.prepared.state,
+    args.prepared.chaMultisiteSteer,
   )
 }
 
@@ -4257,7 +4460,9 @@ const buildAdaptivePhaseEvidence = (args: {
   const ownerFiles =
     args.phase.selectionTelemetry?.ownerFiles ??
     cleanUniqueList([
-      ...(args.prepared.closureSession?.bundle.evidence.candidates.map((candidate) => candidate.file) ?? []),
+      ...(args.prepared.closureSession?.bundle.evidence.candidates.map(
+        (candidate) => candidate.file,
+      ) ?? []),
       ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
       ...args.prepared.localizeCandidates,
     ])

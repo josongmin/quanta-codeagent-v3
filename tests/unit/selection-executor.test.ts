@@ -346,10 +346,10 @@ describe("runSelection", () => {
     expect(repaired?.files).toEqual(["pkg/base.py", "pkg/backend.py"])
   })
 
-  it("clean mode can derive a structural family from cand0 and upgrade it with candidate-local contracts", async () => {
+  it("clean mode can derive a structural family from cand0 without turning it into contract authority", async () => {
     const seeds: (string | undefined)[] = []
     let calls = 0
-    const gen: SelectionPorts["generate"] = async (i, seed) => {
+    const gen: SelectionPorts["generate"] = async (_i, seed) => {
       seeds.push(seed)
       calls += 1
       return calls === 1
@@ -380,21 +380,18 @@ describe("runSelection", () => {
             seed: undefined,
             sourceEvidence: ["static-witness:ast"],
           },
-          publicContracts: {
-            contracts: buildMultiSiteFamilyContract([
-              "pkg/base/client.py",
-              "pkg/postgresql/client.py",
-            ]),
-          },
         }),
       },
     })
 
-    expect(seeds).toHaveLength(2)
-    expect(seeds[1]).toContain("Previous attempt missed required family owner files")
-    expect(r.winner?.files).toEqual(["pkg/base/client.py", "pkg/postgresql/client.py"])
-    expect(r.scored[0]?.requiredContractsSatisfied).toBeGreaterThan(0)
-    expect(r.scored[0]?.verdict.reasons).not.toContain(
+    expect(seeds[0]).toBeUndefined()
+    expect(
+      seeds.some((seed) => seed?.includes("Previous attempt missed required family owner files")),
+    ).toBe(true)
+    expect(r.winner).toBeNull()
+    expect(r.scored[0]?.candidate.files).toEqual(["pkg/base/client.py", "pkg/postgresql/client.py"])
+    expect(r.scored[0]?.requiredContractsSatisfied).toBe(0)
+    expect(r.scored[0]?.verdict.reasons).toContain(
       "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
     )
   })
@@ -665,7 +662,11 @@ describe("runSelection", () => {
     const gen: SelectionPorts["generate"] = async (i) => {
       calls += 1
       if (i >= 1) throw new Error("generator OOM during repair")
-      return cand({ id: `cand-${i}`, patch: patchForFiles(["pkg/owner.py"]), files: ["pkg/owner.py"] })
+      return cand({
+        id: `cand-${i}`,
+        patch: patchForFiles(["pkg/owner.py"]),
+        files: ["pkg/owner.py"],
+      })
     }
     const r = await runSelection({
       n: 1,
@@ -706,8 +707,16 @@ describe("runSelection", () => {
     // must carry the LATEST candidate's patch hash (cand-1), not the first (cand-0).
     // Red-on-injection: revert buildRepairPacketText to `find` (first) and the
     // captured repair_seed hash flips to cand-0.
-    const cand0 = cand({ id: "cand-0", patch: `${patchForFiles(["x.py"])}\n+first`, files: ["x.py"] })
-    const cand1 = cand({ id: "cand-1", patch: `${patchForFiles(["x.py"])}\n+latest`, files: ["x.py"] })
+    const cand0 = cand({
+      id: "cand-0",
+      patch: `${patchForFiles(["x.py"])}\n+first`,
+      files: ["x.py"],
+    })
+    const cand1 = cand({
+      id: "cand-1",
+      patch: `${patchForFiles(["x.py"])}\n+latest`,
+      files: ["x.py"],
+    })
     const repairPackets: LlmEvidencePacket[] = []
     await runSelection({
       n: 2,
@@ -719,7 +728,8 @@ describe("runSelection", () => {
         if (packet.stage === "repair_seed") repairPackets.push(packet)
       },
       ports: {
-        generate: async (i) => [cand0, cand1, cand({ id: "cand-2", patch: "", files: [] })][i] as Candidate,
+        generate: async (i) =>
+          [cand0, cand1, cand({ id: "cand-2", patch: "", files: [] })][i] as Candidate,
         // force no winner so the repair path runs
         mweProof: async () => ({ state: "candidate_red" }),
       },
@@ -1031,6 +1041,52 @@ describe("runSelection", () => {
     expect(r.winner).toBeNull()
     expect(r.repairFeedbackAttempts).toBe(0)
     expect(r.repairFeedbackStopReason).toBe("missing_seed")
+  })
+
+  it("proof-required feedback derives a repair seed for partial typed family coverage", async () => {
+    const seeds: (string | undefined)[] = []
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      if (i === 0) {
+        return cand({
+          id: "cand-0",
+          patch: patchForFiles(["django/db/backends/postgresql/client.py"]),
+          files: ["django/db/backends/postgresql/client.py"],
+          familyId: "override-family",
+          familyOwnerFiles: [
+            "django/db/backends/base/client.py",
+            "django/db/backends/postgresql/client.py",
+          ],
+          familyReason:
+            "override-family: `runshell` — class inheritance override across owner files",
+        })
+      }
+      return cand({ id: `cand-${i}`, patch: "", files: [] })
+    }
+
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      proofRequired: true,
+      problemStatement: "database client runshell doesn't respect os.environ values in some cases",
+      seeds: [undefined],
+      owners: new Set([
+        "django/db/backends/postgresql/client.py",
+        "django/db/backends/base/client.py",
+      ]),
+      ports: { generate: gen },
+    })
+
+    expect(r.winner).toBeNull()
+    expect(r.noWinnerReason).toBe("proof_required_missing")
+    expect(seeds).toHaveLength(2)
+    expect(seeds[1]).toContain("partial family surface")
+    expect(seeds[1]).toContain("django/db/backends/base/client.py")
+    expect(seeds[1]).toContain("Previous attempt missed required family owner files")
+    expect(seeds[1]).not.toContain(
+      "Previous attempt missed required family owner files: `django/db/backends/base/client.py`, `django/db/backends/postgresql/client.py`",
+    )
+    expect(r.repairFeedbackStopReason).toBe("empty_patch")
   })
 
   it("clean mode appends one static-sanity repair candidate when a stronger structural patch is blocked only by deterministic sanity", async () => {

@@ -18,16 +18,15 @@ export type { OwnerStrength } from "./types"
 /**
  * T-OWN-12 / SCAFF-03 — PURE strength classifier (additive; reads only
  * `sources`, never `score`). A candidate is AUTHORITATIVE iff it carries an
- * authoritative evidence stream:
- *   - `issue-file` — named in public issue text, OR
- *   - `static-witness` — named by a TYPED-RELATION static witness that confers
- *     clean owner authority (unique definer / complete override family /
- *     both-ends producer-consumer; see `witnessAuthoritativeOwners`).
- * A bare `owner-resolve` or `stage1` rank stays ADVISORY: uniqueness is not
- * tracked on those streams, so the typed `static-witness` provenance is what
- * finally promotes a structurally-proven owner.
+ * authoritative PUBLIC evidence stream:
+ *   - `issue-file` — named in public issue text.
+ *
+ * Structural static-witness provenance is still useful for localization and
+ * repair evidence, but it is NOT, by itself, a clean owner-admission authority.
+ * A bare `owner-resolve`, `stage1`, or `static-witness` stream therefore stays
+ * ADVISORY here.
  */
-const AUTHORITATIVE_SOURCES: readonly FaultCandidateSource[] = ["issue-file", "static-witness"]
+const AUTHORITATIVE_SOURCES: readonly FaultCandidateSource[] = ["issue-file"]
 export const ownerStrength = (candidate: Pick<FaultCandidate, "sources">): OwnerStrength =>
   candidate.sources.some((s) => AUTHORITATIVE_SOURCES.includes(s)) ? "authoritative" : "advisory"
 
@@ -37,10 +36,9 @@ const DEFAULT_MAX_SYMBOLS = 12
  *  stronger owner signal than a bare stage-1 rank hit. */
 const ISSUE_FILE_BOOST = 2
 const OWNER_RESOLVE_BOOST = 3
-/** A typed-relation static witness is the strongest blind owner signal (it
- *  carries structural authority, not a heuristic rank), so it ranks above a
- *  bare LSP owner-resolve. Score is advisory-only; authority comes from the
- *  `static-witness` SOURCE, not this number. */
+/** A typed-relation static witness is a strong STRUCTURAL hint for localization
+ *  and repair review, so it ranks above a bare LSP owner-resolve. Score stays
+ *  advisory-only; it never becomes clean owner-admission authority by itself. */
 const STATIC_WITNESS_BOOST = 4
 
 export type { FaultEvidenceInput, FaultEvidencePacket } from "./types"
@@ -67,9 +65,9 @@ export const buildFaultEvidencePacket = (input: FaultEvidenceInput): FaultEviden
   for (const f of input.stage1Files ?? []) bump(f.file, f.score, "stage1")
   for (const f of input.issueFiles ?? []) bump(f, ISSUE_FILE_BOOST, "issue-file")
   for (const o of input.ownerResolved ?? []) bump(o.file, OWNER_RESOLVE_BOOST, "owner-resolve")
-  // SCAFF-03: typed-relation witness owners carry the authoritative
-  // `static-witness` source. Generic `{ file, forSymbol? }` records — the bench
-  // adapter already digested the witness IR, so this stays bench-agnostic.
+  // SCAFF-03: typed-relation witness owners carry the `static-witness` source as
+  // advisory structural evidence. Generic `{ file, forSymbol? }` records — the
+  // bench adapter already digested the witness IR, so this stays bench-agnostic.
   for (const w of input.witnessOwners ?? []) bump(w.file, STATIC_WITNESS_BOOST, "static-witness")
   // attach resolved symbol names (bounded, names only) to their owner file
   for (const o of input.ownerResolved ?? []) {

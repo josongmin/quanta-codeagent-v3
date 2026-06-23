@@ -3,7 +3,7 @@
  *
  * FIX 1 — the repair-plan IIFE was collapsed into a declarative ORDERED rule
  * table (`REPAIR_PLAN_RULES`) + first-match `selectRepairPlan`. These tests pin:
- *   - each of the 5 branches returns its EXACT plan (summary + directive + 3
+ *   - each branch returns its EXACT plan (summary + directive + 3
  *     include-flags), copied verbatim from the original literals;
  *   - PRIORITY/short-circuit: an input matching branch 2 AND branch 4 returns
  *     branch 2's plan (the earlier rule wins, exactly like the old if-cascade);
@@ -25,15 +25,16 @@ import {
   type RepairPlanContext,
   selectRepairPlan,
 } from "@/runner/batch/eval/selection-repair-seed"
-import type { Candidate, ScoredEntry, SelectionProofState } from "@/runner/batch/eval/selection-types"
+import type {
+  Candidate,
+  ScoredEntry,
+  SelectionProofState,
+} from "@/runner/batch/eval/selection-types"
 
 const diff = (f: string) =>
   `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1,1 +1,1 @@\n-old\n+new`
 
-const cand = (
-  id: string,
-  over: Partial<Candidate> = {},
-): Candidate => ({
+const cand = (id: string, over: Partial<Candidate> = {}): Candidate => ({
   id,
   patch: diff(`pkg/${id}.py`),
   turns: 1,
@@ -48,10 +49,7 @@ const verdict = (reasons: readonly string[], admissible = false): CandidateVerdi
   reasons: [...reasons],
 })
 
-const entry = (
-  candidate: Candidate,
-  over: Partial<ScoredEntry> = {},
-): ScoredEntry => ({
+const entry = (candidate: Candidate, over: Partial<ScoredEntry> = {}): ScoredEntry => ({
   candidate,
   hard: { baseValidatedRed: true, patchProduced: true },
   resolvedKofN: null,
@@ -94,6 +92,15 @@ const REPRO_PLAN = {
     "Selector feedback: every generated candidate was re-run against the base-red validated reproduction set, and none reached resolved consensus.",
   directive:
     "Regenerate from the base tree. Treat the validated reproduction script(s) below as public executable contracts: the patch must make the scripts pass cleanly (all assertions green / exit 0) without adding unnecessary helpers, files, or unrelated design surface.",
+  includeFamilyRepair: true,
+  includeReproFailureTrace: true,
+  includeOracleFailureSeed: true,
+}
+const FAMILY_MISSING_PLAN = {
+  summary:
+    "Selector feedback: at least one generated candidate selected a typed static family but edited only a partial family surface.",
+  directive:
+    "Regenerate from the base tree. Complete the missing family owner files named below if public source evidence confirms the family relation; otherwise produce no patch for that family rather than a partial single-site edit. The next candidate still must satisfy positive executed public proof before submit.",
   includeFamilyRepair: true,
   includeReproFailureTrace: true,
   includeOracleFailureSeed: true,
@@ -157,7 +164,29 @@ describe("FIX 1 — selectRepairPlan ordered rule table", () => {
     expect(plan).toEqual(REPRO_PLAN)
   })
 
-  it("branch 4 (cleanDrift): every patched candidate rejected as multi-source drift", () => {
+  it("branch 4 (family-missing): proofRequired + partial typed family coverage gets a repair seed", () => {
+    const e = entry(
+      cand("a", {
+        files: ["django/db/backends/postgresql/client.py"],
+        familyId: "override-family",
+        familyOwnerFiles: [
+          "django/db/backends/base/client.py",
+          "django/db/backends/postgresql/client.py",
+        ],
+      }),
+    )
+    const plan = selectRepairPlan(
+      ctx({
+        scored: [e],
+        patched: [e],
+        proofStates: ["candidate_red", "infra_blocked"] as SelectionProofState[],
+        proofRequired: true,
+      }),
+    )
+    expect(plan).toEqual(FAMILY_MISSING_PLAN)
+  })
+
+  it("branch 5 (cleanDrift): every patched candidate rejected as multi-source drift", () => {
     const scored = [
       entry(cand("a"), { verdict: verdict([CLEAN_DRIFT_REJECT_REASON]) }),
       entry(cand("b"), { verdict: verdict([CLEAN_DRIFT_REJECT_REASON]) }),
@@ -166,7 +195,7 @@ describe("FIX 1 — selectRepairPlan ordered rule table", () => {
     expect(plan).toEqual(CLEAN_DRIFT_PLAN)
   })
 
-  it("branch 5 (contract-only): proofRequired, no proof_positive, contract-only evidence present", () => {
+  it("branch 6 (contract-only): proofRequired, no proof_positive, contract-only evidence present", () => {
     const e = entry(cand("a"), { requiredContractsSatisfied: 1 })
     const plan = selectRepairPlan(
       ctx({
@@ -179,15 +208,15 @@ describe("FIX 1 — selectRepairPlan ordered rule table", () => {
     expect(plan).toEqual(CONTRACT_ONLY_PLAN)
   })
 
-  it("PRIORITY: input matching branch 2 AND branch 4 returns branch 2 (earlier rule wins)", () => {
-    // Each entry is BOTH mwe candidate_red (branch 2) AND clean-drift rejected (branch 4).
+  it("PRIORITY: input matching branch 2 AND cleanDrift returns branch 2 (earlier rule wins)", () => {
+    // Each entry is BOTH mwe candidate_red (branch 2) AND clean-drift rejected.
     const both = (id: string): ScoredEntry =>
       entry(cand(id, { mweReceipt: { state: "candidate_red" } as MweProofReceipt }), {
         verdict: verdict([CLEAN_DRIFT_REJECT_REASON]),
       })
     const scored = [both("a"), both("b")]
     const plan = selectRepairPlan(ctx({ scored, patched: scored }))
-    // Sanity: branch 4 WOULD match this input in isolation (cleanDrift predicate holds).
+    // Sanity: cleanDrift WOULD match this input in isolation.
     expect(scored.every((s) => s.verdict.reasons.includes(CLEAN_DRIFT_REJECT_REASON))).toBe(true)
     // But branch 2 is earlier in the table, so it wins.
     expect(plan).toEqual(MWE_PLAN)
@@ -225,10 +254,7 @@ describe("FIX 2 — hardReasonState maps from the structured kind", () => {
       "hard:declaredExpectedMatch=false (candidate contradicts issue-declared expected behavior)",
       "candidate_red",
     ],
-    [
-      "hard:staticSanity=pythonNoneSubscriptMutation(cache) (parse-level violation)",
-      "static_only",
-    ],
+    ["hard:staticSanity=pythonNoneSubscriptMutation(cache) (parse-level violation)", "static_only"],
   ]
 
   for (const [reason, expected] of KNOWN) {

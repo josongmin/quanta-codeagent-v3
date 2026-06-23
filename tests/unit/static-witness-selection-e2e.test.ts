@@ -1,9 +1,9 @@
 /**
- * SCAFF end-to-end: AST source → static witness → required contract → clean
- * selection. This is the exact "single-site beats complete co-change" failure
- * from the django RCA cases, proven fixed through the real logic chain the two
- * drivers compose (buildAstStaticWitnesses → buildStaticWitnessContracts →
- * runSelection clean). No instance id / gold path / file-path regex anywhere.
+ * SCAFF end-to-end: AST source → static witness → clean selection.
+ *
+ * Static witnesses still localize and seed family context, but they do not mint
+ * required contracts by themselves. The clean selector therefore keeps
+ * minimality/proof authority unless some executable public proof says otherwise.
  */
 import { describe, expect, it } from "bun:test"
 import { type Candidate, runSelection } from "@/runner/batch/eval/selection-executor"
@@ -31,7 +31,7 @@ const cand = (id: string, files: readonly string[]): Candidate => ({
   baseValidatedRed: true,
 })
 
-describe("SCAFF e2e — complete co-change beats single-site under a static-witness required contract", () => {
+describe("SCAFF e2e — static-witness remains advisory-only for selection authority", () => {
   const witnesses = buildAstStaticWitnesses({
     problemStatement: `${SHARED} drops the empty environment incorrectly`,
     ownerCandidates: [OWNER_A, OWNER_B],
@@ -39,14 +39,18 @@ describe("SCAFF e2e — complete co-change beats single-site under a static-witn
   })
   const contracts = buildStaticWitnessContracts(witnesses)
 
-  it("the AST adapter + bridge produce ONE required multi-site-family over both owner files", () => {
-    expect(contracts).toHaveLength(1)
-    expect(contracts[0]?.kind).toBe("multi-site-family")
-    expect(contracts[0]?.strength).toBe("required")
-    expect([...(contracts[0]?.subjectFiles ?? [])].sort()).toEqual([OWNER_A, OWNER_B])
+  it("the AST adapter still emits an authoritative override-family witness", () => {
+    expect(witnesses).toHaveLength(1)
+    expect(witnesses[0]?.kind).toBe("override-family")
+    expect(witnesses[0]?.authority).toBe("authoritative")
+    expect(witnesses[0]?.subjectFiles).toEqual([OWNER_A, OWNER_B])
   })
 
-  it("CLEAN: proof tied — the BIGGER complete-family patch beats the SMALLER single-site one", async () => {
+  it("the contract bridge mints ZERO required contracts from static-only evidence", () => {
+    expect(contracts).toEqual([])
+  })
+
+  it("CLEAN: without executable proof, minimality still beats the bigger complete-family patch", async () => {
     const r = await runSelection({
       n: 2,
       seeds: [undefined, undefined],
@@ -60,16 +64,15 @@ describe("SCAFF e2e — complete co-change beats single-site under a static-witn
         applyClean: async () => true,
       },
     })
-    expect(r.winner?.id).toBe("cand-1")
+    expect(r.winner?.id).toBe("cand-0")
   })
 
-  it("RED-ON-INJECTION: with NO witness contract, minimality makes the WRONG single-site patch win", async () => {
+  it("with the same empty contract set, baseline clean selection stays byte-identical", async () => {
     const r = await runSelection({
       n: 2,
       seeds: [undefined, undefined],
       owners: new Set([OWNER_A, OWNER_B]),
       mode: "clean",
-      // no publicContracts ⇒ no required obligation ⇒ minimality decides ⇒ single-site.
       ports: {
         generate: async (i) =>
           [cand("cand-0", [OWNER_A]), cand("cand-1", [OWNER_A, OWNER_B])][i] as Candidate,

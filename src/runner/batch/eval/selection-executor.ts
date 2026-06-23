@@ -39,7 +39,6 @@
 import { analyzePatchBudget } from "@/agent/patch-budget"
 import {
   type HardGateSignals,
-  isValidResolvedKofN,
   type ResolvedKofNSignal,
   type SelectorMode,
   type SoftScoreSignals,
@@ -63,11 +62,14 @@ import {
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
-import type { LlmEvidencePacket, VerificationTargetFact } from "./llm-evidence-packet"
+import type {
+  LlmEvidencePacket,
+  OwnerEvidenceFact,
+  VerificationTargetFact,
+} from "./llm-evidence-packet"
 import type { MweProofReceipt } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
-  evaluateBundle,
   mergePublicContractBundles,
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
@@ -82,7 +84,6 @@ import {
   applyStaticSanityHardGate,
   bestEffortEligible,
   buildLexTiers,
-  cleanDriftRejected,
   cleanProofAuthorityMissing,
   cleanUnprovenMultiSourceDriftRisk,
   declaredExpectedMatchOf,
@@ -97,12 +98,7 @@ import {
   voterQuorumOf,
 } from "./selection-gates"
 import { normalizePatch, normalizeSelectionPaths } from "./selection-paths"
-import {
-  hasContractOnlyEvidence,
-  reproTraceOf,
-  selectionProofState,
-  selectionProofStateForEntry,
-} from "./selection-proof-telemetry"
+import { selectionProofState, selectionProofStateForEntry } from "./selection-proof-telemetry"
 import {
   buildOracleFailureRepairSeed,
   buildRepairPacketText,
@@ -297,6 +293,10 @@ export const runSelection = async (args: {
    *  to resolve the owner source slice in the selector repair packet. Blind:
    *  public issue text only. */
   repairIssueSymbols?: readonly string[]
+  /** Candidate-generation owner evidence, including static-witness exact slices.
+   *  Repair uses this as public source context only. It does not alter scoring,
+   *  admissibility, or proof-required submit authority. */
+  repairOwnerEvidence?: readonly OwnerEvidenceFact[]
   /** OPC-07 runtime packet recorder. Stores which bounded packet stages were
    *  actually used on the live clean path without changing selector authority. */
   recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
@@ -348,16 +348,6 @@ export const runSelection = async (args: {
     familyReason: family.reason,
     familyOwnerFiles: family.ownerFiles,
   })
-  const familyFromCandidate = (candidate: Candidate): CandidateFamily | undefined =>
-    candidate.familyId === undefined || candidate.familyOwnerFiles === undefined
-      ? undefined
-      : {
-          familyId: candidate.familyId,
-          ownerFiles: candidate.familyOwnerFiles,
-          reason: candidate.familyReason ?? `candidate-derived ${candidate.familyId} family`,
-          seed: undefined,
-          sourceEvidence: ["selection-candidate"],
-        }
   const maybeRepairFamilyCoverage = async (
     candidate: Candidate,
     family: CandidateFamily,
@@ -633,6 +623,9 @@ export const runSelection = async (args: {
         // slice to resolve; either absent ⇒ path-only (B2 gap surfaced).
         ...(args.repairReadSource !== undefined ? { readSource: args.repairReadSource } : {}),
         ...(args.repairIssueSymbols !== undefined ? { issueSymbols: args.repairIssueSymbols } : {}),
+        ...(args.repairOwnerEvidence !== undefined
+          ? { structuralOwnerEvidence: args.repairOwnerEvidence }
+          : {}),
         ...(args.recordLlmEvidencePacket !== undefined
           ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
           : {}),

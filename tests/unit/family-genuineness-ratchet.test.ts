@@ -16,7 +16,6 @@ import {
   buildSelectionCandidateFamilyBundle,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
-import { requiredContractsSatisfiedCount } from "@/runner/batch/eval/public-contract-bundle"
 
 const pyDef = (name: string): string => `def ${name}(x):\n    return x\n`
 
@@ -70,7 +69,7 @@ describe("clean family generation is genuine, not heuristic (T-GEN-09 ratchet)",
     expect(kinds.has("root-owner")).toBe(false)
   })
 
-  it("multi-site witness is wired into a clean required public contract", () => {
+  it("multi-site family stays advisory-only and does not mint a required public contract", () => {
     const bundle = buildSelectionCandidateFamilyBundle({
       problemStatement: "the shared_sym spans backends",
       ownerCandidates: ["pkg/p.py", "pkg/q.py"],
@@ -79,21 +78,8 @@ describe("clean family generation is genuine, not heuristic (T-GEN-09 ratchet)",
     })
     const contracts = withCandidateFamilyPublicContracts(undefined, bundle)
 
-    expect(contracts?.contracts).toHaveLength(1)
-    expect(contracts?.contracts[0]?.kind).toBe("multi-site-family")
-    expect(contracts?.contracts[0]?.strength).toBe("required")
-    if (contracts === undefined) throw new Error("expected multi-site contracts")
-    expect(
-      requiredContractsSatisfiedCount(contracts, {
-        touchedFiles: ["pkg/p.py"],
-        touchedSymbols: [],
-      }),
-    ).toBe(0)
-    expect(
-      requiredContractsSatisfiedCount(contracts, {
-        touchedFiles: ["pkg/p.py", "pkg/q.py"],
-        touchedSymbols: [],
-      }),
-    ).toBe(1)
+    expect(bundle?.families).toHaveLength(1)
+    expect(bundle?.families[0]?.familyId).toBe("multi-site")
+    expect(contracts).toBeUndefined()
   })
 })

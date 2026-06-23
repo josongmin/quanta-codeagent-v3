@@ -97,6 +97,38 @@ describe("B1 — selector repair owner evidence carries a real source slice", ()
     const owner = packets.flatMap((p) => p.ownerEvidence).find((o) => o.file === "pkg/axis.py")
     expect(owner?.sourceSlice).toBeUndefined()
   })
+
+  test("ENGAGE: structural owner evidence carries static-witness slices when issue symbols are empty", () => {
+    const { rendered, packets } = capture({
+      scored: [
+        entry(
+          cand({
+            familyId: "override-family",
+            familyOwnerFiles: ["pkg/base.py", "pkg/axis.py"],
+          }),
+        ),
+      ],
+      seed: "Regenerate to complete the typed family.",
+      winner: null,
+      problemStatement: "The database client shell should preserve environment behavior.",
+      issueSymbols: [],
+      readSource: () => null,
+      structuralOwnerEvidence: [
+        {
+          file: "pkg/base.py",
+          symbols: ["runshell"],
+          provenance: "static-witness:override-family/ast/authoritative",
+          sourceSlice: "def runshell(self, parameters):\n    return subprocess.run(parameters)",
+        },
+      ],
+    })
+    const owner = packets
+      .flatMap((p) => p.ownerEvidence)
+      .find((o) => o.file === "pkg/base.py" && o.sourceSlice !== undefined)
+    expect(owner?.sourceSlice).toContain("def runshell")
+    expect(rendered).toContain("def runshell")
+    expect(rendered).not.toContain("no_resolvable_slice:pkg/base.py")
+  })
 })
 
 describe("B7 — selector repair packets carry the candidate's source-only edit surface", () => {

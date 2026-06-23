@@ -40,6 +40,23 @@ const userText = (
   return block && block.type === "text" ? block.text : ""
 }
 
+const withEnv = (vars: Record<string, string | undefined>, fn: () => void): void => {
+  const prev = new Map<string, string | undefined>()
+  for (const [key, value] of Object.entries(vars)) {
+    prev.set(key, process.env[key])
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+  try {
+    fn()
+  } finally {
+    for (const [key, value] of prev) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+}
+
 describe("closure prompt wiring", () => {
   test("closureHint non-empty ⇒ injected before the base task", () => {
     const text = userText("First edit candidate: src/foo.py")
@@ -61,6 +78,35 @@ describe("closure prompt wiring", () => {
     expect(iClosure).toBeGreaterThanOrEqual(0)
     expect(iRepro).toBeGreaterThan(iClosure)
     expect(iBase).toBeGreaterThan(iRepro)
+  })
+
+  test("chaMultisiteSteer is injected into both the prompt prelude and localize-phase config", () => {
+    withEnv({ QUANTA_BENCH_LOCALIZE_PHASE: "3" }, () => {
+      const steer = [
+        "MULTI-SITE FIX: `m` is overridden by sibling classes that share a base.",
+        "  - pkg/oracle.py:9  (Oracle.m)",
+      ].join("\n")
+      const ac = new AbortController()
+      const cfg = buildConfig(
+        mkInstance(),
+        { llm: new StubLLM(), maxTurns: 1, timeoutMs: 5_000 },
+        "/tmp/sb",
+        ac.signal,
+        stubStream,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        steer,
+      )
+      const block = cfg.messages[0]?.content[0]
+      const text = block && block.type === "text" ? block.text : ""
+      expect(text).toContain(steer)
+      expect(text.indexOf(steer)).toBeLessThan(text.indexOf("Work inside /tmp/sb"))
+      expect(cfg.localizePhase).toEqual({ phase1Turns: 3, chaMultisiteSteer: steer })
+    })
   })
 })
 

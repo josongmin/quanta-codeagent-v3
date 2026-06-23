@@ -182,15 +182,16 @@ const decideOwnerAdmissionLegacy = (input: OwnerAdmissionInput): OwnerAdmission 
 /**
  * T-OWN-12 CLEAN path — RULE-BASED admission off the authoritative/advisory
  * lattice. Never reads `score`, `minLeadGap`, or additive corroboration:
- *   - exactly ONE authoritative owner file ⇒ admit that single owner.
+ *   - exactly ONE authoritative PUBLIC owner file ⇒ admit that single owner.
  *       coverageExpectation = `owner-family` when an authoritative-or-corroborated
  *       sibling shares an evidence stream with it (defect class likely spans the
  *       family), else `single-site` — mirroring the legacy sibling logic but over
- *       the AUTHORITATIVE set, not the score winner.
- *   - MULTIPLE authoritative owner files ⇒ admit=false ("cross-owner"); no
+ *       the AUTHORITATIVE PUBLIC set, not the score winner.
+ *   - MULTIPLE authoritative PUBLIC owner files ⇒ admit=false ("cross-owner"); no
  *       forced single owner is picked from a score tie.
- *   - NO authoritative owner file ⇒ admit=false; advisory (stage1 / non-unique
- *       owner-resolve) evidence may shape generation but cannot admit or veto.
+ *   - NO authoritative PUBLIC owner file ⇒ admit=false; advisory (stage1 /
+ *       non-unique owner-resolve / static-witness) evidence may shape generation
+ *       but cannot admit or veto.
  */
 const decideOwnerAdmissionClean = (packet: FaultEvidencePacket): OwnerAdmission => {
   const authoritative = packet.candidates.filter((c) => ownerStrength(c) === "authoritative")
@@ -266,9 +267,9 @@ const decideOwnerAdmissionClean = (packet: FaultEvidencePacket): OwnerAdmission 
 /**
  * T-OWN-12 PURE helper — the authoritative owner files in a packet, so a
  * selector/driver can build CLEAN contracts from owner-authority evidence only
- * (issue-named files, and — once tracked — unique-symbol-definers). Advisory
- * (`stage1` / non-unique `owner-resolve`) files are excluded. Deduped, stable
- * order (packet candidate order).
+ * (today: issue-named files). Advisory (`stage1` / non-unique `owner-resolve` /
+ * `static-witness`) files are excluded. Deduped, stable order (packet candidate
+ * order).
  */
 export const authoritativeOwnerFiles = (packet: FaultEvidencePacket): string[] => {
   const seen = new Set<string>()

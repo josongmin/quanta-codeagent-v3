@@ -222,6 +222,16 @@ describe("localize-phase-guard hellgate (25+ adversarial cases)", () => {
     expect(d.block).toBe(true)
   })
 
+  test("G-6b: dynamic CHA multisite steer is appended before the re-confirm sentence", () => {
+    const steer = [
+      "MULTI-SITE FIX: `m` is overridden by sibling classes that share a base.",
+      "  - pkg/oracle.py:9  (Oracle.m)",
+    ].join("\n")
+    const text = buildLocalizePhaseForceMessage(0, 3, false, steer)
+    expect(text).toContain(steer)
+    expect(text.indexOf(steer)).toBeLessThan(text.indexOf("Re-confirm by reading"))
+  })
+
   test("G-6b: state.turn = phase1Turns - 1 (boundary inside) ⇒ block", () => {
     const state = { turn: 9 }
     expect(decideLocalizePhase({ toolName: "edit", state, cfg: { phase1Turns: 10 } }).block).toBe(

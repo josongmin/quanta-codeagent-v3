@@ -1,7 +1,8 @@
 /**
- * SCAFF-03 hellgate — the owner-evidence lattice. Clean owner admission must
- * rest on TYPED-RELATION provenance (a static witness), never on a heuristic
- * score / lead-gap / same-symbol sibling. Drives the REAL chain:
+ * SCAFF-03 hellgate — the owner-evidence lattice. Clean owner admission now
+ * rests on AUTHORITATIVE PUBLIC evidence only (`issue-file`). Typed structural
+ * witnesses still feed localization/repair evidence, but they do NOT, by
+ * themselves, become clean owner-admission authority. Drives the REAL chain:
  *
  *   makeStaticWitness → witnessAuthoritativeOwners → buildFaultEvidencePacket
  *     → decideOwnerAdmission({clean}) / assembleClosureBundle
@@ -86,14 +87,14 @@ describe("SCAFF-03 — witnessAuthoritativeOwners extractor (typed-relation only
   })
 })
 
-describe("SCAFF-03 — clean owner admission rests on typed provenance", () => {
-  it("a static-witness owner is AUTHORITATIVE; the same file as stage1-only is ADVISORY", () => {
+describe("SCAFF-03 — static witness evidence stays advisory in clean owner admission", () => {
+  it("a static-witness owner stays ADVISORY; the same file as stage1-only is also ADVISORY", () => {
     const witnessed = buildFaultEvidencePacket({
       issueText: `${SYM} drops the empty environment`,
       stage1Files: [{ file: A, score: 9 }],
       witnessOwners: [{ file: A, forSymbol: SYM }],
     })
-    expect(ownerStrength(witnessed.candidates[0]!)).toBe("authoritative")
+    expect(ownerStrength(witnessed.candidates[0]!)).toBe("advisory")
 
     const stage1Only = buildFaultEvidencePacket({
       issueText: `${SYM} drops the empty environment`,
@@ -116,19 +117,19 @@ describe("SCAFF-03 — clean owner admission rests on typed provenance", () => {
     expect(r.admit).toBe(false)
   })
 
-  it("ONE typed-witness owner ⇒ clean admit, single-site", () => {
+  it("ONE typed-witness owner still does NOT clean-admit without issue-file authority", () => {
     const r = cleanAdmit({
       issueText: `${SYM} bug`,
       stage1Files: [{ file: A, score: 1 }],
       witnessOwners: witnessAuthoritativeOwners([uniqueDefiner]),
     })
-    expect(r.admit).toBe(true)
-    expect(r.owner).toBe(A)
-    expect(r.coverageExpectation).toBe("single-site")
-    expect(r.evidenceStrength).toBe("authoritative")
+    expect(r.admit).toBe(false)
+    expect(r.owner).toBeNull()
+    expect(r.coverageExpectation).toBe("cross-owner")
+    expect(r.evidenceStrength).toBeNull()
   })
 
-  it("HELLGATE: TWO authoritative owners (override family) ⇒ cross-owner, NOT an arbitrary single pick", () => {
+  it("HELLGATE: TWO typed-witness owners stay cross-owner, NOT an arbitrary single pick", () => {
     const r = cleanAdmit({
       issueText: `${SYM} bug`,
       stage1Files: [{ file: A, score: 1 }],
@@ -137,6 +138,7 @@ describe("SCAFF-03 — clean owner admission rests on typed provenance", () => {
     expect(r.admit).toBe(false)
     expect(r.owner).toBeNull()
     expect(r.coverageExpectation).toBe("cross-owner")
+    expect(r.evidenceStrength).toBeNull()
   })
 })
 
@@ -163,11 +165,12 @@ describe("SCAFF-03 — witness owners feed ONLY the clean path (research byte-id
       ownerClean,
     })
 
-  it("CLEAN: the witness owner is AUTHORITATIVE and admitted", () => {
+  it("CLEAN: the witness owner is present as structural evidence but NOT admitted", () => {
     const s = sessionArgs(true)
     const cand = s.bundle.evidence.candidates.find((c) => c.file === A)
     expect(cand?.sources).toContain("static-witness")
-    expect(s.bundle.owner.admit).toBe(true)
+    expect(s.bundle.owner.admit).toBe(false)
+    expect(s.bundle.gate.action).toBe("verify")
   })
 
   it("HELLGATE: LEGACY/research withholds the witness owner — no `static-witness` source, no admit", () => {
@@ -190,16 +193,10 @@ describe("SCAFF-03 — FAMILY authority forces verification (no single-site comm
     expect(bundle.gate.action).toBe("verify")
   })
 
-  it("PAIRED CONTROL: a single unique-definer owner is single-site (the family veto is family-specific, not a blanket block)", () => {
-    // Honesty tooth: a high-confidence SINGLE owner with no cheap external signal
-    // is a deliberate pre-existing commit-fast shortcut (T-201/202) — SCAFF-03
-    // does not change it. We assert the coverage class, not a commit veto, so the
-    // test states the true contrast rather than a wished-for one.
+  it("PAIRED CONTROL: a single unique-definer witness also stays verify-first without public owner authority", () => {
     const bundle = bundleFor(witnessAuthoritativeOwners([uniqueDefiner]))
-    expect(bundle.owner.admit).toBe(true)
-    expect(bundle.owner.coverageExpectation).toBe("single-site")
-    // gate enum is "commit-now" | "verify"; a certain low-stakes single owner is
-    // the commit-fast case — proving the family branch above is doing real work.
-    expect(bundle.gate.action).toBe("commit-now")
+    expect(bundle.owner.admit).toBe(false)
+    expect(bundle.owner.coverageExpectation).toBe("cross-owner")
+    expect(bundle.gate.action).toBe("verify")
   })
 })

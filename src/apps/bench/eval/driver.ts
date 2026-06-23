@@ -13,6 +13,7 @@ import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escal
 import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
 import {
   applyBenchKnobs,
+  attachReproVoteOutcomes,
   type BenchKnobState,
   BenchObserver,
   type BenchPosture,
@@ -52,12 +53,11 @@ import {
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
+  resetReproVoteOutcomes,
   resolveBenchKnobs,
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
-  attachReproVoteOutcomes,
-  resetReproVoteOutcomes,
   selectionGenerationEnvCaveats,
   selectionReproPrepK,
   UsageTap,
@@ -65,7 +65,6 @@ import {
   verifyAndFinalizeResult,
   withCandidateFamilyPublicContracts,
 } from "@/runner/batch/eval/driver"
-import { unavailableReproOracleCalibration } from "@/runner/batch/eval/repro-oracle-calibration"
 import {
   buildSelectionGenerationPrompt,
   buildSelectionOwnerEvidence,
@@ -89,6 +88,7 @@ import {
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "@/runner/batch/eval/repo-regression-discovery-adapter"
+import { unavailableReproOracleCalibration } from "@/runner/batch/eval/repro-oracle-calibration"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -759,7 +759,7 @@ const runSelectionPhase = async (
   verifySelectProofRequired: boolean,
   publicContracts: PublicContractBundle | undefined,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
-  regressionMaxTests: number | undefined,
+  _regressionMaxTests: number | undefined,
   verifySelectRepro: BenchPosture["verifySelectRepro"],
   selectionOwnerCandidates: readonly string[],
   ownerResolved: PreparedAttemptContext["ownerResolved"],
@@ -852,9 +852,7 @@ const runSelectionPhase = async (
           ...(reproSources.length > 0 ? { validatedReproScripts: reproSources } : {}),
           ...(closureHint !== undefined ? { closureHint } : {}),
           ...(generationEnvCaveats.length > 0 ? { envCaveats: generationEnvCaveats } : {}),
-          ...(staticWitnessDiagnostics.length > 0
-            ? { staticWitnessDiagnostics }
-            : {}),
+          ...(staticWitnessDiagnostics.length > 0 ? { staticWitnessDiagnostics } : {}),
           // NOTE: the validated repro scripts reach generation ONCE, via
           // `validatedReproScripts` → `validated_public_repro` staticFacts (full,
           // bounded). They are deliberately NOT also merged into `seed`: that
@@ -928,11 +926,6 @@ const runSelectionPhase = async (
     n,
     problemStatement: instance.problemStatement,
     ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-    // jun-23 W2-2 (B1): thread the slice reader + public issue symbols so the
-    // SELECTOR repair packet carries the real owner source slice (engage), not a
-    // path-only stub — mirrors the generation/classic-repair owner evidence.
-    repairReadSource: (rel) => readSandboxSource(sandbox, rel),
-    repairIssueSymbols: extractIssueHint(instance.problemStatement).symbols,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
@@ -943,6 +936,9 @@ const runSelectionPhase = async (
     ...(counterfactual ? { counterfactual: true } : {}),
     mode: selectorMode,
     ...(verifySelectProofRequired ? { proofRequired: true } : {}),
+    repairReadSource: (rel) => readSandboxSource(sandbox, rel),
+    repairIssueSymbols: extractIssueHint(instance.problemStatement).symbols,
+    repairOwnerEvidence: selectionOwnerEvidence,
     ...(effectivePublicContracts !== undefined
       ? { publicContracts: effectivePublicContracts }
       : {}),

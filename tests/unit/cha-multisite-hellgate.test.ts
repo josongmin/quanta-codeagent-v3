@@ -1,0 +1,238 @@
+/**
+ * ★ CHA multi-site fix-site resolver HELLGATE.
+ *
+ * Proves (against a REAL python3 AST walk over a django-shaped fixture) that the
+ * analyzer surfaces SIBLING override sites of a method via SHARED BASE — the exact
+ * capability the measured django-11138 miss needs (model fixed `mysql` backend,
+ * missed `oracle`/`sqlite3` siblings that override the same `BaseDatabaseOperations`
+ * method).
+ *
+ * Teeth:
+ *   ★ real-python: given mysql's `_convert_field_to_tz`, returns oracle + sqlite3
+ *     sites (file+line+class), EXCLUDES the target (mysql) itself.
+ *   ★ red-on-injection: a same-named method on a class with NO shared base is
+ *     EXCLUDED (it's a false sibling — name match without hierarchy).
+ *   ★ no-override base method ⇒ empty (only the base defines it).
+ *   ★ pure-unit teeth (always run): parseChaStdout tolerance + buildMultisiteSteer
+ *     (empty ⇒ undefined / off-byte-identical; non-empty ⇒ names every site).
+ */
+
+import { describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  buildMultisiteSteer,
+  type ChaExec,
+  findEnclosingPythonMethod,
+  findSiblingOverrideSites,
+  parseChaStdout,
+  parseMethodAtLineStdout,
+  type SiblingOverrideSite,
+} from "@/runner/batch/eval/cha-multisite"
+
+const hasPython = spawnSync("python3", ["--version"], { stdio: "ignore" }).status === 0
+
+/** Real bash -c exec (the production shape) for the gated real-python teeth. */
+const realExec: ChaExec = async (cmd, cwd, timeoutMs) => {
+  const r = spawnSync("bash", ["-c", cmd], { cwd, encoding: "utf8", timeout: timeoutMs })
+  return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" }
+}
+
+/** A django-`db/backends`-shaped repo: an abstract base + per-backend overrides in
+ *  separate files, PLUS an unrelated class with the same method name (false sibling). */
+const writeDjangoShapedRepo = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), "cha-"))
+  const be = join(dir, "django", "db", "backends")
+  for (const b of ["base", "mysql", "oracle", "sqlite3"])
+    mkdirSync(join(be, b), { recursive: true })
+  mkdirSync(join(dir, "unrelated"), { recursive: true })
+
+  writeFileSync(
+    join(be, "base", "operations.py"),
+    [
+      "class BaseDatabaseOperations:",
+      "    def _convert_field_to_tz(self, field_name, tzname):",
+      "        return field_name",
+      "",
+    ].join("\n"),
+  )
+  // three backends override the SAME base method — the true siblings
+  for (const b of ["mysql", "oracle", "sqlite3"]) {
+    writeFileSync(
+      join(be, b, "operations.py"),
+      [
+        "from django.db.backends.base.operations import BaseDatabaseOperations",
+        "",
+        "class DatabaseOperations(BaseDatabaseOperations):",
+        "    def some_other(self):",
+        "        return 1",
+        "    def _convert_field_to_tz(self, field_name, tzname):",
+        `        return "CONVERT_TZ(%s)" % field_name  # ${b}`,
+        "",
+      ].join("\n"),
+    )
+  }
+  // FALSE sibling: same method name, NO shared base — must be excluded.
+  writeFileSync(
+    join(dir, "unrelated", "thing.py"),
+    [
+      "class Unrelated:",
+      "    def _convert_field_to_tz(self, field_name, tzname):",
+      "        return field_name",
+      "",
+    ].join("\n"),
+  )
+  return dir
+}
+
+describe("CHA multi-site — real-python sibling resolution [gated on python3]", () => {
+  test.if(hasPython)(
+    "mysql's `_convert_field_to_tz` ⇒ oracle + sqlite3 siblings, NOT mysql, NOT unrelated",
+    async () => {
+      const dir = writeDjangoShapedRepo()
+      try {
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "django/db/backends/mysql/operations.py",
+          method: "_convert_field_to_tz",
+        })
+        const files = sites.map((s) => s.file).sort()
+        expect(files).toEqual([
+          "django/db/backends/oracle/operations.py",
+          "django/db/backends/sqlite3/operations.py",
+        ])
+        // target (mysql) excluded from its own sibling list
+        expect(files).not.toContain("django/db/backends/mysql/operations.py")
+        // false sibling (same name, no shared base) excluded
+        expect(files).not.toContain("unrelated/thing.py")
+        // each site carries the def line + class
+        for (const s of sites) {
+          expect(s.cls).toBe("DatabaseOperations")
+          expect(s.line).toBeGreaterThan(0)
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
+  test.if(hasPython)(
+    "localized line inside mysql override resolves the enclosing method name",
+    async () => {
+      const dir = writeDjangoShapedRepo()
+      try {
+        const method = await findEnclosingPythonMethod({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "django/db/backends/mysql/operations.py",
+          line: 6,
+        })
+        expect(method).toBe("_convert_field_to_tz")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
+  test.if(hasPython)(
+    "a method defined ONLY on the base (no overrides) ⇒ no siblings",
+    async () => {
+      const dir = writeDjangoShapedRepo()
+      try {
+        // `nonexistent_override` is on nobody ⇒ empty; and a base-only method:
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "django/db/backends/base/operations.py",
+          method: "_convert_field_to_tz",
+        })
+        // base defines it; backends override it ⇒ from base's POV the backends share
+        // base `BaseDatabaseOperations`? No — base's OWN bases are empty, so no shared
+        // base ⇒ no siblings. (The steer fires from a BACKEND override, not the base.)
+        expect(sites).toEqual([])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+})
+
+describe("CHA multi-site — pure unit teeth (always run)", () => {
+  test("parseChaStdout tolerates malformed / partial JSON", () => {
+    expect(parseChaStdout("not json")).toEqual([])
+    expect(parseChaStdout("{}")).toEqual([])
+    expect(parseChaStdout('{"sites": null}')).toEqual([])
+    expect(parseChaStdout('{"sites": [{"file":"a.py","line":3,"cls":"X"}]}')).toEqual([
+      { file: "a.py", line: 3, cls: "X" },
+    ])
+    // drops entries with wrong-typed fields
+    expect(parseChaStdout('{"sites": [{"file":"a.py","line":"3","cls":"X"}]}')).toEqual([])
+  })
+
+  test("parseMethodAtLineStdout tolerates malformed / null JSON", () => {
+    expect(parseMethodAtLineStdout("not json")).toBeUndefined()
+    expect(parseMethodAtLineStdout("{}")).toBeUndefined()
+    expect(parseMethodAtLineStdout('{"method": null}')).toBeUndefined()
+    expect(parseMethodAtLineStdout('{"method":"_convert_field_to_tz"}')).toBe(
+      "_convert_field_to_tz",
+    )
+  })
+
+  test("buildMultisiteSteer: empty ⇒ undefined (off-byte-identical); non-empty names every site", () => {
+    expect(buildMultisiteSteer("_convert_field_to_tz", [])).toBeUndefined()
+    const sites: SiblingOverrideSite[] = [
+      { file: "django/db/backends/oracle/operations.py", line: 99, cls: "DatabaseOperations" },
+      { file: "django/db/backends/sqlite3/operations.py", line: 88, cls: "DatabaseOperations" },
+    ]
+    const steer = buildMultisiteSteer("_convert_field_to_tz", sites)
+    expect(steer).toBeDefined()
+    expect(steer).toContain("django/db/backends/oracle/operations.py:99")
+    expect(steer).toContain("django/db/backends/sqlite3/operations.py:88")
+    expect(steer).toContain("_convert_field_to_tz")
+    expect(steer).toContain("Inspect every sibling override below")
+    expect(steer).toContain("only to those proven sites")
+  })
+
+  test("findSiblingOverrideSites: empty method/file ⇒ [] without invoking exec", async () => {
+    let called = false
+    const spyExec: ChaExec = async () => {
+      called = true
+      return { code: 0, stdout: "", stderr: "" }
+    }
+    expect(
+      await findSiblingOverrideSites({
+        exec: spyExec,
+        repoRoot: "/r",
+        targetRelFile: "",
+        method: "x",
+      }),
+    ).toEqual([])
+    expect(
+      await findSiblingOverrideSites({
+        exec: spyExec,
+        repoRoot: "/r",
+        targetRelFile: "a.py",
+        method: "  ",
+      }),
+    ).toEqual([])
+    expect(called).toBe(false)
+  })
+
+  test("findSiblingOverrideSites: exec non-zero ⇒ [] (never throws)", async () => {
+    const failExec: ChaExec = async () => ({ code: 1, stdout: "", stderr: "boom" })
+    expect(
+      await findSiblingOverrideSites({
+        exec: failExec,
+        repoRoot: "/r",
+        targetRelFile: "a.py",
+        method: "m",
+      }),
+    ).toEqual([])
+  })
+})
