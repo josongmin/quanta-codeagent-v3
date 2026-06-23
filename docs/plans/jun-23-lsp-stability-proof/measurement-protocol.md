@@ -22,6 +22,20 @@ It is folded into a `LspGroundingStatus` and stored on:
 `expectedCancels`, `fatalTransports`, and the sorted `readyDurationsMs`
 (min/median/max in one pass). That is the measurement primitive.
 
+### One-command aggregation
+
+After any grounding-preset run lands a `report.json`, turn it into the table:
+
+```
+bun run tools/dev/lsp-grounding-summary.ts <report.json> [more-runs.json ...]
+```
+
+Pass multiple report paths (repeated runs) — they MERGE into one distribution,
+which is exactly the n>1 this protocol mandates. The tool prints grounding-row
+count, per-stage outcome histograms, the three failure counts, and the ready-ms
+min/median/max. (A non-grounding preset emits no `result.lspGrounding`, so the
+tool reports 0 rows with a hint — that is the expected guard, not a bug.)
+
 ## Quantities to read (LSP-03 deliverable list)
 
 For a chosen target set (e.g. the SWE-bench grounding-preset slice):
