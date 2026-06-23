@@ -32,13 +32,16 @@
  *  a single terminal-scroll moment when it does), never shrinks
  *  mid-read. On read exit the band is fully erased and the prompt
  *  line is echoed normally so subsequent stdout starts on a fresh row.
+ *
+ *  Module layout: pure helpers (ANSI / column math, paste display, key-event
+ *  rebuild, candidate-row rendering, shared types) live in `./raw-line-reader/`
+ *  siblings and are re-exported below to preserve the public surface. The
+ *  stateful `readLine` driver (+ its `onKey` keypress machine) stays here.
  */
 
 import * as readline from "node:readline"
 import {
   type AtCandidate,
-  type AtCandidateProvider,
-  type AtState,
   acceptSelected,
   atQuery,
   classifyBackspace,
@@ -50,7 +53,6 @@ import {
 } from "./at-autocomplete"
 import { CANONICAL_KEY_FOR_ACTION } from "./keybindings/defaults"
 import { keyOf } from "./keybindings/normalize"
-import type { KeybindingMap } from "./keybindings/types"
 import {
   deleteWordBefore,
   killToLineEnd,
@@ -58,314 +60,64 @@ import {
   wordLeft,
   wordRight,
 } from "./line-edit-ops"
-import type { PromptHistory } from "./prompt-history"
-import type { ExternalEditorPort } from "./raw-line-reader-editor"
+import {
+  CR,
+  CYAN,
+  DIM,
+  DISABLE_BRACKETED_PASTE,
+  ENABLE_BRACKETED_PASTE,
+  ERASE_LINE,
+  ESC,
+  fillBgRow,
+  GRAY,
+  MAX_VISIBLE_CANDIDATES,
+  moveDown,
+  moveRight,
+  moveUp,
+  RESET,
+  stringColumns,
+  stripAnsi,
+} from "./raw-line-reader/ansi"
+import {
+  cancelSearch,
+  commitSearch,
+  detectFence,
+  setBufFromHistory,
+  stepSearch,
+} from "./raw-line-reader/history-search"
+import { type KeyEvent, remapKeyEvent } from "./raw-line-reader/key-event"
+import {
+  AbortError,
+  type ReaderStdin,
+  type ReaderStdout,
+  type ReadLineOptions,
+  type ReadLineTestIO,
+} from "./raw-line-reader/options"
+import {
+  accumulatePasteKey,
+  beginPaste,
+  finishPaste,
+  isPasteEnd,
+  isPasteStart,
+} from "./raw-line-reader/paste-accum"
+import { pasteBurstPlaceholder, projectPasteDisplay } from "./raw-line-reader/paste-display"
+import {
+  atListRows as atListRowsFor,
+  ghostSuffix,
+  renderListRows,
+} from "./raw-line-reader/render-rows"
+import { longestCommonPrefix, type State } from "./raw-line-reader/types"
 
-export interface CandidateDescriptor {
-  readonly value: string
-  readonly description?: string
-}
-
-export type CompleterFn = (line: string) => readonly string[]
-export type DescribeFn = (candidate: string) => string | undefined
-
-export interface ReadLineOptions {
-  readonly prompt: string
-  readonly completer?: CompleterFn
-  /** Optional description resolver — passed each candidate string in the
-   *  filtered list. Returning a string shows it as the dim right-column
-   *  hint; returning `undefined` leaves the row name-only. */
-  readonly describe?: DescribeFn
-  /** Optional meta line shown directly under the input prompt. Typical
-   *  content: `provider · model · cwd`. Rendered dim on default background. */
-  readonly meta?: string
-  readonly signal?: AbortSignal
-  /** Optional bash-style prompt history. When provided:
-   *    - `↑`/`↓` navigate older/newer entries when the completion menu is
-   *      closed (otherwise they still navigate the menu, byte-identical).
-   *    - `Ctrl+R` enters reverse-i-search mode.
-   *    - `Enter` pushes the submitted line back into history.
-   *  Absent ⇒ all keypress paths byte-identical to the no-history build. */
-  readonly history?: PromptHistory
-  /** Optional heredoc multiline mode. When enabled (`true`), a leading
-   *  `"""` (triple-quote, triple-backtick also accepted) on its own line
-   *  opens a continuation prompt; a single line containing only the same
-   *  fence closes it and submits the joined body (`\n`-separated, fence
-   *  rows excluded). Absent / `false` ⇒ byte-identical, no fence detection. */
-  readonly multiline?: boolean
-  /** RFC-12 / ADR-0439 — optional `@`-mention autocomplete provider. When
-   *  injected, typing `@` at a valid left-boundary opens a kind-grouped
-   *  candidate dropdown (file / symbol / skill / plugin / app); `↑`/`↓`
-   *  select, `Tab`/`Enter` accept (splice the mention token), `Esc`
-   *  dismiss. Absent ⇒ `@` is an ordinary input char and EVERY keypress
-   *  path is byte-identical to the no-provider build. */
-  readonly atProvider?: AtCandidateProvider
-  /** RFC-08 / ADR-0443 — `shift+tab` mode-cycle hook. A NON-submit key: when
-   *  present, `shift+tab` (a.k.a. backtab / CSI Z) invokes this callback, which
-   *  advances the host's turn-boundary mode store and returns the new `meta`
-   *  line (pill + desc) to repaint under the prompt. The input buffer is NEVER
-   *  touched and the line is NOT submitted. Absent ⇒ `shift+tab` is fully
-   *  ignored and every keypress path is byte-identical to the no-hook build. */
-  readonly onCycleMode?: () => { meta?: string } | undefined
-  /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. When injected,
-   *  `ctrl+x ctrl+e` (the bash `edit-and-execute-command` chord) suspends raw
-   *  mode, opens the current draft in `$EDITOR`, and folds the edited text back
-   *  into the buffer WITHOUT submitting (the user presses Enter). Absent ⇒ the
-   *  chord is ignored (ctrl-x / ctrl-e are control chars already dropped) and
-   *  EVERY keypress path is byte-identical to the no-editor build. */
-  readonly openEditor?: ExternalEditorPort
-  /** RFC-11 / ADR-0447 — user keybinding map (loaded + merged over defaults
-   *  from `~/.quanta/keybindings.json`). When injected, an incoming key is
-   *  projected to its bound action and REMAPPED to that action's canonical
-   *  default key before the existing if-chain runs — so context logic (menu vs
-   *  history, heredoc, search) is preserved unchanged. Absent ⇒ NO remap, the
-   *  hardcoded if-chain runs verbatim (byte-identical). */
-  readonly keybindings?: KeybindingMap
-  /** jun-6 (Codex paste-burst) — large-paste coalescing. When injected, a SINGLE
-   *  keypress whose `str` carries at least `minChars` characters (a bracketed
-   *  paste arrives as ONE multi-char keypress) is echoed as a compact
-   *  `[Pasted Content <n> chars]` placeholder INSTEAD of the raw text — while the
-   *  FULL pasted text is still spliced into the buffer and submitted verbatim.
-   *  Detection uses chunk SIZE only (no clock / timing). Absent (default-OFF) ⇒
-   *  every keypress path is byte-identical to today's build (paste is inserted +
-   *  echoed inline, exactly as before). Injected at the composition root from the
-   *  `QUANTA_PASTE_BURST` knob (the slice never reads env directly). */
-  readonly pasteBurst?: PasteBurstOptions
-  /** #10 (jun-11) — bracketed-paste mode. When `true`, the reader emits the
-   *  DECSET `?2004h` enable sequence on raw-mode entry (and `?2004l` on every
-   *  exit / editor-suspend) so the terminal wraps a paste in `ESC[200~ … ESC[201~`
-   *  markers. Bun's `node:readline` surfaces those markers as discrete
-   *  `paste-start`/`paste-end` keypress events (probe-verified 2026-06-11), so the
-   *  reader can ACCUMULATE every keystroke between them — including the embedded
-   *  `\r`/`\n` line breaks that otherwise arrive as `name:"return"` and SUBMIT the
-   *  line at the first newline (the bug this fixes). The full pasted text lands in
-   *  `buf` (multi-line preserved); the line only submits on a genuine Enter
-   *  OUTSIDE a paste. Absent / `false` (default-OFF) ⇒ no `?2004h` is emitted, the
-   *  markers never arrive, and EVERY keypress path is byte-identical to today's
-   *  build (a pasted newline still early-submits — the legacy behavior). Injected
-   *  at the composition root from the `QUANTA_BRACKETED_PASTE` CLI gate; the slice
-   *  never reads env. */
-  readonly bracketedPaste?: boolean
-}
-
-/** jun-6 — paste-burst coalescing config (closed-port DI; the slice never reads
- *  env). `minChars` is the inclusive threshold: a single keypress carrying ≥
- *  this many chars is collapsed to a placeholder on echo. */
-export interface PasteBurstOptions {
-  readonly minChars: number
-}
-
-/** jun-6 — a recorded paste segment. `text` is the EXACT pasted substring (the
- *  source of truth lives in `buf`); `placeholder` is the `[Pasted Content <n>
- *  chars]` echo shown in its place. Display rendering replaces the first
- *  occurrence of `text` in `buf` with `placeholder`; submission ignores this
- *  list entirely (the buffer is already the full text). */
-interface PasteSegment {
-  readonly text: string
-  readonly placeholder: string
-}
-
-/** jun-6 — render the placeholder for a pasted blob of `n` chars. Pure; the
- *  exact wording mirrors the Codex CLI ("[Pasted Content <n> chars]"). */
-export const pasteBurstPlaceholder = (n: number): string => `[Pasted Content ${n} chars]`
-
-/** jun-6 — project `buf` to its echo form by collapsing each recorded paste
- *  segment to its placeholder (first occurrence, left-to-right). Pure: returns
- *  `buf` unchanged when there are no segments (so the OFF / no-paste path is
- *  byte-identical). A segment whose text is no longer present (the user edited
- *  across it) is skipped — the raw chars then show, never a crash. */
-export const projectPasteDisplay = (buf: string, segments: readonly PasteSegment[]): string => {
-  if (segments.length === 0) return buf
-  let out = ""
-  let rest = buf
-  // Replace each segment's text in document order. Pastes are large unique
-  // blobs, so a left-to-right first-occurrence replace is unambiguous.
-  const ordered = [...segments].sort((a, b) => buf.indexOf(a.text) - buf.indexOf(b.text))
-  for (const seg of ordered) {
-    const at = rest.indexOf(seg.text)
-    if (at < 0) continue // edited away — leave the raw chars in place
-    out += rest.slice(0, at) + seg.placeholder
-    rest = rest.slice(at + seg.text.length)
-  }
-  return out + rest
-}
-
-export class AbortError extends Error {
-  constructor() {
-    super("aborted")
-    this.name = "AbortError"
-  }
-}
-
-interface KeyEvent {
-  readonly name?: string
-  readonly ctrl?: boolean
-  /** RFC-08 — node `readline.emitKeypressEvents` already populates `key.shift`;
-   *  we widen the interface so the shift+tab (mode-cycle) guard can read it. */
-  readonly shift?: boolean
-  /** RFC-11 — alt/meta widened so `keyOf` can project meta chords for the
-   *  keybinding remap. */
-  readonly alt?: boolean
-  readonly meta?: boolean
-  readonly sequence?: string
-}
-
-/** RFC-11 / ADR-0447 — rebuild a `KeyEvent` from a canonical single-chord
- *  spec (`"ctrl+r"`, `"up"`). The keybinding remap uses this to dispatch a
- *  user-bound key AS IF the action's default key was pressed, so the existing
- *  if-chain's context logic is preserved. Pure; spec is always a valid single
- *  chord drawn from `CANONICAL_KEY_FOR_ACTION`. */
-const remapKeyEvent = (spec: string): KeyEvent => {
-  const parts = spec.split("+")
-  const name = parts[parts.length - 1] ?? ""
-  const mods = new Set(parts.slice(0, -1))
-  return {
-    name,
-    ...(mods.has("ctrl") ? { ctrl: true } : {}),
-    ...(mods.has("alt") ? { alt: true } : {}),
-    ...(mods.has("shift") ? { shift: true } : {}),
-    ...(mods.has("meta") ? { meta: true } : {}),
-  }
-}
-
-const ESC = "\x1b["
-const ERASE_LINE = `${ESC}2K`
-const ERASE_LINE_RIGHT = `${ESC}0K`
-const CR = "\r"
-const moveUp = (n: number): string => (n > 0 ? `${ESC}${n}A` : "")
-const moveDown = (n: number): string => (n > 0 ? `${ESC}${n}B` : "")
-const moveRight = (n: number): string => (n > 0 ? `${ESC}${n}C` : "")
-const DIM = `${ESC}2m`
-const RESET = `${ESC}0m`
-const CYAN = `${ESC}36m`
-const GRAY = `${ESC}90m`
-const REVERSE = `${ESC}7m`
-// #10 — DECSET 2004: bracketed-paste enable / disable. Emitted only when
-// `opts.bracketedPaste` is set so the OFF path never writes these bytes.
-const ENABLE_BRACKETED_PASTE = `${ESC}?2004h`
-const DISABLE_BRACKETED_PASTE = `${ESC}?2004l`
-
-// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches ANSI SGR sequences to strip them.
-const ANSI_RE = /\x1b\[[0-9;]*m/g
-const stripAnsi = (s: string): string => s.replace(ANSI_RE, "")
-
-const charColumns = (ch: string): number => {
-  const code = ch.codePointAt(0)
-  if (code === undefined) return 1
-  if (code < 0x80) return 1
-  if (
-    (code >= 0x1100 && code <= 0x115f) ||
-    (code >= 0x2e80 && code <= 0x303e) ||
-    (code >= 0x3041 && code <= 0x33ff) ||
-    (code >= 0x3400 && code <= 0x4dbf) ||
-    (code >= 0x4e00 && code <= 0x9fff) ||
-    (code >= 0xa000 && code <= 0xa4cf) ||
-    (code >= 0xac00 && code <= 0xd7a3) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0xfe30 && code <= 0xfe4f) ||
-    (code >= 0xff00 && code <= 0xff60) ||
-    (code >= 0xffe0 && code <= 0xffe6)
-  ) {
-    return 2
-  }
-  return 1
-}
-
-const stringColumns = (s: string): number => {
-  let cols = 0
-  for (const ch of s) cols += charColumns(ch)
-  return cols
-}
-
-const MAX_VISIBLE_CANDIDATES = 8
-
-/** Render a composer row. Previously this wrapped the content in a
- *  full-width dark-gray (xterm 236) background band so the prompt looked
- *  like a Codex-style "input box"; on dark terminal themes that band read
- *  as a solid black bar, so it now passes content through unchanged.
- *  The caller already emits `CR + ERASE_LINE` before each paint, so no
- *  width-padding is needed to overwrite stale content. */
-const fillBgRow = (content: string): string => content
-
-interface State {
-  buf: string
-  cursor: number
-  candidates: readonly string[]
-  selectedIdx: number
-  listOpen: boolean
-  /** Number of rows currently reserved BELOW the prompt line. Grows
-   *  monotonically per readLine call so subsequent redraws stay inside a
-   *  scroll-stable band. */
-  reserved: number
-  /** History navigation: saved draft so `next()` past-newest restores what
-   *  the user was typing before pressing `↑`. `null` ⇒ not navigating. */
-  historyDraft: string | null
-  /** Reverse-i-search mode: when active, keystrokes filter the search query
-   *  instead of editing `buf`. The matched history entry is previewed in the
-   *  prompt row; `Enter` commits it into `buf`, `Esc` cancels. */
-  searchMode: boolean
-  searchQuery: string
-  searchMatch: string
-  /** Heredoc multiline: when open, completed lines accumulate here. The
-   *  active row is still `buf`; on fence-close they are joined with `\n`
-   *  and resolved. */
-  heredocOpen: boolean
-  heredocFence: string
-  heredocLines: string[]
-  /** RFC-12 — `@`-mention dropdown sub-state. Dormant (`at.active=false`)
-   *  unless `opts.atProvider` is injected AND the user typed a boundary `@`. */
-  at: AtState
-  /** jun-6 — recorded paste-burst segments. Empty unless `opts.pasteBurst` is
-   *  injected AND a ≥minChars keypress arrived. Display-only: `buf` always holds
-   *  the FULL text; these only collapse the ECHO. */
-  pasteSegments: PasteSegment[]
-  /** #10 — true between a `paste-start` and `paste-end` marker. While true,
-   *  EVERY keypress is accumulated into `pasteText` (CR/LF normalized to `\n`)
-   *  rather than routed to the submit / nav / completion handlers, so a
-   *  multi-line paste never submits at its first newline. Inert (always false)
-   *  unless `opts.bracketedPaste` is set AND the terminal sent a paste-start. */
-  pasting: boolean
-  /** Cursor index where the active paste began (where the accumulated text is
-   *  spliced into `buf` on paste-end). */
-  pasteAnchor: number
-  /** Accumulated text of the active paste (line breaks normalized to `\n`). */
-  pasteText: string
-  /** `\r\n` collapse latch: a `\n` (`name:"enter"`) immediately after a `\r`
-   *  (`name:"return"`) is the second half of a CRLF and is dropped so the
-   *  buffer keeps a single `\n` per line break. */
-  pasteLastCR: boolean
-}
-
-const ghostSuffix = (buf: string, candidates: readonly string[]): string => {
-  if (candidates.length === 0) return ""
-  const top = candidates[0] ?? ""
-  if (!top.startsWith(buf)) return ""
-  return top.slice(buf.length)
-}
-
-/** Narrow stdin shape `readLine` actually uses. Lets tests inject a fake
- *  keypress source without a real TTY (RFC §7). NOT part of the public
- *  contract — production always passes `process.stdin`. */
-interface ReaderStdin {
-  on(event: "keypress", listener: KeypressListener): unknown
-  removeListener(event: "keypress", listener: KeypressListener): unknown
-  resume(): unknown
-  pause(): unknown
-  readonly isTTY?: boolean
-  readonly isRaw?: boolean
-  setRawMode?(mode: boolean): unknown
-}
-type KeypressListener = (str: string | undefined, key: KeyEvent | undefined) => void
-interface ReaderStdout {
-  write(chunk: string): unknown
-}
-/** Test-only I/O override. Production callers omit this entirely. */
-export interface ReadLineTestIO {
-  readonly stdin: ReaderStdin
-  readonly stdout: ReaderStdout
-  /** Skip `emitKeypressEvents` (the fake stdin emits `keypress` directly). */
-  readonly skipKeypressSetup?: boolean
-}
+export type { ReadLineOptions, ReadLineTestIO } from "./raw-line-reader/options"
+// Re-export the complete public surface so every importer of
+// `./raw-line-reader` stays byte-compatible after the split.
+export { AbortError } from "./raw-line-reader/options"
+export {
+  type PasteBurstOptions,
+  pasteBurstPlaceholder,
+  projectPasteDisplay,
+} from "./raw-line-reader/paste-display"
+export type { CandidateDescriptor, CompleterFn, DescribeFn, State } from "./raw-line-reader/types"
 
 export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promise<string> => {
   return new Promise<string>((resolve, reject) => {
@@ -462,7 +214,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
         ? Math.min(state.candidates.length, MAX_VISIBLE_CANDIDATES) +
           (state.candidates.length > MAX_VISIBLE_CANDIDATES ? 1 : 0)
         : atDropdownOpen()
-          ? atListRows().length
+          ? atListRowsFor(state.at).length
           : 0
       const blankRow = listRows > 0 ? 1 : 0
       return META_ROWS + blankRow + listRows
@@ -482,70 +234,6 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       state.reserved = rows
     }
 
-    const renderListRows = (): string[] => {
-      if (!state.listOpen || state.candidates.length === 0) return []
-      const visible = state.candidates.slice(0, MAX_VISIBLE_CANDIDATES)
-      const extra = state.candidates.length - visible.length
-      const nameW = Math.max(...visible.map((c) => stringColumns(c)))
-      const rows = visible.map((c, i) => {
-        const namePadded = c + " ".repeat(Math.max(0, nameW - stringColumns(c)))
-        const desc = opts.describe?.(c) ?? ""
-        const sel = i === state.selectedIdx
-        const nameStyled = sel
-          ? `${REVERSE}${CYAN}${namePadded}${RESET}`
-          : `${CYAN}${namePadded}${RESET}`
-        const descStyled = desc !== "" ? `  ${GRAY}${desc}${RESET}` : ""
-        return `${nameStyled}${descStyled}`
-      })
-      if (extra > 0) rows.push(`${GRAY}  … +${extra} more${RESET}`)
-      return rows
-    }
-
-    /** RFC-12 §4.4 — render the `@`-dropdown as kind-grouped rows: a dim
-     *  kind-section header followed by indented `label … detail` rows, the
-     *  highlighted row in reverse-cyan. Reuses `stringColumns` for CJK-safe
-     *  alignment. Capped at `MAX_VISIBLE_CANDIDATES` (headers excluded from
-     *  the cap so a group is never orphaned); overflow shows "+N more". */
-    const atListRows = (): string[] => {
-      const cands = state.at.candidates
-      if (cands.length === 0) return []
-      // Sliding window: show MAX_VISIBLE_CANDIDATES rows that always contain the
-      // selection. `start` clamps so the window stays in-bounds; entries above
-      // / below it are summarised with "+N" markers so nothing is silently
-      // hidden (and, with full-list nav, everything stays reachable).
-      const total = cands.length
-      const win = MAX_VISIBLE_CANDIDATES
-      const sel = state.at.selectedIdx
-      let start = 0
-      if (total > win) {
-        start = Math.max(0, Math.min(sel - Math.floor(win / 2), total - win))
-        if (sel < 0) start = 0
-      }
-      const visible = cands.slice(start, start + win)
-      const above = start
-      const below = total - (start + visible.length)
-      const labelW = Math.max(1, ...visible.map((c) => stringColumns(c.label)))
-      const rows: string[] = []
-      if (above > 0) rows.push(`${GRAY}  … +${above} above${RESET}`)
-      let lastKind: AtCandidate["kind"] | null = null
-      visible.forEach((c, i) => {
-        if (c.kind !== lastKind) {
-          rows.push(`${GRAY}${c.kind}${RESET}`)
-          lastKind = c.kind
-        }
-        const labelPadded = c.label + " ".repeat(Math.max(0, labelW - stringColumns(c.label)))
-        const isSel = start + i === sel
-        const labelStyled = isSel
-          ? `  ${REVERSE}${CYAN}${labelPadded}${RESET}`
-          : `  ${CYAN}${labelPadded}${RESET}`
-        const detail = c.detail ?? ""
-        const detailStyled = detail !== "" ? `  ${GRAY}${detail}${RESET}` : ""
-        rows.push(`${labelStyled}${detailStyled}`)
-      })
-      if (below > 0) rows.push(`${GRAY}  … +${below} more${RESET}`)
-      return rows
-    }
-
     const redraw = (): void => {
       const target = targetReserved()
       growBandTo(Math.max(target, state.reserved))
@@ -557,7 +245,11 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       // band is stable once reserved.
       // Slash palette and `@`-dropdown are mutually exclusive; the slash
       // rows win if (somehow) both were open.
-      const listRows = state.listOpen ? renderListRows() : atDropdownOpen() ? atListRows() : []
+      const listRows = state.listOpen
+        ? renderListRows(state.listOpen, state.candidates, state.selectedIdx, opts.describe)
+        : atDropdownOpen()
+          ? atListRowsFor(state.at)
+          : []
       for (let i = 0; i < state.reserved; i += 1) {
         out += moveDown(1) + CR + ERASE_LINE
         if (i === 0 && META_ROWS === 1) {
@@ -768,68 +460,10 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       return true
     }
 
-    /** Heredoc fence detector. A line is a fence iff it equals (after trim)
-     *  the configured opener `"""` or backtick `'''`. Returns the fence
-     *  string when matched, else `""`. */
-    const HEREDOC_FENCES = ['"""', "'''"]
-    const detectFence = (line: string): string => {
-      const trimmed = line.trim()
-      for (const f of HEREDOC_FENCES) if (trimmed === f) return f
-      return ""
-    }
-
-    /** Replace `buf` with a history-recall entry (or restore the saved draft
-     *  on past-newest). Resets cursor and refreshes candidates so a slash-
-     *  prefixed recalled entry re-opens the menu correctly. */
-    const setBufFromHistory = (next: string | undefined): void => {
-      if (next === undefined) {
-        // past-newest ⇒ restore the draft the user was typing.
-        state.buf = state.historyDraft ?? ""
-        state.historyDraft = null
-      } else {
-        if (state.historyDraft === null) state.historyDraft = state.buf
-        state.buf = next
-      }
-      state.cursor = state.buf.length
-      refreshCandidates()
-    }
-
-    /** Reverse-i-search step: re-run the search with the current query and
-     *  paint the match (or clear it on no-match). Cursor inside the history
-     *  ring is owned by `opts.history.search()` itself. */
-    const stepSearch = (): void => {
-      if (opts.history === undefined) return
-      if (state.searchQuery === "") {
-        state.searchMatch = ""
-        redraw()
-        return
-      }
-      // Always restart the search from the newest entry so query edits do
-      // not strand the cursor — `reset()` then `search(query)`.
-      opts.history.reset()
-      state.searchMatch = opts.history.search(state.searchQuery) ?? ""
-      redraw()
-    }
-
-    const commitSearch = (): boolean => {
-      if (!state.searchMode) return false
-      const pick = state.searchMatch
-      state.searchMode = false
-      state.searchQuery = ""
-      state.searchMatch = ""
-      if (pick !== "") {
-        state.buf = pick
-        state.cursor = state.buf.length
-        refreshCandidates()
-      }
-      return true
-    }
-
-    const cancelSearch = (): void => {
-      state.searchMode = false
-      state.searchQuery = ""
-      state.searchMatch = ""
-    }
+    // Heredoc fence detection + history-recall / reverse-i-search helpers live
+    // in `./raw-line-reader/history-search`; they operate on `state` (+ refresh
+    // / redraw callbacks) so the `onKey` routing below is byte-for-byte
+    // equivalent. All inert unless `opts.history` is wired.
 
     // ── RFC-11 / ADR-0446 — external `$EDITOR` composition ──────────────────
     // Suspend raw mode + detach our keypress listener, yield the terminal to
@@ -886,72 +520,9 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     }
 
     // ── #10 — bracketed-paste accumulation ──────────────────────────────────
-    // Bun's `node:readline` surfaces the DECSET 2004 markers as discrete
-    // `paste-start`/`paste-end` keypresses (probe 2026-06-11); we ALSO match the
-    // raw `sequence` as a fallback for runtimes that pass it through unnamed.
-    const isPasteStart = (k: KeyEvent): boolean =>
-      k.name === "paste-start" || k.sequence === `${ESC}200~`
-    const isPasteEnd = (k: KeyEvent): boolean =>
-      k.name === "paste-end" || k.sequence === `${ESC}201~`
-
-    const beginPaste = (): void => {
-      state.pasting = true
-      state.pasteAnchor = state.cursor
-      state.pasteText = ""
-      state.pasteLastCR = false
-    }
-
-    /** Fold one in-paste keypress into `pasteText`. CR (`name:"return"`) and LF
-     *  (`name:"enter"`) both become a single `\n`; a `\n` directly after a `\r`
-     *  is the trailing half of a CRLF and is dropped. Non-printable control keys
-     *  (arrows etc.) inside a paste are ignored — a paste is data, not editing. */
-    const accumulatePasteKey = (str: string | undefined, k: KeyEvent): void => {
-      if (k.name === "return" || str === "\r") {
-        state.pasteText += "\n"
-        state.pasteLastCR = true
-        return
-      }
-      if (k.name === "enter" || str === "\n") {
-        if (state.pasteLastCR) {
-          state.pasteLastCR = false
-          return
-        }
-        state.pasteText += "\n"
-        return
-      }
-      state.pasteLastCR = false
-      if (typeof str === "string" && str.length >= 1) state.pasteText += str
-    }
-
-    /** Splice the accumulated paste into `buf` at its anchor in ONE mutation and
-     *  redraw once. The echo collapses to a `[Pasted Content N chars]` placeholder
-     *  when the paste is multi-line (a raw `\n` in `buf` would corrupt the single-
-     *  row composer band) or when paste-burst is configured and the size crosses
-     *  its threshold; a short single-line paste inserts raw (renders inline). The
-     *  FULL text always stays in `buf` and submits verbatim on the next genuine
-     *  Enter. */
-    const finishPaste = (): void => {
-      state.pasting = false
-      const text = state.pasteText
-      state.pasteText = ""
-      state.pasteLastCR = false
-      if (text.length > 0) {
-        const anchor = Math.min(state.pasteAnchor, state.buf.length)
-        state.buf = state.buf.slice(0, anchor) + text + state.buf.slice(anchor)
-        state.cursor = anchor + text.length
-        const count = [...text].length
-        const collapse =
-          text.includes("\n") ||
-          (opts.pasteBurst !== undefined && count >= opts.pasteBurst.minChars)
-        if (collapse) state.pasteSegments.push({ text, placeholder: pasteBurstPlaceholder(count) })
-        if (state.historyDraft !== null) {
-          state.historyDraft = null
-          opts.history?.reset()
-        }
-      }
-      refreshCandidates()
-      redraw()
-    }
+    // The accumulation helpers live in `./raw-line-reader/paste-accum`; they
+    // operate on `state` (+ refresh / redraw callbacks) so the routing below is
+    // byte-for-byte equivalent. Inert unless `bracketedPasteOn`.
 
     const onKey = (str: string | undefined, key: KeyEvent | undefined): void => {
       if (settled) return
@@ -967,14 +538,14 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       if (bracketedPasteOn) {
         if (state.pasting) {
           if (isPasteEnd(k)) {
-            finishPaste()
+            finishPaste(state, opts, refreshCandidates, redraw)
             return
           }
-          accumulatePasteKey(str, k)
+          accumulatePasteKey(state, str, k)
           return
         }
         if (isPasteStart(k)) {
-          beginPaste()
+          beginPaste(state)
           return
         }
       }
@@ -1050,12 +621,12 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
       // (commit), Esc (cancel), or another Ctrl+R (step to next-older match).
       if (state.searchMode) {
         if (k.name === "return") {
-          commitSearch()
+          commitSearch(state, refreshCandidates)
           settleResolve(state.buf)
           return
         }
         if (k.name === "escape" || (k.ctrl === true && k.name === "g")) {
-          cancelSearch()
+          cancelSearch(state)
           redraw()
           return
         }
@@ -1067,12 +638,12 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
         }
         if (k.name === "backspace") {
           state.searchQuery = state.searchQuery.slice(0, -1)
-          stepSearch()
+          stepSearch(state, opts.history, redraw)
           return
         }
         if (typeof str === "string" && str.length === 1 && str >= " ") {
           state.searchQuery += str
-          stepSearch()
+          stepSearch(state, opts.history, redraw)
           return
         }
         // Ignore other keys inside search mode (no edit, no nav).
@@ -1219,7 +790,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
           return
         }
         if (opts.history !== undefined && !state.heredocOpen) {
-          setBufFromHistory(opts.history.next())
+          setBufFromHistory(state, opts.history.next(), refreshCandidates)
           redraw()
         }
         return
@@ -1235,7 +806,7 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
         if (opts.history !== undefined && !state.heredocOpen) {
           const prev = opts.history.prev()
           if (prev !== undefined) {
-            setBufFromHistory(prev)
+            setBufFromHistory(state, prev, refreshCandidates)
             redraw()
           }
         }
@@ -1404,19 +975,6 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
     growBandTo(targetReserved())
     redraw()
   })
-}
-
-const longestCommonPrefix = (candidates: readonly string[]): string => {
-  if (candidates.length === 0) return ""
-  let prefix = candidates[0] ?? ""
-  for (let i = 1; i < candidates.length; i += 1) {
-    const cur = candidates[i] ?? ""
-    let j = 0
-    while (j < prefix.length && j < cur.length && prefix[j] === cur[j]) j += 1
-    prefix = prefix.slice(0, j)
-    if (prefix === "") return ""
-  }
-  return prefix
 }
 
 export const __longestCommonPrefixForTest = longestCommonPrefix
