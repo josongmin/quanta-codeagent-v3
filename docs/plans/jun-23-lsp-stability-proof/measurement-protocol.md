@@ -75,10 +75,16 @@ substitute for the SWE-bench-repo distribution (Measurement B, below).
 
 | arm | n | ready_ok | ready_timeout | fatal_transport | ready ms (min/med/max) |
 |-----|---|----------|---------------|-----------------|------------------------|
-| cold (fresh cwd each run) | 5 | 5 | 0 | 0 | 14236 / 16909 / 19202 |
-| cold→warm, same cwd reuse | 1+1 | ok / ok | 0 | 0 | cold 9576 → **warm 5** |
+| small pkg, cold (fresh cwd) | 5 | 5 | 0 | 0 | 14236 / 16909 / 19202 |
+| small pkg, cold→warm reuse | 1+1 | ok / ok | 0 | 0 | cold 9576 → **warm 5** |
+| **real bench repo (sympy, 1311 .py / 40M), cold** | 1 | 1 | 0 | 0 | **28477** |
+| real bench repo (sympy), warm reuse | 1 | 1 | 0 | 0 | **16** |
 
 Findings:
+- A REAL bench repo (sympy `c50643a`, target `sympy/crypto/crypto.py`) cold-indexes
+  to ready in **~28.5 s** — under the 90 s `PYRIGHT_READY_TIMEOUT_MS` budget, so it
+  resolves `ok` (no timeout). Warm reuse is **16 ms**. So indexing IS slow on a real
+  repo, but the current budget comfortably absorbs sympy-class repos.
 - Cold ready proof on a TRIVIAL 4-file package is already ~14–19 s — pyright
   cold-start + initial index + first-definition resolve dominates.
 - Warm reuse (the pool keeps the entry warm: `proveReady` releases, never evicts)
