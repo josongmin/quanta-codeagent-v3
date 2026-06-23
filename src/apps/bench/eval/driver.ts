@@ -9,6 +9,8 @@ import type { SessionHost } from "@/kernel/session"
 import type { Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
 import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
+import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
+import { makeAdaptiveToolModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
 import {
   applyBenchKnobs,
   type BenchKnobState,
@@ -16,6 +18,7 @@ import {
   type BenchPosture,
   benchOptIns,
   benchVerifyAuthorityCommandsOf,
+  buildAdaptivePhasePacket,
   buildReproVoteValidate,
   buildConfig as buildRunnerConfig,
   buildSelectionCandidateFamilyBundle,
@@ -105,6 +108,7 @@ import type {
   InstanceResult,
   ReproOracleCalibration,
 } from "../types"
+import { v5AdaptiveEnabled } from "../preset"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
 import { runRepairRounds } from "./repair/index"
@@ -321,13 +325,15 @@ const runAgentOnce = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<RunOnceResult> => {
   const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
   // Knob telemetry: emit ONE `knobs_applied` event per runAgent invocation —
   // the greppable per-run marker of which knobs/preset actually ran. The runner
   // driver emits it at both agent entry points; this prod (SDK) wrapper must
   // match or every real trajectory is silently missing the line (split-brain).
-  emitKnobsApplied(tap, process.env)
+  emitKnobsApplied(tap, process.env, stateOverride)
   const outcome = await runAgentViaSdk(
     buildRunnerConfig(
       instance,
@@ -339,6 +345,8 @@ const runAgentOnce = async (
       precomputedHint,
       reproHint,
       closureHint,
+      postureOverride,
+      stateOverride,
     ),
     deps.runtimeFactory,
   )
@@ -359,6 +367,8 @@ const runAgentPhase = async (
   precomputedHint: string | undefined,
   reproHint: string | undefined,
   closureHint: string | undefined,
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: AgentOutcome["reason"] | undefined
@@ -407,7 +417,7 @@ const runAgentPhase = async (
       // Knob telemetry: emit once per phase entry (matches the contract on
       // `emitKnobsApplied`). The single-pass path bypasses `runAgentOnce`, so
       // the emit lives here directly — mirrors the runner driver's runAgentPhase.
-      emitKnobsApplied(tap, process.env)
+      emitKnobsApplied(tap, process.env, stateOverride)
       const outcome = await runAgentViaSdk(
         buildRunnerConfig(
           instance,
@@ -419,6 +429,8 @@ const runAgentPhase = async (
           precomputedHint,
           reproHint,
           closureHint,
+          postureOverride,
+          stateOverride,
         ),
         deps.runtimeFactory,
       )
@@ -471,6 +483,8 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   let turns = 0
   let finalPatch = ""
@@ -507,6 +521,8 @@ const runRepairPhase = async (
             precomputedHint,
             reproHint,
             closureHint,
+            postureOverride,
+            stateOverride,
           ),
         validate,
         buildContext: (ctxArgs) => {
@@ -639,6 +655,8 @@ const generateSelectionCandidate = async (args: {
   readonly precomputedHint: string | undefined
   readonly reproHint: string | undefined
   readonly mergeHint: (seed: string | undefined) => string | undefined
+  readonly postureOverride?: BenchPosture
+  readonly stateOverride?: BenchKnobState
   readonly concurrency: number | undefined
   readonly baseValidatedRed: boolean | null
   readonly generationErrors: Map<number, string>
@@ -658,6 +676,8 @@ const generateSelectionCandidate = async (args: {
       args.precomputedHint,
       args.reproHint,
       args.mergeHint(args.seed),
+      args.postureOverride,
+      args.stateOverride,
     )
     args.addTurns(phase.turns)
     const generationError = selectionGenerationErrorOf({
@@ -737,6 +757,8 @@ const runSelectionPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   // SCAFF-04/05 parity (see runner driver): AST witnesses feed BOTH generation
   // families (complete candidate is generated) and required contracts (it wins).
@@ -909,6 +931,8 @@ const runSelectionPhase = async (
           wiring: w,
           precomputedHint,
           reproHint,
+          postureOverride,
+          stateOverride,
           mergeHint,
           concurrency,
           baseValidatedRed: selectionBaseValidatedRed,
@@ -1034,6 +1058,8 @@ const runAppMainPhase = async (args: {
       args.prepared.reproHint,
       args.prepared.closureHint,
       args.prepared.reproSources,
+      args.prepared.posture,
+      args.prepared.state,
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
@@ -1050,6 +1076,8 @@ const runAppMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      args.prepared.posture,
+      args.prepared.state,
     )
   }
   return runAgentPhase(
@@ -1061,6 +1089,8 @@ const runAppMainPhase = async (args: {
     args.prepared.precomputedHint,
     args.prepared.reproHint,
     args.prepared.closureHint,
+    args.prepared.posture,
+    args.prepared.state,
   )
 }
 
@@ -1096,6 +1126,114 @@ const runInstanceOnce = async (
     // Setup is done — arm the solve deadline now so the agent gets the full
     // `timeoutMs` of think time (see note where `deadline` is declared).
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
+    if (v5AdaptiveEnabled({ preset: preparedContext.state.preset, envVars: process.env })) {
+      const thinPhase = await runAppMainPhase({
+        instance,
+        deps,
+        sandbox,
+        signal: abort.signal,
+        wiring: w,
+        prepared: preparedContext,
+      })
+      let finalPrepared = preparedContext
+      let finalPhase = thinPhase
+      const revisions: string[] = []
+      const initialPacket = buildAdaptivePhasePacket({
+        instance,
+        phase: thinPhase,
+        prepared: preparedContext,
+        sandbox,
+      })
+      revisions.push(initialPacket.evidenceRevision)
+      const adaptive = await runAdaptiveBenchAttempt({
+        intakePacket: initialPacket,
+        base: preparedContext.state,
+        env: process.env,
+        modelCall: makeAdaptiveToolModelCall({ llm: deps.llm, signal: abort.signal }),
+        runPhase: async ({ state, posture }) => {
+          const nextPrepared = await prepareAttemptContext(
+            instance,
+            sandbox,
+            deps,
+            abort.signal,
+            posture,
+            state,
+          )
+          const nextPhase = await runAppMainPhase({
+            instance,
+            deps,
+            sandbox,
+            signal: abort.signal,
+            wiring: w,
+            prepared: nextPrepared,
+          })
+          finalPrepared = nextPrepared
+          finalPhase = nextPhase
+          const packet = buildAdaptivePhasePacket({
+            instance,
+            phase: nextPhase,
+            prepared: nextPrepared,
+            sandbox,
+          })
+          revisions.push(packet.evidenceRevision)
+          return { packet }
+        },
+      })
+      const adaptiveRoute = {
+        outcome: adaptive.outcome,
+        steps: adaptive.steps,
+        evidenceRevisions: revisions,
+        ...(adaptive.reason !== undefined ? { reason: String(adaptive.reason) } : {}),
+        ...(adaptive.finalDecision !== undefined
+          ? {
+              finalAction: adaptive.finalDecision.action,
+              finalWhy: adaptive.finalDecision.why,
+              citedEvidenceIds: adaptive.finalDecision.citedEvidenceIds,
+            }
+          : {}),
+      } satisfies NonNullable<InstanceResult["adaptiveRoute"]>
+      if (adaptive.outcome !== "finalize") {
+        return {
+          ...latePhaseFailureResultOf({
+            instance,
+            phase: finalPhase,
+            reproTest,
+            error: `adaptive controller stopped: ${String(adaptive.reason ?? adaptive.outcome)}`,
+            prepared: finalPrepared,
+            sandbox,
+          }),
+          adaptiveRoute,
+        }
+      }
+      phase = finalPhase
+      prepared = finalPrepared
+      const terminal = await maybeValidateTerminalResult({
+        instance,
+        phase: finalPhase,
+        reproTest,
+        deps,
+        wiring: w,
+        startedAt,
+        signal: abort.signal,
+        prepared: finalPrepared,
+        sandbox,
+      })
+      if (terminal !== undefined) return { ...terminal, adaptiveRoute }
+      return {
+        ...(await verifyAndFinalizeResult({
+          instance,
+          phase: finalPhase,
+          deps,
+          sandbox,
+          signal: abort.signal,
+          reproTest,
+          wiring: w,
+          startedAt,
+          prepared: finalPrepared,
+        })),
+        adaptiveRoute,
+      }
+    }
 
     phase = await runAppMainPhase({
       instance,

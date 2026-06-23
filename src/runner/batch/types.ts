@@ -142,6 +142,16 @@ export type ReproConsensusProofState =
   import("./eval/repair/resolved-consensus").ReproConsensusProofState
 export type LlmEvidenceArtifacts = import("./eval/llm-evidence-packet").LlmEvidenceArtifacts
 
+export interface AdaptiveRouteTelemetry {
+  outcome: import("./eval/adaptive-escalation").AdaptiveOutcome
+  steps: readonly import("./eval/adaptive-escalation").AdaptiveAction[]
+  reason?: string
+  finalAction?: import("./eval/adaptive-escalation").AdaptiveAction
+  finalWhy?: string
+  citedEvidenceIds?: readonly string[]
+  evidenceRevisions: readonly string[]
+}
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -336,6 +346,9 @@ export interface InstanceResult {
    * but they never alter submit authority.
    */
   llmEvidence?: LlmEvidenceArtifacts
+  /** v5 adaptive-controller trace: which routed phases ran, what terminal
+   *  action was chosen, and which packet revisions the router actually saw. */
+  adaptiveRoute?: AdaptiveRouteTelemetry
   /**
    * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
    * with a structured reason). Emitted only when the `repair-escalation` knob is

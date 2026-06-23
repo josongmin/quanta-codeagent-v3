@@ -2918,6 +2918,8 @@ const runSelectionPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   reproSources: readonly string[],
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   const { effectivePublicContracts, selectionInputs, staticWitnesses } = buildSelectionPhaseContracts({
     instance,
@@ -2991,6 +2993,8 @@ const runSelectionPhase = async (
       precomputedHint,
       reproHint,
       closureHint,
+      postureOverride,
+      stateOverride,
       concurrency,
       generationErrors,
       addTurns: (turns) => {
@@ -3522,8 +3526,11 @@ export const prepareAttemptContext = async (
   sandbox: string,
   deps: RunInstanceDeps,
   signal: AbortSignal,
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
 ): Promise<PreparedAttemptContext> => {
-  const posture = benchOptIns()
+  const state = stateOverride ?? resolveBenchKnobs({ envVars: process.env })
+  const posture = postureOverride ?? benchPostureFromState(state, process.env)
   // The gold patch's targets are the files the task actually concerns ⇒ the
   // language to require grounding for. Absent (non-swebench) ⇒ undefined, and the
   // gate falls back to the whole-repo probe (historical behavior).
@@ -3593,6 +3600,7 @@ export const prepareAttemptContext = async (
   })
   return {
     ...hintRepro,
+    state,
     ownerResolved,
     closureSession,
     verificationPlan: closureSession?.bundle.plan,
@@ -3650,6 +3658,8 @@ const runMainPhase = async (args: {
       args.prepared.reproHint,
       args.prepared.closureHint,
       args.prepared.reproSources,
+      args.prepared.posture,
+      args.prepared.state,
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
@@ -3666,6 +3676,8 @@ const runMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      args.prepared.posture,
+      args.prepared.state,
     )
   }
   return runAgentPhase(
@@ -3677,6 +3689,8 @@ const runMainPhase = async (args: {
     args.prepared.precomputedHint,
     args.prepared.reproHint,
     args.prepared.closureHint,
+    args.prepared.posture,
+    args.prepared.state,
   )
 }
 
@@ -3711,6 +3725,175 @@ export const maybeValidateTerminalResult = async (args: {
   })
   return { ...result, ...extra }
 }
+
+const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
+
+const v5AdaptiveEnabledForState = (
+  state: BenchKnobState,
+  envVars: NodeJS.ProcessEnv,
+): boolean => state.preset === V5_ADAPTIVE_PRESET && gateOn(envVars, "QUANTA_BENCH_V5_ADAPTIVE")
+
+const dedupeProofReceipts = (
+  receipts: readonly ProofReceiptFact[],
+): readonly ProofReceiptFact[] =>
+  [...new Map(receipts.map((receipt) => [`${receipt.source}:${receipt.state}:${receipt.command ?? ""}`, receipt])).values()]
+
+const adaptiveBaseReproReceipts = (
+  reproTest: BenchReproTestTelemetry | undefined,
+): readonly ProofReceiptFact[] => {
+  if (reproTest === undefined) return []
+  if (reproTest.installed) {
+    return [
+      {
+        source: "public_mwe",
+        state: reproTest.reproducedCount > 0 ? "base_red" : "base_green",
+        command: reproTest.path,
+        baseValidatedRed: reproTest.reproducedCount > 0,
+      },
+    ]
+  }
+  const infraReason =
+    reproTest.reason === "not_installed" || reproTest.reason === "write_failed"
+      ? "env_prep_failed"
+      : "execution_failed"
+  return [{ source: "public_mwe", state: infraReason }]
+}
+
+const adaptiveSelectionProofReceipts = (
+  proofSummary: Phase["selectionTelemetry"] extends infer T
+    ? T extends { proofSummary?: infer S }
+      ? S
+      : never
+    : never,
+): readonly ProofReceiptFact[] => {
+  if (proofSummary === undefined) return []
+  const receipts: ProofReceiptFact[] = []
+  switch (proofSummary.publicMweState) {
+    case "base_red":
+      receipts.push({ source: "public_mwe", state: "base_red", baseValidatedRed: true })
+      break
+    case "base_not_red":
+      receipts.push({ source: "public_mwe", state: "base_green" })
+      break
+    case "patched_green":
+      receipts.push({ source: "public_mwe", state: "candidate_green", baseValidatedRed: true })
+      break
+    case "candidate_red":
+      receipts.push({ source: "public_mwe", state: "candidate_red", baseValidatedRed: true })
+      break
+    case "execution_failed":
+      receipts.push({ source: "public_mwe", state: "execution_failed" })
+      break
+  }
+  switch (proofSummary.publicRegressionState) {
+    case "safety_green":
+      receipts.push({ source: "discovered_regression", state: "candidate_green" })
+      break
+    case "candidate_red":
+      receipts.push({ source: "discovered_regression", state: "candidate_red" })
+      break
+    case "execution_failed":
+      receipts.push({ source: "discovered_regression", state: "execution_failed" })
+      break
+    case "coverage_capped":
+      receipts.push({ source: "discovered_regression", state: "static_only" })
+      break
+  }
+  switch (proofSummary.reproConsensusState) {
+    case "base_red_candidate_green":
+      receipts.push({ source: "repro_consensus", state: "candidate_green", baseValidatedRed: true })
+      break
+    case "base_red_candidate_red":
+      receipts.push({ source: "repro_consensus", state: "candidate_red", baseValidatedRed: true })
+      break
+    case "execution_failed":
+      receipts.push({ source: "repro_consensus", state: "execution_failed" })
+      break
+    case "false_negative_suspected":
+      receipts.push({ source: "repro_consensus", state: "static_only", baseValidatedRed: true })
+      break
+  }
+  return receipts
+}
+
+export const buildAdaptivePhasePacket = (args: {
+  readonly instance: Instance
+  readonly phase: Phase
+  readonly prepared: PreparedAttemptContext
+  readonly sandbox: string
+}): LlmEvidencePacket => {
+  const proofSummary = args.phase.selectionTelemetry?.proofSummary
+  if (args.phase.selectionTelemetry !== undefined) {
+    return buildSelectionExplanationPacket({
+      problemStatement: args.instance.problemStatement,
+      ownerFiles: args.phase.selectionTelemetry.ownerFiles,
+      winnerId: args.phase.selectionTelemetry.winnerId,
+      ...(args.phase.selectionTelemetry.noWinnerReason !== undefined
+        ? { noWinnerReason: args.phase.selectionTelemetry.noWinnerReason }
+        : {}),
+      ...(args.phase.selectionTelemetry.proofRequired === true ? { proofRequired: true } : {}),
+      ...(proofSummary !== undefined ? { proofSummary } : {}),
+      candidates: args.phase.selectionTelemetry.candidates,
+    })
+  }
+  const ownerFiles = cleanUniqueList([
+    ...(args.prepared.closureSession?.bundle.evidence.candidates.map((candidate) => candidate.file) ?? []),
+    ...(args.prepared.ownerResolved?.map((owner) => owner.file) ?? []),
+    ...args.prepared.localizeCandidates,
+  ])
+  const ownerEvidence = buildSelectionOwnerEvidence({
+    ownerFiles,
+    issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+    readSource: (rel) => readSandboxSource(args.sandbox, rel),
+  })
+  const verificationTarget = verificationTargetFromPlan(args.prepared.verificationPlan)
+  const missingEvidence: MissingEvidenceFact[] = []
+  const receipts = dedupeProofReceipts([
+    ...adaptiveBaseReproReceipts(args.prepared.reproTest),
+    ...adaptiveSelectionProofReceipts(proofSummary),
+  ])
+  if (!receipts.some((receipt) => receipt.state === "candidate_green")) {
+    missingEvidence.push({
+      kind: "executed_public_proof",
+      reason:
+        proofSummary?.proofState === "infra_blocked"
+          ? "public_proof_infra_blocked"
+          : "no_positive_executed_public_proof",
+    })
+  }
+  if (args.phase.stopReason === "error" && args.phase.agentError !== undefined) {
+    missingEvidence.push({
+      kind: "phase_error",
+      reason: args.phase.agentError.slice(0, 240),
+    })
+  }
+  return buildCandidatePostReviewLlmEvidencePacket({
+    problemStatement: args.instance.problemStatement,
+    candidatePatchHash: candidatePatchHash(args.phase.patch),
+    ownerEvidence,
+    proofReceipts: receipts,
+    contracts: [],
+    ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+    ...(missingEvidence.length > 0 ? { missingEvidence } : {}),
+  })
+}
+
+const adaptiveRouteTelemetryOf = (
+  run: Awaited<ReturnType<typeof runAdaptiveBenchAttempt>>,
+  evidenceRevisions: readonly string[],
+): NonNullable<InstanceResult["adaptiveRoute"]> => ({
+  outcome: run.outcome,
+  steps: run.steps,
+  evidenceRevisions,
+  ...(run.reason !== undefined ? { reason: String(run.reason) } : {}),
+  ...(run.finalDecision !== undefined
+    ? {
+        finalAction: run.finalDecision.action,
+        finalWhy: run.finalDecision.why,
+        citedEvidenceIds: run.finalDecision.citedEvidenceIds,
+      }
+    : {}),
+})
 
 // jun-21 — REMOVED `maybeStrictBudgetBlockedResult` (the strict patch-budget
 // TERMINAL-DISCARD). It violated the patch-budget contract: an over-budget
@@ -4106,6 +4289,102 @@ export const runInstanceOnce = async (
     const preparedContext = prepared
     reproTest = preparedContext.reproTest
     deadline = setTimeout(() => abort.abort(), deps.timeoutMs)
+    if (v5AdaptiveEnabledForState(preparedContext.state, process.env)) {
+      const thinPhase = await runMainPhase({
+        instance,
+        deps,
+        sandbox,
+        signal: abort.signal,
+        wiring: w,
+        prepared: preparedContext,
+      })
+      let finalPrepared = preparedContext
+      let finalPhase = thinPhase
+      const revisions: string[] = []
+      const initialPacket = buildAdaptivePhasePacket({
+        instance,
+        phase: thinPhase,
+        prepared: preparedContext,
+        sandbox,
+      })
+      revisions.push(initialPacket.evidenceRevision)
+      const adaptive = await runAdaptiveBenchAttempt({
+        intakePacket: initialPacket,
+        base: preparedContext.state,
+        env: process.env,
+        modelCall: makeAdaptiveToolModelCall({ llm: deps.llm, signal: abort.signal }),
+        runPhase: async ({ state, posture }) => {
+          const nextPrepared = await prepareAttemptContext(
+            instance,
+            sandbox,
+            deps,
+            abort.signal,
+            posture,
+            state,
+          )
+          const nextPhase = await runMainPhase({
+            instance,
+            deps,
+            sandbox,
+            signal: abort.signal,
+            wiring: w,
+            prepared: nextPrepared,
+          })
+          finalPrepared = nextPrepared
+          finalPhase = nextPhase
+          const packet = buildAdaptivePhasePacket({
+            instance,
+            phase: nextPhase,
+            prepared: nextPrepared,
+            sandbox,
+          })
+          revisions.push(packet.evidenceRevision)
+          return { packet }
+        },
+      })
+      const adaptiveRoute = adaptiveRouteTelemetryOf(adaptive, revisions)
+      if (adaptive.outcome !== "finalize") {
+        return {
+          ...latePhaseFailureResultOf({
+            instance,
+            phase: finalPhase,
+            reproTest,
+            error: `adaptive controller stopped: ${String(adaptive.reason ?? adaptive.outcome)}`,
+            prepared: finalPrepared,
+            sandbox,
+          }),
+          adaptiveRoute,
+        }
+      }
+      phase = finalPhase
+      prepared = finalPrepared
+      const terminal = await maybeValidateTerminalResult({
+        instance,
+        phase: finalPhase,
+        reproTest,
+        deps,
+        wiring: w,
+        startedAt,
+        signal: abort.signal,
+        prepared: finalPrepared,
+        sandbox,
+      })
+      if (terminal !== undefined) return { ...terminal, adaptiveRoute }
+      return {
+        ...(await verifyAndFinalizeResult({
+          instance,
+          phase: finalPhase,
+          deps,
+          sandbox,
+          signal: abort.signal,
+          reproTest,
+          wiring: w,
+          startedAt,
+          prepared: finalPrepared,
+        })),
+        adaptiveRoute,
+      }
+    }
     phase = await runMainPhase({
       instance,
       deps,
