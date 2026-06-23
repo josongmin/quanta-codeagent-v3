@@ -6,7 +6,6 @@
     "src/apps/bench/cli.ts",
     "src/apps/bench/eval/driver.ts",
     "src/apps/bench/remote/box-session.ts",
-    "src/apps/bench/remote/pool.ts",
     "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts"
   ],
