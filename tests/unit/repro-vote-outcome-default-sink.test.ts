@@ -26,6 +26,19 @@ const noWrite: ReproWriteFilePort = async () => {}
 
 /** Exec port that maps each script (in WRITE order) → a canned stdout, so the
  *  test can drive the vote into each verdict deterministically. */
+// P1 (pytest-grounded): translate the legacy intent strings into the pytest
+// exec result `classifyPytest` reads (exit code + summary). Extra text is
+// preserved so failTail assertions still hold.
+const toPytestResult = (intent: string): { code: number; stdout: string; stderr: string } => {
+  if (intent.includes("Issue reproduced")) {
+    return { code: 1, stdout: `${intent}\n1 failed in 0.1s`, stderr: "" }
+  }
+  if (intent.includes("Issue resolved")) {
+    return { code: 0, stdout: `${intent}\n1 passed in 0.1s`, stderr: "" }
+  }
+  return { code: 0, stdout: intent, stderr: "" }
+}
+
 const makeExec = (
   stdoutByIndex: readonly string[],
 ): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
@@ -38,7 +51,7 @@ const makeExec = (
   const exec: ReproExecPort = async (argv) => {
     const path = argv[argv.length - 1] as string
     const idx = pathToIdx.get(path) ?? 0
-    return { code: 0, stdout: stdoutByIndex[idx] ?? "", stderr: "" }
+    return toPytestResult(stdoutByIndex[idx] ?? "")
   }
   return { exec, writeFile }
 }

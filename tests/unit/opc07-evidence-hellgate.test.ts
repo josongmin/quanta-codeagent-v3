@@ -14,18 +14,28 @@
  * below pins that real wiring so a future refactor that bypasses the shared
  * finalize (and silently drops `result.llmEvidence`) goes red.
  */
+
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import * as packet from "@/runner/batch/eval/llm-evidence-packet"
 import {
   buildIntakeLlmEvidencePacket,
-  buildRepairSeedPacket,
+  buildRepairSeedLlmEvidencePacket,
   buildSelectionExplanationPacket,
-  buildSelectionGenerationPacket,
+  buildSelectionGenerationLlmEvidencePacket,
   opaqueInstanceIdHash,
+  type RepairSeedPacketInput,
   renderLlmEvidencePacket,
+  type SelectionGenerationPacketInput,
 } from "@/runner/batch/eval/llm-evidence-packet"
+
+// A8: dead string wrappers removed — render via the live object builders, the
+// exact path production uses.
+const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string =>
+  renderLlmEvidencePacket(buildSelectionGenerationLlmEvidencePacket(input))
+const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
+  renderLlmEvidencePacket(buildRepairSeedLlmEvidencePacket(input))
 
 const REPO_ROOT = process.cwd()
 const readSrc = (rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf8")
@@ -101,13 +111,20 @@ describe("OPC-07 hellgate — self-containedness (no ambient-prompt placeholder)
   })
 
   test("shared candidate_generation packet builder is exported from one helper", () => {
-    expect(typeof (packet as Record<string, unknown>).buildSelectionGenerationPacket).toBe("function")
+    // A8: the live builder is the OBJECT builder; the dead string wrapper was removed.
+    expect(
+      typeof (packet as Record<string, unknown>).buildSelectionGenerationLlmEvidencePacket,
+    ).toBe("function")
+    // A8 fence: the removed string wrapper must NOT come back.
+    expect((packet as Record<string, unknown>).buildSelectionGenerationPacket).toBeUndefined()
   })
 
   test("generation packet is self-contained (real issue facts, no placeholder)", () => {
     const rendered = buildSelectionGenerationPacket({
       problemStatement: "NullPointer in resolve_owner when config is empty (public issue).",
-      ownerEvidence: [{ file: "pkg/mod/owner.py", symbols: ["resolve_owner"], provenance: "selection-owner" }],
+      ownerEvidence: [
+        { file: "pkg/mod/owner.py", symbols: ["resolve_owner"], provenance: "selection-owner" },
+      ],
       contracts: [],
     })
     expect(rendered).not.toContain(PLACEHOLDER_SMELL)
@@ -151,7 +168,13 @@ describe("OPC-07 hellgate — instanceIdHash cross-stage consistency", () => {
     expect(minimalIntake(problem).instanceIdHash).toBe(expected)
     expect(minimalExplanation(problem).instanceIdHash).toBe(expected)
     expect(
-      instanceIdOf(buildSelectionGenerationPacket({ problemStatement: problem, ownerEvidence: [], contracts: [] })),
+      instanceIdOf(
+        buildSelectionGenerationPacket({
+          problemStatement: problem,
+          ownerEvidence: [],
+          contracts: [],
+        }),
+      ),
     ).toBe(expected)
     expect(
       instanceIdOf(
@@ -181,7 +204,7 @@ describe("OPC-07 hellgate — instanceIdHash cross-stage consistency", () => {
 
 describe("OPC-07 hellgate — single shared builder (no driver duplication)", () => {
   const definesGenerationBuilder = (rel: string): boolean =>
-    /const buildSelectionGenerationPacket\s*=/.test(readSrc(rel))
+    /const buildSelectionGenerationLlmEvidencePacket\s*=/.test(readSrc(rel))
 
   test("candidate_generation builder is defined once, not inline in both drivers", () => {
     const definitions = ["src/apps/bench/eval/driver.ts", "src/runner/batch/eval/driver.ts"].filter(

@@ -1,39 +1,83 @@
 /**
- * Repro-test execution — runs each candidate Python script on the ORIGINAL
- * (un-patched) repo and classifies the outcome from stdout.
+ * Repro-test execution — runs each candidate as a pytest test on the ORIGINAL
+ * (un-patched) repo and classifies the outcome from PYTEST EXIT SEMANTICS
+ * (process exit code + parsed summary), NOT from a model-printed sentinel.
  *
- * Paper §3.3.1 algorithm (this file's slice)
- * ==========================================
- *   1. Write each candidate to a unique temp file path inside the repo's
- *      working tree (so relative imports of the project's source code work).
- *   2. Run `python <file>` with a hard timeout, in the repo cwd.
- *   3. Inspect stdout for one of three sentinel substrings:
- *        - "Issue reproduced"  → outcome "reproduced"  (bug present)
- *        - "Issue resolved"    → outcome "resolved"    (already fixed)
- *        - "Other issues"      → outcome "other"       (script blew up)
- *      The LAST occurrence wins (paper §3.3.1 — a script that hits an
- *      `except` then continues might print multiple lines; the final line
- *      is the script's settled verdict).
- *   4. If exec exited non-zero AND no marker line appeared, classify
- *      `"exec_failed"` (timeout / crash before reaching a print).
- *   5. If exec exited zero but no marker line appeared, classify
- *      `"unknown"` (LLM emitted a no-op or paraphrased the sentinels).
+ * P1 — EXECUTION-GROUNDED verdict (jun-23)
+ * ========================================
+ * The legacy oracle scanned stdout for a sentinel the LLM authored itself
+ * ("Issue reproduced" / "Issue resolved"). The model wrote its own verdict, so
+ * it was fakeable/paraphrasable and 6/10 generated repros self-judged into
+ * "Other issues"/"unknown". We replace that with pytest's verdict: a canonical
+ * repro is now a real `def test_*` with `assert`s on the EXPECTED (correct)
+ * behaviour. On the BUGGY base tree the assertion FAILS; on a CORRECT fix it
+ * PASSES. The verdict is the process exit code + pytest's summary line — code
+ * the model cannot paraphrase its way around.
+ *
+ * The `python <path>` → pytest bridge
+ * ===================================
+ * The driver invokes a repro as `python <path>` (its `reproRunArgv`/`buildArgv`
+ * contract, owned by out-of-fence code). A pytest test must run UNDER pytest. So
+ * the GENERATED test file ends with a self-driving footer:
+ *
+ *     if __name__ == "__main__":
+ *         import sys, pytest
+ *         sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))
+ *
+ * Run as `python <path>`, the module executes, hits the guard, and pytest runs
+ * ITSELF — the process EXIT CODE then reflects pass/fail. The `__name__ ==
+ * "__main__"` guard is LOAD-BEARING: without it, pytest re-imports the file
+ * during its own collection and the footer fires recursively ("error during
+ * collection"), destroying the verdict (exit 2 for both pass and fail). With the
+ * guard, collection imports the module under its test-module name (not
+ * "__main__"), the footer is inert during collection, and only the OUTER
+ * `python <path>` invocation drives pytest. This keeps the driver's
+ * `python <path>` contract intact while making the verdict exit-code-grounded.
+ *
+ * pytest exit-code / summary → ReproTestOutcome mapping
+ * =====================================================
+ * pytest's documented exit codes: 0=all passed, 1=tests failed, 2=interrupted,
+ * 3=internal error, 4=usage error, 5=no tests collected. Exit code ALONE is
+ * ambiguous (a top-level import crash and a real assertion failure can BOTH
+ * surface as exit 1), so we combine the exit code with the parsed summary line
+ * ("N failed", "N passed", "N error", "no tests ran"). Priority:
+ *
+ *   - summary has "failed"  → "reproduced"  (a real assertion FAILED on the base
+ *                              tree = the bug is present / red. Wins even if some
+ *                              incidental cases passed or errored — a failure is
+ *                              still a failure.)
+ *   - else summary has "error" (collection/setup/fixture error, no "failed")
+ *                            → "exec_failed" (the test could not even RUN — infra,
+ *                              NOT a verdict. e.g. fixture raised, collection error.)
+ *   - else summary has "passed" (no failed / error)
+ *                            → "resolved"    (green — the expected behaviour held.)
+ *   - else "no tests ran" / exit 5 (no test items collected)
+ *                            → "unknown"     (no def test_*; no signal.)
+ *   - else exit ≠ 0 with NO parseable pytest summary (the script crashed BEFORE
+ *     reaching the footer — e.g. `import projectlib` ModuleNotFoundError, syntax
+ *     error, timeout-kill) → "exec_failed" (infra — project not importable, etc.)
+ *   - else exit == 0 with no summary → "unknown" (ran, produced no test signal).
+ *   - else exit 3/4 (pytest internal / usage error) with no failed/passed/error
+ *                            → "other"       (pytest itself misbehaved — ran, but
+ *                              produced an indeterminate result distinct from a
+ *                              clean pass/fail. Meaningful, not a catch-all.)
+ *
+ * The `ReproTestOutcome` union is UNCHANGED — only HOW it is computed changed, so
+ * every downstream consumer (driver, calibration, vote) is byte-stable.
  *
  * Slice posture
  * =============
- *   - I/O is INJECTED — the `exec` port is supplied by the caller
- *     (production wiring uses bench's `exec.ts` `bash -c`; tests inject a
- *     mock). We DO NOT import `node:fs` / `Bun.spawn` here.
+ *   - I/O is INJECTED — the `exec` port is supplied by the caller (production
+ *     wiring uses bench's `exec.ts`; tests inject a mock). We DO NOT import
+ *     `node:fs` / `Bun.spawn` here.
  *   - file writing is also injected (`writeFile`) so the slice stays
  *     hermetically testable without ever touching the real filesystem.
  *   - cancellation: between samples, if `signal.aborted` is true we stop
- *     dispatching new execs. An in-flight exec is the caller's
- *     responsibility (the bench `exec.ts` honours its own timeout).
+ *     dispatching new execs. An in-flight exec is the caller's responsibility
+ *     (the bench `exec.ts` honours its own timeout).
  *
- * Closed-port choice: the `exec` callable takes argv form rather than
- * `bash -c` so the temp filename is never word-split / glob-expanded. The
- * production wiring builds a wrapper that translates to `bash -c "python
- * '<file>'"` if it must; we recommend argv. Both shapes are equivalent here.
+ * Closed-port choice: the `exec` callable takes argv form rather than `bash -c`
+ * so the temp filename is never word-split / glob-expanded.
  */
 
 import type { ReproTestConfig, ReproTestOutcome, ReproTestSample } from "./types"
@@ -42,12 +86,14 @@ import type { ReproTestConfig, ReproTestOutcome, ReproTestSample } from "./types
  *  same shape used by `tests/smoke/swebench` for individual test commands. */
 export const DEFAULT_EXEC_TIMEOUT_MS = 60_000
 
-/** Marker substrings — paper §3.3.1 verbatim. Order matters only for
- *  documentation; the classifier scans stdout once and picks the LAST
- *  occurrence (regardless of marker kind). */
-const MARKER_REPRODUCED = "Issue reproduced"
-const MARKER_RESOLVED = "Issue resolved"
-const MARKER_OTHER = "Other issues"
+/** pytest documented process exit codes (see pytest `ExitCode`):
+ *    0 OK · 1 TESTS_FAILED · 2 INTERRUPTED · 3 INTERNAL_ERROR ·
+ *    4 USAGE_ERROR · 5 NO_TESTS_COLLECTED.
+ *  Used as a fallback when the summary line is absent/unparseable. */
+const PYTEST_EXIT_OK = 0
+const PYTEST_EXIT_NO_TESTS = 5
+const PYTEST_EXIT_INTERNAL = 3
+const PYTEST_EXIT_USAGE = 4
 
 /** Injected exec port shape — minimal surface so production / test wirings
  *  both fit. Production: `(argv, cwd, t) => execArgv(argv, cwd, t)` from
@@ -101,28 +147,91 @@ export interface ExecuteReproTestsArgs {
 /** Compact a thrown value to a single-line string for the stderr diagnostic. */
 const errText = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e))
 
-/** Classify stdout into a {@link ReproTestOutcome}, applying the
- *  last-marker-wins rule. `code` decides between `"exec_failed"` and
- *  `"unknown"` when no marker is present.
- *
- *  Pure — exported for direct unit testing. */
-export const classifyStdout = (stdout: string, code: number): ReproTestOutcome => {
-  // Defensive: a non-string (e.g. Buffer slipped through) is treated as
-  // empty output, NOT crashed at runtime.
-  const s = typeof stdout === "string" ? stdout : ""
-  // Find the LAST occurrence of any marker. We do this with a single pass
-  // by tracking three indices and picking the maximum.
-  const iReproduced = s.lastIndexOf(MARKER_REPRODUCED)
-  const iResolved = s.lastIndexOf(MARKER_RESOLVED)
-  const iOther = s.lastIndexOf(MARKER_OTHER)
-  const max = Math.max(iReproduced, iResolved, iOther)
-  if (max < 0) {
-    // No marker present.
-    return code !== 0 ? "exec_failed" : "unknown"
+/** What the pytest summary line told us about test items. Computed by a single
+ *  pass over the combined stdout/stderr; `null` for a dimension means "the
+ *  summary did not mention it". Internal — feeds {@link classifyPytest}. */
+interface PytestSummary {
+  /** ≥1 test item FAILED an assertion (the summary said "N failed"). */
+  hasFailed: boolean
+  /** ≥1 test item ERRORED in collection / setup / fixture ("N error[s]"). */
+  hasError: boolean
+  /** ≥1 test item PASSED ("N passed"). */
+  hasPassed: boolean
+  /** pytest reported it collected nothing ("no tests ran"). */
+  noTests: boolean
+  /** ANY recognisable pytest summary token was present — i.e. the process got
+   *  far enough to RUN pytest (the footer fired) rather than crashing before
+   *  it. Distinguishes a real pytest verdict from an import crash. */
+  sawSummary: boolean
+}
+
+/** pytest's terse (`-q`) summary tokens. We match on word boundaries so a test
+ *  whose NAME contains "failed" can't spoof the summary. pytest prints e.g.
+ *  `1 failed in 0.2s`, `2 passed in 0.1s`, `1 failed, 1 passed in 0.3s`,
+ *  `1 error in 0.2s`, `no tests ran in 0.1s`. */
+const RE_FAILED = /\b\d+\s+failed\b/
+const RE_ERROR = /\b\d+\s+errors?\b/
+const RE_PASSED = /\b\d+\s+passed\b/
+const RE_NO_TESTS = /\bno tests ran\b/
+
+/** Parse pytest's summary out of the combined output. Pure helper. */
+const parsePytestSummary = (text: string): PytestSummary => {
+  const hasFailed = RE_FAILED.test(text)
+  const hasError = RE_ERROR.test(text)
+  const hasPassed = RE_PASSED.test(text)
+  const noTests = RE_NO_TESTS.test(text)
+  return {
+    hasFailed,
+    hasError,
+    hasPassed,
+    noTests,
+    sawSummary: hasFailed || hasError || hasPassed || noTests,
   }
-  if (max === iResolved) return "resolved"
-  if (max === iReproduced) return "reproduced"
-  return "other"
+}
+
+/**
+ * Classify a pytest run into a {@link ReproTestOutcome} from EXIT CODE + the
+ * parsed summary line. This REPLACES the old stdout-sentinel scan — the verdict
+ * now comes from pytest semantics the model cannot author, not from a string the
+ * model printed.
+ *
+ * The summary takes priority over the bare exit code because exit 1 is
+ * overloaded (a real assertion failure AND a top-level import crash both exit
+ * 1); only the summary disambiguates them. See the module header for the full
+ * mapping rationale.
+ *
+ * Pure — exported for direct unit testing. */
+export const classifyPytest = (stdout: string, stderr: string, code: number): ReproTestOutcome => {
+  // Defensive: non-strings (e.g. a Buffer slipped through) are treated as empty.
+  const out = typeof stdout === "string" ? stdout : ""
+  const err = typeof stderr === "string" ? stderr : ""
+  const sum = parsePytestSummary(`${out}\n${err}`)
+
+  // 1. A real assertion FAILED ⇒ bug present on the base tree ⇒ reproduced.
+  //    Wins even alongside "passed"/"error": a failure is still a failure.
+  if (sum.hasFailed) return "reproduced"
+  // 2. Collection / setup / fixture ERROR (no failure) ⇒ the test could not be
+  //    RUN ⇒ exec_failed (infra), NOT a verdict.
+  if (sum.hasError) return "exec_failed"
+  // 3. Only PASSED items ⇒ expected behaviour held ⇒ resolved (green).
+  if (sum.hasPassed) return "resolved"
+  // 4. pytest ran but collected nothing ⇒ no signal ⇒ unknown.
+  if (sum.noTests || code === PYTEST_EXIT_NO_TESTS) return "unknown"
+
+  // No parseable pytest summary — the footer either never ran or pytest itself
+  // misbehaved. Fall back to the exit code.
+  if (code === PYTEST_EXIT_OK) {
+    // Ran to a clean exit but produced no test signal at all.
+    return "unknown"
+  }
+  if (code === PYTEST_EXIT_INTERNAL || code === PYTEST_EXIT_USAGE) {
+    // pytest's own machinery errored (ran, but the result is indeterminate and
+    // distinct from a clean pass/fail) ⇒ "other" (meaningful, not a catch-all).
+    return "other"
+  }
+  // Any other non-zero exit with no summary ⇒ the script crashed BEFORE the
+  // footer drove pytest (import error, syntax error, timeout-kill) ⇒ infra.
+  return "exec_failed"
 }
 
 /** Process-lifetime monotonic counter — guarantees that the crypto-less
@@ -174,7 +283,7 @@ export const defaultTempPath = (
 /** Run ONE candidate end-to-end. Extracted to keep `executeReproTests`
  *  under the biome complexity ceiling. Returns a typed sample for every
  *  branch: empty-source → unknown; write failure → exec_failed; exec
- *  exception → exec_failed; success → classifyStdout-derived outcome. */
+ *  exception → exec_failed; success → classifyPytest-derived outcome. */
 const executeOne = async (
   source: string,
   i: number,
@@ -195,7 +304,7 @@ const executeOne = async (
     const stdout = typeof r.stdout === "string" ? r.stdout : ""
     const stderr = typeof r.stderr === "string" ? r.stderr : ""
     const code = typeof r.code === "number" ? r.code : -1
-    return { source, stdout, stderr, outcome: classifyStdout(stdout, code) }
+    return { source, stdout, stderr, outcome: classifyPytest(stdout, stderr, code) }
   } catch (e) {
     // The exec PORT threw (e.g. Bun.spawn ENOENT — the python binary is not on
     // PATH) BEFORE the process produced any output. Capture the throw reason so

@@ -1,11 +1,14 @@
 import {
   assembleFromEvents,
+  buildModelPinnedPort,
   type LLMPort,
   type Message,
   type StreamEvent,
+  tryCreateLLM,
   validateAgainstResponseSchema,
 } from "@/llm"
 import type { AdaptiveModelCall, AdaptiveModelCallArgs } from "./llm-router"
+import { DEFAULT_ROUTER_MAX_TOKENS, DEFAULT_ROUTER_MODEL } from "./llm-router"
 
 const ROUTER_TOOL_NAME = "route_adaptive_phase"
 
@@ -28,12 +31,36 @@ const collectText = (events: readonly StreamEvent[]): string =>
  * both support. If a provider still returns plain text, we accept it only when
  * it parses and validates against the requested schema; otherwise the raw text
  * is returned and the controller rejects it fail-closed.
+ *
+ * jun-23 A1 — the resolved `model` / `maxTokens` (opus pin + 1024 from
+ * `llm-router.ts`) are carried by the INJECTED `llm` port: `StreamInput` has no
+ * model field, so a per-call model override in this codebase is done by handing
+ * this call a port already pinned to that model (`buildModelPinnedPort`), not a
+ * request string. `input.model` / `input.maxTokens` are therefore honored as a
+ * documented CROSS-CHECK against the port the request actually runs on — never
+ * silently dropped. The optional `onResolvedModel` hook surfaces the model the
+ * wire request runs on so an engage-proof test can observe it.
  */
 export const makeAdaptiveToolModelCall = (args: {
   readonly llm: LLMPort
   readonly signal?: AbortSignal
+  /** Observability seam: invoked once per router call with the model id the
+   *  request actually runs on (the injected port's `model`) and the resolved
+   *  pin the router asked for. Best-effort — failures are swallowed. */
+  readonly onResolvedModel?: (resolved: {
+    readonly requested: string
+    readonly actual: string | undefined
+  }) => void
 }): AdaptiveModelCall => {
   return async (input: AdaptiveModelCallArgs): Promise<unknown> => {
+    // Honor the resolved model/maxTokens as a cross-check: the port the router
+    // streams against IS the per-call model override (see jsdoc). Surface the
+    // actual-vs-requested model so the field is observable, not inert.
+    try {
+      args.onResolvedModel?.({ requested: input.model, actual: args.llm.model })
+    } catch {
+      // best-effort observability — never poison the live router call
+    }
     const events: StreamEvent[] = []
     const messages: Message[] = [
       {
@@ -64,4 +91,58 @@ export const makeAdaptiveToolModelCall = (args: {
     const parsed = validateAgainstResponseSchema(text, input.schema as Record<string, unknown>)
     return parsed.ok ? parsed.value : text === "" ? null : text
   }
+}
+
+/**
+ * jun-23 A1 — build the adaptive-router model-call PINNED to the router model
+ * (`DEFAULT_ROUTER_MODEL` = opus) + `DEFAULT_ROUTER_MAX_TOKENS` (1024), instead
+ * of streaming the router request on the bench solver port (`deps.llm`).
+ *
+ * The router is a short, high-stakes one-shot routing decision, so it pins the
+ * strongest available Claude model rather than the bench default. Because
+ * `StreamInput` has no model field, the pin is realized by building a DEDICATED
+ * anthropic adapter and streaming the router request against it (see
+ * `buildModelPinnedPort`). When no anthropic credential is available (a
+ * ChatGPT-OAuth / OpenAI bench), the call degrades to the solver port — a
+ * documented cross-check, never a crash; `onResolvedModel` surfaces the model
+ * the request actually runs on for engage-proof telemetry.
+ *
+ * `env` is threaded in (not read from `process.env` here) so the credential
+ * probe stays at the composition root and the function is test-injectable via
+ * `buildAnthropicPort`.
+ */
+export const buildAdaptiveRouterModelCall = (deps: {
+  /** Bench solver port — the fallback when the router model cannot be served. */
+  readonly basePort: LLMPort
+  /** Env source for the anthropic-credential probe (no `process.env` read here). */
+  readonly env: Record<string, string | undefined>
+  readonly signal?: AbortSignal
+  /** Test seam: override the anthropic adapter builder. Real callers omit it and
+   *  get the `tryCreateLLM("anthropic", { model, maxTokens })` path. */
+  readonly buildAnthropicPort?: (args: {
+    readonly model: string
+    readonly maxTokens: number
+  }) => LLMPort | null
+  /** Engage-proof telemetry: the model the router request actually runs on. */
+  readonly onResolvedModel?: (resolved: {
+    readonly requested: string
+    readonly actual: string | undefined
+    readonly pinned: boolean
+  }) => void
+}): AdaptiveModelCall => {
+  const buildAnthropicPort =
+    deps.buildAnthropicPort ??
+    ((a: { model: string; maxTokens: number }): LLMPort | null =>
+      tryCreateLLM("anthropic", { model: a.model, maxTokens: a.maxTokens }, deps.env))
+  const { port, pinned } = buildModelPinnedPort({
+    basePort: deps.basePort,
+    model: DEFAULT_ROUTER_MODEL,
+    maxTokens: DEFAULT_ROUTER_MAX_TOKENS,
+    buildAnthropicPort,
+  })
+  return makeAdaptiveToolModelCall({
+    llm: port,
+    ...(deps.signal !== undefined ? { signal: deps.signal } : {}),
+    onResolvedModel: (r) => deps.onResolvedModel?.({ ...r, pinned }),
+  })
 }

@@ -15,6 +15,7 @@
  *     vs. just hintedBase.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { ensurePytestFooter } from "../../src/agent/repro-test/generate"
 import {
   benchOptIns,
   buildConfig,
@@ -30,9 +31,17 @@ import type { Instance } from "../../src/apps/bench/types"
 import type { LLMPort, StreamEvent, StreamInput } from "../../src/llm"
 import type { StreamPort } from "../../src/stream"
 
+// P1: a repro is now a pytest test; the generator guarantees the self-driving
+// footer. The exec port's pytest summary (not a printed sentinel) is the verdict.
+const STUB_SOURCE = "def test_bug():\n    assert thing() == 1"
+/** The source the generator actually returns (footer appended). */
+const STUB_RETURNED = ensurePytestFooter(STUB_SOURCE)
+/** A pytest exec result whose failing assertion ⇒ reproduced. */
+const PYTEST_REPRODUCED = { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
+
 class StubLLM implements LLMPort {
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
-    yield { type: "text_delta", delta: 'print("Issue reproduced")' }
+    yield { type: "text_delta", delta: STUB_SOURCE }
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
 }
@@ -140,10 +149,10 @@ describe("prepareReproTest", () => {
       writeFile: async (path, content) => {
         writes.push({ path, content })
       },
-      exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+      exec: async () => PYTEST_REPRODUCED,
     })
     expect(sel).not.toBeNull()
-    expect(sel?.selected).toBe('print("Issue reproduced")')
+    expect(sel?.selected).toBe(STUB_RETURNED)
     expect(sel?.reproducedCount).toBe(3)
     // 3 scripts were written by the executor (not yet the final reproduce_issue.py).
     expect(writes).toHaveLength(3)
@@ -319,7 +328,7 @@ describe("prepareReproTest", () => {
     const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
       llm: new StubLLM(),
       writeFile: async () => {},
-      exec: async () => ({ code: 0, stdout: "Issue resolved\n", stderr: "" }),
+      exec: async () => ({ code: 0, stdout: "1 passed in 0.1s", stderr: "" }),
     })
     expect(detail.selection?.selected).toBeNull()
     // objectContaining: the telemetry also carries jun-18 diagnostic fields
@@ -337,9 +346,9 @@ describe("prepareReproTest", () => {
     const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
       llm: new StubLLM(),
       writeFile: async () => {},
-      exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+      exec: async () => PYTEST_REPRODUCED,
     })
-    expect(detail.selection?.selected).toBe('print("Issue reproduced")')
+    expect(detail.selection?.selected).toBe(STUB_RETURNED)
     expect(detail.telemetry).toEqual({
       installed: false,
       reason: "not_installed",
@@ -361,8 +370,8 @@ describe("prepareReproTest", () => {
         adversarialRepro: false,
       },
       {
-        generate: async () => Array.from({ length: 3 }, () => 'print("Issue reproduced")'),
-        exec: async () => ({ code: 0, stdout: "Issue reproduced\n", stderr: "" }),
+        generate: async () => Array.from({ length: 3 }, () => STUB_SOURCE),
+        exec: async () => PYTEST_REPRODUCED,
         writeFile: async () => {},
       },
     )
@@ -373,7 +382,7 @@ describe("prepareReproTest", () => {
       reproducedCount: 3,
     })
     expect(out.reproSources).toHaveLength(3)
-    expect(new Set(out.reproSources)).toEqual(new Set(['print("Issue reproduced")']))
+    expect(new Set(out.reproSources)).toEqual(new Set([STUB_SOURCE]))
   })
 
   test("selection-only repro prep stays inert when verify-select repro is off", async () => {

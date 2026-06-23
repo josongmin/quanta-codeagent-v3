@@ -1,5 +1,5 @@
-import { gateOn } from "@/shared"
 import { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "@/runner/knobs"
+import { gateOn } from "@/shared"
 
 export const CURRENT_BENCH_BASE_PRESET = "agentless-v3-thin-strict"
 export const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
@@ -13,7 +13,8 @@ export { presetRequiresLiveLspGrounding }
 export const v5AdaptiveEnabled = (args: {
   readonly preset: string | undefined
   readonly envVars: Record<string, string | undefined>
-}): boolean => args.preset === V5_ADAPTIVE_PRESET && gateOn(args.envVars, "QUANTA_BENCH_V5_ADAPTIVE")
+}): boolean =>
+  args.preset === V5_ADAPTIVE_PRESET && gateOn(args.envVars, "QUANTA_BENCH_V5_ADAPTIVE")
 
 const asNonEmpty = (raw: string | undefined): string | undefined => {
   const trimmed = raw?.trim()

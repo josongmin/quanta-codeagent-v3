@@ -1,15 +1,16 @@
 /**
  * Repro-test slice — Agentless paper §3.3.1 absorption.
  *
- * Pipeline: `generateReproTests` (LLM × K) → `executeReproTests`
- * (Python on original repo) → `selectReproTest` (majority vote among
- * "reproduced" outcomes). The bench driver wires this behind a default-OFF
- * env gate (`QUANTA_BENCH_REPRO_TEST=K`) — byte-identical measurement when
- * the flag is unset.
+ * Pipeline: `generateReproTests` (LLM × K — pytest tests) → `executeReproTests`
+ * (each run as `python <path>` which self-drives pytest; the verdict is the
+ * process exit code + parsed pytest summary, NOT a model-printed sentinel) →
+ * `selectReproTest` (majority vote among "reproduced" outcomes). The bench
+ * driver wires this behind a default-OFF env gate (`QUANTA_BENCH_REPRO_TEST=K`)
+ * — byte-identical measurement when the flag is unset.
  */
 
 export {
-  classifyStdout,
+  classifyPytest,
   DEFAULT_EXEC_TIMEOUT_MS,
   type ExecuteReproTestsArgs,
   executeReproTests,
@@ -20,6 +21,7 @@ export {
   buildReproTestPrompt,
   DEFAULT_SAMPLES,
   DEFAULT_TIMEOUT_MS,
+  ensurePytestFooter,
   generateReproTests,
   MAX_SAMPLES,
   stripMarkdownFences,

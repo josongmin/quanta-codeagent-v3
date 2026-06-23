@@ -7,14 +7,12 @@ import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
 import { scopedEnv } from "../_support/scoped-env"
 
-const ENV = scopedEnv([
-  "PATH",
-  "QUANTA_BENCH_LOCALIZE_PHASE",
-  "QUANTA_BENCH_PRESET",
-  "QUANTA_BENCH_V5_ADAPTIVE",
-], {
-  PATH: process.env.PATH,
-})
+const ENV = scopedEnv(
+  ["PATH", "QUANTA_BENCH_LOCALIZE_PHASE", "QUANTA_BENCH_PRESET", "QUANTA_BENCH_V5_ADAPTIVE"],
+  {
+    PATH: process.env.PATH,
+  },
+)
 
 const withPyrightOnPath = (pathValue: string | undefined): string => {
   const pyrightBinDir = join(process.env.HOME ?? "", ".local", "bin")
@@ -64,7 +62,10 @@ class AdaptiveRouteLLM implements LLMPort {
 
     this.solveCalls += 1
     if (sandbox === "") {
-      yield { type: "text_delta", delta: "FILE: calc.py\nREASON: the issue names calc.py directly." }
+      yield {
+        type: "text_delta",
+        delta: "FILE: calc.py\nREASON: the issue names calc.py directly.",
+      }
       yield { type: "message_stop", stop_reason: "end_turn" }
       return
     }

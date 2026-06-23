@@ -114,26 +114,26 @@ describe("generate hellgate", () => {
   })
 })
 
-// ─── classifyStdout / execute hellgate ────────────────────────────────────
+// ─── classifyPytest / execute hellgate (P1: exit-code grounded) ────────────
 
 describe("execute hellgate", () => {
-  test("3 markers in stdout — last position wins", async () => {
+  test("pytest precedence — 'failed' alongside 'passed' ⇒ reproduced", async () => {
     const out = await executeReproTests({
       tests: ["x"],
       repoRoot: "/s",
       writeFile: async () => {},
       tempPath: () => "/s/x.py",
       exec: async () => ({
-        code: 0,
-        stdout: "Issue reproduced\nIssue resolved\nOther issues\n",
+        code: 1,
+        stdout: ".F\n1 failed, 1 passed in 0.3s\n",
         stderr: "",
       }),
     })
-    // "Other issues" is last ⇒ outcome other.
-    expect(out[0]?.outcome).toBe("other")
+    // A real assertion failed ⇒ the bug is present, even though one case passed.
+    expect(out[0]?.outcome).toBe("reproduced")
   })
 
-  test("binary-junk stdout — no marker ⇒ unknown", async () => {
+  test("binary-junk stdout — no pytest summary, exit 0 ⇒ unknown", async () => {
     const out = await executeReproTests({
       tests: ["x"],
       repoRoot: "/s",
@@ -144,19 +144,36 @@ describe("execute hellgate", () => {
     expect(out[0]?.outcome).toBe("unknown")
   })
 
-  test("ANSI/unicode in stdout — markers still detected", async () => {
+  test("ANSI/unicode noise around the pytest summary — still classified", async () => {
     const out = await executeReproTests({
       tests: ["x"],
       repoRoot: "/s",
       writeFile: async () => {},
       tempPath: () => "/s/x.py",
       exec: async () => ({
-        code: 0,
-        stdout: "\x1b[33mDEBUG\x1b[0m\n한글\nIssue reproduced\n",
+        code: 1,
+        stdout: "\x1b[33mDEBUG\x1b[0m\n한글\n1 failed in 0.2s\n",
         stderr: "",
       }),
     })
     expect(out[0]?.outcome).toBe("reproduced")
+  })
+
+  test("import crash — exit 1 with NO summary ⇒ exec_failed (not a fake reproduced)", async () => {
+    // The pytest footer never ran (the project import died first). Exit 1 with no
+    // summary must be infra, NOT a reproduced bug — the import-vs-failure confound.
+    const out = await executeReproTests({
+      tests: ["x"],
+      repoRoot: "/s",
+      writeFile: async () => {},
+      tempPath: () => "/s/x.py",
+      exec: async () => ({
+        code: 1,
+        stdout: "",
+        stderr: "ModuleNotFoundError: No module named 'projectlib'",
+      }),
+    })
+    expect(out[0]?.outcome).toBe("exec_failed")
   })
 
   test("simulated exec timeout (code=137, no marker) ⇒ exec_failed", async () => {

@@ -56,9 +56,26 @@ describe("resolvedConsensus (pure → {votes,k} | null)", () => {
 
 const noWrite: ReproWriteFilePort = async () => {}
 
-/** Exec port mapping each written script path → a canned stdout, by write order. */
+/** P1 (pytest-grounded): a repro's verdict now comes from pytest's exit code +
+ *  summary, NOT a printed sentinel. These helpers translate the test's intent
+ *  ("resolved" / "reproduced") into the pytest exec result `classifyPytest`
+ *  reads: a passing run (exit 0, "1 passed") ⇒ resolved; a failing assertion
+ *  (exit 1, "1 failed") ⇒ reproduced. */
+const PYTEST_RESOLVED = { code: 0, stdout: "1 passed in 0.1s", stderr: "" }
+const PYTEST_REPRODUCED = { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
+// An inconclusive post-fix run that RAN but produced an indeterminate result
+// (pytest internal error, exit 3, no failed/passed/error summary) ⇒ outcome
+// "other". `resolvedConsensus` treats it as a non-decisive (inconclusive) vote —
+// the pytest analog of the old "Other issues" crash. Deliberately NOT
+// exec_failed, so it stays distinct from the `execution_failed` proof state.
+const PYTEST_INCONCLUSIVE = { code: 3, stdout: "INTERNALERROR> ...", stderr: "" }
+
+type ReproIntent = "resolved" | "reproduced" | "inconclusive"
+
+/** Exec port mapping each written script path → a canned pytest result, by
+ *  write order. Each entry is the intended outcome. */
 const makeExec = (
-  stdoutByIndex: readonly string[],
+  outcomeByIndex: readonly ReproIntent[],
 ): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
   const pathToIdx = new Map<string, number>()
   let n = 0
@@ -69,7 +86,10 @@ const makeExec = (
   const exec: ReproExecPort = async (argv) => {
     const path = argv[argv.length - 1] as string
     const idx = pathToIdx.get(path) ?? 0
-    return { code: 0, stdout: stdoutByIndex[idx] ?? "", stderr: "" }
+    const intent = outcomeByIndex[idx] ?? "resolved"
+    if (intent === "reproduced") return PYTEST_REPRODUCED
+    if (intent === "inconclusive") return PYTEST_INCONCLUSIVE
+    return PYTEST_RESOLVED
   }
   return { exec, writeFile }
 }
@@ -77,9 +97,9 @@ const makeExec = (
 describe("makePatchedResolvedConsensus (port)", () => {
   it("re-runs the reproducing set; default k = strict majority of the set size", async () => {
     const { exec, writeFile } = makeExec([
-      "Issue resolved",
-      "Issue resolved",
-      "Issue reproduced", // brittle minority
+      "resolved",
+      "resolved",
+      "reproduced", // brittle minority
     ])
     const probe = makePatchedResolvedConsensus({ sources: ["a", "b", "c"], exec, writeFile })
     const r = await probe("/patched")
@@ -93,7 +113,7 @@ describe("makePatchedResolvedConsensus (port)", () => {
   })
 
   it("RED-on-injection: one fewer resolved ⇒ votes drops under the majority quorum", async () => {
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue reproduced", "Issue reproduced"])
+    const { exec, writeFile } = makeExec(["resolved", "reproduced", "reproduced"])
     const probe = makePatchedResolvedConsensus({ sources: ["a", "b", "c"], exec, writeFile })
     const r = await probe("/patched")
     expect(r).toMatchObject({ votes: 1, k: 2 }) // 1 < 2 ⇒ bundle rejects
@@ -103,7 +123,7 @@ describe("makePatchedResolvedConsensus (port)", () => {
     let called = false
     const exec: ReproExecPort = async () => {
       called = true
-      return { code: 0, stdout: "Issue resolved", stderr: "" }
+      return { code: 0, stdout: "1 passed in 0.1s", stderr: "" }
     }
     const r = await makePatchedResolvedConsensus({ sources: [], exec, writeFile: noWrite })("/p")
     expect(r).toBeNull()
@@ -121,21 +141,21 @@ describe("makePatchedResolvedConsensus (port)", () => {
   it("typed proof port preserves empty/infra/false-negative states", async () => {
     const empty = await makePatchedResolvedConsensusProof({
       sources: [],
-      exec: async () => ({ code: 0, stdout: "Issue resolved", stderr: "" }),
+      exec: async () => ({ code: 0, stdout: "1 passed in 0.1s", stderr: "" }),
       writeFile: noWrite,
     })("/p")
     expect(empty.state).toBe("not_available")
 
     const execFailed = await makePatchedResolvedConsensusProof({
       sources: ["a"],
-      exec: async () => ({ code: 0, stdout: "Issue resolved", stderr: "" }),
+      exec: async () => ({ code: 0, stdout: "1 passed in 0.1s", stderr: "" }),
       writeFile: async () => {
         throw new Error("boom")
       },
     })("/p")
     expect(execFailed.state).toBe("execution_failed")
 
-    const { exec, writeFile } = makeExec(["Other issues", "Other issues"])
+    const { exec, writeFile } = makeExec(["inconclusive", "inconclusive"])
     const inconclusive = await makePatchedResolvedConsensusProof({
       sources: ["a", "b"],
       exec,
@@ -149,11 +169,11 @@ describe("makePatchedResolvedConsensus (port)", () => {
     // says FIXED (decisive 2-0). The default k must be a majority of DECISIVE votes
     // (=2), NOT of all 5 samples (=3) — else a correct patch is rejected (false-NEG).
     const { exec, writeFile } = makeExec([
-      "Issue resolved",
-      "Issue resolved",
-      "Other issues",
-      "Other issues",
-      "Other issues",
+      "resolved",
+      "resolved",
+      "inconclusive",
+      "inconclusive",
+      "inconclusive",
     ])
     const r = await makePatchedResolvedConsensus({
       sources: ["a", "b", "c", "d", "e"],
@@ -164,7 +184,7 @@ describe("makePatchedResolvedConsensus (port)", () => {
   })
 
   it("explicit k overrides the majority default", async () => {
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue resolved"])
+    const { exec, writeFile } = makeExec(["resolved", "resolved"])
     const r = await makePatchedResolvedConsensus({ sources: ["a", "b"], exec, writeFile, k: 1 })(
       "/p",
     )

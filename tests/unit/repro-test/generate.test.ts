@@ -1,9 +1,11 @@
 /**
- * Repro-test generation — unit contract.
+ * Repro-test generation — unit contract (P1: pytest tests, exit-code verdict).
  *
  *   - K=5 default; 1 greedy + 4 sample (we issue K independent LLM calls).
- *   - prompt body embeds the issue verbatim + the three-marker contract.
+ *   - prompt body embeds the issue verbatim + the PYTEST contract (assert the
+ *     EXPECTED behavior; NO sentinel prints; the self-driving footer).
  *   - markdown fences stripped from the raw response.
+ *   - the self-driving pytest footer is GUARANTEED on every non-empty source.
  *   - empty issue / malformed response handled gracefully.
  *   - per-call exception ⇒ "" source for that index (not a throw).
  *   - AbortSignal between samples stops dispatching.
@@ -12,6 +14,7 @@ import { describe, expect, test } from "bun:test"
 import {
   buildReproTestPrompt,
   DEFAULT_SAMPLES,
+  ensurePytestFooter,
   generateReproTests,
   MAX_SAMPLES,
   stripMarkdownFences,
@@ -70,36 +73,38 @@ class YieldThenThrowLLM implements LLMPort {
 }
 
 describe("buildReproTestPrompt", () => {
-  test("embeds issue verbatim + marker contract + example", () => {
+  test("embeds issue verbatim + pytest contract + example", () => {
     const prompt = buildReproTestPrompt("UnicodeError on http://.example.com")
     expect(prompt).toContain("UnicodeError on http://.example.com")
-    expect(prompt).toContain('"Issue reproduced"')
-    expect(prompt).toContain('"Issue resolved"')
-    expect(prompt).toContain('"Other issues"')
+    // P1: pytest contract, not sentinel strings.
+    expect(prompt).toContain("pytest")
+    expect(prompt).toContain("def test_")
+    expect(prompt.toLowerCase()).toContain("assert")
     expect(prompt).toContain("Output only the Python source code")
   })
 
-  // SOTA oracle-reliability hardening (jun-18): the repro is the execution gate,
-  // so its marker must be a TRUSTWORTHY, deterministic signal. The prompt must
-  // steer the LLM away from the two malformations the RCA found: (a) printing the
-  // marker then crashing / exiting non-zero (false-RED), and (b) a wrong
-  // resolved/reproduced decision (false signal). These instructions complement
-  // the validator's sentinel-gating (which already ignores the incidental exit
-  // code) by making the marker itself reliable at the source.
-  test("hardening: marker must be the LAST line + no code after it (anti false-RED)", () => {
+  test("RED-ON-INJECTION: prompt no longer asks for ANY sentinel print", () => {
+    // The exact fakeability we removed: the model must NOT be told to print a
+    // verdict string. If any of these strings reappear in the prompt, the
+    // self-judged sentinel oracle has crept back in.
     const prompt = buildReproTestPrompt("some bug")
-    expect(prompt.toLowerCase()).toContain("last line")
-    expect(prompt.toLowerCase()).toContain("do not")
+    expect(prompt).not.toContain("Issue reproduced")
+    expect(prompt).not.toContain("Issue resolved")
+    expect(prompt).not.toContain("Other issues")
+    expect(prompt).not.toContain("Print EXACTLY ONE")
   })
 
-  test("hardening: decide resolved vs reproduced from the issue's EXPECTED vs ACTUAL", () => {
+  test("the verdict is pytest's exit code — prompt says so explicitly", () => {
     const prompt = buildReproTestPrompt("some bug")
+    expect(prompt.toLowerCase()).toContain("exit code")
     expect(prompt.toLowerCase()).toContain("expected")
   })
 
-  test("hardening: clean exit — no sys.exit / no raise after the marker", () => {
+  test("prompt demands the self-driving footer (python <path> → pytest bridge)", () => {
     const prompt = buildReproTestPrompt("some bug")
-    expect(prompt).toContain("sys.exit")
+    expect(prompt).toContain('if __name__ == "__main__"')
+    expect(prompt).toContain("pytest.main")
+    expect(prompt).toContain("no:cacheprovider")
   })
 })
 
@@ -134,25 +139,25 @@ describe("buildReproTestPrompt — MWE grounding (jun-18 repro-install lever)", 
     expect(iExample).toBeGreaterThan(iMwe)
   })
 
-  test("sentinel contract survives MWE injection (the print-contract is still demanded)", () => {
-    // Even with grounding, the three sentinel strings + the "print EXACTLY ONE"
-    // contract MUST remain — a grounded MWE that displaced the contract would
-    // produce scripts that never print a marker.
+  test("pytest contract survives MWE injection (assert/footer still demanded)", () => {
+    // Even with grounding, the pytest contract MUST remain — a grounded MWE that
+    // displaced the contract would produce scripts that never assert / never
+    // self-drive pytest.
     const prompt = buildReproTestPrompt(baseIssue, "import os\nos.getcwd()")
-    expect(prompt).toContain('"Issue reproduced"')
-    expect(prompt).toContain('"Issue resolved"')
-    expect(prompt).toContain('"Other issues"')
-    expect(prompt).toContain("Print EXACTLY ONE")
+    expect(prompt).toContain("def test_")
+    expect(prompt.toLowerCase()).toContain("assert")
+    expect(prompt).toContain("pytest.main")
+    // The removed sentinel contract must NOT have leaked back in.
+    expect(prompt).not.toContain("Print EXACTLY ONE")
   })
 
   test("MWE containing a markdown fence cannot break out of the grounding block", () => {
     // Adversarial: an MWE that itself contains ``` must not let the model think
-    // the prompt's code block ended early. We still embed it; the sentinel
-    // contract precedes the block so the contract is never displaced. (We assert
-    // the contract + example markers still both appear after such an MWE.)
-    const nasty = "import x\n```\nprint('Issue resolved')\n```"
+    // the prompt's code block ended early. We still embed it; the pytest
+    // contract precedes the block so the contract is never displaced.
+    const nasty = "import x\n```\nassert False\n```"
     const prompt = buildReproTestPrompt(baseIssue, nasty)
-    expect(prompt).toContain("Print EXACTLY ONE")
+    expect(prompt).toContain("def test_")
     expect(prompt).toContain("# Example output")
   })
 })
@@ -230,11 +235,13 @@ describe("stripMarkdownFences", () => {
 
 describe("generateReproTests", () => {
   test("K=5 default, each call hits the LLM exactly once", async () => {
-    const llm = new ScriptedLLM('print("Issue reproduced")')
+    const src = "def test_x():\n    assert thing() == 1"
+    const llm = new ScriptedLLM(src)
     const out = await generateReproTests({ issue: "the bug", llm })
     expect(llm.calls).toBe(DEFAULT_SAMPLES)
     expect(out).toHaveLength(DEFAULT_SAMPLES)
-    for (const s of out) expect(s).toBe('print("Issue reproduced")')
+    // Each source is returned with the self-driving pytest footer guaranteed.
+    for (const s of out) expect(s).toBe(ensurePytestFooter(src))
   })
 
   test("respects config.samples (K=3)", async () => {
@@ -273,24 +280,26 @@ describe("generateReproTests", () => {
     expect(llm.calls).toBe(0)
   })
 
-  test("strips markdown fences from each response", async () => {
-    const fenced = '```python\nprint("Issue reproduced")\n```'
+  test("strips markdown fences from each response (footer appended after strip)", async () => {
+    const body = "def test_x():\n    assert f() == 1"
+    const fenced = `\`\`\`python\n${body}\n\`\`\``
     const llm = new ScriptedLLM(fenced)
     const out = await generateReproTests({ issue: "x", llm, config: { samples: 2 } })
-    expect(out).toEqual(['print("Issue reproduced")', 'print("Issue reproduced")'])
+    expect(out).toEqual([ensurePytestFooter(body), ensurePytestFooter(body)])
   })
 
   test("stream_reset tombstones dead partial within a sample", async () => {
+    const body = "def test_x():\n    assert f() == 1"
     const llm = new EventScriptedLLM([
-      { type: "text_delta", delta: 'print("dead")\n' },
+      { type: "text_delta", delta: "def test_dead():\n    assert False\n" },
       { type: "stream_reset" },
       { type: "text_delta", delta: "```python\n" },
-      { type: "text_delta", delta: 'print("Issue reproduced")\n' },
+      { type: "text_delta", delta: `${body}\n` },
       { type: "text_delta", delta: "```" },
       { type: "message_stop", stop_reason: "end_turn" },
     ])
     const out = await generateReproTests({ issue: "x", llm, config: { samples: 1 } })
-    expect(out).toEqual(['print("Issue reproduced")'])
+    expect(out).toEqual([ensurePytestFooter(body)])
   })
 
   test("per-call LLM exception ⇒ '' for that slot (not a throw)", async () => {
@@ -334,10 +343,51 @@ describe("generateReproTests", () => {
     expect(out).toEqual([])
   })
 
-  test("system message embeds the print-contract", async () => {
-    const llm = new ScriptedLLM('print("Issue reproduced")')
+  test("system message embeds the pytest contract", async () => {
+    const llm = new ScriptedLLM("def test_x(): assert True")
     await generateReproTests({ issue: "x", llm, config: { samples: 1 } })
     const sys = llm.lastInput?.system
-    expect(typeof sys === "string" ? sys : "").toContain("Python")
+    const s = typeof sys === "string" ? sys : ""
+    expect(s).toContain("pytest")
+    expect(s.toLowerCase()).toContain("exit code")
+  })
+})
+
+describe("ensurePytestFooter — python <path> → pytest bridge guarantee", () => {
+  test("appends the self-driving footer when the model omitted it", () => {
+    const src = "def test_x():\n    assert f() == 1"
+    const out = ensurePytestFooter(src)
+    expect(out).toContain(src)
+    expect(out).toContain('if __name__ == "__main__"')
+    expect(out).toContain("pytest.main([__file__")
+    expect(out).toContain("sys.exit")
+  })
+
+  test("LEAVES a compliant source byte-identical (no double-append)", () => {
+    const compliant = [
+      "def test_x():",
+      "    assert f() == 1",
+      "",
+      "",
+      'if __name__ == "__main__":',
+      "    import sys, pytest",
+      '    sys.exit(pytest.main([__file__, "-q"]))',
+    ].join("\n")
+    expect(ensurePytestFooter(compliant)).toBe(compliant)
+    // Exactly one footer (one __main__ guard).
+    const guards = ensurePytestFooter(compliant).match(/if __name__ == "__main__"/g) ?? []
+    expect(guards).toHaveLength(1)
+  })
+
+  test("empty / whitespace / non-string source is returned unchanged (never executed)", () => {
+    expect(ensurePytestFooter("")).toBe("")
+    expect(ensurePytestFooter("   \n  ")).toBe("   \n  ")
+    expect(ensurePytestFooter(undefined as unknown as string)).toBe("")
+  })
+
+  test("recognises a footer that uses single quotes / different args (no double-append)", () => {
+    const single =
+      "def test_x():\n    assert True\nif __name__ == '__main__':\n    import pytest, sys; sys.exit(pytest.main([__file__]))"
+    expect(ensurePytestFooter(single)).toBe(single)
   })
 })

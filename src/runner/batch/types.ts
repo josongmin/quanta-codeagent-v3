@@ -131,6 +131,23 @@ export interface ReproOracleCalibration {
   available: boolean
   goldVotes: number | null
   goldK: number | null
+  /**
+   * P3 metamorphic non-vacuity (jun-23). The canonical resolved-probe run on the
+   * BASE (un-patched / buggy) tree. A SOUND oracle reports NOT-resolved here (the
+   * repro is RED — it reproduces the bug). `baseResolved=true` means the oracle
+   * reports GREEN without any fix ⇒ its "green" is meaningless. OPTIONAL: absent
+   * ⇒ no claim (treated as `false`), so pre-P3 constructors stay valid.
+   */
+  baseResolved?: boolean
+  /**
+   * `=== baseResolved` — the oracle is VACUOUS (would false-GREEN a wrong
+   * candidate). A vacuous oracle must NOT hold proof authority (the proof gate
+   * fails open on it, same as `falseNegative`). Separate field so the fail-open
+   * reason is legible in telemetry. OPTIONAL: absent ⇒ `false` (no fail-open).
+   */
+  vacuous?: boolean
+  baseVotes?: number | null
+  baseK?: number | null
 }
 
 export type SelectionTelemetry = import("./eval/selection-executor").SelectionTelemetry

@@ -132,3 +132,53 @@ export async function* streamWithModel(
     yield ev
   }
 }
+
+/**
+ * Build a port pinned to a SPECIFIC model id + output-token cap, for a
+ * short high-stakes side call (the adaptive-escalation router — jun-23 A1).
+ *
+ * Why this exists: `StreamInput` carries NO model / max_tokens field — in this
+ * codebase those wire fields are baked into the adapter at construction
+ * (`createLLM({ model, maxTokens })`), and a per-call model override is done by
+ * SWAPPING the `LLMPort` instance (the {@link ModelCandidate} mechanism above),
+ * never by a request-level model string. The adaptive router resolves a model
+ * (`DEFAULT_ROUTER_MODEL` = opus) + `maxTokens` (`DEFAULT_ROUTER_MAX_TOKENS`)
+ * but the live model-call was injected the BENCH SOLVER port (sonnet/oauth) and
+ * streamed against IT — so the resolved fields were inert. This builds the
+ * port that actually carries them onto the wire.
+ *
+ * Provider reality: the router pins a Claude model (anthropic). When an
+ * anthropic credential is available (provider resolves to `anthropic`, or an
+ * `ANTHROPIC_API_KEY` is present), a dedicated anthropic adapter is built with
+ * `{ model, maxTokens }` baked in and returned as `pinned:true`. When no
+ * anthropic credential exists (e.g. a ChatGPT-OAuth or OpenAI bench), the model
+ * cannot be served, so the call DEGRADES to the base solver port (`pinned:false`)
+ * rather than crashing — a documented cross-check, not an inert field. The
+ * returned `model` is the model the router request will actually run on.
+ *
+ * Hermetic: `deps.tryCreateLLM` is injected so callers / tests pass a fake
+ * factory; the real driver passes `@/llm`'s `tryCreateLLM`. No `process.env`
+ * read here — the composition root threads `env` in.
+ */
+export const buildModelPinnedPort = (deps: {
+  /** Fallback when the pinned model cannot be served (no anthropic credential).
+   *  Usually the bench solver port (`deps.llm`). */
+  readonly basePort: LLMPort
+  /** Canonical un-suffixed model id the router request must run on (opus). */
+  readonly model: string
+  /** Max output tokens to bake into the pinned adapter. */
+  readonly maxTokens: number
+  /** Env-driven anthropic-credential probe + adapter factory (inject `@/llm`'s
+   *  `tryCreateLLM`-backed builder). Returns `null` when the credential is
+   *  absent (then we fall back to `basePort`). */
+  readonly buildAnthropicPort: (args: {
+    readonly model: string
+    readonly maxTokens: number
+  }) => LLMPort | null
+}): { readonly port: LLMPort; readonly model: string; readonly pinned: boolean } => {
+  const pinned = deps.buildAnthropicPort({ model: deps.model, maxTokens: deps.maxTokens })
+  if (pinned !== null) {
+    return { port: pinned, model: pinned.model ?? deps.model, pinned: true }
+  }
+  return { port: deps.basePort, model: deps.basePort.model ?? "unknown", pinned: false }
+}

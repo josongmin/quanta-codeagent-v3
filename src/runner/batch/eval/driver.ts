@@ -86,7 +86,7 @@ import type {
   ReproOracleCalibration,
 } from "../types"
 import { runAdaptiveBenchAttempt } from "./adaptive-escalation"
-import { makeAdaptiveToolModelCall } from "./adaptive-escalation/live-model-call"
+import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
   buildCandidateFamilyBundleFromWitness,
@@ -2292,6 +2292,7 @@ export const makeReproConsensusSelectionPort = (
       sandbox,
       patch: c.patch,
       baseCommit: instance.swebench?.baseCommit,
+      ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
       timeoutMs,
       probe: (sb) => probe(sb),
     })
@@ -2312,6 +2313,7 @@ export const makeReproConsensusProofSelectionPort = (
       sandbox,
       patch: c.patch,
       baseCommit: instance.swebench?.baseCommit,
+      ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
       timeoutMs,
       probe: (sb) => probe(sb),
     })
@@ -2323,6 +2325,10 @@ const CALIBRATION_UNAVAILABLE: ReproOracleCalibration = {
   available: false,
   goldVotes: null,
   goldK: null,
+  baseResolved: false,
+  vacuous: false,
+  baseVotes: null,
+  baseK: null,
 }
 
 /**
@@ -2368,6 +2374,7 @@ export const makeCalibratedReproConsensusPort = async (
     goldPatch: instance.goldPatch,
     sandbox,
     baseCommit: instance.swebench?.baseCommit,
+    ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
     timeoutMs,
   })
   // A confirmed-false-negative oracle must NEVER reject a candidate ⇒ fail-open.
@@ -2519,6 +2526,10 @@ const unavailableReproCalibration = (): ReproOracleCalibration => ({
   available: false,
   goldVotes: null,
   goldK: null,
+  baseResolved: false,
+  vacuous: false,
+  baseVotes: null,
+  baseK: null,
 })
 
 /**
@@ -2555,6 +2566,7 @@ const calibrateProofOracle = async (
     goldPatch: instance.goldPatch,
     sandbox,
     baseCommit: instance.swebench?.baseCommit,
+    ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
     timeoutMs,
   })
 }
@@ -2579,7 +2591,16 @@ export const computeEffectiveProofRequired = (
   verifySelectProofRequired: boolean,
   proofCalibration: ReproOracleCalibration,
 ): { effectiveProofRequired: boolean; proofGateFailOpen: boolean } => {
-  const proofGateFailOpen = verifySelectProofRequired && proofCalibration.falseNegative
+  // A proven-broken canonical oracle must NOT hold hard submit authority. Two
+  // gold-calibrated failure modes both fail the gate OPEN (lift proofRequired):
+  //   - `falseNegative` (P4): the oracle stays RED on the canonical-correct GOLD
+  //     fix ⇒ it would withhold every correct candidate (too strict).
+  //   - `vacuous` (P3): the oracle reports GREEN on the un-patched BASE tree ⇒ its
+  //     "green" is meaningless and would false-GREEN a wrong candidate (too loose);
+  //     a meaningless proof can't be trusted to gate, so don't require it.
+  const proofGateFailOpen =
+    verifySelectProofRequired &&
+    (proofCalibration.falseNegative || (proofCalibration.vacuous ?? false))
   return {
     effectiveProofRequired: verifySelectProofRequired && !proofGateFailOpen,
     proofGateFailOpen,
@@ -3195,6 +3216,11 @@ const runSelectionPhase = async (
     n,
     problemStatement: instance.problemStatement,
     ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+    // jun-23 W2-2 (B1): thread the slice reader + public issue symbols so the
+    // SELECTOR repair packet carries the real owner source slice (engage), not a
+    // path-only stub — mirrors the generation/classic-repair owner evidence.
+    repairReadSource: (rel) => readSandboxSource(sandbox, rel),
+    repairIssueSymbols: extractIssueHint(instance.problemStatement).symbols,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
@@ -3599,6 +3625,7 @@ export const makeSelectionRegressionPort = (args: {
       sandbox: args.sandbox,
       patch: candidate.patch,
       baseCommit: args.instance.swebench?.baseCommit,
+      ...(args.instance.swebench?.repo !== undefined ? { repo: args.instance.swebench.repo } : {}),
       timeoutMs: args.timeoutMs,
       probe: async (sb) => {
         const r = await makeBenchRegressionOracle(
@@ -4587,7 +4614,11 @@ export const runInstanceOnce = async (
         intakePacket: initialPacket,
         base: preparedContext.state,
         env: process.env,
-        modelCall: makeAdaptiveToolModelCall({ llm: deps.llm, signal: abort.signal }),
+        modelCall: buildAdaptiveRouterModelCall({
+          basePort: deps.llm,
+          env: process.env,
+          signal: abort.signal,
+        }),
         runPhase: async ({ state, posture }) => {
           const nextPrepared = await prepareAttemptContext(
             instance,

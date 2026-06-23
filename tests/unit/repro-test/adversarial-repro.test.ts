@@ -51,9 +51,10 @@ const userTextOf = (input: StreamInput | undefined): string => {
   return part !== undefined && "text" in part ? part.text : ""
 }
 
-// The over-strict marker that induced the 75% gold false-negative. It MUST be
+// The over-strict directive that induced the 75% gold false-negative (P1: now a
+// pytest "every assertion must hold" demand, not a sentinel print). It MUST be
 // absent from the canonical (submit-gate) prompt and present in hardening.
-const OVERSTRICT = '"Issue resolved" ONLY if EVERY case behaves correctly'
+const OVERSTRICT = "pytest passes ONLY if EVERY assertion holds"
 
 describe("adversarial-repro — canonical/hardening prompt split", () => {
   test("CANONICAL (default) carries NO over-strict adversarial markers (the FN fix)", () => {
@@ -68,21 +69,25 @@ describe("adversarial-repro — canonical/hardening prompt split", () => {
     expect(canonical).toContain("CORE symptom only")
   })
 
-  test("HARDENING is a SUPERSET — issue + marker contract survive, plus the block", () => {
+  test("HARDENING is a SUPERSET — issue + pytest contract survive, plus the block", () => {
     const canonical = buildReproTestPrompt(ISSUE)
     const hardening = buildReproTestPrompt(ISSUE, undefined, "hardening")
     expect(hardening.length).toBeGreaterThan(canonical.length)
     // Hardening drops the canonical-only "CORE symptom" line (it wants MORE than
     // the core), so compare on the shared scaffold, not line-for-line.
     expect(hardening).toContain(ISSUE)
-    expect(hardening).toContain('"Issue reproduced"')
-    expect(hardening).toContain('"Issue resolved"')
+    expect(hardening).toContain("def test_")
+    expect(hardening).toContain("pytest.main")
+    // P1: the removed self-judged sentinel must not have leaked into hardening.
+    expect(hardening).not.toContain("Issue reproduced")
+    expect(hardening).not.toContain("Issue resolved")
   })
 
   test("HARDENING content — load-bearing adversarial directives present (red-on-injection)", () => {
     const hardening = buildReproTestPrompt(ISSUE, undefined, "hardening")
     expect(hardening).toContain("ADVERSARIAL")
-    expect(hardening).toContain('must STILL print "Issue reproduced"')
+    // P1: a shallow fix must leave an ASSERTION FAILING (was: still print "Issue reproduced").
+    expect(hardening).toContain("at least one assertion FAILING")
     expect(hardening).toContain("rejected") // must-reject cases
     expect(hardening).toContain("boundary")
     expect(hardening).toContain(OVERSTRICT)

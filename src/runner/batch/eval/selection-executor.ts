@@ -63,10 +63,7 @@ import {
 import { type CandidateRiskFacts, extractCandidateRiskFacts } from "./counterfactual-risk"
 import { buildCounterfactualSeed } from "./counterfactual-seed"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
-import {
-  type LlmEvidencePacket,
-  type VerificationTargetFact,
-} from "./llm-evidence-packet"
+import type { LlmEvidencePacket, VerificationTargetFact } from "./llm-evidence-packet"
 import type { MweProofReceipt } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
@@ -287,6 +284,19 @@ export const runSelection = async (args: {
    *  verificationTargetFromPlan). Surfaced in the repair_seed packet so the
    *  repair instruction names the public proof to satisfy. */
   verificationTarget?: VerificationTargetFact
+  /** jun-23 W2-2 (B1) — sandbox source reader (rel ⇒ source | null) paired with
+   *  {@link issueSymbols}, threaded into the SELECTOR repair packet so its owner
+   *  evidence carries the EXACT symbol slice instead of a path-only stub. The
+   *  path-only stub forced the adaptive router's `localizationCertain=false` in
+   *  every selector-repair phase (A2). Reads PUBLIC source only — never a
+   *  hidden-test path/command (the blindness invariant holds: it resolves owner
+   *  files against the same source the generation stage already reads). Absent ⇒
+   *  path-only (B2 surfaces the gap as `owner_slice` missingEvidence). */
+  repairReadSource?: (rel: string) => string | null
+  /** jun-23 W2-2 (B1) — PUBLIC issue symbols used (with {@link repairReadSource})
+   *  to resolve the owner source slice in the selector repair packet. Blind:
+   *  public issue text only. */
+  repairIssueSymbols?: readonly string[]
   /** OPC-07 runtime packet recorder. Stores which bounded packet stages were
    *  actually used on the live clean path without changing selector authority. */
   recordLlmEvidencePacket?: (packet: LlmEvidencePacket) => void
@@ -617,6 +627,12 @@ export const runSelection = async (args: {
         ...(args.verificationTarget !== undefined
           ? { verificationTarget: args.verificationTarget }
           : {}),
+        // jun-23 W2-2 (B1): give the SELECTOR repair packet the slice-capable
+        // owner evidence (real source slice) instead of the path-only stub that
+        // forced router localizationCertain=false. Both must be present for a
+        // slice to resolve; either absent ⇒ path-only (B2 gap surfaced).
+        ...(args.repairReadSource !== undefined ? { readSource: args.repairReadSource } : {}),
+        ...(args.repairIssueSymbols !== undefined ? { issueSymbols: args.repairIssueSymbols } : {}),
         ...(args.recordLlmEvidencePacket !== undefined
           ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
           : {}),

@@ -57,6 +57,10 @@ const UNAVAILABLE: ReproOracleCalibration = {
   available: false,
   goldVotes: null,
   goldK: null,
+  baseResolved: false,
+  vacuous: false,
+  baseVotes: null,
+  baseK: null,
 }
 
 /**
@@ -74,8 +78,28 @@ export const calibrateReproOracle = async (args: {
   sandbox: string
   baseCommit: string | undefined
   timeoutMs: number
+  /** SWE-bench `owner/name` slug. Forwarded into `withCandidatePatch` so the
+   *  GOLD-patched probe builds under the SAME P0 build-env materialization the
+   *  candidate proof exec uses (e.g. astropy's `extension-helpers`) — otherwise
+   *  gold itself would fail to build and the oracle would read as a spurious
+   *  false-negative. Undefined ⇒ no materialization (byte-identical). */
+  repo?: string
 }): Promise<ReproOracleCalibration> => {
   if (args.goldPatch === undefined || args.goldPatch.trim() === "") return UNAVAILABLE
+  // P3 metamorphic non-vacuity: probe the canonical oracle on the BASE (un-patched)
+  // tree FIRST. The sandbox arrives at base (calibration runs before candidate gen,
+  // and leaves it at base). A SOUND oracle reports NOT-resolved here (the repro is
+  // RED — it reproduces the bug). If it reports RESOLVED on base, its "green" is
+  // meaningless (it would false-GREEN any candidate) ⇒ VACUOUS. Never throws —
+  // a thrown base probe vouches for nothing (treated as not-resolved, not vacuous).
+  let baseVerdict: { votes: number; k: number } | null = null
+  try {
+    baseVerdict = await args.resolvedProbe(args.sandbox)
+  } catch {
+    baseVerdict = null
+  }
+  const baseResolved =
+    baseVerdict !== null && baseVerdict.k >= 1 && baseVerdict.votes >= baseVerdict.k
   // Wrap the probe so a `null` verdict (no decisive repro outcome) is
   // distinguishable from "gold did not apply" (withCandidatePatch → null).
   // "Never throws" contract (adversarial audit jun-20): the probe's own try/catch
@@ -91,6 +115,7 @@ export const calibrateReproOracle = async (args: {
       patch: args.goldPatch,
       baseCommit: args.baseCommit,
       timeoutMs: args.timeoutMs,
+      ...(args.repo !== undefined ? { repo: args.repo } : {}),
       probe: async (sb) => {
         try {
           return { verdict: await args.resolvedProbe(sb) }
@@ -117,5 +142,10 @@ export const calibrateReproOracle = async (args: {
     available: true,
     goldVotes: verdict?.votes ?? null,
     goldK: verdict?.k ?? null,
+    // P3 non-vacuity: RESOLVED on the un-patched base ⇒ vacuous (meaningless green).
+    baseResolved,
+    vacuous: baseResolved,
+    baseVotes: baseVerdict?.votes ?? null,
+    baseK: baseVerdict?.k ?? null,
   }
 }

@@ -62,6 +62,21 @@ const UNAVAILABLE: ReproOracleCalibration = {
   goldK: null,
 }
 
+// P3 VACUOUS oracle: gold flips it green (NOT a false-negative) BUT it also reports
+// resolved on the UN-PATCHED base ⇒ its "green" is meaningless (would false-GREEN a
+// wrong candidate). A vacuous oracle must NOT hold proof authority either.
+const VACUOUS: ReproOracleCalibration = {
+  goldCalibrated: true,
+  falseNegative: false,
+  available: true,
+  goldVotes: 3,
+  goldK: 3,
+  baseResolved: true,
+  vacuous: true,
+  baseVotes: 3,
+  baseK: 3,
+}
+
 describe("computeEffectiveProofRequired — P4 proof-gate fail-open", () => {
   test("gold-FN + proofRequired ⇒ FAIL-OPEN (the correct fix is no longer withheld)", () => {
     const d = computeEffectiveProofRequired(true, GOLD_FALSE_NEGATIVE)
@@ -81,8 +96,24 @@ describe("computeEffectiveProofRequired — P4 proof-gate fail-open", () => {
     expect(d.effectiveProofRequired).toBe(true)
   })
 
+  test("P3: VACUOUS oracle (green on base) + proofRequired ⇒ FAIL-OPEN (meaningless proof can't gate)", () => {
+    const d = computeEffectiveProofRequired(true, VACUOUS)
+    expect(d.proofGateFailOpen).toBe(true)
+    expect(d.effectiveProofRequired).toBe(false)
+  })
+
+  test("P3 mutation: a vacuous oracle that is NOT gold-FN still fails open (vacuous is its own reason)", () => {
+    // VACUOUS has falseNegative=false — so ONLY the `vacuous` term can flip this.
+    // If the vacuous term were dropped from the decision, this would stay gated.
+    expect(VACUOUS.falseNegative).toBe(false)
+    expect(computeEffectiveProofRequired(true, VACUOUS).effectiveProofRequired).toBe(false)
+    // ...and a sound oracle (gold-green AND base-red) stays gated — paired control.
+    const sound: ReproOracleCalibration = { ...VACUOUS, baseResolved: false, vacuous: false }
+    expect(computeEffectiveProofRequired(true, sound).effectiveProofRequired).toBe(true)
+  })
+
   test("proofRequired=false ⇒ effective stays false; calibration can't turn the gate ON", () => {
-    for (const cal of [GOLD_FALSE_NEGATIVE, TRUSTWORTHY, UNAVAILABLE]) {
+    for (const cal of [GOLD_FALSE_NEGATIVE, TRUSTWORTHY, UNAVAILABLE, VACUOUS]) {
       const d = computeEffectiveProofRequired(false, cal)
       expect(d.effectiveProofRequired).toBe(false)
       expect(d.proofGateFailOpen).toBe(false)

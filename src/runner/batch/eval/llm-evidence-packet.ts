@@ -54,6 +54,19 @@ export interface OwnerEvidenceFact {
   /** e.g. "issue-file", "static-witness:override-family", "selection-owner". */
   readonly provenance: string
   readonly sourceSlice?: string
+  /**
+   * B4: when no slice was resolved, WHY — `non_source` (binary/unreadable text)
+   * vs `not_found` (readable source, symbol absent). Lets the caller emit a
+   * specific missingEvidence reason instead of one undifferentiated gap.
+   */
+  readonly sliceMiss?: SymbolSliceMiss
+  /**
+   * B4: true when the resolved slice's symbol name matched MORE THAN ONE
+   * def/class site (overload/redefinition) — the chosen slice is the first match
+   * and therefore ambiguous; surfaced so the LLM/caller knows it may be the
+   * wrong site rather than silently trusting it.
+   */
+  readonly ambiguousSliceMatch?: boolean
 }
 
 /** Observed state of a proof obligation. Separates infra failure from correctness. */
@@ -67,15 +80,117 @@ export type ProofReceiptState =
   | "static_only"
   | "not_run"
 
+/**
+ * B8 — EXPLICIT typed source-policy class. The free-string `source` is a
+ * human-readable receipt identifier (e.g. `public_mwe`, `discovered_regression`,
+ * `hard:proofRequiredMissing`, `selector_hard_reason`) and stays open because
+ * deterministic reasons are generated dynamically. The POLICY — what kind of
+ * evidence provenance this receipt represents, and therefore how the LLM may
+ * trust/use it — is a CLOSED typed union:
+ *
+ *  - `public_issue`            — derived from the public issue / its repro seed.
+ *  - `public_repro`            — an executed public reproduction (blind-by-construction script).
+ *  - `public_discovered_test`  — a publicly-discovered regression/owner test (result only).
+ *  - `static`                  — static analysis / structural witness, not executed.
+ *  - `official_hidden_withheld`— official harness-derived; result MAY surface, command NEVER.
+ *  - `infra`                   — execution/environment outcome, not a correctness verdict.
+ *
+ * Leaking a free string into `sourcePolicy` is a compile error — that is the
+ * point: source provenance must be a deliberate, auditable classification.
+ */
+export type ProofReceiptSourcePolicy =
+  | "public_issue"
+  | "public_repro"
+  | "public_discovered_test"
+  | "static"
+  | "official_hidden_withheld"
+  | "infra"
+
 export interface ProofReceiptFact {
-  /** "public_mwe" | "repro_consensus" | "discovered_regression" | "verification_plan" | "selector_hard_reason" … */
+  /**
+   * Free-string receipt IDENTIFIER (open: `hard:*` reasons are dynamic). Use
+   * {@link sourcePolicyOf} to derive the typed policy, or set `sourcePolicy`
+   * explicitly at construction.
+   */
   readonly source: string
+  /** B8: EXPLICIT typed provenance/trust policy (closed union). */
+  readonly sourcePolicy?: ProofReceiptSourcePolicy
   readonly state: ProofReceiptState
   readonly command?: string
+  /**
+   * B5 / C3 fence: set true for owner-test / module-smoke RESULT receipts whose
+   * command MUST NOT be surfaced (it can encode a hidden-test path). When true,
+   * `command` is always absent — the LLM sees the result STATE and its source
+   * policy, never the executable selector. {@link ownerTestResultReceipt}
+   * constructs these so the fence cannot be forgotten.
+   */
+  readonly cmdWithheld?: boolean
   readonly baseValidatedRed?: boolean
   readonly stdoutTail?: string
   readonly stderrTail?: string
   readonly candidatePatchHash?: string
+}
+
+/**
+ * B8: map a known free-string receipt `source` identifier to its typed policy
+ * class. Unknown identifiers (including dynamic `hard:*` deterministic reasons)
+ * return undefined — producers that KNOW the provenance should set `sourcePolicy`
+ * explicitly rather than rely on inference. ANSWER-KEY SAFE: pure classification
+ * of an already-blind identifier, no test/command text.
+ */
+export const sourcePolicyOf = (source: string): ProofReceiptSourcePolicy | undefined => {
+  switch (source) {
+    case "public_mwe":
+    case "public_repro":
+      return "public_repro"
+    case "repro_consensus":
+      return "public_repro"
+    case "discovered_regression":
+    case "public_discovered_test":
+      return "public_discovered_test"
+    case "verify_cmd":
+    case "primary_rail":
+    case "validation_gate":
+      return "public_repro"
+    case "selection":
+      return "static"
+    default:
+      return undefined
+  }
+}
+
+/**
+ * B5: an owner-test / module-smoke RESULT receipt — RESULT ONLY, command always
+ * WITHHELD (C3 anti-gaming fence). The LLM/router learns whether the owner test
+ * or module smoke went green/red and from which source policy, but NEVER the
+ * executable selector (which can encode a hidden-test path the content scanner
+ * cannot catch). `command` is structurally impossible to set here; `cmdWithheld`
+ * is always true.
+ *
+ *  - kind `owner_test`   ⇒ source `owner_test`,   policy `official_hidden_withheld`
+ *  - kind `module_smoke` ⇒ source `module_smoke`, policy `official_hidden_withheld`
+ *
+ * `result` maps to a correctness/infra STATE: green/red are candidate verdicts,
+ * `infra_failed` is a non-correctness execution outcome, `not_run` is absence.
+ */
+export const ownerTestResultReceipt = (args: {
+  readonly kind: "owner_test" | "module_smoke"
+  readonly result: "green" | "red" | "infra_failed" | "not_run"
+}): ProofReceiptFact => {
+  const state: ProofReceiptState =
+    args.result === "green"
+      ? "candidate_green"
+      : args.result === "red"
+        ? "candidate_red"
+        : args.result === "infra_failed"
+          ? "execution_failed"
+          : "not_run"
+  return {
+    source: args.kind,
+    sourcePolicy: "official_hidden_withheld",
+    state,
+    cmdWithheld: true,
+  }
 }
 
 /** A typed, provenance-carrying public obligation (mirrors PublicContract). */
@@ -496,7 +611,16 @@ export const ownerSliceMissingEvidence = (
 ): MissingEvidenceFact[] =>
   ownerEvidence
     .filter((o) => o.sourceSlice === undefined)
-    .map((o) => ({ kind: "owner_slice", reason: `no_resolvable_slice:${o.file}` }))
+    .map((o) => ({
+      kind: "owner_slice",
+      // B4: distinguish a binary/non-source file from a genuine symbol-not-found.
+      // Default (not_found / unknown) keeps the established `no_resolvable_slice:`
+      // reason so existing consumers/tests stay stable.
+      reason:
+        o.sliceMiss === "non_source"
+          ? `non_source_file:${o.file}`
+          : `no_resolvable_slice:${o.file}`,
+    }))
 
 const firstNonEmptyLine = (text: string): string | undefined =>
   text
@@ -528,39 +652,131 @@ export const describeIssueFacts = (
 }
 
 /**
- * Exact definition/symbol block for a Python `def`/`class` symbol — the bounded
- * source slice rule (no broad windows, no whole-file bodies). Returns undefined
- * when the symbol is not statically resolvable in the source.
+ * B4: distinguishable empty-return reason for {@link extractSymbolSliceResult}.
+ *  - `not_found`        — the source IS readable text but no `def`/`class <symbol>` matched.
+ *  - `non_source`       — the source looks binary / non-text (e.g. NUL bytes), so a
+ *                         Python regex cannot meaningfully run; the absence is NOT
+ *                         "symbol missing" — it is "no source language to inspect".
+ * A typed reason lets callers emit a SPECIFIC missingEvidence (binary file vs.
+ * symbol-not-in-file) instead of conflating both into a single `undefined`.
  */
-export const extractSymbolSlice = (
+export type SymbolSliceMiss = "not_found" | "non_source"
+
+export interface SymbolSliceResult {
+  /** Present iff a matching def/class block was resolved. */
+  readonly slice?: string
+  /** Present iff no slice — distinguishes binary/non-source from genuine not-found. */
+  readonly miss?: SymbolSliceMiss
+  /**
+   * B4: count of DISTINCT def/class sites that matched this symbol name. >1 means
+   * the returned slice is ambiguous (same-name overload/redefinition); callers can
+   * surface this instead of silently taking the first match.
+   */
+  readonly matchCount: number
+}
+
+/**
+ * Heuristic-free binary/non-source probe: a NUL byte never appears in legitimate
+ * UTF-8 source text, so its presence means the "source" is not inspectable as
+ * Python. (We deliberately do NOT guess by extension or content patterns — only
+ * the unambiguous NUL signal, which has zero false positives in real source.)
+ */
+const NUL_CHAR = String.fromCharCode(0)
+const looksNonSource = (source: string): boolean => source.includes(NUL_CHAR)
+
+/**
+ * B4: file-level slice-miss classification. Given the file source (null when
+ * unreadable) and whichever per-symbol resolution succeeded, returns the
+ * distinguishable miss reason, or undefined when a slice WAS resolved.
+ *  - resolved slice present ⇒ undefined (no miss).
+ *  - source null/unreadable ⇒ undefined (handled by other missingEvidence, not a slice miss).
+ *  - binary/non-source file ⇒ `non_source`.
+ *  - readable source, symbol absent ⇒ `not_found`.
+ */
+const sliceMissForFile = (
+  source: string | null,
+  resolved: SymbolSliceResult | undefined,
+): SymbolSliceMiss | undefined => {
+  if (resolved?.slice !== undefined) return undefined
+  if (source === null) return undefined
+  return looksNonSource(source) ? "non_source" : "not_found"
+}
+
+/**
+ * B4: precise, distinguishable symbol-slice resolution.
+ *  1. Walks BACKWARD over contiguous `@decorator` lines directly above the matched
+ *     `def`/`class` and includes them (the decorator is often the fix site).
+ *  2. Reports `matchCount` so an ambiguous same-name redefinition is visible
+ *     instead of silently returning the first match.
+ *  3. Returns a typed `miss` (`non_source` vs `not_found`) so callers can emit a
+ *     specific missingEvidence reason rather than conflating both as `undefined`.
+ * Bounded by `maxLines` (decorators included in the budget).
+ */
+export const extractSymbolSliceResult = (
   source: string,
   symbol: string,
   maxLines = 40,
-): string | undefined => {
+): SymbolSliceResult => {
+  if (looksNonSource(source)) return { miss: "non_source", matchCount: 0 }
   const lines = source.split(/\r?\n/)
   const re = new RegExp(`^(\\s*)(?:async\\s+)?(?:def|class)\\s+${escapeRe(symbol)}\\b`)
+  const matches: { readonly index: number; readonly indent: number }[] = []
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (line === undefined) continue
     const m = line.match(re)
     if (m === null) continue
-    const indent = (m[1] ?? "").length
-    const block: string[] = [line]
-    for (let j = i + 1; j < lines.length && block.length < maxLines; j++) {
-      const ln = lines[j]
-      if (ln === undefined) break
-      if (ln.trim() === "") {
-        block.push(ln)
-        continue
-      }
-      const curIndent = ln.length - ln.trimStart().length
-      if (curIndent <= indent) break
-      block.push(ln)
-    }
-    return block.join("\n").trimEnd()
+    matches.push({ index: i, indent: (m[1] ?? "").length })
   }
-  return undefined
+  if (matches.length === 0) return { miss: "not_found", matchCount: 0 }
+  const chosen = matches[0]
+  if (chosen === undefined) return { miss: "not_found", matchCount: 0 }
+  const { index: i, indent } = chosen
+  // (1) Walk BACKWARD over contiguous decorator lines at the SAME indent.
+  const decoratorLines: string[] = []
+  for (let k = i - 1; k >= 0; k--) {
+    const prev = lines[k]
+    if (prev === undefined) break
+    const trimmed = prev.trim()
+    if (trimmed === "") break
+    const prevIndent = prev.length - prev.trimStart().length
+    if (prevIndent !== indent || !trimmed.startsWith("@")) break
+    decoratorLines.unshift(prev)
+  }
+  // BOUND: decorators + def must fit in maxLines. If a pathological decorator
+  // stack overflows the budget, keep the def and the decorators CLOSEST to it
+  // (the rest are dropped) — never exceed maxLines.
+  const decoratorBudget = Math.max(0, maxLines - 1)
+  const keptDecorators =
+    decoratorLines.length > decoratorBudget
+      ? decoratorLines.slice(decoratorLines.length - decoratorBudget)
+      : decoratorLines
+  const block: string[] = [...keptDecorators, lines[i] as string]
+  for (let j = i + 1; j < lines.length && block.length < maxLines; j++) {
+    const ln = lines[j]
+    if (ln === undefined) break
+    if (ln.trim() === "") {
+      block.push(ln)
+      continue
+    }
+    const curIndent = ln.length - ln.trimStart().length
+    if (curIndent <= indent) break
+    block.push(ln)
+  }
+  return { slice: block.join("\n").trimEnd(), matchCount: matches.length }
 }
+
+/**
+ * Exact definition/symbol block for a Python `def`/`class` symbol — the bounded
+ * source slice rule (no broad windows, no whole-file bodies). Returns undefined
+ * when the symbol is not statically resolvable in the source. Thin back-compat
+ * wrapper over {@link extractSymbolSliceResult} (now decorator-aware).
+ */
+export const extractSymbolSlice = (
+  source: string,
+  symbol: string,
+  maxLines = 40,
+): string | undefined => extractSymbolSliceResult(source, symbol, maxLines).slice
 
 /**
  * Build typed owner evidence from owner files + issue symbols. When a sandbox
@@ -586,15 +802,22 @@ export const assembleOwnerEvidence = (args: {
         : issueSymbols.filter((sym) =>
             new RegExp(`^\\s*(?:async\\s+)?(?:def|class)\\s+${escapeRe(sym)}\\b`, "m").test(source),
           )
-    const slice =
+    const resolved =
       source === null
         ? undefined
-        : definedSymbols.map((sym) => extractSymbolSlice(source, sym)).find((s) => s !== undefined)
+        : definedSymbols
+            .map((sym) => extractSymbolSliceResult(source, sym))
+            .find((r) => r.slice !== undefined)
+    // B4: when nothing resolved, classify WHY at the FILE level — a binary /
+    // non-source file is distinct from a readable source whose symbol is absent.
+    const miss = sliceMissForFile(source, resolved)
     out.push({
       file,
       symbols: definedSymbols,
       provenance,
-      ...(slice !== undefined ? { sourceSlice: slice } : {}),
+      ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
+      ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
+      ...(miss !== undefined ? { sliceMiss: miss } : {}),
     })
   }
   return out
@@ -615,15 +838,20 @@ export const assembleStaticWitnessOwnerEvidence = (args: {
     const symbols = uniqueLines(witness.subjectSymbols)
     for (const file of files) {
       const source = args.readSource?.(file) ?? null
-      const slice =
+      const resolved =
         source === null
           ? undefined
-          : symbols.map((symbol) => extractSymbolSlice(source, symbol)).find((s) => s !== undefined)
+          : symbols
+              .map((symbol) => extractSymbolSliceResult(source, symbol))
+              .find((r) => r.slice !== undefined)
+      const miss = sliceMissForFile(source, resolved)
       out.push({
         file,
         symbols,
         provenance: `static-witness:${witness.kind}/${witness.provenance}/${witness.authority}`,
-        ...(slice !== undefined ? { sourceSlice: slice } : {}),
+        ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
+        ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
+        ...(miss !== undefined ? { sliceMiss: miss } : {}),
       })
     }
   }
@@ -734,11 +962,13 @@ const ownerEvidenceFromFaultEvidence = (args: {
 }
 
 const reproReceipts = (repro: IntakeReproTelemetry | undefined): ProofReceiptFact[] => {
-  if (repro === undefined) return [{ source: "public_mwe", state: "not_run" }]
+  if (repro === undefined)
+    return [{ source: "public_mwe", sourcePolicy: "public_repro", state: "not_run" }]
   if (repro.installed) {
     return [
       {
         source: "public_mwe",
+        sourcePolicy: "public_repro",
         state: repro.reproducedCount > 0 ? "base_red" : "base_green",
         command: repro.path,
       },
@@ -747,6 +977,8 @@ const reproReceipts = (repro: IntakeReproTelemetry | undefined): ProofReceiptFac
   return [
     {
       source: "public_mwe",
+      // B8: an env/exec failure is an INFRA outcome, not a public-repro verdict.
+      sourcePolicy: "infra",
       state: repro.reason.includes("env") ? "env_prep_failed" : "execution_failed",
       ...(repro.sampleStdoutTail !== undefined
         ? { stdoutTail: boundHead(repro.sampleStdoutTail, 600) }
@@ -797,6 +1029,8 @@ export const buildIntakeLlmEvidencePacket = (input: IntakeLlmEvidenceInput): Llm
     proofReceipts: [
       {
         source: "public_mwe",
+        // B8: a not-yet-executed issue-derived seed is public-issue provenance.
+        sourcePolicy: "public_issue",
         state: "static_only",
         ...(issueReproSeed !== undefined
           ? { command: `issue-seed:${issueReproSeed.provenance}` }
@@ -823,6 +1057,9 @@ export const buildIntakeLlmEvidencePacket = (input: IntakeLlmEvidenceInput): Llm
 /* ------------------------------------------------------------------ */
 /* Candidate generation packet (SHARED — one helper, both drivers)     */
 /* ------------------------------------------------------------------ */
+
+/** Bounded number of validated repro scripts rendered into the generation packet. */
+const VALIDATED_REPRO_SCRIPT_CAP = 2
 
 export interface SelectionGenerationPacketInput {
   readonly problemStatement: string
@@ -868,6 +1105,7 @@ export const buildSelectionGenerationLlmEvidencePacket = (
       : [
           {
             source: "public_mwe",
+            sourcePolicy: "public_repro",
             state: input.baseValidatedRed === true ? "base_red" : "static_only",
             command: input.reproCommand,
             ...(input.baseValidatedRed !== undefined
@@ -919,11 +1157,28 @@ export const buildSelectionGenerationLlmEvidencePacket = (
       ...(input.validatedReproScripts ?? [])
         .map((source) => source.trim())
         .filter((source) => source !== "")
-        .slice(0, 2)
+        .slice(0, VALIDATED_REPRO_SCRIPT_CAP)
         .map((source, i) => ({
           kind: "validated_public_repro",
           value: `script ${i + 1}: ${boundHead(source, 1200)}`,
         })),
+      // A4: bounded truncation MUST surface an omitted-count fact so the LLM can
+      // distinguish "only N existed" from "more existed but were withheld for
+      // budget". Mirrors the repair-seed sibling at driver.ts validatedReproContractSeed.
+      ...((): StaticFact[] => {
+        const nonEmpty = (input.validatedReproScripts ?? [])
+          .map((source) => source.trim())
+          .filter((source) => source !== "")
+        const omitted = nonEmpty.length - VALIDATED_REPRO_SCRIPT_CAP
+        return omitted > 0
+          ? [
+              {
+                kind: "validated_public_repro_omitted",
+                value: `Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`,
+              },
+            ]
+          : []
+      })(),
       ...(input.seed !== undefined && input.seed.trim() !== ""
         ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
         : []),
@@ -934,9 +1189,6 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     missingEvidence,
   })
 }
-
-export const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string =>
-  renderLlmEvidencePacket(buildSelectionGenerationLlmEvidencePacket(input))
 
 export interface SelectionGenerationPromptInput
   extends Omit<SelectionGenerationPacketInput, "baseValidatedRed"> {
@@ -1030,9 +1282,6 @@ export const buildCandidateReviewLlmEvidencePacket = (
     ],
   })
 
-export const buildCandidateReviewPacket = (input: CandidateReviewPacketInput): string =>
-  renderLlmEvidencePacket(buildCandidateReviewLlmEvidencePacket(input))
-
 /* ------------------------------------------------------------------ */
 /* Candidate post-review packet (executed-proof diagnosis)             */
 /* ------------------------------------------------------------------ */
@@ -1104,9 +1353,6 @@ export const buildCandidatePostReviewLlmEvidencePacket = (
       ...ownerSliceMissingEvidence(input.ownerEvidence),
     ],
   })
-
-export const buildCandidatePostReviewPacket = (input: CandidatePostReviewPacketInput): string =>
-  renderLlmEvidencePacket(buildCandidatePostReviewLlmEvidencePacket(input))
 
 /* ------------------------------------------------------------------ */
 /* Repair seed packet (SHARED)                                         */
@@ -1185,9 +1431,6 @@ export const buildRepairSeedLlmEvidencePacket = (
   })
 }
 
-export const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
-  renderLlmEvidencePacket(buildRepairSeedLlmEvidencePacket(input))
-
 /* ------------------------------------------------------------------ */
 /* Selection explanation packet (report-only RCA)                      */
 /* ------------------------------------------------------------------ */
@@ -1229,7 +1472,8 @@ export interface SelectionExplanationLlmEvidenceInput {
 const proofSummaryReceipts = (
   summary: SelectionExplanationProofSummaryInput | undefined,
 ): ProofReceiptFact[] => {
-  if (summary === undefined) return [{ source: "selection", state: "not_run" }]
+  if (summary === undefined)
+    return [{ source: "selection", sourcePolicy: "static", state: "not_run" }]
   const publicMweReceiptState = (
     state: MweProofState | undefined,
   ): ProofReceiptState | undefined => {
@@ -1287,18 +1531,27 @@ const proofSummaryReceipts = (
         return "not_run"
     }
   }
+  // B8: each report receipt carries an explicit typed source policy.
+  const withPolicy = (source: string, state: ProofReceiptState): ProofReceiptFact => {
+    const policy = sourcePolicyOf(source)
+    return {
+      source,
+      ...(policy !== undefined ? { sourcePolicy: policy } : {}),
+      state,
+    }
+  }
   return [
     ...(() => {
       const state = publicMweReceiptState(summary.publicMweState)
-      return state === undefined ? [] : [{ source: "public_mwe", state }]
+      return state === undefined ? [] : [withPolicy("public_mwe", state)]
     })(),
     ...(() => {
       const state = publicRegressionReceiptState(summary.publicRegressionState)
-      return state === undefined ? [] : [{ source: "discovered_regression", state }]
+      return state === undefined ? [] : [withPolicy("discovered_regression", state)]
     })(),
     ...(() => {
       const state = reproConsensusReceiptState(summary.reproConsensusState)
-      return state === undefined ? [] : [{ source: "repro_consensus", state }]
+      return state === undefined ? [] : [withPolicy("repro_consensus", state)]
     })(),
   ]
 }

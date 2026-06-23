@@ -186,6 +186,11 @@ describe("calibrateReproOracle", () => {
         available: false,
         goldVotes: null,
         goldK: null,
+        // P3 non-vacuity fields — UNAVAILABLE carries no claim on these either.
+        baseResolved: false,
+        vacuous: false,
+        baseVotes: null,
+        baseK: null,
       })
     })
 

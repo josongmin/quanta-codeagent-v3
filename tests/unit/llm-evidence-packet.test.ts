@@ -3,27 +3,47 @@ import {
   assembleOwnerEvidence,
   assertPacketBlind,
   buildCandidatePostReviewLlmEvidencePacket,
-  buildCandidatePostReviewPacket,
-  buildCandidateReviewPacket,
+  buildCandidateReviewLlmEvidencePacket,
   buildIntakeLlmEvidencePacket,
   buildRepairSeedLlmEvidencePacket,
-  buildRepairSeedPacket,
   buildSelectionExplanationPacket,
-  buildSelectionGenerationPacket,
+  buildSelectionGenerationLlmEvidencePacket,
   buildSelectionGenerationPrompt,
   buildSelectionOwnerEvidence,
+  type CandidatePostReviewPacketInput,
+  type CandidateReviewPacketInput,
   candidatePatchHash,
   extractSymbolSlice,
+  extractSymbolSliceResult,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   opaqueInstanceIdHash,
+  ownerTestResultReceipt,
   PacketBlindnessViolation,
+  type ProofReceiptFact,
+  type ProofReceiptSourcePolicy,
+  type RepairSeedPacketInput,
   recordLlmEvidencePacket,
   renderLlmEvidencePacket,
+  type SelectionGenerationPacketInput,
+  sourcePolicyOf,
   summarizeLlmEvidenceArtifacts,
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { makeStaticWitness } from "@/runner/batch/eval/static-witness"
+
+// A8: the dead string-returning `build*Packet` wrappers were removed (zero
+// production callers). These thin test-local shims keep the existing
+// render-string assertions exercising the LIVE object builders + the shared
+// renderLlmEvidencePacket — the exact rendering path production uses.
+const buildSelectionGenerationPacket = (input: SelectionGenerationPacketInput): string =>
+  renderLlmEvidencePacket(buildSelectionGenerationLlmEvidencePacket(input))
+const buildCandidateReviewPacket = (input: CandidateReviewPacketInput): string =>
+  renderLlmEvidencePacket(buildCandidateReviewLlmEvidencePacket(input))
+const buildCandidatePostReviewPacket = (input: CandidatePostReviewPacketInput): string =>
+  renderLlmEvidencePacket(buildCandidatePostReviewLlmEvidencePacket(input))
+const buildRepairSeedPacket = (input: RepairSeedPacketInput): string =>
+  renderLlmEvidencePacket(buildRepairSeedLlmEvidencePacket(input))
 
 /** Parse the JSON body out of a rendered packet. */
 const parseRendered = (rendered: string): Record<string, unknown> =>
@@ -766,9 +786,14 @@ describe("llm evidence packet — selection explanation (report-only, no submit 
       candidates: [],
     })
     expect(mapped.proofReceipts).toEqual([
-      { source: "public_mwe", state: "base_green" },
-      { source: "discovered_regression", state: "static_only" },
-      { source: "repro_consensus", state: "static_only" },
+      // B8: each report receipt now carries its explicit typed source policy.
+      { source: "public_mwe", sourcePolicy: "public_repro", state: "base_green" },
+      {
+        source: "discovered_regression",
+        sourcePolicy: "public_discovered_test",
+        state: "static_only",
+      },
+      { source: "repro_consensus", sourcePolicy: "public_repro", state: "static_only" },
     ])
   })
 })
@@ -896,5 +921,249 @@ describe("llm evidence packet — 3-case packet semantics", () => {
     })
     expect(rendered).toContain('"command": "python -m pytest dbshell/tests -q"')
     expect(rendered).toContain('"state": "base_red"')
+  })
+})
+
+// ── A4: bounded validated-repro truncation emits an omitted-count fact ─────────
+describe("A4 — validatedReproScripts truncation surfaces an omitted-count fact", () => {
+  const scriptsFacts = (rendered: string): Array<{ kind: string; value: string }> =>
+    (parseRendered(rendered).staticFacts as Array<{ kind: string; value: string }>) ?? []
+
+  test("3+ scripts ⇒ an omitted-count fact appears (no silent truncation)", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Some public bug.",
+      ownerEvidence: [],
+      contracts: [],
+      validatedReproScripts: ["print('a')", "print('b')", "print('c')", "print('d')"],
+    })
+    const facts = scriptsFacts(rendered)
+    const omitted = facts.find((f) => f.kind === "validated_public_repro_omitted")
+    expect(omitted).toBeDefined()
+    // 4 scripts, cap of 2 ⇒ 2 omitted.
+    expect(omitted?.value).toContain("Omitted 2 additional")
+    // exactly the capped number of scripts are rendered.
+    expect(facts.filter((f) => f.kind === "validated_public_repro")).toHaveLength(2)
+  })
+
+  test("exactly 2 scripts ⇒ NO omitted-count fact (paired-control: only-N-existed)", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Some public bug.",
+      ownerEvidence: [],
+      contracts: [],
+      validatedReproScripts: ["print('a')", "print('b')"],
+    })
+    expect(scriptsFacts(rendered).some((f) => f.kind === "validated_public_repro_omitted")).toBe(
+      false,
+    )
+  })
+
+  test("1 script ⇒ NO omitted-count fact", () => {
+    const rendered = buildSelectionGenerationPacket({
+      problemStatement: "Some public bug.",
+      ownerEvidence: [],
+      contracts: [],
+      validatedReproScripts: ["print('a')"],
+    })
+    expect(scriptsFacts(rendered).some((f) => f.kind === "validated_public_repro_omitted")).toBe(
+      false,
+    )
+  })
+})
+
+// ── B4: extractSymbolSlice precision (decorators / ambiguity / non-source) ─────
+describe("B4 — extractSymbolSliceResult precision", () => {
+  test("walks BACKWARD over contiguous @decorator lines and includes them", () => {
+    const src = [
+      "import os",
+      "",
+      "@cached",
+      "@register('x')",
+      "def target(a):",
+      "    return a + 1",
+      "",
+      "def other():",
+      "    pass",
+    ].join("\n")
+    const r = extractSymbolSliceResult(src, "target")
+    expect(r.slice).toContain("@cached")
+    expect(r.slice).toContain("@register('x')")
+    expect(r.slice).toContain("def target(a):")
+    expect(r.slice).not.toContain("def other")
+    // back-compat string API also includes the decorators now.
+    expect(extractSymbolSlice(src, "target")).toContain("@cached")
+  })
+
+  test("a blank line between decorator and def BREAKS the decorator chain (bounded)", () => {
+    const src = ["@stale", "", "def target():", "    pass"].join("\n")
+    const r = extractSymbolSliceResult(src, "target")
+    expect(r.slice).toContain("def target():")
+    expect(r.slice).not.toContain("@stale")
+  })
+
+  test("multiple same-name defs ⇒ matchCount>1 (ambiguity is a distinguishable signal)", () => {
+    const src = ["def dup():", "    return 1", "", "def dup():", "    return 2"].join("\n")
+    const r = extractSymbolSliceResult(src, "dup")
+    expect(r.matchCount).toBe(2)
+    expect(r.slice).toContain("return 1") // first match chosen
+  })
+
+  test("single def ⇒ matchCount===1, no ambiguity", () => {
+    const r = extractSymbolSliceResult("def only():\n    return 1\n", "only")
+    expect(r.matchCount).toBe(1)
+  })
+
+  test("decorators stay BOUNDED — a pathological decorator stack never exceeds maxLines", () => {
+    const decos = Array.from({ length: 60 }, (_, i) => `@d${i}`).join("\n")
+    const r = extractSymbolSliceResult(`${decos}\ndef target():\n    pass\n`, "target", 40)
+    expect((r.slice ?? "").split("\n").length).toBeLessThanOrEqual(40)
+    // the def line itself is always retained (closest decorators kept).
+    expect(r.slice).toContain("def target():")
+  })
+
+  test("a decorator at a DIFFERENT indent is not swallowed into the slice", () => {
+    const src = ["class C:", "    @m", "    def target(self):", "        pass"].join("\n")
+    const r = extractSymbolSliceResult(src, "target")
+    expect(r.slice).toContain("@m")
+    expect(r.slice).toContain("def target")
+    expect(r.slice).not.toContain("class C")
+  })
+
+  test("readable source, symbol absent ⇒ miss=not_found (distinguishable channel)", () => {
+    const r = extractSymbolSliceResult("def a():\n    pass\n", "missing")
+    expect(r.slice).toBeUndefined()
+    expect(r.miss).toBe("not_found")
+  })
+
+  test("binary/non-source (NUL byte) ⇒ miss=non_source, NOT conflated with not_found", () => {
+    const binary = `def x():\n${String.fromCharCode(0)}\n`
+    const r = extractSymbolSliceResult(binary, "x")
+    expect(r.slice).toBeUndefined()
+    expect(r.miss).toBe("non_source")
+  })
+
+  test("assembleOwnerEvidence threads the ambiguity + non-source signals into owner facts", () => {
+    const dupSrc = ["def dup():", "    return 1", "", "def dup():", "    return 2"].join("\n")
+    const ambiguous = assembleOwnerEvidence({
+      ownerFiles: ["m.py"],
+      issueSymbols: ["dup"],
+      readSource: () => dupSrc,
+    })
+    expect(ambiguous[0]?.ambiguousSliceMatch).toBe(true)
+
+    const binary = assembleOwnerEvidence({
+      ownerFiles: ["m.py"],
+      issueSymbols: ["dup"],
+      readSource: () => `${String.fromCharCode(0)}garbage`,
+    })
+    expect(binary[0]?.sliceMiss).toBe("non_source")
+  })
+})
+
+// ── B5: owner-test / module-smoke RESULT receipt — result only, command fenced ─
+describe("B5 — ownerTestResultReceipt (result only, command WITHHELD)", () => {
+  test("renders a result state + source policy, NEVER a command", () => {
+    const receipt = ownerTestResultReceipt({ kind: "owner_test", result: "red" })
+    expect(receipt.state).toBe("candidate_red")
+    expect(receipt.source).toBe("owner_test")
+    expect(receipt.sourcePolicy).toBe("official_hidden_withheld")
+    expect(receipt.cmdWithheld).toBe(true)
+    expect(receipt.command).toBeUndefined()
+  })
+
+  test("green result ⇒ candidate_green; infra ⇒ execution_failed; absent ⇒ not_run", () => {
+    expect(ownerTestResultReceipt({ kind: "module_smoke", result: "green" }).state).toBe(
+      "candidate_green",
+    )
+    expect(ownerTestResultReceipt({ kind: "owner_test", result: "infra_failed" }).state).toBe(
+      "execution_failed",
+    )
+    expect(ownerTestResultReceipt({ kind: "owner_test", result: "not_run" }).state).toBe("not_run")
+  })
+
+  test("the receipt renders into a candidate_post_review packet WITHOUT any command text", () => {
+    const receipt = ownerTestResultReceipt({ kind: "owner_test", result: "red" })
+    const rendered = buildCandidatePostReviewPacket({
+      problemStatement: "Owner test fails for the public bug.",
+      candidatePatchHash: "deadbeef",
+      ownerEvidence: [],
+      proofReceipts: [receipt],
+      contracts: [],
+    })
+    expect(rendered).toContain('"state": "candidate_red"')
+    expect(rendered).toContain('"cmdWithheld": true')
+    // C3 fence: the rendered packet must not contain pytest/path selectors.
+    expect(rendered).not.toMatch(/pytest|::|\.py/)
+    // and blindness still holds.
+    expect(() =>
+      assertPacketBlind(
+        buildCandidatePostReviewLlmEvidencePacket({
+          problemStatement: "Owner test fails.",
+          candidatePatchHash: "deadbeef",
+          ownerEvidence: [],
+          proofReceipts: [receipt],
+          contracts: [],
+        }),
+      ),
+    ).not.toThrow()
+  })
+})
+
+// ── B8: typed source-policy class on proof receipts ───────────────────────────
+describe("B8 — ProofReceiptFact source policy is explicit + typed", () => {
+  test("sourcePolicyOf classifies known identifiers; unknown/hard:* ⇒ undefined", () => {
+    expect(sourcePolicyOf("public_mwe")).toBe("public_repro")
+    expect(sourcePolicyOf("discovered_regression")).toBe("public_discovered_test")
+    expect(sourcePolicyOf("repro_consensus")).toBe("public_repro")
+    expect(sourcePolicyOf("selection")).toBe("static")
+    expect(sourcePolicyOf("hard:proofRequiredMissing")).toBeUndefined()
+    expect(sourcePolicyOf("totally-unknown")).toBeUndefined()
+  })
+
+  test("in-file producers emit an explicit typed sourcePolicy", () => {
+    const intake = buildIntakeLlmEvidencePacket({
+      problemStatement: "A public bug in run().",
+      localizeCandidates: ["pkg/x.py"],
+      reproTest: { installed: false, reason: "env prep failed", samples: 0, reproducedCount: 0 },
+    })
+    // env failure ⇒ infra policy (not a public-repro verdict).
+    expect(
+      intake.proofReceipts.some((r) => r.state === "env_prep_failed" && r.sourcePolicy === "infra"),
+    ).toBe(true)
+    // the static issue-seed receipt is public_issue provenance.
+    expect(
+      intake.proofReceipts.some(
+        (r) => r.state === "static_only" && r.sourcePolicy === "public_issue",
+      ),
+    ).toBe(true)
+
+    const gen = buildSelectionGenerationLlmEvidencePacket({
+      problemStatement: "A public bug.",
+      ownerEvidence: [],
+      contracts: [],
+      reproCommand: "python repro.py",
+      baseValidatedRed: true,
+    })
+    expect(gen.proofReceipts[0]?.sourcePolicy).toBe("public_repro")
+  })
+
+  test("sourcePolicy is a CLOSED union: a leaked free string fails the type contract", () => {
+    // A valid typed receipt compiles.
+    const ok: ProofReceiptFact = {
+      source: "public_mwe",
+      sourcePolicy: "public_repro",
+      state: "candidate_red",
+    }
+    expect(ok.sourcePolicy).toBe("public_repro")
+    // B8 TYPE FENCE: a free-string policy must NOT typecheck. The @ts-expect-error
+    // below is itself an assertion — if the union ever reopens to `string`, the
+    // suppressed error disappears and `@ts-expect-error` becomes an UNUSED-directive
+    // compile error, going red at typecheck:tests time.
+    const leaked = {
+      source: "x",
+      // @ts-expect-error — `gold_patch` is not a member of the closed source-policy union.
+      sourcePolicy: "gold_patch" satisfies ProofReceiptSourcePolicy,
+      state: "not_run",
+    }
+    expect(leaked.source).toBe("x")
   })
 })

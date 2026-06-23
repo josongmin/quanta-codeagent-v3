@@ -9,9 +9,27 @@ import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/t
 
 const noWrite: ReproWriteFilePort = async () => {}
 
-/** Exec port that maps each script (in WRITE order) → a canned stdout, so the
- *  test can drive the vote into each verdict deterministically. */
-const makeExec = (stdoutByIndex: readonly string[]): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
+// P1 (pytest-grounded): the verdict comes from pytest's exit code + summary, not
+// a printed sentinel. We keep the legacy intent strings ("Issue resolved" /
+// "Issue reproduced") as the test vocabulary and TRANSLATE each into the pytest
+// exec result `classifyPytest` reads — appending the matching summary (and exit
+// code) while preserving any extra text (e.g. "boom\n...") so failTail
+// assertions on that text still hold.
+const toPytestResult = (intent: string): { code: number; stdout: string; stderr: string } => {
+  if (intent.includes("Issue reproduced")) {
+    return { code: 1, stdout: `${intent}\n1 failed in 0.1s`, stderr: "" }
+  }
+  if (intent.includes("Issue resolved")) {
+    return { code: 0, stdout: `${intent}\n1 passed in 0.1s`, stderr: "" }
+  }
+  return { code: 0, stdout: intent, stderr: "" }
+}
+
+/** Exec port that maps each script (in WRITE order) → a canned pytest result, so
+ *  the test can drive the vote into each verdict deterministically. */
+const makeExec = (
+  stdoutByIndex: readonly string[],
+): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
   const pathToIdx = new Map<string, number>()
   let n = 0
   const writeFile: ReproWriteFilePort = async (path) => {
@@ -21,7 +39,7 @@ const makeExec = (stdoutByIndex: readonly string[]): { exec: ReproExecPort; writ
   const exec: ReproExecPort = async (argv) => {
     const path = argv[argv.length - 1] as string
     const idx = pathToIdx.get(path) ?? 0
-    return { code: 0, stdout: stdoutByIndex[idx] ?? "", stderr: "" }
+    return toPytestResult(stdoutByIndex[idx] ?? "")
   }
   return { exec, writeFile }
 }
@@ -32,17 +50,24 @@ const baseArgs = (): ValidateArgs => ({
   timeoutMs: 1000,
 })
 
-const LOUD_FALLBACK = async (): Promise<ValidatorResult> => ({ ok: false, failTail: "FALLBACK_RAN" })
+const LOUD_FALLBACK = async (): Promise<ValidatorResult> => ({
+  ok: false,
+  failTail: "FALLBACK_RAN",
+})
 
 /** Capturing sink + the validator result, paired so each branch can assert BOTH
  *  the emitted outcome AND that the result is unchanged vs. the no-sink control. */
 const runWithSink = async (
   deps: Parameters<typeof makeReproVoteValidate>[0],
-): Promise<{ result: ValidatorResult; emitted: { outcome: ReproVoteOutcome; detail?: ReproVoteOutcomeDetail }[] }> => {
+): Promise<{
+  result: ValidatorResult
+  emitted: { outcome: ReproVoteOutcome; detail?: ReproVoteOutcomeDetail }[]
+}> => {
   const emitted: { outcome: ReproVoteOutcome; detail?: ReproVoteOutcomeDetail }[] = []
   const validate = makeReproVoteValidate({
     ...deps,
-    recordReproVoteOutcome: (outcome, detail) => emitted.push({ outcome, detail }),
+    recordReproVoteOutcome: (outcome, detail) =>
+      emitted.push({ outcome, ...(detail !== undefined ? { detail } : {}) }),
   })
   const result = await validate(baseArgs())
   return { result, emitted }
@@ -94,7 +119,12 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
   })
 
   it("resolved majority ⇒ emits 'vote_resolved' with the vote tally", async () => {
-    const { exec, writeFile } = makeExec(["Issue resolved", "Issue resolved", "Issue resolved", "Issue reproduced"])
+    const { exec, writeFile } = makeExec([
+      "Issue resolved",
+      "Issue resolved",
+      "Issue resolved",
+      "Issue reproduced",
+    ])
     const { result, emitted } = await runWithSink({
       sources: ["a", "b", "c", "d"],
       exec,
@@ -108,7 +138,11 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
   })
 
   it("reproduced majority ⇒ emits 'vote_unresolved' with the vote tally", async () => {
-    const { exec, writeFile } = makeExec(["boom\nIssue reproduced", "Issue reproduced", "Issue resolved"])
+    const { exec, writeFile } = makeExec([
+      "boom\nIssue reproduced",
+      "Issue reproduced",
+      "Issue resolved",
+    ])
     const { result, emitted } = await runWithSink({
       sources: ["a", "b", "c"],
       exec,
@@ -140,24 +174,33 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
     // resolved
     const resolved = makeExec(["Issue resolved", "Issue resolved"])
     expect(
-      await makeReproVoteValidate({ sources: ["a", "b"], ...resolved, fallback: LOUD_FALLBACK })(baseArgs()),
+      await makeReproVoteValidate({ sources: ["a", "b"], ...resolved, fallback: LOUD_FALLBACK })(
+        baseArgs(),
+      ),
     ).toEqual({ ok: true })
     // reproduced
     const reproduced = makeExec(["Issue reproduced", "Issue reproduced"])
-    const rRepro = await makeReproVoteValidate({ sources: ["a", "b"], ...reproduced, fallback: LOUD_FALLBACK })(
-      baseArgs(),
-    )
+    const rRepro = await makeReproVoteValidate({
+      sources: ["a", "b"],
+      ...reproduced,
+      fallback: LOUD_FALLBACK,
+    })(baseArgs())
     expect(rRepro.ok).toBe(false)
     expect(rRepro.failTail).toContain("Issue reproduced")
     // tie / empty / throw all defer to the loud fallback, unchanged
     const tie = makeExec(["Issue resolved", "Issue reproduced"])
     expect(
-      await makeReproVoteValidate({ sources: ["a", "b"], ...tie, fallback: LOUD_FALLBACK })(baseArgs()),
-    ).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
-    expect(
-      await makeReproVoteValidate({ sources: [], exec: resolved.exec, writeFile: noWrite, fallback: LOUD_FALLBACK })(
+      await makeReproVoteValidate({ sources: ["a", "b"], ...tie, fallback: LOUD_FALLBACK })(
         baseArgs(),
       ),
+    ).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
+    expect(
+      await makeReproVoteValidate({
+        sources: [],
+        exec: resolved.exec,
+        writeFile: noWrite,
+        fallback: LOUD_FALLBACK,
+      })(baseArgs()),
     ).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
   })
 })

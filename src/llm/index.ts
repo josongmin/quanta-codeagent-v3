@@ -77,6 +77,7 @@ export {
 } from "./model-preset"
 export type { ModelCandidate, ModelSwapRetryOptions } from "./model-swap"
 export {
+  buildModelPinnedPort,
   NoAlternateModelError,
   pickNextModel,
   resolveRetryModel,

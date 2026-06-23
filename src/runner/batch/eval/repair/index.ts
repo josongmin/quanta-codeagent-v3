@@ -21,6 +21,8 @@
  * for observability/golden tests. Throws only if `runOnce` itself throws —
  * validator failures are normal and never throw.
  */
+
+import { classifyReproOutcome } from "./repro-outcome"
 import type {
   BuildRepairContextArgs,
   RepairReproOutcome,
@@ -31,7 +33,6 @@ import type {
   RunRepairRoundsResult,
   ValidatorResult,
 } from "./types"
-import { classifyReproOutcome } from "./repro-outcome"
 
 export const runRepairRounds = async (
   args: RunRepairRoundsArgs,
@@ -158,12 +159,25 @@ const validationGateContextOf = (
   args: RunRepairRoundsArgs,
   run: RunOnceResult,
   validator: ValidatorResult,
-): Pick<BuildRepairContextArgs, "validationSource" | "validationCmd" | "validationExitCode"> => {
+): Pick<
+  BuildRepairContextArgs,
+  "validationSource" | "validationCmd" | "validationExitCode" | "validationOutcome"
+> => {
   const exitCode = validator.observed?.exitCode
+  // A3 (producer): forward the validator's OWN classified repro/exec outcome so
+  // the downstream packet builder (`proofStateOf`) can represent an infra/exec
+  // crash as `execution_failed` instead of coercing it to `candidate_red`. The
+  // outcome is taken verbatim from the validator's classification
+  // (`reproOutcomeOf` — prefers the recorded `reproOutcome`, else classifies the
+  // observed stdout/exit code); NOTHING is inferred/thresholded here. Absent ⇒
+  // the consumer falls back to the exit-code path, byte-identical to before.
+  const outcome = reproOutcomeOf(validator)
   const withExit = <T extends { validationSource: RepairValidationSource; validationCmd?: string }>(
     base: T,
-  ): T & { validationExitCode?: number } =>
-    exitCode !== undefined ? { ...base, validationExitCode: exitCode } : base
+  ): T & { validationExitCode?: number; validationOutcome?: RepairReproOutcome } => {
+    const withCode = exitCode !== undefined ? { ...base, validationExitCode: exitCode } : base
+    return outcome !== undefined ? { ...withCode, validationOutcome: outcome } : withCode
+  }
 
   if (args.primaryRailStep !== undefined) {
     return withExit({
@@ -185,6 +199,8 @@ const validationGateContextOf = (
       validationCmd: `python "${reproPath}"`,
     })
   }
+  // No runnable gate ⇒ no proof receipt is produced downstream; do not attach an
+  // outcome to a `none` source (the consumer returns `not_run` regardless).
   return { validationSource: "none" }
 }
 

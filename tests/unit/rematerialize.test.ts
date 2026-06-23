@@ -19,6 +19,7 @@ import {
   applyCandidatePatch,
   buildApplyCommand,
   candidatePatchAppliesCleanly,
+  materializeBuildEnv,
   PINNED_GIT_IDENTITY,
   resetToBase,
   withCandidatePatch,
@@ -371,6 +372,43 @@ describe("primitives", () => {
     expect(result).toBe(false)
   })
 
+  test("materializeBuildEnv fails OPEN (returns false, never throws) on an fs error", async () => {
+    // A FILE as the "sandbox" makes `join(file, "pyproject.toml")` an ENOTDIR
+    // path. prepareProjectEnvSandbox checks existence first (exists→false ⇒
+    // no-op) so this asserts the swallow path is reachable and total: even if the
+    // port threw, materializeBuildEnv must return without propagating.
+    const fileAsDir = join(repo, "keep.txt")
+    let threw = false
+    let result: boolean | undefined
+    try {
+      result = await materializeBuildEnv(fileAsDir, "astropy/astropy")
+    } catch {
+      threw = true
+    }
+    expect(threw).toBe(false)
+    expect(typeof result).toBe("boolean")
+  })
+
+  test("materializeBuildEnv is a no-op (true, no write) for a repo with no build-dep override", async () => {
+    // django has no build-dep override → prepareProjectEnvSandbox no-ops even if
+    // a pyproject is present. materializeBuildEnv must still return true (success,
+    // nothing to do) and leave pyproject untouched.
+    writeFileSync(join(repo, "pyproject.toml"), "[project]\nname='x'\n")
+    const before = readFileSync(join(repo, "pyproject.toml"), "utf8")
+    expect(await materializeBuildEnv(repo, "django/django")).toBe(true)
+    expect(readFileSync(join(repo, "pyproject.toml"), "utf8")).toBe(before)
+  })
+
+  test("materializeBuildEnv injects the astropy block when pyproject exists", async () => {
+    writeFileSync(join(repo, "pyproject.toml"), "[project]\nname='astropy'\n")
+    expect(await materializeBuildEnv(repo, "astropy/astropy")).toBe(true)
+    const after = readFileSync(join(repo, "pyproject.toml"), "utf8")
+    expect(after).toContain("[tool.uv.extra-build-dependencies]")
+    expect(after).toContain("extension-helpers")
+    // the repo's own table is preserved (merge-safe append, not clobber)
+    expect(after).toContain("[project]")
+  })
+
   test("candidatePatchAppliesCleanly distinguishes applies / non-applies / unavailable", async () => {
     const good = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nGOOD\n"))
     const bad =
@@ -401,5 +439,158 @@ describe("primitives", () => {
         timeoutMs: 30_000,
       }),
     ).toBeNull()
+  })
+})
+
+/**
+ * Hellgate teeth for candidate-PROOF build-env materialization (the astropy
+ * proof-oracle gap). REAL git repo carrying a committed `pyproject.toml`, REAL
+ * fs writes by the production node:fs/promises port. The proof oracle runs every
+ * candidate's repro proof through withCandidatePatch; its leading reset wipes any
+ * pyproject materialization, so without re-injection the astropy `uv` build (and
+ * thus the proof) can NEVER succeed. These prove the probe ACTUALLY observes the
+ * re-injected `[tool.uv.extra-build-dependencies]` block.
+ */
+describe("withCandidatePatch — proof build-env materialization (repo set vs undefined)", () => {
+  const PY = "[project]\nname = 'astropy'\nversion = '0.0'\n"
+  const BLOCK = "[tool.uv.extra-build-dependencies]"
+  // Re-commit a pyproject.toml INTO base so the leading resetToBase keeps it
+  // (materialization needs a pyproject present; the harness base has none).
+  const commitPyproject = (): void => {
+    writeFileSync(join(repo, "pyproject.toml"), PY)
+    git("add", "-A")
+    git("commit", "-q", "-m", "add pyproject")
+  }
+  // A SOURCE-ONLY candidate diff (touches foo.txt only — mirrors the real
+  // captured candidate where the env block was stripped before capture).
+  const sourceCandidate = (): string =>
+    diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nfix\n"))
+
+  test("repo=astropy ⇒ the probe OBSERVES the injected build-dep block (red-on-injection)", async () => {
+    commitPyproject()
+    const obs: { py: string } = { py: "" }
+    const ret = await withCandidatePatch({
+      sandbox: repo,
+      patch: sourceCandidate(),
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      repo: "astropy/astropy",
+      probe: async (sb) => {
+        obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        return "probed"
+      },
+    })
+    expect(ret).toBe("probed")
+    // RED-ON-INJECTION: drop the `if (repo) await materializeBuildEnv(...)` call
+    // and the probe sees the bare base pyproject → no block → this fails.
+    expect(obs.py).toContain(BLOCK)
+    expect(obs.py).toContain("extension-helpers")
+    // The candidate's source edit is ALSO present (materialize did not clobber it).
+    expect(readFileSync(join(repo, "foo.txt"), "utf8")).toBe("base\n") // reset after
+  })
+
+  test("repo=undefined ⇒ the probe sees NO block (paired control = byte-identical to before)", async () => {
+    commitPyproject()
+    const obs: { py: string } = { py: "" }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch: sourceCandidate(),
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      // repo intentionally omitted
+      probe: async (sb) => {
+        obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        return null
+      },
+    })
+    // No materialization when repo is undefined → the bare committed pyproject.
+    expect(obs.py).toBe(PY)
+    expect(obs.py.includes(BLOCK)).toBe(false)
+  })
+
+  test("materialize runs AFTER apply: a candidate that EDITS pyproject still gets the block appended", async () => {
+    commitPyproject()
+    // The candidate itself edits pyproject (its own table) — materialize must
+    // append the env block WITHOUT clobbering the candidate's edit, proving the
+    // ordering is apply→materialize (not materialize→apply, which apply'd over it).
+    const candidate = stagedDiffFor(() =>
+      writeFileSync(join(repo, "pyproject.toml"), `${PY}\n[tool.black]\nline-length = 88\n`),
+    )
+    const obs: { py: string } = { py: "" }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch: candidate,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      repo: "astropy/astropy",
+      probe: async (sb) => {
+        obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        return null
+      },
+    })
+    // Candidate's OWN edit survives …
+    expect(obs.py).toContain("[tool.black]")
+    expect(obs.py).toContain("line-length = 88")
+    // … AND the env block is appended on top of it (apply happened first).
+    expect(obs.py).toContain(BLOCK)
+  })
+
+  test("NO LEAK: the trailing reset wipes the block — a SUBSEQUENT capture sees clean base", async () => {
+    commitPyproject()
+    await withCandidatePatch({
+      sandbox: repo,
+      patch: sourceCandidate(),
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      repo: "astropy/astropy",
+      probe: async () => "x",
+    })
+    // After withCandidatePatch returns, the finally-reset has run. The block must
+    // NOT survive into the resting tree (else the next candidate-capture would
+    // leak the env-only mutation into the submitted diff).
+    expect(readFileSync(join(repo, "pyproject.toml"), "utf8")).toBe(PY)
+    expect(readFileSync(join(repo, "pyproject.toml"), "utf8").includes(BLOCK)).toBe(false)
+    expect(git("status", "--porcelain")).toBe("")
+    // Belt-and-braces: a fresh staged-diff capture from this resting tree is empty.
+    expect(execFileSync("git", ["diff", "HEAD"], { cwd: repo, encoding: "utf8" })).toBe("")
+  })
+
+  test("FAIL-OPEN: a materialize throw does NOT crash the probe loop (probe still runs)", async () => {
+    // No pyproject committed AND repo=astropy: prepareProjectEnvSandbox no-ops
+    // (no pyproject). The probe must still run and return its signal — proving the
+    // materialize seam never blocks/crashes the probe even when it does nothing.
+    let probed = false
+    const ret = await withCandidatePatch({
+      sandbox: repo,
+      patch: sourceCandidate(),
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      repo: "astropy/astropy",
+      probe: async () => {
+        probed = true
+        return "ran"
+      },
+    })
+    expect(probed).toBe(true)
+    expect(ret).toBe("ran")
+  })
+
+  test("django (no override) ⇒ clean no-op: probe sees the bare pyproject even with repo set", async () => {
+    commitPyproject()
+    const obs: { py: string } = { py: "" }
+    await withCandidatePatch({
+      sandbox: repo,
+      patch: sourceCandidate(),
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      repo: "django/django",
+      probe: async (sb) => {
+        obs.py = readFileSync(join(sb, "pyproject.toml"), "utf8")
+        return null
+      },
+    })
+    // django has no build-dep override → no block, byte-identical to base.
+    expect(obs.py).toBe(PY)
+    expect(obs.py.includes(BLOCK)).toBe(false)
   })
 })

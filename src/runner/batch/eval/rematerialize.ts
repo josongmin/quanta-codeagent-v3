@@ -31,8 +31,71 @@
  * at base for the next call regardless of how the probe exits.
  */
 
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { type ProjectEnvSandboxFs, prepareProjectEnvSandbox } from "../corpus/project-env"
 import { exec } from "./exec"
+
+/**
+ * Real-fs `ProjectEnvSandboxFs` port (node:fs/promises) for candidate-PROOF
+ * build-env materialization. Mirrors the `snapshotFsPort` in {@link ./snapshot}
+ * byte-for-byte so the proof path and the main-run snapshot path materialize the
+ * SAME way (one materialization semantics, two call sites). The corpus helper is
+ * fs-injected so unit tests inject a fake; production wires the real filesystem
+ * here. */
+const rematerializeFsPort: ProjectEnvSandboxFs = {
+  readFile: (p) => readFile(p, "utf8"),
+  writeFile: (p, c) => writeFile(p, c),
+  exists: async (p) => {
+    try {
+      await readFile(p)
+      return true
+    } catch {
+      return false
+    }
+  },
+}
+
+/**
+ * Candidate-proof build-env materialization (FAIL-OPEN).
+ *
+ * For repos whose build backend imports a dep at BUILD time (e.g. astropy's
+ * `setup.py` does `import extension_helpers`), the candidate's source-only tree
+ * cannot be `uv`-built unless the `[tool.uv.extra-build-dependencies]` table is
+ * present in `pyproject.toml`. The leading `resetToBase` in
+ * {@link withCandidatePatch} (`checkout -f && reset --hard && clean -fdx`) wipes
+ * any pre-existing materialization, so the proof probe would otherwise hit a
+ * build failure for astropy and the proof oracle could NEVER validate an astropy
+ * candidate. This re-injects the block AFTER the candidate patch is applied.
+ *
+ * Insertion ordering rationale (AFTER apply, BEFORE probe):
+ *  - The candidate patch is SOURCE-ONLY — the env block was stripped upstream
+ *    before capture (see project-env `revertProjectEnvSandbox`). It NEVER touches
+ *    `[tool.uv.extra-build-dependencies]`, so materializing AFTER apply is an
+ *    append-at-EOF with no conflict, even if the candidate edits `pyproject.toml`
+ *    elsewhere (its OWN tables survive verbatim).
+ *  - Materializing BEFORE apply would be wiped by nothing (apply doesn't reset),
+ *    but a candidate that edits pyproject could then collide; AFTER-apply is the
+ *    conflict-free order and matches what the probe must build.
+ *
+ * FAIL-OPEN: a materialization throw (fs error, etc.) is swallowed to `false`
+ * exactly like {@link applyCandidatePatch}'s `Bun.write` throw, so the proof loop
+ * degrades to the existing `null`/skip path rather than crashing. The repo-set
+ * caller treats "couldn't materialize" the same as "couldn't re-materialize the
+ * candidate" — never a false-RED rejection.
+ *
+ * No explicit revert is needed: {@link withCandidatePatch}'s trailing `finally`
+ * `resetToBase` (`clean -fdx`) wipes the block, and withCandidatePatch captures
+ * NO diff (it only runs a probe), so the env-only mutation can never leak.
+ */
+export const materializeBuildEnv = async (sandbox: string, repo: string): Promise<boolean> => {
+  try {
+    await prepareProjectEnvSandbox(sandbox, repo, rematerializeFsPort)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Temp patch file written into the sandbox root for `git apply`. Untracked, so
  *  `git clean -fdx` in the reset removes it even if the explicit unlink fails. */
@@ -108,10 +171,20 @@ export const applyCandidatePatch = async (
  * restore the sandbox to base. Returns the probe's result, or `null` when the
  * candidate cannot be faithfully re-materialized (FAIL-OPEN — see module doc).
  *
- * Ordering: reset → apply → probe → (finally) reset. The leading reset is
- * REQUIRED because the shared sandbox arrives dirty (the prior candidate's tree
- * from generation/scoring); without it `git apply` would stack onto a stale
- * worktree and the probe would measure a polluted tree.
+ * Ordering: reset → apply → materialize-build-env → probe → (finally) reset. The
+ * leading reset is REQUIRED because the shared sandbox arrives dirty (the prior
+ * candidate's tree from generation/scoring); without it `git apply` would stack
+ * onto a stale worktree and the probe would measure a polluted tree.
+ *
+ * `repo` (optional): when set, the repo's build-env block
+ * (`[tool.uv.extra-build-dependencies]`) is materialized into `pyproject.toml`
+ * AFTER apply and BEFORE the probe (see {@link materializeBuildEnv}) so the
+ * proof's `uv` build can succeed for repos like astropy whose build backend
+ * imports a dep at build time. `repo` undefined ⇒ byte-identical to before (no
+ * git/fs work added). A repo with no build-dep override (e.g. django) ⇒
+ * `prepareProjectEnvSandbox` no-ops. Materialization is FAIL-OPEN — a throw is
+ * swallowed and the probe still runs (the build may then fail and the probe
+ * returns its own signal); it never escapes this function.
  */
 export const withCandidatePatch = async <T>(args: {
   sandbox: string
@@ -119,14 +192,23 @@ export const withCandidatePatch = async <T>(args: {
   baseCommit: string | undefined
   timeoutMs: number
   probe: (sandbox: string) => Promise<T>
+  /** Optional `owner/name` slug. When set, build-env is materialized after apply
+   *  / before probe so the proof build succeeds for build-time-import repos. */
+  repo?: string
 }): Promise<T | null> => {
-  const { sandbox, patch, baseCommit, timeoutMs, probe } = args
+  const { sandbox, patch, baseCommit, timeoutMs, probe, repo } = args
   if (patch.trim() === "" || baseCommit === undefined) return null
   if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
   if (!(await applyCandidatePatch(sandbox, patch, timeoutMs))) {
     await resetToBase(sandbox, baseCommit, timeoutMs)
     return null
   }
+  // AFTER apply, BEFORE probe: re-inject the build-env block the leading reset
+  // wiped, so the proof build (e.g. astropy `uv run --with-editable .`) succeeds.
+  // FAIL-OPEN — swallowed to `false`, never crashes the probe loop. No explicit
+  // revert: the trailing `finally` reset's `clean -fdx` wipes it and this seam
+  // captures no diff, so the env-only mutation cannot leak.
+  if (repo !== undefined) await materializeBuildEnv(sandbox, repo)
   try {
     return await probe(sandbox)
   } finally {

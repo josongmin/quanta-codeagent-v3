@@ -5,10 +5,27 @@ import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/t
 
 const noWrite: ReproWriteFilePort = async () => {}
 
-/** Exec port that maps each script SOURCE → a canned stdout, keyed by a marker
- *  the test embeds in the source. The argv is `[python, path]`; we recover the
- *  intended outcome from the path's index suffix via the writeFile capture. */
-const makeExec = (stdoutByIndex: readonly string[]): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
+// P1 (pytest-grounded): the verdict comes from pytest's exit code + summary, not
+// a printed sentinel. Keep the legacy intent strings as the test vocabulary and
+// TRANSLATE each into the pytest exec result `classifyPytest` reads — appending
+// the matching summary while preserving extra text (e.g. "boom\n...") so failTail
+// assertions still hold.
+const toPytestResult = (intent: string): { code: number; stdout: string; stderr: string } => {
+  if (intent.includes("Issue reproduced")) {
+    return { code: 1, stdout: `${intent}\n1 failed in 0.1s`, stderr: "" }
+  }
+  if (intent.includes("Issue resolved")) {
+    return { code: 0, stdout: `${intent}\n1 passed in 0.1s`, stderr: "" }
+  }
+  return { code: 0, stdout: intent, stderr: "" }
+}
+
+/** Exec port that maps each script SOURCE → a canned pytest result, keyed by a
+ *  marker the test embeds in the source. The argv is `[python, path]`; we recover
+ *  the intended outcome from the path's index via the writeFile capture. */
+const makeExec = (
+  stdoutByIndex: readonly string[],
+): { exec: ReproExecPort; writeFile: ReproWriteFilePort } => {
   const pathToIdx = new Map<string, number>()
   let n = 0
   const writeFile: ReproWriteFilePort = async (path) => {
@@ -18,7 +35,7 @@ const makeExec = (stdoutByIndex: readonly string[]): { exec: ReproExecPort; writ
   const exec: ReproExecPort = async (argv) => {
     const path = argv[argv.length - 1] as string
     const idx = pathToIdx.get(path) ?? 0
-    return { code: 0, stdout: stdoutByIndex[idx] ?? "", stderr: "" }
+    return toPytestResult(stdoutByIndex[idx] ?? "")
   }
   return { exec, writeFile }
 }
@@ -29,7 +46,10 @@ const baseArgs = (): ValidateArgs => ({
   timeoutMs: 1000,
 })
 
-const LOUD_FALLBACK = async (): Promise<ValidatorResult> => ({ ok: false, failTail: "FALLBACK_RAN" })
+const LOUD_FALLBACK = async (): Promise<ValidatorResult> => ({
+  ok: false,
+  failTail: "FALLBACK_RAN",
+})
 
 describe("makeReproVoteValidate — K-of-N resolved gate", () => {
   it("THE FIX: majority 'Issue resolved' clears the gate even with a brittle minority", async () => {
@@ -55,7 +75,12 @@ describe("makeReproVoteValidate — K-of-N resolved gate", () => {
       "Issue reproduced",
       "Issue resolved",
     ])
-    const validate = makeReproVoteValidate({ sources: ["a", "b", "c"], exec, writeFile, fallback: LOUD_FALLBACK })
+    const validate = makeReproVoteValidate({
+      sources: ["a", "b", "c"],
+      exec,
+      writeFile,
+      fallback: LOUD_FALLBACK,
+    })
     const r = await validate(baseArgs())
     expect(r.ok).toBe(false)
     expect(r.failTail).toContain("Issue reproduced")
@@ -75,7 +100,12 @@ describe("makeReproVoteValidate — K-of-N resolved gate", () => {
 
   it("a tie is inconclusive ⇒ falls back to the legacy gate (does NOT guess)", async () => {
     const { exec, writeFile } = makeExec(["Issue resolved", "Issue reproduced"])
-    const validate = makeReproVoteValidate({ sources: ["a", "b"], exec, writeFile, fallback: LOUD_FALLBACK })
+    const validate = makeReproVoteValidate({
+      sources: ["a", "b"],
+      exec,
+      writeFile,
+      fallback: LOUD_FALLBACK,
+    })
     const r = await validate(baseArgs())
     expect(r).toEqual({ ok: false, failTail: "FALLBACK_RAN" })
   })

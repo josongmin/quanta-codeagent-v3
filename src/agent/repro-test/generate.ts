@@ -4,12 +4,15 @@
  *
  * What this is
  * ============
- * The function builds a single, paper-faithful prompt that asks the model to
- * emit a self-contained Python script that exercises the buggy behaviour and
- * prints EXACTLY one of three sentinels (`"Issue reproduced"` / `"Issue
- * resolved"` / `"Other issues"`). It then runs the LLM `K` times and returns
- * the K raw response strings (after markdown-fence stripping). Selection /
- * execution / outcome classification live in sibling modules.
+ * The function builds a single prompt that asks the model to emit a
+ * self-contained PYTEST test (P1, jun-23): one or more `def test_*` functions
+ * with real `assert`s on the EXPECTED (correct) behaviour, plus a self-driving
+ * footer that runs pytest on the file itself so the process exit code carries
+ * the verdict. There are NO sentinel prints — the verdict is pytest's exit
+ * semantics, which the model cannot author/paraphrase (the fakeability we are
+ * removing). It then runs the LLM `K` times and returns the K raw response
+ * strings (after markdown-fence stripping). Selection / execution / outcome
+ * classification live in sibling modules.
  *
  * Paper deviation table (this file)
  * =================================
@@ -24,8 +27,9 @@
  *       (b) for a deterministic test double, every call returns the same
  *           text — `select.ts` will see them as a unanimous majority.
  *     We accept this trade-off rather than widen the `LLMPort` shape.
- *   - prompt — verbatim from paper §3.3.1, with the explicit `print(...)`
- *     contract enumerated.
+ *   - prompt — adapted from paper §3.3.1: the model emits a PYTEST test (real
+ *     `assert`s + self-driving footer) instead of a sentinel-printing script.
+ *     The exit code is the verdict.
  *
  * Slice posture
  * =============
@@ -50,30 +54,32 @@ export const MAX_SAMPLES = 40
 /** Default per-sample LLM timeout (ms). */
 export const DEFAULT_TIMEOUT_MS = 30_000
 
-/** System prompt — Agentless paper §3.3.1, verbatim semantics. The
- *  print-contract triple is the load-bearing piece; do not edit lightly. */
+/** System prompt — Agentless paper §3.3.1 adapted for pytest (P1). The verdict
+ *  is pytest's exit code, NOT a printed sentinel; the model must write real
+ *  assertions, not narrate a conclusion. */
 const SYSTEM_MSG = [
-  "You are a senior Python engineer writing a single self-contained script that reproduces a reported bug.",
+  "You are a senior Python engineer writing a single self-contained pytest test that reproduces a reported bug.",
   "Reason calmly. Output Python source code ONLY — no explanations, no markdown fences.",
+  "The verdict is decided by pytest's exit code: your assertions FAIL on the buggy code and PASS once it is fixed. Do NOT print a verdict.",
 ].join("\n")
 
 /** Optional grounding block injected when the issue body embeds a confidently
  *  EXECUTABLE Minimal Working Example (extracted fail-closed by
  *  `extractIssueRepro`). The MWE is the issue author's OWN reproduction — it is
- *  known to trigger the bug — but it does NOT print the sentinel markers. We
- *  hand it to the model as the SEED to wrap in the sentinel scaffold (Agentless
- *  §3.3.1 grounding), instead of letting the model guess a reproduction from
- *  prose. Empty/whitespace `mwe` ⇒ no block (byte-identical to the un-grounded
- *  prompt). Returns the lines to splice before the trailing example. Pure. */
+ *  known to trigger the bug — but it is not yet a pytest test. We hand it to the
+ *  model as the SEED to wrap in a `def test_*` with assertions (P1 grounding),
+ *  instead of letting the model guess a reproduction from prose.
+ *  Empty/whitespace `mwe` ⇒ no block (byte-identical to the un-grounded prompt).
+ *  Returns the lines to splice before the trailing example. Pure. */
 const groundingBlock = (mwe: string | undefined): readonly string[] => {
   if (typeof mwe !== "string" || mwe.trim() === "") return []
   return [
     "",
     "# Known reproduction (the issue author's own minimal working example).",
-    "# This code is known to TRIGGER the bug but does NOT yet print the sentinel",
-    "# lines. Build your script AROUND this exact code: keep its imports and the",
-    "# call(s) that trigger the bug, then add the print-contract above so the",
-    "# script prints one of the three sentinel lines. Do NOT invent a different",
+    "# This code is known to TRIGGER the bug. Build your pytest test AROUND this",
+    "# exact code: keep its imports and the call(s) that trigger the bug, then",
+    "# wrap it in a def test_* and assert the EXPECTED (correct) behavior so the",
+    "# assertion FAILS on the current buggy code. Do NOT invent a different",
     "# reproduction — adapt THIS one.",
     "```python",
     mwe,
@@ -103,68 +109,96 @@ const groundingBlock = (mwe: string | undefined): readonly string[] => {
 const hardeningBlock = (): readonly string[] => [
   "",
   "Make this reproduction ADVERSARIAL / HARDENING. A shallow fix that only handles",
-  'the single example in the issue must STILL print "Issue reproduced". Beyond that',
-  "literal example, exercise the cases below that apply to THIS bug:",
+  "the single example in the issue must STILL leave at least one assertion FAILING.",
+  "Beyond that literal example, assert the cases below that apply to THIS bug:",
   "  - boundary / edge values (empty, zero, negative, very large, range limits);",
   "  - inputs that SHOULD be rejected or raise (malformed, out-of-domain): assert",
-  "    they are rejected / None / error, NOT silently accepted;",
+  "    they are rejected / None / raise (use pytest.raises), NOT silently accepted;",
   "  - consistency a correct fix must preserve (a sign or transform applied",
   "    uniformly, round-trip or symmetry equality).",
   "Derive the EXPECTED behavior by reasoning about what a CORRECT fix must do. Do",
   "NOT copy any fix, regex, or patch the issue itself proposes — issue-suggested",
-  "fixes are frequently incomplete. Use several concrete cases and print",
-  '"Issue resolved" ONLY if EVERY case behaves correctly.',
+  "fixes are frequently incomplete. Write several assertions (across one or more",
+  "def test_* functions); pytest passes ONLY if EVERY assertion holds.",
 ]
 
-/** Build the user message. Paper format: issue text + explicit print-contract
- *  + a tiny example so the LLM emits the exact sentinel strings (not
- *  paraphrases like `"the issue was reproduced"`).
+/** The self-driving pytest footer (P1 `python <path>`→pytest bridge). The driver
+ *  invokes a repro as `python <path>`; pytest must drive the assertions. This
+ *  footer runs pytest on the file ITSELF so the process exit code is the verdict.
  *
- *  When `mwe` is a non-empty extracted Minimal Working Example, a grounding
- *  block is spliced in (see {@link groundingBlock}) so the model wraps the
- *  KNOWN-reproducing code in the sentinel scaffold rather than guessing. When
- *  `mwe` is undefined/empty the output is byte-identical to the pre-feature
- *  prompt.
+ *  The `if __name__ == "__main__"` guard is LOAD-BEARING: during pytest's OWN
+ *  collection the module is imported under its test-module name (not "__main__"),
+ *  so the footer is inert then; it fires ONLY under the outer `python <path>`
+ *  call. Without the guard, pytest re-imports the file and the footer recurses
+ *  ("error during collection"), collapsing pass and fail to the same exit code.
+ *  `-p no:cacheprovider` keeps pytest from writing a `.pytest_cache` into the
+ *  repo tree. Verbatim — the classifier depends on this exact shape. */
+const PYTEST_FOOTER = [
+  "",
+  "",
+  'if __name__ == "__main__":',
+  "    import sys, pytest",
+  "    # Self-drive pytest on THIS file so `python <path>` yields a pass/fail",
+  "    # exit code (the execution-grounded verdict). The __main__ guard keeps",
+  "    # this inert during pytest's own collection (see PYTEST_FOOTER docs).",
+  '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
+] as const
+
+/** Build the user message. The model emits a self-contained PYTEST test (P1):
+ *  real `def test_*` functions whose `assert`s encode the EXPECTED (correct)
+ *  behaviour, so they FAIL on the buggy base tree (pytest exit≠0 ⇒ "reproduced")
+ *  and PASS on a correct fix (exit 0 ⇒ "resolved"). The self-driving footer is
+ *  appended so the driver's `python <path>` invocation drives pytest. NO sentinel
+ *  prints — the verdict is pytest's exit code.
+ *
+ *  When `mwe` is a non-empty extracted Minimal Working Example, a grounding block
+ *  is spliced in (see {@link groundingBlock}) so the model wraps the
+ *  KNOWN-reproducing code in a test with assertions rather than guessing. When
+ *  `mwe` is undefined/empty the output is byte-identical to the un-grounded prompt.
  *
  *  `kind` (jun-23 canonical/hardening split) selects the contract:
- *    - `"canonical"` (default): the PLAIN "reproduce the CORE symptom" contract.
- *      The minimal correct fix MUST be able to flip it to "Issue resolved". NO
- *      adversarial over-strictness. This is the submit-gate oracle prompt and is
- *      byte-identical to the legacy un-adversarial prompt.
+ *    - `"canonical"` (default): the PLAIN "assert the CORE symptom" contract. The
+ *      minimal correct fix MUST be able to make the assertion PASS. NO adversarial
+ *      over-strictness. This is the submit-gate oracle prompt.
  *    - `"hardening"`: the {@link hardeningBlock} is spliced in so a shallow
- *      happy-path fix stays RED (#10999 under-fix class). ADVISORY only. */
+ *      happy-path fix leaves at least one assertion failing (#10999 under-fix
+ *      class). ADVISORY only. */
 export const buildReproTestPrompt = (
   issue: string,
   mwe?: string,
   kind: ReproTestKind = "canonical",
 ): string =>
   [
-    "Write a Python script that reproduces the bug described in the issue below.",
+    "Write a self-contained pytest test that reproduces the bug described in the issue below.",
     "",
-    "The script must:",
+    "The test must:",
     "1. Import the project's library code and exercise the buggy behavior described in the issue.",
-    "2. Decide the verdict by comparing the ACTUAL behavior to the EXPECTED behavior",
-    "   stated in the issue (what it should do vs what it currently does).",
+    "2. Define one or more `def test_*()` functions that ASSERT the EXPECTED (correct)",
+    "   behavior stated in the issue (what it SHOULD do). On the current buggy code the",
+    "   assertion FAILS; once the bug is fixed it PASSES. Use plain `assert`, and",
+    "   `pytest.raises(...)` when the correct behavior is to raise.",
     ...(kind === "canonical"
       ? [
-          "   Exercise the issue's CORE symptom only — the single behavior the issue is",
+          "   Assert the issue's CORE symptom only — the single behavior the issue is",
           "   actually about. Do NOT demand secondary / incidental cases; a minimal",
-          '   correct fix of the reported bug must be enough to make it print "Issue',
-          '   resolved".',
+          "   correct fix of the reported bug must be enough to make the test PASS.",
         ]
       : []),
-    "3. Print EXACTLY ONE of these three lines (no other variants):",
-    '   - "Issue reproduced" if the bug is currently present (the issue is NOT fixed)',
-    '   - "Issue resolved"   if the bug appears fixed (ACTUAL matches EXPECTED)',
-    '   - "Other issues"     if the script hits unexpected errors',
+    "3. Do NOT print a verdict. There are NO sentinel strings. The VERDICT is pytest's",
+    "   exit code: a failing assertion means the bug is present; an all-passing run",
+    "   means it is fixed. Let pytest decide — do not catch the assertion or call",
+    "   sys.exit() yourself inside the test body.",
     "",
-    "Reliability (the marker is an automated gate — it MUST be trustworthy):",
-    "  - The marker line MUST be the LAST line the script prints.",
-    "  - Do NOT run further code, assert, raise, or call sys.exit() AFTER printing",
-    "    the marker — let the script exit cleanly (exit code 0). A correct fix that",
-    '    prints "Issue resolved" but then crashes would be misread as still-broken.',
-    "  - Wrap the bug-exercising code in try/except so an unexpected error prints",
-    '    "Other issues" instead of aborting before any marker.',
+    "Reliability (pytest's exit code is the automated gate — it MUST be trustworthy):",
+    "  - Put the bug-exercising code INSIDE the `def test_*` function, not at module",
+    "    top level, so a triggered error is reported as a test failure/error by pytest",
+    "    rather than crashing the import.",
+    "  - Keep the test focused: a real assertion failure is the signal we want, not an",
+    "    unrelated import or setup error.",
+    "  - END THE FILE with EXACTLY this footer (so `python <file>` runs pytest on itself):",
+    '        if __name__ == "__main__":',
+    "            import sys, pytest",
+    '            sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
     ...(kind === "hardening" ? hardeningBlock() : []),
     "",
     "Output only the Python source code. No explanation. No markdown fences.",
@@ -176,16 +210,15 @@ export const buildReproTestPrompt = (
     "# Example output (illustrative — replace with code for THIS issue):",
     "from package import thing",
     "",
-    "try:",
+    "",
+    "def test_handles_bad_input():",
     '    result = thing.do_something("bad input")',
-    "    if result == expected_safe:",
-    '        print("Issue resolved")',
-    "    else:",
-    '        print("Issue reproduced")',
-    "except SomeError:",
-    '    print("Issue reproduced")',
-    "except Exception:",
-    '    print("Other issues")',
+    "    assert result == expected_safe  # FAILS on the buggy code, PASSES once fixed",
+    "",
+    "",
+    'if __name__ == "__main__":',
+    "    import sys, pytest",
+    '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
   ].join("\n")
 
 /** Strip leading / trailing ```fence lines (with optional language tag like
@@ -222,6 +255,32 @@ export const stripMarkdownFences = (raw: string): string => {
   return lines.slice(start, end + 1).join("\n")
 }
 
+/** True when the source already self-drives pytest — i.e. it has BOTH the
+ *  `__main__` guard and a `pytest.main(` call. We require both so we never
+ *  double-append when the model complied, and never mistake a stray
+ *  `pytest.main` inside a helper for a real footer. */
+const hasPytestFooter = (src: string): boolean =>
+  /if\s+__name__\s*==\s*["']__main__["']/.test(src) && /pytest\.main\s*\(/.test(src)
+
+/**
+ * Ensure the P1 `python <path>`→pytest bridge is present (see PYTEST_FOOTER).
+ *
+ * The prompt INSTRUCTS the model to end with the self-driving footer, but the
+ * bridge is load-bearing — without it `python <path>` would just import the test
+ * module and exit 0 (every repro would be a false "resolved"/"unknown"). So we
+ * GUARANTEE it structurally: if the model omitted the footer we append it; if it
+ * complied we leave the source byte-identical. Empty source ⇒ unchanged (the
+ * executor classifies "" as "unknown" without ever running it).
+ *
+ * Exported for direct unit testing. Pure. */
+export const ensurePytestFooter = (src: string): string => {
+  if (typeof src !== "string" || src.trim() === "") return typeof src === "string" ? src : ""
+  if (hasPytestFooter(src)) return src
+  // Trim a single trailing newline so we don't accumulate blank lines, then
+  // splice the footer (which begins with two blank lines for PEP-8 spacing).
+  return `${src.replace(/\n+$/, "")}\n${PYTEST_FOOTER.join("\n")}`
+}
+
 /** Bounds-checked K. Returns 1 for any non-integer / negative / NaN / 0,
  *  caps at `MAX_SAMPLES`. */
 const resolveSamples = (raw: number | undefined): number => {
@@ -253,11 +312,12 @@ const collectTextFromStream = async (iter: AsyncIterable<StreamEvent>): Promise<
 }
 
 /**
- * Run the LLM `K` times to synthesise K Python repro-test candidates.
- * Returns the raw source strings (markdown-fence stripped). On any per-call
+ * Run the LLM `K` times to synthesise K pytest repro-test candidates.
+ * Returns the source strings (markdown-fence stripped, with the self-driving
+ * pytest footer guaranteed via {@link ensurePytestFooter}). On any per-call
  * exception, a `""` source is recorded for that index; the caller's
- * `executeReproTests` will classify a `""` source as `"unknown"` (since
- * Python's empty-script exit is 0 with empty stdout, no marker).
+ * `executeReproTests` will classify a `""` source as `"unknown"` (it is never
+ * executed).
  *
  * Cancellation: between calls, if `signal.aborted` is true we return the
  * partial result. Inside a single call we cannot abort the LLM stream from
@@ -278,7 +338,9 @@ const generateOne = async (
         ? { messages, system: SYSTEM_MSG, tools: [], signal }
         : { messages, system: SYSTEM_MSG, tools: [] }
     const iter = llm.stream(streamInput)
-    return stripMarkdownFences(await collectTextFromStream(iter))
+    // Strip fences, then GUARANTEE the self-driving pytest footer so the
+    // driver's `python <path>` invocation actually runs pytest (P1 bridge).
+    return ensurePytestFooter(stripMarkdownFences(await collectTextFromStream(iter)))
   } catch {
     // Per-call failure → empty source. The caller's executor will classify
     // an empty source as `"unknown"` (no marker) and `select.ts` will

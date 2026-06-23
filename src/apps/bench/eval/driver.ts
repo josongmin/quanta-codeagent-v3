@@ -9,7 +9,7 @@ import type { SessionHost } from "@/kernel/session"
 import type { Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
 import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
-import { makeAdaptiveToolModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
+import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
 import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
 import {
   applyBenchKnobs,
@@ -904,6 +904,11 @@ const runSelectionPhase = async (
     n,
     problemStatement: instance.problemStatement,
     ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+    // jun-23 W2-2 (B1): thread the slice reader + public issue symbols so the
+    // SELECTOR repair packet carries the real owner source slice (engage), not a
+    // path-only stub — mirrors the generation/classic-repair owner evidence.
+    repairReadSource: (rel) => readSandboxSource(sandbox, rel),
+    repairIssueSymbols: extractIssueHint(instance.problemStatement).symbols,
     owners: selectionInputs.owners,
     seeds: selectionInputs.seeds,
     candidateFamilies: selectionInputs.candidateFamilies,
@@ -1141,7 +1146,7 @@ const runAdaptiveAttempt = async (args: {
     intakePacket: initialPacket,
     base: preparedContext.state,
     env: process.env,
-    modelCall: makeAdaptiveToolModelCall({ llm: deps.llm, signal }),
+    modelCall: buildAdaptiveRouterModelCall({ basePort: deps.llm, env: process.env, signal }),
     runPhase: async ({ state, posture }) => {
       const nextPrepared = await prepareAttemptContext(
         instance,

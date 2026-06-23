@@ -3,19 +3,23 @@
  *
  * Agentless paper §3.3.1 absorption. The paper synthesises a Python *test
  * file* (NOT a patch) from the issue text whose role is execution-based
- * ground truth: a candidate fix is correct IFF the test prints
- * "Issue resolved" after the fix is applied.
+ * ground truth. P1 (jun-23) makes the test a real PYTEST test: a candidate fix
+ * is correct IFF the test's assertions PASS under pytest after the fix is
+ * applied (exit 0), and the bug is present IFF they FAIL on the base tree
+ * (pytest exit≠0 / "N failed"). The verdict is pytest's exit semantics, NOT a
+ * model-printed sentinel string (which the model authored and could fake).
  *
  * The paper samples 40 candidates (1 greedy + 39 temp=0.8), executes each on
- * the ORIGINAL repo (no fix applied), filters to those that print
- * "Issue reproduced", normalises the source, and majority-votes the winner.
+ * the ORIGINAL repo (no fix applied), filters to those whose assertions FAIL
+ * (outcome "reproduced"), normalises the source, and majority-votes the winner.
  * We adapt: K=5 default (1 greedy + 4 sample), everything else identical.
  *
  * Surface posture (pure-typed):
  *   - no I/O lives here; the slice's `generate.ts` / `execute.ts` modules do
  *     I/O via injected `LLMPort` and `exec` ports.
  *   - `ReproTestSample.outcome` is a CLOSED discriminated string union; no
- *     "fallback" outcome — if the marker line is absent we record `"unknown"`.
+ *     "fallback" outcome — if pytest collected no test items we record
+ *     `"unknown"`.
  *   - `ReproTestSelection.selected` is `string | null` so a "no sample
  *     reproduced" outcome is loud at the type level (vs an empty string
  *     which a downstream byte-writer would happily serialize).
@@ -82,17 +86,29 @@ export interface ReproTestConfig {
 
 /** Outcome of executing one repro-test candidate on the original repo.
  *
- *   - `"reproduced"` — stdout contained "Issue reproduced" (bug present).
- *   - `"resolved"`   — stdout contained "Issue resolved" (bug already gone;
- *                       rare on the original repo — means the test is wrong
- *                       or the issue already silently fixed by HEAD).
- *   - `"other"`      — stdout contained "Other issues" (script ran but hit
- *                       unexpected error).
- *   - `"exec_failed"`— exec exited non-zero AND none of the marker lines
- *                       appeared. Either timeout (process killed) or hard
- *                       crash.
- *   - `"unknown"`    — exec succeeded (exit=0) but no marker line was found.
- *                       Either prompt malformed or LLM wrote a no-op script.
+ * P1 (jun-23): the verdict is now EXECUTION-GROUNDED — derived from pytest's
+ * process exit code + summary line (`classifyPytest`), NOT a model-printed
+ * sentinel. The union is UNCHANGED; only HOW each value is computed changed, so
+ * downstream consumers (driver, calibration, vote) are byte-stable.
+ *
+ *   - `"reproduced"` — a pytest assertion FAILED on the base tree (summary
+ *                       "N failed"). The bug is present / red. The minimal
+ *                       correct fix should flip this to "resolved".
+ *   - `"resolved"`   — pytest PASSED (summary "N passed", no failures). The
+ *                       expected behaviour held — green. On the ORIGINAL repo
+ *                       this is rare (means the test is wrong or HEAD already
+ *                       fixed it).
+ *   - `"other"`      — pytest itself errored indeterminately (internal/usage
+ *                       error, exit 3/4) — ran, but produced a result distinct
+ *                       from a clean pass/fail. Meaningful, not a catch-all.
+ *   - `"exec_failed"`— the test could not be RUN: a collection / setup /
+ *                       fixture error (summary "N error[s]"), a top-level import
+ *                       crash (project not importable — no summary, exit≠0),
+ *                       syntax error, or a timeout-kill. Infra, NOT a verdict.
+ *   - `"unknown"`    — pytest collected no test items ("no tests ran" / exit 5),
+ *                       or ran cleanly (exit 0) with no test signal at all.
+ *                       Either the prompt was malformed or the LLM emitted a
+ *                       no-op (no `def test_*`).
  *
  * Closed union; matching is exhaustive at every consumer. */
 export type ReproTestOutcome = "reproduced" | "resolved" | "other" | "exec_failed" | "unknown"
@@ -106,12 +122,14 @@ export interface ReproTestSample {
   stdout: string
   /** Stderr from execution. Captured so an `exec_failed` outcome can be
    *  attributed (ModuleNotFoundError ⇒ project not importable in the exec env;
-   *  SyntaxError ⇒ bad LLM script; nothing ⇒ timeout). Empty string when the
-   *  exec port reported no stderr or threw before producing any. */
+   *  SyntaxError ⇒ bad LLM script; nothing ⇒ timeout) AND so `classifyPytest`
+   *  can see a pytest summary that landed on stderr. Empty string when the exec
+   *  port reported no stderr or threw before producing any. */
   stderr?: string
-  /** Outcome inferred from stdout. The last occurrence of a marker wins
-   *  (so a script that says "Issue reproduced" then "Issue resolved" is
-   *  classified `"resolved"`). */
+  /** Outcome derived from pytest exit semantics (exit code + summary line) by
+   *  `classifyPytest` — NOT from a model-printed sentinel. A failing assertion
+   *  ⇒ "reproduced"; a clean pass ⇒ "resolved"; a collection/setup error ⇒
+   *  "exec_failed"; no collected tests ⇒ "unknown". */
   outcome: ReproTestOutcome
   /** jun-23 canonical/hardening split. Defaults to `"canonical"` when the
    *  generator did not tag a kind (back-compat: the legacy single-set path is

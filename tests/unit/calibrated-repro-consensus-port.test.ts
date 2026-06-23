@@ -49,10 +49,24 @@ const goldFix = (): string => {
   return p
 }
 
-// A repro that recognizes the fix: reads the tree, "resolved" iff marker==FIXED.
-const GOOD_REPRO = `print("Issue resolved" if "FIXED" in open("marker.txt").read() else "Issue reproduced")`
-// A BROKEN oracle: NEVER reports resolved, even when the gold fix is applied.
-const BAD_REPRO = `print("Issue reproduced")`
+// P1 (pytest-grounded): a repro is now a pytest test whose verdict is the
+// process EXIT CODE (the self-driving footer runs pytest on the file). The
+// driver invokes it as `python3 <script>`; the footer drives pytest.
+const FOOTER = [
+  "",
+  "",
+  'if __name__ == "__main__":',
+  "    import sys, pytest",
+  '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
+].join("\n")
+
+// A repro that recognizes the fix: PASSES (resolved) iff marker==FIXED, else the
+// assertion FAILS (reproduced). On the buggy base tree it is red; on the gold
+// fix it is green — a TRUSTWORTHY oracle.
+const GOOD_REPRO = `def test_marker():\n    assert "FIXED" in open("marker.txt").read()${FOOTER}`
+// A BROKEN oracle: its assertion ALWAYS fails, so it NEVER reports resolved even
+// when the gold fix is applied (the false-negative the calibration must catch).
+const BAD_REPRO = `def test_always_red():\n    assert False${FOOTER}`
 
 const CAND: Candidate = {
   id: "c0",
@@ -66,11 +80,19 @@ describe("makeCalibratedReproConsensusPort — gold-calibrated fail-open wrapper
   test("BAD oracle (never resolves gold) ⇒ falseNegative ⇒ port FAILS OPEN (null)", async () => {
     const inst = instance()
     inst.goldPatch = goldFix()
-    const { port, calibration } = await makeCalibratedReproConsensusPort(inst, [BAD_REPRO], repo, 60_000)
+    const { port, calibration } = await makeCalibratedReproConsensusPort(
+      inst,
+      [BAD_REPRO],
+      repo,
+      60_000,
+    )
     expect(calibration.available).toBe(true)
     expect(calibration.falseNegative).toBe(true) // oracle rejected the known-correct gold fix
     expect(await port(CAND)).toBeNull() // fail-open: never rejects a candidate
-  })
+    // P3 non-vacuity: this BAD repro is RED on base (it just never resolves), so it
+    // is NOT vacuous — the falseNegative path, not the vacuous path, fires here.
+    expect(calibration.vacuous ?? false).toBe(false)
+  }, 30_000) // P3 added a base-probe ⇒ calibration runs the repro set TWICE (base + gold)
 
   test("GOOD oracle (recognizes gold fix) ⇒ NOT falseNegative ⇒ uses real base scorer", async () => {
     const inst = instance()
@@ -80,7 +102,10 @@ describe("makeCalibratedReproConsensusPort — gold-calibrated fail-open wrapper
     expect(calibration.goldCalibrated).toBe(true)
     expect(calibration.falseNegative).toBe(false) // oracle is trustworthy here
     expect(calibration.goldVotes).toBeGreaterThanOrEqual(calibration.goldK ?? 1)
-  })
+    // P3: a GOOD repro is RED on base (reproduces the bug) ⇒ NOT vacuous.
+    expect(calibration.vacuous ?? false).toBe(false)
+    expect(calibration.baseResolved ?? false).toBe(false)
+  }, 30_000) // P3 added a base-probe ⇒ calibration runs the repro set TWICE (base + gold)
 
   test("empty reproducing set ⇒ CALIBRATION_UNAVAILABLE + null-returning port (no git)", async () => {
     const { port, calibration } = await makeCalibratedReproConsensusPort(
