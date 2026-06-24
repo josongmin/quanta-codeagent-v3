@@ -28,6 +28,7 @@ function feature(code: readonly string[]): Feature {
     configurable: "n-a",
     telemetry_keys: [],
     config_refs: {},
+    surface_integration: { cli: "unknown", web: "unknown", evidence: {}, method: "unverified" },
     purpose: "x",
     evidence: { code: code.slice(), adrs: [], tests: { unit: [], integration: [], contract: [] } },
     knobs: [],

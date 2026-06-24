@@ -418,7 +418,7 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
       return { first, second, trips: state.trips }
     }
     const absent = runCap({})
-    const explicitUndef = runCap({ maxTrips: undefined } as NonNullable<
+    const explicitUndef = runCap({ maxTrips: undefined } as unknown as NonNullable<
       Parameters<typeof decideVerifyGuard>[0]["cfg"]
     >)
     expect(absent.first.block).toBe(true)
@@ -430,7 +430,7 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // A failing verify ran AFTER the edit ⇒ presence is satisfied. Without the
     // must-pass gate, neither config blocks; the explicit-undefined must match.
     const absent = decide(editThenFailingVerify, {})
-    const explicitUndef = decide(editThenFailingVerify, { mustPass: undefined } as Parameters<
+    const explicitUndef = decide(editThenFailingVerify, { mustPass: undefined } as unknown as Parameters<
       typeof decide
     >[1])
     expect(absent.v.block).toBe(false)
@@ -444,7 +444,7 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // A bash command that the default registry recognizes as a real test run.
     const editThenPytest = h({ name: "edit" }, { name: "bash", arg: "pytest tests/test_x.py" })
     const absent = decide(editThenPytest, {})
-    const explicitUndef = decide(editThenPytest, { exactCommands: undefined } as Parameters<
+    const explicitUndef = decide(editThenPytest, { exactCommands: undefined } as unknown as Parameters<
       typeof decide
     >[1])
     // pytest satisfies presence under the default registry ⇒ no block, identical.

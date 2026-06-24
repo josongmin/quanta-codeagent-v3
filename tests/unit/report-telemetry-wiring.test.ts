@@ -13,11 +13,13 @@ import {
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
 } from "@/runner/batch/eval/llm-evidence-packet"
+import type { PerInstanceReport } from "@/runner/batch/report"
 import { buildReport } from "@/runner/batch/report"
 import type {
   GradeBreakdown,
   InstanceResult,
   LlmEvidenceArtifacts,
+  OwnerWideningTelemetry,
   ReproOracleCalibration,
   SelectionTelemetry,
 } from "@/runner/batch/types"
@@ -175,7 +177,13 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
         }),
       ],
     )
-    expect(rep.perInstance[0]?.ownerWidening).toEqual({
+    // `buildReport` (report.ts) folds `ownerWidening` into the per-instance row,
+    // but `PerInstanceReport` does not surface the field on its public type. Read
+    // through the actual emitted shape so this wiring-proof stays type-precise.
+    const row = rep.perInstance[0] as
+      | (PerInstanceReport & { ownerWidening?: OwnerWideningTelemetry })
+      | undefined
+    expect(row?.ownerWidening).toEqual({
       owners: ["pkg/base.py", "pkg/consumer.py"],
       sources: ["repair_escalation", "forward_localize"],
       path: "adaptive_reroute",

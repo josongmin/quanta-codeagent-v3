@@ -243,9 +243,8 @@ describe.skipIf(IS_WIN)("config-migration READ-jail — symlinked source is not 
     // No converted settings item carries the smuggled allow-token. Either the
     // symlinked source is refused (ok:false) OR it is simply absent from the
     // output — in NO case does the outside token surface.
-    const settingsItems = r.converted.filter((c) => c.type === "settings")
-    for (const item of settingsItems) {
-      if (item.ok) {
+    for (const item of r.converted) {
+      if (item.type === "settings" && item.ok) {
         expect(item.value.allow).not.toContain("LEAKED-FROM-OUTSIDE")
       }
     }

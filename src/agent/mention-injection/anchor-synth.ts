@@ -45,6 +45,11 @@
  * this fix closes). The `cwd` itself is exempt from the dot-dir rule — a
  * workspace rooted at a dot-dir (e.g. `cwd = /x/.quanta`) still has its direct
  * files inspected; only dot-prefixed SUBDIRECTORIES are pruned.
+ * Benchmark reproducer scaffolds (`reproduce_issue.py` / `__repro_N_uuid.py`)
+ * are also not legitimate anchors: they are synthetic executable probes copied
+ * into the repo root before the agent runs, not source owner files. Prewarming
+ * pyright on them can burn the full readiness budget while real package source
+ * files are available.
  *
  * A `maxEntries` ceiling (default generous) is a hard NO-THROW backstop against
  * a pathological tree, NOT a tuning knob: it only bounds work, never changes
@@ -150,6 +155,7 @@ const DEFAULT_MAX_ENTRIES = 1_000_000
  *  checkout (dependency trees, VCS metadata) and never legitimately hold the
  *  anchor source file. Fixed names — deterministic, no scoring. */
 const PRUNED_DIR_NAMES: ReadonlySet<string> = new Set(["node_modules", ".git"])
+const REPRO_SCAFFOLD_FILE_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/
 
 /** True when a SUBDIRECTORY named `name` must not be descended into: an
  *  explicit prune name OR a dot-prefixed directory (`.quanta`, `.cache`, …).
@@ -157,6 +163,8 @@ const PRUNED_DIR_NAMES: ReadonlySet<string> = new Set(["node_modules", ".git"])
  *  itself (the root exemption is handled by seeding the queue directly). */
 const isPrunedDirName = (name: string): boolean =>
   PRUNED_DIR_NAMES.has(name) || name.startsWith(".")
+
+const isSyntheticSourceAnchorName = (name: string): boolean => REPRO_SCAFFOLD_FILE_RE.test(name)
 
 /** Mutable walk state threaded through the per-directory scan. `found` maps a
  *  language key to its winning anchor; `inspected` counts entries against the
@@ -214,6 +222,7 @@ const scanDir = (
       if (!isPrunedDirName(entry.name)) subdirs.push(join(dir, entry.name))
       continue
     }
+    if (isSyntheticSourceAnchorName(entry.name)) continue
     const language = extensionToLanguage.get(extname(entry.name).toLowerCase())
     // FIRST file of a language (deterministic order) wins; later files of the
     // same language are ignored.

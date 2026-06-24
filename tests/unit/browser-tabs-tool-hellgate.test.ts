@@ -60,8 +60,8 @@ describe("HELLGATE browser tab tools (Wave B)", () => {
     const ts = toolset({ tabs: true }).tools
     expect(byName(ts, "browser_tab_list").isReadOnly()).toBe(true)
     expect(byName(ts, "browser_tab_switch").isReadOnly()).toBe(false)
-    expect(byName(ts, "browser_tab_switch").hitlTier({ tab: "0" })).toBe("always-confirm")
-    expect(byName(ts, "browser_tab_close").hitlTier({ tab: "0" })).toBe("always-confirm")
+    expect(byName(ts, "browser_tab_switch").hitlTier?.({ tab: "0" })).toBe("always-confirm")
+    expect(byName(ts, "browser_tab_close").hitlTier?.({ tab: "0" })).toBe("always-confirm")
   })
 
   test("TT-04: E2E ref isolation — a tab-1 ref is not_found after switching to tab 2", async () => {

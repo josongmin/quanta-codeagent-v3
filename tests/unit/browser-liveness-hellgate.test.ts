@@ -124,6 +124,12 @@ const flakyPort = () => {
     consoleMessages: async () => ok({ entries: [], dropped: 0 }),
     wait: async () => ok(undefined),
     read: async () => ok({ value: "" }),
+    getBoundingBox: async () => ok({ x: 0, y: 0, w: 0, h: 0, visible: true }),
+    highlight: async () => ok(undefined),
+    newTab: async () => ok({ id: "t-1", url: "about:blank", title: "", active: true }),
+    switchTab: async () => ok({ id: "t-1", url: "about:blank", title: "", active: true }),
+    closeTab: async () => ok(undefined),
+    listTabs: async () => ok([]),
     cdp: async () => ok({}),
     close: async (h) => {
       closed.push(h.id)

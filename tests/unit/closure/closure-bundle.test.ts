@@ -66,7 +66,7 @@ describe("assembleClosureBundle — SSOT", () => {
     // and that admitted owner MUST be one of the assembled evidence candidates
     // (same packet) — red-on-injection if owner were derived from other evidence.
     const candidateFiles = b.evidence.candidates.map((c) => c.file)
-    expect(candidateFiles).toContain(b.owner.owner)
+    expect(candidateFiles).toContain(b.owner.owner!)
   })
 
   test("no repro ⇒ plan rail falls back to owner-near test (not a synth repro)", () => {

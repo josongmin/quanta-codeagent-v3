@@ -85,7 +85,11 @@ describe("maybeRunRepairEscalationFollowup", () => {
     } as never
     let seenWidenedOwners: readonly string[] | undefined
     let phaseRuns = 0
-    const result = await maybeRunRepairEscalationFollowup({
+    const result = await maybeRunRepairEscalationFollowup<{
+      patch: string
+      validated: boolean
+      primaryFalseGreen: boolean
+    }>({
       instance: {} as never,
       deps: {} as never,
       sandbox: "/tmp/sandbox",

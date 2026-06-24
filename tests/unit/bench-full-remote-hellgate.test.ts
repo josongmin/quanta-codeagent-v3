@@ -858,12 +858,12 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
   test("unreadable local dataset fails closed before launch", async () => {
     const datasetPath = join(allocTempDir("bench-full-unreadable-"), "missing.jsonl")
     const { fn, calls } = mockSpawn()
+    const { instanceIds: _omitInstanceIds, ...cfgWithoutInstanceIds } = baseCfg
     await expect(
       createFullRemoteBackend({
-        ...baseCfg,
+        ...cfgWithoutInstanceIds,
         spawn: fn,
         datasetPath,
-        instanceIds: undefined,
         preset: "agentless-v2",
       }).run(),
     ).rejects.toThrow(/could not be read before launch/i)

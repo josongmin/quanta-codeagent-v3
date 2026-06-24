@@ -27,7 +27,7 @@ import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 import "@/runner/knobs/knobs"
 
 const REGISTRY_SNAPSHOT = __snapshotRegistry()
-const DECLARED = new Set(
+const DECLARED = new Set<string>(
   [...CLI_KNOBS, ...KNOB_INVENTORY, ...RUNTIME_CONFIG_KNOBS].map((k) => k.envKey),
 )
 

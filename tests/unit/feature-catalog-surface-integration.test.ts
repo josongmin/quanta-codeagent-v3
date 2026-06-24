@@ -126,9 +126,8 @@ describe("surface_integration — web reachability SSOT anchor", () => {
   ].sort()
 
   test("SI-20: toSessionHostTurnEvent maps exactly the known 7 event tags", () => {
-    expect([...AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES].sort()).toEqual(
-      KNOWN_BRIDGE_EVENTS,
-    )
+    const bridged: string[] = [...AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES]
+    expect(bridged.sort()).toEqual(KNOWN_BRIDGE_EVENTS)
   })
 })
 

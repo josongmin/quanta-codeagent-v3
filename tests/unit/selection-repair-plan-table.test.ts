@@ -19,6 +19,7 @@
  */
 import { describe, expect, it } from "bun:test"
 import type { CandidateVerdict, ResolvedKofNSignal } from "@/agent/verification-bundle"
+import type { ProofReceiptState } from "@/runner/batch/eval/llm-evidence-packet"
 import type { MweProofReceipt } from "@/runner/batch/eval/mwe-proof"
 import {
   hardReasonState,
@@ -51,7 +52,14 @@ const verdict = (reasons: readonly string[], admissible = false): CandidateVerdi
 
 const entry = (candidate: Candidate, over: Partial<ScoredEntry> = {}): ScoredEntry => ({
   candidate,
-  hard: { baseValidatedRed: true, patchProduced: true },
+  hard: {
+    baseValidatedRed: true,
+    patchProduced: true,
+    patchedResolvedKofN: null,
+    regressionGreen: null,
+    smokeGreen: null,
+    applyClean: null,
+  },
   resolvedKofN: null,
   voterQuorum: null,
   verdict: verdict([], false),
@@ -232,7 +240,7 @@ describe("FIX 1 — selectRepairPlan ordered rule table", () => {
 
 describe("FIX 2 — hardReasonState maps from the structured kind", () => {
   // The 7 known reason constants → documented OLD output (characterization).
-  const KNOWN: ReadonlyArray<[string, string]> = [
+  const KNOWN: ReadonlyArray<[string, ProofReceiptState]> = [
     [
       "hard:proofInfraBlocked=true (public proof execution failed; do not treat this as candidate correctness)",
       "execution_failed",

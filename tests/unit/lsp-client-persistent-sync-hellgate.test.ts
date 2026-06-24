@@ -61,7 +61,7 @@ class DispatchProbeClient extends LspClient {
     }
   }
 
-  dispatch(msg: unknown): void {
+  dispatchMessage(msg: unknown): void {
     ;(
       LspClient.prototype as unknown as {
         dispatch: (this: LspClient, input: unknown) => void
@@ -109,7 +109,7 @@ describe("LspClient server-request handshake responses", () => {
       },
     })
     client.installTransport()
-    client.dispatch({
+    client.dispatchMessage({
       jsonrpc: "2.0",
       id: 7,
       method: "workspace/configuration",
@@ -128,7 +128,7 @@ describe("LspClient server-request handshake responses", () => {
   test("workspace/workspaceFolders returns the advertised roots", async () => {
     const client = new DispatchProbeClient({ workspaceFolders: ["/repo", "/repo/pkg"] })
     client.installTransport()
-    client.dispatch({ jsonrpc: "2.0", id: 9, method: "workspace/workspaceFolders" })
+    client.dispatchMessage({ jsonrpc: "2.0", id: 9, method: "workspace/workspaceFolders" })
     expect(client.lastResponse()).toEqual({
       jsonrpc: "2.0",
       id: 9,

@@ -121,7 +121,7 @@ describe("HELLGATE browser bbox + highlight tool — independent gates (Wave A)"
   test("HELL-TBH-05: highlight tool is read-only / no-HITL (cosmetic)", () => {
     const hl = toolByName(toolset({ highlight: true }).tools, "browser_highlight")
     expect(hl.isReadOnly()).toBe(true)
-    expect(hl.hitlTier({ ref: "e1" })).toBe("pre-approval-ok")
+    expect(hl.hitlTier?.({ ref: "e1" })).toBe("pre-approval-ok")
   })
 
   test("HELL-TBH-06: highlight(known) ⇒ ok + reminds to pair with screenshot", async () => {

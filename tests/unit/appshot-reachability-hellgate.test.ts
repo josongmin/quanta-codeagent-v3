@@ -80,6 +80,12 @@ const fakeBrowser = (): BrowserPort & { calls: { navigate: number; screenshot: n
     consoleMessages: async () => err({ kind: "closed" }),
     wait: async () => err({ kind: "closed" }),
     read: async () => err({ kind: "closed" }),
+    getBoundingBox: async () => err({ kind: "closed" }),
+    highlight: async () => err({ kind: "closed" }),
+    newTab: async () => err({ kind: "closed" }),
+    switchTab: async () => err({ kind: "closed" }),
+    closeTab: async () => err({ kind: "closed" }),
+    listTabs: async () => err({ kind: "closed" }),
     cdp: async () => err({ kind: "closed" }),
   } as BrowserPort & { calls: { navigate: number; screenshot: number } }
 }

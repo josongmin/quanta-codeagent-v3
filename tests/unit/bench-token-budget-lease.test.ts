@@ -327,6 +327,6 @@ describe("patch-gen budget lease", () => {
     expect(r.stderr).toContain("ACQUIRED 1")
     expect(r.status).toBeNull()
     expect(r.signal).toBe("SIGTERM")
-    expect(r.error?.code).toBe("ETIMEDOUT")
+    expect((r.error as NodeJS.ErrnoException | undefined)?.code).toBe("ETIMEDOUT")
   })
 })

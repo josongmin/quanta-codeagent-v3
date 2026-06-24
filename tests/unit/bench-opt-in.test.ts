@@ -292,7 +292,7 @@ describe("buildConfig — bench opt-ins wired into AgentConfig", () => {
     // (they're never set), so the compile-time narrowing is itself part of
     // the guard. Cast to a record for the runtime key-absence assertion so a
     // future edit that starts setting them is caught here too.
-    const asRecord = cfg as Record<string, unknown>
+    const asRecord = cfg as unknown as Record<string, unknown>
     expect("store" in asRecord).toBe(false)
     expect("memory" in asRecord).toBe(false)
     expect("embedder" in asRecord).toBe(false)

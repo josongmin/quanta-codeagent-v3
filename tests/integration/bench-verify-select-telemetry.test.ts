@@ -76,6 +76,7 @@ class SequentialEditLLM implements LLMPort {
       const target =
         this.targets[Math.floor((this.solveCalls - 1) / 2)] ??
         this.targets[this.targets.length - 1]
+      if (target === undefined) throw new Error("targets is non-empty by construction")
       yield { type: "tool_use_start", id: `edit-${this.solveCalls}`, name: "edit" }
       yield {
         type: "tool_use_end",

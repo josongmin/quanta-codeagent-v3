@@ -101,6 +101,7 @@ describe("evidence-existence checker — red-on-injection (has teeth)", () => {
       configurable: "n-a",
       telemetry_keys: [],
       config_refs: { env: [], runtime: [], cli: [], prefs: [] },
+      surface_integration: { cli: "unknown", web: "unknown", evidence: {}, method: "unverified" },
       purpose: "x",
       evidence: {
         code: [],

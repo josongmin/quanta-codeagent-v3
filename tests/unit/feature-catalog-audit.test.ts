@@ -29,6 +29,7 @@ function feature(overrides: Partial<Feature> = {}): Feature {
     configurable: "n-a",
     telemetry_keys: [],
     config_refs: {},
+    surface_integration: { cli: "unknown", web: "unknown", evidence: {}, method: "unverified" },
     purpose: "x",
     evidence: {
       code: [],
