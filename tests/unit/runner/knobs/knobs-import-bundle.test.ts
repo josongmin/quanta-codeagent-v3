@@ -47,6 +47,7 @@ import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
+import { pairedControlKnob } from "@/runner/knobs/knobs/paired-control"
 import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
 import { noPatchForceFractionKnob } from "@/runner/knobs/knobs/no-patch-force-fraction"
 import { patchBudgetKnob } from "@/runner/knobs/knobs/patch-budget"
@@ -110,6 +111,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(multiVoterKnob),
   asAnyKnob(mustPassKnob),
   asAnyKnob(networkProxyKnob),
+  asAnyKnob(pairedControlKnob),
   asAnyKnob(noPatchBreakerKnob),
   asAnyKnob(noPatchForceFractionKnob),
   asAnyKnob(patchBudgetKnob),
