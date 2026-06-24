@@ -33,7 +33,7 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
     expect(DRIVER_SRC).toContain("candidatePatchAppliesCleanly")
     expect(DRIVER_SRC).toContain("applyClean: (candidate) =>")
-    expect(APP_DRIVER_SRC).toContain("applyClean: (c) =>")
+    expect(APP_DRIVER_SRC).toContain("applyClean: (candidate) =>")
     expect(DRIVER_SRC).toContain("prepareMweProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("prepareMweProofSelectionPort")
     expect(DRIVER_SRC).toContain("makeDiscoveredRepoRegressionProofPort")
@@ -51,9 +51,10 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain(
       "ports.reproConsensusProof = args.reproConsensusProofSelectionPort",
     )
-    expect(APP_DRIVER_SRC).toContain("mweProof: mweProofSelectionPort")
-    expect(APP_DRIVER_SRC).toContain("publicRegressionProof: publicRegressionProofSelectionPort")
-    expect(APP_DRIVER_SRC).toContain("reproConsensusProof: reproConsensusProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("ports: selectionPorts({")
+    expect(APP_DRIVER_SRC).toContain("mweProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("publicRegressionProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("reproConsensusProofSelectionPort")
     // jun-22: the answer-key `declaredExpected` gold-patch matcher was removed from
     // both drivers (selection-declared-expected.ts deleted). Parity = absent in both.
     expect(DRIVER_SRC).not.toContain("makeDeclaredExpectedSelectionPort")
@@ -73,7 +74,12 @@ describe("runner verify-select and patch-budget driver parity", () => {
     )
     expect(APP_DRIVER_SRC).toContain("latePhaseFailureResultOf({")
     expect(APP_DRIVER_SRC).toContain('verdict: "degraded"')
-    expect(APP_DRIVER_SRC).toContain("...(prepared !== undefined ? { prepared, sandbox } : {})")
+    expect(APP_DRIVER_SRC).toContain("const runInstanceFailureResult =")
+    expect(APP_DRIVER_SRC).toContain("phase: state.phase")
+    expect(APP_DRIVER_SRC).toContain("...preparedFailureContext(state, sandbox)")
+    expect(APP_DRIVER_SRC).toContain(
+      "attachReproVoteOutcomes(runInstanceFailureResult(instance, sandbox, state, error))",
+    )
   })
 
   test("shared late-failure helper preserves prepared-derived diagnostics in the owner", () => {
@@ -114,17 +120,17 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
     expect(APP_DRIVER_SRC).toContain("buildSelectionOwnerEvidence({")
     expect(DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
-    expect(APP_DRIVER_SRC).toContain("const selectionOwnerEvidence = buildSelectionOwnerEvidence({")
+    expect(APP_DRIVER_SRC).toContain("selectionOwnerEvidence: buildSelectionOwnerEvidence({")
     expect(DRIVER_SRC).toContain(
       "const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(",
     )
-    expect(APP_DRIVER_SRC).toContain(
-      "const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(",
-    )
+    expect(APP_DRIVER_SRC).toContain("staticWitnessDiagnostics: staticWitnessLanguageDiagnostics({")
     expect(DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
-    expect(APP_DRIVER_SRC).toContain("buildSelectionGenerationPrompt({")
+    expect(APP_DRIVER_SRC).toContain(
+      "buildSelectionGenerationPrompt(selectionGenerationPromptInput(args, seed))",
+    )
     expect(DRIVER_SRC).toContain("...(args.staticWitnessDiagnostics.length > 0")
-    expect(APP_DRIVER_SRC).toContain("...(staticWitnessDiagnostics.length > 0")
+    expect(APP_DRIVER_SRC).toContain("...(args.staticWitnessDiagnostics.length > 0")
     expect(DRIVER_SRC).toContain("ownerEvidence: args.selectionOwnerEvidence")
     expect(DRIVER_SRC).toContain("selectionGenerationEnvCaveats({")
     expect(APP_DRIVER_SRC).toContain("ownerEvidence: selectionOwnerEvidence")
@@ -137,8 +143,15 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain("advisoryPromptContracts")
     expect(APP_DRIVER_SRC).toContain("selectionAuthorityContracts")
     expect(APP_DRIVER_SRC).toContain("advisoryPromptContracts")
+    expect(DRIVER_SRC).toContain("mergePublicContractBundles(")
+    expect(APP_DRIVER_SRC).toContain("mergePublicContractBundles(")
+    expect(DRIVER_SRC).not.toContain("const mergeAdvisoryStaticWitnessContracts")
+    expect(APP_DRIVER_SRC).not.toContain("const mergeAdvisoryStaticWitnessContracts")
     expect(DRIVER_SRC).not.toContain("const effectivePublicContracts")
     expect(APP_DRIVER_SRC).not.toContain("const effectivePublicContracts")
+    expect(DRIVER_SRC).toContain("publicContracts: selectionAuthorityContracts")
+    expect(APP_DRIVER_SRC).toContain("publicContracts: args.selectionAuthorityContracts")
+    expect(DRIVER_SRC).toContain("promptContracts: advisoryPromptContracts")
   })
 
   test("both drivers use the shared unavailable repro calibration constructor", () => {

@@ -10,6 +10,7 @@ import {
   type Candidate,
   runSelection,
   type SelectionPorts,
+  summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
 
 const fileDiff = (file: string, body = "+    new_guard"): string =>
@@ -394,6 +395,38 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
     expect(entry?.verdict.reasons).toContain(
       "hard:familyCoverageMissing=pkg/backend.py (typed co-change family postcondition not satisfied)",
     )
+  })
+
+  it("CLEAN: family coverage repair records accepted telemetry", async () => {
+    const r = await runSelection({
+      n: 1,
+      seeds: ["initial seed"],
+      candidateFamilies: [multiSiteFamily],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      mode: "clean",
+      ports: {
+        generate: async (_i, seed) =>
+          seed?.includes("Previous attempt missed required family owner files")
+            ? { ...multiSitePatch, id: "cand-0-family-repair" }
+            : smallBaseOnly,
+        applyClean: async () => true,
+      },
+    })
+    expect(r.scored[0]?.candidate.id).toBe("cand-0-family-repair")
+    expect(r.scored[0]?.candidate.familyCoverageRepair).toEqual({
+      attempted: true,
+      accepted: true,
+      reason: "missing_reduced",
+      missingBefore: ["pkg/backend.py"],
+      missingAfter: [],
+    })
+    expect(summarizeSelection(r).candidates[0]?.familyCoverageRepair).toEqual({
+      attempted: true,
+      accepted: true,
+      reason: "missing_reduced",
+      missingBefore: ["pkg/backend.py"],
+      missingAfter: [],
+    })
   })
 
   it("CLEAN: required PUBLIC multi-site contract beats smaller single-site patch", async () => {

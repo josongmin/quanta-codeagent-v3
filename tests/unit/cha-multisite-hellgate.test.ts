@@ -2,14 +2,13 @@
  * ★ CHA multi-site fix-site resolver HELLGATE.
  *
  * Proves (against a REAL python3 AST walk over a django-shaped fixture) that the
- * analyzer surfaces SIBLING override sites of a method via SHARED BASE — the exact
- * capability the measured django-11138 miss needs (model fixed `mysql` backend,
- * missed `oracle`/`sqlite3` siblings that override the same `BaseDatabaseOperations`
- * method).
+ * analyzer surfaces SIBLING override/backend-contract sites via SHARED BASE — the
+ * exact capability the measured django-11138 miss needs (model fixed `mysql`,
+ * missed sibling backend surfaces sharing `BaseDatabaseOperations`).
  *
  * Teeth:
  *   ★ real-python: given mysql's `_convert_field_to_tz`, returns oracle + sqlite3
- *     sites (file+line+class), EXCLUDES the target (mysql) itself.
+ *     backend sites (file+line+class), EXCLUDES the target (mysql) itself.
  *   ★ red-on-injection: a same-named method on a class with NO shared base is
  *     EXCLUDED (it's a false sibling — name match without hierarchy).
  *   ★ no-override base method ⇒ empty (only the base defines it).
@@ -113,6 +112,67 @@ describe("CHA multi-site — real-python sibling resolution [gated on python3]",
           expect(s.cls).toBe("DatabaseOperations")
           expect(s.line).toBeGreaterThan(0)
         }
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
+  test.if(hasPython)(
+    "django backend-contract fallback keeps sqlite3 even when it does not define the exact method",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cha-django-contract-"))
+      try {
+        const be = join(dir, "django", "db", "backends")
+        for (const b of ["base", "mysql", "oracle", "sqlite3"])
+          mkdirSync(join(be, b), { recursive: true })
+        writeFileSync(
+          join(be, "base", "operations.py"),
+          "class BaseDatabaseOperations:\n    pass\n",
+        )
+        writeFileSync(
+          join(be, "mysql", "operations.py"),
+          [
+            "from django.db.backends.base.operations import BaseDatabaseOperations",
+            "class DatabaseOperations(BaseDatabaseOperations):",
+            "    def _convert_field_to_tz(self, field_name, tzname):",
+            "        return field_name",
+            "",
+          ].join("\n"),
+        )
+        writeFileSync(
+          join(be, "oracle", "operations.py"),
+          [
+            "from django.db.backends.base.operations import BaseDatabaseOperations",
+            "class DatabaseOperations(BaseDatabaseOperations):",
+            "    def _convert_field_to_tz(self, field_name, tzname):",
+            "        return field_name",
+            "",
+          ].join("\n"),
+        )
+        writeFileSync(
+          join(be, "sqlite3", "operations.py"),
+          [
+            "from django.db.backends.base.operations import BaseDatabaseOperations",
+            "class DatabaseOperations(BaseDatabaseOperations):",
+            "    def _convert_tzname_to_sql(self, tzname):",
+            "        return tzname",
+            "",
+          ].join("\n"),
+        )
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "django/db/backends/mysql/operations.py",
+          method: "_convert_field_to_tz",
+        })
+        expect(sites.map((s) => s.file).sort()).toEqual([
+          "django/db/backends/oracle/operations.py",
+          "django/db/backends/sqlite3/operations.py",
+        ])
+        expect(sites.find((s) => s.file.includes("oracle"))?.role).toBe("override")
+        expect(sites.find((s) => s.file.includes("sqlite3"))?.role).toBe("backend-contract")
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }

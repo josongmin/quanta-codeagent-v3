@@ -26,6 +26,14 @@ import type {
   PublicRegressionProofState,
 } from "./repo-regression-discovery-adapter"
 
+export interface FamilyCoverageRepairTelemetry {
+  attempted: true
+  accepted: boolean
+  reason: "missing_reduced" | "empty_patch" | "missing_not_reduced" | "generation_failed"
+  missingBefore: readonly string[]
+  missingAfter?: readonly string[]
+}
+
 export interface Candidate {
   /** Stable id (e.g. `cand-0`). */
   id: string
@@ -48,6 +56,8 @@ export interface Candidate {
   familyId?: CandidateFamilyId
   familyReason?: string
   familyOwnerFiles?: readonly string[]
+  /** Eval-only visibility for bounded typed-family coverage repair. */
+  familyCoverageRepair?: FamilyCoverageRepairTelemetry
   /** SCAFF-06 — executable PUBLIC-issue MWE proof receipt for this candidate.
    *  Drives the selector's top authority tier (`patched_green` admit /
    *  `candidate_red` veto; infra/absent = no authority). Absent until a real MWE
@@ -266,6 +276,7 @@ export interface CandidateTelemetry {
   familyReason?: string
   familyOwnerFiles?: readonly string[]
   familyCoverageMissing?: readonly string[]
+  familyCoverageRepair?: FamilyCoverageRepairTelemetry
   requiredContractsSatisfied?: number
   contractsSatisfied?: number
   /** SCAFF-06 — executable public-MWE proof verdict for this candidate

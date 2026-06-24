@@ -230,6 +230,7 @@ export const reproRunArgv = (
   // (measured on the box re-measure: django repros all crashed on `import pytest`).
   return [
     ...buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
+      PYTEST_ADDOPTS: "",
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
       PYTHONNOUSERSITE: "1",
     }),
@@ -239,9 +240,48 @@ export const reproRunArgv = (
   ]
 }
 
+const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
+const shellWord = (s: string): string => (/^[A-Za-z0-9_./:=+-]+$/.test(s) ? s : shellQuote(s))
+
+const djangoRuntestsLabel = (name: string): string => {
+  const unittestStyle = name.match(/^([A-Za-z_]\w*) \(([^)]+)\)$/)
+  if (unittestStyle !== null) return `${unittestStyle[2]}.${unittestStyle[1]}`
+  const parts = name.split("::")
+  const pathPart = parts[0]
+  if (pathPart === undefined) return name
+  const nodeParts = parts.slice(1)
+  if (pathPart.endsWith(".py")) {
+    const modulePath = pathPart
+      .replace(/^tests\//, "")
+      .replace(/\.py$/, "")
+      .replace(/\//g, ".")
+    return [modulePath, ...nodeParts].filter((part) => part.trim() !== "").join(".")
+  }
+  return name
+}
+
+const synthesizeDjangoTestCmd = (
+  names: readonly string[],
+  repo: string,
+  version: string | undefined,
+): string => {
+  const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
+    PYTEST_ADDOPTS: "",
+    PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
+    PYTHONNOUSERSITE: "1",
+  })
+    .map(shellWord)
+    .join(" ")
+  const labels = names.map((name) => shellQuote(djangoRuntestsLabel(name)))
+  return `${prefix} python tests/runtests.py --settings=test_sqlite --parallel=1 ${labels.join(" ")}`
+}
+
 const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   const names = decodeTestNameList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
+  const repo = typeof raw.repo === "string" ? raw.repo : ""
+  const version = typeof raw.version === "string" ? raw.version : undefined
+  if (repo === "django/django") return synthesizeDjangoTestCmd(names, repo, version)
   // FAIL_TO_PASS values vary by repo:
   //   - "tests/test_x.py::test_y"           → pytest node id (use as path)
   //   - "tests/test_x.py::TestClass::test_y" → also a node id
@@ -254,8 +294,6 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   const isNodeIdLike = (n: string): boolean => n.includes("::") || n.includes("/")
   const nodeIds = names.filter(isNodeIdLike)
   const keywords = names.filter((n) => !isNodeIdLike(n))
-  const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
-  const shellWord = (s: string): string => (/^[A-Za-z0-9_./:=+-]+$/.test(s) ? s : shellQuote(s))
   const parts: string[] = []
   for (const n of nodeIds) parts.push(shellQuote(n))
   if (keywords.length > 0) {
@@ -270,9 +308,11 @@ const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   // `setup.py` / `pyproject.toml` so pip resolves transitive deps.
   // First call per (python ver, repo, base commit) pays the build cost;
   // subsequent calls hit uv's cache (~ms).
-  const repo = typeof raw.repo === "string" ? raw.repo : ""
-  const version = typeof raw.version === "string" ? raw.version : undefined
-  const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"]).map(shellWord).join(" ")
+  const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
+    PYTEST_ADDOPTS: "",
+  })
+    .map(shellWord)
+    .join(" ")
   return `${prefix} pytest -x --no-header ${parts.join(" ")}`
 }
 

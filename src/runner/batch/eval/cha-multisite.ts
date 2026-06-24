@@ -5,15 +5,14 @@
  * reliable (reproduces the bug 20/20), but multi-backend bugs still fail because
  * the model writes the CORRECT per-site fix yet MISSES sibling override sites.
  * django-11138 (proven): the model's `mysql/operations.py._convert_field_to_tz`
- * hunk is byte-identical to gold, but oracle + sqlite3 backends — which override
- * the SAME base method with the same bug — were left unfixed, so the (perfect)
- * repro correctly stays RED → empty_patch.
+ * hunk is byte-identical to gold, but sibling backend contract surfaces were
+ * left unfixed, so the (perfect) repro correctly stays RED → empty_patch.
  *
  * LSP `references` does not surface "every override of an abstract method across
  * subclasses". This module does: a whole-repo class-hierarchy analysis (CHA) that,
- * given a method the agent localized, returns the SIBLING override sites — classes
- * that share a base with the target's class AND define the same method. A steer
- * then tells the agent to apply the same fix to each.
+ * given a method the agent localized, returns SIBLING override sites plus narrow
+ * Django backend contract sibling files that share the same base class. A steer
+ * then tells the agent to inspect each sibling surface.
  *
  * NOT answer-key: this reads ONLY the candidate repo's own class structure. The
  * gold patch / its file list is never consulted. Pure static analysis.
@@ -36,10 +35,14 @@ export type ChaExec = (
 export interface SiblingOverrideSite {
   /** Repo-relative path of the file defining the sibling override. */
   readonly file: string
-  /** 1-based line of the `def <method>`. */
+  /** 1-based line of the `def <method>` or the owning backend contract class. */
   readonly line: number
   /** Class that owns the sibling override. */
   readonly cls: string
+  /** Method at the site when it differs from or is more specific than the target method. */
+  readonly method?: string
+  /** Why this site was selected. */
+  readonly role?: "override" | "backend-contract"
 }
 
 /**
@@ -49,13 +52,13 @@ export interface SiblingOverrideSite {
  * are skipped; no target class (method not found in targetRelFile) ⇒ empty sites.
  *
  * Sibling rule (deliberately conservative — shared BASE, not name-match): a class
- * C is a sibling iff C defines a method named `method` AND C's base-name set
- * intersects the target class's base-name set. So mysql/oracle/sqlite3
- * `DatabaseOperations` (all `(BaseDatabaseOperations)`) are siblings, but an
- * unrelated `Foo._convert_field_to_tz` with no shared base is NOT. The target
- * class itself is excluded from its own sibling list.
+ * C is a sibling iff C defines a method named `method` AND C's ancestor set
+ * intersects the target class's ancestor set. Django backend files also get a
+ * narrow same-file-family fallback so equivalent contract surfaces with different
+ * helper names are still inspected. The target class itself is excluded from its
+ * own sibling list.
  */
-export const CHA_ANALYZER_PY = String.raw`
+export const CHA_ANALYZER_PY = `
 import ast, json, os, sys
 
 repo, target_rel, method = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -182,6 +185,7 @@ if target is None:
             target = qid; break
 
 sites = []
+site_keys = set()
 if target is not None:
     tanc = ancestors(target)
     for qid, c in classes.items():
@@ -189,7 +193,25 @@ if target is not None:
             continue
         # sibling iff ancestor sets share a class IDENTITY (transitive)
         if tanc and (ancestors(qid) & tanc):
-            sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"]})
+            site_keys.add((c["file"], c["line"]))
+            sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"], "method": method, "role": "override"})
+
+    parts = target_rel.split("/")
+    if len(parts) >= 5 and parts[0:3] == ["django", "db", "backends"]:
+        backend_file = parts[-1]
+        for qid, c in classes.items():
+            cparts = c["file"].split("/")
+            if qid == target or len(cparts) != len(parts):
+                continue
+            if cparts[0:3] != ["django", "db", "backends"] or cparts[-1] != backend_file:
+                continue
+            if c["file"] == target_rel or not tanc or not (ancestors(qid) & tanc):
+                continue
+            key = (c["file"], c["line"])
+            if key in site_keys:
+                continue
+            site_keys.add(key)
+            sites.append({"file": c["file"], "line": c["line"], "cls": c["cls"], "role": "backend-contract"})
 
 sites.sort(key=lambda s: (s["file"], s["line"]))
 print(json.dumps({
@@ -205,7 +227,7 @@ print(json.dumps({
  * inside a function/method body (or the file failed to parse). The smallest
  * enclosing span wins so nested defs/lambdas do not mask the true owner.
  */
-export const METHOD_AT_LINE_PY = String.raw`
+export const METHOD_AT_LINE_PY = `
 import ast, json, os, sys
 
 repo, target_rel, raw_line = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -294,24 +316,46 @@ export const findEnclosingPythonMethod = async (args: {
 /** Single-quote a shell arg (safe for paths/identifiers). */
 const shArg = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const siteRoleOf = (role: unknown): SiblingOverrideSite["role"] | undefined =>
+  role === "override" || role === "backend-contract" ? role : undefined
+
+const siteMethodOf = (method: unknown): string | undefined =>
+  typeof method === "string" && method.trim() !== "" ? method : undefined
+
+const siblingSiteOf = (value: unknown): SiblingOverrideSite | undefined => {
+  if (!isRecord(value)) return undefined
+  const { file, line, cls, method, role } = value
+  if (typeof file !== "string" || typeof line !== "number" || typeof cls !== "string") {
+    return undefined
+  }
+  const parsedMethod = siteMethodOf(method)
+  const parsedRole = siteRoleOf(role)
+  return {
+    file,
+    line,
+    cls,
+    ...(parsedMethod !== undefined ? { method: parsedMethod } : {}),
+    ...(parsedRole !== undefined ? { role: parsedRole } : {}),
+  }
+}
+
+const parseChaSites = (value: unknown): readonly SiblingOverrideSite[] => {
+  if (!isRecord(value)) return []
+  const sites = value.sites
+  if (!Array.isArray(sites)) return []
+  return sites.flatMap((site) => {
+    const parsed = siblingSiteOf(site)
+    return parsed === undefined ? [] : [parsed]
+  })
+}
+
 /** Parse the analyzer's JSON stdout into sibling sites. Tolerant: malformed ⇒ []. */
 export const parseChaStdout = (stdout: string): readonly SiblingOverrideSite[] => {
   try {
-    const obj = JSON.parse(stdout.trim()) as unknown
-    if (typeof obj !== "object" || obj === null) return []
-    const sites = (obj as { sites?: unknown }).sites
-    if (!Array.isArray(sites)) return []
-    const out: SiblingOverrideSite[] = []
-    for (const s of sites) {
-      if (typeof s !== "object" || s === null) continue
-      const file = (s as { file?: unknown }).file
-      const line = (s as { line?: unknown }).line
-      const cls = (s as { cls?: unknown }).cls
-      if (typeof file === "string" && typeof line === "number" && typeof cls === "string") {
-        out.push({ file, line, cls })
-      }
-    }
-    return out
+    return parseChaSites(JSON.parse(stdout.trim()) as unknown)
   } catch {
     return []
   }
@@ -340,9 +384,12 @@ export const buildMultisiteSteer = (
   sites: readonly SiblingOverrideSite[],
 ): string | undefined => {
   if (sites.length === 0) return undefined
-  const lines = sites.map((s) => `  - ${s.file}:${s.line}  (${s.cls}.${method})`)
+  const lines = sites.map((s) => {
+    const owner = s.method === undefined ? `${s.cls} backend contract` : `${s.cls}.${s.method}`
+    return `  - ${s.file}:${s.line}  (${owner})`
+  })
   return [
-    `MULTI-SITE FIX: \`${method}\` is overridden by sibling classes that share a base.`,
+    `MULTI-SITE FIX: \`${method}\` participates in a sibling override/backend contract family.`,
     `Inspect every sibling override below before stopping at one backend.`,
     `If the shared contract is broken, confirm which sibling overrides exhibit the`,
     `same bug and apply the equivalent change only to those proven sites:`,

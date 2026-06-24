@@ -120,6 +120,7 @@ export type {
   CandidateTelemetry,
   CounterfactualTelemetry,
   DerivedCandidateStructuralRepair,
+  FamilyCoverageRepairTelemetry,
   ResolvedKofNMode,
   ScoredEntry,
   SelectionNoWinnerReason,
@@ -140,6 +141,7 @@ export type {
 import type {
   Candidate,
   CounterfactualTelemetry,
+  FamilyCoverageRepairTelemetry,
   RepairFeedbackStopReason,
   ResolvedKofNMode,
   ScoredEntry,
@@ -430,6 +432,14 @@ const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate =>
   familyOwnerFiles: family.ownerFiles,
 })
 
+const withFamilyCoverageRepairTelemetry = (
+  candidate: Candidate,
+  repair: FamilyCoverageRepairTelemetry,
+): Candidate => ({
+  ...candidate,
+  familyCoverageRepair: repair,
+})
+
 const familyCoverageRepairSeed = (
   seed: string | undefined,
   family: CandidateFamily,
@@ -464,12 +474,41 @@ const maybeRepairFamilyCoverage = async (
       familyCoverageRepairSeed(seed, family, missing),
     )
     const repairedMissing = candidateFamilyCoverageMissing(family, repaired.files)
-    if (repaired.patch.trim() === "" || repairedMissing.length >= missing.length) {
-      return candidateWithFamily
+    if (repaired.patch.trim() === "") {
+      return withFamilyCoverageRepairTelemetry(candidateWithFamily, {
+        attempted: true,
+        accepted: false,
+        reason: "empty_patch",
+        missingBefore: missing,
+        missingAfter: repairedMissing,
+      })
     }
-    return withFamily(withCandidateAdvisoryContracts(repaired, advisoryContracts), family)
+    if (repairedMissing.length >= missing.length) {
+      return withFamilyCoverageRepairTelemetry(candidateWithFamily, {
+        attempted: true,
+        accepted: false,
+        reason: "missing_not_reduced",
+        missingBefore: missing,
+        missingAfter: repairedMissing,
+      })
+    }
+    return withFamilyCoverageRepairTelemetry(
+      withFamily(withCandidateAdvisoryContracts(repaired, advisoryContracts), family),
+      {
+        attempted: true,
+        accepted: true,
+        reason: "missing_reduced",
+        missingBefore: missing,
+        missingAfter: repairedMissing,
+      },
+    )
   } catch {
-    return candidateWithFamily
+    return withFamilyCoverageRepairTelemetry(candidateWithFamily, {
+      attempted: true,
+      accepted: false,
+      reason: "generation_failed",
+      missingBefore: missing,
+    })
   }
 }
 

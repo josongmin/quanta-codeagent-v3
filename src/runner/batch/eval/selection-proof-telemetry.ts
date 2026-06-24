@@ -242,6 +242,9 @@ const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
       ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
       : {}),
     ...(familyCoverage.length === 0 ? {} : { familyCoverageMissing: familyCoverage }),
+    ...(s.candidate.familyCoverageRepair !== undefined
+      ? { familyCoverageRepair: s.candidate.familyCoverageRepair }
+      : {}),
     requiredContractsSatisfied: s.requiredContractsSatisfied,
     contractsSatisfied: s.contractsSatisfied,
     ...(s.candidate.mweReceipt !== undefined ? { mwe: s.candidate.mweReceipt.state } : {}),

@@ -31,6 +31,7 @@ describe("reproRunArgv", () => {
     expect(argv[argv.length - 1]).toBe("/sandbox/__repro_0.py")
     expect(argv[argv.length - 2]).toBe("-s")
     expect(argv[argv.length - 3]).toBe("python")
+    expect(hasEnvAssign(argv, "PYTEST_ADDOPTS=")).toBe(true)
     expect(hasEnvAssign(argv, "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1")).toBe(true)
     expect(hasEnvAssign(argv, "PYTHONNOUSERSITE=1")).toBe(true)
   })

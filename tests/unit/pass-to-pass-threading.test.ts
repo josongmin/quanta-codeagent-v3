@@ -9,14 +9,15 @@
  * the regression signal stays FAIL-OPEN).
  */
 import { describe, expect, test } from "bun:test"
-import { parseTestNameList, toInstance } from "@/runner/batch/corpus/dataset"
 import type { SwebenchTask } from "@/runner/batch/corpus/dataset"
+import { parseTestNameList, toInstance } from "@/runner/batch/corpus/dataset"
 
 const taskWith = (raw: Record<string, unknown>): SwebenchTask => ({
   instanceId: "sympy__sympy-17630",
   repo: "sympy/sympy",
   baseCommit: "deadbeef",
-  problemStatement: typeof raw.problem_statement === "string" ? raw.problem_statement : "fix the bug",
+  problemStatement:
+    typeof raw.problem_statement === "string" ? raw.problem_statement : "fix the bug",
   raw,
 })
 
@@ -56,19 +57,16 @@ describe("parseTestNameList", () => {
     expect(parseTestNameList({ PASS_TO_PASS: "[]" }, "PASS_TO_PASS")).toBeUndefined()
   })
   test("all-blank array ⇒ undefined", () => {
-    expect(parseTestNameList({ PASS_TO_PASS: JSON.stringify(["", "  "]) }, "PASS_TO_PASS")).toEqual([
-      "  ",
-    ])
+    expect(parseTestNameList({ PASS_TO_PASS: JSON.stringify(["", "  "]) }, "PASS_TO_PASS")).toEqual(
+      ["  "],
+    )
     // (whitespace-only is a non-empty string — kept; only length-0 is dropped)
   })
 })
 
 describe("toInstance — PASS_TO_PASS threading", () => {
   test("present ⇒ swebench.passToPass populated", () => {
-    const inst = toInstance(
-      taskWith({ PASS_TO_PASS: JSON.stringify(["t1", "t2"]) }),
-      "/tmp/repo",
-    )
+    const inst = toInstance(taskWith({ PASS_TO_PASS: JSON.stringify(["t1", "t2"]) }), "/tmp/repo")
     expect(inst.swebench?.passToPass).toEqual(["t1", "t2"])
   })
 
@@ -105,6 +103,7 @@ describe("toInstance — PASS_TO_PASS threading", () => {
     expect(inst.testCmd).toContain("--with pytest")
     expect(inst.testCmd).toContain("--with setuptools")
     expect(inst.testCmd).toContain("--no-project")
+    expect(inst.testCmd).toContain("PYTEST_ADDOPTS=")
     expect(inst.testCmd).toContain("--with-editable . pytest -x --no-header")
   })
 
@@ -131,11 +130,42 @@ describe("toInstance — PASS_TO_PASS threading", () => {
         raw: {
           repo: "pydata/xarray",
           version: "0.12",
-          FAIL_TO_PASS: JSON.stringify(["xarray/tests/test_variable.py::TestAsCompatibleData::test_unsupported_type"]),
+          FAIL_TO_PASS: JSON.stringify([
+            "xarray/tests/test_variable.py::TestAsCompatibleData::test_unsupported_type",
+          ]),
         },
       },
       "/tmp/repo",
     )
     expect(inst.testCmd).toContain("--with 'numpy<2'")
+  })
+
+  test("django testCmd uses Django's runtests labels instead of raw pytest collection", () => {
+    const inst = toInstance(
+      {
+        instanceId: "django__django-11138",
+        repo: "django/django",
+        baseCommit: "deadbeef",
+        problemStatement: "fix the bug",
+        raw: {
+          repo: "django/django",
+          version: "3.0",
+          FAIL_TO_PASS: JSON.stringify([
+            "test_query_convert_timezones (timezones.tests.NewDatabaseTests)",
+            "tests/backends/base/test_client.py::SimpleDatabaseClientTests::test_runshell_use_environ",
+          ]),
+        },
+      },
+      "/tmp/repo",
+    )
+    expect(inst.testCmd).toContain("PYTEST_ADDOPTS=")
+    expect(inst.testCmd).toContain("python tests/runtests.py --settings=test_sqlite --parallel=1")
+    expect(inst.testCmd).toContain(
+      "'timezones.tests.NewDatabaseTests.test_query_convert_timezones'",
+    )
+    expect(inst.testCmd).toContain(
+      "'backends.base.test_client.SimpleDatabaseClientTests.test_runshell_use_environ'",
+    )
+    expect(inst.testCmd).not.toContain("pytest -x --no-header")
   })
 })

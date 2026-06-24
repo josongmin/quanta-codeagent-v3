@@ -103,6 +103,7 @@ import {
   buildMultisiteSteer,
   findEnclosingPythonMethod,
   findSiblingOverrideSites,
+  type SiblingOverrideSite,
 } from "./cha-multisite"
 import {
   buildClosureSession,
@@ -148,7 +149,10 @@ import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
+import {
+  buildCleanSelectionAuthorityContracts,
+  mergePublicContractBundles,
+} from "./public-contract-bundle"
 import type { PublicContractBundle } from "./public-contract-types"
 import { renderContractAuthorityLabel } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
@@ -1171,14 +1175,16 @@ const runScopedLocalize = async (args: {
   return result?.ok === true ? result.output : undefined
 }
 
-const resolveLocalizedPythonMethod = async (args: {
+const resolveLocalizedPythonMethods = async (args: {
   readonly sandbox: string
   readonly targetRelFile: string
   readonly query: string
-}): Promise<string | undefined> => {
-  if (!args.targetRelFile.endsWith(".py")) return undefined
+}): Promise<readonly string[]> => {
+  if (!args.targetRelFile.endsWith(".py")) return []
   const output = await runScopedLocalize(args)
-  if (output === undefined) return undefined
+  if (output === undefined) return []
+  const methods: string[] = []
+  const seen = new Set<string>()
   for (const line of parseLocalizeRankedLines(output)) {
     const method = await findEnclosingPythonMethod({
       exec,
@@ -1187,9 +1193,46 @@ const resolveLocalizedPythonMethod = async (args: {
       line,
       timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
     })
-    if (method !== undefined) return method
+    if (method === undefined || seen.has(method)) continue
+    seen.add(method)
+    methods.push(method)
   }
-  return undefined
+  return methods
+}
+
+const betterChaSteerCandidate = (
+  left: { method: string; sites: readonly SiblingOverrideSite[] } | undefined,
+  right: { method: string; sites: readonly SiblingOverrideSite[] },
+): { method: string; sites: readonly SiblingOverrideSite[] } => {
+  if (left === undefined) return right
+  if (right.sites.length !== left.sites.length) {
+    return right.sites.length > left.sites.length ? right : left
+  }
+  const rightOverrides = right.sites.filter((site) => site.role !== "backend-contract").length
+  const leftOverrides = left.sites.filter((site) => site.role !== "backend-contract").length
+  if (rightOverrides !== leftOverrides) return rightOverrides > leftOverrides ? right : left
+  return left
+}
+
+const bestChaSteerCandidateForFile = async (args: {
+  readonly sandbox: string
+  readonly targetRelFile: string
+  readonly query: string
+}): Promise<{ method: string; sites: readonly SiblingOverrideSite[] } | undefined> => {
+  const methods = await resolveLocalizedPythonMethods(args)
+  let best: { method: string; sites: readonly SiblingOverrideSite[] } | undefined
+  for (const method of methods) {
+    const sites = await findSiblingOverrideSites({
+      exec,
+      repoRoot: args.sandbox,
+      targetRelFile: args.targetRelFile,
+      method,
+      timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
+    })
+    if (sites.length === 0) continue
+    best = betterChaSteerCandidate(best, { method, sites })
+  }
+  return best
 }
 
 const resolveChaMultisiteSteer = async (args: {
@@ -1206,23 +1249,15 @@ const resolveChaMultisiteSteer = async (args: {
     .filter((file) => file.endsWith(".py"))
     .slice(0, CHA_MULTISITE_MAX_FILES)
   for (const targetRelFile of candidates) {
-    const method = await resolveLocalizedPythonMethod({
+    const best = await bestChaSteerCandidateForFile({
       sandbox: args.sandbox,
       targetRelFile,
       query,
     })
-    if (method === undefined) continue
-    const steer = buildMultisiteSteer(
-      method,
-      await findSiblingOverrideSites({
-        exec,
-        repoRoot: args.sandbox,
-        targetRelFile,
-        method,
-        timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
-      }),
-    )
-    if (steer !== undefined) return steer
+    if (best !== undefined) {
+      const steer = buildMultisiteSteer(best.method, best.sites)
+      if (steer !== undefined) return steer
+    }
   }
   return undefined
 }
@@ -1621,6 +1656,7 @@ export const prepareSelectionReproSources = async (
   deps: Omit<PrepareReproTestDeps, "llm" | "adversarial"> = {},
 ): Promise<{
   readonly telemetry: BenchReproTestTelemetry | undefined
+  readonly hint: string | undefined
   /** CANONICAL reproducing sources — the submit-gate oracle set. */
   readonly reproSources: readonly string[]
   /** Advisory HARDENING reproducing sources — tie-break / repair seeding only. */
@@ -1628,7 +1664,7 @@ export const prepareSelectionReproSources = async (
 }> => {
   const reproK = selectionReproPrepK(posture)
   if (reproK === undefined)
-    return { telemetry: undefined, reproSources: [], hardeningReproSources: [] }
+    return { telemetry: undefined, hint: undefined, reproSources: [], hardeningReproSources: [] }
   const detail = await prepareReproTestDetailed(instance, sandbox, reproK, {
     ...deps,
     llm,
@@ -1637,10 +1673,42 @@ export const prepareSelectionReproSources = async (
       ? { reproExecTimeoutMs: posture.reproExecTimeoutMs }
       : {}),
   })
-  return {
-    telemetry: detail.telemetry,
-    reproSources: reproducingReproSources(detail.selection),
-    hardeningReproSources: reproducingHardeningSources(detail.selection),
+  const reproSources = reproducingReproSources(detail.selection)
+  const hardeningReproSources = reproducingHardeningSources(detail.selection)
+  if (detail.selection?.selected === null || detail.selection?.selected === undefined) {
+    return {
+      telemetry: detail.telemetry,
+      hint: undefined,
+      reproSources,
+      hardeningReproSources,
+    }
+  }
+  const path = `${sandbox}/${REPRO_FILE_NAME}`
+  try {
+    const writeFile =
+      deps.writeFile ??
+      (async (p: string, c: string): Promise<void> => {
+        await Bun.write(p, c)
+      })
+    await writeFile(path, detail.selection.selected)
+    return {
+      telemetry: {
+        installed: true,
+        path,
+        samples: detail.selection.samples.length,
+        reproducedCount: detail.selection.reproducedCount,
+      },
+      hint: REPRO_HINT_MESSAGE,
+      reproSources,
+      hardeningReproSources,
+    }
+  } catch {
+    return {
+      telemetry: writeFailedTelemetry(detail.telemetry),
+      hint: undefined,
+      reproSources,
+      hardeningReproSources,
+    }
   }
 }
 
@@ -2946,23 +3014,6 @@ export const selectionGenerationEnvCaveats = (args: {
   }
 }
 
-const mergeAdvisoryStaticWitnessContracts = (
-  publicContracts: PublicContractBundle | undefined,
-  staticWitnessContracts: ReturnType<typeof buildStaticWitnessContracts>,
-): PublicContractBundle | undefined => {
-  if (staticWitnessContracts.length === 0) return publicContracts
-  return {
-    contracts: [
-      ...new Map(
-        [...(publicContracts?.contracts ?? []), ...staticWitnessContracts].map((contract) => [
-          contract.contractId,
-          contract,
-        ]),
-      ).values(),
-    ],
-  }
-}
-
 const buildSelectionStructuralPlan = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -2999,10 +3050,9 @@ const buildSelectionStructuralPlan = (args: {
     args.publicContracts,
     candidateFamilyBundle,
   )
-  const advisoryPromptContracts = mergeAdvisoryStaticWitnessContracts(
-    selectionAuthorityContracts,
-    buildStaticWitnessContracts(staticWitnesses),
-  )
+  const advisoryPromptContracts = mergePublicContractBundles(selectionAuthorityContracts, {
+    contracts: buildStaticWitnessContracts(staticWitnesses),
+  })
   const selectionInputs = buildSelectionInputs({
     n: args.n,
     ownerCandidates: normalizedOwnerCandidates,
@@ -3160,7 +3210,7 @@ type SelectionExecutorPortsArgs = {
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
   readonly staticWitnessDiagnostics: readonly StaticWitnessDiagnostic[]
-  readonly publicContracts: PublicContractBundle | undefined
+  readonly promptContracts: PublicContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
   readonly concurrency: number | undefined
@@ -3187,7 +3237,7 @@ const selectionCandidateSeed = (
   return buildSelectionGenerationPrompt({
     problemStatement: args.instance.problemStatement,
     ownerEvidence: args.selectionOwnerEvidence,
-    contracts: contractFactsFromBundle(args.publicContracts),
+    contracts: contractFactsFromBundle(args.promptContracts),
     baseValidatedRed: args.baseValidatedRed,
     ...(args.verificationTarget !== undefined
       ? { verificationTarget: args.verificationTarget }
@@ -3482,7 +3532,7 @@ const runSelectionPhase = async (
       envCaveats: generationEnvCaveats,
       validatedReproScripts: reproSources,
       staticWitnessDiagnostics,
-      publicContracts: advisoryPromptContracts,
+      promptContracts: advisoryPromptContracts,
       verificationTarget,
       recordLlmEvidencePacket: (packet) => {
         recordLlmEvidencePacket(selectionLlmEvidence, packet)
@@ -3961,6 +4011,7 @@ const prepareHintAndReproContext = async (
     reproInstall.telemetry !== undefined
       ? {
           telemetry: reproInstall.telemetry,
+          hint: reproInstall.hint,
           reproSources: reproInstall.reproSources ?? [],
           hardeningReproSources: reproInstall.hardeningReproSources ?? [],
         }
@@ -3970,7 +4021,7 @@ const prepareHintAndReproContext = async (
     precomputedHint,
     chaMultisiteSteer,
     localizeCandidates,
-    reproHint: reproInstall.hint,
+    reproHint: reproInstall.hint ?? selectionRepro.hint,
     reproTest: selectionRepro.telemetry,
     reproSources: selectionRepro.reproSources,
     hardeningReproSources: selectionRepro.hardeningReproSources,

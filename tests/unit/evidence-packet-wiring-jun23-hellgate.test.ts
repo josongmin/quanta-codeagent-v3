@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { ReproExecPort, ReproWriteFilePort } from "@/agent/repro-test/execute"
 import {
-  ADAPTIVE_ACTIONS,
-  type AdaptiveAction,
-} from "@/runner/batch/eval/adaptive-escalation"
+  pytestReportPathFor,
+  type ReproExecPort,
+  type ReproWriteFilePort,
+} from "@/agent/repro-test/execute"
+import { ADAPTIVE_ACTIONS, type AdaptiveAction } from "@/runner/batch/eval/adaptive-escalation"
 import { attachReproVoteOutcomes } from "@/runner/batch/eval/driver"
-import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/types"
-import type { InstanceResult } from "@/runner/batch/types"
 import {
   assertPacketBlind,
   buildSelectionExplanationPacket,
@@ -18,10 +17,12 @@ import {
 } from "@/runner/batch/eval/llm-evidence-packet"
 import {
   makeReproVoteValidate,
-  resetReproVoteOutcomes,
   type ReproVoteOutcomeRecord,
+  resetReproVoteOutcomes,
   summarizeReproVoteOutcomes,
 } from "@/runner/batch/eval/repair/repro-vote"
+import type { ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/types"
+import type { InstanceResult } from "@/runner/batch/types"
 
 /**
  * jun-23 implementation-completeness wiring hellgate — A5 (summarize), B5
@@ -68,17 +69,31 @@ describe("A5 — summarizeReproVoteOutcomes (drain projection)", () => {
       // production `buildReproVoteValidate` validator writes to — `makeReproVoteValidate`
       // records by construction). Every reproducing script flips to "Issue resolved"
       // ⇒ vote_resolved.
+      const reports = new Map<string, string>()
       const writeFile: ReproWriteFilePort = async () => {}
-      const exec: ReproExecPort = async () => ({
-        code: 0,
-        stdout: "Issue resolved\n1 passed in 0.1s",
-        stderr: "",
-      })
+      const exec: ReproExecPort = async (argv) => {
+        const scriptPath = argv[argv.length - 1] as string
+        reports.set(
+          pytestReportPathFor(scriptPath),
+          JSON.stringify({
+            schema: 1,
+            collected: 1,
+            exitstatus: 0,
+            reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+          }),
+        )
+        return {
+          code: 0,
+          stdout: "Issue resolved\n1 passed in 0.1s",
+          stderr: "",
+        }
+      }
       const fallback = async (): Promise<ValidatorResult> => ({ ok: false, failTail: "legacy" })
       const validate = makeReproVoteValidate({
         sources: ["r1", "r2", "r3"],
         exec,
         writeFile,
+        readFile: async (path) => reports.get(path) ?? "",
         fallback,
       })
       // `args.exec` (an `ExecFn`) is only used by the fallback; the vote runs on

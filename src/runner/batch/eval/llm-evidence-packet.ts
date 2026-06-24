@@ -529,7 +529,12 @@ const packetHistory = (
   history !== undefined && history.length > 0 ? history : singletonPacket(current)
 
 const STAGE_PACKET_READERS: Readonly<
-  Partial<Record<LlmEvidencePacketStage, (artifacts: LlmEvidenceArtifacts) => readonly LlmEvidencePacket[]>>
+  Partial<
+    Record<
+      LlmEvidencePacketStage,
+      (artifacts: LlmEvidenceArtifacts) => readonly LlmEvidencePacket[]
+    >
+  >
 > = {
   intake: (artifacts) => singletonPacket(artifacts.intake),
   candidate_review: (artifacts) =>
@@ -925,7 +930,9 @@ const firstResolvedSymbolSlice = (
 ): SymbolSliceResult | undefined =>
   source === null
     ? undefined
-    : symbols.map((symbol) => extractSymbolSliceResult(source, symbol)).find((r) => r.slice !== undefined)
+    : symbols
+        .map((symbol) => extractSymbolSliceResult(source, symbol))
+        .find((r) => r.slice !== undefined)
 
 const ownerEvidenceFact = (args: {
   readonly file: string
@@ -1199,6 +1206,90 @@ export interface SelectionGenerationPacketInput {
   readonly staticWitnessDiagnostics?: readonly StaticWitnessDiagnostic[]
 }
 
+const selectionGenerationMissingEvidence = (
+  input: SelectionGenerationPacketInput,
+): MissingEvidenceFact[] => [
+  ...(input.reproCommand === undefined
+    ? [{ kind: "public_repro", reason: "no_executable_public_repro_hint" }]
+    : []),
+  ...(input.verificationTarget === undefined
+    ? [{ kind: "verification_target", reason: "no_verification_plan_available" }]
+    : []),
+  ...ownerSliceMissingEvidence(input.ownerEvidence),
+]
+
+const selectionGenerationProofReceipts = (
+  input: SelectionGenerationPacketInput,
+): ProofReceiptFact[] =>
+  input.reproCommand === undefined
+    ? []
+    : [
+        {
+          source: "public_mwe",
+          sourcePolicy: "public_repro",
+          state: input.baseValidatedRed === true ? "base_red" : "static_only",
+          command: input.reproCommand,
+          ...(input.baseValidatedRed !== undefined
+            ? { baseValidatedRed: input.baseValidatedRed }
+            : {}),
+        },
+      ]
+
+const nonEmptyValidatedReproScripts = (input: SelectionGenerationPacketInput): string[] =>
+  (input.validatedReproScripts ?? [])
+    .map((source) => source.trim())
+    .filter((source) => source !== "")
+
+const validatedPublicReproFacts = (input: SelectionGenerationPacketInput): StaticFact[] => {
+  const scripts = nonEmptyValidatedReproScripts(input)
+  const note =
+    scripts.length > 0
+      ? [
+          {
+            kind: "validated_public_repro_note",
+            value:
+              "Scripts below reproduce the issue on the UNPATCHED tree — they reflect the bug's observable behavior. Use them to understand the ROOT CAUSE; a correct fix should make them pass cleanly (all assertions green / exit 0), but fix the root cause rather than contorting the patch to satisfy any single script.",
+          },
+        ]
+      : []
+  const rendered = scripts
+    .filter((_, i) => i < VALIDATED_REPRO_SCRIPT_CAP)
+    .map((source, i) => ({
+      kind: "validated_public_repro",
+      value: `script ${i + 1}: ${boundHead(source, 1200)}`,
+    }))
+  const omitted = scripts.length - VALIDATED_REPRO_SCRIPT_CAP
+  const omittedFact =
+    omitted > 0
+      ? [
+          {
+            kind: "validated_public_repro_omitted",
+            value: `Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`,
+          },
+        ]
+      : []
+  return [...note, ...rendered, ...omittedFact]
+}
+
+const selectionGenerationStaticFacts = (
+  input: SelectionGenerationPacketInput,
+  diagnostics: ReturnType<typeof staticWitnessDiagnosticsFacts>,
+): StaticFact[] => [
+  ...validatedPublicReproFacts(input),
+  ...diagnostics.staticFacts,
+  ...(input.seed !== undefined && input.seed.trim() !== ""
+    ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
+    : []),
+]
+
+const selectionGenerationPublicIssueFacts = (input: SelectionGenerationPacketInput): string[] => [
+  ...describeIssueFacts(input.problemStatement, "candidate_generation"),
+  ...(input.closureHint !== undefined && input.closureHint.trim() !== ""
+    ? [`co-change hint: ${boundHead(input.closureHint, 400)}`]
+    : []),
+  ...(input.envCaveats ?? []).map((c) => `env caveat: ${c}`),
+]
+
 /**
  * The single shared candidate_generation packet builder. SELF-CONTAINED: it
  * carries actual public issue facts + the active proof target, so it never
@@ -1215,30 +1306,8 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     ...(input.envCaveats ?? []),
     ...(input.validatedReproScripts ?? []),
   ])
-  const missingEvidence: MissingEvidenceFact[] = [
-    ...(input.reproCommand === undefined
-      ? [{ kind: "public_repro", reason: "no_executable_public_repro_hint" }]
-      : []),
-    ...(input.verificationTarget === undefined
-      ? [{ kind: "verification_target", reason: "no_verification_plan_available" }]
-      : []),
-    ...ownerSliceMissingEvidence(input.ownerEvidence),
-  ]
+  const missingEvidence = selectionGenerationMissingEvidence(input)
   const staticWitnessDiagnostics = staticWitnessDiagnosticsFacts(input.staticWitnessDiagnostics)
-  const proofReceipts: ProofReceiptFact[] =
-    input.reproCommand === undefined
-      ? []
-      : [
-          {
-            source: "public_mwe",
-            sourcePolicy: "public_repro",
-            state: input.baseValidatedRed === true ? "base_red" : "static_only",
-            command: input.reproCommand,
-            ...(input.baseValidatedRed !== undefined
-              ? { baseValidatedRed: input.baseValidatedRed }
-              : {}),
-          },
-        ]
   return cleanPacket({
     stage: "candidate_generation",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
@@ -1257,62 +1326,11 @@ export const buildSelectionGenerationLlmEvidencePacket = (
       "benchmark_case_tables",
       "broad_multifile_drift_without_public_evidence",
     ],
-    publicIssueFacts: [
-      ...describeIssueFacts(input.problemStatement, "candidate_generation"),
-      ...(input.closureHint !== undefined && input.closureHint.trim() !== ""
-        ? [`co-change hint: ${boundHead(input.closureHint, 400)}`]
-        : []),
-      ...(input.envCaveats ?? []).map((c) => `env caveat: ${c}`),
-    ],
+    publicIssueFacts: selectionGenerationPublicIssueFacts(input),
     ownerEvidence: input.ownerEvidence,
-    proofReceipts,
+    proofReceipts: selectionGenerationProofReceipts(input),
     contractFacts: input.contracts,
-    staticFacts: [
-      // Evidence-toned framing for the scripts below (the old aggressive
-      // "MUST pass" contract-seed was removed; a short note keeps the LLM
-      // context-aware WITHOUT inviting reward-hacking the self-generated oracle).
-      ...((input.validatedReproScripts ?? []).some((s) => s.trim() !== "")
-        ? [
-            {
-              kind: "validated_public_repro_note",
-              value:
-                "Scripts below reproduce the issue on the UNPATCHED tree — they reflect the bug's observable behavior. Use them to understand the ROOT CAUSE; a correct fix should make them pass cleanly (all assertions green / exit 0), but fix the root cause rather than contorting the patch to satisfy any single script.",
-            },
-          ]
-        : []),
-      ...(input.validatedReproScripts ?? [])
-        .map((source) => source.trim())
-        .filter((source) => source !== "")
-        // Take the first N — an ARRAY slice (surrogate-safe), written as a
-        // filter so the surrogate-truncation ratchet's raw-`.slice` AST scan
-        // (which guards STRING slicing) does not false-positive on it.
-        .filter((_, i) => i < VALIDATED_REPRO_SCRIPT_CAP)
-        .map((source, i) => ({
-          kind: "validated_public_repro",
-          value: `script ${i + 1}: ${boundHead(source, 1200)}`,
-        })),
-      // A4: bounded truncation MUST surface an omitted-count fact so the LLM can
-      // distinguish "only N existed" from "more existed but were withheld for
-      // budget". Mirrors the repair-seed sibling at driver.ts validatedReproContractSeed.
-      ...((): StaticFact[] => {
-        const nonEmpty = (input.validatedReproScripts ?? [])
-          .map((source) => source.trim())
-          .filter((source) => source !== "")
-        const omitted = nonEmpty.length - VALIDATED_REPRO_SCRIPT_CAP
-        return omitted > 0
-          ? [
-              {
-                kind: "validated_public_repro_omitted",
-                value: `Omitted ${omitted} additional validated reproduction script(s) to keep the prompt compact.`,
-              },
-            ]
-          : []
-      })(),
-      ...staticWitnessDiagnostics.staticFacts,
-      ...(input.seed !== undefined && input.seed.trim() !== ""
-        ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
-        : []),
-    ],
+    staticFacts: selectionGenerationStaticFacts(input, staticWitnessDiagnostics),
     ...(input.verificationTarget !== undefined
       ? { verificationTarget: input.verificationTarget }
       : {}),

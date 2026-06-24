@@ -38,6 +38,10 @@ const STUB_SOURCE = "def test_bug():\n    assert thing() == 1"
 const STUB_RETURNED = ensurePytestFooter(STUB_SOURCE)
 /** A pytest exec result whose failing assertion ⇒ reproduced. */
 const PYTEST_REPRODUCED = { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
+const reproducedSamples = (tests: readonly string[]) =>
+  tests.map((source) => ({ source, stdout: "1 failed in 0.1s", outcome: "reproduced" as const }))
+const resolvedSamples = (tests: readonly string[]) =>
+  tests.map((source) => ({ source, stdout: "1 passed in 0.1s", outcome: "resolved" as const }))
 
 class StubLLM implements LLMPort {
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
@@ -152,7 +156,7 @@ describe("prepareReproTest", () => {
       writeFile: async (path, content) => {
         writes.push({ path, content })
       },
-      exec: async () => PYTEST_REPRODUCED,
+      execute: async ({ tests }) => reproducedSamples(tests),
     })
     expect(sel).not.toBeNull()
     expect(sel?.selected).toBe(STUB_RETURNED)
@@ -334,7 +338,7 @@ describe("prepareReproTest", () => {
     const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
       llm: new StubLLM(),
       writeFile: async () => {},
-      exec: async () => ({ code: 0, stdout: "1 passed in 0.1s", stderr: "" }),
+      execute: async ({ tests }) => resolvedSamples(tests),
     })
     expect(detail.selection?.selected).toBeNull()
     // objectContaining: the telemetry also carries jun-18 diagnostic fields
@@ -352,7 +356,7 @@ describe("prepareReproTest", () => {
     const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
       llm: new StubLLM(),
       writeFile: async () => {},
-      exec: async () => PYTEST_REPRODUCED,
+      execute: async ({ tests }) => reproducedSamples(tests),
     })
     expect(detail.selection?.selected).toBe(STUB_RETURNED)
     expect(detail.telemetry).toEqual({
@@ -364,6 +368,7 @@ describe("prepareReproTest", () => {
   })
 
   test("selection-only repro prep uses verifySelectN as the late selector fallback K", async () => {
+    const writes: { path: string; content: string }[] = []
     const out = await prepareSelectionReproSources(
       mkInstance(),
       "/tmp/sb",
@@ -377,18 +382,22 @@ describe("prepareReproTest", () => {
       },
       {
         generate: async () => Array.from({ length: 3 }, () => STUB_SOURCE),
-        exec: async () => PYTEST_REPRODUCED,
-        writeFile: async () => {},
+        execute: async ({ tests }) => reproducedSamples(tests),
+        writeFile: async (path, content) => {
+          writes.push({ path, content })
+        },
       },
     )
     expect(out.telemetry).toEqual({
-      installed: false,
-      reason: "not_installed",
+      installed: true,
+      path: "/tmp/sb/reproduce_issue.py",
       samples: 3,
       reproducedCount: 3,
     })
+    expect(out.hint).toContain("reproduce_issue.py")
     expect(out.reproSources).toHaveLength(3)
     expect(new Set(out.reproSources)).toEqual(new Set([STUB_SOURCE]))
+    expect(writes.at(-1)).toEqual({ path: "/tmp/sb/reproduce_issue.py", content: STUB_RETURNED })
   })
 
   test("selection-only repro prep stays inert when verify-select repro is off", async () => {
@@ -409,7 +418,12 @@ describe("prepareReproTest", () => {
         },
       },
     )
-    expect(out).toEqual({ telemetry: undefined, reproSources: [], hardeningReproSources: [] })
+    expect(out).toEqual({
+      telemetry: undefined,
+      hint: undefined,
+      reproSources: [],
+      hardeningReproSources: [],
+    })
   })
 })
 
