@@ -47,6 +47,7 @@ import { mcpToolAnnotationsKnob } from "@/runner/knobs/knobs/mcp-tool-annotation
 import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
+import { modelLaneDiversityKnob } from "@/runner/knobs/knobs/model-lane-diversity"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
 import { pairedControlKnob } from "@/runner/knobs/knobs/paired-control"
 import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
@@ -113,6 +114,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(multiVoterKnob),
   asAnyKnob(mustPassKnob),
   asAnyKnob(networkProxyKnob),
+  asAnyKnob(modelLaneDiversityKnob),
   asAnyKnob(pairedControlKnob),
   asAnyKnob(noPatchBreakerKnob),
   asAnyKnob(noPatchForceFractionKnob),
