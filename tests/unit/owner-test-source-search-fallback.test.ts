@@ -5,7 +5,26 @@ import { dirname, join } from "node:path"
 import {
   extractVerificationOwnerTestExpectations,
   ownerTestCandidatesFromModules,
+  withFsTimeout,
 } from "@/runner/batch/eval/verification-owner-test-expectations"
+
+describe("withFsTimeout — bounds a single fs await", () => {
+  it("returns the fallback when the promise does not settle before the timeout", async () => {
+    const never = new Promise<number>(() => {}) // never settles (simulates a hung mount)
+    expect(await withFsTimeout(never, 5, -1)).toBe(-1)
+  })
+
+  it("returns the real value when it settles before the timeout", async () => {
+    expect(await withFsTimeout(Promise.resolve(42), 10_000, -1)).toBe(42)
+  })
+
+  it("a rejecting fs op is the caller's responsibility (terminal .catch precedes the race)", async () => {
+    // Mirrors the call-site shape: the inner promise already has a terminal .catch,
+    // so withFsTimeout never sees a rejection — it resolves to the caught fallback.
+    const rejected = Promise.reject(new Error("ENOENT")).catch(() => "caught")
+    expect(await withFsTimeout(rejected, 10_000, "timeout")).toBe("caught")
+  })
+})
 
 /**
  * T2 — bounded source-search fallback for existing-test expectations when the

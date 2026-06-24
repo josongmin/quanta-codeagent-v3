@@ -170,9 +170,10 @@ const checkoutOrDeepen = async (
 /** Reap orphaned `*.git.tmp-<uuid>` bare-mirror dirs left by a clone that was
  *  SIGTERM'd before its atomic rename. AGE-GATED: only temps older than the max
  *  plausible in-flight clone are swept, so a concurrent same-repo instance's live
- *  temp (minutes old at most) is never raced. Best-effort: any fs error is ignored. */
+ *  temp (minutes old at most) is never raced. Best-effort: any fs error is ignored.
+ *  @internal exported for unit tests. */
 const ORPHAN_TMP_MAX_AGE_MS = 6 * 60 * 60 * 1000
-const reapStaleMirrorTemps = async (repoCacheRoot: string): Promise<void> => {
+export const reapStaleMirrorTemps = async (repoCacheRoot: string): Promise<void> => {
   const now = Date.now()
   const entries = await readdir(repoCacheRoot).catch(() => [] as string[])
   for (const name of entries) {

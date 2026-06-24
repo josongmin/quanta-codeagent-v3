@@ -33,19 +33,19 @@ describe("HELL-1: tool name", () => {
 
 describe("HELL-2: schema requires pattern", () => {
   test("inputSchema rejects input missing pattern", () => {
-    const schema = astGrepTool.inputSchema as z.ZodObject<z.ZodRawShape>
+    const schema = astGrepTool.inputSchema as unknown as z.ZodObject<z.ZodRawShape>
     const result = schema.safeParse({})
     expect(result.success).toBe(false)
   })
 
   test("inputSchema accepts input with only pattern", () => {
-    const schema = astGrepTool.inputSchema as z.ZodObject<z.ZodRawShape>
+    const schema = astGrepTool.inputSchema as unknown as z.ZodObject<z.ZodRawShape>
     const result = schema.safeParse({ pattern: "console.log($A)" })
     expect(result.success).toBe(true)
   })
 
   test("pattern field is present in schema shape", () => {
-    const schema = astGrepTool.inputSchema as z.ZodObject<z.ZodRawShape>
+    const schema = astGrepTool.inputSchema as unknown as z.ZodObject<z.ZodRawShape>
     expect(schema.shape).toHaveProperty("pattern")
   })
 })
@@ -53,7 +53,7 @@ describe("HELL-2: schema requires pattern", () => {
 // ─── HELL-3: optional fields "path" and "language" ───────────────────────────
 
 describe("HELL-3: optional path and language fields", () => {
-  const schema = astGrepTool.inputSchema as z.ZodObject<z.ZodRawShape>
+  const schema = astGrepTool.inputSchema as unknown as z.ZodObject<z.ZodRawShape>
 
   test("path field is present in schema shape", () => {
     expect(schema.shape).toHaveProperty("path")

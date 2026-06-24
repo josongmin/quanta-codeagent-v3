@@ -89,7 +89,7 @@ describe("S-PROBE-3: missing pattern field → schema rejects or execute returns
   test("inputSchema.safeParse({}) returns success:false (zod rejects missing pattern)", () => {
     // Red-on-injection: make pattern optional in the zod schema → safeParse
     // succeeds on {} and no validation error is surfaced; this test fails.
-    const schema = astGrepTool.inputSchema as z.ZodObject<z.ZodRawShape>
+    const schema = astGrepTool.inputSchema as unknown as z.ZodObject<z.ZodRawShape>
     const result = schema.safeParse({})
     expect(result.success).toBe(false)
   })

@@ -418,7 +418,9 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
       return { first, second, trips: state.trips }
     }
     const absent = runCap({})
-    const explicitUndef = runCap({ maxTrips: undefined })
+    const explicitUndef = runCap({ maxTrips: undefined } as NonNullable<
+      Parameters<typeof decideVerifyGuard>[0]["cfg"]
+    >)
     expect(absent.first.block).toBe(true)
     expect(absent.second.block).toBe(false) // default cap=1 exhausted
     expect(explicitUndef).toEqual(absent) // byte-identical decision + trip count
@@ -428,7 +430,9 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // A failing verify ran AFTER the edit ⇒ presence is satisfied. Without the
     // must-pass gate, neither config blocks; the explicit-undefined must match.
     const absent = decide(editThenFailingVerify, {})
-    const explicitUndef = decide(editThenFailingVerify, { mustPass: undefined })
+    const explicitUndef = decide(editThenFailingVerify, { mustPass: undefined } as Parameters<
+      typeof decide
+    >[1])
     expect(absent.v.block).toBe(false)
     expect(explicitUndef).toEqual(absent)
     // paired control: an EXPLICIT true DOES change behavior (proves the read is live).
@@ -440,14 +444,22 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // A bash command that the default registry recognizes as a real test run.
     const editThenPytest = h({ name: "edit" }, { name: "bash", arg: "pytest tests/test_x.py" })
     const absent = decide(editThenPytest, {})
-    const explicitUndef = decide(editThenPytest, { exactCommands: undefined })
+    const explicitUndef = decide(editThenPytest, { exactCommands: undefined } as Parameters<
+      typeof decide
+    >[1])
     // pytest satisfies presence under the default registry ⇒ no block, identical.
     expect(absent.v.block).toBe(false)
     expect(explicitUndef).toEqual(absent)
   })
 
   test("all-undefined config ≡ {} across both branches (full equivalence)", () => {
-    const allUndef = { maxTrips: undefined, mustPass: undefined, exactCommands: undefined }
+    // Deliberately exercise the RUNTIME shape `{ k: undefined }` (e.g. from
+    // optional chaining) — `exactOptionalPropertyTypes` forbids explicit
+    // undefined at the type level, so cast to the param type to assert that it
+    // behaves identically to the omitted-key `{}` at runtime.
+    const allUndef = { maxTrips: undefined, mustPass: undefined, exactCommands: undefined } as Parameters<
+      typeof decide
+    >[1]
     expect(decide(editOnly, allUndef)).toEqual(decide(editOnly, {}))
     expect(decide(editThenFailingVerify, allUndef)).toEqual(decide(editThenFailingVerify, {}))
   })

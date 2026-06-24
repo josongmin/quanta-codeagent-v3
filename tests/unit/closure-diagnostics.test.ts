@@ -94,8 +94,8 @@ describe("computeClosureDiagnostics", () => {
   })
 
   test("no_patch_exhausted_rate = 1/5", () => {
-    expect(d.metrics.no_patch_exhausted_rate.available).toBe(true)
-    expect(d.metrics.no_patch_exhausted_rate.value).toBeCloseTo(1 / 5)
+    expect(d.metrics.no_patch_exhausted_rate!.available).toBe(true)
+    expect(d.metrics.no_patch_exhausted_rate!.value).toBeCloseTo(1 / 5)
   })
 
   test("budget_exhausted empty patch is also classified as no_patch_exhausted", () => {
@@ -112,23 +112,23 @@ describe("computeClosureDiagnostics", () => {
       new Map(),
     )
     expect(exhausted.perInstance[0]?.class).toBe("no_patch_exhausted")
-    expect(exhausted.metrics.no_patch_exhausted_rate.value).toBeCloseTo(1)
+    expect(exhausted.metrics.no_patch_exhausted_rate!.value).toBeCloseTo(1)
   })
 
   test("owner_recall@1 counts first-edited-file == gold owner (over patch-bearing+oracle)", () => {
     // patch-bearing with oracle: resolved-1(hit), miss-owner(miss), miss-multi(hit base.py), stray-1(hit) = 3/4
-    expect(d.metrics["owner_recall@1"].n).toBe(4)
-    expect(d.metrics["owner_recall@1"].value).toBeCloseTo(3 / 4)
+    expect(d.metrics["owner_recall@1"]!.n).toBe(4)
+    expect(d.metrics["owner_recall@1"]!.value).toBeCloseTo(3 / 4)
   })
 
   test("first_edit_owner_match uses the first mutating edit, not the final diff", () => {
     // firstEditFile present on 4 patch-bearing; matches gold on resolved-1, miss-multi, stray-1 = 3/4
-    expect(d.metrics.first_edit_owner_match.available).toBe(true)
-    expect(d.metrics.first_edit_owner_match.value).toBeCloseTo(3 / 4)
+    expect(d.metrics.first_edit_owner_match!.available).toBe(true)
+    expect(d.metrics.first_edit_owner_match!.value).toBeCloseTo(3 / 4)
   })
 
   test("stray_file_rate = 1/4 over patch-bearing runs", () => {
-    expect(d.metrics.stray_file_rate.value).toBeCloseTo(1 / 4)
+    expect(d.metrics.stray_file_rate!.value).toBeCloseTo(1 / 4)
   })
 
   test("not-yet-instrumented gate metrics degrade to unavailable (value null), never invented", () => {
@@ -148,8 +148,8 @@ describe("computeClosureDiagnostics", () => {
   test("empty input degrades cleanly to metrics-unavailable, not crash", () => {
     const empty = computeClosureDiagnostics([], new Map())
     expect(empty.total).toBe(0)
-    expect(empty.metrics.no_patch_exhausted_rate.available).toBe(false)
-    expect(empty.metrics["owner_recall@1"].available).toBe(false)
+    expect(empty.metrics.no_patch_exhausted_rate!.available).toBe(false)
+    expect(empty.metrics["owner_recall@1"]!.available).toBe(false)
     expect(empty.perInstance).toEqual([])
   })
 
@@ -167,8 +167,8 @@ describe("computeClosureDiagnostics", () => {
       new Map(),
     )
     expect(blocked.perInstance[0]?.class).toBe("admission_blocked")
-    expect(blocked.metrics.admission_blocked_rate.available).toBe(true)
-    expect(blocked.metrics.admission_blocked_rate.value).toBeCloseTo(1)
+    expect(blocked.metrics.admission_blocked_rate!.available).toBe(true)
+    expect(blocked.metrics.admission_blocked_rate!.value).toBeCloseTo(1)
   })
 
   test("gate metrics become available once instrumented (forward-compat)", () => {
@@ -185,9 +185,9 @@ describe("computeClosureDiagnostics", () => {
       ],
       oracleMap,
     )
-    expect(instrumented.metrics.gate_enter_rate.available).toBe(true)
-    expect(instrumented.metrics.gate_enter_rate.value).toBeCloseTo(1)
-    expect(instrumented.metrics.verify_rounds_per_run.value).toBeCloseTo(2)
+    expect(instrumented.metrics.gate_enter_rate!.available).toBe(true)
+    expect(instrumented.metrics.gate_enter_rate!.value).toBeCloseTo(1)
+    expect(instrumented.metrics.verify_rounds_per_run!.value).toBeCloseTo(2)
   })
 
   describe("F6 exploration-efficiency", () => {
@@ -199,8 +199,8 @@ describe("computeClosureDiagnostics", () => {
         ],
         new Map(),
       )
-      expect(d6.metrics.edit_count_per_run.value).toBeCloseTo(4) // (6+2)/2
-      expect(d6.metrics.turns_to_first_edit.value).toBeCloseTo(8) // (12+4)/2
+      expect(d6.metrics.edit_count_per_run!.value).toBeCloseTo(4) // (6+2)/2
+      expect(d6.metrics.turns_to_first_edit!.value).toBeCloseTo(8) // (12+4)/2
     })
 
     test("repro_red_but_unresolved_rate: among reproduced repros, the unresolved fraction", () => {
@@ -225,8 +225,8 @@ describe("computeClosureDiagnostics", () => {
         ],
         new Map(),
       )
-      expect(d6.metrics.repro_red_but_unresolved_rate.n).toBe(2)
-      expect(d6.metrics.repro_red_but_unresolved_rate.value).toBeCloseTo(1 / 2)
+      expect(d6.metrics.repro_red_but_unresolved_rate!.n).toBe(2)
+      expect(d6.metrics.repro_red_but_unresolved_rate!.value).toBeCloseTo(1 / 2)
     })
 
     test("F6 metrics unavailable when uninstrumented (null, never invented)", () => {
@@ -234,9 +234,9 @@ describe("computeClosureDiagnostics", () => {
         [fact({ instanceId: "a", patchFiles: ["x.py"] })],
         new Map(),
       )
-      expect(d6.metrics.edit_count_per_run.available).toBe(false)
-      expect(d6.metrics.turns_to_first_edit.available).toBe(false)
-      expect(d6.metrics.repro_red_but_unresolved_rate.available).toBe(false)
+      expect(d6.metrics.edit_count_per_run!.available).toBe(false)
+      expect(d6.metrics.turns_to_first_edit!.available).toBe(false)
+      expect(d6.metrics.repro_red_but_unresolved_rate!.available).toBe(false)
     })
   })
 })

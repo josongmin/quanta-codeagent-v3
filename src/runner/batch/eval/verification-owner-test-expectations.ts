@@ -16,8 +16,9 @@ const DEFAULT_FS_TIMEOUT_MS = 10_000
 
 /** Bound a single fs await. On timeout the underlying fs promise is abandoned (left
  *  to settle/GC) and the caller receives `fallback` — the same degrade as a `.catch`,
- *  so discovery yields fewer facts rather than hanging. */
-const withFsTimeout = <T>(p: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
+ *  so discovery yields fewer facts rather than hanging.
+ *  @internal exported for unit tests. */
+export const withFsTimeout = <T>(p: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<T>((resolve) => {
     timer = setTimeout(() => resolve(fallback), timeoutMs)
@@ -179,7 +180,11 @@ const globOwnerModuleTests = async (
     for (const testDir of [dir === "" ? "tests" : `${dir}/tests`, dir]) {
       if (seenDir.has(testDir)) continue
       seenDir.add(testDir)
-      const names = await readdir(join(sandbox, testDir)).catch(() => [] as string[])
+      const names = await withFsTimeout(
+        readdir(join(sandbox, testDir)).catch(() => [] as string[]),
+        timeoutMs,
+        [] as string[],
+      )
       for (const name of [...names].sort()) {
         if (name.startsWith("test_") && name.endsWith(".py")) {
           out.push(testDir === "" ? name : `${testDir}/${name}`)

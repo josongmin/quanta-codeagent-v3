@@ -25,6 +25,7 @@ import {
   createSpawnRecorder,
   fail,
   ok,
+  type SpawnHandler,
   when,
   whenArgsInclude,
   whenCmd,
@@ -115,7 +116,7 @@ interface Recorder {
   calls: Array<{ cmd: string; args: string[]; input?: string }>
 }
 
-const createPoolSpawnRecorder = (...handlers: Parameters<typeof createSpawnRecorder>) =>
+const createPoolSpawnRecorder = (...handlers: readonly SpawnHandler[]) =>
   createSpawnRecorder(whenCmd("curl", ok("9.9.9.9")), ...handlers)
 
 /** Mock spawn. `reportFor(runId, launchIdx)` decides the report-fetch payload for

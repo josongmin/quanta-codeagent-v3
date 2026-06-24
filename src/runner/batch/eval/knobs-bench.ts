@@ -427,6 +427,32 @@ const isVerifySelectLlmRiskGateMode = (v: unknown): v is VerifySelectLlmRiskGate
   v === "shadow" || v === "on"
 const isSelectorMode = (v: unknown): v is SelectorModeKnob => v === "clean" || v === "research"
 
+const resolveLspNav = (state: BenchKnobState, env: NodeJS.ProcessEnv): boolean =>
+  readKnobValue(state, "lsp", isBoolean) ?? env.QUANTA_LSP_TOOLS === "full"
+
+const resolveLocalizePhase = (
+  state: BenchKnobState,
+  lspNav: boolean,
+): AgentConfig["localizePhase"] | undefined => {
+  const lp = readKnobValue(state, "localize-phase", isLocalizeValue)
+  if (lp === undefined || lp.phase1Turns <= 0) return undefined
+  const lspGroundingSteer = lspNav && readKnobValue(state, "lsp-steer", isFalse) !== false
+  return {
+    phase1Turns: lp.phase1Turns,
+    ...(lspGroundingSteer ? { lspGroundingSteer: true } : {}),
+  }
+}
+
+const resolveLiveOverrides = (state: BenchKnobState): string[] => {
+  const liveOverrides: string[] = []
+  if (readKnobValue(state, "read-outline", isTrue) === true)
+    liveOverrides.push("QUANTA_READ_OUTLINE")
+  if (readKnobValue(state, "test-runner", isTrue) === true) liveOverrides.push("QUANTA_TEST_RUNNER")
+  if (readKnobValue(state, "repo-map", isRepoMapValue) !== undefined)
+    liveOverrides.push("QUANTA_REPO_MAP")
+  return liveOverrides
+}
+
 /**
  * Project a resolved {@link BenchKnobState} into the {@link BenchPosture}.
  *
@@ -438,19 +464,10 @@ export const benchPostureFromState = (
   state: BenchKnobState,
   env: NodeJS.ProcessEnv,
 ): BenchPosture => {
-  const lspNav = readKnobValue(state, "lsp", isBoolean) === true || env.QUANTA_LSP_TOOLS === "full"
+  const lspNav = resolveLspNav(state, env)
   const subagent = readKnobValue(state, "subagent", isTrue) === true ? {} : undefined
   const skills = readKnobValue(state, "skills", isTrue) === true ? {} : undefined
-  const lp = readKnobValue(state, "localize-phase", isLocalizeValue)
-  // LSP-nav grounding steer: DEFAULT-ON whenever nav tools are on — the steer is
-  // what makes the model actually CALL go-to-def/find-refs (measured ~0% usage
-  // without it). Coupled to `lspNav`; suppressed only by an explicit
-  // `lsp-steer:off` (the A/B baseline). Pointless without nav, so nav-gated.
-  const lspGroundingSteer = lspNav && readKnobValue(state, "lsp-steer", isFalse) !== false
-  const localizePhase =
-    lp !== undefined && lp.phase1Turns > 0
-      ? { phase1Turns: lp.phase1Turns, ...(lspGroundingSteer ? { lspGroundingSteer: true } : {}) }
-      : undefined
+  const localizePhase = resolveLocalizePhase(state, lspNav)
   const bs = readKnobValue(state, "branch-search", isBranchValue)
   const branchSearch = bs !== undefined ? bs.config : undefined
   const issueHintMode: BenchIssueHintMode = readKnobValue(state, "issue-hint", isIssueMode) ?? "off"
@@ -491,12 +508,7 @@ export const benchPostureFromState = (
   // Default-FULL fence: unset ⇒ undefined ⇒ `"full"` (today's exact behavior).
   const inLoopExecMode = readKnobValue(state, "bench-in-loop-exec", isInLoopExecMode) ?? "full"
   const inLoopExec = inLoopExecMode === "full"
-  const liveOverrides: string[] = []
-  if (readKnobValue(state, "read-outline", isTrue) === true)
-    liveOverrides.push("QUANTA_READ_OUTLINE")
-  if (readKnobValue(state, "test-runner", isTrue) === true) liveOverrides.push("QUANTA_TEST_RUNNER")
-  if (readKnobValue(state, "repo-map", isRepoMapValue) !== undefined)
-    liveOverrides.push("QUANTA_REPO_MAP")
+  const liveOverrides = resolveLiveOverrides(state)
   // Proof-driven bench closure (jun-17) — each true ONLY when its knob resolves
   // `true` (env / preset), else false. Default-OFF ⇒ byte-identical when unset.
   //

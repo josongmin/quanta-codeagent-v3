@@ -38,7 +38,10 @@ export const lspKnob: Knob<boolean> = {
         : undefined,
   apply: (cfg, on) => {
     if (!on) return cfg
-    const merged = new ToolRegistry([...registryTools(cfg.registry), ...lspNavToolList(() => cfg.cwd)])
+    const merged = new ToolRegistry([
+      ...registryTools(cfg.registry),
+      ...lspNavToolList(() => cfg.cwd),
+    ])
     return { ...cfg, registry: merged }
   },
   describe: "LSP nav tools (8 tools — ADR-0015)",

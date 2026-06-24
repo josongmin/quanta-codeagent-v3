@@ -33,7 +33,7 @@ describe("knobs_applied AgentEvent variant", () => {
     const _event: AgentEvent = {
       type: "knobs_applied",
       surface: "bench",
-      knobs: { lsp: { value: true, source: "env" } },
+      knobs: { lsp: { value: true, unit: undefined, display: "on", source: "env" } },
       preset: null,
       costMultiplier: 1,
     }
@@ -115,8 +115,8 @@ describe("JsonlRecorder writes a knobs_applied line", () => {
       type: "knobs_applied",
       surface: "bench",
       knobs: {
-        lsp: { value: true, source: "env" },
-        "branch-search": { value: { defaultN: 3 }, source: "env" },
+        lsp: { value: true, unit: undefined, display: "on", source: "env" },
+        "branch-search": { value: { defaultN: 3 }, unit: "candidates", display: "3 candidates", source: "env" },
       },
       preset: "agentless-full",
       costMultiplier: 9,
@@ -136,8 +136,8 @@ describe("JsonlRecorder writes a knobs_applied line", () => {
     expect(knobsLine.data.preset).toBe("agentless-full")
     expect(knobsLine.data.costMultiplier).toBe(9)
     expect(knobsLine.data.knobs).toEqual({
-      lsp: { value: true, source: "env" },
-      "branch-search": { value: { defaultN: 3 }, source: "env" },
+      lsp: { value: true, unit: undefined, display: "on", source: "env" },
+      "branch-search": { value: { defaultN: 3 }, unit: "candidates", display: "3 candidates", source: "env" },
     })
   })
 
@@ -185,7 +185,7 @@ describe("StdoutStream renders the new variant (graceful skip pin)", () => {
     stream.emit({
       type: "knobs_applied",
       surface: "bench",
-      knobs: { lsp: { value: true, source: "env" } },
+      knobs: { lsp: { value: true, unit: undefined, display: "on", source: "env" } },
       preset: null,
       costMultiplier: 1,
     })
@@ -206,7 +206,7 @@ describe("StdoutStream renders the new variant (graceful skip pin)", () => {
     stream.emit({
       type: "knobs_applied",
       surface: "bench",
-      knobs: { lsp: { value: true, source: "env" } },
+      knobs: { lsp: { value: true, unit: undefined, display: "on", source: "env" } },
       preset: "agentless-full",
       costMultiplier: 1,
     })

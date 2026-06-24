@@ -51,7 +51,7 @@ describe("closure-diagnostics-io", () => {
         attemptOutcomes: [{ kind: "real-fail", subkind: "max_turns_exhausted" }],
       },
     }
-    const [f] = buildFacts([r])
+    const f = buildFacts([r])[0]!
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("max_turns")
   })
@@ -69,7 +69,7 @@ describe("closure-diagnostics-io", () => {
         attemptOutcomes: [{ kind: "real-fail", subkind: "budget_exhausted" }],
       },
     }
-    const [f] = buildFacts([r])
+    const f = buildFacts([r])[0]!
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("budget_exhausted")
   })
@@ -94,7 +94,7 @@ describe("closure-diagnostics-io", () => {
         ],
       },
     }
-    const [f] = buildFacts([r])
+    const f = buildFacts([r])[0]!
     expect(f.emptyPatch).toBe(true)
     expect(f.endReason).toBe("admission_blocked")
   })
@@ -119,7 +119,7 @@ describe("closure-diagnostics-io", () => {
         escalate: true,
       },
     }
-    const [f] = buildFacts([over])
+    const f = buildFacts([over])[0]!
     expect(f.overBudget).toBe(true)
     expect(f.newDef).toBe(true)
     expect(f.crossFile).toBe(true)
@@ -127,7 +127,7 @@ describe("closure-diagnostics-io", () => {
 
   test("buildFacts: absent patchBudget ⇒ budget facts null (metric unavailable, not false)", () => {
     const r: InstanceResult = { id: "none", passed: true, patch: "diff --git a/x b/x\n", turns: 1 }
-    const [f] = buildFacts([r])
+    const f = buildFacts([r])[0]!
     expect(f.overBudget).toBeNull()
     expect(f.newDef).toBeNull()
     expect(f.crossFile).toBeNull()
@@ -141,7 +141,7 @@ describe("closure-diagnostics-io", () => {
       turns: 1,
       verdict: "grader_invalid",
     }
-    expect(buildFacts([r])[0].resolved).toBeNull()
+    expect(buildFacts([r])[0]!.resolved).toBeNull()
   })
 
   test("diagnoseRun with no dataset → owner metrics unavailable, no crash", () => {
@@ -153,6 +153,6 @@ describe("closure-diagnostics-io", () => {
     }
     const d = diagnoseRun([r], undefined)
     expect(d.total).toBe(1)
-    expect(d.metrics["owner_recall@1"].available).toBe(false)
+    expect(d.metrics["owner_recall@1"]!.available).toBe(false)
   })
 })

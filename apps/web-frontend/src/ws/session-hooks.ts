@@ -290,7 +290,7 @@ const applyAssistantSignatureToTranscript = (args: {
     state: args.state,
     text,
     timestamp: args.timestamp,
-    eventId: args.eventId,
+    ...(args.eventId !== undefined ? { eventId: args.eventId } : {}),
     fallback,
     signature,
   })
@@ -341,7 +341,12 @@ const applySessionStateToTranscript = (
   eventId?: string,
 ): TranscriptState =>
   applyStreamingSessionStateToTranscript(state, sessionState, timestamp, eventId) ??
-  applyAssistantSignatureToTranscript({ state, sessionState, timestamp, eventId }) ??
+  applyAssistantSignatureToTranscript({
+    state,
+    sessionState,
+    timestamp,
+    ...(eventId !== undefined ? { eventId } : {}),
+  }) ??
   settlePendingCompletionOnIdle(state, sessionState) ??
   state
 

@@ -175,6 +175,16 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(cfg.localizePhase).toEqual({ phase1Turns: 5 })
   })
 
+  test("PRESET-4c: explicit QUANTA_BENCH_LSP=off beats legacy QUANTA_LSP_TOOLS=full alias", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v1"
+    process.env.QUANTA_BENCH_LSP = "off"
+    process.env.QUANTA_LSP_TOOLS = "full"
+    const opt = benchOptIns()
+    expect(opt.lspNav).toBe(false)
+    const cfg = buildOnce()
+    expect(hasLspTool(cfg)).toBe(false)
+  })
+
   // PRESET-5: no preset + no env ⇒ byte-identical all-OFF baseline. The
   // live-override store stays untouched (no setKnobOverride side-effect).
   test("PRESET-5: baseline (no preset/env) is all-OFF, no overrides", () => {

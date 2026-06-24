@@ -123,8 +123,7 @@ describe("hellgate — gate-OFF (env absent)", () => {
 describe("hellgate — active knob end-to-end", () => {
   test("preset localize-phase + env '0' ⇒ explicit OFF suppresses the preset", () => {
     const state = resolveBenchKnobs({
-      envVars: { [ENV_KEY]: "0" },
-      preset: "agentless-v5-thin-and-expanded",
+      envVars: { [ENV_KEY]: "0", QUANTA_BENCH_PRESET: "agentless-v5-thin-and-expanded" },
     })
     expect(state.values.get(localizePhaseKnob.id)?.value).toEqual({ phase1Turns: 0 })
 

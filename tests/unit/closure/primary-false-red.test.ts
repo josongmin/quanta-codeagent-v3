@@ -114,7 +114,7 @@ describe("runRepairRounds — REAL validator sidecar gating", () => {
     // The rail makes the validator run `args.primaryRailStep.cmd` (the repro) and
     // attach the sentinel predicate — exactly the production wiring.
     primaryRailStep: {
-      kind: "repro",
+      kind: "repro" as const,
       cmd: 'python "reproduce_issue.py"',
       authority: "execution" as const,
       successPredicate: { type: "stdout_contains" as const, substring: "Issue resolved" },

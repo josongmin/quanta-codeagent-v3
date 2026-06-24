@@ -84,7 +84,7 @@ const extractUnionTypeLiterals = (
   if (unionMatch === null) {
     throw new Error(`could not locate \`export type ${unionName} = …\` union block`)
   }
-  const memberNames = (unionMatch[1].match(/[A-Za-z0-9_]+/g) ?? []).filter(
+  const memberNames = ((unionMatch[1] ?? "").match(/[A-Za-z0-9_]+/g) ?? []).filter(
     (n) => n.length > 0,
   )
 
@@ -96,7 +96,7 @@ const extractUnionTypeLiterals = (
       `interface ${name}\\b[\\s\\S]*?extends ${envelopeName}<"([^"]+)">`,
     )
     const ifaceMatch = ifaceRe.exec(source)
-    if (ifaceMatch !== null) literals.add(ifaceMatch[1])
+    if (ifaceMatch?.[1] !== undefined) literals.add(ifaceMatch[1])
   }
   return literals
 }
@@ -114,7 +114,9 @@ const extractSetLiterals = (source: string, constName: string): Set<string> => {
     throw new Error(`could not locate \`${constName} = new Set([…])\``)
   }
   const literals = new Set<string>()
-  for (const m of match[1].matchAll(/"([^"]+)"/g)) literals.add(m[1])
+  for (const m of (match[1] ?? "").matchAll(/"([^"]+)"/g)) {
+    if (m[1] !== undefined) literals.add(m[1])
+  }
   return literals
 }
 
@@ -133,7 +135,9 @@ const extractArrayLiterals = (source: string, constName: string): Set<string> =>
     throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
   }
   const literals = new Set<string>()
-  for (const m of match[1].matchAll(/"([^"]+)"/g)) literals.add(m[1])
+  for (const m of (match[1] ?? "").matchAll(/"([^"]+)"/g)) {
+    if (m[1] !== undefined) literals.add(m[1])
+  }
   return literals
 }
 
@@ -150,7 +154,7 @@ const extractOrderedArrayLiterals = (source: string, constName: string): string[
   if (match === null) {
     throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
   }
-  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1])
+  return [...(match[1] ?? "").matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] !== undefined ? [m[1]] : []))
 }
 
 /**
@@ -169,7 +173,9 @@ const extractOrderedObjectFieldLiterals = (
   if (match === null) {
     throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
   }
-  return [...match[1].matchAll(new RegExp(`${field}:\\s*"([^"]+)"`, "g"))].map((m) => m[1])
+  return [...(match[1] ?? "").matchAll(new RegExp(`${field}:\\s*"([^"]+)"`, "g"))].flatMap((m) =>
+    m[1] !== undefined ? [m[1]] : [],
+  )
 }
 
 /**
@@ -182,7 +188,7 @@ const extractStringConst = (source: string, constName: string): string => {
   if (match === null) {
     throw new Error(`could not locate \`${constName} = "…"\``)
   }
-  return match[1]
+  return match[1] ?? ""
 }
 
 describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT", () => {

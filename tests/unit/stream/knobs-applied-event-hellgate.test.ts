@@ -73,9 +73,14 @@ describe("hellgate knobs_applied variant — closed-union construction", () => {
       type: "knobs_applied",
       surface: "bench",
       knobs: {
-        "branch-search": { value: { defaultN: 3, strategy: "ucb1" }, source: "env" },
-        lsp: { value: true, source: "preset" },
-        "issue-hint": { value: 1, source: "default" },
+        "branch-search": {
+          value: { defaultN: 3, strategy: "ucb1" },
+          unit: "candidates",
+          display: "3 candidates",
+          source: "env",
+        },
+        lsp: { value: true, unit: undefined, display: "on", source: "preset" },
+        "issue-hint": { value: 1, unit: "mode", display: "1 mode", source: "default" },
       },
       preset: null,
       costMultiplier: 9,
@@ -192,7 +197,12 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
       knobs: {
         // Note: `id` field uses normal kebab-case; the `value` inner record
         // contains a key named `token` which IS the redacted target.
-        "leaky-knob": { value: { token: "sk-some-real-looking-key-12345" }, source: "env" },
+        "leaky-knob": {
+          value: { token: "sk-some-real-looking-key-12345" },
+          unit: undefined,
+          display: "on",
+          source: "env",
+        },
       },
       preset: null,
       costMultiplier: 1,
@@ -212,7 +222,12 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
       surface: "bench",
       knobs: {
         // `extra` is NOT a secret key, but the string value matches sk- regex.
-        sneaky: { value: { extra: "sk-AAAAAAAAAAAAAAAA" }, source: "env" },
+        sneaky: {
+          value: { extra: "sk-AAAAAAAAAAAAAAAA" },
+          unit: undefined,
+          display: "on",
+          source: "env",
+        },
       },
       preset: null,
       costMultiplier: 1,
@@ -230,7 +245,12 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
       type: "knobs_applied",
       surface: "bench",
       knobs: {
-        "branch-search": { value: { defaultN: 3, strategy: "ucb1" }, source: "preset" },
+        "branch-search": {
+          value: { defaultN: 3, strategy: "ucb1" },
+          unit: "candidates",
+          display: "3 candidates",
+          source: "preset",
+        },
       },
       preset: "agentless-full",
       costMultiplier: 9,
@@ -249,7 +269,7 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
       type: "knobs_applied",
       surface: "bench",
       knobs: {
-        "한글-knob": { value: true, source: "env" },
+        "한글-knob": { value: true, unit: undefined, display: "on", source: "env" },
       },
       preset: null,
       costMultiplier: 1,
@@ -263,8 +283,12 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
   test("large knob map (200 entries) round-trips intact", () => {
     const path = join(dir, "r.jsonl")
     const rec = new JsonlRecorder(path, { strict: true, now: () => 1 })
-    const knobs: Record<string, { value: number; source: string }> = {}
-    for (let i = 0; i < 200; i++) knobs[`k-${i}`] = { value: i, source: "env" }
+    const knobs: Record<
+      string,
+      { value: number; unit: string | undefined; display: string; source: string }
+    > = {}
+    for (let i = 0; i < 200; i++)
+      knobs[`k-${i}`] = { value: i, unit: "items", display: `${i} items`, source: "env" }
     rec.emit({
       type: "knobs_applied",
       surface: "bench",
@@ -319,7 +343,7 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
       rec.emit({
         type: "knobs_applied",
         surface: "bench",
-        knobs: { cycle: { value: cyclic, source: "env" } },
+        knobs: { cycle: { value: cyclic, unit: undefined, display: "on", source: "env" } },
         preset: null,
         costMultiplier: 0,
       }),
@@ -336,7 +360,7 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
       rec.emit({
         type: "knobs_applied",
         surface: "bench",
-        knobs: { cycle: { value: cyclic, source: "env" } },
+        knobs: { cycle: { value: cyclic, unit: undefined, display: "on", source: "env" } },
         preset: null,
         costMultiplier: 0,
       }),
@@ -350,7 +374,7 @@ describe("hellgate JsonlRecorder + knobs_applied — adversarial wire shape", ()
     rec.emit({
       type: "knobs_applied",
       surface: "cli",
-      knobs: { lsp: { value: true, source: "env" } },
+      knobs: { lsp: { value: true, unit: undefined, display: "on", source: "env" } },
       preset: null,
       costMultiplier: 1,
     })

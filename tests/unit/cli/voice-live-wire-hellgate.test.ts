@@ -62,6 +62,9 @@ const fakeTransport = (): RealtimePort => ({
   audioStop() {
     return { ok: true, value: undefined }
   },
+  async listVoices() {
+    return { ok: false as const, error: { kind: "voices-unsupported" as const } }
+  },
   status(): RealtimeStatus {
     return "closed"
   },

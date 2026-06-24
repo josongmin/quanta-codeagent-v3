@@ -33,7 +33,7 @@ import type { ToolContext, ToolEvent } from "@/tool"
 
 /** Drain a tool's execute generator and return the last result event. */
 async function run(
-  tool: { execute: (i: unknown, ctx: ToolContext) => AsyncIterable<ToolEvent> },
+  tool: { execute: (i: never, ctx: ToolContext) => AsyncIterable<ToolEvent> },
   input: unknown,
   cwd: string,
 ): Promise<{ ok: boolean; output: string }> {
