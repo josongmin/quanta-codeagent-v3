@@ -39,7 +39,7 @@ describe("createPpidWalkKiller — whole-tree signal (D1)", () => {
 
     killer.signalTree(100, "SIGTERM")
 
-    // Root signalled FIRST (stops new forks before we enumerate descendants).
+    // Root is still signalled FIRST (stops new forks before descendant signals).
     expect(signalled[0]).toEqual({ pid: 100, signal: "SIGTERM" })
     // Whole subtree reached — crucially the GRANDCHILD (the leak D1 fixes).
     const pidsHit = signalled.map((s) => s.pid)
@@ -50,6 +50,54 @@ describe("createPpidWalkKiller — whole-tree signal (D1)", () => {
     expect(pidsHit).not.toContain(600)
     // Every signal was the requested one.
     expect(signalled.every((s) => s.signal === "SIGTERM")).toBe(true)
+  })
+
+  test("pre-root snapshot catches wrapper children that reparent after root SIGTERM", () => {
+    const tables: ProcessTableProvider[] = [
+      () => [
+        { pid: 100, ppid: 1 },
+        { pid: 200, ppid: 100 },
+      ],
+      () => [{ pid: 200, ppid: 1 }],
+    ]
+    const signalled: Array<{ pid: number; signal: string }> = []
+    const killer = createPpidWalkKiller({
+      readTable: () => {
+        const next = tables.shift()
+        return next ? next() : []
+      },
+      sendSignal: (pid, signal) => {
+        signalled.push({ pid, signal })
+      },
+    })
+
+    killer.signalTree(100, "SIGTERM")
+
+    expect(signalled).toContainEqual({ pid: 100, signal: "SIGTERM" })
+    expect(signalled).toContainEqual({ pid: 200, signal: "SIGTERM" })
+  })
+
+  test("post-root snapshot still catches children visible only after the root signal", () => {
+    const tables: ProcessTableProvider[] = [
+      () => [{ pid: 100, ppid: 1 }],
+      () => [
+        { pid: 100, ppid: 1 },
+        { pid: 201, ppid: 100 },
+      ],
+    ]
+    const seen: number[] = []
+    const killer = createPpidWalkKiller({
+      readTable: () => {
+        const next = tables.shift()
+        return next ? next() : []
+      },
+      sendSignal: (pid) => seen.push(pid),
+    })
+
+    killer.signalTree(100, "SIGKILL")
+
+    expect(seen).toContain(100)
+    expect(seen).toContain(201)
   })
 
   test("no-throw + idempotent: a sendSignal that throws (already-dead pid) is swallowed", () => {

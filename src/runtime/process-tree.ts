@@ -19,8 +19,10 @@
  * we cannot confirm Bun.spawn establishes group leadership (no `detached`
  * option exposed) — guessing at setsid/pgid semantics risks signalling the
  * WRONG group. The ppid-walk needs no new deps (`ps` exists on macOS + Linux),
- * is what Cursor's proclist does, and is race-minimised by signalling the root
- * FIRST (stops new forks before we enumerate the rest of the tree).
+ * is what Cursor's proclist does, and is race-minimised with two snapshots:
+ * pre-root-signal catches existing children before a fast wrapper can exit and
+ * reparent them; post-root-signal catches children that appeared just before the
+ * root was stopped.
  *
  * KNOWN LIMITATION (honest — verified by a real-process repro): a child that
  * DOUBLE-FORKS / daemonizes (`( cmd & )`, `disown`, an explicit `setsid`) escapes.
@@ -72,10 +74,12 @@ export interface PpidWalkDeps {
  * Build the portable ppid-walk tree killer.
  *
  * Algorithm (race-minimised):
- *   1. Signal the ROOT first — a SIGTERM to the parent stops it spawning NEW
- *      children before we enumerate, shrinking the enumerate→kill race window.
- *   2. Read the process table ONCE and BFS the descendant graph from the root.
- *   3. Signal each descendant (deepest-reachable included — this is the
+ *   1. Read the process table once BEFORE root signal. This catches wrapper
+ *      children that would otherwise be reparented to init if the root exits
+ *      immediately on SIGTERM.
+ *   2. Signal the ROOT — stops new forks.
+ *   3. Read the process table once AFTER root signal and signal the union of
+ *      pre/post descendants (deepest-reachable included — this is the
  *      grandchild the legacy single-PID kill leaked).
  *
  * Every `sendSignal` is wrapped so an already-dead pid (ESRCH) does not abort
@@ -94,25 +98,33 @@ export const createPpidWalkKiller = (deps: PpidWalkDeps): ProcessTreeKiller => {
   }
 
   const signalTree = (rootPid: number, signal: TreeSignal): void => {
-    // 1) Root first — stop new forks before enumerating the rest of the tree.
+    const descendantsBefore = readDescendants(rootPid, readTable)
+
+    // Root first among signals — stop new forks before signalling descendants.
     safeSend(rootPid, signal)
 
-    // 2) Enumerate once. If `ps` is unavailable we degrade to root-only.
-    let rows: readonly ProcessRow[]
-    try {
-      rows = readTable()
-    } catch {
-      return
-    }
+    const descendantsAfter = readDescendants(rootPid, readTable)
 
-    // 3) Signal every descendant (BFS over the ppid graph) — the grandchild the
-    // legacy single-PID kill leaked. Pure traversal extracted below.
-    for (const pid of descendantsOf(rootPid, rows)) {
+    // Signal every descendant seen in either snapshot. The pre-snapshot is what
+    // prevents a fast-exiting wrapper from laundering its children to ppid=1
+    // before we ever enumerate them.
+    const seen = new Set<number>()
+    for (const pid of [...descendantsBefore, ...descendantsAfter]) {
+      if (seen.has(pid)) continue
+      seen.add(pid)
       safeSend(pid, signal)
     }
   }
 
   return { signalTree }
+}
+
+const readDescendants = (rootPid: number, readTable: ProcessTableProvider): number[] => {
+  try {
+    return descendantsOf(rootPid, readTable())
+  } catch {
+    return []
+  }
 }
 
 /** BFS the ppid-graph for every descendant of `rootPid` (root EXCLUDED — it is

@@ -20,8 +20,7 @@ const cand0: Candidate = {
   baseValidatedRed: true,
 }
 
-const SANITY_REASON =
-  "hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/owner.py)"
+const SANITY_REASON = "hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/owner.py)"
 
 describe("clean-mode no-expand must run the hard-gate chain (B#3)", () => {
   it("CLEAN + riskGate.expand=false: a staticSanity-failing cand0 is NOT selected", async () => {

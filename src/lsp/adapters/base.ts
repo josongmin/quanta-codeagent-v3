@@ -23,8 +23,8 @@ import { applyWorkspaceEditAtomic } from "./base/atomic-edit"
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   type LspClientOptions,
-  type LspProcessTreeSignal,
   type LspClientSpec,
+  type LspProcessTreeSignal,
   STDERR_TAIL_MAX,
 } from "./base/config"
 import { isUnsupportedError, LspRequestError } from "./base/errors"
@@ -72,12 +72,7 @@ import type {
   WorkspaceConfigurationParams,
 } from "./base/raw-types"
 import { resolveWorkspaceConfiguration, toWorkspaceFolder } from "./base/workspace"
-import {
-  encodeMessage,
-  type JsonRpcMessage,
-  type JsonRpcResponse,
-  MessageReader,
-} from "./jsonrpc"
+import { encodeMessage, type JsonRpcMessage, type JsonRpcResponse, MessageReader } from "./jsonrpc"
 
 export type { LspClientOptions, LspClientSpec } from "./base/config"
 // Re-export the complete original public surface so every importer of
@@ -776,10 +771,10 @@ export class LspClient implements LspPort {
     if (this.processTreeKiller !== undefined && typeof pid === "number" && pid > 0) {
       try {
         this.processTreeKiller.signalTree(pid, signal)
+        return
       } catch {
         // injected killer is expected no-throw; keep stop() defensive anyway.
       }
-      return
     }
     try {
       proc.kill(signal)

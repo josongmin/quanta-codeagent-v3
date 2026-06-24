@@ -15,10 +15,11 @@
  * and keeps living; elapsed bounds prove fail-fast vs the 8s timeout burn.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdtempSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { LspClient, type LspClientSpec } from "@/lsp"
+import { defaultPpidWalkKiller } from "@/runtime"
 import { logger } from "@/shared"
 
 const SPEC: LspClientSpec = {
@@ -32,6 +33,26 @@ const SPEC: LspClientSpec = {
 const REQUEST_TIMEOUT_MS = 8_000
 /** Fail-fast bound: far under the request timeout the old code burned. */
 const FAIL_FAST_BOUND_MS = 4_000
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+const pidIsAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const waitUntil = async (predicate: () => boolean, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await delay(25)
+  }
+  return predicate()
+}
 
 describe("LspClient — stdout pump death while the server process lives (#9)", () => {
   let client: LspClient | null = null
@@ -134,6 +155,44 @@ describe("LspClient — stdout pump death while the server process lives (#9)", 
       expect(warned).toBe(false)
     } finally {
       warn.mockRestore()
+    }
+  })
+
+  test("REAL subprocess tree: stop() reaps a wrapper child, not just the direct LSP pid", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsp-tree-kill-"))
+    const childPidFile = join(dir, "child.pid")
+    let childPid: number | null = null
+    try {
+      client = new LspClient(
+        {
+          defaultCommand: ["/bin/sh", "-c", `sleep 30 & echo $! > "${childPidFile}"; wait`],
+          languageIdFor: () => "plaintext",
+        },
+        {
+          processTreeKiller: defaultPpidWalkKiller(),
+          requestTimeoutMs: 200,
+        },
+      )
+      await client.start().catch(() => undefined)
+      const wrotePid = await waitUntil(() => existsSync(childPidFile), 1_000)
+      expect(wrotePid).toBe(true)
+      childPid = Number.parseInt(readFileSync(childPidFile, "utf8").trim(), 10)
+      expect(Number.isInteger(childPid)).toBe(true)
+      expect(pidIsAlive(childPid)).toBe(true)
+
+      await client.stop()
+      client = null
+
+      const childReaped = await waitUntil(() => childPid !== null && !pidIsAlive(childPid), 2_000)
+      expect(childReaped).toBe(true)
+    } finally {
+      if (childPid !== null && pidIsAlive(childPid)) {
+        try {
+          process.kill(childPid, "SIGKILL")
+        } catch {
+          // already gone
+        }
+      }
     }
   })
 })

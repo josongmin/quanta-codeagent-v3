@@ -367,6 +367,46 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "cha-multisite-steer": "1",
     "selector-mode": "clean",
   },
+  // jun-25 COMPETITOR-VERIFIED ABSORPTION arm. == agentless-v4-proof-clean MINUS
+  // verify-select-proof-required (don't hard-gate submit to empty — mini-SWE-agent
+  // "submit best non-empty diff" posture; the 0/3 run's empty_patch terminator was
+  // the proof gate) PLUS the LANDED-REAL absorbed levers: spec-fidelity-invariant
+  // + dynamic-message-matcher (Lingxi execution-free spec oracle → 13033) and
+  // forward-localize (Lingxi end-state consumer-trace → 14315). cha-multisite +
+  // F821 differential (default-ON) ride along. A/B control = agentless-v4-proof-clean.
+  // NOT default; opt-in via QUANTA_BENCH_PRESET. Composite SSOT: ABSORB_MODULES.
+  "agentless-v5-absorb": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "repro-only",
+    "patch-hygiene": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "repro-test": "10",
+    "adversarial-repro": "1",
+    "test-runner": "1",
+    "verify-select-concurrency": "3",
+    "selector-mode": "clean",
+    "cha-multisite-steer": "1",
+    "spec-fidelity-invariant": "1",
+    "dynamic-message-matcher": "1",
+    "forward-localize": "1",
+  },
   // jun-22 v5 thin-first ADAPTIVE controller opening. The base posture is exactly
   // `agentless-v3-thin-strict` (cheap thin/noexec/minimal round-0); the per-phase
   // capability knobs (expand-select / proof-clean / repair / repro rails) are

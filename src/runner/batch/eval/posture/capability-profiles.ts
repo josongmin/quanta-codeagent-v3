@@ -316,6 +316,27 @@ export const REPRO_RAILS_MODULES: readonly KnobModule[] = [
   CLEAN_SELECTOR,
 ]
 
+/** `agentless-v5-absorb` — the competitor-verified absorption arm (jun-25).
+ *  Bundles the LANDED-REAL absorbed levers into ONE measurable preset so the
+ *  three confirmed our-only fails (13033/14315/11138) finally exercise them:
+ *   - repro-rails (NOT proof-required) ⇒ rank by repro/proof but never hard-gate
+ *     submit to empty — mirrors the mini-SWE-agent "submit best non-empty diff"
+ *     posture that the 0/3 proof-gated run lacked (empty_patch was the terminator).
+ *   - CHA_MULTISITE: backward sibling-override completeness (django-11138/14315).
+ *   - DYNAMIC_MESSAGE_MATCHER: spec-fidelity-invariant + dynamic-format matcher
+ *     (Lingxi topic-question oracle) — the execution-free spec gate for 13033.
+ *   - FORWARD_LOCALIZE: end-state consumer-trace re-localization (Lingxi) — the
+ *     forward lever for the 14315 producer→consumer miss.
+ *  F821 differential gate + lost-edits capture are DEFAULT-ON, so they ride along.
+ *  A/B control = `agentless-v4-proof-clean` (same rails + proof-required, no new
+ *  localize/spec levers). NOT default; opt-in via `QUANTA_BENCH_PRESET`. */
+export const ABSORB_MODULES: readonly KnobModule[] = [
+  ...REPRO_RAILS_MODULES,
+  CHA_MULTISITE,
+  DYNAMIC_MESSAGE_MATCHER,
+  FORWARD_LOCALIZE,
+]
+
 // ── v5 AdaptiveAction → phase modules (the controller's action map) ──────────
 // Mirrors the closed `AdaptiveAction` enum in the v5 readme. `accept_thin` and
 // `stop_infra_or_budget` are no-op postures (finalize/terminate on the thin base).

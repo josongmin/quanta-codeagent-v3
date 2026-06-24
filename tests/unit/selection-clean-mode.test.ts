@@ -489,7 +489,6 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
       "hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/base.py)",
     )
   })
-
 })
 
 describe("clean-mode selector authority (T-AUTH-01 / T-SEL-02 / T-SMK-04 live wiring)", () => {

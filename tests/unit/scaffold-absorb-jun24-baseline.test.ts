@@ -143,10 +143,9 @@ describe("scaffold-absorb jun24 — T0 baseline (false-winner characterization)"
   it("BASELINE(T0): a static-witness multi-site-family contract is sanitized OUT of clean authority — handing the selector one is INERT", async () => {
     // The obvious-but-wrong T1 design: build a `multi-site-family` contract from a
     // static witness and pass it in. In clean mode it is filtered before scoring,
-    // so it cannot move `requiredContractsSatisfied` and a 2-file patch carrying
-    // it is still vetoed as unproven multi-source drift. T1 must therefore route
-    // coverage through AUTHORITY provenance (or a new hard gate), not a static
-    // family bundle. Proof = identical outcome with the contract removed.
+    // so it cannot move `requiredContractsSatisfied` — supplying it is INERT
+    // (identical outcome with the contract removed). T1 must therefore route
+    // coverage through AUTHORITY provenance, not a static family bundle.
     const complete = cand({
       id: "cand-0",
       patch: patchForFiles(["pkg/producer.py", "pkg/consumer.py"]),
@@ -165,16 +164,14 @@ describe("scaffold-absorb jun24 — T0 baseline (false-winner characterization)"
     const withFamily = await runSelection({ ...base, publicContracts: staticFamily })
     const without = await runSelection(base)
 
-    // Inert: contract registers nothing and the drift veto fires either way.
+    // Inert: the static-family contract registers nothing — requiredContractsSatisfied
+    // stays 0 whether or not it is supplied, so it cannot change selection. (With the
+    // unproven-multi-source drift heuristic removed, the proofless 2-file patch is
+    // admissible either way; the contract still moves nothing.)
     expect(withFamily.scored[0]?.requiredContractsSatisfied).toBe(0)
-    expect(withFamily.winner).toBeNull()
-    expect(withFamily.scored[0]?.verdict.reasons).toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
-    expect(without.winner).toBeNull()
-    expect(without.scored[0]?.requiredContractsSatisfied).toBe(
-      withFamily.scored[0]?.requiredContractsSatisfied,
-    )
+    expect(without.scored[0]?.requiredContractsSatisfied).toBe(0)
+    expect(withFamily.scored[0]?.verdict.admissible).toBe(without.scored[0]?.verdict.admissible)
+    expect(withFamily.winner?.id).toBe(without.winner?.id)
   })
 
   it("BASELINE(T0): a genuinely single-file fix with NO owner contract is accepted (false-positive pole)", async () => {
