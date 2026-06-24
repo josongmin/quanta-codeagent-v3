@@ -119,19 +119,16 @@ describe("bench SOTA preset hellgate — QUANTA_BENCH_SOTA=1", () => {
     expect(opt.issueHintMode).toBe("off")
   })
 
-  // SOTA-6: QUANTA_BENCH_LSP=0 does NOT suppress SOTA lspNav. The real reason is
-  // NOT an OR-composition (there is none) — it is the knob RESOLVER layering:
-  // the `agentless-v1` preset sets `lsp:1` at the PRESET layer, and the env
-  // override `QUANTA_BENCH_LSP=0` parses to falsy/unset (gate parser), so it does
-  // NOT flip the preset's `lsp:1`. `readKnobValue(state,"lsp",isTrue)` therefore
-  // stays true (knobs-bench.ts:341). This pins that a falsy individual env value
-  // cannot suppress a super-preset's positive knob.
-  test("SOTA-6: QUANTA_BENCH_LSP=0 with SOTA=1 — preset lsp:1 wins, lspNav===true", () => {
+  // SOTA-6: explicit env false MUST suppress the SOTA preset's `lsp:1`.
+  // Mechanism: the `lsp` knob parser recognizes `0/off/false` as the boolean
+  // value `false`, so the ENV layer resolves the knob and beats the preset
+  // layer. benchPostureFromState must read the knob as an explicit boolean, not
+  // as a truthy-only presence check, or the preset would leak back in.
+  test("SOTA-6: QUANTA_BENCH_LSP=0 with SOTA=1 disables lspNav", () => {
     process.env.QUANTA_BENCH_SOTA = "1"
     process.env.QUANTA_BENCH_LSP = "0"
     const opt = benchOptIns()
-    // preset lsp:1 survives the falsy "0" env override ⇒ lspNav stays true.
-    expect(opt.lspNav).toBe(true)
+    expect(opt.lspNav).toBe(false)
   })
 
   // SOTA-7: QUANTA_BENCH_LOCALIZE_PHASE=3 with SOTA=1 — the explicit value (3)

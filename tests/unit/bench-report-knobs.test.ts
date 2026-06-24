@@ -187,6 +187,24 @@ describe("collectBenchKnobsTelemetry — env adapter", () => {
     expect(k.inactive).toEqual([])
   })
 
+  test("resolved false boolean renders as off", () => {
+    registerKnob({
+      id: "test-one",
+      envKey: "QUANTA_BENCH_TEST_ONE",
+      category: "agent",
+      surfaces: BENCH,
+      parse: (raw: string | undefined): boolean | undefined =>
+        raw === "1" ? true : raw === "0" ? false : undefined,
+      apply: (cfg: AgentConfig): AgentConfig => cfg,
+      describe: "test knob test-one",
+    })
+    process.env.QUANTA_BENCH_TEST_ONE = "0"
+    const k = collectBenchKnobsTelemetry()
+    expect(k.resolved).toEqual({
+      "test-one": { value: false, unit: undefined, display: "off", source: "env" },
+    })
+  })
+
   test("registered + inactive knob ⇒ listed under inactive", () => {
     registerKnob(mkBoolKnob("test-one", "QUANTA_BENCH_TEST_ONE"))
     const k = collectBenchKnobsTelemetry()

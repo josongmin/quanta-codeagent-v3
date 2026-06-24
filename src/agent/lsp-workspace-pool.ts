@@ -57,6 +57,7 @@ interface WorkspaceEntry {
   refs: number
   idleTimer?: ReturnType<typeof setTimeout> | undefined
   destroyed: boolean
+  stopPromise?: Promise<void> | undefined
 }
 
 /** Default idle-TTL (30 minutes) before an unreferenced workspace is reaped
@@ -141,6 +142,7 @@ export class SharedWorkspacePool {
       }
       return this.handle(entry)
     } catch (e) {
+      if (isFatalSharedSessionError(e)) await this.stopClient(entry, "pool/open-fatal")
       await this.release(entry)
       // Route through the typed SSOT classifier (LSP-00). An expected lifecycle
       // race/cancel stays OFF the warn channel so a successful bench run doesn't
@@ -216,6 +218,7 @@ export class SharedWorkspacePool {
       try {
         ready = await this.warmFile(entry, filePath, signal)
       } catch (e) {
+        if (isFatalSharedSessionError(e)) await this.stopClient(entry, "pool/prove-ready-fatal")
         return {
           ...base,
           stage: "ready",
@@ -337,7 +340,12 @@ export class SharedWorkspacePool {
       call: () => Promise<T>,
     ): Promise<T> => {
       if (entry.destroyed) throw new Error(SHARED_SESSION_CLOSED)
-      await this.warmFile(entry, filePath, signal)
+      try {
+        await this.warmFile(entry, filePath, signal)
+      } catch (e) {
+        if (isFatalSharedSessionError(e)) await this.stopClient(entry, "pool/warm-fatal")
+        throw e
+      }
       return this.guarded(entry, call)
     }
     return {
@@ -406,7 +414,7 @@ export class SharedWorkspacePool {
     try {
       return await call()
     } catch (e) {
-      if (isFatalSharedSessionError(e)) void this.stopClient(entry, "pool/fatal")
+      if (isFatalSharedSessionError(e)) await this.stopClient(entry, "pool/fatal")
       throw e
     }
   }
@@ -432,14 +440,18 @@ export class SharedWorkspacePool {
       clearTimeout(entry.idleTimer)
       entry.idleTimer = undefined
     }
-    if (entry.destroyed) return
+    if (entry.destroyed) {
+      await entry.stopPromise?.catch(() => undefined)
+      return
+    }
     entry.destroyed = true
     // Only delete the map slot if it still points at THIS entry (a re-created
     // entry for the same cwd must not be evicted by a stale teardown).
     if (this.sessions.get(entry.key) === entry) this.sessions.delete(entry.key)
-    await entry.client.stop().catch((e: unknown) => {
+    entry.stopPromise = entry.client.stop().catch((e: unknown) => {
       logger.debug(`lsp: stop failed (${label})`, { error: errMessage(e) })
     })
+    await entry.stopPromise
   }
 
   /** TEST-ONLY introspection: number of live (non-destroyed) workspaces. */

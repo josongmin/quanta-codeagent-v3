@@ -28,14 +28,17 @@ import { join } from "node:path"
  *  never realistically ages into expiry during the project's lifetime. */
 const FAR_FUTURE_YEAR = 2090
 
-const EXPIRES_AT = /expires_at:\s*["'](\d{4}-\d{2}-\d{2}[^"']*)["']/g
+// Matches both the TS-literal form (`expires_at: "…"`) and the JSON-fixture form
+// (`"expires_at": "…"`) — auth fixtures live as both inline TS objects AND `.json`
+// files, and the time-bomb class can hide in either.
+const EXPIRES_AT = /["']?expires_at["']?:\s*["'](\d{4}-\d{2}-\d{2}[^"']*)["']/g
 
 function* walk(dir: string): Generator<string> {
   for (const entry of readdirSync(dir)) {
     const p = join(dir, entry)
     const s = statSync(p)
     if (s.isDirectory()) yield* walk(p)
-    else if (entry.endsWith(".ts")) yield p
+    else if (entry.endsWith(".ts") || entry.endsWith(".json")) yield p
   }
 }
 
@@ -109,5 +112,16 @@ describe("no time-bomb auth fixtures (regression guard)", () => {
     expect(isTimeBombDate("2020-01-01T00:00:00Z", now)).toBe(false) // past ⇒ intentional expiry
     expect(isTimeBombDate("2026-06-21T00:00:00Z", now)).toBe(false) // past (vs the fixed clock) ⇒ expiry test
     expect(isTimeBombDate("not-a-date", now)).toBe(false) // unparseable ⇒ ignored
+  })
+
+  test("scan regex captures BOTH the TS-literal and the JSON-quoted-key fixture forms", () => {
+    const dateOf = (line: string): string | undefined => {
+      EXPIRES_AT.lastIndex = 0
+      return EXPIRES_AT.exec(line)?.[1]
+    }
+    expect(dateOf(`    expires_at: "2030-01-01T00:00:00Z",`)).toBe("2030-01-01T00:00:00Z") // TS
+    expect(dateOf(`  "expires_at": "2030-01-01T00:00:00.000Z"`)).toBe("2030-01-01T00:00:00.000Z") // JSON
+    expect(dateOf(`  expires_at: '2099-01-01T00:00:00Z'`)).toBe("2099-01-01T00:00:00Z") // single-quote
+    expect(dateOf(`  refreshed_at: "2030-01-01T00:00:00Z"`)).toBeUndefined() // different key ⇒ no match
   })
 })

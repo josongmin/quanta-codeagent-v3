@@ -17,7 +17,7 @@
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
  */
 import { existsSync } from "node:fs"
-import { mkdir, rename, rm } from "node:fs/promises"
+import { mkdir, readdir, rename, rm, stat } from "node:fs/promises"
 import { createHash, randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
@@ -167,6 +167,24 @@ const checkoutOrDeepen = async (
  * does not overwrite them (matching upstream semantics). When the field is
  * absent, behavior is byte-identical to before (base_commit checkout only).
  */
+/** Reap orphaned `*.git.tmp-<uuid>` bare-mirror dirs left by a clone that was
+ *  SIGTERM'd before its atomic rename. AGE-GATED: only temps older than the max
+ *  plausible in-flight clone are swept, so a concurrent same-repo instance's live
+ *  temp (minutes old at most) is never raced. Best-effort: any fs error is ignored. */
+const ORPHAN_TMP_MAX_AGE_MS = 6 * 60 * 60 * 1000
+const reapStaleMirrorTemps = async (repoCacheRoot: string): Promise<void> => {
+  const now = Date.now()
+  const entries = await readdir(repoCacheRoot).catch(() => [] as string[])
+  for (const name of entries) {
+    if (!name.includes(".git.tmp-")) continue
+    const p = join(repoCacheRoot, name)
+    const st = await stat(p).catch(() => null)
+    if (st !== null && now - st.mtimeMs > ORPHAN_TMP_MAX_AGE_MS) {
+      await rm(p, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+}
+
 export const prepareTaskRepo = async (
   task: SwebenchTask,
   destDir: string,
@@ -200,11 +218,10 @@ export const prepareTaskRepo = async (
     // into a per-call unique temp, then atomically rename into place; if another
     // instance won, our rename throws (target exists) ⇒ discard ours and use theirs.
     // `tmp` and `mirror` share parent `repoCacheRoot` so the rename is intra-dir
-    // (no EXDEV). NOTE: a SIGTERM (the bench deadline kills aggressively) between
-    // the clone success and the rename can orphan a `*.tmp-<uuid>` dir; we do NOT
-    // auto-reap here because a concurrent same-repo instance may have a live tmp of
-    // its own and an age-blind sweep would race it — orphan cleanup is left to an
-    // external repo-cache GC.
+    // (no EXDEV). A SIGTERM (the bench deadline kills aggressively) between the clone
+    // success and the rename can orphan a `*.tmp-<uuid>` dir; reap stale ones here,
+    // AGE-GATED so a concurrent same-repo instance's still-live tmp is never raced.
+    await reapStaleMirrorTemps(repoCacheRoot)
     const tmp = `${mirror}.tmp-${randomUUID()}`
     const m = await exec(`git clone --bare ${repoUrl} ${tmp}`, ".", timeoutMs)
     if (m.code !== 0) {

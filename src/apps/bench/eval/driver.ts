@@ -403,12 +403,13 @@ const classifyPhaseCapture = async (args: {
   readonly captureClass: DoneTimeCaptureClass
   readonly agentError: string | undefined
 }> => {
-  const captureClass = classifyDoneTimeCapture({
+  const facts = classifyDoneTimeCapture({
     sourcePatch: args.rawPatch,
     rawDirty: await gitWorktreeHasStagedChanges(args.sandbox, args.timeoutMs),
     editCount: args.sourceAppliedEditCount ?? 0,
     touchedFiles: filesFromPatch(args.rawPatch),
-  }).captureClass
+  })
+  const captureClass = facts.captureClass
   if (!isCaptureFailure(captureClass)) {
     return { captureClass, agentError: args.agentError }
   }
@@ -426,7 +427,9 @@ const classifyPhaseCapture = async (args: {
     ).catch(() => null)
     logger.warn(
       `[capture-debug] ${args.instance.id}: sandbox=${args.sandbox} firstEditFile=${args.firstEditFile ?? "?"} ` +
-        `rawBytes=${args.rawPatch.length} status=[${(dbgStatus?.stdout ?? "git-fail").slice(0, 400).replace(/\n/g, "|")}]`,
+        `sourceBytes=${facts.sourcePatchBytes} appliedEdits=${facts.editCount} rawDirty=${facts.rawDirty} ` +
+        `touched=[${facts.touchedFiles.join(",").slice(0, 200)}] ` +
+        `status=[${(dbgStatus?.stdout ?? "git-fail").slice(0, 400).replace(/\n/g, "|")}]`,
     )
   }
   return {

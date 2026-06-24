@@ -15,6 +15,7 @@
  *   WP-05  readiness=false does NOT mark prepared ⇒ the next call re-attempts.
  *   WP-06  supports() gates prewarm ⇒ an unsupported anchor spawns nothing.
  *   WP-07  fatal transport error tears down ONCE; siblings fail soft.
+ *   WP-07b readiness fatal tears down the dead entry; next open creates fresh.
  */
 import { describe, expect, test } from "bun:test"
 import { SharedWorkspacePool, type WarmBackend } from "@/agent/lsp-workspace-pool"
@@ -196,6 +197,39 @@ describe("SharedWorkspacePool — generic engine-agnostic lifecycle (fake backen
     expect(client?.stopCalls).toBe(1) // release after teardown is a no-op stop
   })
 
+  test("WP-07b: fatal transport during readiness evicts dead entry; next open is fresh", async () => {
+    const clients: FakeClient[] = []
+    let firstReady = true
+    const backend: WarmBackend = {
+      id: "fake-engine",
+      supports: (filePath) => filePath.endsWith(".fake"),
+      createClient: () => {
+        const c = new FakeClient()
+        clients.push(c)
+        return c
+      },
+      ensureFileReady: async () => {
+        if (firstReady) {
+          firstReady = false
+          throw new Error("LSP server exited during warm-up")
+        }
+        return true
+      },
+    }
+    const pool = new SharedWorkspacePool(backend)
+    const first = await pool.open("/repo/a.fake", "/repo")
+    expect(first).toBeNull()
+    expect(clients.length).toBe(1)
+    expect(clients[0]?.stopCalls).toBe(1)
+    expect(pool.__sizeForTest).toBe(0)
+
+    const second = await pool.open("/repo/a.fake", "/repo")
+    expect(second).not.toBeNull()
+    expect(clients.length).toBe(2)
+    await second?.stop()
+    await pool.disposeAll()
+  })
+
   test("WP-08: hard-evict is terminal — an entry materialized AFTER evict is reaped (leak-race fix)", async () => {
     const probe = makeBackend()
     const pool = new SharedWorkspacePool(probe.backend)
@@ -331,6 +365,8 @@ describe("SharedWorkspacePool — generic engine-agnostic lifecycle (fake backen
     const fatalPool = new SharedWorkspacePool(fatal.backend)
     const r1 = await fatalPool.proveReady("/repo/a.fake", "/repo", { language: "fake" })
     expect(r1.outcome).toBe("fatal_transport")
+    expect(fatal.clients()[0]?.stopCalls).toBe(1)
+    expect(fatalPool.__sizeForTest).toBe(0)
     await fatalPool.disposeAll()
 
     const ok = makeProbeBackend(async () => true)

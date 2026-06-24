@@ -110,10 +110,10 @@ export const resolveBenchKnobs = (args: ResolveBenchKnobsArgs): BenchKnobState =
     // only the env layer is inspected.
     //
     // ONLY VALUED knobs (`unit` defined — numeric/structured) have a "rejected"
-    // state. A boolean ON/OFF flag (unit OMITTED, per the Knob contract) treats
-    // EVERY non-truthy raw as an intentional opt-out — `QUANTA_BENCH_LSP=0/off/
-    // false` is byte-identical to unset, a documented baseline idiom, NOT a typo.
-    // Flagging those would defeat the misconfig/intentional-default distinction.
+    // state. Unit-less boolean knobs either resolve to an explicit boolean
+    // (`true` or, for knobs that support it, `false`) or intentionally fall
+    // through to unset; we do not classify their raws as misconfigs here because
+    // the parser defines the knob-local vocabulary.
     const raw = args.envVars[knob.envKey]
     if (
       knob.unit !== undefined &&
@@ -167,11 +167,11 @@ export const readKnobValue = <T>(
 }
 
 /** Render a knob value with its UNIT so a bare "5" never appears. Number + unit
- *  ⇒ "5 turns"; a knob with no unit is a boolean flag ⇒ "on"; a non-number value
+ *  ⇒ "5 turns"; a knob with no unit is a boolean flag ⇒ "on"/"off"; a non-number value
  *  (e.g. issue-hint mode) ⇒ "agentless (mode)" when unit is "mode", else the
  *  raw value. Pure — exported so the report AND any preset table share one SSOT. */
 export const formatKnobValue = (value: unknown, unit: string | undefined): string => {
-  if (unit === undefined) return "on" // unit-less ⇒ boolean ON/OFF flag
+  if (unit === undefined) return value === false ? "off" : "on" // unit-less ⇒ boolean ON/OFF flag
   if (typeof value === "number") return `${value} ${unit}`
   // Some knobs parse to a wrapper object whose meaningful quantity is a single
   // numeric field (localize-phase ⇒ {phase1Turns:5}, repro-test ⇒ {samples:5}).
@@ -438,7 +438,7 @@ export const benchPostureFromState = (
   state: BenchKnobState,
   env: NodeJS.ProcessEnv,
 ): BenchPosture => {
-  const lspNav = readKnobValue(state, "lsp", isTrue) === true || env.QUANTA_LSP_TOOLS === "full"
+  const lspNav = readKnobValue(state, "lsp", isBoolean) === true || env.QUANTA_LSP_TOOLS === "full"
   const subagent = readKnobValue(state, "subagent", isTrue) === true ? {} : undefined
   const skills = readKnobValue(state, "skills", isTrue) === true ? {} : undefined
   const lp = readKnobValue(state, "localize-phase", isLocalizeValue)

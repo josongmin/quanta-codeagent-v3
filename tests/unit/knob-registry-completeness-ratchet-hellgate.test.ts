@@ -133,7 +133,6 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_FORK_INJECT_TURN", "dev-experiment: trajectory-fork turn injection (fork-experiments), not a user knob"],
   ["QUANTA_BENCH_REPLAY_LIMIT", "dev/bench-only: trajectory replay cap (apps/bench/trajectory), not a shipped user knob"],
   ["QUANTA_CAPTURE_DEBUG", "dev/bench-only: jun-24 lost-edits RCA diagnostic (apps/bench/eval/driver — per-call git-status exec, default-OFF), not a shipped user knob"],
-  ["QUANTA_BENCH_EXPOSE_DATASET_VERIFIER", "dev/bench-only: A/B toggle exposing the dataset's repo-local verifier command to the agent (runner/batch/eval/driver, default-OFF), not a shipped user knob"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {

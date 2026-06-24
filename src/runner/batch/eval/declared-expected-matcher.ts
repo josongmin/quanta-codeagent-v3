@@ -32,6 +32,7 @@ import {
   type IssueDeclaredExpected,
   PUBLIC_ISSUE_TEXT_PROVENANCE,
 } from "@/agent/verification-plan/extract-issue-declared-expected"
+import { stripInlineComment } from "./python-source-text"
 import type { Candidate } from "./selection-types"
 
 const normalize = (s: string): string => s.replace(/\s+/g, " ").trim()
@@ -70,29 +71,6 @@ const isSpecBearing = (s: string): boolean => /\s/.test(s) || s.length >= 12
  *  the matcher must ABSTAIN rather than veto on these (a correct dynamic fix would
  *  otherwise be false-vetoed → PASS→FAIL). */
 const isFormatTemplate = (s: string): boolean => /\{[^}]*\}|%[sdrfgex]|%\(/.test(s)
-
-/** Truncate a line at the first `#` that is OUTSIDE a string literal, removing any
- *  trailing (or whole-line) Python comment. A stale message in a comment — whether
- *  on its own line OR trailing real code — must never be mined as a competing
- *  literal: that is a fail-CLOSED false veto of a correct fix (M4). String-aware so
- *  a `#` inside a literal (e.g. "color #fff") is preserved. */
-const stripInlineComment = (line: string): string => {
-  let q: string | undefined
-  for (let i = 0; i < line.length; i += 1) {
-    const c = line[i]
-    if (q !== undefined) {
-      if (c === "\\") {
-        i += 1
-        continue
-      }
-      if (c === q) q = undefined
-      continue
-    }
-    if (c === '"' || c === "'") q = c
-    else if (c === "#") return line.slice(0, i)
-  }
-  return line
-}
 
 export const matchCandidateAgainstDeclaredExpected = (
   patch: string,

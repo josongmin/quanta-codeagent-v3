@@ -1,12 +1,31 @@
 import { access, readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { isPythonTestFile, normalizeRepoPath } from "./impacted-test-discovery"
+import { stripInlineComment } from "./python-source-text"
 
 const DEFAULT_MAX_TEST_FILES = 2
 const DEFAULT_MAX_EXPECTATIONS = 4
 /** Skip reading any candidate test file larger than this (OOM guard; real Python
  *  test files are << 4 MiB, so this only rejects pathological/binary outliers). */
 const MAX_TEST_FILE_BYTES = 4 * 1024 * 1024
+/** Per-fs-call timeout. The sibling rg/git discovery paths bound their work by time;
+ *  these fs probes previously bounded only by size, so a hung `stat`/`readdir`/
+ *  `readFile` on a stale network mount (some bench sandboxes mount over the box FS)
+ *  could stall owner-test discovery for the whole instance indefinitely. */
+const DEFAULT_FS_TIMEOUT_MS = 10_000
+
+/** Bound a single fs await. On timeout the underlying fs promise is abandoned (left
+ *  to settle/GC) and the caller receives `fallback` — the same degrade as a `.catch`,
+ *  so discovery yields fewer facts rather than hanging. */
+const withFsTimeout = <T>(p: Promise<T>, timeoutMs: number, fallback: T): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), timeoutMs)
+  })
+  return Promise.race([p, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  })
+}
 const PER_FILE_EXPECTATION_CAP = 2
 const PER_FILE_EXPECTATION_SCAN_CAP = 16
 const ASSERTION_LINE =
@@ -108,6 +127,7 @@ const existingTestFiles = async (
   sandbox: string,
   candidates: readonly string[],
   max: number,
+  timeoutMs: number,
 ): Promise<string[]> => {
   const out: string[] = []
   for (const candidate of candidates) {
@@ -115,9 +135,13 @@ const existingTestFiles = async (
     // Existence check only — `access` does NOT read the file into memory, so a
     // pathologically large probe candidate cannot OOM the prober (the actual
     // bounded read happens later in `appendFactsFromTestFile`).
-    const exists = await access(join(sandbox, candidate))
-      .then(() => true)
-      .catch(() => false)
+    const exists = await withFsTimeout(
+      access(join(sandbox, candidate))
+        .then(() => true)
+        .catch(() => false),
+      timeoutMs,
+      false,
+    )
     if (exists) out.push(candidate)
   }
   return out
@@ -143,6 +167,7 @@ const globOwnerModuleTests = async (
   sandbox: string,
   ownerFiles: readonly string[],
   max: number,
+  timeoutMs: number,
 ): Promise<string[]> => {
   const out: string[] = []
   const seenDir = new Set<string>()
@@ -288,29 +313,6 @@ const stripTripleQuoted = (text: string): string => {
   return out
 }
 
-/** Truncate a line at the first `#` OUTSIDE a string literal — removing a trailing
- *  (or whole-line) comment. String-aware (single/double quotes with backslash
- *  escapes) so a `#` inside a legitimate quoted message (e.g. "color #fff") is kept.
- *  Without this, a stale message parked in an INLINE trailing comment leaks into the
- *  mined `exact/public literal` and FALSE-STEERS generation (round-5 finding). */
-const stripInlineComment = (line: string): string => {
-  let q: string | undefined
-  for (let i = 0; i < line.length; i += 1) {
-    const c = line[i]
-    if (q !== undefined) {
-      if (c === "\\") {
-        i += 1
-        continue
-      }
-      if (c === q) q = undefined
-      continue
-    }
-    if (c === '"' || c === "'") q = c
-    else if (c === "#") return line.slice(0, i)
-  }
-  return line
-}
-
 /** Strip triple-quoted spans, then strip `#` comments (whole-line AND inline). */
 const stripCommentsAndDocstrings = (text: string): string[] =>
   stripTripleQuoted(text).split("\n").map(stripInlineComment)
@@ -403,16 +405,21 @@ const appendFactsFromTestFile = async (args: {
   readonly maxExpectations: number
   readonly perFileExpectationCap: number
   readonly issueSymbols: readonly string[]
+  readonly timeoutMs: number
 }): Promise<boolean> => {
   const abs = join(args.sandbox, args.relPath)
   // Bound the read: `globOwnerModuleTests` enumerates ANY `test_*.py` on disk, so a
   // pathological multi-hundred-MB file would otherwise be slurped whole into memory.
   // Real test files are tiny; cap so a malformed/huge file is skipped, not OOM'd.
-  const size = await stat(abs)
-    .then((s) => s.size)
-    .catch(() => -1)
+  const size = await withFsTimeout(
+    stat(abs)
+      .then((s) => s.size)
+      .catch(() => -1),
+    args.timeoutMs,
+    -1,
+  )
   if (size < 0 || size > MAX_TEST_FILE_BYTES) return false
-  const text = await readFile(abs, "utf8").catch(() => null)
+  const text = await withFsTimeout(readFile(abs, "utf8").catch(() => null), args.timeoutMs, null)
   if (text === null) return false
   for (const fact of expectationsFromTestFile(
     args.relPath,
@@ -441,12 +448,23 @@ export const extractVerificationOwnerTestExpectations = async (args: {
   readonly issueSymbols?: readonly string[]
   readonly maxTestFiles?: number
   readonly maxExpectations?: number
+  /** Per-fs-call timeout for the on-disk probes (access/readdir/stat/readFile).
+   *  Absent ⇒ {@link DEFAULT_FS_TIMEOUT_MS} (10s) — far below any turn deadline, so a
+   *  hung mount degrades to fewer facts instead of stalling the instance. Exposed for
+   *  tests; the driver relies on the default. */
+  readonly fsTimeoutMs?: number
 }): Promise<readonly string[]> => {
   const maxFiles = args.maxTestFiles ?? DEFAULT_MAX_TEST_FILES
   const maxExpectations = args.maxExpectations ?? DEFAULT_MAX_EXPECTATIONS
   if (maxFiles < 1 || maxExpectations < 1) return []
+  const fsTimeoutMs = args.fsTimeoutMs ?? DEFAULT_FS_TIMEOUT_MS
   const commandTestCandidates = ownerTestPathsFromCommands(args.ownerNearTests).slice(0, maxFiles)
-  const commandTestFiles = await existingTestFiles(args.sandbox, commandTestCandidates, maxFiles)
+  const commandTestFiles = await existingTestFiles(
+    args.sandbox,
+    commandTestCandidates,
+    maxFiles,
+    fsTimeoutMs,
+  )
   // T2 fallback: command-derived EXISTING files take precedence; otherwise probe
   // owner-module test files on disk. This keeps command authority when it points
   // at a real test, but does not let a stale/missing command path disable the
@@ -463,8 +481,14 @@ export const extractVerificationOwnerTestExpectations = async (args: {
             args.sandbox,
             ownerTestCandidatesFromModules(args.localizedOwnerFiles ?? []),
             maxFiles,
+            fsTimeoutMs,
           )),
-          ...(await globOwnerModuleTests(args.sandbox, args.localizedOwnerFiles ?? [], maxFiles)),
+          ...(await globOwnerModuleTests(
+            args.sandbox,
+            args.localizedOwnerFiles ?? [],
+            maxFiles,
+            fsTimeoutMs,
+          )),
         ]).slice(0, maxFiles)
   if (testFiles.length === 0) return []
   const perFileExpectationCap = Math.max(
@@ -480,6 +504,7 @@ export const extractVerificationOwnerTestExpectations = async (args: {
       maxExpectations,
       perFileExpectationCap,
       issueSymbols: args.issueSymbols ?? [],
+      timeoutMs: fsTimeoutMs,
     })
     if (filled) return out
   }

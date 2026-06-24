@@ -612,4 +612,14 @@ export const BENCH: readonly KnobInventoryEntry[] = [
       "Full-remote: on-demand (non-spot) EC2 escape hatch for capacity crunches. Default-OFF.",
     readSite: "apps/bench/cli.ts",
   },
+  {
+    envKey: "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (jun-24): A/B lever that surfaces the dataset's repo-local verifier command to the agent (`agentVisibleBenchVerifierCommand`) so it prefers that over bare host-global pytest/python. Default-OFF ⇒ the verifier hint is withheld (byte-identical agent-visible context).",
+    readSite: "runner/batch/eval/driver.ts",
+  },
 ]
