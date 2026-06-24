@@ -19,11 +19,15 @@ export {
   type ReproWriteFilePort,
 } from "./execute"
 export {
+  buildControlTestPrompt,
   buildReproTestPrompt,
+  DEFAULT_CONTROL_SAMPLES,
   DEFAULT_SAMPLES,
   DEFAULT_TIMEOUT_MS,
   ensurePytestFooter,
+  generateControlTests,
   generateReproTests,
+  MAX_CONTROL_SAMPLES,
   MAX_SAMPLES,
   stripMarkdownFences,
 } from "./generate"

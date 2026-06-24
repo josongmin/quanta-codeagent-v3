@@ -273,6 +273,92 @@ export const buildReproTestPrompt = (
     '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
   ].join("\n")
 
+/**
+ * G2 paired-control system prompt. UNLIKE the symptom prompt, a control test
+ * must PASS on the BASE (un-patched) tree: it exercises a NORMAL, healthy
+ * operation of the same project that the reported bug does NOT touch, so a
+ * failing control means the EXEC ENV is broken (project un-importable, missing
+ * dep), not that the bug is present. The control is an ENV-HEALTH probe. */
+const CONTROL_SYSTEM_MSG = [
+  "You are a senior Python engineer writing a single self-contained pytest CONTROL test.",
+  "Reason calmly. Output Python source code ONLY — no explanations, no markdown fences.",
+  "A control test asserts NORMAL, correct behavior that is UNAFFECTED by the reported bug, so it",
+  "PASSES on the current code (pytest exit 0). If it FAILS, the exec environment is broken — not the bug.",
+].join("\n")
+
+/**
+ * Build the G2 paired-control user message. The model emits a self-contained
+ * PYTEST test that asserts a NORMAL / happy-path behavior of the SAME project
+ * which is UNRELATED to the reported bug — it MUST already PASS on the current
+ * (un-patched) code. Its role is to CERTIFY the exec env: if it fails on base,
+ * the project is un-importable / the env is broken, so a base-RED symptom test
+ * is a FALSE-RED rather than a real reproduction.
+ *
+ * Crucial contract differences vs {@link buildReproTestPrompt}:
+ *   - The control asserts the EXISTING correct behavior (PASSES on base now),
+ *     NOT the buggy/expected-after-fix behavior. It is the INVERSE oracle.
+ *   - It must NOT exercise the bug path the issue describes; pick a basic,
+ *     adjacent, well-established operation (import + a trivial round-trip /
+ *     construction / documented default) that any healthy install satisfies.
+ *   - Public issue / repo only — derive the normal operation from the project's
+ *     OWN public surface mentioned around the issue. NEVER copy a fix or patch.
+ *
+ * Same self-driving pytest footer so `python <path>` drives pytest and the
+ * sidecar verdict is `"resolved"` (all pass ⇒ control GREEN). Pure. */
+export const buildControlTestPrompt = (issue: string): string =>
+  [
+    "Write a self-contained pytest CONTROL test for the project referenced in the issue below.",
+    "",
+    "The control test must:",
+    "1. Import the project's library code (the SAME package the issue is about).",
+    "2. Define one or more `def test_*()` functions that ASSERT a NORMAL, well-established,",
+    "   correct behavior that is UNRELATED to the reported bug — something that ALREADY",
+    "   works on the current code and a CORRECT fix would leave unchanged. Examples: a basic",
+    "   construction / round-trip, a documented default value, a trivial happy-path call.",
+    "   Use plain `assert`. The control MUST PASS on the current code (exit 0).",
+    "3. Do NOT exercise the buggy behavior the issue describes. Do NOT assert the",
+    "   EXPECTED-AFTER-FIX behavior. The control's ONLY job is to prove the project imports",
+    "   and basic operations work — i.e. the exec environment is healthy.",
+    "4. Do NOT print a verdict and do NOT call sys.exit() inside the test body — let pytest decide.",
+    "",
+    "Reliability (the control is an ENV-HEALTH probe — a failing control means a broken env):",
+    "  - Put the exercising code INSIDE the `def test_*` function, not at module top level.",
+    "  - Use the public API shape stated by the issue / project. Do not call private helpers",
+    "    or guess internal signatures.",
+    "  - Keep it minimal and robust: a control that is itself flaky defeats the purpose.",
+    "  - END THE FILE with the pytest sidecar-report footer shown below (so `python <file>`",
+    "    runs pytest on itself and writes `<file>.pytest-report.json`):",
+    '        if __name__ == "__main__":',
+    "            import json",
+    "            import os",
+    '            os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")',
+    "            import sys, pytest",
+    "            # Use a pytest hook plugin to write structured phase/outcome/exception data.",
+    '            sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
+    "",
+    "Output only the Python source code. No explanation. No markdown fences.",
+    "",
+    "# Issue (for project / package context only — do NOT reproduce the bug)",
+    issue,
+    "",
+    "# Example output (illustrative — replace with a NORMAL operation for THIS project):",
+    "from package import thing",
+    "",
+    "",
+    "def test_basic_roundtrip_works():",
+    '    result = thing.do_something("ordinary input")',
+    "    assert result is not None  # PASSES today; a correct fix leaves this unchanged",
+    "",
+    "",
+    'if __name__ == "__main__":',
+    "    import json",
+    "    import os",
+    '    os.environ.setdefault("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")',
+    "    import sys, pytest",
+    "    # Use a pytest hook plugin to write structured phase/outcome/exception data.",
+    '    sys.exit(pytest.main([__file__, "-q", "-p", "no:cacheprovider"]))',
+  ].join("\n")
+
 /** Strip leading / trailing ```fence lines (with optional language tag like
  *  ```python). Conservative: only removes a fence if the FIRST non-empty
  *  line is a triple-backtick line; otherwise returns the input verbatim.
@@ -392,12 +478,13 @@ const generateOne = async (
   llm: LLMPort,
   messages: Message[],
   signal: AbortSignal | undefined,
+  system: string = SYSTEM_MSG,
 ): Promise<string> => {
   try {
     const streamInput =
       signal !== undefined
-        ? { messages, system: SYSTEM_MSG, tools: [], signal }
-        : { messages, system: SYSTEM_MSG, tools: [] }
+        ? { messages, system, tools: [], signal }
+        : { messages, system, tools: [] }
     const iter = llm.stream(streamInput)
     // Strip fences, then GUARANTEE the self-driving pytest footer so the
     // driver's `python <path>` invocation actually runs pytest (P1 bridge).
@@ -435,6 +522,60 @@ export const generateReproTests = async (args: {
   for (let i = 0; i < samples; i++) {
     if (signal?.aborted === true) break
     out.push(await generateOne(llm, messages, signal))
+  }
+  return out
+}
+
+/** Default count of paired-control tests to synthesise per symptom set. One
+ *  env-health probe is enough to certify importability; a second adds robustness
+ *  against a single flaky control. Kept small — controls are pure overhead on
+ *  the base tree (they never gate ON their own, only certify the symptom). */
+export const DEFAULT_CONTROL_SAMPLES = 2
+/** Hard ceiling on control samples — controls are env probes, not a vote. */
+export const MAX_CONTROL_SAMPLES = 5
+
+/** Bounds-checked control count. Mirrors {@link resolveSamples} but with the
+ *  control-specific default / ceiling. Returns the default for any
+ *  non-integer / NaN / <1, caps at {@link MAX_CONTROL_SAMPLES}. */
+const resolveControlSamples = (raw: number | undefined): number => {
+  const n = raw ?? DEFAULT_CONTROL_SAMPLES
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return DEFAULT_CONTROL_SAMPLES
+  if (n < 1) return 1
+  if (n > MAX_CONTROL_SAMPLES) return MAX_CONTROL_SAMPLES
+  return n
+}
+
+/**
+ * G2 paired-control: synthesise `controlCount` env-health CONTROL tests for an
+ * issue. Each control asserts NORMAL behavior that PASSES on the base tree (the
+ * INVERSE oracle of {@link generateReproTests}), so the executor can certify the
+ * exec env before admitting a base-RED symptom as a real reproduction. Same
+ * footer-guaranteed pytest source shape and same swallow-to-`""` resilience.
+ *
+ * Public issue / repo only — the prompt derives the normal operation from the
+ * project's OWN public surface; the gold patch is NEVER consulted. The returned
+ * strings are the per-control sources (post fence-strip, footer-guaranteed) the
+ * driver threads into `executeReproTests`'s `controlTests` for sample folding. */
+export const generateControlTests = async (args: {
+  issue: string
+  llm: LLMPort
+  /** Reuse {@link ReproTestConfig}; `samples` (when present) caps the control
+   *  count via {@link resolveControlSamples}. */
+  config?: ReproTestConfig
+  signal?: AbortSignal
+  /** Override the control count independently of the symptom-test K. Defaults to
+   *  {@link DEFAULT_CONTROL_SAMPLES}. */
+  controlCount?: number
+}): Promise<readonly string[]> => {
+  const { issue, llm, signal } = args
+  if (typeof issue !== "string" || issue.length === 0) return []
+  const count = resolveControlSamples(args.controlCount ?? args.config?.samples)
+  const userText = buildControlTestPrompt(issue)
+  const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userText }] }]
+  const out: string[] = []
+  for (let i = 0; i < count; i++) {
+    if (signal?.aborted === true) break
+    out.push(await generateOne(llm, messages, signal, CONTROL_SYSTEM_MSG))
   }
   return out
 }
