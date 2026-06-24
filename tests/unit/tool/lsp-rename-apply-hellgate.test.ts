@@ -173,7 +173,7 @@ describe("lsp_rename_apply — input validation", () => {
 /* ------------------------------------------------------------------ */
 
 describe("lsp_rename_apply — port conversion", () => {
-  test("HELL-C8: 1-based input → 0-based port args; newName passed through", async () => {
+  test("HELL-C8: 1-based input → 0-based port args; port receives abs path rooted at ctx.cwd", async () => {
     const port = fakePort({ computeRename: async () => edit(1) })
     await collect(lspRenameApplyTool(port), {
       path: "src/x.ts",
@@ -182,7 +182,7 @@ describe("lsp_rename_apply — port conversion", () => {
       newName: "newSymbol",
     })
     expect(port.computeCalls[0]).toEqual({
-      file: "src/x.ts",
+      file: "/work/proj/src/x.ts",
       line: 6,
       col: 12,
       newName: "newSymbol",

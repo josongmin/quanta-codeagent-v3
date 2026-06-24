@@ -28,10 +28,10 @@ evidence:
     - src/runner/knobs/knobs/no-patch-force-fraction.ts
     - src/runner/knobs/knobs/no-patch-breaker.ts
     - src/runner/batch/eval/no-patch-breaker-adapter.ts
-  adrs: []
+  adrs: [14]
   tests:
     unit:
-      - tests/unit/proof-closure-knobs-wiring.test.ts
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
       - tests/unit/no-patch-breaker.test.ts
       - tests/unit/runner/no-patch-breaker-driver.test.ts
     integration: []

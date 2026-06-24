@@ -39,7 +39,7 @@ evidence:
     - src/apps/bench/remote/full.ts
     - src/apps/bench/remote/pool.ts
     - src/apps/bench/cli.ts
-  adrs: []
+  adrs: [536]
   tests:
     unit:
       - tests/unit/bench-pool-hellgate.test.ts

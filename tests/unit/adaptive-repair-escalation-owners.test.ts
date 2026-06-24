@@ -129,6 +129,11 @@ describe("maybeRunRepairEscalationFollowup", () => {
     expect(seenWidenedOwners).toEqual(["pg.py"])
     expect(phaseRuns).toBe(1)
     expect(result.reran).toBe(true)
+    expect(result.telemetry).toEqual({
+      owners: ["pg.py"],
+      sources: ["repair_escalation"],
+      path: "single_pass_followup",
+    })
     expect(result.prepared).toBe(nextPrepared)
     expect(result.phase.patch).toContain("pg.py")
   })
@@ -174,6 +179,7 @@ describe("maybeRunRepairEscalationFollowup", () => {
     })
     expect(phaseRuns).toBe(0)
     expect(result.reran).toBe(false)
+    expect(result.telemetry).toBeUndefined()
     expect(result.prepared).toBe(prepared)
     expect(result.phase).toBe(phase)
     expect(result.widenedOwners).toEqual([])

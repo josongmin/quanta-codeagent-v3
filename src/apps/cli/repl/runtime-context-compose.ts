@@ -85,6 +85,27 @@ const ladderAutoReviewEnabled = (): boolean => {
   )
 }
 
+/** ADR-0296 PROMPT mode — the deadline consent gate, bound to the mid-turn
+ *  approval `channel`. When `QUANTA_BASH_AUTO_BACKGROUND=prompt`, the bash tool
+ *  calls this AT the deadline; `y`/`yes` ⇒ detach into the bg registry, anything
+ *  else ⇒ kill (legacy timeout). Default-OFF for kill/background modes (never
+ *  invoked), byte-identical when unread. */
+const buildBackgroundConsentPort =
+  (channel: MidTurnApprovalChannel) =>
+  async (info: { readonly command: string; readonly elapsedMs: number }): Promise<boolean> => {
+    const shown = info.command.length > 60 ? `${info.command.slice(0, 60)}…` : info.command
+    const secs = Math.max(1, Math.round(info.elapsedMs / 1000))
+    const ans = (
+      await askLine(
+        channel,
+        `Command still running after ${secs}s: ${shown}\nMove to background? [y]es / [N]o (kill) `,
+      )
+    )
+      .trim()
+      .toLowerCase()
+    return ans === "y" || ans === "yes"
+  }
+
 interface CliHitlDeps {
   readonly idleMonitor: IdleMonitor
   readonly rejectCounter: RejectCounter
@@ -415,6 +436,11 @@ const buildBootstrapContextArgs = (args: {
   readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
   readonly planExitPort: ReturnType<typeof createCliPlanExitPort>
   readonly userInputPort: ReturnType<typeof createCliUserInputPort>
+  /** ADR-0296 PROMPT-mode consent gate (mid-turn approval channel). */
+  readonly backgroundConsentPort: (info: {
+    readonly command: string
+    readonly elapsedMs: number
+  }) => Promise<boolean>
   readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
   readonly sandboxProfile: CliReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
@@ -445,6 +471,7 @@ const buildBootstrapContextArgs = (args: {
     onConfirm,
     planExitPort,
     userInputPort,
+    backgroundConsentPort,
     summarizerLlm,
     sandboxProfile,
     permissionStore,
@@ -473,6 +500,7 @@ const buildBootstrapContextArgs = (args: {
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       planExitPort,
       userInputPort,
+      backgroundConsentPort,
       decisionEmitter: decisionEmitterFromStream(turnStream),
       admissibilityBuilder: ({ materializeReviewerAgent }) =>
         buildAdmissibility({
@@ -637,11 +665,7 @@ export const composeCliRuntimeContext = async (
       observe: (ev) => {
         const who = ev.reviewer === "guardian_subagent" ? "guardian" : "auto-review"
         const what =
-          ev.phase === "started"
-            ? "reviewing…"
-            : ev.allowed
-              ? "approved (no prompt)"
-              : "denied"
+          ev.phase === "started" ? "reviewing…" : ev.allowed ? "approved (no prompt)" : "denied"
         turnStream.emit({
           type: "tool_progress",
           id: ev.toolCallId ?? "",
@@ -657,6 +681,10 @@ export const composeCliRuntimeContext = async (
     ask: (p) => askLine(midTurnApprovalChannel, p),
     stream: turnStream,
   })
+  // ADR-0296 PROMPT mode — see {@link buildBackgroundConsentPort}. Bound to the
+  // SAME mid-turn approval channel the inline confirm uses. Default-OFF for
+  // kill/background modes (never invoked), byte-identical when unread.
+  const backgroundConsentPort = buildBackgroundConsentPort(midTurnApprovalChannel)
   const summarizerLlm = buildSessionMemoryAutoSummarizer(boot)
   // F2 (round-2) — load `.quanta/agents` (+ native dir) ONCE per session at this
   // async composition root, using the SESSION-RESOLVED `boot.cwd` (the jailed /
@@ -683,6 +711,7 @@ export const composeCliRuntimeContext = async (
       onConfirm,
       planExitPort,
       userInputPort,
+      backgroundConsentPort,
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       sandboxProfile,
       permissionStore,

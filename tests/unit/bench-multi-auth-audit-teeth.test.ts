@@ -6,7 +6,7 @@
  * production line whose deletion/mutation it turns red.
  */
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AuthPoolEntry } from "../../src/apps/bench/auth-pool"
@@ -136,6 +136,7 @@ const mockSpawn = (opts: { rateLimited?: Set<string> } = {}) => {
     return ok("")
   }
   const route = (cmd: string, args: string[]): SpawnResult => {
+    if (cmd === "curl") return ok("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
     if (args.includes("run-instances")) return ok("i-box")
     if (args.includes("describe-instances")) return ok("1.2.3.4")
     if (args.includes("terminate-instances")) return ok("")
@@ -156,6 +157,13 @@ const allocBudgetDir = (): string => {
   BUDGET_DIRS.add(dir)
   return dir
 }
+const datasetFor = (runId: string): string => {
+  const dir = allocBudgetDir()
+  const path = join(dir, `${runId}.jsonl`)
+  writeFileSync(path, `${JSON.stringify({ id: `x__${runId}-1` })}\n`)
+  return path
+}
+const chunk = (runId: string): PoolChunk => ({ runId, datasetPath: datasetFor(runId) })
 afterAll(() => {
   for (const d of BUDGET_DIRS) rmSync(d, { recursive: true, force: true })
 })
@@ -202,8 +210,8 @@ describe("audit: worker threads boxAccountLabel as next-chunk affinity (pool.ts 
       nextReadyAt: () => base.nextReadyAt(),
     }
     const chunks: PoolChunk[] = [
-      { runId: "c1", datasetPath: "/c1.jsonl" },
-      { runId: "c2", datasetPath: "/c2.jsonl" },
+      chunk("c1"),
+      chunk("c2"),
     ]
     await runPool(chunks, cfg(fn, recording))
     // first chunk has no affinity; second is PREFERRED toward the first's account.
@@ -232,7 +240,7 @@ describe("audit: budget-timeout abort still returns the account slot (no auth-le
       const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
       await expect(
         runPool(
-          [{ runId: "c1", datasetPath: "/c1.jsonl" }],
+          [chunk("c1")],
           cfg(fn, provider, {
             concurrency: 16,
             tokenBudgetDir,
@@ -261,8 +269,8 @@ describe("audit: multi-auth has NO global worker-level backoff lane (pool.ts ski
     const slept: number[] = []
     await runPool(
       [
-        { runId: "c1", datasetPath: "/c1.jsonl" },
-        { runId: "c2", datasetPath: "/c2.jsonl" },
+        chunk("c1"),
+        chunk("c2"),
       ],
       // backoffBaseMs is large: if a global lane re-appeared, the rate-limited c1
       // would force a sleep(90s). multi-auth must instead cool acct-a and route c2
@@ -296,8 +304,8 @@ describe("audit: multi-auth has NO global worker-level backoff lane (pool.ts ski
     const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
     const out = await runPool(
       [
-        { runId: "c1", datasetPath: "/c1.jsonl" },
-        { runId: "c2", datasetPath: "/c2.jsonl" },
+        chunk("c1"),
+        chunk("c2"),
       ],
       cfg(fn, provider, {
         now: () => clock,

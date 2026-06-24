@@ -8,6 +8,7 @@
  */
 
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { isTestFilePath, type SandboxData } from "@/shared"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
 import {
@@ -93,7 +94,49 @@ const HEADER_RE = /^diff --git a\/\S+ b\/(\S+)/
  *  (2026-06-20): each had the right one-file fix buried under repro contamination.
  *  Matched on BASENAME so a path anywhere in the tree is condemned. */
 const REPRO_SCAFFOLD_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/
+const CANONICAL_REPRO_FILE_NAME = "reproduce_issue.py"
 const basenameOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1)
+
+const readOptionalText = async (path: string): Promise<string | undefined> => {
+  try {
+    return await readFile(path, "utf8")
+  } catch {
+    return undefined
+  }
+}
+
+const appendGitExcludeLine = async (
+  sandbox: string,
+  timeoutMs: number,
+  line: string,
+): Promise<void> => {
+  const gitPath = await execArgv(
+    [...GIT_ARGV, "rev-parse", "--git-path", "info/exclude"],
+    sandbox,
+    timeoutMs,
+  )
+  if (gitPath.code !== 0) return
+  const rawPath = trimOut(gitPath)
+  if (rawPath === "") return
+  const excludePath = rawPath.startsWith("/") ? rawPath : join(sandbox, rawPath)
+  const current = (await readOptionalText(excludePath)) ?? ""
+  if (current.split(/\r?\n/).includes(line)) return
+  const prefix = current === "" || current.endsWith("\n") ? current : `${current}\n`
+  await writeFile(excludePath, `${prefix}${line}\n`)
+}
+
+const restoreCanonicalReproScaffold = async (
+  sandbox: string,
+  timeoutMs: number,
+  content: string | undefined,
+): Promise<void> => {
+  if (content === undefined) return
+  // The canonical repro is a bench-owned execution scaffold, not submitted
+  // source. Keep it available to the agent while excluding it from git capture
+  // so rawDirty/lost-edits diagnostics are not poisoned by our own scaffold.
+  await appendGitExcludeLine(sandbox, timeoutMs, `/${CANONICAL_REPRO_FILE_NAME}`)
+  await writeFile(join(sandbox, CANONICAL_REPRO_FILE_NAME), content)
+}
 
 export const sourceOnlyDiff = (diff: string): string => {
   if (diff.trim() === "") return diff
@@ -191,11 +234,18 @@ export const withGitSnapshot = async (
 ): Promise<string> => {
   const G = "git -c user.email=b@b -c user.name=b -c commit.gpgsign=false"
   const hasGit = (await exec("git rev-parse --git-dir", sandbox, timeoutMs)).code === 0
+  const canonicalReproScaffold =
+    hasGit && baseCommit !== undefined
+      ? await readOptionalText(join(sandbox, CANONICAL_REPRO_FILE_NAME))
+      : undefined
   const prep =
     hasGit && baseCommit
       ? `${G} checkout -q -f ${baseCommit} && ${G} reset -q --hard ${baseCommit} && ${G} clean -qfdx`
       : `git init -q . && ${G} add -A && ${G} commit -q -m base --allow-empty`
   const init = await exec(prep, sandbox, timeoutMs)
+  if (init.code === 0) {
+    await restoreCanonicalReproScaffold(sandbox, timeoutMs, canonicalReproScaffold)
+  }
   // P0: materialize build-env deps into the checked-out tree BEFORE the agent
   // (and its repro/test exec) runs. The base checkout above would wipe a
   // pre-checkout materialization (`reset --hard`), so it MUST happen here.

@@ -59,6 +59,7 @@
  * so the temp filename is never word-split / glob-expanded.
  */
 
+import { errMessage } from "@/shared"
 import {
   classifyPytestReportText,
   parsePytestExecutionReport,
@@ -127,7 +128,7 @@ export interface ExecuteReproTestsArgs {
 }
 
 /** Compact a thrown value to a single-line string for the stderr diagnostic. */
-const errText = (e: unknown): string => (e instanceof Error ? `${e.name}: ${e.message}` : String(e))
+const errText = (e: unknown): string => errMessage(e)
 
 /**
  * Back-compat pure classifier surface. The arguments are intentionally ignored:

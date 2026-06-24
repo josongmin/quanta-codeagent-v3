@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { StreamPort } from "@/stream"
 import { buildConfig } from "../../src/apps/bench/eval/driver"
@@ -12,6 +12,17 @@ class StubLLM implements LLMPort {
 
 const stubStream: StreamPort = { emit() {} }
 const baseDeps = { llm: new StubLLM(), maxTurns: 1, timeoutMs: 5_000 }
+const EXPOSE_ENV = "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER"
+const savedExpose = process.env[EXPOSE_ENV]
+
+beforeEach(() => {
+  delete process.env[EXPOSE_ENV]
+})
+
+afterEach(() => {
+  if (savedExpose === undefined) delete process.env[EXPOSE_ENV]
+  else process.env[EXPOSE_ENV] = savedExpose
+})
 
 const userText = (instance: Instance): string => {
   const ac = new AbortController()
@@ -21,7 +32,24 @@ const userText = (instance: Instance): string => {
 }
 
 describe("bench verifier-command prompt wiring", () => {
-  test("swebench prompt surfaces the exact repo-local verifier command above the workspace line", () => {
+  test("synthesized swebench dataset verifier stays hidden from the agent by default", () => {
+    const testCmd =
+      "uv run --no-project --python 3.8 --with pytest --with setuptools --with-editable . pytest -x --no-header tests/foo.py"
+    const text = userText({
+      id: "x__1",
+      repoPath: "/tmp/x",
+      problemStatement: "fix it",
+      testCmd,
+      swebench: { instanceId: "x__1", repo: "x/x", baseCommit: "deadbeef" },
+    })
+    expect(text).not.toContain("Repository-local verifier for this task:")
+    expect(text).not.toContain(testCmd)
+    expect(text).toContain("Work inside /tmp/sb.")
+    expect(text).toContain("When done, stop.")
+  })
+
+  test("opt-in surfaces the exact repo-local verifier command above the workspace line", () => {
+    process.env[EXPOSE_ENV] = "1"
     const testCmd =
       "uv run --no-project --python 3.8 --with pytest --with setuptools --with-editable . pytest -x --no-header tests/foo.py"
     const text = userText({

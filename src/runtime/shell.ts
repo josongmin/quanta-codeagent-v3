@@ -1,4 +1,5 @@
 import type { Subprocess } from "bun"
+import { type BoundedBuffer, createBoundedBuffer } from "./bounded-buffer"
 import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { applyLocalEnv } from "./local-env"
 import { withProxyEnv } from "./network-proxy"
@@ -10,6 +11,16 @@ import { getShellSandbox } from "./shell-sandbox-holder"
 import type { RunShellEvent, ShellOptions, ShellResult } from "./types"
 
 const DEFAULT_TIMEOUT_MS = 120_000
+
+/** ADR-0296 auto-background — per-detached-shell VERBATIM output budget for the
+ *  bounded tail buffer the registry adopts. Mirrors `MAX_BG_BUFFER_BYTES` in
+ *  `bash-bg-registry.ts` (itself the foreground `DEFAULT_TOOL_OUTPUT_MAX`,
+ *  200 K). Re-declared (named const, no import) to avoid coupling this leaf
+ *  module to the registry slice — the value MUST stay in sync. Output captured
+ *  BEFORE the detach moment is decoded in full (byte-identical to the legacy
+ *  completion result); only the post-detach streaming tail is head+tail
+ *  bounded so a `tail -f` background shell cannot OOM the agent. */
+const DETACH_TAIL_BUDGET_BYTES = 200_000
 
 /** D1 — the whole-tree killer for foreground shells. Module-level singleton:
  *  the adapter is pure (it only reads the process table + signals on each
@@ -234,6 +245,25 @@ export const runShell = async (
     observer(startEvent)
   }
 
+  // ADR-0296 auto-background — when a `background` seam is wired, the deadline
+  // DETACHES the still-running child into the registry instead of killing it.
+  // Self-contained path (own kill/timer/abort): completion BEFORE the deadline
+  // is byte-identical to the legacy result (full-concat UTF-8 decode); only the
+  // deadline branch diverges (adopt + `detached` marker). Placed before the
+  // shared kill-timer so the legacy/observer paths are untouched when absent.
+  const background = options.background
+  if (background !== undefined) {
+    return await runWithBackgroundDetach(proc, {
+      command,
+      cwd,
+      timeoutMs,
+      signal: options.signal,
+      adopt: background.adopt,
+      confirm: background.confirm,
+      observer,
+    })
+  }
+
   let abortReason: "user_abort" | "timeout" | null = null
   // SIGTERM→SIGKILL escalation: a child that traps/ignores SIGTERM is force-
   // killed after KILL_GRACE_MS. `disarm` clears the grace timer; we call it in
@@ -381,4 +411,294 @@ const concat = (chunks: Uint8Array[]): Uint8Array => {
     off += c.byteLength
   }
   return out
+}
+
+/** Full-concat UTF-8 decode of accumulated raw chunks — the SAME decode the
+ *  legacy `new Response(stream).text()` path performs, so a background run that
+ *  COMPLETES before its deadline yields a byte-identical `stdout`/`stderr`. A
+ *  fresh decoder per call (no `stream:true`) flushes any trailing partial
+ *  multibyte exactly as a one-shot full-buffer decode would. */
+const decodeAll = (chunks: Uint8Array[]): string => new TextDecoder("utf-8").decode(concat(chunks))
+
+/**
+ * ADR-0296 auto-background — run a child that DETACHES on its deadline instead
+ * of being killed. Used only when the bash tool wires a `background.adopt`
+ * seam. The spawn + all pre-spawn sandbox/env/wrap layers already happened in
+ * `runShell` (SSOT) — this owns only the drain + deadline race:
+ *
+ *  - Before the deadline: accumulate raw chunks unbounded. On normal exit,
+ *    decode the full concat → a `ShellResult` byte-identical to the legacy
+ *    foreground result (the bash tool then runs its usual evidence / passive-VCS
+ *    / stale-read machinery on it). A user/turn abort kills the child (the user
+ *    asked to stop) and resolves with whatever was captured.
+ *  - At the deadline: seed head+tail bounded buffers with the pre-detach output,
+ *    flip the live drains to feed them, hand the still-running child (its
+ *    kill/disarm closures, buffers, exit promise, drain promise) to the registry
+ *    via `adopt`, and resolve with `{ detached: { shellId } }`. The child keeps
+ *    running, owned by the registry; the model resumes it via `bash_await` /
+ *    `bash_kill`.
+ *
+ * NO double-settle: a `settled` latch + the `detached` flag make the completion
+ * path and the detach path mutually exclusive whichever fires first.
+ */
+const runWithBackgroundDetach = async (
+  proc: Subprocess<"ignore", "pipe", "pipe">,
+  cfg: {
+    readonly command: string
+    readonly cwd: string
+    readonly timeoutMs: number
+    readonly signal: AbortSignal | undefined
+    readonly adopt: NonNullable<ShellOptions["background"]>["adopt"]
+    // ADR-0296 PROMPT mode — optional consent gate (see BackgroundDetachSeam).
+    readonly confirm: NonNullable<ShellOptions["background"]>["confirm"]
+    // PR-5 observer parity: when wired, emit per-chunk stdout/stderr events
+    // PRE-detach + exactly-one terminal event on every exit path, so the
+    // observer contract (start ≺ chunks ≺ one terminal) holds in background
+    // mode too. Post-detach the registry owns the stream (turn-scoped observer
+    // stops). Absent ⇒ no events (byte-identical).
+    readonly observer: ((event: RunShellEvent) => void) | undefined
+  },
+): Promise<ShellResult> => {
+  const { kill, disarm } = escalatingKill(proc, FOREGROUND_TREE_KILLER)
+  // Shared mutable detach state. Pre-detach each stream accumulates raw chunks
+  // (unbounded ⇒ byte-identical completion); at detach `buf`/`dec` are set and
+  // `detached` flips so the live drains stream into the bounded buffers.
+  const state: DetachState = {
+    detached: false,
+    out: { chunks: [], offset: 0 },
+    err: { chunks: [], offset: 0 },
+  }
+  const stdoutDone = drainDetachable(proc.stdout, state.out, state, "stdout", cfg.observer)
+  const stderrDone = drainDetachable(proc.stderr, state.err, state, "stderr", cfg.observer)
+  const drainsDone = Promise.all([stdoutDone, stderrDone]).then(() => undefined)
+
+  return await new Promise<ShellResult>((resolve, reject) => {
+    let settled = false
+    let userAborted = false
+    // PROMPT mode: the user DECLINED background at the deadline ⇒ treat as a
+    // legacy timeout (kill + `timedOut:true`). Latched so the completion path
+    // reports it honestly.
+    let declinedTimeout = false
+    const settle = (r: ShellResult): void => {
+      if (settled) return
+      settled = true
+      resolve(r)
+    }
+    // Explicit abort BEFORE the deadline ⇒ kill (the user asked to stop) and
+    // latch `userAborted` so a deadline timer that fires in the same tick does
+    // NOT detach an aborting command. After detach this listener is removed so a
+    // backgrounded shell survives turn abort (its lifetime is the registry's).
+    const onAbort = (): void => {
+      userAborted = true
+      kill()
+    }
+    cfg.signal?.addEventListener("abort", onAbort, { once: true })
+
+    // Deadline reached. PROMPT mode: ask for consent first — declined ⇒ kill
+    // (legacy timeout); approved (or no `confirm` ⇒ plain background) ⇒ detach.
+    const cancelled = (): boolean => settled || state.detached || userAborted
+    const onDeadline = async (): Promise<void> => {
+      if (cancelled()) return
+      if (cfg.confirm !== undefined) {
+        const approved = await askConsent(cfg.confirm, cfg.command, cfg.timeoutMs)
+        // The command may have completed / been aborted while the user decided.
+        if (cancelled()) return
+        if (!approved) {
+          declinedTimeout = true
+          kill() // legacy timeout: the completion path settles with timedOut:true
+          return
+        }
+      }
+      await detachInto(state, cfg, {
+        kill,
+        disarm,
+        exited: proc.exited,
+        drainsDone,
+        onAbort,
+        observer: cfg.observer,
+      })
+        .then(settle)
+        // Defense-in-depth: `adopt` is structurally no-throw, but if a future
+        // registry regressed and rejected we must NOT hang `runShell`. Kill the
+        // (already detach-flagged) child and surface a degraded result so the
+        // promise always settles.
+        .catch(() => {
+          kill()
+          settle({ stdout: "", stderr: "background adoption failed", exitCode: 1, timedOut: false })
+        })
+    }
+    const timer = setTimeout(() => void onDeadline(), cfg.timeoutMs)
+
+    void drainsDone
+      .then(() => proc.exited)
+      .then((exitCode) => {
+        if (state.detached) return // registry owns the child now
+        clearTimeout(timer)
+        disarm()
+        cfg.signal?.removeEventListener("abort", onAbort)
+        // Observer terminal (mirrors the legacy foreground contract): aborted on
+        // a user abort OR a declined-timeout kill, else a normal exit.
+        cfg.observer?.(selectBgTerminal(userAborted, declinedTimeout, exitCode))
+        settle({
+          stdout: decodeAll(state.out.chunks),
+          stderr: decodeAll(state.err.chunks),
+          exitCode,
+          timedOut: declinedTimeout,
+        })
+      })
+      .catch((e) => {
+        if (state.detached) return
+        clearTimeout(timer)
+        kill()
+        cfg.signal?.removeEventListener("abort", onAbort)
+        reject(e)
+      })
+  })
+}
+
+/** ADR-0296 PROMPT mode — bounded wait for operator consent. The host's
+ *  `confirm` must NEVER be able to hang `runShell` (an operator who walks away
+ *  would otherwise pin the turn open forever). So we race it against a timer:
+ *  on timeout we resolve to `true` (DETACH — the non-destructive default: the
+ *  command already outran its deadline; backgrounding keeps the work alive and
+ *  recoverable via `bash_await`/`bash_kill`, whereas killing would throw it
+ *  away). A throwing prompt is a conservative DECLINE (`false` ⇒ kill). */
+const CONSENT_WAIT_MS = 60_000
+const askConsent = async (
+  confirm: NonNullable<NonNullable<ShellOptions["background"]>["confirm"]>,
+  command: string,
+  elapsedMs: number,
+): Promise<boolean> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const decided = confirm({ command, elapsedMs }).catch(() => false)
+    const timedOut = new Promise<boolean>((res) => {
+      timer = setTimeout(() => res(true), CONSENT_WAIT_MS)
+    })
+    return await Promise.race([decided, timedOut])
+  } catch {
+    return false
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** Pick the observer's terminal event for the background completion path:
+ *  aborted on a user abort OR a declined-timeout kill, else a normal exit. */
+const selectBgTerminal = (
+  userAborted: boolean,
+  declinedTimeout: boolean,
+  exitCode: number,
+): RunShellEvent => {
+  if (userAborted) return { kind: "aborted", reason: "user_abort", abortedAt: Date.now() }
+  if (declinedTimeout) return { kind: "aborted", reason: "timeout", abortedAt: Date.now() }
+  return { kind: "exit", code: exitCode, signal: null, exitedAt: Date.now() }
+}
+
+/** Per-stream detach accumulator: raw `chunks` pre-detach, then a bounded
+ *  `buf` + streaming `dec` once detached. `offset` tracks the per-stream byte
+ *  position for observer chunk events. */
+interface DetachStream {
+  readonly chunks: Uint8Array[]
+  offset: number
+  buf?: BoundedBuffer
+  dec?: TextDecoder
+}
+interface DetachState {
+  detached: boolean
+  readonly out: DetachStream
+  readonly err: DetachStream
+}
+
+/** Drain one pipe: append to the raw `chunks` until detach, then stream-decode
+ *  into the bounded `buf`. PRE-detach, forward each chunk to the observer (with
+ *  its byte offset) so the foreground stream is observable; POST-detach the
+ *  registry owns the stream and the turn-scoped observer stops. Hoisted (vs an
+ *  inner closure) to keep `runWithBackgroundDetach` under the complexity cap. */
+const drainDetachable = async (
+  stream: ReadableStream<Uint8Array>,
+  s: DetachStream,
+  state: DetachState,
+  kind: "stdout" | "stderr",
+  observer: ((event: RunShellEvent) => void) | undefined,
+): Promise<void> => {
+  const reader = stream.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) return
+      if (!value || value.byteLength === 0) continue
+      if (state.detached && s.buf !== undefined && s.dec !== undefined) {
+        s.buf.append(s.dec.decode(value, { stream: true }))
+      } else {
+        if (observer !== undefined) {
+          observer({ kind, chunk: value, offset: s.offset })
+          s.offset += value.byteLength
+        }
+        s.chunks.push(value)
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+/** Deadline reached — seed the bounded buffers with the FULL pre-detach output,
+ *  flip `detached`, and hand the still-running child to the registry. The
+ *  seed→flag block is synchronous, so no chunk can arrive between `decodeAll`
+ *  and `detached = true` (the drain's next `reader.read()` only settles on a
+ *  later microtask) — nothing is double-counted or dropped. Returns the
+ *  `detached` `ShellResult` the caller settles with. */
+const detachInto = async (
+  state: DetachState,
+  cfg: {
+    readonly command: string
+    readonly cwd: string
+    readonly signal: AbortSignal | undefined
+    readonly adopt: NonNullable<ShellOptions["background"]>["adopt"]
+  },
+  child: {
+    readonly kill: () => void
+    readonly disarm: () => void
+    readonly exited: Promise<number>
+    readonly drainsDone: Promise<void>
+    readonly onAbort: () => void
+    readonly observer: ((event: RunShellEvent) => void) | undefined
+  },
+): Promise<ShellResult> => {
+  const outBuf = createBoundedBuffer(DETACH_TAIL_BUDGET_BYTES)
+  const errBuf = createBoundedBuffer(DETACH_TAIL_BUDGET_BYTES)
+  outBuf.append(decodeAll(state.out.chunks))
+  errBuf.append(decodeAll(state.err.chunks))
+  state.out.buf = outBuf
+  state.err.buf = errBuf
+  state.out.dec = new TextDecoder("utf-8")
+  state.err.dec = new TextDecoder("utf-8")
+  const headOut = outBuf.value()
+  const headErr = errBuf.value()
+  state.detached = true
+  cfg.signal?.removeEventListener("abort", child.onAbort)
+  // Observer terminal: the foreground stream ended because the deadline elapsed
+  // (`timeout`) — the registry owns the child from here. Exactly one terminal
+  // for this observer (the completion path is short-circuited by `detached`).
+  child.observer?.({ kind: "aborted", reason: "timeout", abortedAt: Date.now() })
+  const { id } = await cfg.adopt({
+    command: cfg.command,
+    cwd: cfg.cwd,
+    kill: child.kill,
+    disarm: child.disarm,
+    stdout: outBuf,
+    stderr: errBuf,
+    exited: child.exited,
+    drainsDone: child.drainsDone,
+  })
+  return {
+    stdout: headOut,
+    stderr: headErr,
+    // Placeholder — the child has not exited; the caller branches on `detached`
+    // before ever reading `exitCode`.
+    exitCode: 0,
+    timedOut: false,
+    detached: { shellId: id },
+  }
 }

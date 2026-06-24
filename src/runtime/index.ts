@@ -63,7 +63,7 @@ export {
   installShellSandbox,
   type ShellSandboxSlot,
 } from "./shell-sandbox-holder"
-export type { RunShellEvent, ShellOptions, ShellResult } from "./types"
+export type { BackgroundDetachSeam, RunShellEvent, ShellOptions, ShellResult } from "./types"
 export {
   isGitRepo,
   isTransientWorktreeLockError,

@@ -69,7 +69,7 @@ describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
   })
 
   test("permissionModeState is threaded through snapshot + exposed on RuntimeContext", () => {
-    const binding = read("src/host/runtime/internal/context-binding.ts")
+    const binding = read("src/host/runtime/internal/context-binding/base.ts")
     // boot → base and base → snapshot legs
     expect(binding).toContain('whenDefined("permissionModeState", args.boot.permissionModeState)')
     expect(binding).toContain('whenDefined("permissionModeState", base.permissionModeState)')

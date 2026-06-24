@@ -48,6 +48,19 @@ describe("classifyDoneTimeCapture — structural facts, no thresholds", () => {
     expect(classOf({ ...base, rawDirty: false })).toBe("lost-edits")
   })
 
+  it("MUTATION-KILL editCount gate: editCount=1 (boundary) + clean ⇒ lost-edits", () => {
+    // editCount=1 (not 2) kills `editCount > 0` → `=== 2`; the empty-no-work test
+    // (editCount=0) kills `> 0` → `>= 0`. Together they pin the strict boundary.
+    expect(classOf({ sourcePatch: "", rawDirty: false, editCount: 1 })).toBe("lost-edits")
+  })
+
+  it("MUTATION-KILL rawDirty precedence: rawDirty=true + editCount=0 ⇒ stripped-only", () => {
+    // rawDirty must win BEFORE the editCount branch is even consulted; this kills a
+    // mutation that reorders the branches (editCount checked first would give
+    // empty-no-work here).
+    expect(classOf({ sourcePatch: "", rawDirty: true, editCount: 0 })).toBe("stripped-only")
+  })
+
   it("only lost-edits is a capture failure (retry); the others are not", () => {
     expect(isCaptureFailure("lost-edits")).toBe(true)
     expect(isCaptureFailure("empty-no-work")).toBe(false)

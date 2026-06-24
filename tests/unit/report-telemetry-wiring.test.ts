@@ -62,6 +62,7 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
       attempted: 2,
       successfulGenerations: 2,
       generationFailures: 0,
+      generationFailureSamples: ["capture_lost_edits: ... sandbox=/tmp/fork-1"],
       ownerFiles: ["root.py"],
       earlyAccepted: false,
       generated: 2,
@@ -83,6 +84,8 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
         {
           id: "cand-0",
           files: ["symptom.py"],
+          sandboxPath: "/tmp/fork-0",
+          captureClass: "source-captured",
           admissible: false,
           score: 0.2,
           reasons: ["hard:regressionGreen=false"],
@@ -91,6 +94,8 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
         {
           id: "cand-1",
           files: ["root.py"],
+          sandboxPath: "/tmp/fork-1",
+          captureClass: "source-captured",
           admissible: true,
           score: 0.9,
           reasons: ["soft:ownerCoverage=1"],
@@ -100,6 +105,13 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     }
     const rep = buildReport(meta, [baseResult({ selectionTelemetry: t })])
     expect(rep.perInstance[0]?.selectionTelemetry).toEqual(t)
+    expect(rep.perInstance[0]?.selectionTelemetry?.generationFailureSamples).toEqual([
+      "capture_lost_edits: ... sandbox=/tmp/fork-1",
+    ])
+    expect(rep.perInstance[0]?.selectionTelemetry?.candidates[0]?.sandboxPath).toBe("/tmp/fork-0")
+    expect(rep.perInstance[0]?.selectionTelemetry?.candidates[1]?.captureClass).toBe(
+      "source-captured",
+    )
     expect(rep.perInstance[0]?.proofState).toBe("proof_positive")
     expect(rep.perInstance[0]?.proofSource).toBe("repro_consensus")
     expect(rep.perInstance[0]?.publicRegressionState).toBe("safety_green")
@@ -147,6 +159,26 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
       researchContaminated: 1,
       unlabeledPassed: 0,
       officialResolvedPct: 50,
+    })
+  })
+
+  test("ownerWidening survives so bounded follow-up localization is audit-visible", () => {
+    const rep = buildReport(
+      meta,
+      [
+        baseResult({
+          ownerWidening: {
+            owners: ["pkg/base.py", "pkg/consumer.py"],
+            sources: ["repair_escalation", "forward_localize"],
+            path: "adaptive_reroute",
+          },
+        }),
+      ],
+    )
+    expect(rep.perInstance[0]?.ownerWidening).toEqual({
+      owners: ["pkg/base.py", "pkg/consumer.py"],
+      sources: ["repair_escalation", "forward_localize"],
+      path: "adaptive_reroute",
     })
   })
 

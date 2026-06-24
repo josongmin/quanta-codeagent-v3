@@ -26,11 +26,12 @@ purpose: 'Default-OFF: append adversarial-coverage block to repro generation so 
 evidence:
   code:
     - src/runner/knobs/knobs/adversarial-repro.ts
-  adrs: []
+  adrs: [433]
   tests:
     unit:
       - tests/unit/bench-repro-test-wiring.test.ts
       - tests/unit/repro-test/adversarial-repro.test.ts
+      - tests/unit/adversarial-repro-knob-hellgate.test.ts
     integration: []
     contract: []
 knobs: ["adversarial-repro"]

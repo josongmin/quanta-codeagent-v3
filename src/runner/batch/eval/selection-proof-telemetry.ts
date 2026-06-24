@@ -236,6 +236,8 @@ const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
     admissible: s.verdict.admissible,
     score: s.verdict.score,
     reasons: s.verdict.reasons,
+    ...(s.candidate.sandboxPath !== undefined ? { sandboxPath: s.candidate.sandboxPath } : {}),
+    ...(s.candidate.captureClass !== undefined ? { captureClass: s.candidate.captureClass } : {}),
     ...(s.candidate.familyId !== undefined ? { familyId: s.candidate.familyId } : {}),
     ...(s.candidate.familyReason !== undefined ? { familyReason: s.candidate.familyReason } : {}),
     ...(s.candidate.familyOwnerFiles !== undefined

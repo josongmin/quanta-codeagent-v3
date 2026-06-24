@@ -37,6 +37,11 @@ const RUN_EXIT_MARK = "==XQ-RUN-EXIT-XQ=="
 
 const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
 
+interface CompletionArtifacts {
+  readonly reportJson: string
+  readonly predictionsJsonl: string
+}
+
 /**
  * The box this poll loop was watching DIED mid-run (spot reclaim / unreachable),
  * so `run.exit` will never land. Thrown to break the otherwise-forever poll so
@@ -80,8 +85,27 @@ const isInstanceStillLive = async (
 const detachedLaunchCommand = (benchCmd: string, runLog: string, runExit: string): string =>
   `rm -f ${runExit}; setsid bash -c ${shq(`${benchCmd} > ${runLog} 2>&1; echo $? > ${runExit}`)} </dev/null >/dev/null 2>&1 & echo LAUNCHED`
 
-const detachedProbeCommand = (runExit: string, runLog: string, seen: number): string =>
-  `cat ${runExit} 2>/dev/null; echo "${RUN_EXIT_MARK}"; tail -n +${seen + 1} ${runLog} 2>/dev/null`
+const parseableJsonProbe = (path: string): string =>
+  `[ -s ${path} ] && python3 -c ${shq("import json,sys; json.load(open(sys.argv[1]))")} ${path} >/dev/null 2>&1`
+
+const completeArtifactProbe = (runExit: string, artifacts: CompletionArtifacts): string => {
+  const reportComplete = parseableJsonProbe(artifacts.reportJson)
+  const predictionsComplete = `[ -s ${artifacts.predictionsJsonl} ]`
+  return `if [ -s ${runExit} ]; then cat ${runExit}; elif ${reportComplete} && ${predictionsComplete}; then echo 0; fi`
+}
+
+const detachedProbeCommand = (
+  runExit: string,
+  runLog: string,
+  seen: number,
+  completionArtifacts?: CompletionArtifacts,
+): string => {
+  const exitProbe =
+    completionArtifacts === undefined
+      ? `cat ${runExit} 2>/dev/null`
+      : completeArtifactProbe(runExit, completionArtifacts)
+  return `${exitProbe}; echo "${RUN_EXIT_MARK}"; tail -n +${seen + 1} ${runLog} 2>/dev/null`
+}
 
 const parseDetachedProbe = (stdout: string): { exitCode?: number; freshLines: string[] } => {
   const mark = stdout.indexOf(RUN_EXIT_MARK)
@@ -162,6 +186,7 @@ export const runBenchDetachedPoll = async (args: {
   sleep?: (ms: number) => Promise<void>
   pollIntervalMs?: number
   now?: () => number
+  completionArtifacts?: CompletionArtifacts
 }): Promise<{ code: number }> => {
   const sleep = args.sleep ?? defaultSleep
   const now = args.now ?? (() => Date.now())
@@ -183,7 +208,9 @@ export const runBenchDetachedPoll = async (args: {
   let consecFailures = 0
   for (;;) {
     // ONE short ssh per tick: exit sentinel (empty until done) + NEW run.log lines.
-    const probe = await args.ssh(detachedProbeCommand(args.runExit, args.runLog, seen))
+    const probe = await args.ssh(
+      detachedProbeCommand(args.runExit, args.runLog, seen, args.completionArtifacts),
+    )
     if (probe.code === 0) {
       consecFailures = 0 // a successful poll resets the box-death suspicion.
       const applied = applyDetachedProbeSuccess(probe.stdout, seen, args.onLine)

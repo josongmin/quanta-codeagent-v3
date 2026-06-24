@@ -37,6 +37,13 @@ describe("matchCandidateAgainstDeclaredExpected — execution-free spec fidelity
     expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(true)
   })
 
+  test("MUTATION-KILL includes: V verbatim with an extra suffix still ⇒ true (substring, not exact/prefix)", () => {
+    // The added literal is `<V> (strict mode)` — V is a SUBSTRING, not the whole
+    // line and not a prefix. Kills `includes` → `===` and `includes` → `startsWith`.
+    const patch = patchAdding(`raise ValueError("${V} (strict mode)")`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(true)
+  })
+
   test("contradiction: candidate invents a DIFFERENT message literal, V absent ⇒ false (veto)", () => {
     const patch = patchAdding(`raise ValueError("TimeSeries is broken, please check your columns")`)
     expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(false)
@@ -44,6 +51,31 @@ describe("matchCandidateAgainstDeclaredExpected — execution-free spec fidelity
 
   test("abstain: candidate touches no spec-bearing literal ⇒ null (fail-open)", () => {
     const patch = patchAdding("if cols is None:", "    cols = []")
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
+  })
+
+  test("MUTATION-KILL ||/.some: a competing literal that is a SUBSTRING of V ⇒ null (not veto)", () => {
+    // "as the first columns" is a clean contiguous substring of V (so v.includes(s)
+    // holds even though the added line does not contain all of V). The matcher must
+    // NOT veto — it overlaps the declared message. Kills line-125 `||` → `&&` and the
+    // `.some(...)` predicate → constant-false (both would wrongly return false here).
+    const patch = patchAdding(`raise ValueError("as the first columns")`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
+  })
+
+  test("MUTATION-KILL isSpecBearing upper boundary: a no-whitespace 12-char unrelated literal IS spec-bearing ⇒ false (veto)", () => {
+    // 12 chars, no whitespace, no overlap with V ⇒ spec-bearing by the length>=12
+    // arm ⇒ veto. Kills `>= 12` → `> 12` (which would drop it to a non-spec key and
+    // abstain instead of vetoing).
+    const patch = patchAdding(`raise KeyError("abcdefghijkl")`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(false)
+  })
+
+  test("MUTATION-KILL isSpecBearing lower boundary: a no-whitespace 11-char unrelated literal is NOT spec-bearing ⇒ null (abstain)", () => {
+    // 11 chars, no whitespace ⇒ below the length floor ⇒ treated as an incidental
+    // key, not a competing message ⇒ abstain. Kills `>= 12` → `>= 11` (which would
+    // wrongly veto a correct fix that happens to add a short dict key).
+    const patch = patchAdding(`raise KeyError("abcdefghij1")`)
     expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
   })
 

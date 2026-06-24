@@ -55,7 +55,6 @@ const SRC_DIR = join(REPO_ROOT, "src")
  */
 const ALLOWED_UNSAFE_CAST_SITES = new Set<string>([
   "runner/assemble/search-index-backend.ts",
-  "apps/cli/internal.ts",
 ])
 
 /** No shadow `errMessage` definitions are permitted anywhere under src/. */
@@ -131,7 +130,6 @@ const ALLOWED_RAW_STRING_SITES = new Set<string>([
   // canonical migration target is `toError(X)` from `@/shared` — those are
   // tracked separately under the local-`toError`-shadow burn-down.
   "agent/retry-pretry.ts",
-  "apps/cli/repl/surface-compose.ts",
   "llm/replay/recording-llm.ts",
 ])
 

@@ -132,6 +132,10 @@ export interface SessionDeps {
   /** Host-owned operator-input surface. Present ⇒ `request_user_input` is
    *  registered and dispatch wires `ToolContext.requestUserInput`. */
   userInputPort?: AgentConfig["userInputPort"]
+  /** ADR-0296 PROMPT-mode consent surface. Present ⇒ dispatch wires
+   *  `ToolContext.requestBackgroundConsent`, so `prompt` mode asks before
+   *  detaching. Absent ⇒ `prompt` degrades to `background` (byte-identical). */
+  backgroundConsentPort?: AgentConfig["backgroundConsentPort"]
   /** Authoritative live tool-profile slot. The session surface and the gate
    *  share ONE state object; `assembleConfig` projects it into
    *  `AgentConfig.toolProfile.activeName`. */
@@ -278,6 +282,9 @@ const buildObservabilityAndPortsSpreads = (d: SessionDeps): Partial<AgentConfig>
   ...(d.decisionEmitter !== undefined ? { decisionEmitter: d.decisionEmitter } : {}),
   ...(d.planExitPort !== undefined ? { planExitPort: d.planExitPort } : {}),
   ...(d.userInputPort !== undefined ? { userInputPort: d.userInputPort } : {}),
+  ...(d.backgroundConsentPort !== undefined
+    ? { backgroundConsentPort: d.backgroundConsentPort }
+    : {}),
   ...(d.followUpQueue !== undefined ? { followUpQueue: d.followUpQueue } : {}),
   ...(d.planStore !== undefined ? { planStore: d.planStore } : {}),
 })

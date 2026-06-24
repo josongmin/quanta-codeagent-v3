@@ -158,6 +158,8 @@ const PROBE_VALUES = [
   "deny",
   "redact",
   "opaque-tunnel",
+  "background",
+  "prompt",
 ]
 
 /** Drive the seam to learn, per knob: which RuntimeConfig field it controls and
@@ -303,6 +305,12 @@ const NON_FALSY_DEFAULT_ALLOWLIST: Readonly<Record<string, AllowlistEntry>> = {
     expectedDefault: 1,
     reason:
       "full-remote box relaunch COUNT on empty result; default 1 = the resilience baseline (one transient spot/ssh loss self-heals). Bench-only, inert off the full-remote path. Not a feature gate.",
+  },
+  QUANTA_BASH_AUTO_BACKGROUND: {
+    field: "bashAutoBackground",
+    expectedDefault: "background",
+    reason:
+      "ADR-0296 (user decision jun-24): auto-background SHIPS ON. A command that completes before its deadline is byte-identical to the legacy result — only a command that OUTRUNS its deadline diverges (detach into bash_await/bash_kill instead of SIGTERM), which is the intended Claude-Code-style behavior, not a hidden regression. This is a behavioral-default knob (no 'off' state; kill|background|prompt), in the same justified-default class as logLevel='info'/ptyBackend='tmux'. 'kill' is the explicit legacy opt-out.",
   },
 }
 

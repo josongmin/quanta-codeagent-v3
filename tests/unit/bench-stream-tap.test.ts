@@ -123,6 +123,30 @@ describe("BenchStreamTap", () => {
     expect(tap.sourceEditCount).toBe(0)
   })
 
+  test("T5 — failed/blocked edit attempts do NOT count as applied source edits", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit({ type: "turn_start", turn: 1 })
+    tap.emit(toolCall("edit", { file_path: "/s/django/db/models/query.py" }))
+    tap.emit(toolResult("edit", false, "localize-phase-blocked"))
+    expect(tap.editCount).toBe(1)
+    expect(tap.sourceEditCount).toBe(1)
+    expect(tap.appliedEditCount).toBe(0)
+    expect(tap.sourceAppliedEditCount).toBe(0)
+  })
+
+  test("T5 — only successful source edit results drive sourceAppliedEditCount", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit({ type: "turn_start", turn: 1 })
+    tap.emit(toolCall("edit", { file_path: "/s/django/db/models/query.py" }))
+    tap.emit(toolResult("edit", true, "applied"))
+    tap.emit(toolCall("write", { file_path: "/s/tests/test_query.py" }))
+    tap.emit(toolResult("write", true, "written"))
+    expect(tap.editCount).toBe(2)
+    expect(tap.sourceEditCount).toBe(1)
+    expect(tap.appliedEditCount).toBe(2)
+    expect(tap.sourceAppliedEditCount).toBe(1)
+  })
+
   test("M3 — sourceEditCount AGREES with sourceOnlyDiff's keep rule (app/tests.py + .pyi count; repro scaffold does not)", () => {
     const tap = new BenchStreamTap(new Capture())
     tap.emit({ type: "turn_start", turn: 1 })
@@ -263,7 +287,7 @@ describe("BenchStreamTap verify-pass (P0)", () => {
         toolResult(
           "test_runner",
           true,
-          "[31mFAIL[0m  tests/x.test.ts",
+          "\u001b[31mFAIL\u001b[0m  tests/x.test.ts",
           "vitest run tests/x.test.ts",
         ),
       ]).fired,

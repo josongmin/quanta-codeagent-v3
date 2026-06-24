@@ -14,6 +14,7 @@
  *   patch contents.
  */
 
+import { byteCompare } from "@/shared/byte-compare"
 import { canBeCleanAuthority, canBeMultiSiteObligation, type StaticWitness } from "./static-witness"
 
 /** Typed candidate-family identifiers. */
@@ -217,7 +218,7 @@ const symbolFileMapOf = (args: {
 
 const multiSiteFamiliesOf = (bySymbol: ReadonlyMap<string, Set<string>>): CandidateFamily[] =>
   [...bySymbol.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
+    .sort((a, b) => byteCompare(a[0], b[0]))
     .flatMap(([symbol, files]) => {
       const ownerFiles = [...files].sort()
       if (ownerFiles.length < 2) return []

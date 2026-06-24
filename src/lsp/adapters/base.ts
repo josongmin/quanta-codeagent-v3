@@ -3,7 +3,7 @@ import { readdir, rename, unlink } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
 import { PUMP_DEATH_EXIT_GRACE_MS } from "@/plugin-isolation"
-import { errMessage, logger } from "@/shared"
+import { errMessage, logger, sliceTailWholeChars } from "@/shared"
 import type { LspPort } from "../ports"
 import type { CodeAction, CodeActionWorkspaceEdit } from "../ports/code-action-port"
 import type { FormatRange, TextEdit as FormatTextEdit } from "../ports/format-port"
@@ -825,7 +825,8 @@ export class LspClient implements LspPort {
         // ONLY diagnosable signal — formerly discarded. Cap so a verbose server
         // (pyright debug output) can't grow it unbounded.
         const text = decoder.decode(chunk as Uint8Array, { stream: true })
-        if (text.length > 0) this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_MAX)
+        if (text.length > 0)
+          this.stderrTail = sliceTailWholeChars(this.stderrTail + text, STDERR_TAIL_MAX)
       }
     } catch (e) {
       logger.debug("lsp: stderr drain ended", { error: errMessage(e) })

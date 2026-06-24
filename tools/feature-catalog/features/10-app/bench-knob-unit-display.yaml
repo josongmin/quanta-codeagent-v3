@@ -28,10 +28,11 @@ evidence:
   code:
     - src/runner/knobs/types.ts
     - src/runner/batch/eval/knobs-bench.ts
-  adrs: []
+  adrs: [503]
   tests:
     unit:
       - tests/unit/knob-unit-display.test.ts
+      - tests/unit/bench-knob-unit-display-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

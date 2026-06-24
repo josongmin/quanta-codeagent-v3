@@ -30,7 +30,7 @@ evidence:
     - src/agent/verification-plan/extract-issue-repro.ts
     - src/runner/batch/eval/repair/repro-vote.ts
     - src/runner/knobs/knobs/repro-vote.ts
-  adrs: []
+  adrs: [14, 433]
   tests:
     unit:
       - tests/unit/extract-issue-repro.test.ts

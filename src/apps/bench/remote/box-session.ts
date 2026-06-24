@@ -316,6 +316,10 @@ const runChunkBench = async (args: {
     runLog: args.paths.runLog,
     runExit: runExitPathFor(args.paths),
     onLine: args.onLine,
+    completionArtifacts: {
+      reportJson: args.paths.report,
+      predictionsJsonl: args.paths.preds,
+    },
     ...(args.params.pollSleep !== undefined ? { sleep: args.params.pollSleep } : {}),
     ...(args.params.pollIntervalMs !== undefined
       ? { pollIntervalMs: args.params.pollIntervalMs }
@@ -327,6 +331,11 @@ const runChunkBench = async (args: {
 
 const fetchRemoteFile = async (ssh: BoxSession["ssh"], remotePath: string): Promise<SpawnResult> =>
   await ssh(`cat ${remotePath} 2>/dev/null`)
+
+const fetchRemoteCommand = async (
+  ssh: BoxSession["ssh"],
+  command: string,
+): Promise<SpawnResult> => await ssh(command)
 
 const saveLocalArtifact = (
   localPath: string,
@@ -360,6 +369,22 @@ const fetchOptionalArtifact = async (args: {
   }
 }
 
+const fetchOptionalCommandArtifact = async (args: {
+  ssh: BoxSession["ssh"]
+  command: string
+  localPath: string
+  log: (msg: string) => void
+  label: string
+}): Promise<string | undefined> => {
+  try {
+    const fetched = await fetchRemoteCommand(args.ssh, args.command)
+    if (fetched.code !== 0 || fetched.stdout.length === 0) return undefined
+    return saveLocalArtifact(args.localPath, fetched.stdout, args.log, args.label)
+  } catch {
+    return undefined
+  }
+}
+
 const fetchChunkArtifacts = async (args: {
   ssh: BoxSession["ssh"]
   paths: ChunkPaths
@@ -387,6 +412,13 @@ const fetchChunkArtifacts = async (args: {
     localPath: join(fullRemoteArtifactDir(), `runlog-${args.artifactSuffix}.log`),
     log: args.log,
     label: "[full-remote] run.log saved",
+  })
+  await fetchOptionalCommandArtifact({
+    ssh: args.ssh,
+    command: `if [ -d ${args.paths.observeDir} ]; then tar -C ${args.paths.observeDir} -cf - . | base64 -w0; fi`,
+    localPath: join(fullRemoteArtifactDir(), `observe-${args.artifactSuffix}.tar.b64`),
+    log: args.log,
+    label: "[full-remote] observe archive saved",
   })
   await fetchOptionalArtifact({
     ssh: args.ssh,
@@ -545,6 +577,37 @@ const executeGradeChunk = async (args: {
 }
 
 /**
+ * KEYSTONE INVARIANT (jun-24, ~60-test outage RCA): decide the terminal outcome of
+ * a graded chunk from the PRIMARY (grade) outcome and the CLEANUP (grade-lock
+ * release) outcome.
+ *
+ * When BOTH a primary error and a cleanup error occur, the PRIMARY error MUST
+ * propagate: a co-occurring grade-lock-release failure is almost always the SAME
+ * box death (the lock cannot be released on an unreachable box), and the primary
+ * error is the one carrying the box-death signal (ssh-255 / connect-timed-out) the
+ * pool's classifier needs to REQUEUE the chunk. Surfacing the cleanup error instead
+ * masks that signal and turns a recoverable box death into a hard pool abort.
+ *
+ * Pure + exhaustively unit-tested (red-on-injection) so this branch can never
+ * silently regress to error-wrapping. Behaviour is byte-identical to the prior
+ * inline logic.
+ */
+export const resolveChunkOutcome = <T>(
+  primaryErr: unknown,
+  cleanupErr: unknown,
+  result: T | undefined,
+  fallback: T,
+): T => {
+  if (cleanupErr !== undefined) {
+    // KEYSTONE: primary (box-death) wins over a co-occurring cleanup failure.
+    if (primaryErr !== undefined) throw primaryErr
+    throw cleanupErr
+  }
+  if (primaryErr !== undefined) throw primaryErr
+  return result ?? fallback
+}
+
+/**
  * Run ONE patch-gen + grading chunk on an already-provisioned box. Ships a fresh
  * stripped token, scps the dataset, runs `bench run` (grading SERIAL — concurrent
  * on-box grading false-negatives correct patches), then fetches report +
@@ -610,18 +673,9 @@ export const gradeChunkOnBox = async (
     cleanupErr = err
   }
   await snapshots.finish()
-  if (cleanupErr !== undefined) {
-    if (primaryErr !== undefined) {
-      throw new Error(
-        `[full-remote] grade lock cleanup failed for ${session.iid}: primary=${errMessage(primaryErr)}; cleanup=${errMessage(cleanupErr)}`,
-      )
-    }
-    throw cleanupErr
-  }
-  if (primaryErr !== undefined) {
-    throw primaryErr
-  }
-  return result ?? {}
+  // KEYSTONE: primary (box-death) error wins over a co-occurring grade-lock-release
+  // failure so the pool's classifier can requeue. See {@link resolveChunkOutcome}.
+  return resolveChunkOutcome<FullRemoteResult>(primaryErr, cleanupErr, result, {})
 }
 
 export { PHANTOM_DEPS, stripToAccessToken } from "./box-session/auth"

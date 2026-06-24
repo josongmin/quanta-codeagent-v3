@@ -57,6 +57,10 @@ export const forwardLocalizeConsumers = (args: {
 /** Only bare identifiers are safe to feed to `rg -w` (no regex metacharacters). */
 const FORWARD_SYMBOL_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+/** Max files kept per symbol from `rg -l` before the final `maxFiles` cap, so a
+ *  common symbol's huge match list cannot balloon the intermediate map. */
+const PER_SYMBOL_FILE_CAP = 40
+
 /**
  * IO wrapper (driver-facing): resolve the prior candidate's edited symbols to
  * their consumer files in the sandbox via `rg -l -w`, then run the pure
@@ -85,10 +89,15 @@ export const traceForwardLocalizeOwners = async (args: {
       args.timeoutMs,
     ).catch(() => null)
     if (r !== null && r.code === 0) {
+      // Cap per-symbol file lists: a very common symbol (`get`, `value`) in a big
+      // repo can match hundreds of files. The final owner set is bounded by
+      // `maxFiles` in forwardLocalizeConsumers, but cap here too so a huge rg
+      // result never balloons the intermediate map.
       map[symbol] = r.stdout
         .split("\n")
         .map((line) => line.trim())
         .filter((line) => line !== "")
+        .slice(0, PER_SYMBOL_FILE_CAP)
     }
   }
   return forwardLocalizeConsumers({

@@ -27,10 +27,10 @@ purpose: |
 evidence:
   code:
     - src/runner/batch/eval/stream-tap.ts
-  adrs: []
+  adrs: [536]
   tests:
     unit:
-      - tests/unit/bench-stream-tap.test.ts
+      - tests/unit/bench-stream-tap-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

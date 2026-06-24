@@ -132,8 +132,14 @@ const SRC = join(__dirname, "..", "..", "src")
 // Re-measured 2026-06-15 after merge resolution (activity-spine + bench preset
 // unification + quanta-home SSOT): new slices contribute bare catches / nullish
 // swallows / non-abortable sleep; ceilings raised to lock in the new floor.
-const BARE_CATCH_BASELINE = 1046
-const NULLISH_PROMISE_SWALLOW_BASELINE = 113
+// Re-measured 2026-06-25 (ADR-0296 bash auto-background): +2 bare catches, both
+// justified: `runtime/bash-bg-registry.ts` reader-error catch (DOCUMENTED swallow
+// — the error is already surfaced into the shared stdout/stderr buffer), and
+// `runtime/shell.ts` `askConsent` `} catch { return false }` (FAIL-CLOSED safe
+// default — a thrown consent prompt DENIES background adoption). Ceiling 1101 →
+// 1103. (The shell.ts site also bumps CATCH_RETURN_EMPTY 109 → 110 below.)
+const BARE_CATCH_BASELINE = 1103
+const NULLISH_PROMISE_SWALLOW_BASELINE = 143
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on
@@ -141,7 +147,11 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 113
  * R5=13; the 14 fix lanes moved several sites before these constants were
  * pinned).
  */
-const CATCH_RETURN_EMPTY_BASELINE = 98
+// Re-measured 2026-06-25 (ADR-0296 bash auto-background): +1 for
+// `runtime/shell.ts` `askConsent` `catch { return false }` — a FAIL-CLOSED safe
+// default (a thrown consent prompt DENIES background adoption), not a swallowed
+// work path. Ceiling 109 → 110.
+const CATCH_RETURN_EMPTY_BASELINE = 110
 // Re-measured 2026-06-17 (RFC jun-17 LSP warm backend): +1 for
 // `startBackgroundLspPrewarm` in agent/lsp-bridge.ts — a fire-and-forget
 // session-start prewarm whose failure is a documented best-effort skip (the
@@ -156,7 +166,7 @@ const DEBUG_ONLY_CATCH_BASELINE = 9
 // Promise+setTimeout form (already in committed HEAD); ceiling raised to 13.
 // Re-measured 2026-06-15: quanta-home SSOT + bench-preset merge adds 2 new
 // non-abortable sleeps; ceiling raised to 15.
-const NON_ABORTABLE_SLEEP_BASELINE = 15
+const NON_ABORTABLE_SLEEP_BASELINE = 16
 const STRINGIFY_TRUNCATING_WRITE_BASELINE = 9
 
 // Same canonical form as silent-catch-24h-ratchet: no binding, swallowed.

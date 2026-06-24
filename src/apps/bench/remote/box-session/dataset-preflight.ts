@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs"
 import { lspServerBinForFile, PYRIGHT_LANGSERVER_BIN } from "@/lsp/server-registry"
-import { filesFromUnifiedDiff } from "@/shared"
+import { byteCompare, filesFromUnifiedDiff } from "@/shared"
 import { presetRequiresLiveLspGrounding } from "../../preset"
 
 const PYRIGHT_LSP_BIN = PYRIGHT_LANGSERVER_BIN
@@ -72,7 +72,7 @@ const dominantRemoteStrictBinOf = (
     if (
       best === undefined ||
       info.count > best.count ||
-      (info.count === best.count && bin.localeCompare(best.bin) < 0)
+      (info.count === best.count && byteCompare(bin, best.bin) < 0)
     ) {
       best = { instanceId, bin, rel: info.rel, count: info.count }
     }

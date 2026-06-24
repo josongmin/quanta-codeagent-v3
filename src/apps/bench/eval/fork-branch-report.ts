@@ -10,6 +10,8 @@
  * snapshot in tests and to diff across runs.
  */
 
+import { sliceWholeChars } from "@/shared"
+
 export interface ForkBranchOutcome {
   readonly name: string // experiment name (e.g. "baseline", "inject")
   readonly passed: boolean // did this branch resolve the instance
@@ -34,7 +36,7 @@ const RESOLVED_NO = "no"
 const truncateReason = (reason: string): string => {
   if (reason.length <= REASON_MAX) return reason
   // Reserve one slot for the ellipsis so the result is exactly REASON_MAX wide.
-  return reason.slice(0, REASON_MAX - ELLIPSIS.length) + ELLIPSIS
+  return sliceWholeChars(reason, REASON_MAX - ELLIPSIS.length) + ELLIPSIS
 }
 
 const cellsFor = (b: ForkBranchOutcome): readonly string[] => [

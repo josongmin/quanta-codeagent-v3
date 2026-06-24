@@ -55,7 +55,7 @@ evidence:
     - src/runner/batch/eval/fault-evidence.ts
     - src/runner/batch/eval/knobs-bench.ts
     - src/runner/batch/eval/patch-hygiene.ts
-  adrs: []
+  adrs: [17]
   tests:
     unit:
       - tests/unit/closure/closure-bundle.test.ts
@@ -78,8 +78,8 @@ evidence:
       - tests/unit/verification-plan-issue-extract.test.ts
       - tests/unit/closure-diagnostics.test.ts
       - tests/unit/closure-diagnostics-io.test.ts
-      - tests/unit/proof-closure-knobs-wiring.test.ts
-      - tests/unit/bench-closure-prompt-wiring.test.ts
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+      - tests/unit/bench-closure-prompt-wiring-hellgate.test.ts
       - tests/unit/bench-fault-evidence-wiring.test.ts
     integration:
       - tests/integration/bench-closure-repair-gate.test.ts

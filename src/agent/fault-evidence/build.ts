@@ -5,6 +5,7 @@
  * never emits raw source bodies. See {@link FaultEvidencePacket}.
  */
 import { extractSymbols } from "@/agent/issue-hint/extract-symbols"
+import { byteCompare } from "@/shared/byte-compare"
 import type {
   FaultCandidate,
   FaultCandidateSource,
@@ -80,7 +81,7 @@ export const buildFaultEvidencePacket = (input: FaultEvidenceInput): FaultEviden
   }
 
   const ranked = [...byFile.values()].sort(
-    (a, b) => b.score - a.score || a.file.localeCompare(b.file),
+    (a, b) => b.score - a.score || byteCompare(a.file, b.file),
   )
   const candidates = ranked.slice(0, maxCandidates)
 

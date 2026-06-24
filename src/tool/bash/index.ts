@@ -3,9 +3,16 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import { maybeEmitPassiveVcs, type PassiveVcsHookCtx } from "@/git/passive-classify"
-import { type OsSandboxProfile, runShell, type ShellOptions } from "@/runtime"
-import { type BashBgRegistry, getBashBgRegistry } from "@/runtime/bash-bg-registry"
+import {
+  type BackgroundDetachSeam,
+  type OsSandboxProfile,
+  runShell,
+  type ShellOptions,
+} from "@/runtime"
+import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { classifyCommandShape } from "@/security"
+import { runtimeConfig } from "@/shared"
+import { matchVerifyCommand } from "@/shared/verify-command-shape"
 import { statFile } from "@/storage"
 import {
   isWriteCommand,
@@ -20,6 +27,7 @@ import type {
   ToolContext,
   ToolEvent,
   ToolFailure,
+  ToolResult,
   ToolResultEvidence,
 } from "../types"
 import { resolveBashCwd } from "../worktree/cwd-override"
@@ -39,7 +47,10 @@ const schema = z.object({
    *                 accident-proof inspection. Concurrency stays serialized
    *                 (the SOTA invariant — parallel-safety is a future ADR).
    *   - `"write"` : current behavior (default). No per-call sandbox wrap.
-   *  The OS is the enforcer — there is NO command-pattern heuristic.
+   *  The OS is the enforcer for sandbox safety. A separate preflight rejects
+   *  shared-registry verification/reproduction commands in read mode because
+   *  they are not passive inspection and frequently require runtime syscalls /
+   *  temp/cache writes; it never auto-downgrades to write mode.
    *
    *  `mode` is OPTIONAL on the wire (callers may omit) so the input *type*
    *  keeps the field optional — every existing call site that omits `mode`
@@ -50,20 +61,23 @@ const schema = z.object({
     .describe(
       "read = per-call read-only OS sandbox wrap (Seatbelt/Landlock enforces no writes). Parallel-safe-ready (concurrency still serialized for now). write = current behavior (default).",
     ),
-  /** ADR-0296 (Cursor `TimeoutBehavior.BACKGROUND` absorption). `"kill"`
-   *  (default — absent ⇒ "kill") preserves the legacy behavior: SIGTERM on
-   *  the deadline + typed `timeout` ToolFailure. `"background"` DETACHES the
-   *  process when the deadline elapses, returning `{ shellId, status:
-   *  "running", outputSoFar }` so the model can resume control of it later
-   *  via `bash_await` / `bash_kill`. Optional (not `.default()`) so the
-   *  schema's input and output types match — keeps the existing zod-cast
-   *  pattern that other tools rely on (see `Tool<Input>` shape contract). */
+  /** ADR-0296 (Cursor `TimeoutBehavior.BACKGROUND` absorption). Per-call
+   *  override of the session default (`QUANTA_BASH_AUTO_BACKGROUND`, default
+   *  `"background"`). `"background"` DETACHES the still-running process when the
+   *  deadline elapses, returning `{ shellId, status: "running", outputSoFar }`
+   *  so the model resumes it via `bash_await` / `bash_kill`. `"kill"` is the
+   *  legacy SIGTERM-on-deadline + typed `timeout` ToolFailure. `"prompt"` asks
+   *  the operator for one-keystroke consent before detaching (degrades to
+   *  `background` where no interactive surface is wired). Optional (not
+   *  `.default()`) so the schema's input and output types match; absent ⇒ the
+   *  session default applies. */
   timeout_behavior: z
-    .enum(["kill", "background"])
+    .enum(["kill", "background", "prompt"])
     .optional()
     .describe(
-      "kill (default; absent ⇒ kill) = SIGTERM on deadline (current). " +
-        "background = on deadline, detach and return { shellId } — use bash_await later.",
+      "Per-call override of the session default (default 'background'). " +
+        "background = on deadline, detach and return { shellId } — use bash_await/bash_kill later. " +
+        "kill = SIGTERM on deadline (legacy). prompt = ask before detaching.",
     ),
 })
 
@@ -82,10 +96,10 @@ type Input = z.infer<typeof schema>
  *     chars)`), divergent from the registry's `<persisted-output>` wrapper
  *     that the rest of the toolchain emits.
  *
- * Foreground (`formatRunBody`) and bg-completed (`buildBackgroundCompletedResult`)
- * paths now return the raw stdout/stderr body verbatim. The registry caps
- * via head+tail, persisting the full payload to `.quanta/tool-output/<uuid>.txt`
- * when over budget.
+ * The foreground path (`formatRunBody`) now returns the raw stdout/stderr body
+ * verbatim (ADR-0296 routes a deadline-detached command's COMPLETION through the
+ * same foreground path). The registry caps via head+tail, persisting the full
+ * payload to `.quanta/tool-output/<uuid>.txt` when over budget.
  *
  * Memory note: the underlying `runShell` call already buffers stdout/stderr
  * in memory; removing the post-buffering slice is memory-neutral. The
@@ -104,6 +118,7 @@ const MAX_BG_PLACEHOLDER_OUTPUT = 30_000
  *  cap only bounds the per-tool attachment size. */
 const STDERR_CAP = 4_000
 const READ_MODE_TMP_PREFIX = "quanta-bash-read-"
+const READ_MODE_VERIFY_REJECT_REASON = "read_mode_verification_command"
 
 /**
  * ADR-0297 — sandbox-driven HITL. The previous `ALWAYS_CONFIRM_PATTERNS`
@@ -166,6 +181,32 @@ const buildPostBashStaleReminder = async (
   }
   const stale = staleAfterBash(state, command, observations)
   return stale.length > 0 ? renderStaleReminder(stale) : null
+}
+
+/** `mode="read"` is for passive inspection. Test/reproducer commands are still
+ *  shell commands, but they execute language runtimes that may allocate guard
+ *  pages, load native modules, write caches, or create temp files. Running those
+ *  under the read-only per-call sandbox produced false infra failures in
+ *  SWE-bench (django__django-11138). Do not silently relax the sandbox here:
+ *  reject the invalid mode/command pairing and tell the model to rerun with an
+ *  explicit write-capable execution mode. */
+const rejectReadModeVerificationCommand = (
+  mode: "read" | "write",
+  command: string,
+): ToolResult | null => {
+  if (mode !== "read") return null
+  const match = matchVerifyCommand(command)
+  if (match === null) return null
+  return {
+    ok: false,
+    output: [
+      "[read-mode incompatible]",
+      `Command classified as verification/reproduction: ${match.id} (${match.ecosystem}).`,
+      'bash mode="read" is for passive inspection only. Rerun this verifier with bash mode="write" or use the dedicated test_runner/run_tests tool if available.',
+      "No command was spawned.",
+    ].join("\n"),
+    failure: { mode: "rejected", reason: READ_MODE_VERIFY_REJECT_REASON },
+  }
 }
 
 /** Derive a TYPED {@link ToolFailure} from the existing `ShellResult` shape
@@ -393,103 +434,47 @@ const buildBackgroundPlaceholderResult = (
   }
 }
 
-/** Build the final result when the bg shell completed before the deadline.
- *
- *  ADR-0411: no length cap here. The registry's `capToolOutput` truncates
- *  oversized bodies with head+tail and persists the full payload to a
- *  spill file. */
-const buildBackgroundCompletedResult = (snap: {
-  status: string
-  stdout: string
-  stderr: string
-  exitCode: number | null
-  command: string
-}): ToolEvent => {
-  const body = stripModelControlChars(
-    [snap.stdout, snap.stderr].filter(Boolean).join("\n"),
-  ).trimEnd()
-  const exit = snap.exitCode ?? -1
-  const isKilled = snap.status === "killed" || snap.status === "aborted"
-  const status = isKilled ? "killed" : `exit ${exit}`
-  const evidence: ToolResultEvidence = {
-    ...(snap.stderr ? { stderr: snap.stderr.slice(-STDERR_CAP) } : {}),
-    exitCode: exit,
-    executedCommand: snap.command,
-  }
-  return {
-    type: "result",
-    result: {
-      ok: snap.status === "completed" && exit === 0,
-      output: `[${status}]\n${body || "(no output)"}`,
-      evidence,
-    },
-  }
-}
-
-const buildBackgroundResult = (
-  registry: BashBgRegistry,
-  cmd: string,
-  shown: string,
-  timeoutMs: number,
-  signal: AbortSignal,
-  cwd: string,
-): AsyncIterable<ToolEvent> => {
-  const gen = async function* (): AsyncGenerator<ToolEvent> {
-    yield { type: "progress", message: `running (bg-capable): ${shown}` }
-    const handle = await registry.register({ command: cmd, cwd, signal })
-    const outcome = await registry.awaitHandle(handle.id, { timeoutMs, signal })
-    if (outcome === null) {
-      yield {
-        type: "result",
-        result: {
-          ok: false,
-          output: `[bash background] handle ${handle.id} unexpectedly evicted before await completed`,
-          failure: { mode: "error", modelVisibleError: "handle evicted" },
-        },
-      }
-      return
-    }
-    const snap = outcome.snapshot
-    yield snap.status === "running"
-      ? buildBackgroundPlaceholderResult(snap, timeoutMs)
-      : buildBackgroundCompletedResult({ ...snap, command: cmd })
-  }
-  return gen()
-}
-
-const buildReadModeBackgroundUnsupportedResult = (): ToolEvent => ({
-  type: "result",
-  result: {
-    ok: false,
-    output: "[sandbox unavailable]\nread-mode-background-unsupported",
-    failure: {
-      mode: "sandbox_unavailable",
-      reason: "read-mode-background-unsupported",
-    },
-  },
-})
-
-const buildTimeoutBackgroundResult = (
+/** ADR-0296 auto-background — resolve the effective deadline behavior into an
+ *  optional detach seam + the deadline (ms). A per-call `timeout_behavior` wins
+ *  over the runtime-config default (`background`/`prompt` ⇒ detach; `kill` ⇒
+ *  legacy SIGTERM). `prompt` additionally wires a `confirm` consent gate from
+ *  the host (`ctx.requestBackgroundConsent`): approved ⇒ detach, declined ⇒
+ *  kill. Absent that host surface, `prompt` degrades to plain `background`
+ *  (auto-detach). An absent seam ⇒ kill-on-deadline (byte-identical legacy).
+ *  The seam's `adopt` binds the still-running child to the process-wide bash bg
+ *  registry. */
+const resolveBgDetach = (
   input: Input,
-  mode: "read" | "write",
-  cmd: string,
-  shown: string,
   ctx: ToolContext,
-  cwd: string,
-): AsyncIterable<ToolEvent> => {
-  if (mode === "read") {
-    return (async function* (): AsyncGenerator<ToolEvent> {
-      yield buildReadModeBackgroundUnsupportedResult()
-    })()
+): {
+  readonly bgSeam?: { readonly seam: BackgroundDetachSeam; readonly timeoutMs: number }
+  readonly deadlineMs: number
+} => {
+  const cfg = runtimeConfig()
+  const behavior = input.timeout_behavior ?? cfg.bashAutoBackground
+  const deadlineMs = input.timeout_ms ?? cfg.bashAutoBackgroundThresholdMs ?? DEFAULT_BG_TIMEOUT_MS
+  if (behavior === "kill") return { deadlineMs }
+  // PROMPT mode wires a consent gate ONLY when the host surfaced a requester;
+  // otherwise (and for plain `background`) the seam has no `confirm` and detach
+  // is immediate.
+  const consent = ctx.requestBackgroundConsent
+  const confirm =
+    behavior === "prompt" && consent !== undefined
+      ? (info: { command: string; elapsedMs: number }) => consent(info)
+      : undefined
+  return {
+    bgSeam: {
+      seam: {
+        adopt: async (args) => {
+          const { id } = await getBashBgRegistry().adopt(args)
+          return { id }
+        },
+        ...(confirm !== undefined ? { confirm } : {}),
+      },
+      timeoutMs: deadlineMs,
+    },
+    deadlineMs,
   }
-  return buildBackgroundResult(
-    getBashBgRegistry(),
-    cmd,
-    shown,
-    input.timeout_ms ?? DEFAULT_BG_TIMEOUT_MS,
-    ctx.signal,
-    cwd,
-  )
 }
 
 /** RFC jun-6 — the shell result shape `maybeEscalate` consumes/returns (a
@@ -500,6 +485,11 @@ interface EscalatableShellResult {
   readonly stdout: string
   readonly stderr: string
   readonly timedOut: boolean
+  /** ADR-0296 — present when the run hit its deadline under a `background`
+   *  seam and the still-running child was DETACHED into the bg registry. The
+   *  bash tool surfaces a `{ shellId }` placeholder and skips completion-only
+   *  post-processing (evidence / passive-VCS / stale-read / escalation). */
+  readonly detached?: { readonly shellId: string }
 }
 
 /** RFC jun-6 — offer the user-gated sandbox-block escalation when a `mode="read"`
@@ -526,6 +516,9 @@ const maybeEscalate = async (
     }>
   },
 ): Promise<{ readonly result: EscalatableShellResult; readonly note?: string }> => {
+  // ADR-0296 — a detached run never completed, so it cannot be a sandbox block
+  // (no exit code to classify). Short-circuit before the exit-code guard.
+  if (r.detached !== undefined) return { result: r }
   // Fast default-OFF / not-a-block guards — the handler is consulted ONLY for an
   // applied-sandbox nonzero non-timeout exit. A timeout is never a sandbox block.
   if (!meta.sandboxApplied || r.exitCode === 0 || meta.timedOut) return { result: r }
@@ -573,6 +566,11 @@ const runShellWithEscalation = async (
   // `bashExecute` so the escalation re-run uses the SAME cwd.
   cwd: string,
   sandboxLocalEnv?: NonNullable<ShellOptions["localEnv"]>,
+  // ADR-0296 — when present, the FIRST (sandboxed) spawn detaches on its
+  // deadline (`timeoutMs`) into the registry instead of being killed. The
+  // unsandboxed escalation re-run deliberately omits this (it only fires for a
+  // COMPLETED nonzero exit, never a detached run).
+  bg?: { readonly seam: BackgroundDetachSeam; readonly timeoutMs: number },
 ): Promise<{ readonly result: EscalatableShellResult; readonly note?: string }> => {
   const wrapOutcome: PerCallWrapOutcome = { sandboxApplied: false }
   // Build the runShell options ONCE so an approved unsandboxed re-run can
@@ -601,6 +599,10 @@ const runShellWithEscalation = async (
     ...(perCallPort !== undefined
       ? { perCallWrap: buildPerCallWrap(perCallPort, wrapOutcome) }
       : {}),
+    // ADR-0296 — detach-on-deadline. The resolved deadline overrides any
+    // `timeoutMs` from `baseShellOpts` so the bg threshold (not the legacy kill
+    // deadline) governs when the child detaches.
+    ...(bg !== undefined ? { background: bg.seam, timeoutMs: bg.timeoutMs } : {}),
   })
 
   return maybeEscalate(r, {
@@ -674,15 +676,23 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // governing read/write/edit is unaffected here (those tools jail themselves).
   const effectiveCwd = resolveBashCwd(ctx.cwd, ctx.activeWorktree)
 
-  // ADR-0296 — when the caller opts into `timeout_behavior: "background"`,
-  // delegate to the bg-registry path. The default `"kill"` falls through to
-  // the legacy `runShell` branch BYTE-IDENTICALLY.
-  if (input.timeout_behavior === "background") {
-    yield* buildTimeoutBackgroundResult(input, mode, cmd, shown, ctx, effectiveCwd)
-    return
+  // ADR-0296 auto-background — resolve the effective deadline behavior. When the
+  // command outruns its deadline the run is DETACHED into the bg registry
+  // (Claude-Code-style auto-background) instead of killed; the run still goes
+  // through the SAME foreground path (sandbox / env / per-call read-wrap /
+  // evidence on completion), so only the deadline diverges and nothing regresses.
+  const { bgSeam, deadlineMs: detachDeadlineMs } = resolveBgDetach(input, ctx)
+
+  yield {
+    type: "progress",
+    message: `running${bgSeam !== undefined ? " (bg-capable)" : ""}: ${shown}`,
   }
 
-  yield { type: "progress", message: `running: ${shown}` }
+  const readModeRejection = rejectReadModeVerificationCommand(mode, cmd)
+  if (readModeRejection !== null) {
+    yield { type: "result", result: readModeRejection }
+    return
+  }
 
   // ADR-0295 — mode="read" per-call sandbox short-circuit. The acquire helper
   // probes `availability()`; an unsupported host returns a fail-closed result.
@@ -710,9 +720,27 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
       perCallPort,
       effectiveCwd,
       tempScope?.localEnv,
+      bgSeam,
     )
   } finally {
     tempScope?.cleanup()
+  }
+
+  // ADR-0296 — the command outran its deadline and was DETACHED into the bg
+  // registry. Surface the `{ shellId }` placeholder and STOP: there is no exit
+  // code yet, so the completion-only post-processing below (evidence /
+  // sandbox-violation derivation / passive-VCS / stale-read) does not apply.
+  // The model resumes the shell via `bash_await` / `bash_kill`.
+  if (escalated.result.detached !== undefined) {
+    yield buildBackgroundPlaceholderResult(
+      {
+        id: escalated.result.detached.shellId,
+        stdout: escalated.result.stdout,
+        stderr: escalated.result.stderr,
+      },
+      detachDeadlineMs,
+    )
+    return
   }
 
   const { status, body } = formatRunBody(escalated.result)

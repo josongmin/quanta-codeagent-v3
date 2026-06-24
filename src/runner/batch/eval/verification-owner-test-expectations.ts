@@ -1,9 +1,12 @@
-import { readdir, readFile } from "node:fs/promises"
+import { access, readdir, readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { isPythonTestFile, normalizeRepoPath } from "./impacted-test-discovery"
 
 const DEFAULT_MAX_TEST_FILES = 2
 const DEFAULT_MAX_EXPECTATIONS = 4
+/** Skip reading any candidate test file larger than this (OOM guard; real Python
+ *  test files are << 4 MiB, so this only rejects pathological/binary outliers). */
+const MAX_TEST_FILE_BYTES = 4 * 1024 * 1024
 const PER_FILE_EXPECTATION_CAP = 2
 const PER_FILE_EXPECTATION_SCAN_CAP = 16
 const ASSERTION_LINE =
@@ -109,7 +112,10 @@ const existingTestFiles = async (
   const out: string[] = []
   for (const candidate of candidates) {
     if (out.length >= max) break
-    const exists = await readFile(join(sandbox, candidate))
+    // Existence check only — `access` does NOT read the file into memory, so a
+    // pathologically large probe candidate cannot OOM the prober (the actual
+    // bounded read happens later in `appendFactsFromTestFile`).
+    const exists = await access(join(sandbox, candidate))
       .then(() => true)
       .catch(() => false)
     if (exists) out.push(candidate)
@@ -175,69 +181,139 @@ const expectationFact = (args: {
   return normalized === "" ? undefined : `${location} assertion: ${normalized}`
 }
 
-const issueSymbolScore = (evidenceText: string, issueSymbols: readonly string[]): number => {
-  if (issueSymbols.length === 0) return 0
-  const lower = evidenceText.toLowerCase()
-  return issueSymbols.filter((symbol) => {
-    const normalized = symbol.trim().toLowerCase()
-    return normalized !== "" && lower.includes(normalized)
-  }).length
-}
+const identifierParts = (text: string): string[] =>
+  [...text.matchAll(/[A-Za-z0-9_]+/g)].flatMap((match) =>
+    (match[0] ?? "")
+      .split(/_+/)
+      .flatMap((chunk) => chunk.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/\s+/))
+      .map((part) => part.trim().toLowerCase())
+      .filter((part) => part !== ""),
+  )
 
-/** Normalize triple-quoted spans by a proper open/close scan (no leading-`'''`
- *  heuristic, so a lone CLOSING `'''` is never mis-read as an OPEN — the M1 bug):
- *   - a single-line span that is a VALUE (has surrounding code on its line, e.g.
- *     `match="""msg"""`, `== '''msg'''`) is KEPT, rewritten to a normal `"..."`
- *     literal so `quotedLiteralValues` mines it;
- *   - a single-line BARE docstring (whitespace-only before the open AND after the
- *     close) is DROPPED — else its prose (which may contain `assert`/`match=`) would
- *     match `ASSERTION_LINE` and be mined as a FALSE expectation (the round-3 bug);
- *   - a MULTI-LINE span (docstring or multi-line value) is DROPPED, preserving only
- *     its newlines so line / `TEST_DEF` tracking stays aligned;
- *   - an UNTERMINATED span emits its remainder verbatim (never swallows the file).
- *  Single/double single-line literals are untouched, so the adjacent-string
- *  `match=(r"..." r"...")` astropy-13033 shape survives. */
-const stripTripleQuoted = (text: string): string => {
-  const triple = /"""|'''/g
-  let out = ""
-  let pos = 0
-  let open: { quote: string; contentStart: number } | undefined
-  let m: RegExpExecArray | null
-  // biome-ignore lint/suspicious/noAssignInExpressions: standard exec loop
-  while ((m = triple.exec(text)) !== null) {
-    if (open === undefined) {
-      out += text.slice(pos, m.index)
-      open = { quote: m[0], contentStart: m.index + 3 }
-      pos = m.index + 3
-    } else if (m[0] === open.quote) {
-      const closeIndex = m.index
-      const content = text.slice(open.contentStart, closeIndex)
-      if (content.includes("\n")) {
-        out += content.replace(/[^\n]/g, "") // multi-line ⇒ keep only newlines
-      } else {
-        const openIndex = open.contentStart - 3
-        const lineStart = text.lastIndexOf("\n", openIndex) + 1
-        const afterClose = closeIndex + 3
-        const lineEnd = text.indexOf("\n", afterClose)
-        const prefix = text.slice(lineStart, openIndex)
-        const suffix = text.slice(afterClose, lineEnd === -1 ? text.length : lineEnd)
-        // VALUE (surrounding code) ⇒ keep as a mineable literal; BARE docstring ⇒ drop.
-        out += prefix.trim() === "" && suffix.trim() === "" ? "" : `"${content.replace(/"/g, "")}"`
-      }
-      open = undefined
-      pos = closeIndex + 3
-    }
-    // a different triple-quote kind inside an open span is just content; skip it.
+const evidenceSymbolTokens = (text: string): ReadonlySet<string> => {
+  const out = new Set<string>()
+  for (const match of text.matchAll(/[A-Za-z0-9_]+/g)) {
+    const raw = match[0] ?? ""
+    const compact = raw.replace(/_/g, "").toLowerCase()
+    if (compact !== "") out.add(compact)
+    for (const part of identifierParts(raw)) out.add(part)
   }
-  out += open === undefined ? text.slice(pos) : text.slice(open.contentStart)
   return out
 }
 
-/** Strip triple-quoted spans, then drop bare `#` comment lines. */
+const issueSymbolMatchesEvidence = (
+  symbol: string,
+  evidenceTokens: ReadonlySet<string>,
+): boolean => {
+  const compact = symbol.replace(/[^A-Za-z0-9]/g, "").toLowerCase()
+  if (compact.length < 2) return false
+  if (evidenceTokens.has(compact)) return true
+  const parts = identifierParts(symbol)
+  return parts.length > 0 && parts.every((part) => evidenceTokens.has(part))
+}
+
+const issueSymbolScore = (evidenceText: string, issueSymbols: readonly string[]): number => {
+  if (issueSymbols.length === 0) return 0
+  const evidenceTokens = evidenceSymbolTokens(evidenceText)
+  return issueSymbols.filter((symbol) => issueSymbolMatchesEvidence(symbol, evidenceTokens)).length
+}
+
+/** Remove EVERY triple-quoted span (docstrings AND triple-quoted string values)
+ *  with a string-aware scanner, preserving only the newlines inside each span so
+ *  line / `TEST_DEF` tracking stays aligned. Triple-quote tokens inside ordinary
+ *  single/double-quoted strings are ignored. An unterminated triple span keeps
+ *  only its newlines too: mining fake asserts from an invalid/open string is a
+ *  worse failure mode than losing recall after that point.
+ *
+ *  DESIGN (settled after 4 audit rounds): we deliberately do NOT try to keep
+ *  triple-quoted message VALUES while dropping docstrings. Distinguishing the two by
+ *  text position (`;` / block-`:` / continuation-line context) is unreliable and
+ *  repeatedly mis-mined docstring prose as a FALSE expectation — the exact wrong-steer
+ *  class this module exists to prevent. A false expectation actively mis-steers
+ *  generation; a missed one is mere recall loss. Triple-quoted assertion messages are
+ *  rare (the real astropy-13033 shape uses adjacent `r"..." r"..."` SINGLE-quoted
+ *  strings, which this never touches), so stripping all triple spans trades a rare
+ *  recall loss for eliminating the entire false-steer class — the correct safety
+ *  direction.
+ *
+ *  Proper open/close pairing (not a leading-`'''` heuristic) so a lone CLOSING `'''`
+ *  is never mis-read as an OPEN (the M1 bug). */
+const stripTripleQuoted = (text: string): string => {
+  let out = ""
+  let i = 0
+  let quote: string | undefined
+  let triple: { quote: string; contentStart: number } | undefined
+
+  while (i < text.length) {
+    if (triple !== undefined) {
+      if (text.startsWith(triple.quote, i)) {
+        out += text.slice(triple.contentStart, i).replace(/[^\n]/g, "")
+        i += 3
+        triple = undefined
+      } else {
+        i += 1
+      }
+      continue
+    }
+
+    const ch = text[i] ?? ""
+    if (quote !== undefined) {
+      out += ch
+      if (ch === "\\") {
+        out += text[i + 1] ?? ""
+        i += 2
+        continue
+      }
+      if (ch === quote) quote = undefined
+      i += 1
+      continue
+    }
+
+    const maybeTriple = text.startsWith('"""', i)
+      ? '"""'
+      : text.startsWith("'''", i)
+        ? "'''"
+        : undefined
+    if (maybeTriple !== undefined) {
+      triple = { quote: maybeTriple, contentStart: i + 3 }
+      i += 3
+      continue
+    }
+
+    out += ch
+    if (ch === '"' || ch === "'") quote = ch
+    i += 1
+  }
+  if (triple !== undefined) out += text.slice(triple.contentStart).replace(/[^\n]/g, "")
+  return out
+}
+
+/** Truncate a line at the first `#` OUTSIDE a string literal — removing a trailing
+ *  (or whole-line) comment. String-aware (single/double quotes with backslash
+ *  escapes) so a `#` inside a legitimate quoted message (e.g. "color #fff") is kept.
+ *  Without this, a stale message parked in an INLINE trailing comment leaks into the
+ *  mined `exact/public literal` and FALSE-STEERS generation (round-5 finding). */
+const stripInlineComment = (line: string): string => {
+  let q: string | undefined
+  for (let i = 0; i < line.length; i += 1) {
+    const c = line[i]
+    if (q !== undefined) {
+      if (c === "\\") {
+        i += 1
+        continue
+      }
+      if (c === q) q = undefined
+      continue
+    }
+    if (c === '"' || c === "'") q = c
+    else if (c === "#") return line.slice(0, i)
+  }
+  return line
+}
+
+/** Strip triple-quoted spans, then strip `#` comments (whole-line AND inline). */
 const stripCommentsAndDocstrings = (text: string): string[] =>
-  stripTripleQuoted(text)
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("#"))
+  stripTripleQuoted(text).split("\n").map(stripInlineComment)
 
 /** Net bracket depth contributed by a line, IGNORING brackets inside single/double
  *  quoted string literals (with backslash escapes). String-aware so an in-string
@@ -289,6 +365,7 @@ const expectationsFromTestFile = (
   path: string,
   text: string,
   issueSymbols: readonly string[] = [],
+  perFileExpectationCap = PER_FILE_EXPECTATION_CAP,
 ): readonly string[] => {
   const out: { fact: string; score: number; order: number }[] = []
   let currentTest: string | undefined
@@ -315,7 +392,7 @@ const expectationsFromTestFile = (
   }
   return out
     .sort((a, b) => b.score - a.score || a.order - b.order)
-    .slice(0, PER_FILE_EXPECTATION_CAP)
+    .slice(0, perFileExpectationCap)
     .map((entry) => entry.fact)
 }
 
@@ -324,11 +401,25 @@ const appendFactsFromTestFile = async (args: {
   readonly relPath: string
   readonly out: string[]
   readonly maxExpectations: number
+  readonly perFileExpectationCap: number
   readonly issueSymbols: readonly string[]
 }): Promise<boolean> => {
-  const text = await readFile(join(args.sandbox, args.relPath), "utf8").catch(() => null)
+  const abs = join(args.sandbox, args.relPath)
+  // Bound the read: `globOwnerModuleTests` enumerates ANY `test_*.py` on disk, so a
+  // pathological multi-hundred-MB file would otherwise be slurped whole into memory.
+  // Real test files are tiny; cap so a malformed/huge file is skipped, not OOM'd.
+  const size = await stat(abs)
+    .then((s) => s.size)
+    .catch(() => -1)
+  if (size < 0 || size > MAX_TEST_FILE_BYTES) return false
+  const text = await readFile(abs, "utf8").catch(() => null)
   if (text === null) return false
-  for (const fact of expectationsFromTestFile(args.relPath, text, args.issueSymbols)) {
+  for (const fact of expectationsFromTestFile(
+    args.relPath,
+    text,
+    args.issueSymbols,
+    args.perFileExpectationCap,
+  )) {
     if (args.out.includes(fact)) continue
     args.out.push(fact)
     if (args.out.length >= args.maxExpectations) return true
@@ -376,6 +467,10 @@ export const extractVerificationOwnerTestExpectations = async (args: {
           ...(await globOwnerModuleTests(args.sandbox, args.localizedOwnerFiles ?? [], maxFiles)),
         ]).slice(0, maxFiles)
   if (testFiles.length === 0) return []
+  const perFileExpectationCap = Math.max(
+    PER_FILE_EXPECTATION_CAP,
+    Math.ceil(maxExpectations / testFiles.length),
+  )
   const out: string[] = []
   for (const relPath of testFiles) {
     const filled = await appendFactsFromTestFile({
@@ -383,6 +478,7 @@ export const extractVerificationOwnerTestExpectations = async (args: {
       relPath,
       out,
       maxExpectations,
+      perFileExpectationCap,
       issueSymbols: args.issueSymbols ?? [],
     })
     if (filled) return out

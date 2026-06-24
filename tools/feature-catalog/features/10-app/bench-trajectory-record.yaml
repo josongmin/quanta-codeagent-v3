@@ -30,10 +30,10 @@ evidence:
   code:
     - src/apps/bench/index.ts
     - src/config/knob-inventory.ts
-  adrs: []
+  adrs: [536]
   tests:
     unit:
-      - tests/unit/bench-trajectory-record-wiring.test.ts
+      - tests/unit/bench-trajectory-record-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

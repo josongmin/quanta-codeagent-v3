@@ -60,7 +60,7 @@ describe("status-bar paintRow visible-width invariant", () => {
   // Pretend stderr is a TTY in this test surface (Bun's test runner stderr is
   // not a TTY, which would otherwise route through the new auto-disable seam
   // and return a no-op stub.)
-  const ttyOpts = { env: process.env, stderrIsTTY: true } as const
+  const ttyOpts = { env: { TERM: "xterm-256color" }, stderrIsTTY: true } as const
 
   test("short text padded to exactly cols visible chars (not cols + 1)", () => {
     const bar = installStatusBar("hello", ttyOpts)

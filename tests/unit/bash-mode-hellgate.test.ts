@@ -15,6 +15,7 @@
  *  F. unsupported platform — typed `sandbox_unavailable` (fail-closed).
  *  G. concurrency invariant — `isConcurrencySafe` stays `false`.
  *  H. fuzz — 100 random mutating ops under mode="read" → 100% rejected.
+ *  I. verification/repro commands under mode="read" → rejected before sandbox.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -195,6 +196,46 @@ describe("B. mode='read' allows read commands via per-call sandbox wrap", () => 
 })
 
 /* ================================================================== */
+/*  I. mode="read" + verification runtime → fail-fast                 */
+/* ================================================================== */
+
+describe("I. mode='read' rejects verification runtimes before sandbox spawn", () => {
+  const expectReadModeVerifyRejected = async (command: string): Promise<ToolResult> => {
+    let sandboxFactoryCalled = false
+    __setBashPerCallSandboxFactory(() => {
+      sandboxFactoryCalled = true
+      throw new Error("read-mode verification rejection must happen before sandbox acquisition")
+    })
+
+    const { result } = await collect({ command, mode: "read" }, ctx(dir))
+    expect(sandboxFactoryCalled).toBe(false)
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({
+      mode: "rejected",
+      reason: "read_mode_verification_command",
+    })
+    expect(result.output).toContain("[read-mode incompatible]")
+    expect(result.output).toContain('mode="write"')
+    expect(result.output).toContain("No command was spawned")
+    return result
+  }
+
+  test("HELL-I1: uv-backed reproducer is rejected before read sandbox acquisition", async () => {
+    await expectReadModeVerifyRejected(
+      "uv run --no-project --python 3.9 --with pytest --with-editable . python -s reproduce_issue.py",
+    )
+  })
+
+  test("HELL-I2: django runtests.py verifier is rejected before read sandbox acquisition", async () => {
+    await expectReadModeVerifyRejected("python tests/runtests.py auth_tests")
+  })
+
+  test("HELL-I3: pytest verifier is rejected before read sandbox acquisition", async () => {
+    await expectReadModeVerifyRejected("python -m pytest tests/test_forms.py -q")
+  })
+})
+
+/* ================================================================== */
 /*  C. mode="read" + write attempt → typed sandbox_violation           */
 /* ================================================================== */
 
@@ -363,7 +404,14 @@ describe("D. mode='write' (default) → legacy byte-identical", () => {
 /* ================================================================== */
 
 describe("E. unsupported platform → typed sandbox_unavailable", () => {
-  test("HELL-E0: mode='read' + background is fail-closed, not unsandboxed", async () => {
+  test("HELL-E0: mode='read' + background APPLIES the read sandbox (no longer fail-closed)", async () => {
+    // ADR-0296 (jun-24) — read+background previously refused with
+    // "read-mode-background-unsupported" because the legacy registry RE-SPAWN
+    // path bypassed the per-call read wrap. The detach-on-deadline path runs
+    // THROUGH the foreground read-sandbox spawn, so read+background is now
+    // SUPPORTED: the per-call wrap IS applied (wiring-proof: `wrapCalled`) and a
+    // fast command completes under it. (Strictly safer than the old refusal —
+    // the sandbox is honored, not skipped.)
     let wrapCalled = false
     const fakePort: PerCallSandboxPort = {
       wrap: (argv) => {
@@ -374,13 +422,13 @@ describe("E. unsupported platform → typed sandbox_unavailable", () => {
     }
     __setBashPerCallSandboxFactory(() => fakePort)
     const { result } = await collect(
-      { command: "echo should-not-run", mode: "read", timeout_behavior: "background" },
+      { command: "echo ran-under-read-sandbox", mode: "read", timeout_behavior: "background" },
       ctx(dir),
     )
-    expect(result.ok).toBe(false)
-    expect(result.output).toContain("read-mode-background-unsupported")
-    expect(result.failure?.mode).toBe("sandbox_unavailable")
-    expect(wrapCalled).toBe(false)
+    expect(wrapCalled).toBe(true) // the read sandbox WAS applied (not bypassed)
+    expect(result.output).not.toContain("read-mode-background-unsupported")
+    expect(result.ok).toBe(true) // fast command completed under the read wrap
+    expect(result.output).toContain("ran-under-read-sandbox")
   })
 
   test("HELL-E1: mode='read' + unavailable port → typed sandbox_unavailable", async () => {

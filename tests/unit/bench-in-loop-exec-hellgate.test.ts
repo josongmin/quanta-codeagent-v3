@@ -78,6 +78,7 @@ const userText = (cfg: ReturnType<typeof buildConfig>): string => {
 // Single-line substring (the directive wraps "run the repository's\n existing
 // test(s)" across lines, so match the unambiguous MANDATORY clause head).
 const MANDATE = "MANDATORY before you stop"
+const VERIFY_MODE_STEER = 'set mode:"write"'
 
 describe("bench-in-loop-exec posture flip", () => {
   // IN-LOOP-1: DEFAULT (no knob, no preset) = ON, byte-identical to today.
@@ -87,6 +88,7 @@ describe("bench-in-loop-exec posture flip", () => {
     const cfg = buildOnce()
     expect(userText(cfg)).toContain("MANDATORY")
     expect(userText(cfg)).toContain(MANDATE)
+    expect(userText(cfg)).toContain(VERIFY_MODE_STEER)
     expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
     expect(cfg.protectTestPaths).toBe(true)
   })
@@ -144,6 +146,7 @@ describe("bench-in-loop-exec posture flip", () => {
     const txt = userText(cfg)
     expect(txt).not.toContain(MANDATE)
     expect(txt).toContain("you MAY run a tiny issue reproducer")
+    expect(txt).toContain(VERIFY_MODE_STEER)
     expect(txt).toContain("Do NOT run the repository test suite")
     expect(cfg.verifyGuard).toBeUndefined()
     expect(cfg.protectTestPaths).toBe(true)

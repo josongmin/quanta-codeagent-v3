@@ -6,6 +6,7 @@
  *  module-level functions in `default.ts`. */
 
 import { promises as fs } from "node:fs"
+import { homedir } from "node:os"
 import { isAbsolute, join, sep } from "node:path"
 import { errMessage } from "@/shared"
 import type { GitRunner, GitRunResult } from "../git-runner"
@@ -78,7 +79,7 @@ export const resolveBaseDir = (cfg: ShadowOdbConfig): string => {
   if (typeof cfg.baseDir === "string" && cfg.baseDir.length > 0) {
     return cfg.baseDir
   }
-  const home = process.env.HOME
+  const home = homedir()
   if (typeof home !== "string" || home.length === 0) {
     throw new ShadowOdbError(
       "spawn-failed",

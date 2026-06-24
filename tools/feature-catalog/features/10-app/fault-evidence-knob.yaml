@@ -26,10 +26,10 @@ purpose: 'Default-OFF NOOP-apply registry knob: emit bounded typed FaultEvidence
 evidence:
   code:
     - src/runner/knobs/knobs/fault-evidence.ts
-  adrs: []
+  adrs: [533]
   tests:
     unit:
-      - tests/unit/proof-closure-knobs-wiring.test.ts
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
       - tests/unit/bench-fault-evidence-wiring.test.ts
     integration: []
     contract: []

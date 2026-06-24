@@ -1,6 +1,6 @@
 import { mkdir, rm, stat } from "node:fs/promises"
-import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
+import { quantaHomePath } from "@/shared"
 import {
   asPositiveInt,
   atomicWriteJson,
@@ -68,8 +68,7 @@ const OWNER_META = "owner.json"
 const OWNER_SHADOW_SUFFIX = ".owner-shadow.json"
 
 export const resolveSingleBoxGuardDir = (): string =>
-  process.env.QUANTA_BENCH_SINGLE_BOX_GUARD_DIR?.trim() ||
-  join(homedir(), ".quanta", "bench-single-box")
+  process.env.QUANTA_BENCH_SINGLE_BOX_GUARD_DIR?.trim() || quantaHomePath("bench-single-box")
 
 const isOwnerRecord = (value: unknown): value is SingleBoxOwnerRecord => {
   if (value === null || typeof value !== "object") return false

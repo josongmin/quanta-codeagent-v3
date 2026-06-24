@@ -88,7 +88,7 @@ evidence:
     - src/runner/knobs/knobs/verify-select-proof-required.ts
     - src/runner/knobs/knobs/regression-max-tests.ts
     - src/runner/knobs/presets.ts
-  adrs: []
+  adrs: [13, 433]
   tests:
     unit:
       - tests/unit/verification-bundle-score.test.ts

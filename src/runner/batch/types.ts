@@ -192,6 +192,12 @@ export interface AdaptiveRouteTelemetry {
   evidenceRevisions: readonly string[]
 }
 
+export interface OwnerWideningTelemetry {
+  owners: readonly string[]
+  sources: readonly ("repair_escalation" | "forward_localize")[]
+  path: "single_pass_followup" | "adaptive_reroute"
+}
+
 /** Outcome of running one instance once. */
 export interface InstanceResult {
   id: string
@@ -397,6 +403,10 @@ export interface InstanceResult {
   /** v5 adaptive-controller trace: which routed phases ran, what terminal
    *  action was chosen, and which packet revisions the router actually saw. */
   adaptiveRoute?: AdaptiveRouteTelemetry
+  /** Structural owner-widening actually consumed by a rerun/reroute. Present
+   *  only when a bounded follow-up prepare/run pass was armed with additional
+   *  owner files (repair-escalation and/or forward-localize). */
+  ownerWidening?: OwnerWideningTelemetry
   /**
    * A5 — repro-vote outcome telemetry drained from the module sink after the
    * repair/selection rounds finish. Present only when a repro-vote validator

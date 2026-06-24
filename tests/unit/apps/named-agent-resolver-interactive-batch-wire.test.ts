@@ -117,7 +117,10 @@ describe("F2 — both primary surfaces wire loadNamedAgents (source assertion)",
   })
 
   test("host overlay → base lift exists (RuntimeBootstrapOverlay.namedAgentResolver)", () => {
-    const src = readFileSync(join(repoRoot, "src/host/runtime/internal/context-binding.ts"), "utf8")
+    const src = readFileSync(
+      join(repoRoot, "src/host/runtime/internal/context-binding/base.ts"),
+      "utf8",
+    )
     expect(src).toMatch(
       /whenDefined\("namedAgentResolver",\s*args\.overlay\?\.namedAgentResolver\)/,
     )

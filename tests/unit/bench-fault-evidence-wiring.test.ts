@@ -33,7 +33,9 @@ describe("fault-evidence adapter", () => {
     const hint = renderFaultEvidenceHint(packet)
     // no diff/code-block/multi-line-body markers; bounded line-per-candidate
     expect(hint).not.toMatch(/```|def |class |@@ /)
-    expect(hint.split("\n").length).toBeLessThanOrEqual(8)
+    expect(hint).toStartWith("Likely fault owners")
+    expect(hint.match(/^- /gm)?.length).toBe(2)
+    expect(hint).toContain("Issue symbols: Paginator")
   })
 
   test("empty packet → empty string (caller skips injection)", () => {

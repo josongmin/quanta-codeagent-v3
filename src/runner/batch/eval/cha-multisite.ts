@@ -67,6 +67,12 @@ export interface ChaRepairTarget {
  * contract surfaces with different helper names are still inspected. The target
  * class itself is excluded from its own sibling list.
  */
+// Wall-clock ceilings for the one-shot Python analyzers spawned per call.
+// Generous because a cold large repo's `python3 -` startup + AST parse is slow;
+// callers may override via `args.timeoutMs`.
+const CHA_ANALYZER_TIMEOUT_MS = 60_000
+const METHOD_AT_LINE_TIMEOUT_MS = 30_000
+
 export const CHA_ANALYZER_PY = `
 import ast, json, os, sys
 
@@ -337,7 +343,7 @@ export const findSiblingOverrideSites = async (args: {
   const sh = `python3 - ${shArg(repoRoot)} ${shArg(targetRelFile)} ${shArg(method)} <<'QUANTA_CHA_PY'\n${CHA_ANALYZER_PY}\nQUANTA_CHA_PY`
   let r: { code: number; stdout: string; stderr: string }
   try {
-    r = await exec(sh, repoRoot, args.timeoutMs ?? 60_000)
+    r = await exec(sh, repoRoot, args.timeoutMs ?? CHA_ANALYZER_TIMEOUT_MS)
   } catch {
     return []
   }
@@ -362,7 +368,7 @@ export const findEnclosingPythonMethod = async (args: {
   const sh = `python3 - ${shArg(repoRoot)} ${shArg(targetRelFile)} ${shArg(String(line))} <<'QUANTA_METHOD_AT_LINE_PY'\n${METHOD_AT_LINE_PY}\nQUANTA_METHOD_AT_LINE_PY`
   let r: { code: number; stdout: string; stderr: string }
   try {
-    r = await exec(sh, repoRoot, args.timeoutMs ?? 30_000)
+    r = await exec(sh, repoRoot, args.timeoutMs ?? METHOD_AT_LINE_TIMEOUT_MS)
   } catch {
     return undefined
   }

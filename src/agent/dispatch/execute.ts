@@ -1,7 +1,7 @@
 import type { ToolUseBlock } from "@/llm"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { compositePiiScanner } from "@/security/pii-redaction"
-import { runtimeConfig } from "@/shared"
+import { runtimeConfig, sliceTailWholeChars } from "@/shared"
 import { deriveProvenance, type ToolContext, type ToolResult } from "@/tool"
 import { composeToolResultContent } from "@/tool/image/compose"
 import { wireCheckpointedEffectChannel } from "../checkpoint-wiring"
@@ -36,7 +36,7 @@ const evidenceOf = (
   const ev = result.evidence
   if (ev === undefined) return out
   if (typeof ev.stderr === "string" && ev.stderr.length > 0) {
-    out.stderrTail = ev.stderr.slice(-STDERR_TAIL_CAP)
+    out.stderrTail = sliceTailWholeChars(ev.stderr, STDERR_TAIL_CAP)
   }
   if (typeof ev.exitCode === "number") out.exitCode = ev.exitCode
   if (typeof ev.executedCommand === "string" && ev.executedCommand.length > 0) {

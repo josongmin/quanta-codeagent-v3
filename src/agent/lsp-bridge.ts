@@ -952,10 +952,10 @@ const lspSignatureHelpPort = (getCwd: () => string): SignatureHelpPort => ({
  * unchanged (default-OFF, byte-identical). Nothing here spawns a server until
  * a tool is actually called.
  */
-export const lspNavToolList = (): Tool[] => [
+export const lspNavToolList = (getCwd: () => string = () => process.cwd()): Tool[] => [
   ...buildLspNavTools(lspNavProvider()),
-  lspRenameApplyTool(lspRenameApplyPort(process.cwd())) as Tool,
-  lspCodeActionTool(lspCodeActionPort(() => process.cwd())) as Tool,
-  lspFormatTool(lspFormatPort(() => process.cwd())) as Tool,
-  lspSignatureHelpTool(lspSignatureHelpPort(() => process.cwd())) as Tool,
+  lspRenameApplyTool(lspRenameApplyPort(getCwd())) as Tool,
+  lspCodeActionTool(lspCodeActionPort(getCwd)) as Tool,
+  lspFormatTool(lspFormatPort(getCwd)) as Tool,
+  lspSignatureHelpTool(lspSignatureHelpPort(getCwd)) as Tool,
 ]

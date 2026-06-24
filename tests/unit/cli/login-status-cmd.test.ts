@@ -333,7 +333,7 @@ describe("/logout command", () => {
     await writeToken(chatgptTokenPath(dir), {
       access_token: "at",
       refresh_token: "rt",
-      expires_at: "2030-01-01T00:00:00.000Z",
+      expires_at: "2099-01-01T00:00:00.000Z",
       plan_type: "pro",
       account_id: "acct-1",
     })
@@ -363,7 +363,7 @@ describe("/logout command", () => {
     await writeToken(chatgptTokenPath(dir), {
       access_token: "at",
       refresh_token: "rt",
-      expires_at: "2030-01-01T00:00:00.000Z",
+      expires_at: "2099-01-01T00:00:00.000Z",
     })
     const cmd = buildLogoutCmd({ env: { QUANTA_PREFS_HOME: dir, CODEX_HOME: codexHome } })
     const first = makeCtx(dir)

@@ -305,15 +305,6 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/remote/token-budget.ts",
   },
   {
-    envKey: "QUANTA_BENCH_RESULTS_DIR",
-    kind: "string",
-    default: "~/.quanta/bench/results",
-    group: "bench",
-    home: "bench",
-    describe: "Bench report mirror directory; off/0 disables the canonical mirror.",
-    readSite: "runner/batch/report.ts",
-  },
-  {
     envKey: "QUANTA_BENCH_SINGLE_BOX_GUARD_DIR",
     kind: "string",
     default: "~/.quanta/bench-single-box",

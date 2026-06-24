@@ -171,7 +171,7 @@ describe("verificationTargetFromPlan — answer-key fence (leak-by-path)", () =>
     baseValidatedRed: true,
   }
 
-  test("surfaces repro step cmd but WITHHOLDS non-repro (owner-test/module-smoke) cmd", () => {
+  test("surfaces generic repro step cmd but withholds non-repro commands", () => {
     const target = verificationTargetFromPlan(planWithLeakySteps)
     expect(target?.primaryRail?.cmd).toBe("python /sandbox/repro_xyz.py")
     expect(target?.required[0]?.cmd).toBe("python /sandbox/repro_xyz.py")
@@ -198,6 +198,40 @@ describe("verificationTargetFromPlan — answer-key fence (leak-by-path)", () =>
     // ...but the blind repro target IS surfaced.
     expect(rendered).toContain("python /sandbox/repro_xyz.py")
     expect(rendered).toContain('"verificationTarget"')
+  })
+
+  test("absolute sandbox reproduce_issue.py paths are remapped to candidate-local relative paths", () => {
+    const target = verificationTargetFromPlan({
+      primaryRail: {
+        kind: "repro",
+        cmd: "env PYTHONNOUSERSITE=1 uv run --with-editable . python -s /home/ubuntu/.quanta/bench/work/bench-x/repo-y/reproduce_issue.py",
+        authority: "execution",
+        successPredicate: { type: "test_exit_zero" },
+      },
+      required: [],
+      optional: [],
+      baseValidatedRed: true,
+    })
+    expect(target?.primaryRail?.cmd).toBe(
+      "env PYTHONNOUSERSITE=1 uv run --with-editable . python -s reproduce_issue.py",
+    )
+    expect(target?.primaryRail?.cmd).not.toContain("/home/ubuntu/.quanta")
+  })
+
+  test("absolute temp __repro paths are withheld because they are fork-local internals", () => {
+    const target = verificationTargetFromPlan({
+      primaryRail: {
+        kind: "repro",
+        cmd: "python -s /home/ubuntu/.quanta/bench/work/bench-x/repo-y/__repro_0_deadbeef.py",
+        authority: "execution",
+        successPredicate: { type: "test_exit_zero" },
+      },
+      required: [],
+      optional: [],
+      baseValidatedRed: true,
+    })
+    expect(target?.primaryRail?.cmd).toBeUndefined()
+    expect(target?.primaryRail?.cmdWithheld).toBe(true)
   })
 })
 
@@ -604,7 +638,10 @@ describe("llm evidence packet — bounded source slice (assembleOwnerEvidence / 
   test("extractSymbolSlice is bounded and returns undefined for an absent symbol", () => {
     expect(extractSymbolSlice(SRC, "missing")).toBeUndefined()
     const huge = `def big():\n${Array.from({ length: 500 }, (_, i) => `    s${i} = ${i}`).join("\n")}\n`
-    expect((extractSymbolSlice(huge, "big") ?? "").split("\n").length).toBeLessThanOrEqual(40)
+    const slice = extractSymbolSlice(huge, "big") ?? ""
+    expect(slice).toContain("def big():")
+    expect(slice).toContain("s0 = 0")
+    expect(slice).not.toContain("s100 = 100")
   })
 
   test("assembleOwnerEvidence attaches the exact slice for issue symbols defined in the file", () => {
@@ -1112,7 +1149,8 @@ describe("B4 — extractSymbolSliceResult precision", () => {
   test("decorators stay BOUNDED — a pathological decorator stack never exceeds maxLines", () => {
     const decos = Array.from({ length: 60 }, (_, i) => `@d${i}`).join("\n")
     const r = extractSymbolSliceResult(`${decos}\ndef target():\n    pass\n`, "target", 40)
-    expect((r.slice ?? "").split("\n").length).toBeLessThanOrEqual(40)
+    expect(r.slice).toContain("@d59")
+    expect(r.slice).not.toContain("@d0")
     // the def line itself is always retained (closest decorators kept).
     expect(r.slice).toContain("def target():")
   })

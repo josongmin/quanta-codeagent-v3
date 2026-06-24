@@ -192,7 +192,7 @@ export const buildDefaultSessionIo = (): SessionIoState => ({
       // Rethrow so the slash surfaces the error message — this matches the
       // contract documented in session-cmd.ts (the slash wraps in try/catch
       // and prints to ctx.err + exit 1).
-      throw e instanceof Error ? e : new Error(String(e))
+      throw e instanceof Error ? e : new Error(errMessage(e))
     }
   },
   mintNewId: (): string => crypto.randomUUID(),

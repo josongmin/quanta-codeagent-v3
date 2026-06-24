@@ -404,8 +404,8 @@ describe("DedupGate — anti-regression: dispatch.ts must call the gate before t
     // the call, this test fails — protecting the structural invariant T3 ships.
     const dispatchPath = path.resolve(__dirname, "../../src/agent/dispatch.ts")
     const src = fs.readFileSync(dispatchPath, "utf8")
-    // Must import the gate (or its synthetic helper).
-    expect(/from\s+["']\.\/dispatch-dedup["']/.test(src)).toBe(true)
+    // Must import the preflight helper that owns the gate (or its synthetic helper).
+    expect(/consultDedupGate[\s\S]*from\s+["']\.\/dispatch\/preflight-consults["']/.test(src)).toBe(true)
     // Must consult the gate BEFORE the admissibility gate (line position check).
     const dedupIdx = src.search(/consultDedupGate\s*\(/)
     const admitIdx = src.search(/runAdmissibilityGate\s*\(/)

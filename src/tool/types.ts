@@ -142,6 +142,17 @@ export interface ToolContext {
    *  `ShellExecObserver` so a new variant on the union is a compile error at
    *  every consumer that exhaustively switches on `event.kind`. */
   onShellEvent?: ShellExecObserver
+  /** ADR-0296 PROMPT mode — OPTIONAL mid-execution consent requester. When the
+   *  effective `timeout_behavior` is `prompt`, the bash tool calls this AT the
+   *  deadline to surface a one-keystroke "move to background?" prompt; `true` ⇒
+   *  detach into the bg registry, `false` ⇒ kill (legacy timeout). Duck-typed so
+   *  `@/tool` never imports the host surface — the dispatch/CLI seam binds it
+   *  (e.g. to the mid-turn approval channel). Absent ⇒ `prompt` falls back to
+   *  plain `background` (auto-detach, no prompt). */
+  requestBackgroundConsent?: (info: {
+    readonly command: string
+    readonly elapsedMs: number
+  }) => Promise<boolean>
   /** ADR-0086 — OPTIONAL plan-exit requester. The `request_plan_exit` tool
    *  calls this to surface a finished plan to whoever decides (CLI prompt /
    *  IDE modal / RPC) and get back the 3-way {@link PlanExitToolOutcome}.

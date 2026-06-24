@@ -26,10 +26,10 @@ purpose: 'Default-OFF NOOP-apply registry knob: typed RepairEscalationDecision w
 evidence:
   code:
     - src/runner/knobs/knobs/repair-escalation.ts
-  adrs: []
+  adrs: [14]
   tests:
     unit:
-      - tests/unit/proof-closure-knobs-wiring.test.ts
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
       - tests/unit/repair-escalation.test.ts
     integration: []
     contract: []

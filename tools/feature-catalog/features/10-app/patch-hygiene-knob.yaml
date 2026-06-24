@@ -26,10 +26,10 @@ purpose: 'Default-OFF NOOP-apply registry knob: emit PatchHygieneReport (stray-f
 evidence:
   code:
     - src/runner/knobs/knobs/patch-hygiene.ts
-  adrs: []
+  adrs: [17]
   tests:
     unit:
-      - tests/unit/proof-closure-knobs-wiring.test.ts
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
       - tests/unit/patch-hygiene.test.ts
     integration: []
     contract: []

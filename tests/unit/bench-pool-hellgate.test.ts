@@ -38,7 +38,7 @@ const FULL_AUTH = JSON.stringify({
   refresh_token: "REFRESH-super-secret",
   id_token: "IDTOK-secret",
   account_id: "acct-1",
-  expires_at: "2026-06-24T00:00:00Z",
+  expires_at: "2099-01-01T00:00:00Z",
 })
 
 const TEMP_DIRS = new Set<string>()
@@ -326,10 +326,6 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     try {
       let launchIdx = -1
       let launchedBenchRuns = 0
-      let releaseRunExit: (() => void) | undefined
-      const runExitGate = new Promise<void>((resolve) => {
-        releaseRunExit = resolve
-      })
       const { fn, calls } = createPoolSpawnRecorder(
         whenArgsInclude("describe-security-groups", ok("sg-abc")),
         whenArgsInclude("run-instances", () => {
@@ -343,7 +339,6 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         whenSshRemoteIncludes("setsid bash -c", ({ remote, onData }) => {
           if (remote.includes("cli.ts run")) {
             launchedBenchRuns += 1
-            if (launchedBenchRuns >= 2) releaseRunExit?.()
             const runId = remote.match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
             onData?.(`[info] ${runId} started\n`)
             onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
@@ -353,7 +348,9 @@ describe("runPool — persistent box, amortised bootstrap", () => {
         whenSshRemote(
           (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
           async () => {
-            if (launchedBenchRuns < 2) await runExitGate
+            if (launchedBenchRuns < 2) {
+              await waitForCondition(() => launchedBenchRuns >= 2)
+            }
             return RUN_EXIT_OK
           },
         ),

@@ -35,6 +35,7 @@ const mockSpawn = () => {
       o?.onData?.(`[PASS] ${runId}__inst-1 (turns=2)\n`)
     }
     const a = [...args]
+    if (cmd === "curl") return ok("9.9.9.9") // ifconfig.me public-IP probe (SG ingress)
     if (a.includes("run-instances")) return ok("i-box")
     if (a.includes("describe-instances")) return ok("1.2.3.4")
     if (a.includes("terminate-instances")) return ok("")

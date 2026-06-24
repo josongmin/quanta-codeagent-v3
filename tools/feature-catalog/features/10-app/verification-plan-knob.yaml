@@ -26,10 +26,10 @@ purpose: 'Default-OFF NOOP-apply registry knob: build typed VerificationPlan wit
 evidence:
   code:
     - src/runner/knobs/knobs/verification-plan.ts
-  adrs: []
+  adrs: [17]
   tests:
     unit:
-      - tests/unit/proof-closure-knobs-wiring.test.ts
+      - tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
       - tests/unit/verification-plan.test.ts
     integration: []
     contract: []

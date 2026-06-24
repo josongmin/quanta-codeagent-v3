@@ -22,6 +22,7 @@
  * official harness green can count as clean leaderboard score.
  */
 import { createHash } from "node:crypto"
+import { quantaHomePath, runtimeConfig } from "@/shared"
 import {
   aggregate,
   classify,
@@ -306,6 +307,7 @@ export const buildReport = (
         ...(r.verdict === "env_prep_failed" ? { envPrepFailed: true } : {}),
         ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
         ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
+        ...(r.ownerWidening !== undefined ? { ownerWidening: r.ownerWidening } : {}),
         ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
         ...(llmEvidenceSummary !== undefined
           ? {
@@ -324,11 +326,10 @@ export const buildReport = (
  *  `--report` path. Override with `QUANTA_BENCH_RESULTS_DIR`; disable the mirror
  *  with `QUANTA_BENCH_RESULTS_DIR=off`. Default `~/.quanta/bench/results`. */
 const benchResultsDir = (): string | null => {
-  const override = process.env.QUANTA_BENCH_RESULTS_DIR
+  const override = runtimeConfig().benchResultsDir
   if (override === "off" || override === "0") return null
   if (override && override.length > 0) return override
-  const home = process.env.HOME ?? process.env.USERPROFILE
-  return home ? `${home}/.quanta/bench/results` : null
+  return quantaHomePath("bench", "results")
 }
 
 /** Mirror an already-written report's CONTENT into the canonical SSOT dir so

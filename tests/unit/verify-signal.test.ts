@@ -116,9 +116,11 @@ describe("verify-signal — isTestLikeCommand / matchVerifyCommand", () => {
 })
 
 describe("verify-signal module purity", () => {
-  // Pure leaf: no I/O, no clocks, no randomness, no cross-module coupling.
+  // Pure leaf: command recognition has no I/O, no clocks, no randomness, no
+  // cross-module coupling. `@/agent/verify-signal` re-exports it so the agent
+  // guard and bash read-mode preflight share one registry.
   const source = readFileSync(
-    join(import.meta.dir, "..", "..", "src", "agent", "verify-signal.ts"),
+    join(import.meta.dir, "..", "..", "src", "shared", "verify-command-shape.ts"),
     "utf8",
   )
 

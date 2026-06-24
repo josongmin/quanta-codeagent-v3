@@ -30,6 +30,7 @@ const VERBOSE_MARK = "the #1 cause of failure"
 const SIMPLICITY_MARK = "SIMPLEST mechanism that already exists"
 // A phrase the lean directive must carry.
 const LEAN_MARK = "unified diff is the submission"
+const VERIFY_MODE_STEER = 'set mode:"write"'
 
 const ENV_KEYS = [
   "QUANTA_BENCH_PRESET",
@@ -97,6 +98,7 @@ describe("QUANTA_BENCH_LEAN_PROMPT", () => {
     process.env.QUANTA_BENCH_LEAN_PROMPT = "1"
     const text = userText(buildOnce())
     expect(text).toContain(LEAN_MARK) // LEAN-1
+    expect(text).toContain(VERIFY_MODE_STEER)
     expect(text).not.toContain(VERBOSE_MARK) // LEAN-2
     expect(text).not.toContain(SIMPLICITY_MARK) // LEAN-3
   })
@@ -117,6 +119,7 @@ describe("QUANTA_BENCH_LEAN_PROMPT", () => {
     const text = userText(buildOnce())
     expect(text).toContain(LEAN_MARK)
     expect(text).toContain("If useful, reproduce the issue with a small script")
+    expect(text).toContain(VERIFY_MODE_STEER)
     expect(text).toContain("Do NOT run the repository test suite, pytest, tox")
     expect(text).not.toContain("MANDATORY before you stop")
   })

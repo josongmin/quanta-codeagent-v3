@@ -135,13 +135,13 @@ export const formatFindRefs = (stdout: string, symbol: string): string => {
     (a, b) => Number(b[1].hasDef) - Number(a[1].hasDef) || b[1].count - a[1].count,
   )
   const fileLines = files
-    .slice(0, FILE_CAP)
+    .filter((_, index) => index < FILE_CAP)
     .map(([f, s]) => `  ${f} — ${s.count} ref${s.count === 1 ? "" : "s"}${s.hasDef ? " (def here)" : ""}`)
     .join("\n")
   const fileMore = files.length > FILE_CAP ? `\n  … (${files.length - FILE_CAP} more files)` : ""
   const fileBlock = `Files (co-change candidates — verify each that should change together):\n${fileLines}${fileMore}`
   const ordered = [...defs, ...uses]
-  const shown = ordered.slice(0, MAX_ROWS).join("\n")
+  const shown = ordered.filter((_, index) => index < MAX_ROWS).join("\n")
   const more =
     ordered.length > MAX_ROWS
       ? `\n… (${ordered.length - MAX_ROWS} more rows; NARROW with \`path\`/\`type\`)`

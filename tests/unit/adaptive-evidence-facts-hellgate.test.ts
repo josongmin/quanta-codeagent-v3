@@ -76,13 +76,22 @@ describe("router evidence facts", () => {
   })
 
   test("INTEGRATE-1: EvidenceFacts is a valid controller P; citing a real id parses", async () => {
-    const router = (_in: AdaptiveRouterInput<EvidenceFacts>): Promise<unknown> =>
-      Promise.resolve({
-        action: "run_proof_clean",
-        evidenceGaps: ["candidate_no_positive_proof"],
-        citedEvidenceIds: ["ev:proof"],
-        why: "no positive proof yet",
-      })
+    const router = (input: AdaptiveRouterInput<EvidenceFacts>): Promise<unknown> =>
+      Promise.resolve(
+        input.packet.positiveProof
+          ? {
+              action: "accept_thin",
+              evidenceGaps: [],
+              citedEvidenceIds: ["ev:proof"],
+              why: "positive proof is now present",
+            }
+          : {
+              action: "run_proof_clean",
+              evidenceGaps: ["candidate_no_positive_proof"],
+              citedEvidenceIds: ["ev:proof"],
+              why: "no positive proof yet",
+            },
+      )
     const calls: AdaptiveExecutorInput<EvidenceFacts>[] = []
     const result = await runAdaptiveEscalation<EvidenceFacts>({
       initialPacket: { ...clean(), positiveProof: false },

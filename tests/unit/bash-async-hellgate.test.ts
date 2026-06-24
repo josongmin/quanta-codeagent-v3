@@ -212,19 +212,14 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
 
   // 2. background + slow command + deadline → detach.
   test("background mode + slow command past deadline returns { shellId, running }", async () => {
-    const { port, children } = makeFakePort()
+    const { port } = makeFakePort()
     const registry = createBashBgRegistry({ port })
     installBashBgRegistry(registry)
-    // Start bash but DON'T finish the child — deadline must elapse.
-    const promise = collect(
+    const { result } = await collect(
       bashTool,
-      { command: "sleep 30", timeout_behavior: "background", timeout_ms: 100 },
+      { command: "printf partial-output; sleep 30", timeout_behavior: "background", timeout_ms: 100 },
       ctx(),
     )
-    // Allow the spawn promise to resolve.
-    await sleep(20)
-    children[0]?.feedStdout("partial-output ")
-    const { result } = await promise
     expect(result.ok).toBe(true)
     expect(result.output).toContain("status=running")
     expect(result.output).toMatch(/shellId=[0-9a-f-]{36}/)

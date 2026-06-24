@@ -27,9 +27,10 @@ purpose: |
 evidence:
   code:
     - tools/god-code/detect.ts
-  adrs: []
+  adrs: [425]
   tests:
     unit: 
       - tests/unit/god-code-ratchet.test.ts
+      - tests/unit/god-code-detect-hellgate.test.ts
     integration: []
     contract: []

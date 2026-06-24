@@ -24,7 +24,7 @@ describe("slash state SSOT hellgate", () => {
   })
 
   test("runtime deps and AgentConfig expose the same live state slots", () => {
-    const deps = read("src/host/runtime/internal/context-binding.ts")
+    const deps = read("src/host/runtime/internal/context-binding/base.ts")
     expect(deps).toContain('whenDefined("toolProfileState", args.boot.toolProfileState)')
     expect(deps).toContain('whenDefined("identityModeState", args.boot.identityModeState)')
     expect(deps).toContain('whenDefined("focusChain", args.boot.focusChain)')

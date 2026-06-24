@@ -19,6 +19,8 @@
  * field for raw source text anywhere in this IR.
  */
 
+import { byteCompare } from "@/shared/byte-compare"
+
 export type StaticWitnessKind =
   | "unique-symbol-definer"
   | "override-family"
@@ -224,7 +226,7 @@ export function witnessStructuralOwnerCandidates(
       byFile.set(file, symbol !== undefined ? { file, forSymbol: symbol } : { file })
     }
   }
-  return [...byFile.values()].sort((a, b) => a.file.localeCompare(b.file))
+  return [...byFile.values()].sort((a, b) => byteCompare(a.file, b.file))
 }
 
 /**

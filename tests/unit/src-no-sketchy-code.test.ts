@@ -266,6 +266,32 @@ const RULES: readonly Rule[] = [
         "Infrastructure HOME-expansion helper (`expandHome`) for tilde-prefix path resolution — pure string op, reads `process.env.HOME` only as a path component fallback; same posture as storage/shadow-odb/default.ts.",
       "apps/cli/webhook-server-setup.ts":
         "Webhook-server CLI composition root (`quanta webhook`) — reads QUANTA_GITHUB_WEBHOOK strict gate + secret config + port/session-id at launch; same DI posture as apps/cli/mcp-server-setup.ts.",
+      "host/runtime/internal/context-binding/base.ts":
+        "God-module split of host/runtime/internal/context-binding.ts (already allowlisted) — the call-time `env = process.env` DI fallback in wireRuntimePorts + the `wireInteractiveKnobs(..., process.env, \"cli\")` composition-root knob wiring relocated verbatim; downstream modules receive the bound env. Same composition-root posture as context-binding.ts.",
+      "apps/bench/trajectory.ts":
+        "Extracted verbatim from apps/bench/index.ts (already allowlisted) — the bench LLM trajectory record/replay cluster resolves QUANTA_BENCH_(RECORD|REPLAY)_TRAJECTORY / _LIMIT / _ON_MISS gates at resolve time, default-OFF and byte-identical when unset. Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/bench/remote/full.ts":
+        "Full-remote bench composition root — reads the QUANTA_FULL_REMOTE_CONCURRENCY / QUANTA_BENCH_CONCURRENCY launch dials + the QUANTA_BENCH_RECORD_TRAJECTORY gate, and `buildForwardedBenchEnv(process.env)` is ENV PROPAGATION of the parent env into the spawned EC2 box. Same posture as apps/bench/remote/ssh.ts and the env-propagation entries.",
+      "apps/bench/remote/single-box-guard.ts":
+        "Bench single-box-guard composition — `resolveSingleBoxGuardDir` reads QUANTA_BENCH_SINGLE_BOX_GUARD_DIR at boot with a HOME-path fallback; not a feature flag. Same composition-root posture as apps/bench/remote/token-budget.ts.",
+      "apps/bench/remote/fresh-auth.ts":
+        "Injection-first: `opts.env ?? process.env` DI fallback feeding resolveOAuthConfig; tests inject explicit env. Same DI-fallback posture as apps/cli/login-cmd.ts.",
+      "apps/bench/remote/token-budget.ts":
+        "Bench token-budget composition — reads QUANTA_BENCH_PATCH_GEN_BUDGET / SWEEP_PATCH_GEN_BUDGET + QUANTA_BENCH_TOKEN_BUDGET_DIR at boot (raw extracted then parsed via NaN-safe asPositiveInt on a separate line). Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/cli/internal/mcp.ts":
+        "God-module split of apps/cli/internal.ts — CLI reverse-MCP wiring composition root: QUANTA_MCP_AUTORESTART gate + resolveQuantaHome(process.env) + pickMcpNegotiator(process.env) + `envSource = process.env` DI fallbacks; the assembled MCP ports downstream stay env-free. Same posture as apps/cli/internal.ts and apps/cli/mcp-server-setup.ts.",
+      "apps/cli/internal/argv.ts":
+        "God-module split of apps/cli/internal.ts (ADR-0024) — pure process.argv/process.env CLI flag accessors (QUANTA_STATE_PATH / QUANTA_RESUME / QUANTA_OBSERVE_DIR / QUANTA_LSP_TOOLS / QUANTA_AST_GREP), re-exported from ../internal so importers keep resolving from ./internal. Same CLI-bootstrap posture as apps/cli/internal.ts.",
+      "apps/cli/internal/shell-snapshot.ts":
+        "God-module split of apps/cli/internal.ts — CLI shell-snapshot composition reads QUANTA_SHELL_SNAPSHOT_* via a NaN-safe intEnv helper and passes $SHELL through ONCE (ADR-0144) into AgentConfig.shellSnapshot; downstream slices never read env. Same posture as apps/cli/internal.ts.",
+      "apps/web-daemon/server/fetch-handler.ts":
+        "God-module split of apps/web-daemon/server.ts — the `/api/knobs` diagnostic endpoint reads the LIVE process.env to REPORT current knob values (display-only via resolveCatalogValues). Same surface-ambient posture as apps/cli/slash-commands-capabilities.ts.",
+      "apps/web-daemon/server/http.ts":
+        "God-module split of apps/web-daemon/server.ts — the controlled env-mutation seam (set/delete of validated config keys at the config-write endpoint) + the QUANTA_WEB_DIST static-asset resolver read, moved verbatim from server.ts (already allowlisted with this exact rationale).",
+      "apps/web-daemon/server/follower-approval.ts":
+        "God-module split of apps/web-daemon/server.ts — setupFollowerApproval reads QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS at boot. Same composition-root posture as apps/web-daemon/server.ts.",
+      "apps/web-daemon/server/persistence.ts":
+        "God-module split of apps/web-daemon/server.ts — setupThreadPersistence reads the QUANTA_WEB_DB gate at boot. Same composition-root posture as apps/web-daemon/persistence-sqlite.ts.",
     },
   },
   {
@@ -278,6 +304,8 @@ const RULES: readonly Rule[] = [
         "non-security side-chat nonce for in-process turn correlation — not used for collision resistance.",
       "host/runtime/internal/context-binding.ts":
         "mintSideConversationSessionId — non-security side-conversation id for in-process turn correlation; identical posture to runner/orchestrate/side-chat.ts, not used for collision resistance.",
+      "host/runtime/internal/context-binding/side-conversation.ts":
+        "God-module split of context-binding.ts — the SAME `mintSideConversationSessionId` relocated verbatim; non-security side-conversation id for in-process turn correlation, not used for collision resistance.",
     },
   },
   {
@@ -320,6 +348,12 @@ const RULES: readonly Rule[] = [
         "jun-06 atomic-write harden: temp-file cleanup on a FAILED rename (`unlink(tmp).catch(() => {})`) — the real rename error is about to be RETHROWN, so a cleanup failure is non-fatal and there is nothing to surface (same best-effort posture as tool/browser/session-holder.ts).",
       "apps/bench/python-swebench.ts":
         "Grading-lock chain: `await prev.catch(() => {})` waits for the PREVIOUS grading task and explicitly ignores its outcome — the lock is used for sequencing, not error detection, and the caller always receives the current task's result via the finally/release path. Documented inline.",
+      "runner/batch/eval/selection-smoke.ts":
+        "`finally`-block best-effort temp-file cleanup (`(deps.removeFile ?? defaultRemoveFile)(path).catch(() => {})`) — the smoke compile already returned its verdict; a cleanup failure on the scratch file is non-fatal and absence is the success state. Same posture as session/store.ts.",
+      "runner/batch/eval/patch-static-sanity.ts":
+        "`finally`-block best-effort temp-payload cleanup (`rm(payloadPath, { force: true }).catch(() => {})`) — the sanity result is already resolved; a cleanup failure on the scratch payload is non-fatal and absence is the success state. Same posture as memory/dream/team-write-target.ts.",
+      "runner/batch/corpus/dataset.ts":
+        "Bare-mirror clone tmp cleanup (2 sites) — on a failed `git clone --bare` or a failed `rename(tmp, mirror)`, the `${mirror}.tmp-<uuid>` dir is removed best-effort and the REAL clone/rename error is then RETHROWN (or, when another instance already published the mirror, that one is adopted). A cleanup failure is non-fatal and absence is the success state. Same posture as memory/dream/team-write-target.ts.",
     },
   },
   {
@@ -418,6 +452,8 @@ const RULES: readonly Rule[] = [
         "Zod schema UPPER BOUND `.max(60_000)` on the user-supplied `awaitMs` — an input-validation ceiling, not a wall-clock policy literal the harness controls.",
       "apps/headless/fake-deps.ts":
         "Headless DEV/test fake-deps fixture (idleMs/snoozeDefaultMs) — fixture values for the fake runtime, not a production wall-clock policy.",
+      "apps/bench/cli.ts":
+        "Bench CLI minutes→ms conversions (`mins * 60_000`, `(Number(wallMin) || 0) * 60_000`) at the flag-parse boundary — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
     },
   },
   {
@@ -500,6 +536,8 @@ const RULES: readonly Rule[] = [
         "BURN-DOWN (ADR-0231 radar wire): `Date.now()` is the wall-clock sample for the radar proposal-queue producer hook (turn-duration telemetry). Captured ONLY when `cfg.radar` is wired (default-OFF); never reaches model-facing/persisted-replay output — same infra-timing posture as agent/loop/control-poll.ts.",
       "agent/lsp-bridge.ts":
         "INFRA TIMING (RFC jun-17): `Date.now()` in `ensurePyrightFileReady` is the language-server warm-up READINESS-POLL deadline (when to stop polling a cold pyright for an import resolve). Pure infra timing — never reaches model-facing/persisted/replayed output; the budget/retry are injectable for tests via `__setPyrightWarmupTimingForTest`. Same posture as agent/loop/control-poll.ts.",
+      "agent/lsp-workspace-pool.ts":
+        "INFRA TIMING (RFC jun-17 warm-backend): `Date.now()`/`elapsed()` measure the LSP grounding-receipt warm-up probe duration (`startedAt`/`elapsed`) for telemetry on the receipt — pure infra timing, never reaches model-facing/persisted/replayed output. Same posture as agent/lsp-bridge.ts.",
     },
   },
   {
@@ -514,6 +552,8 @@ const RULES: readonly Rule[] = [
       "permission/index.ts": "barrel re-export",
       "agent/admissibility-gate.ts":
         "composition-adjacent layer; transitional fallback when surfaces omit `AgentConfig.admissibility.permissionStore`. Remove once every app wires the nested store explicitly.",
+      "agent/admissibility-gate/gates.ts":
+        "God-module split of agent/admissibility-gate.ts — the `opts.store ?? getDefaultPermissionStore()` transitional fallback relocated verbatim into the composition-adjacent gates cluster (called by dispatch). Same posture + remove-when-fully-wired note as agent/admissibility-gate.ts.",
       "apps/cli/repl.ts":
         "CLI composition root — `loadPermissionStore` is EXACTLY where the rule says the singleton should be wired (`src/apps/**`); the store is then injected downstream via AgentConfig.",
     },

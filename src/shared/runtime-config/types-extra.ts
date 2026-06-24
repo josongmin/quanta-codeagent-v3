@@ -56,6 +56,10 @@ export interface RuntimeConfigPaths {
    *  computes a PERSISTENT default (never tmp): `<quantaHome>/bench`, else
    *  macOS `~/Library/quanta-codeagent-v3/bench`, else `~/.quanta/bench`. */
   readonly benchHome: string | undefined
+  /** Bench report mirror directory override (`QUANTA_BENCH_RESULTS_DIR`).
+   *  Absent ⇒ `quantaHomePath("bench", "results")`; `off`/`0` disables the
+   *  canonical mirror. */
+  readonly benchResultsDir: string | undefined
   /** Extra cache directory names appended to the audited
    *  `DEFAULT_CACHE_DIR_NAMES` SSOT in `apps/bench/cache-pathspecs.ts`.
    *  `QUANTA_BENCH_CACHE_PATHSPECS_EXTRA` is a `,`/`:`/`;`/newline-separated
@@ -93,6 +97,9 @@ export interface RuntimeConfigPaths {
    *  harness config picks by arch ("none" ⇒ build locally; avoids x86 pulls
    *  that would emulate on arm64). */
   readonly swebenchNamespace: string | undefined
+  /** SWE-bench source repo bare-mirror cache override
+   *  (`QUANTA_SWEBENCH_REPO_CACHE`). Absent ⇒ `<quantaHome>/bench/repo-cache`. */
+  readonly swebenchRepoCacheDir: string | undefined
   /** SWE-bench `--force_rebuild` (`QUANTA_SWEBENCH_FORCE_REBUILD`). Default
    *  false — reuse cached images unless explicitly invalidated. */
   readonly swebenchForceRebuild: boolean

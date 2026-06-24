@@ -35,6 +35,6 @@ describe("runner closure-repair driver parity", () => {
     expect(DRIVER_SRC).toContain("repairFalseRed = out.primaryFalseRed")
     expect(DRIVER_SRC).toContain("primaryFalseRed: repairFalseRed")
     expect(DRIVER_SRC).toContain("args.extra.primaryFalseRed = args.phase.primaryFalseRed")
-    expect(DRIVER_SRC).toContain("siblingFiles: ownerResolved?.map((o) => o.file) ?? []")
+    expect(DRIVER_SRC).toContain("siblingFiles: args.prepared.ownerResolved?.map((o) => o.file) ?? []")
   })
 })

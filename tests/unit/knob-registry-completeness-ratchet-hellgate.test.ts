@@ -126,6 +126,14 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_QDRANT_API_KEY", "secret: Qdrant vector-DB credential (search-index-backend)"],
   ["QUANTA_CHATGPT_AUTH_SOURCE", "secret: ChatGPT token-store preference (@/auth/chatgpt-oauth)"],
   ["QUANTA_SIDE_AGENT_LLM_REPLAY", "test-only: side-agent hermetic forked-child LLM replay seam (worker-charter-runner), not a user knob"],
+  // DEV / BENCH-INTERNAL toggles — read at their own call site, intentionally NOT
+  // surfaced in /config (an internal bench/experiment seam, not a user setting).
+  ["QUANTA_FORK_EXPERIMENT", "dev-experiment: counterfactual trajectory-fork troubleshooting seam (jun-23 fork-experiments), not a user knob"],
+  ["QUANTA_FORK_INJECT_TEXT", "dev-experiment: trajectory-fork text injection (fork-experiments), not a user knob"],
+  ["QUANTA_FORK_INJECT_TURN", "dev-experiment: trajectory-fork turn injection (fork-experiments), not a user knob"],
+  ["QUANTA_BENCH_REPLAY_LIMIT", "dev/bench-only: trajectory replay cap (apps/bench/trajectory), not a shipped user knob"],
+  ["QUANTA_CAPTURE_DEBUG", "dev/bench-only: jun-24 lost-edits RCA diagnostic (apps/bench/eval/driver — per-call git-status exec, default-OFF), not a shipped user knob"],
+  ["QUANTA_BENCH_EXPOSE_DATASET_VERIFIER", "dev/bench-only: A/B toggle exposing the dataset's repo-local verifier command to the agent (runner/batch/eval/driver, default-OFF), not a shipped user knob"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {

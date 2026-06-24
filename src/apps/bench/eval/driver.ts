@@ -18,8 +18,8 @@ import {
 } from "@/runner/batch/eval/capture-correctness"
 import { buildPublicDeclaredExpectedPort } from "@/runner/batch/eval/declared-expected-matcher"
 import {
-  applyBenchKnobs,
   adaptiveNextPassOwners,
+  applyBenchKnobs,
   attachReproVoteOutcomes,
   type BenchKnobState,
   BenchObserver,
@@ -120,7 +120,7 @@ import {
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
-import { errMessage, foldGroundingReceipts, gateDisabled, logger } from "@/shared"
+import { errMessage, foldGroundingReceipts, gateDisabled, gateOn, logger } from "@/shared"
 import { v5AdaptiveEnabled } from "../preset"
 import type {
   BenchReproTestTelemetry,
@@ -230,6 +230,10 @@ const captureBenchSessionEvents = (
   return { events, unsubscribe }
 }
 
+const captureLostEditsError = (editCount: number | undefined, sandbox: string): string =>
+  `capture_lost_edits: ${editCount ?? 0} edit(s) made but 0-byte source diff on a clean worktree ` +
+  `(fork-worktree desync, sandbox=${sandbox})`
+
 const lastTerminalTurnEventOf = (
   events: readonly SessionEvent[],
 ): Extract<SessionEvent, { type: "turn.completed" | "turn.failed" }> | undefined => {
@@ -334,6 +338,8 @@ interface Phase {
   selectionTelemetry?: SelectionTelemetry
   /** OPC-07 — stage packets actually used during this phase. */
   llmEvidence?: LlmEvidenceArtifacts
+  /** Structural owner widening actually consumed before this phase ran. */
+  ownerWidening?: NonNullable<InstanceResult["ownerWidening"]>
 }
 
 // Bench stream tap is the SSOT in `@/runner/batch/eval/stream-tap` — imported
@@ -384,6 +390,51 @@ const runAgentOnce = async (
   }
 }
 
+const classifyPhaseCapture = async (args: {
+  readonly instance: Instance
+  readonly sandbox: string
+  readonly timeoutMs: number
+  readonly rawPatch: string
+  readonly sourceAppliedEditCount: number | undefined
+  readonly totalEditCount: number | undefined
+  readonly firstEditFile: string | undefined
+  readonly agentError: string | undefined
+}): Promise<{
+  readonly captureClass: DoneTimeCaptureClass
+  readonly agentError: string | undefined
+}> => {
+  const captureClass = classifyDoneTimeCapture({
+    sourcePatch: args.rawPatch,
+    rawDirty: await gitWorktreeHasStagedChanges(args.sandbox, args.timeoutMs),
+    editCount: args.sourceAppliedEditCount ?? 0,
+    touchedFiles: filesFromPatch(args.rawPatch),
+  }).captureClass
+  if (!isCaptureFailure(captureClass)) {
+    return { captureClass, agentError: args.agentError }
+  }
+  logger.warn(
+    `[capture] ${args.instance.id}: LOST-EDITS — ${args.sourceAppliedEditCount ?? 0} successful ` +
+      "source edit(s) observed but the done-time source diff is empty and the " +
+      "worktree is clean (capture desync or outside-sandbox write). Routed as infra capture " +
+      "failure, NOT a model miss.",
+  )
+  if (gateOn(process.env, "QUANTA_CAPTURE_DEBUG")) {
+    const dbgStatus = await exec(
+      "git status --porcelain --untracked-files=all",
+      args.sandbox,
+      args.timeoutMs,
+    ).catch(() => null)
+    logger.warn(
+      `[capture-debug] ${args.instance.id}: sandbox=${args.sandbox} firstEditFile=${args.firstEditFile ?? "?"} ` +
+        `rawBytes=${args.rawPatch.length} status=[${(dbgStatus?.stdout ?? "git-fail").slice(0, 400).replace(/\n/g, "|")}]`,
+    )
+  }
+  return {
+    captureClass,
+    agentError: args.agentError ?? captureLostEditsError(args.totalEditCount, args.sandbox),
+  }
+}
+
 const runAgentPhase = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -401,7 +452,7 @@ const runAgentPhase = async (
   let agentError: string | undefined
   let firstEditFile: string | undefined
   let editCount: number | undefined
-  let sourceEditCount: number | undefined
+  let sourceAppliedEditCount: number | undefined
   let turnsToFirstEdit: number | undefined
   // P0 — tentative-patch retention (Sonar absorption). When ON, snapshot the
   // sandbox diff each time the agent's OWN verification passes; on a bad ending
@@ -466,7 +517,7 @@ const runAgentPhase = async (
       agentError = tap.lastErrorMessage
       firstEditFile = relFromSandbox(sandbox, tap.firstEditFile)
       editCount = tap.editCount
-      sourceEditCount = tap.sourceEditCount
+      sourceAppliedEditCount = tap.sourceAppliedEditCount
       turnsToFirstEdit = tap.turnsToFirstEdit
     },
     instance.swebench?.repo,
@@ -478,38 +529,21 @@ const runAgentPhase = async (
   const patch = tentativeOn
     ? recorder.selectEmitted(rawPatch, stopReason === "completed")
     : rawPatch
-  // T5 — done-time capture correctness. Distinguish a real fork-worktree capture
-  // desync (edits made, captured tree empty AND clean) from a genuine no-patch
-  // and from a legitimate test/repro-only edit (sourceOnlyDiff strip), using only
-  // structural facts. Surfaced so a `lost-edits` (11138 class) is routed to retry
-  // instead of being silently graded as a model miss. Classify on `rawPatch` (the
-  // done-time tree diff), NOT the tentative-substituted `patch` — both `rawPatch`
-  // and `rawDirty` then reflect the SAME final tree, so a tentative snapshot from
-  // an earlier turn can never mask a real capture desync (or vice versa).
-  const captureClass = classifyDoneTimeCapture({
-    sourcePatch: rawPatch,
-    rawDirty: await gitWorktreeHasStagedChanges(sandbox, deps.timeoutMs),
-    // T5 — classify on SOURCE edits only. Counting test/scratch edits here would
-    // misread a no-source-change run as a fork-worktree desync ⇒ route a real miss
-    // to infra-fail ⇒ drop it from the solve-rate denominator (inflation). The
-    // total `editCount` is still carried as the churn telemetry field below.
-    editCount: sourceEditCount ?? 0,
-    touchedFiles: filesFromPatch(rawPatch),
-  }).captureClass
-  if (isCaptureFailure(captureClass)) {
-    logger.warn(
-      `[capture] ${instance.id}: LOST-EDITS — ${editCount} edit(s) made but the ` +
-        "done-time source diff is empty and the worktree is clean (fork-worktree " +
-        "capture desync). Routed as infra capture failure, NOT a model miss.",
-    )
-    // T5 — close the single-pass measurement hole: surface the desync as an
-    // `agentError` so `classifyOutcome` routes it to `infra-fail` (retry) instead
-    // of the `patch==="" + turns>0 ⇒ real-fail` model-miss bucket. Same marker the
-    // verify-select path throws (capture_lost_edits) so both paths classify alike.
-    // Only fill when no upstream error already explains the run (don't clobber a
-    // real agent/LLM failure that is the true cause).
-    agentError ??= `capture_lost_edits: ${editCount ?? 0} edit(s) made but 0-byte source diff on a clean worktree (fork-worktree desync)`
-  }
+  // T5 — classify on successful SOURCE edits only. Counting failed/blocked
+  // attempts, test edits, or scratch edits would misread a no-source-change run
+  // as a fork-worktree desync. Classify on `rawPatch`, not tentative `patch`.
+  const capture = await classifyPhaseCapture({
+    instance,
+    sandbox,
+    timeoutMs: deps.timeoutMs,
+    rawPatch,
+    sourceAppliedEditCount,
+    totalEditCount: editCount,
+    firstEditFile,
+    agentError,
+  })
+  const captureClass = capture.captureClass
+  agentError = capture.agentError
   if (tentativeOn && patch !== rawPatch) {
     // P0 telemetry — log ONLY when retention actually substitutes (the rare,
     // interesting case): the run ended badly and we recovered a verified-green
@@ -752,7 +786,7 @@ const generateSelectionCandidate = async (args: {
     // BEFORE the generic empty-patch path so it is not laundered into the
     // no-fix/model-miss bucket (the measurement-hole confound this project fences).
     if (phase.captureClass !== undefined && isCaptureFailure(phase.captureClass)) {
-      const captureError = `capture_lost_edits: ${phase.editCount ?? 0} edit(s) made but 0-byte source diff on a clean worktree (fork-worktree desync)`
+      const captureError = captureLostEditsError(phase.editCount, candidateSandbox)
       args.generationErrors.set(args.index, captureError)
       throw new Error(captureError)
     }
@@ -771,6 +805,8 @@ const generateSelectionCandidate = async (args: {
       turns: phase.turns,
       files: filesFromPatch(phase.patch),
       baseValidatedRed: args.baseValidatedRed,
+      sandboxPath: candidateSandbox,
+      ...(phase.captureClass !== undefined ? { captureClass: phase.captureClass } : {}),
       ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
       ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
       ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
@@ -793,6 +829,23 @@ const optionalLlmEvidence = (
 ): { readonly llmEvidence?: LlmEvidenceArtifacts } =>
   Object.keys(llmEvidence).length > 0 ? { llmEvidence: llmEvidence as LlmEvidenceArtifacts } : {}
 
+const generationFailureSamplesOf = (
+  generationErrors: ReadonlyMap<number, string>,
+): readonly string[] =>
+  [...generationErrors.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, error]) => error)
+    .slice(0, 2)
+
+const selectionTelemetryWithGenerationFailures = (args: {
+  readonly result: SelectionResult
+  readonly generationErrors: ReadonlyMap<number, string>
+}): SelectionTelemetry => {
+  const telemetry = summarizeSelection(args.result)
+  const samples = generationFailureSamplesOf(args.generationErrors)
+  return samples.length === 0 ? telemetry : { ...telemetry, generationFailureSamples: samples }
+}
+
 const selectionGenerationFailedPhase = (args: {
   readonly result: SelectionResult
   readonly generationErrors: ReadonlyMap<number, string>
@@ -801,11 +854,8 @@ const selectionGenerationFailedPhase = (args: {
   readonly calibration: Phase["reproOracleCalibration"]
   readonly llmEvidence: Partial<LlmEvidenceArtifacts>
 }): Phase => {
-  const sample = [...args.generationErrors.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([, error]) => error)
-    .slice(0, 2)
-    .join("; ")
+  const samples = generationFailureSamplesOf(args.generationErrors)
+  const sample = samples.join("; ")
   return {
     patch: "",
     turns: args.totalTurns,
@@ -815,13 +865,14 @@ const selectionGenerationFailedPhase = (args: {
       `verify-select candidate generation failed for all ${args.n} candidates` +
       (sample === "" ? "" : ` (${sample})`),
     ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
-    selectionTelemetry: summarizeSelection(args.result),
+    selectionTelemetry: selectionTelemetryWithGenerationFailures(args),
     ...optionalLlmEvidence(args.llmEvidence),
   }
 }
 
 const selectionWinnerPhase = (args: {
   readonly result: SelectionResult
+  readonly generationErrors: ReadonlyMap<number, string>
   readonly totalTurns: number
   readonly calibration: Phase["reproOracleCalibration"]
   readonly llmEvidence: Partial<LlmEvidenceArtifacts>
@@ -838,7 +889,7 @@ const selectionWinnerPhase = (args: {
     ? { editCount: args.result.terminalCandidate.editCount }
     : {}),
   ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
-  selectionTelemetry: summarizeSelection(args.result),
+  selectionTelemetry: selectionTelemetryWithGenerationFailures(args),
   ...optionalLlmEvidence(args.llmEvidence),
 })
 
@@ -1442,7 +1493,7 @@ const runAdaptiveAttempt = async (args: {
     env: process.env,
     modelCall: buildAdaptiveRouterModelCall({ basePort: deps.llm, env: process.env, signal }),
     runPhase: async ({ state, posture }) => {
-      const widenedOwners = await adaptiveNextPassOwners({
+      const widening = await adaptiveNextPassOwners({
         prepared: finalPrepared,
         phase: finalPhase,
         forwardLocalize: posture.forwardLocalize,
@@ -1456,7 +1507,7 @@ const runAdaptiveAttempt = async (args: {
         signal,
         posture,
         state,
-        widenedOwners,
+        widening.owners,
       )
       const nextPhase = await runAppMainPhase({
         instance,
@@ -1466,6 +1517,7 @@ const runAdaptiveAttempt = async (args: {
         wiring,
         prepared: nextPrepared,
       })
+      if (widening.telemetry !== undefined) nextPhase.ownerWidening = widening.telemetry
       finalPrepared = nextPrepared
       finalPhase = nextPhase
       const packet = buildAdaptivePhasePacket({
@@ -1684,6 +1736,7 @@ const runInstanceBody = async (args: {
   args.state.prepared = followup.prepared
   args.state.phase = followup.phase
   if (followup.prepared.reproTest !== undefined) args.state.reproTest = followup.prepared.reproTest
+  if (followup.telemetry !== undefined) args.state.phase.ownerWidening = followup.telemetry
   const terminal = await maybeValidateTerminalResult({
     instance: args.instance,
     phase: args.state.phase,

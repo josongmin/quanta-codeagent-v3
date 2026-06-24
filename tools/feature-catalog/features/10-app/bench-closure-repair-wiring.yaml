@@ -28,7 +28,7 @@ evidence:
   code:
     - src/runner/batch/eval/repair/llm-evidence.ts
     - src/apps/bench/eval/repair/llm-evidence.ts
-    - src/runner/batch/eval/repair/repro-outcome.ts
+    - src/runner/batch/eval/repair/repro-vote.ts
     - src/runner/batch/eval/repair-phase-policy.ts
     - src/runner/batch/eval/prompt-augment.ts
     - src/runner/batch/eval/rematerialize.ts
@@ -37,7 +37,7 @@ evidence:
     - src/runner/batch/eval/repair/validator.ts
     - src/runner/batch/eval/repair/index.ts
     - src/runner/knobs/knobs/closure-repair.ts
-  adrs: []
+  adrs: [14]
   tests:
     unit:
       - tests/unit/bench-repair-phase-policy.test.ts

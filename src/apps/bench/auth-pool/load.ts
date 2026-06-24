@@ -7,6 +7,7 @@
  */
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
+import { errMessage } from "@/shared"
 import type { AuthPoolEntry, AuthSource } from "./types"
 
 /** Default credential when no pool and no explicit `QUANTA_BENCH_AUTH_FILE`.
@@ -114,7 +115,7 @@ export const parseAuthPoolManifest = (text: string): AuthSource => {
   try {
     doc = Bun.YAML.parse(text)
   } catch (e) {
-    throw new Error(`auth-pool: manifest is not valid YAML/JSON — ${(e as Error).message}`)
+    throw new Error(`auth-pool: manifest is not valid YAML/JSON — ${errMessage(e)}`)
   }
   const root = asRecord(doc)
   const rawAccounts = root.accounts

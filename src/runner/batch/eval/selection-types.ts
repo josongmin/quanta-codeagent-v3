@@ -13,6 +13,7 @@ import type {
   HardGateSignals,
   ResolvedKofNSignal,
 } from "@/agent/verification-bundle"
+import type { DoneTimeCaptureClass } from "./capture-correctness"
 import type { CandidateFamily, CandidateFamilyId } from "./candidate-families"
 import type { LlmEvidencePacket } from "./llm-evidence-packet"
 import type { MweProofReceipt, MweProofState } from "./mwe-proof"
@@ -52,6 +53,10 @@ export interface Candidate {
   stopReason?: StopReason
   agentError?: string
   editCount?: number
+  /** Absolute sandbox path this candidate was generated from. */
+  sandboxPath?: string
+  /** T5 done-time capture class for this candidate's own agent run. */
+  captureClass?: DoneTimeCaptureClass
   /** Candidate-family provenance supplied by typed static witness generation. */
   familyId?: CandidateFamilyId
   familyReason?: string
@@ -286,6 +291,8 @@ export interface CandidateTelemetry {
   admissible: boolean
   score: number
   reasons: readonly string[]
+  sandboxPath?: string
+  captureClass?: DoneTimeCaptureClass
   familyId?: CandidateFamilyId
   familyReason?: string
   familyOwnerFiles?: readonly string[]
@@ -317,6 +324,7 @@ export interface SelectionTelemetry {
   earlyAccepted: boolean
   successfulGenerations: number
   generationFailures: number
+  generationFailureSamples?: readonly string[]
   generated: number
   admissibleCount: number
   winnerId: string | null

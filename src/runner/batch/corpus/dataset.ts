@@ -16,6 +16,13 @@
  * Dependency-light per the bench brief / RFC §3.1: git runs via a tiny local
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
  */
+import { existsSync } from "node:fs"
+import { mkdir, rename, rm } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { join } from "node:path"
+import { errMessage } from "@/shared"
+import { quantaHomeDir } from "@/shared/quanta-home"
+import { runtimeConfig } from "@/shared/runtime-config"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
 
@@ -66,6 +73,7 @@ export const defaultExec: Exec = async (cmd, cwd, timeoutMs) => {
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
+const DEFAULT_REPO_BASE_URL = "https://github.com/"
 
 /** Coerce one raw upstream row into a SwebenchTask, or null when a required
  *  field is missing/ill-typed (skipped, never throws). */
@@ -163,21 +171,64 @@ export const prepareTaskRepo = async (
   task: SwebenchTask,
   destDir: string,
   exec: Exec,
-  repoBaseUrl = "https://github.com/",
+  repoBaseUrl = DEFAULT_REPO_BASE_URL,
   timeoutMs = 300000,
 ): Promise<string> => {
   const base = repoBaseUrl.endsWith("/") ? repoBaseUrl : `${repoBaseUrl}/`
   const repoUrl = `${base}${task.repo}.git`
 
-  // Blobless partial clone: fetch commit+tree graph only, NOT every historical
-  // blob. The subsequent `checkoutOrDeepen(base_commit)` lazily fetches just the
-  // blobs that commit needs. A full clone of a large repo (django) is hundreds of
-  // MB and minutes of network per instance; blobless cuts that to the working
-  // set. `--no-tags` drops tag refs we never check out. Env override
-  // QUANTA_SWEBENCH_FULL_CLONE=1 restores the historical full clone.
-  const filterArgs =
-    process.env.QUANTA_SWEBENCH_FULL_CLONE === "1" ? "" : "--filter=blob:none --no-tags "
-  const clone = await exec(`git clone ${filterArgs}${repoUrl} ${destDir}`, ".", timeoutMs)
+  // Persistent FULL bare-mirror cache. A blobless partial clone breaks LSP:
+  // pyright indexes the whole workspace and a missing blob triggers a per-file
+  // lazy fetch, so grounding/localize never finishes. A full clone, conversely,
+  // is hundreds of MB of network PER INSTANCE. The cache squares the circle: the
+  // network full-clone happens at most ONCE per repo (into a bare mirror), and
+  // each instance sandbox is a fast LOCAL clone from it — every blob present, so
+  // pyright indexes normally. Override the cache dir via
+  // QUANTA_SWEBENCH_REPO_CACHE; a `file://` repoBaseUrl already-local stays fast.
+  const repoCacheRoot =
+    runtimeConfig().swebenchRepoCacheDir ?? join(quantaHomeDir(), "bench", "repo-cache")
+  const repoCacheName =
+    base === DEFAULT_REPO_BASE_URL
+      ? task.repo.replace("/", "__")
+      : `${task.repo.replace("/", "__")}--${createHash("sha256").update(repoUrl).digest("hex").slice(0, 12)}`
+  const mirror = join(repoCacheRoot, `${repoCacheName}.git`)
+  if (!existsSync(mirror)) {
+    await mkdir(repoCacheRoot, { recursive: true })
+    // Atomic create to avoid a concurrent-instance TOCTOU on the SHARED mirror
+    // (audit R2: same-repo instances under QUANTA_BENCH_CONCURRENCY>1 both pass
+    // the existsSync check and race `git clone --bare` into the same path). Clone
+    // into a per-call unique temp, then atomically rename into place; if another
+    // instance won, our rename throws (target exists) ⇒ discard ours and use theirs.
+    // `tmp` and `mirror` share parent `repoCacheRoot` so the rename is intra-dir
+    // (no EXDEV). NOTE: a SIGTERM (the bench deadline kills aggressively) between
+    // the clone success and the rename can orphan a `*.tmp-<uuid>` dir; we do NOT
+    // auto-reap here because a concurrent same-repo instance may have a live tmp of
+    // its own and an age-blind sweep would race it — orphan cleanup is left to an
+    // external repo-cache GC.
+    const tmp = `${mirror}.tmp-${randomUUID()}`
+    const m = await exec(`git clone --bare ${repoUrl} ${tmp}`, ".", timeoutMs)
+    if (m.code !== 0) {
+      await rm(tmp, { recursive: true, force: true }).catch(() => {})
+      throw new Error(
+        `bare mirror clone failed for ${task.instanceId} (${repoUrl}, code ${m.code}): ${m.stderr.slice(0, 500)}`,
+      )
+    }
+    try {
+      await rename(tmp, mirror)
+    } catch (renameErr) {
+      // The ONLY benign rename failure is "another instance already published the
+      // mirror" — detect that by the target now existing, then discard our tmp.
+      // Any other failure (permissions, ENOSPC, …) is real: surface it instead of
+      // masking it behind a downstream `git clone failed`.
+      await rm(tmp, { recursive: true, force: true }).catch(() => {})
+      if (!existsSync(mirror)) {
+        throw new Error(
+          `bare mirror publish (rename) failed for ${task.instanceId} (${repoUrl}): ${errMessage(renameErr)}`,
+        )
+      }
+    }
+  }
+  const clone = await exec(`git clone ${mirror} ${destDir}`, ".", timeoutMs)
   if (clone.code !== 0) {
     throw new Error(
       `git clone failed for ${task.instanceId} (${repoUrl}, code ${clone.code}): ${clone.stderr.slice(0, 500)}`,

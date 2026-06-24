@@ -16,8 +16,6 @@ import { writeStderr } from "../terminal-io"
 export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const
 export type LogLevel = (typeof LOG_LEVELS)[number]
 
-const LOG_LEVEL_SET = new Set<string>(LOG_LEVELS)
-
 /** SWE-bench Docker image cache levels (upstream `run_evaluation` vocabulary).
  *  `none` rebuilds + discards everything; `env` (the upstream default and ours)
  *  keeps base + per-repo env images warm; `instance` also keeps per-instance
@@ -41,7 +39,7 @@ const stderrWarn = (msg: string): void => {
 
 export const parseLogLevel = (raw: string | undefined): LogLevel => {
   if (raw === undefined) return "info"
-  if (LOG_LEVEL_SET.has(raw)) return raw as LogLevel
+  if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") return raw
   stderrWarn(
     `ignoring unknown QUANTA_LOG_LEVEL="${raw}" — valid: ${LOG_LEVELS.join("|")} — defaulting to "info"`,
   )
@@ -232,6 +230,28 @@ export const parseSwebenchCacheLevel = (raw: string | undefined): SwebenchCacheL
     `ignoring unknown QUANTA_SWEBENCH_CACHE_LEVEL="${raw}" — valid: ${SWEBENCH_CACHE_LEVELS.join("|")} — defaulting to "env"`,
   )
   return "env"
+}
+
+/** ADR-0296 auto-background — what happens when a foreground bash command
+ *  exceeds its deadline. `background` (DEFAULT — ships ON, ADR-0296) detaches
+ *  the still-running child into the bash background registry so the model
+ *  resumes it via `bash_await`/`bash_kill` (Claude-Code-style auto-background);
+ *  a command that COMPLETES before its deadline is byte-identical to the legacy
+ *  result, so the only behavior change is "deadline ⇒ detach instead of kill".
+ *  `kill` is the legacy SIGTERM-on-deadline opt-out. `prompt` surfaces a
+ *  one-keystroke consent before detaching (falls back to `background` where no
+ *  interactive surface is wired). A per-call `timeout_behavior` on the bash tool
+ *  always overrides. */
+export const BASH_AUTO_BACKGROUND_MODES = ["kill", "background", "prompt"] as const
+export type BashAutoBackgroundMode = (typeof BASH_AUTO_BACKGROUND_MODES)[number]
+
+export const parseBashAutoBackground = (raw: string | undefined): BashAutoBackgroundMode => {
+  if (raw === undefined) return "background"
+  if (raw === "kill" || raw === "background" || raw === "prompt") return raw
+  stderrWarn(
+    `ignoring unknown QUANTA_BASH_AUTO_BACKGROUND="${raw}" — valid: ${BASH_AUTO_BACKGROUND_MODES.join("|")} — defaulting to "background"`,
+  )
+  return "background"
 }
 
 export const stringOrUndef = (raw: string | undefined): string | undefined =>

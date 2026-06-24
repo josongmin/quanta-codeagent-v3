@@ -29,7 +29,7 @@ purpose: |
 evidence:
   code:
     - src/runner/knobs/knobs/lsp-steer.ts
-  adrs: []
+  adrs: [24, 535]
   tests:
     unit:
       - tests/unit/lsp-steer-prompt-wiring-hellgate.test.ts

@@ -50,10 +50,10 @@ evidence:
     - src/runner/batch/eval/repro-oracle-calibration.ts
     - src/runner/batch/eval/driver.ts
     - src/runner/batch/eval/rematerialize.ts
-  adrs: []
+  adrs: [14]
   tests:
     unit:
-      - tests/unit/repro-oracle-calibration.test.ts
+      - tests/unit/repro-oracle-calibration-hellgate.test.ts
     integration:
       - tests/unit/calibrated-repro-consensus-port.test.ts
     contract: []

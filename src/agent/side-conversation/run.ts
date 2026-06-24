@@ -71,6 +71,7 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
   // retain the broad repo-search entrypoint when the host wires it.
   "search_codebase",
   "grep",
+  "find_references",
   "glob",
   // ADR-0296 — `bash_await` is pure polling over the in-memory background-
   // shell registry (no FS / network / shell side effect); safe inside a

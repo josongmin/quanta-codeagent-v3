@@ -105,6 +105,12 @@ export const buildToolContext = (args: {
       ? { planMutator: planStoreToMutator(config.planStore) }
       : {}),
     ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
+    // ADR-0296 PROMPT mode — map the host consent port onto the ctx requester
+    // the bash tool consults at the deadline. ABSENT ⇒ ctx field absent ⇒
+    // `prompt` degrades to plain `background` (byte-identical default).
+    ...(config.backgroundConsentPort !== undefined
+      ? { requestBackgroundConsent: config.backgroundConsentPort }
+      : {}),
     ...((): { shellSnapshot?: import("@/tool").ShellSnapshotRestoreSeam } => {
       const seam = config.shellSnapshotSession?.currentSeam()
       return seam !== undefined ? { shellSnapshot: seam } : {}

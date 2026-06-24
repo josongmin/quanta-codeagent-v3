@@ -36,7 +36,7 @@ evidence:
     - src/runner/knobs/knobs/index.ts
     - src/config/knob-inventory.ts
     - src/runner/knobs/types.ts
-  adrs: []
+  adrs: [503]
   tests:
     unit:
       - tests/unit/bench-preset-drives-config-hellgate.test.ts

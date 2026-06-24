@@ -16,6 +16,7 @@
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 // ── Duck-typed mirror of `RenameApplyPort` ─────────────────────────────────
@@ -109,6 +110,16 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
       yield { type: "result", result: { ok: false, output: "aborted before start" } }
       return
     }
+    let abs: string
+    try {
+      abs = resolveJailed(parsed.data.path, ctx.cwd)
+    } catch (e) {
+      if (e instanceof FsJailError) {
+        yield { type: "result", result: { ok: false, output: e.message } }
+        return
+      }
+      throw e
+    }
     yield {
       type: "progress",
       message: `lsp_rename_apply: computing rename of ${parsed.data.path}:${parsed.data.line}:${parsed.data.character} → ${parsed.data.newName}`,
@@ -116,7 +127,7 @@ export const lspRenameApplyTool = (port: RenameApplyPort): Tool<LspRenameApplyIn
     let edit: RenameApplyPortWorkspaceEdit | null
     try {
       edit = await port.computeRename(
-        parsed.data.path,
+        abs,
         parsed.data.line - 1,
         parsed.data.character - 1,
         parsed.data.newName,

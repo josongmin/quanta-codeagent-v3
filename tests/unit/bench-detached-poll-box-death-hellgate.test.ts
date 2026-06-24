@@ -27,6 +27,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SpawnFn } from "../../src/apps/bench/remote/backend"
+import { runBenchDetachedPoll } from "../../src/apps/bench/remote/box-session/detached-poll"
 import { type PoolChunk, runPool } from "../../src/apps/bench/remote/pool"
 import {
   createSpawnRecorder,
@@ -43,7 +44,7 @@ const FULL_AUTH = JSON.stringify({
   refresh_token: "REFRESH",
   id_token: "IDTOK",
   account_id: "acct",
-  expires_at: "2026-06-24T00:00:00Z",
+  expires_at: "2099-01-01T00:00:00Z",
 })
 
 const TEMP_DIRS = new Set<string>()
@@ -99,6 +100,62 @@ const baseCfg = (spawn: SpawnFn, over: Record<string, unknown> = {}) => ({
 afterAll(cleanup)
 
 describe("BUG 1 — detached poll bounds box death (no forever spin)", () => {
+  test("report+predictions completion breaks the poll even when run.exit is missing", async () => {
+    const sshCommands: string[] = []
+    const out = await runBenchDetachedPoll({
+      iid: "i-report-complete",
+      benchCmd: "bun run bench",
+      runLog: "~/run.log",
+      runExit: "~/run.exit",
+      completionArtifacts: { reportJson: "~/report.json", predictionsJsonl: "~/preds.jsonl" },
+      sleep: async () => {},
+      pollIntervalMs: 1,
+      onLine: () => {},
+      aws: async () => ok("running\n"),
+      ssh: async (remote) => {
+        sshCommands.push(remote)
+        if (remote.includes("setsid bash -c")) return ok("LAUNCHED\n")
+        if (
+          remote.includes("[ -s ~/report.json ]") &&
+          remote.includes("json.load(open(sys.argv[1]))") &&
+          remote.includes("[ -s ~/preds.jsonl ]")
+        ) {
+          return ok(`0\n==XQ-RUN-EXIT-XQ==\n`)
+        }
+        return ok(`\n==XQ-RUN-EXIT-XQ==\n`)
+      },
+    })
+
+    expect(out.code).toBe(0)
+    expect(sshCommands.some((cmd) => cmd.includes("[ -s ~/report.json ]"))).toBe(true)
+  })
+
+  test("non-parseable report does not trigger artifact-complete fallback before run.exit", async () => {
+    let probes = 0
+    const out = await runBenchDetachedPoll({
+      iid: "i-report-half-written",
+      benchCmd: "bun run bench",
+      runLog: "~/run.log",
+      runExit: "~/run.exit",
+      completionArtifacts: { reportJson: "~/report.json", predictionsJsonl: "~/preds.jsonl" },
+      sleep: async () => {},
+      pollIntervalMs: 1,
+      onLine: () => {},
+      aws: async () => ok("running\n"),
+      ssh: async (remote) => {
+        if (remote.includes("setsid bash -c")) return ok("LAUNCHED\n")
+        if (remote.includes("XQ-RUN-EXIT-XQ")) {
+          probes += 1
+          return probes === 1 ? ok(`\n==XQ-RUN-EXIT-XQ==\n`) : ok(`7\n==XQ-RUN-EXIT-XQ==\n`)
+        }
+        return ok("")
+      },
+    })
+
+    expect(out.code).toBe(7)
+    expect(probes).toBe(2)
+  })
+
   test("a box that dies mid-run is requeued after a BOUNDED number of polls, not spun forever", async () => {
     const dsA = join(allocTempDir("poll-death-ds-"), "a.jsonl")
     writeDataset(dsA)
@@ -139,7 +196,9 @@ describe("BUG 1 — detached poll bounds box death (no forever spin)", () => {
       ),
       // run.exit / run.log poll: box0 is dead ⇒ ssh 255 forever; box1 ⇒ exit 0.
       whenSshRemote(
-        (remote) => remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ"),
+        (remote) =>
+          (remote.includes("run.exit") || remote.includes("XQ-RUN-EXIT-XQ")) &&
+          !remote.includes("rm -f"),
         () => {
           probeCount += 1
           return launchIdx === 0

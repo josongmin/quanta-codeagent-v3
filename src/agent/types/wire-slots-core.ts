@@ -234,6 +234,20 @@ export interface WireSlotsCoreConfig {
    */
   userInputPort?: UserInputRequester
   /**
+   * ADR-0296 PROMPT-mode consent port. When wired AND the effective bash
+   * `timeout_behavior` is `prompt`, the bash tool calls this AT the deadline to
+   * surface a one-keystroke "move to background?" prompt (mapped onto
+   * `ToolContext.requestBackgroundConsent`): `true` ⇒ detach into the bg
+   * registry, `false` ⇒ kill (legacy timeout). Absent ⇒ `prompt` degrades to
+   * plain `background` (auto-detach, no prompt) — byte-identical to the
+   * unwired path. The host surface (CLI mid-turn approval channel / IDE modal /
+   * RPC) supplies the decision asynchronously.
+   */
+  backgroundConsentPort?: (info: {
+    readonly command: string
+    readonly elapsedMs: number
+  }) => Promise<boolean>
+  /**
    * Per-turn work-metrics sink (ADR-0064). Absent ⇒ the loop instantiates no
    * collector and emits nothing (byte-identical default-OFF). Present ⇒ one
    * collector per turn; `emit(metrics, { turnId })` at turn end.

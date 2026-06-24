@@ -228,11 +228,16 @@ const dryRunPlan = (cfg: FullRemoteConfig): readonly string[] => {
  * more. Override via QUANTA_FULL_REMOTE_CONCURRENCY OR the alias
  * QUANTA_BENCH_CONCURRENCY. Clamped [1,16].
  */
-const resolveConcurrency = (): number =>
-  clampPatchGenConcurrency(
-    Number(process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY) ||
-      resolveGlobalPatchGenBudget(),
+const resolveConcurrency = (): number => {
+  // Extract the raw env string FIRST, then parse on a separate line with an
+  // explicit finite/positive guard — a garbage value falls back to the global
+  // budget rather than coercing to NaN inside clamp (no-raw-number-env contract).
+  const raw = process.env.QUANTA_FULL_REMOTE_CONCURRENCY ?? process.env.QUANTA_BENCH_CONCURRENCY
+  const parsed = raw !== undefined && raw !== "" ? Number(raw) : Number.NaN
+  return clampPatchGenConcurrency(
+    Number.isFinite(parsed) && parsed > 0 ? parsed : resolveGlobalPatchGenBudget(),
   )
+}
 
 const acquireFullRemoteLease = async (
   cfg: FullRemoteConfig,

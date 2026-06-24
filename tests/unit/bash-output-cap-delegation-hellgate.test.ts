@@ -22,13 +22,7 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  __resetBashBgRegistry,
-  type BashProcessHandlePort,
-  type BashSubprocess,
-  createBashBgRegistry,
-  installBashBgRegistry,
-} from "@/runtime/bash-bg-registry"
+import { __resetBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { ToolRegistry } from "@/tool"
 import { bashTool } from "@/tool/bash"
@@ -57,99 +51,6 @@ const collect = async (
   if (!result) throw new Error("no result")
   return { result, events }
 }
-
-// ─────────────────────────── FAKE port for bg paths ──────────────────────────
-
-interface FakeChild extends BashSubprocess {
-  feedStdout(s: string): void
-  feedStderr(s: string): void
-  finish(exitCode: number): void
-}
-
-const makeFakeChild = (): FakeChild => {
-  let stdoutController!: ReadableStreamDefaultController<Uint8Array>
-  let stderrController!: ReadableStreamDefaultController<Uint8Array>
-  const stdout = new ReadableStream<Uint8Array>({
-    start(c) {
-      stdoutController = c
-    },
-  })
-  const stderr = new ReadableStream<Uint8Array>({
-    start(c) {
-      stderrController = c
-    },
-  })
-  let resolveExit!: (code: number) => void
-  const exited = new Promise<number>((res) => {
-    resolveExit = res
-  })
-  let killed = false
-  const enc = new TextEncoder()
-  return {
-    stdout,
-    stderr,
-    exited,
-    kill(_signal?: number | NodeJS.Signals) {
-      if (!killed) {
-        killed = true
-        try {
-          stdoutController.close()
-        } catch {
-          /* already closed */
-        }
-        try {
-          stderrController.close()
-        } catch {
-          /* already closed */
-        }
-        resolveExit(143)
-      }
-    },
-    feedStdout(s) {
-      try {
-        stdoutController.enqueue(enc.encode(s))
-      } catch {
-        /* stream closed */
-      }
-    },
-    feedStderr(s) {
-      try {
-        stderrController.enqueue(enc.encode(s))
-      } catch {
-        /* stream closed */
-      }
-    },
-    finish(code) {
-      try {
-        stdoutController.close()
-      } catch {
-        /* already closed */
-      }
-      try {
-        stderrController.close()
-      } catch {
-        /* already closed */
-      }
-      resolveExit(code)
-    },
-  }
-}
-
-const makeFakePort = (): { port: BashProcessHandlePort; children: FakeChild[] } => {
-  const children: FakeChild[] = []
-  return {
-    port: {
-      async spawn() {
-        const c = makeFakeChild()
-        children.push(c)
-        return c
-      },
-    },
-    children,
-  }
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 // ─────────────────────────── tests ──────────────────────────────────────────
 
@@ -221,20 +122,15 @@ describe("bash output cap delegation hellgate (TKT-001 / ADR-0411)", () => {
   })
 
   test("8. background COMPLETED result preserves full body (no head-only slice)", async () => {
-    const { port, children } = makeFakePort()
-    const registry = createBashBgRegistry({ port })
-    installBashBgRegistry(registry)
-    const promise = collect(
+    const { result } = await collect(
       bashTool,
-      { command: "huge", timeout_behavior: "background", timeout_ms: 2_000 },
+      {
+        command: `python3 -c 'print("a"*45000, end="")'`,
+        timeout_behavior: "background",
+        timeout_ms: 2_000,
+      },
       ctx(),
     )
-    // Wait for the registry to register the child.
-    await sleep(20)
-    // Feed > 30K stdout, then finish BEFORE the deadline.
-    children[0]?.feedStdout("a".repeat(45_000))
-    children[0]?.finish(0)
-    const { result } = await promise
     // Legacy head-only banner must NOT appear.
     expect(result.output).not.toMatch(/truncated,\s+\d+\s+more\s+chars/)
     // Body length: `[exit 0]\n` + 45_000 stdout. The 30K head-only would have

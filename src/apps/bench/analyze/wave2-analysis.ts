@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { byteCompare } from "@/shared/byte-compare"
 import { filesFromPatch } from "@/runner/batch/eval/selection-paths"
 import type { BenchReport, PerInstanceReport } from "@/runner/batch/report"
 import {
@@ -295,7 +296,7 @@ const coverageEntries = (
         !snapshot.officialResolved &&
         snapshot.coverageClass !== undefined,
     )
-    .sort((a, b) => a.instanceId.localeCompare(b.instanceId))
+    .sort((a, b) => byteCompare(a.instanceId, b.instanceId))
   const chosen = limit !== undefined ? sorted.slice(0, limit) : sorted
   return chosen.map((snapshot) => ({
     instanceId: snapshot.instanceId,
@@ -388,14 +389,14 @@ export const buildWave2BacklogArtifact = (args: {
     generationAccuracy: [
       ...coverage.filter((entry) => generationIds.has(entry.instanceId)),
       ...singleFileGeneration,
-    ].sort((a, b) => a.instanceId.localeCompare(b.instanceId)),
+    ].sort((a, b) => byteCompare(a.instanceId, b.instanceId)),
     oracleQuality: snapshots
       .filter((snapshot) => snapshot.oracleFailure !== undefined)
       .map((snapshot) => ({
         instanceId: snapshot.instanceId,
         reason: snapshot.oracleFailure ?? "unknown",
       }))
-      .sort((a, b) => a.instanceId.localeCompare(b.instanceId)),
+      .sort((a, b) => byteCompare(a.instanceId, b.instanceId)),
   }
 }
 

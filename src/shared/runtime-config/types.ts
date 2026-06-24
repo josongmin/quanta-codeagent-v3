@@ -11,7 +11,7 @@
  * `./types-extra`'s per-field JSDoc against the parent's `loadFromEnv` lines.
  */
 
-import type { LogLevel, PtyBackend } from "./parsers"
+import type { BashAutoBackgroundMode, LogLevel, PtyBackend } from "./parsers"
 import type { RuntimeConfigPaths } from "./types-extra"
 
 /** All runtime-tunable values, frozen at startup. Add fields here when a new
@@ -430,6 +430,22 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  fallback). Only consulted when `ptyAttach` is on (else no PTY tools are
    *  registered at all). */
   readonly ptyBackend: PtyBackend
+  /** ADR-0296 auto-background — default `timeout_behavior` for the bash tool
+   *  (`QUANTA_BASH_AUTO_BACKGROUND`). `background` (DEFAULT — ships ON) detaches
+   *  a command that exceeds its deadline into the bash background registry
+   *  (Claude-Code-style); the model resumes it with `bash_await`/`bash_kill`. A
+   *  command that completes before its deadline is byte-identical to the legacy
+   *  result. `kill` is the legacy SIGTERM-on-deadline opt-out. `prompt` asks for
+   *  one-keystroke consent before detaching (falls back to `background` where no
+   *  interactive surface is wired). A per-call `timeout_behavior` argument on the
+   *  bash tool ALWAYS overrides this. */
+  readonly bashAutoBackground: BashAutoBackgroundMode
+  /** ADR-0296 — deadline (ms) after which an un-completed bash command is
+   *  auto-backgrounded (`QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS`). Absent ⇒
+   *  the runtime default (120 000 ms, same as the legacy kill deadline). A
+   *  per-call `timeout_ms` argument overrides this. Only consulted when the
+   *  effective behavior is `background`/`prompt`. */
+  readonly bashAutoBackgroundThresholdMs: number | undefined
   /** H18/keyring — OS-keyring-backed MCP OAuth token store
    *  (`QUANTA_MCP_OAUTH_KEYRING`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the
    *  MCP OAuth provider uses the plain 0600 file `TokenStorePort` (byte-identical).

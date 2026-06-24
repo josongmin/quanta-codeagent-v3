@@ -26,10 +26,10 @@ purpose: 'Default-OFF: suppress bulky repro directive prose at round 0; re-attac
 evidence:
   code:
     - src/runner/knobs/knobs/round0-minimal.ts
-  adrs: []
+  adrs: [14]
   tests:
     unit:
-      - tests/unit/bench-closure-prompt-wiring.test.ts
+      - tests/unit/bench-closure-prompt-wiring-hellgate.test.ts
     integration: []
     contract: []
 knobs: ["round0-minimal"]

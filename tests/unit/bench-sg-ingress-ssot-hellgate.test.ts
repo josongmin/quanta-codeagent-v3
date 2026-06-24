@@ -33,7 +33,7 @@ const FULL_AUTH = JSON.stringify({
   refresh_token: "REFRESH",
   id_token: "IDTOK",
   account_id: "acct",
-  expires_at: "2026-06-24T00:00:00Z",
+  expires_at: "2099-01-01T00:00:00Z",
 })
 
 const MY_IP = "203.0.113.42"

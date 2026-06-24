@@ -90,7 +90,9 @@ describe("formatFindRefs — grouping/cap (pure)", () => {
     const stdout = Array.from({ length: 250 }, (_, i) => `f${i}.py:1:foo()`).join("\n")
     const out = formatFindRefs(stdout, "foo")
     expect(out).toContain("more")
-    expect(out.split("\n").length).toBeLessThan(210)
+    expect(out.match(/foo\(\)/g)?.length).toBe(200)
+    expect(out).toContain("f199.py:1:foo()")
+    expect(out).not.toContain("f200.py:1:foo()")
   })
 })
 

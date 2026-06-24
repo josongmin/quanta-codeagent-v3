@@ -42,6 +42,7 @@ import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
 import { knobOverrideCount, knobOverrides, knobOverridesVersion } from "./knob-overrides"
 import {
   DEFAULT_CRITICAL_SECTION_MAX_MS,
+  parseBashAutoBackground,
   parseBool,
   parseBoolDefaultTrue,
   parseLogLevel,
@@ -62,6 +63,8 @@ import type { RuntimeConfig } from "./runtime-config/types"
 // after the god-module split. The value vocabulary + parsers live in
 // `./runtime-config/parsers`; the typed surface lives in `./runtime-config/types`.
 export {
+  BASH_AUTO_BACKGROUND_MODES,
+  type BashAutoBackgroundMode,
   DEFAULT_CRITICAL_SECTION_MAX_MS,
   LOG_LEVELS,
   type LogLevel,
@@ -82,6 +85,16 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
     bgCompaction: gateOnStrict(env, "QUANTA_BG_COMPACTION"),
+    // ADR-0296 auto-background — default bash `timeout_behavior` + detach
+    // deadline. Default `background` (ships ON, Claude-Code-style): a command
+    // past its deadline DETACHES into the bg-registry instead of being killed.
+    // Completion before the deadline is byte-identical; opt out per-session with
+    // `QUANTA_BASH_AUTO_BACKGROUND=kill` or per-call.
+    bashAutoBackground: parseBashAutoBackground(env["QUANTA_BASH_AUTO_BACKGROUND"]),
+    bashAutoBackgroundThresholdMs: parsePositiveInt(
+      env["QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS"],
+      "QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS",
+    ),
     // RFC jun-6-microcompaction — opt-in (gateOn vocab `1`/`on`/`true`/`yes`;
     // #24 doc-fix — resolver is `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the
     // tier-1 eviction pre-pass is never constructed (byte-identical). The
@@ -345,6 +358,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     ),
     quantaHome: stringOrUndef(env["QUANTA_HOME"]),
     benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
+    benchResultsDir: stringOrUndef(env["QUANTA_BENCH_RESULTS_DIR"]),
     cachePathspecsExtra: parseStringList(env["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]),
     dedupEnvPrefixesExtra: parseStringList(env["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]),
     permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
@@ -357,6 +371,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       "QUANTA_SWEBENCH_MAX_WORKERS",
     ),
     swebenchNamespace: stringOrUndef(env["QUANTA_SWEBENCH_NAMESPACE"]),
+    swebenchRepoCacheDir: stringOrUndef(env["QUANTA_SWEBENCH_REPO_CACHE"]),
     swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
     swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
     benchTimeoutMs: parsePositiveInt(env["QUANTA_BENCH_TIMEOUT_MS"], "QUANTA_BENCH_TIMEOUT_MS"),

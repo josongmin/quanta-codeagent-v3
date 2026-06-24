@@ -35,6 +35,15 @@ describe("runner verify-select and patch-budget driver parity", () => {
     )
   })
 
+  test("both drivers wire owner-widening follow-up through the shared helpers", () => {
+    expect(DRIVER_SRC).toContain("const widening = await adaptiveNextPassOwners({")
+    expect(APP_DRIVER_SRC).toContain("const widening = await adaptiveNextPassOwners({")
+    expect(DRIVER_SRC).toContain("const followup = await maybeRunRepairEscalationFollowup({")
+    expect(APP_DRIVER_SRC).toContain("const followup = await maybeRunRepairEscalationFollowup({")
+    expect(DRIVER_SRC).toContain("phase.ownerWidening = followup.telemetry")
+    expect(APP_DRIVER_SRC).toContain("args.state.phase.ownerWidening = followup.telemetry")
+  })
+
   test("both drivers route selection evidence and prompt seed assembly through the shared helper", () => {
     expect(DRIVER_SRC).toContain('from "./selection-assembly"')
     expect(APP_DRIVER_SRC).toContain('from "@/runner/batch/eval/selection-assembly"')

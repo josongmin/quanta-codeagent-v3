@@ -21,6 +21,8 @@
  * itself, turn a passing candidate into a rejected one.
  */
 
+import { byteCompare } from "@/shared/byte-compare"
+
 export interface RepoTextFile {
   readonly path: string
   readonly text: string
@@ -345,7 +347,7 @@ export const discoverImpactedTestCandidates = (
   // ORDERING-ONLY sort: rank desc, then path for determinism. Slicing by
   // `maxTests` bounds how many witnesses we will actually execute.
   const ranked = [...byPath.values()].sort(
-    (a, b) => b.score - a.score || a.path.localeCompare(b.path),
+    (a, b) => b.score - a.score || byteCompare(a.path, b.path),
   )
   // #6: a strict truncation drops real, admissible witnesses from the executed
   // set with no other signal. Surface it so a capped regression gate is never a

@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readdir, rm, stat, unlink } from "node:fs/promises"
-import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
-import { errMessage } from "@/shared"
+import { byteCompare, errMessage, quantaHomePath } from "@/shared"
 import {
   asPositiveInt,
   atomicWriteJson,
@@ -114,6 +113,9 @@ const DEFAULT_POLL_MS = 15_000
 const DEFAULT_HEARTBEAT_MS = 15_000
 const DEFAULT_STALE_LEASE_MS = 60_000
 const DEFAULT_STALE_LOCK_MS = 60_000
+// Floor for the stale-lock reclaim window: a lock held shorter than this is never
+// treated as stale, so a slow-but-live writer is not preempted mid-mutation.
+const MIN_STALE_LOCK_MS = 5_000
 const LEASE_SUFFIX = ".lease.json"
 const LOCK_DIR = ".lock"
 const LOCK_META = "owner.json"
@@ -132,8 +134,7 @@ export const resolveGlobalPatchGenBudget = (): number => {
 }
 
 export const resolvePatchGenBudgetDir = (): string =>
-  process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR?.trim() ||
-  join(homedir(), ".quanta", "bench-token-budget")
+  process.env.QUANTA_BENCH_TOKEN_BUDGET_DIR?.trim() || quantaHomePath("bench-token-budget")
 
 const leasePath = (dir: string, leaseId: string): string => join(dir, `${leaseId}${LEASE_SUFFIX}`)
 
@@ -207,7 +208,7 @@ const listLeaseRecords = async (
     records.push(parsed)
   }
   return records.sort(
-    (a, b) => a.acquiredAt.localeCompare(b.acquiredAt) || a.leaseId.localeCompare(b.leaseId),
+    (a, b) => byteCompare(a.acquiredAt, b.acquiredAt) || byteCompare(a.leaseId, b.leaseId),
   )
 }
 
@@ -332,7 +333,7 @@ const resolveBudgetStaleLeaseMs = (value: number | undefined, heartbeatMs: numbe
   Math.max(heartbeatMs * 2, Math.trunc(value ?? DEFAULT_STALE_LEASE_MS) || DEFAULT_STALE_LEASE_MS)
 
 const resolveBudgetStaleLockMs = (value: number | undefined): number =>
-  Math.max(5_000, Math.trunc(value ?? DEFAULT_STALE_LOCK_MS) || DEFAULT_STALE_LOCK_MS)
+  Math.max(MIN_STALE_LOCK_MS, Math.trunc(value ?? DEFAULT_STALE_LOCK_MS) || DEFAULT_STALE_LOCK_MS)
 
 const resolveAcquirePatchGenBudgetLeaseOptions = (
   opts: AcquirePatchGenBudgetLeaseOptions,
@@ -596,7 +597,7 @@ export const readPatchGenBudgetState = async (
     Math.trunc(opts.staleLeaseMs ?? DEFAULT_STALE_LEASE_MS) || DEFAULT_STALE_LEASE_MS,
   )
   const staleLockMs = Math.max(
-    5_000,
+    MIN_STALE_LOCK_MS,
     Math.trunc(opts.staleLockMs ?? DEFAULT_STALE_LOCK_MS) || DEFAULT_STALE_LOCK_MS,
   )
   const releaseLock = await acquireMutationLock({

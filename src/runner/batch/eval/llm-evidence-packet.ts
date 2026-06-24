@@ -1026,11 +1026,20 @@ export const verificationTargetFromPlan = (
   plan: VerificationPlan | undefined,
 ): VerificationTargetFact | undefined => {
   if (plan === undefined) return undefined
+  const sanitizeReproCmd = (cmd: string): string | undefined => {
+    const sandboxPath = /(?<![\w./-])\/[^\s'"]*\/reproduce_issue\.py/g
+    const sanitized = cmd.replace(sandboxPath, "reproduce_issue.py")
+    // Temp __repro_* paths are proof-port internals, not stable user-facing
+    // commands. Do not let a stale fork path become prompt authority.
+    if (/\/[^\s'"]*\/__repro_\d+_[^\s'"]+\.py/.test(sanitized)) return undefined
+    return sanitized
+  }
   const toStep = (step: VerificationStep): VerificationStepFact => {
     const cmdIsBlind = step.kind === "repro"
+    const reproCmd = cmdIsBlind ? sanitizeReproCmd(step.cmd) : undefined
     return {
       kind: step.kind,
-      ...(cmdIsBlind ? { cmd: step.cmd } : { cmdWithheld: true }),
+      ...(cmdIsBlind && reproCmd !== undefined ? { cmd: reproCmd } : { cmdWithheld: true }),
       ...(step.authority !== undefined ? { authority: step.authority } : {}),
       ...(step.successPredicate !== undefined
         ? { successPredicate: step.successPredicate.type }

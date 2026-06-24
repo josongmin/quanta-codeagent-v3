@@ -17,7 +17,7 @@ import {
 const sampleRecord: TokenRecord = {
   access_token: "at-1",
   refresh_token: "rt-1",
-  expires_at: "2030-01-01T00:00:00.000Z",
+  expires_at: "2099-01-01T00:00:00.000Z",
   plan_type: "plus",
   account_id: "acct-1",
   last_refresh: "2026-05-23T00:00:00.000Z",

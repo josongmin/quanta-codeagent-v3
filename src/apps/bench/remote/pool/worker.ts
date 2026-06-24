@@ -56,6 +56,10 @@ export class ChunkQueue {
   }
 }
 
+// Fallback poll-wait when every account is cooling and no explicit backoff base
+// is configured (backoffBaseMs <= 0) — keeps the worker from busy-spinning.
+const DEFAULT_BACKOFF_WAIT_MS = 5_000
+
 const acquireChunkBudgetLease = async (
   workerId: number,
   chunk: PoolChunk,
@@ -835,7 +839,7 @@ const acquireAuthLeaseWithWait = async (
     const waitMs =
       readyAt !== undefined
         ? Math.max(1, readyAt - runtime.now())
-        : Math.max(1, runtime.backoffBaseMs > 0 ? runtime.backoffBaseMs : 5_000)
+        : Math.max(1, runtime.backoffBaseMs > 0 ? runtime.backoffBaseMs : DEFAULT_BACKOFF_WAIT_MS)
     runtime.log(
       `[pool] worker ${workerId}: all accounts busy/cooling — waiting ${Math.round(waitMs / 1000)}s for ${chunk.runId}`,
     )

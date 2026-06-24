@@ -156,6 +156,27 @@ export interface BashBgRegistry {
    *  only spawns). `signal`, when aborted, marks the handle `"aborted"` and
    *  kills the child. */
   register(args: { command: string; cwd: string; signal?: AbortSignal }): Promise<BgShellHandle>
+  /** ADR-0296 auto-background — ADOPT a child already spawned + drained by
+   *  `runShell` (foreground path that hit its deadline). Unlike {@link register}
+   *  (which spawns afresh, bypassing the foreground sandbox/env/wrap pipeline),
+   *  `adopt` takes ownership of an EXISTING live process: its `kill`/`disarm`
+   *  closures, the `stdout`/`stderr` BoundedBuffers that `runShell` is STILL
+   *  appending to, the child's `exited` code promise, and the `drainsDone`
+   *  promise that resolves when both pipes finish. The registry wires only the
+   *  terminal lifecycle (status `running`→`completed`/exit-code latch + disarm)
+   *  — it does NOT start a new drain (the caller's drain keeps feeding the same
+   *  buffers). Cap-and-evict applies identically to `register`. Returns the new
+   *  id + an initial snapshot. */
+  adopt(args: {
+    readonly command: string
+    readonly cwd: string
+    readonly kill: () => void
+    readonly disarm: () => void
+    readonly stdout: BoundedBuffer
+    readonly stderr: BoundedBuffer
+    readonly exited: Promise<number>
+    readonly drainsDone: Promise<void>
+  }): Promise<{ id: string; snapshot: BgShellSnapshot }>
   /** Lookup a snapshot by id. Returns `null` when the id is unknown / evicted. */
   get(id: string): BgShellSnapshot | null
   /** Block until the shell exits OR the optional `regex` matches the combined
@@ -405,6 +426,60 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     exitCode: h.exitCode,
   })
 
+  const adopt: BashBgRegistry["adopt"] = async (args) => {
+    // Cap-and-evict BEFORE inserting — identical posture to `register`. The
+    // oldest still-running shell is killed + dropped so the adopted handle has
+    // a slot. (An adopted handle that overflows the cap is itself subject to
+    // eviction on the NEXT register/adopt — same LRU contract.)
+    if (entries.size >= maxEntries) {
+      await evictOldest()
+    }
+    const id = crypto.randomUUID()
+    let exitedResolve!: () => void
+    const exited = new Promise<void>((res) => {
+      exitedResolve = res
+    })
+    // The buffers are the SAME instances `runShell` is appending to via its
+    // ongoing drain — the registry reads them through `snapshot()`/`get()`,
+    // never writes. The child is already spawned + draining; we only own the
+    // terminal lifecycle from here.
+    const handle: BgShellHandle = {
+      id,
+      command: args.command,
+      cwd: args.cwd,
+      startedAt: Date.now(),
+      status: "running",
+      stdout: args.stdout,
+      stderr: args.stderr,
+      exitCode: null,
+      exited,
+      kill: args.kill,
+    }
+    entries.set(id, handle)
+
+    // Mirror `register`'s lifecycle tail, minus the spawn + drain start (the
+    // caller owns those). When the caller's drain finishes AND the child is
+    // reaped, latch the exit code, flip running→completed (a `kill()` from
+    // eviction/`bash_kill`/`killAll` will have already set `killed`), and
+    // disarm the escalating-kill grace timer the caller handed us.
+    void (async () => {
+      try {
+        await args.drainsDone
+      } catch {
+        /* reader error already surfaced into the shared stdout/stderr buffer */
+      }
+      const code = await args.exited.catch(() => -1)
+      handle.exitCode = code
+      if (handle.status === "running") {
+        handle.status = "completed"
+      }
+      args.disarm()
+      exitedResolve()
+    })()
+
+    return { id, snapshot: snapshot(handle) }
+  }
+
   const get: BashBgRegistry["get"] = (id) => {
     const h = entries.get(id)
     if (h === undefined) return null
@@ -494,6 +569,7 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
 
   return {
     register,
+    adopt,
     get,
     awaitHandle,
     kill,

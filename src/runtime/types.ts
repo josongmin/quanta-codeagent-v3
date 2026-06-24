@@ -1,14 +1,57 @@
+import type { BoundedBuffer } from "./bounded-buffer"
+
 export interface ShellResult {
   stdout: string
   stderr: string
   exitCode: number
   timedOut: boolean
+  /** ADR-0296 auto-background (deadline → detach). Present ONLY when this run
+   *  hit its deadline under a `background` option (see {@link runShell}) and the
+   *  still-running child was DETACHED into the bash background registry instead
+   *  of being killed. `stdout`/`stderr` carry the output captured up to the
+   *  detach moment; `exitCode` is a placeholder (the child has not exited). The
+   *  caller surfaces `shellId` so the model can later `bash_await` / `bash_kill`.
+   *  Absent ⇒ the run completed (or was killed/aborted) in the foreground — the
+   *  field is never set on the legacy paths (byte-identical). */
+  readonly detached?: { readonly shellId: string }
+}
+
+/** ADR-0296 auto-background — the detach seam `runShell` invokes when a
+ *  `background`-mode command reaches its deadline. The tool layer binds `adopt`
+ *  to the bash background registry; `runShell` hands over the still-running
+ *  child (its kill/disarm closures, the live output buffers it keeps appending
+ *  to, the child's exit-code promise, and the drain-completion promise) and the
+ *  registry owns it from there. Returns the new background shell id. */
+export interface BackgroundDetachSeam {
+  readonly adopt: (args: {
+    readonly command: string
+    readonly cwd: string
+    readonly kill: () => void
+    readonly disarm: () => void
+    readonly stdout: BoundedBuffer
+    readonly stderr: BoundedBuffer
+    readonly exited: Promise<number>
+    readonly drainsDone: Promise<void>
+  }) => Promise<{ id: string }>
+  /** ADR-0296 PROMPT mode — optional consent gate invoked AT the deadline,
+   *  BEFORE detaching. Resolves `true` ⇒ detach the still-running child into the
+   *  registry; `false` (or throws) ⇒ kill it (legacy SIGTERM-on-timeout). Absent
+   *  ⇒ detach immediately (plain `background` mode). The host binds this to a
+   *  one-keystroke "move to background?" surface. */
+  readonly confirm?: (info: {
+    readonly command: string
+    readonly elapsedMs: number
+  }) => Promise<boolean>
 }
 
 export interface ShellOptions {
   cwd?: string
   timeoutMs?: number
   signal?: AbortSignal
+  /** ADR-0296 auto-background — when wired, the deadline DETACHES the live
+   *  child into the registry (via {@link BackgroundDetachSeam}) instead of
+   *  killing it. Absent ⇒ byte-identical legacy kill-on-deadline. */
+  background?: BackgroundDetachSeam
   /** When true, the child inherits the parent's FULL environment (API keys
    *  included). Default/absent ⇒ scrubbed env (shared allowlist; see
    *  {@link runShell}). LLM-driven tools MUST NOT set this. */

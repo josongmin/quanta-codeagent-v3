@@ -357,6 +357,10 @@ const ALLOW_HASH_ID_CAPS: ReadonlySet<string> = new Set([
   "SHORT_ID_LEN",
   // array-length cap on git-porcelain lines (ticket-11 worktree dirty-exit list)
   "UNCOMMITTED_LIST_CAP",
+  // array-length cap on rg result lines (jun-24 forward-localize per-symbol file
+  // list) — the `.slice(0, CAP)` bounds the NUMBER of whole `string[]` lines, never
+  // cuts inside one. See runner/batch/eval/forward-localize-trace.ts:96.
+  "PER_SYMBOL_FILE_CAP",
 ])
 
 /** ALLOWLIST 2 — BURN-DOWN. Pre-existing GENUINE text-truncation sites that
@@ -369,10 +373,8 @@ const ALLOW_HASH_ID_CAPS: ReadonlySet<string> = new Set([
 const ALLOW_BURNDOWN: ReadonlySet<string> = new Set([
   "llm/cache-control-audit/analyzer.ts:SAMPLE_CHARS",
   "mcp/isolated-client.ts:MAX_RESULT_CHARS",
-  "mcp/client.ts:MAX_RESULT_CHARS",
   "tool/output-spill.ts:HEAD_CHARS",
   "agent/shadow-verify-adapters/check-lsp-test.ts:TEST_TAIL_CAP",
-  "agent/dispatch.ts:STDERR_TAIL_CAP",
   "agent/issue-hint/extract-errors.ts:MAX_MSG_LEN",
   "agent/side-agent-runner.ts:SUMMARY_MAX",
   "mcp/resources/notifications.ts:RESOURCE_UPDATED_MAX_URI_CHARS",

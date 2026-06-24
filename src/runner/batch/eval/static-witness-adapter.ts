@@ -46,6 +46,7 @@
  */
 
 import { normalizePublicIssueText } from "@/shared"
+import { byteCompare } from "@/shared/byte-compare"
 import { dedupeWitnesses, makeStaticWitness, type StaticWitness } from "./static-witness"
 
 export interface StaticWitnessProviderInput {
@@ -207,7 +208,7 @@ const overrideFamilyWitnesses = (
   }
   const out: StaticWitness[] = []
   for (const [symbol, rawFiles] of [...bySymbol.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0]),
+    byteCompare(a[0], b[0]),
   )) {
     const files = [...new Set(rawFiles)].sort()
     if (files.length < 2) continue
@@ -283,7 +284,7 @@ const uniqueDefinerWitnesses = (
   }
   const out: StaticWitness[] = []
   for (const [symbol, rawFiles] of [...bySymbol.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0]),
+    byteCompare(a[0], b[0]),
   )) {
     const files = [...new Set(rawFiles)]
     if (files.length !== 1) continue
@@ -318,7 +319,7 @@ const producerConsumerWitnesses = (facts: readonly FileFacts[]): StaticWitness[]
   }
   const out: StaticWitness[] = []
   for (const [symbol, rawProducers] of [...definers.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0]),
+    byteCompare(a[0], b[0]),
   )) {
     const producers = [...new Set(rawProducers)]
     if (producers.length !== 1) continue
@@ -364,9 +365,9 @@ const registrationCallbackWitnesses = (facts: readonly FileFacts[]): StaticWitne
     .flatMap((f) => f.registrations.map((r) => ({ ...r, site: f.file })))
     .sort(
       (a, b) =>
-        a.registrar.localeCompare(b.registrar) ||
-        a.callback.localeCompare(b.callback) ||
-        a.site.localeCompare(b.site),
+        byteCompare(a.registrar, b.registrar) ||
+        byteCompare(a.callback, b.callback) ||
+        byteCompare(a.site, b.site),
     )
   for (const { registrar, callback, site } of sites) {
     const impls = implFile.get(callback) ?? []
@@ -407,7 +408,7 @@ const legacySiblingWitnesses = (input: StaticWitnessProviderInput): StaticWitnes
   }
   const out: StaticWitness[] = []
   for (const [symbol, fileSet] of [...bySymbol.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0]),
+    byteCompare(a[0], b[0]),
   )) {
     const files = [...fileSet].sort()
     if (files.length < 2) continue

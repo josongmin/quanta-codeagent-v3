@@ -85,6 +85,7 @@ export interface RuntimeContextSnapshot {
   readonly admissibility?: AgentConfig["admissibility"]
   readonly planExitPort?: AgentConfig["planExitPort"]
   readonly userInputPort?: AgentConfig["userInputPort"]
+  readonly backgroundConsentPort?: AgentConfig["backgroundConsentPort"]
   readonly conversationCheckpoint?: AgentConfig["conversationCheckpoint"]
   readonly responsesContinuation?: AgentConfig["responsesContinuation"]
   readonly fork?: AgentConfig["fork"]
@@ -133,6 +134,7 @@ export type RuntimeContextPatch = Partial<
     | "admissibility"
     | "planExitPort"
     | "userInputPort"
+    | "backgroundConsentPort"
     | "conversationCheckpoint"
     | "responsesContinuation"
     | "fork"
@@ -214,6 +216,7 @@ export type RuntimeBootstrapOverlay = {
   readonly shellSnapshot?: AgentConfig["shellSnapshot"]
   readonly summarizerLlm?: NonNullable<AgentConfig["compaction"]>["summarizerLlm"]
   readonly userInputPort?: AgentConfig["userInputPort"]
+  readonly backgroundConsentPort?: AgentConfig["backgroundConsentPort"]
   /** ADR-0428 jun-02 wire — socket-level egress proxy config. When set, the
    *  base carries `networkProxy` so `runAgent` constructs the live
    *  `LoopbackEgressProxy` and threads `proxyEnv` into the bash-tool child

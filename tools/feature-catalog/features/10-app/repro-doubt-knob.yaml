@@ -30,7 +30,7 @@ evidence:
   code:
     - src/runner/knobs/knobs/repro-doubt.ts
     - src/config/knob-inventory.ts
-  adrs: []
+  adrs: [14]
   tests:
     unit:
       - tests/unit/repro-doubt-guard.test.ts

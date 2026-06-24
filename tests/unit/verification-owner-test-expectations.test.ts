@@ -125,6 +125,32 @@ describe("verification owner test expectations", () => {
     ])
   })
 
+  test("T2 issue-symbol ranking is token-aware: id does not match invalid", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_invalid_message_noise():",
+        '    assert str(exc.value) == "invalid widget state"',
+        "def test_id_message_signal():",
+        '    assert str(exc.value) == "id must be positive"',
+      ].join("\n"),
+    )
+
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+      issueSymbols: ["id"],
+      maxExpectations: 1,
+    })
+
+    expect(facts).toEqual([
+      "pkg/tests/test_widget.py::test_id_message_signal exact/public literal: id must be positive",
+    ])
+  })
+
   test("T2: a STALE message in a comment / docstring is NOT mined as an exact literal (no wrong-steer)", async () => {
     const sandbox = mkSandbox()
     const testDir = join(sandbox, "pkg/tests")
@@ -145,6 +171,29 @@ describe("verification owner test expectations", () => {
     expect(facts.join(" ")).toContain("the correct current message")
     expect(facts.join(" ")).not.toContain("OLD WRONG MESSAGE")
     expect(facts.join(" ")).not.toContain("ANOTHER STALE ONE")
+  })
+
+  test("ROUND-5 regression: a stale message in an INLINE trailing comment is NOT mined; a `#` inside a real literal survives", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_inline():",
+        '    assert str(e) == "the real message"  # was "STALE INLINE MESSAGE"',
+        "def test_hash_literal():",
+        '    assert color == "uses color #fff hex here"',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    expect(facts.join(" ")).toContain("the real message")
+    expect(facts.join(" ")).not.toContain("STALE INLINE MESSAGE")
+    // A '#' inside a genuine quoted literal must be preserved (not treated as a comment).
+    expect(facts.join(" ")).toContain("uses color #fff hex here")
   })
 
   test("T2 fallback is OFF without localizedOwnerFiles ⇒ byte-identical command-only behavior (no false discovery)", async () => {
@@ -190,26 +239,34 @@ describe("verification owner test expectations", () => {
     expect(facts.join(" ")).toContain("the real error message")
   })
 
-  test("MAJOR-B regression: a SINGLE-LINE triple-quoted message VALUE is still mined (not dropped as a docstring)", async () => {
+  test("DOCUMENTED LIMITATION: triple-quoted message VALUES are NOT mined (rare shape; stripped to kill the docstring false-steer class) while adjacent SINGLE-quoted strings ARE", async () => {
+    // Settled design after the audit loop: all triple-quoted spans are dropped (a
+    // false expectation from a docstring is worse than a missed rare value). The
+    // REAL astropy-13033 shape uses adjacent r"..." SINGLE-quoted strings, which are
+    // mined; a triple-quoted assertion message is a documented recall gap.
     const sandbox = mkSandbox()
     const testDir = join(sandbox, "pkg/tests")
     mkdirSync(testDir, { recursive: true })
     writeFileSync(
       join(testDir, "test_widget.py"),
       [
-        "def test_a():",
-        '    with pytest.raises(ValueError, match="""expected long message here"""):',
+        "def test_triple():",
+        '    assert str(exc.value) == """a triple quoted message here"""',
+        "def test_adjacent():",
+        "    with pytest.raises(",
+        '        ValueError, match=(r"the real expected "',
+        '                           r"adjacent-string message")):',
         "        do()",
-        "def test_b():",
-        '    assert str(exc.value) == """the only expected error message"""',
       ].join("\n"),
     )
     const facts = await extractVerificationOwnerTestExpectations({
       sandbox,
       ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
     })
-    expect(facts.join(" ")).toContain("expected long message here")
-    expect(facts.join(" ")).toContain("the only expected error message")
+    // The adjacent single-quoted (r"...") message — the real 13033 shape — is mined.
+    expect(facts.join(" ")).toContain("the real expected adjacent-string message")
+    // The triple-quoted value is the accepted recall gap (no false steer either).
+    expect(facts.join(" ")).not.toContain("a triple quoted message here")
   })
 
   test("MAJOR-1 regression: a BARE single-line docstring whose prose contains 'assert'/'match=' is NOT mined; the real message survives the cap", async () => {
@@ -233,6 +290,73 @@ describe("verification owner test expectations", () => {
     })
     expect(facts.join(" ")).toContain("the real expected message")
     expect(facts.join(" ")).not.toContain("widget stays immutable")
+  })
+
+  test("T2 triple scanner ignores triple tokens inside ordinary strings before stripping docstrings", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_msg():",
+        '    pattern = \'literal triple token: """\'',
+        '    """assert str(e) == "STALE DOCSTRING MESSAGE" """',
+        '    assert str(e) == "REAL MESSAGE AFTER STRING TOKEN"',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    expect(facts.join(" ")).toContain("REAL MESSAGE AFTER STRING TOKEN")
+    expect(facts.join(" ")).not.toContain("STALE DOCSTRING MESSAGE")
+  })
+
+  test("T2 unterminated triple span drops fake asserts after the open span", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_msg():",
+        '    assert str(e) == "REAL BEFORE UNTERMINATED"',
+        '    detail = """this string never closes',
+        '    assert str(e) == "FAKE INSIDE UNTERMINATED"',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    expect(facts.join(" ")).toContain("REAL BEFORE UNTERMINATED")
+    expect(facts.join(" ")).not.toContain("FAKE INSIDE UNTERMINATED")
+  })
+
+  test("T2 single public test file can use the total expectation cap, not the two-fact diversity cap", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_a():",
+        '    assert str(e) == "FIRST REAL MESSAGE"',
+        "def test_b():",
+        '    assert str(e) == "SECOND REAL MESSAGE"',
+        "def test_c():",
+        '    assert str(e) == "THIRD REAL MESSAGE"',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+      maxExpectations: 4,
+    })
+    expect(facts.join(" ")).toContain("FIRST REAL MESSAGE")
+    expect(facts.join(" ")).toContain("SECOND REAL MESSAGE")
+    expect(facts.join(" ")).toContain("THIRD REAL MESSAGE")
   })
 
   test("M2 regression: an in-string bracket does NOT over-join the next test (no cross-test literal mis-attribution)", async () => {

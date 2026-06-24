@@ -10,7 +10,8 @@
  * orchestrator / closure-diagnostics read AFTER `runAgent` returns:
  *   - `lastVerifyCmd`  — the validator re-exec target (bash / test_runner),
  *   - `firstEditFile` + `turnsToFirstEdit` — T-202 owner-match / localize latency,
- *   - `editCount`      — F6 churn signal (#10914-class over-editing).
+ *   - `editCount`      — F6 attempted-edit churn signal (#10914-class over-editing),
+ *   - `sourceAppliedEditCount` — successful SOURCE edits for capture diagnostics.
  *
  * With a `NullStream` downstream (a non-observed run) the tap emits zero new
  * bytes, so the default-OFF posture stays byte-identical.
@@ -20,6 +21,9 @@ import { isVerifyOutputFailing, isVerifySignalCommand, mutatingToolKind } from "
 import { isTestFilePath } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { normalizeRepoPath } from "./impacted-test-discovery"
+
+type ToolCallEvent = Extract<AgentEvent, { type: "tool_call" }>
+type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>
 
 /** Agent reproduction scaffolding — kept in sync with `snapshot.ts` REPRO_SCAFFOLD_RE
  *  (the source-only-diff SSOT). These never survive into the source patch, so an
@@ -101,9 +105,15 @@ export class BenchStreamTap implements StreamPort {
   /** Count of file-mutating tool_calls across the run (churn). */
   editCount = 0
   /** Count of mutating tool_calls that targeted a SOURCE file (not tests/scratch).
-   *  Drives the capture-failure classification so a test/scratch-only run is never
-   *  misread as a fork-worktree source desync. */
+   *  Attempt/churn signal only: a later tool_result still decides whether the
+   *  edit actually landed. */
   sourceEditCount = 0
+  /** Count of file-mutating tool_results that succeeded. Failed/denied/blocked
+   *  edit attempts must not create a false `lost-edits` capture diagnosis. */
+  appliedEditCount = 0
+  /** Successful SOURCE edit count. This is the only edit counter safe for
+   *  done-time source-capture classification. */
+  sourceAppliedEditCount = 0
   private currentTurn = 0
   /** tool_call ids whose invocation was a VERIFY (test_runner / test-like bash),
    *  awaiting their `tool_result` to decide pass/fail. Only populated when
@@ -115,6 +125,8 @@ export class BenchStreamTap implements StreamPort {
    *  authoritative for what actually ran. This prevents denied or non-verify
    *  bash calls from poisoning the validator re-exec target. */
   private readonly pendingVerifyCmd = new Set<string>()
+  private readonly pendingEdits = new Set<string>()
+  private readonly pendingSourceEdits = new Set<string>()
   private verifySeq = 0
   /**
    * @param downstream  pass-through sink (NullStream for non-observed runs).
@@ -139,46 +151,72 @@ export class BenchStreamTap implements StreamPort {
     }
     return false
   }
+
+  private handleToolCall(event: ToolCallEvent): void {
+    this.trackVerifyCall(event)
+    this.trackEditCall(event)
+  }
+
+  private trackVerifyCall(event: ToolCallEvent): void {
+    if (!this.isVerifyCall(event.name, event.input)) return
+    this.pendingVerifyCmd.add(event.id)
+    if (this.onVerifyPass !== undefined) this.pendingVerify.add(event.id)
+  }
+
+  private trackEditCall(event: ToolCallEvent): void {
+    const editPath = editTargetOf(event.name, event.input)
+    if (editPath === undefined) return
+    this.editCount += 1
+    const isSource = isSourceEditPath(editPath)
+    if (isSource) this.sourceEditCount += 1
+    this.pendingEdits.add(event.id)
+    if (isSource) this.pendingSourceEdits.add(event.id)
+    if (this.firstEditFile !== undefined) return
+    this.firstEditFile = editPath
+    this.turnsToFirstEdit = this.currentTurn
+  }
+
+  private handleToolResult(event: ToolResultEvent): void {
+    this.trackAppliedEditResult(event)
+    this.trackVerifyResult(event)
+  }
+
+  private trackAppliedEditResult(event: ToolResultEvent): void {
+    const pendingEdit = this.pendingEdits.delete(event.id)
+    const pendingSourceEdit = this.pendingSourceEdits.delete(event.id)
+    if (!pendingEdit || !event.ok) return
+    this.appliedEditCount += 1
+    if (pendingSourceEdit) this.sourceAppliedEditCount += 1
+  }
+
+  private trackVerifyResult(event: ToolResultEvent): void {
+    // P0 — a VERIFY that came back passing marks the CURRENT tree as a
+    // verified-green candidate. `ok` = the runner executed; the output check
+    // catches "exited 0 but tests failed" (same SSOT the verify-guard uses).
+    const hasVerifyCmdCall = this.pendingVerifyCmd.delete(event.id)
+    const hasAuthoritativeVerifyCmd =
+      hasVerifyCmdCall && typeof event.executedCommand === "string" && event.executedCommand !== ""
+    if (hasAuthoritativeVerifyCmd) {
+      this.lastVerifyCmd = event.executedCommand
+    }
+    if (
+      this.onVerifyPass !== undefined &&
+      this.pendingVerify.delete(event.id) &&
+      hasAuthoritativeVerifyCmd &&
+      event.ok &&
+      !isVerifyOutputFailing(event.name, undefined, event.preview)
+    ) {
+      this.onVerifyPass(this.verifySeq++)
+    }
+  }
+
   emit(event: AgentEvent): void {
     if (event.type === "turn_start") {
       this.currentTurn = event.turn
     } else if (event.type === "tool_call") {
-      if (this.isVerifyCall(event.name, event.input)) {
-        this.pendingVerifyCmd.add(event.id)
-      }
-      if (this.onVerifyPass !== undefined && this.isVerifyCall(event.name, event.input)) {
-        this.pendingVerify.add(event.id)
-      }
-      const editPath = editTargetOf(event.name, event.input)
-      if (editPath !== undefined) {
-        this.editCount += 1
-        if (isSourceEditPath(editPath)) this.sourceEditCount += 1
-        if (this.firstEditFile === undefined) {
-          this.firstEditFile = editPath
-          this.turnsToFirstEdit = this.currentTurn
-        }
-      }
+      this.handleToolCall(event)
     } else if (event.type === "tool_result") {
-      // P0 — a VERIFY that came back passing marks the CURRENT tree as a
-      // verified-green candidate. `ok` = the runner executed; the output check
-      // catches "exited 0 but tests failed" (same SSOT the verify-guard uses).
-      const hasVerifyCmdCall = this.pendingVerifyCmd.delete(event.id)
-      const hasAuthoritativeVerifyCmd =
-        hasVerifyCmdCall &&
-        typeof event.executedCommand === "string" &&
-        event.executedCommand !== ""
-      if (hasAuthoritativeVerifyCmd) {
-        this.lastVerifyCmd = event.executedCommand
-      }
-      if (this.onVerifyPass !== undefined && this.pendingVerify.delete(event.id)) {
-        if (
-          hasAuthoritativeVerifyCmd &&
-          event.ok &&
-          !isVerifyOutputFailing(event.name, undefined, event.preview)
-        ) {
-          this.onVerifyPass(this.verifySeq++)
-        }
-      }
+      this.handleToolResult(event)
     } else if (event.type === "error") {
       this.lastErrorMessage = event.message
     }

@@ -31,7 +31,7 @@ import {
  *   - CONFIG_WRITABLE_KEYS (frontend) === CONFIG_ALLOWED_KEYS (daemon)
  *
  * The SSOT is the daemon. To change the wire shape: edit `src/protocol/session/`
- * (and `src/apps/web-daemon/server.ts` for config keys) FIRST, then re-mirror
+ * (and `src/apps/web-daemon/server/http.ts` for config keys) FIRST, then re-mirror
  * the frontend copies until this test is green again.
  */
 
@@ -49,7 +49,7 @@ const FRONTEND_SLASH_KNOBS_PATH = join(
   REPO_ROOT,
   "apps/web-frontend/src/components/slash-knobs.ts",
 )
-const DAEMON_SERVER_PATH = join(REPO_ROOT, "src/apps/web-daemon/server.ts")
+const DAEMON_CONFIG_HTTP_PATH = join(REPO_ROOT, "src/apps/web-daemon/server/http.ts")
 
 const ESCALATION_CARD_PATH = join(
   REPO_ROOT,
@@ -344,7 +344,7 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
       "CONFIG_WRITABLE_KEYS",
     )
     const daemonKeys = extractSetLiterals(
-      readText(DAEMON_SERVER_PATH),
+      readText(DAEMON_CONFIG_HTTP_PATH),
       "CONFIG_ALLOWED_KEYS",
     )
 

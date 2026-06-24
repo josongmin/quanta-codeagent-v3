@@ -131,7 +131,7 @@ const seedToken = async (dir: string, refresh = REFRESH_SECRET): Promise<void> =
   await writeToken(chatgptTokenPath(dir), {
     access_token: "at",
     refresh_token: refresh,
-    expires_at: "2030-01-01T00:00:00.000Z",
+    expires_at: "2099-01-01T00:00:00.000Z",
     plan_type: "pro",
     account_id: "acct-1",
   })
@@ -333,7 +333,7 @@ describe("/logout revoke wiring (knob-gated, NO-THROW)", () => {
     await writeToken(chatgptTokenPath(dir), {
       access_token: "at",
       refresh_token: "",
-      expires_at: "2030-01-01T00:00:00.000Z",
+      expires_at: "2099-01-01T00:00:00.000Z",
     })
     const { fetchPort, calls } = makeFetch({ kind: "ok" })
     const cmd = buildLogoutCmd({

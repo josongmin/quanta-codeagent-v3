@@ -31,7 +31,7 @@ evidence:
     - src/shared/test-path.ts
     - src/agent/dispatch.ts
     - src/config/knob-inventory.ts
-  adrs: []
+  adrs: [536]
   tests:
     unit:
       - tests/unit/dispatch-test-scope-guard-hellgate.test.ts

@@ -55,7 +55,7 @@ evidence:
     - src/runner/batch/eval/posture/knob-module.ts
     - src/apps/bench/preset.ts
     - src/runner/knobs/presets.ts
-  adrs: []
+  adrs: [14, 535]
   tests:
     unit:
       - tests/unit/adaptive-controller-hellgate.test.ts

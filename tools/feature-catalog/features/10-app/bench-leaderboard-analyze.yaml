@@ -31,8 +31,9 @@ evidence:
     - src/apps/bench/analyze/verdicts.ts
     - tools/leaderboard-dashboard/gen-knob-catalog.ts
     - tools/leaderboard-dashboard/server.ts
-  adrs: []
+  adrs: [536]
   tests:
-    unit: []
+    unit:
+      - tests/unit/bench-leaderboard-analyze-hellgate.test.ts
     integration: []
     contract: []

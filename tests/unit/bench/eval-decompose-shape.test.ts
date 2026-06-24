@@ -11,7 +11,7 @@
  *      that does nothing — patch is "", passed:false, but the shape is fixed).
  */
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -221,6 +221,34 @@ describe("eval/ sub-slice decompose — module surface", () => {
       "+q",
     ].join("\n")
     expect(sourceOnlyDiff(diff)).toBe(diff)
+  })
+
+  test("withGitSnapshot restores canonical repro scaffold after base clean without capturing it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "eval-repro-preserve-"))
+    const timeoutMs = 10_000
+    const git = async (args: readonly string[]) => {
+      const r = await execArgv([...GIT_ARGV, ...args], dir, timeoutMs)
+      expect(r.code).toBe(0)
+      return r
+    }
+    try {
+      writeFileSync(join(dir, "pkg.py"), "VALUE = 1\n")
+      await git(["init", "-q", "."])
+      await git(["add", "pkg.py"])
+      await git(["commit", "-q", "-m", "base"])
+      const base = trimOut(await git(["rev-parse", "HEAD"]))
+      writeFileSync(join(dir, "reproduce_issue.py"), "print('repro')\n")
+
+      const patch = await withGitSnapshot(dir, timeoutMs, base, async () => {
+        expect(readFileSync(join(dir, "reproduce_issue.py"), "utf8")).toBe("print('repro')\n")
+      })
+
+      expect(patch).toBe("")
+      const staged = await git(["diff", "--cached", "--name-only"])
+      expect(staged.stdout.trim()).toBe("")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

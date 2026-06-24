@@ -53,6 +53,7 @@ const mockSpawn = (opts: { rateLimited?: Set<string>; eventLog?: string[] } = {}
   }
   const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
     calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+    if (cmd === "curl") return ok("9.9.9.9")
     if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
       const runId =
         (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "unknown"
@@ -159,6 +160,7 @@ describe("T-3 pool account-aware scheduler", () => {
     const ok = (s: string): SpawnResult => ({ code: 0, stdout: s, stderr: "" })
     const fn: SpawnFn = async (cmd, args, o) => {
       calls.push({ cmd, args: [...args], ...(o?.input !== undefined ? { input: o.input } : {}) })
+      if (cmd === "curl") return ok("9.9.9.9")
       if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
         const runId =
           (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"
@@ -279,6 +281,7 @@ describe("T-3 pool account-aware scheduler", () => {
       resolveTerminateStarted = resolve
     })
     const fn: SpawnFn = async (cmd, args, o) => {
+      if (cmd === "curl") return ok("9.9.9.9")
       if (cmd === "ssh" && args.some((a) => a.includes("cli.ts run"))) {
         const runId =
           (args[args.length - 1] ?? "").match(/~\/runs\/([^/]+)\/instances\.jsonl/)?.[1] ?? "x"

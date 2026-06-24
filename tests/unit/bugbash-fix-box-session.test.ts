@@ -205,7 +205,7 @@ describe("#24 stripToAccessToken whitelist keeps needed fields, never secrets", 
     refresh_token: "REFRESH-super-secret-long-lived",
     id_token: "IDTOK-secret",
     account_id: "acct-123",
-    expires_at: "2026-06-24T00:00:00Z",
+    expires_at: "2099-01-01T00:00:00Z",
     plan_type: "pro",
     last_refresh: "2026-06-19T00:00:00Z",
   })
@@ -216,7 +216,7 @@ describe("#24 stripToAccessToken whitelist keeps needed fields, never secrets", 
     // loader-required + drives the pre-refresh skip. All MUST survive.
     expect(shipped.access_token).toBe("ACCESS-xyz")
     expect(shipped.account_id).toBe("acct-123")
-    expect(shipped.expires_at).toBe("2026-06-24T00:00:00Z")
+    expect(shipped.expires_at).toBe("2099-01-01T00:00:00Z")
   })
 
   test("NEVER ships the long-lived refresh_token / id_token (only REDACTED)", () => {

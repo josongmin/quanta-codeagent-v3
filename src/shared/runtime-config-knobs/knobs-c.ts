@@ -94,6 +94,13 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     describe: "Bench artifacts root override.",
   },
   {
+    envKey: "QUANTA_BENCH_RESULTS_DIR",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    describe: "Bench report mirror directory override; off/0 disables the canonical mirror.",
+  },
+  {
     envKey: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",
     kind: "string",
     default: "",
@@ -121,6 +128,22 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     group: "tool",
     describe:
       "LSP strict-ready/warm readiness-probe budget (ms); default 90000. Only used on the LSP grounding path.",
+  },
+  {
+    envKey: "QUANTA_BASH_AUTO_BACKGROUND",
+    kind: "enum",
+    default: "background",
+    group: "tool",
+    describe:
+      "Default bash timeout behavior: background (default, ships ON, Claude-Code-style) detaches a command past its deadline into bash_await/bash_kill instead of killing it; kill restores legacy SIGTERM-on-timeout; prompt asks for one-keystroke consent before detaching.",
+  },
+  {
+    envKey: "QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS",
+    kind: "int",
+    default: undefined,
+    group: "tool",
+    describe:
+      "Optional default deadline for bash auto-background detachment; absent uses the bash tool default.",
   },
   {
     envKey: "QUANTA_RUN_ID",
@@ -164,6 +187,13 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     default: undefined,
     group: "bench",
     describe: "SWE-bench image namespace.",
+  },
+  {
+    envKey: "QUANTA_SWEBENCH_REPO_CACHE",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    describe: "SWE-bench source repo bare-mirror cache override.",
   },
   {
     envKey: "QUANTA_SWEBENCH_FORCE_REBUILD",

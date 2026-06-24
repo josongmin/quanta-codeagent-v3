@@ -1,3 +1,4 @@
+import { sliceWholeChars } from "@/shared"
 import type { McpMediaBlock, McpToolAnnotations, McpToolDef } from "../types"
 
 /** Max chars of joined tool-result text we hand back from `callTool`. A
@@ -126,5 +127,5 @@ export const extractMedia = (content: ContentBlock[] | undefined): McpMediaBlock
 export const capResultText = (text: string): string => {
   if (text.length <= MAX_RESULT_CHARS) return text
   const omitted = text.length - MAX_RESULT_CHARS
-  return `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated: ${omitted} bytes omitted]`
+  return `${sliceWholeChars(text, MAX_RESULT_CHARS)}\n[truncated: ${omitted} bytes omitted]`
 }

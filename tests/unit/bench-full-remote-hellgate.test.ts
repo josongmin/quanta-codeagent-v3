@@ -46,7 +46,7 @@ const FULL_AUTH = JSON.stringify({
   refresh_token: "REFRESH-super-secret-long-lived",
   id_token: "IDTOK-secret",
   account_id: "acct-123",
-  expires_at: "2026-06-24T00:00:00Z",
+  expires_at: "2099-01-01T00:00:00Z",
 })
 
 const TEMP_DIRS = new Set<string>()
@@ -119,7 +119,7 @@ describe("stripToAccessToken (security crux)", () => {
     const parsed = JSON.parse(out) as Record<string, unknown>
     expect(parsed.access_token).toBe("ACCESS-xyz")
     expect(parsed.account_id).toBe("acct-123")
-    expect(parsed.expires_at).toBe("2026-06-24T00:00:00Z")
+    expect(parsed.expires_at).toBe("2099-01-01T00:00:00Z")
     // TEETH: the loader requires refresh_token/id_token fields, so they're present
     // — but as REDACTED placeholders, NEVER the real long-lived secret values.
     expect(parsed.refresh_token).not.toBe("REFRESH-super-secret-long-lived")
@@ -279,6 +279,17 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       (c) => c.cmd === "ssh" && c.args.some((a) => /cat ~\/(?:runs\/[^/]+\/)?run\.log\b/.test(a)),
     )
     expect(fetchedRunLog).toBe(true)
+  })
+
+  test("ALWAYS fetches the observe archive before terminating (trajectory forensics)", async () => {
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const fetchedObserve = calls.some(
+      (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("tar -C ~/observe -cf - .")),
+    )
+    expect(fetchedObserve).toBe(true)
   })
 
   test("market: default is SPOT; onDemand:true drops the spot market option", async () => {

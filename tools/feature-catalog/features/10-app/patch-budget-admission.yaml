@@ -35,7 +35,7 @@ evidence:
     - src/runner/knobs/knobs/patch-budget.ts
     - src/runner/knobs/knobs/patch-budget-strict.ts
     - src/runner/knobs/presets.ts
-  adrs: []
+  adrs: [117]
   tests:
     unit:
       - tests/unit/patch-budget.test.ts

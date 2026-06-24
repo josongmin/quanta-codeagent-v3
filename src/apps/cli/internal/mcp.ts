@@ -48,7 +48,7 @@ import {
 import type { Metrics, StructuredLogger } from "@/observability"
 import { parseEnvFlag } from "@/runner/assemble"
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
-import { logger, quantaHomeDir, runtimeConfig } from "@/shared"
+import { errMessage, logger, quantaHomeDir, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import { mcpResourcesTools, type ResourcesHandle, type Tool } from "@/tool"
 
@@ -360,7 +360,7 @@ export const readMcpConfig = async (
     })
     return []
   } catch (e) {
-    slog.warn("mcp.config.error", { path, error: (e as Error).message })
+    slog.warn("mcp.config.error", { path, error: errMessage(e) })
     return []
   }
 }
@@ -443,7 +443,7 @@ export const resolveMcpLaunchPolicy = async (
       deniedServers: resolved.mcpDeniedServers,
     }
   } catch (e) {
-    slog.warn("mcp.governance.resolve_failed", { error: (e as Error).message })
+    slog.warn("mcp.governance.resolve_failed", { error: errMessage(e) })
     return undefined
   }
 }

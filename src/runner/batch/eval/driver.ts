@@ -63,6 +63,7 @@ import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
 import {
+  byteCompare,
   errMessage,
   filesFromUnifiedDiff,
   foldGroundingReceipts,
@@ -86,6 +87,7 @@ import type {
   BenchReproTestTelemetry,
   Instance,
   InstanceResult,
+  OwnerWideningTelemetry,
   ReproOracleCalibration,
 } from "../types"
 import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
@@ -108,6 +110,7 @@ import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { coeditFamilyCoverageCandidate } from "./family-coverage-coedit"
+import { traceForwardLocalizeOwners } from "./forward-localize-trace"
 import { validateGoldPatch } from "./gold-sanity"
 import {
   applyBenchKnobs,
@@ -152,7 +155,6 @@ import {
   materializeBuildEnv,
   withCandidatePatch,
 } from "./rematerialize"
-import { traceForwardLocalizeOwners } from "./forward-localize-trace"
 import { runRepairRounds } from "./repair/index"
 import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import {
@@ -222,6 +224,7 @@ import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { createSessionScopedSignal, withSessionScopedSignal } from "./session-signal"
+import { normalizeRepoPath } from "./impacted-test-discovery"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessStructuralOwnerCandidates } from "./static-witness"
 import {
@@ -397,6 +400,9 @@ const SIBLING_COMPLETION_STEER =
   "contain BOTH the primary file AND every coupled file; dropping either one " +
   "fails the hidden tests. Verify both before you stop."
 
+const BASH_VERIFY_MODE_STEER =
+  '- Tool mode: when calling bash for any test, reproducer, or verification command, set mode:"write". Reserve bash mode:"read" for passive inspection only (ls/rg/cat/git diff); read mode rejects verification runtimes instead of running them under a read-only sandbox.'
+
 const SWEBENCH_DIRECTIVE = [
   "",
   "",
@@ -420,6 +426,7 @@ const SWEBENCH_DIRECTIVE = [
   "  existing test(s) most specific to the changed code AND your reproduction",
   "  of the issue. If anything fails, iterate. Do NOT stop right after an edit",
   "  without running tests — an unverified edit is the #1 cause of failure.",
+  BASH_VERIFY_MODE_STEER,
   "- Keep the final diff minimal and isolated to the fix.",
   "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
   "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
@@ -460,6 +467,7 @@ const SWEBENCH_DIRECTIVE_LEAN_FULL = [
   "- Test-driven: reproduce the issue with a small script, fix it, then verify",
   "  with your reproducer AND by finding and running the repository's own",
   "  relevant regression tests.",
+  BASH_VERIFY_MODE_STEER,
 ].join("\n")
 
 const SWEBENCH_DIRECTIVE_LEAN_REPRO_ONLY = [
@@ -467,6 +475,7 @@ const SWEBENCH_DIRECTIVE_LEAN_REPRO_ONLY = [
   "- If useful, reproduce the issue with a small script and verify with that",
   "  focused reproducer. Do NOT run the repository test suite, pytest, tox, or",
   "  broad regression sweeps yourself; the grader owns full verification.",
+  BASH_VERIFY_MODE_STEER,
 ].join("\n")
 
 const SWEBENCH_DIRECTIVE_LEAN_NOEXEC = [
@@ -541,6 +550,7 @@ const SWEBENCH_DIRECTIVE_REPRO_ONLY = [
   "  demonstrates the bug directly. Do NOT run the repository test suite,",
   "  pytest, tox, or broad regression sweeps yourself; the grader owns full",
   "  verification in the correct environment.",
+  BASH_VERIFY_MODE_STEER,
   "- Keep the final diff minimal and isolated to the fix.",
   "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
   "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
@@ -887,7 +897,7 @@ const dominantBinOf = (rels: Iterable<string>): BenchLspProbeTarget | undefined 
     if (
       best === undefined ||
       info.count > best.count ||
-      (info.count === best.count && bin.localeCompare(best.bin) < 0)
+      (info.count === best.count && byteCompare(bin, best.bin) < 0)
     ) {
       best = { bin, rel: info.rel, count: info.count }
     }
@@ -1031,6 +1041,15 @@ const rerouteLocalizedOwnerSurface = (
     ...(prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? []),
   ])
 
+const ownerWideningTelemetryOf = (args: {
+  readonly owners: readonly string[]
+  readonly sources: readonly ("repair_escalation" | "forward_localize")[]
+  readonly path: OwnerWideningTelemetry["path"]
+}): OwnerWideningTelemetry | undefined =>
+  args.owners.length === 0
+    ? undefined
+    : { owners: args.owners, sources: args.sources, path: args.path }
+
 const adaptiveRepairEscalationDecision = (args: {
   readonly prepared: Pick<
     PreparedAttemptContext,
@@ -1100,7 +1119,10 @@ export const adaptiveNextPassOwners = async (args: {
   readonly forwardLocalize: boolean
   readonly sandbox: string
   readonly timeoutMs: number
-}): Promise<readonly string[]> => {
+}): Promise<{
+  readonly owners: readonly string[]
+  readonly telemetry: OwnerWideningTelemetry | undefined
+}> => {
   const escalationOwners = repairEscalationFollowupOwners(args)
   const forwardLocalizeOwners = args.forwardLocalize
     ? await traceForwardLocalizeOwners({
@@ -1110,11 +1132,26 @@ export const adaptiveNextPassOwners = async (args: {
         alreadyLocalized: rerouteLocalizedOwnerSurface(args.prepared),
       })
     : []
-  return cleanUniqueList([...escalationOwners, ...forwardLocalizeOwners])
+  const owners = cleanUniqueList([...escalationOwners, ...forwardLocalizeOwners])
+  return {
+    owners,
+    telemetry: ownerWideningTelemetryOf({
+      owners,
+      sources: [
+        ...(escalationOwners.length > 0 ? (["repair_escalation"] as const) : []),
+        ...(forwardLocalizeOwners.length > 0 ? (["forward_localize"] as const) : []),
+      ],
+      path: "adaptive_reroute",
+    }),
+  }
 }
 
 export const maybeRunRepairEscalationFollowup = async <
-  P extends { readonly patch: string; readonly validated?: boolean; readonly primaryFalseGreen?: boolean },
+  P extends {
+    readonly patch: string
+    readonly validated?: boolean
+    readonly primaryFalseGreen?: boolean
+  },
 >(args: {
   readonly instance: Instance
   readonly deps: RunInstanceDeps
@@ -1129,6 +1166,7 @@ export const maybeRunRepairEscalationFollowup = async <
   readonly phase: P
   readonly reran: boolean
   readonly widenedOwners: readonly string[]
+  readonly telemetry: OwnerWideningTelemetry | undefined
 }> => {
   const widenedOwners = repairEscalationFollowupOwners(args)
   if (widenedOwners.length === 0) {
@@ -1137,6 +1175,7 @@ export const maybeRunRepairEscalationFollowup = async <
       phase: args.phase,
       reran: false,
       widenedOwners,
+      telemetry: undefined,
     }
   }
   const prepare = args.prepare ?? prepareAttemptContext
@@ -1155,6 +1194,11 @@ export const maybeRunRepairEscalationFollowup = async <
     phase: nextPhase,
     reran: true,
     widenedOwners,
+    telemetry: ownerWideningTelemetryOf({
+      owners: widenedOwners,
+      sources: ["repair_escalation"],
+      path: "single_pass_followup",
+    }),
   }
 }
 
@@ -1404,7 +1448,7 @@ const resolveChaMultisiteContext = async (args: {
   }
   const candidates = cleanUniqueList(args.localizeCandidates)
     .filter((file) => file.endsWith(".py"))
-    .slice(0, CHA_MULTISITE_MAX_FILES)
+    .filter((_, index) => index < CHA_MULTISITE_MAX_FILES)
   const repairTargets: ChaRepairTarget[] = []
   let steer: string | undefined
   for (const targetRelFile of candidates) {
@@ -1489,6 +1533,7 @@ export const REPRO_HINT_MESSAGE = [
   "After your fix, run `python reproduce_issue.py` under the project env.",
   "It must go green: all assertions pass and the process exits 0.",
   "A failing assertion or non-zero exit means the bug is still present or the repro could not run cleanly.",
+  "If it fails with TypeError/AttributeError/wrong argument count, inspect existing source/tests and fix the reproducer call shape before treating it as bug proof.",
 ].join("\n")
 
 export interface PrepareReproTestDetailedResult {
@@ -1952,9 +1997,8 @@ export const composeWithReproHint = (
     : composePromptPrelude({ issueHint: hint, reproHint, baseText })
 
 const repoLocalVerifierHint = (instance: Instance): string => {
-  if (instance.swebench === undefined) return ""
-  const testCmd = instance.testCmd.trim()
-  if (testCmd.length === 0) return ""
+  const testCmd = agentVisibleBenchVerifierCommand(instance)
+  if (instance.swebench === undefined || testCmd === undefined) return ""
   return [
     `Repository-local verifier for this task: ${testCmd}`,
     "When running repo tests, prefer this command (or a narrower variant of it) over bare host-global pytest/python.",
@@ -1962,6 +2006,26 @@ const repoLocalVerifierHint = (instance: Instance): string => {
 }
 
 type BenchTestRunnerInput = Parameters<typeof testRunnerTool.execute>[0]
+
+const DATASET_VERIFIER_EXPOSE_ENV = "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER"
+
+const isSynthesizedDatasetVerifierCommand = (cmd: string): boolean =>
+  cmd.startsWith("PYTEST_ADDOPTS=") ||
+  cmd.includes(" pytest -x --no-header") ||
+  cmd.includes(" python tests/runtests.py --settings=test_sqlite --parallel=1")
+
+const agentVisibleBenchVerifierCommand = (instance: Instance): string | undefined => {
+  const cmd = instance.testCmd.trim()
+  if (cmd === "") return undefined
+  if (
+    instance.swebench !== undefined &&
+    isSynthesizedDatasetVerifierCommand(cmd) &&
+    !gateOn(process.env, DATASET_VERIFIER_EXPOSE_ENV)
+  ) {
+    return undefined
+  }
+  return cmd
+}
 
 const hasExplicitBenchTestRunnerCommand = (
   input: BenchTestRunnerInput,
@@ -1980,8 +2044,8 @@ const hasBenchTestRunnerPath = (input: BenchTestRunnerInput): boolean =>
  *  repo-local verify must go through explicit `bash`, whose exact command is
  *  already captured separately by the bench stream tap. */
 const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | undefined => {
-  const authoritative = instance.testCmd.trim()
-  if (authoritative === "") return undefined
+  const authoritative = agentVisibleBenchVerifierCommand(instance)
+  if (authoritative === undefined) return undefined
   return {
     ...testRunnerTool,
     extractShellCommand: (input: BenchTestRunnerInput): string =>
@@ -2019,8 +2083,8 @@ const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
 export const benchVerifyAuthorityCommandsOf = (
   instance: Instance,
 ): readonly string[] | undefined => {
-  const cmd = instance.testCmd.trim()
-  return cmd === "" ? undefined : [cmd]
+  const cmd = agentVisibleBenchVerifierCommand(instance)
+  return cmd === undefined ? undefined : [cmd]
 }
 
 const applyLiveOverrides = (envKeys: readonly string[]): void => {
@@ -2029,8 +2093,8 @@ const applyLiveOverrides = (envKeys: readonly string[]): void => {
   }
 }
 
-const buildBenchRegistry = (instance: Instance, opt: BenchPosture): ToolRegistry => {
-  const lspNavTools = opt.lspNav ? lspNavToolList() : []
+const buildBenchRegistry = (instance: Instance, opt: BenchPosture, cwd: string): ToolRegistry => {
+  const lspNavTools = opt.lspNav ? lspNavToolList(() => cwd) : []
   const astGrepTools = gateOn(process.env, "QUANTA_AST_GREP") ? [astGrepTool as Tool] : []
   const findRefsTools = gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
     ? [findReferencesTool as Tool]
@@ -2256,7 +2320,7 @@ export const buildConfig = (
   applyLiveOverrides(opt.liveOverrides)
   // DIP factory: bench driver runs against the default port surface; the
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
-  const registry = buildBenchRegistry(instance, opt)
+  const registry = buildBenchRegistry(instance, opt, sandbox)
   const permission: PermissionContext = { mode: "acceptEdits" }
   // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
   // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
@@ -2406,6 +2470,8 @@ interface Phase {
   selectionTelemetry?: SelectionTelemetry
   /** OPC-07 — stage packets actually used during this phase. */
   llmEvidence?: LlmEvidenceArtifacts
+  /** Structural owner widening actually consumed before this phase ran. */
+  ownerWidening?: OwnerWideningTelemetry
 }
 
 /**
@@ -3124,6 +3190,7 @@ const generateSelectionCandidate = async (args: {
       turns: phase.turns,
       files: filesFromPatch(phase.patch),
       baseValidatedRed: args.baseValidatedRed,
+      sandboxPath: candidateSandbox,
       ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
       ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
       ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
@@ -3379,20 +3446,36 @@ const selectionGenerationFailurePhase = (args: {
       "agent stopped with error before verification: " +
       `verify-select candidate generation failed for all ${args.n} candidates` +
       (sample === "" ? "" : ` (${sample})`),
-    selectionTelemetry: summarizeSelection(args.result),
+    selectionTelemetry:
+      orderedErrors.length === 0
+        ? summarizeSelection(args.result)
+        : {
+            ...summarizeSelection(args.result),
+            generationFailureSamples: orderedErrors.slice(0, 2),
+          },
     ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
   }
 }
 
 const selectionPhaseResultOf = (args: {
   readonly result: Awaited<ReturnType<typeof runSelection>>
+  readonly generationErrors: Map<number, string>
   readonly totalTurns: number
   readonly calibration: ReproOracleCalibration | undefined
 }): Phase => {
+  const orderedErrors = [...args.generationErrors.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, error]) => error)
   const phase: Phase = {
     patch: args.result.winner?.patch ?? "",
     turns: args.totalTurns,
-    selectionTelemetry: summarizeSelection(args.result),
+    selectionTelemetry:
+      orderedErrors.length === 0
+        ? summarizeSelection(args.result)
+        : {
+            ...summarizeSelection(args.result),
+            generationFailureSamples: orderedErrors.slice(0, 2),
+          },
     ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
   }
   if (args.result.terminalCandidate?.stopReason !== undefined)
@@ -3401,6 +3484,43 @@ const selectionPhaseResultOf = (args: {
     phase.agentError = args.result.terminalCandidate.agentError
   if (args.result.terminalCandidate?.editCount !== undefined)
     phase.editCount = args.result.terminalCandidate.editCount
+  return phase
+}
+
+// P4 RECORD assembly: build the terminal {@link Phase} from a completed
+// {@link runSelection}. Prefers the dedicated `proofCalibration` (soft `positive`
+// path only ran that one) over the hard-mode `calibration`; this is EVAL-ONLY
+// telemetry, never an inference-time gate. Returns the generation-failure phase
+// when every candidate failed to generate, else the winner phase (with any
+// accumulated LLM evidence attached). Extracted verbatim from runSelectionPhase.
+const finalizeSelectionPhase = (args: {
+  readonly result: Awaited<ReturnType<typeof runSelection>>
+  readonly generationErrors: Map<number, string>
+  readonly totalTurns: number
+  readonly n: number
+  readonly proofCalibration: ReproOracleCalibration
+  readonly calibration: ReproOracleCalibration
+  readonly selectionLlmEvidence: Partial<LlmEvidenceArtifacts>
+}): Phase => {
+  const reportCalibration = args.proofCalibration.available
+    ? args.proofCalibration
+    : args.calibration
+  const generationFailure = selectionGenerationFailurePhase({
+    result: args.result,
+    generationErrors: args.generationErrors,
+    totalTurns: args.totalTurns,
+    n: args.n,
+    calibration: reportCalibration,
+  })
+  if (generationFailure !== undefined) return generationFailure
+  const phase = selectionPhaseResultOf({
+    result: args.result,
+    generationErrors: args.generationErrors,
+    totalTurns: args.totalTurns,
+    calibration: reportCalibration,
+  })
+  if (Object.keys(args.selectionLlmEvidence).length > 0)
+    phase.llmEvidence = args.selectionLlmEvidence
   return phase
 }
 
@@ -3580,29 +3700,15 @@ const runSelectionPhase = async (
       },
     }),
   })
-  // P4 RECORD: surface the CANONICAL repro oracle's gold false-negative measurement
-  // so a campaign self-measures the FN rate. In hard mode `calibration` already
-  // carries it (same canonical set + goldVotes/goldK); in the soft `positive` path
-  // only the dedicated `proofCalibration` ran, so prefer it when available. This is
-  // eval-only telemetry, NOT an inference-time gate.
-  const reportCalibration = selectionState.proofCalibration.available
-    ? selectionState.proofCalibration
-    : selectionState.calibration
-  const generationFailure = selectionGenerationFailurePhase({
+  return finalizeSelectionPhase({
     result,
     generationErrors,
     totalTurns,
     n,
-    calibration: reportCalibration,
+    proofCalibration: selectionState.proofCalibration,
+    calibration: selectionState.calibration,
+    selectionLlmEvidence,
   })
-  if (generationFailure !== undefined) return generationFailure
-  const phase = selectionPhaseResultOf({
-    result,
-    totalTurns,
-    calibration: reportCalibration,
-  })
-  if (Object.keys(selectionLlmEvidence).length > 0) phase.llmEvidence = selectionLlmEvidence
-  return phase
 }
 
 const okResult = (
@@ -4207,12 +4313,22 @@ export const prepareAttemptContext = async (
   const taskFiles = instance.goldPatch ? filesFromPatch(instance.goldPatch) : undefined
   const lspGrounding = await verifyStrictPresetLspGrounding(posture, sandbox, taskFiles, signal)
   const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm, posture)
+  // T3 — forward-localize consumers enter as low-score ADDITIONAL owner candidates
+  // (they widen the set; ranking still prefers backward-localized owners). score 0
+  // keeps them below any positively-ranked stage-1 file. DEDUP against the stage-1
+  // set so a consumer already backward-localized is not double-listed (which would
+  // skew owner-coverage counts and waste a candidate-family slot).
+  const stage1Localized = stage1FilesOf(hintRepro.localizeCandidates)
+  // DEDUP by NORMALIZED path: stage1FilesOf keeps the raw localize-candidate paths
+  // while forwardLocalizeOwners are already `normalizeRepoPath`'d, so a raw-vs-raw
+  // Set compare silently never matches (audit R2). Normalize BOTH sides of the
+  // membership test so a consumer already backward-localized is truly dropped.
+  const stage1Seen = new Set(stage1Localized.map((entry) => normalizeRepoPath(entry.file)))
   const stage1Files = [
-    ...stage1FilesOf(hintRepro.localizeCandidates),
-    // T3 — forward-localize consumers enter as low-score ADDITIONAL owner
-    // candidates (they widen the set; ranking still prefers backward-localized
-    // owners). score 0 keeps them below any positively-ranked stage-1 file.
-    ...(forwardLocalizeOwners ?? []).map((file) => ({ file, score: 0 })),
+    ...stage1Localized,
+    ...(forwardLocalizeOwners ?? [])
+      .filter((file) => !stage1Seen.has(normalizeRepoPath(file)))
+      .map((file) => ({ file, score: 0 })),
   ]
   const ownerResolved = await resolveOwnerResolved({
     instance,
@@ -4949,6 +5065,9 @@ const attachSelectionAndClosureArtifacts = (args: {
   if (args.phase.selectionTelemetry !== undefined) {
     args.extra.selectionTelemetry = args.phase.selectionTelemetry
   }
+  if (args.phase.ownerWidening !== undefined) {
+    args.extra.ownerWidening = args.phase.ownerWidening
+  }
   attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
   const hygiene =
@@ -4979,7 +5098,7 @@ const attachSelectionAndClosureArtifacts = (args: {
     // also feeds the adaptive reroute seam (`adaptiveRepairEscalationOwners`)
     // before the next `prepareAttemptContext`, but assigning it to `args.extra`
     // here remains report-only because the phase has already finished.
-    args.extra.repairEscalation = adaptiveRepairEscalationDecision({
+    const repairEscalation = adaptiveRepairEscalationDecision({
       prepared: {
         posture,
         closureSession,
@@ -4988,6 +5107,7 @@ const attachSelectionAndClosureArtifacts = (args: {
       },
       phase: args.phase,
     })
+    if (repairEscalation !== undefined) args.extra.repairEscalation = repairEscalation
   }
 }
 
@@ -5245,7 +5365,7 @@ const runV5AdaptiveAttempt = async (args: {
     env: process.env,
     modelCall: buildRouterModelCall(deps, signal),
     runPhase: async ({ state, posture }) => {
-      const widenedOwners = await adaptiveNextPassOwners({
+      const widening = await adaptiveNextPassOwners({
         prepared: finalPrepared,
         phase: finalPhase,
         forwardLocalize: posture.forwardLocalize,
@@ -5259,7 +5379,7 @@ const runV5AdaptiveAttempt = async (args: {
         signal,
         posture,
         state,
-        widenedOwners,
+        widening.owners,
       )
       const nextPhase = await runMainPhase({
         instance,
@@ -5269,6 +5389,7 @@ const runV5AdaptiveAttempt = async (args: {
         wiring: w,
         prepared: nextPrepared,
       })
+      if (widening.telemetry !== undefined) nextPhase.ownerWidening = widening.telemetry
       finalPrepared = nextPrepared
       finalPhase = nextPhase
       const packet = buildAdaptivePhasePacket({
@@ -5417,6 +5538,7 @@ export const runInstanceOnce = async (
     phase = followup.phase
     prepared = followup.prepared
     if (prepared.reproTest !== undefined) reproTest = prepared.reproTest
+    if (followup.telemetry !== undefined) phase.ownerWidening = followup.telemetry
     const terminal = await maybeValidateTerminalResult({
       instance,
       phase,

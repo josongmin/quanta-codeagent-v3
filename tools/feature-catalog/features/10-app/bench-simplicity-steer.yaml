@@ -30,9 +30,10 @@ evidence:
   code:
     - src/runner/batch/eval/driver.ts
     - src/config/knob-inventory.ts
-  adrs: []
+  adrs: [117]
   tests:
-    unit: []
+    unit:
+      - tests/unit/bench-prompt-steer-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
