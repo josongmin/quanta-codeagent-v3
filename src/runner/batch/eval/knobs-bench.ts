@@ -408,6 +408,14 @@ export interface BenchPosture {
    *  `outcome === "reproduced"` filter is byte-identical. Threaded into
    *  `selectReproTest`'s `pairedControl` option by the bench driver. */
   readonly pairedControl: boolean
+  /** G1 (jun-24 cross-vendor diversity): route verify-select candidate i to
+   *  vendor lane (i mod V) over the injected `deps.llmLanes` provider-distinct
+   *  LLM ports, decorrelating the N-candidate generation set so the selector
+   *  picks across vendors/families instead of N correlated samples of one model.
+   *  Default-OFF ⇒ every candidate stays on `deps.llm` (byte-identical). The
+   *  resolution helper is `resolveLaneLlm` (driver.ts); the wire-site read is
+   *  `buildConfig` (`laneLlm ?? deps.llm`). */
+  readonly modelLaneDiversity: boolean
 }
 
 const isTrue = (v: unknown): v is true => v === true
@@ -543,7 +551,8 @@ export const benchPostureFromState = (
   // QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
   // QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER,
   // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
-  // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL.
+  // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL,
+  // QUANTA_BENCH_MODEL_LANE_DIVERSITY.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -561,6 +570,7 @@ export const benchPostureFromState = (
   const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
+  const modelLaneDiversity = readKnobValue(state, "model-lane-diversity", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
     lspNav,
@@ -614,5 +624,6 @@ export const benchPostureFromState = (
     pairedControl,
     chaMultisiteSteer,
     round0Minimal,
+    modelLaneDiversity,
   }
 }
