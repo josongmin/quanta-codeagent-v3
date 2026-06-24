@@ -273,6 +273,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
+    envKey: "QUANTA_BENCH_MODEL_LANE_DIVERSITY",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (G1, jun-24 cross-vendor diversity): route verify-select candidate i to vendor lane (i mod V) over the injected provider-distinct LLM lanes (deps.llmLanes, built from existing createLLM adapters — no new transport), decorrelating the candidate set so the selector picks across vendors/families instead of N correlated samples of one model. lane = index mod laneCount (pure structure, no answer-key). Default-OFF (unset OR ≤1 lane ⇒ every candidate on deps.llm, byte-identical).",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_CLOSURE_REPAIR",
     kind: "int",
     default: undefined,

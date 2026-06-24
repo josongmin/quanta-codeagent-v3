@@ -7,7 +7,7 @@ import { extractIssueHint } from "@/agent/issue-hint"
 import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
-import type { Message } from "@/llm"
+import type { LLMPort, Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
 import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
@@ -25,6 +25,7 @@ import {
   BenchObserver,
   type BenchPosture,
   benchOptIns,
+  benchPostureFromState,
   benchVerifyAuthorityCommandsOf,
   buildAdaptivePhasePacket,
   buildReproVoteValidate,
@@ -62,6 +63,7 @@ import {
   readKnobValue,
   resetReproVoteOutcomes,
   resolveBenchKnobs,
+  resolveLaneLlm,
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
@@ -449,6 +451,7 @@ const runAgentPhase = async (
   closureHint: string | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  laneLlm?: LLMPort,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: AgentOutcome["reason"] | undefined
@@ -512,6 +515,8 @@ const runAgentPhase = async (
           closureHint,
           postureOverride,
           stateOverride,
+          undefined,
+          laneLlm,
         ),
         deps.runtimeFactory,
       )
@@ -769,6 +774,17 @@ const generateSelectionCandidate = async (args: {
   const candidateSandbox = isolated
     ? await forkSandbox(args.instance.id, args.sandbox)
     : args.sandbox
+  // G1 cross-vendor diversity: resolve the per-candidate generator lane from the
+  // SAME posture buildConfig reads, so candidate `index` is served by vendor lane
+  // (index mod V) when the model-lane-diversity knob is on AND ≥2 lanes were
+  // injected. Resolves to deps.llm otherwise (byte-identical single-vendor path).
+  const lanePosture =
+    args.postureOverride ??
+    benchPostureFromState(
+      args.stateOverride ?? resolveBenchKnobs({ envVars: process.env }),
+      process.env,
+    )
+  const laneLlm = resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index)
   try {
     const phase = await runAgentPhase(
       args.instance,
@@ -781,6 +797,7 @@ const generateSelectionCandidate = async (args: {
       args.mergeHint(args.seed),
       args.postureOverride,
       args.stateOverride,
+      laneLlm,
     )
     args.addTurns(phase.turns)
     // T5 — a fork-worktree capture desync (edits made, 0-byte diff on a CLEAN
@@ -1137,7 +1154,10 @@ const runSelectionExecutor = async (
   const selectionRiskGate = buildSelectionRiskGate({
     structural: args.riskGate,
     llmMode: args.llmRiskGateMode,
-    llm: args.deps.llm,
+    // G1 cross-vendor diversity: route the JUDGE to vendor lane 1 (distinct from
+    // the cand0 generator on lane 0) when the model-lane-diversity posture is ON
+    // and ≥2 lanes were injected; otherwise byte-identical (deps.llm).
+    llm: resolveLaneLlm(args.deps, args.postureOverride?.modelLaneDiversity ?? false, 1),
     problemStatement: args.instance.problemStatement,
     ownerFiles: args.selectionInputs.ownerFiles,
     ownerEvidence: args.selectionOwnerEvidence,

@@ -247,6 +247,18 @@ export {
 
 export interface RunInstanceDeps {
   llm: LLMPort
+  /**
+   * G1 cross-vendor diversity (jun-24) — OPTIONAL ordered list of provider-
+   * DISTINCT LLM ports (the dual-provider seam). When the `model-lane-diversity`
+   * posture is ON and this list has length ≥ 2, the verify-select driver routes
+   * candidate `i` to lane `i mod llmLanes.length` (see {@link resolveLaneLlm}),
+   * decorrelating the generation set across vendors/families instead of running
+   * N correlated samples of `llm`. Each entry is a fully-wired `LLMPort` built
+   * from the existing `createLLM` adapters (NO new transport). ABSENT or length
+   * ≤ 1 ⇒ every candidate stays on `llm` (byte-identical single-vendor path).
+   * The composition root (index.ts) builds this from the configured providers.
+   */
+  llmLanes?: readonly LLMPort[]
   /** Hard ceiling on agent turns per attempt. */
   maxTurns: number
   /** Wall-clock budget (ms) for the whole instance. */
@@ -2300,6 +2312,11 @@ export const buildConfig = (
   stateOverride?: BenchKnobState,
   /** Optional dynamic concrete multi-site steer naming sibling override sites. */
   chaMultisiteSteer?: string,
+  /** G1 cross-vendor diversity — OPTIONAL provider-distinct LLM port for THIS
+   *  candidate's lane. When provided it OVERRIDES `deps.llm` as the agent's
+   *  generator (resolved by {@link resolveLaneLlm} from the candidate index +
+   *  the `model-lane-diversity` posture). Absent ⇒ `deps.llm` (byte-identical). */
+  laneLlm?: LLMPort,
 ) => {
   // ADR-0015 LSP-nav: opt-in via `QUANTA_LSP_TOOLS=full` (same gate as CLI) OR
   // the bench-only `QUANTA_BENCH_LSP=1`. When the language-server binary
@@ -2372,7 +2389,11 @@ export const buildConfig = (
   const messages = userPromptMessages(text)
   const budgetMeter = deps.budgetMeterFactory?.()
   const baseConfig = {
-    llm: deps.llm,
+    // G1 cross-vendor diversity: the per-candidate lane port (when the driver
+    // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
+    // the model-lane-diversity knob is a REAL provider swap at the wire site —
+    // not a tag. Absent ⇒ deps.llm (byte-identical single-vendor path).
+    llm: laneLlm ?? deps.llm,
     registry,
     stream,
     permission,
@@ -2619,6 +2640,7 @@ const runAgentPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
+  laneLlm?: LLMPort,
 ): Promise<Phase> => {
   let turns = 0
   let stopReason: StopReason | undefined
@@ -2664,6 +2686,7 @@ const runAgentPhase = async (
               postureOverride,
               stateOverride,
               chaMultisiteSteer,
+              laneLlm,
             ),
             sessionSignal.signal,
           ),
@@ -3137,6 +3160,32 @@ const resolveSelectionReproConsensus = async (
   }
 }
 
+/**
+ * G1 cross-vendor diversity — resolve the LLM port that should GENERATE
+ * verify-select candidate `index`. Pure (no I/O), so the lane→provider routing
+ * is unit-testable in isolation.
+ *
+ * Routing rule: `lanes[index mod lanes.length]` — index-modulo only, NO issue /
+ * gold / answer-key inspection. Diversity comes from the structural fan-out, not
+ * from peeking at the task. The mapping is the SAME stable round-robin every run.
+ *
+ * Returns `deps.llm` UNCHANGED (the single-vendor path) whenever:
+ *   - the `model-lane-diversity` posture is OFF, OR
+ *   - `deps.llmLanes` is absent / has fewer than 2 distinct lanes
+ * so an unconfigured environment is byte-identical to the pre-feature driver.
+ */
+export const resolveLaneLlm = (
+  deps: Pick<RunInstanceDeps, "llm" | "llmLanes">,
+  modelLaneDiversity: boolean,
+  index: number,
+): LLMPort => {
+  if (!modelLaneDiversity) return deps.llm
+  const lanes = deps.llmLanes
+  if (lanes === undefined || lanes.length < 2) return deps.llm
+  const lane = lanes[((index % lanes.length) + lanes.length) % lanes.length]
+  return lane ?? deps.llm
+}
+
 const generateSelectionCandidate = async (args: {
   readonly index: number
   readonly seed: string | undefined
@@ -3160,6 +3209,14 @@ const generateSelectionCandidate = async (args: {
   const candidateSandbox = isolated
     ? await forkSandbox(args.instance.id, args.sandbox)
     : args.sandbox
+  // G1 cross-vendor diversity: resolve the per-candidate generator lane from the
+  // SAME posture buildConfig reads, so candidate `index` is served by vendor lane
+  // (index mod V) when the model-lane-diversity knob is on AND ≥2 lanes were
+  // injected. Resolves to deps.llm otherwise (byte-identical single-vendor path).
+  const lanePosture =
+    args.postureOverride ??
+    benchPostureFromState(args.stateOverride ?? resolveBenchKnobs({ envVars: process.env }), process.env)
+  const laneLlm = resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index)
   try {
     const phase = await runAgentPhase(
       args.instance,
@@ -3173,6 +3230,7 @@ const generateSelectionCandidate = async (args: {
       args.postureOverride,
       args.stateOverride,
       args.chaMultisiteSteer,
+      laneLlm,
     )
     args.addTurns(phase.turns)
     const generationError = selectionGenerationErrorOf({
@@ -3208,6 +3266,11 @@ const resolveSelectionPhasePorts = async (args: {
   readonly selectorMode: BenchPosture["selectorMode"]
   readonly riskGate: boolean
   readonly llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"]
+  /** G1 cross-vendor diversity: when ON (and ≥2 lanes injected) the LLM
+   *  risk-gate JUDGE is routed to vendor lane 1 — a DIFFERENT vendor than the
+   *  cand0 generator (lane 0) — so the judge is decorrelated from the generator
+   *  it scores. OFF ⇒ judge stays on `deps.llm` (byte-identical). */
+  readonly modelLaneDiversity: boolean
   readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
   readonly verifySelectRepro: BenchPosture["verifySelectRepro"]
   readonly verifySelectProofRequired: boolean
@@ -3275,7 +3338,9 @@ const resolveSelectionPhasePorts = async (args: {
   const selectionRiskGate = buildSelectionRiskGate({
     structural: args.riskGate,
     llmMode: args.llmRiskGateMode,
-    llm: args.deps.llm,
+    // G1: route the JUDGE to vendor lane 1 (distinct from the cand0 generator on
+    // lane 0) when diversity is ON, so generation and judging are cross-vendor.
+    llm: resolveLaneLlm(args.deps, args.modelLaneDiversity, 1),
     problemStatement: args.instance.problemStatement,
     ownerFiles: args.selectionOwnerCandidates,
     ownerEvidence: args.selectionOwnerEvidence,
@@ -3610,6 +3675,7 @@ const runSelectionPhase = async (
     selectorMode,
     riskGate,
     llmRiskGateMode,
+    modelLaneDiversity: postureOverride?.modelLaneDiversity ?? false,
     verifySelectRegression,
     regressionMaxTests,
     verifySelectRepro,
