@@ -113,15 +113,6 @@ const FAMILY_MISSING_PLAN = {
   includeReproFailureTrace: true,
   includeOracleFailureSeed: true,
 }
-const CLEAN_DRIFT_PLAN = {
-  summary:
-    "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
-  directive:
-    "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
-  includeFamilyRepair: false,
-  includeReproFailureTrace: false,
-  includeOracleFailureSeed: true,
-}
 const CONTRACT_ONLY_PLAN = {
   summary:
     "Selector feedback: at least one generated candidate achieved structural/public contract coverage, but no candidate produced positive executed public proof.",
@@ -131,10 +122,6 @@ const CONTRACT_ONLY_PLAN = {
   includeReproFailureTrace: false,
   includeOracleFailureSeed: true,
 }
-
-// Reject-reason constants from selection-gates.ts (verbatim).
-const CLEAN_DRIFT_REJECT_REASON =
-  "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)"
 
 const mweRed = (id: string): ScoredEntry =>
   entry(cand(id, { mweReceipt: { state: "candidate_red" } as MweProofReceipt }))
@@ -194,15 +181,6 @@ describe("FIX 1 — selectRepairPlan ordered rule table", () => {
     expect(plan).toEqual(FAMILY_MISSING_PLAN)
   })
 
-  it("branch 5 (cleanDrift): every patched candidate rejected as multi-source drift", () => {
-    const scored = [
-      entry(cand("a"), { verdict: verdict([CLEAN_DRIFT_REJECT_REASON]) }),
-      entry(cand("b"), { verdict: verdict([CLEAN_DRIFT_REJECT_REASON]) }),
-    ]
-    const plan = selectRepairPlan(ctx({ scored, patched: scored }))
-    expect(plan).toEqual(CLEAN_DRIFT_PLAN)
-  })
-
   it("branch 6 (contract-only): proofRequired, no proof_positive, contract-only evidence present", () => {
     const e = entry(cand("a"), { requiredContractsSatisfied: 1 })
     const plan = selectRepairPlan(
@@ -214,20 +192,6 @@ describe("FIX 1 — selectRepairPlan ordered rule table", () => {
       }),
     )
     expect(plan).toEqual(CONTRACT_ONLY_PLAN)
-  })
-
-  it("PRIORITY: input matching branch 2 AND cleanDrift returns branch 2 (earlier rule wins)", () => {
-    // Each entry is BOTH mwe candidate_red (branch 2) AND clean-drift rejected.
-    const both = (id: string): ScoredEntry =>
-      entry(cand(id, { mweReceipt: { state: "candidate_red" } as MweProofReceipt }), {
-        verdict: verdict([CLEAN_DRIFT_REJECT_REASON]),
-      })
-    const scored = [both("a"), both("b")]
-    const plan = selectRepairPlan(ctx({ scored, patched: scored }))
-    // Sanity: cleanDrift WOULD match this input in isolation.
-    expect(scored.every((s) => s.verdict.reasons.includes(CLEAN_DRIFT_REJECT_REASON))).toBe(true)
-    // But branch 2 is earlier in the table, so it wins.
-    expect(plan).toEqual(MWE_PLAN)
   })
 
   it("no rule matches ⇒ undefined", () => {

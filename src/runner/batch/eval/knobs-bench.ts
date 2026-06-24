@@ -427,6 +427,11 @@ const isVerifySelectLlmRiskGateMode = (v: unknown): v is VerifySelectLlmRiskGate
   v === "shadow" || v === "on"
 const isSelectorMode = (v: unknown): v is SelectorModeKnob => v === "clean" || v === "research"
 
+// Bench LSP-nav precedence is intentionally asymmetric:
+//   1. resolved `lsp` knob boolean (preset + env layered)
+//   2. legacy CLI alias `QUANTA_LSP_TOOLS=full` ONLY when the knob is unset
+// So an explicit env-layer `QUANTA_BENCH_LSP=off` resolves to `false` and
+// suppresses both a preset `lsp:1` and the legacy alias.
 const resolveLspNav = (state: BenchKnobState, env: NodeJS.ProcessEnv): boolean =>
   readKnobValue(state, "lsp", isBoolean) ?? env.QUANTA_LSP_TOOLS === "full"
 
@@ -457,8 +462,10 @@ const resolveLiveOverrides = (state: BenchKnobState): string[] => {
  * Project a resolved {@link BenchKnobState} into the {@link BenchPosture}.
  *
  * @param env  used ONLY for the legacy `QUANTA_LSP_TOOLS=full` alias (the same
- *             gate the CLI uses), OR-ed with the `lsp` knob. Every other field
- *             comes from `state` so preset values flow through.
+ *             gate the CLI uses). The resolved `lsp` knob wins first, including
+ *             explicit `false`; the alias is consulted only when that knob is
+ *             unset. Every other field comes from `state` so preset values flow
+ *             through.
  */
 export const benchPostureFromState = (
   state: BenchKnobState,

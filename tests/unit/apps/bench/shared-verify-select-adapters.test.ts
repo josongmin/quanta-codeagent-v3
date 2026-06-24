@@ -12,6 +12,8 @@ const SHARED_DRIVER_SRC = readFileSync(
 describe("apps bench driver shared verify-select adapters", () => {
   test("apps driver routes verify-select ownership through the shared runner driver", () => {
     expect(APP_DRIVER_SRC).toContain('from "@/runner/batch/eval/driver"')
+    expect(APP_DRIVER_SRC).toContain("computeEffectiveProofRequired")
+    expect(APP_DRIVER_SRC).toContain("familyCoverageCoeditEnabled")
     expect(APP_DRIVER_SRC).not.toContain('from "./regression-oracle-adapter"')
     expect(APP_DRIVER_SRC).not.toContain('from "./repo-regression-discovery-adapter"')
     expect(SHARED_DRIVER_SRC).toContain('from "./regression-oracle-adapter"')

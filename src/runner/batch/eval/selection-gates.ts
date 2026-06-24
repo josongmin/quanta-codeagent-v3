@@ -31,8 +31,7 @@ import {
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
 import type { SelectionContractBundle } from "./public-contract-types"
-import type { ReproConsensusProofReceipt } from "./repair/resolved-consensus"
-import { cleanExecutableProof, hardResolvedRejected } from "./selection-proof-telemetry"
+import { hardResolvedRejected } from "./selection-proof-telemetry"
 import type {
   Candidate,
   ResolvedKofNMode,
@@ -144,39 +143,8 @@ export const staticSanityReasonsOf = async (
   return (await ports.staticSanity?.(c)) ?? []
 }
 
-export const cleanUnprovenMultiSourceDriftRisk = (args: {
-  readonly mode: SelectorMode
-  readonly candidate: Candidate
-  readonly owners: ReadonlySet<string>
-  readonly hard: HardGateSignals
-  readonly resolved: ResolvedKofNSignal | null
-  readonly mweReceipt: MweProofReceipt | undefined
-  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
-  readonly requiredContractsSatisfied: number
-  readonly contractsSatisfied: number
-}): boolean => {
-  if (args.mode !== "clean") return false
-  if (
-    cleanExecutableProof(args.resolved, args.mweReceipt, args.reproConsensusReceipt) ||
-    args.requiredContractsSatisfied > 0 ||
-    args.contractsSatisfied > 0
-  ) {
-    return false
-  }
-  const budget = analyzePatchBudget(args.candidate.patch, {
-    ownerFiles: [...args.owners],
-  }).budget
-  return budget.sourceFiles > 1
-}
-
-const CLEAN_DRIFT_REJECT_REASON =
-  "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)"
-
 const MWE_CANDIDATE_RED_REJECT_REASON =
   "hard:mweProof=candidate_red (public issue MWE still fails after patch)"
-
-const CLEAN_AUTHORITY_MISSING_REJECT_REASON =
-  "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)"
 
 const PROOF_REQUIRED_MISSING_REJECT_REASON =
   "hard:proofRequiredMissing=true (proof-required mode requires positive executed proof; safety or structural evidence alone cannot submit)"
@@ -200,18 +168,6 @@ const familyCoverageHasStructuralAuthority = (candidate: Candidate): boolean => 
   )
 }
 
-export const applyCleanDriftHardGate = (
-  verdict: CandidateVerdict,
-  risk: boolean,
-): CandidateVerdict =>
-  risk
-    ? {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, CLEAN_DRIFT_REJECT_REASON],
-      }
-    : verdict
-
 export const applyMweProofHardGate = (
   verdict: CandidateVerdict,
   mode: SelectorMode,
@@ -222,36 +178,6 @@ export const applyMweProofHardGate = (
         admissible: false,
         score: verdict.score,
         reasons: [...verdict.reasons, MWE_CANDIDATE_RED_REJECT_REASON],
-      }
-    : verdict
-
-export const cleanProofAuthorityMissing = (args: {
-  readonly mode: SelectorMode
-  readonly owners: ReadonlySet<string>
-  readonly candidate: Candidate
-  readonly hard: HardGateSignals
-  readonly resolved: ResolvedKofNSignal | null
-  readonly mweReceipt: MweProofReceipt | undefined
-  readonly reproConsensusReceipt: ReproConsensusProofReceipt | undefined
-  readonly requiredContractsSatisfied: number
-  readonly contractsSatisfied: number
-}): boolean =>
-  args.mode === "clean" &&
-  args.candidate.patch.trim() !== "" &&
-  args.owners.size === 0 &&
-  !cleanExecutableProof(args.resolved, args.mweReceipt, args.reproConsensusReceipt) &&
-  args.requiredContractsSatisfied === 0 &&
-  args.contractsSatisfied === 0
-
-export const applyCleanAuthorityHardGate = (
-  verdict: CandidateVerdict,
-  missing: boolean,
-): CandidateVerdict =>
-  missing
-    ? {
-        admissible: false,
-        score: verdict.score,
-        reasons: [...verdict.reasons, CLEAN_AUTHORITY_MISSING_REJECT_REASON],
       }
     : verdict
 
@@ -411,14 +337,8 @@ export const buildLexTiers = (
 const declaredExpectedRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(DECLARED_EXPECTED_REJECT_REASON)
 
-export const cleanDriftRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(CLEAN_DRIFT_REJECT_REASON)
-
 const mweCandidateRedRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(MWE_CANDIDATE_RED_REJECT_REASON)
-
-const cleanAuthorityMissingRejected = (verdict: CandidateVerdict): boolean =>
-  verdict.reasons.includes(CLEAN_AUTHORITY_MISSING_REJECT_REASON)
 
 const proofRequiredRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(PROOF_REQUIRED_MISSING_REJECT_REASON) ||
@@ -443,9 +363,7 @@ export const bestEffortEligible = (
   if (mode !== "clean" && entry.hard.smokeGreen === false) return false
   if (hardResolvedRejected(entry.hard.patchedResolvedKofN)) return false
   if (declaredExpectedRejected(entry.verdict)) return false
-  if (cleanDriftRejected(entry.verdict)) return false
   if (mweCandidateRedRejected(entry.verdict)) return false
-  if (cleanAuthorityMissingRejected(entry.verdict)) return false
   if (proofRequiredRejected(entry.verdict)) return false
   if (staticSanityRejected(entry.verdict)) return false
   return true

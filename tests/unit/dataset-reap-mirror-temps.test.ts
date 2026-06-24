@@ -36,6 +36,8 @@ describe("reapStaleMirrorTemps", () => {
   })
 
   it("is best-effort: a missing cache root does not throw", async () => {
-    await expect(reapStaleMirrorTemps(join(tmpdir(), "does-not-exist-xyz-123"))).resolves.toBeUndefined()
+    await expect(
+      reapStaleMirrorTemps(join(tmpdir(), "does-not-exist-xyz-123")),
+    ).resolves.toBeUndefined()
   })
 })

@@ -180,6 +180,16 @@ describe("eval/ sub-slice decompose — module surface", () => {
       "index 0000000..5555555",
       "@@ -0,0 +1 @@",
       "+assert True",
+      "diff --git a/reproduce_issue.py.pytest-report.json b/reproduce_issue.py.pytest-report.json",
+      "new file mode 100644",
+      "index 0000000..6666666",
+      "@@ -0,0 +1 @@",
+      '+{"status":"passed"}',
+      "diff --git a/__repro_0_12fc3620-8ad1-4f8f-90f0-2413027f18f8.py.pytest-report.json b/__repro_0_12fc3620-8ad1-4f8f-90f0-2413027f18f8.py.pytest-report.json",
+      "new file mode 100644",
+      "index 0000000..7777777",
+      "@@ -0,0 +1 @@",
+      '+{"status":"failed"}',
     ].join("\n")
     const out = sourceOnlyDiff(diff)
     expect(out).toContain("related_lookups.py")
@@ -189,6 +199,7 @@ describe("eval/ sub-slice decompose — module surface", () => {
     expect(out).not.toContain("__repro_3_e7b8ab35")
     expect(out).not.toContain("reproduce_issue.py")
     expect(out).not.toContain("Issue reproduced")
+    expect(out).not.toContain("pytest-report.json")
   })
 
   // teeth: a legitimate source file whose name merely CONTAINS "repro" (e.g. a

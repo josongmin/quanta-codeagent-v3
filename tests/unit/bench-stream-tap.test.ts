@@ -98,8 +98,14 @@ describe("BenchStreamTap", () => {
     tap.emit(toolCall("edit", { file_path: "/s/django/db/models/query.py" })) // SOURCE
     tap.emit(toolCall("edit", { file_path: "/s/tests/test_query.py" })) // test — not source
     tap.emit(toolCall("write", { file_path: "/s/reproduce_issue.py" })) // repro scaffold — not source
+    tap.emit(toolCall("write", { file_path: "/s/reproduce_issue.py.pytest-report.json" })) // repro sidecar — not source
+    tap.emit(
+      toolCall("write", {
+        file_path: "/s/__repro_0_12fc3620-8ad1-4f8f-90f0-2413027f18f8.py.pytest-report.json",
+      }),
+    ) // repro sidecar — not source
     tap.emit(toolCall("edit", { file_path: "django/core/management.py" })) // SOURCE (relative)
-    expect(tap.editCount).toBe(4)
+    expect(tap.editCount).toBe(6)
     expect(tap.sourceEditCount).toBe(2)
   })
 
@@ -153,8 +159,9 @@ describe("BenchStreamTap", () => {
     tap.emit(toolCall("edit", { file_path: "/s/app/tests.py" })) // django: NOT /tests/, NOT test_* ⇒ source
     tap.emit(toolCall("edit", { file_path: "/s/pkg/stubs.pyi" })) // stub ⇒ source (survives the diff)
     tap.emit(toolCall("write", { file_path: "/s/reproduce_issue.py" })) // repro scaffold ⇒ NOT source
+    tap.emit(toolCall("write", { file_path: "/s/reproduce_issue.py.pytest-report.json" })) // repro sidecar ⇒ NOT source
     tap.emit(toolCall("edit", { file_path: "/s/x/tests/test_y.py" })) // real test ⇒ NOT source
-    expect(tap.editCount).toBe(4)
+    expect(tap.editCount).toBe(5)
     expect(tap.sourceEditCount).toBe(2)
   })
 

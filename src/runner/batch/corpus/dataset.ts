@@ -16,9 +16,10 @@
  * Dependency-light per the bench brief / RFC §3.1: git runs via a tiny local
  * Bun.spawn `exec` (a copy of runner.ts's shape — NOT an import of it).
  */
+
+import { createHash, randomUUID } from "node:crypto"
 import { existsSync } from "node:fs"
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises"
-import { createHash, randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
 import { quantaHomeDir } from "@/shared/quanta-home"
@@ -150,23 +151,6 @@ const checkoutOrDeepen = async (
   }
 }
 
-/**
- * Produce a checked-out repo for `task` under `destDir` and return its path.
- * Clones `https://github.com/<repo>.git` (override the base via `repoBaseUrl`
- * so tests can clone a local path offline). If a shallow clone lacks a target
- * commit it deepens once via `git fetch`.
- *
- * T4 (env pre-prep, Part A): when `task.environmentSetupCommit` is present we
- * check it OUT FIRST. That is the upstream-designated commit carrying the
- * correct `setup.py`/`requirements*.txt` for the instance's toolchain — the
- * same commit the official SWE-bench Docker harness uses to build the env.
- * Materializing those files (pure git, always correct, no host mutation) lets
- * a later setup step install against the right manifest. We then check out
- * `base_commit` so the FINAL working tree is the canonical buggy tree the
- * agent must fix; the env-setup-commit's files survive only where base_commit
- * does not overwrite them (matching upstream semantics). When the field is
- * absent, behavior is byte-identical to before (base_commit checkout only).
- */
 /** Reap orphaned `*.git.tmp-<uuid>` bare-mirror dirs left by a clone that was
  *  SIGTERM'd before its atomic rename. AGE-GATED: only temps older than the max
  *  plausible in-flight clone are swept, so a concurrent same-repo instance's live
@@ -186,6 +170,23 @@ export const reapStaleMirrorTemps = async (repoCacheRoot: string): Promise<void>
   }
 }
 
+/**
+ * Produce a checked-out repo for `task` under `destDir` and return its path.
+ * Clones `https://github.com/<repo>.git` (override the base via `repoBaseUrl`
+ * so tests can clone a local path offline). If a shallow clone lacks a target
+ * commit it deepens once via `git fetch`.
+ *
+ * T4 (env pre-prep, Part A): when `task.environmentSetupCommit` is present we
+ * check it OUT FIRST. That is the upstream-designated commit carrying the
+ * correct `setup.py`/`requirements*.txt` for the instance's toolchain — the
+ * same commit the official SWE-bench Docker harness uses to build the env.
+ * Materializing those files (pure git, always correct, no host mutation) lets
+ * a later setup step install against the right manifest. We then check out
+ * `base_commit` so the FINAL working tree is the canonical buggy tree the
+ * agent must fix; the env-setup-commit's files survive only where base_commit
+ * does not overwrite them (matching upstream semantics). When the field is
+ * absent, behavior is byte-identical to before (base_commit checkout only).
+ */
 export const prepareTaskRepo = async (
   task: SwebenchTask,
   destDir: string,

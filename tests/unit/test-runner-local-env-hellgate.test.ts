@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { testRunnerTool } from "@/tool/test-runner"
 
-const collect = async (input: unknown, ctx: ToolContext): Promise<ToolEvent[]> => {
+const collect = async (
+  input: Parameters<typeof testRunnerTool.execute>[0],
+  ctx: ToolContext,
+): Promise<ToolEvent[]> => {
   const out: ToolEvent[] = []
   for await (const ev of testRunnerTool.execute(input, ctx)) out.push(ev)
   return out

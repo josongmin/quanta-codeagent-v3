@@ -30,11 +30,13 @@ import {
   buildReproVoteValidate,
   buildConfig as buildRunnerConfig,
   composeWithReproHint,
+  computeEffectiveProofRequired,
   DEFAULT_POLICY,
   deriveCandidateStructuralRepair,
   emitKnobsApplied,
   enumerateRepoSources,
   envPrepFailedResult,
+  familyCoverageCoeditEnabled,
   type IssueHintMode,
   knobsForReport,
   latePhaseFailureResultOf,
@@ -699,6 +701,7 @@ const resolveSelectionReproConsensus = async (
   timeoutMs: number,
   reproSources: readonly string[],
   mode: BenchPosture["verifySelectRepro"],
+  proofRequired: boolean,
 ) => {
   const reproPolicy = selectionReproPolicy(mode)
   const calibrationUnavailable = unavailableReproOracleCalibration()
@@ -708,6 +711,7 @@ const resolveSelectionReproConsensus = async (
       resolvedKofNSelectionPort: undefined,
       reproConsensusProofSelectionPort: undefined,
       calibration: calibrationUnavailable,
+      proofCalibration: calibrationUnavailable,
     }
   }
   if (reproPolicy.goldCalibrate) {
@@ -727,8 +731,17 @@ const resolveSelectionReproConsensus = async (
         timeoutMs,
       ),
       calibration,
+      proofCalibration: proofRequired ? calibration : calibrationUnavailable,
     }
   }
+  // `positive` keeps the resolvedKofN port uncalibrated, but a proof-required
+  // gate still needs gold-derived oracle truth so a broken canonical repro rail
+  // cannot withhold the correct fix.
+  const proofCalibration = proofRequired
+    ? (
+        await makeCalibratedReproConsensusPort(instance, reproSources, sandbox, timeoutMs)
+      ).calibration
+    : calibrationUnavailable
   return {
     reproPolicy,
     resolvedKofNSelectionPort: makeReproConsensusSelectionPort(
@@ -744,6 +757,7 @@ const resolveSelectionReproConsensus = async (
       timeoutMs,
     ),
     calibration: calibrationUnavailable,
+    proofCalibration,
   }
 }
 
@@ -967,17 +981,21 @@ const selectionStructuralRepairPorts = (args: SelectionPortsArgs): Partial<Selec
             signal: args.signal,
             preferredTargets: args.chaRepairTargets,
           }),
-        repairFamilyCoverage: ({ candidate, family, missingFiles }) =>
-          coeditFamilyCoverageCandidate({
-            sandbox: args.sandbox,
-            candidate,
-            family,
-            missingFiles,
-            timeoutMs: args.deps.timeoutMs,
-            baseCommit: args.instance.swebench?.baseCommit,
-            repo: args.instance.swebench?.repo,
-            preferredTargets: args.chaRepairTargets,
-          }),
+        ...(familyCoverageCoeditEnabled(process.env)
+          ? {
+              repairFamilyCoverage: ({ candidate, family, missingFiles }) =>
+                coeditFamilyCoverageCandidate({
+                  sandbox: args.sandbox,
+                  candidate,
+                  family,
+                  missingFiles,
+                  timeoutMs: args.deps.timeoutMs,
+                  baseCommit: args.instance.swebench?.baseCommit,
+                  repo: args.instance.swebench?.repo,
+                  preferredTargets: args.chaRepairTargets,
+                }),
+            }
+          : {}),
       }
     : {}
 
@@ -1020,6 +1038,7 @@ interface PreparedSelectionRuntimePorts {
   readonly smokeSelectionPort: SelectionPorts["smoke"] | undefined
   readonly mweProofSelectionPort: SelectionPorts["mweProof"] | undefined
   readonly calibration: ReproOracleCalibration
+  readonly proofCalibration: ReproOracleCalibration
 }
 
 const prepareSelectionRuntimePorts = async (args: {
@@ -1028,17 +1047,24 @@ const prepareSelectionRuntimePorts = async (args: {
   readonly timeoutMs: number
   readonly reproSources: readonly string[]
   readonly verifySelectRepro: BenchPosture["verifySelectRepro"]
+  readonly verifySelectProofRequired: boolean
   readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
   readonly selectorMode: BenchPosture["selectorMode"]
 }): Promise<PreparedSelectionRuntimePorts> => {
-  const { reproPolicy, resolvedKofNSelectionPort, reproConsensusProofSelectionPort, calibration } =
-    await resolveSelectionReproConsensus(
-      args.instance,
-      args.sandbox,
-      args.timeoutMs,
-      args.reproSources,
-      args.verifySelectRepro,
-    )
+  const {
+    reproPolicy,
+    resolvedKofNSelectionPort,
+    reproConsensusProofSelectionPort,
+    calibration,
+    proofCalibration,
+  } = await resolveSelectionReproConsensus(
+    args.instance,
+    args.sandbox,
+    args.timeoutMs,
+    args.reproSources,
+    args.verifySelectRepro,
+    args.verifySelectProofRequired,
+  )
   const discoveredRegressionPort =
     args.verifySelectRegression === "discovered"
       ? makeDiscoveredRepoRegressionPort({
@@ -1081,6 +1107,7 @@ const prepareSelectionRuntimePorts = async (args: {
         ? await prepareMweProofSelectionPort(args.instance, args.sandbox, args.timeoutMs)
         : undefined,
     calibration,
+    proofCalibration,
   }
 }
 
@@ -1117,11 +1144,12 @@ interface SelectionExecutionArgs {
 
 const optionalSelectionRunArgs = (
   args: SelectionExecutionArgs,
+  effectiveProofRequired: boolean,
 ): Partial<Parameters<typeof runSelection>[0]> => ({
   ...(args.verificationTarget !== undefined ? { verificationTarget: args.verificationTarget } : {}),
   ...(args.concurrency !== undefined ? { concurrency: args.concurrency } : {}),
   ...(args.counterfactual ? { counterfactual: true } : {}),
-  ...(args.verifySelectProofRequired ? { proofRequired: true } : {}),
+  ...(effectiveProofRequired ? { proofRequired: true } : {}),
   ...(args.selectionAuthorityContracts !== undefined
     ? { publicContracts: args.selectionAuthorityContracts }
     : {}),
@@ -1154,6 +1182,10 @@ const runSelectionExecutor = async (
           extractIssueDeclaredExpected(args.instance.problemStatement),
         )
       : undefined
+  const { effectiveProofRequired } = computeEffectiveProofRequired(
+    args.verifySelectProofRequired,
+    args.runtimePorts.proofCalibration,
+  )
   const result = await runSelection({
     n: args.n,
     problemStatement: args.instance.problemStatement,
@@ -1167,12 +1199,12 @@ const runSelectionExecutor = async (
     repairIssueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
     repairOwnerEvidence: args.selectionOwnerEvidence,
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
-    ...optionalSelectionRunArgs(args),
+    ...optionalSelectionRunArgs(args, effectiveProofRequired),
     ...(declaredExpectedPort !== undefined ? { declaredExpectedAuthority: "public" as const } : {}),
-    // T1 measurement off-switch: disable the clean-mode family-coverage veto for
-    // an A/B baseline against producer-consumer over-demand. Default ON.
-    ...(gateDisabled(process.env, "QUANTA_BENCH_FAMILY_COVERAGE")
-      ? { familyCoverageVeto: false as const }
+    // T1 family-coverage veto. Default OFF; opt-in via QUANTA_BENCH_FAMILY_COVERAGE
+    // (reverted as net-negative producer-consumer over-demand).
+    ...(gateOn(process.env, "QUANTA_BENCH_FAMILY_COVERAGE")
+      ? { familyCoverageVeto: true as const }
       : {}),
     recordLlmEvidencePacket: (packet: LlmEvidencePacket) => {
       recordLlmEvidencePacket(args.selectionLlmEvidence, packet)
@@ -1327,6 +1359,7 @@ const runSelectionPhase = async (
     timeoutMs: deps.timeoutMs,
     reproSources,
     verifySelectRepro,
+    verifySelectProofRequired,
     verifySelectRegression,
     selectorMode,
   })
@@ -1360,12 +1393,15 @@ const runSelectionPhase = async (
     chaRepairTargets: chaRepairTargets ?? [],
     runtimePorts,
   })
+  const reportCalibration = runtimePorts.proofCalibration.available
+    ? runtimePorts.proofCalibration
+    : runtimePorts.calibration
   return selectionPhaseFromResult({
     result,
     generationErrors,
     totalTurns,
     n,
-    calibration: runtimePorts.calibration,
+    calibration: reportCalibration,
     llmEvidence: selectionLlmEvidence,
   })
 }

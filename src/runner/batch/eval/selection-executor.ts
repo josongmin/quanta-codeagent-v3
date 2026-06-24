@@ -248,12 +248,13 @@ export interface RunSelectionArgs {
    *  its `false` verdict may veto in CLEAN mode. Default/`"research"` keeps the
    *  legacy behavior: the declared-expected gate never vetoes in clean mode. */
   declaredExpectedAuthority?: "public" | "research"
-  /** T1 (jun-24) measurement off-switch for the clean-mode family-coverage veto
-   *  (`hard:familyCoverageMissing`). The producer-consumer witness drives this
-   *  veto from structural call-graph evidence only (no data-flow proof that the
-   *  consumer actually breaks), so a producer-only correct fix CAN be over-demanded.
-   *  Default/undefined ⇒ veto ON (byte-identical). `false` ⇒ OFF, so the A/B
-   *  baseline can measure the over-demand cost before this is promoted. */
+  /** T1 (jun-24) clean-mode family-coverage veto (`hard:familyCoverageMissing`).
+   *  DEFAULT-OFF, opt-IN. The producer-consumer witness drove this veto from
+   *  structural call-graph evidence only (no data-flow proof that the consumer
+   *  actually breaks), so a producer-only correct fix was over-demanded. Prior
+   *  measurement concluded the veto is NET-NEGATIVE and it was reverted to opt-in:
+   *  only `true` enables it; default/undefined/`false` ⇒ veto OFF. The
+   *  relatedness/ranking credit (family rank tier, ownerCoverage) is unaffected. */
   familyCoverageVeto?: boolean
   /** OPTIONAL public-contract bundle (T-CON-10) for the clean lexicographic
    *  contract-dominance tier. When omitted, the contract tier stays empty.

@@ -244,7 +244,7 @@ describe("scaffold-absorb jun24 — T1 finding: the best-effort 'leak' is benign
     expect(r.winner?.files).toEqual(["pkg/producer.py", "pkg/consumer.py"])
   })
 
-  it("a lone incomplete producer-consumer candidate STILL submits its partial (benign — ≥ empty); the lever is regeneration not suppression", async () => {
+  it("DEFAULT-OFF: a lone incomplete producer-consumer candidate is ADMISSIBLE (veto reverted as net-negative) and submits its partial", async () => {
     const incomplete = cand({
       id: "cand-0",
       patch: patchForFiles(["pkg/producer.py"]),
@@ -259,13 +259,13 @@ describe("scaffold-absorb jun24 — T1 finding: the best-effort 'leak' is benign
       owners: new Set(["pkg/producer.py", "pkg/consumer.py"]),
       ports: { generate: genOnce(incomplete) },
     })
-    // Inadmissible (veto fires) but best-effort submits the partial — NOT empty.
-    expect(r.scored[0]?.verdict.admissible).toBe(false)
-    expect(familyMissing(r.scored[0]?.verdict.reasons)).toBe(true)
+    // Default-off ⇒ no veto: the producer-only fix is admissible and submitted.
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
+    expect(familyMissing(r.scored[0]?.verdict.reasons)).toBe(false)
     expect(r.winner?.files).toEqual(["pkg/producer.py"])
   })
 
-  it("KEPT — relatedness guard: a candidate tagged with a producer-consumer family it touches NONE of is NOT vetoed", async () => {
+  it("KEPT (opt-in) — relatedness guard: a candidate tagged with a producer-consumer family it touches NONE of is NOT vetoed", async () => {
     const mistagged = cand({
       id: "cand-0",
       patch: patchForFiles(["pkg/unrelated.py"]),
@@ -278,6 +278,9 @@ describe("scaffold-absorb jun24 — T1 finding: the best-effort 'leak' is benign
       mode: "clean",
       seeds: [undefined],
       owners: new Set(["pkg/unrelated.py"]),
+      // Veto is DEFAULT-OFF; opt-in so this exercises the relatedness guard INSIDE
+      // the veto (not the default-off short-circuit). A spurious tag must NOT veto.
+      familyCoverageVeto: true,
       ports: { generate: genOnce(mistagged) },
     })
     // Touches none of the family ⇒ spurious tag ⇒ veto suppressed ⇒ still wins.
@@ -285,9 +288,9 @@ describe("scaffold-absorb jun24 — T1 finding: the best-effort 'leak' is benign
     expect(r.winner?.files).toEqual(["pkg/unrelated.py"])
   })
 
-  it("KEPT — relatedness guard does NOT suppress a genuine miss: touching the producer but not the consumer still vetoes", async () => {
-    // Related (touches the producer) but incomplete ⇒ the veto MUST still fire.
-    // Guards against the relatedness guard over-suppressing.
+  it("KEPT (opt-in) — relatedness guard does NOT suppress a genuine miss: touching the producer but not the consumer still vetoes", async () => {
+    // Related (touches the producer) but incomplete ⇒ when the veto is OPTED-IN it
+    // MUST still fire. Guards against the relatedness guard over-suppressing.
     const related = cand({
       id: "cand-0",
       patch: patchForFiles(["pkg/producer.py"]),
@@ -300,6 +303,7 @@ describe("scaffold-absorb jun24 — T1 finding: the best-effort 'leak' is benign
       mode: "clean",
       seeds: [undefined],
       owners: new Set(["pkg/producer.py", "pkg/consumer.py"]),
+      familyCoverageVeto: true,
       ports: { generate: genOnce(related) },
     })
     expect(familyMissing(r.scored[0]?.verdict.reasons)).toBe(true)

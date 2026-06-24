@@ -51,15 +51,11 @@ import {
   sanitizeCandidatePublicContracts,
 } from "./selection-executor"
 import {
-  applyCleanAuthorityHardGate,
-  applyCleanDriftHardGate,
   applyMweProofHardGate,
   applyProofRequiredHardGate,
   applyStaticSanityHardGate,
   bestEffortEligible,
   buildLexTiers,
-  cleanProofAuthorityMissing,
-  cleanUnprovenMultiSourceDriftRisk,
   declaredExpectedMatchOf,
   earlyAcceptable,
   familyCoverageMissingHardReasons,
@@ -214,11 +210,13 @@ const scoreOne = async (
     ctx.mode,
     ctx.args.declaredExpectedAuthority === "public",
   )
-  // T1 measurement off-switch: the clean-mode family-coverage veto fires by
-  // default (byte-identical); `familyCoverageVeto === false` disables it for an
-  // A/B baseline against the producer-consumer over-demand risk. Undefined ⇒ on.
+  // T1 (jun-24): the clean-mode family-coverage veto is DEFAULT-OFF and opt-IN.
+  // Prior measurement concluded it is NET-NEGATIVE over-demand (it rejects a
+  // producer-only-correct fix from structural call-graph evidence without
+  // data-flow proof the consumer breaks), so it only fires when explicitly
+  // enabled via `familyCoverageVeto === true`. Undefined/false ⇒ OFF.
   const structuralHardReasons =
-    ctx.mode === "clean" && ctx.args.familyCoverageVeto !== false
+    ctx.mode === "clean" && ctx.args.familyCoverageVeto === true
       ? familyCoverageMissingHardReasons(sanitizedCandidate)
       : []
   const proofState = selectionProofState({
@@ -229,26 +227,13 @@ const scoreOne = async (
     reproConsensusReceipt: probed.reproConsensusReceipt,
   })
   const verdict = applyProofRequiredHardGate(
-    applyCleanAuthorityHardGate(
-      applyMweProofHardGate(
-        applyStaticSanityHardGate(baseVerdict, [
-          ...probed.staticSanityReasons,
-          ...structuralHardReasons,
-        ]),
-        ctx.mode,
-        probed.mweReceipt,
-      ),
-      cleanProofAuthorityMissing({
-        mode: ctx.mode,
-        owners: ctx.args.owners,
-        candidate: sanitizedCandidate,
-        hard: probed.hard,
-        resolved: probed.resolvedKofN,
-        mweReceipt: probed.mweReceipt,
-        reproConsensusReceipt: probed.reproConsensusReceipt,
-        requiredContractsSatisfied,
-        contractsSatisfied,
-      }),
+    applyMweProofHardGate(
+      applyStaticSanityHardGate(baseVerdict, [
+        ...probed.staticSanityReasons,
+        ...structuralHardReasons,
+      ]),
+      ctx.mode,
+      probed.mweReceipt,
     ),
     ctx.proofRequired,
     proofState,
@@ -261,30 +246,6 @@ const scoreOne = async (
     verdict,
     requiredContractsSatisfied,
     contractsSatisfied,
-  }
-}
-
-const applySetLevelCleanDriftGate = (ctx: SelectionRunContext, scored: ScoredEntry[]): void => {
-  if (ctx.mode !== "clean") return
-  // If any executable public-MWE receipt exists, the MWE tier is the stronger
-  // authority. Do not let broad-drift protection overturn a candidate_red vs
-  // no-receipt ordering; the drift gate is only for proofless sets.
-  if (scored.some((s) => s.candidate.mweReceipt !== undefined)) return
-  for (const entry of scored) {
-    entry.verdict = applyCleanDriftHardGate(
-      entry.verdict,
-      cleanUnprovenMultiSourceDriftRisk({
-        mode: ctx.mode,
-        candidate: entry.candidate,
-        owners: ctx.args.owners,
-        hard: entry.hard,
-        resolved: entry.resolvedKofN,
-        mweReceipt: entry.candidate.mweReceipt,
-        reproConsensusReceipt: entry.candidate.reproConsensusReceipt,
-        requiredContractsSatisfied: entry.requiredContractsSatisfied,
-        contractsSatisfied: entry.contractsSatisfied,
-      }),
-    )
   }
 }
 
@@ -703,7 +664,6 @@ export const finalize = async (
   const { candidates, terminalRepresentativeByFirstId } = dedupeCandidates(rawCandidates)
   const { minB, maxB } = realPatchSizeWindow(candidates)
   const scored = await scoreCandidates(ctx, candidates, minB, maxB)
-  applySetLevelCleanDriftGate(ctx, scored)
 
   const counterfactualVerdicts = counterfactualVerdictSet(ctx, scored)
   const winnerId = winnerIdOf(ctx, scored, counterfactualVerdicts.violated)

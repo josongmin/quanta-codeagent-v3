@@ -34,6 +34,7 @@ import {
   test,
 } from "bun:test"
 import type { AgentConfig } from "@/agent"
+import { ToolRegistry } from "@/tool"
 import {
   applyBenchKnobs,
   resolveBenchKnobs,
@@ -56,7 +57,10 @@ const ENV_KEY = "QUANTA_BENCH_LOCALIZE_PHASE" as const
 const baseCfg = (): AgentConfig =>
   ({
     llm: {} as never,
-    registry: {} as never,
+    // Real (empty) registry so preset-activated tool knobs (e.g. lsp) can call
+    // `registry.specs()` during apply without crashing — the test isolates the
+    // localize-phase effect, but the preset path also folds other knobs.
+    registry: new ToolRegistry([]),
     stream: {} as never,
     permission: { mode: "acceptEdits" },
     messages: [],

@@ -36,11 +36,7 @@ import {
   type VerificationTargetFact,
 } from "./llm-evidence-packet"
 import { evaluateBundle, mergeSelectionContractBundles } from "./public-contract-bundle"
-import {
-  type SelectionContractBundle,
-  renderContractAuthorityLabel,
-} from "./public-contract-types"
-import { cleanDriftRejected } from "./selection-gates"
+import { renderContractAuthorityLabel, type SelectionContractBundle } from "./public-contract-types"
 import {
   hasContractOnlyEvidence,
   reproTraceOf,
@@ -155,8 +151,6 @@ const HARD_REASON_STATE: Record<string, ProofReceiptState> = {
   proofInfraBlocked: "execution_failed",
   proofRequiredMissing: "not_run",
   staticSanity: "static_only",
-  cleanProofAuthorityMissing: "not_run",
-  unprovenMultiSourceDriftRisk: "not_run",
   mweProof: "candidate_red",
   declaredExpectedMatch: "candidate_red",
 }
@@ -219,15 +213,6 @@ const reproOracleRepairRequired = (
   )
 }
 
-const cleanDriftRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
-  const patched = scored.filter(hasNonEmptyPatch)
-  return (
-    patched.length > 0 &&
-    !patched.some((s) => s.verdict.admissible) &&
-    patched.every((s) => cleanDriftRejected(s.verdict))
-  )
-}
-
 interface MissingFamilyRepairTarget {
   readonly family: CandidateFamily
   readonly missingFiles: readonly string[]
@@ -267,7 +252,9 @@ const bestMissingFamily = (
 const familyRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
   const target = bestMissingFamily(scored)
   if (target === undefined) return undefined
-  const touchedFamilyFiles = target.touchedFiles.filter((file) => target.family.ownerFiles.includes(file))
+  const touchedFamilyFiles = target.touchedFiles.filter((file) =>
+    target.family.ownerFiles.includes(file),
+  )
   const touchedLine =
     touchedFamilyFiles.length === 0
       ? ""
@@ -285,21 +272,8 @@ const familyCoverageRepairRequired = (scored: readonly ScoredEntry[]): boolean =
 const staticSanityReasons = (entry: ScoredEntry): readonly string[] =>
   entry.verdict.reasons.filter((reason) => reason.startsWith("hard:staticSanity="))
 
-export const staticSanityInstruction = (reason: string): string => {
-  const noneMutation = /^hard:staticSanity=pythonNoneSubscriptMutation\(([^)]+)\)$/.exec(
-    reason,
-  )?.[1]
-  if (noneMutation !== undefined) {
-    return `Static sanity failure: \`${noneMutation}\` can be None before a subscript write. Regenerate so every \`${noneMutation}[...]\` mutation is protected by a non-None mapping invariant, or guard each mutation site that may observe None.`
-  }
-  const arity = /^hard:staticSanity=pythonCallbackArityMismatch\(([^:]+):(\d+)->(\d+)\)$/.exec(
-    reason,
-  )
-  if (arity !== null) {
-    return `Static sanity failure: callback \`${arity[1]}\` is registered with positional arity ${arity[3]}, but its definition accepts ${arity[2]}. Regenerate so the registration and callback signature agree exactly.`
-  }
-  return `Static sanity failure: ${reason.replace("hard:staticSanity=", "")}. Regenerate from the base tree and remove this deterministic parse-level violation without dropping the stronger structural fix.`
-}
+export const staticSanityInstruction = (reason: string): string =>
+  `Static sanity failure: ${reason.replace("hard:staticSanity=", "")}. Regenerate from the base tree and remove this deterministic parse-level violation without dropping the stronger structural fix.`
 
 export const buildStaticSanityRepairSeed = (args: {
   readonly scored: readonly ScoredEntry[]
@@ -374,9 +348,9 @@ export interface RepairPlanContext {
  * Ordered, declarative repair-plan rule table. The first rule whose `when`
  * predicate holds wins (`.find` short-circuits exactly like the prior if-cascade
  * — predicates are pure, so this is identical first-match selection + laziness).
- * Order is load-bearing: infra-blocked → mweOracle → reproOracle → cleanDrift →
- * contract-only. Summary/directive strings and the three include-flags are copied
- * verbatim from the original branches.
+ * Order is load-bearing: infra-blocked → mweOracle → reproOracle → contract-only.
+ * Summary/directive strings and the three include-flags are copied verbatim from
+ * the original branches.
  */
 const REPAIR_PLAN_RULES: readonly {
   when: (c: RepairPlanContext) => boolean
@@ -440,18 +414,6 @@ const REPAIR_PLAN_RULES: readonly {
         "Regenerate from the base tree. Complete the missing family owner files named below if public source evidence confirms the family relation; otherwise produce no patch for that family rather than a partial single-site edit. The next candidate still must satisfy positive executed public proof before submit.",
       includeFamilyRepair: true,
       includeReproFailureTrace: true,
-      includeOracleFailureSeed: true,
-    },
-  },
-  {
-    when: (c) => cleanDriftRepairRequired(c.scored),
-    plan: {
-      summary:
-        "Selector feedback: every generated multi-source candidate was rejected as unproven multi-source drift by clean selector authority because no executable proof or public contract justified touching multiple source files.",
-      directive:
-        "Regenerate from the base tree. Either produce a narrow single-owner patch, or include the complete static/public witness that justifies every source file touched. Do not add helper files, new definitions, or unrelated design surface unless that witness requires them.",
-      includeFamilyRepair: false,
-      includeReproFailureTrace: false,
       includeOracleFailureSeed: true,
     },
   },

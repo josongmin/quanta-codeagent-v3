@@ -81,6 +81,10 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("mweProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("publicRegressionProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("reproConsensusProofSelectionPort")
+    expect(DRIVER_SRC).toContain("computeEffectiveProofRequired(")
+    expect(APP_DRIVER_SRC).toContain("computeEffectiveProofRequired(")
+    expect(DRIVER_SRC).toContain("proofCalibration")
+    expect(APP_DRIVER_SRC).toContain("proofCalibration")
     expect(DRIVER_SRC).toContain("ports.mweProof = args.mweProofSelectionPort")
     expect(DRIVER_SRC).toContain(
       "ports.publicRegressionProof = args.publicRegressionProofSelectionPort",
@@ -88,6 +92,13 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain(
       "ports.reproConsensusProof = args.reproConsensusProofSelectionPort",
     )
+  })
+
+  test("both drivers keep deterministic family-coverage coedit default-OFF behind the shared helper", () => {
+    expect(DRIVER_SRC).toContain("familyCoverageCoeditEnabled(process.env)")
+    expect(APP_DRIVER_SRC).toContain("familyCoverageCoeditEnabled(process.env)")
+    expect(DRIVER_SRC).toContain("QUANTA_BENCH_FAMILY_COVERAGE_COEDIT")
+    expect(APP_DRIVER_SRC).toContain("repairFamilyCoverage")
   })
 
   test("runner driver emits patch-budget telemetry when the knob is on", () => {

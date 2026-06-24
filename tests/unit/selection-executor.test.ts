@@ -466,12 +466,14 @@ describe("runSelection", () => {
     expect(
       seeds.some((seed) => seed?.includes("Previous attempt missed required family owner files")),
     ).toBe(true)
-    expect(r.winner).toBeNull()
     expect(r.scored[0]?.candidate.files).toEqual(["pkg/base/client.py", "pkg/postgresql/client.py"])
+    // The derived advisory family contract must NOT be promoted into REQUIRED
+    // contract authority — it stays advisory (requiredContractsSatisfied === 0).
     expect(r.scored[0]?.requiredContractsSatisfied).toBe(0)
-    expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
+    // With the unproven-multi-source drift heuristic removed, a proofless
+    // multi-source patch is no longer hard-vetoed: it is admissible and wins.
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
+    expect(r.winner?.id).toBe("cand-0")
   })
 
   it("regression=false makes a candidate INADMISSIBLE (red-on-injection)", async () => {
@@ -1200,141 +1202,16 @@ describe("runSelection", () => {
       ports: {
         generate: gen,
         staticSanity: async (c) =>
-          c.id === "cand-0" ? ["hard:staticSanity=pythonNoneSubscriptMutation(env)"] : [],
+          c.id === "cand-0"
+            ? ["hard:staticSanity=pythonUndefinedNameIntroduced(unsafe_base@pkg/base.py)"]
+            : [],
       },
     })
 
     expect(seeds).toHaveLength(3)
     expect(seeds[2]).toContain("deterministic static sanity checks")
-    expect(seeds[2]).toContain("`env` can be None before a subscript write")
+    expect(seeds[2]).toContain("pythonUndefinedNameIntroduced(unsafe_base@pkg/base.py)")
     expect(r.winner?.id).toBe("cand-2")
-  })
-
-  it("clean mode appends one structural repair candidate when all generated candidates are unproven multi-source drift", async () => {
-    const seeds: (string | undefined)[] = []
-    const gen: SelectionPorts["generate"] = async (i, seed) => {
-      seeds.push(seed)
-      return i === 2
-        ? cand({
-            id: "cand-2",
-            patch: patchForFiles(["pkg/a.py"]),
-            files: ["pkg/a.py"],
-          })
-        : cand({
-            id: `cand-${i}`,
-            patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
-            files: ["pkg/a.py", "pkg/b.py"],
-          })
-    }
-    const r = await runSelection({
-      n: 2,
-      mode: "clean",
-      seeds: [undefined, undefined],
-      owners: new Set(["pkg/a.py", "pkg/b.py"]),
-      ports: { generate: gen },
-    })
-
-    expect(seeds).toHaveLength(3)
-    expect(seeds[2]).toContain("unproven multi-source")
-    expect(r.winner?.id).toBe("cand-2")
-  })
-
-  it("clean mode hard-rejects unproven multi-source drift without executable proof or public contract", async () => {
-    const risky = cand({
-      id: "cand-0",
-      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
-      files: ["pkg/a.py", "pkg/b.py"],
-    })
-    const narrow = cand({
-      id: "cand-1",
-      patch: patchForFiles(["pkg/a.py"]),
-      files: ["pkg/a.py"],
-    })
-    const { gen } = genFrom([risky, narrow])
-    const r = await runSelection({
-      n: 2,
-      mode: "clean",
-      seeds: [undefined, undefined],
-      owners: new Set(["pkg/a.py", "pkg/b.py"]),
-      ports: { generate: gen },
-    })
-
-    expect(r.winner?.id).toBe("cand-1")
-    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
-  })
-
-  it("clean mode does not submit a proofless patch when owner authority is empty", async () => {
-    const { gen } = genFrom([
-      cand({
-        id: "cand-0",
-        patch: patchForFiles(["pkg/a.py"]),
-        files: ["pkg/a.py"],
-      }),
-    ])
-    const r = await runSelection({
-      n: 1,
-      mode: "clean",
-      seeds: [undefined],
-      owners: new Set(),
-      ports: { generate: gen },
-    })
-
-    expect(r.winner).toBeNull()
-    expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
-    )
-  })
-
-  it("clean mode does not treat family coverage alone as submit authority when owner authority is empty", async () => {
-    const { gen } = genFrom([
-      cand({
-        id: "cand-0",
-        patch: patchForFiles(["pkg/a.py"]),
-        files: ["pkg/a.py"],
-        familyId: "unique-owner",
-        familyOwnerFiles: ["pkg/a.py"],
-      }),
-    ])
-    const r = await runSelection({
-      n: 1,
-      mode: "clean",
-      seeds: [undefined],
-      owners: new Set(),
-      ports: { generate: gen },
-    })
-
-    expect(r.winner).toBeNull()
-    expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
-    )
-  })
-
-  it("clean mode does not treat discovered regression keep-green as executable proof when owner authority is empty", async () => {
-    const { gen } = genFrom([
-      cand({
-        id: "cand-0",
-        patch: patchForFiles(["pkg/a.py"]),
-        files: ["pkg/a.py"],
-      }),
-    ])
-    const r = await runSelection({
-      n: 1,
-      mode: "clean",
-      seeds: [undefined],
-      owners: new Set(),
-      ports: {
-        generate: gen,
-        regression: async () => true,
-      },
-    })
-
-    expect(r.winner).toBeNull()
-    expect(summarizeSelection(r).proofSummary?.proofState).toBe("safety_only")
-    expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:cleanProofAuthorityMissing=true (clean mode has no owner, executable proof, or public contract authority)",
-    )
   })
 
   it("clean mode allows multi-source candidates when executable repro proof is positive", async () => {
@@ -1362,36 +1239,6 @@ describe("runSelection", () => {
 
     expect(r.winner?.id).toBe("cand-0")
     expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).not.toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
-  })
-
-  it("clean mode keeps discovered regression keep-green as safety-only for multi-source drift", async () => {
-    const riskyButOnlySafe = cand({
-      id: "cand-0",
-      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
-      files: ["pkg/a.py", "pkg/b.py"],
-    })
-    const narrow = cand({
-      id: "cand-1",
-      patch: patchForFiles(["pkg/a.py"]),
-      files: ["pkg/a.py"],
-    })
-    const { gen } = genFrom([riskyButOnlySafe, narrow])
-    const r = await runSelection({
-      n: 2,
-      mode: "clean",
-      seeds: [undefined, undefined],
-      owners: new Set(["pkg/a.py", "pkg/b.py"]),
-      ports: {
-        generate: gen,
-        regression: async (c) => (c.id === "cand-0" ? true : null),
-      },
-    })
-
-    expect(r.winner?.id).toBe("cand-1")
-    expect(summarizeSelection(r).candidates[0]?.proofState).toBe("safety_only")
-    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
       "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
     )
   })
@@ -1879,27 +1726,6 @@ describe("runSelection", () => {
     expect(r.admissibleCount).toBe(0)
     expect(r.winner).toBeNull()
     expect(r.terminalCandidate?.id).toBe("cand-1")
-  })
-
-  it("clean unproven multi-source drift hard reject is not resubmitted as best-effort", async () => {
-    const risky = cand({
-      id: "cand-0",
-      patch: patchForFiles(["pkg/a.py", "pkg/b.py"]),
-      files: ["pkg/a.py", "pkg/b.py"],
-    })
-    const { gen } = genFrom([risky])
-    const r = await runSelection({
-      n: 1,
-      mode: "clean",
-      seeds: [undefined],
-      owners: new Set(["pkg/a.py", "pkg/b.py"]),
-      ports: { generate: gen },
-    })
-    expect(r.admissibleCount).toBe(0)
-    expect(r.winner).toBeNull()
-    expect(r.scored[0]?.verdict.reasons).toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
   })
 
   it("dedup: identical patches collapse to one scored entry", async () => {

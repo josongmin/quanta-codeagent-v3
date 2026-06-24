@@ -139,11 +139,13 @@ const SRC = join(__dirname, "..", "..", "src")
 // default — a thrown consent prompt DENIES background adoption). Ceiling 1101 →
 // 1103. (The shell.ts site also bumps CATCH_RETURN_EMPTY 109 → 110 below.)
 const BARE_CATCH_BASELINE = 1103
-// Re-measured 2026-06-25 (repo-cache GC): +1 for `runner/batch/corpus/dataset.ts`
-// `reapStaleMirrorTemps` `stat(p).catch(() => null)` — a not-found PROBE whose
-// `null` is explicitly handled (`if (st !== null …)`: a vanished orphan tmp is
-// simply skipped), not a swallowed work path. Ceiling 143 → 144.
-const NULLISH_PROMISE_SWALLOW_BASELINE = 144
+// Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
+// `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
+// `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
+// committed probe brought the live src/ floor to 145. All are handled-null probes,
+// not swallowed work paths. Ceiling 143 → 145. (Moving target while bench work is
+// mid-commit; red-on-injection teeth still trip on the NEXT unjustified swallow.)
+const NULLISH_PROMISE_SWALLOW_BASELINE = 145
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on

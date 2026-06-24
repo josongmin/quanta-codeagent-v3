@@ -16,24 +16,6 @@ afterEach(() => {
   }
 })
 
-const probe = async (
-  files: Readonly<Record<string, string>>,
-  targetFiles: readonly string[] = Object.keys(files),
-): Promise<string[] | null> => {
-  const cwd = mkdtempSync(join(tmpdir(), "patch-static-sanity-"))
-  tempDirs.push(cwd)
-  for (const [file, source] of Object.entries(files)) {
-    const abs = join(cwd, file)
-    mkdirSync(dirname(abs), { recursive: true })
-    writeFileSync(abs, source)
-  }
-  return probePatchStaticSanity({
-    cwd,
-    files: targetFiles,
-    timeoutMs: 5_000,
-  })
-}
-
 const git = (cwd: string, ...argv: string[]): void => {
   execFileSync(
     "git",
@@ -81,98 +63,6 @@ const makeBeforeAfterRepo = (
 
 const probeDiff = (cwd: string, files: readonly string[]): Promise<string[] | null> =>
   probeUndefinedNameDiff({ cwd, files, timeoutMs: 5_000 })
-
-describe("probePatchStaticSanity", () => {
-  it("rejects a variable assigned None and then mutated through subscript", async () => {
-    const reasons = await probe({
-      "pkg/client.py": `
-class Client:
-    def build(self, password):
-        env = None
-        if password:
-            env["PASSWORD"] = password
-        return env
-`,
-    })
-    expect(reasons).toContain("hard:staticSanity=pythonNoneSubscriptMutation(env)")
-  })
-
-  it("allows subscript mutation after a non-None rebinding", async () => {
-    const reasons = await probe({
-      "pkg/client.py": `
-class Client:
-    def build(self, password):
-        env = None
-        if password:
-            env = {}
-            env["PASSWORD"] = password
-        return env
-`,
-    })
-    expect(reasons).toEqual([])
-  })
-
-  it("rejects sqlite create_function arity that disagrees with callback definition", async () => {
-    const reasons = await probe({
-      "pkg/sqlite_base.py": `
-class Wrapper:
-    def get_new_connection(self, params):
-        conn = Database.connect(**params)
-        conn.create_function("django_datetime_cast_date", 3, _sqlite_datetime_cast_date)
-        conn.create_function("django_datetime_extract", 4, _sqlite_datetime_extract)
-        return conn
-
-def _sqlite_datetime_cast_date(dt, tzname):
-    return dt
-
-def _sqlite_datetime_extract(lookup_type, dt, tzname=None):
-    return dt
-`,
-    })
-    expect(reasons).toContain(
-      "hard:staticSanity=pythonCallbackArityMismatch(_sqlite_datetime_cast_date:2->3)",
-    )
-    expect(reasons).toContain(
-      "hard:staticSanity=pythonCallbackArityMismatch(_sqlite_datetime_extract:3->4)",
-    )
-  })
-
-  it("matches the runtime positional-only callback semantics", async () => {
-    const reasons = await probe({
-      "pkg/sqlite_base.py": `
-class Wrapper:
-    def get_new_connection(self, params):
-        conn = Database.connect(**params)
-        conn.create_function("demo", 2, _cb)
-        return conn
-
-def _cb(dt, /, tzname=None):
-    return dt
-`,
-    })
-    expect(reasons).toEqual([])
-  })
-
-  it("allows sqlite create_function arity when callbacks match", async () => {
-    const reasons = await probe({
-      "pkg/sqlite_base.py": `
-class Wrapper:
-    def get_new_connection(self, params):
-        conn = Database.connect(**params)
-        conn.create_function("django_datetime_cast_date", 3, _sqlite_datetime_cast_date)
-        conn.create_function("django_datetime_extract", 4, _sqlite_datetime_extract)
-        return conn
-
-def _sqlite_datetime_cast_date(dt, tzname, conn_tzname):
-    return dt
-
-def _sqlite_datetime_extract(lookup_type, dt, tzname=None, conn_tzname=None):
-    return dt
-`,
-    })
-    expect(reasons).toEqual([])
-  })
-})
 
 describe("probeUndefinedNameDiff (differential F821)", () => {
   it("vetoes a NET-NEW undefined name introduced by the edit", async () => {
@@ -403,8 +293,11 @@ describe("probeUndefinedNameDiff (differential F821)", () => {
     )
   })
 
-  it("probePatchStaticSanity keeps the existing none-subscript veto intact alongside the new probe", async () => {
-    // The none-subscript reason and a net-new undefined name should coexist.
+  it("probePatchStaticSanity surfaces ONLY the differential undefined-name veto (bespoke AST probes removed)", async () => {
+    // The bespoke none-subscript / callback-arity AST probes were removed as
+    // overfit deterministic heuristics. probePatchStaticSanity now delegates to
+    // the differential F821 probe alone, so a net-new undefined name is the only
+    // reason it can surface — and the old none-subscript reason must NOT appear.
     const cwd = makeBeforeAfterRepo(
       {
         "pkg/m.py": "def build(password):\n    env = {}\n    return env\n",
@@ -419,9 +312,9 @@ describe("probeUndefinedNameDiff (differential F821)", () => {
       files: ["pkg/m.py"],
       timeoutMs: 5_000,
     })
-    expect(reasons).toContain("hard:staticSanity=pythonNoneSubscriptMutation(env)")
     expect(reasons).toContain(
       "hard:staticSanity=pythonUndefinedNameIntroduced(newly_undefined@pkg/m.py)",
     )
+    expect(reasons).not.toContain("hard:staticSanity=pythonNoneSubscriptMutation(env)")
   })
 })

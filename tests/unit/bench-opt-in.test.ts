@@ -7,7 +7,8 @@
  * each axis independently WITHOUT polluting the CLI's own knobs — so we
  * added three bench-only flags:
  *
- *   QUANTA_BENCH_LSP=1       wire LSP nav tools (OR with QUANTA_LSP_TOOLS=full)
+ *   QUANTA_BENCH_LSP         explicit bench LSP-nav override:
+ *                            1/on/true => enable, 0/off/false => disable
  *   QUANTA_BENCH_SUBAGENT=1  wire `subagent: {}` AgentConfig block
  *   QUANTA_BENCH_SKILLS=1    wire `skills: {}` AgentConfig block
  *
@@ -16,8 +17,10 @@
  *     emitted, no lsp-nav tools registered) — measurement integrity.
  *   - Each ENV ON ⇒ exactly the corresponding wire appears in the config
  *     (independent: setting one doesn't pull the others in).
- *   - The original `QUANTA_LSP_TOOLS=full` gate still works (OR with the
- *     new `QUANTA_BENCH_LSP=1` — either flips the bit).
+ *   - The original `QUANTA_LSP_TOOLS=full` gate still works, but only when
+ *     the bench knob is unset.
+ *   - An explicit `QUANTA_BENCH_LSP=off` suppresses a preset's `lsp:1` and
+ *     also beats the legacy CLI alias.
  *
  * Convention: every test saves + restores the env it touches via
  * `beforeEach/afterEach` so cross-test contamination is impossible.
@@ -30,6 +33,7 @@ import type { Instance } from "../../src/apps/bench/types"
 
 /** Env keys this file touches — saved on `beforeEach`, restored on `afterEach`. */
 const ENV_KEYS = [
+  "QUANTA_BENCH_PRESET",
   "QUANTA_BENCH_LSP",
   "QUANTA_BENCH_SUBAGENT",
   "QUANTA_BENCH_SKILLS",
@@ -84,20 +88,24 @@ describe("benchOptIns — env resolver (pure, three independent flags)", () => {
     expect(benchOptIns().lspNav).toBe(true)
   })
 
-  test("BOTH gates set → lspNav:true (OR, not XOR)", () => {
+  test("BOTH gates set while bench knob is ON → lspNav:true", () => {
     process.env.QUANTA_LSP_TOOLS = "full"
     process.env.QUANTA_BENCH_LSP = "1"
     expect(benchOptIns().lspNav).toBe(true)
   })
 
-  test("QUANTA_BENCH_LSP falsy/garbage → lspNav:false (canonical gate vocab)", () => {
+  test("QUANTA_BENCH_LSP explicit off tokens resolve to lspNav:false", () => {
     process.env.QUANTA_BENCH_LSP = "0"
     expect(benchOptIns().lspNav).toBe(false)
     process.env.QUANTA_BENCH_LSP = "off"
     expect(benchOptIns().lspNav).toBe(false)
+    process.env.QUANTA_BENCH_LSP = "false"
+    expect(benchOptIns().lspNav).toBe(false)
+  })
+
+  test("QUANTA_BENCH_LSP garbage stays unset/off; only accepted true tokens enable", () => {
     process.env.QUANTA_BENCH_LSP = "nope"
     expect(benchOptIns().lspNav).toBe(false)
-    // ...but any truthy token enables (uniform with every other gate).
     process.env.QUANTA_BENCH_LSP = "on"
     expect(benchOptIns().lspNav).toBe(true)
   })
@@ -105,6 +113,23 @@ describe("benchOptIns — env resolver (pure, three independent flags)", () => {
   test("QUANTA_LSP_TOOLS=partial → lspNav:false (only 'full' triggers, same as CLI)", () => {
     process.env.QUANTA_LSP_TOOLS = "partial"
     expect(benchOptIns().lspNav).toBe(false)
+  })
+
+  test("preset lsp:1 is suppressed by explicit QUANTA_BENCH_LSP=off", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v1"
+    process.env.QUANTA_BENCH_LSP = "off"
+    const r = benchOptIns()
+    expect(r.lspNav).toBe(false)
+    expect(r.localizePhase).toEqual({ phase1Turns: 5 })
+  })
+
+  test("explicit QUANTA_BENCH_LSP=off beats legacy QUANTA_LSP_TOOLS=full alias", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v1"
+    process.env.QUANTA_BENCH_LSP = "off"
+    process.env.QUANTA_LSP_TOOLS = "full"
+    const r = benchOptIns()
+    expect(r.lspNav).toBe(false)
+    expect(r.localizePhase).toEqual({ phase1Turns: 5 })
   })
 
   test("QUANTA_BENCH_SUBAGENT=1 → subagent:{} (other axes unchanged)", () => {

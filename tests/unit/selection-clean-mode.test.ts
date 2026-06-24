@@ -377,13 +377,16 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
     expect(r.scored.find((s) => s.candidate.id === "cand-1")?.requiredContractsSatisfied).toBe(0)
   })
 
-  it("CLEAN: partial co-change family patch is inadmissible", async () => {
+  it("CLEAN: partial co-change family patch is inadmissible when the veto is opted-in", async () => {
     const r = await runSelection({
       n: 1,
       seeds: [undefined],
       candidateFamilies: [structuralMultiSiteFamily],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
       mode: "clean",
+      // Family-coverage veto is DEFAULT-OFF (reverted as net-negative); opt-in here
+      // to exercise that, WHEN enabled, partial coverage is still rejected.
+      familyCoverageVeto: true,
       ports: {
         generate: async () => smallBaseOnly,
         applyClean: async () => true,

@@ -97,7 +97,11 @@ describe("traceForwardLocalizeOwners — real rg consumer resolution (IO wrapper
     try {
       // producer (edited; excluded via alreadyLocalized), a genuine consumer, and a
       // test that also calls the symbol (must be filtered as a non-fix site).
-      await writeIn(root, "pkg/producer.py", "def make_client(config):\n    return new_shape(config)\n")
+      await writeIn(
+        root,
+        "pkg/producer.py",
+        "def make_client(config):\n    return new_shape(config)\n",
+      )
       await writeIn(
         root,
         "pkg/base/client.py",

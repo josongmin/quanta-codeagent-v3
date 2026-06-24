@@ -17,7 +17,8 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     default: false,
     group: "bench",
     home: "bench",
-    describe: "Bench: language-server tools gate.",
+    describe:
+      "Bench: LSP-nav tools gate with explicit boolean override semantics. `1`/`on`/`true` enable; `0`/`off`/`false` disable; unset leaves preset/default behavior. An explicit off beats a preset `lsp:1`; legacy `QUANTA_LSP_TOOLS=full` is consulted only when this knob is unset.",
     readSite: "runner/batch/eval/driver.ts",
   },
   {

@@ -21,21 +21,20 @@ import { isVerifyOutputFailing, isVerifySignalCommand, mutatingToolKind } from "
 import { isTestFilePath } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { normalizeRepoPath } from "./impacted-test-discovery"
+import { isBenchReproArtifactPath } from "./repro-artifacts"
 
 type ToolCallEvent = Extract<AgentEvent, { type: "tool_call" }>
 type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>
 
-/** Agent reproduction scaffolding — kept in sync with `snapshot.ts` REPRO_SCAFFOLD_RE
- *  (the source-only-diff SSOT). These never survive into the source patch, so an
- *  edit to one must not count as a source edit either. */
-const REPRO_SCAFFOLD_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/
-
 /** Does an edit target a file that would SURVIVE into the source-only diff? This
  *  MUST agree with `snapshot.ts` `sourceOnlyDiff` EXACTLY (same `isTestFilePath`
- *  SSOT + REPRO_SCAFFOLD strip, NOTHING else) — if the count-predicate and the
- *  survival-predicate disagree, a real source edit lost to a fork desync gets
+ *  SSOT + bench-repro-artifact strip, NOTHING else) — if the count-predicate and
+ *  the survival-predicate disagree, a real source edit lost to a fork desync gets
  *  miscounted ⇒ classified `empty-no-work` ⇒ a genuine infra failure is laundered
  *  as a model miss in the solve-rate denominator.
+ *
+ *  Bench repro scripts and their `.pytest-report.json` sidecars never survive
+ *  into the source patch, so an edit to one must not count as source work either.
  *
  *  NOTE: there is deliberately NO `/tmp` rule. `sourceOnlyDiff` has none either —
  *  it identifies scratch via git-tree membership, not path strings. A previous
@@ -49,7 +48,7 @@ export const isSourceEditPath = (raw: string): boolean => {
   const rel = normalizeRepoPath(raw)
   if (rel === "") return false
   if (isTestFilePath(rel)) return false
-  if (REPRO_SCAFFOLD_RE.test(rel.split("/").pop() ?? rel)) return false
+  if (isBenchReproArtifactPath(rel)) return false
   return true
 }
 

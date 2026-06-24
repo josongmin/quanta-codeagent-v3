@@ -106,6 +106,7 @@ import {
   buildPhasePatchHygiene,
   type ClosureSessionState,
 } from "./closure-session"
+import { type DoneTimeCaptureClass, isCaptureFailure } from "./capture-correctness"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
@@ -2442,6 +2443,11 @@ interface Phase {
   turns: number
   stopReason?: StopReason
   agentError?: string
+  /** T5 — done-time capture class (single-pass path). When this is a capture
+   *  failure (`lost-edits`), {@link agentPhaseError} surfaces the `capture_lost_edits`
+   *  marker so classifyOutcome routes the run to infra-fail/retry, symmetric with the
+   *  selection path's `isCaptureFailure` throw. Undefined elsewhere ⇒ no effect. */
+  captureClass?: DoneTimeCaptureClass
   /** T-202/F6 stream-tap signals (single-pass path only). */
   firstEditFile?: string
   editCount?: number
@@ -3069,6 +3075,9 @@ export const computeEffectiveProofRequired = (
   }
 }
 
+export const familyCoverageCoeditEnabled = (env: NodeJS.ProcessEnv): boolean =>
+  gateOn(env, "QUANTA_BENCH_FAMILY_COVERAGE_COEDIT")
+
 const resolveSelectionReproConsensus = async (
   instance: Instance,
   sandbox: string,
@@ -3410,17 +3419,19 @@ const buildSelectionExecutorPorts = (args: SelectionExecutorPortsArgs): Selectio
         signal: args.signal,
         preferredTargets: args.chaRepairTargets,
       })
-    ports.repairFamilyCoverage = ({ candidate, family, missingFiles }) =>
-      coeditFamilyCoverageCandidate({
-        sandbox: args.sandbox,
-        candidate,
-        family,
-        missingFiles,
-        timeoutMs: args.deps.timeoutMs,
-        baseCommit: args.instance.swebench?.baseCommit,
-        repo: args.instance.swebench?.repo,
-        preferredTargets: args.chaRepairTargets,
-      })
+    if (familyCoverageCoeditEnabled(process.env)) {
+      ports.repairFamilyCoverage = ({ candidate, family, missingFiles }) =>
+        coeditFamilyCoverageCandidate({
+          sandbox: args.sandbox,
+          candidate,
+          family,
+          missingFiles,
+          timeoutMs: args.deps.timeoutMs,
+          baseCommit: args.instance.swebench?.baseCommit,
+          repo: args.instance.swebench?.repo,
+          preferredTargets: args.chaRepairTargets,
+        })
+    }
   }
   return ports
 }
@@ -3739,6 +3750,20 @@ const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolea
   deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
 
 const agentPhaseError = (phase: Phase): string | undefined => {
+  // T5 — a capture-desync (successful source edits observed but an empty done-time
+  // diff) is an INFRA fault, not a model miss. On the SINGLE-PASS path the agent can
+  // stop `completed` with an empty patch, so the generic stopReason branches below
+  // would mislabel it real-fail/completed_unresolved (never retried). Surface the
+  // `capture_lost_edits` marker here so classifyOutcome's CAPTURE_DESYNC_RE routes it
+  // to infra-fail/retry — symmetric with the selection path's isCaptureFailure throw.
+  // Gated on a lost-edits captureClass ⇒ byte-identical for every other run.
+  if (
+    phase.captureClass !== undefined &&
+    isCaptureFailure(phase.captureClass) &&
+    phase.patch.trim() === ""
+  ) {
+    return phase.agentError ?? "capture_lost_edits: source edits observed but done-time diff empty"
+  }
   const patchCaptureMiss = patchCaptureMissErrorOf(phase)
   if (patchCaptureMiss !== undefined) return patchCaptureMiss
   const noPatchExhausted = noPatchExhaustedErrorOf({

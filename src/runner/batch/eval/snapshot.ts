@@ -17,6 +17,7 @@ import {
   revertProjectEnvSandbox,
 } from "../corpus/project-env"
 import { type ExecResult, exec, execArgv, trimOut } from "./exec"
+import { isBenchReproArtifactPath } from "./repro-artifacts"
 
 /** Real-fs port for P0 build-env materialization (node:fs/promises). The
  *  corpus helper is fs-injected so unit tests use a fake; production wires the
@@ -83,8 +84,9 @@ const HEADER_RE = /^diff --git a\/\S+ b\/(\S+)/
 
 /** Agent-authored reproduction scaffolding the repro-test pipeline writes into
  *  the sandbox worktree to reproduce/verify the bug (samples=K → `__repro_0_…`
- *  … `__repro_{K-1}_…`, plus the canonical `reproduce_issue.py`). These are test
- *  harnesses the AGENT created, never part of the source fix. `git add -A`
+ *  … `__repro_{K-1}_…`, plus the canonical `reproduce_issue.py`) and their
+ *  `.pytest-report.json` execution sidecars. These are test harness artifacts the
+ *  AGENT/bench created, never part of the source fix. `git add -A`
  *  (gitStageAndDiffCached) stages them and — unlike test-path/binary — they slip
  *  past every other filter (`.py` at repo root, not under `tests/`, not binary),
  *  so the prediction ships with 4-21 stray `__repro_*.py` files. The official
@@ -93,9 +95,7 @@ const HEADER_RE = /^diff --git a\/\S+ b\/(\S+)/
  *  as a model miss. RCA of django gap-fails 11820/12308/12965/13128/14017/14351
  *  (2026-06-20): each had the right one-file fix buried under repro contamination.
  *  Matched on BASENAME so a path anywhere in the tree is condemned. */
-const REPRO_SCAFFOLD_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/
 const CANONICAL_REPRO_FILE_NAME = "reproduce_issue.py"
-const basenameOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1)
 
 const readOptionalText = async (path: string): Promise<string | undefined> => {
   try {
@@ -155,9 +155,9 @@ export const sourceOnlyDiff = (diff: string): string => {
       const p = m[1] ?? ""
       // SSOT: same test-path classifier the dispatch test-scope guard uses.
       if (isTestFilePath(p)) return false
-      // Agent reproduction scaffolding — never part of the source fix. See
-      // REPRO_SCAFFOLD_RE for the full RCA (django gap-fails, 2026-06-20).
-      if (REPRO_SCAFFOLD_RE.test(basenameOf(p))) return false
+      // Agent/bench reproduction artifacts — never part of the source fix. See
+      // isBenchReproArtifactPath for the full RCA (django gap-fails, 2026-06-20).
+      if (isBenchReproArtifactPath(p)) return false
     }
     // A structural binary marker anywhere in the section condemns the whole
     // section (header + index + blob) — see the doc comment above for why.

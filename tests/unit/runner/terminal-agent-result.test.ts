@@ -66,6 +66,35 @@ describe("terminalAgentResult", () => {
     })
   })
 
+  test("T5 single-pass red-on-injection: lost-edits captureClass ⇒ error carries capture_lost_edits ⇒ infra-fail (retry)", () => {
+    // Single-pass shape (selectionTelemetry undefined, stopReason 'completed', empty
+    // patch) — without the captureClass guard this laundered into real-fail/model-miss
+    // (the agentless-v1 measurement hole). The guard must surface the marker.
+    const result = mkTerminal({
+      stopReason: "completed",
+      selectionTelemetry: undefined,
+      captureClass: "lost-edits",
+      agentError: "capture_lost_edits: 2 source edit(s) but empty done-time diff",
+      patch: "",
+      editCount: 2,
+    })
+    expect(result.error).toContain("capture_lost_edits")
+    expect(classifyOutcome(result).kind).toBe("infra-fail")
+  })
+
+  test("paired control: SAME single-pass shape WITHOUT a lost-edits captureClass ⇒ real-fail (byte-identical, no spurious retry)", () => {
+    const result = mkTerminal({
+      stopReason: "completed",
+      selectionTelemetry: undefined,
+      patch: "",
+    })
+    expect(result.error ?? "").not.toContain("capture_lost_edits")
+    expect(classifyOutcome(result)).toEqual({
+      kind: "real-fail",
+      subkind: "completed_unresolved",
+    })
+  })
+
   test("proof-required no-winner surfaces proof-miss instead of generic no-submittable wording", () => {
     const result = mkTerminal({
       stopReason: "end_turn",

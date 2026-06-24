@@ -48,14 +48,16 @@ describe("resolveBenchKnobs rejected loudness (#5)", () => {
     expect(state.rejected).toEqual([])
   })
 
-  // A boolean ON/OFF flag (unit omitted) parses every non-truthy raw to undefined
-  // BY DESIGN — `=0/=off/=false` is an intentional opt-out (a documented baseline
-  // idiom), not a misconfig. Flagging it would defeat the whole distinction.
+  // A boolean ON/OFF flag (unit omitted) may resolve to an explicit FALSE.
+  // `=0/=off/=false` is an intentional opt-out, not a misconfig, so it must not
+  // show up under `rejected`.
   it("does NOT flag a boolean knob turned off with 0/false/off (intentional opt-out)", () => {
     for (const off of ["0", "false", "off"]) {
       const state = resolveBenchKnobs({ envVars: { QUANTA_BENCH_LSP: off } })
       expect(state.rejected).toEqual([])
-      // and it is treated as a normal unset/off knob, not a misconfig
+      expect(state.values.get("lsp")?.value).toBe(false)
+      expect(state.inactive).not.toContain("lsp")
+      // and it is treated as a normal explicit off knob, not a misconfig
       expect(state.rejected.map((r) => r.envKey)).not.toContain("QUANTA_BENCH_LSP")
     }
   })
@@ -72,9 +74,7 @@ describe("resolveBenchKnobs rejected loudness (#5)", () => {
     expect(base.rejected.map((r) => r.id)).toContain("regression-max-tests")
     // … but a phase module supplies a VALID value ⇒ the knob is now active and
     // must NOT linger in `rejected` (stale otherwise via the `...base` spread).
-    const folded = withKnobModules(base, [
-      { id: "m", knobs: { "regression-max-tests": "50" } },
-    ])
+    const folded = withKnobModules(base, [{ id: "m", knobs: { "regression-max-tests": "50" } }])
     expect(folded.values.has("regression-max-tests")).toBe(true)
     expect(folded.rejected).toEqual([])
   })

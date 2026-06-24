@@ -6,12 +6,12 @@ import {
 } from "@/runner/batch/eval/selection-executor"
 
 /**
- * T1 measurement off-switch — the clean-mode family-coverage veto
- * (`hard:familyCoverageMissing`) makes a tagged-incomplete candidate
- * non-admissible by default (byte-identical), and `familyCoverageVeto: false`
- * removes that reason so an A/B baseline can measure the producer-consumer
- * over-demand cost before promotion. Mirrors the T0 baseline harness exactly so
- * only `familyCoverageVeto` varies.
+ * T1 family-coverage veto — DEFAULT-OFF, opt-IN. The clean-mode veto
+ * (`hard:familyCoverageMissing`) was reverted as NET-NEGATIVE producer-consumer
+ * over-demand: by default a producer-only-correct (sibling-missing) candidate is
+ * admissible (NO veto). It only fires when explicitly enabled with
+ * `familyCoverageVeto: true`. The cases below keep BOTH directions as a paired
+ * control so the gate cannot silently die. Only `familyCoverageVeto` varies.
  */
 
 const cand = (over: Partial<Candidate> & { id: string }): Candidate => ({
@@ -55,26 +55,14 @@ const owners = (): Set<string> => new Set(["pkg/producer.py", "pkg/consumer.py"]
 const familyMissingReason = (c: { verdict: { reasons: string[] } } | undefined): boolean =>
   c?.verdict.reasons.some((x) => x.startsWith("hard:familyCoverageMissing=")) ?? false
 
-describe("T1 family-coverage veto off-switch", () => {
-  it("DEFAULT (undefined): a tagged-incomplete producer-only candidate is non-admissible + reason emitted", async () => {
+describe("T1 family-coverage veto (DEFAULT-OFF, opt-in)", () => {
+  // ── Paired control: default-OFF vs opt-in-ON for the SAME candidate ──
+  it("DEFAULT (undefined): a tagged-incomplete producer-only candidate is ADMISSIBLE + NO reason (veto reverted, net-negative)", async () => {
     const r = await runSelection({
       n: 1,
       mode: "clean",
       seeds: [undefined],
       owners: owners(),
-      ports: { generate: genOnce(taggedIncomplete()) },
-    })
-    expect(r.scored[0]?.verdict.admissible).toBe(false)
-    expect(familyMissingReason(r.scored[0])).toBe(true)
-  })
-
-  it("OFF (familyCoverageVeto:false): the SAME candidate carries NO family-coverage reason and is admissible", async () => {
-    const r = await runSelection({
-      n: 1,
-      mode: "clean",
-      seeds: [undefined],
-      owners: owners(),
-      familyCoverageVeto: false,
       ports: { generate: genOnce(taggedIncomplete()) },
     })
     expect(familyMissingReason(r.scored[0])).toBe(false)
@@ -82,7 +70,7 @@ describe("T1 family-coverage veto off-switch", () => {
     expect(r.winner?.files).toEqual(["pkg/producer.py"])
   })
 
-  it("explicit true behaves like default ON (reason emitted, non-admissible)", async () => {
+  it("OPT-IN (familyCoverageVeto:true): the SAME candidate IS vetoed (reason emitted, non-admissible)", async () => {
     const r = await runSelection({
       n: 1,
       mode: "clean",
@@ -95,12 +83,27 @@ describe("T1 family-coverage veto off-switch", () => {
     expect(familyMissingReason(r.scored[0])).toBe(true)
   })
 
-  it("advisory co-change family provenance does NOT hard-veto in clean mode", async () => {
+  it("explicit false matches the default (NO reason, admissible)", async () => {
     const r = await runSelection({
       n: 1,
       mode: "clean",
       seeds: [undefined],
       owners: owners(),
+      familyCoverageVeto: false,
+      ports: { generate: genOnce(taggedIncomplete()) },
+    })
+    expect(familyMissingReason(r.scored[0])).toBe(false)
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
+  })
+
+  // ── When opted-IN, provenance gating still narrows the veto correctly ──
+  it("opt-in + advisory co-change family provenance does NOT hard-veto in clean mode", async () => {
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: owners(),
+      familyCoverageVeto: true,
       ports: {
         generate: genOnce({
           ...taggedIncomplete(),
@@ -112,7 +115,44 @@ describe("T1 family-coverage veto off-switch", () => {
     expect(r.scored[0]?.verdict.admissible).toBe(true)
   })
 
-  it("structural family provenance still hard-vetoes incomplete coverage", async () => {
+  it("opt-in + structural family provenance hard-vetoes incomplete coverage", async () => {
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: owners(),
+      familyCoverageVeto: true,
+      ports: {
+        generate: genOnce({
+          ...taggedIncomplete(),
+          familySourceEvidence: ["static-witness:ast"],
+        }),
+      },
+    })
+    expect(familyMissingReason(r.scored[0])).toBe(true)
+    expect(r.scored[0]?.verdict.admissible).toBe(false)
+  })
+
+  it("opt-in + CHA-derived structural family provenance also hard-vetoes incomplete coverage", async () => {
+    const r = await runSelection({
+      n: 1,
+      mode: "clean",
+      seeds: [undefined],
+      owners: owners(),
+      familyCoverageVeto: true,
+      ports: {
+        generate: genOnce({
+          ...taggedIncomplete(),
+          familySourceEvidence: ["cha-multisite:python-ast"],
+        }),
+      },
+    })
+    expect(familyMissingReason(r.scored[0])).toBe(true)
+    expect(r.scored[0]?.verdict.admissible).toBe(false)
+  })
+
+  // ── Structural provenance does NOT veto when the veto is OFF (default) ──
+  it("DEFAULT + structural family provenance does NOT veto (default-off dominates provenance)", async () => {
     const r = await runSelection({
       n: 1,
       mode: "clean",
@@ -125,24 +165,7 @@ describe("T1 family-coverage veto off-switch", () => {
         }),
       },
     })
-    expect(familyMissingReason(r.scored[0])).toBe(true)
-    expect(r.scored[0]?.verdict.admissible).toBe(false)
-  })
-
-  it("CHA-derived structural family provenance also hard-vetoes incomplete coverage", async () => {
-    const r = await runSelection({
-      n: 1,
-      mode: "clean",
-      seeds: [undefined],
-      owners: owners(),
-      ports: {
-        generate: genOnce({
-          ...taggedIncomplete(),
-          familySourceEvidence: ["cha-multisite:python-ast"],
-        }),
-      },
-    })
-    expect(familyMissingReason(r.scored[0])).toBe(true)
-    expect(r.scored[0]?.verdict.admissible).toBe(false)
+    expect(familyMissingReason(r.scored[0])).toBe(false)
+    expect(r.scored[0]?.verdict.admissible).toBe(true)
   })
 })

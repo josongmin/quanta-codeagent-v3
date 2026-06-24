@@ -2,9 +2,9 @@
  * ADR-0422 follow-up — deterministic LSP anchor synthesizer hellgate.
  *
  *   A. .ts only ⇒ ts anchor                                  (2)
- *   B. .py only ⇒ py anchor                                  (1)
+ *   B. .py only ⇒ py anchor                                  (2)
  *   C. .ts + .py ⇒ BOTH anchors (one per language)           (2)
- *   D. no supported file ⇒ [] (LSP strategy disabled)        (2)
+ *   D. no supported/source file ⇒ [] (LSP strategy disabled) (3)
  *   E. multi-extension language collapses to ONE anchor      (1)
  *   F. determinism — lexicographically-first file wins       (2)
  *   G. breadth-first — shallow file out-ranks deeper file     (1)
@@ -13,7 +13,7 @@
  *   J. PRUNE — node_modules / .git / dot-dirs are NOT walked  (5)
  *   K. PERF — a missing language does NOT overscan the tree   (3)
  *
- * Total = 22 cases. A hermetic fake tree (no real fs) proves the rule is a
+ * Total = 24 cases. A hermetic fake tree (no real fs) proves the rule is a
  * pure function of (tree, extension→language map).
  *
  * J/K are the audit-H fix: a roster language that is never present in the tree
@@ -85,6 +85,17 @@ describe("synthesizeLspAnchors — ADR-0422 follow-up hellgate", () => {
     expect(anchors).toEqual([{ language: "pyright", anchorFile: "/repo/app.py" }])
   })
 
+  test("B2 — synthetic repro scaffold is skipped; real source .py wins", async () => {
+    const anchors = await synthesizeLspAnchors({
+      cwd: "/repo",
+      extensionToLanguage: EXT_TO_LANG,
+      lister: fakeTree({
+        "/repo": [f("__repro_0_abcdef.py"), f("reproduce_issue.py"), f("z_source.py")],
+      }),
+    })
+    expect(anchors).toEqual([{ language: "pyright", anchorFile: "/repo/z_source.py" }])
+  })
+
   // -------- C. .ts + .py ⇒ both ----------------------------------------
   test("C1 — .ts AND .py present ⇒ one anchor per language", async () => {
     const anchors = await synthesizeLspAnchors({
@@ -126,6 +137,15 @@ describe("synthesizeLspAnchors — ADR-0422 follow-up hellgate", () => {
       cwd: "/repo",
       extensionToLanguage: EXT_TO_LANG,
       lister: fakeTree({ "/repo": [] }),
+    })
+    expect(anchors).toEqual([])
+  })
+
+  test("D3 — only synthetic repro scaffolds ⇒ []", async () => {
+    const anchors = await synthesizeLspAnchors({
+      cwd: "/repo",
+      extensionToLanguage: EXT_TO_LANG,
+      lister: fakeTree({ "/repo": [f("__repro_12_deadbeef.py"), f("reproduce_issue.py")] }),
     })
     expect(anchors).toEqual([])
   })

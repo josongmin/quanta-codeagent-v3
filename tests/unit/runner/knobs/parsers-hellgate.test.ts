@@ -293,9 +293,38 @@ describe("verify-select-repro — closed mode enum", () => {
   })
 })
 
-describe("hellgate / parsers — strict truthy knobs (lsp/subagent/skills/working-state)", () => {
+describe("hellgate / parsers — lsp explicit boolean override", () => {
+  test('lsp: "1" / "on" / "true" all accept as true', () => {
+    expect(lspKnob.parse("1")).toBe(true)
+    expect(lspKnob.parse("on")).toBe(true)
+    expect(lspKnob.parse("true")).toBe(true)
+  })
+  test('lsp: "0" / "off" / "false" all accept as false', () => {
+    expect(lspKnob.parse("0")).toBe(false)
+    expect(lspKnob.parse("off")).toBe(false)
+    expect(lspKnob.parse("false")).toBe(false)
+  })
+  test("lsp: case variants rejected", () => {
+    expect(lspKnob.parse("ON")).toBeUndefined()
+    expect(lspKnob.parse("On")).toBeUndefined()
+    expect(lspKnob.parse("True")).toBeUndefined()
+    expect(lspKnob.parse("TRUE")).toBeUndefined()
+    expect(lspKnob.parse("OFF")).toBeUndefined()
+  })
+  test("lsp: yes/y/enable rejected", () => {
+    expect(lspKnob.parse("yes")).toBeUndefined()
+    expect(lspKnob.parse("y")).toBeUndefined()
+    expect(lspKnob.parse("enable")).toBeUndefined()
+  })
+  test("lsp: leading/trailing whitespace rejected (no trim)", () => {
+    expect(lspKnob.parse(" 1")).toBeUndefined()
+    expect(lspKnob.parse("1 ")).toBeUndefined()
+    expect(lspKnob.parse(" off")).toBeUndefined()
+  })
+})
+
+describe("hellgate / parsers — strict truthy knobs (subagent/skills/working-state)", () => {
   const truthyKnobs = [
-    ["lsp", lspKnob],
     ["subagent", subagentKnob],
     ["skills", skillsKnob],
     ["working-state", workingStateKnob],

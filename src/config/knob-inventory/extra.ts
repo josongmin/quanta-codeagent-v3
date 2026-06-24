@@ -325,12 +325,22 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_BENCH_FAMILY_COVERAGE",
     kind: "bool",
-    default: true,
+    default: false,
     group: "bench",
     home: "bench",
     describe:
-      "Bench eval (T1, jun-24): clean-mode family-coverage veto (hard:familyCoverageMissing). Default ON; set 0/off to disable for an A/B baseline against producer-consumer over-demand before promotion.",
+      "Bench eval (T1, jun-24): clean-mode family-coverage veto (hard:familyCoverageMissing). Default OFF; opt-in via QUANTA_BENCH_FAMILY_COVERAGE (reverted as net-negative producer-consumer over-demand).",
     readSite: "apps/bench/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_FAMILY_COVERAGE_COEDIT",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench eval (T1, jun-25): deterministic family-coverage coedit patch synthesis (exact-replay donor hunks onto sibling files). Default OFF; opt-in via QUANTA_BENCH_FAMILY_COVERAGE_COEDIT.",
+    readSite: "runner/batch/eval/driver.ts",
   },
   {
     envKey: "QUANTA_BENCH_TOKEN_BUDGET_DIR",

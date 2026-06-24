@@ -457,9 +457,11 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // optional chaining) — `exactOptionalPropertyTypes` forbids explicit
     // undefined at the type level, so cast to the param type to assert that it
     // behaves identically to the omitted-key `{}` at runtime.
-    const allUndef = { maxTrips: undefined, mustPass: undefined, exactCommands: undefined } as Parameters<
-      typeof decide
-    >[1]
+    const allUndef = {
+      maxTrips: undefined,
+      mustPass: undefined,
+      exactCommands: undefined,
+    } as unknown as Parameters<typeof decide>[1]
     expect(decide(editOnly, allUndef)).toEqual(decide(editOnly, {}))
     expect(decide(editThenFailingVerify, allUndef)).toEqual(decide(editThenFailingVerify, {}))
   })
