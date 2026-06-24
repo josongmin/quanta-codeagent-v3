@@ -23,6 +23,7 @@ import { applyWorkspaceEditAtomic } from "./base/atomic-edit"
 import {
   DEFAULT_REQUEST_TIMEOUT_MS,
   type LspClientOptions,
+  type LspProcessTreeSignal,
   type LspClientSpec,
   STDERR_TAIL_MAX,
 } from "./base/config"
@@ -83,6 +84,8 @@ export type { LspClientOptions, LspClientSpec } from "./base/config"
 // `@/lsp/adapters/base` stays byte-compatible after the god-module split.
 export { LspRequestError } from "./base/errors"
 
+const LSP_PROCESS_KILL_GRACE_MS = 2_000
+
 /** A real LSP client over stdio, parameterised by an {@link LspClientSpec}.
  *
  *  Lifecycle: spawn → `initialize` → `initialized` → (per file)
@@ -96,6 +99,7 @@ export class LspClient implements LspPort {
   private readonly requestTimeoutMs: number
   private readonly workspaceFolders: readonly string[]
   private readonly workspaceConfiguration: Readonly<Record<string, unknown>>
+  private readonly processTreeKiller: LspClientOptions["processTreeKiller"]
   private readonly spec: LspClientSpec
 
   private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
@@ -127,6 +131,7 @@ export class LspClient implements LspPort {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.workspaceFolders = options.workspaceFolders ?? []
     this.workspaceConfiguration = options.workspaceConfiguration ?? {}
+    this.processTreeKiller = options.processTreeKiller
   }
 
   async start(signal?: AbortSignal): Promise<void> {
@@ -540,16 +545,19 @@ export class LspClient implements LspPort {
       }
     } finally {
       this.failAllPending(new Error("LSP server stopped"))
+      // Kill the whole server process tree before closing stdin. Pyright's
+      // launcher is a Python wrapper around a Node langserver; closing/killing
+      // only the wrapper can reparent the Node child to init and leave it
+      // burning CPU. The injected tree killer is structural so @/lsp stays
+      // slice-clean; without it this degrades to Bun's direct-child kill.
+      this.signalServerProcess(proc, "SIGTERM")
       try {
         proc.stdin?.end()
       } catch {
         // stdin may already be closed
       }
-      try {
-        proc.kill()
-      } catch {
-        // process may have already exited
-      }
+      const exited = await this.waitForProcessExit(proc, LSP_PROCESS_KILL_GRACE_MS)
+      if (!exited) this.signalServerProcess(proc, "SIGKILL")
       await proc.exited.catch(() => undefined)
       await this.readPump?.catch(() => undefined)
       await this.stderrPump?.catch(() => undefined)
@@ -758,6 +766,46 @@ export class LspClient implements LspPort {
       logger.warn("lsp: failed to write to server stdin", { error: err.message })
       return new Error(`LSP transport write failed: ${err.message}`)
     }
+  }
+
+  private signalServerProcess(
+    proc: Subprocess<"pipe", "pipe", "pipe">,
+    signal: LspProcessTreeSignal,
+  ): void {
+    const pid = proc.pid
+    if (this.processTreeKiller !== undefined && typeof pid === "number" && pid > 0) {
+      try {
+        this.processTreeKiller.signalTree(pid, signal)
+      } catch {
+        // injected killer is expected no-throw; keep stop() defensive anyway.
+      }
+      return
+    }
+    try {
+      proc.kill(signal)
+    } catch {
+      // process may have already exited
+    }
+  }
+
+  private async waitForProcessExit(
+    proc: Subprocess<"pipe", "pipe", "pipe">,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    let exited = false
+    await Promise.race([
+      proc.exited
+        .then(() => {
+          exited = true
+        })
+        .catch(() => {
+          exited = true
+        }),
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, timeoutMs).unref?.()
+      }),
+    ])
+    return exited
   }
 
   private async pumpStdout(): Promise<void> {

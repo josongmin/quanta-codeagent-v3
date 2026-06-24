@@ -1238,9 +1238,6 @@ describe("runSelection", () => {
     })
 
     expect(r.winner?.id).toBe("cand-0")
-    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).not.toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
   })
 
   it("capped discovered-regression keep-green stays proof-missing, not safety-only", async () => {
@@ -1301,9 +1298,6 @@ describe("runSelection", () => {
     })
 
     expect(r.winner?.id).toBe("cand-0")
-    expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).not.toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
   })
 
   it("ADVERSARIAL: malformed soft resolved payload earns no voterQuorum credit", async () => {

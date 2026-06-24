@@ -3,11 +3,11 @@ import { type Candidate, runSelection } from "@/runner/batch/eval/selection-exec
 
 // B#3 (P0): in clean mode, when the risk gate decides NOT to expand candidate 0,
 // the executor must NOT blind-static-accept it. A no-expand cand0 still has to
-// clear the real clean hard-gate chain (staticSanity / clean-authority / drift /
-// mwe) via `finalize`. The pre-fix code routed the non-counterfactual /
-// non-proof-required arm through `staticAccept`, which hard-codes the wired ports
-// to null and skips every clean hard gate — so a deterministically-broken cand0
-// (e.g. a python callback arity mismatch) was selected and submitted anyway.
+// clear the real clean hard-gate chain (staticSanity / mwe / proof-required) via
+// `finalize`. The pre-fix code routed the non-counterfactual / non-proof-required
+// arm through `staticAccept`, which hard-codes the wired ports to null and skips
+// every clean hard gate — so a deterministically-broken cand0 (e.g. a net-new
+// undefined name introduced by the edit) was selected and submitted anyway.
 
 const diff =
   "diff --git a/pkg/owner.py b/pkg/owner.py\n--- a/pkg/owner.py\n+++ b/pkg/owner.py\n@@ -1,1 +1,1 @@\n-old\n+new_guard"
@@ -20,7 +20,8 @@ const cand0: Candidate = {
   baseValidatedRed: true,
 }
 
-const SANITY_REASON = "hard:staticSanity=pythonCallbackArityMismatch(_callback:2->3)"
+const SANITY_REASON =
+  "hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/owner.py)"
 
 describe("clean-mode no-expand must run the hard-gate chain (B#3)", () => {
   it("CLEAN + riskGate.expand=false: a staticSanity-failing cand0 is NOT selected", async () => {

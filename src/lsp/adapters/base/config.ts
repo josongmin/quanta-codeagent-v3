@@ -14,6 +14,14 @@ export interface LspClientOptions {
   workspaceFolders?: readonly string[]
   /** Client-side config surfaced via `workspace/configuration` requests. */
   workspaceConfiguration?: Readonly<Record<string, unknown>>
+  /** Optional whole-tree process killer supplied by the composition root. */
+  processTreeKiller?: LspProcessTreeKiller
+}
+
+export type LspProcessTreeSignal = "SIGTERM" | "SIGKILL"
+
+export interface LspProcessTreeKiller {
+  signalTree(rootPid: number, signal: LspProcessTreeSignal): void
 }
 
 /** Per-server identity supplied by the concrete adapter (its only variance). */

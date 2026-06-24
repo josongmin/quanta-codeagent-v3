@@ -22,6 +22,7 @@ import {
   TYPESCRIPT_LANGUAGE_SERVER_BIN,
   TypescriptAdapter,
 } from "@/lsp"
+import { defaultPpidWalkKiller } from "@/runtime"
 import { errMessage, type LspGroundingReceipt, logger, runtimeConfig } from "@/shared"
 import type { StaticEvidence as EvidenceStatic } from "@/tool"
 import {
@@ -81,25 +82,27 @@ interface ServerSpec {
   create(cwd: string): LspClient
 }
 
+const lspProcessTreeKiller = defaultPpidWalkKiller()
+
 const PYRIGHT: ServerSpec = {
   bin: PYRIGHT_LANGSERVER_BIN,
-  create: (cwd) => new PyrightAdapter({ cwd }),
+  create: (cwd) => new PyrightAdapter({ cwd, processTreeKiller: lspProcessTreeKiller }),
 }
 const TYPESCRIPT: ServerSpec = {
   bin: TYPESCRIPT_LANGUAGE_SERVER_BIN,
-  create: (cwd) => new TypescriptAdapter({ cwd }),
+  create: (cwd) => new TypescriptAdapter({ cwd, processTreeKiller: lspProcessTreeKiller }),
 }
 const RUST_ANALYZER: ServerSpec = {
   bin: RUST_ANALYZER_BIN,
-  create: (cwd) => new RustAnalyzerAdapter({ cwd }),
+  create: (cwd) => new RustAnalyzerAdapter({ cwd, processTreeKiller: lspProcessTreeKiller }),
 }
 const GOPLS: ServerSpec = {
   bin: GOPLS_BIN,
-  create: (cwd) => new GoplsAdapter({ cwd }),
+  create: (cwd) => new GoplsAdapter({ cwd, processTreeKiller: lspProcessTreeKiller }),
 }
 const CLANGD: ServerSpec = {
   bin: CLANGD_BIN,
-  create: (cwd) => new ClangdAdapter({ cwd }),
+  create: (cwd) => new ClangdAdapter({ cwd, processTreeKiller: lspProcessTreeKiller }),
 }
 
 const SERVER_SPEC_BY_BIN = new Map<string, ServerSpec>([
