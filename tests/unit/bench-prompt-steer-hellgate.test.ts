@@ -58,9 +58,19 @@ const promptText = (instance: Instance): string => {
   return block && block.type === "text" ? block.text : ""
 }
 
+// Always null the perturbers (preset selectors + lean-prompt) so a stray
+// QUANTA_BENCH_* in the dev shell can't flip the steer composition — the test
+// asserts on the GATE under test, nothing else. Per-test `vars` override.
+const PERTURBERS: Record<string, string | undefined> = {
+  QUANTA_BENCH_PRESET: undefined,
+  QUANTA_BENCH_SOTA: undefined,
+  QUANTA_KNOBS_PRESET: undefined,
+  QUANTA_BENCH_LEAN_PROMPT: undefined,
+}
+
 const withEnv = (vars: Record<string, string | undefined>, fn: () => void): void => {
   const prev = new Map<string, string | undefined>()
-  for (const [key, value] of Object.entries(vars)) {
+  for (const [key, value] of Object.entries({ ...PERTURBERS, ...vars })) {
     prev.set(key, process.env[key])
     if (value === undefined) delete process.env[key]
     else process.env[key] = value

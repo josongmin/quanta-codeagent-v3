@@ -36,12 +36,24 @@ describe("detectGodModules (line-count boundary)", () => {
   })
 })
 
+// A function whose BODY block spans exactly `span` source lines. Layout:
+//   line 1            `export function fn() {`   ← body block opens here
+//   lines 2..span-1   body statements
+//   line `span`       `}`                        ← body block closes here
+// so the AST body span (`endLine - startLine + 1`) == `span`.
+const fnWithBodySpan = (span: number): string => {
+  const stmts = Array.from({ length: span - 2 }, (_, i) => `  const y${i} = ${i}`).join("\n")
+  return `export function fn() {\n${stmts}\n}\n`
+}
+
 describe("detectGodFunctions (AST body span)", () => {
   test("a function whose BODY exceeds the threshold is flagged by file::name", () => {
-    const body = Array.from({ length: GOD_FUNCTION_MAX_LINES + 1 }, (_, i) => `  const y${i} = ${i}`).join("\n")
-    const text = `export function big() {\n${body}\n}\n`
-    const got = detectGodFunctions([{ path: "f.ts", text }])
-    expect(got.map((f) => f.key)).toEqual(["f.ts::big"])
+    const got = detectGodFunctions([{ path: "f.ts", text: fnWithBodySpan(GOD_FUNCTION_MAX_LINES + 1) }])
+    expect(got.map((f) => f.key)).toEqual(["f.ts::fn"])
+  })
+
+  test("a function whose BODY is exactly AT the threshold is NOT flagged (boundary)", () => {
+    expect(detectGodFunctions([{ path: "f.ts", text: fnWithBodySpan(GOD_FUNCTION_MAX_LINES) }])).toEqual([])
   })
 
   test("a short function is NOT flagged, and braces inside strings/comments don't inflate the span", () => {
