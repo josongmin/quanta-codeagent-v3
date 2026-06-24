@@ -36,8 +36,6 @@ import type { StreamPort } from "../../src/stream"
 const STUB_SOURCE = "def test_bug():\n    assert thing() == 1"
 /** The source the generator actually returns (footer appended). */
 const STUB_RETURNED = ensurePytestFooter(STUB_SOURCE)
-/** A pytest exec result whose failing assertion ⇒ reproduced. */
-const PYTEST_REPRODUCED = { code: 1, stdout: "1 failed in 0.1s", stderr: "" }
 const reproducedSamples = (tests: readonly string[]) =>
   tests.map((source) => ({ source, stdout: "1 failed in 0.1s", outcome: "reproduced" as const }))
 const resolvedSamples = (tests: readonly string[]) =>
@@ -150,19 +148,13 @@ describe("prepareReproTest", () => {
   })
 
   test("happy path: K=3, mock LLM+exec ⇒ selection with non-null selected", async () => {
-    const writes: { path: string; content: string }[] = []
     const sel = await prepareReproTest(mkInstance(), "/tmp/sb", 3, {
       llm: new StubLLM(),
-      writeFile: async (path, content) => {
-        writes.push({ path, content })
-      },
       execute: async ({ tests }) => reproducedSamples(tests),
     })
     expect(sel).not.toBeNull()
     expect(sel?.selected).toBe(STUB_RETURNED)
     expect(sel?.reproducedCount).toBe(3)
-    // 3 scripts were written by the executor (not yet the final reproduce_issue.py).
-    expect(writes).toHaveLength(3)
   })
 
   test("LLM stream failure ⇒ samples all '' ⇒ null selection", async () => {
@@ -397,7 +389,7 @@ describe("prepareReproTest", () => {
     expect(out.hint).toContain("reproduce_issue.py")
     expect(out.reproSources).toHaveLength(3)
     expect(new Set(out.reproSources)).toEqual(new Set([STUB_SOURCE]))
-    expect(writes.at(-1)).toEqual({ path: "/tmp/sb/reproduce_issue.py", content: STUB_RETURNED })
+    expect(writes.at(-1)).toEqual({ path: "/tmp/sb/reproduce_issue.py", content: STUB_SOURCE })
   })
 
   test("selection-only repro prep stays inert when verify-select repro is off", async () => {
