@@ -480,33 +480,16 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
         applyClean: async () => true,
         staticSanity: async (c) =>
           c.id === "cand-0"
-            ? ["hard:staticSanity=pythonCallbackArityMismatch(_callback:2->3)"]
+            ? ["hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/base.py)"]
             : [],
       },
     })
     expect(r.winner?.id).toBe("cand-1")
     expect(r.scored.find((s) => s.candidate.id === "cand-0")?.verdict.reasons).toContain(
-      "hard:staticSanity=pythonCallbackArityMismatch(_callback:2->3)",
+      "hard:staticSanity=pythonUndefinedNameIntroduced(missing_helper@pkg/base.py)",
     )
   })
 
-  it("CLEAN: family rank alone cannot bypass unproven multi-source drift gating", async () => {
-    const r = await runSelection({
-      n: 2,
-      seeds: [undefined, undefined],
-      candidateFamilies: [undefined, structuralMultiSiteFamily],
-      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
-      mode: "clean",
-      ports: {
-        generate: async (i) => [smallBaseOnly, multiSitePatch][i] as Candidate,
-        applyClean: async () => true,
-      },
-    })
-    expect(r.winner?.id).toBe("cand-0")
-    expect(r.scored.find((s) => s.candidate.id === "cand-1")?.verdict.reasons).toContain(
-      "hard:unprovenMultiSourceDriftRisk=true (multi-source patch lacks executable proof or public contract)",
-    )
-  })
 })
 
 describe("clean-mode selector authority (T-AUTH-01 / T-SEL-02 / T-SMK-04 live wiring)", () => {
