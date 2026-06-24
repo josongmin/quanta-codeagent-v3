@@ -1180,6 +1180,9 @@ const runSelectionExecutor = async (
     args.postureOverride?.specFidelityInvariant === true
       ? buildPublicDeclaredExpectedPort(
           extractIssueDeclaredExpected(args.instance.problemStatement),
+          // H1 dynamic-message-matcher: when on, narrow the matcher's dynamic-format
+          // abstain region via fixed-skeleton comparison (default-OFF ⇒ byte-identical).
+          { dynamicSkeleton: args.postureOverride?.dynamicMessageMatcher === true },
         )
       : undefined
   const { effectiveProofRequired } = computeEffectiveProofRequired(

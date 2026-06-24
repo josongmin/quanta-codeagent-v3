@@ -72,9 +72,77 @@ const isSpecBearing = (s: string): boolean => /\s/.test(s) || s.length >= 12
  *  otherwise be false-vetoed → PASS→FAIL). */
 const isFormatTemplate = (s: string): boolean => /\{[^}]*\}|%[sdrfgex]|%\(/.test(s)
 
+/** Placeholder pattern used to SPLIT a format template into its fixed fragments.
+ *  Broader than {@link isFormatTemplate}'s detector (it also consumes width/flag/
+ *  precision specifiers and `%(name)s` mapping keys) so a fragment never retains a
+ *  half-eaten conversion specifier. Only used AFTER a literal already qualified as a
+ *  template, so the broader set cannot reclassify a non-template literal. */
+const PLACEHOLDER_SPLIT_SOURCE = "\\{[^}]*\\}|%(?:\\([^)]*\\))?[#0\\- +]*\\d*(?:\\.\\d+)?[sdrfgex]"
+
+/**
+ * H1 dynamic-message-matcher — literal-SKELETON comparison for the abstain region.
+ *
+ * A dynamic-format competing literal (f-string / `%`-format / `str.format`) is split
+ * into its FIXED fragments (the runtime-substituted placeholders are removed). Those
+ * fragments are the parts the author HARD-CODED, so they are comparable to V
+ * execution-free even though the assembled runtime string is not.
+ *
+ * Verdict for ONE template `s` against the declared value `v` (both normalized):
+ *   "consistent" — every non-trivial fixed fragment of `s` appears in `v` IN ORDER
+ *                  (non-overlapping). The template is just `v` with the variable bits
+ *                  abstracted out → a correct dynamic fix → caller must NOT veto.
+ *   "competing"  — `s` has at least one substantive fixed fragment, and the ordered
+ *                  in-`v` match fails → the author hard-coded a DIFFERENT message
+ *                  shape → caller may veto.
+ *   "abstain"    — `s` carries no substantive fixed text (pure placeholder, or only
+ *                  trivial punctuation/spacing around the holes) → undecidable.
+ *
+ * A fixed fragment is "substantive" when, after trimming, it has whitespace OR is
+ * reasonably long — the SAME spec-bearing bar used for whole literals. This keeps a
+ * stray `": "` separator fragment from forcing a verdict.
+ */
+const SUBSTANTIVE_FRAGMENT_MIN_LEN = 6
+const fixedFragmentsOf = (template: string): readonly string[] => {
+  const raw = template.split(new RegExp(PLACEHOLDER_SPLIT_SOURCE))
+  return raw
+    .map((f) => normalize(f))
+    .filter((f) => f.length > 0 && (/\s/.test(f) || f.length >= SUBSTANTIVE_FRAGMENT_MIN_LEN))
+}
+
+/** Are `fragments` present in `v` as ordered, non-overlapping substrings? */
+const fragmentsInOrder = (fragments: readonly string[], v: string): boolean => {
+  let cursor = 0
+  for (const f of fragments) {
+    const at = v.indexOf(f, cursor)
+    if (at < 0) return false
+    cursor = at + f.length
+  }
+  return true
+}
+
+type SkeletonVerdict = "consistent" | "competing" | "abstain"
+const classifyTemplateSkeleton = (template: string, v: string): SkeletonVerdict => {
+  const fragments = fixedFragmentsOf(template)
+  if (fragments.length === 0) return "abstain"
+  return fragmentsInOrder(fragments, v) ? "consistent" : "competing"
+}
+
+/** Knobbed behavior toggles for the matcher (all default-OFF ⇒ byte-identical). */
+export interface DeclaredExpectedMatchOptions {
+  /** H1 dynamic-message-matcher (jun-24). When ON, a competing literal that is a
+   *  dynamic format template is no longer a blanket abstain: its FIXED skeleton is
+   *  compared against the declared value. A skeleton that does NOT match V's
+   *  structure is treated as a competing wrong message (veto); a skeleton that DOES
+   *  match V (the template is just V with the variable bits abstracted) still
+   *  abstains so a correct dynamic fix is never false-vetoed. Default-OFF ⇒ every
+   *  template literal abstains exactly as before. */
+  readonly dynamicSkeleton?: boolean
+}
+
 export const matchCandidateAgainstDeclaredExpected = (
   patch: string,
   expected: IssueDeclaredExpected,
+  options: DeclaredExpectedMatchOptions = {},
 ): boolean | null => {
   // Execution-free contradiction for an empty-output declaration is unreliable
   // (absence of a print is not visible as a competing literal). Abstain.
@@ -107,8 +175,25 @@ export const matchCandidateAgainstDeclaredExpected = (
     .filter((s) => s.length > 0 && isSpecBearing(s))
   // Dynamic-message templates are assembled at runtime; a literal comparison
   // cannot prove contradiction. If the ONLY competing literals are templates,
-  // abstain (the false-veto pole the audit flagged).
+  // the legacy matcher abstains (the false-veto pole the audit flagged).
   const concrete = competing.filter((s) => !isFormatTemplate(s))
+  const templates = competing.filter((s) => isFormatTemplate(s))
+
+  // H1 dynamic-message-matcher (default-OFF): try to DECIDE the template-only
+  // case via fixed-skeleton comparison instead of blanket-abstaining.
+  //  - any template whose skeleton is CONSISTENT with V ⇒ a correct dynamic fix
+  //    is plausibly present ⇒ abstain (never veto, even if other templates look
+  //    competing — we cannot prove the candidate is wrong).
+  //  - else, if at least one template is COMPETING (substantive fixed text that
+  //    does not align with V's structure) and NONE is consistent ⇒ veto.
+  //  - else (only pure-placeholder / non-substantive templates) ⇒ abstain.
+  if (options.dynamicSkeleton === true && concrete.length === 0 && templates.length > 0) {
+    const verdicts = templates.map((t) => classifyTemplateSkeleton(t, v))
+    if (verdicts.includes("consistent")) return null
+    if (verdicts.includes("competing")) return false
+    return null
+  }
+
   if (competing.length > 0 && concrete.length === 0) return null
   if (concrete.length > 0 && !concrete.some((s) => s.includes(v) || v.includes(s))) {
     return false
@@ -127,9 +212,11 @@ export const matchCandidateAgainstDeclaredExpected = (
  */
 export const buildPublicDeclaredExpectedPort = (
   expected: IssueDeclaredExpected | undefined,
+  options: DeclaredExpectedMatchOptions = {},
 ): ((c: Candidate) => Promise<boolean | null>) | undefined => {
   if (expected === undefined) return undefined
   if (expected.provenance !== PUBLIC_ISSUE_TEXT_PROVENANCE) return undefined
   if (expected.value.trim() === "") return undefined
-  return (c: Candidate) => Promise.resolve(matchCandidateAgainstDeclaredExpected(c.patch, expected))
+  return (c: Candidate) =>
+    Promise.resolve(matchCandidateAgainstDeclaredExpected(c.patch, expected, options))
 }

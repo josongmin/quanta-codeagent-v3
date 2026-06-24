@@ -153,6 +153,14 @@ export const FORWARD_LOCALIZE: KnobModule = {
   knobs: { "forward-localize": "1" },
 }
 
+/** H1 — dynamic-message-matcher (default-OFF). Layers on spec-fidelity-invariant:
+ *  narrows the declared-expected matcher's dynamic-format abstain region via
+ *  fixed-skeleton comparison so a WRONG dynamic message can be vetoed. */
+export const DYNAMIC_MESSAGE_MATCHER: KnobModule = {
+  id: "dynamic-message-matcher",
+  knobs: { "spec-fidelity-invariant": "1", "dynamic-message-matcher": "1" },
+}
+
 /** Multi-agent axis: subagent + bundled skills (the `everything` posture). */
 export const MULTI_AGENT: KnobModule = { id: "multi-agent", knobs: { subagent: "1", skills: "1" } }
 

@@ -161,6 +161,128 @@ describe("matchCandidateAgainstDeclaredExpected — execution-free spec fidelity
   })
 })
 
+describe("H1 dynamic-message-matcher — fixed-skeleton narrows the abstain region", () => {
+  const V = "TimeSeries object is invalid - expected ['time'] as the first columns"
+  const ON = { dynamicSkeleton: true } as const
+
+  test("RED-ON-DISABLE / regression floor: knob OFF ⇒ EVERY dynamic template abstains (legacy byte-identical)", () => {
+    // This is the parity guarantee. With the knob off, an f-string with a WRONG
+    // skeleton must STILL abstain (null) exactly as before the H1 change — proving
+    // the new behavior is fully gated. If the matcher decided this without the
+    // option, the legacy path would have regressed.
+    const wrong = patchAdding('raise ValueError(f"completely unrelated boom: {x} happened")')
+    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V))).toBeNull()
+    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), { dynamicSkeleton: false })).toBeNull()
+  })
+
+  test("ENGAGE: knob ON + WRONG f-string skeleton ⇒ false (veto) — the abstain region SHRANK", () => {
+    // The author hard-coded "completely unrelated boom:" / "happened" — neither is a
+    // fragment of V. Skeleton COMPETING ⇒ veto. This is the 13033 residual the legacy
+    // matcher (above) could only abstain on.
+    const wrong = patchAdding('raise ValueError(f"completely unrelated boom: {x} happened")')
+    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), ON)).toBe(false)
+  })
+
+  test("RED-ON-INJECTION (the teeth): knob ON + CONSISTENT f-string skeleton ⇒ null (abstain), NOT a false veto", () => {
+    // The fix is the CORRECT dynamic shape: V with the literal ['time'] abstracted to
+    // a runtime field. Every fixed fragment ("TimeSeries object is invalid - expected",
+    // "as the first columns") appears in V in order ⇒ consistent ⇒ MUST abstain. A
+    // skeleton matcher that vetoed here would false-fail a correct fix (PASS→FAIL).
+    const correct = patchAdding(
+      'raise ValueError(f"TimeSeries object is invalid - expected {required} as the first columns")',
+    )
+    expect(matchCandidateAgainstDeclaredExpected(correct, publicExpected(V), ON)).toBeNull()
+  })
+
+  test("ENGAGE: knob ON + WRONG %-format skeleton ⇒ false (veto)", () => {
+    const wrong = patchAdding('raise ValueError("the table is missing %s entirely now" % col)')
+    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), ON)).toBe(false)
+  })
+
+  test("ENGAGE: knob ON + CONSISTENT %-format skeleton ⇒ null (abstain)", () => {
+    // Fixed fragments ("TimeSeries object is invalid - expected", "as the first columns")
+    // are ordered substrings of V; only the %s sits where ['time'] is ⇒ consistent.
+    const correct = patchAdding(
+      'raise ValueError("TimeSeries object is invalid - expected %s as the first columns" % cols)',
+    )
+    expect(matchCandidateAgainstDeclaredExpected(correct, publicExpected(V), ON)).toBeNull()
+  })
+
+  test("ENGAGE: knob ON + WRONG str.format skeleton ⇒ false (veto)", () => {
+    const wrong = patchAdding('raise ValueError("nope, bad columns {0} were given".format(col))')
+    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), ON)).toBe(false)
+  })
+
+  test("ENGAGE: knob ON + CONSISTENT str.format skeleton ⇒ null (abstain)", () => {
+    const correct = patchAdding(
+      'raise ValueError("TimeSeries object is invalid - expected {0} as the first columns".format(cols))',
+    )
+    expect(matchCandidateAgainstDeclaredExpected(correct, publicExpected(V), ON)).toBeNull()
+  })
+
+  test("ENGAGE: knob ON + ORDER matters — fragments present but TRANSPOSED ⇒ false (veto)", () => {
+    // Both fragments occur in V but in the WRONG order. fragmentsInOrder must fail,
+    // so this is a competing (reordered) message, not a consistent skeleton. Kills a
+    // mutation of fragmentsInOrder → "every fragment is somewhere in V" (set-membership).
+    const transposed = patchAdding(
+      'raise ValueError(f"as the first columns {x} TimeSeries object is invalid - expected")',
+    )
+    expect(matchCandidateAgainstDeclaredExpected(transposed, publicExpected(V), ON)).toBe(false)
+  })
+
+  test("ENGAGE: knob ON + pure-placeholder template (no substantive fixed text) ⇒ null (undecidable)", () => {
+    // `"{0}"` / `f"{x}"` carry NO hard-coded message to compare; the runtime value is
+    // unknown ⇒ abstain even with the knob on. Kills a mutation that treats an
+    // empty-skeleton template as competing (it would false-veto a correct fix that
+    // forwards a computed message).
+    const placeholderOnly = patchAdding('raise ValueError(f"{computed_message}")')
+    expect(matchCandidateAgainstDeclaredExpected(placeholderOnly, publicExpected(V), ON)).toBeNull()
+  })
+
+  test("ENGAGE: knob ON + a CONSISTENT template alongside a competing one ⇒ null (consistency wins, no veto)", () => {
+    // Two added templates: one is the correct shape, one looks wrong. We cannot prove
+    // the candidate emits the wrong one, so a single consistent template forces
+    // abstain. Kills a mutation flipping `includes("consistent")` precedence.
+    const mixed = patchAdding(
+      'msg_a = f"TimeSeries object is invalid - expected {required} as the first columns"',
+      'msg_b = f"some other unrelated note {y} here"',
+    )
+    expect(matchCandidateAgainstDeclaredExpected(mixed, publicExpected(V), ON)).toBeNull()
+  })
+
+  test("ENGAGE: knob ON does NOT change the CONCRETE-literal path (a static wrong literal still vetoes)", () => {
+    // When a non-template concrete competing literal exists, the H1 branch is skipped
+    // entirely (concrete.length>0). The legacy concrete veto must be untouched.
+    const wrong = patchAdding('raise ValueError("the columns provided are not valid at all here")')
+    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), ON)).toBe(false)
+  })
+
+  test("ENGAGE: knob ON preserves the verbatim-consistent fast path (V surfaced literally ⇒ true)", () => {
+    const patch = patchAdding(`raise ValueError("${V}")`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V), ON)).toBe(true)
+  })
+})
+
+describe("H1 wiring-proof — buildPublicDeclaredExpectedPort threads the option to the matcher", () => {
+  const V = "TimeSeries object is invalid - expected ['time'] as the first columns"
+  const wrongDynamic = candidate(
+    patchAdding('raise ValueError(f"completely unrelated boom: {x} happened")'),
+  )
+
+  test("port built WITHOUT the option ⇒ dynamic wrong message abstains (null) — knob-OFF parity", async () => {
+    const port = buildPublicDeclaredExpectedPort(publicExpected(V))
+    expect(await port?.(wrongDynamic)).toBeNull()
+  })
+
+  test("port built WITH { dynamicSkeleton: true } ⇒ same dynamic wrong message vetoes (false)", async () => {
+    // Proves the boolean reaches the matcher through the port factory — the ONLY
+    // delta vs the OFF case above is the option, so the verdict flip is attributable
+    // to the wired knob (red-on-injection through the live port).
+    const port = buildPublicDeclaredExpectedPort(publicExpected(V), { dynamicSkeleton: true })
+    expect(await port?.(wrongDynamic)).toBe(false)
+  })
+})
+
 describe("buildPublicDeclaredExpectedPort — answer-key guard (red-on-injection)", () => {
   const V = "expected ['time', 'flux'] as the first columns"
 

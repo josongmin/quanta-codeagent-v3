@@ -32,6 +32,7 @@ import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { closureRepairKnob } from "@/runner/knobs/knobs/closure-repair"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
+import { dynamicMessageMatcherKnob } from "@/runner/knobs/knobs/dynamic-message-matcher"
 import { faultEvidenceKnob } from "@/runner/knobs/knobs/fault-evidence"
 import { forwardLocalizeKnob } from "@/runner/knobs/knobs/forward-localize"
 import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
@@ -95,6 +96,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(closeoutGuardKnob),
   asAnyKnob(closureRepairKnob),
   asAnyKnob(composeAuthoringKnob),
+  asAnyKnob(dynamicMessageMatcherKnob),
   asAnyKnob(faultEvidenceKnob),
   asAnyKnob(forwardLocalizeKnob),
   asAnyKnob(gitDirectiveKnob),
