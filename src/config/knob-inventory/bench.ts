@@ -253,6 +253,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
+    envKey: "QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (H1, jun-24 astropy-13033 residual): dynamic-message-matcher — narrow the spec-fidelity matcher's dynamic-format abstain region by comparing a candidate template's FIXED skeleton (literal fragments around the placeholders) against the PUBLIC declared value. Skeleton consistent with V ⇒ still abstain (correct dynamic fix); skeleton competing ⇒ the existing clean-mode veto may fire. Layers on QUANTA_BENCH_SPEC_FIDELITY_INVARIANT. Default-OFF ⇒ every template literal abstains (byte-identical).",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_FORWARD_LOCALIZE",
     kind: "bool",
     default: false,

@@ -382,6 +382,13 @@ export interface BenchPosture {
    *  for candidates that invent a different message shape. Default-OFF ⇒ the
    *  clean-mode declared-expected gate stays disabled (byte-identical). */
   readonly specFidelityInvariant: boolean
+  /** H1 (jun-24 astropy-13033 residual): dynamic-message-matcher. Layers on
+   *  specFidelityInvariant — when on, the declared-expected matcher compares a
+   *  candidate's dynamic-format (f-string / `%`-format / `.format`) FIXED skeleton
+   *  against the public declared value instead of blanket-abstaining, so a WRONG
+   *  dynamic message can be vetoed while a skeleton-consistent (correct) dynamic fix
+   *  still abstains. Default-OFF ⇒ every template literal abstains (byte-identical). */
+  readonly dynamicMessageMatcher: boolean
   /** T3 (jun-24): forward-localize on the deeper_localize adaptive route — trace
    *  the prior candidate's edited symbols to their consumer call-sites and widen
    *  the next pass's owner evidence. Default-OFF ⇒ deeper_localize stays a no-op. */
@@ -521,7 +528,8 @@ export const benchPostureFromState = (
   // QUANTA_BENCH_PRIMARY_RAIL, QUANTA_BENCH_PATCH_HYGIENE,
   // QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
   // QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER,
-  // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE.
+  // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
+  // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -533,6 +541,8 @@ export const benchPostureFromState = (
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
   const specFidelityInvariant = readKnobValue(state, "spec-fidelity-invariant", isTrue) === true
+  const dynamicMessageMatcher =
+    readKnobValue(state, "dynamic-message-matcher", isTrue) === true
   const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
@@ -584,6 +594,7 @@ export const benchPostureFromState = (
     repairEscalation,
     specFidelitySteer,
     specFidelityInvariant,
+    dynamicMessageMatcher,
     forwardLocalize,
     chaMultisiteSteer,
     round0Minimal,
