@@ -388,6 +388,7 @@ export interface BenchPosture {
 
 const isTrue = (v: unknown): v is true => v === true
 const isFalse = (v: unknown): v is false => v === false
+const isBoolean = (v: unknown): v is boolean => v === true || v === false
 const isInLoopExecMode = (v: unknown): v is BenchInLoopExecModeKnob =>
   v === "full" || v === "repro-only" || v === "off"
 const isNumber = (v: unknown): v is number => typeof v === "number"
@@ -466,7 +467,7 @@ export const benchPostureFromState = (
     isVerifySelectLlmRiskGateMode,
   )
   const verifySelectProofRequired =
-    readKnobValue(state, "verify-select-proof-required", isTrue) === true
+    readKnobValue(state, "verify-select-proof-required", isBoolean) ?? false
   const verifySelectRegression = readKnobValue(
     state,
     "verify-select-regression",

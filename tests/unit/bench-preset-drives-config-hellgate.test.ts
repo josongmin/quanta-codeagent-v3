@@ -486,6 +486,18 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean")).toBe(true)
   })
 
+  test("PRESET-15g: explicit env false beats proof-clean preset proof-required=true", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
+    process.env.QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED = "0"
+    const opt = benchOptIns()
+    expect(opt.verifySelectProofRequired).toBe(false)
+    const state = resolveBenchKnobs({ envVars: process.env })
+    expect(state.values.get("verify-select-proof-required")).toEqual({
+      source: "env",
+      value: false,
+    })
+  })
+
   test("PRESET-15c: no named preset may bake in targeted RCA gates", () => {
     const contaminated = Object.entries(KNOB_PRESETS).filter(
       ([, preset]) => preset["rca-target-gates"] !== undefined,

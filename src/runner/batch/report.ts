@@ -21,6 +21,7 @@
  * backwards compatibility; `scoreTotals` carries the authority split so only an
  * official harness green can count as clean leaderboard score.
  */
+import { createHash } from "node:crypto"
 import {
   aggregate,
   classify,
@@ -33,6 +34,7 @@ import {
   type LlmEvidencePacketStage,
   type LlmEvidenceRevisionByStage,
 } from "./eval/llm-evidence-packet"
+import { filesFromPatch } from "./eval/selection-paths"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 import { resolvedTotals, scoreTotals } from "./observe"
 import type {
@@ -86,6 +88,8 @@ export interface PerInstanceReport {
   passed: boolean
   turns: number
   patchBytes: number
+  modelPatchDigest?: string
+  touchedFiles?: string[]
   error?: string
   /** Structured failure classification. Omitted for passing runs. */
   failure?: FailureClassification
@@ -257,11 +261,19 @@ export const buildReport = (
       const proofSummary: SelectionProofSummary | undefined = r.selectionTelemetry?.proofSummary
       const llmEvidenceSummary =
         r.llmEvidence !== undefined ? summarizeLlmEvidenceArtifacts(r.llmEvidence) : undefined
+      const patchBytes = Buffer.byteLength(r.patch, "utf8")
+      const touchedFiles = filesFromPatch(r.patch)
       return {
         id: r.id,
         passed: r.passed,
         turns: r.turns,
-        patchBytes: Buffer.byteLength(r.patch, "utf8"),
+        patchBytes,
+        ...(r.patch.trim() !== ""
+          ? {
+              modelPatchDigest: createHash("sha256").update(r.patch, "utf8").digest("hex"),
+            }
+          : {}),
+        ...(touchedFiles.length > 0 ? { touchedFiles } : {}),
         ...(r.error !== undefined ? { error: r.error } : {}),
         ...(c.termination !== "passed" ? { failure: c } : {}),
         ...(r.budget !== undefined ? { budget: r.budget } : {}),

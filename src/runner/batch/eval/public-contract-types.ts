@@ -27,7 +27,7 @@
  */
 
 /** Kind of obligation a contract expresses. Generic across instances. */
-export type PublicContractKind =
+export type SelectionContractKind =
   | "exact-output"
   | "api-surface"
   | "owner-must-touch"
@@ -40,7 +40,7 @@ export type PublicContractKind =
  * selector's contract-dominance tier (an unsatisfied `required` contract demotes
  * a candidate); `supporting` contracts are advisory tie-break signal only.
  */
-export type PublicContractStrength = "required" | "supporting"
+export type SelectionContractStrength = "required" | "supporting"
 
 /**
  * Where the obligation came from. Provenance is carried through so the clean
@@ -76,8 +76,8 @@ export const isAdvisoryContractProvenance = (
 /** A single typed, provenance-carrying selector obligation or advisory hint. */
 export interface SelectionContract {
   readonly contractId: string
-  readonly kind: PublicContractKind
-  readonly strength: PublicContractStrength
+  readonly kind: SelectionContractKind
+  readonly strength: SelectionContractStrength
   readonly provenance: ContractProvenance
   /** Files the obligation is about (e.g. an owner file that must be touched). */
   readonly subjectFiles: readonly string[]
@@ -91,6 +91,8 @@ export interface SelectionContractBundle {
 }
 
 /** Back-compat names retained while runtime callers migrate. */
+export type PublicContractKind = SelectionContractKind
+export type PublicContractStrength = SelectionContractStrength
 export type PublicContract = SelectionContract
 export type PublicContractBundle = SelectionContractBundle
 
@@ -107,8 +109,8 @@ export interface ContractCandidate {
 /** Result of evaluating one contract against one candidate. */
 export interface ContractSatisfaction {
   readonly contractId: string
-  readonly kind: PublicContractKind
-  readonly strength: PublicContractStrength
+  readonly kind: SelectionContractKind
+  readonly strength: SelectionContractStrength
   readonly satisfied: boolean
 }
 

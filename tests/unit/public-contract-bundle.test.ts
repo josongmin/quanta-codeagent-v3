@@ -6,7 +6,7 @@ import {
   buildCleanSelectionAuthorityContracts,
   buildMultiSiteFamilyContract,
   buildOwnerMustTouchContracts,
-  buildPublicContractBundle,
+  buildSelectionContractBundle,
   contractsSatisfiedCount,
   evaluateContractSatisfaction,
   requiredContractsSatisfiedCount,
@@ -14,7 +14,7 @@ import {
 import {
   type ContractCandidate,
   filterAuthorityContractBundle,
-  type PublicContract,
+  type SelectionContract,
   renderContractAuthorityLabel,
 } from "@/runner/batch/eval/public-contract-types"
 
@@ -26,7 +26,7 @@ const candidate = (
 
 describe("builders: empty inputs derive []", () => {
   it("empty input bundle has no contracts (no obligation invented from nothing)", () => {
-    expect(buildPublicContractBundle({}).contracts).toEqual([])
+    expect(buildSelectionContractBundle({}).contracts).toEqual([])
   })
 
   it("each builder returns [] for empty/whitespace inputs", () => {
@@ -85,7 +85,7 @@ describe("contract authority labels", () => {
 
   it("filters static-witness contracts out of clean submit authority", () => {
     const authorityOnly = filterAuthorityContractBundle(
-      buildPublicContractBundle({
+      buildSelectionContractBundle({
         apiSymbols: ["MyClass.reset"],
         ownerFiles: ["pkg/owner.py"],
         publicTests: [{ testName: "tests/test_owner.py::test_owner", coveredFile: "pkg/owner.py" }],
@@ -137,7 +137,7 @@ describe("multi-site-family requires every site", () => {
 
 describe("required-contract violation distinguishes candidates (selector dominance)", () => {
   // generic static witness: one owner file + one API symbol.
-  const bundle = buildPublicContractBundle({
+  const bundle = buildSelectionContractBundle({
     ownerFiles: ["pkg/owner.py"],
     apiSymbols: ["api_fn"],
   })
@@ -215,7 +215,7 @@ describe("clean selection public contracts", () => {
 
 describe("provenance is carried through every kind", () => {
   it("exact-output ← public-issue-text; api/owner ← static-witness; reset ← validated-repro; test ← public-test", () => {
-    const bundle = buildPublicContractBundle({
+    const bundle = buildSelectionContractBundle({
       declaredExpected: { kind: "stdout", value: "42" },
       apiSymbols: ["sym"],
       ownerFiles: ["pkg/o.py"],
@@ -223,7 +223,7 @@ describe("provenance is carried through every kind", () => {
       resetOwnerFile: "pkg/reset.py",
       publicTests: [{ testName: "test_thing", coveredFile: "pkg/t.py" }],
     })
-    const provOf = (kind: PublicContract["kind"]) =>
+    const provOf = (kind: SelectionContract["kind"]) =>
       bundle.contracts.filter((c) => c.kind === kind).map((c) => c.provenance)
 
     expect(provOf("exact-output")).toEqual(["public-issue-text"])
@@ -234,7 +234,7 @@ describe("provenance is carried through every kind", () => {
   })
 
   it("no validated repro ⇒ no state-reset contract (provenance gate is real)", () => {
-    const bundle = buildPublicContractBundle({
+    const bundle = buildSelectionContractBundle({
       validatedReproPresent: false,
       resetOwnerFile: "pkg/reset.py",
     })
@@ -243,7 +243,7 @@ describe("provenance is carried through every kind", () => {
 })
 
 describe("exact-output contributes telemetry, never a structural veto", () => {
-  const bundle = buildPublicContractBundle({
+  const bundle = buildSelectionContractBundle({
     declaredExpected: { kind: "stdout", value: "expected text" },
   })
 

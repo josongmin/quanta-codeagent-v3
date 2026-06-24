@@ -16,7 +16,7 @@ import type {
 import type { CandidateFamily, CandidateFamilyId } from "./candidate-families"
 import type { LlmEvidencePacket } from "./llm-evidence-packet"
 import type { MweProofReceipt, MweProofState } from "./mwe-proof"
-import type { PublicContractBundle } from "./public-contract-types"
+import type { SelectionContractBundle } from "./public-contract-types"
 import type {
   ReproConsensusProofReceipt,
   ReproConsensusProofState,
@@ -72,16 +72,16 @@ export interface Candidate {
   /** OPTIONAL candidate-local public contracts discovered only after this
    *  patch exposed additional public structure. In clean mode the executor
    *  strips non-public provenance before these can affect submit authority. */
-  publicContracts?: PublicContractBundle
+  publicContracts?: SelectionContractBundle
   /** OPTIONAL candidate-local advisory structural contracts. These may be shown
    *  to the LLM in repair/review packets, but they never participate in submit
    *  authority or clean contract dominance. */
-  advisoryContracts?: PublicContractBundle
+  advisoryContracts?: SelectionContractBundle
 }
 
 export interface DerivedCandidateStructuralRepair {
   readonly family?: CandidateFamily
-  readonly advisoryContracts?: PublicContractBundle
+  readonly advisoryContracts?: SelectionContractBundle
 }
 
 export interface SelectionPorts {

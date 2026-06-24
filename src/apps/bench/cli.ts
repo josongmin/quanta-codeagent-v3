@@ -35,6 +35,14 @@ import { explainFailure } from "./analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "./analyze/leaderboard"
 import { loadVerdictsFromFile } from "./analyze/verdicts"
 import {
+  buildWave2AbRail,
+  buildWave2BacklogArtifact,
+  buildWave2CoverageCensus,
+  renderWave2AbMarkdown,
+  renderWave2BacklogMarkdown,
+  renderWave2CoverageMarkdown,
+} from "./analyze/wave2-analysis"
+import {
   AuthLeaseManager,
   type AuthSource,
   describeAuthSource,
@@ -92,6 +100,9 @@ const KNOWN_SUBCOMMANDS = new Set([
   "explain",
   "leaderboard",
   "cost",
+  "wave2-ab",
+  "wave2-coverage",
+  "wave2-backlog",
   "presets",
   "help",
   "--help",
@@ -1852,7 +1863,7 @@ const cmdLeaderboard = (): void => {
   // under — never a single blanket label. `--preset` is an explicit override.
   const presetOverride = argValue("--preset")
   const rows = reports.flatMap((p) => {
-    const v = loadVerdictsFromFile(p)
+    const verdicts = loadVerdictsFromFile(p)
     const meta = (() => {
       try {
         return JSON.parse(readFileSync(p, "utf8")) as {
@@ -1865,7 +1876,7 @@ const cmdLeaderboard = (): void => {
     })()
     const model = meta.model ?? "unknown"
     const preset = presetOverride ?? meta.knobs?.preset ?? "unknown"
-    return rowsFromRun(v, { preset, model })
+    return rowsFromRun(verdicts, { preset, model })
   })
   printBlock(renderLeaderboardMarkdown(rows, argValue("--title") ?? "SWE-bench leaderboard"))
 }
@@ -1887,6 +1898,79 @@ const cmdCost = (): void => {
   )
 }
 
+const cmdWave2Ab = (): void => {
+  const [controlReport, treatmentReport] = positionals()
+  const controlPredictions = argValue("--control-predictions")
+  const treatmentPredictions = argValue("--treatment-predictions")
+  if (
+    controlReport === undefined ||
+    treatmentReport === undefined ||
+    controlPredictions === undefined ||
+    treatmentPredictions === undefined
+  ) {
+    logger.info(
+      "usage: quanta-bench wave2-ab <control-report.json> <treatment-report.json> --control-predictions <control.jsonl> --treatment-predictions <treatment.jsonl>",
+    )
+    process.exit(2)
+  }
+  printBlock(
+    renderWave2AbMarkdown(
+      buildWave2AbRail({
+        controlReportPath: controlReport,
+        controlPredictionsPath: controlPredictions,
+        treatmentReportPath: treatmentReport,
+        treatmentPredictionsPath: treatmentPredictions,
+      }),
+    ),
+  )
+}
+
+const cmdWave2Coverage = (): void => {
+  const dataset = argValue("--dataset")
+  const report = argValue("--report")
+  const predictions = argValue("--predictions")
+  if (dataset === undefined || report === undefined || predictions === undefined) {
+    logger.info(
+      "usage: quanta-bench wave2-coverage --dataset <instances.jsonl> --report <report.json> --predictions <predictions.jsonl> [--limit N] [--min-cases N]",
+    )
+    process.exit(2)
+  }
+  const limit = argValue("--limit")
+  const minCases = argValue("--min-cases")
+  printBlock(
+    renderWave2CoverageMarkdown(
+      buildWave2CoverageCensus({
+        datasetPath: dataset,
+        reportPath: report,
+        predictionsPath: predictions,
+        ...(limit !== undefined ? { limit: Number.parseInt(limit, 10) } : {}),
+        ...(minCases !== undefined ? { minCases: Number.parseInt(minCases, 10) } : {}),
+      }),
+    ),
+  )
+}
+
+const cmdWave2Backlog = (): void => {
+  const dataset = argValue("--dataset")
+  const report = argValue("--report")
+  const predictions = argValue("--predictions")
+  if (dataset === undefined || report === undefined || predictions === undefined) {
+    logger.info(
+      "usage: quanta-bench wave2-backlog --dataset <instances.jsonl> --report <report.json> --predictions <predictions.jsonl>",
+    )
+    process.exit(2)
+  }
+  printBlock(
+    renderWave2BacklogMarkdown(
+      buildWave2BacklogArtifact({
+        datasetPath: dataset,
+        reportPath: report,
+        predictionsPath: predictions,
+      }),
+    ),
+  )
+}
+
 const cmdPresets = (): void => {
   for (const line of renderBenchPresetListLines()) logger.info(line)
 }
@@ -1899,6 +1983,9 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   explain      agent-vs-gold failure analysis for one instance
   leaderboard  render an official/local/research split table from run report(s)
   cost         token / $ / wall-clock summary for a run report
+  wave2-ab     compare thin-strict vs execfull with clean report/prediction provenance
+  wave2-coverage  classify multi-file misses as same/partial/disjoint
+  wave2-backlog   bucket clean receipts into completeness / generation / oracle
   presets      list bench presets
 
 Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}
@@ -1949,6 +2036,15 @@ const main = async (): Promise<void> => {
       return
     case "cost":
       cmdCost()
+      return
+    case "wave2-ab":
+      cmdWave2Ab()
+      return
+    case "wave2-coverage":
+      cmdWave2Coverage()
+      return
+    case "wave2-backlog":
+      cmdWave2Backlog()
       return
     case "presets":
       cmdPresets()

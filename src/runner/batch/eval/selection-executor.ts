@@ -70,10 +70,13 @@ import type {
 import type { MweProofReceipt } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
-  mergePublicContractBundles,
+  mergeSelectionContractBundles,
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
-import { filterAuthorityContractBundle, type PublicContractBundle } from "./public-contract-types"
+import {
+  filterAuthorityContractBundle,
+  type SelectionContractBundle,
+} from "./public-contract-types"
 import type { ReproConsensusProofReceipt } from "./repair/resolved-consensus"
 import type { PublicRegressionProofReceipt } from "./repo-regression-discovery-adapter"
 import {
@@ -210,8 +213,8 @@ export const buildSelectionInputs = (args: {
 
 const sanitizeCleanAuthorityContractsForMode = (
   mode: SelectorMode,
-  bundle: PublicContractBundle | undefined,
-): PublicContractBundle | undefined => {
+  bundle: SelectionContractBundle | undefined,
+): SelectionContractBundle | undefined => {
   if (bundle === undefined) return undefined
   if (mode !== "clean") return bundle
   return filterAuthorityContractBundle(bundle)
@@ -279,7 +282,7 @@ export interface RunSelectionArgs {
   /** OPTIONAL public-contract bundle (T-CON-10) for the clean lexicographic
    *  contract-dominance tier. When omitted, the contract tier stays empty.
    *  Ignored in research mode. */
-  publicContracts?: PublicContractBundle
+  publicContracts?: SelectionContractBundle
   /** Optional index-aligned family plan from typed static witness generation.
    *  Families steer exploration and clean lexicographic family rank only after
    *  the generated patch actually touches the family files. */
@@ -352,7 +355,7 @@ interface SelectionRunContext {
   readonly args: RunSelectionArgs
   readonly mode: SelectorMode
   readonly proofRequired: boolean
-  readonly contractBundle: PublicContractBundle
+  readonly contractBundle: SelectionContractBundle
   readonly limit: number
   readonly state: SelectionRunState
 }
@@ -414,14 +417,14 @@ const sanitizeCandidatePublicContracts = (
 
 const withCandidateAdvisoryContracts = (
   candidate: Candidate,
-  advisoryContracts: PublicContractBundle | undefined,
+  advisoryContracts: SelectionContractBundle | undefined,
 ): Candidate =>
   advisoryContracts === undefined
     ? candidate
     : {
         ...candidate,
         advisoryContracts:
-          mergePublicContractBundles(candidate.advisoryContracts, advisoryContracts) ??
+          mergeSelectionContractBundles(candidate.advisoryContracts, advisoryContracts) ??
           advisoryContracts,
       }
 
@@ -460,7 +463,7 @@ const maybeRepairFamilyCoverage = async (
   family: CandidateFamily,
   seed: string | undefined,
   index: number,
-  advisoryContracts?: PublicContractBundle,
+  advisoryContracts?: SelectionContractBundle,
 ): Promise<Candidate> => {
   const candidateWithFamily = withFamily(
     withCandidateAdvisoryContracts(candidate, advisoryContracts),
@@ -615,8 +618,8 @@ const probeOne = async (ctx: SelectionRunContext, candidate: Candidate): Promise
 const effectiveContractBundleFor = (
   ctx: SelectionRunContext,
   candidate: Candidate,
-): PublicContractBundle =>
-  mergePublicContractBundles(ctx.contractBundle, candidate.publicContracts) ?? ctx.contractBundle
+): SelectionContractBundle =>
+  mergeSelectionContractBundles(ctx.contractBundle, candidate.publicContracts) ?? ctx.contractBundle
 
 const contractCandidateOf = (
   candidate: Candidate,

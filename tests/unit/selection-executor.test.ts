@@ -8,7 +8,7 @@ import {
   buildCleanSelectionAuthorityContracts,
   buildMultiSiteFamilyContract,
 } from "@/runner/batch/eval/public-contract-bundle"
-import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
+import type { SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
 import {
   buildSelectionInputs,
   type Candidate,
@@ -55,12 +55,12 @@ const patchForFiles = (files: readonly string[]): string =>
     )
     .join("\n")
 
-const issueOwnerContracts = (file: string): PublicContractBundle =>
+const issueOwnerContracts = (file: string): SelectionContractBundle =>
   buildCleanSelectionAuthorityContracts({
     candidates: [{ file, sources: ["issue-file"] }],
   }) ?? { contracts: [] }
 
-const publicMultiSiteContracts = (files: readonly string[]): PublicContractBundle => ({
+const publicMultiSiteContracts = (files: readonly string[]): SelectionContractBundle => ({
   contracts: [
     {
       contractId: `multi-site-family:${files.join("|")}`,
@@ -886,6 +886,7 @@ describe("runSelection", () => {
     expect(seeds).toHaveLength(3)
     expect(seeds[2]).toContain("Previous attempt missed required family owner files")
     expect(seeds[2]).toContain("`pkg/owner.py`")
+    expect(seeds[2]).toContain("Bounded co-edit primitive")
     expect(r.winner?.id).toBe("cand-2")
   })
 
@@ -1102,6 +1103,7 @@ describe("runSelection", () => {
     expect(seeds[1]).toContain("partial family surface")
     expect(seeds[1]).toContain("django/db/backends/base/client.py")
     expect(seeds[1]).toContain("Previous attempt missed required family owner files")
+    expect(seeds[1]).toContain("Bounded co-edit primitive")
     expect(seeds[1]).not.toContain(
       "Previous attempt missed required family owner files: `django/db/backends/base/client.py`, `django/db/backends/postgresql/client.py`",
     )

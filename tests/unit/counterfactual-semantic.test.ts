@@ -3,7 +3,7 @@ import { analyzePatchBudget } from "@/agent/patch-budget"
 import {
   deriveSemanticCounterfactualContracts,
   evaluateCounterfactualContracts,
-  type FailedPublicContract,
+  type FailedSelectionContract,
 } from "@/runner/batch/eval/counterfactual-contract"
 import type { CandidateRiskFacts } from "@/runner/batch/eval/counterfactual-risk"
 import { buildCounterfactualSeed } from "@/runner/batch/eval/counterfactual-seed"
@@ -34,7 +34,7 @@ const baseFacts = (over: Partial<CandidateRiskFacts> = {}): CandidateRiskFacts =
 
 describe("deriveSemanticCounterfactualContracts — opposite side of failed contract", () => {
   it("HELLGATE: symptom-owner cand0 that missed a lifecycle-owner contract targets the lifecycle family", () => {
-    const failed: FailedPublicContract = {
+    const failed: FailedSelectionContract = {
       kind: "lifecycle-owner",
       subjectFiles: ["pkg/lifecycle.py"],
     }

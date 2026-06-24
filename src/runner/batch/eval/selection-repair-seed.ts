@@ -35,8 +35,11 @@ import {
   renderLlmEvidencePacket,
   type VerificationTargetFact,
 } from "./llm-evidence-packet"
-import { evaluateBundle, mergePublicContractBundles } from "./public-contract-bundle"
-import { type PublicContractBundle, renderContractAuthorityLabel } from "./public-contract-types"
+import { evaluateBundle, mergeSelectionContractBundles } from "./public-contract-bundle"
+import {
+  type SelectionContractBundle,
+  renderContractAuthorityLabel,
+} from "./public-contract-types"
 import { cleanDriftRejected } from "./selection-gates"
 import {
   hasContractOnlyEvidence,
@@ -228,6 +231,7 @@ const cleanDriftRepairRequired = (scored: readonly ScoredEntry[]): boolean => {
 interface MissingFamilyRepairTarget {
   readonly family: CandidateFamily
   readonly missingFiles: readonly string[]
+  readonly touchedFiles: readonly string[]
 }
 
 const bestMissingFamily = (
@@ -240,6 +244,7 @@ const bestMissingFamily = (
         candidateFamilyOf(entry.candidate),
         entry.candidate.files,
       ),
+      touchedFiles: entry.candidate.files,
       order,
     }))
     .filter(
@@ -248,18 +253,30 @@ const bestMissingFamily = (
       ): entry is {
         family: CandidateFamily
         missing: string[]
+        touchedFiles: readonly string[]
         order: number
       } => entry.family !== undefined && entry.missing.length > 0,
     )
     .sort((a, b) => a.family.ownerFiles.length - b.family.ownerFiles.length || a.order - b.order)
   const best = ranked[0]
-  return best === undefined ? undefined : { family: best.family, missingFiles: best.missing }
+  return best === undefined
+    ? undefined
+    : { family: best.family, missingFiles: best.missing, touchedFiles: best.touchedFiles }
 }
 
 const familyRepairSeed = (scored: readonly ScoredEntry[]): string | undefined => {
   const target = bestMissingFamily(scored)
   if (target === undefined) return undefined
-  return seedForCandidateFamilyCoverageRepair(target.family, target.missingFiles)
+  const touchedFamilyFiles = target.touchedFiles.filter((file) => target.family.ownerFiles.includes(file))
+  const touchedLine =
+    touchedFamilyFiles.length === 0
+      ? ""
+      : ` Already-touched family files: ${touchedFamilyFiles.map((file) => `\`${file}\``).join(", ")}.`
+  const missingLine = target.missingFiles.map((file) => `\`${file}\``).join(", ")
+  return joinSeedSections([
+    seedForCandidateFamilyCoverageRepair(target.family, target.missingFiles),
+    `Bounded co-edit primitive:${touchedLine} Derive one equivalent edit pattern from the already-confirmed family site(s), then apply that same transformation across the remaining family owner files ${missingLine} in one repair step. Do not re-derive each sibling independently or widen beyond the named family.`,
+  ])
 }
 
 const familyCoverageRepairRequired = (scored: readonly ScoredEntry[]): boolean =>
@@ -489,7 +506,7 @@ type BuildRepairPacketTextArgs = {
   readonly scored: readonly ScoredEntry[]
   readonly seed: string
   readonly winner: Candidate | null
-  readonly contractBundle?: PublicContractBundle
+  readonly contractBundle?: SelectionContractBundle
   readonly problemStatement: string
   readonly verificationTarget?: VerificationTargetFact
   /** B1: issue symbols used to resolve the EXACT owner source slice (paired with
@@ -553,8 +570,8 @@ const repairContractsOf = (
   focusCandidate: Candidate | undefined,
 ): ContractFact[] => {
   if (focusCandidate === undefined) return []
-  const effectiveContracts = mergePublicContractBundles(
-    mergePublicContractBundles(args.contractBundle, focusCandidate.publicContracts),
+  const effectiveContracts = mergeSelectionContractBundles(
+    mergeSelectionContractBundles(args.contractBundle, focusCandidate.publicContracts),
     focusCandidate.advisoryContracts,
   )
   if (effectiveContracts === undefined) return []

@@ -128,10 +128,8 @@ import {
   buildCandidatePostReviewLlmEvidencePacket,
   buildIntakeLlmEvidencePacket,
   buildSelectionExplanationPacket,
-  buildSelectionGenerationPrompt,
   buildSelectionOwnerEvidence,
   type CandidateEditSurfaceFact,
-  type ContractFact,
   candidatePatchHash,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
@@ -140,6 +138,7 @@ import {
   ownerTestResultReceipt,
   type ProofReceiptFact,
   recordLlmEvidencePacket,
+  type SelectionGenerationPromptInput,
   toPhaseRoutingContract,
   type VerificationTargetFact,
   verificationTargetFromPlan,
@@ -151,10 +150,9 @@ import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import {
   buildCleanSelectionAuthorityContracts,
-  mergePublicContractBundles,
+  mergeSelectionContractBundles,
 } from "./public-contract-bundle"
-import type { PublicContractBundle } from "./public-contract-types"
-import { renderContractAuthorityLabel } from "./public-contract-types"
+import type { SelectionContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
@@ -219,6 +217,13 @@ import {
   type SelectionTelemetry,
   summarizeSelection,
 } from "./selection-executor"
+import {
+  buildSelectionCandidateFamilyBundle,
+  buildSelectionStructuralPlan,
+  composeSelectionAgentHint,
+  prepareSelectionEvidenceContext,
+  withCandidateFamilyAuthorityContracts,
+} from "./selection-assembly"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
@@ -233,6 +238,14 @@ import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 import { discoverVerificationOwnerTests } from "./verification-owner-tests"
+
+export {
+  buildSelectionCandidateFamilyBundle,
+  cleanSelectionPromptEnabled,
+  composeSelectionAgentHint,
+  selectionGenerationEnvCaveats,
+  withCandidateFamilyAuthorityContracts,
+} from "./selection-assembly"
 
 export interface RunInstanceDeps {
   llm: LLMPort
@@ -2967,114 +2980,12 @@ const mergeSelectionHint = (
   return `${closureHint}\n\n${seed}`
 }
 
-/** Map a public-contract bundle into typed, provenance-carrying contract facts. */
-const contractFactsFromBundle = (
-  contracts: PublicContractBundle | undefined,
-): readonly ContractFact[] =>
-  contracts?.contracts.map((c) => ({
-    contractId: c.contractId,
-    authority: renderContractAuthorityLabel(c),
-    satisfied: "unknown" as const,
-  })) ?? []
-
-export const selectionGenerationEnvCaveats = (args: {
-  readonly reproHint: string | undefined
-  readonly reproTest: BenchReproTestTelemetry | undefined
-}): readonly string[] => {
-  if (args.reproHint !== undefined && args.reproHint.trim() !== "") return []
-  const repro = args.reproTest
-  if (repro === undefined || repro.installed) return []
-  switch (repro.reason) {
-    case "not_installed":
-      return [
-        "public repro helper is unavailable in this runtime; no executable public repro command is attached",
-      ]
-    case "generation_failed":
-      return [
-        "public repro helper synthesis failed before execution; no executable public repro command is attached",
-      ]
-    case "generation_empty":
-      return [
-        "public repro helper synthesis produced no runnable script; no executable public repro command is attached",
-      ]
-    case "write_failed":
-      return [
-        "public repro helper could not be written into the sandbox; no executable public repro command is attached",
-      ]
-    case "execution_failed":
-      return [
-        "attempted public repro helper failed to execute on the base environment; no executable public repro command is attached",
-      ]
-    case "no_reproduced_candidate":
-      return [
-        "generated public repro helpers did not reproduce on the base environment; no executable public repro command is attached",
-      ]
-    default:
-      return []
-  }
-}
-
-const buildSelectionStructuralPlan = (args: {
-  readonly instance: Instance
-  readonly sandbox: string
-  readonly selectionOwnerCandidates: readonly string[]
-  readonly ownerResolved: readonly OwnerSibling[] | undefined
-  readonly publicContracts: PublicContractBundle | undefined
-  readonly n: number
-}) => {
-  const normalizedOwnerCandidates = normalizeSelectionPaths(
-    args.selectionOwnerCandidates,
-    args.sandbox,
-  )
-  const staticWitnessInput = {
-    problemStatement: args.instance.problemStatement,
-    ownerCandidates: normalizedOwnerCandidates,
-    ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-    readSource: (rel: string) => readSandboxSource(args.sandbox, rel),
-  }
-  const staticWitnesses = buildAstStaticWitnesses(staticWitnessInput)
-  const staticWitnessDiagnostics = staticWitnessLanguageDiagnostics(staticWitnessInput)
-  const candidateFamilyBundle = withStaticWitnessFamilies(
-    buildSelectionCandidateFamilyBundle({
-      problemStatement: args.instance.problemStatement,
-      ownerCandidates: normalizedOwnerCandidates,
-      ownerResolved: args.ownerResolved,
-      readSource: (rel) => readSandboxSource(args.sandbox, rel),
-    }),
-    staticWitnesses,
-  )
-  // Split the contract surface here:
-  // selector authority gets only caller-supplied public contracts; prompt/advisory
-  // context may additionally include structural static-witness contracts.
-  const selectionAuthorityContracts = withCandidateFamilyAuthorityContracts(
-    args.publicContracts,
-    candidateFamilyBundle,
-  )
-  const advisoryPromptContracts = mergePublicContractBundles(selectionAuthorityContracts, {
-    contracts: buildStaticWitnessContracts(staticWitnesses),
-  })
-  const selectionInputs = buildSelectionInputs({
-    n: args.n,
-    ownerCandidates: normalizedOwnerCandidates,
-    sandbox: args.sandbox,
-    ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
-  })
-  return {
-    advisoryPromptContracts,
-    candidateFamilyBundle,
-    selectionAuthorityContracts,
-    selectionInputs,
-    staticWitnesses,
-    staticWitnessDiagnostics,
-  }
-}
-
 const buildSelectionPhaseContracts = (args: {
   readonly instance: Instance
   readonly sandbox: string
   readonly selectionOwnerCandidates: readonly string[]
   readonly ownerResolved: readonly OwnerSibling[] | undefined
-  readonly publicContracts: PublicContractBundle | undefined
+  readonly publicContracts: SelectionContractBundle | undefined
   readonly n: number
 }) => {
   const {
@@ -3083,7 +2994,15 @@ const buildSelectionPhaseContracts = (args: {
     selectionInputs,
     staticWitnesses,
     staticWitnessDiagnostics,
-  } = buildSelectionStructuralPlan(args)
+  } = buildSelectionStructuralPlan({
+    problemStatement: args.instance.problemStatement,
+    sandbox: args.sandbox,
+    selectionOwnerCandidates: args.selectionOwnerCandidates,
+    ownerResolved: args.ownerResolved,
+    publicContracts: args.publicContracts,
+    n: args.n,
+    readSource: (rel) => readSandboxSource(args.sandbox, rel),
+  })
   return {
     advisoryPromptContracts,
     selectionAuthorityContracts,
@@ -3108,7 +3027,7 @@ const resolveSelectionPhasePorts = async (args: {
   readonly reproSources: readonly string[]
   readonly baseValidatedRed: boolean
   readonly selectionOwnerCandidates: readonly string[]
-  readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
+  readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
 }) => {
   const {
     reproPolicy,
@@ -3206,11 +3125,11 @@ type SelectionExecutorPortsArgs = {
   readonly postureOverride: BenchPosture | undefined
   readonly stateOverride: BenchKnobState | undefined
   readonly chaMultisiteSteer: string | undefined
-  readonly selectionOwnerEvidence: ReturnType<typeof buildSelectionOwnerEvidence>
+  readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
   readonly staticWitnessDiagnostics: readonly StaticWitnessDiagnostic[]
-  readonly promptContracts: PublicContractBundle | undefined
+  readonly promptContracts: SelectionContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly recordLlmEvidencePacket: ((packet: LlmEvidencePacket) => void) | undefined
   readonly concurrency: number | undefined
@@ -3226,52 +3145,11 @@ type SelectionExecutorPortsArgs = {
   readonly reproConsensusProofSelectionPort: SelectionPorts["reproConsensusProof"]
 }
 
-const cleanSelectionPromptEnabled = (args: SelectionExecutorPortsArgs): boolean =>
-  args.verifySelectProofRequired && args.selectorMode === "clean"
-
-const selectionCandidateSeed = (
-  args: SelectionExecutorPortsArgs,
-  seed: string | undefined,
-): string | undefined => {
-  if (!cleanSelectionPromptEnabled(args)) return seed
-  return buildSelectionGenerationPrompt({
-    problemStatement: args.instance.problemStatement,
-    ownerEvidence: args.selectionOwnerEvidence,
-    contracts: contractFactsFromBundle(args.promptContracts),
-    baseValidatedRed: args.baseValidatedRed,
-    ...(args.verificationTarget !== undefined
-      ? { verificationTarget: args.verificationTarget }
-      : {}),
-    ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
-    ...(args.validatedReproScripts.length > 0
-      ? { validatedReproScripts: args.validatedReproScripts }
-      : {}),
-    ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
-    ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
-    ...(args.staticWitnessDiagnostics.length > 0
-      ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
-      : {}),
-    // Scripts reach generation ONCE via `validatedReproScripts` staticFacts;
-    // NOT also merged into `seed` (that destroyed the diversity seed via the
-    // seed length cap + duplicated the scripts).
-    ...(seed !== undefined ? { seed } : {}),
-    ...(args.recordLlmEvidencePacket !== undefined
-      ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
-      : {}),
-  })
-}
-
-const selectionMergeHint = (
-  args: SelectionExecutorPortsArgs,
-  seedHint: string | undefined,
-): string | undefined =>
-  cleanSelectionPromptEnabled(args) ? seedHint : mergeSelectionHint(args.closureHint, seedHint)
-
 const generateSelectionPort =
   (args: SelectionExecutorPortsArgs) => (index: number, seed?: string) =>
     generateSelectionCandidate({
       index,
-      seed: selectionCandidateSeed(args, seed),
+      seed,
       instance: args.instance,
       deps: args.deps,
       sandbox: args.sandbox,
@@ -3282,7 +3160,29 @@ const generateSelectionPort =
       postureOverride: args.postureOverride,
       stateOverride: args.stateOverride,
       chaMultisiteSteer: args.chaMultisiteSteer,
-      mergeHint: (seedHint) => selectionMergeHint(args, seedHint),
+      mergeHint: (seedHint) =>
+        composeSelectionAgentHint(
+          {
+            verifySelectProofRequired: args.verifySelectProofRequired,
+            selectorMode: args.selectorMode,
+            problemStatement: args.instance.problemStatement,
+            ownerEvidence: args.selectionOwnerEvidence,
+            promptContracts: args.promptContracts,
+            baseValidatedRed: args.baseValidatedRed,
+            ...(args.verificationTarget !== undefined
+              ? { verificationTarget: args.verificationTarget }
+              : {}),
+            ...(args.reproHint !== undefined ? { reproHint: args.reproHint } : {}),
+            validatedReproScripts: args.validatedReproScripts,
+            ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+            envCaveats: args.envCaveats,
+            staticWitnessDiagnostics: args.staticWitnessDiagnostics,
+            ...(args.recordLlmEvidencePacket !== undefined
+              ? { recordLlmEvidencePacket: args.recordLlmEvidencePacket }
+              : {}),
+          },
+          seedHint,
+        ),
       concurrency: args.concurrency,
       baseValidatedRed: args.baseValidatedRed,
       generationErrors: args.generationErrors,
@@ -3390,7 +3290,7 @@ const runSelectionPhase = async (
   counterfactual: boolean,
   selectorMode: BenchPosture["selectorMode"],
   verifySelectProofRequired: boolean,
-  publicContracts: PublicContractBundle | undefined,
+  publicContracts: SelectionContractBundle | undefined,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   regressionMaxTests: number | undefined,
   verifySelectRepro: BenchPosture["verifySelectRepro"],
@@ -3408,20 +3308,6 @@ const runSelectionPhase = async (
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
 ): Promise<Phase> => {
-  const {
-    advisoryPromptContracts,
-    selectionAuthorityContracts,
-    selectionInputs,
-    staticWitnesses,
-    staticWitnessDiagnostics,
-  } = buildSelectionPhaseContracts({
-    instance,
-    sandbox,
-    selectionOwnerCandidates,
-    ownerResolved,
-    publicContracts,
-    n,
-  })
   // jun-23 split: ADVISORY repair seed = canonical (submit-gate) scripts FIRST,
   // then any hardening scripts as extra coverage guidance. Hardening NEVER gates
   // submit; it only seeds repair / breaks ties. Canonical-only ⇒ byte-identical.
@@ -3431,17 +3317,30 @@ const runSelectionPhase = async (
   ])
   const generationErrors = new Map<number, string>()
   const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
-  const verificationTarget = verificationTargetFromPlan(verificationPlan)
-  const selectionOwnerEvidence = buildSelectionOwnerEvidence({
-    ownerFiles: selectionInputs.ownerFiles,
-    issueSymbols: extractIssueHint(instance.problemStatement).symbols,
-    staticWitnesses,
-    readSource: (rel) => readSandboxSource(sandbox, rel),
-  })
-  const generationEnvCaveats = selectionGenerationEnvCaveats({
+  const selectionContext = prepareSelectionEvidenceContext({
+    problemStatement: instance.problemStatement,
+    sandbox,
+    n,
+    ownerCandidates: selectionOwnerCandidates,
+    ownerResolved,
+    publicContracts,
+    verifySelectRegression,
+    baseValidatedRed,
     reproHint,
     reproTest,
+    verificationTarget: verificationTargetFromPlan(verificationPlan),
+    oracleFailureRepairSeed,
+    readSource: (rel) => readSandboxSource(sandbox, rel),
   })
+  const {
+    advisoryPromptContracts,
+    selectionAuthorityContracts,
+    selectionInputs,
+    selectionOwnerEvidence,
+    verificationTarget,
+    staticWitnessDiagnostics,
+    generationEnvCaveats,
+  } = selectionContext
   let totalTurns = 0
   const selectionState = await resolveSelectionPhasePorts({
     instance,
@@ -3790,32 +3689,6 @@ const readSandboxSource = (sandbox: string, rel: string): string | null => {
   }
 }
 
-const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
-const issueMentionsSymbol = (issueText: string, symbol: string): boolean =>
-  new RegExp(`\\b${escapeRegex(symbol)}\\b`).test(issueText)
-
-export const buildSelectionCandidateFamilyBundle = (args: {
-  readonly problemStatement: string
-  readonly ownerCandidates: readonly string[]
-  readonly ownerResolved: readonly OwnerSibling[] | undefined
-  readonly readSource: (relFile: string) => string | null
-}) => {
-  const problemStatement = normalizePublicIssueText(args.problemStatement) ?? args.problemStatement
-  const symbolOwners = args.ownerCandidates.flatMap((file) => {
-    const source = args.readSource(file)
-    if (source === null) return []
-    const symbols = defsInSource(source).filter((symbol) =>
-      issueMentionsSymbol(problemStatement, symbol),
-    )
-    return symbols.length === 0 ? [] : [{ file, symbols }]
-  })
-  return buildCandidateFamilyBundleFromWitness({
-    symbolOwners,
-    ownerResolved: args.ownerResolved ?? [],
-  })
-}
-
 const betterRepairFamily = (
   candidateFiles: readonly string[],
   left: CandidateFamily | undefined,
@@ -3888,12 +3761,13 @@ export const deriveCandidateStructuralRepair = async (args: {
     ...ownerResolved.map((owner) => owner.file),
   ])
   const structural = buildSelectionStructuralPlan({
-    instance: args.instance,
+    problemStatement: args.instance.problemStatement,
     sandbox: args.sandbox,
     selectionOwnerCandidates,
     ownerResolved,
     publicContracts: undefined,
     n: 2,
+    readSource: (rel) => readSandboxSource(args.sandbox, rel),
   })
   const chaFamily = await deriveChaOverrideFamily(args)
   const family =
@@ -3912,15 +3786,6 @@ export const deriveCandidateStructuralRepair = async (args: {
       : {}),
   }
 }
-
-export const withCandidateFamilyAuthorityContracts = (
-  publicContracts: PublicContractBundle | undefined,
-  _candidateFamilyBundle: CandidateFamilyBundle | undefined,
-): PublicContractBundle | undefined =>
-  // Candidate families are structural search hints only. They may seed
-  // localization/generation/repair, but they do not mint required contracts
-  // without executable public proof.
-  publicContracts
 
 export const withCandidateFamilyPublicContracts = withCandidateFamilyAuthorityContracts
 

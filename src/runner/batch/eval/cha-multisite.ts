@@ -51,12 +51,15 @@ export interface SiblingOverrideSite {
  * stdout (sites EXCLUDES the target class itself). Robustness: unparseable files
  * are skipped; no target class (method not found in targetRelFile) ⇒ empty sites.
  *
- * Sibling rule (deliberately conservative — shared BASE, not name-match): a class
- * C is a sibling iff C defines a method named `method` AND C's ancestor set
- * intersects the target class's ancestor set. Django backend files also get a
- * narrow same-file-family fallback so equivalent contract surfaces with different
- * helper names are still inspected. The target class itself is excluded from its
- * own sibling list.
+ * Sibling rule (symptom-coupled, not "all overrides"): a class C is a sibling iff
+ * C defines a method named `method`, C's ancestor set intersects the target
+ * class's ancestor set, AND the sibling method body is structurally similar to
+ * the localized target override. This keeps real co-change siblings while
+ * rejecting divergent overrides that share the base but not the bug shape
+ * (e.g. a backend with a fundamentally different timezone implementation).
+ * Django backend files also get a narrow same-file-family fallback so equivalent
+ * contract surfaces with different helper names are still inspected. The target
+ * class itself is excluded from its own sibling list.
  */
 export const CHA_ANALYZER_PY = `
 import ast, json, os, sys
@@ -100,6 +103,7 @@ def rel_import_to_rel(cur_rel, mod, level):
 # Per-file: import map (local name -> "relfile::Name") + class list.
 # classes registry keyed by qualified id "relfile::Name".
 classes = {}       # qid -> {file, cls, line, method_line, raw_bases:[node]}
+method_nodes = {}  # qid -> ast.FunctionDef/AsyncFunctionDef for the target method
 file_imports = {}  # relfile -> { localname -> qid_or_namefallback }
 file_classes = {}  # relfile -> set(class names defined here)
 
@@ -151,9 +155,11 @@ for rel, tree in trees.items():
             continue
         qid = rel + "::" + node.name
         method_line = None
+        method_node = None
         for item in node.body:
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == method:
                 method_line = item.lineno
+                method_node = item
                 break
         bqids = set()
         for b in node.bases:
@@ -162,6 +168,8 @@ for rel, tree in trees.items():
                 bqids.add(r)
         classes[qid] = {"file": rel, "cls": node.name, "line": node.lineno,
                         "method_line": method_line, "bases": bqids}
+        if method_node is not None:
+            method_nodes[qid] = method_node
 
 def ancestors(qid):
     seen = set()
@@ -173,6 +181,44 @@ def ancestors(qid):
         seen.add(a)
         stack.extend(classes.get(a, {}).get("bases", set()))
     return seen
+
+def call_name(func):
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return type(func).__name__
+
+def method_signature(node):
+    toks = set()
+    if node is None:
+        return toks
+    for child in ast.walk(node):
+        if child is node:
+            continue
+        if isinstance(child, ast.stmt):
+            toks.add("stmt:" + type(child).__name__)
+        if isinstance(child, ast.Call):
+            toks.add("call:" + call_name(child.func))
+        if isinstance(child, ast.Attribute):
+            toks.add("attr:" + child.attr)
+        if isinstance(child, ast.BinOp):
+            toks.add("binop:" + type(child.op).__name__)
+        if isinstance(child, ast.BoolOp):
+            toks.add("boolop:" + type(child.op).__name__)
+        if isinstance(child, ast.Compare):
+            toks.add("cmp")
+    return toks
+
+def structurally_similar(target_qid, sibling_qid):
+    target_sig = method_signature(method_nodes.get(target_qid))
+    sibling_sig = method_signature(method_nodes.get(sibling_qid))
+    if not target_sig or not sibling_sig:
+        return False
+    union = len(target_sig | sibling_sig)
+    if union == 0:
+        return False
+    return (len(target_sig & sibling_sig) / union) >= 0.45
 
 # target = the class in target_rel that defines the method (fallback: any in file)
 target = None
@@ -191,8 +237,9 @@ if target is not None:
     for qid, c in classes.items():
         if qid == target or c["method_line"] is None:
             continue
-        # sibling iff ancestor sets share a class IDENTITY (transitive)
-        if tanc and (ancestors(qid) & tanc):
+        # sibling iff ancestor sets share a class IDENTITY (transitive) AND the
+        # override body is structurally similar to the localized buggy override.
+        if tanc and (ancestors(qid) & tanc) and structurally_similar(target, qid):
             site_keys.add((c["file"], c["line"]))
             sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"], "method": method, "role": "override"})
 
@@ -205,7 +252,11 @@ if target is not None:
                 continue
             if cparts[0:3] != ["django", "db", "backends"] or cparts[-1] != backend_file:
                 continue
-            if c["file"] == target_rel or not tanc or not (ancestors(qid) & tanc):
+            # Backend-contract fallback is ONLY for sibling backend classes that
+            # do NOT define the localized method themselves (e.g. sqlite helper
+            # files). Divergent real overrides are handled by the structural
+            # similarity gate above and must not be re-added here.
+            if c["file"] == target_rel or c["method_line"] is not None or not tanc or not (ancestors(qid) & tanc):
                 continue
             key = (c["file"], c["line"])
             if key in site_keys:

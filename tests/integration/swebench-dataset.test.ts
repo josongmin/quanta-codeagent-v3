@@ -139,7 +139,13 @@ describe("swebench-dataset", () => {
     const parsed = JSON.parse(readFileSync(file, "utf8"))
     expect(parsed.timestamp).toBe("2026-05-19T00:00:00.000Z")
     expect(parsed.totals).toEqual({ total: 2, resolved: 1, resolvedPct: 50 })
-    expect(parsed.perInstance[0]).toEqual({ id: "a-1", passed: true, turns: 3, patchBytes: 2 })
+    expect(parsed.perInstance[0]).toEqual({
+      id: "a-1",
+      passed: true,
+      turns: 3,
+      patchBytes: 2,
+      modelPatchDigest: "5dde896887f6754c9b15bfe3a441ae4806df2fde94001311e08bf110622e0bbe",
+    })
     expect(parsed.perInstance[1].error).toBe("boom")
   })
 

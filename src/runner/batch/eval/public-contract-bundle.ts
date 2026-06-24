@@ -1,7 +1,7 @@
 /**
  * Selection contract bundle — PURE builders + evaluator (T-CON-10).
  *
- * Derives a typed {@link PublicContractBundle} from GENERIC, typed inputs only:
+ * Derives a typed {@link SelectionContractBundle} from GENERIC, typed inputs only:
  *  - an issue-declared expected value (public issue text),
  *  - public test names already present in the repo,
  *  - whether a validated repro is present,
@@ -25,10 +25,10 @@ import type {
   ContractCandidate,
   ContractProvenance,
   ContractSatisfaction,
-  PublicContract,
-  PublicContractBundle,
-  PublicContractKind,
-  PublicContractStrength,
+  SelectionContract,
+  SelectionContractBundle,
+  SelectionContractKind,
+  SelectionContractStrength,
 } from "@/runner/batch/eval/public-contract-types"
 
 /** Trim + drop empties; preserve order, drop duplicates. Generic list hygiene. */
@@ -45,14 +45,14 @@ const cleanList = (xs: readonly string[]): string[] => {
 }
 
 const mkContract = (args: {
-  kind: PublicContractKind
-  strength: PublicContractStrength
+  kind: SelectionContractKind
+  strength: SelectionContractStrength
   provenance: ContractProvenance
   subjectFiles?: readonly string[]
   subjectSymbols?: readonly string[]
   /** stable discriminator so two owner-must-touch contracts get distinct ids */
   discriminator: string
-}): PublicContract => ({
+}): SelectionContract => ({
   contractId: `${args.kind}:${args.discriminator}`,
   kind: args.kind,
   strength: args.strength,
@@ -70,7 +70,7 @@ const mkContract = (args: {
  */
 export const buildExactOutputContract = (
   declaredExpected: { readonly kind?: string | undefined; readonly value: string } | undefined,
-): PublicContract[] => {
+): SelectionContract[] => {
   if (declaredExpected === undefined) return []
   if (declaredExpected.value.trim() === "") return []
   return [
@@ -91,7 +91,7 @@ export const buildExactOutputContract = (
  * witness names as part of the affected public API becomes a `supporting`
  * obligation: a satisfying candidate touches that symbol.
  */
-export const buildApiSurfaceContracts = (apiSymbols: readonly string[]): PublicContract[] =>
+export const buildApiSurfaceContracts = (apiSymbols: readonly string[]): SelectionContract[] =>
   cleanList(apiSymbols).map((symbol) =>
     mkContract({
       kind: "api-surface",
@@ -108,7 +108,7 @@ export const buildApiSurfaceContracts = (apiSymbols: readonly string[]): PublicC
  * `required` because owner non-coverage is a strong (generic) demotion signal in
  * the contract-dominance tier.
  */
-export const buildOwnerMustTouchContracts = (ownerFiles: readonly string[]): PublicContract[] =>
+export const buildOwnerMustTouchContracts = (ownerFiles: readonly string[]): SelectionContract[] =>
   cleanList(ownerFiles).map((file) =>
     mkContract({
       kind: "owner-must-touch",
@@ -124,7 +124,7 @@ export const buildOwnerMustTouchContracts = (ownerFiles: readonly string[]): Pub
  * These are the clean-path owner obligations: issue-file authority only, never
  * stage1 / owner-resolve / static-only structure.
  */
-const buildIssueOwnerMustTouchContracts = (ownerFiles: readonly string[]): PublicContract[] =>
+const buildIssueOwnerMustTouchContracts = (ownerFiles: readonly string[]): SelectionContract[] =>
   cleanList(ownerFiles).map((file) =>
     mkContract({
       kind: "owner-must-touch",
@@ -145,7 +145,7 @@ const buildIssueOwnerMustTouchContracts = (ownerFiles: readonly string[]): Publi
  */
 export const authoritativeIssueOwnerContracts = (
   candidates: readonly { readonly file: string; readonly sources: readonly string[] }[],
-): PublicContract[] =>
+): SelectionContract[] =>
   buildIssueOwnerMustTouchContracts([
     ...new Set(candidates.filter((c) => c.sources.includes("issue-file")).map((c) => c.file)),
   ])
@@ -170,14 +170,14 @@ export const buildCleanSelectionAuthorityContracts = (args: {
     | readonly { readonly file: string; readonly sources: readonly string[] }[]
     | undefined
   readonly apiSymbols?: readonly string[] | undefined
-}): PublicContractBundle | undefined => {
+}): SelectionContractBundle | undefined => {
   const contracts = [
     ...buildExactOutputContract(args.declaredExpected),
     ...authoritativeIssueOwnerContracts(args.candidates ?? []),
     ...buildIssueApiSurfaceContracts(args.apiSymbols ?? []),
   ]
   if (contracts.length === 0) return undefined
-  const byId = new Map<string, PublicContract>()
+  const byId = new Map<string, SelectionContract>()
   for (const contract of contracts) {
     if (!byId.has(contract.contractId)) byId.set(contract.contractId, contract)
   }
@@ -187,7 +187,7 @@ export const buildCleanSelectionAuthorityContracts = (args: {
 export const buildCleanSelectionPublicContracts = buildCleanSelectionAuthorityContracts
 
 /** Clean-path api-surface contracts sourced from issue text, not static witness. */
-const buildIssueApiSurfaceContracts = (apiSymbols: readonly string[]): PublicContract[] =>
+const buildIssueApiSurfaceContracts = (apiSymbols: readonly string[]): SelectionContract[] =>
   cleanList(apiSymbols).map((symbol) =>
     mkContract({
       kind: "api-surface",
@@ -203,7 +203,9 @@ const buildIssueApiSurfaceContracts = (apiSymbols: readonly string[]): PublicCon
  * teardown / state-reset owners). Each becomes a `required` obligation that a
  * satisfying candidate touches that file.
  */
-export const buildLifecycleOwnerContracts = (lifecycleFiles: readonly string[]): PublicContract[] =>
+export const buildLifecycleOwnerContracts = (
+  lifecycleFiles: readonly string[],
+): SelectionContract[] =>
   cleanList(lifecycleFiles).map((file) =>
     mkContract({
       kind: "lifecycle-owner",
@@ -221,7 +223,9 @@ export const buildLifecycleOwnerContracts = (lifecycleFiles: readonly string[]):
  * whole family as its subject. A family of <2 files yields no contract (no
  * multi-site obligation to express).
  */
-export const buildMultiSiteFamilyContract = (familyFiles: readonly string[]): PublicContract[] => {
+export const buildMultiSiteFamilyContract = (
+  familyFiles: readonly string[],
+): SelectionContract[] => {
   const files = cleanList(familyFiles)
   if (files.length < 2) return []
   return [
@@ -236,10 +240,10 @@ export const buildMultiSiteFamilyContract = (familyFiles: readonly string[]): Pu
 }
 
 /** Merge contract bundles, preserving first occurrence of each stable id. */
-export const mergePublicContractBundles = (
-  ...bundles: readonly (PublicContractBundle | undefined)[]
-): PublicContractBundle | undefined => {
-  const byId = new Map<string, PublicContract>()
+export const mergeSelectionContractBundles = (
+  ...bundles: readonly (SelectionContractBundle | undefined)[]
+): SelectionContractBundle | undefined => {
+  const byId = new Map<string, SelectionContract>()
   for (const bundle of bundles) {
     for (const contract of bundle?.contracts ?? []) {
       if (!byId.has(contract.contractId)) byId.set(contract.contractId, contract)
@@ -257,7 +261,7 @@ export const mergePublicContractBundles = (
 export const buildStateResetContract = (args: {
   readonly validatedReproPresent: boolean
   readonly resetOwnerFile: string | undefined
-}): PublicContract[] => {
+}): SelectionContract[] => {
   if (!args.validatedReproPresent) return []
   const file = (args.resetOwnerFile ?? "").trim()
   if (file === "") return []
@@ -279,8 +283,8 @@ export const buildStateResetContract = (args: {
  */
 export const buildPublicTestContracts = (
   publicTests: readonly { readonly testName: string; readonly coveredFile: string }[],
-): PublicContract[] => {
-  const out: PublicContract[] = []
+): SelectionContract[] => {
+  const out: SelectionContract[] = []
   const seen = new Set<string>()
   for (const t of publicTests) {
     const name = t.testName.trim()
@@ -302,8 +306,8 @@ export const buildPublicTestContracts = (
   return out
 }
 
-/** Generic typed inputs to {@link buildPublicContractBundle}. All optional. */
-export interface PublicContractInputs {
+/** Generic typed inputs to {@link buildSelectionContractBundle}. All optional. */
+export interface SelectionContractInputs {
   readonly declaredExpected?: { readonly kind: string; readonly value: string }
   readonly apiSymbols?: readonly string[]
   readonly ownerFiles?: readonly string[]
@@ -315,13 +319,15 @@ export interface PublicContractInputs {
 }
 
 /**
- * Assemble the full {@link PublicContractBundle} from generic typed inputs.
+ * Assemble the full {@link SelectionContractBundle} from generic typed inputs.
  * Empty inputs ⇒ `{ contracts: [] }`. Duplicate contractIds are collapsed (a
  * file that is both an owner and a public-test target keeps one obligation per
  * distinct id).
  */
-export const buildPublicContractBundle = (inputs: PublicContractInputs): PublicContractBundle => {
-  const all: PublicContract[] = [
+export const buildSelectionContractBundle = (
+  inputs: SelectionContractInputs,
+): SelectionContractBundle => {
+  const all: SelectionContract[] = [
     ...buildExactOutputContract(inputs.declaredExpected),
     ...buildApiSurfaceContracts(inputs.apiSymbols ?? []),
     ...buildOwnerMustTouchContracts(inputs.ownerFiles ?? []),
@@ -334,7 +340,7 @@ export const buildPublicContractBundle = (inputs: PublicContractInputs): PublicC
     ...buildPublicTestContracts(inputs.publicTests ?? []),
   ]
 
-  const byId = new Map<string, PublicContract>()
+  const byId = new Map<string, SelectionContract>()
   for (const c of all) {
     if (!byId.has(c.contractId)) byId.set(c.contractId, c)
   }
@@ -357,7 +363,7 @@ export const buildPublicContractBundle = (inputs: PublicContractInputs): PublicC
  * by design.
  */
 export const evaluateContractSatisfaction = (
-  contract: PublicContract,
+  contract: SelectionContract,
   candidate: ContractCandidate,
 ): ContractSatisfaction => {
   const touchedFiles = new Set(candidate.touchedFiles.map((f) => f.trim()))
@@ -387,7 +393,7 @@ export const evaluateContractSatisfaction = (
 
 /** Evaluate every contract in a bundle against one candidate. */
 export const evaluateBundle = (
-  bundle: PublicContractBundle,
+  bundle: SelectionContractBundle,
   candidate: ContractCandidate,
 ): ContractSatisfaction[] => bundle.contracts.map((c) => evaluateContractSatisfaction(c, candidate))
 
@@ -396,7 +402,7 @@ export const evaluateBundle = (
  * the selector's contract-dominance tier (more satisfied contracts dominates).
  */
 export const contractsSatisfiedCount = (
-  bundle: PublicContractBundle,
+  bundle: SelectionContractBundle,
   candidate: ContractCandidate,
 ): number =>
   bundle.contracts.reduce(
@@ -410,10 +416,14 @@ export const contractsSatisfiedCount = (
  * total satisfied counts coincide.
  */
 export const requiredContractsSatisfiedCount = (
-  bundle: PublicContractBundle,
+  bundle: SelectionContractBundle,
   candidate: ContractCandidate,
 ): number =>
   bundle.contracts.reduce((n, c) => {
     if (c.strength !== "required") return n
     return n + (evaluateContractSatisfaction(c, candidate).satisfied ? 1 : 0)
   }, 0)
+
+export type PublicContractInputs = SelectionContractInputs
+export const buildPublicContractBundle = buildSelectionContractBundle
+export const mergePublicContractBundles = mergeSelectionContractBundles

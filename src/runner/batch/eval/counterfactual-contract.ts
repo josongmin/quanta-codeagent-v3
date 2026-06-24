@@ -103,7 +103,7 @@ export type CandidateFamily =
  * to satisfy (e.g. `lifecycle-owner`, `api-surface`). It is a generic typed
  * obligation, NEVER an issue-family regex or instance id.
  */
-export interface FailedPublicContract {
+export interface FailedSelectionContract {
   readonly kind: string
   /** Files the failed public contract names as its subject (the side that must
    *  be touched). Used to bind a concrete target file when available. */
@@ -164,7 +164,7 @@ const asCandidateFamily = (value: string | undefined): CandidateFamily | undefin
  * counterfactual candidate to be spawned; they never reject other candidates.
  */
 export const deriveSemanticCounterfactualContracts = (args: {
-  readonly failedContracts: readonly FailedPublicContract[]
+  readonly failedContracts: readonly FailedSelectionContract[]
   /** Candidate family cand0 (the patch that missed the contract) came from. */
   readonly candidateFamily?: string
   /** Structural facts — currently advisory context only; semantic steering does
@@ -198,6 +198,8 @@ export const deriveSemanticCounterfactualContracts = (args: {
     targetFiles,
   }
 }
+
+export type FailedPublicContract = FailedSelectionContract
 
 export interface CounterfactualContractEvaluation {
   /** true ⇒ candidate honored every derived contract (or no contracts derived). */

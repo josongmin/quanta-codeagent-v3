@@ -27,10 +27,10 @@ import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { type MweProofReceipt, mweProofAuthorityRank } from "./mwe-proof"
 import {
   contractsSatisfiedCount,
-  mergePublicContractBundles,
+  mergeSelectionContractBundles,
   requiredContractsSatisfiedCount,
 } from "./public-contract-bundle"
-import type { PublicContractBundle } from "./public-contract-types"
+import type { SelectionContractBundle } from "./public-contract-types"
 import type { ReproConsensusProofReceipt } from "./repair/resolved-consensus"
 import { cleanExecutableProof, hardResolvedRejected } from "./selection-proof-telemetry"
 import type {
@@ -336,7 +336,7 @@ export const buildLexTiers = (
   entry: ScoredEntry,
   order: number,
   owners: ReadonlySet<string>,
-  contracts: PublicContractBundle,
+  contracts: SelectionContractBundle,
 ): LexTiers => {
   const kofn = entry.resolvedKofN ?? entry.hard.patchedResolvedKofN
   const proofStrength =
@@ -347,7 +347,7 @@ export const buildLexTiers = (
     touchedSymbols: diffTouchedSymbols(entry.candidate.patch),
   }
   const effectiveContracts =
-    mergePublicContractBundles(contracts, entry.candidate.publicContracts) ?? contracts
+    mergeSelectionContractBundles(contracts, entry.candidate.publicContracts) ?? contracts
   return {
     mweProof: mweProofAuthorityRank(entry.candidate.mweReceipt),
     proofStrength,

@@ -13,7 +13,7 @@
  *
  * PURE + deterministic: no I/O, no LLM, no clock/random.
  */
-import type { PublicContract } from "@/runner/batch/eval/public-contract-types"
+import type { SelectionContract } from "@/runner/batch/eval/public-contract-types"
 import type { StaticWitness } from "@/runner/batch/eval/static-witness"
 
 /**
@@ -23,4 +23,4 @@ import type { StaticWitness } from "@/runner/batch/eval/static-witness"
  */
 export const buildStaticWitnessContracts = (
   _witnesses: readonly StaticWitness[],
-): PublicContract[] => []
+): SelectionContract[] => []

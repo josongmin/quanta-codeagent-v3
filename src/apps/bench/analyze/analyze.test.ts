@@ -15,6 +15,12 @@ import { diffRuns, renderDiff } from "./diff"
 import { explainFailure, filesInDiff } from "./explain"
 import { type LeaderRow, renderLeaderboardMarkdown, rowsFromRun } from "./leaderboard"
 import { loadVerdicts, loadVerdictsFromFile } from "./verdicts"
+import {
+  ANSWER_KEY_CLEAN_AFTER,
+  assertWave2BenchReportProvenance,
+  loadWave2VerdictsFromFile,
+  modelPatchFromPredictionArtifact,
+} from "./wave2-guards"
 
 // ── verdicts: both shapes normalise to the same RunVerdicts ────────────────
 
@@ -302,6 +308,60 @@ describe("loadVerdicts — both report shapes", () => {
     writeFileSync(p, JSON.stringify(harnessReport))
     const v = loadVerdictsFromFile(p)
     expect([...v.resolved]).toEqual(["django__django-1"])
+  })
+
+  test("wave2 provenance guard accepts answer-key-clean bench reports", () => {
+    const clean = {
+      ...ourReport,
+      timestamp: ANSWER_KEY_CLEAN_AFTER,
+      knobs: { resolved: {}, inactive: [], preset: "agentless-v3-thin-strict" },
+    }
+    expect(() => assertWave2BenchReportProvenance(clean, "clean-report")).not.toThrow()
+  })
+
+  test("wave2 provenance guard rejects old or underspecified reports", () => {
+    expect(
+      () =>
+        assertWave2BenchReportProvenance(
+          {
+            ...ourReport,
+            knobs: { resolved: {}, inactive: [], preset: "agentless-v3-thin-strict" },
+          },
+          "old-report",
+        ),
+    ).toThrow(
+      /predates answer-key-clean-after/,
+    )
+    expect(() =>
+      assertWave2BenchReportProvenance(
+        {
+          ...ourReport,
+          timestamp: ANSWER_KEY_CLEAN_AFTER,
+          knobs: { resolved: {}, inactive: [] },
+        },
+        "missing-preset",
+      ),
+    ).toThrow(/missing knobs\.preset/)
+  })
+
+  test("loadWave2VerdictsFromFile validates provenance before diff inputs are loaded", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wave2-verdicts-"))
+    const p = join(dir, "report.json")
+    writeFileSync(
+      p,
+      JSON.stringify({
+        ...ourReport,
+        timestamp: ANSWER_KEY_CLEAN_AFTER,
+        knobs: { resolved: {}, inactive: [], preset: "agentless-v3-thin-strict" },
+      }),
+    )
+    const loaded = loadWave2VerdictsFromFile(p)
+    expect([...loaded.verdicts.resolved]).toEqual(["django__django-1"])
+    expect(loaded.report.knobs).toEqual({
+      resolved: {},
+      inactive: [],
+      preset: "agentless-v3-thin-strict",
+    })
   })
 
   test("top-level proofTotals and llmEvidenceTotals win when present", () => {
@@ -691,6 +751,54 @@ describe("explainFailure", () => {
       agentPatchPath,
     })
     expect(e.agentFiles).toEqual(["pylint/checkers/format.py"])
+  })
+
+  test("prediction artifact path resolves model_patch for the requested instance", () => {
+    const dir = mkdtempSync(join(tmpdir(), "predictions-"))
+    const predictionsPath = join(dir, "predictions.jsonl")
+    writeFileSync(
+      predictionsPath,
+      [
+        JSON.stringify({
+          instance_id: "other__1",
+          model_name_or_path: "gpt-5.4",
+          model_patch: "diff --git a/other.py b/other.py\n+x",
+        }),
+        JSON.stringify({
+          instance_id: "pylint-dev__pylint-8898",
+          model_name_or_path: "gpt-5.4",
+          modelPatch:
+            "diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+x\n",
+        }),
+      ].join("\n"),
+    )
+    expect(
+      modelPatchFromPredictionArtifact({
+        artifactPath: predictionsPath,
+        instanceId: "pylint-dev__pylint-8898",
+      }),
+    ).toContain("pylint/checkers/format.py")
+  })
+
+  test("dataset row supplied as a prediction artifact is rejected fail-closed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "predictions-dataset-"))
+    const badPath = join(dir, "dataset.jsonl")
+    writeFileSync(
+      badPath,
+      `${JSON.stringify({
+        instance_id: "pylint-dev__pylint-8898",
+        base_commit: "deadbeef",
+        patch: "diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+x",
+        FAIL_TO_PASS: ["tests/test_format.py::test_thing"],
+      })}\n`,
+    )
+    expect(() =>
+      explainFailure({
+        datasetPath: writeDataset().datasetPath,
+        instanceId: "pylint-dev__pylint-8898",
+        agentPatchPath: badPath,
+      }),
+    ).toThrow(/dataset-shaped row supplied/)
   })
 
   test("missing instance throws", () => {

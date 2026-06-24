@@ -44,7 +44,7 @@ const realExec: ChaExec = async (cmd, cwd, timeoutMs) => {
 const writeDjangoShapedRepo = (): string => {
   const dir = mkdtempSync(join(tmpdir(), "cha-"))
   const be = join(dir, "django", "db", "backends")
-  for (const b of ["base", "mysql", "oracle", "sqlite3"])
+  for (const b of ["base", "mysql", "oracle", "sqlite3", "postgresql"])
     mkdirSync(join(be, b), { recursive: true })
   mkdirSync(join(dir, "unrelated"), { recursive: true })
 
@@ -73,6 +73,21 @@ const writeDjangoShapedRepo = (): string => {
       ].join("\n"),
     )
   }
+  // Divergent sibling: same shared base + same method name, but a structurally
+  // different implementation. Symptom-coupled CHA must exclude it.
+  writeFileSync(
+    join(be, "postgresql", "operations.py"),
+    [
+      "from django.db.backends.base.operations import BaseDatabaseOperations",
+      "",
+      "class DatabaseOperations(BaseDatabaseOperations):",
+      "    def _convert_field_to_tz(self, field_name, tzname):",
+      "        if tzname is None:",
+      "            return field_name",
+      "        return self.quote_name(field_name)",
+      "",
+    ].join("\n"),
+  )
   // FALSE sibling: same method name, NO shared base — must be excluded.
   writeFileSync(
     join(dir, "unrelated", "thing.py"),
@@ -105,6 +120,8 @@ describe("CHA multi-site — real-python sibling resolution [gated on python3]",
         ])
         // target (mysql) excluded from its own sibling list
         expect(files).not.toContain("django/db/backends/mysql/operations.py")
+        // structurally divergent sibling excluded even though it shares the base
+        expect(files).not.toContain("django/db/backends/postgresql/operations.py")
         // false sibling (same name, no shared base) excluded
         expect(files).not.toContain("unrelated/thing.py")
         // each site carries the def line + class

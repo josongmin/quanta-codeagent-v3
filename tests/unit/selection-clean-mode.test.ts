@@ -5,7 +5,7 @@ import {
   buildMultiSiteFamilyContract,
   buildOwnerMustTouchContracts,
 } from "@/runner/batch/eval/public-contract-bundle"
-import type { PublicContractBundle } from "@/runner/batch/eval/public-contract-types"
+import type { SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
 import {
   type Candidate,
   runSelection,
@@ -85,17 +85,17 @@ const runPair = (mode: "clean" | "research", resolvedKofN: SelectionPorts["resol
     },
   })
 
-const issueOwnerContracts = (file: string): PublicContractBundle =>
+const issueOwnerContracts = (file: string): SelectionContractBundle =>
   buildCleanSelectionAuthorityContracts({
     candidates: [{ file, sources: ["issue-file"] }],
   }) ?? { contracts: [] }
 
-const issueApiContracts = (symbol: string): PublicContractBundle =>
+const issueApiContracts = (symbol: string): SelectionContractBundle =>
   buildCleanSelectionAuthorityContracts({
     apiSymbols: [symbol],
   }) ?? { contracts: [] }
 
-const publicMultiSiteContracts = (files: readonly string[]): PublicContractBundle => ({
+const publicMultiSiteContracts = (files: readonly string[]): SelectionContractBundle => ({
   contracts: [
     {
       contractId: `multi-site-family:${files.join("|")}`,

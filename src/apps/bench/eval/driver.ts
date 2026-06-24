@@ -10,7 +10,6 @@ import type { Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
 import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
-import { withStaticWitnessFamilies } from "@/runner/batch/eval/candidate-families"
 import {
   applyBenchKnobs,
   attachReproVoteOutcomes,
@@ -22,7 +21,6 @@ import {
   buildAdaptivePhasePacket,
   buildReproVoteValidate,
   buildConfig as buildRunnerConfig,
-  buildSelectionCandidateFamilyBundle,
   composeWithReproHint,
   DEFAULT_POLICY,
   deriveCandidateStructuralRepair,
@@ -58,17 +56,12 @@ import {
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
-  selectionGenerationEnvCaveats,
   selectionReproPrepK,
   UsageTap,
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
-  withCandidateFamilyAuthorityContracts,
 } from "@/runner/batch/eval/driver"
 import {
-  buildSelectionGenerationPrompt,
-  buildSelectionOwnerEvidence,
-  type ContractFact,
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
   PacketBlindnessViolation,
@@ -78,14 +71,8 @@ import {
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
-import {
-  buildCleanSelectionAuthorityContracts,
-  mergePublicContractBundles,
-} from "@/runner/batch/eval/public-contract-bundle"
-import {
-  type PublicContractBundle,
-  renderContractAuthorityLabel,
-} from "@/runner/batch/eval/public-contract-types"
+import { buildCleanSelectionAuthorityContracts } from "@/runner/batch/eval/public-contract-bundle"
+import { type SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
 import { candidatePatchAppliesCleanly } from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
@@ -107,14 +94,13 @@ import {
   type SelectionTelemetry,
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
+import {
+  composeSelectionAgentHint,
+  prepareSelectionEvidenceContext,
+} from "@/runner/batch/eval/selection-assembly"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
-import {
-  buildAstStaticWitnesses,
-  staticWitnessLanguageDiagnostics,
-} from "@/runner/batch/eval/static-witness-adapter"
-import { buildStaticWitnessContracts } from "@/runner/batch/eval/static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -734,71 +720,6 @@ const readSandboxSource = (sandbox: string, rel: string): string | null => {
   }
 }
 
-/** Map a public-contract bundle into typed, provenance-carrying contract facts. */
-const contractFactsFromBundle = (
-  contracts: PublicContractBundle | undefined,
-): readonly ContractFact[] =>
-  contracts?.contracts.map((c) => ({
-    contractId: c.contractId,
-    authority: renderContractAuthorityLabel(c),
-    satisfied: "unknown" as const,
-  })) ?? []
-
-interface SelectionMergeHintArgs {
-  readonly verifySelectProofRequired: boolean
-  readonly selectorMode: BenchPosture["selectorMode"]
-  readonly problemStatement: string
-  readonly ownerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
-  readonly contracts: readonly ContractFact[]
-  readonly baseValidatedRed: boolean | null
-  readonly verificationTarget?: VerificationTargetFact
-  readonly reproHint?: string
-  readonly reproSources: readonly string[]
-  readonly closureHint?: string
-  readonly envCaveats: readonly string[]
-  readonly staticWitnessDiagnostics: NonNullable<
-    SelectionGenerationPromptInput["staticWitnessDiagnostics"]
-  >
-  readonly recordPacket: (packet: LlmEvidencePacket) => void
-}
-
-const mergeClosureHint = (
-  closureHint: string | undefined,
-  seed: string | undefined,
-): string | undefined => {
-  if (seed === undefined) return closureHint
-  return closureHint === undefined ? seed : `${closureHint}\n\n${seed}`
-}
-
-const selectionGenerationPromptInput = (
-  args: SelectionMergeHintArgs,
-  seed: string | undefined,
-): SelectionGenerationPromptInput => ({
-  problemStatement: args.problemStatement,
-  ownerEvidence: args.ownerEvidence,
-  contracts: args.contracts,
-  baseValidatedRed: args.baseValidatedRed,
-  ...(args.verificationTarget !== undefined ? { verificationTarget: args.verificationTarget } : {}),
-  ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
-  ...(args.reproSources.length > 0 ? { validatedReproScripts: args.reproSources } : {}),
-  ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
-  ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
-  ...(args.staticWitnessDiagnostics.length > 0
-    ? { staticWitnessDiagnostics: args.staticWitnessDiagnostics }
-    : {}),
-  ...(seed !== undefined ? { seed } : {}),
-  recordLlmEvidencePacket: args.recordPacket,
-})
-
-const buildSelectionMergeHint =
-  (args: SelectionMergeHintArgs) =>
-  (seed: string | undefined): string | undefined => {
-    if (!args.verifySelectProofRequired || args.selectorMode !== "clean") {
-      return mergeClosureHint(args.closureHint, seed)
-    }
-    return buildSelectionGenerationPrompt(selectionGenerationPromptInput(args, seed))
-  }
-
 const optionalLlmEvidence = (
   llmEvidence: Partial<LlmEvidenceArtifacts>,
 ): { readonly llmEvidence?: LlmEvidenceArtifacts } =>
@@ -1043,7 +964,7 @@ interface SelectionExecutionArgs {
   readonly selectorMode: BenchPosture["selectorMode"]
   readonly verifySelectProofRequired: boolean
   readonly selectionInputs: ReturnType<typeof buildSelectionInputs>
-  readonly selectionAuthorityContracts: PublicContractBundle | undefined
+  readonly selectionAuthorityContracts: SelectionContractBundle | undefined
   readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly oracleFailureRepairSeed: string | undefined
@@ -1147,111 +1068,8 @@ const runSelectionExecutor = async (
   return { result, totalTurns }
 }
 
-interface SelectionEvidenceContextArgs {
-  readonly instance: Instance
-  readonly sandbox: string
-  readonly n: number
-  readonly ownerCandidates: readonly string[]
-  readonly ownerResolved: PreparedAttemptContext["ownerResolved"]
-  readonly publicContracts: PublicContractBundle | undefined
-  readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
-  readonly baseValidatedRed: boolean
-  readonly reproHint: string | undefined
-  readonly reproTest: BenchReproTestTelemetry | undefined
-  readonly reproSources: readonly string[]
-  readonly verificationPlan: PreparedAttemptContext["verificationPlan"]
-}
-
-interface SelectionEvidenceContext {
-  readonly normalizedOwnerCandidates: readonly string[]
-  readonly selectionInputs: ReturnType<typeof buildSelectionInputs>
-  readonly staticWitnesses: ReturnType<typeof buildAstStaticWitnesses>
-  readonly candidateFamilyBundle: ReturnType<typeof buildSelectionCandidateFamilyBundle>
-  readonly selectionAuthorityContracts: PublicContractBundle | undefined
-  readonly advisoryPromptContracts: PublicContractBundle | undefined
-  readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
-  readonly verificationTarget: VerificationTargetFact | undefined
-  readonly staticWitnessDiagnostics: NonNullable<
-    SelectionGenerationPromptInput["staticWitnessDiagnostics"]
-  >
-  readonly selectionBaseValidatedRed: boolean | null
-  readonly generationEnvCaveats: readonly string[]
-  readonly oracleFailureRepairSeed: string | undefined
-}
-
 const readSelectionSource = (sandbox: string): ((rel: string) => string | null) => {
   return (rel) => readSandboxSource(sandbox, rel)
-}
-
-const buildSelectionStaticWitnesses = (args: SelectionEvidenceContextArgs) =>
-  buildAstStaticWitnesses({
-    problemStatement: args.instance.problemStatement,
-    ownerCandidates: args.ownerCandidates,
-    ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-    readSource: readSelectionSource(args.sandbox),
-  })
-
-const buildSelectionFamilies = (
-  args: SelectionEvidenceContextArgs,
-  staticWitnesses: ReturnType<typeof buildAstStaticWitnesses>,
-) =>
-  withStaticWitnessFamilies(
-    buildSelectionCandidateFamilyBundle({
-      problemStatement: args.instance.problemStatement,
-      ownerCandidates: args.ownerCandidates,
-      ownerResolved: args.ownerResolved,
-      readSource: readSelectionSource(args.sandbox),
-    }),
-    staticWitnesses,
-  )
-
-const prepareSelectionEvidenceContext = (
-  args: SelectionEvidenceContextArgs,
-): SelectionEvidenceContext => {
-  const normalizedOwnerCandidates = normalizeSelectionPaths(args.ownerCandidates, args.sandbox)
-  const normalizedArgs = { ...args, ownerCandidates: normalizedOwnerCandidates }
-  const staticWitnesses = buildSelectionStaticWitnesses(normalizedArgs)
-  const candidateFamilyBundle = buildSelectionFamilies(normalizedArgs, staticWitnesses)
-  const selectionAuthorityContracts = withCandidateFamilyAuthorityContracts(
-    args.publicContracts,
-    candidateFamilyBundle,
-  )
-  const selectionInputs = buildSelectionInputs({
-    n: args.n,
-    ownerCandidates: normalizedOwnerCandidates,
-    sandbox: args.sandbox,
-    ...(candidateFamilyBundle !== undefined ? { candidateFamilies: candidateFamilyBundle } : {}),
-  })
-  return {
-    normalizedOwnerCandidates,
-    selectionInputs,
-    staticWitnesses,
-    candidateFamilyBundle,
-    selectionAuthorityContracts,
-    advisoryPromptContracts: mergePublicContractBundles(selectionAuthorityContracts, {
-      contracts: buildStaticWitnessContracts(staticWitnesses),
-    }),
-    selectionOwnerEvidence: buildSelectionOwnerEvidence({
-      ownerFiles: selectionInputs.ownerFiles,
-      issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
-      staticWitnesses,
-      readSource: readSelectionSource(args.sandbox),
-    }),
-    verificationTarget: verificationTargetFromPlan(args.verificationPlan),
-    staticWitnessDiagnostics: staticWitnessLanguageDiagnostics({
-      problemStatement: args.instance.problemStatement,
-      ownerCandidates: normalizedOwnerCandidates,
-      ...(args.ownerResolved !== undefined ? { ownerResolved: args.ownerResolved } : {}),
-      readSource: readSelectionSource(args.sandbox),
-    }),
-    selectionBaseValidatedRed:
-      args.verifySelectRegression === "discovered" ? null : args.baseValidatedRed,
-    generationEnvCaveats: selectionGenerationEnvCaveats({
-      reproHint: args.reproHint,
-      reproTest: args.reproTest,
-    }),
-    oracleFailureRepairSeed: validatedReproRepairSeed(args.reproSources),
-  }
 }
 
 /**
@@ -1276,7 +1094,7 @@ const runSelectionPhase = async (
   counterfactual: boolean,
   selectorMode: BenchPosture["selectorMode"],
   verifySelectProofRequired: boolean,
-  publicContracts: PublicContractBundle | undefined,
+  publicContracts: SelectionContractBundle | undefined,
   verifySelectRegression: BenchPosture["verifySelectRegression"],
   _regressionMaxTests: number | undefined,
   verifySelectRepro: BenchPosture["verifySelectRepro"],
@@ -1293,7 +1111,7 @@ const runSelectionPhase = async (
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
   const selectionContext = prepareSelectionEvidenceContext({
-    instance,
+    problemStatement: instance.problemStatement,
     sandbox,
     n,
     ownerCandidates: selectionOwnerCandidates,
@@ -1303,8 +1121,9 @@ const runSelectionPhase = async (
     baseValidatedRed,
     reproHint,
     reproTest,
-    reproSources,
-    verificationPlan,
+    verificationTarget: verificationTargetFromPlan(verificationPlan),
+    oracleFailureRepairSeed: validatedReproRepairSeed(reproSources),
+    readSource: readSelectionSource(sandbox),
   })
   const {
     selectionInputs,
@@ -1319,23 +1138,27 @@ const runSelectionPhase = async (
   } = selectionContext
   const generationErrors = new Map<number, string>()
   const selectionLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
-  const mergeHint = buildSelectionMergeHint({
-    verifySelectProofRequired,
-    selectorMode,
-    problemStatement: instance.problemStatement,
-    ownerEvidence: selectionOwnerEvidence,
-    contracts: contractFactsFromBundle(advisoryPromptContracts),
-    baseValidatedRed: selectionBaseValidatedRed,
-    ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-    ...(reproHint !== undefined ? { reproHint } : {}),
-    reproSources,
-    ...(closureHint !== undefined ? { closureHint } : {}),
-    envCaveats: generationEnvCaveats,
-    staticWitnessDiagnostics,
-    recordPacket: (packet) => {
-      recordLlmEvidencePacket(selectionLlmEvidence, packet)
-    },
-  })
+  const mergeHint = (seed: string | undefined): string | undefined =>
+    composeSelectionAgentHint(
+      {
+        verifySelectProofRequired,
+        selectorMode,
+        problemStatement: instance.problemStatement,
+        ownerEvidence: selectionOwnerEvidence,
+        promptContracts: advisoryPromptContracts,
+        baseValidatedRed: selectionBaseValidatedRed,
+        ...(verificationTarget !== undefined ? { verificationTarget } : {}),
+        ...(reproHint !== undefined ? { reproHint } : {}),
+        validatedReproScripts: reproSources,
+        ...(closureHint !== undefined ? { closureHint } : {}),
+        envCaveats: generationEnvCaveats,
+        staticWitnessDiagnostics,
+        recordLlmEvidencePacket: (packet) => {
+          recordLlmEvidencePacket(selectionLlmEvidence, packet)
+        },
+      },
+      seed,
+    )
 
   const runtimePorts = await prepareSelectionRuntimePorts({
     instance,

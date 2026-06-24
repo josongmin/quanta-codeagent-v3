@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from "node:fs"
+import { modelPatchFromPredictionArtifact } from "./wave2-guards"
 
 export interface FailureExplanation {
   readonly instanceId: string
@@ -163,7 +164,10 @@ export const explainFailure = (args: {
     args.agentPatch !== undefined
       ? args.agentPatch
       : args.agentPatchPath !== undefined
-        ? readFileSync(args.agentPatchPath, "utf8")
+        ? modelPatchFromPredictionArtifact({
+            artifactPath: args.agentPatchPath,
+            instanceId: args.instanceId,
+          })
         : undefined
 
   const goldFiles = filesInDiff(goldPatch)
