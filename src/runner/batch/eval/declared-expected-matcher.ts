@@ -36,6 +36,10 @@ import type { Candidate } from "./selection-types"
 
 const normalize = (s: string): string => s.replace(/\s+/g, " ").trim()
 
+/** Abstain on candidate patches larger than this (hot per-candidate path; the
+ *  veto is advisory so skipping a giant patch only forgoes an opportunistic check). */
+const MAX_PATCH_SCAN_BYTES = 2 * 1024 * 1024
+
 /** Added (`+`, not `+++`) source lines of a unified diff, prefix stripped. */
 const addedLines = (patch: string): readonly string[] =>
   patch
@@ -99,6 +103,12 @@ export const matchCandidateAgainstDeclaredExpected = (
   if (expected.kind === "stdout-empty") return null
   const v = normalize(expected.value)
   if (v === "") return null
+  // Candidate patches are LLM/agent-generated and unbounded in size; this matcher
+  // runs per-candidate on the hot selection path. Abstain on a pathologically large
+  // patch rather than scan every added line + run `matchAll` over megabytes — the
+  // signal is advisory (a missed veto only loses an opportunistic check, never a
+  // correctness gate).
+  if (patch.length > MAX_PATCH_SCAN_BYTES) return null
 
   // Strip Python comments (whole-line AND inline-trailing) before any literal
   // mining so a stale message in a comment cannot register as consistent OR as a

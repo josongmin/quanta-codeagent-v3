@@ -78,6 +78,7 @@ describe("classifyDoneTimeCapture — structural facts, no thresholds", () => {
     expect(facts.sourcePatchBytes).toBe(Buffer.byteLength(SOURCE_DIFF, "utf8"))
     expect(facts.touchedFiles).toEqual(["x.py"])
     expect(facts.rawDirty).toBe(true)
+    expect(facts.editCount).toBe(1)
   })
 })
 

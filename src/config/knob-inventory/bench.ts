@@ -250,7 +250,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T2b, jun-24): spec-fidelity invariant — when the issue declares a concrete expected output, wire a PUBLIC-issue-text declared-expected port so the existing hard:declaredExpectedMatch=false veto may fire in CLEAN mode against candidates that invent a different message shape. Answer-key guarded (public provenance only). Default-OFF ⇒ clean-mode gate stays disabled (byte-identical).",
-    readSite: "runner/knobs/knobs/spec-fidelity-invariant.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_FORWARD_LOCALIZE",
@@ -260,7 +260,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (T3, jun-24): forward-localize — occupies the deeper_localize adaptive route. When the controller selects deeper_localize and this lever is on, trace the prior candidate's edited symbols to their consumer call-sites and widen the next pass's owner evidence (advisory candidates, never hard requiredFiles). Default-OFF ⇒ deeper_localize stays a no-op.",
-    readSite: "runner/knobs/knobs/forward-localize.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_BENCH_CHA_MULTISITE_STEER",

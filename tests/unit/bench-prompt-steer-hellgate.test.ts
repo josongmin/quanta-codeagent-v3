@@ -84,13 +84,19 @@ describe("bench-simplicity-steer (DEFAULT-ON)", () => {
 
   test("QUANTA_BENCH_SIMPLICITY=0 ⇒ steer dropped (pre-absorption baseline)", () => {
     withEnv({ QUANTA_BENCH_SIMPLICITY: "0", QUANTA_BENCH_LEAN_PROMPT: undefined }, () => {
-      expect(promptText(mkInstance())).not.toContain(SIMPLICITY_ANCHOR)
+      const t = promptText(mkInstance())
+      // Non-vacuity: the prompt is REAL (carries the task), the steer is just gone —
+      // not an empty/broken prompt that would pass `not.toContain` trivially.
+      expect(t).toContain("Fix the bug in src/foo.py")
+      expect(t).not.toContain(SIMPLICITY_ANCHOR)
     })
   })
 
   test("non-swebench instance ⇒ no steer leak (custom corpus unaffected)", () => {
     withEnv({ QUANTA_BENCH_SIMPLICITY: undefined }, () => {
-      expect(promptText(mkInstance(false))).not.toContain(SIMPLICITY_ANCHOR)
+      const t = promptText(mkInstance(false))
+      expect(t).toContain("Fix the bug in src/foo.py")
+      expect(t).not.toContain(SIMPLICITY_ANCHOR)
     })
   })
 })
@@ -98,7 +104,9 @@ describe("bench-simplicity-steer (DEFAULT-ON)", () => {
 describe("bench-find-refs-steer (DEFAULT-OFF)", () => {
   test("unset ⇒ find_references steer absent (byte-identical baseline)", () => {
     withEnv({ QUANTA_BENCH_FIND_REFS: undefined }, () => {
-      expect(promptText(mkInstance())).not.toContain(FIND_REFS_STEER)
+      const t = promptText(mkInstance())
+      expect(t).toContain("Fix the bug in src/foo.py")
+      expect(t).not.toContain(FIND_REFS_STEER)
     })
   })
 
@@ -110,7 +118,9 @@ describe("bench-find-refs-steer (DEFAULT-OFF)", () => {
 
   test("non-swebench instance ⇒ steer absent even when gated on", () => {
     withEnv({ QUANTA_BENCH_FIND_REFS: "1" }, () => {
-      expect(promptText(mkInstance(false))).not.toContain(FIND_REFS_STEER)
+      const t = promptText(mkInstance(false))
+      expect(t).toContain("Fix the bug in src/foo.py")
+      expect(t).not.toContain(FIND_REFS_STEER)
     })
   })
 })

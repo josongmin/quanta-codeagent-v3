@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test"
-import { forwardLocalizeConsumers } from "@/runner/batch/eval/forward-localize-trace"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import {
+  forwardLocalizeConsumers,
+  traceForwardLocalizeOwners,
+} from "@/runner/batch/eval/forward-localize-trace"
 
 /**
  * T3 forward-localize consumer trace — surfaces consumers a backward localize
@@ -76,5 +82,50 @@ describe("forwardLocalizeConsumers", () => {
       alreadyLocalized: ["pkg/producer.py", "pkg/base/client.py"],
     })
     expect(out).toEqual(["pkg/next_consumer.py"])
+  })
+})
+
+describe("traceForwardLocalizeOwners — real rg consumer resolution (IO wrapper)", () => {
+  const writeIn = async (root: string, rel: string, body: string): Promise<void> => {
+    const abs = join(root, rel)
+    await mkdir(dirname(abs), { recursive: true })
+    await writeFile(abs, body)
+  }
+
+  it("resolves a real consumer file from the sandbox via rg, excluding producer + test files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fwdloc-"))
+    try {
+      // producer (edited; excluded via alreadyLocalized), a genuine consumer, and a
+      // test that also calls the symbol (must be filtered as a non-fix site).
+      await writeIn(root, "pkg/producer.py", "def make_client(config):\n    return new_shape(config)\n")
+      await writeIn(
+        root,
+        "pkg/base/client.py",
+        "from pkg.producer import make_client\n\nclient = make_client(default_config)\n",
+      )
+      await writeIn(
+        root,
+        "pkg/tests/test_client.py",
+        "from pkg.producer import make_client\n\ndef test_make_client():\n    assert make_client(None)\n",
+      )
+      const out = await traceForwardLocalizeOwners({
+        patch: PATCH,
+        sandbox: root,
+        timeoutMs: 15_000,
+        alreadyLocalized: ["pkg/producer.py"],
+      })
+      expect(out).toEqual(["pkg/base/client.py"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("whitespace-only patch ⇒ [] (no rg invoked)", async () => {
+    const out = await traceForwardLocalizeOwners({
+      patch: "   \n  ",
+      sandbox: tmpdir(),
+      timeoutMs: 15_000,
+    })
+    expect(out).toEqual([])
   })
 })

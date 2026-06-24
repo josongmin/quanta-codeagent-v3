@@ -261,7 +261,6 @@ export const prepareTaskRepo = async (
  * the FALLBACK path only. With Docker OFF, pytest runs the exact FAIL_TO_PASS
  * tests in the sandbox; ImportError/test failure surfaces correctly.
  */
-/** Python version per repo for the SWE-bench Verified light-tier set we
 /**
  * Build the argv to run a repro script under the SAME project env the synthesized
  * `testCmd` uses. A bare `python3 <script>` on the box host cannot `import` the
