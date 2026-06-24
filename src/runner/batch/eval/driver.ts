@@ -1518,6 +1518,11 @@ export interface PrepareReproTestDeps {
   /** jun-22 config-extraction: per-repro-script exec timeout (ms). Sourced from
    *  `posture.reproExecTimeoutMs`; undefined ⇒ the 60s `DEFAULT_EXEC_TIMEOUT_MS`. */
   readonly reproExecTimeoutMs?: number
+  /** G2 paired-control gate. When `true`, the admission filter
+   *  ({@link selectReproTest}) tightens to `reproduced && baseControl ===
+   *  "green"`, rejecting env/import-broken false-reds. Sourced from
+   *  `posture.pairedControl`; undefined/false ⇒ byte-identical legacy filter. */
+  readonly pairedControl?: boolean
 }
 
 /** Per-instance reproduction-script filename written into the sandbox. The
@@ -1690,7 +1695,10 @@ export const prepareReproTestDetailed = async (
   // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
   const samples = await executeReproCandidateTests(tests, instance, sandbox, deps, config)
   if (samples === null) return failedReproResult("execution_failed")
-  const selection = select(samples)
+  // G2 paired-control: thread the gate into the admission filter. When on, the
+  // selector rejects reproducing samples whose paired controls did not pass on
+  // base (env/import-broken false-reds). Default-OFF ⇒ legacy filter.
+  const selection = select(samples, { pairedControl: deps.pairedControl === true })
   const telemetry: BenchReproTestTelemetry =
     samples.length > 0
       ? selectionTelemetry(selection)
@@ -1856,7 +1864,12 @@ export const prepareSelectionReproSources = async (
   llm: LLMPort,
   posture: Pick<
     BenchPosture,
-    "verifySelectN" | "verifySelectRepro" | "reproTestK" | "adversarialRepro" | "reproExecTimeoutMs"
+    | "verifySelectN"
+    | "verifySelectRepro"
+    | "reproTestK"
+    | "adversarialRepro"
+    | "reproExecTimeoutMs"
+    | "pairedControl"
   >,
   deps: Omit<PrepareReproTestDeps, "llm" | "adversarial"> = {},
 ): Promise<{
@@ -1877,6 +1890,7 @@ export const prepareSelectionReproSources = async (
     ...(posture.reproExecTimeoutMs !== undefined
       ? { reproExecTimeoutMs: posture.reproExecTimeoutMs }
       : {}),
+    ...(posture.pairedControl === true ? { pairedControl: true } : {}),
   })
   const reproSources = reproducingReproSources(detail.selection)
   const hardeningReproSources = reproducingHardeningSources(detail.selection)
@@ -1920,7 +1934,7 @@ export const prepareSelectionReproSources = async (
 export const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
-  posture: Pick<BenchPosture, "reproTestK" | "adversarialRepro">,
+  posture: Pick<BenchPosture, "reproTestK" | "adversarialRepro" | "pairedControl">,
   llm: LLMPort,
 ): Promise<InstallReproTestResult> => {
   const reproK = posture.reproTestK
@@ -1928,6 +1942,7 @@ export const installReproTestHint = async (
   const preparation = await prepareReproTestDetailed(instance, sandbox, reproK, {
     llm,
     ...(posture.adversarialRepro === true ? { adversarial: true } : {}),
+    ...(posture.pairedControl === true ? { pairedControl: true } : {}),
   })
   const { selection, telemetry } = preparation
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }

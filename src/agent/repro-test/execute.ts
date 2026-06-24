@@ -65,7 +65,12 @@ import {
   parsePytestExecutionReport,
   pytestReportPathFor,
 } from "./pytest-report"
-import type { ReproTestConfig, ReproTestOutcome, ReproTestSample } from "./types"
+import type {
+  ReproControlOutcome,
+  ReproTestConfig,
+  ReproTestOutcome,
+  ReproTestSample,
+} from "./types"
 
 /** Default per-test execution timeout (ms). Paper doesn't fix one; 60s is the
  *  same shape used by `tests/smoke/swebench` for individual test commands. */
@@ -90,6 +95,18 @@ export interface ExecuteReproTestsArgs {
   /** K test sources (post fence-strip). Empty source ⇒ classified
    *  `"unknown"` (we still record a sample so indices align). */
   tests: readonly string[]
+  /** G2 paired-control: OPTIONAL per-symptom-test control sources (parallel to
+   *  {@link tests}). Each entry is itself a list of control-test sources (happy
+   *  / edge cases produced by the SAME repro-gen, NEVER the gold). When present
+   *  for sample `i`, each control is executed on the BASE tree and the resulting
+   *  {@link ReproControlOutcome} is folded into `sample.baseControl`:
+   *    - every control PASSES (outcome `"resolved"`) ⇒ `"green"`
+   *    - any control fails / errors / doesn't run     ⇒ `"red"`
+   *  Omitted / empty for sample `i` ⇒ `baseControl` stays undefined (the
+   *  admission gate treats undefined as `"absent"` ⇒ fail-closed). This is the
+   *  REAL field-population seam; only the control-SOURCE generation (the LLM
+   *  prompt) is a separate follow-up. */
+  controlTests?: readonly (readonly string[])[]
   /** Sandbox path — Python is invoked with this as cwd so the project's
    *  source code resolves on `sys.path` (the repo's own `setup.py` /
    *  `pyproject.toml` decides what's importable). */
@@ -238,6 +255,45 @@ const executeOne = async (
   }
 }
 
+/** G2 paired-control: run one control test on the base tree, reusing the SAME
+ *  pytest bridge as the symptom test. A control is "passing" iff its outcome is
+ *  `"resolved"` (all collected call reports passed in a healthy env). Anything
+ *  else (`exec_failed` import/env break, `reproduced`, `other`, `unknown`)
+ *  signals the env cannot be trusted to certify the symptom's base-red. */
+const runOneControl = async (
+  source: string,
+  i: number,
+  args: ExecuteReproTestsArgs,
+  timeoutMs: number,
+): Promise<boolean> => {
+  if (source === "") return false
+  const sample = await executeOne(source, i, args, timeoutMs)
+  return sample.outcome === "resolved"
+}
+
+/** Execute every paired control for sample `i` on the base tree and fold the
+ *  results into a single {@link ReproControlOutcome}. Empty ⇒ undefined (the
+ *  gate treats it as `"absent"`). All controls pass ⇒ `"green"`; any control
+ *  not-green ⇒ `"red"`. The control script indices are offset past the symptom
+ *  index space so temp paths never collide with the symptom tests. */
+const evaluateControls = async (
+  controls: readonly string[] | undefined,
+  symptomIndex: number,
+  args: ExecuteReproTestsArgs,
+  timeoutMs: number,
+): Promise<ReproControlOutcome | undefined> => {
+  if (controls === undefined || controls.length === 0) return undefined
+  for (let j = 0; j < controls.length; j++) {
+    if (args.signal?.aborted === true) return "red"
+    // Offset the index so the control's temp file path is distinct from the
+    // symptom test's (defaultTempPath embeds the index).
+    const controlIndex = (symptomIndex + 1) * 1000 + j
+    const passed = await runOneControl(controls[j] ?? "", controlIndex, args, timeoutMs)
+    if (!passed) return "red"
+  }
+  return "green"
+}
+
 export const executeReproTests = async (
   args: ExecuteReproTestsArgs,
 ): Promise<readonly ReproTestSample[]> => {
@@ -246,7 +302,14 @@ export const executeReproTests = async (
   for (let i = 0; i < args.tests.length; i++) {
     if (args.signal?.aborted === true) break
     const source = args.tests[i] ?? ""
-    out.push(await executeOne(source, i, args, timeoutMs))
+    const sample = await executeOne(source, i, args, timeoutMs)
+    // G2 paired-control: when controls are supplied for this sample, run them on
+    // the base tree and attach the verdict. This is what populates the field the
+    // admission gate reads — without it the gate would fail-closed on every
+    // sample (undefined ⇒ "absent"). Symptom-test indices stay 0..K-1; control
+    // temp paths are offset so they never collide.
+    const baseControl = await evaluateControls(args.controlTests?.[i], i, args, timeoutMs)
+    out.push(baseControl !== undefined ? { ...sample, baseControl } : sample)
   }
   return out
 }

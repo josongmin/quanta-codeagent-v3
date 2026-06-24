@@ -40,6 +40,21 @@
 
 import type { ReproTestSample, ReproTestSelection } from "./types"
 
+/**
+ * G2 paired-control selection options.
+ *
+ *   - `pairedControl` — when `true`, the admission predicate is TIGHTENED from
+ *     `outcome === "reproduced"` to `outcome === "reproduced" && baseControl ===
+ *     "green"`. A sample whose paired control tests did NOT all pass on the base
+ *     tree (`"red"` env/import-broken, or `"absent"` un-certified) is REJECTED
+ *     as a candidate false-red and excluded from the majority vote.
+ *
+ * Default (`undefined`/`false`) ⇒ byte-identical legacy filter.
+ */
+export interface SelectReproTestOptions {
+  readonly pairedControl?: boolean
+}
+
 const TEST_FN_RE = /\bdef\s+test_[A-Za-z0-9_]+/g
 const TRAILING_WS_RE = /[ \t]+$/
 
@@ -241,11 +256,33 @@ const pickWinner = (buckets: Iterable<Bucket>): Bucket | undefined => {
   return winner
 }
 
-export const selectReproTest = (samples: readonly ReproTestSample[]): ReproTestSelection => {
-  const reproduced = samples.filter((s) => s.outcome === "reproduced")
+/** G2 admission predicate. The base filter is `outcome === "reproduced"`. When
+ *  `pairedControl` is on, a reproducing sample is ADMITTED only if its paired
+ *  control verdict is `"green"` (controls passed on base ⇒ env healthy ⇒ the
+ *  base-red symptom is a REAL reproduction, not a false-red from a broken env).
+ *  This is the single reader site that branches behavior on `baseControl`. */
+const admits = (sample: ReproTestSample, pairedControl: boolean): boolean => {
+  if (sample.outcome !== "reproduced") return false
+  if (!pairedControl) return true
+  // Fail-closed: only a certified-green control admits. `"red"` (env broken)
+  // and `"absent"` (no control run) are both rejected.
+  return sample.baseControl === "green"
+}
+
+export const selectReproTest = (
+  samples: readonly ReproTestSample[],
+  opts: SelectReproTestOptions = {},
+): ReproTestSelection => {
+  const pairedControl = opts.pairedControl === true
+  const reproduced = samples.filter((s) => admits(s, pairedControl))
   const reproducedCount = reproduced.length
+  // Count reproducers that the paired-control gate threw out (only meaningful
+  // when the gate is on; 0 otherwise).
+  const controlRejectedCount = pairedControl
+    ? samples.filter((s) => s.outcome === "reproduced" && s.baseControl !== "green").length
+    : 0
   if (reproducedCount === 0) {
-    return { selected: null, samples, reproducedCount: 0 }
+    return { selected: null, samples, reproducedCount: 0, controlRejectedCount }
   }
   const buckets = bucketReproduced(reproduced)
   const winner = pickWinner(buckets.values())
@@ -253,5 +290,6 @@ export const selectReproTest = (samples: readonly ReproTestSample[]): ReproTestS
     selected: winner !== undefined ? winner.firstSource : null,
     samples,
     reproducedCount,
+    controlRejectedCount,
   }
 }

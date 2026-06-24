@@ -267,6 +267,120 @@ describe("executeReproTests", () => {
     const out = await executeReproTests(mkArgs({ tests: [] }))
     expect(out).toEqual([])
   })
+
+  // G2 paired-control: the REAL field-population seam. A control supplied for a
+  // sample is executed on the base tree via the SAME pytest bridge; its verdict
+  // folds into `baseControl` ("green" all-pass / "red" any-fail). This proves
+  // the admission gate's field is populated by real exec, not a test fixture.
+  describe("G2 paired-control population", () => {
+    // Route each exec to a report keyed by its temp path so symptom + control
+    // scripts get independent verdicts.
+    const routedExec =
+      (verdictFor: (path: string) => string, reports: Map<string, string>) =>
+      async (argv: readonly string[]) => {
+        const path = argv[argv.length - 1] ?? ""
+        reports.set(pytestReportPathFor(path), verdictFor(path))
+        return { code: 0, stdout: "", stderr: "" }
+      }
+
+    test("symptom reproduced + control PASSES on base ⇒ baseControl green", async () => {
+      const reports = new Map<string, string>()
+      const out = await executeReproTests(
+        mkArgs({
+          tests: ["def test_symptom(): assert wrong()"],
+          controlTests: [["def test_happy(): assert basic()"]],
+          // Symptom script (index 0) ⇒ FAILED (reproduced); control script
+          // (offset index 1000) ⇒ PASSED (resolved ⇒ control green).
+          exec: routedExec(
+            (path) => (path.includes("__repro_0.py") ? REPORT_FAILED : REPORT_PASSED),
+            reports,
+          ),
+          tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
+          readFile: async (path) => reports.get(path) ?? "",
+        }),
+      )
+      expect(out[0]?.outcome).toBe("reproduced")
+      expect(out[0]?.baseControl).toBe("green")
+    })
+
+    test("env broken: symptom reproduced but control FAILS on base ⇒ baseControl red", async () => {
+      const reports = new Map<string, string>()
+      const out = await executeReproTests(
+        mkArgs({
+          tests: ["def test_symptom(): assert wrong()"],
+          controlTests: [["def test_happy(): import broken_pkg"]],
+          // Symptom ⇒ FAILED (reproduced); control ⇒ setup error (exec_failed,
+          // i.e. the import broke) ⇒ NOT resolved ⇒ control red.
+          exec: routedExec(
+            (path) => (path.includes("__repro_0.py") ? REPORT_FAILED : REPORT_SETUP_ERROR),
+            reports,
+          ),
+          tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
+          readFile: async (path) => reports.get(path) ?? "",
+        }),
+      )
+      // This is the astropy-13033 false-red: the symptom looks reproduced but
+      // the env is broken (control could not pass), so the gate must reject it.
+      expect(out[0]?.outcome).toBe("reproduced")
+      expect(out[0]?.baseControl).toBe("red")
+    })
+
+    test("any single control failing ⇒ baseControl red (all must pass)", async () => {
+      const reports = new Map<string, string>()
+      const out = await executeReproTests(
+        mkArgs({
+          tests: ["def test_symptom(): assert wrong()"],
+          controlTests: [["def test_a(): pass", "def test_b(): assert False"]],
+          exec: routedExec((path) => {
+            if (path.includes("__repro_0.py")) return REPORT_FAILED // symptom
+            // control index 0 (offset 1000) passes; control index 1 (1001) fails
+            return path.includes("__repro_1000.py") ? REPORT_PASSED : REPORT_FAILED
+          }, reports),
+          tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
+          readFile: async (path) => reports.get(path) ?? "",
+        }),
+      )
+      expect(out[0]?.baseControl).toBe("red")
+    })
+
+    test("no controls supplied ⇒ baseControl absent (undefined) — legacy shape", async () => {
+      const reports = new Map<string, string>()
+      const out = await executeReproTests(
+        mkArgs({
+          tests: ["def test_symptom(): assert wrong()"],
+          exec: routedExec(() => REPORT_FAILED, reports),
+          tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
+          readFile: async (path) => reports.get(path) ?? "",
+        }),
+      )
+      expect(out[0]?.outcome).toBe("reproduced")
+      expect(out[0]?.baseControl).toBeUndefined()
+    })
+
+    test("control temp paths never collide with symptom temp paths", async () => {
+      const written: string[] = []
+      const reports = new Map<string, string>()
+      await executeReproTests(
+        mkArgs({
+          tests: ["def test_symptom(): assert wrong()"],
+          controlTests: [["def test_happy(): pass"]],
+          writeFile: async (path) => {
+            written.push(path)
+          },
+          exec: routedExec(
+            (path) => (path.includes("__repro_0.py") ? REPORT_FAILED : REPORT_PASSED),
+            reports,
+          ),
+          tempPath: (i: number) => `/sandbox/__repro_${i}.py`,
+          readFile: async (path) => reports.get(path) ?? "",
+        }),
+      )
+      // symptom path is __repro_0.py; control path is __repro_1000.py — distinct.
+      expect(new Set(written).size).toBe(written.length)
+      expect(written).toContain("/sandbox/__repro_0.py")
+      expect(written.some((p) => p.includes("__repro_1000.py"))).toBe(true)
+    })
+  })
 })
 
 describe("defaultTempPath — fallback collision-resistance (FIX B)", () => {

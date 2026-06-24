@@ -401,6 +401,13 @@ export interface BenchPosture {
    *  prose at round 0 (the agent's first attempt), re-attaching it only on
    *  repair rounds ≥1. The one-line closure (first-edit) hint is kept. */
   readonly round0Minimal: boolean
+  /** G2 (jun-24 astropy-13033): paired-control repro admission. When true, a
+   *  reproducing self-test is admitted only if its paired control tests passed
+   *  on the base tree (`baseControl === "green"`); env/import-broken false-reds
+   *  (`"red"`/`"absent"`) are rejected. Default-OFF ⇒ the legacy
+   *  `outcome === "reproduced"` filter is byte-identical. Threaded into
+   *  `selectReproTest`'s `pairedControl` option by the bench driver. */
+  readonly pairedControl: boolean
 }
 
 const isTrue = (v: unknown): v is true => v === true
@@ -536,7 +543,7 @@ export const benchPostureFromState = (
   // QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
   // QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER,
   // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
-  // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER.
+  // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -551,6 +558,7 @@ export const benchPostureFromState = (
   const dynamicMessageMatcher =
     readKnobValue(state, "dynamic-message-matcher", isTrue) === true
   const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
+  const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
@@ -603,6 +611,7 @@ export const benchPostureFromState = (
     specFidelityInvariant,
     dynamicMessageMatcher,
     forwardLocalize,
+    pairedControl,
     chaMultisiteSteer,
     round0Minimal,
   }

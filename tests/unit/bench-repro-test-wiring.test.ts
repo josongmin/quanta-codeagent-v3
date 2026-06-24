@@ -371,6 +371,7 @@ describe("prepareReproTest", () => {
         reproTestK: undefined,
         reproExecTimeoutMs: undefined,
         adversarialRepro: false,
+        pairedControl: false,
       },
       {
         generate: async () => Array.from({ length: 3 }, () => STUB_SOURCE),
@@ -403,6 +404,7 @@ describe("prepareReproTest", () => {
         reproTestK: undefined,
         reproExecTimeoutMs: undefined,
         adversarialRepro: false,
+        pairedControl: false,
       },
       {
         generate: async () => {
