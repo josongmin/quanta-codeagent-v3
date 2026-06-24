@@ -307,10 +307,13 @@ export {
   renderRepoRulesBlock,
 } from "./repo-rules"
 export {
+  buildControlTestPrompt,
+  DEFAULT_CONTROL_SAMPLES as REPRO_CONTROL_DEFAULT_SAMPLES,
   DEFAULT_SAMPLES as REPRO_TEST_DEFAULT_SAMPLES,
   DEFAULT_TIMEOUT_MS as REPRO_TEST_DEFAULT_TIMEOUT_MS,
   type ExecuteReproTestsArgs as ReproExecuteArgs,
   executeReproTests,
+  generateControlTests,
   generateReproTests,
   MAX_SAMPLES as REPRO_TEST_MAX_SAMPLES,
   normaliseReproSource,

@@ -28,6 +28,7 @@ import {
   composeIssueHint,
   executeReproTests,
   extractIssueHint,
+  generateControlTests,
   generateReproTests,
   lspBinaryAvailable,
   lspExtensionToLanguage,
@@ -94,6 +95,7 @@ import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
 import { type CandidateFamily, candidateFamilyCoverageMissing } from "./candidate-families"
+import { type DoneTimeCaptureClass, isCaptureFailure } from "./capture-correctness"
 import {
   buildMultisiteSteer,
   type ChaRepairTarget,
@@ -106,13 +108,13 @@ import {
   buildPhasePatchHygiene,
   type ClosureSessionState,
 } from "./closure-session"
-import { type DoneTimeCaptureClass, isCaptureFailure } from "./capture-correctness"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { coeditFamilyCoverageCandidate } from "./family-coverage-coedit"
 import { traceForwardLocalizeOwners } from "./forward-localize-trace"
 import { validateGoldPatch } from "./gold-sanity"
+import { normalizeRepoPath } from "./impacted-test-discovery"
 import {
   applyBenchKnobs,
   type BenchIssueHintMode,
@@ -225,7 +227,6 @@ import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
 import { createSessionScopedSignal, withSessionScopedSignal } from "./session-signal"
-import { normalizeRepoPath } from "./impacted-test-discovery"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessStructuralOwnerCandidates } from "./static-witness"
 import {
@@ -1511,6 +1512,10 @@ export interface PrepareReproTestDeps {
   /** Override for the generator. Tests inject a deterministic K-stream;
    *  production uses {@link generateReproTests}. */
   readonly generate?: typeof generateReproTests
+  /** G2 paired-control: override for the env-health CONTROL generator. Tests
+   *  inject a deterministic control-source stream; production uses
+   *  {@link generateControlTests}. Only invoked when {@link pairedControl} is on. */
+  readonly generateControl?: typeof generateControlTests
   /** Override for the executor. Tests inject a Map-backed mock; production
    *  wraps `execArgv` + a file-write port. */
   readonly execute?: typeof executeReproTests
@@ -1603,15 +1608,32 @@ const buildReproExecPort = (instance: Instance, deps: PrepareReproTestDeps) =>
       ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
     }))
 
+/** Result of {@link generateReproCandidateTests}: the tagged symptom candidates
+ *  plus the OPTIONAL G2 paired-control sources (env-health probes). The controls
+ *  are SHARED across every symptom candidate of this instance — they certify the
+ *  exec env, not any single symptom. Empty/absent ⇒ the legacy path (no controls
+ *  threaded ⇒ `baseControl` stays undefined ⇒ byte-identical). */
+interface ReproCandidateGeneration {
+  readonly candidates: readonly ReproTestCandidate[]
+  readonly controlSources: readonly string[]
+}
+
 /** jun-23 canonical/hardening split. The CANONICAL set is the submit-gate
  *  oracle (plain core-symptom contract); the optional HARDENING set is advisory
  *  (adversarial coverage for tie-break / repair seeding, NEVER the submit gate).
- *  Each returned candidate is tagged with its {@link ReproTestKind}. */
+ *  Each returned candidate is tagged with its {@link ReproTestKind}.
+ *
+ *  G2 (jun-24): when `deps.pairedControl` is on, ALSO synthesise env-health
+ *  CONTROL tests (public issue/repo only, NEVER gold) via {@link
+ *  generateControlTests}. These are returned as `controlSources` so the executor
+ *  can run them on the base tree and populate `baseControl` — the field the
+ *  admission gate branches on. Default-OFF ⇒ `controlSources` is `[]` and the
+ *  whole path is byte-identical to the legacy (no-control) generation. */
 const generateReproCandidateTests = async (
   instance: Instance,
   deps: PrepareReproTestDeps,
   config: ReproTestConfig,
-): Promise<readonly ReproTestCandidate[] | null> => {
+): Promise<ReproCandidateGeneration | null> => {
   try {
     const mwe = extractIssueRepro(instance.problemStatement)?.code
     const gen = deps.generate ?? generateReproTests
@@ -1624,13 +1646,24 @@ const generateReproCandidateTests = async (
     const canonical = (await gen({ ...base, kind: "canonical" })).map(
       (source): ReproTestCandidate => ({ kind: "canonical", source }),
     )
-    if (deps.adversarial !== true) return canonical
+    // G2: env-health control sources. Generated ONLY when the gate is on — when
+    // off this call is skipped entirely so the LLM-call count + outputs are
+    // byte-identical to the legacy path.
+    const controlSources =
+      deps.pairedControl === true
+        ? await (deps.generateControl ?? generateControlTests)({
+            issue: instance.problemStatement,
+            llm: deps.llm,
+            config,
+          })
+        : []
+    if (deps.adversarial !== true) return { candidates: canonical, controlSources }
     // Advisory hardening set: a SEPARATE generation pass with the over-strict
     // adversarial prompt. Kept distinct so it can never reach the submit gate.
     const hardening = (await gen({ ...base, kind: "hardening" })).map(
       (source): ReproTestCandidate => ({ kind: "hardening", source }),
     )
-    return [...canonical, ...hardening]
+    return { candidates: [...canonical, ...hardening], controlSources }
   } catch {
     return null
   }
@@ -1638,6 +1671,7 @@ const generateReproCandidateTests = async (
 
 const executeReproCandidateTests = async (
   candidates: readonly ReproTestCandidate[],
+  controlSources: readonly string[],
   instance: Instance,
   sandbox: string,
   deps: PrepareReproTestDeps,
@@ -1649,6 +1683,12 @@ const executeReproCandidateTests = async (
     reproRepo !== undefined
       ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
       : undefined
+  // G2 paired-control: when controls were generated (gate ON), attach the SAME
+  // env-health control set to EVERY symptom candidate by position. The executor
+  // runs them on the base tree and folds the verdict into each sample's
+  // `baseControl`. Empty controls ⇒ omit the field entirely (byte-identical
+  // legacy `executeReproTests` call — no `controlTests` key).
+  const controlTests = controlSources.length > 0 ? candidates.map(() => controlSources) : undefined
   try {
     const samples = await (deps.execute ?? executeReproTests)({
       tests: candidates.map((c) => c.source),
@@ -1661,6 +1701,7 @@ const executeReproCandidateTests = async (
         }),
       readFile: async (path: string): Promise<string> => Bun.file(path).text(),
       config,
+      ...(controlTests !== undefined ? { controlTests } : {}),
       ...(buildArgv !== undefined ? { buildArgv } : {}),
     })
     // jun-23 split: carry each candidate's KIND onto its sample by positional
@@ -1696,8 +1737,9 @@ export const prepareReproTestDetailed = async (
   // sentinel scaffold instead of guessing a reproduction from prose. Fail-closed:
   // `extractIssueRepro` returns undefined for anything ambiguous, in which case
   // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
-  const tests = await generateReproCandidateTests(instance, deps, config)
-  if (tests === null) return failedReproResult("generation_failed")
+  const generated = await generateReproCandidateTests(instance, deps, config)
+  if (generated === null) return failedReproResult("generation_failed")
+  const tests = generated.candidates
   if (tests.length === 0) return failedReproResult("generation_empty")
   // Run each repro under the SAME project env the testCmd uses. A bare
   // `python3 <script>` on the box host cannot import the target project (it is
@@ -1705,7 +1747,14 @@ export const prepareReproTestDetailed = async (
   // ModuleNotFoundError and the primary rail never fired. For SWE-bench
   // instances, build a `uv run --with-editable . python <script>` argv keyed on the
   // repo's python version; non-SWE-bench fixtures keep the bare python3 default.
-  const samples = await executeReproCandidateTests(tests, instance, sandbox, deps, config)
+  const samples = await executeReproCandidateTests(
+    tests,
+    generated.controlSources,
+    instance,
+    sandbox,
+    deps,
+    config,
+  )
   if (samples === null) return failedReproResult("execution_failed")
   // G2 paired-control: thread the gate into the admission filter. When on, the
   // selector rejects reproducing samples whose paired controls did not pass on
@@ -3239,7 +3288,10 @@ const generateSelectionCandidate = async (args: {
   // injected. Resolves to deps.llm otherwise (byte-identical single-vendor path).
   const lanePosture =
     args.postureOverride ??
-    benchPostureFromState(args.stateOverride ?? resolveBenchKnobs({ envVars: process.env }), process.env)
+    benchPostureFromState(
+      args.stateOverride ?? resolveBenchKnobs({ envVars: process.env }),
+      process.env,
+    )
   const laneLlm = resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index)
   try {
     const phase = await runAgentPhase(
