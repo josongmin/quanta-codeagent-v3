@@ -98,6 +98,7 @@ import {
   toInstance,
 } from "./corpus"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { resolveModelLanes } from "./model-lanes"
 import { finalizeRun, runInstance } from "./eval"
 import {
   type ForkBranchOutcome,
@@ -448,6 +449,10 @@ type SwebenchTaskDeps = {
   llm: LLMPort
   /** Fresh-port factory for fork-branch replay isolation (RFC jun-23 §4.1). */
   freshLlm: () => LLMPort
+  /** G1 — verify-select model lanes (≥2 distinct-model ports) or undefined.
+   *  Threaded onto the per-instance `RunInstanceDeps.llmLanes`. Undefined ⇒
+   *  byte-identical single-port path. */
+  llmLanes?: readonly LLMPort[]
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number }
   pythonSwebench: Awaited<ReturnType<typeof buildPythonSwebench>>
   repair: { maxRounds: number } | undefined
@@ -470,6 +475,9 @@ const runSwebenchTask = async (
         llm: deps.llm,
         maxTurns: deps.cfg.maxTurns,
         timeoutMs: deps.cfg.timeoutMs,
+        // G1 — present ONLY when ≥2 distinct-model lanes resolved (knob ON +
+        // credentialed). Omitted ⇒ key absent ⇒ byte-identical single-port path.
+        ...(deps.llmLanes !== undefined ? { llmLanes: deps.llmLanes } : {}),
         ...(deps.pythonSwebench !== undefined ? { pythonSwebench: deps.pythonSwebench } : {}),
         ...(deps.pythonSwebench !== undefined && instance.goldPatch !== undefined
           ? { goldSanity: { mode: "on-fail" } }
@@ -540,6 +548,9 @@ const runDatasetMode = async (
   // check), `filtered` already has the `--instance` filter applied.
   tasks: { parsed: readonly SwebenchTask[]; filtered: SwebenchTask[] },
   obs?: ObserveCtx,
+  /** G1 — verify-select model lanes (≥2 distinct-model ports) or undefined.
+   *  Undefined ⇒ byte-identical single-port path. */
+  llmLanes?: readonly LLMPort[],
 ): Promise<void> => {
   if (tasks.parsed.length === 0) {
     logger.info(
@@ -579,7 +590,16 @@ const runDatasetMode = async (
   }
 
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
-  const taskDeps = { llm, freshLlm, cfg, pythonSwebench, repair, obs, repoBaseUrl }
+  const taskDeps = {
+    llm,
+    freshLlm,
+    cfg,
+    pythonSwebench,
+    repair,
+    obs,
+    repoBaseUrl,
+    ...(llmLanes !== undefined ? { llmLanes } : {}),
+  }
   // Concurrency>1 overlaps patch-gen across tasks. Docker grading is ALWAYS
   // SERIAL (python-swebench withGradingLock mutex) — concurrent grading
   // false-negatives correct patches (2026-06-19).
@@ -736,6 +756,20 @@ const maybeRunDatasetMode = async (
   const resolved = resolveLLM("a dataset")
   if (resolved === null) return true
   const { provider, model, llm, freshLlm } = resolved
+  // G1 — verify-select model lanes. Undefined unless QUANTA_BENCH_MODEL_LANES
+  // names ≥2 distinct models that EACH build a real port for `provider`. The
+  // primary model (`model`) reuses the already-built `llm` so lane-0 is never a
+  // duplicate port; other ids are pinned via the factory (null ⇒ dropped).
+  const llmLanes = resolveModelLanes({
+    env: process.env,
+    buildLanePort: (modelId) =>
+      modelId === model
+        ? llm
+        : tryCreateLLM(provider, { model: modelId }, process.env),
+  })
+  if (llmLanes !== undefined) {
+    logger.info(`bench: model-lane diversity ON (${llmLanes.length} lanes)`)
+  }
   await runDatasetMode(
     datasetFile,
     llm,
@@ -749,6 +783,7 @@ const maybeRunDatasetMode = async (
     },
     { parsed, filtered },
     obs,
+    llmLanes,
   )
   return true
 }
