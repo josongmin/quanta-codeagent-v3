@@ -69,6 +69,9 @@ export interface AdaptiveControllerArgs<P> {
   readonly router: (input: AdaptiveRouterInput<P>) => Promise<unknown>
   /** Phase-execution port — runs the mapped posture and returns a FRESH packet. */
   readonly executor: (input: AdaptiveExecutorInput<P>) => Promise<{ readonly packet: P }>
+  /** Optional semantic legality guard for parsed actions. Use this for packet-
+   *  dependent restrictions the JSON schema cannot express. */
+  readonly validateDecision?: (packet: P, decision: AdaptiveDecision) => string | undefined
   readonly limits?: AdaptiveLimits
 }
 
@@ -96,6 +99,14 @@ export const runAdaptiveEscalation = async <P>(
     const parsed = parseAdaptiveDecision(raw, citableIds)
     // FAIL-CLOSED: invalid output never submits — escalate for a human/typed stop.
     if (!parsed.ok) return { outcome: "escalate_needs_human", reason: parsed.reason, steps }
+    const illegalReason = args.validateDecision?.(packet, parsed.decision)
+    if (illegalReason !== undefined) {
+      return {
+        outcome: "escalate_needs_human",
+        reason: `illegal_action:${illegalReason}`,
+        steps,
+      }
+    }
 
     const { action } = parsed.decision
     if (isTerminalAction(action)) {

@@ -279,6 +279,19 @@ export interface RunSelectionArgs {
    *  authority veto — researchOnly signals (issue smoke, declaredExpected,
    *  rubric) can neither reject nor rank. */
   mode?: SelectorMode
+  /** T2b — authority of the wired `declaredExpected` port. `"public"` means the
+   *  port was built from a PUBLIC-issue-text invariant
+   *  (buildPublicDeclaredExpectedPort, which refuses any non-public source), so
+   *  its `false` verdict may veto in CLEAN mode. Default/`"research"` keeps the
+   *  legacy behavior: the declared-expected gate never vetoes in clean mode. */
+  declaredExpectedAuthority?: "public" | "research"
+  /** T1 (jun-24) measurement off-switch for the clean-mode family-coverage veto
+   *  (`hard:familyCoverageMissing`). The producer-consumer witness drives this
+   *  veto from structural call-graph evidence only (no data-flow proof that the
+   *  consumer actually breaks), so a producer-only correct fix CAN be over-demanded.
+   *  Default/undefined ⇒ veto ON (byte-identical). `false` ⇒ OFF, so the A/B
+   *  baseline can measure the over-demand cost before this is promoted. */
+  familyCoverageVeto?: boolean
   /** OPTIONAL public-contract bundle (T-CON-10) for the clean lexicographic
    *  contract-dominance tier. When omitted, the contract tier stays empty.
    *  Ignored in research mode. */
@@ -433,6 +446,7 @@ const withFamily = (candidate: Candidate, family: CandidateFamily): Candidate =>
   familyId: family.familyId,
   familyReason: family.reason,
   familyOwnerFiles: family.ownerFiles,
+  familySourceEvidence: family.sourceEvidence,
 })
 
 const withFamilyCoverageRepairTelemetry = (
@@ -471,6 +485,28 @@ const maybeRepairFamilyCoverage = async (
   )
   const missing = shouldUseFamilyRepair(candidate, family)
   if (missing.length === 0) return candidateWithFamily
+  const coedited = await ctx.args.ports
+    .repairFamilyCoverage?.({
+      candidate: candidateWithFamily,
+      family,
+      missingFiles: missing,
+    })
+    .catch(() => undefined)
+  if (coedited !== undefined) {
+    const coeditedMissing = candidateFamilyCoverageMissing(family, coedited.files)
+    if (coedited.patch.trim() !== "" && coeditedMissing.length < missing.length) {
+      return withFamilyCoverageRepairTelemetry(
+        withFamily(withCandidateAdvisoryContracts(coedited, advisoryContracts), family),
+        {
+          attempted: true,
+          accepted: true,
+          reason: "missing_reduced",
+          missingBefore: missing,
+          missingAfter: coeditedMissing,
+        },
+      )
+    }
+  }
   try {
     const repaired = await ctx.args.ports.generate(
       index,
@@ -676,9 +712,20 @@ const scoreOne = async (
     contractCandidate,
   )
   const contractsSatisfied = contractsSatisfiedCount(scoredContracts, contractCandidate)
-  const baseVerdict = scoreWithAuthority(probed.hard, soft, probed.declaredExpectedMatch, ctx.mode)
+  const baseVerdict = scoreWithAuthority(
+    probed.hard,
+    soft,
+    probed.declaredExpectedMatch,
+    ctx.mode,
+    ctx.args.declaredExpectedAuthority === "public",
+  )
+  // T1 measurement off-switch: the clean-mode family-coverage veto fires by
+  // default (byte-identical); `familyCoverageVeto === false` disables it for an
+  // A/B baseline against the producer-consumer over-demand risk. Undefined ⇒ on.
   const structuralHardReasons =
-    ctx.mode === "clean" ? familyCoverageMissingHardReasons(sanitizedCandidate) : []
+    ctx.mode === "clean" && ctx.args.familyCoverageVeto !== false
+      ? familyCoverageMissingHardReasons(sanitizedCandidate)
+      : []
   const proofState = selectionProofState({
     resolved: probed.resolvedKofN,
     hard: probed.hard,
@@ -905,7 +952,13 @@ const staticAcceptEntry = async (
     hard,
     resolvedKofN: null,
     voterQuorum: null,
-    verdict: scoreWithAuthority(hard, soft, soft.declaredExpectedMatch, ctx.mode),
+    verdict: scoreWithAuthority(
+      hard,
+      soft,
+      soft.declaredExpectedMatch,
+      ctx.mode,
+      ctx.args.declaredExpectedAuthority === "public",
+    ),
     requiredContractsSatisfied: requiredContractsSatisfiedCount(
       effectiveContracts,
       contractCandidate,

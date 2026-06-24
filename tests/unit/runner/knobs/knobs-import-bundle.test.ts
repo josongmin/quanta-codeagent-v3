@@ -33,6 +33,7 @@ import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { closureRepairKnob } from "@/runner/knobs/knobs/closure-repair"
 import { composeAuthoringKnob } from "@/runner/knobs/knobs/compose-authoring"
 import { faultEvidenceKnob } from "@/runner/knobs/knobs/fault-evidence"
+import { forwardLocalizeKnob } from "@/runner/knobs/knobs/forward-localize"
 import { gitDirectiveKnob } from "@/runner/knobs/knobs/git-directive"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
@@ -67,6 +68,7 @@ import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
 import { round0MinimalKnob } from "@/runner/knobs/knobs/round0-minimal"
 import { selectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
+import { specFidelityInvariantKnob } from "@/runner/knobs/knobs/spec-fidelity-invariant"
 import { specFidelitySteerKnob } from "@/runner/knobs/knobs/spec-fidelity-steer"
 import { subagentKnob } from "@/runner/knobs/knobs/subagent"
 import { taskBudgetKnob } from "@/runner/knobs/knobs/task-budget"
@@ -94,6 +96,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(closureRepairKnob),
   asAnyKnob(composeAuthoringKnob),
   asAnyKnob(faultEvidenceKnob),
+  asAnyKnob(forwardLocalizeKnob),
   asAnyKnob(gitDirectiveKnob),
   asAnyKnob(hooksKnob),
   asAnyKnob(issueHintKnob),
@@ -128,6 +131,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(round0MinimalKnob),
   asAnyKnob(selectorModeKnob),
   asAnyKnob(skillsKnob),
+  asAnyKnob(specFidelityInvariantKnob),
   asAnyKnob(specFidelitySteerKnob),
   asAnyKnob(subagentKnob),
   asAnyKnob(taskBudgetKnob),

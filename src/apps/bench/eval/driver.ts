@@ -4,6 +4,7 @@ import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts }
 import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { extractIssueHint } from "@/agent/issue-hint"
+import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { Message } from "@/llm"
@@ -11,7 +12,14 @@ import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
 import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
 import {
+  classifyDoneTimeCapture,
+  type DoneTimeCaptureClass,
+  isCaptureFailure,
+} from "@/runner/batch/eval/capture-correctness"
+import { buildPublicDeclaredExpectedPort } from "@/runner/batch/eval/declared-expected-matcher"
+import {
   applyBenchKnobs,
+  adaptiveNextPassOwners,
   attachReproVoteOutcomes,
   type BenchKnobState,
   BenchObserver,
@@ -35,6 +43,7 @@ import {
   makeReproConsensusSelectionPort,
   makeSelectionRegressionPort,
   makeSelectionStaticSanityPort,
+  maybeRunRepairEscalationFollowup,
   maybeValidateTerminalResult,
   type PreparedAttemptContext,
   type PrepareIssueHintDeps,
@@ -61,6 +70,7 @@ import {
   validatedReproRepairSeed,
   verifyAndFinalizeResult,
 } from "@/runner/batch/eval/driver"
+import { coeditFamilyCoverageCandidate } from "@/runner/batch/eval/family-coverage-coedit"
 import {
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
@@ -72,8 +82,11 @@ import {
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { buildCleanSelectionAuthorityContracts } from "@/runner/batch/eval/public-contract-bundle"
-import { type SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
-import { candidatePatchAppliesCleanly } from "@/runner/batch/eval/rematerialize"
+import type { SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
+import {
+  candidatePatchAppliesCleanly,
+  materializeBuildEnv,
+} from "@/runner/batch/eval/rematerialize"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
@@ -84,23 +97,26 @@ import {
 } from "@/runner/batch/eval/repo-regression-discovery-adapter"
 import { unavailableReproOracleCalibration } from "@/runner/batch/eval/repro-oracle-calibration"
 import {
-  buildSelectionInputs,
+  composeSelectionAgentHint,
+  prepareSelectionEvidenceContext,
+} from "@/runner/batch/eval/selection-assembly"
+import {
   type Candidate,
   filesFromPatch,
-  normalizeSelectionPaths,
   runSelection,
+  type SelectionInputs,
   type SelectionPorts,
   type SelectionResult,
   type SelectionTelemetry,
   summarizeSelection,
 } from "@/runner/batch/eval/selection-executor"
-import {
-  composeSelectionAgentHint,
-  prepareSelectionEvidenceContext,
-} from "@/runner/batch/eval/selection-assembly"
 import { selectionGenerationErrorOf } from "@/runner/batch/eval/selection-generation-error"
 import { buildSelectionRiskGate } from "@/runner/batch/eval/selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "@/runner/batch/eval/selection-smoke"
+import {
+  createSessionScopedSignal,
+  withSessionScopedSignal,
+} from "@/runner/batch/eval/session-signal"
 import { BenchStreamTap, relFromSandbox } from "@/runner/batch/eval/stream-tap"
 import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
@@ -120,7 +136,7 @@ import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
 import { buildWiring, emitSandbox, NullStream, ObservationError, type Wiring } from "./report"
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
-import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
+import { gitStageAndDiffCached, gitWorktreeHasStagedChanges, withGitSnapshot } from "./snapshot"
 
 export type { BenchKnobState, IssueHintMode, PrepareIssueHintDeps, PrepareReproTestDeps }
 export {
@@ -228,7 +244,9 @@ const runAgentViaSdk = async (
   config: AgentConfig,
   runtimeFactory: typeof createRuntime = createRuntime,
 ): Promise<AgentOutcome> => {
-  const hostSession = createBenchSessionHost(config)
+  const sessionSignal = createSessionScopedSignal(config.signal)
+  const scopedConfig = withSessionScopedSignal(config, sessionSignal.signal)
+  const hostSession = createBenchSessionHost(scopedConfig)
   const runtimeOptions = {
     host: createSingleSessionRuntimeHost(() => hostSession),
   } satisfies Parameters<typeof createRuntime>[0]
@@ -249,10 +267,10 @@ const runAgentViaSdk = async (
     })
     const eventCapture = captureBenchSessionEvents(session)
     unsubscribe = eventCapture.unsubscribe
-    await session.input.append(promptTextFromMessages(config.messages), undefined, {
-      signal: config.signal,
+    await session.input.append(promptTextFromMessages(scopedConfig.messages), undefined, {
+      signal: scopedConfig.signal,
     })
-    const turn = await session.turn.run(undefined, { signal: config.signal })
+    const turn = await session.turn.run(undefined, { signal: scopedConfig.signal })
     const outcome = turn.turn?.outcome
     if (outcome === undefined) {
       // The session ended without a turn outcome — almost always a deadline/cancel
@@ -276,6 +294,7 @@ const runAgentViaSdk = async (
     }
     return outcome
   } finally {
+    sessionSignal.abort()
     unsubscribe?.()
     await session?.close().catch(() => undefined)
     await runtime.close().catch(() => undefined)
@@ -291,6 +310,10 @@ interface Phase {
   firstEditFile?: string
   editCount?: number
   turnsToFirstEdit?: number
+  /** T5 — done-time patch-capture class. `lost-edits` ⇒ the agent edited but the
+   *  captured tree is empty AND clean (fork-worktree desync, 11138 class): an
+   *  infra capture failure to retry, never a silent empty submit. Single-pass. */
+  captureClass?: DoneTimeCaptureClass
   /** T-601 — did a repair round clear the (primary-rail) validator? Repair path
    *  only; undefined on single-pass. Derives `primaryRailRedAfterRepair`. */
   validated?: boolean
@@ -378,6 +401,7 @@ const runAgentPhase = async (
   let agentError: string | undefined
   let firstEditFile: string | undefined
   let editCount: number | undefined
+  let sourceEditCount: number | undefined
   let turnsToFirstEdit: number | undefined
   // P0 — tentative-patch retention (Sonar absorption). When ON, snapshot the
   // sandbox diff each time the agent's OWN verification passes; on a bad ending
@@ -442,6 +466,7 @@ const runAgentPhase = async (
       agentError = tap.lastErrorMessage
       firstEditFile = relFromSandbox(sandbox, tap.firstEditFile)
       editCount = tap.editCount
+      sourceEditCount = tap.sourceEditCount
       turnsToFirstEdit = tap.turnsToFirstEdit
     },
     instance.swebench?.repo,
@@ -453,6 +478,38 @@ const runAgentPhase = async (
   const patch = tentativeOn
     ? recorder.selectEmitted(rawPatch, stopReason === "completed")
     : rawPatch
+  // T5 — done-time capture correctness. Distinguish a real fork-worktree capture
+  // desync (edits made, captured tree empty AND clean) from a genuine no-patch
+  // and from a legitimate test/repro-only edit (sourceOnlyDiff strip), using only
+  // structural facts. Surfaced so a `lost-edits` (11138 class) is routed to retry
+  // instead of being silently graded as a model miss. Classify on `rawPatch` (the
+  // done-time tree diff), NOT the tentative-substituted `patch` — both `rawPatch`
+  // and `rawDirty` then reflect the SAME final tree, so a tentative snapshot from
+  // an earlier turn can never mask a real capture desync (or vice versa).
+  const captureClass = classifyDoneTimeCapture({
+    sourcePatch: rawPatch,
+    rawDirty: await gitWorktreeHasStagedChanges(sandbox, deps.timeoutMs),
+    // T5 — classify on SOURCE edits only. Counting test/scratch edits here would
+    // misread a no-source-change run as a fork-worktree desync ⇒ route a real miss
+    // to infra-fail ⇒ drop it from the solve-rate denominator (inflation). The
+    // total `editCount` is still carried as the churn telemetry field below.
+    editCount: sourceEditCount ?? 0,
+    touchedFiles: filesFromPatch(rawPatch),
+  }).captureClass
+  if (isCaptureFailure(captureClass)) {
+    logger.warn(
+      `[capture] ${instance.id}: LOST-EDITS — ${editCount} edit(s) made but the ` +
+        "done-time source diff is empty and the worktree is clean (fork-worktree " +
+        "capture desync). Routed as infra capture failure, NOT a model miss.",
+    )
+    // T5 — close the single-pass measurement hole: surface the desync as an
+    // `agentError` so `classifyOutcome` routes it to `infra-fail` (retry) instead
+    // of the `patch==="" + turns>0 ⇒ real-fail` model-miss bucket. Same marker the
+    // verify-select path throws (capture_lost_edits) so both paths classify alike.
+    // Only fill when no upstream error already explains the run (don't clobber a
+    // real agent/LLM failure that is the true cause).
+    agentError ??= `capture_lost_edits: ${editCount ?? 0} edit(s) made but 0-byte source diff on a clean worktree (fork-worktree desync)`
+  }
   if (tentativeOn && patch !== rawPatch) {
     // P0 telemetry — log ONLY when retention actually substitutes (the rare,
     // interesting case): the run ended badly and we recovered a verified-green
@@ -466,6 +523,7 @@ const runAgentPhase = async (
   return {
     patch,
     turns,
+    captureClass,
     ...(stopReason !== undefined ? { stopReason } : {}),
     ...(agentError !== undefined ? { agentError } : {}),
     ...(firstEditFile !== undefined ? { firstEditFile } : {}),
@@ -688,6 +746,16 @@ const generateSelectionCandidate = async (args: {
       args.stateOverride,
     )
     args.addTurns(phase.turns)
+    // T5 — a fork-worktree capture desync (edits made, 0-byte diff on a CLEAN
+    // tree) is an INFRA failure, not a model miss. This is the concurrency>1 fork
+    // path where 11138's empty 0-byte submission occurred. Label it distinctly
+    // BEFORE the generic empty-patch path so it is not laundered into the
+    // no-fix/model-miss bucket (the measurement-hole confound this project fences).
+    if (phase.captureClass !== undefined && isCaptureFailure(phase.captureClass)) {
+      const captureError = `capture_lost_edits: ${phase.editCount ?? 0} edit(s) made but 0-byte source diff on a clean worktree (fork-worktree desync)`
+      args.generationErrors.set(args.index, captureError)
+      throw new Error(captureError)
+    }
     const generationError = selectionGenerationErrorOf({
       stopReason: phase.stopReason,
       patch: phase.patch,
@@ -801,6 +869,7 @@ interface SelectionPortsArgs {
   readonly baseValidatedRed: boolean | null
   readonly generationErrors: Map<number, string>
   readonly addTurns: (turns: number) => void
+  readonly chaRepairTargets: PreparedAttemptContext["chaRepairTargets"]
   readonly staticSanitySelectionPort: NonNullable<SelectionPorts["staticSanity"]>
   readonly regressionSelectionPort: NonNullable<SelectionPorts["regression"]>
   readonly publicRegressionProofSelectionPort?: SelectionPorts["publicRegressionProof"]
@@ -842,6 +911,18 @@ const selectionStructuralRepairPorts = (args: SelectionPortsArgs): Partial<Selec
             candidate,
             sandbox: args.sandbox,
             signal: args.signal,
+            preferredTargets: args.chaRepairTargets,
+          }),
+        repairFamilyCoverage: ({ candidate, family, missingFiles }) =>
+          coeditFamilyCoverageCandidate({
+            sandbox: args.sandbox,
+            candidate,
+            family,
+            missingFiles,
+            timeoutMs: args.deps.timeoutMs,
+            baseCommit: args.instance.swebench?.baseCommit,
+            repo: args.instance.swebench?.repo,
+            preferredTargets: args.chaRepairTargets,
           }),
       }
     : {}
@@ -963,7 +1044,7 @@ interface SelectionExecutionArgs {
   readonly counterfactual: boolean
   readonly selectorMode: BenchPosture["selectorMode"]
   readonly verifySelectProofRequired: boolean
-  readonly selectionInputs: ReturnType<typeof buildSelectionInputs>
+  readonly selectionInputs: SelectionInputs
   readonly selectionAuthorityContracts: SelectionContractBundle | undefined
   readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
   readonly verificationTarget: VerificationTargetFact | undefined
@@ -974,6 +1055,7 @@ interface SelectionExecutionArgs {
   readonly postureOverride: BenchPosture | undefined
   readonly stateOverride: BenchKnobState | undefined
   readonly selectionBaseValidatedRed: boolean | null
+  readonly chaRepairTargets: PreparedAttemptContext["chaRepairTargets"]
   readonly generationErrors: Map<number, string>
   readonly selectionLlmEvidence: Partial<LlmEvidenceArtifacts>
   readonly runtimePorts: PreparedSelectionRuntimePorts
@@ -1008,6 +1090,16 @@ const runSelectionExecutor = async (
     ...(args.instance.swebench?.repo !== undefined ? { repo: args.instance.swebench.repo } : {}),
     signal: args.signal,
   })
+  // T2b — wire the PUBLIC-issue-text declared-expected port so the existing
+  // clean-mode declared-expected veto can fire against message-shape inventions.
+  // Gated default-OFF on `specFidelityInvariant`; the matcher's answer-key guard
+  // refuses any non-public provenance, so this never sources from gold/test_patch.
+  const declaredExpectedPort =
+    args.postureOverride?.specFidelityInvariant === true
+      ? buildPublicDeclaredExpectedPort(
+          extractIssueDeclaredExpected(args.instance.problemStatement),
+        )
+      : undefined
   const result = await runSelection({
     n: args.n,
     problemStatement: args.instance.problemStatement,
@@ -1022,48 +1114,58 @@ const runSelectionExecutor = async (
     repairOwnerEvidence: args.selectionOwnerEvidence,
     ...(selectionRiskGate !== undefined ? { riskGate: selectionRiskGate } : {}),
     ...optionalSelectionRunArgs(args),
+    ...(declaredExpectedPort !== undefined ? { declaredExpectedAuthority: "public" as const } : {}),
+    // T1 measurement off-switch: disable the clean-mode family-coverage veto for
+    // an A/B baseline against producer-consumer over-demand. Default ON.
+    ...(gateDisabled(process.env, "QUANTA_BENCH_FAMILY_COVERAGE")
+      ? { familyCoverageVeto: false as const }
+      : {}),
     recordLlmEvidencePacket: (packet: LlmEvidencePacket) => {
       recordLlmEvidencePacket(args.selectionLlmEvidence, packet)
     },
-    ports: selectionPorts({
-      instance: args.instance,
-      deps: args.deps,
-      sandbox: args.sandbox,
-      signal: args.signal,
-      wiring: args.wiring,
-      precomputedHint: args.precomputedHint,
-      reproHint: args.reproHint,
-      postureOverride: args.postureOverride,
-      stateOverride: args.stateOverride,
-      mergeHint: args.mergeHint,
-      concurrency: args.concurrency,
-      baseValidatedRed: args.selectionBaseValidatedRed,
-      generationErrors: args.generationErrors,
-      addTurns: (turns) => {
-        totalTurns += turns
-      },
-      staticSanitySelectionPort: args.runtimePorts.staticSanitySelectionPort,
-      regressionSelectionPort: args.runtimePorts.regressionSelectionPort,
-      ...(args.runtimePorts.publicRegressionProofSelectionPort !== undefined
-        ? {
-            publicRegressionProofSelectionPort:
-              args.runtimePorts.publicRegressionProofSelectionPort,
-          }
-        : {}),
-      ...(args.runtimePorts.smokeSelectionPort !== undefined
-        ? { smokeSelectionPort: args.runtimePorts.smokeSelectionPort }
-        : {}),
-      ...(args.runtimePorts.mweProofSelectionPort !== undefined
-        ? { mweProofSelectionPort: args.runtimePorts.mweProofSelectionPort }
-        : {}),
-      ...(args.runtimePorts.resolvedKofNSelectionPort !== undefined
-        ? { resolvedKofNSelectionPort: args.runtimePorts.resolvedKofNSelectionPort }
-        : {}),
-      ...(args.runtimePorts.reproConsensusProofSelectionPort !== undefined
-        ? { reproConsensusProofSelectionPort: args.runtimePorts.reproConsensusProofSelectionPort }
-        : {}),
-      selectorMode: args.selectorMode,
-    }),
+    ports: {
+      ...selectionPorts({
+        instance: args.instance,
+        deps: args.deps,
+        sandbox: args.sandbox,
+        signal: args.signal,
+        wiring: args.wiring,
+        precomputedHint: args.precomputedHint,
+        reproHint: args.reproHint,
+        postureOverride: args.postureOverride,
+        stateOverride: args.stateOverride,
+        mergeHint: args.mergeHint,
+        concurrency: args.concurrency,
+        baseValidatedRed: args.selectionBaseValidatedRed,
+        generationErrors: args.generationErrors,
+        chaRepairTargets: args.chaRepairTargets,
+        addTurns: (turns) => {
+          totalTurns += turns
+        },
+        staticSanitySelectionPort: args.runtimePorts.staticSanitySelectionPort,
+        regressionSelectionPort: args.runtimePorts.regressionSelectionPort,
+        ...(args.runtimePorts.publicRegressionProofSelectionPort !== undefined
+          ? {
+              publicRegressionProofSelectionPort:
+                args.runtimePorts.publicRegressionProofSelectionPort,
+            }
+          : {}),
+        ...(args.runtimePorts.smokeSelectionPort !== undefined
+          ? { smokeSelectionPort: args.runtimePorts.smokeSelectionPort }
+          : {}),
+        ...(args.runtimePorts.mweProofSelectionPort !== undefined
+          ? { mweProofSelectionPort: args.runtimePorts.mweProofSelectionPort }
+          : {}),
+        ...(args.runtimePorts.resolvedKofNSelectionPort !== undefined
+          ? { resolvedKofNSelectionPort: args.runtimePorts.resolvedKofNSelectionPort }
+          : {}),
+        ...(args.runtimePorts.reproConsensusProofSelectionPort !== undefined
+          ? { reproConsensusProofSelectionPort: args.runtimePorts.reproConsensusProofSelectionPort }
+          : {}),
+        selectorMode: args.selectorMode,
+      }),
+      ...(declaredExpectedPort !== undefined ? { declaredExpected: declaredExpectedPort } : {}),
+    },
   })
   return { result, totalTurns }
 }
@@ -1102,6 +1204,7 @@ const runSelectionPhase = async (
   ownerResolved: PreparedAttemptContext["ownerResolved"],
   baseValidatedRed: boolean,
   verificationPlan: PreparedAttemptContext["verificationPlan"],
+  existingTestExpectations: PreparedAttemptContext["existingTestExpectations"],
   reproTest: BenchReproTestTelemetry | undefined,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
@@ -1109,6 +1212,7 @@ const runSelectionPhase = async (
   reproSources: readonly string[],
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaRepairTargets?: PreparedAttemptContext["chaRepairTargets"],
 ): Promise<Phase> => {
   const selectionContext = prepareSelectionEvidenceContext({
     problemStatement: instance.problemStatement,
@@ -1123,6 +1227,7 @@ const runSelectionPhase = async (
     reproTest,
     verificationTarget: verificationTargetFromPlan(verificationPlan),
     oracleFailureRepairSeed: validatedReproRepairSeed(reproSources),
+    existingTestExpectations,
     readSource: readSelectionSource(sandbox),
   })
   const {
@@ -1131,6 +1236,7 @@ const runSelectionPhase = async (
     advisoryPromptContracts,
     selectionOwnerEvidence,
     verificationTarget,
+    existingTestExpectations: selectionExistingTestExpectations,
     staticWitnessDiagnostics,
     selectionBaseValidatedRed,
     generationEnvCaveats,
@@ -1150,6 +1256,7 @@ const runSelectionPhase = async (
         ...(verificationTarget !== undefined ? { verificationTarget } : {}),
         ...(reproHint !== undefined ? { reproHint } : {}),
         validatedReproScripts: reproSources,
+        existingTestExpectations: selectionExistingTestExpectations,
         ...(closureHint !== undefined ? { closureHint } : {}),
         envCaveats: generationEnvCaveats,
         staticWitnessDiagnostics,
@@ -1196,6 +1303,7 @@ const runSelectionPhase = async (
     selectionBaseValidatedRed,
     generationErrors,
     selectionLlmEvidence,
+    chaRepairTargets: chaRepairTargets ?? [],
     runtimePorts,
   })
   return selectionPhaseFromResult({
@@ -1245,6 +1353,7 @@ const runAppMainPhase = async (args: {
       args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
       args.prepared.verificationPlan,
+      args.prepared.existingTestExpectations,
       args.prepared.reproTest,
       args.prepared.precomputedHint,
       args.prepared.reproHint,
@@ -1252,6 +1361,7 @@ const runAppMainPhase = async (args: {
       args.prepared.reproSources,
       args.prepared.posture,
       args.prepared.state,
+      args.prepared.chaRepairTargets,
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
@@ -1332,6 +1442,13 @@ const runAdaptiveAttempt = async (args: {
     env: process.env,
     modelCall: buildAdaptiveRouterModelCall({ basePort: deps.llm, env: process.env, signal }),
     runPhase: async ({ state, posture }) => {
+      const widenedOwners = await adaptiveNextPassOwners({
+        prepared: finalPrepared,
+        phase: finalPhase,
+        forwardLocalize: posture.forwardLocalize,
+        sandbox,
+        timeoutMs: deps.timeoutMs,
+      })
       const nextPrepared = await prepareAttemptContext(
         instance,
         sandbox,
@@ -1339,6 +1456,7 @@ const runAdaptiveAttempt = async (args: {
         signal,
         posture,
         state,
+        widenedOwners,
       )
       const nextPhase = await runAppMainPhase({
         instance,
@@ -1503,6 +1621,9 @@ const runInstanceBody = async (args: {
 
   const prep = await runEnvPrep(args.instance, args.sandbox, args.deps.timeoutMs)
   if (!prep.ok) return envPrepFailedResult(args.instance, prep)
+  if (args.instance.swebench?.repo !== undefined) {
+    await materializeBuildEnv(args.sandbox, args.instance.swebench.repo)
+  }
 
   args.state.prepared = await prepareAttemptContext(
     args.instance,
@@ -1543,6 +1664,26 @@ const runInstanceBody = async (args: {
     wiring: args.state.wiring,
     prepared: preparedContext,
   })
+  const followup = await maybeRunRepairEscalationFollowup({
+    instance: args.instance,
+    deps: args.deps,
+    sandbox: args.sandbox,
+    signal: args.abort.signal,
+    prepared: preparedContext,
+    phase: args.state.phase,
+    runPhase: (nextPrepared) =>
+      runAppMainPhase({
+        instance: args.instance,
+        deps: args.deps,
+        sandbox: args.sandbox,
+        signal: args.abort.signal,
+        wiring: args.state.wiring,
+        prepared: nextPrepared,
+      }),
+  })
+  args.state.prepared = followup.prepared
+  args.state.phase = followup.phase
+  if (followup.prepared.reproTest !== undefined) args.state.reproTest = followup.prepared.reproTest
   const terminal = await maybeValidateTerminalResult({
     instance: args.instance,
     phase: args.state.phase,
@@ -1551,7 +1692,7 @@ const runInstanceBody = async (args: {
     wiring: args.state.wiring,
     startedAt: args.startedAt,
     signal: args.abort.signal,
-    prepared: preparedContext,
+    prepared: args.state.prepared,
     sandbox: args.sandbox,
   })
   if (terminal !== undefined) return attachReproVoteOutcomes(terminal)
@@ -1569,7 +1710,7 @@ const runInstanceBody = async (args: {
       reproTest: args.state.reproTest,
       wiring: args.state.wiring,
       startedAt: args.startedAt,
-      prepared: preparedContext,
+      prepared: args.state.prepared,
     }),
   )
 }

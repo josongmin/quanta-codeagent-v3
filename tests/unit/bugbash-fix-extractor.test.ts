@@ -17,7 +17,7 @@ describe("bugbash #10 — EXPECT_LITERAL_RE verbs missing from the old pre-gate 
     const r = extractIssueDeclaredExpected(
       "The result should equal `(1,)` but the call returns `(1)`.",
     )
-    expect(r).toEqual({ kind: "symbolic", value: "(1,)" })
+    expect(r).toEqual({ kind: "symbolic", value: "(1,)", provenance: "public-issue-text" })
   })
 
   test("'should equals `LITERAL`' (plural) ⇒ extracted", () => {
@@ -27,7 +27,7 @@ describe("bugbash #10 — EXPECT_LITERAL_RE verbs missing from the old pre-gate 
 
   test("'should returns `LITERAL`' (plural verb form) ⇒ extracted", () => {
     const r = extractIssueDeclaredExpected("The helper should returns `(1,)` for a 1-tuple.")
-    expect(r).toEqual({ kind: "symbolic", value: "(1,)" })
+    expect(r).toEqual({ kind: "symbolic", value: "(1,)", provenance: "public-issue-text" })
   })
 
   test("'should produces `LITERAL`' (plural verb form) ⇒ extracted", () => {
@@ -45,7 +45,7 @@ describe("bugbash #10 — EXPECT_LITERAL_RE verbs missing from the old pre-gate 
 
   test("control: singular verb already covered ⇒ still extracts (no regression)", () => {
     const r = extractIssueDeclaredExpected("It should print `(1,)` but prints `(1)`.")
-    expect(r).toEqual({ kind: "symbolic", value: "(1,)" })
+    expect(r).toEqual({ kind: "symbolic", value: "(1,)", provenance: "public-issue-text" })
   })
 
   test("control: fail-closed — no expect verb + no marker ⇒ undefined", () => {

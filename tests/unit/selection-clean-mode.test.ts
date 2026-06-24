@@ -351,12 +351,12 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
     files: ["pkg/base.py", "pkg/backend.py"],
     baseValidatedRed: true,
   }
-  const multiSiteFamily: CandidateFamily = {
+  const structuralMultiSiteFamily: CandidateFamily = {
     familyId: "multi-site",
     ownerFiles: ["pkg/base.py", "pkg/backend.py"],
     reason: "shared public symbol `runshell` spans multiple owner files",
     seed: "Cover every owner file defining `runshell` if the bug is in that override family.",
-    sourceEvidence: ["static-symbol-witness"],
+    sourceEvidence: ["static-witness:ast"],
   }
 
   it("CLEAN: a supplied STATIC-WITNESS multi-site contract is ignored", async () => {
@@ -381,7 +381,7 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
     const r = await runSelection({
       n: 1,
       seeds: [undefined],
-      candidateFamilies: [multiSiteFamily],
+      candidateFamilies: [structuralMultiSiteFamily],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
       mode: "clean",
       ports: {
@@ -401,7 +401,7 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
     const r = await runSelection({
       n: 1,
       seeds: ["initial seed"],
-      candidateFamilies: [multiSiteFamily],
+      candidateFamilies: [structuralMultiSiteFamily],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
       mode: "clean",
       ports: {
@@ -491,7 +491,7 @@ describe("clean-mode multi-site authority (public provenance only)", () => {
     const r = await runSelection({
       n: 2,
       seeds: [undefined, undefined],
-      candidateFamilies: [undefined, multiSiteFamily],
+      candidateFamilies: [undefined, structuralMultiSiteFamily],
       owners: new Set(["pkg/base.py", "pkg/backend.py"]),
       mode: "clean",
       ports: {

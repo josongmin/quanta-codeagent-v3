@@ -45,7 +45,6 @@ import {
   wireOptionalAgentPorts,
 } from "@/agent"
 import {
-  defsInSource,
   evaluateSuccessPredicate,
   type OwnerSibling,
   type PrimaryRailStep,
@@ -56,7 +55,7 @@ import {
   LSP_GROUNDING_STEER,
   SPEC_FIDELITY_STEER,
 } from "@/agent/localize-phase-guard"
-import { decideEscalation } from "@/agent/repair-escalation"
+import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
@@ -92,15 +91,10 @@ import type {
 import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
-import {
-  buildCandidateFamilyBundleFromWitness,
-  type CandidateFamily,
-  type CandidateFamilyBundle,
-  candidateFamilyCoverageMissing,
-  withStaticWitnessFamilies,
-} from "./candidate-families"
+import { type CandidateFamily, candidateFamilyCoverageMissing } from "./candidate-families"
 import {
   buildMultisiteSteer,
+  type ChaRepairTarget,
   findEnclosingPythonMethod,
   findSiblingOverrideSites,
   type SiblingOverrideSite,
@@ -113,6 +107,7 @@ import {
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
+import { coeditFamilyCoverageCandidate } from "./family-coverage-coedit"
 import { validateGoldPatch } from "./gold-sanity"
 import {
   applyBenchKnobs,
@@ -148,14 +143,16 @@ import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
-import {
-  buildCleanSelectionAuthorityContracts,
-  mergeSelectionContractBundles,
-} from "./public-contract-bundle"
+import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
 import type { SelectionContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
-import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
+import {
+  candidatePatchAppliesCleanly,
+  materializeBuildEnv,
+  withCandidatePatch,
+} from "./rematerialize"
+import { traceForwardLocalizeOwners } from "./forward-localize-trace"
 import { runRepairRounds } from "./repair/index"
 import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import {
@@ -207,26 +204,24 @@ import {
 import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
 import { labelForReceipt, type ReceiptEvidence, researchKnobTouched } from "./score-label"
 import {
-  buildSelectionInputs,
-  type Candidate,
-  type DerivedCandidateStructuralRepair,
-  filesFromPatch,
-  normalizeSelectionPaths,
-  runSelection,
-  type SelectionPorts,
-  type SelectionTelemetry,
-  summarizeSelection,
-} from "./selection-executor"
-import {
-  buildSelectionCandidateFamilyBundle,
   buildSelectionStructuralPlan,
   composeSelectionAgentHint,
   prepareSelectionEvidenceContext,
   withCandidateFamilyAuthorityContracts,
 } from "./selection-assembly"
+import {
+  type Candidate,
+  type DerivedCandidateStructuralRepair,
+  filesFromPatch,
+  runSelection,
+  type SelectionPorts,
+  type SelectionTelemetry,
+  summarizeSelection,
+} from "./selection-executor"
 import { selectionGenerationErrorOf } from "./selection-generation-error"
 import { buildSelectionRiskGate } from "./selection-risk-gate"
 import { prepareIssueSmokeSelectionPort } from "./selection-smoke"
+import { createSessionScopedSignal, withSessionScopedSignal } from "./session-signal"
 import { gitStageAndDiffCached, withGitSnapshot } from "./snapshot"
 import { witnessStructuralOwnerCandidates } from "./static-witness"
 import {
@@ -234,9 +229,9 @@ import {
   type StaticWitnessDiagnostic,
   staticWitnessLanguageDiagnostics,
 } from "./static-witness-adapter"
-import { buildStaticWitnessContracts } from "./static-witness-contracts"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
+import { extractVerificationOwnerTestExpectations } from "./verification-owner-test-expectations"
 import { discoverVerificationOwnerTests } from "./verification-owner-tests"
 
 export {
@@ -1027,6 +1022,142 @@ const cleanUniqueList = (values: readonly string[]): string[] => {
   return out
 }
 
+const rerouteLocalizedOwnerSurface = (
+  prepared: Pick<PreparedAttemptContext, "localizeCandidates" | "ownerResolved" | "closureSession">,
+): readonly string[] =>
+  cleanUniqueList([
+    ...prepared.localizeCandidates,
+    ...(prepared.ownerResolved?.map((owner) => owner.file) ?? []),
+    ...(prepared.closureSession?.bundle.evidence.candidates.map((c) => c.file) ?? []),
+  ])
+
+const adaptiveRepairEscalationDecision = (args: {
+  readonly prepared: Pick<
+    PreparedAttemptContext,
+    "posture" | "closureSession" | "ownerResolved" | "primaryRailStep"
+  >
+  readonly phase: Pick<Phase, "validated" | "primaryFalseGreen">
+}): EscalationDecision | undefined => {
+  if (!args.prepared.posture.repairEscalation || args.prepared.closureSession === undefined) {
+    return undefined
+  }
+  return decideEscalation({
+    candidates: args.prepared.closureSession.bundle.evidence.candidates.map((c) => ({
+      file: c.file,
+      score: c.score,
+      sources: c.sources,
+    })),
+    primaryRailRedAfterRepair: primaryRailRedAfterRepair(
+      args.prepared.primaryRailStep,
+      args.phase.validated,
+      args.phase.primaryFalseGreen,
+    ),
+    siblingFiles: args.prepared.ownerResolved?.map((o) => o.file) ?? [],
+  })
+}
+
+/** Post-phase adaptive widen seam: when a repair-capable posture leaves the
+ *  primary rail red and the escalation decision says the attempt is structurally
+ *  incomplete, feed those owner files into the NEXT reroute pass as additional
+ *  localized owners. This turns the prior report-only decision into a real
+ *  adaptive widening input without giving it submit authority. */
+export const adaptiveRepairEscalationOwners = (args: {
+  readonly prepared: Pick<
+    PreparedAttemptContext,
+    "posture" | "closureSession" | "ownerResolved" | "primaryRailStep"
+  >
+  readonly phase: Pick<Phase, "validated" | "primaryFalseGreen">
+}): readonly string[] => {
+  const decision = adaptiveRepairEscalationDecision(args)
+  return decision?.escalate ? cleanUniqueList(decision.owners) : []
+}
+
+/** Repair-escalation feeds the NEXT prepare pass, which rebuilds closure/owner
+ *  state from scratch. Filter only against the current stage-1 localized files:
+ *  owners already present there would be re-derived anyway, but ownerResolved /
+ *  closure-session-only siblings still need to be re-seeded explicitly. */
+export const repairEscalationFollowupOwners = (args: {
+  readonly prepared: Pick<
+    PreparedAttemptContext,
+    "localizeCandidates" | "posture" | "closureSession" | "ownerResolved" | "primaryRailStep"
+  >
+  readonly phase: { readonly validated?: boolean; readonly primaryFalseGreen?: boolean }
+}): readonly string[] => {
+  const alreadySeeded = new Set(cleanUniqueList(args.prepared.localizeCandidates))
+  return adaptiveRepairEscalationOwners(args).filter((owner) => !alreadySeeded.has(owner))
+}
+
+export const adaptiveNextPassOwners = async (args: {
+  readonly prepared: Pick<
+    PreparedAttemptContext,
+    "localizeCandidates" | "posture" | "closureSession" | "ownerResolved" | "primaryRailStep"
+  >
+  readonly phase: {
+    readonly patch: string
+    readonly validated?: boolean
+    readonly primaryFalseGreen?: boolean
+  }
+  readonly forwardLocalize: boolean
+  readonly sandbox: string
+  readonly timeoutMs: number
+}): Promise<readonly string[]> => {
+  const escalationOwners = repairEscalationFollowupOwners(args)
+  const forwardLocalizeOwners = args.forwardLocalize
+    ? await traceForwardLocalizeOwners({
+        patch: args.phase.patch,
+        sandbox: args.sandbox,
+        timeoutMs: args.timeoutMs,
+        alreadyLocalized: rerouteLocalizedOwnerSurface(args.prepared),
+      })
+    : []
+  return cleanUniqueList([...escalationOwners, ...forwardLocalizeOwners])
+}
+
+export const maybeRunRepairEscalationFollowup = async <
+  P extends { readonly patch: string; readonly validated?: boolean; readonly primaryFalseGreen?: boolean },
+>(args: {
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly prepared: PreparedAttemptContext
+  readonly phase: P
+  readonly runPhase: (prepared: PreparedAttemptContext) => Promise<P>
+  readonly prepare?: typeof prepareAttemptContext
+}): Promise<{
+  readonly prepared: PreparedAttemptContext
+  readonly phase: P
+  readonly reran: boolean
+  readonly widenedOwners: readonly string[]
+}> => {
+  const widenedOwners = repairEscalationFollowupOwners(args)
+  if (widenedOwners.length === 0) {
+    return {
+      prepared: args.prepared,
+      phase: args.phase,
+      reran: false,
+      widenedOwners,
+    }
+  }
+  const prepare = args.prepare ?? prepareAttemptContext
+  const nextPrepared = await prepare(
+    args.instance,
+    args.sandbox,
+    args.deps,
+    args.signal,
+    args.prepared.posture,
+    args.prepared.state,
+    widenedOwners,
+  )
+  const nextPhase = await args.runPhase(nextPrepared)
+  return {
+    prepared: nextPrepared,
+    phase: nextPhase,
+    reran: true,
+    widenedOwners,
+  }
+}
+
 const normalizeIssuePathCandidate = (raw: string): string => {
   let value = raw.trim().replaceAll("\\", "/")
   while (value.startsWith("./")) value = value.slice(2)
@@ -1231,7 +1362,7 @@ const bestChaSteerCandidateForFile = async (args: {
   readonly sandbox: string
   readonly targetRelFile: string
   readonly query: string
-}): Promise<{ method: string; sites: readonly SiblingOverrideSite[] } | undefined> => {
+}): Promise<ChaRepairTarget | undefined> => {
   const methods = await resolveLocalizedPythonMethods(args)
   let best: { method: string; sites: readonly SiblingOverrideSite[] } | undefined
   for (const method of methods) {
@@ -1245,22 +1376,37 @@ const bestChaSteerCandidateForFile = async (args: {
     if (sites.length === 0) continue
     best = betterChaSteerCandidate(best, { method, sites })
   }
-  return best
+  return best === undefined
+    ? undefined
+    : {
+        file: args.targetRelFile,
+        method: best.method,
+        sites: best.sites,
+      }
 }
 
-const resolveChaMultisiteSteer = async (args: {
+const resolveChaMultisiteContext = async (args: {
   readonly instance: Instance
   readonly sandbox: string
   readonly posture: BenchPosture
   readonly localizeCandidates: readonly string[]
-}): Promise<string | undefined> => {
-  if (!args.posture.chaMultisiteSteer || args.instance.swebench === undefined) return undefined
+}): Promise<{
+  readonly steer: string | undefined
+  readonly repairTargets: readonly ChaRepairTarget[]
+}> => {
+  if (!args.posture.chaMultisiteSteer || args.instance.swebench === undefined) {
+    return { steer: undefined, repairTargets: [] }
+  }
   const query =
     normalizePublicIssueText(args.instance.problemStatement) ?? args.instance.problemStatement
-  if (typeof query !== "string" || query.trim() === "") return undefined
+  if (typeof query !== "string" || query.trim() === "") {
+    return { steer: undefined, repairTargets: [] }
+  }
   const candidates = cleanUniqueList(args.localizeCandidates)
     .filter((file) => file.endsWith(".py"))
     .slice(0, CHA_MULTISITE_MAX_FILES)
+  const repairTargets: ChaRepairTarget[] = []
+  let steer: string | undefined
   for (const targetRelFile of candidates) {
     const best = await bestChaSteerCandidateForFile({
       sandbox: args.sandbox,
@@ -1268,11 +1414,11 @@ const resolveChaMultisiteSteer = async (args: {
       query,
     })
     if (best !== undefined) {
-      const steer = buildMultisiteSteer(best.method, best.sites)
-      if (steer !== undefined) return steer
+      repairTargets.push(best)
+      if (steer === undefined) steer = buildMultisiteSteer(best.method, best.sites)
     }
   }
-  return undefined
+  return { steer, repairTargets }
 }
 
 /**
@@ -2358,32 +2504,40 @@ const runAgentOnce = async (
   // change between rounds, so the lines are identical — useful as a
   // boundary marker).
   emitKnobsApplied(tap, process.env, stateOverride)
-  const outcome = await runAgent(
-    buildConfig(
-      instance,
-      deps,
-      sandbox,
-      signal,
-      tap,
-      seedMsg,
-      precomputedHint,
-      reproHint,
-      closureHint,
-      postureOverride,
-      stateOverride,
-      chaMultisiteSteer,
-    ),
-  )
-  // Capture the cumulative diff CURRENTLY in the worktree (without resetting
-  // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
-  // opportunistic — absence ⇒ "". T2: cache/build paths pruned at source.
-  const patch = await gitStageAndDiffCached(sandbox, timeoutMs)
-  const result: RunOnceResult = {
-    patch,
-    turns: outcome.turns,
-    ...(tap.lastVerifyCmd !== undefined ? { lastVerifyCmd: tap.lastVerifyCmd } : {}),
+  const sessionSignal = createSessionScopedSignal(signal)
+  try {
+    const outcome = await runAgent(
+      withSessionScopedSignal(
+        buildConfig(
+          instance,
+          deps,
+          sandbox,
+          signal,
+          tap,
+          seedMsg,
+          precomputedHint,
+          reproHint,
+          closureHint,
+          postureOverride,
+          stateOverride,
+          chaMultisiteSteer,
+        ),
+        sessionSignal.signal,
+      ),
+    )
+    // Capture the cumulative diff CURRENTLY in the worktree (without resetting
+    // the index): mirrors `withGitSnapshot`'s final diff step. `git` is
+    // opportunistic — absence ⇒ "". T2: cache/build paths pruned at source.
+    const patch = await gitStageAndDiffCached(sandbox, timeoutMs)
+    const result: RunOnceResult = {
+      patch,
+      turns: outcome.turns,
+      ...(tap.lastVerifyCmd !== undefined ? { lastVerifyCmd: tap.lastVerifyCmd } : {}),
+    }
+    return result
+  } finally {
+    sessionSignal.abort()
   }
-  return result
 }
 
 /** Sandbox snapshot → agent (inside the git pre/post-image) → captured diff. */
@@ -2427,28 +2581,36 @@ const runAgentPhase = async (
       // documented on `emitKnobsApplied`). The single-pass path bypasses
       // `runAgentOnce`, so the emit lives here directly.
       emitKnobsApplied(tap, process.env, stateOverride)
-      const outcome = await runAgent(
-        buildConfig(
-          instance,
-          deps,
-          sandbox,
-          signal,
-          tap,
-          undefined,
-          precomputedHint,
-          reproHint,
-          closureHint,
-          postureOverride,
-          stateOverride,
-          chaMultisiteSteer,
-        ),
-      )
-      turns = outcome.turns
-      stopReason = outcome.reason
-      agentError = tap.lastErrorMessage
-      firstEditFile = relFromSandbox(sandbox, tap.firstEditFile)
-      editCount = tap.editCount
-      turnsToFirstEdit = tap.turnsToFirstEdit
+      const sessionSignal = createSessionScopedSignal(signal)
+      try {
+        const outcome = await runAgent(
+          withSessionScopedSignal(
+            buildConfig(
+              instance,
+              deps,
+              sandbox,
+              signal,
+              tap,
+              undefined,
+              precomputedHint,
+              reproHint,
+              closureHint,
+              postureOverride,
+              stateOverride,
+              chaMultisiteSteer,
+            ),
+            sessionSignal.signal,
+          ),
+        )
+        turns = outcome.turns
+        stopReason = outcome.reason
+        agentError = tap.lastErrorMessage
+        firstEditFile = relFromSandbox(sandbox, tap.firstEditFile)
+        editCount = tap.editCount
+        turnsToFirstEdit = tap.turnsToFirstEdit
+      } finally {
+        sessionSignal.abort()
+      }
     },
     instance.swebench?.repo,
   )
@@ -2971,47 +3133,6 @@ const generateSelectionCandidate = async (args: {
   }
 }
 
-const mergeSelectionHint = (
-  closureHint: string | undefined,
-  seed: string | undefined,
-): string | undefined => {
-  if (seed === undefined) return closureHint
-  if (closureHint === undefined) return seed
-  return `${closureHint}\n\n${seed}`
-}
-
-const buildSelectionPhaseContracts = (args: {
-  readonly instance: Instance
-  readonly sandbox: string
-  readonly selectionOwnerCandidates: readonly string[]
-  readonly ownerResolved: readonly OwnerSibling[] | undefined
-  readonly publicContracts: SelectionContractBundle | undefined
-  readonly n: number
-}) => {
-  const {
-    advisoryPromptContracts,
-    selectionAuthorityContracts,
-    selectionInputs,
-    staticWitnesses,
-    staticWitnessDiagnostics,
-  } = buildSelectionStructuralPlan({
-    problemStatement: args.instance.problemStatement,
-    sandbox: args.sandbox,
-    selectionOwnerCandidates: args.selectionOwnerCandidates,
-    ownerResolved: args.ownerResolved,
-    publicContracts: args.publicContracts,
-    n: args.n,
-    readSource: (rel) => readSandboxSource(args.sandbox, rel),
-  })
-  return {
-    advisoryPromptContracts,
-    selectionAuthorityContracts,
-    selectionInputs,
-    staticWitnesses,
-    staticWitnessDiagnostics,
-  }
-}
-
 const resolveSelectionPhasePorts = async (args: {
   readonly instance: Instance
   readonly deps: RunInstanceDeps
@@ -3125,9 +3246,11 @@ type SelectionExecutorPortsArgs = {
   readonly postureOverride: BenchPosture | undefined
   readonly stateOverride: BenchKnobState | undefined
   readonly chaMultisiteSteer: string | undefined
+  readonly chaRepairTargets: readonly ChaRepairTarget[]
   readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
+  readonly existingTestExpectations: readonly string[]
   readonly staticWitnessDiagnostics: readonly StaticWitnessDiagnostic[]
   readonly promptContracts: SelectionContractBundle | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
@@ -3174,6 +3297,7 @@ const generateSelectionPort =
               : {}),
             ...(args.reproHint !== undefined ? { reproHint: args.reproHint } : {}),
             validatedReproScripts: args.validatedReproScripts,
+            existingTestExpectations: args.existingTestExpectations,
             ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
             envCaveats: args.envCaveats,
             staticWitnessDiagnostics: args.staticWitnessDiagnostics,
@@ -3217,6 +3341,18 @@ const buildSelectionExecutorPorts = (args: SelectionExecutorPortsArgs): Selectio
         candidate,
         sandbox: args.sandbox,
         signal: args.signal,
+        preferredTargets: args.chaRepairTargets,
+      })
+    ports.repairFamilyCoverage = ({ candidate, family, missingFiles }) =>
+      coeditFamilyCoverageCandidate({
+        sandbox: args.sandbox,
+        candidate,
+        family,
+        missingFiles,
+        timeoutMs: args.deps.timeoutMs,
+        baseCommit: args.instance.swebench?.baseCommit,
+        repo: args.instance.swebench?.repo,
+        preferredTargets: args.chaRepairTargets,
       })
   }
   return ports
@@ -3298,6 +3434,7 @@ const runSelectionPhase = async (
   ownerResolved: readonly OwnerSibling[] | undefined,
   baseValidatedRed: boolean,
   verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined,
+  existingTestExpectations: readonly string[],
   reproTest: BenchReproTestTelemetry | undefined,
   precomputedHint: string | undefined,
   reproHint: string | undefined,
@@ -3307,6 +3444,7 @@ const runSelectionPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
+  chaRepairTargets?: readonly ChaRepairTarget[],
 ): Promise<Phase> => {
   // jun-23 split: ADVISORY repair seed = canonical (submit-gate) scripts FIRST,
   // then any hardening scripts as extra coverage guidance. Hardening NEVER gates
@@ -3330,6 +3468,7 @@ const runSelectionPhase = async (
     reproTest,
     verificationTarget: verificationTargetFromPlan(verificationPlan),
     oracleFailureRepairSeed,
+    existingTestExpectations,
     readSource: (rel) => readSandboxSource(sandbox, rel),
   })
   const {
@@ -3338,6 +3477,7 @@ const runSelectionPhase = async (
     selectionInputs,
     selectionOwnerEvidence,
     verificationTarget,
+    existingTestExpectations: selectionExistingTestExpectations,
     staticWitnessDiagnostics,
     generationEnvCaveats,
   } = selectionContext
@@ -3413,6 +3553,7 @@ const runSelectionPhase = async (
       postureOverride,
       stateOverride,
       chaMultisiteSteer,
+      chaRepairTargets: chaRepairTargets ?? [],
       concurrency,
       generationErrors,
       addTurns: (turns) => {
@@ -3430,6 +3571,7 @@ const runSelectionPhase = async (
       selectionOwnerEvidence,
       envCaveats: generationEnvCaveats,
       validatedReproScripts: reproSources,
+      existingTestExpectations: selectionExistingTestExpectations,
       staticWitnessDiagnostics,
       promptContracts: advisoryPromptContracts,
       verificationTarget,
@@ -3491,6 +3633,8 @@ const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolea
   deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
 
 const agentPhaseError = (phase: Phase): string | undefined => {
+  const patchCaptureMiss = patchCaptureMissErrorOf(phase)
+  if (patchCaptureMiss !== undefined) return patchCaptureMiss
   const noPatchExhausted = noPatchExhaustedErrorOf({
     enabled: benchOptIns().noPatchBreaker,
     stopReason: phase.stopReason,
@@ -3514,6 +3658,26 @@ const agentPhaseError = (phase: Phase): string | undefined => {
     return "agent exhausted token budget before verification"
   }
   return undefined
+}
+
+const patchCaptureMissErrorOf = (phase: Phase): string | undefined =>
+  phase.patch.trim() === "" && phase.stopReason === "aborted" && (phase.editCount ?? 0) > 0
+    ? "patch capture miss: agent edited files before abort, but final git diff was empty"
+    : undefined
+
+const noWinnerTerminalReasonOf = (phase: Phase): string => {
+  if (phase.selectionTelemetry?.noWinnerReason === "proof_required_missing") {
+    return "verify-select proof-required mode produced no submittable candidate (no candidate achieved positive executed public proof)"
+  }
+  if (phase.selectionTelemetry?.noWinnerReason === "proof_infra_blocked") {
+    return "verify-select proof-required mode produced no submittable candidate (public proof execution was infra-blocked)"
+  }
+  return "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)"
+}
+
+const selectionNoWinnerErrorOf = (phase: Phase): string | undefined => {
+  if (phase.selectionTelemetry?.winnerId !== null) return undefined
+  return agentPhaseError(phase) ?? noWinnerTerminalReasonOf(phase)
 }
 
 const generationFailureResult = (args: {
@@ -3586,15 +3750,7 @@ const noPatchResult = (args: {
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
   }
-  const noWinnerError =
-    args.phase.selectionTelemetry?.winnerId === null
-      ? (agentPhaseError(args.phase) ??
-        (args.phase.selectionTelemetry?.noWinnerReason === "proof_required_missing"
-          ? "verify-select proof-required mode produced no submittable candidate (no candidate achieved positive executed public proof)"
-          : args.phase.selectionTelemetry?.noWinnerReason === "proof_infra_blocked"
-            ? "verify-select proof-required mode produced no submittable candidate (public proof execution was infra-blocked)"
-            : "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)"))
-      : undefined
+  const noWinnerError = patchCaptureMissErrorOf(args.phase) ?? selectionNoWinnerErrorOf(args.phase)
   return {
     id: args.instance.id,
     passed: false,
@@ -3636,6 +3792,7 @@ interface HintReproContext {
   readonly posture: BenchPosture
   readonly precomputedHint: string
   readonly chaMultisiteSteer: string | undefined
+  readonly chaRepairTargets: readonly ChaRepairTarget[]
   readonly localizeCandidates: readonly string[]
   readonly reproHint: string | undefined
   readonly reproTest: BenchReproTestTelemetry | undefined
@@ -3650,6 +3807,7 @@ export interface PreparedAttemptContext extends HintReproContext {
   readonly ownerResolved: readonly OwnerSibling[] | undefined
   readonly closureSession: ClosureSessionState | undefined
   readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined
+  readonly existingTestExpectations: readonly string[]
   readonly primaryRailStep: PrimaryRailStep | undefined
   readonly closureHint: string | undefined
   readonly intakeLlmEvidence: LlmEvidencePacket
@@ -3703,14 +3861,42 @@ const betterRepairFamily = (
   return left
 }
 
+const familyFromChaRepairTarget = (target: ChaRepairTarget): CandidateFamily => ({
+  familyId: "override-family",
+  ownerFiles: cleanUniqueList([target.file, ...target.sites.map((site) => site.file)]),
+  reason: `override-family (CHA sibling override): \`${target.method}\` overridden by sibling classes sharing a base`,
+  seed: buildMultisiteSteer(target.method, target.sites),
+  sourceEvidence: ["cha-multisite:python-ast"],
+})
+
+const preferredChaFamily = (
+  candidateFiles: readonly string[],
+  preferredTargets: readonly ChaRepairTarget[],
+): CandidateFamily | undefined => {
+  let best: CandidateFamily | undefined
+  const matchingTargets = preferredTargets.filter((target) =>
+    cleanUniqueList([target.file, ...target.sites.map((site) => site.file)]).some((file) =>
+      candidateFiles.includes(file),
+    ),
+  )
+  for (const target of matchingTargets) {
+    const family = familyFromChaRepairTarget(target)
+    if (candidateFamilyCoverageMissing(family, candidateFiles).length === 0) continue
+    best = betterRepairFamily(candidateFiles, best, family)
+  }
+  return best
+}
+
 const deriveChaOverrideFamily = async (args: {
   readonly instance: Instance
   readonly candidate: Candidate
   readonly sandbox: string
+  readonly preferredTargets?: readonly ChaRepairTarget[]
 }): Promise<CandidateFamily | undefined> => {
   if (args.candidate.patch.trim() === "" || args.candidate.files.length === 0) return undefined
+  let best = preferredChaFamily(args.candidate.files, args.preferredTargets ?? [])
   const touchedSymbols = diffTouchedSymbols(args.candidate.patch)
-  if (touchedSymbols.length === 0) return undefined
+  if (touchedSymbols.length === 0) return best
   const chaExec = (cmd: string, cwd: string, timeoutMs: number) =>
     exec(
       cmd,
@@ -3718,7 +3904,6 @@ const deriveChaOverrideFamily = async (args: {
       timeoutMs,
       args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : undefined,
     )
-  let best: CandidateFamily | undefined
   for (const targetFile of args.candidate.files) {
     for (const symbol of touchedSymbols) {
       const sites = await findSiblingOverrideSites({
@@ -3728,13 +3913,7 @@ const deriveChaOverrideFamily = async (args: {
         method: symbol,
       })
       if (sites.length === 0) continue
-      const family: CandidateFamily = {
-        familyId: "override-family",
-        ownerFiles: cleanUniqueList([targetFile, ...sites.map((site) => site.file)]),
-        reason: `override-family (CHA sibling override): \`${symbol}\` overridden by sibling classes sharing a base`,
-        seed: buildMultisiteSteer(symbol, sites),
-        sourceEvidence: ["cha-multisite:python-ast"],
-      }
+      const family = familyFromChaRepairTarget({ file: targetFile, method: symbol, sites })
       if (candidateFamilyCoverageMissing(family, args.candidate.files).length === 0) continue
       best = betterRepairFamily(args.candidate.files, best, family)
     }
@@ -3747,6 +3926,7 @@ export const deriveCandidateStructuralRepair = async (args: {
   readonly candidate: Candidate
   readonly sandbox: string
   readonly signal: AbortSignal
+  readonly preferredTargets?: readonly ChaRepairTarget[]
 }): Promise<DerivedCandidateStructuralRepair | undefined> => {
   if (args.candidate.files.length === 0) return undefined
   const ownerResolved = await resolveOwnerSiblings()({
@@ -3844,6 +4024,7 @@ export const makeSelectionStaticSanityPort = (args: {
           cwd: sb,
           files: candidate.files,
           timeoutMs: args.timeoutMs,
+          patch: candidate.patch,
         }),
     }).catch(() => null)
 }
@@ -3863,7 +4044,7 @@ const prepareHintAndReproContext = async (
       localizeCandidates = files
     },
   })
-  const chaMultisiteSteer = await resolveChaMultisiteSteer({
+  const chaMultisite = await resolveChaMultisiteContext({
     instance,
     sandbox,
     posture,
@@ -3884,7 +4065,8 @@ const prepareHintAndReproContext = async (
   return {
     posture,
     precomputedHint,
-    chaMultisiteSteer,
+    chaMultisiteSteer: chaMultisite.steer,
+    chaRepairTargets: chaMultisite.repairTargets,
     localizeCandidates,
     reproHint: reproInstall.hint ?? selectionRepro.hint,
     reproTest: selectionRepro.telemetry,
@@ -4010,6 +4192,12 @@ export const prepareAttemptContext = async (
   signal: AbortSignal,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  /** T3 — forward-localize consumer files traced from the PRIOR adaptive
+   *  candidate (deeper_localize route). Merged into the localized owner set as
+   *  ADDITIONAL candidates for this pass. Absent ⇒ byte-identical (first pass /
+   *  knob off). Never hard `requiredFiles` — only T1 static-edge validation can
+   *  promote a site to a coverage requirement. */
+  forwardLocalizeOwners?: readonly string[],
 ): Promise<PreparedAttemptContext> => {
   const state = stateOverride ?? resolveBenchKnobs({ envVars: process.env })
   const posture = postureOverride ?? benchPostureFromState(state, process.env)
@@ -4019,7 +4207,13 @@ export const prepareAttemptContext = async (
   const taskFiles = instance.goldPatch ? filesFromPatch(instance.goldPatch) : undefined
   const lspGrounding = await verifyStrictPresetLspGrounding(posture, sandbox, taskFiles, signal)
   const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm, posture)
-  const stage1Files = stage1FilesOf(hintRepro.localizeCandidates)
+  const stage1Files = [
+    ...stage1FilesOf(hintRepro.localizeCandidates),
+    // T3 — forward-localize consumers enter as low-score ADDITIONAL owner
+    // candidates (they widen the set; ranking still prefers backward-localized
+    // owners). score 0 keeps them below any positively-ranked stage-1 file.
+    ...(forwardLocalizeOwners ?? []).map((file) => ({ file, score: 0 })),
+  ]
   const ownerResolved = await resolveOwnerResolved({
     instance,
     posture: hintRepro.posture,
@@ -4046,6 +4240,11 @@ export const prepareAttemptContext = async (
   // closure plan should still be able to name PUBLIC repo tests near the best
   // owner candidates. These commands guide verification / repair planning only;
   // final clean submit authority still comes from executed proof ports.
+  const ownerCandidates = verificationOwnerCandidatesOf({
+    witnessOwners,
+    ownerResolved,
+    stage1Files,
+  })
   const ownerNearTests =
     instance.swebench === undefined ||
     !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
@@ -4054,11 +4253,22 @@ export const prepareAttemptContext = async (
           instance,
           sandbox,
           timeoutMs: deps.timeoutMs,
-          ownerCandidates: verificationOwnerCandidatesOf({
-            witnessOwners,
-            ownerResolved,
-            stage1Files,
-          }),
+          ownerCandidates,
+        })
+  // T2 — command-derived test paths take precedence; when empty, the extractor
+  // falls back to a bounded convention-based source search over the localized
+  // owner modules (only files that exist are read). Gated to the SAME condition
+  // as `ownerNearTests` (swebench + verification-plan/primary-rail), so the
+  // fallback never injects expectations into instances that have no closure plan.
+  const existingTestExpectations =
+    instance.swebench === undefined ||
+    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
+      ? []
+      : await extractVerificationOwnerTestExpectations({
+          sandbox,
+          ownerNearTests,
+          localizedOwnerFiles: ownerCandidates,
+          issueSymbols: extractIssueHint(instance.problemStatement).symbols,
         })
   const closureSession = buildClosureAttemptState({
     instance,
@@ -4086,6 +4296,7 @@ export const prepareAttemptContext = async (
     ownerResolved,
     closureSession,
     verificationPlan: closureSession?.bundle.plan,
+    existingTestExpectations,
     primaryRailStep: closureSession?.primaryRailStep,
     closureHint: closureSession?.closureHint,
     intakeLlmEvidence,
@@ -4136,6 +4347,7 @@ const runMainPhase = async (args: {
       args.prepared.ownerResolved,
       args.prepared.verificationPlan?.baseValidatedRed ?? false,
       args.prepared.verificationPlan,
+      args.prepared.existingTestExpectations,
       args.prepared.reproTest,
       args.prepared.precomputedHint,
       args.prepared.reproHint,
@@ -4145,6 +4357,7 @@ const runMainPhase = async (args: {
       args.prepared.posture,
       args.prepared.state,
       args.prepared.chaMultisiteSteer,
+      args.prepared.chaRepairTargets,
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
@@ -4762,27 +4975,18 @@ const attachSelectionAndClosureArtifacts = (args: {
     args.extra.ownerAdmission = closureSession.bundle.owner
   }
   if (posture.repairEscalation && closureSession !== undefined) {
-    // OBSERVE-ONLY (measure-first): the EscalationDecision is computed here on
-    // the post-repair SUCCESS path and assigned only to `args.extra` (serialized
-    // to the report — see RunExtra.repairEscalation doc in batch/types.ts). It
-    // does NOT widen the search: `escalate`/`owners` are never fed back into
-    // selection/seed/branch-search/subagent. Wiring it to ACT (the #14315
-    // multi-owner-widen lever) needs design — there is no seam at this site,
-    // because the repair phase has already finished by the time this runs; the
-    // owners would have to re-enter an earlier phase. Left documented-only on
-    // purpose (default-OFF knob ⇒ byte-identical) until that lever is measured.
-    args.extra.repairEscalation = decideEscalation({
-      candidates: closureSession.bundle.evidence.candidates.map((c) => ({
-        file: c.file,
-        score: c.score,
-        sources: c.sources,
-      })),
-      primaryRailRedAfterRepair: primaryRailRedAfterRepair(
+    // Telemetry attachment only AT THIS LATE SITE: the same decision helper now
+    // also feeds the adaptive reroute seam (`adaptiveRepairEscalationOwners`)
+    // before the next `prepareAttemptContext`, but assigning it to `args.extra`
+    // here remains report-only because the phase has already finished.
+    args.extra.repairEscalation = adaptiveRepairEscalationDecision({
+      prepared: {
+        posture,
+        closureSession,
+        ownerResolved,
         primaryRailStep,
-        args.phase.validated,
-        args.phase.primaryFalseGreen,
-      ),
-      siblingFiles: ownerResolved?.map((o) => o.file) ?? [],
+      },
+      phase: args.phase,
     })
   }
 }
@@ -5041,6 +5245,13 @@ const runV5AdaptiveAttempt = async (args: {
     env: process.env,
     modelCall: buildRouterModelCall(deps, signal),
     runPhase: async ({ state, posture }) => {
+      const widenedOwners = await adaptiveNextPassOwners({
+        prepared: finalPrepared,
+        phase: finalPhase,
+        forwardLocalize: posture.forwardLocalize,
+        sandbox,
+        timeoutMs: deps.timeoutMs,
+      })
       const nextPrepared = await prepareAttemptContext(
         instance,
         sandbox,
@@ -5048,6 +5259,7 @@ const runV5AdaptiveAttempt = async (args: {
         signal,
         posture,
         state,
+        widenedOwners,
       )
       const nextPhase = await runMainPhase({
         instance,
@@ -5152,6 +5364,9 @@ export const runInstanceOnce = async (
     await copyRepo(instance, sandbox)
     const prep = await runEnvPrep(instance, sandbox, deps.timeoutMs)
     if (!prep.ok) return envPrepFailedResult(instance, prep)
+    if (instance.swebench?.repo !== undefined) {
+      await materializeBuildEnv(sandbox, instance.swebench.repo)
+    }
     prepared = await prepareAttemptContext(instance, sandbox, deps, abort.signal)
     const preparedContext = prepared
     reproTest = preparedContext.reproTest
@@ -5182,6 +5397,26 @@ export const runInstanceOnce = async (
       wiring: w,
       prepared: preparedContext,
     })
+    const followup = await maybeRunRepairEscalationFollowup({
+      instance,
+      deps,
+      sandbox,
+      signal: abort.signal,
+      prepared: preparedContext,
+      phase,
+      runPhase: (nextPrepared) =>
+        runMainPhase({
+          instance,
+          deps,
+          sandbox,
+          signal: abort.signal,
+          wiring: w,
+          prepared: nextPrepared,
+        }),
+    })
+    phase = followup.phase
+    prepared = followup.prepared
+    if (prepared.reproTest !== undefined) reproTest = prepared.reproTest
     const terminal = await maybeValidateTerminalResult({
       instance,
       phase,
@@ -5190,7 +5425,7 @@ export const runInstanceOnce = async (
       wiring: w,
       startedAt,
       signal: abort.signal,
-      prepared: preparedContext,
+      prepared,
       sandbox,
     })
     if (terminal !== undefined) return attachReproVoteOutcomes(terminal)
@@ -5210,7 +5445,7 @@ export const runInstanceOnce = async (
         reproTest,
         wiring: w,
         startedAt,
-        prepared: preparedContext,
+        prepared,
       }),
     )
   } catch (e) {

@@ -260,6 +260,39 @@ describe("classifyOutcome — empty-patch", () => {
     })
   })
 
+  test("m5 — a capture desync co-occurring with a max_turns/aborted STOP still ⇒ infra-fail (not shadowed by stop-reason)", () => {
+    for (const stopReason of ["max_turns", "aborted", "budget_exhausted"] as const) {
+      const result = mkResult({
+        patch: "",
+        passed: false,
+        turns: 30,
+        stopReason,
+        error:
+          "capture_lost_edits: 12 edit(s) made but 0-byte source diff on a clean worktree (fork-worktree desync)",
+      })
+      const out = classifyOutcome(result)
+      expect(out.kind).toBe("infra-fail")
+    }
+  })
+
+  test("T5 — empty patch + turns>0 BUT capture_lost_edits error ⇒ infra-fail (retry), NOT laundered as real-fail model-miss", () => {
+    // Same shape as the completed_unresolved case above (patch='', turns>0), so
+    // without the capture marker it WOULD be a model miss. The marker reclassifies
+    // it to infra-fail so the fork-worktree desync (11138 class) retries.
+    const result = mkResult({
+      patch: "",
+      passed: false,
+      turns: 16,
+      error:
+        "capture_lost_edits: 108 edit(s) made but 0-byte source diff on a clean worktree (fork-worktree desync)",
+    })
+    const out = classifyOutcome(result)
+    expect(out.kind).toBe("infra-fail")
+    if (out.kind === "infra-fail") expect(out.reason).toContain("capture_lost_edits")
+    // And the policy retries it (transient infra), unlike a real-fail.
+    expect(DEFAULT_POLICY.shouldRetry(out, 1, 2)).toBeDefined()
+  })
+
   test("empty patch + non-classifying error ⇒ empty-patch with reason", () => {
     const result = mkResult({ patch: "", passed: false, error: "weird thing happened" })
     const out = classifyOutcome(result)
@@ -287,6 +320,19 @@ describe("classifyOutcome — timeout", () => {
   test("error contains generic 'aborted' ⇒ timeout", () => {
     const result = mkResult({ patch: "", turns: 4, error: "agent aborted before verification" })
     expect(classifyOutcome(result)).toEqual({ kind: "timeout" })
+  })
+
+  test("patch-capture-miss aborts are infra-fail, not timeout", () => {
+    const result = mkResult({
+      patch: "",
+      turns: 4,
+      stopReason: "aborted",
+      error: "patch capture miss: agent edited files before abort, but final git diff was empty",
+    })
+    expect(classifyOutcome(result)).toEqual({
+      kind: "infra-fail",
+      reason: "patch capture miss: agent edited files before abort, but final git diff was empty",
+    })
   })
 })
 

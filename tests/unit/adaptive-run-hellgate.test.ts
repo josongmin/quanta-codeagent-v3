@@ -35,6 +35,22 @@ const intake = (rev = "rev-1"): LlmEvidencePacket => ({
   missingEvidence: [],
 })
 
+const intakeWithoutProofContext = (): LlmEvidencePacket => ({
+  stage: "candidate_generation",
+  instanceIdHash: "deadbeefdeadbeef",
+  evidenceRevision: "rev-no-proof",
+  candidatePatchHash: "cafe0001",
+  question: "Which deeper phase, if any?",
+  allowedActions: ["produce_minimal_patch"],
+  forbiddenSources: ["hidden_tests"],
+  publicIssueFacts: ["the parser drops trailing commas"],
+  ownerEvidence: [{ file: "a.py", symbols: ["p"], provenance: "issue-file", sourceSlice: "s" }],
+  proofReceipts: [{ source: "public_mwe", state: "not_run" }],
+  contractFacts: [],
+  staticFacts: [],
+  missingEvidence: [],
+})
+
 const decision = (action: string, citedEvidenceIds: string[] = []) => ({
   action,
   evidenceGaps: [],
@@ -77,17 +93,22 @@ describe("assembled adaptive runner (Wave-3 keystone)", () => {
     expect(phase.postures.length).toBe(0)
   })
 
-  test("RUN-2: run_proof_clean reaches runPhase with the PROOF-CLEAN posture (action→modules→posture)", async () => {
+  test("RUN-2: run_proof_clean reroutes after one proof-clean phase and keeps the mapped posture", async () => {
     const phase = recordingRunPhase()
+    const { modelCall, seen } = scriptedModelCall([
+      decision("run_proof_clean"),
+      decision("accept_thin"),
+    ])
     const result = await runAdaptiveBenchAttempt({
       intakePacket: intake(),
       base: BASE,
       env: ENV,
-      modelCall: scriptedModelCall([decision("run_proof_clean")]).modelCall,
+      modelCall,
       runPhase: phase.runPhase,
     })
     expect(result.outcome).toBe("finalize")
     expect(phase.postures.length).toBe(1)
+    expect(seen.length).toBe(2)
     // The assembly mapped run_proof_clean → PHASE_MODULES → derivePhasePosture:
     // the proof-clean posture must carry proof-required + clean selector + repro-only exec.
     expect(phase.postures[0]?.verifySelectProofRequired).toBe(true)
@@ -145,5 +166,47 @@ describe("assembled adaptive runner (Wave-3 keystone)", () => {
     expect(seen.length).toBe(2)
     expect(seen[0]?.prompt).toContain("rev-initial")
     expect(seen[1]?.prompt).toContain("rev-after-phase")
+  })
+
+  test("RUN-6: repair_with_proof without proof context FAILS CLOSED end-to-end", async () => {
+    const phase = recordingRunPhase()
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: intakeWithoutProofContext(),
+      base: BASE,
+      env: ENV,
+      modelCall: scriptedModelCall([decision("repair_with_proof")]).modelCall,
+      runPhase: phase.runPhase,
+    })
+    expect(result.outcome).toBe("escalate_needs_human")
+    expect(result.reason).toContain("illegal_action:repair_with_proof_without_proof_context")
+    expect(phase.postures.length).toBe(0)
+  })
+
+  test("RUN-7: run_public_repro after base repro is already established FAILS CLOSED", async () => {
+    const phase = recordingRunPhase()
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: intake(),
+      base: BASE,
+      env: ENV,
+      modelCall: scriptedModelCall([decision("run_public_repro")]).modelCall,
+      runPhase: phase.runPhase,
+    })
+    expect(result.outcome).toBe("escalate_needs_human")
+    expect(result.reason).toContain("illegal_action:run_public_repro_after_base_repro")
+    expect(phase.postures.length).toBe(0)
+  })
+
+  test("RUN-8: run_proof_clean without proof context FAILS CLOSED end-to-end", async () => {
+    const phase = recordingRunPhase()
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: intakeWithoutProofContext(),
+      base: BASE,
+      env: ENV,
+      modelCall: scriptedModelCall([decision("run_proof_clean")]).modelCall,
+      runPhase: phase.runPhase,
+    })
+    expect(result.outcome).toBe("escalate_needs_human")
+    expect(result.reason).toContain("illegal_action:run_proof_clean_without_proof_context")
+    expect(phase.postures.length).toBe(0)
   })
 })

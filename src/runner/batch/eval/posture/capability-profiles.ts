@@ -146,6 +146,13 @@ export const PATCH_HYGIENE: KnobModule = { id: "patch-hygiene", knobs: { "patch-
 /** Round-0 minimal prompt (suppress repro prose at round 0). */
 export const ROUND0_MINIMAL: KnobModule = { id: "round0-minimal", knobs: { "round0-minimal": "1" } }
 
+/** T3 — forward-localize lever (default-OFF). Occupies the `deeper_localize`
+ *  route: selecting it turns on a forward consumer-trace for the next pass. */
+export const FORWARD_LOCALIZE: KnobModule = {
+  id: "forward-localize",
+  knobs: { "forward-localize": "1" },
+}
+
 /** Multi-agent axis: subagent + bundled skills (the `everything` posture). */
 export const MULTI_AGENT: KnobModule = { id: "multi-agent", knobs: { subagent: "1", skills: "1" } }
 
@@ -280,6 +287,15 @@ export const PROOF_CLEAN_MODULES: readonly KnobModule[] = [
   CLEAN_SELECTOR,
 ]
 
+/** `agentless-v4-proof-clean` plus full in-loop repo-test execution. Mirrors
+ *  the competitor-style "run the existing tests in the same repair loop"
+ *  posture while preserving clean selector authority and proof-required gating
+ *  as-is. */
+export const PROOF_CLEAN_EXECFULL_MODULES: readonly KnobModule[] = [
+  ...PROOF_CLEAN_MODULES,
+  FULL_EXEC,
+]
+
 /** Public-repro rails WITHOUT proof-required gating — generate/extract a base
  *  oracle and let late selection rank, but do not yet hard-gate submit on it. */
 export const REPRO_RAILS_MODULES: readonly KnobModule[] = [
@@ -308,10 +324,11 @@ export type AdaptiveAction =
 /** Deeper localization pass. INTENTIONALLY EMPTY (no-op) for now: no shipped
  *  preset widens localization, and an arbitrary `localize-phase` bump is an
  *  UNMEASURED heuristic (final-plan STEP 1 must measure a localization-widening
- *  lever before it earns a posture). Routing `deeper_localize` here today is a
- *  no-op (≡ thin) rather than smuggling an unvalidated dial. Populate only after
- *  a measured lever exists. */
-export const DEEPER_LOCALIZE_MODULES: readonly KnobModule[] = []
+ *  lever before it earns a posture). T3 occupies it with the forward-localize
+ *  lever: the knob is DEFAULT-OFF, so `deeper_localize` only engages a forward
+ *  consumer-trace when the controller selects this route AND the lever is on —
+ *  not an always-on dial. Promotion still requires the frozen-slice A/B. */
+export const DEEPER_LOCALIZE_MODULES: readonly KnobModule[] = [FORWARD_LOCALIZE]
 
 export const PHASE_MODULES: Readonly<Record<AdaptiveAction, readonly KnobModule[]>> = {
   accept_thin: [],

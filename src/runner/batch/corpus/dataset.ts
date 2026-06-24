@@ -169,7 +169,15 @@ export const prepareTaskRepo = async (
   const base = repoBaseUrl.endsWith("/") ? repoBaseUrl : `${repoBaseUrl}/`
   const repoUrl = `${base}${task.repo}.git`
 
-  const clone = await exec(`git clone ${repoUrl} ${destDir}`, ".", timeoutMs)
+  // Blobless partial clone: fetch commit+tree graph only, NOT every historical
+  // blob. The subsequent `checkoutOrDeepen(base_commit)` lazily fetches just the
+  // blobs that commit needs. A full clone of a large repo (django) is hundreds of
+  // MB and minutes of network per instance; blobless cuts that to the working
+  // set. `--no-tags` drops tag refs we never check out. Env override
+  // QUANTA_SWEBENCH_FULL_CLONE=1 restores the historical full clone.
+  const filterArgs =
+    process.env.QUANTA_SWEBENCH_FULL_CLONE === "1" ? "" : "--filter=blob:none --no-tags "
+  const clone = await exec(`git clone ${filterArgs}${repoUrl} ${destDir}`, ".", timeoutMs)
   if (clone.code !== 0) {
     throw new Error(
       `git clone failed for ${task.instanceId} (${repoUrl}, code ${clone.code}): ${clone.stderr.slice(0, 500)}`,

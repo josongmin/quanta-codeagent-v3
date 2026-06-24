@@ -376,6 +376,16 @@ export interface BenchPosture {
   /** gap-B: spec-fidelity steer (minimal-literal-fix; fires only when the issue
    *  declares an exact expected output). */
   readonly specFidelitySteer: boolean
+  /** T2b (jun-24 astropy-13033): spec-fidelity INVARIANT. When the issue declares
+   *  an exact expected output, wire a PUBLIC-issue-text declared-expected port so
+   *  the existing `hard:declaredExpectedMatch=false` veto may fire in CLEAN mode
+   *  for candidates that invent a different message shape. Default-OFF ⇒ the
+   *  clean-mode declared-expected gate stays disabled (byte-identical). */
+  readonly specFidelityInvariant: boolean
+  /** T3 (jun-24): forward-localize on the deeper_localize adaptive route — trace
+   *  the prior candidate's edited symbols to their consumer call-sites and widen
+   *  the next pass's owner evidence. Default-OFF ⇒ deeper_localize stays a no-op. */
+  readonly forwardLocalize: boolean
   /** jun-24 django-11138: when a localized Python method has sibling overrides
    *  under the same base class, append a concrete CHA-derived multi-site steer
    *  naming each sibling file:line. */
@@ -509,6 +519,8 @@ export const benchPostureFromState = (
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
+  const specFidelityInvariant = readKnobValue(state, "spec-fidelity-invariant", isTrue) === true
+  const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
   const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
@@ -558,6 +570,8 @@ export const benchPostureFromState = (
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,
+    specFidelityInvariant,
+    forwardLocalize,
     chaMultisiteSteer,
     round0Minimal,
   }

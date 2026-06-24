@@ -1,3 +1,5 @@
+import { isExpired } from "@/auth/chatgpt-oauth"
+
 /**
  * What full-remote ships to the box for it to run patch-gen: the MINIMAL stripped
  * credential + the undeclared "phantom" deps a clean box's `bun install` misses.
@@ -13,8 +15,9 @@
  *  loader only requires `refresh_token`/`id_token` to be NON-EMPTY strings — it
  *  never uses them for a short run (access_token is valid + never refreshed). */
 const REDACTED = "REDACTED-not-shipped-to-remote"
+const REMOTE_AUTH_EXPIRY_SKEW_MS = 60_000
 
-export const stripToAccessToken = (authJson: string): string => {
+const parseRemoteAuthRecord = (authJson: string): Record<string, unknown> => {
   const parsed = JSON.parse(authJson) as Record<string, unknown>
   // Fail fast: a token file with no usable access_token would still ship (with
   // REDACTED placeholders) and the box would run 0 turns / empty patch after a
@@ -38,13 +41,21 @@ export const stripToAccessToken = (authJson: string): string => {
         "(re-login locally: `quanta /login`).",
     )
   }
-  // NOTE (bugbash #24 follow-up): a PRESENT-but-expired / near-expiry token still
-  // ships here, then 401s on the box because the box cannot refresh (refresh_token
-  // is the REDACTED placeholder) — wasting a full provision. A freshness preflight
-  // (`isExpired` from @/auth/chatgpt-oauth/token-store) belongs at the LAUNCH site
-  // with an injected clock, NOT in this pure data-shaping function: a `Date.now()`
-  // here would make the transform impure and turn every fixed-`expires_at` test
-  // fixture into a wall-clock time-bomb. Tracked as a separate, measured change.
+  return parsed
+}
+
+export const assertRemoteAccessTokenFreshEnough = (authJson: string, nowMs = Date.now()): void => {
+  const parsed = parseRemoteAuthRecord(authJson)
+  if (isExpired({ expires_at: parsed.expires_at as string }, nowMs, REMOTE_AUTH_EXPIRY_SKEW_MS)) {
+    throw new Error(
+      "[full-remote] auth json access_token is expired or too close to expiry for box launch " +
+        "(re-login locally: `quanta /login`).",
+    )
+  }
+}
+
+export const stripToAccessToken = (authJson: string): string => {
+  const parsed = parseRemoteAuthRecord(authJson)
   // Whitelist of the non-secret fields the box ACTUALLY needs (verified jun-20
   // against token-store.ts + the chatgpt-oauth adapter):
   //   - access_token : the bearer the box runs patch-gen with (guarded above);

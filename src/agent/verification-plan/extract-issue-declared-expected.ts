@@ -24,10 +24,24 @@ import { normalizePublicIssueText } from "@/shared"
 
 export type IssueDeclaredKind = "latex" | "symbolic" | "stdout" | "stdout-empty"
 
+/** Provenance of a declared-expected invariant. Stamped ONLY by
+ *  {@link extractIssueDeclaredExpected}, which reads PUBLIC problem-statement
+ *  text exclusively (never test_patch / gold / PR diff / grading output). The
+ *  T2b clean-mode spec-fidelity veto fires only for this source — the answer-key
+ *  guard in the declared-expected matcher refuses anything else. */
+export const PUBLIC_ISSUE_TEXT_PROVENANCE = "public-issue-text" as const
+
 export interface IssueDeclaredExpected {
   kind: IssueDeclaredKind
   value: string
+  readonly provenance: typeof PUBLIC_ISSUE_TEXT_PROVENANCE
 }
+
+const declared = (kind: IssueDeclaredKind, value: string): IssueDeclaredExpected => ({
+  kind,
+  value,
+  provenance: PUBLIC_ISSUE_TEXT_PROVENANCE,
+})
 
 /** "should <verb> `LITERAL`" — the literal must DIRECTLY follow the verb (only
  *  whitespace / `:` / `=` between). This deliberately EXCLUDES preposition-object
@@ -123,7 +137,7 @@ export const extractIssueDeclaredExpected = (
   //    "empty" decl can co-exist with a nearby literal, and the empty contract is
   //    the stronger, less-ambiguous signal.
   if (EMPTY_DECL_RE.test(normalized)) {
-    return { kind: "stdout-empty", value: "issue declares the correct output is empty" }
+    return declared("stdout-empty", "issue declares the correct output is empty")
   }
 
   // 2) "should <verb> `LITERAL`" — EXPECT_LITERAL_RE self-contains the required
@@ -136,14 +150,14 @@ export const extractIssueDeclaredExpected = (
   const m = EXPECT_LITERAL_RE.exec(normalized)
   if (m?.[1] !== undefined && isMeaningful(m[1])) {
     const value = m[1].trim()
-    return { kind: classify(value), value }
+    return declared(classify(value), value)
   }
 
   // 3) "Expected[ output]: LITERAL" label.
   const labelled = EXPECTED_LABEL_RE.exec(normalized)
   if (labelled?.[1] !== undefined && isMeaningful(labelled[1])) {
     const value = labelled[1].trim()
-    return { kind: classify(value), value }
+    return declared(classify(value), value)
   }
 
   // 4) Exact error-message proposal in a fenced block. The FULL block is the
@@ -151,7 +165,7 @@ export const extractIssueDeclaredExpected = (
   const msgBlock = MESSAGE_FORM_CODEBLOCK_RE.exec(normalized)
   if (msgBlock?.[1] !== undefined && isMeaningful(msgBlock[1])) {
     const value = msgBlock[1].trim()
-    return { kind: classify(value), value }
+    return declared(classify(value), value)
   }
 
   // 5) Desired output in a FENCED CODE BLOCK after a desired-output marker
@@ -165,7 +179,7 @@ export const extractIssueDeclaredExpected = (
     const q = QUOTED_IN_BODY.exec(cb[1])
     if (q?.[1] !== undefined && isMeaningful(q[1])) {
       const value = q[1].trim()
-      return { kind: classify(value), value }
+      return declared(classify(value), value)
     }
   }
 

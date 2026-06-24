@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 ROOT = "/Users/songmin/quanta-codeagent-v3"
 SWEEP = f"{ROOT}/_mclass-sweep"
 UNIV = f"{SWEEP}/universe.tsv"
-DS = f"{ROOT}/docs/analysis/swe-bench-verified-analysis/_data/verified-full.jsonl"
+DS = f"{ROOT}/tools/leaderboard-dashboard/rawdata/verified-full.jsonl"
 LB = f"{ROOT}/docs/swebench-leaderboard.yaml"
 SLICEDIR = "/Users/songmin/Library/quanta-codeagent-v3/bench-slices"
 RESULTS = f"{SWEEP}/results.jsonl"

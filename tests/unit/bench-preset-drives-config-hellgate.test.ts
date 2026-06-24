@@ -53,6 +53,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_VERIFY_SELECT_REPRO",
   "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
   "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
+  "QUANTA_BENCH_CHA_MULTISITE_STEER",
   "QUANTA_BENCH_SELECTOR_MODE",
   "QUANTA_READ_OUTLINE",
   "QUANTA_TEST_RUNNER",
@@ -461,6 +462,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectProofRequired).toBe(true)
     expect(opt.verifySelectRegression).toBe("discovered")
     expect(opt.verifySelectRepro).toBe("positive")
+    expect(opt.chaMultisiteSteer).toBe(true)
     expect(opt.selectorMode).toBe("clean")
     expect(KNOB_PRESETS["agentless-v4-proof-clean"]).toMatchObject({
       "bench-in-loop-exec": "repro-only",
@@ -479,6 +481,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "verify-select-proof-required": "1",
       "verify-select-regression": "discovered",
       "verify-select-repro": "positive",
+      "cha-multisite-steer": "1",
       "selector-mode": "clean",
     })
     expect(KNOB_PRESETS["agentless-v4-proof-clean"]?.["verify-select-early-accept"]).toBeUndefined()
@@ -493,6 +496,39 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectProofRequired).toBe(false)
     const state = resolveBenchKnobs({ envVars: process.env })
     expect(state.values.get("verify-select-proof-required")).toEqual({
+      source: "env",
+      value: false,
+    })
+  })
+
+  test("PRESET-15ga: proof-clean-execfull keeps proof-clean authority but upgrades in-loop exec to full", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean-execfull"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(true)
+    expect(opt.inLoopExecMode).toBe("full")
+    expect(opt.verifySelectProofRequired).toBe(true)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(opt.chaMultisiteSteer).toBe(true)
+    expect(opt.selectorMode).toBe("clean")
+    expect(KNOB_PRESETS["agentless-v4-proof-clean-execfull"]).toMatchObject({
+      "bench-in-loop-exec": "full",
+      "repro-test": "10",
+      "adversarial-repro": "1",
+      "verify-select-proof-required": "1",
+      "cha-multisite-steer": "1",
+      "selector-mode": "clean",
+    })
+    expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean-execfull")).toBe(true)
+  })
+
+  test("PRESET-15h: explicit env false beats proof-clean preset cha-multisite=true", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
+    process.env.QUANTA_BENCH_CHA_MULTISITE_STEER = "0"
+    const opt = benchOptIns()
+    expect(opt.chaMultisiteSteer).toBe(false)
+    const state = resolveBenchKnobs({ envVars: process.env })
+    expect(state.values.get("cha-multisite-steer")).toEqual({
       source: "env",
       value: false,
     })
@@ -514,6 +550,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
       "agentless-v3-thin-strict-closure-select-clean",
       "agentless-v3-thin-strict-closure-select-clean-witness-only",
       "agentless-v4-proof-clean",
+      "agentless-v4-proof-clean-execfull",
     ]) {
       process.env.QUANTA_BENCH_PRESET = preset
       expect(benchOptIns().selectorMode).toBe("clean")

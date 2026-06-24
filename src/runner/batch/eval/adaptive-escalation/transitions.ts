@@ -29,6 +29,8 @@ const TERMINAL: ReadonlySet<AdaptiveAction> = new Set<AdaptiveAction>([
 /** Actions that rebuild the evidence packet and RE-ROUTE (loop risk → bounded). */
 const REROUTE: ReadonlySet<AdaptiveAction> = new Set<AdaptiveAction>([
   "run_public_repro",
+  "run_proof_clean",
+  "repair_with_proof",
   "deeper_localize",
 ])
 

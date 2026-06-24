@@ -9,7 +9,10 @@
  */
 const DATASET = "princeton-nlp/SWE-bench_Verified"
 const ROWS_API = "https://datasets-server.huggingface.co/rows"
-const out = process.argv[2] ?? `${import.meta.dir}/verified-full.jsonl`
+// SSOT now lives under the bench tool: tools/leaderboard-dashboard/rawdata/.
+const out =
+  process.argv[2] ??
+  `${import.meta.dir}/../../../../tools/leaderboard-dashboard/rawdata/verified-full.jsonl`
 
 const rows: unknown[] = []
 for (let offset = 0; offset < 600; offset += 100) {

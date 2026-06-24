@@ -1199,6 +1199,7 @@ export interface SelectionGenerationPacketInput {
   readonly verificationTarget?: VerificationTargetFact
   readonly reproCommand?: string
   readonly validatedReproScripts?: readonly string[]
+  readonly existingTestExpectations?: readonly string[]
   readonly baseValidatedRed?: boolean
   readonly closureHint?: string
   readonly seed?: string
@@ -1271,11 +1272,30 @@ const validatedPublicReproFacts = (input: SelectionGenerationPacketInput): Stati
   return [...note, ...rendered, ...omittedFact]
 }
 
+const existingOwnerTestExpectationFacts = (input: SelectionGenerationPacketInput): StaticFact[] => {
+  const expectations = (input.existingTestExpectations ?? [])
+    .map((fact) => fact.trim())
+    .filter((fact) => fact !== "")
+  if (expectations.length === 0) return []
+  return [
+    {
+      kind: "existing_owner_test_expectation_note",
+      value:
+        "Existing repo tests below are PUBLIC source-of-truth examples. Match their exact behavior and message literals before inventing a new interpretation.",
+    },
+    ...expectations.map((fact, i) => ({
+      kind: "existing_owner_test_expectation",
+      value: `expectation ${i + 1}: ${boundHead(fact, 240)}`,
+    })),
+  ]
+}
+
 const selectionGenerationStaticFacts = (
   input: SelectionGenerationPacketInput,
   diagnostics: ReturnType<typeof staticWitnessDiagnosticsFacts>,
 ): StaticFact[] => [
   ...validatedPublicReproFacts(input),
+  ...existingOwnerTestExpectationFacts(input),
   ...diagnostics.staticFacts,
   ...(input.seed !== undefined && input.seed.trim() !== ""
     ? [{ kind: "diversity_seed", value: boundHead(input.seed, 400) }]
@@ -1305,13 +1325,14 @@ export const buildSelectionGenerationLlmEvidencePacket = (
     input.seed,
     ...(input.envCaveats ?? []),
     ...(input.validatedReproScripts ?? []),
+    ...(input.existingTestExpectations ?? []),
   ])
   const missingEvidence = selectionGenerationMissingEvidence(input)
   const staticWitnessDiagnostics = staticWitnessDiagnosticsFacts(input.staticWitnessDiagnostics)
   return cleanPacket({
     stage: "candidate_generation",
     instanceIdHash: opaqueInstanceIdHash(input.problemStatement),
-    evidenceRevision: "selection-generation-v2",
+    evidenceRevision: "selection-generation-v3",
     question:
       "Produce one minimal candidate patch that satisfies the active proof target against the bounded owner surface below.",
     allowedActions: [
@@ -1361,6 +1382,9 @@ export const buildSelectionGenerationPrompt = (input: SelectionGenerationPromptI
     ...(input.reproCommand !== undefined ? { reproCommand: input.reproCommand } : {}),
     ...(input.validatedReproScripts !== undefined && input.validatedReproScripts.length > 0
       ? { validatedReproScripts: input.validatedReproScripts }
+      : {}),
+    ...(input.existingTestExpectations !== undefined && input.existingTestExpectations.length > 0
+      ? { existingTestExpectations: input.existingTestExpectations }
       : {}),
     ...(input.closureHint !== undefined ? { closureHint: input.closureHint } : {}),
     ...(input.envCaveats !== undefined && input.envCaveats.length > 0

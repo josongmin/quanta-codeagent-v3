@@ -92,6 +92,48 @@ describe("BenchStreamTap", () => {
     expect(tap.editCount).toBe(0)
   })
 
+  test("T5 — sourceEditCount counts SOURCE edits only; test edits raise editCount but NOT sourceEditCount", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit({ type: "turn_start", turn: 1 })
+    tap.emit(toolCall("edit", { file_path: "/s/django/db/models/query.py" })) // SOURCE
+    tap.emit(toolCall("edit", { file_path: "/s/tests/test_query.py" })) // test — not source
+    tap.emit(toolCall("write", { file_path: "/s/reproduce_issue.py" })) // repro scaffold — not source
+    tap.emit(toolCall("edit", { file_path: "django/core/management.py" })) // SOURCE (relative)
+    expect(tap.editCount).toBe(4)
+    expect(tap.sourceEditCount).toBe(2)
+  })
+
+  test("MAJOR-A regression: an in-tree path containing a `tmp` segment STILL counts as source (no /tmp string arm)", () => {
+    // sourceOnlyDiff has no /tmp rule; the count-predicate must not invent one or
+    // it false-excludes in-tree files and (worse) collapses to 0 for a /tmp-rooted
+    // sandbox, re-creating the laundered-infra confound.
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit({ type: "turn_start", turn: 1 })
+    tap.emit(toolCall("edit", { file_path: "astropy/io/tmp/reader.py" })) // in-tree 'tmp' dir
+    tap.emit(toolCall("edit", { file_path: "/tmp/work/sbx-abc/django/db/models/query.py" })) // /tmp-rooted sandbox
+    expect(tap.sourceEditCount).toBe(2)
+  })
+
+  test("T5 — a test-ONLY run has editCount>0 but sourceEditCount===0 (must NOT classify as lost-edits)", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit({ type: "turn_start", turn: 1 })
+    tap.emit(toolCall("edit", { file_path: "/s/tests/test_x.py" }))
+    tap.emit(toolCall("edit", { file_path: "/s/pkg/tests/test_models.py" }))
+    expect(tap.editCount).toBe(2)
+    expect(tap.sourceEditCount).toBe(0)
+  })
+
+  test("M3 — sourceEditCount AGREES with sourceOnlyDiff's keep rule (app/tests.py + .pyi count; repro scaffold does not)", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit({ type: "turn_start", turn: 1 })
+    tap.emit(toolCall("edit", { file_path: "/s/app/tests.py" })) // django: NOT /tests/, NOT test_* ⇒ source
+    tap.emit(toolCall("edit", { file_path: "/s/pkg/stubs.pyi" })) // stub ⇒ source (survives the diff)
+    tap.emit(toolCall("write", { file_path: "/s/reproduce_issue.py" })) // repro scaffold ⇒ NOT source
+    tap.emit(toolCall("edit", { file_path: "/s/x/tests/test_y.py" })) // real test ⇒ NOT source
+    expect(tap.editCount).toBe(4)
+    expect(tap.sourceEditCount).toBe(2)
+  })
+
   test("pure pass-through: every event reaches downstream unchanged", () => {
     const down = new Capture()
     const tap = new BenchStreamTap(down)

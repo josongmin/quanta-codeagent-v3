@@ -61,7 +61,7 @@ const makeRecordingSession = (): {
 
 const baseParams = (artifactSuffix: string): GradeChunkParams => ({
   datasetPath: "/tmp/instances.jsonl",
-  authJson: JSON.stringify({ access_token: "A", expires_at: "2026-06-24T00:00:00Z" }),
+  authJson: JSON.stringify({ access_token: "A", expires_at: "2099-01-01T00:00:00Z" }),
   preset: "agentless-v1",
   model: "gpt-5.4",
   concurrency: 1,
@@ -69,6 +69,21 @@ const baseParams = (artifactSuffix: string): GradeChunkParams => ({
   recordTrajectory: false,
   forwardedBenchEnv: "",
 })
+
+const RUN_EXIT_OK = ok("0\n==XQ-RUN-EXIT-XQ==\n")
+
+const sshResponseForScrubTest = (remoteCmd: string): SpawnResult => {
+  if (remoteCmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
+  if (remoteCmd.includes("rmdir ~/.pool-grade.lock")) return ok("")
+  if (remoteCmd.includes("setsid bash -c")) return ok("LAUNCHED")
+  if (remoteCmd.includes("run.exit") || remoteCmd.includes("XQ-RUN-EXIT-XQ")) return RUN_EXIT_OK
+  if (remoteCmd.includes("cat ~/report.json")) {
+    return ok(JSON.stringify({ resolved_ids: ["fixture__clean"] }))
+  }
+  if (remoteCmd.includes("tail -60 ~/run.log")) return ok("")
+  if (remoteCmd.includes("grep -aiE")) return ok("")
+  return ok("")
+}
 
 describe("#23 runId / artifactSuffix shell-injection boundary", () => {
   test("rejects a suffix carrying a command-substitution metachar", () => {
@@ -108,6 +123,79 @@ describe("#23 runId / artifactSuffix shell-injection boundary", () => {
     // have been issued once the guard rejects.
     expect(sshCommands).toEqual([])
     expect(spawnArgs).toEqual([])
+  })
+
+  test("gradeChunkOnBox scrubs stale fixed-path artifacts BEFORE launching the bench", async () => {
+    const sshCommands: string[] = []
+    const spawn: SpawnFn = async () => ok()
+    const session: BoxSession = {
+      iid: "i-clean",
+      ip: "203.0.113.11",
+      host: "ubuntu@203.0.113.11",
+      keyPath: "/tmp/key.pem",
+      region: "ap-northeast-2",
+      spawn,
+      log: () => {},
+      ssh: async (remoteCmd) => {
+        sshCommands.push(remoteCmd)
+        return sshResponseForScrubTest(remoteCmd)
+      },
+      aws: async () => ok("running"),
+      terminate: async () => {},
+    }
+
+    const result = await gradeChunkOnBox(session, {
+      ...baseParams("clean"),
+      preset: "baseline",
+      recordTrajectory: true,
+    })
+
+    expect(result.resolved).toEqual(["fixture__clean"])
+    const scrubIndex = sshCommands.findIndex((cmd) =>
+      cmd.includes(
+        "rm -f ~/preds.jsonl ~/report.json ~/run.log ~/run.exit ~/report.closure-diagnostics.json $HOME/quanta/bench-trajectory.jsonl; rm -rf ~/observe; mkdir -p ~/observe",
+      ),
+    )
+    const launchIndex = sshCommands.findIndex((cmd) => cmd.includes("setsid bash -c"))
+    expect(scrubIndex).toBeGreaterThanOrEqual(0)
+    expect(launchIndex).toBeGreaterThan(scrubIndex)
+  })
+
+  test("gradeChunkOnBox rejects an expired auth token BEFORE dataset upload or remote launch", async () => {
+    const sshCommands: string[] = []
+    const spawnArgs: string[][] = []
+    const spawn: SpawnFn = async (_cmd, args) => {
+      spawnArgs.push([...args])
+      return ok()
+    }
+    const session: BoxSession = {
+      iid: "i-expired",
+      ip: "203.0.113.12",
+      host: "ubuntu@203.0.113.12",
+      keyPath: "/tmp/key.pem",
+      region: "ap-northeast-2",
+      spawn,
+      log: () => {},
+      ssh: async (remoteCmd) => {
+        sshCommands.push(remoteCmd)
+        return sshResponseForScrubTest(remoteCmd)
+      },
+      aws: async () => ok("running"),
+      terminate: async () => {},
+    }
+    await expect(
+      gradeChunkOnBox(session, {
+        ...baseParams("expired-auth"),
+        authJson: JSON.stringify({
+          access_token: "ACCESS-expired",
+          expires_at: "2020-01-01T00:00:00Z",
+        }),
+      }),
+    ).rejects.toThrow(/expired or too close to expiry/)
+
+    expect(spawnArgs).toEqual([])
+    expect(sshCommands.some((cmd) => cmd.includes("chatgpt.json"))).toBe(false)
+    expect(sshCommands.some((cmd) => cmd.includes("setsid bash -c"))).toBe(false)
   })
 })
 

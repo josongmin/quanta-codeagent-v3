@@ -137,4 +137,51 @@ describe("deriveCandidateStructuralRepair", () => {
     expect(repair?.family?.seed).toContain(ORACLE_OPS)
     expect(repair?.family?.seed).toContain(SQLITE_OPS)
   })
+
+  test("preferred localized CHA targets still derive the family when the patch text carries no method symbol", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "structural-repair-"))
+    dirs.push(dir)
+    mkdirSync(join(dir, "django", "db", "backends", "base"), { recursive: true })
+    mkdirSync(join(dir, "django", "db", "backends", "postgresql"), { recursive: true })
+    writeFileSync(
+      join(dir, BASE),
+      [
+        "class BaseDatabaseClient:",
+        "    def runshell(self, parameters):",
+        "        return parameters",
+      ].join("\n"),
+    )
+    writeFileSync(
+      join(dir, PG),
+      [
+        "class DatabaseClient(BaseDatabaseClient):",
+        "    def runshell(self, parameters):",
+        "        return parameters",
+      ].join("\n"),
+    )
+
+    const repair = await deriveCandidateStructuralRepair({
+      instance: mkInstance("runshell should preserve os.environ values"),
+      candidate: {
+        id: "cand-pref-0",
+        patch: patchForFiles([PG]),
+        turns: 1,
+        files: [PG],
+        baseValidatedRed: true,
+      },
+      sandbox: dir,
+      signal: new AbortController().signal,
+      preferredTargets: [
+        {
+          file: PG,
+          method: "runshell",
+          sites: [{ file: BASE, line: 2, cls: "BaseDatabaseClient", method: "runshell" }],
+        },
+      ],
+    })
+
+    expect(repair?.family?.familyId).toBe("override-family")
+    expect(repair?.family?.ownerFiles).toEqual([BASE, PG])
+    expect(repair?.family?.reason).toContain("runshell")
+  })
 })

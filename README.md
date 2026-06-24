@@ -145,7 +145,7 @@ bun run bench auth status
 
 # 2) 데이터셋 — SWE-bench Verified jsonl. 서브셋은 instance_id로 grep:
 grep -E '"(astropy__astropy-13033|django__django-11138)"' \
-  docs/analysis/swe-bench-verified-analysis/_data/verified-full.jsonl > /tmp/subset.jsonl
+  tools/leaderboard-dashboard/rawdata/verified-full.jsonl > /tmp/subset.jsonl
 
 # 3) DRY-RUN — LLM 없이 플랜만 확인 (먼저 이걸로 검증)
 bun run bench run --swebench /tmp/subset.jsonl --dry-run

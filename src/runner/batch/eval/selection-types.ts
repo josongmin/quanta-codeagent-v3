@@ -56,6 +56,10 @@ export interface Candidate {
   familyId?: CandidateFamilyId
   familyReason?: string
   familyOwnerFiles?: readonly string[]
+  /** Structural provenance for the family tag. Allows clean-mode family-coverage
+   *  vetoes to distinguish authoritative co-change families from advisory
+   *  exploration-only families. */
+  familySourceEvidence?: readonly string[]
   /** Eval-only visibility for bounded typed-family coverage repair. */
   familyCoverageRepair?: FamilyCoverageRepairTelemetry
   /** SCAFF-06 — executable PUBLIC-issue MWE proof receipt for this candidate.
@@ -82,6 +86,12 @@ export interface Candidate {
 export interface DerivedCandidateStructuralRepair {
   readonly family?: CandidateFamily
   readonly advisoryContracts?: SelectionContractBundle
+}
+
+export interface FamilyCoverageRepairArgs {
+  readonly candidate: Candidate
+  readonly family: CandidateFamily
+  readonly missingFiles: readonly string[]
 }
 
 export interface SelectionPorts {
@@ -119,6 +129,10 @@ export interface SelectionPorts {
   deriveCandidateStructuralRepair?: (
     c: Candidate,
   ) => Promise<DerivedCandidateStructuralRepair | undefined>
+  /** OPTIONAL bounded co-edit primitive for typed family coverage misses.
+   *  Runs before the generator fallback and may only extend the current patch
+   *  across already-admitted sibling files; it is not a new localization pass. */
+  repairFamilyCoverage?: (args: FamilyCoverageRepairArgs) => Promise<Candidate | undefined>
 }
 
 export interface ScoredEntry {
@@ -275,6 +289,7 @@ export interface CandidateTelemetry {
   familyId?: CandidateFamilyId
   familyReason?: string
   familyOwnerFiles?: readonly string[]
+  familySourceEvidence?: readonly string[]
   familyCoverageMissing?: readonly string[]
   familyCoverageRepair?: FamilyCoverageRepairTelemetry
   requiredContractsSatisfied?: number

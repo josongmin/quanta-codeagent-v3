@@ -44,6 +44,10 @@ const staticWitnessDiagnostics = [
   },
 ]
 
+const existingTestExpectations = [
+  "tests/test_target.py::test_target exact/public literal: target_fn must preserve None",
+]
+
 describe("selection assembly", () => {
   test("selectionGenerationPromptInput maps authority vs advisory contracts into model-facing facts", () => {
     const input = selectionGenerationPromptInput(
@@ -56,6 +60,7 @@ describe("selection assembly", () => {
         baseValidatedRed: true,
         reproHint: "python -m pytest tests/test_target.py",
         validatedReproScripts: ["python repro.py"],
+        existingTestExpectations,
         closureHint: "follow the public repro before editing",
         envCaveats: ["public repro helper is unavailable"],
         staticWitnessDiagnostics,
@@ -78,6 +83,7 @@ describe("selection assembly", () => {
     expect(input.baseValidatedRed).toBe(true)
     expect(input.reproCommand).toBe("python -m pytest tests/test_target.py")
     expect(input.validatedReproScripts).toEqual(["python repro.py"])
+    expect(input.existingTestExpectations).toEqual(existingTestExpectations)
     expect(input.closureHint).toBe("follow the public repro before editing")
     expect(input.envCaveats).toEqual(["public repro helper is unavailable"])
     expect(input.staticWitnessDiagnostics).toEqual(staticWitnessDiagnostics)
@@ -95,6 +101,7 @@ describe("selection assembly", () => {
         promptContracts,
         baseValidatedRed: true,
         validatedReproScripts: ["python repro.py"],
+        existingTestExpectations: [],
         closureHint: "follow the public repro before editing",
         envCaveats: [],
         staticWitnessDiagnostics: [],
@@ -119,6 +126,7 @@ describe("selection assembly", () => {
         baseValidatedRed: true,
         reproHint: "python -m pytest tests/test_target.py",
         validatedReproScripts: ["python repro.py"],
+        existingTestExpectations,
         closureHint: "follow the public repro before editing",
         envCaveats: ["public repro helper is unavailable"],
         staticWitnessDiagnostics,
@@ -130,6 +138,7 @@ describe("selection assembly", () => {
     expect(hint).toContain("candidate-seed")
     expect(hint).toContain("follow the public repro before editing")
     expect(hint).toContain("python repro.py")
+    expect(hint).toContain("target_fn must preserve None")
     expect(hint).toContain("pkg/a.py")
     expect(observedStages).toEqual(["candidate_generation"])
   })
@@ -148,6 +157,7 @@ describe("selection assembly", () => {
       reproTest: { installed: false, reason: "not_installed" },
       verificationTarget: undefined,
       oracleFailureRepairSeed: "repair-seed",
+      existingTestExpectations,
       readSource: (rel) =>
         rel === "pkg/a.py"
           ? "def target_fn(x):\n    return x\n"
@@ -163,6 +173,7 @@ describe("selection assembly", () => {
     )
     expect(context.selectionInputs.ownerFiles).toEqual(["pkg/a.py", "pkg/helper.ts"])
     expect(context.selectionOwnerEvidence.map((fact) => fact.file)).toContain("pkg/a.py")
+    expect(context.existingTestExpectations).toEqual(existingTestExpectations)
     expect(context.staticWitnessDiagnostics).toEqual([
       {
         kind: "static_witness_unsupported_language",

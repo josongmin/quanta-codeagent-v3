@@ -2,7 +2,10 @@ import { defsInSource, type OwnerSibling } from "@/agent/closure"
 import { extractIssueHint } from "@/agent/issue-hint"
 import { normalizePublicIssueText } from "@/shared"
 import type { BenchReproTestTelemetry } from "../types"
-import { buildCandidateFamilyBundleFromWitness, withStaticWitnessFamilies } from "./candidate-families"
+import {
+  buildCandidateFamilyBundleFromWitness,
+  withStaticWitnessFamilies,
+} from "./candidate-families"
 import type { BenchPosture } from "./knobs-bench"
 import {
   buildSelectionGenerationPrompt,
@@ -173,6 +176,7 @@ export interface SelectionPromptAssemblyArgs {
   readonly verificationTarget?: VerificationTargetFact
   readonly reproHint?: string
   readonly validatedReproScripts: readonly string[]
+  readonly existingTestExpectations: readonly string[]
   readonly closureHint?: string
   readonly envCaveats: readonly string[]
   readonly staticWitnessDiagnostics: NonNullable<
@@ -196,6 +200,9 @@ export const selectionGenerationPromptInput = (
   ...(args.reproHint !== undefined ? { reproCommand: args.reproHint } : {}),
   ...(args.validatedReproScripts.length > 0
     ? { validatedReproScripts: args.validatedReproScripts }
+    : {}),
+  ...(args.existingTestExpectations.length > 0
+    ? { existingTestExpectations: args.existingTestExpectations }
     : {}),
   ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
   ...(args.envCaveats.length > 0 ? { envCaveats: args.envCaveats } : {}),
@@ -229,6 +236,7 @@ export interface SelectionEvidenceContextArgs {
   readonly reproTest: BenchReproTestTelemetry | undefined
   readonly verificationTarget: VerificationTargetFact | undefined
   readonly oracleFailureRepairSeed: string | undefined
+  readonly existingTestExpectations: readonly string[]
   readonly readSource: (rel: string) => string | null
 }
 
@@ -241,6 +249,7 @@ export interface SelectionEvidenceContext {
   readonly advisoryPromptContracts: SelectionContractBundle | undefined
   readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
   readonly verificationTarget: VerificationTargetFact | undefined
+  readonly existingTestExpectations: readonly string[]
   readonly staticWitnessDiagnostics: NonNullable<
     SelectionGenerationPromptInput["staticWitnessDiagnostics"]
   >
@@ -275,6 +284,7 @@ export const prepareSelectionEvidenceContext = (
       readSource: args.readSource,
     }),
     verificationTarget: args.verificationTarget,
+    existingTestExpectations: args.existingTestExpectations,
     staticWitnessDiagnostics: structural.staticWitnessDiagnostics,
     selectionBaseValidatedRed:
       args.verifySelectRegression === "discovered" ? null : args.baseValidatedRed,

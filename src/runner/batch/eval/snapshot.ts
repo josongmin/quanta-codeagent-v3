@@ -146,6 +146,26 @@ export const gitStageAndDiffCached = async (cwd: string, timeoutMs: number): Pro
 }
 
 /**
+ * T5 — does the worktree carry ANY staged change at all (before the
+ * `sourceOnlyDiff` strip removes test/repro/binary sections)? Call AFTER a
+ * `gitStageAndDiffCached` (which already ran `git add -A`) so the index reflects
+ * the full tree. `git diff --cached --quiet` exits 1 when staged changes exist,
+ * 0 when clean. A git failure ⇒ `false` (conservative: never invent a
+ * capture-failure from an unknown tree state). This is the `rawDirty` fact that
+ * separates a legitimate test-only edit (`stripped-only`) from a real
+ * fork-worktree capture desync (`lost-edits`) in {@link classifyDoneTimeCapture}.
+ */
+export const gitWorktreeHasStagedChanges = async (
+  cwd: string,
+  timeoutMs: number,
+): Promise<boolean> => {
+  const r = await execArgv([...GIT_ARGV, "diff", "--cached", "--quiet"], cwd, timeoutMs).catch(
+    () => null,
+  )
+  return r !== null && r.code === 1
+}
+
+/**
  * Snapshot helper: take a pre-image, run the agent, then diff.
  *
  * If the sandbox already contains a `.git` (real swebench cache repos do) and

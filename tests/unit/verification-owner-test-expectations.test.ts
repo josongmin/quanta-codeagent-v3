@@ -1,0 +1,259 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  extractVerificationOwnerTestExpectations,
+  ownerTestPathsFromCommands,
+} from "@/runner/batch/eval/verification-owner-test-expectations"
+
+const roots: string[] = []
+
+const mkSandbox = (): string => {
+  const root = mkdtempSync(join(tmpdir(), "owner-test-expectations-"))
+  roots.push(root)
+  return root
+}
+
+afterEach(() => {
+  while (roots.length > 0) {
+    const root = roots.pop()
+    if (root !== undefined) rmSync(root, { recursive: true, force: true })
+  }
+})
+
+describe("verification owner test expectations", () => {
+  test("ownerTestPathsFromCommands extracts stable python test paths from bench commands", () => {
+    expect(
+      ownerTestPathsFromCommands([
+        "python -m pytest -x tests/test_widget.py",
+        "uv run pytest 'tests/test_widget.py::test_exact_message'",
+        "python -m pytest src/widget.py",
+      ]),
+    ).toEqual(["tests/test_widget.py"])
+  })
+
+  test("extractVerificationOwnerTestExpectations reads public assert/message literals from existing tests", async () => {
+    const sandbox = mkSandbox()
+    const testPath = join(sandbox, "tests")
+    mkdirSync(testPath, { recursive: true })
+    writeFileSync(
+      join(testPath, "test_widget.py"),
+      [
+        "def test_exact_message():",
+        '    assert str(exc.value) == "widget must stay immutable"',
+        "",
+        "def test_regex():",
+        '    with pytest.raises(ValueError, match="expected widget id"):',
+        "        pass",
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest tests/test_widget.py"],
+    })
+
+    expect(facts).toEqual([
+      "tests/test_widget.py::test_exact_message exact/public literal: widget must stay immutable",
+      "tests/test_widget.py::test_regex exact/public literal: expected widget id",
+    ])
+  })
+
+  test("T2 fallback: REAL astropy-13033 shape — non-convention test filename (test_sampled.py) found by glob + MULTI-LINE match=() literal extracted", async () => {
+    // 13033 reality: owner is astropy/timeseries/core.py, but astropy does NOT use
+    // test_core.py — the message lives in tests/test_sampled.py, and the assertion
+    // spans multiple lines as `match=( r"..." )`. The pure `test_<module>.py`
+    // convention misses the file AND single-line mining misses the literal; the
+    // glob + logical-line join must recover it.
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "astropy/timeseries/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_sampled.py"),
+      [
+        "def test_required_columns_message():",
+        "    with pytest.raises(",
+        "        ValueError,",
+        '        match=(r"TimeSeries object is invalid - expected "',
+        '              r"as the first column but found something else"),',
+        "    ):",
+        "        TimeSeries()",
+      ].join("\n"),
+    )
+
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: [], // no command-derived path ⇒ fallback triggers
+      localizedOwnerFiles: ["astropy/timeseries/core.py"],
+    })
+
+    expect(facts.length).toBeGreaterThan(0)
+    expect(facts.join(" ")).toContain("test_sampled.py")
+    expect(facts.join(" ")).toContain(
+      "TimeSeries object is invalid - expected as the first column but found something else",
+    )
+    expect(facts.join(" ")).toContain("as the first column but found something else")
+    expect(facts.join(" ")).not.toContain("TimeSeries object is invalid - expected |")
+  })
+
+  test("T2 ranks issue-symbol expectations ahead of earlier unrelated asserts in large public test files", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "astropy/timeseries/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_sampled.py"),
+      [
+        "def test_unrelated_a():",
+        '    assert str(exc.value) == "unrelated first message"',
+        "def test_unrelated_b():",
+        '    assert str(exc.value) == "unrelated second message"',
+        "def test_required_columns_message():",
+        '    assert str(exc.value) == "TimeSeries object is invalid - expected required columns"',
+      ].join("\n"),
+    )
+
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: [],
+      localizedOwnerFiles: ["astropy/timeseries/core.py"],
+      issueSymbols: ["TimeSeries"],
+      maxExpectations: 1,
+    })
+
+    expect(facts).toEqual([
+      "astropy/timeseries/tests/test_sampled.py::test_required_columns_message exact/public literal: TimeSeries object is invalid - expected required columns",
+    ])
+  })
+
+  test("T2: a STALE message in a comment / docstring is NOT mined as an exact literal (no wrong-steer)", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_msg():",
+        '    """historical: the message used to be "OLD WRONG MESSAGE"."""',
+        '    # legacy assert was: assert str(e) == "ANOTHER STALE ONE"',
+        '    assert str(e) == "the correct current message"',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    expect(facts.join(" ")).toContain("the correct current message")
+    expect(facts.join(" ")).not.toContain("OLD WRONG MESSAGE")
+    expect(facts.join(" ")).not.toContain("ANOTHER STALE ONE")
+  })
+
+  test("T2 fallback is OFF without localizedOwnerFiles ⇒ byte-identical command-only behavior (no false discovery)", async () => {
+    const sandbox = mkSandbox()
+    // A convention test exists, but with NO localizedOwnerFiles the fallback must
+    // NOT run (command-only, byte-identical to pre-T2).
+    const testDir = join(sandbox, "astropy/timeseries/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_core.py"),
+      'def test_x():\n    assert str(e) == "must not be discovered"',
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: [],
+    })
+    expect(facts).toEqual([])
+  })
+
+  test("M1 regression: a multi-line triple-quoted VALUE does not swallow a following test's real message", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_repr():",
+        "    expected = textwrap.dedent('''",
+        "        some multiline",
+        "        value here",
+        "    ''')",
+        "    assert repr(obj) == expected",
+        "def test_message():",
+        '    with pytest.raises(ValueError, match="the real error message"):',
+        "        do_thing()",
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    // The close-only `''')` must NOT re-arm docstring mode and swallow test_message.
+    expect(facts.join(" ")).toContain("the real error message")
+  })
+
+  test("MAJOR-B regression: a SINGLE-LINE triple-quoted message VALUE is still mined (not dropped as a docstring)", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_a():",
+        '    with pytest.raises(ValueError, match="""expected long message here"""):',
+        "        do()",
+        "def test_b():",
+        '    assert str(exc.value) == """the only expected error message"""',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    expect(facts.join(" ")).toContain("expected long message here")
+    expect(facts.join(" ")).toContain("the only expected error message")
+  })
+
+  test("MAJOR-1 regression: a BARE single-line docstring whose prose contains 'assert'/'match=' is NOT mined; the real message survives the cap", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_immutable():",
+        // Docstring at order 0 with assertion-ish prose — must NOT become a fact,
+        // and must NOT evict the real message under PER_FILE_EXPECTATION_CAP.
+        '    """We assert the widget stays immutable; pytest.raises match= here."""',
+        '    with pytest.raises(ValueError, match="the real expected message"):',
+        "        rebind(widget)",
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    expect(facts.join(" ")).toContain("the real expected message")
+    expect(facts.join(" ")).not.toContain("widget stays immutable")
+  })
+
+  test("M2 regression: an in-string bracket does NOT over-join the next test (no cross-test literal mis-attribution)", async () => {
+    const sandbox = mkSandbox()
+    const testDir = join(sandbox, "pkg/tests")
+    mkdirSync(testDir, { recursive: true })
+    writeFileSync(
+      join(testDir, "test_widget.py"),
+      [
+        "def test_a():",
+        '    assert msg == "unterminated paren foo("',
+        "def test_b():",
+        '    assert other == "TOTALLY UNRELATED MESSAGE"',
+      ].join("\n"),
+    )
+    const facts = await extractVerificationOwnerTestExpectations({
+      sandbox,
+      ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
+    })
+    // test_a's fact must NOT carry test_b's message (the over-join bug).
+    const aFact = facts.find((f) => f.includes("::test_a"))
+    expect(aFact ?? "").not.toContain("TOTALLY UNRELATED MESSAGE")
+  })
+})

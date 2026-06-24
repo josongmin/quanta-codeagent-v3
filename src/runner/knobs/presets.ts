@@ -333,6 +333,40 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "cha-multisite-steer": "1",
     "selector-mode": "clean",
   },
+  // A/B arm (jun-24): identical to agentless-v4-proof-clean except the
+  // in-loop execution rail is FULL instead of repro-only. This isolates the
+  // competitor-style hypothesis that existing repo tests must run inside the
+  // same generation/repair loop to close completeness/regression misses.
+  "agentless-v4-proof-clean-execfull": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "repro-test": "10",
+    "adversarial-repro": "1",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "round0-minimal": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-concurrency": "3",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+    "verify-select-proof-required": "1",
+    "cha-multisite-steer": "1",
+    "selector-mode": "clean",
+  },
   // jun-22 v5 thin-first ADAPTIVE controller opening. The base posture is exactly
   // `agentless-v3-thin-strict` (cheap thin/noexec/minimal round-0); the per-phase
   // capability knobs (expand-select / proof-clean / repair / repro rails) are

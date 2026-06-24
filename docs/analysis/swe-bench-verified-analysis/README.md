@@ -12,7 +12,7 @@ SWE-bench Verified 500문제 전체를 **문제별로 까볼 수 있게** 정리
 swe-bench-verified-analysis/
   README.md                  ← 이 파일
   _data/
-    verified-full.jsonl      ← 원시 500 rows (HF princeton-nlp/SWE-bench_Verified)
+    verified-full.jsonl      ← 이전됨 → tools/leaderboard-dashboard/rawdata/verified-full.jsonl (원시 500 rows, HF princeton-nlp/SWE-bench_Verified)
     by-instance/<id>.json    ← 인스턴스별 분리 레코드 (분석 에이전트 입력)
     django-ids.json          ← django 인스턴스 id 목록
     fetch.ts                 ← 데이터 재수집 스크립트

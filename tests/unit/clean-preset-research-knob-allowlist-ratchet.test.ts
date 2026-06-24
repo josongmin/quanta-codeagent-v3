@@ -95,13 +95,14 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // floor — a refactor that breaks `selector-mode:clean` resolution trips here
   // instead of silently disarming every per-preset assertion below.
   test("auto-discovers a non-empty clean-preset set (anti-vacuous floor)", () => {
-    expect(cleanPresets.length).toBeGreaterThanOrEqual(3)
+    expect(cleanPresets.length).toBeGreaterThanOrEqual(4)
     // And every known-clean preset (these set `selector-mode:clean` literally)
     // is in the discovered set — the discovery isn't dropping any.
     for (const known of [
       "agentless-v3-thin-strict-closure-select-clean",
       "agentless-v3-thin-strict-closure-select-clean-witness-only",
       "agentless-v4-proof-clean",
+      "agentless-v4-proof-clean-execfull",
     ]) {
       expect(cleanPresets).toContain(known)
     }

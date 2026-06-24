@@ -15,7 +15,7 @@ describe("extractIssueDeclaredExpected — precision-first", () => {
     const r = extractIssueDeclaredExpected(
       "Bug: lambdify a 1-tuple. It should print `(1,)` but prints `(1)`.",
     )
-    expect(r).toEqual({ kind: "symbolic", value: "(1,)" })
+    expect(r).toEqual({ kind: "symbolic", value: "(1,)", provenance: "public-issue-text" })
   })
 
   test("'should return' with a quoted literal ⇒ extracted (stdout kind)", () => {
@@ -146,6 +146,7 @@ ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the firs
       kind: "stdout",
       value:
         "ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the first columns but found ['time', 'b']",
+      provenance: "public-issue-text",
     })
   })
 
@@ -154,7 +155,7 @@ ValueError: TimeSeries object is invalid - expected ['time', 'flux'] as the firs
       extractIssueDeclaredExpected(
         "<!-- Expected: `hidden` -->\nThe function should return `visible` for this input.",
       ),
-    ).toEqual({ kind: "stdout", value: "visible" })
+    ).toEqual({ kind: "stdout", value: "visible", provenance: "public-issue-text" })
   })
 })
 

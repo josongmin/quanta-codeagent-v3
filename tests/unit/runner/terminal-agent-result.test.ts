@@ -128,6 +128,20 @@ describe("terminalAgentResult", () => {
     })
   })
 
+  test("aborted after edits with empty patch surfaces patch-capture miss as infra", () => {
+    const result = mkTerminal({
+      stopReason: "aborted",
+      editCount: 3,
+      firstEditFile: "django/db/backends/mysql/operations.py",
+    })
+
+    expect(result.error).toContain("patch capture miss")
+    expect(classifyOutcome(result)).toEqual({
+      kind: "infra-fail",
+      reason: "patch capture miss: agent edited files before abort, but final git diff was empty",
+    })
+  })
+
   test("hard provider/runtime errors still stay generation-fail even when no candidate won", () => {
     const result = mkTerminal({
       stopReason: "error",

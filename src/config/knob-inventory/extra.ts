@@ -332,6 +332,16 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/eval/driver.ts",
   },
   {
+    envKey: "QUANTA_BENCH_FAMILY_COVERAGE",
+    kind: "bool",
+    default: true,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench eval (T1, jun-24): clean-mode family-coverage veto (hard:familyCoverageMissing). Default ON; set 0/off to disable for an A/B baseline against producer-consumer over-demand before promotion.",
+    readSite: "apps/bench/eval/driver.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_TOKEN_BUDGET_DIR",
     kind: "string",
     default: "~/.quanta/bench-token-budget",

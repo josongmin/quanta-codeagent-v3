@@ -365,6 +365,59 @@ describe("runSelection", () => {
     expect(repaired?.files).toEqual(["pkg/base.py", "pkg/backend.py"])
   })
 
+  it("uses bounded co-edit family repair before falling back to another generation", async () => {
+    const seeds: (string | undefined)[] = []
+    let repairCalls = 0
+    const gen: SelectionPorts["generate"] = async (i, seed) => {
+      seeds.push(seed)
+      return i === 1
+        ? cand({
+            id: "cand-1",
+            files: ["pkg/base.py"],
+            patch: patchForFiles(["pkg/base.py"]),
+          })
+        : cand({ id: "cand-0", files: ["pkg/other.py"] })
+    }
+
+    const r = await runSelection({
+      n: 2,
+      seeds: [undefined, "family seed"],
+      owners: new Set(["pkg/base.py", "pkg/backend.py"]),
+      candidateFamilies: [
+        undefined,
+        {
+          familyId: "multi-site",
+          ownerFiles: ["pkg/base.py", "pkg/backend.py"],
+          reason: "shared symbol",
+          seed: undefined,
+          sourceEvidence: ["static-symbol-witness"],
+        },
+      ],
+      ports: {
+        generate: gen,
+        repairFamilyCoverage: async ({ candidate, missingFiles }) => {
+          repairCalls += 1
+          expect(missingFiles).toEqual(["pkg/backend.py"])
+          return {
+            ...candidate,
+            patch: patchForFiles(["pkg/base.py", "pkg/backend.py"]),
+            files: ["pkg/base.py", "pkg/backend.py"],
+          }
+        },
+      },
+    })
+
+    const repaired = r.scored.find((entry) => entry.candidate.id === "cand-1")?.candidate
+    expect(seeds).toHaveLength(2)
+    expect(repairCalls).toBe(1)
+    expect(repaired?.files).toEqual(["pkg/base.py", "pkg/backend.py"])
+    expect(repaired?.familyCoverageRepair).toMatchObject({
+      attempted: true,
+      accepted: true,
+      reason: "missing_reduced",
+    })
+  })
+
   it("clean mode can derive a structural family from cand0 without turning it into contract authority", async () => {
     const seeds: (string | undefined)[] = []
     let calls = 0

@@ -30,6 +30,7 @@ import {
   derivePhasePosture,
   type KnobModule,
   PHASE_MODULES,
+  PROOF_CLEAN_EXECFULL_MODULES,
   PROOF_CLEAN_MODULES,
   PROOF_REQUIRED,
   rejectedModuleKnobs,
@@ -69,6 +70,11 @@ const EQUIVALENCES: ReadonlyArray<{
     preset: "agentless-v3-thin-strict-closure-select-clean",
   },
   { name: "proof-clean", modules: PROOF_CLEAN_MODULES, preset: "agentless-v4-proof-clean" },
+  {
+    name: "proof-clean-execfull",
+    modules: PROOF_CLEAN_EXECFULL_MODULES,
+    preset: "agentless-v4-proof-clean-execfull",
+  },
 ]
 
 describe("posture phase-module seam", () => {
@@ -205,12 +211,18 @@ describe("posture phase-module seam", () => {
       expect(benchRunsRepairPhase(p.repairRounds !== undefined, true, p.inLoopExecMode)).toBe(true)
     })
 
-    test("ACTION-5: deeper_localize is a measured-pending NO-OP (no unvalidated dial)", () => {
-      // localize-phase:8 was an unmeasured heuristic; neutered until STEP 1 measures.
+    test("ACTION-5: deeper_localize occupies ONLY the forward-localize lever (sole delta, default-OFF)", () => {
+      // T3 (jun-24): the route is no longer a bare no-op — it turns on the
+      // default-OFF forward-localize knob and NOTHING else. forward-localize is
+      // the SOLE behavioral delta vs thin (no smuggled unvalidated dial), and the
+      // knob itself stays OFF until the controller routes here, so promotion still
+      // requires the frozen-slice A/B.
       const base = stateFor(THIN_BASE)
-      expect(
-        behavioral(derivePhasePosture(base, PHASE_MODULES.deeper_localize, EMPTY_ENV)),
-      ).toEqual(behavioral(benchPostureFromState(base, EMPTY_ENV)))
+      const deeper = derivePhasePosture(base, PHASE_MODULES.deeper_localize, EMPTY_ENV)
+      const thin = benchPostureFromState(base, EMPTY_ENV)
+      expect(deeper.forwardLocalize).toBe(true)
+      expect(thin.forwardLocalize).toBe(false)
+      expect(behavioral(deeper)).toEqual(behavioral({ ...thin, forwardLocalize: true }))
     })
 
     test("RATCHET: every selector-touching action yields CLEAN selector authority", () => {

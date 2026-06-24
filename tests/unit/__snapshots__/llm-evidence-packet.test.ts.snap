@@ -149,7 +149,7 @@ Use only the bounded packet below. Do not assume hidden tests, gold patches, ben
 {
   "stage": "candidate_generation",
   "instanceIdHash": "8b62cc9c409e9d03",
-  "evidenceRevision": "selection-generation-v2",
+  "evidenceRevision": "selection-generation-v3",
   "question": "Produce one minimal candidate patch that satisfies the active proof target against the bounded owner surface below.",
   "allowedActions": [
     "edit_candidate_sandbox_only",

@@ -31,6 +31,7 @@
 import type { BenchKnobState } from "../knobs-bench"
 import type { LlmEvidencePacket } from "../llm-evidence-packet"
 import { type AdaptiveRunResult, runAdaptiveEscalation } from "./controller"
+import { validateAdaptiveDecisionForEvidence } from "./decision-legality"
 import { evidenceIdsOf } from "./evidence-facts"
 import { type AdaptiveModelCall, makeLlmRouter } from "./llm-router"
 import { makeAdaptiveExecutor, type RunPhasePort } from "./phase-executor"
@@ -74,5 +75,6 @@ export const runAdaptiveBenchAttempt = (deps: AdaptiveRunDeps): Promise<Adaptive
       ...(deps.maxTokens !== undefined ? { maxTokens: deps.maxTokens } : {}),
     }),
     executor: makeAdaptiveExecutor({ base: deps.base, env: deps.env, runPhase: deps.runPhase }),
+    validateDecision: (re, decision) => validateAdaptiveDecisionForEvidence(re.facts, decision),
     ...(deps.limits !== undefined ? { limits: deps.limits } : {}),
   })

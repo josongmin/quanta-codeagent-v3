@@ -187,6 +187,19 @@ const PROOF_INFRA_BLOCKED_REJECT_REASON =
 const familyCoverageMissingRejectReason = (missing: readonly string[]): string =>
   `hard:familyCoverageMissing=${missing.join(",")} (typed co-change family postcondition not satisfied)`
 
+const FAMILY_COVERAGE_VETO_EVIDENCE_PREFIXES = ["static-witness:", "cha-multisite:"] as const
+
+const familyCoverageHasStructuralAuthority = (candidate: Candidate): boolean => {
+  const evidence = candidate.familySourceEvidence
+  // Legacy/test candidates may not carry provenance yet. Preserve prior behavior
+  // there so this split only narrows the veto for real family-tagged candidates
+  // whose source evidence is available.
+  if (evidence === undefined) return true
+  return evidence.some((entry) =>
+    FAMILY_COVERAGE_VETO_EVIDENCE_PREFIXES.some((prefix) => entry.startsWith(prefix)),
+  )
+}
+
 export const applyCleanDriftHardGate = (
   verdict: CandidateVerdict,
   risk: boolean,
@@ -275,10 +288,22 @@ export const applyStaticSanityHardGate = (
 export const familyCoverageMissingHardReasons = (candidate: Candidate): readonly string[] => {
   if (candidate.patch.trim() === "" || candidate.familyId === undefined) return []
   if (!isCoChangeFamily(candidate.familyId)) return []
+  // T1 authority split: only structurally-authoritative co-change families may
+  // veto in clean mode. Advisory exploration families may still steer generation
+  // and ranking, but they must not escalate into a hard submit block without
+  // typed relation provenance.
+  if (!familyCoverageHasStructuralAuthority(candidate)) return []
+  // Relatedness guard (T1): round-robin family planning assigns
+  // `candidateFamilies[i]` independent of what candidate i actually edits, and
+  // `withFamily` stamps the tag unconditionally. A candidate that touches NONE of
+  // the family's owner files is spuriously tagged — do not veto it on a family it
+  // has no relation to (prevents a false-positive rejection of an unrelated fix).
+  const ownerFiles = candidate.familyOwnerFiles ?? []
+  if (!ownerFiles.some((file) => candidate.files.includes(file))) return []
   const missing = candidateFamilyCoverageMissing(
     {
       familyId: candidate.familyId,
-      ownerFiles: candidate.familyOwnerFiles ?? [],
+      ownerFiles,
     },
     candidate.files,
   )
@@ -301,19 +326,31 @@ const applyDeclaredExpectedHardGate = (
     : verdict
 
 /**
- * Score under the active authority mode (T-AUTH-01 / T-SEL-02). `declaredExpected`
- * is a `researchOnly` signal: it may hard-reject ONLY in `research` mode. In
- * `clean` mode it never vetoes — the answer-key matcher carries no clean
- * benchmark authority (it survives only as research telemetry behind rca-gates).
+ * Score under the active authority mode (T-AUTH-01 / T-SEL-02).
+ *
+ * `declaredExpected` is a `researchOnly` signal by default: it may hard-reject
+ * ONLY in `research` mode. In `clean` mode the ANSWER-KEY matcher carries no
+ * clean benchmark authority, so it never vetoes (survives only as research
+ * telemetry behind rca-gates).
+ *
+ * T2b — the ONE exception: when `declaredExpectedPublic` is true, the
+ * declared-expected verdict came from a PUBLIC-issue-text-derived invariant
+ * (built by buildPublicDeclaredExpectedPort, which refuses any non-public
+ * source). A public invariant is legitimate clean-mode authority, so the gate
+ * fires in clean mode too. `declaredExpectedPublic` defaults to false ⇒
+ * clean-mode behavior is byte-identical to before T2b.
  */
 export const scoreWithAuthority = (
   hard: HardGateSignals,
   soft: SoftScoreSignals,
   declaredExpectedMatch: boolean | null,
   mode: SelectorMode,
+  declaredExpectedPublic = false,
 ): CandidateVerdict => {
   const verdict = scoreCandidate(hard, soft, { mode })
-  return mode === "clean" ? verdict : applyDeclaredExpectedHardGate(verdict, declaredExpectedMatch)
+  return mode === "clean" && !declaredExpectedPublic
+    ? verdict
+    : applyDeclaredExpectedHardGate(verdict, declaredExpectedMatch)
 }
 
 const countAddedSourceLines = (patch: string): number => {

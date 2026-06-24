@@ -69,11 +69,11 @@ describe("adaptive-escalation controller", () => {
 
   test("CTRL-2: a finalize_after action executes ONCE with the mapped modules", async () => {
     const exec = recordingExecutor()
-    const { result, calls } = await run([decision("run_proof_clean")], packet("ev:1"), exec)
+    const { result, calls } = await run([decision("expand_select")], packet("ev:1"), exec)
     expect(result.outcome).toBe("finalize")
     expect(calls.length).toBe(1)
-    expect(calls[0]?.modules).toBe(PHASE_MODULES.run_proof_clean)
-    expect(result.steps).toEqual(["run_proof_clean"])
+    expect(calls[0]?.modules).toBe(PHASE_MODULES.expand_select)
+    expect(result.steps).toEqual(["expand_select"])
   })
 
   test("CTRL-3: invalid router output FAILS CLOSED (escalate, never finalize, no exec)", async () => {
@@ -134,5 +134,40 @@ describe("adaptive-escalation controller", () => {
     expect(seen[0]?.citableIds.has("ev:orig")).toBe(true)
     expect(seen[1]?.citableIds.has("ev:new")).toBe(true)
     expect(result.steps).toEqual(["deeper_localize"])
+  })
+
+  test("CTRL-9: run_proof_clean reroutes, so the controller may choose repair_with_proof next", async () => {
+    const exec = recordingExecutor(() => packet("ev:proof"))
+    const { router, seen } = scriptedRouter([
+      decision("run_proof_clean"),
+      decision("repair_with_proof", ["ev:proof"]),
+      decision("accept_thin", ["ev:proof"]),
+    ])
+    const result = await runAdaptiveEscalation({
+      initialPacket: packet("ev:orig"),
+      citableIds: (p) => p.evidenceIds,
+      router,
+      executor: exec.executor,
+    })
+    expect(result.outcome).toBe("finalize")
+    expect(exec.calls.map((call) => call.action)).toEqual(["run_proof_clean", "repair_with_proof"])
+    expect(seen[1]?.citableIds.has("ev:proof")).toBe(true)
+    expect(seen[2]?.citableIds.has("ev:proof")).toBe(true)
+    expect(result.steps).toEqual(["run_proof_clean", "repair_with_proof"])
+  })
+
+  test("CTRL-10: semantic legality guard FAILS CLOSED before execution", async () => {
+    const exec = recordingExecutor()
+    const { router } = scriptedRouter([decision("repair_with_proof")])
+    const result = await runAdaptiveEscalation({
+      initialPacket: packet("ev:orig"),
+      citableIds: (p) => p.evidenceIds,
+      router,
+      executor: exec.executor,
+      validateDecision: () => "repair_with_proof_without_proof_context",
+    })
+    expect(result.outcome).toBe("escalate_needs_human")
+    expect(result.reason).toContain("illegal_action:repair_with_proof_without_proof_context")
+    expect(exec.calls.length).toBe(0)
   })
 })

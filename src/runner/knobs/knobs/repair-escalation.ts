@@ -4,9 +4,12 @@
  * multi-owner-plan) derived from the typed artifacts, with a closed structured
  * reason taxonomy. Widen to multi-site ONLY on explicit cross-owner evidence.
  *
- * Default-OFF. NOOP-apply registry entry: the EFFECT is delivered out of band by
- * the bench driver via `benchPostureFromState` projection (`repairEscalation`
- * field). Strict truthy gate: `"1"`/`"on"`/`"true"` ⇒ enabled.
+ * Default-OFF. NOOP-apply registry entry: the runtime EFFECT is delivered by the
+ * bench driver via `benchPostureFromState` projection (`repairEscalation`
+ * field). When enabled, that driver may feed explicit multi-owner owners into
+ * one bounded follow-up prepare/run pass (or an adaptive reroute's next pass),
+ * and also mirrors the typed decision onto the report. Strict truthy gate:
+ * `"1"`/`"on"`/`"true"` ⇒ enabled.
  */
 
 import type { AgentConfig } from "@/agent"

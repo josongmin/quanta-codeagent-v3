@@ -184,7 +184,7 @@ const candidateFamilyOf = (candidate: Candidate): CandidateFamily | undefined =>
         ownerFiles: candidate.familyOwnerFiles,
         reason: candidate.familyReason ?? `candidate-derived ${candidate.familyId} family`,
         seed: undefined,
-        sourceEvidence: ["selection-candidate"],
+        sourceEvidence: candidate.familySourceEvidence ?? ["selection-candidate"],
       }
 
 const mweOracleRepairRequired = (scored: readonly ScoredEntry[]): boolean => {

@@ -408,9 +408,10 @@ export interface InstanceResult {
   reproVoteOutcomes?: ReproVoteTelemetry
   /**
    * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
-   * with a structured reason). Emitted only when the `repair-escalation` knob is
-   * on AND observing. Telemetry-only — does NOT activate branch-search/subagent
-   * (that behavioral wiring is a later measure-first step). ABSENT ⇒ byte-identical.
+   * with a structured reason). When the `repair-escalation` knob is on, the SAME
+   * decision may feed one bounded follow-up localization/retry pass (non-adaptive)
+   * or the adaptive reroute's next prepare pass; this field mirrors the typed
+   * final-phase decision onto the report. ABSENT ⇒ byte-identical.
    */
   repairEscalation?: import("@/agent/repair-escalation").EscalationDecision
 }

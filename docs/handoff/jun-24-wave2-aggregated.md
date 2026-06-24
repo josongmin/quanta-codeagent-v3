@@ -486,3 +486,62 @@ global unresolved majority를 multi-site completeness와 분리해서 generation
 
 - corpus-level 개선 트랙이 "multi-site completeness"와 분리된 backlog/measurement를 가진다.
 - 새 정적엔진 구축 없이도 다음 개선축이 generation accuracy / oracle quality라는 점이 plan에 고정된다.
+
+## Execution Update - 2026-06-24
+
+### Landed in code
+
+- `13033` remote/full path에서 build env materialization을 runner/apps driver 양쪽에 배선해서 예전 `extension_helpers` / build-env 즉사와는 다른 단계까지 전진하게 만들었다.
+- `11138`류 patch-capture miss는 retry/terminal classification에서 fail-closed로 바꿨다.
+- `agentless-v4-proof-clean-execfull` preset + proof-required boolean override + wave2 provenance/prediction guards + report `modelPatchDigest`/`touchedFiles` 확장을 넣었다.
+- competitor absorption으로 기존 테스트 literal/spec-read steer, localized CHA repair target threading, bounded family co-edit primitive를 추가했다.
+- full-remote stale artifact hygiene bug를 추가로 발견해서 `gradeChunkOnBox()` 시작 전에 box-side `preds/report/run.log/run.exit/closure/trajectory/observe` scrub를 넣었다.
+
+### Verified locally
+
+- focused selector/repair tests: green
+- `src/apps/bench/analyze/analyze.test.ts`: green
+- `tests/integration/bench-cli-e2e.test.ts`: green
+- stale-artifact scrub regression test: green
+
+### Remote receipt status
+
+- fresh full-remote on-demand rerun was attempted for:
+  - `astropy__astropy-13033`
+  - `django__django-11138`
+  - `django__django-14315`
+- attempt 1 (`i-065c542781eb36400`):
+  - auth switched from stale `chatgpt.json` to `chatgpt-acct-a.json`
+  - remote `bun run bench run ...` crashed with `exit 132`
+  - fetched artifacts:
+    - `runlog-i-065c542781eb36400.log`
+    - `trajectory-i-065c542781eb36400.jsonl`
+    - `preds-i-065c542781eb36400.jsonl`
+  - no report/verdicts were produced
+  - RCA: Bun segfault on box; fetched `preds-i-065...jsonl` was stale/gold-shaped contamination, which exposed the fixed-path stale-artifact bug
+- attempt 2 (`i-0afdc6ccba918fb14`):
+  - remote box advanced through astropy build + django/astropy harness grading
+  - `observe/run-1782276520009/` showed all three per-instance patch files as `0 byte`
+  - per-instance trajectories showed:
+    - `django__django-14315`: session completed, patch_generated `filesChanged=0`
+    - `astropy__astropy-13033`: session completed, patch_generated `filesChanged=0`
+    - `django__django-11138`: session aborted, patch_generated `filesChanged=0`
+  - top-level `~/report.json` never appeared and the top-level bun process remained stuck after child grading activity; box was terminated to stop cost
+
+### Current interpretation
+
+- code plan items materially landed through the measurement/provenance/repair rail and the stale-artifact remote hygiene gap is now fixed in source.
+- clean remote closure receipts are still **not closed**.
+- current remote behavior says the new preset is not yet producing non-empty model patches on the 3 canonical cases, and remote orchestration still has a stability problem (`attempt1` Bun segfault, `attempt2` post-grade hang with no report flush).
+
+### Recommended next run shape
+
+- rerun from a **new local process** so the stale-artifact scrub fix is actually active
+- do **case-by-case** full-remote runs, not 3-case bundled:
+  - `django__django-14315`
+  - `django__django-11138`
+  - `astropy__astropy-13033`
+- force `QUANTA_FULL_REMOTE_CONCURRENCY=1`
+- keep `QUANTA_FULL_REMOTE_ONDEMAND=1`
+- keep `QUANTA_BENCH_RECORD_TRAJECTORY=1`
+- if `13033` still dominates wall clock, split it from django entirely and treat it as an infra/runtime lane first, not a shared closure lane

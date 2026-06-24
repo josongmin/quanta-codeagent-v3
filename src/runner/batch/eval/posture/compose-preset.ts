@@ -33,8 +33,10 @@ import {
   CLEAN_SELECTOR,
   CLOSURE_GROUNDING,
   CLOSURE_SELECT_CLEAN_MODULES,
+  FULL_EXEC,
   LOCALIZATION_CORE,
   MULTI_AGENT,
+  PROOF_CLEAN_EXECFULL_MODULES,
   PROOF_CLEAN_MODULES,
   REGRESSION,
   REPRO_DOUBT,
@@ -80,6 +82,11 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
   // ── base-as-self (identity) ──
   { preset: "agentless-v3-thin", base: THIN_BASE.knobs, modules: [] },
   { preset: "agentless-v3-thin-strict", base: THIN_STRICT_BASE.knobs, modules: [] },
+  {
+    preset: "agentless-v3-thin-strict-execfull",
+    base: THIN_STRICT_BASE.knobs,
+    modules: [FULL_EXEC],
+  },
   // v5 opening = the thin-strict base (the controller injects phase modules at
   // runtime, not into the preset literal).
   { preset: "agentless-v5-thin-and-expanded", base: THIN_STRICT_BASE.knobs, modules: [] },
@@ -98,6 +105,11 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
     preset: "agentless-v4-proof-clean",
     base: THIN_STRICT_BASE.knobs,
     modules: PROOF_CLEAN_MODULES,
+  },
+  {
+    preset: "agentless-v4-proof-clean-execfull",
+    base: THIN_STRICT_BASE.knobs,
+    modules: PROOF_CLEAN_EXECFULL_MODULES,
   },
   {
     preset: "agentless-v3-thin-strict-closure-select",

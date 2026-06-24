@@ -45,6 +45,12 @@ export interface SiblingOverrideSite {
   readonly role?: "override" | "backend-contract"
 }
 
+export interface ChaRepairTarget {
+  readonly file: string
+  readonly method: string
+  readonly sites: readonly SiblingOverrideSite[]
+}
+
 /**
  * Python CHA analyzer (stdin program). Args: <repoRoot> <targetRelFile> <method>.
  * Emits JSON `{"sites":[{file,line,cls}], "targetClass": "...", "bases":[...]}` on

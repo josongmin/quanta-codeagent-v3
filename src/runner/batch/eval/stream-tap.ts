@@ -16,12 +16,38 @@
  * bytes, so the default-OFF posture stays byte-identical.
  */
 import { relative, sep } from "node:path"
-import {
-  isVerifyOutputFailing,
-  isVerifySignalCommand,
-  mutatingToolKind,
-} from "@/agent"
+import { isVerifyOutputFailing, isVerifySignalCommand, mutatingToolKind } from "@/agent"
+import { isTestFilePath } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
+import { normalizeRepoPath } from "./impacted-test-discovery"
+
+/** Agent reproduction scaffolding — kept in sync with `snapshot.ts` REPRO_SCAFFOLD_RE
+ *  (the source-only-diff SSOT). These never survive into the source patch, so an
+ *  edit to one must not count as a source edit either. */
+const REPRO_SCAFFOLD_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/
+
+/** Does an edit target a file that would SURVIVE into the source-only diff? This
+ *  MUST agree with `snapshot.ts` `sourceOnlyDiff` EXACTLY (same `isTestFilePath`
+ *  SSOT + REPRO_SCAFFOLD strip, NOTHING else) — if the count-predicate and the
+ *  survival-predicate disagree, a real source edit lost to a fork desync gets
+ *  miscounted ⇒ classified `empty-no-work` ⇒ a genuine infra failure is laundered
+ *  as a model miss in the solve-rate denominator.
+ *
+ *  NOTE: there is deliberately NO `/tmp` rule. `sourceOnlyDiff` has none either —
+ *  it identifies scratch via git-tree membership, not path strings. A previous
+ *  `includes("/tmp/")` arm broke the contract two ways: it false-excluded an
+ *  in-tree `src/tmp/x.py`, and it collapsed `sourceEditCount` to 0 for an entire
+ *  run when the sandbox itself is rooted under `/tmp` (a common CI/EC2 layout) —
+ *  re-creating the exact laundered-infra confound this guard exists to fence.
+ *  `isTestFilePath` matches on segment boundaries, so an absolute sandbox path is
+ *  classified correctly without prefix stripping. */
+export const isSourceEditPath = (raw: string): boolean => {
+  const rel = normalizeRepoPath(raw)
+  if (rel === "") return false
+  if (isTestFilePath(rel)) return false
+  if (REPRO_SCAFFOLD_RE.test(rel.split("/").pop() ?? rel)) return false
+  return true
+}
 
 /**
  * Target path of a single file-mutating tool_call, or undefined for non-edit
@@ -74,6 +100,10 @@ export class BenchStreamTap implements StreamPort {
   turnsToFirstEdit: number | undefined
   /** Count of file-mutating tool_calls across the run (churn). */
   editCount = 0
+  /** Count of mutating tool_calls that targeted a SOURCE file (not tests/scratch).
+   *  Drives the capture-failure classification so a test/scratch-only run is never
+   *  misread as a fork-worktree source desync. */
+  sourceEditCount = 0
   private currentTurn = 0
   /** tool_call ids whose invocation was a VERIFY (test_runner / test-like bash),
    *  awaiting their `tool_result` to decide pass/fail. Only populated when
@@ -105,10 +135,7 @@ export class BenchStreamTap implements StreamPort {
     if (name === "test_runner") return true
     if (name === "bash" && typeof input === "object" && input !== null && "command" in input) {
       const cmd = (input as { command: unknown }).command
-      return (
-        typeof cmd === "string" &&
-        isVerifySignalCommand(cmd, this.verifyAuthorityCommands)
-      )
+      return typeof cmd === "string" && isVerifySignalCommand(cmd, this.verifyAuthorityCommands)
     }
     return false
   }
@@ -125,6 +152,7 @@ export class BenchStreamTap implements StreamPort {
       const editPath = editTargetOf(event.name, event.input)
       if (editPath !== undefined) {
         this.editCount += 1
+        if (isSourceEditPath(editPath)) this.sourceEditCount += 1
         if (this.firstEditFile === undefined) {
           this.firstEditFile = editPath
           this.turnsToFirstEdit = this.currentTurn

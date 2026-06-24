@@ -40,7 +40,7 @@ import { errMessage, foldGroundingReceipts } from "@/shared"
 import { benchHome } from "../corpus"
 import { presetRequiresLiveLspGrounding } from "../preset"
 import type { SpawnFn, SpawnResult } from "./backend"
-import { stripToAccessToken } from "./box-session/auth"
+import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { shq } from "./box-session/shell"
@@ -224,6 +224,7 @@ const shipAccessToken = async (
   log: (msg: string) => void,
   authJson: string,
 ): Promise<void> => {
+  assertRemoteAccessTokenFreshEnough(authJson)
   log("[full-remote] shipping stripped token (access_token only) over ssh stdin…")
   const shipped = await ssh(
     "mkdir -p ~/.quanta/auth && cat > ~/.quanta/auth/chatgpt.json && chmod 600 ~/.quanta/auth/chatgpt.json",
@@ -255,6 +256,42 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
   )
 }
 
+const runExitPathFor = (paths: ChunkPaths): string => paths.runLog.replace(/run\.log$/, "run.exit")
+
+const closureDiagnosticsPathFor = (paths: ChunkPaths): string =>
+  paths.report.replace(/\.json$/, ".closure-diagnostics.json")
+
+/**
+ * Fail closed on stale box-side artifacts. Single full-remote runs still use the
+ * historical fixed `~/preds.jsonl` / `~/report.json` / `~/run.log` paths; if a
+ * previous box image or prior failed run left those behind, blindly fetching
+ * them after a crash can mis-attribute stale/gold data as the current run's
+ * outputs. Scrub every derived artifact path BEFORE launch so an empty/crashed
+ * run fetches nothing instead of contaminated leftovers.
+ */
+const scrubChunkArtifacts = async (args: {
+  ssh: BoxSession["ssh"]
+  paths: ChunkPaths
+  recordTrajectory: boolean
+}): Promise<void> => {
+  const targets = [
+    args.paths.preds,
+    args.paths.report,
+    args.paths.runLog,
+    runExitPathFor(args.paths),
+    closureDiagnosticsPathFor(args.paths),
+    ...(args.recordTrajectory ? [args.paths.trajectory] : []),
+  ]
+  const cleared = await args.ssh(
+    `rm -f ${targets.join(" ")}; rm -rf ${args.paths.observeDir}; mkdir -p ${args.paths.observeDir}`,
+  )
+  if (cleared.code !== 0) {
+    throw new Error(
+      `[full-remote] stale-artifact scrub failed (code ${cleared.code}): ${cleared.stderr}`,
+    )
+  }
+}
+
 const runChunkBench = async (args: {
   ssh: BoxSession["ssh"]
   aws: BoxSession["aws"]
@@ -277,7 +314,7 @@ const runChunkBench = async (args: {
     log: args.log,
     benchCmd: buildBenchCommand(args.params, args.paths),
     runLog: args.paths.runLog,
-    runExit: args.paths.runLog.replace(/run\.log$/, "run.exit"),
+    runExit: runExitPathFor(args.paths),
     onLine: args.onLine,
     ...(args.params.pollSleep !== undefined ? { sleep: args.params.pollSleep } : {}),
     ...(args.params.pollIntervalMs !== undefined
@@ -353,7 +390,7 @@ const fetchChunkArtifacts = async (args: {
   })
   await fetchOptionalArtifact({
     ssh: args.ssh,
-    remotePath: args.paths.report.replace(/\.json$/, ".closure-diagnostics.json"),
+    remotePath: closureDiagnosticsPathFor(args.paths),
     localPath: join(fullRemoteArtifactDir(), `closure-${args.artifactSuffix}.json`),
     log: args.log,
     label: "[full-remote] closure diagnostics saved",
@@ -433,6 +470,80 @@ export const collectRunDiagnostics = async (args: {
   }
 }
 
+const executeGradeChunk = async (args: {
+  session: BoxSession
+  params: GradeChunkParams
+  paths: ChunkPaths
+  artifactSuffix: string
+  state: ReturnType<typeof createGradeChunkState>
+  snapshots: ReturnType<typeof createSnapshotController>
+}): Promise<FullRemoteResult> => {
+  const { host, keyPath, spawn, log } = args.session
+  const ssh = args.session.ssh.bind(args.session)
+  await args.snapshots.start()
+  await shipAccessToken(ssh, log, args.params.authJson)
+  await uploadChunkDataset({
+    spawn,
+    keyPath,
+    datasetPath: args.params.datasetPath,
+    host,
+    targetPath: args.paths.dataset,
+  })
+  await scrubChunkArtifacts({
+    ssh,
+    paths: args.paths,
+    recordTrajectory: args.params.recordTrajectory,
+  })
+  args.state.finalExitCode = await runChunkBench({
+    ssh,
+    aws: args.session.aws.bind(args.session),
+    iid: args.session.iid,
+    log,
+    keyPath,
+    host,
+    paths: args.paths,
+    params: args.params,
+    onLine: args.snapshots.makeLineStreamer(),
+  })
+  await args.snapshots.publish("fetching", {
+    ...(args.state.finalExitCode !== undefined ? { lastExitCode: args.state.finalExitCode } : {}),
+  })
+  log(`[full-remote] run finished (exit ${args.state.finalExitCode}); fetching report…`)
+  const fetched = await fetchChunkArtifacts({
+    ssh,
+    paths: args.paths,
+    artifactSuffix: args.artifactSuffix,
+    recordTrajectory: args.params.recordTrajectory,
+    log,
+  })
+  const parsed = parseVerdicts(fetched.reportText)
+  const reportStatus = classifyReportText(fetched.reportText)
+  if (reportStatus === "unparseable") {
+    args.state.finalReportUnparseable = true
+    log(
+      `[full-remote] ⚠️ report present but UNPARSEABLE (${fetched.reportText.length} bytes, run exit ${args.state.finalExitCode ?? -1}) — likely truncated/half-flushed fetch, NOT a clean box-loss. Re-fetch before treating as lost.`,
+    )
+  }
+  assignVerdictCounts(args.state, parsed)
+  const diagnostics = await collectRunDiagnostics({
+    ssh,
+    runLogPath: args.paths.runLog,
+    latestLogLine: args.state.latestLogLine,
+    remoteRunCode: args.state.finalExitCode ?? -1,
+    emptyVerdicts: verdictCount(parsed) === 0,
+    log,
+  })
+  if (diagnostics.lastLogLine !== undefined) {
+    args.state.finalLastLogLine = diagnostics.lastLogLine
+  }
+  args.state.finalRateLimited = diagnostics.rateLimited
+  return {
+    ...(fetched.reportPath !== undefined ? { reportPath: fetched.reportPath } : {}),
+    ...parsed,
+    ...(diagnostics.rateLimited ? { rateLimited: true } : {}),
+  }
+}
+
 /**
  * Run ONE patch-gen + grading chunk on an already-provisioned box. Ships a fresh
  * stripped token, scps the dataset, runs `bench run` (grading SERIAL — concurrent
@@ -444,7 +555,6 @@ export const gradeChunkOnBox = async (
   session: BoxSession,
   params: GradeChunkParams,
 ): Promise<FullRemoteResult> => {
-  const { host, keyPath, spawn, log } = session
   const ssh = session.ssh.bind(session)
   const paths = params.paths ?? DEFAULT_CHUNK_PATHS
   const { artifactSuffix } = params
@@ -479,69 +589,14 @@ export const gradeChunkOnBox = async (
   // terminating — it belongs to the other run). Released in the `finally`.
   await acquireGradeLock(ssh, session.iid)
   try {
-    await snapshots.start()
-    await uploadChunkDataset({
-      spawn,
-      keyPath,
-      datasetPath: params.datasetPath,
-      host,
-      targetPath: paths.dataset,
-    })
-    await shipAccessToken(ssh, log, params.authJson)
-    state.finalExitCode = await runChunkBench({
-      ssh,
-      aws: session.aws.bind(session),
-      iid: session.iid,
-      log,
-      keyPath,
-      host,
-      paths,
+    result = await executeGradeChunk({
+      session,
       params,
-      onLine: snapshots.makeLineStreamer(),
-    })
-    await snapshots.publish("fetching", {
-      ...(state.finalExitCode !== undefined ? { lastExitCode: state.finalExitCode } : {}),
-    })
-    log(`[full-remote] run finished (exit ${state.finalExitCode}); fetching report…`)
-    const fetched = await fetchChunkArtifacts({
-      ssh,
       paths,
       artifactSuffix,
-      recordTrajectory: params.recordTrajectory,
-      log,
+      state,
+      snapshots,
     })
-    const parsed = parseVerdicts(fetched.reportText)
-    // #9: a non-empty report that fails to parse is NOT the same as "box produced
-    // nothing". Surface it loudly (byte-count log) AND as machine-readable status
-    // (`reportUnparseable`), so a successful grade lost to a truncated/half-flushed
-    // fetch is attributable rather than blamed on the box. The chunk still routes
-    // through the no-verdict requeue (a fresh box re-grades) — the safe direction —
-    // instead of being silently counted as a real zero.
-    const reportStatus = classifyReportText(fetched.reportText)
-    if (reportStatus === "unparseable") {
-      state.finalReportUnparseable = true
-      log(
-        `[full-remote] ⚠️ report present but UNPARSEABLE (${fetched.reportText.length} bytes, run exit ${state.finalExitCode ?? -1}) — likely truncated/half-flushed fetch, NOT a clean box-loss. Re-fetch before treating as lost.`,
-      )
-    }
-    assignVerdictCounts(state, parsed)
-    const diagnostics = await collectRunDiagnostics({
-      ssh,
-      runLogPath: paths.runLog,
-      latestLogLine: state.latestLogLine,
-      remoteRunCode: state.finalExitCode ?? -1,
-      emptyVerdicts: verdictCount(parsed) === 0,
-      log,
-    })
-    if (diagnostics.lastLogLine !== undefined) {
-      state.finalLastLogLine = diagnostics.lastLogLine
-    }
-    state.finalRateLimited = diagnostics.rateLimited
-    result = {
-      ...(fetched.reportPath !== undefined ? { reportPath: fetched.reportPath } : {}),
-      ...parsed,
-      ...(diagnostics.rateLimited ? { rateLimited: true } : {}),
-    }
   } catch (err) {
     primaryErr = err
   } finally {

@@ -192,7 +192,16 @@ const classifyByAdmission = (result: InstanceResult): AttemptOutcome | undefined
   return undefined
 }
 
+const CAPTURE_DESYNC_RE = /capture_lost_edits|fork-worktree desync|patch capture (?:miss|desync)/i
+
 const classifyByStopReason = (result: InstanceResult): AttemptOutcome | undefined => {
+  // T5 — a fork-worktree capture desync is INFRA regardless of the terminal
+  // stop-reason. Check it BEFORE the aborted/max_turns/budget branches so a desync
+  // that co-occurs with one of those stops is not shadowed into a real-fail /
+  // timeout (which would drop it from the retry path and the denominator).
+  if (CAPTURE_DESYNC_RE.test(result.error ?? "")) {
+    return { kind: "infra-fail", reason: result.error ?? "capture desync" }
+  }
   if (result.stopReason === "refusal") {
     return {
       kind: "generation-fail",
@@ -205,6 +214,8 @@ const classifyByStopReason = (result: InstanceResult): AttemptOutcome | undefine
       reason: result.error ?? "agent stopped with error before verification",
     }
   }
+  // (The legacy `aborted + /patch capture miss/` special-case is now subsumed by
+  // the CAPTURE_DESYNC_RE short-circuit at the top of this function.)
   if (result.stopReason === "aborted") return { kind: "timeout" }
   if (result.stopReason === "budget_exhausted") {
     return { kind: "real-fail", subkind: "budget_exhausted" }
@@ -220,6 +231,13 @@ const classifyByStopReason = (result: InstanceResult): AttemptOutcome | undefine
  *  `classifyOutcome` to keep complexity under the biome cap. */
 const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
   if (err === "") return undefined
+  // T5 — fork-worktree capture desync (edits made, 0-byte captured diff on a clean
+  // tree). An INFRA failure, not a model miss: must RETRY and never be laundered
+  // into the `patch==="" + turns>0 ⇒ real-fail` bucket. Checked first so the
+  // specific capture marker cannot be shadowed by a generic pattern.
+  if (CAPTURE_DESYNC_RE.test(err)) {
+    return { kind: "infra-fail", reason: err }
+  }
   if (
     /agent stopped with (?:error|refusal)|LLM stream failed|usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(
       err,

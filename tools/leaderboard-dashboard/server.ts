@@ -9,8 +9,9 @@
  *   - Our runs:        every `*.report.json` under the configured roots
  *                      (perInstance pass/fail, grouped by file label).
  *   - Competitors:     the frontier matrix in
- *                      `_scaffold-summary/scaffold-solving-summary.md`
- *                      (134 public SWE-bench Verified submissions, per-instance).
+ *                      `rawdata/scaffold-solving-summary.md`
+ *                      (134 public SWE-bench Verified submissions, per-instance;
+ *                      upstream results.json vendored under rawdata/experiments-verified/).
  *   - Live boxes:      any `*.log` under the configured live dirs (best-effort
  *                      progress: which instance, how many lines).
  *
@@ -41,12 +42,12 @@ const REPORT_ROOTS = [
   join(HOME, "Library", "quanta-codeagent-v3", "bench"),
   join(HOME, "Library", "quanta-codeagent-v3", "bench-slices"),
 ]
+// Raw source data lives under the bench tool: tools/leaderboard-dashboard/rawdata/.
+const RAWDATA = join(import.meta.dir, "rawdata")
 const MATRIX_MD =
-  argOf("--matrix") ?? join(REPO, "_scaffold-summary", "scaffold-solving-summary.md")
+  argOf("--matrix") ?? join(RAWDATA, "scaffold-solving-summary.md")
 // SWE-bench Verified dataset (500) → problem statement + official difficulty.
-const DATASET_JSONL =
-  argOf("--dataset") ??
-  join(REPO, "docs", "analysis", "swe-bench-verified-analysis", "_data", "verified-full.jsonl")
+const DATASET_JSONL = argOf("--dataset") ?? join(RAWDATA, "verified-full.jsonl")
 const LIVE_ROOTS = [...argsOf("--live"), join(HOME, "easy-more")]
 // Competitor (frontier-winning) full trajectories — the only ones still on
 // disk. The broad per-submission turn data lived in a swe-bench/experiments
@@ -983,8 +984,8 @@ const HTML = /* html */ `<!doctype html>
 
 <script>
 let DATA = null, TAB = "matrix", SORT = { key: "hash", dir: -1 };
-const SCAF_SHOW = ["sonar-o45","trae-dbo","OH-o45","live-gem3","prom-gpt5"];
-const SCAF_LABEL = { "sonar-o45":"Sonar", "trae-dbo":"Trae", "OH-o45":"OpenHands", "live-gem3":"Live-SWE", "prom-gpt5":"Prometheus" };
+const SCAF_SHOW = ["sonar-o45","trae-dbo","OH-o45","live-gem3","prom-gpt5","mini-o45"];
+const SCAF_LABEL = { "sonar-o45":"Sonar", "trae-dbo":"Trae", "OH-o45":"OpenHands", "live-gem3":"Live-SWE", "prom-gpt5":"Prometheus", "mini-o45":"mini+Opus4.5" };
 // HTML-escape covering & < > " ' — & MUST be replaced first so we never
 // double-escape (turning a later &lt; into &amp;lt;). Used for BOTH text and
 // attribute contexts (title="...", data-...), which is why ' and " are both here.
@@ -1340,7 +1341,7 @@ function drawMatrix() {
   h += '<th class="inst" data-k="inst" style="text-align:left">instance</th>';
   h += '<th data-k="quanta">QUANTA</th><th data-k="turns">턴</th><th title="우리가 돌린 스캐폴드 프로파일(issue-hint/repro-vote) · 모델">프로파일</th><th>난이도</th>';
   for (const s of SCAF_SHOW) h += '<th data-k="'+s+'">'+(SCAF_LABEL[s]||s)+'</th>';
-  h += '<th data-k="hash" title="공개 SWE-bench Verified 제출물 134개 중 이 문제를 푼 개수 — 낮을수록 어려움">해결/전체스캐폴드</th><th>tier</th></tr></thead><tbody>';
+  h += '<th data-k="hash" title="135개(공개 134 + mini-o45) 중 이 문제를 푼 개수 — 낮을수록 어려움. mini가 푼 행은 천장(0) 아님">해결/전체스캐폴드</th><th>tier</th></tr></thead><tbody>';
   for (const r of rows) {
     const me = r.me;
     let qcell = '<td class="muted">·</td>';

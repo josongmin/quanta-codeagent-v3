@@ -499,6 +499,21 @@ describe("llm evidence packet — stage builders", () => {
     expect(rendered).toContain("static_witness_unsupported_language")
     expect(rendered).toContain("widget.ts")
   })
+
+  test("shared clean generation prompt carries existing owner-test expectations into static facts", () => {
+    const rendered = buildSelectionGenerationPrompt({
+      problemStatement: "Fix buildWidget() in widget.ts so it preserves the input object.",
+      ownerEvidence: [{ file: "widget.ts", symbols: [], provenance: "selection-owner" }],
+      contracts: [],
+      baseValidatedRed: false,
+      existingTestExpectations: [
+        "tests/test_widget.py::test_build_widget exact/public literal: widget must stay immutable",
+      ],
+    })
+
+    expect(rendered).toContain("existing_owner_test_expectation")
+    expect(rendered).toContain("widget must stay immutable")
+  })
 })
 
 describe("llm evidence packet — stage history aggregation", () => {

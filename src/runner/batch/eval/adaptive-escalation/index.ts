@@ -31,6 +31,7 @@ export {
   fullyEvidencedFacts,
   renderEvidenceFacts,
 } from "./evidence-facts"
+export { validateAdaptiveDecisionForEvidence } from "./decision-legality"
 export {
   deriveEvidenceFactsFromPacket,
   projectRouterEvidence,

@@ -241,6 +241,9 @@ const selectionCandidateTelemetryOf = (s: ScoredEntry): CandidateTelemetry => {
     ...(s.candidate.familyOwnerFiles !== undefined
       ? { familyOwnerFiles: s.candidate.familyOwnerFiles }
       : {}),
+    ...(s.candidate.familySourceEvidence !== undefined
+      ? { familySourceEvidence: s.candidate.familySourceEvidence }
+      : {}),
     ...(familyCoverage.length === 0 ? {} : { familyCoverageMissing: familyCoverage }),
     ...(s.candidate.familyCoverageRepair !== undefined
       ? { familyCoverageRepair: s.candidate.familyCoverageRepair }
