@@ -26,6 +26,7 @@ import {
   prepareSelectionReproSources,
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
+  reproHintMessage,
 } from "../../src/apps/bench/eval/driver"
 import type { Instance } from "../../src/apps/bench/types"
 import type { LLMPort, StreamEvent, StreamInput } from "../../src/llm"
@@ -393,6 +394,34 @@ describe("prepareReproTest", () => {
     expect(writes.at(-1)).toEqual({ path: "/tmp/sb/reproduce_issue.py", content: STUB_SOURCE })
   })
 
+  test("selection-only SWE-bench repro hint uses project-env command, not bare python", async () => {
+    const out = await prepareSelectionReproSources(
+      mkInstance({
+        swebench: { instanceId: "django__django-11138", repo: "django/django", baseCommit: "abc" },
+      }),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 1,
+        verifySelectRepro: "positive",
+        reproTestK: undefined,
+        reproExecTimeoutMs: undefined,
+        adversarialRepro: false,
+        pairedControl: false,
+      },
+      {
+        generate: async () => [STUB_SOURCE],
+        execute: async ({ tests }) => reproducedSamples(tests),
+        writeFile: async () => {},
+      },
+    )
+
+    expect(out.hint).toContain("uv run")
+    expect(out.hint).toContain("--with-editable .")
+    expect(out.hint).toContain("python -s reproduce_issue.py")
+    expect(out.hint).not.toContain("`python reproduce_issue.py`")
+  })
+
   test("selection-only repro prep stays inert when verify-select repro is off", async () => {
     const out = await prepareSelectionReproSources(
       mkInstance(),
@@ -506,6 +535,19 @@ describe("buildConfig — repro hint placement", () => {
     expect(iRepro).toBeGreaterThan(iHint)
     expect(iBase).toBeGreaterThan(iRepro)
   })
+
+  test("SWE-bench buildConfig prepends the project-env python shim to tool PATH", () => {
+    const cfg = buildConfig(
+      mkInstance({
+        swebench: { instanceId: "django__django-11138", repo: "django/django", baseCommit: "abc" },
+      }),
+      deps,
+      sandbox,
+      ac.signal,
+      new NullStream(),
+    )
+    expect(cfg.localEnv?.pathPrepend[0]).toBe("/tmp/.quanta-bin")
+  })
 })
 
 // ─── composeWithReproHint pure tests ─────────────────────────────────────
@@ -539,7 +581,15 @@ describe("exported constants", () => {
 
   test("REPRO_HINT_MESSAGE mentions exit-grounded repro contract + file name", () => {
     expect(REPRO_HINT_MESSAGE).toContain("reproduce_issue.py")
+    expect(REPRO_HINT_MESSAGE).toContain("python3 -s reproduce_issue.py")
+    expect(REPRO_HINT_MESSAGE).not.toContain("`python reproduce_issue.py`")
     expect(REPRO_HINT_MESSAGE).toContain("all assertions pass")
     expect(REPRO_HINT_MESSAGE).toContain("exits 0")
+  })
+
+  test("reproHintMessage renders the supplied command verbatim", () => {
+    expect(reproHintMessage("uv run --with-editable . python -s reproduce_issue.py")).toContain(
+      "`uv run --with-editable . python -s reproduce_issue.py`",
+    )
   })
 })

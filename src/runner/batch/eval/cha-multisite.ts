@@ -63,8 +63,13 @@ export interface ChaRepairTarget {
  * the localized target override. This keeps real co-change siblings while
  * rejecting divergent overrides that share the base but not the bug shape
  * (e.g. a backend with a fundamentally different timezone implementation).
- * Django backend files also get a narrow same-file-family fallback so equivalent
- * contract surfaces with different helper names are still inspected. The target
+ *
+ * Contract-fallback (siblings that do NOT define the method — the structural gate
+ * cannot see them): selected by the `siblingMode` argv. "path-hardcoded" (default)
+ * is the legacy django/db/backends path match (byte-identical). "general" is a
+ * structural parallel-sibling rule (same dir-root + same leaf filename, different
+ * variant dir, shared ancestor) — the django case is a strict subset, so "general"
+ * is byte-identical for django targets and merely additive elsewhere. The target
  * class itself is excluded from its own sibling list.
  */
 // Wall-clock ceilings for the one-shot Python analyzers spawned per call.
@@ -77,6 +82,14 @@ export const CHA_ANALYZER_PY = `
 import ast, json, os, sys
 
 repo, target_rel, method = sys.argv[1], sys.argv[2], sys.argv[3]
+# Sibling-mode for the contract fallback (siblings that DON'T define the method):
+#   "path-hardcoded" (default) — legacy django/db/backends path match (byte-identical).
+#   "general"        — structural parallel-sibling rule: same dir-root + same leaf
+#                      filename, different variant dir, sharing an ancestor. The
+#                      django case is a strict subset (root=django/db/backends), so
+#                      "general" is byte-identical to "path-hardcoded" for django
+#                      targets and merely ADDITIVE for other parallel-impl layouts.
+sibling_mode = sys.argv[4] if len(sys.argv) > 4 else "path-hardcoded"
 
 # ---------------------------------------------------------------------------
 # Real CHA (NOT a base-NAME heuristic): resolve each base to the CLASS IDENTITY
@@ -255,19 +268,38 @@ if target is not None:
             site_keys.add((c["file"], c["line"]))
             sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"], "method": method, "role": "override"})
 
+    # Backend-contract fallback: sibling classes that participate in the same
+    # contract family but do NOT define the localized method themselves (e.g. a
+    # sqlite helper file) — the structural-similarity gate above cannot see them
+    # (no method body to compare). A "contract sibling" is another file in a
+    # PARALLEL implementation directory: same dir-root + same leaf filename, a
+    # different variant dir, sharing a transitive ancestor with the target class.
     parts = target_rel.split("/")
-    if len(parts) >= 5 and parts[0:3] == ["django", "db", "backends"]:
-        backend_file = parts[-1]
+    backend_contract = False
+    root = leaf = None
+    if sibling_mode == "general":
+        # Structural parallel-sibling rule (no repo/path hardcode). Requires a
+        # non-empty root (>=3 segments: <root...>/<variant>/<leaf>) so it cannot
+        # collapse to "every same-named file in the repo".
+        if len(parts) >= 3:
+            backend_contract = True
+            root = parts[:-2]
+            leaf = parts[-1]
+    else:
+        # Legacy path-hardcoded django rule (byte-identical default). The general
+        # rule above subsumes this exact match set for django targets.
+        if len(parts) >= 5 and parts[0:3] == ["django", "db", "backends"]:
+            backend_contract = True
+            root = ["django", "db", "backends"]
+            leaf = parts[-1]
+    if backend_contract:
         for qid, c in classes.items():
             cparts = c["file"].split("/")
             if qid == target or len(cparts) != len(parts):
                 continue
-            if cparts[0:3] != ["django", "db", "backends"] or cparts[-1] != backend_file:
+            # same dir-root + same leaf filename (a different variant directory).
+            if cparts[:-2] != root or cparts[-1] != leaf:
                 continue
-            # Backend-contract fallback is ONLY for sibling backend classes that
-            # do NOT define the localized method themselves (e.g. sqlite helper
-            # files). Divergent real overrides are handled by the structural
-            # similarity gate above and must not be re-added here.
             if c["file"] == target_rel or c["method_line"] is not None or not tanc or not (ancestors(qid) & tanc):
                 continue
             key = (c["file"], c["line"])
@@ -334,13 +366,17 @@ export const findSiblingOverrideSites = async (args: {
   repoRoot: string
   targetRelFile: string
   method: string
+  /** Contract-fallback sibling mode. Default "path-hardcoded" = legacy django
+   *  path match (byte-identical). "general" = structural parallel-sibling rule. */
+  siblingMode?: "path-hardcoded" | "general"
   timeoutMs?: number
 }): Promise<readonly SiblingOverrideSite[]> => {
   const { exec, repoRoot, targetRelFile, method } = args
+  const siblingMode = args.siblingMode ?? "path-hardcoded"
   if (method.trim() === "" || targetRelFile.trim() === "") return []
   // Pass args via argv to a stdin program so paths/method never need shell-quoting
   // inside the program body. The heredoc carries the program; "$@" forwards argv.
-  const sh = `python3 - ${shArg(repoRoot)} ${shArg(targetRelFile)} ${shArg(method)} <<'QUANTA_CHA_PY'\n${CHA_ANALYZER_PY}\nQUANTA_CHA_PY`
+  const sh = `python3 - ${shArg(repoRoot)} ${shArg(targetRelFile)} ${shArg(method)} ${shArg(siblingMode)} <<'QUANTA_CHA_PY'\n${CHA_ANALYZER_PY}\nQUANTA_CHA_PY`
   let r: { code: number; stdout: string; stderr: string }
   try {
     r = await exec(sh, repoRoot, args.timeoutMs ?? CHA_ANALYZER_TIMEOUT_MS)

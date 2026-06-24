@@ -14,6 +14,19 @@ describe("reproValidationCmd", () => {
     expect(cmd.startsWith("python ")).toBe(false)
   })
 
+  test("SWE-bench agent-facing relative command stays project-env wrapped", () => {
+    const cmd = reproValidationCmd({
+      repo: "django/django",
+      version: "3.1",
+      scriptPath: "reproduce_issue.py",
+    })
+    expect(cmd).toContain("uv run")
+    expect(cmd).toContain("--with-editable .")
+    expect(cmd).toContain("python -s reproduce_issue.py")
+    expect(cmd).not.toContain("python reproduce_issue.py")
+    expect(cmd.startsWith("python ")).toBe(false)
+  })
+
   test("non-SWE fixture still uses explicit python3, never ambiguous python", () => {
     expect(
       reproValidationCmd({

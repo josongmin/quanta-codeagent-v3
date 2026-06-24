@@ -197,6 +197,124 @@ describe("CHA multi-site — real-python sibling resolution [gated on python3]",
     60_000,
   )
 
+  // ── jun-25: generalized contract-fallback (no django path hardcode) ─────────
+  /** A NON-django parallel-impl repo: `pkg/adapters/<variant>/ops.py` with an
+   *  abstract base, two real overrides, and one CONTRACT sibling that does NOT
+   *  define the method. The generalized rule must surface the contract sibling via
+   *  the structural parallel-sibling shape; the legacy path-hardcode cannot (no
+   *  `django/db/backends` here). */
+  const writeParallelAdapterRepo = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), "cha-adapter-"))
+    const root = join(dir, "pkg", "adapters")
+    for (const v of ["base", "mysql", "oracle", "sqlite"])
+      mkdirSync(join(root, v), { recursive: true })
+    writeFileSync(
+      join(root, "base", "ops.py"),
+      "class BaseAdapter:\n    def normalize(self, x):\n        return x\n",
+    )
+    // target + a structurally-similar override sibling (found in BOTH modes).
+    writeFileSync(
+      join(root, "mysql", "ops.py"),
+      "from pkg.adapters.base.ops import BaseAdapter\nclass Adapter(BaseAdapter):\n    def normalize(self, x):\n        return x * 2\n",
+    )
+    writeFileSync(
+      join(root, "oracle", "ops.py"),
+      "from pkg.adapters.base.ops import BaseAdapter\nclass Adapter(BaseAdapter):\n    def normalize(self, x):\n        return x * 3\n",
+    )
+    // CONTRACT sibling: same parallel dir + same leaf, shares the base, but does
+    // NOT define `normalize` — only the backend-contract fallback can see it, and
+    // ONLY under the generalized rule (there is no django path here).
+    writeFileSync(
+      join(root, "sqlite", "ops.py"),
+      "from pkg.adapters.base.ops import BaseAdapter\nclass Adapter(BaseAdapter):\n    def some_helper(self, x):\n        return x\n",
+    )
+    return dir
+  }
+
+  test.if(hasPython)(
+    "GENERAL mode finds a NON-django parallel contract sibling (sqlite) the path-hardcode misses",
+    async () => {
+      const dir = writeParallelAdapterRepo()
+      try {
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "pkg/adapters/mysql/ops.py",
+          method: "normalize",
+          siblingMode: "general",
+        })
+        const files = sites.map((s) => s.file).sort()
+        expect(files).toEqual(["pkg/adapters/oracle/ops.py", "pkg/adapters/sqlite/ops.py"])
+        expect(sites.find((s) => s.file.includes("oracle"))?.role).toBe("override")
+        expect(sites.find((s) => s.file.includes("sqlite"))?.role).toBe("backend-contract")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
+  test.if(hasPython)(
+    "DEFAULT (path-hardcoded) mode does NOT surface the non-django contract sibling (knob-OFF byte-identical)",
+    async () => {
+      const dir = writeParallelAdapterRepo()
+      try {
+        // default siblingMode = "path-hardcoded": the django path gate never fires
+        // for pkg/adapters/*, so the contract sibling (sqlite) is absent. The
+        // structural-similarity override (oracle) is still found (mode-independent).
+        const sites = await findSiblingOverrideSites({
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "pkg/adapters/mysql/ops.py",
+          method: "normalize",
+        })
+        expect(sites.map((s) => s.file).sort()).toEqual(["pkg/adapters/oracle/ops.py"])
+        expect(sites.map((s) => s.file)).not.toContain("pkg/adapters/sqlite/ops.py")
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
+  test.if(hasPython)(
+    "GENERAL == PATH-HARDCODED on a django fixture (the general rule is an EXACT superset for django targets)",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "cha-django-parity-"))
+      try {
+        const be = join(dir, "django", "db", "backends")
+        for (const b of ["base", "mysql", "oracle", "sqlite3"])
+          mkdirSync(join(be, b), { recursive: true })
+        writeFileSync(join(be, "base", "operations.py"), "class BaseDatabaseOperations:\n    pass\n")
+        for (const b of ["mysql", "oracle"])
+          writeFileSync(
+            join(be, b, "operations.py"),
+            "from django.db.backends.base.operations import BaseDatabaseOperations\nclass DatabaseOperations(BaseDatabaseOperations):\n    def _convert_field_to_tz(self, field_name, tzname):\n        return field_name\n",
+          )
+        writeFileSync(
+          join(be, "sqlite3", "operations.py"),
+          "from django.db.backends.base.operations import BaseDatabaseOperations\nclass DatabaseOperations(BaseDatabaseOperations):\n    def _convert_tzname_to_sql(self, tzname):\n        return tzname\n",
+        )
+        const common = {
+          exec: realExec,
+          repoRoot: dir,
+          targetRelFile: "django/db/backends/mysql/operations.py",
+          method: "_convert_field_to_tz",
+        } as const
+        const hard = await findSiblingOverrideSites({ ...common, siblingMode: "path-hardcoded" })
+        const general = await findSiblingOverrideSites({ ...common, siblingMode: "general" })
+        expect(general).toEqual(hard)
+        expect(general.map((s) => s.file).sort()).toEqual([
+          "django/db/backends/oracle/operations.py",
+          "django/db/backends/sqlite3/operations.py",
+        ])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    60_000,
+  )
+
   test.if(hasPython)(
     "localized line inside mysql override resolves the enclosing method name",
     async () => {

@@ -254,17 +254,21 @@ const applyDeclaredExpectedHardGate = (
 /**
  * Score under the active authority mode (T-AUTH-01 / T-SEL-02).
  *
- * `declaredExpected` is a `researchOnly` signal by default: it may hard-reject
- * ONLY in `research` mode. In `clean` mode the ANSWER-KEY matcher carries no
- * clean benchmark authority, so it never vetoes (survives only as research
- * telemetry behind rca-gates).
+ * `declaredExpected` is a `researchOnly` signal: a `declaredExpectedMatch ===
+ * false` verdict may hard-reject ONLY in `research` mode (the legacy answer-key
+ * veto, preserved byte-identically). The `declaredExpectedMatch === true` case
+ * NEVER vetoes; it only earns ranking credit, which it does through the soft
+ * score weight (`score.ts`), independent of this gate.
  *
- * T2b — the ONE exception: when `declaredExpectedPublic` is true, the
- * declared-expected verdict came from a PUBLIC-issue-text-derived invariant
- * (built by buildPublicDeclaredExpectedPort, which refuses any non-public
- * source). A public invariant is legitimate clean-mode authority, so the gate
- * fires in clean mode too. `declaredExpectedPublic` defaults to false ⇒
- * clean-mode behavior is byte-identical to before T2b.
+ * CLEAN mode NEVER hard-vetoes on declaredExpected — not even when the verdict
+ * came from a PUBLIC-issue-text-derived invariant (`declaredExpectedPublic`).
+ * The match is a STATIC, execution-free regex compare of the candidate's added
+ * literals against a value extracted from issue PROSE; a non-executed heuristic
+ * may not decide correctness, so it must only ADD ranking credit in clean mode,
+ * never reject. By NOT adding `DECLARED_EXPECTED_REJECT_REASON` here, this also
+ * keeps the candidate best-effort eligible (see `bestEffortEligible`, which bars
+ * only on that reason). `declaredExpectedPublic` is retained for the call sites /
+ * telemetry but no longer enables a clean-mode veto.
  */
 export const scoreWithAuthority = (
   hard: HardGateSignals,
@@ -273,10 +277,11 @@ export const scoreWithAuthority = (
   mode: SelectorMode,
   declaredExpectedPublic = false,
 ): CandidateVerdict => {
+  void declaredExpectedPublic
   const verdict = scoreCandidate(hard, soft, { mode })
-  return mode === "clean" && !declaredExpectedPublic
-    ? verdict
-    : applyDeclaredExpectedHardGate(verdict, declaredExpectedMatch)
+  // RESEARCH mode keeps the legacy declaredExpected veto; CLEAN mode never vetoes
+  // (the static answer-key/prose-regex match has no clean-benchmark authority).
+  return mode === "clean" ? verdict : applyDeclaredExpectedHardGate(verdict, declaredExpectedMatch)
 }
 
 const countAddedSourceLines = (patch: string): number => {

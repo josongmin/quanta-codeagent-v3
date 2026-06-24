@@ -27,6 +27,7 @@ import { adversarialReproKnob } from "@/runner/knobs/knobs/adversarial-repro"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
+import { chaMultisiteGeneralKnob } from "@/runner/knobs/knobs/cha-multisite-general"
 import { chaMultisiteSteerKnob } from "@/runner/knobs/knobs/cha-multisite-steer"
 import { closeoutCriticKnob } from "@/runner/knobs/knobs/closeout-critic"
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
@@ -68,7 +69,6 @@ import { reproExecTimeoutKnob } from "@/runner/knobs/knobs/repro-exec-timeout"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { reproVoteKnob } from "@/runner/knobs/knobs/repro-vote"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
-import { round0MinimalKnob } from "@/runner/knobs/knobs/round0-minimal"
 import { selectorModeKnob } from "@/runner/knobs/knobs/selector-mode"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { specFidelityInvariantKnob } from "@/runner/knobs/knobs/spec-fidelity-invariant"
@@ -134,7 +134,6 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(reproTestKnob),
   asAnyKnob(reproVoteKnob),
   asAnyKnob(retryTransientKnob),
-  asAnyKnob(round0MinimalKnob),
   asAnyKnob(selectorModeKnob),
   asAnyKnob(skillsKnob),
   asAnyKnob(specFidelityInvariantKnob),

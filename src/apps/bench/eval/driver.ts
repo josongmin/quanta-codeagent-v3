@@ -63,6 +63,7 @@ import {
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
+  reproHintMessage,
   resetReproVoteOutcomes,
   resolveBenchKnobs,
   resolveLaneLlm,
@@ -85,6 +86,7 @@ import {
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
+import { installProjectEnvPythonShim } from "@/runner/batch/eval/project-env-python-shim"
 import { buildCleanSelectionAuthorityContracts } from "@/runner/batch/eval/public-contract-bundle"
 import type { SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
 import {
@@ -163,6 +165,7 @@ export {
   REPRO_FILE_NAME,
   REPRO_HINT_MESSAGE,
   readKnobValue,
+  reproHintMessage,
   resolveBenchKnobs,
   selectionReproPrepK,
   UsageTap,
@@ -504,6 +507,7 @@ const runAgentPhase = async (
       // `emitKnobsApplied`). The single-pass path bypasses `runAgentOnce`, so
       // the emit lives here directly — mirrors the runner driver's runAgentPhase.
       emitKnobsApplied(tap, process.env, stateOverride)
+      await installProjectEnvPythonShim(instance, sandbox)
       const outcome = await runAgentViaSdk(
         buildRunnerConfig(
           instance,

@@ -208,6 +208,30 @@ describe("withCandidatePatch — git apply covers all diff shapes", () => {
     })
     expect(obs.v).toBe(false)
   })
+
+  test("canonical repro scaffold survives reset/apply and is visible to the probe", async () => {
+    const patch = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nwith fix\n"))
+    writeFileSync(join(repo, "reproduce_issue.py"), "print('bench repro')\n")
+    writeFileSync(join(repo, "reproduce_issue.py.pytest-report.json"), '{"stale":true}\n')
+    const obs: { repro?: string; sidecar?: boolean } = {}
+
+    await withCandidatePatch({
+      sandbox: repo,
+      patch,
+      baseCommit: baseCommit(),
+      timeoutMs: 30_000,
+      probe: async (sb) => {
+        obs.repro = readFileSync(join(sb, "reproduce_issue.py"), "utf8")
+        obs.sidecar = existsSync(join(sb, "reproduce_issue.py.pytest-report.json"))
+        return null
+      },
+    })
+
+    expect(obs.repro).toBe("print('bench repro')\n")
+    expect(obs.sidecar).toBe(false)
+    expect(readFileSync(join(repo, "reproduce_issue.py"), "utf8")).toBe("print('bench repro')\n")
+    expect(existsSync(join(repo, "reproduce_issue.py.pytest-report.json"))).toBe(false)
+  })
 })
 
 describe("withCandidatePatch — FAIL-OPEN (null, never a false verdict)", () => {
@@ -445,6 +469,21 @@ describe("primitives", () => {
         timeoutMs: 30_000,
       }),
     ).toBeNull()
+  })
+
+  test("candidatePatchAppliesCleanly preserves the canonical repro scaffold", async () => {
+    const good = diffFor(() => writeFileSync(join(repo, "foo.txt"), "base\nGOOD\n"))
+    writeFileSync(join(repo, "reproduce_issue.py"), "print('bench repro')\n")
+
+    expect(
+      await candidatePatchAppliesCleanly({
+        sandbox: repo,
+        patch: good,
+        baseCommit: baseCommit(),
+        timeoutMs: 30_000,
+      }),
+    ).toBe(true)
+    expect(readFileSync(join(repo, "reproduce_issue.py"), "utf8")).toBe("print('bench repro')\n")
   })
 })
 

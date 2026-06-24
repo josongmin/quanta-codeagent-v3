@@ -109,7 +109,7 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
   // jun-19 EXPERIMENTAL ARM — mini-first + patch-budgeted + source-only + critic-late.
   // Measured insight: #13417's cause is missing minimal-patch ADMISSION, not missing
   // verification. v3-thin keeps v2's localization+grounding but (1) thins round-0
-  // (round0-minimal + spec-fidelity-steer; heavy verification prose deferred), and
+  // (spec-fidelity-steer; heavy verification prose deferred), and
   // (2) adds the patch-budget admission (over-engineer escalates to the late critic).
   // closure-repair stays OFF. NOT default; A/B arm vs agentless-v2 / mini-parity.
   // External alignment: Agentless 3-phase + mini-SWE thin scaffold + OpenHands late-critic.
@@ -129,7 +129,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
   },
@@ -148,7 +147,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "off",
     "patch-hygiene": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -168,7 +166,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "full",
     "patch-hygiene": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -185,7 +182,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "off",
     "patch-hygiene": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -214,7 +210,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -241,7 +236,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -271,7 +265,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -316,7 +309,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -331,6 +323,44 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     // the candidate repo's own class hierarchy; never the gold patch). Control
     // arm for the A/B = the pre-cha .bench-pull baseline.
     "cha-multisite-steer": "1",
+    "selector-mode": "clean",
+  },
+  // A/B arm (jun-25): identical to agentless-v4-proof-clean except the CHA
+  // contract-fallback sibling rule is GENERALIZED — the legacy `django/db/backends`
+  // PATH HARDCODE is replaced by a structural parallel-sibling rule (same dir-root
+  // + same leaf filename, different variant dir, shared ancestor). The general rule
+  // is a STRICT SUPERSET of the django match (byte-identical for django targets,
+  // additive elsewhere), so this isolates the single variable "does removing the
+  // django path overfit cost or gain anything". Control arm = agentless-v4-proof-clean
+  // (path-hardcoded). Still gold-blind (reads only the candidate repo's structure).
+  "agentless-v4-proof-clean-chageneral": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "repro-only",
+    "repro-test": "10",
+    "adversarial-repro": "1",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "patch-hygiene": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+    "verify-select": "5",
+    "verify-select-concurrency": "3",
+    "verify-select-regression": "discovered",
+    "verify-select-repro": "positive",
+    "verify-select-proof-required": "1",
+    "cha-multisite-steer": "1",
+    "cha-multisite-general": "1",
     "selector-mode": "clean",
   },
   // A/B arm (jun-24): identical to agentless-v4-proof-clean except the
@@ -355,7 +385,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -385,7 +414,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "repro-only",
     "patch-hygiene": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -424,7 +452,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "off",
     "patch-hygiene": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",
@@ -449,7 +476,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "verify-select": "5",
@@ -477,7 +503,6 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "verify-select": "5",

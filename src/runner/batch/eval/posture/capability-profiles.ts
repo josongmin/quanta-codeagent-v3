@@ -143,9 +143,6 @@ export const STEER_OFF: KnobModule = { id: "steer-off", knobs: { "lsp-steer": "o
 /** Patch hygiene gate (stray-file deny / owner-outside telemetry). */
 export const PATCH_HYGIENE: KnobModule = { id: "patch-hygiene", knobs: { "patch-hygiene": "1" } }
 
-/** Round-0 minimal prompt (suppress repro prose at round 0). */
-export const ROUND0_MINIMAL: KnobModule = { id: "round0-minimal", knobs: { "round0-minimal": "1" } }
-
 /** T3 — forward-localize lever (default-OFF). Occupies the `deeper_localize`
  *  route: selecting it turns on a forward consumer-trace for the next pass. */
 export const FORWARD_LOCALIZE: KnobModule = {
@@ -219,7 +216,6 @@ export const THIN_BASE: KnobModule = {
     "patch-hygiene": "1",
     "no-patch-breaker": "1",
     "repair-escalation": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
   },
@@ -239,7 +235,6 @@ export const THIN_STRICT_BASE: KnobModule = {
     "retry-transient": "3",
     "bench-in-loop-exec": "off",
     "patch-hygiene": "1",
-    "round0-minimal": "1",
     "spec-fidelity-steer": "1",
     "patch-budget": "1",
     "patch-budget-strict": "1",

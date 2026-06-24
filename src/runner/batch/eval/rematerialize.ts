@@ -108,6 +108,34 @@ export const materializeBuildEnv = async (sandbox: string, repo: string): Promis
 /** Temp patch file written into the sandbox root for `git apply`. Untracked, so
  *  `git clean -fdx` in the reset removes it even if the explicit unlink fails. */
 const CAND_PATCH_FILE = ".quanta-cand.patch"
+const CANONICAL_REPRO_FILE_NAME = "reproduce_issue.py"
+
+const readCanonicalReproScaffold = async (sandbox: string): Promise<string | undefined> => {
+  try {
+    return await readFile(join(sandbox, CANONICAL_REPRO_FILE_NAME), "utf8")
+  } catch {
+    return undefined
+  }
+}
+
+const restoreCanonicalReproScaffold = async (
+  sandbox: string,
+  content: string | undefined,
+): Promise<void> => {
+  if (content === undefined) return
+  await writeFile(join(sandbox, CANONICAL_REPRO_FILE_NAME), content)
+}
+
+const resetToBaseKeepingReproScaffold = async (
+  sandbox: string,
+  baseCommit: string,
+  timeoutMs: number,
+  reproScaffold: string | undefined,
+): Promise<boolean> => {
+  const ok = await resetToBase(sandbox, baseCommit, timeoutMs)
+  if (ok) await restoreCanonicalReproScaffold(sandbox, reproScaffold)
+  return ok
+}
 
 /** Bench git prefix (shell-string form) — matches {@link withGitSnapshot}'s `G`
  *  exactly: pinned identity + `gpgsign=false` so a host signing config never
@@ -206,9 +234,12 @@ export const withCandidatePatch = async <T>(args: {
 }): Promise<T | null> => {
   const { sandbox, patch, baseCommit, timeoutMs, probe, repo } = args
   if (patch.trim() === "" || baseCommit === undefined) return null
-  if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
+  const reproScaffold = await readCanonicalReproScaffold(sandbox)
+  if (!(await resetToBaseKeepingReproScaffold(sandbox, baseCommit, timeoutMs, reproScaffold))) {
+    return null
+  }
   if (!(await applyCandidatePatch(sandbox, patch, timeoutMs))) {
-    await resetToBase(sandbox, baseCommit, timeoutMs)
+    await resetToBaseKeepingReproScaffold(sandbox, baseCommit, timeoutMs, reproScaffold)
     return null
   }
   // AFTER apply, BEFORE probe: re-inject the build-env block the leading reset
@@ -220,7 +251,7 @@ export const withCandidatePatch = async <T>(args: {
   try {
     return await probe(sandbox)
   } finally {
-    await resetToBase(sandbox, baseCommit, timeoutMs)
+    await resetToBaseKeepingReproScaffold(sandbox, baseCommit, timeoutMs, reproScaffold)
   }
 }
 
@@ -243,10 +274,13 @@ export const candidatePatchAppliesCleanly = async (args: {
   const { sandbox, patch, baseCommit, timeoutMs } = args
   if (patch.trim() === "") return false
   if (baseCommit === undefined) return null
-  if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
+  const reproScaffold = await readCanonicalReproScaffold(sandbox)
+  if (!(await resetToBaseKeepingReproScaffold(sandbox, baseCommit, timeoutMs, reproScaffold))) {
+    return null
+  }
   try {
     return await applyCandidatePatch(sandbox, patch, timeoutMs)
   } finally {
-    await resetToBase(sandbox, baseCommit, timeoutMs)
+    await resetToBaseKeepingReproScaffold(sandbox, baseCommit, timeoutMs, reproScaffold)
   }
 }

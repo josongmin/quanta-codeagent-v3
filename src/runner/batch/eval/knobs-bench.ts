@@ -397,10 +397,11 @@ export interface BenchPosture {
    *  under the same base class, append a concrete CHA-derived multi-site steer
    *  naming each sibling file:line. */
   readonly chaMultisiteSteer: boolean
-  /** WS1 mini-parity: thin the round-0 prompt — suppress the repro directive
-   *  prose at round 0 (the agent's first attempt), re-attaching it only on
-   *  repair rounds ≥1. The one-line closure (first-edit) hint is kept. */
-  readonly round0Minimal: boolean
+  /** jun-25: generalize the CHA contract-fallback sibling rule from the legacy
+   *  django path hardcode to a structural parallel-sibling rule (superset of the
+   *  django match; byte-identical for django). Only meaningful with
+   *  `chaMultisiteSteer`. */
+  readonly chaMultisiteGeneral: boolean
   /** G2 (jun-24 astropy-13033): paired-control repro admission. When true, a
    *  reproducing self-test is admitted only if its paired control tests passed
    *  on the base tree (`baseControl === "green"`); env/import-broken false-reds
@@ -569,7 +570,7 @@ export const benchPostureFromState = (
   const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
   const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
-  const round0Minimal = readKnobValue(state, "round0-minimal", isTrue) === true
+  const chaMultisiteGeneral = readKnobValue(state, "cha-multisite-general", isTrue) === true
   const modelLaneDiversity = readKnobValue(state, "model-lane-diversity", isTrue) === true
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
@@ -623,7 +624,7 @@ export const benchPostureFromState = (
     forwardLocalize,
     pairedControl,
     chaMultisiteSteer,
-    round0Minimal,
+    chaMultisiteGeneral,
     modelLaneDiversity,
   }
 }

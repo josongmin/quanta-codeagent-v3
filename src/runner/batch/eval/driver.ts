@@ -50,6 +50,7 @@ import {
   type PrimaryRailStep,
   resolveOwnerSiblings,
 } from "@/agent/closure"
+import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import {
   FIND_REFS_STEER,
   LSP_GROUNDING_STEER,
@@ -147,6 +148,10 @@ import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { probePatchStaticSanity } from "./patch-static-sanity"
 import { composePromptPrelude, composePromptText } from "./prompt-augment"
+import {
+  installProjectEnvPythonShim,
+  projectEnvPythonShimLocalEnv,
+} from "./project-env-python-shim"
 import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
 import type { SelectionContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
@@ -1415,10 +1420,16 @@ const betterChaSteerCandidate = (
   return left
 }
 
+/** jun-25: map the CHA-general posture flag to the analyzer's sibling-mode. OFF
+ *  ⇒ legacy django path hardcode (byte-identical); ON ⇒ structural superset. */
+const chaSiblingModeOf = (posture: BenchPosture): "path-hardcoded" | "general" =>
+  posture.chaMultisiteGeneral ? "general" : "path-hardcoded"
+
 const bestChaSteerCandidateForFile = async (args: {
   readonly sandbox: string
   readonly targetRelFile: string
   readonly query: string
+  readonly siblingMode: "path-hardcoded" | "general"
 }): Promise<ChaRepairTarget | undefined> => {
   const methods = await resolveLocalizedPythonMethods(args)
   let best: { method: string; sites: readonly SiblingOverrideSite[] } | undefined
@@ -1428,6 +1439,7 @@ const bestChaSteerCandidateForFile = async (args: {
       repoRoot: args.sandbox,
       targetRelFile: args.targetRelFile,
       method,
+      siblingMode: args.siblingMode,
       timeoutMs: DEFAULT_PREPARE_TIMEOUT_MS,
     })
     if (sites.length === 0) continue
@@ -1462,6 +1474,7 @@ const resolveChaMultisiteContext = async (args: {
   const candidates = cleanUniqueList(args.localizeCandidates)
     .filter((file) => file.endsWith(".py"))
     .filter((_, index) => index < CHA_MULTISITE_MAX_FILES)
+  const siblingMode = chaSiblingModeOf(args.posture)
   const repairTargets: ChaRepairTarget[] = []
   let steer: string | undefined
   for (const targetRelFile of candidates) {
@@ -1469,6 +1482,7 @@ const resolveChaMultisiteContext = async (args: {
       sandbox: args.sandbox,
       targetRelFile,
       query,
+      siblingMode,
     })
     if (best !== undefined) {
       repairTargets.push(best)
@@ -1543,16 +1557,31 @@ export interface PrepareReproTestDeps {
  *  it without scanning. */
 export const REPRO_FILE_NAME = "reproduce_issue.py"
 
-/** User-message line appended (before the existing base text) when a repro
- *  test was successfully selected. Verbatim contract — the agent sees this
- *  exact string. */
-export const REPRO_HINT_MESSAGE = [
-  "A reproduction script has been placed at `reproduce_issue.py` in the sandbox.",
-  "After your fix, run `python reproduce_issue.py` under the project env.",
-  "It must go green: all assertions pass and the process exits 0.",
-  "A failing assertion or non-zero exit means the bug is still present or the repro could not run cleanly.",
-  "If it fails with TypeError/AttributeError/wrong argument count, inspect existing source/tests and fix the reproducer call shape before treating it as bug proof.",
-].join("\n")
+/** User-message block appended (before the existing base text) when a repro
+ *  test was successfully selected. The command is rendered from the same
+ *  project-env repro SSOT as validation; never hand the agent ambiguous
+ *  bare-`python` instructions. */
+export const reproHintMessage = (command: string): string =>
+  [
+    "A reproduction script has been placed at `reproduce_issue.py` in the sandbox.",
+    `After your fix, run \`${command}\` under the project env.`,
+    "It must go green: all assertions pass and the process exits 0.",
+    "A failing assertion or non-zero exit means the bug is still present or the repro could not run cleanly.",
+    "If it fails with TypeError/AttributeError/wrong argument count, inspect existing source/tests and fix the reproducer call shape before treating it as bug proof.",
+  ].join("\n")
+
+/** Compatibility/default hint for non-SWE fixtures. SWE-bench call sites use
+ *  `reproHintForInstance` so the hint includes `uv run --with-editable`. */
+export const REPRO_HINT_MESSAGE = reproHintMessage("python3 -s reproduce_issue.py")
+
+const reproHintForInstance = (instance: Instance): string =>
+  reproHintMessage(
+    reproValidationCmd({
+      repo: instance.swebench?.repo,
+      version: instance.swebench?.version,
+      scriptPath: REPRO_FILE_NAME,
+    }),
+  )
 
 export interface PrepareReproTestDetailedResult {
   readonly selection: ReproTestSelection | null
@@ -1759,7 +1788,7 @@ export const prepareReproTest = async (
  *   if K invalid ⇒ undefined
  *   selection = prepareReproTest(K)
  *   if no selection ⇒ undefined
- *   write `<sandbox>/reproduce_issue.py` ⇒ on success return REPRO_HINT_MESSAGE
+ *   write `<sandbox>/reproduce_issue.py` ⇒ on success return the project-env repro hint
  *   on disk write failure ⇒ undefined (byte-identical to K-unset)
  */
 interface InstallReproTestResult {
@@ -1929,7 +1958,7 @@ export const prepareSelectionReproSources = async (
         samples: detail.selection.samples.length,
         reproducedCount: detail.selection.reproducedCount,
       },
-      hint: REPRO_HINT_MESSAGE,
+      hint: reproHintForInstance(instance),
       reproSources,
       hardeningReproSources,
     }
@@ -1967,7 +1996,7 @@ export const installReproTestHint = async (
   try {
     await Bun.write(path, selection.selected)
     return {
-      hint: REPRO_HINT_MESSAGE,
+      hint: reproHintForInstance(instance),
       reproSources,
       hardeningReproSources,
       telemetry: {
@@ -2105,8 +2134,17 @@ const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | 
   }
 }
 
-const localEnvSlotOf = (instance: Instance): Pick<AgentConfig, "localEnv"> =>
-  instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}
+const localEnvSlotOf = (instance: Instance, sandbox: string): Pick<AgentConfig, "localEnv"> => {
+  const shim = projectEnvPythonShimLocalEnv(instance, sandbox)
+  const declared = instance.localEnv
+  if (shim === undefined && declared === undefined) return {}
+  return {
+    localEnv: {
+      vars: { ...(declared?.vars ?? {}), ...(shim?.vars ?? {}) },
+      pathPrepend: [...(shim?.pathPrepend ?? []), ...(declared?.pathPrepend ?? [])],
+    },
+  }
+}
 
 export const benchVerifyAuthorityCommandsOf = (
   instance: Instance,
@@ -2223,8 +2261,7 @@ const buildPromptText = (args: {
     buildDirectiveSteers(args.instance, args.opt),
     leanPrompt,
   )
-  const round0ReproSuppressed = args.opt.round0Minimal === true && args.seedMsg === undefined
-  const effectiveReproHint = round0ReproSuppressed ? undefined : args.reproHint
+  const effectiveReproHint = args.reproHint
   return composePromptText({
     issueHint: joinPromptBlocks(
       resolveIssueHintText(args.instance, args.opt, args.precomputedHint),
@@ -2424,7 +2461,7 @@ export const buildConfig = (
     // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
     // (`gateDisabled` off-switch). The run `signal` is the warm abort so
     // session end cancels an in-flight warm instead of riding the budget.
-    ...localEnvSlotOf(instance),
+    ...localEnvSlotOf(instance, sandbox),
     maxTurns: deps.maxTurns,
     signal,
     ...(budgetMeter !== undefined ? { budgetMeter } : {}),
@@ -2690,6 +2727,7 @@ const runAgentPhase = async (
       // documented on `emitKnobsApplied`). The single-pass path bypasses
       // `runAgentOnce`, so the emit lives here directly.
       emitKnobsApplied(tap, process.env, stateOverride)
+      await installProjectEnvPythonShim(instance, sandbox)
       const sessionSignal = createSessionScopedSignal(signal)
       try {
         const outcome = await runAgent(
@@ -3278,8 +3316,21 @@ const generateSelectionCandidate = async (args: {
       ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
     }
   } finally {
-    if (isolated) await cleanupSandbox(candidateSandbox)
+    if (isolated) await cleanupSelectionCandidateSandbox(candidateSandbox)
   }
+}
+
+export const cleanupSelectionCandidateSandbox = async (
+  sandbox: string,
+  deps: {
+    readonly evictLspWorkspaces?: (cwd: string) => Promise<void>
+    readonly cleanupSandbox?: (sandbox: string) => Promise<void>
+  } = {},
+): Promise<void> => {
+  const evict = deps.evictLspWorkspaces ?? evictLspWorkspaces
+  const cleanup = deps.cleanupSandbox ?? cleanupSandbox
+  await evict(sandbox).catch(() => undefined)
+  await cleanup(sandbox)
 }
 
 const resolveSelectionPhasePorts = async (args: {
@@ -3403,6 +3454,9 @@ type SelectionExecutorPortsArgs = {
   readonly stateOverride: BenchKnobState | undefined
   readonly chaMultisiteSteer: string | undefined
   readonly chaRepairTargets: readonly ChaRepairTarget[]
+  /** jun-25: CHA contract-fallback sibling mode for the selection-time structural
+   *  repair port. "general" only when `cha-multisite-general` is on. */
+  readonly chaSiblingMode: "path-hardcoded" | "general"
   readonly selectionOwnerEvidence: SelectionGenerationPromptInput["ownerEvidence"]
   readonly envCaveats: readonly string[]
   readonly validatedReproScripts: readonly string[]
@@ -3498,6 +3552,7 @@ const buildSelectionExecutorPorts = (args: SelectionExecutorPortsArgs): Selectio
         sandbox: args.sandbox,
         signal: args.signal,
         preferredTargets: args.chaRepairTargets,
+        siblingMode: args.chaSiblingMode,
       })
     if (familyCoverageCoeditEnabled(process.env)) {
       ports.repairFamilyCoverage = ({ candidate, family, missingFiles }) =>
@@ -3766,6 +3821,7 @@ const runSelectionPhase = async (
       stateOverride,
       chaMultisiteSteer,
       chaRepairTargets: chaRepairTargets ?? [],
+      chaSiblingMode: postureOverride?.chaMultisiteGeneral ? "general" : "path-hardcoded",
       concurrency,
       generationErrors,
       addTurns: (turns) => {
@@ -4104,6 +4160,7 @@ const deriveChaOverrideFamily = async (args: {
   readonly candidate: Candidate
   readonly sandbox: string
   readonly preferredTargets?: readonly ChaRepairTarget[]
+  readonly siblingMode: "path-hardcoded" | "general"
 }): Promise<CandidateFamily | undefined> => {
   if (args.candidate.patch.trim() === "" || args.candidate.files.length === 0) return undefined
   let best = preferredChaFamily(args.candidate.files, args.preferredTargets ?? [])
@@ -4123,6 +4180,7 @@ const deriveChaOverrideFamily = async (args: {
         repoRoot: args.sandbox,
         targetRelFile: targetFile,
         method: symbol,
+        siblingMode: args.siblingMode,
       })
       if (sites.length === 0) continue
       const family = familyFromChaRepairTarget({ file: targetFile, method: symbol, sites })
@@ -4139,6 +4197,7 @@ export const deriveCandidateStructuralRepair = async (args: {
   readonly sandbox: string
   readonly signal: AbortSignal
   readonly preferredTargets?: readonly ChaRepairTarget[]
+  readonly siblingMode?: "path-hardcoded" | "general"
 }): Promise<DerivedCandidateStructuralRepair | undefined> => {
   if (args.candidate.files.length === 0) return undefined
   const ownerResolved = await resolveOwnerSiblings()({
@@ -4161,7 +4220,10 @@ export const deriveCandidateStructuralRepair = async (args: {
     n: 2,
     readSource: (rel) => readSandboxSource(args.sandbox, rel),
   })
-  const chaFamily = await deriveChaOverrideFamily(args)
+  const chaFamily = await deriveChaOverrideFamily({
+    ...args,
+    siblingMode: args.siblingMode ?? "path-hardcoded",
+  })
   const family =
     chaFamily === undefined
       ? structural.selectionInputs.candidateFamilies[1]

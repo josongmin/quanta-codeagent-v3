@@ -307,7 +307,6 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectRegression).toBeUndefined()
     expect(opt.verifySelectRepro).toBeUndefined()
     expect(KNOB_PRESETS["agentless-v3-thin"]).toMatchObject({
-      "round0-minimal": "1",
       "spec-fidelity-steer": "1",
       "patch-budget": "1",
     })
@@ -322,7 +321,6 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.verifySelectN).toBeUndefined()
     expect(KNOB_PRESETS["agentless-v3-thin-strict"]).toMatchObject({
       "bench-in-loop-exec": "off",
-      "round0-minimal": "1",
       "spec-fidelity-steer": "1",
       "patch-budget": "1",
       "patch-budget-strict": "1",

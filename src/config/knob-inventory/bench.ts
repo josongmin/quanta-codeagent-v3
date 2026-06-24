@@ -304,16 +304,6 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/closure-repair.ts",
   },
   {
-    envKey: "QUANTA_BENCH_ROUND0_MINIMAL",
-    kind: "bool",
-    default: false,
-    group: "bench",
-    home: "bench",
-    describe:
-      "Bench (WS1): thin round-0 prompt — suppress bulky repro directive prose at round 0; re-attach on repair rounds ≥1. Default-OFF ⇒ byte-identical.",
-    readSite: "runner/knobs/knobs/round0-minimal.ts",
-  },
-  {
     envKey: "QUANTA_BENCH_LSP_STEER",
     kind: "bool",
     default: undefined,
