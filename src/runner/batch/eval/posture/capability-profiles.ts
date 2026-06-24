@@ -119,6 +119,15 @@ export const PROOF_REQUIRED: KnobModule = {
   knobs: { "verify-select-proof-required": "1" },
 }
 
+/** CHA sibling-override completeness steer (jun-24): static class-hierarchy
+ *  analysis of the candidate repo points the localizer at sibling override
+ *  sites the model otherwise misses on multi-backend bugs. Static-only; never
+ *  reads the gold patch. */
+export const CHA_MULTISITE: KnobModule = {
+  id: "cha-multisite",
+  knobs: { "cha-multisite-steer": "1" },
+}
+
 /** One bounded closure-repair round seeded by proof-failure context. */
 export const REPAIR_BOUNDED = (rounds: number): KnobModule => ({
   id: `repair-bounded-${rounds}`,
@@ -267,6 +276,7 @@ export const PROOF_CLEAN_MODULES: readonly KnobModule[] = [
   REPRO_EXEC,
   WIDE_CONCURRENCY,
   PROOF_REQUIRED,
+  CHA_MULTISITE,
   CLEAN_SELECTOR,
 ]
 

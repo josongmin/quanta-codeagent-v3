@@ -325,6 +325,12 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "verify-select-regression": "discovered",
     "verify-select-repro": "positive",
     "verify-select-proof-required": "1",
+    // jun-24: CHA sibling-override completeness steer. Multi-backend bugs get a
+    // byte-correct per-site hunk but miss sibling override sites (django-11138/
+    // 14315 proven) → perfect repro stays RED → empty_patch. Static-only (reads
+    // the candidate repo's own class hierarchy; never the gold patch). Control
+    // arm for the A/B = the pre-cha .bench-pull baseline.
+    "cha-multisite-steer": "1",
     "selector-mode": "clean",
   },
   // jun-22 v5 thin-first ADAPTIVE controller opening. The base posture is exactly
