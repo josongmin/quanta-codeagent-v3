@@ -22,13 +22,72 @@ export const VALUE_CAP = 100
  *  giant tree (R4 audit [5]). Past the cap, children are dropped. */
 export const MAX_DEPTH = 1000
 
+/* The two helpers below are SERIALIZED into the page via `.toString()` and run
+ * in the browser, NOT in this runtime. They must be self-contained (no closure
+ * capture, no imports) and use only DOM globals. They are exported so the
+ * in-page logic is unit-tested directly (the rest of the walk stays a
+ * real-browser smoke concern). `PageEl` is a minimal structural view of an
+ * Element — the runtime `lib.dom` type isn't in this slice's typecheck lib, and
+ * a local shape keeps the helpers truly self-contained. */
+type PageEl = {
+  readonly children?: { readonly length: number }
+  readonly textContent?: string | null
+  readonly placeholder?: unknown
+  getAttribute(name: string): string | null
+  // resolved against the real DOM at runtime; structurally `unknown` here.
+  readonly ownerDocument: { readonly defaultView: { getComputedStyle(el: PageEl): CSSStyle } }
+  readonly offsetParent: unknown
+}
+type CSSStyle = { readonly display: string; readonly visibility: string; readonly position: string }
+
+/**
+ * Ancestor-aware visibility fold (REPORT-jun26 fix #5, mirrors the proven
+ * `VISIBLE_FOLD_JS` in cdp-adapter/page-scripts.ts). The OLD check only read the
+ * element's OWN computed `display`/`visibility`, so a child of a
+ * `display:none` ancestor — whose own computed `display` is NOT `none` — was
+ * emitted as clickable (fail-open). `offsetParent === null` is the standard
+ * idiom for "this element or an ancestor is display:none", with a
+ * `position:fixed` escape hatch (fixed elements legitimately have a null
+ * offsetParent). MUST stay self-contained — serialized via `.toString()`.
+ */
+export function pageVisible(el: PageEl): boolean {
+  const st = el.ownerDocument.defaultView.getComputedStyle(el)
+  if (st.display === "none" || st.visibility === "hidden") return false
+  if (el.getAttribute("aria-hidden") === "true") return false
+  // offsetParent is null for: a display:none ancestor (the bug we close), AND
+  // for position:fixed (legitimately visible) — so only reject when null and
+  // NOT fixed.
+  if (el.offsetParent === null && st.position !== "fixed") return false
+  return true
+}
+
+/**
+ * Accessible name (REPORT-jun26 fix #5). aria-label / placeholder always win.
+ * Otherwise fall back to `textContent` ONLY for leaf elements (no element
+ * children) — the OLD code slurped up to 200 chars of aggregated descendant
+ * text on container nodes (a `<div role=region>` wrapping paragraphs), which is
+ * snapshot noise, not an accessible name. ARIA "name from content" applies to
+ * leaf roles; containers get their name from a label, not their subtree.
+ * MUST stay self-contained — serialized via `.toString()`. Cap kept in sync
+ * with NAME_CAP (asserted by the unit test).
+ */
+export function pageAccName(el: PageEl): string {
+  const label = el.getAttribute("aria-label")
+  if (label) return label.slice(0, 200)
+  const placeholder = el.getAttribute("placeholder") || el.placeholder
+  if (placeholder) return String(placeholder).slice(0, 200)
+  if (el.children && el.children.length > 0) return ""
+  return (el.textContent || "").trim().slice(0, 200)
+}
+
 /** The script evaluated in-page. Kept as a string (runs in the browser, not in
- *  this runtime). Correctness of the walk is a real-browser smoke concern; the
- *  parse of its output is what we unit-test. */
+ *  this runtime). The `pageVisible`/`pageAccName` helpers are SERIALIZED in via
+ *  `.toString()` so their logic is unit-tested directly (HELL-WIRE-01 guards the
+ *  embedding). The rest of the walk is a real-browser smoke concern. */
 export const COLLECT_SCRIPT = `(() => {
   const NAME_CAP = ${NAME_CAP}, VALUE_CAP = ${VALUE_CAP};
   const INTERACTIVE = 'input,textarea,select,button,a[href],summary,[role],[tabindex]:not([tabindex="-1"]),[contenteditable="true"]';
-  const accName = (el) => (el.getAttribute('aria-label') || el.getAttribute('placeholder') || (el.textContent || '').trim()).slice(0, NAME_CAP);
+  const accName = ${pageAccName.toString()};
   const roleOf = (el) => el.getAttribute('role') || el.tagName.toLowerCase();
   const states = (el) => {
     const s = [];
@@ -37,10 +96,7 @@ export const COLLECT_SCRIPT = `(() => {
     if (el === document.activeElement) s.push('focused');
     return s;
   };
-  const visible = (el) => {
-    const st = el.ownerDocument.defaultView.getComputedStyle(el);
-    return st.display !== 'none' && st.visibility !== 'hidden' && el.getAttribute('aria-hidden') !== 'true';
-  };
+  const visible = ${pageVisible.toString()};
   const MAX_DEPTH = ${MAX_DEPTH};
   const walk = (el, path, depth) => {
     const node = { backendPath: path, role: roleOf(el), name: accName(el), tag: el.tagName.toLowerCase() };
