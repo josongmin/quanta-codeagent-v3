@@ -270,6 +270,17 @@ export interface ToolContext {
    *  `QUANTA_FAST_APPLY_MODEL` are both set. ABSENT (default) ⇒ the ladder is the
    *  byte-identical `exact → fuzzy → typed mismatch`, ZERO apply-model dispatch. */
   fastApplyMerge?: FastApplyMergeSeam
+  /** jun-26 edit-escalate (frontier-parity) — OPTIONAL auto-escalation flag. When
+   *  `true`, the `edit` tool runs the deterministic whitespace-tolerant fuzzy
+   *  ladder on an exact MISS even when the caller did NOT set `input.fuzzy`
+   *  (Claude Code / Codex both auto-retry whitespace-tolerant on exact-miss). The
+   *  ladder is fail-closed (an ambiguous / no-confident result still returns
+   *  `ok:false`, never a wrong write — wrong-edit > no-edit bias preserved), so
+   *  the only behavior delta is recovering edits that differ from the file by
+   *  whitespace alone. ABSENT / `false` (default) ⇒ fuzzy runs ONLY when
+   *  `input.fuzzy === true` ⇒ BYTE-IDENTICAL legacy path. The dispatch seam wires
+   *  this from `runtimeConfig().editAutoFuzzy` (`QUANTA_EDIT_AUTO_FUZZY === "1"`). */
+  autoEscalateFuzzy?: boolean
   /** ADR-0428 jun-02 wire — OPTIONAL socket-level egress proxy env. When the
    *  `network-proxy` knob is active, a composition root / `runAgent` constructs
    *  + `listen()`s a `LoopbackEgressProxy` and the dispatch seam surfaces the

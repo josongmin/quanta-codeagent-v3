@@ -217,6 +217,13 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Operator-chosen apply-model id.",
   },
   {
+    envKey: "QUANTA_EDIT_AUTO_FUZZY",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe: "Auto-escalate edit to the whitespace-tolerant fuzzy ladder on exact-miss.",
+  },
+  {
     envKey: "QUANTA_DEDUP_ENV_PREFIXES_EXTRA",
     kind: "string",
     default: "",

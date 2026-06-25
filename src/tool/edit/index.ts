@@ -65,6 +65,10 @@ const buildMismatchResult = (
   },
   path: string,
   fileLineCount?: number,
+  // jun-26 edit-escalate — OPTIONAL Claude-style nearest-candidate suffix. Only
+  // passed (non-undefined) on the auto-escalate ON path for a `not-found` miss
+  // where a whitespace-equal line exists; absent ⇒ the output is byte-identical.
+  nearestNote?: string,
 ): { ok: false; output: string; failure: ToolFailure } => {
   const next = classifyMismatch(result.kind !== undefined ? { kind: result.kind } : result.message)
   const hint = formatStrategyHint(next)
@@ -74,12 +78,13 @@ const buildMismatchResult = (
   // caller only supplies it for the AMBIGUOUS / already-scoped failure classes,
   // so other failures' output stays byte-identical.
   const lineNote = fileLineCount !== undefined ? `\n(the file has ${fileLineCount} lines)` : ""
+  const nearest = nearestNote !== undefined ? `\n${nearestNote}` : ""
   // The old_string did not match: the target text was not found in the file.
   // Typed as `not_found` so the model branches to re-read / fuzzy instead of
   // regex-sniffing the hint text. `output` is unchanged (byte-identical).
   return {
     ok: false,
-    output: `${result.message}${marker}\n\n${hint}${lineNote}`,
+    output: `${result.message}${marker}\n\n${hint}${lineNote}${nearest}`,
     failure: { mode: "not_found", path },
   }
 }
@@ -132,6 +137,31 @@ const buildEditSketch = (oldString: string, newString: string): string =>
     newString,
     ELISION_MARKER,
   ].join("\n")
+
+/** jun-26 edit-escalate — Claude-style NEAREST-CANDIDATE hint for a `not-found`
+ *  miss. DETERMINISTIC, non-heuristic: split both into lines, take the FIRST
+ *  non-blank line of `old_string`, and report any FILE line whose `.trim()`
+ *  equals that anchor's `.trim()` (a whitespace-only difference — the exact case
+ *  the model can fix by re-reading). Returns the 1-indexed line number + the
+ *  file's verbatim line, or `null` when no such whitespace-equal line exists (no
+ *  guessing). Only ever appended on the auto-escalate ON path, so the OFF path's
+ *  not-found output stays byte-identical. */
+const nearestCandidateHint = (source: string, oldString: string): string | null => {
+  const anchor = oldString.split(/\r?\n/).find((l) => l.trim() !== "")
+  if (anchor === undefined) return null
+  const target = anchor.trim()
+  const lines = source.split(/\r?\n/)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string
+    // Skip the verbatim-equal case: an exact-byte match means the FULL old_string
+    // didn't anchor for a reason other than this line (multi-line drift); a
+    // single byte-identical line is not the useful "off by whitespace" signal.
+    if (line.trim() === target && line !== anchor) {
+      return `Nearest match: line ${i + 1} differs only in whitespace:\n${line}`
+    }
+  }
+  return null
+}
 
 /** Count NON-OVERLAPPING occurrences of `needle` in `haystack`. Pure, deterministic.
  *  `needle` is always nonempty at the call site (the empty-new_string case is
@@ -314,7 +344,14 @@ const planEdit = async (
   const lineRanges = rangesResolved.ranges
   const replaceAll = input.replace_all ?? false
   let result = applyExactEdit(source, input.old_string, input.new_string, replaceAll, lineRanges)
-  if ((!result.ok || result.next === undefined) && input.fuzzy) {
+  // jun-26 edit-escalate — run the whitespace-tolerant fuzzy ladder on an exact
+  // MISS when the caller asked for it (`input.fuzzy`) OR the host enabled
+  // auto-escalation (`ctx.autoEscalateFuzzy`, gated by QUANTA_EDIT_AUTO_FUZZY).
+  // The ladder is fail-closed: an ambiguous / no-confident result still returns
+  // ok:false (never a wrong write). With auto-escalation OFF and `input.fuzzy`
+  // unset, the predicate is `false` ⇒ fuzzy never runs ⇒ BYTE-IDENTICAL legacy.
+  const wantFuzzy = input.fuzzy === true || ctx.autoEscalateFuzzy === true
+  if ((!result.ok || result.next === undefined) && wantFuzzy) {
     result = applyFuzzyEdit(source, input.old_string, input.new_string, replaceAll, lineRanges)
   }
   if (!result.ok || result.next === undefined) {
@@ -343,7 +380,25 @@ const planEdit = async (
     // legacy output — a line count doesn't help re-find missing text.
     const wantsLineCount = result.kind === "ambiguous" || lineRanges !== undefined
     const fileLineCount = wantsLineCount ? lineCount(source) : undefined
-    return { kind: "failure", result: buildMismatchResult(result, input.path, fileLineCount) }
+    // jun-26 edit-escalate — on the auto-escalate ON path, append a Claude-style
+    // nearest-candidate note for a `not-found` miss when a whitespace-equal file
+    // line exists (the model was "off by whitespace"). Gated by the SAME flag as
+    // the fuzzy escalation, so the OFF path's not-found output stays byte-
+    // identical (`nearestNote` is undefined ⇒ buildMismatchResult appends nothing).
+    // A miss reaches here as `not-found` (exact-only) OR `fuzzy-no-confident`
+    // (the ladder ran but anchored nothing); both are "text not located" classes
+    // for which a whitespace-equal line is the useful nearest signal. Ambiguous
+    // (matched 2+) is excluded — there the model needs disambiguation, not a
+    // nearest line.
+    const isLocateMiss = result.kind === "not-found" || result.kind === "fuzzy-no-confident"
+    const nearestNote =
+      wantFuzzy && isLocateMiss
+        ? (nearestCandidateHint(source, input.old_string) ?? undefined)
+        : undefined
+    return {
+      kind: "failure",
+      result: buildMismatchResult(result, input.path, fileLineCount, nearestNote),
+    }
   }
   // Surface the pre-edit `source` so a SUCCESSFUL commit can hand the
   // before/after to the optional tool-diff sink (ADR-0440) — no recompute,

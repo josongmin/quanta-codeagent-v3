@@ -478,6 +478,15 @@ export interface RuntimeConfigPaths {
    *  this gate AND a configured {@link fastApplyModel} for any provider call
    *  (advertise-iff-able). */
   readonly fastApplyMerge: boolean
+  /** jun-26 edit-escalate (frontier-parity, `QUANTA_EDIT_AUTO_FUZZY`). Strict
+   *  opt-in (`=== "1"`). When true the dispatch seam threads
+   *  `ToolContext.autoEscalateFuzzy = true`, so the `edit` tool runs the
+   *  whitespace-tolerant fuzzy ladder on an exact MISS even without an explicit
+   *  `fuzzy:true` (Claude Code / Codex both auto-retry whitespace-tolerant). The
+   *  ladder is fail-closed (ambiguous / no-confident ⇒ ok:false, never a wrong
+   *  write). Default false ⇒ ctx flag absent ⇒ fuzzy runs ONLY on `input.fuzzy`
+   *  ⇒ BYTE-IDENTICAL legacy edit path. Reversible + measurable (A/B). */
+  readonly editAutoFuzzy: boolean
   /** jun-7-misc 06 — operator-chosen apply-model id for the fast-apply MERGE rung
    *  (`QUANTA_FAST_APPLY_MODEL`, mirrors `QUANTA_COMPACT_MODEL`). Absent ⇒ no
    *  `FastApplyPort` is built even when {@link fastApplyMerge} is on (both must be
