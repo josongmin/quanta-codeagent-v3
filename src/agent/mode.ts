@@ -383,6 +383,7 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // output is mcp-origin untrusted DATA wrapped by the H2 envelope, but the
   // call performs no local state mutation). Safe in plan mode.
   mcp_list_resources: null,
+  mcp_list_resource_templates: null,
   mcp_read_resource: null,
   mcp_list_prompts: null,
   mcp_get_prompt: null,
@@ -626,6 +627,7 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   "pty_resize",
   "pty_kill",
   "mcp_list_resources",
+  "mcp_list_resource_templates",
   "mcp_read_resource",
   "mcp_list_prompts",
   "mcp_get_prompt",

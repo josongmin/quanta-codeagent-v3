@@ -1,6 +1,6 @@
 /** N3 — MCP resource/prompt tools (model-facing).
  *
- *  Four caller-wired tools over the H19-landed `McpClient` `resources/*` +
+ *  Five caller-wired tools over the H19-landed `McpClient` `resources/*` +
  *  `prompts/*` methods, surfaced through a DUCK-TYPED `ResourcesHandle` (the
  *  `@/tool` fence forbids `@/tool`→`@/mcp`). Mirror of `@/tool/mcp_tasks`:
  *  registered ONLY when the apps layer wires a `ResourcesHandle` (via
@@ -14,12 +14,18 @@
 import type { Tool } from "../types"
 import { mcpGetPromptTool } from "./get_prompt"
 import { mcpListPromptsTool } from "./list_prompts"
+import { mcpListResourceTemplatesTool } from "./list_resource_templates"
 import { mcpListResourcesTool } from "./list_resources"
 import type { ResourcesHandle } from "./port"
 import { mcpReadResourceTool } from "./read_resource"
 
 export { type GetPromptInput, getPromptInputSchema, mcpGetPromptTool } from "./get_prompt"
 export { type ListPromptsInput, listPromptsInputSchema, mcpListPromptsTool } from "./list_prompts"
+export {
+  type ListResourceTemplatesInput,
+  listResourceTemplatesInputSchema,
+  mcpListResourceTemplatesTool,
+} from "./list_resource_templates"
 export {
   type ListResourcesInput,
   listResourcesInputSchema,
@@ -35,6 +41,7 @@ export type {
   ResourceEntry,
   ResourcesFailureReason,
   ResourcesHandle,
+  ResourceTemplateEntry,
 } from "./port"
 export {
   mcpReadResourceTool,
@@ -48,12 +55,15 @@ export {
   renderPromptResult,
   renderResourceContent,
   renderResourceList,
+  renderResourceTemplateList,
 } from "./render"
 
-/** Build all four tools wired to a single `ResourcesHandle`. Stable order:
- *  list_resources → read_resource → list_prompts → get_prompt (all read-only). */
+/** Build all five tools wired to a single `ResourcesHandle`. Stable order:
+ *  list_resources → list_resource_templates → read_resource → list_prompts →
+ *  get_prompt (all read-only). */
 export const mcpResourcesTools = (port: ResourcesHandle): Tool[] => [
   mcpListResourcesTool(port) as Tool,
+  mcpListResourceTemplatesTool(port) as Tool,
   mcpReadResourceTool(port) as Tool,
   mcpListPromptsTool(port) as Tool,
   mcpGetPromptTool(port) as Tool,

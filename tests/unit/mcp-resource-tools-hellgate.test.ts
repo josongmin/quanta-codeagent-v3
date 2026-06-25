@@ -25,6 +25,7 @@ import {
   type ResourceEntry,
   type ResourcesFailureReason,
   type ResourcesHandle,
+  type ResourceTemplateEntry,
 } from "@/tool/mcp_resources"
 
 const ctx = (aborted = false): ToolContext => {
@@ -60,6 +61,7 @@ const fail = <T>(reason: ResourcesFailureReason, message = "x"): HandleResult<T>
 /** A configurable fake handle. Each method returns whatever the test injects. */
 interface FakeConfig {
   resources?: HandleResult<ResourceEntry[]>
+  templates?: HandleResult<ResourceTemplateEntry[]>
   content?: HandleResult<ResourceBlock[]>
   prompts?: HandleResult<PromptEntry[]>
   prompt?: HandleResult<PromptResult>
@@ -69,6 +71,9 @@ interface FakeConfig {
 const fakeHandle = (cfg: FakeConfig): ResourcesHandle => ({
   async listResources() {
     return cfg.resources ?? { ok: true, value: [] }
+  },
+  async listResourceTemplates() {
+    return cfg.templates ?? { ok: true, value: [] }
   },
   async readResource(_uri: string) {
     return cfg.content ?? { ok: true, value: [] }
@@ -107,6 +112,41 @@ describe("N3 — happy path list/read/get", () => {
     expect(r.output).toContain("A")
     expect(r.output).toContain("text/plain")
     expect(r.output).toContain("alpha")
+  })
+
+  test("mcp_list_resource_templates renders the uriTemplate (parameterized resources)", async () => {
+    const t = byName(
+      tools({
+        templates: {
+          ok: true,
+          value: [{ uriTemplate: "file:///logs/{name}.log", name: "by-name", description: "a log" }],
+        },
+      }),
+      "mcp_list_resource_templates",
+    )
+    const r = await run(t, {})
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("file:///logs/{name}.log")
+    expect(r.output).toContain("by-name")
+    expect(r.output).toContain("a log")
+  })
+
+  test("mcp_list_resource_templates ⇒ '(no resource templates)' when the server has none", async () => {
+    const r = await run(byName(tools({}), "mcp_list_resource_templates"), {})
+    expect(r.ok).toBe(true)
+    expect(r.output).toContain("(no resource templates)")
+  })
+
+  test("mcp_list_resource_templates unsupported ⇒ ok:false (server omits the capability)", async () => {
+    const r = await run(
+      byName(
+        tools({ templates: fail<ResourceTemplateEntry[]>("unsupported") }),
+        "mcp_list_resource_templates",
+      ),
+      {},
+    )
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("unsupported")
   })
 
   test("mcp_read_resource returns text + mime with a source header", async () => {
@@ -226,6 +266,9 @@ describe("N3 — typed failures map to ok:false (no throw)", () => {
   test("a throwing handle does not crash the tool's failure contract", async () => {
     const throwing: ResourcesHandle = {
       async listResources() {
+        throw new Error("boom")
+      },
+      async listResourceTemplates() {
         throw new Error("boom")
       },
       async readResource() {
@@ -420,7 +463,7 @@ describe("N3 — default-OFF registration", () => {
     expect(onlyN3).toEqual(N3)
   })
 
-  test("all four tools are read-only + concurrency-safe", () => {
+  test("all five tools are read-only + concurrency-safe", () => {
     for (const t of mcpResourcesTools(fakeHandle({}))) {
       expect(t.isReadOnly()).toBe(true)
       expect(t.isConcurrencySafe({} as never)).toBe(true)

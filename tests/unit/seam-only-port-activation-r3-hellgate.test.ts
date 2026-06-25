@@ -188,6 +188,9 @@ describe("SEAM mcpResources — DefaultToolPorts.mcpResources (unwired)", () => 
     async listResources() {
       return { ok: true, value: [{ uri: "file:///a.txt", name: "a" }] }
     },
+    async listResourceTemplates() {
+      return { ok: true, value: [{ uriTemplate: "file:///{name}.txt", name: "by-name" }] }
+    },
     async readResource(uri: string) {
       return { ok: true, value: [{ uri, text: "hello" }] }
     },

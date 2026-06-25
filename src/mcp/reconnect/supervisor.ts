@@ -23,6 +23,7 @@ import type {
   McpPromptResult,
   McpResource,
   McpResourceContent,
+  McpResourceTemplate,
   McpResult,
 } from "../resources/port"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "../types"
@@ -213,6 +214,15 @@ export class McpReconnectSupervisor {
     return this.proxyResources((c) =>
       c.listResources
         ? () => (c.listResources as () => Promise<McpResult<McpResource[]>>)()
+        : undefined,
+    )
+  }
+
+  /** Proxy `resources/templates/list` through the current live client. See {@link listResources}. */
+  async listResourceTemplates(): Promise<McpResult<McpResourceTemplate[]>> {
+    return this.proxyResources((c) =>
+      c.listResourceTemplates
+        ? () => (c.listResourceTemplates as () => Promise<McpResult<McpResourceTemplate[]>>)()
         : undefined,
     )
   }

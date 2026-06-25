@@ -31,6 +31,7 @@ import {
   type ResourceBlock,
   type ResourceEntry,
   type ResourcesHandle,
+  type ResourceTemplateEntry,
   sniffMediaType,
   type TasksHandle,
   type Tool,
@@ -461,6 +462,7 @@ export interface McpStoppable {
  *  {@link aggregateResourcesHandle}. */
 export interface McpResourcesClient {
   listResources(): Promise<HandleResult<ResourceEntry[]>>
+  listResourceTemplates(): Promise<HandleResult<ResourceTemplateEntry[]>>
   readResource(uri: string): Promise<HandleResult<ResourceBlock[]>>
   listPrompts(): Promise<HandleResult<PromptEntry[]>>
   getPrompt(name: string, args?: Record<string, unknown>): Promise<HandleResult<PromptResult>>
@@ -474,7 +476,7 @@ const isUnsupported = (r: HandleResult<unknown>): boolean =>
   r.ok === false && r.reason === "unsupported"
 
 /** Aggregate one-or-more live MCP clients behind a SINGLE duck-typed
- *  `ResourcesHandle` (the four N3 tools' host port). NO-THROW end to end (every
+ *  `ResourcesHandle` (the five N3 tools' host port). NO-THROW end to end (every
  *  member returns a typed `HandleResult`, exactly as each underlying `McpClient`
  *  method does).
  *
@@ -531,6 +533,7 @@ export const aggregateResourcesHandle = (clients: McpResourcesClient[]): Resourc
   }
   return {
     listResources: () => concat((c) => c.listResources()),
+    listResourceTemplates: () => concat((c) => c.listResourceTemplates()),
     readResource: (uri) => route((c) => c.readResource(uri)),
     listPrompts: () => concat((c) => c.listPrompts()),
     getPrompt: (name, args) => route((c) => c.getPrompt(name, args)),
@@ -539,7 +542,7 @@ export const aggregateResourcesHandle = (clients: McpResourcesClient[]): Resourc
 
 /** Build the N3 aggregate `ResourcesHandle` over the resources-capable clients,
  *  or `undefined` when NONE qualify (so the surface leaves
- *  `DefaultToolPorts.mcpResources` unset ⇒ the four tools stay absent +
+ *  `DefaultToolPorts.mcpResources` unset ⇒ the five tools stay absent +
  *  byte-identical).
  *
  *  A client qualifies IFF its server advertised `resources` OR `prompts` — a
@@ -909,7 +912,7 @@ export const loadMcpTools = async (
   const { tools: deduped } = disambiguateMcpToolNames(tools)
   // N3 + jun-06 RFC — `undefined` when NO connected server (single OR supervised)
   // advertised resources/prompts ⇒ the surface leaves `DefaultToolPorts.mcpResources`
-  // unset ⇒ the four tools stay absent + byte-identical.
+  // unset ⇒ the five tools stay absent + byte-identical.
   const resources = resourcesHandleFor(resourcesClients)
   return { tools: deduped, clients, ...(resources !== undefined ? { resources } : {}) }
 }

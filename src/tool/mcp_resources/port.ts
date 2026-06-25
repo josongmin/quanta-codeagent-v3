@@ -23,6 +23,17 @@ export interface ResourceEntry {
   readonly description?: string
 }
 
+/** Mirror of `McpResourceTemplate` — one entry from `resources/templates/list`.
+ *  The required field is `uriTemplate` (an RFC 6570 URI Template, e.g.
+ *  `file:///logs/{name}.log`) — NOT a concrete `uri`; the rest are the same
+ *  optional descriptors as {@link ResourceEntry}. */
+export interface ResourceTemplateEntry {
+  readonly uriTemplate: string
+  readonly name?: string
+  readonly mimeType?: string
+  readonly description?: string
+}
+
 /** Mirror of `McpResourceContent` — one content block from `resources/read`.
  *  A well-formed block populates exactly one of `text` (UTF-8) XOR `blob`
  *  (base64). */
@@ -71,6 +82,7 @@ export type HandleResult<T> =
  *  Every method is NO-THROW (returns a typed `HandleResult`). */
 export interface ResourcesHandle {
   listResources(): Promise<HandleResult<ResourceEntry[]>>
+  listResourceTemplates(): Promise<HandleResult<ResourceTemplateEntry[]>>
   readResource(uri: string): Promise<HandleResult<ResourceBlock[]>>
   listPrompts(): Promise<HandleResult<PromptEntry[]>>
   getPrompt(name: string, args?: Record<string, unknown>): Promise<HandleResult<PromptResult>>

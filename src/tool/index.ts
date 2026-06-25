@@ -373,11 +373,14 @@ export {
   type HandleResult as ResourcesHandleResult,
   type ListPromptsInput,
   type ListResourcesInput,
+  type ListResourceTemplatesInput,
   listPromptsInputSchema,
   listResourcesInputSchema,
+  listResourceTemplatesInputSchema,
   mcpGetPromptTool,
   mcpListPromptsTool,
   mcpListResourcesTool,
+  mcpListResourceTemplatesTool,
   mcpReadResourceTool,
   mcpResourcesTools,
   type PromptEntry,
@@ -388,6 +391,7 @@ export {
   type ResourceEntry,
   type ResourcesFailureReason,
   type ResourcesHandle,
+  type ResourceTemplateEntry,
   readResourceInputSchema,
 } from "./mcp_resources"
 // MCP tasks tools (ADR-0196). Caller-wired: registered only when the apps

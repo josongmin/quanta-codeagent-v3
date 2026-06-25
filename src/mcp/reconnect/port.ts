@@ -12,6 +12,7 @@ import type {
   McpPromptResult,
   McpResource,
   McpResourceContent,
+  McpResourceTemplate,
   McpResult,
 } from "../resources/port"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "../types"
@@ -61,6 +62,7 @@ export interface SupervisableMcpClient {
   serverSupportsResources?(): boolean
   serverSupportsPrompts?(): boolean
   listResources?(): Promise<McpResult<McpResource[]>>
+  listResourceTemplates?(): Promise<McpResult<McpResourceTemplate[]>>
   readResource?(uri: string): Promise<McpResult<McpResourceContent[]>>
   listPrompts?(): Promise<McpResult<McpPrompt[]>>
   getPrompt?(name: string, args?: Record<string, unknown>): Promise<McpResult<McpPromptResult>>

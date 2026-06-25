@@ -99,6 +99,9 @@ const resourceHandleReturning = (secretText: string): ResourcesHandle => ({
   async listResources() {
     return { ok: true, value: [{ uri: "mem://creds" }] }
   },
+  async listResourceTemplates() {
+    return { ok: true, value: [{ uriTemplate: "mem://creds/{id}", description: secretText }] }
+  },
   async readResource(uri: string) {
     return { ok: true, value: [{ uri, mimeType: "text/plain", text: secretText }] }
   },

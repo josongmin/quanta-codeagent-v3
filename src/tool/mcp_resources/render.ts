@@ -19,6 +19,7 @@ import type {
   ResourceBlock,
   ResourceEntry,
   ResourcesFailureReason,
+  ResourceTemplateEntry,
 } from "./port"
 
 /** Defensive cap on the rendered tool output. A hostile server can return
@@ -106,6 +107,24 @@ export const renderResourceList = (entries: ReadonlyArray<ResourceEntry>): strin
   })
   return truncate(
     [`${entries.length} resource${entries.length === 1 ? "" : "s"}:`, ...lines].join("\n"),
+  )
+}
+
+/** Render `resources/templates/list` — each entry keys on a `uriTemplate` (RFC
+ *  6570) the model fills in before `mcp_read_resource`. Same shape + cap as
+ *  {@link renderResourceList}. */
+export const renderResourceTemplateList = (
+  entries: ReadonlyArray<ResourceTemplateEntry>,
+): string => {
+  if (entries.length === 0) return "(no resource templates)"
+  const lines = entries.map((e) => {
+    const name = e.name !== undefined ? ` — ${e.name}` : ""
+    const mime = e.mimeType !== undefined ? ` (${e.mimeType})` : ""
+    const desc = e.description !== undefined ? `: ${e.description}` : ""
+    return `  - ${e.uriTemplate}${name}${mime}${desc}`
+  })
+  return truncate(
+    [`${entries.length} resource template${entries.length === 1 ? "" : "s"}:`, ...lines].join("\n"),
   )
 }
 

@@ -795,7 +795,12 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   },
   {
     name: "mcp_list_resources",
-    group: ["mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"],
+    group: [
+      "mcp_list_resource_templates",
+      "mcp_read_resource",
+      "mcp_list_prompts",
+      "mcp_get_prompt",
+    ],
     origin: "@/tool/mcp_resources (mcpResourcesTools, via DefaultToolPorts.mcpResources)",
     gate: {
       kind: "config-slot",

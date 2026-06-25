@@ -6,8 +6,8 @@
  *      → `mcpResourcesTools(handle)` registered through the mcp-origin array
  *      → real `dispatchTool` returns the live server's entries.
  *
- *  Pins the four claims the wire makes:
- *    (1) knob-ON + a capable server ⇒ the four `mcp_*` tools register AND a
+ *  Pins the claims the wire makes:
+ *    (1) knob-ON + a capable server ⇒ the five `mcp_*` tools register AND a
  *        dispatch through `mcp_list_resources` returns the server's resources;
  *    (2) MULTI-client ⇒ `listResources`/`listPrompts` CONCAT across servers and
  *        `readResource`/`getPrompt` ROUTE to the owning server;
@@ -174,6 +174,7 @@ const byName = (tools: Tool[], name: string): Tool | undefined => tools.find((t)
 
 const N3_TOOLS = [
   "mcp_list_resources",
+  "mcp_list_resource_templates",
   "mcp_read_resource",
   "mcp_list_prompts",
   "mcp_get_prompt",
@@ -181,7 +182,7 @@ const N3_TOOLS = [
 
 // ── (1) knob-ON + a capable server activates over the live client ────────────
 
-describe("N3 host-wire — live single client activates the four tools", () => {
+describe("N3 host-wire — live single client activates the five tools", () => {
   test("a server that advertises resources+prompts ⇒ aggregate built, tools dispatch over the live client", async () => {
     const server = new FakeServer(
       { resources: true, prompts: true },
@@ -308,7 +309,7 @@ describe("N3 host-wire — absent / byte-identical when no capable server", () =
 
 describe("N3 host-wire — mcp-origin ⇒ H2 untrusted envelope", () => {
   test("registered via the mcpTools array, deriveProvenance(name,'mcp') === 'mcp'", () => {
-    // Mirror the production wire: the four tools go into the mcp-origin array,
+    // Mirror the production wire: the five tools go into the mcp-origin array,
     // so the registry tags them `mcp` ⇒ dispatch wraps their output in the H2
     // envelope. (Routing through DefaultToolPorts would tag them `builtin` and
     // LOSE the envelope — the reason N3 is wired at the mcpTools layer.)

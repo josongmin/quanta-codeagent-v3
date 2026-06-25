@@ -198,6 +198,7 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   "mcp_get_prompt",
   "mcp_list_prompts",
   "mcp_list_resources",
+  "mcp_list_resource_templates",
   "mcp_read_resource",
   "pty_list",
   "pty_read",
