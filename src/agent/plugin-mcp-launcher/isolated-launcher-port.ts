@@ -49,9 +49,17 @@ const toMcpConfig = (
 ): McpServerConfig => {
   const cfg: McpServerConfig = {
     name: composeServerId(pluginId, serverName),
-    command: [spec.command, ...spec.args],
+    // command/args are optional (an http server omits them); an absent/empty
+    // command yields the empty argv the http carrier selects on.
+    command:
+      spec.command !== undefined && spec.command.length > 0
+        ? [spec.command, ...(spec.args ?? [])]
+        : [],
   }
   if (spec.env !== undefined) cfg.env = spec.env
+  if (spec.url !== undefined) cfg.url = spec.url
+  if (spec.headers !== undefined) cfg.headers = spec.headers
+  if (spec.oauth === true) cfg.oauth = true
   return cfg
 }
 

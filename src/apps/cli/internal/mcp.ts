@@ -304,18 +304,28 @@ export const resolveMcpConfigPath = (
 const pluginSpecToServerConfig = (
   name: string,
   spec: {
-    command: string
-    args: string[]
+    command?: string | undefined
+    args?: string[] | undefined
     env?: Record<string, string> | undefined
     url?: string | undefined
     headers?: Record<string, string> | undefined
+    oauth?: boolean | undefined
   },
 ): McpServerConfig => ({
   name,
-  command: spec.command.length > 0 ? [spec.command, ...spec.args] : [],
+  // command/args are optional (http servers omit them); an absent or empty
+  // command yields the empty argv the http carrier selection keys off.
+  command:
+    spec.command !== undefined && spec.command.length > 0
+      ? [spec.command, ...(spec.args ?? [])]
+      : [],
   ...(spec.env !== undefined ? { env: spec.env } : {}),
   ...(spec.url !== undefined ? { url: spec.url } : {}),
   ...(spec.headers !== undefined ? { headers: spec.headers } : {}),
+  // H18 — carry the per-server OAuth opt-in through so `mcpIssuerResolver` /
+  // `mcpOAuthProviderFromConnectors` (which gate on `oauth === true`) activate
+  // the bearer flow. Dropped here ⇒ an http OAuth server would never authenticate.
+  ...(spec.oauth === true ? { oauth: true } : {}),
 })
 
 /** Read MCP server configs from a config file. Accepts BOTH:

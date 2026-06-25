@@ -34,22 +34,32 @@ export type Capability = z.infer<typeof CapabilitySchema>
  *  (Anthropic MCP spec): `{ command, args, env?, url?, headers? }`. Strict on
  *  purpose so a manifest typo cannot turn into a silent server-spawn miss.
  *
- *  Carriers: stdio (spawn `command`) is the default. Setting `url` opts into
- *  the Streamable-HTTP + SSE carrier (ADR-0391); `command` may then be empty.
- *  The refine guarantees at least one of `command` / `url` is present, so the
- *  previous "command non-empty" invariant is preserved for the stdio-only
- *  callers. */
+ *  Carriers: STDIO (spawn `command`) is the default. Setting `url` opts into the
+ *  Streamable-HTTP + SSE carrier (ADR-0391). `command`/`args` are now OPTIONAL so
+ *  the CANONICAL Anthropic http server form — `{ "url": "...", "headers": {...} }`
+ *  with NO `command` key — parses (it previously HARD-FAILED the required-`command`
+ *  schema; REPORT-jun26 §3.4). The refine still guarantees at least one of a
+ *  non-empty `command` (stdio) or a `url` (http) is present, preserving the
+ *  "no silent empty-spawn" invariant for stdio-only callers. */
 export const MCPServerSpecSchema = z
   .object({
-    command: z.string(),
-    args: z.array(z.string()),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
     url: z.string().url().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    // H18 — per-server OAuth opt-in (mirrors `McpServerConfig.oauth`). OPTIONAL
+    // and additive: a stdio / no-auth entry omits it (byte-identical to before).
+    // Without this key the strict schema HARD-REJECTED any `.mcp.json` server
+    // carrying `oauth:true`, so the per-server OAuth flag could never round-trip
+    // from disk — installing an http OAuth connector dropped its auth opt-in and
+    // the H18 bearer was never resolved (server 401). Honored only for an http
+    // (`url`) server; harmless on stdio (no auth carrier).
+    oauth: z.boolean().optional(),
   })
   .strict()
   .refine(
-    (s) => s.command.length > 0 || s.url !== undefined,
+    (s) => (s.command !== undefined && s.command.length > 0) || s.url !== undefined,
     "mcp server requires either non-empty `command` (stdio) or `url` (http)",
   )
 export type MCPServerSpec = z.infer<typeof MCPServerSpecSchema>
