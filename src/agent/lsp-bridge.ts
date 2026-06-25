@@ -30,6 +30,7 @@ import {
   type DiagnosticsProvider,
   type DiagnosticsSession,
   diagnosticsTool,
+  isCheapLspNavTool,
   type LspNavProvider,
   type LspNavSession,
   lspCodeActionTool,
@@ -962,3 +963,18 @@ export const lspNavToolList = (getCwd: () => string = () => process.cwd()): Tool
   lspFormatTool(lspFormatPort(getCwd)) as Tool,
   lspSignatureHelpTool(lspSignatureHelpPort(getCwd)) as Tool,
 ]
+
+/**
+ * jun-26 (REPORT-jun26-tool-impl-vs-frontier §4.5) — the CHEAP tier of
+ * {@link lspNavToolList}: the read-only nav members that are repo-size-
+ * independent (index-backed point queries, single-file outline, indexed
+ * symbol lookup, two-hop call-hierarchy, plus code_action / format /
+ * signature_help). Excludes (a) the MUTATING `lsp_rename_apply` (never auto-on)
+ * and (b) the two MEASURED-intractable members `lsp_references` /
+ * `lsp_implementation` ({@link LSP_NAV_EXPENSIVE_TOOL_NAMES}), which stay opt-in
+ * / timeout-fenced via the full `lspNavToolList`. Surfaces register THIS list
+ * default-ON to expose the above-frontier nav moat without re-introducing the
+ * references-timeout regression.
+ */
+export const lspNavCheapToolList = (getCwd: () => string = () => process.cwd()): Tool[] =>
+  lspNavToolList(getCwd).filter((t) => t.isReadOnly() && isCheapLspNavTool(t.name))

@@ -34,6 +34,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_SOTA",
   "QUANTA_KNOBS_PRESET",
   "QUANTA_BENCH_LSP",
+  "QUANTA_BENCH_LSP_CHEAP",
   "QUANTA_BENCH_SUBAGENT",
   "QUANTA_BENCH_SKILLS",
   "QUANTA_BENCH_LOCALIZE_PHASE",
@@ -185,11 +186,15 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(hasLspTool(cfg)).toBe(false)
   })
 
-  // PRESET-5: no preset + no env ⇒ byte-identical all-OFF baseline. The
-  // live-override store stays untouched (no setKnobOverride side-effect).
-  test("PRESET-5: baseline (no preset/env) is all-OFF, no overrides", () => {
+  // PRESET-5: no preset + no env ⇒ all-OFF baseline EXCEPT the jun-26 cheap
+  // LSP-nav tier, which is a DEFAULT-ON gated-flip (REPORT-jun26 §4.5). The
+  // full opt-in (`opt.lspNav`) stays OFF and the live-override store stays
+  // untouched (no setKnobOverride side-effect). The measurement-integrity OFF
+  // arm is pinned just below via the `QUANTA_BENCH_LSP_CHEAP=0` kill-switch.
+  test("PRESET-5: baseline (no preset/env) is all-OFF except the default-ON cheap LSP-nav tier", () => {
     const opt = benchOptIns()
-    expect(opt.lspNav).toBe(false)
+    expect(opt.lspNav).toBe(false) // the FULL opt-in (references/implementation) stays OFF
+    expect(opt.lspNavCheap).toBe(true) // jun-26 default-ON cheap tier
     expect(opt.subagent).toBeUndefined()
     expect(opt.skills).toBeUndefined()
     expect(opt.localizePhase).toBeUndefined()
@@ -202,11 +207,33 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.liveOverrides).toEqual([])
     expect(opt.preset).toBeUndefined()
     const cfg = buildOnce()
-    expect(hasLspTool(cfg)).toBe(false)
+    // Cheap tier present by default, but NEVER the two measured-intractable
+    // members nor the mutating rename_apply (those need the full opt-in).
+    const navNames = cfg.registry
+      .specs()
+      .map((s) => s.name)
+      .filter((n) => n.startsWith("lsp_"))
+    expect(navNames).toContain("lsp_workspace_symbol")
+    expect(navNames).not.toContain("lsp_references")
+    expect(navNames).not.toContain("lsp_implementation")
+    expect(navNames).not.toContain("lsp_rename_apply")
     expect(cfg.subagent).toBeUndefined()
     expect(getKnobOverride("QUANTA_READ_OUTLINE")).toBeUndefined()
     expect(getKnobOverride("QUANTA_TEST_RUNNER")).toBeUndefined()
     expect(getKnobOverride("QUANTA_REPO_MAP")).toBeUndefined()
+  })
+
+  // PRESET-5b: the byte-identity OFF arm — `QUANTA_BENCH_LSP_CHEAP=0` reverts
+  // the jun-26 flip so the bench nav surface is the legacy all-OFF baseline
+  // (ZERO lsp_* tools). This is the measurement-integrity / A-arm control and
+  // proves the default-flip is reversible to the prior bytes.
+  test("PRESET-5b: QUANTA_BENCH_LSP_CHEAP=0 ⇒ legacy all-OFF nav baseline (byte-identity arm)", () => {
+    process.env.QUANTA_BENCH_LSP_CHEAP = "0"
+    const opt = benchOptIns()
+    expect(opt.lspNav).toBe(false)
+    expect(opt.lspNavCheap).toBe(false)
+    const cfg = buildOnce()
+    expect(hasLspTool(cfg)).toBe(false)
   })
 
   // PRESET-6: QUANTA_BENCH_SOTA=1 is a back-compat ALIAS for agentless-v1.

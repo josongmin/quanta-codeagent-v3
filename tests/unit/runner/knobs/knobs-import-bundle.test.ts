@@ -43,6 +43,7 @@ import { issueHintExpectedActualKnob } from "@/runner/knobs/knobs/issue-hint-exp
 import { localizeBudgetKnob } from "@/runner/knobs/knobs/localize-budget"
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { lspKnob } from "@/runner/knobs/knobs/lsp"
+import { lspCheapKnob } from "@/runner/knobs/knobs/lsp-cheap"
 import { lspSteerKnob } from "@/runner/knobs/knobs/lsp-steer"
 import { mcpToolAnnotationsKnob } from "@/runner/knobs/knobs/mcp-tool-annotations"
 import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
@@ -109,6 +110,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(localizeBudgetKnob),
   asAnyKnob(localizePhaseKnob),
   asAnyKnob(lspKnob),
+  asAnyKnob(lspCheapKnob),
   asAnyKnob(lspSteerKnob),
   asAnyKnob(mcpToolAnnotationsKnob),
   asAnyKnob(memoryModeKnob),

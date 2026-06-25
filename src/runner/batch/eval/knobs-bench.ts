@@ -44,7 +44,7 @@ import type { VerifySelectReproMode } from "@/runner/knobs/knobs/verify-select-r
 // Side-effect: registers all bench/agent knobs so knobsForSurface("bench")
 // returns a populated map. Safe to import multiple times (module cached once).
 import "@/runner/knobs/knobs"
-import { gateOn } from "@/shared"
+import { gateDisabled, gateOn } from "@/shared"
 
 export interface BenchKnobState {
   /** Bench-surface registry view (frozen by the framework). */
@@ -230,6 +230,18 @@ export type BenchInLoopExecMode = "full" | "repro-only" | "off"
  */
 export interface BenchPosture {
   readonly lspNav: boolean
+  /**
+   * jun-26 (REPORT-jun26-tool-impl-vs-frontier §4.5) — register the CHEAP /
+   * index-backed LSP-nav tier (definition / hover / type_definition /
+   * document_symbol / workspace_symbol / incoming·outgoing_calls / code_action /
+   * format / signature_help) WITHOUT the two measured-intractable members
+   * (`lsp_references` / `lsp_implementation`). DEFAULT-ON gated-flip: from the
+   * `lsp-cheap` knob, which defaults true; `QUANTA_BENCH_LSP_CHEAP=0/off/false`
+   * suppresses it for a byte-identical legacy (empty nav) surface. Ignored when
+   * the full `lspNav` is on (the full `lspNavToolList` already supersets it,
+   * including the expensive members behind the explicit opt-in).
+   */
+  readonly lspNavCheap: boolean
   readonly subagent: AgentConfig["subagent"] | undefined
   readonly skills: AgentConfig["skills"] | undefined
   readonly localizePhase: AgentConfig["localizePhase"] | undefined
@@ -458,6 +470,37 @@ const isSelectorMode = (v: unknown): v is SelectorModeKnob => v === "clean" || v
 const resolveLspNav = (state: BenchKnobState, env: NodeJS.ProcessEnv): boolean =>
   readKnobValue(state, "lsp", isBoolean) ?? env.QUANTA_LSP_TOOLS === "full"
 
+// jun-26 (REPORT-jun26-tool-impl-vs-frontier §4.5) — cheap LSP-nav tier gate.
+// DEFAULT-ON gated-flip: registers the index-backed / call-graph nav members
+// (NOT the measured-intractable references/implementation). Precedence:
+//   1. resolved `lsp-cheap` knob boolean (preset + env layered) wins outright —
+//      an explicit `QUANTA_BENCH_LSP_CHEAP=1` re-enables the cheap tier even
+//      when the full `lsp` gate is explicitly off.
+//   2. else: an EXPLICIT full-off (`QUANTA_BENCH_LSP=off/0/false`, the existing
+//      "I want NO LSP nav" kill-switch) ALSO suppresses the cheap tier — the
+//      operator's intent is no nav, not just no references/implementation.
+//   3. else DEFAULT-ON, suppressed only by the `QUANTA_BENCH_LSP_CHEAP`
+//      kill-switch (`0`/`off`/`false`) → byte-identical legacy (empty nav).
+// The driver IGNORES this bit when the full `lspNav` is on (the full nav list
+// already supersets the cheap tier), so the two never double-register.
+const resolveLspNavCheap = (
+  state: BenchKnobState,
+  env: NodeJS.ProcessEnv,
+  lspExplicitOff: boolean,
+): boolean => {
+  const knob = readKnobValue(state, "lsp-cheap", isBoolean)
+  if (knob !== undefined) return knob
+  if (lspExplicitOff) return false
+  return !gateDisabled(env, "QUANTA_BENCH_LSP_CHEAP")
+}
+
+// True iff the full `lsp` gate is EXPLICITLY turned off (knob `false`, OR the
+// env kill-switch `QUANTA_BENCH_LSP=off/0/false`). Distinct from "merely unset":
+// an unset `lsp` leaves the default-OFF full posture but keeps the cheap tier's
+// DEFAULT-ON. Only an explicit off is treated as "no LSP nav at all".
+const lspNavExplicitlyOff = (state: BenchKnobState, env: NodeJS.ProcessEnv): boolean =>
+  readKnobValue(state, "lsp", isFalse) === false || gateDisabled(env, "QUANTA_BENCH_LSP")
+
 const resolveLocalizePhase = (
   state: BenchKnobState,
   lspNav: boolean,
@@ -495,6 +538,7 @@ export const benchPostureFromState = (
   env: NodeJS.ProcessEnv,
 ): BenchPosture => {
   const lspNav = resolveLspNav(state, env)
+  const lspNavCheap = resolveLspNavCheap(state, env, lspNavExplicitlyOff(state, env))
   const subagent = readKnobValue(state, "subagent", isTrue) === true ? {} : undefined
   const skills = readKnobValue(state, "skills", isTrue) === true ? {} : undefined
   const localizePhase = resolveLocalizePhase(state, lspNav)
@@ -574,6 +618,7 @@ export const benchPostureFromState = (
   const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
   return {
     lspNav,
+    lspNavCheap,
     subagent,
     skills,
     localizePhase,

@@ -354,6 +354,8 @@ export type {
   SignatureHelpPortParameter,
 } from "./lsp_nav"
 export {
+  isCheapLspNavTool,
+  LSP_NAV_EXPENSIVE_TOOL_NAMES,
   lspCodeActionTool,
   lspFormatTool,
   lspNavTools,

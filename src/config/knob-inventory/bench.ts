@@ -344,6 +344,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/knobs/knobs/lsp-steer.ts",
   },
   {
+    envKey: "QUANTA_BENCH_LSP_CHEAP",
+    kind: "bool",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: register the CHEAP/index-backed LSP-nav tier (definition/hover/type_definition/document_symbol/workspace_symbol/incoming·outgoing_calls/code_action/format/signature_help) WITHOUT the measured-intractable lsp_references/lsp_implementation. DEFAULT-ON gated-flip; explicit 0/off/false suppresses for a byte-identical legacy (empty nav) surface (A/B baseline). Ignored when the full QUANTA_BENCH_LSP / QUANTA_LSP_TOOLS=full is on (that supersets this tier).",
+    readSite: "runner/knobs/knobs/lsp-cheap.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_PATCH_BUDGET",
     kind: "bool",
     default: false,

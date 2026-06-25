@@ -274,6 +274,36 @@ export const nullLspNavProvider: LspNavProvider = {
 }
 
 /**
+ * jun-26 (REPORT-jun26-tool-impl-vs-frontier §2/§4.5) — LSP-nav cost tiering.
+ *
+ * `lsp_references` / `lsp_implementation` are the only nav members MEASURED
+ * intractable on large repos: jun-19 timed out pyright `textDocument/references`
+ * on sympy at BOTH 15s and 60s (manifest.ts:904), because the server has to
+ * type-analyze every possibly-referencing file; `implementation` rides the same
+ * whole-repo resolution cost. Every other member is an index-backed point query
+ * (definition / hover / type_definition), a single-file outline
+ * (document_symbol), an indexed symbol lookup (workspace_symbol), a two-hop
+ * call-hierarchy (incoming/outgoing_calls — the server walks its prepared call
+ * graph, NOT the whole tree), or a local rename-edit preview — all repo-size-
+ * independent and warm-backend-friendly.
+ *
+ * This SSOT lets a surface register the CHEAP tier default-ON (the above-
+ * frontier nav moat) while keeping the two EXPENSIVE members opt-in / timeout-
+ * fenced, without a blanket flip that would re-introduce the measured regression.
+ */
+export const LSP_NAV_EXPENSIVE_TOOL_NAMES: readonly string[] = [
+  "lsp_references",
+  "lsp_implementation",
+] as const
+
+/** True iff `name` is an index-backed / call-graph / single-file nav member
+ *  (repo-size-independent) — i.e. NOT one of the measured-intractable members in
+ *  {@link LSP_NAV_EXPENSIVE_TOOL_NAMES}. Pure name predicate (SSOT for the
+ *  cheap/expensive split used by the bench + CLI surfaces). */
+export const isCheapLspNavTool = (name: string): boolean =>
+  !LSP_NAV_EXPENSIVE_TOOL_NAMES.includes(name)
+
+/**
  * Build the 8 LSP-nav tools around a single provider. Conservative flags
  * mirror diagnostics: read-only (we only open + query, never mutate) and NOT
  * concurrency-safe (each call drives a per-session language-server subprocess
