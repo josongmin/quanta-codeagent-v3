@@ -219,6 +219,77 @@ describe("parsePytest", () => {
     expect(r.failed[0]?.message).toContain("ModuleNotFoundError")
   })
 
+  // VERBATIM pytest 9.0.3 (captured 2026-06-26 via a venv): a run with BOTH a
+  // runtime ERROR (broken setup fixture) and two assertion FAILURES. pytest emits
+  // the ERRORS section FIRST, then FAILURES, but the short-summary lists FAILED
+  // before ERROR — so a positional `summary[i] ⇄ blockLocs[i]` zip mis-assigns
+  // the per-block location (the ERROR's true `:15` was dropped / mispaired).
+  const PYTEST_MIXED = [
+    "test_math.py FFE                                                         [100%]",
+    "",
+    "==================================== ERRORS ====================================",
+    "___________________ ERROR at setup of test_with_broken_setup ___________________",
+    "",
+    "    @pytest.fixture",
+    "    def broken_fixture():",
+    '>       raise RuntimeError("fixture setup blew up")',
+    "E       RuntimeError: fixture setup blew up",
+    "",
+    "test_math.py:15: RuntimeError",
+    "=================================== FAILURES ===================================",
+    "___________________________________ test_add ___________________________________",
+    "",
+    "    def test_add():",
+    ">       assert add(2, 2) == 5",
+    "E       assert 4 == 5",
+    "E        +  where 4 = add(2, 2)",
+    "",
+    "test_math.py:7: AssertionError",
+    "____________________________ TestThings.test_method ____________________________",
+    "",
+    "self = <test_math.TestThings object at 0x1201de990>",
+    "",
+    "    def test_method(self):",
+    ">       assert add(0, 0) == 9",
+    "E       assert 0 == 9",
+    "E        +  where 0 = add(0, 0)",
+    "",
+    "test_math.py:11: AssertionError",
+    "=========================== short test summary info ============================",
+    "FAILED test_math.py::test_add - assert 4 == 5",
+    "FAILED test_math.py::TestThings::test_method - assert 0 == 9",
+    "ERROR test_math.py::test_with_broken_setup - RuntimeError: fixture setup blew up",
+    "========================== 2 failed, 1 error in 0.18s ==========================",
+  ].join("\n")
+
+  test("MIXED FAILURES+ERRORS: each summary entry keeps ITS OWN block file:line (by name, not index)", () => {
+    const r = parsePytest(PYTEST_MIXED)
+    expect(r.ok).toBe(false)
+    expect(r.failed).toHaveLength(3)
+    const byName = new Map(r.failed.map((f) => [f.name, f]))
+    // Each failure/error is localized to the line of ITS OWN block — not a
+    // neighbor's. Pre-fix, the ERROR lost its `:15` (index past the FAILURES
+    // blocks) while the assertion failures kept theirs by positional luck.
+    expect(byName.get("test_add")).toEqual({
+      name: "test_add",
+      file: "test_math.py",
+      line: 7,
+      message: "assert 4 == 5",
+    })
+    expect(byName.get("TestThings::test_method")).toEqual({
+      name: "TestThings::test_method",
+      file: "test_math.py",
+      line: 11,
+      message: "assert 0 == 9",
+    })
+    expect(byName.get("test_with_broken_setup")).toEqual({
+      name: "test_with_broken_setup",
+      file: "test_math.py",
+      line: 15,
+      message: "RuntimeError: fixture setup blew up",
+    })
+  })
+
   test("NEVER-throws on garbage", () => {
     expect(() => parsePytest("¬ nonsense ½")).not.toThrow()
   })
