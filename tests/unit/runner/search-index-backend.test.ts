@@ -179,6 +179,109 @@ describe("selectIndexEmbedder — embedder selection", () => {
 })
 
 // ──────────────────────────────────────────────────────────────────────────
+// A'. Key-detection promotion (gated, reversible) — jun26 frontier fix
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("resolveIndexEmbedder — key-detection default promotion", () => {
+  test("AP1. no provider AND no key ⇒ hashEmbed (byte-identical default preserved)", async () => {
+    const embed = selectIndexEmbedder({})
+    const got = await embed("alpha beta gamma")
+    expect(got).toEqual([...hashEmbed("alpha beta gamma")])
+  })
+
+  test("AP2. VOYAGE_API_KEY present (no explicit provider) ⇒ promotes to real voyage embedder", async () => {
+    // Voyage embedder is dim-1024; if promotion fires we get a non-64 vector via
+    // the deterministic headless fallback (no real network). hashEmbed is dim-64,
+    // so a !=64 length proves the real (voyage) provider path was selected.
+    const embed = selectIndexEmbedder({ VOYAGE_API_KEY: "vk-test" })
+    const got = await embed("needs promotion")
+    expect(got.length).not.toBe(hashEmbed("needs promotion").length)
+    expect(got.length).toBe(1024)
+  })
+
+  test("AP3. OPENAI_API_KEY present (no explicit provider) ⇒ promotes to real openai embedder", async () => {
+    const embed = selectIndexEmbedder({ OPENAI_API_KEY: "sk-test" })
+    const got = await embed("needs promotion")
+    expect(got.length).not.toBe(hashEmbed("needs promotion").length)
+    // openai default embedder dim is 1536 (headless-fallback preserves caps.dim).
+    expect(got.length).toBe(1536)
+  })
+
+  test("AP4. explicit QUANTA_EMBED_PROVIDER wins over key detection (no silent override)", async () => {
+    // Provider explicitly headless (dim-1536) even though a voyage key is present.
+    const embed = selectIndexEmbedder({
+      QUANTA_EMBED_PROVIDER: "headless",
+      VOYAGE_API_KEY: "vk-test",
+    })
+    const got = await embed("explicit wins")
+    expect(got.length).toBe(1536)
+  })
+
+  test("AP5. kill-switch QUANTA_INDEX_AUTO_EMBED=off ⇒ key ignored, hashEmbed restored (reversible)", async () => {
+    const embed = selectIndexEmbedder({
+      VOYAGE_API_KEY: "vk-test",
+      QUANTA_INDEX_AUTO_EMBED: "off",
+    })
+    const got = await embed("kill switch")
+    expect(got).toEqual([...hashEmbed("kill switch")])
+  })
+
+  test("AP6. providerLabel reflects the promoted provider (observability)", () => {
+    const resolved = resolveIndexEmbedder({ VOYAGE_API_KEY: "vk-test" })
+    expect(resolved.providerLabel).toBe("voyage")
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// A''. In-memory ranking is COSINE, not raw dot — jun26 frontier fix
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("buildSemanticBackend — in-memory cosine ranking", () => {
+  test("AC1. hash path (unit vectors) ⇒ cosine == dot (byte-identical ordering)", async () => {
+    const backend = buildSemanticBackend({}, async (t) => hashEmbed(t))
+    await backend.upsert.upsert(chunk("a.ts", "alpha function token"))
+    await backend.upsert.upsert(chunk("b.ts", "beta gamma delta"))
+    const hits = await backend.port.query(hashEmbed("alpha function token"), 1)
+    expect(hits[0]?.metadata?.path).toBe("a.ts")
+    // hashEmbed is unit-length, so cosine score equals the dot product (1.0 for
+    // identical text). Byte-identical to the legacy dot ranking on this path.
+    expect(hits[0]?.score).toBeCloseTo(1, 10)
+  })
+
+  test("AC2. non-normalized vectors ⇒ ranking follows cosine, NOT magnitude-inflated dot", async () => {
+    // RED-on-injection: with raw dot, the long high-magnitude vector wins by
+    // sheer length even when its DIRECTION is orthogonal-ish to the query.
+    // With cosine, the directionally-aligned (but small-magnitude) vector wins.
+    //   query     = [1, 0]
+    //   aligned   = [0.1, 0]      (dot=0.1,  cos=1.0)   ← should rank FIRST
+    //   bigButOff = [3, 4]        (dot=3.0,  cos=0.6)   ← raw-dot would win
+    const vecs: Record<string, readonly number[]> = {
+      "aligned aligned": [0.1, 0],
+      "bigoff bigoff": [3, 4],
+    }
+    const embed = async (t: string): Promise<readonly number[]> => vecs[t] ?? [0, 0]
+    const backend = buildSemanticBackend({}, embed)
+    await backend.upsert.upsert(chunk("aligned.ts", "aligned aligned"))
+    await backend.upsert.upsert(chunk("bigoff.ts", "bigoff bigoff"))
+    const hits = await backend.port.query([1, 0], 2)
+    expect(hits[0]?.metadata?.path).toBe("aligned.ts")
+    expect(hits[0]?.score).toBeCloseTo(1, 10)
+    expect(hits[1]?.metadata?.path).toBe("bigoff.ts")
+    expect(hits[1]?.score).toBeCloseTo(0.6, 10)
+  })
+
+  test("AC3. zero-magnitude vector ⇒ score 0, no NaN (division-by-zero guard)", async () => {
+    const embed = async (t: string): Promise<readonly number[]> =>
+      t === "zero" ? [0, 0, 0] : [1, 0, 0]
+    const backend = buildSemanticBackend({}, embed)
+    await backend.upsert.upsert(chunk("zero.ts", "zero"))
+    const hits = await backend.port.query([1, 0, 0], 1)
+    expect(hits[0]?.score).toBe(0)
+    expect(Number.isNaN(hits[0]?.score ?? Number.NaN)).toBe(false)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // B. Backend selection / sqlite persist
 // ──────────────────────────────────────────────────────────────────────────
 
