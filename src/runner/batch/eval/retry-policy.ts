@@ -194,6 +194,13 @@ const classifyByAdmission = (result: InstanceResult): AttemptOutcome | undefined
 
 const CAPTURE_DESYNC_RE = /capture_lost_edits|fork-worktree desync|patch capture (?:miss|desync)/i
 
+// T5b (11138 class) — verify-select produced NO winner yet ≥1 candidate generated a
+// non-empty patch the harness then DISCARDED to an empty submission. The empty
+// submit is an infra/measurement hole (nothing was graded while the model DID
+// produce fixes), NOT a `completed_unresolved` model miss. Distinct marker so it is
+// routed to infra-fail/retry and never laundered into the no-fix denominator.
+const SELECTION_DISCARD_RE = /selection_discarded_real_candidate/i
+
 const classifyByStopReason = (result: InstanceResult): AttemptOutcome | undefined => {
   // T5 — a fork-worktree capture desync is INFRA regardless of the terminal
   // stop-reason. Check it BEFORE the aborted/max_turns/budget branches so a desync
@@ -201,6 +208,13 @@ const classifyByStopReason = (result: InstanceResult): AttemptOutcome | undefine
   // timeout (which would drop it from the retry path and the denominator).
   if (CAPTURE_DESYNC_RE.test(result.error ?? "")) {
     return { kind: "infra-fail", reason: result.error ?? "capture desync" }
+  }
+  // T5b — a discarded-real-candidate empty submit is INFRA regardless of the
+  // terminal stop-reason (the candidates typically stop `completed`). Checked here
+  // alongside the capture-desync short-circuit so a co-occurring stop-reason cannot
+  // shadow it into a real-fail/timeout.
+  if (SELECTION_DISCARD_RE.test(result.error ?? "")) {
+    return { kind: "infra-fail", reason: result.error ?? "selection discarded real candidate" }
   }
   if (result.stopReason === "refusal") {
     return {
@@ -236,6 +250,13 @@ const classifyByErrorString = (err: string): AttemptOutcome | undefined => {
   // into the `patch==="" + turns>0 ⇒ real-fail` bucket. Checked first so the
   // specific capture marker cannot be shadowed by a generic pattern.
   if (CAPTURE_DESYNC_RE.test(err)) {
+    return { kind: "infra-fail", reason: err }
+  }
+  // T5b — verify-select discarded a real non-empty candidate to an empty submit.
+  // INFRA/measurement hole, not a model miss: must retry, never laundered into the
+  // `patch==="" + turns>0 ⇒ real-fail` bucket. Checked early so the specific marker
+  // is not shadowed by a generic pattern.
+  if (SELECTION_DISCARD_RE.test(err)) {
     return { kind: "infra-fail", reason: err }
   }
   if (

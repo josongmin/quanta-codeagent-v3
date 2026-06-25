@@ -3985,12 +3985,44 @@ const patchCaptureMissErrorOf = (phase: Phase): string | undefined =>
     ? "patch capture miss: agent edited files before abort, but final git diff was empty"
     : undefined
 
+/** T5b (django__django-11138 class) — did verify-select DISCARD a real non-empty
+ *  candidate to an EMPTY submission? True iff the winner is null AND at least one
+ *  SCORED candidate produced a non-empty patch (non-empty `files` ⇔ a captured
+ *  diff). This is a measurement hole, not a model miss: the model demonstrably
+ *  produced fix(es) but the harness submitted nothing, so grading an EMPTY patch as
+ *  `completed_unresolved` (a "graded, did not resolve" verdict) is a lie — the same
+ *  laundering confound this project fences for throttle/empty-patch and lost-edits.
+ *
+ *  EXCLUDES the proof-required withholds (`proof_required_missing` /
+ *  `proof_infra_blocked`): those are DELIBERATE model-discipline withholds owned by
+ *  the proof-gate, not a capture/laundering hole — they keep their own wording and
+ *  classification. Pure + deterministic; no thresholds. */
+const selectionDiscardedRealCandidate = (phase: Phase): boolean => {
+  const tel = phase.selectionTelemetry
+  if (tel === undefined || tel.winnerId !== null) return false
+  if (
+    tel.noWinnerReason === "proof_required_missing" ||
+    tel.noWinnerReason === "proof_infra_blocked"
+  ) {
+    return false
+  }
+  return tel.candidates.some((candidate) => candidate.files.length > 0)
+}
+
 const noWinnerTerminalReasonOf = (phase: Phase): string => {
   if (phase.selectionTelemetry?.noWinnerReason === "proof_required_missing") {
     return "verify-select proof-required mode produced no submittable candidate (no candidate achieved positive executed public proof)"
   }
   if (phase.selectionTelemetry?.noWinnerReason === "proof_infra_blocked") {
     return "verify-select proof-required mode produced no submittable candidate (public proof execution was infra-blocked)"
+  }
+  // T5b — a real non-empty candidate existed but was discarded to an empty submit.
+  // Surface the `selection_discarded_real_candidate` marker so `classifyOutcome`'s
+  // SELECTION_DISCARD_RE routes it to infra-fail/retry instead of laundering the
+  // empty patch into `completed_unresolved`. The generic no-candidate-produced case
+  // (every candidate empty) keeps the plain wording ⇒ stays a real model miss.
+  if (selectionDiscardedRealCandidate(phase)) {
+    return "selection_discarded_real_candidate: verify-select produced no submittable candidate but ≥1 candidate generated a non-empty patch that was hard-rejected, so the EMPTY submission is an infra/measurement hole, not a model miss"
   }
   return "verify-select produced no submittable candidate (every candidate was either hard-rejected, empty, or did not apply)"
 }
