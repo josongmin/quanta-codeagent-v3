@@ -8,20 +8,23 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
 
 /**
- * ADR-0079 integration — verify-guard ARM ⇒ next outbound LLM request carries
- * `tool_choice: {kind:"any"}`. This proves the loop wiring (NOT just the pure
- * `resolveToolChoice` policy): when the verify-guard blocks a finish attempt
- * after an unverified mutating tool, the very next LLM stream call MUST be
- * shaped with `StreamInput.toolChoice.kind === "any"` so the adapter forces
- * the model to call a tool.
+ * ADR-0079 integration — verify-guard ARM ⇒ next outbound LLM request resolves
+ * to `tool_choice: {kind:"auto"}` (NO forced tool). This proves the loop wiring
+ * (NOT just the pure `resolveToolChoice` policy): when the verify-guard blocks a
+ * finish attempt after an unverified mutating tool, the very next LLM stream
+ * call MUST be shaped with `StreamInput.toolChoice.kind === "auto"` — the
+ * evidential nudge steers the model but does NOT mechanically force a tool call
+ * (which would ban the "I already verified via <cmd>" text answer the nudge
+ * invites, and strand a read-only-scoped turn on a useless tool).
  *
  * Mechanism asserted:
  *   1. turn 1 — model emits `edit` (mutating, unverified).
  *   2. turn 2 — model emits pure-text "done" (finish-intent).
- *   3. verify-guard fires: injects forcing meta + ARMs `verifyGuardViolated`.
- *   4. SAME-TURN forced re-entry — the new LLM call MUST have
- *      `tool_choice.kind === "any"` on its `StreamInput`.
- *   5. model now emits a `test_runner` (the gate worked — model satisfied "any").
+ *   3. verify-guard fires: injects evidential meta + ARMs `verifyGuardViolated`.
+ *   4. SAME-TURN re-entry — the new LLM call has `tool_choice.kind === "auto"`
+ *      (NOT "any"): the model is FREE to call a verify tool OR answer in text.
+ *   5. model chooses to emit a `test_runner` here (it could equally have
+ *      answered in text — `auto` permits both).
  *   6. closeout text → run completes.
  *
  * Recording is via a fake LLMPort capturing every `StreamInput` so we can
@@ -111,11 +114,12 @@ const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise
   }
 }
 
-describe("verify-guard arms tool_choice:'any' on next LLM call (ADR-0079)", () => {
-  test("after edit+unverified-finish, the FORCED re-entry's StreamInput has toolChoice.kind === 'any'", async () => {
+describe("verify-guard re-entry leaves tool_choice:'auto' on next LLM call (ADR-0079)", () => {
+  test("after edit+unverified-finish, the re-entry's StreamInput has toolChoice.kind === 'auto' (NO force)", async () => {
     // turn 1: edit (mutating). turn 2: pure text "done" → guard fires →
-    // forces SAME-TURN re-entry with ARM. turn 3 (forced re-entry): model
-    // is given tool_choice:"any" — emits test_runner. turn 4: text → done.
+    // SAME-TURN re-entry with ARM. turn 3 (re-entry): model is given
+    // tool_choice:"auto" (NOT forced) — it chooses test_runner here, but the
+    // nudge would equally have permitted a text answer. turn 4: text → done.
     const llm = new RecordingLLM([
       ev(toolUse("e1", "edit", { path: "/x.ts", patch: "fix" })),
       ev(text("All done.")),
@@ -141,12 +145,16 @@ describe("verify-guard arms tool_choice:'any' on next LLM call (ADR-0079)", () =
     const call2 = llm.inputs[1]
     expect(call2?.toolChoice?.kind ?? "auto").toBe("auto")
 
-    // Call 3 (FORCED re-entry): this is the assertion that pins the wiring.
-    // The verify-guard armed `verifyGuardViolated`, `consumeTurnSignals` at
-    // the top of the next runTurn iteration read+cleared it, resolved to
-    // {kind:"any"}, and `streamConsume` threaded it onto StreamInput.
+    // Call 3 (re-entry): this is the assertion that pins the wiring AND the
+    // fix. The verify-guard armed `verifyGuardViolated`, `consumeTurnSignals`
+    // at the top of the next runTurn iteration read+cleared it, and
+    // `resolveToolChoice` deliberately resolved it to {kind:"auto"} — NOT a
+    // forced {kind:"any"} — so the model is free to verify-by-tool OR answer in
+    // text. `streamConsume` threaded that auto onto the StreamInput. TEETH:
+    // restoring the old force makes this read {kind:"any"} and FAILS here.
     const call3 = llm.inputs[2]
-    expect(call3?.toolChoice).toEqual({ kind: "any" })
+    expect(call3?.toolChoice?.kind ?? "auto").toBe("auto")
+    expect(call3?.toolChoice).not.toEqual({ kind: "any" })
 
     // Call 4 (closeout text turn): flag was cleared on read ⇒ back to auto.
     const call4 = llm.inputs[3]

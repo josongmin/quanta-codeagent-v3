@@ -184,11 +184,12 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
-    expect(result).toEqual({
-      ok: false,
-      failTail: "repro vote execution failed",
-      reproOutcome: "exec_failed",
-    })
+    expect(result.ok).toBe(false)
+    expect(result.reproOutcome).toBe("exec_failed")
+    // FLAG 1: the top-level batch-exec catch surfaces the actual thrown reason in
+    // failTail (the next-round seed) instead of a determinative-free bare label.
+    expect(result.failTail).toContain("repro vote execution failed")
+    expect(result.failTail).toContain("tests[i] exploded")
     const drained = drainReproVoteOutcomes()
     expect(drained).toHaveLength(1)
     expect(drained[0]?.outcome).toBe("exec_failed")

@@ -230,10 +230,12 @@ const spendTrip = (state: VerifyGuardState, cap: number): boolean => {
  * `maxTrips: 2` to allow one of each, but the default stays 1.
  *
  * ADR-0079 — when this returns `{block:true}` the loop ALSO sets
- * `ToolChoiceTurnState.verifyGuardViolated = true` so the NEXT turn's
- * `resolveToolChoice` emits `{kind:"any"}` and forces the model to call a tool
- * (typically a verify). The flag is consumed at the next turn's entry and
- * cleared in the same step; it never carries across more than one turn.
+ * `ToolChoiceTurnState.verifyGuardViolated = true` (1-turn TTL, consumed and
+ * cleared at the next turn's entry). This flag NO LONGER forces tool_choice:
+ * `resolveToolChoice` resolves it to `auto`. The steer is carried by the
+ * injected evidential nudge ({@link VERIFY_FORCE_MESSAGE}), which invites the
+ * model to EITHER answer in text how it already verified OR run a test — a
+ * `{kind:"any"}` force would mechanically ban that text answer.
  */
 export const decideVerifyGuard = (args: {
   history: readonly GuardHistoryEntry[]

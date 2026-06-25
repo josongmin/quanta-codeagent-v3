@@ -65,6 +65,7 @@ import {
   readKnobValue,
   reproHintMessage,
   resetReproVoteOutcomes,
+  repairLocalizePhaseSuppressed,
   resolveBenchKnobs,
   resolveLaneLlm,
   runRetryLoop,
@@ -506,6 +507,9 @@ const runAgentPhase = async (
         w.stream,
         onVerifyPass,
         benchVerifyAuthorityCommandsOf(instance),
+        // Per-action progress → run.log (live "what the agent did" under
+        // concurrency). One concise line per tool call.
+        (name, detail) => logger.info(`  · ${instance.id} ${name}${detail ? ` ${detail}` : ""}`),
       )
       // Knob telemetry: emit once per phase entry (matches the contract on
       // `emitKnobsApplied`). The single-pass path bypasses `runAgentOnce`, so
@@ -602,6 +606,21 @@ const runRepairPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
+  // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds (mirrors
+  // the runner-core driver). The fault is already localized in repair (patch
+  // exists + failing gate named, seed = "revise the patch now"), so the Phase-1
+  // edit-block is a straitjacket that re-fires every fresh repair session and
+  // forces ~5 wasted re-localize turns. Resolve the EFFECTIVE posture (override
+  // or the env-derived posture `runAgentOnce`→`buildConfig` would otherwise
+  // compute) and strip `phase1Turns`; the advisory steer is preserved. INITIAL
+  // generation is unchanged.
+  const resolvedPosture =
+    postureOverride ??
+    benchPostureFromState(
+      stateOverride ?? resolveBenchKnobs({ envVars: process.env }),
+      process.env,
+    )
+  const repairPosture = repairLocalizePhaseSuppressed(resolvedPosture)
   // B1/B3: thread the slice-resolving inputs into the classic-repair packet so
   // its owner evidence carries exact slices (paired with issue symbols) and it
   // names the active proof target — parity with the selector-repair sibling.
@@ -641,7 +660,10 @@ const runRepairPhase = async (
             precomputedHint,
             reproHint,
             closureHint,
-            postureOverride,
+            // Repair posture with the localize-phase edit-block stripped (see
+            // `repairLocalizePhaseSuppressed`). Always explicit so `buildConfig`
+            // does NOT re-resolve the block-active env posture.
+            repairPosture,
             stateOverride,
           ),
         validate,
@@ -923,7 +945,7 @@ const selectionWinnerPhase = (args: {
   readonly calibration: Phase["reproOracleCalibration"]
   readonly llmEvidence: Partial<LlmEvidenceArtifacts>
 }): Phase => ({
-  patch: args.result.winner?.patch ?? "",
+  patch: args.result.winner?.patch ?? args.result.fallbackCandidate?.patch ?? "",
   turns: args.totalTurns,
   ...(args.result.terminalCandidate?.stopReason !== undefined
     ? { stopReason: args.result.terminalCandidate.stopReason }
@@ -1243,6 +1265,14 @@ const runSelectionExecutor = async (
     // (reverted as net-negative producer-consumer over-demand).
     ...(gateOn(process.env, "QUANTA_BENCH_FAMILY_COVERAGE")
       ? { familyCoverageVeto: true as const }
+      : {}),
+    // CORRECTED non-empty fallback. Default OFF; opt-in via
+    // QUANTA_BENCH_NONEMPTY_FALLBACK. When no winner exists, submit the rock-solid-
+    // subset candidate (applies clean / no regression / no static-sanity break,
+    // barred only by a self-oracle) instead of empty — weakly dominates on binary
+    // SWE-bench scoring. Unset ⇒ no fallbackCandidate ⇒ byte-identical.
+    ...(gateOn(process.env, "QUANTA_BENCH_NONEMPTY_FALLBACK")
+      ? { nonEmptyFallback: true as const }
       : {}),
     recordLlmEvidencePacket: (packet: LlmEvidencePacket) => {
       recordLlmEvidencePacket(args.selectionLlmEvidence, packet)

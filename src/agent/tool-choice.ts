@@ -27,13 +27,18 @@
  * ## Precedence (exhaustive)
  *
  *   1. `explicit !== undefined`        → `explicit`
- *   2. `verifyGuardViolated === true`  → `{kind:"any"}`   (force re-verify)
- *   3. `closeoutAttempted === true`    → `{kind:"none"}`  (force termination)
- *   4. otherwise                       → `{kind:"auto"}`  (default)
+ *   2. `closeoutAttempted === true`    → `{kind:"none"}`  (force termination)
+ *   3. otherwise                       → `{kind:"auto"}`  (default)
  *
  * Higher precedence wins; the explicit override beats every implicit trigger
  * so a host that wants to pin the choice (test, runbook, retry strategy) is
  * never overridden by a guard signal.
+ *
+ * `verifyGuardViolated` is NO LONGER a tool_choice trigger. The verify-guard
+ * arms it (1-turn TTL, consumed below) but it resolves to `auto`: the guard's
+ * injected nudge is evidential and explicitly invites a TEXT answer ("if you
+ * already verified, say HOW and proceed"), which `{kind:"any"}` would ban. See
+ * `resolveToolChoice` for the full rationale.
  *
  * ## Signal lifecycle (1-turn TTL)
  *
@@ -76,9 +81,10 @@ import type { ToolChoice } from "@/llm"
  * because most turns have no signals at all (the default-OFF path).
  *
  *   - `verifyGuardViolated` — set by `verify-guard.ts` when a mutating tool ran
- *     in the prior turn without a follow-up verify; the next turn reads it and
- *     resolves to `{kind:"any"}` so the model MUST call a tool (typically a
- *     verify) before being allowed to finish.
+ *     in the prior turn without a follow-up verify; the next turn reads it for
+ *     1-turn-TTL state hygiene but it DOES NOT force tool_choice (resolves to
+ *     `auto`). The steer is carried entirely by the guard's injected evidential
+ *     nudge, which the model may satisfy with a verify tool OR a text answer.
  *   - `closeoutAttempted` — set by `closeout-guard.ts` when the 4-truth-surface
  *     closeout reminder was injected; the next turn reads it and resolves to
  *     `{kind:"none"}` so the model MUST produce a text terminal turn (it cannot
@@ -105,7 +111,15 @@ export interface ToolChoiceSignals {
  */
 export const resolveToolChoice = (signals: ToolChoiceSignals): ToolChoice => {
   if (signals.explicit !== undefined) return signals.explicit
-  if (signals.verifyGuardViolated === true) return { kind: "any" }
+  // verifyGuardViolated intentionally does NOT force tool_choice. The
+  // verify-guard's injected nudge is EVIDENTIAL: it tells the model it MAY
+  // answer in TEXT how it already verified ("say HOW … and proceed") OR run a
+  // test. Forcing `{kind:"any"}` here mechanically BANS that text answer and
+  // strands a read-only-scoped turn on a useless tool call — a self-contradicting
+  // force. So the signal falls through to `auto`: the model can EITHER call a
+  // verify tool OR answer in text, exactly what the nudge invites. The bit is
+  // still armed/consumed for 1-turn-TTL state hygiene (see below); it just no
+  // longer changes tool_choice.
   if (signals.closeoutAttempted === true) return { kind: "none" }
   return { kind: "auto" }
 }

@@ -25,20 +25,101 @@ const normalizeLine = (line: string): string => line.trim().replace(/\s+/g, " ")
 
 /** Split into lines for COMPARISON, dropping the EOL terminator (`\r?\n`) so a
  *  CRLF file's `"foo\r"` reduces to `"foo"`. The original terminator is NOT
- *  stored on the line — the splice phase re-emits the file's detected EOL (D6).
- *  Splitting on `\n` only (the pre-fix behaviour) left a trailing `\r` on every
- *  CRLF line that the rungs' `.trim()` then stripped, so a matched window was
- *  re-joined LF and neighbours stayed CRLF = mixed-EOL corruption. */
+ *  stored on the line — it is consulted again at splice time from the ORIGINAL
+ *  `source` so untouched lines keep their exact bytes (D6 / mixed-EOL fix).
+ *  Splitting on `\n` only would leave a trailing `\r` on every CRLF line that the
+ *  rungs' `.trim()` then strips, which is fine for COMPARISON but the splice no
+ *  longer re-joins the whole array (the source of the mixed-EOL corruption). */
 const splitLines = (s: string): string[] => s.split(/\r?\n/)
 
-/** Rebuild `lines`, replacing the [span) window with `repl`'s own lines. The
- *  model's `repl` arrives LF-delimited; we split it the same EOL-agnostic way
- *  so the eventual `join(eol)` (in {@link applyWindows}) normalizes the whole
- *  result — including the spliced-in region — to the file's native terminator. */
-const spliceLines = (lines: string[], span: LineSpan, repl: string): string[] => {
-  const before = lines.slice(0, span.start)
-  const after = lines.slice(span.end)
-  return [...before, ...splitLines(repl), ...after]
+/** One source line plus the EXACT terminator that followed it in the original
+ *  bytes. `eol` is `""` for the final line when the file has no trailing
+ *  newline. Concatenating every `content + eol` reproduces `source` verbatim. */
+interface SourceLine {
+  content: string
+  eol: string
+}
+
+/** Parse `source` into per-line `{content, eol}` segments preserving each line's
+ *  ORIGINAL terminator (`"\r\n"`, `"\n"`, or `""` for a final unterminated
+ *  line). This is the byte-faithful counterpart of {@link splitLines}: it never
+ *  coerces terminators, so a MIXED-EOL file's lines each keep their own. The
+ *  segment array is index-aligned with `splitLines(source)` (same length, same
+ *  line boundaries) so a {@link LineSpan} resolved over `splitLines` maps 1:1. */
+const parseSourceLines = (source: string): SourceLine[] => {
+  const out: SourceLine[] = []
+  let i = 0
+  const n = source.length
+  let contentStart = 0
+  while (i < n) {
+    const c = source.charCodeAt(i)
+    if (c === 0x0a /* \n */) {
+      const crlf = i > 0 && source.charCodeAt(i - 1) === 0x0d /* \r */
+      const contentEnd = crlf ? i - 1 : i
+      out.push({ content: source.slice(contentStart, contentEnd), eol: crlf ? "\r\n" : "\n" })
+      i++
+      contentStart = i
+    } else {
+      i++
+    }
+  }
+  // Final line (no trailing newline, or the empty trailing segment after one).
+  out.push({ content: source.slice(contentStart), eol: "" })
+  return out
+}
+
+/** Character offset (into `source`) at which each line STARTS, plus a final
+ *  entry equal to `source.length`. `offsets[k]` = sum of `(content+eol).length`
+ *  for every line before `k`. Index-aligned with {@link parseSourceLines}. */
+const lineCharOffsets = (lines: SourceLine[]): number[] => {
+  const offsets: number[] = [0]
+  let acc = 0
+  for (const ln of lines) {
+    acc += ln.content.length + ln.eol.length
+    offsets.push(acc)
+  }
+  return offsets
+}
+
+/** Native EOL to use INSIDE the replacement text. The replacement arrives
+ *  LF-delimited; its internal newlines adopt the WINDOW's local terminator — the
+ *  terminator of the window's first line — falling back to the file's detected
+ *  EOL when the window is a single unterminated line. Lines OUTSIDE the window
+ *  are never touched (they are sliced verbatim from `source`). */
+const windowEol = (source: string, lines: SourceLine[], span: LineSpan): string => {
+  const first = lines[span.start]
+  if (first !== undefined && first.eol !== "") return first.eol
+  return detectEol(source)
+}
+
+/**
+ * BYTE-PRESERVING fuzzy splice. The matcher resolves a LINE window `[span)`; we
+ * map it to its CHARACTER span in the ORIGINAL `source` and splice the
+ * replacement there — exactly like the exact path's literal `slice` splice.
+ * Every byte OUTSIDE the matched window (including each untouched line's own
+ * terminator) is copied verbatim, so a MIXED-EOL file is never whole-file
+ * normalized. Only the replacement region's INTERNAL terminators are (re)emitted
+ * using the window's local EOL.
+ *
+ * The window's char span is `[offsets[span.start], offsets[span.end])`, which
+ * INCLUDES the terminator that followed the window's last line. We re-emit that
+ * trailing terminator after the replacement so line-count-changing edits stay
+ * well-formed (the replacement's last line gets the same terminator the window's
+ * last line had — `""` when the window ended an unterminated file).
+ */
+const spliceWindow = (
+  source: string,
+  lines: SourceLine[],
+  offsets: number[],
+  span: LineSpan,
+  repl: string,
+): string => {
+  const charStart = offsets[span.start] as number
+  const charEnd = offsets[span.end] as number
+  const eol = windowEol(source, lines, span)
+  const lastEol = (lines[span.end - 1] as SourceLine).eol
+  const replText = splitLines(repl).join(eol) + lastEol
+  return source.slice(0, charStart) + replText + source.slice(charEnd)
 }
 
 /** Find every contiguous line window in `haystack` whose per-line projection
@@ -118,17 +199,21 @@ const applyWindows = (
       },
     }
   }
-  const lines = splitLines(source)
+  const lines = parseSourceLines(source)
+  const offsets = lineCharOffsets(lines)
   // Under replace_all, findLineWindows can surface SELF-OVERLAPPING windows
   // (e.g. needle ["a","a"] in ["a","a","a"] → {0,2} AND {1,3}). Splicing each
   // independently corrupts/drops the leftover line; reduce to non-overlapping
   // windows first (F3), mirroring split/join's inherently non-overlapping reps.
   const targets = replaceAll ? selectNonOverlapping(spans) : [spans[0] as LineSpan]
-  // Splice from the bottom so earlier indices stay valid.
+  // Splice from the BOTTOM (highest start first) so earlier char offsets stay
+  // valid as the string grows/shrinks — identical to the exact path's
+  // bottom-up splice. Each splice is byte-preserving outside its own window, so
+  // untouched lines (and their terminators) survive verbatim (D6 mixed-EOL fix).
   const ordered = [...targets].sort((a, b) => b.start - a.start)
-  let next = lines
+  let next = source
   for (const span of ordered) {
-    next = spliceLines(next, span, newString)
+    next = spliceWindow(next, lines, offsets, span, newString)
   }
   const count = replaceAll ? targets.length : 1
   return {
@@ -136,10 +221,7 @@ const applyWindows = (
     outcome: {
       ok: true,
       message: `Replaced ${count} occurrence(s) via ${strategy} match`,
-      // Join with the file's native EOL so a uniform CRLF file stays CRLF and a
-      // uniform LF file stays LF (D6) — the comparison phase dropped the
-      // terminator, this is the single place it is restored.
-      next: next.join(detectEol(source)),
+      next,
     },
   }
 }
@@ -256,15 +338,17 @@ const tryScoredCandidate = (
   if (runnerUp === undefined || best.score <= runnerUp.score) {
     return { kind: "none" }
   }
-  const lines = splitLines(source)
-  const next = spliceLines(lines, best.span, newString)
+  const lines = parseSourceLines(source)
+  const offsets = lineCharOffsets(lines)
+  // Byte-preserving splice (D6 mixed-EOL fix): everything outside the chosen
+  // window — including each untouched line's own terminator — is copied verbatim.
+  const next = spliceWindow(source, lines, offsets, best.span, newString)
   return {
     kind: "matched",
     outcome: {
       ok: true,
       message: `Replaced 1 occurrence(s) via scored-candidate best match (exact-anchor ${best.score} > ${runnerUp.score})`,
-      // Native-EOL join (D6): keep the file uniform after the splice.
-      next: next.join(detectEol(source)),
+      next,
     },
   }
 }

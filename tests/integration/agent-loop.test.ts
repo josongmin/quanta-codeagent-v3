@@ -575,7 +575,10 @@ describe("runAgent hell-cases — malformed LLM responses", () => {
       "malformed-stop",
     )
 
-    expect(out.reason).toBe("completed")
+    // FIX-2 (jun-25): a malformed tool_use exhausted past the retry cap seals
+    // as a NON-success `error` terminal — NOT `completed`. A fumbled tool call
+    // is never reported as success.
+    expect(out.reason).toBe("error")
     // Exactly ONE malformed recovery (MAX_MALFORMED_RETRIES=1).
     const malformedRecov = stream.events.filter(
       (e) => e.type === "recovery" && e.reason === "malformed",
@@ -585,8 +588,9 @@ describe("runAgent hell-cases — malformed LLM responses", () => {
     // emitted because no tool_use blocks were actually parsed.
     expect(llm.calls).toBe(2)
     expect(stream.events.filter((e) => e.type === "tool_call")).toHaveLength(0)
-    // Turns is the bounded productive count.
-    expect(out.turns).toBe(1)
+    // The error terminal closes the loop on this turn (the `error` branch in
+    // resolveTurnLoopOutcome reports `turn - 1`; no productive turn completed).
+    expect(out.turns).toBe(0)
   })
 
   test("(H1.c) tool_use with bogus name (not in registry) → recoverable deny tool_result", async () => {

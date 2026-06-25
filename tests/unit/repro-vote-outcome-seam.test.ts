@@ -128,11 +128,12 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.outcome).toBe("exec_failed")
     expect(emitted[0]?.detail).toBeUndefined()
-    expect(result).toEqual({
-      ok: false,
-      failTail: "repro vote execution failed",
-      reproOutcome: "exec_failed",
-    })
+    expect(result.ok).toBe(false)
+    expect(result.reproOutcome).toBe("exec_failed")
+    // FLAG 1: the thrown reason is surfaced in failTail (next-round seed), not a
+    // determinative-free bare "execution failed" label.
+    expect(result.failTail).toContain("repro vote execution failed")
+    expect(result.failTail).toContain("tests[i] exploded")
   })
 
   it("resolved majority ⇒ emits 'vote_resolved' with the vote tally", async () => {

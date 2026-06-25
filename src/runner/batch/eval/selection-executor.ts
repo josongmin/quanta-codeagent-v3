@@ -261,6 +261,18 @@ export interface RunSelectionArgs {
    *  only `true` enables it; default/undefined/`false` ⇒ veto OFF. The
    *  relatedness/ranking credit (family rank tier, ownerCoverage) is unaffected. */
   familyCoverageVeto?: boolean
+  /** CORRECTED non-empty fallback (default-OFF A/B arm). When `true` AND the
+   *  selector found NO winner (no admissible AND no best-effort candidate ⇒ the
+   *  alternative is an EMPTY submission), compute a `fallbackCandidate`: the
+   *  strongest scored candidate passing the ROCK-SOLID SUBSET
+   *  (`nonEmptyFallbackEligible` — applies clean, does not regress, no
+   *  static-sanity parse break) while DROPPING the self-oracle / completeness
+   *  bars (MWE candidate-red, proof-required, family-coverage, resolved-K-of-N,
+   *  declared-expected). On SWE-bench's binary scoring such a candidate WEAKLY
+   *  DOMINATES empty. `winner`/`terminalCandidate`/`admissibleCount` semantics
+   *  are UNCHANGED — telemetry stays honest (it was a fallback, not a winner).
+   *  Default/undefined/`false` ⇒ no `fallbackCandidate` computed ⇒ byte-identical. */
+  nonEmptyFallback?: boolean
   /** OPTIONAL public-contract bundle (T-CON-10) for the clean lexicographic
    *  contract-dominance tier. When omitted, the contract tier stays empty.
    *  Ignored in research mode. */

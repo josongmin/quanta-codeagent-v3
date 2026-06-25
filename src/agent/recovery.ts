@@ -42,6 +42,21 @@ export type RecoveryReason =
   | "unverified"
   | "closeout"
 
+/** Loop-control fix (jun-25): visible marker appended to the surfaced text when
+ *  a turn is sealed while STILL `max_tokens`-truncated after the continuation
+ *  budget is spent. Without it a mid-sentence answer reads as a clean
+ *  completion; with it the operator + downstream classifier can tell the output
+ *  was CUT, not cleanly finished. Exported so tests pin the exact literal. */
+export const OUTPUT_TRUNCATED_MARKER = "\n\n[output truncated at token budget]"
+
+/** Loop-control fix (jun-25): reason tag prefixed onto the `error`-class
+ *  terminal minted when the model signalled `tool_use` intent but could not
+ *  emit a valid tool call within the malformed-retry budget. Routed to a
+ *  NON-success outcome (NOT `completed`) so a fumbled tool call is never
+ *  misclassified as success. `classifyErrorReason` recognises this prefix. */
+export const MALFORMED_TOOL_USE_REASON =
+  "[malformed-tool-use] model signalled a tool call but could not emit a valid one after retries"
+
 /** Mutable per-turn recovery counters, threaded so the budgets are SAME-TURN
  *  (a fresh turn resets them; same-turn retries decrement the shared budget). */
 export interface RecoveryState {
@@ -80,6 +95,23 @@ export type RecoveryAction =
   | { do: "refusal"; rationale: string }
   | { do: "refusal_fallback"; text: string; message: AssembledMessage }
   | { do: "error"; reason: string }
+
+/** Loop-control fix (jun-25): append {@link OUTPUT_TRUNCATED_MARKER} to the
+ *  message's surfaced text in place, so a `max_tokens`-truncated turn sealed
+ *  after the continuation budget reads as CUT, not cleanly finished. Mutates the
+ *  LAST text block (the tail the user sees) or pushes a fresh text block when
+ *  the truncated turn carried no text at all (e.g. thinking-only). Idempotent:
+ *  a message already bearing the marker is left untouched, so re-entry (guards
+ *  / re-decide on the same assembled message) never doubles it. */
+export const markTruncatedOutput = (m: AssembledMessage): void => {
+  const lastText = [...m.content].reverse().find((b) => b.type === "text")
+  if (lastText !== undefined && lastText.type === "text") {
+    if (lastText.text.endsWith(OUTPUT_TRUNCATED_MARKER)) return
+    lastText.text += OUTPUT_TRUNCATED_MARKER
+    return
+  }
+  m.content.push({ type: "text", text: OUTPUT_TRUNCATED_MARKER.trimStart() })
+}
 
 /** True when the assembled turn produced nothing usable: no text, no tool_use
  *  (e.g. an empty completion or a thinking-only block). */
@@ -162,14 +194,24 @@ export const decideOnAssembled = (
   if (stopReason === "refusal") {
     return { do: "refusal", rationale: extractRefusalRationale(message) }
   }
-  if (stopReason === "max_tokens" && rec.outputContinues < MAX_OUTPUT_CONTINUES) {
-    rec.outputContinues += 1
-    return {
-      do: "nudge",
-      keepMessage: true,
-      text: "Output limit hit — continue exactly where you left off, do not repeat.",
-      reason: "nudge",
+  if (stopReason === "max_tokens") {
+    if (rec.outputContinues < MAX_OUTPUT_CONTINUES) {
+      rec.outputContinues += 1
+      return {
+        do: "nudge",
+        keepMessage: true,
+        text: "Output limit hit — continue exactly where you left off, do not repeat.",
+        reason: "nudge",
+      }
     }
+    // Loop-control fix (jun-25): the continuation budget is spent and the turn
+    // is STILL `max_tokens`-truncated. The text that follows would otherwise
+    // be sealed as a clean `completed`, making a mid-sentence answer read as a
+    // finished one. Append a VISIBLE truncation marker to the surfaced text
+    // (idempotent — never doubled) so downstream + the user can tell the output
+    // was cut. We do NOT change the stop itself; the turn still seals via the
+    // text-completion path below.
+    markTruncatedOutput(message)
   }
   const hasTools = message.content.some((b) => b.type === "tool_use")
   if (stopReason === "tool_use" && !hasTools) {
@@ -184,7 +226,14 @@ export const decideOnAssembled = (
         reason: "malformed",
       }
     }
-    return { do: "completed" }
+    // Loop-control fix (jun-25): the model INTENDED to act (`stop_reason
+    // ="tool_use"`) but never assembled a valid tool_use block, and the
+    // same-turn malformed-retry budget is spent. Sealing this as `completed`
+    // (success) misclassifies a fumbled tool call. Seal as a DISTINCT
+    // NON-SUCCESS `error`-class terminal — the outer resolver maps `error`
+    // → reason `"error"` and `classifyErrorReason` buckets the tagged reason,
+    // mirroring every other non-success terminal.
+    return { do: "error", reason: MALFORMED_TOOL_USE_REASON }
   }
   if (!hasTools && isEmptyTurn(message)) {
     if (rec.consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES) return { do: "completed" }

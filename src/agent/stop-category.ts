@@ -111,6 +111,11 @@ export const STOP_REASON_CODE = {
    *  content-policy stop). The visible-text rationale is surfaced on
    *  `AgentOutcome.refusal.rationale`. */
   MODEL_REFUSAL: "model.refusal",
+  /** Loop-control fix (jun-25): the model signalled `stop_reason="tool_use"`
+   *  but never emitted a valid tool_use block, and the same-turn malformed
+   *  retry budget was spent. A FUMBLED tool call — NON-success (the model
+   *  intended to act and could not), distinct from a clean completion. */
+  MODEL_MALFORMED_TOOL_USE: "model.malformed_tool_use",
 } as const
 
 export type StopReasonCode = (typeof STOP_REASON_CODE)[keyof typeof STOP_REASON_CODE]
@@ -138,6 +143,18 @@ export const classifyErrorReason = (reason: string): StopCategory => {
       kind: "failed",
       reasonCode: STOP_REASON_CODE.COMPACTION_THRASH,
       hint: "Compaction made no progress; aborted to avoid a spin.",
+    }
+  }
+  // Loop-control fix (jun-25): fumbled tool call. The malformed-tool-use
+  // terminal (recovery.ts MALFORMED_TOOL_USE_REASON) is tagged with a fixed
+  // `[malformed-tool-use]` prefix so a host can render "the model tried to act
+  // but couldn't" distinctly from a provider/runtime failure. Checked BEFORE
+  // the provider patterns (its prefix is unambiguous).
+  if (/^\[malformed-tool-use\]/.test(reason)) {
+    return {
+      kind: "failed",
+      reasonCode: STOP_REASON_CODE.MODEL_MALFORMED_TOOL_USE,
+      hint: "Model signalled a tool call but could not emit a valid one.",
     }
   }
   // Provider-classified failures. The loop stringifies the LLMError; the

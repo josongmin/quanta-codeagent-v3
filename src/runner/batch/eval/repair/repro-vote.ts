@@ -45,6 +45,7 @@ import {
 } from "@/agent/repro-test/execute"
 import type { ReproTestConfig, ReproTestSample } from "@/agent/repro-test/types"
 import { voteResolved } from "@/agent/repro-test/vote"
+import { errMessage } from "@/shared"
 import { buildValidationFailureEvidence, type ValidateArgs, type ValidatorResult } from "./types"
 
 const DEFAULT_TAIL = 2000
@@ -195,11 +196,44 @@ const reproducedTail = (samples: readonly ReproTestSample[], bound: number): str
   return combined.length > bound ? combined.slice(-bound) : combined
 }
 
-const inconclusiveTail = (samples: readonly ReproTestSample[], bound: number): string => {
-  const rep = samples[0]
-  if (rep === undefined) return ""
-  const combined = `${rep.stdout}\n${rep.stderr ?? ""}`
+/** Bounded TAIL of a sample's combined stdout+stderr — keep the TAIL because the
+ *  determinative error (traceback / `[exec threw] ...` reason / ENOENT) lives at
+ *  the END of the captured output, not the head. */
+const combinedSampleTail = (sample: ReproTestSample, bound: number): string => {
+  const combined = `${sample.stdout}\n${sample.stderr ?? ""}`
   return combined.length > bound ? combined.slice(-bound) : combined
+}
+
+/**
+ * Pick the DETERMINATIVE non-resolved sample for an inconclusive round and render
+ * its raw tail — mirroring {@link reproducedTail}'s `samples.find(...)` instead of
+ * a blind `samples[0]`.
+ *
+ * FLAG 2: a `vote_inconclusive` round is exactly where real exec failures land
+ * (all-crashed ⇒ resolved===reproduced===0 ⇒ inconclusive). If `samples[0]`
+ * happened to RESOLVE/pass while `samples[1]` crashed, a blind `samples[0]` would
+ * feed the model the GREEN sample's output as the "failure" — actively
+ * misdirecting the next repair round. Select a failing/crashed sample instead, and
+ * LABEL which outcome the tail came from so the model knows it is reading the
+ * crashed script, not a passing one.
+ *
+ * FLAG 1: the chosen sample is the one carrying captured crash evidence
+ * (`[exec threw] <reason>` from execute.ts, or a pytest-error stderr), so the real
+ * detail (ENOENT / missing interpreter / sandbox path error) reaches the model
+ * instead of a bare asserted label.
+ */
+const inconclusiveTail = (samples: readonly ReproTestSample[], bound: number): string => {
+  const pick =
+    samples.find((s) => s.outcome === "exec_failed") ??
+    samples.find((s) => s.outcome === "other") ??
+    samples.find((s) => s.outcome !== "resolved") ??
+    samples[0]
+  if (pick === undefined) return ""
+  const tail = combinedSampleTail(pick, bound)
+  // Provenance prefix: name the sample's outcome so the model never mistakes a
+  // resolved/green tail for the failure (and knows a crashed script when it sees
+  // one). Counts against the byte budget after the (already-bounded) tail.
+  return `[repro vote inconclusive — sample outcome=${pick.outcome}]\n${tail}`
 }
 
 const recordFor =
@@ -214,9 +248,17 @@ const emptySourcesResult = (record: RecordReproVoteOutcome): ValidatorResult => 
   return { ok: false, failTail: "repro vote unavailable: empty_sources", reproOutcome: "unknown" }
 }
 
-const execFailedResult = (record: RecordReproVoteOutcome): ValidatorResult => {
+const execFailedResult = (record: RecordReproVoteOutcome, cause: unknown): ValidatorResult => {
   record("exec_failed")
-  return { ok: false, failTail: "repro vote execution failed", reproOutcome: "exec_failed" }
+  // FLAG 1: surface the actual thrown reason instead of a bare asserted label.
+  // This catch fires when the BATCH executor itself throws (per-test throws are
+  // already captured as `[exec threw]` samples by execute.ts and flow through the
+  // inconclusive path). Either way the model gets the real crash detail.
+  return {
+    ok: false,
+    failTail: `repro vote execution failed: ${errMessage(cause)}`,
+    reproOutcome: "exec_failed",
+  }
 }
 
 const executeVoteSamples = (
@@ -300,9 +342,9 @@ export const makeReproVoteValidate =
     let samples: readonly ReproTestSample[]
     try {
       samples = await executeVoteSamples(deps, args)
-    } catch {
+    } catch (e) {
       // A broken exec port must never be a silent pass or legacy fallback.
-      return execFailedResult(record)
+      return execFailedResult(record, e)
     }
     const vote = voteResolved(samples)
     const detail = detailOf(vote)

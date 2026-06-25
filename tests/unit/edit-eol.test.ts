@@ -113,6 +113,128 @@ describe("applyFuzzyEdit — EOL preservation (D6)", () => {
 })
 
 // ---------------------------------------------------------------------------
+// D6 MIXED-EOL CORRUPTION (jun-25) — the silent content-corruption bug.
+//
+// A MIXED-EOL file (mostly one terminator with a region of the other) must NOT
+// be whole-file-normalized by a fuzzy edit that touches a SINGLE line. The old
+// `next.join(detectEol(source))` reassembly coerced EVERY line's terminator to
+// the strict-majority EOL — silently rewriting hundreds of untouched lines. The
+// fix splices BYTE-LITERALLY into the original source at the matched window's
+// char span, so every byte OUTSIDE the edited window is identical to the input.
+//
+// TEETH: under the old whole-file join, the untouched lines' minority-EOL
+// terminators are rewritten to the majority EOL, so the byte-identity assertions
+// below FAIL (the result no longer equals the input outside the edited window).
+// ---------------------------------------------------------------------------
+
+/** The substring of `s` with the edited line's region cut out, used to assert
+ *  the surrounding bytes are byte-identical to the input. */
+const sliceAround = (s: string, removeStart: number, removeEnd: number): string =>
+  s.slice(0, removeStart) + s.slice(removeEnd)
+
+describe("applyFuzzyEdit — MIXED-EOL files: untouched lines keep their ORIGINAL terminators (D6)", () => {
+  test("LF-majority file with one CRLF region: editing an LF line leaves the CRLF region byte-identical", () => {
+    // Lines 0,1 are LF; line 2 ("keep me\r") is CRLF; lines 3,4 LF. LF is the
+    // strict majority, so the OLD code would have rewritten the CRLF terminator
+    // on line 2 to LF. We edit line 1 (whitespace-approx → fuzzy rung), and the
+    // CRLF region must survive untouched.
+    const src = "head\n  target   here\nkeep me\r\ntail one\ntail two"
+    expect(detectEol(src)).toBe("\n") // LF is the strict majority
+
+    const r = applyFuzzyEdit(src, "target here", "TARGET DONE", false)
+    expect(r.ok).toBe(true)
+    expect(r.message).toMatch(/whitespace-flexible|anchored-trim/)
+    const out = r.next ?? ""
+
+    // The edited line became "TARGET DONE" with its OWN (LF) terminator.
+    expect(out).toContain("TARGET DONE\n")
+    // The CRLF region is BYTE-IDENTICAL — its \r\n was NOT coerced to \n.
+    expect(out).toContain("keep me\r\n")
+    // Whole-file shape: only line 1 changed; everything else verbatim.
+    expect(out).toBe("head\nTARGET DONE\nkeep me\r\ntail one\ntail two")
+  })
+
+  test("CRLF-majority file with one LF region: editing a CRLF line leaves the LF region byte-identical", () => {
+    // Lines 0,1,3,4 are CRLF; line 2 ("lone\n") is a lone-LF. CRLF is the strict
+    // majority, so the OLD code would have rewritten the lone LF to CRLF. We edit
+    // line 1 via the fuzzy rung; the lone-LF line must survive untouched.
+    const src = "head\r\n  target   here\r\nlone\ntail one\r\ntail two\r\n"
+    expect(detectEol(src)).toBe("\r\n") // CRLF is the strict majority
+
+    const r = applyFuzzyEdit(src, "target here", "TARGET DONE", false)
+    expect(r.ok).toBe(true)
+    expect(r.message).toMatch(/whitespace-flexible|anchored-trim/)
+    const out = r.next ?? ""
+
+    // The edited (CRLF) line is re-emitted CRLF (window-local terminator).
+    expect(out).toContain("TARGET DONE\r\n")
+    // The lone-LF region is BYTE-IDENTICAL — its \n was NOT coerced to \r\n.
+    // "lone" is followed by a lone \n (the char before that \n is "e", not \r).
+    const idx = out.indexOf("lone\n")
+    expect(idx).toBeGreaterThanOrEqual(0)
+    const lfPos = idx + "lone".length // position of the \n after "lone"
+    expect(out.charCodeAt(lfPos)).toBe(0x0a) // the terminator is \n
+    expect(out.charCodeAt(lfPos - 1)).not.toBe(0x0d) // NOT preceded by \r → lone LF
+    // Whole-file shape.
+    expect(out).toBe("head\r\nTARGET DONE\r\nlone\ntail one\r\ntail two\r\n")
+  })
+
+  test("everything OUTSIDE the edited window is byte-identical to the input (mixed file)", () => {
+    // Strong invariant: cut the edited line out of BOTH input and output and the
+    // remainders must be byte-equal. This catches ANY terminator coercion on an
+    // untouched line, anywhere in the file.
+    const src = "a\nb\nc\r\nd\ne\r\nf\n  EDIT  ME\ng\r\nh\n"
+    // Edit the line "  EDIT  ME" (index in source).
+    const lineStart = src.indexOf("  EDIT  ME")
+    const lineEnd = src.indexOf("\n", lineStart) + 1 // include its LF terminator
+    const r = applyFuzzyEdit(src, "EDIT ME", "DONE", false)
+    expect(r.ok).toBe(true)
+    const out = r.next ?? ""
+
+    // The replacement line: "DONE" + the window's LF terminator.
+    const outLineStart = out.indexOf("DONE")
+    const outLineEnd = out.indexOf("\n", outLineStart) + 1
+    // Surrounding bytes (input vs output, edited line removed) are IDENTICAL —
+    // no untouched terminator was rewritten.
+    expect(sliceAround(out, outLineStart, outLineEnd)).toBe(sliceAround(src, lineStart, lineEnd))
+    // And the CRLF lines are still CRLF in the output.
+    expect(out).toContain("c\r\n")
+    expect(out).toContain("e\r\n")
+    expect(out).toContain("g\r\n")
+  })
+
+  test("replaceAll across a mixed-EOL file: untouched lines (both EOLs) survive verbatim", () => {
+    // Two fuzzy-matching duplicate lines straddle a mixed region; replace_all
+    // splices BOTH. Untouched lines keep their own terminator (CRLF stays CRLF,
+    // LF stays LF) — no whole-file normalize.
+    const src = "x =  1\nmid CRLF\r\nbetween\nx =  1\r\nlone\n"
+    const r = applyFuzzyEdit(src, "x = 1", "x = 2", true)
+    expect(r.ok).toBe(true)
+    const out = r.next ?? ""
+    expect(out).toContain("mid CRLF\r\n") // untouched CRLF survives
+    expect(out).toContain("between\n") // untouched LF survives
+    expect(out).toContain("lone\n") // untouched LF survives
+    // Each "x = 1" became "x = 2" with that line's ORIGINAL terminator:
+    // first occurrence was LF-terminated, second was CRLF-terminated.
+    expect(out).toBe("x = 2\nmid CRLF\r\nbetween\nx = 2\r\nlone\n")
+  })
+
+  test("scored-candidate recovery on a mixed-EOL file also byte-preserves untouched lines", () => {
+    // Engineer the ADR-0456 scored-candidate rung (ambiguous → strict winner) on
+    // a mixed-EOL file and assert the untouched CRLF region survives. Window A's
+    // first line is verbatim; window B's is not → strict winner A.
+    const src = "  x = 1\n  y  =  2\nCRLF HERE\r\n  x  =  1\n  y  =  2\n"
+    const r = applyFuzzyEdit(src, "  x = 1\n  y = 2", "  x = 9\n  y = 9", false)
+    expect(r.ok).toBe(true)
+    expect(r.message).toMatch(/scored|best/i)
+    const out = r.next ?? ""
+    // The untouched CRLF line is byte-identical.
+    expect(out).toContain("CRLF HERE\r\n")
+    expect(out).toBe("  x = 9\n  y = 9\nCRLF HERE\r\n  x  =  1\n  y  =  2\n")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // T-D6 (RFC jun-7 Phase-2-FINAL W3) — REAL-FS disk round-trip CRLF.
 //
 // The `applyFuzzyEdit` tests above are pure-string only (no disk). The plan

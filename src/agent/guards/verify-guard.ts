@@ -11,7 +11,8 @@
  *   two completion points the loop accepts: `action.do === "completed"` OR
  *   `action.do === "proceed"` with no `tool_use` blocks).
  * - When blocking: emit recovery=`"unverified"`, arm
- *   `toolChoiceState.verifyGuardViolated = true` (ADR-0079, 1-turn TTL),
+ *   `toolChoiceState.verifyGuardViolated = true` (ADR-0079, 1-turn TTL — note
+ *   this no longer forces tool_choice; it resolves to `auto`),
  *   `wm.append(message)` + `wm.append(metaUser(text))`, return blocked.
  */
 
@@ -60,7 +61,10 @@ export const createVerifyGuard = (args: {
         return undefined
       }
       ctx.emit("unverified")
-      // ADR-0079 — arm tool_choice:{kind:"any"} for the FORCED re-entry.
+      // ADR-0079 — arm the 1-turn-TTL signal bit. This NO LONGER forces
+      // tool_choice (resolveToolChoice maps it to `auto`); the steer is the
+      // injected evidential nudge below, which the model may satisfy with a
+      // verify tool OR a text answer. Bit kept for state-hygiene/observability.
       ctx.toolChoiceState.verifyGuardViolated = true
       ctx.wm.append(ctx.message as Message)
       ctx.wm.append(metaUser(verdict.text))

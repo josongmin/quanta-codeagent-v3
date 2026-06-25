@@ -2396,6 +2396,37 @@ const localizePhaseConfigOf = (
   return { ...opt.localizePhase, chaMultisiteSteer }
 }
 
+/**
+ * Repair-round localize-phase suppression (jun-25).
+ *
+ * The localize-phase EDIT-BLOCK (`decideLocalizePhase`) is an INITIAL-generation
+ * safety: it denies mutating tools for the first `phase1Turns` of a session to
+ * stop the model editing the wrong file before the fault is localized. A REPAIR
+ * round spins a FRESH agent session (turn 0) but the fault is ALREADY localized
+ * by construction — the patch exists and the failing gate is named, and the
+ * repair seed explicitly says "Revise the existing cumulative patch …
+ * repair_existing_patch_only". Letting the edit-block re-fire there is a
+ * straitjacket: the model is told to fix the patch AND forbidden to edit for the
+ * first 5 turns, wasting a round re-localizing.
+ *
+ * This strips `phase1Turns` from the repair posture's `localizePhase` so
+ * `buildLocalizePhase` returns `undefined` (no state ⇒ `decideLocalizePhase`
+ * never blocks). The advisory LSP-grounding / CHA steers ride on the SAME
+ * `localizePhase` object (`lspGroundingSteer` is read by `buildDirectiveSteers`
+ * as an always-present directive line), so we PRESERVE those fields and only
+ * drop `phase1Turns` — repair keeps the optional steer but loses the hard
+ * edit-block. Absent `localizePhase` ⇒ pass-through (byte-identical).
+ *
+ * INITIAL generation is untouched: this only rewrites the posture used by the
+ * repair `runAgentOnce` call, never the single-pass / generation phase.
+ */
+export const repairLocalizePhaseSuppressed = (opt: BenchPosture): BenchPosture => {
+  const lp = opt.localizePhase
+  if (lp === undefined) return opt
+  const { phase1Turns: _dropped, ...rest } = lp
+  return { ...opt, localizePhase: rest }
+}
+
 const wirePostureAgentPorts = (args: {
   readonly config: AgentConfig
   readonly opt: BenchPosture
@@ -3049,6 +3080,21 @@ const runRepairPhase = async (
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
 ): Promise<Phase> => {
+  // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds. The fault
+  // is already localized in repair (patch exists + failing gate named), so the
+  // Phase-1 edit-block is a straitjacket that re-fires every fresh repair session
+  // and forces ~5 wasted re-localize turns against the "revise the patch now"
+  // seed. We resolve the EFFECTIVE posture here (the override, or the env-derived
+  // posture `runAgentOnce`→`buildConfig` would otherwise compute) and strip
+  // `phase1Turns` so `decideLocalizePhase` never blocks — the advisory steer is
+  // preserved. INITIAL generation (`runAgentPhase`) is unchanged.
+  const resolvedPosture =
+    postureOverride ??
+    benchPostureFromState(
+      stateOverride ?? resolveBenchKnobs({ envVars: process.env }),
+      process.env,
+    )
+  const repairPosture = repairLocalizePhaseSuppressed(resolvedPosture)
   // B1/B3: thread the slice-resolving inputs into the classic-repair packet so
   // its owner evidence carries exact slices (paired with issue symbols) and it
   // names the active proof target — parity with the selector-repair sibling.
@@ -3092,7 +3138,10 @@ const runRepairPhase = async (
             precomputedHint,
             reproHint,
             closureHint,
-            postureOverride,
+            // Repair posture with the localize-phase edit-block stripped (see
+            // `repairLocalizePhaseSuppressed`). Always an explicit override so
+            // `buildConfig` does NOT re-resolve the block-active env posture.
+            repairPosture,
             stateOverride,
             chaMultisiteSteer,
           ),
@@ -3709,7 +3758,7 @@ const selectionPhaseResultOf = (args: {
     .sort((a, b) => a[0] - b[0])
     .map(([, error]) => error)
   const phase: Phase = {
-    patch: args.result.winner?.patch ?? "",
+    patch: args.result.winner?.patch ?? args.result.fallbackCandidate?.patch ?? "",
     turns: args.totalTurns,
     selectionTelemetry:
       orderedErrors.length === 0
@@ -3902,6 +3951,14 @@ const runSelectionPhase = async (
       ? { publicContracts: selectionAuthorityContracts }
       : {}),
     ...(oracleFailureRepairSeed !== undefined ? { oracleFailureRepairSeed } : {}),
+    // CORRECTED non-empty fallback. Default OFF; opt-in via
+    // QUANTA_BENCH_NONEMPTY_FALLBACK. When no winner exists, submit the rock-solid-
+    // subset candidate (applies clean / no regression / no static-sanity break,
+    // barred only by a self-oracle) instead of empty — weakly dominates on binary
+    // SWE-bench scoring. Unset ⇒ no fallbackCandidate ⇒ byte-identical.
+    ...(gateOn(process.env, "QUANTA_BENCH_NONEMPTY_FALLBACK")
+      ? { nonEmptyFallback: true as const }
+      : {}),
     recordLlmEvidencePacket: (packet) => {
       recordLlmEvidencePacket(selectionLlmEvidence, packet)
     },

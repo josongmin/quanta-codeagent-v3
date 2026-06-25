@@ -18,6 +18,44 @@ export const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
  *  token is piped over STDIN and is safe, but these env/flag values are not). */
 export const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
+/** `Bun.spawn` runs argv directly (no shell), so a `~/…` keyPath reaches
+ *  ssh/scp/rsync LITERALLY. OpenSSH happens to tilde-expand `-i`, but rsync's
+ *  `-e` string and other consumers don't — and an unreadable `-i` degrades
+ *  SILENTLY (a warning, then "try other auth"), so a literal `~` is a latent
+ *  foot-gun. Expand a leading `~/` ourselves; absolute paths pass through. */
+export const expandHome = (p: string): string =>
+  p.startsWith("~/") ? `${process.env.HOME ?? ""}/${p.slice(2)}` : p
+
+/** ssh/scp/rsync host-key + safety options for EPHEMERAL bench boxes (SSOT —
+ *  makeSsh, the rsync `-e` transport, and scp ALL use these so they connect the
+ *  SAME way).
+ *
+ *  Host-key checking is DISABLED on purpose (RCA jun-25):
+ *  - bench boxes are launched & identified by US via the AWS instance API, not by
+ *    a persistent host identity, so a MITM host-key check adds ~zero value;
+ *  - EC2 RECYCLES public IPs, so a fresh box routinely lands on an IP already in
+ *    the user's `~/.ssh/known_hosts` with a DIFFERENT (stale) key. The prior
+ *    `StrictHostKeyChecking=accept-new` then REFUSES that box (instant exit 255,
+ *    BEFORE auth) — which surfaced as "box never became ssh-reachable" while the
+ *    box was in fact fully up and reachable via `ssh -o StrictHostKeyChecking=no`;
+ *  - persisting throwaway box keys POLLUTES the real known_hosts (it had 1400+
+ *    stale entries), which is what SEEDS the recycled-IP collisions above.
+ *  `UserKnownHostsFile=/dev/null` ⇒ never read/poison the real file; `=no` ⇒
+ *  never refuse/prompt on a host key; `BatchMode=yes` ⇒ never block on ANY prompt
+ *  (a hung passphrase/confirm prompt is invisible and indistinguishable from a
+ *  dead box); `LogLevel=ERROR` silences the now-expected known-hosts warning so
+ *  the REAL ssh stderr stays diagnosable in the readiness loop. */
+export const BENCH_SSH_SAFE_OPTS = [
+  "-o",
+  "StrictHostKeyChecking=no",
+  "-o",
+  "UserKnownHostsFile=/dev/null",
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "LogLevel=ERROR",
+] as const
+
 /** Full-remote readiness/retry waits MUST keep the owner process alive.
  *  `unref()` here let the CLI exit cleanly while still awaiting cloud-init,
  *  orphaning fresh EC2 boxes before bootstrap finished. */
@@ -55,9 +93,8 @@ export const makeSsh =
       "ssh",
       [
         "-i",
-        keyPath,
-        "-o",
-        "StrictHostKeyChecking=accept-new",
+        expandHome(keyPath),
+        ...BENCH_SSH_SAFE_OPTS,
         "-o",
         "ConnectTimeout=15",
         "-o",

@@ -138,7 +138,27 @@ export class BenchStreamTap implements StreamPort {
     private readonly downstream: StreamPort,
     private readonly onVerifyPass?: (seq: number) => void,
     private readonly verifyAuthorityCommands?: readonly string[],
+    /** Optional per-action progress sink. Wired in the bench path to logger.info
+     *  so the box `run.log` shows WHAT the agent is doing live (edit <file> /
+     *  bash <cmd> / read …) under concurrency, instead of ~15min of silence
+     *  between the ▶ start and ■ done lines. Absent ⇒ byte-identical (no emit). */
+    private readonly onAction?: (name: string, detail: string) => void,
   ) {}
+
+  /** Concise human detail for an action line: edit→target file, bash→command
+   *  head, else the first string arg. Truncated so run.log stays one line/action. */
+  private actionDetailOf(name: string, input: unknown): string {
+    const edit = editTargetOf(name, input)
+    if (edit !== undefined) return edit
+    if (typeof input === "object" && input !== null) {
+      const o = input as Record<string, unknown>
+      for (const k of ["command", "path", "file_path", "query", "pattern", "url"]) {
+        const v = o[k]
+        if (typeof v === "string" && v !== "") return v.replace(/\s+/g, " ").slice(0, 80)
+      }
+    }
+    return ""
+  }
   /** A verify tool_call — `test_runner`, or a `bash` whose command is test-like
    *  OR exactly matches a caller-declared verifier authority command
    *  (e.g. bench `instance.testCmd`). */
@@ -152,6 +172,9 @@ export class BenchStreamTap implements StreamPort {
   }
 
   private handleToolCall(event: ToolCallEvent): void {
+    if (this.onAction !== undefined) {
+      this.onAction(event.name, this.actionDetailOf(event.name, event.input))
+    }
     this.trackVerifyCall(event)
     this.trackEditCall(event)
   }

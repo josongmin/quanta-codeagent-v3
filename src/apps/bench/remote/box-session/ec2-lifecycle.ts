@@ -16,7 +16,7 @@ import { lookupCurrentPublicIpv4 } from "../ec2"
 import { PHANTOM_DEPS } from "./auth"
 import { readDatasetInstanceIds } from "./dataset-preflight"
 import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
-import { aws, defaultSleep, makeSsh, oneLine } from "./shell"
+import { BENCH_SSH_SAFE_OPTS, aws, defaultSleep, expandHome, makeSsh, oneLine } from "./shell"
 import {
   type BoxSnapshotRead,
   readBoxRuntimeProbe,
@@ -278,7 +278,10 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   log(
     "[full-remote] bootstrapped. Syncing src/ + config (SURGICAL — the monorepo's apps/crates/native are GBs and the bench needs only src)…",
   )
-  const sshOpts = `ssh -i ${keyPath} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o ServerAliveInterval=15`
+  // Same host-key/safety posture as makeSsh (SSOT) so the rsync transport
+  // connects identically to the readiness/grade ssh — a recycled-IP stale key
+  // must not refuse the rsync after readiness already succeeded.
+  const sshOpts = `ssh -i ${expandHome(keyPath)} ${BENCH_SSH_SAFE_OPTS.join(" ")} -o ConnectTimeout=15 -o ServerAliveInterval=15`
   await ssh("mkdir -p ~/quanta")
   const rsynced = await spawn("rsync", [
     "-az",
@@ -301,7 +304,8 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   }
   const scpCfg = await spawn("scp", [
     "-i",
-    keyPath,
+    expandHome(keyPath),
+    ...BENCH_SSH_SAFE_OPTS,
     "-o",
     "ConnectTimeout=15",
     `${cfg.repoDir}/package.json`,
@@ -388,18 +392,68 @@ const waitForBoxReady = async (
   cfg: FullRemoteConfig,
 ): Promise<void> => {
   const sleep = cfg.sleep ?? defaultSleep
-  const maxReadyPolls = cfg.maxReadyPolls ?? 30
+  const log = cfg.onLog ?? (() => {})
+  // jun-25: 30→90 (5min→15min readiness window). A READY box returns on the
+  // FIRST poll, so this only extends the wait for a SLOW bootstrap — which is
+  // exactly what was failing: under a degraded network, cloud-init's
+  // docker+bun+uv+pyright install ran past 5min, so the box was ssh-reachable
+  // but not yet bun-ready when the old 30-poll window expired → "never became
+  // ready" → relaunch → both attempts LOST despite the boxes being healthy.
+  const maxReadyPolls = cfg.maxReadyPolls ?? 90
+  // jun-25 RCA: the prior loop DISCARDED probe.code/stderr every poll and threw a
+  // hardcoded guess ("check SG :22 / cloud-init"). So a box that was provably
+  // reachable + ready + world-open-SG looked IDENTICAL to a dead one — a run
+  // burned ~15min × 2 retries blind-polling, and the on-call had to hand-forensic
+  // (ssh + auth.log + AWS state, ~25min) to learn the readiness ssh simply never
+  // reached the box. Surface the REAL exit/stderr: first failure immediately
+  // (the diagnostic that matters), a heartbeat every 10th poll, and the actual
+  // last error in the throw.
+  let lastCode = -1
+  let lastErr = ""
+  let consecutiveTerminal = 0
   for (let i = 0; i < maxReadyPolls; i++) {
     const probe = await ssh(
       "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY",
     )
     if (probe.code === 0 && probe.stdout.includes("READY")) return
+    lastCode = probe.code
+    lastErr = (probe.stderr || probe.stdout).trim().replace(/\s+/g, " ").slice(0, 300)
+    const terminal = SSH_TERMINAL_ERROR.test(lastErr)
+    consecutiveTerminal = terminal ? consecutiveTerminal + 1 : 0
+    if (i === 0 || i % 10 === 9 || terminal) {
+      log(
+        `[full-remote] readiness poll ${i + 1}/${maxReadyPolls} not ready ` +
+          `(ssh exit ${lastCode}${lastErr ? `: ${lastErr}` : ""})` +
+          (terminal ? " — NON-RECOVERABLE (key/host-key/perm, not slow-boot)" : ""),
+      )
+    }
+    // A non-recoverable ssh error (auth / host-key / unreadable key / bad config)
+    // will NEVER heal by waiting — abort after a few consecutive hits instead of
+    // burning the whole ~15min window (and then a retry burning another ~15min).
+    // "Connection refused / timed out" is the NORMAL still-booting signal and is
+    // deliberately NOT terminal, so a slow cloud-init still gets the full window.
+    if (consecutiveTerminal >= 3) {
+      throw new Error(
+        `[full-remote] box ssh is NON-RECOVERABLE after ${i + 1} polls ` +
+          `(ssh exit ${lastCode}: ${lastErr}) — not a slow boot; ` +
+          "check key path / host-key / SG :22, not cloud-init",
+      )
+    }
     await sleep(10_000)
   }
   throw new Error(
-    "[full-remote] box never became ssh-reachable + bun-ready (check SG :22 / cloud-init)",
+    `[full-remote] box never became ssh-reachable + bun-ready after ${maxReadyPolls} polls ` +
+      `(last ssh exit ${lastCode}${lastErr ? `: ${lastErr}` : ""})`,
   )
 }
+
+/** ssh stderr patterns that will NEVER self-heal by waiting longer (auth /
+ *  host-key / unreadable key / misconfig) — as opposed to the normal still-
+ *  booting signals ("Connection refused", "Operation timed out"), which are NOT
+ *  listed here so a slow cloud-init keeps polling. Used by {@link waitForBoxReady}
+ *  to fail fast instead of polling the full readiness window on a doomed box. */
+const SSH_TERMINAL_ERROR =
+  /Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|Permission denied|identity file .* not accessible|Bad (?:configuration|owner)|Could not resolve hostname|UNPROTECTED PRIVATE KEY|Too many authentication failures/i
 
 /**
  * Launch + bootstrap a box; return a live {@link BoxSession}. On ANY failure
@@ -439,6 +493,9 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     const ip = await describeInstancePublicIp(awsFn, iid)
     const host = `ubuntu@${ip}`
     log(`[full-remote] box up at ${ip}. Waiting for cloud-init (docker+bun+uv ~2-3min)…`)
+    // Copy-paste log tracker — printed the moment the IP is known (not ~5min later
+    // at patch-gen) so you can `tail -f` the per-action run.log from the start.
+    log(`[full-remote] 📋 track live (copy-paste):\n    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`)
 
     const ssh = makeSsh(spawn, keyPath, host)
     const session: BoxSession = {

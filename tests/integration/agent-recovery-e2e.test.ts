@@ -187,9 +187,10 @@ describe("recovery e2e — integrated runAgent", () => {
     expect(continueMeta).toBe(true)
   })
 
-  test("5. malformed tool_use: nudge+retry once, persists → treated as text, completes", async () => {
+  test("5. malformed tool_use: nudge+retry once, persists → NON-success terminal (FIX-2)", async () => {
     // stop_reason "tool_use" but ZERO tool_use blocks, twice. MAX_MALFORMED
-    // RETRIES=1 → first nudge, second occurrence treated as a normal turn.
+    // RETRIES=1 → first nudge, second occurrence → FIX-2 seals a NON-success
+    // `error` terminal (was `completed` pre-fix), never spinning.
     const llm = new ScriptedLLM([
       ev([
         { type: "text_delta", delta: "oops no tool" },
@@ -201,10 +202,10 @@ describe("recovery e2e — integrated runAgent", () => {
       ]),
     ])
     const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 2 })), 15_000, "malformed-tool")
-    expect(out.reason).toBe("completed")
+    // TEETH: pre-fix `completed`. A fumbled tool call is not reported as success.
+    expect(out.reason).toBe("error")
     // Exactly 2 LLM calls (one nudge retry), no infinite loop.
     expect(llm.calls).toBe(2)
-    expect(out.turns).toBe(1)
   })
 
   test("6. consecutive empty turns are capped → terminates completed", async () => {
@@ -253,9 +254,12 @@ describe("recovery e2e — integrated runAgent", () => {
   // the last turn and a state.ts resume lost it too. These two tests FAIL
   // pre-fix (last entry would be the injected meta `user` nudge, not the
   // final assistant turn) and PASS post-fix.
-  test("8. C5: malformed-exhausted completion keeps the final assistant turn last", async () => {
+  test("8. C5: malformed-exhausted terminal keeps the final assistant turn last (FIX-2)", async () => {
     // stop_reason "tool_use" with ZERO tool_use blocks twice. MAX_MALFORMED
-    // RETRIES=1 → first nudge, second occurrence → completed-via-exhaustion.
+    // RETRIES=1 → first nudge, second occurrence → FIX-2 NON-success `error`
+    // terminal. The C5 invariant still holds: the final assistant turn (the
+    // model's last words) is preserved in the transcript — `applyNonSuccess
+    // RecoveryAction` appends the assembled message before sealing `error`.
     const llm = new ScriptedLLM([
       ev([
         { type: "text_delta", delta: "oops no tool" },
@@ -271,7 +275,7 @@ describe("recovery e2e — integrated runAgent", () => {
       15_000,
       "c5-malformed-exhausted",
     )
-    expect(out.reason).toBe("completed")
+    expect(out.reason).toBe("error")
     const last = out.messages.at(-1)
     expect(last?.role).toBe("assistant")
     expect(
@@ -376,9 +380,11 @@ describe("recovery e2e — hell cases: budget exhaustion per recovery kind", () 
     expect(llm.calls).toBe(4)
   }, 30_000)
 
-  test("hc-malformed: 2 malformed in a row (budget=1) → 2nd is completed-via-exhaustion", async () => {
-    // Re-pins test #5 explicitly as budget=1 exhaustion. The 2nd malformed
-    // turn is treated as completed (terminal), NOT another nudge.
+  test("hc-malformed: 2 malformed in a row (budget=1) → 2nd is a NON-success terminal (FIX-2)", async () => {
+    // Re-pins test #5 explicitly as budget=1 exhaustion. FIX-2 (jun-25): the
+    // 2nd malformed turn (model signalled tool_use intent but emitted no valid
+    // call) is sealed as a NON-success `error` terminal — NOT `completed`. A
+    // fumbled tool call must never be reported as success.
     const llm = new ScriptedLLM([
       ev([
         { type: "text_delta", delta: "m1" },
@@ -395,8 +401,11 @@ describe("recovery e2e — hell cases: budget exhaustion per recovery kind", () 
       15_000,
       "hc-malformed-exhaust",
     )
-    expect(out.reason).toBe("completed")
-    // EXACTLY 2 calls — 1 nudge then exhaustion → completed without a 3rd.
+    // TEETH: pre-fix this was `completed` (success). Now a distinct non-success
+    // terminal so the fumble is not misclassified.
+    expect(out.reason).toBe("error")
+    expect(out.reason).not.toBe("completed")
+    // EXACTLY 2 calls — 1 nudge then exhaustion → terminal without a 3rd.
     expect(llm.calls).toBe(2)
   }, 15_000)
 

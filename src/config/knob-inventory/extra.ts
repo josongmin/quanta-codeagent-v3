@@ -343,6 +343,16 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/driver.ts",
   },
   {
+    envKey: "QUANTA_BENCH_NONEMPTY_FALLBACK",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench eval (jun-25): CORRECTED non-empty fallback. When no winner exists, submit the rock-solid-subset candidate (applies clean / no regression / no static-sanity break, barred only by a self-oracle MWE/repro false-negative) instead of empty — weakly dominates on binary SWE-bench scoring. Default OFF; opt-in via QUANTA_BENCH_NONEMPTY_FALLBACK.",
+    readSite: "apps/bench/eval/driver.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_TOKEN_BUDGET_DIR",
     kind: "string",
     default: "~/.quanta/bench-token-budget",

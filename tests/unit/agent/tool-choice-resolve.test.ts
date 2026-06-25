@@ -9,14 +9,21 @@ import {
 
 /**
  * ADR-0079 — `resolveToolChoice(signals)` is a pure function over a closed
- * signal struct. Five tests pin the four-way precedence ladder plus the
- * 1-turn-TTL consume/clear discipline of the loop-owned turn state.
+ * signal struct. These tests pin the precedence ladder plus the 1-turn-TTL
+ * consume/clear discipline of the loop-owned turn state.
  *
  * Precedence (exhaustive):
  *   1. explicit !== undefined      → explicit
- *   2. verifyGuardViolated === true → {kind:"any"}
- *   3. closeoutAttempted === true   → {kind:"none"}
- *   4. otherwise                    → {kind:"auto"}
+ *   2. closeoutAttempted === true   → {kind:"none"}
+ *   3. otherwise                    → {kind:"auto"}
+ *
+ * `verifyGuardViolated` is DELIBERATELY NOT a tool_choice trigger: it falls
+ * through to `auto`. The verify-guard's injected nudge is evidential and
+ * invites a TEXT answer ("if you already verified, say HOW and proceed"), which
+ * `{kind:"any"}` would mechanically ban. Forcing a tool there is a
+ * self-contradicting force (and strands a read-only-scoped turn on a useless
+ * tool). The tests below GO RED if the old `verifyGuardViolated → {kind:"any"}`
+ * branch is restored.
  *
  * Every test must construct ONLY the closed `ToolChoiceSignals` struct — no
  * heuristic side-channel — to assert the policy is structural, not advisory.
@@ -31,14 +38,18 @@ describe("resolveToolChoice — pure 4-way precedence", () => {
     expect(resolveToolChoice({})).toEqual({ kind: "auto" })
   })
 
-  test("verifyGuardViolated:true ⇒ {kind:'any'} — force model to call a tool", () => {
-    // The verify-guard arms this AFTER a finish-intent right after an
-    // unverified mutating tool. The next LLM stream must FORCE the model to
-    // emit a tool_use (typically a verify) — `any` is the closed-union variant
-    // that maps to Anthropic `tool_choice:{type:"any"}` and OpenAI
-    // `tool_choice:"required"`. No name pinning: the verify-guard does not
-    // dictate WHICH tool, only that ONE must be called.
-    expect(resolveToolChoice({ verifyGuardViolated: true })).toEqual({ kind: "any" })
+  test("verifyGuardViolated:true ⇒ {kind:'auto'} — NO forced tool; model may answer in text", () => {
+    // TEETH: the verify-guard arms this AFTER a finish-intent right after an
+    // unverified mutating tool, but it MUST NOT force a tool call. The guard's
+    // injected nudge is evidential and explicitly invites the model to answer
+    // in TEXT how it already verified ("say HOW … and proceed") OR run a test.
+    // `{kind:"any"}` would mechanically ban that text answer and strand a
+    // read-only-scoped turn on a useless tool. So this resolves to `auto`: the
+    // model is free to call a verify tool OR answer in text. Restoring the old
+    // `verifyGuardViolated → {kind:"any"}` branch FAILS this assertion.
+    expect(resolveToolChoice({ verifyGuardViolated: true })).toEqual({ kind: "auto" })
+    // Explicitly NOT the old forced shape.
+    expect(resolveToolChoice({ verifyGuardViolated: true })).not.toEqual({ kind: "any" })
   })
 
   test("closeoutAttempted:true ⇒ {kind:'none'} — forbid any tool call", () => {
@@ -49,16 +60,14 @@ describe("resolveToolChoice — pure 4-way precedence", () => {
     expect(resolveToolChoice({ closeoutAttempted: true })).toEqual({ kind: "none" })
   })
 
-  test("verifyGuardViolated + closeoutAttempted ⇒ verify wins (any) — verify > closeout precedence", () => {
-    // Precedence is documented order: verifyGuardViolated checked BEFORE
-    // closeoutAttempted. A session that simultaneously sets both should
-    // emit `any` (verify forced) — the model still has to verify before
-    // it gets to the closeout-text-only branch. Loop-level ordering also
-    // ensures verify-guard fires first (its check runs strictly before
-    // closeoutGuardStep in applyAction), so a concurrent ARM is rare in
-    // practice — but the policy MUST still be deterministic.
+  test("verifyGuardViolated + closeoutAttempted ⇒ closeout {none} wins — verify no longer forces", () => {
+    // PAIRED CONTROL: verifyGuardViolated is now a no-op for tool_choice, so
+    // when both are set the only remaining trigger is closeout, which forces a
+    // terminal text turn `{kind:"none"}`. (Concurrent ARM is rare in practice —
+    // verify-guard fires strictly before closeoutGuardStep — but the policy
+    // MUST still be deterministic.) The closeout force is UNCHANGED by this fix.
     expect(resolveToolChoice({ verifyGuardViolated: true, closeoutAttempted: true })).toEqual({
-      kind: "any",
+      kind: "none",
     })
   })
 

@@ -379,3 +379,42 @@ export const bestEffortEligible = (
   if (staticSanityRejected(entry.verdict)) return false
   return true
 }
+
+/**
+ * CORRECTED non-empty fallback eligibility (default-OFF A/B arm).
+ *
+ * This is the ROCK-SOLID SUBSET of submittability, used ONLY when there is NO
+ * winner at all (no admissible AND no best-effort-eligible candidate, so the
+ * alternative is submitting an EMPTY patch). A candidate is eligible to be
+ * submitted in place of empty iff it:
+ *   - produced a non-empty patch,
+ *   - did not fail to apply (`applyClean !== false` — null fail-open is allowed),
+ *   - did not regress existing tests (`regressionGreen !== false`), and
+ *   - did not trip the DETERMINISTIC static-sanity parse gate (NameError /
+ *     callback-arity / None-subscript style "this patch is broken" evidence).
+ *
+ * WEAK-DOMINANCE RATIONALE (SWE-bench, BINARY scoring): such a candidate WEAKLY
+ * DOMINATES the empty patch. If it is wrong it scores 0 — exactly what empty
+ * scores. If the ONLY thing that barred it was a SELF-oracle (the candidate's
+ * own MWE/repro run, ~45% false-negative rate per jun-20), it may actually be
+ * correct and score 1 (> empty). Submitting empty instead can only ever lose,
+ * never help. So we DELIBERATELY DO NOT bar the SELF-oracle / completeness /
+ * absorb-inert rejections that `bestEffortEligible` bars:
+ *   - `mweCandidateRedRejected`   — candidate's own MWE still red (self-oracle FN)
+ *   - `proofRequiredRejected`     — proof-required mode had no positive proof
+ *   - `familyCoverageRejected`    — typed co-change completeness demand
+ *   - `hardResolvedRejected`      — resolved-K-of-N self-oracle
+ *   - `declaredExpectedRejected`  — static prose-regex answer-key heuristic
+ * We STILL bar the genuinely-bad ones (won't apply / regresses / static-sanity /
+ * empty): those risk a grader error or real breakage, not merely a 0.
+ */
+export const nonEmptyFallbackEligible = (
+  entry: Pick<ScoredEntry, "hard" | "verdict">,
+  _mode: SelectorMode,
+): boolean => {
+  if (!entry.hard.patchProduced) return false
+  if (entry.hard.applyClean === false) return false
+  if (entry.hard.regressionGreen === false) return false
+  if (staticSanityRejected(entry.verdict)) return false
+  return true
+}

@@ -182,14 +182,16 @@ describe("A3 boundary — empty-turn budget (=2)", () => {
 })
 
 describe("A3 boundary — malformed-tool budget (=1)", () => {
-  test("nudge,(2nd) completed — the 2nd malformed is exhaustion, not a 2nd nudge", () => {
+  test("nudge,(2nd) NON-success terminal — exhaustion, not a 2nd nudge (FIX-2)", () => {
     const rec = freshRecovery()
     // stop_reason "tool_use" but the message carries NO tool_use block.
     const a1 = decideOnAssembled("tool_use", textMsg("oops"), rec)
     expect(a1.do).toBe("nudge")
     expect(rec.malformedRetries).toBe(1)
     const a2 = decideOnAssembled("tool_use", textMsg("still oops"), rec)
-    expect(a2.do).toBe("completed")
+    // FIX-2 (jun-25): a fumbled tool call (model intended to act, emitted no
+    // valid call) is sealed as a NON-success terminal — NOT `completed`/success.
+    expect(a2.do).toBe("error")
     expect(rec.malformedRetries).toBe(1)
   })
 })
@@ -240,9 +242,10 @@ describe("A3 interleaving — what a successful `proceed` turn resets (DOCUMENTE
     expect(rec.outputContinues).toBe(3) // NOT reset
     expect(rec.malformedRetries).toBe(1) // NOT reset
     // So the next max_tokens proceeds (budget already spent) and the next
-    // malformed completes (budget already spent) — no fresh allowance.
+    // malformed seals as a NON-success terminal (FIX-2; budget already spent) —
+    // no fresh allowance.
     expect(decideOnAssembled("max_tokens", textMsg("x"), rec).do).toBe("proceed")
-    expect(decideOnAssembled("tool_use", textMsg("y"), rec).do).toBe("completed")
+    expect(decideOnAssembled("tool_use", textMsg("y"), rec).do).toBe("error")
   })
 
   test("DOCUMENTED: streamRetries is never reset by decideOnAssembled (only fresh turns reset)", () => {
@@ -413,11 +416,14 @@ describe("decideOnAssembled", () => {
     expect(decideOnAssembled("max_tokens", textMsg("done"), rec).do).toBe("proceed")
   })
 
-  test("malformed tool_use: one nudge, then completed", () => {
+  test("malformed tool_use: one nudge, then NON-success terminal (FIX-2)", () => {
     const rec = freshRecovery()
     const a1 = decideOnAssembled("tool_use", textMsg("oops"), rec)
     expect(a1.do).toBe("nudge")
-    expect(decideOnAssembled("tool_use", textMsg("oops"), rec).do).toBe("completed")
+    // FIX-2 (jun-25): exhausted malformed-tool retries seal as `error`
+    // (non-success), not `completed` — a fumbled tool call is never reported
+    // as success.
+    expect(decideOnAssembled("tool_use", textMsg("oops"), rec).do).toBe("error")
   })
 
   test("empty turn: capped nudges then completed", () => {

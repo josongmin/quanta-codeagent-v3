@@ -237,6 +237,13 @@ export interface SelectionResult {
   /** Highest-scoring terminal candidate when nothing was submittable. Lets the
    *  caller preserve stop-reason/error/edit metadata even when `winner=null`. */
   terminalCandidate: Candidate | null
+  /** CORRECTED non-empty fallback (default-OFF A/B arm). Present (non-null) ONLY
+   *  when `winner === null` AND the `nonEmptyFallback` arg was on AND a candidate
+   *  passed the rock-solid subset (`nonEmptyFallbackEligible`). The driver submits
+   *  this patch INSTEAD of empty. This is NOT a winner — `winner`,
+   *  `terminalCandidate`, `admissibleCount`, and `noWinnerReason` stay honest. When
+   *  the arm is off or no candidate qualifies, this is `null`/absent. */
+  fallbackCandidate?: Candidate | null
   /** Per-candidate scoring (post-dedup), generation order. */
   scored: ScoredEntry[]
   /** How many candidates were admissible. */

@@ -925,6 +925,107 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(terminated).toBe(true)
   })
 
+  test("readiness poll surfaces the REAL ssh exit/stderr instead of swallowing it", async () => {
+    // RCA jun-25: waitForBoxReady DISCARDED probe.code/stderr every poll and threw
+    // a hardcoded "(check SG :22 / cloud-init)" guess. So a box that was provably
+    // reachable + ready + world-open-SG looked IDENTICAL to a dead one — a run
+    // burned ~15min × 2 retries blind-polling, and the on-call had to hand-forensic
+    // (ssh + auth.log + AWS state, ~25min) to learn the readiness ssh simply never
+    // connected. Now the real exit/stderr is logged per failed poll AND carried in
+    // the throw. Red-on-injection: drop the stderr capture and both halves fail.
+    const TIMEOUT_STDERR = "ssh: connect to host 1.2.3.4 port 22: Operation timed out"
+    const logs: string[] = []
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-stuck")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("bun") && remote.includes("READY"),
+        fail(255, TIMEOUT_STDERR),
+      ),
+    )
+    let thrown: unknown
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn, onLog: (line) => logs.push(line) })
+      .run()
+      .catch((err) => {
+        thrown = err
+      })
+    // (1) per-poll surfacing: the real ssh exit code + stderr reaches the log.
+    expect(
+      logs.some(
+        (l) => l.includes("readiness poll") && l.includes("255") && l.includes(TIMEOUT_STDERR),
+      ),
+    ).toBe(true)
+    // (2) the throw carries the real reason, not just the generic prefix.
+    const msg = String(thrown)
+    expect(msg).toContain("box never became ssh-reachable + bun-ready")
+    expect(msg).toContain("255")
+    expect(msg).toContain(TIMEOUT_STDERR)
+  })
+
+  test("readiness FAILS FAST on a non-recoverable ssh error instead of polling the full window", async () => {
+    // RCA jun-25: a doomed box (auth / host-key / unreadable key) will NOT heal by
+    // waiting — yet the loop polled the full window (~15min) × 2 retries (~30min
+    // wasted) before giving up. "Connection refused / timed out" = still booting
+    // (keep polling); "Permission denied / host-key" = terminal (abort now).
+    // Red-on-injection: drop the terminal classification and this exhausts the 30
+    // polls instead of bailing after ~3.
+    let probes = 0
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-doomed")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("bun") && remote.includes("READY"),
+        () => {
+          probes += 1
+          return fail(255, "Permission denied (publickey).")
+        },
+      ),
+    )
+    await expect(
+      createFullRemoteBackend({ ...baseCfg, spawn: fn, maxReadyPolls: 30 }).run(),
+    ).rejects.toThrow(/NON-RECOVERABLE|Permission denied/i)
+    expect(probes).toBeGreaterThanOrEqual(3) // gave it a few tries (not a one-off fluke)
+    expect(probes).toBeLessThan(30) // ...but did NOT exhaust the full readiness window
+  })
+
+  test("a TRANSIENT connect error keeps polling the full window (slow boot is not aborted)", async () => {
+    // The flip side of fail-fast: "Connection refused" during a slow cloud-init
+    // MUST NOT be misclassified as terminal, else a healthy-but-slow box gets
+    // killed mid-boot. Polls the full (small) window, then gives the generic
+    // not-ready error — never the NON-RECOVERABLE one.
+    let probes = 0
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-slowboot")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("bun") && remote.includes("READY"),
+        () => {
+          probes += 1
+          return fail(255, "ssh: connect to host 1.2.3.4 port 22: Connection refused")
+        },
+      ),
+    )
+    let thrown: unknown
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn, maxReadyPolls: 5 })
+      .run()
+      .catch((err) => {
+        thrown = err
+      })
+    expect(probes).toBe(5) // polled the FULL window — not aborted as terminal
+    const msg = String(thrown)
+    expect(msg).toContain("box never became ssh-reachable + bun-ready")
+    expect(msg).not.toContain("NON-RECOVERABLE")
+  })
+
   test("a grade-phase termination failure preserves BOTH the primary run error and cleanup error", async () => {
     const { fn } = createSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),

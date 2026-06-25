@@ -44,6 +44,17 @@ export const applyNonSuccessRecoveryAction = async (
   const { config } = session
   const { wm, breaker } = state
   if (action.do === "error") {
+    // Loop-control fix (jun-25, FIX-2): when the `error` terminal was minted
+    // from a SUCCESSFULLY-assembled turn (the malformed-tool-use seal — the
+    // model emitted visible text but no valid tool_use), preserve that final
+    // assistant turn in working memory (mirrors the refusal path, and the C5
+    // regression invariant) so the transcript / resume keeps the model's last
+    // words rather than ending on the injected meta nudge. A THROWN stream
+    // error carries no assembled message (`"error" in result`) ⇒ nothing to
+    // append (byte-identical to the prior behaviour for that case).
+    if (!("error" in result)) {
+      wm.append(stripOrphanToolUse(result.message))
+    }
     return { done: true, result: { kind: "error", reason: action.reason } }
   }
   if (action.do === "refusal") {

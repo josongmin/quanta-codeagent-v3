@@ -60,6 +60,7 @@ import {
   earlyAcceptable,
   familyCoverageMissingHardReasons,
   minimalityOf,
+  nonEmptyFallbackEligible,
   ownerCoverageOf,
   requireHardResolvedForEarlyAccept,
   scoreWithAuthority,
@@ -595,6 +596,36 @@ const winnerIdOf = (
     : (selectBest(rankedEntries(scored, violatedCounterfactual)) ??
       selectBestEffort(bestEffortRankedEntries(ctx, scored, violatedCounterfactual)))
 
+/**
+ * CORRECTED non-empty fallback id (default-OFF A/B arm). Picks the STRONGEST
+ * scored candidate that passes the ROCK-SOLID SUBSET (`nonEmptyFallbackEligible`:
+ * applies clean, does not regress, no static-sanity break) while DROPPING the
+ * self-oracle / completeness bars — using the SAME ranking the real winner would
+ * use (clean lexicographic / research best-effort), so it is the candidate we
+ * would most prefer to submit in place of empty. Counterfactual-violating
+ * candidates are excluded (parity with the winner path). Returns `null` when no
+ * candidate qualifies. Caller invokes ONLY when `winner === null`.
+ */
+const nonEmptyFallbackIdOf = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  violatedCounterfactual: ReadonlySet<string>,
+): string | null => {
+  const eligible = scored.filter(
+    (entry) =>
+      !violatedCounterfactual.has(entry.candidate.id) &&
+      nonEmptyFallbackEligible(entry, ctx.mode),
+  )
+  if (eligible.length === 0) return null
+  if (ctx.mode === "clean") {
+    const orderOf = new Map(scored.map((entry, i) => [entry.candidate.id, i]))
+    return selectLexicographic(eligible.map((entry) => lexCandidateOf(ctx, orderOf, entry, true)))
+  }
+  return selectBestEffort(
+    eligible.map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict })),
+  )
+}
+
 const counterfactualTelemetryOf = (
   ctx: SelectionRunContext,
   scored: readonly ScoredEntry[],
@@ -670,6 +701,17 @@ export const finalize = async (
   const winner = scored.find((entry) => entry.candidate.id === winnerId)?.candidate ?? null
   const noWinnerReason = noWinnerReasonOf(ctx, scored, winner)
   const counterfactual = counterfactualTelemetryOf(ctx, scored, counterfactualVerdicts)
+  // CORRECTED non-empty fallback (default-OFF). Computed ONLY when there is no
+  // winner AND the arm is on — submitting the rock-solid-subset candidate instead
+  // of empty weakly dominates on binary scoring. Winner semantics are untouched.
+  const fallbackCandidateId =
+    winner === null && ctx.args.nonEmptyFallback === true
+      ? nonEmptyFallbackIdOf(ctx, scored, counterfactualVerdicts.violated)
+      : null
+  const fallbackCandidate =
+    fallbackCandidateId === null
+      ? null
+      : (scored.find((entry) => entry.candidate.id === fallbackCandidateId)?.candidate ?? null)
   return {
     attempted: ctx.args.n,
     ownerFiles: [...ctx.args.owners],
@@ -679,6 +721,7 @@ export const finalize = async (
     winner,
     terminalCandidate:
       winner === null ? terminalCandidateOf(scored, terminalRepresentativeByFirstId) : null,
+    ...(fallbackCandidate !== null ? { fallbackCandidate } : {}),
     scored,
     admissibleCount: scored.filter((entry) => entry.verdict.admissible).length,
     generated: candidates.length,

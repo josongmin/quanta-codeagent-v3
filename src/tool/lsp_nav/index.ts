@@ -292,10 +292,14 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     name: "lsp_references",
     description:
       "PREFER over grep when answering 'where else is this symbol used?'. Given " +
-      "PATH:LINE:CHARACTER (1-based) pointing at a symbol, returns every call " +
-      "site / read site with file:range — semantic, follows imports and " +
-      "aliases, no false positives from name shadowing. Includes the " +
-      "declaration site unless includeDeclaration:false. Returns a clean " +
+      "PATH:LINE:CHARACTER (1-based) pointing at a symbol, returns call / read " +
+      "sites with file:range — semantic resolution, so the sites it DOES return " +
+      "are real uses, not name-shadow text matches. Includes the declaration " +
+      "site unless includeDeclaration:false. NOT exhaustive: an empty result is " +
+      "NOT proof the symbol is unused — the language server may be cold, " +
+      "unindexed, or unable to resolve dynamic dispatch / getattr / duck-typed " +
+      "calls (common in Python). Before concluding 'unused' or deleting, " +
+      "confirm with grep, read the source, and run the code. Returns a clean " +
       "message when no language server is available — never fails the turn.",
     inputSchema: referencesSchema,
     isReadOnly: () => true,
@@ -451,10 +455,15 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     ),
     description:
       "PREFER over grep when answering 'if I change this function, what breaks?'. " +
-      "Given PATH:LINE:CHARACTER (1-based) on a function/method, returns every " +
-      "CALLER plus the exact call-site lines inside each. Semantic — follows " +
-      "imports/aliases, no name-shadow false positives. Returns a clean message " +
-      "when no language server is available — never fails the turn.",
+      "Given PATH:LINE:CHARACTER (1-based) on a function/method, returns CALLERS " +
+      "plus the exact call-site lines inside each — semantic resolution, so the " +
+      "callers it DOES return are real, not name-shadow text matches. NOT " +
+      "exhaustive: an empty result is NOT proof the function has no callers / is " +
+      "unused — the language server may be cold, unindexed, or unable to resolve " +
+      "dynamic dispatch / getattr / duck-typed calls (common in Python). Before " +
+      "concluding 'unused' or deleting, confirm with grep, read the source, and " +
+      "run the code. Returns a clean message when no language server is " +
+      "available — never fails the turn.",
   }
 
   const outgoingCalls: Tool<PositionInput> = {
@@ -468,9 +477,10 @@ export const lspNavTools = (provider: LspNavProvider): Tool[] => {
     ),
     description:
       "What does this function call? Given PATH:LINE:CHARACTER (1-based) on a " +
-      "function/method, returns each CALLEE plus the call-site line inside this " +
-      "function. Semantic. Returns a clean message when no language server is " +
-      "available — never fails the turn.",
+      "function/method, returns the callees it can resolve plus the call-site " +
+      "line inside this function — semantic resolution, not text matches; not " +
+      "guaranteed exhaustive (dynamic dispatch may not resolve). Returns a " +
+      "clean message when no language server is available — never fails the turn.",
   }
 
   return [

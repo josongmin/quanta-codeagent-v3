@@ -73,6 +73,61 @@ export const syncQueuedTurnInputs = async (args: {
   return "continue"
 }
 
+/** Loop-control fix (jun-25): how many trailing turns (inclusive of the last)
+ *  carry the budget-tail reminder. K≈3 gives the model a short runway to land
+ *  the plane without spamming every turn. Frozen — a test asserting the tail
+ *  width mutates with the source rather than duplicating a magic number. */
+export const TURN_BUDGET_TAIL_REMINDER_K = 3
+
+/** Loop-control fix (jun-25, FIX-1) — the turn budget is otherwise INVISIBLE to
+ *  the model: the outer loop hard-stops at `maxTurns` and nothing ever tells the
+ *  model it is running out, so it gets cut off mid-exploration. This pure helper
+ *  computes the one-line reminder to inject into a turn's context when it falls
+ *  within the tail `turn >= maxTurns - K`, or `null` when no reminder is due.
+ *
+ *  Guards (byte-identical default for unbounded / interactive-unbounded modes):
+ *    - `maxTurns` non-finite (Infinity / NaN) ⇒ `null` (UNBOUNDED — never warn).
+ *    - `maxTurns <= 0` ⇒ `null` (degenerate; the loop body never runs).
+ *    - `turn < maxTurns - K` ⇒ `null` (not yet in the tail).
+ *  Does NOT change the stop itself — it only makes the limit visible so the
+ *  model can finalize/commit rather than starting new exploration. */
+export const turnBudgetReminderText = (
+  turn: number,
+  maxTurns: number,
+  k: number = TURN_BUDGET_TAIL_REMINDER_K,
+): string | null => {
+  if (!Number.isFinite(maxTurns) || maxTurns <= 0) return null
+  if (turn < maxTurns - k) return null
+  const remaining = maxTurns - turn
+  if (remaining <= 0) {
+    return (
+      "This is your LAST turn before the turn budget ends. Provide your final " +
+      "answer / commit your work now — do not start new exploration or tool calls " +
+      "you cannot finish this turn."
+    )
+  }
+  const plural = remaining === 1 ? "turn remains" : "turns remain"
+  return (
+    `${remaining} ${plural} before the turn budget ends — if you are close to a ` +
+    "solution, finalize/commit now rather than starting new exploration."
+  )
+}
+
+/** Loop-control fix (jun-25, FIX-1) — inject the turn-budget tail reminder into
+ *  this turn's context as an out-of-band user message (same seam shape as
+ *  {@link injectFocusChainMessage}). No-op (byte-identical) when no reminder is
+ *  due (see {@link turnBudgetReminderText} guards), so unbounded modes append
+ *  nothing. */
+export const injectTurnBudgetReminder = (
+  cfg: AgentConfig,
+  wm: WorkingMemory<Message>,
+  turn: number,
+): void => {
+  const text = turnBudgetReminderText(turn, cfg.maxTurns)
+  if (text === null) return
+  wm.append({ role: "user", content: [{ type: "text", text }] })
+}
+
 export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
   if (cfg.focusChain === undefined) return
   try {
@@ -111,6 +166,10 @@ export const prepareTurnIteration = async (args: {
   const queuedInputs = await syncQueuedTurnInputs(args)
   if (queuedInputs === "aborted") return "aborted"
   injectFocusChainMessage(args.cfg, args.wm)
+  // Loop-control fix (jun-25, FIX-1) — make the approaching turn budget visible
+  // to the model so it can finalize rather than be silently hard-cut at
+  // `maxTurns`. No-op for unbounded `maxTurns` (byte-identical).
+  injectTurnBudgetReminder(args.cfg, args.wm, args.turn)
   if (args.dedupGate) {
     const stamped = stampTurn(args.cfg.run, args.turn)
     args.cfg.run = stamped ?? { runId: args.sessionId, turn: args.turn }
