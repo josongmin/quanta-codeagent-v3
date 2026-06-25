@@ -52,6 +52,14 @@ export {
   type OAuthClientRegistration,
   registerOAuthClient,
 } from "./oauth-registration"
+// ADR-0160 wire-up — REST registry → installable MCP-connector catalog adapter
+// (closes the rest-registry "built-not-wired" gap; REPORT-jun26 §4.4).
+export {
+  connectorsToEntries,
+  connectorToMcpEntry,
+  fetchCatalogFromRegistry,
+  restRegistrySnapshotToCatalog,
+} from "./rest-catalog-adapter"
 export { createRestConnectorRegistry, type RestRegistryConfig } from "./rest-registry"
 export {
   BACKOFF_BASE_MS,

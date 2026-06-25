@@ -21,10 +21,15 @@
  * entry would let `mcp_connector_install <bundled-id>` swap out a hand-pinned
  * server the host then SPAWNS, so the divergent case is never auto-written.
  *
- * Schema note: the plugin `MCPServerSpec` is `.strict()` and carries no `oauth` /
- * `cwd` keys, so those are dropped on write — `url` presence is what opts an http
- * server into the H18 per-server OAuth path (resolved separately at connect
- * time). `command: string[]` is split into the plugin `{ command, args }` pair.
+ * Schema note: the plugin `MCPServerSpec` is `.strict()` and carries no `cwd`
+ * key, so `cwd` is dropped on write. `oauth` IS carried through (the schema now
+ * accepts an optional `oauth` boolean) so an installed http OAuth connector
+ * actually authenticates next launch — the reader gates the H18 bearer flow on
+ * `oauth === true`, so dropping it (the prior behavior) left every installed
+ * OAuth server unauthenticated (401). For a STDIO entry `command: string[]` is
+ * split into the plugin `{ command, args }` pair; an HTTP entry (`url`, empty
+ * `command`) is written WITHOUT `command`/`args` (the canonical Anthropic http
+ * `.mcp.json` shape — a `command:""` placeholder is a malformed stdio spec).
  *
  * DEFAULT-OFF: wired only when `QUANTA_MCP_CONNECTORS=1` (the arg-builder gate);
  * absent ⇒ no port ⇒ tools never registered ⇒ byte-identical.
@@ -32,7 +37,9 @@
 
 import {
   BUNDLED_MCP_CONNECTORS,
+  type ConnectorRegistryPort,
   createMcpConnectorCatalog,
+  fetchCatalogFromRegistry,
   type McpConnectorCatalogPort,
   type McpConnectorEntry,
   type McpServerConfigShape,
@@ -41,13 +48,19 @@ import {
 import { writeFileAtomic } from "@/storage"
 import type { McpConnectorDiscoveryPort, McpConnectorEntryView, McpInstallOutcome } from "@/tool"
 
-/** Plugin-style `.mcp.json` server spec (mirror of `@/skill` `MCPServerSpec`). */
+/** Plugin-style `.mcp.json` server spec (mirror of `@/skill` `MCPServerSpec`).
+ *  `command`/`args` are OPTIONAL — an http server (`url`) omits them (the
+ *  canonical Anthropic shape; the strict reader schema accepts the http form). */
 interface PluginMcpServerSpec {
-  command: string
-  args: string[]
+  command?: string
+  args?: string[]
   env?: Record<string, string>
   url?: string
   headers?: Record<string, string>
+  /** H18 per-server OAuth opt-in. Carried through so an installed http OAuth
+   *  connector actually authenticates next launch (the reader gates the bearer
+   *  flow on `oauth === true`). */
+  oauth?: boolean
 }
 interface PluginMcpRoot {
   mcpServers: Record<string, PluginMcpServerSpec>
@@ -61,16 +74,26 @@ const toView = (e: McpConnectorEntry): McpConnectorEntryView => ({
   ...(e.requiresOAuth === true ? { requiresOAuth: true } : {}),
 })
 
-/** `McpServerConfigShape` (command: string[]) → the plugin `.mcp.json` spec
- *  (command: string + args: string[]). Drops `oauth`/`cwd` — not in the strict
- *  plugin schema. */
-const toPluginSpec = (c: McpServerConfigShape): PluginMcpServerSpec => ({
-  command: c.command[0] ?? "",
-  args: [...c.command.slice(1)],
-  ...(c.env !== undefined ? { env: { ...c.env } } : {}),
-  ...(c.url !== undefined ? { url: c.url } : {}),
-  ...(c.headers !== undefined ? { headers: { ...c.headers } } : {}),
-})
+/** `McpServerConfigShape` (command: string[]) → the plugin `.mcp.json` spec.
+ *
+ *  CARRIER SHAPE: a STDIO entry is written as `{ command, args }` (executable +
+ *  argv tail). An HTTP entry (`url` present, `command` empty) is written WITHOUT
+ *  the `command`/`args` keys — a `command:""` placeholder is a malformed stdio
+ *  shape (REPORT-jun26 §3.4): the reader (`pluginSpecToServerConfig`) keys the
+ *  carrier off `command.length`/`url`, and the canonical Anthropic http `.mcp.json`
+ *  server omits `command` entirely. The schema now allows the http form (command/
+ *  args are present-only for stdio via the refine). `oauth` is carried through so
+ *  an http OAuth connector authenticates (was previously DROPPED — H18 inert). */
+const toPluginSpec = (c: McpServerConfigShape): PluginMcpServerSpec => {
+  const isStdio = c.command.length > 0
+  return {
+    ...(isStdio ? { command: c.command[0] ?? "", args: [...c.command.slice(1)] } : {}),
+    ...(c.env !== undefined ? { env: { ...c.env } } : {}),
+    ...(c.url !== undefined ? { url: c.url } : {}),
+    ...(c.headers !== undefined ? { headers: { ...c.headers } } : {}),
+    ...(c.oauth === true ? { oauth: true } : {}),
+  }
+}
 
 /** Order-independent structural equality of two server specs (the existing
  *  on-disk entry vs the one we'd write). A canonical JSON with sorted keys is
@@ -170,5 +193,45 @@ export const buildMcpConnectorDiscoveryPort = (args: {
       await writeFileAtomic(args.configPath, `${JSON.stringify(root, null, 2)}\n`)
       return { ok: true, name: result.config.name, alreadyPresent }
     },
+  }
+}
+
+/**
+ * REMOTE-registry wire (ADR-0160 closeout; REPORT-jun26 §4.4 — the "swap BUNDLED
+ * for createRestConnectorRegistry at the catalog seam" item). Resolves the
+ * installable catalog from a server-driven connector registry (Claude's
+ * `search_mcp_registry` parity) and hands the SYNC snapshot to
+ * {@link buildMcpConnectorDiscoveryPort}.
+ *
+ * WHY ASYNC (and why NOT inlined into the sync `buildGatedToolPorts` tool-menu
+ * seam): the REST registry is network-backed (24h cache + refresh). The tool
+ * menu must NOT block on a remote round-trip at every agent start, so the
+ * default seam keeps the BUNDLED catalog (byte-identical) and the host opts into
+ * the remote catalog HERE, at a point where it can `await` — pre-warming the
+ * snapshot once. The registry's own TTL governs staleness.
+ *
+ * FAIL-SOFT: if the registry is unreachable AND has no cache, `registry.list()`
+ * throws `ConnectorOutageError`; we catch it and fall back to the BUNDLED
+ * catalog rather than leaving discovery dead — an outage must not erase the
+ * built-in reference servers. The fallback is surfaced via the returned
+ * `source` discriminant so the host can log it.
+ */
+export const buildMcpConnectorDiscoveryPortFromRegistry = async (args: {
+  readonly configPath: string
+  readonly registry: ConnectorRegistryPort
+}): Promise<{ port: McpConnectorDiscoveryPort; source: "registry" | "bundled-fallback" }> => {
+  try {
+    const catalog = await fetchCatalogFromRegistry(args.registry)
+    return {
+      port: buildMcpConnectorDiscoveryPort({ configPath: args.configPath, catalog }),
+      source: "registry",
+    }
+  } catch {
+    // Registry unreachable with no cache (ConnectorOutageError) or any fetch
+    // fault — fall back to the bundled reference catalog (never dead discovery).
+    return {
+      port: buildMcpConnectorDiscoveryPort({ configPath: args.configPath }),
+      source: "bundled-fallback",
+    }
   }
 }
