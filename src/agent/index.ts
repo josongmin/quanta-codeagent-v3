@@ -208,6 +208,7 @@ export {
   lspBinaryAvailable,
   lspDiagnosticsTool,
   lspExtensionToLanguage,
+  lspNavCheapToolList,
   lspNavToolList,
   proveStrictLspReady,
 } from "./lsp-bridge"

@@ -32,6 +32,7 @@ import {
   generateReproTests,
   lspBinaryAvailable,
   lspExtensionToLanguage,
+  lspNavCheapToolList,
   lspNavToolList,
   proveStrictLspReady,
   pytestReportPathFor,
@@ -2243,7 +2244,19 @@ const applyLiveOverrides = (envKeys: readonly string[]): void => {
 }
 
 const buildBenchRegistry = (instance: Instance, opt: BenchPosture, cwd: string): ToolRegistry => {
-  const lspNavTools = opt.lspNav ? lspNavToolList(() => cwd) : []
+  // jun-26 (REPORT-jun26-tool-impl-vs-frontier §4.5) — LSP-nav tiering. The full
+  // opt-in (`opt.lspNav`, QUANTA_BENCH_LSP / QUANTA_LSP_TOOLS=full) supersets the
+  // cheap tier and additionally exposes the MEASURED-intractable members
+  // (`lsp_references` / `lsp_implementation`), so it wins when set. Otherwise the
+  // DEFAULT-ON cheap tier (`opt.lspNavCheap`) registers the index-backed /
+  // call-graph nav moat; an explicit `QUANTA_BENCH_LSP_CHEAP=0/off/false` (or a
+  // preset `lsp-cheap:false`) makes `lspNavCheap` false ⇒ empty list ⇒ the nav
+  // surface is byte-identical to the legacy default-OFF posture.
+  const lspNavTools = opt.lspNav
+    ? lspNavToolList(() => cwd)
+    : opt.lspNavCheap
+      ? lspNavCheapToolList(() => cwd)
+      : []
   const astGrepTools = gateOn(process.env, "QUANTA_AST_GREP") ? [astGrepTool as Tool] : []
   const findRefsTools = gateOn(process.env, "QUANTA_BENCH_FIND_REFS")
     ? [findReferencesTool as Tool]
