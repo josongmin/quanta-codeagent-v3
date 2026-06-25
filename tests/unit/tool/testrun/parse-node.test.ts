@@ -164,7 +164,7 @@ const JEST_REAL = [
   "    Expected: 99",
   "    Received: 10",
   "",
-  "      2 | test(\"fails\", () => {",
+  '      2 | test("fails", () => {',
   "      3 |   const result = compute(5)",
   "    > 4 |   expect(result).toBe(99)",
   "        |                  ^",
@@ -183,5 +183,55 @@ describe("parseNodeTest — jest default reporter (● bullet)", () => {
     expect(r.failed[0]?.name).toBe("fails")
     expect(r.failed[0]?.file).toBe("sum.test.js")
     expect(r.failed[0]?.line).toBe(4)
+  })
+})
+
+// VERBATIM-shaped bun output, TWO failures, where the FIRST failure's stack has
+// a HELPER frame above the test frame (assertEq called from the test). The old
+// flat-index zip (`locs[i]`) mis-pairs: it has THREE frames for TWO failures, so
+// failure #2 inherits failure #1's SECOND frame (`one.test.ts`) — a confidently
+// WRONG file:line that mis-localizes the Evidence Packet's debugger. The marker-
+// scoped association binds each failure to the frame that sits next to ITS own
+// `(fail)` marker.
+const BUN_MULTI = [
+  "bun test v1.3.14 (0d9b296a)",
+  "",
+  "multi.test.ts:",
+  "error: expect(received).toBe(expected)",
+  "Expected: 5",
+  "Received: 4",
+  "      at assertEq (/tmp/m/helper.ts:3:5)",
+  "      at <anonymous> (/tmp/m/one.test.ts:7:10)",
+  "(fail) one [0.20ms]",
+  "error: expect(received).toBe(expected)",
+  "Expected: 9",
+  "Received: 0",
+  "      at <anonymous> (/tmp/m/two.test.ts:4:8)",
+  "(fail) two [0.10ms]",
+  "",
+  " 0 pass",
+  " 2 fail",
+  "Ran 2 tests across 1 file. [12.00ms]",
+].join("\n")
+
+describe("parseNodeTest — multi-failure association (positional mis-pairing regression)", () => {
+  test("each failure gets ITS OWN frame, not the next failure's", () => {
+    const r = parseNodeTest(BUN_MULTI)
+    expect(r.failed).toHaveLength(2)
+    const one = r.failed.find((f) => f.name === "one")
+    const two = r.failed.find((f) => f.name === "two")
+    // failure #1 localizes to its deepest user frame (the assertion in the helper)
+    expect(one?.file).toBe("/tmp/m/helper.ts")
+    expect(one?.line).toBe(3)
+    // failure #2 MUST land on two.test.ts — NOT one.test.ts (the old-zip bug)
+    expect(two?.file).toBe("/tmp/m/two.test.ts")
+    expect(two?.line).toBe(4)
+  })
+
+  test("single-failure localization is unchanged (no regression)", () => {
+    const r = parseNodeTest(BUN)
+    expect(r.failed).toHaveLength(1)
+    expect(r.failed[0]?.file).toBe("/private/tmp/nodeparse/sum.test.ts")
+    expect(r.failed[0]?.line).toBe(2)
   })
 })

@@ -7,6 +7,7 @@ import {
 } from "@/agent"
 import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import type { CredentialSource, LLMPort } from "@/llm"
+import { anyLspServerOnPath } from "@/lsp"
 import { Metrics, type StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import {
@@ -50,9 +51,10 @@ import {
   gitCoChangeEnabled,
   gitToolsEnabled,
   hasArg,
+  type LspNavMode,
   lspEnabled,
-  lspNavEnabled,
   planEnabled,
+  resolveLspNavMode,
   resumePath,
   statePath,
 } from "./internal/argv"
@@ -92,6 +94,17 @@ import { isIndicatorEnabled } from "./turn-indicator"
  */
 
 export const env = (k: string, fallback: string): string => process.env[k] ?? fallback
+
+/** Map a resolved {@link LspNavMode} to the nav tools to register: `all` ⇒ the
+ *  full list (read-only + mutating); `readonly` ⇒ only `isReadOnly()` members;
+ *  `none` ⇒ empty. Module-scope (not inlined) so the env-driven assembler stays
+ *  under the cognitive-complexity ceiling. Lazy — `lspNavToolList()` builds tool
+ *  objects but spawns no server until a tool is called. */
+const selectLspNavTools = (mode: LspNavMode): Tool[] => {
+  if (mode === "none") return []
+  const all = lspNavToolList()
+  return mode === "all" ? all : all.filter((t) => t.isReadOnly())
+}
 
 /** Provider union — re-exported from the `@/runner/assemble` factory (the
  *  single source of truth via `@/llm`). Kept as a CLI-local name so existing
@@ -611,8 +624,18 @@ export const loadFeatures = async (
   // no-op one in defaultTools, so appending it lets the registry's last-write
   // -wins map swap in the real provider (same merge path as MCP tools).
   const lspTools: Tool[] = lspEnabled() ? [lspDiagnosticsTool()] : []
-  // ADR-0015: LSP nav tools. NOT in defaultTools — opt-in only.
-  const lspNavTools: Tool[] = lspNavEnabled() ? lspNavToolList() : []
+  // ADR-0015: LSP nav tools. NOT in defaultTools. Server-present resource gate
+  // (jun-26): with QUANTA_LSP_TOOLS unset, the READ-ONLY nav tools register
+  // by default IFF a language server binary is on PATH (mirrors the browser
+  // tools self-gating on chrome) — surfacing the nav moat out-of-box without
+  // exposing dead tools in a no-LSP environment. `=full` adds the mutating
+  // members (rename_apply/format); an explicit OFF token keeps the legacy
+  // byte-identical (empty) surface even with a server installed.
+  const lspNavMode = resolveLspNavMode(
+    process.env.QUANTA_LSP_TOOLS,
+    anyLspServerOnPath((bin) => Bun.which(bin) !== null),
+  )
+  const lspNavTools: Tool[] = selectLspNavTools(lspNavMode)
   // ADR-0016: first-class git tools. NOT in defaultTools — opt-in only.
   // §7.2: when QUANTA_GIT_CO_CHANGE is also on, append the co-change tool
   // (opts.coChange). Default-OFF: gate off ⇒ git tool set is byte-identical.

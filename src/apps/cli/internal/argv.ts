@@ -1,3 +1,4 @@
+import { isFalsyToken } from "@/shared"
 import { readCliKnob } from "../cli-knobs-accessor"
 import { isPathLikeToken } from "../resume"
 
@@ -72,12 +73,39 @@ export const planEnabled = (): boolean =>
 export const lspEnabled = (): boolean =>
   (readCliKnob("QUANTA_LSP", "bool") ?? false) || hasArg("--lsp")
 
-/** Codex `may-20-codex-lsp.md` absorption (ADR-0015). LSP NAV tools
- *  (definition / references / hover / type_definition / implementation /
- *  document_symbol / workspace_symbol / rename_preview) are NOT in
- *  `defaultTools` — they expand the tool surface, so opt-in only via
- *  `QUANTA_LSP_TOOLS=full`. With the knob unset the registry is byte-identical. */
+/** Codex `may-20-codex-lsp.md` absorption (ADR-0015). `QUANTA_LSP_TOOLS=full`
+ *  requests the FULL nav surface (read-only nav + the mutating
+ *  `lsp_rename_apply` / `lsp_format`). This predicate answers ONLY that explicit
+ *  request; the default (unset) server-present behaviour is resolved by
+ *  {@link resolveLspNavMode} below. */
 export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "full"
+
+/** Which LSP-nav tools the CLI registers:
+ *  - `"all"`      → read-only nav + mutating (`rename_apply`/`format`)
+ *  - `"readonly"` → read-only nav only (`isReadOnly()` members)
+ *  - `"none"`     → no nav tools (byte-identical legacy registry) */
+export type LspNavMode = "all" | "readonly" | "none"
+
+/** Resolve the CLI LSP-nav mode from the raw `QUANTA_LSP_TOOLS` value and whether
+ *  a language server is present on PATH. Pure (no env/PATH read) so it is unit-
+ *  testable; the wire injects both inputs.
+ *
+ *  - explicit `full` ⇒ `"all"` (back-compat: the documented full-surface opt-in,
+ *    the ONLY way to get the mutating members — they are never server-present
+ *    auto-on).
+ *  - explicit OFF token (`0`/`off`/`false`/`no`) ⇒ `"none"` (kill-switch wins,
+ *    even with a server installed — the deliberate way to keep the legacy
+ *    byte-identical surface).
+ *  - otherwise (unset / truthy / unrecognized) ⇒ AUTO: `"readonly"` iff a
+ *    language server is on PATH, else `"none"`. This is what surfaces the
+ *    read-only nav moat out-of-box for real CLI users WITHOUT exposing dead
+ *    tools in a no-LSP environment (mirrors the browser tools self-gating on a
+ *    chrome binary). */
+export const resolveLspNavMode = (raw: string | undefined, serverPresent: boolean): LspNavMode => {
+  if (raw?.trim().toLowerCase() === "full") return "all"
+  if (isFalsyToken(raw)) return "none"
+  return serverPresent ? "readonly" : "none"
+}
 
 /** Structural AST search via ast-grep (opt-in via `QUANTA_AST_GREP=1` or
  *  `QUANTA_AST_GREP=full`). Requires `ast-grep` CLI (`brew install ast-grep`).

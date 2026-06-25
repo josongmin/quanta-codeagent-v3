@@ -2908,7 +2908,7 @@ const runAgentPhase = async (
  *  localEnv, mirroring the base-red run so imports resolve identically. Used by
  *  BOTH the repro-vote validator and the consensus selection scorer (one SSOT so
  *  they can never drift in how a candidate's repro set is executed). */
-const reproExecBundle = (
+export const reproExecBundle = (
   instance: Instance,
 ): {
   exec: ReproExecPort

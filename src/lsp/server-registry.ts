@@ -40,3 +40,15 @@ export const lspServerBinForFile = (filePath: string): string | null =>
 
 export const lspExtensionToServerBin = (): ReadonlyMap<string, string> =>
   new Map(EXTENSION_TO_SERVER_BIN)
+
+/** The distinct language-server binaries the registry knows about (dedup'd,
+ *  stable order). The server-present resource gate iterates this. */
+export const LSP_SERVER_BINS: readonly string[] = LSP_SERVER_REGISTRY.map((e) => e.bin)
+
+/** Is ANY known language-server binary resolvable on PATH? The pure core of the
+ *  "server-present" resource gate that decides whether the CLI surfaces the
+ *  read-only LSP-nav tools by default (mirrors the browser tools self-gating on
+ *  a chrome binary). `resolveBin` is injected (the CLI passes `Bun.which`-backed
+ *  resolution) so this stays a pure, lightweight leaf with no runtime coupling. */
+export const anyLspServerOnPath = (resolveBin: (bin: string) => boolean): boolean =>
+  LSP_SERVER_BINS.some((bin) => resolveBin(bin))

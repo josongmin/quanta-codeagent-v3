@@ -16,35 +16,56 @@ export const parseCtest = (output: string): TestRunResult => {
 
   // libc assert (verbatim) — one failure per assert line, fully localized.
   for (const raw of lines) {
-    const am = /^Assertion failed: \((.+)\), function (.+), file (.+), line (\d+)\.?$/.exec(raw.trim())
-    if (am !== null) failed.push({ name: am[2]!.trim(), file: am[3]!.trim(), line: Number(am[4]), message: `Assertion failed: (${am[1]})` })
+    const am = /^Assertion failed: \((.+)\), function (.+), file (.+), line (\d+)\.?$/.exec(
+      raw.trim(),
+    )
+    if (am !== null)
+      failed.push({
+        name: am[2]!.trim(),
+        file: am[3]!.trim(),
+        line: Number(am[4]),
+        message: `Assertion failed: (${am[1]})`,
+      })
   }
 
-  // GoogleTest: `[  FAILED  ] Suite.Test` markers + nearest `FILE:LINE: Failure`
-  // location (emitted just before, in document order) + the assertion message.
+  // GoogleTest: a `[  FAILED  ] Suite.Test (N ms)` marker, preceded (in document
+  // order) by its `FILE:LINE: Failure` location(s) + assertion message(s). Bind
+  // each marker to the FIRST location/message that accumulated SINCE the prior
+  // marker, then reset — so a test with TWO failed assertions takes its own first
+  // site, and the NEXT test is never shifted onto the previous test's second
+  // location (the flat-index-zip bug).
   if (failed.length === 0) {
-    const locs: { file: string; line: number }[] = []
-    const msgs: string[] = []
-    const names: string[] = []
+    let pendingLocs: { file: string; line: number }[] = []
+    let pendingMsgs: string[] = []
     for (const raw of lines) {
-      const lm = /^(.+?):(\d+): Failure$/.exec(raw.trim())
+      const t = raw.trim()
+      const lm = /^(.+?):(\d+): Failure$/.exec(t)
       if (lm !== null) {
-        locs.push({ file: lm[1]!, line: Number(lm[2]) })
+        pendingLocs.push({ file: lm[1]!, line: Number(lm[2]) })
+        continue
+      }
+      const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(t)
+      if (em !== null) {
+        pendingMsgs.push(t)
         continue
       }
       // ONLY the per-test result line carries `(N ms)` — the trailing summary
       // block (`[ FAILED ] 1 test, listed below:` and a bare `[ FAILED ] Name`)
       // has no timing, so requiring `(N ms)` excludes both (verbatim-confirmed
       // against real gtest, which a simpler fixture had hidden).
-      const fm = /^\[\s*FAILED\s*\]\s+(.+?)\s+\(\d+\s*ms\)$/.exec(raw.trim())
-      if (fm !== null) names.push(fm[1]!)
-      const em = /^(?:Expected|Actual|Value of|error:)\b.*$/.exec(raw.trim())
-      if (em !== null) msgs.push(raw.trim())
+      const fm = /^\[\s*FAILED\s*\]\s+(.+?)\s+\(\d+\s*ms\)$/.exec(t)
+      if (fm !== null) {
+        const loc = pendingLocs[0]
+        const msg = pendingMsgs[0]
+        failed.push({
+          name: fm[1]!,
+          ...(loc ? { file: loc.file, line: loc.line } : {}),
+          ...(msg ? { message: msg } : {}),
+        })
+        pendingLocs = []
+        pendingMsgs = []
+      }
     }
-    names.forEach((name, i) => {
-      const loc = locs[i]
-      failed.push({ name, ...(loc ? { file: loc.file, line: loc.line } : {}), ...(msgs[i] ? { message: msgs[i] } : {}) })
-    })
   }
 
   // Pass count: gtest `[  PASSED  ] N tests` or ctest `N% tests passed, M ... failed`.
@@ -75,7 +96,11 @@ export const parseGoJson = (stdout: string): TestRunResult => {
     // Build/compile failures (no Test) — a `build-fail` action or a package-level
     // `fail`. MUST surface, else a non-compiling suite reads as green.
     if (ev.Action === "build-fail") buildFailed = true
-    if (ev.Action === "build-output" && typeof ev.Output === "string" && /:\d+:\d+:/.test(ev.Output))
+    if (
+      ev.Action === "build-output" &&
+      typeof ev.Output === "string" &&
+      /:\d+:\d+:/.test(ev.Output)
+    )
       buildMsg = ev.Output.trim()
     if (ev.Test === undefined) {
       if (ev.Action === "fail") pkgFailed = true
@@ -102,7 +127,10 @@ export const parseGoJson = (stdout: string): TestRunResult => {
   // A build failure / package-level fail with no per-test failures is still a
   // FAILED run — synthesize an entry so it is never reported green.
   if ((buildFailed || pkgFailed) && failed.length === 0) {
-    failed.push({ name: buildFailed ? "(build failed)" : "(package failed)", ...(buildMsg ? { message: buildMsg } : {}) })
+    failed.push({
+      name: buildFailed ? "(build failed)" : "(package failed)",
+      ...(buildMsg ? { message: buildMsg } : {}),
+    })
   }
   return { runner: "go", passed, failed, ok: failed.length === 0 }
 }
@@ -139,7 +167,11 @@ export const parseCargo = (output: string): TestRunResult => {
         // Capture the panic message + a few following detail lines (e.g.
         // `assertion failed` + `left: 4` / `right: 5`) until a blank line.
         const detail: string[] = []
-        for (let k = i + 1; k < lines.length && lines[k]!.trim().length > 0 && !lines[k]!.startsWith("---- "); k++) {
+        for (
+          let k = i + 1;
+          k < lines.length && lines[k]!.trim().length > 0 && !lines[k]!.startsWith("---- ");
+          k++
+        ) {
           detail.push(lines[k]!.trim())
           if (detail.length >= 4) break
         }
@@ -147,7 +179,12 @@ export const parseCargo = (output: string): TestRunResult => {
         break
       }
     }
-    return { name, ...(file ? { file } : {}), ...(lineNo ? { line: lineNo } : {}), ...(message ? { message } : {}) }
+    return {
+      name,
+      ...(file ? { file } : {}),
+      ...(lineNo ? { line: lineNo } : {}),
+      ...(message ? { message } : {}),
+    }
   })
   // ok when the summary says ok, or no failures were seen.
   const ok = failed.length === 0 && !/test result: FAILED/.test(output)
@@ -163,7 +200,8 @@ export const parseCargo = (output: string): TestRunResult => {
 const NODE_SRC_EXT = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/
 /** A frame is USER source (not a runner/stdlib frame) when it has a JS/TS
  *  extension and is neither under node_modules nor a `node:` internal module. */
-const isUserSource = (f: string): boolean => NODE_SRC_EXT.test(f) && !f.includes("/node_modules/") && !f.startsWith("node:")
+const isUserSource = (f: string): boolean =>
+  NODE_SRC_EXT.test(f) && !f.includes("/node_modules/") && !f.startsWith("node:")
 
 /** Pull a `{file,line}` out of a V8 stack frame or a vitest `❯` location line,
  *  stripping a `file://` URL prefix. Returns null for non-frames / non-user
@@ -185,58 +223,103 @@ const extractNodeLoc = (line: string): { file: string; line: number } | null => 
 
 /** Parse a JS/TS runner's output. Extracts failed test NAMES (bun `(fail)`,
  *  node:test `✖`, jest/vitest `✕/×`, TAP `not ok`), and localizes each via the
- *  first user-source stack frame + the error message. Location association is
- *  EXACT for a single failure (the localization case the Evidence Packet uses);
- *  for multiple failures it is best-effort, by order. NEVER-throws. */
+ *  user-source stack frame + the error message NEAREST its own fail-marker.
+ *
+ *  Association is by MARKER PROXIMITY, not by a global flat index: each failure
+ *  binds the location/message whose line sits closest to ITS marker (without a
+ *  different marker in between). This is order-agnostic — bun prints the frame
+ *  ABOVE its `(fail)` marker, while node:test/jest/vitest print it BELOW — and,
+ *  unlike the old `locs[i]` zip, a failure that emits two user frames (e.g. an
+ *  assertion inside a helper) no longer shifts the NEXT failure onto the wrong
+ *  file:line. NEVER-throws. */
 export const parseNodeTest = (output: string): TestRunResult => {
   const lines = output.split("\n")
 
-  const failedNames: string[] = []
-  const addName = (n: string): void => {
+  // Each failure record + the line indices of EVERY marker that names it (a
+  // doubled marker — node:test prints the inline `✖` and a trailing one — maps
+  // to the SAME record, so proximity can use whichever is closer to a frame).
+  type FailRec = { name: string; file?: string; line?: number; message?: string }
+  const byName = new Map<string, FailRec>()
+  const order: FailRec[] = []
+  const markers: { idx: number; rec: FailRec }[] = []
+  const markAt = (idx: number, n: string): void => {
     const t = n.trim()
     // Skip section headers like `✖ failing tests:` (node:test) — they end with `:`.
-    if (t.length > 0 && !t.endsWith(":") && !failedNames.includes(t)) failedNames.push(t)
+    if (t.length === 0 || t.endsWith(":")) return
+    let rec = byName.get(t)
+    if (rec === undefined) {
+      rec = { name: t }
+      byName.set(t, rec)
+      order.push(rec)
+    }
+    markers.push({ idx, rec })
   }
-  for (const raw of lines) {
+  lines.forEach((raw, idx) => {
     const l = raw.trim()
     let m: RegExpExecArray | null
-    if ((m = /^\(fail\)\s+(.+?)(?:\s+\[[\d.]+\s*m?s\])?$/.exec(l)) !== null) addName(m[1]!) // bun
-    else if ((m = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)) !== null) addName(m[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
-    else if ((m = /^not ok \d+ - (.+)$/.exec(l)) !== null) addName(m[1]!) // TAP
-    else if ((m = /^[✕×]\s+(.+)$/.exec(l)) !== null) addName(m[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
-    else if ((m = /^●\s+(.+)$/.exec(l)) !== null) addName(m[1]!) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
-  }
+    if ((m = /^\(fail\)\s+(.+?)(?:\s+\[[\d.]+\s*m?s\])?$/.exec(l)) !== null)
+      markAt(idx, m[1]!) // bun
+    else if ((m = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)) !== null)
+      markAt(idx, m[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
+    else if ((m = /^not ok \d+ - (.+)$/.exec(l)) !== null)
+      markAt(idx, m[1]!) // TAP
+    else if ((m = /^[✕×]\s+(.+)$/.exec(l)) !== null)
+      markAt(idx, m[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
+    else if ((m = /^●\s+(.+)$/.exec(l)) !== null) markAt(idx, m[1]!) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
+  })
   // mocha uses neither shape — it prints a `N failing` count + numbered `N) name`
   // entries (summary list first, then per-failure detail). Harvest exactly
   // `failing`-many numbered names (the summary list comes first, so we stop
   // before the detail `N) <suite>` headers). Gated on a real failing count so a
   // passing run can't be mis-read.
-  if (failedNames.length === 0) {
+  if (order.length === 0) {
     const failing = Number(/(\d+)\s+failing\b/.exec(output)?.[1] ?? "0")
     if (failing > 0) {
-      for (const raw of lines) {
-        const mm = /^\s*\d+\)\s+(.+?)\s*$/.exec(raw)
-        if (mm !== null) addName(mm[1]!)
-        if (failedNames.length >= failing) break
+      for (let idx = 0; idx < lines.length && order.length < failing; idx++) {
+        const mm = /^\s*\d+\)\s+(.+?)\s*$/.exec(lines[idx]!)
+        if (mm !== null) markAt(idx, mm[1]!)
       }
     }
   }
 
-  // User-source locations + error messages in document order.
-  const locs: { file: string; line: number }[] = []
-  const messages: string[] = []
-  for (const raw of lines) {
-    const loc = extractNodeLoc(raw)
-    if (loc !== null) locs.push(loc)
-    const em = /^\s*(?:error:\s*(.+)|([A-Za-z_][\w.]*(?:Error|Exception|Failure)(?:\s*\[[^\]]+\])?):\s*(.+))$/.exec(raw)
-    if (em !== null) messages.push((em[1] ?? `${em[2]}: ${em[3]}`).trim())
+  // The failure whose marker is NEAREST this line index (ties → the earlier
+  // marker, deterministic). Undefined when no marker was found.
+  const nearestRec = (idx: number): FailRec | undefined => {
+    let best: { idx: number; rec: FailRec } | undefined
+    for (const mk of markers) {
+      if (best === undefined || Math.abs(mk.idx - idx) < Math.abs(best.idx - idx)) best = mk
+    }
+    return best?.rec
   }
-
-  const failed: TestFailure[] = failedNames.map((name, i) => {
-    const loc = locs[i] ?? (failedNames.length === 1 ? locs[0] : undefined)
-    const message = messages[i] ?? (failedNames.length === 1 ? messages[0] : undefined)
-    return { name, ...(loc ? { file: loc.file, line: loc.line } : {}), ...(message ? { message } : {}) }
+  // Bind each user-source frame / error message to its nearest marker. Iterating
+  // in DOCUMENT ORDER + "first one wins per record" keeps the deepest user frame
+  // (printed first) and the first error message — matching the prior single-
+  // failure contract.
+  lines.forEach((raw, idx) => {
+    const loc = extractNodeLoc(raw)
+    if (loc !== null) {
+      const rec = nearestRec(idx)
+      if (rec !== undefined && rec.file === undefined) {
+        rec.file = loc.file
+        rec.line = loc.line
+      }
+    }
+    const em =
+      /^\s*(?:error:\s*(.+)|([A-Za-z_][\w.]*(?:Error|Exception|Failure)(?:\s*\[[^\]]+\])?):\s*(.+))$/.exec(
+        raw,
+      )
+    if (em !== null) {
+      const rec = nearestRec(idx)
+      if (rec !== undefined && rec.message === undefined)
+        rec.message = (em[1] ?? `${em[2]}: ${em[3]}`).trim()
+    }
   })
+
+  const failed: TestFailure[] = order.map((r) => ({
+    name: r.name,
+    ...(r.file ? { file: r.file, line: r.line } : {}),
+    ...(r.message ? { message: r.message } : {}),
+  }))
   // NB: a markerless failure (unusual formatter, exit≠0 but nothing parsed) is
   // NOT synthesized here — that is the EXIT-CODE safety net's job in `tool.ts`
   // (it has the exit code; this pure parser does not). Synthesizing on
@@ -301,7 +384,8 @@ export const parsePytest = (output: string): TestRunResult => {
   }
   // If FAILURES ran to EOF without a trailing summary/section (no `break`/header
   // fired), the final block's location is still pending — flush it.
-  if (started && (blockLocs.length === 0 || blockLocs.length < summary.length)) blockLocs.push(cur ?? { file: "", line: 0 })
+  if (started && (blockLocs.length === 0 || blockLocs.length < summary.length))
+    blockLocs.push(cur ?? { file: "", line: 0 })
 
   const failed: TestFailure[] = summary.map((s, i) => {
     const sep = s.testid.indexOf("::")
@@ -341,7 +425,9 @@ export const parsePythonUnittest = (output: string): TestRunResult => {
     // of the block; blocks are separated by `===`, and the run ends at `Ran N`).
     for (
       let j = i + 1;
-      j < lines.length && !/^={10,}$/.test(lines[j]!.trim()) && !/^Ran \d+ tests? in /.test(lines[j]!.trim());
+      j < lines.length &&
+      !/^={10,}$/.test(lines[j]!.trim()) &&
+      !/^Ran \d+ tests? in /.test(lines[j]!.trim());
       j++
     ) {
       const fm = /File "([^"]+)", line (\d+), in /.exec(lines[j]!)
@@ -353,7 +439,12 @@ export const parsePythonUnittest = (output: string): TestRunResult => {
       const em = /^([A-Za-z_][\w.]*(?:Error|Exception|Failure)): (.*)$/.exec(lines[j]!.trim())
       if (em !== null) message = `${em[1]}: ${em[2]}`
     }
-    failed.push({ name, ...(file ? { file } : {}), ...(lineNo ? { line: lineNo } : {}), ...(message ? { message } : {}) })
+    failed.push({
+      name,
+      ...(file ? { file } : {}),
+      ...(lineNo ? { line: lineNo } : {}),
+      ...(message ? { message } : {}),
+    })
   }
   const passed = Math.max(0, ran - failed.length)
   // ok requires: zero failures, the trailing `OK`, AND at least one test ran

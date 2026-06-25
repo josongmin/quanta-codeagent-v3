@@ -35,6 +35,7 @@
     "smoke:record": "bun run tests/smoke/record-cli.ts",
     "smoke:swebench": "bun run src/apps/bench/index.ts --swebench tests/smoke/swebench/picks.jsonl --predictions tests/smoke/swebench/predictions.jsonl --report tests/smoke/swebench/bench-report.json",
     "smoke:swebench:audit": "bun run tests/smoke/swebench/select.ts --audit",
+    "smoke:preset-eval": "bun run src/apps/bench/index.ts --swebench tests/smoke/swebench/preset-eval-smoke.jsonl --predictions tests/smoke/swebench/preset-eval-preds.jsonl --report tests/smoke/swebench/preset-eval-report.json",
     "typecheck": "bun run tools/dev/typecheck.ts src",
     "typecheck:tests": "bun run tools/dev/typecheck.ts tests",
     "typecheck:all": "bun run tools/dev/typecheck.ts all",

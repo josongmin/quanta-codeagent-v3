@@ -72,3 +72,58 @@ QUANTA_BENCH_NONEMPTY_FALLBACK=1 QUANTA_BENCH_CONCURRENCY=3
 3. **선결조건**: escalate 신호로 쓰는 오라클 신뢰도(repro FN) 개선 — 안 그러면 라우터가 헛 escalate. 이게 V5 켜기 전 P0.
 
 요지: 새로 만들 게 아니라 **(a) single-pass 기본화 + (b) V5 adaptive 라우터를 escalate-only로 켜기 + (c) 오라클 신뢰도 확보** 3단계. heavy는 "항상"이 아니라 "LLM이 부르면".
+
+---
+
+## 2026-06-26 02:08 KST — 원격 mini/live 베이스라인 실측 + 간소화 계획
+
+**원격 EC2 박스(on-demand, 우리 AMI)에서 mini-swe·live-swe + gpt-5.5 frozen-3 실측** (랩탑은 proxy만, 박스가 docker agent+official harness 채점, reverse-tunnel로 모델). 인프라 완주:
+
+| 케이스 | mini+5.5 | live+5.5 | 우리 |
+|---|---|---|---|
+| django-11138 | ✅ resolved | ✅ resolved | ❌ (verify-select 0/3; single-pass 3/4 ungraded) |
+| django-14315 | ❌ | ❌ | ❌ |
+| astropy-13033 | ❌ | ❌ | ❌ |
+
+→ **결정적 분리**: (1) **11138 = 우리 scaffold 문제** — 같은 gpt-5.5로 미니멀이 풀고 우리 heavy가 못 풂. (2) **14315/13033 = gpt-5.5 천장** — 프론티어 미니멀도 못 풂(14315는 dual-site 커버해도 시맨틱 못맞춤). mini≡live(self-evolve 효과 0).
+
+### 간소화 계획 (mini-swe ≈ 우리 목표 posture)
+
+**P1 — single-pass 기본화** (최우선, 11138 회복):
+- 기본 bench posture = single-pass(verify-select OFF). 우리 turn-loop은 이미 프론티어 동급 clean(veto 0). mini가 이 posture로 11138 품 = 우리도 됨.
+- 신규 `agentless-v6-minimal` preset = agentless-v1 코어(lsp/localize-phase/issue-hint/repo-map/read-outline/repro-test/test-runner/retry-transient) only. verify-select·proof-required·family-coverage·MWE-veto·declaredExpected **전부 미포함**.
+
+**P2 — 애매한 hard-veto 닫기** (audit 5종, config로): proof-required·MWE candidate_red·declaredExpected·familyCoverage = 미니멀 preset서 제외. 코드 삭제는 보류(net-neg 측정 후). empty-laundering은 nonempty-fallback(default-ON 후보)로 대체.
+
+**P3 — good-determinism 유지** (mini도 함): turn-loop integrity(transcript/budget/compaction/refusal), primary-rail RED-finish, sourceOnlyDiff. patch 안 건드림 = 유지.
+
+**P4 — escalation은 V5 adaptive(LLM-router)로 on-demand**: single-pass 부족 판단 시에만 heavy phase. 선결=repro 오라클 FN 개선(라우터 신뢰 신호). 그 전엔 단순 single-pass.
+
+**P5 — 문제별 knob은 problem-driven**: 측정된 실패 + A/B win + default-OFF일 때만 추가. 14315/13033은 gpt-5.5 천장이라 scaffold knob 대상 아님 → **모델 업그레이드**(Opus 4.8/GPT-5.3 Codex) 영역.
+
+**측정**: 모든 변경은 frozen-slice A/B를 **원격 박스**(이번에 검증된 EC2 mini-path 재사용 — provision→run→docker grade→terminate, 랩탑 free)로. 로컬 docker no-op grade는 신뢰 못 함.
+
+ROI순: P1(single-pass 기본 → 11138 회복) > P2(애매veto 닫기) > P4(escalation, repro오라클 후) > 모델업그레이드(14315/13033).
+
+---
+
+## 2026-06-26 02:49 KST — ✅ 간소화 실측 성공: 11138 RESOLVED (thesis 입증 완료)
+
+**우리 minimal scaffold가 원격 박스 진짜 채점에서 11138 풀었다.** config = `agentless-v1`(single-pass, verify-select 없음) + `QUANTA_BENCH_IN_LOOP_EXEC=full`(execfull) + `QUANTA_BENCH_NONEMPTY_FALLBACK=1`, gpt-5.5, full-remote on-demand, fresh chatgpt.json.
+
+| | 11138 | 14315 | 13033 | 합 |
+|---|---|---|---|---|
+| 우리 verify-select(heavy) | ❌ | ❌ | ❌ | 0/3 |
+| mini-swe + gpt-5.5 | ✅ | ❌ | ❌ | 1/3 |
+| **우리 minimal+execfull + gpt-5.5** | **✅** | ❌ | ❌ | **1/3 (=mini 동급)** |
+
+11138 winning patch = gold 4파일 정확히 (mysql/oracle/sqlite3-base/sqlite3-operations), grade resolved=true, failToPass 0 fail, passToPass 73/73 (회귀 0).
+
+**입증된 것:**
+- 11138 = scaffold 문제였음(heavy verify-select 9게이트가 정답 죽임). **간소화(single-pass)로 회복.** 우리도 mini급.
+- **execfull이 키** — plain single-pass는 3/4(sqlite3/base 누락), execfull(인루프 full test exec = TRAE 방법)이 런타임에러로 빠진 사이트 드러내 4/4 완성. cha-multisite veto 같은 결정론 강제 없이 **모델이 테스트 피드백으로 스스로 완성**.
+- 14315/13033 = gpt-5.5 천장(mini도 우리도 못 풂) → 모델 업그레이드 영역, scaffold knob 아님.
+
+**인프라 교훈 (측정 5회 confound 후 정리)**: box-loss→on-demand로 해결, python-not-found/disk→해결, **429=full-remote가 박스서 토큰 refresh 못 함(401)→stale→throttle. fix=토큰 fresh 유지 OR mini식 proxy(랩탑서 refresh) 차용.** 깨끗한 측정엔 fresh 토큰 필수.
+
+**다음**: 이 winning config(`agentless-v1`+execfull+nonempty-fallback)를 frozen preset(`agentless-v6-singlepass-execfull`)로 동결 + 더 큰 슬라이스(our-only-misses 10+)에서 verify-select vs single-pass A/B로 일반화 검증. 14315/13033은 frontier 모델(Opus 4.8/GPT-5.3 Codex) 확보 시 재측정.

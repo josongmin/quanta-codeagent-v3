@@ -5,7 +5,13 @@
  * {passed, failed:[{name,file,line,message}]}.
  */
 import { describe, expect, test } from "bun:test"
-import { parseCargo, parseCtest, parseGoJson, parsePytest, parsePythonUnittest } from "@/tool/testrun/parse"
+import {
+  parseCargo,
+  parseCtest,
+  parseGoJson,
+  parsePytest,
+  parsePythonUnittest,
+} from "@/tool/testrun/parse"
 
 const GO_JSON = [
   '{"Action":"run","Package":"t","Test":"TestPass"}',
@@ -69,7 +75,9 @@ describe("parseGoJson", () => {
   })
 
   test("all-pass ⇒ ok true, no failures", () => {
-    const r = parseGoJson(['{"Action":"pass","Test":"A"}', '{"Action":"pass","Test":"B"}'].join("\n"))
+    const r = parseGoJson(
+      ['{"Action":"pass","Test":"A"}', '{"Action":"pass","Test":"B"}'].join("\n"),
+    )
     expect(r.passed).toBe(2)
     expect(r.failed).toHaveLength(0)
     expect(r.ok).toBe(true)
@@ -92,7 +100,9 @@ describe("parseGoJson", () => {
   })
 
   test("duplicate fail events for one test are de-duplicated", () => {
-    const r = parseGoJson(['{"Action":"fail","Test":"T"}', '{"Action":"fail","Test":"T"}'].join("\n"))
+    const r = parseGoJson(
+      ['{"Action":"fail","Test":"T"}', '{"Action":"fail","Test":"T"}'].join("\n"),
+    )
     expect(r.failed).toHaveLength(1)
   })
 })
@@ -110,7 +120,9 @@ describe("parseCargo", () => {
   })
 
   test("all-pass summary ⇒ ok true", () => {
-    const r = parseCargo("test tests::a ... ok\ntest result: ok. 1 passed; 0 failed; finished in 0.00s")
+    const r = parseCargo(
+      "test tests::a ... ok\ntest result: ok. 1 passed; 0 failed; finished in 0.00s",
+    )
     expect(r.ok).toBe(true)
     expect(r.failed).toHaveLength(0)
   })
@@ -191,8 +203,18 @@ describe("parsePytest", () => {
     expect(r.passed).toBe(1)
     expect(r.failed).toHaveLength(2)
     // Zipped per-block location onto the summary entry (same order).
-    expect(r.failed[0]).toEqual({ name: "test_add", file: "test_math.py", line: 5, message: "assert 4 == 5" })
-    expect(r.failed[1]).toEqual({ name: "TestThings::test_method", file: "test_math.py", line: 12, message: "assert 0 == 9" })
+    expect(r.failed[0]).toEqual({
+      name: "test_add",
+      file: "test_math.py",
+      line: 5,
+      message: "assert 4 == 5",
+    })
+    expect(r.failed[1]).toEqual({
+      name: "TestThings::test_method",
+      file: "test_math.py",
+      line: 12,
+      message: "assert 0 == 9",
+    })
   })
 
   test("green run ⇒ no failures", () => {
@@ -232,7 +254,12 @@ describe("parseCtest (C++)", () => {
     expect(r.runner).toBe("ctest")
     expect(r.ok).toBe(false)
     expect(r.failed).toHaveLength(1)
-    expect(r.failed[0]).toEqual({ name: "main", file: "t.cpp", line: 5, message: "Assertion failed: (result == 99)" })
+    expect(r.failed[0]).toEqual({
+      name: "main",
+      file: "t.cpp",
+      line: 5,
+      message: "Assertion failed: (result == 99)",
+    })
   })
 
   test("GoogleTest (VERBATIM, gtest 1.17.0): one failure, NOT the summary lines", () => {
@@ -263,6 +290,39 @@ describe("parseCtest (C++)", () => {
     expect(r.failed[0]?.name).toBe("MathTest.Adds")
     expect(r.failed[0]?.file).toBe("math_test.cpp")
     expect(r.failed[0]?.line).toBe(5)
+  })
+
+  test("GoogleTest TWO failures, first with TWO assertions: each name keeps ITS OWN first location", () => {
+    // The OLD 3-independent-scan zip mis-pairs: `Adds` has two `Failure` lines,
+    // so `locs` has 3 entries for 2 names ⇒ `Subs` inherits `add.cpp:9` (the
+    // SECOND assertion of `Adds`) instead of its own `sub.cpp:3`.
+    const out = [
+      "[ RUN      ] MathTest.Adds",
+      "add.cpp:5: Failure",
+      "Expected equality of these values:",
+      "  1",
+      "add.cpp:9: Failure",
+      "Expected equality of these values:",
+      "  2",
+      "[  FAILED  ] MathTest.Adds (0 ms)",
+      "[ RUN      ] MathTest.Subs",
+      "sub.cpp:3: Failure",
+      "Expected equality of these values:",
+      "  7",
+      "[  FAILED  ] MathTest.Subs (0 ms)",
+      "[  PASSED  ] 0 tests.",
+      "[  FAILED  ] 2 tests, listed below:",
+      "[  FAILED  ] MathTest.Adds",
+      "[  FAILED  ] MathTest.Subs",
+    ].join("\n")
+    const r = parseCtest(out)
+    expect(r.failed).toHaveLength(2)
+    const adds = r.failed.find((f) => f.name === "MathTest.Adds")
+    const subs = r.failed.find((f) => f.name === "MathTest.Subs")
+    expect(adds?.file).toBe("add.cpp")
+    expect(adds?.line).toBe(5) // first assertion of Adds
+    expect(subs?.file).toBe("sub.cpp") // NOT add.cpp (the old-zip bug)
+    expect(subs?.line).toBe(3)
   })
 
   test("green run ⇒ no failures; NEVER-throws on garbage", () => {
