@@ -43,7 +43,7 @@ import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
-import { shq } from "./box-session/shell"
+import { BENCH_SSH_SAFE_OPTS, shq } from "./box-session/shell"
 import {
   createGradeChunkState,
   createSnapshotBase,
@@ -209,6 +209,11 @@ const uploadChunkDataset = async (args: {
   const scpDs = await args.spawn("scp", [
     "-i",
     args.keyPath,
+    // SSOT host-key/safety posture (jun-25): without StrictHostKeyChecking=no +
+    // UserKnownHostsFile=/dev/null this scp FAILED "Host key verification failed"
+    // on a recycled-IP box AFTER readiness already succeeded — the exact
+    // known_hosts-collision class makeSsh fences, which this transport skipped.
+    ...BENCH_SSH_SAFE_OPTS,
     "-o",
     "ConnectTimeout=15",
     args.datasetPath,
