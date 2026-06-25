@@ -1,5 +1,8 @@
 import { existsSync } from "node:fs"
-import type { SandboxProfile } from "./types"
+import { compileBubblewrapArgs } from "./bubblewrap"
+import { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
+import type { LinuxSandboxBackend } from "./linux"
+import type { SandboxPolicy, SandboxProfile } from "./types"
 import { DEFAULT_SANDBOX_EXEC_PATH, type WrappedShellArgv, wrapShellArgv } from "./wrap-argv"
 
 /**
@@ -71,6 +74,13 @@ export interface PerCallSandboxConfig {
    *  Used by bash mode="read" to support shell here-doc/tempfile mechanics via
    *  a caller-owned TMPDIR. */
   readonly extraWritePaths?: ReadonlyArray<string>
+  /** SYNC PATH probe for the Linux backend (`bwrap` / `landlock-cli`). Default
+   *  {@link Bun.which}. Synchronous on purpose — the per-call port's
+   *  `availability()` is sync (the bash dispatch hot-path reads it before
+   *  spawning), so the backend must be resolved at CONSTRUCTION time without an
+   *  async probe. Tests inject a fake to drive the linux branches deterministically
+   *  from any host. */
+  readonly whichSync?: (binary: string) => string | null
 }
 
 /**
@@ -79,13 +89,20 @@ export interface PerCallSandboxConfig {
  * future tools). The construction probes `sandbox-exec` presence ONCE on
  * macOS; thereafter `wrap()` and `availability()` are pure.
  *
- * Linux backends require an async probe (`bwrap` / `landlock-cli`) that the
- * existing `ShellSandboxSlot` already encapsulates. To keep this per-call
- * port pure + fast on the bash hot-path we do NOT replicate that probe here:
- * linux callers get `supported:false` with a `linux-not-implemented-per-call`
- * reason, which the bash tool surfaces as fail-closed `sandbox_unavailable`.
- * That is the conservative posture (matches the user's stated rule:
- * "fallback으로 직렬 실행 안 함 (fail-closed)").
+ * Linux backends (`bwrap` / `landlock-cli`) are detected SYNCHRONOUSLY at
+ * construction time via {@link Bun.which} (injectable as `cfg.whichSync` for
+ * tests). When a backend is present the port reports `supported:true` and
+ * `wrap()` produces the proper backend-prefixed argv — reusing the same
+ * `compileBubblewrapArgs` / `compileLandlockCliArgs` compilers the
+ * session-wide `ShellSandboxSlot` uses, so the per-call path is no longer
+ * inert on Linux. When NEITHER backend is on PATH the port stays fail-closed
+ * (`supported:false`, reason `linux-bwrap-missing`) so the bash tool never
+ * silently passes a mode="read" call through unsandboxed (matches the user's
+ * rule: "fallback으로 직렬 실행 안 함 (fail-closed)").
+ *
+ * NOTE: the sync `Bun.which` probe is deliberate — `availability()` is sync
+ * (the bash dispatch hot-path reads it before spawning), so an async detect
+ * cannot be used here. `Bun.which` is the codebase-canonical sync PATH probe.
  */
 export const defaultPerCallSandbox = (
   profile: SandboxProfile,
@@ -102,9 +119,19 @@ export const defaultPerCallSandbox = (
       ? null
       : rawSandboxExec
 
+  // Detect the Linux backend ONCE, synchronously, at construction time so
+  // `availability()` stays sync. `null` on non-linux (unused there).
+  const linuxBackend: LinuxSandboxBackend | null =
+    platform === "linux" ? detectLinuxSandboxBackendSync(cfg.whichSync) : null
+
   // Pre-compute availability at construction time so `availability()` stays
   // sync (the bash tool calls it on the dispatch hot-path).
-  const avail = computeAvailability(platform, sandboxExecPath)
+  const avail = computeAvailability(platform, sandboxExecPath, linuxBackend)
+
+  const buildPolicy = (): SandboxPolicy =>
+    cfg.extraWritePaths !== undefined && cfg.extraWritePaths.length > 0
+      ? { profile, extraWritePaths: cfg.extraWritePaths }
+      : { profile }
 
   return {
     wrap: (argv, cwd) => {
@@ -118,19 +145,63 @@ export const defaultPerCallSandbox = (
           degradeReason: avail.reason,
         }
       }
-      const policy =
-        cfg.extraWritePaths !== undefined && cfg.extraWritePaths.length > 0
-          ? { profile, extraWritePaths: cfg.extraWritePaths }
-          : { profile }
+      const policy = buildPolicy()
+      if (platform === "linux") {
+        // `avail.supported === true` on linux ⇒ a backend was detected.
+        return wrapLinuxPerCall(argv, cwd, policy, linuxBackend as LinuxSandboxBackend)
+      }
       return wrapShellArgv(argv, cwd, policy, { platform, sandboxExecPath })
     },
     availability: () => avail,
   }
 }
 
+/** Synchronous mirror of {@link detectLinuxSandboxBackend} — bubblewrap wins
+ *  over landlock-cli when both present (stronger fence). Returns `null` when
+ *  neither is on PATH. Uses the injected `whichSync` (default {@link Bun.which})
+ *  so the per-call `availability()` can stay sync. */
+const detectLinuxSandboxBackendSync = (
+  whichSync?: (binary: string) => string | null,
+): LinuxSandboxBackend | null => {
+  const which = whichSync ?? ((b: string): string | null => Bun.which(b))
+  if (which("bwrap") !== null) return "bubblewrap"
+  if (which("landlock-cli") !== null) return "landlock-cli"
+  return null
+}
+
+/** Compose the Linux backend-prefixed argv for one per-call spawn. Mirrors
+ *  `sandbox-wire.ts`'s `wrapLinuxShellArgv` (session-wide slot) so the two
+ *  paths produce identical fences from the same compilers. */
+const wrapLinuxPerCall = (
+  argv: ReadonlyArray<string>,
+  cwd: string,
+  policy: SandboxPolicy,
+  backend: LinuxSandboxBackend,
+): WrappedShellArgv => {
+  if (backend === "bubblewrap") {
+    const policyArgs = compileBubblewrapArgs(policy, cwd)
+    // null ⇒ off/danger-full-access ⇒ verbatim passthrough (no degrade).
+    if (policyArgs === null) return { argv: [...argv], sandboxApplied: false }
+    return { argv: ["bwrap", ...policyArgs, "--", ...argv], sandboxApplied: true }
+  }
+  // landlock-cli: compile → filter the network-deferred marker (no real flag),
+  // surfacing an honest `degradeReason` when network deny could not be enforced.
+  const rawArgs = compileLandlockCliArgs(policy, cwd)
+  if (rawArgs === null) return { argv: [...argv], sandboxApplied: false }
+  const filtered = rawArgs.filter((tok) => tok !== LANDLOCK_CLI_NETWORK_DEFERRED_MARKER)
+  return {
+    argv: ["landlock-cli", ...filtered, "--", ...argv],
+    sandboxApplied: true,
+    ...(rawArgs.length !== filtered.length
+      ? { degradeReason: "landlock-network-policy-not-enforced" }
+      : {}),
+  }
+}
+
 const computeAvailability = (
   platform: NodeJS.Platform,
   sandboxExecPath: string | null,
+  linuxBackend: LinuxSandboxBackend | null,
 ): PerCallSandboxAvailability => {
   if (platform === "darwin") {
     if (sandboxExecPath === null) {
@@ -139,11 +210,16 @@ const computeAvailability = (
     return { supported: true }
   }
   if (platform === "linux") {
-    // Per-call port does not duplicate the async bwrap/landlock probe — keep
-    // it conservative (fail-closed) so we never silently passthrough a
-    // mode="read" call. The session-wide slot remains the path for linux
-    // sandboxing today.
-    return { supported: false, reason: "linux-not-implemented-per-call" }
+    // A real bwrap/landlock-cli backend ⇒ supported. Neither ⇒ fail-closed so
+    // the bash tool surfaces `sandbox_unavailable` rather than silently
+    // passing a mode="read" call through unsandboxed.
+    if (linuxBackend === null) {
+      return {
+        supported: false,
+        reason: "linux-bwrap-missing — install bubblewrap (apt/dnf/pacman)",
+      }
+    }
+    return { supported: true }
   }
   return { supported: false, reason: `unsupported-platform:${platform}` }
 }
