@@ -5,12 +5,16 @@ import {
   buildPublicDeclaredExpectedPort,
   matchCandidateAgainstDeclaredExpected,
 } from "@/runner/batch/eval/declared-expected-matcher"
-import { scoreWithAuthority } from "@/runner/batch/eval/selection-gates"
+import { bestEffortEligible, scoreWithAuthority } from "@/runner/batch/eval/selection-gates"
 import type { Candidate } from "@/runner/batch/eval/selection-types"
 
 /**
- * T2b — public-sourced declared-expected spec-fidelity matcher + the clean-mode
- * enablement of the EXISTING `hard:declaredExpectedMatch=false` veto.
+ * T2b — public-sourced declared-expected spec-fidelity matcher (`matchCandidate…`)
+ * plus the CLEAN-mode authority contract: the static prose-regex match may only
+ * ever ADD ranking credit in clean mode, NEVER hard-veto. A `match === false`
+ * verdict keeps the candidate admissible AND best-effort eligible in clean mode
+ * (no `hard:declaredExpectedMatch=false` reason is stamped). RESEARCH mode keeps
+ * the legacy answer-key veto byte-identically (paired controls below).
  */
 
 const publicExpected = (
@@ -312,7 +316,7 @@ describe("buildPublicDeclaredExpectedPort — answer-key guard (red-on-injection
   })
 })
 
-describe("scoreWithAuthority — clean-mode veto fires ONLY for public provenance", () => {
+describe("scoreWithAuthority — CLEAN mode NEVER hard-vetoes on declaredExpected (ranking-only)", () => {
   const admissibleHard: HardGateSignals = {
     baseValidatedRed: null,
     patchProduced: true,
@@ -335,13 +339,26 @@ describe("scoreWithAuthority — clean-mode veto fires ONLY for public provenanc
     expect(v.reasons.some((r) => r.startsWith("hard:declaredExpectedMatch"))).toBe(false)
   })
 
-  test("clean + PUBLIC + match=false ⇒ vetoed (T2b enablement)", () => {
-    const v = scoreWithAuthority(admissibleHard, soft, false, "clean", true)
-    expect(v.admissible).toBe(false)
-    expect(v.reasons.some((r) => r.startsWith("hard:declaredExpectedMatch"))).toBe(true)
-  })
+  test(
+    "RED-ON-INJECTION (the teeth): clean + PUBLIC authority + match=false ⇒ STILL admissible " +
+      "AND no reject reason — a static prose-regex mismatch may not hard-reject a correct fix",
+    () => {
+      // This is the hole the audit flagged: with declaredExpectedAuthority="public"
+      // the old code set admissible:false here AND stamped the reject reason (which
+      // also bars best-effort). The match is a NON-EXECUTED regex compare of the
+      // candidate's added literals vs a value scraped from issue PROSE; it must
+      // only ADD ranking credit (the true case), never reject. Reverting the
+      // scoreWithAuthority change (re-enabling the clean-mode public veto) flips
+      // BOTH assertions RED. The reason-absence assertion is what proves the
+      // best-effort bar is ALSO neutralized (bestEffortEligible bars solely on this
+      // reason — see the paired best-effort test below).
+      const v = scoreWithAuthority(admissibleHard, soft, false, "clean", true)
+      expect(v.admissible).toBe(true)
+      expect(v.reasons.some((r) => r.startsWith("hard:declaredExpectedMatch"))).toBe(false)
+    },
+  )
 
-  test("clean + PUBLIC + match=true ⇒ NOT vetoed", () => {
+  test("clean + PUBLIC + match=true ⇒ NOT vetoed (the true case never rejects)", () => {
     const v = scoreWithAuthority(
       admissibleHard,
       { ...soft, declaredExpectedMatch: true },
@@ -352,9 +369,67 @@ describe("scoreWithAuthority — clean-mode veto fires ONLY for public provenanc
     expect(v.admissible).toBe(true)
   })
 
-  test("research mode + match=false ⇒ vetoed regardless of provenance (existing behavior)", () => {
-    expect(scoreWithAuthority(admissibleHard, soft, false, "research").admissible).toBe(false)
+  // PAIRED CONTROL: research mode is untouched — declaredExpected=false STILL vetoes
+  // there regardless of provenance, proving the change is scoped to clean mode only.
+  test("PAIRED CONTROL: research mode + match=false ⇒ STILL vetoed (byte-identical legacy)", () => {
+    const research = scoreWithAuthority(admissibleHard, soft, false, "research")
+    expect(research.admissible).toBe(false)
+    expect(research.reasons.some((r) => r.startsWith("hard:declaredExpectedMatch"))).toBe(true)
+    // public/non-public flag is irrelevant in research mode — both still veto.
     expect(scoreWithAuthority(admissibleHard, soft, false, "research", false).admissible).toBe(
+      false,
+    )
+    expect(scoreWithAuthority(admissibleHard, soft, false, "research", true).admissible).toBe(false)
+  })
+})
+
+describe("bestEffortEligible — CLEAN public declaredExpected mismatch does NOT bar best-effort", () => {
+  const eligibleHard: HardGateSignals = {
+    baseValidatedRed: null,
+    patchProduced: true,
+    patchedResolvedKofN: null,
+    regressionGreen: null,
+    smokeGreen: null,
+    applyClean: true,
+  }
+
+  // The verdict a CLEAN + PUBLIC + match=false candidate now carries after the fix:
+  // admissible with NO declaredExpected reject reason.
+  const cleanVerdict = scoreWithAuthority(
+    eligibleHard,
+    {
+      declaredExpectedMatch: false,
+      rubricScore: null,
+      voterQuorum: null,
+      minimality: 1,
+      ownerCoverage: null,
+    },
+    false,
+    "clean",
+    true,
+  )
+
+  test("RED-ON-INJECTION (best-effort teeth): clean candidate is best-effort eligible", () => {
+    // Reverting the scoreWithAuthority change stamps DECLARED_EXPECTED_REJECT_REASON
+    // onto cleanVerdict, which bestEffortEligible bars on ⇒ this flips RED. Proves
+    // the best-effort bar (not only the admissibility veto) is neutralized in clean.
+    expect(bestEffortEligible({ hard: eligibleHard, verdict: cleanVerdict }, "clean")).toBe(true)
+  })
+
+  test("PAIRED CONTROL: research declaredExpected=false verdict STILL bars best-effort", () => {
+    const researchVerdict = scoreWithAuthority(
+      eligibleHard,
+      {
+        declaredExpectedMatch: false,
+        rubricScore: null,
+        voterQuorum: null,
+        minimality: 1,
+        ownerCoverage: null,
+      },
+      false,
+      "research",
+    )
+    expect(bestEffortEligible({ hard: eligibleHard, verdict: researchVerdict }, "research")).toBe(
       false,
     )
   })

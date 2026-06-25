@@ -284,6 +284,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
+    envKey: "QUANTA_BENCH_CHA_MULTISITE_GENERAL",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (jun-25): generalize the CHA contract-fallback sibling rule from the legacy django/db/backends PATH HARDCODE to a structural parallel-sibling rule (same dir-root + same leaf filename, shared ancestor). Strict superset of the django match — byte-identical for django targets, additive elsewhere. Only meaningful with cha-multisite-steer. Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_MODEL_LANE_DIVERSITY",
     kind: "bool",
     default: false,

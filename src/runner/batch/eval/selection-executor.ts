@@ -244,9 +244,14 @@ export interface RunSelectionArgs {
   mode?: SelectorMode
   /** T2b — authority of the wired `declaredExpected` port. `"public"` means the
    *  port was built from a PUBLIC-issue-text invariant
-   *  (buildPublicDeclaredExpectedPort, which refuses any non-public source), so
-   *  its `false` verdict may veto in CLEAN mode. Default/`"research"` keeps the
-   *  legacy behavior: the declared-expected gate never vetoes in clean mode. */
+   *  (buildPublicDeclaredExpectedPort, which refuses any non-public source).
+   *  NOTE: in CLEAN mode the declared-expected match is a STATIC, execution-free
+   *  prose-regex compare and may only ever ADD ranking credit (the `true` case) —
+   *  a `false` verdict NEVER hard-vetoes and never bars best-effort, even with
+   *  `"public"` authority (a non-executed heuristic must not decide correctness).
+   *  In RESEARCH mode the legacy answer-key veto on `false` is preserved
+   *  byte-identically regardless of this flag. The flag is retained for call-site
+   *  wiring / telemetry. */
   declaredExpectedAuthority?: "public" | "research"
   /** T1 (jun-24) clean-mode family-coverage veto (`hard:familyCoverageMissing`).
    *  DEFAULT-OFF, opt-IN. The producer-consumer witness drove this veto from

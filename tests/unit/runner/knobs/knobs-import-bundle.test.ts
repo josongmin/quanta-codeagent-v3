@@ -46,13 +46,13 @@ import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { lspSteerKnob } from "@/runner/knobs/knobs/lsp-steer"
 import { mcpToolAnnotationsKnob } from "@/runner/knobs/knobs/mcp-tool-annotations"
 import { memoryModeKnob } from "@/runner/knobs/knobs/memory-mode"
+import { modelLaneDiversityKnob } from "@/runner/knobs/knobs/model-lane-diversity"
 import { multiVoterKnob } from "@/runner/knobs/knobs/multi-voter"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
-import { modelLaneDiversityKnob } from "@/runner/knobs/knobs/model-lane-diversity"
 import { networkProxyKnob } from "@/runner/knobs/knobs/network-proxy"
-import { pairedControlKnob } from "@/runner/knobs/knobs/paired-control"
 import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
 import { noPatchForceFractionKnob } from "@/runner/knobs/knobs/no-patch-force-fraction"
+import { pairedControlKnob } from "@/runner/knobs/knobs/paired-control"
 import { patchBudgetKnob } from "@/runner/knobs/knobs/patch-budget"
 import { patchBudgetStrictKnob } from "@/runner/knobs/knobs/patch-budget-strict"
 import { patchHygieneKnob } from "@/runner/knobs/knobs/patch-hygiene"
@@ -93,6 +93,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(advisorKnob),
   asAnyKnob(benchInLoopExecKnob),
   asAnyKnob(branchSearchKnob),
+  asAnyKnob(chaMultisiteGeneralKnob),
   asAnyKnob(chaMultisiteSteerKnob),
   asAnyKnob(closeoutCriticKnob),
   asAnyKnob(closeoutGuardKnob),

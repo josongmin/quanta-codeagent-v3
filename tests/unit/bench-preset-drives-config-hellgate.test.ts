@@ -601,3 +601,78 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 })
+
+// ── Safety ratchet: NO preset may surface the HIDDEN-TEST verifier to the agent ──
+// `QUANTA_BENCH_EXPOSE_DATASET_VERIFIER` surfaces the FAIL_TO_PASS-derived verifier
+// command (hidden test node-ids) into the AGENT prompt
+// (`agentVisibleBenchVerifierCommand`, src/runner/batch/eval/driver.ts). That is a
+// leaderboard-gaming hazard: it leaks the answer-key test selection into the model's
+// context. It is default-OFF (src/config/knob-inventory/bench.ts) and must NEVER be
+// baked into a shippable preset. Symmetric to the verify-select-regression!="discovered"
+// contamination guards above — this ratchet trips if any preset adds the key on-value.
+describe("HIDDEN-TEST verifier exposure ratchet: no preset arms QUANTA_BENCH_EXPOSE_DATASET_VERIFIER", () => {
+  const EXPOSE_ENV_KEY = "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER"
+  // Match the exact env key OR any normalized alias (a future short knob name) that
+  // would still surface the dataset verifier. Case/separator-insensitive so a rename
+  // to e.g. `expose-dataset-verifier` cannot smuggle past an exact-string match.
+  const matchesExposeKey = (key: string): boolean => {
+    if (key === EXPOSE_ENV_KEY) return true
+    const norm = key.toLowerCase().replace(/[^a-z]/g, "")
+    return norm.includes("expose") && norm.includes("verifier")
+  }
+  // A knob value is "on" unless it is an explicit off-token. Mirrors the env-gate
+  // default-OFF semantics (any non-off string enables a bool knob).
+  const OFF_TOKENS = new Set(["", "0", "off", "false", "no"])
+  const isOnValue = (value: string): boolean => !OFF_TOKENS.has(value.trim().toLowerCase())
+
+  const presetEntries = Object.entries(KNOB_PRESETS)
+
+  test("anti-vacuous floor: there is a non-empty set of presets to scan", () => {
+    expect(presetEntries.length).toBeGreaterThanOrEqual(4)
+  })
+
+  test("RATCHET: no PRESETS entry sets the dataset-verifier exposure key to an on-value", () => {
+    const violations: string[] = []
+    for (const [presetName, knobs] of presetEntries) {
+      for (const [key, value] of Object.entries(knobs)) {
+        if (matchesExposeKey(key) && isOnValue(value)) {
+          violations.push(`${presetName}.${key}=${value}`)
+        }
+      }
+    }
+    expect(violations).toEqual([])
+  })
+
+  test("RED-ON-INJECTION (the teeth): the same scan REJECTS a preset that armed the key", () => {
+    // Synthetic contaminated preset table — proves the scan is not vacuously green:
+    // if a real preset added the key on-value, the RATCHET test above would fail
+    // exactly like this.
+    const injected: Record<string, Record<string, string>> = {
+      ...Object.fromEntries(presetEntries),
+      "evil-leak": { [EXPOSE_ENV_KEY]: "1" },
+      "evil-alias-leak": { "expose-dataset-verifier": "true" },
+    }
+    const violations: string[] = []
+    for (const [presetName, knobs] of Object.entries(injected)) {
+      for (const [key, value] of Object.entries(knobs)) {
+        if (matchesExposeKey(key) && isOnValue(value)) {
+          violations.push(`${presetName}.${key}=${value}`)
+        }
+      }
+    }
+    expect(violations).toContain("evil-leak.QUANTA_BENCH_EXPOSE_DATASET_VERIFIER=1")
+    expect(violations).toContain("evil-alias-leak.expose-dataset-verifier=true")
+
+    // PAIRED CONTROL: the OFF-token form is NOT a violation (the ratchet only trips
+    // on an on-value, so a deliberately-disabled key would be permitted).
+    const offForm: Record<string, Record<string, string>> = {
+      "explicitly-off": { [EXPOSE_ENV_KEY]: "0" },
+    }
+    const offViolations = Object.entries(offForm).flatMap(([p, knobs]) =>
+      Object.entries(knobs)
+        .filter(([k, v]) => matchesExposeKey(k) && isOnValue(v))
+        .map(([k, v]) => `${p}.${k}=${v}`),
+    )
+    expect(offViolations).toEqual([])
+  })
+})

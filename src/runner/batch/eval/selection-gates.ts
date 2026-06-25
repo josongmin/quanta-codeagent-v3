@@ -257,8 +257,10 @@ const applyDeclaredExpectedHardGate = (
  * `declaredExpected` is a `researchOnly` signal: a `declaredExpectedMatch ===
  * false` verdict may hard-reject ONLY in `research` mode (the legacy answer-key
  * veto, preserved byte-identically). The `declaredExpectedMatch === true` case
- * NEVER vetoes; it only earns ranking credit, which it does through the soft
- * score weight (`score.ts`), independent of this gate.
+ * NEVER vetoes. (In research mode the `true` value also earns soft ranking credit
+ * via `score.ts`; in clean mode researchOnly soft signals are excluded from the
+ * ranking entirely — see accumulateSoftScore — so declaredExpected is credit-only
+ * by being NON-vetoing rather than by adding score.)
  *
  * CLEAN mode NEVER hard-vetoes on declaredExpected — not even when the verdict
  * came from a PUBLIC-issue-text-derived invariant (`declaredExpectedPublic`).

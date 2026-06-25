@@ -51,12 +51,12 @@ import {
   type PrimaryRailStep,
   resolveOwnerSiblings,
 } from "@/agent/closure"
-import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import {
   FIND_REFS_STEER,
   LSP_GROUNDING_STEER,
   SPEC_FIDELITY_STEER,
 } from "@/agent/localize-phase-guard"
+import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
@@ -149,11 +149,11 @@ import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
 import { probePatchStaticSanity } from "./patch-static-sanity"
-import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import {
   installProjectEnvPythonShim,
   projectEnvPythonShimLocalEnv,
 } from "./project-env-python-shim"
+import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
 import type { SelectionContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"

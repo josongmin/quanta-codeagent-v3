@@ -565,8 +565,7 @@ export const benchPostureFromState = (
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
   const specFidelityInvariant = readKnobValue(state, "spec-fidelity-invariant", isTrue) === true
-  const dynamicMessageMatcher =
-    readKnobValue(state, "dynamic-message-matcher", isTrue) === true
+  const dynamicMessageMatcher = readKnobValue(state, "dynamic-message-matcher", isTrue) === true
   const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
   const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true

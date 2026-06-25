@@ -285,7 +285,10 @@ describe("CHA multi-site — real-python sibling resolution [gated on python3]",
         const be = join(dir, "django", "db", "backends")
         for (const b of ["base", "mysql", "oracle", "sqlite3"])
           mkdirSync(join(be, b), { recursive: true })
-        writeFileSync(join(be, "base", "operations.py"), "class BaseDatabaseOperations:\n    pass\n")
+        writeFileSync(
+          join(be, "base", "operations.py"),
+          "class BaseDatabaseOperations:\n    pass\n",
+        )
         for (const b of ["mysql", "oracle"])
           writeFileSync(
             join(be, b, "operations.py"),

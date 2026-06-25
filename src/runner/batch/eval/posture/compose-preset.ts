@@ -37,6 +37,7 @@ import {
   FULL_EXEC,
   LOCALIZATION_CORE,
   MULTI_AGENT,
+  PROOF_CLEAN_CHAGENERAL_MODULES,
   PROOF_CLEAN_EXECFULL_MODULES,
   PROOF_CLEAN_MODULES,
   REGRESSION,
@@ -111,6 +112,11 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
     preset: "agentless-v4-proof-clean-execfull",
     base: THIN_STRICT_BASE.knobs,
     modules: PROOF_CLEAN_EXECFULL_MODULES,
+  },
+  {
+    preset: "agentless-v4-proof-clean-chageneral",
+    base: THIN_STRICT_BASE.knobs,
+    modules: PROOF_CLEAN_CHAGENERAL_MODULES,
   },
   {
     preset: "agentless-v5-absorb",

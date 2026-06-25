@@ -42,13 +42,18 @@ const ports = (over: Partial<SelectionPorts> = {}): SelectionPorts => ({
   ...over,
 })
 
-const run = (mode: "clean" | "research", over: Partial<SelectionPorts>) =>
+const run = (
+  mode: "clean" | "research",
+  over: Partial<SelectionPorts>,
+  declaredExpectedAuthority?: "public" | "research",
+) =>
   runSelection({
     n: 1,
     seeds: [undefined],
     owners: new Set(["pkg/owner.py"]),
     mode,
     ports: ports(over),
+    ...(declaredExpectedAuthority !== undefined ? { declaredExpectedAuthority } : {}),
   })
 
 const bigDiff =
@@ -510,6 +515,29 @@ describe("clean-mode selector authority (T-AUTH-01 / T-SEL-02 / T-SMK-04 live wi
   it("CLEAN: declaredExpected=false does NOT reject — answer-key has no clean authority", async () => {
     const r = await run("clean", { declaredExpected: async () => false })
     expect(r.winner?.id).toBe("cand-0")
+  })
+
+  it("RED-ON-INJECTION: CLEAN + PUBLIC declaredExpected authority + match=false STILL wins (no hard veto)", async () => {
+    // This wires the end-to-end hole the audit flagged: with
+    // declaredExpectedAuthority="public" (set by the spec-fidelity-invariant knob),
+    // a CORRECT candidate whose static prose-regex match is false used to be
+    // hard-rejected (admissible:false) AND barred from best-effort. A non-executed
+    // regex compare must NOT decide correctness — so the candidate must still WIN.
+    // Reverting the scoreWithAuthority clean-mode change flips this RED.
+    const r = await run("clean", { declaredExpected: async () => false }, "public")
+    expect(r.winner?.id).toBe("cand-0")
+    expect(
+      r.scored
+        .find((s) => s.candidate.id === "cand-0")
+        ?.verdict.reasons.some((x) => x.startsWith("hard:declaredExpectedMatch")),
+    ).toBe(false)
+  })
+
+  it("PAIRED CONTROL: RESEARCH + PUBLIC authority + declaredExpected=false STILL rejects (clean-only scope)", async () => {
+    // Research mode is byte-identical to legacy: the declared-expected veto fires
+    // regardless of authority. Proves the neutralization is scoped to clean mode.
+    const r = await run("research", { declaredExpected: async () => false }, "public")
+    expect(r.winner).toBeNull()
   })
 
   it("CLEAN: structural/executable vetoes STILL apply (applyClean=false rejects)", async () => {

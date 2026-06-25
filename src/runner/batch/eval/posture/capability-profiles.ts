@@ -128,6 +128,16 @@ export const CHA_MULTISITE: KnobModule = {
   knobs: { "cha-multisite-steer": "1" },
 }
 
+/** CHA contract-fallback generalization (jun-25): replace the legacy
+ *  django/db/backends PATH HARDCODE with a structural parallel-sibling rule
+ *  (same dir-root + same leaf filename, shared ancestor). Strict superset of the
+ *  django match — byte-identical for django targets, additive elsewhere. Only
+ *  meaningful alongside CHA_MULTISITE. */
+export const CHA_MULTISITE_GENERAL: KnobModule = {
+  id: "cha-multisite-general",
+  knobs: { "cha-multisite-general": "1" },
+}
+
 /** One bounded closure-repair round seeded by proof-failure context. */
 export const REPAIR_BOUNDED = (rounds: number): KnobModule => ({
   id: `repair-bounded-${rounds}`,
@@ -288,6 +298,14 @@ export const PROOF_CLEAN_MODULES: readonly KnobModule[] = [
   PROOF_REQUIRED,
   CHA_MULTISITE,
   CLEAN_SELECTOR,
+]
+
+/** `agentless-v4-proof-clean` plus the generalized CHA contract-fallback sibling
+ *  rule (django path hardcode → structural parallel-sibling). Superset of the
+ *  django match, so byte-identical on django targets and additive elsewhere. */
+export const PROOF_CLEAN_CHAGENERAL_MODULES: readonly KnobModule[] = [
+  ...PROOF_CLEAN_MODULES,
+  CHA_MULTISITE_GENERAL,
 ]
 
 /** `agentless-v4-proof-clean` plus full in-loop repo-test execution. Mirrors

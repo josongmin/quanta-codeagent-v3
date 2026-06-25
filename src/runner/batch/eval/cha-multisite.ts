@@ -85,10 +85,13 @@ repo, target_rel, method = sys.argv[1], sys.argv[2], sys.argv[3]
 # Sibling-mode for the contract fallback (siblings that DON'T define the method):
 #   "path-hardcoded" (default) — legacy django/db/backends path match (byte-identical).
 #   "general"        — structural parallel-sibling rule: same dir-root + same leaf
-#                      filename, different variant dir, sharing an ancestor. The
-#                      django case is a strict subset (root=django/db/backends), so
-#                      "general" is byte-identical to "path-hardcoded" for django
-#                      targets and merely ADDITIVE for other parallel-impl layouts.
+#                      filename, different variant dir, sharing an ancestor. For the
+#                      canonical 5-segment django layout (django/db/backends/<backend>/
+#                      <file> — the only shape django backends use) the match set is
+#                      EXACTLY the path-hardcode's, so "general" is byte-identical on
+#                      real django and merely ADDITIVE for other parallel-impl layouts.
+#                      (For hypothetical deeper django-prefixed paths "general" is
+#                      strictly more precise, not a superset — irrelevant in practice.)
 sibling_mode = sys.argv[4] if len(sys.argv) > 4 else "path-hardcoded"
 
 # ---------------------------------------------------------------------------
