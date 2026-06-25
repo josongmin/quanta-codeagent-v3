@@ -338,12 +338,24 @@ export const parseNodeTest = (output: string): TestRunResult => {
   return { runner: "node", passed, failed, ok: failed.length === 0 }
 }
 
-/** `python -m pytest` (text): a `=== FAILURES ===` section with one
- *  `___ test ___` block per failure (each ending in `FILE:LINE: ExcType`), and a
- *  `short test summary info` with `FAILED FILE::test - message` lines + an
- *  `N failed, M passed` total. Blocks and summary lines are in the SAME order, so
- *  we zip the per-block location onto the summary entry. Pinned to VERBATIM
- *  pytest 9.x output. NEVER-throws. */
+/** Normalize a pytest test identifier to a stable lookup key: drop a leading
+ *  `FILE::` (or `FILE.py:`) path, and collapse the `::` / `.` separators the two
+ *  surfaces disagree on (summary uses `Class::method`, the `___ block ___` header
+ *  uses `Class.method`) to a single token. Lets a FAILURES/ERRORS block be paired
+ *  to its short-summary entry BY NAME — never by array index. */
+const pytestNameKey = (id: string): string =>
+  id
+    .replace(/^.*?\.py(?:::|:)/, "") // strip a leading file path (`test_math.py::` / `test_math.py:`)
+    .replace(/::/g, ".") // unify `Class::method` ⇄ `Class.method`
+    .trim()
+
+/** `python -m pytest` (text): a `=== FAILURES ===` and/or `=== ERRORS ===` section
+ *  with one `___ name ___` block per failing/erroring test (each ending in
+ *  `FILE:LINE: ExcType`), and a `short test summary info` listing `FAILED`/`ERROR
+ *  FILE::test - message` lines + an `N failed, M passed` total. The summary lists
+ *  FAILED-before-ERROR while the sections print ERRORS-before-FAILURES, so blocks
+ *  are paired to summary entries BY TEST NAME (not by order/index — a positional
+ *  zip mis-localizes the ERROR rows). Pinned to VERBATIM pytest 9.x. NEVER-throws. */
 export const parsePytest = (output: string): TestRunResult => {
   const lines = output.split("\n")
   const passed = Number(/(\d+) passed/.exec(output)?.[1] ?? "0")
@@ -355,43 +367,59 @@ export const parsePytest = (output: string): TestRunResult => {
     if (m !== null) summary.push({ testid: m[1]!, ...(m[2] ? { message: m[2].trim() } : {}) })
   }
 
-  // FAILURES blocks: header `___ name ___`; the LAST `FILE.py:LINE:` inside a
-  // block is the assertion / raise site (deepest user frame).
-  const blockLocs: { file: string; line: number }[] = []
-  let inFailures = false
-  let started = false
+  // FAILURES + ERRORS blocks: header `___ name ___`; the LAST `FILE.py:LINE:`
+  // inside a block is the assertion / raise site (deepest user frame). Keyed by
+  // the block's parsed name so it pairs to the matching summary entry regardless
+  // of section vs summary ordering. The ERRORS header carries a prefix
+  // (`ERROR at setup of <test>` / `ERROR collecting <file>`) — strip it to the
+  // bare test/file id before keying.
+  const blockLocByKey = new Map<string, { file: string; line: number }>()
+  let inBlocks = false
+  let curName: string | undefined
   let cur: { file: string; line: number } | undefined
+  const flush = (): void => {
+    if (curName !== undefined && cur !== undefined && !blockLocByKey.has(curName)) blockLocByKey.set(curName, cur)
+  }
   for (const raw of lines) {
     const t = raw.trim()
-    if (/^=+\s*FAILURES\s*=+$/.test(t)) {
-      inFailures = true
+    if (/^=+\s*(FAILURES|ERRORS)\s*=+$/.test(t)) {
+      flush()
+      inBlocks = true
+      curName = undefined
+      cur = undefined
       continue
     }
-    if (!inFailures) continue
-    // End of the FAILURES section (short summary / totals / errors section).
-    if (/^=+\s*(short test summary|\d+ (failed|passed|error)|ERRORS)\b/.test(t)) {
-      if (started) blockLocs.push(cur ?? { file: "", line: 0 })
-      break
-    }
-    if (/^_{3,}.*_{3,}$/.test(t)) {
-      if (started) blockLocs.push(cur ?? { file: "", line: 0 })
+    if (!inBlocks) continue
+    // End of a blocks section: short summary / totals. (A `=== FAILURES ===` or
+    // `=== ERRORS ===` header is handled above and KEEPS scanning the next section.)
+    if (/^=+\s*(short test summary|\d+ (failed|passed|error)|warnings summary)\b/.test(t)) {
+      flush()
+      inBlocks = false
+      curName = undefined
       cur = undefined
-      started = true
+      continue
+    }
+    const hm = /^_{3,}\s*(.*?)\s*_{3,}$/.exec(t)
+    if (hm !== null) {
+      flush()
+      // Strip the ERRORS-section prefixes down to the bare test/file id.
+      const bare = hm[1]!
+        .replace(/^ERROR at (?:setup|teardown|call) of\s+/, "")
+        .replace(/^ERROR collecting\s+/, "")
+      curName = pytestNameKey(bare)
+      cur = undefined
       continue
     }
     const fm = /^(.+\.py):(\d+):\s/.exec(raw)
     if (fm !== null) cur = { file: fm[1]!, line: Number(fm[2]) }
   }
-  // If FAILURES ran to EOF without a trailing summary/section (no `break`/header
-  // fired), the final block's location is still pending — flush it.
-  if (started && (blockLocs.length === 0 || blockLocs.length < summary.length))
-    blockLocs.push(cur ?? { file: "", line: 0 })
+  flush()
 
-  const failed: TestFailure[] = summary.map((s, i) => {
+  const failed: TestFailure[] = summary.map((s) => {
     const sep = s.testid.indexOf("::")
     const fileFromId = sep === -1 ? undefined : s.testid.slice(0, sep)
     const name = sep === -1 ? s.testid : s.testid.slice(sep + 2)
-    const loc = blockLocs[i]
+    const loc = blockLocByKey.get(pytestNameKey(s.testid))
     const file = loc?.file && loc.file.length > 0 ? loc.file : fileFromId
     return {
       name,
