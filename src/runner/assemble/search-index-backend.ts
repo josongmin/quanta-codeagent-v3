@@ -35,6 +35,7 @@ import {
   type Embedder,
   type EmbedderCapabilities,
   type EmbedderEnv,
+  type EmbedProvider,
   type LanceStoreOptions,
   negotiateCapabilities,
   type QdrantStoreOptions,
@@ -42,7 +43,7 @@ import {
   type VectorStore,
 } from "@/retrieval/engines"
 import type { SearchHit, SemanticIndex } from "@/retrieval/pipeline"
-import { errMessage, gateOn, logger } from "@/shared"
+import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
 
 /** Caller-supplied upsert surface — mirrors `IndexerChunkUpsertPort`. */
 export interface ChunkUpsertPort {
@@ -201,6 +202,33 @@ const buildLegacyHashEmbedder = (): ResolvedIndexEmbedder => ({
   providerLabel: HASH_EMBED_MODEL_TAG,
 })
 
+/**
+ * Key-detection default promotion (jun26 frontier-parity fix).
+ *
+ * The strongest semantic-search path (Voyage/OpenAI/Cohere embed) was real but
+ * default-OFF: out-of-box you got the 64-dim hash-BoW placeholder unless you
+ * BOTH set a key AND remembered to set `QUANTA_EMBED_PROVIDER`. When a real API
+ * key is present but no provider is named, promote to that provider's embedder
+ * so the box-fresh experience is real semantic search, not a placeholder.
+ *
+ * Invariants:
+ *   - NO key present ⇒ returns `undefined` ⇒ caller keeps the legacy hash path
+ *     verbatim (byte-identical default-OFF preserved).
+ *   - An EXPLICIT `QUANTA_EMBED_PROVIDER` always wins (we never override it).
+ *   - Kill-switch `QUANTA_INDEX_AUTO_EMBED=off` (or `=0`) disables promotion so
+ *     the flip is reversible/measurable; default-ON only fires WITH a key.
+ *
+ * Probe order matches the registry's switch; first key present wins.
+ */
+const promoteProviderFromKey = (env: NodeJS.ProcessEnv): EmbedProvider | undefined => {
+  if (env.QUANTA_EMBED_PROVIDER !== undefined && env.QUANTA_EMBED_PROVIDER !== "") return undefined
+  if (gateDisabled(env, "QUANTA_INDEX_AUTO_EMBED")) return undefined
+  if (env.VOYAGE_API_KEY !== undefined && env.VOYAGE_API_KEY !== "") return "voyage"
+  if (env.OPENAI_API_KEY !== undefined && env.OPENAI_API_KEY !== "") return "openai"
+  if (env.COHERE_API_KEY !== undefined && env.COHERE_API_KEY !== "") return "cohere"
+  return undefined
+}
+
 const fallbackHeadless = async (
   embedder: Embedder,
   text: string,
@@ -233,9 +261,17 @@ export const resolveIndexEmbedder = (
   factory: EmbedderFactory = createEmbedderFromEnv,
   opts: ResolveIndexEmbedderOptions = {},
 ): ResolvedIndexEmbedder => {
-  const embedder = factory(env as EmbedderEnv)
+  // Key-detection promotion: with a key but no explicit provider, build the
+  // provider env the key implies. Absent a key (or kill-switch off) this is a
+  // no-op and the original env flows through ⇒ byte-identical hash default.
+  const promoted = promoteProviderFromKey(env)
+  const factoryEnv: EmbedderEnv =
+    promoted === undefined
+      ? (env as EmbedderEnv)
+      : { ...(env as EmbedderEnv), QUANTA_EMBED_PROVIDER: promoted }
+  const embedder = factory(factoryEnv)
   if (embedder === null) return buildLegacyHashEmbedder()
-  const providerLabel = env.QUANTA_EMBED_PROVIDER ?? HASH_EMBED_MODEL_TAG
+  const providerLabel = factoryEnv.QUANTA_EMBED_PROVIDER ?? HASH_EMBED_MODEL_TAG
   return {
     capabilities: async (): Promise<EmbedderCapabilities> => {
       try {
@@ -311,13 +347,27 @@ const newInMemoryBackend = (
       async query(vec: readonly number[], k: number): Promise<readonly SearchHit[]> {
         const t0 = nowOrDate(nowMs)
         const out: SearchHit[] = []
+        // COSINE similarity, not raw dot. The legacy hash embedder emits
+        // unit-length vectors, so cosine == dot there (byte-identical ranking).
+        // But a real (Voyage/OpenAI/Cohere) embedder need NOT be normalized; raw
+        // dot then ranks by magnitude, not direction — a ranking distortion.
+        // Normalizing by both magnitudes restores direction-based ranking on the
+        // most-common enabled path. Zero-magnitude vectors ⇒ score 0 (no NaN).
+        let qNorm = 0
+        for (let i = 0; i < vec.length; i++) qNorm += (vec[i] ?? 0) * (vec[i] ?? 0)
+        qNorm = Math.sqrt(qNorm)
         for (const [id, { vec: v, chunk }] of store) {
           let dot = 0
+          let vNorm = 0
           const len = Math.min(v.length, vec.length)
           for (let i = 0; i < len; i++) dot += (v[i] ?? 0) * (vec[i] ?? 0)
+          for (let i = 0; i < v.length; i++) vNorm += (v[i] ?? 0) * (v[i] ?? 0)
+          vNorm = Math.sqrt(vNorm)
+          const denom = qNorm * vNorm
+          const score = denom === 0 ? 0 : dot / denom
           out.push({
             id,
-            score: dot,
+            score,
             text: chunk.text,
             source: "semantic",
             metadata: {

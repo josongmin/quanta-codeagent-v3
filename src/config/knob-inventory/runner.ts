@@ -65,6 +65,16 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
     readSite: "runner/assemble/search-index-backend.ts",
   },
   {
+    envKey: "QUANTA_INDEX_AUTO_EMBED",
+    kind: "bool",
+    default: true,
+    group: "retrieval",
+    home: "runtime-config",
+    describe:
+      "Promote semantic embedder from hash-BoW to a real provider when an API key is present and QUANTA_EMBED_PROVIDER is unset (kill-switch =off/0).",
+    readSite: "runner/assemble/search-index-backend.ts",
+  },
+  {
     envKey: "QUANTA_VECTOR_STORE",
     kind: "enum",
     default: undefined,
