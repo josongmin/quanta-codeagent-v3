@@ -43,11 +43,11 @@ describe("preset ⇄ composite raw identity (D2 + P2)", () => {
   })
 
   // red-on-injection: the identity is NOT vacuous — a wrong module value breaks it.
-  test("RED: a wrong N in the proof-clean composite breaks the identity", () => {
-    const entry = PRESET_COMPOSITES.find((c) => c.preset === "agentless-v4-proof-clean")!
+  test("RED: a wrong N in the absorb-execfull composite breaks the identity", () => {
+    const entry = PRESET_COMPOSITES.find((c) => c.preset === "agentless-v5-absorb-execfull")!
     const wrong = entry.modules.map((m) => (m.id.startsWith("select-n-") ? SELECT_N(2) : m))
     expect(composePresetKnobs(entry.base, wrong)).not.toEqual(
-      KNOB_PRESETS["agentless-v4-proof-clean"] ?? {},
+      KNOB_PRESETS["agentless-v5-absorb-execfull"] ?? {},
     )
   })
 })

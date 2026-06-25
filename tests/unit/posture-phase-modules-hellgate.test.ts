@@ -129,13 +129,13 @@ describe("posture phase-module seam", () => {
   })
 
   describe("red-on-injection (equivalence is not vacuous)", () => {
-    test("RED-1: wrong N in proof-clean breaks preset equivalence", () => {
+    test("RED-1: wrong N in proof-clean modules breaks the fold equivalence", () => {
       const wrong = PROOF_CLEAN_MODULES.map((m) => (m.id.startsWith("select-n-") ? SELECT_N(2) : m))
-      const derived = derivePhasePosture(stateFor(THIN_BASE), wrong, EMPTY_ENV)
-      const direct = benchPostureFromState(stateFor("agentless-v4-proof-clean"), EMPTY_ENV)
-      expect(behavioral(derived)).not.toEqual(behavioral(direct))
-      expect(derived.verifySelectN).toBe(2)
-      expect(direct.verifySelectN).toBe(5)
+      const derivedWrong = derivePhasePosture(stateFor(THIN_BASE), wrong, EMPTY_ENV)
+      const derivedRight = derivePhasePosture(stateFor(THIN_BASE), PROOF_CLEAN_MODULES, EMPTY_ENV)
+      expect(behavioral(derivedWrong)).not.toEqual(behavioral(derivedRight))
+      expect(derivedWrong.verifySelectN).toBe(2)
+      expect(derivedRight.verifySelectN).toBe(5)
     })
   })
 
@@ -186,11 +186,11 @@ describe("posture phase-module seam", () => {
       ).toEqual(thin)
     })
 
-    test("ACTION-2: run_proof_clean maps to the proof-clean posture", () => {
+    test("ACTION-2: run_proof_clean maps to the proof-clean module fold", () => {
       const base = stateFor(THIN_BASE)
       expect(
         behavioral(derivePhasePosture(base, PHASE_MODULES.run_proof_clean, EMPTY_ENV)),
-      ).toEqual(behavioral(benchPostureFromState(stateFor("agentless-v4-proof-clean"), EMPTY_ENV)))
+      ).toEqual(behavioral(derivePhasePosture(base, PROOF_CLEAN_MODULES, EMPTY_ENV)))
     })
 
     test("ACTION-3: every action's modules reference only registered knobs", () => {

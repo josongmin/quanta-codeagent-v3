@@ -13,6 +13,15 @@
  * flowing into the config and PRESET-1/2/6 fail (lsp/subagent/skills/localize
  * vanish). If the `liveOverrides` bridge in `buildConfig` is removed,
  * PRESET-1's setKnobOverride assertions fail.
+ *
+ * jun-26 preset cleanup: the heavy verify-select arms (agentless-v2,
+ * v3-select-regression*, v3-thin, v3-thin-strict-*select*, v4-proof-clean*,
+ * v5-absorb*, everything-v1, model-lane-diversity) were removed — they laundered
+ * correct patches to empty via hard-veto gates and were superseded by the
+ * measured single-pass winner `agentless-v6-singlepass-execfull`. Their per-preset
+ * pinning tests were deleted with them; the retained presets are baseline /
+ * agentless-v1 / -v1-nosteer / -v6-singlepass-execfull / -v3-thin-strict /
+ * -v5-absorb-execfull / -v5-thin-and-expanded / hint-only / everything.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -130,31 +139,19 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(getKnobOverride("QUANTA_REPO_MAP")).toBe("1")
   })
 
-  // PRESET-2: everything-v1 adds the multi-agent axis on top of agentless-v1.
-  test("PRESET-2: everything-v1 additionally wires subagent + skills", () => {
-    process.env.QUANTA_BENCH_PRESET = "everything-v1"
-    const cfg = buildOnce()
-    expect(cfg.subagent).toEqual({})
-    expect(cfg.skills).toEqual({})
-    expect(hasLspTool(cfg)).toBe(true) // still inherits agentless-v1 lsp
-    expect(getKnobOverride("QUANTA_READ_OUTLINE")).toBe("1")
-  })
-
   // PRESET-3: the SAME resolved state feeds the report AND the posture — so
   // "report == applied" by construction (the report-lie is impossible).
   test("PRESET-3: report's active knobs match what drives config", () => {
-    process.env.QUANTA_BENCH_PRESET = "everything-v1"
+    process.env.QUANTA_BENCH_PRESET = "agentless-v1"
     const state = resolveBenchKnobs({ envVars: process.env })
     const report = knobsForReport(state)
     // Report shows the preset's knobs active...
-    for (const id of ["lsp", "subagent", "skills", "localize-phase", "issue-hint", "repro-test"]) {
+    for (const id of ["lsp", "localize-phase", "issue-hint", "repro-test"]) {
       expect(report[id]).toBeDefined()
     }
     // ...and the posture projected from the SAME state agrees.
     const opt = benchOptIns()
     expect(opt.lspNav).toBe(true)
-    expect(opt.subagent).toEqual({})
-    expect(opt.skills).toEqual({})
     expect(opt.localizePhase).toEqual({ phase1Turns: 5, lspGroundingSteer: true })
   })
 
@@ -229,7 +226,7 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
   test("PRESET-7: QUANTA_BENCH_PRESET wins over SOTA alias and QUANTA_KNOBS_PRESET", () => {
     process.env.QUANTA_BENCH_PRESET = "baseline"
     process.env.QUANTA_BENCH_SOTA = "1"
-    process.env.QUANTA_KNOBS_PRESET = "everything-v1"
+    process.env.QUANTA_KNOBS_PRESET = "everything"
     const opt = benchOptIns()
     expect(opt.preset).toBe("baseline")
     expect(opt.lspNav).toBe(false) // baseline = no-op, despite SOTA/KNOBS set
@@ -253,65 +250,8 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
-  // PRESET-9: the repair EXECUTOR is NOT in the DEFAULT/v1/v2 presets — measured
-  // net-negative (jun-19: resolution 9→7, repro is a false-NEGATIVE oracle so
-  // repair just churns). The closure GROUNDING knobs stay (they win: 82/84
-  // django). The executor is opt-in: the jun-19 repair-arms `agentless-v2-repair`
-  // (legacy gate) and `agentless-v2-reprovote` (K-of-N vote gate) DO enable
-  // `closure-repair:3` — exactly the "for when the repro oracle is fixed" arms
-  // this comment foresaw (the vote IS that fix). This test pins that v1/v2
-  // themselves stay executor-free. red-on-injection: add "closure-repair" to
-  // agentless-v2 and this fails.
-  test("PRESET-9: v1/v2 presets stay executor-free (repair is explicit opt-in via the repair-arms)", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v2"
-    expect(benchOptIns().repairRounds).toBeUndefined()
-    expect(KNOB_PRESETS["agentless-v2"]?.["closure-repair"]).toBeUndefined()
-    // But the closure GROUNDING knobs ARE on (the winning config).
-    expect(KNOB_PRESETS["agentless-v2"]?.["primary-rail"]).toBe("1")
-    process.env.QUANTA_BENCH_PRESET = "agentless-v1"
-    expect(benchOptIns().repairRounds).toBeUndefined()
-  })
-
-  // PRESET-10: the executor is still reachable as an explicit opt-in (env/CLI),
-  // so a future A/B can re-enable it on top of agentless-v2 without forking.
-  test("PRESET-10: QUANTA_BENCH_CLOSURE_REPAIR opts the executor back in over a preset", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v2"
-    expect(benchOptIns().repairRounds).toBeUndefined() // off by preset
-    process.env.QUANTA_BENCH_CLOSURE_REPAIR = "5"
-    expect(benchOptIns().repairRounds).toBe(5) // explicit opt-in wins
-    // Garbage is rejected by the strict parse; with no preset value to fall back
-    // to, the executor stays OFF (undefined) — fail-safe given it's net-negative.
-    process.env.QUANTA_BENCH_CLOSURE_REPAIR = "abc"
-    expect(benchOptIns().repairRounds).toBeUndefined()
-  })
-
-  test("PRESET-11: agentless-v3-select-regression wires no-oracle select posture", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression"
-    const opt = benchOptIns()
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectEarlyAccept).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    expect(KNOB_PRESETS["agentless-v3-select-regression"]).toMatchObject({
-      "verify-select": "5",
-      "verify-select-early-accept": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
-    })
-  })
-
-  test("PRESET-12: agentless-v3-thin stays mini-first without verify-select enabled", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin"
-    const opt = benchOptIns()
-    expect(opt.verifySelectN).toBeUndefined()
-    expect(opt.verifySelectRegression).toBeUndefined()
-    expect(opt.verifySelectRepro).toBeUndefined()
-    expect(KNOB_PRESETS["agentless-v3-thin"]).toMatchObject({
-      "spec-fidelity-steer": "1",
-      "patch-budget": "1",
-    })
-  })
-
+  // PRESET-14: agentless-v3-thin-strict is noexec + hard patch-budget, without
+  // a late selector (the retained thin-strict base the v5 controller composes over).
   test("PRESET-14: agentless-v3-thin-strict is noexec + hard patch-budget, without late selector", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict"
     const opt = benchOptIns()
@@ -329,272 +269,49 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(KNOB_PRESETS["agentless-v3-thin-strict"]?.["repro-test"]).toBeUndefined()
   })
 
-  test("PRESET-15: agentless-v3-thin-strict-select keeps noexec candidate-gen and adds late selector", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-select"
+  // PRESET-V6: the MEASURED WINNER — agentless-v6-singlepass-execfull == the
+  // agentless-v1 localization core PLUS full in-loop repo-test execution. This is
+  // the posture that resolved django-11138 on the official harness.
+  test("PRESET-V6: agentless-v6-singlepass-execfull == v1 core + full in-loop exec", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v6-singlepass-execfull"
     const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectEarlyAccept).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-select"]).toMatchObject({
-      "bench-in-loop-exec": "off",
-      "patch-budget-strict": "1",
-      "verify-select": "5",
-      "verify-select-early-accept": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
+    expect(opt.lspNav).toBe(true)
+    expect(opt.localizePhase).toEqual({ phase1Turns: 5, lspGroundingSteer: true })
+    expect(opt.reproTestK).toBe(5)
+    expect(opt.inLoopExec).toBe(true)
+    expect(opt.inLoopExecMode).toBe("full")
+    expect(KNOB_PRESETS["agentless-v6-singlepass-execfull"]).toMatchObject({
+      lsp: "1",
+      "localize-phase": "5",
+      "issue-hint": "agentless",
+      "repro-test": "5",
+      "bench-in-loop-exec": "full",
     })
   })
 
-  test("PRESET-15b: agentless-v3-thin-strict-closure-select combines noexec selector with ClosureBundle grounding", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.faultEvidence).toBe(true)
-    expect(opt.verificationPlan).toBe(true)
-    expect(opt.primaryRail).toBe(true)
-    expect(opt.patchHygiene).toBe(true)
-    expect(opt.noPatchBreaker).toBe(true)
-    expect(opt.repairEscalation).toBe(true)
-    expect(opt.repairRounds).toBeUndefined()
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectEarlyAccept).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]).toMatchObject({
-      "bench-in-loop-exec": "off",
-      "fault-evidence": "1",
-      "verification-plan": "1",
-      "primary-rail": "1",
-      "patch-hygiene": "1",
-      "no-patch-breaker": "1",
-      "repair-escalation": "1",
-      "patch-budget-strict": "1",
-      "verify-select": "5",
-      "verify-select-early-accept": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
-    })
-    expect(
-      KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["rca-target-gates"],
-    ).toBeUndefined()
-    expect(
-      KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["closure-repair"],
-    ).toBeUndefined()
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["test-runner"]).toBeUndefined()
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select"]?.["repro-test"]).toBeUndefined()
-  })
-
-  test("PRESET-15d: agentless-v3-thin-strict-closure-select-clean preserves closure grounding but switches submit authority to clean", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select-clean"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.faultEvidence).toBe(true)
-    expect(opt.verificationPlan).toBe(true)
-    expect(opt.primaryRail).toBe(true)
-    expect(opt.patchHygiene).toBe(true)
-    expect(opt.noPatchBreaker).toBe(true)
-    expect(opt.repairEscalation).toBe(true)
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectEarlyAccept).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    expect(opt.selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean"]).toMatchObject({
-      "bench-in-loop-exec": "off",
-      "fault-evidence": "1",
-      "verification-plan": "1",
-      "primary-rail": "1",
-      "patch-hygiene": "1",
-      "no-patch-breaker": "1",
-      "repair-escalation": "1",
-      "patch-budget-strict": "1",
-      "verify-select": "5",
-      "verify-select-early-accept": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
-      "selector-mode": "clean",
-    })
-  })
-
-  test("PRESET-15e: agentless-v3-thin-strict-closure-select-clean-witness-only keeps closure grounding but removes early accept and generated repro ranking", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-thin-strict-closure-select-clean-witness-only"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.faultEvidence).toBe(true)
-    expect(opt.verificationPlan).toBe(true)
-    expect(opt.primaryRail).toBe(true)
-    expect(opt.patchHygiene).toBe(true)
-    expect(opt.noPatchBreaker).toBe(true)
-    expect(opt.repairEscalation).toBe(true)
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectEarlyAccept).toBe(false)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("off")
-    expect(opt.selectorMode).toBe("clean")
-    expect(
-      KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean-witness-only"],
-    ).toMatchObject({
-      "bench-in-loop-exec": "off",
-      "fault-evidence": "1",
-      "verification-plan": "1",
-      "primary-rail": "1",
-      "patch-hygiene": "1",
-      "no-patch-breaker": "1",
-      "repair-escalation": "1",
-      "patch-budget-strict": "1",
-      "verify-select": "5",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "off",
-      "selector-mode": "clean",
-    })
-    expect(
-      KNOB_PRESETS["agentless-v3-thin-strict-closure-select-clean-witness-only"]?.[
-        "verify-select-early-accept"
-      ],
-    ).toBeUndefined()
-  })
-
-  test("PRESET-15f: agentless-v4-proof-clean promotes clean selector to bounded executable proof mode", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.inLoopExecMode).toBe("repro-only")
-    expect(opt.reproTestK).toBe(10)
-    expect(opt.adversarialRepro).toBe(true)
-    expect(opt.faultEvidence).toBe(true)
-    expect(opt.verificationPlan).toBe(true)
-    expect(opt.primaryRail).toBe(true)
-    expect(opt.patchHygiene).toBe(true)
-    expect(opt.noPatchBreaker).toBe(true)
-    expect(opt.repairEscalation).toBe(true)
-    expect(opt.patchBudgetStrict).toBe(true)
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectConcurrency).toBe(3)
-    expect(opt.verifySelectEarlyAccept).toBe(false)
-    expect(opt.verifySelectProofRequired).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    expect(opt.chaMultisiteSteer).toBe(true)
-    expect(opt.selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v4-proof-clean"]).toMatchObject({
-      "bench-in-loop-exec": "repro-only",
-      "repro-test": "10",
-      "adversarial-repro": "1",
-      "test-runner": "1",
-      "fault-evidence": "1",
-      "verification-plan": "1",
-      "primary-rail": "1",
-      "patch-hygiene": "1",
-      "no-patch-breaker": "1",
-      "repair-escalation": "1",
-      "patch-budget-strict": "1",
-      "verify-select": "5",
-      "verify-select-concurrency": "3",
-      "verify-select-proof-required": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
-      "cha-multisite-steer": "1",
-      "selector-mode": "clean",
-    })
-    expect(KNOB_PRESETS["agentless-v4-proof-clean"]?.["verify-select-early-accept"]).toBeUndefined()
-    expect(KNOB_PRESETS["agentless-v4-proof-clean"]?.["rca-target-gates"]).toBeUndefined()
-    expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean")).toBe(true)
-  })
-
-  test("PRESET-15g: explicit env false beats proof-clean preset proof-required=true", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
-    process.env.QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED = "0"
-    const opt = benchOptIns()
-    expect(opt.verifySelectProofRequired).toBe(false)
-    const state = resolveBenchKnobs({ envVars: process.env })
-    expect(state.values.get("verify-select-proof-required")).toEqual({
-      source: "env",
-      value: false,
-    })
-  })
-
-  test("PRESET-15ga: proof-clean-execfull keeps proof-clean authority but upgrades in-loop exec to full", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean-execfull"
+  // PRESET-ABSORB: agentless-v5-absorb-execfull is the ONE retained verify-select
+  // arm — the competitor-absorb reference (forward-localize / spec-fidelity-invariant
+  // / dynamic-message-matcher / cha-multisite) with FULL in-loop exec and clean
+  // submit authority. Kept as an A/B arm against the v6 single-pass winner.
+  test("PRESET-ABSORB: agentless-v5-absorb-execfull carries the absorb levers + clean selector", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v5-absorb-execfull"
     const opt = benchOptIns()
     expect(opt.inLoopExec).toBe(true)
     expect(opt.inLoopExecMode).toBe("full")
-    expect(opt.verifySelectProofRequired).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    expect(opt.chaMultisiteSteer).toBe(true)
-    expect(opt.selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v4-proof-clean-execfull"]).toMatchObject({
-      "bench-in-loop-exec": "full",
-      "repro-test": "10",
-      "adversarial-repro": "1",
-      "verify-select-proof-required": "1",
-      "cha-multisite-steer": "1",
-      "selector-mode": "clean",
-    })
-    expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean-execfull")).toBe(true)
-  })
-
-  test("PRESET-15gb: proof-clean-absorb is the explicit measured scaffold-absorb arm", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean-absorb"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(false)
-    expect(opt.inLoopExecMode).toBe("repro-only")
-    expect(opt.reproTestK).toBe(10)
-    expect(opt.adversarialRepro).toBe(true)
-    expect(opt.faultEvidence).toBe(true)
-    expect(opt.verificationPlan).toBe(true)
-    expect(opt.primaryRail).toBe(true)
-    expect(opt.noPatchBreaker).toBe(true)
-    expect(opt.repairEscalation).toBe(true)
-    expect(opt.patchBudgetStrict).toBe(true)
     expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectConcurrency).toBe(3)
-    expect(opt.verifySelectProofRequired).toBe(false)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
     expect(opt.chaMultisiteSteer).toBe(true)
     expect(opt.specFidelityInvariant).toBe(true)
     expect(opt.dynamicMessageMatcher).toBe(true)
     expect(opt.forwardLocalize).toBe(true)
     expect(opt.selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v4-proof-clean-absorb"]).toEqual(
-      KNOB_PRESETS["agentless-v5-absorb"],
-    )
-    expect(KNOB_PRESETS["agentless-v4-proof-clean-absorb"]?.["verify-select-proof-required"]).toBe(
-      undefined,
-    )
-    expect(KNOB_PRESETS["agentless-v4-proof-clean-absorb"]).toMatchObject({
-      "bench-in-loop-exec": "repro-only",
-      "repro-test": "10",
-      "adversarial-repro": "1",
+    expect(KNOB_PRESETS["agentless-v5-absorb-execfull"]).toMatchObject({
+      "bench-in-loop-exec": "full",
       "verify-select": "5",
-      "verify-select-concurrency": "3",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
       "cha-multisite-steer": "1",
       "spec-fidelity-invariant": "1",
       "dynamic-message-matcher": "1",
       "forward-localize": "1",
       "selector-mode": "clean",
-    })
-    expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean-absorb")).toBe(true)
-  })
-
-  test("PRESET-15h: explicit env false beats proof-clean preset cha-multisite=true", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
-    process.env.QUANTA_BENCH_CHA_MULTISITE_STEER = "0"
-    const opt = benchOptIns()
-    expect(opt.chaMultisiteSteer).toBe(false)
-    const state = resolveBenchKnobs({ envVars: process.env })
-    expect(state.values.get("cha-multisite-steer")).toEqual({
-      source: "env",
-      value: false,
     })
   })
 
@@ -605,46 +322,21 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(contaminated).toEqual([])
   })
 
-  // PRESET-SM: the three clean-authority presets resolve selectorMode="clean";
-  // a research/select preset (no selector-mode key) projects the default
+  // PRESET-SM: the retained clean-authority preset resolves selectorMode="clean";
+  // a preset with no selector-mode key (and no preset at all) projects the default
   // "research". red-on-injection: if benchPostureFromState defaulted selectorMode
   // to "clean", or a clean preset dropped the key, these flip.
-  test("PRESET-SM: clean presets resolve selectorMode=clean, research preset stays research", () => {
-    for (const preset of [
-      "agentless-v3-thin-strict-closure-select-clean",
-      "agentless-v3-thin-strict-closure-select-clean-witness-only",
-      "agentless-v4-proof-clean",
-      "agentless-v4-proof-clean-execfull",
-    ]) {
-      process.env.QUANTA_BENCH_PRESET = preset
-      expect(benchOptIns().selectorMode).toBe("clean")
-      expect(KNOB_PRESETS[preset]?.["selector-mode"]).toBe("clean")
-    }
-    // A select preset opts into NO selector-mode ⇒ default research projection.
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression"
+  test("PRESET-SM: clean preset resolves selectorMode=clean, others stay research", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v5-absorb-execfull"
+    expect(benchOptIns().selectorMode).toBe("clean")
+    expect(KNOB_PRESETS["agentless-v5-absorb-execfull"]?.["selector-mode"]).toBe("clean")
+    // A preset that opts into NO selector-mode ⇒ default research projection.
+    process.env.QUANTA_BENCH_PRESET = "agentless-v1"
     expect(benchOptIns().selectorMode).toBe("research")
-    expect(KNOB_PRESETS["agentless-v3-select-regression"]?.["selector-mode"]).toBeUndefined()
+    expect(KNOB_PRESETS["agentless-v1"]?.["selector-mode"]).toBeUndefined()
     // No preset / no env ⇒ default research (byte-identical baseline).
     delete process.env.QUANTA_BENCH_PRESET
     expect(benchOptIns().selectorMode).toBe("research")
-  })
-
-  test("PRESET-16: agentless-v3-select-regression-doubt adds the targeted stall-breaker", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v3-select-regression-doubt"
-    const opt = benchOptIns()
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.verifySelectEarlyAccept).toBe(true)
-    expect(opt.verifySelectRegression).toBe("discovered")
-    expect(opt.verifySelectRepro).toBe("positive")
-    const cfg = buildOnce()
-    expect(cfg.reproDoubt).toEqual({ stuckRuns: 5 })
-    expect(KNOB_PRESETS["agentless-v3-select-regression-doubt"]).toMatchObject({
-      "verify-select": "5",
-      "verify-select-early-accept": "1",
-      "verify-select-regression": "discovered",
-      "verify-select-repro": "positive",
-      "repro-doubt": "5",
-    })
   })
 })
 

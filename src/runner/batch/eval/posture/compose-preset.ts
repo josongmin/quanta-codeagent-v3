@@ -23,32 +23,16 @@
  * {@link PRESET_COMPOSITES} is the SINGLE registry declaring which (base, modules)
  * each shipped composable preset must equal. The identity hellgate pins
  * `KNOB_PRESETS[name] === composePresetKnobs(base, modules)` raw, byte-for-byte,
- * so the two physical copies can never drift. Covers the WHOLE composable family
- * over its three frozen bases (v1 / v3-thin / v3-thin-strict); only true
- * subtractions / legacy literals (baseline, v1, v2, v2-safe, full, hint-only,
- * everything) are excluded.
+ * so the two physical copies can never drift. Covers the composable family over
+ * its frozen bases (v1 / v3-thin-strict); only true subtractions / legacy
+ * literals (baseline, agentless-v1, hint-only, everything) are excluded.
  */
 
 import {
   ABSORB_EXECFULL_MODULES,
-  ABSORB_MODULES,
-  ABSORB_XLANE_MODULES,
-  CLEAN_SELECTOR,
-  CLOSURE_GROUNDING,
-  CLOSURE_SELECT_CLEAN_MODULES,
   FULL_EXEC,
   LOCALIZATION_CORE,
-  MULTI_AGENT,
-  PROOF_CLEAN_CHAGENERAL_MODULES,
-  PROOF_CLEAN_EXECFULL_MODULES,
-  PROOF_CLEAN_MODULES,
-  REGRESSION,
-  REPRO_DOUBT,
-  SELECT_MODULES,
-  SELECT_N,
-  SELECT_REPRO_OFF,
   STEER_OFF,
-  THIN_BASE,
   THIN_STRICT_BASE,
 } from "./capability-profiles"
 import type { KnobModule } from "./knob-module"
@@ -82,86 +66,18 @@ interface PresetComposite {
 export const PRESET_COMPOSITES: readonly PresetComposite[] = [
   // ── localization-core (agentless-v1) base ──
   { preset: "agentless-v1-nosteer", base: LOCALIZATION_CORE.knobs, modules: [STEER_OFF] },
-  { preset: "everything-v1", base: LOCALIZATION_CORE.knobs, modules: [MULTI_AGENT] },
+  // jun-24 MEASURED WINNER: the minimal single-pass core + full in-loop exec.
+  { preset: "agentless-v6-singlepass-execfull", base: LOCALIZATION_CORE.knobs, modules: [FULL_EXEC] },
   // ── base-as-self (identity) ──
-  { preset: "agentless-v3-thin", base: THIN_BASE.knobs, modules: [] },
   { preset: "agentless-v3-thin-strict", base: THIN_STRICT_BASE.knobs, modules: [] },
-  {
-    preset: "agentless-v3-thin-strict-execfull",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [FULL_EXEC],
-  },
   // v5 opening = the thin-strict base (the controller injects phase modules at
   // runtime, not into the preset literal).
   { preset: "agentless-v5-thin-and-expanded", base: THIN_STRICT_BASE.knobs, modules: [] },
-  // ── thin-strict base — reuse the SAME composite arrays the controller routes to ──
-  {
-    preset: "agentless-v3-thin-strict-select",
-    base: THIN_STRICT_BASE.knobs,
-    modules: SELECT_MODULES,
-  },
-  {
-    preset: "agentless-v3-thin-strict-closure-select-clean",
-    base: THIN_STRICT_BASE.knobs,
-    modules: CLOSURE_SELECT_CLEAN_MODULES,
-  },
-  {
-    preset: "agentless-v4-proof-clean",
-    base: THIN_STRICT_BASE.knobs,
-    modules: PROOF_CLEAN_MODULES,
-  },
-  {
-    preset: "agentless-v4-proof-clean-execfull",
-    base: THIN_STRICT_BASE.knobs,
-    modules: PROOF_CLEAN_EXECFULL_MODULES,
-  },
-  {
-    preset: "agentless-v4-proof-clean-chageneral",
-    base: THIN_STRICT_BASE.knobs,
-    modules: PROOF_CLEAN_CHAGENERAL_MODULES,
-  },
-  {
-    preset: "agentless-v5-absorb",
-    base: THIN_STRICT_BASE.knobs,
-    modules: ABSORB_MODULES,
-  },
-  {
-    preset: "agentless-v5-absorb-xlane",
-    base: THIN_STRICT_BASE.knobs,
-    modules: ABSORB_XLANE_MODULES,
-  },
+  // ── thin-strict base — the retained ABSORB reference arm ──
   {
     preset: "agentless-v5-absorb-execfull",
     base: THIN_STRICT_BASE.knobs,
     modules: ABSORB_EXECFULL_MODULES,
-  },
-  {
-    preset: "agentless-v4-proof-clean-absorb",
-    base: THIN_STRICT_BASE.knobs,
-    modules: ABSORB_MODULES,
-  },
-  {
-    preset: "agentless-v3-thin-strict-closure-select",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [...SELECT_MODULES, CLOSURE_GROUNDING],
-  },
-  {
-    preset: "agentless-v3-thin-strict-closure-select-clean-witness-only",
-    base: THIN_STRICT_BASE.knobs,
-    modules: [
-      SELECT_N(5),
-      REGRESSION("discovered"),
-      SELECT_REPRO_OFF,
-      CLOSURE_GROUNDING,
-      CLEAN_SELECTOR,
-    ],
-  },
-  // ── select-regression family over the v3-thin base ──
-  { preset: "agentless-v3-select-regression", base: THIN_BASE.knobs, modules: SELECT_MODULES },
-  {
-    preset: "agentless-v3-select-regression-doubt",
-    base: THIN_BASE.knobs,
-    modules: [...SELECT_MODULES, REPRO_DOUBT(5)],
   },
 ]
 

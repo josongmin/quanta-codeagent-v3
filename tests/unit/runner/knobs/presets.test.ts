@@ -20,14 +20,6 @@ describe("KNOB_PRESETS", () => {
     expect(Object.keys(KNOB_PRESETS.baseline ?? {})).toEqual([])
   })
 
-  test("agentless-full bundles issue-hint + branch-search + repro-test", () => {
-    const p = KNOB_PRESETS["agentless-full"]
-    expect(p).toBeDefined()
-    expect(p?.["issue-hint"]).toBe("agentless")
-    expect(p?.["branch-search"]).toBe("3")
-    expect(p?.["repro-test"]).toBe("5")
-  })
-
   test("hint-only bundles issue-hint", () => {
     expect(KNOB_PRESETS["hint-only"]?.["issue-hint"]).toBe("1")
   })

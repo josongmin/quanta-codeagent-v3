@@ -95,15 +95,12 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // floor — a refactor that breaks `selector-mode:clean` resolution trips here
   // instead of silently disarming every per-preset assertion below.
   test("auto-discovers a non-empty clean-preset set (anti-vacuous floor)", () => {
-    expect(cleanPresets.length).toBeGreaterThanOrEqual(4)
+    // jun-26 cleanup: the heavy proof-clean / closure-select-clean arms were removed;
+    // the ONE retained clean-authority preset is agentless-v5-absorb-execfull.
+    expect(cleanPresets.length).toBeGreaterThanOrEqual(1)
     // And every known-clean preset (these set `selector-mode:clean` literally)
     // is in the discovered set — the discovery isn't dropping any.
-    for (const known of [
-      "agentless-v3-thin-strict-closure-select-clean",
-      "agentless-v3-thin-strict-closure-select-clean-witness-only",
-      "agentless-v4-proof-clean",
-      "agentless-v4-proof-clean-execfull",
-    ]) {
+    for (const known of ["agentless-v5-absorb-execfull"]) {
       expect(cleanPresets).toContain(known)
     }
   })
@@ -129,9 +126,9 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // ── HELLGATE teeth #1: paired-control — a RESEARCH preset is NOT subject to the
   // allowlist, proving the ratchet body isn't vacuously green (it really filters). ──
   test("paired-control: a research-mode preset is excluded from the clean set (ratchet is live, not vacuous)", () => {
-    const posture = resolvePreset("agentless-v3-select-regression")
+    const posture = resolvePreset("agentless-v1")
     expect(posture.selectorMode).toBe("research")
-    expect(cleanPresets).not.toContain("agentless-v3-select-regression")
+    expect(cleanPresets).not.toContain("agentless-v1")
     // (The gated-llm research arm — verify-select-llm-risk-gate=on — was retired
     // in the jun-23 preset cleanup; the llm-risk-gate=on case is still proven by
     // the red-on-injection test below.)
@@ -140,7 +137,7 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
   // ── HELLGATE teeth #2: red-on-injection mutation — the checker REJECTS a
   // synthetic clean posture that an injected research-only knob would produce. ──
   test("red-on-injection: researchViolations rejects each injected research-only authority", () => {
-    const base = resolvePreset("agentless-v3-thin-strict-closure-select-clean")
+    const base = resolvePreset("agentless-v5-absorb-execfull")
     expect(researchViolations(base)).toEqual([])
 
     const llmInjected: BenchPosture = { ...base, verifySelectLlmRiskGate: "on" }
@@ -168,7 +165,7 @@ describe("T-PRESET-07: clean presets carry NO research-only authority knob", () 
     expect(SIGNAL_AUTHORITY.regressionGreen).toBe("hardExecutable")
     expect(
       researchContaminationReasons({
-        ...resolvePreset("agentless-v3-thin-strict-closure-select-clean"),
+        ...resolvePreset("agentless-v5-absorb-execfull"),
         verifySelectLlmRiskGate: "on",
         reproDoubt: true,
         verifySelectRegression: "gold",

@@ -93,7 +93,7 @@ describe("bench strict LSP grounding fail-closed", () => {
     "non-strict presets keep the historical degrade-open behavior when pyright is unavailable",
     env.run(async () => {
       env.set({
-        QUANTA_BENCH_PRESET: "agentless-v3-thin",
+        QUANTA_BENCH_PRESET: "agentless-v1",
       })
       __resetLspAvailabilityCacheForTest()
       __setLspAvailabilityOverrideForTest((bin) => (bin === "pyright-langserver" ? false : true))
@@ -127,7 +127,7 @@ describe("bench strict LSP grounding fail-closed", () => {
   test.serial(
     "strict family also degrades when the repo has no source file mapped to a configured LSP server",
     env.run(async () => {
-      env.set({ QUANTA_BENCH_PRESET: "agentless-v3-thin-strict-select" })
+      env.set({ QUANTA_BENCH_PRESET: "agentless-v3-thin-strict" })
       __resetLspAvailabilityCacheForTest()
       __setLspAvailabilityOverrideForTest(null)
       const dir = mkdtempSync(join(tmpdir(), "bench-strict-lsp-unsupported-"))
