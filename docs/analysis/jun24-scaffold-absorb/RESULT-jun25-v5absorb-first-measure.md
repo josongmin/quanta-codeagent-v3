@@ -20,7 +20,7 @@ resolved: **0/3 (변화 없음)**. 그러나 실패모드가 근본 이동.
 
 ## 다음 레버 (측정 기반, 우선순위)
 1. **11138 regression 게이트**: proof-required 빼서 regressing 패치 ship됨 → submit-non-empty는 유지하되 verify-select-regression을 rank-only→soft-gate(6-p2p-break 후보가 cleaner 후보에 지게). empty↔regressing 사이 middle.
-2. **13033 verify-select 전수 reject 진단**: env 아님(ModuleNotFound 로그 없음). 가설=spec-fidelity-invariant veto 과민(우리가 켠 13033 레버가 13033 후보를 다 쳐냄, 아이러니). hard-veto→soft rank-down 검토. (closure 진단 thin, 재현 필요)
+2. ~~13033 spec-fidelity veto 과민 가설~~ → **틀림(정정 2026-06-25)**. trajectory 까보니 진짜 원인 2개: **(a) python3 shim 누락** — 에이전트가 repro를 `python`/`python3` 번갈아 실행, `python`(shim)=IMPORT-OK 매번 / **`python3`(미shim)=ModuleNotFound 매번**(20회중 9회) → astropy import 못해 core.py 18편집 검증 불가 → 후보 non-submittable. **(b) 429 usage_limit_reached**(chatgpt.json pro plan 런중 quota소진, 13033이 굶음). **FIX LANDED**: `project-env-python-shim.ts` PYTHON_SHIM_NAMES=["python","python3"] 둘다 shim(teeth: project-env-python-shim.test.ts python3 케이스). selector-mode=clean은 declaredExpected hard-veto 안 함(selection-gates.ts:265 확인)이라 spec-fidelity는 무죄.
 3. **edit 정확도(synthesis-74%) = 진짜 남은 병목**: localization 닫혔으니 이제 batch-2의 **cross-vendor diversity(c축)**가 경험적으로 motivated — 같은 gpt-5.4 N샘플은 같은 틀린 edit, 이종 vendor면 decorrelated. 단 현재 ABSENT(미구현). 이게 다음 진짜 absorption.
 
 ## 메타

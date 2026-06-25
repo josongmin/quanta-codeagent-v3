@@ -67,20 +67,40 @@ describe("matchCandidateAgainstDeclaredExpected — execution-free spec fidelity
     expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
   })
 
-  test("MUTATION-KILL isSpecBearing upper boundary: a no-whitespace 12-char unrelated literal IS spec-bearing ⇒ false (veto)", () => {
-    // 12 chars, no whitespace, no overlap with V ⇒ spec-bearing by the length>=12
-    // arm ⇒ veto. Kills `>= 12` → `> 12` (which would drop it to a non-spec key and
-    // abstain instead of vetoing).
-    const patch = patchAdding(`raise KeyError("abcdefghijkl")`)
-    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(false)
+  test("isSpecBearing structural: a long BARE IDENTIFIER (no whitespace, no punctuation) is NOT spec-bearing ⇒ null (abstain)", () => {
+    // `abcdefghijklmnop` is a valid bare identifier — a plausible attribute/dict key,
+    // carrying no spec — so it must abstain REGARDLESS of length. This is the case the
+    // old `length >= 12` length cutoff WRONGLY vetoed. Parameter-free rule: an
+    // identifier-shaped token is never a competing message.
+    const patch = patchAdding(`raise KeyError("abcdefghijklmnop")`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
   })
 
-  test("MUTATION-KILL isSpecBearing lower boundary: a no-whitespace 11-char unrelated literal is NOT spec-bearing ⇒ null (abstain)", () => {
-    // 11 chars, no whitespace ⇒ below the length floor ⇒ treated as an incidental
-    // key, not a competing message ⇒ abstain. Kills `>= 12` → `>= 11` (which would
-    // wrongly veto a correct fix that happens to add a short dict key).
-    const patch = patchAdding(`raise KeyError("abcdefghij1")`)
-    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
+  test("isSpecBearing structural: a SHORT NON-IDENTIFIER literal IS spec-bearing ⇒ false (veto) — the case `>= 12` wrongly excluded", () => {
+    // `[1,2,3]`, `a.b.c`, `<x>` are all short (< 12 chars) and would have been dropped
+    // by the old length cutoff, yet each has punctuation/structure that no plausible
+    // bare identifier has ⇒ a real value, not an incidental key ⇒ spec-bearing ⇒ veto
+    // (none overlaps V). Each kills the reintroduction of a numeric length floor.
+    for (const lit of ["[1,2,3]", "a.b.c", "<x>"]) {
+      const patch = patchAdding(`raise ValueError("${lit}")`)
+      expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(false)
+    }
+  })
+
+  test("isSpecBearing structural: short BARE identifiers/dict-keys (`id`,`x`,`foo`) are NOT spec-bearing ⇒ null (abstain)", () => {
+    // Short structureless identifier-shaped tokens are plausible keys/attrs ⇒ must not
+    // be treated as competing messages, or correct dict/attr edits get false-vetoed.
+    for (const key of ["id", "x", "foo"]) {
+      const patch = patchAdding(`obj["${key}"] = value`)
+      expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
+    }
+  })
+
+  test("isSpecBearing structural: a whitespace-bearing value (`index out of range`) IS spec-bearing ⇒ false (veto)", () => {
+    // Whitespace ⇒ a phrase ⇒ spec-bearing regardless of length; it does not overlap V
+    // ⇒ competing message ⇒ veto. Kills dropping the whitespace arm of the rule.
+    const patch = patchAdding(`raise IndexError("index out of range")`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBe(false)
   })
 
   test("T2b-FIX: a DYNAMIC f-string message ⇒ abstain (null), NOT a false veto", () => {
@@ -144,6 +164,16 @@ describe("matchCandidateAgainstDeclaredExpected — execution-free spec fidelity
     // `time` is a short, structureless key — must NOT be treated as a competing
     // message literal, or correct dict/attr edits would be falsely vetoed.
     const patch = patchAdding(`obj["time"] = value`)
+    expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
+  })
+
+  test("isSpecBearing structural: an EMPTY-STRING literal is NOT spec-bearing ⇒ null (abstain) — preserves empty⇒false", () => {
+    // `""` is a degenerate literal carrying no spec; the rule must return false for it
+    // (length 0 fails both the whitespace and the not-an-identifier arm). A correct fix
+    // that adds an empty default string must not be vetoed. Note QUOTED requires ≥1
+    // body char, so the empty literal is not even mined — but pairing it with a real
+    // bare-identifier key proves NEITHER registers as competing ⇒ abstain.
+    const patch = patchAdding('default = ""', 'obj["k"] = default')
     expect(matchCandidateAgainstDeclaredExpected(patch, publicExpected(V))).toBeNull()
   })
 

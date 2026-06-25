@@ -540,6 +540,52 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean-execfull")).toBe(true)
   })
 
+  test("PRESET-15gb: proof-clean-absorb is the explicit measured scaffold-absorb arm", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean-absorb"
+    const opt = benchOptIns()
+    expect(opt.inLoopExec).toBe(false)
+    expect(opt.inLoopExecMode).toBe("repro-only")
+    expect(opt.reproTestK).toBe(10)
+    expect(opt.adversarialRepro).toBe(true)
+    expect(opt.faultEvidence).toBe(true)
+    expect(opt.verificationPlan).toBe(true)
+    expect(opt.primaryRail).toBe(true)
+    expect(opt.noPatchBreaker).toBe(true)
+    expect(opt.repairEscalation).toBe(true)
+    expect(opt.patchBudgetStrict).toBe(true)
+    expect(opt.verifySelectN).toBe(5)
+    expect(opt.verifySelectConcurrency).toBe(3)
+    expect(opt.verifySelectProofRequired).toBe(false)
+    expect(opt.verifySelectRegression).toBe("discovered")
+    expect(opt.verifySelectRepro).toBe("positive")
+    expect(opt.chaMultisiteSteer).toBe(true)
+    expect(opt.specFidelityInvariant).toBe(true)
+    expect(opt.dynamicMessageMatcher).toBe(true)
+    expect(opt.forwardLocalize).toBe(true)
+    expect(opt.selectorMode).toBe("clean")
+    expect(KNOB_PRESETS["agentless-v4-proof-clean-absorb"]).toEqual(
+      KNOB_PRESETS["agentless-v5-absorb"],
+    )
+    expect(KNOB_PRESETS["agentless-v4-proof-clean-absorb"]?.["verify-select-proof-required"]).toBe(
+      undefined,
+    )
+    expect(KNOB_PRESETS["agentless-v4-proof-clean-absorb"]).toMatchObject({
+      "bench-in-loop-exec": "repro-only",
+      "repro-test": "10",
+      "adversarial-repro": "1",
+      "verify-select": "5",
+      "verify-select-concurrency": "3",
+      "verify-select-regression": "discovered",
+      "verify-select-repro": "positive",
+      "cha-multisite-steer": "1",
+      "spec-fidelity-invariant": "1",
+      "dynamic-message-matcher": "1",
+      "forward-localize": "1",
+      "selector-mode": "clean",
+    })
+    expect(presetRequiresLiveLspGrounding("agentless-v4-proof-clean-absorb")).toBe(true)
+  })
+
   test("PRESET-15h: explicit env false beats proof-clean preset cha-multisite=true", () => {
     process.env.QUANTA_BENCH_PRESET = "agentless-v4-proof-clean"
     process.env.QUANTA_BENCH_CHA_MULTISITE_STEER = "0"

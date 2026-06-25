@@ -6,7 +6,14 @@ import type { Instance } from "../types"
 import { shellJoin } from "./repro-command"
 
 const SHIM_DIR_NAME = ".quanta-bin"
-const PYTHON_SHIM_NAME = "python"
+// Both `python` AND `python3` MUST be shimmed: agents reach for either spelling
+// (esp. `python3 - <<'PY'` heredocs), and a shim that only intercepts `python`
+// silently leaks `python3` repro scripts to the SYSTEM interpreter — which has
+// no `--with-editable .` project build, so `import astropy`/extension_helpers
+// raises ModuleNotFoundError and the candidate never validates (astropy-13033
+// empty-patch root cause, jun-25). Same wrapper body for both; uv run selects
+// the correct interpreter regardless of the invoked name.
+const PYTHON_SHIM_NAMES = ["python", "python3"] as const
 
 export const projectEnvPythonShimDir = (sandbox: string): string =>
   join(dirname(sandbox), SHIM_DIR_NAME)
@@ -38,11 +45,13 @@ export const installProjectEnvPythonShim = async (
   const prefix = projectEnvPythonPrefix(instance)
   if (prefix === undefined) return
   const dir = projectEnvPythonShimDir(sandbox)
-  const path = join(dir, PYTHON_SHIM_NAME)
   await mkdir(dir, { recursive: true })
-  await writeFile(
-    path,
-    ["#!/usr/bin/env bash", "set -euo pipefail", `exec ${prefix} python "$@"`, ""].join("\n"),
+  const body = ["#!/usr/bin/env bash", "set -euo pipefail", `exec ${prefix} python "$@"`, ""].join(
+    "\n",
   )
-  await chmod(path, 0o755)
+  for (const name of PYTHON_SHIM_NAMES) {
+    const path = join(dir, name)
+    await writeFile(path, body)
+    await chmod(path, 0o755)
+  }
 }

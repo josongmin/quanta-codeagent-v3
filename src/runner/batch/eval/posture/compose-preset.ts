@@ -124,6 +124,11 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
     modules: ABSORB_MODULES,
   },
   {
+    preset: "agentless-v4-proof-clean-absorb",
+    base: THIN_STRICT_BASE.knobs,
+    modules: ABSORB_MODULES,
+  },
+  {
     preset: "agentless-v3-thin-strict-closure-select",
     base: THIN_STRICT_BASE.knobs,
     modules: [...SELECT_MODULES, CLOSURE_GROUNDING],

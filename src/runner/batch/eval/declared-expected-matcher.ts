@@ -61,9 +61,13 @@ const quotedLiteralsOf = (lines: readonly string[]): readonly string[] => {
 }
 
 /** A literal is "spec-bearing" (a message/output candidate, not an incidental
- *  identifier or dict key) when it contains whitespace OR is reasonably long.
- *  This keeps the veto from firing on short keys/attribute names. */
-const isSpecBearing = (s: string): boolean => /\s/.test(s) || s.length >= 12
+ *  identifier or dict key) when it contains whitespace OR is not a bare
+ *  identifier. A bare identifier (`id`, `foo`, `_x1`) is a plausible attribute
+ *  name / dict key and carries no spec; anything else (a phrase, or a value with
+ *  punctuation/structure like `[1,2,3]`, `a.b.c`, `<x>`) is spec-bearing. Empty
+ *  string is never spec-bearing. Parameter-free — no length cutoff. */
+const isSpecBearing = (s: string): boolean =>
+  /\s/.test(s) || (s.length > 0 && !/^[A-Za-z_]\w*$/.test(s))
 
 /** A dynamic-message template (f-string placeholder `{…}`, `%s`/`%d`/`%r`/`%(name)s`
  *  printf, or `str.format` field). The FINAL message is assembled at runtime, so an
@@ -97,16 +101,14 @@ const PLACEHOLDER_SPLIT_SOURCE = "\\{[^}]*\\}|%(?:\\([^)]*\\))?[#0\\- +]*\\d*(?:
  *   "abstain"    — `s` carries no substantive fixed text (pure placeholder, or only
  *                  trivial punctuation/spacing around the holes) → undecidable.
  *
- * A fixed fragment is "substantive" when, after trimming, it has whitespace OR is
- * reasonably long — the SAME spec-bearing bar used for whole literals. This keeps a
- * stray `": "` separator fragment from forcing a verdict.
+ * A fixed fragment is "substantive" when, after trimming, it is spec-bearing by
+ * the SAME parameter-free bar used for whole literals ({@link isSpecBearing}):
+ * whitespace OR not a bare identifier. This keeps a stray `": "` separator
+ * fragment from forcing a verdict.
  */
-const SUBSTANTIVE_FRAGMENT_MIN_LEN = 6
 const fixedFragmentsOf = (template: string): readonly string[] => {
   const raw = template.split(new RegExp(PLACEHOLDER_SPLIT_SOURCE))
-  return raw
-    .map((f) => normalize(f))
-    .filter((f) => f.length > 0 && (/\s/.test(f) || f.length >= SUBSTANTIVE_FRAGMENT_MIN_LEN))
+  return raw.map((f) => normalize(f)).filter((f) => isSpecBearing(f))
 }
 
 /** Are `fragments` present in `v` as ordered, non-overlapping substrings? */
