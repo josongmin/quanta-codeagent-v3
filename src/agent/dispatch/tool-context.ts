@@ -131,6 +131,11 @@ export const buildToolContext = (args: {
     // merge rung actually receives it. ABSENT ⇒ ctx field absent ⇒ edit ladder
     // byte-identical (default-OFF).
     ...(config.fastApplyMerge !== undefined ? { fastApplyMerge: config.fastApplyMerge } : {}),
+    // jun-26 edit-escalate — surface the auto-escalate-fuzzy flag so the `edit`
+    // tool runs the whitespace-tolerant fuzzy ladder on an exact MISS even without
+    // an explicit `fuzzy:true`. Gated by QUANTA_EDIT_AUTO_FUZZY. OFF (default) ⇒
+    // flag omitted ⇒ edit ladder byte-identical (fuzzy only on input.fuzzy).
+    ...(runtimeConfig().editAutoFuzzy ? { autoEscalateFuzzy: true } : {}),
     // ADR-0428 jun-02 wire — surface the LIVE proxy-env (bound loopback address)
     // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
     // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).

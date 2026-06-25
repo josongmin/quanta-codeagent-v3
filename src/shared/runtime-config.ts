@@ -547,6 +547,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // the edit ladder is the byte-identical exact→fuzzy→V4A re-emit with ZERO
     // apply-model dispatches. Requires BOTH this gate AND a configured model below.
     fastApplyMerge: gateOnStrict(env, "QUANTA_FAST_APPLY_MERGE"),
+    // jun-26 edit-escalate (frontier-parity) — strict `=== "1"` opt-in. When ON,
+    // the `edit` tool auto-escalates to the whitespace-tolerant fuzzy ladder on an
+    // exact MISS even when the caller did NOT set `fuzzy:true` (Claude/Codex both
+    // auto-retry whitespace-tolerant). Fail-closed ladder ⇒ never a wrong write.
+    // Default false ⇒ ctx.autoEscalateFuzzy unset ⇒ fuzzy runs ONLY on explicit
+    // `input.fuzzy` ⇒ BYTE-IDENTICAL legacy edit path. Reversible / measurable.
+    editAutoFuzzy: gateOnStrict(env, "QUANTA_EDIT_AUTO_FUZZY"),
     // jun-7-misc 06 — operator-chosen apply-model id (mirrors QUANTA_COMPACT_MODEL).
     // Absent ⇒ no port built even when fastApplyMerge is on (both required —
     // advertise-iff-able). NO default model (no-heuristics rule: measure vs the
