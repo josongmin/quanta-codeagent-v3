@@ -372,7 +372,18 @@ const runAgentOnce = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<RunOnceResult> => {
-  const tap = new BenchStreamTap(w.stream, undefined, benchVerifyAuthorityCommandsOf(instance))
+  const tap = new BenchStreamTap(
+    w.stream,
+    undefined,
+    benchVerifyAuthorityCommandsOf(instance),
+    // Per-action progress → run.log (live "what the agent did" under concurrency).
+    // One concise line per tool call. The verify-select phase below already wired
+    // this; the single-pass path (the default for most presets) was the gap, so a
+    // full-remote run.log showed only coarse "▶ instance" milestones and never the
+    // per-turn agent actions — exactly the live LLM-process visibility that was
+    // missing.
+    (name, detail) => logger.info(`  · ${instance.id} ${name}${detail ? ` ${detail}` : ""}`),
+  )
   // Knob telemetry: emit ONE `knobs_applied` event per runAgent invocation —
   // the greppable per-run marker of which knobs/preset actually ran. The runner
   // driver emits it at both agent entry points; this prod (SDK) wrapper must

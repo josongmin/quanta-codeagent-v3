@@ -83,6 +83,37 @@ describe("BenchStreamTap", () => {
     expect(tap.lastVerifyCmd).toBe("pytest")
   })
 
+  test("onAction fires ONCE per tool_call with (name, detail) and still forwards downstream", () => {
+    // The live per-action run.log line ("· <instance> <tool> <detail>") the bench
+    // drivers wire on the 4th arg. RCA jun-25: this was wired ONLY on the verify-
+    // select phase, so the single-pass path (most presets) logged coarse-only —
+    // the full-remote run.log never showed the agent's per-turn actions. This locks
+    // the mechanism the wiring depends on. Red-on-injection: fire on tool_result
+    // instead of tool_call, or fire twice, and the expected sequence breaks.
+    const down = new Capture()
+    const seen: Array<{ name: string; detail: string }> = []
+    const tap = new BenchStreamTap(down, undefined, undefined, (name, detail) => {
+      seen.push({ name, detail })
+    })
+    tap.emit(toolCall("bash", { command: "pytest -q tests/foo.py" }))
+    tap.emit(toolCall("edit", { file_path: "/s/django/core/x.py" }))
+    tap.emit(toolResult("edit", true, "ok"))
+    // one onAction per tool_call (NOT per tool_result), detail = actionDetailOf
+    expect(seen).toEqual([
+      { name: "bash", detail: "pytest -q tests/foo.py" },
+      { name: "edit", detail: "/s/django/core/x.py" },
+    ])
+    // pure pass-through preserved: downstream still receives EVERY event
+    expect(down.events.map((e) => e.type)).toEqual(["tool_call", "tool_call", "tool_result"])
+  })
+
+  test("WITHOUT onAction the tap is unaffected (4th arg optional, still forwards)", () => {
+    const down = new Capture()
+    const tap = new BenchStreamTap(down)
+    tap.emit(toolCall("bash", { command: "ls" }))
+    expect(down.events).toHaveLength(1)
+  })
+
   test("no edits ⇒ firstEditFile/turnsToFirstEdit undefined, editCount 0", () => {
     const tap = new BenchStreamTap(new Capture())
     tap.emit({ type: "turn_start", turn: 1 })
