@@ -965,13 +965,41 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(msg).toContain(TIMEOUT_STDERR)
   })
 
-  test("readiness FAILS FAST on a non-recoverable ssh error instead of polling the full window", async () => {
-    // RCA jun-25: a doomed box (auth / host-key / unreadable key) will NOT heal by
-    // waiting — yet the loop polled the full window (~15min) × 2 retries (~30min
-    // wasted) before giving up. "Connection refused / timed out" = still booting
-    // (keep polling); "Permission denied / host-key" = terminal (abort now).
-    // Red-on-injection: drop the terminal classification and this exhausts the 30
-    // polls instead of bailing after ~3.
+  test("bench-box ssh/scp/rsync DISABLE host-key checking (ephemeral recycled-IP boxes) — never accept-new", async () => {
+    // RCA jun-25 (the ROOT cause): `StrictHostKeyChecking=accept-new` REFUSES a
+    // fresh box that landed on a RECYCLED public IP already in ~/.ssh/known_hosts
+    // with a stale key — instant exit 255 BEFORE auth, no TCP retry — which showed
+    // up as "box never became ssh-reachable" on a box that was in fact fully up
+    // (reachable via `ssh -o StrictHostKeyChecking=no`). Bench boxes are identified
+    // by the AWS instance API, not a host key, so the check is pure liability + it
+    // POLLUTES the real known_hosts (1400+ stale entries — what seeds the recycling
+    // collisions). All three transports must connect the SAME safe way. Red-on-
+    // injection: revert to accept-new or drop /dev/null and this fails. (The
+    // sibling ec2.ts readiness path already does exactly this.)
+    const { fn, calls } = mockSpawn()
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+      .run()
+      .catch(() => undefined)
+    const sshCall = calls.find((c) => c.cmd === "ssh")
+    expect(sshCall).toBeDefined()
+    expect(sshCall?.args).toContain("StrictHostKeyChecking=no")
+    expect(sshCall?.args).toContain("UserKnownHostsFile=/dev/null")
+    expect(sshCall?.args).toContain("BatchMode=yes")
+    expect(sshCall?.args).not.toContain("StrictHostKeyChecking=accept-new")
+    // The rsync transport + scp must match — else a recycled-IP stale key refuses
+    // the bootstrap copy AFTER readiness already succeeded.
+    expect(calls.find((c) => c.cmd === "rsync")?.args.join(" ")).toContain(
+      "UserKnownHostsFile=/dev/null",
+    )
+    expect(calls.find((c) => c.cmd === "scp")?.args).toContain("UserKnownHostsFile=/dev/null")
+  })
+
+  test("readiness FAILS FAST on a LOCAL-misconfig ssh error instead of polling the full window", async () => {
+    // RCA jun-25: a box doomed by LOCAL misconfig (wrong/unreadable key path, bad
+    // ssh option) fails INSTANTLY + identically every poll — yet the loop polled
+    // the full window (~15min) × 2 retries (~30min wasted) before giving up. Abort
+    // after a few consecutive hits. Red-on-injection: drop the terminal
+    // classification and this exhausts the 30 polls instead of bailing after ~3.
     let probes = 0
     const { fn } = createSpawnRecorder(
       whenArgsInclude("describe-security-groups", ok("sg-abc")),
@@ -983,15 +1011,50 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
         (remote) => remote.includes("bun") && remote.includes("READY"),
         () => {
           probes += 1
-          return fail(255, "Permission denied (publickey).")
+          return fail(
+            255,
+            "Warning: Identity file ~/Downloads/key.pem not accessible: No such file or directory.",
+          )
         },
       ),
     )
     await expect(
       createFullRemoteBackend({ ...baseCfg, spawn: fn, maxReadyPolls: 30 }).run(),
-    ).rejects.toThrow(/NON-RECOVERABLE|Permission denied/i)
+    ).rejects.toThrow(/NON-RECOVERABLE|not accessible/i)
     expect(probes).toBeGreaterThanOrEqual(3) // gave it a few tries (not a one-off fluke)
     expect(probes).toBeLessThan(30) // ...but did NOT exhaust the full readiness window
+  })
+
+  test("a transient AUTH error (Permission denied) keeps polling — cloud-init key-injection window", async () => {
+    // Audit catch: "Permission denied" is NOT terminal. There is a real window
+    // where sshd is up but cloud-init hasn't yet written the launch key into the
+    // ubuntu user's authorized_keys, so a HEALTHY box transiently rejects auth.
+    // Classifying it terminal would kill boxes mid-bootstrap (the exact early-boot
+    // transient the 90-poll window exists to tolerate). Red-on-injection: add
+    // "Permission denied" back to SSH_TERMINAL_ERROR and `probes` drops below 5.
+    let probes = 0
+    const { fn } = createSpawnRecorder(
+      whenArgsInclude("describe-security-groups", ok("sg-abc")),
+      whenCmd("curl", ok("9.9.9.9")),
+      whenArgsInclude("run-instances", ok("i-keyinject")),
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenArgsInclude("terminate-instances", ok("")),
+      whenSshRemote(
+        (remote) => remote.includes("bun") && remote.includes("READY"),
+        () => {
+          probes += 1
+          return fail(255, "ubuntu@1.2.3.4: Permission denied (publickey).")
+        },
+      ),
+    )
+    let thrown: unknown
+    await createFullRemoteBackend({ ...baseCfg, spawn: fn, maxReadyPolls: 5 })
+      .run()
+      .catch((err) => {
+        thrown = err
+      })
+    expect(probes).toBe(5) // polled the FULL window — auth error is NOT fast-failed
+    expect(String(thrown)).not.toContain("NON-RECOVERABLE")
   })
 
   test("a TRANSIENT connect error keeps polling the full window (slow boot is not aborted)", async () => {

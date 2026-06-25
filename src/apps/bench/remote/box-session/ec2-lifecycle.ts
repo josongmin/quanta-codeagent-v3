@@ -16,7 +16,7 @@ import { lookupCurrentPublicIpv4 } from "../ec2"
 import { PHANTOM_DEPS } from "./auth"
 import { readDatasetInstanceIds } from "./dataset-preflight"
 import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
-import { BENCH_SSH_SAFE_OPTS, aws, defaultSleep, expandHome, makeSsh, oneLine } from "./shell"
+import { aws, BENCH_SSH_SAFE_OPTS, defaultSleep, makeSsh, oneLine } from "./shell"
 import {
   type BoxSnapshotRead,
   readBoxRuntimeProbe,
@@ -178,7 +178,14 @@ const ensureSecurityGroup = async (
     }
     sgId = oneLine(created.stdout)
   }
-  const myIp = await lookupCurrentPublicIpv4(spawn, "full-remote")
+  // jun-25 (user directive): open :22 to 0.0.0.0/0 rather than the detected
+  // `${myIp}/32`. The public-IP lookup is a network-dependent curl that, on a
+  // locally-degraded network (corp proxy / endpoint-security resetting egress),
+  // returned a STALE/WRONG IP — so :22 was authorized for an address that wasn't
+  // ours and every ssh/scp/rsync timed out AFTER a healthy box launch. Boxes are
+  // ephemeral, key-ONLY (no password), IMDSv2, short-TTL, so world-open :22 is
+  // safe: only the private key holder can connect. Removing the lookup also drops
+  // a blocked-network failure point entirely.
   const auth = await awsFn([
     "ec2",
     "authorize-security-group-ingress",
@@ -189,7 +196,7 @@ const ensureSecurityGroup = async (
     "--port",
     "22",
     "--cidr",
-    `${myIp}/32`,
+    "0.0.0.0/0",
   ])
   if (auth.code !== 0 && !/Duplicate/i.test(auth.stderr)) {
     throw new Error(
@@ -281,7 +288,7 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   // Same host-key/safety posture as makeSsh (SSOT) so the rsync transport
   // connects identically to the readiness/grade ssh — a recycled-IP stale key
   // must not refuse the rsync after readiness already succeeded.
-  const sshOpts = `ssh -i ${expandHome(keyPath)} ${BENCH_SSH_SAFE_OPTS.join(" ")} -o ConnectTimeout=15 -o ServerAliveInterval=15`
+  const sshOpts = `ssh -i ${keyPath} ${BENCH_SSH_SAFE_OPTS.join(" ")} -o ConnectTimeout=15 -o ServerAliveInterval=15`
   await ssh("mkdir -p ~/quanta")
   const rsynced = await spawn("rsync", [
     "-az",
@@ -304,7 +311,7 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   }
   const scpCfg = await spawn("scp", [
     "-i",
-    expandHome(keyPath),
+    keyPath,
     ...BENCH_SSH_SAFE_OPTS,
     "-o",
     "ConnectTimeout=15",
@@ -387,6 +394,31 @@ const describeInstancePublicIp = async (
   return ip
 }
 
+const READINESS_PROBE_CMD =
+  "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY"
+
+/** Classify a not-ready readiness probe and (when it's worth surfacing) log the
+ *  REAL ssh exit + stderr — first poll, every 10th, or ANY terminal one. Returns
+ *  whether it's a LOCAL-misconfig terminal error so the caller can fail fast.
+ *  Extracted from {@link waitForBoxReady} to keep that loop's complexity low. */
+const reportReadinessPoll = (
+  i: number,
+  max: number,
+  probe: SpawnResult,
+  log: (m: string) => void,
+): { code: number; err: string; terminal: boolean } => {
+  const err = (probe.stderr || probe.stdout).trim().replace(/\s+/g, " ").slice(0, 300)
+  const terminal = SSH_TERMINAL_ERROR.test(err)
+  if (i === 0 || i % 10 === 9 || terminal) {
+    log(
+      `[full-remote] readiness poll ${i + 1}/${max} not ready ` +
+        `(ssh exit ${probe.code}${err ? `: ${err}` : ""})` +
+        (terminal ? " — NON-RECOVERABLE (local key/config, not slow-boot)" : ""),
+    )
+  }
+  return { code: probe.code, err, terminal }
+}
+
 const waitForBoxReady = async (
   ssh: (cmd: string) => Promise<SpawnResult>,
   cfg: FullRemoteConfig,
@@ -408,34 +440,21 @@ const waitForBoxReady = async (
   // reached the box. Surface the REAL exit/stderr: first failure immediately
   // (the diagnostic that matters), a heartbeat every 10th poll, and the actual
   // last error in the throw.
-  let lastCode = -1
-  let lastErr = ""
+  let last = { code: -1, err: "", terminal: false }
   let consecutiveTerminal = 0
   for (let i = 0; i < maxReadyPolls; i++) {
-    const probe = await ssh(
-      "sudo cloud-init status --wait >/dev/null 2>&1; test -x ~/.bun/bin/bun && echo READY",
-    )
+    const probe = await ssh(READINESS_PROBE_CMD)
     if (probe.code === 0 && probe.stdout.includes("READY")) return
-    lastCode = probe.code
-    lastErr = (probe.stderr || probe.stdout).trim().replace(/\s+/g, " ").slice(0, 300)
-    const terminal = SSH_TERMINAL_ERROR.test(lastErr)
-    consecutiveTerminal = terminal ? consecutiveTerminal + 1 : 0
-    if (i === 0 || i % 10 === 9 || terminal) {
-      log(
-        `[full-remote] readiness poll ${i + 1}/${maxReadyPolls} not ready ` +
-          `(ssh exit ${lastCode}${lastErr ? `: ${lastErr}` : ""})` +
-          (terminal ? " — NON-RECOVERABLE (key/host-key/perm, not slow-boot)" : ""),
-      )
-    }
-    // A non-recoverable ssh error (auth / host-key / unreadable key / bad config)
-    // will NEVER heal by waiting — abort after a few consecutive hits instead of
-    // burning the whole ~15min window (and then a retry burning another ~15min).
-    // "Connection refused / timed out" is the NORMAL still-booting signal and is
-    // deliberately NOT terminal, so a slow cloud-init still gets the full window.
+    last = reportReadinessPoll(i, maxReadyPolls, probe, log)
+    consecutiveTerminal = last.terminal ? consecutiveTerminal + 1 : 0
+    // A LOCAL-misconfig ssh error (wrong/unreadable key, bad option, stale changed
+    // host key) NEVER heals by waiting — abort after a few consecutive hits rather
+    // than burning the whole ~15min window (and a retry burning another). Auth /
+    // "connection refused" / timeout stay non-terminal (transient during boot).
     if (consecutiveTerminal >= 3) {
       throw new Error(
         `[full-remote] box ssh is NON-RECOVERABLE after ${i + 1} polls ` +
-          `(ssh exit ${lastCode}: ${lastErr}) — not a slow boot; ` +
+          `(ssh exit ${last.code}: ${last.err}) — not a slow boot; ` +
           "check key path / host-key / SG :22, not cloud-init",
       )
     }
@@ -443,17 +462,25 @@ const waitForBoxReady = async (
   }
   throw new Error(
     `[full-remote] box never became ssh-reachable + bun-ready after ${maxReadyPolls} polls ` +
-      `(last ssh exit ${lastCode}${lastErr ? `: ${lastErr}` : ""})`,
+      `(last ssh exit ${last.code}${last.err ? `: ${last.err}` : ""})`,
   )
 }
 
-/** ssh stderr patterns that will NEVER self-heal by waiting longer (auth /
- *  host-key / unreadable key / misconfig) — as opposed to the normal still-
- *  booting signals ("Connection refused", "Operation timed out"), which are NOT
- *  listed here so a slow cloud-init keeps polling. Used by {@link waitForBoxReady}
- *  to fail fast instead of polling the full readiness window on a doomed box. */
+/** ssh stderr patterns that will NEVER self-heal by waiting longer — strictly
+ *  LOCAL misconfiguration (wrong/unreadable/unprotected key path, a bad ssh
+ *  option, a stale changed host key). These fail INSTANTLY and identically on
+ *  every poll, so polling the full window is pure waste.
+ *
+ *  Deliberately EXCLUDED (these CAN be transient during provisioning, so they
+ *  keep polling the full window):
+ *  - "Connection refused" / "Operation timed out" — sshd not up yet (slow boot);
+ *  - "Permission denied" / "Too many authentication failures" — there is a real
+ *    window where sshd is accepting but cloud-init has not yet written the launch
+ *    key into the ubuntu user's authorized_keys, so a HEALTHY box transiently
+ *    rejects auth. Fast-failing on it would kill boxes mid-bootstrap (exactly the
+ *    early-boot transient the 90-poll window exists to tolerate). */
 const SSH_TERMINAL_ERROR =
-  /Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|Permission denied|identity file .* not accessible|Bad (?:configuration|owner)|Could not resolve hostname|UNPROTECTED PRIVATE KEY|Too many authentication failures/i
+  /Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|identity file .* not accessible|Bad (?:configuration|owner)|Could not resolve hostname|UNPROTECTED PRIVATE KEY/i
 
 /**
  * Launch + bootstrap a box; return a live {@link BoxSession}. On ANY failure
@@ -495,7 +522,9 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     log(`[full-remote] box up at ${ip}. Waiting for cloud-init (docker+bun+uv ~2-3min)…`)
     // Copy-paste log tracker — printed the moment the IP is known (not ~5min later
     // at patch-gen) so you can `tail -f` the per-action run.log from the start.
-    log(`[full-remote] 📋 track live (copy-paste):\n    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`)
+    log(
+      `[full-remote] 📋 track live (copy-paste):\n    ssh -i ${keyPath} ${host} 'tail -f ~/run.log'`,
+    )
 
     const ssh = makeSsh(spawn, keyPath, host)
     const session: BoxSession = {

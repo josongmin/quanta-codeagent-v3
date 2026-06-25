@@ -18,14 +18,6 @@ export const oneLine = (s: string): string => s.trim().split(/\s+/)[0] ?? ""
  *  token is piped over STDIN and is safe, but these env/flag values are not). */
 export const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 
-/** `Bun.spawn` runs argv directly (no shell), so a `~/…` keyPath reaches
- *  ssh/scp/rsync LITERALLY. OpenSSH happens to tilde-expand `-i`, but rsync's
- *  `-e` string and other consumers don't — and an unreadable `-i` degrades
- *  SILENTLY (a warning, then "try other auth"), so a literal `~` is a latent
- *  foot-gun. Expand a leading `~/` ourselves; absolute paths pass through. */
-export const expandHome = (p: string): string =>
-  p.startsWith("~/") ? `${process.env.HOME ?? ""}/${p.slice(2)}` : p
-
 /** ssh/scp/rsync host-key + safety options for EPHEMERAL bench boxes (SSOT —
  *  makeSsh, the rsync `-e` transport, and scp ALL use these so they connect the
  *  SAME way).
@@ -93,7 +85,7 @@ export const makeSsh =
       "ssh",
       [
         "-i",
-        expandHome(keyPath),
+        keyPath,
         ...BENCH_SSH_SAFE_OPTS,
         "-o",
         "ConnectTimeout=15",
@@ -107,6 +99,7 @@ export const makeSsh =
         // 4 ⇒ a hung ssh errors in 2min, so consecutive-failure detection +
         // aws liveness confirm fire in minutes. Healthy boxes answer keepalives
         // instantly, so this never trips on a live box.
+        "-o",
         "ServerAliveCountMax=4",
         "-o",
         "TCPKeepAlive=yes",
