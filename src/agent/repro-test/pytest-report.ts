@@ -61,30 +61,92 @@ const PYTEST_EXIT_USAGE = 4
 
 const assertionFailureTypes = new Set(["AssertionError", "Failed"])
 
+/**
+ * Exception types that NEVER count as a reproduction even when they surface in
+ * the call phase. These are infra / invalid-test signatures, not the symptom of
+ * the bug under test:
+ *
+ *   - `SyntaxError` / `IndentationError` / `TabError` — the LLM emitted a broken
+ *     test file. (These normally surface at COLLECTION, but a deferred
+ *     `compile()`/`exec()` could raise one mid-call; exclude regardless.)
+ *   - `ImportError` / `ModuleNotFoundError` — the project / a dependency is not
+ *     importable in the exec env. A deferred (in-test) import that fails is an
+ *     ENV break, not the issue's behavioural symptom. This is the astropy-13033
+ *     false-red shape and is the single most dangerous leak to admit.
+ *
+ * Everything else raised from the code under test in the call phase (TypeError,
+ * AttributeError, KeyError, ValueError, IndexError, RuntimeError, …) IS a real
+ * crash reproduction.
+ */
+const infraExcTypesAtCall = new Set([
+  "SyntaxError",
+  "IndentationError",
+  "TabError",
+  "ImportError",
+  "ModuleNotFoundError",
+])
+
+/** A call-phase FAILED report (`when === "call"`, `outcome === "failed"`).
+ *  Collection (`when === "collect"`), setup/teardown, and pytest `ERROR`
+ *  (which pytest surfaces via a non-call `when` with `outcome === "failed"`)
+ *  are all excluded HERE — only the body of the test function executing and
+ *  failing reaches this predicate. */
+const isCallPhaseFailure = (record: PytestReportRecord): boolean =>
+  record.when === "call" && record.outcome === "failed"
+
 const isAssertionCallFailure = (record: PytestReportRecord): boolean =>
-  record.when === "call" &&
-  record.outcome === "failed" &&
+  isCallPhaseFailure(record) &&
   record.exc_type !== undefined &&
   assertionFailureTypes.has(record.exc_type)
 
-const isNonAssertionFailure = (record: PytestReportRecord): boolean =>
-  record.outcome === "failed" && !isAssertionCallFailure(record)
+/**
+ * A call-phase FAILED whose exception is a RAW exception thrown by the code
+ * under test (e.g. TypeError/AttributeError/KeyError/ValueError) — a legitimate
+ * crash-bug reproduction. Excludes:
+ *   - the assertion shapes (already counted by {@link isAssertionCallFailure});
+ *   - infra/invalid-test exception types ({@link infraExcTypesAtCall});
+ *   - a FAILED report with NO `exc_type` recorded (cannot attribute the failure
+ *     to the code under test ⇒ stay conservative, treat as infra).
+ */
+const isRawExceptionCallFailure = (record: PytestReportRecord): boolean =>
+  isCallPhaseFailure(record) &&
+  record.exc_type !== undefined &&
+  !assertionFailureTypes.has(record.exc_type) &&
+  !infraExcTypesAtCall.has(record.exc_type)
+
+/** A reproduction witness in the call phase: either an assertion failure or a
+ *  raw code-under-test exception. */
+const isReproducingCallFailure = (record: PytestReportRecord): boolean =>
+  isAssertionCallFailure(record) || isRawExceptionCallFailure(record)
+
+/** A FAILED report that is NEITHER a reproduction witness: collection/setup/
+ *  teardown failures, pytest `ERROR` (non-call `when`), import/syntax infra
+ *  exceptions even at call phase, and call-phase FAILED with no `exc_type`.
+ *  These are infra / invalid-test failures, not reproduction authority. */
+const isInfraFailure = (record: PytestReportRecord): boolean =>
+  record.outcome === "failed" && !isReproducingCallFailure(record)
 
 /**
  * Classify only from the deterministic pytest hook sidecar.
  *
- * A red witness is admitted only when pytest reached the test call phase and the
- * call failed through AssertionError/pytest.fail. Raw TypeError/AttributeError,
- * collection errors, setup failures, and malformed/missing reports are infra or
- * invalid-test failures, not issue reproduction authority.
+ * A red witness is admitted only when pytest reached the test CALL phase and the
+ * call failed through (a) AssertionError/pytest.fail, OR (b) a raw exception
+ * thrown by the code under test (TypeError/AttributeError/…). For a large class
+ * of real SWE-bench bugs the symptom IS a raw exception, so withholding those
+ * biased the oracle toward "no base repro established".
+ *
+ * STRICTLY excluded (stay `exec_failed`): collection errors, setup/teardown
+ * failures, pytest `ERROR` (non-call `when`), top-level import crashes, syntax
+ * errors, and any import/syntax exception even if it leaks into the call phase.
+ * These are infra / invalid-test failures, not issue reproduction authority.
  */
 export const classifyPytestExecutionReport = (
   report: PytestExecutionReport | null,
 ): ReproTestOutcome => {
   if (report === null) return "exec_failed"
   if (report.collected <= 0 || report.exitstatus === PYTEST_EXIT_NO_TESTS) return "unknown"
-  if (report.reports.some(isNonAssertionFailure)) return "exec_failed"
-  if (report.reports.some(isAssertionCallFailure)) return "reproduced"
+  if (report.reports.some(isInfraFailure)) return "exec_failed"
+  if (report.reports.some(isReproducingCallFailure)) return "reproduced"
   if (report.exitstatus === PYTEST_EXIT_OK && report.reports.some((r) => r.outcome === "passed")) {
     return "resolved"
   }

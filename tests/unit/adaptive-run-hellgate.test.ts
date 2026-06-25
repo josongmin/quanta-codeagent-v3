@@ -168,45 +168,149 @@ describe("assembled adaptive runner (Wave-3 keystone)", () => {
     expect(seen[1]?.prompt).toContain("rev-after-phase")
   })
 
-  test("RUN-6: repair_with_proof without proof context FAILS CLOSED end-to-end", async () => {
+  // jun-25 fix: the interpretive "without proof context" / "after base repro"
+  // vetoes are DEMOTED to advisory. The model's chosen expensive phase must NOT
+  // be force-aborted by a derived proxy — it proceeds (the phase may ESTABLISH
+  // the missing context), and the advisory facts are surfaced in the prompt.
+  test("RUN-6: repair_with_proof without proof context PROCEEDS (advisory, not aborted)", async () => {
     const phase = recordingRunPhase()
+    const { modelCall, seen } = scriptedModelCall([
+      decision("repair_with_proof"),
+      decision("accept_thin"),
+    ])
     const result = await runAdaptiveBenchAttempt({
       intakePacket: intakeWithoutProofContext(),
       base: BASE,
       env: ENV,
-      modelCall: scriptedModelCall([decision("repair_with_proof")]).modelCall,
+      modelCall,
       runPhase: phase.runPhase,
     })
-    expect(result.outcome).toBe("escalate_needs_human")
-    expect(result.reason).toContain("illegal_action:repair_with_proof_without_proof_context")
-    expect(phase.postures.length).toBe(0)
+    // RED-ON-INJECTION teeth: reinstate the hard veto in decision-legality
+    // (return "repair_with_proof_without_proof_context" when lacksProofContext)
+    // and this flips to escalate_needs_human / 0 postures — proving the demotion
+    // is what lets the model's expensive choice run.
+    expect(result.outcome).toBe("finalize")
+    expect(result.reason).not.toContain("illegal_action")
+    expect(phase.postures.length).toBe(1)
+    // the derived proof-context signal reaches the model as an advisory line.
+    expect(seen[0]?.prompt).toContain("Router Advisory Facts")
+    expect(seen[0]?.prompt).toContain("lacks proof context")
   })
 
-  test("RUN-7: run_public_repro after base repro is already established FAILS CLOSED", async () => {
+  test("RUN-7: run_public_repro when base repro already established PROCEEDS (ordering veto demoted)", async () => {
+    const phase = recordingRunPhase()
+    const { modelCall } = scriptedModelCall([
+      decision("run_public_repro"),
+      decision("accept_thin"),
+    ])
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: intake(),
+      base: BASE,
+      env: ENV,
+      modelCall,
+      runPhase: phase.runPhase,
+    })
+    expect(result.outcome).toBe("finalize")
+    expect(result.reason).not.toContain("illegal_action")
+    expect(phase.postures.length).toBe(1)
+  })
+
+  test("RUN-8: run_proof_clean without proof context PROCEEDS (advisory, not aborted)", async () => {
+    const phase = recordingRunPhase()
+    const { modelCall, seen } = scriptedModelCall([
+      decision("run_proof_clean"),
+      decision("accept_thin"),
+    ])
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: intakeWithoutProofContext(),
+      base: BASE,
+      env: ENV,
+      modelCall,
+      runPhase: phase.runPhase,
+    })
+    expect(result.outcome).toBe("finalize")
+    expect(result.reason).not.toContain("illegal_action")
+    expect(phase.postures.length).toBe(1)
+    expect(seen[0]?.prompt).toContain("lacks proof context")
+  })
+
+  // PAIRED CONTROL #1 (mechanical guards intact): the bounded-loop budget caps
+  // still terminate the run with a typed stop — we only removed the interpretive
+  // vetoes, not the budget. (RUN-4 already covers per-action; this guards the
+  // total-step ceiling under a tight limit.)
+  test("RUN-9: budget caps STILL hold after demotion (bounded-loop, typed stop)", async () => {
     const phase = recordingRunPhase()
     const result = await runAdaptiveBenchAttempt({
       intakePacket: intake(),
       base: BASE,
       env: ENV,
+      // run_public_repro is expensive+reroute → loops until the expensive cap.
       modelCall: scriptedModelCall([decision("run_public_repro")]).modelCall,
       runPhase: phase.runPhase,
     })
-    expect(result.outcome).toBe("escalate_needs_human")
-    expect(result.reason).toContain("illegal_action:run_public_repro_after_base_repro")
-    expect(phase.postures.length).toBe(0)
+    expect(result.outcome).toBe("stop")
+    expect(result.reason).toBe("max_expensive_exhausted")
+    expect(phase.postures.length).toBe(2)
   })
 
-  test("RUN-8: run_proof_clean without proof context FAILS CLOSED end-to-end", async () => {
+  // PAIRED CONTROL #2 (fail-closed-on-invalid-OUTPUT intact): a malformed model
+  // reply STILL escalates and never runs a phase (mechanical, not interpretive).
+  test("RUN-10: invalid model OUTPUT still FAILS CLOSED after demotion", async () => {
     const phase = recordingRunPhase()
     const result = await runAdaptiveBenchAttempt({
       intakePacket: intakeWithoutProofContext(),
+      base: BASE,
+      env: ENV,
+      modelCall: scriptedModelCall([{ not: "a decision" }]).modelCall,
+      runPhase: phase.runPhase,
+    })
+    expect(result.outcome).toBe("escalate_needs_human")
+    expect(phase.postures.length).toBe(0)
+  })
+
+  // infraBlocked stays HARD — but ONLY when backed by a REAL execution-failure
+  // receipt, never the missingEvidence `public_proof` proxy.
+  test("RUN-11: run_proof_clean is HARD-vetoed only by a real execution-failure receipt", async () => {
+    const phase = recordingRunPhase()
+    const infraBlockedPacket = (): LlmEvidencePacket => ({
+      ...intakeWithoutProofContext(),
+      evidenceRevision: "rev-infra",
+      proofReceipts: [{ source: "public_mwe", state: "execution_failed" }],
+    })
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: infraBlockedPacket(),
       base: BASE,
       env: ENV,
       modelCall: scriptedModelCall([decision("run_proof_clean")]).modelCall,
       runPhase: phase.runPhase,
     })
     expect(result.outcome).toBe("escalate_needs_human")
-    expect(result.reason).toContain("illegal_action:run_proof_clean_without_proof_context")
+    expect(result.reason).toContain("illegal_action:run_proof_clean_while_infra_blocked")
     expect(phase.postures.length).toBe(0)
+  })
+
+  test("RUN-12: the missingEvidence public_proof PROXY does NOT trigger the hard infra veto", async () => {
+    const phase = recordingRunPhase()
+    const proxyOnlyPacket = (): LlmEvidencePacket => ({
+      ...intakeWithoutProofContext(),
+      evidenceRevision: "rev-proxy",
+      // proxy infra signal only (no execution_failed/env_prep_failed receipt).
+      missingEvidence: [{ kind: "public_proof", reason: "public_proof_infra_blocked" }],
+    })
+    const { modelCall } = scriptedModelCall([
+      decision("run_proof_clean"),
+      decision("accept_thin"),
+    ])
+    const result = await runAdaptiveBenchAttempt({
+      intakePacket: proxyOnlyPacket(),
+      base: BASE,
+      env: ENV,
+      modelCall,
+      runPhase: phase.runPhase,
+    })
+    // proxy must NOT abort: the model's expensive choice proceeds.
+    expect(result.outcome).toBe("finalize")
+    expect(result.reason).not.toContain("illegal_action")
+    expect(phase.postures.length).toBe(1)
   })
 })

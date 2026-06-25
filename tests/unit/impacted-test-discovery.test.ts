@@ -110,9 +110,9 @@ describe("impacted repo-test discovery", () => {
   // cannot add or drop a candidate from the discovered set.
   test("admissibility is evidence-presence, not score — rank only reorders", () => {
     const repoFiles = [
-      // import-ref only (rank 30): non-mirror test that imports the source.
+      // import-ref tier only: non-mirror test that imports the source.
       { path: "tests/test_uses_core.py", text: "from pkg.core import run\n" },
-      // mirror only (rank 50): same-stem mirror test, no import.
+      // mirror tier only (stronger class): same-stem mirror test, no import.
       { path: "pkg/tests/test_core.py", text: "" },
     ]
     const candidates = discoverImpactedTestCandidates({
@@ -133,17 +133,53 @@ describe("impacted repo-test discovery", () => {
     expect(candidates.every((c) => c.evidence.length > 0)).toBe(true)
   })
 
-  test("rankWitnessEvidence is a pure additive projection (no gate / threshold)", () => {
+  test("rankWitnessEvidence is the STRONGEST-tier projection (max, not additive)", () => {
     const mirror: WitnessEvidence = { kind: "mirror", detail: "core" }
     const importRef: WitnessEvidence = { kind: "import-ref", detail: "pkg.core" }
+    const pkg: WitnessEvidence = { kind: "package", detail: "pkg" }
     // Empty evidence ranks 0 — but an empty-evidence candidate is simply never
     // built, so a 0 here is not a "reject", it is "not a witness".
     expect(rankWitnessEvidence([])).toBe(0)
-    expect(rankWitnessEvidence([mirror])).toBe(50)
-    expect(rankWitnessEvidence([importRef])).toBe(30)
-    // Additive: combining evidence sums the weights, order-independent.
-    expect(rankWitnessEvidence([mirror, importRef])).toBe(80)
-    expect(rankWitnessEvidence([importRef, mirror])).toBe(80)
+    // Stronger class ⇒ strictly higher ordinal (parameter-free, derived from the
+    // discrete tier order; no 50/32/30/18/8/5 magic magnitudes).
+    expect(rankWitnessEvidence([mirror])).toBeGreaterThan(rankWitnessEvidence([importRef]))
+    expect(rankWitnessEvidence([importRef])).toBeGreaterThan(rankWitnessEvidence([pkg]))
+    // NOT additive: combining evidence collapses to the MAX tier, order-
+    // independent — it does NOT sum. The rank of {mirror, import-ref} equals the
+    // rank of {mirror} alone, and never exceeds it.
+    expect(rankWitnessEvidence([mirror, importRef])).toBe(rankWitnessEvidence([mirror]))
+    expect(rankWitnessEvidence([importRef, mirror])).toBe(rankWitnessEvidence([mirror]))
+  })
+
+  // ── Anti-additive teeth (the FLIP) ──────────────────────────────────────────
+  // Under the OLD weighted sum, a witness carrying THREE weak signals
+  // (path-token 18 + context-token 8 + package 5 = 31) outranked a witness
+  // carrying ONE stronger class on its own (import-ref 30): 31 > 30. The new
+  // parameter-free tier max makes that impossible — one stronger CLASS always
+  // wins, regardless of how many weak signals pile up. This case FLIPS the old
+  // behavior and proves the heuristic magnitudes are gone.
+  test("several weak signals do NOT outrank one stronger class (flips the old additive sum)", () => {
+    const threeWeak: WitnessEvidence[] = [
+      { kind: "path-token", detail: "core" },
+      { kind: "context-token", detail: "pkg" },
+      { kind: "package", detail: "pkg" },
+    ]
+    const oneStronger: WitnessEvidence[] = [{ kind: "import-ref", detail: "pkg.core" }]
+    // OLD additive: rank(threeWeak)=18+8+5=31 > rank(oneStronger)=30 ⇒ weak wins.
+    // NEW tier-max: the strongest of {path-token,context-token,package} is
+    // path-token, which is a STRICTLY WEAKER class than import-ref ⇒ stronger wins.
+    expect(rankWitnessEvidence(oneStronger)).toBeGreaterThan(rankWitnessEvidence(threeWeak))
+  })
+
+  test("mirror class outranks package class regardless of secondary signals", () => {
+    const mirrorPlus: WitnessEvidence[] = [{ kind: "mirror", detail: "core" }]
+    // package witness loaded up with every weaker secondary signal it could carry.
+    const packageLoaded: WitnessEvidence[] = [
+      { kind: "package", detail: "pkg" },
+      { kind: "path-token", detail: "core" },
+      { kind: "context-token", detail: "sub" },
+    ]
+    expect(rankWitnessEvidence(mirrorPlus)).toBeGreaterThan(rankWitnessEvidence(packageLoaded))
   })
 
   test("empty witness candidates: a changed non-source file yields no candidates", () => {

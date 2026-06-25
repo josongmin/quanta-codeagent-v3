@@ -13,8 +13,11 @@
  * `/rewind` and `/fork` slash commands consume:
  *
  *   - `rewindSession(opts)` returns a structured `RewindResult` (turn count,
- *     message count, file-state note). Optionally calls into an injected git
- *     port to reset working tree (default OFF — destructive).
+ *     message count, file-state note). It NEVER resets the working tree to
+ *     the session-start `gitSha` — that was a data-loss bug (one coarse SHA
+ *     for the whole session ⇒ wiped turns 1..N on an interior rewind). File
+ *     restore now safely degrades to "unchanged" until a per-message
+ *     checkpoint mapping is wired (see the `restoreFiles` handling below).
  *   - `forkSession(opts)` clones the source THEN rewinds the clone to
  *     `atMessageId`. Result is a fresh session whose transcript ends at the
  *     fork point. Original session is preserved byte-identically.
@@ -56,16 +59,21 @@ export interface RewindGitPort {
 export interface RewindOptions {
   readonly sessionId: string
   readonly messageId: string
-  /** When true, also restore the git working tree to the commit SHA
-   *  recorded in the session meta (`gitSha`). Default false — history
+  /** When true, the caller is asking us to ALSO restore the git working
+   *  tree to the rewound-to message's file state. Default false — history
    *  truncation only.
    *
-   *  DESTRUCTIVE — the working tree is `git stash`-ed then `git reset
-   *  --hard` to the recorded SHA. The caller (slash command) is expected
-   *  to have prompted the user. */
+   *  IMPORTANT (data-loss fix): we deliberately do NOT reset to the
+   *  session-meta `gitSha` here — that SHA is captured once at session start
+   *  and is the WRONG target for an interior rewind (it would wipe turns
+   *  1..N). Until an accurate per-message checkpoint mapping is wired (see
+   *  the `rewindSession` body), `restoreFiles: true` is a SAFE no-op: the
+   *  working tree is left unchanged and `fileStateNote` says so. */
   readonly restoreFiles?: boolean
-  /** Inject a git port for `restoreFiles: true`. Absent ⇒ file-restore is
-   *  a no-op with an explanatory `fileStateNote`. */
+  /** Inject a git port for `restoreFiles: true`. Currently unused by the
+   *  restore path (the session-start `gitSha` reset was a data-loss bug and
+   *  was removed); retained for the eventual per-message checkpoint wiring
+   *  and for back-compat with callers that still inject it. */
   readonly git?: RewindGitPort
   /** Override the session loader (test seam). Defaults to
    *  `loadSessionById`. */
@@ -90,8 +98,11 @@ export interface RewindResult {
   /** Human-readable note about file-state action: one of
    *    "working tree unchanged"                — restoreFiles was false
    *    "git port not wired; working tree unchanged"
-   *    "no gitSha on session; working tree unchanged"
-   *    "git stashed; reset to <sha>"
+   *    "no per-message checkpoint; working tree unchanged (file restore not yet wired)"
+   *                                            — restoreFiles + port, but no
+   *                                              accurate per-message restore
+   *                                              target (session-start sha is
+   *                                              the WRONG target; data-loss fix)
    *    "rewind no-op; working tree unchanged"  — message already last
    */
   readonly fileStateNote: string
@@ -152,7 +163,27 @@ export const rewindSession = async (opts: RewindOptions): Promise<RewindResult> 
   // Run the truncate. Returns `removed: 0` if msg already last (no-op).
   const truncateResult = await rewindToMessage(opts.sessionId, fullId)
 
-  // File-state handling — destructive, default OFF.
+  // File-state handling — restore to the CORRECT boundary, or stay honest.
+  //
+  // DATA-LOSS FIX: `meta.gitSha` is captured ONCE at session start (see
+  // `SessionMeta.gitSha` in `./types.ts`) — it is a single SHA for the whole
+  // session, NOT a per-message/per-turn marker. Resetting the working tree to
+  // it when rewinding to message N (e.g. turn 5 of 10) would blow away every
+  // file edit made in turns 1..N and leave a turn-N transcript over a turn-0
+  // workspace. So `git reset --hard meta.gitSha` is NEVER a correct restore
+  // target for an interior rewind (it is correct ONLY when N is the session
+  // start, where it is also a no-op for our purposes).
+  //
+  // The accurate per-message restore would route through the per-tool
+  // checkpoint / ShadowOdb rail (`ThreeWayRestorePort.restoreFiles(tag)` in
+  // `@/agent/per-tool-checkpoint`), but that rail is keyed by tool-call/turn
+  // anchors in an in-memory `GranularRegistry` (on `AgentConfig`) and there is
+  // NO persisted mapping from a session `Message.id` to a checkpoint tag at
+  // this layer. Until that mapping is wired (FOLLOW-UP: persist a checkpoint
+  // tag per message and resolve message N → tag → `restoreFiles(tag)`), we
+  // take the SAFE DEGRADE: never touch the working tree, so a rewind can
+  // never destroy intermediate work. The honest note tells the user the tree
+  // was left as-is.
   let fileStateNote: string
   if (truncateResult.removed === 0) {
     fileStateNote = "rewind no-op; working tree unchanged"
@@ -161,14 +192,12 @@ export const rewindSession = async (opts: RewindOptions): Promise<RewindResult> 
   } else if (opts.git === undefined) {
     fileStateNote = "git port not wired; working tree unchanged"
   } else {
-    const sha = existing.meta.gitSha
-    if (typeof sha !== "string" || sha === "") {
-      fileStateNote = "no gitSha on session; working tree unchanged"
-    } else {
-      await opts.git.stash(existing.meta.cwd)
-      await opts.git.resetHard(existing.meta.cwd, sha)
-      fileStateNote = `git stashed; reset to ${sha}`
-    }
+    // restoreFiles requested WITH a git port, but we have no accurate
+    // per-message checkpoint to restore to. Refuse the unsafe session-start
+    // reset rather than destroy turns 1..N of work. `opts.git` is left
+    // deliberately unused here — `stash`/`resetHard` would only let us target
+    // the WRONG (coarse, session-start) SHA.
+    fileStateNote = "no per-message checkpoint; working tree unchanged (file restore not yet wired)"
   }
 
   return {

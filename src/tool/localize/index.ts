@@ -33,8 +33,11 @@ const SNIPPET_CAP = 160
  *  `parse_test_failure`'s tiering so localize's rank order is consistent with
  *  the build-log signal: user-code matches outrank test matches, both outrank
  *  vendored. `vendored = -50` effectively buries `node_modules/`, `.venv/`,
- *  etc. — hits are still RETURNED (visible to the model) but cannot push
- *  user-code matches out of `max_results`. */
+ *  etc. — a vendored hit can therefore be pushed PAST `max_results` and is then
+ *  OMITTED from the rendered output (it is NOT silently dropped: `render` always
+ *  appends an accurate omitted-COUNT marker when ranked hits exceed `max_results`,
+ *  and a real fault in a patched dependency is recoverable via `verbose` /
+ *  raising `max_results` / a `path` filter). */
 const TIER_PENALTY: Record<FrameTier, number> = { user: 0, test: -2, vendored: -50 }
 
 /** R-Phase10 sibling-`.js`-with-`.ts`-twin penalty. When the scope contains
@@ -247,7 +250,7 @@ const render = (
   verbose: boolean,
   tsStems: Set<string>,
 ): string => {
-  const ranked = hits
+  const sorted = hits
     .map((h) => {
       const tier = classifyFrame(h.file)
       return { h, tier, score: scoreHit(h, tokens, stats, N, tier, tsStems) }
@@ -259,7 +262,12 @@ const render = (
           ? byteCompare(a.h.file, b.h.file)
           : a.h.line - b.h.line,
     )
-    .slice(0, max)
+  // Omitted-count is computed BEFORE the slice: M = total ranked − shown. A
+  // vendored/sibling-penalized hit pushed past `max_results` is OMITTED from the
+  // rows but is still COUNTED in M, so the model is never silently denied a
+  // lower-ranked candidate — it can raise max_results / pass `path` to surface them.
+  const omitted = sorted.length > max ? sorted.length - max : 0
+  const ranked = sorted.slice(0, max)
 
   const byFile = new Map<string, typeof ranked>()
   for (const entry of ranked) {
@@ -279,6 +287,11 @@ const render = (
         out.push(`  ${file}:${h.line}  ${snippet}`)
       }
     }
+  }
+  if (omitted > 0) {
+    out.push(
+      `… (${omitted} lower-ranked candidate${omitted === 1 ? "" : "s"} omitted — raise max_results, or some were down-ranked as vendored/sibling; add a path filter to surface them)`,
+    )
   }
   return out.join("\n")
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
 import { inspectBox } from "../../src/apps/bench/remote/box-session"
+import { readBoxRuntimeProbe } from "../../src/apps/bench/remote/box-session/snapshot"
 
 const ok = (stdout: string): SpawnResult => ({ code: 0, stdout, stderr: "" })
 const err = (stderr: string, code = 1): SpawnResult => ({ code, stdout: "", stderr })
@@ -44,7 +45,7 @@ const snapshotSpawnResult = (
 const isBootstrapProbe = (remoteCmd: string): boolean =>
   remoteCmd.includes("test -x ~/.bun/bin/bun && test -x ~/swebench-python")
 
-const isBusyProbe = (remoteCmd: string): boolean => remoteCmd.includes("pgrep -f 'cli.ts run'")
+const isBusyProbe = (remoteCmd: string): boolean => remoteCmd.includes("pgrep -f '[c]li")
 
 const isSnapshotRead = (remoteCmd: string): boolean => remoteCmd.includes("bench-box-status.json")
 
@@ -93,6 +94,46 @@ const mockInspectSpawn = (o: {
 }
 
 describe("inspectBox snapshot health classification", () => {
+  test("busy probe uses self-match-safe process patterns", async () => {
+    const remoteCommands: string[] = []
+    await inspectBox(
+      inspectCfg(async (cmd, args) => {
+        if (cmd !== "ssh") return err(`unexpected cmd: ${cmd}`)
+        const remoteCmd = args.at(-1) ?? ""
+        remoteCommands.push(remoteCmd)
+        return (
+          routeKnownInspectCommand(remoteCmd, {
+            snapshot: "missing",
+            probeJson: '{"activeRunDetected":false}',
+            busy: false,
+          }) ?? err(`unexpected ssh cmd: ${remoteCmd}`)
+        )
+      }),
+      {
+        iid: "i-demo",
+        ip: "1.2.3.4",
+      },
+    )
+    const busyCmd = remoteCommands.find((cmd) => cmd.includes("pgrep -f"))
+    expect(busyCmd).toContain("[c]li\\.ts run")
+    expect(busyCmd).toContain("[r]un_evaluation")
+    expect(busyCmd).not.toContain("pgrep -f 'cli.ts run'")
+    expect(busyCmd).not.toContain("pgrep -f run_evaluation")
+  })
+
+  test("runtime probe does not classify its own heredoc as an active bench run", async () => {
+    let runtimeProbeCmd = ""
+    await readBoxRuntimeProbe(async (cmd) => {
+      runtimeProbeCmd = cmd
+      return ok('{"activeRunDetected":false}')
+    })
+
+    expect(runtimeProbeCmd).toContain("def is_driver_line")
+    expect(runtimeProbeCmd).toContain("\\bbun\\b.*src/apps/bench/cli\\.ts\\s+run\\b")
+    expect(runtimeProbeCmd).toContain("def is_grade_line")
+    expect(runtimeProbeCmd).toContain("'python' in line")
+  })
+
   test("runtime-visible box with no snapshot is surfaced as write-failed, not generic missing", async () => {
     const inspection = await inspectBox(
       inspectCfg(

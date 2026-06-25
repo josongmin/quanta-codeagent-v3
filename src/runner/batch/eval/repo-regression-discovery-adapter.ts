@@ -29,6 +29,7 @@
 
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { logger } from "@/shared/logger"
 import { buildProjectEnvUvRunArgv } from "../corpus/project-env"
 import type { Instance } from "../types"
 import { execArgv } from "./exec"
@@ -352,7 +353,18 @@ export const makeDiscoveredRepoRegressionWitness = (
         changedFiles: candidate.files,
         repoFiles,
         maxTests,
-        onCap: (info) => cappedByKey.set(key, info),
+        onCap: (info) => {
+          cappedByKey.set(key, info)
+          // #6: silent under-coverage is a regression-gate hazard — a witness
+          // dropped by `maxTests` never runs, so a candidate that breaks it reads
+          // green. Emit the drop so capped coverage is attributable, not invisible.
+          logger.warn("regression-discovery: maxTests capped witnesses", {
+            files: key,
+            discovered: info.discovered,
+            executed: info.executed,
+            dropped: info.discovered - info.executed,
+          })
+        },
       })
     })()
     discoveryCache.set(key, p)

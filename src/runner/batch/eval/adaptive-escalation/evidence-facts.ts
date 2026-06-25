@@ -100,3 +100,36 @@ export const renderEvidenceFacts = (f: EvidenceFacts): string =>
       f.regressionSignal,
     )}; infra blocked: ${yn(f.infraBlocked)}`,
   ].join("\n")
+
+/**
+ * The derived "lacks proof context" signal (jun-25). This is the SAME predicate
+ * the legality guard used to HARD-veto run_proof_clean / repair_with_proof on
+ * (`!baseReproEstablished && declaredConditionEvidenced !== true`). It is now
+ * SURFACED to the router as advisory so the model — not a derived proxy — decides
+ * whether to enter a phase that might ESTABLISH that very context.
+ */
+export const lacksProofContext = (f: EvidenceFacts): boolean =>
+  !f.baseReproEstablished && f.declaredConditionEvidenced !== true
+
+/**
+ * Advisory router facts block (jun-25). Surfaces the derived signals that the
+ * legality guard previously force-aborted on — proof-context and the fact inputs
+ * to the (now-removed) ordering vetoes — as EVIDENCE the model weighs itself. No
+ * line here narrows the legal action set; it is purely informational. Worded so
+ * the model understands an expensive phase MAY be the way to acquire missing
+ * proof context, rather than being blocked from it.
+ */
+export const renderAdvisoryRouterFacts = (f: EvidenceFacts): string =>
+  [
+    "## Router Advisory Facts (derived; NOT restrictions — you decide)",
+    `- base reproduction established: ${yn(f.baseReproEstablished)}`,
+    `- issue declared-condition evidenced: ${
+      f.declaredConditionEvidenced === null ? "n/a" : yn(f.declaredConditionEvidenced)
+    }`,
+    `- candidate has executed positive proof: ${yn(f.positiveProof)}`,
+    `- lacks proof context (no base repro AND declared-condition not evidenced): ${yn(
+      lacksProofContext(f),
+    )}`,
+    "  note: entering run_public_repro / run_proof_clean / repair_with_proof MAY be how you ESTABLISH missing proof context — this advisory does not forbid it.",
+    `- infra blocked (real execution-failure receipt): ${yn(f.infraBlocked)}`,
+  ].join("\n")

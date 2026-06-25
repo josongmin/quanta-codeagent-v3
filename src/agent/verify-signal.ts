@@ -241,6 +241,22 @@ const outputHasFailureMarker = (normalized: string): boolean => {
 }
 
 /**
+ * The `id` of the FIRST failure matcher that fires on the captured output, or
+ * `null` if none / empty. Same recognition as {@link isVerifyOutputFailing} but
+ * surfaces WHICH marker matched so the verify-guard can thread it into its
+ * (now evidential, not asserted) nudge — the model sees WHY the output looked
+ * like a failure and can confirm/deny. Pure: no I/O, no clock.
+ */
+export const verifyOutputFailureMarkerId = (output: string): string | null => {
+  const normalized = normalizeVerifyOutput(output)
+  if (normalized === null) return null
+  for (const m of OUTCOME_FAILURE_MATCHERS) {
+    if (m.pattern.test(normalized)) return m.id
+  }
+  return null
+}
+
+/**
  * True iff the captured tool output contains an EXPLICIT, ecosystem-specific
  * success summary AND no explicit failure summary. This is the exact mirror of
  * {@link isVerifyOutputFailing}: verdict salvage can promote a non-zero wrapper

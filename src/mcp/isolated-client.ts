@@ -36,7 +36,7 @@ import {
   PluginHostError,
 } from "@/plugin-isolation"
 import { errMessage, logger, QuantaError, runtimeConfig } from "@/shared"
-import { extractMedia, McpError, sanitizeAnnotations } from "./client"
+import { extractMedia, McpError, sanitizeAnnotations, unsupportedTypeMarker } from "./client"
 import {
   isSupportedProtocolVersion,
   resolveOfferedVersion,
@@ -297,9 +297,13 @@ export class IsolatedMcpClient {
     // §19.3 — mirror the in-process client: surface non-text media alongside the
     // joined text. Empty ⇒ `media` omitted (byte-identical text-only result).
     const media = extractMedia(res.content)
+    // F2 — mirror the in-process client: a content block whose top-level `type`
+    // is neither text nor a handled media kind is carried by neither fold path
+    // and would be silently lost. Disclose the omission via a visible marker.
+    const omittedMarker = unsupportedTypeMarker(res.content)
     return {
       ok: res.isError !== true,
-      content: capResultText(joinTextBlocks(res.content)),
+      content: capResultText(joinTextBlocks(res.content)) + omittedMarker,
       ...(media.length > 0 ? { media } : {}),
     }
   }

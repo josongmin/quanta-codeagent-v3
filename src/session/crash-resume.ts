@@ -218,18 +218,46 @@ export const detectInterruptedSessions = async (
 }
 
 /**
+ * The interrupted turn's `tool_use`/`tool_result` blocks are NOT persisted in
+ * the marker (it carries only `userText` + accumulated narration — see
+ * {@link PersistedInterruptedTurn}; the structured blocks live in the agent
+ * loop's fenced working memory and never reach this slice). So the resume CANNOT
+ * splice the already-applied edits/commands back into history. Without an
+ * explicit warning the model treats the prose summary as a fresh task and
+ * blindly re-does steps it ALREADY applied to the workspace before the crash —
+ * producing duplicate or conflicting changes. This guidance forces a
+ * before-redo inspection of the live working-tree so an already-applied step is
+ * skipped, not repeated. It is appended to EVERY resume message (even one with
+ * no narration: a crash with zero narration can still have applied file edits).
+ */
+const RESUME_INSPECT_GUIDANCE =
+  "IMPORTANT: the interrupted turn may have ALREADY applied changes to the " +
+  "workspace (file edits, created files, run commands). Before re-doing any " +
+  "step, INSPECT the current working-tree state (read the relevant files, " +
+  "check what already exists) and SKIP any step whose effect is already " +
+  "present — do not blindly re-apply edits, or you will create duplicate or " +
+  "conflicting changes."
+
+/**
  * Build the user-facing resume message for a crash-recovered turn. PURE.
  * Re-injected as a `role:"user"` continuation so the agent picks the
  * interrupted task back up — same framing as the in-memory
  * `buildResumeMessage`, but self-contained in the session slice (the session
  * slice may not import `@/agent`).
+ *
+ * Always carries {@link RESUME_INSPECT_GUIDANCE} so the model does not re-apply
+ * changes the interrupted turn already made (the marker cannot carry the
+ * structured tool_use/tool_result blocks to splice them back into history).
  */
 export const buildCrashResumeMessage = (turn: PersistedInterruptedTurn): string => {
   const head =
     `Resume the previously interrupted task (it was interrupted: ${turn.reason}). ` +
     `The task was:\n${turn.userText}`
-  if (turn.partialAssistantText.trim().length === 0) return head
-  return `${head}\n\nYour partial progress before the interruption:\n${turn.partialAssistantText}`
+  const body =
+    turn.partialAssistantText.trim().length === 0
+      ? head
+      : `${head}\n\nYour partial progress before the interruption:\n${turn.partialAssistantText}`
+  return `${body}\n\n${RESUME_INSPECT_GUIDANCE}`
 }
 
 /** One actionable resume offer surfaced to the operator at restart. PURE. */

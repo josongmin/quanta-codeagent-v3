@@ -131,17 +131,6 @@ describe("router evidence projection (P5)", () => {
         }),
         gap: "infra_blocked",
       },
-      {
-        // teeth for the dead-check fix: the infra-blocked signal also arrives as a
-        // `public_proof` missingEvidence entry; the prior `includes("infra")` never
-        // matched it (no *infra* kind exists), so this path was silently inert.
-        name: "missing public_proof (infra-blocked) → infra_blocked from missingEvidence",
-        mutate: (p) => ({
-          ...p,
-          missingEvidence: [{ kind: "public_proof", reason: "public_proof_infra_blocked" }],
-        }),
-        gap: "infra_blocked",
-      },
     ]
     for (const { name, mutate, gap } of cases) {
       test(name, () => {
@@ -154,6 +143,19 @@ describe("router evidence projection (P5)", () => {
         expect(deriveEvidenceGaps(deriveEvidenceFactsFromPacket(goodPacket()))).not.toContain(gap)
       })
     }
+
+    test("PROXY-DEMOTED: a `public_proof` missingEvidence entry does NOT set infraBlocked", () => {
+      // jun-25 fix: the HARD infra veto must be backed by a real execution-failure
+      // receipt only. The `public_proof` missingEvidence entry is a DERIVED proxy
+      // (selection's infra_blocked summary label), so it must NOT flip infraBlocked
+      // / the infra_blocked gap — it reaches the model only as an advisory.
+      const facts = deriveEvidenceFactsFromPacket({
+        ...goodPacket(),
+        missingEvidence: [{ kind: "public_proof", reason: "public_proof_infra_blocked" }],
+      })
+      expect(facts.infraBlocked).toBe(false)
+      expect(deriveEvidenceGaps(facts)).not.toContain("infra_blocked")
+    })
   })
 
   test("BLIND: projecting a packet renders blindness-audited bytes (clean packet ok)", () => {

@@ -295,7 +295,10 @@ describe("/rewind dispatch", () => {
     const code = await cmd.run(["m0", "--yes", "--restore-files"], cap.ctx)
     expect(code).toBe(0)
     expect(stashCalled).toBe(false)
-    expect(cap.out).toContain("no gitSha")
+    // Data-loss fix: file restore safely degrades to "unchanged" — we never
+    // reset to the (coarse, session-start) gitSha. The note reflects that
+    // no accurate per-message checkpoint exists yet.
+    expect(cap.out).toContain("working tree unchanged")
   })
 
   test("ambiguous prefix ⇒ exit 1 with clear error", async () => {

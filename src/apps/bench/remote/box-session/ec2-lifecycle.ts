@@ -531,7 +531,7 @@ export const countLiveBoxes = async (cfg: FullRemoteConfig): Promise<number> => 
 }
 
 const busyProbeCommand =
-  "if pgrep -f 'cli.ts run' >/dev/null 2>&1 || pgrep -f run_evaluation >/dev/null 2>&1; then echo BUSY; " +
+  "if pgrep -f '[c]li\\.ts run' >/dev/null 2>&1 || pgrep -f '[r]un_evaluation' >/dev/null 2>&1; then echo BUSY; " +
   "elif test -d ~/.pool-grade.lock; then " +
   'if find ~/.pool-grade.lock -maxdepth 0 -mmin +10 >/dev/null 2>&1 && [ -n "$(find ~/.pool-grade.lock -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir ~/.pool-grade.lock 2>/dev/null; echo IDLE; else echo BUSY; fi; ' +
   "else echo IDLE; fi"

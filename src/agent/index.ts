@@ -220,6 +220,7 @@ export {
 } from "./lsp-diagnostics-hook"
 export {
   applyMcpClientWiring,
+  disambiguateMcpToolNames,
   type ElicitationPrompterFactory,
   type LoadMcpToolsOpts,
   loadMcpTools,

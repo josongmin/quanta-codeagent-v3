@@ -12,13 +12,24 @@
  * worth EXECUTING as regression witnesses, and in what order?" It has NO verdict
  * authority. A candidate's *admissibility* (whether it is a witness at all) is
  * decided by the PRESENCE of structural evidence (mirror / import-ref / …), not
- * by any numeric score. The score table below is ORDERING-ONLY: it sorts the
+ * by any numeric score. The ordering below is ORDERING-ONLY: it sorts the
  * already-admissible witnesses so the strongest run first under `maxTests`, and
  * it is surfaced in telemetry. Whether a candidate is rejected is decided later,
  * and ONLY by actually executing the selected tests (see
- * `repo-regression-discovery-adapter.ts` → `ExecutedWitnessResult`). Changing a
- * rank weight here can reorder which witnesses run first, but it can never, by
+ * `repo-regression-discovery-adapter.ts` → `ExecutedWitnessResult`). Changing the
+ * tier order here can reorder which witnesses run first, but it can never, by
  * itself, turn a passing candidate into a rejected one.
+ *
+ * ── Ordering is PARAMETER-FREE lexicographic tiers (no magic weights) ────────
+ * Run order is decided by a witness's STRONGEST provenance class alone — a
+ * discrete tier, NOT a tuned additive blend. The prior implementation summed
+ * hand-picked integer weights (mirror:50 + import-ref:30 + …), so accumulating
+ * several WEAK signals could overtake one strictly STRONGER class. That arbitrary
+ * magnitude arithmetic is removed. Now: mirror > parent-mirror > import-ref >
+ * path-token > context-token > package, compared lexicographically by the best
+ * tier each witness carries; secondary signals never sum past a higher class.
+ * Within a tier, ties break on the stable byte-ordered path key. No numbers to
+ * sweep, no blend to game.
  */
 
 import { byteCompare } from "@/shared/byte-compare"
@@ -50,11 +61,13 @@ export interface WitnessEvidence {
 export interface ImpactedTestCandidate {
   readonly path: string
   /**
-   * ORDERING-ONLY rank. Higher = earlier in the run order under `maxTests`. This
-   * value carries NO verdict authority — it never decides admissibility and is
-   * never compared against a threshold to reject a candidate. It exists so the
-   * strongest structural witnesses execute first, and so telemetry can show the
-   * ranking. See module header.
+   * ORDERING-ONLY rank = the ordinal of this witness's STRONGEST provenance tier
+   * (see `tierOf` / `rankWitnessEvidence`). Higher tier = earlier in the run
+   * order under `maxTests`. It is NOT an additive score: several weak signals do
+   * not sum past one stronger class. This value carries NO verdict authority — it
+   * never decides admissibility and is never compared against a threshold to
+   * reject a candidate. It exists so the strongest structural witnesses execute
+   * first, and so telemetry can show the ranking. See module header.
    */
   readonly score: number
   /** Backward-compatible flat reason strings (telemetry). */
@@ -76,26 +89,53 @@ export interface DiscoverImpactedTestsArgs {
   readonly onCap?: (info: { readonly discovered: number; readonly executed: number }) => void
 }
 
+/**
+ * Default cap on how many discovered witnesses are EXECUTED per candidate. This
+ * is the unset default of the `regression-max-tests` knob (env
+ * `QUANTA_BENCH_REGRESSION_MAX_TESTS`, domain [1,200]); a researcher overrides it
+ * via that knob — it is a documented, config-backed bound, NOT a free heuristic.
+ * The runtime SSOT lives here (the knob slice cannot import this batch slice); a
+ * caller-supplied `args.maxTests` (from `posture.regressionMaxTests`) wins when
+ * present.
+ */
 export const DEFAULT_MAX_TESTS = 12
 
 /**
- * ── ORDERING-ONLY rank weights ──────────────────────────────────────────────
- * These constants ONLY break ties when sorting already-admissible witnesses so
- * the strongest run first under `maxTests`. They are NOT a verdict gate: no code
- * path compares a candidate's accumulated score against a threshold to admit or
- * reject it. Admission is keyed on the PRESENCE of evidence (see
- * `evidenceForTestSource`); rejection is keyed on an EXECUTED test failing.
- * Tuning any weight below can change run order but can never, on its own, flip a
- * candidate from admitted to rejected.
+ * ── ORDERING-ONLY provenance tiers (PARAMETER-FREE) ─────────────────────────
+ * The run order of already-admissible witnesses, strongest class first. This is
+ * a DISCRETE ordering, not a tunable weight table: the ordinals are derived from
+ * the array index (position = strength), so there are no magic magnitudes and
+ * nothing to sweep. A witness's rank is the ordinal of its STRONGEST tier alone
+ * (`Math.max` over its evidence), so accumulating several weak signals can NEVER
+ * overtake one strictly stronger class — unlike the prior additive sum.
+ *
+ * These ordinals are NOT a verdict gate: no code path compares a candidate's
+ * rank against a threshold to admit or reject it. Admission is keyed on the
+ * PRESENCE of evidence (see `evidenceForTestSource`); rejection is keyed on an
+ * EXECUTED test failing. Reordering this list changes run order but can never,
+ * on its own, flip a candidate from admitted to rejected.
  */
-const RANK_WEIGHTS = {
-  mirror: 50,
-  parentMirror: 32,
-  importRef: 30,
-  pathToken: 18,
-  contextToken: 8,
-  package: 5,
-} as const
+const TIER_ORDER: readonly WitnessEvidenceKind[] = [
+  // strongest …
+  "mirror",
+  "parent-mirror",
+  "import-ref",
+  "path-token",
+  "context-token",
+  "package",
+  // … weakest
+]
+
+/**
+ * ORDERING-ONLY: the discrete tier ordinal for a single provenance class. Higher
+ * = stronger (runs first). Derived purely from `TIER_ORDER` position so there are
+ * no hand-picked magnitudes. An unknown kind sorts below every named tier.
+ */
+const tierOf = (kind: WitnessEvidenceKind): number => {
+  const i = TIER_ORDER.indexOf(kind)
+  // position 0 (strongest) → highest ordinal; unknown (-1) → 0 (below all).
+  return i < 0 ? 0 : TIER_ORDER.length - i
+}
 
 /** ORDERING-ONLY: tokens shorter than this are too generic to rank on. */
 const MIN_DISCOVERY_TOKEN_LENGTH = 4
@@ -256,34 +296,23 @@ const evidenceForTestSource = (
 }
 
 /**
- * ORDERING-ONLY: map a witness's structural evidence to a rank number. This is
- * the single place the magic weights are consumed, and it is a pure projection
- * of evidence → number. It is NEVER used as a gate (no threshold compare); it
- * only feeds the stable sort that decides run order under `maxTests`.
+ * ORDERING-ONLY: project a witness's structural evidence to a rank = the ordinal
+ * of its STRONGEST provenance tier (a `Math.max`, NOT a sum). This is the single
+ * place the tier ordering is consumed and it is a pure projection of evidence →
+ * number. It is NEVER used as a gate (no threshold compare); it only feeds the
+ * stable sort that decides run order under `maxTests`.
+ *
+ * Anti-additive by construction: because the rank is the max tier and never an
+ * accumulation, a witness carrying many WEAK signals (e.g. path-token +
+ * context-token + package) can never outrank one carrying a single STRONGER
+ * class (e.g. mirror). Empty evidence ranks 0, but an empty-evidence candidate is
+ * simply never built, so a 0 here is "not a witness", not a "reject".
  */
 export const rankWitnessEvidence = (evidence: readonly WitnessEvidence[]): number => {
   let rank = 0
   for (const e of evidence) {
-    switch (e.kind) {
-      case "mirror":
-        rank += RANK_WEIGHTS.mirror
-        break
-      case "parent-mirror":
-        rank += RANK_WEIGHTS.parentMirror
-        break
-      case "import-ref":
-        rank += RANK_WEIGHTS.importRef
-        break
-      case "path-token":
-        rank += RANK_WEIGHTS.pathToken
-        break
-      case "context-token":
-        rank += RANK_WEIGHTS.contextToken
-        break
-      case "package":
-        rank += RANK_WEIGHTS.package
-        break
-    }
+    const t = tierOf(e.kind)
+    if (t > rank) rank = t
   }
   return rank
 }

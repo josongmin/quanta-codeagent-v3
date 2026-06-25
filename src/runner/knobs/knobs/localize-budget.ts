@@ -15,6 +15,14 @@
  * Omitted fields keep their hardcoded default (byte-identical when unset).
  * Domains: topk [1,50], tree [1000,200000], files [100,50000]. APPLY IS A NOOP —
  * consumed out of band (`posture.localizeBudget` → `agentlessLocalize` deps).
+ *
+ * jun-25 magic-number removal: `chafiles` — how many of the agent's localized
+ * candidate FILES get whole-repo CHA sibling analysis in the multisite-steer
+ * path (was a frozen `CHA_MULTISITE_MAX_FILES=3` literal in the driver). This
+ * lives on the SAME localizer-breadth knob because it is the same family of
+ * recall-vs-cost dial; omitted ⇒ the documented default. The per-file localize
+ * `max_results` reuses `topk` (the analyzer scans the same ranked rows the
+ * one-shot localizer ranks), so it has NO separate field. Domain: chafiles [1,50].
  */
 
 import type { AgentConfig } from "@/agent"
@@ -27,17 +35,26 @@ export interface LocalizeBudgetValue {
   readonly topK?: number
   readonly maxTreeChars?: number
   readonly maxFiles?: number
+  /** jun-25: # of localized candidate files given CHA sibling analysis in the
+   *  multisite-steer path (replaces the frozen `CHA_MULTISITE_MAX_FILES`). */
+  readonly chaMultisiteFiles?: number
 }
 
 const FIELD = {
   topk: { key: "topK", min: 1, max: 50 },
   tree: { key: "maxTreeChars", min: 1_000, max: 200_000 },
   files: { key: "maxFiles", min: 100, max: 50_000 },
+  chafiles: { key: "chaMultisiteFiles", min: 1, max: 50 },
 } as const
 
 const parseLocalizeBudget = (raw: string | undefined): LocalizeBudgetValue | undefined => {
   if (raw === undefined) return undefined
-  const out: { topK?: number; maxTreeChars?: number; maxFiles?: number } = {}
+  const out: {
+    topK?: number
+    maxTreeChars?: number
+    maxFiles?: number
+    chaMultisiteFiles?: number
+  } = {}
   for (const part of raw.split(",")) {
     const [name, val] = part.split("=").map((x) => x.trim())
     const spec = name !== undefined ? FIELD[name as keyof typeof FIELD] : undefined
@@ -61,7 +78,7 @@ export const localizeBudgetKnob: Knob<LocalizeBudgetValue> = {
   parse: parseLocalizeBudget,
   apply: applyLocalizeBudget,
   describe:
-    "Bench: agentless one-shot localizer breadth — `topk=N,tree=N,files=N` (defaults 5/12000/3000). The most localization-recall-sensitive levers, was un-sweepable.",
+    "Bench: agentless one-shot localizer breadth — `topk=N,tree=N,files=N,chafiles=N` (defaults 5/12000/3000/3). The most localization-recall-sensitive levers, was un-sweepable.",
   unit: "spec",
   // category note: "hint" — the agentless localizer is the issue-hint/localization family.
   costMultiplier: 1,

@@ -36,8 +36,11 @@ export type OwnerStrength = "authoritative" | "advisory"
 export interface FaultCandidate {
   /** Repo-relative path. */
   file: string
-  /** Deterministic merged rank score (higher = stronger owner signal).
-   *  Heuristic/advisory only — clean owner admission MUST NOT read this. */
+  /** External stage-1 rank score carried through as an IN-TIER tie-break only
+   *  (the max stage-1 score among this file's hits; 0 when no stage-1 hit). It
+   *  is NOT a merged/additive blend across provenance streams — primary ranking
+   *  is the parameter-free provenance TIER (see build.ts). Heuristic/advisory
+   *  only — clean owner admission MUST NOT read this. */
   score: number
   /** Which evidence streams pointed at this file (deduped, stable order). */
   sources: FaultCandidateSource[]
@@ -46,7 +49,8 @@ export interface FaultCandidate {
 }
 
 export interface FaultEvidencePacket {
-  /** Top-K owner candidates, score-desc with deterministic path tie-break. */
+  /** Top-K owner candidates, ranked by strongest provenance TIER (parameter-free
+   *  lexicographic), then external stage-1 score, then deterministic path. */
   candidates: FaultCandidate[]
   /** Bounded issue symbols (`extractSymbols`, capped). */
   issueSymbols: readonly string[]

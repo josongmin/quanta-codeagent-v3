@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { persistSession, recallContext, SESSION_TAG } from "@/agent/memory"
+import { persistSession, recallBudgetHint, recallContext, SESSION_TAG } from "@/agent/memory"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 import { type EmbedderPort, InMemoryStore, type PersistentStorePort } from "@/memory"
 import { DEFAULT_EVICTION_CAPS, EVICTION_DECAY, planEviction } from "@/memory/eviction"
@@ -463,6 +463,78 @@ describe("recallContext", () => {
     expect(out).toBe(
       `## Memory hints (routing hints only — not proof)\n- (fact) ${"x".repeat(600)}…`,
     )
+  })
+})
+
+describe("recall-budget visibility (truncation disclosure)", () => {
+  /** Build N distinct fact entries so the ranker scans N but the limit caps K. */
+  const seedN = (n: number): InMemoryStore =>
+    new InMemoryStore(
+      Array.from({ length: n }, (_, i) => ({
+        id: `m${i}`,
+        kind: "fact" as const,
+        // Shared substring so every entry is a lexical hit for the query → all
+        // N are genuine candidates (not filtered out before the limit applies).
+        text: `database note ${i}`,
+        tags: [],
+        createdAt: 1 + i,
+      })),
+    )
+
+  test("over-limit: block carries the 'recalled K of N' disclosure with correct K/N", async () => {
+    // 8 candidates, limit 3 → K=3 injected, N=8 scanned ⇒ truncated.
+    const out = await recallContext({ store: seedN(8) }, "database", { limit: 3 })
+    expect(out).not.toBeNull()
+    const block = out as string
+    // Disclosure present, exact K/N, and the memory_search nudge.
+    expect(block).toContain(
+      "(recalled 3 of 8 candidate memories — use memory_search for more)",
+    )
+    // Exactly K rendered entry lines (the disclosure is not an entry line).
+    const entryLines = block.split("\n").filter((l) => l.startsWith("- (fact)"))
+    expect(entryLines).toHaveLength(3)
+    // Trust-ladder framing intact (single H2, not duplicated).
+    expect(block.match(/## Memory hints/g)).toHaveLength(1)
+    expect(block).toContain("routing hints only — not proof")
+    // The disclosure rides UNDER the H2 (inside the one hint frame), at the tail.
+    expect(block.endsWith("use memory_search for more)")).toBe(true)
+  })
+
+  test("no-noise control: when candidates ≤ limit, NO disclosure line", async () => {
+    // 3 candidates, limit 5 → K=N=3 ⇒ everything fit ⇒ no disclosure, and the
+    // block is byte-identical to the legacy shape (no trailing budget line).
+    const out = await recallContext({ store: seedN(3) }, "database", { limit: 5 })
+    expect(out).not.toBeNull()
+    const block = out as string
+    expect(block).not.toContain("candidate memories")
+    expect(block).not.toContain("memory_search")
+    expect(block.split("\n").filter((l) => l.startsWith("- (fact)"))).toHaveLength(3)
+  })
+
+  test("boundary: candidates EXACTLY equal to limit ⇒ no disclosure (only N>K)", async () => {
+    // 4 candidates, limit 4 → K=N=4 ⇒ no truncation ⇒ no line (strict >).
+    const out = await recallContext({ store: seedN(4) }, "database", { limit: 4 })
+    expect(out as string).not.toContain("candidate memories")
+  })
+
+  test("teeth: recallBudgetHint emits ONLY when scanned > injected", () => {
+    // The exact disclosure the renderer appends — removing/altering this line
+    // (the teeth) flips the over-limit assertion above to red.
+    expect(recallBudgetHint(3, 8)).toBe(
+      "(recalled 3 of 8 candidate memories — use memory_search for more)",
+    )
+    // Fits / boundary / over-fit ⇒ undefined (no noise).
+    expect(recallBudgetHint(5, 3)).toBeUndefined()
+    expect(recallBudgetHint(4, 4)).toBeUndefined()
+    expect(recallBudgetHint(0, 0)).toBeUndefined()
+  })
+
+  test("ranking weights/limit unchanged: K honors the requested limit verbatim", async () => {
+    // Adversarial control — confirm the fix did not alter the cap: with limit 2
+    // over 8 candidates, EXACTLY 2 entries are injected and N is reported as 8.
+    const out = (await recallContext({ store: seedN(8) }, "database", { limit: 2 })) as string
+    expect(out.split("\n").filter((l) => l.startsWith("- (fact)"))).toHaveLength(2)
+    expect(out).toContain("(recalled 2 of 8 candidate memories — use memory_search for more)")
   })
 })
 

@@ -228,9 +228,11 @@ describe("BUG 1 — detached poll bounds box death (no forever spin)", () => {
     // the dead box instead of polling it forever.
     expect(calls.filter((c) => c.args.includes("run-instances")).length).toBe(2)
     // The dead box was probed a BOUNDED number of times then abandoned — the
-    // threshold is ~20 consecutive failures; assert we didn't spin unboundedly.
-    expect(probeCount).toBeGreaterThanOrEqual(20)
-    expect(probeCount).toBeLessThan(60)
+    // threshold is 6 consecutive failures (jun-25: lowered 20→6 so a dead box is
+    // requeued in minutes, not ~30min+). Assert it abandoned at the new, lower
+    // bound — not the old 20, and never an unbounded spin.
+    expect(probeCount).toBeGreaterThanOrEqual(6)
+    expect(probeCount).toBeLessThan(20)
     // The liveness confirmation actually queried describe-instances State.Name.
     expect(
       calls.some(

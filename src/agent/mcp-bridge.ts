@@ -824,6 +824,51 @@ const loadSingle = async (
   }
 }
 
+/** F1 — the registry is a name-keyed Map with last-write-wins, and
+ *  {@link mcpToolName} sanitizes free-form server/tool names through
+ *  `replace(/[^A-Za-z0-9_]+/g, "_")`. So two DISTINCT source tools — across
+ *  servers (`my-srv` vs `my_srv`) or on one server (`get.x` vs `get-x`) — can
+ *  collapse to the SAME bridged name and one would be SILENTLY shadowed (no log,
+ *  no `/mcp` record, capability withheld).
+ *
+ *  This pass walks the bridged tools IN LOAD ORDER and, when a name is already
+ *  taken, DISAMBIGUATES the later tool by appending the smallest `_<n>` (n≥2)
+ *  suffix that is itself free — so BOTH tools stay callable (the registry no
+ *  longer drops one). The first tool to claim a name keeps it verbatim, so the
+ *  non-colliding common case is BYTE-IDENTICAL (every name unchanged). Each
+ *  rename is `logger.warn`'d AND recorded so the collision is observable, never
+ *  silent. Renaming only the `name` field is safe: the tool's `execute` dispatches
+ *  on the captured ORIGINAL MCP tool name (`def.name`), not on this registry key.
+ *
+ *  Returns the (possibly renamed) tools plus the list of collision records for
+ *  any observability surface (`/mcp`). */
+export const disambiguateMcpToolNames = (
+  tools: Tool[],
+): { tools: Tool[]; collisions: { kept: string; renamed: string; to: string }[] } => {
+  const seen = new Set<string>()
+  const collisions: { kept: string; renamed: string; to: string }[] = []
+  const out = tools.map((t) => {
+    if (!seen.has(t.name)) {
+      seen.add(t.name)
+      return t
+    }
+    let n = 2
+    let candidate = `${t.name}_${n}`
+    while (seen.has(candidate)) {
+      n += 1
+      candidate = `${t.name}_${n}`
+    }
+    seen.add(candidate)
+    collisions.push({ kept: t.name, renamed: t.name, to: candidate })
+    logger.warn(
+      `mcp: tool-name collision on "${t.name}" — a second tool maps to the same ` +
+        `identifier; renaming the later one to "${candidate}" so both stay callable`,
+    )
+    return { ...t, name: candidate }
+  })
+  return { tools: out, collisions }
+}
+
 export const loadMcpTools = async (
   servers: McpServerConfig[],
   elicitationPrompterFor?: ElicitationPrompterFactory,
@@ -856,9 +901,15 @@ export const loadMcpTools = async (
     clients.push(loaded.client)
     if (loaded.resources !== undefined) resourcesClients.push(loaded.resources)
   }
+  // F1 — DISAMBIGUATE bridged-name collisions before the tools reach the
+  // name-keyed (last-write-wins) registry, so a second tool that sanitizes to an
+  // already-taken identifier gets a deterministic `_<n>` suffix (both callable)
+  // and the collision is warned + recorded — never a silent shadow. No collision
+  // ⇒ every name is unchanged (byte-identical).
+  const { tools: deduped } = disambiguateMcpToolNames(tools)
   // N3 + jun-06 RFC — `undefined` when NO connected server (single OR supervised)
   // advertised resources/prompts ⇒ the surface leaves `DefaultToolPorts.mcpResources`
   // unset ⇒ the four tools stay absent + byte-identical.
   const resources = resourcesHandleFor(resourcesClients)
-  return { tools, clients, ...(resources !== undefined ? { resources } : {}) }
+  return { tools: deduped, clients, ...(resources !== undefined ? { resources } : {}) }
 }

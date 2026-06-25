@@ -22,7 +22,7 @@
  * unit testable with fakes (no real Python).
  */
 
-import { extractIssueRepro } from "@/agent/verification-plan/extract-issue-repro"
+import { extractIssueReproSeed } from "@/agent/verification-plan/extract-issue-repro"
 import type { Instance } from "../types"
 import {
   baseReceipt,
@@ -61,7 +61,10 @@ export const prepareMweProofSelectionPort = async (
   timeoutMs: number,
   deps: PrepareIssueSmokeSelectionPortDeps = {},
 ): Promise<((candidate: Candidate) => Promise<MweProofReceipt | null>) | undefined> => {
-  const source = extractIssueRepro(instance.problemStatement)?.code
+  // SEED-tagged extraction: the regex guess only SEEDS this port. It cannot
+  // confer authority until the base-RED gate below (`base !== "base_red"` ⇒ no
+  // candidate veto) proves the source actually reproduces the failure on base.
+  const source = extractIssueReproSeed(instance.problemStatement)?.code
   const baseCommit = instance.swebench?.baseCommit
   if (source === undefined || baseCommit === undefined) return undefined
   const reset = deps.resetBase ?? resetToBase

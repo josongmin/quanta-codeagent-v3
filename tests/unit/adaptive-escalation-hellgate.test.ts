@@ -18,17 +18,37 @@ import {
   ADAPTIVE_ACTIONS,
   ADAPTIVE_DECISION_JSON_SCHEMA,
   type AdaptiveAction,
+  type AdaptiveDecision,
   admitNextStep,
   classifyAction,
   DEFAULT_ADAPTIVE_LIMITS,
+  type EvidenceFacts,
   EVIDENCE_GAPS,
+  fullyEvidencedFacts,
   isExpensiveAction,
   isRerouteAction,
   isTerminalAction,
   parseAdaptiveDecision,
+  renderAdvisoryRouterFacts,
   terminalStopReason,
+  validateAdaptiveDecisionForEvidence,
 } from "@/runner/batch/eval/adaptive-escalation"
 import { PHASE_MODULES } from "@/runner/batch/eval/posture"
+
+const IDS = { issueId: "issue", candidateId: "candidate", ownersId: "owners", proofId: "proof" }
+/** Facts with NO proof context (the predicate the old hard veto fired on). */
+const lacksProofFacts = (): EvidenceFacts => ({
+  ...fullyEvidencedFacts(IDS),
+  baseReproEstablished: false,
+  declaredConditionEvidenced: null,
+  positiveProof: false,
+})
+const dec = (action: AdaptiveAction): AdaptiveDecision => ({
+  action,
+  evidenceGaps: [],
+  citedEvidenceIds: [],
+  why: "x",
+})
 
 const PACKET_IDS = new Set(["ev:issue", "ev:owner", "ev:repro"])
 
@@ -189,6 +209,57 @@ describe("adaptive-escalation router contract", () => {
 
     test("BOUND-5: a fresh history admits a first expensive step", () => {
       expect(admitNextStep([], "run_proof_clean").admit).toBe(true)
+    })
+  })
+
+  // jun-25: the interpretive proof-context / ordering vetoes are DEMOTED to
+  // advisory. The router's legal action set must NOT be narrowed by derived
+  // proxies — only a real infra block (execution-failure receipt) stays hard.
+  describe("decision legality (interpretive vetoes demoted to advisory)", () => {
+    test("LEGAL-1: run_proof_clean WITHOUT proof context is NOT vetoed (advisory)", () => {
+      // RED-ON-INJECTION teeth: re-add `if (lacksProofContext) return
+      // "run_proof_clean_without_proof_context"` to decision-legality and this
+      // flips to a defined illegal reason.
+      expect(
+        validateAdaptiveDecisionForEvidence(lacksProofFacts(), dec("run_proof_clean")),
+      ).toBeUndefined()
+    })
+
+    test("LEGAL-2: repair_with_proof WITHOUT proof context is NOT vetoed (advisory)", () => {
+      expect(
+        validateAdaptiveDecisionForEvidence(lacksProofFacts(), dec("repair_with_proof")),
+      ).toBeUndefined()
+    })
+
+    test("LEGAL-3: ordering vetoes are gone (run_public_repro after base repro proceeds)", () => {
+      const facts: EvidenceFacts = { ...fullyEvidencedFacts(IDS), baseReproEstablished: true }
+      expect(
+        validateAdaptiveDecisionForEvidence(facts, dec("run_public_repro")),
+      ).toBeUndefined()
+      // and positive-proof ordering veto is gone too
+      expect(validateAdaptiveDecisionForEvidence(facts, dec("run_proof_clean"))).toBeUndefined()
+    })
+
+    test("LEGAL-4: infraBlocked STAYS a HARD veto for every expensive action", () => {
+      const facts: EvidenceFacts = { ...fullyEvidencedFacts(IDS), infraBlocked: true }
+      expect(validateAdaptiveDecisionForEvidence(facts, dec("run_public_repro"))).toBe(
+        "run_public_repro_while_infra_blocked",
+      )
+      expect(validateAdaptiveDecisionForEvidence(facts, dec("run_proof_clean"))).toBe(
+        "run_proof_clean_while_infra_blocked",
+      )
+      expect(validateAdaptiveDecisionForEvidence(facts, dec("repair_with_proof"))).toBe(
+        "repair_with_proof_while_infra_blocked",
+      )
+    })
+
+    test("LEGAL-5: the demoted signals are SURFACED as advisory router facts (no info lost)", () => {
+      const text = renderAdvisoryRouterFacts(lacksProofFacts())
+      expect(text).toContain("Router Advisory Facts")
+      expect(text).toContain("lacks proof context")
+      expect(text).toContain("base reproduction established: no")
+      // worded as advisory, not a restriction
+      expect(text.toLowerCase()).toContain("does not forbid")
     })
   })
 })

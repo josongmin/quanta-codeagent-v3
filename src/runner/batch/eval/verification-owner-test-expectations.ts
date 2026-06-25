@@ -3,8 +3,16 @@ import { join } from "node:path"
 import { isPythonTestFile, normalizeRepoPath } from "./impacted-test-discovery"
 import { stripInlineComment } from "./python-source-text"
 
-const DEFAULT_MAX_TEST_FILES = 2
-const DEFAULT_MAX_EXPECTATIONS = 4
+// These are an OVERALL SIZE/COST BUDGET on advisory context, NOT a relevance
+// filter. Existing repo-test expectations are unranked PUBLIC evidence; we surface
+// as many of the discovered files' asserts as fit the budget and let the model
+// judge relevance. The previous values (2 files / 4 expectations) combined with a
+// keyword-overlap re-rank withheld test contracts whose wording did not lexically
+// match the issue symbols — exactly the context-withholding this module must avoid.
+// Each fact is rendered ≤240 chars (boundHead in llm-evidence-packet), so the prompt
+// cost is bounded by maxExpectations × ~240B ≈ a few KB — a deliberate size budget.
+const DEFAULT_MAX_TEST_FILES = 4
+const DEFAULT_MAX_EXPECTATIONS = 16
 /** Skip reading any candidate test file larger than this (OOM guard; real Python
  *  test files are << 4 MiB, so this only rejects pathological/binary outliers). */
 const MAX_TEST_FILE_BYTES = 4 * 1024 * 1024
@@ -27,7 +35,13 @@ export const withFsTimeout = <T>(p: Promise<T>, timeoutMs: number, fallback: T):
     if (timer !== undefined) clearTimeout(timer)
   })
 }
-const PER_FILE_EXPECTATION_CAP = 2
+// PER_FILE_EXPECTATION_SCAN_CAP is the per-file READ/COST bound (how many asserts we
+// mine from one file). PER_FILE_EXPECTATION_CAP is the per-file OUTPUT floor used when
+// splitting the overall budget across files; it is a fairness floor (every discovered
+// file contributes at least this many facts), never a relevance filter. We default the
+// per-file output cap to the scan cap so a single discovered file is bounded only by
+// the read/cost bound + the overall maxExpectations budget — no keyword re-rank.
+const PER_FILE_EXPECTATION_CAP = 4
 const PER_FILE_EXPECTATION_SCAN_CAP = 16
 const ASSERTION_LINE =
   /\bassert\b|pytest\.raises|assert(?:Equal|NotEqual|In|NotIn|True|False|Is|IsNone|Regex|Raises|RaisesRegex)\b|match\s*=/
@@ -211,43 +225,6 @@ const expectationFact = (args: {
   return normalized === "" ? undefined : `${location} assertion: ${normalized}`
 }
 
-const identifierParts = (text: string): string[] =>
-  [...text.matchAll(/[A-Za-z0-9_]+/g)].flatMap((match) =>
-    (match[0] ?? "")
-      .split(/_+/)
-      .flatMap((chunk) => chunk.replace(/([a-z0-9])([A-Z])/g, "$1 $2").split(/\s+/))
-      .map((part) => part.trim().toLowerCase())
-      .filter((part) => part !== ""),
-  )
-
-const evidenceSymbolTokens = (text: string): ReadonlySet<string> => {
-  const out = new Set<string>()
-  for (const match of text.matchAll(/[A-Za-z0-9_]+/g)) {
-    const raw = match[0] ?? ""
-    const compact = raw.replace(/_/g, "").toLowerCase()
-    if (compact !== "") out.add(compact)
-    for (const part of identifierParts(raw)) out.add(part)
-  }
-  return out
-}
-
-const issueSymbolMatchesEvidence = (
-  symbol: string,
-  evidenceTokens: ReadonlySet<string>,
-): boolean => {
-  const compact = symbol.replace(/[^A-Za-z0-9]/g, "").toLowerCase()
-  if (compact.length < 2) return false
-  if (evidenceTokens.has(compact)) return true
-  const parts = identifierParts(symbol)
-  return parts.length > 0 && parts.every((part) => evidenceTokens.has(part))
-}
-
-const issueSymbolScore = (evidenceText: string, issueSymbols: readonly string[]): number => {
-  if (issueSymbols.length === 0) return 0
-  const evidenceTokens = evidenceSymbolTokens(evidenceText)
-  return issueSymbols.filter((symbol) => issueSymbolMatchesEvidence(symbol, evidenceTokens)).length
-}
-
 /** Remove EVERY triple-quoted span (docstrings AND triple-quoted string values)
  *  with a string-aware scanner, preserving only the newlines inside each span so
  *  line / `TEST_DEF` tracking stays aligned. Triple-quote tokens inside ordinary
@@ -371,12 +348,21 @@ const toLogicalLines = (lines: readonly string[]): string[] => {
 const expectationsFromTestFile = (
   path: string,
   text: string,
-  issueSymbols: readonly string[] = [],
   perFileExpectationCap = PER_FILE_EXPECTATION_CAP,
 ): readonly string[] => {
-  const out: { fact: string; score: number; order: number }[] = []
+  // STABLE, PARAMETER-FREE ORDER: mined assertions are surfaced in SOURCE ORDER
+  // (file top→bottom). We deliberately do NOT re-rank by issue-symbol keyword
+  // overlap: that re-rank was a relevance GUESS that pre-empted which test contract
+  // the model got to weigh and, combined with the small cap, withheld relevant
+  // expectations whose wording did not lexically match the issue symbols. These are
+  // ADVISORY public evidence; the model judges relevance. Truncation here is purely
+  // the read/cost bound (PER_FILE_EXPECTATION_SCAN_CAP) and the per-file output cap.
+  // The effective per-file ceiling is the smaller of the caller's output cap and the
+  // read/cost scan bound: a single file never contributes more than we are willing to
+  // mine, and the overall budget (maxExpectations) is enforced by the caller.
+  const cap = Math.min(perFileExpectationCap, PER_FILE_EXPECTATION_SCAN_CAP)
+  const out: string[] = []
   let currentTest: string | undefined
-  let order = 0
   for (const logicalLine of toLogicalLines(stripCommentsAndDocstrings(text))) {
     const testMatch = TEST_DEF.exec(logicalLine)
     if (testMatch?.[1] !== undefined) currentTest = testMatch[1]
@@ -385,22 +371,11 @@ const expectationsFromTestFile = (
       testName: currentTest,
       line: logicalLine,
     })
-    if (fact === undefined || out.some((entry) => entry.fact === fact)) continue
-    // Rank by assertion/test evidence only. The file path is source authority,
-    // not semantic evidence; including it makes every astropy/timeseries fact
-    // match a TimeSeries issue symbol and preserves noisy early asserts.
-    out.push({
-      fact,
-      score: issueSymbolScore(`${currentTest ?? ""} ${logicalLine}`, issueSymbols),
-      order,
-    })
-    order += 1
-    if (out.length >= PER_FILE_EXPECTATION_SCAN_CAP) break
+    if (fact === undefined || out.includes(fact)) continue
+    out.push(fact)
+    if (out.length >= cap) break
   }
   return out
-    .sort((a, b) => b.score - a.score || a.order - b.order)
-    .slice(0, perFileExpectationCap)
-    .map((entry) => entry.fact)
 }
 
 const appendFactsFromTestFile = async (args: {
@@ -409,7 +384,6 @@ const appendFactsFromTestFile = async (args: {
   readonly out: string[]
   readonly maxExpectations: number
   readonly perFileExpectationCap: number
-  readonly issueSymbols: readonly string[]
   readonly timeoutMs: number
 }): Promise<boolean> => {
   const abs = join(args.sandbox, args.relPath)
@@ -426,12 +400,7 @@ const appendFactsFromTestFile = async (args: {
   if (size < 0 || size > MAX_TEST_FILE_BYTES) return false
   const text = await withFsTimeout(readFile(abs, "utf8").catch(() => null), args.timeoutMs, null)
   if (text === null) return false
-  for (const fact of expectationsFromTestFile(
-    args.relPath,
-    text,
-    args.issueSymbols,
-    args.perFileExpectationCap,
-  )) {
+  for (const fact of expectationsFromTestFile(args.relPath, text, args.perFileExpectationCap)) {
     if (args.out.includes(fact)) continue
     args.out.push(fact)
     if (args.out.length >= args.maxExpectations) return true
@@ -447,9 +416,11 @@ export const extractVerificationOwnerTestExpectations = async (args: {
    *  test files that exist are read for expectations. Absent ⇒ command-only
    *  behavior, byte-identical to before T2. */
   readonly localizedOwnerFiles?: readonly string[]
-  /** Public issue symbols from `extractIssueHint`. Used only to order bounded
-   *  facts within an already-discovered public test file; it never discovers a
-   *  new file or changes source authority. */
+  /** Public issue symbols from `extractIssueHint`. ACCEPTED for caller compatibility
+   *  but NO LONGER used to order or filter expectations: the keyword-overlap re-rank
+   *  was a relevance guess that withheld test contracts whose wording did not lexically
+   *  match the issue symbols. Expectations are now surfaced UNRANKED (source order)
+   *  within the size budget so the model — not a heuristic — judges relevance. */
   readonly issueSymbols?: readonly string[]
   readonly maxTestFiles?: number
   readonly maxExpectations?: number
@@ -508,7 +479,6 @@ export const extractVerificationOwnerTestExpectations = async (args: {
       out,
       maxExpectations,
       perFileExpectationCap,
-      issueSymbols: args.issueSymbols ?? [],
       timeoutMs: fsTimeoutMs,
     })
     if (filled) return out

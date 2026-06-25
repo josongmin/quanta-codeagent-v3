@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { type AgentConfig, loadRepoRules, type RepoRules, runAgent } from "@/agent"
-import { CODE_MOD_CLOSEOUT_REMINDER } from "@/agent/closeout-guard"
+import { CLOSEOUT_REMINDER } from "@/agent/closeout-guard"
 import type { Message } from "@/llm"
 import {
   FakeLLM,
@@ -203,13 +203,15 @@ describe("Phase 8 — all Phases ON compose cleanly", () => {
 })
 
 /**
- * Phase 4 (ADR-0019) routing: a session that called a mutating tool routes the
- * closeout-guard to the four-truth-surface reminder, regardless of `fourRule`.
- * The audit found this routing was wired in `decideCloseoutGuard` but the loop
- * was passing no history to it — every session received the legacy reminder.
- * This integration check pins the wired-through path end-to-end.
+ * De-heuristicized closeout routing through the loop. The closeout reminder is
+ * NO LONGER selected by a tool-name scan over history (that heuristic was
+ * over- and under-inclusive). Every enabled non-`fourRule` session now
+ * receives the SAME UNION self-check — the general defended-claim guidance PLUS
+ * the self-select code-modification four-surface walk. These integration
+ * checks pin the wired-through path: both a mutating session and a
+ * non-mutating session get the identical complete reminder.
  */
-describe("Phase 4 — code-mod closeout routing through the loop", () => {
+describe("closeout reminder is the UNION self-check (no history route) through the loop", () => {
   // A scripted LLM that takes a list of "scripts" (one per turn) and yields the
   // events for the current turn each time `.stream()` is called. Each script
   // is `{type:"text", text}` (a finish attempt) or `{type:"tool_use", id, name,
@@ -224,21 +226,18 @@ describe("Phase 4 — code-mod closeout routing through the loop", () => {
     rmSync(cwd, { recursive: true, force: true })
   })
 
-  test("session that called `write` then attempts to finish ⇒ CODE_MOD four-surface reminder injected", async () => {
+  test("session that called `write` then attempts to finish ⇒ UNION self-check injected", async () => {
     const file = join(cwd, "patched.txt")
     const llm = new ScriptedLLM([
       // Turn 1: mutate source.
       { type: "tool_use", id: "c1", name: "write", input: { path: file, content: "new" } },
       // Turn 2: model tries to finish — closeout-guard should block ONCE and
-      // inject the four-truth-surface reminder (history is non-empty mutating).
+      // inject the UNION self-check.
       { type: "text", text: "done" },
       // Forced re-stream of turn 2: finish for real.
       { type: "text", text: "actually done" },
     ])
     const stream = new NullStream()
-    // fourRule:false on purpose — the audit fix routes code-mod sessions to
-    // the Phase 4 four-surface reminder REGARDLESS of fourRule. Before the
-    // fix, this assertion would observe the legacy one-liner.
     const config = baseConfig({
       llm,
       cwd,
@@ -253,8 +252,8 @@ describe("Phase 4 — code-mod closeout routing through the loop", () => {
     const closeout = stream.events.filter((e) => e.type === "recovery" && e.reason === "closeout")
     expect(closeout).toHaveLength(1)
 
-    // The injected nudge text matches the four-truth-surface reminder, not the
-    // legacy one-liner. Find the forced meta-user message in the transcript.
+    // The injected nudge is the UNION self-check (general defended-claim
+    // guidance + the self-select four-surface walk), pinned by identity.
     const forced = out.messages.find(
       (m) =>
         m.role === "user" &&
@@ -264,18 +263,19 @@ describe("Phase 4 — code-mod closeout routing through the loop", () => {
     const forcedText = forced?.content.find(
       (b) => b.type === "text" && b.text.includes("four truth surfaces"),
     ) as { type: "text"; text: string } | undefined
-    expect(forcedText?.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
-    // Four-surface lines present.
-    expect(forcedText?.text).toContain("type")
-    expect(forcedText?.text).toContain("owner")
-    expect(forcedText?.text).toContain("wire")
-    expect(forcedText?.text).toContain("test")
+    expect(forcedText?.text).toBe(CLOSEOUT_REMINDER)
+    // Both portions present.
+    expect(forcedText?.text).toContain("defended claims")
+    expect(forcedText?.text).toContain("If you modified code")
+    for (const surface of ["type", "owner", "wire", "test"]) {
+      expect(forcedText?.text).toContain(surface)
+    }
   })
 
-  test("non-mutating session + fourRule:false ⇒ legacy one-liner (routing untouched)", async () => {
+  test("non-mutating session + fourRule:false ⇒ SAME UNION self-check (no history route)", async () => {
     const llm = new ScriptedLLM([
-      // Turn 1: model tries to finish immediately — no mutating tool ran, so
-      // the closeout falls through to the legacy one-liner.
+      // Turn 1: model tries to finish immediately — no mutating tool ran. The
+      // closeout still injects the full UNION self-check (no history scan).
       { type: "text", text: "done" },
       // Forced re-stream of turn 1: finish for real.
       { type: "text", text: "actually done" },
@@ -300,8 +300,11 @@ describe("Phase 4 — code-mod closeout routing through the loop", () => {
     const forcedText = forced?.content.find(
       (b) => b.type === "text" && b.text.includes("defended claims"),
     ) as { type: "text"; text: string } | undefined
-    // Legacy one-liner, NOT four-surface.
-    expect(forcedText?.text).not.toContain("four truth surfaces")
+    // Identical to the mutating-session reminder: the four-surface section is
+    // ALWAYS present now — the old "legacy one-liner for non-mutating" route
+    // is gone.
+    expect(forcedText?.text).toBe(CLOSEOUT_REMINDER)
+    expect(forcedText?.text).toContain("four truth surfaces")
   })
 
   // V4-P3 fix (Round 6 audit): the working-state cross-turn round-trip was

@@ -2,8 +2,19 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { discoverScenarios, runScenario } from "../smoke/runner"
 
-/** Pending-record scenarios are allowed but must stay visible — not buried in green. */
-const MAX_ALLOWED_SKIPS = 8
+/**
+ * FLAG 3 — skip budget is a DOWNWARD RATCHET, not a fixed slack allowance.
+ * Pending-record scenarios are tolerated but must stay visible (per-skip
+ * `console.warn` below) AND cannot grow: re-introducing a skip for an
+ * already-recorded scenario fails the suite.
+ *
+ * Baseline = the actual skip count of the battery as checked in. This number
+ * must only ever go DOWN (record a trajectory ⇒ lower it). Raising it requires
+ * an explicit edit here with rationale — it is not a free knob.
+ *
+ * Baseline as of 2026-06-25: 0 skips (all 15 fixtures have a trajectory.jsonl).
+ */
+const SKIP_BASELINE = 0
 
 /**
  * Folds the tier-0 smoke battery into the main `bun test` gate (RFC §1.2).
@@ -41,16 +52,38 @@ describe("smoke battery (tier-0 replay)", () => {
   }
 
   afterAll(() => {
-    if (skipped.length === 0) return
-    const lines = skipped.map((s) => `  - ${s.depth}/${s.id}: ${s.reason}`)
-    console.warn(
-      `\n[smoke-battery] ${skipped.length} scenario(s) skipped (pending trajectory):\n${lines.join("\n")}\n`,
-    )
-    if (skipped.length > MAX_ALLOWED_SKIPS) {
-      throw new Error(
-        `[smoke-battery] too many skipped scenarios (${skipped.length} > ${MAX_ALLOWED_SKIPS}). ` +
-          "Record trajectories or raise MAX_ALLOWED_SKIPS with an ADR rationale.",
+    if (skipped.length > 0) {
+      const lines = skipped.map((s) => `  - ${s.depth}/${s.id}: ${s.reason}`)
+      console.warn(
+        `\n[smoke-battery] ${skipped.length} scenario(s) skipped (pending trajectory):\n${lines.join("\n")}\n`,
       )
     }
+    assertSkipsWithinBaseline(skipped.length)
+  })
+})
+
+/** FLAG 3 ratchet rule, extracted so it has direct unit teeth (the battery's
+ *  afterAll only exercises the happy path where 0 scenarios skip). Throws when
+ *  the observed skip count exceeds the checked-in baseline. */
+export const assertSkipsWithinBaseline = (count: number, baseline = SKIP_BASELINE): void => {
+  if (count > baseline) {
+    throw new Error(
+      `[smoke-battery] skip count regressed (${count} > baseline ${baseline}). ` +
+        "Skips may only go DOWN: record the missing trajectory.jsonl, or — if a skip is " +
+        "genuinely unavoidable — raise SKIP_BASELINE here with a dated rationale.",
+    )
+  }
+}
+
+describe("smoke battery — skip ratchet (FLAG 3)", () => {
+  test("skip count over baseline fails (teeth)", () => {
+    // Pre-fix the budget was a fixed slack of 8; re-introducing a skip for an
+    // already-recorded scenario passed silently. Now any growth past baseline throws.
+    expect(() => assertSkipsWithinBaseline(SKIP_BASELINE + 1)).toThrow(/skip count regressed/)
+  })
+
+  test("skip count at or below baseline passes (control)", () => {
+    expect(() => assertSkipsWithinBaseline(SKIP_BASELINE)).not.toThrow()
+    expect(() => assertSkipsWithinBaseline(0, 3)).not.toThrow()
   })
 })

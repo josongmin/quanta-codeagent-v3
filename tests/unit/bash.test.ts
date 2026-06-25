@@ -39,7 +39,10 @@ describe("bashTool", () => {
     expect(result.ok).toBe(true)
     expect(result.output).toBe("[exit 0]\nhello")
     expect(result.evidence?.executedCommand).toBe("echo hello")
-    expect(events[0]).toEqual({ type: "progress", message: "running: echo hello" })
+    expect(events[0]).toMatchObject({
+      type: "progress",
+      message: expect.stringMatching(/^running( \(bg-capable\))?: echo hello$/),
+    })
   })
 
   test("true succeeds with no output", async () => {
@@ -85,13 +88,19 @@ describe("bashTool", () => {
   }, 15000)
 
   test("timeout_ms aborts a long command and flags timed out", async () => {
-    const { result } = await collect({ command: "sleep 5", timeout_ms: 50 }, ctx(dir))
+    const { result } = await collect(
+      { command: "sleep 5", timeout_ms: 50, timeout_behavior: "kill" },
+      ctx(dir),
+    )
     expect(result.ok).toBe(false)
     expect(result.output).toContain("[timed out]")
   })
 
   test("timeout → failure.mode timeout with timeoutMs (absorb #2)", async () => {
-    const { result } = await collect({ command: "sleep 5", timeout_ms: 50 }, ctx(dir))
+    const { result } = await collect(
+      { command: "sleep 5", timeout_ms: 50, timeout_behavior: "kill" },
+      ctx(dir),
+    )
     expect(result.ok).toBe(false)
     expect(result.failure).toEqual({ mode: "timeout", timeoutMs: 50 })
   })

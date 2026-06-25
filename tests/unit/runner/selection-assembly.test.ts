@@ -187,4 +187,59 @@ describe("selection assembly", () => {
     ])
     expect(context.oracleFailureRepairSeed).toBe("repair-seed")
   })
+
+  test("a per-candidate owner seed is ADDITIVE — candidate 1 is NOT blinded to sibling owners (case A)", () => {
+    // Generic non-Python source + symbol-free issue text ⇒ no static-witness
+    // family forms, so seedFor(1) takes the plain per-owner (softened) path.
+    const context = prepareSelectionEvidenceContext({
+      problemStatement: "the output is wrong",
+      sandbox: "/tmp/sandbox",
+      n: 3,
+      ownerCandidates: ["pkg/a.txt", "pkg/sibling.txt"],
+      ownerResolved: undefined,
+      publicContracts: undefined,
+      verifySelectRegression: "off",
+      baseValidatedRed: true,
+      reproHint: undefined,
+      reproTest: { installed: false, reason: "not_installed" },
+      verificationTarget: undefined,
+      oracleFailureRepairSeed: undefined,
+      existingTestExpectations: [],
+      readSource: (rel) =>
+        rel === "pkg/a.txt" ? "alpha line\n" : rel === "pkg/sibling.txt" ? "beta line\n" : null,
+    })
+
+    // The softened per-owner seed for candidate 1 nudges toward the FIRST owner
+    // only, with evidential (non-imperative) wording…
+    const seedForCand1 = context.selectionInputs.seeds[1]
+    expect(seedForCand1).toContain("`pkg/a.txt`")
+    expect(seedForCand1).toContain("pay particular attention to")
+    expect(seedForCand1).toContain("consider the other candidates too")
+    expect(seedForCand1).not.toContain("Focus your investigation")
+    expect(seedForCand1).not.toContain("`pkg/sibling.txt`")
+
+    // …but when that seed is composed into the generation prompt alongside the
+    // FULL owner evidence, candidate 1 STILL sees its sibling owner. The seed is
+    // an additive nudge, not a withholding filter (the prompt is built from the
+    // complete owner-candidate set + this seed).
+    const prompt = composeSelectionAgentHint(
+      {
+        verifySelectProofRequired: true,
+        selectorMode: "clean",
+        problemStatement: "the output is wrong",
+        ownerEvidence: context.selectionOwnerEvidence,
+        promptContracts: context.advisoryPromptContracts,
+        baseValidatedRed: context.selectionBaseValidatedRed,
+        validatedReproScripts: [],
+        existingTestExpectations: [],
+        envCaveats: [],
+        staticWitnessDiagnostics: context.staticWitnessDiagnostics,
+      },
+      seedForCand1,
+    )
+    expect(prompt).toBeDefined()
+    expect(prompt).toContain("pkg/a.txt")
+    // TEETH: the sibling owner candidate 1 was NOT seeded toward is still present.
+    expect(prompt).toContain("pkg/sibling.txt")
+  })
 })

@@ -32,6 +32,21 @@ export interface RunVerdicts {
   readonly unresolved: ReadonlySet<string>
   readonly errored: ReadonlySet<string>
   readonly emptyPatch: ReadonlySet<string>
+  /**
+   * Re-runnable measurement-holes — a SUBSET of `errored` (it is intentionally
+   * NOT removed from `errored`, so `diff.ts`'s `bUnmeasured = errored ∪
+   * emptyPatch` stays correct). These are the terminations that are our-fault /
+   * infra and re-runnable, so they must be EXCLUDED from the leaderboard
+   * solve-rate denominator rather than counted as a capability miss:
+   *   - `throttled`      (rate-limit / 429 / usage-limit)
+   *   - `harness_error`  (grading/runner infra failure)
+   *   - `grader_invalid` (grader produced no usable verdict)
+   * Genuine misses that STAY counted (NOT here): `timeout`, `hung_stream`,
+   * `generation_error`, `emptyPatch`, plain `unresolved` (wrong fix).
+   * For the swebench HARNESS report shape, `error_ids` are infra/grading
+   * errors by convention (distinct from `unresolved_ids`) → all re-runnable.
+   */
+  readonly reRunnable: ReadonlySet<string>
   /** Bench-report-only aggregate telemetry. Absent for harness-only report shapes. */
   readonly reportTotals?: RunReportTotals
 }
@@ -106,6 +121,7 @@ const rowIsEmptyPatch = (row: Record<string, unknown>): boolean => {
 const ERRORED_TERMINATIONS = new Set([
   "harness_error",
   "generation_error",
+  "throttled",
   "timeout",
   "hung_stream",
   "grader_invalid",
@@ -121,6 +137,19 @@ const rowIsErrored = (row: Record<string, unknown>): boolean => {
     return true
   }
   return false
+}
+
+// Re-runnable measurement-holes among the errored terminations: throttle
+// (our-fault / infra), grading/runner infra, grader output failures. These are
+// EXCLUDED from the leaderboard solve-rate. `timeout` / `hung_stream` /
+// `generation_error` are deliberately NOT here — they are genuine misses.
+const RE_RUNNABLE_TERMINATIONS = new Set(["throttled", "harness_error", "grader_invalid"])
+
+const rowTermination = (row: Record<string, unknown>): string | undefined => {
+  const failure = row.failure
+  return isRecord(failure) && typeof failure.termination === "string"
+    ? failure.termination
+    : undefined
 }
 
 const rowScoreLabel = (
@@ -273,13 +302,17 @@ const fromOurReport = (report: Record<string, unknown>, perInstance: readonly un
   const unresolved = new Set<string>()
   const errored = new Set<string>()
   const emptyPatch = new Set<string>()
-  for (const { id, verdict } of canonicalRows) {
+  const reRunnable = new Set<string>()
+  for (const { id, verdict, row } of canonicalRows) {
     if (verdict === "resolved") resolved.add(id)
     else if (verdict === "localStructural") localStructural.add(id)
     else if (verdict === "researchContaminated") researchContaminated.add(id)
     else if (verdict === "unresolved") unresolved.add(id)
-    else if (verdict === "errored") errored.add(id)
-    else emptyPatch.add(id)
+    else if (verdict === "errored") {
+      errored.add(id)
+      const t = rowTermination(row)
+      if (t !== undefined && RE_RUNNABLE_TERMINATIONS.has(t)) reRunnable.add(id)
+    } else emptyPatch.add(id)
   }
   const reportTotals = reportTotalsFromOurReport({
     report,
@@ -301,6 +334,7 @@ const fromOurReport = (report: Record<string, unknown>, perInstance: readonly un
     unresolved,
     errored,
     emptyPatch,
+    reRunnable,
     reportTotals,
   }
 }
@@ -340,6 +374,10 @@ const fromHarnessReport = (r: Record<string, unknown>): RunVerdicts => {
     unresolved,
     errored,
     emptyPatch,
+    // swebench `error_ids` = harness/grading infra failures (distinct from
+    // `unresolved_ids` real misses) → re-runnable. The shape carries no
+    // per-instance termination, so the whole errored set is re-runnable here.
+    reRunnable: new Set<string>(errored),
   }
 }
 

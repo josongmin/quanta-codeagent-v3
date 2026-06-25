@@ -37,32 +37,18 @@ const fakeRematerialize =
   <T>(args: Parameters<Rematerialize>[0]): Promise<T | null> =>
     args.probe(pickSandbox(args.patch)) as Promise<T | null>
 
-describe("prepareIssueSmokeSelectionPort", () => {
-  test("base-red public MWE does not become selector authority", async () => {
-    const runCalls: string[] = []
-    const deps: PrepareIssueSmokeSelectionPortDeps = {
-      resetBase: async () => true,
-      runScript: async (_instance, sandbox) => {
-        runCalls.push(sandbox)
-        return false
-      },
-    }
-    const port = await prepareIssueSmokeSelectionPort(
-      mkSmokeInstance(issue),
-      "/tmp/base",
-      1000,
-      deps,
-    )
-    expect(port).toBeUndefined()
-    expect(runCalls).toEqual(["/tmp/base"])
-  })
+describe("prepareIssueSmokeSelectionPort (base-RED executed-authority gate)", () => {
+  // The extractor is a HEURISTIC regex guess. It may only confer a veto after the
+  // base-RED gate proves the source actually reproduces the failure on base.
 
-  test("base-green public MWE becomes a candidate keep-green hard gate", async () => {
+  test("base-RED public MWE (proven oracle) becomes a candidate veto authority", async () => {
     const deps: PrepareIssueSmokeSelectionPortDeps = {
       resetBase: async () => true,
-      runScript: async (_instance, sandbox) => !sandbox.includes("broken"),
+      // Base run reproduces the failure (exit≠0 ⇒ false). A candidate that FIXES
+      // it runs green (true) in /tmp/fixed; one that leaves it red (false) elsewhere.
+      runScript: async (_instance, sandbox) => sandbox.includes("fixed"),
       rematerialize: fakeRematerialize((patch) =>
-        patch.includes("break") ? "/tmp/broken" : "/tmp/clean",
+        patch.includes("fix") ? "/tmp/fixed" : "/tmp/stillred",
       ),
     }
     const port = await prepareIssueSmokeSelectionPort(
@@ -73,8 +59,44 @@ describe("prepareIssueSmokeSelectionPort", () => {
     )
     expect(port).toBeDefined()
     const smoke = port!
-    await expect(smoke(mkCandidate("+++ b/x.py\n+safe"))).resolves.toBe(true)
-    await expect(smoke(mkCandidate("+++ b/x.py\n+break"))).resolves.toBe(false)
+    // Candidate that fixes the base-red oracle ⇒ true (no veto).
+    await expect(smoke(mkCandidate("+++ b/x.py\n+fix"))).resolves.toBe(true)
+    // Candidate that leaves the proven base-red oracle red ⇒ false (executed veto).
+    await expect(smoke(mkCandidate("+++ b/x.py\n+nope"))).resolves.toBe(false)
+  })
+
+  // TEETH: the legacy base-GREEN gate would have manufactured a keep-green veto
+  // here (base ran clean, candidate "broke" it). A base-green source is NOT a
+  // proven oracle — an "Expected output" block that merely runs clean must NOT
+  // grant the regex guess executed authority. New invariant ⇒ no veto port.
+  test("base-GREEN source confers NO authority (regex guess stays seed-only)", async () => {
+    const runCalls: string[] = []
+    const deps: PrepareIssueSmokeSelectionPortDeps = {
+      resetBase: async () => true,
+      // Base runs CLEAN (green/true) — could be a wrong block that just imports.
+      runScript: async (_instance, sandbox) => {
+        runCalls.push(sandbox)
+        return true
+      },
+      rematerialize: fakeRematerialize(() => "/tmp/any"),
+    }
+    const port = await prepareIssueSmokeSelectionPort(
+      mkSmokeInstance(issue),
+      "/tmp/base",
+      1000,
+      deps,
+    )
+    expect(port).toBeUndefined()
+    // It probed base exactly once and then refused authority — no candidate run.
+    expect(runCalls).toEqual(["/tmp/base"])
+  })
+
+  test("base setup/exec failure (null) confers NO authority (fail-open)", async () => {
+    const port = await prepareIssueSmokeSelectionPort(mkSmokeInstance(issue), "/tmp/base", 1000, {
+      resetBase: async () => true,
+      runScript: async () => null,
+    })
+    expect(port).toBeUndefined()
   })
 
   test("no executable public python block => no smoke port", async () => {
@@ -85,6 +107,35 @@ describe("prepareIssueSmokeSelectionPort", () => {
       { resetBase: async () => true },
     )
     expect(port).toBeUndefined()
+  })
+
+  // TEETH (the bug scenario end-to-end): the issue's only fenced block is an
+  // "Expected output" snippet that `hasCall` mis-extracts. It runs CLEAN on base
+  // (it's just a print). Under the old base-GREEN gate this would have become a
+  // keep-green veto authority over candidate selection — a wrong block driving the
+  // oracle. The base-RED gate refuses it: NO veto port, the regex guess stays a seed.
+  test("mis-extracted 'Expected output' block granted NO executed authority", async () => {
+    const outputOnlyIssue =
+      "The MathML printer drops subscripts.\n\nExpected output:\n```python\nprint('<msub>...</msub>')\n```"
+    const candidateRuns: string[] = []
+    const port = await prepareIssueSmokeSelectionPort(
+      mkSmokeInstance(outputOnlyIssue),
+      "/tmp/base",
+      1000,
+      {
+        resetBase: async () => true,
+        // The mis-extracted output block runs clean on base (green/true).
+        runScript: async () => true,
+        rematerialize: fakeRematerialize((patch) => {
+          candidateRuns.push(patch)
+          return "/tmp/any"
+        }),
+      },
+    )
+    // No authority: the regex guess that merely runs clean cannot veto candidates.
+    expect(port).toBeUndefined()
+    // And it never executed any CANDIDATE (authority was refused at the base gate).
+    expect(candidateRuns).toEqual([])
   })
 })
 

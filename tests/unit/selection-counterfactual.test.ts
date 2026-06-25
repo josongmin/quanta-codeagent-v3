@@ -72,8 +72,8 @@ describe("counterfactual select — seed (T-202)", () => {
     })
     // cand1 was seeded with the counterfactual minimal-alternative, NOT seeds[1].
     expect(seeds[1]).not.toBe("OWNER-FOCUS-SENTINEL")
-    expect(seeds[1]).toContain("counterfactual minimal alternative")
-    expect(seeds[1]).toContain(`edit only \`${OWNER}\``)
+    expect(seeds[1]).toContain("smaller in-place alternative")
+    expect(seeds[1]).toContain(`the owner file appears to be \`${OWNER}\``)
   })
 
   it("RED-ON-INJECTION: counterfactual OFF keeps the owner-focus seed verbatim", async () => {
@@ -108,7 +108,7 @@ describe("counterfactual select — seed diversity + telemetry honesty (audit fi
       riskGate: async (c) => expandDecisionFor(c.patch),
       ports: { generate: gen, applyClean: async () => true },
     })
-    expect(seeds[1]).toContain("counterfactual minimal alternative")
+    expect(seeds[1]).toContain("smaller in-place alternative")
     // cand2 keeps its owner-focus seed — diversity preserved, not a 2nd copy.
     expect(seeds[2]).toBe("OWNER-2-SEED")
   })

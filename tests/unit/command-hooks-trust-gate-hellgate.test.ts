@@ -275,28 +275,31 @@ describe("T04 — UC4 Codex 10-event coverage", () => {
   })
 })
 
-// ---- UC5 — default-OFF byte-identical ---------------------------------------
+// ---- UC5 — fail-closed BY PROVENANCE (decoupled from the opt-in knob) -------
+//
+// SECURITY FIX (RCE-class default-path hole). Previously the `needsReview`
+// stamp was honored ONLY when the `QUANTA_HOOK_TRUST_GATE` opt-in was ON, so a
+// cloned hostile repo's `settings.json#hooks` (stamped repo-provenance /
+// needsReview by `loadCommandHookBindings`) ran arbitrary shell on the first
+// matching event by default. The fix makes provenance enforcement ALWAYS-ON:
+// an untrusted-source (`needsReview`) hook is HELD until approved, regardless of
+// the knob; the knob now only governs the approval UX. These are the SECURITY
+// TEETH — each is RED under the old `gate.trustGate ? selectApproved : matching`
+// bypass.
 
-describe("T04 — UC5 trust gate OFF is byte-identical", () => {
-  test("trust gate OFF ⇒ needsReview binding fires unchanged (flag informational)", async () => {
+describe("UC5 — fail-closed by provenance (decoupled from the opt-in knob)", () => {
+  test("TEETH 1 — DEFAULT (trustGate OFF, no review port): repo/needsReview hook is HELD, not run", async () => {
+    // The default-hostile-repo case: trustGate OFF (knob unset), no review port.
+    // Under the OLD bypass this binding RAN (the hole) → this assertion was RED.
+    // Now it is HELD by provenance. A held hook does NOT deny the tool.
     const { port, calls } = fakeExec()
-    // trustGate:false, NO review port — the imported hook still fires.
-    await fire(armed([importedBinding], false), port)
-    expect(calls.length).toBe(1)
-    expect(calls[0]!.command).toBe("imported-hook.sh")
+    const verdict = await fire(armed([importedBinding], false), port) // NO review port
+    expect(calls.length).toBe(0) // untrusted repo shell NEVER auto-executes
+    expect(verdict.deny).toBeNull() // holding a hook does not block the tool
   })
 
-  test("gate carries trustGate flag faithfully", () => {
-    expect(armed([userBinding], true).trustGate).toBe(true)
-    expect(armed([userBinding], false).trustGate).toBe(false)
-    expect(normalizeCommandHookGate(undefined).trustGate).toBe(false)
-  })
-
-  test("OMITTING trustGate defaults to false ⇒ needsReview binding still FIRES", async () => {
-    // Teeth for the default: a config that never mentions trustGate must NOT
-    // accidentally arm the gate (kills the `raw.trustGate !== false` mutation,
-    // which only diverges when trustGate is UNDEFINED — every other test pins
-    // it explicitly). An un-mentioned trust gate is OFF ⇒ byte-identical.
+  test("TEETH 1b — OMITTING trustGate entirely is still fail-closed (knob never mentioned)", async () => {
+    // A config that never mentions trustGate must NOT let an untrusted hook fire.
     const gate = normalizeCommandHookGate({
       enabled: true,
       acknowledgedRisk: "trustGate omitted",
@@ -305,7 +308,46 @@ describe("T04 — UC5 trust gate OFF is byte-identical", () => {
     expect(gate.trustGate).toBe(false)
     const { port, calls } = fakeExec()
     await fire(gate, port) // NO review port
-    expect(calls.length).toBe(1) // needsReview ignored ⇒ fires
+    expect(calls.length).toBe(0) // needsReview ENFORCED even with the knob off
+  })
+
+  test("TEETH 2 — PAIRED CONTROL: trusted (user/needsReview:false) hook STILL fires by default", async () => {
+    // We did not break legit hooks: a trusted-provenance binding fires with the
+    // knob OFF and NO review port, exactly as before.
+    const { port, calls } = fakeExec()
+    await fire(armed([userBinding], false), port) // trustGate OFF, no review port
+    expect(calls.length).toBe(1)
+    expect(calls[0]!.command).toBe("user-hook.sh")
+  })
+
+  test("TEETH 3 — WITH approval: repo/needsReview hook fires once a review port approves (knob OFF)", async () => {
+    // The escape hatch is approval, not the knob: even with trustGate OFF, an
+    // approving review port lets the formerly-held binding fire.
+    const { port, calls } = fakeExec()
+    await fire(armed([importedBinding], false), port, approveAll)
+    expect(calls.length).toBe(1)
+    expect(calls[0]!.command).toBe("imported-hook.sh")
+  })
+
+  test("knob is decoupled — enforcement is IDENTICAL whether trustGate is ON or OFF", async () => {
+    // Same untrusted binding, no review port, both knob states ⇒ both HELD.
+    for (const knob of [true, false]) {
+      const { port, calls } = fakeExec()
+      await fire(armed([importedBinding], knob), port) // no review port
+      expect(calls.length).toBe(0)
+    }
+    // Same trusted binding, no review port, both knob states ⇒ both FIRE.
+    for (const knob of [true, false]) {
+      const { port, calls } = fakeExec()
+      await fire(armed([userBinding], knob), port)
+      expect(calls.length).toBe(1)
+    }
+  })
+
+  test("gate carries trustGate flag faithfully (now governs only the approval UX)", () => {
+    expect(armed([userBinding], true).trustGate).toBe(true)
+    expect(armed([userBinding], false).trustGate).toBe(false)
+    expect(normalizeCommandHookGate(undefined).trustGate).toBe(false)
   })
 })
 

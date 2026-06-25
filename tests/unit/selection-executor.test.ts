@@ -121,6 +121,19 @@ describe("selection input canonicalization", () => {
     expect(inputs.seeds[1]).toContain("`sympy/core/function.py`")
     expect(inputs.seeds[2]).toContain("`sympy/core/evalf.py`")
     expect(inputs.seeds[3]).toBeUndefined()
+    // Evidential, non-blinding wording: the per-candidate seed nudges toward one
+    // owner WITHOUT framing it as the answer or hiding the sibling owners.
+    expect(inputs.seeds[1]).toContain("pay particular attention to")
+    expect(inputs.seeds[1]).toContain("consider the other candidates too")
+    // No imperative assertion of a conclusion the model should reach itself.
+    expect(inputs.seeds[1]).not.toContain("Focus your investigation")
+    expect(inputs.seeds[1]).not.toContain("ROOT CAUSE")
+    // TEETH (case A, not blinded): the FULL owner candidate set survives in
+    // `owners`/`ownerFiles` and reaches the generation prompt for EVERY
+    // candidate (the prompt is built from owner evidence + this additive seed),
+    // so candidate 1 can still see its sibling `evalf.py`.
+    expect(inputs.owners.has("sympy/core/evalf.py")).toBe(true)
+    expect(inputs.owners.has("sympy/core/function.py")).toBe(true)
   })
 
   it("family coverage seeds start after cand0 baseline and carry typed provenance", () => {

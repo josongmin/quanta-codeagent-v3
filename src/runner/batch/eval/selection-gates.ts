@@ -351,6 +351,9 @@ const proofRequiredRejected = (verdict: CandidateVerdict): boolean =>
   verdict.reasons.includes(PROOF_REQUIRED_MISSING_REJECT_REASON) ||
   verdict.reasons.includes(PROOF_INFRA_BLOCKED_REJECT_REASON)
 
+const familyCoverageRejected = (verdict: CandidateVerdict): boolean =>
+  verdict.reasons.some((reason) => reason.startsWith("hard:familyCoverageMissing="))
+
 // B#3: a static-sanity hard reject is a DETERMINISTIC parse-level "this patch is
 // broken" signal (e.g. callback arity mismatch, None-subscript mutation). Like
 // the other hard vetoes it must also bar the best-effort fallback — otherwise a
@@ -372,6 +375,7 @@ export const bestEffortEligible = (
   if (declaredExpectedRejected(entry.verdict)) return false
   if (mweCandidateRedRejected(entry.verdict)) return false
   if (proofRequiredRejected(entry.verdict)) return false
+  if (familyCoverageRejected(entry.verdict)) return false
   if (staticSanityRejected(entry.verdict)) return false
   return true
 }

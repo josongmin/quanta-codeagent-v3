@@ -30,7 +30,9 @@
  */
 
 import {
+  ABSORB_EXECFULL_MODULES,
   ABSORB_MODULES,
+  ABSORB_XLANE_MODULES,
   CLEAN_SELECTOR,
   CLOSURE_GROUNDING,
   CLOSURE_SELECT_CLEAN_MODULES,
@@ -122,6 +124,16 @@ export const PRESET_COMPOSITES: readonly PresetComposite[] = [
     preset: "agentless-v5-absorb",
     base: THIN_STRICT_BASE.knobs,
     modules: ABSORB_MODULES,
+  },
+  {
+    preset: "agentless-v5-absorb-xlane",
+    base: THIN_STRICT_BASE.knobs,
+    modules: ABSORB_XLANE_MODULES,
+  },
+  {
+    preset: "agentless-v5-absorb-execfull",
+    base: THIN_STRICT_BASE.knobs,
+    modules: ABSORB_EXECFULL_MODULES,
   },
   {
     preset: "agentless-v4-proof-clean-absorb",

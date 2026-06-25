@@ -70,9 +70,13 @@ describe("no-patch breaker driver wiring", () => {
     const before = await cfg.hooks?.emit({ type: "turn_start", turn: 47 })
     const atThreshold = await cfg.hooks?.emit({ type: "turn_start", turn: 48 })
     expect(before?.promptHook).toBeUndefined()
-    expect(atThreshold?.promptHook?.injectBeforeUser).toContain(
-      "No mutating edit has been made after 48/60 turns.",
-    )
+    const injected = atThreshold?.promptHook?.injectBeforeUser
+    // Evidential: states the budget fact + turn counts, lets the model decide.
+    expect(injected).toContain("You have used 48 of 60 turns with no mutating edit yet")
+    expect(injected).toContain("the turn budget is finite")
+    // No imperative conclusion the model should reach itself.
+    expect(injected).not.toContain("Stop exploring")
+    expect(injected).not.toContain("smallest concrete code change now")
   })
 
   test("a denied write attempt does not disarm the breaker, but an executed edit does", async () => {
@@ -91,7 +95,7 @@ describe("no-patch breaker driver wiring", () => {
     })
     const afterDeniedAttempt = await cfg.hooks?.emit({ type: "turn_start", turn: 48 })
     expect(afterDeniedAttempt?.promptHook?.injectBeforeUser).toContain(
-      "No mutating edit has been made after 48/60 turns.",
+      "You have used 48 of 60 turns with no mutating edit yet",
     )
 
     await cfg.hooks?.emit({

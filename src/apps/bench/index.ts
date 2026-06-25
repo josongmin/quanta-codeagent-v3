@@ -466,10 +466,16 @@ const runSwebenchTask = async (
 ): Promise<InstanceResult> => {
   const work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
   const dest = join(work, "repo")
+  // Live progress to run.log: under concurrency the per-instance result line is
+  // emitted only at the END of the batch (all in-flight at once → ~15min silence
+  // mid-run). A START line + an inline DONE line make each instance's lifecycle
+  // visible via `tail -f ~/run.log` while the box is working.
+  const startedAt = Date.now()
+  logger.info(`▶ ${task.instanceId} — repo prep → patch-gen → grade …`)
   try {
     await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
     const instance = toInstance(task, dest)
-    return await resolveInstance(
+    const result = await resolveInstance(
       instance,
       {
         llm: deps.llm,
@@ -488,7 +494,16 @@ const runSwebenchTask = async (
       deps.obs,
       deps.freshLlm,
     )
+    const secs = Math.round((Date.now() - startedAt) / 1000)
+    const mark = result.passed ? "PASS" : "FAIL"
+    const bytes = result.patch?.length ?? 0
+    logger.info(
+      `■ ${task.instanceId} ${mark} — patch=${bytes}B turns=${result.turns} ${secs}s${result.error ? ` (${result.error.slice(0, 60)})` : ""}`,
+    )
+    return result
   } catch (e) {
+    const secs = Math.round((Date.now() - startedAt) / 1000)
+    logger.info(`■ ${task.instanceId} ERROR ${secs}s — ${errMessage(e).slice(0, 80)}`)
     return {
       id: task.instanceId,
       passed: false,
@@ -906,13 +921,17 @@ const runCustomCorpusMode = async (
   await finalizeObserve(obs, results)
 }
 
-/** Default per-instance wall-clock cap for the AGENT SOLVE (10 min). This is a
+/** Default per-instance wall-clock cap for the AGENT SOLVE (20 min). This is a
  *  runaway BACKSTOP, not the real budget — `maxTurns` (60) is the agent's turn
  *  budget. The old 2-min value was a tight solve budget that, combined with the
  *  pre-fix timer placement (which also counted env setup), aborted ~68% of
- *  instances mid-work under concurrency. Sized to maxTurns (~10s/turn headroom).
- *  Overridable via `QUANTA_BENCH_TIMEOUT_MS` (`cfg.benchTimeoutMs`). */
-const DEFAULT_BENCH_TIMEOUT_MS = 600_000
+ *  instances mid-work under concurrency. jun-25: raised 10→20 min — the hard
+ *  multi-file/wide-coordination cases (django-11138/14315) were CONVERGING
+ *  (f2pFail 9→2, p2pFail 6→2) but `term=timeout` cut them off at ~290 turns
+ *  under low concurrency; only the churning cases use the extra headroom (fast
+ *  cases finish well under it). Overridable via `QUANTA_BENCH_TIMEOUT_MS`
+ *  (`cfg.benchTimeoutMs`); forwarded to the box (QUANTA_BENCH_ prefix). */
+const DEFAULT_BENCH_TIMEOUT_MS = 1_200_000
 
 /**
  * Test seam — `runMain` accepts an injectable `exit` so unit tests can

@@ -62,8 +62,15 @@ export const makeSsh =
         "ConnectTimeout=15",
         "-o",
         "ServerAliveInterval=30",
-        "-o",
-        "ServerAliveCountMax=20",
+        // jun-25: 20→4. A network-partitioned/dead box leaves an established
+        // poll ssh BLOCKED until SSH gives up = ServerAliveInterval*CountMax.
+        // At 20 that was 10min PER hung poll, so the detached-poll box-death
+        // detector (which needs N consecutive poll FAILURES) took hours to
+        // trip → a dead box hung the run for ~30min+ instead of being requeued.
+        // 4 ⇒ a hung ssh errors in 2min, so consecutive-failure detection +
+        // aws liveness confirm fire in minutes. Healthy boxes answer keepalives
+        // instantly, so this never trips on a live box.
+        "ServerAliveCountMax=4",
         "-o",
         "TCPKeepAlive=yes",
         host,

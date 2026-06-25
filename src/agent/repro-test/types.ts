@@ -90,16 +90,22 @@ export interface ReproTestConfig {
  * pytest footer writes a structured report, and stdout/process-code-only output
  * is not a proof surface.
  *
- *   - `"reproduced"` — a call-phase AssertionError/pytest.fail occurred on the
- *                       base tree. The bug is present / red.
+ *   - `"reproduced"` — a call-phase reproduction occurred on the base tree:
+ *                       EITHER an AssertionError/pytest.fail, OR a raw exception
+ *                       thrown by the code under test (TypeError/AttributeError/
+ *                       KeyError/…). For a large class of real bugs the symptom
+ *                       IS a raw crash, so this is a legitimate red witness.
+ *                       The bug is present / red.
  *   - `"resolved"`   — collected call reports passed. The expected behaviour
  *                       held — green.
  *   - `"other"`      — pytest itself errored indeterminately (internal/usage
  *                       error, exit 3/4) — ran, but produced a result distinct
  *                       from a clean pass/fail. Meaningful, not a catch-all.
- *   - `"exec_failed"`— raw call exception, collection/setup/teardown failure,
- *                       missing/malformed sidecar, top-level import crash,
- *                       syntax error, or timeout. Infra/invalid test, NOT red.
+ *   - `"exec_failed"`— collection/setup/teardown failure, pytest ERROR (non-call
+ *                       phase), missing/malformed sidecar, top-level import
+ *                       crash, syntax error, an import/syntax exception even at
+ *                       call phase, a call-phase FAILED with no recorded
+ *                       exc_type, or timeout. Infra/invalid test, NOT red.
  *   - `"unknown"`    — pytest collected no test items.
  *                       Either the prompt was malformed or the LLM emitted a
  *                       no-op (no `def test_*`).

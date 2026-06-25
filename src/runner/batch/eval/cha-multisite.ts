@@ -43,6 +43,11 @@ export interface SiblingOverrideSite {
   readonly method?: string
   /** Why this site was selected. */
   readonly role?: "override" | "backend-contract"
+  /** TELEMETRY ONLY (jun-25 magic-number removal): Jaccard overlap [0,1] of this
+   *  sibling's method-body structural token set against the target override. Was
+   *  formerly a `>= 0.45` admission gate; now surfaced purely so a sweep can see
+   *  how divergent a surfaced sibling is. NEVER filtered on downstream. */
+  readonly structurallySimilar?: number
 }
 
 export interface ChaRepairTarget {
@@ -57,12 +62,14 @@ export interface ChaRepairTarget {
  * stdout (sites EXCLUDES the target class itself). Robustness: unparseable files
  * are skipped; no target class (method not found in targetRelFile) ⇒ empty sites.
  *
- * Sibling rule (symptom-coupled, not "all overrides"): a class C is a sibling iff
- * C defines a method named `method`, C's ancestor set intersects the target
- * class's ancestor set, AND the sibling method body is structurally similar to
- * the localized target override. This keeps real co-change siblings while
- * rejecting divergent overrides that share the base but not the bug shape
- * (e.g. a backend with a fundamentally different timezone implementation).
+ * Sibling rule (parameter-free CHA invariant): a class C is a sibling iff C
+ * defines a method named `method` AND C's transitive ancestor set intersects the
+ * target class's ancestor set. Shared-ancestor + same-method-name IS the
+ * override-family membership signal; EVERY such sibling is surfaced as evidence
+ * (no similarity threshold admits/rejects). The steer text then asks the LLM to
+ * confirm which siblings exhibit the bug — the model filters, not a frozen
+ * constant. A `structurallySimilar` Jaccard value is computed per site for
+ * telemetry/sweep visibility only and never gates the set.
  *
  * Contract-fallback (siblings that do NOT define the method — the structural gate
  * cannot see them): selected by the `siblingMode` argv. "path-hardcoded" (default)
@@ -238,15 +245,22 @@ def method_signature(node):
             toks.add("cmp")
     return toks
 
-def structurally_similar(target_qid, sibling_qid):
+# Jaccard overlap of the two method bodies' structural token sets. TELEMETRY
+# ONLY: emitted as the per-site \`structurallySimilar\` score so a sweep can SEE
+# how divergent a surfaced sibling is, but it MUST NOT gate admission — the
+# parameter-free CHA invariant (shared transitive ancestor + same method name =
+# override-family member) is the admission signal, and the steer text already
+# tells the LLM to confirm which siblings exhibit the bug. (A frozen threshold
+# here silently dropped TRUE override-family members whose body shape differed.)
+def structural_overlap(target_qid, sibling_qid):
     target_sig = method_signature(method_nodes.get(target_qid))
     sibling_sig = method_signature(method_nodes.get(sibling_qid))
     if not target_sig or not sibling_sig:
-        return False
+        return 0.0
     union = len(target_sig | sibling_sig)
     if union == 0:
-        return False
-    return (len(target_sig & sibling_sig) / union) >= 0.45
+        return 0.0
+    return len(target_sig & sibling_sig) / union
 
 # target = the class in target_rel that defines the method (fallback: any in file)
 target = None
@@ -266,15 +280,18 @@ if target is not None:
         if qid == target or c["method_line"] is None:
             continue
         # sibling iff ancestor sets share a class IDENTITY (transitive) AND the
-        # override body is structurally similar to the localized buggy override.
-        if tanc and (ancestors(qid) & tanc) and structurally_similar(target, qid):
+        # sibling overrides the SAME method name. That pair (shared ancestor +
+        # same method name) IS the parameter-free override-family invariant; ALL
+        # such siblings are surfaced as evidence (no similarity threshold gates
+        # admission). The Jaccard overlap rides along as telemetry only.
+        if tanc and (ancestors(qid) & tanc):
             site_keys.add((c["file"], c["line"]))
-            sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"], "method": method, "role": "override"})
+            sites.append({"file": c["file"], "line": c["method_line"], "cls": c["cls"], "method": method, "role": "override", "structurallySimilar": structural_overlap(target, qid)})
 
     # Backend-contract fallback: sibling classes that participate in the same
     # contract family but do NOT define the localized method themselves (e.g. a
-    # sqlite helper file) — the structural-similarity gate above cannot see them
-    # (no method body to compare). A "contract sibling" is another file in a
+    # sqlite helper file) — the same-method-name override pass above cannot see
+    # them (no def of the method to match). A "contract sibling" is another file in a
     # PARALLEL implementation directory: same dir-root + same leaf filename, a
     # different variant dir, sharing a transitive ancestor with the target class.
     parts = target_rel.split("/")
@@ -427,20 +444,25 @@ const siteRoleOf = (role: unknown): SiblingOverrideSite["role"] | undefined =>
 const siteMethodOf = (method: unknown): string | undefined =>
   typeof method === "string" && method.trim() !== "" ? method : undefined
 
+const siteSimilarityOf = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined
+
 const siblingSiteOf = (value: unknown): SiblingOverrideSite | undefined => {
   if (!isRecord(value)) return undefined
-  const { file, line, cls, method, role } = value
+  const { file, line, cls, method, role, structurallySimilar } = value
   if (typeof file !== "string" || typeof line !== "number" || typeof cls !== "string") {
     return undefined
   }
   const parsedMethod = siteMethodOf(method)
   const parsedRole = siteRoleOf(role)
+  const parsedSimilarity = siteSimilarityOf(structurallySimilar)
   return {
     file,
     line,
     cls,
     ...(parsedMethod !== undefined ? { method: parsedMethod } : {}),
     ...(parsedRole !== undefined ? { role: parsedRole } : {}),
+    ...(parsedSimilarity !== undefined ? { structurallySimilar: parsedSimilarity } : {}),
   }
 }
 

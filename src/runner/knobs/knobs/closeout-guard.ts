@@ -4,11 +4,13 @@
  * Single-shot finish-time self-check (one nudge per session, NOT a knob —
  * single-shot cap is enforced by the policy itself in `src/agent/closeout-
  * guard.ts`). The knob value selects the variant:
- *   - truthy ("1" / "on" / "true") ⇒ enable with legacy one-liner / code-mod
- *     four-surface walk (routed by `decideCloseoutGuard` based on history).
+ *   - truthy ("1" / "on" / "true") ⇒ enable with the default UNION self-check
+ *     (general defended-claim guidance + a self-select code-modification
+ *     four-surface walk). No history scan — the model self-selects the
+ *     code-mod portion iff it actually changed source.
  *   - "4rule" ⇒ enable AND force the Codex `response-assembly-and-closeout
  *     §5.2` defended-claim 4-rule + Verification report scaffold (explicit
- *     opt-in, wins over the implicit code-mod detector).
+ *     opt-in).
  *
  * Anything else (falsy / garbage / empty / whitespace) returns `undefined` so
  * the caller falls through to the next layer. No heuristics.

@@ -96,8 +96,10 @@ describe("classifyPytest — pytest sidecar → outcome", () => {
     expect(classifyPytest(REPORT_NO_TESTS, "", 5)).toBe("unknown")
   })
 
-  test("raw exception bubbling out of call phase ⇒ exec_failed", () => {
-    expect(classifyPytest(REPORT_RAW_EXCEPTION, "", 1)).toBe("exec_failed")
+  test("raw exception bubbling out of call phase ⇒ reproduced", () => {
+    // A non-assertion exception thrown by the code under test in the CALL phase is
+    // a legitimate crash-bug reproduction (collection/setup/import errors stay exec_failed).
+    expect(classifyPytest(REPORT_RAW_EXCEPTION, "", 1)).toBe("reproduced")
   })
 
   test("malformed/missing sidecar ⇒ exec_failed", () => {

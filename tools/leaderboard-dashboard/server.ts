@@ -202,9 +202,20 @@ interface Run {
   preset: string
   mtime: number
   resolved: number
+  // Denominator EXCLUDING re-runnable measurement-holes (FLAG-B). A campaign
+  // throttled on N instances no longer shows a deflated resolved/total %.
   total: number
+  // Count of attempts dropped from `total` because they were unmeasured
+  // (throttle / infra / env-degraded) — surfaced beside the ratio.
+  unmeasured: number
   perInstance: { id: string; passed: boolean; turns: number; fail: FailInfo | null }[]
 }
+
+// A failing instance is unmeasured (re-runnable) iff its classified failure says
+// so. Passing instances are always measured. Used for both run-level and
+// campaign-level denominators so the two stay consistent.
+const instanceIsUnmeasured = (pi: { passed: boolean; fail: FailInfo | null }): boolean =>
+  !pi.passed && pi.fail?.reRunnable === true
 
 interface FailInfo {
   termination: string // completed_unresolved / error / timeout / …
@@ -212,6 +223,33 @@ interface FailInfo {
   repro: string // reproTest.reason (no_reproduced_candidate / execution_failed / …)
   f2p: number // FAIL_TO_PASS still failing
   p2p: number // PASS_TO_PASS broken (regression signal)
+  // Re-runnable measurement-hole (throttle / harness / grader-infra /
+  // env-degraded) — EXCLUDED from the solve-rate denominator and from the
+  // "real gap" card, mirroring src/apps/bench/analyze/verdicts.ts. NOT a
+  // capability miss: re-running the instance can still resolve it.
+  reRunnable: boolean
+}
+
+// Canonical re-runnable terminations — byte-identical to verdicts.ts's
+// RE_RUNNABLE_TERMINATIONS. throttle(429/usage-limit), harness/runner infra,
+// grader output failures. timeout / hung_stream / generation_error /
+// admission_blocked / empty_patch are deliberately NOT here: they are GENUINE
+// misses that stay in the denominator.
+const RE_RUNNABLE_TERMINATIONS = new Set(["throttled", "harness_error", "grader_invalid"])
+
+// Decide whether a failing instance is an unmeasured re-runnable hole.
+// Source-of-truth is the RAW termination string + env/infra-blocked flags on
+// the per-instance row (same signals verdicts.ts uses), NOT the fuzzy `klass`
+// label — `admission_blocked` and `infra_blocked` BOTH render as 게이트차단 via
+// classifyFail's /blocked/ regex, but only `infra_blocked` is re-runnable, so
+// we must not key off klass. A graded miss (f2p/p2p > 0) is never re-runnable:
+// the grader ran and the patch was wrong / regressed.
+function isReRunnableHole(row: JsonRecord | null, term: string, f2p: number, p2p: number): boolean {
+  if (f2p > 0 || p2p > 0) return false
+  if (RE_RUNNABLE_TERMINATIONS.has(term)) return true
+  if (row?.envPrepFailed === true) return true
+  if (row?.proofState === "infra_blocked") return true
+  return false
 }
 
 // Turn the raw grade/termination signals into a one-line failure reason.
@@ -246,6 +284,7 @@ function classifyFail(pi: unknown): FailInfo | null {
     repro: asString(reproTest?.reason) ?? "",
     f2p,
     p2p,
+    reRunnable: isReRunnableHole(row, term, f2p, p2p),
   }
 }
 
@@ -366,6 +405,9 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     }
   })
   const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length
+  // FLAG-B: drop re-runnable measurement-holes (throttle/infra/env) from the
+  // denominator so a throttled run isn't reported with a deflated solve-rate.
+  const unmeasured = perInstance.filter(instanceIsUnmeasured).length
   return {
     label: basename(f).replace(/\.report\.json$/, ""),
     file: f,
@@ -373,7 +415,8 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     preset: presetLabel(f, asRecord(report.knobs)),
     mtime,
     resolved,
-    total: perInstance.length,
+    total: perInstance.length - unmeasured,
+    unmeasured,
     perInstance,
   }
 }
@@ -549,7 +592,19 @@ interface Campaign {
   preset: string
   mtime: number
   resolved: number
+  // Denominator EXCLUDING re-runnable holes (FLAG-B). An instance counts as
+  // unmeasured only if EVERY run failed to measure it (a measured/passing run
+  // anywhere wins), mirroring verdicts.ts dedup semantics.
   total: number
+  unmeasured: number
+}
+
+// Per-instance rollup state inside one campaign. passed wins over everything;
+// among non-passing, a measured failure (real miss) wins over an unmeasured
+// hole — so an instance only counts as unmeasured when no run ever measured it.
+interface SeenInstance {
+  passed: boolean
+  measured: boolean // at least one run produced a graded/real outcome (not a hole)
 }
 
 const campaignKeyOf = (run: Run): string => {
@@ -562,7 +617,7 @@ const campaignKeyOf = (run: Run): string => {
 }
 
 const addRunToCampaign = (
-  groups: Map<string, Campaign & { seen: Map<string, boolean> }>,
+  groups: Map<string, Campaign & { seen: Map<string, SeenInstance> }>,
   run: Run,
 ): void => {
   const key = campaignKeyOf(run)
@@ -576,6 +631,7 @@ const addRunToCampaign = (
       mtime: 0,
       resolved: 0,
       total: 0,
+      unmeasured: 0,
       seen: new Map(),
     }
     groups.set(key, group)
@@ -585,7 +641,12 @@ const addRunToCampaign = (
   for (const perInstance of run.perInstance) {
     const sid = shortId(perInstance.id)
     if (!sid) continue
-    group.seen.set(sid, (group.seen.get(sid) ?? false) || perInstance.passed)
+    const prev = group.seen.get(sid)
+    const measured = perInstance.passed || !instanceIsUnmeasured(perInstance)
+    group.seen.set(sid, {
+      passed: (prev?.passed ?? false) || perInstance.passed,
+      measured: (prev?.measured ?? false) || measured,
+    })
   }
 }
 
@@ -596,12 +657,17 @@ const addRunToCampaign = (
 // resolved/total dedupe by instance (union) so overlapping sidecars don't
 // double-count.
 function groupRuns(runs: Run[]): Campaign[] {
-  const groups = new Map<string, Campaign & { seen: Map<string, boolean> }>()
+  const groups = new Map<string, Campaign & { seen: Map<string, SeenInstance> }>()
   for (const run of runs) addRunToCampaign(groups, run)
   const out: Campaign[] = []
   for (const group of groups.values()) {
-    group.total = group.seen.size
-    group.resolved = [...group.seen.values()].filter(Boolean).length
+    const seen = [...group.seen.values()]
+    // FLAG-B: unmeasured = instances NO run ever measured (all-throttle/infra).
+    // They leave the denominator; surfaced separately as `unmeasured`.
+    const unmeasured = seen.filter((s) => !s.passed && !s.measured).length
+    group.total = group.seen.size - unmeasured
+    group.unmeasured = unmeasured
+    group.resolved = seen.filter((s) => s.passed).length
     out.push({
       key: group.key,
       members: group.members,
@@ -610,11 +676,14 @@ function groupRuns(runs: Run[]): Campaign[] {
       mtime: group.mtime,
       resolved: group.resolved,
       total: group.total,
+      unmeasured: group.unmeasured,
     })
   }
+  // Rank on the REAL solve-rate (resolved / measured-total), so throttle noise
+  // can no longer reorder the leaderboard. Ties broken by larger measured set.
   return out.sort(
     (a, b) =>
-      b.total - a.total || b.resolved / Math.max(1, b.total) - a.resolved / Math.max(1, a.total),
+      b.resolved / Math.max(1, b.total) - a.resolved / Math.max(1, a.total) || b.total - a.total,
   )
 }
 
@@ -1164,18 +1233,22 @@ function renderCards() {
   const ids = Object.keys(q);
   const solved = ids.filter(i => q[i].passed).length;
   const ran = ids.length;
-  // ceiling-adjusted: drop instances no public submission solved (#<=1)
-  let realMiss = 0, ceilMiss = 0;
+  // ceiling-adjusted: drop instances no public submission solved (#<=1).
+  // FLAG-C: also drop re-runnable measurement-holes (throttle/infra/env) — a
+  // 429 on a frontier-solved problem is NOT a capability gap, it's unmeasured.
+  let realMiss = 0, ceilMiss = 0, unmeasured = 0;
   for (const id of ids) {
     if (q[id].passed) continue;
+    const f = q[id].fail;
+    if (f && f.reRunnable) { unmeasured++; continue; }
     const row = DATA.rows[id];
     if (row && row.hash <= 1) ceilMiss++; else realMiss++;
   }
   const best = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)))[0];
   const cards = [
     ["해결 / 실행", solved + " / " + ran, DATA.coverage ? "데이터셋 "+DATA.coverage.datasetTotal : ""],
-    ["천장보정 점수", solved + " / " + (solved + realMiss), "ceiling("+ceilMiss+") 제외"],
-    ["진짜 격차", realMiss, "프론티어는 푸는데 미스"],
+    ["천장보정 점수", solved + " / " + (solved + realMiss), "ceiling("+ceilMiss+") · 미측정("+unmeasured+") 제외"],
+    ["진짜 격차", realMiss, "프론티어는 푸는데 미스 · 미측정("+unmeasured+") 제외"],
     ["best 캠페인", best ? (best.resolved+"/"+best.total) : "—", best ? best.key : ""],
     ["리포트 파일", DATA.runs.length, (DATA.campaigns||[]).length+" 캠페인"],
     ["라이브 박스", DATA.live.length],
@@ -1188,14 +1261,16 @@ function renderCards() {
 function renderRuns() {
   // Campaigns roll shards up into one logical run (clean-shard×6 → SOTA-clean).
   const camps = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)));
-  let h = '<p class="muted">샤드는 한 캠페인으로 묶음. 행 펼치면 멤버 리포트.</p>';
-  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th><th>갱신</th></tr></thead><tbody>';
+  let h = '<p class="muted">샤드는 한 캠페인으로 묶음. 행 펼치면 멤버 리포트. 해결률 분모는 측정된 시도만(throttle/인프라/env=미측정 제외).</p>';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th><th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
   for (const r of camps) {
     const pct = r.total ? Math.round(100*r.resolved/r.total) : 0;
+    const unmeasured = r.unmeasured || 0;
     h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
       '<td class="muted">'+r.members.length+'</td>'+
       '<td>'+r.resolved+'/'+r.total+'</td>'+
       '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%</td>'+
+      '<td class="muted" title="재런 가능한 측정 구멍 — 해결률 분모서 제외됨">'+(unmeasured? '⟳ '+unmeasured : '·')+'</td>'+
       '<td class="muted">'+ (r.mtime? new Date(r.mtime).toLocaleString() : '—') +'</td></tr>';
   }
   return h + '</tbody></table>';

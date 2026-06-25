@@ -32,7 +32,7 @@ export const createCloseoutGuard = (args: {
     decide: (ctx: TurnGuardContext): TurnGuardResult | undefined => {
       // Body byte-identical to legacy `closeoutGuardStep`.
       if (!isFinishAttempt(ctx.action, ctx.message)) return undefined
-      const verdict = decideCloseoutGuard({ cfg, state, history: ctx.history })
+      const verdict = decideCloseoutGuard({ cfg, state })
       if (!verdict.block || verdict.text === undefined) return undefined
       ctx.emit("closeout")
       // ADR-0079 — arm tool_choice:{kind:"none"} for the FORCED re-entry.

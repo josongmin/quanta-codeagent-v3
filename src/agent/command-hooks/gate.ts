@@ -28,8 +28,11 @@ export interface CommandHookConfig {
   readonly timeoutMs?: number
   readonly maxOutputBytes?: number
   readonly envAllowlist?: readonly string[]
-  /** T04 — arm the trust gate: a binding flagged `needsReview` is HELD until
-   *  approved. Default false ⇒ `needsReview` is informational (byte-identical). */
+  /** Whether the INTERACTIVE approval port / UX is offered for review-gated
+   *  hooks. This NO LONGER controls whether an untrusted-source (`needsReview`)
+   *  hook may fire — that is ALWAYS enforced fail-closed by the runner. A
+   *  `needsReview` binding is HELD until approved regardless of this flag; the
+   *  flag only governs whether/how the operator is asked to approve. */
   readonly trustGate?: boolean
 }
 

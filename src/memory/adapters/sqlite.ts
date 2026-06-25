@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import { errMessage } from "@/shared"
 import type { PersistentStorePort } from "../ports"
 import { rankEntries } from "../ranking"
+import type { MemoryTelemetryPort } from "../telemetry-port"
 import {
   MEMORY_KINDS,
   type MemoryEntry,
@@ -267,7 +268,7 @@ export class SqliteStore implements PersistentStorePort {
     return Promise.resolve(rows.map((r) => normalizeEntry(this.toEntry(r))))
   }
 
-  recall(query: MemoryQuery): Promise<MemoryEntry[]> {
+  recall(query: MemoryQuery, telemetry?: MemoryTelemetryPort): Promise<MemoryEntry[]> {
     // Cheap SQL prefilter on kind; all other filtering/ranking in shared TS fn.
     const kinds = query.kinds?.filter(isKind) ?? []
     let rows: MemoryRow[]
@@ -280,7 +281,7 @@ export class SqliteStore implements PersistentStorePort {
       rows = this.selectAllStmt.all() as MemoryRow[]
     }
     const entries = rows.map((r) => this.toEntry(r))
-    return Promise.resolve(rankEntries(entries, query))
+    return Promise.resolve(rankEntries(entries, query, undefined, telemetry))
   }
 
   /** Test-only: the raw underlying handle, so a hellgate can inject a corrupt

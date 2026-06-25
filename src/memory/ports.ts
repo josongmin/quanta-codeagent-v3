@@ -1,3 +1,4 @@
+import type { MemoryTelemetryPort } from "./telemetry-port"
 import type { MemoryEntry, MemoryQuery } from "./types"
 
 /**
@@ -25,6 +26,15 @@ export interface PersistentStorePort {
    * where possible; callers must not assume cheapness.
    */
   all(): Promise<MemoryEntry[]>
-  /** Return entries matching the query, best-ranked first (see ranking.ts). */
-  recall(query: MemoryQuery): Promise<MemoryEntry[]>
+  /**
+   * Return entries matching the query, best-ranked first (see ranking.ts).
+   *
+   * `telemetry` (optional) is forwarded verbatim to {@link import("./ranking").rankEntries}
+   * so a caller can observe the SAME content-free counts the ranker computes —
+   * `hits` (entries returned, post-limit) and `totalScanned` (candidates the
+   * ranker considered). Absent ⇒ byte-identical to the legacy single-arg call
+   * (the ranker's telemetry branch is skipped). The recall-budget visibility
+   * hint (recallContext) reuses these exact counts; it does NOT recompute them.
+   */
+  recall(query: MemoryQuery, telemetry?: MemoryTelemetryPort): Promise<MemoryEntry[]>
 }

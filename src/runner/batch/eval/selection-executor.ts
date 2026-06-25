@@ -164,7 +164,7 @@ export const buildSelectionInputs = (args: {
     const file = ownerFiles[i - 1]
     return file === undefined
       ? undefined
-      : `Focus your investigation on \`${file}\`. Confirm the ROOT CAUSE lives there (not merely where the symptom surfaces) before editing.`
+      : `Among the candidate locations, pay particular attention to \`${file}\`: check whether the root cause lives there (rather than only where the symptom surfaces) before editing, and consider the other candidates too.`
   }
   return {
     ownerFiles,

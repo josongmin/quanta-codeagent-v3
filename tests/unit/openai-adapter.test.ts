@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { isRetryable } from "@/agent/retry"
 import type { StreamEvent, StreamInput, SystemBlock } from "@/llm"
 import type { ChatParam, RawChunk } from "@/llm/adapters/openai"
 import { OpenAIAdapter } from "@/llm/adapters/openai"
+import { LLMError } from "@/shared"
 
 /**
  * Drive the integrated `OpenAIAdapter.stream` against a fake OpenAI client.
@@ -212,5 +214,88 @@ describe("OpenAIAdapter.stream — system flattening (inspect captured request)"
     expect((fakeEmptyBlocks.requests[0]?.messages ?? []).some((m) => m.role === "system")).toBe(
       false,
     )
+  })
+})
+
+/**
+ * jun-25 (defense-in-depth) — chat-completions throttle-swallow guard, mirroring
+ * the Responses-transport guard (src/llm/responses-stream.ts:632-645). A 200
+ * chat stream that emits ZERO content events AND never carries a `finish_reason`
+ * is a silently-swallowed throttle: pre-guard it drained to a synthetic
+ * completed-empty `message_stop` with no backoff. It is now reclassified as a
+ * RETRYABLE `rate_limit` so the agent loop's exponential-jitter backoff engages.
+ *
+ * Teeth:
+ *  1. empty stream (0 chunks / no finish_reason) ⇒ throws `rate_limit` AND
+ *     `isRetryable === true` (so backoff actually engages — the whole point).
+ * RED-ON-INJECTION (both MUST complete without throwing, proving we only catch
+ * the swallow case):
+ *  2. a normal stream (has content) completes.
+ *  3. an empty-but-finish_reason stream (`stop` with empty content) completes —
+ *     a legitimate empty completion is NOT reclassified.
+ */
+const catchErr = async (it: AsyncIterable<StreamEvent>): Promise<unknown> => {
+  try {
+    await collect(it)
+    return undefined
+  } catch (e) {
+    return e
+  }
+}
+
+describe("OpenAIAdapter.stream — throttle-swallow guard (empty-200 defense-in-depth)", () => {
+  test("THE FIX: zero chunks / no finish_reason ⇒ RETRYABLE rate_limit", async () => {
+    // A 200 that streamed nothing at all (prepare-only swallow).
+    const fake = new FakeOpenAI([])
+    const err = await catchErr(adapterWith(fake).stream(baseInput()))
+    expect(err).toBeInstanceOf(LLMError)
+    expect((err as LLMError).kind).toBe("rate_limit")
+    // The whole point: the loop's backoff retry path must engage on this.
+    expect(isRetryable(err)).toBe(true)
+  })
+
+  test("a usage-only chunk with NO content and NO finish_reason is also reclassified", async () => {
+    // Trailing usage chunk has empty `choices` — it is NOT content and carries
+    // no finish_reason, so the swallow guard still fires.
+    const fake = new FakeOpenAI([
+      { choices: [], usage: { prompt_tokens: 1, completion_tokens: 0 } },
+    ])
+    const err = await catchErr(adapterWith(fake).stream(baseInput()))
+    expect(err).toBeInstanceOf(LLMError)
+    expect((err as LLMError).kind).toBe("rate_limit")
+  })
+
+  test("RED-ON-INJECTION: a normal stream (has content) completes WITHOUT throwing", async () => {
+    const fake = new FakeOpenAI([textChunk("hi"), stopChunk("stop")])
+    const events = await collect(adapterWith(fake).stream(baseInput()))
+    expect(events).toEqual([
+      { type: "text_delta", delta: "hi" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ])
+  })
+
+  test("RED-ON-INJECTION: empty content BUT finish_reason present completes WITHOUT throwing", async () => {
+    // A legitimate empty completion (`stop`, no content) MUST NOT be reclassified —
+    // only the no-content-AND-no-finish_reason case throws.
+    const fake = new FakeOpenAI([stopChunk("stop")])
+    const events = await collect(adapterWith(fake).stream(baseInput()))
+    expect(events).toEqual([{ type: "message_stop", stop_reason: "end_turn" }])
+  })
+
+  test("a tool-call-only stream (content via tool_calls, no finish) does NOT throw", async () => {
+    // tool_call deltas count as content ⇒ sawContent=true ⇒ guard skipped even
+    // with no finish_reason (a partial-but-real stream).
+    const fake = new FakeOpenAI([
+      {
+        choices: [
+          {
+            delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "read", arguments: "{}" } }] },
+            finish_reason: null,
+          },
+        ],
+      },
+    ])
+    const err = await catchErr(adapterWith(fake).stream(baseInput()))
+    expect(err).toBeUndefined()
   })
 })

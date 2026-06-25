@@ -59,7 +59,7 @@ import {
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
-import { extractIssueDeclaredExpected, extractIssueRepro } from "@/agent/verification-plan"
+import { extractIssueDeclaredExpected, extractIssueReproSeed } from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
@@ -95,7 +95,11 @@ import type {
 import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import { computeAdaptedTimeout } from "./adaptive-timeout"
-import { type CandidateFamily, candidateFamilyCoverageMissing } from "./candidate-families"
+import {
+  candidateFamilyCoverageMissing,
+  isCoChangeFamily,
+  type CandidateFamily,
+} from "./candidate-families"
 import { type DoneTimeCaptureClass, isCaptureFailure } from "./capture-correctness"
 import {
   buildMultisiteSteer,
@@ -1036,8 +1040,26 @@ export interface PrepareIssueHintDeps {
 }
 
 const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
-const CHA_MULTISITE_MAX_FILES = 3
-const CHA_MULTISITE_LOCALIZE_MAX_RESULTS = 5
+// CHA-multisite breadth defaults (jun-25 magic-number removal). These are NOT a
+// frozen ceiling on outcome: they are overridable via the existing
+// `localize-budget` knob (`posture.localizeBudget`), and the per-file localize
+// row count reuses the localizer's documented `topK` default so the analyzer
+// scans the SAME ranked rows the one-shot localizer ranks (single SSOT).
+const DEFAULT_CHA_MULTISITE_FILES = 3
+const DEFAULT_LOCALIZE_TOP_K = 5
+
+/** Resolve the # of localized candidate files to give CHA sibling analysis.
+ *  Overridable via `localize-budget` (`chafiles=N`); default mirrors the prior
+ *  literal, now documented config rather than a hidden constant. */
+const chaMultisiteFileBudget = (budget: LocalizeBudgetValue | undefined): number =>
+  budget?.chaMultisiteFiles ?? DEFAULT_CHA_MULTISITE_FILES
+
+/** Resolve the per-file localize `max_results`. Reuses the localizer's own
+ *  `topK` (how many ranked rows the one-shot localizer surfaces) so the
+ *  CHA-multisite scan is tied to the SAME breadth dial rather than a separate
+ *  frozen number. Overridable via `localize-budget` (`topk=N`). */
+const chaLocalizeMaxResults = (budget: LocalizeBudgetValue | undefined): number =>
+  budget?.topK ?? DEFAULT_LOCALIZE_TOP_K
 
 const cleanUniqueList = (values: readonly string[]): string[] => {
   const seen = new Set<string>()
@@ -1358,6 +1380,7 @@ const runScopedLocalize = async (args: {
   readonly sandbox: string
   readonly targetRelFile: string
   readonly query: string
+  readonly maxResults: number
   readonly timeoutMs?: number
 }): Promise<string | undefined> => {
   const controller = new AbortController()
@@ -1368,7 +1391,7 @@ const runScopedLocalize = async (args: {
       {
         query: args.query,
         path: args.targetRelFile,
-        max_results: CHA_MULTISITE_LOCALIZE_MAX_RESULTS,
+        max_results: args.maxResults,
       },
       { cwd: args.sandbox, signal: controller.signal },
     )) {
@@ -1386,6 +1409,7 @@ const resolveLocalizedPythonMethods = async (args: {
   readonly sandbox: string
   readonly targetRelFile: string
   readonly query: string
+  readonly maxResults: number
 }): Promise<readonly string[]> => {
   if (!args.targetRelFile.endsWith(".py")) return []
   const output = await runScopedLocalize(args)
@@ -1431,6 +1455,7 @@ const bestChaSteerCandidateForFile = async (args: {
   readonly targetRelFile: string
   readonly query: string
   readonly siblingMode: "path-hardcoded" | "general"
+  readonly maxResults: number
 }): Promise<ChaRepairTarget | undefined> => {
   const methods = await resolveLocalizedPythonMethods(args)
   let best: { method: string; sites: readonly SiblingOverrideSite[] } | undefined
@@ -1472,9 +1497,11 @@ const resolveChaMultisiteContext = async (args: {
   if (typeof query !== "string" || query.trim() === "") {
     return { steer: undefined, repairTargets: [] }
   }
+  const maxFiles = chaMultisiteFileBudget(args.posture.localizeBudget)
+  const maxResults = chaLocalizeMaxResults(args.posture.localizeBudget)
   const candidates = cleanUniqueList(args.localizeCandidates)
     .filter((file) => file.endsWith(".py"))
-    .filter((_, index) => index < CHA_MULTISITE_MAX_FILES)
+    .filter((_, index) => index < maxFiles)
   const siblingMode = chaSiblingModeOf(args.posture)
   const repairTargets: ChaRepairTarget[] = []
   let steer: string | undefined
@@ -1484,6 +1511,7 @@ const resolveChaMultisiteContext = async (args: {
       targetRelFile,
       query,
       siblingMode,
+      maxResults,
     })
     if (best !== undefined) {
       repairTargets.push(best)
@@ -1664,7 +1692,13 @@ const generateReproCandidateTests = async (
   config: ReproTestConfig,
 ): Promise<ReproCandidateGeneration | null> => {
   try {
-    const mwe = extractIssueRepro(instance.problemStatement)?.code
+    // SEED-ONLY: the issue-text extractor is a precision-first HEURISTIC guess at
+    // the repro (its `hasCall` regex can mistake an "Expected output" block for an
+    // executable MWE). We therefore consume it via the SEED-tagged variant and
+    // hand it to the LLM generator ONLY as grounding — it never executes as an
+    // oracle on its own. The AUTHORITATIVE repro is what the generator synthesises
+    // and the base-red gate (selectReproTest / baseValidatedRed) validates below.
+    const mwe = extractIssueReproSeed(instance.problemStatement)?.code
     const gen = deps.generate ?? generateReproTests
     const base = {
       issue: instance.problemStatement,
@@ -1764,7 +1798,7 @@ export const prepareReproTestDetailed = async (
   // EXECUTABLE Minimal Working Example (the author's own reproduction), seed the
   // generation with it so the model wraps that KNOWN-reproducing code in the
   // sentinel scaffold instead of guessing a reproduction from prose. Fail-closed:
-  // `extractIssueRepro` returns undefined for anything ambiguous, in which case
+  // `extractIssueReproSeed` returns undefined for anything ambiguous, in which case
   // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
   const generated = await generateReproCandidateTests(instance, deps, config)
   if (generated === null) return failedReproResult("generation_failed")
@@ -2255,7 +2289,8 @@ const buildDirectiveSteers = (
     ),
     spec: buildSpecSteer(instance, opt, isSwebench),
     simplicity: steerLine(
-      isSwebench && !gateDisabled(process.env, "QUANTA_BENCH_SIMPLICITY"),
+      // Default OFF; opt-in via QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).
+      isSwebench && gateOn(process.env, "QUANTA_BENCH_SIMPLICITY"),
       SIMPLICITY_STEER,
     ),
     sibling: steerLine(
@@ -2341,9 +2376,7 @@ const buildConfigGuards = (
       ? { lspPrewarm: { enabled: true, warmSignal: signal } }
       : {}),
     ...(verifyGuard !== undefined ? { verifyGuard } : {}),
-    ...(instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
-      ? { protectTestPaths: true }
-      : {}),
+    ...(instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS") ? { protectTestPaths: true } : {}),
   }
 }
 
@@ -2462,11 +2495,11 @@ export const buildConfig = (
   // mini/OpenHands solve it minimally because their system prompt carries an
   // explicit "seek the simplest mechanism / reject over-engineering" philosophy
   // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
-  // that philosophy verbatim-in-spirit. DEFAULT-ON (validated 2026-06-19):
-  // 2 proven causal flips (django-13417, sympy-24562: ❌→✅ with the steer), a
-  // fresh untried tier-E batch 8/9 across 7 repos, 7166's earlier fail confirmed
-  // RUN-NOISE (passed on re-run), 0 clear regression across ~18 graded. Off-
-  // switch `QUANTA_BENCH_SIMPLICITY=0` restores the pre-absorption baseline.
+  // that philosophy verbatim-in-spirit. Default OFF; opt-in via
+  // QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).
+  // Earlier DEFAULT-ON claim (2026-06-19) lacked an in-repo A/B harness, so the
+  // steer is now opt-in to keep it cleanly measurable; OFF ⇒ "" ⇒ byte-identical
+  // prompt restoring the pre-absorption baseline.
   // Lever A — sibling-completion / co-change check (ceiling multi-file class).
   // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
   // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
@@ -2540,11 +2573,14 @@ export const buildConfig = (
     // postures deliberately avoid broad repo-test execution, so a must-verify
     // guard would reintroduce the same host-env flail they are designed to
     // avoid.
-    // Test-scope guard (RCA 2026-06-19, django-13417). DEFAULT-ON for ALL real
-    // swebench modes, not just full execution: source-only is a benchmark
-    // invariant, so the dispatch layer must enforce it even in submit-only or
-    // repro-only runs. Off-switch `QUANTA_BENCH_PROTECT_TESTS=0` yields the
-    // advisory-only baseline.
+    // Test-scope guard (RCA 2026-06-19, django-13417). ENFORCING — when ON, the
+    // dispatch pre-flight `consultTestScope` DENIES any mutating tool call whose
+    // target is a test path (edit/write/apply_patch); source-only is a benchmark
+    // invariant for ALL real swebench modes, not just full execution. This keeps
+    // the agent from editing existing tests, chasing its own modified tests, or
+    // gaming PASS_TO_PASS / the oracle. DEFAULT-ON (a defensible measurement
+    // safeguard): the guard is enforced for every swebench instance unless
+    // `QUANTA_BENCH_PROTECT_TESTS=0` is set, which disables it (advisory baseline).
     ...buildConfigGuards(instance, opt, signal),
     // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
@@ -2573,6 +2609,11 @@ interface Phase {
   /** T-202/F6 stream-tap signals (single-pass path only). */
   firstEditFile?: string
   editCount?: number
+  /** Successful SOURCE edits (excludes test/scratch edits) — same predicate the
+   *  `lost-edits` capture classifier uses. The capture-miss guard gates on THIS,
+   *  not raw {@link editCount}: a test-only-edit timeout (raw editCount>0,
+   *  sourceAppliedEditCount=0) must NOT be mislabeled a capture-desync infra fail. */
+  sourceAppliedEditCount?: number
   turnsToFirstEdit?: number
   /** T-601 — did a repair round clear the (primary-rail) validator? Only set on
    *  the repair path; undefined on single-pass. Used to derive
@@ -3366,6 +3407,9 @@ const generateSelectionCandidate = async (args: {
       ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
       ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
       ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
+      ...(phase.sourceAppliedEditCount !== undefined
+        ? { sourceAppliedEditCount: phase.sourceAppliedEditCount }
+        : {}),
     }
   } finally {
     if (isolated) await cleanupSelectionCandidateSandbox(candidateSandbox)
@@ -3682,6 +3726,8 @@ const selectionPhaseResultOf = (args: {
     phase.agentError = args.result.terminalCandidate.agentError
   if (args.result.terminalCandidate?.editCount !== undefined)
     phase.editCount = args.result.terminalCandidate.editCount
+  if (args.result.terminalCandidate?.sourceAppliedEditCount !== undefined)
+    phase.sourceAppliedEditCount = args.result.terminalCandidate.sourceAppliedEditCount
   return phase
 }
 
@@ -3981,7 +4027,14 @@ const agentPhaseError = (phase: Phase): string | undefined => {
 }
 
 const patchCaptureMissErrorOf = (phase: Phase): string | undefined =>
-  phase.patch.trim() === "" && phase.stopReason === "aborted" && (phase.editCount ?? 0) > 0
+  // Gate on SOURCE-applied edits, not raw churn. A run that edited ONLY a
+  // test/scratch file then timed out (raw editCount>0, sourceAppliedEditCount=0)
+  // is a genuine no-source-edit timeout — NOT a capture desync — and must fall
+  // through to the normal `timeout` classification (no retry). Capture-miss fires
+  // ONLY when a real source edit was applied yet the captured diff is empty.
+  phase.patch.trim() === "" &&
+  phase.stopReason === "aborted" &&
+  (phase.sourceAppliedEditCount ?? 0) > 0
     ? "patch capture miss: agent edited files before abort, but final git diff was empty"
     : undefined
 
@@ -4207,6 +4260,23 @@ const preferredChaFamily = (
   return best
 }
 
+const structuralRepairFamilyFromSelection = (
+  candidateFiles: readonly string[],
+  candidateFamilies: readonly (CandidateFamily | undefined)[],
+): CandidateFamily | undefined => {
+  const families = candidateFamilies.filter((family): family is CandidateFamily => family !== undefined)
+  if (families.length === 0) return undefined
+  let bestMissing: CandidateFamily | undefined
+  let fallback: CandidateFamily | undefined
+  for (const family of families) {
+    if (fallback === undefined) fallback = family
+    if (!isCoChangeFamily(family.familyId)) continue
+    if (candidateFamilyCoverageMissing(family, candidateFiles).length === 0) continue
+    bestMissing = betterRepairFamily(candidateFiles, bestMissing, family)
+  }
+  return bestMissing ?? fallback
+}
+
 const deriveChaOverrideFamily = async (args: {
   readonly instance: Instance
   readonly candidate: Candidate
@@ -4276,14 +4346,14 @@ export const deriveCandidateStructuralRepair = async (args: {
     ...args,
     siblingMode: args.siblingMode ?? "path-hardcoded",
   })
+  const plannedStructuralFamily = structuralRepairFamilyFromSelection(
+    args.candidate.files,
+    structural.selectionInputs.candidateFamilies,
+  )
   const family =
     chaFamily === undefined
-      ? structural.selectionInputs.candidateFamilies[1]
-      : betterRepairFamily(
-          args.candidate.files,
-          structural.selectionInputs.candidateFamilies[1],
-          chaFamily,
-        )
+      ? plannedStructuralFamily
+      : betterRepairFamily(args.candidate.files, plannedStructuralFamily, chaFamily)
   if (family === undefined && structural.advisoryPromptContracts === undefined) return undefined
   return {
     ...(family !== undefined ? { family } : {}),

@@ -73,8 +73,10 @@ const writeDjangoShapedRepo = (): string => {
       ].join("\n"),
     )
   }
-  // Divergent sibling: same shared base + same method name, but a structurally
-  // different implementation. Symptom-coupled CHA must exclude it.
+  // Override-family member: same shared base + same method name, but a STRUCTURALLY
+  // DIFFERENT body. This previously fell below the frozen Jaccard `>= 0.45` gate
+  // and was wrongly DROPPED. The parameter-free CHA invariant (shared ancestor +
+  // same method name) surfaces it; the LLM, not a constant, decides relevance.
   writeFileSync(
     join(be, "postgresql", "operations.py"),
     [
@@ -103,7 +105,7 @@ const writeDjangoShapedRepo = (): string => {
 
 describe("CHA multi-site — real-python sibling resolution [gated on python3]", () => {
   test.if(hasPython)(
-    "mysql's `_convert_field_to_tz` ⇒ oracle + sqlite3 siblings, NOT mysql, NOT unrelated",
+    "mysql's `_convert_field_to_tz` ⇒ ALL same-base override-family siblings (incl. the structurally-divergent postgresql), NOT mysql, NOT unrelated",
     async () => {
       const dir = writeDjangoShapedRepo()
       try {
@@ -114,21 +116,35 @@ describe("CHA multi-site — real-python sibling resolution [gated on python3]",
           method: "_convert_field_to_tz",
         })
         const files = sites.map((s) => s.file).sort()
+        // Every shared-ancestor + same-method-name sibling is surfaced — including
+        // postgresql, whose body diverges and previously fell below the frozen
+        // `>= 0.45` Jaccard gate (the magic number we removed). No similarity
+        // threshold filters the set; the LLM confirms which sites exhibit the bug.
         expect(files).toEqual([
           "django/db/backends/oracle/operations.py",
+          "django/db/backends/postgresql/operations.py",
           "django/db/backends/sqlite3/operations.py",
         ])
         // target (mysql) excluded from its own sibling list
         expect(files).not.toContain("django/db/backends/mysql/operations.py")
-        // structurally divergent sibling excluded even though it shares the base
-        expect(files).not.toContain("django/db/backends/postgresql/operations.py")
-        // false sibling (same name, no shared base) excluded
+        // false sibling (same name, NO shared base) STILL excluded — the CHA
+        // invariant (shared ancestor) is the only gate, and it is not parameterized.
         expect(files).not.toContain("unrelated/thing.py")
         // each site carries the def line + class
         for (const s of sites) {
           expect(s.cls).toBe("DatabaseOperations")
           expect(s.line).toBeGreaterThan(0)
         }
+        // TELEMETRY (not admission): the divergent postgresql sibling carries a
+        // LOWER structural-overlap score than an identical-body sibling, yet is
+        // STILL admitted — proving the value rides along, never gates.
+        const pg = sites.find((s) => s.file.includes("postgresql"))
+        const oracle = sites.find((s) => s.file.includes("oracle"))
+        expect(pg?.structurallySimilar).toBeDefined()
+        expect(oracle?.structurallySimilar).toBeDefined()
+        expect(pg?.structurallySimilar as number).toBeLessThan(
+          oracle?.structurallySimilar as number,
+        )
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
@@ -473,6 +489,18 @@ describe("CHA multi-site — pure unit teeth (always run)", () => {
     ])
     // drops entries with wrong-typed fields
     expect(parseChaStdout('{"sites": [{"file":"a.py","line":"3","cls":"X"}]}')).toEqual([])
+    // telemetry-only structuralSimilarity rides through as a NUMBER (never gates)
+    expect(
+      parseChaStdout(
+        '{"sites": [{"file":"a.py","line":3,"cls":"X","structurallySimilar":0.12}]}',
+      ),
+    ).toEqual([{ file: "a.py", line: 3, cls: "X", structurallySimilar: 0.12 }])
+    // a wrong-typed similarity is dropped but the site is KEPT (low score never rejects)
+    expect(
+      parseChaStdout(
+        '{"sites": [{"file":"a.py","line":3,"cls":"X","structurallySimilar":"lots"}]}',
+      ),
+    ).toEqual([{ file: "a.py", line: 3, cls: "X" }])
   })
 
   test("parseMethodAtLineStdout tolerates malformed / null JSON", () => {

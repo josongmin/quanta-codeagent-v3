@@ -15,12 +15,14 @@ import { BOX_DIED_DURING_RUN_ERROR } from "./types"
 /** Poll cadence for the detached run. The box does the work; we just re-check. */
 const RUN_POLL_INTERVAL_MS = 15_000
 /** Consecutive failed polls (ssh exit !== 0) before a LIVENESS confirmation runs.
- *  ~20 × 15s ≈ 5min of unbroken ssh failure is the signal that the box may be
- *  gone (spot reclaim), not a transient NAT-drop the next tick recovers from.
- *  A spot reclaim NEVER writes `run.exit`, so without this bound the old `for(;;)`
- *  loop polled FOREVER at the 15s cadence, defeating the box-death-requeue
- *  invariant (rotation only re-checks BETWEEN chunks). */
-const RUN_MAX_CONSEC_POLL_FAILURES = 20
+ *  jun-25: 20→6. The confirmation is an `aws describe-instances` (source of
+ *  truth) that only ABORTS on a genuinely-gone box and RESETS on a live one, so
+ *  this threshold just decides how SOON we ask AWS — a lower value cannot
+ *  false-abort a healthy box. At 20 a partitioned box (each hung poll now ~2min
+ *  after the ServerAliveCountMax fix) took ~45min to even ask AWS; 6 fires the
+ *  liveness probe in ~3min (connect-refused fast-fail) to ~12min (partition),
+ *  so a dead box is requeued in minutes, not the prior ~30min+ hang. */
+const RUN_MAX_CONSEC_POLL_FAILURES = 6
 /** Absolute wall-clock ceiling on the detached run+poll loop — a backstop in case
  *  the liveness probe ITSELF keeps reporting "running" (e.g. an AWS describe lies
  *  / the box is half-zombied) yet `run.exit` never lands. The EC2 TTL backstop

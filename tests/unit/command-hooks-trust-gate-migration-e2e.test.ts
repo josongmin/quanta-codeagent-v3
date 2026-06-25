@@ -77,6 +77,24 @@ describe("T04 — migration-imported hook lands review-gated (import→persist�
         { type: "pre_tool_use", toolName: "write", payload: {} },
       )
       expect(calls.length).toBe(0)
+
+      // SECURITY (fail-closed by provenance) — the SAME imported hook is ALSO
+      // held with the trust-gate knob OFF and no review port (the default-path
+      // RCE hole this fix closes): provenance enforcement does not depend on the
+      // opt-in knob.
+      const knobOff = normalizeCommandHookGate({
+        enabled: true,
+        acknowledgedRisk: "armed for migration e2e, knob off",
+        bindings,
+        trustGate: false,
+      })
+      const offRun = fakeExec()
+      await runCommandHooks(
+        knobOff,
+        { exec: offRun.port, permission: allowPermission, cwd: projectDir },
+        { type: "pre_tool_use", toolName: "write", payload: {} },
+      )
+      expect(offRun.calls.length).toBe(0) // RED under the old bypass
     } finally {
       await rm(projectDir, { recursive: true, force: true })
       await rm(homeDir, { recursive: true, force: true })

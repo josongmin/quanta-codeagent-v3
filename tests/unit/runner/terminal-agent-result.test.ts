@@ -158,9 +158,12 @@ describe("terminalAgentResult", () => {
   })
 
   test("aborted after edits with empty patch surfaces patch-capture miss as infra", () => {
+    // Genuine capture desync: a real SOURCE edit was applied yet the captured
+    // diff is empty. sourceAppliedEditCount>0 ⇒ capture miss ⇒ infra-fail/retry.
     const result = mkTerminal({
       stopReason: "aborted",
       editCount: 3,
+      sourceAppliedEditCount: 2,
       firstEditFile: "django/db/backends/mysql/operations.py",
     })
 
@@ -168,6 +171,27 @@ describe("terminalAgentResult", () => {
     expect(classifyOutcome(result)).toEqual({
       kind: "infra-fail",
       reason: "patch capture miss: agent edited files before abort, but final git diff was empty",
+    })
+  })
+
+  test("aborted after editing ONLY a test/scratch file with empty patch ⇒ timeout, NOT capture-miss/retry", () => {
+    // No-source-edit timeout: raw churn happened (a test/scratch file was touched)
+    // but ZERO source edits were applied, so the empty captured diff is the real
+    // miss — not a capture desync. Gating on sourceAppliedEditCount keeps this out
+    // of the infra-fail/retry bucket and lands it in the timeout denominator.
+    // TEETH: gating on raw `editCount` (the old over-broad guard) would surface a
+    // spurious "patch capture miss" and reclassify this as infra-fail (retry) —
+    // this assertion goes RED under that injection.
+    const result = mkTerminal({
+      stopReason: "aborted",
+      editCount: 4,
+      sourceAppliedEditCount: 0,
+      firstEditFile: "tests/test_operations.py",
+    })
+
+    expect(result.error ?? "").not.toContain("patch capture miss")
+    expect(classifyOutcome(result)).toEqual({
+      kind: "timeout",
     })
   })
 

@@ -87,7 +87,10 @@ const userText = (cfg: ReturnType<typeof buildConfig>): string => {
 }
 
 describe("QUANTA_BENCH_LEAN_PROMPT", () => {
-  test("OFF (default) ⇒ verbose directive + simplicity steer present (byte-identical baseline)", () => {
+  test("OFF (default) ⇒ verbose directive + (opt-in) simplicity steer present (byte-identical baseline)", () => {
+    // Simplicity steer is now DEFAULT-OFF (opt-in); explicitly enable it so this
+    // test exercises the verbose-vs-lean directive split with the bolt-on present.
+    process.env.QUANTA_BENCH_SIMPLICITY = "1"
     const text = userText(buildOnce())
     expect(text).toContain(VERBOSE_MARK)
     expect(text).toContain(SIMPLICITY_MARK)
@@ -96,6 +99,7 @@ describe("QUANTA_BENCH_LEAN_PROMPT", () => {
 
   test("LEAN-1/2/3: ON ⇒ lean directive present, verbose + bolt-on steers absent", () => {
     process.env.QUANTA_BENCH_LEAN_PROMPT = "1"
+    process.env.QUANTA_BENCH_SIMPLICITY = "1" // opt-in; lean must still strip it (LEAN-3)
     const text = userText(buildOnce())
     expect(text).toContain(LEAN_MARK) // LEAN-1
     expect(text).toContain(VERIFY_MODE_STEER)

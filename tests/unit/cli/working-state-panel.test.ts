@@ -16,7 +16,13 @@
  *                                cap single-line `what`/`reason` ellipsised
  *                                to `MAX_LINE_LEN`.
  *   - posture inference       → blockers > next > hypothesis > owners >
- *                                idle, with explicit ordering tests.
+ *                                no-active-plan, with explicit ordering tests.
+ *                                The header is "Plan posture" and the
+ *                                empty-plan value is "no active plan" (NOT a
+ *                                bare "idle") so the line reads as a summary
+ *                                of the model's plan scratchpad, never a live
+ *                                turn-lifecycle status this pure renderer
+ *                                cannot verify.
  *   - transient cap           → very long transient capped at
  *                                `MAX_TRANSIENT_LEN`.
  *   - slash registration      → BUILTINS includes `/state` + `/working-state`.
@@ -88,7 +94,7 @@ describe("renderWorkingStatePanel", () => {
       hypothesis: "config parsing is the hot path",
     }
     const out = stripAnsi(renderWorkingStatePanel(snap))
-    expect(out).toContain("Posture:")
+    expect(out).toContain("Plan posture:")
     expect(out).toContain("investigating")
     expect(out).toContain("Hypothesis:")
     expect(out).toContain("config parsing is the hot path")
@@ -179,8 +185,8 @@ describe("renderWorkingStatePanel", () => {
     expect(longest).toBeLessThan(__internal.MAX_LINE_LEN + 40)
   })
 
-  test("posture precedence: blockers > next > hypothesis > owners > idle", () => {
-    expect(__internal.inferPosture(emptySnap())).toBe("idle")
+  test("posture precedence: blockers > next > hypothesis > owners > no-active-plan", () => {
+    expect(__internal.inferPosture(emptySnap())).toBe("no active plan")
     expect(
       __internal.inferPosture({
         ...emptySnap(),
@@ -202,6 +208,38 @@ describe("renderWorkingStatePanel", () => {
         nextStepQueue: [{ what: "n" }],
       }),
     ).toBe("blocked")
+  })
+
+  // Status-honesty: this pure renderer has NO access to the real turn
+  // lifecycle (the surface threads only the read-only WorkingState getter —
+  // see `SlashContext.workingState`), so the posture line must NOT read as a
+  // live turn status. Empty plan ⇒ "no active plan" (a plan-scoped phrase),
+  // never a bare "idle" that could contradict a turn that is actually
+  // running. The header is "Plan posture" (plan-scoped), not bare "Posture".
+  //
+  // TEETH: the OLD wording (header "Posture:" + empty value "idle") fails
+  // both assertions below — `inferPosture` returning "idle" trips the first,
+  // and a bare "Posture:" header (no "Plan") trips the second.
+  test("status honesty: empty plan ⇒ 'no active plan', never a bare 'idle'", () => {
+    setColorPolicy("off")
+    // The inferred value for an empty scratchpad is plan-scoped, NOT "idle".
+    expect(__internal.inferPosture(emptySnap())).toBe("no active plan")
+    expect(__internal.inferPosture(emptySnap())).not.toBe("idle")
+  })
+
+  test("status honesty: posture line is plan-scoped ('Plan posture'), never bare 'Posture:'", () => {
+    setColorPolicy("off")
+    // A non-empty scratchpad paints the posture line. The label must read as
+    // a plan-scratchpad summary, not a live turn status. A bare "idle" value
+    // must never appear even when no plan fields are set on a non-empty snap.
+    const snap: WorkingState = { ...emptySnap(), hypothesis: "still framing" }
+    const out = stripAnsi(renderWorkingStatePanel(snap))
+    expect(out).toContain("Plan posture:")
+    // The bare "Posture:" header (without the "Plan " qualifier) would read
+    // as a live lifecycle status — it must NOT appear.
+    expect(out).not.toMatch(/(^|\n)\s*Posture:/)
+    // And the word "idle" (a live-lifecycle term) must never surface.
+    expect(out).not.toContain("idle")
   })
 })
 

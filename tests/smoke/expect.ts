@@ -31,11 +31,46 @@ export const runAssertions = (args: {
   checkFinalText(out, spec, capture)
   checkContextRetention(out, spec, capture)
   checkBudget(out, spec, capture)
+  // FLAG 1: a tier-0 scenario whose ONLY pass signal is the cached judge score
+  // (a constant typed into expect.json — never inspecting the replayed output)
+  // would green even if the replayed text were garbage. A judge block is allowed
+  // to CONTRIBUTE, but it cannot be the only thing standing between the run and
+  // green. Require at least one real, output-inspecting assertion alongside it.
+  checkJudgeNotSoleGate(out, spec)
   // judge: Phase 2 — schema is honoured at parse time but execution is wired
   // in a follow-up. A `cached.score < threshold` is honoured here so already-
   // cached judge runs gate without an LLM round-trip.
   checkJudgeCached(out, spec)
   return out
+}
+
+/**
+ * "Real assertion" = a teeth-bearing block that inspects the actual run/output:
+ * stopReason, turns, toolCalls, files, finalText, contextRetention, or budget.
+ * The cached `judge` score is explicitly NOT real (it is a hardcoded literal,
+ * not derived from the replayed output). Used by {@link checkJudgeNotSoleGate}.
+ */
+const hasRealAssertion = (spec: ExpectSpec): boolean =>
+  spec.stopReason !== undefined ||
+  spec.turns?.count !== undefined ||
+  spec.toolCalls !== undefined ||
+  (spec.files !== undefined && spec.files.length > 0) ||
+  spec.finalText !== undefined ||
+  (spec.contextRetention !== undefined && spec.contextRetention.length > 0) ||
+  spec.budget !== undefined
+
+/** FLAG 1 — fail LOUD (as a config error) when a scenario declares a judge block
+ *  but carries NO real assertion. Such a fixture would pass purely on the cached
+ *  literal judge score, never inspecting the replayed output. */
+const checkJudgeNotSoleGate = (out: AssertionFailure[], spec: ExpectSpec): void => {
+  if (spec.judge === undefined) return
+  if (hasRealAssertion(spec)) return
+  fail(
+    out,
+    "judge.soleGate",
+    "a real assertion (finalText/files/toolCalls/stopReason/turns/...) alongside the judge",
+    "tier-0 scenario relies on cached judge alone — add a real assertion",
+  )
 }
 
 const fail = (out: AssertionFailure[], path: string, expected: string, actual: string): void => {

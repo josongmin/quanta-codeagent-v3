@@ -96,19 +96,25 @@ describe("verification owner test expectations", () => {
     expect(facts.join(" ")).not.toContain("TimeSeries object is invalid - expected |")
   })
 
-  test("T2 ranks issue-symbol expectations ahead of earlier unrelated asserts in large public test files", async () => {
+  test("TEETH: an expectation with ZERO issue-symbol overlap is STILL surfaced (unranked, source order) within the size budget", async () => {
+    // The fix removed the issue-symbol keyword-overlap re-rank+small-cap that withheld
+    // test contracts whose wording did not lexically match the issue symbols. Here the
+    // FIRST assert shares NO token with the issue symbol ("TimeSeries") yet must reach
+    // the model. Under the OLD score-sort + maxExpectations=2 cap, the two lexically
+    // matching asserts would outrank and DROP the zero-overlap assert.
     const sandbox = mkSandbox()
     const testDir = join(sandbox, "astropy/timeseries/tests")
     mkdirSync(testDir, { recursive: true })
     writeFileSync(
       join(testDir, "test_sampled.py"),
       [
-        "def test_unrelated_a():",
-        '    assert str(exc.value) == "unrelated first message"',
-        "def test_unrelated_b():",
-        '    assert str(exc.value) == "unrelated second message"',
-        "def test_required_columns_message():",
-        '    assert str(exc.value) == "TimeSeries object is invalid - expected required columns"',
+        "def test_zero_overlap_contract():",
+        // No token here overlaps the "TimeSeries" issue symbol.
+        '    assert str(exc.value) == "rows must be sorted ascending"',
+        "def test_match_a():",
+        '    assert str(exc.value) == "TimeSeries object is invalid - first"',
+        "def test_match_b():",
+        '    assert str(exc.value) == "TimeSeries object is invalid - second"',
       ].join("\n"),
     )
 
@@ -117,15 +123,19 @@ describe("verification owner test expectations", () => {
       ownerNearTests: [],
       localizedOwnerFiles: ["astropy/timeseries/core.py"],
       issueSymbols: ["TimeSeries"],
-      maxExpectations: 1,
     })
 
-    expect(facts).toEqual([
-      "astropy/timeseries/tests/test_sampled.py::test_required_columns_message exact/public literal: TimeSeries object is invalid - expected required columns",
-    ])
+    // The zero-overlap contract is surfaced (it is first in source order, well within
+    // the budget) — NOT dropped in favor of the lexically matching asserts.
+    expect(facts).toContain(
+      "astropy/timeseries/tests/test_sampled.py::test_zero_overlap_contract exact/public literal: rows must be sorted ascending",
+    )
+    // All three contracts fit the budget; none is withheld by a relevance guess.
+    expect(facts.join(" ")).toContain("TimeSeries object is invalid - first")
+    expect(facts.join(" ")).toContain("TimeSeries object is invalid - second")
   })
 
-  test("T2 issue-symbol ranking is token-aware: id does not match invalid", async () => {
+  test("UNRANKED ORDER: expectations are surfaced in stable SOURCE order, not issue-symbol order", async () => {
     const sandbox = mkSandbox()
     const testDir = join(sandbox, "pkg/tests")
     mkdirSync(testDir, { recursive: true })
@@ -143,10 +153,11 @@ describe("verification owner test expectations", () => {
       sandbox,
       ownerNearTests: ["python -m pytest pkg/tests/test_widget.py"],
       issueSymbols: ["id"],
-      maxExpectations: 1,
     })
 
+    // Source order preserved — the "id"-matching assert is NOT hoisted to the front.
     expect(facts).toEqual([
+      "pkg/tests/test_widget.py::test_invalid_message_noise exact/public literal: invalid widget state",
       "pkg/tests/test_widget.py::test_id_message_signal exact/public literal: id must be positive",
     ])
   })

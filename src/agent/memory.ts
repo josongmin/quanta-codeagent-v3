@@ -7,6 +7,7 @@ import {
   findNearDuplicates,
   type MemoryEntry,
   type MemoryQuery,
+  type MemoryTelemetryPort,
   type MemoryTier,
   type PersistentStorePort,
   planEviction,
@@ -84,13 +85,37 @@ const embedOne = async (
   }
 }
 
+/**
+ * Recall-budget visibility hint. When the ranker SCANNED more candidate
+ * memories (`scanned` = N) than it INJECTED (`injected` = K, the post-limit
+ * count), the recalled block is a TRUNCATED top-K view — the model has no way
+ * to know more exist unless we say so. Returns the one-line disclosure in that
+ * case, else `undefined` (no line ⇒ no noise when everything fit).
+ *
+ * K/N are the ranker's own counts (the SAME values it emits on the telemetry
+ * seam — `hits` / `totalScanned`); this helper does NOT recompute relevance or
+ * apply any new heuristic. It is purely the budget readout.
+ */
+export const recallBudgetHint = (injected: number, scanned: number): string | undefined =>
+  scanned > injected
+    ? `(recalled ${injected} of ${scanned} candidate memories — use memory_search for more)`
+    : undefined
+
 /** Fold entries into the system-prompt augmentation block. The H2 carries the
  *  trust-ladder downgrade verbatim (Codex `memory-model-audit.md`): recalled
  *  memory is a ROUTING HINT, never proof. The prompt-side renderer no longer
- *  prefixes a second label, so there's exactly one H2 for the memory block. */
-const formatBlock = (entries: readonly MemoryEntry[]): string => {
+ *  prefixes a second label, so there's exactly one H2 for the memory block.
+ *
+ *  `scanned` (the ranker's candidate total) drives the recall-budget hint
+ *  (see {@link recallBudgetHint}). When it exceeds the rendered entry count
+ *  the truncation disclosure is appended UNDER the same H2 (still inside the
+ *  one "routing hints only — not proof" frame); when it doesn't (or is
+ *  omitted) the block is byte-identical to the legacy shape. */
+const formatBlock = (entries: readonly MemoryEntry[], scanned?: number): string => {
   const lines = entries.map((e) => `- (${e.kind}) ${truncate(e.text)}`)
-  return `## Memory hints (routing hints only — not proof)\n${lines.join("\n")}`
+  const hint = scanned === undefined ? undefined : recallBudgetHint(entries.length, scanned)
+  const body = hint === undefined ? lines.join("\n") : `${lines.join("\n")}\n${hint}`
+  return `## Memory hints (routing hints only — not proof)\n${body}`
 }
 
 /** Invoke an optional stats observer; an observer throw must never escape. */
@@ -179,7 +204,22 @@ export const recallContext = async (
     query.routing = opts.routing
   }
 
-  let entries = await deps.store.recall(query)
+  // Capturing telemetry sink: reuse the ranker's content-free counts (the
+  // SAME `hits`/`totalScanned` it emits) to drive the recall-budget hint, so
+  // the disclosure never recomputes relevance with a fresh heuristic. Only the
+  // candidate total (`totalScanned`) is read; entry text/scores never cross it.
+  // `scanned` tracks whichever recall actually produced the rendered entries
+  // (primary, or the tag-only fallback below).
+  let scanned: number | undefined
+  const countSink: MemoryTelemetryPort = {
+    recordPhase1: () => {},
+    recordPhase2: () => {},
+    recordRecall: (e) => {
+      scanned = e.totalScanned
+    },
+  }
+
+  let entries = await deps.store.recall(query, countSink)
   let fellBack = false
   let queryForScore: MemoryQuery = query
   if (entries.length === 0) {
@@ -188,7 +228,7 @@ export const recallContext = async (
     // is the score from the empty first-query attempt, not the score that
     // actually placed the entry). Use the same tag-only query for scoring.
     queryForScore = { tags: [SESSION_TAG], limit }
-    entries = await deps.store.recall(queryForScore)
+    entries = await deps.store.recall(queryForScore, countSink)
     fellBack = true
   }
   if (entries.length === 0) {
@@ -222,7 +262,7 @@ export const recallContext = async (
       // Observability is advisory; never let it break recall.
     }
   }
-  return formatBlock(entries)
+  return formatBlock(entries, scanned)
 }
 
 export interface PersistDeps {

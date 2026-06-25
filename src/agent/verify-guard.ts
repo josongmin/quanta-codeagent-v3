@@ -13,7 +13,12 @@
  * machine. The signal symbols are re-exported below for back-compat.
  */
 
-import { isTestLikeCommand, isVerifyOutputFailing, isVerifySignalCommand } from "./verify-signal"
+import {
+  isTestLikeCommand,
+  isVerifyOutputFailing,
+  isVerifySignalCommand,
+  verifyOutputFailureMarkerId,
+} from "./verify-signal"
 
 export {
   isTestLikeCommand,
@@ -24,6 +29,7 @@ export {
   OUTCOME_FAILURE_MATCHERS,
   type OutcomeFailureMatcher,
   TEST_LIKE_RE,
+  verifyOutputFailureMarkerId,
   type VerifyMatcher,
 } from "./verify-signal"
 
@@ -35,20 +41,56 @@ export interface VerifyGuardState {
 /** Fresh state for a session — zero forcings spent. */
 export const createVerifyGuardState = (): VerifyGuardState => ({ trips: 0 })
 
-/** The forcing nudge injected when the model finishes after an unverified edit. */
+/**
+ * The forcing nudge injected when no verify-classified call is detected after
+ * the latest edit. EVIDENTIAL, not asserted: the detector is a heuristic over
+ * the command STRING (per-ecosystem registry in `verify-signal`), so a custom
+ * or unrecognized runner can produce a FALSE no-verify reading. The wording
+ * therefore acknowledges the detector is heuristic and HANDS the judgment back
+ * to the model (it can answer "I verified via <cmd>") instead of asserting a
+ * falsehood. Mechanics (when it fires, the trip cap, the tool_choice routing)
+ * are unchanged — only the framing moved from asserted verdict to evidence +
+ * question.
+ */
 export const VERIFY_FORCE_MESSAGE =
-  "You edited source but ran no test or reproduction afterward. Do NOT finish yet. Construct the exact failing scenario the issue describes, run it to confirm your fix makes it pass, AND run the repository's existing test(s) nearest the changed code to confirm no regression. Only stop once those pass."
+  "I didn't detect a test or reproduction run after your last edit (detection is heuristic — it matches a registry of known runner commands and may MISS a custom or unrecognized runner). If you already verified the fix, say HOW (which command and what it showed) and proceed. Otherwise, do NOT finish yet: construct the exact failing scenario the issue describes, run it to confirm your fix makes it pass, AND run the repository's existing test(s) nearest the changed code to confirm no regression."
 
 /**
- * The forcing nudge injected when the model finishes after a verify call that
- * FAILED (mustPass-only). Distinct from {@link VERIFY_FORCE_MESSAGE} because
- * the corrective action differs: here a verify DID run — the model must read
- * the failure, locate the cause, edit, and re-run. This is the outcome-gate
- * that closes the "ran pytest → ok:false → declared done" loophole observed
- * in skills/subagent-ON sanity runs.
+ * The forcing nudge injected when the model finishes after a verify call whose
+ * outcome LOOKED like a failure (mustPass-only). Distinct from
+ * {@link VERIFY_FORCE_MESSAGE} because here a verify DID run.
+ *
+ * EVIDENTIAL, not asserted: the "failed?" reading is a heuristic — either the
+ * dispatch `ok:false` flag OR a REGEX match of an ecosystem failure summary in
+ * the captured stdout (see `OUTCOME_FAILURE_MATCHERS`). A custom runner whose
+ * summary happens to match (e.g. `pytest --continue-on-collection-errors`, or a
+ * project runner that prints a "N failed" line for a passing run) can flip this
+ * reading. So the message SURFACES the evidence (the matched marker id, when
+ * the output regex is what fired) and HANDS the judgment to the model rather
+ * than asserting a categorical "FAILED". The model can say "that run actually
+ * passed" and proceed. Mechanics (firing condition, trip cap, tool_choice
+ * routing) are unchanged — only the framing moved from asserted verdict to
+ * evidence + question.
+ *
+ * @param marker - the `id` of the failure matcher that fired on the output
+ *   (from {@link verifyOutputFailureMarkerId}), or `undefined` when the reading
+ *   came from the dispatch `ok:false` flag (no stdout regex available).
  */
-export const VERIFY_PASS_FORCE_MESSAGE =
-  "Your last verification (test/repro) FAILED. Do NOT finish — fix the regression first. Read the failure output, locate the root cause, edit, then re-run the same verification. Only stop once the test passes."
+export const verifyPassForceMessage = (marker?: string): string => {
+  const evidence =
+    marker !== undefined
+      ? `The output of your last verification (test/repro) matched a known failure pattern (\`${marker}\`).`
+      : "Your last verification (test/repro) was reported as failing by the tool runner."
+  return `${evidence} If that is a REAL failure, do NOT finish — read the failure output, locate the root cause, edit, then re-run the same verification and stop only once it passes. If the run actually PASSED (e.g. a custom runner whose summary only LOOKS like a failure), say so and proceed.`
+}
+
+/**
+ * Back-compat constant: the marker-less evidential message. Equal to
+ * `verifyPassForceMessage()` (the dispatch-`ok:false` phrasing). The guard
+ * computes the marker dynamically and prefers {@link verifyPassForceMessage};
+ * this constant is the value emitted when no output marker is available.
+ */
+export const VERIFY_PASS_FORCE_MESSAGE = verifyPassForceMessage()
 
 /** Tools that mutate source — an edit that must be verified before finishing. */
 const MUTATING = new Set(["edit", "write"])
@@ -216,7 +258,12 @@ export const decideVerifyGuard = (args: {
   // Must-pass branch: presence satisfied, but the latest verify failed.
   // Conservative: unknown outcome (ok absent + output absent) ⇒ no block.
   if (mustPass && isVerifyFailing(lastVerify) && spendTrip(state, cap)) {
-    return { block: true, text: VERIFY_PASS_FORCE_MESSAGE }
+    // Thread the matched failure marker (when the OUTPUT regex is what fired)
+    // into the EVIDENTIAL message so the model sees WHY the output looked like
+    // a failure. When the reading came from the dispatch `ok:false` flag there
+    // is no stdout marker ⇒ `undefined` ⇒ the marker-less back-compat phrasing.
+    const marker = verifyOutputFailureMarkerId(lastVerify.output ?? "") ?? undefined
+    return { block: true, text: verifyPassForceMessage(marker) }
   }
   return { block: false }
 }

@@ -67,11 +67,19 @@ const matcherPredicate = (matcher: string | undefined): ((name: string) => boole
   return (name) => re.test(name)
 }
 
-/** T04 — filter `matching` down to the bindings allowed to fire under the trust
- *  gate. A binding NOT flagged `needsReview` always passes. A `needsReview`
- *  binding passes ONLY if the review port explicitly approves it; with NO review
- *  port it is HELD (fail-closed — an imported hook never fires un-reviewed). A
- *  throwing review port is treated as "not approved" (never spawns on error). */
+/** SECURITY (fail-closed by provenance) — filter `matching` down to the
+ *  bindings allowed to fire. ALWAYS applied (NOT gated on the `trustGate`
+ *  opt-in): the `needsReview` stamp is set by trusted code from the binding's
+ *  provenance (repo/imported ⇒ untrusted ⇒ review-gated), so honoring it is the
+ *  security boundary, not a feature toggle.
+ *
+ *  - A binding NOT flagged `needsReview` (user/managed/legacy-un-provenanced,
+ *    i.e. trusted) ALWAYS passes — legit hooks are never broken.
+ *  - A `needsReview` binding passes ONLY if the review port explicitly approves
+ *    it; with NO review port it is HELD (deny-on-doubt — an untrusted repo hook
+ *    never fires un-reviewed).
+ *  - A throwing review port is treated as "not approved" (never spawns on
+ *    error). */
 const selectApproved = async (
   matching: readonly CommandHookBinding[],
   review: CommandHookReviewPort | undefined,
@@ -180,15 +188,20 @@ export const runCommandHooks = async (
   const matching = gate.bindings.filter((b) => bindingMatches(b, event))
   if (matching.length === 0) return NEUTRAL
 
-  // T04 TRUST GATE — a binding flagged `needsReview` (imported / repo-shipped
-  // provenance) must NOT spawn until the user has explicitly approved it. Only
-  // enforced when the gate's trust gate is armed; otherwise `needsReview` is
-  // informational and every binding fires (byte-identical pre-T04 path). A
-  // HELD binding does NOT deny the tool — it is simply not active yet (the RCE
-  // surface is the COMMAND EXEC, which never happens for an un-approved hook).
-  // Fail-closed: no review port ⇒ a review-gated binding is treated as not
-  // approved (never silently fires).
-  const runnable = gate.trustGate ? await selectApproved(matching, deps.review) : matching
+  // SECURITY — fail-closed BY PROVENANCE. A binding flagged `needsReview`
+  // (imported / repo-shipped / untrusted-source provenance) must NOT spawn until
+  // it has been explicitly approved — ALWAYS, regardless of the `trustGate`
+  // opt-in knob. The RCE surface is the COMMAND EXEC, so an untrusted hook that
+  // could run un-approved by default is the hole; deny-on-doubt closes it. A
+  // HELD binding does NOT deny the tool — it is simply not active yet.
+  //
+  // The `gate.trustGate` knob now controls ONLY whether an interactive approval
+  // PORT / UX is offered (wired by the composition root) — NEVER whether an
+  // untrusted-source hook may fire. A user/trusted-provenance binding
+  // (needsReview:false / absent) always fires; `selectApproved` enforces exactly
+  // that split. Fail-closed: no review port ⇒ a review-gated binding is treated
+  // as NOT approved (never silently fires).
+  const runnable = await selectApproved(matching, deps.review)
   if (runnable.length === 0) return NEUTRAL
 
   // Permission guard — a command hook is privileged. Consulted ONCE per event

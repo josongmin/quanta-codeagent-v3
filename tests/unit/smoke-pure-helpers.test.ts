@@ -17,6 +17,7 @@
 // meta-test: exercises tests/smoke/* helpers (lives outside src/, no @/ alias).
 import { describe, expect, test } from "bun:test"
 import { CaptureStream } from "../smoke/capture-stream"
+import { runAssertions } from "../smoke/expect"
 import { parseJudgeReply } from "../smoke/judge"
 import { diffExpect, proposeExpect, serializeTrajectory } from "../smoke/recorder"
 import { TrajectoryReplayLLM } from "../smoke/replay-llm"
@@ -295,5 +296,66 @@ describe("TrajectoryReplayLLM", () => {
     expect(first.length).toBe(3)
     expect(second.length).toBe(2)
     expect(second[0]?.type).toBe("text_delta")
+  })
+
+  // FLAG 2 — under-consumption detection. Teeth: pre-fix there was no way to
+  // tell the agent left recorded buckets unused; the run would pass silently.
+  test("consumedAll()/remaining() track which buckets were streamed", async () => {
+    const llm = new TrajectoryReplayLLM([
+      { run: 0, turn: 0, event: { type: "message_stop", stop_reason: "end_turn" } },
+      { run: 1, turn: 0, event: { type: "message_stop", stop_reason: "end_turn" } },
+    ])
+    // Fresh fixture: nothing consumed yet ⇒ both buckets outstanding.
+    expect(llm.consumedAll()).toBe(false)
+    expect(llm.remaining()).toEqual(["0:0", "1:0"])
+    // Consume only the first run, then STOP early (agent diverged to fewer
+    // turns) — the run-1 bucket is left unused.
+    await drain(llm.stream(input))
+    expect(llm.consumedAll()).toBe(false)
+    expect(llm.remaining()).toEqual(["1:0"])
+    // Control: consuming the remaining bucket flips it green.
+    llm.nextRun()
+    await drain(llm.stream(input))
+    expect(llm.consumedAll()).toBe(true)
+    expect(llm.remaining()).toEqual([])
+  })
+})
+
+// =====================================================================
+// FLAG 1 — cached judge must not be the SOLE gate (config-error fail-closed).
+// =====================================================================
+describe("runAssertions — judge-not-sole-gate (FLAG 1)", () => {
+  const blankCapture = (): CaptureStream => new CaptureStream()
+  const run = (spec: ExpectSpec) =>
+    runAssertions({ spec, capture: blankCapture(), cwd: "/tmp/nonexistent", stopReason: "x", turns: 0 })
+
+  test("judge block with NO real assertion FAILS as a config error (teeth)", () => {
+    // Pre-fix this spec passed purely on the cached literal score (1 >= 0.6),
+    // never inspecting the replayed output. It must now fail loud.
+    const spec: ExpectSpec = {
+      judge: {
+        rubric: "anything",
+        threshold: 0.6,
+        cached: { score: 1, rationale: "looks great" },
+      },
+    }
+    const failures = run(spec)
+    const soleGate = failures.find((f) => f.path === "judge.soleGate")
+    expect(soleGate).toBeDefined()
+    expect(soleGate?.actual).toContain("cached judge alone")
+  })
+
+  test("judge block ALONGSIDE a real assertion does NOT trip the sole-gate check (control)", () => {
+    const spec: ExpectSpec = {
+      stopReason: "completed",
+      judge: { rubric: "x", threshold: 0.6, cached: { score: 1, rationale: "ok" } },
+    }
+    const failures = run(spec)
+    expect(failures.some((f) => f.path === "judge.soleGate")).toBe(false)
+  })
+
+  test("a spec with NO judge block is unaffected (the check is judge-gated)", () => {
+    const failures = run({ finalText: { contains: ["hi"] } })
+    expect(failures.some((f) => f.path === "judge.soleGate")).toBe(false)
   })
 })

@@ -109,6 +109,20 @@ describe("real-pytest grounding (capability-gated)", () => {
     await expect(readFile(pytestReportPathFor(r.path), "utf8")).rejects.toThrow()
   })
 
+  test.skipIf(!HAS_PYTEST)(
+    "call-phase raw exception from code under test ⇒ reproduced (real pytest)",
+    async () => {
+      // The buggy code raises a RAW exception (no assertion) — the symptom IS
+      // the crash. This must count as a reproduction, not be withheld.
+      const src = ensurePytestFooter(
+        "def buggy():\n    return 1 / 0\n\ndef test_bug():\n    buggy()",
+      )
+      const r = await runAsPython(dir, "t_raw_exc.py", src)
+      expect(r.code).not.toBe(0)
+      expect(await outcomeOf(r.path)).toBe("reproduced")
+    },
+  )
+
   test.skipIf(!HAS_PYTEST)("no def test_* ⇒ unknown (no tests ran)", async () => {
     const src = ensurePytestFooter("x = 1\ny = x + 1")
     const r = await runAsPython(dir, "t_none.py", src)

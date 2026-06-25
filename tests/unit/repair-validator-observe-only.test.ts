@@ -62,39 +62,49 @@ describe("validator — observe-only predicate", () => {
     expect(r.predicate).toBeUndefined()
   })
 
-  test("exit 0 + matching predicate ⇒ ok:true, predicate.matched:true", async () => {
+  test("exit 0 + matching EVALUABLE predicate (test_exit_zero) ⇒ ok:true, predicate.matched:true", async () => {
+    // Use the execution oracle here: it is the only EVALUABLE predicate in v1, so
+    // it exercises the matched:true recording path. (stdout_contains is now
+    // advisory — see the prose-stdout test below.)
     const r = await validate(
       base({
         exec: fakeExec(0, "3 PASSED"),
-        successPredicate: { type: "stdout_contains", substring: "PASSED" },
+        successPredicate: { type: "test_exit_zero" },
       }),
     )
     expect(r.ok).toBe(true)
     expect(r.predicate).toEqual({ evaluable: true, matched: true })
   })
 
-  test("🔴 exit 0 + predicate MISMATCH ⇒ STILL ok:true (observe-only, no false-RED in v1)", async () => {
+  test("🔴 exit 0 + ADVISORY prose stdout_contains MISMATCH ⇒ STILL ok:true, recorded evaluable:false (no false-RED)", async () => {
+    // stdout_contains is issue-PROSE-derived; a mis-extracted value must NOT gain
+    // rail authority. So even a stdout that does NOT contain the value records as
+    // ADVISORY (evaluable:false), never a hard matched:false.
     const r = await validate(
       base({
         exec: fakeExec(0, "wrong output"),
         successPredicate: { type: "stdout_contains", substring: "expected" },
       }),
     )
-    // ok unchanged (exit-code decision); mismatch only RECORDED.
     expect(r.ok).toBe(true)
-    expect(r.predicate?.evaluable).toBe(true)
-    expect(r.predicate?.matched).toBe(false)
+    expect(r.predicate?.evaluable).toBe(false) // ← was evaluable:true before the demotion
   })
 
-  test("advisory predicate (latex) ⇒ recorded evaluable:false, ok follows exit code", async () => {
-    const r = await validate(
+  test("advisory predicate (latex / stdout_exact_empty) ⇒ recorded evaluable:false, ok follows exit code", async () => {
+    const latex = await validate(
       base({
         exec: fakeExec(0),
         successPredicate: { type: "latex_or_string_exact", expected: "\\left(x\\right)" },
       }),
     )
-    expect(r.ok).toBe(true)
-    expect(r.predicate?.evaluable).toBe(false)
+    expect(latex.ok).toBe(true)
+    expect(latex.predicate?.evaluable).toBe(false)
+    // stdout_exact_empty with NON-empty stdout is also advisory now (prose-derived).
+    const empty = await validate(
+      base({ exec: fakeExec(0, "noise"), successPredicate: { type: "stdout_exact_empty" } }),
+    )
+    expect(empty.ok).toBe(true)
+    expect(empty.predicate?.evaluable).toBe(false)
   })
 
   test("exit 1 ⇒ ok:false + failTail + observed recorded", async () => {

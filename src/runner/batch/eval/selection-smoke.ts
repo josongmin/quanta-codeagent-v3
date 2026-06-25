@@ -1,7 +1,6 @@
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
 import {
-  extractIssueRepro,
   extractIssueReproSeed,
   type IssueReproSeed,
 } from "@/agent/verification-plan/extract-issue-repro"
@@ -88,9 +87,24 @@ export interface PrepareIssueSmokeSelectionPortDeps extends RunIssueSmokeScriptD
 /**
  * Build an OPTIONAL verify-select hard gate from the public issue MWE.
  *
- * Only a MWE that is already green on the base tree becomes smoke authority.
- * That keeps this signal strictly "don't break the public hot path", not a
- * misleading fix oracle. Candidate-side setup/probe failures degrade to `null`.
+ * BASE-RED GATE (the executed-authority invariant). The issue-text extractor is a
+ * precision-first HEURISTIC: its `hasCall` regex can mistake an "Expected output"
+ * / setup block for an executable MWE. A wrong block that merely RUNS CLEAN on
+ * base would, under the legacy base-GREEN gate, have manufactured a keep-green
+ * veto — i.e. a regex guess granted EXECUTED authority over candidate selection.
+ * That is forbidden: the extractor may only SEED.
+ *
+ * So authority is conferred ONLY when the extracted source REPRODUCES the public
+ * failure on the base tree (base-RED — a proven oracle, the same bar `mwe-proof`
+ * uses). A base-GREEN or non-reproducing source is NOT a proven oracle and yields
+ * NO veto port (fail-open, `undefined`): the regex guess stays a seed. When a
+ * base-red oracle exists, a candidate that makes it PASS scores `true`; one that
+ * leaves it RED scores `false` (an EXECUTED veto of a proven oracle). Candidate-
+ * side setup/probe failures degrade to `null` (fail-open).
+ *
+ * The extraction is routed through {@link extractIssueReproSeed} so the snippet is
+ * type-tagged `provenance: "repro-seed"` at the boundary — it cannot be mistaken
+ * for validated repro authority before the base-red gate runs.
  */
 export const prepareIssueSmokeSelectionPort = async (
   instance: Pick<Instance, "problemStatement" | "localEnv" | "swebench">,
@@ -98,7 +112,7 @@ export const prepareIssueSmokeSelectionPort = async (
   timeoutMs: number,
   deps: PrepareIssueSmokeSelectionPortDeps = {},
 ): Promise<((candidate: Candidate) => Promise<boolean | null>) | undefined> => {
-  const source = extractIssueRepro(instance.problemStatement)?.code
+  const source = extractIssueReproSeed(instance.problemStatement)?.code
   const baseCommit = instance.swebench?.baseCommit
   if (source === undefined || baseCommit === undefined) return undefined
   const reset = deps.resetBase ?? resetToBase
@@ -106,13 +120,17 @@ export const prepareIssueSmokeSelectionPort = async (
     (deps.runScript ?? runIssueSmokeScript)(instance, sb, source, timeoutMs, deps)
   if (!(await reset(sandbox, baseCommit, timeoutMs))) return undefined
   let restoredBase = true
-  let baseGreen: boolean | null = null
+  let baseRun: boolean | null = null
   try {
-    baseGreen = await runInSandbox(sandbox)
+    baseRun = await runInSandbox(sandbox)
   } finally {
     restoredBase = await reset(sandbox, baseCommit, timeoutMs)
   }
-  if (baseGreen !== true || !restoredBase) return undefined
+  // BASE-RED GATE: only a source that REPRODUCED the failure on base (exit≠0 ⇒
+  // `runIssueSmokeScript` returns false) is a proven oracle that may grant a veto.
+  // A base-green run (true), an infra/exec failure (null), or a failed base
+  // restore all yield NO authority — the regex guess remains seed-only.
+  if (baseRun !== false || !restoredBase) return undefined
   const rematerialize = deps.rematerialize ?? withCandidatePatch
   return (candidate) =>
     rematerialize({
@@ -187,7 +205,9 @@ export const prepareIssueSmokeAux = async (
   timeoutMs: number,
   deps: PrepareIssueSmokeSelectionPortDeps = {},
 ): Promise<IssueSmokeAuxPort | undefined> => {
-  const source = extractIssueRepro(instance.problemStatement)?.code
+  // SEED-tagged extraction (observe-only path — this probe never returns a veto
+  // boolean, only telemetry, so it carries no executed authority regardless).
+  const source = extractIssueReproSeed(instance.problemStatement)?.code
   const baseCommit = instance.swebench?.baseCommit
   if (source === undefined || baseCommit === undefined) return undefined
   const reset = deps.resetBase ?? resetToBase

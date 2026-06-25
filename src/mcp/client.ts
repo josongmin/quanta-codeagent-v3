@@ -11,6 +11,7 @@ import {
   mapTool,
   type ToolsCallResult,
   type ToolsListResult,
+  unsupportedTypeMarker,
 } from "./client/result-folding"
 import { defaultTransportFor, type McpClientTransport } from "./client/transport-factory"
 import { headlessRejecter } from "./elicitation"
@@ -76,7 +77,7 @@ const MAX_INBOUND_SAMPLING_IN_FLIGHT = 8
  *  factory type) so EVERY external importer of `@/mcp/client` stays
  *  byte-compatible after the split. */
 export { McpError } from "./client/errors"
-export { extractMedia, sanitizeAnnotations } from "./client/result-folding"
+export { extractMedia, sanitizeAnnotations, unsupportedTypeMarker } from "./client/result-folding"
 export type { McpClientTransport } from "./client/transport-factory"
 
 interface PendingRequest {
@@ -461,9 +462,15 @@ export class McpClient {
     // joined text. Empty ⇒ `media` is omitted so the result is byte-identical to
     // the legacy text-only shape for every server that returns only text.
     const media = extractMedia(res.content)
+    // F2 — a content block whose top-level `type` is neither text nor a handled
+    // media kind (image/resource) is carried by NEITHER fold path and would be
+    // silently lost. Disclose the omission (per-type count) via a visible marker
+    // appended to the joined text — never silent. Empty when all blocks handled
+    // (byte-identical text-only result).
+    const omittedMarker = unsupportedTypeMarker(res.content)
     return {
       ok: res.isError !== true,
-      content: capResultText(joinTextBlocks(res.content)),
+      content: capResultText(joinTextBlocks(res.content)) + omittedMarker,
       ...(media.length > 0 ? { media } : {}),
       // §19.2 — carry the server's typed structuredContent through to the bridge.
       // Absent ⇒ omitted (byte-identical to the legacy text-only result).

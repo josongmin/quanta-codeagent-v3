@@ -350,6 +350,43 @@ export const ABSORB_MODULES: readonly KnobModule[] = [
   FORWARD_LOCALIZE,
 ]
 
+/** G1 — model-lane diversity (default-OFF). Routes verify-select candidate `i`
+ *  to provider/model lane `i mod V` over the injected `deps.llmLanes`, so the
+ *  best-of-N pool is DECORRELATED across models instead of N samples of one —
+ *  the edit-correctness lever for the "right files, wrong edit" (synthesis-74%)
+ *  residual. Needs `QUANTA_BENCH_MODEL_LANES=<id,id,…>` (≥2 buildable lanes,
+ *  e.g. `gpt-5.4,gpt-5-2`) injected too — the knob alone is inert. Auth reality
+ *  (2026-06): OpenAI-family model lanes only until an Anthropic credential
+ *  exists (then true cross-vendor joins automatically; see model-lanes.ts). */
+export const MODEL_LANE_DIVERSITY: KnobModule = {
+  id: "model-lane-diversity",
+  knobs: { "model-lane-diversity": "1" },
+}
+
+/** `agentless-v5-absorb-xlane` — v5-absorb + G1 model-lane diversity. The A/B
+ *  arm that isolates whether decorrelating the candidate pool across models
+ *  lifts edit-correctness once localization is already closed. Control =
+ *  `agentless-v5-absorb` (single-lane). Fire with QUANTA_BENCH_MODEL_LANES set. */
+export const ABSORB_XLANE_MODULES: readonly KnobModule[] = [
+  ...ABSORB_MODULES,
+  MODEL_LANE_DIVERSITY,
+]
+
+/** `agentless-v5-absorb-execfull` — v5-absorb with FULL in-loop repo-test
+ *  execution (overrides REPRO_EXEC's `repro-only`, which FORBIDS the repo test
+ *  suite). Adversarial-audit fix (jun-25): the wide-coordination residual
+ *  (django-11138's incomplete `_convert_tznames_to_sql` sqlite call-sites) is
+ *  NOT a maxTests-cap blind (that gates SELECTION regression, not the agent) —
+ *  it's that `repro-only` traps the agent in its self-authored SINGLE-backend
+ *  reproducer, so the missing sqlite arity never executes and never fails. `full`
+ *  lets the agent run the REPO's existing test suite (the TRAE verified method:
+ *  existing tests → runtime coordination error → fix the missed site). Control =
+ *  `agentless-v5-absorb` (repro-only). */
+export const ABSORB_EXECFULL_MODULES: readonly KnobModule[] = [
+  ...ABSORB_MODULES,
+  FULL_EXEC,
+]
+
 // ── v5 AdaptiveAction → phase modules (the controller's action map) ──────────
 // Mirrors the closed `AdaptiveAction` enum in the v5 readme. `accept_thin` and
 // `stop_infra_or_budget` are no-op postures (finalize/terminate on the thin base).

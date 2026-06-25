@@ -35,31 +35,55 @@ describe("evaluateSuccessPredicate — execution-grounded", () => {
       evaluateSuccessPredicate(obs(0), { type: "selected_test_passes" }).matched,
     ).toBe(true)
   })
-  test("stdout_contains: present ⇒ matched, absent ⇒ not", () => {
-    const p: SuccessPredicate = { type: "stdout_contains", substring: "PASSED" }
-    expect(evaluateSuccessPredicate(obs(0, "... 3 PASSED ..."), p).matched).toBe(true)
-    expect(evaluateSuccessPredicate(obs(0, "... 3 FAILED ..."), p).matched).toBe(false)
+  test("🔴 EXECUTION-ORACLE CONTROL: test_exit_zero still HARD-gates after the stdout demotion", () => {
+    // The genuine execution oracle is the ONLY hard signal on the rail. This control
+    // proves we demoted ONLY the prose-derived stdout predicates, NOT real execution:
+    // a nonzero exit MUST stay evaluable:true + matched:false (a real hard RED).
+    const red = evaluateSuccessPredicate(obs(1), { type: "test_exit_zero" })
+    expect(red).toEqual({
+      evaluable: true,
+      matched: false,
+      mismatchReason: expect.stringContaining("exit 1"),
+    })
+    // and exit 0 still hard-clears.
+    expect(evaluateSuccessPredicate(obs(0), { type: "test_exit_zero" })).toEqual({
+      evaluable: true,
+      matched: true,
+    })
   })
-  test("stdout_exact_empty: empty/whitespace ⇒ matched, content ⇒ not", () => {
-    expect(evaluateSuccessPredicate(obs(0, "   \n "), { type: "stdout_exact_empty" }).matched).toBe(
-      true,
-    )
-    expect(
-      evaluateSuccessPredicate(obs(0, "duplicate found"), { type: "stdout_exact_empty" }).matched,
-    ).toBe(false)
-  })
+})
 
-  test("🔴 exit 0 but stdout mismatch ⇒ matched:false (non-primary green can't clear)", () => {
-    // red-on-injection: an evaluator that only looked at exitCode would say matched.
+describe("evaluateSuccessPredicate — issue-prose stdout predicates are ADVISORY (no false-RED)", () => {
+  // 🔴 RED-ON-INJECTION: `stdout_contains` / `stdout_exact_empty` are produced ONLY
+  // by build.ts from `extractIssueDeclaredExpected` (a regex over issue PROSE). A
+  // prose mis-extraction must NOT hard-veto a correct patch. So even when the
+  // observed stdout does NOT contain the prose-extracted value, the result must be
+  // ADVISORY (evaluable:false) — the rail degrades to the exit-code oracle, never a
+  // hard matched:false. TEETH: reverting to a hard `matched(false, …)` makes this
+  // assertion go RED (evaluable would become true).
+  test("🔴 stdout_contains: stdout NOT containing the prose value ⇒ advisory, not a hard fail", () => {
     const r = evaluateSuccessPredicate(obs(0, "still wrong output"), {
       type: "stdout_contains",
       substring: "expected output",
     })
-    expect(r).toEqual({
-      evaluable: true,
-      matched: false,
-      mismatchReason: expect.stringContaining("stdout missing substring"),
-    })
+    expect(r.evaluable).toBe(false) // ← TEETH: hard-evaluable revert flips this to true
+    // a correct patch (exit 0) is NOT marked failed on the rail by the prose regex.
+    // (matched is meaningless when evaluable:false; the repair gate treats this as
+    //  "not a false-green" so the exit-code green clears.)
+  })
+  test("🔴 stdout_exact_empty: non-empty stdout ⇒ advisory, not a hard fail", () => {
+    const r = evaluateSuccessPredicate(obs(0, "duplicate found"), { type: "stdout_exact_empty" })
+    expect(r.evaluable).toBe(false) // ← TEETH: hard-evaluable revert flips this to true
+  })
+  // Even a "matching" prose value stays advisory — the regex never gains rail
+  // authority in either direction (it cannot hard-CLEAR a non-primary green either).
+  test("stdout_contains: stdout DOES contain the prose value ⇒ still advisory", () => {
+    expect(
+      evaluateSuccessPredicate(obs(0, "... 3 PASSED ..."), {
+        type: "stdout_contains",
+        substring: "PASSED",
+      }).evaluable,
+    ).toBe(false)
   })
 })
 
@@ -90,7 +114,8 @@ describe("evaluateSuccessPredicate — FAIL-OPEN (advisory in v1)", () => {
   })
 
   test("🔴 never-throws contract: malformed predicates ⇒ advisory, not throw", () => {
-    // stdout_contains missing substring (eager .slice would throw without the guard).
+    // stdout_contains is advisory in v1 regardless of substring, so a malformed
+    // one (missing substring) is also advisory — and must never throw.
     expect(() =>
       evaluateSuccessPredicate(obs(0, "x"), { type: "stdout_contains" } as unknown as SuccessPredicate),
     ).not.toThrow()

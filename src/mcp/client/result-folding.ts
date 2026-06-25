@@ -89,6 +89,40 @@ export const joinTextBlocks = (content: ContentBlock[] | undefined): string =>
     .map((b) => b.text ?? "")
     .join("\n")
 
+/** Top-level content-block `type` values this layer can fold into a native
+ *  result: `text` (→ {@link joinTextBlocks}) and the two media shapes
+ *  (`image`/`resource` → {@link extractMedia}). Any OTHER top-level type — the
+ *  spec's `audio`, or a future/unrecognized kind — is folded by NEITHER path and
+ *  would be silently lost; {@link unsupportedTypeMarker} makes that omission
+ *  observable. */
+const HANDLED_BLOCK_TYPES = new Set(["text", "image", "resource"])
+
+/** F2 — build a visible marker disclosing content blocks whose top-level `type`
+ *  is NOT in {@link HANDLED_BLOCK_TYPES} (so neither `joinTextBlocks` nor
+ *  `extractMedia` carried them — they would otherwise vanish with no record). We
+ *  do NOT attempt to render audio/unknown content; we only count it per-type and
+ *  name it so the model knows the result was clipped. Reuses the honest-
+ *  truncation-marker convention (`capResultText`'s `[…omitted]`).
+ *
+ *  Byte-identical common case: when every block is handled (text/image/resource,
+ *  or no content at all) the count is 0 and the marker is the empty string, so a
+ *  caller that appends it changes nothing.
+ *
+ *  Deterministic multi-type output: counts are grouped by `type` and emitted in
+ *  first-seen order, e.g. `[mcp: 2 block(s) of unsupported type "audio" omitted]
+ *  [mcp: 1 block(s) of unsupported type "video" omitted]`. */
+export const unsupportedTypeMarker = (content: ContentBlock[] | undefined): string => {
+  const counts = new Map<string, number>()
+  for (const b of content ?? []) {
+    if (HANDLED_BLOCK_TYPES.has(b.type)) continue
+    counts.set(b.type, (counts.get(b.type) ?? 0) + 1)
+  }
+  if (counts.size === 0) return ""
+  return [...counts.entries()]
+    .map(([type, n]) => `\n[mcp: ${n} block(s) of unsupported type "${type}" omitted]`)
+    .join("")
+}
+
 /** §19.3 — extract non-text content blocks (image / embedded resource) into the
  *  typed {@link McpMediaBlock} carrier. Text blocks are left to
  *  {@link joinTextBlocks}.

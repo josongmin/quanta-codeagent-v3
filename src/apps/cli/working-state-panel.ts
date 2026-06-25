@@ -84,17 +84,23 @@ const fmtNext = (n: NextStep, idx: number): string =>
 const fmtDeferred = (d: { rail: string; reason: string }): string =>
   truncate(`${d.rail}: ${d.reason}`)
 
-/** Posture is not a stored field on {@link WorkingState} — we infer it from
- *  the live mix. The spec asks for `Posture: investigating` etc. as a header
- *  so the user sees what mode the agent thinks it is in. Order matters:
- *  blockers dominate (something is in the way) over progress (next-steps
- *  pending) over hypothesis (still framing) over idle. */
+/** Posture is not a stored field on {@link WorkingState} — we infer it PURELY
+ *  from the model's scratchpad mix (blockers / next-steps / hypothesis /
+ *  owners). It is a derived view of the model-authored plan, NOT the real
+ *  turn lifecycle: this pure renderer has no access to `sessionState.status`
+ *  (the surface only threads the read-only WorkingState getter — see
+ *  `SlashContext.workingState`). So the words MUST NOT read as a live turn
+ *  status — e.g. the empty case is "no active plan", never a bare "idle"
+ *  that could contradict a turn that is actually running. The panel header
+ *  labels this "Plan posture" for the same reason. Order matters: blockers
+ *  dominate (something is in the way) over progress (next-steps pending)
+ *  over hypothesis (still framing) over scoping over the no-plan fallback. */
 const inferPosture = (snap: WorkingStateSnapshot): string => {
   if (snap.blockers.length > 0) return "blocked"
   if (snap.nextStepQueue.length > 0) return "executing"
   if (snap.hypothesis !== undefined && snap.hypothesis.trim() !== "") return "investigating"
   if (snap.ownerShortlist.length > 0) return "scoping"
-  return "idle"
+  return "no active plan"
 }
 
 const postureColor = (posture: string): ((s: string) => string) => {
@@ -141,7 +147,10 @@ const pushSection = (
 const buildPanelLines = (snap: WorkingStateSnapshot): string[] => {
   const lines: string[] = []
   const posture = inferPosture(snap)
-  lines.push(`${dim("Posture:")}    ${postureColor(posture)(posture)}`)
+  // "Plan posture" (not bare "Posture") so the lifecycle-sounding values
+  // ("executing"/"no active plan") read as a summary of the model's plan
+  // scratchpad, NOT the real turn lifecycle this pure renderer can't see.
+  lines.push(`${dim("Plan posture:")} ${postureColor(posture)(posture)}`)
   if (snap.hypothesis !== undefined && snap.hypothesis.trim() !== "") {
     lines.push(`${dim("Hypothesis:")} ${truncate(snap.hypothesis.trim())}`)
   }

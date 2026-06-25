@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runAgent } from "@/agent"
+import { runAgent, VERIFY_FORCE_MESSAGE } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
 import {
@@ -224,7 +224,7 @@ describe("runAgent integration", () => {
     const forced = outcome.messages.some(
       (m) =>
         m.role === "user" &&
-        m.content.some((b) => b.type === "text" && b.text.includes("ran no test or reproduction")),
+        m.content.some((b) => b.type === "text" && b.text === VERIFY_FORCE_MESSAGE),
     )
     expect(forced).toBe(true)
 

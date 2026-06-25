@@ -6,9 +6,16 @@
  * authority. When the same instance appears in multiple rows we keep the
  * STRONGEST status:
  *
- *   official_harness > local_structural > research_contaminated > unresolved
+ *   official_harness > local_structural > research_contaminated > unresolved > unmeasured
  *
  * Only `official_harness` counts as leaderboard-resolved.
+ *
+ * Measurement integrity: re-runnable holes (throttle/429, harness/grader infra,
+ * env-degraded) are NOT capability misses. They are tagged `unmeasured`, kept
+ * out of the solve-rate DENOMINATOR, and surfaced on a separate line — so a 429
+ * no longer deflates the headline rate. Genuine misses (wrong-fix, empty-patch,
+ * timeout/generation_error) stay `unresolved` and ARE counted. This mirrors the
+ * already-correct `diff.ts` `bUnmeasured` treatment.
  */
 
 import { byteCompare } from "@/shared/byte-compare"
@@ -19,7 +26,12 @@ export interface LeaderRow {
   readonly repo: string
   readonly preset: string
   readonly model: string
-  readonly status: "official_harness" | "local_structural" | "research_contaminated" | "unresolved"
+  readonly status:
+    | "official_harness"
+    | "local_structural"
+    | "research_contaminated"
+    | "unresolved"
+    | "unmeasured"
 }
 
 /** repo = the segment before `__` in a swebench instance id
@@ -62,8 +74,27 @@ export const rowsFromRun = (
       status: "research_contaminated",
     })
   }
+  // Re-runnable measurement-holes (throttle/429, harness/grader infra,
+  // env-degraded) — tagged `unmeasured`, excluded from the solve-rate
+  // denominator. `reRunnable` is a subset of `errored`; `infraBlocked` is
+  // env/degraded (proofState/envPrepFailed) tracked separately by verdicts.ts.
+  const reRunnable = new Set<string>([...(v.reRunnable ?? []), ...(v.infraBlocked ?? [])])
+  for (const id of reRunnable) {
+    rows.push({
+      instanceId: id,
+      repo: repoOf(id),
+      preset: meta.preset,
+      model: meta.model,
+      status: "unmeasured",
+    })
+  }
+  // Genuine misses that STAY in the denominator: wrong-fix (`unresolved`),
+  // empty-patch (model produced nothing), and the non-re-runnable errored
+  // terminations (timeout / hung_stream / generation_error). We explicitly
+  // EXCLUDE the re-runnable ids from `errored` so they are not double-tagged.
   for (const set of [v.unresolved, v.errored, v.emptyPatch]) {
     for (const id of set) {
+      if (reRunnable.has(id)) continue
       rows.push({
         instanceId: id,
         repo: repoOf(id),
@@ -76,11 +107,15 @@ export const rowsFromRun = (
   return rows
 }
 
+// `unmeasured` ranks BELOW `unresolved`: if an instance was a re-runnable hole
+// in one run but a genuine miss (or better) in another, the measured verdict
+// wins — we only treat it as unmeasured when EVERY run failed to measure it.
 const RANK: Record<LeaderRow["status"], number> = {
-  unresolved: 0,
-  research_contaminated: 1,
-  local_structural: 2,
-  official_harness: 3,
+  unmeasured: 0,
+  unresolved: 1,
+  research_contaminated: 2,
+  local_structural: 3,
+  official_harness: 4,
 }
 
 /** Dedup by instanceId, keeping the strongest status. Among equally-strong
@@ -119,13 +154,19 @@ export const renderLeaderboardMarkdown = (
   const localStructural = deduped.filter((r) => r.status === "local_structural")
   const researchContaminated = deduped.filter((r) => r.status === "research_contaminated")
   const unresolved = deduped.filter((r) => r.status === "unresolved")
+  const unmeasured = deduped.filter((r) => r.status === "unmeasured")
+  // Real attempts = everything that was actually measured. Re-runnable holes
+  // (throttle/infra/env) are EXCLUDED from the denominator so they can't deflate
+  // the headline rate; they are surfaced explicitly on their own line.
+  const realAttempts = deduped.length - unmeasured.length
   return [
     `# ${title}`,
     "",
-    `Official harness resolved: ${official.length} / ${deduped.length}`,
+    `Official harness resolved: ${official.length} / ${realAttempts}`,
     `Local structural only: ${localStructural.length}`,
     `Research contaminated: ${researchContaminated.length}`,
     `Unresolved: ${unresolved.length}`,
+    `Unmeasured (re-runnable: ${unmeasured.length} throttled/infra): excluded from rate`,
     "",
     `## Official Harness (${official.length})`,
     "",
@@ -142,6 +183,10 @@ export const renderLeaderboardMarkdown = (
     `## Unresolved (${unresolved.length})`,
     "",
     table(unresolved),
+    "",
+    `## Unmeasured — re-runnable (${unmeasured.length})`,
+    "",
+    table(unmeasured),
     "",
   ].join("\n")
 }

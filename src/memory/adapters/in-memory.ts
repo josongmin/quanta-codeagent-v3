@@ -1,5 +1,6 @@
 import type { PersistentStorePort } from "../ports"
 import { rankEntries } from "../ranking"
+import type { MemoryTelemetryPort } from "../telemetry-port"
 import { type MemoryEntry, type MemoryQuery, normalizeEntry } from "../types"
 
 /**
@@ -47,8 +48,8 @@ export class InMemoryStore implements PersistentStorePort {
     return Promise.resolve([...this.entries.values()].map((e) => clone(normalizeEntry(e))))
   }
 
-  recall(query: MemoryQuery): Promise<MemoryEntry[]> {
-    const ranked = rankEntries([...this.entries.values()], query)
+  recall(query: MemoryQuery, telemetry?: MemoryTelemetryPort): Promise<MemoryEntry[]> {
+    const ranked = rankEntries([...this.entries.values()], query, undefined, telemetry)
     return Promise.resolve(ranked.map((e) => clone(normalizeEntry(e))))
   }
 

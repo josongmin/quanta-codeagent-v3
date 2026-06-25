@@ -86,6 +86,31 @@ describe("formatFindRefs — grouping/cap (pure)", () => {
     expect(defIdx).toBeLessThan(useIdx)
   })
 
+  it("discloses the file-list RE-RANK (def-presence then ref-count) when FILE_CAP is exceeded", () => {
+    // 30 distinct files each with one ref ⇒ 30 > FILE_CAP(25) ⇒ marker fires.
+    const stdout = Array.from({ length: 30 }, (_, i) => `f${i}.py:1:foo()`).join("\n")
+    const out = formatFindRefs(stdout, "foo")
+    // count is already shown (5 more) AND now the ordering is disclosed so the
+    // model knows a low-ref co-change owner could be buried past the cap.
+    expect(out).toContain("(5 more files")
+    expect(out).toContain("sorted by definition-presence then ref-count")
+    expect(out).toMatch(/narrow with .*path.*type.* to surface buried owners/)
+  })
+
+  it("does NOT emit the re-rank disclosure when files fit within FILE_CAP", () => {
+    const stdout = Array.from({ length: 3 }, (_, i) => `f${i}.py:1:foo()`).join("\n")
+    const out = formatFindRefs(stdout, "foo")
+    expect(out).not.toContain("more files")
+    expect(out).not.toContain("sorted by definition-presence")
+  })
+
+  it("Matches cap (200) surfaces an accurate omitted row count", () => {
+    const stdout = Array.from({ length: 250 }, (_, i) => `f${i}.py:1:foo()`).join("\n")
+    const out = formatFindRefs(stdout, "foo")
+    // 250 − 200 = 50 rows omitted, shown explicitly (no silent drop).
+    expect(out).toContain("(50 more rows")
+  })
+
   it("caps at 200 rows and signals overflow", () => {
     const stdout = Array.from({ length: 250 }, (_, i) => `f${i}.py:1:foo()`).join("\n")
     const out = formatFindRefs(stdout, "foo")

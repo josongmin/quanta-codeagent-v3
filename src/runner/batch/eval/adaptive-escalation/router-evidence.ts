@@ -18,7 +18,7 @@
  */
 
 import { type LlmEvidencePacket, renderLlmEvidencePacket } from "../llm-evidence-packet"
-import type { EvidenceFacts } from "./evidence-facts"
+import { type EvidenceFacts, renderAdvisoryRouterFacts } from "./evidence-facts"
 
 /** The router's read-model: the lean discriminating facts + the blindness-audited
  *  packet body + an origin fingerprint for telemetry cross-checks. */
@@ -80,13 +80,20 @@ export const deriveEvidenceFactsFromPacket = (packet: LlmEvidencePacket): Eviden
     baseReproEstablished:
       receipts.some((r) => r.baseValidatedRed === true) || target?.baseValidatedRed === true,
     regressionSignal: receipts.some((r) => r.source === "discovered_regression"),
-    infraBlocked:
-      receipts.some((r) => r.state === "execution_failed" || r.state === "env_prep_failed") ||
-      // The packet emits the infra-blocked signal as a `public_proof` missing
-      // entry (reason `public_proof_infra_blocked`, llm-evidence-packet.ts:1185);
-      // there is NO `*infra*` kind, so the prior `includes("infra")` was dead.
-      // Match the real kind so a build/env block surfaces from missingEvidence too.
-      packet.missingEvidence.some((m) => m.kind === "public_proof"),
+    // jun-25: HARD infra veto must be backed by a REAL execution-failure receipt
+    // only. The prior second disjunct also matched a `missingEvidence public_proof`
+    // entry — but that entry is itself a DERIVED interpretive proxy
+    // (selection's `proofState === "infra_blocked"` summary label,
+    // llm-evidence-packet.ts:1841), not a receipt that the sandbox actually
+    // failed to execute. Letting a proxy force-abort the model's chosen expensive
+    // phase is exactly the bug this fix removes, so `infraBlocked` is now true
+    // ONLY for a genuine `execution_failed` / `env_prep_failed` receipt. The
+    // proxy still reaches the router as an ADVISORY evidence line via the rendered
+    // packet (renderLlmEvidencePacket includes missingEvidence), so no signal is
+    // lost — the model weighs it instead of being overridden by it.
+    infraBlocked: receipts.some(
+      (r) => r.state === "execution_failed" || r.state === "env_prep_failed",
+    ),
   }
 }
 
@@ -95,8 +102,17 @@ export const deriveEvidenceFactsFromPacket = (packet: LlmEvidencePacket): Eviden
  * through `renderLlmEvidencePacket` (blindness-audited) — projecting a poisoned
  * packet throws there, so blindness is enforced on the exact router-visible bytes.
  */
-export const projectRouterEvidence = (packet: LlmEvidencePacket): RouterEvidence => ({
-  facts: deriveEvidenceFactsFromPacket(packet),
-  rendered: renderLlmEvidencePacket(packet),
-  origin: { evidenceRevision: packet.evidenceRevision, instanceIdHash: packet.instanceIdHash },
-})
+export const projectRouterEvidence = (packet: LlmEvidencePacket): RouterEvidence => {
+  const facts = deriveEvidenceFactsFromPacket(packet)
+  return {
+    facts,
+    // jun-25: append the advisory derived-facts block AFTER the blindness-audited
+    // packet body. These are the signals the legality guard used to HARD-veto on
+    // (proof-context / ordering); surfacing them lets the model weigh them itself
+    // instead of having its chosen expensive phase silently force-aborted. The
+    // advisory is derived from the SAME packet, so it adds no out-of-band info and
+    // cannot leak an answer key (the packet bytes are already blindness-audited).
+    rendered: `${renderLlmEvidencePacket(packet)}\n\n${renderAdvisoryRouterFacts(facts)}`,
+    origin: { evidenceRevision: packet.evidenceRevision, instanceIdHash: packet.instanceIdHash },
+  }
+}

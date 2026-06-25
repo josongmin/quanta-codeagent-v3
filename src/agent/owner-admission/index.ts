@@ -75,8 +75,10 @@ export interface OwnerAdmission {
   reason: string
 }
 
-/** Default lead-gap: corroboration boosts in the packet are ≥1 (issue-file +2,
- *  owner-resolve +3), so a sub-1 gap means the runner-up is effectively tied. */
+/** Default lead-gap for the RESEARCH/legacy path, applied to the external
+ *  stage-1 rank score that the packet carries (overridable via `minLeadGap`).
+ *  A sub-1 gap means the runner-up is effectively tied. The clean path does not
+ *  read score at all. */
 const DEFAULT_MIN_LEAD_GAP = 1
 
 /** A candidate is "corroborated" when more than one evidence stream points at

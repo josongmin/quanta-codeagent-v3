@@ -265,6 +265,22 @@ export const runScenario = async (
       ...(opts?.signal ? { signal: opts.signal } : {}),
     })
 
+    // FLAG 2: a replay must consume EVERY recorded `(run,turn)` bucket. If the
+    // agent diverged to fewer turns than recorded, leftover buckets are unused
+    // and the run would otherwise "pass" silently. Throw — symmetric to the
+    // exhaustion (over-consumption) throw inside TrajectoryReplayLLM. Live tier
+    // has no recorded trajectory to under-consume, so this only fires on replay.
+    // NOTE: this asserts COUNT (all buckets reached), not content; verifying the
+    // agent fed back the same inputs that produced each turn is a follow-up
+    // (content fingerprinting — intentionally out of scope for this low-risk pass).
+    if (picked.llm instanceof TrajectoryReplayLLM && !picked.llm.consumedAll()) {
+      throw new Error(
+        `smoke trajectory under-consumed for scenario "${meta.id}" ` +
+          `(agent diverged to fewer turns than recorded — re-record or fix). ` +
+          `Unused recorded buckets (run:turn): ${picked.llm.remaining().join(", ")}`,
+      )
+    }
+
     const failures = [
       ...runAssertions({ spec, capture, cwd: work, stopReason: lastReason, turns: totalTurns }),
     ]

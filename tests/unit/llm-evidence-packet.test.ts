@@ -1141,6 +1141,30 @@ describe("B4 — extractSymbolSliceResult precision", () => {
     expect(r.slice).toContain("return 1") // first match chosen
   })
 
+  test("multiple same-name defs ⇒ ALL sites surfaced (not just site 0), each line-labeled", () => {
+    const src = ["def dup():", "    return 1", "", "def dup():", "    return 2"].join("\n")
+    const r = extractSymbolSliceResult(src, "dup")
+    expect(r.slices?.length).toBe(2)
+    // every site's body is present — the model gets BOTH to disambiguate.
+    const joined = (r.slices ?? []).map((s) => s.slice).join("\n")
+    expect(joined).toContain("return 1")
+    expect(joined).toContain("return 2") // TEETH: matches[0]-only would drop this
+    // each candidate is labeled by its def line (1-based).
+    expect(r.slices?.map((s) => s.label)).toEqual(["dup@1", "dup@4"])
+    // per-site slices stay bounded — neither swallows the other's body.
+    expect(r.slices?.[0]?.slice).not.toContain("return 2")
+  })
+
+  test("each multi-site slice stays bounded by maxLines (no unbounded growth)", () => {
+    const body = Array.from({ length: 50 }, (_, i) => `    x${i} = ${i}`).join("\n")
+    const src = `def big():\n${body}\n\ndef big():\n${body}\n`
+    const r = extractSymbolSliceResult(src, "big", 10)
+    expect(r.slices?.length).toBe(2)
+    for (const s of r.slices ?? []) {
+      expect(s.slice.split("\n").length).toBeLessThanOrEqual(10)
+    }
+  })
+
   test("single def ⇒ matchCount===1, no ambiguity", () => {
     const r = extractSymbolSliceResult("def only():\n    return 1\n", "only")
     expect(r.matchCount).toBe(1)
@@ -1184,6 +1208,12 @@ describe("B4 — extractSymbolSliceResult precision", () => {
       readSource: () => dupSrc,
     })
     expect(ambiguous[0]?.ambiguousSliceMatch).toBe(true)
+    // BOTH candidate sites reach the LLM via sourceSlices, file-prefixed labels.
+    expect(ambiguous[0]?.sourceSlices?.length).toBe(2)
+    expect(ambiguous[0]?.sourceSlices?.map((s) => s.label)).toEqual(["m.py:dup@1", "m.py:dup@4"])
+    const ownerJoined = (ambiguous[0]?.sourceSlices ?? []).map((s) => s.slice).join("\n")
+    expect(ownerJoined).toContain("return 1")
+    expect(ownerJoined).toContain("return 2") // TEETH: site-0-only drops this
 
     const binary = assembleOwnerEvidence({
       ownerFiles: ["m.py"],
@@ -1191,6 +1221,61 @@ describe("B4 — extractSymbolSliceResult precision", () => {
       readSource: () => `${String.fromCharCode(0)}garbage`,
     })
     expect(binary[0]?.sliceMiss).toBe("non_source")
+  })
+
+  test("ALL ambiguous sites are rendered into the prompt AND pass the gold-blindness guard", () => {
+    const dupSrc = ["def dup():", "    return 1", "", "def dup():", "    return 2"].join("\n")
+    const ownerEvidence = assembleOwnerEvidence({
+      ownerFiles: ["m.py"],
+      issueSymbols: ["dup"],
+      readSource: () => dupSrc,
+    })
+    const packet: LlmEvidencePacket = {
+      stage: "candidate_generation",
+      instanceIdHash: "x",
+      evidenceRevision: "v1",
+      question: "q",
+      allowedActions: ["a"],
+      forbiddenSources: ["gold_patch"],
+      publicIssueFacts: [],
+      ownerEvidence,
+      proofReceipts: [],
+      contractFacts: [],
+      staticFacts: [],
+      missingEvidence: [],
+    }
+    // Blindness guard scans every slice; clean render must not throw.
+    const rendered = renderLlmEvidencePacket(packet)
+    expect(rendered).toContain("sourceSlices")
+    expect(rendered).toContain("return 1")
+    expect(rendered).toContain("return 2") // second site reaches the prompt
+    expect(rendered).toContain("m.py:dup@4")
+  })
+
+  test("a single def ⇒ no sourceSlices (one site already carried by sourceSlice, no bloat)", () => {
+    const ev = assembleOwnerEvidence({
+      ownerFiles: ["m.py"],
+      issueSymbols: ["only"],
+      readSource: () => "def only():\n    return 1\n",
+    })
+    expect(ev[0]?.sourceSlice).toContain("return 1")
+    expect(ev[0]?.sourceSlices).toBeUndefined()
+    expect(ev[0]?.ambiguousSliceMatch).toBeUndefined()
+  })
+
+  test("two DISTINCT issue symbols both resolve ⇒ both sites surfaced (not just the first)", () => {
+    const src = ["def alpha():", "    return 1", "", "def beta():", "    return 2"].join("\n")
+    const ev = assembleOwnerEvidence({
+      ownerFiles: ["m.py"],
+      issueSymbols: ["alpha", "beta"],
+      readSource: () => src,
+    })
+    expect(ev[0]?.sourceSlices?.map((s) => s.label)).toEqual(["m.py:alpha@1", "m.py:beta@4"])
+    // distinct symbols are NOT "ambiguous" — that flag stays off — but both reach the model.
+    expect(ev[0]?.ambiguousSliceMatch).toBeUndefined()
+    const joined = (ev[0]?.sourceSlices ?? []).map((s) => s.slice).join("\n")
+    expect(joined).toContain("return 1")
+    expect(joined).toContain("return 2")
   })
 })
 

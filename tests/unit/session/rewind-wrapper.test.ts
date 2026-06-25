@@ -164,7 +164,7 @@ describe("rewindSession (wrapper)", () => {
     expect(result.fileStateNote).toBe("git port not wired; working tree unchanged")
   })
 
-  test("restoreFiles=true without gitSha on session: note explains", async () => {
+  test("restoreFiles=true without gitSha on session: safe no-op note", async () => {
     await seed("rs-no-sha", ["m0", "m1"])
     const port: RewindGitPort = {
       stash: async () => undefined,
@@ -176,11 +176,22 @@ describe("rewindSession (wrapper)", () => {
       restoreFiles: true,
       git: port,
     })
-    expect(result.fileStateNote).toBe("no gitSha on session; working tree unchanged")
+    expect(result.fileStateNote).toBe(
+      "no per-message checkpoint; working tree unchanged (file restore not yet wired)",
+    )
   })
 
-  test("restoreFiles=true with port + gitSha: stash + reset called once", async () => {
-    await seed("rs-restore", ["m0", "m1"], { gitSha: "cafefeed" })
+  // ---- DATA-LOSS REGRESSION TEETH ------------------------------------
+  // The old code did `git stash` + `git reset --hard meta.gitSha` here.
+  // `meta.gitSha` is the SESSION-START sha, so rewinding to an INTERIOR
+  // message N reset files all the way back to turn 0, destroying turns
+  // 1..N of work. The fix removes that path entirely: with a port AND a
+  // gitSha present, we must STILL leave the working tree untouched (no
+  // stash, no reset) and say so. If anyone re-introduces the
+  // `resetHard(meta.gitSha)` path, `resetCalls`/`stashCalls` go non-zero
+  // and this test goes RED.
+  test("restoreFiles=true with port + gitSha: NO reset to session-start sha (data-loss teeth)", async () => {
+    await seed("rs-restore", ["m0", "m1", "m2", "m3"], { gitSha: "cafefeed" })
     let stashCalls = 0
     let resetCalls = 0
     let resetSha: string | undefined
@@ -194,16 +205,28 @@ describe("rewindSession (wrapper)", () => {
         resetSha = sha
       },
     }
+    // Rewind to an INTERIOR message (m1, not the first) — the exact case
+    // where session-start-sha reset would destroy turns 1..N.
     const result = await rewindSession({
       sessionId: "rs-restore",
-      messageId: "m0",
+      messageId: "m1",
       restoreFiles: true,
       git: port,
     })
-    expect(stashCalls).toBe(1)
-    expect(resetCalls).toBe(1)
-    expect(resetSha).toBe("cafefeed")
-    expect(result.fileStateNote).toBe("git stashed; reset to cafefeed")
+    // Transcript truncation is the deterministic part — still happens.
+    expect(result.removedMessages).toBe(2) // m2, m3 dropped
+    // The data-loss reset must NOT fire.
+    expect(stashCalls).toBe(0)
+    expect(resetCalls).toBe(0)
+    expect(resetSha).toBeUndefined()
+    // And the SESSION-START sha must never be the restore target.
+    expect(resetSha).not.toBe("cafefeed")
+    expect(result.fileStateNote).toBe(
+      "no per-message checkpoint; working tree unchanged (file restore not yet wired)",
+    )
+    // Transcript truncated correctly (deterministic part unchanged).
+    const reloaded = await loadSessionById("rs-restore")
+    expect(reloaded?.messages.map((m) => m.id)).toEqual(["m0", "m1"])
   })
 
   test("rewind to first message yields a single-message transcript", async () => {

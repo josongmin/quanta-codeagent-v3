@@ -14,7 +14,14 @@
  * than none (it would gate the rail on a script that does not reproduce).
  *
  * Pure + deterministic: no I/O, no LLM, no clock/random. The VALUE is the snippet
- * (it becomes a runnable repro); precision matters because it IS executed.
+ * (it may become a runnable repro). It is a HEURISTIC guess, so it is consumed as
+ * a SEED only — every executed call site routes through {@link
+ * extractIssueReproSeed} and confers authority ONLY after a base-RED gate (the
+ * source must reproduce the failure on the base tree). The regex's `hasCall` guess
+ * can never become an executed primary oracle on its own; the AUTHORITATIVE repro
+ * is produced by the LLM repro generator (`@/agent/repro-test/generate`) and
+ * validated by base-red execution. Prefer fewer false "reproduced" over a wrong
+ * block: anything ambiguous ⇒ `undefined`.
  */
 
 import { normalizePublicIssueText } from "@/shared"

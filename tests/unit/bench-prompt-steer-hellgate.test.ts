@@ -2,8 +2,10 @@
  * Hellgate (real composition + gate-OFF baseline + red-on-injection) for the two
  * bench prompt steers that are wired ONLY inside the real bench config builder:
  *
- *   - bench-simplicity-steer  (DEFAULT-ON):  QUANTA_BENCH_SIMPLICITY=0 restores
- *     the pre-absorption baseline (steer dropped from the SWE-bench prompt).
+ *   - bench-simplicity-steer  (DEFAULT-OFF, opt-in): unset ⇒ steer absent
+ *     (pre-absorption baseline); QUANTA_BENCH_SIMPLICITY=1 folds the steer into
+ *     the SWE-bench prompt. Unvalidated absorbed steer — kept opt-in so it stays
+ *     cleanly A/B-able.
  *   - bench-find-refs-steer   (DEFAULT-OFF): QUANTA_BENCH_FIND_REFS=1 appends the
  *     ripgrep find_references steer; unset ⇒ byte-identical (absent).
  *
@@ -14,8 +16,8 @@
  * steer into the prompt (or flips its default) reds this test.
  *
  * Red-on-injection:
- *   - simplicity default flips OFF ⇒ "default-ON ⇒ present" RED.
- *   - simplicity gate ignored      ⇒ "=0 ⇒ absent" RED.
+ *   - simplicity default flips ON  ⇒ "unset ⇒ absent" RED.
+ *   - simplicity gate ignored      ⇒ "=1 ⇒ present" RED.
  *   - find-refs default flips ON   ⇒ "unset ⇒ absent" RED.
  *   - find-refs gate ignored       ⇒ "=1 ⇒ present" RED.
  *   - non-swebench leak            ⇒ "custom corpus ⇒ no steer" RED.
@@ -85,15 +87,10 @@ const withEnv = (vars: Record<string, string | undefined>, fn: () => void): void
   }
 }
 
-describe("bench-simplicity-steer (DEFAULT-ON)", () => {
-  test("unset ⇒ simplicity steer present in the SWE-bench prompt", () => {
+describe("bench-simplicity-steer (DEFAULT-OFF, opt-in)", () => {
+  // PAIRED CONTROL (a): env unset ⇒ steer NOT in the composed prompt.
+  test("unset (default) ⇒ simplicity steer ABSENT (pre-absorption baseline)", () => {
     withEnv({ QUANTA_BENCH_SIMPLICITY: undefined, QUANTA_BENCH_LEAN_PROMPT: undefined }, () => {
-      expect(promptText(mkInstance())).toContain(SIMPLICITY_ANCHOR)
-    })
-  })
-
-  test("QUANTA_BENCH_SIMPLICITY=0 ⇒ steer dropped (pre-absorption baseline)", () => {
-    withEnv({ QUANTA_BENCH_SIMPLICITY: "0", QUANTA_BENCH_LEAN_PROMPT: undefined }, () => {
       const t = promptText(mkInstance())
       // Non-vacuity: the prompt is REAL (carries the task), the steer is just gone —
       // not an empty/broken prompt that would pass `not.toContain` trivially.
@@ -102,8 +99,17 @@ describe("bench-simplicity-steer (DEFAULT-ON)", () => {
     })
   })
 
-  test("non-swebench instance ⇒ no steer leak (custom corpus unaffected)", () => {
-    withEnv({ QUANTA_BENCH_SIMPLICITY: undefined }, () => {
+  // PAIRED CONTROL (b): explicit opt-in ⇒ steer IS present. Reverting the default
+  // to ON would NOT red this (still present), but it reds the unset-absent test
+  // above — that pairing is the teeth.
+  test("QUANTA_BENCH_SIMPLICITY=1 ⇒ steer folded into the SWE-bench prompt", () => {
+    withEnv({ QUANTA_BENCH_SIMPLICITY: "1", QUANTA_BENCH_LEAN_PROMPT: undefined }, () => {
+      expect(promptText(mkInstance())).toContain(SIMPLICITY_ANCHOR)
+    })
+  })
+
+  test("non-swebench instance ⇒ no steer leak even when gated ON", () => {
+    withEnv({ QUANTA_BENCH_SIMPLICITY: "1" }, () => {
       const t = promptText(mkInstance(false))
       expect(t).toContain("Fix the bug in src/foo.py")
       expect(t).not.toContain(SIMPLICITY_ANCHOR)

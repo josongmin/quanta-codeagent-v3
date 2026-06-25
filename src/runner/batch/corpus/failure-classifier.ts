@@ -28,6 +28,7 @@ export type TerminationType =
   | "admission_blocked"
   | "budget_exhausted"
   | "generation_error"
+  | "throttled"
   | "grader_invalid"
   | "harness_error"
   | "hung_stream"
@@ -93,7 +94,12 @@ const lastSessionEnd = (events: TrajectoryEvent[]): TrajectoryEvent | undefined 
 }
 
 const terminationFromStopReason = (r: InstanceResult): TerminationType | null => {
-  if (r.stopReason === "refusal" || r.stopReason === "error") return "generation_error"
+  if (r.stopReason === "refusal" || r.stopReason === "error") {
+    // Throttle (rate-limit / 429 / usage-limit) is a re-runnable infra/our-fault
+    // hole, NOT a genuine model generation failure — keep it out of
+    // `generation_error` so the leaderboard can exclude it from the solve-rate.
+    return isThrottled(r.error) ? "throttled" : "generation_error"
+  }
   if (r.stopReason === "aborted") return r.turns === 0 ? "hung_stream" : "timeout"
   if (r.stopReason === "budget_exhausted") return "budget_exhausted"
   if (r.stopReason === "max_turns") return "max_turns_exhausted"
@@ -104,6 +110,7 @@ const terminationWithoutTrajectory = (r: InstanceResult): TerminationType | null
   if (r.passed) return "passed"
   if (isPatchBudgetStrictAdmission(r.admissionBlock)) return "admission_blocked"
   if (r.verdict === "grader_invalid") return "grader_invalid"
+  if (isThrottled(r.error)) return "throttled"
   const stopReasonTermination = terminationFromStopReason(r)
   if (stopReasonTermination !== null) return stopReasonTermination
   if (isGenerationError(r.error)) return "generation_error"
@@ -140,11 +147,15 @@ const computeTermination = (
     : (direct ?? fromEnd)
 }
 
-const isGenerationError = (error: string | undefined): boolean =>
+/** Re-runnable provider throttle: rate-limit / 429 / usage-limit. This is an
+ *  infra/our-fault hole, not a capability miss, so it gets its own
+ *  `throttled` termination and is excluded from the leaderboard solve-rate. */
+const isThrottled = (error: string | undefined): boolean =>
   error !== undefined &&
-  /agent stopped with (?:error|refusal)|LLM stream failed|usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(
-    error,
-  )
+  /usage_limit_reached|usage limit|rate[_ -]?limit|429 Too Many Requests/i.test(error)
+
+const isGenerationError = (error: string | undefined): boolean =>
+  error !== undefined && /agent stopped with (?:error|refusal)|LLM stream failed/i.test(error)
 
 const isTimeoutError = (error: string | undefined): boolean =>
   error !== undefined &&
@@ -264,8 +275,12 @@ export const classify = (r: InstanceResult): FailureClassification => {
   if (
     r.patch.trim() === "" &&
     termination !== "generation_error" &&
+    termination !== "throttled" &&
     termination !== "admission_blocked"
   ) {
+    // A throttled run produced no patch because the provider rate-limited it,
+    // not because the model emitted nothing — suppress the empty_patch signal
+    // (same as generation_error) so it is not double-counted as a real miss.
     signals.push("empty_patch")
   } else if (isDirtyCacheLeak(r.patch)) {
     signals.push("dirty_cache_leak")

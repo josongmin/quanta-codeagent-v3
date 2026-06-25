@@ -138,7 +138,10 @@ export const formatFindRefs = (stdout: string, symbol: string): string => {
     .filter((_, index) => index < FILE_CAP)
     .map(([f, s]) => `  ${f} — ${s.count} ref${s.count === 1 ? "" : "s"}${s.hasDef ? " (def here)" : ""}`)
     .join("\n")
-  const fileMore = files.length > FILE_CAP ? `\n  … (${files.length - FILE_CAP} more files)` : ""
+  const fileMore =
+    files.length > FILE_CAP
+      ? `\n  … (${files.length - FILE_CAP} more files; sorted by definition-presence then ref-count — narrow with \`path\`/\`type\` to surface buried owners)`
+      : ""
   const fileBlock = `Files (co-change candidates — verify each that should change together):\n${fileLines}${fileMore}`
   const ordered = [...defs, ...uses]
   const shown = ordered.filter((_, index) => index < MAX_ROWS).join("\n")

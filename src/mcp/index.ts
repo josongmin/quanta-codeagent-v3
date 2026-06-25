@@ -16,6 +16,7 @@ export {
   type McpClientTransport,
   McpError,
   sanitizeAnnotations,
+  unsupportedTypeMarker,
 } from "./client"
 export {
   type CliPrompterIO,

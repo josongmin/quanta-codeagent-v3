@@ -93,6 +93,89 @@ describe("buildFaultEvidencePacket", () => {
   })
 })
 
+/**
+ * PARAMETER-FREE TIER ORDERING (post `*_BOOST` removal). Ranking is lexicographic
+ * by STRONGEST provenance tier (static-witness > owner-resolve > issue-file >
+ * stage1), NOT a sum of per-source magnitudes. These teeth pin the anti-additive
+ * contract: two weak signals must NEVER out-rank one strong signal.
+ */
+describe("buildFaultEvidencePacket — parameter-free provenance tier ordering", () => {
+  test("a static-witness-only file outranks an issue-file-only file regardless of count", () => {
+    // The witness file has ZERO stage-1 score; the issue-file rival has a large
+    // stage-1 score. Tier (not magnitude) must decide: static-witness > issue-file.
+    const p = buildFaultEvidencePacket({
+      issueText: "bug in helpers",
+      stage1Files: [{ file: "named.py", score: 1000 }],
+      issueFiles: ["named.py"],
+      witnessOwners: [{ file: "witness.py", forSymbol: "Foo" }],
+    })
+    expect(p.candidates.map((c) => c.file)).toEqual(["witness.py", "named.py"])
+  })
+
+  test("a file with multiple provenances ranks by its STRONGEST tier, not a sum", () => {
+    // multi.py = issue-file + stage1 (strongest tier = issue-file).
+    // resolved.py = owner-resolve only (strongest tier = owner-resolve, stronger).
+    // If tiers summed, multi.py (two streams) could win; it must NOT.
+    const p = buildFaultEvidencePacket({
+      issueText: "bug",
+      stage1Files: [{ file: "multi.py", score: 5 }],
+      issueFiles: ["multi.py"],
+      ownerResolved: [{ file: "resolved.py", forSymbol: "Bar" }],
+    })
+    expect(p.candidates[0]?.file).toBe("resolved.py")
+    expect(p.candidates.map((c) => c.file)).toEqual(["resolved.py", "multi.py"])
+  })
+
+  test("ANTI-ADDITIVE TEETH: two weak signals do NOT beat one strong signal (would FLIP under old +boost scheme)", () => {
+    // weak.py: issue-file (+2) + stage1 score 1 ⇒ OLD blended score ≈ 3.
+    // strong.py: owner-resolve (+3) ONLY, no stage1 ⇒ OLD blended score = 3.
+    // Push weak.py's stage-1 score up so the OLD ADDITIVE scheme would rank
+    // weak.py FIRST (3 + extra > 3). Under tier ordering, owner-resolve's tier
+    // strictly dominates issue-file's tier, so strong.py MUST stay on top.
+    const p = buildFaultEvidencePacket({
+      issueText: "bug",
+      stage1Files: [{ file: "weak.py", score: 100 }],
+      issueFiles: ["weak.py"],
+      ownerResolved: [{ file: "strong.py", forSymbol: "Baz" }],
+    })
+    expect(p.candidates[0]?.file).toBe("strong.py")
+    // explicit anti-additive assertion: the stronger-tier file wins despite a far
+    // smaller carried score (0 vs 100).
+    expect(p.candidates[0]?.score).toBe(0)
+    expect(p.candidates[1]?.file).toBe("weak.py")
+  })
+
+  test("within a tier, external stage-1 score breaks the tie (parameter-free, externally supplied)", () => {
+    const p = buildFaultEvidencePacket({
+      issueText: "",
+      stage1Files: [
+        { file: "low.py", score: 1 },
+        { file: "high.py", score: 9 },
+      ],
+    })
+    // same tier (stage1) ⇒ external score orders them, then path.
+    expect(p.candidates.map((c) => c.file)).toEqual(["high.py", "low.py"])
+  })
+
+  test("carried score is the MAX external stage-1 score, never a sum across streams", () => {
+    // Same file hit by stage-1 once + issue-file + owner-resolve. The score must
+    // be the single stage-1 value (7), not 7 plus any per-source magnitude.
+    const p = buildFaultEvidencePacket({
+      issueText: "bug",
+      stage1Files: [{ file: "f.py", score: 7 }],
+      issueFiles: ["f.py"],
+      ownerResolved: [{ file: "f.py", forSymbol: "Q" }],
+    })
+    expect(p.candidates[0]?.file).toBe("f.py")
+    expect(p.candidates[0]?.score).toBe(7)
+    expect(p.candidates[0]?.sources.slice().sort()).toEqual([
+      "issue-file",
+      "owner-resolve",
+      "stage1",
+    ])
+  })
+})
+
 describe("ownerStrength (T-OWN-12 lattice classifier)", () => {
   test("issue-file stream ⇒ authoritative (public issue named it)", () => {
     expect(ownerStrength({ sources: ["issue-file"] })).toBe("authoritative")

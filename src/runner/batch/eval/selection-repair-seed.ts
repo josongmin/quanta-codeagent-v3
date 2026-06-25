@@ -603,6 +603,7 @@ const dedupeOwnerEvidence = (facts: readonly OwnerEvidenceFact[]): OwnerEvidence
       symbols: fact.symbols,
       provenance: fact.provenance,
       sourceSlice: fact.sourceSlice,
+      sourceSlices: fact.sourceSlices,
       sliceMiss: fact.sliceMiss,
       ambiguousSliceMatch: fact.ambiguousSliceMatch,
     })

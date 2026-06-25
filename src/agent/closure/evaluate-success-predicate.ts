@@ -10,9 +10,14 @@
  * observation return `{ evaluable: false }`. The caller degrades to the legacy
  * exit-code decision — NEVER hard-fails. A correct patch rejected by a fragile
  * issue-derived predicate (false-RED) is worse than today's false-green. So in
- * v1 only EXECUTION-GROUNDED predicates are evaluable; issue-derived
- * exact-string / symbolic / structural predicates are advisory (evaluable:false)
- * until their observed-side extraction is proven safe.
+ * v1 only EXIT-CODE predicates (`test_exit_zero` / `selected_test_passes`) are
+ * evaluable; ALL issue-PROSE-derived predicates — exact-string / symbolic /
+ * structural AND the stdout-shape ones (`stdout_contains` / `stdout_exact_empty`,
+ * whose sole source is the issue-prose regex `extractIssueDeclaredExpected`) —
+ * are advisory (evaluable:false) until their observed-side extraction is proven
+ * safe. The declared value still reaches the model as a spec-fidelity steer, so
+ * demoting them loses no information; it only removes the regex's authority to
+ * hard-fail the rail.
  */
 
 import type { ExecObservation, PredicateResult, SuccessPredicate } from "./types"
@@ -47,22 +52,28 @@ export const evaluateSuccessPredicate = (
     case "selected_test_passes":
       // the selector already narrowed the cmd upstream; a zero exit is the proof.
       return matched(observed.exitCode === 0, `selected test exit ${observed.exitCode} != 0`)
-    case "stdout_contains": {
-      // Defensive: a malformed predicate missing `substring` must NOT throw (the
-      // reason string would eagerly `.slice` undefined) — fail-open to advisory.
-      if (typeof predicate.substring !== "string") return advisory("stdout_contains missing substring")
-      return matched(
-        observed.stdout.includes(predicate.substring),
-        `stdout missing substring ${JSON.stringify(predicate.substring.slice(0, 80))}`,
-      )
-    }
-    case "stdout_exact_empty":
-      return matched(observed.stdout.trim() === "", "stdout is not empty")
 
     // ── advisory in v1 (observed-side extraction not yet proven safe) ──────
     // Hard-gating these on a fuzzy issue-derived expected value risks false-RED
     // (rejecting a correct patch). They feed repair-seed pressure only, never the
     // finish gate, until T-3 measurement proves their evaluability.
+    //
+    // 🔴 `stdout_contains` / `stdout_exact_empty` are ALSO issue-PROSE-derived:
+    // their SOLE producer is build.ts, fed exclusively by
+    // `extractIssueDeclaredExpected` (a regex over the public problem statement).
+    // A prose mis-extraction (wrong/current value captured, negation/contrast
+    // blindness like "should print `False` but returns `True`", or the
+    // "stop X from checking" inversion) would mark a CORRECT patch matched:false
+    // and hard-veto the primary rail (false-RED) — the very failure this design
+    // forbids. So they are advisory in v1, exactly like latex/symbolic: the
+    // declared value still reaches the model as a spec-fidelity steer
+    // (driver.buildSpecSteer, gated on the same extractor), so NO information is
+    // lost — we only strip the regex's authority to hard-fail. The rail falls
+    // back to the genuine execution oracle (`test_exit_zero`) as the hard signal.
+    case "stdout_contains":
+      return advisory("stdout_contains is advisory in v1 (issue-prose-derived; no reliable observed match)")
+    case "stdout_exact_empty":
+      return advisory("stdout_exact_empty is advisory in v1 (issue-prose-derived; no reliable observed match)")
     case "latex_or_string_exact":
       return advisory("latex_or_string_exact is advisory in v1 (no reliable observed repr)")
     case "symbolic_repr_equals":

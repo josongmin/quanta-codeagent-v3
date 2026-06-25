@@ -81,12 +81,12 @@ export interface CommandHookBinding {
   /** Provenance (T04). Derived from the config layer / importer by trusted
    *  code. Absent on the legacy un-provenanced path. */
   readonly source?: CommandHookSource
-  /** When true, this binding must be APPROVED (via the review store) before the
-   *  runner will spawn it — but ONLY when the gate's trust gate is armed
-   *  ({@link CommandHookGate.trustGate}). Absent / false ⇒ fires as usual.
-   *  Set by trusted code from {@link sourceNeedsReview} or the migration
-   *  importer's `needsReview` marker; the on-disk loosening direction
-   *  (`false`) is never honored. */
+  /** When true, this binding (untrusted / repo / imported provenance) must be
+   *  APPROVED (via the review port) before the runner will spawn it — ALWAYS,
+   *  independent of {@link CommandHookGate.trustGate} (which only governs the
+   *  approval UX). Absent / false ⇒ trusted ⇒ fires as usual. Set by trusted
+   *  code from {@link sourceNeedsReview} or the migration importer's marker; the
+   *  on-disk loosening direction (`false`) is never honored. */
   readonly needsReview?: boolean
 }
 
@@ -162,8 +162,9 @@ export interface CommandHookPermissionPort {
 
 /** Trust-review gate for a {@link CommandHookBinding} flagged
  *  {@link CommandHookBinding.needsReview} (T04). The runner consults this
- *  PER-BINDING — only when {@link CommandHookGate.trustGate} is armed — BEFORE
- *  spawning a review-gated hook. Returning false ⇒ the binding is HELD (the
+ *  PER-BINDING — ALWAYS, for every review-gated binding (NOT gated on
+ *  {@link CommandHookGate.trustGate}) — BEFORE spawning a review-gated hook.
+ *  Returning false ⇒ the binding is HELD (the
  *  command never spawns; the tool still proceeds — a held hook does not deny,
  *  it simply has not been activated yet). Injected so the slice does not depend
  *  on the concrete approval store; the production adapter is backed by the
@@ -185,10 +186,11 @@ export interface CommandHookDeps {
   readonly permission: CommandHookPermissionPort
   /** Working directory passed to every exec. */
   readonly cwd: string
-  /** Trust-review gate (T04). Consulted ONLY for bindings flagged
-   *  {@link CommandHookBinding.needsReview} when {@link CommandHookGate.trustGate}
-   *  is armed. Absent ⇒ a review-gated binding is treated as NOT approved
-   *  (fail-closed: an un-reviewed imported hook never fires). */
+  /** Trust-review gate (T04). Consulted for EVERY binding flagged
+   *  {@link CommandHookBinding.needsReview} (ALWAYS — not conditioned on
+   *  {@link CommandHookGate.trustGate}). Absent ⇒ a review-gated binding is
+   *  treated as NOT approved (fail-closed: an un-reviewed imported / repo hook
+   *  never fires). */
   readonly review?: CommandHookReviewPort
 }
 
@@ -197,11 +199,13 @@ export interface CommandHookDeps {
 export interface CommandHookGate {
   /** All three guards satisfied AND at least one binding present. */
   readonly armed: boolean
-  /** T04 trust gate. When true, a binding flagged
-   *  {@link CommandHookBinding.needsReview} is HELD (does not spawn) until the
-   *  injected {@link CommandHookReviewPort} approves it. When false (the
-   *  DEFAULT), `needsReview` is purely informational and every armed binding
-   *  fires as before — byte-identical to the pre-T04 behavior. */
+  /** Whether the INTERACTIVE approval port / UX is offered for review-gated
+   *  hooks. SECURITY: this does NOT control whether an untrusted-source
+   *  ({@link CommandHookBinding.needsReview}) hook may fire — the runner ALWAYS
+   *  holds a `needsReview` binding (does not spawn) until the injected
+   *  {@link CommandHookReviewPort} approves it, regardless of this flag. The flag
+   *  only governs whether/how the human is asked to approve; it can never let an
+   *  untrusted repo hook fire un-reviewed. */
   readonly trustGate: boolean
   /** The acknowledgement string (preserved for audit) when armed; else
    *  undefined. */

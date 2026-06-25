@@ -56,6 +56,16 @@ export type LlmEvidencePacketStage =
   | "phase_routing"
 
 /**
+ * One labeled candidate definition/symbol slice. `label` is `file:line` of the
+ * matched `def`/`class` so the LLM can tell co-located sites apart; `slice` is
+ * the EXACT bounded block (same per-slice cap as the single-slice path).
+ */
+export interface OwnerSourceSlice {
+  readonly label: string
+  readonly slice: string
+}
+
+/**
  * A narrowed owner/fault site. `sourceSlice` is the EXACT definition/symbol
  * block resolved from public issue/static provenance — never a broad excerpt or
  * a whole file body. Absent slice ⇒ the caller emits a `missingEvidence` entry
@@ -67,6 +77,16 @@ export interface OwnerEvidenceFact {
   /** e.g. "issue-file", "static-witness:override-family", "selection-owner". */
   readonly provenance: string
   readonly sourceSlice?: string
+  /**
+   * ALL candidate def/class slices when the owner symbol resolves to MORE THAN
+   * ONE site (overload/redefinition) OR several issue symbols resolve in the
+   * same file. Each entry is the bounded block for one site, labeled `file:line`.
+   * Present so the model receives EVERY candidate site to disambiguate — instead
+   * of the scaffold deterministically picking site 0. Each slice obeys the same
+   * per-slice `maxLines` cap, so total size stays bounded. `sourceSlice` remains
+   * the first/primary site for back-compat readers.
+   */
+  readonly sourceSlices?: readonly OwnerSourceSlice[]
   /**
    * B4: when no slice was resolved, WHY — `non_source` (binary/unreadable text)
    * vs `not_found` (readable source, symbol absent). Lets the caller emit a
@@ -387,6 +407,9 @@ const ownerEvidenceStrings = (o: OwnerEvidenceFact): string[] => [
   o.provenance,
   ...o.symbols,
   ...(o.sourceSlice !== undefined ? [o.sourceSlice] : []),
+  // Every multi-site slice (and its label) is rendered to the LLM, so it must
+  // also pass the blindness scan — no candidate site escapes the gold guard.
+  ...(o.sourceSlices ?? []).flatMap((s) => [s.label, s.slice]),
 ]
 
 const proofReceiptStrings = (r: ProofReceiptFact): string[] => [
@@ -737,8 +760,15 @@ export const describeIssueFacts = (
 export type SymbolSliceMiss = "not_found" | "non_source"
 
 export interface SymbolSliceResult {
-  /** Present iff a matching def/class block was resolved. */
+  /** Present iff a matching def/class block was resolved (FIRST site, back-compat). */
   readonly slice?: string
+  /**
+   * ALL matching def/class sites, each a bounded block labeled `<symbol>@line`.
+   * Present when a slice resolved. Lets callers surface every candidate site
+   * (not just `slice`) so an ambiguous symbol is disambiguated by the model, not
+   * by the scaffold. Empty/absent when nothing resolved.
+   */
+  readonly slices?: readonly OwnerSourceSlice[]
   /** Present iff no slice — distinguishes binary/non-source from genuine not-found. */
   readonly miss?: SymbolSliceMiss
   /**
@@ -797,8 +827,17 @@ export const extractSymbolSliceResult = (
   if (matches.length === 0) return { miss: "not_found", matchCount: 0 }
   const chosen = matches[0]
   if (chosen === undefined) return { miss: "not_found", matchCount: 0 }
+  // EVERY matching site as its own bounded, labeled slice — so an ambiguous
+  // symbol surfaces all candidate sites to the model, not just site 0. Each
+  // slice is independently capped by `maxLines`.
+  const slices: OwnerSourceSlice[] = matches.map((match) => ({
+    label: `${symbol}@${match.index + 1}`,
+    slice: symbolBlockLines(lines, match, maxLines).join("\n").trimEnd(),
+  }))
   return {
+    // `chosen` is non-undefined, so the first slice always exists.
     slice: symbolBlockLines(lines, chosen, maxLines).join("\n").trimEnd(),
+    slices,
     matchCount: matches.length,
   }
 }
@@ -924,15 +963,28 @@ const symbolDefinedInSource = (source: string, symbol: string): boolean =>
 const definedIssueSymbols = (source: string | null, issueSymbols: readonly string[]): string[] =>
   source === null ? [] : issueSymbols.filter((symbol) => symbolDefinedInSource(source, symbol))
 
-const firstResolvedSymbolSlice = (
+/**
+ * Resolve issue symbols to bounded slices. Returns the FIRST resolved result
+ * (for back-compat `slice`/`matchCount`/`miss`) PLUS `allSlices`: the union of
+ * EVERY resolved site across EVERY symbol (each label already file-local as
+ * `<symbol>@line`, here re-labeled below by caller). When more than one site
+ * resolves, the caller surfaces them all so the model — not the scaffold —
+ * picks the right one.
+ */
+const resolvedSymbolSlices = (
   source: string | null,
   symbols: readonly string[],
-): SymbolSliceResult | undefined =>
-  source === null
-    ? undefined
-    : symbols
-        .map((symbol) => extractSymbolSliceResult(source, symbol))
-        .find((r) => r.slice !== undefined)
+): { readonly first?: SymbolSliceResult; readonly allSlices: readonly OwnerSourceSlice[] } => {
+  if (source === null) return { allSlices: [] }
+  const resolved = symbols
+    .map((symbol) => extractSymbolSliceResult(source, symbol))
+    .filter((r) => r.slice !== undefined)
+  const first = resolved[0]
+  return {
+    ...(first !== undefined ? { first } : {}),
+    allSlices: resolved.flatMap((r) => r.slices ?? []),
+  }
+}
 
 const ownerEvidenceFact = (args: {
   readonly file: string
@@ -941,17 +993,33 @@ const ownerEvidenceFact = (args: {
   readonly source: string | null
 }): OwnerEvidenceFact => {
   const symbols = definedIssueSymbols(args.source, args.issueSymbols)
-  const resolved = firstResolvedSymbolSlice(args.source, symbols)
+  const { first: resolved, allSlices } = resolvedSymbolSlices(args.source, symbols)
   const miss = sliceMissForFile(args.source, resolved)
   return {
     file: args.file,
     symbols,
     provenance: args.provenance,
     ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
+    ...multiSiteSlicesField(args.file, allSlices),
     ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
     ...(miss !== undefined ? { sliceMiss: miss } : {}),
   }
 }
+
+/**
+ * Build the `sourceSlices` field ONLY when there are multiple candidate sites —
+ * one site is already fully carried by `sourceSlice`, so duplicating it would
+ * just bloat the packet. Each label is prefixed with the owner file so the model
+ * sees `file:symbol@line`. The per-slice cap was applied upstream; this only
+ * relabels, never grows a slice.
+ */
+const multiSiteSlicesField = (
+  file: string,
+  allSlices: readonly OwnerSourceSlice[],
+): { sourceSlices?: readonly OwnerSourceSlice[] } =>
+  allSlices.length > 1
+    ? { sourceSlices: allSlices.map((s) => ({ label: `${file}:${s.label}`, slice: s.slice })) }
+    : {}
 
 /**
  * Static-witness-backed owner evidence. Carries witness kind/provenance/authority
@@ -977,13 +1045,14 @@ const staticWitnessOwnerEvidenceFact = (
   source: string | null,
 ): OwnerEvidenceFact => {
   const symbols = uniqueLines(witness.subjectSymbols)
-  const resolved = firstResolvedSymbolSlice(source, symbols)
+  const { first: resolved, allSlices } = resolvedSymbolSlices(source, symbols)
   const miss = sliceMissForFile(source, resolved)
   return {
     file,
     symbols,
     provenance: `static-witness:${witness.kind}/${witness.provenance}/${witness.authority}`,
     ...(resolved?.slice !== undefined ? { sourceSlice: resolved.slice } : {}),
+    ...multiSiteSlicesField(file, allSlices),
     ...(resolved !== undefined && resolved.matchCount > 1 ? { ambiguousSliceMatch: true } : {}),
     ...(miss !== undefined ? { sliceMiss: miss } : {}),
   }

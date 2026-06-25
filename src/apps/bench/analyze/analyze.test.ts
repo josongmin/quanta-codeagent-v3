@@ -523,6 +523,7 @@ describe("diffRuns", () => {
     unresolved: new Set(rest),
     errored: new Set<string>(),
     emptyPatch: new Set<string>(),
+    reRunnable: new Set<string>(),
   })
 
   test("newlyResolved [z], newlyBroken [x], stillResolved [y]", () => {
@@ -634,6 +635,7 @@ describe("diffRuns", () => {
       unresolved: new Set<string>(),
       errored: new Set<string>(),
       emptyPatch: new Set<string>(),
+      reRunnable: new Set<string>(),
     }
     const b = {
       resolved: new Set<string>(),
@@ -646,6 +648,7 @@ describe("diffRuns", () => {
       unresolved: new Set(["Z"]),
       errored: new Set(["X"]),
       emptyPatch: new Set(["Y"]),
+      reRunnable: new Set(["X"]),
     }
     const d = diffRuns(a, b)
     expect(d.newlyBroken).toEqual(["Z"])
@@ -835,6 +838,7 @@ describe("renderLeaderboardMarkdown", () => {
         unresolved: new Set<string>(),
         errored: new Set<string>(),
         emptyPatch: new Set<string>(),
+        reRunnable: new Set<string>(),
       },
       { preset: "agentless-v1", model: "gpt-5" },
     )

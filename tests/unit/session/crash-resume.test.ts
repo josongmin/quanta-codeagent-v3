@@ -188,6 +188,46 @@ describe("§13.2 crash resume — persisted interrupted-turn marker", () => {
       expect(msg).not.toContain("partial progress")
     })
 
+    test("RED-ON-INJECTION: resume message tells the model to INSPECT the workspace before re-doing already-applied changes", () => {
+      // Correctness bug fix (Option B): the marker cannot carry the interrupted
+      // turn's tool_use/tool_result blocks (they live in the agent loop's fenced
+      // working memory and never reach the session slice), so the resume cannot
+      // splice the already-applied edits back into history. Without an explicit
+      // warning the model re-does edits it already made → duplicate/conflicting
+      // changes. The reinject MUST carry inspect-before-redo guidance.
+      //
+      // Teeth: the OLD prose-only summary — `Resume … + partial progress` — is
+      // built here verbatim and asserted to LACK every guidance phrase, so a
+      // revert to prose-only flips this test RED.
+      const withProgress = buildCrashResumeMessage(det.interruptedTurn)
+      const noProgress = buildCrashResumeMessage(mkTurn({ partialAssistantText: "" }))
+      const guidancePhrases = [
+        "INSPECT the current working-tree state",
+        "ALREADY applied changes",
+        "do not blindly re-apply",
+        "duplicate or conflicting changes",
+      ]
+      for (const phrase of guidancePhrases) {
+        // Present on BOTH branches (even the no-narration crash, which is the
+        // most dangerous case: applied edits, zero narration to summarize).
+        expect(withProgress).toContain(phrase)
+        expect(noProgress).toContain(phrase)
+      }
+      // Teeth: reconstruct the pre-fix prose-only message and prove it omits the
+      // guidance — i.e. the bug (blind re-do) WOULD reproduce on the old output.
+      const t = det.interruptedTurn
+      const proseOnly =
+        `Resume the previously interrupted task (it was interrupted: ${t.reason}). ` +
+        `The task was:\n${t.userText}` +
+        `\n\nYour partial progress before the interruption:\n${t.partialAssistantText}`
+      for (const phrase of guidancePhrases) {
+        expect(proseOnly).not.toContain(phrase)
+      }
+      // The fixed message is a strict superset of the prose summary (still
+      // resumes the same task — the guidance is additive, not a replacement).
+      expect(withProgress.startsWith(proseOnly)).toBe(true)
+    })
+
     test("buildCrashResumeOffer produces a clipped one-line summary + resume message", () => {
       const offer = buildCrashResumeOffer(det)
       expect(offer.sessionId).toBe("s1")

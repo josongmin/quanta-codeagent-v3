@@ -4,7 +4,6 @@ import { join } from "node:path"
 import {
   CLOSEOUT_4RULE_REMINDER,
   CLOSEOUT_REMINDER,
-  CODE_MOD_CLOSEOUT_REMINDER,
   createCloseoutGuardState,
   decideCloseoutGuard,
 } from "@/agent/closeout-guard"
@@ -96,103 +95,67 @@ describe("decideCloseoutGuard", () => {
   // pin the constant by identity; the sota-codex-full e2e asserts that the
   // 4-rule text reaches the agent transcript through closeout-guard fire.
 
-  // Phase 4 absorption: code-modification routing precedence. A history that
-  // contains a mutating tool call (`edit` / `write` / `scripted_replace`)
-  // routes to the Phase 4 four-truth-surface reminder, taking precedence over
-  // `cfg.fourRule`. Non-code-mod sessions fall through to the legacy choice.
-  test("(10) history contains {name:'edit'} + fourRule:false ⇒ CODE_MOD reminder (not legacy)", () => {
+  // De-heuristicized routing: the closeout reminder is NO LONGER selected by a
+  // tool-name scan over history. The default (non-`fourRule`) path always
+  // injects the UNION self-check ({@link CLOSEOUT_REMINDER}), which carries
+  // both the general defended-claim guidance AND the self-select code-mod
+  // four-surface walk. `decideCloseoutGuard` no longer accepts a `history`
+  // argument at all — the route is a single explicit switch on `fourRule`.
+  test("(10) default (fourRule absent) ⇒ UNION reminder, regardless of how files were changed", () => {
     const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true, fourRule: false },
-      history: [{ name: "edit" }],
-    })
+    const r = decideCloseoutGuard({ state, cfg: { enabled: true } })
     expect(r.block).toBe(true)
-    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
-    expect(r.text).not.toBe(CLOSEOUT_REMINDER)
+    expect(r.text).toBe(CLOSEOUT_REMINDER)
+    // The union carries the code-mod walk inline — no separate constant.
+    expect(r.text).toContain("If you modified code")
+    expect(r.text).toContain("four truth surfaces")
     expect(state.trips).toBe(1)
   })
 
-  test("(11) history contains {name:'scripted_replace'} ⇒ CODE_MOD reminder", () => {
+  test("(11) fourRule:false ⇒ same UNION reminder (no history dependence)", () => {
     const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true },
-      history: [{ name: "bash" }, { name: "scripted_replace" }],
-    })
-    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
-    expect(state.trips).toBe(1)
+    const r = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: false } })
+    expect(r.text).toBe(CLOSEOUT_REMINDER)
   })
 
-  test("(11b) history contains {name:'write'} ⇒ CODE_MOD reminder", () => {
-    const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true },
-      history: [{ name: "write" }],
-    })
-    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
+  // Teeth: an `edit`-tool session and a `bash sed -i` session that the old
+  // heuristic classified DIFFERENTLY now get byte-identical self-check text,
+  // because the route no longer inspects history at all. Both go through the
+  // single non-fourRule branch.
+  test("(11b) edit-tool session and bash-sed session get the SAME complete self-check", () => {
+    const editSession = createCloseoutGuardState()
+    const sedSession = createCloseoutGuardState()
+    // Old heuristic: edit ⇒ code-mod reminder; bash ⇒ legacy one-liner.
+    const edit = decideCloseoutGuard({ state: editSession, cfg: { enabled: true } })
+    const sed = decideCloseoutGuard({ state: sedSession, cfg: { enabled: true } })
+    expect(edit.text).toBe(sed.text)
+    expect(edit.text).toBe(CLOSEOUT_REMINDER)
   })
 
-  test("(12) empty history + fourRule:true ⇒ legacy 4-rule (not CODE_MOD)", () => {
-    const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true, fourRule: true },
-      history: [],
-    })
-    expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
-    expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
-  })
-
-  test("(12b) undefined history + fourRule:true ⇒ legacy 4-rule", () => {
+  test("(12) fourRule:true ⇒ explicit 4-rule reminder (the only non-default route)", () => {
     const state = createCloseoutGuardState()
     const r = decideCloseoutGuard({ state, cfg: { enabled: true, fourRule: true } })
     expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
+    expect(r.text).not.toBe(CLOSEOUT_REMINDER)
   })
 
-  test("(13) empty history + fourRule:false ⇒ legacy one-liner CLOSEOUT_REMINDER", () => {
-    const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true, fourRule: false },
-      history: [{ name: "bash" }, { name: "read" }],
-    })
-    expect(r.text).toBe(CLOSEOUT_REMINDER)
-    expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
+  // Teeth: `decideCloseoutGuard` takes NO `history` parameter — the source of
+  // the removed interpretive route. A future re-introduction of a tool-name
+  // scan would reappear in this signature; this asserts it stays absent.
+  test("(13) decideCloseoutGuard signature carries no `history` route", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "..", "..", "src", "agent", "closeout-guard.ts"),
+      "utf8",
+    )
+    const sig = source.slice(
+      source.indexOf("export const decideCloseoutGuard"),
+      source.indexOf("): { block: boolean; text?: string }"),
+    )
+    expect(sig).not.toContain("history")
+    // And no branch on mutating tool names anywhere in the body.
+    expect(source).not.toContain("isCodeModificationSession")
+    expect(source).not.toContain("scripted_replace")
   })
-
-  // CR1 P1 fix (Round 3): explicit-over-implicit. A caller that EXPLICITLY
-  // sets `fourRule:true` chose the 4-rule discipline; the code-mod
-  // auto-detector must NOT silently overwrite that intent. The Round 1
-  // precedence (code-mod > fourRule) was wrong — it silently overrode user
-  // intent in the exact case where intent matters most.
-  test("(14) code-mod session + fourRule:true ⇒ 4-rule wins (explicit-over-implicit)", () => {
-    const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true, fourRule: true },
-      history: [{ name: "edit" }],
-    })
-    expect(r.text).toBe(CLOSEOUT_4RULE_REMINDER)
-    expect(r.text).not.toBe(CODE_MOD_CLOSEOUT_REMINDER)
-  })
-
-  test("(14b) code-mod session WITHOUT explicit fourRule ⇒ four-surface (default)", () => {
-    const state = createCloseoutGuardState()
-    const r = decideCloseoutGuard({
-      state,
-      cfg: { enabled: true },
-      history: [{ name: "edit" }],
-    })
-    expect(r.text).toBe(CODE_MOD_CLOSEOUT_REMINDER)
-  })
-
-  // W2 audit fix: (15) deleted — same substring-keyword tautology. Routing
-  // tests (10)-(14b) `toBe(CODE_MOD_CLOSEOUT_REMINDER)` already pin the
-  // constant; `tests/integration/sota-codex-full.test.ts` "code-mod closeout
-  // routing through the loop" verifies the four-surface text reaches the
-  // forced meta-user message in the agent transcript.
 })
 
 describe("closeout-guard module purity", () => {

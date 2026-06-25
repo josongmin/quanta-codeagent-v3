@@ -23,13 +23,42 @@ export interface CloseoutGuardState {
 /** Fresh state for a session — zero closeout nudges spent. */
 export const createCloseoutGuardState = (): CloseoutGuardState => ({ trips: 0 })
 
-/** The closeout nudge (legacy single-line). Compresses the four CloseoutLens
- *  directives into one sentence: keep only defended claims, state explicitly
- *  if verification was not run, separate fact from inference, match the
- *  requested reporting shape. Retained for callers using `closeoutGuard:
- *  { enabled:true }` without the new `fourRule` flag. */
-export const CLOSEOUT_REMINDER =
-  "Before finishing: keep only defended claims, state explicitly if verification was not run, separate fact from inference, and match the requested reporting shape. Then stop only if those hold."
+/**
+ * The default closeout nudge — the UNION self-check. Two parts:
+ *
+ *   1. The general defended-claim guidance (keep only defended claims, state
+ *      explicitly if verification was not run, separate fact from inference,
+ *      match the requested reporting shape).
+ *   2. A self-select code-modification section: the four-truth-surface walk
+ *      (type / owner / wire / test), gated by an explicit "If you modified
+ *      code, also:" clause so the model applies it iff it actually changed
+ *      source — no harness-side guess required.
+ *
+ * Why a UNION instead of routing by a tool-name scan: the prior design picked
+ * between this general checklist and a code-mod-only one via a heuristic that
+ * scanned tool history for mutating-tool NAMES. That scan was both over-
+ * inclusive (a stray scratch-file write looked like a code change) and
+ * under-inclusive (files mutated via `bash sed -i` / redirection were
+ * invisible). Injecting the full self-check every time and
+ * letting the model self-select the code-mod portion removes the interpretive
+ * guess while keeping every directive the model previously could have seen.
+ * Retained name for callers using `closeoutGuard: { enabled:true }` without
+ * the `fourRule` flag.
+ */
+export const CLOSEOUT_REMINDER = [
+  "Before finishing: keep only defended claims, state explicitly if",
+  "verification was not run, separate fact from inference, and match the",
+  "requested reporting shape.",
+  "If you modified code, also walk the four truth surfaces:",
+  "  type  — signatures + exported types still align with all uses.",
+  "  owner — the file that OWNS the changed contract is itself fixed,",
+  "          not just a caller patched into agreement.",
+  "  wire  — every caller / import / config / wiring point referencing",
+  "          the changed surface compiles and matches the new shape.",
+  "  test  — the failing scenario the issue describes now passes AND",
+  "          nearest existing tests still pass (no regression).",
+  "Then stop only if those hold.",
+].join("\n")
 
 /** Defended-claim 4-rule (Codex `response-assembly-and-closeout.md §5.2`
  *  verbatim absorption). Each rule names a recoverable failure mode and the
@@ -58,82 +87,30 @@ export const CLOSEOUT_4RULE_REMINDER = [
 ].join("\n")
 
 /**
- * Phase 4 Codex absorption — code-modification surface-alignment reminder.
- * Codex's `agent-loop-deep-dive.md §7` surface-alignment loop walks four truth
- * surfaces after an owner fix: type / owner / wire / test. This constant is a
- * SUPPLEMENT to {@link CLOSEOUT_REMINDER} / {@link CLOSEOUT_4RULE_REMINDER},
- * not a replacement — {@link decideCloseoutGuard} picks which to inject based
- * on whether the session contains a mutating tool call (see
- * {@link isCodeModificationSession}); a code-modification session ALWAYS
- * receives this four-surface reminder, taking precedence over `cfg.fourRule`.
- * Keeping the prior reminders untouched preserves Phase 2's contract.
- */
-export const CODE_MOD_CLOSEOUT_REMINDER = [
-  "Before finishing a code change, walk the four truth surfaces:",
-  "  type  — signatures + exported types still align with all uses.",
-  "  owner — the file that OWNS the changed contract is itself fixed,",
-  "          not just a caller patched into agreement.",
-  "  wire  — every caller / import / config / wiring point referencing",
-  "          the changed surface compiles and matches the new shape.",
-  "  test  — the failing scenario the issue describes now passes AND",
-  "          nearest existing tests still pass (no regression).",
-  "Stop only after all four surfaces are clean.",
-].join("\n")
-
-/** Tool names that mutate source — the trigger set for the code-modification
- *  closeout reminder. Mirrors `verify-guard`'s mutating set, plus the new
- *  Phase 4 `scripted_replace` tool. Centralized here so any future mutating
- *  tool only needs to be added in one place. */
-const CODE_MOD_TOOLS = new Set(["edit", "write", "scripted_replace"])
-
-/**
- * True iff any history entry names a tool that mutates source. Pure: a
- * structural `name`-only inspection, no allocation beyond the loop variable.
- * Accepts the `ToolHistoryEntry` shape from `@/agent/loop` by duck-typing —
- * declared inline so this module stays import-free (the `closeout-guard
- * module purity` test forbids non-`./types` imports). Empty / undefined
- * history ⇒ false.
- */
-export const isCodeModificationSession = (
-  history: ReadonlyArray<{ name: string }> | undefined,
-): boolean => {
-  if (history === undefined) return false
-  for (const entry of history) {
-    if (CODE_MOD_TOOLS.has(entry.name)) return true
-  }
-  return false
-}
-
-/**
  * Decide whether to block a finish attempt and inject the closeout reminder.
  * Pure: the only side effect is incrementing `state.trips` when it blocks
- * (the loop owns the state object). Routing precedence (after the OFF /
- * single-shot checks):
+ * (the loop owns the state object). Routing (after the OFF / single-shot
+ * checks) is now a single explicit switch — NO interpretive guess:
  *
- *   1. code-modification session (any history entry names a mutating tool —
- *      see {@link isCodeModificationSession}) ⇒ inject the Phase 4 four-truth-
- *      surface reminder {@link CODE_MOD_CLOSEOUT_REMINDER} — UNLESS the
- *      caller explicitly opted into `cfg.fourRule: true`, which takes
- *      precedence (the user's explicit choice beats the implicit detector
- *      — standard "explicit-over-implicit" principle from Codex's
- *      response-assembly contract). A caller that wants the 4-rule
- *      checklist even on code-mod sessions opts in; a caller that wants
- *      the four-surface walk on code-mod sessions leaves `fourRule`
- *      unset (the default).
- *   2. `cfg.fourRule === true` ⇒ inject {@link CLOSEOUT_4RULE_REMINDER}
- *      (the Phase 2 defended-claim R1–R4 + VerificationCloseout cue).
- *      This is the explicit-override path that beats #1 too.
- *   3. else ⇒ inject the legacy one-liner {@link CLOSEOUT_REMINDER}.
+ *   1. `cfg.fourRule === true` ⇒ inject {@link CLOSEOUT_4RULE_REMINDER}
+ *      (the defended-claim R1–R4 + Verification report scaffold). This is an
+ *      EXPLICIT caller opt-in (knob value `"4rule"`), not a heuristic.
+ *   2. else ⇒ inject the default UNION self-check {@link CLOSEOUT_REMINDER},
+ *      which already carries BOTH the general defended-claim guidance AND the
+ *      self-select code-modification four-surface walk. The model applies the
+ *      code-mod portion iff it actually changed source.
+ *
+ * Removed in this revision: the tool-name history scan that used to route
+ * between a code-mod-only reminder and the general one. That scan was over-
+ * and under-inclusive (a stray scratch write looked like a code change;
+ * `bash sed -i` mutations were invisible), so it handed the model the wrong
+ * checklist on a guess. The union reminder removes the guess entirely while
+ * preserving every directive.
  *
  * OFF rules (short-circuit before any of the above):
  *   - `cfg === undefined`        ⇒ guard OFF, byte-identical.
  *   - `cfg.enabled !== true`     ⇒ off unless explicitly enabled.
  *   - `state.trips >= 1`         ⇒ already tripped this run (single-shot cap).
- *
- * The `history` parameter is optional and duck-typed inline as
- * `ReadonlyArray<{name: string}>` so this module stays import-free — the loop
- * threads its existing `toolHistory` array straight through without any cross-
- * slice import.
  */
 /**
  * ADR-0079 — when this returns `{block:true}` the loop ALSO sets
@@ -147,22 +124,15 @@ export const isCodeModificationSession = (
 export const decideCloseoutGuard = (args: {
   state: CloseoutGuardState
   cfg: { enabled?: boolean; fourRule?: boolean } | undefined
-  history?: ReadonlyArray<{ name: string }>
 }): { block: boolean; text?: string } => {
   const { cfg, state } = args
   if (cfg === undefined) return { block: false }
   if (cfg.enabled !== true) return { block: false }
   if (state.trips >= 1) return { block: false }
   state.trips += 1
-  // Explicit `fourRule:true` opt-in wins over the implicit code-mod detector
-  // (explicit-over-implicit). Caller chose the 4-rule discipline; respect it.
+  // Explicit `fourRule:true` opt-in (knob value "4rule") ⇒ the 4-rule
+  // discipline. Otherwise the default UNION reminder, which already includes
+  // the self-select code-modification four-surface walk — no history scan.
   if (cfg.fourRule === true) return { block: true, text: CLOSEOUT_4RULE_REMINDER }
-  // Otherwise: code-mod session (any history entry names a mutating tool)
-  // gets the four-truth-surface reminder; non-code-mod falls through to
-  // the legacy one-liner below.
-  if (isCodeModificationSession(args.history)) {
-    return { block: true, text: CODE_MOD_CLOSEOUT_REMINDER }
-  }
-  // Neither explicit fourRule nor a code-mod session ⇒ legacy one-liner.
   return { block: true, text: CLOSEOUT_REMINDER }
 }

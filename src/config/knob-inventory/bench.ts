@@ -281,7 +281,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (gap-C): when a localized Python method has sibling overrides under the same base class, append a concrete CHA-derived multi-site steer naming the sibling file:line sites (django-11138 class). Default-OFF ⇒ byte-identical.",
-    readSite: "runner/batch/eval/knobs-bench.ts",
+    readSite: "runner/knobs/knobs/cha-multisite-steer.ts",
   },
   {
     envKey: "QUANTA_BENCH_CHA_MULTISITE_GENERAL",
@@ -291,7 +291,17 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (jun-25): generalize the CHA contract-fallback sibling rule from the legacy django/db/backends PATH HARDCODE to a structural parallel-sibling rule (same dir-root + same leaf filename, shared ancestor). Strict superset of the django match — byte-identical for django targets, additive elsewhere. Only meaningful with cha-multisite-steer. Default-OFF ⇒ byte-identical.",
-    readSite: "runner/batch/eval/knobs-bench.ts",
+    readSite: "runner/knobs/knobs/cha-multisite-general.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_PAIRED_CONTROL",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench (gap-G2): require paired control tests to pass on base before admitting a reproducing symptom sample. Prevents false-red symptom admissions from env/import failures. Default-OFF ⇒ legacy reproduction admission.",
+    readSite: "runner/knobs/knobs/paired-control.ts",
   },
   {
     envKey: "QUANTA_BENCH_MODEL_LANE_DIVERSITY",
@@ -301,7 +311,17 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench (G1, jun-24 cross-vendor diversity): route verify-select candidate i to vendor lane (i mod V) over the injected provider-distinct LLM lanes (deps.llmLanes, built from existing createLLM adapters — no new transport), decorrelating the candidate set so the selector picks across vendors/families instead of N correlated samples of one model. lane = index mod laneCount (pure structure, no answer-key). Default-OFF (unset OR ≤1 lane ⇒ every candidate on deps.llm, byte-identical).",
-    readSite: "runner/batch/eval/knobs-bench.ts",
+    readSite: "runner/knobs/knobs/model-lane-diversity.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_MODEL_LANES",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "G1 verify-select diversity lanes override: comma-separated explicit model IDs or bare true-like value for built-in default pair, used by apps/bench/model-lanes to build per-candidate LLM lanes. Default-OFF (unset/empty) keeps single-lane byte-identical behavior.",
+    readSite: "apps/bench/model-lanes.ts",
   },
   {
     envKey: "QUANTA_BENCH_CLOSURE_REPAIR",
@@ -526,11 +546,11 @@ export const BENCH: readonly KnobInventoryEntry[] = [
   {
     envKey: "QUANTA_BENCH_SIMPLICITY",
     kind: "bool",
-    default: true,
+    default: false,
     group: "bench",
     home: "bench",
     describe:
-      "Bench: minimal-mechanism simplicity steer in SWE-bench prompt (OpenHands/Linus philosophy). DEFAULT-ON; explicit 0 disables (A/B baseline arm).",
+      "Bench: minimal-mechanism simplicity steer in SWE-bench prompt (OpenHands/Linus philosophy). Default OFF; opt-in via QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).",
     readSite: "runner/batch/eval/driver.ts",
   },
   {
@@ -550,7 +570,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe:
-      "Bench: dispatch test-scope guard — deny mutating tools on test paths during in-loop swebench runs. DEFAULT-ON; explicit 0 disables (advisory-only baseline).",
+      "Bench: dispatch test-scope guard — ENFORCING: DENIES mutating tools (edit/write/apply_patch) on test paths during swebench runs (source-only invariant; prevents PASS_TO_PASS gaming). DEFAULT-ON; QUANTA_BENCH_PROTECT_TESTS=0 disables.",
     readSite: "runner/batch/eval/driver.ts",
   },
   {

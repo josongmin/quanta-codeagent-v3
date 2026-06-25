@@ -341,6 +341,66 @@ describe("localizeTool", () => {
     }
   })
 
+  test("omitted-count marker: ranked hits > max_results surface an accurate M (total − shown)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      // 8 distinct files each containing the symbol once = 8 ranked hits.
+      // max_results=3 ⇒ 3 shown, M = 8 − 3 = 5 omitted.
+      for (let i = 0; i < 8; i++) {
+        writeFileSync(join(root, `mod${i}.ts`), `export const handleRequest${i} = () => 0\n`)
+      }
+      const { output, ok } = await drive({ query: "handleRequest", max_results: 3 }, root)
+      expect(ok).toBe(true)
+      const rows = output.split("\n").filter((l) => l.startsWith("  "))
+      expect(rows.length).toBe(3)
+      // Marker present with the EXACT omitted count (5), and teeth: removing the
+      // marker line would fail this assertion.
+      expect(output).toContain("(5 lower-ranked candidates omitted")
+      expect(output).toMatch(/raise max_results/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("omitted-count marker: a vendored hit pushed past the cap is COUNTED in M, not silently dropped", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      mkdirSync(join(root, "src"))
+      mkdirSync(join(root, "node_modules"))
+      // Two user-code hits + one vendored hit = 3 ranked. max_results=2 keeps the
+      // two user hits (vendored is down-ranked −50) and omits the vendored one,
+      // but it MUST be counted: M = 3 − 2 = 1.
+      writeFileSync(join(root, "src", "a.ts"), "export const validateToken = (t: string) => 1\n")
+      writeFileSync(join(root, "src", "b.ts"), "export const validateToken2 = (t: string) => 2\n")
+      writeFileSync(
+        join(root, "node_modules", "dep.ts"),
+        "export const validateToken3 = (t: string) => 3\n",
+      )
+      const { output, ok } = await drive({ query: "validateToken", max_results: 2 }, root)
+      expect(ok).toBe(true)
+      // The vendored hit is omitted from the visible rows…
+      expect(output).not.toContain("node_modules")
+      // …but its count is surfaced (M = 1, singular form), so it is NOT silently
+      // withheld. Teeth: a buggy slice that forgot the penalized hit would yield
+      // M=0 (no marker) and fail this.
+      expect(output).toContain("(1 lower-ranked candidate omitted")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("no marker when ranked hits fit within max_results (no false omission claim)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "localize-"))
+    try {
+      writeFileSync(join(root, "only.ts"), "export const uniqsymbolxyz = () => 1\n")
+      const { output, ok } = await drive({ query: "uniqsymbolxyz", max_results: 20 }, root)
+      expect(ok).toBe(true)
+      expect(output).not.toContain("omitted")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("verbose flag toggles per-row score + tier", async () => {
     const root = mkdtempSync(join(tmpdir(), "localize-"))
     try {

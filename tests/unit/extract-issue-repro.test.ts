@@ -89,6 +89,20 @@ describe("extractIssueReproSeed (repro-seed provenance)", () => {
     expect(seed?.provenance).toBe("repro-seed")
   })
 
+  test("hasCall is a HEURISTIC: an 'Expected output' block with a call is mis-extracted (⇒ must stay seed)", () => {
+    // The issue's ONLY fenced block is example OUTPUT, not the repro — but it
+    // contains a call (`print(...)`), so the `hasCall` regex matches and the
+    // extractor returns it. This is exactly the ambiguous false-positive the bug
+    // is about: the value MUST be consumed as a repro-seed (not executed as an
+    // authoritative oracle) — its provenance proves it is only a heuristic guess.
+    const ps = "The MathML printer drops subscripts.\n\nExpected output:\n```python\nprint('<msub>...</msub>')\n```"
+    const seed = extractIssueReproSeed(ps)
+    expect(seed?.code).toContain("print(")
+    // The marker is the structural guard: a consumer cannot mistake this for a
+    // validated repro. Authority is conferred only later by a base-RED gate.
+    expect(seed?.provenance).toBe("repro-seed")
+  })
+
   test("FAIL-CLOSED: ambiguous / non-python ⇒ no seed (cannot become repro authority)", () => {
     // A false-positive extraction here would have NO veto power, but precision is
     // still preserved: nothing extractable ⇒ no seed at all.

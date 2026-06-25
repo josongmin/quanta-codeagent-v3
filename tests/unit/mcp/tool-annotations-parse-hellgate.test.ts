@@ -13,7 +13,7 @@
  *      result with no `media` key). */
 
 import { describe, expect, test } from "bun:test"
-import { extractMedia, McpClient, sanitizeAnnotations } from "@/mcp"
+import { extractMedia, McpClient, sanitizeAnnotations, unsupportedTypeMarker } from "@/mcp"
 import type { JsonRpcMessage } from "@/mcp/jsonrpc"
 import type { McpTransport, McpTransportMessageHandler } from "@/mcp/transports/port"
 
@@ -139,6 +139,83 @@ describe("extractMedia — non-text content blocks", () => {
 
   test("undefined content ⇒ empty", () => {
     expect(extractMedia(undefined)).toEqual([])
+  })
+})
+
+describe("F2 — unsupportedTypeMarker (unknown content-block types never silent)", () => {
+  test("handled types (text/image/resource) ⇒ empty marker (byte-identical)", () => {
+    expect(
+      unsupportedTypeMarker([
+        { type: "text", text: "hi" },
+        { type: "image", data: "AAAA", mimeType: "image/png" },
+        { type: "resource", resource: { blob: "X", mimeType: "application/pdf" } },
+      ]),
+    ).toBe("")
+    expect(unsupportedTypeMarker(undefined)).toBe("")
+    expect(unsupportedTypeMarker([])).toBe("")
+  })
+
+  test('an `audio` block ⇒ visible omission marker with count + type', () => {
+    expect(unsupportedTypeMarker([{ type: "audio", data: "X", mimeType: "audio/wav" }])).toBe(
+      '\n[mcp: 1 block(s) of unsupported type "audio" omitted]',
+    )
+  })
+
+  test("counts per type, grouped, in first-seen order", () => {
+    expect(
+      unsupportedTypeMarker([
+        { type: "audio", data: "1", mimeType: "audio/wav" },
+        { type: "text", text: "kept" },
+        { type: "audio", data: "2", mimeType: "audio/wav" },
+        { type: "video", data: "3", mimeType: "video/mp4" },
+      ]),
+    ).toBe(
+      '\n[mcp: 2 block(s) of unsupported type "audio" omitted]' +
+        '\n[mcp: 1 block(s) of unsupported type "video" omitted]',
+    )
+  })
+})
+
+describe("F2 — callTool discloses unsupported blocks, byte-identical when all handled", () => {
+  const transportFor = (callContent: unknown[]): ScriptedTransport =>
+    new ScriptedTransport((method) => {
+      if (method === "initialize") return initResult()
+      if (method === "tools/list") return { tools: [] }
+      if (method === "tools/call") return { content: callContent }
+      return {}
+    })
+
+  test("audio block ⇒ folded content carries the omission marker", async () => {
+    const client = new McpClient(
+      { name: "mock", command: ["x"] },
+      {
+        transport: transportFor([
+          { type: "text", text: "partial answer" },
+          { type: "audio", data: "BBBB", mimeType: "audio/wav" },
+        ]),
+      },
+    )
+    await client.start()
+    const res = await client.callTool("t", {})
+    expect(res.content).toBe(
+      'partial answer\n[mcp: 1 block(s) of unsupported type "audio" omitted]',
+    )
+    // TEETH: removing the marker (the old silent path) drops the disclosure — the
+    // content would be just "partial answer" and the model never learns audio was lost.
+    expect(res.content).toContain("unsupported type")
+    await client.stop()
+  })
+
+  test("all-text result has NO marker (byte-identical)", async () => {
+    const client = new McpClient(
+      { name: "mock", command: ["x"] },
+      { transport: transportFor([{ type: "text", text: "plain" }]) },
+    )
+    await client.start()
+    const res = await client.callTool("t", {})
+    expect(res.content).toBe("plain")
+    expect(res.content).not.toContain("unsupported type")
+    await client.stop()
   })
 })
 

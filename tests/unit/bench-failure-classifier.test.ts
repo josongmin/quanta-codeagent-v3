@@ -158,7 +158,11 @@ describe("classify — termination axis", () => {
     expect(c.signals).toContain("empty_patch")
   })
 
-  test("provider generation error → generation_error, not empty_patch", () => {
+  test("provider throttle (429 / usage_limit) → throttled, NOT generation_error", () => {
+    // Measurement-integrity (FLAG-D): a rate-limit/429/usage-limit is a
+    // re-runnable our-fault/infra hole, not a genuine model generation failure.
+    // It MUST get its own `throttled` termination so the leaderboard can exclude
+    // it from the solve-rate instead of deflating the rate with re-runnable noise.
     const r: InstanceResult = {
       id: "x",
       passed: false,
@@ -168,7 +172,34 @@ describe("classify — termination axis", () => {
         "LLM stream failed after retries: chatgpt-oauth responses request failed: 429 Too Many Requests — usage_limit_reached",
     }
     const c = classify(r)
+    expect(c.termination).toBe("throttled")
+    expect(c.termination).not.toBe("generation_error")
+    expect(c.signals).not.toContain("empty_patch")
+  })
+
+  test("TEETH: each throttle variant (rate_limit / 429 / usage_limit_reached) → throttled", () => {
+    for (const error of [
+      "agent stopped with error: rate_limit exceeded",
+      "responses request failed: 429 Too Many Requests",
+      "LLM stream failed after retries: usage_limit_reached",
+      "rate-limit hit, backing off",
+    ]) {
+      const r: InstanceResult = { id: "x", passed: false, patch: "", turns: 0, error }
+      expect(classify(r).termination).toBe("throttled")
+    }
+  })
+
+  test("CONTROL: a genuine generation error (no throttle markers) STAYS generation_error", () => {
+    const r: InstanceResult = {
+      id: "x",
+      passed: false,
+      patch: "",
+      turns: 0,
+      error: "LLM stream failed after retries: connection reset by peer",
+    }
+    const c = classify(r)
     expect(c.termination).toBe("generation_error")
+    expect(c.termination).not.toBe("throttled")
     expect(c.signals).not.toContain("empty_patch")
   })
 

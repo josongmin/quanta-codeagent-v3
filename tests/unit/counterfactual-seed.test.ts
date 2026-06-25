@@ -28,10 +28,17 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: "pkg/axis.py",
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("- edit only `pkg/axis.py`")
+    // Evidential owner-file framing (no imperative "edit only").
+    expect(seed).toContain("the owner file appears to be `pkg/axis.py`")
+    expect(seed).toContain("prefer it")
+    expect(seed).not.toContain("edit only")
+    // The structural facts are still surfaced.
     expect(seed).toContain("- touched 2 source files")
+    // The model is asked to judge, not commanded.
+    expect(seed).toContain("Consider whether a smaller in-place alternative")
+    expect(seed).toContain("if the broader change is genuinely required")
     // mutation guard: unrelated facts did not fire ⇒ no def/runtime/empty bullets.
-    expect(seed).not.toContain("no new helper")
+    expect(seed).not.toContain("new helpers/classes/methods")
     expect(seed).not.toContain("runtime-expanding")
     expect(seed).not.toContain("non-empty and apply cleanly")
   })
@@ -42,10 +49,12 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: "pkg/axis.py",
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("- no new helper/class/method")
+    expect(seed).toContain("new helpers/classes/methods may not be necessary")
     expect(seed).toContain("- added 1 new def")
     // singular, not plural.
     expect(seed).not.toContain("added 1 new defs")
+    // No imperative command.
+    expect(seed).not.toContain("- no new helper/class/method")
   })
 
   it("new-def plural wording for newDefs=2", () => {
@@ -62,9 +71,12 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: "pkg/axis.py",
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("- avoid runtime-expanding calls")
-    expect(seed).toContain("- preserve existing control flow")
+    expect(seed).toContain("runtime-expanding calls (compiler/IO/DB/subprocess) may not be necessary")
+    expect(seed).toContain("changing the existing control flow may not be necessary")
     expect(seed).toContain("- added 2 runtime-expanding calls")
+    // No imperative command.
+    expect(seed).not.toContain("- avoid runtime-expanding calls")
+    expect(seed).not.toContain("- preserve existing control flow")
   })
 
   it("empty patch → 'non-empty and apply cleanly' constraint + reason bullet", () => {
@@ -95,7 +107,7 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: undefined,
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("- edit the smallest set of source files")
+    expect(seed).toContain("if a smaller edit to fewer source files fully fixes the issue, prefer it")
     expect(seed).not.toContain("`")
   })
 
@@ -108,7 +120,7 @@ describe("buildCounterfactualSeed", () => {
       }),
       ownerFile: undefined,
     })
-    expect(seed).toContain("- edit only `pkg/fallback.py`")
+    expect(seed).toContain("the owner file appears to be `pkg/fallback.py`")
   })
 
   it("a non-firing fact emits NO bullet (mutation-killing negative assertion)", () => {
@@ -118,8 +130,34 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: "pkg/axis.py",
     })
     expect(seed).toBeDefined()
-    expect(seed).not.toContain("no new helper")
+    expect(seed).not.toContain("new helpers/classes/methods")
     expect(seed).not.toContain("added 0 new")
     expect(seed).not.toContain("touched 1 source file")
+  })
+
+  it("EVIDENTIAL: structural seed surfaces facts + a judgement question, no imperative directives", () => {
+    const seed = buildCounterfactualSeed({
+      facts: baseFacts({
+        touchedSourceFiles: 2,
+        crossFile: true,
+        newDefs: 1,
+        runtimeExpandingCalls: 1,
+        filesOutsideOwner: ["pkg/other.py"],
+      }),
+      ownerFile: "pkg/axis.py",
+    })
+    expect(seed).toBeDefined()
+    // Frames as facts + a question the model decides.
+    expect(seed).toContain("Facts about its patch")
+    expect(seed).toContain("Consider whether a smaller in-place alternative fully fixes the issue")
+    expect(seed).toContain(
+      "if the broader change is genuinely required to fix the issue, keep it and explain why",
+    )
+    // None of the old imperative conclusion-assertions survive.
+    expect(seed).not.toContain("Produce a counterfactual minimal alternative")
+    expect(seed).not.toContain("edit only")
+    expect(seed).not.toContain("- no new helper")
+    expect(seed).not.toContain("- avoid runtime-expanding")
+    expect(seed).not.toContain("- preserve existing control flow")
   })
 })

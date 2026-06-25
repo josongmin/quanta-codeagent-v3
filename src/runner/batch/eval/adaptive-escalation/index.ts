@@ -29,6 +29,8 @@ export {
   type EvidenceFacts,
   evidenceIdsOf,
   fullyEvidencedFacts,
+  lacksProofContext,
+  renderAdvisoryRouterFacts,
   renderEvidenceFacts,
 } from "./evidence-facts"
 export { validateAdaptiveDecisionForEvidence } from "./decision-legality"

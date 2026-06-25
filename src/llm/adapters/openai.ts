@@ -300,6 +300,13 @@ interface StreamState {
   finish: string | null
   rawUsage: RawUsage | null | undefined
   usageModel: string
+  /** jun-25 (defense-in-depth, mirrors responses-stream.ts:632-645) — TRUE
+   *  once a real content event flowed (text / reasoning / tool-call delta).
+   *  A trailing usage-only chunk does NOT set this. Used together with
+   *  `finish === null` to detect a swallowed-throttle empty 200: a stream that
+   *  emitted ZERO content AND never carried a `finish_reason` is reclassified
+   *  as a retryable `rate_limit` on drain so the loop's backoff engages. */
+  sawContent: boolean
 }
 
 /** Map one streamed chunk to events, threading finish/usage/model into the
@@ -316,8 +323,15 @@ function* processChunk(chunk: RawChunk, st: StreamState): Generator<StreamEvent>
   // populated on the same chunk (provider bug guard — concatenating would
   // double-count). No signature: OpenAI reasoning is opaque.
   const r = choice.delta.reasoning ?? choice.delta.reasoning_content
-  if (r) yield { type: "thinking_delta", text: r }
-  if (choice.delta.content) yield { type: "text_delta", delta: choice.delta.content }
+  if (r) {
+    st.sawContent = true
+    yield { type: "thinking_delta", text: r }
+  }
+  if (choice.delta.content) {
+    st.sawContent = true
+    yield { type: "text_delta", delta: choice.delta.content }
+  }
+  if (choice.delta.tool_calls && choice.delta.tool_calls.length > 0) st.sawContent = true
   yield* mapToolCallDeltas(chunk, st.pending)
   if (choice.finish_reason) st.finish = choice.finish_reason
 }
@@ -454,6 +468,7 @@ export class OpenAIAdapter implements LLMPort {
       finish: null,
       rawUsage: undefined,
       usageModel: this.model,
+      sawContent: false,
     }
 
     // L6 H2: `finalizeCalls` MUST run inside the same try/catch as the stream
@@ -464,6 +479,26 @@ export class OpenAIAdapter implements LLMPort {
     // abort, and drain all classify consistently.
     try {
       for await (const chunk of guarded) yield* processChunk(chunk, st)
+      // jun-25 (defense-in-depth) — STRUCTURAL throttle-swallow guard, mirroring
+      // responses-stream.ts:632-645. A 200 chat-completions response that streamed
+      // ZERO content events and never carried a `finish_reason` is NOT a valid
+      // empty turn: under load the endpoint can accept the request then close the
+      // stream with nothing (a silently-swallowed throttle). Pre-guard this drained
+      // to a synthetic completed-empty `message_stop` (stop_reason:"end_turn") with
+      // no backoff → the loop fires the next request straight into the same window.
+      // Reclassify as a RETRYABLE `rate_limit` so the agent loop's exponential-
+      // jitter backoff (src/agent/retry.ts, RETRYABLE_KINDS) spaces the retries.
+      // Guarded on BOTH no-content AND no-finish_reason: a legitimate empty
+      // completion that DOES carry a `finish_reason` (e.g. `stop`/`length` with
+      // empty content) completes exactly as before (byte-identical), and a partial
+      // stream (content then drop) is untouched. Aborts already threw above.
+      if (!st.sawContent && st.finish === null) {
+        throw new LLMError(
+          "openai chat-completions stream produced no content and no finish_reason " +
+            "(empty/truncated stream — likely transport throttle); retrying with backoff",
+          { kind: "rate_limit", provider: "openai" },
+        )
+      }
       yield* finalizeCalls(st.pending)
       const usageEvent = buildUsageEvent(st.rawUsage, st.usageModel)
       if (usageEvent) yield usageEvent

@@ -320,6 +320,10 @@ interface Phase {
   /** T-202/F6 stream-tap signals (single-pass path only). */
   firstEditFile?: string
   editCount?: number
+  /** Successful SOURCE edits (excludes test/scratch edits). Threaded so the
+   *  capture-miss guard can distinguish a real source-edit capture desync from a
+   *  test-only-edit timeout. See runner driver `patchCaptureMissErrorOf`. */
+  sourceAppliedEditCount?: number
   turnsToFirstEdit?: number
   /** T5 — done-time patch-capture class. `lost-edits` ⇒ the agent edited but the
    *  captured tree is empty AND clean (fork-worktree desync, 11138 class): an
@@ -576,6 +580,7 @@ const runAgentPhase = async (
     ...(agentError !== undefined ? { agentError } : {}),
     ...(firstEditFile !== undefined ? { firstEditFile } : {}),
     ...(editCount !== undefined ? { editCount } : {}),
+    ...(sourceAppliedEditCount !== undefined ? { sourceAppliedEditCount } : {}),
     ...(turnsToFirstEdit !== undefined ? { turnsToFirstEdit } : {}),
   }
 }
@@ -848,6 +853,9 @@ const generateSelectionCandidate = async (args: {
       ...(phase.stopReason !== undefined ? { stopReason: phase.stopReason } : {}),
       ...(phase.agentError !== undefined ? { agentError: phase.agentError } : {}),
       ...(phase.editCount !== undefined ? { editCount: phase.editCount } : {}),
+      ...(phase.sourceAppliedEditCount !== undefined
+        ? { sourceAppliedEditCount: phase.sourceAppliedEditCount }
+        : {}),
     }
   } finally {
     if (isolated) await cleanupSandbox(candidateSandbox)
@@ -925,6 +933,9 @@ const selectionWinnerPhase = (args: {
     : {}),
   ...(args.result.terminalCandidate?.editCount !== undefined
     ? { editCount: args.result.terminalCandidate.editCount }
+    : {}),
+  ...(args.result.terminalCandidate?.sourceAppliedEditCount !== undefined
+    ? { sourceAppliedEditCount: args.result.terminalCandidate.sourceAppliedEditCount }
     : {}),
   ...(args.calibration !== undefined ? { reproOracleCalibration: args.calibration } : {}),
   selectionTelemetry: selectionTelemetryWithGenerationFailures(args),

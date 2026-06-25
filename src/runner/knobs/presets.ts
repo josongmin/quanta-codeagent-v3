@@ -61,6 +61,26 @@ const COMPETITOR_ABSORB_PRESET = {
   "forward-localize": "1",
 } satisfies Readonly<Record<string, string>>
 
+// `agentless-v5-absorb` + G1 model-lane diversity (the edit-correctness A/B arm).
+// Identical to COMPETITOR_ABSORB_PRESET except `model-lane-diversity: 1`, appended
+// LAST to match composePresetKnobs(ABSORB_XLANE_MODULES) byte-for-byte. INERT
+// until `QUANTA_BENCH_MODEL_LANES=<id,id>` injects ≥2 buildable lanes.
+const COMPETITOR_ABSORB_XLANE_PRESET = {
+  ...COMPETITOR_ABSORB_PRESET,
+  "model-lane-diversity": "1",
+} satisfies Readonly<Record<string, string>>
+
+// `agentless-v5-absorb` with FULL in-loop repo-test execution (the adversarial-
+// audit fix: `repro-only` forbids the repo test suite, trapping the agent in a
+// single-backend self-reproducer → wide-coordination sqlite sites never execute/
+// fail; `full` enables the TRAE verified method = run existing tests → coordination
+// runtime error → fix the missed site). Identical to COMPETITOR_ABSORB_PRESET
+// except `bench-in-loop-exec` flips repro-only→full (same key position).
+const COMPETITOR_ABSORB_EXECFULL_PRESET = {
+  ...COMPETITOR_ABSORB_PRESET,
+  "bench-in-loop-exec": "full",
+} satisfies Readonly<Record<string, string>>
+
 export const presetRequiresLiveLspGrounding = (preset: string): boolean =>
   preset === THIN_STRICT_PRESET_PREFIX ||
   preset.startsWith(`${THIN_STRICT_PRESET_PREFIX}-`) ||
@@ -438,6 +458,8 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
   // NOT default; opt-in via QUANTA_BENCH_PRESET. Composite SSOT: ABSORB_MODULES.
   "agentless-v4-proof-clean-absorb": COMPETITOR_ABSORB_PRESET,
   "agentless-v5-absorb": COMPETITOR_ABSORB_PRESET,
+  "agentless-v5-absorb-xlane": COMPETITOR_ABSORB_XLANE_PRESET,
+  "agentless-v5-absorb-execfull": COMPETITOR_ABSORB_EXECFULL_PRESET,
   // jun-22 v5 thin-first ADAPTIVE controller opening. The base posture is exactly
   // `agentless-v3-thin-strict` (cheap thin/noexec/minimal round-0); the per-phase
   // capability knobs (expand-select / proof-clean / repair / repro rails) are

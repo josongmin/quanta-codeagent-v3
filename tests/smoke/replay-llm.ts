@@ -20,6 +20,11 @@ export class TrajectoryReplayLLM implements LLMPort {
    *  prompt stability across compaction). */
   readonly inputs: StreamInput[] = []
   private readonly byRunTurn: Map<string, StreamEvent[]>
+  /** Set of `(run,turn)` keys that have actually been streamed. Used to detect
+   *  UNDER-consumption: if the agent diverges to FEWER turns than recorded,
+   *  recorded buckets are left unused and the run would otherwise pass silently
+   *  (FLAG 2). Symmetric to the exhaustion throw (over-consumption). */
+  private readonly consumed = new Set<string>()
   private readonly scenarioHint: string
   private run = 0
   private turn = 0
@@ -37,6 +42,25 @@ export class TrajectoryReplayLLM implements LLMPort {
       bucket.push(e.event as StreamEvent)
     }
     this.byRunTurn = buckets
+  }
+
+  /** Recorded `(run,turn)` buckets that were never streamed. Empty ⇒ the agent
+   *  consumed the whole trajectory. A non-empty result after a run means the
+   *  agent diverged to FEWER turns than recorded (re-record or fix the agent).
+   *  Content fingerprinting (asserting the agent fed back the SAME inputs that
+   *  produced each recorded turn) is an intentional FOLLOW-UP — out of scope for
+   *  this low-risk hardening pass. */
+  remaining(): string[] {
+    const left: string[] = []
+    for (const key of this.byRunTurn.keys()) {
+      if (!this.consumed.has(key)) left.push(key)
+    }
+    return left.sort()
+  }
+
+  /** True when every recorded bucket was streamed. */
+  consumedAll(): boolean {
+    return this.remaining().length === 0
   }
 
   /** Advance to the next user-message bucket. Called by the runner after each
@@ -57,6 +81,7 @@ export class TrajectoryReplayLLM implements LLMPort {
           `(no events recorded for this bucket — re-record the fixture)`,
       )
     }
+    this.consumed.add(key)
     this.turn += 1
     for (const ev of bucket) yield ev
   }

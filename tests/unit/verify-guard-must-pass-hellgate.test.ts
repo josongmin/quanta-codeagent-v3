@@ -24,6 +24,8 @@ import {
   isVerifyOutputFailing,
   VERIFY_FORCE_MESSAGE,
   VERIFY_PASS_FORCE_MESSAGE,
+  verifyOutputFailureMarkerId,
+  verifyPassForceMessage,
 } from "@/agent/verify-guard"
 
 type Entry = { name: string; arg?: string; id?: string; ok?: boolean; output?: string }
@@ -68,7 +70,8 @@ describe("HELLGATE — the false-success leak mustPass was designed to close", (
       },
     )
     expect(v.block).toBe(true)
-    expect(v.text).toBe(VERIFY_PASS_FORCE_MESSAGE)
+    // Output regex fired ⇒ the EVIDENTIAL message threads the matched marker id.
+    expect(v.text).toBe(verifyPassForceMessage("pytest-summary"))
   })
 })
 
@@ -315,7 +318,10 @@ describe("HELLGATE — ecosystem coverage at the gate", () => {
       // regardless of arg). The output-side parser is ecosystem-agnostic.
       const v = verdictAfter({ name: "edit" }, { name: "test_runner", ok: true, output: fo.output })
       expect(v.block).toBe(true)
-      expect(v.text).toBe(VERIFY_PASS_FORCE_MESSAGE)
+      // Evidential message threads the marker matched on THIS ecosystem's output.
+      const marker = verifyOutputFailureMarkerId(fo.output)
+      expect(marker).not.toBeNull()
+      expect(v.text).toBe(verifyPassForceMessage(marker ?? undefined))
     })
   }
 
@@ -324,7 +330,9 @@ describe("HELLGATE — ecosystem coverage at the gate", () => {
     expect(isVerifyOutputFailing("bash", "pytest", ansiFail)).toBe(true)
     const v = verdictAfter({ name: "edit" }, { name: "test_runner", ok: true, output: ansiFail })
     expect(v.block).toBe(true)
-    expect(v.text).toBe(VERIFY_PASS_FORCE_MESSAGE)
+    const marker = verifyOutputFailureMarkerId(ansiFail)
+    expect(marker).not.toBeNull()
+    expect(v.text).toBe(verifyPassForceMessage(marker ?? undefined))
   })
 
   const passingOutputs: Array<{ name: string; output: string }> = [
@@ -366,7 +374,10 @@ describe("HELLGATE — synthetic demo of the sanity-observed false-done", () => 
     )
     const v = decideVerifyGuard({ history, cfg, state })
     expect(v.block).toBe(true)
-    expect(v.text).toBe(VERIFY_PASS_FORCE_MESSAGE)
+    // ok:false AND the captured output matches a failure marker ⇒ the
+    // evidential message surfaces it (`pytest-failed-line`) so the model can
+    // confirm or refute rather than be told a categorical "FAILED".
+    expect(v.text).toBe(verifyPassForceMessage("pytest-failed-line"))
     expect(state.trips).toBe(1)
 
     // Crucially: with mustPass DISABLED, the SAME history flows through.
@@ -464,6 +475,70 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     } as unknown as Parameters<typeof decide>[1]
     expect(decide(editOnly, allUndef)).toEqual(decide(editOnly, {}))
     expect(decide(editThenFailingVerify, allUndef)).toEqual(decide(editThenFailingVerify, {}))
+  })
+})
+
+// ────────────────────────────────────────────────────────────────────────
+// 7. TEETH — the nudge SURFACES heuristic EVIDENCE, it does NOT ASSERT a verdict
+// ────────────────────────────────────────────────────────────────────────
+//
+// The lens fix: the guard recognition (`isVerifySignalCommand`/
+// `isVerifyOutputFailing`) is a REGEX heuristic, so the message must hand the
+// final pass/fail call to the model rather than asserting it as fact. A custom
+// runner whose summary only LOOKS like a failure must be able to answer. These
+// tests go RED if anyone re-introduces the categorical "verification FAILED"
+// assertion or drops the evidential framing.
+describe("TEETH — evidential framing, not asserted verdict", () => {
+  test("PASS-branch message does NOT assert a categorical verdict as fact", () => {
+    // The output-marker form (the heuristic that can flip on a custom runner).
+    const withMarker = verifyPassForceMessage("pytest-summary")
+    // The dispatch ok:false form (no stdout regex).
+    const noMarker = verifyPassForceMessage()
+    for (const msg of [withMarker, noMarker, VERIFY_PASS_FORCE_MESSAGE]) {
+      // No categorical assertion that the verification DID fail.
+      expect(msg).not.toContain("verification (test/repro) FAILED")
+      expect(msg).not.toMatch(/last verification.*FAILED\b/)
+      // Hands the call back to the model: an explicit "if it passed, say so".
+      expect(msg.toLowerCase()).toContain("if the run actually passed")
+      expect(msg.toLowerCase()).toContain("say so and proceed")
+    }
+  })
+
+  test("PASS-branch message THREADS the matched marker so the model sees WHY", () => {
+    const msg = verifyPassForceMessage("pytest-summary")
+    expect(msg).toContain("pytest-summary")
+    expect(msg.toLowerCase()).toContain("matched a known failure pattern")
+    // Marker-less form must NOT fabricate a marker token.
+    expect(verifyPassForceMessage()).not.toContain("`")
+  })
+
+  test("the SHIPPING decision (real decideVerifyGuard) carries the evidential text + marker", () => {
+    const v = decideVerifyGuard({
+      history: h(
+        { name: "edit" },
+        {
+          name: "bash",
+          arg: "pytest",
+          ok: true,
+          output: "==================== 2 failed in 0.4s ====================",
+        },
+      ),
+      cfg: { mustPass: true, maxTrips: 1 },
+      state: createVerifyGuardState(),
+    })
+    expect(v.block).toBe(true)
+    expect(v.text).toBeDefined()
+    expect(v.text).toContain("pytest-summary")
+    expect((v.text ?? "").toLowerCase()).toContain("if the run actually passed")
+    expect(v.text).not.toContain("verification (test/repro) FAILED")
+  })
+
+  test("PRESENCE-branch message acknowledges detection is heuristic and lets the model answer", () => {
+    expect(VERIFY_FORCE_MESSAGE.toLowerCase()).toContain("heuristic")
+    expect(VERIFY_FORCE_MESSAGE.toLowerCase()).toContain("if you already verified")
+    // No false assertion that the model "ran no test" — it may have used a
+    // runner the registry doesn't recognize.
+    expect(VERIFY_FORCE_MESSAGE).not.toContain("ran no test or reproduction")
   })
 })
 

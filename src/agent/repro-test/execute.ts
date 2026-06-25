@@ -38,10 +38,13 @@
  * Sidecar → ReproTestOutcome mapping
  * ==================================
  *   - call-phase AssertionError / pytest.fail failure → "reproduced"
+ *   - call-phase RAW exception from code under test
+ *     (TypeError/AttributeError/KeyError/…)            → "reproduced"
  *   - all collected call reports passed                 → "resolved"
  *   - no collected tests                                → "unknown"
- *   - raw call exception, collection/setup/teardown
- *     failure, missing/malformed sidecar                → "exec_failed"
+ *   - collection/setup/teardown failure, pytest ERROR,
+ *     import/syntax exception (even at call phase),
+ *     missing/malformed sidecar                         → "exec_failed"
  *   - pytest internal/usage exitstatus in sidecar       → "other"
  *
  * Slice posture

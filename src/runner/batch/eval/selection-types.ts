@@ -53,6 +53,10 @@ export interface Candidate {
   stopReason?: StopReason
   agentError?: string
   editCount?: number
+  /** Successful SOURCE edits (excludes test/scratch edits). Preserved so the
+   *  no-winner terminal path's capture-miss guard gates on real source edits,
+   *  not raw churn — parity with the single-pass path. */
+  sourceAppliedEditCount?: number
   /** Absolute sandbox path this candidate was generated from. */
   sandboxPath?: string
   /** T5 done-time capture class for this candidate's own agent run. */

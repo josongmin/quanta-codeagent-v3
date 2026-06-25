@@ -43,7 +43,7 @@ describe("localize-budget knob (structured)", () => {
     expect(p(undefined)).toBeUndefined()
     expect(p("")).toBeUndefined()
   })
-  it("parses any subset of topk/tree/files", () => {
+  it("parses any subset of topk/tree/files/chafiles", () => {
     expect(p("topk=8")).toEqual({ topK: 8 })
     expect(p("tree=20000,files=4000")).toEqual({ maxTreeChars: 20000, maxFiles: 4000 })
     expect(p("topk=8,tree=20000,files=4000")).toEqual({
@@ -51,12 +51,20 @@ describe("localize-budget knob (structured)", () => {
       maxTreeChars: 20000,
       maxFiles: 4000,
     })
+    // jun-25: chafiles replaces the frozen CHA_MULTISITE_MAX_FILES literal —
+    // the CHA-multisite file budget is now a documented, sweepable config field.
+    expect(p("chafiles=7")).toEqual({ chaMultisiteFiles: 7 })
+    expect(p("topk=10,chafiles=2")).toEqual({ topK: 10, chaMultisiteFiles: 2 })
   })
   it("clamps each field's domain; out-of-range ⇒ undefined (whole value rejected)", () => {
     expect(p("topk=0")).toBeUndefined()
     expect(p("topk=51")).toBeUndefined()
     expect(p("tree=999")).toBeUndefined()
     expect(p("files=99")).toBeUndefined()
+    expect(p("chafiles=0")).toBeUndefined()
+    expect(p("chafiles=51")).toBeUndefined()
+    expect(p("chafiles=1")).toEqual({ chaMultisiteFiles: 1 })
+    expect(p("chafiles=50")).toEqual({ chaMultisiteFiles: 50 })
   })
   it("rejects unknown keys / garbage / present-but-empty", () => {
     expect(p("bogus=5")).toBeUndefined()

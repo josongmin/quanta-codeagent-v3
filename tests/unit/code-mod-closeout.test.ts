@@ -1,88 +1,53 @@
 import { describe, expect, test } from "bun:test"
-import {
-  CLOSEOUT_4RULE_REMINDER,
-  CLOSEOUT_REMINDER,
-  CODE_MOD_CLOSEOUT_REMINDER,
-  isCodeModificationSession,
-} from "@/agent/closeout-guard"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import * as closeoutGuard from "@/agent/closeout-guard"
+import { CLOSEOUT_4RULE_REMINDER, CLOSEOUT_REMINDER } from "@/agent/closeout-guard"
 
-describe("isCodeModificationSession", () => {
-  test("empty history ⇒ false", () => {
-    expect(isCodeModificationSession([])).toBe(false)
+// This suite formerly tested the `isCodeModificationSession` tool-name scan and
+// the separate `CODE_MOD_CLOSEOUT_REMINDER` constant. Both were REMOVED: the
+// scan routed the closeout self-check by guessing from tool names (over- AND
+// under-inclusive — a stray scratch `write` looked like a code change, while
+// `bash sed -i` mutations were invisible). The default reminder is now a UNION
+// that carries the code-mod walk inline, self-selected by the model. These
+// tests are the teeth that the interpretive route is gone.
+
+describe("code-mod closeout — interpretive routing removed (teeth)", () => {
+  const source = readFileSync(
+    join(import.meta.dir, "..", "..", "src", "agent", "closeout-guard.ts"),
+    "utf8",
+  )
+
+  test("the `isCodeModificationSession` heuristic export no longer exists", () => {
+    expect("isCodeModificationSession" in closeoutGuard).toBe(false)
   })
 
-  test("undefined history ⇒ false", () => {
-    expect(isCodeModificationSession(undefined)).toBe(false)
+  test("the separate `CODE_MOD_CLOSEOUT_REMINDER` constant no longer exists", () => {
+    expect("CODE_MOD_CLOSEOUT_REMINDER" in closeoutGuard).toBe(false)
   })
 
-  test("only read ⇒ false", () => {
-    expect(isCodeModificationSession([{ name: "read" }])).toBe(false)
+  test("the source contains no tool-name scan over edit/write/scripted_replace", () => {
+    // The removed heuristic was a Set membership test over mutating tool NAMES.
+    // If a future edit reintroduces a route on those names, this fails.
+    expect(source).not.toContain("scripted_replace")
+    expect(source).not.toMatch(/new\s+Set\(\s*\[\s*["']edit["']/)
+    expect(source).not.toContain("isCodeModificationSession")
+    expect(source).not.toContain("CODE_MOD_TOOLS")
   })
 
-  test("only readonly tools ⇒ false", () => {
-    expect(
-      isCodeModificationSession([
-        { name: "read" },
-        { name: "grep" },
-        { name: "glob" },
-        { name: "diagnostics" },
-      ]),
-    ).toBe(false)
+  test("the default reminder is the UNION: general guidance + self-select code-mod walk", () => {
+    // General defended-claim portion.
+    expect(CLOSEOUT_REMINDER).toContain("defended claims")
+    expect(CLOSEOUT_REMINDER).toContain("verification was not run")
+    // Self-select code-modification four-surface portion, inline.
+    expect(CLOSEOUT_REMINDER).toContain("If you modified code")
+    expect(CLOSEOUT_REMINDER).toContain("four truth surfaces")
+    for (const surface of ["type", "owner", "wire", "test"]) {
+      expect(CLOSEOUT_REMINDER).toContain(surface)
+    }
   })
 
-  test("edit ⇒ true", () => {
-    expect(isCodeModificationSession([{ name: "edit" }])).toBe(true)
-  })
-
-  test("write ⇒ true", () => {
-    expect(isCodeModificationSession([{ name: "write" }])).toBe(true)
-  })
-
-  test("scripted_replace ⇒ true", () => {
-    expect(isCodeModificationSession([{ name: "scripted_replace" }])).toBe(true)
-  })
-
-  test("mixed history with a mutating tool ⇒ true", () => {
-    expect(
-      isCodeModificationSession([
-        { name: "read" },
-        { name: "grep" },
-        { name: "edit" },
-        { name: "read" },
-      ]),
-    ).toBe(true)
-  })
-
-  test("entries with the extra `arg` field (ToolHistoryEntry duck-typed) still work", () => {
-    // Duck-typed: the predicate only reads `.name`, so the real
-    // ToolHistoryEntry shape with an optional `arg` must not break anything.
-    expect(
-      isCodeModificationSession([
-        { name: "bash", arg: "ls" } as { name: string; arg?: string },
-        { name: "scripted_replace" } as { name: string; arg?: string },
-      ]),
-    ).toBe(true)
-  })
-
-  test("`bash` alone is NOT classified as code-modification", () => {
-    // verify-guard treats SOME bash commands as verification; here we only
-    // care about the mutating set — bash is not in it.
-    expect(isCodeModificationSession([{ name: "bash" }])).toBe(false)
-  })
-})
-
-describe("CODE_MOD_CLOSEOUT_REMINDER", () => {
-  // NOTE: the substring-keyword scans ("names the four surfaces" / "all four"
-  // stop-condition phrase) were removed as substring tautologies over this
-  // module's own constant. The constant's full content (four surface keywords
-  // + the "Stop only after all four surfaces are clean." line) is pinned
-  // by-identity via toBe(CODE_MOD_CLOSEOUT_REMINDER) in the routing tests of
-  // closeout-guard.test.ts and end-to-end through the real loop in
-  // sota-codex-full.test.ts:267 (which also re-checks the four keywords against
-  // text that actually reached the transcript). Identity catches any drift.
-
-  test("is distinct from the legacy reminders (Phase 2 contract preserved)", () => {
-    expect(CODE_MOD_CLOSEOUT_REMINDER).not.toBe(CLOSEOUT_REMINDER)
-    expect(CODE_MOD_CLOSEOUT_REMINDER).not.toBe(CLOSEOUT_4RULE_REMINDER)
+  test("the union default is distinct from the explicit 4-rule reminder", () => {
+    expect(CLOSEOUT_REMINDER).not.toBe(CLOSEOUT_4RULE_REMINDER)
   })
 })

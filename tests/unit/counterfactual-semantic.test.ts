@@ -212,11 +212,13 @@ describe("buildCounterfactualSeed — semantic composition (T-CF-11)", () => {
       semantic: d,
     })
     expect(seed).toBeDefined()
-    // structural body preserved…
-    expect(seed).toContain("counterfactual minimal alternative")
-    // …AND it now steers to the opposite (lifecycle) side.
-    expect(seed).toContain("family: lifecycle-owner")
+    // structural body preserved (now evidential)…
+    expect(seed).toContain("Consider whether a smaller in-place alternative fully fixes the issue")
+    // …AND it now surfaces the opposite (lifecycle) side as an advisory observation.
+    expect(seed).toContain("a public contract for the lifecycle-owner family was not satisfied")
     expect(seed).toContain("`pkg/lifecycle.py`")
+    // No categorical "fixed the wrong side" assertion.
+    expect(seed).not.toContain("fixed the wrong side")
   })
 
   it("semantic-only (no structural breach) still produces a family-targeting seed", () => {
@@ -230,8 +232,10 @@ describe("buildCounterfactualSeed — semantic composition (T-CF-11)", () => {
       semantic: d,
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("family: api-owner")
-    expect(seed).not.toContain("counterfactual minimal alternative")
+    expect(seed).toContain("a public contract for the api-owner family was not satisfied")
+    // semantic-only ⇒ no structural body.
+    expect(seed).not.toContain("Consider whether a smaller in-place alternative")
+    expect(seed).not.toContain("Facts about its patch")
   })
 
   it("RED-ON-INJECTION: omitting `semantic` preserves the pure structural seed verbatim", () => {
@@ -240,8 +244,12 @@ describe("buildCounterfactualSeed — semantic composition (T-CF-11)", () => {
       ownerFile: "pkg/symptom.py",
     })
     expect(withSemantic).toBeDefined()
-    expect(withSemantic).not.toContain("missed a public contract")
-    expect(withSemantic).not.toContain("family:")
+    // No semantic body when `semantic` is omitted: the advisory family
+    // observation must not appear.
+    expect(withSemantic).not.toContain("public contract for the")
+    expect(withSemantic).not.toContain("was not satisfied by candidate 0")
+    // structural body present + evidential.
+    expect(withSemantic).toContain("Consider whether a smaller in-place alternative")
   })
 
   it("within-budget facts AND no semantic target ⇒ undefined (self-guard intact)", () => {

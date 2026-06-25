@@ -3,7 +3,7 @@ import { decideNoPatch } from "@/agent/no-patch-breaker"
 import { editTargetOf } from "./stream-tap"
 
 const commitNowMessage = (turnsUsed: number, maxTurns: number): string =>
-  `No mutating edit has been made after ${turnsUsed}/${maxTurns} turns. Stop exploring. Make the smallest concrete code change now, then run the narrowest verification you can.`
+  `You have used ${turnsUsed} of ${maxTurns} turns with no mutating edit yet; the turn budget is finite. When you are ready, proceed to a concrete code change and run the narrowest verification you can.`
 
 const isTurnBudgetStop = (stopReason: StopReason | undefined): boolean =>
   stopReason === "max_turns" || stopReason === "budget_exhausted"
