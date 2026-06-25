@@ -15,6 +15,7 @@ import {
   detectLinuxSandboxBackend,
   LANDLOCK_CLI_NETWORK_DEFERRED_MARKER,
   type LinuxSandboxBackend,
+  SANDBOX_DEFAULT_FLIP_PROFILE,
 } from "@/runtime/os-sandbox"
 import { gateOn, logger } from "@/shared"
 
@@ -66,13 +67,23 @@ export const buildCliOsSandbox = (
   deps: CliSandboxDeps = {},
 ): ShellSandboxSlot | undefined => {
   const raw = env.QUANTA_SANDBOX ?? "default"
-  if (raw === "" || raw === "default" || raw === "off") return undefined
-  if (!ACTIVE_SET.has(raw)) {
-    logger.warn(`QUANTA_SANDBOX="${raw}" unrecognised — falling back to passthrough`)
+  // GATED default-flip (REPORT-jun26 §4 fix-2): an UNSET / "default" profile
+  // installs NOTHING by default (byte-identical passthrough). When
+  // `QUANTA_SANDBOX_DEFAULT` is ON it instead resolves to the flip default
+  // (`workspace-write`, Codex's posture) — every compiler/parity-fixture for
+  // that arm already exists. Explicit "off" ALWAYS wins (reversible opt-out).
+  let resolved = raw
+  if (raw === "" || raw === "default") {
+    if (!gateOn(env, "QUANTA_SANDBOX_DEFAULT")) return undefined
+    resolved = SANDBOX_DEFAULT_FLIP_PROFILE
+  }
+  if (resolved === "off") return undefined
+  if (!ACTIVE_SET.has(resolved)) {
+    logger.warn(`QUANTA_SANDBOX="${resolved}" unrecognised — falling back to passthrough`)
     return undefined
   }
 
-  const profile = raw as ActiveProfile
+  const profile = resolved as ActiveProfile
   // §12.6 (jun-08 long-tail) — Codex `exclude_slash_tmp` parity. Default-OFF:
   // absent ⇒ `excludeTmpdir` omitted ⇒ the compiled Seatbelt profile keeps its
   // baseline `/tmp` read-allow (byte-identical). `QUANTA_SANDBOX_EXCLUDE_TMPDIR`

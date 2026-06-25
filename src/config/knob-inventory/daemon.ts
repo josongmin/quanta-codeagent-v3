@@ -200,6 +200,20 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "runtime/os-sandbox/env.ts",
   },
   {
+    // REPORT-jun26 §4 fix-2 — gated default-flip. Default-OFF: absent ⇒ an
+    // UNSET / "default" `QUANTA_SANDBOX` installs no sandbox (byte-identical
+    // passthrough). On ⇒ unset/"default" resolves to `workspace-write`
+    // (Codex's default-ON posture; all compilers + parity fixtures exist).
+    // Explicit `QUANTA_SANDBOX=off` always wins (reversible). Lenient gateOn.
+    envKey: "QUANTA_SANDBOX_DEFAULT",
+    kind: "bool",
+    default: false,
+    group: "sandbox",
+    home: "runtime-config",
+    describe: "Default the OS sandbox to workspace-write when QUANTA_SANDBOX is unset (Codex parity).",
+    readSite: "runtime/os-sandbox/env.ts",
+  },
+  {
     // §12.6 (jun-08 long-tail) — Codex `[sandbox_workspace_write].exclude_slash_tmp`.
     // Default-OFF: absent ⇒ the Seatbelt profile keeps its hardcoded `/tmp`
     // read-allow (byte-identical Codex baseline). On ⇒ `/tmp` is omitted from
