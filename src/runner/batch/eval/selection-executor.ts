@@ -357,6 +357,10 @@ export interface SelectionRunContext {
 export interface DedupedCandidates {
   readonly candidates: readonly Candidate[]
   readonly terminalRepresentativeByFirstId: Map<string, Candidate>
+  /** Consensus weight per surviving (first-seen) candidate id: how many RAW
+   *  pre-dedup candidates collapsed to its normalized patch. Drives the
+   *  Agentless-style majority floor (`nonEmptyFallbackIdOf`). */
+  readonly votesByFirstId: ReadonlyMap<string, number>
 }
 
 export interface CounterfactualVerdictSet {

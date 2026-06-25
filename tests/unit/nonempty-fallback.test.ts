@@ -246,3 +246,91 @@ describe("runSelection non-empty fallback (default-OFF A/B arm)", () => {
     expect(r.winner?.patch ?? r.fallbackCandidate?.patch ?? "").toBe(cand({ id: "cand-0" }).patch)
   })
 })
+
+// -- Agentless CONSENSUS floor (normalized-majority vote) ----------------------
+
+// Two DISTINCT normalized edits to x.py: A (smaller diff) and B (larger diff).
+// All self-oracle-barred (mwe candidate_red) so none can win → fallback floor.
+const PATCH_A = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,1 +1,1 @@\n-old\n+aaa"
+const PATCH_B =
+  "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -5,1 +5,2 @@\n-old\n+bbb\n+bbb2"
+
+describe("runSelection non-empty fallback — consensus (normalized-majority) floor", () => {
+  const fourCandidates = [
+    cand({ id: "a-1", patch: PATCH_A }),
+    cand({ id: "b-1", patch: PATCH_B }),
+    cand({ id: "a-2", patch: PATCH_A }),
+    cand({ id: "a-3", patch: PATCH_A }),
+  ]
+
+  it("MAJORITY wins: 3×A vs 1×B ⇒ floor submits an A even though B is not the minority on minimality alone", async () => {
+    const r = await runSelection({
+      n: 4,
+      mode: "clean",
+      nonEmptyFallback: true,
+      seeds: [undefined, undefined, undefined, undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: genThenEmpty(fourCandidates),
+        applyClean: async () => true,
+        regression: async () => true,
+        mweProof: async () => ({ state: "candidate_red" }),
+      },
+    })
+    expect(r.winner).toBeNull()
+    // The 3-vote A bucket beats the lone B. The chosen id is one of the A copies.
+    expect(["a-1", "a-2", "a-3"]).toContain(r.fallbackCandidate?.id ?? "")
+    expect(r.fallbackCandidate?.patch).toBe(PATCH_A)
+  })
+
+  it("RED-on-injection: flip to 3×B vs 1×A ⇒ floor MUST follow the majority to B (proves consensus is the primary key, not minimality)", async () => {
+    // B is the LARGER diff (worse on minimality). If the floor were minimality-led
+    // it would pick A regardless of votes; consensus forces B when B is the bucket.
+    const r = await runSelection({
+      n: 4,
+      mode: "clean",
+      nonEmptyFallback: true,
+      seeds: [undefined, undefined, undefined, undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: genThenEmpty([
+          cand({ id: "b-1", patch: PATCH_B }),
+          cand({ id: "a-1", patch: PATCH_A }),
+          cand({ id: "b-2", patch: PATCH_B }),
+          cand({ id: "b-3", patch: PATCH_B }),
+        ]),
+        applyClean: async () => true,
+        regression: async () => true,
+        mweProof: async () => ({ state: "candidate_red" }),
+      },
+    })
+    expect(r.winner).toBeNull()
+    expect(["b-1", "b-2", "b-3"]).toContain(r.fallbackCandidate?.id ?? "")
+    expect(r.fallbackCandidate?.patch).toBe(PATCH_B)
+  })
+
+  it("NO consensus (all unique) ⇒ reduces to the structural ranking (minimality) — byte-identical to the pre-consensus floor", async () => {
+    // Two distinct single-vote buckets: the smaller diff (A) wins on minimality,
+    // exactly as the old lexicographic-only floor did. Proves the consensus layer
+    // is inert without a genuine ≥2 agreement.
+    const r = await runSelection({
+      n: 2,
+      mode: "clean",
+      nonEmptyFallback: true,
+      seeds: [undefined, undefined],
+      owners: new Set(["x.py"]),
+      ports: {
+        generate: genThenEmpty([
+          cand({ id: "b-1", patch: PATCH_B }),
+          cand({ id: "a-1", patch: PATCH_A }),
+        ]),
+        applyClean: async () => true,
+        regression: async () => true,
+        mweProof: async () => ({ state: "candidate_red" }),
+      },
+    })
+    expect(r.winner).toBeNull()
+    expect(r.fallbackCandidate?.id).toBe("a-1")
+    expect(r.fallbackCandidate?.patch).toBe(PATCH_A)
+  })
+})

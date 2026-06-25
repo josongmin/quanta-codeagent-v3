@@ -457,13 +457,16 @@ const staticAccept = async (
 }
 
 const dedupeCandidates = (rawCandidates: readonly Candidate[]): DedupedCandidates => {
-  const seen = new Set<string>()
   const firstIdByPatchKey = new Map<string, string>()
+  // Consensus weight: how many RAW candidates collapse to each normalized key.
+  // Counted over the PRE-dedup population (dedup keeps one representative, but the
+  // Agentless-style majority floor votes over how many independently agreed).
+  const countByKey = new Map<string, number>()
   const terminalRepresentativeByFirstId = new Map<string, Candidate>()
   const candidates = rawCandidates.filter((candidate) => {
     const key = normalizePatch(candidate.patch)
-    if (!seen.has(key)) {
-      seen.add(key)
+    countByKey.set(key, (countByKey.get(key) ?? 0) + 1)
+    if (!firstIdByPatchKey.has(key)) {
       firstIdByPatchKey.set(key, candidate.id)
       terminalRepresentativeByFirstId.set(candidate.id, candidate)
       return true
@@ -479,7 +482,11 @@ const dedupeCandidates = (rawCandidates: readonly Candidate[]): DedupedCandidate
     }
     return false
   })
-  return { candidates, terminalRepresentativeByFirstId }
+  const votesByFirstId = new Map<string, number>()
+  for (const [key, firstId] of firstIdByPatchKey) {
+    votesByFirstId.set(firstId, countByKey.get(key) ?? 1)
+  }
+  return { candidates, terminalRepresentativeByFirstId, votesByFirstId }
 }
 
 const realPatchSizeWindow = (
@@ -597,12 +604,13 @@ const winnerIdOf = (
       selectBestEffort(bestEffortRankedEntries(ctx, scored, violatedCounterfactual)))
 
 /**
- * CORRECTED non-empty fallback id (default-OFF A/B arm). Picks the STRONGEST
- * scored candidate that passes the ROCK-SOLID SUBSET (`nonEmptyFallbackEligible`:
- * applies clean, does not regress, no static-sanity break) while DROPPING the
- * self-oracle / completeness bars — using the SAME ranking the real winner would
- * use (clean lexicographic / research best-effort), so it is the candidate we
- * would most prefer to submit in place of empty. Counterfactual-violating
+ * CORRECTED non-empty fallback id (default-OFF A/B arm). Among the candidates that
+ * pass the ROCK-SOLID SUBSET (`nonEmptyFallbackEligible`: applies clean, does not
+ * regress, no static-sanity break) while DROPPING the self-oracle / completeness
+ * bars, picks the normalized-MAJORITY (largest agreeing bucket) — the Agentless
+ * consensus floor — with the SAME ranking the real winner would use (clean
+ * lexicographic / research best-effort) as the tie-break. So it is the candidate
+ * we would most prefer to submit in place of empty. Counterfactual-violating
  * candidates are excluded (parity with the winner path). Returns `null` when no
  * candidate qualifies. Caller invokes ONLY when `winner === null`.
  */
@@ -610,6 +618,7 @@ const nonEmptyFallbackIdOf = (
   ctx: SelectionRunContext,
   scored: readonly ScoredEntry[],
   violatedCounterfactual: ReadonlySet<string>,
+  votesByFirstId: ReadonlyMap<string, number>,
 ): string | null => {
   const eligible = scored.filter(
     (entry) =>
@@ -617,12 +626,26 @@ const nonEmptyFallbackIdOf = (
       nonEmptyFallbackEligible(entry, ctx.mode),
   )
   if (eligible.length === 0) return null
+  // Agentless-style CONSENSUS floor (jun-26): N independent candidates agreeing on
+  // the SAME normalized edit is itself a verification-free signal (the agreement
+  // the self-oracle could not confirm) — so the LARGEST normalized-patch bucket
+  // wins. Votes are counted over the PRE-dedup population (`votesByFirstId`), not
+  // the deduped `scored` set where every bucket is size 1. Consensus is PRIMARY;
+  // the existing structural ranking (clean lexicographic root-cause/minimality,
+  // else research best-effort) breaks ties BOTH between equally-popular buckets AND
+  // for the within-bucket representative. This strictly extends the prior
+  // lexicographic-only floor: with no agreement (every candidate unique ⇒ maxVotes
+  // 1) `finalists === eligible`, so the pick is byte-identical to the old floor;
+  // only a genuine ≥2 agreement changes it.
+  const votesOf = (entry: ScoredEntry): number => votesByFirstId.get(entry.candidate.id) ?? 1
+  const maxVotes = Math.max(...eligible.map(votesOf))
+  const finalists = maxVotes <= 1 ? eligible : eligible.filter((entry) => votesOf(entry) === maxVotes)
   if (ctx.mode === "clean") {
     const orderOf = new Map(scored.map((entry, i) => [entry.candidate.id, i]))
-    return selectLexicographic(eligible.map((entry) => lexCandidateOf(ctx, orderOf, entry, true)))
+    return selectLexicographic(finalists.map((entry) => lexCandidateOf(ctx, orderOf, entry, true)))
   }
   return selectBestEffort(
-    eligible.map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict })),
+    finalists.map((entry) => ({ id: entry.candidate.id, verdict: entry.verdict })),
   )
 }
 
@@ -692,7 +715,8 @@ export const finalize = async (
   earlyAccepted: boolean,
   riskGate?: SelectionRiskGateTelemetry,
 ): Promise<SelectionResult> => {
-  const { candidates, terminalRepresentativeByFirstId } = dedupeCandidates(rawCandidates)
+  const { candidates, terminalRepresentativeByFirstId, votesByFirstId } =
+    dedupeCandidates(rawCandidates)
   const { minB, maxB } = realPatchSizeWindow(candidates)
   const scored = await scoreCandidates(ctx, candidates, minB, maxB)
 
@@ -706,7 +730,7 @@ export const finalize = async (
   // of empty weakly dominates on binary scoring. Winner semantics are untouched.
   const fallbackCandidateId =
     winner === null && ctx.args.nonEmptyFallback === true
-      ? nonEmptyFallbackIdOf(ctx, scored, counterfactualVerdicts.violated)
+      ? nonEmptyFallbackIdOf(ctx, scored, counterfactualVerdicts.violated, votesByFirstId)
       : null
   const fallbackCandidate =
     fallbackCandidateId === null

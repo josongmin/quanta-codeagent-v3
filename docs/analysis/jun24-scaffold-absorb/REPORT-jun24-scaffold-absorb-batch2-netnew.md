@@ -1,5 +1,22 @@
 # 흡수 어딧 배치2 — Lingxi/JoyCode/ACoder (NET-NEW vs batch-1)
 
+> ## ⚠️ 적대검증 정정 (2026-06-25, 이 섹션이 SSOT — 아래 §1~§4는 STALE)
+>
+> 3-agent 적대 재검증(코드 현시점 대조): **§1 "즉시흡수" 7후보 중 5개가 작성 당일/직후 이미 랜딩**(default-OFF, `COMPETITOR_ABSORB_PRESET`). 이 리포트는 "빌드 제안"으로 써졌으나 그 시점에 빌드가 같이/직후 커밋됨 → §1 "absorb candidate" 프레이밍 무효.
+>
+> | 후보 | 판정 | 현재 seam |
+> |---|---|---|
+> | lingxi-1 topic-question | **ALREADY-COVERED** | `spec-fidelity-invariant` knob + `declared-expected-matcher.ts` 실행-free veto(predicate-union엔 안 들어갔지만 selection veto로 13033 의도 처리). predicate set(types.ts:20-28)은 여전히 execution-coupled(프레이밍만 stale) |
+> | joy-2 paired-control | **ALREADY-COVERED / STALE-SEAM** | `paired-control` knob + `select.ts:264-270` `admits()`=`reproduced && baseControl==="green"`(PASS-on-base 게이트), `types.ts:116-157` 지원타입. 리포트 "select.ts reproduced-only" 거짓(landed 후) |
+> | lingxi-2 forward-localize | **ALREADY-COVERED** | `forward-localize` knob + `forward-localize-trace.ts`(consumer-trace) + driver 배선. 단 "부재 메서드명 invent"는 의도적 미구현(answer-key 위험)—edited 심볼의 consumer 추적까지만 |
+> | acoder-1 deeper-localize | **STALE-SEAM + COVERED** | `capability-profiles.ts:410` `DEEPER_LOCALIZE_MODULES=[FORWARD_LOCALIZE]`(빈배열 아님), `PHASE_MODULES.deeper_localize` 배선됨(리포트 :323 stale) |
+> | acoder-5 cross-vendor | **ALREADY-COVERED(wiring), cross-VENDOR 미달** | `model-lane-diversity` knob+`resolveLaneLlm`이 실제 port swap(driver.ts:3378). 단 **cross-MODEL뿐**(model-lanes.ts:16-27: Anthropic 크레덴셜 없어 ghost-lane 드롭) → 진짜 cross-vendor decorrelation은 **auth갭**(코드갭 아님) |
+> | joy-1 PATCH/TEST router | **HOLDS (진짜 갭)** | retry-policy.ts:122-141 real-fail=zero attribution, 라우터 없음. **단 LLM-router=THEATER**(리포트 자체가 measured-A/B mandatory 명시); blind 빌드 금지 |
+> | acoder-6 NL judge rubric | **HOLDS (진짜 갭)** | predicate set 전부 execution-coupled, LLM-evidence층은 explicit advisory("NOT judge correctness/pick winner", llm-risk-gate.ts:13). NL correctness/safety/simplicity binary-vote rubric 부재. theater-prone, measure 필수 |
+> | §3 kill 9개 | **3/3 spot-check KILL-CORRECT** | joy-5(apply-safety=stale-read-guard 소유)/lingxi-5(reviewer=closeout-critic+repro-vote+T03)/acoder-8(=verify-select-regression) 다 맞음 |
+>
+> **결론(정정)**: 새로 빌드할 absorb 거의 없음 — 5/7 이미 shipped(default-OFF). **진짜 병목 = 측정**(랜딩된 default-OFF 노브들 frozen-slice A/B: spec-fidelity-invariant/forward-localize/paired-control/model-lane-diversity + nonEmptyFallback). 남은 진짜 갭 2개(joy-1 router, acoder-6 NL rubric)는 둘 다 LLM-judge **theater-prone → measure-before-build**(memory 반복 theater 클래스). cross-vendor는 auth 해소돼야 cross-MODEL→cross-VENDOR 승격. answer-key 미참조는 유지 확인.
+
 작성 2026-06-24. 10에이전트 3라운드. batch-1+우리knob37 dedup, NET-NEW만.
 
 ---
