@@ -92,21 +92,46 @@ describe("tool-surface manifest — GATED factories match the manifest two-way",
 
 describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", () => {
   test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
+    // jun-26 coordination-trio gating: QUANTA_SUBAGENT_MAILBOX / QUANTA_TEAM_PEER_MSG /
+    // QUANTA_OBJECTIVE_TOOLS were FLIPPED to opt-in (engagement-UNVERIFIED, frontier
+    // ships ONE Task tool), so the CLI no longer auto-seeds them. The remaining
+    // spawn-core gates (subagent / 6tools / batch / introspect) stay default-ON.
     expect([...seedEnvVarsForSurface("cli")].sort()).toEqual(
       [
         "QUANTA_COVERAGE_TOOL",
         "QUANTA_ENABLE_STRUCTURED_PATCH",
-        "QUANTA_OBJECTIVE_TOOLS",
         "QUANTA_PROMPT_CACHE_STATUS",
         "QUANTA_SIDE_AGENT",
         "QUANTA_SUBAGENT",
         "QUANTA_SUBAGENT_6TOOLS",
         "QUANTA_SUBAGENT_BATCH",
         "QUANTA_SUBAGENT_INTROSPECT",
-        "QUANTA_SUBAGENT_MAILBOX",
-        "QUANTA_TEAM_PEER_MSG",
       ].sort(),
     )
+  })
+
+  test("coordination trio (mailbox/team/objective) is NOT auto-seeded on any surface", () => {
+    // jun-26 frontier tool-impl audit: these 3 are opt-in EVERYWHERE until a live
+    // engagement smoke proves the model uses them. The CLI seed deriving from the
+    // SSOT means flipping the manifest default is the ONLY lever — assert the
+    // trio's env gates appear in NO surface's seed set (red-on-injection: restoring
+    // any trio entry's `cli: "on"` re-introduces its env here and fails this).
+    const trio = ["QUANTA_SUBAGENT_MAILBOX", "QUANTA_TEAM_PEER_MSG", "QUANTA_OBJECTIVE_TOOLS"]
+    for (const surface of TOOL_SURFACES) {
+      const seeded = new Set(seedEnvVarsForSurface(surface))
+      for (const env of trio) expect(seeded.has(env)).toBe(false)
+    }
+  })
+
+  test("coordination trio is opt-in on every surface in the manifest (no `on` default)", () => {
+    for (const rep of ["subagent_send_message", "team_create", "objective_set"]) {
+      const entry = GATED_TOOLS.find((e) => e.name === rep)
+      if (entry === undefined) throw new Error(`manifest has no entry for "${rep}"`)
+      for (const surface of TOOL_SURFACES) {
+        // explicit `on` is the only state that auto-seeds; the trio must never carry it
+        expect(entry.default[surface]).not.toBe("on")
+      }
+    }
   })
 
   test("bench surface seeds NOTHING (shared-assembler byte-identity)", () => {
