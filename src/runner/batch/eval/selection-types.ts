@@ -13,8 +13,8 @@ import type {
   HardGateSignals,
   ResolvedKofNSignal,
 } from "@/agent/verification-bundle"
-import type { DoneTimeCaptureClass } from "./capture-correctness"
 import type { CandidateFamily, CandidateFamilyId } from "./candidate-families"
+import type { DoneTimeCaptureClass } from "./capture-correctness"
 import type { LlmEvidencePacket } from "./llm-evidence-packet"
 import type { MweProofReceipt, MweProofState } from "./mwe-proof"
 import type { SelectionContractBundle } from "./public-contract-types"
@@ -190,6 +190,35 @@ export type SelectionNoWinnerReason =
   | "proof_infra_blocked"
   | "no_submittable_candidate"
 
+/**
+ * G0 — winner=null RCA diagnostic (jun-25). Behavior-NEUTRAL telemetry emitted
+ * ONLY when `winner === null`, so a `completed_unresolved` empty patch is no
+ * longer indistinguishable from a genuine model miss. It answers: of the scored
+ * candidates, how many were non-empty, how many were best-effort eligible, and
+ * — for the ineligible ones — WHICH gate barred them (the histogram), plus the
+ * raw `regressionGreen` distribution (the F3R suspect). A `regressionGreen`-
+ * dominated histogram with `false>0` is the fingerprint of the infra-conflation
+ * body; a `applyClean`-dominated one points elsewhere.
+ */
+export interface SelectionNoWinnerDiagnostic {
+  /** Total scored (post-dedup) candidates. */
+  readonly scoredCount: number
+  /** Candidates whose patch was non-empty (a real diff was produced). */
+  readonly nonemptyCandidateCount: number
+  /** Candidates that passed `bestEffortEligible` (would have rescued the run). */
+  readonly bestEffortEligibleCount: number
+  /** Per-gate count of which best-effort gate barred a candidate. A candidate
+   *  barred by N gates increments all N buckets. Buckets with 0 are omitted. */
+  readonly ineligibleReasons: Readonly<Record<string, number>>
+  /** Distribution of the `regressionGreen` HARD signal across scored candidates
+   *  — the direct readout for whether the body is regression-on-infra. */
+  readonly regressionGreen: {
+    readonly false: number
+    readonly null: number
+    readonly true: number
+  }
+}
+
 export interface SelectionRiskGateDecision {
   readonly expand: boolean
   readonly reasons: readonly string[]
@@ -254,6 +283,9 @@ export interface SelectionResult {
   proofRequired: boolean
   /** Why no winner existed, when the selector can distinguish the cause. */
   noWinnerReason?: SelectionNoWinnerReason
+  /** G0 RCA diagnostic — present ONLY when `winner === null`. Behavior-neutral
+   *  telemetry that attributes the empty submission to its real cause. */
+  noWinnerDiagnostic?: SelectionNoWinnerDiagnostic
   /** Adaptive strict@1 gate telemetry, present only when the gate was enabled
    *  and candidate 0 was produced. */
   riskGate?: SelectionRiskGateTelemetry
@@ -341,6 +373,8 @@ export interface SelectionTelemetry {
   winnerId: string | null
   proofRequired?: boolean
   noWinnerReason?: SelectionNoWinnerReason
+  /** G0 RCA diagnostic — present ONLY when `winnerId === null`. */
+  noWinnerDiagnostic?: SelectionNoWinnerDiagnostic
   winningFamilyId?: CandidateFamilyId
   riskGate?: SelectionRiskGateTelemetry
   counterfactual?: CounterfactualTelemetry

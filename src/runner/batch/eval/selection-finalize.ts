@@ -59,6 +59,7 @@ import {
   declaredExpectedMatchOf,
   earlyAcceptable,
   familyCoverageMissingHardReasons,
+  ineligibleReasonsFor,
   minimalityOf,
   nonEmptyFallbackEligible,
   ownerCoverageOf,
@@ -82,6 +83,7 @@ import type {
   RepairFeedbackStopReason,
   ResolvedKofNMode,
   ScoredEntry,
+  SelectionNoWinnerDiagnostic,
   SelectionNoWinnerReason,
   SelectionResult,
   SelectionRiskGateDecision,
@@ -439,6 +441,7 @@ const staticAccept = async (
 ): Promise<SelectionResult> => {
   const entry = await staticAcceptEntry(ctx, candidate)
   const winner = staticAcceptWinnerOf(ctx, entry)
+  const noWinnerDiagnostic = noWinnerDiagnosticOf(ctx, [entry], winner)
   return {
     attempted: ctx.args.n,
     ownerFiles: [...ctx.args.owners],
@@ -452,6 +455,7 @@ const staticAccept = async (
     generated: 1,
     proofRequired: ctx.proofRequired,
     ...(ctx.proofRequired ? { noWinnerReason: "proof_required_missing" as const } : {}),
+    ...(noWinnerDiagnostic !== undefined ? { noWinnerDiagnostic } : {}),
     riskGate,
   }
 }
@@ -622,8 +626,7 @@ const nonEmptyFallbackIdOf = (
 ): string | null => {
   const eligible = scored.filter(
     (entry) =>
-      !violatedCounterfactual.has(entry.candidate.id) &&
-      nonEmptyFallbackEligible(entry, ctx.mode),
+      !violatedCounterfactual.has(entry.candidate.id) && nonEmptyFallbackEligible(entry, ctx.mode),
   )
   if (eligible.length === 0) return null
   // Agentless-style CONSENSUS floor (jun-26): N independent candidates agreeing on
@@ -639,7 +642,8 @@ const nonEmptyFallbackIdOf = (
   // only a genuine ≥2 agreement changes it.
   const votesOf = (entry: ScoredEntry): number => votesByFirstId.get(entry.candidate.id) ?? 1
   const maxVotes = Math.max(...eligible.map(votesOf))
-  const finalists = maxVotes <= 1 ? eligible : eligible.filter((entry) => votesOf(entry) === maxVotes)
+  const finalists =
+    maxVotes <= 1 ? eligible : eligible.filter((entry) => votesOf(entry) === maxVotes)
   if (ctx.mode === "clean") {
     const orderOf = new Map(scored.map((entry, i) => [entry.candidate.id, i]))
     return selectLexicographic(finalists.map((entry) => lexCandidateOf(ctx, orderOf, entry, true)))
@@ -679,6 +683,44 @@ const noWinnerReasonOf = (
       : "proof_required_missing"
   }
   return scored.length > 0 ? "no_submittable_candidate" : undefined
+}
+
+/**
+ * G0 — build the winner=null RCA diagnostic (PURE, behavior-neutral). Returns
+ * `undefined` when there IS a winner (so the result stays byte-identical on the
+ * normal path) or when nothing was scored (a true 0-generation miss carries no
+ * gate evidence). The histogram is built from {@link ineligibleReasonsFor},
+ * which mirrors `bestEffortEligible` exactly, so it can never disagree with the
+ * gate that actually produced winner=null.
+ */
+const noWinnerDiagnosticOf = (
+  ctx: SelectionRunContext,
+  scored: readonly ScoredEntry[],
+  winner: Candidate | null,
+): SelectionNoWinnerDiagnostic | undefined => {
+  if (winner !== null || scored.length === 0) return undefined
+  const ineligibleReasons: Record<string, number> = {}
+  const regressionGreen = { false: 0, null: 0, true: 0 }
+  let bestEffortEligibleCount = 0
+  let nonemptyCandidateCount = 0
+  for (const entry of scored) {
+    if (entry.candidate.patch.trim() !== "") nonemptyCandidateCount++
+    if (bestEffortEligible(entry, ctx.mode)) bestEffortEligibleCount++
+    for (const reason of ineligibleReasonsFor(entry, ctx.mode)) {
+      ineligibleReasons[reason] = (ineligibleReasons[reason] ?? 0) + 1
+    }
+    const rg = entry.hard.regressionGreen
+    if (rg === false) regressionGreen.false++
+    else if (rg === true) regressionGreen.true++
+    else regressionGreen.null++
+  }
+  return {
+    scoredCount: scored.length,
+    nonemptyCandidateCount,
+    bestEffortEligibleCount,
+    ineligibleReasons,
+    regressionGreen,
+  }
 }
 
 const terminalCandidateOf = (
@@ -724,6 +766,7 @@ export const finalize = async (
   const winnerId = winnerIdOf(ctx, scored, counterfactualVerdicts.violated)
   const winner = scored.find((entry) => entry.candidate.id === winnerId)?.candidate ?? null
   const noWinnerReason = noWinnerReasonOf(ctx, scored, winner)
+  const noWinnerDiagnostic = noWinnerDiagnosticOf(ctx, scored, winner)
   const counterfactual = counterfactualTelemetryOf(ctx, scored, counterfactualVerdicts)
   // CORRECTED non-empty fallback (default-OFF). Computed ONLY when there is no
   // winner AND the arm is on — submitting the rock-solid-subset candidate instead
@@ -751,6 +794,7 @@ export const finalize = async (
     generated: candidates.length,
     proofRequired: ctx.proofRequired,
     ...(noWinnerReason !== undefined ? { noWinnerReason } : {}),
+    ...(noWinnerDiagnostic !== undefined ? { noWinnerDiagnostic } : {}),
     ...(riskGate !== undefined ? { riskGate } : {}),
     ...(counterfactual !== undefined ? { counterfactual } : {}),
   }

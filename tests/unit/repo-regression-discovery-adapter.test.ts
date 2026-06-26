@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import {
   candidateKeepsBaseGreenTests,
   executeWitnessTestsOnPatched,
+  keepBaseGreenDiscoveredTests,
   publicRegressionProofReceiptOf,
   regressionAuthorityOf,
-  keepBaseGreenDiscoveredTests,
 } from "@/apps/bench/eval/repo-regression-discovery-adapter"
 
 describe("repo regression discovery adapter helpers", () => {
@@ -30,9 +30,13 @@ describe("repo regression discovery adapter helpers", () => {
     ).resolves.toBe(false)
   })
 
-  test("candidate non-verdict after base-green is treated as a regression, not fail-open", async () => {
+  // F3R (jun-25): an INFRA non-verdict (the witness could not RUN) is NOT a
+  // regression. The back-compat boolean wrapper must fail-OPEN to `true` (no
+  // OBSERVED regression) rather than fabricating a `false` veto on a broken env.
+  // The rich receipt preserves the `null` distinction (covered below).
+  test("candidate infra non-verdict after base-green fails OPEN (not a regression)", async () => {
     await expect(candidateKeepsBaseGreenTests(["tests/test_a.py"], async () => null)).resolves.toBe(
-      false,
+      true,
     )
   })
 
@@ -44,7 +48,7 @@ describe("repo regression discovery adapter helpers", () => {
         ["tests/test_a.py", "tests/test_b.py"],
         async (test) => {
           executed.push(test)
-          return test === "tests/test_b.py" ? false : true
+          return test === "tests/test_b.py" ? "red" : "green"
         },
       )
       expect(out.regressionGreen).toBe(false)
@@ -58,30 +62,34 @@ describe("repo regression discovery adapter helpers", () => {
     test("all executed witnesses green ⇒ regressionGreen=true, no failures", async () => {
       const out = await executeWitnessTestsOnPatched(
         ["tests/test_a.py", "tests/test_b.py"],
-        async () => true,
+        async () => "green",
       )
       expect(out.regressionGreen).toBe(true)
       expect(out.executedTests).toEqual(["tests/test_a.py", "tests/test_b.py"])
       expect(out.failures).toEqual([])
     })
 
-    test("a static candidate that is NEVER executed cannot reject (empty set ⇒ green, no run)", async () => {
+    test("a static candidate that is NEVER executed cannot reject (empty set ⇒ null, no run)", async () => {
       let ran = false
       const out = await executeWitnessTestsOnPatched([], async () => {
         ran = true
-        return false
+        return "red"
       })
       // No execution receipt ⇒ no rejection. `false` is unreachable without a run.
+      // Empty executed set ⇒ no positive evidence either ⇒ null (fail-open).
       expect(ran).toBe(false)
-      expect(out.regressionGreen).toBe(true)
+      expect(out.regressionGreen).toBeNull()
       expect(out.executedTests).toEqual([])
       expect(out.failures).toEqual([])
     })
 
-    test("a non-verdict (null) on the patched tree counts as a witness failure", async () => {
-      const out = await executeWitnessTestsOnPatched(["tests/test_a.py"], async () => null)
-      expect(out.regressionGreen).toBe(false)
-      expect(out.failures).toEqual(["tests/test_a.py"])
+    // F3R (jun-25): an INFRA non-verdict on the patched tree is NOT a regression
+    // — it fails OPEN to `null`, never `false`, and is recorded in infraSkipped.
+    test("an infra non-verdict on the patched tree fails OPEN (null), not a failure", async () => {
+      const out = await executeWitnessTestsOnPatched(["tests/test_a.py"], async () => "infra")
+      expect(out.regressionGreen).toBeNull()
+      expect(out.failures).toEqual([])
+      expect(out.infraSkipped).toEqual(["tests/test_a.py"])
     })
   })
 
@@ -108,9 +116,13 @@ describe("repo regression discovery adapter helpers", () => {
     }
 
     expect(await mk(undefined)()).toBe("not_available")
-    expect(await mk({ candidateTests: ["tests/test_a.py"], baseGreenTests: [], regressionGreen: null })()).toBe(
-      "base_not_green",
-    )
+    expect(
+      await mk({
+        candidateTests: ["tests/test_a.py"],
+        baseGreenTests: [],
+        regressionGreen: null,
+      })(),
+    ).toBe("base_not_green")
     expect(
       await mk({
         candidateTests: ["tests/test_a.py"],

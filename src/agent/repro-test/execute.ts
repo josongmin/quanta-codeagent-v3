@@ -70,6 +70,7 @@ import {
 } from "./pytest-report"
 import type {
   ReproControlOutcome,
+  ReproExecFailureKind,
   ReproTestConfig,
   ReproTestOutcome,
   ReproTestSample,
@@ -160,6 +161,37 @@ export const classifyPytest = (stdout: string, _stderr: string, _code: number): 
 
 export { classifyPytestReportText, parsePytestExecutionReport, pytestReportPathFor }
 
+/**
+ * F3D — classify the CAUSE of an `exec_failed` outcome (PURE).
+ *
+ * The single discriminator is "did pytest actually RUN and emit a parseable
+ * sidecar report?":
+ *
+ *   - exec port threw (ENOENT / python-missing / spawn failure) ⇒ the process
+ *     never produced output ⇒ `infra_unavailable`.
+ *   - no report text at all (read port absent, sidecar never written because the
+ *     process was killed at launch / timeout-kill / exit 127) ⇒ `infra_unavailable`.
+ *   - report text present but UNPARSEABLE (not the schema-1 JSON the controlled
+ *     footer writes) ⇒ the footer never completed a real pytest run ⇒
+ *     `infra_unavailable`.
+ *   - a PARSEABLE schema-1 report exists ⇒ pytest RAN. Whatever failure it
+ *     describes (collection/setup/import error) is a `test_errored` — the
+ *     harness worked, the TEST is the problem.
+ *
+ * Never inspects exit code as authority (the project's heuristic-free posture):
+ * the presence of a real pytest report is the ground truth that it ran.
+ */
+export const classifyExecFailureKind = (args: {
+  /** The raw sidecar report text read back, or `undefined` if none was read. */
+  readonly reportText: string | undefined
+  /** True iff the exec/write port THREW before any report could exist. */
+  readonly execThrew?: boolean
+}): ReproExecFailureKind => {
+  if (args.execThrew === true) return "infra_unavailable"
+  if (args.reportText === undefined) return "infra_unavailable"
+  return parsePytestExecutionReport(args.reportText) === null ? "infra_unavailable" : "test_errored"
+}
+
 /** Process-lifetime monotonic counter — guarantees that the crypto-less
  *  fallback id is distinct even for two calls in the SAME millisecond with the
  *  SAME sample index (the exact concurrent-collision the prior `${Date.now()}-${i}`
@@ -221,7 +253,14 @@ const executeOne = async (
   try {
     await args.writeFile(path, source)
   } catch (e) {
-    return { source, stdout: "", stderr: `[writeFile threw] ${errText(e)}`, outcome: "exec_failed" }
+    // F3D: the file could not even be written ⇒ the harness never ran ⇒ infra.
+    return {
+      source,
+      stdout: "",
+      stderr: `[writeFile threw] ${errText(e)}`,
+      outcome: "exec_failed",
+      execFailure: "infra_unavailable",
+    }
   }
   try {
     const argv =
@@ -231,22 +270,33 @@ const executeOne = async (
     const stderr = typeof r.stderr === "string" ? r.stderr : ""
     const reportPath = pytestReportPathFor(path)
     if (args.readFile === undefined) {
+      // F3D: no read port ⇒ no sidecar can be inspected ⇒ infra (cannot prove
+      // pytest ran), never a test signal.
       return {
         source,
         stdout,
         stderr: `${stderr}\n[pytest report missing read port] ${reportPath}`.trim(),
         outcome: "exec_failed",
+        execFailure: "infra_unavailable",
       }
     }
     try {
       const reportText = await args.readFile(reportPath)
-      return { source, stdout, stderr, outcome: classifyPytestReportText(reportText) }
+      const outcome = classifyPytestReportText(reportText)
+      // F3D: attach the cause ONLY when the outcome is exec_failed. A parseable
+      // schema-1 report ⇒ pytest RAN ⇒ test_errored; otherwise ⇒ infra.
+      return outcome === "exec_failed"
+        ? { source, stdout, stderr, outcome, execFailure: classifyExecFailureKind({ reportText }) }
+        : { source, stdout, stderr, outcome }
     } catch (e) {
+      // F3D: the sidecar could not be READ (process produced no report — killed
+      // at launch / timeout-kill / exit 127) ⇒ infra, not a test verdict.
       return {
         source,
         stdout,
         stderr: `${stderr}\n[pytest report read failed] ${reportPath}: ${errText(e)}`.trim(),
         outcome: "exec_failed",
+        execFailure: "infra_unavailable",
       }
     }
   } catch (e) {
@@ -254,7 +304,14 @@ const executeOne = async (
     // PATH) BEFORE the process produced any output. Capture the throw reason so
     // an `exec_failed` is never silent again (the prior version dropped it,
     // making a missing-binary indistinguishable from a crashed script).
-    return { source, stdout: "", stderr: `[exec threw] ${errText(e)}`, outcome: "exec_failed" }
+    // F3D: a port throw is unambiguous infrastructure (could not run).
+    return {
+      source,
+      stdout: "",
+      stderr: `[exec threw] ${errText(e)}`,
+      outcome: "exec_failed",
+      execFailure: "infra_unavailable",
+    }
   }
 }
 

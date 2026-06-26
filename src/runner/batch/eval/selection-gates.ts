@@ -418,3 +418,44 @@ export const nonEmptyFallbackEligible = (
   if (staticSanityRejected(entry.verdict)) return false
   return true
 }
+
+/**
+ * G0 — RCA histogram key: which gate(s) barred a candidate. The first nine
+ * mirror the EXACT predicate sequence {@link bestEffortEligible} checks, so the
+ * diagnostic can never drift from the best-effort gate it explains; a candidate
+ * with NONE of those nine is `bestEffortEligible`. The tenth (`family`) is an
+ * ADDITIVE attribution bucket for the clean-mode family-coverage admissibility
+ * veto (which bars before best-effort is even reached) — surfaced so a
+ * family-driven winner=null is auditable rather than invisible.
+ *
+ * PURE telemetry — never changes admissibility or the winner.
+ */
+export type BestEffortIneligibleReason =
+  | "patchProduced"
+  | "applyClean"
+  | "regressionGreen"
+  | "smokeGreen"
+  | "hardResolved"
+  | "declaredExpected"
+  | "mweRed"
+  | "proof"
+  | "staticSanity"
+  | "family"
+
+export const ineligibleReasonsFor = (
+  entry: Pick<ScoredEntry, "hard" | "verdict">,
+  mode: SelectorMode,
+): readonly BestEffortIneligibleReason[] => {
+  const reasons: BestEffortIneligibleReason[] = []
+  if (!entry.hard.patchProduced) reasons.push("patchProduced")
+  if (entry.hard.applyClean === false) reasons.push("applyClean")
+  if (entry.hard.regressionGreen === false) reasons.push("regressionGreen")
+  if (mode !== "clean" && entry.hard.smokeGreen === false) reasons.push("smokeGreen")
+  if (hardResolvedRejected(entry.hard.patchedResolvedKofN)) reasons.push("hardResolved")
+  if (declaredExpectedRejected(entry.verdict)) reasons.push("declaredExpected")
+  if (mweCandidateRedRejected(entry.verdict)) reasons.push("mweRed")
+  if (proofRequiredRejected(entry.verdict)) reasons.push("proof")
+  if (staticSanityRejected(entry.verdict)) reasons.push("staticSanity")
+  if (familyCoverageRejected(entry.verdict)) reasons.push("family")
+  return reasons
+}

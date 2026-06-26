@@ -105,6 +105,33 @@ export interface DiscoveredRepoRegressionPortArgs {
 
 type SingleTestVerdictPort = (test: string) => Promise<boolean | null>
 
+/**
+ * F3R — three-valued PATCHED-tree witness verdict. The base-green preflight is
+ * binary (`boolean | null`, {@link SingleTestVerdictPort}), but the patched-tree
+ * run MUST distinguish a real regression from an infra failure:
+ *
+ *   - `"green"` — the witness ran and stayed green on the patched tree.
+ *   - `"red"`   — the witness RAN and broke (a real regression — bars).
+ *   - `"infra"` — the witness could NOT run (exec port threw / ENOENT /
+ *                 timeout-kill / pytest never reached a verdict). An
+ *                 infrastructure failure is NOT a correctness verdict, so it
+ *                 FAILS-OPEN: it is never counted as a regression failure.
+ *
+ * Collapsing `"infra"` into `"red"` (the prior `!== true` test) turned a broken
+ * exec env into an unjust hard veto on a CORRECT patch → winner=null → empty
+ * patch laundered as a model miss. The split closes that hole.
+ */
+export type WitnessRunVerdict = "green" | "red" | "infra"
+
+type SingleTestWitnessRunPort = (test: string) => Promise<WitnessRunVerdict>
+
+/** Project a binary base-green verdict (`boolean | null`) into the three-valued
+ *  patched-tree witness verdict. `true` ⇒ green; `false` ⇒ red (a real
+ *  fail/non-verdict reached by an actual run that exited with a verdict code);
+ *  `null` ⇒ infra (the run could not be performed at all — exec threw). */
+export const toWitnessRunVerdict = (verdict: boolean | null): WitnessRunVerdict =>
+  verdict === true ? "green" : verdict === false ? "red" : "infra"
+
 export const keepBaseGreenDiscoveredTests = async (
   tests: readonly string[],
   run: SingleTestVerdictPort,
@@ -204,42 +231,62 @@ export const collectBaseGreenBatched = async (
 
 /**
  * Execute every base-green witness test on the (already-materialized) patched
- * tree and report whether ALL of them stayed green, plus WHICH tests were
- * actually executed and WHICH failed. The returned `regressionGreen=false` is by
- * construction the product of a real execution: a non-`true` verdict from `run`
- * (a fresh failure or a non-verdict on the patched tree) flips it to `false`.
+ * tree and report whether the executed witnesses stayed green, plus WHICH tests
+ * were actually executed, WHICH broke, and WHICH could not run (infra).
+ *
+ * F3R fail-open: `regressionGreen` is THREE-valued. A witness whose verdict is
+ * `"infra"` (the run could not be performed — exec threw / ENOENT / timeout-kill
+ * / pytest never reached a verdict) is NEVER counted as a failure. Only an
+ * executed `"red"` bars (`regressionGreen=false`). When no witness produced a
+ * real verdict at all (every executed witness was infra-blocked) the result is
+ * `null` — fail-OPEN, never `false`.
  */
 export interface ExecutedWitnessOutcome {
-  /** `false` only after an executed witness broke; `true` if all stayed green. */
-  readonly regressionGreen: boolean
-  /** Tests that were actually executed on the patched tree. */
+  /** `false` only after an executed witness BROKE (a real `"red"`); `true` if at
+   *  least one witness ran green and NONE broke; `null` when every executed
+   *  witness was infra-blocked (no real verdict reached — fail-OPEN). */
+  readonly regressionGreen: boolean | null
+  /** Tests that were attempted on the patched tree. */
   readonly executedTests: readonly string[]
-  /** Executed tests that did NOT stay green on the patched tree. */
+  /** Executed tests that produced a real RED verdict (the rejection cause). */
   readonly failures: readonly string[]
+  /** Witnesses whose run was infra-blocked (could not run) — NO veto authority. */
+  readonly infraSkipped: readonly string[]
 }
 
 export const executeWitnessTestsOnPatched = async (
   tests: readonly string[],
-  run: SingleTestVerdictPort,
+  run: SingleTestWitnessRunPort,
 ): Promise<ExecutedWitnessOutcome> => {
   const executedTests: string[] = []
   const failures: string[] = []
+  const infraSkipped: string[] = []
+  let anyGreen = false
   for (const test of tests) {
     executedTests.push(test)
-    if ((await run(test)) !== true) failures.push(test)
+    const verdict = await run(test)
+    if (verdict === "red") failures.push(test)
+    else if (verdict === "infra") infraSkipped.push(test)
+    else anyGreen = true
   }
-  return {
-    regressionGreen: failures.length === 0,
-    executedTests,
-    failures,
-  }
+  // A real RED bars unconditionally. Otherwise: green only if SOME witness
+  // actually ran green; if every executed witness was infra-blocked there is no
+  // verdict to report → null (fail-OPEN, never `false`).
+  const regressionGreen: boolean | null = failures.length > 0 ? false : anyGreen ? true : null
+  return { regressionGreen, executedTests, failures, infraSkipped }
 }
 
-/** Back-compat boolean wrapper: did the candidate keep every witness green? */
+/** Back-compat boolean wrapper: did the candidate keep every witness green?
+ *  Takes the binary base-green port and projects through {@link toWitnessRunVerdict}.
+ *  Note the F3R contract change: an infra (`null`) verdict no longer counts as a
+ *  break, so an all-infra run yields `true` here (no observed regression) — the
+ *  rich {@link executeWitnessTestsOnPatched} preserves the `null` distinction. */
 export const candidateKeepsBaseGreenTests = async (
   tests: readonly string[],
   run: SingleTestVerdictPort,
-): Promise<boolean> => (await executeWitnessTestsOnPatched(tests, run)).regressionGreen
+): Promise<boolean> =>
+  (await executeWitnessTestsOnPatched(tests, async (t) => toWitnessRunVerdict(await run(t))))
+    .regressionGreen !== false
 
 /**
  * Full telemetry receipt for one candidate's witness regression check, with the
@@ -266,6 +313,10 @@ export interface ExecutedWitnessResult {
   readonly executedTests: readonly string[]
   /** Executed witnesses that broke on the patched tree (the rejection cause). */
   readonly failures: readonly string[]
+  /** F3R: witnesses whose patched-tree run was INFRA-blocked (could not run). No
+   *  veto authority — surfaced for telemetry so an all-infra `null` is auditable
+   *  rather than indistinguishable from "no base-green witness". */
+  readonly infraSkipped?: readonly string[]
   /** #6: set when the `maxTests` cap dropped lower-ranked admissible witnesses
    *  from the executed set (`discovered > executed`). A capped gate can miss a
    *  regression in a dropped witness, so this surfaces the coverage gap rather
@@ -430,8 +481,13 @@ export const makeDiscoveredRepoRegressionWitness = (
       timeoutMs,
       probe: async (sb) =>
         executeWitnessTestsOnPatched(baseGreenTests, async (test) => {
+          // F3R: a witness that could not RUN on the patched tree (exec port
+          // threw / ENOENT / timeout-kill ⇒ `null`, or pytest never reached a
+          // verdict ⇒ `null`) is `"infra"`, NOT a `"red"` regression. Only a real
+          // executed fail/non-verdict (`false`) bars. `toRegressionGreen` already
+          // maps a non-verdict run to `null`, so the infra/red split is exact.
           const r = await oracle.run({ tests: [test], sandbox: sb, timeoutMs }).catch(() => null)
-          return toRegressionGreen([test], r)
+          return toWitnessRunVerdict(toRegressionGreen([test], r))
         }),
     })
 
@@ -455,6 +511,7 @@ export const makeDiscoveredRepoRegressionWitness = (
       baseGreenTests,
       executedTests: outcome.executedTests,
       failures: outcome.failures,
+      ...(outcome.infraSkipped.length > 0 ? { infraSkipped: outcome.infraSkipped } : {}),
     })
   }
 }

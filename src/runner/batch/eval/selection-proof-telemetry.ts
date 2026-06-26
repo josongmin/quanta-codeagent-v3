@@ -279,6 +279,9 @@ export const summarizeSelection = (result: SelectionResult): SelectionTelemetry 
     winnerId: result.winner?.id ?? null,
     ...(result.proofRequired ? { proofRequired: true } : {}),
     ...(result.noWinnerReason !== undefined ? { noWinnerReason: result.noWinnerReason } : {}),
+    ...(result.noWinnerDiagnostic !== undefined
+      ? { noWinnerDiagnostic: result.noWinnerDiagnostic }
+      : {}),
     ...(result.winner?.familyId !== undefined ? { winningFamilyId: result.winner.familyId } : {}),
     ...(result.riskGate !== undefined ? { riskGate: result.riskGate } : {}),
     ...(result.counterfactual !== undefined ? { counterfactual: result.counterfactual } : {}),

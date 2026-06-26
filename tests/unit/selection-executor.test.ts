@@ -531,6 +531,39 @@ describe("runSelection", () => {
     expect(r.scored[0]?.verdict.admissible).toBe(false)
   })
 
+  it("G0 wiring-proof: winner=null carries noWinnerDiagnostic fingerprinting regressionGreen=false", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      // A REAL regression (regressionGreen=false) bars the only candidate ⇒
+      // winner=null ⇒ empty patch. The diagnostic must attribute it.
+      ports: { generate: gen, regression: async () => false },
+    })
+    expect(r.winner).toBeNull()
+    expect(r.noWinnerDiagnostic).toBeDefined()
+    expect(r.noWinnerDiagnostic?.scoredCount).toBe(1)
+    expect(r.noWinnerDiagnostic?.nonemptyCandidateCount).toBe(1)
+    expect(r.noWinnerDiagnostic?.bestEffortEligibleCount).toBe(0)
+    // The fingerprint: the bar is regressionGreen, and the raw distribution shows
+    // the `false` that produced it (this is exactly what tells us the F3R body).
+    expect(r.noWinnerDiagnostic?.ineligibleReasons.regressionGreen).toBe(1)
+    expect(r.noWinnerDiagnostic?.regressionGreen.false).toBe(1)
+  })
+
+  it("G0 red-on-injection: a WINNER present ⇒ NO noWinnerDiagnostic (byte-identical normal path)", async () => {
+    const { gen } = genFrom([cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] })])
+    const r = await runSelection({
+      n: 1,
+      seeds: [undefined],
+      owners: new Set(),
+      ports: { generate: gen, regression: async () => true },
+    })
+    expect(r.winner?.id).toBe("cand-0")
+    expect(r.noWinnerDiagnostic).toBeUndefined()
+  })
+
   it("resolvedKofN hard reject is not resubmitted as best-effort", async () => {
     const { gen } = genFrom([cand({ id: "cand-0", patch: "+++ b/a.py\n+x", files: ["a.py"] })])
     const r = await runSelection({
