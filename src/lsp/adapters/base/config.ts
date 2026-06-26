@@ -40,3 +40,13 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 8_000
  *  server exit (crash / OOM) can be diagnosed. Flat literal so the magic-number
  *  scan does not trip. */
 export const STDERR_TAIL_MAX = 8_192
+
+/** Cap on the per-session open-document cache (`didOpen`-tracked full text +
+ *  the diagnostics keyed by the same URI). Nav RPCs leave each touched file
+ *  `didOpen` for the rest of the session so a reused client emits `didChange`
+ *  instead of re-opening; without a bound, a long (30-min idle TTL) session that
+ *  touches many files retains every file's full text indefinitely. When the cap
+ *  is exceeded the least-recently-touched document is `didClose`d and forgotten
+ *  (its retained text AND diagnostics dropped). Flat literal so the magic-number
+ *  scan does not trip. */
+export const OPEN_DOC_CACHE_MAX = 256

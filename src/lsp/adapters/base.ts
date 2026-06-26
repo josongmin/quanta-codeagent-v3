@@ -25,6 +25,7 @@ import {
   type LspClientOptions,
   type LspClientSpec,
   type LspProcessTreeSignal,
+  OPEN_DOC_CACHE_MAX,
   STDERR_TAIL_MAX,
 } from "./base/config"
 import { isUnsupportedError, LspRequestError } from "./base/errors"
@@ -105,7 +106,9 @@ export class LspClient implements LspPort {
   private readonly diagnosticsWaiters = new Map<string, Array<(d: Diagnostic[]) => void>>()
   /** Open-document cache for long-lived sessions. Tracks the last synced text
    *  and LSP version so a reused client emits `didChange` instead of serving
-   *  stale buffers after an on-disk edit. */
+   *  stale buffers after an on-disk edit. Iteration order is recency (LRU):
+   *  {@link syncOpenDocument} re-inserts on every touch and bounds the size to
+   *  {@link OPEN_DOC_CACHE_MAX} so a long session can't retain unbounded text. */
   private readonly opened = new Map<string, { version: number; text: string }>()
   private readPump: Promise<void> | null = null
   private stderrPump: Promise<void> | null = null
@@ -530,6 +533,12 @@ export class LspClient implements LspPort {
       this.sendNotification("textDocument/didClose", { textDocument: { uri } })
     }
     this.opened.clear()
+    // Drop the per-session URI-keyed caches so a stopped client retains no
+    // document text or diagnostics (the maps would otherwise live until GC even
+    // though the session is over). Waiters are settled by `failAllPending` /
+    // their own timeout; clearing the registry just frees the keys.
+    this.diagnosticsByUri.clear()
+    this.diagnosticsWaiters.clear()
 
     if (!proc) return
 
@@ -956,9 +965,16 @@ export class LspClient implements LspPort {
         textDocument: { uri, languageId: this.spec.languageIdFor(filePath), version: 1, text },
       })
       this.opened.set(uri, { version: 1, text })
+      this.evictOpenDocsToCap(uri)
       return uri
     }
-    if (existing.text === text) return uri
+    // Re-insert so the Map's insertion order tracks recency (LRU): the most
+    // recently touched doc moves to the tail, the eviction victim is the head.
+    this.opened.delete(uri)
+    if (existing.text === text) {
+      this.opened.set(uri, existing)
+      return uri
+    }
     const version = existing.version + 1
     this.sendNotification("textDocument/didChange", {
       textDocument: { uri, version },
@@ -966,6 +982,33 @@ export class LspClient implements LspPort {
     })
     this.opened.set(uri, { version, text })
     return uri
+  }
+
+  /** Bound the per-session open-doc cache: while it exceeds {@link
+   *  OPEN_DOC_CACHE_MAX}, `didClose` and forget the least-recently-touched
+   *  document (Map iteration order = insertion order = recency, because
+   *  {@link syncOpenDocument} re-inserts on every touch). Never evicts the
+   *  just-touched `keep` URI. Forgetting drops its retained text AND its
+   *  URI-keyed diagnostics so neither map grows without bound. */
+  private evictOpenDocsToCap(keep: string): void {
+    while (this.opened.size > OPEN_DOC_CACHE_MAX) {
+      let victim: string | undefined
+      for (const uri of this.opened.keys()) {
+        if (uri !== keep) {
+          victim = uri
+          break
+        }
+      }
+      if (victim === undefined) return
+      this.forgetDocument(victim)
+    }
+  }
+
+  /** Close one open document and drop every per-session trace of it. */
+  private forgetDocument(uri: string): void {
+    this.sendNotification("textDocument/didClose", { textDocument: { uri } })
+    this.opened.delete(uri)
+    this.diagnosticsByUri.delete(uri)
   }
 
   private sendServerResult(id: number | string, result: unknown): void {
