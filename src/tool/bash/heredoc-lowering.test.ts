@@ -3,7 +3,10 @@ import { lowerSimpleHereDocForReadMode } from "./heredoc-lowering"
 
 const runBash = async (script: string, env: Record<string, string>): Promise<string> => {
   const proc = Bun.spawn(["bash", "-c", script], {
-    env: { ...process.env, ...env },
+    // Minimal explicit env (NOT process.env — the @/tool slice-boundary guard
+    // forbids reading process.env even in co-located tests). A fixed PATH is all
+    // bash needs here; the test's own vars come from `env`.
+    env: { PATH: "/usr/bin:/bin", ...env },
     stdout: "pipe",
     stderr: "pipe",
   })
