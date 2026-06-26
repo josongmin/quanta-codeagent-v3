@@ -39,10 +39,18 @@
  * report a normal PASS with zero assertions (un-verifying the decorated-class /
  * wrapper fix on any machine where the grammar is absent). `skipIf` instead
  * surfaces the gap loudly in the report.
+ *
+ * UPDATE (jun-27): FINDING A is now RESOLVED — a minimal test-only seam
+ * (`export const __test = { collectDecls, nodeName }` in `tree-sitter.ts`) lets
+ * the bottom `describe` drive the walk over a SYNTHETIC `TsNode` tree, so the
+ * nesting + name-extraction logic is pinned even on a host with NO grammar
+ * `.wasm` (the `skipIf` real-parse cases above go silent there; these do not).
  */
 
 import { describe, expect, test } from "bun:test"
 import { createTreeSitterParser, type ParseOutcome } from "@/retrieval/code-parser"
+// Test-only seam: the module-private decl-walk + name extractor (grammar-independent).
+import { __test } from "@/retrieval/code-parser/tree-sitter"
 
 const parser = createTreeSitterParser()
 
@@ -257,18 +265,69 @@ describe("tree-sitter collectDecls — class-with-two-methods (via real parse)",
   )
 })
 
-describe("tree-sitter collectDecls — REPORTED follow-up (walk not isolable)", () => {
-  // FINDING A: a TRUE unit test of collectDecls over a SYNTHETIC TsNode tree
-  // (independent of any grammar) is blocked until the walk is exported or an
-  // injection seam is added. The real-parse cases above cover the same
-  // behaviour wherever the grammar loads; these pin the synthetic-node intent.
-  test.todo("collectDecls(lang, syntheticRoot) over a hand-built TsNode class tree (needs export/seam)", () => {
-    // Blocked: collectDecls is module-private. Once exported, build a
-    // synthetic TsNode (type/namedChildren/startPosition/childForFieldName)
-    // for class C { m1() {} m2() {} } and assert the DeclNode tree directly.
+describe("tree-sitter collectDecls — synthetic-node walk (grammar-independent)", () => {
+  // The real-parse cases above cover collectDecls wherever a grammar `.wasm`
+  // loads; these drive the SAME module-private walk over a hand-built TsNode tree
+  // via the `__test` seam, so the nesting/name logic stays pinned even on a CI
+  // host with no grammars. The synthetic node type is recovered from the seam's
+  // own signature (no need to export the WASM-mirror interface).
+  type SynNode = Parameters<typeof __test.collectDecls>[1]
+  const node = (over: Partial<SynNode> & { type: string }): SynNode =>
+    ({
+      startPosition: { row: 0, column: 0 },
+      endPosition: { row: 0, column: 0 },
+      hasError: false,
+      namedChildren: [],
+      childForFieldName: () => null,
+      ...over,
+    }) as SynNode
+  // A name node carries `text` on the concrete web-tree-sitter Node; nodeName
+  // reads it structurally. Build one as a node with an extra `text` field.
+  const nameNode = (text: string): SynNode => ({ ...node({ type: "identifier" }), text }) as SynNode
+  const fields =
+    (map: Record<string, SynNode>) =>
+    (f: string): SynNode | null =>
+      map[f] ?? null
+
+  test("collectDecls over a hand-built `class C { m1(){} m2(){} }` tree yields the nested DeclNode shape", () => {
+    const method = (name: string): SynNode =>
+      node({ type: "method_definition", childForFieldName: fields({ name: nameNode(name) }) })
+    const m1 = method("m1")
+    const m2 = method("m2")
+    const body = node({ type: "class_body", namedChildren: [m1, m2] })
+    const cls = node({
+      type: "class_declaration",
+      childForFieldName: fields({ name: nameNode("C"), body }),
+    })
+    const root = node({ type: "program", namedChildren: [cls] })
+
+    const decls = __test.collectDecls("typescript", root)
+    expect(decls).toHaveLength(1)
+    expect(decls[0]?.kind).toBe("class")
+    expect(decls[0]?.name).toBe("C")
+    // class_declaration is a container ⇒ its body's methods are collected as children
+    expect(decls[0]?.children.map((c) => c.kind)).toEqual(["method", "method"])
+    expect(decls[0]?.children.map((c) => c.name)).toEqual(["m1", "m2"])
   })
-  test.todo("nodeName(node) over a synthetic node with a missing `name` field returns '' (needs export)", () => {
-    // Blocked: nodeName is module-private. Once exported, pass a node whose
-    // childForFieldName('name') returns null and assert nodeName(node) === "".
+
+  test("nodeName returns '' when the node has no `name` field (childForFieldName ⇒ null)", () => {
+    expect(__test.nodeName(node({ type: "method_definition" }))).toBe("")
+  })
+
+  test("nodeName returns the name field's text when present", () => {
+    const named = node({
+      type: "function_declaration",
+      childForFieldName: fields({ name: nameNode("foo") }),
+    })
+    expect(__test.nodeName(named)).toBe("foo")
+  })
+
+  test("nodeName returns '' when the name node lacks a string `text` (structural guard)", () => {
+    const nameless = node({ type: "identifier" }) // no `text`
+    const decl = node({
+      type: "function_declaration",
+      childForFieldName: fields({ name: nameless }),
+    })
+    expect(__test.nodeName(decl)).toBe("")
   })
 })

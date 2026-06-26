@@ -165,6 +165,14 @@ const collectDeclsInBody = (lang: ParseLang, container: TsNode): DeclNode[] => {
   return collectDecls(lang, container)
 }
 
+/** Test-only seam (RFC §4.2): the module-private decl-walk + name extractor,
+ *  exposed so a unit test can drive them over a SYNTHETIC `TsNode` tree —
+ *  grammar-independent, so the walk's nesting/name logic is pinned even on a CI
+ *  host where no grammar `.wasm` loads. Production code uses the parser path
+ *  (`createTreeSitterParser`); do NOT import `__test` outside tests. The synthetic
+ *  node type is recovered in-test via `Parameters<typeof __test.collectDecls>`. */
+export const __test = { collectDecls, nodeName }
+
 /** Lazy singletons. `initPromise` runs `Parser.init()` once; `grammars`
  *  caches one `Language` per lang. Module-level cache is fine — it is keyed by
  *  immutable grammar bytes, NOT by any per-run state. */

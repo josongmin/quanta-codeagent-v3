@@ -2,7 +2,30 @@
 
 date: 2026-06-26
 owner: bench
-status: PLANNED (audit-adjusted; not yet implemented)
+status: DONE (verified 2026-06-27 — all four gaps closed in code + hellgated)
+
+## Closure verification (2026-06-27)
+
+Audit found every gap already implemented on head; tests pin it:
+
+- **Gap 1 (report serialization) — CLOSED.** `buildReport` (`src/runner/batch/report.ts`)
+  forwards `usage` + `durationMs` into `perInstance[]` (the optional-fence spreads
+  at the `results.map(...)` site). `PerInstanceReport` declares both fields.
+- **Gap 2 (lossy schema) — CLOSED.** `InstanceUsage` (`src/runner/batch/types.ts`)
+  carries `cacheReadTokens?` / `cacheCreationTokens?` with provider-semantics docs;
+  `UsageTap` (`src/runner/batch/observe.ts`) accumulates BOTH and emits them in
+  `total()`.
+- **Gap 3 (duplicate pricing) — CLOSED.** `src/apps/bench/analyze/cost.ts` imports
+  `costUsd` from `@/observability` (the versioned pricing SSOT) and no longer carries
+  a private `DEFAULT_PRICING` table; cache-read is threaded into the cost call.
+- **Gap 4 (unknown-pricing honesty) — CLOSED.** cost rows carry a `known` flag so a
+  priced-as-zero model is distinguishable from a genuinely-free one (no fake `$0`).
+
+Hellgate coverage (green): `tests/unit/bench-token-usage-report.test.ts`,
+`tests/unit/eval-runner-token-cost.test.ts`, `tests/unit/bugbash-fix-cost.test.ts`
+(16 tests), plus `tests/integration/bench-{observability,cost-cli-e2e}.test.ts`.
+
+Original plan retained below for provenance.
 
 ## Problem
 
