@@ -205,6 +205,13 @@ const buildWrappedStream = <T>(
           }
 
           if (winner.timedOut) {
+            // The timeout WON the race, so `nextPromise` (the abandoned
+            // `iter.next()`) is still pending. If the torn-down stream later
+            // REJECTS it, that rejection has no handler → an `unhandledRejection`
+            // that can crash the process. Attach a no-op catch so the abandoned
+            // promise's late settle is swallowed (the timeout error below is the
+            // one the caller needs). jun-26 SE-audit.
+            void nextPromise.catch(() => {})
             const error = buildTimeoutError(reason, ms, opts.provider)
             abortHandle(upstreamAbort, error)
             try {

@@ -118,6 +118,54 @@ describe("withStreamTimeout — first-chunk deadline", () => {
   })
 })
 
+describe("withStreamTimeout — abandoned iter.next() rejection is swallowed", () => {
+  // jun-26 SE-audit: when the timeout WINS the race, the abandoned iter.next()
+  // promise is still pending; if the torn-down stream later REJECTS it, that has
+  // no handler → an unhandledRejection that can crash the process. The wrapper
+  // attaches a no-op catch. This drives that exact path and asserts no
+  // unhandledRejection escapes.
+  test("a late rejection from the abandoned next() does NOT surface unhandledRejection", async () => {
+    // A stream whose first next() rejects 120ms in — AFTER the 40ms timeout fires.
+    const lateReject: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () =>
+            new Promise<IteratorResult<number>>((_resolve, reject) =>
+              setTimeout(() => reject(new Error("late upstream reject")), 120),
+            ),
+        }
+      },
+    }
+    const seen: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      seen.push(reason)
+    }
+    process.on("unhandledRejection", onUnhandled)
+    try {
+      const wrapped = withStreamTimeout(lateReject, {
+        firstChunkMs: 40,
+        idleMs: 9_999_000,
+        provider: "openai",
+      })
+      let threw = false
+      try {
+        for await (const _ of wrapped) void _
+      } catch {
+        threw = true // the timeout error — expected
+      }
+      expect(threw).toBe(true)
+      // Wait past the late rejection (120ms) + a drain so any unhandled would fire.
+      await new Promise<void>((r) => setTimeout(r, 220))
+      const fromUs = seen.filter(
+        (e) => e instanceof Error && e.message.includes("late upstream reject"),
+      )
+      expect(fromUs).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
+  })
+})
+
 describe("withStreamTimeout — inter-chunk idle deadline", () => {
   test("yield one then hang forever throws a RETRYABLE network timeout with 'idle' message", async () => {
     const stub = makeStubStream<string>({ chunks: ["a"], hangAfter: true })
