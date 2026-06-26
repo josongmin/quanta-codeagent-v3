@@ -108,6 +108,14 @@ const VOCABULARY_OWNER_FILES = new Set<string>([
   // as the portable-session JSONL format identifier. Same schema-id rule.
   join(REPO_ROOT, "src", "ipc", "session-export.ts"),
   join(REPO_ROOT, "src", "ipc", "session-import.ts"),
+  // `apps/bench/otel-trace-sink.ts` is the operator-side OTLP/JSON RECEIVER +
+  // waterfall UI. Its `KEY_ATTRS` render-priority list references attribute keys
+  // as PARSE/DISPLAY targets for arbitrary inbound OTLP (incl. third-party
+  // spans) — it is intentionally DECOUPLED from the app vocabulary (no import of
+  // QUANTA_ATTRS/GEN_AI_ATTRS) so it can render any OTLP source. The literals are
+  // a consumer's render config, not a vocabulary declaration. (Lived in `tools/`
+  // — exempt from this src-only scan — until the jun-27 move into apps/bench.)
+  join(REPO_ROOT, "src", "apps", "bench", "otel-trace-sink.ts"),
 ])
 
 interface LiteralHit {

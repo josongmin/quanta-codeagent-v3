@@ -19,6 +19,7 @@
  * no-op (no sink registered, no exporter built) — exactly today's behavior.
  */
 
+import { getDefaultMetricSink, setDefaultMetricSink } from "./metrics/in-memory-registry"
 import {
   attachOtelExporterFromEnv,
   type ExportSpan,
@@ -26,8 +27,7 @@ import {
   type OtelExporter,
   type OtelExporterOpts,
 } from "./otel-exporter"
-import { getDefaultMetricSink, setDefaultMetricSink } from "./metrics/in-memory-registry"
-import { getSpanSink, setSpanSink, type SpanName, type SpanSink, type SpanStatus } from "./spans"
+import { getSpanSink, type SpanName, type SpanSink, type SpanStatus, setSpanSink } from "./spans"
 import type { SpanAttributes, SpanStatusCode } from "./tracing/port"
 
 /** Loop span status → OTLP status code. `aborted` is a non-OK terminal state,
@@ -72,6 +72,12 @@ export const createExporterSpanSink = (
     readonly traceId: string
     readonly parentSpanId?: string
     readonly startEpochMs: number
+    /** Attributes supplied at span OPEN (`startSpan(name, attrs)`). The bridge
+     *  used to DROP these — only `onEnd` attrs reached the exporter — so
+     *  open-time facts like `quanta.tool.name` / `quanta.tool.input` silently
+     *  never appeared in a trace. We now carry them and merge with the close
+     *  attrs at `onEnd` (close wins on key collision). */
+    readonly startAttrs: SpanAttributes
   }
   // Open-span stack for parent linkage. A token IS its frame, so onEnd removes
   // the EXACT frame (`splice(idx, 1)`) — never the stragglers above it (audit
@@ -81,7 +87,7 @@ export const createExporterSpanSink = (
   const open: Frame[] = []
 
   return {
-    onStart(_name: SpanName, _attrs): unknown {
+    onStart(_name: SpanName, attrs): unknown {
       const parent = open.length > 0 ? open[open.length - 1] : undefined
       // Root (no open parent) ⇒ a NEW trace; child ⇒ inherit the parent's trace.
       const traceId = parent?.traceId ?? fixedTraceId ?? toHex(16, gen)
@@ -90,6 +96,7 @@ export const createExporterSpanSink = (
         traceId,
         ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
         startEpochMs: now(),
+        startAttrs: attrs as SpanAttributes,
       }
       open.push(frame)
       return frame
@@ -98,6 +105,9 @@ export const createExporterSpanSink = (
       const frame = token as Frame
       const idx = open.lastIndexOf(frame)
       if (idx >= 0) open.splice(idx, 1) // remove ONLY this frame — never siblings
+      // Merge OPEN + CLOSE attrs (close wins on collision) so open-time facts
+      // (tool name/input) survive alongside close-time facts (status/output).
+      const merged = { ...frame.startAttrs, ...(attrs as SpanAttributes) }
       const span: ExportSpan = {
         traceId: frame.traceId,
         spanId: frame.spanId,
@@ -106,7 +116,7 @@ export const createExporterSpanSink = (
         status: STATUS_MAP[status],
         startTimeEpochMs: frame.startEpochMs,
         endTimeEpochMs: frame.startEpochMs + durationMs,
-        attributes: attrs as SpanAttributes,
+        attributes: merged,
       }
       exporter.recordSpan(span)
     },

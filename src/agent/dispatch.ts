@@ -1,5 +1,14 @@
 import type { ToolUseBlock } from "@/llm"
-import { attrs, endSpan, QUANTA_ATTRS, SPAN_NAMES, type Span, startSpan } from "@/observability"
+import {
+  attrs,
+  endSpan,
+  getSpanSink,
+  previewPayload,
+  QUANTA_ATTRS,
+  SPAN_NAMES,
+  type Span,
+  startSpan,
+} from "@/observability"
 import { type AutoModeClassifier, extractWriteEffects, type PermissionContext } from "@/permission"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, WorkingStateHandle } from "@/tool"
@@ -120,7 +129,10 @@ export const dispatchTool = async (
   // Default-OFF (no sink) ⇒ all `startSpan`/`endSpan` calls are the shared
   // NOOP_SPAN sentinel (zero allocation), so dispatch is byte-identical to
   // the pre-span path.
-  const toolSpan: Span = startSpan(SPAN_NAMES.handleToolCall, toolSpanAttrs(call.name, call.id))
+  const toolSpan: Span = startSpan(
+    SPAN_NAMES.handleToolCall,
+    toolSpanAttrs(call.name, call.id, call.input),
+  )
   try {
     const out = await dispatchToolInner(
       call,
@@ -138,12 +150,12 @@ export const dispatchTool = async (
     endSpan(
       toolSpan,
       out.ok ? "ok" : "error",
-      attrs({ [QUANTA_ATTRS.tool.status]: out.ok ? "success" : "error" }),
+      toolCloseAttrs(out.ok ? "success" : "error", out.preview),
     )
     return out
   } catch (e) {
     if (isSessionApprovalRequiredError(e)) {
-      endSpan(toolSpan, "error", attrs({ [QUANTA_ATTRS.tool.status]: "error" }))
+      endSpan(toolSpan, "error", toolCloseAttrs("error"))
       throw e
     }
     // NO-THROW CONTRACT (AUDIT-FIX). `dispatchTool` is the loop's single-tool
@@ -163,8 +175,8 @@ export const dispatchTool = async (
     // We now NORMALIZE the throw into an error DispatchResult so the no-throw
     // contract holds structurally for EVERY path. The span is still closed
     // error before returning.
-    endSpan(toolSpan, "error", attrs({ [QUANTA_ATTRS.tool.status]: "error" }))
     const message = e instanceof QuantaError ? e.message : toError(e).message
+    endSpan(toolSpan, "error", toolCloseAttrs("error", message))
     return deny(call.id, `Tool dispatch failed for ${call.name}: ${message}`, "dispatch-error")
   }
 }
@@ -521,9 +533,27 @@ const emitPostToolUseHooks = async (
 }
 
 /** Build the `handle_tool_call` span open-attrs. Status (and durationMs)
- *  fill in on close — at open time we only know the name + call_id. */
-const toolSpanAttrs = (name: string, callId: string) =>
+ *  fill in on close — at open time we only know the name + call_id + the input
+ *  args. The input PREVIEW (truncated) is attached ONLY when a span sink is
+ *  active so the operator can click the span and see WHAT was dispatched
+ *  (the bash command, the edited path …); with no sink the `previewPayload`
+ *  stringify never runs (default-OFF allocation-free). */
+const toolSpanAttrs = (name: string, callId: string, input?: unknown) =>
   attrs({
     [QUANTA_ATTRS.tool.name]: name,
     [QUANTA_ATTRS.tool.callId]: callId,
+    ...(input !== undefined && getSpanSink() !== null
+      ? { [QUANTA_ATTRS.tool.input]: previewPayload(input) }
+      : {}),
+  })
+
+/** Build the close-attrs for a `handle_tool_call` span: the terminal status,
+ *  plus a truncated preview of the tool OUTPUT when a sink is listening. Keeps
+ *  the two `endSpan` sites (success / error) consistent. */
+const toolCloseAttrs = (status: "success" | "error", output?: unknown) =>
+  attrs({
+    [QUANTA_ATTRS.tool.status]: status,
+    ...(output !== undefined && getSpanSink() !== null
+      ? { [QUANTA_ATTRS.tool.output]: previewPayload(output) }
+      : {}),
   })

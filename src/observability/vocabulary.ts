@@ -64,6 +64,15 @@ export const QUANTA_ATTRS = {
     /** `"success" | "error" | "blocked"` (kept as `string` here — the literal
      * union is enforced by `toolAttrs()` in `attrs.ts`). */
     status: "quanta.tool.call.status",
+    /** Truncated preview of the tool-call INPUT args (the bash command, the
+     *  edited path + patch, the grep pattern …) — the "what event was sent"
+     *  payload an operator sees when clicking a `handle_tool_call` span in the
+     *  live trace UI. Bounded to a few hundred chars and ONLY built when a span
+     *  sink is active, so the default-OFF loop stays allocation-free. */
+    input: "quanta.tool.input",
+    /** Truncated preview of the tool-call OUTPUT (result preview / error text).
+     *  Same bounded + sink-gated discipline as {@link input}. */
+    output: "quanta.tool.output",
   },
   mcp: {
     serverName: "quanta.mcp.server.name",
@@ -261,6 +270,12 @@ export const GEN_AI_ATTRS = {
     maxTokens: "gen_ai.request.max_tokens",
     temperature: "gen_ai.request.temperature",
   },
+  /** Truncated preview of the LAST input message text shipped to the provider
+   *  — the "what did we ask" payload surfaced when an operator clicks a
+   *  `run_sampling_request` span in the live trace UI. Bounded + only built
+   *  when a span sink is active (no cost on the default-OFF path). OTel GenAI
+   *  semconv `gen_ai.prompt`. */
+  prompt: "gen_ai.prompt",
   response: {
     model: "gen_ai.response.model",
     finishReason: "gen_ai.response.finish_reasons",
@@ -270,6 +285,10 @@ export const GEN_AI_ATTRS = {
      *  (e.g. empty stream / immediate abort). Sourced from
      *  `TurnTiming.firstTokenLatencyMs`. */
     timeToFirstTokenMs: "gen_ai.response.time_to_first_token_ms",
+    /** Truncated preview of the model's text/tool-call output — the "what came
+     *  back" payload for the trace UI. Same bounded + sink-gated discipline as
+     *  {@link prompt}. OTel GenAI semconv `gen_ai.completion`. */
+    completion: "gen_ai.completion",
   },
   usage: {
     inputTokens: "gen_ai.usage.input_tokens",

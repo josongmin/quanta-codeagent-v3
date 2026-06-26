@@ -230,6 +230,37 @@ describe("HELLGATE: span-export wiring (installOtelSpanExportFromEnv)", () => {
     expect(spanC?.parentSpanId).toBe(spanB?.spanId) // C correctly nests under still-open B
   })
 
+  test("ATTRS MERGE: onStart attrs (tool name/input) survive alongside onEnd attrs", () => {
+    const { exporter, spans } = fakeExporter()
+    const sink = createExporterSpanSink(exporter, { randomBytes: makeSeq(), now: () => 1000 })
+    // open-time facts (tool name + input) at onStart; close-time facts (status +
+    // output) at onEnd — exactly how dispatch.ts brackets a `handle_tool_call`.
+    const tok = sink.onStart(SPAN_NAMES.handleToolCall, {
+      "quanta.tool.name": "bash",
+      "quanta.tool.input": "pytest -q",
+    })
+    sink.onEnd(tok, SPAN_NAMES.handleToolCall, "ok", 5, {
+      "quanta.tool.call.status": "success",
+      "quanta.tool.output": "5 passed",
+    })
+    const span = spans.find((s) => s.name === SPAN_NAMES.handleToolCall)
+    // RED-ON-INJECTION teeth: the old bridge ignored onStart attrs entirely, so
+    // tool.name + tool.input were silently absent from every exported trace.
+    expect(span?.attributes?.["quanta.tool.name"]).toBe("bash")
+    expect(span?.attributes?.["quanta.tool.input"]).toBe("pytest -q")
+    // close attrs still present (the merge keeps both halves)
+    expect(span?.attributes?.["quanta.tool.call.status"]).toBe("success")
+    expect(span?.attributes?.["quanta.tool.output"]).toBe("5 passed")
+  })
+
+  test("ATTRS MERGE: a close attr WINS over a same-key open attr", () => {
+    const { exporter, spans } = fakeExporter()
+    const sink = createExporterSpanSink(exporter, { randomBytes: makeSeq(), now: () => 1000 })
+    const tok = sink.onStart(SPAN_NAMES.handleToolCall, { "quanta.tool.call.status": "pending" })
+    sink.onEnd(tok, SPAN_NAMES.handleToolCall, "ok", 1, { "quanta.tool.call.status": "success" })
+    expect(spans[0]?.attributes?.["quanta.tool.call.status"]).toBe("success")
+  })
+
   test("IDEMPOTENT: a pre-registered sink is NOT clobbered", async () => {
     const sentinel = { onStart: () => 0, onEnd: () => {} }
     setSpanSink(sentinel)

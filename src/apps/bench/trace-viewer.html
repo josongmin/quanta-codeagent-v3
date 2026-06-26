@@ -1,7 +1,7 @@
 <!doctype html>
 <!--
   trace-viewer — self-contained live OTEL waterfall for the bench agent loop.
-  Served by tools/otel-trace-sink.ts at GET /. Polls /spans.json and renders a
+  Served by src/apps/bench/otel-trace-sink.ts at GET /. Polls /spans.json and renders a
   Jaeger-style waterfall (per-trace nesting, duration bars, gen_ai attrs). No
   build, no deps, no network — just the sink + a browser.
 -->
@@ -152,7 +152,7 @@ function render(spans){
   const opts = ['<option value="">all traces ('+traces.size+')</option>'];
   for(const [t,arr] of traces){
     const nm = arr.find(x=>x.attrs?.["quanta.instance.id"])?.attrs["quanta.instance.id"] || t.slice(0,8);
-    opts.push(`<option value="${t}"${t===want?" selected":""}>${nm} · ${arr.length}sp</option>`);
+    opts.push(`<option value="${esc(t)}"${t===want?" selected":""}>${esc(nm)} · ${arr.length}sp</option>`);
   }
   sel.innerHTML = opts.join("");
 
@@ -177,7 +177,7 @@ function render(spans){
     const inst = arr.find(x=>x.attrs?.["quanta.instance.id"])?.attrs["quanta.instance.id"] || "trace";
     const div = document.createElement("div"); div.className="trace";
     const head = document.createElement("div"); head.className="thead";
-    head.innerHTML = `<span class="tname">${inst}</span><span class="tid">${t.slice(0,12)}…</span>`+
+    head.innerHTML = `<span class="tname">${esc(inst)}</span><span class="tid">${esc(t.slice(0,12))}…</span>`+
       `<span class="tdur">${((tmax-tmin)/1e9).toFixed(2)}s · ${arr.length} spans</span>`;
     div.appendChild(head);
     for(const s of sorted){
@@ -189,7 +189,7 @@ function render(spans){
       const ind = "&nbsp;".repeat(depth(s)*2);
       row.innerHTML =
         `<div class="label"><span class="tick" style="background:${COLOR[cat]}"></span>`+
-        `${ind}<span class="nm">${s.name}</span> <span class="ky">${KEYATTR(s)}</span></div>`+
+        `${ind}<span class="nm">${esc(s.name)}</span> <span class="ky">${esc(KEYATTR(s))}</span></div>`+
         `<div class="track"><div class="bar ${s.status==="error"?"err":""}" `+
         `style="left:${left}%;width:${wid}%;background:${COLOR[cat]}"></div>`+
         `<span class="dms" style="left:${Math.min(left,88)}%">${s.durationMs??"?"}ms</span></div>`;

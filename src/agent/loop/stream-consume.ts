@@ -4,17 +4,10 @@ import {
   proactiveDelayMs,
   snapshotToNotice,
 } from "@/llm/ratelimit-snapshot"
-import {
-  attrs,
-  createTurnTimingCapture,
-  endSpan,
-  SPAN_NAMES,
-  type Span,
-  startSpan,
-} from "@/observability"
+import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import { abortReasonOf, errMessage, LLMError, runtimeConfig } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
-import { buildSamplingSpanAttrs, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
+import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
 import { streamingTurn } from "../streaming-dispatch"
@@ -98,6 +91,23 @@ async function* teeUsage(
   }
 }
 
+/** F3 proactive rate-limit backoff: emit the reached-window notice in BOTH modes
+ *  (proactive backoff AND notice-only), but apply the pre-request `sleep` ONLY
+ *  under proactive — so `QUANTA_RATELIMIT_NOTICE` alone renders the notice without
+ *  ever delaying the request (byte-identical no-sleep). Extracted from
+ *  `streamConsume` to keep that turn function under the god-FUNCTION size cap. */
+const applyProactiveRateLimitBackoff = async (
+  config: AgentConfig,
+  rl: NonNullable<TurnSession["rateLimitProactive"]>,
+): Promise<void> => {
+  const snapshot = rl.store.current()
+  if (snapshot === undefined) return
+  const delayMs = proactiveDelayMs(snapshot)
+  if (delayMs <= 0) return
+  config.stream.emit(snapshotToNotice(snapshot))
+  if (rl.proactive) await rl.sleep(delayMs)
+}
+
 export const streamConsume = async (
   session: TurnSession,
   state: TurnState,
@@ -129,6 +139,8 @@ export const streamConsume = async (
   // / why-stopped — not just TTFT. Absent on early abort ⇒ omitted (empty-safe).
   let capturedUsage: SamplingUsage | undefined
   let capturedFinish: string | undefined
+  // Captured for the trace-UI completion preview (built sink-gated in `finally`).
+  let capturedMessage: unknown
   const captureUsage = (ev: Extract<StreamEvent, { type: "usage" }>): void => {
     capturedUsage = samplingUsageFromEvent(ev)
   }
@@ -157,20 +169,8 @@ export const streamConsume = async (
       })
     }
   }
-  if (rateLimitProactive !== undefined) {
-    const snapshot = rateLimitProactive.store.current()
-    if (snapshot !== undefined) {
-      const delayMs = proactiveDelayMs(snapshot)
-      if (delayMs > 0) {
-        // F3 decouple: emit the reached-window notice in BOTH modes (proactive
-        // backoff AND notice-only), but apply the pre-request backoff `sleep`
-        // ONLY under proactive — so `QUANTA_RATELIMIT_NOTICE` alone renders the
-        // notice without ever delaying the request (byte-identical no-sleep).
-        config.stream.emit(snapshotToNotice(snapshot))
-        if (rateLimitProactive.proactive) await rateLimitProactive.sleep(delayMs)
-      }
-    }
-  }
+  if (rateLimitProactive !== undefined)
+    await applyProactiveRateLimitBackoff(config, rateLimitProactive)
   try {
     const outcome = await streamingTurn({
       events: teeUsage(
@@ -215,6 +215,7 @@ export const streamConsume = async (
       return { aborted: true }
     }
     capturedFinish = outcome.stopReason
+    capturedMessage = outcome.message
     return {
       message: outcome.message,
       stopReason: outcome.stopReason,
@@ -241,6 +242,15 @@ export const streamConsume = async (
     turnTimingCapture.markStreamEnd()
     const timing = turnTimingCapture.snapshot()
     onTurnTiming?.(timing)
-    endSpan(samplingSpan, samplingStatus, attrs(buildSamplingSpanAttrs(timing, capturedUsage, capturedFinish)))
+    // gen_ai.* attrs + trace-UI prompt/response previews (sink-gated).
+    closeSamplingSpan(
+      samplingSpan,
+      samplingStatus,
+      timing,
+      capturedUsage,
+      capturedFinish,
+      messages,
+      capturedMessage,
+    )
   }
 }

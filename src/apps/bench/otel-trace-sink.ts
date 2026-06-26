@@ -402,7 +402,9 @@ if (import.meta.main) {
   runTraceSink({
     port: envInt(process.env.PORT, DEFAULT_PORT),
     showMetrics: process.argv.includes("--metrics"),
-    ...(process.env.QUANTA_OTEL_SAVE !== undefined ? { savePath: process.env.QUANTA_OTEL_SAVE } : {}),
+    ...(process.env.QUANTA_OTEL_SAVE !== undefined
+      ? { savePath: process.env.QUANTA_OTEL_SAVE }
+      : {}),
     ringMax: envInt(process.env.QUANTA_OTEL_RING, 5000),
   })
 }

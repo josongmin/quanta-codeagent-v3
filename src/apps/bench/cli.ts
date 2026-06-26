@@ -29,7 +29,6 @@ import {
   runtimeConfig,
   setTerminalIo,
 } from "@/shared"
-import { runTraceSink } from "./otel-trace-sink"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -53,6 +52,7 @@ import {
   selectAuthSourceLabel,
 } from "./auth-pool"
 import { attachBenchOtelExport } from "./otel"
+import { runTraceSink } from "./otel-trace-sink"
 import {
   CURRENT_BENCH_BASE_PRESET,
   renderBenchPresetListLines,
@@ -1994,7 +1994,7 @@ const openBrowser = (url: string): void => {
 }
 
 /** `quanta-bench trace` — launch the live OTEL waterfall receiver + UI (the same
- *  `tools/otel-trace-sink.ts` the full-remote box ships spans to) and open it in
+ *  `./otel-trace-sink.ts` the full-remote box ships spans to) and open it in
  *  the browser. Run this, then point any bench at it with
  *  `QUANTA_OTEL_ENDPOINT=http://127.0.0.1:<port>`; spans stream into the
  *  waterfall live (click a span to see the tool input / LLM prompt + response).

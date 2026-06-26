@@ -270,6 +270,8 @@ const RULES: readonly Rule[] = [
         "Injection-first: `env: Readonly<...> = process.env` DI fallback at the init-scaffold composition root (EDITOR resolution); tests inject explicit env. Same posture as raw-line-reader-editor.ts.",
       "apps/bench/cli.ts":
         "Bench CLI sub-command composition root — reads HOME + QUANTA_SWEBENCH_DATASET + QUANTA_BENCH_PRESET at launch time (same bootstrap posture as apps/bench/index.ts, which is already allowlisted); downstream logic receives resolved values, not live env.",
+      "apps/bench/otel-trace-sink.ts":
+        "Standalone OTLP/JSON receiver + waterfall-UI script (`quanta-bench trace` / `bun … otel-trace-sink.ts`). `runTraceSink` is PURE (opts only); the SOLE env reads live in the `import.meta.main` script entry point, which resolves PORT / QUANTA_OTEL_SAVE / QUANTA_OTEL_RING via a NaN-guarded `envInt` parser and hands fully-validated options down. Same composition-root posture as apps/bench/cli.ts / index.ts.",
       "apps/bench/remote/ssh.ts":
         "Infrastructure HOME-expansion helper (`expandHome`) for tilde-prefix path resolution — pure string op, reads `process.env.HOME` only as a path component fallback; same posture as storage/shadow-odb/default.ts.",
       "apps/cli/webhook-server-setup.ts":

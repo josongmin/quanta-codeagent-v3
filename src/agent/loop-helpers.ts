@@ -6,7 +6,16 @@ import {
   type GitDirectiveCollector,
 } from "@/git/directive-emit"
 import type { Message } from "@/llm"
-import { GEN_AI_ATTRS, type TurnTiming } from "@/observability"
+import {
+  attrs,
+  endSpan,
+  GEN_AI_ATTRS,
+  getSpanSink,
+  previewPayload,
+  type Span,
+  type SpanStatus,
+  type TurnTiming,
+} from "@/observability"
 import { type TickOutcome, tickScheduler } from "@/scheduler/automation-engine"
 import { type RedactionHit, type RedactionOrigin, redactSecrets } from "@/security"
 import { writeStderr, writeStdout } from "@/shared"
@@ -16,8 +25,8 @@ import { DedupGate } from "./dispatch-dedup"
 import { type TurnDiffSession, wireGitObservability } from "./git-observability"
 import type { HookBus, HookPromptInject } from "./hooks"
 import type { LocalizePhaseState } from "./localize-phase-guard"
-import type { ReproDoubtState } from "./repro-doubt-guard"
 import type { AgentMode } from "./prompt"
+import type { ReproDoubtState } from "./repro-doubt-guard"
 import { buildLocalizePhase, buildReproDoubt } from "./session-resources"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import type { AgentConfig } from "./types"
@@ -388,19 +397,58 @@ export const buildSamplingSpanAttrs = (
   timing: TurnTiming,
   usage?: SamplingUsage,
   finishReason?: string,
+  /** Truncated previews (built by the caller ONLY when a span sink is active)
+   *  of the last input message we sent and the model's response — so clicking a
+   *  `run_sampling_request` span in the live trace UI reveals what was asked /
+   *  what came back. Omitted (undefined) on the default-OFF path. */
+  promptPreview?: string,
+  completionPreview?: string,
 ): Record<string, string | number> => {
   const out: Record<string, string | number> = { ...buildTtftAttrs(timing) }
+  if (promptPreview !== undefined) out[GEN_AI_ATTRS.prompt] = promptPreview
+  if (completionPreview !== undefined) out[GEN_AI_ATTRS.response.completion] = completionPreview
   if (usage !== undefined) {
+    // Absorb a malformed usage event: a non-finite token count (NaN/Infinity)
+    // must NOT reach the OTel attribute layer (it throws InvalidAttrValueError)
+    // nor poison downstream sums — coerce it to 0.
+    const fin = (n: number): number => (Number.isFinite(n) ? n : 0)
     out[GEN_AI_ATTRS.response.model] = usage.model
-    out[GEN_AI_ATTRS.usage.inputTokens] = usage.inputTokens
-    out[GEN_AI_ATTRS.usage.outputTokens] = usage.outputTokens
+    out[GEN_AI_ATTRS.usage.inputTokens] = fin(usage.inputTokens)
+    out[GEN_AI_ATTRS.usage.outputTokens] = fin(usage.outputTokens)
     if (usage.cacheReadTokens !== undefined)
-      out[GEN_AI_ATTRS.usage.cacheReadInputTokens] = usage.cacheReadTokens
+      out[GEN_AI_ATTRS.usage.cacheReadInputTokens] = fin(usage.cacheReadTokens)
     if (usage.cacheCreationTokens !== undefined)
-      out[GEN_AI_ATTRS.usage.cacheCreationInputTokens] = usage.cacheCreationTokens
+      out[GEN_AI_ATTRS.usage.cacheCreationInputTokens] = fin(usage.cacheCreationTokens)
   }
   if (finishReason !== undefined) out[GEN_AI_ATTRS.response.finishReason] = finishReason
   return out
+}
+
+/** Close a `run_sampling_request` span with its full gen_ai.* attribute bag. Owns
+ *  the trace-UI payload previews: when (and ONLY when) a span sink is active, it
+ *  attaches a truncated preview of the last input message and the model's
+ *  response so an operator can click the span and see what was asked / returned.
+ *  Default-OFF path pays nothing (no `previewPayload` stringify). Extracted from
+ *  `streamConsume` to keep that turn function under the god-FUNCTION size cap. */
+export const closeSamplingSpan = (
+  span: Span,
+  status: SpanStatus,
+  timing: TurnTiming,
+  usage: SamplingUsage | undefined,
+  finishReason: string | undefined,
+  messages: readonly Message[],
+  responseMessage: unknown,
+): void => {
+  const sinkActive = getSpanSink() !== null
+  const promptPreview =
+    sinkActive && messages.length > 0 ? previewPayload(messages[messages.length - 1]) : undefined
+  const completionPreview =
+    sinkActive && responseMessage !== undefined ? previewPayload(responseMessage) : undefined
+  endSpan(
+    span,
+    status,
+    attrs(buildSamplingSpanAttrs(timing, usage, finishReason, promptPreview, completionPreview)),
+  )
 }
 
 // ─── ADR-0240 §B — Automation engine tick wire ─────────────────────────
