@@ -17,6 +17,7 @@
  */
 import { basename } from "node:path"
 import { errMessage } from "@/shared"
+import { resolveBenchTrajectoryDefault } from "../trajectory"
 import {
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
@@ -376,10 +377,12 @@ const acquireFullRemoteSingleBoxGuard = async (
   })
 }
 
+// DEFAULT-ON (industry-SOTA opt-OUT): full-remote records + fetches the box's
+// LLM-trajectory cassette unless the operator sets QUANTA_BENCH_RECORD_TRAJECTORY
+// to a falsy token (0/off/false/no). Same resolver as the local bench default so
+// the box env, stale-scrub, and fetch-back all agree on whether to record.
 const fullRemoteRecordTrajectoryEnabled = (): boolean =>
-  process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== undefined &&
-  process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "" &&
-  process.env.QUANTA_BENCH_RECORD_TRAJECTORY !== "0"
+  resolveBenchTrajectoryDefault(process.env).path !== undefined
 
 const runSingleFullRemoteChunk = async (args: {
   readonly session: BoxSession

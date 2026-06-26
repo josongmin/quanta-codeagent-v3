@@ -293,6 +293,74 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     expect(fetchedObserve).toBe(true)
   })
 
+  test("DEFAULT-ON: box bench-run sets QUANTA_BENCH_RECORD_TRAJECTORY (no env needed)", async () => {
+    // Industry-SOTA: record the full agent conversation by default (opt-OUT, not
+    // opt-in). The box gets the explicit record-env so it writes to the known
+    // path the host then fetches back. Red-on-injection: regress
+    // fullRemoteRecordTrajectoryEnabled to default-OFF and this fails.
+    const savedRec = process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+    delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+    try {
+      const { fn, calls } = mockSpawn()
+      await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+        .run()
+        .catch(() => undefined)
+      const benchRun = calls.find(
+        (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
+      )
+      const cmd = benchRun?.args.join(" ") ?? ""
+      expect(cmd).toContain("QUANTA_BENCH_RECORD_TRAJECTORY=")
+    } finally {
+      if (savedRec === undefined) delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+      else process.env.QUANTA_BENCH_RECORD_TRAJECTORY = savedRec
+    }
+  })
+
+  test("DEFAULT-ON: trajectory cassette is fetched back before terminating", async () => {
+    // With default-on recording EVERY full-remote run must leave a readable
+    // trajectory locally — so the box's cassette is scp'd back (mirrors the
+    // observe/report fetch). Red-on-injection: drop the trajectory
+    // fetchOptionalArtifact (or its default-on gate) and this fails.
+    const savedRec = process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+    delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+    try {
+      const { fn, calls } = mockSpawn()
+      await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+        .run()
+        .catch(() => undefined)
+      const fetchedTrajectory = calls.some(
+        (c) => c.cmd === "ssh" && c.args.some((a) => /cat \S*bench-trajectory\.jsonl/.test(a)),
+      )
+      expect(fetchedTrajectory).toBe(true)
+    } finally {
+      if (savedRec === undefined) delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+      else process.env.QUANTA_BENCH_RECORD_TRAJECTORY = savedRec
+    }
+  })
+
+  test("OPT-OUT: QUANTA_BENCH_RECORD_TRAJECTORY=0 ⇒ box gets NO record-env, no fetch", async () => {
+    const savedRec = process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+    process.env.QUANTA_BENCH_RECORD_TRAJECTORY = "0"
+    try {
+      const { fn, calls } = mockSpawn()
+      await createFullRemoteBackend({ ...baseCfg, spawn: fn })
+        .run()
+        .catch(() => undefined)
+      const benchRun = calls.find(
+        (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("run --swebench")),
+      )
+      const cmd = benchRun?.args.join(" ") ?? ""
+      expect(cmd).not.toContain("QUANTA_BENCH_RECORD_TRAJECTORY=")
+      const fetchedTrajectory = calls.some(
+        (c) => c.cmd === "ssh" && c.args.some((a) => /cat \S*bench-trajectory\.jsonl/.test(a)),
+      )
+      expect(fetchedTrajectory).toBe(false)
+    } finally {
+      if (savedRec === undefined) delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
+      else process.env.QUANTA_BENCH_RECORD_TRAJECTORY = savedRec
+    }
+  })
+
   test("market: default is SPOT; onDemand:true drops the spot market option", async () => {
     const launchArgs = async (cfg: Parameters<typeof createFullRemoteBackend>[0]) => {
       const { fn, calls } = mockSpawn()

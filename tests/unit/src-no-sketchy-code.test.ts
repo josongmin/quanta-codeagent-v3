@@ -74,6 +74,14 @@ const RULES: readonly Rule[] = [
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "runner/batch/eval/driver.ts":
         "Extracted batch core keeps the same bench-only opt-in env gates (`QUANTA_BENCH_*`) while the app surface becomes thin. Same posture as the prior apps/bench/eval/driver.ts entry; follow-up work can move these dials behind typed config.",
+      "runner/batch/eval/run-health.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param (`opts.env ?? process.env`); the QUANTA_BENCH_HEALTH_ABORT gate is read off that param via gateDisabled, never module-level. Same bench-only opt-in gate posture as runner/batch/eval/driver.ts; tests inject a fake env.",
+      "lsp/server-mem-budget.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param; resolves the QUANTA_LSP_MEM_BUDGET_MB heap cap at LSP-spawn time and downstream gets the resolved budget. Same DI-boundary posture as the CLI gate wires; tests pass a fake env.",
+      "lsp/adapters/base.ts":
+        "ENV PROPAGATION — passes the parent's `process.env` into `buildLspServerEnv` so the spawned language-server child inherits it (plus the NODE_OPTIONS heap cap); pass-through to a child, not a feature read. Same posture as runtime/shell.ts / tool/git/runner.ts.",
+      "apps/bench/remote/box-session/ec2-lifecycle.ts":
+        "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",
@@ -317,6 +325,8 @@ const RULES: readonly Rule[] = [
         "FALSE POSITIVE — the `catch {}` is INSIDE a template-string of generated cell-bootstrap JS (runs in the WASM cell, not TS control flow here); `delete globalThis.__cmDispatch` is best-effort fencing in that emitted code.",
       "stream/adapters/jsonl-recorder.ts":
         "explicit best-effort recording of a degraded line — the file already documents the fallthrough",
+      "llm/stream-timeout.ts":
+        "jun-26 SE-audit: `void nextPromise.catch(() => {})` swallows the ABANDONED upstream promise's late settle on a timeout (4-line comment above explains it) — without it the orphaned rejection becomes an unhandledRejection that can crash the process; the timeout error is surfaced separately.",
       "session/store.ts": "ENOENT-style file delete cleanup; absence is the success state",
       "storage/service.ts":
         "realResolve climbs ancestors when a parent doesn't exist (expected, not an error)",
@@ -454,6 +464,8 @@ const RULES: readonly Rule[] = [
         "Headless DEV/test fake-deps fixture (idleMs/snoozeDefaultMs) — fixture values for the fake runtime, not a production wall-clock policy.",
       "apps/bench/cli.ts":
         "Bench CLI minutes→ms conversions (`mins * 60_000`, `(Number(wallMin) || 0) * 60_000`) at the flag-parse boundary — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
+      "apps/bench/remote/fresh-auth.ts":
+        "ms→minutes conversion for a LOG message (`Math.round(remaining / 60_000)` shows token-remaining minutes) — display unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
     },
   },
   {

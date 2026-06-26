@@ -7,14 +7,17 @@ import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { jsonlReplayStore, ReplayMissError, recordingLlmPort } from "@/llm/replay"
 
 /**
- * Wiring proof: bench LLM-trajectory recording is DEFAULT-OFF and only wraps the
- * port when `QUANTA_BENCH_RECORD_TRAJECTORY` is set. When on, consuming the
- * wrapped stream writes a replayable JSONL cassette — the bench-native "fork from
- * a point" enabler (a failed remote run can be replayed/diverged after the fact).
+ * Wiring proof: bench LLM-trajectory recording is DEFAULT-ON (industry-SOTA —
+ * SWE-agent / mini-swe / LangSmith persist the full conversation by default;
+ * recording is opt-OUT, not opt-in). It wraps the port unless
+ * `QUANTA_BENCH_RECORD_TRAJECTORY=0`/off (operator opt-OUT). When on, consuming
+ * the wrapped stream writes a replayable JSONL cassette — the bench-native "fork
+ * from a point" enabler (a failed remote run can be replayed/diverged after the
+ * fact).
  *
  * Red-on-injection:
- *  - always-wrap ⇒ OFF-1 (identity when knob unset) RED.
- *  - never-wrap ⇒ ON-1 (different port) + ON-2 (cassette written) RED.
+ *  - never-wrap (regressed to default-OFF) ⇒ DEFAULT-ON + ON-1/ON-2 RED.
+ *  - always-wrap (ignores opt-out) ⇒ OPT-OUT (=0 identity) RED.
  */
 const RECORD_KEY = "QUANTA_BENCH_RECORD_TRAJECTORY"
 const REPLAY_KEY = "QUANTA_BENCH_REPLAY_TRAJECTORY"
@@ -63,13 +66,19 @@ const drain = async (llm: LLMPort): Promise<void> => {
 }
 
 describe("bench trajectory recording gate", () => {
-  test("OFF-1: knob unset ⇒ identity (byte-identical, no wrap)", () => {
+  test("DEFAULT-ON: knob unset ⇒ wrapped (records by default, opt-OUT not opt-in)", () => {
+    const stub = new StubLLM()
+    expect(maybeRecordTrajectory(stub)).not.toBe(stub)
+  })
+
+  test("OPT-OUT: knob='0' ⇒ identity (byte-identical, no wrap)", () => {
+    process.env[RECORD_KEY] = "0"
     const stub = new StubLLM()
     expect(maybeRecordTrajectory(stub)).toBe(stub)
   })
 
-  test("OFF-2: knob='0' ⇒ identity", () => {
-    process.env[RECORD_KEY] = "0"
+  test("OPT-OUT: knob='off' ⇒ identity (token vocabulary)", () => {
+    process.env[RECORD_KEY] = "off"
     const stub = new StubLLM()
     expect(maybeRecordTrajectory(stub)).toBe(stub)
   })

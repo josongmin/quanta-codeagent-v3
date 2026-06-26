@@ -773,6 +773,12 @@ const resolveLLM = (
     exitFn(0)
     return null
   }
+  // Bench records the FULL LLM trajectory by DEFAULT (industry-SOTA opt-OUT;
+  // QUANTA_BENCH_RECORD_TRAJECTORY=0 opts out). Log where it lands so the
+  // operator can find the cassette without grepping the source for the default.
+  if (trajectory.kind === "record") {
+    logger.info(`bench: recording LLM trajectory → ${trajectory.path} (set QUANTA_BENCH_RECORD_TRAJECTORY=0 to opt out)`)
+  }
   // Live LLM is stateless across calls, so off/live mode can share it; replay
   // mode re-wraps a fresh store each call (applyBenchTrajectoryMode → fresh
   // replayTrajectoryPort) so branches stay isolated.

@@ -23,12 +23,41 @@
 import { resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
+import { isFalsyToken } from "@/shared"
 
 const defaultBenchTrajectoryPath = (): string => `${process.cwd()}/bench-trajectory.jsonl`
 
 const trajectoryPathFromRaw = (raw: string | undefined): string | undefined => {
   if (raw === undefined || raw === "" || raw === "0") return undefined
   return raw === "1" || raw.toLowerCase() === "on" ? defaultBenchTrajectoryPath() : raw
+}
+
+/**
+ * BENCH default for LLM-trajectory RECORDING: DEFAULT-ON (industry-SOTA —
+ * SWE-agent / mini-swe / LangSmith all persist the full agent conversation by
+ * default; recording is opt-OUT, not opt-in). A CODE default (mirrors
+ * `./reasoning-summary`) so it rides the rsynced bench source to the full-remote
+ * box with NO env forwarding.
+ *
+ * Resolution of `QUANTA_BENCH_RECORD_TRAJECTORY` → the record path (or
+ * `undefined` = no recording):
+ *   - unset / "" / "1" / "on" / unrecognized ⇒ default `<cwd>/bench-trajectory.jsonl`
+ *   - "0" / off / false / no                 ⇒ undefined (operator opt-OUT)
+ *   - any other string                       ⇒ treated as the cassette path
+ *
+ * `explicit` is true iff the operator set a recognized value (a path, "1"/"on",
+ * or a falsy opt-out token). It is FALSE for unset / "" / unrecognized. The
+ * caller uses it so the record⇄replay mutual-exclusion check ONLY fires when the
+ * operator EXPLICITLY asked to record alongside replay — the default-on path
+ * must never spuriously collide with an explicit replay request.
+ */
+export const resolveBenchTrajectoryDefault = (
+  env: Record<string, string | undefined>,
+): { path: string | undefined; explicit: boolean } => {
+  const raw = env.QUANTA_BENCH_RECORD_TRAJECTORY
+  if (isFalsyToken(raw)) return { path: undefined, explicit: true } // operator opt-OUT
+  const fromRaw = trajectoryPathFromRaw(raw) // path | "1"/"on"→default | undefined(unset/"")
+  return { path: fromRaw ?? defaultBenchTrajectoryPath(), explicit: fromRaw !== undefined }
 }
 
 const replayOnMissFromRaw = (raw: string | undefined): OnMissPolicy => {
@@ -60,9 +89,12 @@ export type BenchTrajectoryMode =
   | { kind: "replay"; path: string; onMiss: OnMissPolicy; limit?: number }
 
 export const resolveBenchTrajectoryMode = (): BenchTrajectoryMode => {
-  const recordPath = trajectoryPathFromRaw(process.env.QUANTA_BENCH_RECORD_TRAJECTORY)
+  // Record is DEFAULT-ON for bench (industry-SOTA opt-OUT). `recordExplicit`
+  // gates the collision check so the default-on path never spuriously trips the
+  // mutual-exclusion throw against an explicit replay request.
+  const { path: recordPath, explicit: recordExplicit } = resolveBenchTrajectoryDefault(process.env)
   const replayPath = trajectoryPathFromRaw(process.env.QUANTA_BENCH_REPLAY_TRAJECTORY)
-  if (recordPath !== undefined && replayPath !== undefined) {
+  if (recordExplicit && recordPath !== undefined && replayPath !== undefined) {
     throw new Error(
       "cannot combine QUANTA_BENCH_RECORD_TRAJECTORY with QUANTA_BENCH_REPLAY_TRAJECTORY",
     )
