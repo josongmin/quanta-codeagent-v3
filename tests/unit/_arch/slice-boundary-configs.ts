@@ -382,6 +382,35 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     envAllowFiles: ["types.ts"],
     requireSliceBarrel: true,
   },
+  // `@/side-agent` is the N1 background side-agent daemon (RFC
+  // `docs/plans/jun-4-background-side-agent.md`). The barrel + registries
+  // (`process.ts` / `registry.ts` / `process-registry.ts` / `types.ts`) are a
+  // PURE LEAF: a supervise-loop over injected ports whose only deps are
+  // `@/shared` + intra-slice. Deny the full peer-library set AND every Layer-2
+  // surface so a regression that re-adds a VALUE import from any higher layer
+  // into the leaf is flagged (this slice previously had NO boundary config —
+  // the gap this closes).
+  //
+  // Documented carve-out: `worker-charter-runner.ts` is the CHILD composition
+  // root the forked `.mjs` worker dynamically imports per charter (its own
+  // header records this). Like the `@/host` wiring it deliberately assembles a
+  // real LLM-backed bounded pass and is NOT re-exported from the pure-leaf
+  // barrel, so the leaf consumed by `@/agent/side-agent-runner` stays
+  // dependency-clean. These are the EXACT value-import specs that composition
+  // root carries (type-only imports — `@/agent`, `@/permission`, `@/stream` —
+  // are erased and never reach the scanner). Reviewed exceptions.
+  "side-agent": {
+    slice: "side-agent",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    allowImports: [
+      "@/agent/side-agent-runner",
+      "@/agent/subagent-runner",
+      "@/llm",
+      "@/llm/replay",
+      "@/tool",
+    ],
+    requireSliceBarrel: true,
+  },
 }
 
 export const getSliceBoundaryConfig = (slice: string): SliceBoundaryConfig => {
