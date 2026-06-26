@@ -79,6 +79,23 @@ describe("buildForwardedBenchEnv", () => {
     expect(buildForwardedBenchEnv({ QUANTA_RUN_ID: "run-x" })).toBe("")
   })
 
+  test("FWD-9: QUANTA_REASONING_SUMMARY override (non-BENCH allowlist) reaches the box", () => {
+    // jun-26 audit: reasoning-summary is DEFAULT-ON for bench as a CODE default
+    // (rides rsync), so the default needs no forwarding. But an operator OPT-OUT
+    // (`QUANTA_REASONING_SUMMARY=0`, to A/B the reasoning-model silent-stall fix
+    // on the box) must reach the box — otherwise it is silently dropped and the
+    // box stays default-ON, so the experiment arm reads as a null effect (the
+    // jun-16/jun-20 env-forwarding bug class). It is NOT QUANTA_BENCH_*-prefixed,
+    // so it must be in the explicit FORWARD_EXTRA_ENV allowlist.
+    const off = buildForwardedBenchEnv({ QUANTA_REASONING_SUMMARY: "0", QUANTA_BENCH_A: "1" })
+    expect(off).toContain("QUANTA_REASONING_SUMMARY='0' ")
+    const on = buildForwardedBenchEnv({ QUANTA_REASONING_SUMMARY: "1" })
+    expect(on).toBe("QUANTA_REASONING_SUMMARY='1' ")
+    // shell-quoted (no injection) and still NOT a blanket widening.
+    const inj = buildForwardedBenchEnv({ QUANTA_REASONING_SUMMARY: "0; rm -rf /" })
+    expect(inj).toBe("QUANTA_REASONING_SUMMARY='0; rm -rf /' ")
+  })
+
   test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {
     expect(() =>
       buildForwardedBenchEnv({

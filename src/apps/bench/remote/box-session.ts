@@ -125,7 +125,17 @@ const EXPLICIT_BOX_ENV: ReadonlySet<string> = new Set([
  *  preset 60 on the box, so complex instances `max_turns_exhausted` even when a
  *  higher local budget was set. Same env-forwarding bug class the BENCH filter
  *  guards against. */
-const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set(["QUANTA_MAX_TURNS"])
+const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
+  "QUANTA_MAX_TURNS",
+  // jun-26: reasoning-summary is DEFAULT-ON for bench as a CODE default (rides
+  // rsync), so the default needs no forwarding. But an operator OPT-OUT
+  // (`QUANTA_REASONING_SUMMARY=0`, e.g. to A/B the reasoning-model silent-stall
+  // fix on the box) is NOT QUANTA_BENCH_*-prefixed and would be SILENTLY DROPPED
+  // — the box would stay default-ON and the experiment arm read as a null effect
+  // (same env-forwarding bug class as QUANTA_MAX_TURNS). Forward it so the
+  // override actually reaches the box.
+  "QUANTA_REASONING_SUMMARY",
+])
 
 /**
  * Build the `KEY=val ` prefix that forwards the operator's local bench knobs
