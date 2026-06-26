@@ -30,6 +30,18 @@
  * awaited before re-opening a route that has at least one prior empty, so a
  * throttling endpoint is not hammered.
  *
+ * ── Time-based decay / half-open (no permanent latch) ────────────────────────
+ * The empties are TRANSIENT (throttle / auth wall / a momentary content-less
+ * stream); a route that trips must NOT stay fatal for the rest of a long CLI
+ * session after the throttle has passed. Each empty stamps the route with the
+ * injected clock ({@link EmptyStreamBreakerOpts.now}); once
+ * {@link DEFAULT_EMPTY_STREAM_BREAKER_DECAY_MS} of wall-time has elapsed since a
+ * route's LAST empty, the next open HALF-OPENS — the consecutive count resets to
+ * 0 and ONE trial is allowed through. A content trial fully closes the route; a
+ * still-empty trial re-arms from 1 (NOT from the latched cap), so the route is
+ * not instantly re-fatal. The clock is INJECTED (the `@/llm` slice never reads
+ * the wall-clock in pure code).
+ *
  * ── Safety-guard, not a posture knob ─────────────────────────────────────────
  * This is a failure-path safety guard. The default-OFF byte-identical invariant
  * does NOT apply (the guard is always active on the empty-stream failure path).
@@ -55,6 +67,17 @@ export const DEFAULT_EMPTY_STREAM_BREAKER_K = 2
 /** Stable substring on the terminal error message so triage / tests can match
  *  without depending on the surrounding prose. */
 export const EMPTY_STREAM_BREAKER_ERROR_MARKER = "consecutive empty streams (no content)"
+
+/** Default cooldown (ms) after which a latched route DECAYS / HALF-OPENS. The
+ *  empties that trip the breaker are caused by a TRANSIENT condition (throttle /
+ *  auth wall / momentary content-less stream); without decay a route that hit K
+ *  empties stays fatal for the rest of a long CLI session even after the throttle
+ *  has long passed. After this much wall-time has elapsed since the route's LAST
+ *  empty, the next open HALF-OPENS: the consecutive count is reset to 0 and ONE
+ *  trial is allowed through. ~5 min — long enough that we are not re-hammering a
+ *  still-throttling endpoint, short enough that a long session recovers on its
+ *  own. */
+export const DEFAULT_EMPTY_STREAM_BREAKER_DECAY_MS = 300_000
 
 /**
  * True iff `ev` is a CONTENT event — assistant text, extended-thinking, or a
@@ -98,6 +121,20 @@ export interface EmptyStreamBreakerOpts {
    *  least one prior empty stream — so a throttling endpoint is spaced out
    *  rather than hammered. Omitted / 0 ⇒ no backoff (byte-identical timing). */
   readonly backoffMs?: number
+  /** Cooldown (ms) after which a latched route DECAYS / HALF-OPENS so a TRANSIENT
+   *  throttle does not permanently poison a route in a long CLI session. Once
+   *  this much time has elapsed since the route's LAST empty stream, the next open
+   *  resets the consecutive count to 0 and lets ONE trial through (half-open). A
+   *  successful (content) trial fully closes the route; another empty re-arms from
+   *  1, NOT from the latched cap, so the route is not instantly re-fatal. Defaults
+   *  to {@link DEFAULT_EMPTY_STREAM_BREAKER_DECAY_MS}. Pass
+   *  `Number.POSITIVE_INFINITY` to DISABLE decay (the route latches permanently —
+   *  the pre-decay behaviour; test seam). */
+  readonly decayMs?: number
+  /** Injectable clock (ms) so the decay/half-open is deterministic in tests. The
+   *  `@/llm` slice does not read the wall-clock directly in pure code — resolve
+   *  the real clock at the composition root. Defaults to `Date.now`. */
+  readonly now?: () => number
   /** Injectable sleep for deterministic tests. Defaults to real `setTimeout`. */
   readonly sleep?: (ms: number) => Promise<void>
 }
@@ -140,9 +177,17 @@ export const withEmptyStreamCircuitBreaker = (
   const k = opts.maxConsecutiveEmpty ?? DEFAULT_EMPTY_STREAM_BREAKER_K
   const keyOf = opts.routeKey ?? ((input: StreamInput) => defaultHashRequest(input, "exact"))
   const backoffMs = opts.backoffMs ?? 0
+  const decayMs = opts.decayMs ?? DEFAULT_EMPTY_STREAM_BREAKER_DECAY_MS
+  const now = opts.now ?? Date.now
   const sleep = opts.sleep ?? realSleep
-  // Per-route count of CONSECUTIVE content-less streams seen so far.
-  const consecutiveEmpty = new Map<string, number>()
+  // Per-route record of CONSECUTIVE content-less streams: `count` and the
+  // wall-clock (via the injected `now`) of the LAST empty, so a latched route can
+  // DECAY / half-open after `decayMs` rather than staying fatal forever.
+  interface RouteState {
+    count: number
+    lastEmptyAt: number
+  }
+  const consecutiveEmpty = new Map<string, RouteState>()
 
   const buildTerminal = (route: string, count: number, cause?: string): LLMError => {
     const where = route === "" ? "" : ` [route=${route}]`
@@ -168,13 +213,25 @@ export const withEmptyStreamCircuitBreaker = (
     })
   }
 
+  /** The route's prior consecutive-empty count, DECAYED. If `decayMs` has elapsed
+   *  since the route's last empty stream, the latch is considered stale (a passed
+   *  throttle) and the count half-opens to 0 — so the next open is allowed one
+   *  trial instead of tripping the circuit-open pre-check forever. */
+  const priorEmptyOf = (route: string): number => {
+    const state = consecutiveEmpty.get(route)
+    if (state === undefined) return 0
+    if (now() - state.lastEmptyAt >= decayMs) return 0
+    return state.count
+  }
+
   /** Record that the route produced a content-LESS stream (clean end or throw).
-   *  Increments the route's consecutive-empty count and returns the breaker's
-   *  TERMINAL error to throw when the cap is reached, else `null` (let the
-   *  original outcome stand). `cause` is the underlying throw message, if any. */
+   *  Increments the route's consecutive-empty count (stamping the decay clock) and
+   *  returns the breaker's TERMINAL error to throw when the cap is reached, else
+   *  `null` (let the original outcome stand). `cause` is the underlying throw
+   *  message, if any. */
   const recordEmpty = (route: string, priorEmpty: number, cause?: string): LLMError | null => {
     const next = priorEmpty + 1
-    consecutiveEmpty.set(route, next)
+    consecutiveEmpty.set(route, { count: next, lastEmptyAt: now() })
     return next >= k ? buildTerminal(route, next, cause) : null
   }
 
@@ -189,7 +246,7 @@ export const withEmptyStreamCircuitBreaker = (
     err: unknown,
   ): unknown => {
     if (sawContent) {
-      consecutiveEmpty.set(route, 0)
+      consecutiveEmpty.delete(route)
       return err
     }
     const cause = err instanceof Error ? err.message : String(err)
@@ -201,7 +258,7 @@ export const withEmptyStreamCircuitBreaker = (
    *  return the breaker's terminal once the cap is hit, else `null`. */
   const onStreamEnd = (route: string, priorEmpty: number, sawContent: boolean): LLMError | null => {
     if (sawContent) {
-      consecutiveEmpty.set(route, 0)
+      consecutiveEmpty.delete(route)
       return null
     }
     return recordEmpty(route, priorEmpty)
@@ -216,13 +273,18 @@ export const withEmptyStreamCircuitBreaker = (
     ...(inner.authMode !== undefined ? { authMode: inner.authMode } : {}),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       const route = keyOf(input)
-      const priorEmpty = consecutiveEmpty.get(route) ?? 0
+      // DECAYED read: a route that latched at K but whose last empty was longer
+      // than `decayMs` ago HALF-OPENS to 0, so the circuit-open pre-check below
+      // does not trip and one trial is allowed through (a transient throttle that
+      // has passed must not poison the route for the rest of the session).
+      const priorEmpty = priorEmptyOf(route)
 
       async function* iterate(): AsyncIterable<StreamEvent> {
         // CIRCUIT-OPEN pre-check: if the route already hit K empties on a prior
-        // call, trip immediately on the NEXT open rather than burning another
-        // full idle window. (The end-of-stream check below is the primary trip;
-        // this guards the re-entry path so we never re-issue past the cap.)
+        // call AND the cooldown has NOT elapsed (so `priorEmpty` is still ≥ K),
+        // trip immediately on the NEXT open rather than burning another full idle
+        // window. (The end-of-stream check below is the primary trip; this guards
+        // the re-entry path so we never re-issue past the cap while still latched.)
         if (priorEmpty >= k) throw buildTerminal(route, priorEmpty)
 
         // Backoff BEFORE re-opening a route that already had ≥1 empty — space out

@@ -19,6 +19,7 @@ import { describe, expect, mock, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { LLMError } from "@/shared"
 import {
+  DEFAULT_EMPTY_STREAM_BREAKER_DECAY_MS,
   DEFAULT_EMPTY_STREAM_BREAKER_K,
   EMPTY_STREAM_BREAKER_ERROR_MARKER,
   isStreamEventContentful,
@@ -74,9 +75,9 @@ describe("isStreamEventContentful — content vs telemetry classification", () =
       }),
     ).toBe(false)
     expect(isStreamEventContentful({ type: "message_stop", stop_reason: "end_turn" })).toBe(false)
-    expect(isStreamEventContentful({ type: "output_progress", outputTokens: 5, exact: false })).toBe(
-      false,
-    )
+    expect(
+      isStreamEventContentful({ type: "output_progress", outputTokens: 5, exact: false }),
+    ).toBe(false)
     expect(isStreamEventContentful({ type: "response_in_progress" })).toBe(false)
     expect(isStreamEventContentful({ type: "stream_reset" })).toBe(false)
   })
@@ -229,5 +230,90 @@ describe("withEmptyStreamCircuitBreaker — consecutive content-less streams tri
 
   test("default K constant is small (2) and exported", () => {
     expect(DEFAULT_EMPTY_STREAM_BREAKER_K).toBe(2)
+  })
+})
+
+describe("withEmptyStreamCircuitBreaker — time-based decay / half-open (no permanent latch)", () => {
+  test("after the cooldown elapses a LATCHED route HALF-OPENS — the next open is allowed a trial instead of tripping forever", async () => {
+    // The route trips at K=2 empties, then a content-producing stream becomes
+    // available once the throttle passes. Without decay the circuit-open pre-check
+    // would throw on EVERY subsequent open and the inner port would never be
+    // hit again — the route would be permanently fatal.
+    const inner = new ScriptedPort([
+      [TELEMETRY_CONTINUATION], // call 1: empty → count 1
+      [TELEMETRY_CONTINUATION], // call 2: empty → count 2 → trips terminal
+      [TELEMETRY_CONTINUATION, { type: "text_delta", delta: "ok" } as StreamEvent], // call 3: content
+    ])
+    let nowMs = 1_000
+    const guarded = withEmptyStreamCircuitBreaker(inner, {
+      maxConsecutiveEmpty: 2,
+      decayMs: 60_000,
+      now: () => nowMs,
+    })
+
+    await collect(guarded.stream(REQ)) // empty #1 (t=1s)
+    await expect(collect(guarded.stream(REQ))).rejects.toMatchObject({ kind: "bad_request" }) // empty #2 trips
+    expect(inner.calls).toBe(2)
+
+    // STILL within the cooldown: the latch holds — the inner port is NOT re-hit.
+    nowMs += 30_000
+    await expect(collect(guarded.stream(REQ))).rejects.toMatchObject({ kind: "bad_request" })
+    expect(inner.calls).toBe(2) // circuit-open pre-check threw; no inner call
+
+    // Cooldown ELAPSED (> decayMs since the last empty): the route half-opens, the
+    // trial reaches the inner port, sees content, and passes through.
+    nowMs += 31_000 // total 61s since the last empty stamp (> 60s)
+    const recovered = await collect(guarded.stream(REQ))
+    expect(recovered.some((e) => e.type === "text_delta")).toBe(true)
+    expect(inner.calls).toBe(3) // the half-open trial DID reach the inner port
+  })
+
+  test("red-on-injection — with decay DISABLED (Infinity) the SAME latched route stays permanently fatal (proves decay, not the stub, reopens it)", async () => {
+    const inner = new ScriptedPort([
+      [TELEMETRY_CONTINUATION],
+      [TELEMETRY_CONTINUATION],
+      [TELEMETRY_CONTINUATION, { type: "text_delta", delta: "ok" } as StreamEvent],
+    ])
+    let nowMs = 1_000
+    const guarded = withEmptyStreamCircuitBreaker(inner, {
+      maxConsecutiveEmpty: 2,
+      decayMs: Number.POSITIVE_INFINITY, // latch forever (pre-decay behaviour)
+      now: () => nowMs,
+    })
+    await collect(guarded.stream(REQ)) // empty #1
+    await expect(collect(guarded.stream(REQ))).rejects.toMatchObject({ kind: "bad_request" }) // trips
+    // Advance an ENORMOUS amount of time — with decay disabled the latch never lifts.
+    nowMs += 10 * 60 * 60 * 1000 // 10 hours
+    await expect(collect(guarded.stream(REQ))).rejects.toMatchObject({ kind: "bad_request" })
+    expect(inner.calls).toBe(2) // never re-hit — the route is permanently fatal when decay is off
+  })
+
+  test("a half-open trial that is STILL empty re-arms from 1 (not the latched cap) — it is not instantly re-fatal", async () => {
+    // Every call is empty. With K=2, the half-open trial is one empty → count 1,
+    // which is BELOW the cap, so the trial surfaces the original (transient)
+    // outcome rather than the breaker's terminal.
+    const inner = new ScriptedPort([[TELEMETRY_CONTINUATION]])
+    let nowMs = 1_000
+    const guarded = withEmptyStreamCircuitBreaker(inner, {
+      maxConsecutiveEmpty: 2,
+      decayMs: 60_000,
+      now: () => nowMs,
+    })
+    await collect(guarded.stream(REQ)) // empty #1
+    await expect(collect(guarded.stream(REQ))).rejects.toMatchObject({ kind: "bad_request" }) // trips
+    nowMs += 61_000 // cooldown elapsed → half-open
+    // The half-open trial reaches the inner port (count was reset to 0 → now 1),
+    // emits only telemetry and ends — count 1 < 2, so NO terminal throw.
+    const trial = await collect(guarded.stream(REQ))
+    expect(trial).toEqual([TELEMETRY_CONTINUATION])
+    expect(inner.calls).toBe(3) // half-open trial DID reach the inner port
+    // Immediately after (still within the cooldown of THIS new empty), one more
+    // empty pushes count to 2 → trips again. Decay re-arms, it does not free-pass.
+    const next = guarded.stream(REQ)
+    await expect(collect(next)).rejects.toMatchObject({ kind: "bad_request" })
+  })
+
+  test("default decay constant is exported and a sane multi-minute cooldown", () => {
+    expect(DEFAULT_EMPTY_STREAM_BREAKER_DECAY_MS).toBe(300_000)
   })
 })
