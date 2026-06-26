@@ -20,6 +20,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
+import { resolveMaxReadyPolls } from "../../src/apps/bench/remote/box-session/ec2-lifecycle"
 import {
   attachBox,
   createFullRemoteBackend,
@@ -1448,5 +1449,49 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       .run()
       .catch(() => ({ reportPath: "SHOULD-NOT-HAPPEN" }) as { reportPath?: string })
     expect(res.reportPath).toBeUndefined()
+  })
+})
+
+// jun-26 (absorbed from salvage/a81b-bench-boxloss): the readiness window is now
+// operator-tunable WITHOUT a code edit. Precedence: test-seam cfg.maxReadyPolls >
+// QUANTA_FULL_REMOTE_READY_POLLS env > default(90). Default-safe: garbage / 0 /
+// negative ⇒ default (a bad value must never shorten the window to 0 or throw).
+describe("resolveMaxReadyPolls — operator-tunable readiness window", () => {
+  const KEY = "QUANTA_FULL_REMOTE_READY_POLLS"
+  const withEnv = (val: string | undefined, run: () => void): void => {
+    const prev = process.env[KEY]
+    if (val === undefined) delete process.env[KEY]
+    else process.env[KEY] = val
+    try {
+      run()
+    } finally {
+      if (prev === undefined) delete process.env[KEY]
+      else process.env[KEY] = prev
+    }
+  }
+  const cfg = (over: { maxReadyPolls?: number }) =>
+    over as Parameters<typeof resolveMaxReadyPolls>[0]
+
+  test("unset env ⇒ default 90", () => {
+    withEnv(undefined, () => expect(resolveMaxReadyPolls(cfg({}))).toBe(90))
+  })
+
+  test("env knob widens the window", () => {
+    withEnv("180", () => expect(resolveMaxReadyPolls(cfg({}))).toBe(180))
+  })
+
+  test("test-seam cfg.maxReadyPolls WINS over the env knob (deterministic tests)", () => {
+    withEnv("180", () => expect(resolveMaxReadyPolls(cfg({ maxReadyPolls: 3 }))).toBe(3))
+  })
+
+  test("garbage / zero / negative ⇒ default (never 0, never throws)", () => {
+    withEnv("abc", () => expect(resolveMaxReadyPolls(cfg({}))).toBe(90))
+    withEnv("0", () => expect(resolveMaxReadyPolls(cfg({}))).toBe(90))
+    withEnv("-5", () => expect(resolveMaxReadyPolls(cfg({}))).toBe(90))
+    withEnv("", () => expect(resolveMaxReadyPolls(cfg({}))).toBe(90))
+  })
+
+  test("fractional ⇒ floored", () => {
+    withEnv("120.9", () => expect(resolveMaxReadyPolls(cfg({}))).toBe(120))
   })
 })

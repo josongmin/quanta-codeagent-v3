@@ -664,6 +664,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/cli.ts",
   },
   {
+    envKey: "QUANTA_FULL_REMOTE_READY_POLLS",
+    kind: "int",
+    default: 90,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Full-remote: cloud-init readiness window, in 10s polls (default 90 ≈ 15min). jun-25 BOX-LOSS RCA: a too-short window counted a slow-but-healthy box as LOST. A READY box returns on the first poll, so raising this only tolerates a slow bootstrap (degraded network / stock-AMI image re-pull). The test-seam cfg.maxReadyPolls still wins; unset/garbage ⇒ default.",
+    readSite: "apps/bench/remote/box-session/ec2-lifecycle.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER",
     kind: "bool",
     default: false,

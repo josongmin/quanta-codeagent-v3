@@ -419,19 +419,32 @@ const reportReadinessPoll = (
   return { code: probe.code, err, terminal }
 }
 
+/** Default cloud-init readiness window: 90 polls × 10s ≈ 15min. jun-25: 30→90.
+ *  A READY box returns on the FIRST poll, so a longer window NEVER slows a
+ *  healthy launch — it only tolerates a SLOW bootstrap (the exact box-loss RCA:
+ *  under a degraded network / stock-AMI fallback, cloud-init's
+ *  docker+bun+uv+pyright install ran past 5min, so a ssh-reachable box was
+ *  abandoned as a hard loss when the old 30-poll window expired). */
+const DEFAULT_READY_POLLS = 90
+
+/** Resolve the readiness-poll budget. Precedence: the test-seam `cfg.maxReadyPolls`
+ *  (deterministic tests) → the operator knob `QUANTA_FULL_REMOTE_READY_POLLS`
+ *  (widen for a persistently-degraded network WITHOUT a code edit) → the default.
+ *  Default-safe: unset / garbage / non-positive ⇒ the default, never 0, never throws. */
+export const resolveMaxReadyPolls = (cfg: FullRemoteConfig): number => {
+  if (cfg.maxReadyPolls !== undefined) return cfg.maxReadyPolls
+  const raw = process.env.QUANTA_FULL_REMOTE_READY_POLLS
+  const parsed = raw !== undefined && raw !== "" ? Number(raw) : Number.NaN
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_READY_POLLS
+}
+
 const waitForBoxReady = async (
   ssh: (cmd: string) => Promise<SpawnResult>,
   cfg: FullRemoteConfig,
 ): Promise<void> => {
   const sleep = cfg.sleep ?? defaultSleep
   const log = cfg.onLog ?? (() => {})
-  // jun-25: 30→90 (5min→15min readiness window). A READY box returns on the
-  // FIRST poll, so this only extends the wait for a SLOW bootstrap — which is
-  // exactly what was failing: under a degraded network, cloud-init's
-  // docker+bun+uv+pyright install ran past 5min, so the box was ssh-reachable
-  // but not yet bun-ready when the old 30-poll window expired → "never became
-  // ready" → relaunch → both attempts LOST despite the boxes being healthy.
-  const maxReadyPolls = cfg.maxReadyPolls ?? 90
+  const maxReadyPolls = resolveMaxReadyPolls(cfg)
   // jun-25 RCA: the prior loop DISCARDED probe.code/stderr every poll and threw a
   // hardcoded guess ("check SG :22 / cloud-init"). So a box that was provably
   // reachable + ready + world-open-SG looked IDENTICAL to a dead one — a run
