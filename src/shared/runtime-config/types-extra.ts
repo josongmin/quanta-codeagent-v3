@@ -58,6 +58,15 @@ export interface RuntimeConfigPaths {
    *  /tmp/g55-traj.jsonl). Absent ⇒ default
    *  (`DEFAULT_EMPTY_STREAM_BREAKER_K` = 2). */
   readonly llmEmptyStreamBreakerK: number | undefined
+  /** Per-LLM-stream PROGRESS HEARTBEAT interval in ms
+   *  (`QUANTA_LLM_STREAM_TRACE_MS`). The bench `run.log` only gets a line when a
+   *  TOOL ACTION completes, so a turn stalled INSIDE the LLM stream is invisible.
+   *  The stream-progress trace emits a periodic heartbeat during stream
+   *  consumption (idle climbing, content frozen) plus a one-line summary, so a
+   *  stall is VISIBLE. Telemetry ONLY — byte-identical event passthrough — so it
+   *  is safe DEFAULT-ON. `0` ⇒ DISABLED; absent ⇒ default
+   *  (`DEFAULT_STREAM_TRACE_INTERVAL_MS` = 10_000). */
+  readonly llmStreamTraceMs: number | undefined
   /** Quanta home dir override (`QUANTA_HOME`). Absent ⇒ feature sites compute
    *  `~/.quanta`. Used by ADR-0046 permission-store path resolution. */
   readonly quantaHome: string | undefined

@@ -53,6 +53,12 @@ export {
   withEmptyStreamCircuitBreaker,
 } from "./empty-stream-breaker"
 export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
+export {
+  DEFAULT_STREAM_TRACE_INTERVAL_MS,
+  type StreamProgressTraceOpts,
+  type TraceTimer,
+  withStreamProgressTrace,
+} from "./stream-progress-trace"
 export type { LiveUsageKnobs } from "./live-usage"
 export { estimateTokensFromChars, withLiveUsage } from "./live-usage"
 // §9.6 — Anthropic Message Batches API client core (default-OFF). Surfaced on

@@ -46,6 +46,7 @@ import {
   parseBool,
   parseBoolDefaultTrue,
   parseLogLevel,
+  parseNonNegativeInt,
   parsePositiveInt,
   parsePositiveNumber,
   parsePtyBackend,
@@ -359,6 +360,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     llmEmptyStreamBreakerK: parsePositiveInt(
       env["QUANTA_LLM_EMPTY_STREAM_BREAKER_K"],
       "QUANTA_LLM_EMPTY_STREAM_BREAKER_K",
+    ),
+    llmStreamTraceMs: parseNonNegativeInt(
+      env["QUANTA_LLM_STREAM_TRACE_MS"],
+      "QUANTA_LLM_STREAM_TRACE_MS",
     ),
     quantaHome: stringOrUndef(env["QUANTA_HOME"]),
     benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),

@@ -46,6 +46,29 @@ export const parseLogLevel = (raw: string | undefined): LogLevel => {
   return "info"
 }
 
+/** Like {@link parsePositiveInt} but ACCEPTS `0` as a valid value. Used by knobs
+ *  whose `0` carries meaning DISTINCT from "absent" (e.g.
+ *  `QUANTA_LLM_STREAM_TRACE_MS=0` ⇒ explicitly DISABLE the stream-progress
+ *  heartbeat, vs absent ⇒ default ON). Absent ⇒ `undefined`; a negative / non-
+ *  integer value is rejected with a warning and treated as absent. */
+export const parseNonNegativeInt = (
+  raw: string | undefined,
+  varName: string,
+): number | undefined => {
+  if (raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) {
+    stderrWarn(`ignoring invalid ${varName}="${raw}" — must be a non-negative integer`)
+    return undefined
+  }
+  const n = Number.parseInt(trimmed, 10)
+  if (!Number.isInteger(n) || n < 0) {
+    stderrWarn(`ignoring invalid ${varName}="${raw}" — must be a non-negative integer`)
+    return undefined
+  }
+  return n
+}
+
 export const parsePositiveInt = (raw: string | undefined, varName: string): number | undefined => {
   if (raw === undefined) return undefined
   const trimmed = raw.trim()

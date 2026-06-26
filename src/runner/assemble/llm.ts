@@ -18,6 +18,7 @@ import {
   type ShellExecResult,
   withEmptyStreamCircuitBreaker,
   withLiveUsage,
+  withStreamProgressTrace,
 } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
@@ -176,6 +177,24 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
   finalLLM = withEmptyStreamCircuitBreaker(
     finalLLM,
     breakerK !== undefined ? { maxConsecutiveEmpty: breakerK } : {},
+  )
+  // jun-26 observability — per-stream PROGRESS HEARTBEAT. The bench run.log only
+  // gets a line when a TOOL ACTION completes, so a turn stalled INSIDE the LLM
+  // stream (content-less stream awaiting data, or a very slow turn) is invisible
+  // — "troubleshooting blind". This decorator emits a periodic heartbeat DURING
+  // stream consumption that keeps firing while the async generator awaits the
+  // next event, so a stall shows up as idle climbing with content frozen, plus a
+  // one-line summary on completion. Telemetry ONLY — events pass through
+  // byte-identically (no add/drop/reorder/delay), so it is safe DEFAULT-ON (the
+  // whole point is visibility; healthy fast turns finish before the first
+  // interval and stay silent). Wired OUTERMOST — around the breaker — so it
+  // observes the fully-normalized event stream AND surfaces the breaker's own
+  // terminal throw as an `error:` summary. Env override: QUANTA_LLM_STREAM_TRACE_MS
+  // (0 ⇒ disabled; absent ⇒ DEFAULT_STREAM_TRACE_INTERVAL_MS).
+  const traceMs = runtimeConfig().llmStreamTraceMs
+  finalLLM = withStreamProgressTrace(
+    finalLLM,
+    traceMs !== undefined ? { intervalMs: traceMs } : {},
   )
   return finalLLM
 }

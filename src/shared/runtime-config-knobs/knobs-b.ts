@@ -266,6 +266,14 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     describe: "Consecutive content-less-stream circuit-breaker cap (default 2).",
   },
   {
+    envKey: "QUANTA_LLM_STREAM_TRACE_MS",
+    kind: "int",
+    default: undefined,
+    group: "llm",
+    describe:
+      "Per-LLM-stream progress-heartbeat interval (ms); 0=disabled, absent=default 10000 (telemetry only).",
+  },
+  {
     envKey: "QUANTA_LLM_TRANSPORT",
     kind: "string",
     default: undefined,
