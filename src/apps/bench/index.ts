@@ -101,6 +101,7 @@ import {
 } from "./corpus"
 import { runTokenCostLine } from "./analyze/cost"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { attachBenchOtelExport } from "./otel"
 import { resolveModelLanes } from "./model-lanes"
 import { resolveBenchReasoningSummary } from "./reasoning-summary"
 import { finalizeRun, runInstance } from "./eval"
@@ -1082,6 +1083,16 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 // trigger the CLI entry point. Bun sets `import.meta.main` only for the file
 // the runtime started from; unit tests start from `bun test` and never match.
 if (import.meta.main) {
+  // OTLP span export (ADR-0268) — boot wire for the bench process when invoked
+  // directly (legacy `bun run src/apps/bench/index.ts …`). Installed here (not in
+  // `runMain`) so the tested `runMain(deps)` stays env-pure; Default-OFF no-op
+  // unless QUANTA_OTEL_ENDPOINT is set. The unref'd flush timer streams spans
+  // steady-state; a best-effort final flush drains on natural exit. The agent
+  // loop's existing span emit sites become live once the sink is registered.
+  const otelExport = attachBenchOtelExport(process.env)
+  process.on("beforeExit", () => {
+    void otelExport.teardown()
+  })
   runMain().catch((e) => {
     logger.error(`bench fatal: ${errMessage(e)}`)
     // Top-level fatal still goes through the injectable exit binding so a

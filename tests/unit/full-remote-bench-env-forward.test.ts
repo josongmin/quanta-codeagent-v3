@@ -96,6 +96,26 @@ describe("buildForwardedBenchEnv", () => {
     expect(inj).toBe("QUANTA_REASONING_SUMMARY='0; rm -rf /' ")
   })
 
+  test("FWD-10: OTLP live-trace endpoint + service name reach the box (live span stream)", () => {
+    // jun-26 ADR-0268: the box's agent loop attaches the OTLP exporter ONLY when
+    // QUANTA_OTEL_ENDPOINT is in its env. Without forwarding, the box stays
+    // Default-OFF and the operator gets NO live span stream (falls back to the
+    // flaky box→local run.log push). Both vars are non-BENCH-prefixed, so they
+    // must be in the explicit FORWARD_EXTRA_ENV allowlist.
+    const out = buildForwardedBenchEnv({
+      QUANTA_OTEL_ENDPOINT: "http://127.0.0.1:4318",
+      QUANTA_OTEL_SERVICE_NAME: "quanta-bench-box",
+      QUANTA_BENCH_A: "1",
+    })
+    expect(out).toContain("QUANTA_OTEL_ENDPOINT='http://127.0.0.1:4318' ")
+    expect(out).toContain("QUANTA_OTEL_SERVICE_NAME='quanta-bench-box' ")
+    // shell-quoted (no injection) and still NOT a blanket widening — a sibling
+    // OTEL knob NOT in the allowlist stays home.
+    const inj = buildForwardedBenchEnv({ QUANTA_OTEL_ENDPOINT: "http://x; rm -rf /" })
+    expect(inj).toBe("QUANTA_OTEL_ENDPOINT='http://x; rm -rf /' ")
+    expect(buildForwardedBenchEnv({ QUANTA_OTEL_BATCH_SIZE: "128" })).toBe("")
+  })
+
   test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {
     expect(() =>
       buildForwardedBenchEnv({

@@ -78,6 +78,7 @@ import {
   planMicrochunks,
   writeMicrochunks,
 } from "./slicing/microchunk"
+import { attachBenchOtelExport } from "./otel"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
 // logger.info writes nowhere).
@@ -2056,6 +2057,17 @@ const main = async (): Promise<void> => {
 // Only run when invoked directly (not when imported by a test) so unit tests
 // can exercise the helpers without launching the CLI.
 if (import.meta.main) {
+  // OTLP span export (ADR-0268) — this is the PRIMARY bench entry: the operator's
+  // `quanta-bench run --swebench …` AND the full-remote box (which runs
+  // `bun run src/apps/bench/cli.ts run --swebench …`). When QUANTA_OTEL_ENDPOINT is
+  // forwarded to the box (see remote/box-session FORWARD_EXTRA_ENV), the box's
+  // agent loop spans STREAM to the operator's collector instead of the flaky
+  // box→local run.log push. Default-OFF no-op when the endpoint is unset
+  // (byte-identical). Installed here (not in `main`) so the routing fn stays pure.
+  const otelExport = attachBenchOtelExport(process.env)
+  process.on("beforeExit", () => {
+    void otelExport.teardown()
+  })
   main().catch((err) => {
     logger.info(`quanta-bench error: ${errMessage(err)}`)
     process.exit(1)

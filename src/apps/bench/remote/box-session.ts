@@ -135,6 +135,15 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
   // (same env-forwarding bug class as QUANTA_MAX_TURNS). Forward it so the
   // override actually reaches the box.
   "QUANTA_REASONING_SUMMARY",
+  // jun-26: OTLP live-trace export (ADR-0268). The box's agent loop attaches the
+  // OTLP exporter (apps/bench/cli.ts boot wire) ONLY when QUANTA_OTEL_ENDPOINT is
+  // set in its env — without forwarding it the box stays Default-OFF and the
+  // operator gets NO live span stream (falls back to the flaky box→local run.log
+  // push). The operator points QUANTA_OTEL_ENDPOINT at a reverse-tunneled laptop
+  // receiver (like the oauth proxy). QUANTA_OTEL_SERVICE_NAME rides along so the
+  // operator can label the box's spans distinctly.
+  "QUANTA_OTEL_ENDPOINT",
+  "QUANTA_OTEL_SERVICE_NAME",
 ])
 
 /**
