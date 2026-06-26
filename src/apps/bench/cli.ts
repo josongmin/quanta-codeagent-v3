@@ -58,6 +58,7 @@ import {
 } from "./preset"
 import type { GradeBackend } from "./remote/backend"
 import { boxRunLogPath, D, inspectBox, provisionBox } from "./remote/box-session"
+import { BENCH_SSH_SAFE_OPTS } from "./remote/box-session/shell"
 import { createEc2Backend } from "./remote/ec2"
 import { createFanoutBackend } from "./remote/fanout"
 import { refreshRemoteAuthJson } from "./remote/fresh-auth"
@@ -1547,8 +1548,7 @@ const sshBoxText = async (
       "ssh",
       "-i",
       keyPath,
-      "-o",
-      "StrictHostKeyChecking=accept-new",
+      ...BENCH_SSH_SAFE_OPTS,
       "-o",
       "ConnectTimeout=15",
       "-o",
@@ -1575,8 +1575,7 @@ const sshBoxFollow = async (keyPath: string, host: string, remoteCmd: string): P
       "ssh",
       "-i",
       keyPath,
-      "-o",
-      "StrictHostKeyChecking=accept-new",
+      ...BENCH_SSH_SAFE_OPTS,
       "-o",
       "ConnectTimeout=15",
       "-o",

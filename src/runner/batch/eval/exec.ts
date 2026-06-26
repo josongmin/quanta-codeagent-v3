@@ -17,12 +17,43 @@
  * word-splitting would corrupt the `:(exclude,top)…` magic. LLM-controlled
  * inputs MUST flow through the agent's `bash` tool, NOT through this helper.
  */
-import { applyLocalEnv, DEFAULT_ENV_ALLOWLIST, type LocalEnvSelection, scrubEnv } from "@/runtime"
+import {
+  applyLocalEnv,
+  DEFAULT_ENV_ALLOWLIST,
+  defaultPpidWalkKiller,
+  type LocalEnvSelection,
+  scrubEnv,
+} from "@/runtime"
 
 export interface ExecResult {
   code: number
   stdout: string
   stderr: string
+}
+
+// jun-26 SE-audit: a bench test/install command is a process TREE
+// (`bash -c "<testCmd>"` → pytest → workers). `proc.kill()` signals only the
+// `bash` root, so a surviving child holds the stdout/stderr pipe open and the
+// `new Response(proc.stdout).text()` await HANGS past the deadline — leaking the
+// tree and stalling the whole grading run. Tree-kill on timeout (SIGTERM, then
+// SIGKILL after a grace) — the same primitive the agent's bash bg-registry uses.
+const BENCH_TREE_KILLER = defaultPpidWalkKiller()
+const TREE_SIGKILL_GRACE_MS = 2_000
+
+/** Arm a deadline that tree-kills `proc` (SIGTERM → SIGKILL escalation). Returns
+ *  the cleanup that cancels both timers. No-op when `proc.pid` is undefined. */
+const armTreeKillTimeout = (proc: { pid?: number }, timeoutMs: number): (() => void) => {
+  let kill9: ReturnType<typeof setTimeout> | undefined
+  const term = setTimeout(() => {
+    const pid = proc.pid
+    if (pid === undefined) return
+    BENCH_TREE_KILLER.signalTree(pid, "SIGTERM")
+    kill9 = setTimeout(() => BENCH_TREE_KILLER.signalTree(pid, "SIGKILL"), TREE_SIGKILL_GRACE_MS)
+  }, timeoutMs)
+  return () => {
+    clearTimeout(term)
+    if (kill9 !== undefined) clearTimeout(kill9)
+  }
 }
 
 export interface ExecOptions {
@@ -57,7 +88,7 @@ export const exec = async (
     stderr: "pipe",
     env: execEnv(options),
   })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
+  const cancelKill = armTreeKillTimeout(proc, timeoutMs)
   try {
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -66,7 +97,7 @@ export const exec = async (
     const code = await proc.exited
     return { code, stdout, stderr }
   } finally {
-    clearTimeout(timer)
+    cancelKill()
   }
 }
 
@@ -87,7 +118,7 @@ export const execArgv = async (
     stderr: "pipe",
     env: execEnv(options),
   })
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
+  const cancelKill = armTreeKillTimeout(proc, timeoutMs)
   try {
     const [stdout, stderr] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -96,7 +127,7 @@ export const execArgv = async (
     const code = await proc.exited
     return { code, stdout, stderr }
   } finally {
-    clearTimeout(timer)
+    cancelKill()
   }
 }
 

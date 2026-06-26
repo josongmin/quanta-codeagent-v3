@@ -241,7 +241,7 @@ export type CompactResult =
        * headroom gained. `deferred` covers the HITL/hook skip (the host
        * explicitly chose to wait one turn — not a failure to make progress).
        */
-      reason: "under_threshold" | "no_boundary" | "deferred"
+      reason: "under_threshold" | "no_boundary" | "deferred" | "empty_summary"
     }
   | { compacted: true; messages: Message[]; summaryTokens: number }
 
@@ -647,6 +647,14 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
     // loop differentiates them only for emit/log purposes.
   }
   const summary = await summarize(input.llm, prefix)
+  // jun-26 SE-audit: an EMPTY/refused summarizer response must NOT replace the
+  // summarized prefix with an empty summary (it would silently DESTROY history).
+  // Abort this compaction and keep the full message list — parity with the
+  // reactive path's "continuation summary came back empty" guard. compacted:false
+  // is an unproductive strike, so the breaker still trips if it keeps recurring.
+  if (summary.trim() === "") {
+    return { compacted: false, messages: input.messages, reason: "empty_summary" }
+  }
   const synthetic: Message = {
     role: "user",
     content: [{ type: "text", text: `<conversation summary>\n${summary}` }],
