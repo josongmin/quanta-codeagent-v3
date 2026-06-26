@@ -243,11 +243,13 @@ export interface InstanceResult {
   /** Rolled-up token usage (only when observing and the LLM reported it). */
   usage?: InstanceUsage
   /**
-   * Per-instance adaptive-timeout + retry budget (measurement-stability slice).
-   * ABSENT (default) ⇒ neither adaptive nor retry ran (byte-identical path);
-   * the report.json omits the field entirely. PRESENT ⇒ the driver applied
-   * the knob-aware adaptive timeout and/or the transient-retry loop and is
-   * recording the per-attempt history for after-the-fact analysis.
+   * Per-instance transient-retry budget (measurement-stability slice).
+   * ABSENT (default) ⇒ the retry loop did not run (byte-identical path);
+   * the report.json omits the field entirely. PRESENT ⇒ the driver ran the
+   * transient-retry loop and is recording the per-attempt history for
+   * after-the-fact analysis. `adaptedTimeoutMs` always equals `baseTimeoutMs`
+   * (knob `costMultiplier` is a matrix-budget construct, never a wall-clock
+   * multiplier).
    *
    * `attempts === 1` and `attemptOutcomes.length === 1` is the standard
    * single-pass posture (no retry consumed). `baseTimeoutMs === adaptedTimeoutMs`
@@ -462,8 +464,9 @@ export type BenchAttemptOutcome =
 export interface BenchInstanceBudget {
   /** `deps.timeoutMs` as passed by the caller (pre-adaptation). */
   baseTimeoutMs: number
-  /** `baseTimeoutMs * Σ(active knob costMultipliers)` clamped to 30 min.
-   *  Equals `baseTimeoutMs` when no knob is active. */
+  /** The per-attempt deadline actually used. Always equals `baseTimeoutMs` —
+   *  knob `costMultiplier` is a matrix-budget construct, never a wall-clock
+   *  multiplier. Retained for the report shape. */
   adaptedTimeoutMs: number
   /** Number of attempts actually consumed (1 = no retry). */
   attempts: number

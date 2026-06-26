@@ -95,11 +95,10 @@ import type {
 } from "../types"
 import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
-import { computeAdaptedTimeout } from "./adaptive-timeout"
 import {
+  type CandidateFamily,
   candidateFamilyCoverageMissing,
   isCoChangeFamily,
-  type CandidateFamily,
 } from "./candidate-families"
 import { type DoneTimeCaptureClass, isCaptureFailure } from "./capture-correctness"
 import {
@@ -332,12 +331,16 @@ export interface RunInstanceDeps {
    * loop. ABSENT (default) ⇒ feature OFF (byte-identical single-pass path) —
    * `deps.timeoutMs` is the deadline, retries are not attempted, and the
    * `budget` field is omitted from `InstanceResult`. PRESENT ⇒ the driver:
-   *   1. resolves the bench-surface knob state from `process.env`;
-   *   2. computes `adaptedTimeoutMs = baseMs * Σ(active costMultipliers)`
-   *      clamped to 30 min, and uses that as the per-attempt deadline;
-   *   3. runs up to `maxAttempts` attempts, classifying each `InstanceResult`
+   *   1. resolves `maxAttempts` (test seam > preset `retryTransient` > 1);
+   *   2. runs up to `maxAttempts` attempts, classifying each `InstanceResult`
    *      and retrying ONLY transient outcomes (empty-patch / infra-fail).
-   *   4. stamps `result.budget` with the per-attempt history.
+   *   3. stamps `result.budget` with the per-attempt history.
+   *
+   * NOTE: the per-attempt timeout is the operator-controlled `deps.timeoutMs`
+   * verbatim — knob `costMultiplier` is a matrix-budget construct (e.g.
+   * repro-test=40) and was intentionally NOT used as a wall-clock multiplier
+   * (it would balloon an `agentless-v1` instance ~15×). `budget.adaptedTimeoutMs`
+   * therefore always equals `baseTimeoutMs`.
    *
    * `maxAttempts === 1` is byte-identical to the pre-feature single-pass
    * path EXCEPT that `budget` is recorded. To keep the JSON report
@@ -2389,7 +2392,9 @@ const buildConfigGuards = (
       ? { lspPrewarm: { enabled: true, warmSignal: signal } }
       : {}),
     ...(verifyGuard !== undefined ? { verifyGuard } : {}),
-    ...(instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS") ? { protectTestPaths: true } : {}),
+    ...(instance.swebench && !gateDisabled(process.env, "QUANTA_BENCH_PROTECT_TESTS")
+      ? { protectTestPaths: true }
+      : {}),
   }
 }
 
@@ -3103,10 +3108,7 @@ const runRepairPhase = async (
   // preserved. INITIAL generation (`runAgentPhase`) is unchanged.
   const resolvedPosture =
     postureOverride ??
-    benchPostureFromState(
-      stateOverride ?? resolveBenchKnobs({ envVars: process.env }),
-      process.env,
-    )
+    benchPostureFromState(stateOverride ?? resolveBenchKnobs({ envVars: process.env }), process.env)
   const repairPosture = repairLocalizePhaseSuppressed(resolvedPosture)
   // B1/B3: thread the slice-resolving inputs into the classic-repair packet so
   // its owner evidence carries exact slices (paired with issue symbols) and it
@@ -4366,7 +4368,9 @@ const structuralRepairFamilyFromSelection = (
   candidateFiles: readonly string[],
   candidateFamilies: readonly (CandidateFamily | undefined)[],
 ): CandidateFamily | undefined => {
-  const families = candidateFamilies.filter((family): family is CandidateFamily => family !== undefined)
+  const families = candidateFamilies.filter(
+    (family): family is CandidateFamily => family !== undefined,
+  )
   if (families.length === 0) return undefined
   let bestMissing: CandidateFamily | undefined
   let fallback: CandidateFamily | undefined
@@ -6005,21 +6009,23 @@ export const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
  * Public entry-point with measurement-stability wrapper.
  *
  * Flow:
- *   1. Resolve bench knob state from `process.env`. (Pure: closed-port read.)
- *   2. Compute the adaptive per-attempt timeout via `computeAdaptedTimeout`
- *      (= `baseMs * Σ(active knob costMultipliers)`, clamped to 30 min).
- *   3. Resolve `maxAttempts` (`deps.measurementStability?.maxAttempts` >
+ *   1. Resolve `maxAttempts` (`deps.measurementStability?.maxAttempts` >
  *      `QUANTA_BENCH_RETRY_TRANSIENT` > 1).
- *   4. Run the retry loop: each iteration calls `runInstanceOnce` with deps
- *      whose `timeoutMs` is the ADAPTED value. Classify the result; stop on
- *      pass / real-fail / policy says stop.
- *   5. Stamp `result.budget` with the per-attempt history when adaptive OR
- *      retry produced a non-baseline value; otherwise omit (byte-identical
- *      JSON report shape).
+ *   2. Run the retry loop: each iteration calls `runInstanceOnce` with
+ *      `deps.timeoutMs` as the per-attempt deadline. Classify the result;
+ *      stop on pass / real-fail / policy says stop.
+ *   3. Stamp `result.budget` with the per-attempt history when the retry loop
+ *      ran; otherwise omit (byte-identical JSON report shape).
  *
- * Byte-identical fence: when `maxAttempts === 1` (default) AND every active
- * knob's `costMultiplier <= 1` (i.e. `adaptedTimeoutMs === baseTimeoutMs`),
- * the wrapper:
+ * Per-attempt timeout is the operator-controlled `deps.timeoutMs` verbatim.
+ * Knob `costMultiplier` is a matrix-budget construct (e.g. repro-test=40) and
+ * is intentionally NOT used as a wall-clock multiplier — using it would balloon
+ * an `agentless-v1` instance ~15×. `budget.adaptedTimeoutMs` therefore always
+ * equals `baseTimeoutMs` (kept for the report shape, truthful — the timeout
+ * actually used per attempt). This mirrors the prod twin in
+ * `src/apps/bench/eval/driver.ts`.
+ *
+ * Byte-identical fence: when `maxAttempts === 1` (default) the wrapper:
  *   - calls `runInstanceOnce` EXACTLY ONCE with `deps.timeoutMs` unchanged;
  *   - does NOT stamp `result.budget` (omitted);
  *   - returns the same `InstanceResult` shape the legacy path would have.
@@ -6028,21 +6034,7 @@ export const runInstance = async (
   instance: Instance,
   deps: RunInstanceDeps,
 ): Promise<InstanceResult> => {
-  // Resolve knob state for adaptive timeout. Fail-soft: any unexpected
-  // throw in the resolver falls back to baseMs (byte-identical posture).
-  let adaptedTimeoutMs = deps.timeoutMs
   const baseTimeoutMs = deps.timeoutMs
-  try {
-    const state = resolveBenchKnobs({ envVars: process.env })
-    adaptedTimeoutMs = computeAdaptedTimeout(deps.timeoutMs, state)
-    // computeAdaptedTimeout returns 0 for garbage baseMs; preserve the caller's
-    // value in that case (the deadline timer will fire immediately, which is
-    // the intended fail-fast posture).
-    if (adaptedTimeoutMs === 0 && deps.timeoutMs > 0) adaptedTimeoutMs = deps.timeoutMs
-  } catch {
-    // Any resolution error ⇒ baseline posture. Telemetry concerns must
-    // never fail a measurement run.
-  }
 
   // Resolve maxAttempts. Precedence: deps.measurementStability.maxAttempts
   // (test seam) > unified posture `retryTransient` (preset/env via the knob
@@ -6055,14 +6047,13 @@ export const runInstance = async (
   )
   const policy = deps.measurementStability?.policy ?? DEFAULT_POLICY
 
-  // Adapted deps: only `timeoutMs` differs. All other fields are passed
-  // through verbatim so each attempt sees the same agent / repair / observe
-  // wiring. `measurementStability` is stripped so the inner call doesn't try
-  // to recurse into the wrapper.
+  // Inner deps: all fields are passed through verbatim so each attempt sees the
+  // same agent / repair / observe wiring. `measurementStability` is stripped so
+  // the inner call doesn't try to recurse into the wrapper.
   const innerDeps: RunInstanceDeps = {
     llm: deps.llm,
     maxTurns: deps.maxTurns,
-    timeoutMs: adaptedTimeoutMs,
+    timeoutMs: baseTimeoutMs,
     ...(deps.budgetMeterFactory !== undefined
       ? { budgetMeterFactory: deps.budgetMeterFactory }
       : {}),
@@ -6072,11 +6063,11 @@ export const runInstance = async (
     ...(deps.goldSanity !== undefined ? { goldSanity: deps.goldSanity } : {}),
   }
 
-  // Byte-identical fast path: single attempt + adapted === base ⇒ run the
-  // legacy single-pass and return without stamping `budget`. This is the
-  // contract that keeps `QUANTA_BENCH_RETRY_TRANSIENT=1` + all-knobs-OFF
-  // identical to the pre-feature wall-clock and JSON shape.
-  if (maxAttempts === 1 && adaptedTimeoutMs === baseTimeoutMs) {
+  // Byte-identical fast path: single attempt ⇒ run the legacy single-pass and
+  // return without stamping `budget`. This is the contract that keeps
+  // `QUANTA_BENCH_RETRY_TRANSIENT=1` identical to the pre-feature wall-clock
+  // and JSON shape.
+  if (maxAttempts === 1) {
     return runInstanceOnce(instance, innerDeps)
   }
 
@@ -6087,16 +6078,15 @@ export const runInstance = async (
   )
   const budget = {
     baseTimeoutMs,
-    adaptedTimeoutMs,
+    // Equals `baseTimeoutMs` by design — knob `costMultiplier` is a matrix-
+    // budget construct, never a wall-clock multiplier (see the doc above).
+    adaptedTimeoutMs: baseTimeoutMs,
     attempts: loop.attempts,
     attemptOutcomes: loop.outcomes.map(projectOutcome),
   }
   return { ...result, budget }
 }
 
-/** Re-export the adaptive-timeout helpers so apps/bench's matrix budget tools
- *  can reuse the exact same projection. */
-export { computeAdaptedTimeout, MAX_TIMEOUT_MS, sumCostMultipliers } from "./adaptive-timeout"
 export type { BenchIssueHintMode, BenchKnobState, BenchPosture } from "./knobs-bench"
 // Knob wiring helpers — re-exported for the report path + tests so callers
 // don't have to import from two siblings.
