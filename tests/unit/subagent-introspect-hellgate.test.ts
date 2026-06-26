@@ -380,4 +380,31 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
       expect(out.agents[0]?.status).toBe("running")
     }
   })
+
+  // BOUNDEDNESS: the AgentMetaRegistry side-table must NOT grow unbounded —
+  // when a child reaches a terminal state the spawn path drops its entry. Without
+  // the `delete` cleanup this read-back finds a lingering entry (red-on-injection).
+  test("spawn_agent deletes its AgentMetaRegistry entry once the child settles", async () => {
+    const reg = new TaskRegistry()
+    const meta = new AgentMetaRegistry()
+    // Runner resolves immediately ⇒ registry.complete(...) settles the task.
+    const runner: SubagentRunner = async () => ({ ok: true, finalText: "done", turns: 1 })
+    const { tools } = createSubagent6Tools({ runner, registry: reg, agentMeta: meta })
+    const spawn = tools.find((t) => t.name === "spawn_agent") as Tool
+    const res = await drive(spawn, { prompt: "settle then vanish", agent_type: "Explore" })
+    expect(res.type).toBe("result")
+    // Pull the freshly-minted agent id (the only record in this fresh registry),
+    // then wait for the fire-and-forget settle continuation (complete → finally).
+    const listed = handleListAgents({ includeSettled: true }, { registry: reg })
+    const agentId = listed.kind === "success" ? listed.agents[0]?.id : undefined
+    expect(agentId).toBeDefined()
+    if (agentId === undefined) return
+    await reg.waitForSettle(agentId)
+    // Let the trailing `.finally(delete)` microtask flush.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(meta.get(agentId)).toBeUndefined()
+    // Sanity: the task itself is no longer a live (running) entry either.
+    expect(reg.pendingIds()).not.toContain(agentId)
+  })
 })

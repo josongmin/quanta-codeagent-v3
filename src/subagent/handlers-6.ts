@@ -507,8 +507,14 @@ interface SpawnAgentDeps {
    *  label}` into so `list_agents` can show richer rows WITHOUT mutating the
    *  frozen `TaskRecord` contract. Absent ⇒ no write (byte-identical spawn
    *  path). Typed structurally (a `set(id,{depth,label})` method) so this slice
-   *  does not depend on the concrete `AgentMetaRegistry` class import shape. */
-  agentMeta?: { set(agentId: string, meta: { depth: number; label: string }): void }
+   *  does not depend on the concrete `AgentMetaRegistry` class import shape.
+   *  Optional `delete` lets the spawn path drop the entry when the child
+   *  settles so the side-table does not grow unbounded; a `{set}`-only stub
+   *  (older host wiring / tests) is still accepted and simply skips cleanup. */
+  agentMeta?: {
+    set(agentId: string, meta: { depth: number; label: string }): void
+    delete?(agentId: string): void
+  }
   /** B3 — closed-port per-session cap on CONCURRENT running subagents. When
    *  set, `spawn_agent` counts currently-running TaskRegistry records and
    *  rejects (cause:"concurrency_cap") any spawn that would exceed it. Absent
@@ -660,10 +666,16 @@ export const handleSpawnAgent = async (
   }
 
   // Fire-and-forget: the registry record settles when the runner returns.
+  // On EITHER terminal path (complete/fail) drop the optional agentMeta entry
+  // so the side-table is bounded by the set of RUNNING agents, not every agent
+  // ever spawned. Idempotent + no-op when the host wired a `{set}`-only stub or
+  // no side-table at all (byte-identical default-OFF path). Mirrors how the
+  // registry record itself stops being a live `pendingIds()` entry on settle.
   void deps
     .runner(req)
     .then((r) => deps.registry.complete(taskId, r))
     .catch((e: unknown) => deps.registry.fail(taskId, errMessage(e)))
+    .finally(() => deps.agentMeta?.delete?.(taskId))
 
   return { kind: "success", agentId: taskId, ownerToken }
 }
