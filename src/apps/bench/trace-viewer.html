@@ -33,6 +33,16 @@
   .legend{display:flex;gap:12px;font-size:11px;color:var(--dim);align-items:center}
   .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
   main{display:flex;height:calc(100vh - 53px)}
+  /* left session picker — choose WHICH run/session before the waterfall renders */
+  #sessions{width:248px;flex:none;overflow:auto;border-right:1px solid var(--line);background:var(--panel)}
+  #sessions .sh{padding:9px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--dim);position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line)}
+  .sess{padding:8px 12px;border-bottom:1px solid var(--grid);cursor:pointer;border-left:2px solid transparent}
+  .sess:hover{background:#0f141d}
+  .sess.sel{background:#152033;border-left-color:var(--accent)}
+  .sess .si{color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+  .sess .sm{color:var(--dim);font-size:10px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}
+  .sess .sm .e{color:var(--err)}
   #waterfall{flex:1;overflow:auto;padding:8px 0}
   .trace{margin:0 0 4px}
   .trace>.thead{display:flex;gap:10px;align-items:center;padding:6px 16px;
@@ -80,7 +90,7 @@
 <header>
   <h1>quanta<span class="dot">·</span>live trace</h1>
   <div class="stat"><b id="s-spans">0</b><span>spans</span></div>
-  <div class="stat"><b id="s-traces">0</b><span>traces</span></div>
+  <div class="stat"><b id="s-traces">0</b><span>turns</span></div>
   <div class="stat"><b id="s-err" style="color:var(--err)">0</b><span>errors</span></div>
   <div class="stat"><b id="s-tin">0</b><span>tok in</span></div>
   <div class="stat"><b id="s-tout">0</b><span>tok out</span></div>
@@ -93,10 +103,11 @@
     <span><i style="background:var(--root)"></i>session</span>
     <span><i style="background:var(--err)"></i>error</span>
   </div>
-  <select id="traceSel"><option value="">all traces</option></select>
+  <span class="stat"><b id="s-sess">0</b><span>sessions</span></span>
   <button id="auto" class="on">● live</button>
 </header>
 <main>
+  <div id="sessions"></div>
   <div id="waterfall"></div>
   <div id="resizer" title="drag to resize"></div>
   <div id="side"><div class="empty">click a span →</div></div>
@@ -119,7 +130,30 @@ const KEYATTR = (s) => {
   if (a["quanta.instance.id"]||a["instance"]) return a["quanta.instance.id"]||a["instance"];
   return "";
 };
-let selId = null, auto = true, lastData = [];
+let selId = null, selSession = null, auto = true, lastData = [];
+
+// Group spans into SESSIONS. A session = one run/conversation, keyed by
+// quanta.instance.id when present (so all turns of one bench instance fold
+// together even across trace ids), else the traceId. Returns key → {label, spans}.
+function sessionsOf(spans){
+  const byTrace = new Map();
+  for(const s of spans){ const t = s.traceId||"·"; if(!byTrace.has(t)) byTrace.set(t,[]); byTrace.get(t).push(s); }
+  const attrAny = (arr,k)=>{ const h=arr.find(x=>x.attrs&&x.attrs[k]!=null); return h?h.attrs[k]:undefined; };
+  const sess = new Map();
+  for(const [t,arr] of byTrace){
+    // session identity: bench instance id (readable) > conversation id > trace id.
+    const inst = attrAny(arr,"quanta.instance.id");
+    const conv = attrAny(arr,"quanta.conversation.id");
+    const key = inst || conv || t;
+    // label: instance name if the bench tagged it; else a short, stable handle.
+    const label = inst || ("session " + String(conv||t).replace(/^bench-/,"").slice(0,8));
+    let e = sess.get(key);
+    if(!e){ e = {key, label, spans: [], traces: new Set()}; sess.set(key,e); }
+    for(const s of arr) e.spans.push(s);
+    e.traces.add(t);
+  }
+  return sess;
+}
 
 async function poll(){
   try{
@@ -129,43 +163,57 @@ async function poll(){
   }catch(e){/* sink restarting; keep last */}
 }
 function render(spans){
-  // group by trace
-  const traces = new Map();
-  let errs=0, tin=0, tout=0;
-  for(const s of spans){
-    const t = s.traceId||"·";
-    if(!traces.has(t)) traces.set(t,[]);
-    traces.get(t).push(s);
-    if(s.status==="error") errs++;
-    tin += +(s.attrs?.["gen_ai.usage.input_tokens"]||0);
-    tout += +(s.attrs?.["gen_ai.usage.output_tokens"]||0);
-  }
-  document.getElementById("s-spans").textContent = spans.length;
-  document.getElementById("s-traces").textContent = traces.size;
-  document.getElementById("s-err").textContent = errs;
-  document.getElementById("s-tin").textContent = tin.toLocaleString();
-  document.getElementById("s-tout").textContent = tout.toLocaleString();
+  // ── sessions: summarize each, sort most-recent first ──
+  const sess = sessionsOf(spans);
+  const list = [...sess.values()].map(e=>{
+    let min=Infinity,max=-Infinity,err=0,turns=0,tin=0,tout=0;
+    for(const s of e.spans){
+      min=Math.min(min,s.startNano); max=Math.max(max,s.endNano);
+      if(s.status==="error") err++;
+      if((s.name||"").includes("turn")) turns++;
+      tin += +(s.attrs?.["gen_ai.usage.input_tokens"]||0);
+      tout += +(s.attrs?.["gen_ai.usage.output_tokens"]||0);
+    }
+    return Object.assign(e,{min,max,err,turns,tin,tout,dur:isFinite(min)?(max-min)/1e9:0});
+  }).sort((a,b)=>b.max-a.max);
 
-  // trace selector
-  const sel = document.getElementById("traceSel");
-  const want = sel.value;
-  const opts = ['<option value="">all traces ('+traces.size+')</option>'];
-  for(const [t,arr] of traces){
-    const nm = arr.find(x=>x.attrs?.["quanta.instance.id"])?.attrs["quanta.instance.id"] || t.slice(0,8);
-    opts.push(`<option value="${esc(t)}"${t===want?" selected":""}>${esc(nm)} · ${arr.length}sp</option>`);
-  }
-  sel.innerHTML = opts.join("");
+  // default / keep selection valid (auto-pick the most recent session)
+  if(!selSession || !sess.has(selSession)) selSession = list.length ? list[0].key : null;
 
-  // global wall = max end - min start across shown traces
-  const shown = want ? [[want,traces.get(want)||[]]] : [...traces];
-  let gmin=Infinity,gmax=-Infinity;
-  for(const [,arr] of shown) for(const s of arr){ gmin=Math.min(gmin,s.startNano); gmax=Math.max(gmax,s.endNano); }
-  document.getElementById("s-wall").textContent = isFinite(gmin)? ((gmax-gmin)/1e9).toFixed(1)+"s" : "0s";
+  // ── left sidebar: the session picker ──
+  const sb = document.getElementById("sessions");
+  const hhmmss = (nano)=> isFinite(nano) ? new Date(nano/1e6).toLocaleTimeString() : "";
+  sb.innerHTML = '<div class="sh">sessions · '+list.length+'</div>' + list.map(e=>
+    '<div class="sess'+(e.key===selSession?' sel':'')+'" data-k="'+esc(e.key)+'">'
+    + '<div class="si">'+esc(e.label)+'</div>'
+    + '<div class="sm"><span>'+hhmmss(e.min)+'</span>'
+    + '<span>'+e.spans.length+' sp</span>'
+    + (e.turns?'<span>'+e.turns+' turn</span>':'')
+    + (e.err?'<span class="e">'+e.err+' err</span>':'')
+    + '<span>'+e.dur.toFixed(1)+'s</span>'
+    + (e.tin?'<span>'+(e.tin/1000).toFixed(1)+'k→'+e.tout+'</span>':'')
+    + '</div></div>'
+  ).join('');
+  sb.querySelectorAll('.sess').forEach(el=> el.onclick = ()=>{ selSession=el.dataset.k; selId=null; render(lastData); });
 
+  // header stats reflect the SELECTED session
+  const cur = list.find(e=>e.key===selSession);
+  document.getElementById("s-sess").textContent = list.length;
+  document.getElementById("s-spans").textContent = cur? cur.spans.length : 0;
+  document.getElementById("s-traces").textContent = cur? cur.turns : 0;
+  document.getElementById("s-err").textContent = cur? cur.err : 0;
+  document.getElementById("s-tin").textContent = cur? cur.tin.toLocaleString() : "0";
+  document.getElementById("s-tout").textContent = cur? cur.tout.toLocaleString() : "0";
+  document.getElementById("s-wall").textContent = cur? cur.dur.toFixed(1)+"s" : "0s";
+
+  // ── waterfall: ONLY the selected session, grouped by its trace(s)/turns ──
   const wf = document.getElementById("waterfall");
   const sc = wf.scrollTop;
   wf.innerHTML = "";
-  for(const [t,arr] of shown){
+  if(!cur){ wf.innerHTML = '<div class="empty" style="padding:24px">세션 없음 — 벤치를 <code>QUANTA_OTEL_ENDPOINT</code> 로 돌리면 여기 채워진다.</div>'; return; }
+  const byTrace = new Map();
+  for(const s of cur.spans){ const t=s.traceId||"·"; if(!byTrace.has(t)) byTrace.set(t,[]); byTrace.get(t).push(s); }
+  for(const [t,arr] of byTrace){
     if(!arr.length) continue;
     const tmin = Math.min(...arr.map(s=>s.startNano));
     const tmax = Math.max(...arr.map(s=>s.endNano));
@@ -227,7 +275,6 @@ function showSide(s){
     `<span class="pill ${esc(s.status)}">${esc(s.status)}</span></div>`+
     (blocks || `<div class="empty">no attributes</div>`);
 }
-document.getElementById("traceSel").onchange = ()=>render(lastData);
 document.getElementById("auto").onclick = (e)=>{ auto=!auto; e.target.classList.toggle("on",auto); e.target.textContent = auto?"● live":"○ paused"; };
 
 // drag the divider to resize the detail panel; width persists across reloads.
