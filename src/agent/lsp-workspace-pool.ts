@@ -58,6 +58,9 @@ interface WorkspaceEntry {
   idleTimer?: ReturnType<typeof setTimeout> | undefined
   destroyed: boolean
   stopPromise?: Promise<void> | undefined
+  /** Monotonic recency stamp — bumped on every `acquire` (hit or create) so the
+   *  max-live cap can reap the LEAST-recently-used IDLE entry. Higher = newer. */
+  lastUsedSeq: number
 }
 
 /** Default idle-TTL (30 minutes) before an unreferenced workspace is reaped
@@ -103,10 +106,28 @@ export class SharedWorkspacePool {
   private readonly hardEvicted = new Set<string>()
   private readonly backend: WarmBackend
   private readonly idleTtlMs: number
+  /** Hard ceiling on simultaneously-LIVE backends (= language-server child
+   *  processes). undefined ⇒ unbounded (legacy / interactive single-cwd reuse).
+   *  Bench opens a DISTINCT sandbox cwd per instance; without a cap each cwd
+   *  leaves a live pyright child for the 30-min idle-TTL window, so live servers
+   *  ACCUMULATE with instance count (independent of concurrency) until the box
+   *  OOMs (exit 137). The per-server heap cap (server-mem-budget) bounds each
+   *  server's heap but NOT their COUNT — N × 4GB still blows a 64GB box. This cap
+   *  bounds the count regardless of whether the per-instance evict matched the
+   *  opened cwd. */
+  private readonly maxLiveBackends: number | undefined
+  /** Monotonic recency counter — every `acquire` stamps the entry with the next
+   *  value, so {@link enforceMaxLiveBackends} can pick the LRU idle entry. */
+  private useSeq = 0
 
-  constructor(backend: WarmBackend, opts?: { idleTtlMs?: number }) {
+  constructor(backend: WarmBackend, opts?: { idleTtlMs?: number; maxLiveBackends?: number }) {
     this.backend = backend
     this.idleTtlMs = opts?.idleTtlMs ?? DEFAULT_IDLE_TTL_MS
+    // <=0 / non-finite is treated as "unbounded" (the legacy default) rather than
+    // an absurd zero-cap that would evict the entry we just created.
+    const cap = opts?.maxLiveBackends
+    this.maxLiveBackends =
+      cap !== undefined && Number.isFinite(cap) && cap > 0 ? Math.floor(cap) : undefined
   }
 
   /** Engine id of the backing {@link WarmBackend} (logs / test discriminator). */
@@ -129,6 +150,10 @@ export class SharedWorkspacePool {
       entry.idleTimer = undefined
     }
     entry.refs += 1
+    // Bound live backends BEFORE the (potentially slow) boot/warm of THIS entry,
+    // reaping idle LRU workspaces so a bench run's per-instance cwds can never
+    // accumulate into a host OOM. The current entry has refs≥1 ⇒ it is protected.
+    await this.enforceMaxLiveBackends()
     try {
       await entry.startPromise
       await this.warmFile(entry, filePath, signal)
@@ -202,6 +227,9 @@ export class SharedWorkspacePool {
       entry.idleTimer = undefined
     }
     entry.refs += 1
+    // Bound live backends (parity with {@link open}) — reap idle LRU workspaces
+    // so a strict-admission ready-proof sweep across many cwds stays flat.
+    await this.enforceMaxLiveBackends()
     try {
       try {
         await entry.startPromise
@@ -305,7 +333,12 @@ export class SharedWorkspacePool {
 
   private acquire(cwd: string, signal?: AbortSignal): WorkspaceEntry {
     const existing = this.sessions.get(cwd)
-    if (existing) return existing
+    if (existing) {
+      // Touch recency on a warm HIT too, so a frequently-reused cwd is never the
+      // LRU victim (the interactive single-cwd reuse must stay warm).
+      existing.lastUsedSeq = ++this.useSeq
+      return existing
+    }
     const client = this.backend.createClient(cwd)
     const entry: WorkspaceEntry = {
       key: cwd,
@@ -315,6 +348,7 @@ export class SharedWorkspacePool {
       preparingFiles: new Map<string, Promise<boolean>>(),
       refs: 0,
       destroyed: false,
+      lastUsedSeq: ++this.useSeq,
     }
     // start() may reject (binary vanished mid-run): tear the entry down so a
     // later open() re-creates rather than awaiting a permanently-rejected
@@ -325,6 +359,31 @@ export class SharedWorkspacePool {
     })
     this.sessions.set(cwd, entry)
     return entry
+  }
+
+  /** Bound the number of LIVE backends (server processes) at {@link maxLiveBackends}.
+   *  Reaps the LEAST-recently-used IDLE entries (refs===0) — calling the backend
+   *  `stop()` (real process death) — until the live count is within the cap. A
+   *  REFERENCED entry (an in-flight/active session) is never reaped, so the cap
+   *  can transiently exceed its target under concurrent active sessions; it
+   *  re-converges as those sessions release. With the cap unset this is a no-op
+   *  (legacy unbounded behavior, byte-identical). The just-acquired entry for the
+   *  current open has refs≥1 by the time this runs, so it is inherently
+   *  protected — the cap only ever evicts OTHER, idle workspaces. */
+  private async enforceMaxLiveBackends(): Promise<void> {
+    const cap = this.maxLiveBackends
+    if (cap === undefined) return
+    while (this.sessions.size > cap) {
+      let lru: WorkspaceEntry | undefined
+      for (const entry of this.sessions.values()) {
+        if (entry.refs !== 0 || entry.destroyed) continue
+        if (lru === undefined || entry.lastUsedSeq < lru.lastUsedSeq) lru = entry
+      }
+      // No idle entry to reap (all referenced) ⇒ cannot shrink without killing a
+      // live session; stop here and let release() re-converge later.
+      if (lru === undefined) return
+      await this.stopClient(lru, "pool/max-live-evict")
+    }
   }
 
   private handle(entry: WorkspaceEntry): LspNavSession {

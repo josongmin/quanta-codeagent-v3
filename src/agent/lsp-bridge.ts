@@ -254,6 +254,18 @@ export const __hasCachedLspAvailabilityForTest = (bin: string): boolean =>
  *  `30 * 60_000`) so the magic-timeout scan's arithmetic-form false positive
  *  does not trip. */
 const PYRIGHT_NAV_IDLE_TTL_MS = 1_800_000
+/** Hard ceiling on simultaneously-live pyright servers across ALL cwds (DEFAULT-ON,
+ *  jun-26 LSP-OOM fix). A bench run opens a DISTINCT sandbox cwd per instance; the
+ *  per-instance evict reaps the matching cwd, but any miss (a verify-select
+ *  candidate sandbox, or a cwd-mismatch) leaves a live pyright child for the full
+ *  30-min idle-TTL window, so servers ACCUMULATE with instance count until the box
+ *  OOMs (exit 137 — 12 instances OOM'd a 64GB box at concurrency 1 AND 2). The
+ *  per-server heap cap (server-mem-budget) bounds each server's heap but NOT their
+ *  count; this LRU cap bounds the count. Interactive CLI nav reuses ONE cwd across
+ *  turns, so a cap of 2 keeps that workspace permanently warm (no prewarm
+ *  regression) while flattening the bench accumulation curve. Flat literal — the
+ *  magic-number scan tolerates small structural caps. */
+const PYRIGHT_MAX_LIVE_WORKSPACES = 2
 const PYRIGHT_READY_TIMEOUT_MS = 90_000
 const PYRIGHT_READY_RETRY_MS = 1_000
 const PYRIGHT_IMPORT_SCAN_LINE_CAP = 200
@@ -408,7 +420,10 @@ const pyrightBackend: WarmBackend = {
 }
 
 /** The single pyright warm pool (one workspace per cwd, idle-TTL pooled). */
-const pyrightPool = new SharedWorkspacePool(pyrightBackend, { idleTtlMs: PYRIGHT_NAV_IDLE_TTL_MS })
+const pyrightPool = new SharedWorkspacePool(pyrightBackend, {
+  idleTtlMs: PYRIGHT_NAV_IDLE_TTL_MS,
+  maxLiveBackends: PYRIGHT_MAX_LIVE_WORKSPACES,
+})
 
 /** Registry of warm-capable backends, keyed by {@link ServerSpec}. Adding a
  *  warm engine is ONE entry; the nav provider branches on "is there a warm pool

@@ -397,4 +397,108 @@ describe("SharedWorkspacePool — generic engine-agnostic lifecycle (fake backen
     expect(pool.__sizeForTest).toBe(0) // reaped, not leaked
     await pool.disposeAll()
   })
+
+  // --- max-live-backends LRU cap (jun-26 OOM accumulation fix, LSP-OOM) -------
+  //
+  // ROOT CAUSE: a bench run opens a DISTINCT sandbox cwd per instance. Each cwd
+  // is a fresh pool entry (acquire) backing a real pyright child; the only
+  // reapers are explicit evict(cwd), the 30-min idle-TTL, fatal teardown, and
+  // disposeAll. If the per-instance evict ever fails to match the opened cwd (or
+  // a verify-select candidate sandbox is not evicted), the prior server lives
+  // for the whole idle-TTL window — so live pyright servers ACCUMULATE with
+  // instance count (independent of concurrency) until the box OOMs (exit 137).
+  // The per-server heap cap (server-mem-budget) bounds EACH server's heap but
+  // NOT their COUNT: N × 4GB still blows a 64GB box. A max-live-backends LRU cap
+  // bounds the count regardless of evict-matching correctness.
+
+  test("WP-16: N distinct bench cwds with NO cap ⇒ N live backends accumulate (RED control)", async () => {
+    // Paired control for WP-17: this is the UNBOUNDED status quo (no cap opt).
+    // It proves the accumulation is real — the leak the cap closes.
+    const probe = makeBackend()
+    const pool = new SharedWorkspacePool(probe.backend)
+    for (let i = 0; i < 12; i++) {
+      const session = await pool.open(`/repo${i}/a.fake`, `/repo${i}`)
+      await session?.stop() // released to refs=0, but kept warm (idle-TTL)
+    }
+    // Unbounded: every distinct cwd left a live entry + a live client.
+    expect(pool.__sizeForTest).toBe(12)
+    expect(probe.createCalls()).toBe(12)
+    const stopped = probe.clients().filter((c) => c.stopCalls > 0).length
+    expect(stopped).toBe(0) // nothing reaped → 12 live servers → OOM
+    await pool.disposeAll()
+  })
+
+  test("WP-17: maxLiveBackends caps live backends ⇒ LRU idle cwd is stop()'d (accumulation bounded)", async () => {
+    const probe = makeBackend()
+    const pool = new SharedWorkspacePool(probe.backend, { maxLiveBackends: 2 })
+    for (let i = 0; i < 12; i++) {
+      const session = await pool.open(`/repo${i}/a.fake`, `/repo${i}`)
+      await session?.stop()
+    }
+    // Bounded regardless of instance count — flat at the cap.
+    expect(pool.__sizeForTest).toBeLessThanOrEqual(2)
+    // REAL EFFECT: the evicted (LRU) clients were actually stop()'d (process
+    // death), not merely dropped from the map. 12 created, ≤2 still live ⇒ ≥10
+    // stopped. RED-on-injection: without the cap nothing is stopped (WP-16).
+    const stopped = probe.clients().filter((c) => c.stopCalls > 0).length
+    expect(stopped).toBeGreaterThanOrEqual(10)
+    await pool.disposeAll()
+  })
+
+  test("WP-18: cap evicts the LEAST-recently-used cwd, keeping the freshest warm (LRU order)", async () => {
+    const probe = makeBackend()
+    const pool = new SharedWorkspacePool(probe.backend, { maxLiveBackends: 2 })
+    // Open A, B, C in order. With cap=2, opening C must evict A (the LRU), not B.
+    const a = await pool.open("/A/a.fake", "/A")
+    await a?.stop()
+    const b = await pool.open("/B/a.fake", "/B")
+    await b?.stop()
+    const c = await pool.open("/C/a.fake", "/C")
+    await c?.stop()
+    expect(pool.__sizeForTest).toBe(2)
+    // A was the oldest idle entry ⇒ its client is the one stopped.
+    const [clientA, clientB, clientC] = probe.clients()
+    expect(clientA?.stopCalls).toBe(1) // LRU evicted
+    expect(clientB?.stopCalls).toBe(0) // kept warm
+    expect(clientC?.stopCalls).toBe(0) // freshest, kept warm
+    await pool.disposeAll()
+  })
+
+  test("WP-19: a REFERENCED cwd is never evicted by the cap (active sessions protected)", async () => {
+    const probe = makeBackend()
+    const pool = new SharedWorkspacePool(probe.backend, { maxLiveBackends: 1 })
+    // Hold A open (refs=1, never stopped) while opening B and C. The cap=1 must
+    // NOT kill A's in-use server; it can only reap idle (refs=0) entries.
+    const a = await pool.open("/A/a.fake", "/A") // refs=1, NOT released
+    const b = await pool.open("/B/a.fake", "/B")
+    await b?.stop()
+    const c = await pool.open("/C/a.fake", "/C")
+    await c?.stop()
+    const [clientA] = probe.clients()
+    expect(clientA?.stopCalls).toBe(0) // active session survives the cap
+    // A is still usable.
+    const defs = await a?.definition("/A/a.fake", { line: 0, character: 0 })
+    expect(defs).toEqual(LOC)
+    await a?.stop()
+    await pool.disposeAll()
+  })
+
+  test("WP-20: cap≥1 preserves the interactive single-cwd warm reuse (no regression)", async () => {
+    // Interactive CLI reuses ONE cwd across turns; the cap must never evict the
+    // sole warm workspace (that is the whole prewarm benefit). With cap=1, a
+    // prewarm + repeated opens on the SAME cwd spawn exactly one client and keep
+    // it warm — byte-equivalent to the uncapped single-cwd behavior.
+    const probe = makeBackend()
+    const pool = new SharedWorkspacePool(probe.backend, { maxLiveBackends: 1 })
+    await pool.prewarm("/repo/anchor.fake", "/repo")
+    expect(probe.createCalls()).toBe(1)
+    const s1 = await pool.open("/repo/a.fake", "/repo")
+    await s1?.stop()
+    const s2 = await pool.open("/repo/b.fake", "/repo")
+    await s2?.stop()
+    expect(probe.createCalls()).toBe(1) // one warm workspace, reused
+    expect(probe.clients()[0]?.stopCalls).toBe(0) // never reaped by the cap
+    expect(pool.__sizeForTest).toBe(1)
+    await pool.disposeAll()
+  })
 })
