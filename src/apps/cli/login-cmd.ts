@@ -116,7 +116,6 @@ const renderSuccess = (
   return `${renderBox(lines, {
     title: "ChatGPT Sign-In",
     titleStyle: cyan,
-    footer: "ADR-0094 · chatgpt-oauth Phase 1",
   })}\n`
 }
 

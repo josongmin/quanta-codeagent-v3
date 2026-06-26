@@ -188,7 +188,6 @@ export const buildStatusCmd = (deps: StatusDeps = {}): SlashCommand => ({
       `${renderBox(lines, {
         title: "quanta status",
         titleStyle: cyan,
-        footer: "ADR-0094 · chatgpt-oauth Phase 1",
       })}\n`,
     )
     return 0

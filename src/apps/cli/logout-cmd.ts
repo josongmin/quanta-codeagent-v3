@@ -71,7 +71,6 @@ const renderLoggedOut = (
   return `${renderBox(lines, {
     title: "ChatGPT Sign-Out",
     titleStyle: cyan,
-    footer: "ADR-0094 · chatgpt-oauth Phase 2",
   })}\n`
 }
 
@@ -87,7 +86,6 @@ const renderAlreadyOut = (path: string): string =>
     {
       title: "ChatGPT Sign-Out",
       titleStyle: cyan,
-      footer: "ADR-0094 · chatgpt-oauth Phase 2",
     },
   )}\n`
 
@@ -103,7 +101,6 @@ const renderExternallyManaged = (path: string): string =>
     {
       title: "ChatGPT Sign-Out",
       titleStyle: cyan,
-      footer: "ADR-0094 · chatgpt-oauth Phase 2",
     },
   )}\n`
 
@@ -113,7 +110,6 @@ const renderError = (path: string, detail: string): string =>
     {
       title: "ChatGPT Sign-Out",
       titleStyle: cyan,
-      footer: "ADR-0094 · chatgpt-oauth Phase 2",
     },
   )}\n`
 
