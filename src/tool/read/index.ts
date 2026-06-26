@@ -217,6 +217,23 @@ const binaryRejected = (path: string): ToolResult => ({
   failure: { mode: "rejected", reason: "binary_file" },
 })
 
+/** jun-26 SE-audit: `read` materializes the WHOLE file into a JS string + a
+ *  full line-array before paging — `offset`/`limit` do NOT bound the read. The
+ *  agent autonomously picks paths, so a blind `read` of a large checked-in JSON
+ *  dump / lockfile / minified bundle / log can exhaust the heap and crash the
+ *  agent process. A file this large also cannot usefully fit the model's context,
+ *  so we reject BEFORE the read with actionable advice instead of OOM-ing. */
+const MAX_READ_BYTES = 10 * 1024 * 1024
+const tooLargeRejected = (path: string, size: number): ToolResult => ({
+  ok: false,
+  output:
+    `Cannot read ${path}: file is ${Math.round(size / (1024 * 1024))}MB, over the ` +
+    `${MAX_READ_BYTES / (1024 * 1024)}MB read cap. Use grep/search to find the relevant ` +
+    "lines, or read a specific region (this tool loads the whole file, so it cannot " +
+    "stream a window of a file this large).",
+  failure: { mode: "rejected", reason: "file_too_large" },
+})
+
 /** U+FEFF — the BOM code point as it appears in a DECODED string (explicit
  *  escape, not an invisible literal, so it survives copy/paste + future lints).
  *  Bun's `file.text()` usually consumes a UTF-8 BOM already, making the strip a
@@ -326,6 +343,12 @@ const resolveReadOutcome = async (
   // read so we NEVER attempt the hanging read() on a FIFO to sniff it.
   const device = classifyDeviceFile(info, input.path)
   if (device !== null) return { kind: "failure", result: device }
+
+  // jun-26 SE-audit — reject an oversized file BEFORE the whole-file read so a
+  // blind `read` of a huge data dump / lockfile cannot OOM the agent process.
+  if (info.size > MAX_READ_BYTES) {
+    return { kind: "failure", result: tooLargeRejected(input.path, info.size) }
+  }
 
   // P15 + B5 — sniff the bounded leading window ONCE for BOTH the BOM (encoding)
   // and the binary NUL discriminator. ORDER: a UTF-16 BOM marks a NUL-rich-but-

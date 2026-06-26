@@ -138,4 +138,25 @@ describe("read binary/device guard (B5)", () => {
     const r = await run({ path: fifo })
     expect(r.failure).toEqual({ mode: "rejected", reason: "device_file" })
   }, 5000)
+
+  // jun-26 SE-audit: `read` materializes the whole file — a blind read of a huge
+  // data dump / lockfile could OOM the agent. Reject above the 10MB cap BEFORE
+  // the read (and before paging — offset/limit do not bound the underlying read).
+  test("a file over the read cap is REJECTED file_too_large, NOT slurped into memory", async () => {
+    const big = join(dir, "huge.txt")
+    // 11MB of newline-terminated text (text so it passes the binary sniff and
+    // reaches the size gate, not the binary gate).
+    writeFileSync(big, `${"a".repeat(64)}\n`.repeat(Math.ceil((11 * 1024 * 1024) / 65)))
+    const r = await run({ path: big })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "rejected", reason: "file_too_large" })
+    expect(r.output).toContain("read cap")
+  })
+
+  test("a normal-sized file under the cap still reads ok (cap does not over-reject)", async () => {
+    const small = join(dir, "small.txt")
+    writeFileSync(small, "under the cap\n")
+    const r = await run({ path: small })
+    expect(r.ok).toBe(true)
+  })
 })
