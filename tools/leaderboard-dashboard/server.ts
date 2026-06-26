@@ -25,6 +25,11 @@ import { basename, join } from "node:path"
 const HOME = homedir()
 const REPO = join(import.meta.dir, "..", "..")
 const PORT = Number(argOf("--port") ?? 7878)
+// The live OTEL trace waterfall (otel-trace-sink) is shown as a tab here via an
+// iframe. By default the dashboard auto-spawns the sink as a child so ONE command
+// brings up BOTH surfaces; `--no-trace` opts out, `--trace-port N` overrides.
+const TRACE_PORT = Number(argOf("--trace-port") ?? 4318)
+const NO_TRACE = process.argv.includes("--no-trace")
 
 // Where to look for our run reports + the competitor matrix + live logs.
 // Extra roots can be added on the CLI: `--reports /some/dir --reports /other`.
@@ -44,8 +49,7 @@ const REPORT_ROOTS = [
 ]
 // Raw source data lives under the bench tool: tools/leaderboard-dashboard/rawdata/.
 const RAWDATA = join(import.meta.dir, "rawdata")
-const MATRIX_MD =
-  argOf("--matrix") ?? join(RAWDATA, "scaffold-solving-summary.md")
+const MATRIX_MD = argOf("--matrix") ?? join(RAWDATA, "scaffold-solving-summary.md")
 // SWE-bench Verified dataset (500) → problem statement + official difficulty.
 const DATASET_JSONL = argOf("--dataset") ?? join(RAWDATA, "verified-full.jsonl")
 const LIVE_ROOTS = [...argsOf("--live"), join(HOME, "easy-more")]
@@ -954,9 +958,35 @@ const server = Bun.serve({
     return routeRequest(new URL(req.url))
   },
 })
+// Auto-spawn the live-trace receiver (otel-trace-sink) so the "🔭 트레이스" tab's
+// iframe has something to load — one command brings up BOTH surfaces. Best-effort:
+// if the port is already serving (a sink the operator launched themselves), skip;
+// if the spawn fails, the tab simply shows a "sink not running" note. Never blocks
+// or crashes the dashboard.
+const maybeSpawnTraceSink = async (): Promise<void> => {
+  if (NO_TRACE) return
+  const alreadyUp = await fetch(`http://127.0.0.1:${TRACE_PORT}/spans.json`, {
+    signal: AbortSignal.timeout(400),
+  })
+    .then((r) => r.ok)
+    .catch(() => false)
+  if (alreadyUp) return
+  try {
+    Bun.spawn(["bun", join(REPO, "src", "apps", "bench", "otel-trace-sink.ts")], {
+      env: { ...process.env, PORT: String(TRACE_PORT) },
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+  } catch {
+    // no bun on PATH / spawn denied — the tab falls back to its "not running" note.
+  }
+}
+void maybeSpawnTraceSink()
+
 process.stdout.write(
   `${[
     `leaderboard-dashboard → http://localhost:${server.port}`,
+    `  live trace tab → :${TRACE_PORT}${NO_TRACE ? " (--no-trace: not auto-spawned)" : " (auto-spawned)"}`,
     `  reports roots: ${REPORT_ROOTS.join(", ")}`,
     `  matrix: ${MATRIX_MD}`,
   ].join("\n")}\n`,
@@ -1042,6 +1072,7 @@ const HTML = /* html */ `<!doctype html>
   <button data-tab="scaffolds">경쟁 스캐폴드</button>
   <button data-tab="knobs">Knob / 프로필</button>
   <button data-tab="live">라이브</button>
+  <button data-tab="trace">🔭 트레이스</button>
 </nav>
 <div class="wrap" id="view"></div>
 <div class="modal-overlay" id="modal">
@@ -1053,6 +1084,7 @@ const HTML = /* html */ `<!doctype html>
 
 <script>
 let DATA = null, TAB = "matrix", SORT = { key: "hash", dir: -1 };
+const TRACE_PORT = ${TRACE_PORT};
 const SCAF_SHOW = ["sonar-o45","trae-dbo","OH-o45","live-gem3","prom-gpt5","mini-o45"];
 const SCAF_LABEL = { "sonar-o45":"Sonar", "trae-dbo":"Trae", "OH-o45":"OpenHands", "live-gem3":"Live-SWE", "prom-gpt5":"Prometheus", "mini-o45":"mini+Opus4.5" };
 // HTML-escape covering & < > " ' — & MUST be replaced first so we never
@@ -1085,6 +1117,7 @@ function render() {
   }
   else if (TAB === "scaffolds") v.innerHTML = renderScaffolds();
   else if (TAB === "knobs") renderKnobs(v);
+  else if (TAB === "trace") { if (!document.getElementById("trace-frame")) v.innerHTML = renderTrace(); }
   else v.innerHTML = renderLive();
 }
 
@@ -1480,6 +1513,20 @@ function renderLive() {
     ' <span class="muted">'+new Date(b.mtime).toLocaleTimeString()+'</span>'+
     '<pre>'+ esc(b.tail||'') +'</pre></div>'
   ).join("");
+}
+
+// Live OTEL trace waterfall (otel-trace-sink) embedded as an iframe. The frame is
+// built ONCE on first switch to this tab (the render() guard skips rebuild on the
+// 5s poll) so it never reloads/flickers mid-stream. Points at TRACE_PORT on the
+// same host the dashboard is served from.
+function renderTrace() {
+  var host = location.hostname || "127.0.0.1";
+  var url = "http://" + host + ":" + TRACE_PORT + "/";
+  return '<div class="muted" style="padding:6px 0 10px">라이브 에이전트 트레이스 — OTLP 수신기 :' + TRACE_PORT
+    + '. 벤치를 <code>QUANTA_OTEL_ENDPOINT=http://127.0.0.1:' + TRACE_PORT + '</code> 로 돌리면 워터폴이 실시간으로 찬다. '
+    + '비면 싱크가 꺼진 것(대시보드가 자동 spawn하지만, 아니면 <code>quanta-bench trace</code>). '
+    + '<a href="' + url + '" target="_blank" style="color:#2f81f7">↗ 새 탭</a></div>'
+    + '<iframe id="trace-frame" src="' + url + '" style="width:100%;height:78vh;border:1px solid #21262d;border-radius:8px;background:#0b0e14"></iframe>';
 }
 
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { TAB = b.dataset.tab; render(); });
