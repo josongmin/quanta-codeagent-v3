@@ -74,6 +74,7 @@ import type {
 } from "./base/raw-types"
 import { resolveWorkspaceConfiguration, toWorkspaceFolder } from "./base/workspace"
 import { encodeMessage, type JsonRpcMessage, type JsonRpcResponse, MessageReader } from "./jsonrpc"
+import { buildLspServerEnv, resolveLspMemBudgetMb } from "../server-mem-budget"
 
 export type { LspClientOptions, LspClientSpec } from "./base/config"
 // Re-export the complete original public surface so every importer of
@@ -140,6 +141,15 @@ export class LspClient implements LspPort {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
+      // Cap the V8 old-space heap of Node-based servers (pyright /
+      // typescript-language-server) so one can never OOM the host: a large repo
+      // balloons pyright's heap, and with bench concurrency + warm-pool-retained
+      // servers the combined RSS OOM-killed a 64GB box (jun-26). DEFAULT-ON 4096
+      // MB; `QUANTA_LSP_MEM_BUDGET_MB=0` opts out (env passed through unchanged,
+      // byte-identical). Non-Node servers (clangd/gopls/rust-analyzer) ignore
+      // NODE_OPTIONS — harmless. Read here (not via runtime-config) to match
+      // base.ts already sourcing process.{pid,cwd} directly at the spawn site.
+      env: buildLspServerEnv(process.env, resolveLspMemBudgetMb(process.env)),
     })
     this.readPump = this.pumpStdout()
     // Drain stderr to completion so a verbose language server (tsserver /
