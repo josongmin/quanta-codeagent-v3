@@ -22,6 +22,10 @@
  *      `--global`).  We never mutate the user's global git identity.
  *   4. argv-array spawn (no shell), so commit messages cannot be turned
  *      into shell-injection vectors.
+ *   5. PATHSPEC-SCOPED commit (`git commit -- .`): consolidation commits ONLY
+ *      the memory subtree, never the whole index — so when memory is nested in
+ *      an ancestor repo (the dotfiles wrap case isRepo anticipates), the user's
+ *      unrelated pre-staged changes are NEVER swept into our auto-commit.
  */
 import { MemoryWriteError } from "./types"
 
@@ -126,7 +130,16 @@ export class ChildProcessGitPort implements GitPort {
     //   1 = "nothing to commit, working tree clean" OR a real failure.
     // We disambiguate via stderr/stdout text (both can carry the clean
     // message depending on git version).
-    const commitRes = await runGit(["commit", "-m", message], dir)
+    //
+    // PATHSPEC-SCOPED (negative invariant #5): commit ONLY the memory subtree
+    // (`-- .`, cwd-relative to `dir`), NOT the whole index. When ~/.quanta/memory
+    // is wrapped inside an ancestor repo (the dotfiles case the isRepo docstring
+    // anticipates), a bare `git commit` would sweep ANY changes the user had
+    // pre-staged elsewhere in that repo into our auto `consolidate` commit
+    // (fire-and-forget, under their identity). The pathspec confines the commit
+    // to the memory files we just wrote — the user's unrelated staged work is
+    // never touched.
+    const commitRes = await runGit(["commit", "-m", message, "--", "."], dir)
     if (commitRes.exitCode === 0) {
       // Resolve the freshly-minted sha.
       const shaRes = await runGit(["rev-parse", "HEAD"], dir)

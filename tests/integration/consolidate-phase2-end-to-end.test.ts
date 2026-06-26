@@ -173,4 +173,43 @@ describe("Phase 2 writer end-to-end (real fs + git)", () => {
     // .git still present.
     expect(statSync(join(root, ".git")).isDirectory()).toBe(true)
   })
+
+  // jun-26 SE-audit HIGH#2: when ~/.quanta/memory is NESTED inside an ancestor
+  // repo (the dotfiles-wrap case isRepo deliberately supports), consolidation's
+  // commit MUST NOT sweep the user's unrelated pre-staged changes into our
+  // fire-and-forget `consolidate` commit. The pathspec-scoped `git commit -- .`
+  // confines the commit to the memory subtree.
+  test("nested-in-ancestor-repo: addCommit does NOT sweep the user's unrelated staged changes", async () => {
+    const outer = mkdtempSync(join(tmpdir(), "quanta-outer-repo-"))
+    try {
+      await runGitInDir(outer, ["init"])
+      await runGitInDir(outer, ["config", "user.email", "u@example.com"])
+      await runGitInDir(outer, ["config", "user.name", "User"])
+      // The user's OWN unrelated work, pre-staged in the outer repo.
+      await fsp.writeFile(join(outer, "user-secret.txt"), "do not commit me\n")
+      await runGitInDir(outer, ["add", "user-secret.txt"])
+
+      // Memory lives nested inside the outer repo; write a memory file there.
+      const memDir = join(outer, ".quanta", "memory")
+      await fsp.mkdir(memDir, { recursive: true })
+      await fsp.writeFile(join(memDir, "MEMORY.md"), "# mem\n")
+
+      // isRepo sees the ancestor repo (deliberate) → no inner init; addCommit
+      // commits into the outer repo BUT only the memory pathspec.
+      const git = new ChildProcessGitPort()
+      expect(await git.isRepo(memDir)).toBe(true)
+      const sha = await git.addCommit(memDir, "consolidate test")
+      expect(sha).not.toBeNull()
+
+      // The consolidate commit contains ONLY the memory file, NOT the user's file.
+      const show = await runGitInDir(outer, ["show", "--name-only", "--format=", "HEAD"])
+      expect(show.stdout).toContain(".quanta/memory/MEMORY.md")
+      expect(show.stdout).not.toContain("user-secret.txt")
+      // The user's file is still staged + uncommitted (untouched by us).
+      const status = await runGitInDir(outer, ["status", "--porcelain"])
+      expect(status.stdout).toContain("A  user-secret.txt")
+    } finally {
+      rmSync(outer, { recursive: true, force: true })
+    }
+  })
 })
