@@ -100,6 +100,7 @@ import {
 import { runTokenCostLine } from "./analyze/cost"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { resolveModelLanes } from "./model-lanes"
+import { resolveBenchReasoningSummary } from "./reasoning-summary"
 import { finalizeRun, runInstance } from "./eval"
 import {
   type ForkBranchOutcome,
@@ -723,7 +724,16 @@ const resolveLLM = (
       })
     return { provider, model, llm: freshLlm(), freshLlm }
   }
-  const llm = tryCreateLLM(provider, modelArg !== undefined ? { model: modelArg } : {}, process.env)
+  // Bench defaults reasoning-summary ON (a CODE default, no env forwarding) so
+  // reasoning models (gpt-5.5) STREAM their reasoning instead of thinking
+  // silently and tripping the LLM idle-timeout → silent-retry stall loop. An
+  // explicit `QUANTA_REASONING_SUMMARY=0`/off still wins (operator override).
+  const reasoningSummary = resolveBenchReasoningSummary(process.env)
+  const llm = tryCreateLLM(
+    provider,
+    { ...(modelArg !== undefined ? { model: modelArg } : {}), reasoningSummary },
+    process.env,
+  )
   if (!llm) {
     logger.info(
       `Found ${noun} but no API key for provider "${provider}". Set ANTHROPIC_API_KEY or OPENAI_API_KEY to run. Exiting.`,
@@ -786,7 +796,11 @@ const maybeRunDatasetMode = async (
     buildLanePort: (modelId) =>
       modelId === model
         ? llm
-        : tryCreateLLM(provider, { model: modelId }, process.env),
+        : tryCreateLLM(
+            provider,
+            { model: modelId, reasoningSummary: resolveBenchReasoningSummary(process.env) },
+            process.env,
+          ),
   })
   if (llmLanes !== undefined) {
     logger.info(`bench: model-lane diversity ON (${llmLanes.length} lanes)`)
