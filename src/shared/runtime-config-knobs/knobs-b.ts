@@ -259,6 +259,13 @@ export const KNOBS_B: readonly RuntimeConfigKnob[] = [
     describe: "LLM stream inter-chunk idle timeout (ms).",
   },
   {
+    envKey: "QUANTA_LLM_EMPTY_STREAM_BREAKER_K",
+    kind: "int",
+    default: undefined,
+    group: "llm",
+    describe: "Consecutive content-less-stream circuit-breaker cap (default 2).",
+  },
+  {
     envKey: "QUANTA_LLM_TRANSPORT",
     kind: "string",
     default: undefined,

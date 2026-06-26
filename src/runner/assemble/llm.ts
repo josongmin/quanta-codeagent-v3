@@ -16,11 +16,13 @@ import {
   resolveProvider,
   resolveVendorApiKey,
   type ShellExecResult,
+  withEmptyStreamCircuitBreaker,
   withLiveUsage,
 } from "@/llm"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import { runShell } from "@/runtime"
+import { runtimeConfig } from "@/shared"
 
 /**
  * Surface-agnostic LLM assembly. The CLI / Web / Tauri surfaces parse their
@@ -160,6 +162,21 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
     finalLLM = withLiveUsage(finalLLM, { enabled: true })
     input.slog.debug("llm.live_usage.on")
   }
+  // jun-26 RCA (cassette /tmp/g55-traj.jsonl): a content-LESS stream — only the
+  // `llm_continuation` telemetry then an idle timeout — is classified transient
+  // and retried with the SAME request, each retry burning the full idle window
+  // (~120s) producing zero content → the bench box sits idle for minutes. The
+  // consecutive-empty circuit breaker converts that silent burn into a TERMINAL
+  // (non-retryable) error after K content-less streams. This is a failure-path
+  // SAFETY guard, NOT a posture knob: it is byte-identical for any stream that
+  // produces content (it never trips), so the healthy path is unaffected.
+  // OUTERMOST so it observes the fully-normalized event stream (incl. fallback
+  // `stream_reset`). Env override: QUANTA_LLM_EMPTY_STREAM_BREAKER_K.
+  const breakerK = runtimeConfig().llmEmptyStreamBreakerK
+  finalLLM = withEmptyStreamCircuitBreaker(
+    finalLLM,
+    breakerK !== undefined ? { maxConsecutiveEmpty: breakerK } : {},
+  )
   return finalLLM
 }
 

@@ -49,6 +49,15 @@ export interface RuntimeConfigPaths {
    *  Absent ⇒ adapter default (120_000 ms). Read ONCE at adapter
    *  construction; T1 hang-stream guard. Long completions are OK. */
   readonly llmStreamIdleMs: number | undefined
+  /** Consecutive content-less-stream circuit-breaker cap
+   *  (`QUANTA_LLM_EMPTY_STREAM_BREAKER_K`). After this many CONSECUTIVE streams
+   *  that yield ZERO content events (only telemetry such as `llm_continuation`)
+   *  — or that throw the idle-timeout having produced no content — the breaker
+   *  throws a TERMINAL non-retryable error instead of letting the transient-
+   *  retry path burn the full idle window over and over (jun-26 RCA, cassette
+   *  /tmp/g55-traj.jsonl). Absent ⇒ default
+   *  (`DEFAULT_EMPTY_STREAM_BREAKER_K` = 2). */
+  readonly llmEmptyStreamBreakerK: number | undefined
   /** Quanta home dir override (`QUANTA_HOME`). Absent ⇒ feature sites compute
    *  `~/.quanta`. Used by ADR-0046 permission-store path resolution. */
   readonly quantaHome: string | undefined

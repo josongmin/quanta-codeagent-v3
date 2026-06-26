@@ -45,6 +45,13 @@ export {
   tryCreateLLM,
 } from "./factory"
 export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
+export {
+  DEFAULT_EMPTY_STREAM_BREAKER_K,
+  EMPTY_STREAM_BREAKER_ERROR_MARKER,
+  type EmptyStreamBreakerOpts,
+  isStreamEventContentful,
+  withEmptyStreamCircuitBreaker,
+} from "./empty-stream-breaker"
 export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
 export type { LiveUsageKnobs } from "./live-usage"
 export { estimateTokensFromChars, withLiveUsage } from "./live-usage"

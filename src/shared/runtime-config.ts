@@ -356,6 +356,10 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_LLM_STREAM_IDLE_MS"],
       "QUANTA_LLM_STREAM_IDLE_MS",
     ),
+    llmEmptyStreamBreakerK: parsePositiveInt(
+      env["QUANTA_LLM_EMPTY_STREAM_BREAKER_K"],
+      "QUANTA_LLM_EMPTY_STREAM_BREAKER_K",
+    ),
     quantaHome: stringOrUndef(env["QUANTA_HOME"]),
     benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
     benchResultsDir: stringOrUndef(env["QUANTA_BENCH_RESULTS_DIR"]),
