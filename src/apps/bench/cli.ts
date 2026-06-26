@@ -1988,8 +1988,9 @@ const openBrowser = (url: string): void => {
         : ["xdg-open", url]
   try {
     Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" })
-  } catch {
+  } catch (e) {
     // no opener on this host — the URL is already printed; operator opens it.
+    logger.info(`[trace] could not auto-open a browser (${errMessage(e)}); open ${url} manually`)
   }
 }
 

@@ -74,6 +74,15 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "observability/otel-exporter.ts",
   },
   {
+    envKey: "QUANTA_OTEL_SAVE",
+    kind: "string",
+    default: undefined,
+    group: "observability",
+    home: "runtime-config",
+    describe: "otel-trace-sink: tee received spans to this JSONL file (offline replay).",
+    readSite: "apps/bench/otel-trace-sink.ts",
+  },
+  {
     envKey: "QUANTA_DEPLOYMENT_ENV",
     kind: "string",
     default: "unknown",
@@ -210,7 +219,8 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     default: false,
     group: "sandbox",
     home: "runtime-config",
-    describe: "Default the OS sandbox to workspace-write when QUANTA_SANDBOX is unset (Codex parity).",
+    describe:
+      "Default the OS sandbox to workspace-write when QUANTA_SANDBOX is unset (Codex parity).",
     readSite: "runtime/os-sandbox/env.ts",
   },
   {

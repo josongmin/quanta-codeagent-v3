@@ -34,6 +34,7 @@
  */
 
 import { appendFileSync } from "node:fs"
+import { errMessage } from "@/shared"
 
 const DEFAULT_PORT = 4318
 
@@ -303,8 +304,9 @@ const ingestTraces = (
     if (savePath !== undefined) {
       try {
         appendFileSync(savePath, `${JSON.stringify(s)}\n`)
-      } catch {
-        // best-effort tee — never let a disk hiccup drop a live span
+      } catch (e) {
+        // best-effort tee — surface the disk hiccup but never drop the live span
+        write(`[otel-trace-sink] span tee dropped: ${errMessage(e)}`)
       }
     }
   }
@@ -354,7 +356,7 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
           write(formatMetricLine(m))
       }
     } catch (e) {
-      write(`[otel-trace-sink] parse error: ${(e as Error).message}`)
+      write(`[otel-trace-sink] parse error: ${errMessage(e)}`)
     }
   }
 
@@ -399,12 +401,14 @@ const envInt = (raw: string | undefined, fallback: number): number => {
 }
 
 if (import.meta.main) {
+  // `ringMax` is intentionally NOT env-driven — it is a niche in-memory cap with a
+  // sane default; programmatic callers override via opts. Keeping it off `process.env`
+  // avoids a registry-orphan operator knob for a value nobody tunes from the shell.
   runTraceSink({
     port: envInt(process.env.PORT, DEFAULT_PORT),
     showMetrics: process.argv.includes("--metrics"),
     ...(process.env.QUANTA_OTEL_SAVE !== undefined
       ? { savePath: process.env.QUANTA_OTEL_SAVE }
       : {}),
-    ringMax: envInt(process.env.QUANTA_OTEL_RING, 5000),
   })
 }
