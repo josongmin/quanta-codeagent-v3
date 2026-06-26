@@ -77,7 +77,16 @@ interface BunTerminalLike {
   onExit?(cb: (code: number) => void): void
 }
 interface BunTerminalCtor {
-  new (opts: { cols: number; rows: number }): BunTerminalLike
+  // jun-26 SE-audit: the data/exit callbacks are CONSTRUCTOR OPTIONS in the Bun
+  // 1.3.14 API (NOT methods). Declaring them here — instead of the old call-site
+  // `options as unknown as {cols,rows}` cast that discarded them — makes the
+  // callback contract type-checked at construction.
+  new (opts: {
+    cols: number
+    rows: number
+    data: (terminal: unknown, bytes: Uint8Array) => void
+    exit: (terminal: unknown, exitCode: number) => void
+  }): BunTerminalLike
 }
 interface BunSpawnedChild {
   readonly pid: number
@@ -119,15 +128,16 @@ export const bunPtyFactory = (jailRoot: string): PtyFactoryPort => ({
       // reachable if a caller mints the factory directly on an old runtime.
       throw new Error("Bun.Terminal is not available on this Bun runtime (needs 1.3.14+)")
     }
-    // Bun 1.3.14 API: data/exit callbacks are CONSTRUCTOR OPTIONS, not methods.
-    // `Bun.Terminal` has no `onData`/`onExit` methods — calling them via `?.`
-    // would silently no-op and leave the ring buffer permanently empty.
+    // Bun 1.3.14 API: data/exit callbacks are CONSTRUCTOR OPTIONS, not methods
+    // (declared on BunTerminalCtor above) — `Bun.Terminal` has no
+    // `onData`/`onExit` methods, so the contract is now type-checked here with NO
+    // call-site cast (was `options as unknown as {cols,rows}`, which discarded it).
     const term = new Ctor({
       cols: opts.cols,
       rows: opts.rows,
       data: (_terminal: unknown, bytes: Uint8Array) => opts.onData(bytes),
       exit: (_terminal: unknown, _exitCode: number) => opts.onExit(0),
-    } as unknown as { cols: number; rows: number })
+    })
     const handle: PtyTerminalHandle = {
       write: (data) => term.write(data),
       resize: (cols, rows) => term.resize(cols, rows),

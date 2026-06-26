@@ -111,8 +111,11 @@ const buildTurnAssemblerDeps = (args: {
     ...rest
   } = args.base
 
+  // jun-26 SE-audit: NO `rest as RuntimeAgentTurnDeps` cast — let TS check the
+  // assembled literal against the `RuntimeAgentTurnDeps` return type so a future
+  // RuntimeBase↔RuntimeAgentTurnDeps drift is a COMPILE error, not a silent gap.
   return withDefinedProps({
-    ...(rest as RuntimeAgentTurnDeps),
+    ...rest,
     messages: [...args.messages],
     system: systemSource?.get() ?? system,
     signal: args.signal ?? args.base.signal,
@@ -151,7 +154,9 @@ export const buildAgentConfigFromBase = (args: {
   } = args.base
 
   return installCliMentionInjector({
-    ...(rest as Omit<AgentConfig, "messages" | "signal" | "system">),
+    // jun-26 SE-audit: no cast — TS checks the literal against the return type so
+    // a RuntimeBase↔AgentConfig drift fails to compile instead of slipping through.
+    ...rest,
     messages: [...args.messages],
     system: systemSource?.get() ?? system,
     signal: args.signal ?? args.base.signal,
