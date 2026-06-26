@@ -346,13 +346,13 @@ describe("ADR-0361 sqlite-store — hellgate (port-aligned)", () => {
     expect(afterTwoCache).toBeGreaterThan(afterEvent)
     // Invalidate ONE cache key — total must drop (below the two-cache
     // peak) yet stay above the surviving event + other cache row.
-    r.cache.invalidate(asCacheKey("k1"), "test")
+    r.cache.invalidate(asCacheKey("k1"), "manual_reset")
     const afterInvalidate = readTotalBytes(path, "s1")
     expect(afterInvalidate).toBeLessThan(afterTwoCache)
     expect(afterInvalidate).toBeGreaterThan(afterEvent)
     // clearAll drops the remaining cache row; only the event byte-cost
     // should survive.
-    r.cache.clearAll("test")
+    r.cache.clearAll("manual_reset")
     expect(readTotalBytes(path, "s1")).toBe(afterEvent)
     cleanup()
   })
