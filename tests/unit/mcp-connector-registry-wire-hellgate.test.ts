@@ -147,6 +147,7 @@ describe("§3.4 — http connector install ROUND-TRIP (shape + oauth)", () => {
       mcpServers: Record<string, Record<string, unknown>>
     }
     const spec = raw.mcpServers.remote
+    if (spec === undefined) throw new Error("install did not write the 'remote' server entry")
     // Canonical http shape — a `command:""` stdio placeholder is malformed.
     expect("command" in spec).toBe(false)
     expect("args" in spec).toBe(false)

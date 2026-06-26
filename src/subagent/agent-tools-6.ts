@@ -180,7 +180,13 @@ export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
     // state with siblings — fan-out is the whole point).
     make<unknown, SpawnAgentOutput & { kind: "success" }>(
       "spawn_agent",
-      "Create a child subagent with its own loop and return its agentId.",
+      "Spawn a CONCURRENT child subagent, returning its agentId immediately. This " +
+        "is the FAN-OUT / interactive primitive: launch several workers in parallel, " +
+        "STEER a paused one mid-run with send_input, and collect them with " +
+        "wait_agent / close_agent. For a SINGLE delegated task prefer the `agent` " +
+        "tool (its background:true gives the same async handle with simpler " +
+        "task_output polling); reach for spawn_agent when you need multiple " +
+        "concurrent children or mid-run control.",
       SpawnAgentInputSchema,
       false,
       true,

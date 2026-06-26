@@ -496,11 +496,14 @@ export const createAgentTool = (
   const tool: Tool<AgentInput> & { registry: TaskRegistry } = {
     name: "agent",
     description:
-      "Launch a subagent to autonomously handle a delegated task. " +
+      "Launch a subagent to autonomously handle ONE delegated task. " +
       "Foreground returns the subagent's summary; set background:true to get a " +
       "task id and poll with task_output / cancel with task_stop. " +
       "Pass continue_from to warm-start from a prior task's findings; pass checkpoint:true " +
-      "(non-isolation only) to enable interim progress at .subagent-state/<task_id>.md.",
+      "(non-isolation only) to enable interim progress at .subagent-state/<task_id>.md. " +
+      "For running MANY children concurrently or steering a child mid-run use " +
+      "spawn_agent / wait_agent / send_input instead; for the SAME task over a list " +
+      "of inputs use spawn_batch.",
     inputSchema: agentSchema,
     // S2 fix: the previous `() => true` was a LIE — `agent` spawns a child
     // run that owns its OWN unrestricted tool set (write/edit/bash/git/…).

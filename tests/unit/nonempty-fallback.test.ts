@@ -25,7 +25,7 @@ const hardOf = (over: Partial<HardGateSignals>): HardGateSignals => ({
 const verdictOf = (reasons: readonly string[]): CandidateVerdict => ({
   admissible: false,
   score: 0,
-  reasons,
+  reasons: [...reasons],
 })
 
 const MWE_RED = "hard:mweProof=candidate_red (public issue MWE still fails after patch)"
