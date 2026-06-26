@@ -30,7 +30,28 @@ import {
   rowToEvent,
 } from "../serializer"
 import type { PreparedStatements } from "./statements"
-import { DELETE_CACHE_ENTRY_SQL, DELETE_CACHE_SESSION_SQL, DELETE_EVENTS_SQL } from "./statements"
+import {
+  DELETE_CACHE_ENTRY_SQL,
+  DELETE_CACHE_SESSION_SQL,
+  DELETE_EVENTS_SQL,
+  RECOMPUTE_SESSION_BYTES_SQL,
+} from "./statements"
+
+/**
+ * Reconcile `sessions.total_estimated_bytes` with the LIVE child rows
+ * after a clear / invalidate / truncate. `UPSERT_SESSION_SQL` only ever
+ * increments the running total, so without this the GC sliding-window
+ * (`gc.ts`) would evict on a stale-high, ever-growing byte count.
+ * NO-THROW — a recompute failure leaves the (stale) total in place,
+ * never worse than the pre-fix behaviour.
+ */
+const recomputeSessionBytes = (deps: Deps, sessionId: string): void => {
+  try {
+    deps.db.query(RECOMPUTE_SESSION_BYTES_SQL).run({ $sid: sessionId })
+  } catch {
+    // NO-THROW.
+  }
+}
 
 export interface Entry {
   readonly resources: SessionResources
@@ -154,6 +175,7 @@ export const wrapStore = (
     // Truncate the events rows for this session. NO-THROW.
     try {
       deps.db.query(DELETE_EVENTS_SQL).run(sessionId)
+      recomputeSessionBytes(deps, sessionId)
     } catch {
       // NO-THROW.
     }
@@ -185,6 +207,7 @@ export const wrapCache = (
     inner.invalidate(key, reason)
     try {
       deps.db.query(DELETE_CACHE_ENTRY_SQL).run(sessionId, String(key))
+      recomputeSessionBytes(deps, sessionId)
     } catch {
       // NO-THROW.
     }
@@ -193,6 +216,7 @@ export const wrapCache = (
     inner.clearAll(reason)
     try {
       deps.db.query(DELETE_CACHE_SESSION_SQL).run(sessionId)
+      recomputeSessionBytes(deps, sessionId)
     } catch {
       // NO-THROW.
     }

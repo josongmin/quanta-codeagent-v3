@@ -51,6 +51,25 @@ export const DELETE_CACHE_ENTRY_SQL =
   "DELETE FROM cache_entries WHERE session_id = ? AND cache_key = ?"
 export const DELETE_CACHE_SESSION_SQL = "DELETE FROM cache_entries WHERE session_id = ?"
 
+/**
+ * Recompute `sessions.total_estimated_bytes` from the LIVE child rows
+ * (events + cache_entries) for one session.
+ *
+ * `UPSERT_SESSION_SQL` only ever INCREMENTS the running total, so any
+ * clear / invalidate / truncate of child rows leaves the session row's
+ * total stale-high. The GC sliding-window (`gc.ts`) evicts on this
+ * ever-growing total, so it must be reconciled with reality whenever
+ * rows are removed. Recomputing from the surviving `estimated_bytes`
+ * sums is self-correcting (no risk of drifting negative) and matches
+ * the bytes that `UPSERT_SESSION_SQL` originally added per row.
+ */
+export const RECOMPUTE_SESSION_BYTES_SQL = `
+    UPDATE sessions SET total_estimated_bytes =
+      COALESCE((SELECT SUM(estimated_bytes) FROM events WHERE session_id = $sid), 0)
+      + COALESCE((SELECT SUM(estimated_bytes) FROM cache_entries WHERE session_id = $sid), 0)
+    WHERE session_id = $sid
+  `
+
 /** All prepared statements used by the registry methods. */
 export interface PreparedStatements {
   readonly upsertSession: Statement

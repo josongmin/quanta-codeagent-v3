@@ -303,4 +303,57 @@ describe("ADR-0361 sqlite-store — hellgate (port-aligned)", () => {
     expect(ids).toContain("sess-Y")
     cleanup()
   })
+
+  // ─── session-bytes-decrement — total reconciled on clear/invalidate ──
+
+  const readTotalBytes = (path: string, sessionId: string): number => {
+    const probe = new Database(path)
+    const row = probe
+      .query("SELECT total_estimated_bytes AS b FROM sessions WHERE session_id = ?")
+      .get(sessionId) as { b: number } | null
+    probe.close()
+    return row !== null ? row.b : -1
+  }
+
+  test("[20] store.clear() decrements total_estimated_bytes to reflect removed events", () => {
+    const { path, cleanup } = makeTmp()
+    const reg = createSqliteSessionResourceRegistry({ databasePath: path })
+    const r = reg.getOrCreate("s1")
+    for (let i = 0; i < 20; i++) r.store.append(sampleEvent(i, `p${i}`, `n${i}`))
+    const grown = readTotalBytes(path, "s1")
+    // Sanity: appends must have driven the running total above zero.
+    expect(grown).toBeGreaterThan(0)
+    // Clearing every event row must reconcile the total back to the
+    // sum of live rows — here, zero. WITHOUT the fix the total stays
+    // stale-high at `grown`, so this assertion is the red-on-injection.
+    r.store.clear()
+    expect(readTotalBytes(path, "s1")).toBe(0)
+    cleanup()
+  })
+
+  test("[21] cache.clearAll() / invalidate() reconcile total to live-row bytes", () => {
+    const { path, cleanup } = makeTmp()
+    const reg = createSqliteSessionResourceRegistry({ databasePath: path })
+    const r = reg.getOrCreate("s1")
+    // Two cache misses (each mirrors a row + increments the total) plus
+    // one event so a partial invalidate leaves a non-zero remainder.
+    r.store.append(sampleEvent(1))
+    const afterEvent = readTotalBytes(path, "s1")
+    expect(afterEvent).toBeGreaterThan(0)
+    r.cache.getOrBuild(asCacheKey("k1"), () => "first-cached-value")
+    r.cache.getOrBuild(asCacheKey("k2"), () => "second-cached-value")
+    const afterTwoCache = readTotalBytes(path, "s1")
+    expect(afterTwoCache).toBeGreaterThan(afterEvent)
+    // Invalidate ONE cache key — total must drop (below the two-cache
+    // peak) yet stay above the surviving event + other cache row.
+    r.cache.invalidate(asCacheKey("k1"), "test")
+    const afterInvalidate = readTotalBytes(path, "s1")
+    expect(afterInvalidate).toBeLessThan(afterTwoCache)
+    expect(afterInvalidate).toBeGreaterThan(afterEvent)
+    // clearAll drops the remaining cache row; only the event byte-cost
+    // should survive.
+    r.cache.clearAll("test")
+    expect(readTotalBytes(path, "s1")).toBe(afterEvent)
+    cleanup()
+  })
 })
