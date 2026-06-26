@@ -46,6 +46,13 @@ describe("G3 pinned price table (exact cost at 1M in / 1M out)", () => {
     ["claude-opus-4-7", 15, 75],
     ["claude-sonnet-4-6", 3, 15],
     ["claude-haiku-4-5", 1, 5],
+    // gpt-5 family — CONFIRMED vs OpenAI pricing page 2026-06-26. gpt-5.4 is the
+    // bench default model; an accidental half-price edit (the original estimate
+    // bug: 1.25/10) goes red here.
+    ["gpt-5.4", 2.5, 15],
+    ["gpt-5.5", 5, 30],
+    ["gpt-5", 1.25, 10],
+    ["gpt-5-mini", 0.25, 2],
   ]
 
   for (const [model, inPerM, outPerM] of ISOLATION) {
@@ -78,6 +85,14 @@ describe("G3 cache_read pricing (pricing.v2: provider-aware, discounted)", () =>
     // discounted cache rate. Pinned with an independent hard literal ($1.25/1M ×
     // 1M = 1.25) rather than recomputing the impl's own rate×tokens/1e6 formula.
     expect(costUsd("gpt-4o", 1_000_000, 0, 1_000_000)).toBe(1.25)
+  })
+
+  test("gpt-5 family cache-read is the 0.1× family rate (not gpt-4o's 0.5×)", () => {
+    // gpt-5.4: in $2.5/1M, cached $0.25/1M (0.1×). A fully-cached 1M prompt prices
+    // entirely at the discounted cache rate — pinned with a hard literal.
+    expect(costUsd("gpt-5.4", 1_000_000, 0, 1_000_000)).toBe(0.25)
+    // gpt-5.5: in $5/1M, cached $0.5/1M (0.1×).
+    expect(costUsd("gpt-5.5", 1_000_000, 0, 1_000_000)).toBe(0.5)
   })
 
   test("Anthropic: cacheRead additive at the discounted cache-read rate", () => {

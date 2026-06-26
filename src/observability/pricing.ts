@@ -41,7 +41,8 @@ interface ModelPrice {
   outPerM: number
   /**
    * Cache-READ tokens, $/1M. Provider-documented discounted rate:
-   *   - OpenAI cached input ≈ 0.5× input rate.
+   *   - OpenAI gpt-4o family ≈ 0.5× input rate.
+   *   - OpenAI gpt-5 family ≈ 0.1× input rate (per the gpt-5.x pricing page).
    *   - Anthropic cache read ≈ 0.1× input rate.
    * Always set explicitly per model so the discount is auditable.
    */
@@ -77,16 +78,19 @@ const TABLE: Readonly<Record<string, ModelPrice>> = Object.assign(
     "claude-opus-4-7": { inPerM: 15, outPerM: 75, cacheReadPerM: 1.5 },
     "claude-sonnet-4-6": { inPerM: 3, outPerM: 15, cacheReadPerM: 0.3 },
     "claude-haiku-4-5": { inPerM: 1, outPerM: 5, cacheReadPerM: 0.1 },
-    // ── gpt-5 family — ESTIMATES (UNCONFIRMED), migrated from the former
-    // `src/apps/bench/analyze/cost.ts` DEFAULT_PRICING so the bench's primary
-    // models (`--model` default `gpt-5.4`) are priced from this single SSOT
-    // instead of a second drifting table. cacheReadPerM = 0.5× input (OpenAI's
-    // documented cached-input ratio). Confirm against the provider's price page
-    // before trusting the dollar figures; an unconfirmed model is still better
-    // priced from here than duplicated. Truly-unknown models stay `null`.
-    "gpt-5": { inPerM: 1.25, outPerM: 10, cacheReadPerM: 0.625 },
-    "gpt-5.4": { inPerM: 1.25, outPerM: 10, cacheReadPerM: 0.625 },
-    "gpt-5-mini": { inPerM: 0.25, outPerM: 2, cacheReadPerM: 0.125 },
+    // ── gpt-5 family. CONFIRMED against OpenAI's API pricing page (captured
+    // 2026-06-26: developers.openai.com/api/docs/pricing). The bench's primary
+    // models (`--model` default `gpt-5.4`; lanes gpt-5.4/gpt-5.5) are priced from
+    // this single SSOT. cache-read is the documented 0.1× input rate for this
+    // family (NOT gpt-4o's 0.5×). gpt-5 / gpt-5-mini are legacy GPT-5 launch
+    // prices (absent from the current page); their cache-read follows the 0.1×
+    // family rate. Truly-unknown models (e.g. lane alias `gpt-5-2`) stay `null`.
+    "gpt-5.5": { inPerM: 5, outPerM: 30, cacheReadPerM: 0.5 },
+    "gpt-5.4": { inPerM: 2.5, outPerM: 15, cacheReadPerM: 0.25 },
+    "gpt-5.4-mini": { inPerM: 0.75, outPerM: 4.5, cacheReadPerM: 0.075 },
+    "gpt-5.4-nano": { inPerM: 0.2, outPerM: 1.25, cacheReadPerM: 0.02 },
+    "gpt-5": { inPerM: 1.25, outPerM: 10, cacheReadPerM: 0.125 },
+    "gpt-5-mini": { inPerM: 0.25, outPerM: 2, cacheReadPerM: 0.025 },
   },
 )
 

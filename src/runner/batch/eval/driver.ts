@@ -114,7 +114,6 @@ import {
   type ClosureSessionState,
 } from "./closure-session"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
-import { runEnvPrep } from "./env-prep"
 import { exec, execArgv } from "./exec"
 import { coeditFamilyCoverageCandidate } from "./family-coverage-coedit"
 import { traceForwardLocalizeOwners } from "./forward-localize-trace"
@@ -162,17 +161,12 @@ import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
 import type { SelectionContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
 import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
-import {
-  candidatePatchAppliesCleanly,
-  materializeBuildEnv,
-  withCandidatePatch,
-} from "./rematerialize"
+import { candidatePatchAppliesCleanly, withCandidatePatch } from "./rematerialize"
 import { runRepairRounds } from "./repair/index"
 import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import {
   drainReproVoteOutcomes,
   makeReproVoteValidate,
-  resetReproVoteOutcomes,
   summarizeReproVoteOutcomes,
 } from "./repair/repro-vote"
 import {
@@ -196,15 +190,7 @@ import {
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
-import {
-  buildWiring,
-  emitPatch,
-  emitSandbox,
-  emitVerify,
-  NullStream,
-  ObservationError,
-  type Wiring,
-} from "./report"
+import { emitPatch, emitSandbox, emitVerify, ObservationError, type Wiring } from "./report"
 import { reproValidationCmd } from "./repro-command"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
 import {
@@ -213,9 +199,8 @@ import {
   DEFAULT_POLICY,
   parseRetryTransientEnv,
   type RetryPolicy,
-  runRetryLoop,
 } from "./retry-policy"
-import { cleanupSandbox, copyRepo, createSandbox, forkSandbox } from "./sandbox"
+import { cleanupSandbox, forkSandbox } from "./sandbox"
 import { labelForReceipt, type ReceiptEvidence, researchKnobTouched } from "./score-label"
 import {
   buildSelectionStructuralPlan,
@@ -4941,7 +4926,7 @@ export const maybeValidateTerminalResult = async (args: {
 
 const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
 
-const v5AdaptiveEnabledForState = (state: BenchKnobState, envVars: NodeJS.ProcessEnv): boolean =>
+const _v5AdaptiveEnabledForState = (state: BenchKnobState, envVars: NodeJS.ProcessEnv): boolean =>
   state.preset === V5_ADAPTIVE_PRESET && gateOn(envVars, "QUANTA_BENCH_V5_ADAPTIVE")
 
 const dedupeProofReceipts = (
@@ -5575,7 +5560,7 @@ export const latePhaseFailureResultOf = (args: {
   }
 }
 
-const latePhaseFailureResultFromError = (args: {
+const _latePhaseFailureResultFromError = (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly reproTest: BenchReproTestTelemetry | undefined
@@ -5721,7 +5706,7 @@ const buildRouterModelCall = (deps: RunInstanceDeps, signal: AbortSignal) =>
  * non-adaptive path's `finally`-time cleanup reads; the downstream helpers take
  * explicit args, so capturing the finals locally is equivalent.
  */
-const runV5AdaptiveAttempt = async (args: {
+const _runV5AdaptiveAttempt = async (args: {
   instance: Instance
   deps: RunInstanceDeps
   sandbox: string
@@ -5859,7 +5844,6 @@ export const attachReproVoteOutcomes = (result: InstanceResult): InstanceResult 
  *  preventing cross-instance accumulation on either driver. */
 export { resetReproVoteOutcomes } from "./repair/repro-vote"
 
-
 /** Project `AttemptOutcome` (the retry-policy enum) into `BenchAttemptOutcome`
  *  (the wire shape on `InstanceResult.budget`). Same union, mirrored here so
  *  the bench-types module doesn't have to depend on `retry-policy.ts`.
@@ -5880,7 +5864,6 @@ export const projectOutcome = (o: AttemptOutcome): BenchAttemptOutcome => {
   if (o.kind === "real-fail") return { kind: "real-fail", subkind: o.subkind }
   return { kind: "infra-fail", reason: o.reason }
 }
-
 
 export type { BenchIssueHintMode, BenchKnobState, BenchPosture } from "./knobs-bench"
 // Knob wiring helpers — re-exported for the report path + tests so callers
