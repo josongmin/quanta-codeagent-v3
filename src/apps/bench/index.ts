@@ -97,6 +97,7 @@ import {
   type SwebenchTask,
   toInstance,
 } from "./corpus"
+import { runTokenCostLine } from "./analyze/cost"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { resolveModelLanes } from "./model-lanes"
 import { finalizeRun, runInstance } from "./eval"
@@ -272,6 +273,11 @@ const printSummary = (summary: BenchSummary): void => {
   logger.info(
     `score official_harness ${score.officialHarness}/${total} (${score.officialResolvedPct}%) | local_structural ${score.localStructural} | research_contaminated ${score.researchContaminated} | unlabeled_passed ${score.unlabeledPassed}`,
   )
+  // Token/cost surfacing — active by default (observe is on), derived from the
+  // SAME InstanceUsage that lands in report.json. Suppressed (byte-identical)
+  // when no instance reported usage (e.g. usage-free synthetic corpus).
+  const tokenLine = runTokenCostLine(summary.results)
+  if (tokenLine !== undefined) logger.info(tokenLine)
   // Failure-pattern rollup — one line per axis, suppressed when 0 failed.
   const failed = summary.results.filter((r) => !r.passed).map((r) => classify(r))
   if (failed.length === 0) return

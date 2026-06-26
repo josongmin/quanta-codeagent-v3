@@ -43,6 +43,7 @@ import type {
   BenchReproTestTelemetry,
   GradeBreakdown,
   InstanceResult,
+  InstanceUsage,
   LlmEvidenceArtifacts,
   PublicRegressionProofState,
   ReproOracleCalibration,
@@ -92,6 +93,13 @@ export interface PerInstanceReport {
   modelPatchDigest?: string
   touchedFiles?: string[]
   error?: string
+  /** Rolled-up token usage (only when observability captured it). This is the
+   *  cost-analysis SSOT (`cost.ts` path-1) — when omitted, `cost.ts` falls back
+   *  to the `observe/` trajectories. Absent ⇒ byte-identical to the pre-feature
+   *  report shape. */
+  usage?: InstanceUsage
+  /** Wall-clock instance duration in ms (only when observing). */
+  durationMs?: number
   /** Structured failure classification. Omitted for passing runs. */
   failure?: FailureClassification
   /** Adaptive-timeout + retry budget. Omitted unless the driver applied the
@@ -276,6 +284,11 @@ export const buildReport = (
           : {}),
         ...(touchedFiles.length > 0 ? { touchedFiles } : {}),
         ...(r.error !== undefined ? { error: r.error } : {}),
+        // Cost-analysis SSOT: forward the observed token usage + wall-clock so
+        // `report.json` carries what `cost.ts` reads (Gap 1). Both are omitted
+        // when observability did not capture them ⇒ byte-identical legacy shape.
+        ...(r.usage !== undefined ? { usage: r.usage } : {}),
+        ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
         ...(c.termination !== "passed" ? { failure: c } : {}),
         ...(r.budget !== undefined ? { budget: r.budget } : {}),
         ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),

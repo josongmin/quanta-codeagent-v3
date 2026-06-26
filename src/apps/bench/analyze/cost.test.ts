@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { costSummaryFromReport, type ModelPricing, renderCost } from "./cost"
+import { costSummaryFromReport, type ModelPricing, renderCost, runTokenCostLine } from "./cost"
 
 let dir: string
 beforeEach(() => {
@@ -136,5 +136,55 @@ describe("cost — pricing unknown for the model (the OTHER silent-$0 trap)", ()
     })
     const s = costSummaryFromReport({ reportPath, pricing: PRICING })
     expect(s.pricingKnown).toBe(true)
+  })
+})
+
+// ── Gap 3: default path delegates to the observability pricing SSOT ───────────
+// With NO injected `pricing` override, cost analysis must reuse the provider-aware
+// `costUsd` SSOT (src/observability/pricing.ts) — including OpenAI's cached-input
+// CARVE-OUT (prompt_tokens already includes cached_tokens), never a second drifting
+// table inside cost.ts.
+describe("cost — SSOT pricing (no override) with cache carve-out", () => {
+  test("OpenAI cached input is repriced, not double-counted", () => {
+    // gpt-4o is in the observability SSOT: $2.50/1M in, $10/1M out, $1.25/1M cached.
+    // 1M input of which 400k cached, 100k output:
+    //   fresh = 600k @ 2.50 = $1.50 ; cached = 400k @ 1.25 = $0.50 ; out 100k @ 10 = $1.00
+    //   carve-out total = $3.00
+    // A naive double-count (input*2.5 + cacheRead*1.25 + out) = 2.5 + 0.5 + 1.0 = $4.00.
+    const reportPath = writeReport({
+      model: "gpt-4o",
+      perInstance: [
+        {
+          id: "a",
+          usage: { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 400_000 },
+        },
+      ],
+    })
+    const s = costSummaryFromReport({ reportPath }) // NO override → SSOT
+    expect(s.pricingKnown).toBe(true)
+    expect(s.totalCostUsd).toBeCloseTo(3.0, 6)
+    // TEETH: the naive double-count would land at $4.00 — assert we are NOT there.
+    expect(s.totalCostUsd).not.toBeCloseTo(4.0, 2)
+  })
+
+  test("bench default model gpt-5.4 is priced via the SSOT (no override needed)", () => {
+    const reportPath = writeReport({
+      model: "gpt-5.4",
+      perInstance: [{ id: "a", usage: { inputTokens: 1_000_000, outputTokens: 0 } }],
+    })
+    const s = costSummaryFromReport({ reportPath }) // NO override
+    expect(s.pricingKnown).toBe(true)
+    expect(s.totalCostUsd).toBeGreaterThan(0)
+  })
+
+  test("model unknown to the SSOT and no override → honest caveat, never fake $0", () => {
+    const reportPath = writeReport({
+      model: "totally-unpriced-model",
+      perInstance: [{ id: "a", usage: { inputTokens: 1_000_000, outputTokens: 50_000 } }],
+    })
+    const s = costSummaryFromReport({ reportPath }) // NO override
+    expect(s.instancesWithUsage).toBe(1)
+    expect(s.pricingKnown).toBe(false)
+    expect(renderCost(s).toLowerCase()).toMatch(/no pricing|unknown/)
   })
 })

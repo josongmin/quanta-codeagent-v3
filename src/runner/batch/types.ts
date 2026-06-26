@@ -59,11 +59,21 @@ export interface Instance {
   swebench?: SwebenchMeta
 }
 
-/** Token usage rolled up for one instance (RFC-0002 §5.3, cost derivation). */
+/** Token usage rolled up for one instance (RFC-0002 §5.3, cost derivation).
+ *  The cache buckets mirror the stream-level `usage` event so the report SSOT
+ *  is non-lossy: OpenAI cached-input discounts and Anthropic cache-read/-write
+ *  accounting can be derived from `report.json` alone. Cache fields are OMITTED
+ *  (not zero-filled) when the run reported no cache activity. */
 export interface InstanceUsage {
   model: string
   inputTokens: number
   outputTokens: number
+  /** Cache-READ (cached prompt) tokens. OpenAI: SUBSET of inputTokens.
+   *  Anthropic: DISJOINT additive bucket. See @/observability/pricing costUsd. */
+  cacheReadTokens?: number
+  /** Cache-CREATION (cache write) tokens. Anthropic-only today; preserved for
+   *  fidelity even though `costUsd` does not yet price it. */
+  cacheCreationTokens?: number
 }
 
 export type BenchReproTestReason =
@@ -159,8 +169,7 @@ export type PublicRegressionProofState =
 export type ReproConsensusProofState =
   import("./eval/repair/resolved-consensus").ReproConsensusProofState
 export type LlmEvidenceArtifacts = import("./eval/llm-evidence-packet").LlmEvidenceArtifacts
-export type ReproVoteOutcomeRecord =
-  import("./eval/repair/repro-vote").ReproVoteOutcomeRecord
+export type ReproVoteOutcomeRecord = import("./eval/repair/repro-vote").ReproVoteOutcomeRecord
 
 /**
  * A5 — per-instance repro-vote outcome telemetry, drained from the module sink
@@ -177,9 +186,7 @@ export type ReproVoteOutcomeRecord =
  */
 export interface ReproVoteTelemetry {
   readonly rounds: readonly ReproVoteOutcomeRecord[]
-  readonly tally: Readonly<
-    Record<import("./eval/repair/repro-vote").ReproVoteOutcome, number>
-  >
+  readonly tally: Readonly<Record<import("./eval/repair/repro-vote").ReproVoteOutcome, number>>
 }
 
 export interface AdaptiveRouteTelemetry {

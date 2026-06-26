@@ -42,6 +42,8 @@ export class UsageTap implements StreamPort {
   private model = ""
   private inputTokens = 0
   private outputTokens = 0
+  private cacheReadTokens = 0
+  private cacheCreationTokens = 0
   private seen = false
 
   emit(event: AgentEvent): void {
@@ -50,6 +52,11 @@ export class UsageTap implements StreamPort {
     this.model = event.model
     this.inputTokens += event.inputTokens
     this.outputTokens += event.outputTokens
+    // The stream `usage` event already carries cache buckets (OpenAI cached_tokens,
+    // Anthropic cache_read/cache_creation). Sum them so the report SSOT is
+    // non-lossy instead of collapsing every run to input/output only.
+    this.cacheReadTokens += event.cacheReadTokens ?? 0
+    this.cacheCreationTokens += event.cacheCreationTokens ?? 0
   }
 
   total(): InstanceUsage | undefined {
@@ -58,6 +65,9 @@ export class UsageTap implements StreamPort {
       model: this.model,
       inputTokens: this.inputTokens,
       outputTokens: this.outputTokens,
+      // Omit zero buckets so a cache-free run stays byte-identical (no fabricated keys).
+      ...(this.cacheReadTokens > 0 ? { cacheReadTokens: this.cacheReadTokens } : {}),
+      ...(this.cacheCreationTokens > 0 ? { cacheCreationTokens: this.cacheCreationTokens } : {}),
     }
   }
 }
@@ -285,7 +295,15 @@ const buildMetrics = (results: readonly InstanceResult[]): Metrics => {
     if (r.usage) {
       m.counter("inputTokens").inc(r.usage.inputTokens)
       m.counter("outputTokens").inc(r.usage.outputTokens)
-      const c = costUsd(r.usage.model, r.usage.inputTokens, r.usage.outputTokens)
+      // Pass cacheReadTokens so provider-aware cost math (OpenAI carve-out /
+      // Anthropic discounted add) is correct instead of charging cached tokens
+      // at the full input rate.
+      const c = costUsd(
+        r.usage.model,
+        r.usage.inputTokens,
+        r.usage.outputTokens,
+        r.usage.cacheReadTokens ?? 0,
+      )
       if (c !== null) m.gauge("costUsdMilli").set(Math.round(c * 1000))
     }
   }

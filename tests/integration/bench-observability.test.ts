@@ -192,6 +192,82 @@ describe("bench observability (RFC-0002 W-D)", () => {
     })
   })
 
+  // LLM that fixes the bug AND reports token usage (incl. an OpenAI cached-input
+  // bucket) on its final turn — mirrors what the chatgpt-oauth Responses wire
+  // emits. Proves the FULL production chain end-to-end: agent loop → stream tap
+  // (UsageTap) → driver attaches InstanceResult.usage → buildReport serializes.
+  class UsageReportingLLM implements LLMPort {
+    calls = 0
+    constructor(
+      private readonly file: string,
+      private readonly oldStr: string,
+      private readonly newStr: string,
+    ) {}
+    async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+      this.calls += 1
+      const text = input.messages
+        .flatMap((m) => m.content)
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .join(" ")
+      const sandbox = text.match(/Work inside (\S+?)\./)?.[1] ?? ""
+      if (this.calls === 1) {
+        yield { type: "tool_use_start", id: "e1", name: "edit" }
+        yield {
+          type: "tool_use_end",
+          id: "e1",
+          input: {
+            path: join(sandbox, this.file),
+            old_string: this.oldStr,
+            new_string: this.newStr,
+          },
+        }
+        yield {
+          type: "usage",
+          model: "gpt-5.4",
+          inputTokens: 1200,
+          outputTokens: 300,
+          cacheReadTokens: 800,
+        }
+        yield { type: "message_stop", stop_reason: "tool_use" }
+        return
+      }
+      yield { type: "text_delta", delta: "done" }
+      yield { type: "usage", model: "gpt-5.4", inputTokens: 400, outputTokens: 50 }
+      yield { type: "message_stop", stop_reason: "end_turn" }
+    }
+  }
+
+  test("E2E: token usage flows agent-loop → UsageTap → InstanceResult → report.json", async () => {
+    await withTmp(async (dir) => {
+      const corpus = join(dir, "corpus")
+      const obs = join(dir, "obs")
+      await writeSyntheticCorpus(corpus)
+      const add = (await loadCorpus(corpus)).find((i) => i.id === "inst-add") as Instance
+      let ts = 1_000
+      const r = await runInstance(add, {
+        ...DEPS,
+        llm: new UsageReportingLLM("math.js", "return a - b", "return a + b"),
+        observe: { dir: obs, runId: "run-usage", now: () => ts++ },
+      })
+      expect(r.passed).toBe(true)
+      // The driver attached the rolled-up usage onto InstanceResult — summed
+      // across BOTH turns, with the cache bucket preserved (non-lossy).
+      expect(r.usage).toEqual({
+        model: "gpt-5.4",
+        inputTokens: 1600,
+        outputTokens: 350,
+        cacheReadTokens: 800,
+      })
+      expect(typeof r.durationMs).toBe("number")
+
+      // …and buildReport serializes it into report.json's perInstance[] (the
+      // cost.ts path-1 SSOT). This is the full chain, hermetic, no live tokens.
+      const report = buildReport({ provider: "chatgpt-oauth", model: "gpt-5.4", n: 1 }, [r])
+      expect(report.perInstance[0]?.usage).toEqual(r.usage)
+      expect(report.perInstance[0]?.durationMs).toBe(r.durationMs)
+    })
+  })
+
   test("strict degraded: unwritable observe path ⇒ verdict degraded, excluded", async () => {
     await withTmp(async (dir) => {
       const corpus = join(dir, "corpus")

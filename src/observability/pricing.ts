@@ -77,6 +77,16 @@ const TABLE: Readonly<Record<string, ModelPrice>> = Object.assign(
     "claude-opus-4-7": { inPerM: 15, outPerM: 75, cacheReadPerM: 1.5 },
     "claude-sonnet-4-6": { inPerM: 3, outPerM: 15, cacheReadPerM: 0.3 },
     "claude-haiku-4-5": { inPerM: 1, outPerM: 5, cacheReadPerM: 0.1 },
+    // ── gpt-5 family — ESTIMATES (UNCONFIRMED), migrated from the former
+    // `src/apps/bench/analyze/cost.ts` DEFAULT_PRICING so the bench's primary
+    // models (`--model` default `gpt-5.4`) are priced from this single SSOT
+    // instead of a second drifting table. cacheReadPerM = 0.5× input (OpenAI's
+    // documented cached-input ratio). Confirm against the provider's price page
+    // before trusting the dollar figures; an unconfirmed model is still better
+    // priced from here than duplicated. Truly-unknown models stay `null`.
+    "gpt-5": { inPerM: 1.25, outPerM: 10, cacheReadPerM: 0.625 },
+    "gpt-5.4": { inPerM: 1.25, outPerM: 10, cacheReadPerM: 0.625 },
+    "gpt-5-mini": { inPerM: 0.25, outPerM: 2, cacheReadPerM: 0.125 },
   },
 )
 

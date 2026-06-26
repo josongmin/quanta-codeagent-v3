@@ -13,23 +13,21 @@
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
+import { costUsd } from "@/observability"
 
+/**
+ * Per-call price override (USD / 1M tokens). This is NOT a maintained price
+ * TABLE — the single source of truth for model prices is
+ * `src/observability/pricing.ts` (`costUsd`, provider-aware cache math, versioned
+ * via `PRICING_VERSION`). Callers pass `pricing` only to override or to price a
+ * model the SSOT does not know (e.g. tests, `--pricing`). When no override is
+ * given for the report's model, cost is derived from the SSOT.
+ */
 export interface ModelPricing {
   /** USD per 1M input tokens. */
   readonly inputPerMTok: number
   /** USD per 1M output tokens. */
   readonly outputPerMTok: number
-}
-
-/**
- * Built-in price table — ESTIMATES (confirm against the provider's current
- * pricing before trusting the dollar figures). Callers override via `pricing`.
- */
-export const DEFAULT_PRICING: Readonly<Record<string, ModelPricing>> = {
-  // placeholder estimates (USD / 1M tok) — confirm:
-  "gpt-5.4": { inputPerMTok: 1.25, outputPerMTok: 10 },
-  "gpt-5": { inputPerMTok: 1.25, outputPerMTok: 10 },
-  "gpt-5-mini": { inputPerMTok: 0.25, outputPerMTok: 2 },
 }
 
 export interface InstanceCost {
@@ -57,15 +55,21 @@ export interface CostSummary {
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 
-/** Pull a usage `{input,output}` token pair from a `perInstance[].usage` object,
- *  tolerating the common key spellings. */
-const usageTokens = (usage: unknown): { input: number; output: number } => {
-  if (typeof usage !== "object" || usage === null) return { input: 0, output: 0 }
+/** Pull a usage `{input,output,cacheRead}` token triple from a `perInstance[].usage`
+ *  object, tolerating the common key spellings. `cacheRead` feeds the
+ *  provider-aware cache math in the SSOT (`costUsd`). */
+const usageTokens = (usage: unknown): { input: number; output: number; cacheRead: number } => {
+  if (typeof usage !== "object" || usage === null) return { input: 0, output: 0, cacheRead: 0 }
   const u = usage as Record<string, unknown>
   const input = num(u.inputTokens) || num(u.input_tokens) || num(u.input) || num(u.promptTokens)
   const output =
     num(u.outputTokens) || num(u.output_tokens) || num(u.output) || num(u.completionTokens)
-  return { input, output }
+  const cacheRead =
+    num(u.cacheReadTokens) ||
+    num(u.cache_read_tokens) ||
+    num(u.cachedTokens) ||
+    num(u.cached_tokens)
+  return { input, output, cacheRead }
 }
 
 /** Recursively sum every `inputTokens`/`outputTokens` numeric leaf in a value —
@@ -131,6 +135,25 @@ const fromObserve = (
   return { input: acc.input, output: acc.output, wallClockMs }
 }
 
+/** USD cost for one instance. Price source, in priority order:
+ *   1. caller `pricing` override for the model (tests / `--pricing`) — simple
+ *      input·rate + output·rate (the override type carries no cache rate);
+ *   2. the observability pricing SSOT `costUsd` — provider-aware cache math
+ *      (OpenAI cached-input carve-out / Anthropic discounted add). Unknown ⇒ 0
+ *      (the caller marks `pricingKnown=false` so renderCost shows "—", not $0). */
+const priceInstance = (
+  model: string,
+  override: ModelPricing | undefined,
+  input: number,
+  output: number,
+  cacheRead: number,
+): number => {
+  if (override !== undefined) {
+    return (input / 1e6) * override.inputPerMTok + (output / 1e6) * override.outputPerMTok
+  }
+  return costUsd(model, input, output, cacheRead) ?? 0
+}
+
 export const costSummaryFromReport = (args: {
   reportPath: string
   observeDir?: string
@@ -141,24 +164,29 @@ export const costSummaryFromReport = (args: {
     perInstance?: Array<{ id?: string; usage?: unknown; durationMs?: unknown }>
   }
   const model = report.model ?? "unknown"
-  const pricing = args.pricing ?? DEFAULT_PRICING
-  const price = pricing[model]
+  const override = args.pricing?.[model]
+  const pricingKnown = override !== undefined || costUsd(model, 0, 0) !== null
   const perInstance: InstanceCost[] = []
   for (const pi of report.perInstance ?? []) {
     const id = typeof pi.id === "string" ? pi.id : "?"
-    let { input, output } = usageTokens(pi.usage)
+    let { input, output, cacheRead } = usageTokens(pi.usage)
     let wallClockMs = num(pi.durationMs)
     if (input === 0 && output === 0 && args.observeDir !== undefined) {
       const o = fromObserve(args.observeDir, id)
       input = o.input
       output = o.output
+      // observe trajectories do not carry a cache-read breakdown → 0 (no discount
+      // applied, never a double-count).
+      cacheRead = 0
       if (wallClockMs === 0) wallClockMs = o.wallClockMs
     }
-    const costUsd =
-      price !== undefined
-        ? (input / 1e6) * price.inputPerMTok + (output / 1e6) * price.outputPerMTok
-        : 0
-    perInstance.push({ id, inputTokens: input, outputTokens: output, wallClockMs, costUsd })
+    perInstance.push({
+      id,
+      inputTokens: input,
+      outputTokens: output,
+      wallClockMs,
+      costUsd: priceInstance(model, override, input, output, cacheRead),
+    })
   }
   return {
     model,
@@ -168,8 +196,52 @@ export const costSummaryFromReport = (args: {
     totalCostUsd: perInstance.reduce((s, p) => s + p.costUsd, 0),
     totalWallClockMs: perInstance.reduce((s, p) => s + p.wallClockMs, 0),
     instancesWithUsage: perInstance.filter((p) => p.inputTokens + p.outputTokens > 0).length,
-    pricingKnown: price !== undefined,
+    pricingKnown,
   }
+}
+
+/** Minimal structural view of an instance's rolled-up usage — kept dependency-
+ *  free so cost.ts imports no runner/batch types. `InstanceResult` satisfies it. */
+export interface RunUsageInput {
+  readonly usage?: {
+    readonly model: string
+    readonly inputTokens: number
+    readonly outputTokens: number
+    readonly cacheReadTokens?: number
+  }
+}
+
+/** One-line token + estimated-cost summary for a finished bench run, derived
+ *  straight from the in-memory results (the SAME `InstanceUsage` that lands in
+ *  `report.json`). Cost reuses the observability pricing SSOT per-instance, so a
+ *  mixed-model run (model lanes) is priced correctly. Returns `undefined` when NO
+ *  instance reported usage (observe off / usage-free corpus) so the run summary
+ *  stays byte-identical in that case. Honest on price: when tokens exist but NO
+ *  instance's model is priced, cost renders `—`, never a fake `$0`. */
+export const runTokenCostLine = (results: readonly RunUsageInput[]): string | undefined => {
+  let inputTokens = 0
+  let outputTokens = 0
+  let cacheReadTokens = 0
+  let costUsdTotal = 0
+  let anyPriced = false
+  let withUsage = 0
+  for (const r of results) {
+    const u = r.usage
+    if (u === undefined) continue
+    withUsage += 1
+    inputTokens += u.inputTokens
+    outputTokens += u.outputTokens
+    cacheReadTokens += u.cacheReadTokens ?? 0
+    const c = costUsd(u.model, u.inputTokens, u.outputTokens, u.cacheReadTokens ?? 0)
+    if (c !== null) {
+      costUsdTotal += c
+      anyPriced = true
+    }
+  }
+  if (withUsage === 0) return undefined
+  const cache = cacheReadTokens > 0 ? ` (${cacheReadTokens} cache-read)` : ""
+  const cost = anyPriced ? `$${costUsdTotal.toFixed(4)}` : "— (no pricing for model)"
+  return `tokens ${inputTokens} in + ${outputTokens} out${cache} | est. cost ${cost} | ${withUsage}/${results.length} instances`
 }
 
 export const renderCost = (s: CostSummary): string => {
@@ -200,7 +272,7 @@ export const renderCost = (s: CostSummary): string => {
     lines.push(
       "",
       `⚠️ NO pricing for model "${s.model}" — $ shown as "—" (NOT $0). ` +
-        "Pass --pricing or add the model to DEFAULT_PRICING for real cost.",
+        "Pass --pricing or add the model to src/observability/pricing.ts for real cost.",
     )
   }
   return lines.join("\n")
