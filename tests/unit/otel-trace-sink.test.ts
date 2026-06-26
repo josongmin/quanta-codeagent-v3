@@ -24,7 +24,8 @@ import {
   formatSpanLine,
   parseResourceMetrics,
   parseResourceSpans,
-} from "../../tools/otel-trace-sink"
+  parseResourceSpansFull,
+} from "../../src/apps/bench/otel-trace-sink"
 
 const ENDPOINT = "http://127.0.0.1:4318"
 
@@ -151,5 +152,46 @@ describe("otel-trace-sink parses the exporter's exact OTLP/JSON shape", () => {
     expect(parseResourceSpans({} as never)).toEqual([])
     expect(parseResourceSpans({ resourceSpans: [{}] } as never)).toEqual([])
     expect(parseResourceMetrics({} as never)).toEqual([])
+    expect(parseResourceSpansFull({} as never)).toEqual([])
+    expect(parseResourceSpansFull({ resourceSpans: [{}] } as never)).toEqual([])
+  })
+
+  // The waterfall UI (tools/trace-viewer.html) lays spans out on a timeline and
+  // nests them by parent — so the receiver's STRUCTURAL parser must preserve the
+  // trace/span ids and the nanosecond start/end that formatSpanLine throws away.
+  test("parseResourceSpansFull preserves trace/span ids + nanosecond timestamps for the waterfall", async () => {
+    const { fetch, calls } = makeFakeFetch()
+    let clock = 2_000
+    const exporter = otelHttpExporter({
+      endpoint: ENDPOINT,
+      fetch,
+      flushIntervalMs: 0,
+      now: () => clock,
+      ...noTimer,
+    })
+    const tracer = buildExportingTracer(exporter, { now: () => clock })
+    const span = tracer.startSpan("run_sampling_request", {
+      attributes: { "gen_ai.response.model": "gpt-5.5" },
+    })
+    clock = 2_400 // 400ms elapsed
+    span.setStatus("ok")
+    span.end()
+    await exporter.flush()
+
+    const body = calls.find((c) => c.path === "/v1/traces")?.body
+    const full = parseResourceSpansFull(body as never)
+    expect(full.length).toBe(1)
+    const s = full[0]
+    // ids present + non-empty so the browser can group-by-trace and nest.
+    expect(s?.traceId).toBeTruthy()
+    expect(s?.spanId).toBeTruthy()
+    // a root span has no parent — the field exists (string), never undefined.
+    expect(typeof s?.parentSpanId).toBe("string")
+    // nanosecond timeline inputs survive as finite numbers, end > start.
+    expect(Number.isFinite(s?.startNano)).toBe(true)
+    expect(Number.isFinite(s?.endNano)).toBe(true)
+    expect((s?.endNano ?? 0) > (s?.startNano ?? 0)).toBe(true)
+    expect(s?.durationMs).toBe(400)
+    expect(s?.attrs["gen_ai.response.model"]).toBe("gpt-5.5")
   })
 })

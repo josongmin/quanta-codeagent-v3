@@ -29,6 +29,7 @@ import {
   runtimeConfig,
   setTerminalIo,
 } from "@/shared"
+import { runTraceSink } from "./otel-trace-sink"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -51,6 +52,7 @@ import {
   runBenchLogin,
   selectAuthSourceLabel,
 } from "./auth-pool"
+import { attachBenchOtelExport } from "./otel"
 import {
   CURRENT_BENCH_BASE_PRESET,
   renderBenchPresetListLines,
@@ -78,7 +80,6 @@ import {
   planMicrochunks,
   writeMicrochunks,
 } from "./slicing/microchunk"
-import { attachBenchOtelExport } from "./otel"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
 // logger.info writes nowhere).
@@ -106,6 +107,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "wave2-coverage",
   "wave2-backlog",
   "presets",
+  "trace",
   "help",
   "--help",
   "-h",
@@ -1975,6 +1977,47 @@ const cmdPresets = (): void => {
   for (const line of renderBenchPresetListLines()) logger.info(line)
 }
 
+/** Best-effort open a URL in the OS default browser. Never throws — a headless
+ *  box (no opener) just leaves the operator to click the printed URL. */
+const openBrowser = (url: string): void => {
+  const cmd =
+    process.platform === "darwin"
+      ? ["open", url]
+      : process.platform === "win32"
+        ? ["cmd", "/c", "start", "", url]
+        : ["xdg-open", url]
+  try {
+    Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" })
+  } catch {
+    // no opener on this host — the URL is already printed; operator opens it.
+  }
+}
+
+/** `quanta-bench trace` — launch the live OTEL waterfall receiver + UI (the same
+ *  `tools/otel-trace-sink.ts` the full-remote box ships spans to) and open it in
+ *  the browser. Run this, then point any bench at it with
+ *  `QUANTA_OTEL_ENDPOINT=http://127.0.0.1:<port>`; spans stream into the
+ *  waterfall live (click a span to see the tool input / LLM prompt + response).
+ *
+ *  Flags: --port N (default 4318) · --save <file.jsonl> (tee spans for offline
+ *  replay) · --metrics (also print metric points) · --no-open (don't launch a
+ *  browser). The process stays alive serving the UI until Ctrl-C. */
+const cmdTrace = (): void => {
+  const portArg = argValue("--port")
+  const save = argValue("--save")
+  const { port, uiUrl } = runTraceSink({
+    ...(portArg !== undefined ? { port: Number(portArg) } : {}),
+    ...(save !== undefined ? { savePath: save } : {}),
+    showMetrics: process.argv.includes("--metrics"),
+  })
+  logger.info(`[trace] live waterfall UI → ${uiUrl}`)
+  logger.info(`[trace] point a bench at it: QUANTA_OTEL_ENDPOINT=http://127.0.0.1:${port}`)
+  if (!process.argv.includes("--no-open")) {
+    openBrowser(uiUrl)
+    logger.info("[trace] opened in browser — Ctrl-C to stop")
+  }
+}
+
 const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
 
   run          local patch-gen + optional local grading (legacy flat flags)
@@ -1987,6 +2030,7 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   wave2-coverage  classify multi-file misses as same/partial/disjoint
   wave2-backlog   bucket clean receipts into completeness / generation / oracle
   presets      list bench presets
+  trace        launch the live OTEL waterfall UI (receiver + browser) for any run
 
 Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}
 Explicit selectors still win: QUANTA_BENCH_PRESET > QUANTA_BENCH_SOTA > QUANTA_KNOBS_PRESET > --preset.
@@ -2048,6 +2092,9 @@ const main = async (): Promise<void> => {
       return
     case "presets":
       cmdPresets()
+      return
+    case "trace":
+      cmdTrace()
       return
     default:
       printBlock(HELP)

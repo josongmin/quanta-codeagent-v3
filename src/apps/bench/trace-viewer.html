@@ -1,0 +1,255 @@
+<!doctype html>
+<!--
+  trace-viewer — self-contained live OTEL waterfall for the bench agent loop.
+  Served by tools/otel-trace-sink.ts at GET /. Polls /spans.json and renders a
+  Jaeger-style waterfall (per-trace nesting, duration bars, gen_ai attrs). No
+  build, no deps, no network — just the sink + a browser.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>quanta · live trace</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#11151f; --panel2:#161b27; --line:#222b3a;
+    --txt:#cdd6e4; --dim:#7c8aa0; --accent:#7aa2f7;
+    --llm:#7aa2f7; --tool:#9ece6a; --turn:#bb9af7; --root:#7dcfff;
+    --err:#f7768e; --grid:#1b2230;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+  header{display:flex;align-items:center;gap:18px;padding:10px 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  header h1{font-size:14px;margin:0;font-weight:600;letter-spacing:.5px;color:#fff}
+  header h1 .dot{color:var(--tool)}
+  .stat{display:flex;flex-direction:column;line-height:1.1}
+  .stat b{font-size:15px;color:#fff}
+  .stat span{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px}
+  .spacer{flex:1}
+  select,button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:5px 9px;font:inherit;cursor:pointer}
+  button.on{border-color:var(--tool);color:var(--tool)}
+  .legend{display:flex;gap:12px;font-size:11px;color:var(--dim);align-items:center}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  main{display:flex;height:calc(100vh - 53px)}
+  #waterfall{flex:1;overflow:auto;padding:8px 0}
+  .trace{margin:0 0 4px}
+  .trace>.thead{display:flex;gap:10px;align-items:center;padding:6px 16px;
+    background:var(--panel);border-top:1px solid var(--line);cursor:pointer;position:sticky;top:0}
+  .trace>.thead .tid{color:var(--dim);font-size:11px}
+  .trace>.thead .tname{color:#fff;font-weight:600}
+  .trace>.thead .tdur{margin-left:auto;color:var(--accent)}
+  .row{display:flex;align-items:center;height:22px;padding:0 16px;position:relative}
+  .row:hover{background:#0f141d}
+  .row.sel{background:#152033}
+  .label{width:46%;min-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    display:flex;align-items:center;gap:6px;cursor:pointer}
+  .label .nm{color:var(--txt)}
+  .label .ky{color:var(--dim);font-size:11px}
+  .tick{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none}
+  .track{flex:1;position:relative;height:14px;background:
+    repeating-linear-gradient(90deg,transparent,transparent 9.9%,var(--grid) 10%,var(--grid) calc(10% + 1px))}
+  .bar{position:absolute;top:2px;height:10px;border-radius:3px;min-width:2px;opacity:.92}
+  .bar.err{outline:1px solid var(--err);outline-offset:1px}
+  .dms{position:absolute;top:-1px;font-size:10px;color:var(--dim);white-space:nowrap}
+  /* drag-to-resize divider between the waterfall and the detail panel */
+  #resizer{width:7px;flex:none;cursor:col-resize;background:var(--line);
+    transition:background .12s;position:relative}
+  #resizer::after{content:"";position:absolute;inset:0 2px;border-radius:2px}
+  #resizer:hover,#resizer.drag{background:var(--accent)}
+  #side{width:var(--side-w,460px);flex:none;background:var(--panel);
+    overflow:auto;padding:14px 16px}
+  #side h2{font-size:13px;margin:0 0 4px;color:#fff;word-break:break-all}
+  #side .meta{color:var(--dim);font-size:11px;margin-bottom:14px;display:flex;gap:8px;align-items:center}
+  /* each attribute is a full-width block: key label above, value in its own box —
+     so long LLM prompts/completions use the whole panel instead of a squished cell */
+  #side .attr{margin:0 0 12px}
+  #side .attr .k{color:var(--accent);font-size:11px;font-weight:600;margin-bottom:3px;word-break:break-all}
+  #side .attr .v{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel2);
+    border:1px solid var(--grid);border-radius:5px;padding:7px 9px;font-size:12px;line-height:1.5;
+    color:var(--txt);max-width:100%;overflow-x:auto;max-height:46vh;overflow-y:auto}
+  #side .attr .v.json{color:#b7c7e8}
+  #side .empty{color:var(--dim)}
+  .pill{font-size:10px;padding:1px 6px;border-radius:8px;border:1px solid var(--line)}
+  .pill.error{color:var(--err);border-color:var(--err)}
+  .pill.ok{color:var(--tool);border-color:var(--tool)}
+</style>
+</head>
+<body>
+<header>
+  <h1>quanta<span class="dot">·</span>live trace</h1>
+  <div class="stat"><b id="s-spans">0</b><span>spans</span></div>
+  <div class="stat"><b id="s-traces">0</b><span>traces</span></div>
+  <div class="stat"><b id="s-err" style="color:var(--err)">0</b><span>errors</span></div>
+  <div class="stat"><b id="s-tin">0</b><span>tok in</span></div>
+  <div class="stat"><b id="s-tout">0</b><span>tok out</span></div>
+  <div class="stat"><b id="s-wall">0s</b><span>wall</span></div>
+  <div class="spacer"></div>
+  <div class="legend">
+    <span><i style="background:var(--llm)"></i>llm</span>
+    <span><i style="background:var(--tool)"></i>tool</span>
+    <span><i style="background:var(--turn)"></i>turn</span>
+    <span><i style="background:var(--root)"></i>session</span>
+    <span><i style="background:var(--err)"></i>error</span>
+  </div>
+  <select id="traceSel"><option value="">all traces</option></select>
+  <button id="auto" class="on">● live</button>
+</header>
+<main>
+  <div id="waterfall"></div>
+  <div id="resizer" title="drag to resize"></div>
+  <div id="side"><div class="empty">click a span →</div></div>
+</main>
+<script>
+const CAT = (s) => {
+  const n = (s.name||"").toLowerCase();
+  if (s.status === "error") return "err";
+  if (n.includes("sampling") || s.attrs?.["gen_ai.response.model"] || s.attrs?.["gen_ai.request.model"]) return "llm";
+  if (n.includes("tool")) return "tool";
+  if (n.includes("turn")) return "turn";
+  if (n.includes("session") || n.includes("loop")) return "root";
+  return "root";
+};
+const COLOR = {llm:"var(--llm)",tool:"var(--tool)",turn:"var(--turn)",root:"var(--root)",err:"var(--err)"};
+const KEYATTR = (s) => {
+  const a = s.attrs||{};
+  if (a["gen_ai.response.model"]) return `${a["gen_ai.response.model"]} · ${a["gen_ai.usage.input_tokens"]??"?"}→${a["gen_ai.usage.output_tokens"]??"?"}`;
+  if (a["quanta.tool.name"]||a["tool"]) return `${a["quanta.tool.name"]||a["tool"]} ${a["quanta.tool.call.status"]||""}`.trim();
+  if (a["quanta.instance.id"]||a["instance"]) return a["quanta.instance.id"]||a["instance"];
+  return "";
+};
+let selId = null, auto = true, lastData = [];
+
+async function poll(){
+  try{
+    const r = await fetch("/spans.json",{cache:"no-store"});
+    lastData = await r.json();
+    render(lastData);
+  }catch(e){/* sink restarting; keep last */}
+}
+function render(spans){
+  // group by trace
+  const traces = new Map();
+  let errs=0, tin=0, tout=0;
+  for(const s of spans){
+    const t = s.traceId||"·";
+    if(!traces.has(t)) traces.set(t,[]);
+    traces.get(t).push(s);
+    if(s.status==="error") errs++;
+    tin += +(s.attrs?.["gen_ai.usage.input_tokens"]||0);
+    tout += +(s.attrs?.["gen_ai.usage.output_tokens"]||0);
+  }
+  document.getElementById("s-spans").textContent = spans.length;
+  document.getElementById("s-traces").textContent = traces.size;
+  document.getElementById("s-err").textContent = errs;
+  document.getElementById("s-tin").textContent = tin.toLocaleString();
+  document.getElementById("s-tout").textContent = tout.toLocaleString();
+
+  // trace selector
+  const sel = document.getElementById("traceSel");
+  const want = sel.value;
+  const opts = ['<option value="">all traces ('+traces.size+')</option>'];
+  for(const [t,arr] of traces){
+    const nm = arr.find(x=>x.attrs?.["quanta.instance.id"])?.attrs["quanta.instance.id"] || t.slice(0,8);
+    opts.push(`<option value="${t}"${t===want?" selected":""}>${nm} · ${arr.length}sp</option>`);
+  }
+  sel.innerHTML = opts.join("");
+
+  // global wall = max end - min start across shown traces
+  const shown = want ? [[want,traces.get(want)||[]]] : [...traces];
+  let gmin=Infinity,gmax=-Infinity;
+  for(const [,arr] of shown) for(const s of arr){ gmin=Math.min(gmin,s.startNano); gmax=Math.max(gmax,s.endNano); }
+  document.getElementById("s-wall").textContent = isFinite(gmin)? ((gmax-gmin)/1e9).toFixed(1)+"s" : "0s";
+
+  const wf = document.getElementById("waterfall");
+  const sc = wf.scrollTop;
+  wf.innerHTML = "";
+  for(const [t,arr] of shown){
+    if(!arr.length) continue;
+    const tmin = Math.min(...arr.map(s=>s.startNano));
+    const tmax = Math.max(...arr.map(s=>s.endNano));
+    const span = Math.max(1, tmax - tmin);
+    // nest: order by start, depth via parent chain within trace
+    const byId = new Map(arr.map(s=>[s.spanId,s]));
+    const depth = (s,guard=0)=>{ let d=0,p=s.parentSpanId; while(p&&byId.has(p)&&guard<50){d++;p=byId.get(p).parentSpanId;guard++;} return d; };
+    const sorted = [...arr].sort((a,b)=>a.startNano-b.startNano);
+    const inst = arr.find(x=>x.attrs?.["quanta.instance.id"])?.attrs["quanta.instance.id"] || "trace";
+    const div = document.createElement("div"); div.className="trace";
+    const head = document.createElement("div"); head.className="thead";
+    head.innerHTML = `<span class="tname">${inst}</span><span class="tid">${t.slice(0,12)}…</span>`+
+      `<span class="tdur">${((tmax-tmin)/1e9).toFixed(2)}s · ${arr.length} spans</span>`;
+    div.appendChild(head);
+    for(const s of sorted){
+      const cat = CAT(s);
+      const left = ((s.startNano - tmin)/span*100);
+      const wid = Math.max(0.4,(s.endNano - s.startNano)/span*100);
+      const row = document.createElement("div");
+      row.className = "row"+(s.spanId===selId?" sel":"");
+      const ind = "&nbsp;".repeat(depth(s)*2);
+      row.innerHTML =
+        `<div class="label"><span class="tick" style="background:${COLOR[cat]}"></span>`+
+        `${ind}<span class="nm">${s.name}</span> <span class="ky">${KEYATTR(s)}</span></div>`+
+        `<div class="track"><div class="bar ${s.status==="error"?"err":""}" `+
+        `style="left:${left}%;width:${wid}%;background:${COLOR[cat]}"></div>`+
+        `<span class="dms" style="left:${Math.min(left,88)}%">${s.durationMs??"?"}ms</span></div>`;
+      row.querySelector(".label").onclick = ()=>{ selId=s.spanId; showSide(s); render(lastData); };
+      div.appendChild(row);
+    }
+    wf.appendChild(div);
+  }
+  wf.scrollTop = sc;
+  if(selId){ const s = spans.find(x=>x.spanId===selId); if(s) showSide(s); }
+}
+function esc(x){ return String(x).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+// pretty-print JSON-ish values so LLM prompts/completions read as formatted blocks
+function fmtVal(v){
+  if(typeof v === "string"){
+    const t = v.trim();
+    if((t[0]==="{"&&t.endsWith("}"))||(t[0]==="["&&t.endsWith("]"))){
+      try{ return {text:JSON.stringify(JSON.parse(t),null,2),json:true}; }catch{}
+    }
+    return {text:v,json:false};
+  }
+  if(v&&typeof v==="object"){ try{ return {text:JSON.stringify(v,null,2),json:true}; }catch{} }
+  return {text:String(v),json:false};
+}
+function showSide(s){
+  const a = s.attrs||{};
+  const blocks = Object.keys(a).sort().map(k=>{
+    const f = fmtVal(a[k]);
+    return `<div class="attr"><div class="k">${esc(k)}</div>`+
+      `<div class="v${f.json?" json":""}">${esc(f.text)}</div></div>`;
+  }).join("");
+  document.getElementById("side").innerHTML =
+    `<h2>${esc(s.name)}</h2>`+
+    `<div class="meta">${s.durationMs??"?"}ms · ${esc(s.kind)} · `+
+    `<span class="pill ${esc(s.status)}">${esc(s.status)}</span></div>`+
+    (blocks || `<div class="empty">no attributes</div>`);
+}
+document.getElementById("traceSel").onchange = ()=>render(lastData);
+document.getElementById("auto").onclick = (e)=>{ auto=!auto; e.target.classList.toggle("on",auto); e.target.textContent = auto?"● live":"○ paused"; };
+
+// drag the divider to resize the detail panel; width persists across reloads.
+// double-click the divider to snap back to the default width.
+(function(){
+  const rz = document.getElementById("resizer"), root = document.documentElement, DEFAULT = 460;
+  const clamp = (w)=>Math.min(window.innerWidth*0.85, Math.max(300, w));
+  const setW = (w)=>root.style.setProperty("--side-w", clamp(w)+"px");
+  const saved = +localStorage.getItem("trace.sideW"); if(saved>=300) setW(saved);
+  let drag=false;
+  const move=(e)=>{ if(!drag)return; setW(window.innerWidth - (e.touches?e.touches[0].clientX:e.clientX)); };
+  const end=()=>{ if(!drag)return; drag=false; rz.classList.remove("drag"); document.body.style.userSelect="";
+    localStorage.setItem("trace.sideW", parseInt(getComputedStyle(root).getPropertyValue("--side-w"))||DEFAULT); };
+  const start=(e)=>{ drag=true; rz.classList.add("drag"); document.body.style.userSelect="none"; e.preventDefault(); };
+  rz.addEventListener("mousedown",start); rz.addEventListener("touchstart",start,{passive:false});
+  window.addEventListener("mousemove",move); window.addEventListener("touchmove",move,{passive:false});
+  window.addEventListener("mouseup",end); window.addEventListener("touchend",end);
+  rz.addEventListener("dblclick",()=>{ setW(DEFAULT); localStorage.setItem("trace.sideW",DEFAULT); });
+})();
+
+setInterval(()=>{ if(auto) poll(); }, 1500);
+poll();
+</script>
+</body>
+</html>
