@@ -331,7 +331,13 @@ export {
   stripMarkdownFences,
   stripPythonComments,
 } from "./repro-test"
-export { isRetryable, RetryingLLM, type RetryingLLMOptions } from "./retry"
+export {
+  classifyLLMError,
+  isRetryable,
+  type LLMErrorKind,
+  RetryingLLM,
+  type RetryingLLMOptions,
+} from "./retry"
 export { createOnConfirmReviewerPort, type OnConfirmReviewerPortOptions } from "./reviewer-port"
 export {
   type AgentMode as RunMode,

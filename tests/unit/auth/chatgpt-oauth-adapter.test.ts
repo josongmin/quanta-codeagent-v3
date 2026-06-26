@@ -589,7 +589,7 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
     expect(postedBody).toMatchObject({ max_output_tokens: 321 })
   })
 
-  test("first-chunk timeout before response headers fails closed as stream_corrupt", async () => {
+  test("first-chunk timeout before response headers surfaces a retryable network timeout", async () => {
     await seedToken()
     const fetchImpl = async (url: string, init?: RequestInit): Promise<Response> => {
       if (url.includes("/codex/models")) {
@@ -620,7 +620,9 @@ describe("ChatGPTOAuthAdapter (Phase 2)", () => {
       caught = e
     }
     expect(caught).toBeInstanceOf(LLMError)
-    expect((caught as LLMError).kind).toBe("stream_corrupt")
+    // jun-26: a first-chunk timeout is a transient stall ⇒ RETRYABLE `network`
+    // (was `stream_corrupt`, which the kind-first isRetryable treats as fatal).
+    expect((caught as LLMError).kind).toBe("network")
     expect((caught as LLMError).provider).toBe("chatgpt-oauth")
     expect((caught as LLMError).message).toContain("first-chunk timeout")
   })

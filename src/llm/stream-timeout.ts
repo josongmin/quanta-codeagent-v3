@@ -17,12 +17,20 @@
  *     completions are OK, but no sane provider is silent for >2 minutes
  *     mid-response).
  *
- * On timeout we throw an {@link LLMError} with `kind:"stream_corrupt"`.
- * That kind ALREADY exists in our taxonomy ({@link LLMError}) and the
- * agent loop's `classifyLLMError` routes it through the same-turn retry
- * path (message contains "timeout" → `RETRYABLE_MARKERS` hit → retry with
- * backoff). We deliberately reuse `stream_corrupt` rather than mint a new
- * kind: invariant compatibility with all downstream policy.
+ * On timeout we throw an {@link LLMError} with `kind:"network"`. A silent
+ * provider stall is a TRANSIENT network-level failure, so it MUST route through
+ * the same-turn retry path: `classifyLLMError`→`isRetryable` matches on the
+ * `.kind` discriminator FIRST (`network` ∈ `RETRYABLE_KINDS`) before any message
+ * scan, so `decideOnStreamError` backs off + retries (bounded by
+ * `MAX_TURN_STREAM_RETRIES`; a pathological content-less retry loop is capped
+ * separately by the empty-stream circuit breaker). The message still contains
+ * "timeout" as defense-in-depth for the `kind:"unknown"` marker fallback.
+ *
+ * jun-26 FIX: this previously used `kind:"stream_corrupt"`, which the kind-first
+ * `isRetryable` refactor had since moved into `FATAL_KINDS` — so a timeout was
+ * classified FATAL and the turn died on the FIRST stall with zero retries,
+ * silently killing the retry contract this decorator exists to provide.
+ * `stream_corrupt` is now reserved for genuine SDK shape-drift (correctly fatal).
  *
  * Abort wiring: the wrapper resolves the raw stream's OWN upstream abort
  * surface (`.controller.abort()` first, `.abort()` second) and uses that
@@ -69,16 +77,17 @@ export const DEFAULT_IDLE_MS = 120_000
 type TimeoutReason = "first-chunk" | "idle"
 
 const buildTimeoutError = (reason: TimeoutReason, ms: number, provider: LLMProvider): LLMError => {
-  // Message includes "timeout" so `classifyLLMError` in `src/agent/retry.ts`
-  // (which checks `RETRYABLE_MARKERS` for "timeout"/"timed out") routes this
-  // through the existing same-turn retry path. Do NOT change this wording
-  // without also extending the retry markers — the integration is by string.
+  // `kind:"network"` is the retry contract: `isRetryable` matches it on the
+  // `.kind` discriminator (∈ RETRYABLE_KINDS) BEFORE any message scan, so a
+  // transient stall retries with backoff. The "timeout" wording is kept as a
+  // defense-in-depth marker for the `kind:"unknown"` fallback only — the primary
+  // route is now the kind, NOT the string.
   const message =
     reason === "first-chunk"
       ? `LLM stream first-chunk timeout after ${ms}ms (provider sent no data; timed out)`
       : `LLM stream idle timeout after ${ms}ms (no data between chunks; timed out)`
   return new LLMError(message, {
-    kind: "stream_corrupt",
+    kind: "network",
     provider,
     cause: new Error(`${reason} timeout @${ms}ms`),
   })

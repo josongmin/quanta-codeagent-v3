@@ -2,9 +2,10 @@
  * T1 stream-hang guard — `withStreamTimeout` decorator tests.
  *
  * Pins the contract used by both adapters (`openai.ts` + `anthropic.ts`):
- *  1. First-chunk silence → `LLMError(kind:"stream_corrupt")` with message
- *     containing "first-chunk" and "timeout" (the latter is the substring the
- *     loop's `RETRYABLE_MARKERS` checks for so retry engages).
+ *  1. First-chunk silence → a RETRYABLE `LLMError(kind:"network")` with message
+ *     containing "first-chunk" and "timeout"; `isRetryable`/`classifyLLMError`
+ *     match the `network` kind FIRST so the loop's same-turn retry engages (a
+ *     timeout is a transient stall, NOT the fatal `stream_corrupt` shape-drift).
  *  2. Yield-one-then-hang silence → same error class with "idle" + "timeout".
  *  3. Yields-within-budget → passes through verbatim, no throw.
  *  4. On timeout the wrapper aborts the RAW stream's upstream cancellation
@@ -19,6 +20,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import { classifyLLMError, isRetryable } from "@/agent"
 import type { StreamEvent, StreamInput } from "@/llm"
 import { AnthropicAdapter } from "@/llm/adapters/anthropic"
 import type { RawChunk } from "@/llm/adapters/openai"
@@ -83,7 +85,7 @@ function makeControllerBackedStream<T>(opts: {
 }
 
 describe("withStreamTimeout — first-chunk deadline", () => {
-  test("stream that yields nothing throws stream_corrupt with 'first-chunk' message", async () => {
+  test("stream that yields nothing throws a RETRYABLE network timeout with 'first-chunk' message", async () => {
     const stub = makeStubStream<number>({ chunks: [], hangAfter: true })
     const wrapped = withStreamTimeout(stub, {
       firstChunkMs: 50,
@@ -102,7 +104,12 @@ describe("withStreamTimeout — first-chunk deadline", () => {
 
     expect(caught).toBeInstanceOf(LLMError)
     const err = caught as LLMError
-    expect(err.kind).toBe("stream_corrupt")
+    expect(err.kind).toBe("network")
+    // REGRESSION GUARD (jun-26): a timeout MUST classify retryable. Asserting on
+    // the REAL thrown error (not a kind-less LLMError) is the coverage the prior
+    // tests lacked — `kind:"stream_corrupt"` was FATAL and silently killed retry.
+    expect(isRetryable(err)).toBe(true)
+    expect(classifyLLMError(err)).toBe("retryable")
     expect(err.provider).toBe("openai")
     expect(err.message).toContain("first-chunk")
     expect(err.message.toLowerCase()).toContain("timeout")
@@ -112,7 +119,7 @@ describe("withStreamTimeout — first-chunk deadline", () => {
 })
 
 describe("withStreamTimeout — inter-chunk idle deadline", () => {
-  test("yield one then hang forever throws stream_corrupt with 'idle' message", async () => {
+  test("yield one then hang forever throws a RETRYABLE network timeout with 'idle' message", async () => {
     const stub = makeStubStream<string>({ chunks: ["a"], hangAfter: true })
     const wrapped = withStreamTimeout(stub, {
       firstChunkMs: 5_000,
@@ -135,7 +142,9 @@ describe("withStreamTimeout — inter-chunk idle deadline", () => {
     expect(seen).toEqual(["a"])
     expect(caught).toBeInstanceOf(LLMError)
     const err = caught as LLMError
-    expect(err.kind).toBe("stream_corrupt")
+    expect(err.kind).toBe("network")
+    expect(isRetryable(err)).toBe(true)
+    expect(classifyLLMError(err)).toBe("retryable")
     expect(err.provider).toBe("anthropic")
     expect(err.message).toContain("idle")
     expect(err.message.toLowerCase()).toContain("timeout")
@@ -355,16 +364,14 @@ describe("T1 wiring — both adapters use withStreamTimeout", () => {
     tools: [],
   })
 
-  test("openai adapter applies withStreamTimeout with provider:'openai' (hung stream ⇒ stream_corrupt)", async () => {
+  test("openai adapter applies withStreamTimeout with provider:'openai' (hung stream ⇒ retryable network timeout)", async () => {
     const a = new OpenAIAdapter({
       apiKey: "test",
       model: "gpt-x",
       maxTokens: 64,
       streamFirstChunkMs: 40,
     })
-    ;(
-      a as unknown as { client: { chat: { completions: { create: unknown } } } }
-    ).client = {
+    ;(a as unknown as { client: { chat: { completions: { create: unknown } } } }).client = {
       chat: { completions: { create: async () => neverYielding() } },
     }
 
@@ -376,12 +383,13 @@ describe("T1 wiring — both adapters use withStreamTimeout", () => {
     }
     expect(caught).toBeInstanceOf(LLMError)
     const err = caught as LLMError
-    expect(err.kind).toBe("stream_corrupt")
+    expect(err.kind).toBe("network")
+    expect(isRetryable(err)).toBe(true)
     expect(err.provider).toBe("openai")
     expect(err.message.toLowerCase()).toContain("timeout")
   })
 
-  test("anthropic adapter applies withStreamTimeout with provider:'anthropic' (hung stream ⇒ stream_corrupt)", async () => {
+  test("anthropic adapter applies withStreamTimeout with provider:'anthropic' (hung stream ⇒ retryable network timeout)", async () => {
     const a = new AnthropicAdapter({
       apiKey: "test",
       model: "claude-test",
@@ -399,7 +407,8 @@ describe("T1 wiring — both adapters use withStreamTimeout", () => {
     }
     expect(caught).toBeInstanceOf(LLMError)
     const err = caught as LLMError
-    expect(err.kind).toBe("stream_corrupt")
+    expect(err.kind).toBe("network")
+    expect(isRetryable(err)).toBe(true)
     expect(err.provider).toBe("anthropic")
     expect(err.message.toLowerCase()).toContain("timeout")
   })
@@ -425,10 +434,7 @@ describe("OpenAIAdapter — input.signal reaches the SDK create() options", () =
     createCalls = 0
     readonly chat = {
       completions: {
-        create: async (
-          _req: unknown,
-          opts?: unknown,
-        ): Promise<AsyncIterable<RawChunk>> => {
+        create: async (_req: unknown, opts?: unknown): Promise<AsyncIterable<RawChunk>> => {
           this.createCalls += 1
           this.capturedOpts = opts
           const chunks: RawChunk[] = [

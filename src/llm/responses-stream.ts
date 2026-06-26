@@ -191,9 +191,15 @@ const readBodyTextOrLog = async (res: Response, provider: LLMProvider): Promise<
   }
 }
 
+// jun-26: a first-chunk TIMEOUT is a transient stall, not SDK corruption — so
+// `kind:"network"` (∈ RETRYABLE_KINDS) routes it through the same-turn retry path
+// (the empty-stream breaker caps a pathological content-less retry loop). Was
+// `stream_corrupt`, which the kind-first `isRetryable` treats as FATAL ⇒ the turn
+// died on the first stall with zero retries. `stream_corrupt` stays for genuine
+// shape-drift (e.g. the no-body case below).
 export const buildResponsesFirstChunkTimeoutError = (ms: number, provider: LLMProvider): LLMError =>
   new LLMError(`LLM stream first-chunk timeout after ${ms}ms (provider sent no data; timed out)`, {
-    kind: "stream_corrupt",
+    kind: "network",
     provider,
     cause: new Error(`first-chunk timeout @${ms}ms`),
   })
