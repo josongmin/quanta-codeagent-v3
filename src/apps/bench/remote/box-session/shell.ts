@@ -74,10 +74,13 @@ export const aws =
  *    no `run finished (exit …)` line ⇒ the await never returned.
  *  - TIGHT keepalive (`15 / CountMax=4`, 60s grace) TORE DOWN healthy runs: a
  *    CPU-saturated box can't answer probes within 60s → `exit 255`, empty log.
- *  The fix is BOTH at once: probes every 30s keep the idle TCP alive THROUGH the
- *  silence (NAT idle ~300s ≫ 30s), and a 30×20 = 600s grace tolerates a
- *  busy-but-alive box (only 20 consecutive missed probes ⇒ truly dead).
- *  `TCPKeepAlive=yes` is OS-layer belt-and-suspenders. */
+ *  The fix: probes every 30s keep the idle TCP alive THROUGH the silence (NAT
+ *  idle ~300s ≫ 30s). The run itself is now DETACHED (`setsid`), so it survives a
+ *  dropped ssh; status comes from SHORT reconnecting polls. CountMax is the
+ *  jun-25 value `4` (30×4 = 120s): a hung/partitioned poll errors in ~2min so
+ *  box-death detection trips fast, instead of the old 30×20 = 600s that left a
+ *  dead box hanging the run for ~10min/poll. `TCPKeepAlive=yes` is OS-layer
+ *  belt-and-suspenders. */
 export const makeSsh =
   (spawn: SpawnFn, keyPath: string, host: string) =>
   (remoteCmd: string, input?: string, onData?: (chunk: string) => void): Promise<SpawnResult> =>
@@ -115,3 +118,61 @@ export const makeSsh =
           ]
         : []),
     )
+
+/**
+ * Live OTEL: open a persistent reverse SSH tunnel (box localhost:<port> →
+ * operator localhost:<port>) so the box's agent loop — when its env carries
+ * QUANTA_OTEL_ENDPOINT=http://localhost:<port> — streams OTLP spans straight into
+ * the operator's local trace-sink/UI. REPLACES the flaky box→local run.log tail as
+ * the live-progress channel (spans carry per-turn LLM prompt/response + tool calls).
+ *
+ * Returns a no-op closer UNLESS QUANTA_OTEL_ENDPOINT points at localhost, so it is
+ * byte-identical / zero-cost when live tracing isn't requested. Bun.spawn (not the
+ * awaitable SpawnFn) keeps a killable long-lived child; `-N` runs no remote command;
+ * ExitOnForwardFailure fails loudly on a bind clash instead of silently running
+ * tunnel-less. Per-box loopback bind ⇒ N concurrent boxes never collide — each
+ * box's :port is independent and all forward to the one operator sink (spans
+ * disambiguated by QUANTA_OTEL_SERVICE_NAME).
+ */
+export const openOtelReverseTunnel = (
+  keyPath: string,
+  host: string,
+  log: (msg: string) => void,
+): { close: () => void } => {
+  const endpoint = process.env.QUANTA_OTEL_ENDPOINT ?? ""
+  const match = endpoint.match(/^https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/)
+  if (match === null) return { close: () => {} }
+  const port = match[1]
+  const proc = Bun.spawn(
+    [
+      "ssh",
+      "-i",
+      keyPath,
+      ...BENCH_SSH_SAFE_OPTS,
+      "-o",
+      "ServerAliveInterval=30",
+      "-o",
+      "ExitOnForwardFailure=yes",
+      "-N",
+      "-R",
+      `${port}:localhost:${port}`,
+      host,
+    ],
+    { stdout: "ignore", stderr: "ignore", stdin: "ignore" },
+  )
+  log(
+    `[full-remote] 📡 OTEL reverse tunnel up (box localhost:${port} → operator:${port}) — live spans → trace UI`,
+  )
+  let closed = false
+  return {
+    close: () => {
+      if (closed) return
+      closed = true
+      try {
+        proc.kill()
+      } catch {
+        // box already gone / tunnel already dead — nothing to reap
+      }
+    },
+  }
+}

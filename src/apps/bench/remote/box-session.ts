@@ -43,7 +43,7 @@ import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
-import { BENCH_SSH_SAFE_OPTS, shq } from "./box-session/shell"
+import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
 import {
   createGradeChunkState,
   createSnapshotBase,
@@ -331,6 +331,10 @@ const runChunkBench = async (args: {
     `[full-remote] running patch-gen + grading on box (minutes). Watch live:\n` +
       `    ssh -i ${args.keyPath} ${args.host} 'tail -f ${args.paths.runLog}'`,
   )
+  // Live OTEL: stream this run's spans to the operator's trace UI for the run's
+  // duration (no-op unless QUANTA_OTEL_ENDPOINT points at localhost). Closed in
+  // .finally so a thrown poll / box-death still reaps the tunnel child.
+  const otelTunnel = openOtelReverseTunnel(args.keyPath, args.host, args.log)
   const remoteRun = await runBenchDetachedPoll({
     ssh: args.ssh,
     aws: args.aws,
@@ -349,6 +353,8 @@ const runChunkBench = async (args: {
       ? { pollIntervalMs: args.params.pollIntervalMs }
       : {}),
     ...(args.params.pollNow !== undefined ? { now: args.params.pollNow } : {}),
+  }).finally(() => {
+    otelTunnel.close()
   })
   return remoteRun.code
 }
