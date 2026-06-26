@@ -6,6 +6,7 @@
  * the production adapters and passes them in.
  */
 
+export { lastTurnOutcomeFromAgentOutcome } from "./agent-outcome-adapter"
 export type {
   SelfWakeOpts,
   SelfWakeResult,

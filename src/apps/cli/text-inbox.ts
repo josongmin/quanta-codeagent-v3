@@ -14,7 +14,9 @@
  * again for a future turn.
  *
  * Slice posture (RFC §3.1):
- *   - Lives in `apps/cli` (surface-only); imports nothing outside `node:*`.
+ *   - Lives in `apps/cli` (surface-only); the only non-`node:*` import is the
+ *     PORT CONTRACT type from `@/agent/surface-ports` (a downward surface→core
+ *     type dependency — the agent owns the contract, this file implements it).
  *   - exactOptionalPropertyTypes-clean (no `T | undefined` on the public
  *     surface — capacity errors are typed discriminants, not nullable).
  *   - No-throw: every add-failure mode returns a typed result.
@@ -22,36 +24,12 @@
 
 export const TEXT_INBOX_DEFAULT_MAX = 8
 
-/** Single text attachment — `kind` distinguishes provenance so the
- *  surface can render a friendlier preface ("(web: https://…)" vs
- *  "(paste)") on the prepended bytes. */
-export interface TextInboxEntry {
-  /** Provenance tag — `web` ⇒ added by `/web`, `paste` ⇒ added by `/paste`,
-   *  `other` reserved for future surface integrations (drag-drop on Web). */
-  readonly kind: "web" | "paste" | "other"
-  /** Short human label — e.g. the URL for `/web`, the path for a `/paste`
-   *  that resolved a filesystem path. Surfaced in `list()` output. */
-  readonly label: string
-  /** The literal text body to attach (markdown or raw). */
-  readonly text: string
-}
+// The PORT CONTRACT lives in `@/agent/surface-ports` (the agent core owns it;
+// this surface implements it via `createTextInbox`). Re-exported here so every
+// existing `./text-inbox` importer keeps its import site unchanged.
+export type { TextInbox, TextInboxAddResult, TextInboxEntry } from "@/agent/surface-ports"
 
-export type TextInboxAddResult =
-  | { readonly kind: "ok" }
-  | { readonly kind: "over_cap"; readonly cap: number }
-
-export interface TextInbox {
-  add(entry: TextInboxEntry): TextInboxAddResult
-  /** Snapshot of currently-queued entries. Returns a fresh array; mutating
-   *  it has no effect on the inbox. */
-  list(): readonly TextInboxEntry[]
-  /** Empty the inbox. Idempotent. */
-  clear(): void
-  size(): number
-  /** Atomically return + clear. Single-shot drain semantics — every
-   *  `PromptSource.next()` call invokes this exactly once. */
-  drain(): readonly TextInboxEntry[]
-}
+import type { TextInbox, TextInboxAddResult, TextInboxEntry } from "@/agent/surface-ports"
 
 export interface TextInboxOpts {
   /** Capacity cap. Defaults to {@link TEXT_INBOX_DEFAULT_MAX}. */

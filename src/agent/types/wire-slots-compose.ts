@@ -41,18 +41,18 @@ export interface WireSlotsComposeConfig {
    * other subsystems (e.g. a `/web` slash enqueueing for a different
    * surface). The loop NEVER drains this slot directly. Absent ⇒ omitted.
    */
-  textInbox?: { readonly sink: import("../../apps/cli/text-inbox").TextInbox }
+  textInbox?: { readonly sink: import("../surface-ports").TextInbox }
   /**
    * ADR-0236 / ADR-0225 — plan-edit port (composition-root wire). Caller-
    * side; `/edit-plan` slash reads it via `SlashContext.planEdit`. Loop
    * does not consume. Absent ⇒ slash prints "not wired in this surface".
    */
-  planEdit?: { readonly port: import("../../apps/cli/edit-plan-cmd").PlanEditPort }
+  planEdit?: { readonly port: import("../surface-ports").PlanEditPort }
   /**
    * ADR-0236 / ADR-0225 — composer-edit port (composition-root wire).
    * Sibling to {@link planEdit}: drives `/edit-message`. Default-OFF.
    */
-  composerEdit?: { readonly port: import("../../apps/cli/edit-message-cmd").ComposerEditPort }
+  composerEdit?: { readonly port: import("../surface-ports").ComposerEditPort }
   /**
    * ADR-0236 / ADR-0212 — sticky-model-per-mode store (composition-root
    * wire). Caller-side slot consumed by the model-resolver (`/status` may

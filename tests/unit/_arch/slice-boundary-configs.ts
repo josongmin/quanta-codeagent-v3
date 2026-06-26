@@ -290,6 +290,39 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     includeBackupArtifacts: true,
     requireSliceBarrel: true,
   },
+  // `@/host` is the Layer-2 composition seam (ADR-0299): it wires every surface
+  // (CLI / headless / web) to the `@/runner` + `@/agent` core via a DI bundle.
+  // It legitimately reads `process.env` (36 sites — it IS the env composition
+  // root) and writes startup stdio, so the library-purity suite does NOT apply.
+  // The ONE invariant that DOES bind it is surface isolation: the host must NOT
+  // import or even type-reference `apps/**` (the bootstrap's own docblock,
+  // `bootstrap/types.ts:133,394`, asserts "host cannot import apps/cli/...").
+  // Previously NO automated guard enforced this over `src/host/**` — only the
+  // `@/agent`/`@/runner` guards covered their own slices, leaving the host's
+  // ADR-0299 fence enforced by docblock alone. `surfaceIsolationOnly` runs
+  // exactly the surface-isolation test (runtime + type-position) and nothing
+  // else.
+  host: {
+    slice: "host",
+    denyImports: [],
+    surfaceIsolationOnly: true,
+  },
+  // `@/sdk` and `@/kernel` are Layer-2 composition seams (the runtime facade +
+  // the session-host turn machinery). They legitimately import many lower slices
+  // (@/agent, @/host, @/ipc, @/llm, @/protocol, @/tool, …) and read env / write
+  // a startup console line, so the library-purity suite does NOT apply — but the
+  // surface-isolation invariant DOES: neither may import or type-reference
+  // `apps/**`. Same `surfaceIsolationOnly` posture as `@/host`.
+  sdk: {
+    slice: "sdk",
+    denyImports: [],
+    surfaceIsolationOnly: true,
+  },
+  kernel: {
+    slice: "kernel",
+    denyImports: [],
+    surfaceIsolationOnly: true,
+  },
   // `@/patch` is a pure leaf (V4A parser + applier + ports). Its ONLY runtime
   // dependency is `@/shared` (leaf util). The applier takes an injected
   // `PatchTracePort` (closed-port DI) for telemetry, so it imports NOTHING from
@@ -325,6 +358,28 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   scheduler: {
     slice: "scheduler",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/stream` is a leaf (agent-event taxonomy + projectors + emitter adapters);
+  // its ONLY runtime dependency is `@/shared`. Full deny so a VALUE import from
+  // any higher layer is flagged. (`@/stream` IS itself in PEER_LIBRARY_DENY —
+  // the self-prefix filter in `registerSliceBoundarySuite` drops it.)
+  stream: {
+    slice: "stream",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  // `@/reactor` is a proactive-reactor leaf. It gained ONE cross-slice edge —
+  // `import type { AgentOutcome } from "@/agent"` in `agent-outcome-adapter.ts`
+  // (the relocated turn-outcome projection; observer→observed, type-only). The
+  // full deny-list INCLUDES `@/agent`, so a TYPE-only ref stays allowed (the AST
+  // scanner skips `import type`) while a VALUE import of `@/agent` — or any other
+  // peer library / Layer-2 surface — FIRES. That locks the new edge: it can never
+  // silently widen into a runtime coupling. `types.ts` reads `REACTOR_ENV_FLAG`.
+  reactor: {
+    slice: "reactor",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    envAllowFiles: ["types.ts"],
     requireSliceBarrel: true,
   },
 }

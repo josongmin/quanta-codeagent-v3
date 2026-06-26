@@ -1,6 +1,4 @@
-import type { AgentOutcome } from "@/agent"
 import type { InboundMode } from "@/agent/inbound-mode"
-import type { LastTurnOutcome } from "@/reactor"
 import { sliceWholeChars } from "@/shared"
 import type { ConversationActionSurface } from "../conversation-action-surface"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
@@ -227,20 +225,6 @@ export const backgroundTurnLabel = (text: string): string => {
   const oneLine = text.replace(/\s+/g, " ").trim()
   if (oneLine.length === 0) return "(empty prompt)"
   return oneLine.length > BG_LABEL_MAX ? `${sliceWholeChars(oneLine, BG_LABEL_MAX - 1)}…` : oneLine
-}
-
-export const mapAgentOutcomeToReactorOutcome = (outcome: AgentOutcome): LastTurnOutcome => {
-  switch (outcome.reason) {
-    case "completed":
-      return "success"
-    case "max_turns":
-    case "aborted":
-    case "budget_exhausted":
-      return "partial"
-    case "error":
-    case "refusal":
-      return "fail"
-  }
 }
 
 export const drainTurnImages = (

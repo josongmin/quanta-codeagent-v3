@@ -146,6 +146,8 @@ export {
 } from "./per-host-mode"
 export type { ApprovalLadderName, NamedApprovalLadderRung } from "./approval-ladder"
 export { APPROVAL_LADDER, APPROVAL_LADDER_NAMES, parseApprovalLadderName } from "./approval-ladder"
+export type { ReviewerSandboxProfile } from "./reviewer-default-policy"
+export { selectDefaultReviewer } from "./reviewer-default-policy"
 export type {
   AutoApprovalReviewEvent,
   AutoApprovalReviewObserver,

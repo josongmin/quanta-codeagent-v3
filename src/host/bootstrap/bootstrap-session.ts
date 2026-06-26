@@ -293,8 +293,26 @@ const probeCapabilityConsistency = (env: NodeJS.ProcessEnv): void => {
  * signal, byte-identical). Finishes the migration the welcome-banner docblock
  * describes ("Replaces the bare `[info] quanta ready` + JSONL config dumps").
  */
+const inInteractiveBanner = (runtime: SessionRuntimeConfigShape): boolean =>
+  runtime.argPrompt === undefined && runtime.stderrIsTTY === true
+
 const startupReadyLogger = (runtime: SessionRuntimeConfigShape): Logger | undefined =>
-  runtime.argPrompt === undefined && runtime.stderrIsTTY === true ? undefined : logger
+  inInteractiveBanner(runtime) ? undefined : logger
+
+/** Floor for the session's structured (JSONL) logger. The same feature-on
+ *  startup events (`lsp.nav.on`, `lsp.diagnostics.on`, `mcp.tools.loaded`, …)
+ *  that the human lines duplicate are also emitted as `slog.info` JSONL, and in
+ *  the interactive surface they spray raw JSON above the welcome box (stderr is
+ *  the same TTY the banner paints to). When the banner renders AND the user has
+ *  not explicitly pinned `QUANTA_LOG_LEVEL`, raise the floor to `warn` so those
+ *  info events fall silent while real warn/error JSONL still surfaces. An
+ *  explicit level (incl. `debug` for troubleshooting) is honored verbatim, and
+ *  pipe / one-shot / CI (no banner) stay byte-identical (`undefined` ⇒ live
+ *  `runtimeConfig().logLevel`). */
+const interactiveStructuredLogLevel = (
+  runtime: SessionRuntimeConfigShape,
+): "warn" | undefined =>
+  inInteractiveBanner(runtime) && runtime.env.QUANTA_LOG_LEVEL === undefined ? "warn" : undefined
 
 /** Emit a human startup line through the gated logger — a no-op when the
  *  welcome banner renders (`log` is then `undefined`). Wrapping the `?.` here
@@ -335,7 +353,10 @@ const prepareSessionRuntime = async (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
 ): Promise<PreparedSessionRuntime> => {
-  const slog = new StructuredLogger()
+  const interactiveLevel = interactiveStructuredLogLevel(runtime)
+  const slog = new StructuredLogger(
+    interactiveLevel !== undefined ? { level: interactiveLevel } : {},
+  )
   // ADR-0503 P3 — armed, read-only capability consistency probe. Gated on the
   // strict master gate inside the runner; OFF ⇒ byte-identical no-op (no probe,
   // no log). Observe-only: it never enforces or replaces a legacy gate.

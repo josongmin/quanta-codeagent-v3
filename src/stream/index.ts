@@ -33,4 +33,4 @@ export type {
   TodoStatusMirror,
   ToolRiskMirror,
 } from "./types"
-export { AGENT_EVENT_TYPES, isAgentEventType } from "./types"
+export { AGENT_EVENT_TYPES, ALL_PLAN_DELTA_KIND_MIRROR, isAgentEventType } from "./types"

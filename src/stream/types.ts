@@ -81,6 +81,21 @@ export type PlanDeltaKindMirror =
   | "todo_renamed"
   | "plan_renamed"
 
+/** All {@link PlanDeltaKindMirror} values as a runtime list. SSOT for the
+ *  producer↔consumer fold contract: the web frontend's `applyPlanDelta`
+ *  dispatch (`apps/web-frontend/src/ws/plan-reducer.ts`) MUST fold exactly these
+ *  kinds — a kind added here but unhandled there is silently dropped by the
+ *  reducer's forward-compat fallback. The `satisfies` clause pins this list to
+ *  the union so the two cannot drift; the cross-toolchain fold-coverage drift is
+ *  guarded by `web-frontend-plan-delta-fold-contract-hellgate.test.ts`. */
+export const ALL_PLAN_DELTA_KIND_MIRROR = Object.freeze([
+  "todo_added",
+  "todo_removed",
+  "todo_status_changed",
+  "todo_renamed",
+  "plan_renamed",
+] as const satisfies readonly PlanDeltaKindMirror[])
+
 /** Read-only plan-delta — mirrors `PlanDeltaReadonly` in
  *  `@/agent/plan/types.ts`. Carried by `plan_updated`. */
 export interface PlanDeltaReadonlyMirror {

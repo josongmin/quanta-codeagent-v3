@@ -27,21 +27,18 @@
 import { errMessage } from "@/shared"
 import { defaultEditorSpawn, editInTemp, renderEditResult, resolveEditor } from "./edit-plan-cmd"
 import type { SlashCommand } from "./slash-commands"
+
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
 /* ------------------------------------------------------------------ */
 
-/** Duck-typed composer port. The surface owns the pending text + commits
- *  it on the next `PromptSource.next()` cycle. */
-export interface ComposerEditPort {
-  /** Snapshot the pending composer buffer. Empty string ⇒ no pending
-   *  text; the user's edit BECOMES the new pending text. */
-  getPending(): Promise<string> | string
-  /** Push the edited text back into the composer buffer. The surface
-   *  decides whether to AUTO-submit (Claude Code does not — the user
-   *  still hits Enter); we never auto-submit from the slash side. */
-  setPending(body: string): Promise<void> | void
-}
+// The `ComposerEditPort` CONTRACT lives in `@/agent/surface-ports` (the agent
+// core owns it; this surface implements + wires it). Re-exported here so the
+// existing `./edit-message-cmd` importers (slash-surface, composer-edit-adapter)
+// are unaffected.
+export type { ComposerEditPort } from "@/agent/surface-ports"
+
+import type { ComposerEditPort } from "@/agent/surface-ports"
 
 declare module "./slash-commands" {
   interface SlashContext {

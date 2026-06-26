@@ -28,9 +28,23 @@ export interface SliceBoundaryConfig {
   readonly requireSliceBarrel?: boolean
   /** Require sub-slice barrels relative to `src/<slice>/`. */
   readonly requireSubSliceBarrels?: readonly string[]
+  /** Layer-2 composition slices (e.g. `@/host`) are NOT pure libraries: they
+   *  legitimately read `process.env`, write startup stdio, and import every
+   *  lower layer. Only the ONE invariant that still applies to them — surface
+   *  isolation (no `apps/**` reference, runtime OR type-position) — is run when
+   *  this is set; the library-purity tests (deny-list / env / stdio / console /
+   *  alt-runtime / node-surface / barrel) are skipped. */
+  readonly surfaceIsolationOnly?: boolean
 }
 
 const SURFACE_PATTERNS = [/^@\/apps\b/, /(^|\/)apps\//, /(^|\/)src\/apps\//] as const
+
+/** Does an import specifier point at a surface (`apps/**`)? SSOT for the
+ *  surface-isolation guard — a core/wiring slice may never reference these,
+ *  runtime OR type-position. Exported so the negative-proof battery can drive
+ *  the SAME predicate the guard uses (no second copy to drift). */
+export const isSurfaceSpec = (spec: string): boolean =>
+  SURFACE_PATTERNS.some((p) => p.test(spec))
 
 const NODE_SURFACE_MODULES = new Set<string>([
   "node:readline",
@@ -154,6 +168,52 @@ export const extractImports = (src: string): Array<{ line: number; spec: string 
           line: lineOf(sf, node.getStart(sf)),
           spec: firstArg.text,
         })
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return out
+}
+
+/**
+ * Type-POSITION module references that {@link extractImports} deliberately
+ * skips: `import type … from "x"`, `export type … from "x"`, and the inline
+ * `import("x").Member` type syntax (`ts.ImportTypeNode`). These are erased at
+ * compile time, so for a general peer-library deny-list they are correctly
+ * ignored (slice purity is a RUNTIME-dependency invariant). But a CORE slice
+ * referencing a SURFACE (`apps/**`) is a dependency-direction INVERSION
+ * regardless of erasure — and the inline `import("../../apps/cli/…").Port`
+ * form is exactly how three such references hid in `@/agent` until the surface
+ * ports were hoisted to `@/agent/surface-ports`. The surface-isolation guard
+ * scans these in ADDITION to runtime imports so the inversion cannot regress.
+ */
+export const extractTypeOnlyModuleRefs = (
+  src: string,
+): Array<{ line: number; spec: string }> => {
+  const out: Array<{ line: number; spec: string }> = []
+  const sf = parseSourceFile(src)
+  const visit = (node: ts.Node): void => {
+    // `import type … from "x"` / `export type … from "x"`
+    if (
+      ts.isImportDeclaration(node) &&
+      node.importClause?.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      out.push({ line: lineOf(sf, node.getStart(sf)), spec: node.moduleSpecifier.text })
+    } else if (
+      ts.isExportDeclaration(node) &&
+      node.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      out.push({ line: lineOf(sf, node.getStart(sf)), spec: node.moduleSpecifier.text })
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument)) {
+      // `import("x").Member` — the argument is a LiteralTypeNode wrapping the string.
+      const lit = node.argument.literal
+      if (ts.isStringLiteralLike(lit)) {
+        out.push({ line: lineOf(sf, node.getStart(sf)), spec: lit.text })
       }
     }
     ts.forEachChild(node, visit)
@@ -307,21 +367,36 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       expect(files.length).toBeGreaterThan(0)
     })
 
-    test("no file imports from any `apps/**` (surface isolation)", () => {
+    test("no file imports from any `apps/**` (surface isolation, incl. type-position)", () => {
       const violations: string[] = []
       for (const f of files) {
-        for (const { line, spec } of extractImports(readFileSync(f, "utf8"))) {
-          if (SURFACE_PATTERNS.some((p) => p.test(spec))) {
+        const src = readFileSync(f, "utf8")
+        // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
+        for (const { line, spec } of extractImports(src)) {
+          if (isSurfaceSpec(spec)) {
             violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
+          }
+        }
+        // …AND type-position refs (`import type`, `export type`, `import("x").T`).
+        // A core/wiring slice referencing a surface is an inversion even when
+        // erased — this is the exact form that hid the `@/agent`→`apps/cli`
+        // surface-port inversion. (For non-`apps` peer libs, type contracts stay
+        // allowed; only the surface boundary is checked here.)
+        for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
+          if (isSurfaceSpec(spec)) {
+            violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
           }
         }
       }
       if (violations.length > 0) {
         throw new Error(
-          `@/${config.slice} must not import from apps/**:\n\n${violations.join("\n")}`,
+          `@/${config.slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
         )
       }
     })
+
+    // Layer-2 composition slices run ONLY the surface-isolation invariant above.
+    if (config.surfaceIsolationOnly) return
 
     test("no file imports from the slice deny-list", () => {
       const violations: string[] = []

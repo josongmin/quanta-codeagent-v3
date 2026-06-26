@@ -43,24 +43,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
 import type { SlashCommand } from "./slash-commands"
+
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
 /* ------------------------------------------------------------------ */
 
-/** Duck-typed plan-edit port. The surface owns the wire; the slash never
- *  imports `@/agent`. Async to match the rest of our port surfaces
- *  (`PlanQueueStore.enqueue` is sync but a future Tauri-backed surface
- *  may need to await an IPC round-trip). */
-export interface PlanEditPort {
-  /** Snapshot the current plan as markdown the user can edit in `$EDITOR`.
-   *  Empty string ⇒ no plan exists yet; the user's edit BECOMES the new
-   *  plan body. */
-  getPlan(): Promise<string> | string
-  /** Push the edited body back. Implementation may parse it back to
-   *  structured todos or simply enqueue it as a `external_editor` follow-up
-   *  the next turn reads (the surface chooses). */
-  setPlan(body: string): Promise<void> | void
-}
+// The `PlanEditPort` CONTRACT lives in `@/agent/surface-ports` (the agent core
+// owns it; this surface implements + wires it). Re-exported here so the existing
+// `./edit-plan-cmd` importers (slash-surface, plan-edit-adapter) are unaffected.
+export type { PlanEditPort } from "@/agent/surface-ports"
+
+import type { PlanEditPort } from "@/agent/surface-ports"
 
 declare module "./slash-commands" {
   interface SlashContext {

@@ -10,15 +10,17 @@
  * surfacing a stack trace mid-turn.
  *
  * Layering:
- *   - This module lives in `apps/cli` because the ANSI helpers (`@/ui`) and
- *     the env knobs are CLI-surface concerns. The pure diff math
- *     (line-LCS) has no surface dependency and could be hoisted to
- *     `@/runner` in a separate PR (see the worktree task notes — explicitly
- *     out of scope here to keep this slice small).
+ *   - This module lives in `apps/cli` because the ANSI serialization (`@/ui`)
+ *     and the env knobs are CLI-surface concerns. The pure diff math (line-LCS,
+ *     caps, binary probe) HAS been hoisted to the surface-agnostic
+ *     `@/runner/diff-ops` slice (ADR-0440) — this file imports it (below) and
+ *     the web-daemon canvas emitter imports the SAME implementation, so the diff
+ *     math runs from one source. This module only adds ANSI serialization.
  *   - Imports: `node:fs/promises` (file read), `@/permission` (ToolAction
- *     shape), `@/ui` (ANSI helpers). NO `@/agent`, NO `@/runner`, NO
- *     `@/tool` — the action's `input` is read structurally so the slice
- *     stays decoupled from the tool implementations.
+ *     shape), `@/ui` (ANSI helpers), and `@/runner/{action-diff,diff-ops}` (the
+ *     shared diff math hoisted per ADR-0440). NO `@/agent`, NO `@/tool` — the
+ *     action's `input` is read structurally so the slice stays decoupled from
+ *     the tool implementations.
  *
  * Inputs handled (snake_case keys match the actual tool zod schemas in
  * `src/tool/{write,edit,apply-patch,scripted-replace}`):

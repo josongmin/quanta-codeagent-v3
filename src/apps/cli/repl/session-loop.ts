@@ -3,7 +3,12 @@ import type { InboundMode } from "@/agent/inbound-mode"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import type { Message } from "@/llm"
 import { buildAutorunEligibility } from "@/permission"
-import { injectSimulatedTurn, type LastTurnOutcome, REACTOR_ENV_FLAG } from "@/reactor"
+import {
+  injectSimulatedTurn,
+  type LastTurnOutcome,
+  lastTurnOutcomeFromAgentOutcome,
+  REACTOR_ENV_FLAG,
+} from "@/reactor"
 import { driveSessionTurn } from "@/runner/orchestrate"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type {
@@ -37,7 +42,6 @@ import {
   drainTurnImages,
   ESC_WINDOW_MS,
   makeInTurnCaptureWrapper,
-  mapAgentOutcomeToReactorOutcome,
   notifyTurnComplete,
   registerNotifyDispose,
   registerSearchPipelineDispose,
@@ -569,7 +573,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
               sinks.renderAndResetSummary(result)
               sinks.flushLifecyclePills()
               if (result.outcomeReason !== undefined) {
-                lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
+                lastTurnOutcome = lastTurnOutcomeFromAgentOutcome({
                   reason: result.outcomeReason,
                 } as AgentOutcome)
               }
@@ -778,7 +782,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                 sinks.renderAndResetSummary(result)
                 sinks.flushLifecyclePills()
                 if (result.outcomeReason !== undefined) {
-                  lastTurnOutcome = mapAgentOutcomeToReactorOutcome({
+                  lastTurnOutcome = lastTurnOutcomeFromAgentOutcome({
                     reason: result.outcomeReason,
                   } as AgentOutcome)
                 }

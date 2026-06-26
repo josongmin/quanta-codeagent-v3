@@ -23,6 +23,8 @@ import {
   // #20 — the operator-facing program token a `session_prefix` grant would cover
   // (null when this command cannot be safely prefix-granted).
   prefixGrantLabel,
+  type ReviewerSandboxProfile,
+  selectDefaultReviewer,
   type ToolAction,
   type TrustScopeRegistry,
 } from "@/permission"
@@ -51,7 +53,6 @@ import {
   createMidTurnApprovalChannel,
   type MidTurnApprovalChannel,
 } from "./mid-turn-approval-channel"
-import { type CliReviewerSandboxProfile, selectDefaultReviewer } from "./reviewer-policy"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
 // MID-TURN FIX (jun-10): when an in-turn keystroke reader owns stdin (a turn is
@@ -404,7 +405,7 @@ export interface ComposeCliRuntimeContextArgs {
   readonly boot: SessionBootstrapResult
   readonly turnStream: StreamPort
   readonly loadPermissionStore: () => Promise<PermissionStore | undefined>
-  readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly sandboxProfile: ReviewerSandboxProfile
   readonly convStore?: ConversationCheckpointStore
   readonly responsesStore?: ResponsesContinuationStore
   readonly envSource?: Readonly<Record<string, string | undefined>>
@@ -442,7 +443,7 @@ const buildBootstrapContextArgs = (args: {
     readonly elapsedMs: number
   }) => Promise<boolean>
   readonly summarizerLlm?: ReturnType<typeof buildSummarizerLlm>
-  readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly sandboxProfile: ReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
   readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
   /** ADR-0428 jun-02 wire — composition-root env view used for the DIRECT
@@ -532,7 +533,7 @@ const buildBootstrapContextArgs = (args: {
 const buildAdmissibility = (args: {
   readonly boot: SessionBootstrapResult
   readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
-  readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly sandboxProfile: ReviewerSandboxProfile
   readonly permissionStore: PermissionStore | undefined
   readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
   readonly materializeReviewerAgent: () => ReturnType<

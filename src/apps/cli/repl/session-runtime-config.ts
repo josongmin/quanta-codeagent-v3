@@ -1,4 +1,4 @@
-import type { PermissionMode } from "@/permission"
+import type { PermissionMode, ReviewerSandboxProfile } from "@/permission"
 import {
   argvImages,
   argvPrompt,
@@ -12,7 +12,7 @@ import {
   resolveMcpConfigPath,
   titleFlag,
 } from "../internal"
-import { type CliReviewerSandboxProfile, parseCliReviewerSandboxProfile } from "./reviewer-policy"
+import { parseCliReviewerSandboxProfile } from "./reviewer-policy"
 
 export interface SessionRuntimeConfig {
   readonly env: NodeJS.ProcessEnv
@@ -28,7 +28,7 @@ export interface SessionRuntimeConfig {
   readonly provider: Provider
   readonly model: string
   readonly mode: PermissionMode
-  readonly sandboxProfile: CliReviewerSandboxProfile
+  readonly sandboxProfile: ReviewerSandboxProfile
   readonly maxTurns: number
   readonly mcpConfigPath: string | undefined
   readonly spinnerIntervalMs: string
