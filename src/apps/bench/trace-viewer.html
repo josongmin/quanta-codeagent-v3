@@ -141,12 +141,16 @@ function sessionsOf(spans){
   const attrAny = (arr,k)=>{ const h=arr.find(x=>x.attrs&&x.attrs[k]!=null); return h?h.attrs[k]:undefined; };
   const sess = new Map();
   for(const [t,arr] of byTrace){
-    // session identity: bench instance id (readable) > conversation id > trace id.
+    // session identity MUST be unique-per-run. traceId is (each session_loop root
+    // mints a fresh one); conversation.id is NOT (the local bench path leaves it
+    // "default" for every run, which would collapse all concurrent runs into one).
+    // So key by instance.id (unique per bench instance, folds retries) ELSE traceId.
+    // conversation.id is used only as a label hint when it is a real, non-default id.
     const inst = attrAny(arr,"quanta.instance.id");
     const conv = attrAny(arr,"quanta.conversation.id");
-    const key = inst || conv || t;
-    // label: instance name if the bench tagged it; else a short, stable handle.
-    const label = inst || ("session " + String(conv||t).replace(/^bench-/,"").slice(0,8));
+    const key = inst || t;
+    const convLabel = conv && conv !== "default" ? conv.replace(/^bench-/,"").slice(0,8) : null;
+    const label = inst || convLabel || ("run " + t.slice(0,8));
     let e = sess.get(key);
     if(!e){ e = {key, label, spans: [], traces: new Set()}; sess.set(key,e); }
     for(const s of arr) e.spans.push(s);
