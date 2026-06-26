@@ -7,11 +7,21 @@ interface HereDocHeader {
   readonly prefix: string
   readonly delimiter: string
   readonly stripTabs: boolean
+  /** Quoted delimiter (`<<'EOF'`/`<<"EOF"`) keeps the body literal; an unquoted
+   * delimiter (`<<EOF`) expands `$var`, `$(...)` and backticks. */
+  readonly expand: boolean
 }
 
 const unchanged = (command: string): HereDocLowering => ({ command, lowered: false })
 
 const shellSingleQuote = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`
+
+/** Embed an unquoted here-doc body into a double-quoted shell string so the
+ * shell still performs parameter/command/backtick expansion. Only `"` needs
+ * escaping: a backslash carries the same meaning in an unquoted here-doc as it
+ * does inside double quotes (special before `$`, `` ` ``, `\`, newline; literal
+ * otherwise), so backslashes are left untouched to stay byte-faithful. */
+const shellDoubleQuote = (value: string): string => `"${value.replace(/"/g, '\\"')}"`
 
 const parseQuotedDelimiter = (
   line: string,
@@ -45,10 +55,14 @@ const parseUnquotedDelimiter = (
 const parseDelimiter = (
   line: string,
   start: number,
-): { readonly value: string; readonly end: number } | undefined => {
+): { readonly value: string; readonly end: number; readonly quoted: boolean } | undefined => {
   const ch = line[start]
-  if (ch === "'" || ch === '"') return parseQuotedDelimiter(line, start, ch)
-  return parseUnquotedDelimiter(line, start)
+  if (ch === "'" || ch === '"') {
+    const parsed = parseQuotedDelimiter(line, start, ch)
+    return parsed === undefined ? undefined : { ...parsed, quoted: true }
+  }
+  const parsed = parseUnquotedDelimiter(line, start)
+  return parsed === undefined ? undefined : { ...parsed, quoted: false }
 }
 
 interface ScanState {
@@ -100,7 +114,12 @@ const parseHeader = (line: string): HereDocHeader | undefined => {
 
   const prefix = line.slice(0, operator.index).trimEnd()
   if (prefix.length === 0) return undefined
-  return { prefix, delimiter: delimiter.value, stripTabs: operator.stripTabs }
+  return {
+    prefix,
+    delimiter: delimiter.value,
+    stripTabs: operator.stripTabs,
+    expand: !delimiter.quoted,
+  }
 }
 
 const bodyLineFor = (line: string, stripTabs: boolean): string =>
@@ -138,8 +157,10 @@ export const lowerSimpleHereDocForReadMode = (command: string): HereDocLowering 
   const suffix = lines.slice(closingIndex + 1).join("\n")
   if (suffix.trim().length > 0) return unchanged(command)
 
+  const joined = body.join("\n")
+  const encoded = header.expand ? shellDoubleQuote(joined) : shellSingleQuote(joined)
   return {
-    command: `printf '%s\\n' ${shellSingleQuote(body.join("\n"))} | ${header.prefix}`,
+    command: `printf '%s\\n' ${encoded} | ${header.prefix}`,
     lowered: true,
   }
 }
