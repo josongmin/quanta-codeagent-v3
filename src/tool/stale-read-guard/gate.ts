@@ -7,12 +7,15 @@
  * mtimes and `write`/`edit`/`apply_patch` reject a target that drifted on disk
  * since the model last read it (TOCTOU clobber protection).
  *
- * DEFAULT-ON, deliberate opt-out: this is a SAFETY control, so it mirrors the
- * filesystem-jail posture (`gateDisabledStrict`) — it is ON unless the operator
- * sets the EXACT kill-switch `QUANTA_STALE_READ_GUARD=off`. A loose `"0"` /
- * `"false"` / `"no"` does NOT silently drop the protection (tearing down a
- * safety control must be unambiguous). The byte-identical legacy path is
- * recovered ONLY by the explicit `=off`.
+ * DEFAULT-ON, deliberate opt-out: a staleness/correctness guard (NOT a security
+ * boundary like the fs-jail, which prevents filesystem ESCAPE), so it uses the
+ * STANDARD kill-switch vocabulary (`gateDisabled`) — ON unless the operator sets
+ * any recognized falsy token: `QUANTA_STALE_READ_GUARD=off` / `0` / `false` /
+ * `no`. This matches the seed-loop convention (`QUANTA_X=0` wins) so the off
+ * escape hatch is uniform with every other CLI feature gate; disabling it only
+ * permits a stale overwrite (same blast radius as `=off`), never a path escape,
+ * so the strict `=off`-only posture is not warranted here. The byte-identical
+ * legacy path is recovered by any falsy token.
  *
  * Note on false-positives: the guard NEVER blocks an UNREAD target (a file the
  * model never read has no baseline — a brand-new write or an intentional blind
@@ -26,17 +29,16 @@
  * (never `process.env` directly).
  */
 
-import { gateDisabledStrict } from "@/shared"
+import { gateDisabled } from "@/shared"
 
 /** The env var that DISABLES the stale-read guard. The guard is DEFAULT-ON; set
- *  this to the exact literal `"off"` to opt out. Any other value (incl. `"0"` /
- *  `"false"` / `"no"` / unset) keeps the guard ON — a safety control is not
- *  silently disabled by a stray falsy token (mirrors the fs-jail kill-switch). */
+ *  it to any recognized falsy token (`off` / `0` / `false` / `no`) to opt out.
+ *  Unset (or any non-falsy value) keeps the guard ON. */
 export const STALE_READ_GUARD_ENV = "QUANTA_STALE_READ_GUARD"
 
-/** Pure gate check via the canonical strict kill-switch SSOT
- *  (`@/shared#gateDisabledStrict`) — ON by default; OFF only for the exact
- *  `QUANTA_STALE_READ_GUARD=off`. Mirrors the filesystem jail (default-ON safety
- *  control, deliberate `=off` teardown). */
+/** Pure gate check via the canonical kill-switch SSOT (`@/shared#gateDisabled`)
+ *  — ON by default; OFF for any falsy token (`off`/`0`/`false`/`no`). A
+ *  staleness/correctness guard (not a path-escape security boundary), so it
+ *  honors the standard disable vocabulary like every other CLI feature gate. */
 export const staleReadGuardEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  !gateDisabledStrict(env, STALE_READ_GUARD_ENV)
+  !gateDisabled(env, STALE_READ_GUARD_ENV)

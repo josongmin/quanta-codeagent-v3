@@ -95,8 +95,9 @@ export interface EnvProbeWireResult {
  *  stalls startup. */
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000
 
-/** True iff the gate is the literal `"1"` (case-sensitive). Anything else
- *  (`undefined` / `"0"` / `"true"` / `""`) is OFF. */
+/** True iff the gate is any canonical truthy token (`1`/`on`/`true`/`yes`,
+ *  trimmed + case-insensitive) via the `gateOn` SSOT. Unset / `""` / a falsy
+ *  token / any unrecognized value ⇒ OFF. */
 const isGateOn = (env: NodeJS.ProcessEnv): boolean => gateOn(env, "QUANTA_ENABLE_ENV_PROBE")
 
 /** Parse the timeout knob. Non-positive / non-finite / unset ⇒ the documented

@@ -16,9 +16,10 @@
  * NO-THROW contract: every export returns a value (Result / boolean / array /
  * string), never throws.
  *
- * DEFAULT-OFF: the gate `staleReadGuardEnabled(env)` returns false unless
- * `QUANTA_STALE_READ_GUARD === "1"`. The host consults the gate BEFORE calling
- * any guard function, so an unset deployment is byte-identical to today.
+ * DEFAULT-ON (post-upgrade): `staleReadGuardEnabled(env)` returns true unless
+ * `QUANTA_STALE_READ_GUARD` is set to a falsy token (`off`/`0`/`false`/`no`).
+ * The host consults the gate BEFORE calling any guard function, so a disabled
+ * deployment is byte-identical to the pre-guard path.
  */
 
 /** A file's freshness verdict relative to the recorded read-time mtime. */

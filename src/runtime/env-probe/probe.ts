@@ -30,8 +30,9 @@ import type {
 } from "./types"
 
 export interface ProbeOpts {
-  /** DEFAULT-OFF gate. Composition root sets this from
-   *  `QUANTA_ENABLE_ENV_PROBE === "1"`. Absent/false ⇒ no probe runs. */
+  /** DEFAULT-OFF gate. Composition root sets this from the canonical `gateOn`
+   *  SSOT over `QUANTA_ENABLE_ENV_PROBE` (any truthy token `1`/`on`/`true`/`yes`).
+   *  Absent/false ⇒ no probe runs. */
   readonly enabled?: boolean
   /** Declared project manifest (read from disk by the composition root).
    *  Drives the conditional test-runner checks. When omitted, only CORE
