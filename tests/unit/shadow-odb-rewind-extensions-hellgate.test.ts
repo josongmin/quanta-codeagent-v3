@@ -302,6 +302,33 @@ describe("rewindToVerified — happy + guards (HELL-C11..C15)", () => {
     const preAfter = after.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
     expect(preAfter.length).toBe(preBefore.length + 1)
   })
+
+  test("HELL-C16: two rewinds within the SAME instant get DISTINCT pre-rewind refs (no rewind-failed collision)", async () => {
+    const base = mkTmp("base-c16")
+    const ws = makeWorkspace("c16")
+    // Frozen clock: BOTH rewinds compute the identical ISO timestamp. The
+    // ref name must still be unique via the injected monotonic counter,
+    // otherwise the second create-only ref update collides → rewind-failed.
+    const frozen = new Date("2026-06-26T12:00:00.000Z")
+    const odb = defaultShadowOdb({ baseDir: base, now: () => frozen })
+    await odb.registerHead(ws)
+    await odb.markVerified(ws)
+
+    writeFileSync(join(ws, "a.txt"), "A-FIRST-LOSS\n", "utf8")
+    await odb.rewindToVerified(ws)
+    writeFileSync(join(ws, "a.txt"), "A-SECOND-LOSS\n", "utf8")
+    // Pre-fix this throws ShadowOdbError("rewind-failed") because the
+    // ISO-second suffix collides on the frozen clock. Must NOT throw.
+    await odb.rewindToVerified(ws)
+
+    const snaps = await odb.listSnapshots(ws)
+    const preRefs = snaps
+      .filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
+      .map((s) => s.ref)
+    // Two distinct safety-net refs were minted despite the frozen clock.
+    expect(preRefs.length).toBe(2)
+    expect(new Set(preRefs).size).toBe(2)
+  })
 })
 
 /* ================================================================== */

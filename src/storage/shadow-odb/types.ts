@@ -74,7 +74,10 @@ export interface ShadowOdb {
    *
    *  SAFETY NET: BEFORE the destructive checkout, this method captures the
    *  CURRENT worktree state to a brand-new ref under
-   *  `SHADOW_PRE_REWIND_REF_PREFIX` with a UTC-ISO-second timestamp suffix.
+   *  `SHADOW_PRE_REWIND_REF_PREFIX` with a UTC-ISO-millisecond timestamp
+   *  suffix PLUS a strictly-monotonic counter so rapid sequential rewinds
+   *  (even within the same millisecond, or under a frozen test clock) never
+   *  collide on the ref name.
    *  Recovery is then: `git --git-dir=<shadow>/.git checkout-index -a -f`
    *  against that ref. The pre-rewind ref is NEVER overwritten — successive
    *  rewinds add new refs.
@@ -225,11 +228,13 @@ export const SHADOW_LAST_REF = "refs/quanta/snapshots/last-registered" as const
 export const SHADOW_LAST_VERIFIED_REF = "refs/quanta/snapshots/last-verified" as const
 
 /** Canonical prefix for safety-net refs created right before `rewindToLast`
- *  performs its destructive checkout. Each rewind appends a UTC-ISO-second
- *  timestamp suffix (with `:` replaced by `-` because git refuses colons
- *  in ref names) so successive rewinds NEVER overwrite each other's
- *  recovery point — `git for-each-ref` can list them all. Example:
- *  `refs/quanta/snapshots/pre-rewind-2026-05-24T03-14-15Z`.
+ *  performs its destructive checkout. Each rewind appends a UTC-ISO-
+ *  millisecond timestamp suffix (with `:` and `.` replaced by `-` because
+ *  git refuses colons and treats `.` runs specially in ref names) PLUS a
+ *  strictly-monotonic counter, so successive rewinds — even two within the
+ *  same millisecond — NEVER overwrite each other's recovery point and
+ *  `git for-each-ref` can list them all. Example:
+ *  `refs/quanta/snapshots/pre-rewind-2026-05-24T03-14-15-000Z-1`.
  *  Hard-coded for the same reason `SHADOW_LAST_REF` is hard-coded
  *  (path traversal / ref injection defense). */
 export const SHADOW_PRE_REWIND_REF_PREFIX = "refs/quanta/snapshots/pre-rewind-" as const

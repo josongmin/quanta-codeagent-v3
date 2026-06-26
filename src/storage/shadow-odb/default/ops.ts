@@ -49,6 +49,12 @@ export interface OdbDeps {
   now: () => Date
   cfg: ShadowOdbConfig
   states: Map<string, WorkspaceState>
+  /** Strictly-monotonic, factory-scoped counter for pre-rewind safety-net
+   *  ref names. Two rewinds whose `now()` lands in the SAME millisecond
+   *  (or share a frozen test clock) still mint distinct refs because this
+   *  suffix advances on every `captureSafetyNet` call. Mutable single-field
+   *  box so the increment is visible to every op sharing the `deps` value. */
+  refSeq: { n: number }
 }
 
 export const resolveState = (deps: OdbDeps, workspaceRoot: string): WorkspaceState => {
@@ -311,11 +317,17 @@ const captureSafetyNet = async (
   msgLabel: string,
 ): Promise<void> => {
   const { runner, now } = deps
-  // ISO-second timestamp with `:` replaced by `-` because git refuses
-  // colons in ref names (`refusing to update ref with bad name`). The
-  // suffix is still strictly monotonic in time (yyyy-mm-ddThh-mm-ssZ).
-  const isoTs = now().toISOString().replace(/\..*$/, "Z").replace(/:/g, "-")
-  const preRewindRef = `${SHADOW_PRE_REWIND_REF_PREFIX}${isoTs}`
+  // ISO timestamp with `:` and `.` replaced by `-` because git refuses
+  // colons (and treats `.` runs specially) in ref names (`refusing to
+  // update ref with bad name`). Millisecond resolution is preserved
+  // (yyyy-mm-ddThh-mm-ss-sssZ) and a strictly-monotonic factory-scoped
+  // counter is appended so two rewinds within the SAME millisecond — or
+  // sharing a frozen test clock — still mint DISTINCT refs instead of
+  // colliding into a `rewind-failed` on the create-only ref update below.
+  const seq = ++deps.refSeq.n
+  const isoTs = now().toISOString().replace(/:/g, "-").replace(/\./g, "-")
+  const suffix = `${isoTs}-${seq}`
+  const preRewindRef = `${SHADOW_PRE_REWIND_REF_PREFIX}${suffix}`
   // Stage current worktree to the shadow index.
   await runShadowOrThrow(runner, st.gitDir, canonical, ["add", "-A"])
   // Commit (allow-empty so a "no change since last register" rewind
@@ -325,7 +337,7 @@ const captureSafetyNet = async (
     "--allow-empty",
     "--no-gpg-sign",
     "-m",
-    `${msgLabel} ${isoTs}`,
+    `${msgLabel} ${suffix}`,
   ])
   const headRef = await runShadowOrThrow(runner, st.gitDir, canonical, ["rev-parse", "HEAD"])
   const preSha = headRef.stdout.trim()
@@ -336,10 +348,11 @@ const captureSafetyNet = async (
     )
   }
   // Create-only ref update: third arg "0000…" (40 zeros = empty-oid
-  // sentinel) tells git to fail if the ref ALREADY exists. This is
-  // the same-ISO-second collision policy (HELL-25): two concurrent
-  // rewinds that compute the same suffix → the second one fails
-  // with a typed `rewind-failed` rather than silently clobbering
+  // sentinel) tells git to fail if the ref ALREADY exists (HELL-25).
+  // The `${isoTs}-${seq}` suffix already guarantees uniqueness across
+  // rapid sequential rewinds (millisecond + monotonic counter), so this
+  // remains a defence-in-depth guard against a truly concurrent collision
+  // — it surfaces a typed `rewind-failed` rather than silently clobbering
   // the first one's safety net.
   const empty = "0".repeat(40)
   const updRef = await runShadow(runner, st.gitDir, canonical, [

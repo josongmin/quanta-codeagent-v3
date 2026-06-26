@@ -348,11 +348,13 @@ const readShadowFile = async (shadowDir: string, ref: string, relPath: string): 
   return r.stdout
 }
 
-/** Regex for valid pre-rewind ref names. Colons in the ISO timestamp are
- *  replaced with `-` (git refuses colons in ref names), so the format is
- *  `yyyy-mm-ddThh-mm-ssZ`. */
+/** Regex for valid pre-rewind ref names. Colons AND dots in the ISO
+ *  timestamp are replaced with `-` (git refuses colons and treats `.`
+ *  runs specially in ref names), and a strictly-monotonic counter is
+ *  appended so rapid sequential rewinds never collide, so the format is
+ *  `yyyy-mm-ddThh-mm-ss-sssZ-<seq>` (millisecond resolution + counter). */
 const PRE_REWIND_REF_RE =
-  /^refs\/quanta\/snapshots\/pre-rewind-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/
+  /^refs\/quanta\/snapshots\/pre-rewind-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-\d+$/
 
 describe("rewindToLast — happy paths (HELL-20)", () => {
   test("HELL-20: tracked file modified after snapshot ⇒ rewind restores content", async () => {
@@ -533,25 +535,29 @@ describe("rewindToLast — safety net (HELL-24)", () => {
   })
 })
 
-describe("rewindToLast — concurrent same-ISO-second collision (HELL-25)", () => {
-  test("HELL-25: two rewinds at identical ISO second ⇒ second one throws rewind-failed (no silent overwrite)", async () => {
+describe("rewindToLast — same-instant rewinds mint distinct refs (HELL-25)", () => {
+  test("HELL-25: two rewinds at the IDENTICAL frozen instant ⇒ both succeed with DISTINCT pre-rewind refs (monotonic counter, no rewind-failed)", async () => {
     const base = mkTmp("base-rewind-25")
     const ws = makeWorkspace("rw-25")
-    // Fixed clock: every call returns the SAME instant ⇒ both rewinds
-    // compute the same pre-rewind suffix. The second update-ref must
-    // fail (create-only semantics), not silently overwrite.
+    // Fixed clock: every call returns the SAME instant ⇒ the timestamp
+    // portion of the suffix is identical for both rewinds. The injected
+    // monotonic counter must still make the two ref names distinct so the
+    // second create-only update-ref does NOT collide into `rewind-failed`
+    // (the safety net for the FIRST rewind would otherwise be lost).
     const fixed = new Date("2026-05-24T03:14:15.000Z")
     const odb = defaultShadowOdb({ baseDir: base, now: () => fixed })
     await odb.registerHead(ws)
     writeFileSync(join(ws, "seed.txt"), "seed\nFIRST\n", "utf8")
     await odb.rewindToLast(ws)
-    // Second rewind at the same instant must surface as rewind-failed.
+    // Second rewind at the same instant must NOT throw — the counter
+    // advanced, so a fresh, distinct safety-net ref is minted.
     writeFileSync(join(ws, "seed.txt"), "seed\nSECOND\n", "utf8")
-    await expectShadowError(() => odb.rewindToLast(ws), "rewind-failed")
-    // Only ONE pre-rewind ref exists — the second never overwrote the first.
+    await odb.rewindToLast(ws)
+    // TWO distinct pre-rewind refs exist — neither overwrote the other.
     const snaps = await odb.listSnapshots(ws)
     const preRewinds = snaps.filter((s) => s.ref.startsWith(SHADOW_PRE_REWIND_REF_PREFIX))
-    expect(preRewinds.length).toBe(1)
+    expect(preRewinds.length).toBe(2)
+    expect(new Set(preRewinds.map((s) => s.ref)).size).toBe(2)
   })
 })
 

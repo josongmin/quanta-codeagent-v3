@@ -66,7 +66,7 @@ export const defaultShadowOdb = (cfg: ShadowOdbConfig = {}): ShadowOdb => {
    *  `init` so a `cleanup` call doesn't require any prior `init`. */
   const states = new Map<string, WorkspaceState>()
 
-  const deps: OdbDeps = { runner, now, cfg, states }
+  const deps: OdbDeps = { runner, now, cfg, states, refSeq: { n: 0 } }
 
   return {
     init: (workspaceRoot: string): Promise<ShadowInitResult> => opInit(deps, workspaceRoot),

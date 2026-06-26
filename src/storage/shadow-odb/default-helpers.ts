@@ -215,8 +215,8 @@ export const ensureNotNested = async (shadowDir: string, workspaceRoot: string):
 
 /** SHADOW_LAST_REF + SHADOW_LAST_VERIFIED_REF are the only refs we ever
  *  WRITE (the pre-rewind refs are dynamically-named via the
- *  `SHADOW_PRE_REWIND_REF_PREFIX` + ISO timestamp helper, validated
- *  inside the rewind flow). We guard against accidental future code
+ *  `SHADOW_PRE_REWIND_REF_PREFIX` + ISO-millisecond timestamp + monotonic
+ *  counter helper, validated inside the rewind flow). We guard against accidental future code
  *  paths that build a ref from user input: the resolver rejects
  *  anything that doesn't match the hard-coded ref names. */
 export const assertSafeRef = (ref: string): void => {
