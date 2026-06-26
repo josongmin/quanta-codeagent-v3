@@ -188,3 +188,50 @@ describe("cost — SSOT pricing (no override) with cache carve-out", () => {
     expect(renderCost(s).toLowerCase()).toMatch(/no pricing|unknown/)
   })
 })
+
+// ── Run-summary token/cost line — the default-active operator surface in a bench
+// run's end-of-run output (printSummary). Derived from in-memory InstanceUsage.
+describe("runTokenCostLine — default-active run summary surface", () => {
+  test("sums tokens across instances + prices via SSOT (cache carve-out)", () => {
+    // gpt-4o SSOT. inst a: 1M in (400k cached) + 100k out → $3.00 (carve-out).
+    //             inst b: 200k in + 50k out → 200k*2.5/1e6 + 50k*10/1e6 = 0.5+0.5 = $1.00.
+    const line = runTokenCostLine([
+      {
+        usage: {
+          model: "gpt-4o",
+          inputTokens: 1_000_000,
+          outputTokens: 100_000,
+          cacheReadTokens: 400_000,
+        },
+      },
+      { usage: { model: "gpt-4o", inputTokens: 200_000, outputTokens: 50_000 } },
+    ])
+    expect(line).toBeDefined()
+    expect(line).toContain("1200000 in")
+    expect(line).toContain("150000 out")
+    expect(line).toContain("400000 cache-read")
+    expect(line).toContain("$4.0000") // 3.00 + 1.00
+    expect(line).toContain("2/2 instances")
+  })
+
+  test("byte-identical: NO instance has usage ⇒ undefined (line suppressed)", () => {
+    expect(runTokenCostLine([{}, {}])).toBeUndefined()
+  })
+
+  test("honest: tokens present but model UNPRICED ⇒ '—', never a fake $0", () => {
+    const line = runTokenCostLine([
+      { usage: { model: "unpriced-model-x", inputTokens: 1_000_000, outputTokens: 10_000 } },
+    ])
+    expect(line).toContain("1000000 in")
+    expect(line?.toLowerCase()).toMatch(/no pricing/)
+    expect(line).not.toContain("$0.0000")
+  })
+
+  test("partial usage: only counts instances that reported usage", () => {
+    const line = runTokenCostLine([
+      { usage: { model: "gpt-4o", inputTokens: 1_000_000, outputTokens: 0 } },
+      {}, // no usage (e.g. env_prep_failed before any LLM call)
+    ])
+    expect(line).toContain("1/2 instances")
+  })
+})

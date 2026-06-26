@@ -13,6 +13,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { isTrajectoryEvent } from "@/shared"
+import { runTokenCostLine } from "../../src/apps/bench/analyze/cost"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
 import { finalizeRun, type RunObservation, runInstance } from "../../src/apps/bench/eval"
 import { buildReport } from "../../src/apps/bench/report"
@@ -265,6 +266,15 @@ describe("bench observability (RFC-0002 W-D)", () => {
       const report = buildReport({ provider: "chatgpt-oauth", model: "gpt-5.4", n: 1 }, [r])
       expect(report.perInstance[0]?.usage).toEqual(r.usage)
       expect(report.perInstance[0]?.durationMs).toBe(r.durationMs)
+
+      // …and the SAME result feeds the default-active run-summary surface
+      // (printSummary → runTokenCostLine), so the operator sees tokens/cost
+      // without a separate command. Priced via the SSOT (gpt-5.4 carve-out).
+      const line = runTokenCostLine([r])
+      expect(line).toContain("1600 in")
+      expect(line).toContain("350 out")
+      expect(line).toContain("800 cache-read")
+      expect(line).toMatch(/est\. cost \$[0-9]/) // real $ (gpt-5.4 is priced)
     })
   })
 
