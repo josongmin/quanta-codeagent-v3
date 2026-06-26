@@ -1,5 +1,6 @@
 import { loadCorpus as defaultLoadCorpus, type Prediction, writePredictions } from "./corpus"
 import { knobsForReport, resolveBenchKnobs } from "./eval/knobs-bench"
+import type { RunHealthSummary } from "./report"
 import { type BenchReportKnobs, buildReport, writeReport } from "./report"
 import type { Instance, InstanceResult } from "./types"
 
@@ -15,6 +16,10 @@ export interface BatchArtifactMeta {
    * the run's actual posture. Tests can inject a deterministic value here.
    */
   knobs?: BenchReportKnobs
+  /** Optional run-health verdict (early systemic-abort detector). When present
+   *  AND non-healthy/aborted, embedded in the report's `runHealth` field;
+   *  omitted for a plain healthy run (byte-identical report). */
+  runHealth?: RunHealthSummary
 }
 
 export interface LoadSelectedInstancesOptions {
@@ -162,7 +167,13 @@ export const writeArtifacts = async (
     // knob posture for after-the-fact comparison. With an empty registry
     // the section is `{ resolved:{}, inactive:[] }` — a safe baseline marker.
     const knobs = meta.knobs ?? collectBenchKnobsTelemetry()
-    await writeReport(reportFile, buildReport({ ...meta, knobs }, [...results]))
+    await writeReport(
+      reportFile,
+      buildReport(
+        { ...meta, knobs, ...(meta.runHealth !== undefined ? { runHealth: meta.runHealth } : {}) },
+        [...results],
+      ),
+    )
   }
 }
 

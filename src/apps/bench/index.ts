@@ -84,6 +84,8 @@ import {
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
 import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
+import { runBatchWithHealth } from "@/runner/batch/eval/run-health"
+import type { RunHealthSummary } from "@/runner/batch/report"
 import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
 import {
   aggregate,
@@ -629,16 +631,46 @@ const runDatasetMode = async (
   if (concurrency > 1) {
     logger.info(`bench: patch-gen concurrency=${concurrency} (grading serialised)`)
   }
-  const results = await mapWithConcurrency(selected, concurrency, (task) =>
-    runSwebenchTask(task, taskDeps),
-  )
+  // Serial path (concurrency<=1 — the full-remote default where the 0/N
+  // burn-the-whole-run pain occurs): run through the RUN-HEALTH detector so a
+  // systemic auth/infra failure aborts FAST instead of attempting all N. For a
+  // HEALTHY run this is byte-identical (every instance attempted, no abort) — the
+  // gate only fires on systemic failure. Concurrency>1 keeps the plain parallel
+  // map (health-abort is a serial-path optimisation).
+  let runHealth: RunHealthSummary | undefined
+  let results: InstanceResult[]
+  if (concurrency > 1) {
+    results = await mapWithConcurrency(selected, concurrency, (task) =>
+      runSwebenchTask(task, taskDeps),
+    )
+  } else {
+    const out = await runBatchWithHealth({
+      instances: selected,
+      env: process.env,
+      runInstance: (task) => runSwebenchTask(task, taskDeps),
+      idOf: (task) => task.instanceId,
+    })
+    results = out.results
+    runHealth = {
+      aborted: out.runHealth.aborted,
+      verdict: out.runHealth.verdict,
+      reason: out.runHealth.reason,
+      attempted: out.runHealth.attempted,
+      total: out.runHealth.total,
+    }
+  }
 
   const reportPath = argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json")
   await writeArtifacts(
     argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
     reportPath,
     results,
-    { provider: meta.provider, model: meta.model, n: cfg.n },
+    {
+      provider: meta.provider,
+      model: meta.model,
+      n: cfg.n,
+      ...(runHealth !== undefined ? { runHealth } : {}),
+    },
   )
   // T-101 closure diagnostics — OFFLINE sibling artifact. EVAL-ONLY: the oracle
   // (dataset gold/F2P) is read here post-run, never threaded into the agent loop.
@@ -674,7 +706,7 @@ export const writeArtifacts = async (
   predictionsFile: string,
   reportFile: string,
   results: InstanceResult[],
-  meta: { provider: string; model: string; n: number },
+  meta: { provider: string; model: string; n: number; runHealth?: RunHealthSummary },
 ): Promise<void> => {
   await writeBatchArtifacts(predictionsFile, reportFile, results, meta)
   logger.info(`wrote ${predictionsFile} (${results.length} prediction(s)) and ${reportFile}`)

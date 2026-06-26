@@ -193,6 +193,24 @@ export interface BenchReport {
   /** Knob telemetry — recorded so two runs are comparable from the JSON
    *  alone. Always present (empty subfields when the registry is empty). */
   knobs: BenchReportKnobs
+  /** Run-health verdict from the early systemic-abort detector. ABSENT for a
+   *  plain HEALTHY run (byte-identical report) — present only when the detector
+   *  ran AND it has something worth recording: an abort, or a non-healthy
+   *  diagnosis (e.g. the gate was disabled but the run was systemically broken).
+   *  `verdict:"healthy"` runs omit it so a normal report is unchanged. */
+  runHealth?: RunHealthSummary
+}
+
+/** Serialisable run-health verdict embedded in the report. Mirrors
+ *  {@link import("./eval/run-health").RunHealthVerdict} minus the per-instance
+ *  category list (kept out of the report SSOT — it is derivable from
+ *  perInstance). */
+export interface RunHealthSummary {
+  aborted: boolean
+  verdict: string
+  reason: string
+  attempted: number
+  total: number
 }
 
 /** Build the report object from results + meta. Pure & deterministic given a
@@ -205,7 +223,12 @@ export interface BenchReport {
  *  after this change) from "registry was empty for this run" (legitimate
  *  pre-knob baseline). */
 export const buildReport = (
-  meta: BenchReportMeta & { n: number; timestamp?: string; knobs?: BenchReportKnobs },
+  meta: BenchReportMeta & {
+    n: number
+    timestamp?: string
+    knobs?: BenchReportKnobs
+    runHealth?: RunHealthSummary
+  },
   results: InstanceResult[],
 ): BenchReport => {
   // C8: degraded-excluding denominator — the SAME source as observe.summarize
@@ -332,6 +355,13 @@ export const buildReport = (
       }
     }),
     knobs,
+    // Emit the run-health verdict ONLY when it carries signal — an abort or a
+    // non-healthy diagnosis. A plain `verdict:"healthy"` run omits the field so
+    // a normal report stays byte-identical to the pre-feature shape.
+    ...(meta.runHealth !== undefined &&
+    (meta.runHealth.aborted || meta.runHealth.verdict !== "healthy")
+      ? { runHealth: meta.runHealth }
+      : {}),
   }
 }
 
