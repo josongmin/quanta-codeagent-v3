@@ -244,6 +244,39 @@ export const closureRepairSchema: KnobSchema<number> = {
   parse: parseClosureRepair,
 }
 
+/* ── repair-breadth (QUANTA_BENCH_REPAIR_BREADTH) ─────────────────────────── */
+const parseRepairBreadth = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  const s = raw.trim()
+  if (s === "") return undefined
+  if (!/^-?\d+$/.test(s)) return undefined
+  const n = Number(s)
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
+  if (n < 1 || n > 8) return undefined
+  return n
+}
+export const repairBreadthSchema: KnobSchema<number> = {
+  id: "repair-breadth",
+  envKey: "QUANTA_BENCH_REPAIR_BREADTH",
+  kind: "int",
+  domain: { range: [1, 8] },
+  // Default-OFF fence: like closure-repair/verify-select the registry Knob carries
+  // NO default, so unset ⇒ INACTIVE and the posture projects `?? 1`. B=1 is the
+  // legacy single-candidate path (no fork, no extra validate) ⇒ byte-identical.
+  default: undefined,
+  describe:
+    "Bench (jun-28 repair-loop BREADTH): oracle-SELECTED best-of-N inside the repair loop. With B in [2,8], a repair round generates B INDEPENDENT candidates on B forked sandboxes (lane i = i mod laneCount when model-lane-diversity + ≥2 lanes are configured, else the same model with independent sampling), validates EACH against the SAME repro/primary-rail validator, and CONTINUES from the candidate the validator turns GREEN (the oracle as SELECTOR). None green ⇒ keep the best by validator signal (resolved > reproduced > other > exec_failed) to seed the next round. The cumulative diff of the selected candidate is handed to the grader EXACTLY ONCE (no-leak: selection uses ONLY the agent-side validator, never gold). COST ≈ B× patch-gen per round — that is why it is opt-in. Needs closure-repair (a repair budget) to engage. Default 1 ⇒ single candidate (byte-identical).",
+  knobDescribe:
+    "repair-loop BREADTH: generate B diverse candidates per repair round on B forked sandboxes (model lanes when configured), keep the one the validated-red repro/primary-rail oracle turns GREEN (else best validator signal). Needs closure-repair; default 1 ⇒ byte-identical single candidate; B candidates ⇒ ~B× patch-gen cost",
+  readSite: "runner/batch/eval/knobs-bench.ts",
+  surfaces: BENCH,
+  costMultiplier: 8,
+  unit: "candidates",
+  source:
+    "jun-28 repair-loop BREADTH (oracle-selected diverse candidates; synthesis over-narrow-patch lever)",
+  parse: parseRepairBreadth,
+}
+
 /* ── patch-budget (QUANTA_BENCH_PATCH_BUDGET) ─────────────────────────────── */
 const parsePatchBudget = (raw: string | undefined): boolean | undefined => {
   if (raw === undefined) return undefined
@@ -258,7 +291,8 @@ export const patchBudgetSchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: minimal-edit PatchBudget telemetry over the final diff (#13417 over-engineer class). Default-OFF ⇒ byte-identical; observe-first.",
-  knobDescribe: "Minimal-edit admission: emit PatchBudget over the diff (#13417 over-engineer class)",
+  knobDescribe:
+    "Minimal-edit admission: emit PatchBudget over the diff (#13417 over-engineer class)",
   readSite: "runner/knobs/knobs/patch-budget.ts",
   surfaces: BENCH,
   source: "jun-19 minimal-patch admission (Agentless 3-phase / mini-SWE thin scaffold)",
@@ -327,7 +361,8 @@ export const verifySelectSchema: KnobSchema<number> = {
   default: undefined,
   describe:
     "Bench: verify-and-select outer plane — generate N candidate patches, score via VerificationBundle, submit best. Domain N in [1,8]. Default-OFF ⇒ single-pass.",
-  knobDescribe: "Verify-and-select: generate N candidates, score via VerificationBundle, submit the best",
+  knobDescribe:
+    "Verify-and-select: generate N candidates, score via VerificationBundle, submit the best",
   readSite: "runner/knobs/knobs/verify-select.ts",
   surfaces: BENCH,
   costMultiplier: 8,
@@ -359,7 +394,10 @@ const parseLocalizeBudget = (raw: string | undefined): LocalizeBudgetValue | und
   } = {}
   for (const part of raw.split(",")) {
     const [name, val] = part.split("=").map((x) => x.trim())
-    const spec = name !== undefined ? LOCALIZE_BUDGET_FIELD[name as keyof typeof LOCALIZE_BUDGET_FIELD] : undefined
+    const spec =
+      name !== undefined
+        ? LOCALIZE_BUDGET_FIELD[name as keyof typeof LOCALIZE_BUDGET_FIELD]
+        : undefined
     if (spec === undefined || val === undefined || !/^\d+$/.test(val)) return undefined
     const n = Number(val)
     if (!Number.isInteger(n) || n < spec.min || n > spec.max) return undefined
@@ -432,7 +470,8 @@ export const verifySelectConcurrencySchema: KnobSchema<number> = {
   default: undefined,
   describe:
     "Bench: max verify-and-select candidates generated concurrently (requires isolated sandboxes). Domain [1,8]. Unset ⇒ sequential (byte-identical).",
-  knobDescribe: "Verify-and-select: max candidates generated concurrently (requires isolated generate)",
+  knobDescribe:
+    "Verify-and-select: max candidates generated concurrently (requires isolated generate)",
   readSite: "runner/knobs/knobs/verify-select-concurrency.ts",
   surfaces: BENCH,
   costMultiplier: 1,
@@ -443,7 +482,9 @@ export const verifySelectConcurrencySchema: KnobSchema<number> = {
 
 /* ── verify-select-llm-risk-gate (QUANTA_BENCH_VERIFY_SELECT_LLM_RISK_GATE) ── */
 type VerifySelectLlmRiskGateMode = "shadow" | "on"
-const parseVerifySelectLlmRiskGate = (raw: string | undefined): VerifySelectLlmRiskGateMode | undefined => {
+const parseVerifySelectLlmRiskGate = (
+  raw: string | undefined,
+): VerifySelectLlmRiskGateMode | undefined => {
   if (raw === undefined) return undefined
   const s = raw.trim().toLowerCase()
   if (s === "") return undefined
@@ -459,7 +500,8 @@ export const verifySelectLlmRiskGateSchema: KnobSchema<VerifySelectLlmRiskGateMo
   default: undefined,
   describe:
     "Bench: optional LLM semantic expansion gate layered on top of the structural verify-select gate. Modes: shadow=telemetry only, on=fail-closed expand.",
-  knobDescribe: "Verify-and-select semantic expansion gate: shadow telemetry or fail-closed LLM expand",
+  knobDescribe:
+    "Verify-and-select semantic expansion gate: shadow telemetry or fail-closed LLM expand",
   readSite: "runner/knobs/knobs/verify-select-llm-risk-gate.ts",
   surfaces: BENCH,
   costMultiplier: 1,

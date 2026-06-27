@@ -24,6 +24,7 @@
 
 import type {
   BuildRepairContextArgs,
+  RepairCandidateOutcome,
   RepairReproOutcome,
   RepairValidationSource,
   RoundResult,
@@ -33,6 +34,7 @@ import type {
   ValidateArgs,
   ValidatorResult,
 } from "./types"
+import { reproOutcomeRank } from "./types"
 
 export const runRepairRounds = async (
   args: RunRepairRoundsArgs,
@@ -42,9 +44,10 @@ export const runRepairRounds = async (
 
   // Round 0: initial attempt — seed is undefined so the runner uses its
   // existing problem message construction unchanged.
-  const r0 = await args.runOnce(undefined)
-  const v0 = await runValidate(args, r0)
-  let turnsTotal = r0.turns
+  const round0 = await runRound(args, undefined, 0)
+  const r0 = round0.run
+  const v0 = round0.validator
+  let turnsTotal = round0.turnsConsumed
   history.push({ round: 0, patch: r0.patch, validated: v0.ok })
   // T-302 finish gate (default-OFF; armed only when a primary rail is set — the
   // SAME `primaryRailStep !== undefined` knob that already swaps the validator
@@ -81,9 +84,10 @@ export const runRepairRounds = async (
       ...(predicateSummary !== undefined ? { predicateSummary } : {}),
       round: i,
     })
-    const ri = await args.runOnce(seed)
-    const vi = await runValidate(args, ri)
-    turnsTotal += ri.turns
+    const roundI = await runRound(args, seed, i)
+    const ri = roundI.run
+    const vi = roundI.validator
+    turnsTotal += roundI.turnsConsumed
     history.push({ round: i, patch: ri.patch, validated: vi.ok })
     prevRun = ri
     prevValidator = vi
@@ -99,6 +103,95 @@ export const runRepairRounds = async (
     }
   }
   return finalize(history, turnsTotal, validated, prevRun.patch, falseGreen, falseRed)
+}
+
+/** One round's executed outcome: the agent run + its validator verdict. For the
+ *  single-candidate path the orchestrator ran the validator itself; for the
+ *  BREADTH path the SELECTED candidate's validator (run by the driver in-fork)
+ *  is carried verbatim and its tree has already been adopted into the sandbox. */
+interface RoundExecution {
+  readonly run: RunOnceResult
+  readonly validator: ValidatorResult
+  /** Turns consumed by the WHOLE round. Single path ⇒ the one run's turns. BREADTH
+   *  path ⇒ the SUM across ALL `breadth` candidates (the honest ~B× cost), not
+   *  just the selected one — `run.turns` alone would under-report the budget. */
+  readonly turnsConsumed: number
+}
+
+/**
+ * Execute ONE repair round, dispatching on breadth.
+ *
+ * - Breadth ≤ 1 OR no `runCandidates` port ⇒ the LEGACY single-candidate path:
+ *   `runOnce(seed)` then the orchestrator's own `validate`. BYTE-IDENTICAL — the
+ *   fan-out port is never touched, no fork, no extra validate.
+ * - Breadth > 1 WITH the port ⇒ generate `breadth` candidates (driver forks +
+ *   lanes + validates EACH), SELECT the best (see {@link selectCandidate}), ADOPT
+ *   it (driver makes the main sandbox reflect the winner's tree), and continue
+ *   from its run+validator. The official grader still runs EXACTLY ONCE later on
+ *   the adopted cumulative diff (no extra grading — no-leak holds: selection read
+ *   ONLY the injected validator).
+ */
+const runRound = async (
+  args: RunRepairRoundsArgs,
+  seedMsg: string | undefined,
+  round: number,
+): Promise<RoundExecution> => {
+  const breadth = args.config.breadth ?? 1
+  if (breadth > 1 && args.runCandidates !== undefined) {
+    const candidates = await args.runCandidates({ seedMsg, breadth, round })
+    // A zero-length fan-out (every candidate failed to even generate) must not
+    // wedge the loop or NPE on selection — fall back to the single path so the
+    // round still produces a run+verdict (degenerate but not silently lost).
+    if (candidates.length > 0) {
+      const winner = selectCandidate(args, candidates)
+      await winner.adopt()
+      // Honest cost: ALL candidates' turns were spent this round, not just the
+      // selected one's — attribute the full sum so the budget/report is truthful.
+      const turnsConsumed = candidates.reduce((sum, c) => sum + c.run.turns, 0)
+      return { run: winner.run, validator: winner.validator, turnsConsumed }
+    }
+  }
+  const run = await args.runOnce(seedMsg)
+  const validator = await runValidate(args, run)
+  return { run, validator, turnsConsumed: run.turns }
+}
+
+/**
+ * SELECT the best of a breadth fan-out — the validated-red repro/primary-rail
+ * oracle acting as SELECTOR.
+ *
+ * 1. GREEN-FIRST: the FIRST candidate the validator turns green (under the SAME
+ *    finish-gate semantics as {@link clearedAsValidated}, so a primary-rail
+ *    false-green does NOT win) — index order is the stable tie-break, so a
+ *    deterministic run picks the same winner every time.
+ * 2. NONE-GREEN: keep the BEST by validator signal — highest
+ *    {@link reproOutcomeRank} (resolved > reproduced > other > exec_failed >
+ *    none), index order breaking ties — to seed the next round from the
+ *    strongest red rather than an arbitrary one.
+ *
+ * Selection consumes ONLY each candidate's injected `validator` — never a
+ * gold/hidden field (the no-leak fence is structural: the candidate type has no
+ * such field). `candidates` is non-empty (the caller guards length).
+ */
+const selectCandidate = (
+  args: RunRepairRoundsArgs,
+  candidates: readonly RepairCandidateOutcome[],
+): RepairCandidateOutcome => {
+  const green = candidates.find((c) => clearedAsValidated(args, c.validator))
+  if (green !== undefined) return green
+  // None green ⇒ argmax over the validator rank, first index wins ties. Seeded
+  // with index 0 so an all-equal field deterministically yields the first.
+  let best = candidates[0] as RepairCandidateOutcome
+  let bestRank = reproOutcomeRank(reproOutcomeOf(best.validator))
+  for (let i = 1; i < candidates.length; i++) {
+    const c = candidates[i] as RepairCandidateOutcome
+    const rank = reproOutcomeRank(reproOutcomeOf(c.validator))
+    if (rank > bestRank) {
+      best = c
+      bestRank = rank
+    }
+  }
+  return best
 }
 
 /** OBSERVE-ONLY measurement: the round CLEARED (ok by exit code) yet the typed
@@ -225,8 +318,22 @@ const validationGateContextOf = (
 
 type PrimaryRailStep = NonNullable<RunRepairRoundsArgs["primaryRailStep"]>
 
+/** The validate-arg policy inputs the orchestrator owns. Exposed as a NARROW
+ *  subset (not full {@link RunRepairRoundsArgs}) so the BREADTH fan-out in the
+ *  driver can build per-fork ValidateArgs through the SAME policy — pointing
+ *  `sandbox` at a candidate's fork — instead of re-deriving primary-rail-vs-agent
+ *  selection (one source of truth, no drift). */
+export interface RepairValidateArgsInputs {
+  readonly sandbox: string
+  readonly exec: RunRepairRoundsArgs["exec"]
+  readonly timeoutMs: number
+  readonly readFile?: RunRepairRoundsArgs["readFile"]
+  readonly evaluatePredicate?: RunRepairRoundsArgs["evaluatePredicate"]
+  readonly primaryRailStep?: PrimaryRailStep
+}
+
 const commonValidateArgs = (
-  args: RunRepairRoundsArgs,
+  args: RepairValidateArgsInputs,
 ): Pick<ValidateArgs, "sandbox" | "exec" | "timeoutMs" | "readFile" | "evaluatePredicate"> => ({
   sandbox: args.sandbox,
   exec: args.exec,
@@ -236,7 +343,7 @@ const commonValidateArgs = (
 })
 
 const primaryRailValidateArgs = (
-  args: RunRepairRoundsArgs,
+  args: RepairValidateArgsInputs,
   primaryRailStep: PrimaryRailStep,
 ): ValidateArgs => ({
   ...commonValidateArgs(args),
@@ -250,20 +357,27 @@ const primaryRailValidateArgs = (
   successPredicate: primaryRailStep.successPredicate,
 })
 
-const agentRunValidateArgs = (args: RunRepairRoundsArgs, r: RunOnceResult): ValidateArgs => ({
+const agentRunValidateArgs = (args: RepairValidateArgsInputs, r: RunOnceResult): ValidateArgs => ({
   ...commonValidateArgs(args),
   ...(r.lastVerifyCmd !== undefined ? { cmd: r.lastVerifyCmd } : {}),
   ...(r.reproPath !== undefined ? { reproPath: r.reproPath } : {}),
   ...(r.reproCmd !== undefined ? { reproCmd: r.reproCmd } : {}),
 })
 
-const buildValidateArgs = (args: RunRepairRoundsArgs, r: RunOnceResult): ValidateArgs =>
-  args.primaryRailStep !== undefined
-    ? primaryRailValidateArgs(args, args.primaryRailStep)
-    : agentRunValidateArgs(args, r)
+/** Build the ValidateArgs for one agent run under the repair gate's policy
+ *  (primary-rail when set, else the agent's own verify cmd / repro). Pure +
+ *  EXPORTED so the BREADTH fan-out validates each fork through the SAME policy as
+ *  the orchestrator's single-candidate path (point `inputs.sandbox` at the fork). */
+export const buildRepairValidateArgs = (
+  inputs: RepairValidateArgsInputs,
+  r: RunOnceResult,
+): ValidateArgs =>
+  inputs.primaryRailStep !== undefined
+    ? primaryRailValidateArgs(inputs, inputs.primaryRailStep)
+    : agentRunValidateArgs(inputs, r)
 
 const runValidate = (args: RunRepairRoundsArgs, r: RunOnceResult): Promise<ValidatorResult> =>
-  args.validate(buildValidateArgs(args, r))
+  args.validate(buildRepairValidateArgs(args, r))
 
 const finalize = (
   history: readonly RoundResult[],

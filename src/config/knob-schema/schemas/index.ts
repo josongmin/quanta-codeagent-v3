@@ -40,6 +40,7 @@ import {
   patchBudgetSchema,
   patchBudgetStrictSchema,
   regressionMaxTestsSchema,
+  repairBreadthSchema,
   repairSpecGateSchema,
   specFidelityInvariantSchema,
   verifySelectConcurrencySchema,
@@ -93,11 +94,21 @@ import {
   benchSotaSchema,
   noPatchForceFractionSchema,
 } from "./bench-gap-3"
-import { localizePhaseSchema, repoMapSchema, retryTransientSchema, selectorModeSchema } from "./bench-loop"
-import { reproDoubtSchema, reproExecTimeoutSchema, reproTestSchema, reproVoteSchema } from "./bench-repro"
+import {
+  localizePhaseSchema,
+  repoMapSchema,
+  retryTransientSchema,
+  selectorModeSchema,
+} from "./bench-loop"
+import {
+  reproDoubtSchema,
+  reproExecTimeoutSchema,
+  reproTestSchema,
+  reproVoteSchema,
+} from "./bench-repro"
 
 /**
- * ALL 75 bench knob schemas, IN THE EXACT ORDER their entries appear in
+ * ALL 76 bench knob schemas, IN THE EXACT ORDER their entries appear in
  * src/config/knob-inventory/bench.ts (envKey order). Do NOT reorder.
  */
 export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
@@ -129,6 +140,7 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   specFidelityInvariantSchema, // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT
   dynamicMessageMatcherSchema, // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER
   repairSpecGateSchema, // QUANTA_BENCH_REPAIR_SPEC_GATE
+  repairBreadthSchema, // QUANTA_BENCH_REPAIR_BREADTH
   forwardLocalizeSchema, // QUANTA_BENCH_FORWARD_LOCALIZE
   chaMultisiteSteerSchema, // QUANTA_BENCH_CHA_MULTISITE_STEER
   chaMultisiteGeneralSchema, // QUANTA_BENCH_CHA_MULTISITE_GENERAL

@@ -279,6 +279,18 @@ export interface BenchPosture {
    */
   readonly repairRounds: number | undefined
   /**
+   * jun-28 repair-loop BREADTH (oracle-selected best-of-N inside the repair
+   * loop). B in [1,8]; default 1 ⇒ single candidate (byte-identical, no fork, no
+   * extra validate). When B>1 (and a repair budget is active), each repair round
+   * generates B independent candidates on B forked sandboxes, validates EACH
+   * against the SAME repro/primary-rail validator, and continues from the
+   * candidate the validator turns GREEN (else the best validator signal). The
+   * fan-out itself lives in the driver (it owns fork/lane/git); the repair slice
+   * stays pure and consumes it through an injected `runCandidates` port. From the
+   * `repair-breadth` knob. Unset ⇒ projected to 1 (byte-identical single-pass).
+   */
+  readonly repairBreadth: number
+  /**
    * Verify-and-select candidate count (N). PRESENT ⇒ runInstance generates N
    * closure-diversity-seeded candidates and submits the VerificationBundle's
    * pick instead of a single pass. From the `verify-select` knob. Unset ⇒
@@ -564,6 +576,10 @@ export const benchPostureFromState = (
   const reproDoubt = state.values.has("repro-doubt")
   const retryTransient = readKnobValue(state, "retry-transient", isNumber)
   const repairRounds = readKnobValue(state, "closure-repair", isNumber)
+  // jun-28 repair-loop BREADTH: unset ⇒ projected to 1 (single candidate ⇒
+  // byte-identical no-fork path). The registry Knob carries no default, so an
+  // unset/rejected env value reads `undefined` here and the `?? 1` fence applies.
+  const repairBreadth = readKnobValue(state, "repair-breadth", isNumber) ?? 1
   const verifySelectN = readKnobValue(state, "verify-select", isNumber)
   const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
   const verifySelectEarlyAccept =
@@ -606,7 +622,8 @@ export const benchPostureFromState = (
   // QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER,
   // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
   // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL,
-  // QUANTA_BENCH_MODEL_LANE_DIVERSITY.
+  // QUANTA_BENCH_MODEL_LANE_DIVERSITY, QUANTA_BENCH_REPAIR_SPEC_GATE,
+  // QUANTA_BENCH_REPAIR_BREADTH.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -645,6 +662,7 @@ export const benchPostureFromState = (
     reproDoubt,
     retryTransient,
     repairRounds,
+    repairBreadth,
     verifySelectN,
     verifySelectConcurrency,
     verifySelectEarlyAccept,

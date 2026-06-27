@@ -30,6 +30,16 @@ export interface RepairConfig {
   /** Max additional repair rounds after the initial attempt. Default 2 ⇒ up
    *  to 3 total agent invocations. Honest cost ≈ ×(1+maxRounds). */
   maxRounds?: number
+  /** jun-28 repair-loop BREADTH (oracle-selected best-of-N). When `> 1` AND a
+   *  `runCandidates` port is injected, a repair round generates `breadth`
+   *  INDEPENDENT candidates (the driver forks `breadth` sandboxes + routes model
+   *  lanes), validates EACH against the SAME repro/primary-rail validator, and the
+   *  orchestrator CONTINUES from the candidate the validator turns GREEN (the
+   *  oracle as SELECTOR). None green ⇒ keep the best by validator signal
+   *  (`reproOutcome` rank) to seed the next round. ABSENT / `1` ⇒ the legacy
+   *  single-candidate `runOnce`+`validate` path (no fork, no extra validate) ⇒
+   *  byte-identical. Honest cost ≈ ×breadth patch-gen per round (opt-in). */
+  breadth?: number
 }
 
 /**
@@ -163,6 +173,75 @@ export type RepairReproOutcome = "reproduced" | "resolved" | "other" | "exec_fai
 
 export type RepairValidationSource = "primary_rail" | "verify_cmd" | "repro" | "none"
 
+/**
+ * jun-28 repair-loop BREADTH — SELECTOR rank over a validator signal. Higher =
+ * a stronger validator-side claim the patch fixed the issue. Used ONLY when NO
+ * candidate cleared (no GREEN) to seed the next round from the best of a red
+ * field. This is the agent-side oracle's ordering — it consumes ONLY the
+ * injected validator's classification, NEVER a gold/hidden field (no-leak).
+ *   resolved (4) > reproduced (3) > other/unknown (2) > exec_failed (1) > none (0)
+ * `exec_failed` ranks BELOW a plain red because an infra/exec crash carries no
+ * evidence the patch is even on the right track. A missing outcome (the validator
+ * never classified one) is `none`. Pure + exported so the orchestrator and any
+ * driver-side tie-break share ONE ordering.
+ */
+export const reproOutcomeRank = (outcome: RepairReproOutcome | undefined): number => {
+  switch (outcome) {
+    case "resolved":
+      return 4
+    case "reproduced":
+      return 3
+    case "other":
+    case "unknown":
+      return 2
+    case "exec_failed":
+      return 1
+    default:
+      return 0
+  }
+}
+
+/** jun-28 repair-loop BREADTH — one candidate the driver generated + validated on
+ *  its OWN forked sandbox. The orchestrator ranks these and continues from the
+ *  selected one. The driver owns fork/lane/git; this is the pure hand-back. */
+export interface RepairCandidateOutcome {
+  /** What the agent run produced on this candidate's fork (cumulative diff +
+   *  turns + the agent's last verify cmd / repro). */
+  readonly run: RunOnceResult
+  /** The SAME validator (re-)run against this candidate's patched fork. Selection
+   *  reads ONLY this — never a gold/hidden field. */
+  readonly validator: ValidatorResult
+  /** ADOPT this candidate as the continuation point: the driver makes the MAIN
+   *  sandbox reflect this candidate's cumulative tree (reset-to-base + apply its
+   *  diff) so the next repair round AND the final grader-bound capture see it.
+   *  Called by the orchestrator for the SELECTED candidate only; the driver
+   *  cleans up the (now-discarded) forks. */
+  readonly adopt: () => Promise<void>
+}
+
+/** jun-28 repair-loop BREADTH — inputs the orchestrator hands the driver's
+ *  fan-out port for ONE repair round. */
+export interface RunRepairCandidatesArgs {
+  /** Seed message for this round (undefined for round 0 — initial attempt). */
+  readonly seedMsg: string | undefined
+  /** How many INDEPENDENT candidates to generate (already clamped to ≥2 by the
+   *  orchestrator before this port is called). */
+  readonly breadth: number
+  /** 0-based round index (0 = initial, ≥1 = repair rounds). Lets the driver vary
+   *  lane assignment / telemetry per round. */
+  readonly round: number
+}
+
+/** jun-28 repair-loop BREADTH — the DRIVER-implemented fan-out port. Generates
+ *  `breadth` candidates on `breadth` forked sandboxes (routing model lanes when
+ *  configured), validates EACH against the injected validator, and returns the
+ *  per-candidate outcomes IN INDEX ORDER. Keeping this a port (vs calling
+ *  `forkSandbox` here) is what lets the repair slice stay PURE — it never imports
+ *  `@/agent` or the sandbox/fork helpers. */
+export type RunRepairCandidatesPort = (
+  args: RunRepairCandidatesArgs,
+) => Promise<readonly RepairCandidateOutcome[]>
+
 const boundTail = (s: string, maxChars: number): string =>
   s.length > maxChars ? s.slice(-maxChars) : s
 
@@ -286,6 +365,14 @@ export interface RunRepairRoundsArgs {
   /** Injected typed-predicate evaluator passed through to the validator when a
    *  typed success predicate is present. */
   evaluatePredicate?: ValidateArgs["evaluatePredicate"]
+  /** jun-28 repair-loop BREADTH — the DRIVER-implemented fan-out port. When
+   *  `config.breadth > 1` AND this port is present, each repair round generates
+   *  `breadth` independent candidates (on forked sandboxes, routing model lanes),
+   *  validates EACH against the same validator, and the orchestrator continues
+   *  from the GREEN candidate (else the best validator signal). ABSENT or
+   *  `breadth <= 1` ⇒ the legacy single `runOnce`+`validate` path (byte-identical:
+   *  this port is NEVER called, no fork, no extra validate). */
+  runCandidates?: RunRepairCandidatesPort
 }
 
 /** Orchestrator result. The cumulative `patch` is what the bench runner then

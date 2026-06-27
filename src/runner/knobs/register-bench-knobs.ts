@@ -8,8 +8,8 @@
  * It iterates the schema barrel and registers `deriveKnob(schema, apply?)` for
  * each schema that backs a registry Knob. No per-knob hand-import list.
  *
- * WHICH schemas back a registry Knob? `ALL_BENCH_SCHEMAS` (75) is the union of
- * (a) registry-Knob schemas (52 — they carry a `source` provenance string, the
+ * WHICH schemas back a registry Knob? `ALL_BENCH_SCHEMAS` (76) is the union of
+ * (a) registry-Knob schemas (53 — they carry a `source` provenance string, the
  * field every registry knob declares) and (b) INVENTORY-ONLY schemas (23 — bench
  * infra/config dials like full-remote-*, resume, bench-preset that are consumed
  * out of band by the bench driver and are NOT `@/runner/knobs` Knobs). The split

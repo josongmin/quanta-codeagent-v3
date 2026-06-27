@@ -1,0 +1,280 @@
+/**
+ * jun-28 repair-loop BREADTH — DRIVER-side fan-out (`makeRepairBreadthRunCandidates`).
+ *
+ * The orchestrator selection tests mock the `runCandidates` port; THIS suite
+ * proves the driver seam the port is built from: fork B sandboxes, run the agent
+ * on each (routed to lane i), validate EACH against the SAME repair-gate policy
+ * with the fork's OWN sandbox, hand back outcomes, and (for the adopted one)
+ * re-materialize it onto the main sandbox (reset-to-base + git apply). All ports
+ * are fakes — no real fork / agent / git.
+ */
+
+import { describe, expect, test } from "bun:test"
+import type { LLMPort } from "@/llm"
+import type { RunOnceResult, ValidateArgs, ValidatorResult } from "@/runner/batch/eval/repair/types"
+import {
+  makeRepairBreadthRunCandidates,
+  type RepairBreadthDeps,
+} from "@/runner/batch/eval/repair-breadth"
+
+const fakeLane = (tag: string): LLMPort => ({ tag }) as unknown as LLMPort
+
+interface Recorder {
+  forks: string[]
+  cleaned: string[]
+  agentCalls: { fork: string; seed: string | undefined; lane: LLMPort }[]
+  validateCalls: ValidateArgs[]
+  resets: { sandbox: string; base: string }[]
+  applies: { sandbox: string; patch: string }[]
+  buildEnvs: { sandbox: string; repo: string }[]
+}
+
+const freshRecorder = (): Recorder => ({
+  forks: [],
+  cleaned: [],
+  agentCalls: [],
+  validateCalls: [],
+  resets: [],
+  applies: [],
+  buildEnvs: [],
+})
+
+/** Build deps where fork i ⇒ a deterministic path, the agent yields patch
+ *  `PATCH_<i>` from a per-index map, and validation echoes a per-index verdict. */
+const makeDeps = (
+  rec: Recorder,
+  opts: {
+    patches: readonly string[]
+    verdicts: readonly ValidatorResult[]
+    baseCommit?: string | undefined
+    repo?: string | undefined
+    lanes?: readonly LLMPort[]
+    runAgentOnFork?: RepairBreadthDeps["runAgentOnFork"]
+  },
+): RepairBreadthDeps => {
+  let forkSeq = 0
+  return {
+    instanceId: "inst-1",
+    mainSandbox: "/main",
+    baseCommit: "baseCommit" in opts ? opts.baseCommit : "BASE",
+    repo: "repo" in opts ? opts.repo : undefined,
+    timeoutMs: 1000,
+    resolveLaneLlm: (index) => opts.lanes?.[index] ?? fakeLane(`lane-${index}`),
+    runAgentOnFork:
+      opts.runAgentOnFork ??
+      (async (fork, seed, lane): Promise<RunOnceResult> => {
+        // Recover the candidate index from the fork path suffix.
+        const idx = Number(fork.split("#")[1])
+        rec.agentCalls.push({ fork, seed, lane })
+        return { patch: opts.patches[idx] as string, turns: 1, lastVerifyCmd: "pytest" }
+      }),
+    validate: async (args: ValidateArgs): Promise<ValidatorResult> => {
+      rec.validateCalls.push(args)
+      const idx = Number(args.sandbox.split("#")[1])
+      return opts.verdicts[idx] as ValidatorResult
+    },
+    validateInputs: { exec: async () => ({ code: 0, stdout: "", stderr: "" }), timeoutMs: 1000 },
+    sandboxPorts: {
+      forkSandbox: async (_id, _src) => {
+        const path = `/fork#${forkSeq++}`
+        rec.forks.push(path)
+        return path
+      },
+      cleanupSandbox: async (sandbox) => {
+        rec.cleaned.push(sandbox)
+      },
+    },
+    gitPorts: {
+      resetToBase: async (sandbox, base, _t) => {
+        rec.resets.push({ sandbox, base })
+        return true
+      },
+      applyCandidatePatch: async (sandbox, patch, _t) => {
+        rec.applies.push({ sandbox, patch })
+        return true
+      },
+      materializeBuildEnv: async (sandbox, repo) => {
+        rec.buildEnvs.push({ sandbox, repo })
+        return true
+      },
+    },
+  }
+}
+
+describe("repair-breadth fan-out — forks B sandboxes, runs+validates each", () => {
+  test("B=3 ⇒ 3 forks, 3 agent runs (lane i), 3 validations on the FORK's sandbox, 3 cleanups", async () => {
+    const rec = freshRecorder()
+    const lanes = [fakeLane("L0"), fakeLane("L1"), fakeLane("L2")]
+    const port = makeRepairBreadthRunCandidates(
+      makeDeps(rec, {
+        patches: ["P0", "P1", "P2"],
+        verdicts: [{ ok: false }, { ok: true }, { ok: false }],
+        lanes,
+      }),
+    )
+    const outcomes = await port({ seedMsg: "seed-x", breadth: 3, round: 0 })
+
+    expect(outcomes).toHaveLength(3)
+    // 3 distinct forks. Guard-revert: a non-forking impl would create 0/1.
+    expect(rec.forks).toHaveLength(3)
+    // Each agent run got its lane port (i mod laneCount). Guard-revert: dropping
+    // the lane arg would push `undefined` here.
+    const lanesByFork = new Map(rec.agentCalls.map((c) => [c.fork, c.lane]))
+    expect(lanesByFork.get("/fork#0")).toBe(lanes[0])
+    expect(lanesByFork.get("/fork#1")).toBe(lanes[1])
+    expect(lanesByFork.get("/fork#2")).toBe(lanes[2])
+    // The seed propagated to every candidate.
+    expect(rec.agentCalls.every((c) => c.seed === "seed-x")).toBe(true)
+    // Validation ran against EACH FORK's own sandbox (not the main one). This is
+    // the no-leak-relevant invariant: the oracle re-executes on the candidate's
+    // tree. Guard-revert: validating `/main` would put "/main" here.
+    expect(rec.validateCalls.map((v) => v.sandbox).sort()).toEqual([
+      "/fork#0",
+      "/fork#1",
+      "/fork#2",
+    ])
+    // Every fork is cleaned up (loser AND would-be winner — adopt re-applies from
+    // the captured diff, so the fork dir is disposable).
+    expect(rec.cleaned.sort()).toEqual(["/fork#0", "/fork#1", "/fork#2"])
+    // Outcomes carry the per-candidate run+validator.
+    expect(outcomes.map((o) => o.run.patch).sort()).toEqual(["P0", "P1", "P2"])
+  })
+
+  test("validateInputs threads the primary-rail policy through to each fork", async () => {
+    const rec = freshRecorder()
+    const deps = makeDeps(rec, { patches: ["P0", "P1"], verdicts: [{ ok: false }, { ok: false }] })
+    const railDeps: RepairBreadthDeps = {
+      ...deps,
+      validateInputs: {
+        exec: async () => ({ code: 0, stdout: "", stderr: "" }),
+        timeoutMs: 1000,
+        primaryRailStep: {
+          kind: "repro",
+          cmd: 'python "repro.py"',
+          authority: "execution",
+          successPredicate: { type: "stdout_contains", substring: "Issue resolved" },
+        },
+      },
+    }
+    await makeRepairBreadthRunCandidates(railDeps)({ seedMsg: undefined, breadth: 2, round: 1 })
+    // Each validation used the PRIMARY-RAIL cmd (policy carried through
+    // buildRepairValidateArgs), not the agent's lastVerifyCmd. Guard-revert:
+    // ignoring validateInputs.primaryRailStep would set cmd to "pytest".
+    expect(rec.validateCalls.every((v) => v.cmd === 'python "repro.py"')).toBe(true)
+    expect(rec.validateCalls.every((v) => v.reproAuthority === true)).toBe(true)
+  })
+})
+
+describe("repair-breadth fan-out — adopt() re-materializes the candidate onto MAIN", () => {
+  test("adopt ⇒ reset main to base THEN git apply the candidate's cumulative diff", async () => {
+    const rec = freshRecorder()
+    const port = makeRepairBreadthRunCandidates(
+      makeDeps(rec, {
+        patches: ["DIFF_A", "DIFF_B"],
+        verdicts: [{ ok: false }, { ok: true }],
+        baseCommit: "BASE_SHA",
+      }),
+    )
+    const outcomes = await port({ seedMsg: undefined, breadth: 2, round: 0 })
+    // No git side-effects until adopt is called (generation must not mutate main).
+    expect(rec.resets).toHaveLength(0)
+    expect(rec.applies).toHaveLength(0)
+
+    // Adopt candidate #1 (DIFF_B) — the green one a selector would pick.
+    const winner = outcomes.find((o) => o.run.patch === "DIFF_B")
+    expect(winner).toBeDefined()
+    await winner?.adopt()
+
+    // reset-to-base on MAIN, then apply the winner's cumulative diff to MAIN.
+    // Guard-revert: dropping resetToBase (no continue-from-base) ⇒ resets empty;
+    // dropping applyCandidatePatch ⇒ applies empty.
+    expect(rec.resets).toEqual([{ sandbox: "/main", base: "BASE_SHA" }])
+    expect(rec.applies).toEqual([{ sandbox: "/main", patch: "DIFF_B" }])
+  })
+
+  test("adopt re-materializes the build-env after reset+apply when a repo is set (next round can build)", async () => {
+    const rec = freshRecorder()
+    const port = makeRepairBreadthRunCandidates(
+      makeDeps(rec, {
+        patches: ["DIFF_A"],
+        verdicts: [{ ok: true }],
+        baseCommit: "BASE_SHA",
+        repo: "astropy/astropy", // a build-time-import repo
+      }),
+    )
+    const [only] = await port({ seedMsg: undefined, breadth: 1, round: 1 })
+    await only?.adopt()
+    // The leading reset wiped the build-env block ⇒ adopt re-injects it on MAIN so
+    // the NEXT round's fork can build. Guard-revert: dropping the materialize call
+    // leaves buildEnvs empty and astropy's round-2 forks fail to build.
+    expect(rec.buildEnvs).toEqual([{ sandbox: "/main", repo: "astropy/astropy" }])
+  })
+
+  test("adopt does NOT materialize build-env when repo is unset (no build-time import)", async () => {
+    const rec = freshRecorder()
+    const port = makeRepairBreadthRunCandidates(
+      makeDeps(rec, {
+        patches: ["DIFF_A"],
+        verdicts: [{ ok: true }],
+        baseCommit: "BASE_SHA",
+        repo: undefined,
+      }),
+    )
+    const [only] = await port({ seedMsg: undefined, breadth: 1, round: 0 })
+    await only?.adopt()
+    expect(rec.buildEnvs).toHaveLength(0)
+  })
+
+  test("empty winner diff ⇒ reset main to base, but NO apply (continuation point is base)", async () => {
+    const rec = freshRecorder()
+    const port = makeRepairBreadthRunCandidates(
+      makeDeps(rec, { patches: [""], verdicts: [{ ok: false }], baseCommit: "BASE_SHA" }),
+    )
+    // breadth 1 here exercises the helper directly (the orchestrator never calls
+    // the port at breadth 1; this isolates the empty-diff adopt path).
+    const [only] = await port({ seedMsg: undefined, breadth: 1, round: 0 })
+    await only?.adopt()
+    expect(rec.resets).toEqual([{ sandbox: "/main", base: "BASE_SHA" }])
+    // The empty diff is NOT applied (git apply of "" is a no-op we skip).
+    expect(rec.applies).toHaveLength(0)
+  })
+
+  test("missing baseCommit ⇒ adopt applies onto live main WITHOUT a reset (defensive)", async () => {
+    const rec = freshRecorder()
+    const port = makeRepairBreadthRunCandidates(
+      makeDeps(rec, { patches: ["DIFF_X"], verdicts: [{ ok: true }], baseCommit: undefined }),
+    )
+    const [only] = await port({ seedMsg: undefined, breadth: 1, round: 0 })
+    await only?.adopt()
+    // No reset (no base to reset to); the diff is still applied best-effort.
+    expect(rec.resets).toHaveLength(0)
+    expect(rec.applies).toEqual([{ sandbox: "/main", patch: "DIFF_X" }])
+  })
+})
+
+describe("repair-breadth fan-out — resilience", () => {
+  test("a candidate whose agent THROWS is dropped; the others still return + its fork is cleaned", async () => {
+    const rec = freshRecorder()
+    const deps = makeDeps(rec, {
+      patches: ["P0", "P1", "P2"],
+      verdicts: [{ ok: false }, { ok: false }, { ok: false }],
+      runAgentOnFork: async (fork, _seed, _lane): Promise<RunOnceResult> => {
+        const idx = Number(fork.split("#")[1])
+        if (idx === 1) throw new Error("lane 1 blew up")
+        return { patch: `P${idx}`, turns: 1 }
+      },
+    })
+    const outcomes = await makeRepairBreadthRunCandidates(deps)({
+      seedMsg: undefined,
+      breadth: 3,
+      round: 0,
+    })
+    // The throwing candidate is dropped (2 of 3 returned). Guard-revert: not using
+    // allSettled would reject the whole round.
+    expect(outcomes).toHaveLength(2)
+    expect(outcomes.map((o) => o.run.patch).sort()).toEqual(["P0", "P2"])
+    // ALL THREE forks (incl. the failed one) were created and cleaned up — no leak.
+    expect(rec.forks).toHaveLength(3)
+    expect(rec.cleaned.sort()).toEqual(["/fork#0", "/fork#1", "/fork#2"])
+  })
+})
