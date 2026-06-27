@@ -9,7 +9,13 @@
 set -uo pipefail
 cd /Users/songmin/quanta-codeagent-v3
 DS="$HOME/.quanta-ab-dataset.jsonl"
-[ -s "$DS" ] || { echo "FATAL: dataset missing"; exit 1; }
+
+# PRE-FLIGHT GATE — validate config + environment BEFORE spending a box/token.
+# Every jun-27 crater (wrong model, capped account, orphan boxes, port clash) is a
+# check in here; a CRITICAL failure aborts the launch instead of debugging a crash.
+bash tools/bench-preflight.sh "$DS" gpt-5.5 \
+  agentless-v6-singlepass-execfull agentless-v6-closure-control agentless-v6-closure-repair \
+  || { echo "PRE-FLIGHT FAILED — not launching"; exit 1; }
 
 export QUANTA_FULL_REMOTE_ONDEMAND=1
 export QUANTA_FULL_REMOTE_INSTANCE_TYPE=c7i.4xlarge
