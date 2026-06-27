@@ -99,6 +99,18 @@ const REPO_ENV_OVERRIDES: Record<string, RepoEnvOverride> = {
       },
     ],
   },
+  // scikit-learn's editable build compiles Cython C-extensions and its build
+  // backend imports numpy (build-time) — old bench snapshots don't declare these
+  // for uv, so `uv run --with-editable .` fails the build backend ("Failed to
+  // resolve --with requirement"), and repro-gen never gets a working interpreter
+  // (jun-27 RCA: the two highest frontier-solvable misses, scikit-14087 f=60 /
+  // 14983 f=48, were no-repro from exactly this). Materialize the build deps the
+  // same way as astropy/extension-helpers. Cython generates the .c; numpy headers
+  // are needed to compile the extensions (numpy.distutils on 0.2x, meson on 1.x).
+  "scikit-learn/scikit-learn": {
+    buildDeps: ["Cython", "numpy", "scipy"],
+    distName: "scikit-learn",
+  },
   // xarray still imports `np.unicode_` on older bench snapshots; numpy 2 removed
   // it. This is a RUNTIME import (module code, not the build backend), so a
   // `--with numpy<2` runtime pin is the correct mechanism, NOT a build dep.
