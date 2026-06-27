@@ -13,7 +13,7 @@ DS="$HOME/.quanta-ab-dataset.jsonl"
 
 export QUANTA_FULL_REMOTE_ONDEMAND=1
 export QUANTA_FULL_REMOTE_INSTANCE_TYPE=c7i.4xlarge
-export QUANTA_FULL_REMOTE_CONCURRENCY=1
+export QUANTA_FULL_REMOTE_CONCURRENCY=4   # 4 cases/box in parallel (3 boxes ⇒ ≤12 streams)
 export QUANTA_BENCH_NO_PROGRESS_ABORT_S=1800
 
 SUP="$HOME/.quanta-ab6-supervisor.log"
