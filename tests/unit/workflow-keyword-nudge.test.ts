@@ -16,10 +16,12 @@ import {
   detectWorkflowKeyword,
   injectWorkflowKeywordNudge,
   WORKFLOW_NUDGE_MARKER,
+  WORKFLOW_TOOL_NAME,
 } from "@/agent/workflow-keyword"
-import type { Message, Tool } from "@/llm"
+import type { Message } from "@/llm"
 import { createWorkingMemory } from "@/memory"
-import { ToolRegistry } from "@/tool"
+import { type Tool, ToolRegistry } from "@/tool"
+import { createRunWorkflowTool } from "@/tool/workflow/run-workflow-tool"
 
 // ── pure detector ────────────────────────────────────────────────────────────
 
@@ -50,6 +52,17 @@ describe("detectWorkflowKeyword — hard keyword match", () => {
     // The injected reminder must never re-trigger detection when it becomes the
     // latest user text on a no-tool-use continuation turn.
     expect(detectWorkflowKeyword(WORKFLOW_NUDGE_MARKER)).toBe(false)
+  })
+})
+
+// ── inert-guard: the gate name MUST match the real tool ──────────────────────
+
+describe("WORKFLOW_TOOL_NAME — pinned to the real run_workflow tool", () => {
+  test("nudge gate name === createRunWorkflowTool().name (rename ⇒ this fails, not prod-silent)", () => {
+    const real = createRunWorkflowTool({
+      agentRun: (async () => ({ ok: true, output: "" })) as never,
+    })
+    expect(real.name).toBe(WORKFLOW_TOOL_NAME)
   })
 })
 
