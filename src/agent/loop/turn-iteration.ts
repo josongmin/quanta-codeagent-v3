@@ -7,6 +7,7 @@ import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeTurnHeader } from "../turn-kind"
 import type { AgentConfig } from "../types"
+import { injectWorkflowKeywordNudge } from "../workflow-keyword"
 import { compactNowOnDemand } from "./compaction-wire"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
@@ -175,6 +176,9 @@ export const prepareTurnIteration = async (args: {
   const queuedInputs = await syncQueuedTurnInputs(args)
   if (queuedInputs === "aborted") return "aborted"
   injectFocusChainMessage(args.cfg, args.wm)
+  // CC "ultracode" parity — a hard keyword in the user's prompt nudges this turn
+  // toward `run_workflow` (only when the tool is registered; gate untouched).
+  injectWorkflowKeywordNudge(args.cfg, args.wm)
   // Loop-control fix (jun-25, FIX-1) — make the approaching turn budget visible
   // to the model so it can finalize rather than be silently hard-cut at
   // `maxTurns`. No-op for unbounded `maxTurns` (byte-identical).
