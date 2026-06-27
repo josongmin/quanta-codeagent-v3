@@ -723,4 +723,24 @@ export const BENCH: readonly KnobInventoryEntry[] = [
       "stable campaign id; resume key prefix. Unset ⇒ 'default-campaign'. Scopes the resume cassette/receipt S3 prefix (<campaignId>/<instanceId>).",
     readSite: "apps/bench/resume/config.ts",
   },
+  {
+    envKey: "QUANTA_BENCH_RESUME_IAM_PROFILE",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "EC2 instance-profile attached to the box ONLY when QUANTA_BENCH_RESUME is on (the box reads/writes its cassette in S3). Unset ⇒ 'quanta-bench-resume-profile'. No effect when resume is off (no profile attached).",
+    readSite: "apps/bench/remote/box-session/ec2-lifecycle.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_INSTANCE_ID",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "the single SWE-bench instance the box is running (resume is chunk-size=1). Scopes the resume cassette/receipt S3 key (<campaignId>/<instanceId>) on both record and replay. Set by the pool worker on the box; unset ⇒ resume-write inert (fail-closed).",
+    readSite: "apps/bench/resume/recorder.ts",
+  },
 ]

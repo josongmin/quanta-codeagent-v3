@@ -9,7 +9,7 @@
  */
 
 import { basename } from "node:path"
-import { errMessage } from "@/shared"
+import { errMessage, gateOn } from "@/shared"
 import { presetRequiresLiveLspGrounding } from "../../preset"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "../backend"
 import { lookupCurrentPublicIpv4 } from "../ec2"
@@ -127,12 +127,13 @@ const userData = (ttl: number): string =>
   ].join("\n")
 
 /** Find-or-create the SG + open :22. Without an attached SG the box lands in the
- *  default SG (no inbound :22) ⇒ ssh times out. Ingress is scoped to the current
- *  public IPv4 `/32` (via the SSOT {@link lookupCurrentPublicIpv4}, shared with
- *  ec2.ts) — NOT `0.0.0.0/0`: both sites authorize the SAME named SG, so a
- *  world-open rule here would permanently widen the SG the ec2 path restricts.
- *  Throws on a REAL failure (never masks a connectivity error by blindly
- *  creating, and fail-closes on an unresolvable IP rather than world-opening). */
+ *  default SG (no inbound :22) ⇒ ssh times out. Per the jun-25 user directive
+ *  (see below) this path authorizes `0.0.0.0/0` rather than a detected
+ *  `<myIp>/32`: the public-IP lookup curl returned stale IPs on degraded
+ *  networks and stranded ssh after a healthy launch. Boxes are key-ONLY,
+ *  ephemeral, IMDSv2, short-TTL, so world-open :22 is safe (only the key holder
+ *  connects). Throws on a REAL authorize failure (never masks a connectivity
+ *  error by blindly creating). */
 const ensureSecurityGroup = async (
   awsFn: (args: readonly string[]) => Promise<SpawnResult>,
   spawn: SpawnFn,
@@ -235,6 +236,15 @@ const launchInstance = async (
     "--security-group-ids",
     sgId,
     ...(onDemand ? [] : ["--instance-market-options", '{"MarketType":"spot"}']),
+    // Resume needs the box to read/write its cassette in S3 → attach the scoped
+    // instance-profile ONLY when resume is on (default-off ⇒ no profile, launch
+    // byte-identical to today). Requires iam:PassRole on the launching principal.
+    ...(gateOn(process.env, "QUANTA_BENCH_RESUME")
+      ? [
+          "--iam-instance-profile",
+          `Name=${process.env.QUANTA_BENCH_RESUME_IAM_PROFILE ?? "quanta-bench-resume-profile"}`,
+        ]
+      : []),
     "--metadata-options",
     "HttpTokens=required,HttpPutResponseHopLimit=1",
     "--instance-initiated-shutdown-behavior",
