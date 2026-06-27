@@ -99,6 +99,36 @@ describe("detached poll — no-progress (wedged-but-alive) watchdog wiring", () 
     expect(polls).toBeGreaterThanOrEqual(10)
   })
 
+  test("growing run.log: EVERY real line reaches onLine exactly once (no cursor-drift skip)", async () => {
+    // jun-27: the `echo MARK` newline made the parse emit a leading "" each poll,
+    // over-counting `seen` so `tail -n +${seen+1}` SKIPPED real lines — the operator
+    // log desynced from the box (froze at case 1 while the box ran case 7).
+    const boxLines = ["▶ case-1", "■ case-1 ok", "▶ case-2", "■ case-2 ok", "▶ case-3"]
+    let revealed = 0 // lines the box has written so far (one more per poll)
+    const received: string[] = []
+    const out = await runBenchDetachedPoll({
+      iid: "i-grow",
+      benchCmd: "b",
+      runLog: "~/run.log",
+      runExit: "~/run.exit",
+      onLine: (l) => received.push(l.replace(/\n$/, "")),
+      sleep: async () => {
+        revealed = Math.min(revealed + 1, boxLines.length)
+      },
+      pollIntervalMs: 1,
+      aws: async () => ok("running\n"),
+      ssh: async (remote) => {
+        if (isLaunch(remote)) return ok("LAUNCHED\n")
+        const from = Number(remote.match(/tail -n \+(\d+)/)?.[1] ?? "1") // 1-indexed cursor
+        const tail = boxLines.slice(0, revealed).slice(from - 1)
+        const done = revealed >= boxLines.length && from > boxLines.length
+        return ok(`${done ? "0" : ""}${MARK}\n${tail.map((l) => `${l}\n`).join("")}`)
+      },
+    })
+    expect(out.code).toBe(0)
+    expect(received).toEqual(boxLines) // in order, once each — no skip, dupe, or "" noise
+  })
+
   test("CONTROL: with NO budget (default) a frozen log NEVER aborts (byte-identical opt-in)", async () => {
     let t = 0
     let polls = 0

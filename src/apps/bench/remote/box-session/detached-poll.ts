@@ -114,9 +114,16 @@ const parseDetachedProbe = (stdout: string): { exitCode?: number; freshLines: st
   const mark = stdout.indexOf(RUN_EXIT_MARK)
   const exitField = (mark >= 0 ? stdout.slice(0, mark) : "").trim()
   const fresh = mark >= 0 ? stdout.slice(mark + RUN_EXIT_MARK.length) : ""
+  // The probe is `<exit>; echo MARK; tail …`, so `fresh` ALWAYS begins with the
+  // newline `echo` printed after MARK. Left in, that yields a spurious leading ""
+  // every poll → `seen` over-counts by 1 → next `tail -n +${seen+1}` SKIPS a real
+  // run.log line. Over a run this silently DESYNCS the operator log from the box
+  // (jun-27: the orchestrator log froze at case 1 while the box was on case 7).
+  // Strip exactly that one leading newline so the cursor tracks real lines.
+  const body = fresh.startsWith("\n") ? fresh.slice(1) : fresh
   return {
     ...(/^\d+$/.test(exitField) ? { exitCode: Number(exitField) } : {}),
-    freshLines: fresh.split("\n").slice(0, -1),
+    freshLines: body.split("\n").slice(0, -1),
   }
 }
 
