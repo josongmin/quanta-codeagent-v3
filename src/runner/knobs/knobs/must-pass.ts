@@ -36,6 +36,7 @@ const SURFACES: readonly Surface[] = ["bench", "agent-batch", "agent-interactive
 interface MustPassValue {
   readonly mustPass: boolean
   readonly maxTrips?: number
+  readonly stickyRed?: boolean
 }
 
 /** Non-NOOP apply — folds `cfg.verifyGuard`. Bound into the central registrar
@@ -47,11 +48,18 @@ export const applyMustPass = (
   ctx: { surface: Surface },
 ): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
-  // exactOptionalPropertyTypes-friendly: only include `maxTrips` when defined.
-  const verifyGuard =
-    value.maxTrips !== undefined
-      ? { mustPass: value.mustPass, maxTrips: value.maxTrips }
-      : { mustPass: value.mustPass }
+  // Preserve any `exactCommands` the bench driver already established on the
+  // incoming verifyGuard (buildConfigGuards sets the per-instance verify
+  // authority before knobs apply). Dropping it would silently broaden what
+  // counts as a verify call — an unintended behavior change when the override
+  // is set. exactOptionalPropertyTypes-friendly: only include fields when set.
+  const exactCommands = cfg.verifyGuard?.exactCommands
+  const verifyGuard = {
+    mustPass: value.mustPass,
+    ...(value.maxTrips !== undefined ? { maxTrips: value.maxTrips } : {}),
+    ...(value.stickyRed === true ? { stickyRed: true } : {}),
+    ...(exactCommands !== undefined ? { exactCommands } : {}),
+  }
   return { ...cfg, verifyGuard }
 }
 

@@ -31,6 +31,8 @@ import type { KnobSchema } from "../contracts"
 interface MustPassValue {
   readonly mustPass: boolean
   readonly maxTrips?: number
+  /** `"sticky"` variant — sticky-red outcome gate (see verify-guard.ts). */
+  readonly stickyRed?: boolean
 }
 
 /**
@@ -57,13 +59,14 @@ const parseSkills = (raw: string | undefined): true | undefined => {
   return SKILLS_TRUTHY.has(raw) ? true : undefined
 }
 
-/** must-pass — strict enum parse (off / 1|on|strict / 2 / 3). */
+/** must-pass — strict enum parse (off / 1|on|strict / 2 / 3 / sticky). */
 const parseMustPass = (raw: string | undefined): MustPassValue | undefined => {
   if (raw === undefined) return undefined
   if (raw === "off") return { mustPass: false }
   if (raw === "1" || raw === "on" || raw === "strict") return { mustPass: true, maxTrips: 2 }
   if (raw === "2") return { mustPass: true, maxTrips: 2 }
   if (raw === "3") return { mustPass: true, maxTrips: 3 }
+  if (raw === "sticky") return { mustPass: true, maxTrips: 2, stickyRed: true }
   return undefined
 }
 
@@ -185,10 +188,10 @@ export const mustPassSchema: KnobSchema<MustPassValue> = {
   id: "must-pass",
   envKey: "QUANTA_BENCH_MUST_PASS",
   kind: "enum",
-  domain: { enum: ["off", "1", "on", "strict", "2", "3"] },
+  domain: { enum: ["off", "1", "on", "strict", "2", "3", "sticky"] },
   default: undefined,
   describe:
-    "Bench: verify-guard outcome gate override (off / 1|on|strict / 2 / 3 maxTrips). Unset ⇒ driver swebench auto-on posture stands.",
+    "Bench: verify-guard outcome gate override (off / 1|on|strict / 2 / 3 maxTrips / sticky). `sticky` = maxTrips:2 + sticky-red (a failing verify is not cleared by a later green run of a different command). Unset ⇒ driver swebench auto-on posture stands.",
   readSite: "runner/knobs/knobs/must-pass.ts",
   surfaces: CROSS,
   parse: parseMustPass,

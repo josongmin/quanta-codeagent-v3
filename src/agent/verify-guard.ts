@@ -159,6 +159,12 @@ export interface VerifyGuardConfig {
   maxTrips?: number
   mustPass?: boolean
   exactCommands?: readonly string[]
+  /** Opt-in (gated on `mustPass:true`). When set, a failing verify after the
+   *  latest edit is STICKY — only a later passing run of the SAME command
+   *  clears it; a green run of a different (narrower) command does not. Closes
+   *  the "narrow repro green washes out broad regression red" gap. Default
+   *  absent ⇒ byte-identical latest-verify-only behavior. */
+  stickyRed?: boolean
 }
 
 /**
@@ -194,6 +200,43 @@ const findLastVerifyAfter = (
   for (let j = history.length - 1; j > from; j--) {
     const entry = history[j]
     if (entry !== undefined && isVerify(entry, exactCommands)) return entry
+  }
+  return undefined
+}
+
+/** Command-identity key for the sticky-red scan: a `test_runner` call keys on
+ *  its tool name; a `bash` call keys on its EXACT argument string. Two runs
+ *  share a key iff they are the same command — so a later GREEN run only clears
+ *  an earlier RED of the *same* command, never a different (narrower) one. */
+const verifyCommandKey = (entry: GuardHistoryEntry): string =>
+  entry.name === "bash" ? `bash:${entry.arg ?? ""}` : entry.name
+
+/**
+ * Sticky-red scan (opt-in `stickyRed`). Among verify-classified entries
+ * STRICTLY after `from`, the LATEST run of each distinct command decides that
+ * command's standing. Returns the most-recent entry whose command's latest run
+ * is FAILING, or `undefined` if every command's latest run passed/unknown.
+ *
+ * This is strictly stronger than {@link findLastVerifyAfter}+{@link
+ * isVerifyFailing}: the latest-only check can be defeated by running a DIFFERENT
+ * green command after a red (a narrow repro green washing out a broad regression
+ * red — the django-11141 gpt-5.4 failure mode). Here a red is sticky until the
+ * SAME command is re-run green. Walking backward and taking the first-seen key
+ * yields that command's latest run for free.
+ */
+const findUnresolvedFailingVerify = (
+  history: readonly GuardHistoryEntry[],
+  from: number,
+  exactCommands: readonly string[] | undefined,
+): GuardHistoryEntry | undefined => {
+  const seen = new Set<string>()
+  for (let j = history.length - 1; j > from; j--) {
+    const entry = history[j]
+    if (entry === undefined || !isVerify(entry, exactCommands)) continue
+    const key = verifyCommandKey(entry)
+    if (seen.has(key)) continue // an earlier (superseded) run of this command
+    seen.add(key)
+    if (isVerifyFailing(entry)) return entry // latest run of this command failed
   }
   return undefined
 }
@@ -252,10 +295,23 @@ export const decideVerifyGuard = (args: {
   const lastVerify = findLastVerifyAfter(history, lastMut, exactCommands)
   const cap = ownVerifyGuardField(cfg, "maxTrips") ?? DEFAULT_MAX_TRIPS
   const mustPass = ownVerifyGuardField(cfg, "mustPass") === true
+  const stickyRed = ownVerifyGuardField(cfg, "stickyRed") === true
 
   // Presence branch: no verify after the latest edit.
   if (lastVerify === undefined) {
     return spendTrip(state, cap) ? { block: true, text: VERIFY_FORCE_MESSAGE } : { block: false }
+  }
+  // Sticky-red branch (opt-in; superset of the latest-only must-pass check):
+  // an unresolved failing verify — a command whose LATEST run after the edit
+  // failed — blocks even if a different command was run green afterwards. Only
+  // re-running that same command green clears it.
+  if (mustPass && stickyRed) {
+    const unresolved = findUnresolvedFailingVerify(history, lastMut, exactCommands)
+    if (unresolved !== undefined && spendTrip(state, cap)) {
+      const marker = verifyOutputFailureMarkerId(unresolved.output ?? "") ?? undefined
+      return { block: true, text: verifyPassForceMessage(marker) }
+    }
+    return { block: false }
   }
   // Must-pass branch: presence satisfied, but the latest verify failed.
   // Conservative: unknown outcome (ok absent + output absent) ⇒ no block.
