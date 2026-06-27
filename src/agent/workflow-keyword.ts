@@ -51,7 +51,10 @@ export const WORKFLOW_NUDGE_MARKER =
 
 const NUDGE_TEXT = `<system-reminder>\n${WORKFLOW_NUDGE_MARKER}\n</system-reminder>`
 
-const WORKFLOW_TOOL_NAME = "run_workflow"
+/** The registered name of the tool the nudge points at. Exported so a guard
+ *  test can pin it against the REAL `createRunWorkflowTool().name` — a rename of
+ *  either side would otherwise make the nudge silently inert. */
+export const WORKFLOW_TOOL_NAME = "run_workflow"
 
 /**
  * Append the workflow nudge when the latest user prompt carries the keyword AND

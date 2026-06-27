@@ -23,6 +23,11 @@
  * "model touched its todos" semantics.
  *
  * No heuristics — the status map is a closed switch with a `never` default arm.
+ *
+ * SSOT NOTE: once a plan exists it is the source of truth for the focus chain.
+ * A `/focus-chain reset` (which clears the tracker to `[]`) is therefore
+ * transient — the next turn's change-gated sync re-derives the list from the
+ * live plan. To stop seeing it, drop the plan (plan-exit), not the projection.
  */
 
 import type { Plan, TodoItem, TodoStatus } from "@/agent/plan/types"

@@ -10,9 +10,9 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import { type AgentConfig, runAgent } from "@/agent"
-import type { LLMPort, Message, StreamEvent, StreamInput, Tool } from "@/llm"
+import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { defaultTools, type Tool, ToolRegistry } from "@/tool"
 
 const txt = (t: string): StreamEvent[] => [
   { type: "text_delta", delta: t },
