@@ -143,6 +143,56 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "full",
   },
+  // jun-27 REPAIR EXPERIMENT — 3-arm A/B isolating the closure-repair REINJECT
+  // loop (the Prometheus-equivalent execution-feedback lever) from the closure
+  // grounding it rides on. RCA: ~88% of v6 failures are "synthesis" — correct
+  // localization + clean-applying patch + 0 regression, but the validated-red
+  // repro / fail_to_pass test STILL fails. The reinject loop re-runs the repro
+  // against the candidate and feeds the VERBATIM failure tail back to the agent
+  // until green — but it is OFF in the v6 winner. With plain v6 (A0) the three
+  // arms attribute any delta correctly:
+  //   A2 − A1 = the reinject loop ALONE (both carry identical grounding+widening)
+  //   A1 − A0 = the closure grounding / owner-widening effect
+  // Lean BY DESIGN: NO proof-required / proof-clean / family modules — those
+  // reshape candidate ADMISSION and would confound the repair signal.
+  //
+  // A1 (control): v6 + closure grounding, reinject loop OFF (no closure-repair).
+  "agentless-v6-closure-control": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+  },
+  // A2 (treatment): == A1 + the reinject loop ON (closure-repair: 5 rounds).
+  "agentless-v6-closure-repair": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+  },
   // jun-20 strict arm:
   // mini-first + hard patch-budget admission + source-only sanitizer. It keeps
   // the localization stack, turns host in-loop execution OFF for round-0 thinness,
