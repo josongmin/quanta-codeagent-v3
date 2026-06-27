@@ -33,7 +33,12 @@
  * Default port 4318 = the OTLP/HTTP convention.
  */
 
-import { appendFileSync } from "node:fs"
+import {
+  fileSpanSink,
+  noopSpanSink,
+  resolveSpanSink,
+  type SpanSinkPort,
+} from "./span-sink"
 import { errMessage } from "@/shared"
 
 const DEFAULT_PORT = 4318
@@ -289,26 +294,21 @@ const handleGet = (url: URL, collected: ReadonlyArray<FullSpan>, uiHtml: Blob): 
 }
 
 /** Ingest a `/v1/traces` batch: print one line per span AND collect the
- *  structured spans (ring-capped at `ringMax`) for the UI, optionally tee'd to
- *  `savePath` as JSONL. Mutates `collected` in place. */
+ *  structured spans (ring-capped at `ringMax`) for the UI, tee'd to the durable
+ *  {@link SpanSinkPort} (file / S3 / noop). Mutates `collected` in place. */
 const ingestTraces = (
   parsed: unknown,
   collected: FullSpan[],
   ringMax: number,
-  savePath: string | undefined,
+  spanSink: SpanSinkPort,
   write: (line: string) => void,
 ): void => {
   for (const s of parseResourceSpans(parsed as OtlpResourceSpans)) write(formatSpanLine(s))
   for (const s of parseResourceSpansFull(parsed as OtlpResourceSpans)) {
     collected.push(s)
-    if (savePath !== undefined) {
-      try {
-        appendFileSync(savePath, `${JSON.stringify(s)}\n`)
-      } catch (e) {
-        // best-effort tee — surface the disk hiccup but never drop the live span
-        write(`[otel-trace-sink] span tee dropped: ${errMessage(e)}`)
-      }
-    }
+    // Durable tee is best-effort BY CONTRACT (the adapter swallows its own disk /
+    // S3 errors) — a dropped span must never break the live ring + UI.
+    spanSink.write(JSON.stringify(s))
   }
   if (collected.length > ringMax) collected.splice(0, collected.length - ringMax)
 }
@@ -319,7 +319,13 @@ const ingestTraces = (
 export interface TraceSinkOptions {
   readonly port?: number
   readonly showMetrics?: boolean
+  /** @deprecated prefer {@link spanSink}. Back-compat: a bare path ⇒ fileSpanSink. */
   readonly savePath?: string
+  /** Durable persistence target (file / S3 / noop). Default noop = ring only.
+   *  Resolve from env with {@link resolveSpanSink}; the caller owns env reading. */
+  readonly spanSink?: SpanSinkPort
+  /** Human label for the resolved sink, shown in the listening banner. */
+  readonly sinkLabel?: string
   /** Max structured spans retained for the UI feed. Default 5000. */
   readonly ringMax?: number
 }
@@ -342,7 +348,16 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
   // later offline replay into the same viewer.
   const RING_MAX = opts.ringMax ?? 5000
   const collected: FullSpan[] = []
-  const savePath = opts.savePath
+  // Durable tee: explicit port wins, else back-compat a bare savePath ⇒ file, else
+  // noop (ring only). The S3/file ADAPTER owns its own errors (best-effort).
+  const spanSink =
+    opts.spanSink ?? (opts.savePath !== undefined ? fileSpanSink(opts.savePath) : noopSpanSink())
+  // Periodically flush a partial buffer so an S3 batch < flushEveryN doesn't sit
+  // unuploaded between bursts (no-op for file/noop). The receiver runs forever, so
+  // there is no shutdown hook to flush on — this bounds the unflushed window.
+  setInterval(() => {
+    void spanSink.flush()
+  }, 15_000)
   const uiHtml = Bun.file(`${import.meta.dir}/trace-viewer.html`)
 
   // Route a parsed POST body to traces/metrics ingestion. Never throws — a
@@ -350,7 +365,7 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
   // partial batch). Extracted to keep `fetch` under the complexity cap.
   const routePost = (url: URL, parsed: unknown): void => {
     try {
-      if (url.pathname === "/v1/traces") ingestTraces(parsed, collected, RING_MAX, savePath, write)
+      if (url.pathname === "/v1/traces") ingestTraces(parsed, collected, RING_MAX, spanSink, write)
       else if (url.pathname === "/v1/metrics" && showMetrics) {
         for (const m of parseResourceMetrics(parsed as OtlpResourceMetrics))
           write(formatMetricLine(m))
@@ -385,7 +400,7 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
   write(
     `otel-trace-sink listening on http://0.0.0.0:${port} — waterfall UI at ${uiUrl} · POST OTLP/JSON to /v1/traces${
       showMetrics ? " (+/v1/metrics)" : ""
-    }${savePath !== undefined ? ` · saving spans → ${savePath}` : ""}`,
+    }${opts.sinkLabel !== undefined ? ` · durable → ${opts.sinkLabel}` : ""}`,
   )
   return { port, uiUrl }
 }
@@ -404,11 +419,15 @@ if (import.meta.main) {
   // `ringMax` is intentionally NOT env-driven — it is a niche in-memory cap with a
   // sane default; programmatic callers override via opts. Keeping it off `process.env`
   // avoids a registry-orphan operator knob for a value nobody tunes from the shell.
+  const sinkDest =
+    process.env.QUANTA_OTEL_SINK ??
+    (process.env.QUANTA_OTEL_SAVE !== undefined && process.env.QUANTA_OTEL_SAVE !== ""
+      ? `file:${process.env.QUANTA_OTEL_SAVE}`
+      : undefined)
   runTraceSink({
     port: envInt(process.env.PORT, DEFAULT_PORT),
     showMetrics: process.argv.includes("--metrics"),
-    ...(process.env.QUANTA_OTEL_SAVE !== undefined
-      ? { savePath: process.env.QUANTA_OTEL_SAVE }
-      : {}),
+    spanSink: resolveSpanSink(process.env),
+    ...(sinkDest !== undefined ? { sinkLabel: sinkDest } : {}),
   })
 }
