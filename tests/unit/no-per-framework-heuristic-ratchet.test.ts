@@ -101,14 +101,19 @@ interface Forbidden {
   re: RegExp
 }
 
-/** A repo-name equality TS branch: `repo === "x/y"` or `instanceId === "x/y"`.
- *  Requires the bare TS identifier `repo`/`instanceId` (word-bounded) on the
- *  left of `===` so it does NOT match python-string content like
- *  `parts[0:3] == ["django","db","backends"]` (no such identifier, `==` not
- *  `===`). The `[^\n=]{0,40}` middle tolerates whitespace / a closing paren /
- *  `.toLowerCase()`-style chaining without crossing a line. The right side is a
- *  quoted `org/name` slug. */
-const REPO_EQUALITY_RE = /\b(repo|instanceId)\b[^\n=]{0,40}===\s*["'][a-z0-9_-]+\/[a-z0-9_-]+["']/g
+/** A repo-name branch keyed on the TS identifier `repo`/`instanceId` (word-bounded
+ *  on the LEFT — so it does NOT match python-string content like
+ *  `parts[0:3] == ["django","db","backends"]`, which has no such identifier and
+ *  uses `==`). Catches the realistic forms, against a quoted `org/name…` slug
+ *  (single/double/backtick): equality `repo === "x/y"` (tolerating
+ *  `.toLowerCase()` chaining), AND `repo.startsWith("django/")` /
+ *  `repo.includes("django/db")` evasions. The slug requires an `org/` prefix
+ *  (a `/` with a leading token) so a legit `repo === ""` empty-check or a
+ *  `path.includes("/")` separator check never trips it. */
+const REPO_EQUALITY_RE =
+  /\b(repo|instanceId)\b[^\n=]{0,40}===\s*["'`][a-z0-9_-]+\/[a-z0-9_-]*["'`]/g
+const REPO_METHOD_RE =
+  /\b(repo|instanceId)\b\s*\.\s*(?:startsWith|includes)\s*\(\s*["'`][a-z0-9_-]+\/[a-z0-9_-]*/g
 
 // All runner-name knowledge is centralized in the SSOT module via `specRunnerKind`
 // — logic code classifies with that helper, never a runner-name literal. So all
@@ -117,6 +122,7 @@ const REPO_EQUALITY_RE = /\b(repo|instanceId)\b[^\n=]{0,40}===\s*["'][a-z0-9_-]+
 // `runtests.py` runner name (which lives only inside `specRunnerKind`).
 const FORBIDDEN: ReadonlyArray<Forbidden> = [
   { label: 'repo-name equality branch (repo/instanceId === "x/y")', re: REPO_EQUALITY_RE },
+  { label: 'repo-name method branch (repo.startsWith/includes("x/…"))', re: REPO_METHOD_RE },
   { label: "\"test_sqlite\" / 'test_sqlite' literal", re: /["']test_sqlite["']/g },
   { label: "runtests.py runner-name literal (use specRunnerKind)", re: /runtests\.py/g },
 ]
@@ -196,16 +202,32 @@ describe("ratchet teeth — red-on-injection", () => {
     expect(hits.some((h) => h.line === 2 && h.label.startsWith("repo-name equality"))).toBe(true)
   })
 
-  test("scanner FIRES on all three smells (instanceId ===, test_sqlite, runtests.py)", () => {
+  test("scanner FIRES on all smells (instanceId ===, startsWith/includes evasion, test_sqlite, runtests.py)", () => {
     const fixture = [
       'if (instanceId === "django/django") {}',
+      'if (repo.startsWith("django/")) {}',
+      'if (repo.includes("flask/flask")) {}',
       'const s = "test_sqlite"',
       'if (runner.includes("runtests.py")) {}',
     ].join("\n")
     const hits = scanText(fixture, "<fixture>")
     expect(hits.some((h) => h.label.startsWith("repo-name equality"))).toBe(true)
+    // the .startsWith / .includes evasions are caught by the method-branch smell
+    expect(hits.filter((h) => h.label.startsWith("repo-name method")).length).toBe(2)
     expect(hits.some((h) => h.label.includes("test_sqlite"))).toBe(true)
     expect(hits.some((h) => h.label.includes("runtests.py"))).toBe(true)
+  })
+
+  test("scanner does NOT false-fire on empty-check / path-separator (no org/name slug)", () => {
+    // `repo === ""` (empty check) and `path.includes("/")` (separator) are legit —
+    // the slug requires an `org/` prefix with a leading token, so neither trips.
+    const fixture = [
+      'if (repo === "") return',
+      'if (path.includes("/")) {}',
+      'if (s.includes("tests/")) {}',
+    ].join("\n")
+    const hits = scanText(fixture, "<fixture>")
+    expect(hits.filter((h) => h.label.includes("repo-name")).length).toBe(0)
   })
 
   test("repo-equality scanner does NOT fire on the cha-multisite python-string array", () => {

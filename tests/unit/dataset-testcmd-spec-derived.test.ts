@@ -14,7 +14,11 @@
  */
 import { describe, expect, test } from "bun:test"
 import { synthesizeTestCmd } from "@/runner/batch/corpus/dataset"
-import { specRunnerKind, specTestCmd } from "@/runner/batch/corpus/repo-version-specs"
+import {
+  hasRepoVersionSpec,
+  specRunnerKind,
+  specTestCmd,
+} from "@/runner/batch/corpus/repo-version-specs"
 
 const f2p = (names: readonly string[]) => JSON.stringify(names)
 
@@ -126,6 +130,10 @@ describe("synthesizeTestCmd derives the runner from the SWE-bench spec SSOT", ()
       ["pydata/xarray", "2023.07"],
       ["mwaskom/seaborn", "0.13"],
     ] as const) {
+      // vacuous-proof: assert each is a REAL spec entry, else specRunnerKind would
+      // return "pytest" for an unknown/typo'd version and the check would pass for
+      // the wrong reason.
+      expect(hasRepoVersionSpec(repo, version)).toBe(true)
       expect(specRunnerKind(repo, version)).toBe("pytest")
     }
     // unknown (repo,version) defaults to the pytest oracle, never a broken runner
