@@ -109,6 +109,23 @@ export const specPreInstall = (repo: string, version: string | undefined): reado
 /** Whether the spec knows this (repo, version). */
 export const hasRepoVersionSpec = (repo: string, version: string | undefined): boolean =>
   version !== undefined && REPO_VERSION_SPECS[repo]?.[version] !== undefined
+
+/** Classify the in-loop test runner for (repo, version). "runtests" repos (django)
+ *  genuinely CANNOT run under plain pytest — their tests need the project test
+ *  harness + settings (the engage=0 RCA: pytest collection dies on
+ *  ImproperlyConfigured), so the oracle invokes their spec runner. Everything
+ *  else is pytest-compatible and uses the uniform pytest oracle (the spec runners
+ *  for those — pytest / tox-wrapping-pytest / sympy bin-test — are all
+ *  pytest-collectable in-loop; their native wrappers like tox aren't on the uv
+ *  env anyway). Derived from the spec runner string: this is the ONE place
+ *  runner-name knowledge lives, so no logic file needs a per-framework literal. */
+export const specRunnerKind = (
+  repo: string,
+  version: string | undefined,
+): "runtests" | "pytest" => {
+  const t = specTestCmd(repo, version)
+  return t !== undefined && t.includes("runtests.py") ? "runtests" : "pytest"
+}
 `
 
 writeFileSync(OUT, header + body + footer)

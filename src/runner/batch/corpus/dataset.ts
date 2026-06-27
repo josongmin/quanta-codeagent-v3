@@ -339,22 +339,23 @@ const djangoRuntestsLabel = (name: string): string => {
 }
 
 /** Synthesize the per-instance test command from FAIL_TO_PASS. The RUNNER is
- *  derived from the SWE-bench spec SSOT (`specTestCmd`) — version-correct, no
- *  per-repo branch. Directive FORMATTING is chosen by the RUNNER SHAPE, not the
- *  repo name: a `runtests.py` runner gets django dotted-module labels; anything
- *  else gets the pytest node-id/`-k` path. The FAIL_TO_PASS names are the
- *  grading answer key (existing oracle behavior) and are appended here. */
+ *  derived from the SWE-bench spec SSOT. The RUNNER KIND comes from
+ *  `specRunnerKind` (the ONE place runner-name knowledge lives) — no per-repo or
+ *  per-runner-name literal here: a "runtests" repo (django) gets its spec runner +
+ *  dotted-module labels; everything else uses the uniform pytest node-id/`-k`
+ *  path. The FAIL_TO_PASS names are the grading answer key (existing oracle
+ *  behavior) and are appended here. */
 export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   const names = decodeTestNameList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
   const repo = typeof raw.repo === "string" ? raw.repo : ""
   const version = typeof raw.version === "string" ? raw.version : undefined
-  const runner = specTestCmd(repo, version)
-  if (runner?.includes("runtests.py")) {
+  if (specRunnerKind(repo, version) === "runtests") {
     // django-style: the spec runner already carries the correct, version-aware
     // verbosity/settings/parallel flags — use them VERBATIM, never re-add a
     // settings flag (1.9 has none, 1.10 does; the spec owns that difference).
     // Strip the leading `./` and invoke under `python`. FAIL_TO_PASS → labels.
+    const runner = specTestCmd(repo, version) ?? ""
     const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
       PYTEST_ADDOPTS: "",
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
