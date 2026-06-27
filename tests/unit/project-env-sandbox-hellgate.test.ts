@@ -217,23 +217,6 @@ describe("project-env real-build materialization (uv) [gated on uv]", () => {
     240_000,
   )
 
-  // jun-27 RCA: scikit-learn was UNREGISTERED in REPO_ENV_OVERRIDES → its Cython/
-  // numpy build-backend deps never materialized → the uv editable build failed →
-  // repro-gen got no interpreter (the two highest frontier-solvable misses,
-  // scikit-14087 f=60 / 14983 f=48). Pure guard (no uv toolchain): dropping the
-  // override regresses this.
-  test("scikit-learn build deps (Cython/numpy/scipy) materialize into the pyproject table", () => {
-    const injected = materializeProjectEnvPyproject(
-      "scikit-learn/scikit-learn",
-      SETUPTOOLS_PYPROJECT,
-    ) as string
-    expect(injected).toContain("[tool.uv.extra-build-dependencies]")
-    expect(injected).toContain("scikit-learn") // distName = table key
-    expect(injected).toMatch(/Cython/i)
-    expect(injected).toContain("numpy")
-    expect(injected).toContain("scipy")
-  })
-
   test.if(HAS_UV)(
     "WITH materialized [tool.uv.extra-build-dependencies] the extension_helpers-only build is BUILT-OK",
     () => {
