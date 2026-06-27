@@ -273,10 +273,15 @@ function showSide(s){
     return `<div class="attr"><div class="k">${esc(k)}</div>`+
       `<div class="v${f.json?" json":""}">${esc(f.text)}</div></div>`;
   }).join("");
+  const errLine = (s.status==="error" && s.statusMessage)
+    ? `<div class="attr"><div class="k" style="color:var(--err)">error message</div>`+
+      `<div class="v" style="border-color:var(--err);color:var(--err)">${esc(s.statusMessage)}</div></div>`
+    : "";
   document.getElementById("side").innerHTML =
     `<h2>${esc(s.name)}</h2>`+
     `<div class="meta">${s.durationMs??"?"}ms · ${esc(s.kind)} · `+
     `<span class="pill ${esc(s.status)}">${esc(s.status)}</span></div>`+
+    errLine+
     (blocks || `<div class="empty">no attributes</div>`);
 }
 document.getElementById("auto").onclick = (e)=>{ auto=!auto; e.target.classList.toggle("on",auto); e.target.textContent = auto?"● live":"○ paused"; };

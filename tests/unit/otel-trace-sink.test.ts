@@ -117,7 +117,10 @@ describe("otel-trace-sink parses the exporter's exact OTLP/JSON shape", () => {
       (calls.find((c) => c.path === "/v1/traces")?.body ?? {}) as never,
     )
     expect(parsed[0]?.status).toBe("error")
-    expect(formatSpanLine(parsed[0] as never)).toContain("✗")
+    expect(parsed[0]?.statusMessage).toBe("boom")
+    const line = formatSpanLine(parsed[0] as never)
+    expect(line).toContain("✗")
+    expect(line).toContain("boom") // the message is inline, not just the mark
   })
 
   test("a real exported metric round-trips: name + value + attrs", async () => {
@@ -193,5 +196,43 @@ describe("otel-trace-sink parses the exporter's exact OTLP/JSON shape", () => {
     expect((s?.endNano ?? 0) > (s?.startNano ?? 0)).toBe(true)
     expect(s?.durationMs).toBe(400)
     expect(s?.attrs["gen_ai.response.model"]).toBe("gpt-5.5")
+  })
+
+  // jun-27: error spans carried `status: error` but DROPPED the message — the
+  // operator saw THAT a tool call failed, never WHAT (ENOENT? timeout? 429?),
+  // forcing an SSH into the box to diagnose. The receiver must surface the
+  // exported `status.message` so the live UI / span feed alone is diagnosable.
+  test("parseResourceSpansFull surfaces the error status MESSAGE (WHAT failed, not just that it did)", async () => {
+    const { fetch, calls } = makeFakeFetch()
+    const exporter = otelHttpExporter({
+      endpoint: ENDPOINT,
+      fetch,
+      flushIntervalMs: 0,
+      ...noTimer,
+    })
+    const tracer = buildExportingTracer(exporter, { now: () => 1_000 })
+    const span = tracer.startSpan("handle_tool_call")
+    span.setStatus("error", "ENOENT: reproduce_issue.py not found")
+    span.end()
+    await exporter.flush()
+
+    const full = parseResourceSpansFull(
+      (calls.find((c) => c.path === "/v1/traces")?.body ?? {}) as never,
+    )
+    expect(full[0]?.status).toBe("error")
+    expect(full[0]?.statusMessage).toBe("ENOENT: reproduce_issue.py not found")
+    // an OK span carries no status message (only meaningful for errors)
+    const { calls: okCalls } = (() => {
+      const f = makeFakeFetch()
+      const ex = otelHttpExporter({ endpoint: ENDPOINT, fetch: f.fetch, flushIntervalMs: 0, ...noTimer })
+      const t = buildExportingTracer(ex, { now: () => 1_000 })
+      const sp = t.startSpan("ok_span")
+      sp.setStatus("ok")
+      sp.end()
+      void ex.flush()
+      return f
+    })()
+    const okFull = parseResourceSpansFull((okCalls.find((c) => c.path === "/v1/traces")?.body ?? {}) as never)
+    expect(okFull[0]?.statusMessage).toBeUndefined()
   })
 })

@@ -157,6 +157,8 @@ export interface ParsedSpan {
   readonly durationMs: number | undefined
   readonly kind: string
   readonly status: string
+  /** Error status message (only present when status === "error"). */
+  readonly statusMessage?: string
   readonly attrs: Record<string, string | number | boolean>
 }
 
@@ -175,6 +177,9 @@ export const parseResourceSpans = (body: OtlpResourceSpans): ParsedSpan[] => {
           durationMs: durMs(span.startTimeUnixNano, span.endTimeUnixNano),
           kind: kindLabel(span.kind),
           status: statusLabel(span.status?.code),
+          ...(span.status?.message !== undefined && span.status.message !== ""
+            ? { statusMessage: span.status.message }
+            : {}),
           attrs: attrsOf(span.attributes),
         })
       }
@@ -197,6 +202,10 @@ export interface FullSpan {
   readonly endNano: number
   readonly durationMs: number | undefined
   readonly status: string
+  /** Error status message (only present when status === "error"). Surfaced so the
+   *  operator sees WHAT failed (ENOENT / timeout / 429) from the span feed alone,
+   *  instead of an unhelpful bare `status: error`. */
+  readonly statusMessage?: string
   readonly attrs: Record<string, string | number | boolean>
 }
 
@@ -218,6 +227,9 @@ export const parseResourceSpansFull = (body: OtlpResourceSpans): FullSpan[] => {
           endNano: Number(span.endTimeUnixNano ?? 0),
           durationMs: durMs(span.startTimeUnixNano, span.endTimeUnixNano),
           status: statusLabel(span.status?.code),
+          ...(span.status?.message !== undefined && span.status.message !== ""
+            ? { statusMessage: span.status.message }
+            : {}),
           attrs: attrsOf(span.attributes),
         })
       }
@@ -260,8 +272,12 @@ export const formatSpanLine = (s: ParsedSpan): string => {
     if (k in s.attrs) keyParts.push(`${k}=${s.attrs[k]}`)
   }
   const statusMark = s.status === "error" ? " ✗" : s.status === "ok" ? "" : ` [${s.status}]`
+  // Show WHAT failed inline on error rows so the terminal feed is diagnosable
+  // without opening the span detail (the bare ✗ forced an SSH to find out).
+  const errMsg =
+    s.status === "error" && s.statusMessage !== undefined ? ` — ${s.statusMessage}` : ""
   const tail = keyParts.length > 0 ? ` | ${keyParts.join(" ")}` : ""
-  return `${s.name.padEnd(22)} | ${dur.padStart(8)}${statusMark}${tail}`
+  return `${s.name.padEnd(22)} | ${dur.padStart(8)}${statusMark}${errMsg}${tail}`
 }
 
 export const formatMetricLine = (m: ParsedMetric): string => {
