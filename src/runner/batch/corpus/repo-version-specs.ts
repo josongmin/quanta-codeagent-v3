@@ -16,7 +16,7 @@
  * grading oracle -- NEVER append them on an agent path. Multi-command test_cmd/
  * install (go/js/rust repos) are joined with " && " at generation time.
  *
- * Regenerate: see docs/plans (uvx --with swebench dump of MAP_REPO_VERSION_TO_SPECS).
+ * DO NOT EDIT BY HAND. Regenerate: `bun tools/dev/regen-repo-version-specs.ts`
  */
 
 export interface RepoVersionSpec {
