@@ -25,6 +25,7 @@
  *   while keeping both the opening context and the tail instructions. Each
  *   truncation leaves a marker `… <N bytes truncated>`.
  */
+import { hasPytestFailureMarkers, pinPytestAssertion } from "./pytest-assertion-pin"
 import { combinedFailureTailOf, type BuildRepairContextArgs } from "./types"
 
 const DEFAULT_MAX = 12000
@@ -167,7 +168,13 @@ export const buildRepairContext = (args: BuildRepairContextArgs): string => {
     const otherProblem = problem.length
     const overhead = compose("", "", "").length + otherDiff + otherProblem
     const room = Math.max(floors.failTail, maxBytes - overhead)
-    failTail = trimTail(failTail, room)
+    // jun-28 (audit #2): for pytest output, PIN the FAILURES/assertion region at
+    // the front so it survives the budget — `trimTail` keeps the END (warnings/
+    // summary) and routinely drops the `E   assert …` the agent must satisfy.
+    // Non-pytest blobs keep the legacy byte-tail (byte-identical no-op).
+    failTail = hasPytestFailureMarkers(failTail)
+      ? pinPytestAssertion(failTail, room)
+      : trimTail(failTail, room)
   }
   out = compose(problem, diff, failTail)
   if (out.length <= maxBytes) return out
