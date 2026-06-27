@@ -401,6 +401,15 @@ export interface BenchPosture {
    *  dynamic message can be vetoed while a skeleton-consistent (correct) dynamic fix
    *  still abstains. Default-OFF ⇒ every template literal abstains (byte-identical). */
   readonly dynamicMessageMatcher: boolean
+  /** jun-26 repair-loop oracle-hardening: when on AND the PUBLIC problem statement
+   *  declares a concrete expected output, the primary-rail repair validator's typed
+   *  predicate ALSO requires that declared expected to appear in the observed output
+   *  (`buildSpecGateEvaluatePredicate`). An exit-0 repair round whose output lacks
+   *  the declared expected then reads as a FALSE GREEN (`isFalseGreen`), so the loop
+   *  does NOT stop at round 0 (runs rounds 1..N). Needs `primaryRail`. Answer-key
+   *  guarded (public-issue-text provenance only). Default-OFF ⇒ the repair predicate
+   *  stays observe-only / test_exit_zero (byte-identical). */
+  readonly repairSpecGate: boolean
   /** T3 (jun-24): forward-localize on the deeper_localize adaptive route — trace
    *  the prior candidate's edited symbols to their consumer call-sites and widen
    *  the next pass's owner evidence. Default-OFF ⇒ deeper_localize stays a no-op. */
@@ -610,6 +619,7 @@ export const benchPostureFromState = (
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
   const specFidelityInvariant = readKnobValue(state, "spec-fidelity-invariant", isTrue) === true
   const dynamicMessageMatcher = readKnobValue(state, "dynamic-message-matcher", isTrue) === true
+  const repairSpecGate = readKnobValue(state, "repair-spec-gate", isTrue) === true
   const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
   const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
@@ -665,6 +675,7 @@ export const benchPostureFromState = (
     specFidelitySteer,
     specFidelityInvariant,
     dynamicMessageMatcher,
+    repairSpecGate,
     forwardLocalize,
     pairedControl,
     chaMultisiteSteer,

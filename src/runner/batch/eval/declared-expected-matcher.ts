@@ -28,6 +28,7 @@
  * Pure + deterministic: no I/O, no LLM, no clock/random.
  */
 
+import type { ExecObservation, PredicateResult, SuccessPredicate } from "@/agent/closure"
 import {
   type IssueDeclaredExpected,
   PUBLIC_ISSUE_TEXT_PROVENANCE,
@@ -221,4 +222,104 @@ export const buildPublicDeclaredExpectedPort = (
   if (expected.value.trim() === "") return undefined
   return (c: Candidate) =>
     Promise.resolve(matchCandidateAgainstDeclaredExpected(c.patch, expected, options))
+}
+
+/** Abstain verdict (the matcher cannot confidently judge the observation) ⇒ the
+ *  repair finish gate falls back to the legacy exit-code decision (fail-open). */
+const ABSTAIN: PredicateResult = { evaluable: false, matched: false }
+
+/**
+ * Repair-loop spec gate (jun-26 oracle-hardening): does the OBSERVED command
+ * output satisfy the PUBLIC issue-declared expected output?
+ *
+ * This is the OBSERVED-side sibling of {@link matchCandidateAgainstDeclaredExpected}
+ * (which judges a candidate PATCH). The repair validator re-runs the rail and
+ * captures stdout/stderr; this turns the public declared-expected literal into an
+ * `evaluable:true` predicate verdict over that capture, so a green run whose
+ * output does NOT surface the declared expected reads as a FALSE GREEN (
+ * `matched:false`) and the repair loop does not stop at round 0.
+ *
+ * PRECISION OVER RECALL — the only hard verdict is for a concrete, spec-bearing
+ * literal that the runner would print VERBATIM when the issue is actually fixed:
+ *   - `matched:true`  — the declared literal appears (whitespace-collapsed) in
+ *                       stdout OR stderr (runners write to either).
+ *   - `matched:false` — a spec-bearing concrete literal is declared and is ABSENT
+ *                       from the combined output (the over-narrow false green).
+ *   - ABSTAIN (evaluable:false) — fail-open, never penalizes:
+ *       • `stdout-empty` (absence of a print is invisible in a pytest report),
+ *       • a non-spec-bearing / bare-identifier / empty declared value (would
+ *         false-RED on incidental output tokens),
+ *       • any non-public-provenance invariant (ANSWER-KEY GUARD — symmetric to
+ *         {@link buildPublicDeclaredExpectedPort}; a gold/test_patch-derived value
+ *         can NEVER acquire gate authority).
+ *
+ * Pure + deterministic: no I/O, no LLM, no clock/random.
+ */
+export const evaluateDeclaredExpectedAgainstObserved = (
+  expected: IssueDeclaredExpected | undefined,
+  observed: ExecObservation,
+): PredicateResult => {
+  if (expected === undefined) return ABSTAIN
+  // ANSWER-KEY GUARD (red-on-injection): only a public-issue-text-derived
+  // invariant may gate. Anything else abstains (no authority).
+  if (expected.provenance !== PUBLIC_ISSUE_TEXT_PROVENANCE) return ABSTAIN
+  // The empty-output declaration is not observable as a competing literal in a
+  // pytest run's output; abstain exactly like the patch-side matcher.
+  if (expected.kind === "stdout-empty") return ABSTAIN
+  const v = normalize(expected.value)
+  // A non-spec-bearing literal (bare identifier, too short, empty) could appear
+  // incidentally in runner output ⇒ fail-open rather than hard-gate on noise.
+  if (v === "" || !isSpecBearing(v)) return ABSTAIN
+  const combined = normalize(`${observed.stdout}\n${observed.stderr}`)
+  return combined.includes(v)
+    ? { evaluable: true, matched: true }
+    : {
+        evaluable: true,
+        matched: false,
+        mismatchReason: `issue-declared expected output not found in observed output: ${v}`,
+      }
+}
+
+/** A predicate evaluator (the shape the repair validator injects). */
+export type EvaluatePredicateFn = (
+  observed: ExecObservation,
+  predicate: SuccessPredicate,
+) => PredicateResult
+
+/**
+ * Repair spec-gate (jun-26 oracle-hardening) — wrap a base predicate evaluator so
+ * the repair rail's success check ALSO requires the PUBLIC issue-declared expected
+ * output to be present in the observed output.
+ *
+ * Used by the bench driver ONLY when `QUANTA_BENCH_REPAIR_SPEC_GATE` is on AND the
+ * public problem statement declares a concrete expected output. The returned
+ * evaluator is a drop-in for `ValidateArgs.evaluatePredicate`.
+ *
+ * COMPOSITION (the declared-expected obligation DOMINATES when it can be judged):
+ *   - declared `matched:false` (evaluable) ⇒ `{evaluable:true, matched:false}` —
+ *     this is the over-narrow FALSE GREEN: an exit-0 round whose output lacks the
+ *     declared expected. `isFalseGreen` (repair/index) then keeps `clearedAsValidated`
+ *     false, so the loop does NOT stop at round 0 and runs repair rounds 1..N.
+ *   - declared `matched:true` (evaluable) ⇒ clear ON THE SPEC, UNLESS the base
+ *     predicate already reports an evaluable mismatch (never overturn an existing
+ *     false-green into a clear).
+ *   - declared ABSTAIN ⇒ fall back to the base predicate result UNCHANGED
+ *     (byte-identical to legacy). `expected === undefined` ⇒ identity wrapper.
+ *
+ * NO-LEAK: `expected` is the public-issue-text-provenance invariant only; the
+ * observed-side matcher re-asserts that provenance (answer-key guard).
+ */
+export const buildSpecGateEvaluatePredicate = (
+  base: EvaluatePredicateFn,
+  expected: IssueDeclaredExpected | undefined,
+): EvaluatePredicateFn => {
+  if (expected === undefined) return base
+  return (observed, predicate) => {
+    const baseResult = base(observed, predicate)
+    // Never weaken an existing evaluable mismatch the base already found.
+    if (baseResult.evaluable && !baseResult.matched) return baseResult
+    const declaredVerdict = evaluateDeclaredExpectedAgainstObserved(expected, observed)
+    if (!declaredVerdict.evaluable) return baseResult
+    return declaredVerdict
+  }
 }

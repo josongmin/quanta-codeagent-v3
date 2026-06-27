@@ -40,6 +40,7 @@ import {
   patchBudgetSchema,
   patchBudgetStrictSchema,
   regressionMaxTestsSchema,
+  repairSpecGateSchema,
   specFidelityInvariantSchema,
   verifySelectConcurrencySchema,
   verifySelectLlmRiskGateSchema,
@@ -127,6 +128,7 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   specFidelitySteerSchema, // QUANTA_BENCH_SPEC_FIDELITY_STEER
   specFidelityInvariantSchema, // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT
   dynamicMessageMatcherSchema, // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER
+  repairSpecGateSchema, // QUANTA_BENCH_REPAIR_SPEC_GATE
   forwardLocalizeSchema, // QUANTA_BENCH_FORWARD_LOCALIZE
   chaMultisiteSteerSchema, // QUANTA_BENCH_CHA_MULTISITE_STEER
   chaMultisiteGeneralSchema, // QUANTA_BENCH_CHA_MULTISITE_GENERAL

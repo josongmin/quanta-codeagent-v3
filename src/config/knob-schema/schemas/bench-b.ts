@@ -82,6 +82,27 @@ export const dynamicMessageMatcherSchema: KnobSchema<boolean> = {
   parse: parseDynamicMessageMatcher,
 }
 
+/* ── repair-spec-gate (QUANTA_BENCH_REPAIR_SPEC_GATE) ──────────────────────── */
+const parseRepairSpecGate = (raw: string | undefined): true | undefined => {
+  if (raw === undefined) return undefined
+  return ENABLING_TRUTHY.has(raw.trim().toLowerCase()) ? true : undefined
+}
+export const repairSpecGateSchema: KnobSchema<boolean> = {
+  id: "repair-spec-gate",
+  envKey: "QUANTA_BENCH_REPAIR_SPEC_GATE",
+  kind: "bool",
+  category: "tool",
+  default: false,
+  describe:
+    "Bench (jun-26 repair-loop oracle-hardening): repair-rail spec gate. When the PUBLIC problem statement declares a concrete expected output, the primary-rail repair validator's predicate ALSO requires that declared expected to appear in the observed output — so an exit-0 round whose output lacks it reads as a FALSE GREEN and the repair loop does not stop at round 0 (runs rounds 1..N). Answer-key guarded (public-issue-text provenance only). Layers on QUANTA_BENCH_PRIMARY_RAIL. Default-OFF ⇒ the repair predicate stays observe-only / test_exit_zero (byte-identical).",
+  knobDescribe:
+    "repair-loop spec gate: require the public issue-declared expected output in the repair rail's observed output so an over-narrow exit-0 false green keeps the loop iterating (needs primary-rail; fires only when the issue declares an exact expected output)",
+  readSite: "runner/batch/eval/knobs-bench.ts",
+  surfaces: BENCH,
+  source: "jun-26 repair-loop false-green RCA (round-0 over-narrow patch passes weak repro)",
+  parse: parseRepairSpecGate,
+}
+
 /* ── forward-localize (QUANTA_BENCH_FORWARD_LOCALIZE) ──────────────────────── */
 const parseForwardLocalize = (raw: string | undefined): true | undefined => {
   if (raw === undefined) return undefined

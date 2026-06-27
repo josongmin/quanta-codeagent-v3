@@ -4,7 +4,10 @@ import { type AgentConfig, type AgentOutcome, runAgent, wireOptionalAgentPorts }
 import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { extractIssueHint } from "@/agent/issue-hint"
-import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
+import {
+  extractIssueDeclaredExpected,
+  type IssueDeclaredExpected,
+} from "@/agent/verification-plan"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { LLMPort, Message } from "@/llm"
@@ -16,7 +19,10 @@ import {
   type DoneTimeCaptureClass,
   isCaptureFailure,
 } from "@/runner/batch/eval/capture-correctness"
-import { buildPublicDeclaredExpectedPort } from "@/runner/batch/eval/declared-expected-matcher"
+import {
+  buildPublicDeclaredExpectedPort,
+  buildSpecGateEvaluatePredicate,
+} from "@/runner/batch/eval/declared-expected-matcher"
 import {
   adaptiveNextPassOwners,
   applyBenchKnobs,
@@ -614,6 +620,10 @@ const runRepairPhase = async (
   siblingOwners: readonly string[],
   reproSources: readonly string[],
   verificationTarget: VerificationTargetFact | undefined,
+  /** jun-26 repair spec gate: PUBLIC issue-declared expected output (from the
+   *  closure session). Only consumed when `QUANTA_BENCH_REPAIR_SPEC_GATE` is on AND
+   *  a `primaryRailStep` is set; absent / knob-off ⇒ never read (byte-identical). */
+  issueDeclaredExpected: IssueDeclaredExpected | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
 ): Promise<Phase> => {
@@ -1555,6 +1565,7 @@ const runAppMainPhase = async (args: {
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
       verificationTargetFromPlan(args.prepared.verificationPlan),
+      args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
     )

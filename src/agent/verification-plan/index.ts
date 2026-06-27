@@ -8,6 +8,7 @@ export {
   extractIssueDeclaredExpected,
   type IssueDeclaredExpected,
   type IssueDeclaredKind,
+  PUBLIC_ISSUE_TEXT_PROVENANCE,
 } from "./extract-issue-declared-expected"
 export {
   extractIssueRepro,
