@@ -22,6 +22,7 @@
  * validator failures are normal and never throw.
  */
 
+import { isStrongOracleFalseGreen } from "./strong-oracle"
 import type {
   BuildRepairContextArgs,
   RepairCandidateOutcome,
@@ -217,6 +218,14 @@ const shouldFinishAfterRound0 = (cleared: boolean, maxRounds: number): boolean =
  *  than re-deriving the policy. */
 const clearedAsValidated = (args: RunRepairRoundsArgs, v: ValidatorResult): boolean => {
   if (!v.ok) return false
+  // jun-28 STRONG-ORACLE (default-OFF): a CONJUNCTIVE strengthening that can ONLY
+  // WITHHOLD a clear the gates below would grant (monotone, precision-raising). An
+  // exit-0 round whose self-repro is green but ANY available strong signal is RED
+  // (declared-expected mismatch OR a non-resolved repro-vote consensus) is a FALSE
+  // GREEN ⇒ does not clear ⇒ the loop iterates toward a general fix. Each conjunct
+  // fails OPEN on absence, so a correct patch with no contradicting strong signal
+  // is never blocked. Knob ABSENT/false ⇒ this branch is skipped ⇒ byte-identical.
+  if (args.config.strongOracle === true && isStrongOracleFalseGreen(v)) return false
   if (args.primaryRailStep === undefined) return true
   // A false-green round (rail predicate evaluable AND matched===false) leaves the
   // typed rail unproven, so the lone exit-code green must NOT substitute for the

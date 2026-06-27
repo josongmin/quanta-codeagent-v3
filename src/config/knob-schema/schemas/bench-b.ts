@@ -103,6 +103,28 @@ export const repairSpecGateSchema: KnobSchema<boolean> = {
   parse: parseRepairSpecGate,
 }
 
+/* ── repair-strong-oracle (QUANTA_BENCH_REPAIR_STRONG_ORACLE) ──────────────── */
+const parseRepairStrongOracle = (raw: string | undefined): true | undefined => {
+  if (raw === undefined) return undefined
+  return ENABLING_TRUTHY.has(raw.trim().toLowerCase()) ? true : undefined
+}
+export const repairStrongOracleSchema: KnobSchema<boolean> = {
+  id: "repair-strong-oracle",
+  envKey: "QUANTA_BENCH_REPAIR_STRONG_ORACLE",
+  kind: "bool",
+  category: "tool",
+  default: false,
+  describe:
+    "Bench (jun-28 repair-loop SOTA++ oracle-hardening): STRONG-ORACLE clear gate. The repair loop normally clears the moment the agent's OWN self-repro goes GREEN — too lenient: an over-narrow patch that handles only the issue's happy-path example passes that weak repro (false green at round 0) while the general FAIL_TO_PASS stays red. When ON, a round clears ONLY when its exit-0 green ALSO survives a CONJUNCTION of the AVAILABLE strong, no-leak signals: (1) base-discrimination (already required), (2) declared-expected match (lever #2, the PUBLIC issue-stated expected output — needs repair-spec-gate/primary-rail to surface the predicate), (3) repro-vote K-of-N RESOLVED consensus (needs repro-vote). Each conjunct FAILS OPEN when its signal is unavailable, so a correct patch is never blocked (issue declares nothing + single repro ⇒ behaves as today). A green round contradicted by any available strong signal is a FALSE GREEN ⇒ the loop iterates rounds 1..N toward a general fix. RAISES precision of the clear gate (fewer false greens) at the cost of MORE repair rounds — opt-in, A/B before promotion. Layers on closure-repair + (repair-spec-gate and/or repro-vote). Answer-key guarded (PUBLIC inputs only — issue text / agent-side repros). Default-OFF ⇒ the legacy single-green clear (byte-identical).",
+  knobDescribe:
+    "repair-loop STRONG-ORACLE clear gate: clear a round ONLY when its self-repro green ALSO survives a conjunction of the available strong no-leak signals (declared-expected match + repro-vote RESOLVED consensus); a green contradicted by any available signal is a false green so the loop keeps iterating toward a general fix. Each conjunct fails-open on absence (never blocks a correct patch). Needs closure-repair + repair-spec-gate and/or repro-vote; raises precision at the cost of more rounds; default-OFF ⇒ legacy single-green clear (byte-identical)",
+  readSite: "runner/batch/eval/knobs-bench.ts",
+  surfaces: BENCH,
+  source:
+    "jun-28 repair-loop oracle adequacy RCA (over-narrow round-0 patch passes weak self-repro; closure-repair ties baseline)",
+  parse: parseRepairStrongOracle,
+}
+
 /* ── forward-localize (QUANTA_BENCH_FORWARD_LOCALIZE) ──────────────────────── */
 const parseForwardLocalize = (raw: string | undefined): true | undefined => {
   if (raw === undefined) return undefined

@@ -667,6 +667,19 @@ const runRepairPhase = async (
     reproSources,
     repair.validate ?? defaultValidate,
   )
+  // jun-26 repair spec gate / jun-28 strong-oracle (mirror of the runner-core
+  // driver): when the issue declares a concrete PUBLIC expected output AND the
+  // spec-gate OR strong-oracle knob is on, wrap the typed-predicate evaluator so an
+  // exit-0 repair round whose output LACKS the declared expected reads as a
+  // predicate `matched:false` (a FALSE GREEN that `isFalseGreen` / the strong-oracle
+  // conjunction catch). NO-LEAK: `issueDeclaredExpected` is public-issue-text only.
+  // Both knobs OFF ⇒ the raw evaluator (byte-identical); `undefined` expected ⇒
+  // `buildSpecGateEvaluatePredicate` returns the identity wrapper.
+  const repairEvaluatePredicate =
+    (repairPosture.repairSpecGate || repairPosture.repairStrongOracle) &&
+    issueDeclaredExpected !== undefined
+      ? buildSpecGateEvaluatePredicate(evaluateSuccessPredicate, issueDeclaredExpected)
+      : evaluateSuccessPredicate
   // jun-28 repair-loop BREADTH: when B>1, fan a repair round out to B forked
   // candidates and continue from the one the SAME validator turns green (else the
   // best validator signal). B=1 (default) ⇒ `runCandidates` is undefined ⇒ the
@@ -702,7 +715,7 @@ const runRepairPhase = async (
             exec,
             timeoutMs: deps.timeoutMs,
             readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-            evaluatePredicate: evaluateSuccessPredicate,
+            evaluatePredicate: repairEvaluatePredicate,
             ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
           },
           sandboxPorts: { forkSandbox, cleanupSandbox },
@@ -716,7 +729,11 @@ const runRepairPhase = async (
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
       const out = await runRepairRounds({
-        config: buildRepairRoundsConfig(repair.maxRounds, repairBreadth),
+        config: buildRepairRoundsConfig(
+          repair.maxRounds,
+          repairBreadth,
+          repairPosture.repairStrongOracle,
+        ),
         problem: instance.problemStatement,
         runOnce: (seedMsg) =>
           runAgentOnce(
@@ -762,7 +779,7 @@ const runRepairPhase = async (
         // inert. Threading the same Bun.file reader makes the rail evaluable.
         readFile: async (path: string): Promise<string> => Bun.file(path).text(),
         timeoutMs: deps.timeoutMs,
-        evaluatePredicate: evaluateSuccessPredicate,
+        evaluatePredicate: repairEvaluatePredicate,
         ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
         // jun-28 BREADTH: present only when B>1 (else undefined ⇒ the orchestrator
         // takes the legacy single path, byte-identical).

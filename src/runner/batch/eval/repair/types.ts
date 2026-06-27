@@ -40,6 +40,16 @@ export interface RepairConfig {
    *  single-candidate `runOnce`+`validate` path (no fork, no extra validate) ⇒
    *  byte-identical. Honest cost ≈ ×breadth patch-gen per round (opt-in). */
   breadth?: number
+  /** jun-28 STRONG-ORACLE clear gate (knob QUANTA_BENCH_REPAIR_STRONG_ORACLE).
+   *  When `true`, a round clears ONLY when its exit-code green ALSO survives a
+   *  CONJUNCTION of the AVAILABLE strong, no-leak signals (declared-expected match
+   *  + repro-vote consensus); a green round contradicted by any available strong
+   *  signal is treated as a FALSE GREEN and the loop iterates rounds 1..N toward a
+   *  general fix. Each conjunct fails OPEN on absence (a correct patch is never
+   *  blocked). ABSENT / `false` ⇒ the legacy single-green clear (byte-identical).
+   *  RAISES precision of the clear gate (fewer false-greens) at the cost of more
+   *  repair rounds — opt-in; A/B before promotion. See `./strong-oracle`. */
+  strongOracle?: boolean
 }
 
 /**
@@ -80,7 +90,23 @@ export interface ValidatorResult {
   /** Repro-marker outcome recorded from stdout classification. Diagnostic only:
    *  used by observe-only repair instruments such as false-RED measurement. */
   reproOutcome?: RepairReproOutcome
+  /** jun-28 STRONG-ORACLE: the K-of-N repro-vote's RESOLVED-side consensus verdict
+   *  over the independently-phrased reproducing set, when the vote ran. Set ONLY by
+   *  the repro-vote validator (`makeReproVoteValidate`); ABSENT for single-repro /
+   *  primary-rail rounds. A no-leak signal (agent-side repros only). Consumed by the
+   *  strong-oracle clear gate: an exit-0 round whose consensus is NOT `resolved`
+   *  (a minority-green) is a false green. Absent ⇒ fail-open (never penalizes). */
+  consensus?: ReproConsensusVerdict
 }
+
+/** jun-28 STRONG-ORACLE: the RESOLVED-side verdict of the K-of-N repro-vote over
+ *  the reproducing set, re-declared here (NOT imported from `@/agent/repro-test`)
+ *  so the repair slice keeps its structural no-leak fence. Mirrors the closure
+ *  engine's `ReproResolvedVerdict`:
+ *    - `resolved`     — strict majority of decisive repros now pass on the patch.
+ *    - `reproduced`   — strict majority still reproduce the bug (patch insufficient).
+ *    - `inconclusive` — tie / all-noisy (no decisive consensus). */
+export type ReproConsensusVerdict = "resolved" | "reproduced" | "inconclusive"
 
 /** One repair round's bookkeeping (observability/golden, not the score). */
 export interface RoundResult {

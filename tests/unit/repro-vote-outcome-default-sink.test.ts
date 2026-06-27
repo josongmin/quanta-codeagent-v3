@@ -106,7 +106,9 @@ describe("makeReproVoteValidate — DEFAULT outcome sink (no injected recorder)"
       fallback: LOUD_FALLBACK,
     })(baseArgs())
 
-    expect(result).toEqual({ ok: true })
+    // jun-28 STRONG-ORACLE: the resolved vote carries the RESOLVED-side consensus
+    // verdict (no-leak agent-side signal the strong-oracle clear gate reads).
+    expect(result).toEqual({ ok: true, consensus: "resolved" })
     const drained = drainReproVoteOutcomes()
     expect(drained).toHaveLength(1)
     expect(drained[0]?.outcome).toBe("vote_resolved")

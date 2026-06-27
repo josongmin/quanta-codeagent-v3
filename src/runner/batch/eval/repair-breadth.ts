@@ -40,18 +40,22 @@ import type {
 } from "./repair/types"
 
 /**
- * Build the {@link RepairConfig} for a repair phase: `maxRounds` (when set) plus
+ * Build the {@link RepairConfig} for a repair phase: `maxRounds` (when set),
  * `breadth` (ONLY when > 1, so B=1 omits the key ⇒ the orchestrator's
- * `config.breadth ?? 1` byte-identical single-candidate path). Shared by BOTH
- * drivers so the breadth wiring is identical and the `runRepairRounds({` call
- * site stays compact.
+ * `config.breadth ?? 1` byte-identical single-candidate path), and the jun-28
+ * STRONG-ORACLE clear-gate flag (ONLY when on, so OFF omits the key ⇒ the
+ * orchestrator's `config.strongOracle === true` check is false ⇒ byte-identical
+ * legacy single-green clear). Shared by BOTH drivers so the repair config wiring
+ * is identical and the `runRepairRounds({` call site stays compact.
  */
 export const buildRepairRoundsConfig = (
   maxRounds: number | undefined,
   breadth: number,
+  strongOracle = false,
 ): RepairConfig => ({
   ...(maxRounds !== undefined ? { maxRounds } : {}),
   ...(breadth > 1 ? { breadth } : {}),
+  ...(strongOracle ? { strongOracle: true } : {}),
 })
 
 /** Sandbox-fork lifecycle ports (injected from `./sandbox` by the driver). */

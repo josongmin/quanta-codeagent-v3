@@ -153,7 +153,10 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
     expect(emitted).toHaveLength(1)
     expect(emitted[0]?.outcome).toBe("vote_resolved")
     expect(emitted[0]?.detail).toEqual({ resolved: 3, reproduced: 1, inconclusive: 0 })
-    expect(result).toEqual({ ok: true })
+    // jun-28 STRONG-ORACLE: a resolved vote carries the RESOLVED-side consensus
+    // verdict so the strong-oracle clear gate can require it (no-leak: agent-side
+    // repro vote only).
+    expect(result).toEqual({ ok: true, consensus: "resolved" })
   })
 
   it("reproduced majority ⇒ emits 'vote_unresolved' with the vote tally", async () => {
@@ -189,13 +192,14 @@ describe("makeReproVoteValidate — outcome MEASUREMENT seam", () => {
   })
 
   it("PAIRED CONTROL: with NO sink, every branch's result is byte-identical (no-op seam)", async () => {
-    // resolved
+    // resolved (carries the STRONG-ORACLE consensus verdict; no-op seam = the
+    // result shape is identical whether or not a sink was injected)
     const resolved = makeExec(["resolved", "resolved"])
     expect(
       await makeReproVoteValidate({ sources: ["a", "b"], ...resolved, fallback: LOUD_FALLBACK })(
         baseArgs(),
       ),
-    ).toEqual({ ok: true })
+    ).toEqual({ ok: true, consensus: "resolved" })
     // reproduced
     const reproduced = makeExec(["reproduced", "reproduced"])
     const rRepro = await makeReproVoteValidate({

@@ -289,7 +289,11 @@ const voteResolvedResult = (
   detail: ReproVoteOutcomeDetail,
 ): ValidatorResult => {
   record("vote_resolved", detail)
-  return { ok: true }
+  // jun-28 STRONG-ORACLE: carry the RESOLVED-side consensus verdict so the
+  // strong-oracle clear gate can require it (a `resolved` consensus is consistent
+  // with a CLEAR; the minority-green cases below are not). No-leak: this is the
+  // agent-side repro vote, never a hidden field.
+  return { ok: true, consensus: "resolved" }
 }
 
 const voteUnresolvedResult = (
@@ -313,6 +317,10 @@ const voteUnresolvedResult = (
     failTail:
       failureEvidence?.combinedTail ?? reproducedTail(samples, args.tailBytes ?? DEFAULT_TAIL),
     ...(failureEvidence !== undefined ? { failureEvidence } : {}),
+    // jun-28 STRONG-ORACLE: the majority still reproduces — record the consensus so
+    // a future strong-oracle round can read it (here ok:false already withholds the
+    // clear; the field keeps the verdict observable end-to-end).
+    consensus: "reproduced",
   }
 }
 
@@ -331,6 +339,10 @@ const voteInconclusiveResult = (
     ok: false,
     failTail: inconclusiveTail(samples, args.tailBytes ?? DEFAULT_TAIL),
     reproOutcome,
+    // jun-28 STRONG-ORACLE: tie / all-noisy ⇒ no decisive consensus. Recorded so a
+    // strong-oracle round treats a (hypothetical exit-0) inconclusive vote as a
+    // minority-green false green rather than clearing.
+    consensus: "inconclusive",
   }
 }
 

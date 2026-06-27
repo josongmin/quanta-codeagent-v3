@@ -176,7 +176,7 @@ describe("validate (non-leaking repair validator)", () => {
 // protecting test = the no-leak invariant becomes a build gate.
 describe("structural no-leak invariant (build gate)", () => {
   const ROOT = resolve(__dirname, "../../src/runner/batch/eval/repair")
-  const FILES = ["validator.ts", "context.ts", "index.ts"] as const
+  const FILES = ["validator.ts", "context.ts", "index.ts", "strong-oracle.ts"] as const
   // Forbidden dataset/grader tokens. These names MUST NOT appear in source
   // text — the validator/context/orchestrator must be structurally incapable
   // of touching them.
@@ -207,13 +207,22 @@ describe("structural no-leak invariant (build gate)", () => {
   const allowedImportsOf = (f: (typeof FILES)[number]): readonly string[] => {
     switch (f) {
       case "validator.ts":
-      case "index.ts":
         return ["./types", "./pytest-report"]
+      case "index.ts":
+        // ./strong-oracle is a PURE local repair helper (imports only ./types) —
+        // the jun-28 STRONG-ORACLE conjunction over the available no-leak signals.
+        // Keeps the structural fence (no @/agent, no gold) while letting the
+        // orchestrator strengthen its clear gate.
+        return ["./types", "./pytest-report", "./strong-oracle"]
       case "context.ts":
         // ./pytest-assertion-pin is a PURE local repair helper (imports nothing) —
         // pins the pytest assertion region in the repair seed. Keeps the no-leak
         // fence (no @/agent, no gold) while letting context.ts use it.
         return ["./types", "./pytest-assertion-pin"]
+      case "strong-oracle.ts":
+        // STRONG-ORACLE reads ONLY fields already on ValidatorResult; its sole
+        // import is the local type module — no @/agent, no gold/hidden fields.
+        return ["./types"]
     }
   }
   const assertImportsOnlyAllowed = (src: string, f: (typeof FILES)[number]): void => {

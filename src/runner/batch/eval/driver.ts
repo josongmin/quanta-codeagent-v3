@@ -60,7 +60,11 @@ import {
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
-import { extractIssueDeclaredExpected, extractIssueReproSeed } from "@/agent/verification-plan"
+import {
+  extractIssueDeclaredExpected,
+  extractIssueReproSeed,
+  type IssueDeclaredExpected,
+} from "@/agent/verification-plan"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
@@ -113,6 +117,7 @@ import {
   buildPhasePatchHygiene,
   type ClosureSessionState,
 } from "./closure-session"
+import { buildSpecGateEvaluatePredicate } from "./declared-expected-matcher"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { exec, execArgv } from "./exec"
 import { coeditFamilyCoverageCandidate } from "./family-coverage-coedit"
@@ -3101,6 +3106,11 @@ const runRepairPhase = async (
   siblingOwners: readonly string[],
   reproSources: readonly string[],
   verificationTarget: VerificationTargetFact | undefined,
+  /** jun-26 repair spec gate / jun-28 strong-oracle: PUBLIC issue-declared expected
+   *  output (from the closure session). Composed into the repair `evaluatePredicate`
+   *  ONLY when `repairSpecGate` or `repairStrongOracle` is on; absent / both off ⇒
+   *  the raw evaluator is used (byte-identical). */
+  issueDeclaredExpected: IssueDeclaredExpected | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
@@ -3139,6 +3149,20 @@ const runRepairPhase = async (
     reproSources,
     repair.validate ?? defaultValidate,
   )
+  // jun-26 repair spec gate / jun-28 strong-oracle: when the issue declares a
+  // concrete PUBLIC expected output AND the spec-gate OR strong-oracle knob is on,
+  // wrap the typed-predicate evaluator so the repair rail ALSO requires that
+  // declared expected in the observed output. The wrapper turns an exit-0 round
+  // whose output lacks the declared expected into a predicate `matched:false`,
+  // which `isFalseGreen` (and the strong-oracle conjunction) then read. NO-LEAK:
+  // `issueDeclaredExpected` is public-issue-text provenance only (the matcher
+  // re-asserts the answer-key guard). Both knobs OFF ⇒ the raw evaluator
+  // (byte-identical). `buildSpecGateEvaluatePredicate(base, undefined)` is identity.
+  const repairEvaluatePredicate =
+    (repairPosture.repairSpecGate || repairPosture.repairStrongOracle) &&
+    issueDeclaredExpected !== undefined
+      ? buildSpecGateEvaluatePredicate(evaluateSuccessPredicate, issueDeclaredExpected)
+      : evaluateSuccessPredicate
   // jun-28 repair-loop BREADTH (mirror of the apps driver): B>1 ⇒ fan a repair
   // round out to B forked candidates, continue from the validator-green one (else
   // best validator signal). B=1 (default) ⇒ undefined ⇒ legacy single path
@@ -3175,7 +3199,7 @@ const runRepairPhase = async (
             exec,
             timeoutMs: deps.timeoutMs,
             readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-            evaluatePredicate: evaluateSuccessPredicate,
+            evaluatePredicate: repairEvaluatePredicate,
             ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
           },
           sandboxPorts: { forkSandbox, cleanupSandbox },
@@ -3189,7 +3213,11 @@ const runRepairPhase = async (
     async () => {
       await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
       const out = await runRepairRounds({
-        config: buildRepairRoundsConfig(repair.maxRounds, repairBreadth),
+        config: buildRepairRoundsConfig(
+          repair.maxRounds,
+          repairBreadth,
+          repairPosture.repairStrongOracle,
+        ),
         problem: instance.problemStatement,
         runOnce: (seedMsg) =>
           runAgentOnce(
@@ -3230,7 +3258,7 @@ const runRepairPhase = async (
         exec,
         readFile: async (path: string): Promise<string> => Bun.file(path).text(),
         timeoutMs: deps.timeoutMs,
-        evaluatePredicate: evaluateSuccessPredicate,
+        evaluatePredicate: repairEvaluatePredicate,
         ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
         // jun-28 BREADTH: present only when B>1 (else undefined ⇒ legacy single
         // path, byte-identical). Kept in parity with the apps driver.
@@ -4940,6 +4968,7 @@ const runMainPhase = async (args: {
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
       verificationTargetFromPlan(args.prepared.verificationPlan),
+      args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
       args.prepared.chaMultisiteSteer,

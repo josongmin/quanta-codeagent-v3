@@ -422,6 +422,16 @@ export interface BenchPosture {
    *  guarded (public-issue-text provenance only). Default-OFF ⇒ the repair predicate
    *  stays observe-only / test_exit_zero (byte-identical). */
   readonly repairSpecGate: boolean
+  /** jun-28 repair-loop SOTA++ STRONG-ORACLE clear gate. When on, a repair round
+   *  clears ONLY when its self-repro green ALSO survives a CONJUNCTION of the
+   *  AVAILABLE strong, no-leak signals (declared-expected match via repair-spec-gate
+   *  / primary-rail predicate + repro-vote K-of-N RESOLVED consensus). A green round
+   *  contradicted by any available signal reads as a FALSE GREEN, so the loop
+   *  iterates rounds 1..N toward a general fix instead of stopping at an over-narrow
+   *  round-0 patch. Each conjunct fails OPEN on absence (never blocks a correct
+   *  patch). Layers on closure-repair + (repair-spec-gate and/or repro-vote).
+   *  Default-OFF ⇒ the legacy single-green clear (byte-identical). */
+  readonly repairStrongOracle: boolean
   /** T3 (jun-24): forward-localize on the deeper_localize adaptive route — trace
    *  the prior candidate's edited symbols to their consumer call-sites and widen
    *  the next pass's owner evidence. Default-OFF ⇒ deeper_localize stays a no-op. */
@@ -623,7 +633,7 @@ export const benchPostureFromState = (
   // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
   // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL,
   // QUANTA_BENCH_MODEL_LANE_DIVERSITY, QUANTA_BENCH_REPAIR_SPEC_GATE,
-  // QUANTA_BENCH_REPAIR_BREADTH.
+  // QUANTA_BENCH_REPAIR_BREADTH, QUANTA_BENCH_REPAIR_STRONG_ORACLE.
   const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
   const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
   const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
@@ -637,6 +647,7 @@ export const benchPostureFromState = (
   const specFidelityInvariant = readKnobValue(state, "spec-fidelity-invariant", isTrue) === true
   const dynamicMessageMatcher = readKnobValue(state, "dynamic-message-matcher", isTrue) === true
   const repairSpecGate = readKnobValue(state, "repair-spec-gate", isTrue) === true
+  const repairStrongOracle = readKnobValue(state, "repair-strong-oracle", isTrue) === true
   const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
   const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
   const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
@@ -694,6 +705,7 @@ export const benchPostureFromState = (
     specFidelityInvariant,
     dynamicMessageMatcher,
     repairSpecGate,
+    repairStrongOracle,
     forwardLocalize,
     pairedControl,
     chaMultisiteSteer,
