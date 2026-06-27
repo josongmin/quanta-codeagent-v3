@@ -1,11 +1,13 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { errMessage } from "@/shared"
+import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
 import { captureInterruptedTurn } from "../interrupted-turn"
 import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeTurnHeader } from "../turn-kind"
 import type { AgentConfig } from "../types"
+import { injectWorkflowKeywordNudge } from "../workflow-keyword"
 import { compactNowOnDemand } from "./compaction-wire"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
@@ -131,6 +133,14 @@ export const injectTurnBudgetReminder = (
 export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
   if (cfg.focusChain === undefined) return
   try {
+    // Feed the tracker from the structured plan store (ADR-0219 missing wire).
+    // Change-gated so an unchanged plan stays a no-op and the drift detector
+    // keeps accumulating. Only when a planStore is wired — absent planStore ⇒
+    // the bridge does NOT touch the tracker (byte-identical to the prior unfed
+    // behaviour; any direct feeder is left intact).
+    if (cfg.planStore !== undefined) {
+      syncFocusChainFromPlan(cfg.focusChain.tracker, cfg.planStore.current())
+    }
     cfg.focusChain.tracker.tickTurn()
     const injection = cfg.focusChain.tracker.getInjection()
     if (injection !== null && injection.trim().length > 0) {
@@ -166,6 +176,9 @@ export const prepareTurnIteration = async (args: {
   const queuedInputs = await syncQueuedTurnInputs(args)
   if (queuedInputs === "aborted") return "aborted"
   injectFocusChainMessage(args.cfg, args.wm)
+  // CC "ultracode" parity — a hard keyword in the user's prompt nudges this turn
+  // toward `run_workflow` (only when the tool is registered; gate untouched).
+  injectWorkflowKeywordNudge(args.cfg, args.wm)
   // Loop-control fix (jun-25, FIX-1) — make the approaching turn budget visible
   // to the model so it can finalize rather than be silently hard-cut at
   // `maxTurns`. No-op for unbounded `maxTurns` (byte-identical).

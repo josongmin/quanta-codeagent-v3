@@ -26,7 +26,7 @@ const readSrc = (p: string) => readFile(p, "utf8")
 
 /** The ONE sanctioned value import into `@/runner/batch` from the knob slice:
  *  the `deriveKnob` SSOT derive primitive (knob=schema unification). */
-const DERIVE_IMPORT = '@/runner/batch/eval/kernel/derive'
+const DERIVE_IMPORT = "@/runner/batch/eval/kernel/derive"
 /** A value import into `@/runner/batch` that is NOT the sanctioned derive SSOT. */
 const forbiddenBatchValueImport = (txt: string): boolean =>
   txt

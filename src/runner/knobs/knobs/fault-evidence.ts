@@ -7,6 +7,8 @@
  * the bench driver via `benchPostureFromState` projection (`faultEvidence`
  * field) + `buildConfig`. Exists here so the resolver / report / preset layer
  * can SEE the knob. Strict truthy gate: `"1"`/`"on"`/`"true"` ⇒ enabled.
+ * envKey: `QUANTA_BENCH_FAULT_EVIDENCE` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import { faultEvidenceSchema } from "@/config/knob-schema/schemas/bench-a"

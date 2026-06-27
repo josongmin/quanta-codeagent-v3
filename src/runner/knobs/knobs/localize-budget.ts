@@ -5,6 +5,8 @@
  * band (`posture.localizeBudget` → `agentlessLocalize` deps). Registration is
  * CENTRAL (`registerBenchKnobs`); this file re-exports the derived knob + the
  * value type for back-compat importers (knobs-bench posture + driver).
+ * envKey: `QUANTA_BENCH_LOCALIZE_BUDGET` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import { localizeBudgetSchema } from "@/config/knob-schema/schemas/bench-b"

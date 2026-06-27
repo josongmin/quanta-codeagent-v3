@@ -4,6 +4,8 @@
  * of band via the bench posture projection. Registration is CENTRAL
  * (`registerBenchKnobs`); this file re-exports the derived knob + the mode type
  * for back-compat importers (knobs-bench posture).
+ * envKey: `QUANTA_BENCH_VERIFY_SELECT_REGRESSION` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import { verifySelectRegressionSchema } from "@/config/knob-schema/schemas/bench-c"

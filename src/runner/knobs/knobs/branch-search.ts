@@ -19,6 +19,8 @@
  * `costMultiplier: K` — explicit matrix budget contract.
  *
  * Conflicts with `localize-phase` — both strengthen explore.
+ * envKey: `QUANTA_BENCH_BRANCH_SEARCH` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"

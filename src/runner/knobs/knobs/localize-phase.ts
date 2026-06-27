@@ -25,6 +25,8 @@
  *
  * Conflicts with `branch-search` — both strengthen explore; running them
  * together confounds A/B measurement.
+ * envKey: `QUANTA_BENCH_LOCALIZE_PHASE` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import type { AgentConfig } from "@/agent"

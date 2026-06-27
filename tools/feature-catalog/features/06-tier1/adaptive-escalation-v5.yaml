@@ -32,9 +32,10 @@ purpose: |
   router-evidence (LlmEvidencePacket → RouterEvidence CQRS read-model, single
   origin), evidence-facts (deterministic gap classifier), llm-router +
   phase-executor port factories, adaptive-run (the assembled keystone), and the
-  posture seam (knob-module / capability-profiles / compose-preset — the SSOT
-  where the SAME module arrays feed both PHASE_MODULES and the preset literals via
-  composePresetKnobs, drift pinned by the raw-identity hellgate). Default-OFF /
+  posture seam (knob-module / capability-profiles + the preset-spec SSOT
+  `kernel/preset-spec.ts` where `resolvePresetSpec` GENERATES the resolved knob
+  map from a PresetSpec — one origin, the literal-vs-composite double-book and its
+  byte-identical golden oracle removed; parity pinned by preset-spec-parity). Default-OFF /
   byte-identical: selecting the preset is INERT (≡ thin-strict) until
   QUANTA_BENCH_V5_ADAPTIVE is explicitly on. The live driver call-site + real
   LLM/phase adapters are Wave-3 deferred (gate on a measured oracle, never n=1),
@@ -51,7 +52,7 @@ evidence:
     - src/runner/batch/eval/adaptive-escalation/phase-executor.ts
     - src/runner/batch/eval/adaptive-escalation/adaptive-run.ts
     - src/runner/batch/eval/posture/capability-profiles.ts
-    - src/runner/batch/eval/posture/compose-preset.ts
+    - src/runner/batch/eval/kernel/preset-spec.ts
     - src/runner/batch/eval/posture/knob-module.ts
     - src/apps/bench/preset.ts
     - src/runner/knobs/presets.ts
@@ -67,7 +68,7 @@ evidence:
       - tests/unit/adaptive-router-prompt-hellgate.test.ts
       - tests/unit/adaptive-run-hellgate.test.ts
       - tests/unit/posture-phase-modules-hellgate.test.ts
-      - tests/unit/bench-preset-composite-identity.test.ts
+      - tests/unit/kernel/preset-spec-parity.test.ts
       - tests/unit/bench-v5-preset-gate.test.ts
       - tests/unit/preset-resolution-golden.test.ts
     integration: []

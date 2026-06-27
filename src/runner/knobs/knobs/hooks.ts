@@ -17,6 +17,8 @@
  * handlers / pre-registered handlers are the caller's concern. If
  * `cfg.hooks` is already set (a caller pre-wired its own bus), the knob is
  * a no-op (preserve caller intent — registry layering, NOT overwrite).
+ * envKey: `QUANTA_BENCH_HOOKS` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import type { AgentConfig } from "@/agent"
@@ -30,7 +32,11 @@ const SURFACES: readonly Surface[] = ["cli", "agent-batch"]
 /** Non-NOOP apply — wires the in-process `HookBus`. Bound into the central
  *  registrar (`APPLY_BINDINGS`) AND used to derive the back-compat knob export;
  *  ONE definition so the derived knob is byte-identical to the registered one. */
-export const applyHooks = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): AgentConfig => {
+export const applyHooks = (
+  cfg: AgentConfig,
+  value: true,
+  ctx: { surface: Surface },
+): AgentConfig => {
   if (value !== true) return cfg
   if (!SURFACES.includes(ctx.surface)) return cfg
   // Preserve a caller-supplied bus (defensive: a host that wired its own bus
