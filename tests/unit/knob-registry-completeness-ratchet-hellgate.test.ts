@@ -140,6 +140,11 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_CAPTURE_DEBUG", "dev/bench-only: jun-24 lost-edits RCA diagnostic (apps/bench/eval/driver — per-call git-status exec, default-OFF), not a shipped user knob"],
   ["QUANTA_BENCH_HEALTH_ABORT", "bench-only: run-health systemic-failure abort control (runner/batch/eval/run-health — read at call site), not a shipped user /config knob"],
   ["QUANTA_LSP_MEM_BUDGET_MB", "infra: LSP server RSS cap (lsp/server-mem-budget — operator memory-budget tuning read at call site), not a user /config knob"],
+  ["QUANTA_BENCH_NO_PROGRESS_ABORT_S", "bench-only: full-remote no-progress (wedged-box) idle-abort budget (resolveNoProgressBudgetMs, read at the full.ts composition root), same class as QUANTA_BENCH_HEALTH_ABORT — not a shipped /config knob"],
+  ["QUANTA_OTEL_ENDPOINT", "infra: operator OTEL collector URL (apps/bench OTLP export + reverse tunnel, read at the bench composition root), not a user /config knob"],
+  ["QUANTA_OTEL_RUN_ID", "infra: OTEL trace-viewer deep-link run id (apps/bench/otel + default-trace-sink, operator tracing), not a user /config knob"],
+  ["QUANTA_OTEL_SINK", "infra: OTEL durable span-sink target file/s3 (apps/bench/span-sink resolveSpanSink, operator tracing), not a user /config knob"],
+  ["QUANTA_OTEL_S3_REGION", "infra: OTEL durable s3 span-sink region (apps/bench/span-sink, operator tracing), not a user /config knob"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {

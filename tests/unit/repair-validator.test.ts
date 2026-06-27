@@ -210,7 +210,10 @@ describe("structural no-leak invariant (build gate)", () => {
       case "index.ts":
         return ["./types", "./pytest-report"]
       case "context.ts":
-        return ["./types"]
+        // ./pytest-assertion-pin is a PURE local repair helper (imports nothing) —
+        // pins the pytest assertion region in the repair seed. Keeps the no-leak
+        // fence (no @/agent, no gold) while letting context.ts use it.
+        return ["./types", "./pytest-assertion-pin"]
     }
   }
   const assertImportsOnlyAllowed = (src: string, f: (typeof FILES)[number]): void => {

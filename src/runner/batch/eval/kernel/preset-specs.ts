@@ -153,6 +153,38 @@ export const AGENTLESS_V6_CLOSURE_REPAIR: PresetSpec = {
 }
 
 /**
+ * `agentless-v6-closure-tuned` — jun-28 == closure-repair + repair-spec-gate (the
+ * oracle-hardening gate). The plain closure-repair arm tied its control because the
+ * loop false-greened at round 0; repair-spec-gate makes a green round whose output
+ * lacks the issue-declared expected read as a false green, so the loop fires rounds
+ * 1..N exactly where the candidate is wrong.
+ */
+export const AGENTLESS_V6_CLOSURE_TUNED: PresetSpec = {
+  id: "agentless-v6-closure-tuned",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+  },
+  note: "jun-28 tuned closure: closure-repair + repair-spec-gate (oracle-hardening, catches round-0 false-green).",
+}
+
+/**
  * `agentless-v3-thin-strict` — jun-20 strict arm: mini-first + hard patch-budget
  * admission + source-only sanitizer. Keeps the localization stack but turns host
  * in-loop execution OFF for round-0 thinness and blocks over-budget final patches
@@ -259,6 +291,7 @@ export const PRESET_SPECS: Readonly<Record<string, PresetSpec>> = Object.freeze(
   [AGENTLESS_V1_NOSTEER.id]: AGENTLESS_V1_NOSTEER,
   [AGENTLESS_V6_CLOSURE_CONTROL.id]: AGENTLESS_V6_CLOSURE_CONTROL,
   [AGENTLESS_V6_CLOSURE_REPAIR.id]: AGENTLESS_V6_CLOSURE_REPAIR,
+  [AGENTLESS_V6_CLOSURE_TUNED.id]: AGENTLESS_V6_CLOSURE_TUNED,
   [AGENTLESS_V3_THIN_STRICT.id]: AGENTLESS_V3_THIN_STRICT,
   [AGENTLESS_V5_THIN_AND_EXPANDED.id]: AGENTLESS_V5_THIN_AND_EXPANDED,
   [HINT_ONLY.id]: HINT_ONLY,
