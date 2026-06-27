@@ -151,7 +151,7 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench: transient retry cap.",
-    readSite: "runner/batch/eval/driver.ts",
+    readSite: "runner/batch/eval/retry-policy.ts",
   },
   {
     envKey: "QUANTA_BENCH_PRESET",
@@ -654,6 +654,16 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/cli.ts",
   },
   {
+    envKey: "QUANTA_FULL_REMOTE_INSTANCE_TYPE",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Full-remote: EC2 instance-type override. Unset ⇒ the jun-27 default c7i.4xlarge (patch-gen is API-bound, grading serial); bump for high patch-gen concurrency.",
+    readSite: "apps/bench/remote/box-session/types.ts",
+  },
+  {
     envKey: "QUANTA_FULL_REMOTE_ONDEMAND",
     kind: "bool",
     default: false,
@@ -682,5 +692,35 @@ export const BENCH: readonly KnobInventoryEntry[] = [
     describe:
       "Bench (jun-24): A/B lever that surfaces the dataset's repo-local verifier command to the agent (`agentVisibleBenchVerifierCommand`) so it prefers that over bare host-global pytest/python. Default-OFF ⇒ the verifier hint is withheld (byte-identical agent-visible context).",
     readSite: "runner/batch/eval/driver.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_RESUME",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: enable spot-resume: stream per-turn cassette to S3 + replay on a fresh box after reclaim. Default-OFF (gateOn) ⇒ byte-identical (no S3 touch). Requires QUANTA_BENCH_RESUME_S3_BUCKET; enabled-but-no-bucket is treated as off (fail-closed).",
+    readSite: "apps/bench/resume/config.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_RESUME_S3_BUCKET",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "S3 bucket for resume cassettes; required when QUANTA_BENCH_RESUME on. Unset ⇒ resume stays inert (resumeActive=false).",
+    readSite: "apps/bench/resume/config.ts",
+  },
+  {
+    envKey: "QUANTA_BENCH_CAMPAIGN_ID",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "stable campaign id; resume key prefix. Unset ⇒ 'default-campaign'. Scopes the resume cassette/receipt S3 prefix (<campaignId>/<instanceId>).",
+    readSite: "apps/bench/resume/config.ts",
   },
 ]

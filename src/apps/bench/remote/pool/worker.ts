@@ -6,10 +6,13 @@
  * orchestrator (runPool) stays thin; everything here is pool-internal.
  */
 import { errMessage } from "@/shared"
+import { resolveResumeConfig, resumeActive } from "../../resume"
+import { resumeReplayBoxEnv } from "../../resume/resume-launch"
 import {
   attachBox,
   BOX_DIED_DURING_RUN_ERROR,
   type BoxSession,
+  buildForwardedBenchEnv,
   type FullRemoteResult,
   findIdleBox,
   GRADE_LOCK_RELEASE_ERROR,
@@ -690,6 +693,42 @@ const routeChunkGradeError = async (
   )
 }
 
+/**
+ * RESUME relaunch env (DEFAULT-OFF). When bench-resume is `resumeActive` AND this
+ * chunk targets exactly ONE instance (the pinned resume contract: chunk-size=1),
+ * append the box-download resume KNOBS to the forwarded bench env so the box
+ * relaunches, DOWNLOADS its recorded cassette from S3, REPLAYS it, then diverges
+ * live. The box itself is the fail-closed eligibility authority (its
+ * `prepareResume` returns undefined for an absent/degraded/corrupt cassette ⇒
+ * fresh) so a lost box that has no eligible cassette simply re-runs from scratch.
+ *
+ * Returns "" when resume is OFF, no bucket is configured, or the chunk is not a
+ * single-instance chunk — so the forwarded env (and thus the box command) is
+ * BYTE-IDENTICAL to today's fresh path. Reads `process.env`: the worker process
+ * holds the operator's resume config + aws creds.
+ */
+export const resumeForwardEnvFor = (
+  chunk: PoolChunk,
+  env: Record<string, string | undefined> = process.env,
+): string => {
+  const cfg = resolveResumeConfig(env)
+  if (!resumeActive(cfg)) return ""
+  // Pinned contract: resume is per-instance (chunk-size=1). A multi-instance
+  // chunk has no single resume key, so leave it on the fresh path.
+  const ids = chunk.instanceIds
+  if (ids === undefined || ids.length !== 1) return ""
+  const boxEnv = resumeReplayBoxEnv({
+    campaignId: cfg.campaignId,
+    instanceId: ids[0]!,
+    bucket: cfg.bucket,
+    ...(cfg.region !== undefined ? { region: cfg.region } : {}),
+  })
+  // Route through the SAME forwarder the box command uses so the resume knobs are
+  // quoted + filtered identically (EXPLICIT_BOX_ENV keys like REPLAY_ON_MISS are
+  // dropped here — the box-side prepareResume sets them locally after download).
+  return buildForwardedBenchEnv(boxEnv as NodeJS.ProcessEnv)
+}
+
 const gradeChunkAttempt = async (
   workerId: number,
   queue: ChunkQueue,
@@ -721,7 +760,9 @@ const gradeChunkAttempt = async (
       paths,
       artifactSuffix: chunk.runId,
       recordTrajectory: cfg.recordTrajectory ?? false,
-      forwardedBenchEnv: cfg.forwardedBenchEnv ?? "",
+      // DEFAULT-OFF: resumeForwardEnvFor returns "" unless bench-resume is active
+      // AND this is a single-instance chunk, so the OFF path is byte-identical.
+      forwardedBenchEnv: `${cfg.forwardedBenchEnv ?? ""}${resumeForwardEnvFor(chunk)}`,
       // jun-20 multi-auth (T-6): surface the leased account in the box status snapshot.
       ...(accountLabel !== undefined ? { accountLabel } : {}),
       // BUG 1 test seams: forward the box-side injectable sleep/clock into the

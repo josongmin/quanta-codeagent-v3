@@ -161,10 +161,20 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
 export const buildForwardedBenchEnv = (env: NodeJS.ProcessEnv): string => {
   const replayPath = env.QUANTA_BENCH_REPLAY_TRAJECTORY
   if (replayPath !== undefined && replayPath !== "" && replayPath !== "0") {
+    // NARROW guard (kept, NOT blanket-removed): a LOCAL cassette path still must
+    // never be blindly forwarded — a worker-local file path is meaningless on the
+    // box. The supported resume wiring DOES exist now (bench-resume, DEFAULT-OFF):
+    // the worker forwards resume KNOBS (`QUANTA_BENCH_RESUME` /
+    // `QUANTA_BENCH_RESUME_S3_BUCKET` / `QUANTA_BENCH_CAMPAIGN_ID` /
+    // `QUANTA_BENCH_INSTANCE_ID`) and the box-side `resume-launch.ts` prelaunch
+    // DOWNLOADS the cassette from S3 and sets `QUANTA_BENCH_REPLAY_TRAJECTORY`
+    // locally (see {@link buildResumePrelaunchStep}). So forwarding a local
+    // REPLAY_TRAJECTORY is still wrong — use the resume knobs instead.
     throw new Error(
-      "[full-remote] QUANTA_BENCH_REPLAY_TRAJECTORY is local-only today; remote/pool runs cannot " +
-        "blindly forward a local cassette path to the box. Run the replay locally or add explicit " +
-        "cassette upload wiring first.",
+      "[full-remote] QUANTA_BENCH_REPLAY_TRAJECTORY is a LOCAL path; remote/pool runs cannot forward " +
+        "a local cassette path to the box. For spot-resume use the bench-resume knobs " +
+        "(QUANTA_BENCH_RESUME + QUANTA_BENCH_RESUME_S3_BUCKET + QUANTA_BENCH_CAMPAIGN_ID + " +
+        "QUANTA_BENCH_INSTANCE_ID) — the box downloads its cassette from S3 and sets the replay path itself.",
     )
   }
   return Object.keys(env)
@@ -259,6 +269,33 @@ const shipAccessToken = async (
   }
 }
 
+/**
+ * BOX-SIDE resume prelaunch step (DEFAULT-OFF). When the forwarded env carries
+ * the resume knobs (`QUANTA_BENCH_RESUME=…`, set ONLY by the worker's
+ * `resumeForwardEnvFor` on a relaunch), prepend a step that runs the resume
+ * materializer ON THE BOX: it DOWNLOADS this instance's recorded cassette from
+ * S3 (the box has aws creds + the resume env), writes it locally, and EMITS
+ * `export QUANTA_BENCH_REPLAY_TRAJECTORY=… / QUANTA_BENCH_REPLAY_ON_MISS=…`,
+ * which we `eval` so the bench run REPLAYS then diverges live. This is why the
+ * worker forwards resume KNOBS (not a local cassette path) — the box sets
+ * `QUANTA_BENCH_REPLAY_TRAJECTORY` itself, so the {@link buildForwardedBenchEnv}
+ * local-forward guard is never tripped.
+ *
+ * Returns "" when no resume knob is present ⇒ byte-identical to the fresh path.
+ * The materializer is fail-closed (no eligible cassette ⇒ emits nothing ⇒ fresh
+ * run), and `eval "$(…)"` of empty output is a no-op.
+ */
+const buildResumePrelaunchStep = (forwardedBenchEnv: string): string => {
+  if (!forwardedBenchEnv.includes("QUANTA_BENCH_RESUME=")) return ""
+  // The resume knobs are already inline-assigned to THIS command; export them so
+  // the prelaunch subprocess (which reads process.env) sees them, then eval its
+  // `export …` lines to set QUANTA_BENCH_REPLAY_TRAJECTORY for the bench run.
+  return (
+    `export ${forwardedBenchEnv.trim()}; ` +
+    `eval "$(~/.bun/bin/bun run src/apps/bench/resume/resume-launch.ts)"; `
+  )
+}
+
 const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string => {
   const idsFlag =
     params.instanceIds && params.instanceIds.length > 0
@@ -267,8 +304,11 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
   const trajectoryRecordEnv = params.recordTrajectory
     ? `QUANTA_BENCH_RECORD_TRAJECTORY="${paths.trajectory}" `
     : ""
+  const resumePrelaunch = buildResumePrelaunchStep(params.forwardedBenchEnv)
   return (
-    `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
+    `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; ` +
+    resumePrelaunch +
+    `QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
     `QUANTA_PREFS_HOME="$HOME/.quanta" ` +
     `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
     `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +

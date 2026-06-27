@@ -71,7 +71,7 @@
 // this import the registry is empty and report/telemetry record nothing.
 import "@/runner/knobs/knobs"
 import { existsSync, readFileSync } from "node:fs"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
@@ -474,8 +474,29 @@ const runSwebenchTask = async (
   task: SwebenchTask,
   deps: SwebenchTaskDeps,
 ): Promise<InstanceResult> => {
-  const work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
-  const dest = join(work, "repo")
+  // B1 (jun-27-bench-spot-resume-s3.md): when resume is ON, mint a
+  // DETERMINISTIC instance-scoped checkout path so a partial cassette recorded
+  // on box A replays HIT on box B (the random mkdtemp suffix otherwise embeds in
+  // the agent cwd → prompt → content-hash mismatch → replay MISS). Pre-existing
+  // path (local re-run) is wiped first so resume re-executes against a CLEAN
+  // checkout. Read the env gate inline with the canonical truthy vocab so
+  // ""/"0"/"off" = OFF; default OFF is byte-identical (random mkdtemp). Resume
+  // assumes workers=1 / chunk-size=1 (Tier-0 default) — a deterministic path
+  // loses mkdtemp's uniqueness, so concurrent same-instance runs would collide;
+  // no locking is added.
+  let dest: string
+  // The dir to `rm` on the finally path: the parent that holds `repo` (so both
+  // the checkout and its wrapper are gone), identical semantics in both modes.
+  let work: string
+  if (gateOn(process.env, "QUANTA_BENCH_RESUME")) {
+    work = join(benchWorkRoot(), task.instanceId.replace(/[^A-Za-z0-9._-]/g, "_"))
+    dest = join(work, "repo")
+    await rm(dest, { recursive: true, force: true })
+    await mkdir(dest, { recursive: true })
+  } else {
+    work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
+    dest = join(work, "repo")
+  }
   // Live progress to run.log: under concurrency the per-instance result line is
   // emitted only at the END of the batch (all in-flight at once → ~15min silence
   // mid-run). A START line + an inline DONE line make each instance's lifecycle

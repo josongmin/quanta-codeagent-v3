@@ -24,6 +24,7 @@ import { resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import { isFalsyToken } from "@/shared"
+import { maybeTeeResumeRecording } from "./resume/recorder"
 
 const defaultBenchTrajectoryPath = (): string => `${process.cwd()}/bench-trajectory.jsonl`
 
@@ -148,9 +149,15 @@ export const replayTrajectoryPort = (args: {
  */
 export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
   const mode = resolveBenchTrajectoryMode()
-  return mode.kind === "record"
-    ? recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path: mode.path }) })
-    : llm
+  if (mode.kind !== "record") return llm
+  // Resume WRITE path (DEFAULT-OFF, fail-closed): when `QUANTA_BENCH_RESUME` is
+  // active AND `QUANTA_BENCH_INSTANCE_ID` is set, mirror the SAME local cassette
+  // (`mode.path`) to durable S3 + maintain a receipt. Otherwise this returns the
+  // inner `llm` UNCHANGED, and we fall through to the EXACT prior behavior
+  // (plain local-only jsonl recording) — byte-identical when resume is off.
+  const teed = maybeTeeResumeRecording(llm, process.env, mode.path)
+  if (teed !== llm) return teed
+  return recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path: mode.path }) })
 }
 
 /**

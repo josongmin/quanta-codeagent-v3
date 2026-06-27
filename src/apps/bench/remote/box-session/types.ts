@@ -70,7 +70,11 @@ export const D = {
   // GB of swebench images every launch). userData stays idempotent (re-running
   // present installs is fast; bun is still installed there). Override via cfg.ami.
   ami: "ami-04c2cdd2e17b15779",
-  instanceType: "c7i.8xlarge",
+  // jun-27: 4xlarge (16 vCPU/32GB) default — patch-gen is LLM-API-bound (cores idle
+  // on the wire) and grading is serial (max_workers≈6), so the 8xlarge's 32 vCPU were
+  // paid-for idle. ~$0.24/hr spot vs ~$0.5/hr. Bump back via the env override for
+  // high patch-gen concurrency.
+  instanceType: process.env.QUANTA_FULL_REMOTE_INSTANCE_TYPE || "c7i.4xlarge",
   keyName: "pickinstead_korea.pem",
   keyPath: "~/Downloads/pickinstead_korea.pem",
   subnetId: "subnet-9c13f1e7",

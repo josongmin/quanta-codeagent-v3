@@ -12,6 +12,8 @@ export type { RecordingLlmOpts } from "./recording-llm"
 export { recordingLlmPort } from "./recording-llm"
 export type { OnMissPolicy, ReplayLlmOpts } from "./replay-llm"
 export { replayLlmPort } from "./replay-llm"
+export type { S3ReplayStoreOpts } from "./s3-replay-store"
+export { s3ReplayStore } from "./s3-replay-store"
 export {
   type MatchPolicy,
   type RecordedInteraction,
