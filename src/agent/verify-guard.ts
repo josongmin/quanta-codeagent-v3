@@ -85,6 +85,39 @@ export const verifyPassForceMessage = (marker?: string): string => {
 }
 
 /**
+ * Sticky-red forcing nudge — used ONLY by the stickyRed branch. Unlike
+ * {@link verifyPassForceMessage}, it NAMES the specific unresolved command
+ * whose latest run failed, and explicitly closes the escape hatch the generic
+ * message left open: a DIFFERENT check (e.g. a narrow reproduction) passing
+ * does NOT clear this red. Observed failure (django-11141 gpt-5.4): the model
+ * read the generic "test/repro failed" nudge, pointed at its green repro, and
+ * proceeded — never realizing a broad regression test was still red. The fix
+ * is detection (stickyRed) AND messaging (this): only re-running THIS command
+ * green clears the block.
+ *
+ * @param command - the exact command string of the unresolved failing verify
+ *   (the bash `arg`), or `undefined` for a non-bash verify (e.g. test_runner).
+ * @param marker - the matched output failure id, when the regex (not the
+ *   dispatch `ok:false` flag) is what fired.
+ */
+export const stickyRedForceMessage = (command?: string, marker?: string): string => {
+  const which =
+    command !== undefined && command !== ""
+      ? `the command \`${command}\``
+      : "an earlier verification command"
+  const evidence =
+    marker !== undefined
+      ? ` Its output matched a known failure pattern (\`${marker}\`).`
+      : ""
+  return (
+    `The LATEST run of ${which} after your last edit FAILED and has not been re-run green.${evidence} ` +
+    `A DIFFERENT check passing (e.g. a narrow reproduction script) does NOT clear this — it is a separate test. ` +
+    `Do NOT finish: read THAT failure, fix the root cause, then re-run THAT SAME command and stop only once IT passes. ` +
+    `Only claim a false positive if THAT exact command actually passed.`
+  )
+}
+
+/**
  * Back-compat constant: the marker-less evidential message. Equal to
  * `verifyPassForceMessage()` (the dispatch-`ok:false` phrasing). The guard
  * computes the marker dynamically and prefers {@link verifyPassForceMessage};
@@ -191,6 +224,21 @@ const findLastMutating = (history: readonly GuardHistoryEntry[]): number => {
   return -1
 }
 
+/** Index of the FIRST mutating tool in history, or `-1` if none. Pure scan.
+ *  The sticky-red scan anchors here (not at the LAST edit): a test that went
+ *  red after the work began must be proven green by a same-command RE-RUN —
+ *  editing another file (or even the fix itself) is a hypothesis, not proof, and
+ *  must NOT drop the red out of the window. Reds BEFORE the first edit are the
+ *  expected pre-fix baseline (e.g. the initial failing reproduction) and are
+ *  correctly excluded. */
+const findFirstMutating = (history: readonly GuardHistoryEntry[]): number => {
+  for (let i = 0; i < history.length; i++) {
+    const entry = history[i]
+    if (entry !== undefined && MUTATING.has(entry.name)) return i
+  }
+  return -1
+}
+
 /** Most-recent verify-classified entry STRICTLY after `from`, or `undefined`. */
 const findLastVerifyAfter = (
   history: readonly GuardHistoryEntry[],
@@ -204,12 +252,57 @@ const findLastVerifyAfter = (
   return undefined
 }
 
-/** Command-identity key for the sticky-red scan: a `test_runner` call keys on
- *  its tool name; a `bash` call keys on its EXACT argument string. Two runs
- *  share a key iff they are the same command — so a later GREEN run only clears
- *  an earlier RED of the *same* command, never a different (narrower) one. */
+/**
+ * Canonicalize a bash command for sticky-red identity matching. Strips ONLY
+ * provably-irrelevant leading shell scaffolding so a re-run of the SAME test
+ * matches even when the model varies the wrapper between runs:
+ *   - a leading `cd <path> &&` / `cd <path>;` prefix (the box cwd, often a
+ *     run-random `repo-XXXX` path the model includes inconsistently),
+ *   - a leading `env` word and any leading `VAR=value` environment assignments
+ *     (e.g. `env PYTEST_ADDOPTS= PYTHONNOUSERSITE=1 ...`),
+ *   - surrounding / collapsed whitespace.
+ * It does NOT touch the command BODY (interpreter, test target, args), so two
+ * genuinely different tests never collapse to one key — only the irrelevant
+ * prefix is removed. This is bounded prefix removal, not fuzzy similarity: the
+ * false-BLOCK direction (a correct re-run failing to clear its red because the
+ * env prefix differed) is closed without opening a false-CLEAR (a different
+ * test's green clearing this red), since the body is preserved verbatim.
+ */
+const canonicalizeBashVerify = (raw: string): string => {
+  let s = raw.trim()
+  // Fixpoint: peel any leading scaffolding until none remains, so nested or
+  // interleaved prefixes are all handled (`cd a && cd b && env FOO=1 cmd`,
+  // `FOO=1 cd x && cmd`, etc.). Each pass removes at most one of:
+  //   - a `cd <...> &&` / `cd <...>;` segment (note `cd=1` is NOT this — no space),
+  //   - a leading `env` launcher word,
+  //   - one leading `VAR=value` assignment token (value: empty / quoted / no
+  //     unquoted whitespace — the shell tokenization boundary).
+  // The loop terminates because every branch strictly shortens `s` or no-ops
+  // (then `s === before` breaks). The command BODY is never touched, so two
+  // different tests never collapse — only irrelevant prefixes are removed.
+  while (true) {
+    const before = s
+    s = s.replace(/^cd\s+[^&;]+(?:&&|;)\s*/, "")
+    s = s.replace(/^env\s+/, "")
+    s = s.replace(/^[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S*)\s+/, "")
+    if (s === before) break
+  }
+  return s.replace(/\s+/g, " ").trim()
+}
+
+/** Command-identity key for the sticky-red scan: `<tool>:<canonical arg>`.
+ *  Keying on the ARG (canonicalized — irrelevant env/cd prefix stripped) for
+ *  EVERY tool, not just bash, prevents two different targets of the same tool
+ *  (e.g. `test_runner` on test A vs test B) from collapsing to one key, which
+ *  would let a green run of a DIFFERENT target wash out this red. Falls back to
+ *  the bare tool name only when no arg is available (nothing to distinguish on).
+ *  Two runs share a key iff they are the same command/target — so a later GREEN
+ *  clears an earlier RED of the *same* target even when the wrapper differs, but
+ *  never clears a different (narrower) one. */
 const verifyCommandKey = (entry: GuardHistoryEntry): string =>
-  entry.name === "bash" ? `bash:${entry.arg ?? ""}` : entry.name
+  entry.arg !== undefined && entry.arg !== ""
+    ? `${entry.name}:${canonicalizeBashVerify(entry.arg)}`
+    : entry.name
 
 /**
  * Sticky-red scan (opt-in `stickyRed`). Among verify-classified entries
@@ -233,10 +326,16 @@ const findUnresolvedFailingVerify = (
   for (let j = history.length - 1; j > from; j--) {
     const entry = history[j]
     if (entry === undefined || !isVerify(entry, exactCommands)) continue
+    // Only a DEFINITIVE outcome (ok true/false) decides a command's standing.
+    // An unknown-outcome re-run (`ok === undefined`: push-only / unresolved
+    // dispatch) must NOT clear a prior definitive red — a red is cleared by a
+    // GREEN, never by "outcome unknown". Skip unknowns so the most recent
+    // DEFINITIVE run per command wins.
+    if (entry.ok !== true && entry.ok !== false) continue
     const key = verifyCommandKey(entry)
-    if (seen.has(key)) continue // an earlier (superseded) run of this command
+    if (seen.has(key)) continue // an earlier (superseded) definitive run
     seen.add(key)
-    if (isVerifyFailing(entry)) return entry // latest run of this command failed
+    if (isVerifyFailing(entry)) return entry // latest definitive run failed
   }
   return undefined
 }
@@ -306,10 +405,20 @@ export const decideVerifyGuard = (args: {
   // failed — blocks even if a different command was run green afterwards. Only
   // re-running that same command green clears it.
   if (mustPass && stickyRed) {
-    const unresolved = findUnresolvedFailingVerify(history, lastMut, exactCommands)
+    // Anchor at the FIRST edit, not the last: a red since work began stays
+    // unresolved across intervening edits until the SAME command is re-run
+    // green (an edit is a hypothesis, not proof). Closes the escape where the
+    // model edits an unrelated file after a regression red to drop it from the
+    // last-edit window, then finishes on a narrow green.
+    const firstMut = findFirstMutating(history)
+    const unresolved = findUnresolvedFailingVerify(history, firstMut, exactCommands)
     if (unresolved !== undefined && spendTrip(state, cap)) {
       const marker = verifyOutputFailureMarkerId(unresolved.output ?? "") ?? undefined
-      return { block: true, text: verifyPassForceMessage(marker) }
+      // Show the CANONICAL command (env/cd wrapper stripped) — the meaningful
+      // command the model must re-run, matching the identity key it is judged on.
+      const command =
+        unresolved.name === "bash" ? canonicalizeBashVerify(unresolved.arg ?? "") : undefined
+      return { block: true, text: stickyRedForceMessage(command, marker) }
     }
     return { block: false }
   }
