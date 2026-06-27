@@ -363,7 +363,13 @@ const attachOrProvisionFullRemoteBox = async (cfg: FullRemoteConfig): Promise<Bo
         "Wait for the existing box to go idle, or re-run with explicit extra-box opt-in.",
     )
   }
-  return provisionBox({ ...cfg, launchMode: cfg.launchMode ?? "full-remote" })
+  return provisionBox({
+    ...cfg,
+    launchMode: cfg.launchMode ?? "full-remote",
+    // Resolve the OTEL endpoint HERE (allowlisted root) so provisionBox emits live
+    // bootstrap spans without reading env. "" when unset ⇒ no spans (byte-identical).
+    otelEndpoint: cfg.otelEndpoint ?? process.env.QUANTA_OTEL_ENDPOINT ?? "",
+  })
 }
 
 const acquireFullRemoteSingleBoxGuard = async (

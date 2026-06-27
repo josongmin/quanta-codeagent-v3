@@ -12,6 +12,7 @@ import { basename } from "node:path"
 import { errMessage, gateOn } from "@/shared"
 import { presetRequiresLiveLspGrounding } from "../../preset"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "../backend"
+import { createBootstrapTracer } from "../bootstrap-tracer"
 import { lookupCurrentPublicIpv4 } from "../ec2"
 import { PHANTOM_DEPS } from "./auth"
 import { readDatasetInstanceIds } from "./dataset-preflight"
@@ -537,9 +538,20 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     if (terminated.code !== 0) throw terminateFailure(iid, terminated)
   }
 
+  // jun-27 #4: live BOOTSTRAP-phase spans so the ~20min provision window is visible
+  // in the operator's trace UI — a slow bootstrap vs a DEAD one no longer look the
+  // same, and a failed phase surfaces WHERE it died (error span + message). Off
+  // unless an OTEL endpoint is threaded in (cfg.otelEndpoint) ⇒ byte-identical.
+  const tracer = (cfg.makeBootstrapTracer ?? createBootstrapTracer)({
+    endpoint: cfg.otelEndpoint ?? "",
+    iid,
+  })
+
   try {
     log(`[full-remote] instance ${iid} — waiting for running…`)
-    await awsFn(["ec2", "wait", "instance-running", "--instance-ids", iid])
+    await tracer.phase("wait-running", () =>
+      awsFn(["ec2", "wait", "instance-running", "--instance-ids", iid]),
+    )
     const ip = await describeInstancePublicIp(awsFn, iid)
     const host = `ubuntu@${ip}`
     log(`[full-remote] box up at ${ip}. Waiting for cloud-init (docker+bun+uv ~2-3min)…`)
@@ -564,8 +576,8 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
     }
 
     // Wait until SSH is reachable AND cloud-init finished installing bun.
-    await waitForBoxReady(ssh, cfg)
-    await bootstrapBox(session, cfg)
+    await tracer.phase("cloud-init", () => waitForBoxReady(ssh, cfg))
+    await tracer.phase("bootstrap", () => bootstrapBox(session, cfg))
     return session
   } catch (err) {
     try {
@@ -574,6 +586,10 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
       throw cleanupFailure("bootstrap", iid, err, cleanupErr)
     }
     throw err
+  } finally {
+    // Flush the bootstrap spans (success or failure) before the caller proceeds to
+    // grading — which streams its OWN spans into the same trace UI.
+    await tracer.close()
   }
 }
 

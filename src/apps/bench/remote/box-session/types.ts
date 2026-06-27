@@ -8,6 +8,7 @@
 import type { LspGroundingStatus } from "@/shared"
 import { CURRENT_BENCH_BASE_PRESET } from "../../preset"
 import type { SpawnFn, SpawnResult } from "../backend"
+import type { BootstrapTracer, BootstrapTracerOpts } from "../bootstrap-tracer"
 
 export interface FullRemoteConfig {
   /** Local quanta repo to rsync to the box (excludes node_modules/.git). */
@@ -33,6 +34,15 @@ export interface FullRemoteConfig {
   readonly sleep?: (ms: number) => Promise<void>
   /** Max cloud-init readiness polls (test seam — default 30 × 10s ≈ 5min). */
   readonly maxReadyPolls?: number
+  /** OTLP sink for live BOOTSTRAP-phase spans (jun-27 #4). Resolved from
+   *  `QUANTA_OTEL_ENDPOINT` at the allowlisted composition root and threaded so
+   *  provisionBox emits a span per bootstrap phase WITHOUT reading env. Non-http
+   *  / unset ⇒ no bootstrap spans (byte-identical). */
+  readonly otelEndpoint?: string
+  /** Test seam — bootstrap-tracer factory (default {@link createBootstrapTracer}).
+   *  The wiring hellgate injects a recording tracer to prove provisionBox wraps
+   *  each phase. */
+  readonly makeBootstrapTracer?: (opts: BootstrapTracerOpts) => BootstrapTracer
   readonly region?: string
   readonly ami?: string
   readonly instanceType?: string
