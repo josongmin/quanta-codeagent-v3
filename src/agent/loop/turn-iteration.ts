@@ -1,6 +1,7 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { errMessage } from "@/shared"
+import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
 import { captureInterruptedTurn } from "../interrupted-turn"
 import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
@@ -131,6 +132,14 @@ export const injectTurnBudgetReminder = (
 export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
   if (cfg.focusChain === undefined) return
   try {
+    // Feed the tracker from the structured plan store (ADR-0219 missing wire).
+    // Change-gated so an unchanged plan stays a no-op and the drift detector
+    // keeps accumulating. Only when a planStore is wired — absent planStore ⇒
+    // the bridge does NOT touch the tracker (byte-identical to the prior unfed
+    // behaviour; any direct feeder is left intact).
+    if (cfg.planStore !== undefined) {
+      syncFocusChainFromPlan(cfg.focusChain.tracker, cfg.planStore.current())
+    }
     cfg.focusChain.tracker.tickTurn()
     const injection = cfg.focusChain.tracker.getInjection()
     if (injection !== null && injection.trim().length > 0) {

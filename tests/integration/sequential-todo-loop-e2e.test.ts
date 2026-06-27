@@ -177,10 +177,10 @@ describe("sequential a→b→c through the real loop — NO ENFORCEMENT", () => 
   })
 })
 
-// ── (3) focus-chain auto-reinject is INERT in the real wiring ────────────────
+// ── (3) focus-chain auto-reinject NOW FIRES from the plan (the wire) ──────────
 
-describe("focus-chain auto-reinject — INERT unless fed", () => {
-  test("model calls create_plan + works 4 turns: focus-chain block NEVER appears", async () => {
+describe("focus-chain auto-reinject — plan-fed via the bridge", () => {
+  test("model calls create_plan: the plan's todos auto-re-inject after N turns", async () => {
     const planStore = createInMemoryPlanStore({ now: Date.now })
     const tracker = defaultFocusChainTracker({ reinjectEveryN: 2 })
     const { outcome } = await run(
@@ -188,7 +188,7 @@ describe("focus-chain auto-reinject — INERT unless fed", () => {
         tu("p", "create_plan", {
           name: "abc",
           overview: "do a then b then c",
-          todos: [{ content: "a" }, { content: "b" }, { content: "c" }],
+          todos: [{ content: "step-a" }, { content: "step-b" }, { content: "step-c" }],
         }),
         read("a", fileA),
         read("b", fileB),
@@ -199,28 +199,28 @@ describe("focus-chain auto-reinject — INERT unless fed", () => {
     )
 
     expect(outcome.reason).toBe("completed")
-    // The model DID author a plan (planStore got it; todos is a Record).
     expect(Object.keys(planStore.current()?.todos ?? {}).length).toBe(3)
-    // ...yet the focus-chain re-injection NEVER fired: nothing bridges the
-    // plan tool → tracker.setTodos, so the tracker stayed empty across 5 turns
-    // (it would have injected at turns 2 and 4 had it any todos).
-    expect(transcriptText(outcome)).not.toContain("## Focus Chain — Todos")
-    expect(tracker.snapshotTodos().length).toBe(0)
+    // The bridge fed the tracker from planStore.current() → the re-injection
+    // fired and carries the model's ACTUAL plan todos (not a synthetic feed).
+    const t = transcriptText(outcome)
+    expect(t).toContain("## Focus Chain — Todos")
+    expect(t).toContain("step-a")
+    expect(t).toContain("step-b")
+    expect(t).toContain("step-c")
+    expect(tracker.snapshotTodos().map((x) => x.text)).toEqual(["step-a", "step-b", "step-c"])
   })
 
-  test("PAIRED CONTROL — when setTodos IS fed, the block DOES re-appear (teeth)", async () => {
+  test("PAIRED CONTROL — no planStore wired ⇒ block stays absent (byte-identical)", async () => {
     const tracker = defaultFocusChainTracker({ reinjectEveryN: 2 })
-    tracker.setTodos([
-      { text: "a", state: "in-progress" },
-      { text: "b", state: "pending" },
-    ])
     const { outcome } = await run(
       [read("a", fileA), read("b", fileB), read("c", fileC), txt("done")],
-      { focusChain: { tracker, reinjectEveryN: 2 } },
+      { focusChain: { tracker, reinjectEveryN: 2 } }, // no planStore
     )
 
     expect(outcome.reason).toBe("completed")
-    // Fed → the loop seam splices the block (proves test (3) isn't vacuously green).
-    expect(transcriptText(outcome)).toContain("## Focus Chain — Todos")
+    // Nothing to feed → bridge syncs to empty → no injection (the OFF path is
+    // unchanged; the wire only activates when a plan exists).
+    expect(transcriptText(outcome)).not.toContain("## Focus Chain — Todos")
+    expect(tracker.snapshotTodos().length).toBe(0)
   })
 })
