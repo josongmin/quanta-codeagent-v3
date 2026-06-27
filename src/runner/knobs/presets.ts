@@ -155,6 +155,33 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "repair-escalation": "1",
     "closure-repair": "5",
   },
+  // jun-28 TUNED closure arm — == closure-repair + the oracle-hardening gate
+  // (repair-spec-gate). The plain closure-repair arm TIED its control because the
+  // loop false-greened at round 0 (over-narrow patch passes the weak test_exit_zero
+  // repro predicate, loop stops, real fail_to_pass red). repair-spec-gate makes a
+  // green round whose output LACKS the issue-declared expected read as a false
+  // green, so the loop FIRES rounds 1..N exactly where it is advantageous (the
+  // candidate is wrong) instead of stopping. assertion-pin (always-on in repair)
+  // gives those rounds the literal assertion to satisfy. Measures #2's lift.
+  "agentless-v6-closure-tuned": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+  },
   // jun-20 strict arm:
   // mini-first + hard patch-budget admission + source-only sanitizer. It keeps
   // the localization stack, turns host in-loop execution OFF for round-0 thinness,
