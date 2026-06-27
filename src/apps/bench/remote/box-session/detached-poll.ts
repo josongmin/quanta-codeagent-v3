@@ -8,6 +8,7 @@
  * `ssh` / `aws`.
  */
 
+import { makeNoProgressWatchdog } from "@/runner/batch/eval/no-progress-watchdog"
 import type { SpawnResult } from "../backend"
 import { defaultSleep, shq } from "./shell"
 import { BOX_DIED_DURING_RUN_ERROR } from "./types"
@@ -129,15 +130,21 @@ const applyDetachedProbeSuccess = (
   stdout: string,
   seen: number,
   onLine: (chunk: string) => void,
-): { seen: number; exitCode?: number } => {
+): { seen: number; exitCode?: number; progressed: boolean } => {
   const parsed = parseDetachedProbe(stdout)
   let next = seen
+  // `progressed` = did the run.log gain a NON-BLANK line this poll. The parse
+  // emits a spurious leading "" every poll (the `echo MARK` newline lands in the
+  // fresh slice), so a bare `seen` delta is ALWAYS positive — it cannot tell a
+  // wedged box from a working one. Only non-blank growth is real forward progress.
+  let progressed = false
   for (const line of parsed.freshLines) {
     onLine(`${line}\n`)
     next += 1
+    if (line.trim() !== "") progressed = true
   }
-  if (parsed.exitCode === undefined) return { seen: next }
-  return { seen: next, exitCode: parsed.exitCode }
+  if (parsed.exitCode === undefined) return { seen: next, progressed }
+  return { seen: next, exitCode: parsed.exitCode, progressed }
 }
 
 /**
@@ -188,11 +195,23 @@ export const runBenchDetachedPoll = async (args: {
   sleep?: (ms: number) => Promise<void>
   pollIntervalMs?: number
   now?: () => number
+  /** Idle budget (ms): if the box's run.log produces NO new lines for this long
+   *  while polls still SUCCEED (the box is alive but wedged — the jun-27 77min
+   *  throttle hang), abort the instance so the run isn't stuck. Default Infinity
+   *  ⇒ off (byte-identical). Resolve via resolveNoProgressBudgetMs(env). */
+  noProgressBudgetMs?: number
   completionArtifacts?: CompletionArtifacts
 }): Promise<{ code: number }> => {
   const sleep = args.sleep ?? defaultSleep
   const now = args.now ?? (() => Date.now())
   const log = args.log ?? (() => {})
+  // No-progress watchdog: progress() fires ONLY when run.log grows; a wedged box
+  // (polls succeed, log frozen) trips stalled() and aborts to the requeue path —
+  // distinct from box-DEATH (consecutive poll FAILURES, handled below).
+  const watchdog = makeNoProgressWatchdog({
+    budgetMs: args.noProgressBudgetMs ?? Number.POSITIVE_INFINITY,
+    now,
+  })
   const launch = await args.ssh(detachedLaunchCommand(args.benchCmd, args.runLog, args.runExit))
   if (launch.code !== 0) {
     throw new Error(
@@ -216,6 +235,7 @@ export const runBenchDetachedPoll = async (args: {
     if (probe.code === 0) {
       consecFailures = 0 // a successful poll resets the box-death suspicion.
       const applied = applyDetachedProbeSuccess(probe.stdout, seen, args.onLine)
+      if (applied.progressed) watchdog.progress() // real (non-blank) run.log growth = progress
       seen = applied.seen
       if (applied.exitCode !== undefined) return { code: applied.exitCode }
     } else {
@@ -235,6 +255,12 @@ export const runBenchDetachedPoll = async (args: {
           RUN_WALL_CEILING_MS / 60000,
         )}min wall-clock ceiling without an exit sentinel — abandoning to the pool's requeue path`,
       )
+    }
+    // Wedged-but-alive (polls succeed, run.log frozen past the idle budget) — the
+    // 77min throttle hang. Abort to the SAME requeue path as box-death so the run
+    // moves on instead of polling a stuck box forever (off unless budget is finite).
+    if (watchdog.stalled()) {
+      throw new BoxDiedDuringRunError(`${BOX_DIED_DURING_RUN_ERROR}: ${watchdog.reason(args.iid)}`)
     }
     await sleep(args.pollIntervalMs ?? RUN_POLL_INTERVAL_MS)
   }

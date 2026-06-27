@@ -16,6 +16,7 @@
  * whole flow is unit-tested offline via an injected SpawnFn.
  */
 import { basename } from "node:path"
+import { resolveNoProgressBudgetMs } from "@/runner/batch/eval/no-progress-watchdog"
 import { errMessage } from "@/shared"
 import { resolveBenchTrajectoryDefault } from "../trajectory"
 import {
@@ -416,6 +417,14 @@ const runSingleFullRemoteChunk = async (args: {
       artifactSuffix: args.session.iid,
       recordTrajectory: fullRemoteRecordTrajectoryEnabled(),
       forwardedBenchEnv: buildForwardedBenchEnv(process.env),
+      // No-progress (wedged-box) idle-abort budget, resolved HERE at the
+      // allowlisted full-remote composition root (env reads belong at the root;
+      // box-session stays env-free). Unset ⇒ Infinity ⇒ off (byte-identical).
+      noProgressBudgetMs: resolveNoProgressBudgetMs(process.env),
+      // OTEL live-tunnel endpoint, likewise resolved at the root and threaded so
+      // box-session opens the reverse tunnel without reading env (no-process-env).
+      // "" when unset ⇒ no tunnel (the regex match fails) — byte-identical.
+      otelEndpoint: process.env.QUANTA_OTEL_ENDPOINT ?? "",
     })
     args.onLog("[full-remote] terminating box…")
     await terminateWithContext()

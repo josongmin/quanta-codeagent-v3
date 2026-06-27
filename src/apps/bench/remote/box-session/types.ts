@@ -182,6 +182,16 @@ export interface GradeChunkParams {
   readonly pollIntervalMs?: number
   /** Test seam — injectable clock for the detached run+poll wall-clock ceiling. */
   readonly pollNow?: () => number
+  /** Idle-abort budget (ms) for the NO-PROGRESS watchdog: a box whose run.log
+   *  stops growing for this long while polls still succeed (the jun-27 wedged-box
+   *  hang) is aborted to the requeue path. Resolved once from the bench env via
+   *  {@link resolveNoProgressBudgetMs}; `undefined`/`Infinity` ⇒ off (default). */
+  readonly noProgressBudgetMs?: number
+  /** OTLP endpoint for the live OTEL reverse tunnel (operator-side). Resolved from
+   *  `QUANTA_OTEL_ENDPOINT` at the allowlisted full.ts root and threaded here so
+   *  box-session opens the tunnel WITHOUT reading env itself. `undefined`/non-
+   *  localhost ⇒ no tunnel (byte-identical). */
+  readonly otelEndpoint?: string
 }
 
 export interface BoxStatusSnapshot {

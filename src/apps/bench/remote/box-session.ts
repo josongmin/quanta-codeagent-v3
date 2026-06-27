@@ -144,6 +144,11 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
   // operator can label the box's spans distinctly.
   "QUANTA_OTEL_ENDPOINT",
   "QUANTA_OTEL_SERVICE_NAME",
+  // jun-27: run id stamped on every span (`quanta.run.id` resource attr) so the
+  // trace-viewer `?run=<id>` deep-link can filter THIS box's run out of a sink
+  // that mixes many concurrent runs. Without forwarding it the box's spans carry
+  // no run id and the operator's run-link shows nothing.
+  "QUANTA_OTEL_RUN_ID",
 ])
 
 /**
@@ -374,7 +379,12 @@ const runChunkBench = async (args: {
   // Live OTEL: stream this run's spans to the operator's trace UI for the run's
   // duration (no-op unless QUANTA_OTEL_ENDPOINT points at localhost). Closed in
   // .finally so a thrown poll / box-death still reaps the tunnel child.
-  const otelTunnel = openOtelReverseTunnel(args.keyPath, args.host, args.log)
+  const otelTunnel = openOtelReverseTunnel(
+    args.keyPath,
+    args.host,
+    args.params.otelEndpoint ?? "",
+    args.log,
+  )
   const remoteRun = await runBenchDetachedPoll({
     ssh: args.ssh,
     aws: args.aws,
@@ -393,6 +403,12 @@ const runChunkBench = async (args: {
       ? { pollIntervalMs: args.params.pollIntervalMs }
       : {}),
     ...(args.params.pollNow !== undefined ? { now: args.params.pollNow } : {}),
+    // No-progress (wedged-box) abort budget — pure pass-through. Resolved from env
+    // at the ALLOWLISTED composition root (full.ts) and threaded via params, so
+    // this mid-tree orchestrator stays env-free (no-process-env-outside-config).
+    ...(args.params.noProgressBudgetMs !== undefined
+      ? { noProgressBudgetMs: args.params.noProgressBudgetMs }
+      : {}),
   }).finally(() => {
     otelTunnel.close()
   })

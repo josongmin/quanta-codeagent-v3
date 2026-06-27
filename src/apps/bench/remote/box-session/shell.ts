@@ -137,10 +137,12 @@ export const makeSsh =
 export const openOtelReverseTunnel = (
   keyPath: string,
   host: string,
+  endpoint: string,
   log: (msg: string) => void,
 ): { close: () => void } => {
-  const endpoint = process.env.QUANTA_OTEL_ENDPOINT ?? ""
-  const match = endpoint.match(/^https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/)
+  // `endpoint` (QUANTA_OTEL_ENDPOINT) is resolved by the caller at the allowlisted
+  // composition root and passed in, so this slice reads no env (no-process-env).
+  const match = (endpoint ?? "").match(/^https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/)
   if (match === null) return { close: () => {} }
   const port = match[1]
   const proc = Bun.spawn(
