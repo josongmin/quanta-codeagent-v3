@@ -2854,6 +2854,30 @@ export const specPreInstall = (repo: string, version: string | undefined): reado
 export const hasRepoVersionSpec = (repo: string, version: string | undefined): boolean =>
   version !== undefined && REPO_VERSION_SPECS[repo]?.[version] !== undefined
 
+/** Whether the spec knows this repo at ALL (any version). Lets a caller tell a
+ *  genuinely-unknown repo apart from a known repo on a DRIFTED (unmapped) version
+ *  — the latter is a spec-coverage gap to surface, not a silent fallback. */
+export const specHasRepo = (repo: string): boolean => REPO_VERSION_SPECS[repo] !== undefined
+
+/** Resolve the test-runner for (repo, version): the EXACT spec runner, or — when
+ *  that version is unmapped (drift) — the repo's most-recent mapped version's
+ *  runner. A repo's runner is stable across versions, so this degrades version
+ *  drift gracefully WITHOUT a repo-name branch (and keeps a runtests repo from
+ *  silently mis-resolving). `specTestCmd` stays strictly exact for callers that
+ *  need precision. */
+export const specResolvedRunner = (
+  repo: string,
+  version: string | undefined,
+): string | undefined => {
+  const exact = specTestCmd(repo, version)
+  if (exact !== undefined) return exact
+  const vers = REPO_VERSION_SPECS[repo]
+  if (vers === undefined) return undefined
+  const keys = Object.keys(vers).sort()
+  const last = keys[keys.length - 1]
+  return last === undefined ? undefined : vers[last]?.testCmd
+}
+
 /** Classify the in-loop test runner for (repo, version). "runtests" repos (django)
  *  genuinely CANNOT run under plain pytest — their tests need the project test
  *  harness + settings (the engage=0 RCA: pytest collection dies on
@@ -2861,12 +2885,14 @@ export const hasRepoVersionSpec = (repo: string, version: string | undefined): b
  *  else is pytest-compatible and uses the uniform pytest oracle (the spec runners
  *  for those — pytest / tox-wrapping-pytest / sympy bin-test — are all
  *  pytest-collectable in-loop; their native wrappers like tox aren't on the uv
- *  env anyway). Derived from the spec runner string: this is the ONE place
- *  runner-name knowledge lives, so no logic file needs a per-framework literal. */
+ *  env anyway). Derived from the spec runner (drift-resilient via
+ *  `specResolvedRunner`): this is the ONE place runner-name knowledge lives,
+ *  so no logic file needs a per-framework literal, and an unmapped version of a
+ *  runtests repo still classifies "runtests" rather than silently mis-routing. */
 export const specRunnerKind = (
   repo: string,
   version: string | undefined,
 ): "runtests" | "pytest" => {
-  const t = specTestCmd(repo, version)
+  const t = specResolvedRunner(repo, version)
   return t !== undefined && t.includes("runtests.py") ? "runtests" : "pytest"
 }

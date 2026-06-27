@@ -26,7 +26,7 @@ import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
-import { specRunnerKind, specTestCmd } from "./repo-version-specs"
+import { specResolvedRunner, specRunnerKind } from "./repo-version-specs"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {
@@ -355,7 +355,9 @@ export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
     // verbosity/settings/parallel flags — use them VERBATIM, never re-add a
     // settings flag (1.9 has none, 1.10 does; the spec owns that difference).
     // Strip the leading `./` and invoke under `python`. FAIL_TO_PASS → labels.
-    const runner = specTestCmd(repo, version) ?? ""
+    // specResolvedRunner (not specTestCmd) so an unmapped version of a runtests
+    // repo still gets a real runtests runner instead of an empty command.
+    const runner = specResolvedRunner(repo, version) ?? ""
     const prefix = buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
       PYTEST_ADDOPTS: "",
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",

@@ -16,6 +16,7 @@ import { describe, expect, test } from "bun:test"
 import { synthesizeTestCmd } from "@/runner/batch/corpus/dataset"
 import {
   hasRepoVersionSpec,
+  specHasRepo,
   specRunnerKind,
   specTestCmd,
 } from "@/runner/batch/corpus/repo-version-specs"
@@ -138,6 +139,28 @@ describe("synthesizeTestCmd derives the runner from the SWE-bench spec SSOT", ()
     }
     // unknown (repo,version) defaults to the pytest oracle, never a broken runner
     expect(specRunnerKind("foo/bar", "1.0")).toBe("pytest")
+  })
+
+  test("version drift is resilient: an UNMAPPED django version still classifies + runs as runtests (not silent pytest)", () => {
+    // The SOTA++ defense: if SWE-bench ships a django version not yet in the spec,
+    // specRunnerKind infers "runtests" from the repo's OTHER versions (a repo's
+    // runner is stable) instead of silently mis-routing django to the pytest
+    // oracle (which can't run django — the engage=0 failure mode).
+    expect(hasRepoVersionSpec("django/django", "99.99")).toBe(false) // genuinely unmapped
+    expect(specRunnerKind("django/django", "99.99")).toBe("runtests")
+    // and synthesizeTestCmd still produces a REAL runtests command (resolved from
+    // the repo's known versions), never an empty/pytest command for django
+    const cmd = synthesizeTestCmd({
+      repo: "django/django",
+      version: "99.99",
+      FAIL_TO_PASS: f2p(DJANGO_F2P),
+    })
+    expect(cmd).toContain("runtests.py")
+    expect(cmd).toContain(DJANGO_LABEL)
+    expect(cmd).not.toContain("pytest -x --no-header")
+    // specHasRepo distinguishes known-repo-drift from a genuinely unknown repo
+    expect(specHasRepo("django/django")).toBe(true)
+    expect(specHasRepo("totally/unknown")).toBe(false)
   })
 
   test('no `repo === "django/django"` literal remains in dataset.ts', async () => {
