@@ -695,6 +695,13 @@ const runRepairPhase = async (
         },
         sandbox,
         exec,
+        // PARITY with the runner-core driver (src/runner/batch/eval/driver.ts):
+        // the repro-rail validator reads the pytest report via `readFile` to
+        // classify resolved/red; WITHOUT it `classifyPytestReport` short-circuits
+        // to "exec_failed" every round (validator.ts: `readFile === undefined`),
+        // so a `repro` primary rail can never clear — the repair loop runs but is
+        // inert. Threading the same Bun.file reader makes the rail evaluable.
+        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
         timeoutMs: deps.timeoutMs,
         evaluatePredicate: evaluateSuccessPredicate,
         ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
