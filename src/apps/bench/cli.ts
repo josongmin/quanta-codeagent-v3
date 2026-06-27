@@ -51,6 +51,7 @@ import {
   runBenchLogin,
   selectAuthSourceLabel,
 } from "./auth-pool"
+import { ensureBenchTraceSink } from "./default-trace-sink"
 import { bootBenchOtelExport, traceViewerUrl } from "./otel"
 import { runTraceSink } from "./otel-trace-sink"
 import {
@@ -438,24 +439,35 @@ const cmdGradeFullRemote = async (): Promise<void> => {
     )
     return
   }
-  if (expected.length === 0) {
-    // Unknown expected set ⇒ no instance-aware reconcile possible; run once.
-    logger.info("[full-remote] could not determine instance set — relaunch retry disabled")
-    const res = await makeBackend([]).run()
-    logFullRemoteOutcome({
-      resolved: [...(res.resolved ?? [])],
-      unresolved: [...(res.unresolved ?? [])],
-      missing: [],
-      attempts: 1,
-    })
-    return
-  }
-  const out = await runWithRelaunch(makeBackend, {
-    expected,
-    maxRelaunch,
-    onLog: (m) => logger.info(m),
+  // Default-ON tracing: embed a durable sink + point this run at it so the agent
+  // waterfall is auto-captured to a file (never silently lost). Opt out with
+  // QUANTA_OTEL_ENDPOINT=off, or set your own endpoint to use an external sink.
+  const trace = ensureBenchTraceSink(process.env, {
+    runId: `fullremote-${argValue("--instance") ?? "all"}-${Date.now()}`,
+    log: (m) => logger.info(m),
   })
-  logFullRemoteOutcome(out)
+  try {
+    if (expected.length === 0) {
+      // Unknown expected set ⇒ no instance-aware reconcile possible; run once.
+      logger.info("[full-remote] could not determine instance set — relaunch retry disabled")
+      const res = await makeBackend([]).run()
+      logFullRemoteOutcome({
+        resolved: [...(res.resolved ?? [])],
+        unresolved: [...(res.unresolved ?? [])],
+        missing: [],
+        attempts: 1,
+      })
+      return
+    }
+    const out = await runWithRelaunch(makeBackend, {
+      expected,
+      maxRelaunch,
+      onLog: (m) => logger.info(m),
+    })
+    logFullRemoteOutcome(out)
+  } finally {
+    await trace?.stop()
+  }
 }
 
 /** Patch-gen concurrency on the box, clamped [1,16]. The binding limit is the

@@ -356,7 +356,9 @@ export interface TraceSinkOptions {
  *  (the CLI sub-command or the script entry point) owns all `process.env`
  *  resolution. Exported so the bench CLI (`quanta-bench trace`) can launch it
  *  in-process. Returns the resolved port + UI URL. */
-export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl: string } => {
+export const runTraceSink = (
+  opts: TraceSinkOptions = {},
+): { port: number; uiUrl: string; stop: () => Promise<void> } => {
   const port = opts.port ?? DEFAULT_PORT
   const showMetrics = opts.showMetrics ?? false
   const write = (line: string): void => {
@@ -376,7 +378,7 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
   // Periodically flush a partial buffer so an S3 batch < flushEveryN doesn't sit
   // unuploaded between bursts (no-op for file/noop). The receiver runs forever, so
   // there is no shutdown hook to flush on — this bounds the unflushed window.
-  setInterval(() => {
+  const flushTimer = setInterval(() => {
     void spanSink.flush()
   }, 15_000)
   const uiHtml = Bun.file(`${import.meta.dir}/trace-viewer.html`)
@@ -396,7 +398,7 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
     }
   }
 
-  Bun.serve({
+  const server = Bun.serve({
     port,
     hostname: "0.0.0.0",
     async fetch(req) {
@@ -423,7 +425,16 @@ export const runTraceSink = (opts: TraceSinkOptions = {}): { port: number; uiUrl
       showMetrics ? " (+/v1/metrics)" : ""
     }${opts.sinkLabel !== undefined ? ` · durable → ${opts.sinkLabel}` : ""}`,
   )
-  return { port, uiUrl }
+  // Graceful stop for an EMBEDDED sink (the default-on bench auto-capture): the
+  // CLI `trace` command never calls this (it serves until Ctrl-C), but an
+  // in-process owner must clear the flush timer, drain the last batch to the
+  // durable sink, and free the port. Idempotent.
+  const stop = async (): Promise<void> => {
+    clearInterval(flushTimer)
+    await spanSink.flush().catch(() => {})
+    server.stop()
+  }
+  return { port, uiUrl, stop }
 }
 
 // ── Script entry point ───────────────────────────────────────────────────────
