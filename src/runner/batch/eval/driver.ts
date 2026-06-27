@@ -23,7 +23,6 @@ import {
   type AgentlessLocalizeDeps,
   type AgentlessLocalizeResult,
   agentlessLocalize,
-  applyReproBootstrap,
   buildSystemPrompt,
   composeAgentlessHint,
   composeIssueHint,
@@ -1696,19 +1695,13 @@ const generateReproCandidateTests = async (
       config,
       ...(mwe !== undefined ? { mwe } : {}),
     }
-    // jun-27 engage=0 fix: prepend the repo's execution bootstrap (django settings)
-    // to EVERY repro source before it runs, so pytest collection doesn't die on
-    // ImproperlyConfigured (→ collected=0 → "unknown" → reproduced=0 → no rail).
-    // No-op for repos that need none ⇒ byte-identical to the legacy path.
-    const repo = instance.swebench?.repo
-    const boot = (source: string): string => applyReproBootstrap(source, repo)
     const canonical = (await gen({ ...base, kind: "canonical" })).map(
-      (source): ReproTestCandidate => ({ kind: "canonical", source: boot(source) }),
+      (source): ReproTestCandidate => ({ kind: "canonical", source }),
     )
     // G2: env-health control sources. Generated ONLY when the gate is on — when
     // off this call is skipped entirely so the LLM-call count + outputs are
     // byte-identical to the legacy path.
-    const controlSources = (
+    const controlSources =
       deps.pairedControl === true
         ? await (deps.generateControl ?? generateControlTests)({
             issue: instance.problemStatement,
@@ -1716,12 +1709,11 @@ const generateReproCandidateTests = async (
             config,
           })
         : []
-    ).map(boot)
     if (deps.adversarial !== true) return { candidates: canonical, controlSources }
     // Advisory hardening set: a SEPARATE generation pass with the over-strict
     // adversarial prompt. Kept distinct so it can never reach the submit gate.
     const hardening = (await gen({ ...base, kind: "hardening" })).map(
-      (source): ReproTestCandidate => ({ kind: "hardening", source: boot(source) }),
+      (source): ReproTestCandidate => ({ kind: "hardening", source }),
     )
     return { candidates: [...canonical, ...hardening], controlSources }
   } catch {

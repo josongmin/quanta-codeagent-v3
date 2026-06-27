@@ -409,52 +409,6 @@ const stripTrailingPytestFooter = (src: string): string => {
   return src.slice(0, start).replace(/\n+$/, "")
 }
 
-/** Marker so {@link applyReproBootstrap} is idempotent (never double-prepends). */
-const REPRO_BOOTSTRAP_MARKER = "# quanta:repro-bootstrap"
-
-/** django execution bootstrap. The repro runs `python <file>` with cwd = repo
- *  root; pytest then re-imports the file for collection. A django repro's
- *  models/imports touch `settings` AT COLLECTION TIME → without a configured
- *  settings module that raises `ImproperlyConfigured` → "1 error during
- *  collection" → `collected=0` → outcome `"unknown"` → reproduced=0 → the repair
- *  rail never opens (jun-27 engage=0 RCA, cassette-confirmed). Prepending this
- *  preamble runs `django.setup()` BEFORE the test body / collection re-import, so
- *  settings are live. `setdefault` keeps an env-supplied DJANGO_SETTINGS_MODULE
- *  (the box/grader may export the right one) and only falls back to the standard
- *  `test_sqlite` (django's own runtests settings, on `tests/`). All failures are
- *  swallowed so a non-django-shaped repro is never broken by the bootstrap. */
-const DJANGO_REPRO_BOOTSTRAP = [
-  REPRO_BOOTSTRAP_MARKER,
-  "import os as _q_os, sys as _q_sys",
-  '_q_sys.path.insert(0, _q_os.path.join(_q_os.getcwd(), "tests"))',
-  '_q_os.environ.setdefault("DJANGO_SETTINGS_MODULE", "test_sqlite")',
-  "try:",
-  "    import django as _q_dj",
-  "    _q_dj.setup()",
-  "except Exception:",
-  "    pass",
-  "",
-  "",
-].join("\n")
-
-/** The per-repo repro execution bootstrap, or `""` when the repo needs none.
- *  Keyed on the SWE-bench repo slug; today only django requires a framework
- *  bootstrap (its tests are useless without configured settings). Exported pure
- *  for unit testing. */
-export const reproBootstrapPreamble = (repo: string | undefined): string =>
-  repo === "django/django" ? DJANGO_REPRO_BOOTSTRAP : ""
-
-/** Prepend the repo's execution bootstrap to a repro source (idempotent;
- *  no-op for repos that need none or an empty source). Applied to every repro
- *  candidate before execution so the framework is configured BEFORE pytest
- *  collection (the engage=0 fix). PURE. */
-export const applyReproBootstrap = (src: string, repo: string | undefined): string => {
-  if (typeof src !== "string" || src.trim() === "") return typeof src === "string" ? src : ""
-  const preamble = reproBootstrapPreamble(repo)
-  if (preamble === "" || src.includes(REPRO_BOOTSTRAP_MARKER)) return src
-  return `${preamble}${src}`
-}
-
 /**
  * Ensure the P1 `python <path>`→pytest bridge is present (see PYTEST_FOOTER).
  *

@@ -309,7 +309,6 @@ export {
   renderRepoRulesBlock,
 } from "./repo-rules"
 export {
-  applyReproBootstrap,
   buildControlTestPrompt,
   DEFAULT_CONTROL_SAMPLES as REPRO_CONTROL_DEFAULT_SAMPLES,
   DEFAULT_SAMPLES as REPRO_TEST_DEFAULT_SAMPLES,
@@ -328,7 +327,6 @@ export {
   type ReproTestSample,
   type ReproTestSelection,
   type ReproWriteFilePort,
-  reproBootstrapPreamble,
   selectReproTest,
   stripMarkdownFences,
   stripPythonComments,
