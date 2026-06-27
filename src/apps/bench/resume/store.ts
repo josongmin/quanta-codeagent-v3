@@ -10,7 +10,8 @@
  * pure composition so the producer + consumer agents share one wiring point.
  */
 import { s3ReplayStore } from "@/llm/replay"
-import type { ReplayStore } from "@/llm/replay"
+import type { MatchPolicy, ReplayStore } from "@/llm/replay"
+import type { StreamInput } from "@/llm/types"
 import {
   type RemoteBackend,
   readReceipt,
@@ -27,6 +28,14 @@ export interface ResumeStoreConfig {
   readonly region?: string
   /** Injected aws cli runner (offline-testable); default = the real cli. */
   readonly runAws?: S3BackendOptions["runAws"]
+  /**
+   * Override the request→hash used by the durable S3 replay store. The resume
+   * path passes the CANONICALIZING `resumeHashRequest` here so a cassette
+   * recorded on box A replays HIT on box B (volatile tokens masked before
+   * hashing). Absent ⇒ the store's `defaultHashRequest` (byte-identical match
+   * with the jsonl store — used by tests / non-resume callers).
+   */
+  readonly hashRequest?: (req: StreamInput, policy: MatchPolicy) => string
 }
 
 export interface ResumeStore {
@@ -46,7 +55,10 @@ export const resumeStore = (cfg: ResumeStoreConfig, key: string): ResumeStore =>
     ...(cfg.runAws !== undefined ? { runAws: cfg.runAws } : {}),
   })
   const segments = segmentStore(backend, key)
-  const replayStore = s3ReplayStore({ store: segments })
+  const replayStore = s3ReplayStore({
+    store: segments,
+    ...(cfg.hashRequest !== undefined ? { hashRequest: cfg.hashRequest } : {}),
+  })
   return {
     backend,
     segments,

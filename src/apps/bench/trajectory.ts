@@ -23,7 +23,11 @@
 import { resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
+import type { MatchPolicy } from "@/llm/replay"
+import type { StreamInput } from "@/llm/types"
 import { isFalsyToken } from "@/shared"
+import { resumeHashRequest } from "./resume/canonicalize"
+import { resolveResumeConfig, resumeActive } from "./resume/config"
 import { maybeTeeResumeRecording } from "./resume/recorder"
 
 const defaultBenchTrajectoryPath = (): string => `${process.cwd()}/bench-trajectory.jsonl`
@@ -120,12 +124,23 @@ export const replayTrajectoryPort = (args: {
   fallback?: LLMPort
   provider?: string
   model?: string
+  /**
+   * Override the request→hash the jsonl replay store uses to match. The resume
+   * path threads the CANONICALIZING `resumeHashRequest` here so a cassette
+   * recorded on box A replays HIT on box B despite volatile tool-output tokens.
+   * Absent ⇒ `defaultHashRequest` (byte-identical to the prior default path).
+   */
+  hashRequest?: (req: StreamInput, policy: MatchPolicy) => string
 }): LLMPort => {
   if (args.onMiss !== "throw" && args.fallback === undefined) {
     throw new Error(`QUANTA_BENCH_REPLAY_ON_MISS=${args.onMiss} requires a live fallback LLMPort`)
   }
   return replayLlmPort({
-    store: jsonlReplayStore({ path: args.path, ...(args.limit !== undefined ? { limit: args.limit } : {}) }),
+    store: jsonlReplayStore({
+      path: args.path,
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      ...(args.hashRequest !== undefined ? { hashRequest: args.hashRequest } : {}),
+    }),
     onMiss: args.onMiss,
     ...(args.fallback !== undefined ? { fallback: args.fallback } : {}),
     ...(args.provider !== undefined ? { provider: args.provider } : {}),
@@ -172,12 +187,18 @@ export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
 export const maybeReplayTrajectory = (llm: LLMPort): LLMPort => {
   const mode = resolveBenchTrajectoryMode()
   if (mode.kind !== "replay") return llm
+  // RESUME-GATED canonicalization: only when `resumeActive` (gate ON + bucket)
+  // do we mask volatile tokens before matching, so cross-box replay HITs. The
+  // DEFAULT (resume off) path omits `hashRequest` ⇒ `defaultHashRequest`,
+  // byte-identical to the prior behavior.
+  const resumeOn = resumeActive(resolveResumeConfig(process.env))
   return replayTrajectoryPort({
     path: mode.path,
     onMiss: mode.onMiss,
     ...(mode.onMiss === "throw" ? {} : { fallback: llm }),
     ...(llm.provider !== undefined ? { provider: llm.provider } : {}),
     ...(llm.model !== undefined ? { model: llm.model } : {}),
+    ...(resumeOn ? { hashRequest: resumeHashRequest } : {}),
   })
 }
 

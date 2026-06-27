@@ -30,6 +30,7 @@ import {
 } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import type { ResumeReceipt } from "@/shared/remote-store"
+import { resumeHashRequest } from "./canonicalize"
 import { resolveResumeConfig, resumeActive } from "./config"
 import { resumeKey } from "./identity"
 import { resumeStore } from "./store"
@@ -178,9 +179,16 @@ export const maybeTeeResumeRecording = (
   }
 
   const key = resumeKey({ campaignId: cfg.campaignId, instanceId })
-  // exactOptionalPropertyTypes: thread region only when present.
+  // exactOptionalPropertyTypes: thread region only when present. The CANONICALIZING
+  // `resumeHashRequest` masks volatile tokens (durations / clock / ISO / workdir
+  // suffixes) BEFORE hashing so a cassette recorded on THIS box replays HIT on a
+  // fresh resume box even though tool-output timings differ.
   const resume = resumeStore(
-    { bucket: cfg.bucket, ...(cfg.region !== undefined ? { region: cfg.region } : {}) },
+    {
+      bucket: cfg.bucket,
+      ...(cfg.region !== undefined ? { region: cfg.region } : {}),
+      hashRequest: resumeHashRequest,
+    },
     key,
   )
 
@@ -199,5 +207,13 @@ export const maybeTeeResumeRecording = (
     writeReceipt: resume.writeReceipt,
   })
 
-  return recordingLlmPort({ inner: llm, store })
+  // Stamp the record `id` with the SAME canonicalizing hash (policy "exact",
+  // recordingLlmPort's default policy) so a cassette's id field is canonical too.
+  // Not load-bearing for matching — `match` rehashes candidates with the
+  // store-side `hashRequest` — but keeps the persisted id consistent.
+  return recordingLlmPort({
+    inner: llm,
+    store,
+    hashRequest: (req) => resumeHashRequest(req, "exact"),
+  })
 }
