@@ -53,9 +53,15 @@ const VOLATILE_MASKS: ReadonlyArray<{ readonly re: RegExp; readonly to: string }
   // 4-segment version-ish "1:2:3:4" middle (the \b on each end keeps it tight).
   { re: /\b\d{1,2}:\d{2}:\d{2}\b/g, to: "<TIME>" },
   // Durations: a digit IMMEDIATELY followed (optionally one space) by a time
-  // unit. The leading \b + required digit means we never touch a bare word like
-  // "press" or "ms" alone — only "0.34s", "12 ms", "5ns".
-  { re: /\b\d+(\.\d+)?\s?(ns|µs|us|ms|s)\b/g, to: "<DUR>" },
+  // unit — abbreviations AND word forms (real tool output uses both: pytest
+  // "0.34s", MySQL "1 row in set (0.00 sec)", "took 2 minutes"). Longest units
+  // first so "sec" wins over "s". The leading \b + required digit means we never
+  // touch a bare word ("press", "minimum") — only "0.34s", "12 ms", "0.00 sec".
+  // Bare "m"/"h" are intentionally EXCLUDED (ambiguous: "-5m", "git -5h").
+  {
+    re: /\b\d+(\.\d+)?\s?(nanoseconds?|milliseconds?|microseconds?|seconds?|minutes?|hours?|msec|secs?|mins?|hrs?|µs|us|ns|ms|s)\b/g,
+    to: "<DUR>",
+  },
   // Random workdir suffixes (belt-and-suspenders with the deterministic-workdir
   // fix). repo-<hex/alnum>, bench-<name>-<suffix>, swebench-<name>-<suffix>.
   { re: /\bswebench-[\w.]+-[A-Za-z0-9]{6,}\b/g, to: "<WORK>" },

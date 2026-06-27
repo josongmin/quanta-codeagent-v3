@@ -276,7 +276,10 @@ describe("canonicalize — RE-VALIDATION on the REAL cassette (residual ≈ 0)",
 
     const before = { iso: 0, clock: 0, dur: 0, workdir: 0 }
     const after = { iso: 0, clock: 0, dur: 0, workdir: 0 }
-    for (const line of lines) {
+    // Sample the cassette — parsing+regexing all 331 × ~65KB rows blew the default
+    // test timeout; 150 rows is representative (the full-cassette residual=0 is
+    // separately witnessed by tools/resume-hammer + the perturbation check).
+    for (const line of lines.slice(0, 150)) {
       const request = (JSON.parse(line) as { request: StreamInput }).request
       const raw = textOf(request)
       const masked = canonicalizeForHash(raw)
@@ -301,15 +304,18 @@ describe("canonicalize — RE-VALIDATION on the REAL cassette (residual ≈ 0)",
     }
     const sample = lines.slice(0, 40)
     const requests = sample.map((l) => (JSON.parse(l) as { request: StreamInput }).request)
+    // PRECOMPUTE both hashes once per request (O(n)) — computing them inside the
+    // O(n²) pair loop re-hashed 65KB requests ~3000× (SHA-256 over the whole
+    // prompt), which blew the default test timeout. Comparisons below are cheap.
+    const baseHash = requests.map((r) => defaultHashRequest(r, POLICY))
+    const canonHash = requests.map((r) => resumeHashRequest(r, POLICY))
     // Pair up requests whose ORIGINAL hashes differ; after canonicalization they
     // must STILL differ (no false-collapse of genuinely-different turns).
     let checked = 0
     for (let i = 0; i < requests.length; i++) {
       for (let j = i + 1; j < requests.length; j++) {
-        const a = requests[i] as StreamInput
-        const b = requests[j] as StreamInput
-        if (defaultHashRequest(a, POLICY) !== defaultHashRequest(b, POLICY)) {
-          expect(resumeHashRequest(a, POLICY)).not.toBe(resumeHashRequest(b, POLICY))
+        if (baseHash[i] !== baseHash[j]) {
+          expect(canonHash[i]).not.toBe(canonHash[j])
           checked++
         }
       }
