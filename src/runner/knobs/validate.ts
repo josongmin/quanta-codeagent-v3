@@ -33,7 +33,12 @@ const enforceRequires = (
   }
 }
 
-/** Collect all reciprocal conflict pairs, deduped by sorted pair key. */
+/** Collect all reciprocal conflict pairs, deduped by sorted pair key. The
+ *  reported pair is emitted in CANONICAL (lexicographic) order — `[min, max]` —
+ *  so the conflict message is DETERMINISTIC regardless of knob registration /
+ *  resolution order (e.g. `branch-search<->localize-phase`, never the reverse).
+ *  Before the schema-derived central registration this happened to match the
+ *  import order; pinning it here makes it order-independent (stronger). */
 const collectConflicts = (
   active: ReadonlySet<string>,
   knobs: ReadonlyMap<string, AnyKnob>,
@@ -45,10 +50,11 @@ const collectConflicts = (
     if (!k) continue
     for (const c of k.conflicts ?? []) {
       if (!active.has(c)) continue
-      const key = id < c ? `${id} ${c}` : `${c} ${id}`
+      const [lo, hi] = id < c ? [id, c] : [c, id]
+      const key = `${lo} ${hi}`
       if (seen.has(key)) continue
       seen.add(key)
-      conflicts.push([id, c])
+      conflicts.push([lo, hi])
     }
   }
   return conflicts

@@ -21,7 +21,11 @@ const SURFACES: readonly Surface[] = ["bench"]
 /** Non-NOOP apply — wires `cfg.subagent`. Bound into the central registrar
  *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export; ONE
  *  definition so the derived knob is byte-identical to the registered one. */
-export const applySubagent = (cfg: AgentConfig, value: boolean, ctx: { surface: Surface }): AgentConfig => {
+export const applySubagent = (
+  cfg: AgentConfig,
+  value: boolean,
+  ctx: { surface: Surface },
+): AgentConfig => {
   if (value !== true) return cfg
   if (!SURFACES.includes(ctx.surface)) return cfg
   return { ...cfg, subagent: cfg.subagent ?? {} }

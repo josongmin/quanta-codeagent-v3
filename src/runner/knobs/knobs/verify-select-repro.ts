@@ -3,6 +3,8 @@
  * in `@/config/knob-schema/schemas/bench-c`). NOOP apply: consumed out of band
  * via the bench posture projection. Registration is CENTRAL (`registerBenchKnobs`);
  * this file re-exports the derived knob + the mode type for back-compat importers.
+ * envKey: `QUANTA_BENCH_VERIFY_SELECT_REPRO` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import { verifySelectReproSchema } from "@/config/knob-schema/schemas/bench-c"

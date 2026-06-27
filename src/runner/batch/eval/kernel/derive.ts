@@ -27,12 +27,16 @@
  * @see @/runner/knobs/types — the registry `Knob` shape we reproduce.
  */
 
-import type { AnyKnobSchema, KnobSchema } from "@/config/knob-schema/contracts"
 import type { AgentConfig } from "@/agent"
+import type { AnyKnobSchema, KnobSchema } from "@/config/knob-schema/contracts"
 import type { Knob } from "@/runner/knobs/types"
 
 /** NOOP apply — the default for bench knobs consumed out of band via posture. */
-const NOOP_APPLY = <T>(cfg: AgentConfig, _value: T, _ctx: { surface: import("@/runner/knobs/types").Surface }): AgentConfig => cfg
+const NOOP_APPLY = <T>(
+  cfg: AgentConfig,
+  _value: T,
+  _ctx: { surface: import("@/runner/knobs/types").Surface },
+): AgentConfig => cfg
 
 /** Runner-side relationship bindings — `conflicts`/`requires` reference OTHER
  *  knob ids (resolver validation), a runner-registration concern that the

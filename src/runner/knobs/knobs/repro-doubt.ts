@@ -15,6 +15,8 @@
  *   - < 2 would fire after a single test run (false-positive on normal verify).
  *   - > 12 never trips on a maxTurns≈30/60 run (dead knob).
  * Closed parser: `Number(...)` + `Number.isInteger` (no parseInt partial-parse).
+ * envKey: `QUANTA_BENCH_REPRO_DOUBT` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 import type { AgentConfig } from "@/agent"
 import { reproDoubtSchema } from "@/config/knob-schema/schemas/bench-repro"

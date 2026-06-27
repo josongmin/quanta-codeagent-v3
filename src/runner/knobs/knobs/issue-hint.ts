@@ -5,6 +5,8 @@
  * (`prepareIssueHint` → `precomputedHint` string), not a field on `AgentConfig`.
  * Registration is CENTRAL (`registerBenchKnobs`); this file re-exports the derived
  * knob + the mode type for back-compat importers.
+ * envKey: `QUANTA_BENCH_ISSUE_HINT` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import { issueHintSchema } from "@/config/knob-schema/schemas/bench-a"

@@ -27,9 +27,6 @@
 
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
 import { deriveKnob, type KnobRelationships } from "@/runner/batch/eval/kernel/derive"
-import { allKnobs, registerKnob } from "./registry"
-import type { Knob } from "./types"
-
 // Non-NOOP applyFns — the ONLY definitions live in the knob files; imported here
 // so the registrar's derived knob shares the SAME apply reference as the live
 // knob export (byte-identical). A schema absent from this map ⇒ NOOP apply.
@@ -45,6 +42,8 @@ import { applyReproDoubt } from "./knobs/repro-doubt"
 import { applySkills } from "./knobs/skills"
 import { applySubagent } from "./knobs/subagent"
 import { applyWorkingState } from "./knobs/working-state"
+import { allKnobs, registerKnob } from "./registry"
+import type { Knob } from "./types"
 
 /**
  * Knob-id → non-NOOP `apply` binding. The 12 bench knobs whose live registry

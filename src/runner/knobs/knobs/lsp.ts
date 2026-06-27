@@ -9,10 +9,12 @@
  * Surfaces: bench, agent-batch, agent-interactive. CLI/IDE entries do not
  * register LSP tools by this knob (those surfaces wire LSP through their
  * own assembly path).
+ * envKey: `QUANTA_BENCH_LSP` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
-import { lspNavToolList } from "@/agent"
 import type { AgentConfig } from "@/agent"
+import { lspNavToolList } from "@/agent"
 import { lspSchema } from "@/config/knob-schema/schemas/bench-gap-1"
 import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import type { Tool } from "@/tool"

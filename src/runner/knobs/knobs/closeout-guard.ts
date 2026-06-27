@@ -17,6 +17,8 @@
  *
  * Wired field: `cfg.closeoutGuard = { enabled: true, fourRule?: boolean }`
  * (typed in `src/agent/types.ts` at AgentConfig.closeoutGuard).
+ * envKey: `QUANTA_BENCH_CLOSEOUT` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import type { AgentConfig } from "@/agent"

@@ -22,6 +22,8 @@
  * `maxTrips` semantics are sensitive (each trip is one full reminder cycle);
  * we surface only the operational values observed in the codebase. No
  * heuristics.
+ * envKey: `QUANTA_BENCH_MUST_PASS` (the SSOT declaration lives on the schema; this
+ * runner-side knob derives from it).
  */
 
 import type { AgentConfig } from "@/agent"
