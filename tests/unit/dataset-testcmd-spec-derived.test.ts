@@ -40,6 +40,10 @@ describe("synthesizeTestCmd derives the runner from the SWE-bench spec SSOT", ()
     expect(cmd).toContain(DJANGO_LABEL)
     // runner invoked under python with the leading `./` stripped
     expect(cmd).toContain("python tests/runtests.py")
+    // gold-suppression link: the django command carries the PYTEST_ADDOPTS=
+    // signature that driver's isSynthesizedDatasetVerifierCommand hides from the
+    // agent (this command bakes the FAIL_TO_PASS answer key) — any version.
+    expect(cmd).toContain("PYTEST_ADDOPTS=")
     // the runner substring is exactly the spec's, with no re-added settings
     const runner = specTestCmd("django/django", "1.10") ?? ""
     expect(runner).toBe("./tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1")
