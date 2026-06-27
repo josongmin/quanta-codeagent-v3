@@ -15,7 +15,8 @@
  *   quanta-bench trace                           # CLI wrapper (launch + open browser)
  *   bun src/apps/bench/otel-trace-sink.ts        # run directly; listen on 0.0.0.0:4318
  *   PORT=4319 bun src/apps/bench/otel-trace-sink.ts   # custom port
- *   QUANTA_OTEL_SAVE=spans.jsonl bun src/apps/bench/otel-trace-sink.ts  # tee spans
+ *   QUANTA_OTEL_SAVE=spans.jsonl bun src/apps/bench/otel-trace-sink.ts        # tee → local file
+ *   QUANTA_OTEL_SINK=s3://bucket/traces/run1 bun src/apps/bench/otel-trace-sink.ts  # tee → S3
  *
  * Then point the bench at it:
  *   QUANTA_OTEL_ENDPOINT=http://127.0.0.1:4318 quanta-bench run --swebench …

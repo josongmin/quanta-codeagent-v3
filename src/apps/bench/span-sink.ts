@@ -66,11 +66,34 @@ export const s3SpanSink = (
 ): SpanSinkPort => {
   const flushN = opts.flushEveryN ?? 200
   const buf: string[] = []
-  let seq = 0
+  // Durable sequence: resolved ONCE from the highest existing `spans-<n>` under the
+  // prefix so a sink RESTART appends instead of overwriting `spans-000000` (silent
+  // data loss — the bug this fixes). `list` is the same primitive the resume segment
+  // store uses. Guarded by a single init promise so concurrent first-flushes can't
+  // both seed `seq` (the only async-interleave race in a single-threaded event loop).
+  let seq = -1
+  let init: Promise<void> | undefined
+  const ensureSeq = async (): Promise<void> => {
+    if (seq >= 0) return
+    init ??= (async () => {
+      let max = -1
+      try {
+        for (const key of await backend.list(prefix)) {
+          const m = key.match(/spans-(\d+)\.jsonl$/)
+          if (m?.[1] !== undefined) max = Math.max(max, Number(m[1]))
+        }
+      } catch {
+        // list unavailable — start at 0 (best-effort; first object may overwrite)
+      }
+      seq = max + 1
+    })()
+    await init
+  }
   const flush = async (): Promise<void> => {
     if (buf.length === 0) return
     const body = `${buf.join("\n")}\n`
     buf.length = 0
+    await ensureSeq()
     const part = String(seq++).padStart(6, "0")
     try {
       await backend.put(`${prefix}/spans-${part}.jsonl`, body)

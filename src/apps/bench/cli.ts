@@ -53,6 +53,7 @@ import {
 } from "./auth-pool"
 import { attachBenchOtelExport } from "./otel"
 import { runTraceSink } from "./otel-trace-sink"
+import { fileSpanSink, resolveSpanSink } from "./span-sink"
 import {
   CURRENT_BENCH_BASE_PRESET,
   renderBenchPresetListLines,
@@ -2006,9 +2007,21 @@ const openBrowser = (url: string): void => {
 const cmdTrace = (): void => {
   const portArg = argValue("--port")
   const save = argValue("--save")
+  // `--save <file>` is the explicit file override; otherwise resolve the durable
+  // sink from env so `QUANTA_OTEL_SINK=s3://bucket/prefix quanta-bench trace`
+  // streams to S3 too (not just a local file).
+  const spanSink = save !== undefined ? fileSpanSink(save) : resolveSpanSink(process.env)
+  const sinkLabel =
+    save !== undefined
+      ? `file:${save}`
+      : (process.env.QUANTA_OTEL_SINK ??
+        (process.env.QUANTA_OTEL_SAVE !== undefined && process.env.QUANTA_OTEL_SAVE !== ""
+          ? `file:${process.env.QUANTA_OTEL_SAVE}`
+          : undefined))
   const { port, uiUrl } = runTraceSink({
     ...(portArg !== undefined ? { port: Number(portArg) } : {}),
-    ...(save !== undefined ? { savePath: save } : {}),
+    spanSink,
+    ...(sinkLabel !== undefined ? { sinkLabel } : {}),
     showMetrics: process.argv.includes("--metrics"),
   })
   logger.info(`[trace] live waterfall UI → ${uiUrl}`)

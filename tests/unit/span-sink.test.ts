@@ -63,6 +63,25 @@ describe("span-sink: s3 adapter (offline, injected RemoteBackend)", () => {
     expect(puts.map((p) => p.body)).toEqual(["x\n", "y\n"])
   })
 
+  test("durable seq: resumes after highest existing object (restart appends, race-guarded init)", async () => {
+    const puts: string[] = []
+    let listCalls = 0
+    const backend: RemoteBackend = {
+      put: async (p) => void puts.push(p),
+      get: async () => undefined,
+      list: async () => {
+        listCalls++
+        return ["p/spans-000000.jsonl", "p/spans-000003.jsonl", "p/junk.txt"]
+      },
+    }
+    const s = s3SpanSink(backend, "p", { flushEveryN: 100 })
+    s.write("a")
+    s.write("b")
+    await Promise.all([s.flush(), s.flush()]) // concurrent; only the first has buffered content
+    expect(listCalls).toBe(1) // single init promise guards the seq seed (no double-list)
+    expect(puts).toEqual(["p/spans-000004.jsonl"]) // max(0,3)=3 ⇒ resume at 4, NOT overwrite 0
+  })
+
   test("empty flush is a no-op (no spurious object)", async () => {
     const puts: { path: string; body: string }[] = []
     const s = s3SpanSink(fakeBackend(puts), "p")
