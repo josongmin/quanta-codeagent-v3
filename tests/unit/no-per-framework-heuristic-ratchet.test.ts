@@ -15,21 +15,18 @@
  *   - src/runner/batch/eval/
  *   - src/agent/repro-test/
  *
- * It scans .ts files recursively (excluding *.test.ts and __tests__/) for two
+ * It scans .ts files recursively (excluding *.test.ts and __tests__/) for three
  * smells and asserts ZERO hits, EXCEPT in the generated SSOT file
- * `repo-version-specs.ts` (where the spec strings legitimately live):
+ * `repo-version-specs.ts` (where the spec strings legitimately live — its
+ * `specRunnerKind` is the ONE place runner-name knowledge belongs):
  *
  *   1. A repo-name equality branch — a TS expression of the form
  *      `repo === "x/y"` / `instanceId === "x/y"`. Modeled on the orphan-literal
  *      scanner in tests/unit/observability/vocabulary-migration.test.ts.
  *   2. The literal `"test_sqlite"` (double OR single quoted) — the magic django
  *      settings value, which now lives ONLY in the generated spec.
- *
- * `runtests.py` is deliberately ALLOWED: directive formatting keys on the runner
- * TYPE (`runner.includes("runtests.py")`) reading the spec-derived runner — a
- * runner-shape discriminator, not a repo-name branch or answer-key value. A full
- * hardcoded `python tests/runtests.py --settings=test_sqlite …` still trips the
- * `test_sqlite` catch.
+ *   3. The `runtests.py` runner-name literal — logic must classify via
+ *      `specRunnerKind(repo, version)`, never match the runner name inline.
  *
  * CORRECTNESS NOTE on smell #1: the repo-equality regex MUST require the TS
  * identifier `repo` / `instanceId` on the LEFT of `===`. This is deliberate so
@@ -113,18 +110,15 @@ interface Forbidden {
  *  quoted `org/name` slug. */
 const REPO_EQUALITY_RE = /\b(repo|instanceId)\b[^\n=]{0,40}===\s*["'][a-z0-9_-]+\/[a-z0-9_-]+["']/g
 
-// NOTE: `runtests.py` is intentionally NOT forbidden. After the de-heuristic, the
-// test RUNNER comes from the spec (`specTestCmd`), but directive FORMATTING still
-// needs to know the runner TYPE (a runtests runner takes dotted module labels; a
-// pytest runner takes node-ids) — `runner.includes("runtests.py")` reads the
-// SPEC-DERIVED runner string, it is a runner-shape discriminator, NOT a repo-name
-// branch or an answer-key magic value. The two real smells below catch the actual
-// reintroduction: a `repo === "x/y"` branch, or the magic `test_sqlite` settings
-// value hardcoded outside the generated spec (a full `python tests/runtests.py
-// --settings=test_sqlite …` reintroduction trips the test_sqlite catch).
+// All runner-name knowledge is centralized in the SSOT module via `specRunnerKind`
+// — logic code classifies with that helper, never a runner-name literal. So all
+// three spec strings are forbidden in logic and allowed ONLY in the SSOT owner
+// file: a `repo === "x/y"` branch, the magic `test_sqlite` settings value, and the
+// `runtests.py` runner name (which lives only inside `specRunnerKind`).
 const FORBIDDEN: ReadonlyArray<Forbidden> = [
   { label: 'repo-name equality branch (repo/instanceId === "x/y")', re: REPO_EQUALITY_RE },
   { label: "\"test_sqlite\" / 'test_sqlite' literal", re: /["']test_sqlite["']/g },
+  { label: "runtests.py runner-name literal (use specRunnerKind)", re: /runtests\.py/g },
 ]
 
 interface Hit {
@@ -202,18 +196,16 @@ describe("ratchet teeth — red-on-injection", () => {
     expect(hits.some((h) => h.line === 2 && h.label.startsWith("repo-name equality"))).toBe(true)
   })
 
-  test('scanner FIRES on `instanceId === "x/y"` and the test_sqlite magic literal', () => {
-    const fixture = ['if (instanceId === "django/django") {}', 'const s = "test_sqlite"'].join("\n")
+  test("scanner FIRES on all three smells (instanceId ===, test_sqlite, runtests.py)", () => {
+    const fixture = [
+      'if (instanceId === "django/django") {}',
+      'const s = "test_sqlite"',
+      'if (runner.includes("runtests.py")) {}',
+    ].join("\n")
     const hits = scanText(fixture, "<fixture>")
     expect(hits.some((h) => h.label.startsWith("repo-name equality"))).toBe(true)
     expect(hits.some((h) => h.label.includes("test_sqlite"))).toBe(true)
-  })
-
-  test("scanner does NOT fire on a `runner.includes('runtests.py')` shape discriminator", () => {
-    // runtests.py is a legit runner-TYPE check (reads the spec-derived runner),
-    // not a per-framework branch — it must NOT be flagged.
-    const hits = scanText('if (runner.includes("runtests.py")) {}', "<fixture>")
-    expect(hits.length).toBe(0)
+    expect(hits.some((h) => h.label.includes("runtests.py"))).toBe(true)
   })
 
   test("repo-equality scanner does NOT fire on the cha-multisite python-string array", () => {

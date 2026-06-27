@@ -14,7 +14,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { synthesizeTestCmd } from "@/runner/batch/corpus/dataset"
-import { specTestCmd } from "@/runner/batch/corpus/repo-version-specs"
+import { specRunnerKind, specTestCmd } from "@/runner/batch/corpus/repo-version-specs"
 
 const f2p = (names: readonly string[]) => JSON.stringify(names)
 
@@ -97,6 +97,35 @@ describe("synthesizeTestCmd derives the runner from the SWE-bench spec SSOT", ()
     expect(cmd).toContain("-k")
     expect(cmd).toContain("test_encode_morse")
     expect(cmd).not.toContain("runtests.py")
+  })
+
+  test("specRunnerKind: ONLY django needs its spec runner; every other SWE-bench Verified repo is pytest-run", () => {
+    // The de-heuristic's design claim, pinned: django genuinely can't run under
+    // plain pytest (needs runtests + settings — the engage=0 RCA), so it uses its
+    // spec runner; every OTHER Verified repo is pytest-compatible in-loop and uses
+    // the uniform pytest oracle (their native wrappers — sphinx's tox, sympy's
+    // bin/test — aren't on the uv env, and their tests collect under pytest). This
+    // makes the runtests-vs-pytest split FUNCTIONAL + spec-derived, not a guess.
+    expect(specRunnerKind("django/django", "1.10")).toBe("runtests")
+    expect(specRunnerKind("django/django", "1.9")).toBe("runtests")
+    expect(specRunnerKind("django/django", "5.0")).toBe("runtests")
+    for (const [repo, version] of [
+      ["astropy/astropy", "5.1"],
+      ["sympy/sympy", "1.1"], // spec runner is bin/test → still pytest-run in-loop
+      ["sphinx-doc/sphinx", "4.1"], // spec runner is tox → still pytest-run in-loop
+      ["scikit-learn/scikit-learn", "1.3"],
+      ["matplotlib/matplotlib", "3.7"],
+      ["pytest-dev/pytest", "7.4"],
+      ["pylint-dev/pylint", "3.0"],
+      ["psf/requests", "2.31"],
+      ["pallets/flask", "2.3"],
+      ["pydata/xarray", "2023.07"],
+      ["mwaskom/seaborn", "0.13"],
+    ] as const) {
+      expect(specRunnerKind(repo, version)).toBe("pytest")
+    }
+    // unknown (repo,version) defaults to the pytest oracle, never a broken runner
+    expect(specRunnerKind("foo/bar", "1.0")).toBe("pytest")
   })
 
   test('no `repo === "django/django"` literal remains in dataset.ts', async () => {

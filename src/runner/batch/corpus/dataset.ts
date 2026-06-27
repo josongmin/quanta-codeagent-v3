@@ -26,7 +26,7 @@ import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
-import { specTestCmd } from "./repo-version-specs"
+import { specRunnerKind, specTestCmd } from "./repo-version-specs"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {

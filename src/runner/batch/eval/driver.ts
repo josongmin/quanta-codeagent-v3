@@ -2138,13 +2138,14 @@ type BenchTestRunnerInput = Parameters<typeof testRunnerTool.execute>[0]
 
 const DATASET_VERIFIER_EXPOSE_ENV = "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER"
 
+// Recognize a command WE synthesized in `synthesizeTestCmd` (which bakes the
+// FAIL_TO_PASS answer key) so it stays hidden from the agent. Match our OWN
+// structural signature, not a per-framework runner name: every synthesized
+// command (django-runtests AND pytest) is built via buildProjectEnvUvRunArgv
+// with an injected `PYTEST_ADDOPTS=` env. The `pytest -x --no-header` arm also
+// catches a bare (env-less) synthesized pytest command.
 const isSynthesizedDatasetVerifierCommand = (cmd: string): boolean =>
-  cmd.startsWith("PYTEST_ADDOPTS=") ||
-  cmd.includes(" pytest -x --no-header") ||
-  // The django runner is now spec-derived (version-aware flags), so match the
-  // runtests.py runner itself — NOT the old hardcoded `--settings=test_sqlite`
-  // literal (django 1.9 has no settings flag; the literal would miss it).
-  cmd.includes("runtests.py")
+  cmd.includes("PYTEST_ADDOPTS=") || cmd.includes(" pytest -x --no-header")
 
 const agentVisibleBenchVerifierCommand = (instance: Instance): string | undefined => {
   const cmd = instance.testCmd.trim()
