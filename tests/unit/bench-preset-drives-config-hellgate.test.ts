@@ -21,7 +21,10 @@
  * measured single-pass winner `agentless-v6-singlepass-execfull`. Their per-preset
  * pinning tests were deleted with them; the retained presets are baseline /
  * agentless-v1 / -v1-nosteer / -v6-singlepass-execfull / -v3-thin-strict /
- * -v5-absorb-execfull / -v5-thin-and-expanded / hint-only / everything.
+ * -v5-thin-and-expanded / hint-only / everything.
+ *
+ * jun-27: `agentless-v5-absorb-execfull` was also removed when the verify-select /
+ * best-of-N veto SELECTION plane was retired; its PRESET-ABSORB pin was deleted.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -316,31 +319,9 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     })
   })
 
-  // PRESET-ABSORB: agentless-v5-absorb-execfull is the ONE retained verify-select
-  // arm — the competitor-absorb reference (forward-localize / spec-fidelity-invariant
-  // / dynamic-message-matcher / cha-multisite) with FULL in-loop exec and clean
-  // submit authority. Kept as an A/B arm against the v6 single-pass winner.
-  test("PRESET-ABSORB: agentless-v5-absorb-execfull carries the absorb levers + clean selector", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v5-absorb-execfull"
-    const opt = benchOptIns()
-    expect(opt.inLoopExec).toBe(true)
-    expect(opt.inLoopExecMode).toBe("full")
-    expect(opt.verifySelectN).toBe(5)
-    expect(opt.chaMultisiteSteer).toBe(true)
-    expect(opt.specFidelityInvariant).toBe(true)
-    expect(opt.dynamicMessageMatcher).toBe(true)
-    expect(opt.forwardLocalize).toBe(true)
-    expect(opt.selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v5-absorb-execfull"]).toMatchObject({
-      "bench-in-loop-exec": "full",
-      "verify-select": "5",
-      "cha-multisite-steer": "1",
-      "spec-fidelity-invariant": "1",
-      "dynamic-message-matcher": "1",
-      "forward-localize": "1",
-      "selector-mode": "clean",
-    })
-  })
+  // PRESET-ABSORB removed (jun-27): `agentless-v5-absorb-execfull` was deleted with
+  // the verify-select / best-of-N veto SELECTION plane retirement. No verify-select
+  // reference arm or clean-selector preset remains to assert against.
 
   test("PRESET-15c: no named preset may bake in targeted RCA gates", () => {
     const contaminated = Object.entries(KNOB_PRESETS).filter(
@@ -349,14 +330,11 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(contaminated).toEqual([])
   })
 
-  // PRESET-SM: the retained clean-authority preset resolves selectorMode="clean";
-  // a preset with no selector-mode key (and no preset at all) projects the default
-  // "research". red-on-injection: if benchPostureFromState defaulted selectorMode
-  // to "clean", or a clean preset dropped the key, these flip.
-  test("PRESET-SM: clean preset resolves selectorMode=clean, others stay research", () => {
-    process.env.QUANTA_BENCH_PRESET = "agentless-v5-absorb-execfull"
-    expect(benchOptIns().selectorMode).toBe("clean")
-    expect(KNOB_PRESETS["agentless-v5-absorb-execfull"]?.["selector-mode"]).toBe("clean")
+  // PRESET-SM: a preset with no selector-mode key (and no preset at all) projects
+  // the default "research". red-on-injection: if benchPostureFromState defaulted
+  // selectorMode to "clean", these flip. (The clean-authority arm was retired with
+  // the verify-select veto plane — no clean preset remains to assert against.)
+  test("PRESET-SM: no-selector-mode preset projects research", () => {
     // A preset that opts into NO selector-mode ⇒ default research projection.
     process.env.QUANTA_BENCH_PRESET = "agentless-v1"
     expect(benchOptIns().selectorMode).toBe("research")

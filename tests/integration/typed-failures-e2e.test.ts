@@ -54,8 +54,15 @@ const call = (id: string, name: string, input: unknown): ToolUseBlock => ({
 
 describe("e2e: typed failure surfaces verbatim from real tools through dispatch", () => {
   test("bash + timeout_ms ⇒ DispatchResult.failure {mode:'timeout', timeoutMs}", async () => {
+    // ADR-0296 auto-background now SHIPS ON (a deadline detaches into the bg
+    // registry, ok:true). This test exercises the legacy kill-on-deadline path —
+    // the one that mints the typed `timeout` FAILURE — so it opts in explicitly.
     const res = await dispatchTool(
-      call("c-timeout", "bash", { command: "sleep 5", timeout_ms: 40 }),
+      call("c-timeout", "bash", {
+        command: "sleep 5",
+        timeout_ms: 40,
+        timeout_behavior: "kill",
+      }),
       config(),
       perm,
     )

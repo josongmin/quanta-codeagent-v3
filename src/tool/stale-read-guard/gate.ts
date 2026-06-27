@@ -7,15 +7,14 @@
  * mtimes and `write`/`edit`/`apply_patch` reject a target that drifted on disk
  * since the model last read it (TOCTOU clobber protection).
  *
- * DEFAULT-ON, deliberate opt-out: a staleness/correctness guard (NOT a security
- * boundary like the fs-jail, which prevents filesystem ESCAPE), so it uses the
- * STANDARD kill-switch vocabulary (`gateDisabled`) — ON unless the operator sets
- * any recognized falsy token: `QUANTA_STALE_READ_GUARD=off` / `0` / `false` /
- * `no`. This matches the seed-loop convention (`QUANTA_X=0` wins) so the off
- * escape hatch is uniform with every other CLI feature gate; disabling it only
- * permits a stale overwrite (same blast radius as `=off`), never a path escape,
- * so the strict `=off`-only posture is not warranted here. The byte-identical
- * legacy path is recovered by any falsy token.
+ * DEFAULT-ON, deliberate opt-out: a staleness/correctness safety control that
+ * uses the STRICT kill-switch vocabulary (`gateDisabledStrict`) — ON unless the
+ * operator sets EXACTLY `QUANTA_STALE_READ_GUARD=off`. A stray falsy token
+ * (`0` / `false` / `no`) that may appear in an env by accident must NOT silently
+ * tear down the TOCTOU clobber protection; only a deliberate literal `off` (like
+ * the fs-jail kill-switch) disables it. This strict posture is enforced SRC-WIDE
+ * by the dangerous-gate-strict ratchet (`gateDisabledStrict` required, no loose
+ * `gateDisabled` alias) so the guard cannot be silently weakened.
  *
  * Note on false-positives: the guard NEVER blocks an UNREAD target (a file the
  * model never read has no baseline — a brand-new write or an intentional blind
@@ -29,16 +28,18 @@
  * (never `process.env` directly).
  */
 
-import { gateDisabled } from "@/shared"
+import { gateDisabledStrict } from "@/shared"
 
 /** The env var that DISABLES the stale-read guard. The guard is DEFAULT-ON; set
- *  it to any recognized falsy token (`off` / `0` / `false` / `no`) to opt out.
- *  Unset (or any non-falsy value) keeps the guard ON. */
+ *  it to EXACTLY `off` to opt out. Unset (or any other value, including stray
+ *  falsy tokens like `0`/`false`) keeps the guard ON — only a deliberate literal
+ *  `off` tears down the safety control. */
 export const STALE_READ_GUARD_ENV = "QUANTA_STALE_READ_GUARD"
 
-/** Pure gate check via the canonical kill-switch SSOT (`@/shared#gateDisabled`)
- *  — ON by default; OFF for any falsy token (`off`/`0`/`false`/`no`). A
- *  staleness/correctness guard (not a path-escape security boundary), so it
- *  honors the standard disable vocabulary like every other CLI feature gate. */
+/** Pure gate check via the canonical STRICT kill-switch SSOT
+ *  (`@/shared#gateDisabledStrict`) — ON by default; OFF only for the literal
+ *  `off`. A safety control whose accidental teardown by a stray falsy token must
+ *  be impossible, so it uses the strict `=off`-only vocabulary (enforced by the
+ *  dangerous-gate-strict ratchet), like the fs-jail kill-switch. */
 export const staleReadGuardEnabled = (env: Readonly<Record<string, string | undefined>>): boolean =>
-  !gateDisabled(env, STALE_READ_GUARD_ENV)
+  !gateDisabledStrict(env, STALE_READ_GUARD_ENV)

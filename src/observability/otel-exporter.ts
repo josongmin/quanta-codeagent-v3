@@ -66,6 +66,7 @@ import type {
   SpanStatusCode,
   Tracer,
 } from "./tracing/port"
+import { QUANTA_ATTRS } from "./vocabulary"
 // ────────────────────────────────────────────────────────────────────────────
 // Export envelope shapes — the typed records that producers hand to the
 // exporter. Intentionally minimal: only the fields that survive the OTLP/JSON
@@ -139,6 +140,11 @@ export interface OtelExporterOpts {
   /** Service name attribute attached to every span/metric resource. Default
    *  `"quanta-codeagent"`. */
   readonly serviceName?: string
+  /** Run id — attached as the `quanta.run.id` resource attribute on every
+   *  span/metric when set. Lets the trace-viewer filter ONE bench run out of a
+   *  sink that mixes many (the `?run=<id>` deep-link). Absent ⇒ no attribute
+   *  (byte-identical Default-OFF). */
+  readonly runId?: string
   /** Batch size — when the in-memory buffer reaches this many spans (or
    *  metrics, counted separately), the exporter triggers an immediate flush.
    *  Default `64`. */
@@ -279,18 +285,27 @@ const otlpAttributes = (
  *  by 1e6 and convert to string. */
 const nanos = (epochMs: number): string => `${Math.trunc(epochMs * 1_000_000)}`
 
-const buildResource = (serviceName: string): Record<string, unknown> => ({
-  attributes: otlpAttributes({ "service.name": serviceName }),
+/** Resource attributes shared by every span/metric of one process. `quanta.run.id`
+ *  is attached when the operator sets a run id (env `QUANTA_OTEL_RUN_ID`) so the
+ *  trace-viewer can FILTER one bench run out of a sink that mixes many concurrent
+ *  runs (e.g. an A/B fan-out) — the run-id deep-link (`?run=<id>`). Omitted (not
+ *  empty-string) when unset, so Default-OFF stays byte-identical. */
+const buildResource = (serviceName: string, runId?: string): Record<string, unknown> => ({
+  attributes: otlpAttributes({
+    "service.name": serviceName,
+    ...(runId !== undefined && runId !== "" ? { [QUANTA_ATTRS.run.id]: runId } : {}),
+  }),
 })
 
 /** Serialize an array of spans → OTLP/JSON `resourceSpans` envelope. */
 const serializeSpans = (
   spans: ReadonlyArray<ExportSpan>,
   serviceName: string,
+  runId?: string,
 ): Record<string, unknown> => ({
   resourceSpans: [
     {
-      resource: buildResource(serviceName),
+      resource: buildResource(serviceName, runId),
       scopeSpans: [
         {
           scope: { name: "quanta" },
@@ -344,10 +359,11 @@ const AGG_TEMPORALITY_DELTA = 1
 const serializeMetrics = (
   ms: ReadonlyArray<ExportMetric>,
   serviceName: string,
+  runId?: string,
 ): Record<string, unknown> => ({
   resourceMetrics: [
     {
-      resource: buildResource(serviceName),
+      resource: buildResource(serviceName, runId),
       scopeMetrics: [
         {
           scope: { name: "quanta" },
@@ -407,6 +423,7 @@ const serializeMetrics = (
 export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
   const fetchImpl = opts.fetch ?? (globalThis.fetch as typeof fetch)
   const serviceName = opts.serviceName ?? DEFAULT_SERVICE_NAME
+  const runId = opts.runId
   const batchSize = opts.batchSize ?? DEFAULT_BATCH_SIZE
   const flushIntervalMs = opts.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
   // Buffer cap is at least `batchSize` so a single batch always fits.
@@ -522,7 +539,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
     // in-flight entries from the front mid-flush — that would drop UNSENT
     // records beyond the documented drop-oldest overflow policy (audit R1 D-F1).
     const snapshot = spanBuffer.splice(0, spanBuffer.length)
-    const ok = await post(TRACES_PATH, serializeSpans(snapshot, serviceName))
+    const ok = await post(TRACES_PATH, serializeSpans(snapshot, serviceName, runId))
     if (ok) {
       if (spanBuffer.length < maxBufferSize) spanOverflowWarned = false
     } else {
@@ -538,7 +555,7 @@ export const otelHttpExporter = (opts: OtelExporterOpts): OtelExporter => {
   const flushMetrics = async (): Promise<void> => {
     if (metricBuffer.length === 0) return
     const snapshot = metricBuffer.splice(0, metricBuffer.length)
-    const ok = await post(METRICS_PATH, serializeMetrics(snapshot, serviceName))
+    const ok = await post(METRICS_PATH, serializeMetrics(snapshot, serviceName, runId))
     if (ok) {
       if (metricBuffer.length < maxBufferSize) metricOverflowWarned = false
     } else {
@@ -836,6 +853,7 @@ export interface OtelExporterFromEnvResult {
  *
  *  Additional env knobs honored:
  *   - `QUANTA_OTEL_SERVICE_NAME` (default `"quanta-codeagent"`)
+ *   - `QUANTA_OTEL_RUN_ID` (optional; `quanta.run.id` resource attr → `?run=` filter)
  *   - `QUANTA_OTEL_BATCH_SIZE` (default `64`)
  *   - `QUANTA_OTEL_FLUSH_MS` (default `5000`)
  *
@@ -853,6 +871,10 @@ export const attachOtelExporterFromEnv = (
   if (endpoint.length === 0) return undefined
 
   const serviceName = overrides?.serviceName ?? env.QUANTA_OTEL_SERVICE_NAME ?? DEFAULT_SERVICE_NAME
+  // Run id (`quanta.run.id` resource attr) → the trace-viewer `?run=<id>` filter.
+  // Trimmed; a blank env value is treated as unset (no attribute, byte-identical).
+  const runIdRaw = overrides?.runId ?? env.QUANTA_OTEL_RUN_ID
+  const runId = runIdRaw !== undefined && runIdRaw.trim() !== "" ? runIdRaw.trim() : undefined
 
   const parseIntEnv = (val: string | undefined, fallback: number): number => {
     if (val === undefined) return fallback
@@ -867,6 +889,7 @@ export const attachOtelExporterFromEnv = (
   const exporter = otelHttpExporter({
     endpoint,
     serviceName,
+    ...(runId !== undefined ? { runId } : {}),
     batchSize,
     flushIntervalMs,
     ...(overrides?.fetch !== undefined ? { fetch: overrides.fetch } : {}),

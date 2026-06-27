@@ -84,8 +84,11 @@ describe("session state persistence", () => {
         this.events.push(event)
       }
     }
-    // Two "tool_use" stops with ZERO tool blocks: nudge once, then
-    // completed-via-exhaustion with a final assistant text turn.
+    // Two "tool_use" stops with ZERO tool blocks: nudge once, then a malformed
+    // tool_use NON-success terminal after the retry cap (jun-25 loop-control
+    // FIX-2 — sealing such a turn as `completed` was the misclassification it
+    // corrected). The FIX-2 error handler still PRESERVES the final assistant
+    // text turn, so the persistence assertion below holds regardless of reason.
     const llm = new ScriptedLLM([
       [
         { type: "text_delta", delta: "malformed once" },
@@ -109,7 +112,9 @@ describe("session state persistence", () => {
       onConfirm: async () => false,
     }
     const outcome = await runAgent(config)
-    expect(outcome.reason).toBe("completed")
+    // jun-25 FIX-2: a malformed tool_use (tool_use stop, no valid call) after
+    // the retry cap seals a NON-success terminal, NOT `completed`.
+    expect(outcome.reason).toBe("error")
 
     const path = join(dir, "resume.json")
     await saveSession(path, {

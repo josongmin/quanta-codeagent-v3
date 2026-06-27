@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { errMessage } from "@/shared"
 import {
   type FetchLike,
   refreshToken,
@@ -61,7 +62,7 @@ export const refreshRemoteAuthJson = async (
     if (typeof current.access_token === "string" && current.access_token !== "" && remaining >= FALLBACK_MIN_REMAINING_MS) {
       const mins = Math.round(remaining / 60_000)
       process.stderr.write(
-        `[full-remote] local token refresh failed (${err instanceof Error ? err.message : String(err)}); ` +
+        `[full-remote] local token refresh failed (${errMessage(err)}); ` +
           `shipping existing access token as-is (~${mins}min remaining). The box has clean egress and will use it.\n`,
       )
       return JSON.stringify(current)

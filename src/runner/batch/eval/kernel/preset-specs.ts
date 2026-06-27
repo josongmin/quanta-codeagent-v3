@@ -1,0 +1,267 @@
+/**
+ * Pillar C — the CURRENT bench presets re-expressed as {@link PresetSpec}s (the single
+ * source). Each spec's `params` are authored to GENERATE the corresponding frozen
+ * literal in `runner/knobs/presets.ts` (`KNOB_PRESETS[id]`) byte-for-byte — proven by
+ * `tests/unit/kernel/preset-spec-parity.test.ts`. Once parity holds, the literal +
+ * its composite double-book (`posture/compose-preset.ts`) + the byte-identical golden
+ * oracle can all be deleted, leaving THIS as the only place a preset is declared.
+ *
+ * `steps` names the CONCEPTUAL ordered pipeline stages this preset runs (localize →
+ * repro → repair → verify → select, as applicable). Steps do not affect the resolved
+ * knob map (params do); they document/drive the pipeline ordering for Pillar B.
+ *
+ * Additive: not wired into the live driver — `presets.ts` is untouched.
+ */
+
+import type { PresetSpec } from "@/config/knob-schema/contracts"
+
+/**
+ * `agentless-v1` — the LSP-grounded localization core (the bundle formerly hidden
+ * behind `QUANTA_BENCH_SOTA=1`). Localize-heavy with a validated-red repro and a
+ * single-pass repair; no verify-select hard-veto gates. `params` mirror the frozen
+ * literal exactly. `lsp-steer` is NOT a param here: it is DEFAULT-ON whenever `lsp:1`
+ * (derived in `benchPostureFromState`), matching the literal which omits it too.
+ */
+export const AGENTLESS_V1: PresetSpec = {
+  id: "agentless-v1",
+  steps: ["localize", "repro", "repair"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+  },
+  note: "LSP-grounded localization core; was QUANTA_BENCH_SOTA=1. Single-pass, no verify-select veto gates.",
+}
+
+/**
+ * `agentless-v6-singlepass-execfull` — the jun-24 MEASURED WINNER. Exactly
+ * `agentless-v1` PLUS `bench-in-loop-exec: full` (in-loop execution feedback). This
+ * is the posture that RESOLVED django-11138 on the official harness (gold 4/4 files,
+ * 0 regression). `NONEMPTY_FALLBACK` stays ENV-gated (default-OFF), deliberately NOT
+ * a param, so the generated map == agentless-v1 + full-exec, matching the literal.
+ */
+export const AGENTLESS_V6_SINGLEPASS_EXECFULL: PresetSpec = {
+  id: "agentless-v6-singlepass-execfull",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+  },
+  note: "jun-24 measured winner: agentless-v1 + full in-loop exec. Resolved django-11138 on the official harness.",
+}
+
+/**
+ * `agentless-v1-nosteer` — the A/B BASELINE for the `lsp-steer` grounding steer.
+ * Identical to `agentless-v1` but with the steer explicitly `off`, so
+ * `--preset agentless-v1` vs this is a clean single-variable measure of the
+ * steer's effect (no env-forwarding needed; full-remote forwards `--preset`
+ * only). `lsp-steer: off` IS a param here (the literal names it explicitly),
+ * unlike agentless-v1 where the steer is DEFAULT-ON and omitted.
+ */
+export const AGENTLESS_V1_NOSTEER: PresetSpec = {
+  id: "agentless-v1-nosteer",
+  steps: ["localize", "repro", "repair"],
+  params: {
+    lsp: "1",
+    "lsp-steer": "off",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+  },
+  note: "A/B baseline for the lsp-steer grounding steer: agentless-v1 with the steer explicitly OFF.",
+}
+
+/**
+ * `agentless-v6-closure-control` — jun-27 repair experiment arm A1 (control).
+ * == the v6 winner (agentless-v1 + full in-loop exec) PLUS the closure
+ * grounding / owner-widening rails (fault-evidence / verification-plan /
+ * primary-rail / no-patch-breaker / repair-escalation), but the closure-repair
+ * REINJECT loop is OFF. Paired with `agentless-v6-closure-repair` (A2) so
+ * A2 − A1 isolates the reinject loop alone.
+ */
+export const AGENTLESS_V6_CLOSURE_CONTROL: PresetSpec = {
+  id: "agentless-v6-closure-control",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+  },
+  note: "jun-27 repair experiment A1 (control): v6 + closure grounding, reinject loop OFF.",
+}
+
+/**
+ * `agentless-v6-closure-repair` — jun-27 repair experiment arm A2 (treatment).
+ * == A1 (`agentless-v6-closure-control`) PLUS the reinject loop ON
+ * (`closure-repair: 5` rounds), the Prometheus-equivalent execution-feedback
+ * lever that re-runs the validated-red repro against the candidate and feeds
+ * the verbatim failure tail back until green.
+ */
+export const AGENTLESS_V6_CLOSURE_REPAIR: PresetSpec = {
+  id: "agentless-v6-closure-repair",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+  },
+  note: "jun-27 repair experiment A2 (treatment): A1 + closure-repair reinject loop (5 rounds).",
+}
+
+/**
+ * `agentless-v3-thin-strict` — jun-20 strict arm: mini-first + hard patch-budget
+ * admission + source-only sanitizer. Keeps the localization stack but turns host
+ * in-loop execution OFF for round-0 thinness and blocks over-budget final patches
+ * from submission. Note vs agentless-v1: NO `repro-test` / `test-runner` params,
+ * adds `bench-in-loop-exec: off` + patch-hygiene/spec-fidelity-steer/patch-budget(-strict).
+ */
+export const AGENTLESS_V3_THIN_STRICT: PresetSpec = {
+  id: "agentless-v3-thin-strict",
+  steps: ["localize", "repair"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+  },
+  note: "jun-20 strict arm: thin/noexec round-0 + hard patch-budget admission + source-only sanitizer.",
+}
+
+/**
+ * `agentless-v5-thin-and-expanded` — jun-22 v5 thin-first ADAPTIVE controller
+ * opening. The base posture is EXACTLY `agentless-v3-thin-strict`; the per-phase
+ * capability knobs are injected by the v5 controller via PHASE_MODULES at
+ * runtime (NOT baked here), and selecting this preset is INERT (≡ thin-strict)
+ * until `QUANTA_BENCH_V5_ADAPTIVE` opts the live router in (default-OFF). So this
+ * literal == thin-strict byte-for-byte; the only difference is the live router
+ * hook, which is out-of-band and not a resolved-knob param.
+ */
+export const AGENTLESS_V5_THIN_AND_EXPANDED: PresetSpec = {
+  id: "agentless-v5-thin-and-expanded",
+  steps: ["localize", "repair"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repo-map": "1",
+    "read-outline": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "off",
+    "patch-hygiene": "1",
+    "spec-fidelity-steer": "1",
+    "patch-budget": "1",
+    "patch-budget-strict": "1",
+  },
+  note: "jun-22 v5 adaptive opening; resolved-knob map IDENTICAL to agentless-v3-thin-strict (the adaptive brain is an out-of-band runtime router, default-OFF).",
+}
+
+/**
+ * `hint-only` — legacy unversioned preset: just `issue-hint: 1` (the issue text
+ * passed through, no localization / repro / exec stack). Retained for back-compat
+ * with existing sweeps + the `/knobs preset` listing.
+ */
+export const HINT_ONLY: PresetSpec = {
+  id: "hint-only",
+  steps: ["repair"],
+  params: { "issue-hint": "1" },
+  note: "Legacy unversioned: issue text only, no localization/repro/exec stack.",
+}
+
+/**
+ * `everything` — legacy unversioned kitchen-sink preset: localization + subagent
+ * + skills + branch-search, with `localize-phase: 3` (NOT 5) and `issue-hint:
+ * agentless`. Retained for A/B against the versioned cores (no measured win for
+ * subagent/skills yet). Has NO `read-outline` / `test-runner` / `retry-transient`.
+ */
+export const EVERYTHING: PresetSpec = {
+  id: "everything",
+  steps: ["localize", "repro", "repair"],
+  params: {
+    lsp: "1",
+    subagent: "1",
+    skills: "1",
+    "localize-phase": "3",
+    "branch-search": "3",
+    "issue-hint": "agentless",
+    "repro-test": "5",
+  },
+  note: "Legacy unversioned kitchen-sink: localization + subagent + skills + branch-search (localize-phase 3).",
+}
+
+/**
+ * `baseline` — explicit no-op. Selecting `baseline` is byte-identical to no preset
+ * at all: zero param overrides. `resolvePresetSpec(BASELINE, {})` === `{}`.
+ */
+export const BASELINE: PresetSpec = {
+  id: "baseline",
+  steps: [],
+  params: {},
+  note: "Explicit no-op preset; byte-identical to selecting no preset (empty override map).",
+}
+
+/** All re-expressed preset specs, keyed by id (parallels `KNOB_PRESETS` for parity). */
+export const PRESET_SPECS: Readonly<Record<string, PresetSpec>> = Object.freeze({
+  [AGENTLESS_V1.id]: AGENTLESS_V1,
+  [AGENTLESS_V6_SINGLEPASS_EXECFULL.id]: AGENTLESS_V6_SINGLEPASS_EXECFULL,
+  [AGENTLESS_V1_NOSTEER.id]: AGENTLESS_V1_NOSTEER,
+  [AGENTLESS_V6_CLOSURE_CONTROL.id]: AGENTLESS_V6_CLOSURE_CONTROL,
+  [AGENTLESS_V6_CLOSURE_REPAIR.id]: AGENTLESS_V6_CLOSURE_REPAIR,
+  [AGENTLESS_V3_THIN_STRICT.id]: AGENTLESS_V3_THIN_STRICT,
+  [AGENTLESS_V5_THIN_AND_EXPANDED.id]: AGENTLESS_V5_THIN_AND_EXPANDED,
+  [HINT_ONLY.id]: HINT_ONLY,
+  [EVERYTHING.id]: EVERYTHING,
+  [BASELINE.id]: BASELINE,
+})

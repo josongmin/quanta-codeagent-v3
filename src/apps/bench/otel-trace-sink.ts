@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * otel-trace-sink — a standalone OTLP/JSON receiver + live waterfall UI for the
  * bench trace view (ADR-0268, jun-26 full-remote live trace; jun-27 waterfall UI).
@@ -34,13 +35,8 @@
  * Default port 4318 = the OTLP/HTTP convention.
  */
 
-import {
-  fileSpanSink,
-  noopSpanSink,
-  resolveSpanSink,
-  type SpanSinkPort,
-} from "./span-sink"
 import { errMessage } from "@/shared"
+import { fileSpanSink, noopSpanSink, resolveSpanSink, type SpanSinkPort } from "./span-sink"
 
 const DEFAULT_PORT = 4318
 
@@ -209,31 +205,39 @@ export interface FullSpan {
   readonly attrs: Record<string, string | number | boolean>
 }
 
+/** Build one {@link FullSpan} from a raw OTLP span + its batch's resource attrs.
+ *  `resourceAttrs` (e.g. `service.name`, `quanta.run.id`) apply to every span in
+ *  the batch and are folded UNDER the span's own attrs (span-level wins) so the
+ *  viewer can filter by `quanta.run.id` — its picker is attribute-driven and
+ *  never reads the resource sub-tree. */
+const toFullSpan = (
+  span: OtlpSpan,
+  resourceAttrs: Record<string, string | number | boolean>,
+): FullSpan => ({
+  traceId: span.traceId ?? "",
+  spanId: span.spanId ?? "",
+  parentSpanId: span.parentSpanId ?? "",
+  name: span.name ?? "(unnamed)",
+  kind: kindLabel(span.kind),
+  startNano: Number(span.startTimeUnixNano ?? 0),
+  endNano: Number(span.endTimeUnixNano ?? 0),
+  durationMs: durMs(span.startTimeUnixNano, span.endTimeUnixNano),
+  status: statusLabel(span.status?.code),
+  ...(span.status?.message !== undefined && span.status.message !== ""
+    ? { statusMessage: span.status.message }
+    : {}),
+  attrs: { ...resourceAttrs, ...attrsOf(span.attributes) },
+})
+
 /** Parse an OTLP/JSON `resourceSpans` envelope → FullSpan[] preserving trace/span
  *  ids and timestamps (for the waterfall). Same never-throw contract as
  *  parseResourceSpans. */
 export const parseResourceSpansFull = (body: OtlpResourceSpans): FullSpan[] => {
   const out: FullSpan[] = []
   for (const rs of body.resourceSpans ?? []) {
-    for (const ss of rs.scopeSpans ?? []) {
-      for (const span of ss.spans ?? []) {
-        out.push({
-          traceId: span.traceId ?? "",
-          spanId: span.spanId ?? "",
-          parentSpanId: span.parentSpanId ?? "",
-          name: span.name ?? "(unnamed)",
-          kind: kindLabel(span.kind),
-          startNano: Number(span.startTimeUnixNano ?? 0),
-          endNano: Number(span.endTimeUnixNano ?? 0),
-          durationMs: durMs(span.startTimeUnixNano, span.endTimeUnixNano),
-          status: statusLabel(span.status?.code),
-          ...(span.status?.message !== undefined && span.status.message !== ""
-            ? { statusMessage: span.status.message }
-            : {}),
-          attrs: attrsOf(span.attributes),
-        })
-      }
-    }
+    const resourceAttrs = attrsOf(rs.resource?.attributes)
+    for (const ss of rs.scopeSpans ?? [])
+      for (const span of ss.spans ?? []) out.push(toFullSpan(span, resourceAttrs))
   }
   return out
 }

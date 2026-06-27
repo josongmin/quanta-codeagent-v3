@@ -33,6 +33,7 @@
 
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { errMessage, logger } from "@/shared"
 import { type ProjectEnvSandboxFs, prepareProjectEnvSandbox } from "../corpus/project-env"
 import { exec } from "./exec"
 
@@ -113,7 +114,14 @@ const CANONICAL_REPRO_FILE_NAME = "reproduce_issue.py"
 const readCanonicalReproScaffold = async (sandbox: string): Promise<string | undefined> => {
   try {
     return await readFile(join(sandbox, CANONICAL_REPRO_FILE_NAME), "utf8")
-  } catch {
+  } catch (e) {
+    // Absent scaffold (ENOENT) is the normal case ⇒ undefined, silently. A real
+    // read failure (perms/IO) is NOT expected and must be visible, not masked as
+    // a genuinely missing scaffold.
+    const enoent = (e as { code?: string } | null)?.code === "ENOENT"
+    if (!enoent) {
+      logger.warn("rematerialize.read_canonical_repro_failed", { sandbox, cause: errMessage(e) })
+    }
     return undefined
   }
 }

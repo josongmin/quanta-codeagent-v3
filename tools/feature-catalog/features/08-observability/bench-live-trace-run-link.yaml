@@ -1,0 +1,94 @@
+id: bench-live-trace-run-link
+title: Live-trace receiver + waterfall UI + run-id deep-link (operator span view)
+section: 8
+subsystem: 옵저버빌리티 — 라이브 트레이스 뷰어 + run-id deep-link (ADR-0268 follow-on)
+order: 627
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: integrated
+telemetry_keys: [quanta.run.id]
+modes: [batch]
+configurable: integrated
+config_refs:
+  env:
+    - QUANTA_OTEL_ENDPOINT
+    - QUANTA_OTEL_RUN_ID
+    - QUANTA_OTEL_SERVICE_NAME
+    - QUANTA_OTEL_SAVE
+    - QUANTA_OTEL_SINK
+owners: ["@songmin"]
+labels: ["surface:bench", "observability-primitive", "absorbed:none"]
+depends_on: [otlp-http-exporter, otel-attribute-vocab, bench-full-remote-ami]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-06-27"
+  evidence:
+    cli: "quanta-bench trace (launch receiver+UI) · trace <run-id> deep-links · trace-url <run-id> link-only; run id auto-issued + printed at bench boot"
+    web: "the waterfall itself is a self-contained browser page (trace-viewer.html) served by the local sink at GET / — no web-daemon affordance"
+purpose: |
+  Operator-side live span view for a bench run, with a per-run deep-link. The OTLP
+  exporter (ADR-0268, otlp-http-exporter) ships the agent loop's spans; this is the
+  RECEIVER + UI + run-id addressing layer on top:
+  (1) `otel-trace-sink.ts` — OTLP/JSON receiver on :4318 that prints each span one
+  line AND serves a Jaeger-style waterfall (`trace-viewer.html`, session picker +
+  resizable detail + pretty-printed gen_ai prompt/response) at GET / backed by
+  GET /spans.json. Full-remote boxes ship spans back over a reverse SSH tunnel.
+  (2) RUN-ID DEEP-LINK — the hole this closes: many concurrent runs (an A/B fan-out)
+  stream into ONE sink and the viewer mixed them. A run id rides the OTLP *resource*
+  as `quanta.run.id` (canonical vocab key), the sink folds it onto every span's
+  attrs, and the viewer's `?run=<id>` filters to just that run (header chip clears
+  it; `?session=<id>` sticky-preselects one session).
+  (3) ZERO-MANUAL run id — `resolveBenchRunId` auto-issues `<preset-slug>-<base36
+  time><entropy>` when export is ON and no `QUANTA_OTEL_RUN_ID` is set (explicit
+  always wins); the shared `bootBenchOtelExport` seam writes it back onto
+  process.env BEFORE attach so it both reaches the exporter AND forwards to every
+  full-remote box (one operator invocation ⇒ one shared id across its boxes). BOTH
+  bench entry binaries (cli.ts + legacy index.ts) call the seam so they never drift.
+  (4) CLI — `quanta-bench trace [<run-id>]` launches the receiver+UI (deep-linked
+  when a run id is given); `quanta-bench trace-url <run-id>` prints/opens the
+  deep-link against an already-running sink; the boot wire prints the clickable link.
+evidence:
+  code:
+    - src/apps/bench/otel-trace-sink.ts
+    - src/apps/bench/trace-viewer.html
+    - src/apps/bench/otel.ts
+    - src/apps/bench/cli.ts
+    - src/apps/bench/index.ts
+    - src/apps/bench/remote/box-session.ts
+    - src/observability/otel-exporter.ts
+    - src/observability/vocabulary.ts
+  adrs: [268]
+  tests:
+    unit:
+      - tests/unit/bench-otel-attach.test.ts
+      - tests/unit/otel-trace-sink.test.ts
+      - tests/unit/bench-cli-dispatch.test.ts
+      - tests/unit/full-remote-bench-env-forward.test.ts
+      - tests/unit/observability/vocabulary-migration.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: |
+    Not yet extended to the real-agent surfaces (apps/cli, apps/agent). The OTLP
+    span export there is already generic (installOtelSpanExportFromEnv), so a user
+    could watch their own interactive/headless agent session with the same viewer —
+    only the run-id auto-issue + a `quanta trace`-equivalent launcher are bench-local
+    today. (기능: 에이전트 세션 라이브 트레이스 / 왜: 본인이 쓴 도구·LLM 호출 실동작 가시화,
+    observability 북극성 / ROI: 코어 export는 이미 일반, auto-issue seam만 옮기면 됨 — 中)
+  promotion_path: |
+    Lift resolveBenchRunId + bootBenchOtelExport out of apps/bench/otel.ts into the
+    shared observability composition root (installOtelSpanExportFromEnv) so every
+    entry auto-issues, and add a generic `quanta trace` launcher mirroring
+    `quanta-bench trace`. The viewer + sink + vocab are already surface-agnostic.
+notes: |
+  Default-OFF byte-identical: no QUANTA_OTEL_ENDPOINT ⇒ no run id issued, env
+  untouched, no sink, no spans (identical to a plain run). Negative invariants:
+  (a) run id rides the resource, NOT a per-span attr duplicated N times;
+  (b) auto-issue ONLY when export is on (no confusing no-op id when nothing streams);
+  (c) explicit QUANTA_OTEL_RUN_ID is never overwritten;
+  (d) the `quanta.run.id` literal lives ONLY in vocabulary.ts (orphan-literal ratchet);
+  (e) auto-id is slugified to [A-Za-z0-9._-] + URL-encoded so it is shell/URL safe.

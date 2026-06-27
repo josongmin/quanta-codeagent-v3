@@ -1,4 +1,6 @@
 /**
+ * @deprecated jun-27 — the verify-select / best-of-N veto SELECTION plane is retired (it laundered correct patches to empty when no candidate passed the hard gates). Superseded by the closure-repair loop (run test → re-inject fail-log → rewrite). The enabling presets were removed; do NOT enable these knobs. Best-of-N may return later in a SOFT-rerank / LLM-judge form (never the hard-veto form), so this code is kept for reference only.
+ *
  * TD — verify-and-select FINALIZE phase (scoring → ranking → finalize).
  *
  * Extracted from {@link selection-executor} to keep that orchestrator under the

@@ -28,8 +28,9 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { localizePhaseSchema } from "@/config/knob-schema/schemas/bench-loop"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
 
@@ -37,21 +38,10 @@ interface LocalizePhaseValue {
   readonly phase1Turns: number
 }
 
-const parseLocalizePhase = (raw: string | undefined): LocalizePhaseValue | undefined => {
-  if (typeof raw !== "string") return undefined
-  if (raw.length === 0) return undefined
-  // Number(...) (NOT parseInt) so "1abc"/"1.5" cleanly become NaN /
-  // non-integer and fail the validity check — no partial-parse foot-gun.
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return undefined
-  if (!Number.isInteger(n)) return undefined
-  if (n === 0) return { phase1Turns: 0 }
-  if (n < 0) return undefined
-  if (n > 20) return undefined
-  return { phase1Turns: n }
-}
-
-const applyLocalizePhase = (
+/** Non-NOOP apply — folds `cfg.localizePhase`. Bound into the central registrar
+ *  (`APPLY_BINDINGS` + conflicts) AND used to derive the back-compat knob export;
+ *  ONE definition so the derived knob is byte-identical to the registered one. */
+export const applyLocalizePhase = (
   cfg: AgentConfig,
   value: LocalizePhaseValue,
   ctx: { surface: Surface },
@@ -61,17 +51,8 @@ const applyLocalizePhase = (
   return { ...cfg, localizePhase: { phase1Turns: value.phase1Turns } }
 }
 
-export const localizePhaseKnob: Knob<LocalizePhaseValue> = {
-  id: "localize-phase",
-  envKey: "QUANTA_BENCH_LOCALIZE_PHASE",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseLocalizePhase,
-  apply: applyLocalizePhase,
-  describe: "Block mutating tools during first N turns; force localize-first (Agentless §3.1)",
-  unit: "turns",
+// DERIVED from the schema SSOT (data) + the runner-side apply + relationship
+// bindings. Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const localizePhaseKnob = deriveKnob(localizePhaseSchema, applyLocalizePhase, {
   conflicts: ["branch-search"],
-  source: "Agentless absorption",
-}
-
-registerKnob(localizePhaseKnob)
+})

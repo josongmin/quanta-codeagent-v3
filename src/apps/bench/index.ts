@@ -87,6 +87,7 @@ import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
 import { runBatchWithHealth } from "@/runner/batch/eval/run-health"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { runTokenCostLine } from "./analyze/cost"
 import {
   aggregate,
   benchRunDir,
@@ -99,22 +100,18 @@ import {
   type SwebenchTask,
   toInstance,
 } from "./corpus"
-import { runTokenCostLine } from "./analyze/cost"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
-import { attachBenchOtelExport } from "./otel"
-import { resolveModelLanes } from "./model-lanes"
-import { resolveBenchReasoningSummary } from "./reasoning-summary"
 import { finalizeRun, runInstance } from "./eval"
-import {
-  type ForkBranchOutcome,
-  formatForkBranchReport,
-} from "./eval/fork-branch-report"
+import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
+import { resolveModelLanes } from "./model-lanes"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals, scoreTotals } from "./observe"
+import { bootBenchOtelExport } from "./otel"
 import { renderBenchPresetListLines, seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
+import { resolveBenchReasoningSummary } from "./reasoning-summary"
 import { patchVote, sampleBestOfN } from "./sampler"
 import {
   applyBenchTrajectoryMode,
@@ -799,7 +796,9 @@ const resolveLLM = (
   // QUANTA_BENCH_RECORD_TRAJECTORY=0 opts out). Log where it lands so the
   // operator can find the cassette without grepping the source for the default.
   if (trajectory.kind === "record") {
-    logger.info(`bench: recording LLM trajectory → ${trajectory.path} (set QUANTA_BENCH_RECORD_TRAJECTORY=0 to opt out)`)
+    logger.info(
+      `bench: recording LLM trajectory → ${trajectory.path} (set QUANTA_BENCH_RECORD_TRAJECTORY=0 to opt out)`,
+    )
   }
   // Live LLM is stateless across calls, so off/live mode can share it; replay
   // mode re-wraps a fresh store each call (applyBenchTrajectoryMode → fresh
@@ -1105,12 +1104,14 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 // the runtime started from; unit tests start from `bun test` and never match.
 if (import.meta.main) {
   // OTLP span export (ADR-0268) — boot wire for the bench process when invoked
-  // directly (legacy `bun run src/apps/bench/index.ts …`). Installed here (not in
-  // `runMain`) so the tested `runMain(deps)` stays env-pure; Default-OFF no-op
-  // unless QUANTA_OTEL_ENDPOINT is set. The unref'd flush timer streams spans
-  // steady-state; a best-effort final flush drains on natural exit. The agent
-  // loop's existing span emit sites become live once the sink is registered.
-  const otelExport = attachBenchOtelExport(process.env)
+  // directly (legacy `bun run src/apps/bench/index.ts …`). Uses the SHARED boot
+  // seam (same as cli.ts) so this entry also auto-issues a run id + prints the
+  // deep-link — previously it attached WITHOUT auto-issuing, so direct-invoke
+  // runs streamed with no `quanta.run.id` and the `?run=` link was dead.
+  // Installed here (not in `runMain`) so the tested `runMain(deps)` stays env-pure;
+  // Default-OFF no-op unless QUANTA_OTEL_ENDPOINT is set.
+  const { otelExport, runId: benchRunId, traceLink } = bootBenchOtelExport(process.env)
+  if (traceLink !== undefined) logger.info(`[otel] run ${benchRunId} live trace → ${traceLink}`)
   process.on("beforeExit", () => {
     void otelExport.teardown()
   })

@@ -51,9 +51,8 @@ import {
   runBenchLogin,
   selectAuthSourceLabel,
 } from "./auth-pool"
-import { attachBenchOtelExport } from "./otel"
+import { bootBenchOtelExport, traceViewerUrl } from "./otel"
 import { runTraceSink } from "./otel-trace-sink"
-import { fileSpanSink, resolveSpanSink } from "./span-sink"
 import {
   CURRENT_BENCH_BASE_PRESET,
   renderBenchPresetListLines,
@@ -81,6 +80,7 @@ import {
   planMicrochunks,
   writeMicrochunks,
 } from "./slicing/microchunk"
+import { fileSpanSink, resolveSpanSink } from "./span-sink"
 
 // Route `logger` to the real terminal (same wiring index.ts does — without it
 // logger.info writes nowhere).
@@ -109,6 +109,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "wave2-backlog",
   "presets",
   "trace",
+  "trace-url",
   "help",
   "--help",
   "-h",
@@ -209,6 +210,9 @@ const VALUE_FLAGS = new Set([
   "--chunk-size",
   "--microchunk-dir",
   "--max-parallel",
+  "--port",
+  "--run",
+  "--save",
 ])
 
 /** Positional args after the subcommand (argv[2]), skipping flags AND the
@@ -2004,6 +2008,34 @@ const openBrowser = (url: string): void => {
  *  Flags: --port N (default 4318) · --save <file.jsonl> (tee spans for offline
  *  replay) · --metrics (also print metric points) · --no-open (don't launch a
  *  browser). The process stays alive serving the UI until Ctrl-C. */
+/** The run id for a trace deep-link: explicit `--run <id>` wins, else the first
+ *  positional after the subcommand (`quanta-bench trace <run-id>`). Blank ⇒ none. */
+const traceRunId = (): string | undefined => {
+  const flag = argValue("--run")
+  if (flag !== undefined && flag.trim() !== "") return flag.trim()
+  const pos = positionals()[0]
+  return pos !== undefined && pos.trim() !== "" ? pos.trim() : undefined
+}
+
+/** `quanta-bench trace-url [run-id] [--port N]` — print (+ open) the trace-viewer
+ *  deep-link for a run WITHOUT launching a receiver. Use this when the sink is
+ *  ALREADY running (the common case: a live campaign streams to one sink and you
+ *  want to focus on one run/arm). `quanta-bench trace <run-id>` launches a fresh
+ *  sink instead — use that when nothing is listening yet. */
+const cmdTraceUrl = (): void => {
+  const portArg = argValue("--port")
+  const port = portArg !== undefined ? Number(portArg) : 4318
+  const runId = traceRunId()
+  if (runId === undefined) {
+    logger.info("usage: quanta-bench trace-url <run-id> [--port N] [--no-open]")
+    logger.info("  (run-id = the QUANTA_OTEL_RUN_ID the bench/campaign ran under)")
+    return
+  }
+  const url = traceViewerUrl(port, runId)
+  logger.info(`[trace] run ${runId} → ${url}`)
+  if (!process.argv.includes("--no-open")) openBrowser(url)
+}
+
 const cmdTrace = (): void => {
   const portArg = argValue("--port")
   const save = argValue("--save")
@@ -2024,10 +2056,19 @@ const cmdTrace = (): void => {
     ...(sinkLabel !== undefined ? { sinkLabel } : {}),
     showMetrics: process.argv.includes("--metrics"),
   })
-  logger.info(`[trace] live waterfall UI → ${uiUrl}`)
-  logger.info(`[trace] point a bench at it: QUANTA_OTEL_ENDPOINT=http://127.0.0.1:${port}`)
+  // A run id (`quanta-bench trace <id>` / `--run <id>`) deep-links the opened UI
+  // to just that run's spans (`?run=<id>`); the operator should then point the
+  // bench at it with a matching QUANTA_OTEL_RUN_ID so the spans carry that id.
+  const runId = traceRunId()
+  const openUrl = traceViewerUrl(port, runId)
+  logger.info(`[trace] live waterfall UI → ${runId !== undefined ? openUrl : uiUrl}`)
+  logger.info(
+    `[trace] point a bench at it: QUANTA_OTEL_ENDPOINT=http://127.0.0.1:${port}${
+      runId !== undefined ? ` QUANTA_OTEL_RUN_ID=${runId}` : ""
+    }`,
+  )
   if (!process.argv.includes("--no-open")) {
-    openBrowser(uiUrl)
+    openBrowser(openUrl)
     logger.info("[trace] opened in browser — Ctrl-C to stop")
   }
 }
@@ -2044,7 +2085,8 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   wave2-coverage  classify multi-file misses as same/partial/disjoint
   wave2-backlog   bucket clean receipts into completeness / generation / oracle
   presets      list bench presets
-  trace        launch the live OTEL waterfall UI (receiver + browser) for any run
+  trace        launch the live OTEL waterfall UI (receiver + browser); 'trace <run-id>' deep-links to one run
+  trace-url    open/print the trace-viewer deep-link for a run-id (sink already running)
 
 Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}
 Explicit selectors still win: QUANTA_BENCH_PRESET > QUANTA_BENCH_SOTA > QUANTA_KNOBS_PRESET > --preset.
@@ -2110,6 +2152,9 @@ const main = async (): Promise<void> => {
     case "trace":
       cmdTrace()
       return
+    case "trace-url":
+      cmdTraceUrl()
+      return
     default:
       printBlock(HELP)
   }
@@ -2125,7 +2170,12 @@ if (import.meta.main) {
   // agent loop spans STREAM to the operator's collector instead of the flaky
   // box→local run.log push. Default-OFF no-op when the endpoint is unset
   // (byte-identical). Installed here (not in `main`) so the routing fn stays pure.
-  const otelExport = attachBenchOtelExport(process.env)
+  // Auto-issue a run id + attach via the shared boot seam (same path the legacy
+  // index.ts entry uses, so they never drift). The deep-link is surfaced up front
+  // so the operator clicks straight to THIS run's waterfall (`?run=<id>` filters
+  // it out of a sink that mixes many concurrent runs). Default-OFF byte-identical.
+  const { otelExport, runId: benchRunId, traceLink } = bootBenchOtelExport(process.env)
+  if (traceLink !== undefined) logger.info(`[otel] run ${benchRunId} live trace → ${traceLink}`)
   process.on("beforeExit", () => {
     void otelExport.teardown()
   })
@@ -2135,6 +2185,10 @@ if (import.meta.main) {
   })
 }
 
+// Trace deep-link helpers live in ./otel (shared with the boot seam); re-exported
+// here under their historical names so the CLI-dispatch unit tests keep importing
+// them from the cli barrel.
+export { otelUiPort, traceViewerUrl as traceUrl } from "./otel"
 // Exported for unit tests (pure CLI-arg helpers — the routing-bug surface).
 export { argValue, buildBackend, modelNameFromPredictions, positionals }
 // Note: `parseMaxWorkers` and `resolvedIdsFromReport` are exported at their

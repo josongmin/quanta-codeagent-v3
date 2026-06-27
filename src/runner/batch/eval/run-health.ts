@@ -218,7 +218,9 @@ export interface RunBatchWithHealthResult {
 export const runBatchWithHealth = async <T = { id: string }>(
   opts: RunBatchWithHealthOptions<T>,
 ): Promise<RunBatchWithHealthResult> => {
-  const env = opts.env ?? process.env
+  // @/runner is slice-pure: the env record is INJECTED by the composition root
+  // (apps/bench passes `process.env`); never read process.env here directly.
+  const env = opts.env ?? {}
   const log = opts.log ?? ((m: string) => logger.warn(m))
   const idOf =
     opts.idOf ?? ((instance: T) => String((instance as { id?: unknown }).id ?? "<unknown>"))

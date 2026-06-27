@@ -9,11 +9,12 @@ import { STALE_READ_GUARD_ENV, staleReadGuardEnabled } from "./gate"
  * Background: several gate docs claimed a STRICT one/on-only contract that the
  * canonical readers do NOT implement (loose `gateOn` vocab) or vice-versa. This
  * suite converts the whole CLASS to a single CI signal:
- *   (a) QUANTA_STALE_READ_GUARD — a DEFAULT-ON staleness/correctness guard that
- *       must honor the STANDARD kill-switch vocabulary (any falsy token
- *       disables), NOT a strict `=off`-only posture. The disable-via-falsy path
- *       is the red-on-injection: before the fix `=0`/`=false`/`=no` were
- *       silently ignored and the guard stayed ON.
+ *   (a) QUANTA_STALE_READ_GUARD — a DEFAULT-ON safety control that uses the
+ *       STRICT `=off`-only kill-switch (`gateDisabledStrict`), registered in the
+ *       dangerous-gate-strict ratchet. A stray falsy token (`0`/`false`/`no`)
+ *       must NOT silently tear down the TOCTOU clobber protection; the
+ *       red-on-injection is the reverse — a loose reader would let `=0`/`=false`
+ *       accidentally disable a safety control.
  *   (b) followup_task gate / (c) env-probe gate — both route through the loose
  *       `gateOn` SSOT, so their readers accept the SAME vocab and the docs are
  *       corrected to match (asserted structurally below).
@@ -23,32 +24,26 @@ describe("stale-read-guard gate contract (default-ON kill-switch vocab)", () => 
     expect(staleReadGuardEnabled({})).toBe(true)
   })
 
-  // Red-on-injection: the prior `gateDisabledStrict` reader honored ONLY `=off`,
-  // so each of these falsy tokens would have left the guard ON (test FAILS).
+  test("`=off` (the deliberate literal) disables the guard", () => {
+    expect(staleReadGuardEnabled({ [STALE_READ_GUARD_ENV]: "off" })).toBe(false)
+  })
+
+  // Red-on-injection: a STRAY falsy token must NOT silently tear down the safety
+  // control — only the exact literal `off` does. A loose reader would fail here.
   test.each([
-    "off",
     "0",
     "false",
     "no",
     "OFF",
     " off ",
     "FALSE",
-  ])("falsy token %p DISABLES the guard", (token) => {
-    expect(staleReadGuardEnabled({ [STALE_READ_GUARD_ENV]: token })).toBe(false)
-  })
-
-  test("`=off` still disables (backward-compatible with the legacy kill-switch + bench opt-out)", () => {
-    expect(staleReadGuardEnabled({ [STALE_READ_GUARD_ENV]: "off" })).toBe(false)
-  })
-
-  test.each([
     "1",
     "on",
     "true",
     "yes",
     "garbage",
     "",
-  ])("non-falsy value %p keeps the guard ON", (token) => {
+  ])("any value other than exactly `off` (%p) keeps the guard ON", (token) => {
     expect(staleReadGuardEnabled({ [STALE_READ_GUARD_ENV]: token })).toBe(true)
   })
 })

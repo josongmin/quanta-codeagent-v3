@@ -1,21 +1,24 @@
 /**
- * BUG 2 (jun-22 bench-remote bugbash) — the SG `:22` ingress MUST be scoped to
- * the current public IPv4 `/32` from BOTH SG-authorizing sites, NOT `0.0.0.0/0`
- * from one of them.
+ * SG `:22` ingress posture.
  *
- * box-session.ts (full-remote / pool path) and ec2.ts (ssh/ec2 grade path) share
- * the SAME named SG `quanta-bench-sg`. ec2.ts already restricted `:22` to
- * `<myIp>/32` via a `curl -4` lookup; box-session.ts world-opened the SAME SG
- * with `0.0.0.0/0`, leaving a PERMANENT world-open rule on it. A world-open
- * ingress on a box that holds a (short-lived) LLM credential is exactly the
- * exposure the ec2 path was hardened against.
+ * HISTORY: jun-22 bugbash (BUG 2) scoped `:22` to the operator `<myIp>/32` from
+ * the box-session path. jun-25 (USER DIRECTIVE, see
+ * `box-session/ec2-lifecycle.ts`) reverted the box-session path to `0.0.0.0/0`:
+ * the public-IP lookup is a network-dependent curl that, on a locally-degraded
+ * network (corp proxy / endpoint-security resetting egress), returned a
+ * STALE/WRONG IP — so `:22` was authorized for an address that wasn't ours and
+ * every ssh/scp/rsync timed out AFTER a healthy box launch. Boxes are ephemeral,
+ * key-ONLY (no password), IMDSv2, short-TTL, so world-open `:22` is safe — only
+ * the private-key holder can connect — and removing the lookup drops a
+ * blocked-network failure point entirely.
  *
  * TEETH:
- *  - the full-remote box-session authorize call must carry `<ip>/32`, never
- *    `0.0.0.0/0` (red-on-injection: reverting the cidr flips both asserts);
- *  - the IPv4 lookup is a SINGLE SHARED helper (lookupCurrentPublicIpv4) so the
- *    two sites can't drift — exercised directly + fail-closed on a non-IPv4
- *    (proxied/HTML) response rather than world-opening.
+ *  - the full-remote box-session authorize call carries the deliberate
+ *    `0.0.0.0/0` (per the directive), so the box never strands ssh on a
+ *    misdetected IP;
+ *  - the IPv4 lookup helper (lookupCurrentPublicIpv4) — still used by the ec2.ts
+ *    grade path — is exercised directly + fail-closed on a non-IPv4
+ *    (proxied/HTML) response rather than emitting a bad `/32`.
  */
 import { describe, expect, test } from "bun:test"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
@@ -53,8 +56,8 @@ const mockSpawnForProvision = (): ReturnType<typeof createSpawnRecorder> =>
     whenSshRemoteIncludes("cloud-init", ok("")),
   )
 
-describe("BUG 2 — SG :22 ingress is /32 from the SSOT helper, never 0.0.0.0/0", () => {
-  test("full-remote provisionBox authorizes :22 with <ip>/32 (NOT 0.0.0.0/0)", async () => {
+describe("SG :22 ingress — box-session world-opens per jun-25 directive; lookup helper fails closed", () => {
+  test("full-remote provisionBox authorizes :22 with the deliberate 0.0.0.0/0 (jun-25 directive)", async () => {
     const { provisionBox } = await import("../../src/apps/bench/remote/box-session")
     const { fn, calls } = mockSpawnForProvision()
     await provisionBox({
@@ -72,9 +75,10 @@ describe("BUG 2 — SG :22 ingress is /32 from the SSOT helper, never 0.0.0.0/0"
     expect(authCall).toBeDefined()
     const cidrIdx = (authCall?.args ?? []).indexOf("--cidr")
     const cidr = cidrIdx >= 0 ? authCall?.args[cidrIdx + 1] : undefined
-    // TEETH: must be the looked-up /32, and must NEVER be world-open.
-    expect(cidr).toBe(`${MY_IP}/32`)
-    expect(cidr).not.toBe("0.0.0.0/0")
+    // TEETH: the box-session path deliberately world-opens :22 (jun-25 directive
+    // — key-only ephemeral boxes; avoids a misdetected-IP ssh stall). Asserting
+    // the exact value is red-on-injection: silently swapping the cidr flips this.
+    expect(cidr).toBe("0.0.0.0/0")
   })
 
   test("lookupCurrentPublicIpv4 returns the curl -4 IPv4 (shared SSOT helper)", async () => {

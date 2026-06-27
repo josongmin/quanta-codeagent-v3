@@ -5,9 +5,13 @@ import type { StreamInput } from "@/llm/types"
 
 type ChatCompletionsCreate = typeof OpenAI.prototype.chat.completions.create
 
-const emptyStream = (): AsyncIterable<unknown> => ({
+// A minimal but COMPLETE chat-completions stream: a real response always closes
+// with a `finish_reason`. A truly-empty stream now trips the empty-stream circuit
+// breaker ("no content and no finish_reason"), which would throw before we can
+// capture the request params these tests assert on.
+const terminalStream = (): AsyncIterable<unknown> => ({
   async *[Symbol.asyncIterator]() {
-    // empty
+    yield { choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }
   },
 })
 
@@ -26,7 +30,7 @@ describe("OpenAIAdapter prompt cache routing", () => {
         completions: {
           create: (async (p: Record<string, unknown>) => {
             params = p
-            return emptyStream()
+            return terminalStream()
           }) as unknown as ChatCompletionsCreate,
         },
       },

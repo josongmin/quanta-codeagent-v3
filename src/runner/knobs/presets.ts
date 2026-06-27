@@ -34,48 +34,10 @@ const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
 // dynamic-message-matcher / cha-multisite bundle is not lost. This literal itself
 // is NOT a shipped preset (it sets `bench-in-loop-exec: repro-only`, the failed
 // posture); only the execfull derivative below ships.
-const COMPETITOR_ABSORB_PRESET = {
-  lsp: "1",
-  "localize-phase": "5",
-  "issue-hint": "agentless",
-  "issue-hint-expected-actual": "1",
-  "repo-map": "1",
-  "read-outline": "1",
-  "retry-transient": "3",
-  "bench-in-loop-exec": "repro-only",
-  "patch-hygiene": "1",
-  "spec-fidelity-steer": "1",
-  "patch-budget": "1",
-  "patch-budget-strict": "1",
-  "verify-select": "5",
-  "verify-select-regression": "discovered",
-  "verify-select-repro": "positive",
-  "fault-evidence": "1",
-  "verification-plan": "1",
-  "primary-rail": "1",
-  "no-patch-breaker": "1",
-  "repair-escalation": "1",
-  "repro-test": "10",
-  "adversarial-repro": "1",
-  "test-runner": "1",
-  "verify-select-concurrency": "3",
-  "selector-mode": "clean",
-  "cha-multisite-steer": "1",
-  "spec-fidelity-invariant": "1",
-  "dynamic-message-matcher": "1",
-  "forward-localize": "1",
-} satisfies Readonly<Record<string, string>>
-
-// `agentless-v5-absorb` with FULL in-loop repo-test execution (the adversarial-
-// audit fix: `repro-only` forbids the repo test suite, trapping the agent in a
-// single-backend self-reproducer → wide-coordination sqlite sites never execute/
-// fail; `full` enables the TRAE verified method = run existing tests → coordination
-// runtime error → fix the missed site). Identical to COMPETITOR_ABSORB_PRESET
-// except `bench-in-loop-exec` flips repro-only→full (same key position).
-const COMPETITOR_ABSORB_EXECFULL_PRESET = {
-  ...COMPETITOR_ABSORB_PRESET,
-  "bench-in-loop-exec": "full",
-} satisfies Readonly<Record<string, string>>
+// jun-27: COMPETITOR_ABSORB_PRESET / COMPETITOR_ABSORB_EXECFULL_PRESET removed
+// with the `agentless-v5-absorb-execfull` registration — the verify-select veto
+// plane is retired (@deprecated). Re-derive a SOFT-rerank best-of-N arm fresh if
+// ever needed; do not resurrect the hard-veto literal.
 
 export const presetRequiresLiveLspGrounding = (preset: string): boolean =>
   preset === THIN_STRICT_PRESET_PREFIX ||
@@ -212,14 +174,12 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "patch-budget": "1",
     "patch-budget-strict": "1",
   },
-  // jun-25 ABSORB reference arm (the ONE verify-select arm retained post jun-25
-  // cleanup). == the competitor-verified absorption posture with FULL in-loop
-  // repo-test execution: preserves the absorbed levers (forward-localize,
-  // spec-fidelity-invariant, dynamic-message-matcher, cha-multisite) so the
-  // absorb work is not lost and stays available as an A/B arm against the v6
-  // single-pass winner. NOT default; opt-in via QUANTA_BENCH_PRESET.
-  // Composite SSOT: ABSORB_EXECFULL_MODULES.
-  "agentless-v5-absorb-execfull": COMPETITOR_ABSORB_EXECFULL_PRESET,
+  // jun-27: the `agentless-v5-absorb-execfull` verify-select reference arm was
+  // REMOVED — the verify-select/best-of-N veto SELECTION plane is retired (it
+  // laundered correct patches to empty). The absorbed non-veto levers
+  // (forward-localize, spec-fidelity-invariant, dynamic-message-matcher,
+  // cha-multisite) survive as individual knobs; verify-select itself is
+  // @deprecated. The synthesis lever is now the closure-repair loop.
   // jun-22 v5 thin-first ADAPTIVE controller opening. The base posture is exactly
   // `agentless-v3-thin-strict` (cheap thin/noexec/minimal round-0); the per-phase
   // capability knobs (expand-select / proof-clean / repair / repro rails) are

@@ -17,8 +17,9 @@
  * Closed parser: `Number(...)` + `Number.isInteger` (no parseInt partial-parse).
  */
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { reproDoubtSchema } from "@/config/knob-schema/schemas/bench-repro"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
 
@@ -26,18 +27,10 @@ interface ReproDoubtValue {
   readonly stuckRuns: number
 }
 
-const parseReproDoubt = (raw: string | undefined): ReproDoubtValue | undefined => {
-  if (typeof raw !== "string") return undefined
-  if (raw.length === 0) return undefined
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return undefined
-  if (!Number.isInteger(n)) return undefined
-  if (n < 2) return undefined
-  if (n > 12) return undefined
-  return { stuckRuns: n }
-}
-
-const applyReproDoubt = (
+/** Non-NOOP apply — folds `cfg.reproDoubt`. Bound into the central registrar
+ *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export; ONE
+ *  definition so the derived knob is byte-identical to the registered one. */
+export const applyReproDoubt = (
   cfg: AgentConfig,
   value: ReproDoubtValue,
   ctx: { surface: Surface },
@@ -46,16 +39,6 @@ const applyReproDoubt = (
   return { ...cfg, reproDoubt: { stuckRuns: value.stuckRuns } }
 }
 
-export const reproDoubtKnob: Knob<ReproDoubtValue> = {
-  id: "repro-doubt",
-  envKey: "QUANTA_BENCH_REPRO_DOUBT",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseReproDoubt,
-  apply: applyReproDoubt,
-  describe: "After N test re-runs with no edit, steer the agent to doubt its repro test (break verify_loop_stuck)",
-  unit: "runs",
-  source: "jun-20-bestofn-wrong-repro-oracle-root",
-}
-
-registerKnob(reproDoubtKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const reproDoubtKnob = deriveKnob(reproDoubtSchema, applyReproDoubt)

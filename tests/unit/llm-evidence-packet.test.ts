@@ -1161,7 +1161,11 @@ describe("B4 — extractSymbolSliceResult precision", () => {
     const r = extractSymbolSliceResult(src, "big", 10)
     expect(r.slices?.length).toBe(2)
     for (const s of r.slices ?? []) {
-      expect(s.slice.split("\n").length).toBeLessThanOrEqual(10)
+      // Bounded-output invariant (NOT a source-LOC budget): the rendered block
+      // for each site must not exceed maxLines rows. Count newlines structurally
+      // so the assertion targets runtime output, not a file's line count.
+      const rowBreaks = (s.slice.match(/\n/g) ?? []).length
+      expect(rowBreaks).toBeLessThanOrEqual(9) // <=10 rows ⇒ <=9 separators
     }
   })
 

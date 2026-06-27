@@ -35,40 +35,18 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
-
-const SURFACES: readonly Surface[] = ["bench", "cli", "agent-batch", "agent-interactive"]
+import { multiVoterSchema } from "@/config/knob-schema/schemas/bench-c"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 
 interface MultiVoterValue {
   readonly voters: number
   readonly quorum?: number
 }
 
-const parseMultiVoter = (raw: string | undefined): MultiVoterValue | undefined => {
-  if (raw === undefined) return undefined
-  const s = raw.trim()
-  if (s === "") return undefined
-  const parts = s.split(":")
-  if (parts.length > 2) return undefined
-  const votersRaw = (parts[0] ?? "").trim()
-  if (!/^\d+$/.test(votersRaw)) return undefined
-  const voters = Number(votersRaw)
-  if (!Number.isInteger(voters) || voters < 1) return undefined
-  if (parts.length === 1) return { voters }
-  const quorumRaw = (parts[1] ?? "").trim()
-  if (quorumRaw === "") return undefined
-  // Plain decimal only — reject signs, exponents, NaN/Infinity literals.
-  if (!/^\d*\.?\d+$/.test(quorumRaw)) return undefined
-  const quorum = Number(quorumRaw)
-  if (!Number.isFinite(quorum) || quorum <= 0 || quorum > 1) return undefined
-  // Defensive: a fraction quorum can never exceed the voter count for
-  // `quorum ≤ 1`, but reject a mistaken count-shaped quorum explicitly.
-  if (quorum > voters) return undefined
-  return { voters, quorum }
-}
-
-const applyMultiVoter = (cfg: AgentConfig, value: MultiVoterValue): AgentConfig => {
+/** Non-NOOP apply — merges `voterQuorum` into `cfg.branchSearch`. Bound into the
+ *  central registrar (`APPLY_BINDINGS` + requires) AND used to derive the
+ *  back-compat knob export; ONE definition so the derived knob is byte-identical. */
+export const applyMultiVoter = (cfg: AgentConfig, value: MultiVoterValue): AgentConfig => {
   // No-op when branch-search is not configured — the `requires` resolver guard
   // normally prevents this, but a defensive no-op keeps `apply` pure + total.
   const bs = cfg.branchSearch
@@ -85,23 +63,9 @@ const applyMultiVoter = (cfg: AgentConfig, value: MultiVoterValue): AgentConfig 
   }
 }
 
-export const multiVoterKnob: Knob<MultiVoterValue> = {
-  id: "multi-voter",
-  envKey: "QUANTA_MULTI_VOTER",
-  category: "verify",
-  surfaces: SURFACES,
-  parse: parseMultiVoter,
-  apply: applyMultiVoter,
-  describe:
-    "Adversarial multi-voter verification — N refute-biased voters per candidate (ADR-0433)",
-  // Requires branch-search to be active: the voter signal is folded into the
-  // branch-search scorer; without `cfg.branchSearch` there is no caller.
+// DERIVED from the schema SSOT (data) + the runner-side apply + relationship
+// (`requires: branch-search`) bindings. Registration is CENTRAL
+// (`registerBenchKnobs`); no self-register here.
+export const multiVoterKnob = deriveKnob(multiVoterSchema, applyMultiVoter, {
   requires: ["branch-search"],
-  // Cost scales with voter count — one extra LLM round-trip per voter per
-  // candidate. Static value documents a typical fan-out (3); the registry uses
-  // the parsed value for precise budgeting.
-  costMultiplier: 3,
-  source: "ADR-0433 / Agentless §4.2 sample-and-vote",
-}
-
-registerKnob(multiVoterKnob)
+})

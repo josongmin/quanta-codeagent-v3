@@ -185,7 +185,7 @@ describe("withEmptyStreamCircuitBreaker — consecutive content-less streams tri
 
   test("optional backoff is awaited BETWEEN empty streams (not hammering a throttling endpoint)", async () => {
     const inner = new ScriptedPort([[TELEMETRY_CONTINUATION]])
-    const sleep = mock(async (_ms: number) => {})
+    const sleep = mock(async (_ms: number, _signal?: AbortSignal) => {})
     const guarded = withEmptyStreamCircuitBreaker(inner, {
       maxConsecutiveEmpty: 3,
       backoffMs: 50,
@@ -194,7 +194,9 @@ describe("withEmptyStreamCircuitBreaker — consecutive content-less streams tri
     await collect(guarded.stream(REQ)) // empty #1 → schedule backoff before next
     await collect(guarded.stream(REQ)) // empty #2 → backoff applied at stream open
     // Backoff fired before the 2nd attempt (one prior empty in the route).
-    expect(sleep).toHaveBeenCalledWith(50)
+    // The abort-aware sleep takes (ms, signal?); assert the backoff MS arg
+    // (the signal is threaded for immediate-settle-on-abort, not asserted here).
+    expect(sleep.mock.calls.map((c) => c[0])).toContain(50)
   })
 
   test("a thrown empty stream (idle timeout) ALSO counts toward the breaker", async () => {

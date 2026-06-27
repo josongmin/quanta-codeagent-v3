@@ -19,6 +19,7 @@ export {
   type ReproWriteFilePort,
 } from "./execute"
 export {
+  applyReproBootstrap,
   buildControlTestPrompt,
   buildReproTestPrompt,
   DEFAULT_CONTROL_SAMPLES,
@@ -29,6 +30,7 @@ export {
   generateReproTests,
   MAX_CONTROL_SAMPLES,
   MAX_SAMPLES,
+  reproBootstrapPreamble,
   stripMarkdownFences,
 } from "./generate"
 export {

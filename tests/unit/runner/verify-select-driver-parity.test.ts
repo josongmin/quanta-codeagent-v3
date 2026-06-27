@@ -35,12 +35,15 @@ describe("runner verify-select and patch-budget driver parity", () => {
     )
   })
 
-  test("both drivers wire owner-widening follow-up through the shared helpers", () => {
-    expect(DRIVER_SRC).toContain("const widening = await adaptiveNextPassOwners({")
+  test("owner-widening follow-up is wired through the shared helpers", () => {
+    // Post ac3a266f8 the runner driver's own per-instance orchestrator was
+    // deleted as dead — it is now the shared-helper LIBRARY (DEFINES the helpers,
+    // exported), and the app driver is the sole orchestrator that CALLS them.
+    // Parity = runner DEFINES, app CONSUMES (with the owner-widening telemetry).
+    expect(DRIVER_SRC).toContain("export const adaptiveNextPassOwners")
+    expect(DRIVER_SRC).toContain("export const maybeRunRepairEscalationFollowup")
     expect(APP_DRIVER_SRC).toContain("const widening = await adaptiveNextPassOwners({")
-    expect(DRIVER_SRC).toContain("const followup = await maybeRunRepairEscalationFollowup({")
     expect(APP_DRIVER_SRC).toContain("const followup = await maybeRunRepairEscalationFollowup({")
-    expect(DRIVER_SRC).toContain("phase.ownerWidening = followup.telemetry")
     expect(APP_DRIVER_SRC).toContain("args.state.phase.ownerWidening = followup.telemetry")
   })
 

@@ -33,7 +33,7 @@
  * the default interval.
  */
 
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { isStreamEventContentful } from "./empty-stream-breaker"
 import type { LLMPort } from "./ports"
 import type { StreamEvent, StreamInput } from "./types"
@@ -184,7 +184,7 @@ export const withStreamProgressTrace = (
             yield ev
           }
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
+          const msg = errMessage(err)
           outcome = `error:${msg}`
           throw err
         } finally {

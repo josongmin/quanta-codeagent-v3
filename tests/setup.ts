@@ -2,7 +2,7 @@
 import { afterEach, beforeEach } from "bun:test"
 import { __resetSpanSink } from "@/observability"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
-import { setTerminalIo } from "@/shared"
+import { __resetKnobOverrides, __resetRuntimeConfig, setTerminalIo } from "@/shared"
 
 beforeEach(() => {
   setTerminalIo({
@@ -26,4 +26,17 @@ beforeEach(() => {
 afterEach(() => {
   __resetSpanSink()
   __resetDefaultMetricSink()
+  // The runtime-config singleton reads process.env ONCE and freezes it (cached).
+  // A test that mutates env (or a knob override), reads `runtimeConfig()`, then
+  // restores env leaves the STALE frozen config cached for every later test in
+  // the run — a broad, hard-to-trace cross-file flake (verify-select/bench/loop
+  // suites that pass in isolation but fail in the full run). Clear the cache so
+  // the next `runtimeConfig()` re-reads the then-current env/overrides; the leak
+  // is structurally impossible, not a per-file convention.
+  __resetRuntimeConfig()
+  // Same hazard one layer down: the live knob-override store (`/config set`) is a
+  // module-global keyed by a monotonic version that `runtimeConfig()` caches on.
+  // A test that sets an override and forgets to clear it leaks the override (and
+  // its version bump) into every later test's `runtimeConfig()` / knob read.
+  __resetKnobOverrides()
 })

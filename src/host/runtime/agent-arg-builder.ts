@@ -180,7 +180,7 @@ const resolvePrewarmSlot = (
 
 // RFC jun-17 (code-intelligence warm backend) — project `QUANTA_LSP_PREWARM`
 // into `AgentConfig.lspPrewarm`. DEFAULT-ON, but GATED on the nav tools actually
-// being exposed (`QUANTA_LSP_TOOLS=full`, matching `lspNavEnabled`, OR the
+// being exposed (`QUANTA_LSP_TOOLS=full`, matching `resolveLspNavMode`, OR the
 // bench-only `QUANTA_BENCH_LSP`) — warming a server whose tools are not
 // registered is wasted work, so with nav OFF the slot is omitted (byte-identical
 // legacy). With nav ON the warm fires unless explicitly killed via

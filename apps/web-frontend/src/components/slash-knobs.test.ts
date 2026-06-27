@@ -26,7 +26,13 @@ const knob = (over: Partial<KnobEntry>): KnobEntry => ({
   ...over,
 })
 
+const realFetch = globalThis.fetch
+const stubFetch = (impl: typeof fetch) => {
+  globalThis.fetch = impl
+}
+
 afterEach(() => {
+  globalThis.fetch = realFetch
   vi.restoreAllMocks()
 })
 
@@ -188,7 +194,7 @@ describe("fetchKnobs", () => {
       async (_url: string | URL, _init?: RequestInit): Promise<Response> =>
         new Response(JSON.stringify({ total: 0, groups: [] }), { status: 200 }),
     )
-    vi.stubGlobal("fetch", fetchMock)
+    stubFetch(fetchMock)
     const out = await fetchKnobs({ httpUrl: "http://x:1/", token: "tok" })
     expect(out.total).toBe(0)
     const call = fetchMock.mock.calls[0]
@@ -197,10 +203,7 @@ describe("fetchKnobs", () => {
   })
 
   it("throws on a non-ok response", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("nope", { status: 401 })),
-    )
+    stubFetch(vi.fn(async () => new Response("nope", { status: 401 })))
     await expect(fetchKnobs({ httpUrl: "http://x:1" })).rejects.toThrow(/401/)
   })
 })
@@ -211,7 +214,7 @@ describe("postKnobValue", () => {
       async (_url: string | URL, _init?: RequestInit): Promise<Response> =>
         new Response("{}", { status: 200 }),
     )
-    vi.stubGlobal("fetch", fetchMock)
+    stubFetch(fetchMock)
     const res = await postKnobValue({ httpUrl: "http://x:1", token: "t" }, "QUANTA_FAST", "1")
     expect(res.ok).toBe(true)
     const call = fetchMock.mock.calls[0]
@@ -221,10 +224,7 @@ describe("postKnobValue", () => {
   })
 
   it("returns an error result (not a throw) on rejection", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response("unknown_key", { status: 400 })),
-    )
+    stubFetch(vi.fn(async () => new Response("unknown_key", { status: 400 })))
     const res = await postKnobValue({ httpUrl: "http://x:1" }, "QUANTA_FAST", null)
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/400/)

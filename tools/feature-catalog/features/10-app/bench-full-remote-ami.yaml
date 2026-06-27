@@ -49,7 +49,6 @@ evidence:
       - tests/unit/full-remote-bench-env-forward.test.ts
       - tests/unit/bench-remote-backend.test.ts
       - tests/unit/bench-concurrency-hellgate.test.ts
-      - tests/unit/bench-local-env-and-gold-sanity.test.ts
     integration:
       - tests/integration/bench-box-ls-status.test.ts
     contract: []

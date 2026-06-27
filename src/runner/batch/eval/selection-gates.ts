@@ -1,4 +1,6 @@
 /**
+ * @deprecated jun-27 — the verify-select / best-of-N veto SELECTION plane is retired (it laundered correct patches to empty when no candidate passed the hard gates). Superseded by the closure-repair loop (run test → re-inject fail-log → rewrite). The enabling presets were removed; do NOT enable these knobs. Best-of-N may return later in a SOFT-rerank / LLM-judge form (never the hard-veto form), so this code is kept for reference only.
+ *
  * Hard-gate + early-accept + lexicographic-scoring helpers for the selection
  * executor. Pure functions over candidates / scored entries / injected ports.
  * `ownerCoverageOf` is re-exported from `./selection-executor` (public surface);

@@ -104,7 +104,7 @@ evidence:
       - tests/unit/bench-preset-drives-config-hellgate.test.ts
     integration:
       - tests/integration/bench-verify-select-concurrency.test.ts
-      - tests/integration/runner-verify-select-telemetry.test.ts
+      - tests/integration/bench-verify-select-telemetry.test.ts
     contract: []
 knobs:
   - name: verify-select

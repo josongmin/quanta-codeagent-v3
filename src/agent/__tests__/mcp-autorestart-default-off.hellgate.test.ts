@@ -29,11 +29,21 @@ const makeTransport = (tools: McpToolDef[]) => {
     },
     async start() {},
     send(payload: unknown) {
-      const req = payload as { id?: number; method?: string }
+      const req = payload as {
+        id?: number
+        method?: string
+        params?: { protocolVersion?: string }
+      }
       if (req.id === undefined) return null // notification
       queueMicrotask(() => {
         if (req.method === "initialize") {
-          onMessage?.({ jsonrpc: "2.0", id: req.id, result: { protocolVersion: "x" } })
+          // Echo the client's negotiated protocol version (a real server replies
+          // with a supported version; the client rejects an unsupported one).
+          onMessage?.({
+            jsonrpc: "2.0",
+            id: req.id,
+            result: { protocolVersion: req.params?.protocolVersion ?? "2025-11-25" },
+          })
         } else if (req.method === "tools/list") {
           onMessage?.({ jsonrpc: "2.0", id: req.id, result: { tools } })
         } else {

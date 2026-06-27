@@ -2,11 +2,13 @@
  * Knobs bootstrap helper — CLI surface entry assembly for the SOTA++ knob
  * framework (`@/runner/knobs`).
  *
- * Side-effect imports below register the 13 knob records into the module-level
- * singleton registry. The registry is populated *exactly once per process* —
- * importing this file at CLI startup is what makes `knobsForSurface("cli")`,
- * `resolveKnobs`, and `applyKnobs` actually see knob records. Bench / agent
- * surfaces have their own bootstrap entries (or rely on `knobs-bench.ts`).
+ * Registry population now derives from the SCHEMA BARREL, not a hand-maintained
+ * per-knob import list. The single side-effect import of `@/runner/knobs/knobs`
+ * runs the central `registerBenchKnobs()` (52 bench knobs DERIVED from
+ * `ALL_BENCH_SCHEMAS`) plus the self-registering cross-surface knobs (advisor,
+ * persona, …). The registry is populated *exactly once per process* — importing
+ * this file at CLI startup is what makes `knobsForSurface("cli")`, `resolveKnobs`,
+ * and `applyKnobs` actually see knob records.
  *
  * The bootstrap function ITSELF is a closed-port assembly: every input
  * (`argv`, `env`, `surface`) is passed in by the caller; no `process.argv` /
@@ -31,30 +33,11 @@ import {
   saveKnobConfigMerged,
 } from "@/runner/knobs"
 
-// Side-effect registry population — ORDER does not matter (each knob is
-// independent); we keep alphabetical to make adding/removing one a clean diff.
-import "@/runner/knobs/knobs/advisor"
-import "@/runner/knobs/knobs/branch-search"
-import "@/runner/knobs/knobs/closeout-critic"
-import "@/runner/knobs/knobs/closeout-guard"
-import "@/runner/knobs/knobs/compose-authoring"
-import "@/runner/knobs/knobs/hooks"
-import "@/runner/knobs/knobs/issue-hint"
-import "@/runner/knobs/knobs/localize-phase"
-import "@/runner/knobs/knobs/lsp"
-import "@/runner/knobs/knobs/mcp-tool-annotations"
-import "@/runner/knobs/knobs/memory-mode"
-import "@/runner/knobs/knobs/multi-voter"
-import "@/runner/knobs/knobs/must-pass"
-import "@/runner/knobs/knobs/network-proxy"
-import "@/runner/knobs/knobs/persona"
-import "@/runner/knobs/knobs/policy-merge"
-import "@/runner/knobs/knobs/ratelimit-notice"
-import "@/runner/knobs/knobs/repro-test"
-import "@/runner/knobs/knobs/skills"
-import "@/runner/knobs/knobs/subagent"
-import "@/runner/knobs/knobs/task-budget"
-import "@/runner/knobs/knobs/working-state"
+// Side-effect registry population — the schema-barrel registration entry point.
+// Registers all bench knobs centrally (DERIVED from `ALL_BENCH_SCHEMAS` via
+// `registerBenchKnobs`) + the self-registering cross-surface knobs. NO per-knob
+// hand-import list (the drift the knob=schema unification removes).
+import "@/runner/knobs/knobs"
 
 /** Inputs to {@link bootstrapKnobs}. All env/argv reads happen at the caller
  *  (the CLI entry); this helper stays a pure data folder. */

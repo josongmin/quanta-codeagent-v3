@@ -1,40 +1,12 @@
 /**
- * Knob: `repair-escalation` (T-601) — explicit `RepairEscalationDecision`
- * (continue-single-owner / collect-more-evidence / branch-search /
- * multi-owner-plan) derived from the typed artifacts, with a closed structured
- * reason taxonomy. Widen to multi-site ONLY on explicit cross-owner evidence.
- *
- * Default-OFF. NOOP-apply registry entry: the runtime EFFECT is delivered by the
- * bench driver via `benchPostureFromState` projection (`repairEscalation`
- * field). When enabled, that driver may feed explicit multi-owner owners into
- * one bounded follow-up prepare/run pass (or an adaptive reroute's next pass),
- * and also mirrors the typed decision onto the report. Strict truthy gate:
- * `"1"`/`"on"`/`"true"` ⇒ enabled.
+ * Knob: `repair-escalation` — DERIVED from `repairEscalationSchema` (the knob-schema SSOT in
+ * `@/config/knob-schema/schemas/bench-a`). NOOP apply: the value is consumed
+ * out of band by the bench driver via `benchPostureFromState` (posture path),
+ * not folded onto `AgentConfig`. Registration is CENTRAL (`registerBenchKnobs`);
+ * this file only re-exports the derived knob for back-compat importers.
  */
 
-import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { repairEscalationSchema } from "@/config/knob-schema/schemas/bench-a"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 
-const SURFACES: readonly Surface[] = ["bench"]
-const ENABLING = new Set(["1", "on", "true"])
-
-const parseRepairEscalation = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return ENABLING.has(raw.trim().toLowerCase()) ? true : undefined
-}
-
-const applyRepairEscalation = (cfg: AgentConfig): AgentConfig => cfg
-
-export const repairEscalationKnob: Knob<true> = {
-  id: "repair-escalation",
-  envKey: "QUANTA_BENCH_REPAIR_ESCALATION",
-  category: "tool",
-  surfaces: SURFACES,
-  parse: parseRepairEscalation,
-  apply: applyRepairEscalation,
-  describe: "T-601 multi-owner escalation decision (closed reason taxonomy)",
-  source: "jun-17 proof-driven bench closure (T-601)",
-}
-
-registerKnob(repairEscalationKnob)
+export const repairEscalationKnob = deriveKnob(repairEscalationSchema)

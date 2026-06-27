@@ -1,36 +1,12 @@
 /**
- * Knob: `patch-hygiene` (T-401) — run the typed `PatchHygieneReport` over the
- * candidate diff to flag stray/out-of-scope files structurally (stray added
- * files deny; owner-outside is telemetry-only).
- *
- * Default-OFF. NOOP-apply registry entry: the EFFECT is delivered out of band by
- * the bench driver via `benchPostureFromState` projection (`patchHygiene` field).
- * Strict truthy gate: `"1"`/`"on"`/`"true"` ⇒ enabled.
+ * Knob: `patch-hygiene` — DERIVED from `patchHygieneSchema` (the knob-schema SSOT in
+ * `@/config/knob-schema/schemas/bench-a`). NOOP apply: the value is consumed
+ * out of band by the bench driver via `benchPostureFromState` (posture path),
+ * not folded onto `AgentConfig`. Registration is CENTRAL (`registerBenchKnobs`);
+ * this file only re-exports the derived knob for back-compat importers.
  */
 
-import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { patchHygieneSchema } from "@/config/knob-schema/schemas/bench-a"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 
-const SURFACES: readonly Surface[] = ["bench"]
-const ENABLING = new Set(["1", "on", "true"])
-
-const parsePatchHygiene = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return ENABLING.has(raw.trim().toLowerCase()) ? true : undefined
-}
-
-const applyPatchHygiene = (cfg: AgentConfig): AgentConfig => cfg
-
-export const patchHygieneKnob: Knob<true> = {
-  id: "patch-hygiene",
-  envKey: "QUANTA_BENCH_PATCH_HYGIENE",
-  category: "tool",
-  surfaces: SURFACES,
-  parse: parsePatchHygiene,
-  apply: applyPatchHygiene,
-  describe: "T-401 patch hygiene gate (stray-file deny, owner-outside telemetry)",
-  source: "jun-17 proof-driven bench closure (T-401)",
-}
-
-registerKnob(patchHygieneKnob)
+export const patchHygieneKnob = deriveKnob(patchHygieneSchema)

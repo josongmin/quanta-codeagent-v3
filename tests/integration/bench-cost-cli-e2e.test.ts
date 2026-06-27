@@ -53,9 +53,10 @@ describe("hellgate E2E — quanta-bench cost CLI (real subprocess)", () => {
   test("PRIMARY: report.json usage incl. cache ⇒ real tokens + carve-out cost", async () => {
     await withDir(async (dir) => {
       const reportPath = join(dir, "report.json")
-      // gpt-5.4 (OpenAI-family, in SSOT): 1M input of which 400k cached, 200k out.
-      // carve-out: 600k*1.25 + 400k*0.625 + 200k*10 (all /1e6) = 0.75 + 0.25 + 2.0 = $3.00.
-      // A double-count bug would render $4.00 here.
+      // gpt-5.4 (OpenAI-family, in SSOT — rates corrected jun-26 to in 2.5 /
+      // out 15 / cacheRead 0.25 per M): 1M input of which 400k cached, 200k out.
+      // carve-out: 600k*2.5 + 400k*0.25 + 200k*15 (all /1e6) = 1.5 + 0.1 + 3.0 = $4.60.
+      // A double-count bug (full 1M input AND the 400k cached) would render $5.60.
       writeFileSync(
         reportPath,
         JSON.stringify({
@@ -80,8 +81,8 @@ describe("hellgate E2E — quanta-bench cost CLI (real subprocess)", () => {
       expect(code).toBe(0)
       expect(out).toContain("1000000") // input tokens surfaced
       expect(out).toContain("200000") // output tokens surfaced
-      expect(out).toContain("$3.0000") // cache carve-out cost (NOT $4.0000)
-      expect(out).not.toContain("$4.0000")
+      expect(out).toContain("$4.6000") // cache carve-out cost (NOT the $5.60 double-count)
+      expect(out).not.toContain("$5.6000")
       expect(out).toContain("1/1 instances had token data")
       // Teeth: the honest-caveat branches must NOT fire when data is real.
       expect(out).not.toMatch(/NO token usage|NO pricing/)

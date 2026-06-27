@@ -30,9 +30,9 @@ import {
   REPO_MAP_DEFAULT_MAX_DEPTH,
   REPO_MAP_DEFAULT_MAX_FILES,
 } from "@/agent"
-import { isTruthyToken } from "@/shared"
-import { registerKnob } from "../registry"
-import type { ApplyContext, Knob, Surface } from "../types"
+import { repoMapSchema } from "@/config/knob-schema/schemas/bench-loop"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { ApplyContext, Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive", "bench"]
 
@@ -40,13 +40,14 @@ interface RepoMapValue {
   readonly enabled: true
 }
 
-/** Enable-only boolean parse via the gate-vocab SSOT (`1`/`true`/`on`/`yes`);
- *  anything else ⇒ inactive (byte-identical default-OFF). Previously a
- *  hand-rolled Set that was missing `yes` — diverged from every other gate. */
-const parseRepoMap = (raw: string | undefined): RepoMapValue | undefined =>
-  isTruthyToken(raw) ? { enabled: true } : undefined
-
-const applyRepoMap = (cfg: AgentConfig, _value: RepoMapValue, ctx: ApplyContext): AgentConfig => {
+/** Non-NOOP apply — folds `cfg.repoMap` (turn-0 injection). Bound into the central
+ *  registrar (`APPLY_BINDINGS`) AND used to derive the back-compat knob export;
+ *  ONE definition so the derived knob is byte-identical to the registered one. */
+export const applyRepoMap = (
+  cfg: AgentConfig,
+  _value: RepoMapValue,
+  ctx: ApplyContext,
+): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
   return {
     ...cfg,
@@ -58,17 +59,6 @@ const applyRepoMap = (cfg: AgentConfig, _value: RepoMapValue, ctx: ApplyContext)
   }
 }
 
-export const repoMapKnob: Knob<RepoMapValue> = {
-  id: "repo-map",
-  envKey: "QUANTA_REPO_MAP",
-  category: "hint",
-  surfaces: SURFACES,
-  parse: parseRepoMap,
-  apply: applyRepoMap,
-  describe: "Inject a bounded repo-map tree into the turn-0 env block (one-time orientation)",
-  // One-time turn-0 cost: a single bounded scan + a few hundred tokens once.
-  costMultiplier: 1,
-  source: "RFC jun-6 §4 / Codex realtime-startup-context mirror",
-}
-
-registerKnob(repoMapKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const repoMapKnob = deriveKnob(repoMapSchema, applyRepoMap)

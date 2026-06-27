@@ -258,6 +258,15 @@ export const QUANTA_ATTRS = {
      *  prewarm hook. */
     prewarmOutcome: "quanta.startup.prewarm_outcome",
   },
+  run: {
+    /** Resource attribute identifying ONE logical run a process streams its
+     *  spans under (a bench invocation / campaign arm). Set from
+     *  `QUANTA_OTEL_RUN_ID` (auto-issued when unset), it lets the trace-viewer
+     *  filter one run out of a sink that mixes many concurrent runs — the
+     *  `?run=<id>` deep-link. Unlike the other keys (per-span attrs) this rides
+     *  the OTLP *resource*, so it applies to every span of the run. */
+    id: "quanta.run.id",
+  },
 } as const
 
 // ---------------------------------------------------------------------------

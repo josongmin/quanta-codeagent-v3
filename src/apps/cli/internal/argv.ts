@@ -73,13 +73,6 @@ export const planEnabled = (): boolean =>
 export const lspEnabled = (): boolean =>
   (readCliKnob("QUANTA_LSP", "bool") ?? false) || hasArg("--lsp")
 
-/** Codex `may-20-codex-lsp.md` absorption (ADR-0015). `QUANTA_LSP_TOOLS=full`
- *  requests the FULL nav surface (read-only nav + the mutating
- *  `lsp_rename_apply` / `lsp_format`). This predicate answers ONLY that explicit
- *  request; the default (unset) server-present behaviour is resolved by
- *  {@link resolveLspNavMode} below. */
-export const lspNavEnabled = (): boolean => process.env.QUANTA_LSP_TOOLS === "full"
-
 /** Which LSP-nav tools the CLI registers:
  *  - `"all"`      → read-only nav + mutating (`rename_apply`/`format`)
  *  - `"readonly"` → read-only nav only (`isReadOnly()` members)
@@ -112,7 +105,7 @@ export const resolveLspNavMode = (raw: string | undefined, serverPresent: boolea
  *  Default-OFF: with the knob unset the tool surface is byte-identical.
  *
  *  NOTE: `"full"` is accepted as an alias for parity with `QUANTA_LSP_TOOLS=full`
- *  (see `lspNavEnabled`). It is NOT in GATE_TRUTHY so it would silently resolve
+ *  (see `resolveLspNavMode`). It is NOT in GATE_TRUTHY so it would silently resolve
  *  to `false` via `readCliKnob("bool")`; the explicit OR guard below captures it. */
 export const astGrepEnabled = (): boolean =>
   process.env.QUANTA_AST_GREP === "full" || (readCliKnob("QUANTA_AST_GREP", "bool") ?? false)

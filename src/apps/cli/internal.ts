@@ -889,7 +889,6 @@ export {
   hasArg,
   idModeEnabled,
   lspEnabled,
-  lspNavEnabled,
   newSessionFlag,
   observeDir,
   planEnabled,

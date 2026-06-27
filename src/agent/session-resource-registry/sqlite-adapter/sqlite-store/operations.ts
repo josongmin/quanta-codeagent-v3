@@ -10,6 +10,7 @@
  */
 
 import type { Database } from "bun:sqlite"
+import { errMessage, logger } from "@/shared"
 import {
   createInMemorySystemPromptCache,
   type SystemPromptCacheKey,
@@ -48,8 +49,10 @@ import {
 const recomputeSessionBytes = (deps: Deps, sessionId: string): void => {
   try {
     deps.db.query(RECOMPUTE_SESSION_BYTES_SQL).run({ $sid: sessionId })
-  } catch {
-    // NO-THROW.
+  } catch (e) {
+    // NO-THROW: a recompute failure leaves the (stale) total in place, but the
+    // failure is surfaced so a drifting byte-count is diagnosable.
+    logger.warn("session_registry.recompute_session_bytes_failed", { sessionId, cause: errMessage(e) })
   }
 }
 

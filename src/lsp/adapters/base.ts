@@ -791,14 +791,16 @@ export class LspClient implements LspPort {
       try {
         this.processTreeKiller.signalTree(pid, signal)
         return
-      } catch {
+      } catch (e) {
         // injected killer is expected no-throw; keep stop() defensive anyway.
+        logger.warn("lsp: process-tree signal threw (defensive)", { pid, signal, error: errMessage(e) })
       }
     }
     try {
       proc.kill(signal)
-    } catch {
+    } catch (e) {
       // process may have already exited
+      logger.warn("lsp: proc.kill threw (likely already exited)", { pid, signal, error: errMessage(e) })
     }
   }
 

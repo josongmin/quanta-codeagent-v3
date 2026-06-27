@@ -17,18 +17,16 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { workingStateSchema } from "@/config/knob-schema/schemas/bench-c"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive"]
-const TRUTHY = new Set(["1", "on", "true"])
 
-const parseWorkingState = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return TRUTHY.has(raw) ? true : undefined
-}
-
-const applyWorkingState = (
+/** Non-NOOP apply — wires `cfg.workingState`. Bound into the central registrar
+ *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export; ONE
+ *  definition so the derived knob is byte-identical to the registered one. */
+export const applyWorkingState = (
   cfg: AgentConfig,
   value: true,
   ctx: { surface: Surface },
@@ -41,15 +39,6 @@ const applyWorkingState = (
   return { ...cfg, workingState: { ...(cfg.workingState ?? {}), enabled: true } }
 }
 
-export const workingStateKnob: Knob<true> = {
-  id: "working-state",
-  envKey: "QUANTA_BENCH_WORKING_STATE",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseWorkingState,
-  apply: applyWorkingState,
-  describe: "L3 working-state scratchpad (Codex absorption)",
-  source: "Codex absorption",
-}
-
-registerKnob(workingStateKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const workingStateKnob = deriveKnob(workingStateSchema, applyWorkingState)

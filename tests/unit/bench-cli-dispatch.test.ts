@@ -10,7 +10,9 @@ import {
   argValue,
   buildBackend,
   modelNameFromPredictions,
+  otelUiPort,
   positionals,
+  traceUrl,
 } from "../../src/apps/bench/cli"
 
 let savedArgv: string[]
@@ -34,6 +36,31 @@ describe("bench CLI dispatch", () => {
   test("positionals: boolean flag (--keep) consumes no value", () => {
     setArgv("grade", "r.json", "--keep", "--backend", "ec2")
     expect(positionals()).toEqual(["r.json"]) // ec2 is --backend's value, skipped
+  })
+
+  test("positionals: --run takes a value (trace <run-id> deep-link)", () => {
+    // `trace box-3 --run other --port 4319` — both --run and --port are value
+    // flags, so only the bare run-id positional survives.
+    setArgv("trace", "box-3", "--run", "other", "--port", "4319")
+    expect(positionals()).toEqual(["box-3"])
+  })
+
+  test("traceUrl: deep-links to one run and URL-encodes the run id", () => {
+    // no run id ⇒ bare UI url (launch-fresh path)
+    expect(traceUrl(4318)).toBe("http://127.0.0.1:4318/")
+    // run id ⇒ ?run= filter; the port is honored
+    expect(traceUrl(4319, "ab-A2")).toBe("http://127.0.0.1:4319/?run=ab-A2")
+    // a run id with shell/url-unsafe chars is encoded, not injected raw
+    expect(traceUrl(4318, "wave3 s0/A&B")).toBe("http://127.0.0.1:4318/?run=wave3%20s0%2FA%26B")
+  })
+
+  test("otelUiPort: parses the endpoint's port so the printed link matches the sink", () => {
+    // the boot-wire link must point at the SAME port the sink listens on
+    expect(otelUiPort({ QUANTA_OTEL_ENDPOINT: "http://127.0.0.1:4319" })).toBe(4319)
+    // unset / unparseable / portless ⇒ OTLP/HTTP default 4318
+    expect(otelUiPort({})).toBe(4318)
+    expect(otelUiPort({ QUANTA_OTEL_ENDPOINT: "not a url" })).toBe(4318)
+    expect(otelUiPort({ QUANTA_OTEL_ENDPOINT: "http://example.com" })).toBe(4318)
   })
 
   test("positionals: empty when only flags", () => {

@@ -116,6 +116,16 @@ describe("buildForwardedBenchEnv", () => {
     expect(buildForwardedBenchEnv({ QUANTA_OTEL_BATCH_SIZE: "128" })).toBe("")
   })
 
+  test("FWD-11: OTLP run id reaches the box (so its spans carry quanta.run.id → ?run= filter)", () => {
+    // jun-27: the run-id deep-link only works if the BOX's spans carry the run id.
+    // QUANTA_OTEL_RUN_ID is non-BENCH-prefixed ⇒ must be in the FORWARD allowlist.
+    const out = buildForwardedBenchEnv({
+      QUANTA_OTEL_ENDPOINT: "http://127.0.0.1:4318",
+      QUANTA_OTEL_RUN_ID: "ab-closure-repair-A2",
+    })
+    expect(out).toContain("QUANTA_OTEL_RUN_ID='ab-closure-repair-A2' ")
+  })
+
   test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {
     expect(() =>
       buildForwardedBenchEnv({

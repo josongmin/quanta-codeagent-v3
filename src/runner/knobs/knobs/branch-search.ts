@@ -22,60 +22,33 @@
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { branchSearchSchema } from "@/config/knob-schema/schemas/bench-a"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
-const BENCH_BRANCH_TIMEOUT_MS = 60_000
 
-interface BranchSearchValue {
-  readonly defaultN: number
-  readonly config: BranchSearchConfig
-}
+/** The schema's parsed value (config-leaf can't reference the runner
+ *  `VerifierKind`, so its `defaultVerifierKinds` is `readonly string[]`). */
+type BranchSearchValue = ReturnType<typeof branchSearchSchema.parse>
 
-const parseBranchSearch = (raw: string | undefined): BranchSearchValue | undefined => {
-  if (raw === undefined) return undefined
-  const s = raw.trim()
-  if (s === "") return undefined
-  // Reject internal whitespace and anything that isn't an optional sign + digits.
-  if (!/^-?\d+$/.test(s)) return undefined
-  const n = Number(s)
-  if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
-  if (n < 2 || n > 8) return undefined
-  return {
-    defaultN: n,
-    config: {
-      defaultN: n,
-      defaultVerifierKinds: ["tsc"],
-      timeoutPerBranchMs: BENCH_BRANCH_TIMEOUT_MS,
-      isolation: "tmpdir",
-    },
-  }
-}
-
-const applyBranchSearch = (
+/** Non-NOOP apply — folds `cfg.branchSearch`. Bound into the central registrar
+ *  (`APPLY_BINDINGS` + conflicts) AND used to derive the back-compat knob export;
+ *  ONE definition so the derived knob is byte-identical to the registered one.
+ *  The schema's `defaultVerifierKinds` is `readonly string[]` (leaf-clean); the
+ *  parse only ever emits `["tsc"]`, so the narrowing to `BranchSearchConfig` is
+ *  sound. */
+export const applyBranchSearch = (
   cfg: AgentConfig,
-  value: BranchSearchValue,
+  value: NonNullable<BranchSearchValue>,
   ctx: { surface: Surface },
 ): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
-  return { ...cfg, branchSearch: value.config }
+  return { ...cfg, branchSearch: value.config as BranchSearchConfig }
 }
 
-export const branchSearchKnob: Knob<BranchSearchValue> = {
-  id: "branch-search",
-  envKey: "QUANTA_BENCH_BRANCH_SEARCH",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseBranchSearch,
-  apply: applyBranchSearch,
-  describe: "Agentless N-best speculative branch search (K candidates, ~K× cost)",
-  unit: "candidates",
+// DERIVED from the schema SSOT (data) + the runner-side apply + relationship
+// bindings. Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const branchSearchKnob = deriveKnob(branchSearchSchema, applyBranchSearch, {
   conflicts: ["localize-phase"],
-  // The cost multiplier scales with K — the registry uses the value from
-  // `parse` so this static value documents the worst case (max K=8).
-  costMultiplier: 8,
-  source: "ADR-0084 / Agentless paper",
-}
-
-registerKnob(branchSearchKnob)
+})

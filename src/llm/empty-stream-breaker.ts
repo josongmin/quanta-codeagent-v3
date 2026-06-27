@@ -54,7 +54,7 @@
  * `logger.error` line is emitted — no silent burn (memory: no silent caps).
  */
 
-import { LLMError, type LLMProvider, logger } from "@/shared"
+import { errMessage, LLMError, type LLMProvider, logger } from "@/shared"
 import type { LLMPort } from "./ports"
 import { defaultHashRequest } from "./replay/jsonl-store"
 import type { StreamEvent, StreamInput } from "./types"
@@ -135,11 +135,28 @@ export interface EmptyStreamBreakerOpts {
    *  `@/llm` slice does not read the wall-clock directly in pure code — resolve
    *  the real clock at the composition root. Defaults to `Date.now`. */
   readonly now?: () => number
-  /** Injectable sleep for deterministic tests. Defaults to real `setTimeout`. */
-  readonly sleep?: (ms: number) => Promise<void>
+  /** Injectable sleep for deterministic tests. Defaults to an abort-aware
+   *  `setTimeout` that settles early on the stream's cancellation signal. */
+  readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
-const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+/** Abort-aware backoff sleep: settles immediately once `signal` aborts, so an
+ *  aborted turn does not strand the breaker waiting out the full backoff delay
+ *  (mirrors src/agent/loop/sleep.ts; kept local to avoid an @/llm→@/agent slice
+ *  edge). With no signal it behaves like a plain timer. */
+const realSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve) => {
+    if (ms <= 0 || signal?.aborted) return resolve()
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(t)
+      resolve()
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 
 /** Relay every event of `inner`, flipping `flag.sawContent` true on the first
  *  CONTENT event. Extracted as a top-level generator so the decorator's
@@ -249,7 +266,7 @@ export const withEmptyStreamCircuitBreaker = (
       consecutiveEmpty.delete(route)
       return err
     }
-    const cause = err instanceof Error ? err.message : String(err)
+    const cause = errMessage(err)
     return recordEmpty(route, priorEmpty, cause) ?? err
   }
 
@@ -289,7 +306,7 @@ export const withEmptyStreamCircuitBreaker = (
 
         // Backoff BEFORE re-opening a route that already had ≥1 empty — space out
         // a throttling endpoint. Skipped on the first attempt / when disabled.
-        if (priorEmpty > 0 && backoffMs > 0) await sleep(backoffMs)
+        if (priorEmpty > 0 && backoffMs > 0) await sleep(backoffMs, input.signal)
 
         const flag = { sawContent: false }
         try {

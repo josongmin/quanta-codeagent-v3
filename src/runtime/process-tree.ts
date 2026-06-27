@@ -37,6 +37,8 @@
  * describe this killer as "orphan-proof".
  */
 
+import { errMessage, logger } from "@/shared"
+
 export type TreeSignal = "SIGTERM" | "SIGKILL"
 
 /** A single row of the OS process table: a pid and its parent pid. */
@@ -122,7 +124,11 @@ export const createPpidWalkKiller = (deps: PpidWalkDeps): ProcessTreeKiller => {
 const readDescendants = (rootPid: number, readTable: ProcessTableProvider): number[] => {
   try {
     return descendantsOf(rootPid, readTable())
-  } catch {
+  } catch (e) {
+    // Best-effort: a process table that cannot be read leaves us with no
+    // descendants to signal, but the failure must be visible (not masked as a
+    // genuinely empty tree) so a stuck enumerator is diagnosable.
+    logger.warn("process-tree.read_descendants_failed", { rootPid, cause: errMessage(e) })
     return []
   }
 }

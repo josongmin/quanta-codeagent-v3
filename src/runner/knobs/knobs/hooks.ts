@@ -21,18 +21,16 @@
 
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { hooksSchema } from "@/config/knob-schema/schemas/bench-c"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch"]
-const TRUTHY = new Set(["1", "on"])
 
-const parseHooks = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return TRUTHY.has(raw) ? true : undefined
-}
-
-const applyHooks = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): AgentConfig => {
+/** Non-NOOP apply — wires the in-process `HookBus`. Bound into the central
+ *  registrar (`APPLY_BINDINGS`) AND used to derive the back-compat knob export;
+ *  ONE definition so the derived knob is byte-identical to the registered one. */
+export const applyHooks = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): AgentConfig => {
   if (value !== true) return cfg
   if (!SURFACES.includes(ctx.surface)) return cfg
   // Preserve a caller-supplied bus (defensive: a host that wired its own bus
@@ -41,15 +39,6 @@ const applyHooks = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): A
   return { ...cfg, hooks: new HookBus() }
 }
 
-export const hooksKnob: Knob<true> = {
-  id: "hooks",
-  envKey: "QUANTA_BENCH_HOOKS",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseHooks,
-  apply: applyHooks,
-  describe: "Tool-use hooks (pre/post invocation gates)",
-  source: "Cursor hooks absorption",
-}
-
-registerKnob(hooksKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const hooksKnob = deriveKnob(hooksSchema, applyHooks)

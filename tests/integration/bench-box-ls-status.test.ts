@@ -90,15 +90,15 @@ case "$host::$last" in
     echo OK
     exit 0
     ;;
-  ubuntu@1.2.3.4::*"pgrep -f 'cli.ts run'"*)
+  ubuntu@1.2.3.4::*"pool-grade.lock"*)
     echo BUSY
     exit 0
     ;;
-  ubuntu@1.2.3.5::*"pgrep -f 'cli.ts run'"*)
+  ubuntu@1.2.3.5::*"pool-grade.lock"*)
     echo IDLE
     exit 0
     ;;
-  ubuntu@1.2.3.6::*"pgrep -f 'cli.ts run'"*)
+  ubuntu@1.2.3.6::*"pool-grade.lock"*)
     echo BUSY
     exit 0
     ;;

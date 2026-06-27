@@ -82,6 +82,8 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — passes the parent's `process.env` into `buildLspServerEnv` so the spawned language-server child inherits it (plus the NODE_OPTIONS heap cap); pass-through to a child, not a feature read. Same posture as runtime/shell.ts / tool/git/runner.ts.",
       "apps/bench/remote/box-session/ec2-lifecycle.ts":
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count.",
+      "apps/bench/remote/box-session/types.ts":
+        "Bench full-remote launch dial (QUANTA_FULL_REMOTE_INSTANCE_TYPE) read in the provision-config defaults; same bench-only opt-in env posture as the sibling ec2-lifecycle.ts. Downstream gets the resolved instance type.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",

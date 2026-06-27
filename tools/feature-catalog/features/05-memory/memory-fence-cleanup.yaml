@@ -38,7 +38,6 @@ purpose: |
 evidence:
   code:
     - src/memory/consolidate/phase2-llm.ts
-    - src/memory/consolidate/phase2-llm.js
     - src/memory/consolidate/types.ts
     - biome.json
   adrs: ["docs/decisions/0068-codex-2-phase-memory-consolidator.md"]

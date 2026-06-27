@@ -1,11 +1,14 @@
 /**
  * Hellgate — cross-slice import cycle + slice-fence verification.
  *
- * `src/runner/knobs/` must not depend on `src/runner/batch/` (modulo
- * type-only imports). Each per-knob file under `src/runner/knobs/knobs/`
- * must not depend on a SIBLING knob file (slice isolation). The framework
- * core (registry/resolve/apply/validate/persist/presets/types) must form a
- * DAG within the slice.
+ * `src/runner/knobs/` must not depend on `src/runner/batch/` (modulo type-only
+ * imports) — with ONE sanctioned exception: the knob=schema unification makes
+ * each per-knob file DERIVE its registry Knob from the schema SSOT via
+ * `deriveKnob` (`@/runner/batch/eval/kernel/derive`). That ONE value import is the
+ * SSOT derive primitive; every OTHER value import into `@/runner/batch` is still
+ * banned. Each per-knob file under `src/runner/knobs/knobs/` must not depend on a
+ * SIBLING knob file (slice isolation). The framework core
+ * (registry/resolve/apply/validate/persist/presets/types) must form a DAG.
  *
  * We assert via filesystem inspection — read each file and verify forbidden
  * `import` patterns are absent. The set is narrow and explicit; new
@@ -20,6 +23,16 @@ const KNOBS_DIR = join(REPO_ROOT, "src", "runner", "knobs")
 const PER_KNOB_DIR = join(KNOBS_DIR, "knobs")
 
 const readSrc = (p: string) => readFile(p, "utf8")
+
+/** The ONE sanctioned value import into `@/runner/batch` from the knob slice:
+ *  the `deriveKnob` SSOT derive primitive (knob=schema unification). */
+const DERIVE_IMPORT = '@/runner/batch/eval/kernel/derive'
+/** A value import into `@/runner/batch` that is NOT the sanctioned derive SSOT. */
+const forbiddenBatchValueImport = (txt: string): boolean =>
+  txt
+    .split("\n")
+    .filter((l) => /^import\s+(?!type\b)[^"']*from\s+["']@\/runner\/batch/.test(l))
+    .some((l) => !l.includes(DERIVE_IMPORT))
 
 describe("hellgate / cross-slice — runner/knobs DOES NOT import runner/batch (value-level)", () => {
   test("framework core files have no value-level batch import", async () => {
@@ -42,13 +55,14 @@ describe("hellgate / cross-slice — runner/knobs DOES NOT import runner/batch (
     }
   })
 
-  test("per-knob files have no value-level batch import", async () => {
+  test("per-knob files have no value-level batch import EXCEPT the deriveKnob SSOT", async () => {
     const files = await readdir(PER_KNOB_DIR)
     for (const f of files) {
       if (!f.endsWith(".ts")) continue
       const txt = await readSrc(join(PER_KNOB_DIR, f))
-      const valueImport = /^import\s+(?!type\b)[^"']*from\s+["']@\/runner\/batch/m
-      expect(valueImport.test(txt)).toBe(false)
+      // The ONLY permitted runner/batch value import is the `deriveKnob` SSOT
+      // (knob=schema unification); any other batch value import is still banned.
+      expect(forbiddenBatchValueImport(txt)).toBe(false)
     }
   })
 })
@@ -67,15 +81,30 @@ describe("hellgate / cross-slice — per-knob files do NOT import each other", (
     }
   })
 
-  test("the side-effect barrel imports every per-knob file but no other", async () => {
+  test("the barrel registers all knobs centrally + side-effect-imports only NON-schema knobs", async () => {
+    // Post knob=schema unification: schema-backed bench knobs register CENTRALLY
+    // via `registerBenchKnobs()` (derived from `ALL_BENCH_SCHEMAS`), so the barrel
+    // no longer hand-imports each one. The only `import "./<knob>"` side-effects
+    // left are the NON-schema, self-registering cross-surface knobs. The drift
+    // guard that "no knob is silently missing" now lives in knobs-import-bundle.
     const txt = await readSrc(join(PER_KNOB_DIR, "index.ts"))
-    // One `import "./<knob>"` per per-knob file (excluding the barrel itself).
+    // Central registration is wired.
+    expect(txt).toContain("registerBenchKnobs")
     const sideImports = txt.match(/import\s+["']\.\/[^"']+["']/g) ?? []
     const files = await readdir(PER_KNOB_DIR)
     const knobFileCount = files.filter((f) => f.endsWith(".ts") && f !== "index.ts").length
-    expect(sideImports.length).toBe(knobFileCount)
-    // No `from "../"` (would break the barrel contract).
-    expect(/from\s+["']\.\.\//.test(txt)).toBe(false)
+    // Strictly FEWER side-effect imports than knob files (the schema-backed ones
+    // are registered centrally, not hand-imported) — and at least one remains
+    // (the non-schema self-registering knobs).
+    expect(sideImports.length).toBeGreaterThan(0)
+    expect(sideImports.length).toBeLessThan(knobFileCount)
+    // Every side-effect-imported file exists and is itself a self-registering
+    // (NON-schema) knob — i.e. it still calls `registerKnob` (NOT thin-derived).
+    for (const imp of sideImports) {
+      const rel = (imp.match(/import\s+["']\.\/([^"']+)["']/) as RegExpMatchArray)[1]
+      const knobTxt = await readSrc(join(PER_KNOB_DIR, `${rel}.ts`))
+      expect(knobTxt).toContain("registerKnob")
+    }
   })
 })
 
@@ -140,9 +169,11 @@ describe("hellgate / cross-slice — index.ts barrel surface stability", () => {
 })
 
 describe("hellgate / cross-slice — issue-hint type-only fence", () => {
-  test("issue-hint.ts uses type-only imports for @/runner/batch (if any)", async () => {
+  test("issue-hint.ts imports no @/runner/batch value EXCEPT the deriveKnob SSOT", async () => {
     const txt = await readSrc(join(PER_KNOB_DIR, "issue-hint.ts"))
-    const valueBatchImport = /^import\s+(?!type\b)[^"']*from\s+["']@\/runner\/batch/m
-    expect(valueBatchImport.test(txt)).toBe(false)
+    // The thin issue-hint knob derives from the schema SSOT via `deriveKnob`
+    // (the one sanctioned batch value import); any OTHER batch value import is
+    // still banned (no driver/loop value dependency leaking into the slice).
+    expect(forbiddenBatchValueImport(txt)).toBe(false)
   })
 })

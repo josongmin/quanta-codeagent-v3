@@ -1,80 +1,37 @@
 /**
- * Side-effect bundle import — registers all bench/agent knobs into the
- * registry via their module-level `registerKnob(...)` calls.
+ * Knob registration barrel — populates the registry singleton.
  *
- * Surface entries that drive the bench / matrix / CLI MUST import this
- * barrel BEFORE calling `resolveKnobs` / `knobsForSurface` so the registry
- * is populated. Tests that need a clean registry can call `__resetRegistry`
- * and then re-import this module (Bun caches it once per process, so the
- * side-effect fires exactly once unless explicitly reset).
+ * TWO registration mechanisms, ONE entry point:
+ *   1. BENCH knobs (the 52 schema-backed `@/runner/knobs` Knobs) are registered
+ *      CENTRALLY by `registerBenchKnobs()`, which DERIVES each from the schema
+ *      SSOT (`ALL_BENCH_SCHEMAS`). No per-knob hand-import list (the drift this
+ *      unification removes). The thin per-knob files no longer self-register.
+ *   2. NON-bench / cross-surface knobs (advisor, persona, network-proxy, …) that
+ *      are NOT in the bench schema SSOT still self-register via their module-level
+ *      `registerKnob(...)`; the side-effect imports below fire that exactly once.
  *
- * The matrix tool's `bootstrapBenchKnobs` is the runtime fallback for cases
- * where the registry has been reset mid-process (e.g. test isolation); the
- * production import path goes through this barrel.
+ * Surface entries that drive bench / matrix / CLI MUST import this barrel before
+ * calling `resolveKnobs` / `knobsForSurface`. `registerBenchKnobs()` and the
+ * self-registering modules are both idempotent under the registry collision guard
+ * (presence-checked), so a sibling `__resetRegistry()` + cached re-import is safe.
  */
 
-import "./adversarial-repro"
+import { registerBenchKnobs } from "../register-bench-knobs"
+
+// Schema-backed BENCH knobs — registered centrally (derived from the SSOT).
+registerBenchKnobs()
+
+// Non-schema, cross-surface knobs — self-register via side-effect import.
 import "./advisor"
-import "./bench-in-loop-exec"
-import "./branch-search"
-import "./cha-multisite-general"
-import "./cha-multisite-steer"
 import "./closeout-critic"
-import "./closeout-guard"
-import "./closure-repair"
 import "./compose-authoring"
-import "./dynamic-message-matcher"
-import "./fault-evidence"
-import "./forward-localize"
 import "./git-directive"
-import "./hooks"
-import "./issue-hint"
-import "./issue-hint-expected-actual"
-import "./localize-budget"
-import "./localize-phase"
-import "./lsp"
-import "./lsp-cheap"
-import "./repro-doubt"
-import "./repro-exec-timeout"
-import "./lsp-steer"
 import "./mcp-tool-annotations"
 import "./memory-mode"
-import "./model-lane-diversity"
-import "./multi-voter"
-import "./paired-control"
-import "./must-pass"
 import "./network-proxy"
-import "./no-patch-breaker"
-import "./no-patch-force-fraction"
-import "./patch-budget"
-import "./patch-budget-strict"
-import "./patch-hygiene"
 import "./persona"
 import "./policy-merge"
-import "./primary-rail"
 import "./ratelimit-notice"
 import "./read-outline"
-import "./regression-max-tests"
-import "./repair-escalation"
-import "./repo-map"
-import "./repro-test"
-import "./repro-vote"
-import "./retry-transient"
-import "./selector-mode"
-import "./spec-fidelity-invariant"
-import "./spec-fidelity-steer"
-import "./verification-plan"
-import "./skills"
-import "./subagent"
 import "./task-budget"
 import "./test-runner"
-import "./verify-select"
-import "./verify-select-concurrency"
-import "./verify-select-counterfactual"
-import "./verify-select-early-accept"
-import "./verify-select-llm-risk-gate"
-import "./verify-select-proof-required"
-import "./verify-select-regression"
-import "./verify-select-repro"
-import "./verify-select-risk-gate"
-import "./working-state"

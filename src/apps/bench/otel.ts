@@ -42,3 +42,112 @@ export const attachBenchOtelExport = (
   env: Readonly<Record<string, string | undefined>>,
   overrides?: Partial<OtelExporterOpts> & ExporterSpanSinkOpts,
 ): InstalledOtelExport => installOtelSpanExportFromEnv(env, overrides)
+
+/** Chars NOT allowed in a run-id slug — collapsed to `-` so an auto-issued id is
+ *  always URL- and shell-safe (it rides into `?run=` and forwarded box env). */
+const RUN_ID_UNSAFE = /[^A-Za-z0-9._-]+/g
+
+/** Resolve the run id a bench process streams its spans under, or `undefined`
+ *  when OTLP export is OFF (no endpoint) — leaving Default-OFF byte-identical.
+ *
+ *  THE HOLE THIS CLOSES: the run-id deep-link (`?run=<id>`) only works if spans
+ *  carry `quanta.run.id`, which only happens if `QUANTA_OTEL_RUN_ID` is set.
+ *  Relying on the operator to remember it means a forgotten env (e.g. the jun-27
+ *  3-arm A/B) streams with NO run id and the link shows nothing. So:
+ *    - explicit `QUANTA_OTEL_RUN_ID` (trimmed, non-blank) ALWAYS wins — the
+ *      operator can pin a clean campaign/arm label;
+ *    - else, when export is ON, AUTO-ISSUE `<preset-slug>-<base36 time>` so every
+ *      run is linkable with zero manual steps and two runs never collide.
+ *  Set the result back onto `process.env.QUANTA_OTEL_RUN_ID` at the boot wire so
+ *  it (a) reaches the exporter AND (b) forwards to every full-remote box (one
+ *  operator invocation ⇒ one shared id across all its boxes). */
+export const resolveBenchRunId = (
+  env: Readonly<Record<string, string | undefined>>,
+  opts: { readonly now?: () => number; readonly rand?: () => number } = {},
+): string | undefined => {
+  const explicit = env.QUANTA_OTEL_RUN_ID
+  if (explicit !== undefined && explicit.trim() !== "") return explicit.trim()
+  // Auto-issue only when export is actually ON — no endpoint ⇒ nothing streams,
+  // so minting an id would be a confusing no-op (and a non-OFF env mutation).
+  if ((env.QUANTA_OTEL_ENDPOINT ?? "").trim() === "") return undefined
+  const label =
+    env.QUANTA_OTEL_SERVICE_NAME?.trim() &&
+    env.QUANTA_OTEL_SERVICE_NAME.trim() !== "quanta-codeagent"
+      ? env.QUANTA_OTEL_SERVICE_NAME
+      : (env.QUANTA_BENCH_PRESET ?? env.QUANTA_BENCH_SOTA ?? env.QUANTA_KNOBS_PRESET ?? "bench")
+  const slug =
+    label
+      .replace(RUN_ID_UNSAFE, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "bench"
+  const now = opts.now ?? Date.now
+  const rand = opts.rand ?? Math.random
+  const t = Math.trunc(Math.abs(now())).toString(36).slice(-6)
+  // 3 base36 entropy chars: a TIME suffix alone collides when two operator
+  // processes auto-issue the same preset in the SAME millisecond (parallel
+  // campaign boxes) → both stream under one id and the viewer MERGES them. The
+  // entropy makes that 1-in-46656 even at identical ms (explicit ids stay exact).
+  const ent = Math.floor(Math.abs(rand()) * 36 ** 3)
+    .toString(36)
+    .padStart(3, "0")
+    .slice(-3)
+  return `${slug}-${t}${ent}`
+}
+
+/** Compose the trace-viewer URL, deep-linked to one run when a run id is given
+ *  (`?run=<id>` — the viewer then filters to only that run's spans). */
+export const traceViewerUrl = (port: number, runId?: string): string =>
+  `http://127.0.0.1:${port}/${runId !== undefined ? `?run=${encodeURIComponent(runId)}` : ""}`
+
+/** Port the local trace-viewer UI is served on. The operator runs the sink on
+ *  the SAME port their `QUANTA_OTEL_ENDPOINT` points at, so parse it from there
+ *  (the printed boot-wire link must match where the UI actually listens); falls
+ *  back to the OTLP/HTTP default 4318 when unset / unparseable. */
+export const otelUiPort = (env: Readonly<Record<string, string | undefined>>): number => {
+  const raw = env.QUANTA_OTEL_ENDPOINT
+  if (raw !== undefined) {
+    try {
+      const p = Number(new URL(raw.trim()).port)
+      if (Number.isInteger(p) && p > 0) return p
+    } catch {
+      // not a parseable URL → default port
+    }
+  }
+  return 4318
+}
+
+export interface BenchOtelBoot {
+  readonly otelExport: InstalledOtelExport
+  /** The run id this process streams under, or undefined when export is OFF. */
+  readonly runId: string | undefined
+  /** The clickable trace-viewer deep-link, or undefined when export is OFF —
+   *  the entry logs it so the operator can jump straight to this run's waterfall. */
+  readonly traceLink: string | undefined
+}
+
+/** THE single bench boot seam both entry binaries (`cli.ts` + the legacy
+ *  `index.ts`) call, so they auto-issue + attach IDENTICALLY (no drift: the
+ *  legacy entry previously attached WITHOUT auto-issuing, so direct-invoke runs
+ *  streamed with no run id and the `?run=` link was dead). It:
+ *    1. resolves the run id ({@link resolveBenchRunId}) and writes it BACK onto
+ *       `env` (process.env) BEFORE attach, so it both (a) reaches the exporter
+ *       and (b) forwards to every full-remote box (buildForwardedBenchEnv reads
+ *       process.env at box-launch) — one operator invocation ⇒ one shared id;
+ *    2. attaches the exporter ({@link attachBenchOtelExport});
+ *    3. computes the trace-viewer deep-link for the entry to print.
+ *  Default-OFF byte-identical: no endpoint ⇒ runId/traceLink undefined, env
+ *  untouched, no sink registered. `env` is mutated in place by design (the
+ *  entries pass process.env); a test passes a throwaway record. */
+export const bootBenchOtelExport = (
+  env: Record<string, string | undefined>,
+  overrides?: Partial<OtelExporterOpts> & ExporterSpanSinkOpts,
+): BenchOtelBoot => {
+  const runId = resolveBenchRunId(env)
+  if (runId !== undefined) env.QUANTA_OTEL_RUN_ID = runId
+  const otelExport = attachBenchOtelExport(env, overrides)
+  const traceLink =
+    otelExport.exporter !== null && runId !== undefined
+      ? traceViewerUrl(otelUiPort(env), runId)
+      : undefined
+  return { otelExport, runId, traceLink }
+}

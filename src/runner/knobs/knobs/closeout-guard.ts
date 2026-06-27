@@ -20,22 +20,19 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { closeoutGuardSchema } from "@/config/knob-schema/schemas/bench-c"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive"]
-const TRUTHY = new Set(["1", "on", "true"])
 
 /** Parsed value distinguishes plain-enable from the strict 4-rule variant. */
 export type CloseoutGuardValue = { fourRule: boolean }
 
-const parseCloseoutGuard = (raw: string | undefined): CloseoutGuardValue | undefined => {
-  if (raw === undefined) return undefined
-  if (raw === "4rule") return { fourRule: true }
-  return TRUTHY.has(raw) ? { fourRule: false } : undefined
-}
-
-const applyCloseoutGuard = (
+/** Non-NOOP apply — folds `cfg.closeoutGuard`. Bound into the central registrar
+ *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export below; ONE
+ *  definition so the derived knob is byte-identical to the registered one. */
+export const applyCloseoutGuard = (
   cfg: AgentConfig,
   value: CloseoutGuardValue,
   ctx: { surface: Surface },
@@ -54,15 +51,6 @@ const applyCloseoutGuard = (
   }
 }
 
-export const closeoutGuardKnob: Knob<CloseoutGuardValue> = {
-  id: "closeout-guard",
-  envKey: "QUANTA_BENCH_CLOSEOUT",
-  category: "verify",
-  surfaces: SURFACES,
-  parse: parseCloseoutGuard,
-  apply: applyCloseoutGuard,
-  describe: "Closeout reminder (final-claim verification)",
-  source: "ADR-0017",
-}
-
-registerKnob(closeoutGuardKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const closeoutGuardKnob = deriveKnob(closeoutGuardSchema, applyCloseoutGuard)

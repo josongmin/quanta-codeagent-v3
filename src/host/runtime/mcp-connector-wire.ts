@@ -45,6 +45,7 @@ import {
   type McpServerConfigShape,
   toMcpServerConfig,
 } from "@/connectors"
+import { errMessage, logger } from "@/shared"
 import { writeFileAtomic } from "@/storage"
 import type { McpConnectorDiscoveryPort, McpConnectorEntryView, McpInstallOutcome } from "@/tool"
 
@@ -132,8 +133,11 @@ const readExistingServers = async (
   let parsed: unknown
   try {
     parsed = JSON.parse(await file.text())
-  } catch {
-    return { corrupt: true } // present but not JSON ⇒ never clobber
+  } catch (e) {
+    // present but not JSON ⇒ never clobber; surface WHY so a malformed config
+    // is diagnosable instead of looking like an empty install.
+    logger.warn("mcp_connector_wire.config_parse_failed", { configPath, cause: errMessage(e) })
+    return { corrupt: true }
   }
   // The doc must be a plain JSON object. A non-object top level (array, string,
   // number) is wrong-shaped ⇒ refuse rather than clobber.

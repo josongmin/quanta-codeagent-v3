@@ -12,10 +12,11 @@
  */
 
 import { lspNavToolList } from "@/agent"
+import type { AgentConfig } from "@/agent"
+import { lspSchema } from "@/config/knob-schema/schemas/bench-gap-1"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import type { Tool } from "@/tool"
 import { ToolRegistry } from "@/tool"
-import { registerKnob } from "../registry"
-import type { Knob } from "../types"
 
 /** Reconstruct the underlying `Tool[]` from a registry — `ToolRegistry`
  *  is construct-only and exposes specs by name; we round-trip them here. */
@@ -25,28 +26,18 @@ const registryTools = (r: ToolRegistry): Tool[] =>
     .map((s) => r.get(s.name))
     .filter((t): t is Tool => t !== undefined)
 
-export const lspKnob: Knob<boolean> = {
-  id: "lsp",
-  envKey: "QUANTA_BENCH_LSP",
-  category: "tool",
-  surfaces: ["bench", "agent-batch", "agent-interactive"],
-  parse: (raw) =>
-    raw === "1" || raw === "on" || raw === "true"
-      ? true
-      : raw === "0" || raw === "off" || raw === "false"
-        ? false
-        : undefined,
-  apply: (cfg, on) => {
-    if (!on) return cfg
-    const merged = new ToolRegistry([
-      ...registryTools(cfg.registry),
-      ...lspNavToolList(() => cfg.cwd),
-    ])
-    return { ...cfg, registry: merged }
-  },
-  describe: "LSP nav tools (8 tools — ADR-0015)",
-  source: "ADR-0015",
-  costMultiplier: 1,
+/** Non-NOOP apply — appends the 8 LSP-nav tools to the registry. Bound into the
+ *  central registrar (`APPLY_BINDINGS`) AND used to derive the back-compat knob
+ *  export; ONE definition so the derived knob is byte-identical to registered. */
+export const applyLsp = (cfg: AgentConfig, on: boolean): AgentConfig => {
+  if (!on) return cfg
+  const merged = new ToolRegistry([
+    ...registryTools(cfg.registry),
+    ...lspNavToolList(() => cfg.cwd),
+  ])
+  return { ...cfg, registry: merged }
 }
 
-registerKnob(lspKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const lspKnob = deriveKnob(lspSchema, applyLsp)

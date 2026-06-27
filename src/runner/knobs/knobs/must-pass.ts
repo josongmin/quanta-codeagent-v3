@@ -25,8 +25,9 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { mustPassSchema } from "@/config/knob-schema/schemas/bench-gap-1"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench", "agent-batch", "agent-interactive"]
 
@@ -35,16 +36,10 @@ interface MustPassValue {
   readonly maxTrips?: number
 }
 
-const parseMustPass = (raw: string | undefined): MustPassValue | undefined => {
-  if (raw === undefined) return undefined
-  if (raw === "off") return { mustPass: false }
-  if (raw === "1" || raw === "on" || raw === "strict") return { mustPass: true, maxTrips: 2 }
-  if (raw === "2") return { mustPass: true, maxTrips: 2 }
-  if (raw === "3") return { mustPass: true, maxTrips: 3 }
-  return undefined
-}
-
-const applyMustPass = (
+/** Non-NOOP apply — folds `cfg.verifyGuard`. Bound into the central registrar
+ *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export; ONE
+ *  definition so the derived knob is byte-identical to the registered one. */
+export const applyMustPass = (
   cfg: AgentConfig,
   value: MustPassValue,
   ctx: { surface: Surface },
@@ -58,16 +53,6 @@ const applyMustPass = (
   return { ...cfg, verifyGuard }
 }
 
-export const mustPassKnob: Knob<MustPassValue> = {
-  id: "must-pass",
-  envKey: "QUANTA_BENCH_MUST_PASS",
-  category: "verify",
-  surfaces: SURFACES,
-  parse: parseMustPass,
-  apply: applyMustPass,
-  describe: "verify-guard outcome-gate (must pass, not just presence)",
-  default: undefined,
-  source: "RCA 2026-05-25 sanity",
-}
-
-registerKnob(mustPassKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const mustPassKnob = deriveKnob(mustPassSchema, applyMustPass)

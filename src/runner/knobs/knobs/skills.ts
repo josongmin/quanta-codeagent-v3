@@ -11,32 +11,21 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { skillsSchema } from "@/config/knob-schema/schemas/bench-gap-1"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench", "agent-batch", "agent-interactive"]
-const TRUTHY = new Set(["1", "on", "true"])
 
-const parseSkills = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return TRUTHY.has(raw) ? true : undefined
-}
-
-const applySkills = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): AgentConfig => {
+/** Non-NOOP apply — wires `cfg.skills`. Bound into the central registrar
+ *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export; ONE
+ *  definition so the derived knob is byte-identical to the registered one. */
+export const applySkills = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): AgentConfig => {
   if (value !== true) return cfg
   if (!SURFACES.includes(ctx.surface)) return cfg
   return { ...cfg, skills: cfg.skills ?? {} }
 }
 
-export const skillsKnob: Knob<true> = {
-  id: "skills",
-  envKey: "QUANTA_BENCH_SKILLS",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseSkills,
-  apply: applySkills,
-  describe: "Wire the Tier-1 skill system (bundled-only; Skill / ToolSearch tools)",
-  source: "ADR-0045",
-}
-
-registerKnob(skillsKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const skillsKnob = deriveKnob(skillsSchema, applySkills)

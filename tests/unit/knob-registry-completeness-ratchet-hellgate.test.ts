@@ -61,6 +61,11 @@ const isDeclarationFile = (path: string): boolean =>
   // the daemon/agent-side declaration inventory (ADR-0503 P1; god-module split →
   // entries live in src/config/knob-inventory/{host,runner,daemon,bench,extra,const-keyed}.ts)
   path.includes("src/config/knob-inventory") ||
+  // the bench knob SCHEMA SSOT (relocated into the config leaf): the bench
+  // inventory is now `ALL_BENCH_SCHEMAS.map(deriveInventoryEntry)`, so the
+  // canonical `envKey: "QUANTA_BENCH_*"` declarations live in the schema files
+  // here (`src/config/knob-schema/schemas/*`), not in the derived bench.ts.
+  path.includes("src/config/knob-schema") ||
   // the typed runtime-config knob declaration registry (ADR-0503 P3; god-module
   // split → entries live in src/shared/runtime-config-knobs/knobs-{a,b,c}.ts)
   path.includes("src/shared/runtime-config-knobs")
@@ -133,6 +138,8 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_FORK_INJECT_TURN", "dev-experiment: trajectory-fork turn injection (fork-experiments), not a user knob"],
   ["QUANTA_BENCH_REPLAY_LIMIT", "dev/bench-only: trajectory replay cap (apps/bench/trajectory), not a shipped user knob"],
   ["QUANTA_CAPTURE_DEBUG", "dev/bench-only: jun-24 lost-edits RCA diagnostic (apps/bench/eval/driver — per-call git-status exec, default-OFF), not a shipped user knob"],
+  ["QUANTA_BENCH_HEALTH_ABORT", "bench-only: run-health systemic-failure abort control (runner/batch/eval/run-health — read at call site), not a shipped user /config knob"],
+  ["QUANTA_LSP_MEM_BUDGET_MB", "infra: LSP server RSS cap (lsp/server-mem-budget — operator memory-budget tuning read at call site), not a user /config knob"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {

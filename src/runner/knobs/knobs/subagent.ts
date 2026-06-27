@@ -12,32 +12,21 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { registerKnob } from "../registry"
-import type { Knob, Surface } from "../types"
+import { subagentSchema } from "@/config/knob-schema/schemas/bench-a"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import type { Surface } from "../types"
 
 const SURFACES: readonly Surface[] = ["bench"]
-const TRUTHY = new Set(["1", "on", "true"])
 
-const parseSubagent = (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return TRUTHY.has(raw) ? true : undefined
-}
-
-const applySubagent = (cfg: AgentConfig, value: true, ctx: { surface: Surface }): AgentConfig => {
+/** Non-NOOP apply — wires `cfg.subagent`. Bound into the central registrar
+ *  (`APPLY_BINDINGS`) AND used to derive the back-compat knob export; ONE
+ *  definition so the derived knob is byte-identical to the registered one. */
+export const applySubagent = (cfg: AgentConfig, value: boolean, ctx: { surface: Surface }): AgentConfig => {
   if (value !== true) return cfg
   if (!SURFACES.includes(ctx.surface)) return cfg
   return { ...cfg, subagent: cfg.subagent ?? {} }
 }
 
-export const subagentKnob: Knob<true> = {
-  id: "subagent",
-  envKey: "QUANTA_BENCH_SUBAGENT",
-  category: "agent",
-  surfaces: SURFACES,
-  parse: parseSubagent,
-  apply: applySubagent,
-  describe: "Wire the Tier-1 subagent system (Agent/Task/TaskOutput/TaskStop tools)",
-  source: "Codex absorption Phase 0-8",
-}
-
-registerKnob(subagentKnob)
+// DERIVED from the schema SSOT (data) + the runner-side apply binding above.
+// Registration is CENTRAL (`registerBenchKnobs`); no self-register here.
+export const subagentKnob = deriveKnob(subagentSchema, applySubagent)

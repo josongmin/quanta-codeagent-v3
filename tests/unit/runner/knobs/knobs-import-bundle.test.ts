@@ -206,3 +206,44 @@ describe("per-knob side-effect import bundle", () => {
     })
   }
 })
+
+// NEW MECHANISM (knob=schema unification): bench knobs are no longer registered
+// by a per-file side-effect import; they are registered CENTRALLY by
+// `registerBenchKnobs()`, which DERIVES each from the schema SSOT
+// (`ALL_BENCH_SCHEMAS`). The "no knob silently missing" guarantee — formerly
+// "every per-knob import populated the registry" — is preserved here in the form
+// matched to the new mechanism: after `registerBenchKnobs()`, EVERY registry-Knob
+// schema id is present in `allKnobs()`. A schema added to the SSOT that the
+// registrar fails to register trips this.
+describe("central registrar covers the schema SSOT (no schema-backed knob missing)", () => {
+  test("after registerBenchKnobs(), every registry-Knob schema id is registered", async () => {
+    const { registerBenchKnobs } = await import("@/runner/knobs/register-bench-knobs")
+    const { ALL_BENCH_SCHEMAS } = await import("@/config/knob-schema/schemas")
+    // Idempotent: safe to call even if the barrel already registered them.
+    registerBenchKnobs()
+    const reg = allKnobs()
+    // A schema backs a registry Knob iff it declares a `source` provenance string
+    // (the 23 inventory-only schemas omit it). This MUST match the registrar's
+    // own predicate so the completeness claim is exact, not vacuous.
+    const registryKnobIds = ALL_BENCH_SCHEMAS.filter(
+      (s) => (s as { source?: string }).source !== undefined,
+    ).map((s) => s.id)
+    expect(registryKnobIds.length).toBeGreaterThan(0) // sanity: SSOT non-empty
+    const missing = registryKnobIds.filter((id) => !reg.has(id))
+    expect(missing).toEqual([])
+  })
+
+  test("inventory-only schemas (no `source`) are NOT registered as Knobs", async () => {
+    const { ALL_BENCH_SCHEMAS } = await import("@/config/knob-schema/schemas")
+    const reg = allKnobs()
+    // The 23 bench-driver config dials (full-remote-*, resume, bench-preset, …)
+    // are inventory entries, NOT `@/runner/knobs` Knobs — registering them would
+    // CHANGE the registered set (a behavior change). Pin that they stay out.
+    const inventoryOnly = ALL_BENCH_SCHEMAS.filter(
+      (s) => (s as { source?: string }).source === undefined,
+    ).map((s) => s.id)
+    expect(inventoryOnly.length).toBeGreaterThan(0) // sanity: the split is real
+    const leaked = inventoryOnly.filter((id) => reg.has(id))
+    expect(leaked).toEqual([])
+  })
+})

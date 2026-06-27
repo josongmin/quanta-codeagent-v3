@@ -672,20 +672,22 @@ describe("runPool — persistent box, amortised bootstrap", () => {
     expect(count(calls, (c) => c.args.includes("run-instances"))).toBe(1)
   })
 
-  test("RCA jun-20: the long bench-run ssh carries keepalive (no-keepalive HANG regression)", async () => {
+  test("RCA jun-20: the bench-run ssh carries keepalive probes (no-keepalive HANG regression)", async () => {
     const { fn, calls } = mockSpawn({})
     await runPool(CHUNKS, poolCfg(fn))
-    // The long foreground `ssh '… cli.ts run … | tee run.log'` MUST keep the idle
-    // TCP alive through patch-gen silence — with NO probes ssh hangs on a NAT-
-    // dropped socket forever and the box is orphaned (observed on 2/2 long runs).
-    // Probes every 30s + 600s grace (30×20) tolerate a busy-but-alive box.
+    // The bench run is now DETACHED (`setsid … & echo LAUNCHED`), so this ssh
+    // returns immediately and the run survives a dropped socket; status comes
+    // from SHORT reconnecting polls. Both still carry keepalive probes via the
+    // shared makeSsh — ServerAliveInterval=30 + the jun-25 ServerAliveCountMax=4
+    // (a hung/partitioned poll errors in ~2min so box-death detection trips fast
+    // rather than stranding the run for 10min/poll at the old CountMax=20).
     const benchRuns = calls.filter(
       (c) => c.cmd === "ssh" && c.args.some((a) => a.includes("cli.ts run")),
     )
     expect(benchRuns.length).toBeGreaterThan(0)
     for (const c of benchRuns) {
       expect(c.args).toContain("ServerAliveInterval=30")
-      expect(c.args).toContain("ServerAliveCountMax=20")
+      expect(c.args).toContain("ServerAliveCountMax=4")
     }
   })
 

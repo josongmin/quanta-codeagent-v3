@@ -146,6 +146,36 @@ established = the usual bottleneck) and `report-<suffix>.json` →
 repro is to check out the repo at `base_commit` and run `uv run` (the `reproRunArgv`
 argv) directly — no LLM, no cassette.
 
+## Live trace — watch one run's spans (run-id deep-link, ADR-0268)
+
+Stream the agent loop's spans (LLM requests, tool calls, durations, prompt/response
+payloads) to a local waterfall UI, and jump straight to **one** run even when many
+stream into the same sink (e.g. an A/B fan-out).
+
+```bash
+# 1. start the receiver + UI (stays up; Ctrl-C to stop). Opens http://127.0.0.1:4318/
+quanta-bench trace
+
+# 2. run the bench pointed at it. A run id is AUTO-ISSUED (no manual step) and the
+#    boot log prints the deep-link. For a clean arm label, set it yourself:
+QUANTA_OTEL_ENDPOINT=http://127.0.0.1:4318 \
+QUANTA_OTEL_RUN_ID=closure-repair-A2 \      # optional — auto = <preset>-<base36 time>
+  quanta-bench run --swebench tasks.jsonl …
+# → logs:  [otel] run closure-repair-A2 live trace → http://127.0.0.1:4318/?run=closure-repair-A2
+
+# 3. open ONE run's spans (sink already running — link-only, no new receiver):
+quanta-bench trace-url closure-repair-A2
+```
+
+- **`quanta-bench trace [<run-id>]`** — launch the receiver + UI; with a run-id it deep-links.
+- **`quanta-bench trace-url <run-id>`** — open/print the deep-link against an already-running sink.
+- The viewer's `?run=<id>` shows only that run; a chip in the header clears the filter.
+- **Full-remote**: `QUANTA_OTEL_ENDPOINT` is forwarded to the box and the box's spans
+  ride a reverse SSH tunnel back to your sink. The auto-issued run-id is forwarded too,
+  so **all boxes of one invocation share one run-id** (one operator run = one link).
+- **Default-OFF**: with no `QUANTA_OTEL_ENDPOINT` set, nothing streams and no run-id is
+  issued — byte-identical to a plain run.
+
 ## Gotchas (this account/region)
 
 - `key-name` is literally `pickinstead_korea.pem` (registered with the `.pem` suffix) — you
