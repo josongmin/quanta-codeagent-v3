@@ -110,6 +110,32 @@ Empirical: all 689 spec cells produce well-formed argv (valid editable target, K
 env). The era-pin core (sphinx Jinja2==3.0.3 + applehelp caps on non-floored cells) is
 SOTA-matching.
 
+## Empirical validation (100-diligence)
+
+- **Box:** sphinx-8595 (Verified) repro 0/5 → 5/5 reproduced under the full era pins.
+- **Resolution (pin-set mutual-resolvability, uv ephemeral env):** the high-pin
+  Verified-era cells all resolve cleanly with NO conflict — matplotlib 3.5 (15 pins,
+  py3.11), astropy 4.3 (py3.9), xarray 2022.03 (py3.10), seaborn 0.12 (py3.9), flask
+  2.0 (py3.9), sphinx 3.5 (jinja2 chain). 
+- **Shape:** all 689 spec cells produce a well-formed argv (valid `.`/`.[extra]`
+  editable target, KEY=VAL env entries) — 0 bad.
+
+### Known edge — version-newer-than-era pin conflict (zero Verified impact)
+
+The official `pip_packages` is **version-SHARED** across a repo's versions: sphinx
+3.x AND 8.x both pin `Jinja2==3.0.3`. For the OLD versions (Verified) that's correct
+(sphinx 3.x needs jinja2<3.1). For a NEW version (sphinx 8.1 needs jinja2>=3.1) the
+pin CONFLICTS: `uv run --with Jinja2==3.0.3 --with-editable .` → `sphinx 8.1.3 depends
+on jinja2>=3.1 … requirements unsatisfiable` (verified). The official harness's
+sequential `pip install` lets the editable upgrade jinja2 (the pin is overridden);
+uv's STRICT single-resolution does not, so we'd fail where pip succeeds.
+- **Impact on Verified = ZERO**: sphinx 8.x is 2024, Verified is 2023 — no Verified
+  instance uses a version newer than its era pins.
+- **Closure path (scoped, measure-first):** SWE-bench Live/Pro MAY carry newer
+  versions; the robust fix is a RUNTIME resolution-fallback (on a uv era-pin conflict,
+  retry without the era pins) in the repro/test exec port — deferred until a Live/Pro
+  run actually hits it, to avoid speculative exec-path changes.
+
 ## Residual env gaps (follow-up, low priority)
 
 - The regen drops the official `packages` (conda) field; a few repos (pvlib `pandas
