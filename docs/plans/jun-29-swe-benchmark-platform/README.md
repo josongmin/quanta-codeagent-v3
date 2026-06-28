@@ -1,6 +1,6 @@
 # RFC: SWE-bench Multi-Dataset Platform (Verified · Pro · Live) — FINAL (3-round audited)
 
-- **Status:** Proposed (post 3-round adversarial audit, all corrections folded in)
+- **Status:** Proposed — **complete implementable spec** (3-round adversarial audit + operational hardening folded in)
 - **Date:** 2026-06-29
 - **Scope:** `src/runner/batch/{corpus,eval,core.ts,report.ts,types.ts}`, `src/apps/bench/`
 - **Related:** [docs/analysis/semantica-codegraph.md](../../analysis/semantica-codegraph.md) (multi-language nav backend — orthogonal)
@@ -173,12 +173,205 @@ with official defaults (pure rename/inject, Verified output unchanged — golden
 `pro-swebench.ts`. Steps 1–3 are refactors with zero behavior change (the R1 guard proves
 it); only 4–5 add datasets.
 
+## 6.6 Concrete interfaces
+
+```ts
+// LIBRARY (src/runner/batch) — dataset-agnostic ports the app injects into.
+type GradeFn = (instance: Instance, prediction: string, opts?: GradeOpts)
+  => Promise<GradeResult>
+
+interface GradeResult {
+  resolved: boolean            // authoritative harness verdict
+  gradingCompleted: boolean    // harness REACHED a verdict (vs infra crash before grading)
+  outcome: GradeOutcome        // see §6.7 — measurement-hole classification
+  breakdown?: GradeBreakdown   // F2P/P2P fail counts (regression vs didn't-fix)
+  log: string                  // never thrown — failure cause is data
+}
+
+type PredictionFormatter = (rows: PredictionRow[]) => string   // default = official 3-key
+
+interface DatasetBudget { timeoutMs?: number; maxTurns?: number }  // absent ⇒ current globals
+
+// APP (src/apps/bench/profiles) — composition that injects the above down.
+interface DatasetProfile {
+  id: DatasetFamily                              // "verified" | "live" | "pro"
+  parseRows(text: string): SwebenchTask[]        // normalizes `raw` to canonical UPPER keys
+  resolveRepoUrl(task: SwebenchTask): string     // default github.com
+  resolveImage?(task: SwebenchTask): string      // docker ref (pro: jefzda/sweap-images:<tag>)
+  synthesizeTestCmd(task: SwebenchTask): string | null   // pro ⇒ null (no local repro)
+  formatPrediction: PredictionFormatter
+  verifier: { evaluate: GradeFn }                // official | pro (app-slice import — legal)
+  budget?: DatasetBudget
+}
+```
+
+The library never names a profile; it consumes the injected `gradeVerifier`,
+`formatPrediction`, `resolveRepoUrl`, and `budget`. The only place a `DatasetFamily` is
+switched on is `apps/bench/index.ts` profile selection.
+
+## 6.7 Failure taxonomy — measurement holes ≠ real misses (load-bearing for this repo)
+
+A Pro grade can fail for reasons that are **not the model's fault** (image pull fail,
+throttle, box loss, empty patch, harness crash). Conflating those with real misses is the
+**leaderboard throttle-miss confound** this project has hit repeatedly. `GradeResult.outcome`
+makes the distinction first-class, mirroring the official harness's `gradingCompleted` flag:
+
+```ts
+type GradeOutcome =
+  | "resolved"            // counts: numerator
+  | "real_miss"           // counts: denominator (gradingCompleted=true, resolved=false, non-empty patch)
+  | "empty_patch"         // EXCLUDED — agent produced no diff (separate metric)
+  | "harness_unavailable" // EXCLUDED — Scale harness/Docker not importable (R5 abort, not a miss)
+  | "image_pull_fail"     // EXCLUDED — jefzda/sweap-images pull failed (infra)
+  | "throttled"           // EXCLUDED — provider 429 / rate-limit during patch-gen (infra)
+  | "box_loss"            // EXCLUDED — grading box died mid-run (infra)
+  | "harness_crash"       // EXCLUDED — gradingCompleted=false before a verdict (retry-worthy infra)
+```
+
+**Rule (extends R5/R6):** the leaderboard rate = `resolved / (resolved + real_miss)`.
+Every EXCLUDED outcome is logged per-instance with its cause and **never silently
+counted as a miss**. `real_miss` requires `gradingCompleted === true` **and** a non-empty
+patch — the same guard the official verifier uses to avoid the `harness_error` misname.
+*(MEMORY: jun-20 leaderboard throttle-miss confound; jun-27 box-loss masking; perInstance.error/patchBytes classification.)*
+
+## 6.8 Reproducibility envelope (every run self-describes)
+
+A committed number is meaningless without its provenance (this RFC's own analysis cited a
+stale jun-17 baseline). Each `report.json` carries a reproducibility block, mirroring the
+existing `taint-ifds.json` baseline shape:
+
+```jsonc
+"repro": {
+  "datasetFamily": "pro",
+  "engineGitSha": "<codeagent-v3 HEAD>",
+  "harnessRef": "<scaleapi/SWE-bench_Pro-os commit>",   // pro only
+  "corpusLockDigest": "<hash of the Pro JSONL/CSV used>",
+  "configDigest": "<knob posture digest — R3 SSOT>",
+  "imageDigests": { "<instance_id>": "jefzda/sweap-images@sha256:..." },  // pro only
+  "createdUtc": "<run timestamp>"
+}
+```
+
+**Rule:** two runs are comparable only if `corpusLockDigest` + `configDigest` +
+`harnessRef` match; a baseline whose `engineGitSha` ≠ current HEAD is flagged **stale** by
+the dashboard, not silently trusted.
+
+## 6.9 Observability / run-attribution
+
+`datasetFamily` + `corpus` + `runId` MUST be stamped on the run log and on OTEL span
+attributes, so a Pro span in a multi-box / multi-dataset stream is attributable to its
+run. *(MEMORY: jun-28 OTEL trace-sink had no run-id ⇒ spans un-isolable; ground-truth
+attribution lived only in the run-scoped stdout log.)* The bench run id encodes the family
+(`bench-pro-<slug>`), and per-instance logs carry `outcome` (§6.7) for fast triage of
+measurement holes vs real misses.
+
+## 6.10 Threat model — untrusted Pro images / harness
+
+`jefzda/sweap-images` and `scaleapi/SWE-bench_Pro-os` are **third-party code executed
+locally**. Confinement (extends R9):
+- Pro grading runs **only on a disposable grading box**, never the agent-loop host.
+- Scale harness deps **pinned** (`requirements.txt` hash); no unpinned `pip install` in CI.
+- Network egress from the grading box restricted to Docker Hub + HF; no agent credentials present on it.
+- `ulimit`/nproc cap to prevent the uv/subprocess **fork-storm OOM** (the xarray-class box kill).
+- Images are pull-only (no local build); image digests recorded (§6.8) so a swapped tag is detectable.
+
 ## 7. Phasing
 
 - **P0 — acquire.** Export Pro JSONL + raw CSV from HF (keep `dockerhub_tag`,`repo_language`,`selected_test_files_to_run`); clone `scaleapi/SWE-bench_Pro-os`, pin deps; Docker + (Modal | `--use_local_docker`) on a **disposable grading box**. Live JSONL too.
 - **P1 — seam + Verified/Live.** Widen `gradeVerifier`/`formatPrediction`/`budget` DI; refactor current path into `verified` profile (**byte-identical, golden-diff gated — R1/R10**). Add `live` profile (config-only). **Blocking probe:** does stock `swebench` grade Live (A-F3)? Ship Live as the pipeline smoke.
 - **P2 — Pro ingest + verifier.** `pro` profile: normalize lowercase schema, carry Pro metadata, opt out of local test-cmd. `pro-swebench.ts` (Scale format/harness/images) **reusing `withGradingLock` (R2)**; fail-closed refuse-to-fake-grade (R5). Route via injected verifier. **First run = Python subset, measured baseline (≥ N, not n=1 — R6).**
 - **P3 — Pro multi-language (separate).** Grading already covers Go/JS/TS via Scale Docker; remaining = agent-side multi-lang **repro rail** (`synthesizeTestCmd`/`reproArgv` → per-language) + patch-capture de-Python-ization (env-strip, `go.sum`/`package-lock` noise) + nav via semantica MCP. Score-critical, optional for baseline.
+
+## 7.5 Acceptance matrix (per-phase exit gates)
+
+A phase is done only when its gates are green. Each gate ties to a rule (§8).
+
+| Phase | Exit gate | Rule |
+|---|---|---|
+| P1 | `verified`-profile golden-diff of `predictions.jsonl`+`report.json` byte-identical to pinned baseline, all dataset env unset | R1, R10 |
+| P1 | red-on-injection: perturb one field in `verified` profile ⇒ golden guard FAILS | R10 |
+| P1 | `bun lint` green — no `corpus/profiles/`→`apps/bench` import | R8 |
+| P1 | Live blocking probe: stock `swebench` grades 1 Live instance, or Live is declared verifier #3 | A-F3 |
+| P1 | grading lock-counter test: max-in-flight === 1 across official+(stub)pro | R2 |
+| P2 | `dataset_family` is a single `KnobSchema`; derive-parity tests green; zero raw `process.env.QUANTA_SWEBENCH_*` in `profiles/` | R3 |
+| P2 | `report.json` for Pro carries `datasetFamily`+`repro` block; Verified report OMITS them | R4, §6.8 |
+| P2 | harness-missing ⇒ Pro batch ABORTS (no local-pytest green counted) | R5 |
+| P2 | answer-key grep guard: Pro `fail_to_pass`/`selected_test_files_to_run`/`interface` never reach prompt assembly | R6 |
+| P2 | god-code ratchet green; no `allowlist.json` additions | R7 |
+| P2 | measurement-hole test: an `image_pull_fail`/`throttled` instance is EXCLUDED, not counted as miss | §6.7 |
+| P2 | first Pro **Python-subset** number is multi-instance measured (≥ a stated N), with full `repro` block | R6, §6.8 |
+| P3 | per-language repro rail + de-Python patch capture have their own gates (separate workstream) | — |
+
+## 7.6 Pre-flight checklist (before any Pro/Live campaign)
+
+Per the launch-then-debug ban — validate before spending: 
+- [ ] Corpus lock present + `corpusLockDigest` recorded (JSONL **and** Pro CSV).
+- [ ] Scale harness deps installed + pinned; `swe_bench_pro_eval.py` importable on the grading box.
+- [ ] Docker/Modal auth works; sample `jefzda/sweap-images:<tag>` pulls; **disk headroom ≥ projected pull size**.
+- [ ] Grading box is disposable + egress-restricted; `ulimit`/nproc cap set (fork-storm guard).
+- [ ] `QUANTA_MAX_COST_USD` set; projected pull bandwidth + grade time within budget.
+- [ ] `dataset_family` knob set; Verified golden-diff still green (no accidental default flip).
+- [ ] Bad-signal watcher armed (429 / not-signed / OOM / box-loss) — alert on first bad signal, not at completion.
+
+## 7.7 Dashboard / leaderboard UI-UX integration
+
+The existing leaderboard (`localhost:7878`, "SWE-bench Verified — Leaderboard": stat
+cards, 전체 문제 매트릭스 + 우리 런 / 경쟁 스캐폴드 / Knob·프로필 / 라이브 / 트레이스 tabs,
+per-instance × competitor matrix, failure-classification legend) is Verified-shaped but
+**already encodes the two hardest pieces**: a failure-classification taxonomy and
+"미측정 제외" denominator logic. Integration = make it **dataset-parametric** and unify
+its legend with the backend `GradeOutcome` (§6.7). **Never merge corpora into one matrix**
+(different size/lang/harness — R4 partition).
+
+### Principle
+- The dashboard's failure legend **IS** `GradeOutcome` (§6.7) — make them one SSOT, not two drifting lists. The existing "채점/실행에러(인프라)" + "미측정 제외" already implement the measurement-hole exclusion; extend the enum with Pro infra outcomes.
+- Everything re-scopes by a top-level **dataset switcher**; cross-dataset is a side-by-side overview, never a merged row set.
+
+### UI changes
+
+```
+┌─ SWE-bench Leaderboard ───────────────  [ Verified ] [ Pro ] [ Live ]  [ ⊕ All ] ─┐
+│  (title + every card/tab/matrix below re-scopes to the selected family)            │
+│                                                                                    │
+│  Verified cards: 해결/실행 · 천장보정 · 진짜격차 · BEST캠페인 · 리포트 · 라이브박스   │
+│  Pro cards:      해결/실행 · 언어별(py/go/js/ts) · authoritative-only · 라이브박스   │
+│  Live cards:     해결/실행 · 스냅샷(월) · 신규 vs 누적 · 오염윈도우                   │
+│                                                                                    │
+│  [stale ⚠] badge when campaign.engineGitSha ≠ current HEAD  (§6.8)                  │
+└────────────────────────────────────────────────────────────────────────────────┘
+전체 문제 매트릭스   우리 런   경쟁 스캐폴드   Knob/프로필   라이브   트레이스
+ ├ filters: instance · 전체(=outcome) · 모든 repo · [언어 ▾ (Pro)] · [스냅샷 ▾ (Live)]
+ ├ matrix cols: instance · QUANTA(outcome) · 턴 · 프로파일 · 난이도 · ⟨competitor set⟩ · tier
+ └ competitor set is DATASET-SCOPED:
+     Verified → Sonar·Trae·OpenHands·Live-SWE·Prometheus·mini+Opus4.5
+     Pro      → Scale leaderboard tools (Claude/GPT/… Pro scores)
+     Live     → Live-SWE leaderboard set
+```
+
+| element | change | ties to |
+|---|---|---|
+| dataset switcher | new top-level segmented control (Verified/Pro/Live + All overview); re-scopes title, cards, matrix, competitors | R4 partition |
+| stat cards | dataset-aware sets (Verified: ceiling/frontier-gap; Pro: per-language + authoritative-only; Live: snapshot/contamination-window) | §6.7, R11 |
+| failure legend | unify with `GradeOutcome`; add `image_pull_fail`/`throttled`/`box_loss` (greyed = EXCLUDED from denominator, like today's "미측정 제외") | §6.7 |
+| filters | add **언어** (Pro) and **스냅샷·월** (Live) to the existing instance/outcome/repo filters | §6.7 |
+| competitor columns | dataset-scoped column set (each family has its own frontier pool) | — |
+| staleness/repro | per-campaign badge from the `repro` block (engineGitSha vs HEAD, corpusLockDigest) — surfaces the stale-baseline trap in UI | §6.8 |
+| denominator | reuse "미측정 제외"; leaderboard rate = `resolved/(resolved+real_miss)` with EXCLUDED outcomes shown but not counted | §6.7, R6 |
+
+### Data plumbing (feeds the UI — already in the RFC)
+- `report.json` carries `datasetFamily` + `repro` block (R4, §6.8) ⇒ dashboard partitions + flags stale.
+- `GradeResult.outcome` (§6.7) is the single source for both the backend denominator and the UI legend ⇒ no drift.
+- SSOT mirror (`~/.quanta/bench/results`) + `REPORT_ROOTS` partitioned by `datasetFamily` (§6.5 behavioral row) ⇒ no cross-dataset conflation.
+- Pro per-instance `repoLanguage` (types.ts additive) ⇒ the 언어 filter/breakdown.
+
+### Phasing tie-in
+- **P1:** add the dataset switcher (Verified-only populated) + bind the legend to `GradeOutcome` (refactor, no new data) + `repro`/staleness badge. Verified view byte-identical in content.
+- **P2:** Pro tab lights up (per-language card+filter, Scale competitor columns, infra-outcome legend rows).
+- **P3 (Live):** snapshot/month selector + contamination-window card.
+
+> The dashboard work is **additive and low-risk**: it consumes fields the RFC already
+> adds (`datasetFamily`, `repro`, `outcome`, `repoLanguage`). No new measurement logic —
+> it reuses the excellent exclusion/classification the Verified board already has.
 
 ## 8. 시스템 구현 규칙 / Implementation Rules (enforceable)
 
@@ -209,6 +402,7 @@ Each rule = invariant (file:line) + verification. **These are gates, not guidanc
 - **R1 (fan-out, 3 adversarial lenses, code-grounded):** architecture/correctness (8 findings), code-vs-RFC (7), implementation-rules (R1–R11). Surfaced: slice-fence violation in the layout, mislocated seams (predictions in `core.ts`, grade via injected dep not `profile.grade`, lowercase at `dataset.ts:349`), `before_repo_set_cmd` ≠ git, namespace already wired, Best-of-N × Pro-grade cost, per-dataset budget, 11 missing impl rules.
 - **R2 (reconcile + self-verify):** I re-read primary source for the 4 load-bearing corrections — AGENTS.md:43-52 (fence), verdict.ts:49 (injected dep), harness/config.ts:20 + python-swebench.ts:93 (namespace/datasetName exist), core.ts:158 (predictions hardcoded), dataset.ts:349 (raw uppercase). All confirmed; design rewritten to inject-down via existing DI.
 - **R3 (convergence):** corrected design introduces no new fence crossings (verifiers stay app-slice, injected); Verified byte-identity preserved (default formatter/verifier/budget unchanged, no `datasetFamily` emitted); all 11 rules have a landing point + verification. Clean.
+- **Hardening pass (completeness):** added concrete interfaces (§6.6), failure taxonomy / measurement-hole classification (§6.7 — `GradeOutcome`, the throttle-miss confound this repo repeatedly hit), reproducibility envelope (§6.8 — repro block so stale-vs-current is detectable), observability/run-attribution (§6.9), threat model (§6.10), per-phase acceptance matrix (§7.5), and pre-flight checklist (§7.6). The spec is now implementable end-to-end with enforceable gates at every step.
 
 ## 11. References
 
