@@ -131,6 +131,7 @@ import {
   type BenchPosture,
   benchPostureFromState,
   knobsForReport,
+  readKnobValue,
   resolveBenchKnobs,
 } from "./knobs-bench"
 import {
@@ -2380,19 +2381,56 @@ const buildPromptText = (args: {
   })
 }
 
-const buildConfigGuards = (
-  instance: Instance,
-  opt: BenchPosture,
-  signal: AbortSignal,
-): Partial<AgentConfig> => {
+/** must-pass knob override shape (bench consumes it HERE, not via apply-binding —
+ *  see {@link reconcileBenchGuards}). Mirrors the parsed `mustPassSchema` value. */
+interface MustPassOverride {
+  readonly mustPass: boolean
+  readonly maxTrips?: number
+  readonly stickyRed?: boolean
+}
+const isMustPassOverride = (v: unknown): v is MustPassOverride =>
+  typeof v === "object" && v !== null && typeof (v as { mustPass?: unknown }).mustPass === "boolean"
+
+/**
+ * SINGLE authority for bench AgentConfig GUARD fields (ADR-0013 + jun-28 SSOT).
+ * Runs AFTER `applyBenchKnobs` and is the ONLY place verifyGuard / lspPrewarm /
+ * protectTestPaths / evictLspPoolOnEnd are set — no driver-hardcode-vs-knob
+ * double-set (the merge-order fragility that previously dropped `exactCommands`).
+ *
+ * `verifyGuard` = posture DEFAULT (swebench + in-loop-exec=full) ⊕ the optional
+ * `must-pass` knob OVERRIDE. The override replaces the default per-field but
+ * ALWAYS inherits the instance's `exactCommands` so an explicit override never
+ * silently broadens verify detection. Byte-identical fence: no preset/env ⇒
+ * `opt` all-OFF and `mustPass` undefined ⇒ same fields as the pre-SSOT path.
+ */
+const reconcileBenchGuards = (
+  cfg: AgentConfig,
+  args: {
+    instance: Instance
+    opt: BenchPosture
+    signal: AbortSignal
+    mustPass: MustPassOverride | undefined
+  },
+): AgentConfig => {
+  const { instance, opt, signal, mustPass } = args
   const exactCommands = benchVerifyAuthorityCommandsOf(instance)
-  const verifyGuard =
+  const defaultGuard =
     instance.swebench && opt.inLoopExecMode === "full"
       ? exactCommands !== undefined
         ? { mustPass: true, maxTrips: 2, exactCommands }
         : { mustPass: true, maxTrips: 2 }
       : undefined
+  const verifyGuard =
+    mustPass !== undefined
+      ? {
+          mustPass: mustPass.mustPass,
+          ...(mustPass.maxTrips !== undefined ? { maxTrips: mustPass.maxTrips } : {}),
+          ...(mustPass.stickyRed === true ? { stickyRed: true } : {}),
+          ...(exactCommands !== undefined ? { exactCommands } : {}),
+        }
+      : defaultGuard
   return {
+    ...cfg,
     ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),
     ...(opt.lspNav && !gateDisabled(process.env, "QUANTA_LSP_PREWARM")
       ? { lspPrewarm: { enabled: true, warmSignal: signal } }
@@ -2636,14 +2674,22 @@ export const buildConfig = (
     // gaming PASS_TO_PASS / the oracle. DEFAULT-ON (a defensible measurement
     // safeguard): the guard is enforced for every swebench instance unless
     // `QUANTA_BENCH_PROTECT_TESTS=0` is set, which disables it (advisory baseline).
-    ...buildConfigGuards(instance, opt, signal),
+    // Guard fields (verifyGuard / lspPrewarm / protectTestPaths /
+    // evictLspPoolOnEnd) are NOT set here — `reconcileBenchGuards` is the single
+    // authority, applied AFTER knobs below (jun-28 SSOT: no driver/knob double-set).
     // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
     // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
   }
   const knobApplied = applyBenchKnobs(baseConfig, state, { instance, sandbox })
+  const guarded = reconcileBenchGuards(knobApplied, {
+    instance,
+    opt,
+    signal,
+    mustPass: readKnobValue(state, "must-pass", isMustPassOverride),
+  })
   const noPatchApplied = opt.noPatchBreaker
-    ? wireNoPatchBreaker(knobApplied, opt.noPatchForceFraction)
-    : knobApplied
+    ? wireNoPatchBreaker(guarded, opt.noPatchForceFraction)
+    : guarded
   const localizePhase = localizePhaseConfigOf(opt, chaMultisiteSteer)
   return wireOptionalAgentPorts(
     wirePostureAgentPorts({ config: noPatchApplied, opt, localizePhase }),

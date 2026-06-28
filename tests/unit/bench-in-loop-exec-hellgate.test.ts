@@ -34,6 +34,7 @@ const ENV_KEYS = [
   "QUANTA_KNOBS_PRESET",
   "QUANTA_BENCH_IN_LOOP_EXEC",
   "QUANTA_BENCH_REPRO_TEST",
+  "QUANTA_BENCH_MUST_PASS",
   "QUANTA_READ_OUTLINE",
   "QUANTA_TEST_RUNNER",
   "QUANTA_REPO_MAP",
@@ -91,6 +92,26 @@ describe("bench-in-loop-exec posture flip", () => {
     expect(userText(cfg)).toContain(VERIFY_MODE_STEER)
     expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
     expect(cfg.protectTestPaths).toBe(true)
+  })
+
+  // SSOT (jun-28): the must-pass OVERRIDE flows buildConfig → reconcileBenchGuards
+  // → verifyGuard (must-pass apply is bench-NOOP now). This pins the exact path
+  // the gpt-5.4 11141 e2e PASS relied on, after the single-authority refactor.
+  test("MUST-PASS-STICKY: QUANTA_BENCH_MUST_PASS=sticky ⇒ verifyGuard.stickyRed + exactCommands preserved", () => {
+    process.env.QUANTA_BENCH_MUST_PASS = "sticky"
+    const cfg = buildOnce()
+    expect(cfg.verifyGuard).toEqual({
+      mustPass: true,
+      maxTrips: 2,
+      stickyRed: true,
+      exactCommands: ["true"],
+    })
+  })
+
+  test("MUST-PASS-OFF: override=off ⇒ verifyGuard {mustPass:false} but exactCommands still inherited", () => {
+    process.env.QUANTA_BENCH_MUST_PASS = "off"
+    const cfg = buildOnce()
+    expect(cfg.verifyGuard).toEqual({ mustPass: false, exactCommands: ["true"] })
   })
 
   // IN-LOOP-2: explicit OFF via env flips the posture.

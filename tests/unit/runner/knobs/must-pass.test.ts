@@ -38,27 +38,30 @@ describe("must-pass knob — parse", () => {
 })
 
 describe("must-pass knob — apply", () => {
-  test("bench surface + mustPass:true ⇒ cfg.verifyGuard set", () => {
+  test("BENCH apply is a NO-OP (jun-28 SSOT): driver reconcileBenchGuards owns verifyGuard", () => {
+    // Bench consumes the must-pass VALUE via readKnobValue in the driver and
+    // merges it (with the posture default + instance exactCommands) in ONE place.
+    // Folding here too would double-set the field — so bench apply must NOT touch it.
     const out = mustPassKnob.apply(baseCfg(), { mustPass: true, maxTrips: 2 }, { surface: "bench" })
-    expect(out.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 })
+    expect(out.verifyGuard).toBeUndefined()
   })
 
-  test("agent-batch / agent-interactive also wire verifyGuard", () => {
+  test("agent-batch / agent-interactive wire verifyGuard (no driver reconcile there)", () => {
     for (const s of ["agent-batch", "agent-interactive"] as const) {
       const out = mustPassKnob.apply(baseCfg(), { mustPass: true, maxTrips: 3 }, { surface: s })
       expect(out.verifyGuard).toEqual({ mustPass: true, maxTrips: 3 })
     }
   })
 
-  test("`off` ⇒ verifyGuard set with mustPass:false (force guard off)", () => {
-    const out = mustPassKnob.apply(baseCfg(), { mustPass: false }, { surface: "bench" })
+  test("`off` (non-bench) ⇒ verifyGuard set with mustPass:false (force guard off)", () => {
+    const out = mustPassKnob.apply(baseCfg(), { mustPass: false }, { surface: "agent-batch" })
     expect(out.verifyGuard).toEqual({ mustPass: false })
     // exactOptionalPropertyTypes — `maxTrips` is NOT present (not undefined).
     expect("maxTrips" in (out.verifyGuard ?? {})).toBe(false)
   })
 
-  test("non-supported surface (cli, ide) ⇒ cfg unchanged", () => {
-    for (const s of ["cli", "ide"] as const) {
+  test("non-supported surface (cli, ide, bench) ⇒ cfg unchanged", () => {
+    for (const s of ["cli", "ide", "bench"] as const) {
       const out = mustPassKnob.apply(baseCfg(), { mustPass: true, maxTrips: 2 }, { surface: s })
       expect(out.verifyGuard).toBeUndefined()
     }

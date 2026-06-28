@@ -31,7 +31,12 @@ import { mustPassSchema } from "@/config/knob-schema/schemas/bench-gap-1"
 import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import type { Surface } from "../types"
 
-const SURFACES: readonly Surface[] = ["bench", "agent-batch", "agent-interactive"]
+// BENCH is intentionally EXCLUDED: the bench driver is the single authority for
+// `verifyGuard` (`reconcileBenchGuards` reads the must-pass value via
+// `readKnobValue` and merges it with the posture default + instance
+// `exactCommands` in ONE place — jun-28 SSOT). Applying here too would double-set
+// the field. Non-bench surfaces have no such reconcile step, so they fold here.
+const SURFACES: readonly Surface[] = ["agent-batch", "agent-interactive"]
 
 interface MustPassValue {
   readonly mustPass: boolean
@@ -48,17 +53,12 @@ export const applyMustPass = (
   ctx: { surface: Surface },
 ): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
-  // Preserve any `exactCommands` the bench driver already established on the
-  // incoming verifyGuard (buildConfigGuards sets the per-instance verify
-  // authority before knobs apply). Dropping it would silently broaden what
-  // counts as a verify call — an unintended behavior change when the override
-  // is set. exactOptionalPropertyTypes-friendly: only include fields when set.
-  const exactCommands = cfg.verifyGuard?.exactCommands
+  // Non-bench surfaces have no driver-established exactCommands; fold the parsed
+  // value straight onto verifyGuard. exactOptionalPropertyTypes-friendly.
   const verifyGuard = {
     mustPass: value.mustPass,
     ...(value.maxTrips !== undefined ? { maxTrips: value.maxTrips } : {}),
     ...(value.stickyRed === true ? { stickyRed: true } : {}),
-    ...(exactCommands !== undefined ? { exactCommands } : {}),
   }
   return { ...cfg, verifyGuard }
 }
