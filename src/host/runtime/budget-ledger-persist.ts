@@ -21,7 +21,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import type { BudgetLedger } from "@/agent/budget-ledger"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 
 /** Minimal fs surface — injectable so tests run without touching disk. */
 export interface LedgerFs {
@@ -53,14 +53,14 @@ export const persistBudgetLedger = (
   try {
     if (fs.exists(path)) inner.hydrate(fs.read(path))
   } catch (e) {
-    logger.warn(`budget-ledger persist: hydrate from ${path} failed: ${String(e)}`)
+    logger.warn(`budget-ledger persist: hydrate from ${path} failed: ${errMessage(e)}`)
   }
 
   const flush = (): void => {
     try {
       fs.write(path, inner.serialize())
     } catch (e) {
-      logger.warn(`budget-ledger persist: write to ${path} failed: ${String(e)}`)
+      logger.warn(`budget-ledger persist: write to ${path} failed: ${errMessage(e)}`)
     }
   }
 
