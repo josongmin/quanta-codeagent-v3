@@ -9,6 +9,9 @@
  * (byte-identical default-OFF, no-heuristics on the cap value).
  */
 import { describe, expect, test } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { type AssemblerEnv, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 
@@ -61,6 +64,32 @@ describe("HELLGATE L4 — budget-ledger activation seam", () => {
         assembleWith({ QUANTA_BUDGET_LEDGER: "1", QUANTA_BUDGET_LEDGER_SESSION_USD: bad })
           .budgetLedger,
       ).toBeUndefined()
+    }
+  })
+
+  test("PATH set ⇒ assembler wires a PERSISTING ledger (write-through to disk)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "budget-ledger-"))
+    try {
+      const path = join(dir, "budget.json")
+      const cfg = assembleWith({
+        QUANTA_BUDGET_LEDGER: "1",
+        QUANTA_BUDGET_LEDGER_DAILY_USD: "10",
+        QUANTA_BUDGET_LEDGER_PATH: path,
+      })
+      expect(cfg.budgetLedger).toBeDefined()
+      expect(existsSync(path)).toBe(false)
+      cfg.budgetLedger?.record({
+        model: "gpt-5.4",
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+        sessionId: "s",
+        at: 0,
+      })
+      // The record wrote through to the configured campaign file.
+      expect(existsSync(path)).toBe(true)
+      expect(readFileSync(path, "utf8")).toContain("gpt-5.4")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

@@ -102,6 +102,7 @@ import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildAppshotPortWire } from "./appshot-port-wire"
+import { persistBudgetLedger } from "./budget-ledger-persist"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
@@ -496,12 +497,19 @@ const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
   const sessionHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_SESSION_USD"])
   const dailyHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_DAILY_USD"])
   if (sessionHardLimit === undefined && dailyHardLimit === undefined) return
-  cfg.budgetLedger = defaultBudgetLedger({
+  const ledger = defaultBudgetLedger({
     policy: {
       ...(sessionHardLimit !== undefined ? { sessionHardLimit } : {}),
       ...(dailyHardLimit !== undefined ? { dailyHardLimit } : {}),
     },
   })
+  // Cross-PROCESS persistence — when a path is configured, hydrate prior runs'
+  // spend on construction and write-through after each record, so several runs
+  // (a campaign / daemon) share ONE rolling budget (the "Cline $50/afternoon"
+  // case). Absent path ⇒ in-memory only (per-session enforcement still live).
+  const path = env["QUANTA_BUDGET_LEDGER_PATH"]
+  cfg.budgetLedger =
+    path !== undefined && path.length > 0 ? persistBudgetLedger(ledger, path) : ledger
 }
 
 /** jun-6 exfil-rail (a) — mint ONE per-session `SessionWriteBudget` when the
