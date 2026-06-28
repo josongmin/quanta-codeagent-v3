@@ -24,10 +24,15 @@
  * Fires at most once per stuck streak; every edit opens a fresh streak.
  */
 import { MUTATING_TOOL_NAMES } from "./localize-phase-guard"
+import { isTestLikeCommand } from "./verify-signal"
 
 /** Tools that constitute a "test re-run" for stuck detection. Mirrors the
  *  `failure-classifier` stuck signal (trailing run of bash/test_runner with no
- *  edit). `bash` dominates because the Agentless repro is executed via a shell. */
+ *  edit). `bash` dominates because the Agentless repro is executed via a shell —
+ *  but a `bash` only counts when its command actually LOOKS like a test/repro run
+ *  ({@link isTestLikeCommand}); plain `bash ls`/`cat`/`grep` investigation must
+ *  NOT advance the stuck streak (else exploration trips a false `verify_loop_stuck`).
+ *  `test_runner` always counts (it has no shell command to inspect). */
 export const TEST_TOOL_NAMES: ReadonlySet<string> = new Set(["bash", "test_runner"])
 
 export interface ReproDoubtConfig {
@@ -72,6 +77,7 @@ export const reproDoubtStep = (
   state: ReproDoubtState,
   toolName: string,
   cfg: ReproDoubtConfig | undefined,
+  command?: string,
 ): { steer: string | undefined; state: ReproDoubtState } => {
   if (cfg === undefined || !isPositiveInt(cfg.stuckRuns)) {
     return { steer: undefined, state }
@@ -80,6 +86,12 @@ export const reproDoubtStep = (
     return { steer: undefined, state: { runsSinceEdit: 0, hasEdited: true, steered: false } }
   }
   if (!TEST_TOOL_NAMES.has(toolName)) {
+    return { steer: undefined, state }
+  }
+  // `bash` only counts as a test re-run when its command looks test-like; plain
+  // investigation (ls/cat/grep) must not advance the stuck streak. `test_runner`
+  // (no command) always counts. A `bash` with no/empty command is investigation.
+  if (toolName === "bash" && !(command !== undefined && isTestLikeCommand(command))) {
     return { steer: undefined, state }
   }
   const runsSinceEdit = state.runsSinceEdit + 1

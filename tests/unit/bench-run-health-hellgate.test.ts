@@ -336,3 +336,51 @@ describe("buildReport — runHealth field is byte-identical-for-healthy", () => 
     expect(report.runHealth?.aborted).toBe(false)
   })
 })
+
+// ── transient_throttle (jun-28): name throttle so it doesn't masquerade as a
+// stall, but NEVER abort (throttle is recoverable — the jun-20 confound lesson).
+describe("transient_throttle classification + non-abort", () => {
+  test("429 / rate limit / overloaded ⇒ transient_throttle", () => {
+    for (const e of [
+      "request failed: 429 Too Many Requests",
+      "openai: rate limit exceeded",
+      "stream empty (likely transport throttle); retrying with backoff",
+      "provider overloaded",
+    ]) {
+      expect(classifyInstanceHealth(res({ turns: 0, error: e }))).toBe("transient_throttle")
+    }
+  })
+
+  test("auth-first preserved: the breaker's ambiguous 'throttle/auth' ⇒ systemic_auth", () => {
+    expect(
+      classifyInstanceHealth(res({ turns: 0, error: "circuit open: throttle/auth (K empty streams)" })),
+    ).toBe("systemic_auth")
+  })
+
+  // hell-audit R1 — a real auth/infra failure whose log incidentally carries a
+  // throttle word must NOT be masked as transient_throttle (it would defeat abort).
+  test("3a: re-auth death carrying a 429 ⇒ systemic_auth (not throttle)", () => {
+    expect(
+      classifyInstanceHealth(res({ turns: 0, error: "re-authentication required: 429 rate limit" })),
+    ).toBe("systemic_auth")
+  })
+
+  test("3b: infra wedge + incidental throttle word ⇒ systemic_infra (not throttle)", () => {
+    for (const e of [
+      "spot reclaim during grading; rate limit hit",
+      "system overloaded, container OOM killed (exit 137)",
+      "connection timed out on 1.2.3.4; throttle requests",
+    ]) {
+      expect(classifyInstanceHealth(res({ turns: 0, error: e }))).toBe("systemic_infra")
+    }
+  })
+
+  test("transient_throttle is NOT systemic and does NOT abort (even K of them)", () => {
+    const history = ["transient_throttle", "transient_throttle", "transient_throttle"] as const
+    expect(shouldAbortRun([...history]).abort).toBe(false)
+  })
+
+  test("a real graded miss after throttles still keeps the run healthy (no abort)", () => {
+    expect(shouldAbortRun(["transient_throttle", "graded_fail"]).abort).toBe(false)
+  })
+})

@@ -21,11 +21,14 @@ import {
 
 const cfg = { stuckRuns: 5 }
 
+// A `bash` step now needs a test-like command to count as a test re-run (jun-28
+// gate). drive() supplies one for every bash so the streak semantics below are
+// unchanged; the non-test-bash case is covered by its own test.
 const drive = (tools: string[], c = cfg) => {
   let s = createReproDoubtState()
   const steers: (string | undefined)[] = []
   for (const t of tools) {
-    const r = reproDoubtStep(s, t, c)
+    const r = reproDoubtStep(s, t, c, t === "bash" ? "python -m pytest tests/x.py" : undefined)
     s = r.state
     steers.push(r.steer)
   }
@@ -86,6 +89,32 @@ describe("repro-doubt-guard", () => {
   test("non-test tools between runs do not advance the stuck counter", () => {
     // read/grep are investigation, not test-churn; should not trip the guard
     const steers = drive(["edit", "bash", "read", "grep", "bash", "read", "bash"])
+    expect(steers.every((x) => x === undefined)).toBe(true)
+  })
+
+  test("jun-28 GATE: bash with a NON-test command (ls/cat/grep) does NOT count as a test re-run", () => {
+    // edit once, then 6 investigation bashes that are NOT test-like ⇒ streak
+    // never advances ⇒ no steer (the false-positive the gate closes).
+    let s = createReproDoubtState()
+    s = reproDoubtStep(s, "edit", cfg).state
+    const steers: (string | undefined)[] = []
+    for (const cmd of ["ls -la", "cat reproduce.py", "grep -r foo .", "ls", "find . -name x", "cat out"]) {
+      const r = reproDoubtStep(s, "bash", cfg, cmd)
+      s = r.state
+      steers.push(r.steer)
+    }
+    expect(steers.every((x) => x === undefined)).toBe(true)
+  })
+
+  test("jun-28 GATE: bash with NO command (investigation) does NOT count", () => {
+    const steers: (string | undefined)[] = []
+    let s = createReproDoubtState()
+    s = reproDoubtStep(s, "edit", cfg).state
+    for (let i = 0; i < 6; i++) {
+      const r = reproDoubtStep(s, "bash", cfg /* no command */)
+      s = r.state
+      steers.push(r.steer)
+    }
     expect(steers.every((x) => x === undefined)).toBe(true)
   })
 

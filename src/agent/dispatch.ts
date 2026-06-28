@@ -244,11 +244,15 @@ const applyReproDoubtSteer = (
   out: DispatchResult,
   config: AgentConfig,
   toolName: string,
+  command: string | undefined,
 ): DispatchResult => {
   const cfg = config.reproDoubt
   const state = config.reproDoubtState
   if (cfg === undefined || state === undefined) return out
-  const r = reproDoubtStep(state, toolName, cfg)
+  // `command` (the extracted shell command, undefined for non-shell tools) lets
+  // the guard count a `bash` as a test re-run ONLY when it looks test-like —
+  // plain investigation (ls/cat/grep) no longer trips the stuck streak.
+  const r = reproDoubtStep(state, toolName, cfg, command)
   config.reproDoubtState = r.state
   return r.steer === undefined ? out : prependCapReminder(out, r.steer)
 }
@@ -474,7 +478,7 @@ const dispatchToolInner = async (
   const cappedOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
   // repro-doubt: advance the stuck counter + (once per streak) prepend the
   // doubt steer. Default-OFF byte-identical when the knob is unset.
-  const finalOut = applyReproDoubtSteer(cappedOut, config, effectiveCall.name)
+  const finalOut = applyReproDoubtSteer(cappedOut, config, effectiveCall.name, shellCommand ?? undefined)
   if (config.hooks) {
     await emitPostToolUseHooks(config, effectiveCall, finalOut)
   }

@@ -79,25 +79,12 @@ export interface LocalizePhaseConfig {
  * it here AND updating the ADR — silent-coverage would be a security/policy
  * regression. The closed set is exported for invariant tests.
  */
-export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "edit",
-  "write",
-  "scripted_replace",
-  // apply_patch (V4A multi-file patch, isReadOnly:()=>false) is a REGISTERED
-  // mutating-FS edit tool that previously ESCAPED this Phase-1 block (audit #10),
-  // letting the model edit the wrong file before the fault was localized. Added
-  // EXPLICITLY here (the closed-set design) — NOT via raw isReadOnly, which would
-  // also wrongly gate `bash` (a deliberately-exempt tool: isReadOnly===false but
-  // not a file-edit tool).
-  "apply_patch",
-  // apply_patch_structured (src/tool/apply-patch-structured-tool.ts, name
-  // "apply_patch_structured", isReadOnly:()=>false) is the SIBLING registered
-  // structured-op variant of apply_patch — same audit #10 mutating-FS class. The
-  // original fix added only the string-patch "apply_patch" and missed this sibling,
-  // so the model could apply_patch_structured the WRONG file before localization.
-  // Added EXPLICITLY (closed-set design).
-  "apply_patch_structured",
-])
+// SSOT moved to ./mutating-tools (shared with verify-guard so the two finish/
+// phase guards cannot drift). Aliased under the historical name (local binding +
+// export) for in-file use, the existing invariant tests, and the repro-doubt importer.
+import { MUTATING_FS_EDIT_TOOLS } from "./mutating-tools"
+
+export const MUTATING_TOOL_NAMES = MUTATING_FS_EDIT_TOOLS
 
 /** Opt-in LSP-nav GROUNDING sentence appended to the Phase-1 nudge.
  *

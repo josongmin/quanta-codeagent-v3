@@ -20,9 +20,15 @@ import { z } from "zod"
 const tool = (name: string, readOnly: boolean): Tool => ({
   name,
   description: `${name} stub`,
-  inputSchema: z.object({}) as z.ZodType<unknown>,
+  // include `command` so the registry's safeParse doesn't strip it before
+  // extractShellCommand reads it (zod objects drop unknown keys).
+  inputSchema: z.object({ command: z.string().optional() }) as z.ZodType<unknown>,
   isReadOnly: () => readOnly,
   isConcurrencySafe: () => readOnly,
+  // Expose the shell command so the jun-28 repro-doubt gate can see it's test-like
+  // (mirrors the real bash tool's extractShellCommand surface).
+  extractShellCommand: (input: unknown) =>
+    (input as { command?: string } | null)?.command ?? null,
   execute: async function* (): AsyncIterable<ToolEvent> {
     yield { type: "result", result: { ok: true, output: `${name} ran` } }
   },
@@ -40,13 +46,21 @@ const mkConfig = (over: Partial<AgentConfig> = {}): AgentConfig =>
     ...over,
   }) as AgentConfig
 
-const call = (name: string, id: string): ToolUseBlock => ({ type: "tool_use", id, name, input: {} })
+const call = (name: string, id: string, input: unknown = {}): ToolUseBlock => ({
+  type: "tool_use",
+  id,
+  name,
+  input,
+})
 
 const previews = async (cfg: AgentConfig, names: string[]): Promise<string[]> => {
   const out: string[] = []
   let i = 0
   for (const n of names) {
-    const r = await dispatchTool(call(n, `c${i++}`), cfg, perm)
+    // a `bash` here is a TEST re-run (the streak the guard watches) — give it a
+    // test-like command so the jun-28 gate counts it.
+    const input = n === "bash" ? { command: "python -m pytest tests/x.py" } : {}
+    const r = await dispatchTool(call(n, `c${i++}`, input), cfg, perm)
     out.push(r.preview)
   }
   return out

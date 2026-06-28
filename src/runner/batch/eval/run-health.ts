@@ -31,10 +31,11 @@ import type { InstanceResult } from "../types"
 export type InstanceHealth =
   | "systemic_auth" // dead/invalid token — whole account is bad, retry is futile
   | "systemic_infra" // box-loss / OOM(137) / ssh-255 / readiness — box-level
+  | "transient_throttle" // 429 / rate-limit / overloaded — recoverable, NOT model-miss
   | "model_attempt" // turns>0 + a patch, ungraded — REAL generation (healthy)
   | "graded_pass" // graded resolved (healthy)
   | "graded_fail" // graded, did not resolve (HEALTHY miss — model just missed)
-  | "empty_or_stall" // turns=0 (or empty patch) with no auth/infra error
+  | "empty_or_stall" // turns=0 (or empty patch) with no auth/infra/throttle error
 
 /** A category is "systemic" iff it indicates the WHOLE run is broken (account or
  *  box), not just this one instance missing. */
@@ -57,6 +58,7 @@ const AUTH_PATTERNS: readonly RegExp[] = [
   /token[_ ]invalidated/,
   /invalid_grant/,
   /\bunauthorized\b/,
+  /re-?auth/, // re-auth / reauthenticate / re-authentication — unambiguous auth-death
   /\b401\b/,
   /\b403\b/,
   /\bauth\b/,
@@ -79,6 +81,23 @@ const INFRA_PATTERNS: readonly RegExp[] = [
   /ssh_terminal_error/,
 ]
 
+/** Throttle = transient rate-limit / overload (429 / "rate limit" / overloaded).
+ *  Checked LAST among the error buckets (auth → infra → throttle → stall): a
+ *  genuine auth/infra failure whose log incidentally carries a throttle word must
+ *  win, so throttle only claims a PURE rate-limit. This is RECOVERABLE — upstream
+ *  retry/backoff handles it — so it is NEITHER systemic (no abort: a rate-limited
+ *  box is not a broken box — the jun-20 lesson is that conflating throttle with a
+ *  real failure is the confound) NOR a model miss. Its sole job: make a throttled
+ *  run VISIBLE as throttle instead of vanishing into the unattributed
+ *  `empty_or_stall` bucket (the old measurement hole). */
+const THROTTLE_PATTERNS: readonly RegExp[] = [
+  /\b429\b/,
+  /rate[ _-]?limit/,
+  /throttl/,
+  /too many requests/,
+  /overloaded/,
+]
+
 const matchesAny = (text: string, pats: readonly RegExp[]): boolean =>
   pats.some((p) => p.test(text))
 
@@ -90,8 +109,17 @@ const matchesAny = (text: string, pats: readonly RegExp[]): boolean =>
 export const classifyInstanceHealth = (result: InstanceResult): InstanceHealth => {
   const err = (result.error ?? "").toLowerCase()
   if (err !== "") {
+    // Order matters (hell-audit R1): AUTH first (all-or-nothing account root) →
+    // INFRA next → THROTTLE last (before the stall fallback). Throttle is checked
+    // AFTER infra so a genuine box-level wedge whose log INCIDENTALLY contains a
+    // throttle word ("spot reclaim; rate limit", "overloaded; OOM exit 137") still
+    // classifies as systemic_infra and trips the abort gate — not masked as a
+    // benign throttle. A PURE rate-limit (429 with no infra token) still falls
+    // through to transient_throttle: NAMED (not a mystery stall) but non-aborting
+    // (throttle is recoverable — the jun-20 confound lesson).
     if (matchesAny(err, AUTH_PATTERNS)) return "systemic_auth"
     if (matchesAny(err, INFRA_PATTERNS)) return "systemic_infra"
+    if (matchesAny(err, THROTTLE_PATTERNS)) return "transient_throttle"
     // An unrecognized harness error with turns=0 / no patch is a stall, not a
     // systemic signal — don't trip the abort gate on noise we can't attribute.
   }
@@ -181,6 +209,7 @@ const deriveVerdict = (
   if (categories.some(isHealthySignal)) return "healthy"
   if (categories.some((c) => c === "systemic_auth")) return "systemic_auth"
   if (categories.some((c) => c === "systemic_infra")) return "systemic_infra"
+  if (categories.some((c) => c === "transient_throttle")) return "transient_throttle"
   if (categories.some((c) => c === "empty_or_stall")) return "empty_or_stall"
   return "unknown"
 }

@@ -13,6 +13,7 @@
  * machine. The signal symbols are re-exported below for back-compat.
  */
 
+import { MUTATING_FS_EDIT_TOOLS as MUTATING } from "./mutating-tools"
 import {
   isTestLikeCommand,
   isVerifyOutputFailing,
@@ -126,7 +127,10 @@ export const stickyRedForceMessage = (command?: string, marker?: string): string
 export const VERIFY_PASS_FORCE_MESSAGE = verifyPassForceMessage()
 
 /** Tools that mutate source — an edit that must be verified before finishing. */
-const MUTATING = new Set(["edit", "write"])
+// MUTATING (FS-edit tool set) is imported at the top from ./mutating-tools — the
+// SSOT shared with localize-phase-guard so the two guards can't drift. Was
+// {edit,write} here, which silently MISSED apply_patch/scripted_replace/
+// apply_patch_structured (a source fix via apply_patch then "done" was un-gated).
 
 /** History-entry shape with the optional outcome fields the mustPass branch
  *  consults. Kept as a local widening of the public {@link ToolHistoryEntry}
