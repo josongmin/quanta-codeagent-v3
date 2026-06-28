@@ -92,7 +92,9 @@ fence: skeleton에 assertion/gold 토큰 0 (헬게이트 red-on-injection)
 | localization recall@1 | BM25-lite | embedding 보강 |
 | API-usage 컨텍스트(시그니처+예시호출) | LSP 시그니처만 | 실 호출 예시 retrieve |
 
-→ **설계 함의**: exemplar retrieval을 **injected port**(`retrieveExemplarSkeletons`)로 두면, 지금은 impacted-discovery 어댑터로 채우고 **나중에 리트리버 엔진 어댑터로 교체**(generate.ts 불변). 이 RFC가 리트리버의 **첫 소비자**가 되게 seam을 미리 그 모양으로. 즉 리트리버 엔진은 "이 RFC를 더 좋게"가 아니라 **"이 RFC가 깔아둔 port를 채우는 더 나은 백엔드"** — 지금 lexical로 짓고 엔진 오면 무료 업그레이드.
+→ **설계 함의**: exemplar retrieval을 **injected port**로 두면, 지금은 impacted-discovery 어댑터로 채우고 **나중에 리트리버 엔진 어댑터로 교체**(generate.ts 불변). 이 RFC가 리트리버의 **첫 소비자**.
+
+> **⚠️ 소유권 정합성 (통합 RFC v2 객관어딧 OBJ#3)**: swap-seam은 **[jun-29-code-intelligence-engine-integration-rfc.md](jun-29-code-intelligence-engine-integration-rfc.md)의 `CodeIntelligencePort.relatedTests` 하나가 소유**한다. 본 RFC의 `retrieveExemplarSkeletons`는 **그 포트의 thin caller**(`relatedTests`→`TestRef[]` 받아 skeleton-strip은 consumer-side)로 강등 — "이 RFC가 독립 retriever 어댑터를 직접 교체"하는 게 아님. 엔진(semantica 등) 교체는 `CodeIntelligencePort` 어댑터 한 곳에서만. 즉 lexical(impacted-discovery)로 짓고, 통합 RFC의 measure-게이트 통과 시 semantica 어댑터로 백엔드만 무료 교체.
 
 ## 6. 단계
 1. exemplarBlock + signatureBlock 순수 빌더 + skeleton-strip(assertion 제거) + no-leak fence 헬게이트.
