@@ -1906,7 +1906,7 @@ runs:
   grading: official swebench python harness, spot EC2 c7i.4xlarge (4-box campaign), source-only patch
   scope: 'FULL SWEEP of the 24 unresolved sphinx instances (44 total − 20 already resolved) — every one was subject to the -rA parser false-unresolved bug, so any the model can solve was being false-failed. PARTIAL — campaign in progress (10/24 graded at fold time); PASSes folded as they confirm, genuine fails excluded.'
   success_note: 'Patches pulled live from the boxes and diffed against gold: every PASS here touches the EXACT gold file(s) with an independent (byte-different) fix — NOT gold-as-ours. The 3 confirmed fails so far break cleanly into the known taxonomy (8056 localization / 7462 multi-site / 9229 synthesis), not measurement holes. 11510 in particular was a prior "synthesis fail" in earlier-run forensics — now a clean PASS under v6, confirming the stale-count thesis.'
-  resolved_count: 7
+  resolved_count: 9
   resolved:
   - instance_id: sphinx-doc__sphinx-10323  # our fix == gold file directives/code.py
     repo: sphinx
@@ -1929,3 +1929,9 @@ runs:
   - instance_id: sphinx-doc__sphinx-9230  # util/docfields.py
     repo: sphinx
     turns: 29
+  - instance_id: sphinx-doc__sphinx-9258  # domains/python.py == gold
+    repo: sphinx
+    turns: 44
+  - instance_id: sphinx-doc__sphinx-8551  # python.py — leaner than gold (python.py+docfields.py) but passes official tests
+    repo: sphinx
+    turns: 37
