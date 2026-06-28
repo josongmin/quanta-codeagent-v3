@@ -94,6 +94,18 @@ export interface ReproVoteOutcomeRecord {
   detail?: ReproVoteOutcomeDetail
 }
 
+/** A1 follow-through: one repro-vote round's durable RCA payload. `samples`
+ *  carry the raw stdout/stderr/sidecar/outcome bytes for the re-run reproducing
+ *  set; empty_sources / thrown exec paths can persist without samples and carry
+ *  only the round verdict plus optional error text. */
+export interface PersistReproVoteRoundArgs {
+  round: number
+  outcome: ReproVoteOutcome
+  detail?: ReproVoteOutcomeDetail
+  samples?: readonly ReproTestSample[]
+  error?: string
+}
+
 /**
  * A5 LIVE-BY-CONSTRUCTION SEAM. `recordReproVoteOutcome` is OPTIONAL on the deps
  * and the production call site (`buildReproVoteValidate` in the bench driver)
@@ -186,6 +198,10 @@ export interface ReproVoteValidateDeps {
    *  by construction, never dropped because the caller forgot the arg. Additive
    *  observation only; never affects `ok`/`failTail`. */
   recordReproVoteOutcome?: RecordReproVoteOutcome
+  /** OPTIONAL A1 seam: persist the FULL vote-round artifact payload (outcome +
+   *  detail + raw sample bytes) durably. Best-effort observation only; a thrown
+   *  writer is swallowed and never affects the validator result. */
+  persistReproVoteRound?: (args: PersistReproVoteRoundArgs) => Promise<void> | void
 }
 
 /** Tail of a representative still-reproducing sample, for the next-round seed. */
@@ -243,20 +259,43 @@ const recordFor =
     deps.recordReproVoteOutcome?.(outcome, detail)
   }
 
-const emptySourcesResult = (record: RecordReproVoteOutcome): ValidatorResult => {
+const persistRound = async (
+  deps: ReproVoteValidateDeps,
+  payload: PersistReproVoteRoundArgs,
+): Promise<void> => {
+  try {
+    await deps.persistReproVoteRound?.(payload)
+  } catch {
+    // observe-only: persistence failures must never perturb the validator.
+  }
+}
+
+const emptySourcesResult = async (
+  deps: ReproVoteValidateDeps,
+  record: RecordReproVoteOutcome,
+  round: number,
+): Promise<ValidatorResult> => {
   record("empty_sources")
+  await persistRound(deps, { round, outcome: "empty_sources" })
   return { ok: false, failTail: "repro vote unavailable: empty_sources", reproOutcome: "unknown" }
 }
 
-const execFailedResult = (record: RecordReproVoteOutcome, cause: unknown): ValidatorResult => {
+const execFailedResult = async (
+  deps: ReproVoteValidateDeps,
+  record: RecordReproVoteOutcome,
+  round: number,
+  cause: unknown,
+): Promise<ValidatorResult> => {
   record("exec_failed")
+  const error = errMessage(cause)
+  await persistRound(deps, { round, outcome: "exec_failed", error })
   // FLAG 1: surface the actual thrown reason instead of a bare asserted label.
   // This catch fires when the BATCH executor itself throws (per-test throws are
   // already captured as `[exec threw]` samples by execute.ts and flow through the
   // inconclusive path). Either way the model gets the real crash detail.
   return {
     ok: false,
-    failTail: `repro vote execution failed: ${errMessage(cause)}`,
+    failTail: `repro vote execution failed: ${error}`,
     reproOutcome: "exec_failed",
   }
 }
@@ -284,11 +323,15 @@ const detailOf = (vote: VoteResolvedResult): ReproVoteOutcomeDetail => ({
   inconclusive: vote.inconclusive,
 })
 
-const voteResolvedResult = (
+const voteResolvedResult = async (
+  deps: ReproVoteValidateDeps,
+  round: number,
   record: RecordReproVoteOutcome,
   detail: ReproVoteOutcomeDetail,
-): ValidatorResult => {
+  samples: readonly ReproTestSample[],
+): Promise<ValidatorResult> => {
   record("vote_resolved", detail)
+  await persistRound(deps, { round, outcome: "vote_resolved", detail, samples })
   // jun-28 STRONG-ORACLE: carry the RESOLVED-side consensus verdict so the
   // strong-oracle clear gate can require it (a `resolved` consensus is consistent
   // with a CLEAR; the minority-green cases below are not). No-leak: this is the
@@ -296,13 +339,16 @@ const voteResolvedResult = (
   return { ok: true, consensus: "resolved" }
 }
 
-const voteUnresolvedResult = (
+const voteUnresolvedResult = async (
+  deps: ReproVoteValidateDeps,
+  round: number,
   record: RecordReproVoteOutcome,
   detail: ReproVoteOutcomeDetail,
   samples: readonly ReproTestSample[],
   args: ValidateArgs,
-): ValidatorResult => {
+): Promise<ValidatorResult> => {
   record("vote_unresolved", detail)
+  await persistRound(deps, { round, outcome: "vote_unresolved", detail, samples })
   const rep = samples.find((s) => s.outcome === "reproduced")
   const failureEvidence =
     rep === undefined
@@ -324,13 +370,16 @@ const voteUnresolvedResult = (
   }
 }
 
-const voteInconclusiveResult = (
+const voteInconclusiveResult = async (
+  deps: ReproVoteValidateDeps,
+  round: number,
   record: RecordReproVoteOutcome,
   detail: ReproVoteOutcomeDetail,
   samples: readonly ReproTestSample[],
   args: ValidateArgs,
-): ValidatorResult => {
+): Promise<ValidatorResult> => {
   record("vote_inconclusive", detail)
+  await persistRound(deps, { round, outcome: "vote_inconclusive", detail, samples })
   const reproOutcome =
     samples.length > 0 && samples.every((sample) => sample.outcome === "exec_failed")
       ? "exec_failed"
@@ -346,22 +395,26 @@ const voteInconclusiveResult = (
   }
 }
 
-export const makeReproVoteValidate =
-  (deps: ReproVoteValidateDeps) =>
-  async (args: ValidateArgs): Promise<ValidatorResult> => {
+export const makeReproVoteValidate = (deps: ReproVoteValidateDeps) => {
+  let nextRound = 0
+  return async (args: ValidateArgs): Promise<ValidatorResult> => {
     const record = recordFor(deps)
-    if (deps.sources.length === 0) return emptySourcesResult(record)
+    const round = nextRound++
+    if (deps.sources.length === 0) return emptySourcesResult(deps, record, round)
     let samples: readonly ReproTestSample[]
     try {
       samples = await executeVoteSamples(deps, args)
     } catch (e) {
       // A broken exec port must never be a silent pass or legacy fallback.
-      return execFailedResult(record, e)
+      return execFailedResult(deps, record, round, e)
     }
     const vote = voteResolved(samples)
     const detail = detailOf(vote)
-    if (vote.verdict === "resolved") return voteResolvedResult(record, detail)
-    if (vote.verdict === "reproduced") return voteUnresolvedResult(record, detail, samples, args)
+    if (vote.verdict === "resolved")
+      return voteResolvedResult(deps, round, record, detail, samples)
+    if (vote.verdict === "reproduced")
+      return voteUnresolvedResult(deps, round, record, detail, samples, args)
     // Inconclusive (tie / all-noisy): don't guess and don't use a legacy fallback.
-    return voteInconclusiveResult(record, detail, samples, args)
+    return voteInconclusiveResult(deps, round, record, detail, samples, args)
   }
+}

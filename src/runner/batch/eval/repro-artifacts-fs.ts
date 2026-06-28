@@ -10,7 +10,9 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
+  reproArtifactVoteRoundDir,
   makeReproArtifactSink,
+  reproArtifactInstanceDir,
   type ReproArtifactSink,
   type ReproArtifactWritePort,
 } from "./repro-artifacts-sink"
@@ -30,3 +32,14 @@ export const makeReproArtifactFsPort = (rootDir: string): ReproArtifactWritePort
  *  `<observeDir>/<runId>`). */
 export const makeReproArtifactFsSink = (rootDir: string): ReproArtifactSink =>
   makeReproArtifactSink(makeReproArtifactFsPort(rootDir))
+
+/** Absolute per-instance artifact directory under the bound sink root. */
+export const reproArtifactInstancePath = (rootDir: string, instanceId: string): string =>
+  join(rootDir, reproArtifactInstanceDir(instanceId))
+
+/** Absolute per-round vote artifact directory under the bound sink root. */
+export const reproArtifactVoteRoundPath = (
+  rootDir: string,
+  instanceId: string,
+  round: number,
+): string => join(rootDir, reproArtifactVoteRoundDir(instanceId, round))

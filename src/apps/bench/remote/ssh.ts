@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
+import { SPHINX_RA_SHIM } from "../python-swebench"
 import {
   DEFAULT_MAX_WORKERS,
   defaultSpawn,
@@ -72,12 +73,21 @@ const sshFlags = (keyPath: string): readonly string[] => [
  * nohup in the background so the grading survives an ssh disconnect; the report
  * file is polled separately. `--namespace swebench` pulls prebuilt amd64 images;
  * `--cache_level instance` keeps them warm across instances.
+ *
+ * jun-28: runs via the SHARED `SPHINX_RA_SHIM` (same as the local buildArgv path)
+ * instead of bare `-m swebench.harness.run_evaluation`, so sphinx's tox test_cmd
+ * gets `-rA` and isn't false-unresolved here either. The shim is base64-shipped to
+ * `~/ra_shim.py` — NOT a heredoc, because this script is itself piped to `bash -s`
+ * over stdin and a heredoc would steal that stdin. `python ra_shim.py <args>` makes
+ * the shim's `runpy.run_module(..., run_name="__main__")` see `<args>` as argv.
  */
-const buildRemoteGradeScript = (maxWorkers: number): string =>
-  [
+export const buildRemoteGradeScript = (maxWorkers: number): string => {
+  const shimB64 = Buffer.from(SPHINX_RA_SHIM, "utf8").toString("base64")
+  return [
     "set -eu",
     "UVX=$(command -v uvx || echo ~/.local/bin/uvx)",
-    'nohup "$UVX" --from swebench --python 3.11 python -m swebench.harness.run_evaluation \\',
+    `printf %s ${shimB64} | base64 -d > ~/ra_shim.py`,
+    'nohup "$UVX" --from swebench --python 3.11 python ~/ra_shim.py \\',
     "  --predictions_path ~/preds.jsonl \\",
     "  --run_id RUNID \\",
     `  --max_workers ${maxWorkers} \\`,
@@ -88,6 +98,7 @@ const buildRemoteGradeScript = (maxWorkers: number): string =>
     "echo STARTED",
     "",
   ].join("\n")
+}
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 

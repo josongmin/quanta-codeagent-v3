@@ -29,7 +29,7 @@ describe("runRepairRounds — validation gate context", () => {
       observed: { exitCode: 1, stdout: "Issue reproduced\n", stderr: "" },
     })
 
-    await runRepairRounds({
+    const out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -74,7 +74,7 @@ describe("runRepairRounds — validation gate context", () => {
       observed: { exitCode: 1, stdout: "", stderr: "AssertionError\n" },
     })
 
-    await runRepairRounds({
+    const out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -113,7 +113,7 @@ describe("runRepairRounds — validation gate context", () => {
       failTail: "",
     })
 
-    await runRepairRounds({
+    const out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -146,7 +146,7 @@ describe("runRepairRounds — validation gate context", () => {
       observed: { exitCode: 1, stdout: "", stderr: "AssertionError\n" },
     })
 
-    await runRepairRounds({
+    const out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -163,6 +163,13 @@ describe("runRepairRounds — validation gate context", () => {
     expect(captured?.validationSource).toBe("verify_cmd")
     expect(captured?.validationCmd).toBe("pytest tests/test_x.py -k repro")
     expect(captured?.validationExitCode).toBe(1)
+    expect(out.validationDecision).toEqual({
+      authority: "agent-verify-cmd",
+      issueResolved: false,
+      regressionFailed: null,
+      adoptable: false,
+      reason: "agent verify-cmd exit code — not canonical sidecar authority",
+    })
   })
 
   test("explicit repro command is surfaced as the validation gate when verify command is absent", async () => {
@@ -176,10 +183,11 @@ describe("runRepairRounds — validation gate context", () => {
     const validate = async (_args: ValidateArgs): Promise<ValidatorResult> => ({
       ok: false,
       failTail: "Issue reproduced\n",
+      reproOutcome: "reproduced",
       observed: { exitCode: 1, stdout: "Issue reproduced\n", stderr: "" },
     })
 
-    await runRepairRounds({
+    const out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -196,5 +204,12 @@ describe("runRepairRounds — validation gate context", () => {
     expect(captured?.validationSource).toBe("repro")
     expect(captured?.validationCmd).toBe('python3 -s "repro.py"')
     expect(captured?.validationExitCode).toBe(1)
+    expect(out.validationDecision).toEqual({
+      authority: "canonical-sidecar",
+      issueResolved: false,
+      regressionFailed: null,
+      adoptable: false,
+      reason: "canonical sidecar still reproduces the bug",
+    })
   })
 })

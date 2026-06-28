@@ -413,6 +413,9 @@ export interface RunRepairRoundsResult {
   /** True ⇒ a round's validator returned ok; false ⇒ all rounds exhausted
    *  without ok (the final patch is still handed to the official grader). */
   validated: boolean
+  /** jun-28 A2 — observe-only typed authority decision for the FINAL validator
+   *  result. Does not gate adopt/clear/select; emitted for driver/report RCA. */
+  validationDecision?: import("./decision").ValidationDecision
   /** T-3 OBSERVE-ONLY measurement: ANY round (including round 0) whose exit-code
    *  green had a typed rail predicate that was EVALUABLE but did NOT match — i.e.
    *  the rail went green on exit code while the typed proof says it should not

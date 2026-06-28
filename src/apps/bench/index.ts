@@ -512,6 +512,8 @@ const runSwebenchTask = async (
       deps.obs !== undefined
         ? makeReproArtifactFsSink(join(deps.obs.dir, deps.obs.runId))
         : undefined
+    const reproArtifactRootPath =
+      deps.obs !== undefined ? join(deps.obs.dir, deps.obs.runId) : undefined
     const result = await resolveInstance(
       instance,
       {
@@ -519,6 +521,7 @@ const runSwebenchTask = async (
         maxTurns: deps.cfg.maxTurns,
         timeoutMs: deps.cfg.timeoutMs,
         ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
+        ...(reproArtifactRootPath !== undefined ? { reproArtifactRootPath } : {}),
         // G1 — present ONLY when ≥2 distinct-model lanes resolved (knob ON +
         // credentialed). Omitted ⇒ key absent ⇒ byte-identical single-port path.
         ...(deps.llmLanes !== undefined ? { llmLanes: deps.llmLanes } : {}),
@@ -1008,12 +1011,14 @@ const runCustomCorpusMode = async (
   // observe opt-in; no handle ⇒ no sink ⇒ no-op).
   const reproArtifactSink =
     obs !== undefined ? makeReproArtifactFsSink(join(obs.dir, obs.runId)) : undefined
+  const reproArtifactRootPath = obs !== undefined ? join(obs.dir, obs.runId) : undefined
   const base: RunCfg = {
     llm,
     maxTurns: cfg.maxTurns,
     timeoutMs: cfg.timeoutMs,
     ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
     ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
+    ...(reproArtifactRootPath !== undefined ? { reproArtifactRootPath } : {}),
   }
   const { results } = await runBatch({
     instances,

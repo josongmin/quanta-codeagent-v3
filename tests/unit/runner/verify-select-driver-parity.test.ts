@@ -31,7 +31,7 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(DRIVER_SRC).toContain('verdict: "degraded"')
     expect(APP_DRIVER_SRC).toContain('verdict: "degraded"')
     expect(APP_DRIVER_SRC).toContain(
-      "attachReproVoteOutcomes(runInstanceFailureResult(instance, sandbox, state, error))",
+      "attachAndPersistReproVoteOutcomes(\n      runInstanceFailureResult(instance, sandbox, state, error)",
     )
   })
 

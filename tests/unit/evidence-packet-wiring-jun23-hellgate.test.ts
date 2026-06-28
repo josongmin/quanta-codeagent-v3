@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   pytestReportPathFor,
   type ReproExecPort,
   type ReproWriteFilePort,
 } from "@/agent/repro-test/execute"
 import { ADAPTIVE_ACTIONS, type AdaptiveAction } from "@/runner/batch/eval/adaptive-escalation"
-import { attachReproVoteOutcomes } from "@/runner/batch/eval/driver"
+import {
+  attachAndPersistReproVoteOutcomes,
+  attachReproVoteOutcomes,
+} from "@/runner/batch/eval/driver"
 import {
   assertPacketBlind,
   buildSelectionExplanationPacket,
@@ -17,6 +23,7 @@ import {
 } from "@/runner/batch/eval/llm-evidence-packet"
 import {
   makeReproVoteValidate,
+  type PersistReproVoteRoundArgs,
   type ReproVoteOutcomeRecord,
   resetReproVoteOutcomes,
   summarizeReproVoteOutcomes,
@@ -104,7 +111,7 @@ describe("A5 — summarizeReproVoteOutcomes (drain projection)", () => {
         timeoutMs: 1000,
       }
       const voteResult = await validate(args)
-      expect(voteResult).toEqual({ ok: true })
+      expect(voteResult).toEqual({ ok: true, consensus: "resolved" })
 
       // The DRIVER's exported consumer drains the sink onto the result — the wiring
       // the campaign report reads. RED-WITHOUT-FIX: no production code drained the
@@ -123,6 +130,102 @@ describe("A5 — summarizeReproVoteOutcomes (drain projection)", () => {
       // CONSUMING drain — a second attach carries nothing (no double-count / no leak).
       const second = attachReproVoteOutcomes({ id: "inst-2", passed: false, patch: "", turns: 0 })
       expect(second.reproVoteOutcomes).toBeUndefined()
+    })
+
+    test("attachAndPersistReproVoteOutcomes writes vote-summary.json under reproArtifactPath", async () => {
+      const root = await mkdtemp(join(tmpdir(), "repro-vote-art-"))
+      try {
+        const reports = new Map<string, string>()
+        const writeFile: ReproWriteFilePort = async () => {}
+        const exec: ReproExecPort = async (argv) => {
+          const scriptPath = argv[argv.length - 1] as string
+          reports.set(
+            pytestReportPathFor(scriptPath),
+            JSON.stringify({
+              schema: 1,
+              collected: 1,
+              exitstatus: 0,
+              reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "passed" }],
+            }),
+          )
+          return { code: 0, stdout: "Issue resolved\n", stderr: "" }
+        }
+        const validate = makeReproVoteValidate({
+          sources: ["r1", "r2"],
+          exec,
+          writeFile,
+          readFile: async (path) => reports.get(path) ?? "",
+          fallback: async (): Promise<ValidatorResult> => ({ ok: false, failTail: "legacy" }),
+        })
+        await validate({
+          sandbox: "/sbx",
+          exec: async () => ({ code: 1, stdout: "LEGACY", stderr: "" }),
+          timeoutMs: 1000,
+        })
+        const attached = await attachAndPersistReproVoteOutcomes({
+          id: "inst-1",
+          passed: true,
+          patch: "x",
+          turns: 3,
+          reproArtifactPath: root,
+        })
+        expect(attached.reproVoteOutcomes?.tally.vote_resolved).toBe(1)
+        const persisted = JSON.parse(await readFile(join(root, "vote-summary.json"), "utf8"))
+        expect(persisted).toEqual(attached.reproVoteOutcomes)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+
+    test("makeReproVoteValidate emits raw vote-round samples to persistReproVoteRound", async () => {
+      const reports = new Map<string, string>()
+      const persisted: PersistReproVoteRoundArgs[] = []
+      const writeFile: ReproWriteFilePort = async () => {}
+      const exec: ReproExecPort = async (argv) => {
+        const scriptPath = argv[argv.length - 1] as string
+        reports.set(
+          pytestReportPathFor(scriptPath),
+          JSON.stringify({
+            schema: 1,
+            collected: 1,
+            exitstatus: 1,
+            reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" }],
+          }),
+        )
+        return { code: 1, stdout: "Issue reproduced\n", stderr: "tb\n" }
+      }
+      const validate = makeReproVoteValidate({
+        sources: ["print('r1')", "print('r2')"],
+        exec,
+        writeFile,
+        readFile: async (path) => reports.get(path) ?? "",
+        fallback: async (): Promise<ValidatorResult> => ({ ok: false, failTail: "legacy" }),
+        persistReproVoteRound: async (args) => void persisted.push(args),
+      })
+      const voteResult = await validate({
+        sandbox: "/sbx",
+        exec: async () => ({ code: 1, stdout: "LEGACY", stderr: "" }),
+        timeoutMs: 1000,
+      })
+      expect(voteResult).toMatchObject({
+        ok: false,
+        failTail: "Issue reproduced\n\ntb\n",
+        consensus: "reproduced",
+        failureEvidence: {
+          stdoutTail: "Issue reproduced\n",
+          stderrTail: "tb\n",
+          combinedTail: "Issue reproduced\n\ntb\n",
+        },
+      })
+      expect(persisted).toHaveLength(1)
+      expect(persisted[0]?.round).toBe(0)
+      expect(persisted[0]?.outcome).toBe("vote_unresolved")
+      expect(persisted[0]?.detail).toEqual({ resolved: 0, reproduced: 2, inconclusive: 0 })
+      expect(persisted[0]?.samples?.map((sample) => sample.outcome)).toEqual([
+        "reproduced",
+        "reproduced",
+      ])
+      expect(persisted[0]?.samples?.every((sample) => sample.sidecarReport !== undefined)).toBe(true)
     })
   })
 

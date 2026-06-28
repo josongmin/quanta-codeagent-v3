@@ -23,7 +23,7 @@ import {
 import {
   adaptiveNextPassOwners,
   applyBenchKnobs,
-  attachReproVoteOutcomes,
+  attachAndPersistReproVoteOutcomes,
   type BenchKnobState,
   BenchObserver,
   type BenchPosture,
@@ -349,6 +349,8 @@ interface Phase {
   /** jun-18 RCA OBSERVE-ONLY — a repair round's rail (exit-code) rejected a patch
    *  the repro sentinel reports resolved (false-RED ⇒ wasteful churn). Repair only. */
   primaryFalseRed?: boolean
+  /** jun-28 A2 — final repair-gate authority decision (observe-only). */
+  repairValidationDecision?: import("@/runner/batch/eval/repair/decision").ValidationDecision
   verifyRounds?: number
   /** jun-20 — repro-oracle gold calibration for this verify-select run (eval-only
    *  telemetry). Set by the selection phase; undefined on single-pass/repair. */
@@ -658,6 +660,7 @@ const runRepairPhase = async (
   let repairValidated = false
   let repairFalseGreen = false
   let repairFalseRed = false
+  let repairValidationDecision: Phase["repairValidationDecision"] = undefined
   let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: K-of-N RESOLVED majority gate when the knob is on AND a
@@ -666,6 +669,7 @@ const runRepairPhase = async (
     instance,
     reproSources,
     repair.validate ?? defaultValidate,
+    deps.reproArtifactRootPath,
   )
   // jun-26 repair spec gate / jun-28 strong-oracle (mirror of the runner-core
   // driver): when the issue declares a concrete PUBLIC expected output AND the
@@ -790,6 +794,7 @@ const runRepairPhase = async (
       repairValidated = out.validated
       repairFalseGreen = out.primaryFalseGreen
       repairFalseRed = out.primaryFalseRed
+      repairValidationDecision = out.validationDecision
       repairRounds = out.rounds
     },
     instance.swebench?.repo,
@@ -800,6 +805,7 @@ const runRepairPhase = async (
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
     primaryFalseRed: repairFalseRed,
+    ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
   }
@@ -1892,7 +1898,7 @@ const runInstanceBody = async (args: {
   args.state.deadline = setTimeout(() => args.abort.abort(), args.deps.timeoutMs)
 
   if (v5AdaptiveEnabled({ preset: preparedContext.state.preset, envVars: process.env })) {
-    return attachReproVoteOutcomes(
+    return attachAndPersistReproVoteOutcomes(
       await runAdaptiveAttempt({
         instance: args.instance,
         deps: args.deps,
@@ -1952,12 +1958,12 @@ const runInstanceBody = async (args: {
     prepared: args.state.prepared,
     sandbox: args.sandbox,
   })
-  if (terminal !== undefined) return attachReproVoteOutcomes(terminal)
+  if (terminal !== undefined) return attachAndPersistReproVoteOutcomes(terminal)
 
   // Await inside the try so sandbox cleanup in `finally` cannot race the final
   // verifier. A bare `return promise` here would run `finally` immediately and
   // tear down the sandbox while verify is still spawning.
-  return attachReproVoteOutcomes(
+  return attachAndPersistReproVoteOutcomes(
     await verifyAndFinalizeResult({
       instance: args.instance,
       phase: args.state.phase,
@@ -1979,7 +1985,7 @@ const runInstanceOnce = async (
   // A5: reset the repro-vote sink at instance START so this instance's vote
   // outcomes cannot leak into the next instance's telemetry (the audit's
   // cross-instance accumulation risk). Drained per result via
-  // `attachReproVoteOutcomes`.
+  // `attachAndPersistReproVoteOutcomes`.
   resetReproVoteOutcomes()
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
@@ -2004,7 +2010,9 @@ const runInstanceOnce = async (
       state,
     })
   } catch (error) {
-    return attachReproVoteOutcomes(runInstanceFailureResult(instance, sandbox, state, error))
+    return attachAndPersistReproVoteOutcomes(
+      runInstanceFailureResult(instance, sandbox, state, error),
+    )
   } finally {
     clearTimeout(state.deadline)
     state.wiring.observer?.close()

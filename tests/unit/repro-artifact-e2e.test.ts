@@ -13,8 +13,14 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "../../src/llm"
-import { prepareReproTestDetailed } from "../../src/runner/batch/eval/driver"
-import { makeReproArtifactFsSink } from "../../src/runner/batch/eval/repro-artifacts-fs"
+import {
+  persistReproVoteRoundArtifacts,
+  prepareReproTestDetailed,
+} from "../../src/runner/batch/eval/driver"
+import {
+  makeReproArtifactFsSink,
+  reproArtifactVoteRoundPath,
+} from "../../src/runner/batch/eval/repro-artifacts-fs"
 import type { Instance } from "../../src/runner/batch/types"
 
 class StubLLM implements LLMPort {
@@ -81,6 +87,55 @@ describe("A1 e2e — driver persists the full artifact tree to real disk", () =>
       const sidecar = await readFile(join(instDir, "hardening-1/sidecar.json"), "utf8")
       expect(sidecar).toBe(REPORT)
       expect(JSON.parse(sidecar).reports[0].nodeid).toBe("t.py::test_x")
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("repro-vote round artifacts land under vote-round-N with raw sample files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "a1-vote-e2e-"))
+    try {
+      await persistReproVoteRoundArtifacts({
+        rootDir: root,
+        instanceId: "django__django-12345",
+        round: 0,
+        payload: {
+          round: 0,
+          outcome: "vote_unresolved",
+          detail: { resolved: 0, reproduced: 2, inconclusive: 0 },
+          samples: [
+            {
+              source: "def test_a():\n    assert False\n",
+              stdout: "Issue reproduced\n",
+              stderr: "tb-a\n",
+              outcome: "reproduced",
+              sidecarReport: REPORT,
+            },
+            {
+              source: "def test_b():\n    assert False\n",
+              stdout: "Issue reproduced\n",
+              stderr: "tb-b\n",
+              outcome: "reproduced",
+              sidecarReport: REPORT,
+            },
+          ],
+        },
+      })
+
+      const roundDir = reproArtifactVoteRoundPath(root, "django__django-12345", 0)
+      const entries = (await readdir(roundDir)).sort()
+      expect(entries).toEqual(["canonical-0", "canonical-1", "vote.json"])
+      const vote = JSON.parse(await readFile(join(roundDir, "vote.json"), "utf8"))
+      expect(vote.outcome).toBe("vote_unresolved")
+      expect(vote.detail).toEqual({ resolved: 0, reproduced: 2, inconclusive: 0 })
+      expect(vote.samples[0]?.candidateId).toBe("canonical-0")
+      expect(typeof vote.samples[0]?.sourceHash).toBe("string")
+      expect(vote.samples[0]?.sidecarPresent).toBe(true)
+      expect(await readFile(join(roundDir, "canonical-1/stdout.txt"), "utf8")).toBe(
+        "Issue reproduced\n",
+      )
+      expect(await readFile(join(roundDir, "canonical-1/stderr.txt"), "utf8")).toBe("tb-b\n")
+      expect(await readFile(join(roundDir, "canonical-0/sidecar.json"), "utf8")).toBe(REPORT)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

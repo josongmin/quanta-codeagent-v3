@@ -170,6 +170,7 @@ export type ReproConsensusProofState =
   import("./eval/repair/resolved-consensus").ReproConsensusProofState
 export type LlmEvidenceArtifacts = import("./eval/llm-evidence-packet").LlmEvidenceArtifacts
 export type ReproVoteOutcomeRecord = import("./eval/repair/repro-vote").ReproVoteOutcomeRecord
+export type RepairValidationDecision = import("./eval/repair/decision").ValidationDecision
 
 /**
  * A5 — per-instance repro-vote outcome telemetry, drained from the module sink
@@ -238,6 +239,9 @@ export interface InstanceResult {
   admissionBlock?: import("./admission").AdmissionBlock
   /** Absolute path of the captured `.patch` file (only when observing). */
   patchPath?: string
+  /** Absolute path of the per-instance repro artifact directory (only when the
+   *  repro artifact sink was bound). */
+  reproArtifactPath?: string
   /** Wall-clock instance duration in ms (only when observing). */
   durationMs?: number
   /** Rolled-up token usage (only when observing and the LLM reported it). */
@@ -425,6 +429,9 @@ export interface InstanceResult {
    * is reset per-instance so counts never accumulate across instances.
    */
   reproVoteOutcomes?: ReproVoteTelemetry
+  /** jun-28 A2 — final repair-gate authority decision. Observe-only: shows
+   *  canonical-sidecar proof vs legacy verify-cmd/inconclusive/missing oracle. */
+  repairValidationDecision?: RepairValidationDecision
   /**
    * T-601 — RepairEscalationDecision (escalate to multi-owner / branch-search,
    * with a structured reason). When the `repair-escalation` knob is on, the SAME

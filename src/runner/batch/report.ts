@@ -48,6 +48,7 @@ import type {
   PublicRegressionProofState,
   ReproConsensusProofState,
   ReproOracleCalibration,
+  RepairValidationDecision,
   ReproVoteTelemetry,
   SelectionProofSource,
   SelectionProofState,
@@ -94,6 +95,9 @@ export interface PerInstanceReport {
   modelPatchDigest?: string
   touchedFiles?: string[]
   error?: string
+  /** Absolute path of the per-instance repro artifact directory when the
+   *  observe-root artifact sink was bound. */
+  reproArtifactPath?: string
   /** Rolled-up token usage (only when observability captured it). This is the
    *  cost-analysis SSOT (`cost.ts` path-1) — when omitted, `cost.ts` falls back
    *  to the `observe/` trajectories. Absent ⇒ byte-identical to the pre-feature
@@ -114,6 +118,9 @@ export interface PerInstanceReport {
    *  DROPPED at report serialization; now emitted so an A/B campaign can read the
    *  vote distribution. Omitted when the repro-vote validator never ran. */
   reproVoteOutcomes?: ReproVoteTelemetry
+  /** jun-28 A2 — final repair-gate authority decision. Omitted when the repair
+   *  path did not produce a terminal validator decision. */
+  repairValidationDecision?: RepairValidationDecision
   /** jun-19 — official-grade regression-vs-didn't-fix breakdown (swebench only).
    *  Lets a run self-measure PASS_TO_PASS-break rate (regression-gate
    *  justification). Omitted for non-swebench / ungraded ⇒ byte-identical. */
@@ -313,6 +320,7 @@ export const buildReport = (
           : {}),
         ...(touchedFiles.length > 0 ? { touchedFiles } : {}),
         ...(r.error !== undefined ? { error: r.error } : {}),
+        ...(r.reproArtifactPath !== undefined ? { reproArtifactPath: r.reproArtifactPath } : {}),
         // Cost-analysis SSOT: forward the observed token usage + wall-clock so
         // `report.json` carries what `cost.ts` reads (Gap 1). Both are omitted
         // when observability did not capture them ⇒ byte-identical legacy shape.
@@ -322,6 +330,9 @@ export const buildReport = (
         ...(r.budget !== undefined ? { budget: r.budget } : {}),
         ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
         ...(r.reproVoteOutcomes !== undefined ? { reproVoteOutcomes: r.reproVoteOutcomes } : {}),
+        ...(r.repairValidationDecision !== undefined
+          ? { repairValidationDecision: r.repairValidationDecision }
+          : {}),
         ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
         ...(r.reproOracleCalibration !== undefined
           ? { reproOracleCalibration: r.reproOracleCalibration }

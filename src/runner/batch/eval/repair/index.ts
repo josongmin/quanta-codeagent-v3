@@ -22,7 +22,12 @@
  * validator failures are normal and never throw.
  */
 
-import { isFalseGreen, repairCandidateClears } from "./decision"
+import {
+  decideAdoption,
+  isFalseGreen,
+  repairCandidateClears,
+  type ValidationDecisionContext,
+} from "./decision"
 import type {
   BuildRepairContextArgs,
   RepairCandidateOutcome,
@@ -57,7 +62,15 @@ export const runRepairRounds = async (
   // Knob ABSENT ⇒ `clearedAsValidated` is identically `v.ok` ⇒ byte-identical.
   const v0Cleared = clearedAsValidated(args, v0)
   if (shouldFinishAfterRound0(v0Cleared, maxRounds)) {
-    return finalize(history, turnsTotal, v0Cleared, r0.patch, isFalseGreen(v0), isFalseRed(v0))
+    return finalize(
+      history,
+      turnsTotal,
+      v0Cleared,
+      r0.patch,
+      validationDecisionOf(args, r0, v0),
+      isFalseGreen(v0),
+      isFalseRed(v0),
+    )
   }
 
   let prevRun: RunOnceResult = r0
@@ -103,7 +116,15 @@ export const runRepairRounds = async (
       break
     }
   }
-  return finalize(history, turnsTotal, validated, prevRun.patch, falseGreen, falseRed)
+  return finalize(
+    history,
+    turnsTotal,
+    validated,
+    prevRun.patch,
+    validationDecisionOf(args, prevRun, prevValidator),
+    falseGreen,
+    falseRed,
+  )
 }
 
 /** One round's executed outcome: the agent run + its validator verdict. For the
@@ -296,6 +317,36 @@ const validationGateContextOf = (
   return { validationSource: "none" }
 }
 
+const validationDecisionContextOf = (
+  args: RunRepairRoundsArgs,
+  run: RunOnceResult,
+): ValidationDecisionContext => {
+  if (args.primaryRailStep !== undefined) {
+    return {
+      validationSource: "primary_rail",
+      reproAuthority: args.primaryRailStep.kind === "repro",
+    }
+  }
+  if (typeof run.lastVerifyCmd === "string" && run.lastVerifyCmd !== "") {
+    return { validationSource: "verify_cmd", reproAuthority: false }
+  }
+  if (
+    typeof run.reproPath === "string" &&
+    run.reproPath !== "" &&
+    typeof run.reproCmd === "string" &&
+    run.reproCmd !== ""
+  ) {
+    return { validationSource: "repro", reproAuthority: true }
+  }
+  return { validationSource: "none", reproAuthority: false }
+}
+
+const validationDecisionOf = (
+  args: RunRepairRoundsArgs,
+  run: RunOnceResult,
+  validator: ValidatorResult,
+) => decideAdoption(validator, validationDecisionContextOf(args, run))
+
 type PrimaryRailStep = NonNullable<RunRepairRoundsArgs["primaryRailStep"]>
 
 /** The validate-arg policy inputs the orchestrator owns. Exposed as a NARROW
@@ -364,6 +415,7 @@ const finalize = (
   turns: number,
   validated: boolean,
   patch: string,
+  validationDecision: RunRepairRoundsResult["validationDecision"],
   primaryFalseGreen: boolean,
   primaryFalseRed: boolean,
 ): RunRepairRoundsResult => ({
@@ -371,6 +423,7 @@ const finalize = (
   turns,
   rounds: history.length,
   validated,
+  ...(validationDecision !== undefined ? { validationDecision } : {}),
   primaryFalseGreen,
   primaryFalseRed,
   history,

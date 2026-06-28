@@ -14,7 +14,10 @@ import {
   candidateIdOf,
   makeReproArtifactSink,
   REPRO_ARTIFACT_TAIL_BOUND,
+  reproArtifactInstanceDir,
+  reproArtifactVoteRoundDir,
   type ReproArtifactWritePort,
+  safeReproArtifactSegment,
   sourceHashOf,
 } from "../../src/runner/batch/eval/repro-artifacts-sink"
 
@@ -108,6 +111,14 @@ describe("repro artifact sink", () => {
   test("candidateIdOf is deterministic per kind+index (join-stable)", () => {
     expect(candidateIdOf("canonical", 0)).toBe("canonical-0")
     expect(candidateIdOf("hardening", 1)).toBe("hardening-1")
+  })
+
+  test("per-instance path helpers are deterministic and sanitized", () => {
+    expect(safeReproArtifactSegment("../../etc/evil path")).toBe("____etc_evil_path")
+    expect(reproArtifactInstanceDir("../../etc/evil path")).toBe("repro/____etc_evil_path")
+    expect(reproArtifactVoteRoundDir("../../etc/evil path", 2)).toBe(
+      "repro/____etc_evil_path/vote-round-2",
+    )
   })
 
   test("sourceHashOf is deterministic and content-sensitive (join key)", () => {
@@ -206,9 +217,22 @@ describe("repro artifact sink", () => {
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeReproArtifactFsSink } from "../../src/runner/batch/eval/repro-artifacts-fs"
+import {
+  makeReproArtifactFsSink,
+  reproArtifactInstancePath,
+  reproArtifactVoteRoundPath,
+} from "../../src/runner/batch/eval/repro-artifacts-fs"
 
 describe("repro artifact fs sink (real disk)", () => {
+  test("reproArtifactInstancePath resolves the same per-instance directory layout", () => {
+    expect(reproArtifactInstancePath("/tmp/run-1", "../../etc/evil path")).toBe(
+      "/tmp/run-1/repro/____etc_evil_path",
+    )
+    expect(reproArtifactVoteRoundPath("/tmp/run-1", "../../etc/evil path", 2)).toBe(
+      "/tmp/run-1/repro/____etc_evil_path/vote-round-2",
+    )
+  })
+
   test("writes candidate.py + outcome.json under <root>/repro/<inst>/<id>/", async () => {
     const root = await mkdtemp(join(tmpdir(), "repro-art-"))
     try {

@@ -21,6 +21,7 @@ import type {
   LlmEvidenceArtifacts,
   OwnerWideningTelemetry,
   ReproOracleCalibration,
+  RepairValidationDecision,
   SelectionTelemetry,
 } from "@/runner/batch/types"
 
@@ -79,6 +80,24 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     }
     const rep = buildReport(meta, [baseResult({ reproVoteOutcomes: votes })])
     expect(rep.perInstance[0]?.reproVoteOutcomes).toEqual(votes)
+  })
+
+  test("repairValidationDecision survives into perInstance", () => {
+    const decision: RepairValidationDecision = {
+      authority: "canonical-sidecar",
+      issueResolved: true,
+      regressionFailed: null,
+      adoptable: true,
+      reason: "canonical sidecar resolved",
+    }
+    const rep = buildReport(meta, [baseResult({ repairValidationDecision: decision })])
+    expect(rep.perInstance[0]?.repairValidationDecision).toEqual(decision)
+  })
+
+  test("reproArtifactPath survives into perInstance", () => {
+    const path = "/tmp/observe/run-123/repro/sympy__sympy-1"
+    const rep = buildReport(meta, [baseResult({ reproArtifactPath: path })])
+    expect(rep.perInstance[0]?.reproArtifactPath).toBe(path)
   })
 
   test("selectionTelemetry survives (verify-select diagnosis stays in report)", () => {

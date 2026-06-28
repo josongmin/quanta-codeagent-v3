@@ -17,6 +17,7 @@
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs"
+import { mkdir, writeFile } from "node:fs/promises"
 import { extname, join, relative, sep } from "node:path"
 import {
   type AgentConfig,
@@ -181,6 +182,7 @@ import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import {
   drainReproVoteOutcomes,
   makeReproVoteValidate,
+  type PersistReproVoteRoundArgs,
   summarizeReproVoteOutcomes,
 } from "./repair/repro-vote"
 import {
@@ -205,8 +207,15 @@ import {
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
+import { reproArtifactInstancePath, reproArtifactVoteRoundPath } from "./repro-artifacts-fs"
 import { emitPatch, emitSandbox, emitVerify, ObservationError, type Wiring } from "./report"
-import type { ReproArtifactKind, ReproArtifactSink } from "./repro-artifacts-sink"
+import {
+  boundReproArtifactSidecar,
+  boundReproArtifactTail,
+  sourceHashOf,
+  type ReproArtifactKind,
+  type ReproArtifactSink,
+} from "./repro-artifacts-sink"
 import { reproValidationCmd } from "./repro-command"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
 import {
@@ -300,6 +309,9 @@ export interface RunInstanceDeps {
    * builds it from the observe handle, gated by the `reproArtifacts` opt-in.
    */
   reproArtifactSink?: ReproArtifactSink
+  /** Absolute root dir bound into `reproArtifactSink`; used only to surface the
+   *  per-instance artifact directory in results/report.json. */
+  reproArtifactRootPath?: string
   /**
    * Official-harness verifier. When present AND the instance carries swebench
    * metadata, the captured patch is graded by the Python harness instead of
@@ -2815,6 +2827,8 @@ interface Phase {
    *  stdout classified RESOLVED (false RED). Repair path only; undefined on single-
    *  pass ⇒ measurement null. */
   primaryFalseRed?: boolean
+  /** jun-28 A2 — final repair-gate authority decision (observe-only). */
+  repairValidationDecision?: import("./repair/decision").ValidationDecision
   /** Number of repair/verify rounds consumed when verify-first ran. */
   verifyRounds?: number
   /** jun-20 — repro-oracle gold calibration for this verify-select run (eval-only
@@ -3095,13 +3109,87 @@ export const reproExecBundle = (
   }
 }
 
+/** A1 follow-through: persist ONE repro-vote round's raw samples under the same
+ *  per-instance artifact tree as generation candidates. */
+export const persistReproVoteRoundArtifacts = async (args: {
+  rootDir: string
+  instanceId: string
+  round: number
+  payload: PersistReproVoteRoundArgs
+}): Promise<void> => {
+  const dir = reproArtifactVoteRoundPath(args.rootDir, args.instanceId, args.round)
+  await mkdir(dir, { recursive: true })
+  await writeFile(
+    join(dir, "vote.json"),
+    `${JSON.stringify(
+      {
+        round: args.payload.round,
+        outcome: args.payload.outcome,
+        ...(args.payload.detail !== undefined ? { detail: args.payload.detail } : {}),
+        ...(args.payload.error !== undefined ? { error: args.payload.error } : {}),
+        samples:
+          args.payload.samples?.map((sample, index) => ({
+            candidateId: `canonical-${index}`,
+            sourceHash: sourceHashOf(sample.source),
+            outcome: sample.outcome,
+            ...(sample.execFailure !== undefined ? { execFailure: sample.execFailure } : {}),
+            sidecarPresent: sample.sidecarReport !== undefined,
+          })) ?? [],
+      },
+      null,
+      2,
+    )}\n`,
+  )
+  for (const [index, sample] of (args.payload.samples ?? []).entries()) {
+    const sampleDir = join(dir, `canonical-${index}`)
+    await mkdir(sampleDir, { recursive: true })
+    await writeFile(join(sampleDir, "candidate.py"), sample.source)
+    await writeFile(
+      join(sampleDir, "outcome.json"),
+      `${JSON.stringify(
+        {
+          round: args.payload.round,
+          candidateId: `canonical-${index}`,
+          sourceHash: sourceHashOf(sample.source),
+          outcome: sample.outcome,
+          ...(sample.execFailure !== undefined ? { execFailure: sample.execFailure } : {}),
+          sidecarPresent: sample.sidecarReport !== undefined,
+        },
+        null,
+        2,
+      )}\n`,
+    )
+    await writeFile(join(sampleDir, "stdout.txt"), boundReproArtifactTail(sample.stdout))
+    await writeFile(join(sampleDir, "stderr.txt"), boundReproArtifactTail(sample.stderr ?? ""))
+    if (sample.sidecarReport !== undefined) {
+      await writeFile(join(sampleDir, "sidecar.json"), boundReproArtifactSidecar(sample.sidecarReport))
+    }
+  }
+}
+
 export const buildReproVoteValidate = (
   instance: Instance,
   reproSources: readonly string[],
   fallback: (args: ValidateArgs) => Promise<ValidatorResult>,
+  reproArtifactRootPath?: string,
 ): ((args: ValidateArgs) => Promise<ValidatorResult>) => {
   if (benchOptIns().reproVote !== true) return fallback
-  return makeReproVoteValidate({ sources: reproSources, ...reproExecBundle(instance), fallback })
+  return makeReproVoteValidate({
+    sources: reproSources,
+    ...reproExecBundle(instance),
+    fallback,
+    ...(reproArtifactRootPath !== undefined
+      ? {
+          persistReproVoteRound: (payload: PersistReproVoteRoundArgs) =>
+            persistReproVoteRoundArtifacts({
+              rootDir: reproArtifactRootPath,
+              instanceId: instance.id,
+              round: payload.round,
+              payload,
+            }),
+        }
+      : {}),
+  })
 }
 
 /**
@@ -3268,6 +3356,7 @@ const runRepairPhase = async (
   let repairValidated = false
   let repairFalseGreen = false
   let repairFalseRed = false
+  let repairValidationDecision: Phase["repairValidationDecision"] = undefined
   let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
@@ -3280,6 +3369,7 @@ const runRepairPhase = async (
     instance,
     reproSources,
     repair.validate ?? defaultValidate,
+    deps.reproArtifactRootPath,
   )
   // jun-26 repair spec gate / jun-28 strong-oracle: when the issue declares a
   // concrete PUBLIC expected output AND the spec-gate OR strong-oracle knob is on,
@@ -3401,6 +3491,7 @@ const runRepairPhase = async (
       repairValidated = out.validated
       repairFalseGreen = out.primaryFalseGreen
       repairFalseRed = out.primaryFalseRed
+      repairValidationDecision = out.validationDecision
       repairRounds = out.rounds
     },
     instance.swebench?.repo,
@@ -3415,6 +3506,7 @@ const runRepairPhase = async (
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
     primaryFalseRed: repairFalseRed,
+    ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
   }
@@ -4264,7 +4356,19 @@ const okResult = (
 
 const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
-): Partial<InstanceResult> => (reproTest === undefined ? {} : { reproTest })
+  reproArtifactPath: string | undefined,
+): Partial<InstanceResult> =>
+  reproTest === undefined && reproArtifactPath === undefined
+    ? {}
+    : {
+        ...(reproTest !== undefined ? { reproTest } : {}),
+        ...(reproArtifactPath !== undefined ? { reproArtifactPath } : {}),
+      }
+
+const reproArtifactPathOf = (deps: RunInstanceDeps, instance: Instance): string | undefined =>
+  deps.reproArtifactRootPath !== undefined
+    ? reproArtifactInstancePath(deps.reproArtifactRootPath, instance.id)
+    : undefined
 
 const shouldValidateGold = (deps: RunInstanceDeps, agentPassed: boolean): boolean =>
   deps.goldSanity !== undefined && (deps.goldSanity.mode === "always" || agentPassed === false)
@@ -4379,8 +4483,9 @@ const generationFailureResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult => {
+  const reproArtifactPath = reproArtifactPathOf(args.deps, args.instance)
   const extra: Partial<InstanceResult> = {
-    ...reproResultExtra(args.reproTest),
+    ...reproResultExtra(args.reproTest, reproArtifactPath),
     ...(args.phase.reproOracleCalibration !== undefined
       ? { reproOracleCalibration: args.phase.reproOracleCalibration }
       : {}),
@@ -4419,8 +4524,9 @@ const noPatchResult = (args: {
   readonly wiring: Wiring
   readonly startedAt: number
 }): InstanceResult => {
+  const reproArtifactPath = reproArtifactPathOf(args.deps, args.instance)
   const extra: Partial<InstanceResult> = {
-    ...reproResultExtra(args.reproTest),
+    ...reproResultExtra(args.reproTest, reproArtifactPath),
     ...(args.phase.reproOracleCalibration !== undefined
       ? { reproOracleCalibration: args.phase.reproOracleCalibration }
       : {}),
@@ -5623,6 +5729,9 @@ const attachRepairGateMetrics = (args: {
   args.extra.gateEntered = args.prepared.gateDecisionVerify
   args.extra.gateBypassed = !args.prepared.gateDecisionVerify
   if (args.phase.verifyRounds !== undefined) args.extra.verifyRounds = args.phase.verifyRounds
+  if (args.phase.repairValidationDecision !== undefined) {
+    args.extra.repairValidationDecision = args.phase.repairValidationDecision
+  }
 }
 
 const attachClosureMetrics = (args: {
@@ -5749,13 +5858,14 @@ export const latePhaseFailureResultOf = (args: {
   readonly instance: Instance
   readonly phase: Phase
   readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly reproArtifactPath?: string
   readonly error: string
   readonly verdict?: InstanceResult["verdict"]
   readonly prepared?: PreparedAttemptContext
   readonly sandbox?: string
 }): InstanceResult => {
   const extra: Partial<InstanceResult> = {
-    ...reproResultExtra(args.reproTest),
+    ...reproResultExtra(args.reproTest, args.reproArtifactPath),
     ...(args.phase.stopReason !== undefined ? { stopReason: args.phase.stopReason } : {}),
     ...(args.phase.firstEditFile !== undefined ? { firstEditFile: args.phase.firstEditFile } : {}),
     ...(args.phase.editCount !== undefined ? { editCount: args.phase.editCount } : {}),
@@ -5767,6 +5877,9 @@ export const latePhaseFailureResultOf = (args: {
       : {}),
     ...(args.phase.primaryFalseRed !== undefined
       ? { primaryFalseRed: args.phase.primaryFalseRed }
+      : {}),
+    ...(args.phase.repairValidationDecision !== undefined
+      ? { repairValidationDecision: args.phase.repairValidationDecision }
       : {}),
     ...(args.phase.verifyRounds !== undefined ? { verifyRounds: args.phase.verifyRounds } : {}),
     ...(args.phase.reproOracleCalibration !== undefined
@@ -5851,7 +5964,8 @@ const buildSuccessfulResultExtra = (args: {
   readonly prepared: PreparedAttemptContext
   readonly graderInvalid: boolean
 }): Partial<InstanceResult> => {
-  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest)
+  const reproArtifactPath = reproArtifactPathOf(args.deps, args.instance)
+  const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest, reproArtifactPath)
   if (args.graderInvalid) extra.verdict = "grader_invalid"
   attachObservedSuccessBasics({ ...args, extra })
   attachClosureMetrics({ extra, phase: args.phase, prepared: args.prepared })
@@ -6021,11 +6135,13 @@ const _runV5AdaptiveAttempt = async (args: {
   })
   const adaptiveRoute = adaptiveRouteTelemetryOf(adaptive, revisions)
   if (adaptive.outcome !== "finalize") {
+    const reproArtifactPath = reproArtifactPathOf(deps, instance)
     return {
       ...latePhaseFailureResultOf({
         instance,
         phase: finalPhase,
         reproTest,
+        ...(reproArtifactPath !== undefined ? { reproArtifactPath } : {}),
         error: `adaptive controller stopped: ${String(adaptive.reason ?? adaptive.outcome)}`,
         prepared: finalPrepared,
         sandbox,
@@ -6073,6 +6189,29 @@ const _runV5AdaptiveAttempt = async (args: {
 export const attachReproVoteOutcomes = (result: InstanceResult): InstanceResult => {
   const summary = summarizeReproVoteOutcomes(drainReproVoteOutcomes())
   return summary === undefined ? result : { ...result, reproVoteOutcomes: summary }
+}
+
+/** A1 follow-through: persist the drained repro-vote summary under the SAME
+ *  per-instance artifact directory so full-remote RCA has the round/tally record
+ *  even after the process exits. Best-effort + observe-only: write failures are
+ *  swallowed and never perturb the result shape or grading path. */
+export const attachAndPersistReproVoteOutcomes = async (
+  result: InstanceResult,
+): Promise<InstanceResult> => {
+  const attached = attachReproVoteOutcomes(result)
+  if (attached.reproVoteOutcomes === undefined || attached.reproArtifactPath === undefined) {
+    return attached
+  }
+  try {
+    await mkdir(attached.reproArtifactPath, { recursive: true })
+    await writeFile(
+      join(attached.reproArtifactPath, "vote-summary.json"),
+      `${JSON.stringify(attached.reproVoteOutcomes, null, 2)}\n`,
+    )
+  } catch {
+    // observe-only: a persistence failure must never disturb the result path.
+  }
+  return attached
 }
 
 /** A5 — reset the per-instance repro-vote sink at instance START. Re-exported so
