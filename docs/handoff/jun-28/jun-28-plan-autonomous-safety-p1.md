@@ -11,10 +11,17 @@
 
 **검증**: typecheck PASS. 풀스위트 33637 pass / 14 fail **전부 내것아님**(working-loop=budget 전부 revert해도 동일=pre-existing; 라쳇 god-code/knob-orphan `QUANTA_BENCH_HOST_MONITOR`=유저 동시 bench 커밋; 나머지 timing/pollution). 내 코드 전부 `budgetMeter?.`/`budgetLedger?.` 게이트=무관 config byte-identical.
 
-### 남은 것
-- **L3 burn-rate**: 후순위(cost/turn 속도 이상, trip 빈도 측정 후).
-- **캠페인 러너 스크립트**(tools/): `~/.quanta/budget.json` hydrate→run→serialize로 다회런 누적(L4b 영속 API 위에).
-- **operator cap값**: typical 캠페인 spend 측정(#5 G2/SSH) 후 soft/hard 설정 — 그래야 L4b 집행이 깨어남.
+### 추가 랜딩 (100점 push)
+- **theater 해소**(`675009d79`): `maybeWireBudgetLedger` 활성화 seam(`QUANTA_BUDGET_LEDGER=1`+cap) → L4b reachable.
+- **cross-process 영속**(`cd42668cf`): `persistBudgetLedger`(hydrate+write-through, crash-safe) + `QUANTA_BUDGET_LEDGER_PATH` → campaign이 cumulative cross-run spend로 정지.
+- **bench per-instance cap**(`4614dca9d`): `benchBudgetMeterFromEnv`(`QUANTA_BENCH_MAX_COST_USD`) → bench가 L0/L2 획득.
+- **L3 per-turn ceiling**(`8bac3c43d`): `maxCostPerTurnUsd` dial(`QUANTA_BENCH_MAX_COST_PER_TURN_USD`) → runaway-turn 즉시차단(propositional, velocity heuristic 아님).
+- 적대 3R + 셀프어딧(theater) + 풀스위트가 String(e) 회귀 잡음(수정 후 0). 내 작업 stable fail 0.
+
+### 진짜 남은 것
+- **(a) 실런 검증**: 전부 FakeLLM — 실 LLM으로 cap 발화 1회 확인 필요 = **유저 박스**(measure-first 마지막 5%).
+- **bench cross-run ledger**: 병렬 인스턴스가 같은 budget.json race → in-process 부적합. 캠페인 전역예산은 supervisor 영역(의도적 SKIP).
+- **operator cap값**: typical spend 측정 후 설정.
 
 ---
 
