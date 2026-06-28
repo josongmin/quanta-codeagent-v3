@@ -8,9 +8,9 @@
  * was hand-folded. A result folded into the yaml never reached the dashboard, and
  * a graded report never reached the yaml unless someone remembered to fold it.
  *
- * This tool reads the ONE canonical sink (`~/.quanta/bench/results`, the same
- * "keep first so it always wins" root the dashboard server uses) and reconciles
- * the solved set against the leaderboard:
+ * This tool reads the SAME report trove the dashboard server reads (REPORT_ROOTS,
+ * canonical mirror sink first; verified: it reports the same solved count as the
+ * dashboard's N/500) and reconciles the solved set against the leaderboard:
  *   --check (default): print MISSING (solved in reports, absent from the yaml) and
  *     OVERCLAIM (in the yaml, no passing report). Exits non-zero on divergence so
  *     it can gate CI / a pre-commit hook.
@@ -224,19 +224,21 @@ const main = (): void => {
     process.stdout.write(emitRunblock(missing, date))
     return
   }
-  console.log(`leaderboard-sync — SSOT: report trove (${REPORT_ROOTS.length} roots)`)
-  console.log(`  reports: ${rows.length} rows | solved instances: ${solved.size}`)
-  console.log(`  leaderboard resolved: ${resolved.size}`)
-  console.log(`  MISSING (solved in reports, not folded): ${missing.length}`)
-  for (const r of missing)
-    console.log(`    + ${r.id} (preset=${r.preset ?? "?"} turns=${r.turns ?? "?"})`)
-  console.log(`  OVERCLAIM (in leaderboard, no passing report): ${overclaim.length}`)
-  for (const id of overclaim) console.log(`    - ${id}`)
+  const out = (s: string): void => {
+    process.stdout.write(`${s}\n`)
+  }
+  out(`leaderboard-sync — SSOT: report trove (${REPORT_ROOTS.length} roots)`)
+  out(`  reports: ${rows.length} rows | solved instances: ${solved.size}`)
+  out(`  leaderboard resolved: ${resolved.size}`)
+  out(`  MISSING (solved in reports, not folded): ${missing.length}`)
+  for (const r of missing) out(`    + ${r.id} (preset=${r.preset ?? "?"} turns=${r.turns ?? "?"})`)
+  out(`  OVERCLAIM (in leaderboard, no passing report): ${overclaim.length}`)
+  for (const id of overclaim) out(`    - ${id}`)
   if (missing.length > 0 || overclaim.length > 0) {
-    console.log("\n  → run with --emit to print a run-block for the MISSING set.")
+    out("\n  → run with --emit to print a run-block for the MISSING set.")
     process.exit(1)
   }
-  console.log("  ✓ in sync")
+  out("  ✓ in sync")
 }
 
 if (import.meta.main) main()
