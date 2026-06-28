@@ -212,7 +212,13 @@ interface Run {
   // Count of attempts dropped from `total` because they were unmeasured
   // (throttle / infra / env-degraded) — surfaced beside the ratio.
   unmeasured: number
-  perInstance: { id: string; passed: boolean; turns: number; fail: FailInfo | null }[]
+  perInstance: {
+    id: string
+    passed: boolean
+    turns: number
+    durationMs: number
+    fail: FailInfo | null
+  }[]
 }
 
 // A failing instance is unmeasured (re-runnable) iff its classified failure says
@@ -405,6 +411,7 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
       id: asString(row?.id) ?? "",
       passed: row?.passed === true,
       turns: Number(row?.turns) || 0,
+      durationMs: Number(row?.durationMs) || 0,
       fail: classifyFail(pi),
     }
   })
@@ -696,6 +703,11 @@ interface QuantaSummary {
   attempts: number
   passes: number
   bestTurns: number | null
+  // Wall-clock (ms) of the winning run — the same run that set bestTurns, so the
+  // profile column can show "how long it took" beside "which profile solved it".
+  passDurationMs: number | null
+  // Report mtime (epoch ms) of the winning run = WHEN it was solved.
+  passMtime: number | null
   failTurns: number | null
   models: string[]
   presets: string[]
@@ -723,6 +735,8 @@ const createQuantaSummary = (): QuantaSummary => ({
   attempts: 0,
   passes: 0,
   bestTurns: null,
+  passDurationMs: null,
+  passMtime: null,
   failTurns: null,
   models: [],
   presets: [],
@@ -744,18 +758,27 @@ const addRunMetadata = (summary: QuantaSummary, run: Run): void => {
   if (run.preset && !summary.presets.includes(run.preset)) summary.presets.push(run.preset)
 }
 
-const recordPassingAttempt = (summary: QuantaSummary, run: Run, turns: number): void => {
+const recordPassingAttempt = (
+  summary: QuantaSummary,
+  run: Run,
+  turns: number,
+  durationMs: number,
+): void => {
   summary.passed = true
   summary.passes++
   summary.passedBy.push(run.label)
   if (turns > 0 && (summary.bestTurns === null || turns < summary.bestTurns)) {
     summary.bestTurns = turns
+    summary.passDurationMs = durationMs > 0 ? durationMs : null
+    summary.passMtime = run.mtime > 0 ? run.mtime : null
     summary.passPreset = run.preset
     summary.passModel = run.model
   }
   if (!summary.passPreset) {
     summary.passPreset = run.preset
     summary.passModel = run.model
+    if (summary.passDurationMs === null && durationMs > 0) summary.passDurationMs = durationMs
+    if (summary.passMtime === null && run.mtime > 0) summary.passMtime = run.mtime
   }
 }
 
@@ -782,7 +805,8 @@ const quantaSummaryOf = (runs: readonly Run[]): Record<string, QuantaSummary> =>
       if (!sid || !isRealSwebenchInstanceId(sid)) continue
       const summary = ensureQuantaSummary(quanta, sid)
       addRunMetadata(summary, run)
-      if (perInstance.passed) recordPassingAttempt(summary, run, perInstance.turns)
+      if (perInstance.passed)
+        recordPassingAttempt(summary, run, perInstance.turns, perInstance.durationMs)
       else recordFailingAttempt(summary, run, perInstance.turns, perInstance.fail)
     }
   }
@@ -1101,6 +1125,24 @@ async function poll() {
 }
 
 function tierClass(t){ return "tier-" + (t === "×" ? "x" : t); }
+// Wall-clock of the winning run, compact: 47s / 6.1m / 1.3h.
+function fmtDur(ms){
+  if (!ms || ms <= 0) return "";
+  var s = ms/1000;
+  if (s < 90) return Math.round(s) + "s";
+  var m = s/60;
+  if (m < 90) return (m < 10 ? m.toFixed(1) : Math.round(m)) + "m";
+  return (m/60).toFixed(1) + "h";
+}
+// WHEN it was solved — relative if recent, else M/D HH:MM (local).
+function fmtWhen(ms){
+  if (!ms || ms <= 0) return "";
+  var d = new Date(ms), now = Date.now(), age = (now - ms)/1000;
+  if (age < 3600) return Math.max(1, Math.round(age/60)) + "분 전";
+  if (age < 86400) return Math.round(age/3600) + "시간 전";
+  var p = function(n){ return (n<10?"0":"")+n; };
+  return (d.getMonth()+1) + "/" + d.getDate() + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
 
 function render() {
   if (!DATA) return;
@@ -1356,7 +1398,7 @@ function oracleHtml(o) {
   let verdict = '';
   if (me && me.passed) {
     verdict = '<div style="margin-bottom:6px;color:#3fb950">✅ 우리 해결 — '+me.passes+'/'+me.attempts+'회'+
-      (me.bestTurns?', 최소 '+me.bestTurns+'턴':'')+(me.passPreset?' · '+esc(me.passPreset):'')+(me.passModel?' · '+esc(me.passModel):'')+'</div>';
+      (me.bestTurns?', 최소 '+me.bestTurns+'턴':'')+(fmtDur(me.passDurationMs)?', ⏱ '+fmtDur(me.passDurationMs):'')+(fmtWhen(me.passMtime)?', 📅 '+fmtWhen(me.passMtime):'')+(me.passPreset?' · '+esc(me.passPreset):'')+(me.passModel?' · '+esc(me.passModel):'')+'</div>';
   } else if (me) {
     const f = me.fail;
     verdict = '<div style="margin-bottom:6px;color:#f85149">❌ 우리 미해결 — 시도 '+me.attempts+'회'+(me.failTurns?', 최대 '+me.failTurns+'턴':'')+'</div>'+
@@ -1469,7 +1511,12 @@ function drawMatrix() {
       const mdl = me.passed && me.passModel ? me.passModel : (me.models || []).join('/');
       const lines = presetsArr.map(esc);
       const body = lines.length ? lines.join('<br>') : '—';
-      presetCell = '<span title="'+esc(presetsArr.join(' / ')+' · '+(mdl||'—'))+'">'+body+
+      // Solve time + WHEN solved — only on a pass (the winning run).
+      const dur = me.passed ? fmtDur(me.passDurationMs) : '';
+      const durSpan = dur ? ' <span class="pill" title="해결 소요시간(승리 런 wall-clock)" style="background:#1e3a2a;color:#7ee2a8;font-size:10px">⏱ '+dur+'</span>' : '';
+      const when = me.passed ? fmtWhen(me.passMtime) : '';
+      const whenSpan = when ? ' <span class="pill" title="해결 시각(승리 런 report 기록시점)" style="background:#1e2a3a;color:#8ab4f8;font-size:10px">📅 '+when+'</span>' : '';
+      presetCell = '<span title="'+esc(presetsArr.join(' / ')+' · '+(mdl||'—'))+'">'+body+durSpan+whenSpan+
         (mdl ? '<br><span class="muted" style="font-size:10px">'+esc(mdl)+'</span>' : '')+'</span>';
     }
     const hashCell = r.hash < 0
