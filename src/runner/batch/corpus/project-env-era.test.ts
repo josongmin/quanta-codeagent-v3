@@ -77,6 +77,14 @@ describe("SOTA++ faithfulness — official install extra + eval_commands", () =>
     expect(argv[i + 1]).toBe(".")
   })
 
+  test("FLOORED cell with an extra ⇒ bare `.` (extra gated like the era pins)", () => {
+    // astropy 1.3 is floored (truth 3.6 → 3.9) AND its install is `.[test]`; the
+    // extra is dropped so a floored env doesn't try unbuildable era test-deps.
+    const argv = buildProjectEnvUvRunArgv("astropy/astropy", "1.3", ["pytest"], {})
+    const i = argv.indexOf("--with-editable")
+    expect(argv[i + 1]).toBe(".")
+  })
+
   test("eval_commands LANG exports folded into the exec env (django 1.11 locale)", () => {
     const argv = buildProjectEnvUvRunArgv("django/django", "1.11", ["pytest"], {})
     // env prefix carries the official locale exports

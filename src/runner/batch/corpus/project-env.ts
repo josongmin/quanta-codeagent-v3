@@ -270,8 +270,11 @@ export const buildProjectEnvUvRunArgv = (
   argv.push("--python", pythonForRepoVersion(repo, version))
   for (const dep of deps) argv.push("--with", dep)
   // editable install with the official `.[extra]` (e.g. sphinx `.[test]`) so the
-  // env pulls the extras the tests import; bare `.` when the spec has no extra.
-  const extra = installExtra(repo, version)
+  // env pulls the extras the tests import; bare `.` when the spec has no extra OR
+  // the python was floored off-era (the extra's era deps may be unbuildable on the
+  // floored python — consistent with the specEraPins floor gate).
+  const floored = resolvePythonForRepoVersion(repo, version).pythonFloored !== undefined
+  const extra = floored ? undefined : installExtra(repo, version)
   argv.push("--with-editable", extra !== undefined ? `.[${extra}]` : ".")
   return argv
 }
