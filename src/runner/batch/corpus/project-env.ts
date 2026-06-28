@@ -1,5 +1,6 @@
 import { basename, join } from "node:path"
 import { pythonForRepoVersion } from "./repo-version-python"
+import { specPipPackages } from "./repo-version-specs"
 
 const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -168,7 +169,18 @@ export const buildProjectEnvUvRunArgv = (
    *  (byte-identical to the pre-fix argv). */
   excludeNewer?: string,
 ): readonly string[] => {
-  const deps = [...new Set([...extraWith, ...repoPinnedDeps(repo), ...BASE_PROJECT_ENV_DEPS])]
+  // jun-29 SOTA++ env fix: the official `pip_packages` PINS (e.g. sphinx 3.5
+  // `Jinja2==3.0.3`) are applied as `--with` so the repro/test env resolves
+  // era-correct deps instead of latest — the official mechanism, no setup.py edit
+  // / build break (the rejected --exclude-newer approach broke the editable build).
+  const deps = [
+    ...new Set([
+      ...extraWith,
+      ...specPipPackages(repo, version),
+      ...repoPinnedDeps(repo),
+      ...BASE_PROJECT_ENV_DEPS,
+    ]),
+  ]
   const argv = [] as string[]
   for (const [name, value] of Object.entries({ ...extraExecEnv, ...repoExecEnv(repo) })) {
     if (argv.length === 0) argv.push("env")
