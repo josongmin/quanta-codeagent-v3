@@ -64,6 +64,28 @@ SOTA++는 이 둘을 **분리**해서 다르게 배선한다. 절대 매 라운�
 - **no-leak**: regression 셋은 **기존 repo 테스트에서 LLM이 고른 것**(공개), 절대 hidden FAIL_TO_PASS/PASS_TO_PASS 직접 안 봄(Agentless도 동일 제약).
 - **answer-key 금지**: gold 패치/경로 기반 선택 금지.
 
+## 4.5 토글 아키텍처 (껐다켰다 클린 — 단일 스위치, default-OFF byte-identical)
+
+목표: 전체 Phase-A/R 파이프라인이 **한 노브로 깔끔히 on/off**되고, off면 글로벌 동작이 **byte-identical**이어야 한다. 흩뿌린 if문 금지.
+
+**3-레이어 규율 (각 신규 모듈이 따름):**
+1. **순수 코어** — 결정 로직은 전부 순수함수(I/O·LLM·clock 없음). 호출되지 않으면 **영향 0(inert by construction)**. 예: `acceptance-rerank.ts`(rerankSelect), `regression-select.ts`(prompt/parse/diff/fit). 이 레이어는 "켜짐" 개념 자체가 없음 — 그냥 라이브러리.
+2. **게이트된 orchestrator** — 부수효과(LLM 호출, 테스트 실행)는 **모듈당 단 1개의 비순수 export**에 격리(`resolveRegressionTests` 등). injected port만 받음(hermetic). 이게 노브가 켤 **유일한 실행 지점**.
+3. **단일 배선 seam** — 드라이버에서 **selection 전략을 고르는 1지점**에서만 "acceptance 경로 vs 레거시(reproVote/단일)" 분기. 분기는 `benchOptIns().acceptance`(또는 preset) **하나**. 다른 곳에 acceptance 조건 흩지 않음.
+
+**노브 계층 (중첩 가능, 각 default-OFF):**
+- `acceptance` (마스터) — Phase A(후보당 1회 채점 + rerank + dual-guard) on/off.
+  - `acceptance.regression` — regression dual-guard 포함 여부(없으면 repro-only rerank).
+  - `repairFeedback` — Phase R(싼 단일실행 루프 + 실패로그 재주입 + early-exit) on/off.
+- 마스터 OFF ⇒ 하위 무관하게 **현행 reproVote/legacy 경로 그대로**(byte-identical). 하위는 마스터 ON일 때만 의미.
+
+**off=byte-identical 보장 방식:**
+- 순수 코어는 호출부 0이면 무효과(트리에 있어도 dead).
+- orchestrator는 노브 OFF시 **아예 호출 안 됨**(seam에서 분기) → LLM/exec 0회 → 비용·동작 불변.
+- 배선 seam은 `...(acceptanceOn ? acceptancePath : legacyPath)` 단일식 → 골든 테스트로 "OFF ⇒ legacy와 동일 selection" 고정.
+
+**머지 게이트(토글)**: ① 마스터 OFF에서 selection 결과 == 현행 골든 ② orchestrator는 OFF시 호출 0(spy 테스트) ③ 순수 코어는 노브 미존재(라이브러리) ④ 배선 분기 1지점(grep로 acceptance 조건 산재 0).
+
 ## 5. 측정 계획
 
 - **C (비용·동작보존, 지금/박스 불필요)**: Phase R 단일실행+재주입의 라운드당 exec 횟수 vs 현행 전수; early-exit 정확성. hermetic 골든.
