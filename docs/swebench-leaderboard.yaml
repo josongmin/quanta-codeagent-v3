@@ -1950,3 +1950,21 @@ runs:
   - instance_id: sphinx-doc__sphinx-8638  # domains/python.py == gold; patch bloated by .quanta/tool-output leak (harmless to grading, hygiene bug)
     repo: sphinx
     turns: 28
+
+- run_id: competitor-gap-sweep-2026-06-29
+  date: '2026-06-29'
+  preset: agentless-v6-singlepass-execfull
+  preset_env: 'QUANTA_BENCH_NONEMPTY_FALLBACK=1'
+  model: gpt-5.5
+  auth: chatgpt-oauth
+  grading: official swebench python harness, spot EC2 c7i.4xlarge (5-box campaign), source-only patch
+  scope: 'ADDRESSABLE-GAP probe — the top-20 instances (by competitor solve-count, 22-67 scaffolds each) that ≥1 frontier competitor resolved but we never had. NOT a grader-recovery wave (unlike the sphinx -rA cluster): these are GENUINE model/scaffold gaps. Result 2/20 PASS — an honest read of the real ceiling on hard cross-repo gaps with the current single-pass scaffold (the 18 fails are real synthesis/localization misses, converging with the jun-20 no-fail-to-pass-oracle root cause).'
+  success_note: 'Both PASSes verified vs gold: sympy-21379 (core/mod.py == gold, independent byte-different patch); django-16560 (db/models/constraints.py — leaner than gold''s 2-file fix but passes official FAIL_TO_PASS+PASS_TO_PASS). Net-new solves on instances we had never resolved.'
+  resolved_count: 2
+  resolved:
+  - instance_id: sympy__sympy-21379  # core/mod.py == gold
+    repo: sympy
+    turns: 34
+  - instance_id: django__django-16560  # db/models/constraints.py — leaner than gold, passes
+    repo: django
+    turns: 59
