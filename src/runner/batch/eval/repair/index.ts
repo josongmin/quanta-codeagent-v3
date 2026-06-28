@@ -22,7 +22,7 @@
  * validator failures are normal and never throw.
  */
 
-import { isStrongOracleFalseGreen } from "./strong-oracle"
+import { isFalseGreen, repairCandidateClears } from "./decision"
 import type {
   BuildRepairContextArgs,
   RepairCandidateOutcome,
@@ -195,47 +195,18 @@ const selectCandidate = (
   return best
 }
 
-/** OBSERVE-ONLY measurement: the round CLEARED (ok by exit code) yet the typed
- *  rail predicate was evaluable AND did not match — the false green a
- *  predicate-aware gate would have caught. Fail-open: an unevaluable/absent
- *  predicate is NOT a false green (never penalizes). */
-const isFalseGreen = (v: ValidatorResult): boolean =>
-  v.ok && v.predicate?.evaluable === true && v.predicate.matched === false
-
 const hasFalseGreenSignal = (v: ValidatorResult): boolean => v.ok && isFalseGreen(v)
 
 const shouldFinishAfterRound0 = (cleared: boolean, maxRounds: number): boolean =>
   cleared || maxRounds <= 0
 
-/** T-302 finish-gate ENFORCEMENT (default-OFF). Whether an exit-code-green
- *  round may be treated as VALIDATED. With no primary rail set the answer is
- *  identically `v.ok` (byte-identical to the legacy exit-code-only behavior).
- *  When a primary rail IS set, the typed-rail-aware {@link decidePrimaryRailFinishGate}
- *  is the authority: a false-green round (rail predicate evaluable AND matched
- *  ===false) maps to a still-RED rail, so the gate BLOCKS and the round does NOT
- *  clear — the spurious exit-code green is the lone non-primary green that must
- *  not substitute for the rail's own proof. Reuses the keystone decider rather
- *  than re-deriving the policy. */
-const clearedAsValidated = (args: RunRepairRoundsArgs, v: ValidatorResult): boolean => {
-  if (!v.ok) return false
-  // jun-28 STRONG-ORACLE (default-OFF): a CONJUNCTIVE strengthening that can ONLY
-  // WITHHOLD a clear the gates below would grant (monotone, precision-raising). An
-  // exit-0 round whose self-repro is green but ANY available strong signal is RED
-  // (declared-expected mismatch OR a non-resolved repro-vote consensus) is a FALSE
-  // GREEN ⇒ does not clear ⇒ the loop iterates toward a general fix. Each conjunct
-  // fails OPEN on absence, so a correct patch with no contradicting strong signal
-  // is never blocked. Knob ABSENT/false ⇒ this branch is skipped ⇒ byte-identical.
-  if (args.config.strongOracle === true && isStrongOracleFalseGreen(v)) return false
-  if (args.primaryRailStep === undefined) return true
-  // A false-green round (rail predicate evaluable AND matched===false) leaves the
-  // typed rail unproven, so the lone exit-code green must NOT substitute for the
-  // rail's own proof and the round does not clear. This is exactly
-  // `decidePrimaryRailFinishGate`'s decision (block ⇔ rail present AND state !==
-  // "green") specialised to this site; it is INLINED rather than imported from
-  // `@/agent/primary-rail` so the repair slice keeps its structural no-leak fence
-  // (imports only local repair helpers). Keep in sync with the keystone decider.
-  return !isFalseGreen(v)
-}
+/** A2 SSOT: the live adopt/clear gate now lives in `./decision`
+ *  ({@link repairCandidateClears}) — bit-identical to the former local
+ *  `clearedAsValidated`. The finish gates AND the breadth selector all call that
+ *  one function so the strong-oracle / primary-rail strengthening can never drift
+ *  between sites. `isFalseGreen` (also from `./decision`) is the shared false-green
+ *  predicate the observe-only telemetry below reuses. */
+const clearedAsValidated = repairCandidateClears
 
 const reproOutcomeOf = (v: ValidatorResult): RepairReproOutcome | undefined => {
   if (v.reproOutcome !== undefined) return v.reproOutcome
