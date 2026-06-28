@@ -298,8 +298,8 @@ export const buildArgv = (
 ): string[] => {
   const argv = [
     python,
-    "-m",
-    "swebench.harness.run_evaluation",
+    "-c",
+    SPHINX_RA_SHIM,
     "--predictions_path",
     predictionsPath,
     "--run_id",
@@ -311,6 +311,34 @@ export const buildArgv = (
   if (datasetName) argv.push("--dataset_name", datasetName)
   return argv
 }
+
+/** Patch-then-run shim for `run_evaluation` (jun-28 false-unresolved fix).
+ *
+ * sphinx's `test_cmd` is `tox --current-env -epy39 -v --` — the `-v` is TOX
+ * verbosity, NOT pytest's, so the inner pytest prints only a `1 passed` SUMMARY
+ * with NO per-test `PASSED <id>` lines. swebench's log parser keys off those
+ * per-test lines, so it extracts an EMPTY tests_status → the instance is marked
+ * UNRESOLVED even though the FAIL_TO_PASS test passed. Measured: gold itself
+ * comes back resolved=0 on the authoritative prebuilt image for sphinx-9711/8595
+ * (a false grader_invalid that discards the model's correct patch).
+ *
+ * Fix: append `-rA` (report-all) to sphinx's tox `--` passthrough so pytest emits
+ * `PASSED tests/…::test` lines the parser can read. Verified on-box: gold flips
+ * resolved 0→1. SCOPED to tox cmds ending in `--` (only sphinx today); every
+ * other repo already carries `-rA` (astropy/xarray/sklearn/matplotlib) or is
+ * unittest (django), so they are untouched. `-rA` is purely additive reporting —
+ * it cannot change a pass/fail, only make it parseable. Runs as `python -c` so no
+ * file ships to the box; argv after `-c` becomes run_evaluation's argv. */
+export const SPHINX_RA_SHIM = [
+  "import runpy",
+  "import swebench.harness.constants as _C",
+  "for _s in _C.MAP_REPO_VERSION_TO_SPECS.values():",
+  " for _d in _s.values():",
+  "  _tc=_d.get('test_cmd')",
+  "  if isinstance(_tc,str) and '-rA' not in _tc and 'tox' in _tc and _tc.rstrip().endswith('--'):",
+  "   _d['test_cmd']=_tc.rstrip()+' -rA'",
+  "runpy.run_module('swebench.harness.run_evaluation',run_name='__main__')",
+].join("\n")
 
 /**
  * Grade one instance's `prediction` (a unified `diff --git` patch) with the
