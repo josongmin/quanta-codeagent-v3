@@ -45,6 +45,7 @@ import {
   type ModePolicy,
   type RunMode,
 } from "@/agent"
+import { defaultBudgetLedger } from "@/agent/budget-ledger"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { captureSnapshot } from "@/agent/context-change"
 import { buildNetworkDispatchGuard } from "@/agent/dispatch-guard"
@@ -462,6 +463,45 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireProgressSink(cfg, env)
   maybeWireSideAgent(cfg, env)
   maybeWireWriteBudget(cfg, env)
+  maybeWireBudgetLedger(cfg, env)
+}
+
+/** Parse a USD cost cap (`QUANTA_BUDGET_LEDGER_*_USD`) from the env bag: a
+ *  positive, finite dollar amount (fractional allowed, e.g. `5.50`), else
+ *  `undefined`. No magic default — the cap is operator-supplied (measure-first /
+ *  no-heuristics), so an enabled-but-uncapped config stays inert. */
+const parseLedgerUsd = (raw: string | undefined): number | undefined => {
+  if (raw === undefined) return undefined
+  const n = Number.parseFloat(raw.trim())
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/** ADR-0136 activation — mint ONE per-session cross-run `BudgetLedger` when it
+ *  is opted in (`QUANTA_BUDGET_LEDGER=1`) AND at least one HARD USD cap is set
+ *  (`QUANTA_BUDGET_LEDGER_SESSION_USD` / `QUANTA_BUDGET_LEDGER_DAILY_USD`). BOTH
+ *  the gate and a cap are required: the caps are operator values with NO
+ *  hardcoded default (no-heuristics — campaign spend is measured, not guessed),
+ *  so an enabled-but-uncapped config stays inert. This is the activation seam
+ *  that makes the L4 cross-run cost governance REACHABLE: the loop's `emitUsage`
+ *  records into this ledger and `turn-loop` stops the run on a hard breach. The
+ *  ledger's UNIQUE value over the per-run `maxCostUsd` meter is the DAILY scope
+ *  (a cap that spans turns/sessions in a UTC day) + the `budget_status` tool's
+ *  per-model breakdown. Cross-process PERSISTENCE (hydrate/serialize a
+ *  `~/.quanta/budget.json` so several runs share one daily budget) is a separate
+ *  follow-up driven by the campaign runner. Caller-override-safe; absent gate /
+ *  no cap ⇒ slot UNSET ⇒ no record, no enforcement (byte-identical default-OFF). */
+const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  if (cfg.budgetLedger !== undefined) return
+  if (!gateOn(env, "QUANTA_BUDGET_LEDGER")) return
+  const sessionHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_SESSION_USD"])
+  const dailyHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_DAILY_USD"])
+  if (sessionHardLimit === undefined && dailyHardLimit === undefined) return
+  cfg.budgetLedger = defaultBudgetLedger({
+    policy: {
+      ...(sessionHardLimit !== undefined ? { sessionHardLimit } : {}),
+      ...(dailyHardLimit !== undefined ? { dailyHardLimit } : {}),
+    },
+  })
 }
 
 /** jun-6 exfil-rail (a) — mint ONE per-session `SessionWriteBudget` when the
