@@ -17,6 +17,7 @@
  */
 
 import {
+  type BudgetDials,
   BudgetMeter,
   buildSystemPrompt,
   createBriefStore,
@@ -62,6 +63,25 @@ import {
   type SessionFeatureConfig,
   type SessionRuntimeConfigShape,
 } from "./types"
+
+/** Operator cost-cap dials from env (`QUANTA_MAX_COST_USD` /
+ *  `QUANTA_MAX_COST_PER_TURN_USD`): a positive USD amount, fractional allowed,
+ *  NO default. An absent/garbage value omits that dial so the meter stays
+ *  dial-less (byte-identical). Mirrors the autonomous-mode assembler's override
+ *  so the CLI/interactive surface honours the same cost-cap knobs. */
+export const parseOperatorCostDials = (env: NodeJS.ProcessEnv): BudgetDials => {
+  const pos = (raw: string | undefined): number | undefined => {
+    if (raw === undefined) return undefined
+    const n = Number.parseFloat(raw.trim())
+    return Number.isFinite(n) && n > 0 ? n : undefined
+  }
+  const maxCostUsd = pos(env.QUANTA_MAX_COST_USD)
+  const maxCostPerTurnUsd = pos(env.QUANTA_MAX_COST_PER_TURN_USD)
+  return {
+    ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
+    ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
+  }
+}
 
 const failSessionBootstrap = (
   kind: SessionBootstrapFailureKind,
@@ -309,9 +329,7 @@ const startupReadyLogger = (runtime: SessionRuntimeConfigShape): Logger | undefi
  *  explicit level (incl. `debug` for troubleshooting) is honored verbatim, and
  *  pipe / one-shot / CI (no banner) stay byte-identical (`undefined` ⇒ live
  *  `runtimeConfig().logLevel`). */
-const interactiveStructuredLogLevel = (
-  runtime: SessionRuntimeConfigShape,
-): "warn" | undefined =>
+const interactiveStructuredLogLevel = (runtime: SessionRuntimeConfigShape): "warn" | undefined =>
   inInteractiveBanner(runtime) && runtime.env.QUANTA_LOG_LEVEL === undefined ? "warn" : undefined
 
 /** Emit a human startup line through the gated logger — a no-op when the
@@ -560,7 +578,17 @@ const buildToolingBundle = (
   // config in `context-binding.ts`. Without this thread the guard was inert
   // because the surface never supplied a `budgetRemainingPercent` closure.
   const writeGuardActive = runtime.env.QUANTA_MEMORY_WRITE_GUARD_PCT !== undefined
-  const budgetMeter = writeGuardActive ? new BudgetMeter() : undefined
+  // Operator cost cap on the interactive/CLI session. This surface is otherwise
+  // human-paced (no preset cost dial — see the autonomous-mode assembler for
+  // those); `QUANTA_MAX_COST_USD` / `QUANTA_MAX_COST_PER_TURN_USD` let a human
+  // pin a dollar ceiling so a long REPL session stops itself. Positive USD, NO
+  // default ⇒ absent leaves the meter dial-less (byte-identical: `maxTurns` /
+  // the write-guard stay the only stops). When set, the meter carries the cost
+  // dials so the loop's `checkExhausted` trips on overrun.
+  const costDials = parseOperatorCostDials(runtime.env)
+  const hasCostCap = Object.keys(costDials).length > 0
+  const budgetMeter =
+    writeGuardActive || hasCostCap ? new BudgetMeter({ dials: costDials }) : undefined
 
   const tooling = deps.buildTooling(
     features.mcpTools,
