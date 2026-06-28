@@ -35,6 +35,9 @@ export interface SwebenchTask {
   baseCommit: string
   problemStatement: string
   environmentSetupCommit?: string
+  /** SWE-bench `created_at` (RFC3339) — the instance era, threaded into the
+   *  per-instance repro/test env as uv `--exclude-newer` (era-correct deps). */
+  createdAt?: string
   /** The untouched upstream row, kept around for callers that need extra
    *  fields (cheap — it is already parsed). */
   raw: Record<string, unknown>
@@ -86,12 +89,14 @@ const toTask = (raw: Record<string, unknown>): SwebenchTask | null => {
   const problemStatement = str(raw.problem_statement)
   if (!instanceId || !repo || !baseCommit || !problemStatement) return null
   const environmentSetupCommit = str(raw.environment_setup_commit)
+  const createdAt = str(raw.created_at)
   return {
     instanceId,
     repo,
     baseCommit,
     problemStatement,
     ...(environmentSetupCommit !== undefined ? { environmentSetupCommit } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
     raw,
   }
 }
@@ -103,7 +108,10 @@ const toTask = (raw: Record<string, unknown>): SwebenchTask | null => {
  * malformed lines are skipped, rows missing any required field are skipped.
  * Never throws.
  */
-export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
+export const parseSwebenchJsonl = (
+  text: string,
+  normalize: (raw: Record<string, unknown>) => Record<string, unknown> = (r) => r,
+): SwebenchTask[] => {
   const out: SwebenchTask[] = []
   for (const line of text.split("\n")) {
     const trimmed = line.trim()
@@ -111,7 +119,7 @@ export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
     try {
       const row = JSON.parse(trimmed) as unknown
       if (typeof row !== "object" || row === null) continue
-      const task = toTask(row as Record<string, unknown>)
+      const task = toTask(normalize(row as Record<string, unknown>))
       if (task) out.push(task)
     } catch {
       // skip malformed line
@@ -119,6 +127,27 @@ export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
   }
   return out
 }
+
+/**
+ * Normalize a SWE-bench **Pro** (ScaleAI) row into the canonical raw shape this
+ * module's downstream readers expect (RFC jun-29). Pro ships lowercase
+ * `fail_to_pass`/`pass_to_pass`; {@link synthesizeTestCmd}/{@link parseTestNameList}
+ * read the UPPERCASE official keys — without this mapping a Pro row yields the
+ * `testCmd:"true"` no-op (fake-green risk). Originals + Pro's extra fields
+ * (`dockerhub_tag`, `repo_language`, `before_repo_set_cmd`,
+ * `selected_test_files_to_run`) are preserved; {@link toInstance} carries the
+ * image tag + language onward. Pure — the Pro profile passes this as the
+ * `parseSwebenchJsonl` normalizer.
+ */
+export const normalizeProRow = (raw: Record<string, unknown>): Record<string, unknown> => ({
+  ...raw,
+  ...(raw.FAIL_TO_PASS === undefined && raw.fail_to_pass !== undefined
+    ? { FAIL_TO_PASS: raw.fail_to_pass }
+    : {}),
+  ...(raw.PASS_TO_PASS === undefined && raw.pass_to_pass !== undefined
+    ? { PASS_TO_PASS: raw.pass_to_pass }
+    : {}),
+})
 
 /** Check out `ref` in `destDir`, deepening a shallow clone once on failure.
  *  Throws a precise Error (with `label` for context) on any git failure. */
@@ -300,6 +329,9 @@ export const reproRunArgv = (
   repo: string,
   version: string | undefined,
   scriptPath: string,
+  /** Instance `created_at` (RFC3339) → uv `--exclude-newer` for era-correct deps
+   *  (RCA jun-29: latest jinja2 broke old sphinx import). Absent ⇒ latest. */
+  createdAt?: string,
 ): readonly string[] => {
   // `pytest` MUST be in the repro exec env: P1 (jun-23) made repros real pytest
   // tests whose verdict is the process exit code, via a `pytest.main([__file__])`
@@ -307,11 +339,17 @@ export const reproRunArgv = (
   // `import pytest` raises ModuleNotFoundError ⇒ every repro is `exec_failed`
   // (measured on the box re-measure: django repros all crashed on `import pytest`).
   return [
-    ...buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
-      PYTEST_ADDOPTS: "",
-      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
-      PYTHONNOUSERSITE: "1",
-    }),
+    ...buildProjectEnvUvRunArgv(
+      repo,
+      version,
+      ["pytest"],
+      {
+        PYTEST_ADDOPTS: "",
+        PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
+        PYTHONNOUSERSITE: "1",
+      },
+      createdAt,
+    ),
     "python",
     "-s",
     scriptPath,
@@ -435,6 +473,9 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
   const goldPatch = str(task.raw.patch)
   const passToPass = parseTestNameList(task.raw, "PASS_TO_PASS")
   const version = typeof task.raw.version === "string" ? task.raw.version : undefined
+  // Pro-only carry (RFC jun-29) — absent for Verified/Live ⇒ byte-identical.
+  const dockerhubTag = str(task.raw.dockerhub_tag)
+  const repoLanguage = str(task.raw.repo_language)
   return {
     id: task.instanceId,
     repoPath,
@@ -446,10 +487,13 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
       repo: task.repo,
       baseCommit: task.baseCommit,
       ...(version !== undefined ? { version } : {}),
+      ...(task.createdAt !== undefined ? { createdAt: task.createdAt } : {}),
       ...(task.environmentSetupCommit !== undefined
         ? { environmentSetupCommit: task.environmentSetupCommit }
         : {}),
       ...(passToPass !== undefined ? { passToPass } : {}),
+      ...(dockerhubTag !== undefined ? { dockerhubTag } : {}),
+      ...(repoLanguage !== undefined ? { repoLanguage } : {}),
     },
   }
 }

@@ -158,6 +158,15 @@ export const buildProjectEnvUvRunArgv = (
   version: string | undefined,
   extraWith: readonly string[] = [],
   extraExecEnv: Readonly<Record<string, string>> = {},
+  /** jun-29 ENV-ERA PIN: the instance's `created_at` (RFC3339). When present, uv
+   *  resolves transitive deps to versions available ON OR BEFORE this date, so an
+   *  OLD instance gets its ERA-correct deps instead of latest. RCA: sphinx-8595
+   *  (2020) freely resolved jinja2>=3.1, which removed `environmentfilter`, so
+   *  `import sphinx` died and EVERY repro was a spurious exec_failed — an env bug,
+   *  not a repro-gen-quality signal (it confounded the grounding A/B). uv resolves
+   *  the LOCAL `--with-editable .` repo regardless of the cutoff. Absent ⇒ no flag
+   *  (byte-identical to the pre-fix argv). */
+  excludeNewer?: string,
 ): readonly string[] => {
   const deps = [...new Set([...extraWith, ...repoPinnedDeps(repo), ...BASE_PROJECT_ENV_DEPS])]
   const argv = [] as string[]
@@ -165,7 +174,11 @@ export const buildProjectEnvUvRunArgv = (
     if (argv.length === 0) argv.push("env")
     argv.push(`${name}=${value}`)
   }
-  argv.push("uv", "run", "--no-project", "--python", pythonForRepoVersion(repo, version))
+  argv.push("uv", "run", "--no-project")
+  if (typeof excludeNewer === "string" && excludeNewer !== "") {
+    argv.push("--exclude-newer", excludeNewer)
+  }
+  argv.push("--python", pythonForRepoVersion(repo, version))
   for (const dep of deps) argv.push("--with", dep)
   argv.push("--with-editable", ".")
   return argv
