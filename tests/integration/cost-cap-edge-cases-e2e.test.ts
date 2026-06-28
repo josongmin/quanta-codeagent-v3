@@ -175,6 +175,44 @@ describe("E2E cost-cap edge cases — pricing robustness", () => {
   })
 })
 
+describe("E2E cost-cap edge cases — numeric extremes", () => {
+  test("1e12-token usage ⇒ huge finite cost trips (no overflow / NaN)", async () => {
+    const { reason, cfg } = await assembleRun({
+      scripts: [done(usage(1_000_000_000_000, 1_000_000_000_000))],
+      dials: { maxCostUsd: 1 },
+    })
+    expect(reason).toBe("budget_exhausted")
+    const cost = cfg.budgetMeter?.snapshot().costUsd ?? 0
+    expect(Number.isFinite(cost)).toBe(true)
+    expect(cost).toBeGreaterThan(1)
+  })
+
+  test("Infinity-token usage ⇒ non-finite cost is dropped by the tick guard (no poison)", async () => {
+    // costUsd(Infinity) is non-finite ⇒ the meter tick guard no-ops it. A later
+    // valid event must still trip (the cap was not disabled).
+    const { reason, cfg } = await assembleRun({
+      scripts: [cont(usage(Number.POSITIVE_INFINITY, 0), 1), done(usage(0, outForUsd(5)))],
+      dials: { maxCostUsd: 1 },
+    })
+    expect(reason).toBe("budget_exhausted")
+    expect(Number.isFinite(cfg.budgetMeter?.snapshot().costUsd ?? Number.NaN)).toBe(true)
+  })
+})
+
+describe("E2E cost-cap edge cases — exhaustion policy carried", () => {
+  test("assembleAgentConfig threads the exhaustion policy onto the meter", () => {
+    const cfg = assembleAgentConfig(
+      {
+        mode: "batch",
+        base: baseConfig({ llm: new PricedFakeLLM([text("x")]) }),
+        exhaustion: "stop-with-summary",
+      },
+      {},
+    )
+    expect(cfg.budgetMeter?.exhaustion).toBe("stop-with-summary")
+  })
+})
+
 describe("E2E cost-cap edge cases — pre-flight (L2)", () => {
   test("input-floor breach stops BEFORE the model call (llm.calls === 0)", async () => {
     // cap is below the cost of even the initial prompt's input tokens.
