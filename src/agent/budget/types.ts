@@ -93,6 +93,13 @@ export type TickKind =
   | "patch_bytes"
   | "retry"
   | "consecutive_failure"
+  // Model-aware USD cost, accumulated per provider-usage event. UNLIKE the
+  // token dims (raw counts), `cost_usd` is a fractional dollar amount the
+  // CALLER computes from the pricing SSOT (`@/observability` `costUsd`) using
+  // the per-event `ev.model` — the meter holds NO price table (RFC may-22:
+  // "the meter never embeds a price table"). One tick per terminal `usage`
+  // event, same delta semantics as the token ticks.
+  | "cost_usd"
 
 /** Snapshot of every counter — used for trajectory recording and tests. */
 export interface BudgetUsage {

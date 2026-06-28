@@ -132,18 +132,31 @@ export const costUsd = (
   const price = TABLE[model]
   if (price === undefined) return null
 
-  const outCost = (outputTokens * price.outPerM) / PER_TOKEN
+  // Defensive NEGATIVE clamp (negatives only — NaN/Infinity deliberately pass
+  // through as non-finite so a downstream check can DETECT a bad usage report
+  // rather than trust a wrong dollar figure; see the pricing-hellgate
+  // "Infinity / NaN … do not silently produce a bogus finite cost" contract).
+  // A negative token count, by contrast, yields a positive FINITE cost that
+  // would slip past the budget meter's `tick` guard (which no-ops `n < 0`)
+  // while the token counters drop it — diverging cost from tokens. Clamping
+  // negatives to 0 keeps cost consistent with the token counters for every
+  // caller. `x < 0 ? 0 : x` preserves NaN (NaN<0 is false ⇒ NaN) and Infinity.
+  const inTok = inputTokens < 0 ? 0 : inputTokens
+  const outTok = outputTokens < 0 ? 0 : outputTokens
+  const cacheTok = cacheReadTokens < 0 ? 0 : cacheReadTokens
+
+  const outCost = (outTok * price.outPerM) / PER_TOKEN
 
   let inCost: number
   if (providerOf(model) === "openai") {
     // prompt_tokens already includes cached_tokens → carve out, don't add.
     // Clamp keeps the non-cached portion non-negative for malformed events.
-    const cached = Math.min(cacheReadTokens, inputTokens)
-    const fresh = inputTokens - cached
+    const cached = Math.min(cacheTok, inTok)
+    const fresh = inTok - cached
     inCost = (fresh * price.inPerM + cached * price.cacheReadPerM) / PER_TOKEN
   } else {
     // anthropic: input_tokens excludes cache reads → additive, discounted rate.
-    inCost = (inputTokens * price.inPerM + cacheReadTokens * price.cacheReadPerM) / PER_TOKEN
+    inCost = (inTok * price.inPerM + cacheTok * price.cacheReadPerM) / PER_TOKEN
   }
   return inCost + outCost
 }

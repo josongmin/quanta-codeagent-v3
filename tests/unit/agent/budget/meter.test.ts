@@ -22,6 +22,7 @@ describe("BudgetMeter.tick", () => {
     "patch_bytes",
     "retry",
     "consecutive_failure",
+    "cost_usd",
   ]
 
   // Lookup map TickKind → BudgetUsage counter key (kept as data so the test
@@ -39,6 +40,7 @@ describe("BudgetMeter.tick", () => {
     patch_bytes: "patchBytes",
     retry: "retries",
     consecutive_failure: "consecutiveFailures",
+    cost_usd: "costUsd",
   }
 
   test("every kind increments its corresponding counter", () => {
@@ -111,14 +113,23 @@ describe("BudgetMeter.snapshot", () => {
     expect(b - a).toBe(150)
   })
 
-  test("costUsd uses caller-supplied estimator (no implicit pricing)", () => {
-    const m = new BudgetMeter({
-      estimateCostUsd: ({ inputTokens, outputTokens }) =>
-        inputTokens * 0.001 + outputTokens * 0.002,
-    })
-    m.tick("input_tokens", 1000)
-    m.tick("output_tokens", 500)
+  test("costUsd accumulates caller-priced USD ticks (meter holds no price table)", () => {
+    // The meter is a pure accountant: the CALLER prices the event (via the
+    // pricing SSOT, using `ev.model`) and ticks the resulting USD. The meter
+    // embeds no price table — it only sums fractional dollars it is handed.
+    const m = new BudgetMeter()
+    m.tick("cost_usd", 1.0)
+    m.tick("cost_usd", 0.5)
+    m.tick("cost_usd", 0.5)
     expect(m.snapshot().costUsd).toBeCloseTo(2.0, 5)
+  })
+
+  test("cost_usd tick rejects NaN / negative (cannot poison the cost cap)", () => {
+    const m = new BudgetMeter()
+    m.tick("cost_usd", 1.25)
+    m.tick("cost_usd", Number.NaN) // no-op
+    m.tick("cost_usd", -3) // no-op
+    expect(m.snapshot().costUsd).toBeCloseTo(1.25, 5)
   })
 })
 
@@ -172,14 +183,14 @@ describe("BudgetMeter.checkExhausted", () => {
     expect(ex.kind).toBe("total_tokens")
   })
 
-  test("cost_usd dial fires when estimator output exceeds cap", () => {
-    const m = new BudgetMeter({
-      dials: { maxCostUsd: 1 },
-      estimateCostUsd: () => 2.5,
-    })
+  test("cost_usd dial fires when accumulated USD exceeds cap", () => {
+    const m = new BudgetMeter({ dials: { maxCostUsd: 1 } })
+    m.tick("cost_usd", 2.5)
     const ex = m.checkExhausted()
     expect(ex.exhausted).toBe(true)
     expect(ex.kind).toBe("cost_usd")
+    expect(ex.budget).toBe(1)
+    expect(ex.observed).toBeCloseTo(2.5, 5)
   })
 
   test("per-counter dial fires before total_tokens (deterministic order)", () => {

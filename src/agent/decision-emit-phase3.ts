@@ -46,6 +46,7 @@
  *     `metadata`.
  */
 
+import { PRICING_VERSION } from "@/observability"
 import { buildFsJailDecisionEvent } from "@/storage/service"
 import type { DecisionEmitter, DecisionEvent } from "@/stream"
 import { safeEmitDecision } from "@/stream"
@@ -102,13 +103,23 @@ export const emitBudgetExhaustedDecision = (
   const kind = ex.kind ?? "unknown"
   const used = ex.observed ?? 0
   const limit = ex.budget ?? 0
+  // Observability north-star (L1): when the COST dial is the binding dimension,
+  // stamp the pricing-table version so the dollar figures are reproducible /
+  // auditable after the static price table drifts (every cost figure is
+  // best-effort evidence keyed to a versioned table — `@/observability`
+  // pricing doctrine). Only attached on the cost trip so the other dials'
+  // metadata stays byte-identical.
+  const metadata: Record<string, unknown> =
+    kind === "cost_usd"
+      ? { kind, used, limit, pricingVersion: PRICING_VERSION }
+      : { kind, used, limit }
   const event: DecisionEvent = {
     type: "decision",
     turn: args.turn,
     kind: "budget",
     outcome: "deny",
     reason: `budget exhausted: ${kind} used=${used} limit=${limit}`,
-    metadata: { kind, used, limit },
+    metadata,
   }
   safeEmitDecision(emitter, event)
 }

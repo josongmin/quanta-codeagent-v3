@@ -34,24 +34,13 @@ export interface BudgetMeterOptions {
   exhaustion?: BudgetExhaustionPolicy
   /** Returns the current monotonic ms timestamp. Defaults to `Date.now`. */
   now?: () => number
-  /** Cost estimator: given current input/output/reasoning tokens, return USD.
-   *  Pure function — meter never embeds a price table. Default returns 0. */
-  estimateCostUsd?: (
-    usage: Pick<BudgetUsage, "inputTokens" | "outputTokens" | "reasoningTokens">,
-  ) => number
 }
-
-/** Default no-op cost estimator (callers wire their own pricing table). */
-const ZERO_COST = (): number => 0
 
 export class BudgetMeter {
   readonly dials: BudgetDials
   readonly caps: BudgetCaps
   readonly exhaustion: BudgetExhaustionPolicy
   private readonly clock: () => number
-  private readonly costFn: (
-    usage: Pick<BudgetUsage, "inputTokens" | "outputTokens" | "reasoningTokens">,
-  ) => number
   private readonly startedAtMs: number
 
   // Counters — pure ints; mutation is the meter's only state.
@@ -67,13 +56,18 @@ export class BudgetMeter {
   private patchBytes = 0
   private retries = 0
   private consecutiveFailures = 0
+  // Cumulative USD cost. Accumulated via `tick("cost_usd", n)` where the
+  // CALLER has already priced the event through the pricing SSOT
+  // (`@/observability` `costUsd(ev.model, …)`). The meter holds no price table
+  // — it is a pure accountant of dollars it is handed, exactly like the token
+  // counters are pure accountants of tokens.
+  private costUsdAccum = 0
 
   constructor(opts: BudgetMeterOptions = {}) {
     this.dials = opts.dials ?? {}
     this.caps = opts.caps ?? {}
     this.exhaustion = opts.exhaustion ?? "stop"
     this.clock = opts.now ?? Date.now
-    this.costFn = opts.estimateCostUsd ?? ZERO_COST
     this.startedAtMs = this.clock()
   }
 
@@ -129,6 +123,13 @@ export class BudgetMeter {
       case "consecutive_failure":
         this.consecutiveFailures += n
         return
+      case "cost_usd":
+        // `n` is a fractional USD amount (e.g. 0.0023) already priced by the
+        // caller. The non-finite/negative guard above protects the same way it
+        // protects the token counters: a malformed price (NaN / negative) is a
+        // no-op so a single bad usage report cannot poison the cost cap.
+        this.costUsdAccum += n
+        return
       default: {
         // Exhaustive switch — TS narrows `kind` to `never` here. Defense in
         // depth: throw on a programmer error rather than silently drop.
@@ -181,11 +182,7 @@ export class BudgetMeter {
   /** Snapshot of every counter. Stable — every call returns a fresh object. */
   snapshot(): BudgetUsage {
     const wallClockMs = this.clock() - this.startedAtMs
-    const costUsd = this.costFn({
-      inputTokens: this.inputTokens,
-      outputTokens: this.outputTokens,
-      reasoningTokens: this.reasoningTokens,
-    })
+    const costUsd = this.costUsdAccum
     return {
       turns: this.turns,
       modelCalls: this.modelCalls,

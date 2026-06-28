@@ -140,4 +140,20 @@ describe("costUsd", () => {
     const outOnly = costUsd("gpt-4o", 0, 1_000_000)
     expect(outOnly as number).toBeGreaterThanOrEqual(inOnly as number)
   })
+
+  test("negative clamp: negative token counts never yield negative cost (no meter divergence)", () => {
+    // A negative count yields a positive FINITE cost that would slip past the
+    // budget meter's `tick` guard (which no-ops n<0) while the token counters
+    // drop it — diverging cost from tokens. Clamp keeps them consistent.
+    // anthropic (additive): negative input collapses to 0, output still bills.
+    expect(costUsd("claude-sonnet-4-6", -1000, 1000)).toBe((1000 * 15) / 1_000_000)
+    // openai (carve-out): negative input → 0 in-cost, output still bills.
+    expect(costUsd("gpt-4o", -5000, 1000)).toBe((1000 * 10) / 1_000_000)
+    // all-negative → exactly 0, never below.
+    expect(costUsd("gpt-5.4", -1, -1, -1)).toBe(0)
+    // CONTRACT PRESERVED: NaN/Infinity stay NON-finite (fail-loud, detectable
+    // downstream) — clamp touches negatives ONLY.
+    expect(Number.isNaN(costUsd("gpt-5.4", Number.NaN, 0) as number)).toBe(true)
+    expect(Number.isFinite(costUsd("gpt-5.4", Number.POSITIVE_INFINITY, 0) as number)).toBe(false)
+  })
 })

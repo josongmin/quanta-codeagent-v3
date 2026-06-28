@@ -1,4 +1,5 @@
 import type { StreamEvent, ToolChoice } from "@/llm"
+import { costUsd } from "@/observability"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
 import { errMessage, logger, runtimeConfig } from "@/shared"
 import type { CancelSubagentOutcome, ResponseQueuedReason } from "../control-op-handler"
@@ -27,6 +28,16 @@ export const emitUsage = (
   recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
   config.budgetMeter?.tick("input_tokens", ev.inputTokens)
   config.budgetMeter?.tick("output_tokens", ev.outputTokens)
+  // Autonomous-safety cost cap (L0): price THIS event via the pricing SSOT
+  // using the per-event model id (the only place `ev.model` is available) and
+  // accumulate USD into the meter — the same single seam that ticks tokens. An
+  // unpriced model yields `null` (cost is best-effort evidence, never
+  // authoritative — `@/observability` pricing doctrine) ⇒ skip the tick so the
+  // cost cap stays a no-op rather than billing $0 falsely. `maxCostUsd` is only
+  // set on autonomous modes (batch/daemon/ci-bot); interactive has no dial so
+  // this accrues but never gates (human-paced, by design).
+  const eventCostUsd = costUsd(ev.model, ev.inputTokens, ev.outputTokens, ev.cacheReadTokens ?? 0)
+  if (eventCostUsd !== null) config.budgetMeter?.tick("cost_usd", eventCostUsd)
   collector?.recordUsage({
     tokensInput: ev.inputTokens,
     tokensOutput: ev.outputTokens,
