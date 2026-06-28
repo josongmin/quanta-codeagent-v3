@@ -70,6 +70,51 @@ describe("fan-out backend", () => {
     expect(calls.length).toBe(2) // 2 preds ⇒ at most 2 non-empty shards
   })
 
+  test("merges shard errorLogDir(s) into the outcome (don't drop observability)", async () => {
+    // jun-28: each shard's ssh backend fetches error-logs/<id>; the merge must
+    // carry errorLogDir through or the cli never points at them on multi-box runs.
+    const ids = Array.from({ length: 4 }, (_, i) => `e-${i}`)
+    let shardN = 0
+    const backend = createFanoutBackend({
+      shards: 2,
+      makeBackend: () => {
+        const n = shardN++
+        return {
+          name: "mock",
+          grade: async (predictionsPath, _opts): Promise<GradeOutcome> => {
+            const sids = (await Bun.file(predictionsPath).text())
+              .split("\n")
+              .filter((l) => l.trim() !== "")
+              .map((l) => (JSON.parse(l) as { instance_id: string }).instance_id)
+            return {
+              reportPath: "r",
+              resolved: [],
+              unresolved: [],
+              errored: sids,
+              emptyPatch: [],
+              errorLogDir: `/tmp/out-shard-${n}/error-logs`,
+            }
+          },
+        }
+      },
+    })
+    const out = await backend.grade(predsFile(ids), { datasetPath: "ds", runId: "run" })
+    expect(out.errorLogDir).toBeDefined()
+    // both distinct shard dirs are surfaced (no --out ⇒ separate temp dirs)
+    expect(out.errorLogDir).toContain("/tmp/out-shard-0/error-logs")
+    expect(out.errorLogDir).toContain("/tmp/out-shard-1/error-logs")
+  })
+
+  test("no shard error logs ⇒ errorLogDir stays undefined (no empty string)", async () => {
+    const calls: { path: string; runId: string }[] = []
+    const backend = createFanoutBackend({ shards: 2, makeBackend: () => recordingBackend(calls) })
+    const out = await backend.grade(predsFile(["a", "b", "c", "d"]), {
+      datasetPath: "ds",
+      runId: "run",
+    })
+    expect(out.errorLogDir).toBeUndefined()
+  })
+
   test("one shard throws ⇒ its instances errored, others merged (no total failure)", async () => {
     const ids = Array.from({ length: 6 }, (_, i) => `i-${i}`)
     let shardN = 0

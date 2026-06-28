@@ -104,12 +104,19 @@ export const createFanoutBackend = (cfg: FanoutConfig): GradeBackend => {
     const unresolved: string[] = []
     const errored: string[] = []
     const emptyPatch: string[] = []
+    // Carry each shard's error-log dir through the merge — else a K>1 sharded
+    // grade (the cli DEFAULT path) silently drops the per-instance error logs the
+    // shards DID fetch, defeating the observability feature exactly on the
+    // multi-box runs it exists for. Shards share opts.outDir (so the dir is
+    // usually identical); dedup, and join if a shard mkdtemp'd its own (no --out).
+    const errorLogDirs: string[] = []
     settled.forEach((res, i) => {
       if (res.status === "fulfilled") {
         resolved.push(...res.value.resolved)
         unresolved.push(...res.value.unresolved)
         errored.push(...res.value.errored)
         emptyPatch.push(...res.value.emptyPatch)
+        if (res.value.errorLogDir !== undefined) errorLogDirs.push(res.value.errorLogDir)
       } else {
         // Shard crashed ⇒ its instances are errored (re-runnable), not lost.
         errored.push(...(shardIds[i] ?? []))
@@ -126,7 +133,17 @@ export const createFanoutBackend = (cfg: FanoutConfig): GradeBackend => {
 
     const reportPath = join(dir, `${opts.runId}-merged.json`)
     await writeFile(reportPath, mergedReportJson(r, u, e, p))
-    return { reportPath, resolved: r, unresolved: u, errored: e, emptyPatch: p }
+    const mergedLogDirs = [...new Set(errorLogDirs)]
+    const errorLogDir =
+      mergedLogDirs.length === 0 ? undefined : mergedLogDirs.join(", ")
+    return {
+      reportPath,
+      resolved: r,
+      unresolved: u,
+      errored: e,
+      emptyPatch: p,
+      ...(errorLogDir !== undefined ? { errorLogDir } : {}),
+    }
   }
 
   return { name: `fanout:${cfg.shards}`, grade }
