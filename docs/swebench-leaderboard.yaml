@@ -1854,3 +1854,21 @@ runs:
   - instance_id: sympy__sympy-13757
     repo: sympy
     turns: 29
+
+- run_id: wave2-xarray-oom-recovery-2026-06-28
+  date: '2026-06-28'
+  preset: agentless-v6-singlepass-execfull
+  preset_env: 'QUANTA_BENCH_NONEMPTY_FALLBACK=1 — byte-same winning config as run red-campaign-v6-singlepass-execfull-2026-06-28; only delta is the fork-storm fix in src/.'
+  model: gpt-5.5
+  auth: chatgpt-oauth
+  grading: official swebench python harness, spot EC2 c7i.4xlarge, source-only patch
+  scope: 'OOM-RECOVERY wave — the 10 pydata/xarray + pylint-4551 the red-campaign left as NO-VERDICT (box kernel-OOM-killed by a uv fork-storm during patch-gen, exit 137). Re-run with the fix landed (shim re-entrancy guard bed0b2de2 + ulimit nproc cap d17757a8 + host-resource sampler 65f312ad). Box now survives + grades normally (exit137=0, peak procs ~300 vs ~4700 before). PARTIAL — wave in progress; success results so far.'
+  success_note: 'These were a MEASUREMENT HOLE (infra OOM, not a real model miss) — now converted to real verdicts. pydata__xarray-4094 is a NET-NEW solve (no scaffold had ever resolved it); pydata__xarray-3677 re-confirmed green under v6. End-to-end validation of the fork-storm fix on the exact cases that triggered the OOM.'
+  resolved_count: 2
+  resolved:
+  - instance_id: pydata__xarray-4094  # NET-NEW — was no-verdict (OOM), now PASS
+    repo: xarray
+    turns: 21
+  - instance_id: pydata__xarray-3677  # re-confirmed under v6 — was no-verdict (OOM)
+    repo: xarray
+    turns: 26
