@@ -1527,7 +1527,8 @@ function drawMatrix() {
     const tierCell = r.tier === '?' ? '<span class="muted">—</span>' : '<span class="'+tierClass(r.tier)+'">'+r.tier+'</span>';
     const ftn = (DATA.frontierTurns||{})[r.id];
     const ftBadge = ftn ? ' <span class="pill" title="프론티어 경쟁사 풀이 턴">🏆'+ftn+'t</span>' : '';
-    h += '<tr class="mrow" data-id="'+esc(r.id)+'"><td class="inst">'+esc(r.id)+(r.statement?' <span class="muted">ⓘ</span>':'')+ftBadge+'</td>'+qcell+
+    h += '<tr class="mrow" data-id="'+esc(r.id)+'"><td class="inst">'+esc(r.id)+
+      ' <span class="dbtn" data-id="'+esc(r.id)+'" title="문제·오라클·trajectory 상세" style="cursor:pointer;color:#58a6ff;font-weight:700;padding:0 4px">ⓘ</span>'+ftBadge+'</td>'+qcell+
       '<td class="muted">'+turns+'</td><td class="profile muted">'+presetCell+'</td><td class="muted" style="font-size:11px">'+r.difficulty+'</td>';
     for (const s of SCAF_SHOW) h += '<td class="'+(r.cells[s]?'yes':'no')+'">'+(r.cells[s]?'✅':'·')+'</td>';
     h += '<td>'+hashCell+'</td><td>'+tierCell+'</td></tr>';
@@ -1539,7 +1540,7 @@ function drawMatrix() {
     if (SORT.key === k) SORT.dir *= -1; else { SORT.key = k; SORT.dir = -1; }
     drawMatrix();
   });
-  document.querySelectorAll("#mtable tr.mrow").forEach(tr => tr.onclick = () => openModal(tr.dataset.id));
+  document.querySelectorAll("#mtable .dbtn").forEach(b => b.onclick = e => { e.stopPropagation(); openModal(b.dataset.id); });
 }
 
 function renderScaffolds() {

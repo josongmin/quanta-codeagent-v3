@@ -31,6 +31,7 @@
 
 ### #2 — xarray val stall 원인 확정
 - **기능:** 진행 중이던 xarray val(gpt-5.5) 런이 `lsp_references xarray/core/merge.py`에서 ~20분 stall. 원인 미확정.
+- **[2026-06-28 update]** root cause found: xarray/box OOM(exit 137)은 **python-shim recursion으로 인한 `uv` fork-storm**. fix 작성 중(미검증/미커밋) — 아직 RESOLVED 아님, 그대로 둘 것.
 - **왜:** OTEL sink가 run-id 미라벨([[jun-28-otel-sink-no-runid-attribution-gap]])이라 스팬 귀속 불가 + SSH 차단으로 operator-side만 봄. LSP-wedge vs 박스death 미구분.
 - **how:** 박스 ground-truth 필요 — `ssh -i ~/Downloads/pickinstead_korea.pem ubuntu@<ip> 'tail -40 ~/run.log; ps aux|grep pyright'`. (SSH는 유저만 가능.)
 - **ROI:** 중. fork-storm 가드(`d17757a82`) 들어갔으니 재현 시 더 깨끗이 보일 것.
