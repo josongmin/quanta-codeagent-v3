@@ -1,54 +1,65 @@
 import { describe, expect, test } from "bun:test"
 import { reproRunArgv } from "./dataset"
-import { buildProjectEnvUvRunArgv } from "./project-env"
+import { buildProjectEnvUvRunArgv, specEraPins } from "./project-env"
 import { specPipPackages } from "./repo-version-specs"
 
 // jun-29 SOTA++ ENV FIX (RCA): the repro/test env free-resolved deps to LATEST, so
-// old sphinx-doc__sphinx-8595 (3.5) got jinja2>=3.1 which dropped `environmentfilter`
-// ⇒ `import sphinx` died ⇒ every repro a spurious exec_failed (an env bug that
-// confounded the grounding A/B). Fix: apply the OFFICIAL `pip_packages` PINS
-// (Jinja2==3.0.3) as uv `--with` — the official mechanism, no setup.py edit / build
-// break (the earlier --exclude-newer approach broke the editable build).
+// old sphinx 3.x got jinja2>=3.1 (dropped `environmentfilter`) AND sphinxcontrib 2.x
+// (raises VersionRequirementError in `Sphinx()`) ⇒ every repro a spurious
+// exec_failed (an env bug that confounded the grounding A/B). Fix: apply the
+// OFFICIAL era pins — `pip_packages` (Jinja2==3.0.3) MERGED with the pre_install
+// dep-caps (sphinxcontrib-*<=…, markupsafe<=2.0.1, alabaster<0.7.12) — as uv
+// `--with`. Skipped when the python was floored off-era (era pins unbuildable).
 
-describe("buildProjectEnvUvRunArgv — official pip_packages pins (SOTA++)", () => {
-  test("sphinx 3.5 ⇒ the official Jinja2==3.0.3 pin is applied as --with", () => {
-    const argv = buildProjectEnvUvRunArgv("sphinx-doc/sphinx", "3.5", ["pytest"], {})
-    const i = argv.indexOf("Jinja2==3.0.3")
-    expect(i).toBeGreaterThan(-1)
-    expect(argv[i - 1]).toBe("--with") // applied as a --with pin
+describe("specEraPins — official pip_packages + pre_install dep-caps (SOTA++)", () => {
+  test("sphinx 3.5 ⇒ Jinja2==3.0.3 + the sphinxcontrib/markupsafe/alabaster caps", () => {
+    const pins = specEraPins("sphinx-doc/sphinx", "3.5")
+    expect(pins).toContain("Jinja2==3.0.3") // pip_packages
+    expect(pins).toContain("sphinxcontrib-applehelp<=1.0.7") // pre_install cap (the GAP fix)
+    expect(pins).toContain("markupsafe<=2.0.1")
+    expect(pins).toContain("alabaster>=0.7,<0.7.12")
   })
 
-  test("the pin is the SAME official ground truth specPipPackages returns", () => {
-    const pins = specPipPackages("sphinx-doc/sphinx", "3.5")
+  test("jinja2 dedup — the pip_packages ==3.0.3 WINS over the pre_install Jinja2<3.0", () => {
+    const pins = specEraPins("sphinx-doc/sphinx", "3.5")
     expect(pins).toContain("Jinja2==3.0.3")
-    const argv = buildProjectEnvUvRunArgv("sphinx-doc/sphinx", "3.5", ["pytest"], {})
-    for (const pin of pins) expect(argv).toContain(pin)
+    expect(pins).not.toContain("Jinja2<3.0") // would CONFLICT with ==3.0.3
   })
 
-  test("a repo/version with NO pip_packages ⇒ byte-identical (no extra --with)", () => {
-    // unknown repo ⇒ specPipPackages returns [] ⇒ the deps set is unchanged
-    const argv = buildProjectEnvUvRunArgv("nonexistent/repo", "9.9", ["pytest"], {})
-    expect(specPipPackages("nonexistent/repo", "9.9")).toEqual([])
-    // only the base + extraWith deps appear (pytest, setuptools); no era pins
-    expect(argv).toContain("--with-editable")
-    expect(argv).toContain("uv")
+  test("FLOORED python ⇒ [] (era pins unbuildable; free-resolve instead, no regression)", () => {
+    // astropy 1.3 + scikit-learn 0.20 are floored (truth py3.6 → UV_FLOOR 3.9);
+    // their numpy==1.16/scipy==1.5 era pins have no cp39 wheel ⇒ source-build fails.
+    expect(specEraPins("astropy/astropy", "1.3")).toEqual([])
+    expect(specEraPins("scikit-learn/scikit-learn", "0.20")).toEqual([])
+    // sanity: those repos DO have pip_packages (so the [] is the floor gate, not absence)
+    expect(specPipPackages("astropy/astropy", "1.3").length).toBeGreaterThan(0)
   })
 
-  test("reproRunArgv inherits the pins (sphinx repro env is era-correct)", () => {
-    const argv = reproRunArgv("sphinx-doc/sphinx", "3.5", "/tmp/repro.py")
-    expect(argv).toContain("Jinja2==3.0.3")
-    expect(argv.slice(-3)).toEqual(["python", "-s", "/tmp/repro.py"])
+  test("unknown repo/version ⇒ [] (byte-identical, no pins)", () => {
+    expect(specEraPins("nonexistent/repo", "9.9")).toEqual([])
   })
 })
 
-describe("buildProjectEnvUvRunArgv — excludeNewer param (inert capability)", () => {
-  // The --exclude-newer param is retained (default-safe) but NOT wired by any call
-  // site — it broke the editable build; the pip_packages mechanism supersedes it.
-  test("absent excludeNewer ⇒ no --exclude-newer flag", () => {
-    expect(buildProjectEnvUvRunArgv("x/y", "1", [], {})).not.toContain("--exclude-newer")
+describe("buildProjectEnvUvRunArgv — era pins folded into --with", () => {
+  test("sphinx 3.5 argv carries the era pins as --with entries", () => {
+    const argv = buildProjectEnvUvRunArgv("sphinx-doc/sphinx", "3.5", ["pytest"], {})
+    for (const pin of ["Jinja2==3.0.3", "sphinxcontrib-applehelp<=1.0.7", "markupsafe<=2.0.1"]) {
+      const i = argv.indexOf(pin)
+      expect(i).toBeGreaterThan(-1)
+      expect(argv[i - 1]).toBe("--with")
+    }
   })
-  test("explicit excludeNewer ⇒ flag present (capability preserved)", () => {
-    const argv = buildProjectEnvUvRunArgv("x/y", "1", [], {}, "2020-12-27T03:07:50Z")
-    expect(argv).toContain("--exclude-newer")
+
+  test("floored repo ⇒ no era pins in the argv (free-resolve)", () => {
+    const argv = buildProjectEnvUvRunArgv("astropy/astropy", "1.3", ["pytest"], {})
+    expect(argv).not.toContain("numpy==1.16.0")
+    expect(argv).toContain("--with-editable") // still installs the repo
+  })
+
+  test("reproRunArgv inherits the era pins (sphinx repro env is era-correct)", () => {
+    const argv = reproRunArgv("sphinx-doc/sphinx", "3.5", "/tmp/repro.py")
+    expect(argv).toContain("Jinja2==3.0.3")
+    expect(argv).toContain("sphinxcontrib-applehelp<=1.0.7")
+    expect(argv.slice(-3)).toEqual(["python", "-s", "/tmp/repro.py"])
   })
 })

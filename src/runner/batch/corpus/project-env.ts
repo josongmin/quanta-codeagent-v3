@@ -1,6 +1,59 @@
 import { basename, join } from "node:path"
-import { pythonForRepoVersion } from "./repo-version-python"
-import { specPipPackages } from "./repo-version-specs"
+import { pythonForRepoVersion, resolvePythonForRepoVersion } from "./repo-version-python"
+import { specPipPackages, specPreInstall } from "./repo-version-specs"
+
+/* ── era-correct dependency pins (jun-29 SOTA++ env fix) ───────────────────────
+ * The official SWE-bench env pins old-instance deps two ways: `pip_packages`
+ * (explicit version pins) AND `pre_install` sed edits that CONSTRAIN deps in
+ * setup.py (e.g. sphinx 3.5: `sphinxcontrib-applehelp<=1.0.7`, `markupsafe<=2.0.1`,
+ * `alabaster<0.7.12`). pip_packages alone is INSUFFICIENT for sphinx 3.x/4.x: uv
+ * free-resolves sphinxcontrib-applehelp 2.x → `Sphinx()` raises
+ * VersionRequirementError. We extract the dep CONSTRAINTS from the pre_install
+ * sed REPLACEMENTS and apply them as uv `--with` too (pure version bounds — no
+ * setup.py edit / revert needed). Both sets are gated on the env using the
+ * GROUND-TRUTH python: when UV_FLOOR raised the python off-era (`pythonFloored`),
+ * the era pins (e.g. numpy==1.16.0) have no wheel and source-build fails, so we
+ * SKIP them and free-resolve (the pre-fix behavior — no new regression). */
+
+/** Replacement side `B` of a `sed 's/A/B/' file` command (escape-tolerant), or
+ *  null when the command is not a substitution. */
+const sedReplacement = (cmd: string): string | null => {
+  const m = /s\/((?:[^/\\]|\\.)*)\/((?:[^/\\]|\\.)*)\//.exec(cmd)
+  return m === null ? null : (m[2] ?? null)
+}
+
+/** A pip requirement with an explicit version constraint, e.g. `Jinja2<3.0`,
+ *  `sphinxcontrib-applehelp<=1.0.7`, `alabaster>=0.7,<0.7.12`. */
+const DEP_CONSTRAINT = /[A-Za-z][A-Za-z0-9_.-]*(?:(?:<=|>=|==|!=|<|>)[0-9][0-9A-Za-z.*]*,?)+/g
+
+/** Distribution name (lowercased, normalized) of a requirement spec. */
+const pkgName = (spec: string): string =>
+  (spec.toLowerCase().match(/^[a-z0-9_.-]+/)?.[0] ?? spec.toLowerCase()).replace(/[._]+/g, "-")
+
+/** Dep CONSTRAINTS extracted from the (repo,version) pre_install sed replacements
+ *  (the official setup.py dep-cap edits, as uv `--with` constraints). */
+const preInstallConstraints = (repo: string, version: string | undefined): readonly string[] => {
+  const out = new Set<string>()
+  for (const cmd of specPreInstall(repo, version)) {
+    const repl = sedReplacement(cmd)
+    if (repl === null) continue
+    for (const m of repl.matchAll(DEP_CONSTRAINT)) out.add(m[0])
+  }
+  return [...out]
+}
+
+/** The era-correct `--with` pins for (repo,version): official `pip_packages`
+ *  (priority) merged with the pre_install dep-caps, deduped by distribution name
+ *  (a pip_packages pin wins over a pre_install constraint for the same package —
+ *  e.g. `Jinja2==3.0.3` supersedes `Jinja2<3.0`). EMPTY when the env's python was
+ *  FLOORED off ground truth (era pins would be unbuildable ⇒ free-resolve). */
+export const specEraPins = (repo: string, version: string | undefined): readonly string[] => {
+  if (resolvePythonForRepoVersion(repo, version).pythonFloored !== undefined) return []
+  const pips = specPipPackages(repo, version)
+  const seen = new Set(pips.map(pkgName))
+  const extra = preInstallConstraints(repo, version).filter((c) => !seen.has(pkgName(c)))
+  return [...pips, ...extra]
+}
 
 const BASE_PROJECT_ENV_DEPS = ["setuptools"] as const
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -169,14 +222,15 @@ export const buildProjectEnvUvRunArgv = (
    *  (byte-identical to the pre-fix argv). */
   excludeNewer?: string,
 ): readonly string[] => {
-  // jun-29 SOTA++ env fix: the official `pip_packages` PINS (e.g. sphinx 3.5
-  // `Jinja2==3.0.3`) are applied as `--with` so the repro/test env resolves
-  // era-correct deps instead of latest — the official mechanism, no setup.py edit
-  // / build break (the rejected --exclude-newer approach broke the editable build).
+  // jun-29 SOTA++ env fix: the official era pins (`pip_packages` + pre_install
+  // dep-caps, e.g. sphinx 3.5 `Jinja2==3.0.3` + `sphinxcontrib-applehelp<=1.0.7`)
+  // applied as `--with` so the repro/test env resolves era-correct deps instead of
+  // latest — the official mechanism, no setup.py edit / build break, and skipped
+  // when the python was floored off-era (see {@link specEraPins}).
   const deps = [
     ...new Set([
       ...extraWith,
-      ...specPipPackages(repo, version),
+      ...specEraPins(repo, version),
       ...repoPinnedDeps(repo),
       ...BASE_PROJECT_ENV_DEPS,
     ]),
