@@ -117,7 +117,7 @@ import {
   buildPhasePatchHygiene,
   type ClosureSessionState,
 } from "./closure-session"
-import { buildSpecGateEvaluatePredicate } from "./declared-expected-matcher"
+import { resolveRepairEvaluatePredicate } from "./declared-expected-matcher"
 import { diffTouchedSymbols } from "./diff-touched-symbols"
 import { exec, execArgv } from "./exec"
 import { coeditFamilyCoverageCandidate } from "./family-coverage-coedit"
@@ -3158,11 +3158,11 @@ const runRepairPhase = async (
   // `issueDeclaredExpected` is public-issue-text provenance only (the matcher
   // re-asserts the answer-key guard). Both knobs OFF ⇒ the raw evaluator
   // (byte-identical). `buildSpecGateEvaluatePredicate(base, undefined)` is identity.
-  const repairEvaluatePredicate =
-    (repairPosture.repairSpecGate || repairPosture.repairStrongOracle) &&
-    issueDeclaredExpected !== undefined
-      ? buildSpecGateEvaluatePredicate(evaluateSuccessPredicate, issueDeclaredExpected)
-      : evaluateSuccessPredicate
+  const repairEvaluatePredicate = resolveRepairEvaluatePredicate(
+    repairPosture,
+    issueDeclaredExpected,
+    evaluateSuccessPredicate,
+  )
   // jun-28 repair-loop BREADTH (mirror of the apps driver): B>1 ⇒ fan a repair
   // round out to B forked candidates, continue from the validator-green one (else
   // best validator signal). B=1 (default) ⇒ undefined ⇒ legacy single path

@@ -323,3 +323,22 @@ export const buildSpecGateEvaluatePredicate = (
     return declaredVerdict
   }
 }
+
+/**
+ * The repair phase's `evaluatePredicate` SELECTION — the seam that was the jun-28
+ * INERT bug: both drivers passed the RAW `base` to `runRepairRounds`, so the spec
+ * gate (and the strong-oracle conjunction that reads its verdict) NEVER ran at the
+ * repair validator (wired≠engages). Centralized + unit-tested here so the wiring
+ * cannot silently regress again: returns the spec-gated wrapper ONLY when a gate
+ * knob is on AND the issue declares a concrete expected output; otherwise the RAW
+ * base (byte-identical, fail-open). BOTH drivers MUST build their repair
+ * `evaluatePredicate` through this single function.
+ */
+export const resolveRepairEvaluatePredicate = (
+  posture: { readonly repairSpecGate?: boolean; readonly repairStrongOracle?: boolean },
+  expected: IssueDeclaredExpected | undefined,
+  base: EvaluatePredicateFn,
+): EvaluatePredicateFn =>
+  (posture.repairSpecGate === true || posture.repairStrongOracle === true) && expected !== undefined
+    ? buildSpecGateEvaluatePredicate(base, expected)
+    : base

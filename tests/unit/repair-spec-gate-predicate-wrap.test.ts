@@ -15,7 +15,10 @@ import {
   type IssueDeclaredExpected,
   PUBLIC_ISSUE_TEXT_PROVENANCE,
 } from "@/agent/verification-plan"
-import { buildSpecGateEvaluatePredicate } from "@/runner/batch/eval/declared-expected-matcher"
+import {
+  buildSpecGateEvaluatePredicate,
+  resolveRepairEvaluatePredicate,
+} from "@/runner/batch/eval/declared-expected-matcher"
 
 const declared = (value: string): IssueDeclaredExpected => ({
   kind: "stdout",
@@ -87,5 +90,48 @@ describe("buildSpecGateEvaluatePredicate", () => {
     )
     const observed = { exitCode: 1, stdout: "present-literal", stderr: "" }
     expect(evalP(observed, EXIT_ZERO)).toEqual(evaluateSuccessPredicate(observed, EXIT_ZERO))
+  })
+})
+
+// ---- THE WIRING GUARD (jun-28 inert-#2 regression class) -------------------
+// `buildSpecGateEvaluatePredicate` above was CORRECT yet INERT for a full session
+// because both drivers passed the RAW evaluator to `runRepairRounds` — the wrapper
+// was never composed. The wrapper test alone passes in that broken state. These
+// tests pin the SINGLE seam both drivers now build through (`resolveRepairEvaluate
+// Predicate`), so "knob on ⇒ composed; off ⇒ raw" cannot silently regress.
+describe("resolveRepairEvaluatePredicate — driver seam (inert-#2 guard)", () => {
+  test("both gate knobs OFF ⇒ the RAW base (byte-identical; the OFF default must be raw, not a silent gap)", () => {
+    expect(
+      resolveRepairEvaluatePredicate({}, declared("TypeError: x"), evaluateSuccessPredicate),
+    ).toBe(evaluateSuccessPredicate)
+  })
+
+  test("repair-spec-gate ON + declared-expected PRESENT ⇒ a COMPOSED gate that CATCHES a false-green", () => {
+    const evalP = resolveRepairEvaluatePredicate(
+      { repairSpecGate: true },
+      declared("TypeError: cannot convert"),
+      evaluateSuccessPredicate,
+    )
+    expect(evalP).not.toBe(evaluateSuccessPredicate) // composed, NOT raw (the inert state)
+    // exit-0 round whose output LACKS the declared expected ⇒ false green caught.
+    const v = evalP({ exitCode: 0, stdout: "1 passed", stderr: "" }, EXIT_ZERO)
+    expect(v.evaluable).toBe(true)
+    expect(v.matched).toBe(false)
+  })
+
+  test("repair-strong-oracle ON + declared-expected ⇒ composed (same seam, either knob arms it)", () => {
+    expect(
+      resolveRepairEvaluatePredicate(
+        { repairStrongOracle: true },
+        declared("x"),
+        evaluateSuccessPredicate,
+      ),
+    ).not.toBe(evaluateSuccessPredicate)
+  })
+
+  test("knob ON but NO declared-expected ⇒ RAW (fail-open; never penalize a correct patch on a spec-less issue)", () => {
+    expect(
+      resolveRepairEvaluatePredicate({ repairSpecGate: true }, undefined, evaluateSuccessPredicate),
+    ).toBe(evaluateSuccessPredicate)
   })
 })

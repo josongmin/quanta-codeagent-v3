@@ -18,7 +18,7 @@ import {
 } from "@/runner/batch/eval/capture-correctness"
 import {
   buildPublicDeclaredExpectedPort,
-  buildSpecGateEvaluatePredicate,
+  resolveRepairEvaluatePredicate,
 } from "@/runner/batch/eval/declared-expected-matcher"
 import {
   adaptiveNextPassOwners,
@@ -675,11 +675,11 @@ const runRepairPhase = async (
   // conjunction catch). NO-LEAK: `issueDeclaredExpected` is public-issue-text only.
   // Both knobs OFF ⇒ the raw evaluator (byte-identical); `undefined` expected ⇒
   // `buildSpecGateEvaluatePredicate` returns the identity wrapper.
-  const repairEvaluatePredicate =
-    (repairPosture.repairSpecGate || repairPosture.repairStrongOracle) &&
-    issueDeclaredExpected !== undefined
-      ? buildSpecGateEvaluatePredicate(evaluateSuccessPredicate, issueDeclaredExpected)
-      : evaluateSuccessPredicate
+  const repairEvaluatePredicate = resolveRepairEvaluatePredicate(
+    repairPosture,
+    issueDeclaredExpected,
+    evaluateSuccessPredicate,
+  )
   // jun-28 repair-loop BREADTH: when B>1, fan a repair round out to B forked
   // candidates and continue from the one the SAME validator turns green (else the
   // best validator signal). B=1 (default) ⇒ `runCandidates` is undefined ⇒ the
