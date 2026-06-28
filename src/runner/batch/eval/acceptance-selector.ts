@@ -28,10 +28,15 @@ export interface ReproAcceptancePorts {
   ) => Promise<T | null>
   /** Run the reproducing set on the (already patched) sandbox → did the issue RESOLVE. */
   readonly reproResolvedOnSandbox: (sandbox: string) => Promise<boolean>
+  /** OPTIONAL dual-guard: run the selected regression set on the (already patched)
+   *  sandbox → COUNT of failed tests. Present ⇒ the rerank gains the regression
+   *  guard (Agentless dual-oracle); absent ⇒ repro-only. */
+  readonly regressionFailuresOnSandbox?: (sandbox: string) => Promise<number>
 }
 
-/** Build the repair `selectCandidates` port for the repro-only acceptance path, or
- *  `undefined` to keep the legacy selection (opt-in OFF / no reproducing set). */
+/** Build the repair `selectCandidates` port for the acceptance path (repro-only,
+ *  or dual-guard when `regressionFailuresOnSandbox` is supplied), or `undefined` to
+ *  keep the legacy selection (opt-in OFF / no reproducing set). */
 export const buildReproAcceptanceSelector = (
   enabled: boolean,
   reproSources: readonly string[],
@@ -42,5 +47,17 @@ export const buildReproAcceptanceSelector = (
   if (!enabled || reproSources.length === 0) return undefined
   const runReproOnPatch = async (patch: string): Promise<boolean> =>
     (await ports.withCandidatePatch(patch, ports.reproResolvedOnSandbox)) === true
-  return maybeAcceptanceSelector({ enabled: true, runReproOnPatch })
+  // Dual-guard: a failed apply (`withCandidatePatch` null) ⇒ +Infinity failures so
+  // the candidate loses the min-regression bar (consistent with the repro degrade).
+  const regressionProbe = ports.regressionFailuresOnSandbox
+  const runRegressionOnPatch =
+    regressionProbe === undefined
+      ? undefined
+      : async (patch: string): Promise<number> =>
+          (await ports.withCandidatePatch(patch, regressionProbe)) ?? Number.POSITIVE_INFINITY
+  return maybeAcceptanceSelector({
+    enabled: true,
+    runReproOnPatch,
+    ...(runRegressionOnPatch !== undefined ? { runRegressionOnPatch } : {}),
+  })
 }

@@ -83,4 +83,34 @@ describe("buildReproAcceptanceSelector — gating + composition", () => {
     expect(winner.run.patch).toBe("GOOD") // BAD degraded (null ⇒ false), GOOD wins
     expect(applied).toEqual(["BAD", "GOOD"])
   })
+
+  test("DUAL-GUARD ENGAGES: regression probe supplied ⇒ picks repro-pass + min-regression", async () => {
+    const regrSeen: string[] = []
+    const ports: ReproAcceptancePorts = {
+      withCandidatePatch: async (patch, probe) => probe(`sandbox:${patch}`),
+      reproResolvedOnSandbox: async () => true, // both pass repro
+      regressionFailuresOnSandbox: async (sandbox) => {
+        const patch = sandbox.replace("sandbox:", "")
+        regrSeen.push(patch)
+        return patch === "A" ? 0 : 3 // A has fewer regression failures
+      },
+    }
+    const sel = buildReproAcceptanceSelector(true, ["r.py"], ports)
+    const winner = await (sel as NonNullable<typeof sel>)([outcome("A"), outcome("B")])
+    // dual-guard active ⇒ min-regression A wins (not a repro-only tie).
+    expect(winner.run.patch).toBe("A")
+    expect(regrSeen).toEqual(["A", "B"]) // the regression probe actually ran per candidate
+  })
+
+  test("regression null apply ⇒ +Infinity failures (loses the min bar)", async () => {
+    const ports: ReproAcceptancePorts = {
+      withCandidatePatch: async (patch, probe) =>
+        patch === "BROKEN" ? null : probe(`sandbox:${patch}`),
+      reproResolvedOnSandbox: async () => true,
+      regressionFailuresOnSandbox: async () => 0,
+    }
+    const sel = buildReproAcceptanceSelector(true, ["r.py"], ports)
+    const winner = await (sel as NonNullable<typeof sel>)([outcome("BROKEN"), outcome("OK")])
+    expect(winner.run.patch).toBe("OK") // BROKEN: null apply ⇒ Infinity regression ⇒ loses
+  })
 })

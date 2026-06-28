@@ -171,7 +171,7 @@ import { composePromptPrelude, composePromptText } from "./prompt-augment"
 import { buildCleanSelectionAuthorityContracts } from "./public-contract-bundle"
 import type { SelectionContractBundle } from "./public-contract-types"
 import { toRegressionGreen } from "./regression-oracle"
-import { makeBenchRegressionOracle } from "./regression-oracle-adapter"
+import { buildProjectPytestArgv, makeBenchRegressionOracle } from "./regression-oracle-adapter"
 import {
   applyCandidatePatch,
   candidatePatchAppliesCleanly,
@@ -3213,6 +3213,11 @@ export const makeAcceptanceSelectCandidates = (
   sandbox: string,
   timeoutMs: number,
   enabled: boolean,
+  /** OPTIONAL dual-guard regression set (no-leak: base-tree-green tests an operator/
+   *  upstream selected). Non-empty ⇒ the acceptance rerank ALSO scores regression
+   *  failures; absent/empty ⇒ repro-only (byte-identical). The base-green capture
+   *  that feeds this is the measure-first follow-up (≈2× test cost — opt-in). */
+  regressionSet?: readonly string[],
 ) =>
   buildReproAcceptanceSelector(enabled, reproSources, {
     withCandidatePatch: (patch, probe) =>
@@ -3232,6 +3237,22 @@ export const makeAcceptanceSelectCandidates = (
       })
       return voteResolved(samples).verdict === "resolved"
     },
+    // Dual-guard regression probe (only when a regression set was supplied): run it
+    // on the patched tree and count failures (ran && !pass ⇒ failed.length, else 0).
+    ...(regressionSet !== undefined && regressionSet.length > 0
+      ? {
+          regressionFailuresOnSandbox: async (sb: string): Promise<number> => {
+            const buildArgv = buildProjectPytestArgv(
+              instance.swebench?.repo,
+              instance.swebench?.version,
+            )
+            const r = await makeBenchRegressionOracle(buildArgv, {
+              ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
+            }).run({ tests: regressionSet, sandbox: sb, timeoutMs })
+            return r.ran && !r.pass ? r.failed.length : 0
+          },
+        }
+      : {}),
   })
 
 /**
