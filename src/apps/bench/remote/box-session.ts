@@ -311,7 +311,15 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
     : ""
   const resumePrelaunch = buildResumePrelaunchStep(params.forwardedBenchEnv)
   return (
-    `set -o pipefail; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; ` +
+    // FORK-STORM GUARD (jun-28): on some repos (measured: pydata/xarray) the
+    // model's repo commands run via `uv run` leaked ~4700 live `uv` processes
+    // during patch-gen — ~6MB anon each ⇒ ~30GB AnonPages ⇒ kernel OOM-killed the
+    // box (exit 137, no verdict). Cap the bench user's process count so a runaway
+    // spawn fails its own fork (EAGAIN) instead of taking down the host: normal
+    // runs sit in the low hundreds, so 2048 leaves wide headroom while bounding
+    // peak well under box RAM. Soft limit, `|| true` so a lower box hard-limit
+    // never aborts launch. Docker grading runs as root (separate uid) — unaffected.
+    `set -o pipefail; ulimit -S -u 2048 2>/dev/null || true; cd ~/quanta && export PATH="$HOME/.local/bin:$PATH"; ` +
     resumePrelaunch +
     `QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
     `QUANTA_PREFS_HOME="$HOME/.quanta" ` +
