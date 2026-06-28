@@ -9,6 +9,12 @@ import type { CodeAction, CodeActionWorkspaceEdit } from "../ports/code-action-p
 import type { FormatRange, TextEdit as FormatTextEdit } from "../ports/format-port"
 import type { RenameWorkspaceEdit } from "../ports/rename-apply-port"
 import type { SignatureInfo } from "../ports/signature-help-port"
+import { buildLspServerEnv, resolveLspMemBudgetMb } from "../server-mem-budget"
+import {
+  type LspRssWatchdogHandle,
+  resolveLspRssBudgetMb,
+  startLspRssWatchdog,
+} from "../server-rss-watchdog"
 import type {
   CallHierarchyEntry,
   Diagnostic,
@@ -74,7 +80,6 @@ import type {
 } from "./base/raw-types"
 import { resolveWorkspaceConfiguration, toWorkspaceFolder } from "./base/workspace"
 import { encodeMessage, type JsonRpcMessage, type JsonRpcResponse, MessageReader } from "./jsonrpc"
-import { buildLspServerEnv, resolveLspMemBudgetMb } from "../server-mem-budget"
 
 export type { LspClientOptions, LspClientSpec } from "./base/config"
 // Re-export the complete original public surface so every importer of
@@ -100,6 +105,10 @@ export class LspClient implements LspPort {
   private readonly spec: LspClientSpec
 
   private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
+  /** RSS watchdog over `proc` — kills a server whose total resident memory blows
+   *  past the budget (off-heap pyright OOM that `--max-old-space-size` cannot
+   *  catch). null when disabled (budget 0) or before start. */
+  private rssWatchdog: LspRssWatchdogHandle | null = null
   private reader = new MessageReader()
   private nextId = 1
   private readonly pending = new Map<number, PendingRequest>()
@@ -159,6 +168,43 @@ export class LspClient implements LspPort {
     // discarded; this is purely a deadlock guard. Mirrors the stdout pump.
     this.stderrPump = this.drainStderr()
     this.watchExit()
+
+    // DEFENSIVE guard for OFF-heap RSS runaway: `--max-old-space-size` (above)
+    // caps only V8 old-space, so a server whose memory grows OUTSIDE old-space
+    // (external / ArrayBuffer / native) can still climb RSS to the host limit
+    // without Node ever throwing its own heap OOM. This watchdog kills such a
+    // runaway tree → the pool degrades that cwd to no-LSP (grep/read still work)
+    // and the host survives. NOTE (jun-28): budget DEFAULT (8GB) sits ABOVE the
+    // 4GB heap cap, so it does NOT govern an ON-heap balloon (that self-OOMs at
+    // 247 first — measured on xarray); this guard is for the off-heap path only.
+    // Opt out with QUANTA_LSP_RSS_BUDGET_MB=0.
+    const rssBudgetMb = resolveLspRssBudgetMb(process.env)
+    const pid = this.proc.pid
+    if (rssBudgetMb > 0 && typeof pid === "number") {
+      logger.info("lsp: RSS watchdog armed", {
+        command: this.command[0],
+        pid,
+        budgetMb: rssBudgetMb,
+      })
+      this.rssWatchdog = startLspRssWatchdog({
+        pid,
+        budgetMb: rssBudgetMb,
+        onExceed: (rssMb) => {
+          logger.warn("lsp: server RSS over budget — killing to protect host", {
+            command: this.command[0],
+            cwd: this.cwd,
+            rssMb: Math.round(rssMb),
+            budgetMb: rssBudgetMb,
+          })
+          // SIGKILL the runaway tree IMMEDIATELY — a graceful stop() would await
+          // a `shutdown` request (up to requestTimeoutMs) while the server keeps
+          // ballooning and could still OOM the box. The proc death cascades into
+          // watchExit (fails pending) → the pool's reactive teardown.
+          const proc = this.proc
+          if (proc) this.signalServerProcess(proc, "SIGKILL")
+        },
+      })
+    }
 
     const onAbort = () => {
       void this.stop().catch(() => undefined)
@@ -534,6 +580,8 @@ export class LspClient implements LspPort {
   async stop(): Promise<void> {
     if (this.stopped) return
     this.stopped = true
+    this.rssWatchdog?.stop()
+    this.rssWatchdog = null
     const proc = this.proc
 
     // Close every doc we lazily opened so the server's per-URI state is freed
@@ -793,14 +841,22 @@ export class LspClient implements LspPort {
         return
       } catch (e) {
         // injected killer is expected no-throw; keep stop() defensive anyway.
-        logger.warn("lsp: process-tree signal threw (defensive)", { pid, signal, error: errMessage(e) })
+        logger.warn("lsp: process-tree signal threw (defensive)", {
+          pid,
+          signal,
+          error: errMessage(e),
+        })
       }
     }
     try {
       proc.kill(signal)
     } catch (e) {
       // process may have already exited
-      logger.warn("lsp: proc.kill threw (likely already exited)", { pid, signal, error: errMessage(e) })
+      logger.warn("lsp: proc.kill threw (likely already exited)", {
+        pid,
+        signal,
+        error: errMessage(e),
+      })
     }
   }
 
@@ -1036,6 +1092,8 @@ export class LspClient implements LspPort {
     if (!proc) return
     const onExit = async () => {
       this.exited = true
+      this.rssWatchdog?.stop()
+      this.rssWatchdog = null
       // Reject in-flight requests FIRST so callers never hang on a dead server.
       this.failAllPending(new Error("LSP server exited"))
       // Then let the stderr drain finish before logging, so the retained tail
