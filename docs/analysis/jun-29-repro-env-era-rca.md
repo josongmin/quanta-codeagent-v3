@@ -80,6 +80,36 @@ hand-rolled, but once the env was fixed the hand-roll reproduced fine).
   load-bearing no-leak strip, so it is NOT done speculatively on an unmeasured
   feature; revisit only if the A/B shows grounding has potential.
 
+## SOTA++ faithfulness audit (vs the official SWE-bench harness)
+
+An adversarial audit compared the uv approximation against the official env-build
+(`MAP_REPO_VERSION_TO_SPECS` + `run_evaluation`). Two real gaps were closed; four are
+audit-confirmed acceptable simplifications.
+
+**Closed (landed):**
+- **install `.[extra]`** — official runs `pip install -e .[test]`; we used bare
+  `--with-editable .`. The "pip_packages always carries [test] deps" assumption is
+  FALSE for sphinx (`[test]` = html5lib/cython/typed-ast, absent from pip_packages →
+  HTML-writer tests ImportError; 44 instances). Fix: `installExtra` → `--with-editable
+  '.[extra]'` (gated on !floored). 63 cells have an extra.
+- **eval_commands** — `specEvalCommands` existed but was unwired; django's locale
+  exports (LANG/LC_ALL/PYTHONIOENCODING/LANGUAGE; 1.11-3.2, ~150 instances) never set
+  → locale-sensitive i18n tests flipped under C locale. Fix: `evalEnvExports` folds the
+  `export KEY=VAL` subset into the exec env (root-only `locale-gen` skipped).
+
+**Acceptable non-SOTA simplifications (audit-confirmed with Verified instance counts):**
+- matplotlib qhull/apt build steps (≤34 subset, out of uv scope — needs host libs).
+- conda `packages` field dropped (sympy/xarray transitively covered; sklearn
+  pandas/matplotlib overlaps the already-floored/native-blocked cohort).
+- coarse floor gate (drops pure-python pins on floored cells — only 4 astropy-1.3
+  instances hit it, and they're independently native-build-blocked anyway).
+- `environment_setup_commit` ignored (building from base_commit's own setup.py is the
+  correct dependency authority for that commit — defensible, no concrete failure).
+
+Empirical: all 689 spec cells produce well-formed argv (valid editable target, KEY=VAL
+env). The era-pin core (sphinx Jinja2==3.0.3 + applehelp caps on non-floored cells) is
+SOTA-matching.
+
 ## Residual env gaps (follow-up, low priority)
 
 - The regen drops the official `packages` (conda) field; a few repos (pvlib `pandas
