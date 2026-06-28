@@ -102,4 +102,30 @@ describe("selectByAcceptance — score-once + rerank", () => {
     expect(r.selected.patch).toBe("")
     expect(r.selected.tier).toBe("none")
   })
+
+  test("DEGRADE: a throwing repro oracle on ONE candidate does not abort selection", async () => {
+    const oracles: AcceptanceOracles = {
+      runRepro: async (c) => {
+        if (c.patch === "B") throw new Error("sandbox crash on B")
+        return true
+      },
+    }
+    // B's oracle throws ⇒ B degrades to repro=false (loses); A still wins. No throw.
+    const r = await selectByAcceptance([cand("A"), cand("B")], oracles)
+    expect(r.selected.patch).toBe("A")
+    expect(r.scored[1]).toMatchObject({ patch: "B", reproPass: false })
+  })
+
+  test("DEGRADE: a throwing regression oracle ⇒ +Infinity failures (loses min bar)", async () => {
+    const oracles: AcceptanceOracles = {
+      runRepro: async () => true,
+      runRegression: async (c) => {
+        if (c.patch === "B") throw new Error("regression run crashed")
+        return 0
+      },
+    }
+    const r = await selectByAcceptance([cand("A"), cand("B")], oracles)
+    expect(r.selected.patch).toBe("A") // A has 0 failures; B degraded to Infinity
+    expect(r.scored[1]?.regressionFailures).toBe(Number.POSITIVE_INFINITY)
+  })
 })

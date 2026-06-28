@@ -30,15 +30,21 @@ export const buildAcceptanceSelector = (
   normalizePatch: (patch: string) => string = trimKey,
 ): ((candidates: readonly RepairCandidateOutcome[]) => Promise<RepairCandidateOutcome>) => {
   return async (candidates) => {
-    // never called empty by the orchestrator (it guards length); stay NPE-safe.
-    if (candidates.length === 0) return candidates[0] as RepairCandidateOutcome
+    // The orchestrator guards `candidates.length > 0` before calling this port, so
+    // an empty list is a contract violation — throw loudly rather than return a
+    // cast-masked `undefined` that would NPE later at `winner.adopt()`.
+    if (candidates.length === 0) {
+      throw new Error("buildAcceptanceSelector: empty candidate list")
+    }
     const accCandidates = candidates.map((c) => ({
       patch: c.run.patch,
       patchKey: normalizePatch(c.run.patch),
     }))
     const { selected } = await selectByAcceptance(accCandidates, oracles)
-    // map the winning patch back to its outcome (first match — same patch ⇒ same
-    // tree); fall back to the first candidate on a degenerate empty selection.
+    // Map the winning patch back to its outcome. Distinct candidates with the SAME
+    // patch are equivalent (adopt re-applies the diff ⇒ identical tree; deterministic
+    // validation ⇒ identical verdict), so the first match is correct. `selected.patch`
+    // is always one of the inputs unless tier === "none" (all empty) ⇒ first candidate.
     const winner = candidates.find((c) => c.run.patch === selected.patch)
     return winner ?? (candidates[0] as RepairCandidateOutcome)
   }

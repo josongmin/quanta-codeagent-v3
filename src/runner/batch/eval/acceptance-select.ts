@@ -54,6 +54,34 @@ export interface AcceptanceResult {
  * Agentless-faithful rerank ladder. Sequential await keeps it deterministic; a
  * batching oracle port may parallelise internally.
  */
+/** DEGRADE-don't-abort: a single candidate's oracle failure (sandbox crash /
+ *  timeout) must NOT reject the whole selection — that would crash the repair round
+ *  on one flaky fork, where the legacy validator-rank selector never throws. A
+ *  thrown repro ⇒ `false` (didn't resolve); a thrown regression ⇒ `+Infinity`
+ *  failures (loses the min-regression bar). The candidate simply loses. */
+const safeRepro = async (
+  run: NonNullable<AcceptanceOracles["runRepro"]> | undefined,
+  c: AcceptanceCandidate,
+): Promise<boolean> => {
+  if (run === undefined) return false
+  try {
+    return await run(c)
+  } catch {
+    return false
+  }
+}
+const safeRegression = async (
+  run: NonNullable<AcceptanceOracles["runRegression"]> | undefined,
+  c: AcceptanceCandidate,
+): Promise<number> => {
+  if (run === undefined) return 0
+  try {
+    return await run(c)
+  } catch {
+    return Number.POSITIVE_INFINITY
+  }
+}
+
 export const selectByAcceptance = async (
   candidates: readonly AcceptanceCandidate[],
   oracles: AcceptanceOracles,
@@ -61,9 +89,8 @@ export const selectByAcceptance = async (
   const scored: AcceptanceScored[] = []
   let index = 0
   for (const candidate of candidates) {
-    const reproPass = oracles.runRepro !== undefined ? await oracles.runRepro(candidate) : false
-    const regressionFailures =
-      oracles.runRegression !== undefined ? await oracles.runRegression(candidate) : 0
+    const reproPass = await safeRepro(oracles.runRepro, candidate)
+    const regressionFailures = await safeRegression(oracles.runRegression, candidate)
     scored.push({
       index,
       patch: candidate.patch,

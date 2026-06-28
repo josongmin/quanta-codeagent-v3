@@ -46,9 +46,12 @@ test5
 \`\`\`
 Return only the selected tests.`
 
-/** Parse the model's plain-text return into excluded test names — one per line
- *  (faithful to `_parse_model_return_lines`: strip then split on newline), with
- *  empty lines dropped. */
+/** Parse the model's plain-text return into excluded test names — one per line.
+ *  INTENTIONAL robustness deviation from Agentless `_parse_model_return_lines`
+ *  (which is `content.strip().split("\n")` only): we ALSO per-line trim + drop
+ *  empty lines, so a model that emits `"  test_x  "` or stray blank lines still
+ *  matches the exact passing-test name. Set-difference semantics are unchanged
+ *  (an empty line never matches a real test either way). */
 export const parseExcludedTests = (raw: string): string[] => {
   const trimmed = raw.trim()
   if (trimmed === "") return []

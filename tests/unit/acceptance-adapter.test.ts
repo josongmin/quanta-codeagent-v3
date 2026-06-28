@@ -60,10 +60,11 @@ describe("buildAcceptanceSelector — RepairCandidateOutcome bridge", () => {
     expect(seen).toEqual(["A", "B", "C"])
   })
 
-  test("degenerate: empty candidate list ⇒ no throw (returns undefined-safe)", async () => {
-    // The orchestrator never calls with an empty list (it guards length), but the
-    // adapter must not NPE if it ever does.
-    const winner = await buildAcceptanceSelector({ runRepro: async () => true })([])
-    expect(winner).toBeUndefined()
+  test("empty candidate list ⇒ THROWS (contract violation, not a cast-masked undefined)", async () => {
+    // The orchestrator guards length>0 before calling; an empty list is a contract
+    // breach — throw loudly rather than return undefined that NPEs at winner.adopt().
+    await expect(buildAcceptanceSelector({ runRepro: async () => true })([])).rejects.toThrow(
+      "empty candidate list",
+    )
   })
 })
