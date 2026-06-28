@@ -15,6 +15,11 @@
  *   - `"strict"`        ⇒ `{ mustPass: true, maxTrips: 2 }`   (alias)
  *   - `"2"`             ⇒ `{ mustPass: true, maxTrips: 2 }`
  *   - `"3"`             ⇒ `{ mustPass: true, maxTrips: 3 }`
+ *   - `"sticky"`        ⇒ `{ mustPass: true, maxTrips: 2, stickyRed: true }`
+ *     (sticky-red: a failing verify is cleared ONLY by re-running the SAME
+ *     command green — a narrow repro green can't wash out a broad regression
+ *     red; flipped django-11141 gpt-5.4 FAIL→PASS. Bench consumes it via the
+ *     driver's reconcileBenchGuards, not this apply.)
  *   - anything else (absent / `"true"` / `"yes"` / `"4"` / garbage) ⇒
  *     `undefined` (knob does nothing; driver's existing posture stands)
  *

@@ -105,6 +105,25 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "full",
   },
+  // jun-28 AUTONOMOUS-SAFE arm — v6-singlepass-execfull + sticky-red verify gate.
+  // The proven autonomous-safety bundle (verify-guard mustPass + STICKY: a failing
+  // verify is cleared only by re-running the SAME command green — flipped
+  // django-11141 gpt-5.4 FAIL→PASS). OPT-IN preset (NOT a promoted default): it is
+  // the measurement arm for sticky's default-promotion decision (no global
+  // byte-identical change). Identical to v6-singlepass-execfull except must-pass.
+  "agentless-v6-singlepass-execfull-sticky": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "must-pass": "sticky",
+  },
   // jun-27 REPAIR EXPERIMENT — 3-arm A/B isolating the closure-repair REINJECT
   // loop (the Prometheus-equivalent execution-feedback lever) from the closure
   // grounding it rides on. RCA: ~88% of v6 failures are "synthesis" — correct

@@ -65,6 +65,34 @@ export const AGENTLESS_V6_SINGLEPASS_EXECFULL: PresetSpec = {
 }
 
 /**
+ * `agentless-v6-singlepass-execfull-sticky` — jun-28 AUTONOMOUS-SAFE arm. The v6
+ * measured winner PLUS `must-pass: sticky` (sticky-red verify gate: a failing
+ * verify is cleared ONLY by re-running the SAME command green — a narrow repro
+ * green can't wash out a broad regression red). Flipped django-11141 gpt-5.4
+ * FAIL→PASS in the controlled e2e. OPT-IN arm (not a promoted default) — the
+ * measurement vehicle for sticky's default-promotion decision. Identical to
+ * AGENTLESS_V6_SINGLEPASS_EXECFULL except the one added param.
+ */
+export const AGENTLESS_V6_SINGLEPASS_EXECFULL_STICKY: PresetSpec = {
+  id: "agentless-v6-singlepass-execfull-sticky",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "must-pass": "sticky",
+  },
+  note: "jun-28 autonomous-safe arm: v6 winner + sticky-red verify gate. Flipped django-11141 gpt-5.4 FAIL→PASS.",
+}
+
+/**
  * `agentless-v1-nosteer` — the A/B BASELINE for the `lsp-steer` grounding steer.
  * Identical to `agentless-v1` but with the steer explicitly `off`, so
  * `--preset agentless-v1` vs this is a clean single-variable measure of the
@@ -288,6 +316,7 @@ export const BASELINE: PresetSpec = {
 export const PRESET_SPECS: Readonly<Record<string, PresetSpec>> = Object.freeze({
   [AGENTLESS_V1.id]: AGENTLESS_V1,
   [AGENTLESS_V6_SINGLEPASS_EXECFULL.id]: AGENTLESS_V6_SINGLEPASS_EXECFULL,
+  [AGENTLESS_V6_SINGLEPASS_EXECFULL_STICKY.id]: AGENTLESS_V6_SINGLEPASS_EXECFULL_STICKY,
   [AGENTLESS_V1_NOSTEER.id]: AGENTLESS_V1_NOSTEER,
   [AGENTLESS_V6_CLOSURE_CONTROL.id]: AGENTLESS_V6_CLOSURE_CONTROL,
   [AGENTLESS_V6_CLOSURE_REPAIR.id]: AGENTLESS_V6_CLOSURE_REPAIR,

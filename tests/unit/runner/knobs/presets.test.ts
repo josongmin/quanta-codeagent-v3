@@ -126,4 +126,24 @@ describe("preset → resolver integration", () => {
     expect(r.get("lsp")?.source).toBe("env")
     expect(r.get("lsp")?.value).toBe(false)
   })
+
+  // jun-28 autonomous-safe arm — CONTRACT: it carries the sticky verify gate AND
+  // is otherwise byte-identical to the v6 winner (the bundle can't silently drop
+  // the safety gate, and can't diverge from the baseline it measures against).
+  describe("autonomous-safe arm (agentless-v6-singlepass-execfull-sticky)", () => {
+    const v6 = KNOB_PRESETS["agentless-v6-singlepass-execfull"]
+    const sticky = KNOB_PRESETS["agentless-v6-singlepass-execfull-sticky"]
+
+    test("carries the sticky-red verify gate (must-pass=sticky)", () => {
+      expect(sticky?.["must-pass"]).toBe("sticky")
+    })
+
+    test("is v6 + must-pass:sticky and NOTHING else (no drift from the baseline)", () => {
+      expect(sticky).toEqual({ ...(v6 ?? {}), "must-pass": "sticky" })
+    })
+
+    test("the baseline v6 does NOT carry must-pass (single-variable A/B)", () => {
+      expect(v6 && "must-pass" in v6).toBe(false)
+    })
+  })
 })
