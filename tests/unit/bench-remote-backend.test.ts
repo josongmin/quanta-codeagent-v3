@@ -259,8 +259,12 @@ describe("ssh backend", () => {
     )
     expect(scpData).toBeDefined()
     // ssh run_evaluation streamed via bash -s; the script is in stdin
+    // The run command's body is the grade script piped via `bash -s`. Since the
+    // sphinx -rA fix the python entrypoint is `python ~/ra_shim.py` (run_evaluation
+    // lives base64-encoded inside the shipped shim), so locate it by the stable
+    // `--predictions_path` flag rather than the literal "run_evaluation".
     const sshRun = issued.find(
-      (i) => i.cmd === "ssh" && i.args.includes("bash") && i.input?.includes("run_evaluation"),
+      (i) => i.cmd === "ssh" && i.args.includes("bash") && i.input?.includes("--predictions_path"),
     )
     expect(sshRun).toBeDefined()
     // scp report back happens last among scps
@@ -272,7 +276,7 @@ describe("ssh backend", () => {
 
   test("run_evaluation command carries default --max_workers 4, --namespace swebench, --cache_level instance", async () => {
     const { issued } = await setup()
-    const script = issued.find((i) => i.input?.includes("run_evaluation"))?.input ?? ""
+    const script = issued.find((i) => i.input?.includes("--predictions_path"))?.input ?? ""
     expect(script).toContain("--max_workers 4")
     expect(script).toContain("--namespace swebench")
     expect(script).toContain("--cache_level instance")
@@ -296,7 +300,7 @@ describe("ssh backend", () => {
     await backend
       .grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "run-$&-$1", outDir })
       .catch(() => undefined)
-    const script = issued.find((i) => i.input?.includes("run_evaluation"))?.input ?? ""
+    const script = issued.find((i) => i.input?.includes("--predictions_path"))?.input ?? ""
     expect(script).toContain("--run_id run-$&-$1")
   })
 
@@ -314,16 +318,22 @@ describe("ssh backend", () => {
     )
     const backend = createSshBackend({ host: "u@h", keyPath: "/k", spawn, sleep: async () => {} })
     await backend.grade("/p.jsonl", { datasetPath: "/d.jsonl", runId: "r", outDir, maxWorkers: 16 })
-    const script = issued.find((i) => i.input?.includes("run_evaluation"))?.input ?? ""
+    const script = issued.find((i) => i.input?.includes("--predictions_path"))?.input ?? ""
     expect(script).toContain("--max_workers 16")
   })
 
-  test("ssh/scp invocations carry -i <key> and StrictHostKeyChecking=accept-new", async () => {
+  test("ssh/scp invocations carry -i <key>, accept-new, and the fail-fast timeout triad", async () => {
     const { issued } = await setup()
     for (const i of issued.filter((x) => x.cmd === "ssh" || x.cmd === "scp")) {
       expect(i.args).toContain("-i")
       expect(i.args).toContain("/tmp/key.pem")
       expect(i.args).toContain("StrictHostKeyChecking=accept-new")
+      // TEETH: without these a flaky box hangs scp/ssh indefinitely — and the
+      // report-back + error-log fetch run AFTER the grade succeeded, so a hang
+      // there strands a completed grade forever.
+      expect(i.args).toContain("BatchMode=yes")
+      expect(i.args).toContain("ConnectTimeout=15")
+      expect(i.args).toContain("ServerAliveInterval=15")
     }
   })
 

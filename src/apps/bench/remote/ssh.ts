@@ -13,7 +13,7 @@
  * Every external call goes through the injected {@link SpawnFn}; the EC2
  * backend reuses this module against a freshly-provisioned host.
  */
-import { mkdtempSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -60,12 +60,29 @@ const expandHome = (p: string): string => {
   return p
 }
 
-/** Common ssh/scp flags: explicit key + auto-accept host key (fresh boxes). */
+/**
+ * Common ssh/scp flags: explicit key + auto-accept host key (fresh boxes) +
+ * fail-fast networking. The timeout/keepalive triad is NOT cosmetic: without it
+ * a flaky box (a TCP black-hole on :22) makes any scp/ssh hang INDEFINITELY —
+ * and the report-back + error-log fetch run AFTER the grade already succeeded, so
+ * a hang there strands a completed grade forever. `BatchMode=yes` also prevents a
+ * key-auth failure from blocking on an interactive password prompt. Mirrors the
+ * sibling `BENCH_SSH_SAFE_OPTS`/`makeSsh` SSOT (which the full-remote path already
+ * carries) — closing the asymmetry flagged by the jun-28 hardening audit.
+ */
 const sshFlags = (keyPath: string): readonly string[] => [
   "-i",
   expandHome(keyPath),
   "-o",
   "StrictHostKeyChecking=accept-new",
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  "ConnectTimeout=15",
+  "-o",
+  "ServerAliveInterval=15",
+  "-o",
+  "ServerAliveCountMax=4",
 ]
 
 /**
@@ -100,12 +117,43 @@ export const buildRemoteGradeScript = (maxWorkers: number): string => {
   ].join("\n")
 }
 
+/**
+ * The harness mangles `model_name_or_path` with `.replace("/", "__")` before it
+ * names BOTH the report file and the per-instance log dir
+ * (run_evaluation.py:93). We must replicate that mangling or every path with a
+ * slash-bearing model name (e.g. an HF-style `org/model`) silently mismatches —
+ * the report poll would 404 and the error-log fetch would pull nothing. Today's
+ * names ("quanta", "gpt-5.4") have no slash so this is a no-op, but the harness
+ * contract — not the current naming luck — is what we encode. Idempotent.
+ */
+const sanitizeModelName = (model: string): string => model.replace(/\//g, "__")
+
+/** Cap on per-grade error-log fetches — beyond this an env/build break has
+ *  errored most of the slice (a systemic failure, not per-instance debugging),
+ *  and N serial scp round-trips aren't worth it. The error COUNT is still
+ *  surfaced by the report tally, so truncation is never silent-as-complete. */
+const MAX_ERROR_LOG_FETCH = 50
+
+/**
+ * Remote per-instance swebench log dir for `id` under this run. Mirrors the
+ * harness convention `RUN_EVALUATION_LOG_DIR / run_id / model / instance_id`
+ * (constants.py: `RUN_EVALUATION_LOG_DIR = Path("logs/run_evaluation")`), rooted
+ * at `~` because the grade runs under nohup from the home dir. The dir holds
+ * `run_instance.log` + `test_output.txt` — the only ground-truth for WHY an
+ * instance errored. Pure string op (no fs / no network) so it's unit-testable.
+ * `model` is sanitized to match the harness's `/`→`__` mangling.
+ */
+export const remoteInstanceLogDir = (runId: string, model: string, id: string): string =>
+  `~/logs/run_evaluation/${runId}/${sanitizeModelName(model)}/${id}`
+
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
   const spawn = cfg.spawn ?? defaultSpawn
   const sleep = cfg.sleep ?? delay
-  const model = cfg.modelName ?? "quanta"
+  // Sanitized at the source so BOTH the report filename and the per-instance log
+  // path match the harness's `/`→`__` mangling (run_evaluation.py:93).
+  const model = sanitizeModelName(cfg.modelName ?? "quanta")
   const pollIntervalMs = cfg.pollIntervalMs ?? 15_000
   const maxPolls = cfg.maxPolls ?? 240
 
@@ -175,7 +223,46 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
       )
     }
 
-    return { reportPath, ...parsed }
+    // 6) observability: for ERROR instances, pull each one's remote swebench log
+    //    dir back to `<outDir>/error-logs/<id>/`. This is the only ground-truth
+    //    for WHY an instance errored (env/build/collection), and a manual ssh to
+    //    the box is often blocked or the box is gone. Best-effort: a missing log
+    //    or a failed scp must NOT fail the grade — the report already parsed.
+    let errorLogDir: string | undefined
+    if (parsed.errored.length > 0) {
+      errorLogDir = join(outDir, "error-logs")
+      try {
+        mkdirSync(errorLogDir, { recursive: true })
+      } catch {
+        // a mkdir failure (perms) shouldn't sink the grade; skip the fetch.
+        errorLogDir = undefined
+      }
+      if (errorLogDir !== undefined) {
+        // Cap the serial fetches: a slice that errored >MAX is a systemic break,
+        // not per-instance debugging fodder (the count is still in the tally).
+        for (const id of parsed.errored.slice(0, MAX_ERROR_LOG_FETCH)) {
+          const dest = join(errorLogDir, id)
+          try {
+            // `scp -r` nests the source UNDER an existing dest (→ <id>/<id>) on a
+            // re-grade into the same outDir; clear the dest first so the logs land
+            // at <id>/ directly. force:true ⇒ a missing dest is a no-op.
+            rmSync(dest, { recursive: true, force: true })
+            await spawn("scp", [
+              ...flags,
+              "-r",
+              `${cfg.host}:${remoteInstanceLogDir(opts.runId, model, id)}`,
+              dest,
+            ])
+            // non-zero code is tolerated (log dir may not exist for a crash
+            // that never reached the per-instance stage) — best-effort.
+          } catch {
+            // even a thrown spawn (reaped child) or rmSync must not break the outcome.
+          }
+        }
+      }
+    }
+
+    return { reportPath, ...parsed, ...(errorLogDir !== undefined ? { errorLogDir } : {}) }
   }
 
   return { name: `ssh:${cfg.host}`, grade }

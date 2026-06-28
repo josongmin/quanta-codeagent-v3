@@ -1839,6 +1839,11 @@ const cmdGrade = async (): Promise<void> => {
   for (const id of out.errored) logger.info(`  ⚠️  ${id}`)
   for (const id of out.emptyPatch) logger.info(`  ∅ ${id}`)
   logger.info(`report: ${out.reportPath}`)
+  // Surface the per-instance failure logs for ERROR ids — diagnosable locally
+  // without a manual ssh to the (often-gone) box.
+  if (out.errorLogDir !== undefined) {
+    logger.info(`error logs (run_instance.log per id): ${out.errorLogDir}/`)
+  }
 }
 
 const cmdDiff = (): void => {

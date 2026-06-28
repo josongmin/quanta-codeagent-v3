@@ -37,6 +37,13 @@ export interface GradeOutcome {
   readonly unresolved: readonly string[]
   readonly errored: readonly string[]
   readonly emptyPatch: readonly string[]
+  /**
+   * Local dir holding each ERROR instance's retrieved swebench log dir
+   * (`<outDir>/error-logs/<id>/run_instance.log` …). Present only when grading
+   * produced ≥1 error and the best-effort fetch ran. The ground-truth for WHY an
+   * instance errored without a manual ssh to the (often gone) box.
+   */
+  readonly errorLogDir?: string
 }
 
 /** A pluggable remote grading backend. */
