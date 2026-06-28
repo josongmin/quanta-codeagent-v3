@@ -145,6 +145,32 @@ export class BudgetMeter {
   }
 
   /**
+   * L2 pre-flight admission control (cost dimension). Pure projection — NO
+   * mutation. Answers "if `projectedUsd` MORE dollars were spent, would the
+   * cost cap trip?" without billing them. The loop uses this BEFORE issuing a
+   * model call: when the accumulated cost plus the next prompt's input-floor
+   * cost already exceeds `maxCostUsd`, the call is GUARANTEED to breach (output
+   * only adds cost), so the loop can stop without spending.
+   *
+   * Propositional, same contract as `checkExhausted`:
+   *   - No `maxCostUsd` dial ⇒ `{ exhausted: false }` (byte-identical no-op).
+   *   - A non-finite / negative projection ⇒ `{ exhausted: false }` (never
+   *     pre-empt on a garbage estimate — fail-open toward letting the call run,
+   *     since the post-hoc `checkExhausted` still guards the real spend).
+   *   - Otherwise trips iff `costUsdAccum + projectedUsd > maxCostUsd`.
+   * `wouldExceedCost(0)` is exactly the cost arm of `checkExhausted`.
+   */
+  wouldExceedCost(projectedUsd: number): BudgetExhaustion {
+    const cap = this.dials.maxCostUsd
+    if (cap === undefined) return { exhausted: false }
+    if (!Number.isFinite(projectedUsd) || projectedUsd < 0) return { exhausted: false }
+    const observed = this.costUsdAccum + projectedUsd
+    return observed > cap
+      ? { exhausted: true, kind: "cost_usd", budget: cap, observed }
+      : { exhausted: false }
+  }
+
+  /**
    * 0..100 remaining-budget percentage across the *configured* consumable
    * dials (token + cost dimensions). PURE / propositional — NO heuristics, NO
    * arbitrary thresholds. For each configured dial the remaining fraction is

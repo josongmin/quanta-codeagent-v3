@@ -1,14 +1,15 @@
 import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import { errMessage, logger } from "@/shared"
+import { emitBudgetExhaustedDecision } from "../decision-emit-phase3"
 import { maybeProposeRadarCard } from "../radar-producer-hook"
 import { freshRecovery } from "../recovery"
 import { buildWorkMetricsResources, turnSpanAttrs } from "../session-resources"
-import { interruptedCategory } from "../stop-category"
+import { completedCategory, interruptedCategory } from "../stop-category"
 import { flushTurnObservability } from "../turn-closeout"
 import type { TurnState } from "../turn-context"
 import type { AgentOutcome } from "../types"
 import { runTurn } from "./same-turn-engine"
-import { prepareTurnIteration } from "./turn-iteration"
+import { prepareTurnIteration, projectCostPreflight } from "./turn-iteration"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "./turn-outcome"
 import type { RunAgentContext, TurnResult } from "./types"
 
@@ -26,8 +27,7 @@ export const executeTurnWithObservability = async (args: {
   // radar producer hook is wired, so the default-OFF path reads no extra
   // clock (strict byte-identity). `undefined` ⇒ the radar block is absent ⇒
   // the finally never samples.
-  const radarTurnStartMs =
-    args.ctx.cfg.radar !== undefined ? Date.now() : undefined
+  const radarTurnStartMs = args.ctx.cfg.radar !== undefined ? Date.now() : undefined
   try {
     if (args.ctx.turnDiffSession !== undefined) {
       await args.ctx.turnDiffSession.startTurn(args.turn)
@@ -72,9 +72,7 @@ export const executeTurnWithObservability = async (args: {
       maybeProposeRadarCard(args.ctx.cfg.radar, {
         lastTaskDurationMs: Date.now() - radarTurnStartMs,
         flushKind,
-        ...(args.ctx.cfg.sessionId !== undefined
-          ? { sessionId: args.ctx.cfg.sessionId }
-          : {}),
+        ...(args.ctx.cfg.sessionId !== undefined ? { sessionId: args.ctx.cfg.sessionId } : {}),
       })
     }
     endSpan(turnSpan, turnSpanStatus, attrs({}))
@@ -97,6 +95,16 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
     })
     if (turnReady === "aborted") {
       return ctx.finish("aborted", turn - 1, interruptedCategory("user"))
+    }
+    // L2 cost pre-flight admission control — stop BEFORE issuing a model call
+    // whose input cost alone would breach `maxCostUsd` (the call cannot avoid
+    // breaching, so spending on it is waste). Default-OFF / byte-identical when
+    // no cost dial is configured (`projectCostPreflight` ⇒ undefined). `turn-1`
+    // completed turns: this turn produced no model output.
+    const costPreflight = projectCostPreflight(ctx.cfg, ctx.wm)
+    if (costPreflight !== undefined) {
+      emitBudgetExhaustedDecision(ctx.cfg.decisionEmitter, costPreflight, { turn })
+      return ctx.finish("budget_exhausted", turn - 1, completedCategory("max_turns"))
     }
     const { result } = await executeTurnWithObservability({ ctx, turn })
     const resolution = await resolveTurnLoopOutcome({

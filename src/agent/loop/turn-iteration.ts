@@ -1,6 +1,9 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
+import { costUsd } from "@/observability"
 import { errMessage } from "@/shared"
+import type { BudgetExhaustion } from "../budget"
+import { estimateTokens } from "../compaction"
 import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
 import { captureInterruptedTurn } from "../interrupted-turn"
 import { stampTurn } from "../session-resources"
@@ -11,6 +14,7 @@ import { injectWorkflowKeywordNudge } from "../workflow-keyword"
 import { compactNowOnDemand } from "./compaction-wire"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
+import { configuredModel } from "./emit-helpers"
 
 export const applySteerBarrierMessages = async (
   cfg: AgentConfig,
@@ -196,4 +200,40 @@ export const prepareTurnIteration = async (args: {
     if (turnStart.promptHook !== undefined) args.hookPromptPending.push(turnStart.promptHook)
   }
   return "continue"
+}
+
+/**
+ * L2 pre-flight cost admission control. Returns the cost exhaustion to finish
+ * on when the UPCOMING model call is GUARANTEED to breach the `maxCostUsd` cap,
+ * else `undefined` (proceed). Pure / read-only — never mutates the meter.
+ *
+ * Projection = the prompt's INPUT-floor cost (output assumed 0). When
+ * `costUsdAccum + inputFloor > cap`, the call cannot avoid breaching (output
+ * only adds), so pre-empting is correct with ZERO false positives. The token
+ * estimate is `estimateTokens(wm.snapshot())`, which UNDER-counts the real
+ * wire prompt (it omits the system prompt + tool schemas added downstream in
+ * `same-turn-engine`), making the floor strictly conservative.
+ *
+ * Precision bound (documented, NOT a heuristic): the model is read as the
+ * configured BASE model. A per-turn sticky / skill model SWAP that downstream
+ * resolves to a CHEAPER model could make this floor a slight over-estimate —
+ * at worst pre-empting ONE turn early in a run already within a rounding error
+ * of a hard cap. The projection itself is deterministic; only the rare swap
+ * edge is imprecise, and it only ever stops a near-exhausted run marginally
+ * sooner (never lets spend through — the post-hoc `checkExhausted` still
+ * guards the real model + real tokens at the epilogue).
+ *
+ * Byte-identical default-OFF: no `budgetMeter`, no `maxCostUsd` dial, or an
+ * unpriced model ⇒ `undefined` (no behavior change).
+ */
+export const projectCostPreflight = (
+  cfg: AgentConfig,
+  wm: WorkingMemory<Message>,
+): BudgetExhaustion | undefined => {
+  const meter = cfg.budgetMeter
+  if (meter === undefined) return undefined
+  const inputFloorUsd = costUsd(configuredModel(cfg.llm), estimateTokens([...wm.snapshot()]), 0)
+  if (inputFloorUsd === null) return undefined // unpriced model ⇒ no pre-flight
+  const ex = meter.wouldExceedCost(inputFloorUsd)
+  return ex.exhausted ? ex : undefined
 }
