@@ -1881,9 +1881,15 @@ runs:
   auth: chatgpt-oauth
   grading: official swebench python harness, spot EC2 c7i.4xlarge, source-only patch
   scope: 'GRADER-FIX RECOVERY wave — the sphinx cluster that the official harness was FALSELY marking grader_invalid. ROOT: sphinx test_cmd is `tox -epy39 -v --`; the `-v` is TOX verbosity, NOT pytest, so the inner pytest printed only a `1 passed` summary with NO per-test `PASSED <id>` lines — the swebench log parser keys off those, so tests_status parsed EMPTY → false unresolved, and even GOLD came back resolved=0 (a false grader_invalid that discarded the model''s correct patch). FIX (c89504d84): run the harness via a `python -c` shim that appends `-rA` to tox `--` test_cmds → pytest emits per-test PASSED lines → parseable. Box-verified gold 0→1. PARTIAL — wave in progress; confirmed recoveries so far.'
-  success_note: 'These were a MEASUREMENT HOLE (grader parse bug, not a real model miss). sphinx-8595 previously came back grader_invalid (correct patch discarded); with -rA it grades as a real PASS (638B patch, 27 turns) — end-to-end validation of the grader fix on the exact false-fail cluster. NOTE: this wave also exercises the box-reuse stale-code self-heal (ff9571c85 / 83987edbd) so a reused box can never grade with old src/config.'
-  resolved_count: 1
+  success_note: 'These were a MEASUREMENT HOLE (grader parse bug, not a real model miss). The whole sphinx cluster previously came back grader_invalid (correct patches discarded); with -rA they grade as real PASSes — end-to-end validation of the grader fix on the exact false-fail cluster. 3/4 recovered (8595/8265/9658); 9711 still in patch-gen. NOTE: this wave also exercises the box-reuse stale-code self-heal (ff9571c85 / 83987edbd) so a reused box can never grade with old src/config.'
+  resolved_count: 3
   resolved:
   - instance_id: sphinx-doc__sphinx-8595  # RECOVERED — was false grader_invalid, now real PASS
     repo: sphinx
     turns: 27
+  - instance_id: sphinx-doc__sphinx-8265  # RECOVERED — was false grader_invalid, now real PASS
+    repo: sphinx
+    turns: 59
+  - instance_id: sphinx-doc__sphinx-9658  # RECOVERED — was false grader_invalid, now real PASS
+    repo: sphinx
+    turns: 25
