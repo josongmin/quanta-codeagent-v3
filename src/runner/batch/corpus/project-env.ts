@@ -1,6 +1,11 @@
 import { basename, join } from "node:path"
 import { pythonForRepoVersion, resolvePythonForRepoVersion } from "./repo-version-python"
-import { specPipPackages, specPreInstall } from "./repo-version-specs"
+import {
+  specEvalCommands,
+  specInstall,
+  specPipPackages,
+  specPreInstall,
+} from "./repo-version-specs"
 
 /* ── era-correct dependency pins (jun-29 SOTA++ env fix) ───────────────────────
  * The official SWE-bench env pins old-instance deps two ways: `pip_packages`
@@ -40,6 +45,29 @@ const preInstallConstraints = (repo: string, version: string | undefined): reado
     for (const m of repl.matchAll(DEP_CONSTRAINT)) out.add(m[0])
   }
   return [...out]
+}
+
+/** The pip EXTRA from the official `install` command (`pip install -e .[test]` →
+ *  `test`), or undefined. Applied as `--with-editable '.[extra]'` so the editable
+ *  install pulls the official test/dev extras the env needs — SOTA-faithful: a
+ *  prior assumption that pip_packages always carries the `[test]` deps is FALSE
+ *  (e.g. sphinx `[test]` = html5lib/cython/typed-ast, absent from pip_packages). */
+const installExtra = (repo: string, version: string | undefined): string | undefined => {
+  const m = specInstall(repo, version)?.match(/-e\s+\.\[([A-Za-z0-9_,.-]+)\]/)
+  return m === null ? undefined : m?.[1]
+}
+
+/** `export KEY=VAL` env vars from the official `eval_commands` (e.g. django's
+ *  LANG / LC_ALL / PYTHONIOENCODING locale exports, which flip locale-sensitive
+ *  i18n tests). Folded into the exec env. Non-export commands (root-only
+ *  `locale-gen`, `sed /etc/locale.gen`) are skipped. */
+const evalEnvExports = (repo: string, version: string | undefined): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const cmd of specEvalCommands(repo, version)) {
+    const m = /^export\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$/.exec(cmd.trim())
+    if (m?.[1] !== undefined && m[2] !== undefined) out[m[1]] = m[2].replace(/^["']|["']$/g, "")
+  }
+  return out
 }
 
 /** The era-correct `--with` pins for (repo,version): official `pip_packages`
@@ -228,14 +256,23 @@ export const buildProjectEnvUvRunArgv = (
     ]),
   ]
   const argv = [] as string[]
-  for (const [name, value] of Object.entries({ ...extraExecEnv, ...repoExecEnv(repo) })) {
+  // env layer: official eval_commands exports (LANG/locale) as the BASE, then the
+  // caller's extraExecEnv, then the repo's build-flag overrides (later wins).
+  for (const [name, value] of Object.entries({
+    ...evalEnvExports(repo, version),
+    ...extraExecEnv,
+    ...repoExecEnv(repo),
+  })) {
     if (argv.length === 0) argv.push("env")
     argv.push(`${name}=${value}`)
   }
   argv.push("uv", "run", "--no-project")
   argv.push("--python", pythonForRepoVersion(repo, version))
   for (const dep of deps) argv.push("--with", dep)
-  argv.push("--with-editable", ".")
+  // editable install with the official `.[extra]` (e.g. sphinx `.[test]`) so the
+  // env pulls the extras the tests import; bare `.` when the spec has no extra.
+  const extra = installExtra(repo, version)
+  argv.push("--with-editable", extra !== undefined ? `.[${extra}]` : ".")
   return argv
 }
 

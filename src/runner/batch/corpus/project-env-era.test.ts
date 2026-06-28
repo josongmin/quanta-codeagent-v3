@@ -63,3 +63,38 @@ describe("buildProjectEnvUvRunArgv — era pins folded into --with", () => {
     expect(argv.slice(-3)).toEqual(["python", "-s", "/tmp/repro.py"])
   })
 })
+
+describe("SOTA++ faithfulness — official install extra + eval_commands", () => {
+  test("install `.[test]` extra ⇒ editable target is `.[test]` (sphinx html5lib/cython)", () => {
+    const argv = buildProjectEnvUvRunArgv("sphinx-doc/sphinx", "3.5", ["pytest"], {})
+    const i = argv.indexOf("--with-editable")
+    expect(argv[i + 1]).toBe(".[test]")
+  })
+
+  test("no install extra ⇒ bare `.` editable target", () => {
+    const argv = buildProjectEnvUvRunArgv("django/django", "4.1", ["pytest"], {})
+    const i = argv.indexOf("--with-editable")
+    expect(argv[i + 1]).toBe(".")
+  })
+
+  test("eval_commands LANG exports folded into the exec env (django 1.11 locale)", () => {
+    const argv = buildProjectEnvUvRunArgv("django/django", "1.11", ["pytest"], {})
+    // env prefix carries the official locale exports
+    expect(argv).toContain("LANG=en_US.UTF-8")
+    expect(argv).toContain("LC_ALL=en_US.UTF-8")
+    expect(argv[0]).toBe("env") // exec-env prefix present
+  })
+
+  test("root-only eval commands (locale-gen / sed /etc/locale.gen) are SKIPPED", () => {
+    // django 3.0 eval_commands includes a `sed … locale-gen` (root) + the exports.
+    const argv = buildProjectEnvUvRunArgv("django/django", "3.0", ["pytest"], {})
+    const env = argv.join(" ")
+    expect(env).toContain("LANG=en_US.UTF-8") // export kept
+    expect(env).not.toContain("locale-gen") // root-only command dropped
+  })
+
+  test("repo with no eval_commands ⇒ no LANG (byte-identical env layer)", () => {
+    const argv = buildProjectEnvUvRunArgv("sympy/sympy", "1.10", ["pytest"], {})
+    expect(argv.join(" ")).not.toContain("LANG=")
+  })
+})
