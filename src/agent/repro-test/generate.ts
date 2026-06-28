@@ -44,7 +44,20 @@
  */
 
 import type { LLMPort, Message, StreamEvent } from "@/llm"
+import { exemplarBlock, signatureBlock } from "./grounding"
 import type { ReproTestConfig, ReproTestKind } from "./types"
+
+/** Repo-context GROUNDING for repro generation (jun-29 RFC). Optional; when
+ *  absent / all-empty the prompt is byte-identical to the un-grounded prompt
+ *  (the default-OFF invariant). The driver-side adapter fills these from the
+ *  `CodeIntelligencePort` (relatedTests → skeleton-strip; LSP → signatures).
+ *  - `exemplarSkeletons`: SETUP SKELETONS of relevant existing tests (bodies
+ *    already elided; re-stripped defensively by {@link exemplarBlock}).
+ *  - `issueSignatures`: public signatures of the symbols the issue mentions. */
+export interface ReproGroundingInput {
+  readonly exemplarSkeletons?: readonly string[]
+  readonly issueSignatures?: readonly string[]
+}
 
 /** Default K when the caller doesn't override. Paper uses 40; 5 is our
  *  measurement-budget default. */
@@ -203,6 +216,7 @@ export const buildReproTestPrompt = (
   issue: string,
   mwe?: string,
   kind: ReproTestKind = "canonical",
+  grounding?: ReproGroundingInput,
 ): string =>
   [
     "Write a self-contained pytest test that reproduces the bug described in the issue below.",
@@ -254,6 +268,8 @@ export const buildReproTestPrompt = (
     "# Issue",
     issue,
     ...groundingBlock(mwe),
+    ...exemplarBlock(grounding?.exemplarSkeletons),
+    ...signatureBlock(grounding?.issueSignatures),
     "",
     "# Example output (illustrative — replace with code for THIS issue):",
     "from package import thing",
@@ -512,11 +528,15 @@ export const generateReproTests = async (args: {
    *  adversarial set. Back-compat: omitting it is byte-identical to the legacy
    *  un-adversarial prompt. */
   kind?: ReproTestKind
+  /** jun-29 repo-context grounding (exemplar skeletons + issue-symbol
+   *  signatures). Undefined/all-empty ⇒ byte-identical to the un-grounded prompt
+   *  (default-OFF). */
+  grounding?: ReproGroundingInput
 }): Promise<readonly string[]> => {
   const { issue, llm, signal, mwe } = args
   if (typeof issue !== "string" || issue.length === 0) return []
   const samples = resolveSamples(args.config?.samples)
-  const userText = buildReproTestPrompt(issue, mwe, args.kind ?? "canonical")
+  const userText = buildReproTestPrompt(issue, mwe, args.kind ?? "canonical", args.grounding)
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: userText }] }]
   const out: string[] = []
   for (let i = 0; i < samples; i++) {
