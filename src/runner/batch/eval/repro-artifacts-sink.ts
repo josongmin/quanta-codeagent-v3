@@ -1,11 +1,19 @@
 /**
  * A1 — Per-candidate repro artifact sink (jun-28 oracle-first RFC).
  *
- * Persists ONE directory per generated repro candidate so that the unselected
- * breadth candidates leave durable RCA evidence BEFORE the driver discards their
- * forks. Today only the SELECTED `reproduce_issue.py` survives (in the ephemeral
- * sandbox); everything else evaporates, so "why was this candidate rejected" is
- * unanswerable post-hoc.
+ * Persists ONE directory per GENERATED repro candidate (the canonical + hardening
+ * set from the repro-generation phase) so the non-selected candidates leave durable
+ * RCA evidence. Today only the SELECTED `reproduce_issue.py` survives (in the
+ * ephemeral sandbox); every other generated candidate evaporates, so "why was this
+ * candidate rejected" is unanswerable post-hoc.
+ *
+ * SCOPE (audited): this covers the GENERATION phase. The repair-round re-validation
+ * of canonical sources on the PATCHED tree (repro-vote / resolved-consensus) is NOT
+ * persisted here — that signal is captured separately as `reproVoteOutcomes`
+ * telemetry in the report. `sidecar.json` is written only when a raw pytest report
+ * is supplied; `ReproTestSample` currently carries only the sidecar-DERIVED outcome,
+ * so `outcome.json` is the authoritative verdict and `sidecarPresent` is false until
+ * the raw report is threaded onto the sample.
  *
  * fs-FREE BY CONSTRUCTION: the sink takes an injected {@link ReproArtifactWritePort}
  * and never imports `node:fs` / `Bun.write`. Production binds the port to a root
