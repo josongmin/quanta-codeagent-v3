@@ -988,17 +988,45 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       { ...baseCfg, spawn: fn, preset: "agentless-v2", onLog: (m: string) => logs.push(m) },
       "i-warm",
     )
-    // a CHECKSUM + itemize rsync fired — distinguishes the self-heal from
+    // a CHECKSUM + itemize rsync of src/ fired — distinguishes the self-heal from
     // bootstrapBox's plain seed rsync (which carries neither flag).
-    const heal = calls.find((c) => c.cmd === "rsync" && c.args.includes("--checksum"))
-    expect(heal).toBeDefined()
-    expect(heal?.args).toContain("--itemize-changes")
-    // a HEALTHY bootstrapped box is NOT re-bootstrapped (no bun install).
+    const srcHeal = calls.find(
+      (c) =>
+        c.cmd === "rsync" &&
+        c.args.includes("--checksum") &&
+        c.args.some((a) => a.endsWith("/src/")),
+    )
+    expect(srcHeal).toBeDefined()
+    expect(srcHeal?.args).toContain("--itemize-changes")
+    expect(srcHeal?.args).toContain("--delete") // orphans removed too
+    // the CONFIG self-heal also fired (package.json/bun.lock/tsconfig drift class).
+    const cfgHeal = calls.find(
+      (c) =>
+        c.cmd === "rsync" &&
+        c.args.includes("--checksum") &&
+        c.args.some((a) => a.endsWith("/package.json")),
+    )
+    expect(cfgHeal).toBeDefined()
+    // a HEALTHY bootstrapped box is NOT re-bootstrapped (no bun install; the mock
+    // drift is python-swebench.ts, not a dep-graph file, so no reinstall either).
     expect(
       calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("bun install"))),
     ).toBe(false)
     // the stale drift surfaced to the operator (not a silent stale-code run).
     expect(logs.some((l) => l.includes("STALE") && l.includes("python-swebench.ts"))).toBe(true)
+  })
+
+  test("UNBOOTSTRAPPED box re-bootstraps (seed rsync) and SKIPS the checksum self-heal", async () => {
+    // The reBootstrapped guard: when isBootstrapped is false, attachBox calls
+    // bootstrapBox (which seed-syncs fresh src+config), so the reuse self-heal
+    // must NOT additionally fire — that would be a redundant double-rsync. The
+    // isBootstrapped probe is left unmocked → defaults to ok("") (no "OK") → false.
+    const { fn, calls } = createSpawnRecorder(whenArgsInclude("describe-instances", ok("1.2.3.4")))
+    await attachBox({ ...baseCfg, spawn: fn, preset: "agentless-v2" }, "i-cold")
+    // bootstrapBox ran its SEED rsync (byte-identical historical args — NO checksum).
+    expect(calls.some((c) => c.cmd === "rsync" && !c.args.includes("--checksum"))).toBe(true)
+    // ...and the reuse self-heal (a --checksum rsync) was SKIPPED.
+    expect(calls.some((c) => c.cmd === "rsync" && c.args.includes("--checksum"))).toBe(false)
   })
 
   test("ALWAYS terminates the box — even when the remote run throws", async () => {

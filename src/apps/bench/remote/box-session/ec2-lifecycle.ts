@@ -24,7 +24,7 @@ import {
   readBoxSnapshot,
   resolveSnapshotInspection,
 } from "./snapshot"
-import { buildSrcRsyncArgs, ensureBoxSrcCurrent } from "./src-sync-guard"
+import { buildSrcRsyncArgs, ensureBoxConfigCurrent, ensureBoxSrcCurrent } from "./src-sync-guard"
 import { type BoxInspection, type BoxSession, D, type FullRemoteConfig } from "./types"
 
 const RUNNING_BOX_FILTERS = [
@@ -778,11 +778,21 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
     }
   }
   // Close the silent-stale-CODE class: a warm box reused across a code change
-  // would otherwise grade with the src rsynced at its ORIGINAL bootstrap. A
-  // checksum-mode rsync is a fast no-op when current and self-heals when stale.
-  // (Skip when we just re-bootstrapped — that already seed-synced fresh src.)
+  // would otherwise grade with the src + config rsynced at its ORIGINAL bootstrap.
+  // Checksum-mode rsyncs are a fast no-op when current and self-heal when stale.
+  // src: --delete-enabled (orphans removed). config: re-syncs package.json/
+  // bun.lock/tsconfig*/bunfig + re-runs bun install when the dep graph drifted.
+  // (Skip when we just re-bootstrapped — that already seed-synced fresh src+config.)
   if (!reBootstrapped) {
     await ensureBoxSrcCurrent({ spawn, repoDir: cfg.repoDir, host, keyPath, log })
+    await ensureBoxConfigCurrent({
+      spawn,
+      ssh: (c) => ssh(c),
+      repoDir: cfg.repoDir,
+      host,
+      keyPath,
+      log,
+    })
   }
   return session
 }

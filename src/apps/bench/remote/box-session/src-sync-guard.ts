@@ -29,16 +29,20 @@ export const SRC_RSYNC_EXCLUDES = ["node_modules", "*.js", "*.test.ts", ".quanta
  *  With no opts the argv is byte-identical to the historical bootstrap rsync.
  *  `checksum` forces a CONTENT compare (size+mtime can BOTH coincidentally match
  *  a stale edit); `itemize` emits one line per transferred path (the self-heal
- *  observability seam). */
+ *  observability seam); `del` adds `--delete` so a file DELETED locally since the
+ *  box's last sync is removed from the box too (else it lingers as an orphan that
+ *  a dynamic import could still execute). `--delete` (NOT `--delete-excluded`)
+ *  protects excluded paths, so the box's `*.js`/node_modules are never touched. */
 export const buildSrcRsyncArgs = (
   repoDir: string,
   host: string,
   sshOpts: string,
-  opts?: { readonly checksum?: boolean; readonly itemize?: boolean },
+  opts?: { readonly checksum?: boolean; readonly itemize?: boolean; readonly del?: boolean },
 ): string[] => {
   const args = ["-az", "--partial"]
   if (opts?.checksum === true) args.push("--checksum")
   if (opts?.itemize === true) args.push("--itemize-changes")
+  if (opts?.del === true) args.push("--delete")
   for (const ex of SRC_RSYNC_EXCLUDES) args.push("--exclude", ex)
   args.push("-e", sshOpts, `${repoDir}/src/`, `${host}:~/quanta/src/`)
   return args
@@ -46,9 +50,9 @@ export const buildSrcRsyncArgs = (
 
 /** rsync `--itemize-changes` prints an 11-char `YXcstpoguax` code, a space, then
  *  the path. A CONTENT transfer is a FILE update — code begins `>f`/`<f`/`cf`
- *  (send / receive / locally-created file). Directory entries (`cd`/`.d`),
- *  attr-only touches (`.f……`), and `*deleting` lines are NOT content drift and
- *  are ignored, so a current box parses to ZERO transfers. */
+ *  (send / receive / locally-created file). Directory entries (`cd`/`.d`) and
+ *  attr-only touches (`.f……`) are NOT content drift and are ignored, so a current
+ *  box parses to ZERO transfers. */
 const TRANSFER_LINE = /^[<>c]f\S*\s+(.+)$/
 export const parseItemizedTransfers = (stdout: string): string[] => {
   const out: string[] = []
@@ -59,24 +63,47 @@ export const parseItemizedTransfers = (stdout: string): string[] => {
   return out
 }
 
+/** With `--delete`, rsync prints `*deleting   <path>` for each orphan it removes
+ *  from the box (a file deleted locally since the box's last sync). These are
+ *  staleness too — the box was carrying code that no longer exists. */
+const DELETING_LINE = /^\*deleting\s+(.+)$/
+export const parseItemizedDeletions = (stdout: string): string[] => {
+  const out: string[] = []
+  for (const raw of stdout.split("\n")) {
+    const m = DELETING_LINE.exec(raw.trim())
+    if (m?.[1] !== undefined) out.push(m[1].replace(/\/$/, ""))
+  }
+  return out
+}
+
 export interface SrcSyncOutcome {
-  /** True iff the reused box was running stale src (≥1 file self-healed). */
+  /** True iff the reused box was running stale src (≥1 file transferred OR deleted). */
   readonly wasStale: boolean
   /** The src paths rsync transferred to bring the box current. */
   readonly transferred: readonly string[]
+  /** The orphan src paths rsync DELETED from the box (removed-since-sync). */
+  readonly deleted: readonly string[]
 }
 
-/** Build the human log line for a self-heal outcome (pure; empty when current). */
+const truncList = (xs: readonly string[]): string => {
+  const shown = xs.slice(0, 8).join(", ")
+  return `${shown}${xs.length > 8 ? ` (+${xs.length - 8} more)` : ""}`
+}
+
+/** Build the human log line for a self-heal outcome (pure; undefined when current). */
 export const describeSrcSync = (o: SrcSyncOutcome): string | undefined => {
   if (!o.wasStale) return undefined
-  const shown = o.transferred.slice(0, 8).join(", ")
-  const more = o.transferred.length > 8 ? ` (+${o.transferred.length - 8} more)` : ""
-  return `[full-remote] reuse: box src was STALE — self-healed ${o.transferred.length} file(s): ${shown}${more}`
+  const parts: string[] = []
+  if (o.transferred.length > 0)
+    parts.push(`synced ${o.transferred.length} file(s): ${truncList(o.transferred)}`)
+  if (o.deleted.length > 0)
+    parts.push(`removed ${o.deleted.length} orphan(s): ${truncList(o.deleted)}`)
+  return `[full-remote] reuse: box src was STALE — self-healed [${parts.join("; ")}]`
 }
 
-/** Run a checksum-mode src rsync onto a REUSED box (idempotent self-heal). Throws
- *  on rsync failure — a box whose src cannot be verified-current MUST NOT grade
- *  (the whole point is to never silently run stale code). */
+/** Run a checksum-mode, delete-enabled src rsync onto a REUSED box (idempotent
+ *  self-heal). Throws on rsync failure — a box whose src cannot be verified-current
+ *  MUST NOT grade (the whole point is to never silently run stale code). */
 export const ensureBoxSrcCurrent = async (deps: {
   readonly spawn: SpawnFn
   readonly repoDir: string
@@ -88,6 +115,7 @@ export const ensureBoxSrcCurrent = async (deps: {
   const args = buildSrcRsyncArgs(deps.repoDir, deps.host, sshOpts, {
     checksum: true,
     itemize: true,
+    del: true,
   })
   const res = await deps.spawn("rsync", args)
   if (res.code !== 0) {
@@ -96,8 +124,86 @@ export const ensureBoxSrcCurrent = async (deps: {
     )
   }
   const transferred = parseItemizedTransfers(res.stdout)
-  const outcome: SrcSyncOutcome = { wasStale: transferred.length > 0, transferred }
+  const deleted = parseItemizedDeletions(res.stdout)
+  const outcome: SrcSyncOutcome = {
+    wasStale: transferred.length > 0 || deleted.length > 0,
+    transferred,
+    deleted,
+  }
   const line = describeSrcSync(outcome)
   if (line !== undefined) deps.log(line)
   return outcome
+}
+
+/** Config files scp'd at bootstrap. Drift on REUSE is the same stale class as src:
+ *  a new dep (package.json/bun.lock) or a new path alias (tsconfig*) added since
+ *  the box's bootstrap would otherwise leave the reused box running old config. */
+export const CONFIG_FILES = [
+  "package.json",
+  "bun.lock",
+  "tsconfig.json",
+  "tsconfig.base.json",
+  "bunfig.toml",
+] as const
+
+/** Files whose drift requires a `bun install` (dep graph changed), not just a
+ *  re-copy. tsconfig/bunfig are read at bun startup, so a re-sync alone suffices. */
+const INSTALL_TRIGGERS: ReadonlySet<string> = new Set(["package.json", "bun.lock"])
+
+/** rsync argv for the config-file set → box `~/quanta/` (checksum+itemize, no
+ *  `--delete`: these are individually-named files, not a mirrored tree). */
+export const buildConfigRsyncArgs = (repoDir: string, host: string, sshOpts: string): string[] => {
+  const args = ["-az", "--checksum", "--itemize-changes", "-e", sshOpts]
+  for (const f of CONFIG_FILES) args.push(`${repoDir}/${f}`)
+  args.push(`${host}:~/quanta/`)
+  return args
+}
+
+/** True iff any drifted config file requires a dependency reinstall. */
+export const configDriftNeedsInstall = (transferred: readonly string[]): boolean =>
+  transferred.some((f) => INSTALL_TRIGGERS.has(f.replace(/^.*\//, "")))
+
+export interface ConfigSyncOutcome {
+  readonly configStale: boolean
+  readonly transferred: readonly string[]
+  readonly reinstalled: boolean
+}
+
+/** Bring a REUSED box's build config current too: re-sync the config-file set
+ *  and, if the dependency graph drifted, re-run `bun install`. Idempotent (a
+ *  current box transfers nothing). Throws on rsync/install failure. */
+export const ensureBoxConfigCurrent = async (deps: {
+  readonly spawn: SpawnFn
+  readonly ssh: (cmd: string) => Promise<{ readonly code: number; readonly stderr: string }>
+  readonly repoDir: string
+  readonly host: string
+  readonly keyPath: string
+  readonly log: (msg: string) => void
+}): Promise<ConfigSyncOutcome> => {
+  const sshOpts = `ssh -i ${deps.keyPath} ${BENCH_SSH_SAFE_OPTS.join(" ")} -o ConnectTimeout=15 -o ServerAliveInterval=15`
+  const res = await deps.spawn("rsync", buildConfigRsyncArgs(deps.repoDir, deps.host, sshOpts))
+  if (res.code !== 0) {
+    throw new Error(
+      `[full-remote] reuse config self-heal rsync failed (code ${res.code}): ${res.stderr}`,
+    )
+  }
+  const transferred = parseItemizedTransfers(res.stdout)
+  if (transferred.length === 0) return { configStale: false, transferred, reinstalled: false }
+  const needsInstall = configDriftNeedsInstall(transferred)
+  deps.log(
+    `[full-remote] reuse: box config was STALE — re-synced ${transferred.length} file(s): ${truncList(
+      transferred,
+    )}${needsInstall ? " → re-running bun install (dep graph drifted)" : ""}`,
+  )
+  if (needsInstall) {
+    const install = await deps.ssh(
+      "set -o pipefail; cd ~/quanta && ~/.bun/bin/bun install 2>&1 | tail -5",
+    )
+    if (install.code !== 0) {
+      throw new Error(
+        `[full-remote] reuse config self-heal bun install failed (code ${install.code}): ${install.stderr}`,
+      )
+    }
+  }
+  return { configStale: true, transferred, reinstalled: needsInstall }
 }
