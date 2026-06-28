@@ -58,5 +58,6 @@ export const instrumentBudgetLedger = (
     },
     serialize: ledger.serialize.bind(ledger),
     hydrate: ledger.hydrate.bind(ledger),
+    hardBreach: ledger.hardBreach.bind(ledger),
   }
 }

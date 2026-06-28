@@ -51,6 +51,7 @@ const fakeLedger = (): BudgetLedger =>
     clear: () => 0,
     serialize: () => "{}",
     hydrate: () => {},
+    hardBreach: () => undefined,
   }) as unknown as BudgetLedger
 
 /** Capture-warn port: tests push into this array instead of console.warn. */

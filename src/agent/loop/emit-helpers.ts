@@ -38,6 +38,22 @@ export const emitUsage = (
   // this accrues but never gates (human-paced, by design).
   const eventCostUsd = costUsd(ev.model, ev.inputTokens, ev.outputTokens, ev.cacheReadTokens ?? 0)
   if (eventCostUsd !== null) config.budgetMeter?.tick("cost_usd", eventCostUsd)
+  // L4 cross-run cost ledger (default-OFF: no `budgetLedger` slot ⇒ no-op,
+  // byte-identical). Records this event into the persistent session/daily
+  // ledger from the SAME single seam, mapping the provider's cache-CREATION
+  // tokens onto the ledger's cache-write bucket (which the ledger bills and
+  // `costUsd` does not). The ledger prices from the same SSOT rate card, so the
+  // meter (per-run) and ledger (cross-run) never disagree. A hard breach is
+  // surfaced to the loop via `ledger.hardBreach()` at the turn epilogue.
+  config.budgetLedger?.record({
+    model: ev.model,
+    inputTokens: ev.inputTokens,
+    outputTokens: ev.outputTokens,
+    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+    ...(ev.cacheCreationTokens !== undefined ? { cacheWriteTokens: ev.cacheCreationTokens } : {}),
+    sessionId: config.sessionId ?? "",
+    at: Date.now(),
+  })
   collector?.recordUsage({
     tokensInput: ev.inputTokens,
     tokensOutput: ev.outputTokens,

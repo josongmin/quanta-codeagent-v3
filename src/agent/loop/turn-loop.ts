@@ -107,6 +107,26 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
       return ctx.finish("budget_exhausted", turn - 1, completedCategory("max_turns"))
     }
     const { result } = await executeTurnWithObservability({ ctx, turn })
+    // L4 cross-run cost ledger enforcement — after the turn's usage is recorded
+    // (emitUsage), stop the run if a HARD cost ceiling (session/daily) has been
+    // crossed. Default-OFF / byte-identical when no ledger or no policy is
+    // wired (`hardBreach()` ⇒ undefined). This is the cross-run analogue of the
+    // per-run `BudgetMeter` cost cap: a campaign that hydrates a shared ledger
+    // stops the moment cumulative spend breaches the operator-set hard limit.
+    const ledgerHardBreach = ctx.cfg.budgetLedger?.hardBreach()
+    if (ledgerHardBreach !== undefined) {
+      emitBudgetExhaustedDecision(
+        ctx.cfg.decisionEmitter,
+        {
+          exhausted: true,
+          kind: "cost_usd",
+          budget: ledgerHardBreach.limit,
+          observed: ledgerHardBreach.observed,
+        },
+        { turn },
+      )
+      return ctx.finish("budget_exhausted", turn, completedCategory("max_turns"))
+    }
     const resolution = await resolveTurnLoopOutcome({
       cfg: ctx.cfg,
       stream: ctx.cfg.stream,

@@ -62,6 +62,7 @@ const fakeLedger = (): BudgetLedger =>
     clear: () => 0,
     serialize: () => "{}",
     hydrate: () => {},
+    hardBreach: () => undefined,
   }) as unknown as BudgetLedger
 
 const WIRED_METRIC = "observability.wired.total"

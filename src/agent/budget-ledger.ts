@@ -190,6 +190,13 @@ export interface BudgetLedger {
   /** Re-hydrate from a prior `serialize()` output. On parse failure or
    *  shape mismatch, resets to empty + returns silently (contract #7). */
   hydrate(jsonl: string): void
+  /** The first `*-hard` breach that has fired (session-hard or daily-hard),
+   *  reconstructed with the CURRENT observed cost, or `undefined` when none.
+   *  SOFT breaches are advisory and never returned here. The autonomous loop
+   *  reads this AFTER each turn to STOP a run that crossed its hard cost
+   *  ceiling — the cross-run analogue of `BudgetMeter.checkExhausted`. Pure /
+   *  read-only. */
+  hardBreach(): BudgetBreach | undefined
 }
 
 export interface BudgetLedgerOpts {
@@ -715,6 +722,37 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
         pushEvent(event)
       }
       evictIfOver()
+    },
+
+    hardBreach(): BudgetBreach | undefined {
+      // Reconstruct the first fired hard breach with the CURRENT observed cost
+      // (the `fired` set stores only `${kind}:${scope}` keys; the live total is
+      // read back from the per-scope aggregate). `policy.*HardLimit` is the
+      // configured ceiling (0 when somehow unset — a hard breach cannot fire
+      // without a limit, so this is defensive only).
+      for (const key of fired) {
+        const SESSION = "session-hard:"
+        const DAILY = "daily-hard:"
+        if (key.startsWith(SESSION)) {
+          const scope = key.slice(SESSION.length)
+          return {
+            kind: "session-hard",
+            limit: policy.sessionHardLimit ?? 0,
+            observed: perSession.get(scope)?.totalCost ?? 0,
+            scope,
+          }
+        }
+        if (key.startsWith(DAILY)) {
+          const scope = key.slice(DAILY.length)
+          return {
+            kind: "daily-hard",
+            limit: policy.dailyHardLimit ?? 0,
+            observed: perDay.get(scope)?.totalCost ?? 0,
+            scope,
+          }
+        }
+      }
+      return undefined
     },
   }
 }

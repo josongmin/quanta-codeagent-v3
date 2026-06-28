@@ -150,6 +150,7 @@ const fakeLedger = (overrides: Partial<BudgetLedger> = {}): BudgetLedger =>
     clear: () => 0,
     serialize: () => "{}",
     hydrate: () => {},
+    hardBreach: () => undefined,
     ...overrides,
   }) as unknown as BudgetLedger
 
