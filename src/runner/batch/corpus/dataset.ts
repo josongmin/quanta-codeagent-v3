@@ -35,9 +35,6 @@ export interface SwebenchTask {
   baseCommit: string
   problemStatement: string
   environmentSetupCommit?: string
-  /** SWE-bench `created_at` (RFC3339) — the instance era, threaded into the
-   *  per-instance repro/test env as uv `--exclude-newer` (era-correct deps). */
-  createdAt?: string
   /** The untouched upstream row, kept around for callers that need extra
    *  fields (cheap — it is already parsed). */
   raw: Record<string, unknown>
@@ -89,14 +86,12 @@ const toTask = (raw: Record<string, unknown>): SwebenchTask | null => {
   const problemStatement = str(raw.problem_statement)
   if (!instanceId || !repo || !baseCommit || !problemStatement) return null
   const environmentSetupCommit = str(raw.environment_setup_commit)
-  const createdAt = str(raw.created_at)
   return {
     instanceId,
     repo,
     baseCommit,
     problemStatement,
     ...(environmentSetupCommit !== undefined ? { environmentSetupCommit } : {}),
-    ...(createdAt !== undefined ? { createdAt } : {}),
     raw,
   }
 }
@@ -141,10 +136,13 @@ export const parseSwebenchJsonl = (
  */
 export const normalizeProRow = (raw: Record<string, unknown>): Record<string, unknown> => ({
   ...raw,
-  ...(raw.FAIL_TO_PASS === undefined && raw.fail_to_pass !== undefined
+  // Guard `!= null` (not just `!== undefined`) — a JSON `null` fail_to_pass (common in
+  // datasets) would otherwise copy `FAIL_TO_PASS: null`, which decodes to the no-op
+  // testCmd silently (audit #8). `!= null` excludes both null and undefined.
+  ...(raw.FAIL_TO_PASS === undefined && raw.fail_to_pass != null
     ? { FAIL_TO_PASS: raw.fail_to_pass }
     : {}),
-  ...(raw.PASS_TO_PASS === undefined && raw.pass_to_pass !== undefined
+  ...(raw.PASS_TO_PASS === undefined && raw.pass_to_pass != null
     ? { PASS_TO_PASS: raw.pass_to_pass }
     : {}),
 })
@@ -329,9 +327,6 @@ export const reproRunArgv = (
   repo: string,
   version: string | undefined,
   scriptPath: string,
-  /** Instance `created_at` (RFC3339) → uv `--exclude-newer` for era-correct deps
-   *  (RCA jun-29: latest jinja2 broke old sphinx import). Absent ⇒ latest. */
-  createdAt?: string,
 ): readonly string[] => {
   // `pytest` MUST be in the repro exec env: P1 (jun-23) made repros real pytest
   // tests whose verdict is the process exit code, via a `pytest.main([__file__])`
@@ -339,17 +334,11 @@ export const reproRunArgv = (
   // `import pytest` raises ModuleNotFoundError ⇒ every repro is `exec_failed`
   // (measured on the box re-measure: django repros all crashed on `import pytest`).
   return [
-    ...buildProjectEnvUvRunArgv(
-      repo,
-      version,
-      ["pytest"],
-      {
-        PYTEST_ADDOPTS: "",
-        PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
-        PYTHONNOUSERSITE: "1",
-      },
-      createdAt,
-    ),
+    ...buildProjectEnvUvRunArgv(repo, version, ["pytest"], {
+      PYTEST_ADDOPTS: "",
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
+      PYTHONNOUSERSITE: "1",
+    }),
     "python",
     "-s",
     scriptPath,
@@ -384,6 +373,14 @@ const djangoRuntestsLabel = (name: string): string => {
  *  path. The FAIL_TO_PASS names are the grading answer key (existing oracle
  *  behavior) and are appended here. */
 export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
+  // Pro non-Python (RFC jun-29 / audit #7): repo_language go/js/ts/java does NOT run
+  // under pytest — synthesizing `uv run pytest` for a Go repo is a fake-grade vector
+  // (verdict.ts would run it on a non-Python tree). Return the `"true"` no-op so the
+  // harness-required guard fires (verdict.ts refuses to fake-grade swebench without the
+  // authoritative harness). Verified/Live carry no repo_language ⇒ unaffected.
+  const lang =
+    typeof raw.repo_language === "string" ? raw.repo_language.trim().toLowerCase() : undefined
+  if (lang !== undefined && lang !== "" && lang !== "python") return "true"
   const names = decodeTestNameList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
   const repo = typeof raw.repo === "string" ? raw.repo : ""
@@ -487,7 +484,6 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
       repo: task.repo,
       baseCommit: task.baseCommit,
       ...(version !== undefined ? { version } : {}),
-      ...(task.createdAt !== undefined ? { createdAt: task.createdAt } : {}),
       ...(task.environmentSetupCommit !== undefined
         ? { environmentSetupCommit: task.environmentSetupCommit }
         : {}),

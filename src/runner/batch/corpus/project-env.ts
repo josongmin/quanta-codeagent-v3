@@ -212,21 +212,13 @@ export const buildProjectEnvUvRunArgv = (
   version: string | undefined,
   extraWith: readonly string[] = [],
   extraExecEnv: Readonly<Record<string, string>> = {},
-  /** jun-29 ENV-ERA PIN: the instance's `created_at` (RFC3339). When present, uv
-   *  resolves transitive deps to versions available ON OR BEFORE this date, so an
-   *  OLD instance gets its ERA-correct deps instead of latest. RCA: sphinx-8595
-   *  (2020) freely resolved jinja2>=3.1, which removed `environmentfilter`, so
-   *  `import sphinx` died and EVERY repro was a spurious exec_failed — an env bug,
-   *  not a repro-gen-quality signal (it confounded the grounding A/B). uv resolves
-   *  the LOCAL `--with-editable .` repo regardless of the cutoff. Absent ⇒ no flag
-   *  (byte-identical to the pre-fix argv). */
-  excludeNewer?: string,
 ): readonly string[] => {
   // jun-29 SOTA++ env fix: the official era pins (`pip_packages` + pre_install
   // dep-caps, e.g. sphinx 3.5 `Jinja2==3.0.3` + `sphinxcontrib-applehelp<=1.0.7`)
   // applied as `--with` so the repro/test env resolves era-correct deps instead of
   // latest — the official mechanism, no setup.py edit / build break, and skipped
-  // when the python was floored off-era (see {@link specEraPins}).
+  // when the python was floored off-era (see {@link specEraPins}). (A `--exclude-newer`
+  // date-cutoff approach was tried + rejected — it broke the editable build.)
   const deps = [
     ...new Set([
       ...extraWith,
@@ -241,9 +233,6 @@ export const buildProjectEnvUvRunArgv = (
     argv.push(`${name}=${value}`)
   }
   argv.push("uv", "run", "--no-project")
-  if (typeof excludeNewer === "string" && excludeNewer !== "") {
-    argv.push("--exclude-newer", excludeNewer)
-  }
   argv.push("--python", pythonForRepoVersion(repo, version))
   for (const dep of deps) argv.push("--with", dep)
   argv.push("--with-editable", ".")

@@ -29,13 +29,6 @@ export interface SwebenchMeta {
    *  because one repo spans versions needing different pythons (RCA jun-20).
    *  Absent ⇒ the per-repo high fallback is used. */
   version?: string
-  /** SWE-bench `created_at` (RFC3339, the PR/instance era). Threaded as uv
-   *  `--exclude-newer` so the per-instance repro/test env resolves ERA-correct
-   *  transitive deps instead of latest — an OLD instance must NOT get a new dep
-   *  that broke its API (RCA jun-29: sphinx-8595's jinja2>=3.1 dropped
-   *  `environmentfilter` ⇒ `import sphinx` died ⇒ spurious exec_failed). Absent ⇒
-   *  no cutoff (latest, the pre-fix behavior). */
-  createdAt?: string
   /** EVAL-ONLY — the official PASS_TO_PASS regression set (tests that already
    *  pass on the buggy tree and must keep passing). Threaded for the
    *  verify-and-select regression oracle (TB): the bench adapter supplies these

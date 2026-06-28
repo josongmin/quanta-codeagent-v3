@@ -1811,7 +1811,6 @@ const executeReproCandidateTests = async (
 ): Promise<ReproSamples | null> => {
   const reproRepo = instance.swebench?.repo
   const reproVersion = instance.swebench?.version
-  const reproCreatedAt = instance.swebench?.createdAt
   const buildArgv =
     reproRepo !== undefined
       ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
