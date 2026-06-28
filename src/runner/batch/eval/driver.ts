@@ -23,6 +23,7 @@ import {
   type AgentlessLocalizeDeps,
   type AgentlessLocalizeResult,
   agentlessLocalize,
+  BudgetMeter,
   buildSystemPrompt,
   composeAgentlessHint,
   composeIssueHint,
@@ -46,7 +47,6 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
-import { buildVerifyGuard } from "@/agent/verify-guard"
 import {
   evaluateSuccessPredicate,
   type OwnerSibling,
@@ -66,6 +66,7 @@ import {
   extractIssueReproSeed,
   type IssueDeclaredExpected,
 } from "@/agent/verification-plan"
+import { buildVerifyGuard } from "@/agent/verify-guard"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
@@ -2495,6 +2496,28 @@ const wirePostureAgentPorts = (args: {
   ...(args.opt.branchSearch !== undefined ? { branchSearch: args.opt.branchSearch } : {}),
 })
 
+/**
+ * Per-instance cost cap for bench runs. The bench harness assembles its config
+ * via `buildConfig` (NOT the host `assembleAgentConfig`), so the per-run
+ * `maxCostUsd` meter that protects the `apps/agent` autonomous modes never
+ * reached it — a SWE-bench instance could spend unboundedly. This mints a
+ * `BudgetMeter` with a cost cap from `QUANTA_BENCH_MAX_COST_USD` (a positive USD
+ * amount, fractional allowed; NO hardcoded default — the cap is operator-
+ * supplied, measure-first). Once the meter exists, the SAME L0/L2 machinery
+ * engages: `emitUsage` ticks the priced cost, the turn epilogue `checkExhausted`
+ * stops on overrun, and the pre-flight refuses a guaranteed-breach call. A
+ * caller-provided `budgetMeterFactory` still wins. Absent env ⇒ undefined ⇒
+ * byte-identical (bench unchanged). Exported for direct unit testing. */
+export const benchBudgetMeterFromEnv = (
+  env: Record<string, string | undefined>,
+): BudgetMeter | undefined => {
+  const raw = env["QUANTA_BENCH_MAX_COST_USD"]
+  if (raw === undefined) return undefined
+  const usd = Number.parseFloat(raw.trim())
+  if (!Number.isFinite(usd) || usd <= 0) return undefined
+  return new BudgetMeter({ dials: { maxCostUsd: usd } })
+}
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -2609,7 +2632,7 @@ export const buildConfig = (
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
   const messages = userPromptMessages(text)
-  const budgetMeter = deps.budgetMeterFactory?.()
+  const budgetMeter = deps.budgetMeterFactory?.() ?? benchBudgetMeterFromEnv(process.env)
   const baseConfig = {
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
     // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
