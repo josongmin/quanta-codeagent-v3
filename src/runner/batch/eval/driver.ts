@@ -1907,16 +1907,25 @@ const computeReproGrounding = async (
     deps.groundingPorts === undefined
       ? await listTrackedPythonFiles(sandbox, GROUNDING_TIMEOUT_MS).catch(() => [])
       : []
+  const sourceFiles =
+    deps.groundingSourceFiles ?? inferIssueSourceFiles(instance.problemStatement, tracked)
   const ports =
     deps.groundingPorts ??
     buildLexicalReproGroundingPorts({
       sandbox,
       timeoutMs: GROUNDING_TIMEOUT_MS,
       trackedFiles: tracked,
+      sourceFiles,
     })
-  const sourceFiles =
-    deps.groundingSourceFiles ?? inferIssueSourceFiles(instance.problemStatement, tracked)
-  return retrieveExemplarSkeletons({ enabled: true, sourceFiles, ports })
+  // Issue symbols for the signature block (lexical extraction from the source
+  // files above). Empty ⇒ collectSignatures no-ops ⇒ no signature block.
+  const issueSymbols = extractIssueHint(instance.problemStatement).symbols
+  return retrieveExemplarSkeletons({
+    enabled: true,
+    sourceFiles,
+    ...(issueSymbols.length > 0 ? { issueSymbols } : {}),
+    ports,
+  })
 }
 
 /** Observe-only grounding-engagement summary for telemetry. Returned ONLY when

@@ -215,6 +215,24 @@ describe("buildLexicalReproGroundingPorts — ranks + maps text", () => {
     expect(listed).toBe(false)
   })
 
+  test("signatures port (LIVE) — reads source files, extracts symbol signatures", async () => {
+    const ports = buildLexicalReproGroundingPorts({
+      sandbox: "/repo",
+      timeoutMs: 1000,
+      sourceFiles: ["pkg/plot.py"],
+      readSource: async () =>
+        "class Plotter:\n    def render(self, fmt=\"html\"):\n        return 'GOLD'\n",
+    })
+    const sigs = (await ports.signatures?.(["Plotter.render"])) ?? []
+    expect(sigs.join("\n")).toContain("def render(self, fmt=")
+    expect(sigs.join("\n")).not.toContain("GOLD")
+  })
+
+  test("no sourceFiles ⇒ no signatures port (deferred/inert)", () => {
+    const ports = buildLexicalReproGroundingPorts({ sandbox: "/repo", timeoutMs: 1000 })
+    expect(ports.signatures).toBeUndefined()
+  })
+
   test("end-to-end through the orchestrator strips lexical-adapter bodies", async () => {
     const ports = buildLexicalReproGroundingPorts({
       sandbox: "/repo",

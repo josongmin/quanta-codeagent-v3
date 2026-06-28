@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   EXEMPLAR_BLOCK_HEADER,
   exemplarBlock,
+  extractSignatures,
   SIGNATURE_BLOCK_HEADER,
   signatureBlock,
   stripTestBodies,
@@ -186,9 +187,9 @@ describe("stripTestBodies — NO-LEAK fence (red-on-injection)", () => {
     expect(s).not.toContain("GOLD-MULTI-LINE")
     expect(s).toContain("def f(x=")
     // triple in a decorator arg
-    expect(
-      stripTestBodies('@parametrize("""GOLD-DEC""")\ndef t():\n    pass'),
-    ).not.toContain("GOLD-DEC")
+    expect(stripTestBodies('@parametrize("""GOLD-DEC""")\ndef t():\n    pass')).not.toContain(
+      "GOLD-DEC",
+    )
   })
 })
 
@@ -213,6 +214,45 @@ describe("exemplarBlock", () => {
     const joined = block.join("\n")
     expect((joined.match(/```python/g) ?? []).length).toBe(1)
     expect(joined).toContain("import os")
+  })
+})
+
+describe("extractSignatures — issue-symbol API shapes from source (LIVE)", () => {
+  const SOURCE = `import os
+
+class Plotter:
+    def render(self, fmt="html", *, dpi=300):
+        secret = "GOLD"
+        return secret
+
+def stringify(obj, indent=2):
+    return repr(obj)
+
+def _private():
+    pass
+`
+
+  test("extracts def/class signatures for the named symbols, redacted", () => {
+    const sigs = extractSignatures(["Plotter.render", "stringify"], [{ text: SOURCE }])
+    const joined = sigs.join("\n")
+    expect(joined).toContain("def render(self, fmt=")
+    expect(joined).toContain("def stringify(obj, indent=")
+    // bodies + literal defaults are NOT leaked
+    expect(joined).not.toContain("GOLD")
+    expect(joined).not.toContain('"html"')
+    expect(joined).not.toContain("300")
+  })
+
+  test("only the requested symbols (leaf name) — others excluded", () => {
+    const sigs = extractSignatures(["stringify"], [{ text: SOURCE }]).join("\n")
+    expect(sigs).toContain("def stringify")
+    expect(sigs).not.toContain("def render")
+    expect(sigs).not.toContain("_private")
+  })
+
+  test("no symbols / no match ⇒ []", () => {
+    expect(extractSignatures([], [{ text: SOURCE }])).toEqual([])
+    expect(extractSignatures(["NoSuchThing"], [{ text: SOURCE }])).toEqual([])
   })
 })
 

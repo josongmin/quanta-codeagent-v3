@@ -107,7 +107,7 @@ export const reproGroundingSchema: KnobSchema<boolean> = {
   kind: "bool",
   default: false,
   describe:
-    "Bench: repro-gen GROUNDING — splice SETUP SKELETONS of relevant existing tests (no-leak: assertion bodies elided, literals redacted) into the repro prompt so the model copies the repo's fixture pattern instead of hand-rolling framework setup. (Issue-symbol signature injection is built but DEFERRED — exemplar skeletons ship first.) Requires repro-test. Default-OFF ⇒ byte-identical.",
+    "Bench: repro-gen GROUNDING — splice SETUP SKELETONS of relevant existing tests + the issue symbols' def/class signatures (no-leak: assertion bodies elided, string/number literals redacted) into the repro prompt so the model copies the repo's fixture pattern + real API shapes instead of hand-rolling framework setup / guessing signatures. Requires repro-test. Default-OFF ⇒ byte-identical.",
   knobDescribe:
     "repro-gen grounding: inject existing-test setup skeletons (bodies stripped) + issue signatures so the model stops hand-rolling framework setup (targets the ~40% exec_failed class)",
   readSite: "runner/knobs/knobs/repro-grounding.ts",

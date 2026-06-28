@@ -22,8 +22,10 @@
  * never reach the prompt.
  */
 
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import type { ReproGroundingInput } from "@/agent/repro-test/generate"
-import { stripTestBodies } from "@/agent/repro-test/grounding"
+import { extractSignatures, stripTestBodies } from "@/agent/repro-test/grounding"
 import {
   type DiscoverImpactedTestsArgs,
   discoverImpactedTests,
@@ -196,10 +198,11 @@ const DEFAULT_RELATED_MAX = 8
  * Concrete LEXICAL {@link ReproGroundingPorts} over the existing
  * `discoverImpactedTests` engine: list tracked python test files, read them,
  * rank them against the localized source files by import/reference evidence, and
- * return the ranked {path,text}. Does NOT provide `signatures` (the issue-symbol
- * signature block is a ready-but-DEFERRED extension — no LSP signature port is
- * wired yet; the exemplar path ships first per RFC R2). Pure-ish glue over
- * injected I/O so it stays unit-testable.
+ * return the ranked {path,text}. When `sourceFiles` (the inferred BASE-tree source
+ * paths) are given, ALSO provides a `signatures` port that reads those source
+ * files and extracts the issue symbols' def/class signature lines (redacted) — the
+ * wrong-API-guess lever (RFC R2). Pure-ish glue over injected I/O so it stays
+ * unit-testable.
  *
  * `trackedFiles`: when the driver already listed `git ls-files` (for source-file
  * inference), it passes the list here so the adapter does NOT re-run it (C6 audit:
@@ -211,16 +214,21 @@ export const buildLexicalReproGroundingPorts = (deps: {
   readonly maxRelated?: number
   /** Already-listed tracked files (avoids a second `git ls-files`). */
   readonly trackedFiles?: readonly string[]
+  /** Inferred BASE-tree source files — read for the `signatures` port. */
+  readonly sourceFiles?: readonly string[]
   /** Injected for tests; default to the real adapters. */
   readonly listFiles?: typeof listTrackedPythonFiles
   readonly readTests?: typeof readRepoTestFiles
   readonly discover?: (args: DiscoverImpactedTestsArgs) => string[]
+  readonly readSource?: (absPath: string) => Promise<string | null>
 }): ReproGroundingPorts => {
   const listFiles = deps.listFiles ?? listTrackedPythonFiles
   const readTests = deps.readTests ?? readRepoTestFiles
   const discover = deps.discover ?? discoverImpactedTests
+  const readSource = deps.readSource ?? ((p: string) => readFile(p, "utf8").catch(() => null))
   const maxRelated = Math.max(1, Math.floor(deps.maxRelated ?? DEFAULT_RELATED_MAX))
-  return {
+  const sourcePaths = deps.sourceFiles ?? []
+  const base: ReproGroundingPorts = {
     relatedTests: async (sourceFiles) => {
       if (sourceFiles.length === 0) return []
       const tracked = deps.trackedFiles ?? (await listFiles(deps.sandbox, deps.timeoutMs))
@@ -235,6 +243,17 @@ export const buildLexicalReproGroundingPorts = (deps: {
         if (text !== undefined && text.trim() !== "") out.push({ path, text })
       }
       return out
+    },
+  }
+  if (sourcePaths.length === 0) return base
+  return {
+    ...base,
+    signatures: async (symbols) => {
+      const texts = await Promise.all(
+        sourcePaths.slice(0, 5).map((p) => readSource(join(deps.sandbox, p))),
+      )
+      const files = texts.filter((t): t is string => t !== null).map((text) => ({ text }))
+      return extractSignatures(symbols, files)
     },
   }
 }

@@ -110,6 +110,7 @@ const redactAndMaybeCut = (line: string, cutAtTopLevelColon: boolean): string =>
       i = pastString(line, i)
       continue
     }
+    if (ch === "#") return out.trimEnd() // trailing comment (outside a string) ⇒ drop
     if (cutAtTopLevelColon && ch === ":" && depth <= 0) return `${out}:`
     if (isDigit(ch) && !isIdentChar(line[i - 1])) {
       // Standalone numeric literal ⇒ `0` (an expected number could be the gold).
@@ -225,15 +226,16 @@ export const stripTestBodies = (src: string): string => {
       i = next
       continue
     }
-    if (IMPORT_LINE.test(ln) || ln.trim() === "") {
-      // Import / from (module paths — not oracle values) or blank ⇒ verbatim.
+    if (ln.trim() === "") {
       out.push(ln)
       i++
       continue
     }
-    if (DECORATOR_LINE.test(ln)) {
-      // Decorator ⇒ keep the marker SHAPE but redact literal args (a
-      // `@parametrize([... "GOLD" ...])` table is a gold oracle).
+    if (IMPORT_LINE.test(ln) || DECORATOR_LINE.test(ln)) {
+      // Import (module paths — no oracle values) or decorator (keep the marker
+      // SHAPE, redact literal args — `@parametrize([... "GOLD" ...])` is a gold
+      // oracle). Both run through the redactor so a trailing `# comment` is also
+      // dropped (a comment on a kept line could carry an expected value).
       out.push(redactAndMaybeCut(ln, false))
       i++
       continue
@@ -298,4 +300,55 @@ export const signatureBlock = (signatures: readonly string[] | undefined): reado
   const cleaned = signatures.map((s) => s.trim()).filter((s) => s !== "")
   if (cleaned.length === 0) return []
   return ["", SIGNATURE_BLOCK_HEADER, "```python", ...cleaned, "```"]
+}
+
+/** Last dotted component of a symbol (`pkg.mod.Foo.bar` ⇒ `bar`). */
+const symbolLeaf = (s: string): string => {
+  const parts = s.split(".")
+  return parts[parts.length - 1] ?? s
+}
+
+const DEF_NAME = /^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)/
+
+/** If `lines[i]` is a def/class for a wanted symbol, return its redacted
+ *  (multi-line) signature; else null. */
+const matchSignatureAt = (
+  lines: readonly string[],
+  i: number,
+  want: ReadonlySet<string>,
+): string | null => {
+  const m = DEF_NAME.exec(lines[i] ?? "")
+  if (m === null || m[1] === undefined || !want.has(m[1])) return null
+  const text = captureSignature(lines, i).sig.join("\n").trim()
+  return text === "" ? null : text
+}
+
+/**
+ * Extract the redacted def/class SIGNATURE lines of `symbols` from already-read
+ * BASE-tree source files (the unpatched API — the gold patch is NOT applied at
+ * repro-gen time, so source signatures are safe to show and are exactly the API
+ * shape the model otherwise guesses). Multi-line signatures captured + redacted
+ * via {@link captureSignature}; deduped; bounded to `max`. Pure.
+ */
+export const extractSignatures = (
+  symbols: readonly string[],
+  files: readonly { readonly text: string }[],
+  max = 6,
+): readonly string[] => {
+  const want = new Set(symbols.map(symbolLeaf).filter((s) => s.length > 0))
+  if (want.size === 0) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const f of files) {
+    if (typeof f.text !== "string") continue
+    const lines = stripTripleQuoted(f.text.replace(/\r\n?/g, "\n")).split("\n")
+    for (let i = 0; i < lines.length; i++) {
+      const sig = matchSignatureAt(lines, i, want)
+      if (sig === null || seen.has(sig)) continue
+      seen.add(sig)
+      out.push(sig)
+      if (out.length >= max) return out
+    }
+  }
+  return out
 }
