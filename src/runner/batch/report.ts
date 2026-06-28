@@ -30,13 +30,13 @@ import {
   type FailureClassification,
 } from "./corpus/failure-classifier"
 import {
-  llmEvidencePacketCounts,
-  summarizeLlmEvidenceArtifacts,
   type LlmEvidencePacketStage,
   type LlmEvidenceRevisionByStage,
+  llmEvidencePacketCounts,
+  summarizeLlmEvidenceArtifacts,
 } from "./eval/llm-evidence-packet"
-import { filesFromPatch } from "./eval/selection-paths"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
+import { filesFromPatch } from "./eval/selection-paths"
 import { resolvedTotals, scoreTotals } from "./observe"
 import type {
   BenchInstanceBudget,
@@ -46,8 +46,9 @@ import type {
   InstanceUsage,
   LlmEvidenceArtifacts,
   PublicRegressionProofState,
-  ReproOracleCalibration,
   ReproConsensusProofState,
+  ReproOracleCalibration,
+  ReproVoteTelemetry,
   SelectionProofSource,
   SelectionProofState,
   SelectionProofSummary,
@@ -108,6 +109,11 @@ export interface PerInstanceReport {
   budget?: BenchInstanceBudget
   /** Repro-test generation/install telemetry. Omitted when the knob was off. */
   reproTest?: BenchReproTestTelemetry
+  /** jun-28 — repro-vote per-round outcome telemetry (vote-decided vs unavailable/
+   *  inconclusive). Attached to `InstanceResult` by the driver but previously
+   *  DROPPED at report serialization; now emitted so an A/B campaign can read the
+   *  vote distribution. Omitted when the repro-vote validator never ran. */
+  reproVoteOutcomes?: ReproVoteTelemetry
   /** jun-19 — official-grade regression-vs-didn't-fix breakdown (swebench only).
    *  Lets a run self-measure PASS_TO_PASS-break rate (regression-gate
    *  justification). Omitted for non-swebench / ungraded ⇒ byte-identical. */
@@ -315,6 +321,7 @@ export const buildReport = (
         ...(c.termination !== "passed" ? { failure: c } : {}),
         ...(r.budget !== undefined ? { budget: r.budget } : {}),
         ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
+        ...(r.reproVoteOutcomes !== undefined ? { reproVoteOutcomes: r.reproVoteOutcomes } : {}),
         ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
         ...(r.reproOracleCalibration !== undefined
           ? { reproOracleCalibration: r.reproOracleCalibration }
@@ -387,7 +394,9 @@ export const mirrorReportToSsot = async (sourceFile: string, content: string): P
   if (!dir) return
   try {
     const { resolve } = await import("node:path")
-    const mirrorName = resolve(sourceFile).replace(/^[/\\]+/, "").replace(/[^a-zA-Z0-9._-]/g, "__")
+    const mirrorName = resolve(sourceFile)
+      .replace(/^[/\\]+/, "")
+      .replace(/[^a-zA-Z0-9._-]/g, "__")
     await Bun.write(`${dir}/${mirrorName}`, content)
   } catch {
     // canonical mirror is best-effort — the source report already landed

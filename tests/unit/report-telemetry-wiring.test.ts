@@ -59,6 +59,28 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
     expect(rep.perInstance[0]?.reproOracleCalibration).toEqual(cal)
   })
 
+  // jun-28: reproVoteOutcomes was attached to InstanceResult but DROPPED at report
+  // serialization — an A/B campaign read `null`. Red-on-injection if re-dropped.
+  test("reproVoteOutcomes survives into perInstance", () => {
+    const votes = {
+      rounds: [
+        {
+          outcome: "vote_resolved" as const,
+          detail: { resolved: 2, reproduced: 0, inconclusive: 1 },
+        },
+      ],
+      tally: {
+        empty_sources: 0,
+        exec_failed: 0,
+        vote_resolved: 1,
+        vote_unresolved: 0,
+        vote_inconclusive: 0,
+      },
+    }
+    const rep = buildReport(meta, [baseResult({ reproVoteOutcomes: votes })])
+    expect(rep.perInstance[0]?.reproVoteOutcomes).toEqual(votes)
+  })
+
   test("selectionTelemetry survives (verify-select diagnosis stays in report)", () => {
     const t: SelectionTelemetry = {
       attempted: 2,
@@ -165,18 +187,15 @@ describe("buildReport carries eval-only telemetry into perInstance", () => {
   })
 
   test("ownerWidening survives so bounded follow-up localization is audit-visible", () => {
-    const rep = buildReport(
-      meta,
-      [
-        baseResult({
-          ownerWidening: {
-            owners: ["pkg/base.py", "pkg/consumer.py"],
-            sources: ["repair_escalation", "forward_localize"],
-            path: "adaptive_reroute",
-          },
-        }),
-      ],
-    )
+    const rep = buildReport(meta, [
+      baseResult({
+        ownerWidening: {
+          owners: ["pkg/base.py", "pkg/consumer.py"],
+          sources: ["repair_escalation", "forward_localize"],
+          path: "adaptive_reroute",
+        },
+      }),
+    ])
     // `buildReport` (report.ts) folds `ownerWidening` into the per-instance row,
     // but `PerInstanceReport` does not surface the field on its public type. Read
     // through the actual emitted shape so this wiring-proof stays type-precise.
