@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildLexicalReproGroundingPorts,
+  inferIssueSourceFiles,
   type ReproGroundingPorts,
   retrieveExemplarSkeletons,
 } from "./repro-grounding"
@@ -135,6 +136,40 @@ describe("retrieveExemplarSkeletons — gated orchestrator (C4)", () => {
       }),
     })
     expect(out).toEqual({})
+  })
+})
+
+describe("inferIssueSourceFiles — lexical localization key", () => {
+  const tracked = [
+    "sphinx/ext/autodoc/__init__.py",
+    "sphinx/ext/napoleon/__init__.py",
+    "sphinx/util/inspect.py",
+    "tests/test_autodoc.py", // test file ⇒ excluded
+    "setup.py",
+    "README.md", // non-py ⇒ excluded
+  ]
+
+  test("matches issue tokens against source path components, ranked", () => {
+    const issue = "sphinx.ext.autodoc fails to render typehints in the inspect module."
+    const out = inferIssueSourceFiles(issue, tracked)
+    // autodoc (2 components: autodoc) + inspect both match; autodoc path has
+    // 'autodoc' stem, inspect path has 'inspect' stem.
+    expect(out).toContain("sphinx/ext/autodoc/__init__.py")
+    expect(out).toContain("sphinx/util/inspect.py")
+    // excluded kinds never appear
+    expect(out).not.toContain("tests/test_autodoc.py")
+    expect(out).not.toContain("README.md")
+  })
+
+  test("no distinctive tokens / empty ⇒ []", () => {
+    expect(inferIssueSourceFiles("", tracked)).toEqual([])
+    expect(inferIssueSourceFiles("it is a the bug big", tracked)).toEqual([]) // all <5 / common
+  })
+
+  test("respects maxFiles", () => {
+    const many = Array.from({ length: 10 }, (_, i) => `pkg/widget/module${i}.py`)
+    const out = inferIssueSourceFiles("module0 module1 module2 module3 module4 module5", many, 3)
+    expect(out.length).toBe(3)
   })
 })
 

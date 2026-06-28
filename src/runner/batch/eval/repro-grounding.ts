@@ -27,6 +27,7 @@ import { stripTestBodies } from "@/agent/repro-test/grounding"
 import {
   type DiscoverImpactedTestsArgs,
   discoverImpactedTests,
+  isPythonTestFile,
   type RepoTextFile,
 } from "./impacted-test-discovery"
 import { listTrackedPythonFiles, readRepoTestFiles } from "./repo-regression-discovery-adapter"
@@ -117,6 +118,54 @@ export const retrieveExemplarSkeletons = async (
     ...(skeletons.length > 0 ? { exemplarSkeletons: skeletons } : {}),
     ...(signatures.length > 0 ? { issueSignatures: signatures } : {}),
   }
+}
+
+/* ── Cheap source-file inference (lexical localization for the exemplar key) ── */
+
+/** Distinctive tokens the issue mentions: dotted module paths (`sphinx.ext.autodoc`)
+ *  split into components + standalone identifiers length ≥ 5. Lowercased, deduped.
+ *  Pure. NOT an answer-key signal — derived from the PUBLIC issue text only (never
+ *  the gold patch), the same surface localization already uses. */
+const issueTokens = (problemStatement: string): ReadonlySet<string> => {
+  const out = new Set<string>()
+  for (const m of problemStatement.matchAll(/[A-Za-z_][A-Za-z0-9_.]{3,}/g)) {
+    for (const part of m[0].toLowerCase().split(".")) {
+      if (part.length >= 5) out.add(part)
+    }
+  }
+  return out
+}
+
+const PY_PATH_COMPONENT = /[^/]+/g
+
+/**
+ * Infer the source files the issue is about, by matching {@link issueTokens}
+ * against the path components of tracked NON-test python files. Ranked by match
+ * count (desc), then path (stable); capped at `maxFiles`. This is the LEXICAL
+ * exemplar-retrieval key — the localization signal that {@link discoverImpactedTests}
+ * scores existing tests against. A future `CodeIntelligencePort` (semantica)
+ * replaces this with real localization. Empty issue / no match ⇒ `[]`. Pure.
+ */
+export const inferIssueSourceFiles = (
+  problemStatement: string,
+  trackedFiles: readonly string[],
+  maxFiles = 5,
+): readonly string[] => {
+  if (typeof problemStatement !== "string" || problemStatement.trim() === "") return []
+  const tokens = issueTokens(problemStatement)
+  if (tokens.size === 0) return []
+  const scored: { path: string; score: number }[] = []
+  for (const path of trackedFiles) {
+    if (!path.endsWith(".py") || isPythonTestFile(path)) continue
+    let score = 0
+    for (const comp of path.toLowerCase().matchAll(PY_PATH_COMPONENT)) {
+      const stem = comp[0].replace(/\.py$/, "")
+      if (tokens.has(stem)) score++
+    }
+    if (score > 0) scored.push({ path, score })
+  }
+  scored.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  return scored.slice(0, Math.max(1, Math.floor(maxFiles))).map((s) => s.path)
 }
 
 /* ── Lexical adapter (default backend) ─────────────────────────────────────── */

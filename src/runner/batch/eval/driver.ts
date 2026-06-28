@@ -61,6 +61,7 @@ import {
 } from "@/agent/localize-phase-guard"
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
+import type { ReproGroundingInput } from "@/agent/repro-test/generate"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { voteResolved } from "@/agent/repro-test/vote"
 import {
@@ -206,6 +207,7 @@ import {
   primaryRailRedAfterRepair,
 } from "./repair-phase-policy"
 import {
+  listTrackedPythonFiles,
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
@@ -219,6 +221,12 @@ import {
   sourceHashOf,
 } from "./repro-artifacts-sink"
 import { reproValidationCmd } from "./repro-command"
+import {
+  buildLexicalReproGroundingPorts,
+  inferIssueSourceFiles,
+  type ReproGroundingPorts,
+  retrieveExemplarSkeletons,
+} from "./repro-grounding"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
 import {
   type AttemptOutcome,
@@ -1621,6 +1629,21 @@ export interface PrepareReproTestDeps {
    *  byte-identical). Built by the bench app under the run's observe dir (full-remote
    *  tarball) and gated by the `reproArtifacts` opt-in. */
   readonly reproArtifactSink?: ReproArtifactSink
+  /** jun-29 GROUNDING gate. When `true`, the repro prompt is grounded with the
+   *  SETUP SKELETONS of relevant existing tests (no-leak: bodies elided) so the
+   *  model copies the repo's fixture pattern instead of hand-rolling framework
+   *  setup. Sourced from `posture.reproGrounding`; undefined/false ⇒ no retrieval,
+   *  byte-identical prompt. */
+  readonly reproGrounding?: boolean
+  /** Injected grounding ports (tests). Production builds the LEXICAL adapter from
+   *  the sandbox; a future semantica `CodeIntelligencePort` adapter fills the same
+   *  port. Only consulted when {@link reproGrounding} is on. */
+  readonly groundingPorts?: ReproGroundingPorts
+  /** Source files the issue is about (localization output). When absent and
+   *  grounding is on, the driver infers them lexically from the issue × tracked
+   *  files ({@link inferIssueSourceFiles}). Empty inference ⇒ exemplar retrieval
+   *  is inert (byte-identical). */
+  readonly groundingSourceFiles?: readonly string[]
 }
 
 /** Per-instance reproduction-script filename written into the sandbox. The
@@ -1729,6 +1752,7 @@ const generateReproCandidateTests = async (
   instance: Instance,
   deps: PrepareReproTestDeps,
   config: ReproTestConfig,
+  grounding: ReproGroundingInput = {},
 ): Promise<ReproCandidateGeneration | null> => {
   try {
     // SEED-ONLY: the issue-text extractor is a precision-first HEURISTIC guess at
@@ -1739,11 +1763,16 @@ const generateReproCandidateTests = async (
     // and the base-red gate (selectReproTest / baseValidatedRed) validates below.
     const mwe = extractIssueReproSeed(instance.problemStatement)?.code
     const gen = deps.generate ?? generateReproTests
+    // jun-29: splice grounding ONLY when it carries content, so an empty (off /
+    // no-retrieval) grounding is byte-identical to the un-grounded base.
+    const hasGrounding =
+      grounding.exemplarSkeletons !== undefined || grounding.issueSignatures !== undefined
     const base = {
       issue: instance.problemStatement,
       llm: deps.llm,
       config,
       ...(mwe !== undefined ? { mwe } : {}),
+      ...(hasGrounding ? { grounding } : {}),
     }
     const canonical = (await gen({ ...base, kind: "canonical" })).map(
       (source): ReproTestCandidate => ({ kind: "canonical", source }),
@@ -1854,6 +1883,33 @@ const persistReproArtifacts = async (
   }
 }
 
+/** Per-instance grounding-retrieval timeout (git ls-files / file reads). */
+const GROUNDING_TIMEOUT_MS = 30_000
+
+/**
+ * Compute the repro-prompt GROUNDING (jun-29). Default-OFF (`reproGrounding`
+ * unset) ⇒ `{}` (no I/O, byte-identical prompt). When on, build the lexical ports
+ * (unless injected), infer the issue's source files when the caller did not supply
+ * them, and retrieve exemplar skeletons. Never throws (the orchestrator degrades
+ * any port failure to `{}`); a flaky retrieval can never fail repro generation.
+ */
+const computeReproGrounding = async (
+  instance: Instance,
+  sandbox: string,
+  deps: PrepareReproTestDeps,
+): Promise<ReproGroundingInput> => {
+  if (deps.reproGrounding !== true) return {}
+  const ports =
+    deps.groundingPorts ??
+    buildLexicalReproGroundingPorts({ sandbox, timeoutMs: GROUNDING_TIMEOUT_MS })
+  let sourceFiles = deps.groundingSourceFiles ?? []
+  if (sourceFiles.length === 0) {
+    const tracked = await listTrackedPythonFiles(sandbox, GROUNDING_TIMEOUT_MS).catch(() => [])
+    sourceFiles = inferIssueSourceFiles(instance.problemStatement, tracked)
+  }
+  return retrieveExemplarSkeletons({ enabled: true, sourceFiles, ports })
+}
+
 export const prepareReproTestDetailed = async (
   instance: Instance,
   sandbox: string,
@@ -1877,7 +1933,8 @@ export const prepareReproTestDetailed = async (
   // sentinel scaffold instead of guessing a reproduction from prose. Fail-closed:
   // `extractIssueReproSeed` returns undefined for anything ambiguous, in which case
   // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
-  const generated = await generateReproCandidateTests(instance, deps, config)
+  const grounding = await computeReproGrounding(instance, sandbox, deps)
+  const generated = await generateReproCandidateTests(instance, deps, config, grounding)
   if (generated === null) return failedReproResult("generation_failed")
   const tests = generated.candidates
   if (tests.length === 0) return failedReproResult("generation_empty")
@@ -2071,6 +2128,7 @@ export const prepareSelectionReproSources = async (
     | "adversarialRepro"
     | "reproExecTimeoutMs"
     | "pairedControl"
+    | "reproGrounding"
   >,
   deps: Omit<PrepareReproTestDeps, "llm" | "adversarial"> = {},
 ): Promise<{
@@ -2092,6 +2150,7 @@ export const prepareSelectionReproSources = async (
       ? { reproExecTimeoutMs: posture.reproExecTimeoutMs }
       : {}),
     ...(posture.pairedControl === true ? { pairedControl: true } : {}),
+    ...(posture.reproGrounding === true ? { reproGrounding: true } : {}),
   })
   const reproSources = reproducingReproSources(detail.selection)
   const hardeningReproSources = reproducingHardeningSources(detail.selection)
@@ -2135,7 +2194,10 @@ export const prepareSelectionReproSources = async (
 export const installReproTestHint = async (
   instance: Instance,
   sandbox: string,
-  posture: Pick<BenchPosture, "reproTestK" | "adversarialRepro" | "pairedControl">,
+  posture: Pick<
+    BenchPosture,
+    "reproTestK" | "adversarialRepro" | "pairedControl" | "reproGrounding"
+  >,
   llm: LLMPort,
   reproArtifactSink?: ReproArtifactSink,
 ): Promise<InstallReproTestResult> => {
@@ -2145,6 +2207,7 @@ export const installReproTestHint = async (
     llm,
     ...(posture.adversarialRepro === true ? { adversarial: true } : {}),
     ...(posture.pairedControl === true ? { pairedControl: true } : {}),
+    ...(posture.reproGrounding === true ? { reproGrounding: true } : {}),
     ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
   })
   const { selection, telemetry } = preparation
