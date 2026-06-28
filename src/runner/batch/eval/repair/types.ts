@@ -399,6 +399,18 @@ export interface RunRepairRoundsArgs {
    *  `breadth <= 1` ⇒ the legacy single `runOnce`+`validate` path (byte-identical:
    *  this port is NEVER called, no fork, no extra validate). */
   runCandidates?: RunRepairCandidatesPort
+  /** jun-28 SOTA++ Phase-A acceptance SELECTOR (DRIVER-implemented, default-OFF).
+   *  When present, the breadth fan-out's winner is chosen by THIS port instead of
+   *  the legacy {@link reproOutcomeRank} `selectCandidate` — the driver scores each
+   *  candidate ONCE through the acceptance oracle (reproduction boolean +
+   *  regression failure count) and rerank-votes (Agentless-faithful). MUST return
+   *  one of the input `candidates` (the orchestrator then `.adopt()`s it). ABSENT
+   *  ⇒ legacy validator-rank selection (byte-identical). The orchestrator never
+   *  runs the oracle itself — it stays fenced; the driver gates this behind the
+   *  `acceptance` opt-in and wires the sandbox repro/regression runners. */
+  selectCandidates?: (
+    candidates: readonly RepairCandidateOutcome[],
+  ) => Promise<RepairCandidateOutcome>
 }
 
 /** Orchestrator result. The cumulative `patch` is what the bench runner then

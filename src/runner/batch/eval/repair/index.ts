@@ -165,7 +165,13 @@ const runRound = async (
     // wedge the loop or NPE on selection — fall back to the single path so the
     // round still produces a run+verdict (degenerate but not silently lost).
     if (candidates.length > 0) {
-      const winner = selectCandidate(args, candidates)
+      // SOTA++ Phase-A: when the driver injects an acceptance selector, IT picks
+      // the winner (score-once + rerank); else the legacy validator-rank select.
+      // ABSENT ⇒ byte-identical. The injected port MUST return one of `candidates`.
+      const winner =
+        args.selectCandidates !== undefined
+          ? await args.selectCandidates(candidates)
+          : selectCandidate(args, candidates)
       await winner.adopt()
       // Honest cost: ALL candidates' turns were spent this round, not just the
       // selected one's — attribute the full sum so the budget/report is truthful.
