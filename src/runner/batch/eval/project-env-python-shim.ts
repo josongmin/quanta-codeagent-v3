@@ -22,17 +22,11 @@ const projectEnvPythonPrefix = (instance: Instance): string | undefined => {
   const swebench = instance.swebench
   if (swebench === undefined) return undefined
   return shellJoin(
-    buildProjectEnvUvRunArgv(
-      swebench.repo,
-      swebench.version,
-      ["pytest"],
-      {
-        PYTEST_ADDOPTS: "",
-        PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
-        PYTHONNOUSERSITE: "1",
-      },
-      swebench.createdAt,
-    ),
+    buildProjectEnvUvRunArgv(swebench.repo, swebench.version, ["pytest"], {
+      PYTEST_ADDOPTS: "",
+      PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1",
+      PYTHONNOUSERSITE: "1",
+    }),
   )
 }
 

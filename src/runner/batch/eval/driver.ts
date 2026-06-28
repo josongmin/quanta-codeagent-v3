@@ -1814,7 +1814,7 @@ const executeReproCandidateTests = async (
   const reproCreatedAt = instance.swebench?.createdAt
   const buildArgv =
     reproRepo !== undefined
-      ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath, reproCreatedAt)
+      ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
       : undefined
   // G2 paired-control: when controls were generated (gate ON), attach the SAME
   // env-health control set to EVERY symptom candidate by position. The executor
@@ -3207,10 +3207,7 @@ export const reproExecBundle = (
     },
     readFile: async (p: string): Promise<string> => Bun.file(p).text(),
     ...(repo !== undefined
-      ? {
-          buildArgv: (scriptPath: string) =>
-            reproRunArgv(repo, version, scriptPath, instance.swebench?.createdAt),
-        }
+      ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, version, scriptPath) }
       : {}),
   }
 }
