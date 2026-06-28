@@ -117,4 +117,36 @@ describe("gitWorktreeHasStagedChanges — the raw-dirty fact from real git", () 
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  // jun-28: env-applied setup.py dep-pins (box/swebench install) must NOT reach
+  // the grader (they false-fail as already-applied). WIRING proof end-to-end
+  // through real git → gitStageAndDiffCached → stripEnvManifestPins.
+  it("strips an env dep-pin setup.py edit from the capture but keeps the real code fix", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "capture-pin-"))
+    try {
+      await execArgv(["git", "init", "-q"], dir, 5_000)
+      await execArgv(["git", "config", "user.email", "b@b"], dir, 5_000)
+      await execArgv(["git", "config", "user.name", "b"], dir, 5_000)
+      await writeFile(
+        join(dir, "setup.py"),
+        "install_requires = [\n    'docutils>=0.12',\n    'Jinja2>=2.3',\n]\n",
+      )
+      await writeFile(join(dir, "mod.py"), "def f():\n    return 1\n")
+      await execArgv(["git", "add", "-A"], dir, 5_000)
+      await execArgv(["git", "-c", "commit.gpgsign=false", "commit", "-qm", "base"], dir, 5_000)
+      // env tightens the manifest (contamination) AND the agent fixes real code.
+      await writeFile(
+        join(dir, "setup.py"),
+        "install_requires = [\n    'docutils>=0.12,<0.18',\n    'Jinja2>=2.3,<3.1',\n]\n",
+      )
+      await writeFile(join(dir, "mod.py"), "def f():\n    return 2\n")
+      const captured = await gitStageAndDiffCached(dir, 5_000)
+      expect(captured).not.toContain("setup.py") // env-pin section dropped
+      expect(captured).not.toContain("docutils")
+      expect(captured).toContain("mod.py") // real fix survives
+      expect(captured).toContain("+    return 2")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })

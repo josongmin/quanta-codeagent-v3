@@ -18,6 +18,7 @@ import {
 } from "../corpus/project-env"
 import { type ExecResult, exec, execArgv, trimOut } from "./exec"
 import { isBenchReproArtifactPath } from "./repro-artifacts"
+import { stripEnvManifestPins } from "./strip-env-manifest-pins"
 
 /** Real-fs port for P0 build-env materialization (node:fs/promises). The
  *  corpus helper is fs-injected so unit tests use a fake; production wires the
@@ -185,7 +186,11 @@ export const gitStageAndDiffCached = async (cwd: string, timeoutMs: number): Pro
     cwd,
     timeoutMs,
   )
-  return diff.code === 0 ? sourceOnlyDiff(diff.stdout) : ""
+  // jun-28: strip env-applied dependency-pin contamination (e.g. setup.py
+  // `install_requires` caps the box/swebench install adds to make an old repo
+  // resolvable) so it never reaches the grader as a false "Patch Apply Failed".
+  // No-op unless a manifest section is a pure same-package constraint rewording.
+  return diff.code === 0 ? stripEnvManifestPins(sourceOnlyDiff(diff.stdout)) : ""
 }
 
 /**
