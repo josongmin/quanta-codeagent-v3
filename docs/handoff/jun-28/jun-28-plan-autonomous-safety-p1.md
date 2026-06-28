@@ -3,16 +3,18 @@
 작성: 2026-06-28. MASTER 백로그 P1 두 항목의 구현 계획. **중복구현 회피**가 1차 제약.
 관련: `[[jun-26-bench-token-usage-tracking-gap]]`, `[[no-heuristics-only-validated]]`, `[[jun-28-harness-safety-audit-hardening]]`.
 
-## ✅ LANDED (2026-06-28, 헬게이트 프로토콜, 2 커밋)
-- **체크포인트1 `20be4bb5a`** — L0 비용회계 + L1 관측성.
-- **체크포인트2 `bfb20bf6c`** — L2 pre-flight admission control(`wouldExceedCost`+`projectCostPreflight`, turn-loop 배선; e2e anti-theater=llm.calls===0).
+## ✅ LANDED (2026-06-28, 헬게이트 프로토콜, **L0~L4 / 4 커밋**)
+- **`20be4bb5a` L0+L1** — 비용회계(단일 가격 SSOT, emitUsage 단일 seam) + pricingVersion 관측.
+- **`bfb20bf6c` L2** — pre-flight admission(`wouldExceedCost`+`projectCostPreflight`; e2e anti-theater=llm.calls===0).
+- **`cdf74d541` L4a** — 가격 SSOT 통일: `BudgetLedger.DEFAULT_MODEL_PRICING`이 SSOT와 드리프트(gpt-5 $10/$30 vs $1.25/$10, gpt-5.4/5.5 부재→sonnet폴백=bench비용틀림) → pricing.ts를 superset SSOT로(cacheWritePerM·MODEL_RATE_CARD export), ledger가 derive. costUsd 불변(L0 byte-identical).
+- **`d0e1fe983` L4b** — ledger 배선+집행: emitUsage→`budgetLedger.record`(cache-creation→cacheWrite 매핑) + `hardBreach()`(session/daily-hard 재구성, soft제외) + turn-loop 턴후 hardBreach→budget_exhausted. **cap값 미shipped**(no default policy=operator 측정값까지 inert, measure-first). e2e anti-theater=하드브리치가 runAgent 멈춤. serialize/hydrate=cross-run 영속.
 
-### L4 상태 (다음, measure-first — blind 금지)
-L4=캠페인 ledger. **3-파트 별도작업으로 확정**(한방 big-bang 금지 이유):
-1. **가격 드리프트 선결**: `BudgetLedger.DEFAULT_MODEL_PRICING`이 SSOT(pricing.ts)와 드리프트 — `gpt-5` $10/$30(SSOT $1.25/$10), **gpt-5.4/5.5 부재→sonnet 폴백**(=bench모델 비용 틀림). + cacheWrite 차원은 SSOT에 없음. 가격 SSOT 통일이 ledger 배선 전 필수(안 그러면 틀린측정=hygiene 위반). ledger 테스트 32개가 옛 가격에 의존→리팩터 신중.
-2. **cross-run 영속 배선**: config.budgetLedger 슬롯+budget_status 툴은 존재하나 **생성/주입·emitUsage record·hydrate/serialize·breach→abort 전부 미배선**. bootstrap/session-lifecycle cross-cutting.
-3. **cap값 measure-first**: soft/hard=typical 캠페인 spend 측정(#5 G2 합류) 후 산정. blind 값 금지.
-- **L3 burn-rate**: 후순위(trip 빈도 측정 후).
+**검증**: typecheck PASS. 풀스위트 33637 pass / 14 fail **전부 내것아님**(working-loop=budget 전부 revert해도 동일=pre-existing; 라쳇 god-code/knob-orphan `QUANTA_BENCH_HOST_MONITOR`=유저 동시 bench 커밋; 나머지 timing/pollution). 내 코드 전부 `budgetMeter?.`/`budgetLedger?.` 게이트=무관 config byte-identical.
+
+### 남은 것
+- **L3 burn-rate**: 후순위(cost/turn 속도 이상, trip 빈도 측정 후).
+- **캠페인 러너 스크립트**(tools/): `~/.quanta/budget.json` hydrate→run→serialize로 다회런 누적(L4b 영속 API 위에).
+- **operator cap값**: typical 캠페인 spend 측정(#5 G2/SSH) 후 soft/hard 설정 — 그래야 L4b 집행이 깨어남.
 
 ---
 
