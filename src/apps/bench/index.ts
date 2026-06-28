@@ -84,6 +84,7 @@ import {
   writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
 import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
+import { makeReproArtifactFsSink } from "@/runner/batch/eval/repro-artifacts-fs"
 import { runBatchWithHealth } from "@/runner/batch/eval/run-health"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
@@ -504,12 +505,20 @@ const runSwebenchTask = async (
   try {
     await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
     const instance = toInstance(task, dest)
+    // A1 (jun-28): persist per-candidate repro artifacts UNDER the observe dir so
+    // they ride the full-remote observe tarball. Rides the EXISTING observe opt-in
+    // (no new knob): no observe handle ⇒ no sink ⇒ no-op (default-OFF).
+    const reproArtifactSink =
+      deps.obs !== undefined
+        ? makeReproArtifactFsSink(join(deps.obs.dir, deps.obs.runId))
+        : undefined
     const result = await resolveInstance(
       instance,
       {
         llm: deps.llm,
         maxTurns: deps.cfg.maxTurns,
         timeoutMs: deps.cfg.timeoutMs,
+        ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
         // G1 — present ONLY when ≥2 distinct-model lanes resolved (knob ON +
         // credentialed). Omitted ⇒ key absent ⇒ byte-identical single-port path.
         ...(deps.llmLanes !== undefined ? { llmLanes: deps.llmLanes } : {}),
@@ -995,11 +1004,16 @@ const runCustomCorpusMode = async (
     `bench: ${instances.length} instance(s), provider=${provider}, model=${model}, n=${cfg.n}`,
   )
 
+  // A1 (jun-28): per-candidate repro artifacts under the observe dir (rides the
+  // observe opt-in; no handle ⇒ no sink ⇒ no-op).
+  const reproArtifactSink =
+    obs !== undefined ? makeReproArtifactFsSink(join(obs.dir, obs.runId)) : undefined
   const base: RunCfg = {
     llm,
     maxTurns: cfg.maxTurns,
     timeoutMs: cfg.timeoutMs,
     ...(pythonSwebench !== undefined ? { pythonSwebench } : {}),
+    ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
   }
   const { results } = await runBatch({
     instances,

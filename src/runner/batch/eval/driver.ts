@@ -206,6 +206,7 @@ import {
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
 import { emitPatch, emitSandbox, emitVerify, ObservationError, type Wiring } from "./report"
+import type { ReproArtifactKind, ReproArtifactSink } from "./repro-artifacts-sink"
 import { reproValidationCmd } from "./repro-command"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
 import {
@@ -290,6 +291,15 @@ export interface RunInstanceDeps {
    * byte-identical to the pre-budget path.
    */
   budgetMeterFactory?: () => AgentConfig["budgetMeter"]
+  /**
+   * A1 (jun-28): per-candidate repro artifact sink. When present, every generated
+   * repro candidate (canonical + hardening) is persisted under the run's observe
+   * dir before the unselected breadth candidates are discarded — durable RCA
+   * evidence that survives the full-remote tarball. Observe-only (never gates a
+   * decision); ABSENT ⇒ no-op (default-OFF, byte-identical). The composition root
+   * builds it from the observe handle, gated by the `reproArtifacts` opt-in.
+   */
+  reproArtifactSink?: ReproArtifactSink
   /**
    * Official-harness verifier. When present AND the instance carries swebench
    * metadata, the captured patch is graded by the Python harness instead of
@@ -1591,6 +1601,12 @@ export interface PrepareReproTestDeps {
    *  "green"`, rejecting env/import-broken false-reds. Sourced from
    *  `posture.pairedControl`; undefined/false ⇒ byte-identical legacy filter. */
   readonly pairedControl?: boolean
+  /** A1 (jun-28): per-candidate repro artifact sink. When present, EVERY generated
+   *  candidate (canonical + hardening) is persisted before the unselected ones are
+   *  discarded — durable RCA evidence. Observe-only; absent ⇒ no-op (default-OFF,
+   *  byte-identical). Built by the bench app under the run's observe dir (full-remote
+   *  tarball) and gated by the `reproArtifacts` opt-in. */
+  readonly reproArtifactSink?: ReproArtifactSink
 }
 
 /** Per-instance reproduction-script filename written into the sandbox. The
@@ -1780,9 +1796,46 @@ const executeReproCandidateTests = async (
     // alignment (executeReproTests returns one sample per input, in order). This
     // is what lets the driver route ONLY canonical reproducing sources into the
     // submit-gate oracle (calibration + proof gate) and keep hardening advisory.
-    return samples.map((s, i) => ({ ...s, kind: candidates[i]?.kind ?? "canonical" }))
+    const final = samples.map((s, i) => ({ ...s, kind: candidates[i]?.kind ?? "canonical" }))
+    // A1 (jun-28): persist EVERY candidate (canonical + hardening) before the
+    // unselected ones evaporate — durable RCA evidence. Observe-only + best-effort:
+    // a sink failure never changes the returned samples (wrapped). No-op when no
+    // sink is injected (default-OFF, byte-identical).
+    await persistReproArtifacts(deps.reproArtifactSink, instance.id, final)
+    return final
   } catch {
     return null
+  }
+}
+
+/** A1 persistence: write one artifact dir per repro candidate (per-kind index)
+ *  via the injected sink. Best-effort + observe-only — swallows its own errors so
+ *  persistence can NEVER fail the repro path. No-op when `sink` is undefined. */
+const persistReproArtifacts = async (
+  sink: ReproArtifactSink | undefined,
+  instanceId: string,
+  samples: ReproSamples,
+): Promise<void> => {
+  if (sink === undefined) return
+  const perKind: Record<string, number> = {}
+  for (const s of samples) {
+    const kind: ReproArtifactKind = s.kind === "hardening" ? "hardening" : "canonical"
+    const index = perKind[kind] ?? 0
+    perKind[kind] = index + 1
+    try {
+      await sink.persist({
+        instanceId,
+        index,
+        kind,
+        source: s.source,
+        stdout: s.stdout,
+        stderr: s.stderr ?? "",
+        outcome: s.outcome,
+        ...(s.execFailure !== undefined ? { execFailure: s.execFailure } : {}),
+      })
+    } catch {
+      // observe-only: a write failure must never disturb the repro pipeline.
+    }
   }
 }
 
@@ -2069,6 +2122,7 @@ export const installReproTestHint = async (
   sandbox: string,
   posture: Pick<BenchPosture, "reproTestK" | "adversarialRepro" | "pairedControl">,
   llm: LLMPort,
+  reproArtifactSink?: ReproArtifactSink,
 ): Promise<InstallReproTestResult> => {
   const reproK = posture.reproTestK
   if (reproK === undefined) return { hint: undefined, telemetry: undefined }
@@ -2076,6 +2130,7 @@ export const installReproTestHint = async (
     llm,
     ...(posture.adversarialRepro === true ? { adversarial: true } : {}),
     ...(posture.pairedControl === true ? { pairedControl: true } : {}),
+    ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
   })
   const { selection, telemetry } = preparation
   if (selection === null || selection.selected === null) return { hint: undefined, telemetry }
@@ -4693,6 +4748,7 @@ const prepareHintAndReproContext = async (
   sandbox: string,
   llm: LLMPort,
   posture: BenchPosture,
+  reproArtifactSink?: ReproArtifactSink,
 ): Promise<HintReproContext> => {
   let localizeCandidates: readonly string[] = []
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
@@ -4710,7 +4766,7 @@ const prepareHintAndReproContext = async (
     localizeCandidates,
   })
   const reproInstall = benchInstallsReproHint(posture.inLoopExecMode)
-    ? await installReproTestHint(instance, sandbox, posture, llm)
+    ? await installReproTestHint(instance, sandbox, posture, llm, reproArtifactSink)
     : { hint: undefined, telemetry: undefined }
   const selectionRepro =
     reproInstall.telemetry !== undefined
@@ -4865,7 +4921,13 @@ export const prepareAttemptContext = async (
   // gate falls back to the whole-repo probe (historical behavior).
   const taskFiles = instance.goldPatch ? filesFromPatch(instance.goldPatch) : undefined
   const lspGrounding = await verifyStrictPresetLspGrounding(posture, sandbox, taskFiles, signal)
-  const hintRepro = await prepareHintAndReproContext(instance, sandbox, deps.llm, posture)
+  const hintRepro = await prepareHintAndReproContext(
+    instance,
+    sandbox,
+    deps.llm,
+    posture,
+    deps.reproArtifactSink,
+  )
   // T3 — forward-localize consumers enter as low-score ADDITIONAL owner candidates
   // (they widen the set; ranking still prefers backward-localized owners). score 0
   // keeps them below any positively-ranked stage-1 file. DEDUP against the stage-1
