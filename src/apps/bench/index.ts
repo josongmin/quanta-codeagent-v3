@@ -105,6 +105,7 @@ import { finalizeRun, runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
+import { startHostResourceSampler } from "./host-resource-sampler"
 import { resolveModelLanes } from "./model-lanes"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals, scoreTotals } from "./observe"
@@ -864,21 +865,37 @@ const maybeRunDatasetMode = async (
   if (llmLanes !== undefined) {
     logger.info(`bench: model-lane diversity ON (${llmLanes.length} lanes)`)
   }
-  await runDatasetMode(
-    datasetFile,
-    llm,
-    freshLlm,
-    { provider, model },
-    {
-      n: cfg.n,
-      ...(cfg.limit !== null ? { limit: cfg.limit } : {}),
-      maxTurns: cfg.maxTurns,
-      timeoutMs: cfg.timeoutMs,
-    },
-    { parsed, filtered },
-    obs,
-    llmLanes,
-  )
+  // Host resource telemetry: periodic memory + process-count lines into the run
+  // log so a runaway (fork-storm / OOM climb) is visible AS IT HAPPENS instead of
+  // reverse-engineered from a dead box. Default-ON; no-op off Linux (no /proc);
+  // opt out with QUANTA_BENCH_HOST_MONITOR=0. (jun-28: a uv fork-storm OOM-killed
+  // an xarray box with no in-log signal — this makes that self-evident.)
+  const hostMonitor =
+    process.env.QUANTA_BENCH_HOST_MONITOR !== "0"
+      ? startHostResourceSampler({
+          intervalMs: 15_000,
+          log: (level, msg) => (level === "warn" ? logger.warn(msg) : logger.info(msg)),
+        })
+      : { stop: () => {} }
+  try {
+    await runDatasetMode(
+      datasetFile,
+      llm,
+      freshLlm,
+      { provider, model },
+      {
+        n: cfg.n,
+        ...(cfg.limit !== null ? { limit: cfg.limit } : {}),
+        maxTurns: cfg.maxTurns,
+        timeoutMs: cfg.timeoutMs,
+      },
+      { parsed, filtered },
+      obs,
+      llmLanes,
+    )
+  } finally {
+    hostMonitor.stop()
+  }
   return true
 }
 
