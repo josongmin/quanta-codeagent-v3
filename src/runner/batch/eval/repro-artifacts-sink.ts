@@ -81,13 +81,31 @@ export const sourceHashOf = (source: string): string => {
 const boundTail = (s: string): string =>
   s.length > REPRO_ARTIFACT_TAIL_BOUND ? s.slice(-REPRO_ARTIFACT_TAIL_BOUND) : s
 
+/** Path-segment hardening: the artifact directory is built from `instanceId`,
+ *  which for a non-swebench / custom corpus is NOT guaranteed `/`- or `..`-free.
+ *  Collapse every char outside `[A-Za-z0-9._-]` to `_` so a traversal/injection id
+ *  can never escape the artifact root (mirrors the bench work-dir sanitizer). The
+ *  ORIGINAL id is preserved verbatim inside `outcome.json` for join-back. */
+const safeSegment = (s: string): string => s.replace(/[^A-Za-z0-9._-]/g, "_").replace(/\.\.+/g, "_")
+
+/** Raw pytest sidecar is normally tiny (a repro is 1-few nodes), but a pathological
+ *  report must not blow up disk. Tail/head-truncating raw JSON would CORRUPT it, so
+ *  an oversized report is replaced by a small VALID-JSON marker instead. */
+const SIDECAR_MAX_BYTES = 64 * 1024
+const boundSidecar = (raw: string): string =>
+  raw.length <= SIDECAR_MAX_BYTES
+    ? raw
+    : `${JSON.stringify({ sidecarOmitted: "oversized", bytes: raw.length })}\n`
+
 /** Build a sink over an injected write port. The port's root is bound by the
  *  caller (production: under the observe dir; tests: a fake map). */
 export const makeReproArtifactSink = (port: ReproArtifactWritePort): ReproArtifactSink => ({
   persist: async (a: ReproCandidateArtifact): Promise<void> => {
     const candidateId = candidateIdOf(a.kind, a.index)
-    const dir = `repro/${a.instanceId}/${candidateId}`
+    const dir = `repro/${safeSegment(a.instanceId)}/${candidateId}`
     const outcome = {
+      // original (un-sanitized) id so a sanitized dir still maps back to the run.
+      instanceId: a.instanceId,
       kind: a.kind,
       candidateId,
       sourceHash: sourceHashOf(a.source),
@@ -100,7 +118,7 @@ export const makeReproArtifactSink = (port: ReproArtifactWritePort): ReproArtifa
     await port.writeFile(`${dir}/stdout.txt`, boundTail(a.stdout))
     await port.writeFile(`${dir}/stderr.txt`, boundTail(a.stderr))
     if (a.sidecar !== undefined) {
-      await port.writeFile(`${dir}/sidecar.json`, a.sidecar)
+      await port.writeFile(`${dir}/sidecar.json`, boundSidecar(a.sidecar))
     }
   },
 })

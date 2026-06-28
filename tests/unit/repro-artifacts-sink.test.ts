@@ -115,6 +115,91 @@ describe("repro artifact sink", () => {
     expect(sourceHashOf("abc")).not.toBe(sourceHashOf("abd"))
     expect(sourceHashOf("")).toMatch(/^[0-9a-f]+$/)
   })
+
+  test("PATH SAFETY: a traversal/injection instanceId is sanitized; original kept in outcome.json", async () => {
+    const { port, writes } = fakePort()
+    await makeReproArtifactSink(port).persist({
+      instanceId: "../../etc/evil",
+      index: 0,
+      kind: "canonical",
+      source: "x",
+      stdout: "",
+      stderr: "",
+      outcome: "reproduced",
+    })
+    // No written path may escape the repro/ root via "..".
+    for (const p of writes.keys()) {
+      expect(p.startsWith("repro/")).toBe(true)
+      expect(p.includes("..")).toBe(false)
+      expect(p.includes("/etc/")).toBe(false)
+    }
+    // The ORIGINAL instanceId is preserved inside outcome.json for join-back.
+    const outcomeKey = [...writes.keys()].find((p) => p.endsWith("outcome.json"))
+    const outcome = JSON.parse(writes.get(outcomeKey ?? "") ?? "{}")
+    expect(outcome.instanceId).toBe("../../etc/evil")
+  })
+
+  test("SIDECAR BOUND: an oversized raw report is replaced by a small VALID-JSON marker", async () => {
+    const { port, writes } = fakePort()
+    const huge = `{"schema":1,"reports":[${"0,".repeat(200_000)}0]}`
+    await makeReproArtifactSink(port).persist({
+      instanceId: "i",
+      index: 0,
+      kind: "canonical",
+      source: "x",
+      stdout: "",
+      stderr: "",
+      outcome: "reproduced",
+      sidecar: huge,
+    })
+    const sidecar = writes.get("repro/i/canonical-0/sidecar.json") ?? ""
+    expect(sidecar.length).toBeLessThan(huge.length)
+    // still parseable JSON (a tail/head truncation would corrupt it)
+    const parsed = JSON.parse(sidecar)
+    expect(parsed.sidecarOmitted).toBe("oversized")
+    expect(parsed.bytes).toBe(huge.length)
+  })
+
+  test("SIDECAR BOUND: a normal-size report is written verbatim", async () => {
+    const { port, writes } = fakePort()
+    const report = '{"schema":1,"collected":1,"exitstatus":1,"reports":[]}'
+    await makeReproArtifactSink(port).persist({
+      instanceId: "i",
+      index: 0,
+      kind: "canonical",
+      source: "x",
+      stdout: "",
+      stderr: "",
+      outcome: "reproduced",
+      sidecar: report,
+    })
+    expect(writes.get("repro/i/canonical-0/sidecar.json")).toBe(report)
+  })
+
+  test("PER-KIND: canonical + hardening from one instance never collide", async () => {
+    const { port, writes } = fakePort()
+    const sink = makeReproArtifactSink(port)
+    const base = {
+      instanceId: "i",
+      source: "x",
+      stdout: "",
+      stderr: "",
+      outcome: "reproduced" as const,
+    }
+    await sink.persist({ ...base, index: 0, kind: "canonical" })
+    await sink.persist({ ...base, index: 1, kind: "canonical" })
+    await sink.persist({ ...base, index: 0, kind: "hardening" })
+    expect(writes.has("repro/i/canonical-0/candidate.py")).toBe(true)
+    expect(writes.has("repro/i/canonical-1/candidate.py")).toBe(true)
+    expect(writes.has("repro/i/hardening-0/candidate.py")).toBe(true)
+    // three distinct candidate dirs ⇒ no overwrite
+    const candDirs = new Set(
+      [...writes.keys()]
+        .filter((p) => p.endsWith("candidate.py"))
+        .map((p) => p.replace(/\/candidate\.py$/, "")),
+    )
+    expect(candDirs.size).toBe(3)
+  })
 })
 
 // ── fs adapter (real disk roundtrip) ─────────────────────────────────────────
