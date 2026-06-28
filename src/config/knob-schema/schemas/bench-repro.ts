@@ -94,6 +94,28 @@ export const acceptanceSchema: KnobSchema<boolean> = {
   source: "jun-28 SOTA++ Phase-A acceptance (Agentless rerank.py port)",
 }
 
+/* ── repro-grounding (QUANTA_BENCH_REPRO_GROUNDING) ───────────────────────── */
+const parseReproGrounding = (raw: string | undefined): boolean | undefined => {
+  if (raw === undefined) return undefined
+  const s = raw.trim().toLowerCase()
+  if (s === "" || s === "0" || s === "off" || s === "false") return undefined
+  return true
+}
+export const reproGroundingSchema: KnobSchema<boolean> = {
+  id: "repro-grounding",
+  envKey: "QUANTA_BENCH_REPRO_GROUNDING",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: repro-gen GROUNDING — splice SETUP SKELETONS of relevant existing tests (no-leak: assertion bodies elided) + issue-symbol signatures into the repro prompt so the model copies the repo's fixture pattern instead of hand-rolling framework setup. Requires repro-test. Default-OFF ⇒ byte-identical.",
+  knobDescribe:
+    "repro-gen grounding: inject existing-test setup skeletons (bodies stripped) + issue signatures so the model stops hand-rolling framework setup (targets the ~40% exec_failed class)",
+  readSite: "runner/knobs/knobs/repro-grounding.ts",
+  surfaces: BENCH,
+  parse: parseReproGrounding,
+  source: "jun-29 repro-gen grounding RFC (Agentless/SWE-RL retrieve-existing-test)",
+}
+
 /* ── repro-doubt (QUANTA_BENCH_REPRO_DOUBT) ───────────────────────────────── */
 interface ReproDoubtValue {
   readonly stuckRuns: number

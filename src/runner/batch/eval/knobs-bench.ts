@@ -398,6 +398,12 @@ export interface BenchPosture {
    *  rerank instead of legacy validator-rank. Armed only when a reproducing set
    *  exists; default-OFF ⇒ byte-identical legacy selection. */
   readonly acceptance: boolean
+  /** jun-29: repro-gen GROUNDING — splice setup skeletons of relevant existing
+   *  tests (assertion bodies elided, no-leak) + issue-symbol signatures into the
+   *  repro prompt so the model copies the repo's fixture pattern instead of
+   *  hand-rolling framework setup. Armed only when the driver retrieves a
+   *  non-empty skeleton/signature set; default-OFF ⇒ byte-identical prompt. */
+  readonly reproGrounding: boolean
   /** T-501: post-localization commit rail + no-patch exhausted verdict. */
   readonly noPatchBreaker: boolean
   /** T-601: multi-owner escalation decision (closed reason taxonomy). */
@@ -647,6 +653,7 @@ export const benchPostureFromState = (
   const patchBudgetStrict = readKnobValue(state, "patch-budget-strict", isTrue) === true
   const reproVote = readKnobValue(state, "repro-vote", isTrue) === true
   const acceptance = readKnobValue(state, "acceptance", isTrue) === true
+  const reproGrounding = readKnobValue(state, "repro-grounding", isTrue) === true
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
@@ -706,6 +713,7 @@ export const benchPostureFromState = (
     patchBudgetStrict,
     reproVote,
     acceptance,
+    reproGrounding,
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,

@@ -105,12 +105,13 @@ import {
   acceptanceSchema,
   reproDoubtSchema,
   reproExecTimeoutSchema,
+  reproGroundingSchema,
   reproTestSchema,
   reproVoteSchema,
 } from "./bench-repro"
 
 /**
- * ALL 76 bench knob schemas, IN THE EXACT ORDER their entries appear in
+ * ALL 77 bench knob schemas, IN THE EXACT ORDER their entries appear in
  * src/config/knob-inventory/bench.ts (envKey order). Do NOT reorder.
  */
 export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
@@ -157,6 +158,7 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   patchBudgetStrictSchema, // QUANTA_BENCH_PATCH_BUDGET_STRICT
   reproVoteSchema, // QUANTA_BENCH_REPRO_VOTE
   acceptanceSchema, // QUANTA_BENCH_ACCEPTANCE
+  reproGroundingSchema, // QUANTA_BENCH_REPRO_GROUNDING
   adversarialReproSchema, // QUANTA_BENCH_ADVERSARIAL_REPRO
   reproDoubtSchema, // QUANTA_BENCH_REPRO_DOUBT
   verifySelectSchema, // QUANTA_BENCH_VERIFY_SELECT
