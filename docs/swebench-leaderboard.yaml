@@ -1710,3 +1710,147 @@ runs:
     patch_bytes: 528
     repro_samples: 5
     pass_to_pass_total: 141
+
+- run_id: red-campaign-v6-singlepass-execfull-2026-06-28
+  date: '2026-06-28'
+  preset: agentless-v6-singlepass-execfull
+  preset_env: 'QUANTA_BENCH_NONEMPTY_FALLBACK=1 (best clean-apply/no-regression candidate vs empty); SIMPLICITY/SIBLING/FIND_REFS steers OFF (default); active steers = LSP-grounding + spec-fidelity (generic, non-instance-tuned)'
+  model: gpt-5.5
+  auth: chatgpt-oauth
+  grading: official swebench python harness, spot EC2 c7i.4xlarge, source-only patch
+  scope: 'RED-FLIP campaign — 81 v6-untried red instances (TierA other-scaffold-passers + TierB never-solved), ROI-ordered. Heuristic-clean: no answer-key steers (removed 294b40a8), SIMPLICITY off, single-pass (no verify-select/declaredExpected selection authority).'
+  resolved_count: 44
+  audit_note: '4 of these sit on the audit_flags watchlist from PRIOR (verify-select/SIMPLICITY/declaredExpected) runs — django-11138 (contaminated_solved_clean_resolve_required), django-13417 (heuristic_assisted SIMPLICITY), astropy-13033 (targeted_heuristic_present), django-16642 (no_clean_ssot_receipt). This v6 single-pass run carries NONE of those authorities (SIMPLICITY off, no verify-select selection, no answer-key steer) and is the requested CLEAN re-solve receipt. audit_flags entries left for operator to officially clear.'
+  resolved:
+  - instance_id: astropy__astropy-13033 # WATCHLIST clean-resolve
+    repo: astropy
+    turns: 36
+  - instance_id: astropy__astropy-13579
+    repo: astropy
+    turns: 51
+  - instance_id: astropy__astropy-7166
+    repo: astropy
+    turns: 22
+  - instance_id: django__django-11138 # WATCHLIST clean-resolve
+    repo: django
+    turns: 58
+  - instance_id: django__django-11239
+    repo: django
+    turns: 25
+  - instance_id: django__django-11433
+    repo: django
+    turns: 23
+  - instance_id: django__django-11490
+    repo: django
+    turns: 24
+  - instance_id: django__django-11551
+    repo: django
+    turns: 13
+  - instance_id: django__django-11555
+    repo: django
+    turns: 59
+  - instance_id: django__django-11848
+    repo: django
+    turns: 13
+  - instance_id: django__django-11885
+    repo: django
+    turns: 42
+  - instance_id: django__django-11964
+    repo: django
+    turns: 13
+  - instance_id: django__django-12193
+    repo: django
+    turns: 18
+  - instance_id: django__django-13023
+    repo: django
+    turns: 17
+  - instance_id: django__django-13112
+    repo: django
+    turns: 38
+  - instance_id: django__django-13128
+    repo: django
+    turns: 23
+  - instance_id: django__django-13195
+    repo: django
+    turns: 29
+  - instance_id: django__django-13343
+    repo: django
+    turns: 26
+  - instance_id: django__django-13406
+    repo: django
+    turns: 24
+  - instance_id: django__django-13417 # WATCHLIST clean-resolve
+    repo: django
+    turns: 22
+  - instance_id: django__django-13551
+    repo: django
+    turns: 19
+  - instance_id: django__django-13568
+    repo: django
+    turns: 37
+  - instance_id: django__django-14580
+    repo: django
+    turns: 21
+  - instance_id: django__django-14771
+    repo: django
+    turns: 21
+  - instance_id: django__django-15103
+    repo: django
+    turns: 25
+  - instance_id: django__django-15973
+    repo: django
+    turns: 35
+  - instance_id: django__django-15987
+    repo: django
+    turns: 19
+  - instance_id: django__django-16139
+    repo: django
+    turns: 49
+  - instance_id: django__django-16454
+    repo: django
+    turns: 29
+  - instance_id: django__django-16642 # WATCHLIST clean-resolve
+    repo: django
+    turns: 15
+  - instance_id: matplotlib__matplotlib-20488
+    repo: matplotlib
+    turns: 20
+  - instance_id: matplotlib__matplotlib-22865
+    repo: matplotlib
+    turns: 47
+  - instance_id: matplotlib__matplotlib-24177
+    repo: matplotlib
+    turns: 60
+  - instance_id: matplotlib__matplotlib-25122
+    repo: matplotlib
+    turns: 24
+  - instance_id: matplotlib__matplotlib-26208
+    repo: matplotlib
+    turns: 60
+  - instance_id: psf__requests-1766
+    repo: psf
+    turns: 18
+  - instance_id: psf__requests-1921
+    repo: psf
+    turns: 24
+  - instance_id: psf__requests-2317
+    repo: psf
+    turns: 24
+  - instance_id: psf__requests-6028
+    repo: psf
+    turns: 53
+  - instance_id: pytest-dev__pytest-10081
+    repo: pytest
+    turns: 36
+  - instance_id: pytest-dev__pytest-7236
+    repo: pytest
+    turns: 41
+  - instance_id: scikit-learn__scikit-learn-10297
+    repo: scikit-learn
+    turns: 27
+  - instance_id: sympy__sympy-11618
+    repo: sympy
+    turns: 22
+  - instance_id: sympy__sympy-13757
+    repo: sympy
+    turns: 29
