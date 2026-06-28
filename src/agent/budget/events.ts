@@ -21,7 +21,7 @@ export interface BudgetTickEvent {
 export interface BudgetExhaustedEvent {
   type: "budget_exhausted"
   /** Which dimension fired. */
-  kind: TickKind | "wall_clock_ms" | "cost_usd" | "total_tokens"
+  kind: TickKind | "wall_clock_ms" | "cost_usd" | "cost_per_turn" | "total_tokens"
   budget: number
   observed: number
   /** Snapshot of every counter at the moment exhaustion was detected. */

@@ -29,6 +29,7 @@ const DIAL_FIELDS = [
   "maxReasoningTokens",
   "maxTotalTokens",
   "maxCostUsd",
+  "maxCostPerTurnUsd",
   "maxFilesChanged",
   "maxPatchBytes",
   "maxRetries",

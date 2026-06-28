@@ -2501,21 +2501,34 @@ const wirePostureAgentPorts = (args: {
  * via `buildConfig` (NOT the host `assembleAgentConfig`), so the per-run
  * `maxCostUsd` meter that protects the `apps/agent` autonomous modes never
  * reached it — a SWE-bench instance could spend unboundedly. This mints a
- * `BudgetMeter` with a cost cap from `QUANTA_BENCH_MAX_COST_USD` (a positive USD
- * amount, fractional allowed; NO hardcoded default — the cap is operator-
- * supplied, measure-first). Once the meter exists, the SAME L0/L2 machinery
- * engages: `emitUsage` ticks the priced cost, the turn epilogue `checkExhausted`
- * stops on overrun, and the pre-flight refuses a guaranteed-breach call. A
- * caller-provided `budgetMeterFactory` still wins. Absent env ⇒ undefined ⇒
+ * `BudgetMeter` with a CUMULATIVE cap from `QUANTA_BENCH_MAX_COST_USD` and/or a
+ * per-TURN runaway cap from `QUANTA_BENCH_MAX_COST_PER_TURN_USD` (positive USD,
+ * fractional allowed; NO hardcoded default — operator-supplied, measure-first).
+ * Once the meter exists, the SAME L0/L2/L3 machinery engages: `emitUsage` ticks
+ * the priced cost, the turn epilogue `checkExhausted` stops on cumulative OR
+ * per-turn overrun, and the pre-flight refuses a guaranteed-breach call. A
+ * caller-provided `budgetMeterFactory` still wins. No cap ⇒ undefined ⇒
  * byte-identical (bench unchanged). Exported for direct unit testing. */
 export const benchBudgetMeterFromEnv = (
   env: Record<string, string | undefined>,
 ): BudgetMeter | undefined => {
-  const raw = env["QUANTA_BENCH_MAX_COST_USD"]
-  if (raw === undefined) return undefined
-  const usd = Number.parseFloat(raw.trim())
-  if (!Number.isFinite(usd) || usd <= 0) return undefined
-  return new BudgetMeter({ dials: { maxCostUsd: usd } })
+  const posUsd = (raw: string | undefined): number | undefined => {
+    if (raw === undefined) return undefined
+    const n = Number.parseFloat(raw.trim())
+    return Number.isFinite(n) && n > 0 ? n : undefined
+  }
+  // Cumulative per-instance cap (L0) and per-TURN runaway-turn cap (L3). Either
+  // (or both) opts the meter in; a missing/garbage value for one leaves that
+  // dial uncapped. No cap at all ⇒ undefined (byte-identical, bench unchanged).
+  const maxCostUsd = posUsd(env["QUANTA_BENCH_MAX_COST_USD"])
+  const maxCostPerTurnUsd = posUsd(env["QUANTA_BENCH_MAX_COST_PER_TURN_USD"])
+  if (maxCostUsd === undefined && maxCostPerTurnUsd === undefined) return undefined
+  return new BudgetMeter({
+    dials: {
+      ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
+      ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
+    },
+  })
 }
 
 export const buildConfig = (

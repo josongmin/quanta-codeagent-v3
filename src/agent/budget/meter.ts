@@ -62,6 +62,10 @@ export class BudgetMeter {
   // — it is a pure accountant of dollars it is handed, exactly like the token
   // counters are pure accountants of tokens.
   private costUsdAccum = 0
+  // Per-TURN USD cost (L3 runaway-turn guard). Reset to 0 at each `tick("turn")`
+  // boundary, accumulated by `tick("cost_usd")`, compared against
+  // `maxCostPerTurnUsd`. Distinct from `costUsdAccum` (cumulative across the run).
+  private costUsdThisTurn = 0
 
   constructor(opts: BudgetMeterOptions = {}) {
     this.dials = opts.dials ?? {}
@@ -89,6 +93,11 @@ export class BudgetMeter {
     switch (kind) {
       case "turn":
         this.turns += n
+        // A new turn boundary — reset the per-turn cost accumulator so the
+        // maxCostPerTurnUsd ceiling measures THIS turn's spend only. (Cost is
+        // ticked during the turn that follows; the per-turn check runs at the
+        // turn epilogue, before the next `tick("turn")`.)
+        this.costUsdThisTurn = 0
         return
       case "model_call":
         this.modelCalls += n
@@ -129,6 +138,7 @@ export class BudgetMeter {
         // protects the token counters: a malformed price (NaN / negative) is a
         // no-op so a single bad usage report cannot poison the cost cap.
         this.costUsdAccum += n
+        this.costUsdThisTurn += n
         return
       default: {
         // Exhaustive switch — TS narrows `kind` to `never` here. Defense in
@@ -266,7 +276,13 @@ export class BudgetMeter {
       check(dials.maxRetries, u.retries, "retry") ??
       check(dials.maxConsecutiveFailures, u.consecutiveFailures, "consecutive_failure") ??
       check(dials.maxWallClockMs, u.wallClockMs, "wall_clock_ms") ??
-      check(dials.maxCostUsd, u.costUsd, "cost_usd") ?? { exhausted: false }
+      check(dials.maxCostUsd, u.costUsd, "cost_usd") ??
+      // L3 runaway-turn guard — THIS turn's cost (reset each `tick("turn")`),
+      // distinct from the cumulative `cost_usd` above. Read from the private
+      // accumulator (not the snapshot, which carries cumulative cost only).
+      check(dials.maxCostPerTurnUsd, this.costUsdThisTurn, "cost_per_turn") ?? {
+        exhausted: false,
+      }
     )
   }
 }

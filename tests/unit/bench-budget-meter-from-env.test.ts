@@ -43,4 +43,25 @@ describe("HELLGATE — bench per-instance cost cap", () => {
       expect(benchBudgetMeterFromEnv({ QUANTA_BENCH_MAX_COST_USD: bad })).toBeUndefined()
     }
   })
+
+  test("L3 per-turn cap (QUANTA_BENCH_MAX_COST_PER_TURN_USD) trips on a runaway turn", () => {
+    const meter = benchBudgetMeterFromEnv({ QUANTA_BENCH_MAX_COST_PER_TURN_USD: "0.5" })
+    expect(meter).toBeDefined()
+    meter?.tick("turn")
+    meter?.tick("cost_usd", 0.6) // one turn > $0.5
+    expect(meter?.checkExhausted().kind).toBe("cost_per_turn")
+  })
+
+  test("per-turn cap ONLY (no cumulative) still mints a meter", () => {
+    expect(benchBudgetMeterFromEnv({ QUANTA_BENCH_MAX_COST_PER_TURN_USD: "2" })).toBeDefined()
+  })
+
+  test("both caps set ⇒ both dials present", () => {
+    const meter = benchBudgetMeterFromEnv({
+      QUANTA_BENCH_MAX_COST_USD: "5",
+      QUANTA_BENCH_MAX_COST_PER_TURN_USD: "1",
+    })
+    expect(meter?.dials.maxCostUsd).toBe(5)
+    expect(meter?.dials.maxCostPerTurnUsd).toBe(1)
+  })
 })

@@ -41,8 +41,17 @@ export interface BudgetDials {
   maxReasoningTokens?: number
   /** Cumulative tokens (in + out + reasoning). */
   maxTotalTokens?: number
-  /** Estimated dollar cost ceiling. */
+  /** Estimated dollar cost ceiling (CUMULATIVE across the whole run). */
   maxCostUsd?: number
+  /**
+   * Per-TURN dollar cost ceiling (L3 runaway-turn guard). Unlike `maxCostUsd`
+   * (cumulative), this trips when a SINGLE turn's cost exceeds the cap — a
+   * runaway turn (e.g. a turn that issues a huge-context call) is caught
+   * immediately, even on turn 1 while the cumulative total is still low.
+   * Propositional dial, NOT a velocity heuristic; the per-turn accumulator
+   * resets at each `tick("turn")` boundary.
+   */
+  maxCostPerTurnUsd?: number
   /** Files-changed ceiling (e.g. via write/edit/patch). */
   maxFilesChanged?: number
   /** Cumulative patch payload size in bytes. */
@@ -124,7 +133,7 @@ export interface BudgetExhaustion {
   /** True if ANY dial is set AND observed value exceeds it. */
   exhausted: boolean
   /** The first dimension that tripped (deterministic check order). */
-  kind?: TickKind | "wall_clock_ms" | "cost_usd" | "total_tokens"
+  kind?: TickKind | "wall_clock_ms" | "cost_usd" | "cost_per_turn" | "total_tokens"
   /** The configured budget that was exceeded. */
   budget?: number
   /** The observed value at the time of check. */
