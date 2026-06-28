@@ -1896,3 +1896,36 @@ runs:
   - instance_id: sphinx-doc__sphinx-9711  # RECOVERED — was false grader_invalid, now real PASS
     repo: sphinx
     turns: 40
+
+- run_id: sphinx-rA-recovery-sweep-2026-06-29
+  date: '2026-06-29'
+  preset: agentless-v6-singlepass-execfull
+  preset_env: 'QUANTA_BENCH_NONEMPTY_FALLBACK=1 — same winning config as the 4/4 cluster; delta is the sphinx -rA grader fix (c89504d84) + box-reuse stale-code self-heal (ff9571c85/83987edbd).'
+  model: gpt-5.5
+  auth: chatgpt-oauth
+  grading: official swebench python harness, spot EC2 c7i.4xlarge (4-box campaign), source-only patch
+  scope: 'FULL SWEEP of the 24 unresolved sphinx instances (44 total − 20 already resolved) — every one was subject to the -rA parser false-unresolved bug, so any the model can solve was being false-failed. PARTIAL — campaign in progress (10/24 graded at fold time); PASSes folded as they confirm, genuine fails excluded.'
+  success_note: 'Patches pulled live from the boxes and diffed against gold: every PASS here touches the EXACT gold file(s) with an independent (byte-different) fix — NOT gold-as-ours. The 3 confirmed fails so far break cleanly into the known taxonomy (8056 localization / 7462 multi-site / 9229 synthesis), not measurement holes. 11510 in particular was a prior "synthesis fail" in earlier-run forensics — now a clean PASS under v6, confirming the stale-count thesis.'
+  resolved_count: 7
+  resolved:
+  - instance_id: sphinx-doc__sphinx-10323  # our fix == gold file directives/code.py
+    repo: sphinx
+    turns: 48
+  - instance_id: sphinx-doc__sphinx-10435  # writers/latex.py
+    repo: sphinx
+    turns: 29
+  - instance_id: sphinx-doc__sphinx-10449  # autodoc/typehints.py
+    repo: sphinx
+    turns: 26
+  - instance_id: sphinx-doc__sphinx-11510  # directives/other.py — was a prior "synthesis fail", now PASS
+    repo: sphinx
+    turns: 37
+  - instance_id: sphinx-doc__sphinx-7454  # domains/python.py
+    repo: sphinx
+    turns: 52
+  - instance_id: sphinx-doc__sphinx-8035  # autodoc/__init__.py
+    repo: sphinx
+    turns: 43
+  - instance_id: sphinx-doc__sphinx-9230  # util/docfields.py
+    repo: sphinx
+    turns: 29
