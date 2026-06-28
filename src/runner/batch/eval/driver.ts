@@ -101,7 +101,7 @@ import type {
   OwnerWideningTelemetry,
   ReproOracleCalibration,
 } from "../types"
-import { buildReproAcceptanceSelector } from "./acceptance-selector"
+import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
 import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import {
@@ -3249,7 +3249,7 @@ export const makeAcceptanceSelectCandidates = (
             const r = await makeBenchRegressionOracle(buildArgv, {
               ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
             }).run({ tests: regressionSet, sandbox: sb, timeoutMs })
-            return r.ran && !r.pass ? r.failed.length : 0
+            return regressionFailureCount(r)
           },
         }
       : {}),

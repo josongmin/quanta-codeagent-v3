@@ -9,8 +9,29 @@ import { describe, expect, test } from "bun:test"
 import {
   buildReproAcceptanceSelector,
   type ReproAcceptancePorts,
+  regressionFailureCount,
 } from "../../src/runner/batch/eval/acceptance-selector"
 import type { RepairCandidateOutcome } from "../../src/runner/batch/eval/repair/types"
+
+describe("regressionFailureCount — RegressionResult → acceptance count", () => {
+  test("ran && pass ⇒ 0 (clean)", () => {
+    expect(regressionFailureCount({ ran: true, pass: true, failed: [] })).toBe(0)
+  })
+  test("ran && !pass ⇒ failed-test count", () => {
+    expect(regressionFailureCount({ ran: true, pass: false, failed: ["t1", "t2"] })).toBe(2)
+  })
+  test("!ran ⇒ +Infinity (SUSPECT, not 0 — a patch that breaks collection must not win)", () => {
+    // The real bug: a patched tree where pytest can't collect (syntax error from the
+    // patch) returns ran:false. Scoring 0 would let it WIN the min-regression bar.
+    expect(regressionFailureCount({ ran: false, pass: false, failed: [] })).toBe(
+      Number.POSITIVE_INFINITY,
+    )
+    // even pass:true (the oracle's no-tests-collected shape) with !ran ⇒ Infinity
+    expect(regressionFailureCount({ ran: false, pass: true, failed: [] })).toBe(
+      Number.POSITIVE_INFINITY,
+    )
+  })
+})
 
 const outcome = (patch: string): RepairCandidateOutcome => ({
   run: { patch, turns: 1 },

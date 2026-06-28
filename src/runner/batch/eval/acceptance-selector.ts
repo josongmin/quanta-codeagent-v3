@@ -19,6 +19,23 @@
 import { maybeAcceptanceSelector } from "./acceptance-wire"
 import type { RepairCandidateOutcome } from "./repair/types"
 
+/**
+ * Map a regression run result → the acceptance failure COUNT (lower = better).
+ *
+ * `!ran` (the patched tree's pytest could not COLLECT/run the selected tests — a
+ * patch that broke importability, a collection error, no tests collected) ⇒
+ * `+Infinity` (SUSPECT — loses the min-regression bar), NOT `0`. Scoring an
+ * unmeasurable regression as `0` would let a patch that BREAKS the test suite win
+ * the regression comparison. If collection fails UNIFORMLY across candidates they
+ * all get `+Infinity` ⇒ the min bar is `+Infinity` ⇒ regression no-ops and repro
+ * decides (correct). `ran && pass` ⇒ 0; `ran && !pass` ⇒ the failed-test count.
+ */
+export const regressionFailureCount = (r: {
+  readonly ran: boolean
+  readonly pass: boolean
+  readonly failed: readonly string[]
+}): number => (!r.ran ? Number.POSITIVE_INFINITY : r.pass ? 0 : r.failed.length)
+
 export interface ReproAcceptancePorts {
   /** Apply `patch` to the sandbox then run `probe(sandbox)`; `null` on empty/failed
    *  apply (degrades that candidate). Reset-to-base is guaranteed after the probe. */
