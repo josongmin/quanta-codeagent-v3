@@ -136,15 +136,27 @@ const issueTokens = (problemStatement: string): ReadonlySet<string> => {
   return out
 }
 
-const PY_PATH_COMPONENT = /[^/]+/g
+/** Lowercased path-component stems (dir names + filename sans `.py`). */
+const componentStems = (path: string): readonly string[] =>
+  path
+    .toLowerCase()
+    .split("/")
+    .map((c) => c.replace(/\.py$/, ""))
 
 /**
  * Infer the source files the issue is about, by matching {@link issueTokens}
- * against the path components of tracked NON-test python files. Ranked by match
- * count (desc), then path (stable); capped at `maxFiles`. This is the LEXICAL
- * exemplar-retrieval key — the localization signal that {@link discoverImpactedTests}
- * scores existing tests against. A future `CodeIntelligencePort` (semantica)
- * replaces this with real localization. Empty issue / no match ⇒ `[]`. Pure.
+ * against the path-component stems of tracked NON-test python files. Ranked by
+ * match count (desc), then path (stable); capped at `maxFiles`. This is the
+ * LEXICAL exemplar-retrieval key — the localization signal that
+ * {@link discoverImpactedTests} scores existing tests against. A future
+ * `CodeIntelligencePort` (semantica) replaces this with real localization.
+ *
+ * C6 audit fix: FLOOD tokens — ones matching > half the source files (i.e. the
+ * package/top-dir name `sphinx`/`django`, which every file shares) — carry no
+ * localization signal and would fill the cap with alphabetical noise. They are
+ * DROPPED from scoring, so the ranking reflects only DISTINCTIVE matches. When
+ * the issue offers only flood tokens, the result is `[]` (honestly inert) rather
+ * than alphabetical noise. Empty issue / no distinctive match ⇒ `[]`. Pure.
  */
 export const inferIssueSourceFiles = (
   problemStatement: string,
@@ -154,15 +166,21 @@ export const inferIssueSourceFiles = (
   if (typeof problemStatement !== "string" || problemStatement.trim() === "") return []
   const tokens = issueTokens(problemStatement)
   if (tokens.size === 0) return []
+  const sources = trackedFiles
+    .filter((p) => p.endsWith(".py") && !isPythonTestFile(p))
+    .map((p) => ({ path: p, stems: new Set(componentStems(p)) }))
+  if (sources.length === 0) return []
+  // Drop flood tokens (match > half the files = package/dir names = no signal).
+  const floodCutoff = sources.length / 2
+  const live = [...tokens].filter((t) => {
+    const n = sources.reduce((acc, s) => acc + (s.stems.has(t) ? 1 : 0), 0)
+    return n > 0 && n <= floodCutoff
+  })
+  if (live.length === 0) return []
   const scored: { path: string; score: number }[] = []
-  for (const path of trackedFiles) {
-    if (!path.endsWith(".py") || isPythonTestFile(path)) continue
-    let score = 0
-    for (const comp of path.toLowerCase().matchAll(PY_PATH_COMPONENT)) {
-      const stem = comp[0].replace(/\.py$/, "")
-      if (tokens.has(stem)) score++
-    }
-    if (score > 0) scored.push({ path, score })
+  for (const s of sources) {
+    const score = live.reduce((acc, t) => acc + (s.stems.has(t) ? 1 : 0), 0)
+    if (score > 0) scored.push({ path: s.path, score })
   }
   scored.sort((a, b) => b.score - a.score || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   return scored.slice(0, Math.max(1, Math.floor(maxFiles))).map((s) => s.path)
@@ -178,13 +196,21 @@ const DEFAULT_RELATED_MAX = 8
  * Concrete LEXICAL {@link ReproGroundingPorts} over the existing
  * `discoverImpactedTests` engine: list tracked python test files, read them,
  * rank them against the localized source files by import/reference evidence, and
- * return the ranked {path,text}. No signatures (LSP is wired separately by the
- * driver in C5). Pure-ish glue over injected I/O so it stays unit-testable.
+ * return the ranked {path,text}. Does NOT provide `signatures` (the issue-symbol
+ * signature block is a ready-but-DEFERRED extension — no LSP signature port is
+ * wired yet; the exemplar path ships first per RFC R2). Pure-ish glue over
+ * injected I/O so it stays unit-testable.
+ *
+ * `trackedFiles`: when the driver already listed `git ls-files` (for source-file
+ * inference), it passes the list here so the adapter does NOT re-run it (C6 audit:
+ * was a double `git ls-files` per instance).
  */
 export const buildLexicalReproGroundingPorts = (deps: {
   readonly sandbox: string
   readonly timeoutMs: number
   readonly maxRelated?: number
+  /** Already-listed tracked files (avoids a second `git ls-files`). */
+  readonly trackedFiles?: readonly string[]
   /** Injected for tests; default to the real adapters. */
   readonly listFiles?: typeof listTrackedPythonFiles
   readonly readTests?: typeof readRepoTestFiles
@@ -197,7 +223,7 @@ export const buildLexicalReproGroundingPorts = (deps: {
   return {
     relatedTests: async (sourceFiles) => {
       if (sourceFiles.length === 0) return []
-      const tracked = await listFiles(deps.sandbox, deps.timeoutMs)
+      const tracked = deps.trackedFiles ?? (await listFiles(deps.sandbox, deps.timeoutMs))
       // readRepoTestFiles filters to python TEST files internally.
       const repoFiles: readonly RepoTextFile[] = await readTests(deps.sandbox, tracked)
       if (repoFiles.length === 0) return []

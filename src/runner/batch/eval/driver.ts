@@ -100,6 +100,7 @@ import type {
   Instance,
   InstanceResult,
   OwnerWideningTelemetry,
+  ReproGroundingTelemetry,
   ReproOracleCalibration,
 } from "../types"
 import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
@@ -1899,15 +1900,36 @@ const computeReproGrounding = async (
   deps: PrepareReproTestDeps,
 ): Promise<ReproGroundingInput> => {
   if (deps.reproGrounding !== true) return {}
+  // List tracked files ONCE (reused for source inference AND the lexical adapter
+  // — C6 audit closed a double `git ls-files`). Skipped when ports are injected
+  // (tests) since the lexical adapter is then unused.
+  const tracked =
+    deps.groundingPorts === undefined
+      ? await listTrackedPythonFiles(sandbox, GROUNDING_TIMEOUT_MS).catch(() => [])
+      : []
   const ports =
     deps.groundingPorts ??
-    buildLexicalReproGroundingPorts({ sandbox, timeoutMs: GROUNDING_TIMEOUT_MS })
-  let sourceFiles = deps.groundingSourceFiles ?? []
-  if (sourceFiles.length === 0) {
-    const tracked = await listTrackedPythonFiles(sandbox, GROUNDING_TIMEOUT_MS).catch(() => [])
-    sourceFiles = inferIssueSourceFiles(instance.problemStatement, tracked)
-  }
+    buildLexicalReproGroundingPorts({
+      sandbox,
+      timeoutMs: GROUNDING_TIMEOUT_MS,
+      trackedFiles: tracked,
+    })
+  const sourceFiles =
+    deps.groundingSourceFiles ?? inferIssueSourceFiles(instance.problemStatement, tracked)
   return retrieveExemplarSkeletons({ enabled: true, sourceFiles, ports })
+}
+
+/** Observe-only grounding-engagement summary for telemetry. Returned ONLY when
+ *  the knob was on (so OFF telemetry is byte-identical). `engaged` distinguishes
+ *  "injected ≥1 skeleton/signature" from "ran but lexical inference whiffed". */
+const groundingTelemetry = (
+  on: boolean,
+  grounding: ReproGroundingInput,
+): ReproGroundingTelemetry | undefined => {
+  if (!on) return undefined
+  const exemplars = grounding.exemplarSkeletons?.length ?? 0
+  const signatures = grounding.issueSignatures?.length ?? 0
+  return { engaged: exemplars > 0 || signatures > 0, exemplars, signatures }
 }
 
 export const prepareReproTestDetailed = async (
@@ -1934,10 +1956,16 @@ export const prepareReproTestDetailed = async (
   // `extractIssueReproSeed` returns undefined for anything ambiguous, in which case
   // `mwe` is omitted and the generate prompt is byte-identical to the prior path.
   const grounding = await computeReproGrounding(instance, sandbox, deps)
+  // Observe-only grounding telemetry, attached to EVERY post-grounding return so
+  // the A/B can tell "engaged" from "ran-but-whiffed". Absent when off ⇒ telemetry
+  // byte-identical to the pre-feature path.
+  const gt = groundingTelemetry(deps.reproGrounding === true, grounding)
+  const withG = (r: PrepareReproTestDetailedResult): PrepareReproTestDetailedResult =>
+    gt === undefined ? r : { ...r, telemetry: { ...r.telemetry, grounding: gt } }
   const generated = await generateReproCandidateTests(instance, deps, config, grounding)
-  if (generated === null) return failedReproResult("generation_failed")
+  if (generated === null) return withG(failedReproResult("generation_failed"))
   const tests = generated.candidates
-  if (tests.length === 0) return failedReproResult("generation_empty")
+  if (tests.length === 0) return withG(failedReproResult("generation_empty"))
   // Run each repro under the SAME project env the testCmd uses. A bare
   // `python3 <script>` on the box host cannot import the target project (it is
   // not pip-installed there), so without this every Agentless repro hit
@@ -1952,7 +1980,7 @@ export const prepareReproTestDetailed = async (
     deps,
     config,
   )
-  if (samples === null) return failedReproResult("execution_failed")
+  if (samples === null) return withG(failedReproResult("execution_failed"))
   // G2 paired-control: thread the gate into the admission filter. When on, the
   // selector rejects reproducing samples whose paired controls did not pass on
   // base (env/import-broken false-reds). Default-OFF ⇒ legacy filter.
@@ -1966,7 +1994,7 @@ export const prepareReproTestDetailed = async (
           samples: 0,
           reproducedCount: countReproduced(samples),
         }
-  return { selection, telemetry }
+  return withG({ selection, telemetry })
 }
 
 /**

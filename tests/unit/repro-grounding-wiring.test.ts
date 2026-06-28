@@ -96,4 +96,43 @@ describe("repro-grounding driver wiring (C5)", () => {
     })
     for (const g of captured) expect(g).toBeUndefined()
   })
+
+  // C6 measurement-hole fix: telemetry must distinguish engaged / ran-but-whiffed /
+  // off, so the A/B can't mistake "grounding never fired" for "grounding didn't help".
+  const telemetryWith = async (opts: {
+    reproGrounding?: boolean
+    ports?: ReproGroundingPorts
+  }): Promise<{ grounding?: { engaged: boolean; exemplars: number } }> => {
+    const r = await prepareReproTestDetailed(instance, "/tmp/sb-nonexistent", 1, {
+      llm: new StubLLM(),
+      generate: async () => ["def test_x():\n    assert True\n"],
+      execute: (async () => []) as never,
+      ...(opts.reproGrounding !== undefined ? { reproGrounding: opts.reproGrounding } : {}),
+      ...(opts.ports !== undefined ? { groundingPorts: opts.ports } : {}),
+      ...(opts.reproGrounding ? { groundingSourceFiles: ["sphinx/ext/autodoc/__init__.py"] } : {}),
+    })
+    return r.telemetry as { grounding?: { engaged: boolean; exemplars: number } }
+  }
+
+  test("telemetry: OFF ⇒ no grounding field (byte-identical)", async () => {
+    const t = await telemetryWith({})
+    expect(t.grounding).toBeUndefined()
+  })
+
+  test("telemetry: ON + engaged ⇒ engaged=true, exemplars counted", async () => {
+    const ports: ReproGroundingPorts = {
+      relatedTests: async () => [{ path: "t.py", text: RAW_TEST }],
+    }
+    const t = await telemetryWith({ reproGrounding: true, ports })
+    expect(t.grounding?.engaged).toBe(true)
+    expect(t.grounding?.exemplars).toBe(1)
+  })
+
+  test("telemetry: ON but whiffed ⇒ engaged=false (distinguishable from off)", async () => {
+    const ports: ReproGroundingPorts = { relatedTests: async () => [] }
+    const t = await telemetryWith({ reproGrounding: true, ports })
+    expect(t.grounding).toBeDefined()
+    expect(t.grounding?.engaged).toBe(false)
+    expect(t.grounding?.exemplars).toBe(0)
+  })
 })

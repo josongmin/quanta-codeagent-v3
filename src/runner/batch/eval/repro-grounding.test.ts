@@ -166,6 +166,17 @@ describe("inferIssueSourceFiles — lexical localization key", () => {
     expect(inferIssueSourceFiles("it is a the bug big", tracked)).toEqual([]) // all <5 / common
   })
 
+  test("C6: FLOOD token (package name matching >half files) is dropped — no alphabetical noise", () => {
+    // 'sphinx' matches every source path ⇒ flood ⇒ dropped. With ONLY the package
+    // token and no distinctive match, the result is [] (honestly inert), not a
+    // noise tail of alphabetically-first sphinx files.
+    expect(inferIssueSourceFiles("the sphinx package is broken somehow", tracked)).toEqual([])
+    // a DISTINCTIVE token still surfaces its file despite the package flood.
+    const out = inferIssueSourceFiles("sphinx autodoc is broken", tracked)
+    expect(out).toContain("sphinx/ext/autodoc/__init__.py")
+    expect(out).not.toContain("sphinx/ext/napoleon/__init__.py") // no 'napoleon' token
+  })
+
   test("respects maxFiles", () => {
     const many = Array.from({ length: 10 }, (_, i) => `pkg/widget/module${i}.py`)
     const out = inferIssueSourceFiles("module0 module1 module2 module3 module4 module5", many, 3)

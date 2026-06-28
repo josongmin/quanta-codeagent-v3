@@ -86,18 +86,31 @@ export type BenchReproTestReason =
   | "write_failed"
   | "not_installed"
 
+/** jun-29 grounding engagement (observe-only). Present ONLY when the
+ *  `reproGrounding` knob was on, so the A/B can distinguish "grounding injected N
+ *  skeletons" from "grounding ran but the lexical inference whiffed (engaged=false)"
+ *  — the silent-no-op confound the measurement would otherwise hide. Absent ⇒
+ *  grounding was off (byte-identical telemetry). */
+export interface ReproGroundingTelemetry {
+  readonly engaged: boolean
+  readonly exemplars: number
+  readonly signatures: number
+}
+
 export type BenchReproTestTelemetry =
   | {
       installed: true
       path: string
       samples: number
       reproducedCount: number
+      grounding?: ReproGroundingTelemetry
     }
   | {
       installed: false
       reason: BenchReproTestReason
       samples?: number
       reproducedCount?: number
+      grounding?: ReproGroundingTelemetry
       /** jun-18 DIAGNOSTIC (observe-only): per-sample outcome classification +
        *  a tail of the first sample's stdout. Surfaces WHY base-red reproduction
        *  is 0% (all `resolved` ⇒ LLM repro doesn't detect on base; `exec_failed`/
