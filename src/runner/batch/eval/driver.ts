@@ -46,6 +46,7 @@ import {
   selectReproTest,
   wireOptionalAgentPorts,
 } from "@/agent"
+import { buildVerifyGuard } from "@/agent/verify-guard"
 import {
   evaluateSuccessPredicate,
   type OwnerSibling,
@@ -2421,14 +2422,7 @@ const reconcileBenchGuards = (
         : { mustPass: true, maxTrips: 2 }
       : undefined
   const verifyGuard =
-    mustPass !== undefined
-      ? {
-          mustPass: mustPass.mustPass,
-          ...(mustPass.maxTrips !== undefined ? { maxTrips: mustPass.maxTrips } : {}),
-          ...(mustPass.stickyRed === true ? { stickyRed: true } : {}),
-          ...(exactCommands !== undefined ? { exactCommands } : {}),
-        }
-      : defaultGuard
+    mustPass !== undefined ? buildVerifyGuard(mustPass, exactCommands) : defaultGuard
   return {
     ...cfg,
     ...(opt.lspNav ? { evictLspPoolOnEnd: true } : {}),

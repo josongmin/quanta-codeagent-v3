@@ -200,6 +200,30 @@ export interface VerifyGuardConfig {
   stickyRed?: boolean
 }
 
+/** Parsed `must-pass` knob value shape (mirrors `mustPassSchema`). */
+export interface VerifyGuardOverride {
+  readonly mustPass: boolean
+  readonly maxTrips?: number
+  readonly stickyRed?: boolean
+}
+
+/**
+ * SINGLE constructor for a {@link VerifyGuardConfig} from a parsed must-pass
+ * value (+ optional instance `exactCommands`). Shared by the bench driver
+ * (`reconcileBenchGuards`) and the non-bench must-pass apply-binding so the
+ * field shape lives in ONE place — `exactCommands`/`maxTrips`/`stickyRed` are
+ * each included only when present (exactOptionalPropertyTypes-friendly).
+ */
+export const buildVerifyGuard = (
+  value: VerifyGuardOverride,
+  exactCommands?: readonly string[],
+): VerifyGuardConfig => ({
+  mustPass: value.mustPass,
+  ...(value.maxTrips !== undefined ? { maxTrips: value.maxTrips } : {}),
+  ...(value.stickyRed === true ? { stickyRed: true } : {}),
+  ...(exactCommands !== undefined ? { exactCommands } : {}),
+})
+
 /**
  * Read a config field as an OWN property only. The `Object.hasOwn` guard is a
  * prototype-pollution defense — NOT dead indirection: callers may pass a `cfg`

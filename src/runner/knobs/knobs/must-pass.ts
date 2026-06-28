@@ -27,6 +27,7 @@
  */
 
 import type { AgentConfig } from "@/agent"
+import { buildVerifyGuard } from "@/agent/verify-guard"
 import { mustPassSchema } from "@/config/knob-schema/schemas/bench-gap-1"
 import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import type { Surface } from "../types"
@@ -53,14 +54,9 @@ export const applyMustPass = (
   ctx: { surface: Surface },
 ): AgentConfig => {
   if (!SURFACES.includes(ctx.surface)) return cfg
-  // Non-bench surfaces have no driver-established exactCommands; fold the parsed
-  // value straight onto verifyGuard. exactOptionalPropertyTypes-friendly.
-  const verifyGuard = {
-    mustPass: value.mustPass,
-    ...(value.maxTrips !== undefined ? { maxTrips: value.maxTrips } : {}),
-    ...(value.stickyRed === true ? { stickyRed: true } : {}),
-  }
-  return { ...cfg, verifyGuard }
+  // Non-bench surfaces have no driver-established exactCommands; fold via the
+  // shared single-shape constructor (same one the bench reconcile uses).
+  return { ...cfg, verifyGuard: buildVerifyGuard(value) }
 }
 
 // DERIVED from the schema SSOT (data) + the runner-side apply binding above.

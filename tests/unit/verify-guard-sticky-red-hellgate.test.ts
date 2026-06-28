@@ -21,6 +21,7 @@
 
 import { describe, expect, test } from "bun:test"
 import {
+  buildVerifyGuard,
   createVerifyGuardState,
   decideVerifyGuard,
   isVerifyOutputFailing,
@@ -276,6 +277,28 @@ describe("HELLGATE — canonicalize peels nested/interleaved cd+env prefixes", (
 describe("sanity — the real django runtests tail is recognized as failing output", () => {
   test("isVerifyOutputFailing matches `FAILED (failures=1)`", () => {
     expect(isVerifyOutputFailing("bash", RUNTESTS, DJANGO_FAIL_OUTPUT)).toBe(true)
+  })
+})
+
+// buildVerifyGuard — the SINGLE shape constructor shared by the bench driver
+// (reconcileBenchGuards) and the non-bench must-pass apply. Pins the exactOptional
+// shape so optional fields are OMITTED (not set undefined) when absent.
+describe("buildVerifyGuard — single shape SSOT", () => {
+  test("minimal: only mustPass ⇒ no extra keys", () => {
+    expect(buildVerifyGuard({ mustPass: false })).toEqual({ mustPass: false })
+    expect("maxTrips" in buildVerifyGuard({ mustPass: false })).toBe(false)
+    expect("exactCommands" in buildVerifyGuard({ mustPass: false })).toBe(false)
+  })
+  test("full: sticky + maxTrips + exactCommands all threaded", () => {
+    expect(buildVerifyGuard({ mustPass: true, maxTrips: 2, stickyRed: true }, ["true"])).toEqual({
+      mustPass: true,
+      maxTrips: 2,
+      stickyRed: true,
+      exactCommands: ["true"],
+    })
+  })
+  test("stickyRed:false is OMITTED (not set false)", () => {
+    expect("stickyRed" in buildVerifyGuard({ mustPass: true, stickyRed: false })).toBe(false)
   })
 })
 
