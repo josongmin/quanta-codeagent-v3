@@ -23,7 +23,14 @@ export { buildMemoryTelemetry, MEMORY_TELEMETRY_KEYS } from "./memory-telemetry"
 export { Metrics, metrics } from "./metrics"
 export { instrumentToolsForExport } from "./metrics/instrument-tool"
 export { PREVIEW_MAX, previewPayload } from "./payload-preview"
-export { costUsd, PRICING_VERSION, type Provider, providerOf } from "./pricing"
+export {
+  costUsd,
+  MODEL_RATE_CARD,
+  type ModelPrice,
+  PRICING_VERSION,
+  type Provider,
+  providerOf,
+} from "./pricing"
 export { buildShellOtelObserver } from "./shell-exec-otel"
 export {
   __resetSpanSink,

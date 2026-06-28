@@ -22,10 +22,12 @@
  * `record` always returns `{cost, breaches: []}` — pure accountant mode
  * (cost still observable for the per-event histogram, ADR-0162).
  *
- * Plane-clean: imports ONLY `node:crypto` (for nothing — we do not need an id
- * here; the comment is forward-looking). No `@/agent/loop`, `@/agent/dispatch`,
- * `@/permission`, `@/tool`, `@/llm` — those are consumers, never collaborators
- * of this primitive (RFC §3.1 slice fence).
+ * Plane-clean: the ONLY cross-slice import is the PRICING SSOT
+ * (`@/observability/pricing` `MODEL_RATE_CARD`) — a dependency-free PURE DATA
+ * leaf, not a consumer slice, so the ledger derives its rate table from the one
+ * source instead of keeping a second drift-prone copy (L4a). No `@/agent/loop`,
+ * `@/agent/dispatch`, `@/permission`, `@/tool`, `@/llm` — those are consumers,
+ * never collaborators of this primitive (RFC §3.1 slice fence).
  *
  * Contract (8):
  *   1. PURE STORE: in-memory only; 0 I/O, 0 SQLite. Persistence is the
@@ -69,6 +71,8 @@
  *      `YYYY-MM-DD` in UTC (not the local TZ) so the boundary is
  *      reproducible across machines and matches typical billing windows.
  */
+
+import { MODEL_RATE_CARD, type ModelPrice } from "@/observability/pricing"
 
 /** Per-model pricing. All values in USD per 1 million tokens. */
 export interface ModelPricing {
@@ -202,23 +206,33 @@ export interface BudgetLedgerOpts {
 }
 
 /**
- * Sensible 2026-05 estimates for the most-used model families. Confirm against
- * vendor rate cards (anthropic.com/pricing, openai.com/api/pricing) before
- * relying on these for billing-critical decisions — the ledger is a guard
- * rail, not an invoice.
+ * The ledger's per-model rate table, DERIVED from the pricing SSOT
+ * (`@/observability` `MODEL_RATE_CARD`) so there is exactly ONE place model
+ * prices live. The SSOT's `{inPerM,outPerM,cacheReadPerM,cacheWritePerM?}` maps
+ * onto the ledger's `{inputPerM,outputPerM,cacheReadPerM?,cacheWritePerM?}`.
+ * This fixed a real drift: the ledger previously hard-coded `gpt-5` at the stale
+ * $10/$30 launch price (SSOT: $1.25/$10) and OMITTED the bench's primary models
+ * `gpt-5.4`/`gpt-5.5`, so a wired ledger silently billed them at the sonnet
+ * fallback. Null-prototype preserved so an unknown `model` key reads `undefined`.
  */
-export const DEFAULT_MODEL_PRICING: Readonly<Record<string, ModelPricing>> = Object.freeze({
-  // 2026-05 estimate; confirm against vendor rate card before billing-critical use.
-  "claude-opus-4-7": { inputPerM: 15, outputPerM: 75, cacheReadPerM: 1.5, cacheWritePerM: 18.75 },
-  // 2026-05 estimate; confirm against vendor rate card before billing-critical use.
-  "claude-sonnet-4-6": { inputPerM: 3, outputPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75 },
-  // 2026-05 estimate; confirm against vendor rate card before billing-critical use.
-  "claude-haiku-4-5": { inputPerM: 1, outputPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25 },
-  // 2026-05 estimate; confirm against vendor rate card before billing-critical use.
-  "gpt-5": { inputPerM: 10, outputPerM: 30 },
-  // 2026-05 estimate; confirm against vendor rate card before billing-critical use.
-  "gpt-4o": { inputPerM: 2.5, outputPerM: 10 },
-})
+const deriveLedgerPricing = (
+  card: Readonly<Record<string, ModelPrice>>,
+): Record<string, ModelPricing> => {
+  const out: Record<string, ModelPricing> = Object.create(null)
+  for (const [model, r] of Object.entries(card)) {
+    out[model] = {
+      inputPerM: r.inPerM,
+      outputPerM: r.outPerM,
+      cacheReadPerM: r.cacheReadPerM,
+      ...(r.cacheWritePerM !== undefined ? { cacheWritePerM: r.cacheWritePerM } : {}),
+    }
+  }
+  return out
+}
+
+export const DEFAULT_MODEL_PRICING: Readonly<Record<string, ModelPricing>> = Object.freeze(
+  deriveLedgerPricing(MODEL_RATE_CARD),
+)
 
 /** Pricing used when an event references an unknown model. Picked deliberately:
  *  sonnet is the safe middle ground (not the cheapest haiku that would under-

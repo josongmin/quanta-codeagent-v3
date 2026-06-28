@@ -34,7 +34,7 @@ export const providerOf = (model: string): Provider => {
 }
 
 /** USD per 1,000,000 tokens. */
-interface ModelPrice {
+export interface ModelPrice {
   /** Input (prompt) tokens, $/1M. */
   inPerM: number
   /** Output (completion) tokens, $/1M. */
@@ -47,6 +47,15 @@ interface ModelPrice {
    * Always set explicitly per model so the discount is auditable.
    */
   cacheReadPerM: number
+  /**
+   * Cache-CREATION (write) tokens, $/1M. Anthropic bills a one-time premium
+   * (≈ 1.25× input) to WRITE the prompt cache; OpenAI does not bill cache
+   * creation separately (the field is omitted). {@link costUsd} does NOT read
+   * this field — it is part of the single rate-card SSOT consumed by the
+   * cross-run cost ledger (`@/agent/budget-ledger`), which DOES bill the
+   * cache-creation bucket. Kept here so there is ONE rate table, not two.
+   */
+  cacheWritePerM?: number
 }
 
 /**
@@ -75,9 +84,10 @@ const TABLE: Readonly<Record<string, ModelPrice>> = Object.assign(
   {
     "gpt-4o": { inPerM: 2.5, outPerM: 10, cacheReadPerM: 1.25 },
     "gpt-4o-mini": { inPerM: 0.15, outPerM: 0.6, cacheReadPerM: 0.075 },
-    "claude-opus-4-7": { inPerM: 15, outPerM: 75, cacheReadPerM: 1.5 },
-    "claude-sonnet-4-6": { inPerM: 3, outPerM: 15, cacheReadPerM: 0.3 },
-    "claude-haiku-4-5": { inPerM: 1, outPerM: 5, cacheReadPerM: 0.1 },
+    // Anthropic cache-creation (write) ≈ 1.25× input — billed by the ledger.
+    "claude-opus-4-7": { inPerM: 15, outPerM: 75, cacheReadPerM: 1.5, cacheWritePerM: 18.75 },
+    "claude-sonnet-4-6": { inPerM: 3, outPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75 },
+    "claude-haiku-4-5": { inPerM: 1, outPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25 },
     // ── gpt-5 family. CONFIRMED against OpenAI's API pricing page (captured
     // 2026-06-26: developers.openai.com/api/docs/pricing). The bench's primary
     // models (`--model` default `gpt-5.4`; lanes gpt-5.4/gpt-5.5) are priced from
@@ -93,6 +103,16 @@ const TABLE: Readonly<Record<string, ModelPrice>> = Object.assign(
     "gpt-5-mini": { inPerM: 0.25, outPerM: 2, cacheReadPerM: 0.025 },
   },
 )
+
+/**
+ * The rate card, exposed read-only as the SINGLE pricing SSOT. Consumers that
+ * need per-component rates (the cross-run budget ledger's input/output/
+ * cacheRead/cacheWrite breakdown) derive from THIS map instead of keeping a
+ * second, drift-prone table. `costUsd` (total-cost, provider-aware) and the
+ * ledger (per-component) are two views over the same numbers. Null-prototype is
+ * preserved so an untrusted `model` key never resolves an inherited member.
+ */
+export const MODEL_RATE_CARD: Readonly<Record<string, ModelPrice>> = TABLE
 
 const PER_TOKEN = 1_000_000
 
