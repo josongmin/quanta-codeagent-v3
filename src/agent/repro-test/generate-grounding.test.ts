@@ -42,7 +42,7 @@ describe("buildReproTestPrompt — grounding injection (C2)", () => {
     expect(prompt.length).toBeGreaterThan(baseline.length)
     expect(prompt).toContain(EXEMPLAR_BLOCK_HEADER)
     expect(prompt).toContain("from pkg.testing import AppHarness")
-    expect(prompt).toContain('@pytest.mark.harness("html")')
+    expect(prompt).toContain("@pytest.mark.harness") // marker kept, literal redacted
     // NO-LEAK end-to-end: the secret assertion value must not reach the prompt.
     expect(prompt).not.toContain("gold-secret-value")
     expect(prompt).not.toContain("app.build()")

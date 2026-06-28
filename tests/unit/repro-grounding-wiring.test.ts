@@ -81,7 +81,7 @@ describe("repro-grounding driver wiring (C5)", () => {
     expect(g?.exemplarSkeletons?.length).toBe(1)
     const skeleton = g?.exemplarSkeletons?.[0] ?? ""
     expect(skeleton).toContain("from sphinx.testing.util import SphinxTestApp")
-    expect(skeleton).toContain('@pytest.mark.sphinx("html", testroot="ext-autodoc")')
+    expect(skeleton).toContain("@pytest.mark.sphinx") // marker shape kept (literals redacted)
     // NO-LEAK end-to-end through the driver seam.
     expect(skeleton).not.toContain("SECRET-GOLD-VALUE")
     expect(skeleton).not.toMatch(/\bassert\b/)

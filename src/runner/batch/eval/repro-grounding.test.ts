@@ -62,7 +62,7 @@ describe("retrieveExemplarSkeletons — gated orchestrator (C4)", () => {
     const sk = (out.exemplarSkeletons ?? []).join("\n")
     expect(out.exemplarSkeletons).toHaveLength(1)
     expect(sk).toContain("from pkg.testing import Harness")
-    expect(sk).toContain('@pytest.mark.harness("html")')
+    expect(sk).toContain("@pytest.mark.harness") // marker kept, literal redacted
     expect(sk).not.toContain("SECRET-GOLD")
     expect(sk).not.toMatch(/\bassert\b/)
   })

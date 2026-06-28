@@ -33,73 +33,157 @@
  *     prompt — the default-OFF invariant rides on this).
  */
 
-/** A line is "structural" (kept verbatim) iff it starts a top-level import, a
- *  decorator, or a def/class signature. Captured at any indent so nested
- *  fixtures/classes keep their shape. */
-const IMPORT_OR_DECORATOR = /^\s*(?:import\s|from\s+\S+\s+import\b|@)/
+/** A line is "structural" iff it starts a top-level import, a decorator, or a
+ *  def/class signature. Captured at any indent so nested fixtures/classes keep
+ *  their shape. IMPORT is kept verbatim (module paths are not oracle values);
+ *  DECORATOR + SIGNATURE lines are LITERAL-REDACTED before keeping. */
+const IMPORT_LINE = /^\s*(?:import\s|from\s+\S+\s+import\b)/
+const DECORATOR_LINE = /^\s*@/
 const DEF_OR_CLASS = /^\s*(?:async\s+)?(?:def|class)\b/
 
-/** Width of the leading whitespace run (tabs counted as 1 — test files are
- *  space-indented; this only needs a monotone indent comparison). */
-const indentWidth = (line: string): number => {
-  let n = 0
-  for (const ch of line) {
-    if (ch === " " || ch === "\t") n++
-    else break
-  }
-  return n
-}
+/** Hard cap on a single emitted skeleton (RFC R3 token bound, ~char proxy). A
+ *  large test class kept as dozens of verbatim signatures must not blow the
+ *  prompt budget; head-truncate with an elision marker. */
+const MAX_SKELETON_CHARS = 6000
 
 /** Leading-whitespace prefix of a line (for the elision placeholder indent). */
-const leadingWhitespace = (line: string): string => line.slice(0, indentWidth(line))
+const leadingWhitespace = (line: string): string => {
+  const m = /^[ \t]*/.exec(line)
+  return m ? m[0] : ""
+}
 
-/** Net unclosed-paren depth contributed by a line (ignores parens inside string
- *  literals only crudely — sufficient for def signatures, which rarely embed
- *  unbalanced parens in default-arg strings). */
-const parenDelta = (line: string): number => {
-  let depth = 0
-  for (const ch of line) {
-    if (ch === "(" || ch === "[" || ch === "{") depth++
-    else if (ch === ")" || ch === "]" || ch === "}") depth--
+const isDigit = (ch: string | undefined): boolean => ch !== undefined && ch >= "0" && ch <= "9"
+const isIdentChar = (ch: string | undefined): boolean => ch !== undefined && /[A-Za-z0-9_]/.test(ch)
+
+/** Index just past a string literal whose opening quote is at `start` (handles
+ *  backslash escapes). Pure. */
+const pastString = (line: string, start: number): number => {
+  const q = line[start]
+  let i = start + 1
+  while (i < line.length && line[i] !== q) {
+    if (line[i] === "\\") i++
+    i++
   }
-  return depth
+  return i + 1
+}
+
+/** Net bracket depth contributed by a single char (0 for non-brackets). */
+const BRACKET_DELTA: Readonly<Record<string, number>> = {
+  "(": 1,
+  "[": 1,
+  "{": 1,
+  ")": -1,
+  "]": -1,
+  "}": -1,
+}
+
+/** Index just past the numeric-literal run (digits + dots) starting at `i`. */
+const numericRunEnd = (line: string, i: number): number => {
+  let j = i
+  while (j < line.length && (isDigit(line[j]) || line[j] === ".")) j++
+  return j
 }
 
 /**
- * Strip a Python test file to its SETUP SKELETON: keep imports, decorators, and
- * class/def signatures (incl. multi-line signatures); replace every function /
- * method / class body with a single elision placeholder. Module-level
- * non-structural statements (bare assignments, expressions — which could embed an
- * expected-value constant) are DROPPED. Consecutive blank lines are collapsed.
+ * Single-pass scan of one source line that simultaneously (a) REDACTS the
+ * CONTENTS of string literals to empty and numeric literals to `0` — the only
+ * places a kept decorator/signature line can carry a gold/expected VALUE — and
+ * (b) optionally CUTS the line at its first top-level `:` (paren-depth 0, not in
+ * a string), dropping any single-line body after it. String-aware so a `:`,
+ * quote, or paren inside a literal cannot confuse depth/cut. Pure.
  *
- * This is the no-leak gate: assertion bodies — where the gold oracle lives — never
- * survive. The fixture pattern (decorator markers, fixture-param signatures, import
- * paths) — the value — does. Pure. Empty/whitespace ⇒ `""`.
+ * This is the no-leak hardening (C6 audit): a single-line `def f(): assert x ==
+ * "GOLD"` is cut to `def f():`; `@parametrize("a,expected", [(1,"GOLD")])` keeps
+ * the marker shape but the expected table becomes `("", [(0,"")])`; a nested
+ * `def inner(default="LEAK")` becomes `def inner(default="")`. The fixture
+ * PATTERN (names, markers, structure) survives; literal VALUES never do.
  */
-const SIG_ENDS = /:\s*(#.*)?$/
+const redactAndMaybeCut = (line: string, cutAtTopLevelColon: boolean): string => {
+  let out = ""
+  let i = 0
+  let depth = 0
+  while (i < line.length) {
+    const ch = line[i] ?? ""
+    if (ch === '"' || ch === "'") {
+      // String literal ⇒ emit empty quotes (content redacted), skip to past-close.
+      out += ch + ch
+      i = pastString(line, i)
+      continue
+    }
+    if (cutAtTopLevelColon && ch === ":" && depth <= 0) return `${out}:`
+    if (isDigit(ch) && !isIdentChar(line[i - 1])) {
+      // Standalone numeric literal ⇒ `0` (an expected number could be the gold).
+      i = numericRunEnd(line, i)
+      out += "0"
+      continue
+    }
+    depth += BRACKET_DELTA[ch] ?? 0
+    out += ch
+    i++
+  }
+  return out
+}
+
+/** True once `line` (scanned from `startDepth`) reaches a top-level `:` —
+ *  i.e. the signature header ends here (mid-line or at line end). String-aware.
+ *  Returns the ending paren depth too. Pure. */
+const signatureCloses = (
+  line: string,
+  startDepth: number,
+): { readonly closed: boolean; readonly depth: number } => {
+  let depth = startDepth
+  let i = 0
+  while (i < line.length) {
+    const ch = line[i] ?? ""
+    if (ch === '"' || ch === "'") {
+      i = pastString(line, i)
+      continue
+    }
+    if (ch === ":" && depth <= 0) return { closed: true, depth }
+    depth += BRACKET_DELTA[ch] ?? 0
+    i++
+  }
+  return { closed: false, depth }
+}
 
 /** Capture a (possibly multi-line) def/class signature starting at `lines[start]`,
- *  consuming continuation lines until paren-balanced AND a line ends with ":".
- *  Returns the signature lines and the index just past them. Pure. */
+ *  consuming continuation lines until a top-level `:` closes the header. Each
+ *  captured line is literal-redacted; the closing line is cut at its colon so a
+ *  single-line body is dropped. Returns the redacted signature + next index. */
 const captureSignature = (
   lines: readonly string[],
   start: number,
 ): { readonly sig: readonly string[]; readonly next: number } => {
-  const first = lines[start] ?? ""
-  const sig: string[] = [first]
-  let depth = parenDelta(first)
-  let i = start + 1
-  let done = depth <= 0 && SIG_ENDS.test(first)
-  while (!done && i < lines.length) {
-    const cont = lines[i] ?? ""
-    sig.push(cont)
-    depth += parenDelta(cont)
-    done = depth <= 0 && SIG_ENDS.test(cont)
+  const sig: string[] = []
+  let depth = 0
+  let i = start
+  while (i < lines.length) {
+    const line = lines[i] ?? ""
+    const { closed, depth: d } = signatureCloses(line, depth)
+    if (closed) {
+      sig.push(redactAndMaybeCut(line, true))
+      return { sig, next: i + 1 }
+    }
+    sig.push(redactAndMaybeCut(line, false))
+    depth = d
     i++
   }
   return { sig, next: i }
 }
 
+/**
+ * Strip a Python test file to its SETUP SKELETON: keep imports verbatim, keep
+ * literal-redacted decorators + class/def signatures (incl. multi-line; a
+ * single-line body is cut at the colon), replace every body with one elision
+ * placeholder. Module-level + body STATEMENTS (asserts/calls/assignments) are
+ * DROPPED. Consecutive blank lines collapsed; output head-truncated to
+ * {@link MAX_SKELETON_CHARS}.
+ *
+ * No-leak gate (C6-hardened): assertion bodies — where the gold oracle lives —
+ * never survive, AND no kept line carries a string/number literal VALUE. The
+ * fixture pattern (import paths, decorator markers, fixture-param signatures) —
+ * the value — does. Pure. Empty/whitespace ⇒ `""`.
+ */
 export const stripTestBodies = (src: string): string => {
   if (typeof src !== "string" || src.trim() === "") return ""
   const lines = src.replace(/\r\n?/g, "\n").split("\n")
@@ -108,31 +192,35 @@ export const stripTestBodies = (src: string): string => {
   while (i < lines.length) {
     const ln = lines[i] ?? ""
     if (DEF_OR_CLASS.test(ln)) {
-      // Keep the signature + ONE elision placeholder. We do NOT skip the body
-      // wholesale — nested def/class/decorator lines are kept by the main loop
-      // (the fixture pattern often lives in methods inside a test class); only
-      // non-structural STATEMENTS (asserts, calls, assignments) are dropped.
       const { sig, next } = captureSignature(lines, i)
       out.push(...sig, `${leadingWhitespace(ln)}    ...  # body elided (no-leak)`)
       i = next
       continue
     }
-    if (IMPORT_OR_DECORATOR.test(ln) || ln.trim() === "") {
-      // Structural line (import/from/decorator) or blank ⇒ keep verbatim.
+    if (IMPORT_LINE.test(ln) || ln.trim() === "") {
+      // Import / from (module paths — not oracle values) or blank ⇒ verbatim.
       out.push(ln)
       i++
       continue
     }
-    // Non-structural statement at ANY indent (module-level constant OR a body
-    // line: assert / call / assignment): DROP — it may carry an expected-value
-    // constant (leak) and is not fixture shape.
+    if (DECORATOR_LINE.test(ln)) {
+      // Decorator ⇒ keep the marker SHAPE but redact literal args (a
+      // `@parametrize([... "GOLD" ...])` table is a gold oracle).
+      out.push(redactAndMaybeCut(ln, false))
+      i++
+      continue
+    }
+    // Non-structural statement at ANY indent ⇒ DROP (assert/call/assignment;
+    // may carry an expected-value constant).
     i++
   }
-  // Collapse runs of blank lines to a single blank; trim ends.
-  return out
+  const joined = out
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim()
+  return joined.length > MAX_SKELETON_CHARS
+    ? `${joined.slice(0, MAX_SKELETON_CHARS)}\n# … skeleton truncated (no-leak)`
+    : joined
 }
 
 /** Heading lines shared by the exemplar block (kept as a const so the fence test
