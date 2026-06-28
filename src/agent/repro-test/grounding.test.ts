@@ -176,6 +176,20 @@ describe("stripTestBodies — NO-LEAK fence (red-on-injection)", () => {
     expect(s.length).toBeLessThan(6200)
     expect(s).toContain("skeleton truncated")
   })
+
+  test("CARDINAL: triple-quoted literal (single + multi-line) does NOT leak", () => {
+    // single-line triple default arg
+    expect(stripTestBodies("def f(x='''GOLD-TRIPLE'''):\n    pass\n")).not.toContain("GOLD-TRIPLE")
+    // multi-line triple default spanning lines
+    const multi = ['def f(x="""', "GOLD-MULTI-LINE", '"""):', "    pass"].join("\n")
+    const s = stripTestBodies(multi)
+    expect(s).not.toContain("GOLD-MULTI-LINE")
+    expect(s).toContain("def f(x=")
+    // triple in a decorator arg
+    expect(
+      stripTestBodies('@parametrize("""GOLD-DEC""")\ndef t():\n    pass'),
+    ).not.toContain("GOLD-DEC")
+  })
 })
 
 describe("exemplarBlock", () => {

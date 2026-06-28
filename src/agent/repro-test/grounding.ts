@@ -184,9 +184,37 @@ const captureSignature = (
  * fixture pattern (import paths, decorator markers, fixture-param signatures) —
  * the value — does. Pure. Empty/whitespace ⇒ `""`.
  */
+/**
+ * Collapse every TRIPLE-quoted region (`'''…'''` / `"""…"""`, possibly spanning
+ * lines) to an empty `""` BEFORE the line strip. C6 re-audit: triple-quotes are
+ * the one literal form the per-line `pastString` mis-reads (it sees `'''` as two
+ * empty `''`), so a triple-quoted default-arg / decorator-arg / multi-line
+ * expected-output block would leak its content. Removing the whole region up-front
+ * closes the class (single + multi-line, docstrings, defaults). Over-collapsing a
+ * stray triple inside a normal string is SAFE (loses non-leak text, never leaks).
+ * Pure.
+ */
+const stripTripleQuoted = (src: string): string => {
+  let out = ""
+  let i = 0
+  while (i < src.length) {
+    const three = src.slice(i, i + 3)
+    if (three === '"""' || three === "'''") {
+      let j = i + 3
+      while (j < src.length && src.slice(j, j + 3) !== three) j++
+      out += '""' // collapsed (interior redacted)
+      i = j + 3
+      continue
+    }
+    out += src[i]
+    i++
+  }
+  return out
+}
+
 export const stripTestBodies = (src: string): string => {
   if (typeof src !== "string" || src.trim() === "") return ""
-  const lines = src.replace(/\r\n?/g, "\n").split("\n")
+  const lines = stripTripleQuoted(src.replace(/\r\n?/g, "\n")).split("\n")
   const out: string[] = []
   let i = 0
   while (i < lines.length) {
