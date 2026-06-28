@@ -727,29 +727,49 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
     hardBreach(): BudgetBreach | undefined {
       // Reconstruct the first fired hard breach with the CURRENT observed cost
       // (the `fired` set stores only `${kind}:${scope}` keys; the live total is
-      // read back from the per-scope aggregate). `policy.*HardLimit` is the
-      // configured ceiling (0 when somehow unset — a hard breach cannot fire
-      // without a limit, so this is defensive only).
+      // read back from the per-scope aggregate).
+      //
+      // Two robustness guards on the reconstruction:
+      //  - A fired key whose CURRENT policy has no matching limit is SKIPPED
+      //    (`limit === undefined`): this happens when a serialized breach memory
+      //    is hydrated into a ledger built without the original policy — the key
+      //    is stale relative to this ledger's config, so we don't surface a
+      //    breach with a meaningless `limit: 0`.
+      //  - `observed` is clamped to be at least `limit`: after LRU eviction the
+      //    breaching event may have dropped from the live aggregate, leaving a
+      //    smaller (or zero) total; reporting `observed < limit` would be an
+      //    internally inconsistent breach. The breach genuinely fired, so the
+      //    observed-at-stop is at least the limit.
+      const reconstruct = (
+        kind: "session-hard" | "daily-hard",
+        scope: string,
+        limit: number | undefined,
+        liveTotal: number,
+      ): BudgetBreach | undefined => {
+        if (limit === undefined) return undefined
+        return { kind, limit, observed: liveTotal < limit ? limit : liveTotal, scope }
+      }
       for (const key of fired) {
         const SESSION = "session-hard:"
         const DAILY = "daily-hard:"
         if (key.startsWith(SESSION)) {
           const scope = key.slice(SESSION.length)
-          return {
-            kind: "session-hard",
-            limit: policy.sessionHardLimit ?? 0,
-            observed: perSession.get(scope)?.totalCost ?? 0,
+          const b = reconstruct(
+            "session-hard",
             scope,
-          }
-        }
-        if (key.startsWith(DAILY)) {
+            policy.sessionHardLimit,
+            perSession.get(scope)?.totalCost ?? 0,
+          )
+          if (b !== undefined) return b
+        } else if (key.startsWith(DAILY)) {
           const scope = key.slice(DAILY.length)
-          return {
-            kind: "daily-hard",
-            limit: policy.dailyHardLimit ?? 0,
-            observed: perDay.get(scope)?.totalCost ?? 0,
+          const b = reconstruct(
+            "daily-hard",
             scope,
-          }
+            policy.dailyHardLimit,
+            perDay.get(scope)?.totalCost ?? 0,
+          )
+          if (b !== undefined) return b
         }
       }
       return undefined

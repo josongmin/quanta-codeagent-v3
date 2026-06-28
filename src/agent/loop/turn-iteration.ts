@@ -14,7 +14,6 @@ import { injectWorkflowKeywordNudge } from "../workflow-keyword"
 import { compactNowOnDemand } from "./compaction-wire"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
-import { configuredModel } from "./emit-helpers"
 
 export const applySteerBarrierMessages = async (
   cfg: AgentConfig,
@@ -214,14 +213,14 @@ export const prepareTurnIteration = async (args: {
  * wire prompt (it omits the system prompt + tool schemas added downstream in
  * `same-turn-engine`), making the floor strictly conservative.
  *
- * Precision bound (documented, NOT a heuristic): the model is read as the
- * configured BASE model. A per-turn sticky / skill model SWAP that downstream
- * resolves to a CHEAPER model could make this floor a slight over-estimate —
- * at worst pre-empting ONE turn early in a run already within a rounding error
- * of a hard cap. The projection itself is deterministic; only the rare swap
- * edge is imprecise, and it only ever stops a near-exhausted run marginally
- * sooner (never lets spend through — the post-hoc `checkExhausted` still
- * guards the real model + real tokens at the epilogue).
+ * `activeModelId` MUST be the model the turn will ACTUALLY run — the caller
+ * resolves it with `resolveActiveModelId` (the SAME resolver `same-turn-engine`
+ * uses, so a sticky / skill model SWAP is reflected and the floor is priced at
+ * the real rate). Pricing the floor at the base `config.llm` would over-estimate
+ * when a skill swaps to a cheaper model and could stop a run with a large
+ * fraction of budget unspent — so the resolved id is required, not optional.
+ * (The effort-classifier floor only changes `thinking`, never the model, so the
+ * resolved id is exact.)
  *
  * Byte-identical default-OFF: no `budgetMeter`, no `maxCostUsd` dial, or an
  * unpriced model ⇒ `undefined` (no behavior change).
@@ -229,10 +228,11 @@ export const prepareTurnIteration = async (args: {
 export const projectCostPreflight = (
   cfg: AgentConfig,
   wm: WorkingMemory<Message>,
+  activeModelId: string,
 ): BudgetExhaustion | undefined => {
   const meter = cfg.budgetMeter
   if (meter === undefined) return undefined
-  const inputFloorUsd = costUsd(configuredModel(cfg.llm), estimateTokens([...wm.snapshot()]), 0)
+  const inputFloorUsd = costUsd(activeModelId, estimateTokens([...wm.snapshot()]), 0)
   if (inputFloorUsd === null) return undefined // unpriced model ⇒ no pre-flight
   const ex = meter.wouldExceedCost(inputFloorUsd)
   return ex.exhausted ? ex : undefined

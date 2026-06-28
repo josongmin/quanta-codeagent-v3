@@ -9,6 +9,7 @@ import { flushTurnObservability } from "../turn-closeout"
 import type { TurnState } from "../turn-context"
 import type { AgentOutcome } from "../types"
 import { runTurn } from "./same-turn-engine"
+import { resolveActiveModelId } from "./skill-gate"
 import { prepareTurnIteration, projectCostPreflight } from "./turn-iteration"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "./turn-outcome"
 import type { RunAgentContext, TurnResult } from "./types"
@@ -98,35 +99,25 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
     }
     // L2 cost pre-flight admission control — stop BEFORE issuing a model call
     // whose input cost alone would breach `maxCostUsd` (the call cannot avoid
-    // breaching, so spending on it is waste). Default-OFF / byte-identical when
-    // no cost dial is configured (`projectCostPreflight` ⇒ undefined). `turn-1`
-    // completed turns: this turn produced no model output.
-    const costPreflight = projectCostPreflight(ctx.cfg, ctx.wm)
+    // breaching, so spending on it is waste). Priced at the model the turn will
+    // ACTUALLY run (`resolveActiveModelId`, the SAME resolver `same-turn-engine`
+    // uses) so a sticky/skill swap never over-estimates. `turn-1` completed
+    // turns: this turn produced no model output. The whole block is GATED on a
+    // configured `budgetMeter` so the no-cost-cap path pays no extra
+    // model-resolution / sticky read (byte-identical default-OFF).
+    const costPreflight =
+      ctx.cfg.budgetMeter !== undefined
+        ? projectCostPreflight(
+            ctx.cfg,
+            ctx.wm,
+            await resolveActiveModelId(ctx.cfg, ctx.session.skillGate?.activeOverride()),
+          )
+        : undefined
     if (costPreflight !== undefined) {
       emitBudgetExhaustedDecision(ctx.cfg.decisionEmitter, costPreflight, { turn })
       return ctx.finish("budget_exhausted", turn - 1, completedCategory("max_turns"))
     }
     const { result } = await executeTurnWithObservability({ ctx, turn })
-    // L4 cross-run cost ledger enforcement — after the turn's usage is recorded
-    // (emitUsage), stop the run if a HARD cost ceiling (session/daily) has been
-    // crossed. Default-OFF / byte-identical when no ledger or no policy is
-    // wired (`hardBreach()` ⇒ undefined). This is the cross-run analogue of the
-    // per-run `BudgetMeter` cost cap: a campaign that hydrates a shared ledger
-    // stops the moment cumulative spend breaches the operator-set hard limit.
-    const ledgerHardBreach = ctx.cfg.budgetLedger?.hardBreach()
-    if (ledgerHardBreach !== undefined) {
-      emitBudgetExhaustedDecision(
-        ctx.cfg.decisionEmitter,
-        {
-          exhausted: true,
-          kind: "cost_usd",
-          budget: ledgerHardBreach.limit,
-          observed: ledgerHardBreach.observed,
-        },
-        { turn },
-      )
-      return ctx.finish("budget_exhausted", turn, completedCategory("max_turns"))
-    }
     const resolution = await resolveTurnLoopOutcome({
       cfg: ctx.cfg,
       stream: ctx.cfg.stream,
@@ -151,6 +142,29 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
         resolution.stopCategory,
         resolution.refusal,
       )
+    }
+    // L4 cross-run cost ledger enforcement — the turn is about to CONTINUE
+    // (resolution is neither park nor finish). If the usage recorded this turn
+    // (emitUsage) crossed a HARD session/daily cost ceiling, stop instead of
+    // looping. Placed AFTER resolveTurnLoopOutcome so a turn that already
+    // reached a terminal state (completed/error) keeps its natural outcome and
+    // its recorder/tool-result handling — a hard cost breach only PRE-EMPTS the
+    // continuation, the cross-run analogue of the per-run meter cap. Default-OFF
+    // / byte-identical when no ledger or no policy is wired (`hardBreach()` ⇒
+    // undefined).
+    const ledgerHardBreach = ctx.cfg.budgetLedger?.hardBreach()
+    if (ledgerHardBreach !== undefined) {
+      emitBudgetExhaustedDecision(
+        ctx.cfg.decisionEmitter,
+        {
+          exhausted: true,
+          kind: "cost_usd",
+          budget: ledgerHardBreach.limit,
+          observed: ledgerHardBreach.observed,
+        },
+        { turn },
+      )
+      return ctx.finish("budget_exhausted", turn, completedCategory("max_turns"))
     }
   }
   return undefined

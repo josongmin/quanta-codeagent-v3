@@ -15,6 +15,9 @@
 
 import { describe, expect, test } from "bun:test"
 import { BudgetMeter } from "@/agent"
+import type { Message } from "@/llm"
+import { projectCostPreflight } from "../../../../src/agent/loop/turn-iteration"
+import type { AgentConfig } from "../../../../src/agent/types"
 
 describe("HELLGATE L2 — BudgetMeter.wouldExceedCost (pure projection)", () => {
   test("no maxCostUsd dial ⇒ never would-exceed (byte-identical)", () => {
@@ -61,5 +64,40 @@ describe("HELLGATE L2 — BudgetMeter.wouldExceedCost (pure projection)", () => 
     // wouldExceedCost(0) ≡ checkExhausted for the cost dial.
     expect(m.wouldExceedCost(0).exhausted).toBe(true)
     expect(m.checkExhausted().kind).toBe("cost_usd")
+  })
+})
+
+describe("HELLGATE L2 — projectCostPreflight prices the RESOLVED model (no swap FP)", () => {
+  // ~10k-token prompt (estimateTokens ≈ chars/4).
+  const wmWith = (tokens: number): { snapshot: () => readonly Message[] } => {
+    const text = "x".repeat(tokens * 4)
+    const messages: Message[] = [{ role: "user", content: [{ type: "text", text }] }]
+    return { snapshot: () => messages }
+  }
+  const cfgWith = (meter: BudgetMeter): AgentConfig =>
+    ({ budgetMeter: meter, llm: { model: "claude-opus-4-7" } }) as unknown as AgentConfig
+
+  test("REGRESSION: a cheaper resolved model does NOT trip (the base-model FP fix)", () => {
+    // Near the cap. The BASE model (claude-opus-4-7, $15/M in) would over-
+    // estimate the floor and trip; the RESOLVED cheaper model must not.
+    const meter = new BudgetMeter({ dials: { maxCostUsd: 1 } })
+    meter.tick("cost_usd", 0.97)
+    const cfg = cfgWith(meter)
+    const wm = wmWith(10_000) as never
+    // gpt-5.4-nano = $0.2/1M in ⇒ floor = 10k*0.2/1M = $0.002 ⇒ 0.972 < 1 ⇒ no trip.
+    expect(projectCostPreflight(cfg, wm, "gpt-5.4-nano")).toBeUndefined()
+    // claude-opus-4-7 = $15/1M in ⇒ floor = 10k*15/1M = $0.15 ⇒ 1.12 > 1 ⇒ trips.
+    expect(projectCostPreflight(cfg, wm, "claude-opus-4-7")?.exhausted).toBe(true)
+  })
+
+  test("no budgetMeter ⇒ undefined regardless of model (byte-identical)", () => {
+    const cfg = { llm: { model: "claude-opus-4-7" } } as unknown as AgentConfig
+    expect(projectCostPreflight(cfg, wmWith(10_000) as never, "claude-opus-4-7")).toBeUndefined()
+  })
+
+  test("unpriced resolved model ⇒ undefined (no pre-flight, mirrors meter best-effort)", () => {
+    const meter = new BudgetMeter({ dials: { maxCostUsd: 0.0001 } })
+    meter.tick("cost_usd", 0.0001)
+    expect(projectCostPreflight(cfgWith(meter), wmWith(10_000) as never, "gpt-5-2")).toBeUndefined()
   })
 })
