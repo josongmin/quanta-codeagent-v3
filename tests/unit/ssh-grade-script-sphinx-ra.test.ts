@@ -32,7 +32,8 @@ describe("ssh grade script — SPHINX_RA_SHIM wiring", () => {
   test("DRIFT-PROOF: the shipped base64 decodes back to the shared SPHINX_RA_SHIM", () => {
     const m = script.match(/printf %s ([A-Za-z0-9+/=]+) \| base64 -d/)
     expect(m).not.toBeNull()
-    const decoded = Buffer.from((m as RegExpMatchArray)[1], "base64").toString("utf8")
+    const b64 = (m as RegExpMatchArray)[1] ?? ""
+    const decoded = Buffer.from(b64, "base64").toString("utf8")
     expect(decoded).toBe(SPHINX_RA_SHIM)
   })
 

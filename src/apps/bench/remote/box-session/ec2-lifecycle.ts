@@ -24,6 +24,7 @@ import {
   readBoxSnapshot,
   resolveSnapshotInspection,
 } from "./snapshot"
+import { buildSrcRsyncArgs, ensureBoxSrcCurrent } from "./src-sync-guard"
 import { type BoxInspection, type BoxSession, D, type FullRemoteConfig } from "./types"
 
 const RUNNING_BOX_FILTERS = [
@@ -301,22 +302,10 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   // must not refuse the rsync after readiness already succeeded.
   const sshOpts = `ssh -i ${keyPath} ${BENCH_SSH_SAFE_OPTS.join(" ")} -o ConnectTimeout=15 -o ServerAliveInterval=15`
   await ssh("mkdir -p ~/quanta")
-  const rsynced = await spawn("rsync", [
-    "-az",
-    "--partial",
-    "--exclude",
-    "node_modules",
-    "--exclude",
-    "*.js", // stale compiled mirrors — bun runs the .ts directly
-    "--exclude",
-    "*.test.ts", // tests not needed to RUN the agent
-    "--exclude",
-    ".quanta",
-    "-e",
-    sshOpts,
-    `${cfg.repoDir}/src/`,
-    `${host}:~/quanta/src/`,
-  ])
+  // SSOT excludes/argv shared with the reuse self-heal (src-sync-guard) so the
+  // seed-sync and the verify-sync can never diverge. No opts ⇒ byte-identical to
+  // the historical bootstrap rsync.
+  const rsynced = await spawn("rsync", buildSrcRsyncArgs(cfg.repoDir, host, sshOpts))
   if (rsynced.code !== 0) {
     throw new Error(`[full-remote] rsync src failed (code ${rsynced.code}): ${rsynced.stderr}`)
   }
@@ -773,17 +762,27 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
   }
   log(`[pool] reusing warm box ${iid} (${ip})`)
   const preset = cfg.preset ?? D.preset
+  let reBootstrapped = false
   if (!(await isBootstrapped((c) => ssh(c)))) {
     log(`[pool] box ${iid} missing bootstrap (stale) — re-bootstrapping…`)
     await bootstrapBox(session, cfg)
+    reBootstrapped = true
   } else if (presetRequiresLiveLspGrounding(preset)) {
     const groundingVerdict = await probePyrightGrounding((c) => ssh(c))
     if (!groundingVerdict.ready) {
       log(`[pool] box ${iid} lost live LSP grounding for preset ${preset} — re-bootstrapping…`)
       await bootstrapBox(session, cfg)
+      reBootstrapped = true
     } else {
       log(`[pool] warm box ${iid} LSP grounding ready — ${groundingVerdict.detail}`)
     }
+  }
+  // Close the silent-stale-CODE class: a warm box reused across a code change
+  // would otherwise grade with the src rsynced at its ORIGINAL bootstrap. A
+  // checksum-mode rsync is a fast no-op when current and self-heals when stale.
+  // (Skip when we just re-bootstrapped — that already seed-synced fresh src.)
+  if (!reBootstrapped) {
+    await ensureBoxSrcCurrent({ spawn, repoDir: cfg.repoDir, host, keyPath, log })
   }
   return session
 }

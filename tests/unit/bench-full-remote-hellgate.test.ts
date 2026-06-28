@@ -971,6 +971,36 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
     ).toBe(true)
   })
 
+  test("warm bootstrapped box self-heals src via a CHECKSUM rsync on reuse (stale-code guard)", async () => {
+    // jun-28: a reused box keeps the src rsynced at its ORIGINAL bootstrap, so a
+    // code change after provision graded with STALE src (a committed grader fix
+    // looked inert). attachBox must now run a checksum-mode self-heal rsync on
+    // every clean reuse. Preset agentless-v2 does NOT require LSP grounding, so
+    // the path is: bootstrapped-OK → (no re-bootstrap) → self-heal.
+    const logs: string[] = []
+    const { fn, calls } = createSpawnRecorder(
+      whenArgsInclude("describe-instances", ok("1.2.3.4")),
+      whenSshRemoteIncludes("test -x ~/.bun/bin/bun", ok("OK\n")),
+      // the self-heal rsync reports the box was STALE (one drifted file).
+      whenCmd("rsync", ok(">f.st...... apps/bench/python-swebench.ts\n")),
+    )
+    await attachBox(
+      { ...baseCfg, spawn: fn, preset: "agentless-v2", onLog: (m: string) => logs.push(m) },
+      "i-warm",
+    )
+    // a CHECKSUM + itemize rsync fired — distinguishes the self-heal from
+    // bootstrapBox's plain seed rsync (which carries neither flag).
+    const heal = calls.find((c) => c.cmd === "rsync" && c.args.includes("--checksum"))
+    expect(heal).toBeDefined()
+    expect(heal?.args).toContain("--itemize-changes")
+    // a HEALTHY bootstrapped box is NOT re-bootstrapped (no bun install).
+    expect(
+      calls.some((c) => c.cmd === "ssh" && c.args.some((a) => a.includes("bun install"))),
+    ).toBe(false)
+    // the stale drift surfaced to the operator (not a silent stale-code run).
+    expect(logs.some((l) => l.includes("STALE") && l.includes("python-swebench.ts"))).toBe(true)
+  })
+
   test("ALWAYS terminates the box — even when the remote run throws", async () => {
     const calls: Array<{ cmd: string; args: string[] }> = []
     const fn: SpawnFn = async (cmd, args): Promise<SpawnResult> => {
