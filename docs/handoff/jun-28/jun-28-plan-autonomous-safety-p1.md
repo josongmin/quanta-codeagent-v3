@@ -3,8 +3,23 @@
 작성: 2026-06-28. MASTER 백로그 P1 두 항목의 구현 계획. **중복구현 회피**가 1차 제약.
 관련: `[[jun-26-bench-token-usage-tracking-gap]]`, `[[no-heuristics-only-validated]]`, `[[jun-28-harness-safety-audit-hardening]]`.
 
-## ✅ LANDED (2026-06-28, 헬게이트 프로토콜)
-**L0 비용회계 + L1 관측성** 구현 완료(아직 uncommitted). 5파일:
+## ✅ LANDED (2026-06-28, 헬게이트 프로토콜, 2 커밋)
+- **체크포인트1 `20be4bb5a`** — L0 비용회계 + L1 관측성.
+- **체크포인트2 `bfb20bf6c`** — L2 pre-flight admission control(`wouldExceedCost`+`projectCostPreflight`, turn-loop 배선; e2e anti-theater=llm.calls===0).
+
+### L4 상태 (다음, measure-first — blind 금지)
+L4=캠페인 ledger. **3-파트 별도작업으로 확정**(한방 big-bang 금지 이유):
+1. **가격 드리프트 선결**: `BudgetLedger.DEFAULT_MODEL_PRICING`이 SSOT(pricing.ts)와 드리프트 — `gpt-5` $10/$30(SSOT $1.25/$10), **gpt-5.4/5.5 부재→sonnet 폴백**(=bench모델 비용 틀림). + cacheWrite 차원은 SSOT에 없음. 가격 SSOT 통일이 ledger 배선 전 필수(안 그러면 틀린측정=hygiene 위반). ledger 테스트 32개가 옛 가격에 의존→리팩터 신중.
+2. **cross-run 영속 배선**: config.budgetLedger 슬롯+budget_status 툴은 존재하나 **생성/주입·emitUsage record·hydrate/serialize·breach→abort 전부 미배선**. bootstrap/session-lifecycle cross-cutting.
+3. **cap값 measure-first**: soft/hard=typical 캠페인 spend 측정(#5 G2 합류) 후 산정. blind 값 금지.
+- **L3 burn-rate**: 후순위(trip 빈도 측정 후).
+
+---
+
+(이하 초기 계획 원문 — L0 상세)
+
+## ✅ L0/L1 구현 상세 (체크포인트1)
+5파일:
 - `types.ts`: TickKind에 `cost_usd`. `meter.ts`: costFn/estimateCostUsd/ZERO_COST **제거**, `costUsdAccum` 순수누적기. `emit-helpers.ts`: emitUsage서 `costUsd(ev.model,…)`→`tick("cost_usd")`(단일 seam, unknown-model null-skip). `decision-emit-phase3.ts`: 비용 trip 결정에 `pricingVersion` 스탬프(L1). `pricing.ts`: 음수 토큰 방어클램프(NaN/Inf는 fail-loud 유지).
 - 테스트: `cost-cap-hellgate.test.ts` 신규(11, RED→GREEN, 실 emitUsage 구동=anti-theater, BUDGET_PRESETS e2e 선언↔집행), `meter.test.ts` estimator 2개 재작성, `pricing.test.ts` 음수클램프.
 - 검증: typecheck PASS, **2889 pass/0 fail**, 적대어딧 BLOCKER 0(NIT 1=음수클램프 반영), lint clean.
