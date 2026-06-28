@@ -2065,6 +2065,9 @@ const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTele
   reason: "write_failed",
   ...(base.samples !== undefined ? { samples: base.samples } : {}),
   ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
+  // jun-29: preserve grounding engagement telemetry across the rebuild (else the
+  // A/B can't read it on the write-failed path).
+  ...(base.grounding !== undefined ? { grounding: base.grounding } : {}),
 })
 
 /** The CANONICAL reproducing sources — the SUBMIT-GATE oracle set (jun-23
@@ -2214,6 +2217,12 @@ export const prepareSelectionReproSources = async (
         path,
         samples: detail.selection.samples.length,
         reproducedCount: detail.selection.reproducedCount,
+        // jun-29: carry grounding engagement onto the installed-success telemetry
+        // (prepareReproTestDetailed attached it via withG; this rebuild must NOT
+        // drop it, or the A/B reads no grounding on the reproduced path).
+        ...(detail.telemetry.grounding !== undefined
+          ? { grounding: detail.telemetry.grounding }
+          : {}),
       },
       hint: reproHintForInstance(instance),
       reproSources,
@@ -2267,6 +2276,9 @@ export const installReproTestHint = async (
         path,
         samples: selection.samples.length,
         reproducedCount: selection.reproducedCount,
+        // jun-29: preserve grounding engagement (else the A/B reads None on the
+        // installed-success path — the canary symptom).
+        ...(telemetry.grounding !== undefined ? { grounding: telemetry.grounding } : {}),
       },
     }
   } catch {

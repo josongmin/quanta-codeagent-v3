@@ -158,6 +158,41 @@ describe("prepareReproTest", () => {
     expect(sel?.reproducedCount).toBe(3)
   })
 
+  test("jun-29 regression: installed-success telemetry PRESERVES grounding (not dropped on rebuild)", async () => {
+    // The bug: prepareSelectionReproSources / installReproTestHint rebuild a fresh
+    // {installed:true,...} telemetry on the reproduced path, dropping the grounding
+    // field that prepareReproTestDetailed attached via withG → the A/B read None.
+    const out = await prepareSelectionReproSources(
+      mkInstance(),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 3,
+        verifySelectRepro: "positive",
+        reproTestK: 3,
+        reproExecTimeoutMs: undefined,
+        adversarialRepro: false,
+        pairedControl: false,
+        reproGrounding: true,
+      },
+      {
+        execute: async ({ tests }: { tests: readonly string[] }) => reproducedSamples(tests),
+        writeFile: async () => {},
+        reproGrounding: true,
+        groundingSourceFiles: ["pkg/foo.py"],
+        groundingPorts: {
+          relatedTests: async () => [
+            { path: "tests/test_x.py", text: "import pkg\ndef test_a():\n    assert pkg" },
+          ],
+        },
+      },
+    )
+    expect(out.telemetry?.installed).toBe(true)
+    const g = (out.telemetry as { grounding?: { engaged: boolean; exemplars: number } }).grounding
+    expect(g?.engaged).toBe(true)
+    expect(g?.exemplars).toBe(1)
+  })
+
   test("LLM stream failure ⇒ samples all '' ⇒ null selection", async () => {
     class ThrowLLM implements LLMPort {
       // biome-ignore lint/correctness/useYield: throws before any yield
