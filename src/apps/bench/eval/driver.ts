@@ -44,6 +44,7 @@ import {
   type IssueHintMode,
   knobsForReport,
   latePhaseFailureResultOf,
+  makeAcceptanceSelectCandidates,
   makeCalibratedReproConsensusPort,
   makeReproConsensusProofSelectionPort,
   makeReproConsensusSelectionPort,
@@ -660,7 +661,7 @@ const runRepairPhase = async (
   let repairValidated = false
   let repairFalseGreen = false
   let repairFalseRed = false
-  let repairValidationDecision: Phase["repairValidationDecision"] = undefined
+  let repairValidationDecision: Phase["repairValidationDecision"]
   let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: K-of-N RESOLVED majority gate when the knob is on AND a
@@ -726,6 +727,15 @@ const runRepairPhase = async (
           gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
         })
       : undefined
+  // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only) — SHARED
+  // wiring with the runner driver. ABSENT ⇒ legacy selection (byte-identical).
+  const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
+    instance,
+    reproSources,
+    sandbox,
+    deps.timeoutMs,
+    repairPosture.acceptance,
+  )
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -788,6 +798,11 @@ const runRepairPhase = async (
         // jun-28 BREADTH: present only when B>1 (else undefined ⇒ the orchestrator
         // takes the legacy single path, byte-identical).
         ...(runCandidates !== undefined ? { runCandidates } : {}),
+        // jun-28 SOTA++ acceptance: present only when the opt-in is on + a repro set
+        // exists (else undefined ⇒ legacy validator-rank selection, byte-identical).
+        ...(acceptanceSelectCandidates !== undefined
+          ? { selectCandidates: acceptanceSelectCandidates }
+          : {}),
       })
       turns = out.turns
       finalPatch = out.patch

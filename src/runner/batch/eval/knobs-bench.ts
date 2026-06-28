@@ -393,6 +393,11 @@ export interface BenchPosture {
    *  single-script oracle). Armed by the driver only when repro-test produced a
    *  reproducing set; empty set ⇒ byte-identical legacy gate. */
   readonly reproVote: boolean
+  /** jun-28 SOTA++ Phase-A: when on, the repair breadth winner is chosen by the
+   *  score-once acceptance oracle (reproduction-resolved + regression-fail-count)
+   *  rerank instead of legacy validator-rank. Armed only when a reproducing set
+   *  exists; default-OFF ⇒ byte-identical legacy selection. */
+  readonly acceptance: boolean
   /** T-501: post-localization commit rail + no-patch exhausted verdict. */
   readonly noPatchBreaker: boolean
   /** T-601: multi-owner escalation decision (closed reason taxonomy). */
@@ -641,6 +646,7 @@ export const benchPostureFromState = (
   const patchBudget = readKnobValue(state, "patch-budget", isTrue) === true
   const patchBudgetStrict = readKnobValue(state, "patch-budget-strict", isTrue) === true
   const reproVote = readKnobValue(state, "repro-vote", isTrue) === true
+  const acceptance = readKnobValue(state, "acceptance", isTrue) === true
   const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
   const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
   const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
@@ -699,6 +705,7 @@ export const benchPostureFromState = (
     patchBudget,
     patchBudgetStrict,
     reproVote,
+    acceptance,
     noPatchBreaker,
     repairEscalation,
     specFidelitySteer,

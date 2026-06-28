@@ -72,6 +72,28 @@ export const reproVoteSchema: KnobSchema<boolean> = {
   source: "jun-19 repro oracle quality (Agentless §3.3.1 resolved-side majority vote)",
 }
 
+/* ── acceptance (QUANTA_BENCH_ACCEPTANCE) ─────────────────────────────────── */
+const parseAcceptance = (raw: string | undefined): boolean | undefined => {
+  if (raw === undefined) return undefined
+  const s = raw.trim().toLowerCase()
+  if (s === "" || s === "0" || s === "off" || s === "false") return undefined
+  return true
+}
+export const acceptanceSchema: KnobSchema<boolean> = {
+  id: "acceptance",
+  envKey: "QUANTA_BENCH_ACCEPTANCE",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: SOTA++ Phase-A acceptance selector — the repair breadth winner is chosen by score-once acceptance oracle (reproduction-resolved + regression-fail-count) rerank instead of legacy validator-rank. Requires repro-test. Default-OFF ⇒ byte-identical.",
+  knobDescribe:
+    "SOTA++ acceptance selector: score each breadth candidate ONCE via the repro/regression oracle and rerank (Agentless-faithful patch vote + 3-tier ladder) instead of the per-round validator-rank selection",
+  readSite: "runner/knobs/knobs/acceptance.ts",
+  surfaces: BENCH,
+  parse: parseAcceptance,
+  source: "jun-28 SOTA++ Phase-A acceptance (Agentless rerank.py port)",
+}
+
 /* ── repro-doubt (QUANTA_BENCH_REPRO_DOUBT) ───────────────────────────────── */
 interface ReproDoubtValue {
   readonly stuckRuns: number

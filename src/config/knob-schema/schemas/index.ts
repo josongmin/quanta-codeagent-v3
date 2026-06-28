@@ -102,6 +102,7 @@ import {
   selectorModeSchema,
 } from "./bench-loop"
 import {
+  acceptanceSchema,
   reproDoubtSchema,
   reproExecTimeoutSchema,
   reproTestSchema,
@@ -155,6 +156,7 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   patchBudgetSchema, // QUANTA_BENCH_PATCH_BUDGET
   patchBudgetStrictSchema, // QUANTA_BENCH_PATCH_BUDGET_STRICT
   reproVoteSchema, // QUANTA_BENCH_REPRO_VOTE
+  acceptanceSchema, // QUANTA_BENCH_ACCEPTANCE
   adversarialReproSchema, // QUANTA_BENCH_ADVERSARIAL_REPRO
   reproDoubtSchema, // QUANTA_BENCH_REPRO_DOUBT
   verifySelectSchema, // QUANTA_BENCH_VERIFY_SELECT

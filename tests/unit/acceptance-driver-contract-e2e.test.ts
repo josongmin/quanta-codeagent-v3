@@ -112,7 +112,8 @@ const baseArgs = (over: Partial<RunRepairRoundsArgs>): RunRepairRoundsArgs => ({
 const wireAcceptance = (
   sandbox: ReturnType<typeof makeSandbox>,
   regressionSet: readonly string[] | undefined,
-) =>
+): NonNullable<RunRepairRoundsArgs["selectCandidates"]> =>
+  // enabled:true ⇒ always defined; assert so the (full) args spread is exactOptional-clean.
   maybeAcceptanceSelector({
     enabled: true,
     runReproOnPatch: (patch) => sandbox.withCandidatePatch(patch, async (p) => p.fix),
@@ -125,7 +126,7 @@ const wireAcceptance = (
             ),
         }
       : {}),
-  })
+  }) as NonNullable<RunRepairRoundsArgs["selectCandidates"]>
 
 describe("HARD e2e — driver-instantiation contract", () => {
   test("5 candidates, dual-guard: picks fix=1 + min-regression; ISOLATION held all run", async () => {
@@ -260,7 +261,7 @@ describe("HARD e2e — driver-instantiation contract", () => {
         selectCandidates: maybeAcceptanceSelector({
           enabled: true,
           runReproOnPatch: (patch) => sandbox.withCandidatePatch(patch, async (p) => p.fix),
-        }),
+        }) as NonNullable<RunRepairRoundsArgs["selectCandidates"]>,
       }),
     )
     // The crashing candidate degraded (did not abort the round); the clean fixer won.

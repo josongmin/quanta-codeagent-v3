@@ -62,6 +62,7 @@ import {
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
+import { voteResolved } from "@/agent/repro-test/vote"
 import {
   extractIssueDeclaredExpected,
   extractIssueReproSeed,
@@ -100,6 +101,7 @@ import type {
   OwnerWideningTelemetry,
   ReproOracleCalibration,
 } from "../types"
+import { buildReproAcceptanceSelector } from "./acceptance-selector"
 import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import {
@@ -207,14 +209,14 @@ import {
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
-import { reproArtifactInstancePath, reproArtifactVoteRoundPath } from "./repro-artifacts-fs"
 import { emitPatch, emitSandbox, emitVerify, ObservationError, type Wiring } from "./report"
+import { reproArtifactInstancePath, reproArtifactVoteRoundPath } from "./repro-artifacts-fs"
 import {
   boundReproArtifactSidecar,
   boundReproArtifactTail,
-  sourceHashOf,
   type ReproArtifactKind,
   type ReproArtifactSink,
+  sourceHashOf,
 } from "./repro-artifacts-sink"
 import { reproValidationCmd } from "./repro-command"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
@@ -3162,7 +3164,10 @@ export const persistReproVoteRoundArtifacts = async (args: {
     await writeFile(join(sampleDir, "stdout.txt"), boundReproArtifactTail(sample.stdout))
     await writeFile(join(sampleDir, "stderr.txt"), boundReproArtifactTail(sample.stderr ?? ""))
     if (sample.sidecarReport !== undefined) {
-      await writeFile(join(sampleDir, "sidecar.json"), boundReproArtifactSidecar(sample.sidecarReport))
+      await writeFile(
+        join(sampleDir, "sidecar.json"),
+        boundReproArtifactSidecar(sample.sidecarReport),
+      )
     }
   }
 }
@@ -3191,6 +3196,43 @@ export const buildReproVoteValidate = (
       : {}),
   })
 }
+
+/**
+ * jun-28 SOTA++ Phase-A — SHARED acceptance `selectCandidates` builder (both
+ * drivers call this so the probe wiring is one SSOT). When `enabled` AND a
+ * reproducing set exists, each breadth candidate's patch is scored ONCE by the
+ * repro oracle (re-run the reproducing set on the candidate's patched tree via
+ * {@link withCandidatePatch} reset→apply→probe→reset; RESOLVED iff the K-of-N vote
+ * resolves) and the winner is chosen by the Agentless-faithful rerank. ABSENT ⇒
+ * `undefined` ⇒ legacy validator-rank selection (byte-identical). No-leak: scores
+ * ONLY the agent-side reproSources.
+ */
+export const makeAcceptanceSelectCandidates = (
+  instance: Instance,
+  reproSources: readonly string[],
+  sandbox: string,
+  timeoutMs: number,
+  enabled: boolean,
+) =>
+  buildReproAcceptanceSelector(enabled, reproSources, {
+    withCandidatePatch: (patch, probe) =>
+      withCandidatePatch({
+        sandbox,
+        patch,
+        baseCommit: instance.swebench?.baseCommit,
+        timeoutMs,
+        ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
+        probe,
+      }),
+    reproResolvedOnSandbox: async (sb) => {
+      const samples = await executeReproTests({
+        tests: reproSources,
+        repoRoot: sb,
+        ...reproExecBundle(instance),
+      })
+      return voteResolved(samples).verdict === "resolved"
+    },
+  })
 
 /**
  * SOTA++ verify-and-select — repro-vote as the candidate SELECTION scorer.
@@ -3356,7 +3398,7 @@ const runRepairPhase = async (
   let repairValidated = false
   let repairFalseGreen = false
   let repairFalseRed = false
-  let repairValidationDecision: Phase["repairValidationDecision"] = undefined
+  let repairValidationDecision: Phase["repairValidationDecision"]
   let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
@@ -3428,6 +3470,16 @@ const runRepairPhase = async (
           gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
         })
       : undefined
+  // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only). SHARED
+  // wiring (`makeAcceptanceSelectCandidates`) so both drivers agree. ABSENT ⇒
+  // legacy validator-rank selection (byte-identical).
+  const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
+    instance,
+    reproSources,
+    sandbox,
+    deps.timeoutMs,
+    repairPosture.acceptance,
+  )
   const patch = await withGitSnapshot(
     sandbox,
     deps.timeoutMs,
@@ -3485,6 +3537,11 @@ const runRepairPhase = async (
         // jun-28 BREADTH: present only when B>1 (else undefined ⇒ legacy single
         // path, byte-identical). Kept in parity with the apps driver.
         ...(runCandidates !== undefined ? { runCandidates } : {}),
+        // jun-28 SOTA++ acceptance: present only when the opt-in is on + a repro set
+        // exists (else undefined ⇒ legacy validator-rank selection, byte-identical).
+        ...(acceptanceSelectCandidates !== undefined
+          ? { selectCandidates: acceptanceSelectCandidates }
+          : {}),
       })
       turns = out.turns
       finalPatch = out.patch
