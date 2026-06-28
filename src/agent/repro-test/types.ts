@@ -168,6 +168,13 @@ export interface ReproTestSample {
   stderr?: string
   /** Outcome derived from the controlled pytest sidecar — NOT stdout. */
   outcome: ReproTestOutcome
+  /** A1 (jun-28): the RAW controlled pytest report JSON (the bytes the classifier
+   *  read), surfaced so per-candidate artifact persistence can write `sidecar.json`
+   *  — RCA can then see WHICH test nodes passed/failed, not just the derived
+   *  `outcome`. Present only when the sidecar was actually read; absent on the
+   *  empty-source / exec-threw / report-unreadable paths. Observability ONLY — no
+   *  consumer reads it for a decision, so every existing path stays byte-identical. */
+  sidecarReport?: string
   /** F3D: when `outcome === "exec_failed"`, WHY — `"infra_unavailable"` (the
    *  harness could not run; no verdict authority) vs `"test_errored"` (pytest
    *  ran and the test/collection errored; a real execution signal). Absent for

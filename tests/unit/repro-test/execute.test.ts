@@ -152,6 +152,24 @@ describe("executeReproTests", () => {
     expect(out[1]?.outcome).toBe("resolved")
   })
 
+  test("A1: the RAW pytest sidecar report is surfaced on the sample (sidecarReport)", async () => {
+    const out = await executeReproTests(
+      mkArgs({
+        tests: ["def test_a(): assert False"],
+        exec: async (argv) => {
+          // readFile (mkArgs default) returns REPORT_PASSED for every path.
+          void argv
+          return { code: 0, stdout: "1 passed in 0.1s", stderr: "" }
+        },
+        readFile: async () => REPORT_PASSED,
+      }),
+    )
+    // The sample carries the exact bytes readFile produced — RCA can reconstruct
+    // which test nodes passed/failed, not just the derived outcome label.
+    expect(out[0]?.sidecarReport).toBe(REPORT_PASSED)
+    expect(out[0]?.outcome).toBe("resolved")
+  })
+
   test("empty source ⇒ unknown, no write, no exec", async () => {
     let writeCount = 0
     let execCount = 0

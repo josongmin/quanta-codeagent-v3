@@ -285,9 +285,18 @@ const executeOne = async (
       const outcome = classifyPytestReportText(reportText)
       // F3D: attach the cause ONLY when the outcome is exec_failed. A parseable
       // schema-1 report ⇒ pytest RAN ⇒ test_errored; otherwise ⇒ infra.
+      // A1: surface the RAW report bytes (sidecarReport) for per-candidate artifact
+      // persistence — RCA reconstructs the node-level verdict, not just `outcome`.
       return outcome === "exec_failed"
-        ? { source, stdout, stderr, outcome, execFailure: classifyExecFailureKind({ reportText }) }
-        : { source, stdout, stderr, outcome }
+        ? {
+            source,
+            stdout,
+            stderr,
+            outcome,
+            sidecarReport: reportText,
+            execFailure: classifyExecFailureKind({ reportText }),
+          }
+        : { source, stdout, stderr, outcome, sidecarReport: reportText }
     } catch (e) {
       // F3D: the sidecar could not be READ (process produced no report — killed
       // at launch / timeout-kill / exit 127) ⇒ infra, not a test verdict.

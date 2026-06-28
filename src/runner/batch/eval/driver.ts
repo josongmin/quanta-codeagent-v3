@@ -1832,6 +1832,7 @@ const persistReproArtifacts = async (
         stderr: s.stderr ?? "",
         outcome: s.outcome,
         ...(s.execFailure !== undefined ? { execFailure: s.execFailure } : {}),
+        ...(s.sidecarReport !== undefined ? { sidecar: s.sidecarReport } : {}),
       })
     } catch {
       // observe-only: a write failure must never disturb the repro pipeline.

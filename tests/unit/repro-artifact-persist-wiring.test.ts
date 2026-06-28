@@ -83,6 +83,25 @@ describe("A1b repro-artifact persistence wiring", () => {
     expect(detail.selection).not.toBeNull()
   })
 
+  test("SIDECAR: a sample carrying sidecarReport ⇒ persisted as artifact.sidecar", async () => {
+    const { sink, calls } = recordingSink()
+    const report = '{"schema":1,"collected":1,"exitstatus":1,"reports":[]}'
+    await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 1, {
+      llm: new StubLLM(),
+      execute: async ({ tests }) =>
+        tests.map((source) => ({
+          source,
+          stdout: "x",
+          stderr: "",
+          outcome: "reproduced" as const,
+          sidecarReport: report,
+        })),
+      reproArtifactSink: sink,
+    })
+    expect(calls.length).toBe(1)
+    expect(calls[0]?.sidecar).toBe(report)
+  })
+
   test("NO-OP: absent sink ⇒ pipeline unchanged (no throw, selection produced)", async () => {
     const detail = await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 2, {
       llm: new StubLLM(),
