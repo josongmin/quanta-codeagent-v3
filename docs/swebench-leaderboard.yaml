@@ -1968,3 +1968,18 @@ runs:
   - instance_id: django__django-16560  # db/models/constraints.py — leaner than gold, passes
     repo: django
     turns: 59
+
+- run_id: competitor-gap-sweep-batch2-2026-06-29
+  date: '2026-06-29'
+  preset: agentless-v6-singlepass-execfull
+  preset_env: 'QUANTA_BENCH_NONEMPTY_FALLBACK=1'
+  model: gpt-5.5
+  auth: chatgpt-oauth
+  grading: official swebench python harness, spot EC2 c7i.4xlarge (5-box campaign), source-only patch
+  scope: 'ADDRESSABLE-GAP probe batch-2 — the next-20 competitor-solved-but-not-ours instances (solve-count 7-20, harder than batch-1). Loop-until-dry strategy: keep running 20-batches down the addressability ranking until a batch yields 0 net-new. IN PROGRESS.'
+  success_note: 'astropy-13236 net-new (PASS). Folded as confirmed; remaining instances grading.'
+  resolved_count: 1
+  resolved:
+  - instance_id: astropy__astropy-13236
+    repo: astropy
+    turns: 40
