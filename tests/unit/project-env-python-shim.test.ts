@@ -122,6 +122,81 @@ describe("project-env python shim", () => {
     expect(calls).not.toContain("UV")
   })
 
+  test("RE-ENTRY prefers the active venv interpreter ($VIRTUAL_ENV/bin) — the prod branch", async () => {
+    // The branch that ACTUALLY fires in production: uv run sets VIRTUAL_ENV to its
+    // ephemeral build venv (which has the --with-editable . deps). Re-entry must
+    // exec THAT interpreter, not a bare PATH python.
+    await installProjectEnvPythonShim(sweInstance(), sandbox)
+    const shimDir = projectEnvPythonShimDir(sandbox)
+    const log = join(parent, "calls.log")
+    const venv = join(parent, "venv")
+    mkdirSync(join(venv, "bin"), { recursive: true })
+    writeFileSync(join(venv, "bin", "python"), `#!/usr/bin/env bash\necho VENVPY >> ${log}\n`)
+    chmodSync(join(venv, "bin", "python"), 0o755)
+    // a DIFFERENT python on PATH that must NOT be chosen when the venv exists
+    const stubDir = join(parent, "stubs")
+    mkdirSync(stubDir, { recursive: true })
+    writeFileSync(join(stubDir, "python"), `#!/usr/bin/env bash\necho PATHPY >> ${log}\n`)
+    chmodSync(join(stubDir, "python"), 0o755)
+
+    Bun.spawnSync([join(shimDir, "python"), "-c", "pass"], {
+      env: {
+        PATH: `${shimDir}:${stubDir}:/usr/bin:/bin`,
+        QUANTA_PYENV_SHIM_ACTIVE: "1",
+        VIRTUAL_ENV: venv,
+      },
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+    const calls = readFileSync(log, "utf8")
+    expect(calls).toContain("VENVPY")
+    expect(calls).not.toContain("PATHPY")
+  })
+
+  test("PROPAGATION: sentinel survives uv-run into the subprocess → recursion breaks (uv runs ONCE)", async () => {
+    // The load-bearing real-world property: the FIRST shim entry sets the sentinel
+    // and execs uv; uv PRESERVES env into the python it runs; that python's `python`
+    // subprocess re-hits the shim, sees the propagated sentinel, and bypasses uv.
+    // This end-to-end test (vs. the manual-sentinel one above) would catch a
+    // regression where the sentinel stops reaching the subprocess.
+    await installProjectEnvPythonShim(sweInstance(), sandbox)
+    const shimDir = projectEnvPythonShimDir(sandbox)
+    const stubDir = join(parent, "stubs")
+    const log = join(parent, "calls.log")
+    const ctr = join(parent, "uv.count")
+    mkdirSync(stubDir, { recursive: true })
+    // stub `uv` modelling the VERIFIED behaviour: preserve env (so the sentinel
+    // propagates) and run `python <args>`. A circuit breaker (exit after 3) makes a
+    // BROKEN guard fail FAST (≥4 uv calls) instead of recursing forever / hanging.
+    writeFileSync(
+      join(stubDir, "uv"),
+      [
+        "#!/usr/bin/env bash",
+        `n=$(( $(cat ${ctr} 2>/dev/null || echo 0) + 1 )); echo $n > ${ctr}`,
+        `echo UV >> ${log}`,
+        '[ "$n" -gt 3 ] && exit 99',
+        'while [ $# -gt 0 ] && [ "$1" != "python" ]; do shift; done; shift || true',
+        'exec python "$@"',
+        "",
+      ].join("\n"),
+    )
+    chmodSync(join(stubDir, "uv"), 0o755)
+    // the REAL interpreter a correct re-entry must reach (does not recurse further)
+    writeFileSync(join(stubDir, "python"), `#!/usr/bin/env bash\necho REALPY >> ${log}\n`)
+    chmodSync(join(stubDir, "python"), 0o755)
+
+    // NO sentinel in the launch env — the first entry must set it itself.
+    Bun.spawnSync([join(shimDir, "python"), "-c", "pass"], {
+      env: { PATH: `${shimDir}:${stubDir}:/usr/bin:/bin` },
+      stdout: "ignore",
+      stderr: "ignore",
+    })
+    const calls = readFileSync(log, "utf8")
+    const uvRuns = (calls.match(/UV/g) ?? []).length
+    expect(uvRuns).toBe(1) // wrapped once; the propagated sentinel bypassed the re-entry
+    expect(calls).toContain("REALPY")
+  })
+
   test("python3 is ALSO shimmed (agents reach for python3 heredocs)", async () => {
     // Regression guard: a python-only shim leaks `python3 - <<'PY'` repro scripts
     // to the system interpreter (no --with-editable . build) → ModuleNotFoundError
