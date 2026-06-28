@@ -477,6 +477,21 @@ const parseLedgerUsd = (raw: string | undefined): number | undefined => {
   return Number.isFinite(n) && n > 0 ? n : undefined
 }
 
+/** Operator cost-cap dial overrides from env (`QUANTA_MAX_COST_USD` /
+ *  `QUANTA_MAX_COST_PER_TURN_USD`). Each is a positive USD amount (fractional
+ *  allowed) with NO default; an absent/garbage value omits that dial so the
+ *  preset's own value stands (byte-identical). Lets a human pin a cost ceiling
+ *  on any mode — including the otherwise-uncapped interactive/ide modes —
+ *  without code. */
+const envCostDialOverrides = (env: AssemblerEnv): Partial<BudgetDials> => {
+  const maxCostUsd = parseLedgerUsd(env["QUANTA_MAX_COST_USD"])
+  const maxCostPerTurnUsd = parseLedgerUsd(env["QUANTA_MAX_COST_PER_TURN_USD"])
+  return {
+    ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
+    ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
+  }
+}
+
 /** ADR-0136 activation — mint ONE per-session cross-run `BudgetLedger` when it
  *  is opted in (`QUANTA_BUDGET_LEDGER=1`) AND at least one HARD USD cap is set
  *  (`QUANTA_BUDGET_LEDGER_SESSION_USD` / `QUANTA_BUDGET_LEDGER_DAILY_USD`). BOTH
@@ -741,8 +756,17 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   assertModeMatrix(policy)
 
   const presetDials = BUDGET_PRESETS[req.mode]
-  // operator dials override preset; both then clamp to caps (with surface log)
-  const merged: BudgetDials = { ...presetDials, ...(req.dials ?? {}) }
+  // operator dials override preset; both then clamp to caps (with surface log).
+  // `QUANTA_MAX_COST_USD` / `QUANTA_MAX_COST_PER_TURN_USD` are operator cost-cap
+  // overrides that apply to ANY mode (a positive USD amount, fractional; NO
+  // default — absent ⇒ the preset's own dials, byte-identical). They override
+  // the preset's maxCostUsd / add a per-turn cap so a human can pin a cost
+  // ceiling on an otherwise-uncapped mode (e.g. interactive) without code.
+  const merged: BudgetDials = {
+    ...presetDials,
+    ...(req.dials ?? {}),
+    ...envCostDialOverrides(env),
+  }
   const caps = "budgetCaps" in policy ? (policy.budgetCaps as Partial<BudgetDials>) : {}
   const clamped = clampDials(merged, caps)
 

@@ -25,6 +25,19 @@ describe("HELLGATE L4 — budget-ledger activation seam", () => {
     expect(assembleWith({}).budgetLedger).toBeUndefined()
   })
 
+  test("QUANTA_MAX_COST_USD overrides the preset cost cap on any mode", () => {
+    // interactive has NO preset maxCostUsd; the override pins one.
+    expect(assembleWith({ QUANTA_MAX_COST_USD: "0.05" }).budgetMeter?.dials.maxCostUsd).toBe(0.05)
+    // garbage ⇒ omitted (preset stands; interactive ⇒ undefined).
+    expect(assembleWith({ QUANTA_MAX_COST_USD: "abc" }).budgetMeter?.dials.maxCostUsd).toBeUndefined()
+  })
+
+  test("QUANTA_MAX_COST_PER_TURN_USD override pins a per-turn ceiling", () => {
+    expect(
+      assembleWith({ QUANTA_MAX_COST_PER_TURN_USD: "0.01" }).budgetMeter?.dials.maxCostPerTurnUsd,
+    ).toBe(0.01)
+  })
+
   test("ANTI-THEATER: gate + session cap ⇒ assembler mints an ENFORCING ledger", () => {
     const cfg = assembleWith({
       QUANTA_BUDGET_LEDGER: "1",
