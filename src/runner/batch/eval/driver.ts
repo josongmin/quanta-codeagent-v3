@@ -62,6 +62,8 @@ import {
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproGroundingInput } from "@/agent/repro-test/generate"
+import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
+import { resolveReproAdapter } from "./repro-adapter"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { voteResolved } from "@/agent/repro-test/vote"
 import {
@@ -92,7 +94,6 @@ import type { Tool } from "@/tool"
 import { astGrepTool, buildDefaultTools, findReferencesTool, ToolRegistry } from "@/tool"
 import { localizeTool } from "@/tool/localize"
 import { testRunnerTool } from "@/tool/test-runner"
-import { reproRunArgv } from "../corpus/dataset"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type {
   BenchAttemptOutcome,
@@ -1648,11 +1649,10 @@ export interface PrepareReproTestDeps {
   readonly groundingSourceFiles?: readonly string[]
 }
 
-/** Per-instance reproduction-script filename written into the sandbox. The
- *  agent's user message references this exact path. The leading underscore
- *  is intentional — keeps the script at the top of `ls` so the agent sees
- *  it without scanning. */
-export const REPRO_FILE_NAME = "reproduce_issue.py"
+/** Per-instance reproduction-script filename written into the sandbox. The agent's user
+ *  message references this exact path. Sourced from the repro-scaffold SSOT (RFC Phase 1b) so
+ *  the canonical name has ONE definition across hint / hygiene / strip / rematerialize. */
+export const REPRO_FILE_NAME = REPRO_CANONICAL_BASENAME
 
 /** User-message block appended (before the existing base text) when a repro
  *  test was successfully selected. The command is rendered from the same
@@ -1812,9 +1812,19 @@ const executeReproCandidateTests = async (
 ): Promise<ReproSamples | null> => {
   const reproRepo = instance.swebench?.repo
   const reproVersion = instance.swebench?.version
+  // RFC jun-29 Phase 1c: route the repro exec command through the per-language ReproAdapter.
+  // Python (incl. Verified/Live default) ⇒ adapter.buildExecArgv === reproRunArgv ⇒ BYTE-IDENTICAL.
+  // Unsupported language (Pro non-Python) ⇒ adapter null ⇒ FAIL-CLOSED (no repro exec: running a
+  // pytest on a Go/JS tree only ever produced `exec_failed`/`infra_unavailable` — an honest "no
+  // signal" beats a fake one). The repo-undefined branch is preserved verbatim (non-SWE-bench
+  // fixtures keep execute.ts's bare `[python, path]` default — NOT the adapter's `-s` form).
+  const reproAdapter = resolveReproAdapter(instance)
+  if (reproAdapter === null) return null
   const buildArgv =
     reproRepo !== undefined
-      ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
+      ? (scriptPath: string) => [
+          ...reproAdapter.buildExecArgv({ repo: reproRepo, version: reproVersion, scriptPath }),
+        ]
       : undefined
   // G2 paired-control: when controls were generated (gate ON), attach the SAME
   // env-health control set to EVERY symptom candidate by position. The executor
@@ -3209,6 +3219,11 @@ export const reproExecBundle = (
 } => {
   const repo = instance.swebench?.repo
   const version = instance.swebench?.version
+  // RFC jun-29 Phase 1c: same per-language adapter routing as prepareReproTests, so the
+  // repro-vote validator + consensus scorer execute candidates identically (one SSOT). Python ⇒
+  // adapter.buildExecArgv === reproRunArgv (BYTE-IDENTICAL); unsupported language ⇒ adapter null
+  // ⇒ omit buildArgv (the non-Python repro set is already fail-closed upstream in prepareReproTests).
+  const adapter = resolveReproAdapter(instance)
   return {
     exec: (argv, cwd, timeoutMs) =>
       execArgv(argv, cwd, timeoutMs, {
@@ -3218,8 +3233,8 @@ export const reproExecBundle = (
       await Bun.write(p, c)
     },
     readFile: async (p: string): Promise<string> => Bun.file(p).text(),
-    ...(repo !== undefined
-      ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, version, scriptPath) }
+    ...(repo !== undefined && adapter !== null
+      ? { buildArgv: (scriptPath: string) => [...adapter.buildExecArgv({ repo, version, scriptPath })] }
       : {}),
   }
 }

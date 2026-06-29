@@ -33,6 +33,7 @@
 
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
 import { errMessage, logger } from "@/shared"
 import { type ProjectEnvSandboxFs, prepareProjectEnvSandbox } from "../corpus/project-env"
 import { exec } from "./exec"
@@ -109,7 +110,7 @@ export const materializeBuildEnv = async (sandbox: string, repo: string): Promis
 /** Temp patch file written into the sandbox root for `git apply`. Untracked, so
  *  `git clean -fdx` in the reset removes it even if the explicit unlink fails. */
 const CAND_PATCH_FILE = ".quanta-cand.patch"
-const CANONICAL_REPRO_FILE_NAME = "reproduce_issue.py"
+const CANONICAL_REPRO_FILE_NAME = REPRO_CANONICAL_BASENAME
 
 const readCanonicalReproScaffold = async (sandbox: string): Promise<string | undefined> => {
   try {

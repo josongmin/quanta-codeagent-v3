@@ -2,7 +2,7 @@
 
 731개 공개 인스턴스를 **골드패치 기반으로 전수 분석**한 결과의 cross-cutting 결론. 근거는 per-instance md(`<repo>/<id>.md`) 731개 + frontmatter 집계.
 
-> 분석 상태: Phase A(전수 분석) 731/731 완료. Phase B(per-instance 적대+객관 어딧) 64/731 — 환경 throttle로 incremental 진행 중(분석 품질엔 영향 없음, 어딧은 분류 재검증·강화 패스).
+> 분석 상태: Phase A(전수 분석) 731/731 완료. **객관 어딧(gold 재도출) 731/731 완료·clean** — f2p/gold_file_count/primary_type 전수 gold 대조, **팩트 카운트 에러 0건**(불일치는 전부 의도적·주석된 의미 선택), vocab 드리프트 77개만 controlled 8종 정규화. 적대 어딧(false-green refute) 394/731 — 나머지는 측정상 confirmatory(거시 결론 394 표본서 이미 불변, 기계 재도출 3회 다 md가 정답 → 코퍼스 견고).
 
 ---
 
@@ -28,7 +28,7 @@
 |---|---|---|
 | **loc** | **L3(멀티사이트) 517 (72%)** · L2 96 · L1 98 · L0 9 | Verified는 L0/L1 다수 |
 | **tier** | **T4 393 (modal, 54%)** · T5 155 · T3 141 · T6 19 · T2 12 | Verified는 T2/T3 modal |
-| **primary_type** (정규화) | **T-DesignRefactor 388 (53%)** · T-SpecInference 199 (27%) · DiffuseLoc 42 · ConstraintReason 38 · DomainBound 29 · DirectMap 23 | Verified는 ConstraintReason/DirectMap 최다 |
+| **primary_type** (파일-레벨 정규화 SSOT) | **T-DesignRefactor 427 (58%)** · T-SpecInference 165 (23%) · DiffuseLoc 46 · ConstraintReason 39 · DomainBound 29 · DirectMap 24 | Verified는 ConstraintReason/DirectMap 최다 |
 | gold 파일수 | mean 5.0 / median 4 | Verified 대부분 1-2 |
 | 패치크기 | median 7.8KB / mean 13KB | Verified ~1줄~수KB |
 | fail_to_pass | median 1 | Verified 두꺼움(데이터드리븐) |
@@ -76,4 +76,4 @@
 
 - Phase A 731 분석은 병렬 분석 에이전트 fleet(골드패치+problem+Pro필드 입력)로 생성. ground-truth=md 파일수(워크플로 "analyzed" 카운트는 return-no-write로 과대계상되어 missing-set diff로 수렴).
 - primary_type은 에이전트 어휘 드리프트(T-Cross* 50여종 발명)를 controlled vocab 8종으로 정규화 집계.
-- Phase B 적대+객관 어딧은 분류 재검증·강화 패스(throttle로 incremental). 본 종합의 분포/벡터 결론은 Phase A 전수에 근거하며 어딧이 세부 분류를 일부 조정해도 **멀티사이트·thin-oracle·DesignRefactor 지배**라는 거시 결론은 불변(압도적 다수라 노이즈 내성).
+- 객관 어딧은 gold 기준 전수 결정적 재도출(f2p 중첩 언팩·gold_file_count `diff --git`·vocab 8종) — 731 clean, 팩트 에러 0, vocab 77개만 정규화. 적대 어딧(false-green refute)은 394 표본 수행. 본 종합의 분포/벡터 결론은 Phase A 전수 + 객관 재도출에 근거하며 **멀티사이트·thin-oracle·DesignRefactor 지배**라는 거시 결론은 불변(압도적 다수라 노이즈 내성). frontmatter `audited:` 값 = `true`(적대+객관) / `objective`(객관 재도출 clean)로 두 티어를 정직 구분.

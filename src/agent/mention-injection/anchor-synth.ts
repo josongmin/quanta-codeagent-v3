@@ -76,6 +76,7 @@
 
 import { promises as fsp } from "node:fs"
 import { extname, join } from "node:path"
+import { isReproScriptBasename } from "@/agent/repro-test/scaffold-patterns"
 import { errMessage, logger } from "@/shared"
 
 /** Minimal directory-listing port. Injected so the synthesizer is hermetic in
@@ -155,7 +156,6 @@ const DEFAULT_MAX_ENTRIES = 1_000_000
  *  checkout (dependency trees, VCS metadata) and never legitimately hold the
  *  anchor source file. Fixed names — deterministic, no scoring. */
 const PRUNED_DIR_NAMES: ReadonlySet<string> = new Set(["node_modules", ".git"])
-const REPRO_SCAFFOLD_FILE_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/
 
 /** True when a SUBDIRECTORY named `name` must not be descended into: an
  *  explicit prune name OR a dot-prefixed directory (`.quanta`, `.cache`, …).
@@ -164,7 +164,7 @@ const REPRO_SCAFFOLD_FILE_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\
 const isPrunedDirName = (name: string): boolean =>
   PRUNED_DIR_NAMES.has(name) || name.startsWith(".")
 
-const isSyntheticSourceAnchorName = (name: string): boolean => REPRO_SCAFFOLD_FILE_RE.test(name)
+const isSyntheticSourceAnchorName = (name: string): boolean => isReproScriptBasename(name)
 
 /** Mutable walk state threaded through the per-directory scan. `found` maps a
  *  language key to its winning anchor; `inspected` counts entries against the

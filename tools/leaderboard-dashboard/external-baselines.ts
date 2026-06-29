@@ -40,59 +40,65 @@ export interface ExternalBaselines {
  *  resolved-by map. Tolerant of the int|array `resolved` field. Pure + tested. */
 export const parseLiveLeaderboard = (
   jsonlText: string,
-  sourceLabel: string,
+  _sourceLabel: string,
 ): { models: ExternalModelResult[]; liveResolvedBy: Record<string, string[]> } => {
   const models: ExternalModelResult[] = []
   const liveResolvedBy: Record<string, string[]> = {}
   for (const line of jsonlText.split("\n")) {
-    const t = line.trim()
-    if (t === "") continue
-    let row: Record<string, unknown>
-    try {
-      row = JSON.parse(t) as Record<string, unknown>
-    } catch {
-      continue // skip malformed line, never throw
-    }
-    const name = typeof row.name === "string" ? row.name : undefined
-    const total = typeof row.total === "number" ? row.total : undefined
-    const set = typeof row.set === "string" ? row.set : "full"
-    if (name === undefined || total === undefined || total <= 0) continue
-    const rv = row.resolved
-    const resolvedCount = Array.isArray(rv)
-      ? rv.length
-      : typeof rv === "number"
-        ? rv
-        : undefined
-    if (resolvedCount === undefined) continue
-    models.push({
-      name,
-      dataset: "live",
-      set,
-      total,
-      resolved: resolvedCount,
-      rate: resolvedCount / total,
-      ...(typeof row.date === "string" ? { date: row.date } : {}),
-    })
-    // Per-instance: only the array form carries instance_ids.
-    if (Array.isArray(rv)) {
-      for (const id of rv) {
-        if (typeof id !== "string") continue
-        ;(liveResolvedBy[id] ??= []).push(name)
-      }
+    const parsed = parseLeaderboardLine(line)
+    if (parsed === null) continue // empty / malformed / no verdict — skipped
+    models.push(parsed.model)
+    // Per-instance: only the array form carried instance_ids (else resolvedIds is empty).
+    for (const id of parsed.resolvedIds) {
+      liveResolvedBy[id] ??= []
+      liveResolvedBy[id].push(parsed.model.name)
     }
   }
-  // Stable de-dup of resolver lists.
   for (const id of Object.keys(liveResolvedBy)) {
-    liveResolvedBy[id] = [...new Set(liveResolvedBy[id])].sort()
+    liveResolvedBy[id] = [...new Set(liveResolvedBy[id])].sort() // stable de-dup
   }
   return { models, liveResolvedBy }
+}
+
+/** Parse ONE leaderboard JSONL line → a model result + its resolved instance-ids (empty when
+ *  the line carries only a count). Returns null for empty/malformed/no-verdict lines. Extracted
+ *  so {@link parseLiveLeaderboard}'s loop stays a simple accumulator (complexity ratchet). */
+const parseLeaderboardLine = (
+  line: string,
+): { model: ExternalModelResult; resolvedIds: string[] } | null => {
+  const t = line.trim()
+  if (t === "") return null
+  let row: Record<string, unknown>
+  try {
+    row = JSON.parse(t) as Record<string, unknown>
+  } catch {
+    return null // malformed line, never throw
+  }
+  const name = typeof row.name === "string" ? row.name : undefined
+  const total = typeof row.total === "number" ? row.total : undefined
+  if (name === undefined || total === undefined || total <= 0) return null
+  const rv = row.resolved
+  const resolvedIds = Array.isArray(rv) ? rv.filter((x): x is string => typeof x === "string") : []
+  const resolvedCount = Array.isArray(rv) ? rv.length : typeof rv === "number" ? rv : undefined
+  if (resolvedCount === undefined) return null
+  const model: ExternalModelResult = {
+    name,
+    dataset: "live",
+    set: typeof row.set === "string" ? row.set : "full",
+    total,
+    resolved: resolvedCount,
+    rate: resolvedCount / total,
+    ...(typeof row.date === "string" ? { date: row.date } : {}),
+  }
+  return { model, resolvedIds }
 }
 
 /** Curated SWE-bench **Pro** aggregate SOTA — the open 731-instance public subset. No public
  *  per-instance matrix or JSON API exists (labs.scale.com is HTML; per-instance lives only in
  *  S3 trajectories), so these are transcribed from the published standardized-SEAL leaderboard
  *  with explicit provenance. Update the `asOf` + numbers when the leaderboard refreshes. */
-export const PRO_BASELINE_ASOF = "2026-06 (labs.scale.com/leaderboard/swe_bench_pro_public, standardized SEAL)"
+export const PRO_BASELINE_ASOF =
+  "2026-06 (labs.scale.com/leaderboard/swe_bench_pro_public, standardized SEAL)"
 export const proBaselines = (): ExternalModelResult[] => {
   const pub = (name: string, rate: number): ExternalModelResult => ({
     name,
@@ -134,6 +140,4 @@ export const sotaFor = (
   dataset: "pro" | "live",
   set: string,
 ): ExternalModelResult | undefined =>
-  b.models
-    .filter((m) => m.dataset === dataset && m.set === set)
-    .sort((a, c) => c.rate - a.rate)[0]
+  b.models.filter((m) => m.dataset === dataset && m.set === set).sort((a, c) => c.rate - a.rate)[0]

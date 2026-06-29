@@ -40,7 +40,9 @@ describe("parseLiveLeaderboard — tolerant int|array resolved", () => {
 describe("proBaselines + sotaFor", () => {
   test("Pro curated baselines carry the 731-public set + provenance-stable rates", () => {
     const pro = proBaselines()
-    expect(pro.every((m) => m.dataset === "pro" && m.set === "public-731" && m.total === 731)).toBe(true)
+    expect(pro.every((m) => m.dataset === "pro" && m.set === "public-731" && m.total === 731)).toBe(
+      true,
+    )
     expect(pro[0]!.rate).toBeGreaterThan(0.5) // SOTA gpt-5.4
   })
 

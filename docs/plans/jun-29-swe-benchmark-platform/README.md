@@ -3,7 +3,7 @@
 - **Status:** Proposed — **complete implementable spec** (3-round adversarial audit + operational hardening folded in)
 - **Date:** 2026-06-29
 - **Scope:** `src/runner/batch/{corpus,eval,core.ts,report.ts,types.ts}`, `src/apps/bench/`
-- **Related:** [docs/analysis/semantica-codegraph.md](../../analysis/semantica-codegraph.md) (multi-language nav backend — orthogonal)
+- **Related:** [docs/analysis/semantica-codegraph.md](../../analysis/semantica-codegraph.md) (multi-language nav backend — orthogonal) · [swe-bench-pro-analysis/](../../analysis/swe-bench-pro-analysis/README.md) (per-instance 문제 해설집 731 + 우리 실측 결과)
 - **Audit log:** §A (3 rounds, grounded in primary source — every load-bearing claim verified at file:line)
 
 ## 1. Summary

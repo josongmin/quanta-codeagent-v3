@@ -7,6 +7,11 @@ cd /Users/songmin/quanta-codeagent-v3 || exit 1
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"
 # Pro signal: drives the Scale-harness box wiring + the Pro parse/verify path.
 export QUANTA_SWEBENCH_DATASET_FAMILY=pro
+# ON-DEMAND box (no spot reclaim). The spot run churned: boxes were reclaimed mid-grade twice
+# (BOX_DIED_DURING_RUN) → already-graded ansible/qutebrowser results LOST (box died before the
+# report scp'd) + full re-run each time. On-demand (~3× cost) completes all 5 on ONE stable box
+# so the report + trajectories actually persist.
+export QUANTA_FULL_REMOTE_ONDEMAND=1
 # Pro is MULTI-LANGUAGE (NodeBB=js/ts, qutebrowser/ansible=python). The default
 # `agentless-v3-thin-strict` preset HARD-REFUSES any task whose language lacks a live LSP the
 # box bootstraps (box has pyright only) → "requires typescript-language-server, refusing

