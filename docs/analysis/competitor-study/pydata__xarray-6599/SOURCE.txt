@@ -1,0 +1,3 @@
+competitor_scaffold: 20241202_agentless-1.5_claude-3.5-sonnet-20241022
+instance: pydata__xarray-6599
+patch_pull: OK

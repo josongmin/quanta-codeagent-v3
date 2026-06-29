@@ -1,0 +1,31 @@
+diff --git a/sympy/printing/mathml.py b/sympy/printing/mathml.py
+index 3f8b8d49e0..13a09f3a8e 100644
+--- a/sympy/printing/mathml.py
++++ b/sympy/printing/mathml.py
+@@ -59,6 +59,26 @@ def doprint(self, expr):
+         Prints the expression as MathML.
+         """
+         mathML = Printer._print(self, expr)
++
++        def replace_numeric_scripts(node):
++            if node.nodeType != node.ELEMENT_NODE:
++                return
++            if node.nodeName in ('msub', 'msup', 'msubsup'):
++                for child in node.childNodes[1:]:
++                    if (child.nodeName == 'mi' and len(child.childNodes) == 1 and
++                            child.childNodes[0].nodeType == child.TEXT_NODE and
++                            child.childNodes[0].data.isdigit()):
++                        mn = self.dom.createElement('mn')
++                        mn.appendChild(self.dom.createTextNode(child.childNodes[0].data))
++                        node.replaceChild(mn, child)
++            for child in node.childNodes:
++                replace_numeric_scripts(child)
++
++        replace_numeric_scripts(mathML)
++        if (mathML.nodeName == 'mi' and not mathML.hasAttributes() and
++                len(mathML.childNodes) == 1 and
++                mathML.childNodes[0].nodeType == mathML.ELEMENT_NODE):
++            mathML = mathML.childNodes[0]
+         unistr = mathML.toxml()
+         xmlbstr = unistr.encode('ascii', 'xmlcharrefreplace')
+         res = xmlbstr.decode()

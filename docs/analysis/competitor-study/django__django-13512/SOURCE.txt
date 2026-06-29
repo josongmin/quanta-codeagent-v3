@@ -1,0 +1,3 @@
+competitor_scaffold: 20250807_openhands_gpt5
+instance: django__django-13512
+patch_pull: OK

@@ -1,0 +1,3 @@
+competitor_scaffold: 20250611_moatless_claude-4-sonnet-20250514
+instance: sympy__sympy-13974
+patch_pull: OK
