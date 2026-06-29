@@ -380,7 +380,10 @@ export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   // authoritative harness). Verified/Live carry no repo_language ⇒ unaffected.
   const lang =
     typeof raw.repo_language === "string" ? raw.repo_language.trim().toLowerCase() : undefined
-  if (lang !== undefined && lang !== "" && lang !== "python") return "true"
+  // Treat every python spelling as python (audit EDGE-2): `python3`, `py`, `cpython`,
+  // `python 3.11` must NOT be fenced as non-python (that would no-op a gradeable repo).
+  const isPython = lang === undefined || lang === "" || lang.startsWith("python") || lang === "py" || lang === "cpython"
+  if (!isPython) return "true"
   const names = decodeTestNameList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
   const repo = typeof raw.repo === "string" ? raw.repo : ""

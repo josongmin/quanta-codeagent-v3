@@ -59,6 +59,8 @@ import type {
 export interface BenchReportMeta {
   model: string
   provider: string
+  /** Dataset family (RFC jun-29 R4). Absent ⇒ verified. */
+  datasetFamily?: "verified" | "live" | "pro"
 }
 
 /** Knob telemetry — exact registry state for the run. Cheaply serialisable
@@ -139,6 +141,10 @@ export interface PerInstanceReport {
   contractOnlySubmitted?: boolean
   contractOnlyBlocked?: boolean
   envPrepFailed?: boolean
+  /** Solvability oracle (RFC jun-29): gold resolved under the verifier (true) / gold failed,
+   *  verifier-broken (false) / not checked (absent). Lets the dashboard curate benchmarkable
+   *  instances + never count a gold-broken instance as a model miss. */
+  goldResolved?: boolean
   publicMweState?: import("./eval/mwe-proof").MweProofState
   publicRegressionState?: PublicRegressionProofState
   reproConsensusState?: ReproConsensusProofState
@@ -188,6 +194,10 @@ export interface BenchReport {
   timestamp: string
   model: string
   provider: string
+  /** Dataset family (RFC jun-29 R4) — present only for non-verified runs so a
+   *  verified report stays byte-identical; lets the leaderboard SSOT separate
+   *  verified/live/pro instead of conflating their resolved-rates. */
+  datasetFamily?: "verified" | "live" | "pro"
   n: number
   totals: {
     total: number
@@ -291,6 +301,10 @@ export const buildReport = (
     timestamp: meta.timestamp ?? new Date().toISOString(),
     model: meta.model,
     provider: meta.provider,
+    // R4: emit ONLY for non-verified families ⇒ a verified report is byte-identical.
+    ...(meta.datasetFamily !== undefined && meta.datasetFamily !== "verified"
+      ? { datasetFamily: meta.datasetFamily }
+      : {}),
     n: meta.n,
     totals: {
       total,
@@ -359,6 +373,7 @@ export const buildReport = (
             }
           : {}),
         ...(r.verdict === "env_prep_failed" ? { envPrepFailed: true } : {}),
+        ...(r.goldResolved !== undefined ? { goldResolved: r.goldResolved } : {}),
         ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
         ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
         ...(r.ownerWidening !== undefined ? { ownerWidening: r.ownerWidening } : {}),

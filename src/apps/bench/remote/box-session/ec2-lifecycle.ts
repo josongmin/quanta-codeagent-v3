@@ -17,7 +17,7 @@ import { lookupCurrentPublicIpv4 } from "../ec2"
 import { PHANTOM_DEPS } from "./auth"
 import { readDatasetInstanceIds } from "./dataset-preflight"
 import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
-import { aws, BENCH_SSH_SAFE_OPTS, defaultSleep, makeSsh, oneLine } from "./shell"
+import { aws, BENCH_SSH_SAFE_OPTS, defaultSleep, makeSsh, oneLine, shq } from "./shell"
 import {
   type BoxSnapshotRead,
   readBoxRuntimeProbe,
@@ -26,6 +26,88 @@ import {
 } from "./snapshot"
 import { buildSrcRsyncArgs, ensureBoxConfigCurrent, ensureBoxSrcCurrent } from "./src-sync-guard"
 import { type BoxInspection, type BoxSession, D, type FullRemoteConfig } from "./types"
+
+/** RFC jun-29 — is this a SWE-bench-Live dataset? Case-insensitive + tolerant of the common
+ *  spellings (canonical HF id `SWE-bench-Live/SWE-bench-Live`, plus `swebench-live` /
+ *  `swe_bench_live` for local JSONL paths). The earlier exact `includes("SWE-bench-Live")`
+ *  silently fell back to stock on any case/spelling drift → KeyError counted as a model miss
+ *  (the worst failure direction). Verified/Pro names never contain "live", so no false-positive.
+ *  The trailing `(?![a-z])` blocks the `…liveness…` substring false-positive (audit r2 a). */
+export const isLiveDataset = (datasetName: string): boolean =>
+  /swe[-_]?bench[-_]live(?![a-z])/i.test(datasetName)
+
+/** A run is Live iff the dataset NAME looks Live OR the explicit family signal says so. The
+ *  family is the SSOT (`--dataset-family live` / QUANTA_SWEBENCH_DATASET_FAMILY) — keying ONLY
+ *  off the dataset name made the fix INERT for the full-remote path, which passes a local JSONL
+ *  path (not the HF id) and signals Live via the family (audit r2 BUG#1). */
+export const isLiveRun = (datasetName: string, family: string | undefined): boolean =>
+  isLiveDataset(datasetName) || (family ?? "").toLowerCase() === "live"
+
+/** RFC jun-29 — pick the `swebench` harness build for the box's grading shim. Stock PyPI
+ *  `swebench` only knows the ORIGINAL SWE-bench repos (its `make_test_spec` does
+ *  `MAP_REPO_VERSION_TO_SPECS[repo][version]` and KeyErrors on a SWE-bench-Live repo —
+ *  measured `KeyError: 'conan-io/conan'`). The SWE-bench-Live fork registers the Live repos,
+ *  so a Live run pulls the fork; explicit `override` (QUANTA_SWEBENCH_PIP_SPEC) wins. Default
+ *  `swebench` ⇒ Verified/Pro unchanged. Pure + exported for unit test. */
+export const resolveSwebenchPipSpec = (
+  datasetName: string,
+  override: string | undefined,
+  family?: string,
+): string =>
+  override ?? (isLiveRun(datasetName, family) ? "git+https://github.com/SWE-bench-Live/SWE-bench-Live" : "swebench")
+
+/** RFC jun-29 — pick the Docker image NAMESPACE the harness pulls prebuilt images from.
+ *  SWE-bench-Live publishes its prebuilt images under `starryzhang`, NOT the default
+ *  `swebench` org; grading a Live repo against the `swebench` namespace can't find the image
+ *  → "image not found" measurement-hole. Derived from the same Live signal as the pip-spec so
+ *  the two never disagree; explicit `override` (QUANTA_SWEBENCH_NAMESPACE) wins. Default
+ *  `swebench` ⇒ Verified/Pro unchanged. Pure + exported for unit test. */
+export const resolveSwebenchNamespace = (
+  datasetName: string,
+  override: string | undefined,
+  family?: string,
+): string => override ?? (isLiveRun(datasetName, family) ? "starryzhang" : "swebench")
+
+/** The grading-shim file body. `shq` the spec (not bare single-quotes): QUANTA_SWEBENCH_PIP_SPEC
+ *  is operator-controlled and a value with a `'` would break out of the quoting. The exact
+ *  `--from ${shq(spec)} ` token is what {@link ensureBoxSwebenchShimCurrent} matches to detect
+ *  a stale shim on a reused box. Pure + exported for unit test. */
+export const buildSwebenchShim = (pipSpec: string): string =>
+  `#!/usr/bin/env bash\nexec "$HOME/.local/bin/uvx" --from ${shq(pipSpec)} --python 3.11 --quiet python "$@"\n`
+
+/** The pip-spec a run WANTS, from the live env signals (dataset name + family + override). */
+const wantedSwebenchPipSpec = (): string =>
+  resolveSwebenchPipSpec(
+    process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "",
+    process.env.QUANTA_SWEBENCH_PIP_SPEC,
+    process.env.QUANTA_SWEBENCH_DATASET_FAMILY,
+  )
+
+/** Self-heal the grading shim on a REUSED warm box. `isBootstrapped` only checks the shim
+ *  FILE EXISTS, not its content — so a box first bootstrapped for Verified (`swebench`) and
+ *  later reused for a Live run would keep the stock shim and KeyError on every Live repo
+ *  (audit r2 BUG#2). Rewrite + re-warm iff the on-box shim's `--from` differs from what this
+ *  run wants. A fast no-op (single `cat`) when already current ⇒ Verified reuse unchanged. */
+export const ensureBoxSwebenchShimCurrent = async (session: BoxSession): Promise<void> => {
+  const want = wantedSwebenchPipSpec()
+  const marker = `--from ${shq(want)} `
+  const cur = await session.ssh("cat ~/swebench-python 2>/dev/null || true")
+  if (cur.stdout.includes(marker)) return // shim already targets the wanted spec
+  session.log(`[pool] box swebench shim stale → rewriting (from=${want}) + re-warming…`)
+  const wrote = await session.ssh(
+    "cat > ~/swebench-python && chmod +x ~/swebench-python",
+    buildSwebenchShim(want),
+  )
+  if (wrote.code !== 0) {
+    throw new Error(`[pool] rewriting stale swebench shim failed (code ${wrote.code}): ${wrote.stderr}`)
+  }
+  const warm = await session.ssh(
+    'set -o pipefail; ~/swebench-python -c "import swebench; print(swebench.__version__)" 2>&1 | tail -3',
+  )
+  if (warm.code !== 0) {
+    throw new Error(`[pool] re-warming swebench shim (from=${want}) failed (code ${warm.code}):\n${warm.stdout}`)
+  }
+}
 
 const RUNNING_BOX_FILTERS = [
   "Name=tag:Name,Values=quanta-bench-full",
@@ -346,13 +428,25 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
       `[full-remote] bun add (phantom deps) failed (code ${added.code}):\n${added.stdout}${added.stderr}`,
     )
   }
-  // Grading toolchain: the swebench-python shim (uvx --from swebench python) +
-  // warm the uvx cache so the first import-probe doesn't time out.
-  log(
-    "[full-remote] creating swebench-python shim + warming uvx swebench cache (first pull ~30-60s)…",
+  // Grading toolchain: the swebench-python shim (uvx --from <spec> python) + warm the
+  // uvx cache so the first import-probe doesn't time out.
+  //
+  // RFC jun-29 (Live grading fix): stock PyPI `swebench` only knows the ORIGINAL
+  // SWE-bench repos — its `make_test_spec` does `MAP_REPO_VERSION_TO_SPECS[repo][version]`
+  // and KeyErrors on a SWE-bench-Live repo (measured: `KeyError: 'conan-io/conan'`). The
+  // SWE-bench-Live fork registers the Live repos, so for a Live `--dataset_name` we pull
+  // the fork instead. Derived from the forwarded QUANTA_SWEBENCH_DATASET_NAME so the one
+  // dataset signal drives BOTH grading params and the harness build; QUANTA_SWEBENCH_PIP_SPEC
+  // is an explicit operator override. Default `swebench` ⇒ Verified/Pro unchanged.
+  const swebenchPipSpec = resolveSwebenchPipSpec(
+    process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "",
+    process.env.QUANTA_SWEBENCH_PIP_SPEC,
+    process.env.QUANTA_SWEBENCH_DATASET_FAMILY,
   )
-  const shim =
-    '#!/usr/bin/env bash\nexec "$HOME/.local/bin/uvx" --from swebench --python 3.11 --quiet python "$@"\n'
+  log(
+    `[full-remote] creating swebench-python shim + warming uvx cache (from=${swebenchPipSpec}, first pull ~30-60s)…`,
+  )
+  const shim = buildSwebenchShim(swebenchPipSpec)
   const wrote = await ssh("cat > ~/swebench-python && chmod +x ~/swebench-python", shim)
   if (wrote.code !== 0) {
     throw new Error(
@@ -367,10 +461,42 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
       `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
     )
   }
+  await setupProHarnessIfNeeded((cmd) => ssh(cmd), log)
   // #1-P0 (jun-19/20): prove LSP grounding is actually LIVE after bootstrap.
   // The thin-strict family is fail-closed: proceeding with silent no-nav
   // degrade would violate the preset's contract.
   await verifyPyrightGrounding(ssh, log, cfg.preset ?? D.preset)
+}
+
+/** RFC jun-29 — Pro grading needs the ScaleAI harness (`swe_bench_pro_eval.py` + per-instance
+ *  `run_scripts/<id>/`) AND a Python env with its deps (pandas/docker SDK/…), which the
+ *  `swebench` shim does NOT have. Clone the harness + build a dedicated venv ON the box. Gated
+ *  on family=pro so Verified/Live bootstraps are byte-identical (no clone, no venv). Idempotent
+ *  (skips an existing clone). The verifier reads QUANTA_SWEBENCH_PRO_PYTHON_BIN (set by
+ *  buildBenchCommand) to use this venv, not the swebench shim. */
+const setupProHarnessIfNeeded = async (
+  ssh: (cmd: string) => Promise<SpawnResult>,
+  log: (m: string) => void,
+): Promise<void> => {
+  if ((process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() !== "pro") return
+  log("[full-remote] Pro: cloning ScaleAI harness (scaleapi/SWE-bench_Pro-os) + grading venv…")
+  const clone = await ssh(
+    "test -d ~/swebench-pro/.git || git clone --depth 1 https://github.com/scaleapi/SWE-bench_Pro-os ~/swebench-pro 2>&1 | tail -3",
+  )
+  if (clone.code !== 0) {
+    throw new Error(`[full-remote] Pro harness clone failed (code ${clone.code}):\n${clone.stdout}${clone.stderr}`)
+  }
+  // Dedicated venv with the harness deps (requirements.txt: pandas/tqdm/datasets/modal/docker/
+  // huggingface_hub). modal is imported even in --use_local_docker mode, so install it too.
+  const venv = await ssh(
+    "set -o pipefail; export PATH=\"$HOME/.local/bin:$PATH\"; " +
+      "uv venv ~/swebench-pro-venv --python 3.11 2>&1 | tail -2 && " +
+      "uv pip install --python ~/swebench-pro-venv/bin/python pandas tqdm datasets docker huggingface_hub modal 2>&1 | tail -4",
+  )
+  if (venv.code !== 0) {
+    throw new Error(`[full-remote] Pro grading venv setup failed (code ${venv.code}):\n${venv.stdout}${venv.stderr}`)
+  }
+  log("[full-remote] Pro harness ready (~/swebench-pro + ~/swebench-pro-venv)")
 }
 
 const describeInstancePublicIp = async (
@@ -793,6 +919,9 @@ export const attachBox = async (cfg: FullRemoteConfig, iid: string): Promise<Box
       keyPath,
       log,
     })
+    // Close the silent-stale-SHIM class (audit r2 BUG#2): a Verified-bootstrapped box reused
+    // for a Live run would otherwise grade on the stock-swebench shim → KeyError on Live repos.
+    await ensureBoxSwebenchShimCurrent(session)
   }
   return session
 }

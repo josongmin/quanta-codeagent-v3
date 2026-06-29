@@ -5842,16 +5842,20 @@ const validateVerifiedOutcome = async (args: {
 }): Promise<{
   readonly verified: Awaited<ReturnType<typeof verify>>
   readonly graderInvalid: boolean
+  /** Solvability oracle: gold resolved (true) / gold failed (false) / gold-sanity didn't run
+   *  (undefined). Persisted per-instance so the platform can curate verifier-sound instances. */
+  readonly goldResolved: boolean | undefined
 }> => {
   if (!shouldValidateGold(args.deps, args.verified.passed)) {
-    return { verified: args.verified, graderInvalid: false }
+    return { verified: args.verified, graderInvalid: false, goldResolved: undefined }
   }
   const gold = await validateGoldPatch(args.instance, { ...args.deps, signal: args.signal })
-  if (gold.ok) return { verified: args.verified, graderInvalid: false }
+  if (gold.ok) return { verified: args.verified, graderInvalid: false, goldResolved: true }
   const { error: _prevError, ...rest } = args.verified
   return {
     verified: { ...rest, passed: false, error: gold.error },
     graderInvalid: true,
+    goldResolved: false,
   }
 }
 
@@ -6142,6 +6146,31 @@ const _latePhaseFailureResultFromError = (args: {
   })
 }
 
+/** RFC jun-29 #2 (measurement-hole, audit R3): a swebench MAIN-grade INFRA failure is a
+ *  measurement hole, NOT a model miss. `verify` (verdict.ts) sets `error` on a non-pass
+ *  ONLY for the harness `gradingCompleted:false` / refuse-to-fake-grade path — never for a
+ *  genuine patch-fail — so this triple is the precise infra signal. The caller marks it
+ *  `grader_invalid` so the resolvedTotals denominator EXCLUDES it (else a Pro image-pull /
+ *  harness crash is laundered into a real miss — the throttle-miss confound). Pure +
+ *  exported for unit test (`buildSuccessfulResultExtra` is not exported). */
+export const isSwebenchInfraGradeFailure = (
+  instance: Pick<Instance, "swebench">,
+  verified: Pick<Awaited<ReturnType<typeof verify>>, "passed" | "error">,
+): boolean => instance.swebench !== undefined && !verified.passed && verified.error !== undefined
+
+/** Decide the measurement-hole verdict for a finalized result: `"grader_invalid"` (⇒
+ *  resolvedTotals EXCLUDES it from the denominator) when EITHER the gold-sanity check failed
+ *  (`graderInvalid`) OR the main grade hit a swebench infra failure; otherwise `undefined`
+ *  (a normal result that stays in the denominator). Extracted + exported so the predicate→
+ *  verdict WIRING is unit-testable (`buildSuccessfulResultExtra` is not exported) — a mutant
+ *  dropping the infra branch is then caught, not silently green. */
+export const swebenchGraderInvalidVerdict = (
+  graderInvalid: boolean,
+  instance: Pick<Instance, "swebench">,
+  verified: Pick<Awaited<ReturnType<typeof verify>>, "passed" | "error">,
+): "grader_invalid" | undefined =>
+  graderInvalid || isSwebenchInfraGradeFailure(instance, verified) ? "grader_invalid" : undefined
+
 const buildSuccessfulResultExtra = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -6153,10 +6182,19 @@ const buildSuccessfulResultExtra = (args: {
   readonly startedAt: number
   readonly prepared: PreparedAttemptContext
   readonly graderInvalid: boolean
+  readonly goldResolved: boolean | undefined
 }): Partial<InstanceResult> => {
   const reproArtifactPath = reproArtifactPathOf(args.deps, args.instance)
   const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest, reproArtifactPath)
-  if (args.graderInvalid) extra.verdict = "grader_invalid"
+  // Solvability oracle: persist the gold-sanity outcome per instance (RFC jun-29).
+  if (args.goldResolved !== undefined) extra.goldResolved = args.goldResolved
+  // RFC jun-29 #2 (measurement-hole, audit R3): EITHER a gold-sanity failure (`graderInvalid`)
+  // OR a swebench MAIN-grade INFRA failure — `verify` sets `error` ONLY on the official/Pro
+  // harness `gradingCompleted:false` / refuse-to-fake-grade path (verdict.ts), never on a
+  // genuine patch-fail — is `grader_invalid` so `resolvedTotals` EXCLUDES it from the
+  // denominator; else a Pro image-pull / harness crash is laundered into a real miss.
+  const graderVerdict = swebenchGraderInvalidVerdict(args.graderInvalid, args.instance, args.verified)
+  if (graderVerdict !== undefined) extra.verdict = graderVerdict
   attachObservedSuccessBasics({ ...args, extra })
   attachClosureMetrics({ extra, phase: args.phase, prepared: args.prepared })
   attachSelectionAndClosureArtifacts({
@@ -6207,6 +6245,7 @@ export const verifyAndFinalizeResult = async (args: {
     ...args,
     verified: validated.verified,
     graderInvalid: validated.graderInvalid,
+    goldResolved: validated.goldResolved,
   })
   return okResult(args.instance, args.phase, validated.verified, extra)
 }

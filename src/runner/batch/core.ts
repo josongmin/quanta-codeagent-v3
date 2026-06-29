@@ -7,6 +7,10 @@ import type { Instance, InstanceResult } from "./types"
 export interface BatchArtifactMeta {
   model: string
   provider: string
+  /** Dataset family (RFC jun-29 R4) — recorded in the report so verified/live/pro
+   *  runs are distinguishable in the leaderboard SSOT (else a Pro resolved-rate is
+   *  averaged into the Verified one). Absent ⇒ verified ⇒ byte-identical legacy report. */
+  datasetFamily?: "verified" | "live" | "pro"
   n: number
   /**
    * Optional pre-resolved knob telemetry. When provided, embedded verbatim

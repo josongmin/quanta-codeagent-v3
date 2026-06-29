@@ -36,12 +36,14 @@ export interface SwebenchMeta {
    *  inadmissible. NEVER handed to the agent loop — same eval-only boundary as
    *  the closure oracle's gold files. Absent ⇒ regression signal FAIL-OPEN. */
   passToPass?: readonly string[]
-  /** Pro only (RFC jun-29) — the prebuilt Scale image tag, used as
-   *  `jefzda/sweap-images:<dockerhubTag>` by the Pro verifier. Absent for
-   *  Verified/Live (additive ⇒ byte-identical when omitted). */
+  /** Pro only (RFC jun-29) — the prebuilt Scale image tag (`jefzda/sweap-images:<tag>`).
+   *  NOTE: the Pro verifier does NOT consume this — Scale's harness resolves the image from
+   *  the raw-sample CSV itself. Carried for observability/reporting (per-instance image
+   *  provenance) only. Absent for Verified/Live (additive ⇒ byte-identical when omitted). */
   dockerhubTag?: string
-  /** Pro only — `repo_language` (python|go|js|ts) for the per-language matrix
-   *  and the multi-language repro rail. Absent for Verified/Live. */
+  /** Pro only — `repo_language` (python|go|js|ts…). Consumed at synthesize-time to fence
+   *  non-Python repos from a fake pytest grade ({@link synthesizeTestCmd}); also available
+   *  for a per-language report breakdown. Absent for Verified/Live. */
   repoLanguage?: string
 }
 
@@ -250,6 +252,12 @@ export interface InstanceResult {
    * behavior).
    */
   verdict?: "ok" | "degraded" | "env_prep_failed" | "grader_invalid"
+  /** Solvability oracle (RFC jun-29): did the GOLD patch resolve under the selected verifier?
+   *  `true` = instance is solvable + verifier-sound (safe to benchmark); `false` = gold itself
+   *  failed ⇒ the instance's verifier/env is broken (a measurement artifact, NOT model
+   *  difficulty — see geopandas Live). `undefined` = gold-sanity didn't run for this instance
+   *  (e.g. the model PASSED, so it's trivially solvable). Populated by the gold-sanity gate. */
+  goldResolved?: boolean
   /**
    * Bench-side admission block (distinct from observation `verdict`). Present
    * when the runner intentionally refuses to submit a generated patch, e.g.

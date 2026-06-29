@@ -352,6 +352,20 @@ const logFullRemoteOutcome = (out: {
  *  ships ONLY the stripped short-lived access_token over ssh STDIN (refresh/id
  *  dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. --dry-run plans
  *  it safely without launching. Instance-aware relaunch recovers box loss. */
+/** RFC jun-29: the full-remote grading-shim pip-spec / image namespace + the box's grading
+ *  dataset default are all driven by the QUANTA_SWEBENCH_DATASET_FAMILY *env* (it's what gets
+ *  forwarded to the box + what the local pip-spec/namespace derivations read). Bridge the
+ *  `--dataset-family` argv into the env so a Live/Pro remote launch works with either the flag
+ *  OR the env var — else the flag is inert on the remote paths and Live silently grades as
+ *  Verified (audit r2 BUG#1; r3 found the pool path had the same gap). Idempotent: never
+ *  clobbers an explicit env value. Shared by `cmdGradeFullRemote` AND `cmdPool`. */
+const bridgeDatasetFamilyArgToEnv = (): void => {
+  const familyArg = argValue("--dataset-family")
+  if (familyArg !== undefined && process.env.QUANTA_SWEBENCH_DATASET_FAMILY === undefined) {
+    process.env.QUANTA_SWEBENCH_DATASET_FAMILY = familyArg
+  }
+}
+
 const cmdGradeFullRemote = async (): Promise<void> => {
   if (!hasFlag("--allow-remote-secrets")) {
     logger.info(
@@ -364,10 +378,11 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
   if (dataset === undefined) {
     logger.info(
-      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dry-run] [--allow-extra-boxes]",
+      "usage: quanta-bench grade --mode full --allow-remote-secrets --dataset <instances.jsonl> [--instance id] [--dataset-family verified|pro|live] [--dry-run] [--allow-extra-boxes]",
     )
     process.exit(2)
   }
+  bridgeDatasetFamilyArgToEnv()
   const dry = hasFlag("--dry-run")
   // Only read the on-disk credential when actually launching (dry-run never
   // touches it). Stripped to access_token only inside the executor.
@@ -653,6 +668,7 @@ const cmdPool = async (): Promise<void> => {
     )
     process.exit(2)
   }
+  bridgeDatasetFamilyArgToEnv() // r3: pool must honor --dataset-family too (else Live grades as Verified)
   const datasets = requirePoolDatasets()
   const chunks = resolvePoolChunks(datasets, hasFlag("--dry-run"))
   const workers = resolvePoolWorkers()

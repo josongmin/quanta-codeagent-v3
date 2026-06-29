@@ -21,6 +21,8 @@
 import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
+import type { ExternalBaselines } from "./external-baselines"
+import { campaignKeyOf } from "./family-partition"
 
 const HOME = homedir()
 const REPO = join(import.meta.dir, "..", "..")
@@ -204,6 +206,11 @@ interface Run {
   file: string
   model: string
   preset: string
+  /** Dataset family (RFC jun-29 R4) from report.datasetFamily. Absent in the
+   *  report ⇒ "verified" (the legacy default), so verified runs are unchanged and
+   *  pro/live runs partition into their own campaigns instead of being averaged
+   *  into one bogus resolved-rate. */
+  datasetFamily: string
   mtime: number
   resolved: number
   // Denominator EXCLUDING re-runnable measurement-holes (FLAG-B). A campaign
@@ -218,6 +225,11 @@ interface Run {
     turns: number
     durationMs: number
     fail: FailInfo | null
+    // SOLVABILITY (RFC jun-29): did the GOLD patch pass the instance's verifier?
+    //   true  = instance solvable + verifier sound (a fail here is a genuine model miss)
+    //   false = gold FAILED / verifier broken → NOT a model miss, exclude from blame
+    //   undefined = not checked
+    goldResolved?: boolean
   }[]
 }
 
@@ -413,6 +425,8 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
       turns: Number(row?.turns) || 0,
       durationMs: Number(row?.durationMs) || 0,
       fail: classifyFail(pi),
+      // Only the explicit boolean is meaningful — absent stays absent (not checked).
+      ...(typeof row?.goldResolved === "boolean" ? { goldResolved: row.goldResolved } : {}),
     }
   })
   const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length
@@ -424,6 +438,7 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     file: f,
     model: asString(report.model) ?? "?",
     preset: presetLabel(f, asRecord(report.knobs)),
+    datasetFamily: asString(report.datasetFamily) ?? "verified",
     mtime,
     resolved,
     total: perInstance.length - unmeasured,
@@ -601,6 +616,10 @@ interface Campaign {
   members: string[] // file labels that rolled up into this campaign
   model: string
   preset: string
+  /** Dataset family (RFC jun-29 R4) — "verified" | "pro" | "live". Lets the UI
+   *  filter/group by dataset so a pro resolved-rate is never shown beside (or
+   *  averaged into) the verified leaderboard number. */
+  datasetFamily: string
   mtime: number
   resolved: number
   // Denominator EXCLUDING re-runnable holes (FLAG-B). An instance counts as
@@ -618,14 +637,8 @@ interface SeenInstance {
   measured: boolean // at least one run produced a graded/real outcome (not a hole)
 }
 
-const campaignKeyOf = (run: Run): string => {
-  const dir = basename(run.file.replace(/\/[^/]+$/, ""))
-  const shardMatch = run.label.match(/^(.*?)[-_]?shard(\d+)$/i)
-  if (/^report-i-/.test(run.label)) return `${dir} · full-remote (${run.model})`
-  if (shardMatch) return `${dir}/${shardMatch[1] || "shard"}`
-  if (/^local-/.test(run.label)) return `${dir}/local-singles`
-  return run.label
-}
+// campaignKeyOf moved to ./family-partition (testable — server.ts calls Bun.serve at
+// import, so a unit test cannot import it). RFC jun-29 R4 partition lives there.
 
 const addRunToCampaign = (
   groups: Map<string, Campaign & { seen: Map<string, SeenInstance> }>,
@@ -639,6 +652,7 @@ const addRunToCampaign = (
       members: [],
       model: run.model,
       preset: run.preset,
+      datasetFamily: run.datasetFamily,
       mtime: 0,
       resolved: 0,
       total: 0,
@@ -688,6 +702,7 @@ function groupRuns(runs: Run[]): Campaign[] {
       resolved: group.resolved,
       total: group.total,
       unmeasured: group.unmeasured,
+      datasetFamily: group.datasetFamily,
     })
   }
   // Rank on the REAL solve-rate (resolved / measured-total), so throttle noise
@@ -716,6 +731,11 @@ interface QuantaSummary {
   passedBy: string[]
   fail: FailInfo | null
   failMtime: number
+  // SOLVABILITY rollup (RFC jun-29). goldResolved === false on ANY run ⇒ the
+  // instance's verifier was broken / gold failed: a miss here is NOT a model miss,
+  // so the matrix flags it "⚠ verifier-broken (excluded)". A true anywhere clears
+  // the flag (a sound verifier somewhere wins). undefined throughout ⇒ not checked.
+  goldBroken: boolean
 }
 
 const datasetPreviewOf = (
@@ -745,6 +765,7 @@ const createQuantaSummary = (): QuantaSummary => ({
   passedBy: [],
   fail: null,
   failMtime: 0,
+  goldBroken: false,
 })
 
 const ensureQuantaSummary = (quanta: Record<string, QuantaSummary>, id: string): QuantaSummary => {
@@ -805,6 +826,9 @@ const quantaSummaryOf = (runs: readonly Run[]): Record<string, QuantaSummary> =>
       if (!sid || !isRealSwebenchInstanceId(sid)) continue
       const summary = ensureQuantaSummary(quanta, sid)
       addRunMetadata(summary, run)
+      // gold === false anywhere ⇒ verifier broken (sticky); a later sound run can't
+      // un-break it, but a passing instance is obviously solvable so we never set it.
+      if (perInstance.goldResolved === false && !perInstance.passed) summary.goldBroken = true
       if (perInstance.passed)
         recordPassingAttempt(summary, run, perInstance.turns, perInstance.durationMs)
       else recordFailingAttempt(summary, run, perInstance.turns, perInstance.fail)
@@ -834,6 +858,26 @@ const frontierTurnsOf = (
   return turns
 }
 
+// External SOTA baselines (RFC jun-29). Generated by external-baselines.ts into
+// external-baselines.json next to this file. Read fresh each request (re-running the
+// generator reflects live, no restart). DEFENSIVE: the file may be absent / malformed —
+// return null so the comparison feature degrades to "—" instead of crashing the page.
+function loadExternalBaselines(): ExternalBaselines | null {
+  const p = join(import.meta.dir, "external-baselines.json")
+  if (!existsSync(p)) return null
+  try {
+    const parsed = asRecord(JSON.parse(readFileSync(p, "utf8")))
+    if (parsed === null || !Array.isArray(parsed.models)) return null
+    return {
+      generatedFrom: asString(parsed.generatedFrom) ?? "",
+      models: parsed.models as ExternalBaselines["models"],
+      liveResolvedBy: asRecord(parsed.liveResolvedBy) ?? {},
+    } as ExternalBaselines
+  } catch {
+    return null
+  }
+}
+
 function buildData() {
   const matrix = parseMatrix()
   const fullDataset = loadDataset()
@@ -857,6 +901,8 @@ function buildData() {
     coverage,
     live: parseLive(),
     reportRoots: REPORT_ROOTS,
+    // null when the file is absent/malformed → client renders no external column (—).
+    externalBaselines: loadExternalBaselines(),
   }
 }
 
@@ -1031,6 +1077,12 @@ const HTML = /* html */ `<!doctype html>
            align-items: baseline; gap: 14px; flex-wrap: wrap; }
   h1 { font-size: 15px; margin: 0; color: #e6edf3; }
   .muted { color: #768390; }
+  /* RFC jun-29 R4 dataset-family chips — pro/live are visually fenced off from verified. */
+  .fam { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px;
+         font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+         vertical-align: 1px; border: 1px solid transparent; }
+  .fam-pro { background: #3a2d12; color: #e3b341; border-color: #5c4516; }
+  .fam-live { background: #122a3a; color: #58a6ff; border-color: #1f4a6b; }
   .cards { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 18px; }
   .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px;
           padding: 10px 14px; min-width: 120px; }
@@ -1333,18 +1385,77 @@ function renderCards() {
     (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
 }
 
+// RFC jun-29 R4: dataset family is a partition, not a flavor — a pro resolved-rate must
+// never sit in the same row-space as a verified one without a label. verified shows no
+// chip (byte-identical to the legacy look); pro/live get a colored chip.
+var FAM_FILTER = "";
+function famChip(fam) {
+  if (!fam || fam === "verified") return "";
+  return '<span class="fam fam-'+esc(fam)+'">'+esc(fam)+'</span> ';
+}
+// RFC jun-29: our datasetFamily → external (dataset,set) we're measured against.
+// verified ⇒ null (its own surface; byte-identical, no external column). Mirrors the
+// unit-tested externalCoordFor in external-comparison.ts (kept in sync there).
+function extCoordFor(fam) {
+  if (fam === "pro") return { dataset: "pro", sets: ["public-731"] };
+  if (fam === "live") return { dataset: "live", sets: ["verified", "lite"] };
+  return null;
+}
+// Top external model for a family from DATA.externalBaselines, or null. Defensive:
+// missing/empty baselines ⇒ null (the column shows —, never crashes).
+function extSotaForFamily(fam) {
+  var b = DATA.externalBaselines;
+  if (!b || !Array.isArray(b.models)) return null;
+  var coord = extCoordFor(fam);
+  if (!coord) return null;
+  for (var si = 0; si < coord.sets.length; si++) {
+    var set = coord.sets[si];
+    var top = null;
+    for (var i = 0; i < b.models.length; i++) {
+      var m = b.models[i];
+      if (m.dataset !== coord.dataset || m.set !== set) continue;
+      if (top === null || m.rate > top.rate) top = m;
+    }
+    if (top) return top;
+  }
+  return null;
+}
 function renderRuns() {
   // Campaigns roll shards up into one logical run (clean-shard×6 → SOTA-clean).
-  const camps = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)));
+  let camps = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)));
+  const fams = [...new Set(camps.map(c => c.datasetFamily || "verified"))].sort();
+  if (FAM_FILTER) camps = camps.filter(c => (c.datasetFamily||"verified") === FAM_FILTER);
   let h = '<p class="muted">샤드는 한 캠페인으로 묶음. 행 펼치면 멤버 리포트. 해결률 분모는 측정된 시도만(throttle/인프라/env=미측정 제외).</p>';
-  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th><th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
+  if (fams.length > 1) {
+    h += '<p class="muted">데이터셋: <select onchange="FAM_FILTER=this.value;render()">'+
+      '<option value=""'+(FAM_FILTER===""?" selected":"")+'>전체 ('+fams.length+')</option>'+
+      fams.map(f => '<option value="'+esc(f)+'"'+(FAM_FILTER===f?" selected":"")+'>'+esc(f)+'</option>').join("")+
+      '</select> <span class="muted">— pro/live는 verified와 분모를 절대 섞지 않음 (R4)</span></p>';
+  }
+  // External SOTA column only when a non-verified (pro/live) campaign is in view AND
+  // baselines loaded — keeps an all-verified dashboard byte-identical (no ext column,
+  // no external-baselines references rendered).
+  const showExt = !!DATA.externalBaselines &&
+    camps.some(c => { const f = c.datasetFamily || "verified"; return (f === "pro" || f === "live") && !!extSotaForFamily(f); });
+  const extHead = showExt ? '<th title="이 데이터셋의 공개 외부 SOTA 해결률 (pro=public-731 · live=verified/lite) — 우리 % 옆에 나란히 (R4: verified는 비교 안 함)">외부 SOTA</th>' : '';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th>'+extHead+'<th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
   for (const r of camps) {
     const pct = r.total ? Math.round(100*r.resolved/r.total) : 0;
     const unmeasured = r.unmeasured || 0;
-    h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
+    let extCell = '';
+    if (showExt) {
+      const fam = r.datasetFamily || "verified";
+      const top = (fam === "pro" || fam === "live") ? extSotaForFamily(fam) : null;
+      // External names + set come from external JSON → esc() at this HTML boundary.
+      extCell = top
+        ? '<td class="muted" title="'+esc(top.name)+' · '+esc(top.set)+' · '+top.resolved+'/'+top.total+'">ext SOTA '+Math.round(100*top.rate)+'% <span style="font-size:10px">('+esc(top.name)+')</span></td>'
+        : '<td class="muted">—</td>';
+    }
+    h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+famChip(r.datasetFamily)+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
       '<td class="muted">'+r.members.length+'</td>'+
       '<td>'+r.resolved+'/'+r.total+'</td>'+
       '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%</td>'+
+      extCell+
       '<td class="muted" title="재런 가능한 측정 구멍 — 해결률 분모서 제외됨">'+(unmeasured? '⟳ '+unmeasured : '·')+'</td>'+
       '<td class="muted">'+ (r.mtime? new Date(r.mtime).toLocaleString() : '—') +'</td></tr>';
   }
@@ -1376,6 +1487,7 @@ function renderMatrix(v) {
       <b>타임아웃</b> · <b>미제출(불명)</b>
       &nbsp;|&nbsp; preset <b>*</b> = 파일경로서 추정(리포트에 미기록) · 🏆 = 경쟁사 풀이 트랜스크립트 보유(4개뿐)
     </div>
+    \${DATA.externalBaselines ? '<div class="muted" style="font-size:11px;margin-bottom:8px;line-height:1.7">해결가능성 — <span class="pill" style="background:#1e3a2a;color:#7ee2a8;font-size:10px">ext✓</span> 외부 모델이 푼 인스턴스(provably solvable → 우리 미스는 진짜 격차) · <span class="pill" style="background:#5a1e1e;color:#f0a0a0;font-size:10px">⚠ verifier-broken</span> gold 패치가 verifier 통과 못함 → 모델 미스 아님(제외)</div>' : ''}
     <div id="mtable"></div>\`;
   const sel = v.querySelector("#filter"); sel.value = MATRIX_FILTER.kind;
   const repoSel = v.querySelector("#repo");
@@ -1527,8 +1639,21 @@ function drawMatrix() {
     const tierCell = r.tier === '?' ? '<span class="muted">—</span>' : '<span class="'+tierClass(r.tier)+'">'+r.tier+'</span>';
     const ftn = (DATA.frontierTurns||{})[r.id];
     const ftBadge = ftn ? ' <span class="pill" title="프론티어 경쟁사 풀이 턴">🏆'+ftn+'t</span>' : '';
+    // SOLVABILITY markers (RFC jun-29): WHY did an instance fail?
+    //  ⚠ verifier-broken — gold patch failed the verifier → NOT a model miss (excluded).
+    //  ext✓ — ≥1 external model resolved it (DATA.externalBaselines.liveResolvedBy) →
+    //         provably solvable, so OUR miss is a genuine capability gap.
+    let solvBadge = '';
+    if (me && me.goldBroken) {
+      solvBadge += ' <span class="pill" title="gold 패치가 이 인스턴스 verifier를 통과 못함 → 모델 미스 아님, 해결률서 제외" style="background:#5a1e1e;color:#f0a0a0;font-size:10px">⚠ verifier-broken</span>';
+    }
+    const resolvers = ((DATA.externalBaselines||{}).liveResolvedBy||{})[r.id];
+    if (Array.isArray(resolvers) && resolvers.length) {
+      // resolver names come from external JSON → esc().
+      solvBadge += ' <span class="pill" title="외부 모델이 푼 인스턴스 (provably solvable): '+esc(resolvers.slice(0,8).join(", "))+'" style="background:#1e3a2a;color:#7ee2a8;font-size:10px">ext✓'+(resolvers.length>1?' '+resolvers.length:'')+'</span>';
+    }
     h += '<tr class="mrow" data-id="'+esc(r.id)+'"><td class="inst">'+esc(r.id)+
-      ' <span class="dbtn" data-id="'+esc(r.id)+'" title="문제·오라클·trajectory 상세" style="cursor:pointer;color:#58a6ff;font-weight:700;padding:0 4px">ⓘ</span>'+ftBadge+'</td>'+qcell+
+      ' <span class="dbtn" data-id="'+esc(r.id)+'" title="문제·오라클·trajectory 상세" style="cursor:pointer;color:#58a6ff;font-weight:700;padding:0 4px">ⓘ</span>'+ftBadge+solvBadge+'</td>'+qcell+
       '<td class="muted">'+turns+'</td><td class="profile muted">'+presetCell+'</td><td class="muted" style="font-size:11px">'+r.difficulty+'</td>';
     for (const s of SCAF_SHOW) h += '<td class="'+(r.cells[s]?'yes':'no')+'">'+(r.cells[s]?'✅':'·')+'</td>';
     h += '<td>'+hashCell+'</td><td>'+tierCell+'</td></tr>';

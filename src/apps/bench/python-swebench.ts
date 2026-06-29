@@ -364,7 +364,15 @@ export const SPHINX_RA_SHIM = [
  * At concurrency 1 this is a no-op (an already-resolved chain).
  */
 let gradingChain: Promise<unknown> = Promise.resolve()
-const withGradingLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+/**
+ * EXPORTED (RFC jun-29 R2) so a second verifier — the Pro harness in
+ * `pro-swebench.ts` — routes its Docker spawns through the SAME process-global
+ * chain. Pro pulls `jefzda/sweap-images` into the same Docker daemon: identical
+ * race surface. Exactly ONE grading chain across all verifiers, never one per
+ * module — re-implementing a separate lock would reintroduce the proven
+ * false-negative (0/5 → 4/5 serial).
+ */
+export const withGradingLock = async <T>(fn: () => Promise<T>): Promise<T> => {
   const prev = gradingChain
   let release: () => void = () => {}
   gradingChain = new Promise<void>((resolve) => {
