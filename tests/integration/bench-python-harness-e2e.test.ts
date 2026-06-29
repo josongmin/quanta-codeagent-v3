@@ -107,23 +107,28 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     const lines = [
       "#!/usr/bin/env bash",
       "set -u",
-      // Probe path: `python -c "import swebench"`.
+      // jun-28: buildArgv now invokes the harness via a `python -c <shim>` (the
+      // SPHINX_RA_SHIM that appends -rA then runpy.run_module). The import-PROBE
+      // is ALSO `python -c "import swebench"`. Both start with `-c`, so we route
+      // on the script body: the RUN shim contains `run_evaluation`, the probe
+      // does not.
       `if [ "$1" = "-c" ]; then`,
-      `  if [ "\${QUANTA_HARNESS_IMPORT_OK:-1}" = "1" ]; then exit 0; else exit 1; fi`,
-      "fi",
-      // Run path: `python -m swebench.harness.run_evaluation ...`.
-      `if [ "$1" = "-m" ] && [ "$2" = "swebench.harness.run_evaluation" ]; then`,
-      `  if [ -n "\${QUANTA_HARNESS_ARGV_LOG:-}" ]; then`,
-      `    printf '%s\\x1e' "$0" >> "$QUANTA_HARNESS_ARGV_LOG"`,
-      `    for arg in "$@"; do printf '%s\\x1e' "$arg" >> "$QUANTA_HARNESS_ARGV_LOG"; done`,
-      "  fi",
-      // Write the report JSON into the harness cwd (= work dir). The body
-      // is ALWAYS set by the test (bash default-value with `{...}` is fragile
-      // — `${VAR:-X}` brace-matching can append a stray `}` when VAR is set),
-      // so we simply require the env var.
-      `  printf '%s' "$QUANTA_HARNESS_REPORT_BODY" > report.json`,
-      `  if [ -n "\${QUANTA_HARNESS_SLEEP_S:-}" ]; then exec sleep "$QUANTA_HARNESS_SLEEP_S"; fi`,
-      `  exit "\${QUANTA_HARNESS_EXIT:-0}"`,
+      `  case "$2" in`,
+      // Run path: `python -c "<...run_evaluation...>" --predictions_path ...`.
+      `    *run_evaluation*)`,
+      `      if [ -n "\${QUANTA_HARNESS_ARGV_LOG:-}" ]; then`,
+      `        printf '%s\\x1e' "$0" >> "$QUANTA_HARNESS_ARGV_LOG"`,
+      `        for arg in "$@"; do printf '%s\\x1e' "$arg" >> "$QUANTA_HARNESS_ARGV_LOG"; done`,
+      "      fi",
+      // Write the report JSON into the harness cwd (= work dir). The body is
+      // ALWAYS set by the test (bash default-value with `{...}` is fragile).
+      `      printf '%s' "$QUANTA_HARNESS_REPORT_BODY" > report.json`,
+      `      if [ -n "\${QUANTA_HARNESS_SLEEP_S:-}" ]; then exec sleep "$QUANTA_HARNESS_SLEEP_S"; fi`,
+      `      exit "\${QUANTA_HARNESS_EXIT:-0}" ;;`,
+      // Probe path: `python -c "import swebench"`.
+      `    *)`,
+      `      if [ "\${QUANTA_HARNESS_IMPORT_OK:-1}" = "1" ]; then exit 0; else exit 1; fi ;;`,
+      `  esac`,
       "fi",
       // Anything else (defensive): exit 0.
       "exit 0",
@@ -175,7 +180,7 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
   })
 
   // (c) argv contract — exact argv reaches the real subprocess.
-  test("(c) argv contract: -m swebench.harness.run_evaluation with --predictions_path/--instance_ids/--run_id", async () => {
+  test("(c) argv contract: -c <run_evaluation shim> with --predictions_path/--instance_ids/--run_id", async () => {
     writeStub()
     process.env.QUANTA_HARNESS_ARGV_LOG = argvLog
     process.env.QUANTA_HARNESS_REPORT_BODY = JSON.stringify({ resolved_ids: ["case-c"] })
@@ -201,10 +206,13 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     )
 
     const argv = readArgv()
-    // argv[0] is the stub binary path ($0). We expect the rest to match the
-    // documented contract exactly.
-    expect(argv[1]).toBe("-m")
-    expect(argv[2]).toBe("swebench.harness.run_evaluation")
+    // argv[0] is the stub binary path ($0). buildArgv now invokes the harness
+    // via `-c <SPHINX_RA_SHIM>`: argv[1] is `-c`, argv[2] is the shim body (runs
+    // run_evaluation via runpy + appends -rA for sphinx). The run_evaluation
+    // flags follow as sys.argv.
+    expect(argv[1]).toBe("-c")
+    expect(argv[2]).toContain("swebench.harness.run_evaluation")
+    expect(argv[2]).toContain("'-rA'")
 
     const i = (flag: string): number => argv.indexOf(flag)
     expect(i("--predictions_path")).toBeGreaterThan(-1)

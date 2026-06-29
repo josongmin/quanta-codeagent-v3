@@ -55,6 +55,20 @@ describe("buildSrcRsyncArgs", () => {
     expect(args).not.toContain("--itemize-changes")
     expect(args).not.toContain("--delete")
   })
+
+  it("SSOT: seed-sync (no opts) and reuse self-heal share the SAME excludes + src/dst", () => {
+    // The stale-code guard's whole correctness rests on the seed-sync (bootstrap)
+    // and the verify-sync (reuse) shipping the identical file set. If they ever
+    // diverge, a reused box could ship/exclude different files than its seed.
+    const seed = buildSrcRsyncArgs("/repo", "ubuntu@h", SSH)
+    const heal = buildSrcRsyncArgs("/repo", "ubuntu@h", SSH, {
+      checksum: true,
+      itemize: true,
+      del: true,
+    })
+    const stripFlags = (a: string[]) => a.filter((x) => !x.startsWith("--checksum") && !x.startsWith("--itemize") && x !== "--delete")
+    expect(stripFlags(heal)).toEqual(seed)
+  })
 })
 
 describe("parseItemizedTransfers", () => {
