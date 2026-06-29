@@ -127,6 +127,22 @@ export interface PerInstanceReport {
    *  Lets a run self-measure PASS_TO_PASS-break rate (regression-gate
    *  justification). Omitted for non-swebench / ungraded ⇒ byte-identical. */
   gradeBreakdown?: GradeBreakdown
+  /** jun-29 — repair-loop diagnostics that existed on the typed InstanceResult but
+   *  were DROPPED at report serialization, so an oracle A/B could not read whether
+   *  the loop iterated or false-cleared. Emitted now; omitted when the repair path
+   *  never produced them ⇒ byte-identical for non-repair runs. */
+  verifyRounds?: number
+  primaryFalseGreen?: boolean
+  primaryFalseRed?: boolean
+  /** jun-29 — DERIVED post-grade diagnostic (observe-ONLY; never fed back into
+   *  repair selection). True ⇒ the agent-side canonical oracle cleared the repair
+   *  gate (`canonical-sidecar` issueResolved) but the OFFICIAL harness graded it
+   *  unresolved — i.e. the agent's repro is WEAKER than the held-out FAIL_TO_PASS.
+   *  This is the measured failure mode of agentless-v6-oracle (jun-29 pilot:
+   *  django-11265 + sympy-23413, 0/2 official with canonical-sidecar resolved).
+   *  Computed at serialization from already-graded fields — it CANNOT leak the
+   *  official test into the loop (that would be answer-key gaming). */
+  oracleGapFalseGreen?: boolean
   /** jun-20 — repro-oracle gold calibration (verify-select runs only). Lets a
    *  campaign self-measure the resolved-oracle false-negative rate (the
    *  verify-and-select bottleneck). Omitted otherwise ⇒ byte-identical. */
@@ -348,6 +364,19 @@ export const buildReport = (
           ? { repairValidationDecision: r.repairValidationDecision }
           : {}),
         ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
+        // jun-29 — forward the repair-loop diagnostics that were typed but dropped.
+        ...(r.verifyRounds !== undefined ? { verifyRounds: r.verifyRounds } : {}),
+        ...(r.primaryFalseGreen !== undefined ? { primaryFalseGreen: r.primaryFalseGreen } : {}),
+        ...(r.primaryFalseRed !== undefined ? { primaryFalseRed: r.primaryFalseRed } : {}),
+        // jun-29 — DERIVED, observe-only: the agent-side canonical oracle cleared
+        // the repair gate but the OFFICIAL harness graded unresolved (agent repro
+        // weaker than the held-out test). Computed from already-graded fields ONLY;
+        // never consulted by repair selection (no answer-key leak).
+        ...(r.repairValidationDecision?.authority === "canonical-sidecar" &&
+        r.repairValidationDecision?.issueResolved === true &&
+        r.gradeBreakdown?.resolved === false
+          ? { oracleGapFalseGreen: true }
+          : {}),
         ...(r.reproOracleCalibration !== undefined
           ? { reproOracleCalibration: r.reproOracleCalibration }
           : {}),
