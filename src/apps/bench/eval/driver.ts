@@ -104,6 +104,7 @@ import {
   buildRepairRoundsConfig,
   makeRepairBreadthRunCandidates,
 } from "@/runner/batch/eval/repair-breadth"
+import { writeCandidatePool } from "@/runner/batch/eval/repair/candidate-ledger-sink"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
@@ -725,6 +726,20 @@ const runRepairPhase = async (
           },
           sandboxPorts: { forkSandbox, cleanupSandbox },
           gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
+          // jun-29 OBSERVE-ONLY pool capture (mirror of the runner driver):
+          // persist the FULL candidate pool per round when a run artifact root
+          // exists. Decision impact 0; absent root ⇒ no sink ⇒ byte-identical.
+          ...(deps.reproArtifactRootPath !== undefined
+            ? {
+                recordCandidates: (round, candidates) =>
+                  writeCandidatePool(
+                    deps.reproArtifactRootPath as string,
+                    instance.id,
+                    round,
+                    candidates,
+                  ),
+              }
+            : {}),
         })
       : undefined
   // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only) — SHARED

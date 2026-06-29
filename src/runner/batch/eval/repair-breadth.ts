@@ -126,6 +126,14 @@ export interface RepairBreadthDeps {
   readonly validateInputs: Omit<RepairValidateArgsInputs, "sandbox">
   readonly sandboxPorts: RepairBreadthSandboxPorts
   readonly gitPorts: RepairBreadthGitPorts
+  /** jun-29 OBSERVE-ONLY: persist the WHOLE candidate pool (not just the adopted
+   *  winner) so "was there a winning candidate the selector missed?" is answerable
+   *  post-hoc. Called with every round's outcomes BEFORE selection. Decision impact
+   *  ZERO — never read by select/adopt; fail-open. Absent ⇒ byte-identical. */
+  readonly recordCandidates?: (
+    round: number,
+    candidates: readonly RepairCandidateOutcome[],
+  ) => void | Promise<void>
 }
 
 /**
@@ -152,6 +160,16 @@ export const makeRepairBreadthRunCandidates =
     const outcomes: RepairCandidateOutcome[] = []
     for (const s of settled) {
       if (s.status === "fulfilled" && s.value !== undefined) outcomes.push(s.value)
+    }
+    // OBSERVE-ONLY pool capture (jun-29): record the FULL pool before the
+    // orchestrator selects+adopts the winner. Fail-open — a sink throw must never
+    // affect the round (the pool ledger is post-hoc analysis, not control flow).
+    if (deps.recordCandidates !== undefined) {
+      try {
+        await deps.recordCandidates(args.round, outcomes)
+      } catch {
+        /* observe-only: never let a ledger write perturb the repair round */
+      }
     }
     return outcomes
   }
