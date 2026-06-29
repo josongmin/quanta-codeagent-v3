@@ -90,14 +90,22 @@ describe("cache-pathspecs — SSOT contents", () => {
     }
   })
 
+  test("CACHE_PATHSPECS excludes .quanta/ (the sphinx-8638 tool-output leak)", () => {
+    expect(CACHE_PATHSPECS.join(" ")).toContain(":(exclude,top).quanta/")
+    expect(DEFAULT_CACHE_DIR_NAMES).toContain(".quanta")
+  })
+
   test("CACHE_PATH_RE matches build/cache-shaped paths it claims to cover", () => {
     expect(CACHE_PATH_RE.test("outputs/foo")).toBe(true)
     expect(CACHE_PATH_RE.test("a/b/__pycache__/c.pyc")).toBe(true)
     expect(CACHE_PATH_RE.test(".claude/worktrees/agent-abc/bar")).toBe(true)
     expect(CACHE_PATH_RE.test("node_modules/x/y.js")).toBe(true)
+    // jun-29: the agent's own tool-output sidecar must be pruned.
+    expect(CACHE_PATH_RE.test(".quanta/tool-output/3ee5989-c693.txt")).toBe(true)
     // Source paths must NOT match (segment-boundary guard).
     expect(CACHE_PATH_RE.test("src/foo.py")).toBe(false)
     expect(CACHE_PATH_RE.test("my_outputs_pkg/foo.py")).toBe(false)
+    expect(CACHE_PATH_RE.test("sphinx/domains/python.py")).toBe(false)
   })
 })
 
