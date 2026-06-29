@@ -201,6 +201,30 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "closure-repair": "5",
     "repair-spec-gate": "1",
   },
+  // jun-29 oracle lever: closure-tuned + repro-grounding. The repair validator
+  // runs the AGENT'S repro (not the official FAIL_TO_PASS — that would be answer-key
+  // gaming), so grounded repro is the prerequisite for a real oracle signal that
+  // rejects under-edit / wrong-predicate patches (docs/analysis/competitor-study).
+  "agentless-v6-oracle": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+  },
   // jun-20 strict arm:
   // mini-first + hard patch-budget admission + source-only sanitizer. It keeps
   // the localization stack, turns host in-loop execution OFF for round-0 thinness,
