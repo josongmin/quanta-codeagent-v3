@@ -47,6 +47,11 @@ export const DEFAULT_CACHE_DIR_NAMES: readonly string[] = [
   ".pytest_cache",
   ".mypy_cache",
   ".claude/worktrees",
+  // jun-29: the bench harness's OWN scratch dir — the agent's tool-output sidecar
+  // (`.quanta/tool-output/<uuid>.txt`) leaked into a source-only patch and bloated
+  // sphinx-8638 to 445KB (graded PASS regardless, but the patch + patchBytes signal
+  // were polluted). Never part of a source fix. Mirrors SRC_RSYNC_EXCLUDES.
+  ".quanta",
 ]
 
 /** Effective directory-name list = defaults ∪ env extras, deduped, order
