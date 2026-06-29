@@ -71,6 +71,21 @@ describe("agentless-v6-oracle — the synthesis-convergence lever preset", () =>
     expect(lit["repro-grounding"]).toBe("1")
   })
 
+  test("hardened arm = oracle + repro-vote + repair-strong-oracle (PUBLIC-only)", () => {
+    const HARD = "agentless-v6-oracle-hardened"
+    expect(PRESET_SPECS[HARD]).toBeDefined()
+    const oracle = PRESET_SPECS[ORACLE]?.params ?? {}
+    const hard = PRESET_SPECS[HARD]?.params ?? {}
+    // every oracle param preserved
+    for (const [k, v] of Object.entries(oracle)) expect(hard[k]).toBe(v)
+    // exactly the two PUBLIC-only hardening knobs added
+    const added = Object.keys(hard).filter((k) => !(k in oracle)).sort()
+    expect(added).toEqual(["repair-strong-oracle", "repro-vote"])
+    // frozen literal matches
+    expect(KNOB_PRESETS[HARD]?.["repro-vote"]).toBe("1")
+    expect(KNOB_PRESETS[HARD]?.["repair-strong-oracle"]).toBe("1")
+  })
+
   test("OPT-IN: the v6 winner and closure-tuned are NOT mutated", () => {
     // v6 must stay the byte-identical jun-24 winner (no oracle params leaked in)
     const v6 = PRESET_SPECS[V6]?.params ?? {}
