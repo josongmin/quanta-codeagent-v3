@@ -70,6 +70,10 @@ const RULES: readonly Rule[] = [
       "apps/cli/fetch-rules-wire.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
+      "apps/bench/run-main.ts":
+        "Bench local-run composition root extracted verbatim from apps/bench/index.ts (already allowlisted) — owns the same dotenv shim + QUANTA_BENCH_* / QUANTA_SWEBENCH_* launch-time reads; downstream logic receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/bench/run-args.ts":
+        "Bench CLI-arg parsing concern extracted verbatim from apps/bench/run-main.ts — the tiny dotenv shim (loadEnv writes process.env before any runtimeConfig() read) + the QUANTA_BENCH_CONCURRENCY launch-time read; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "runner/batch/eval/driver.ts":
