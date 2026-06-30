@@ -18,6 +18,7 @@ import { dirname } from "node:path"
 import { reproRunArgv } from "../corpus/dataset"
 import type { Instance } from "../types"
 import { classifyPytest, classifyPytestReportText } from "@/agent/repro-test/execute"
+import { gateOn } from "@/shared"
 import {
   REPRO_SCAFFOLD_ARTIFACT_PATTERNS,
   reproScriptBasename,
@@ -158,6 +159,14 @@ export const preferredReproExecRuntime = (
   instance: Pick<Instance, "swebench">,
   scriptPath: string,
 ): Pick<ReproExecCtx, "execBackend" | "imageRef" | "sandboxDir"> => {
+  // RFC jun-29-repro-adapter-polyglot Phase 2b is runtime-gated + DEFERRED: the
+  // `image` backend's Python parity (does the patched, mounted sandbox actually
+  // shadow the image's own pip-installed repo copy, or does `import <project>`
+  // resolve to the UNPATCHED image checkout?) is UNPROVEN and must be validated on
+  // a box first. Default-OFF ⇒ `{}` ⇒ host backend ⇒ byte-identical (every
+  // existing Pro/Live/Verified repro run unchanged); enabling it is the opt-in
+  // measurement arm, not a silent posture flip for the next Pro launch.
+  if (!gateOn(process.env, "QUANTA_BENCH_REPRO_IMAGE_EXEC")) return {}
   const imageRef = proReproImageRef(instance)
   if (imageRef === null) return {}
   return {

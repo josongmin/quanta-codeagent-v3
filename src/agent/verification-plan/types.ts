@@ -82,6 +82,8 @@ export interface VerificationPlanInput {
   ownerNearPrimaryBaseValidatedRed?: boolean
   /** Touched-module smoke commands (post-edit info). */
   touchedModuleSmoke?: readonly string[]
+  /** Base-tree RED proof for the PRIMARY module-smoke candidate. */
+  moduleSmokePrimaryBaseValidatedRed?: boolean
   /**
    * Issue-declared expected output (PUBLIC problem-statement text). When the
    * issue exposes a concrete expected/observed output, it is encoded as the

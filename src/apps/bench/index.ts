@@ -87,7 +87,7 @@ import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
 import { makeReproArtifactFsSink } from "@/runner/batch/eval/repro-artifacts-fs"
 import { runBatchWithHealth } from "@/runner/batch/eval/run-health"
 import type { RunHealthSummary } from "@/runner/batch/report"
-import { byteCompare, errMessage, gateOn, logger, runtimeConfig, setTerminalIo } from "@/shared"
+import { byteCompare, errMessage, gateOn, logger, runtimeConfig } from "@/shared"
 import { runTokenCostLine } from "./analyze/cost"
 import {
   aggregate,
@@ -107,6 +107,7 @@ import {
   resolveDatasetFamily,
 } from "./dataset-family"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
+import { argValue, routeBenchTerminalIo } from "./entry-bootstrap"
 import { finalizeRun, runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
@@ -132,14 +133,7 @@ import type { BenchSummary, Instance, InstanceResult } from "./types"
 // the original byte-compatible public API after the split into ./trajectory.
 export { maybeRecordTrajectory, maybeReplayTrajectory } from "./trajectory"
 
-setTerminalIo({
-  stdout: (chunk) => {
-    void process.stdout.write(chunk)
-  },
-  stderr: (chunk) => {
-    void process.stderr.write(chunk)
-  },
-})
+routeBenchTerminalIo()
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────
 const unquote = (v: string): string =>
@@ -167,14 +161,6 @@ const loadEnv = (files: string[]): void => {
       if (pair && process.env[pair[0]] === undefined) process.env[pair[0]] = pair[1]
     }
   }
-}
-
-const argValue = (flag: string): string | undefined => {
-  const i = process.argv.indexOf(flag)
-  if (i >= 0) return process.argv[i + 1]
-  const pref = `${flag}=`
-  const eq = process.argv.find((a) => a.startsWith(pref))
-  return eq !== undefined ? eq.slice(pref.length) : undefined
 }
 
 const argFlag = (flag: string): boolean => process.argv.includes(flag)

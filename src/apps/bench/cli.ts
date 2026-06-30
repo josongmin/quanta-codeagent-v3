@@ -21,14 +21,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  errMessage,
-  gateOn,
-  logger,
-  renderLspGroundingStatus,
-  runtimeConfig,
-  setTerminalIo,
-} from "@/shared"
+import { errMessage, gateOn, logger, renderLspGroundingStatus, runtimeConfig } from "@/shared"
 import { costSummaryFromReport, renderCost } from "./analyze/cost"
 import { diffRuns, renderDiff } from "./analyze/diff"
 import { explainFailure } from "./analyze/explain"
@@ -53,6 +46,7 @@ import {
 } from "./auth-pool"
 import { resolveDatasetFamily } from "./dataset-family"
 import { ensureBenchTraceSink } from "./default-trace-sink"
+import { argValue, routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport, traceViewerUrl } from "./otel"
 import { runTraceSink } from "./otel-trace-sink"
 import {
@@ -84,16 +78,9 @@ import {
 } from "./slicing/microchunk"
 import { fileSpanSink, resolveSpanSink } from "./span-sink"
 
-// Route `logger` to the real terminal (same wiring index.ts does — without it
+// Route `logger` to the real terminal (shared with index.ts — without it
 // logger.info writes nowhere).
-setTerminalIo({
-  stdout: (chunk) => {
-    void process.stdout.write(chunk)
-  },
-  stderr: (chunk) => {
-    void process.stderr.write(chunk)
-  },
-})
+routeBenchTerminalIo()
 
 const KNOWN_SUBCOMMANDS = new Set([
   "run",
@@ -141,15 +128,6 @@ const readDatasetInstanceIds = (path: string): string[] => {
   return ids
 }
 
-/** Read a value flag in BOTH `--flag value` and `--flag=value` forms. The
- *  `=`-form previously fell through `indexOf` and was silently ignored. */
-const argValue = (flag: string): string | undefined => {
-  const i = process.argv.indexOf(flag)
-  if (i >= 0) return process.argv[i + 1]
-  const pref = `${flag}=`
-  const eq = process.argv.find((a) => a.startsWith(pref))
-  return eq !== undefined ? eq.slice(pref.length) : undefined
-}
 const hasFlag = (flag: string): boolean => process.argv.includes(flag)
 const allowExtraBoxes = (): boolean =>
   hasFlag("--allow-extra-boxes") || gateOn(process.env, "QUANTA_ALLOW_EXTRA_BOXES")

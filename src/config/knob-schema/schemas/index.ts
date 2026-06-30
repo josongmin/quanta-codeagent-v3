@@ -86,6 +86,7 @@ import {
   benchExposeDatasetVerifierSchema,
   benchEffortLadderSchema,
   benchFindRefsSchema,
+  benchReproImageExecSchema,
   benchSampleTempSchema,
   benchSubmitReviewSchema,
   benchVoteNormalizeSchema,
@@ -190,6 +191,7 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   benchSubmitReviewSchema, // QUANTA_BENCH_SUBMIT_REVIEW
   benchVoteNormalizeSchema, // QUANTA_BENCH_VOTE_NORMALIZE
   benchSampleTempSchema, // QUANTA_BENCH_SAMPLE_TEMP
+  benchReproImageExecSchema, // QUANTA_BENCH_REPRO_IMAGE_EXEC
   benchProtectTestsSchema, // QUANTA_BENCH_PROTECT_TESTS
   hooksSchema, // QUANTA_BENCH_HOOKS
   workingStateSchema, // QUANTA_BENCH_WORKING_STATE

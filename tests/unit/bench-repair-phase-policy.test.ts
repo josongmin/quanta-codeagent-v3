@@ -76,6 +76,24 @@ describe("bench repair-phase policy", () => {
     ).toBe(true)
   })
 
+  test("module-smoke primary rail with observed base-red proof also admits repair", () => {
+    expect(
+      benchShouldRunRepairPhase({
+        eligible: true,
+        primaryRailEnabled: true,
+        gateAction: "verify",
+        primaryRailStep: { ...railStep, kind: "module-smoke" },
+        verificationPlan: {
+          primaryRail: { kind: "module-smoke", cmd: 'node -e "process.exit(1)"' },
+          required: [],
+          optional: [],
+          baseValidatedRed: false,
+          primaryRailBaseValidatedRed: true,
+        },
+      }),
+    ).toBe(true)
+  })
+
   test("primaryRail ON + red rail + commit-now gate => repair loop stays off", () => {
     expect(
       benchShouldRunRepairPhase({

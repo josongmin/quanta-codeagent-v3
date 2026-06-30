@@ -56,4 +56,17 @@ describe("buildClosureSession", () => {
     expect(session.bundle.plan.primaryRailBaseValidatedRed).toBe(true)
     expect(session.bundle.gate.action).toBe("verify")
   })
+
+  test("base-red module-smoke proof is threaded into the plan and gate signal", () => {
+    const session = buildClosureSession({
+      problemStatement: "Fix foo in src/foo.py.",
+      stage1Files: [{ file: "src/foo.py", score: 5 }],
+      touchedModuleSmoke: ['node -e "process.exit(1)"'],
+      moduleSmokePrimaryBaseValidatedRed: true,
+      posture: { lspNav: false, primaryRail: true, faultEvidence: false },
+    })
+    expect(session.bundle.plan.primaryRail?.kind).toBe("module-smoke")
+    expect(session.bundle.plan.primaryRailBaseValidatedRed).toBe(true)
+    expect(session.bundle.gate.action).toBe("verify")
+  })
 })

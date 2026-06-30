@@ -58,6 +58,15 @@ const hasExplicitPassingSummary = (output: string): boolean =>
 const hasExplicitFailureSummary = (output: string): boolean =>
   isVerifyOutputFailing("test_runner", undefined, output)
 
+/** Shared local-`testCmd` verdict classifier. The official grader path and the
+ *  public module-smoke base probe must agree on what counts as green vs red on
+ *  the repo-local verifier command. */
+export const localTestCmdPassed = (result: Pick<VerifyOutcome, "exitCode" | "logTail">): boolean => {
+  const explicitFailure = hasExplicitFailureSummary(result.logTail)
+  const summaryPass = hasExplicitPassingSummary(result.logTail) && !explicitFailure
+  return !explicitFailure && (result.exitCode === 0 || summaryPass)
+}
+
 export const verify = async (
   instance: Instance,
   patch: string,
@@ -150,9 +159,7 @@ export const verify = async (
   // can still emit a zero exit while reporting failed/error counts in their
   // summary, and grading must fail closed there.
   const combined = `${test.stdout}\n${test.stderr}`
-  const explicitFailure = hasExplicitFailureSummary(combined)
-  const summaryPass = hasExplicitPassingSummary(combined) && !explicitFailure
-  const passed = !explicitFailure && (test.code === 0 || summaryPass)
+  const passed = localTestCmdPassed({ exitCode: test.code, logTail: combined })
   return {
     passed,
     command: instance.testCmd,

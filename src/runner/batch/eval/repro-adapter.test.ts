@@ -4,6 +4,7 @@ import type { Instance } from "../types"
 import { reproValidationCmd } from "./repro-command"
 import {
   dockerRunReproArgv,
+  preferredReproExecRuntime,
   proReproImageRef,
   pythonReproAdapter,
   resolveReproAdapter,
@@ -147,6 +148,45 @@ describe("image exec backend (RFC Phase 2a — pure composition)", () => {
       "jefzda/sweap-images:nodebb.x",
     )
     expect(proReproImageRef({ swebench: { instanceId: "i", repo: "r", baseCommit: "c" } })).toBeNull()
+  })
+})
+
+describe("preferredReproExecRuntime — Phase 2b image backend is DEFAULT-OFF (gated)", () => {
+  const withImageTag: Pick<Instance, "swebench"> = {
+    swebench: { instanceId: "i", repo: "r", baseCommit: "c", dockerhubTag: "nodebb.x" },
+  }
+  const KNOB = "QUANTA_BENCH_REPRO_IMAGE_EXEC"
+  const withGate = <T>(value: string | undefined, fn: () => T): T => {
+    const prev = process.env[KNOB]
+    if (value === undefined) delete process.env[KNOB]
+    else process.env[KNOB] = value
+    try {
+      return fn()
+    } finally {
+      if (prev === undefined) delete process.env[KNOB]
+      else process.env[KNOB] = prev
+    }
+  }
+
+  test("gate UNSET + Pro instance w/ dockerhubTag ⇒ {} (host backend, byte-identical)", () => {
+    // REGRESSION GUARD: the RFC defers Phase 2b until image-parity is proven on a
+    // box. Selecting the image backend by default would silently flip every Pro
+    // repro run onto an unproven `docker run` path (import may resolve to the
+    // image's UNPATCHED copy ⇒ correct patches read base-red ⇒ real solves lost).
+    expect(withGate(undefined, () => preferredReproExecRuntime(withImageTag, "/w/__repro_0_a.py"))).toEqual({})
+  })
+
+  test("gate ON + dockerhubTag ⇒ image backend selected (opt-in arm)", () => {
+    expect(withGate("1", () => preferredReproExecRuntime(withImageTag, "/w/__repro_0_a.py"))).toEqual({
+      execBackend: "image",
+      imageRef: "jefzda/sweap-images:nodebb.x",
+      sandboxDir: "/w",
+    })
+  })
+
+  test("gate ON but NO dockerhubTag (Verified/Live) ⇒ {} (host, fail-closed)", () => {
+    const noTag: Pick<Instance, "swebench"> = { swebench: { instanceId: "i", repo: "r", baseCommit: "c" } }
+    expect(withGate("1", () => preferredReproExecRuntime(noTag, "/w/r.py"))).toEqual({})
   })
 })
 

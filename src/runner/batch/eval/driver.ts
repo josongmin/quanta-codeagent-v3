@@ -292,6 +292,10 @@ import {
 } from "./static-witness-adapter"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
+import {
+  discoverVerificationModuleSmokePlan,
+  type VerificationModuleSmokePlan,
+} from "./verification-module-smoke"
 import { extractVerificationOwnerTestExpectations } from "./verification-owner-test-expectations"
 import {
   discoverVerificationOwnerTestsPlan,
@@ -5361,6 +5365,8 @@ const buildClosureAttemptState = (args: {
   readonly reproTest: BenchReproTestTelemetry | undefined
   readonly ownerNearTests?: readonly string[]
   readonly ownerNearPrimaryBaseValidatedRed?: boolean
+  readonly touchedModuleSmoke?: readonly string[]
+  readonly moduleSmokePrimaryBaseValidatedRed?: boolean
 }): ClosureSessionState | undefined =>
   args.instance.swebench === undefined
     ? undefined
@@ -5385,6 +5391,12 @@ const buildClosureAttemptState = (args: {
           : {}),
         ...(args.ownerNearPrimaryBaseValidatedRed === true
           ? { ownerNearPrimaryBaseValidatedRed: true }
+          : {}),
+        ...(args.touchedModuleSmoke !== undefined && args.touchedModuleSmoke.length > 0
+          ? { touchedModuleSmoke: args.touchedModuleSmoke }
+          : {}),
+        ...(args.moduleSmokePrimaryBaseValidatedRed === true
+          ? { moduleSmokePrimaryBaseValidatedRed: true }
           : {}),
         posture: {
           lspNav: args.posture.lspNav,
@@ -5519,6 +5531,17 @@ export const prepareAttemptContext = async (
   const ownerNearTests = ownerNearTestPlan.commands
   const ownerNearRegressionSet = ownerNearTestPlan.baseGreenTestPaths
   const ownerNearPrimaryBaseValidatedRed = ownerNearTestPlan.primaryBaseState === "red"
+  const moduleSmokePlan: VerificationModuleSmokePlan =
+    instance.swebench === undefined ||
+    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
+      ? { commands: [], primaryBaseState: "unavailable" }
+      : await discoverVerificationModuleSmokePlan({
+          instance,
+          sandbox,
+          timeoutMs: deps.timeoutMs,
+        })
+  const touchedModuleSmoke = moduleSmokePlan.commands
+  const moduleSmokePrimaryBaseValidatedRed = moduleSmokePlan.primaryBaseState === "red"
   // T2 — command-derived test paths take precedence; when empty, the extractor
   // falls back to a bounded convention-based source search over the localized
   // owner modules (only files that exist are read). Gated to the SAME condition
@@ -5543,6 +5566,8 @@ export const prepareAttemptContext = async (
     reproTest: hintRepro.reproTest,
     ownerNearTests,
     ...(ownerNearPrimaryBaseValidatedRed ? { ownerNearPrimaryBaseValidatedRed } : {}),
+    ...(touchedModuleSmoke.length > 0 ? { touchedModuleSmoke } : {}),
+    ...(moduleSmokePrimaryBaseValidatedRed ? { moduleSmokePrimaryBaseValidatedRed } : {}),
   })
   const intakeLlmEvidence = buildIntakeLlmEvidencePacket({
     problemStatement: instance.problemStatement,

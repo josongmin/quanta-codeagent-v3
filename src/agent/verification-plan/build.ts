@@ -148,6 +148,7 @@ export const buildVerificationPlan = (input: VerificationPlanInput): Verificatio
   const maxRequired = input.maxRequired ?? DEFAULT_MAX_REQUIRED
   const baseValidatedRed = input.reproScript?.baseValidatedRed ?? false
   const ownerNearPrimaryBaseValidatedRed = input.ownerNearPrimaryBaseValidatedRed === true
+  const moduleSmokePrimaryBaseValidatedRed = input.moduleSmokePrimaryBaseValidatedRed === true
   const ownerSteps = ownerStepsOf(input)
   const smokeSteps = smokeStepsOf(input)
   const reproStep = reproStepOf(input)
@@ -167,7 +168,9 @@ export const buildVerificationPlan = (input: VerificationPlanInput): Verificatio
       ? baseValidatedRed
       : primaryRail?.kind === "owner-test"
         ? ownerNearPrimaryBaseValidatedRed
-        : false
+        : primaryRail?.kind === "module-smoke"
+          ? moduleSmokePrimaryBaseValidatedRed
+          : false
 
   return { primaryRail, required, optional, baseValidatedRed, primaryRailBaseValidatedRed }
 }

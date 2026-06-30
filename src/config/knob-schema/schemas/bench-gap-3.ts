@@ -241,6 +241,21 @@ export const benchSampleTempSchema: KnobSchema<boolean> = {
   parse: parseGateBool,
 }
 
+/* ── QUANTA_BENCH_REPRO_IMAGE_EXEC (env-direct, repro-adapter.ts via gateOn) ── */
+export const benchReproImageExecSchema: KnobSchema<boolean> = {
+  id: "bench-repro-image-exec",
+  envKey: "QUANTA_BENCH_REPRO_IMAGE_EXEC",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: run the repro-oracle EXEC inside the instance's prebuilt Docker image (Pro `jefzda/sweap-images:<tag>`) via `docker run`, instead of the host uv project-env. RFC jun-29-repro-adapter-polyglot Phase 2b — the `image` backend selection. DEFERRED/runtime-gated BY DESIGN: Python parity inside the image (does the mounted, patched sandbox shadow the image's own pip-installed copy?) is UNPROVEN and must be validated on a box before promotion. Default-OFF ⇒ host backend ⇒ byte-identical (every existing Pro/Live/Verified repro run unchanged).",
+  knobDescribe:
+    "Repro EXEC inside the instance Docker image (Pro sweap-images) — Phase 2b, unproven parity, opt-in only",
+  readSite: "runner/batch/eval/repro-adapter.ts",
+  surfaces: BENCH,
+  parse: parseGateBool,
+}
+
 /* ── QUANTA_BENCH_VOTE_NORMALIZE (env-direct, driver.ts via gateOn) ────────── */
 export const benchVoteNormalizeSchema: KnobSchema<boolean> = {
   id: "bench-vote-normalize",

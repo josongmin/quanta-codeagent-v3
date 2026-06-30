@@ -60,6 +60,17 @@ describe("buildVerificationPlan", () => {
     const p = buildVerificationPlan({ touchedModuleSmoke: ["pytest mod_smoke.py"] })
     expect(p.primaryRail?.kind).toBe("module-smoke")
     expect(p.primaryRail?.cmd).toBe("pytest mod_smoke.py")
+    expect(p.primaryRailBaseValidatedRed).toBe(false)
+  })
+
+  test("module-smoke base-red proof is tracked separately from synth repro proof", () => {
+    const p = buildVerificationPlan({
+      touchedModuleSmoke: ["node verify.js"],
+      moduleSmokePrimaryBaseValidatedRed: true,
+    })
+    expect(p.primaryRail?.kind).toBe("module-smoke")
+    expect(p.baseValidatedRed).toBe(false)
+    expect(p.primaryRailBaseValidatedRed).toBe(true)
   })
 
   test("no evidence → primaryRail null (repair stays off)", () => {
