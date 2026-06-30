@@ -214,3 +214,56 @@ Augment 표(Opus 4.5 고정): Auggie 51.80 · Cursor 50.21 · Claude Code 49.75 
 | 2024-03-15 | Cognition/Devin **SWE-bench technical report** | 봉인+하네스 공개 원조, original 13.86 |
 
 **연도 요약:** Pro 벤치 자체는 **2025-09** 등장(23%대). **2025-11~2026-06**에 점수 80%대로 폭등 + 동시에 누수 폭로(2026-04 issue #93, 2026-05 Datacurve/Poolside, 2026-06 Cursor)가 터짐 = "점수 오름"과 "그 점수 못 믿음"이 같은 9개월에 동시 진행. 봉인 정식 측정은 **2026-06 Cursor가 처음**(Cognition 2024 선례 빼면).
+
+---
+
+## 10. 스캐폴드 플레이어 전수 (B/C급 롱테일) + Pro 구조적 공백
+
+§5는 "스캐폴드를 엄밀히 증명한 A급"만. 여기는 **롱테일 전체**와 **왜 Pro엔 스캐폴드가 없는지**.
+
+### 🔴 구조적 사실 — Pro엔 스캐폴드 제출 자체가 불가
+- **swebench.com**(Verified/Lite/Full) 보드는 **에이전트 제출을 받음** → 모든 스캐폴드 롱테일이 여기 쌓임.
+- **Scale Pro 보드**는 **모델을 자기가 고정 하네스(mini-swe-agent)로 돌림** → 스캐폴드 제품 제출 레인이 없음.
+- ⇒ 에이전트 제품이 Pro 숫자를 가지려면 **자기 블로그 자체발표뿐**이고, 거의 아무도 안 함.
+- **Pro 숫자 있는 스캐폴드 = 6개가 전부**(전부 자체발표): Augment 51.80 · Blitzy 66.5(Quesma검증, base 비공개) · Cursor Composer(봉인연구) · Sakana Fugu 73.7(secondary, 라우터) · Confucius 59(학계 sealed) · StepFun Step-SWE-Bench(멀티스캐폴드).
+- 봉인+감사=Cursor 1 · same-model 격리=Augment 1 · 학계 sealed=Confucius 1. **(Pro+봉인+same-model+감사) 조합은 0.**
+
+### B급 — 엔터프라이즈 "wrapped-Claude" 군 (71~79% **Verified**, 거의 안 알려짐)
+| 에이전트 | org | % (Verified) | 모델 |
+|---|---|--:|---|
+| Sonar Foundation Agent | SonarSource | **79.2**(Opus) / 52.62 Full | Claude 4.5 Opus/Sonnet |
+| Atlassian Rovo Dev | Atlassian | 76.8 | |
+| EPAM AI/Run | EPAM | 76.8 | Claude 4 Sonnet |
+| ACoder | OSS | 76.4 | |
+| Harness AI | Harness.io | 74.8 | |
+| **Lingxi** | **Huawei**+U.Manitoba | 74.6 | 멀티모델 ablation(GPT-4.1/Kimi/Sonnet), sealed |
+| JoyCode | JD.com 🇨🇳 | 74.6 | Claude4 Sonnet+GPT-4.1 |
+| Refact.ai | Refact | 74.4 | Claude4 Sonnet+o4-mini |
+| Prometheus | euni.ai | 74.4 | GPT-5 |
+| Salesforce SAGE | Salesforce | 73.8 | |
+| Tools | OSS | 73.2(Opus) | same-model arm(Opus/Sonnet/Haiku) |
+
+### B급 — 중위 (Verified)
+Qodo 71.2 · Bloop(🇬🇧) 71.2 · devlo 70.2 · Zencoder 70.0 · Amazon Q Developer 65.4 · W&B Programmer 64.6 · AgentScope(Alibaba🇨🇳) 63.4 · CodeStory/Aide 62.2 · Cline(자체발표 off-board) ~59.8 · Emergent E1(🇮🇳) 57.2 · Artemis/TurinTech 57.0 · Gru.ai(🇨🇳) 57.0 · JetBrains Junie 53.6(SWE-rebench #1 61.6) · Bracket.sh 53.2 · AutoCodeRover(🇸🇬NUS) 51.6 · Engine Labs/Solver(Laredo)/MarsCode(🇨🇳ByteDance)/nFactorial ~49-52 · AppMap Navie 47.2
+
+### C급 (obscure / Lite / 옛날 / 약함)
+Isoform(Lite 55) · Codev(Lite 49) · Globant Code Fixer(🇦🇷 Lite 48.33) · Honeycomb(40.6) · Aider(Lite 26.33; 자기 polyglot 벤치는 별개) · Mentat(Lite 38) · Lingma SWE-GPT(🇨🇳 30.2, 모델에 가까움) · LingmaAgent(Lite relative-delta만) · 학계 일회성 무더기(SemAgent·KGCompass·ExpeRepair·DARS·OrcaLoca·CodeFuse·Kortix·MASAI·HyperAgent·IBM SWE-1.0, Lite 23~58)
+
+### 아시아 스캐폴드 국가별
+- **중국** — Trae(ByteDance) 75.2 최강 · JoyCode(JD) 74.6 · AgentScope(Alibaba) 63.4 · Gru.ai 57 · MarsCode 49.4 · Lingma 30.2. **Tencent CodeBuddy·Baidu Comate·iFlytek·CodeGeeX(제품)은 SWE-bench 미보고**(내부 채택률만).
+- **Huawei Lingxi 74.6** — 별개·강함(중국 corporate).
+- **한국** — 스캐폴드 제품 **0**. Naver "Agent N" 예고만.
+- **일본** — Sakana Fugu만(secondary, 라우터).
+- **인도** — Composio/Emergent/Patchwork(디아스포라)만.
+
+### 정정 (이 census에서)
+- **Lingxi = Huawei + 매니토바대** (Alibaba 아님).
+- **CodeGeeX는 스캐폴드로 SWE-bench 안 냄** — 그 숫자는 GLM 모델 라인.
+- Tencent/Baidu/iFlytek 코딩 제품 = SWE-bench 미보고, 채택률 등 내부지표만.
+- Sonar 52.62는 SWE-bench **Full**(원본 2294), Pro 아님.
+
+### 참고 — 스캐폴드 아키텍처 택소노미
+**"Inside the Scaffold: A Source-Code Taxonomy of Coding Agent Architectures"** (arXiv 2604.03515, 2026-04). 코딩 에이전트 하네스 구조 분류 — quanta 하네스 설계 baseline으로 볼 만함. (앞선 [Dissecting the SWE-Bench Leaderboards](https://arxiv.org/html/2506.17208v2) = 제출자/아키텍처 프로파일링과 보완.)
+
+### 한 줄
+Verified는 70%대 wrapped-Claude 래퍼가 빽빽(차별화 불가). **Pro 스캐폴드는 자체발표 6개가 전부 = 빈 운동장.** (Pro+봉인+same-model+감사) 칸 0개 재확인.
