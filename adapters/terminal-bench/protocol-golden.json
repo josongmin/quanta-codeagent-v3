@@ -1,0 +1,48 @@
+{
+  "_comment": "SHARED golden wire-frame corpus for the container-exec IPC protocol. The TS brain (src/tool/container-exec/ipc-backend.ts) and the Python hands (adapters/terminal-bench/quanta_terminal_bridge) BOTH replay this so the two independently-written ends cannot drift. requests[] = frames the brain WRITES for a given exec(); responses[] = frames the hands WRITE for a given env result. Each end asserts it PRODUCES and CONSUMES exactly these bytes. Edit here, both suites re-pin.",
+  "requests": [
+    {
+      "desc": "exec request the brain writes (id is nextId, first call = 0)",
+      "exec": { "id": 0, "command": "ls -la /" },
+      "frame": { "id": 0, "type": "exec", "command": "ls -la /" }
+    },
+    {
+      "desc": "cancel request the brain writes on abort",
+      "cancel": { "id": 0 },
+      "frame": { "id": 0, "type": "cancel" }
+    }
+  ],
+  "responses": [
+    {
+      "desc": "clean success (code 0)",
+      "env": { "stdout": "total 0", "stderr": "", "return_code": 0 },
+      "frame": { "id": 0, "type": "exec_result", "stdout": "total 0", "stderr": "", "code": 0 },
+      "result": { "stdout": "total 0", "stderr": "", "code": 0 }
+    },
+    {
+      "desc": "non-zero exit is a NORMAL result (the command ran)",
+      "env": { "stdout": "", "stderr": "boom", "return_code": 1 },
+      "frame": { "id": 0, "type": "exec_result", "stdout": "", "stderr": "boom", "code": 1 },
+      "result": { "stdout": "", "stderr": "boom", "code": 1 }
+    },
+    {
+      "desc": "null streams (orchestrator reported no stream) pass through verbatim",
+      "env": { "stdout": null, "stderr": null, "return_code": 0 },
+      "frame": { "id": 0, "type": "exec_result", "stdout": null, "stderr": null, "code": 0 },
+      "result": { "stdout": null, "stderr": null, "code": 0 }
+    },
+    {
+      "desc": "non-ASCII output round-trips (UTF-8 both ends)",
+      "env": { "stdout": "build ok 🚀 éè", "stderr": "", "return_code": 0 },
+      "frame": { "id": 0, "type": "exec_result", "stdout": "build ok 🚀 éè", "stderr": "", "code": 0 },
+      "result": { "stdout": "build ok 🚀 éè", "stderr": "", "code": 0 }
+    }
+  ],
+  "errors": [
+    {
+      "desc": "hands could not run it / cancelled — terminal error frame the brain rejects on",
+      "message": "cancelled",
+      "frame": { "id": 0, "type": "error", "message": "cancelled" }
+    }
+  ]
+}

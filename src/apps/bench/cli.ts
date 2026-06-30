@@ -51,6 +51,7 @@ import {
   runBenchLogin,
   selectAuthSourceLabel,
 } from "./auth-pool"
+import { resolveDatasetFamily } from "./dataset-family"
 import { ensureBenchTraceSink } from "./default-trace-sink"
 import { bootBenchOtelExport, traceViewerUrl } from "./otel"
 import { runTraceSink } from "./otel-trace-sink"
@@ -287,6 +288,18 @@ export const parseMaxWorkers = (
 /** Build ONE backend instance for `spec` (ec2 | ssh:host). A fresh call mints a
  *  fresh box (fanout uses this per shard). */
 const buildBaseBackend = (spec: string, modelName: string | undefined): GradeBackend => {
+  // FAIL-CLOSED: the legacy `--backend ec2|ssh:` path grades via the OFFICIAL swebench
+  // `run_evaluation` (Pro-unaware) — it has no Scale harness, no `--raw_sample_path`. Pointing it
+  // at a Pro dataset would KeyError every instance (Pro repos aren't in MAP_REPO_VERSION_TO_SPECS)
+  // or, worse, grade against the WRONG Verified test-spec → silent mismeasurement. The Pro-aware
+  // grade path is full-remote/pool only. Refuse loudly rather than fake/mis-grade.
+  if (resolveDatasetFamily(argValue("--dataset-family"), process.env) === "pro") {
+    logger.info(
+      `refused: --backend ${spec} cannot grade dataset-family=pro (it uses the official swebench ` +
+        "harness, which is Pro-unaware). Use the full-remote or pool grade path for Pro.",
+    )
+    process.exit(2)
+  }
   const mw = parseMaxWorkers(argValue("--max-workers"))
   if (!mw.ok) {
     logger.info(

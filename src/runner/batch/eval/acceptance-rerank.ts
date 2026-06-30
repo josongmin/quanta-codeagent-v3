@@ -81,11 +81,22 @@ const voteWinner = (
   return { patch: winner.patch, tier, votes: vote.get(winner.patchKey) ?? 0 }
 }
 
-export const rerankSelect = (
+/** The ADMISSIBLE set + its tier — the survivors of the 3-tier ladder, BEFORE the
+ *  patch-vote tiebreak. Factored out so an optional async soft-reranker (LLM
+ *  chooser/reviewer) can operate over EXACTLY this set: it can re-order admissible
+ *  candidates but can never resurrect an inadmissible one (the never-veto invariant
+ *  is structural — the soft-reranker only ever sees `ids`). `ids` empty ⇒ tier
+ *  `none` (every patch empty). Pure; identical tiering to {@link rerankSelect}. */
+export interface RerankAdmissible {
+  readonly ids: readonly number[]
+  readonly tier: RerankTier
+}
+
+export const selectAdmissible = (
   candidates: readonly RerankCandidate[],
   opts: RerankOpts,
-): RerankResult => {
-  if (candidates.length === 0) return { patch: "", tier: "none", votes: 0 }
+): RerankAdmissible => {
+  if (candidates.length === 0) return { ids: [], tier: "none" }
   const at = (i: number): RerankCandidate => candidates[i] as RerankCandidate
   const nonEmpty = (i: number): boolean => at(i).patchKey.trim() !== ""
   const ids = range(candidates.length)
@@ -115,8 +126,16 @@ export const rerankSelect = (
   // tier 3: nothing survived ⇒ vote over ALL non-empty patches (rerank.py:217-254).
   if (selected.length === 0) {
     const all = ids.filter((i) => nonEmpty(i))
-    if (all.length === 0) return { patch: "", tier: "none", votes: 0 }
-    return voteWinner(candidates, all, "all_patches")
+    return all.length === 0 ? { ids: [], tier: "none" } : { ids: all, tier: "all_patches" }
   }
-  return voteWinner(candidates, selected, tier)
+  return { ids: selected, tier }
+}
+
+export const rerankSelect = (
+  candidates: readonly RerankCandidate[],
+  opts: RerankOpts,
+): RerankResult => {
+  const { ids, tier } = selectAdmissible(candidates, opts)
+  if (ids.length === 0) return { patch: "", tier: "none", votes: 0 }
+  return voteWinner(candidates, ids, tier)
 }

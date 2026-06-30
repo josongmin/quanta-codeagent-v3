@@ -9,7 +9,10 @@ import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { LLMPort, Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
-import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
+import {
+  resolveEffortLadderLimits,
+  runAdaptiveBenchAttempt,
+} from "@/runner/batch/eval/adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
 import {
   classifyDoneTimeCapture,
@@ -27,6 +30,7 @@ import {
   type BenchKnobState,
   BenchObserver,
   type BenchPosture,
+  benchBudgetMeterFromEnv,
   benchOptIns,
   benchPostureFromState,
   benchVerifyAuthorityCommandsOf,
@@ -44,9 +48,12 @@ import {
   type IssueHintMode,
   knobsForReport,
   latePhaseFailureResultOf,
+  applySampleTemperature,
   makeAcceptanceSelectCandidates,
+  maybeReviewSubmission,
   makeCalibratedReproConsensusPort,
   makeReproConsensusProofSelectionPort,
+  resolveAcceptanceLlmRerank,
   makeReproConsensusSelectionPort,
   makeSelectionRegressionPort,
   makeSelectionStaticSanityPort,
@@ -72,6 +79,7 @@ import {
   resetReproVoteOutcomes,
   resolveBenchKnobs,
   resolveLaneLlm,
+  resolveLocationFanoutSeeder,
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
@@ -81,6 +89,11 @@ import {
   verifyAndFinalizeResult,
 } from "@/runner/batch/eval/driver"
 import { coeditFamilyCoverageCandidate } from "@/runner/batch/eval/family-coverage-coedit"
+import {
+  buildRepairFanoutFiles,
+  buildRepairFanoutSymbols,
+  type PerCandidateSeed,
+} from "@/runner/batch/eval/location-set-fanout"
 import {
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
@@ -100,11 +113,11 @@ import {
   materializeBuildEnv,
   resetToBase,
 } from "@/runner/batch/eval/rematerialize"
+import { writeCandidatePool } from "@/runner/batch/eval/repair/candidate-ledger-sink"
 import {
   buildRepairRoundsConfig,
   makeRepairBreadthRunCandidates,
 } from "@/runner/batch/eval/repair-breadth"
-import { writeCandidatePool } from "@/runner/batch/eval/repair/candidate-ledger-sink"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
@@ -640,6 +653,10 @@ const runRepairPhase = async (
   issueDeclaredExpected: IssueDeclaredExpected | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
+   *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
+   *  (byte-identical). */
+  perCandidateSeed?: PerCandidateSeed,
 ): Promise<Phase> => {
   // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds (mirrors
   // the runner-core driver). The fault is already localized in repair (patch
@@ -699,7 +716,11 @@ const runRepairPhase = async (
           baseCommit: instance.swebench?.baseCommit,
           repo: instance.swebench?.repo,
           timeoutMs: deps.timeoutMs,
-          resolveLaneLlm: (index) => resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
+          resolveLaneLlm: (index) =>
+            applySampleTemperature(
+              resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
+              index,
+            ),
           runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
             runAgentOnce(
               instance,
@@ -740,6 +761,9 @@ const runRepairPhase = async (
                   ),
               }
             : {}),
+          // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined
+          // ⇒ shared base seed ⇒ byte-identical).
+          ...(perCandidateSeed !== undefined ? { perCandidateSeed } : {}),
         })
       : undefined
   // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only) — SHARED
@@ -750,6 +774,8 @@ const runRepairPhase = async (
     sandbox,
     deps.timeoutMs,
     repairPosture.acceptance,
+    undefined,
+    resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
   const patch = await withGitSnapshot(
     sandbox,
@@ -829,8 +855,10 @@ const runRepairPhase = async (
     },
     instance.swebench?.repo,
   )
+  const capturedPatch = patch !== "" ? patch : finalPatch
+  const submissionReview = maybeReviewSubmission(capturedPatch)
   return {
-    patch: patch !== "" ? patch : finalPatch,
+    patch: capturedPatch,
     turns,
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
@@ -838,6 +866,7 @@ const runRepairPhase = async (
     ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
+    ...(submissionReview !== undefined ? { submissionReview } : {}),
   }
 }
 
@@ -1655,6 +1684,12 @@ const runAppMainPhase = async (args: {
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
+    const repairFanoutFiles = buildRepairFanoutFiles({
+      localizeCandidates: args.prepared.localizeCandidates,
+      stage1Files: args.prepared.closureSession?.input.evidence.stage1Files,
+      ownerResolved: args.prepared.ownerResolved,
+      witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+    })
     return runRepairPhase(
       args.instance,
       args.deps,
@@ -1672,6 +1707,16 @@ const runAppMainPhase = async (args: {
       args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
+      resolveLocationFanoutSeeder(
+        repairFanoutFiles,
+        args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,
+        buildRepairFanoutSymbols({
+          issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+          fanoutFiles: repairFanoutFiles,
+          ownerResolved: args.prepared.ownerResolved,
+          witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+        }),
+      ),
     )
   }
   return runAgentPhase(
@@ -1727,6 +1772,7 @@ const runAdaptiveAttempt = async (args: {
     sandbox,
   })
   revisions.push(initialPacket.evidenceRevision)
+  const effortLimits = resolveEffortLadderLimits(process.env)
   const adaptive = await runAdaptiveBenchAttempt({
     intakePacket: initialPacket,
     base: preparedContext.state,
@@ -1769,6 +1815,9 @@ const runAdaptiveAttempt = async (args: {
       revisions.push(packet.evidenceRevision)
       return { packet }
     },
+    // #8 effort ladder: raise the bounded-loop ceiling by the opt-in tier (OFF ⇒
+    // undefined ⇒ DEFAULT_ADAPTIVE_LIMITS ⇒ byte-identical).
+    ...(effortLimits !== undefined ? { limits: effortLimits } : {}),
   })
   const adaptiveRoute = {
     outcome: adaptive.outcome,
@@ -2019,6 +2068,17 @@ const runInstanceOnce = async (
   resetReproVoteOutcomes()
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
+  // Attempt-scoped bench budget: one meter spans the nested agent runs inside
+  // THIS attempt (repair rounds, breadth candidates, verify-select generation),
+  // so batch dials bound aggregate churn instead of resetting on every internal
+  // `runAgent` invocation.
+  const attemptBudgetMeter = (
+    deps.budgetMeterFactory ?? (() => benchBudgetMeterFromEnv(process.env))
+  )()
+  const effectiveDeps: RunInstanceDeps = {
+    ...deps,
+    budgetMeterFactory: () => attemptBudgetMeter,
+  }
   // The per-instance wall-clock deadline bounds the AGENT SOLVE only — NOT env
   // setup (copyRepo + setupCmd + hint/repro install), which have their own
   // timeouts (runEnvPrep). Starting the timer here (pre-setup) let cold-start
@@ -2033,7 +2093,7 @@ const runInstanceOnce = async (
   try {
     return await runInstanceBody({
       instance,
-      deps,
+      deps: effectiveDeps,
       sandbox,
       abort,
       startedAt,

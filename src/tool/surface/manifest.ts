@@ -50,10 +50,20 @@ import { assertNever } from "@/shared"
 
 /** Surfaces the agent runs on. Distinct from `@/runner/knobs`'s `Surface`
  *  (which `@/tool` cannot import) — this is the tool-availability axis only. */
-export type ToolSurface = "cli" | "bench" | "web" | "ide" | "headless"
+export type ToolSurface = "cli" | "bench" | "web" | "ide" | "headless" | "terminal"
 
-/** All surfaces, in stable order — the drift guard + renderers iterate this. */
-export const TOOL_SURFACES: readonly ToolSurface[] = ["cli", "bench", "web", "ide", "headless"]
+/** All surfaces, in stable order — the drift guard + renderers iterate this. `terminal` (RFC
+ *  jun-29) is a FIRST-CLASS surface (NOT folded into `bench` — a terminal-operator session must
+ *  not inherit SWE-bench's repo-edit tools): its registry is the BASE-free `buildTerminalTools`
+ *  (pty_* only), so the existing surfaces' defaults are byte-identical. */
+export const TOOL_SURFACES: readonly ToolSurface[] = [
+  "cli",
+  "bench",
+  "web",
+  "ide",
+  "headless",
+  "terminal",
+]
 
 /** How a tool's availability is decided. */
 export type ToolGate =
@@ -228,7 +238,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "opt-in" },
     risk: "meta",
     adr: "0416",
-    note: "In-memory inter-agent mailbox. jun-26 (frontier tool-impl audit) coordination-trio gating: was CLI default-ON, but engagement is UNVERIFIED — no smoke proves the model actually uses the mailbox, and the frontier (Claude/Codex) delivers multi-agent via ONE Task tool, not a coordination menu. Flipped to OPT-IN (QUANTA_SUBAGENT_MAILBOX=1) on every surface until a live round-trip engagement smoke lands; default-OFF ⇒ gate unset ⇒ maybeWireMailbox/optional-ports early-return ⇒ tool absent, byte-identical menu. Re-enable by restoring `cli: \"on\"` once engagement is measured.",
+    note: 'In-memory inter-agent mailbox. jun-26 (frontier tool-impl audit) coordination-trio gating: was CLI default-ON, but engagement is UNVERIFIED — no smoke proves the model actually uses the mailbox, and the frontier (Claude/Codex) delivers multi-agent via ONE Task tool, not a coordination menu. Flipped to OPT-IN (QUANTA_SUBAGENT_MAILBOX=1) on every surface until a live round-trip engagement smoke lands; default-OFF ⇒ gate unset ⇒ maybeWireMailbox/optional-ports early-return ⇒ tool absent, byte-identical menu. Re-enable by restoring `cli: "on"` once engagement is measured.',
   },
   {
     name: "team_create",
@@ -237,7 +247,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     gate: { kind: "config-slot", slot: "teamRegistry", env: "QUANTA_TEAM_PEER_MSG" },
     default: { cli: "opt-in" },
     risk: "mutating",
-    note: "Peer teammate messaging (RFC jun-6) — mint/reap a team (membership scope over the shared mailbox). jun-26 (frontier tool-impl audit) coordination-trio gating: was CLI default-ON (seeded alongside the mailbox), but engagement is UNVERIFIED and team rides the (now opt-in) mailbox substrate — flipped to OPT-IN (QUANTA_TEAM_PEER_MSG=1) on every surface until a live engagement smoke proves the model uses peer teams. Registered only when QUANTA_TEAM_PEER_MSG is on AND the host injects a TeamRegistryPort; default-OFF ⇒ gate unset ⇒ no TeamRegistryPort wired ⇒ tool absent, byte-identical menu. The cross-team deny is enforced at send by the TeamScopedMailbox decorator, not these tools. Re-enable by restoring `cli: \"on\"` once engagement is measured.",
+    note: 'Peer teammate messaging (RFC jun-6) — mint/reap a team (membership scope over the shared mailbox). jun-26 (frontier tool-impl audit) coordination-trio gating: was CLI default-ON (seeded alongside the mailbox), but engagement is UNVERIFIED and team rides the (now opt-in) mailbox substrate — flipped to OPT-IN (QUANTA_TEAM_PEER_MSG=1) on every surface until a live engagement smoke proves the model uses peer teams. Registered only when QUANTA_TEAM_PEER_MSG is on AND the host injects a TeamRegistryPort; default-OFF ⇒ gate unset ⇒ no TeamRegistryPort wired ⇒ tool absent, byte-identical menu. The cross-team deny is enforced at send by the TeamScopedMailbox decorator, not these tools. Re-enable by restoring `cli: "on"` once engagement is measured.',
   },
   {
     name: "objective_set",
@@ -247,7 +257,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "opt-in" },
     risk: "meta",
     adr: "0394",
-    note: "In-memory agent objective tracking. jun-26 (frontier tool-impl audit) coordination-trio gating: was CLI default-ON, but engagement is UNVERIFIED (no smoke proves the model reads/updates the objective) — flipped to OPT-IN (QUANTA_OBJECTIVE_TOOLS=1) on every surface until a live engagement smoke lands; default-OFF ⇒ gate unset ⇒ maybeWireObjective early-return ⇒ tool absent, byte-identical menu. Re-enable by restoring `cli: \"on\"` once engagement is measured.",
+    note: 'In-memory agent objective tracking. jun-26 (frontier tool-impl audit) coordination-trio gating: was CLI default-ON, but engagement is UNVERIFIED (no smoke proves the model reads/updates the objective) — flipped to OPT-IN (QUANTA_OBJECTIVE_TOOLS=1) on every surface until a live engagement smoke lands; default-OFF ⇒ gate unset ⇒ maybeWireObjective early-return ⇒ tool absent, byte-identical menu. Re-enable by restoring `cli: "on"` once engagement is measured.',
   },
   {
     name: "subagent_fork",
@@ -821,7 +831,17 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       slot: "DefaultToolPorts.ptySession",
       env: "QUANTA_PTY_ATTACH",
     },
-    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    default: {
+      cli: "opt-in",
+      bench: "opt-in",
+      web: "opt-in",
+      ide: "opt-in",
+      headless: "opt-in",
+      // RFC jun-29: pty_* IS the `terminal` surface's primary toolset (default-ON there). The
+      // terminal registry is built BASE-free by `buildTerminalTools` (not buildDefaultTools), so
+      // this `on` only affects the terminal surface; cli/bench/web/ide/headless stay opt-in.
+      terminal: "on",
+    },
     risk: "exec",
     adr: "N6",
     note: "Attach to a long-lived PTY / named tmux session — resize + live stdin/stdout (resumable `pty_read` cursor) across turns (§7, RFC jun-4-pty-attach). Distinct from the one-shot bash + 6-tool pipe paths: this attaches to sessions quanta did NOT necessarily spawn. Two zero-dep backends behind one PtySessionPort: tmux shell-out (createTmuxAdapter — attach to existing named sessions) and Bun native PTY (Bun.Terminal — real tty/resize). pty_list/pty_read are read-only; attach/write/resize/kill are exec-risk. SECURITY: only tmux sessions matching the allow-prefix (default `quanta-`) are attachable; a foreign session is fail-closed `foreign-denied` unless pty.allowForeignTmux + HITL; dangerous pty_write content flows through the host's existing command HITL; 64 KiB write cap, 1..1000 resize bounds, MAX_ATTACHED cap. Opt-in EVERYWHERE (QUANTA_PTY_ATTACH) — exec risk, touches sessions outside the spawn jail; never auto-seeds. Closed-port DI keeps @/tool/pty fence-clean (injected exec/backend).",
@@ -838,6 +858,28 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     risk: "meta",
     adr: "0487",
     note: "ADR-0487 — promote/reorder a queued background subagent within its OWN admission pool (move-to-front / burst-run). Reorders work the agent already requested, so it is plan-safe (no NEW mutation of the workspace) like subagent_poll. Minted by subagentBgTools ONLY when opts.forceBackground (QUANTA_FORCE_BACKGROUND) AND the admission queue is enabled (QUANTA_SUBAGENT_QUEUE); off ⇒ the 4th tool is absent and the scheduler throws-at-cap (byte-identical). Opt-in EVERYWHERE.",
+  },
+  {
+    name: "container_exec",
+    origin: "@/tool (containerExecTool, via DefaultToolPorts.containerExec)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.containerExec",
+      env: "QUANTA_CONTAINER_EXEC",
+    },
+    default: {
+      cli: "opt-in",
+      bench: "opt-in",
+      web: "opt-in",
+      ide: "opt-in",
+      headless: "opt-in",
+      // RFC jun-29 §13 #1: the one-shot exec workhorse of the `terminal` surface (default-ON there,
+      // built BASE-free by buildTerminalTools — never on cli/bench/web/ide/headless).
+      terminal: "on",
+    },
+    risk: "exec",
+    adr: "N6",
+    note: "RFC jun-29 §13 — one-shot shell exec INSIDE the bound container; returns stdout/stderr + EXIT CODE (the completion signal, lever #2), head+tail-capped (#4) and run through the shared neutralizeTerminalOutput forge-defence. Container-bound by construction (the injected ContainerExec port is docker exec / orchestrator env-exec, NEVER host bash — spec S3); command flows through the host HARD_DENY denylist via extractShellCommand. Minted ONLY when DefaultToolPorts.containerExec is wired (QUANTA_CONTAINER_EXEC, by the terminal entry-point adapter in src/apps/); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE except the terminal surface.",
   },
   {
     name: "appshot_verify",

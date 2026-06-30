@@ -35,6 +35,11 @@ export {
 } from "./evidence-facts"
 export { validateAdaptiveDecisionForEvidence } from "./decision-legality"
 export {
+  effortLadderLimits,
+  MAX_EFFORT_TIER,
+  resolveEffortLadderLimits,
+} from "./effort-ladder"
+export {
   deriveEvidenceFactsFromPacket,
   projectRouterEvidence,
   type RouterEvidence,

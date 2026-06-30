@@ -36,13 +36,13 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mirrorReportToSsot } from "@/runner/batch/report"
-import { errMessage, foldGroundingReceipts } from "@/shared"
+import { foldGroundingReceipts } from "@/shared"
 import { benchHome } from "../corpus"
 import { presetRequiresLiveLspGrounding } from "../preset"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
-import { resolveSwebenchNamespace } from "./box-session/ec2-lifecycle"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
+import { resolveSwebenchNamespace } from "./box-session/ec2-lifecycle"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
 import {
@@ -450,10 +450,8 @@ const runChunkBench = async (args: {
 const fetchRemoteFile = async (ssh: BoxSession["ssh"], remotePath: string): Promise<SpawnResult> =>
   await ssh(`cat ${remotePath} 2>/dev/null`)
 
-const fetchRemoteCommand = async (
-  ssh: BoxSession["ssh"],
-  command: string,
-): Promise<SpawnResult> => await ssh(command)
+const fetchRemoteCommand = async (ssh: BoxSession["ssh"], command: string): Promise<SpawnResult> =>
+  await ssh(command)
 
 const saveLocalArtifact = (
   localPath: string,
@@ -798,6 +796,7 @@ export const gradeChunkOnBox = async (
 
 export { PHANTOM_DEPS, stripToAccessToken } from "./box-session/auth"
 export {
+  assertProDatasetGradeable,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,

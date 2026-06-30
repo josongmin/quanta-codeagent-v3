@@ -4,6 +4,7 @@ import {
   type PrepareIssueSmokeSelectionPortDeps,
   prepareIssueSmokeAux,
   prepareIssueSmokeSelectionPort,
+  runIssueSmokeScript,
   seedFromIssueSmoke,
 } from "@/runner/batch/eval/selection-smoke"
 
@@ -136,6 +137,49 @@ describe("prepareIssueSmokeSelectionPort (base-RED executed-authority gate)", ()
     expect(port).toBeUndefined()
     // And it never executed any CANDIDATE (authority was refused at the base gate).
     expect(candidateRuns).toEqual([])
+  })
+})
+
+describe("runIssueSmokeScript", () => {
+  test("Pro python instance with dockerhubTag ⇒ issue smoke runs inside the instance image", async () => {
+    const seen: (readonly string[])[] = []
+    const ok = await runIssueSmokeScript(
+      {
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          version: "1.0",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      },
+      "/tmp/sb",
+      "print('ok')",
+      1000,
+      {
+        writeFile: async () => {},
+        removeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "", stderr: "" }
+        },
+      },
+    )
+    expect(ok).toBe(true)
+    expect(seen[0]).toEqual([
+      "docker",
+      "run",
+      "--rm",
+      "-v",
+      "/tmp/sb:/tmp/sb",
+      "-w",
+      "/tmp/sb",
+      "jefzda/sweap-images:qutebrowser.demo",
+      "python",
+      "-s",
+      "/tmp/sb/.quanta-issue-smoke.py",
+    ])
   })
 })
 

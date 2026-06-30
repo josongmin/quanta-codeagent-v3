@@ -97,6 +97,15 @@ export {
   streamWithModel,
 } from "./model-swap"
 export type { LLMPort } from "./ports"
+// Repair-breadth fanout sampling — pure leaf (per-candidate temperature
+// schedule, Agentless `repair.py` parity) + SOLID decorator that injects a
+// per-port temperature into `StreamInput`. Inert until a seam wires them.
+export {
+  GREEDY,
+  sampleTemperatureForCandidate,
+  TEMPERATURE_SAMPLE,
+} from "./sample-temperature"
+export { withTemperature } from "./with-temperature"
 export {
   hasPrewarm,
   type LlmPrewarmPort,
@@ -107,7 +116,11 @@ export {
 // (imports only `provider-types`), so re-exporting through the barrel drags no
 // SDK dependency; the compaction slice + the loop's usage-snapshot consume it.
 export type { ModelWindow } from "./provider-metadata"
-export { MODEL_CONTEXT_WINDOWS, resolveModelWindow } from "./provider-metadata"
+export {
+  MODEL_CONTEXT_WINDOWS,
+  modelSupportsSamplingTemperature,
+  resolveModelWindow,
+} from "./provider-metadata"
 export type { ProviderEnv, ProviderId, ResolvedProvider } from "./providers"
 export { isRefusalStopReason, PROVIDER_ENV_KEYS, resolveProvider } from "./providers"
 export type {

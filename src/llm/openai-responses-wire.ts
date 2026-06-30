@@ -390,6 +390,14 @@ export const buildResponsesBody = (
     ...(input.promptCacheRetention !== undefined
       ? { prompt_cache_retention: input.promptCacheRetention }
       : {}),
+    // Per-call sampling temperature (repair-breadth fanout). Present ⇒ spread
+    // the Responses `temperature` field; absent ⇒ OMIT the key entirely
+    // (byte-identical to the pre-feature body — same conditional-spread pattern
+    // as `prompt_cache_key` above). NOTE: OpenAI reasoning surfaces
+    // (o-series / GPT-5 on Responses) REJECT `temperature` with a 400 — the
+    // seam owner only injects this for sampling-capable (non-reasoning) lanes;
+    // this wire passes the caller-owned value straight through without clamping.
+    ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
     ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
     // `reasoning` carries `{ effort?, summary? }`. Emitted only when non-empty
     // (effort OR summary requested); absent ⇒ no `reasoning` key (byte-identical

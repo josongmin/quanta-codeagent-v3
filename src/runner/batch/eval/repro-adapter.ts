@@ -11,8 +11,10 @@
  *
  * PHASE 1 (this module) = the contract + the Python adapter wrapping today's behavior
  * BYTE-IDENTICALLY (default = python), plus fail-closed resolution for unsupported languages.
- * Backends (host → in-image) and the Go/JS adapters are later phases — see the RFC.
+ * Phase 2 adds the image backend seam + the runtime policy helper that upgrades Pro Python
+ * repros into their prebuilt instance image when the image ref is derivable.
  */
+import { dirname } from "node:path"
 import { reproRunArgv } from "../corpus/dataset"
 import type { Instance } from "../types"
 import { classifyPytest, classifyPytestReportText } from "@/agent/repro-test/execute"
@@ -21,7 +23,7 @@ import {
   reproScriptBasename,
 } from "@/agent/repro-test/scaffold-patterns"
 import type { ReproTestOutcome } from "@/agent/repro-test/types"
-import { reproValidationCmd } from "./repro-command"
+import { reproValidationCmd, shellJoin, shellWord } from "./repro-command"
 
 export type ReproLanguage = "python" | "go" | "js" | "ts"
 
@@ -54,6 +56,11 @@ export const dockerRunReproArgv = (
   sandboxDir: string,
   inner: readonly string[],
 ): readonly string[] => ["docker", "run", "--rm", "-v", `${sandboxDir}:${sandboxDir}`, "-w", sandboxDir, imageRef, ...inner]
+
+const dockerValidationCmd = (imageRef: string, sandboxDir: string, scriptPath: string): string =>
+  sandboxDir.startsWith("/")
+    ? shellJoin(dockerRunReproArgv(imageRef, sandboxDir, ["python", "-s", scriptPath]))
+    : `docker run --rm -v "$PWD":/work -w /work ${shellWord(imageRef)} python -s ${shellWord(scriptPath)}`
 
 /** Evidence the executor collected from a repro run, fed to the language-specific parser. */
 export interface ReproEvidence {
@@ -96,8 +103,10 @@ export const pythonReproAdapter: ReproAdapter = {
     // (matches reproValidationCmd); else the uv project-env SSOT. BYTE-IDENTICAL to pre-Phase-2.
     return repo === undefined ? ["python3", "-s", scriptPath] : [...reproRunArgv(repo, version, scriptPath)]
   },
-  buildValidationCmd: ({ repo, version, scriptPath }) =>
-    reproValidationCmd({ repo, version, scriptPath }),
+  buildValidationCmd: ({ repo, version, scriptPath, execBackend, imageRef, sandboxDir }) =>
+    execBackend === "image" && imageRef !== undefined && sandboxDir !== undefined
+      ? dockerValidationCmd(imageRef, sandboxDir, scriptPath)
+      : reproValidationCmd({ repo, version, scriptPath }),
   // pytest sidecar is authoritative when present (matches execute.ts precedence); else the
   // stdout-based classifier. Byte-identical to the current verdict path.
   parseEvidence: ({ stdout, stderr, code, sidecarText }) =>
@@ -136,4 +145,24 @@ export const proReproImageRef = (
 ): string | null => {
   const tag = instance.swebench?.dockerhubTag
   return tag !== undefined && tag !== "" ? `${dockerhubUsername}/sweap-images:${tag}` : null
+}
+
+/**
+ * Preferred execution runtime for a repro on this instance + script path.
+ *
+ * Pro Python instances carry a clean, pullable image ref (`dockerhubTag`), so their repros should
+ * run INSIDE that image instead of the host uv env. Verified/Live (no derivable image ref) stay on
+ * the legacy host path byte-identically.
+ */
+export const preferredReproExecRuntime = (
+  instance: Pick<Instance, "swebench">,
+  scriptPath: string,
+): Pick<ReproExecCtx, "execBackend" | "imageRef" | "sandboxDir"> => {
+  const imageRef = proReproImageRef(instance)
+  if (imageRef === null) return {}
+  return {
+    execBackend: "image",
+    imageRef,
+    sandboxDir: dirname(scriptPath),
+  }
 }

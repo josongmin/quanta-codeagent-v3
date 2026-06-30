@@ -15,7 +15,7 @@
  */
 
 import { buildAcceptanceSelector } from "./acceptance-adapter"
-import type { AcceptanceOracles } from "./acceptance-select"
+import type { AcceptanceLlmRerank, AcceptanceOracles } from "./acceptance-select"
 import type { RepairCandidateOutcome } from "./repair/types"
 
 /** Low-level sandbox runners (driver-supplied). Each applies the candidate patch to
@@ -46,6 +46,9 @@ export interface AcceptanceWireDeps extends SandboxAcceptanceDeps {
   readonly enabled: boolean
   /** Optional AST-canonical vote-key normalizer (defaults to trimmed raw patch). */
   readonly normalizePatch?: (patch: string) => string
+  /** Optional LLM soft-reranker over the admissible survivors (chooser/reviewer).
+   *  Absent ⇒ deterministic vote only (byte-identical). Fail-open / never-veto. */
+  readonly llmRerank?: AcceptanceLlmRerank
 }
 
 /**
@@ -61,5 +64,5 @@ export const maybeAcceptanceSelector = (
   | undefined => {
   if (!deps.enabled) return undefined
   const oracles = buildSandboxAcceptanceOracles(deps)
-  return buildAcceptanceSelector(oracles, deps.normalizePatch)
+  return buildAcceptanceSelector(oracles, deps.normalizePatch, deps.llmRerank)
 }

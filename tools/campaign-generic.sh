@@ -10,15 +10,23 @@
 #   CBATCH   instances per box                     [default 6]
 # bash-3.2 safe. Clean exit self-terminates EC2 boxes (no orphans). Stops on
 # queue-empty OR account-death. Harvest → /tmp/camp-$CNS-green.txt (NO backup restore).
+#   CDATASET  path to dataset jsonl         [default: verified-full.jsonl]
+#   CPRESET   bench preset name             [default: agentless-v6-singlepass-execfull]
+#   CNONEMPTY set to 0 to skip NONEMPTY_FALLBACK [default: 1]
+#   CCONCURRENCY per-box instance concurrency      [default: 1]
 set -uo pipefail
 cd /Users/songmin/quanta-codeagent-v3
 : "${CNS:?CNS required}"; : "${CQUEUE:?CQUEUE required}"
 CMODEL="${CMODEL:-gpt-5.5}"; CEXTRA="${CEXTRA:-}"; CMAXBOX="${CMAXBOX:-4}"; CBATCH="${CBATCH:-6}"
+CCONCURRENCY="${CCONCURRENCY:-1}"
+CPRESET="${CPRESET:-agentless-v6-singlepass-execfull}"
+CNONEMPTY="${CNONEMPTY:-1}"
 QUEUE="$CQUEUE"
 GREEN="/tmp/camp-$CNS-green.txt"
 PROG="/tmp/camp-$CNS-progress.txt"
 DEAD="/tmp/camp-$CNS-ACCOUNT_DEAD"
 RAW=tools/leaderboard-dashboard/rawdata/verified-full.jsonl
+CDATASET="${CDATASET:-$RAW}"
 batch=200
 log() { echo "$(date +%H:%M:%S) $*" >> "$PROG"; }
 
@@ -64,9 +72,10 @@ while true; do
   tail -n +$((CBATCH+1)) "$QUEUE" > "$QUEUE.t" && mv "$QUEUE.t" "$QUEUE"
   batch=$((batch+1)); tag="b$batch"
   echo "$ids" > /tmp/camp-$CNS-$tag.ids
-  IDS="$ids" python3 -c "import json,os;w=set(os.environ['IDS'].split());f=open('/tmp/camp-$CNS-$tag.jsonl','w');[f.write(l) for l in open('$RAW') if json.loads(l).get('instance_id') in w]"
-  env QUANTA_BENCH_PRESET=agentless-v6-singlepass-execfull QUANTA_BENCH_NONEMPTY_FALLBACK=1 \
-      QUANTA_BENCH_CONCURRENCY=1 QUANTA_OTEL_ENDPOINT=http://localhost:4318 QUANTA_OTEL_SERVICE_NAME="bench-$CNS-$tag" \
+  IDS="$ids" CDATASET="$CDATASET" python3 -c "import json,os;w=set(os.environ['IDS'].split());f=open('/tmp/camp-$CNS-$tag.jsonl','w');[f.write(l) for l in open(os.environ['CDATASET']) if json.loads(l).get('instance_id') in w]"
+  NONEMPTY_FLAG=""; [ "$CNONEMPTY" = "1" ] && NONEMPTY_FLAG="QUANTA_BENCH_NONEMPTY_FALLBACK=1"
+  env QUANTA_BENCH_PRESET="$CPRESET" $NONEMPTY_FLAG \
+      QUANTA_BENCH_CONCURRENCY="$CCONCURRENCY" QUANTA_OTEL_ENDPOINT=http://localhost:4318 QUANTA_OTEL_SERVICE_NAME="bench-$CNS-$tag" \
       $CEXTRA \
     nohup bun run src/apps/bench/cli.ts grade --mode full --allow-remote-secrets \
       --dataset /tmp/camp-$CNS-$tag.jsonl --model "$CMODEL" --allow-extra-boxes \

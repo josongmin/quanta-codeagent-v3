@@ -24,6 +24,7 @@ import {
   type AgentlessLocalizeDeps,
   type AgentlessLocalizeResult,
   agentlessLocalize,
+  BUDGET_PRESETS,
   BudgetMeter,
   buildSystemPrompt,
   composeAgentlessHint,
@@ -63,7 +64,6 @@ import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproGroundingInput } from "@/agent/repro-test/generate"
 import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
-import { resolveReproAdapter } from "./repro-adapter"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { voteResolved } from "@/agent/repro-test/vote"
 import {
@@ -72,7 +72,13 @@ import {
   type IssueDeclaredExpected,
 } from "@/agent/verification-plan"
 import { buildVerifyGuard } from "@/agent/verify-guard"
-import type { LLMPort, Message } from "@/llm"
+import {
+  type LLMPort,
+  type Message,
+  modelSupportsSamplingTemperature,
+  sampleTemperatureForCandidate,
+  withTemperature,
+} from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
@@ -104,8 +110,17 @@ import type {
   ReproGroundingTelemetry,
   ReproOracleCalibration,
 } from "../types"
+import {
+  buildLlmRerankFromPort,
+  resolveLlmSelectMode,
+} from "./acceptance-llm-rerank-wire"
+import type { AcceptanceLlmRerank } from "./acceptance-select"
 import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
-import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
+import {
+  ADAPTIVE_ACTIONS,
+  resolveEffortLadderLimits,
+  runAdaptiveBenchAttempt,
+} from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import {
   type CandidateFamily,
@@ -182,6 +197,7 @@ import {
   resetToBase,
   withCandidatePatch,
 } from "./rematerialize"
+import { writeCandidatePool } from "./repair/candidate-ledger-sink"
 import { runRepairRounds } from "./repair/index"
 import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import {
@@ -201,8 +217,15 @@ import type {
   ValidatorResult,
 } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
+import {
+  buildLocationSeeder,
+  buildRepairFanoutFiles,
+  buildRepairFanoutSymbols,
+  type PerCandidateSeed,
+} from "./location-set-fanout"
+import { reviewSubmission, type SubmissionReview } from "./submission-review"
+import { strongVoteKey } from "./vote-key-normalize"
 import { buildRepairRoundsConfig, makeRepairBreadthRunCandidates } from "./repair-breadth"
-import { writeCandidatePool } from "./repair/candidate-ledger-sink"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
@@ -215,6 +238,7 @@ import {
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
 import { emitPatch, emitSandbox, emitVerify, ObservationError, type Wiring } from "./report"
+import { preferredReproExecRuntime, resolveReproAdapter } from "./repro-adapter"
 import { reproArtifactInstancePath, reproArtifactVoteRoundPath } from "./repro-artifacts-fs"
 import {
   boundReproArtifactSidecar,
@@ -306,8 +330,9 @@ export interface RunInstanceDeps {
   turnContextMutator?: AgentConfig["turnContextMutator"]
   /**
    * Optional hard-budget factory for a single agent invocation. The factory is
-   * called fresh for each solve / repair round / verify-select candidate so
-   * meter state never leaks across independent agent runs.
+   * threaded through `buildConfig`; callers may return a FRESH meter per nested
+   * run, or close over ONE shared meter to enforce an attempt-wide budget
+   * across repair rounds / breadth candidates / selector runs.
    *
    * Absent (default) ⇒ no budget meter is wired and the loop stays
    * byte-identical to the pre-budget path.
@@ -713,6 +738,14 @@ const composeBaseText = (
  *                                   baseline — keep OFF unless measuring N-best.
  *                                   NOT auto-enabled for `instance.swebench` —
  *                                   explicit opt-in only (cost discipline).
+ *   - QUANTA_BENCH_LLM_SELECT=chooser|reviewer  LLM soft-rerank over the acceptance
+ *                                   admissible survivors (SWE-agent Chooser/Score
+ *                                   retry-loop absorption). Re-ranks WITHIN the
+ *                                   deterministic admissible set only (never-veto)
+ *                                   and fails open to the vote winner; needs the
+ *                                   acceptance selector to be active to have an
+ *                                   effect. ~N× one-shot LLM cost. See
+ *                                   {@link resolveAcceptanceLlmRerank}.
  *  See {@link benchOptIns} (just below) for the resolver — the BENCH-INTENTIONAL
  *  posture is unchanged when all four are unset. If a future bench mode wants
  *  any of the other listed knobs, add another opt-in flag — do NOT remove this
@@ -1671,14 +1704,23 @@ export const reproHintMessage = (command: string): string =>
  *  `reproHintForInstance` so the hint includes `uv run --with-editable`. */
 export const REPRO_HINT_MESSAGE = reproHintMessage("python3 -s reproduce_issue.py")
 
+const reproValidationCmdForInstance = (instance: Instance, scriptPath: string): string => {
+  const repo = instance.swebench?.repo
+  const version = instance.swebench?.version
+  const adapter = resolveReproAdapter(instance)
+  if (repo !== undefined && adapter !== null) {
+    return adapter.buildValidationCmd({
+      repo,
+      version,
+      scriptPath,
+      ...preferredReproExecRuntime(instance, scriptPath),
+    })
+  }
+  return reproValidationCmd({ repo, version, scriptPath })
+}
+
 const reproHintForInstance = (instance: Instance): string =>
-  reproHintMessage(
-    reproValidationCmd({
-      repo: instance.swebench?.repo,
-      version: instance.swebench?.version,
-      scriptPath: REPRO_FILE_NAME,
-    }),
-  )
+  reproHintMessage(reproValidationCmdForInstance(instance, REPRO_FILE_NAME))
 
 export interface PrepareReproTestDetailedResult {
   readonly selection: ReproTestSelection | null
@@ -1812,18 +1854,23 @@ const executeReproCandidateTests = async (
 ): Promise<ReproSamples | null> => {
   const reproRepo = instance.swebench?.repo
   const reproVersion = instance.swebench?.version
-  // RFC jun-29 Phase 1c: route the repro exec command through the per-language ReproAdapter.
-  // Python (incl. Verified/Live default) ⇒ adapter.buildExecArgv === reproRunArgv ⇒ BYTE-IDENTICAL.
-  // Unsupported language (Pro non-Python) ⇒ adapter null ⇒ FAIL-CLOSED (no repro exec: running a
-  // pytest on a Go/JS tree only ever produced `exec_failed`/`infra_unavailable` — an honest "no
-  // signal" beats a fake one). The repo-undefined branch is preserved verbatim (non-SWE-bench
-  // fixtures keep execute.ts's bare `[python, path]` default — NOT the adapter's `-s` form).
+  // RFC jun-29 Phase 2b: route repro exec through the per-language adapter PLUS the preferred
+  // runtime for this instance. Verified/Live Python stay host-byte-identical; Pro Python with a
+  // clean image ref upgrades to `docker run ... python -s <script>` inside the instance image.
+  // Unsupported language (Pro non-Python) ⇒ adapter null ⇒ FAIL-CLOSED (no fake pytest on a
+  // Go/JS tree). The repo-undefined branch is preserved verbatim (non-SWE-bench fixtures keep
+  // execute.ts's bare `[python, path]` default — NOT the adapter's `-s` form).
   const reproAdapter = resolveReproAdapter(instance)
   if (reproAdapter === null) return null
   const buildArgv =
     reproRepo !== undefined
       ? (scriptPath: string) => [
-          ...reproAdapter.buildExecArgv({ repo: reproRepo, version: reproVersion, scriptPath }),
+          ...reproAdapter.buildExecArgv({
+            repo: reproRepo,
+            version: reproVersion,
+            scriptPath,
+            ...preferredReproExecRuntime(instance, scriptPath),
+          }),
         ]
       : undefined
   // G2 paired-control: when controls were generated (gate ON), attach the SAME
@@ -2690,34 +2737,32 @@ const wirePostureAgentPorts = (args: {
 })
 
 /**
- * Per-instance cost cap for bench runs. The bench harness assembles its config
- * via `buildConfig` (NOT the host `assembleAgentConfig`), so the per-run
- * `maxCostUsd` meter that protects the `apps/agent` autonomous modes never
- * reached it — a SWE-bench instance could spend unboundedly. This mints a
- * `BudgetMeter` with a CUMULATIVE cap from `QUANTA_BENCH_MAX_COST_USD` and/or a
- * per-TURN runaway cap from `QUANTA_BENCH_MAX_COST_PER_TURN_USD` (positive USD,
- * fractional allowed; NO hardcoded default — operator-supplied, measure-first).
+ * Bench budget meter (reused attempt-wide by the apps driver, or per-config by
+ * direct callers). The bench harness assembles its config via `buildConfig`
+ * (NOT the host `assembleAgentConfig`), so the batch preset dials and the
+ * autonomous-mode cost caps never reached it directly. This mints a real
+ * `BudgetMeter` from the canonical `BUDGET_PRESETS.batch` dials, but it strips
+ * the preset's default `maxCostUsd` so bench does NOT silently acquire a new
+ * default dollar cap. Operators may still opt into cumulative and/or per-turn
+ * cost ceilings via `QUANTA_BENCH_MAX_COST_USD` and
+ * `QUANTA_BENCH_MAX_COST_PER_TURN_USD` (positive USD, fractional allowed).
  * Once the meter exists, the SAME L0/L2/L3 machinery engages: `emitUsage` ticks
- * the priced cost, the turn epilogue `checkExhausted` stops on cumulative OR
- * per-turn overrun, and the pre-flight refuses a guaranteed-breach call. A
- * caller-provided `budgetMeterFactory` still wins. No cap ⇒ undefined ⇒
- * byte-identical (bench unchanged). Exported for direct unit testing. */
-export const benchBudgetMeterFromEnv = (
-  env: Record<string, string | undefined>,
-): BudgetMeter | undefined => {
+ * the priced cost, the turn epilogue `checkExhausted` stops on the first
+ * tripped dial, and the pre-flight refuses a guaranteed-breach call. A
+ * caller-provided `budgetMeterFactory` still wins. Exported for direct unit
+ * testing. */
+export const benchBudgetMeterFromEnv = (env: Record<string, string | undefined>): BudgetMeter => {
   const posUsd = (raw: string | undefined): number | undefined => {
     if (raw === undefined) return undefined
     const n = Number.parseFloat(raw.trim())
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  // Cumulative per-instance cap (L0) and per-TURN runaway-turn cap (L3). Either
-  // (or both) opts the meter in; a missing/garbage value for one leaves that
-  // dial uncapped. No cap at all ⇒ undefined (byte-identical, bench unchanged).
-  const maxCostUsd = posUsd(env["QUANTA_BENCH_MAX_COST_USD"])
-  const maxCostPerTurnUsd = posUsd(env["QUANTA_BENCH_MAX_COST_PER_TURN_USD"])
-  if (maxCostUsd === undefined && maxCostPerTurnUsd === undefined) return undefined
+  const { maxCostUsd: _defaultBatchCostCap, ...batchDialsSansDefaultCost } = BUDGET_PRESETS.batch
+  const maxCostUsd = posUsd(env.QUANTA_BENCH_MAX_COST_USD)
+  const maxCostPerTurnUsd = posUsd(env.QUANTA_BENCH_MAX_COST_PER_TURN_USD)
   return new BudgetMeter({
     dials: {
+      ...batchDialsSansDefaultCost,
       ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
       ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
     },
@@ -2967,6 +3012,9 @@ interface Phase {
   llmEvidence?: LlmEvidenceArtifacts
   /** Structural owner widening actually consumed before this phase ran. */
   ownerWidening?: OwnerWideningTelemetry
+  /** #6 submit-review (QUANTA_BENCH_SUBMIT_REVIEW): observe-only verdict over the
+   *  final captured patch (clean / empty / test-edits). Absent ⇒ knob off. */
+  submissionReview?: SubmissionReview
 }
 
 /**
@@ -3100,6 +3148,7 @@ const runAgentOnce = async (
       patch,
       turns: outcome.turns,
       ...(tap.lastVerifyCmd !== undefined ? { lastVerifyCmd: tap.lastVerifyCmd } : {}),
+      ...(tap.actionTrace.length > 0 ? { actionTrace: tap.actionTrace } : {}),
     }
     return result
   } finally {
@@ -3219,10 +3268,9 @@ export const reproExecBundle = (
 } => {
   const repo = instance.swebench?.repo
   const version = instance.swebench?.version
-  // RFC jun-29 Phase 1c: same per-language adapter routing as prepareReproTests, so the
-  // repro-vote validator + consensus scorer execute candidates identically (one SSOT). Python ⇒
-  // adapter.buildExecArgv === reproRunArgv (BYTE-IDENTICAL); unsupported language ⇒ adapter null
-  // ⇒ omit buildArgv (the non-Python repro set is already fail-closed upstream in prepareReproTests).
+  // Same repro runtime policy as prepareReproTests: Verified/Live Python stay on the host argv,
+  // Pro Python with `dockerhubTag` run inside the instance image, and unsupported languages omit
+  // buildArgv entirely (the non-Python repro set is already fail-closed upstream in prepareReproTests).
   const adapter = resolveReproAdapter(instance)
   return {
     exec: (argv, cwd, timeoutMs) =>
@@ -3234,7 +3282,16 @@ export const reproExecBundle = (
     },
     readFile: async (p: string): Promise<string> => Bun.file(p).text(),
     ...(repo !== undefined && adapter !== null
-      ? { buildArgv: (scriptPath: string) => [...adapter.buildExecArgv({ repo, version, scriptPath })] }
+      ? {
+          buildArgv: (scriptPath: string) => [
+            ...adapter.buildExecArgv({
+              repo,
+              version,
+              scriptPath,
+              ...preferredReproExecRuntime(instance, scriptPath),
+            }),
+          ],
+        }
       : {}),
   }
 }
@@ -3346,6 +3403,10 @@ export const makeAcceptanceSelectCandidates = (
    *  failures; absent/empty ⇒ repro-only (byte-identical). The base-green capture
    *  that feeds this is the measure-first follow-up (≈2× test cost — opt-in). */
   regressionSet?: readonly string[],
+  /** OPTIONAL LLM soft-reranker over the admissible survivors (chooser/reviewer
+   *  knobs, `QUANTA_BENCH_LLM_SELECT`). Absent ⇒ deterministic vote only
+   *  (byte-identical). Never-veto / fail-open (see acceptance-select). */
+  llmRerank?: AcceptanceLlmRerank,
 ) =>
   buildReproAcceptanceSelector(enabled, reproSources, {
     withCandidatePatch: (patch, probe) =>
@@ -3357,6 +3418,7 @@ export const makeAcceptanceSelectCandidates = (
         ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
         probe,
       }),
+    ...(llmRerank !== undefined ? { llmRerank } : {}),
     reproResolvedOnSandbox: async (sb) => {
       const samples = await executeReproTests({
         tests: reproSources,
@@ -3365,6 +3427,12 @@ export const makeAcceptanceSelectCandidates = (
       })
       return voteResolved(samples).verdict === "resolved"
     },
+    // #3 Agentless-parity vote-key dedup (QUANTA_BENCH_VOTE_NORMALIZE): stronger
+    // key so comment/blank/whitespace variants reinforce the majority instead of
+    // splitting it. OFF ⇒ undefined ⇒ raw-trim key (byte-identical).
+    ...(gateOn(process.env, "QUANTA_BENCH_VOTE_NORMALIZE")
+      ? { normalizePatch: strongVoteKey }
+      : {}),
     // Dual-guard regression probe (only when a regression set was supplied): run it
     // on the patched tree and count failures (ran && !pass ⇒ failed.length, else 0).
     ...(regressionSet !== undefined && regressionSet.length > 0
@@ -3382,6 +3450,71 @@ export const makeAcceptanceSelectCandidates = (
         }
       : {}),
   })
+
+/**
+ * Strategy #2 — Agentless-style sampling diversity for the repair-breadth fanout.
+ * Wraps a candidate's lane port so candidate 0 stays greedy (unwrapped ⇒
+ * byte-identical) and candidates ≥1 sample at temperature 0.8
+ * ({@link sampleTemperatureForCandidate}). Gated by `QUANTA_BENCH_SAMPLE_TEMP`
+ * (OFF ⇒ base port ⇒ byte-identical). SHARED by both drivers. Composition at the
+ * wiring layer — repair-breadth + the LLM loop stay untouched.
+ */
+export const applySampleTemperature = (base: LLMPort, index: number): LLMPort => {
+  if (!gateOn(process.env, "QUANTA_BENCH_SAMPLE_TEMP")) return base
+  // Model-capability guard: OpenAI reasoning models (o-series / GPT-5) 400 on a
+  // `temperature` field, so the knob NO-OPS (greedy lanes) on them rather than
+  // collapsing the breadth fanout to failed forks. Sampling diversity needs a
+  // sampling-capable model (Claude / GPT-4o). The "sampling-capable lanes only"
+  // contract is now ENFORCED here, not just documented at the wire.
+  if (!modelSupportsSamplingTemperature(base.model ?? "")) return base
+  const t = sampleTemperatureForCandidate(index)
+  return t === undefined ? base : withTemperature(base, t)
+}
+
+/**
+ * Strategy #6 — observe-only submission review (SWE-agent `review_on_submit`
+ * deterministic check). When `QUANTA_BENCH_SUBMIT_REVIEW` is on, classify the final
+ * captured patch (clean / empty / test-edits) for telemetry + as a strip-regression
+ * sentinel (the test-revert itself is already unconditional via `sourceOnlyDiff`).
+ * OFF ⇒ `undefined` ⇒ nothing attached ⇒ byte-identical.
+ */
+export const maybeReviewSubmission = (patch: string): SubmissionReview | undefined =>
+  gateOn(process.env, "QUANTA_BENCH_SUBMIT_REVIEW") ? reviewSubmission(patch) : undefined
+
+/**
+ * Strategy #7 — resolve the optional per-candidate location-set seeder from
+ * `QUANTA_BENCH_LOCATION_FANOUT`. OFF / no localizer files / <2 files / breadth≤1 ⇒
+ * `undefined` ⇒ every breadth candidate uses the base seed (byte-identical). SHARED
+ * by both drivers. Pure (built from the localizer's ranked files only — no-leak).
+ */
+export const resolveLocationFanoutSeeder = (
+  rankedFiles: readonly string[],
+  breadth: number,
+  issueSymbols: readonly string[] = [],
+): PerCandidateSeed | undefined => {
+  if (!gateOn(process.env, "QUANTA_BENCH_LOCATION_FANOUT") || breadth <= 1) return undefined
+  return buildLocationSeeder(rankedFiles, breadth, issueSymbols)
+}
+
+/**
+ * Resolve the optional LLM acceptance soft-reranker from `QUANTA_BENCH_LLM_SELECT`
+ * (chooser/reviewer). Unset/invalid ⇒ `undefined` ⇒ deterministic vote only
+ * (byte-identical). SHARED by both drivers so the knob behaves identically.
+ */
+export const resolveAcceptanceLlmRerank = (
+  instance: Instance,
+  llm: LLMPort,
+  signal?: AbortSignal,
+): AcceptanceLlmRerank | undefined => {
+  const mode = resolveLlmSelectMode(process.env)
+  if (mode === undefined) return undefined
+  return buildLlmRerankFromPort({
+    llm,
+    problemStatement: instance.problemStatement,
+    mode,
+    ...(signal !== undefined ? { signal } : {}),
+  })
+}
 
 /**
  * SOTA++ verify-and-select — repro-vote as the candidate SELECTION scorer.
@@ -3525,6 +3658,10 @@ const runRepairPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
+  /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
+   *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
+   *  (byte-identical). Passed into the repair-breadth deps. */
+  perCandidateSeed?: PerCandidateSeed,
 ): Promise<Phase> => {
   // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds. The fault
   // is already localized in repair (patch exists + failing gate named), so the
@@ -3589,7 +3726,11 @@ const runRepairPhase = async (
           baseCommit: instance.swebench?.baseCommit,
           repo: instance.swebench?.repo,
           timeoutMs: deps.timeoutMs,
-          resolveLaneLlm: (index) => resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
+          resolveLaneLlm: (index) =>
+            applySampleTemperature(
+              resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
+              index,
+            ),
           runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
             runAgentOnce(
               instance,
@@ -3631,6 +3772,9 @@ const runRepairPhase = async (
                   ),
               }
             : {}),
+          // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined
+          // ⇒ shared base seed ⇒ byte-identical).
+          ...(perCandidateSeed !== undefined ? { perCandidateSeed } : {}),
         })
       : undefined
   // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only). SHARED
@@ -3642,6 +3786,8 @@ const runRepairPhase = async (
     sandbox,
     deps.timeoutMs,
     repairPosture.acceptance,
+    undefined,
+    resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
   const patch = await withGitSnapshot(
     sandbox,
@@ -3720,8 +3866,10 @@ const runRepairPhase = async (
   // available we prefer it (it reflects the worktree at end of all rounds).
   // `finalPatch` is the orchestrator's view of the last round's diff — they
   // agree by construction (continue-from-patched-tree, single sandbox).
+  const capturedPatch = patch !== "" ? patch : finalPatch
+  const submissionReview = maybeReviewSubmission(capturedPatch)
   return {
-    patch: patch !== "" ? patch : finalPatch,
+    patch: capturedPatch,
     turns,
     validated: repairValidated,
     primaryFalseGreen: repairFalseGreen,
@@ -3729,6 +3877,7 @@ const runRepairPhase = async (
     ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
     ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
+    ...(submissionReview !== undefined ? { submissionReview } : {}),
   }
 }
 
@@ -5170,11 +5319,7 @@ const buildClosureAttemptState = (args: {
         ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
           ? {
               reproScript: {
-                cmd: reproValidationCmd({
-                  repo: args.instance.swebench.repo,
-                  version: args.instance.swebench.version,
-                  scriptPath: args.reproTest.path,
-                }),
+                cmd: reproValidationCmdForInstance(args.instance, args.reproTest.path),
                 pytestReportPath: pytestReportPathFor(args.reproTest.path),
                 baseValidatedRed: true,
               },
@@ -5419,6 +5564,12 @@ const runMainPhase = async (args: {
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
+    const repairFanoutFiles = buildRepairFanoutFiles({
+      localizeCandidates: args.prepared.localizeCandidates,
+      stage1Files: args.prepared.closureSession?.input.evidence.stage1Files,
+      ownerResolved: args.prepared.ownerResolved,
+      witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+    })
     return runRepairPhase(
       args.instance,
       args.deps,
@@ -5437,6 +5588,16 @@ const runMainPhase = async (args: {
       args.prepared.posture,
       args.prepared.state,
       args.prepared.chaMultisiteSteer,
+      resolveLocationFanoutSeeder(
+        repairFanoutFiles,
+        args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,
+        buildRepairFanoutSymbols({
+          issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+          fanoutFiles: repairFanoutFiles,
+          ownerResolved: args.prepared.ownerResolved,
+          witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+        }),
+      ),
     )
   }
   return runAgentPhase(
@@ -6018,6 +6179,9 @@ const attachSelectionAndClosureArtifacts = (args: {
   if (args.phase.ownerWidening !== undefined) {
     args.extra.ownerWidening = args.phase.ownerWidening
   }
+  if (args.phase.submissionReview !== undefined) {
+    args.extra.submissionReview = args.phase.submissionReview
+  }
   attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
   const hygiene =
@@ -6223,7 +6387,11 @@ const buildSuccessfulResultExtra = (args: {
   // harness `gradingCompleted:false` / refuse-to-fake-grade path (verdict.ts), never on a
   // genuine patch-fail — is `grader_invalid` so `resolvedTotals` EXCLUDES it from the
   // denominator; else a Pro image-pull / harness crash is laundered into a real miss.
-  const graderVerdict = swebenchGraderInvalidVerdict(args.graderInvalid, args.instance, args.verified)
+  const graderVerdict = swebenchGraderInvalidVerdict(
+    args.graderInvalid,
+    args.instance,
+    args.verified,
+  )
   if (graderVerdict !== undefined) extra.verdict = graderVerdict
   attachObservedSuccessBasics({ ...args, extra })
   attachClosureMetrics({ extra, phase: args.phase, prepared: args.prepared })
@@ -6349,6 +6517,7 @@ const _runV5AdaptiveAttempt = async (args: {
     sandbox,
   })
   revisions.push(initialPacket.evidenceRevision)
+  const effortLimits = resolveEffortLadderLimits(process.env)
   const adaptive = await runAdaptiveBenchAttempt({
     intakePacket: initialPacket,
     base: preparedContext.state,
@@ -6391,6 +6560,9 @@ const _runV5AdaptiveAttempt = async (args: {
       revisions.push(packet.evidenceRevision)
       return { packet }
     },
+    // #8 effort ladder: raise the bounded-loop ceiling by the opt-in tier (OFF ⇒
+    // undefined ⇒ controller uses DEFAULT_ADAPTIVE_LIMITS ⇒ byte-identical).
+    ...(effortLimits !== undefined ? { limits: effortLimits } : {}),
   })
   const adaptiveRoute = adaptiveRouteTelemetryOf(adaptive, revisions)
   if (adaptive.outcome !== "finalize") {

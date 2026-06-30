@@ -224,5 +224,11 @@ export const buildAnthropicMessagesRequest = (
       input_schema: t.input_schema as Anthropic.Tool.InputSchema,
     })),
     ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+    // Per-call sampling temperature (repair-breadth fanout). Present ⇒ spread
+    // Anthropic's `temperature` field; absent ⇒ OMIT the key entirely
+    // (byte-identical to the pre-feature wire — same conditional-spread pattern
+    // as `service_tier`/`tool_choice` above). Anthropic Messages accepts
+    // `temperature` (0–1) on the surface we drive; the caller owns the value.
+    ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
   }
 }

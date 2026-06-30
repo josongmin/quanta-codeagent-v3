@@ -142,6 +142,11 @@ export interface RunOnceResult {
    *  When present and `lastVerifyCmd` absent, this is the only runnable repro
    *  fallback the validator may execute. */
   reproCmd?: string
+  /** Bounded ACTION TRACE (`<tool> <target/cmd-head>` per call, most-recent window)
+   *  captured by the stream tap — the agent's what-it-did sequence for the LLM
+   *  reviewer (SWE-agent reviewer parity). Tool names + targets only, no observation
+   *  bodies. Telemetry/selection-evidence only; the validator never reads it. */
+  actionTrace?: readonly string[]
 }
 
 /** Minimal shell-exec port for the validator. SAME shape as `runner.ts`'s

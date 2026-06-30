@@ -769,3 +769,94 @@ exports[`preset resolution — golden byte-identical oracle (P0) golden resolved
   ],
 ]
 `;
+
+exports[`preset resolution — golden byte-identical oracle (P0) golden resolved knobs: agentless-v6-oracle-hardened: agentless-v6-oracle-hardened 1`] = `
+[
+  [
+    "bench-in-loop-exec",
+    "full",
+  ],
+  [
+    "closure-repair",
+    5,
+  ],
+  [
+    "fault-evidence",
+    true,
+  ],
+  [
+    "issue-hint",
+    "agentless",
+  ],
+  [
+    "issue-hint-expected-actual",
+    true,
+  ],
+  [
+    "localize-phase",
+    {
+      "phase1Turns": 5,
+    },
+  ],
+  [
+    "lsp",
+    true,
+  ],
+  [
+    "no-patch-breaker",
+    true,
+  ],
+  [
+    "primary-rail",
+    true,
+  ],
+  [
+    "read-outline",
+    true,
+  ],
+  [
+    "repair-escalation",
+    true,
+  ],
+  [
+    "repair-spec-gate",
+    true,
+  ],
+  [
+    "repair-strong-oracle",
+    true,
+  ],
+  [
+    "repo-map",
+    {
+      "enabled": true,
+    },
+  ],
+  [
+    "repro-grounding",
+    true,
+  ],
+  [
+    "repro-test",
+    {
+      "samples": 5,
+    },
+  ],
+  [
+    "repro-vote",
+    true,
+  ],
+  [
+    "retry-transient",
+    3,
+  ],
+  [
+    "test-runner",
+    true,
+  ],
+  [
+    "verification-plan",
+    true,
+  ],
+]
+`;

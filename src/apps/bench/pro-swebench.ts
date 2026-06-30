@@ -29,8 +29,8 @@ import { join } from "node:path"
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
 import { abortReasonOf, errMessage, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
+import { defaultSpawn, type Spawn, withGradingLock } from "./python-swebench"
 import type { Instance } from "./types"
-import { type Spawn, defaultSpawn, withGradingLock } from "./python-swebench"
 
 /** One Scale predictions row (exact shape consumed by `swe_bench_pro_eval.py`). */
 export interface ProPredictionRow {
@@ -40,8 +40,7 @@ export interface ProPredictionRow {
 }
 
 /** Serialize Scale predictions: a JSON array (NOT JSONL). */
-export const writeProPredictions = (rows: ProPredictionRow[]): string =>
-  `${JSON.stringify(rows)}\n`
+export const writeProPredictions = (rows: ProPredictionRow[]): string => `${JSON.stringify(rows)}\n`
 
 export interface ProSwebenchOpts {
   /** Override the process boundary (tests inject a fake). */
@@ -109,8 +108,15 @@ export const buildProArgv = (
  * file). Treating a bare `false` as a model miss would launder a docker/throttle infra hole
  * into a real_miss — the #1 measurement sin. The corroborating signal is the per-instance
  * output json `{output_dir}/{instance_id}/{prefix}_output.json`, which the harness writes
- * ONLY after the container's tests actually ran. So a `false` is a genuine miss IFF that file
- * exists; otherwise the instance never ran ⇒ indeterminate (null) ⇒ infra hole.
+ * ONLY after the container's tests actually ran (collect_outputs_local, AFTER container.wait).
+ *
+ * BOTH verdicts are marker-gated (symmetric):
+ *   - a `false` is a genuine miss IFF the marker exists (else the instance never ran ⇒ infra ⇒ null);
+ *   - a `true` is a genuine pass IFF the marker exists too. A real pass ALWAYS writes the marker
+ *     (tests must have run to pass), so this loses no real pass — but it (a) kills a stray/leftover
+ *     json forging a pass, and (b) makes a Scale schema-DRIFT (marker renamed/moved) fail LOUD: every
+ *     `true` collapses to null ⇒ the whole slice reads ~0%/all-infra (operator notices instantly)
+ *     instead of silently INFLATING (misses vanishing into "infra"). Fail-loud beats fail-silent.
  *
  * @param prefix the predictions `prefix` (our modelName) — names the per-instance output json.
  * @internal exported for unit tests.
@@ -122,17 +128,19 @@ export const extractProResolved = async (
 ): Promise<boolean | null> => {
   const names = await readdir(dir, { recursive: true }).catch(() => null)
   if (names === null) return null
+  let sawTrue = false
   let sawFalse = false
   for (const rel of names as string[]) {
     if (!rel.endsWith(".json")) continue
     const verdict = resolvedFromReport(await readJsonOrNull(join(dir, rel)), instanceId)
-    if (verdict === true) return true
-    if (verdict === false) sawFalse = true // a `false` needs corroboration (see below)
+    if (verdict === true) sawTrue = true
+    else if (verdict === false) sawFalse = true
   }
-  if (!sawFalse) return null
-  // Corroborate the `false`: only a real grade (tests ran) writes the per-instance output
-  // json. Absent ⇒ the `false` is an infra error masquerading as a miss ⇒ null.
-  return proTestsActuallyRan(names as string[], instanceId, prefix) ? false : null
+  if (!sawTrue && !sawFalse) return null
+  // Both verdicts require the per-instance run marker (only a real in-container grade writes it).
+  // Absent ⇒ the verdict is an infra error / forge / schema-drift, NOT a real grade ⇒ null.
+  if (!proTestsActuallyRan(names as string[], instanceId, prefix)) return null
+  return sawTrue // true wins a (Scale-impossible) true/false disagreement — a real pass is a pass
 }
 
 /** Did the harness genuinely run tests for `instanceId`? True iff the per-instance output
@@ -198,28 +206,50 @@ const proResult = (
  * standard `PythonSwebenchResult` so it injects into the same grade seam.
  * NEVER throws (R5).
  */
-export const evaluateWithProSwebench = async (
+/** Fail-closed precondition gate: returns an infra `PythonSwebenchResult` (gradingCompleted:false)
+ *  for any reason we must NOT spawn the harness, or null when inputs are valid + gradeable. Extracted
+ *  to keep {@link evaluateWithProSwebench} under the cognitive-complexity ratchet (R7). */
+const proGateFailure = (
   instance: Instance,
   prediction: string,
-  opts: ProSwebenchOpts = {},
-): Promise<PythonSwebenchResult> => {
+  opts: ProSwebenchOpts,
+): PythonSwebenchResult | null => {
   const meta = instance.swebench
   if (!meta) return proResult(false, false, `instance ${instance.id} has no swebench metadata`)
-  if (prediction.trim() === "") return proResult(false, false, `empty prediction for ${meta.instanceId}`)
-
-  // Opts-driven (the Pro profile injects these from its KnobSchema — R3, no global
-  // config read in the verifier itself).
-  const rawSamplePath = opts.rawSamplePath
-  const harnessDir = opts.harnessDir
-  if (!rawSamplePath || !harnessDir) {
-    // R5: requested Pro grading but the harness/CSV is not wired ⇒ fail loud, never
-    // silently degrade. The eval seam classifies gradingCompleted:false as infra.
+  if (prediction.trim() === "")
+    return proResult(false, false, `empty prediction for ${meta.instanceId}`)
+  if (!opts.rawSamplePath || !opts.harnessDir) {
+    // R5: requested Pro grading but the harness/CSV is not wired ⇒ fail loud, never silently
+    // degrade. The eval seam classifies gradingCompleted:false as infra.
     return proResult(
       false,
       false,
       "Pro harness not wired: set QUANTA_SWEBENCH_PRO_HARNESS_DIR + QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH (scaleapi/SWE-bench_Pro-os).",
     )
   }
+  // Scale parses raw_sample as JSON-lines IFF the path ends `.jsonl`, else `pd.read_csv` — a
+  // non-.jsonl path silently mis-parses EVERY row (garbled columns ⇒ all-False). Fail-closed.
+  if (!opts.rawSamplePath.endsWith(".jsonl")) {
+    return proResult(
+      false,
+      false,
+      `Pro raw_sample must be a .jsonl file (Scale reads non-.jsonl as CSV ⇒ mis-parse): ${opts.rawSamplePath}`,
+    )
+  }
+  return null
+}
+
+export const evaluateWithProSwebench = async (
+  instance: Instance,
+  prediction: string,
+  opts: ProSwebenchOpts = {},
+): Promise<PythonSwebenchResult> => {
+  const gate = proGateFailure(instance, prediction, opts)
+  if (gate !== null) return gate
+  // Validated by the gate above (meta present, prediction non-empty, harness wired, raw is .jsonl).
+  const meta = instance.swebench as NonNullable<Instance["swebench"]>
+  const rawSamplePath = opts.rawSamplePath as string
+  const harnessDir = opts.harnessDir as string
 
   const spawn = opts.spawn ?? defaultSpawn
   const python = opts.pythonBin ?? runtimeConfig().swebenchPythonBin ?? "python3"
@@ -235,7 +265,14 @@ export const evaluateWithProSwebench = async (
       patchPath,
       writeProPredictions([{ instance_id: meta.instanceId, patch: prediction, prefix: modelName }]),
     )
-    const argv = buildProArgv(python, harnessDir, rawSamplePath, patchPath, outDir, dockerhubUsername)
+    const argv = buildProArgv(
+      python,
+      harnessDir,
+      rawSamplePath,
+      patchPath,
+      outDir,
+      dockerhubUsername,
+    )
     // R2: same process-global grading chain as the official harness.
     // CWD MUST be harnessDir, NOT the temp `work` dir: swe_bench_pro_eval.py reads the
     // per-instance env Dockerfiles via the hardcoded RELATIVE path
@@ -248,7 +285,8 @@ export const evaluateWithProSwebench = async (
     try {
       run = await withGradingLock(() => spawn(argv, harnessDir, timeout))
     } catch (e) {
-      if (abortReasonOf(e) !== null) return proResult(false, false, `pro grade cancelled: ${errMessage(e)}`)
+      if (abortReasonOf(e) !== null)
+        return proResult(false, false, `pro grade cancelled: ${errMessage(e)}`)
       throw e
     }
     const verdict = await extractProResolved(outDir, meta.instanceId, modelName)

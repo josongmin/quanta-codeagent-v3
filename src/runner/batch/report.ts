@@ -406,6 +406,7 @@ export const buildReport = (
         ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
         ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
         ...(r.ownerWidening !== undefined ? { ownerWidening: r.ownerWidening } : {}),
+        ...(r.submissionReview !== undefined ? { submissionReview: r.submissionReview } : {}),
         ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
         ...(llmEvidenceSummary !== undefined
           ? {

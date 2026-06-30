@@ -4,6 +4,7 @@ import type { FileSystemPort } from "@/storage"
 import type { AppshotArtifactSink, AppshotPort } from "./appshot"
 import type { ArtifactRegistryPort } from "./artifact"
 import type { AskUserPort } from "./ask-user"
+import type { ContainerExec } from "./container-exec"
 import type { DiagnosticsProvider } from "./diagnostics"
 import type { EvidenceToolDeps } from "./evidence/tool"
 import type { FetchRulesPort } from "./fetch-rules"
@@ -184,6 +185,11 @@ export interface DefaultToolPorts {
    *  composition root wires the port (tmux/Bun backend) only when
    *  `QUANTA_PTY_ATTACH === "1"`. */
   ptySession?: PtySessionPort
+  /** RFC jun-29 §13 — when a `ContainerExec` is wired, append the `container_exec` one-shot
+   *  tool (run a command in the bound container, get stdout/stderr+exit code). The terminal
+   *  surface's workhorse (non-interactive steps). Absent ⇒ NOT registered (byte-identical).
+   *  Container-bound by construction; never the host. */
+  containerExec?: ContainerExec
   /** code-mode (RFC jun-6-code-mode, Phase 1) — when true, append the gated
    *  `code_cell` tool (run a model-authored JS program whose every `tools.X(args)`
    *  re-enters the REAL dispatchTool). Absent/false ⇒ tool NOT registered

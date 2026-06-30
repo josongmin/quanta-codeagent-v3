@@ -89,6 +89,31 @@ describe("image exec backend (RFC Phase 2a — pure composition)", () => {
     expect(argv).not.toContain("--with")
   })
 
+  test("buildValidationCmd uses the same image runtime policy", () => {
+    const cmd = pythonReproAdapter.buildValidationCmd(
+      ctx({ execBackend: "image", imageRef: "jefzda/sweap-images:demo", sandboxDir: "/w" }),
+    )
+    expect(cmd).toBe(
+      "docker run --rm -v /w:/w -w /w jefzda/sweap-images:demo python -s /w/__repro_0_a.py",
+    )
+    expect(cmd).not.toContain("--with")
+  })
+
+  test("buildValidationCmd for relative script paths uses $PWD bind, not invalid .:. mounts", () => {
+    const cmd = pythonReproAdapter.buildValidationCmd({
+      repo: "qutebrowser/qutebrowser",
+      version: "1.0",
+      scriptPath: "reproduce_issue.py",
+      execBackend: "image",
+      imageRef: "jefzda/sweap-images:demo",
+      sandboxDir: ".",
+    })
+    expect(cmd).toBe(
+      'docker run --rm -v "$PWD":/work -w /work jefzda/sweap-images:demo python -s reproduce_issue.py',
+    )
+    expect(cmd).not.toContain("-v .:.")
+  })
+
   test("execBackend=image but ref/dir MISSING ⇒ falls back to host (byte-identical)", () => {
     const host = pythonReproAdapter.buildExecArgv(ctx({}))
     expect(pythonReproAdapter.buildExecArgv(ctx({ execBackend: "image" }))).toEqual(host)

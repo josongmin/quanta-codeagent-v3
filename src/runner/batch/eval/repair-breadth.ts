@@ -134,6 +134,13 @@ export interface RepairBreadthDeps {
     round: number,
     candidates: readonly RepairCandidateOutcome[],
   ) => void | Promise<void>
+  /** Strategy #7 multi-location-set fanout (QUANTA_BENCH_LOCATION_FANOUT): map a
+   *  candidate `index` + the round's base seed → a seed that LEADS the candidate at
+   *  a distinct ranked file (location diversity instead of N resamples). Returning
+   *  `undefined` (or this port being absent) ⇒ the base seed is used unchanged ⇒
+   *  byte-identical. Pure (built from the localizer's ranked files); see
+   *  {@link buildLocationSeeder}. */
+  readonly perCandidateSeed?: (index: number, baseSeed: string | undefined) => string | undefined
 }
 
 /**
@@ -153,9 +160,12 @@ export const makeRepairBreadthRunCandidates =
     // settles independently; a candidate that THROWS during generation is dropped
     // (Promise.allSettled) so one bad lane never sinks the whole round.
     const settled = await Promise.allSettled(
-      Array.from({ length: args.breadth }, (_unused, index) =>
-        runOneBreadthCandidate(deps, args.seedMsg, index),
-      ),
+      Array.from({ length: args.breadth }, (_unused, index) => {
+        // #7 location fanout: distinct lead-file seed per candidate (OFF ⇒ undefined
+        // ⇒ base seed ⇒ byte-identical).
+        const seed = deps.perCandidateSeed?.(index, args.seedMsg) ?? args.seedMsg
+        return runOneBreadthCandidate(deps, seed, index)
+      }),
     )
     const outcomes: RepairCandidateOutcome[] = []
     for (const s of settled) {

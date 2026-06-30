@@ -1,12 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises"
 import { describe, expect, test } from "bun:test"
-import type { Instance } from "./types"
+import { mkdir, writeFile } from "node:fs/promises"
 import {
   buildProArgv,
   evaluateWithProSwebench,
   extractProResolved,
   writeProPredictions,
 } from "./pro-swebench"
+import type { Instance } from "./types"
 
 const proInstance = (id = "scale__demo-1"): Instance => ({
   id,
@@ -17,8 +17,11 @@ const proInstance = (id = "scale__demo-1"): Instance => ({
 })
 
 /** Parse `--output_dir=...` out of a Scale argv. */
-const outDirOf = (argv: string[]): string =>
-  argv.find((a) => a.startsWith("--output_dir="))!.slice("--output_dir=".length)
+const outDirOf = (argv: string[]): string => {
+  const flag = argv.find((a) => a.startsWith("--output_dir="))
+  if (flag === undefined) throw new Error("argv has no --output_dir=")
+  return flag.slice("--output_dir=".length)
+}
 
 describe("writeProPredictions — Scale row shape", () => {
   test("emits {instance_id, patch, prefix} JSON array (not model_patch/JSONL)", () => {
@@ -59,16 +62,27 @@ describe("extractProResolved — tolerant, fail-closed", () => {
     await writeFile(`${dir}/${id}/${PFX}_output.json`, JSON.stringify({ tests: { a: "PASSED" } }))
   }
 
-  test("shape A {<id>:{resolved:true}} ⇒ true", async () => {
+  test("shape A {<id>:{resolved:true}} + marker ⇒ true", async () => {
     const d = `${process.env.TMPDIR ?? "/tmp"}/pro-x-${Date.now()}-a`
     await mkdir(d, { recursive: true })
     await writeFile(`${d}/report.json`, JSON.stringify({ "scale__demo-1": { resolved: true } }))
+    await writeRanMarker(d, "scale__demo-1") // a real pass ALWAYS writes the run marker
     expect(await extractProResolved(d, "scale__demo-1", PFX)).toBe(true)
   })
-  test("shape B {resolved_ids:[ours]} membership ⇒ true", async () => {
+  // SYMMETRIC corroboration (TEETH): a `true` with NO run marker is a stray/leftover json or a
+  // Scale schema-DRIFT (marker renamed) — NOT a real pass. It must be null (→ infra, fail-LOUD:
+  // the whole slice collapses to ~0% so the operator notices) rather than forge/inflate a pass.
+  test("shape A true WITHOUT marker ⇒ null (stray-json forge / schema-drift fail-loud)", async () => {
+    const d = `${process.env.TMPDIR ?? "/tmp"}/pro-x-${Date.now()}-atnm`
+    await mkdir(d, { recursive: true })
+    await writeFile(`${d}/report.json`, JSON.stringify({ "scale__demo-1": { resolved: true } }))
+    expect(await extractProResolved(d, "scale__demo-1", PFX)).toBeNull()
+  })
+  test("shape B {resolved_ids:[ours]} + marker ⇒ true", async () => {
     const d = `${process.env.TMPDIR ?? "/tmp"}/pro-x-${Date.now()}-bt`
     await mkdir(d, { recursive: true })
     await writeFile(`${d}/r.json`, JSON.stringify({ resolved_ids: ["scale__demo-1"] }))
+    await writeRanMarker(d, "scale__demo-1")
     expect(await extractProResolved(d, "scale__demo-1", PFX)).toBe(true)
   })
   // audit #5: ABSENCE from a resolved-ids list is INDETERMINATE (null), never a
@@ -104,7 +118,11 @@ describe("extractProResolved — tolerant, fail-closed", () => {
   test("REAL Scale eval_results.json {<id>:bool} ⇒ true (passed) / false (graded miss)", async () => {
     const d = `${process.env.TMPDIR ?? "/tmp"}/pro-x-${Date.now()}-scale`
     await mkdir(d, { recursive: true })
-    await writeFile(`${d}/eval_results.json`, JSON.stringify({ "scale__demo-1": true, other: false }))
+    await writeFile(
+      `${d}/eval_results.json`,
+      JSON.stringify({ "scale__demo-1": true, other: false }),
+    )
+    await writeRanMarker(d, "scale__demo-1") // pass ⇒ marker present
     await writeRanMarker(d, "other")
     expect(await extractProResolved(d, "scale__demo-1", PFX)).toBe(true)
     expect(await extractProResolved(d, "other", PFX)).toBe(false) // tests ran + failed = genuine miss
@@ -118,7 +136,9 @@ describe("extractProResolved — tolerant, fail-closed", () => {
 
 describe("evaluateWithProSwebench — fail-closed (R5), never throws", () => {
   test("missing harnessDir/rawSamplePath ⇒ {resolved:false, gradingCompleted:false}", async () => {
-    const r = await evaluateWithProSwebench(proInstance(), "diff --git ...", { spawn: async () => ({ code: 0, stdout: "", stderr: "" }) })
+    const r = await evaluateWithProSwebench(proInstance(), "diff --git ...", {
+      spawn: async () => ({ code: 0, stdout: "", stderr: "" }),
+    })
     expect(r.resolved).toBe(false)
     expect(r.gradingCompleted).toBe(false)
     expect(r.log).toContain("not wired")
@@ -127,7 +147,7 @@ describe("evaluateWithProSwebench — fail-closed (R5), never throws", () => {
   test("empty prediction ⇒ fail-closed, no spawn", async () => {
     let spawned = false
     const r = await evaluateWithProSwebench(proInstance(), "   ", {
-      rawSamplePath: "/h/raw.csv",
+      rawSamplePath: "/h/raw.jsonl",
       harnessDir: "/h",
       spawn: async () => {
         spawned = true
@@ -138,15 +158,41 @@ describe("evaluateWithProSwebench — fail-closed (R5), never throws", () => {
     expect(spawned).toBe(false)
   })
 
-  test("harness writes a resolved report ⇒ {resolved:true, gradingCompleted:true}", async () => {
-    // hermetic: the injected spawn plays the Scale harness — writes its report into outDir.
+  // The Scale harness reads raw_sample as JSON-lines IFF the path ends `.jsonl`, else read_csv ⇒
+  // a non-.jsonl path mis-parses EVERY row. Fail-closed to infra, never grade a mis-parsed slice.
+  test("non-.jsonl raw_sample ⇒ fail-closed infra, no spawn", async () => {
+    let spawned = false
     const r = await evaluateWithProSwebench(proInstance(), "diff --git a b", {
-      rawSamplePath: "/h/raw.csv",
+      rawSamplePath: "/h/raw.csv", // NOT .jsonl ⇒ Scale would read_csv ⇒ mis-parse
+      harnessDir: "/h",
+      spawn: async () => {
+        spawned = true
+        return { code: 0, stdout: "", stderr: "" }
+      },
+    })
+    expect(r.resolved).toBe(false)
+    expect(r.gradingCompleted).toBe(false)
+    expect(r.log).toContain(".jsonl")
+    expect(spawned).toBe(false)
+  })
+
+  test("harness writes a resolved report + run marker ⇒ {resolved:true, gradingCompleted:true}", async () => {
+    // hermetic: the injected spawn plays the Scale harness — writes its report + the per-instance
+    // run marker (which a real pass always emits) into outDir.
+    const r = await evaluateWithProSwebench(proInstance(), "diff --git a b", {
+      rawSamplePath: "/h/raw.jsonl",
       harnessDir: "/h",
       spawn: async (argv) => {
         const out = outDirOf(argv)
-        await mkdir(out, { recursive: true })
-        await writeFile(`${out}/report.json`, JSON.stringify({ "scale__demo-1": { resolved: true } }))
+        await mkdir(`${out}/scale__demo-1`, { recursive: true })
+        await writeFile(
+          `${out}/report.json`,
+          JSON.stringify({ "scale__demo-1": { resolved: true } }),
+        )
+        await writeFile(
+          `${out}/scale__demo-1/quanta_output.json`,
+          JSON.stringify({ tests: { a: "PASSED" } }),
+        )
         return { code: 0, stdout: "Evaluation complete", stderr: "" }
       },
     })
@@ -161,7 +207,7 @@ describe("evaluateWithProSwebench — fail-closed (R5), never throws", () => {
   test("spawns the Scale harness with cwd = harnessDir (relative dockerfiles/ must resolve)", async () => {
     let seenCwd: string | undefined
     await evaluateWithProSwebench(proInstance(), "diff --git a b", {
-      rawSamplePath: "/h/raw.csv",
+      rawSamplePath: "/h/raw.jsonl",
       harnessDir: "/h/swebench-pro",
       spawn: async (_argv, cwd) => {
         seenCwd = cwd
@@ -173,7 +219,7 @@ describe("evaluateWithProSwebench — fail-closed (R5), never throws", () => {
 
   test("harness crashes, no report ⇒ resolved:false + gradingCompleted:false (infra)", async () => {
     const r = await evaluateWithProSwebench(proInstance(), "diff --git a b", {
-      rawSamplePath: "/h/raw.csv",
+      rawSamplePath: "/h/raw.jsonl",
       harnessDir: "/h",
       spawn: async () => ({ code: 1, stdout: "boom", stderr: "crashed" }),
     })
@@ -186,7 +232,7 @@ describe("evaluateWithProSwebench — fail-closed (R5), never throws", () => {
   // stdout substring — else verdict.ts would class a crashed grade as a clean real_miss.
   test("crash that echoes --output_dir in stdout but writes no report ⇒ gradingCompleted:false", async () => {
     const r = await evaluateWithProSwebench(proInstance(), "diff --git a b", {
-      rawSamplePath: "/h/raw.csv",
+      rawSamplePath: "/h/raw.jsonl",
       harnessDir: "/h",
       spawn: async (argv) => ({
         code: 1,

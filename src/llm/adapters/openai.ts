@@ -404,6 +404,12 @@ export class OpenAIAdapter implements LLMPort {
           ...(promptCacheRetention !== undefined
             ? { prompt_cache_retention: promptCacheRetention }
             : {}),
+          // Per-call sampling temperature (repair-breadth fanout). Present ⇒
+          // spread OpenAI's `temperature` param; absent ⇒ OMIT the key entirely
+          // (byte-identical to the pre-feature wire — same conditional-spread
+          // pattern as `prompt_cache_key` above). Chat-completions accepts
+          // `temperature` on every model we drive through this surface.
+          ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
           ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
           // ADR-0469 — Structured Outputs passthrough. Present ⇒ spread the
           // OpenAI `response_format:{type:"json_schema",…}` param; absent ⇒

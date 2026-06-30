@@ -400,4 +400,17 @@ export interface StreamInput {
     readonly schema: Record<string, unknown>
     readonly strict?: boolean
   }
+  /** Per-call sampling temperature (repair-breadth fanout diversity, Agentless
+   *  `repair.py` greedy + temperature-0.8 sampling). Range 0–2 (the common
+   *  OpenAI/Anthropic bound); the value is passed straight through to each
+   *  provider's wire field of the same name with no clamping here — callers own
+   *  the value. Absent ⇒ BYTE-IDENTICAL: every adapter OMITS the `temperature`
+   *  key entirely (no key on the wire), so the pre-feature request is
+   *  reproduced exactly and the model uses its own default sampling. Threaded
+   *  loop → StreamInput → adapter wire body; the {@link withTemperature}
+   *  decorator is the canonical injector (it defers to a caller-set value, so
+   *  this field is the override seam). Reasoning surfaces that reject the field
+   *  (e.g. OpenAI o-series / GPT-5 on the Responses API) drop it — see the
+   *  per-adapter notes. */
+  temperature?: number
 }

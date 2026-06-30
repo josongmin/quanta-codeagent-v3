@@ -959,12 +959,22 @@ const buildProGradeVerifier = (): RunCfg["pythonSwebench"] => {
   // Pro grades with its OWN venv python (pandas/docker SDK), NOT the swebench shim — the box
   // sets QUANTA_SWEBENCH_PRO_PYTHON_BIN to ~/swebench-pro-venv/bin/python (ec2-lifecycle).
   const pythonBin = process.env.QUANTA_SWEBENCH_PRO_PYTHON_BIN
-  logger.info(`using ScaleAI SWE-bench Pro harness for grading (${harnessDir}, python=${pythonBin ?? "python3"})`)
+  // Operator overrides (defaults jefzda / quanta in the verifier): a fork hosting the Pro images
+  // under a different DockerHub user, or tagging predictions per-model, sets these without a code
+  // change (the predictions `prefix` and the marker-file check both derive from modelName, so they
+  // stay consistent automatically).
+  const dockerhubUsername = process.env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
+  const modelName = process.env.QUANTA_SWEBENCH_PRO_MODEL_NAME
+  logger.info(
+    `using ScaleAI SWE-bench Pro harness for grading (${harnessDir}, python=${pythonBin ?? "python3"})`,
+  )
   return {
     evaluate: gradeEvaluatorForFamily("pro", {
       harnessDir,
       rawSamplePath,
       ...(pythonBin !== undefined ? { pythonBin } : {}),
+      ...(dockerhubUsername ? { dockerhubUsername } : {}),
+      ...(modelName ? { modelName } : {}),
     }),
   }
 }
@@ -989,8 +999,7 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
   // Verified (the swebench default) would look Live instance-ids up in the Verified
   // dataset (KeyError / mismatched spec). When family=live and no explicit name is
   // given, default to the Live HF dataset so the ids resolve. Verified/Pro unchanged.
-  const liveDefault =
-    datasetFamily() === "live" ? "SWE-bench-Live/SWE-bench-Live" : undefined
+  const liveDefault = datasetFamily() === "live" ? "SWE-bench-Live/SWE-bench-Live" : undefined
   const datasetName =
     argValue("--dataset-name") ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? liveDefault
   logger.info(

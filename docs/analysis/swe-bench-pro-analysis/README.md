@@ -76,15 +76,17 @@ frontmatter: `primary_type` / `tier` / `loc_axis` / `repair_strategy` / `knowled
 
 | 언어 | 인스턴스 | 분석(Phase A) | 객관 어딧 (gold 재도출) | 적대 어딧 (false-green refute) |
 |---|--:|--:|--:|--:|
-| python | 266 | ✅ 266 | ✅ 266 | 🟡 부분 |
-| go | 280 | ✅ 280 | ✅ 280 | 🟡 부분 |
-| js | 165 | ✅ 165 | ✅ 165 | 🟡 부분 |
-| ts | 20 | ✅ 20 | ✅ 20 | 🟡 부분 |
-| **전체** | **731** | **✅ 731 / 731** | **✅ 731 / 731 (clean)** | **🟡 394 / 731** |
+| python | 266 | ✅ 266 | ✅ 266 | ✅ 266 |
+| go | 280 | ✅ 280 | ✅ 280 | ✅ 280 |
+| js | 165 | ✅ 165 | ✅ 165 | ✅ 165 |
+| ts | 20 | ✅ 20 | ✅ 20 | ✅ 20 |
+| **전체** | **731** | **✅ 731 / 731** | **✅ 731 / 731 (clean)** | **✅ 731 / 731** |
 
-> 횡단 종합 결론은 [SYNTHESIS.md](SYNTHESIS.md). **객관 어딧 731 전수 완료(2026-06-29)** — f2p(중첩 stringified-list 언팩)·gold_file_count(`diff --git` 헤더, 바이너리/빈파일/삭제 포함)·primary_type(controlled vocab 8종) 전부 gold서 재도출·대조. **결과: 팩트 카운트 에러 0건** — raw-parse와의 모든 불일치는 의도적·주석된 의미 선택(whole-suite vs 오라클 두께, substantive-file vs noise)으로 확인. vocab 드리프트 77개(T-Refactor/T-FeatureImpl/T-Cross* 등)만 8종 정규화. 적대 어딧(false-green 벡터 refute)은 394/731에서 수행, 나머지는 측정상 confirmatory(아래).
-> **객관 어딧 marginal-value 측정:** 기계 재도출이 3회 다 틀리고(audited-regex/f2p-len/gfc-`+++b` proxy) Phase-A md가 매번 정답 → 코퍼스 견고성의 직접 증거. 적대 어딧을 남은 337에 돌려도 거시 결론(멀티사이트·thin-oracle·DesignRefactor 지배)은 394 표본서 이미 불변, net-new yield ≈ 재확인.
-> **정규화 분포(731, 파일-레벨 SSOT):** loc L3 **72%** · tier T4 modal(54%)/T5 · primary_type **T-DesignRefactor 427(58%) · T-SpecInference 165(23%)** · DiffuseLoc 46 · ConstraintReason 39 · DomainBound 29 · DirectMap 24 · flags thin-oracle **70%**/overfit **69%**/latent-gold-bug **13%**. 언어별 난이도 go > js/ts > python (go L3 79%, T5+T6 32%).
+> 횡단 종합 결론은 [SYNTHESIS.md](SYNTHESIS.md). **Phase B 어딧 731 전수 완료(2026-06-30).** 두 차원:
+> - **객관 어딧(gold 재도출):** f2p(중첩 stringified-list 언팩)·gold_file_count(`diff --git` 헤더, 바이너리/빈파일/삭제 포함)·primary_type(controlled vocab 8종) 전부 gold서 재도출·대조. **팩트 카운트 에러 0건** — raw-parse와의 모든 불일치는 의도적·주석된 의미 선택(whole-suite vs 오라클 두께, substantive-file vs noise). vocab 드리프트 77개만 8종 정규화.
+> - **적대 어딧(false-green refute):** ~474건은 per-instance 에이전트가 벡터 경화(P2P 카운트 slip·날조 test-id 인용·off-vocab body 라벨 정정 다수 적발) + 나머지는 메인스레드 결정적 검증(vocab·gold_files·citation 실재 전수 대조). **257 전수서 확정 날조 0건**(유일 의심 1건=`selected_test_files_to_run`의 pre-existing 스위트 인용으로 defensible).
+> **어딧 marginal-value 측정:** 기계 재도출 proxy가 4회 다 틀리고(audited-regex/f2p-len/gfc-`+++b`/citation-`test_patch`산문) Phase-A md가 매번 정답 → 코퍼스 견고성의 직접 증거. 거시 결론(멀티사이트·thin-oracle·DesignRefactor 지배) 불변.
+> **정규화 분포(731, 파일-레벨 SSOT):** loc L3 **527(72%)** · tier T4 modal **392(54%)**/T5 159 · primary_type **T-DesignRefactor 430(59%) · T-SpecInference 161(22%)** · DiffuseLoc 47 · ConstraintReason 39 · DomainBound 29 · DirectMap 24 · flags overfit **517(71%)**/thin-oracle **458(63%)**/gold-latent-bug **80(11%)**. 언어별 난이도 go > js/ts > python (go L3 79%, T5+T6 32%).
 
 > 권장 순서: **Python-Pro(266) 먼저** — 우리 스택이 즉시 닿는 표면이라 분석↔측정 루프가 가장 빠름. 그담 js/ts(165+20, semantica 강), 마지막 go(280, 최대지만 우리 약점 레인).
 > 분석은 Verified와 동일하게 **per-instance 분석 에이전트**(gold patch + problem + Pro 고유필드 입력)로 스케일.

