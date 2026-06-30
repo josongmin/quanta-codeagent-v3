@@ -579,6 +579,49 @@ const resolveLiveOverrides = (state: BenchKnobState): string[] => {
  *             unset. Every other field comes from `state` so preset values flow
  *             through.
  */
+/** Resolve the simple boolean opt-in posture flags — each `true` ONLY when its
+ *  knob resolves `true` (env / preset), else `false`. Default-OFF ⇒ byte-identical
+ *  when unset. Extracted from `benchPostureFromState` so that projection stays
+ *  under the god-function line cap.
+ *
+ *  EFFECT SITE for the closure knobs (bugbash #16): the knob declaration files
+ *  under `runner/knobs/knobs/<knob>.ts` are NOOP-apply (`(cfg) => cfg`); the REAL
+ *  read is right here — `readKnobValue` projects each into a behavioral posture
+ *  field that the driver consumes, so `knob-inventory.ts` points these readSites at
+ *  this file (knobs-bench.ts — unchanged by the extraction). Listed verbatim so the
+ *  readSite-truthfulness ratchet resolves them: QUANTA_BENCH_FAULT_EVIDENCE,
+ *  QUANTA_BENCH_VERIFICATION_PLAN, QUANTA_BENCH_PRIMARY_RAIL, QUANTA_BENCH_PATCH_HYGIENE,
+ *  QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
+ *  QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER,
+ *  QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
+ *  QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL,
+ *  QUANTA_BENCH_MODEL_LANE_DIVERSITY, QUANTA_BENCH_REPAIR_SPEC_GATE,
+ *  QUANTA_BENCH_REPAIR_BREADTH, QUANTA_BENCH_REPAIR_STRONG_ORACLE. */
+const resolveBenchPostureFlags = (state: BenchKnobState) => ({
+  faultEvidence: readKnobValue(state, "fault-evidence", isTrue) === true,
+  verificationPlan: readKnobValue(state, "verification-plan", isTrue) === true,
+  primaryRail: readKnobValue(state, "primary-rail", isTrue) === true,
+  patchHygiene: readKnobValue(state, "patch-hygiene", isTrue) === true,
+  patchBudget: readKnobValue(state, "patch-budget", isTrue) === true,
+  patchBudgetStrict: readKnobValue(state, "patch-budget-strict", isTrue) === true,
+  reproVote: readKnobValue(state, "repro-vote", isTrue) === true,
+  acceptance: readKnobValue(state, "acceptance", isTrue) === true,
+  reproGrounding: readKnobValue(state, "repro-grounding", isTrue) === true,
+  noPatchBreaker: readKnobValue(state, "no-patch-breaker", isTrue) === true,
+  repairEscalation: readKnobValue(state, "repair-escalation", isTrue) === true,
+  specFidelitySteer: readKnobValue(state, "spec-fidelity-steer", isTrue) === true,
+  specFidelityInvariant: readKnobValue(state, "spec-fidelity-invariant", isTrue) === true,
+  dynamicMessageMatcher: readKnobValue(state, "dynamic-message-matcher", isTrue) === true,
+  repairSpecGate: readKnobValue(state, "repair-spec-gate", isTrue) === true,
+  repairStrongOracle: readKnobValue(state, "repair-strong-oracle", isTrue) === true,
+  forwardLocalize: readKnobValue(state, "forward-localize", isTrue) === true,
+  pairedControl: readKnobValue(state, "paired-control", isTrue) === true,
+  chaMultisiteSteer: readKnobValue(state, "cha-multisite-steer", isTrue) === true,
+  chaMultisiteGeneral: readKnobValue(state, "cha-multisite-general", isTrue) === true,
+  modelLaneDiversity: readKnobValue(state, "model-lane-diversity", isTrue) === true,
+  adversarialRepro: readKnobValue(state, "adversarial-repro", isTrue) === true,
+})
+
 export const benchPostureFromState = (
   state: BenchKnobState,
   env: NodeJS.ProcessEnv,
@@ -634,44 +677,8 @@ export const benchPostureFromState = (
   const inLoopExecMode = readKnobValue(state, "bench-in-loop-exec", isInLoopExecMode) ?? "full"
   const inLoopExec = inLoopExecMode === "full"
   const liveOverrides = resolveLiveOverrides(state)
-  // Proof-driven bench closure (jun-17) — each true ONLY when its knob resolves
-  // `true` (env / preset), else false. Default-OFF ⇒ byte-identical when unset.
-  //
-  // EFFECT SITE for the closure knobs (bugbash #16): the knob declaration files
-  // under `runner/knobs/knobs/<knob>.ts` are NOOP-apply (`(cfg) => cfg`); the
-  // REAL read is right here — `readKnobValue` projects each into a behavioral
-  // posture field that the driver consumes. So `knob-inventory.ts` points these
-  // readSites at this file. Listed verbatim so the readSite-truthfulness ratchet
-  // resolves them: QUANTA_BENCH_FAULT_EVIDENCE, QUANTA_BENCH_VERIFICATION_PLAN,
-  // QUANTA_BENCH_PRIMARY_RAIL, QUANTA_BENCH_PATCH_HYGIENE,
-  // QUANTA_BENCH_NO_PATCH_BREAKER, QUANTA_BENCH_REPAIR_ESCALATION,
-  // QUANTA_BENCH_SPEC_FIDELITY_STEER, QUANTA_BENCH_CHA_MULTISITE_STEER,
-  // QUANTA_BENCH_SPEC_FIDELITY_INVARIANT, QUANTA_BENCH_FORWARD_LOCALIZE,
-  // QUANTA_BENCH_DYNAMIC_MESSAGE_MATCHER, QUANTA_BENCH_PAIRED_CONTROL,
-  // QUANTA_BENCH_MODEL_LANE_DIVERSITY, QUANTA_BENCH_REPAIR_SPEC_GATE,
-  // QUANTA_BENCH_REPAIR_BREADTH, QUANTA_BENCH_REPAIR_STRONG_ORACLE.
-  const faultEvidence = readKnobValue(state, "fault-evidence", isTrue) === true
-  const verificationPlan = readKnobValue(state, "verification-plan", isTrue) === true
-  const primaryRail = readKnobValue(state, "primary-rail", isTrue) === true
-  const patchHygiene = readKnobValue(state, "patch-hygiene", isTrue) === true
-  const patchBudget = readKnobValue(state, "patch-budget", isTrue) === true
-  const patchBudgetStrict = readKnobValue(state, "patch-budget-strict", isTrue) === true
-  const reproVote = readKnobValue(state, "repro-vote", isTrue) === true
-  const acceptance = readKnobValue(state, "acceptance", isTrue) === true
-  const reproGrounding = readKnobValue(state, "repro-grounding", isTrue) === true
-  const noPatchBreaker = readKnobValue(state, "no-patch-breaker", isTrue) === true
-  const repairEscalation = readKnobValue(state, "repair-escalation", isTrue) === true
-  const specFidelitySteer = readKnobValue(state, "spec-fidelity-steer", isTrue) === true
-  const specFidelityInvariant = readKnobValue(state, "spec-fidelity-invariant", isTrue) === true
-  const dynamicMessageMatcher = readKnobValue(state, "dynamic-message-matcher", isTrue) === true
-  const repairSpecGate = readKnobValue(state, "repair-spec-gate", isTrue) === true
-  const repairStrongOracle = readKnobValue(state, "repair-strong-oracle", isTrue) === true
-  const forwardLocalize = readKnobValue(state, "forward-localize", isTrue) === true
-  const pairedControl = readKnobValue(state, "paired-control", isTrue) === true
-  const chaMultisiteSteer = readKnobValue(state, "cha-multisite-steer", isTrue) === true
-  const chaMultisiteGeneral = readKnobValue(state, "cha-multisite-general", isTrue) === true
-  const modelLaneDiversity = readKnobValue(state, "model-lane-diversity", isTrue) === true
-  const adversarialRepro = readKnobValue(state, "adversarial-repro", isTrue) === true
+  // Proof-driven bench closure + SOTA boolean opt-in flags resolved together in
+  // `resolveBenchPostureFlags` (default-OFF ⇒ byte-identical) and spread below.
   return {
     lspNav,
     lspNavCheap,
@@ -687,7 +694,6 @@ export const benchPostureFromState = (
     localizeBudget,
     noPatchForceFraction,
     regressionMaxTests,
-    adversarialRepro,
     reproDoubt,
     retryTransient,
     repairRounds,
@@ -711,26 +717,8 @@ export const benchPostureFromState = (
     // production consumer reads it. Retained only so the cross-group SOTA
     // hellgate stays green; safe to delete once that test drops it.
     sotaOn: state.preset === "agentless-v1",
-    faultEvidence,
-    verificationPlan,
-    primaryRail,
-    patchHygiene,
-    patchBudget,
-    patchBudgetStrict,
-    reproVote,
-    acceptance,
-    reproGrounding,
-    noPatchBreaker,
-    repairEscalation,
-    specFidelitySteer,
-    specFidelityInvariant,
-    dynamicMessageMatcher,
-    repairSpecGate,
-    repairStrongOracle,
-    forwardLocalize,
-    pairedControl,
-    chaMultisiteSteer,
-    chaMultisiteGeneral,
-    modelLaneDiversity,
+    // Boolean opt-in flags (faultEvidence … modelLaneDiversity, adversarialRepro)
+    // resolved as a cohesive group — see `resolveBenchPostureFlags`.
+    ...resolveBenchPostureFlags(state),
   }
 }
