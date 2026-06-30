@@ -89,3 +89,6 @@ tests/smoke/swebench/recordings/trajectories/
 # tracking them is the R6 "tier-bypass" hazard (a `.js` import path bypasses
 # every R3/R4/R5 fix). Source-of-truth is `.ts` only.
 src/observability/coverage/*.js
+
+# python editable-install build artifacts (adapters/terminal-bench)
+*.egg-info/

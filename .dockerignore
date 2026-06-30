@@ -1,0 +1,41 @@
+# Docker build context trim — adapters/terminal-bench/Dockerfile builds FROM the repo root
+# (COPY package.json/bun.lock/bunfig.toml, tsconfig*.json, src/, adapters/terminal-bench/*).
+# Everything the image does NOT need is excluded so the context isn't the multi-GB monorepo.
+# node_modules is REBUILT inside the image via `bun install --frozen-lockfile` — never ship the
+# host copy (platform-specific binaries + ~277 MB).
+node_modules
+**/node_modules
+
+# VCS + CI
+.git
+.github
+
+# Native / rust build artifacts (GBs: crates/native/target per the monorepo layout)
+target
+**/target
+*.app
+*.dylib
+*.node
+
+# Other surfaces the terminal-bench image does not build (only src/ + the adapter are copied)
+apps
+crates
+native
+src-tauri
+
+# Bench trajectories, cassettes, datasets, extracted corpora (never needed at image-build)
+**/*.jsonl
+.extracted_source
+docs/analysis
+tools/leaderboard-dashboard/rawdata
+
+# Python / pytest caches inside the adapter (rebuilt; not shippable)
+**/__pycache__
+**/.pytest_cache
+**/.benchmarks
+**/*.pyc
+
+# Editor / OS noise
+.DS_Store
+.vscode
+.idea
