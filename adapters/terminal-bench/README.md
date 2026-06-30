@@ -44,14 +44,16 @@ pip install -e ".[harbor]"   # box-phase; pulls harbor-framework/harbor (box-ver
 
 ## Register the agent with Harbor
 
-Harbor loads an agent by an **import selector** `module:Class` (RFC §3). This package
-installs a top-level `quanta_agent` module exposing `QuantaAgent`, so the selector is:
+Harbor loads a CUSTOM agent by its **import path** `module:Class` via the
+`--agent-import-path` flag (VERIFIED against harbor 0.16.1 — it sets
+`AgentConfig.import_path`; the bare `--agent` flag is for harbor's BUILT-IN named agents
+only — `aider|claude-code|terminus-2|…`). This package installs a top-level `quanta_agent`
+module exposing `QuantaAgent` (a concrete `harbor.agents.base.BaseAgent` subclass —
+verified in-image: zero remaining abstract methods, `name()=="quanta"`), so the run flag is:
 
 ```
---agent quanta_agent:QuantaAgent
+--agent-import-path quanta_agent:QuantaAgent
 ```
-
-`QuantaAgent.name()` returns `quanta`.
 
 ---
 
@@ -85,9 +87,15 @@ Pass them at run time, e.g.:
 harbor run \
   -d terminal-bench/terminal-bench-2 \
   -m gpt-5 \
-  --agent quanta_agent:QuantaAgent \
+  --agent-import-path quanta_agent:QuantaAgent \
   -e OPENAI_API_KEY="$OPENAI_API_KEY"          # or ANTHROPIC_API_KEY / QUANTA_API_KEY
 ```
+
+> Harbor itself shells out to the host `docker` to provision each task's container
+> (verified: it aborts with "Docker is not installed" when `docker` is absent), so
+> harbor runs on the HOST (Docker Desktop), not inside this image — the image is the
+> agent runtime harbor builds/uses. `QuantaAgent.run()` spawns the brain there and its
+> `container_exec` frames reach the task container via `environment.exec`.
 
 > Do **not** put keys in the Dockerfile, in `pyproject.toml`, or in any committed
 > file. The only baked env is `QUANTA_TERMINAL_BRAIN_CMD=quanta-terminal-brain`
@@ -115,22 +123,30 @@ runtime + quanta `src/`, the `quanta-terminal-brain` shim, the Python hands
 
 ---
 
-## Box-phase steps remaining to a green `tb run`
+## Box verification status (run against real Docker + harbor 0.16.1)
 
-Everything above is verified WITHOUT a daemon (import smoke, pytest, shim logic,
-contract-match — see the agent's report). To reach a green live run you still need:
+VERIFIED on a live Docker daemon + the real `harbor` (jul-01):
+- ✅ **Image builds end-to-end** — `docker build … -t quanta-tb:local .` → 1.7 GB; the
+  real `harbor 0.16.1` + `quanta-terminal-bench 0.1.0` install. (Found+fixed: the image
+  needed `git` for pip's VCS clone of harbor.)
+- ✅ **Agent loads as a valid harbor agent** — `quanta_agent:QuantaAgent` import_path
+  resolves, IS a `harbor.agents.base.BaseAgent` subclass, ZERO remaining abstract methods.
+- ✅ **AgentContext fold verified** — harbor's real `AgentContext` (pydantic) accepts
+  `n_input_tokens`/`n_output_tokens`/`cost_usd` + the raw report on `metadata`
+  (`rollout_details` is `list[RolloutDetail]`, so the report rides `metadata` instead).
+- ✅ **brain shim** — `quanta-terminal-brain --version` → exit 0 (what `setup()` probes).
+- ✅ **real LLM wired** — `brain-mode.ts buildRealLlm` now binds the shared `tryCreateLLM`
+  provider factory (no longer a throw).
 
-1. **Docker daemon up** + **harbor installed** (`pip install ".[harbor]"`, box-verify
-   the harbor-framework ref pinned in `pyproject.toml`).
-2. **Build the image**: `docker build -f adapters/terminal-bench/Dockerfile -t quanta-tb:local .` (from repo root).
-   Resolve any `# box-verify` pins (bun tag digest, python3 version, harbor ref).
-3. **Wire the real brain LLM**: `brain-mode.ts`'s `buildRealLlm` currently throws
-   ("box-wired"); bind it to the provider factory on the box.
-4. **Run**:
+Remaining for a green LIVE `tb run` (needs LLM tokens + a task):
+1. Run harbor on the HOST (Docker Desktop up) with this package installed
+   (`pip install -e adapters/terminal-bench`) — harbor provisions the task container via
+   the host `docker`.
+2. Download a task/dataset (`harbor download …` / `-d terminal-bench/…`).
+3. Provide a brain credential (`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`QUANTA_API_KEY`) the
+   `tryCreateLLM` factory can use, and run:
    ```sh
    harbor run -d terminal-bench/terminal-bench-2 -m <model> \
-     --agent quanta_agent:QuantaAgent -e OPENAI_API_KEY="$OPENAI_API_KEY"
+     --agent-import-path quanta_agent:QuantaAgent -e OPENAI_API_KEY="$OPENAI_API_KEY"
    ```
-5. Confirm `setup()` passes (`quanta-terminal-brain --version` → exit 0 in-box) and a
-   task `run()` produces a `--report-out` the hands fold into `AgentContext`
-   (box-verify the `AgentContext` field names in `quanta_agent._apply_report_to_context`).
+4. Score quanta+Opus-4.8 vs the standardized-scaffold Opus-4.8 baseline (58.3%).

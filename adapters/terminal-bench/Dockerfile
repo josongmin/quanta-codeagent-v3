@@ -34,6 +34,7 @@ RUN apt-get update \
       python3-pip \
       python3-venv \
       ca-certificates \
+      git \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/quanta

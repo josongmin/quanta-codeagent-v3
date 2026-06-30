@@ -79,10 +79,12 @@ class FakeContext:
     """Harbor AgentContext stand-in exposing the slots run() should populate."""
 
     def __init__(self):
+        # Mirrors the real harbor 0.16.1 AgentContext slots run() populates.
         self.n_input_tokens = None
         self.n_output_tokens = None
         self.cost_usd = None
-        self.rollout_details = None
+        self.rollout_details = None  # list[RolloutDetail] — we never set this (typed, not a dict)
+        self.metadata = None  # dict[str, Any] — the brain's raw report rides here
 
 
 # ── run(): the full bridge wiring ────────────────────────────────────────────
@@ -145,6 +147,9 @@ def test_run_drives_serve_calls_env_exec_and_replies_to_brain(monkeypatch):
     assert ctx.n_input_tokens == 111
     assert ctx.n_output_tokens == 222
     assert ctx.cost_usd == 0.0042
+    # (d) the raw report rides metadata (dict-typed); rollout_details (list[RolloutDetail]) stays None.
+    assert ctx.metadata is not None and ctx.metadata.get("cost_usd") == 0.0042
+    assert ctx.rollout_details is None
     assert brain.waited is True
 
 

@@ -139,13 +139,15 @@ def _brain_env() -> "dict[str, str]":
 
 
 def _apply_report_to_context(report: "dict[str, Any]", context: Any) -> None:
-    """Fold the brain's final report into the harbor ``AgentContext`` defensively.
-    Harbor is not importable here, so every slot is set guarded — a field-name
-    mismatch on the box degrades to a no-op instead of crashing the run.
+    """Fold the brain's final report into the harbor ``AgentContext``.
 
-    box-verify: confirm AgentContext field names against the installed harbor
-    (n_input_tokens / n_output_tokens / cost_usd / rollout_details below are the
-    RFC §7.5 names; reconcile on the box if harbor renamed them)."""
+    Field names VERIFIED against harbor 0.16.1 (the AgentContext pydantic model):
+    ``n_input_tokens``/``n_output_tokens`` (int|None), ``cost_usd`` (float|None),
+    ``metadata`` (dict[str, Any]|None). Note ``rollout_details`` is typed
+    ``list[RolloutDetail]`` — NOT a free dict — so the brain's raw record rides the
+    free-form ``metadata`` slot instead (we don't synthesize RolloutDetail objects).
+    Every slot is hasattr-guarded so the dev fake (no harbor) degrades to a no-op
+    instead of crashing."""
     tokens = report.get("tokens")
     if not isinstance(tokens, dict):  # malformed/absent tokens → no token slots
         tokens = {}
@@ -157,9 +159,9 @@ def _apply_report_to_context(report: "dict[str, Any]", context: Any) -> None:
     _set("n_input_tokens", tokens.get("input"))
     _set("n_output_tokens", tokens.get("output"))
     _set("cost_usd", report.get("cost_usd"))
-    # Trajectory slot: hand the whole report through (turns/final live here) so the
-    # box has the brain's record even before the exact field name is pinned.
-    _set("rollout_details", report)
+    # rollout_details is list[RolloutDetail] (not a dict); the brain's raw record
+    # (turns/final/trajectory) rides the free-form metadata slot, which IS dict-typed.
+    _set("metadata", report)
 
 
 class QuantaAgent(BaseAgent):  # type: ignore[misc]
