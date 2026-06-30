@@ -49,12 +49,24 @@ def preset_weight(preset: str | None) -> str:
     return "other"
 
 
+# Unit-test / smoke / fixture report artifacts pollute ~/.quanta/bench/results
+# (1588 of 2173 files were tmp__bench-* junk with synthetic turns/preset). EXCLUDE
+# them — only real box runs carry a measurable turn count.
+JUNK_RE = re.compile(r"tmp__|smoke|fixture|/test|-test-|mock|sample", re.I)
+
+
+def is_real_report(path: str) -> bool:
+    return JUNK_RE.search(path) is None
+
+
 def load_reports() -> dict:
     """instance_id -> list of {preset, weight, passed, turns, patchBytes, model}."""
     by_inst: dict[str, list] = defaultdict(list)
     seen_files = set()
     for g in REPORT_GLOBS:
         for f in glob.glob(g):
+            if not is_real_report(f):
+                continue
             rf = os.path.realpath(f)
             if rf in seen_files:
                 continue
