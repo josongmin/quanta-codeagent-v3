@@ -74,6 +74,8 @@ const RULES: readonly Rule[] = [
         "Bench local-run composition root extracted verbatim from apps/bench/index.ts (already allowlisted) — owns the same dotenv shim + QUANTA_BENCH_* / QUANTA_SWEBENCH_* launch-time reads; downstream logic receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/run-args.ts":
         "Bench CLI-arg parsing concern extracted verbatim from apps/bench/run-main.ts — the tiny dotenv shim (loadEnv writes process.env before any runtimeConfig() read) + the QUANTA_BENCH_CONCURRENCY launch-time read; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/bench/dataset-family.ts":
+        "Injection-first (jul-01 A1): `process.env` is ONLY the default for the injected `env` param of `bridgeDatasetFamilyToEnv` (tests pass a fake env); the flag→QUANTA_SWEBENCH_DATASET_FAMILY bridge writes that injected param at the bench composition root. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "runner/batch/eval/driver.ts":

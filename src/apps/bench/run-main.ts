@@ -42,6 +42,7 @@ import {
   toInstance,
 } from "./corpus"
 import {
+  bridgeDatasetFamilyToEnv,
   type DatasetFamily,
   gradeEvaluatorForFamily,
   parseTasksForFamily,
@@ -914,6 +915,12 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
   applyBenchEnvDefaults(process.env, { argvPreset: argValue("--preset") })
+  // jul-01 audit A1 follow-up — bridge --dataset-family flag → env at the LEGACY
+  // direct entry too (`bun src/apps/bench/index.ts … --dataset-family live`), which
+  // bypasses cli.ts main(). Closes the footgun both A1+A2 audits flagged: without it
+  // the local-Live guard (env-reader) wouldn't fire on a direct-invoke. After .env load
+  // so the flag wins; no-op when absent (byte-identical).
+  bridgeDatasetFamilyToEnv(argValue("--dataset-family"))
 
   if (argFlag("--help") || argFlag("-h")) {
     printHelp()

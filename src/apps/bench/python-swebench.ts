@@ -421,6 +421,23 @@ const gradeWithRetry = async (
   return { run, resolvedIds, retried }
 }
 
+/** jul-01 audit A2 — guard the LOCAL (host) grade path against SWE-bench-Live: stock
+ *  `swebench` only knows the ORIGINAL repos (KeyError on Live) and Live's prebuilt
+ *  images live under `starryzhang` (amd64) — neither is on a plain laptop. Returns a
+ *  guidance string to fail-LOUD, or undefined to proceed. BOX-SAFE: the full-remote/
+ *  box path ALWAYS sets `QUANTA_SWEBENCH_NAMESPACE` (=starryzhang for Live), so it is
+ *  never tripped; an operator who manually sets the namespace + installs the Live fork
+ *  also proceeds. Pure (family + namespace in) ⇒ unit-testable. */
+export const localLiveGradeRefusal = (
+  family: string,
+  namespace: string | undefined,
+): string | undefined =>
+  family === "live" && (namespace ?? "").trim() === ""
+    ? "refusing local SWE-bench-Live grade: host stock `swebench` cannot grade Live repos " +
+      "and `starryzhang` images are amd64. Grade Live via `--backend ec2|ssh` or `--mode full`, " +
+      "or set QUANTA_SWEBENCH_NAMESPACE=starryzhang with the SWE-bench-Live fork installed."
+    : undefined
+
 export const evaluateWithPythonSwebench = async (
   instance: Instance,
   prediction: string,
@@ -440,6 +457,17 @@ export const evaluateWithPythonSwebench = async (
       gradingCompleted: false,
       log: `empty prediction for ${meta.instanceId}`,
     }
+  }
+  // jul-01 audit A2 — refuse a LOCAL SWE-bench-Live grade on the unconfigured path
+  // (host stock `swebench` KeyErrors on Live repos; `starryzhang` images are amd64).
+  // Fail-LOUD with guidance instead of a cryptic KeyError. The full-remote/box path
+  // always sets QUANTA_SWEBENCH_NAMESPACE, so it is NOT tripped (see localLiveGradeRefusal).
+  const liveRefusal = localLiveGradeRefusal(
+    (process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase(),
+    process.env.QUANTA_SWEBENCH_NAMESPACE,
+  )
+  if (liveRefusal !== undefined) {
+    return { resolved: false, gradingCompleted: false, log: liveRefusal }
   }
 
   const spawn = opts.spawn ?? defaultSpawn

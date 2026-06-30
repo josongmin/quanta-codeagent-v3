@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { toInstance } from "@/runner/batch/corpus/dataset"
 import {
+  bridgeDatasetFamilyToEnv,
   gradeEvaluatorForFamily,
   parseTasksForFamily,
   resolveDatasetFamily,
 } from "./dataset-family"
+import { localLiveGradeRefusal } from "./python-swebench"
 import type { Instance } from "./types"
 
 describe("resolveDatasetFamily", () => {
@@ -35,6 +37,53 @@ describe("parseTasksForFamily — Pro normalizes, verified does not (de-theaters
   test("family=verified ⇒ same lowercase row degrades to the no-op (no normalize)", () => {
     const t = parseTasksForFamily(proRow, "verified")
     expect(toInstance(t[0]!, "/tmp").testCmd).toBe("true")
+  })
+})
+
+describe("bridgeDatasetFamilyToEnv — flag → canonical env (A1: full-remote/pool footgun fix)", () => {
+  test("--dataset-family live writes canonical env (so box-forward + pre-flight see it)", () => {
+    const env: NodeJS.ProcessEnv = {}
+    expect(bridgeDatasetFamilyToEnv("live", env)).toBe("live")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBe("live")
+  })
+  test("flag BEATS a stale env (the exact footgun: flag was ignored before)", () => {
+    const env: NodeJS.ProcessEnv = { QUANTA_SWEBENCH_DATASET_FAMILY: "verified" }
+    expect(bridgeDatasetFamilyToEnv("live", env)).toBe("live")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBe("live")
+  })
+  test("no flag ⇒ NO write (env/default untouched ⇒ byte-identical)", () => {
+    const env: NodeJS.ProcessEnv = { QUANTA_SWEBENCH_DATASET_FAMILY: "pro" }
+    expect(bridgeDatasetFamilyToEnv(undefined, env)).toBe("pro")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBe("pro")
+  })
+  test("empty flag ⇒ NO write (treated as absent)", () => {
+    const env: NodeJS.ProcessEnv = {}
+    expect(bridgeDatasetFamilyToEnv("", env)).toBe("verified")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBeUndefined()
+  })
+  test("unknown flag ⇒ verified fail-safe, written canonical", () => {
+    const env: NodeJS.ProcessEnv = {}
+    expect(bridgeDatasetFamilyToEnv("bogus", env)).toBe("verified")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBe("verified")
+  })
+})
+
+describe("localLiveGradeRefusal — guard unconfigured LOCAL Live grade (A2), box-safe", () => {
+  test("live + no namespace ⇒ REFUSE with actionable guidance", () => {
+    const r = localLiveGradeRefusal("live", undefined)
+    expect(r).toBeDefined()
+    expect(r).toContain("--backend")
+    expect(r).toContain("starryzhang")
+  })
+  test("live + blank namespace ⇒ refuse (treated as unset)", () => {
+    expect(localLiveGradeRefusal("live", "   ")).toBeDefined()
+  })
+  test("BOX-SAFE: live + starryzhang namespace ⇒ proceed (undefined)", () => {
+    expect(localLiveGradeRefusal("live", "starryzhang")).toBeUndefined()
+  })
+  test("verified / pro ⇒ never refuse (not live)", () => {
+    expect(localLiveGradeRefusal("verified", undefined)).toBeUndefined()
+    expect(localLiveGradeRefusal("pro", undefined)).toBeUndefined()
   })
 })
 

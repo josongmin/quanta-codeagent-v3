@@ -36,7 +36,9 @@ import { cmdAuth } from "./commands/auth"
 import { cmdBox } from "./commands/box"
 import { cmdGrade } from "./commands/grade"
 import { cmdPool } from "./commands/pool"
+import { argValue } from "./commands/shared"
 import { cmdTrace, cmdTraceUrl } from "./commands/trace"
+import { bridgeDatasetFamilyToEnv } from "./dataset-family"
 import { routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport } from "./otel"
 import { CURRENT_BENCH_BASE_PRESET } from "./preset"
@@ -88,10 +90,15 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
 
 Default live execution preset: ${CURRENT_BENCH_BASE_PRESET}
 Explicit selectors still win: QUANTA_BENCH_PRESET > QUANTA_BENCH_SOTA > QUANTA_KNOBS_PRESET > --preset.
+Dataset family: --dataset-family <verified|live|pro> (or QUANTA_SWEBENCH_DATASET_FAMILY); default verified. Live grading needs a remote amd64 backend (ec2|ssh|--mode full).
 
 Run a subcommand with no/invalid args to see its usage. No subcommand ⇒ 'run'.`
 
 const main = async (): Promise<void> => {
+  // jul-01 audit A1 — bridge --dataset-family flag → QUANTA_SWEBENCH_DATASET_FAMILY so
+  // the full-remote/pool/box path (which reads that env + forwards it to the box) honors
+  // the CLI flag, not only an explicit export. No-op when the flag is absent.
+  bridgeDatasetFamilyToEnv(argValue("--dataset-family"))
   const sub = process.argv[2]
   // Legacy: no subcommand, or a leading flag ⇒ route to `run` (byte-compat with
   // the historical `index.ts --swebench …` entry).
