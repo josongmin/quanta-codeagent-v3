@@ -37,11 +37,16 @@ import {
   benchRunId,
   benchWorkRoot,
   defaultExec,
-  parseSwebenchJsonl,
   prepareTaskRepo,
   type SwebenchTask,
   toInstance,
 } from "./corpus"
+import {
+  type DatasetFamily,
+  gradeEvaluatorForFamily,
+  parseTasksForFamily,
+  resolveDatasetFamily,
+} from "./dataset-family"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { finalizeRun, runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
@@ -359,8 +364,16 @@ const runPrepareImages = async (instanceIds: string[]): Promise<number> => {
   return result.ok ? 0 : 1
 }
 
+/** Resolve the dataset family (verified|live|pro) from `--dataset-family` /
+ *  QUANTA_SWEBENCH_DATASET_FAMILY. Default "verified" (byte-identical legacy). */
+const datasetFamily = (): DatasetFamily =>
+  resolveDatasetFamily(argValue("--dataset-family"), process.env)
+
+// REGRESSION FIX (jun-30): the god-MODULE split (11adab597) dropped the family-aware
+// parse — Pro rows MUST be normalized (lowercase fail_to_pass + extra fields) or they
+// degrade to the `testCmd:"true"` no-op. Verified/Live are the standard schema.
 const readSwebenchTasks = (datasetFile: string): SwebenchTask[] =>
-  parseSwebenchJsonl(readFileSync(datasetFile, "utf8"))
+  parseTasksForFamily(readFileSync(datasetFile, "utf8"), datasetFamily())
 
 /** Apply the `--instance <substr>` filter to ALREADY-parsed tasks. Pure — no
  *  IO — so the dataset file is read + JSON-parsed exactly ONCE per run and the
@@ -696,7 +709,43 @@ const maybeRunDatasetMode = async (
 /** Build the optional Python-harness wiring for the runner. Returns undefined
  *  unless `QUANTA_SWEBENCH_PYTHON=1` AND the official harness is importable
  *  (probe is real here). Default-off ⇒ the local testCmd path is unchanged. */
+// REGRESSION FIX (jun-30): the god-MODULE split (11adab597) dropped this Pro grader
+// branch — `family=pro` then fell through to the VERIFIED harness, which can't find
+// Pro instance_ids ⇒ gold-sanity "gold did not resolve" ⇒ 8/8 grader_invalid. The
+// Pro grader injects into the SAME `pythonSwebench` seam (gradeEvaluatorForFamily),
+// so verify()/gold-sanity transparently grade with the ScaleAI harness. Opts come
+// from box-set env (QUANTA_SWEBENCH_PRO_HARNESS_DIR/RAW_SAMPLE_PATH/PYTHON_BIN).
+const buildProGradeVerifier = (): RunCfg["pythonSwebench"] => {
+  const harnessDir = process.env.QUANTA_SWEBENCH_PRO_HARNESS_DIR
+  const rawSamplePath = process.env.QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH
+  if (!harnessDir || !rawSamplePath) {
+    logger.error(
+      "dataset-family=pro requires QUANTA_SWEBENCH_PRO_HARNESS_DIR + " +
+        "QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH (clone scaleapi/SWE-bench_Pro-os). " +
+        "REFUSING to fake-grade. Aborting.",
+    )
+    exitFn(1)
+    return undefined
+  }
+  const pythonBin = process.env.QUANTA_SWEBENCH_PRO_PYTHON_BIN
+  const dockerhubUsername = process.env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
+  const modelName = process.env.QUANTA_SWEBENCH_PRO_MODEL_NAME
+  logger.info(
+    `using ScaleAI SWE-bench Pro harness for grading (${harnessDir}, python=${pythonBin ?? "python3"})`,
+  )
+  return {
+    evaluate: gradeEvaluatorForFamily("pro", {
+      harnessDir,
+      rawSamplePath,
+      ...(pythonBin !== undefined ? { pythonBin } : {}),
+      ...(dockerhubUsername ? { dockerhubUsername } : {}),
+      ...(modelName ? { modelName } : {}),
+    }),
+  }
+}
+
 const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
+  if (datasetFamily() === "pro") return buildProGradeVerifier()
   if (!gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")) return undefined
   if (!(await isPythonSwebenchAvailable())) {
     // FAIL LOUD — no silent fake fallback. The operator explicitly asked for
@@ -711,8 +760,12 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
     exitFn(1)
     return undefined // unreachable in prod (exitFn = process.exit)
   }
+  // REGRESSION FIX (jun-30): restore the Live default the refactor dropped — family=live
+  // grades a DIFFERENT dataset; defaulting to Verified would look Live ids up in the
+  // Verified dataset (KeyError / mismatched spec). Verified/Pro unchanged.
+  const liveDefault = datasetFamily() === "live" ? "SWE-bench-Live/SWE-bench-Live" : undefined
   const datasetName =
-    argValue("--dataset-name") ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? undefined
+    argValue("--dataset-name") ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? liveDefault
   logger.info(
     `using official Python swebench harness for grading (dataset=${datasetName ?? "princeton-nlp/SWE-bench_Verified (default)"})`,
   )
