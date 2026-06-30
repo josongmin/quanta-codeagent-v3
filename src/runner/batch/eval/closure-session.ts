@@ -41,6 +41,12 @@ type BuildClosureSessionArgs = {
   witnessOwners?: readonly { file: string; forSymbol?: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean; pytestReportPath?: string }
   ownerNearTests?: readonly string[]
+  /** Base-tree RED proof for the PRIMARY owner-test fallback rail. */
+  ownerNearPrimaryBaseValidatedRed?: boolean
+  /** Public repo-local verifier fallback (module-smoke rail). */
+  touchedModuleSmoke?: readonly string[]
+  /** Base-tree RED proof for the PRIMARY module-smoke fallback rail. */
+  moduleSmokePrimaryBaseValidatedRed?: boolean
   posture: ClosureSessionPosture
   /** T-OWN-12: opt into rule-based clean owner admission (authoritative/advisory
    *  lattice, no additive score). Default/omitted ⇒ legacy scored behavior,
@@ -84,6 +90,15 @@ const closureBundleInputOf = (args: {
       ...(args.session.ownerNearTests !== undefined && args.session.ownerNearTests.length > 0
         ? { ownerNearTests: args.session.ownerNearTests }
         : {}),
+      ...(args.session.ownerNearPrimaryBaseValidatedRed === true
+        ? { ownerNearPrimaryBaseValidatedRed: true }
+        : {}),
+      ...(args.session.touchedModuleSmoke !== undefined && args.session.touchedModuleSmoke.length > 0
+        ? { touchedModuleSmoke: args.session.touchedModuleSmoke }
+        : {}),
+      ...(args.session.moduleSmokePrimaryBaseValidatedRed === true
+        ? { moduleSmokePrimaryBaseValidatedRed: true }
+        : {}),
       ...(args.issueDeclaredExpected !== undefined
         ? { issueDeclaredExpected: args.issueDeclaredExpected }
         : {}),
@@ -107,7 +122,14 @@ const closureBundleInputOf = (args: {
       stakes: { patchFileCount: 1, crossFile: false, destructive: false },
       uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
       signal: {
-        reproAvailable: args.session.reproScript?.baseValidatedRed === true,
+        // GateDecision's `reproAvailable` bit is the practical "cheap execution
+        // rail already exists" signal. Base-red owner-test / module-smoke
+        // fallback rails are the same class of external execution evidence for
+        // commit-vs-verify purposes.
+        reproAvailable:
+          args.session.reproScript?.baseValidatedRed === true ||
+          args.session.ownerNearPrimaryBaseValidatedRed === true ||
+          args.session.moduleSmokePrimaryBaseValidatedRed === true,
         lspAvailable: args.session.posture.lspNav,
       },
       issueProvidesFix: args.issueDeclaredExpected !== undefined,

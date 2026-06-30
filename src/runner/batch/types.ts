@@ -10,6 +10,7 @@ import type { StopReason } from "@/agent"
 import type { LocalEnvSelection } from "@/runtime"
 import type { LspGroundingStatus } from "@/shared"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
+import type { SubmissionReview } from "./eval/submission-review"
 
 /** Official SWE-bench instance metadata, present only for instances loaded
  *  from the real `swebench.verified` corpus. Consumed by the optional Python
@@ -36,6 +37,15 @@ export interface SwebenchMeta {
    *  inadmissible. NEVER handed to the agent loop — same eval-only boundary as
    *  the closure oracle's gold files. Absent ⇒ regression signal FAIL-OPEN. */
   passToPass?: readonly string[]
+  /** Pro only (RFC jun-29) — the prebuilt Scale image tag (`jefzda/sweap-images:<tag>`).
+   *  The official Pro verifier resolves its own image from the raw sample CSV; our repro/issue-
+   *  smoke rails consume this field to run Python repros INSIDE that same prebuilt image instead
+   *  of the host uv env. Absent for Verified/Live (additive ⇒ byte-identical when omitted). */
+  dockerhubTag?: string
+  /** Pro only — `repo_language` (python|go|js|ts…). Consumed at synthesize-time to fence
+   *  non-Python repos from a fake pytest grade ({@link synthesizeTestCmd}); also available
+   *  for a per-language report breakdown. Absent for Verified/Live. */
+  repoLanguage?: string
 }
 
 /** A single SWE-bench-style task. `repoPath` is treated as read-only: the
@@ -243,6 +253,12 @@ export interface InstanceResult {
    * behavior).
    */
   verdict?: "ok" | "degraded" | "env_prep_failed" | "grader_invalid"
+  /** Solvability oracle (RFC jun-29): did the GOLD patch resolve under the selected verifier?
+   *  `true` = instance is solvable + verifier-sound (safe to benchmark); `false` = gold itself
+   *  failed ⇒ the instance's verifier/env is broken (a measurement artifact, NOT model
+   *  difficulty — see geopandas Live). `undefined` = gold-sanity didn't run for this instance
+   *  (e.g. the model PASSED, so it's trivially solvable). Populated by the gold-sanity gate. */
+  goldResolved?: boolean
   /**
    * Bench-side admission block (distinct from observation `verdict`). Present
    * when the runner intentionally refuses to submit a generated patch, e.g.
@@ -433,6 +449,10 @@ export interface InstanceResult {
    *  only when a bounded follow-up prepare/run pass was armed with additional
    *  owner files (repair-escalation and/or forward-localize). */
   ownerWidening?: OwnerWideningTelemetry
+  /** #6 submit-review verdict over the final captured patch (clean / empty /
+   *  test-edits). Present only when `QUANTA_BENCH_SUBMIT_REVIEW` is on (observe-
+   *  only; the test-revert itself is unconditional via `sourceOnlyDiff`). */
+  submissionReview?: SubmissionReview
   /**
    * A5 — repro-vote outcome telemetry drained from the module sink after the
    * repair/selection rounds finish. Present only when a repro-vote validator

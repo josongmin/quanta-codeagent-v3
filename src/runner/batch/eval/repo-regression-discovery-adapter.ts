@@ -229,6 +229,79 @@ export const collectBaseGreenBatched = async (
   return [...(await keepBaseGreenDiscoveredTests(tests, ports.perTest))]
 }
 
+export interface CollectBaseGreenRepoTestsArgs {
+  readonly instance: Pick<Instance, "swebench" | "localEnv">
+  readonly sandbox: string
+  readonly timeoutMs: number
+  readonly tests: readonly string[]
+}
+
+export interface ProbeRepoTestOnCurrentTreeArgs {
+  readonly instance: Pick<Instance, "swebench" | "localEnv">
+  readonly sandbox: string
+  readonly timeoutMs: number
+  readonly test: string
+}
+
+/** Run one repo-owned test on the CURRENT sandbox tree (no reset) and return a
+ *  three-valued verdict: `true` green, `false` real red, `null` infra/non-verdict.
+ *  Used to admit a public owner-test primary rail into repair only after it was
+ *  actually observed red on the base tree. */
+export const probeRepoTestOnCurrentTree = async (
+  args: ProbeRepoTestOnCurrentTreeArgs,
+): Promise<boolean | null> => {
+  const oracle = makeBenchRegressionOracle(
+    buildProjectPytestArgv(args.instance.swebench?.repo, args.instance.swebench?.version),
+    args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : {},
+  )
+  const result = await oracle
+    .run({ tests: [args.test], sandbox: args.sandbox, timeoutMs: args.timeoutMs })
+    .catch(() => null)
+  return toRegressionGreen([args.test], result)
+}
+
+/**
+ * Shared base-green filter for a PUBLIC repo-owned regression set discovered
+ * outside verify-select. This keeps repair acceptance on the SAME "base-green
+ * before patched-tree authority" contract as verify-select instead of letting a
+ * statically discovered test file become a regression veto on its own.
+ */
+export const collectBaseGreenRepoTests = async (
+  args: CollectBaseGreenRepoTestsArgs,
+): Promise<readonly string[]> => {
+  const baseCommit = args.instance.swebench?.baseCommit
+  if (baseCommit === undefined || args.tests.length === 0) return []
+
+  const oracle = makeBenchRegressionOracle(
+    buildProjectPytestArgv(args.instance.swebench?.repo, args.instance.swebench?.version),
+    args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : {},
+  )
+  const batchOracle = makeBenchRegressionOracle(
+    buildBaseGreenBatchArgv(args.instance.swebench?.repo, args.instance.swebench?.version),
+    args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : {},
+  )
+  const runOneBaseTest = async (test: string): Promise<boolean | null> => {
+    if (!(await resetToBase(args.sandbox, baseCommit, args.timeoutMs))) return null
+    const r = await oracle
+      .run({ tests: [test], sandbox: args.sandbox, timeoutMs: args.timeoutMs })
+      .catch(() => null)
+    return toRegressionGreen([test], r)
+  }
+
+  return [
+    ...(await collectBaseGreenBatched(args.tests, {
+      reset: () => resetToBase(args.sandbox, baseCommit, args.timeoutMs),
+      runBatch: async (tests) => {
+        const r = await batchOracle
+          .run({ tests, sandbox: args.sandbox, timeoutMs: args.timeoutMs })
+          .catch(() => null)
+        return r === null ? null : { ran: r.ran, failed: r.failed }
+      },
+      perTest: runOneBaseTest,
+    })),
+  ]
+}
+
 /**
  * Execute every base-green witness test on the (already-materialized) patched
  * tree and report whether the executed witnesses stayed green, plus WHICH tests

@@ -57,6 +57,7 @@ const ENV_KEYS = [
   "QUANTA_BENCH_ADVERSARIAL_REPRO",
   "QUANTA_BENCH_RETRY_TRANSIENT",
   "QUANTA_BENCH_CLOSURE_REPAIR",
+  "QUANTA_BENCH_REPAIR_BREADTH",
   "QUANTA_BENCH_IN_LOOP_EXEC",
   "QUANTA_BENCH_VERIFY_SELECT",
   "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
@@ -66,7 +67,11 @@ const ENV_KEYS = [
   "QUANTA_BENCH_VERIFY_SELECT_REPRO",
   "QUANTA_BENCH_VERIFY_SELECT_RISK_GATE",
   "QUANTA_BENCH_VERIFY_SELECT_COUNTERFACTUAL",
+  "QUANTA_BENCH_ACCEPTANCE",
+  "QUANTA_BENCH_LOCATION_FANOUT",
   "QUANTA_BENCH_CHA_MULTISITE_STEER",
+  "QUANTA_BENCH_CHA_MULTISITE_GENERAL",
+  "QUANTA_BENCH_MODEL_LANE_DIVERSITY",
   "QUANTA_BENCH_SELECTOR_MODE",
   "QUANTA_READ_OUTLINE",
   "QUANTA_TEST_RUNNER",
@@ -184,6 +189,25 @@ describe("bench preset DRIVES config (anti report-lie)", () => {
     expect(opt.lspNav).toBe(false)
     const cfg = buildOnce()
     expect(hasLspTool(cfg)).toBe(false)
+  })
+
+  test("PRESET-4d: v7 multifile preset projects the structural breadth posture, not just telemetry", () => {
+    process.env.QUANTA_BENCH_PRESET = "agentless-v7-oracle-multifile"
+    const opt = benchOptIns()
+    expect(opt.repairRounds).toBe(5)
+    expect(opt.repairBreadth).toBe(3)
+    expect(opt.locationFanout).toBe(true)
+    expect(opt.chaMultisiteSteer).toBe(true)
+    expect(opt.chaMultisiteGeneral).toBe(true)
+    expect(opt.modelLaneDiversity).toBe(true)
+    expect(opt.acceptance).toBe(true)
+    expect(opt.pairedControl).toBe(true)
+    expect(opt.adversarialRepro).toBe(true)
+    const report = knobsForReport(resolveBenchKnobs({ envVars: process.env }))
+    expect(report["repair-breadth"]).toBeDefined()
+    expect(report["bench-location-fanout"]).toBeDefined()
+    expect(report["paired-control"]).toBeDefined()
+    expect(report["adversarial-repro"]).toBeDefined()
   })
 
   // PRESET-5: no preset + no env ⇒ all-OFF baseline EXCEPT the jun-26 cheap

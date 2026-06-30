@@ -24,6 +24,7 @@ import {
   type AgentlessLocalizeDeps,
   type AgentlessLocalizeResult,
   agentlessLocalize,
+  BUDGET_PRESETS,
   BudgetMeter,
   buildSystemPrompt,
   composeAgentlessHint,
@@ -62,6 +63,7 @@ import {
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { ReproGroundingInput } from "@/agent/repro-test/generate"
+import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { voteResolved } from "@/agent/repro-test/vote"
 import {
@@ -70,7 +72,13 @@ import {
   type IssueDeclaredExpected,
 } from "@/agent/verification-plan"
 import { buildVerifyGuard } from "@/agent/verify-guard"
-import type { LLMPort, Message } from "@/llm"
+import {
+  type LLMPort,
+  type Message,
+  modelSupportsSamplingTemperature,
+  sampleTemperatureForCandidate,
+  withTemperature,
+} from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
@@ -92,7 +100,6 @@ import type { Tool } from "@/tool"
 import { astGrepTool, buildDefaultTools, findReferencesTool, ToolRegistry } from "@/tool"
 import { localizeTool } from "@/tool/localize"
 import { testRunnerTool } from "@/tool/test-runner"
-import { reproRunArgv } from "../corpus/dataset"
 import { type AttemptObservation, BenchObserver, UsageTap } from "../observe"
 import type {
   BenchAttemptOutcome,
@@ -103,8 +110,14 @@ import type {
   ReproGroundingTelemetry,
   ReproOracleCalibration,
 } from "../types"
+import { buildLlmRerankFromPort, resolveLlmSelectMode } from "./acceptance-llm-rerank-wire"
+import type { AcceptanceLlmRerank } from "./acceptance-select"
 import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
-import { ADAPTIVE_ACTIONS, runAdaptiveBenchAttempt } from "./adaptive-escalation"
+import {
+  ADAPTIVE_ACTIONS,
+  resolveEffortLadderLimits,
+  runAdaptiveBenchAttempt,
+} from "./adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "./adaptive-escalation/live-model-call"
 import {
   type CandidateFamily,
@@ -161,6 +174,12 @@ import {
   type VerificationTargetFact,
   verificationTargetFromPlan,
 } from "./llm-evidence-packet"
+import {
+  buildLocationSeeder,
+  buildRepairFanoutFiles,
+  buildRepairFanoutSymbols,
+  type PerCandidateSeed,
+} from "./location-set-fanout"
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
@@ -181,6 +200,7 @@ import {
   resetToBase,
   withCandidatePatch,
 } from "./rematerialize"
+import { writeCandidatePool } from "./repair/candidate-ledger-sink"
 import { runRepairRounds } from "./repair/index"
 import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import {
@@ -207,12 +227,14 @@ import {
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "./repair-phase-policy"
+import { agentVisibleBenchVerifierCommand } from "./repo-local-verifier-command"
 import {
   listTrackedPythonFiles,
   makeDiscoveredRepoRegressionPort,
   makeDiscoveredRepoRegressionProofPort,
 } from "./repo-regression-discovery-adapter"
 import { emitPatch, emitSandbox, emitVerify, ObservationError, type Wiring } from "./report"
+import { preferredReproExecRuntime, resolveReproAdapter } from "./repro-adapter"
 import { reproArtifactInstancePath, reproArtifactVoteRoundPath } from "./repro-artifacts-fs"
 import {
   boundReproArtifactSidecar,
@@ -265,9 +287,18 @@ import {
   staticWitnessLanguageDiagnostics,
 } from "./static-witness-adapter"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
+import { reviewSubmission, type SubmissionReview } from "./submission-review"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
+import {
+  discoverVerificationModuleSmokePlan,
+  type VerificationModuleSmokePlan,
+} from "./verification-module-smoke"
 import { extractVerificationOwnerTestExpectations } from "./verification-owner-test-expectations"
-import { discoverVerificationOwnerTests } from "./verification-owner-tests"
+import {
+  discoverVerificationOwnerTestsPlan,
+  type VerificationOwnerTestsPlan,
+} from "./verification-owner-tests"
+import { strongVoteKey } from "./vote-key-normalize"
 
 export {
   buildSelectionCandidateFamilyBundle,
@@ -304,8 +335,9 @@ export interface RunInstanceDeps {
   turnContextMutator?: AgentConfig["turnContextMutator"]
   /**
    * Optional hard-budget factory for a single agent invocation. The factory is
-   * called fresh for each solve / repair round / verify-select candidate so
-   * meter state never leaks across independent agent runs.
+   * threaded through `buildConfig`; callers may return a FRESH meter per nested
+   * run, or close over ONE shared meter to enforce an attempt-wide budget
+   * across repair rounds / breadth candidates / selector runs.
    *
    * Absent (default) ⇒ no budget meter is wired and the loop stays
    * byte-identical to the pre-budget path.
@@ -711,6 +743,14 @@ const composeBaseText = (
  *                                   baseline — keep OFF unless measuring N-best.
  *                                   NOT auto-enabled for `instance.swebench` —
  *                                   explicit opt-in only (cost discipline).
+ *   - QUANTA_BENCH_LLM_SELECT=chooser|reviewer  LLM soft-rerank over the acceptance
+ *                                   admissible survivors (SWE-agent Chooser/Score
+ *                                   retry-loop absorption). Re-ranks WITHIN the
+ *                                   deterministic admissible set only (never-veto)
+ *                                   and fails open to the vote winner; needs the
+ *                                   acceptance selector to be active to have an
+ *                                   effect. ~N× one-shot LLM cost. See
+ *                                   {@link resolveAcceptanceLlmRerank}.
  *  See {@link benchOptIns} (just below) for the resolver — the BENCH-INTENTIONAL
  *  posture is unchanged when all four are unset. If a future bench mode wants
  *  any of the other listed knobs, add another opt-in flag — do NOT remove this
@@ -1647,11 +1687,10 @@ export interface PrepareReproTestDeps {
   readonly groundingSourceFiles?: readonly string[]
 }
 
-/** Per-instance reproduction-script filename written into the sandbox. The
- *  agent's user message references this exact path. The leading underscore
- *  is intentional — keeps the script at the top of `ls` so the agent sees
- *  it without scanning. */
-export const REPRO_FILE_NAME = "reproduce_issue.py"
+/** Per-instance reproduction-script filename written into the sandbox. The agent's user
+ *  message references this exact path. Sourced from the repro-scaffold SSOT (RFC Phase 1b) so
+ *  the canonical name has ONE definition across hint / hygiene / strip / rematerialize. */
+export const REPRO_FILE_NAME = REPRO_CANONICAL_BASENAME
 
 /** User-message block appended (before the existing base text) when a repro
  *  test was successfully selected. The command is rendered from the same
@@ -1670,14 +1709,23 @@ export const reproHintMessage = (command: string): string =>
  *  `reproHintForInstance` so the hint includes `uv run --with-editable`. */
 export const REPRO_HINT_MESSAGE = reproHintMessage("python3 -s reproduce_issue.py")
 
+const reproValidationCmdForInstance = (instance: Instance, scriptPath: string): string => {
+  const repo = instance.swebench?.repo
+  const version = instance.swebench?.version
+  const adapter = resolveReproAdapter(instance)
+  if (repo !== undefined && adapter !== null) {
+    return adapter.buildValidationCmd({
+      repo,
+      version,
+      scriptPath,
+      ...preferredReproExecRuntime(instance, scriptPath),
+    })
+  }
+  return reproValidationCmd({ repo, version, scriptPath })
+}
+
 const reproHintForInstance = (instance: Instance): string =>
-  reproHintMessage(
-    reproValidationCmd({
-      repo: instance.swebench?.repo,
-      version: instance.swebench?.version,
-      scriptPath: REPRO_FILE_NAME,
-    }),
-  )
+  reproHintMessage(reproValidationCmdForInstance(instance, REPRO_FILE_NAME))
 
 export interface PrepareReproTestDetailedResult {
   readonly selection: ReproTestSelection | null
@@ -1708,7 +1756,7 @@ const selectionTelemetry = (selection: ReproTestSelection): BenchReproTestTeleme
 type ReproSamples = Awaited<ReturnType<typeof executeReproTests>>
 
 const disabledReproResult = (
-  reason: "disabled" | "empty_problem",
+  reason: "disabled" | "empty_problem" | "unsupported_language",
 ): PrepareReproTestDetailedResult => ({
   selection: null,
   telemetry: { installed: false, reason },
@@ -1811,9 +1859,24 @@ const executeReproCandidateTests = async (
 ): Promise<ReproSamples | null> => {
   const reproRepo = instance.swebench?.repo
   const reproVersion = instance.swebench?.version
+  // RFC jun-29 Phase 2b: route repro exec through the per-language adapter PLUS the preferred
+  // runtime for this instance. Verified/Live Python stay host-byte-identical; Pro Python with a
+  // clean image ref upgrades to `docker run ... python -s <script>` inside the instance image.
+  // Unsupported language (Pro non-Python) ⇒ adapter null ⇒ FAIL-CLOSED (no fake pytest on a
+  // Go/JS tree). The repo-undefined branch is preserved verbatim (non-SWE-bench fixtures keep
+  // execute.ts's bare `[python, path]` default — NOT the adapter's `-s` form).
+  const reproAdapter = resolveReproAdapter(instance)
+  if (reproAdapter === null) return null
   const buildArgv =
     reproRepo !== undefined
-      ? (scriptPath: string) => reproRunArgv(reproRepo, reproVersion, scriptPath)
+      ? (scriptPath: string) => [
+          ...reproAdapter.buildExecArgv({
+            repo: reproRepo,
+            version: reproVersion,
+            scriptPath,
+            ...preferredReproExecRuntime(instance, scriptPath),
+          }),
+        ]
       : undefined
   // G2 paired-control: when controls were generated (gate ON), attach the SAME
   // env-health control set to EVERY symptom candidate by position. The executor
@@ -1953,6 +2016,9 @@ export const prepareReproTestDetailed = async (
   if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
     return disabledReproResult("empty_problem")
   }
+  if (instance.swebench?.repoLanguage !== undefined && resolveReproAdapter(instance) === null) {
+    return disabledReproResult("unsupported_language")
+  }
   const config: ReproTestConfig = {
     samples: k,
     ...(deps.reproExecTimeoutMs !== undefined ? { execTimeoutMs: deps.reproExecTimeoutMs } : {}),
@@ -2064,6 +2130,9 @@ const writeFailedTelemetry = (base: BenchReproTestTelemetry): BenchReproTestTele
   reason: "write_failed",
   ...(base.samples !== undefined ? { samples: base.samples } : {}),
   ...(base.reproducedCount !== undefined ? { reproducedCount: base.reproducedCount } : {}),
+  // jun-29: preserve grounding engagement telemetry across the rebuild (else the
+  // A/B can't read it on the write-failed path).
+  ...(base.grounding !== undefined ? { grounding: base.grounding } : {}),
 })
 
 /** The CANONICAL reproducing sources — the SUBMIT-GATE oracle set (jun-23
@@ -2213,6 +2282,12 @@ export const prepareSelectionReproSources = async (
         path,
         samples: detail.selection.samples.length,
         reproducedCount: detail.selection.reproducedCount,
+        // jun-29: carry grounding engagement onto the installed-success telemetry
+        // (prepareReproTestDetailed attached it via withG; this rebuild must NOT
+        // drop it, or the A/B reads no grounding on the reproduced path).
+        ...(detail.telemetry.grounding !== undefined
+          ? { grounding: detail.telemetry.grounding }
+          : {}),
       },
       hint: reproHintForInstance(instance),
       reproSources,
@@ -2266,6 +2341,9 @@ export const installReproTestHint = async (
         path,
         samples: selection.samples.length,
         reproducedCount: selection.reproducedCount,
+        // jun-29: preserve grounding engagement (else the A/B reads None on the
+        // installed-success path — the canary symptom).
+        ...(telemetry.grounding !== undefined ? { grounding: telemetry.grounding } : {}),
       },
     }
   } catch {
@@ -2316,7 +2394,7 @@ export const composeWithReproHint = (
     : composePromptPrelude({ issueHint: hint, reproHint, baseText })
 
 const repoLocalVerifierHint = (instance: Instance): string => {
-  const testCmd = agentVisibleBenchVerifierCommand(instance)
+  const testCmd = agentVisibleBenchVerifierCommand(instance, process.env)
   if (instance.swebench === undefined || testCmd === undefined) return ""
   return [
     `Repository-local verifier for this task: ${testCmd}`,
@@ -2325,30 +2403,6 @@ const repoLocalVerifierHint = (instance: Instance): string => {
 }
 
 type BenchTestRunnerInput = Parameters<typeof testRunnerTool.execute>[0]
-
-const DATASET_VERIFIER_EXPOSE_ENV = "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER"
-
-// Recognize a command WE synthesized in `synthesizeTestCmd` (which bakes the
-// FAIL_TO_PASS answer key) so it stays hidden from the agent. Match our OWN
-// structural signature, not a per-framework runner name: every synthesized
-// command (django-runtests AND pytest) is built via buildProjectEnvUvRunArgv
-// with an injected `PYTEST_ADDOPTS=` env. The `pytest -x --no-header` arm also
-// catches a bare (env-less) synthesized pytest command.
-const isSynthesizedDatasetVerifierCommand = (cmd: string): boolean =>
-  cmd.includes("PYTEST_ADDOPTS=") || cmd.includes(" pytest -x --no-header")
-
-const agentVisibleBenchVerifierCommand = (instance: Instance): string | undefined => {
-  const cmd = instance.testCmd.trim()
-  if (cmd === "") return undefined
-  if (
-    instance.swebench !== undefined &&
-    isSynthesizedDatasetVerifierCommand(cmd) &&
-    !gateOn(process.env, DATASET_VERIFIER_EXPOSE_ENV)
-  ) {
-    return undefined
-  }
-  return cmd
-}
 
 const hasExplicitBenchTestRunnerCommand = (
   input: BenchTestRunnerInput,
@@ -2367,7 +2421,7 @@ const hasBenchTestRunnerPath = (input: BenchTestRunnerInput): boolean =>
  *  repo-local verify must go through explicit `bash`, whose exact command is
  *  already captured separately by the bench stream tap. */
 const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | undefined => {
-  const authoritative = agentVisibleBenchVerifierCommand(instance)
+  const authoritative = agentVisibleBenchVerifierCommand(instance, process.env)
   if (authoritative === undefined) return undefined
   return {
     ...testRunnerTool,
@@ -2415,7 +2469,7 @@ const localEnvSlotOf = (instance: Instance, sandbox: string): Pick<AgentConfig, 
 export const benchVerifyAuthorityCommandsOf = (
   instance: Instance,
 ): readonly string[] | undefined => {
-  const cmd = agentVisibleBenchVerifierCommand(instance)
+  const cmd = agentVisibleBenchVerifierCommand(instance, process.env)
   return cmd === undefined ? undefined : [cmd]
 }
 
@@ -2667,18 +2721,26 @@ const wirePostureAgentPorts = (args: {
 })
 
 /**
- * Per-instance cost cap for bench runs. The bench harness assembles its config
- * via `buildConfig` (NOT the host `assembleAgentConfig`), so the per-run
- * `maxCostUsd` meter that protects the `apps/agent` autonomous modes never
- * reached it — a SWE-bench instance could spend unboundedly. This mints a
- * `BudgetMeter` with a CUMULATIVE cap from `QUANTA_BENCH_MAX_COST_USD` and/or a
- * per-TURN runaway cap from `QUANTA_BENCH_MAX_COST_PER_TURN_USD` (positive USD,
- * fractional allowed; NO hardcoded default — operator-supplied, measure-first).
- * Once the meter exists, the SAME L0/L2/L3 machinery engages: `emitUsage` ticks
- * the priced cost, the turn epilogue `checkExhausted` stops on cumulative OR
- * per-turn overrun, and the pre-flight refuses a guaranteed-breach call. A
- * caller-provided `budgetMeterFactory` still wins. No cap ⇒ undefined ⇒
- * byte-identical (bench unchanged). Exported for direct unit testing. */
+ * Bench budget meter (reused attempt-wide by the apps driver, or per-config by
+ * direct callers). The bench harness assembles its config via `buildConfig`
+ * (NOT the host `assembleAgentConfig`), so the batch preset dials and the
+ * autonomous-mode cost caps never reached it directly.
+ *
+ * DEFAULT-OFF (HARD byte-identical invariant): with NO operator cost cap set, this
+ * returns `undefined` ⇒ no meter ⇒ the bench loop keeps its prior behavior exactly
+ * (no new always-on `maxTurns`/`maxWallClockMs`/`maxConsecutiveFailures`/call caps
+ * that could abort a legitimate hard-instance repair trajectory mid-solve and
+ * record it as a real miss — a measurement confound). Bounding bench unconditionally
+ * is a posture change that must ride its OWN opt-in knob + an A/B, not the default.
+ *
+ * A meter is minted ONLY when an operator opts into a cumulative and/or per-turn
+ * cost ceiling via `QUANTA_BENCH_MAX_COST_USD` / `QUANTA_BENCH_MAX_COST_PER_TURN_USD`
+ * (positive USD, fractional allowed). Once opted in, it ALSO carries the canonical
+ * batch dials (minus the preset's default dollar cap) so a cost-capped run is fully
+ * bounded, and the SAME L0/L2/L3 machinery engages: `emitUsage` ticks the priced
+ * cost, the turn epilogue `checkExhausted` stops on the first tripped dial, and the
+ * pre-flight refuses a guaranteed-breach call. A caller-provided
+ * `budgetMeterFactory` still wins. Exported for direct unit testing. */
 export const benchBudgetMeterFromEnv = (
   env: Record<string, string | undefined>,
 ): BudgetMeter | undefined => {
@@ -2687,18 +2749,87 @@ export const benchBudgetMeterFromEnv = (
     const n = Number.parseFloat(raw.trim())
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  // Cumulative per-instance cap (L0) and per-TURN runaway-turn cap (L3). Either
-  // (or both) opts the meter in; a missing/garbage value for one leaves that
-  // dial uncapped. No cap at all ⇒ undefined (byte-identical, bench unchanged).
-  const maxCostUsd = posUsd(env["QUANTA_BENCH_MAX_COST_USD"])
-  const maxCostPerTurnUsd = posUsd(env["QUANTA_BENCH_MAX_COST_PER_TURN_USD"])
+  const maxCostUsd = posUsd(env.QUANTA_BENCH_MAX_COST_USD)
+  const maxCostPerTurnUsd = posUsd(env.QUANTA_BENCH_MAX_COST_PER_TURN_USD)
+  // No operator cost cap ⇒ NO meter (byte-identical default-OFF). The batch dials
+  // engage only as a side-effect of an opted-in cost cap below.
   if (maxCostUsd === undefined && maxCostPerTurnUsd === undefined) return undefined
+  const { maxCostUsd: _defaultBatchCostCap, ...batchDialsSansDefaultCost } = BUDGET_PRESETS.batch
   return new BudgetMeter({
     dials: {
+      ...batchDialsSansDefaultCost,
       ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
       ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
     },
   })
+}
+
+/**
+ * Compose the user-message array for a bench agent config — the prompt text
+ * (base task + the agentless/repro/closure/multi-site hint sections) wrapped as
+ * user messages. Extracted verbatim from `buildConfig` so that closure stays
+ * under the god-function line cap; behaviour-identical — every hint stays
+ * conditionally spread (byte-identical when absent), and the prompt-composition
+ * methodology comments move here with the code they describe.
+ */
+const buildAgentMessages = (args: {
+  instance: Instance
+  sandbox: string
+  opt: BenchPosture
+  seedMsg?: string
+  precomputedHint?: string
+  reproHint?: string
+  closureHint?: string
+  chaMultisiteSteer?: string
+}): ReturnType<typeof userPromptMessages> => {
+  // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
+  // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
+  // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
+  // `bench-in-loop-exec` knob (default-FULL ⇒ byte-identical): FULL uses the
+  // test-running directive; REPRO-ONLY permits only a narrow reproducer; OFF
+  // swaps to edit-and-submit with no in-loop execution.
+  // LSP-nav GROUNDING steer (agentless-v2 / `lsp-steer`). The localize-phase
+  // guard ALSO carries this steer, but ONLY fires it when the model attempts an
+  // early edit during Phase 1 — a localize-first agent explores with read/grep
+  // for the whole phase and NEVER sees it (measured: 0 occurrences, 0 lsp_*
+  // calls in a real run). So we surface it as an ALWAYS-PRESENT directive line
+  // too, gated on the SAME `lspGroundingSteer` flag (not `lspNav`, so the
+  // frozen agentless-v1 prompt stays byte-identical and the v1↔v2 A/B is clean).
+  // ABSORBED METHODOLOGY (jun-19, #13417 class) — anti-SEMANTIC-over-engineering.
+  // quanta's directive already enforces DIFF-SIZE minimality ("smallest change",
+  // "no whole-file rewrite"), but the 13417 failure is SEMANTIC: a 1-2 line diff
+  // that reaches for a runtime/compiler API (`get_compiler()`) or invents a
+  // helper method (`has_results_ordering()`) — both pass the diff-size rule.
+  // mini/OpenHands solve it minimally because their system prompt carries an
+  // explicit "seek the simplest mechanism / reject over-engineering" philosophy
+  // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
+  // that philosophy verbatim-in-spirit. Default OFF; opt-in via
+  // QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).
+  // Earlier DEFAULT-ON claim (2026-06-19) lacked an in-repo A/B harness, so the
+  // steer is now opt-in to keep it cleanly measurable; OFF ⇒ "" ⇒ byte-identical
+  // prompt restoring the pre-absorption baseline.
+  // Lever A — sibling-completion / co-change check (ceiling multi-file class).
+  // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
+  // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
+  // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
+  //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
+  //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
+  //                                    threaded in via `precomputedHint`
+  //   - mode `"off"`                ⇒ empty hint (byte-identical)
+  // When `precomputedHint` is provided (any non-undefined value, including
+  // `""`), the Agentless pre-compute already ran; we honor it verbatim and do
+  // NOT re-extract. Empty pre-computed hint ⇒ "" ⇒ byte-identical.
+  const text = buildPromptText({
+    instance: args.instance,
+    sandbox: args.sandbox,
+    opt: args.opt,
+    ...(args.seedMsg !== undefined ? { seedMsg: args.seedMsg } : {}),
+    ...(args.precomputedHint !== undefined ? { precomputedHint: args.precomputedHint } : {}),
+    ...(args.reproHint !== undefined ? { reproHint: args.reproHint } : {}),
+    ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+    ...(args.chaMultisiteSteer !== undefined ? { chaMultisiteSteer: args.chaMultisiteSteer } : {}),
+  })
+  return userPromptMessages(text)
 }
 
 export const buildConfig = (
@@ -2767,44 +2898,10 @@ export const buildConfig = (
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
   const registry = buildBenchRegistry(instance, opt, sandbox)
   const permission: PermissionContext = { mode: "acceptEdits" }
-  // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
-  // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
-  // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
-  // `bench-in-loop-exec` knob (default-FULL ⇒ byte-identical): FULL uses the
-  // test-running directive; REPRO-ONLY permits only a narrow reproducer; OFF
-  // swaps to edit-and-submit with no in-loop execution.
-  // LSP-nav GROUNDING steer (agentless-v2 / `lsp-steer`). The localize-phase
-  // guard ALSO carries this steer, but ONLY fires it when the model attempts an
-  // early edit during Phase 1 — a localize-first agent explores with read/grep
-  // for the whole phase and NEVER sees it (measured: 0 occurrences, 0 lsp_*
-  // calls in a real run). So we surface it as an ALWAYS-PRESENT directive line
-  // too, gated on the SAME `lspGroundingSteer` flag (not `lspNav`, so the
-  // frozen agentless-v1 prompt stays byte-identical and the v1↔v2 A/B is clean).
-  // ABSORBED METHODOLOGY (jun-19, #13417 class) — anti-SEMANTIC-over-engineering.
-  // quanta's directive already enforces DIFF-SIZE minimality ("smallest change",
-  // "no whole-file rewrite"), but the 13417 failure is SEMANTIC: a 1-2 line diff
-  // that reaches for a runtime/compiler API (`get_compiler()`) or invents a
-  // helper method (`has_results_ordering()`) — both pass the diff-size rule.
-  // mini/OpenHands solve it minimally because their system prompt carries an
-  // explicit "seek the simplest mechanism / reject over-engineering" philosophy
-  // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
-  // that philosophy verbatim-in-spirit. Default OFF; opt-in via
-  // QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).
-  // Earlier DEFAULT-ON claim (2026-06-19) lacked an in-repo A/B harness, so the
-  // steer is now opt-in to keep it cleanly measurable; OFF ⇒ "" ⇒ byte-identical
-  // prompt restoring the pre-absorption baseline.
-  // Lever A — sibling-completion / co-change check (ceiling multi-file class).
-  // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
-  // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
-  // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
-  //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
-  //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
-  //                                    threaded in via `precomputedHint`
-  //   - mode `"off"`                ⇒ empty hint (byte-identical)
-  // When `precomputedHint` is provided (any non-undefined value, including
-  // `""`), the Agentless pre-compute already ran; we honor it verbatim and do
-  // NOT re-extract. Empty pre-computed hint ⇒ "" ⇒ byte-identical.
-  const text = buildPromptText({
+  // Prompt + hint composition (agentless / repro / closure / multi-site steer)
+  // lives in `buildAgentMessages` to keep this closure under the god-function
+  // line cap — behaviour-identical, every hint conditionally spread.
+  const messages = buildAgentMessages({
     instance,
     sandbox,
     opt,
@@ -2814,7 +2911,6 @@ export const buildConfig = (
     ...(closureHint !== undefined ? { closureHint } : {}),
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
-  const messages = userPromptMessages(text)
   const budgetMeter = deps.budgetMeterFactory?.() ?? benchBudgetMeterFromEnv(process.env)
   const baseConfig = {
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
@@ -2944,6 +3040,9 @@ interface Phase {
   llmEvidence?: LlmEvidenceArtifacts
   /** Structural owner widening actually consumed before this phase ran. */
   ownerWidening?: OwnerWideningTelemetry
+  /** #6 submit-review (QUANTA_BENCH_SUBMIT_REVIEW): observe-only verdict over the
+   *  final captured patch (clean / empty / test-edits). Absent ⇒ knob off. */
+  submissionReview?: SubmissionReview
 }
 
 /**
@@ -3077,6 +3176,7 @@ const runAgentOnce = async (
       patch,
       turns: outcome.turns,
       ...(tap.lastVerifyCmd !== undefined ? { lastVerifyCmd: tap.lastVerifyCmd } : {}),
+      ...(tap.actionTrace.length > 0 ? { actionTrace: tap.actionTrace } : {}),
     }
     return result
   } finally {
@@ -3196,6 +3296,10 @@ export const reproExecBundle = (
 } => {
   const repo = instance.swebench?.repo
   const version = instance.swebench?.version
+  // Same repro runtime policy as prepareReproTests: Verified/Live Python stay on the host argv,
+  // Pro Python with `dockerhubTag` run inside the instance image, and unsupported languages omit
+  // buildArgv entirely (the non-Python repro set is already fail-closed upstream in prepareReproTests).
+  const adapter = resolveReproAdapter(instance)
   return {
     exec: (argv, cwd, timeoutMs) =>
       execArgv(argv, cwd, timeoutMs, {
@@ -3205,8 +3309,17 @@ export const reproExecBundle = (
       await Bun.write(p, c)
     },
     readFile: async (p: string): Promise<string> => Bun.file(p).text(),
-    ...(repo !== undefined
-      ? { buildArgv: (scriptPath: string) => reproRunArgv(repo, version, scriptPath) }
+    ...(repo !== undefined && adapter !== null
+      ? {
+          buildArgv: (scriptPath: string) => [
+            ...adapter.buildExecArgv({
+              repo,
+              version,
+              scriptPath,
+              ...preferredReproExecRuntime(instance, scriptPath),
+            }),
+          ],
+        }
       : {}),
   }
 }
@@ -3318,6 +3431,10 @@ export const makeAcceptanceSelectCandidates = (
    *  failures; absent/empty ⇒ repro-only (byte-identical). The base-green capture
    *  that feeds this is the measure-first follow-up (≈2× test cost — opt-in). */
   regressionSet?: readonly string[],
+  /** OPTIONAL LLM soft-reranker over the admissible survivors (chooser/reviewer
+   *  knobs, `QUANTA_BENCH_LLM_SELECT`). Absent ⇒ deterministic vote only
+   *  (byte-identical). Never-veto / fail-open (see acceptance-select). */
+  llmRerank?: AcceptanceLlmRerank,
 ) =>
   buildReproAcceptanceSelector(enabled, reproSources, {
     withCandidatePatch: (patch, probe) =>
@@ -3329,6 +3446,7 @@ export const makeAcceptanceSelectCandidates = (
         ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
         probe,
       }),
+    ...(llmRerank !== undefined ? { llmRerank } : {}),
     reproResolvedOnSandbox: async (sb) => {
       const samples = await executeReproTests({
         tests: reproSources,
@@ -3337,6 +3455,12 @@ export const makeAcceptanceSelectCandidates = (
       })
       return voteResolved(samples).verdict === "resolved"
     },
+    // #3 Agentless-parity vote-key dedup (QUANTA_BENCH_VOTE_NORMALIZE): stronger
+    // key so comment/blank/whitespace variants reinforce the majority instead of
+    // splitting it. OFF ⇒ undefined ⇒ raw-trim key (byte-identical).
+    ...(gateOn(process.env, "QUANTA_BENCH_VOTE_NORMALIZE")
+      ? { normalizePatch: strongVoteKey }
+      : {}),
     // Dual-guard regression probe (only when a regression set was supplied): run it
     // on the patched tree and count failures (ran && !pass ⇒ failed.length, else 0).
     ...(regressionSet !== undefined && regressionSet.length > 0
@@ -3354,6 +3478,73 @@ export const makeAcceptanceSelectCandidates = (
         }
       : {}),
   })
+
+/**
+ * Strategy #2 — Agentless-style sampling diversity for the repair-breadth fanout.
+ * Wraps a candidate's lane port so candidate 0 stays greedy (unwrapped ⇒
+ * byte-identical) and candidates ≥1 sample at temperature 0.8
+ * ({@link sampleTemperatureForCandidate}). Gated by `QUANTA_BENCH_SAMPLE_TEMP`
+ * (OFF ⇒ base port ⇒ byte-identical). SHARED by both drivers. Composition at the
+ * wiring layer — repair-breadth + the LLM loop stay untouched.
+ */
+export const applySampleTemperature = (base: LLMPort, index: number): LLMPort => {
+  if (!gateOn(process.env, "QUANTA_BENCH_SAMPLE_TEMP")) return base
+  // Model-capability guard: OpenAI reasoning models (o-series / GPT-5) 400 on a
+  // `temperature` field, so the knob NO-OPS (greedy lanes) on them rather than
+  // collapsing the breadth fanout to failed forks. Sampling diversity needs a
+  // sampling-capable model (Claude / GPT-4o). The "sampling-capable lanes only"
+  // contract is now ENFORCED here, not just documented at the wire.
+  if (!modelSupportsSamplingTemperature(base.model ?? "")) return base
+  const t = sampleTemperatureForCandidate(index)
+  return t === undefined ? base : withTemperature(base, t)
+}
+
+/**
+ * Strategy #6 — observe-only submission review (SWE-agent `review_on_submit`
+ * deterministic check). When `QUANTA_BENCH_SUBMIT_REVIEW` is on, classify the final
+ * captured patch (clean / empty / test-edits) for telemetry + as a strip-regression
+ * sentinel (the test-revert itself is already unconditional via `sourceOnlyDiff`).
+ * OFF ⇒ `undefined` ⇒ nothing attached ⇒ byte-identical.
+ */
+export const maybeReviewSubmission = (patch: string): SubmissionReview | undefined =>
+  gateOn(process.env, "QUANTA_BENCH_SUBMIT_REVIEW") ? reviewSubmission(patch) : undefined
+
+/**
+ * Strategy #7 — resolve the optional per-candidate location-set seeder from the
+ * preset/env-projected bench posture. OFF / no localizer files / <2 files /
+ * breadth≤1 ⇒ `undefined` ⇒ every breadth candidate uses the base seed
+ * (byte-identical). SHARED by both drivers. Pure (built from the localizer's
+ * ranked files only — no-leak).
+ */
+export const resolveLocationFanoutSeeder = (
+  enabled: boolean,
+  rankedFiles: readonly string[],
+  breadth: number,
+  issueSymbols: readonly string[] = [],
+): PerCandidateSeed | undefined => {
+  if (!enabled || breadth <= 1) return undefined
+  return buildLocationSeeder(rankedFiles, breadth, issueSymbols)
+}
+
+/**
+ * Resolve the optional LLM acceptance soft-reranker from `QUANTA_BENCH_LLM_SELECT`
+ * (chooser/reviewer). Unset/invalid ⇒ `undefined` ⇒ deterministic vote only
+ * (byte-identical). SHARED by both drivers so the knob behaves identically.
+ */
+export const resolveAcceptanceLlmRerank = (
+  instance: Instance,
+  llm: LLMPort,
+  signal?: AbortSignal,
+): AcceptanceLlmRerank | undefined => {
+  const mode = resolveLlmSelectMode(process.env)
+  if (mode === undefined) return undefined
+  return buildLlmRerankFromPort({
+    llm,
+    problemStatement: instance.problemStatement,
+    mode,
+    ...(signal !== undefined ? { signal } : {}),
+  })
+}
 
 /**
  * SOTA++ verify-and-select — repro-vote as the candidate SELECTION scorer.
@@ -3475,6 +3666,187 @@ export const makeCalibratedReproConsensusPort = async (
  * cumulative final patch (no-leak invariant). The validator/buildContext are
  * injectable; production defaults are G1's `validate`/`buildRepairContext`.
  */
+/** Shared repair-loop BREADTH candidate factory (jun-28). Both bench drivers
+ *  (this runner core + `apps/bench/eval/driver.ts`) build the SAME B>1 fan-out
+ *  here; the ONLY per-driver divergence — how a forked round runs the agent
+ *  (the runner threads `chaMultisiteSteer`, the app does not) — is injected as
+ *  `runAgentOnFork`. B≤1 ⇒ undefined ⇒ the orchestrator takes the legacy single
+ *  path (byte-identical). Derives its types from `makeRepairBreadthRunCandidates`
+ *  so the seam can never silently drift from the breadth contract. */
+type RepairBreadthDeps = Parameters<typeof makeRepairBreadthRunCandidates>[0]
+export const buildRepairBreadthRunCandidates = (args: {
+  instance: Instance
+  deps: RunInstanceDeps
+  sandbox: string
+  signal: AbortSignal
+  repairPosture: BenchPosture
+  repairBreadth: number
+  validate: RepairBreadthDeps["validate"]
+  repairEvaluatePredicate: RepairBreadthDeps["validateInputs"]["evaluatePredicate"]
+  primaryRailStep: PrimaryRailStep | undefined
+  chaRepairTargets: readonly ChaRepairTarget[] | undefined
+  perCandidateSeed: PerCandidateSeed | undefined
+  runAgentOnFork: RepairBreadthDeps["runAgentOnFork"]
+}): ReturnType<typeof makeRepairBreadthRunCandidates> | undefined => {
+  if (args.repairBreadth <= 1) return undefined
+  return makeRepairBreadthRunCandidates({
+    instanceId: args.instance.id,
+    mainSandbox: args.sandbox,
+    baseCommit: args.instance.swebench?.baseCommit,
+    repo: args.instance.swebench?.repo,
+    timeoutMs: args.deps.timeoutMs,
+    resolveLaneLlm: (index) =>
+      applySampleTemperature(
+        resolveLaneLlm(args.deps, args.repairPosture.modelLaneDiversity, index),
+        index,
+      ),
+    runAgentOnFork: args.runAgentOnFork,
+    validate: args.validate,
+    validateInputs: {
+      exec,
+      timeoutMs: args.deps.timeoutMs,
+      readFile: async (path: string): Promise<string> => Bun.file(path).text(),
+      evaluatePredicate: args.repairEvaluatePredicate,
+      ...(args.primaryRailStep !== undefined ? { primaryRailStep: args.primaryRailStep } : {}),
+    },
+    sandboxPorts: { forkSandbox, cleanupSandbox },
+    gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
+    // jun-29 OBSERVE-ONLY pool capture: when a run artifact root exists, persist
+    // the FULL candidate pool per round (decision impact 0). Absent ⇒ no sink ⇒
+    // byte-identical.
+    ...(args.deps.reproArtifactRootPath !== undefined
+      ? {
+          recordCandidates: (round, candidates) =>
+            writeCandidatePool(
+              args.deps.reproArtifactRootPath as string,
+              args.instance.id,
+              round,
+              candidates,
+            ),
+        }
+      : {}),
+    ...(args.repairPosture.selectorMode === "clean"
+      ? {
+          deriveCandidateStructuralRepair: (candidate: Candidate, candidateSandbox: string) =>
+            deriveCandidateStructuralRepair({
+              instance: args.instance,
+              candidate,
+              sandbox: candidateSandbox,
+              signal: args.signal,
+              ...(args.chaRepairTargets !== undefined
+                ? { preferredTargets: args.chaRepairTargets }
+                : {}),
+            }),
+        }
+      : {}),
+    ...(args.repairPosture.selectorMode === "clean" && familyCoverageCoeditEnabled(process.env)
+      ? {
+          repairFamilyCoverage: ({ sandbox: candidateSandbox, candidate, family, missingFiles }) =>
+            coeditFamilyCoverageCandidate({
+              sandbox: candidateSandbox,
+              candidate,
+              family,
+              missingFiles,
+              timeoutMs: args.deps.timeoutMs,
+              baseCommit: args.instance.swebench?.baseCommit,
+              repo: args.instance.swebench?.repo,
+              ...(args.chaRepairTargets !== undefined
+                ? { preferredTargets: args.chaRepairTargets }
+                : {}),
+            }),
+        }
+      : {}),
+    // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined ⇒
+    // shared base seed ⇒ byte-identical).
+    ...(args.perCandidateSeed !== undefined ? { perCandidateSeed: args.perCandidateSeed } : {}),
+  })
+}
+
+/** Shared repair-round orchestration inside a git snapshot (jun-28). Both bench
+ *  drivers run the SAME `runRepairRounds` here — owner-evidence seed assembly,
+ *  acceptance/breadth wiring, repro-rail readFile. The ONLY per-driver divergence
+ *  (the runner threads `chaMultisiteSteer` into the per-round agent, the app does
+ *  not) is injected as `runOnce`. Returns the snapshot's final diff plus the raw
+ *  rounds result so the caller derives the Phase verdict (no closure mutation). */
+export const runRepairRoundsInSnapshot = async (args: {
+  instance: Instance
+  deps: RunInstanceDeps
+  sandbox: string
+  w: Wiring
+  repair: NonNullable<RunInstanceDeps["repair"]>
+  repairPosture: BenchPosture
+  repairBreadth: number
+  validate: RepairBreadthDeps["validate"]
+  repairEvaluatePredicate: RepairBreadthDeps["validateInputs"]["evaluatePredicate"]
+  primaryRailStep: PrimaryRailStep | undefined
+  runCandidates: ReturnType<typeof makeRepairBreadthRunCandidates> | undefined
+  acceptanceSelectCandidates: ReturnType<typeof makeAcceptanceSelectCandidates>
+  siblingOwners: readonly string[]
+  repairIssueSymbols: ReturnType<typeof extractIssueHint>["symbols"]
+  verificationTarget: VerificationTargetFact | undefined
+  repairLlmEvidence: Partial<LlmEvidenceArtifacts>
+  runOnce: Parameters<typeof runRepairRounds>[0]["runOnce"]
+}): Promise<{ patch: string; out: Awaited<ReturnType<typeof runRepairRounds>> }> => {
+  let captured: Awaited<ReturnType<typeof runRepairRounds>> | undefined
+  const patch = await withGitSnapshot(
+    args.sandbox,
+    args.deps.timeoutMs,
+    args.instance.swebench?.baseCommit,
+    async () => {
+      await emitSandbox(
+        args.w.observer,
+        args.sandbox,
+        args.instance.swebench?.baseCommit,
+        args.deps.timeoutMs,
+      )
+      captured = await runRepairRounds({
+        config: buildRepairRoundsConfig(
+          args.repair.maxRounds,
+          args.repairBreadth,
+          args.repairPosture.repairStrongOracle,
+        ),
+        problem: args.instance.problemStatement,
+        runOnce: args.runOnce,
+        validate: args.validate,
+        buildContext: (ctxArgs) => {
+          const repairArgs = {
+            ...ctxArgs,
+            siblingOwners: args.siblingOwners,
+            issueSymbols: args.repairIssueSymbols,
+            readSource: (rel: string) => readSandboxSource(args.sandbox, rel),
+            ...(args.verificationTarget !== undefined
+              ? { verificationTarget: args.verificationTarget }
+              : {}),
+          }
+          const repairSeed = buildRepairRoundSeedMessage(
+            repairArgs,
+            args.repair.buildContext?.(repairArgs),
+          )
+          recordLlmEvidencePacket(args.repairLlmEvidence, repairSeed.packet)
+          return repairSeed.seedMsg
+        },
+        sandbox: args.sandbox,
+        exec,
+        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
+        timeoutMs: args.deps.timeoutMs,
+        evaluatePredicate: args.repairEvaluatePredicate,
+        ...(args.primaryRailStep !== undefined ? { primaryRailStep: args.primaryRailStep } : {}),
+        // jun-28 BREADTH: present only when B>1 (else undefined ⇒ legacy single path).
+        ...(args.runCandidates !== undefined ? { runCandidates: args.runCandidates } : {}),
+        // jun-28 SOTA++ acceptance: present only when opt-in is on + a repro set exists.
+        ...(args.acceptanceSelectCandidates !== undefined
+          ? { selectCandidates: args.acceptanceSelectCandidates }
+          : {}),
+      })
+    },
+    args.instance.swebench?.repo,
+  )
+  // withGitSnapshot always invokes the callback, so `captured` is set; guard
+  // defensively so a future refactor that changes that contract fails loudly.
+  if (captured === undefined) throw new Error("runRepairRounds did not execute in snapshot")
+  return { patch, out: captured }
+}
+
 const runRepairPhase = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -3488,6 +3860,7 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  ownerNearRegressionSet: readonly string[],
   verificationTarget: VerificationTargetFact | undefined,
   /** jun-26 repair spec gate / jun-28 strong-oracle: PUBLIC issue-declared expected
    *  output (from the closure session). Composed into the repair `evaluatePredicate`
@@ -3497,6 +3870,11 @@ const runRepairPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
+  chaRepairTargets?: readonly ChaRepairTarget[],
+  /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
+   *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
+   *  (byte-identical). Passed into the repair-breadth deps. */
+  perCandidateSeed?: PerCandidateSeed,
 ): Promise<Phase> => {
   // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds. The fault
   // is already localized in repair (patch exists + failing gate named), so the
@@ -3514,13 +3892,6 @@ const runRepairPhase = async (
   // its owner evidence carries exact slices (paired with issue symbols) and it
   // names the active proof target — parity with the selector-repair sibling.
   const repairIssueSymbols = extractIssueHint(instance.problemStatement).symbols
-  let turns = 0
-  let finalPatch = ""
-  let repairValidated = false
-  let repairFalseGreen = false
-  let repairFalseRed = false
-  let repairValidationDecision: Phase["repairValidationDecision"]
-  let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
   // validator becomes the K-of-N RESOLVED majority vote (re-run the set on the
@@ -3548,145 +3919,107 @@ const runRepairPhase = async (
     issueDeclaredExpected,
     evaluateSuccessPredicate,
   )
-  // jun-28 repair-loop BREADTH (mirror of the apps driver): B>1 ⇒ fan a repair
-  // round out to B forked candidates, continue from the validator-green one (else
-  // best validator signal). B=1 (default) ⇒ undefined ⇒ legacy single path
-  // (byte-identical). Kept equivalent to src/apps/bench/eval/driver.ts.
+  // jun-28 repair-loop BREADTH (shared with apps/bench/eval/driver.ts via the
+  // exported `buildRepairBreadthRunCandidates`): B>1 ⇒ fan a repair round out to
+  // B forked candidates, continue from the validator-green one (else best signal).
+  // B=1 ⇒ undefined ⇒ legacy single path (byte-identical). The runner threads
+  // `chaMultisiteSteer` into the forked agent; that divergence lives in the
+  // injected `runAgentOnFork` closure (the app omits it).
   const repairBreadth = repair.breadth ?? repairPosture.repairBreadth
-  const runCandidates =
-    repairBreadth > 1
-      ? makeRepairBreadthRunCandidates({
-          instanceId: instance.id,
-          mainSandbox: sandbox,
-          baseCommit: instance.swebench?.baseCommit,
-          repo: instance.swebench?.repo,
-          timeoutMs: deps.timeoutMs,
-          resolveLaneLlm: (index) => resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
-          runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
-            runAgentOnce(
-              instance,
-              deps,
-              forkSandbox,
-              signal,
-              w,
-              seedMsg,
-              deps.timeoutMs,
-              precomputedHint,
-              reproHint,
-              closureHint,
-              repairPosture,
-              stateOverride,
-              chaMultisiteSteer,
-              laneLlm,
-            ),
-          validate,
-          validateInputs: {
-            exec,
-            timeoutMs: deps.timeoutMs,
-            readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-            evaluatePredicate: repairEvaluatePredicate,
-            ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
-          },
-          sandboxPorts: { forkSandbox, cleanupSandbox },
-          gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
-        })
-      : undefined
-  // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only). SHARED
-  // wiring (`makeAcceptanceSelectCandidates`) so both drivers agree. ABSENT ⇒
-  // legacy validator-rank selection (byte-identical).
+  const runCandidates = buildRepairBreadthRunCandidates({
+    instance,
+    deps,
+    sandbox,
+    signal,
+    repairPosture,
+    repairBreadth,
+    validate,
+    repairEvaluatePredicate,
+    primaryRailStep,
+    chaRepairTargets,
+    perCandidateSeed,
+    runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
+      runAgentOnce(
+        instance,
+        deps,
+        forkSandbox,
+        signal,
+        w,
+        seedMsg,
+        deps.timeoutMs,
+        precomputedHint,
+        reproHint,
+        closureHint,
+        repairPosture,
+        stateOverride,
+        chaMultisiteSteer,
+        laneLlm,
+      ),
+  })
+  // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
+  // reproducing set and the owner-near PUBLIC regression set that was confirmed
+  // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
     sandbox,
     deps.timeoutMs,
     repairPosture.acceptance,
+    ownerNearRegressionSet,
+    resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
-  const patch = await withGitSnapshot(
+  const { patch, out } = await runRepairRoundsInSnapshot({
+    instance,
+    deps,
     sandbox,
-    deps.timeoutMs,
-    instance.swebench?.baseCommit,
-    async () => {
-      await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const out = await runRepairRounds({
-        config: buildRepairRoundsConfig(
-          repair.maxRounds,
-          repairBreadth,
-          repairPosture.repairStrongOracle,
-        ),
-        problem: instance.problemStatement,
-        runOnce: (seedMsg) =>
-          runAgentOnce(
-            instance,
-            deps,
-            sandbox,
-            signal,
-            w,
-            seedMsg,
-            deps.timeoutMs,
-            precomputedHint,
-            reproHint,
-            closureHint,
-            // Repair posture with the localize-phase edit-block stripped (see
-            // `repairLocalizePhaseSuppressed`). Always an explicit override so
-            // `buildConfig` does NOT re-resolve the block-active env posture.
-            repairPosture,
-            stateOverride,
-            chaMultisiteSteer,
-          ),
-        validate,
-        buildContext: (ctxArgs) => {
-          const repairArgs = {
-            ...ctxArgs,
-            siblingOwners,
-            issueSymbols: repairIssueSymbols,
-            readSource: (rel: string) => readSandboxSource(sandbox, rel),
-            ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-          }
-          const repairSeed = buildRepairRoundSeedMessage(
-            repairArgs,
-            repair.buildContext?.(repairArgs),
-          )
-          recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
-          return repairSeed.seedMsg
-        },
+    w,
+    repair,
+    repairPosture,
+    repairBreadth,
+    validate,
+    repairEvaluatePredicate,
+    primaryRailStep,
+    runCandidates,
+    acceptanceSelectCandidates,
+    siblingOwners,
+    repairIssueSymbols,
+    verificationTarget,
+    repairLlmEvidence,
+    runOnce: (seedMsg) =>
+      runAgentOnce(
+        instance,
+        deps,
         sandbox,
-        exec,
-        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-        timeoutMs: deps.timeoutMs,
-        evaluatePredicate: repairEvaluatePredicate,
-        ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
-        // jun-28 BREADTH: present only when B>1 (else undefined ⇒ legacy single
-        // path, byte-identical). Kept in parity with the apps driver.
-        ...(runCandidates !== undefined ? { runCandidates } : {}),
-        // jun-28 SOTA++ acceptance: present only when the opt-in is on + a repro set
-        // exists (else undefined ⇒ legacy validator-rank selection, byte-identical).
-        ...(acceptanceSelectCandidates !== undefined
-          ? { selectCandidates: acceptanceSelectCandidates }
-          : {}),
-      })
-      turns = out.turns
-      finalPatch = out.patch
-      repairValidated = out.validated
-      repairFalseGreen = out.primaryFalseGreen
-      repairFalseRed = out.primaryFalseRed
-      repairValidationDecision = out.validationDecision
-      repairRounds = out.rounds
-    },
-    instance.swebench?.repo,
-  )
-  // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
-  // available we prefer it (it reflects the worktree at end of all rounds).
-  // `finalPatch` is the orchestrator's view of the last round's diff — they
-  // agree by construction (continue-from-patched-tree, single sandbox).
+        signal,
+        w,
+        seedMsg,
+        deps.timeoutMs,
+        precomputedHint,
+        reproHint,
+        closureHint,
+        // Repair posture with the localize-phase edit-block stripped; explicit so
+        // `buildConfig` does NOT re-resolve the block-active env posture.
+        repairPosture,
+        stateOverride,
+        chaMultisiteSteer,
+      ),
+  })
+  // `patch` (withGitSnapshot's final diff) is the canonical capture; fall back to
+  // the orchestrator's last-round view. They agree by construction (single sandbox).
+  const capturedPatch = patch !== "" ? patch : out.patch
+  const submissionReview = maybeReviewSubmission(capturedPatch)
   return {
-    patch: patch !== "" ? patch : finalPatch,
-    turns,
-    validated: repairValidated,
-    primaryFalseGreen: repairFalseGreen,
-    primaryFalseRed: repairFalseRed,
-    ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
-    ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
+    patch: capturedPatch,
+    turns: out.turns,
+    validated: out.validated,
+    primaryFalseGreen: out.primaryFalseGreen,
+    primaryFalseRed: out.primaryFalseRed,
+    ...(out.validationDecision !== undefined
+      ? { repairValidationDecision: out.validationDecision }
+      : {}),
+    ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
+    ...(submissionReview !== undefined ? { submissionReview } : {}),
   }
 }
 
@@ -4782,6 +5115,7 @@ export interface PreparedAttemptContext extends HintReproContext {
   readonly closureSession: ClosureSessionState | undefined
   readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined
   readonly existingTestExpectations: readonly string[]
+  readonly ownerNearRegressionSet: readonly string[]
   readonly primaryRailStep: PrimaryRailStep | undefined
   readonly closureHint: string | undefined
   readonly intakeLlmEvidence: LlmEvidencePacket
@@ -5115,6 +5449,9 @@ const buildClosureAttemptState = (args: {
   readonly witnessOwners?: readonly { file: string; forSymbol?: string }[]
   readonly reproTest: BenchReproTestTelemetry | undefined
   readonly ownerNearTests?: readonly string[]
+  readonly ownerNearPrimaryBaseValidatedRed?: boolean
+  readonly touchedModuleSmoke?: readonly string[]
+  readonly moduleSmokePrimaryBaseValidatedRed?: boolean
 }): ClosureSessionState | undefined =>
   args.instance.swebench === undefined
     ? undefined
@@ -5128,11 +5465,7 @@ const buildClosureAttemptState = (args: {
         ...(args.reproTest?.installed === true && args.reproTest.reproducedCount > 0
           ? {
               reproScript: {
-                cmd: reproValidationCmd({
-                  repo: args.instance.swebench.repo,
-                  version: args.instance.swebench.version,
-                  scriptPath: args.reproTest.path,
-                }),
+                cmd: reproValidationCmdForInstance(args.instance, args.reproTest.path),
                 pytestReportPath: pytestReportPathFor(args.reproTest.path),
                 baseValidatedRed: true,
               },
@@ -5140,6 +5473,15 @@ const buildClosureAttemptState = (args: {
           : {}),
         ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
           ? { ownerNearTests: args.ownerNearTests }
+          : {}),
+        ...(args.ownerNearPrimaryBaseValidatedRed === true
+          ? { ownerNearPrimaryBaseValidatedRed: true }
+          : {}),
+        ...(args.touchedModuleSmoke !== undefined && args.touchedModuleSmoke.length > 0
+          ? { touchedModuleSmoke: args.touchedModuleSmoke }
+          : {}),
+        ...(args.moduleSmokePrimaryBaseValidatedRed === true
+          ? { moduleSmokePrimaryBaseValidatedRed: true }
           : {}),
         posture: {
           lspNav: args.posture.lspNav,
@@ -5261,16 +5603,30 @@ export const prepareAttemptContext = async (
     ownerResolved,
     stage1Files,
   })
-  const ownerNearTests =
+  const ownerNearTestPlan: VerificationOwnerTestsPlan =
     instance.swebench === undefined ||
     !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
-      ? []
-      : await discoverVerificationOwnerTests({
+      ? { commands: [], testPaths: [], baseGreenTestPaths: [], primaryBaseState: "unavailable" }
+      : await discoverVerificationOwnerTestsPlan({
           instance,
           sandbox,
           timeoutMs: deps.timeoutMs,
           ownerCandidates,
         })
+  const ownerNearTests = ownerNearTestPlan.commands
+  const ownerNearRegressionSet = ownerNearTestPlan.baseGreenTestPaths
+  const ownerNearPrimaryBaseValidatedRed = ownerNearTestPlan.primaryBaseState === "red"
+  const moduleSmokePlan: VerificationModuleSmokePlan =
+    instance.swebench === undefined ||
+    !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
+      ? { commands: [], primaryBaseState: "unavailable" }
+      : await discoverVerificationModuleSmokePlan({
+          instance,
+          sandbox,
+          timeoutMs: deps.timeoutMs,
+        })
+  const touchedModuleSmoke = moduleSmokePlan.commands
+  const moduleSmokePrimaryBaseValidatedRed = moduleSmokePlan.primaryBaseState === "red"
   // T2 — command-derived test paths take precedence; when empty, the extractor
   // falls back to a bounded convention-based source search over the localized
   // owner modules (only files that exist are read). Gated to the SAME condition
@@ -5294,6 +5650,9 @@ export const prepareAttemptContext = async (
     witnessOwners,
     reproTest: hintRepro.reproTest,
     ownerNearTests,
+    ...(ownerNearPrimaryBaseValidatedRed ? { ownerNearPrimaryBaseValidatedRed } : {}),
+    ...(touchedModuleSmoke.length > 0 ? { touchedModuleSmoke } : {}),
+    ...(moduleSmokePrimaryBaseValidatedRed ? { moduleSmokePrimaryBaseValidatedRed } : {}),
   })
   const intakeLlmEvidence = buildIntakeLlmEvidencePacket({
     problemStatement: instance.problemStatement,
@@ -5313,6 +5672,7 @@ export const prepareAttemptContext = async (
     closureSession,
     verificationPlan: closureSession?.bundle.plan,
     existingTestExpectations,
+    ownerNearRegressionSet,
     primaryRailStep: closureSession?.primaryRailStep,
     closureHint: closureSession?.closureHint,
     intakeLlmEvidence,
@@ -5377,6 +5737,12 @@ const runMainPhase = async (args: {
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
+    const repairFanoutFiles = buildRepairFanoutFiles({
+      localizeCandidates: args.prepared.localizeCandidates,
+      stage1Files: args.prepared.closureSession?.input.evidence.stage1Files,
+      ownerResolved: args.prepared.ownerResolved,
+      witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+    })
     return runRepairPhase(
       args.instance,
       args.deps,
@@ -5390,11 +5756,24 @@ const runMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      args.prepared.ownerNearRegressionSet,
       verificationTargetFromPlan(args.prepared.verificationPlan),
       args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
       args.prepared.chaMultisiteSteer,
+      args.prepared.chaRepairTargets,
+      resolveLocationFanoutSeeder(
+        args.prepared.posture.locationFanout,
+        repairFanoutFiles,
+        args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,
+        buildRepairFanoutSymbols({
+          issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+          fanoutFiles: repairFanoutFiles,
+          ownerResolved: args.prepared.ownerResolved,
+          witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+        }),
+      ),
     )
   }
   return runAgentPhase(
@@ -5502,7 +5881,9 @@ const adaptiveBaseReproReceipts = (
     ]
   }
   const infraReason =
-    reproTest.reason === "not_installed" || reproTest.reason === "write_failed"
+    reproTest.reason === "not_installed" ||
+    reproTest.reason === "write_failed" ||
+    reproTest.reason === "unsupported_language"
       ? "env_prep_failed"
       : "execution_failed"
   return [{ source: "public_mwe", sourcePolicy: "public_repro", state: infraReason }]
@@ -5830,16 +6211,20 @@ const validateVerifiedOutcome = async (args: {
 }): Promise<{
   readonly verified: Awaited<ReturnType<typeof verify>>
   readonly graderInvalid: boolean
+  /** Solvability oracle: gold resolved (true) / gold failed (false) / gold-sanity didn't run
+   *  (undefined). Persisted per-instance so the platform can curate verifier-sound instances. */
+  readonly goldResolved: boolean | undefined
 }> => {
   if (!shouldValidateGold(args.deps, args.verified.passed)) {
-    return { verified: args.verified, graderInvalid: false }
+    return { verified: args.verified, graderInvalid: false, goldResolved: undefined }
   }
   const gold = await validateGoldPatch(args.instance, { ...args.deps, signal: args.signal })
-  if (gold.ok) return { verified: args.verified, graderInvalid: false }
+  if (gold.ok) return { verified: args.verified, graderInvalid: false, goldResolved: true }
   const { error: _prevError, ...rest } = args.verified
   return {
     verified: { ...rest, passed: false, error: gold.error },
     graderInvalid: true,
+    goldResolved: false,
   }
 }
 
@@ -5971,6 +6356,9 @@ const attachSelectionAndClosureArtifacts = (args: {
   }
   if (args.phase.ownerWidening !== undefined) {
     args.extra.ownerWidening = args.phase.ownerWidening
+  }
+  if (args.phase.submissionReview !== undefined) {
+    args.extra.submissionReview = args.phase.submissionReview
   }
   attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
@@ -6130,6 +6518,31 @@ const _latePhaseFailureResultFromError = (args: {
   })
 }
 
+/** RFC jun-29 #2 (measurement-hole, audit R3): a swebench MAIN-grade INFRA failure is a
+ *  measurement hole, NOT a model miss. `verify` (verdict.ts) sets `error` on a non-pass
+ *  ONLY for the harness `gradingCompleted:false` / refuse-to-fake-grade path — never for a
+ *  genuine patch-fail — so this triple is the precise infra signal. The caller marks it
+ *  `grader_invalid` so the resolvedTotals denominator EXCLUDES it (else a Pro image-pull /
+ *  harness crash is laundered into a real miss — the throttle-miss confound). Pure +
+ *  exported for unit test (`buildSuccessfulResultExtra` is not exported). */
+export const isSwebenchInfraGradeFailure = (
+  instance: Pick<Instance, "swebench">,
+  verified: Pick<Awaited<ReturnType<typeof verify>>, "passed" | "error">,
+): boolean => instance.swebench !== undefined && !verified.passed && verified.error !== undefined
+
+/** Decide the measurement-hole verdict for a finalized result: `"grader_invalid"` (⇒
+ *  resolvedTotals EXCLUDES it from the denominator) when EITHER the gold-sanity check failed
+ *  (`graderInvalid`) OR the main grade hit a swebench infra failure; otherwise `undefined`
+ *  (a normal result that stays in the denominator). Extracted + exported so the predicate→
+ *  verdict WIRING is unit-testable (`buildSuccessfulResultExtra` is not exported) — a mutant
+ *  dropping the infra branch is then caught, not silently green. */
+export const swebenchGraderInvalidVerdict = (
+  graderInvalid: boolean,
+  instance: Pick<Instance, "swebench">,
+  verified: Pick<Awaited<ReturnType<typeof verify>>, "passed" | "error">,
+): "grader_invalid" | undefined =>
+  graderInvalid || isSwebenchInfraGradeFailure(instance, verified) ? "grader_invalid" : undefined
+
 const buildSuccessfulResultExtra = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -6141,10 +6554,23 @@ const buildSuccessfulResultExtra = (args: {
   readonly startedAt: number
   readonly prepared: PreparedAttemptContext
   readonly graderInvalid: boolean
+  readonly goldResolved: boolean | undefined
 }): Partial<InstanceResult> => {
   const reproArtifactPath = reproArtifactPathOf(args.deps, args.instance)
   const extra: Partial<InstanceResult> = reproResultExtra(args.reproTest, reproArtifactPath)
-  if (args.graderInvalid) extra.verdict = "grader_invalid"
+  // Solvability oracle: persist the gold-sanity outcome per instance (RFC jun-29).
+  if (args.goldResolved !== undefined) extra.goldResolved = args.goldResolved
+  // RFC jun-29 #2 (measurement-hole, audit R3): EITHER a gold-sanity failure (`graderInvalid`)
+  // OR a swebench MAIN-grade INFRA failure — `verify` sets `error` ONLY on the official/Pro
+  // harness `gradingCompleted:false` / refuse-to-fake-grade path (verdict.ts), never on a
+  // genuine patch-fail — is `grader_invalid` so `resolvedTotals` EXCLUDES it from the
+  // denominator; else a Pro image-pull / harness crash is laundered into a real miss.
+  const graderVerdict = swebenchGraderInvalidVerdict(
+    args.graderInvalid,
+    args.instance,
+    args.verified,
+  )
+  if (graderVerdict !== undefined) extra.verdict = graderVerdict
   attachObservedSuccessBasics({ ...args, extra })
   attachClosureMetrics({ extra, phase: args.phase, prepared: args.prepared })
   attachSelectionAndClosureArtifacts({
@@ -6195,6 +6621,7 @@ export const verifyAndFinalizeResult = async (args: {
     ...args,
     verified: validated.verified,
     graderInvalid: validated.graderInvalid,
+    goldResolved: validated.goldResolved,
   })
   return okResult(args.instance, args.phase, validated.verified, extra)
 }
@@ -6268,6 +6695,7 @@ const _runV5AdaptiveAttempt = async (args: {
     sandbox,
   })
   revisions.push(initialPacket.evidenceRevision)
+  const effortLimits = resolveEffortLadderLimits(process.env)
   const adaptive = await runAdaptiveBenchAttempt({
     intakePacket: initialPacket,
     base: preparedContext.state,
@@ -6310,6 +6738,9 @@ const _runV5AdaptiveAttempt = async (args: {
       revisions.push(packet.evidenceRevision)
       return { packet }
     },
+    // #8 effort ladder: raise the bounded-loop ceiling by the opt-in tier (OFF ⇒
+    // undefined ⇒ controller uses DEFAULT_ADAPTIVE_LIMITS ⇒ byte-identical).
+    ...(effortLimits !== undefined ? { limits: effortLimits } : {}),
   })
   const adaptiveRoute = adaptiveRouteTelemetryOf(adaptive, revisions)
   if (adaptive.outcome !== "finalize") {

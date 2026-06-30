@@ -129,3 +129,72 @@ describe("selectByAcceptance — score-once + rerank", () => {
     expect(r.scored[1]?.regressionFailures).toBe(Number.POSITIVE_INFINITY)
   })
 })
+
+describe("selectByAcceptance — optional LLM soft-rerank (never-veto, fail-open)", () => {
+  // No oracles ⇒ admissible = all non-empty patches (tier 3). A vs B vs C all admissible.
+  const noOracles: AcceptanceOracles = {}
+
+  test("LLM choice OVERRIDES the deterministic vote winner — within admissible", async () => {
+    // Deterministic winner would be A (2 votes). LLM picks index 2 (C). C is admissible.
+    const r = await selectByAcceptance(
+      [cand("A"), cand("A"), cand("C")],
+      noOracles,
+      async (admissible) => {
+        expect(admissible.map((c) => c.patch).sort()).toEqual(["A", "A", "C"])
+        return 2 // choose C
+      },
+    )
+    expect(r.selected.patch).toBe("C")
+    expect(r.llmChosenIndex).toBe(2)
+    expect(r.selected.votes).toBe(1) // honest: C's OWN vote count, not A's (=2)
+  })
+
+  test("NEVER-VETO: an out-of-admissible index is ignored ⇒ deterministic stands", async () => {
+    // repro-only: only X is admissible (repro-pass). LLM tries to pick Y (index 1, inadmissible).
+    const oracles: AcceptanceOracles = { runRepro: async (c) => c.patch === "X" }
+    const r = await selectByAcceptance([cand("X"), cand("Y")], oracles, async () => 1)
+    expect(r.selected.patch).toBe("X")
+    expect(r.llmChosenIndex).toBeUndefined()
+  })
+
+  test("FAIL-OPEN: null choice ⇒ deterministic vote winner stands", async () => {
+    const r = await selectByAcceptance([cand("A"), cand("A"), cand("C")], noOracles, async () => null)
+    expect(r.selected.patch).toBe("A")
+    expect(r.llmChosenIndex).toBeUndefined()
+  })
+
+  test("FAIL-OPEN: a throwing reranker ⇒ deterministic winner, no crash", async () => {
+    const r = await selectByAcceptance([cand("A"), cand("A"), cand("C")], noOracles, async () => {
+      throw new Error("llm down")
+    })
+    expect(r.selected.patch).toBe("A")
+    expect(r.llmChosenIndex).toBeUndefined()
+  })
+
+  test("single admissible survivor ⇒ reranker NOT invoked (nothing to choose)", async () => {
+    const oracles: AcceptanceOracles = { runRepro: async (c) => c.patch === "X" }
+    let called = false
+    const r = await selectByAcceptance([cand("X"), cand("Y")], oracles, async () => {
+      called = true
+      return 0
+    })
+    expect(called).toBe(false)
+    expect(r.selected.patch).toBe("X")
+  })
+
+  test("reranker receives ONLY the admissible survivors (not the full pool)", async () => {
+    // repro-only: X1,X2 pass (admissible), Z fails (inadmissible). Reranker must not see Z.
+    const oracles: AcceptanceOracles = { runRepro: async (c) => c.patch.startsWith("X") }
+    let seen: string[] = []
+    const r = await selectByAcceptance(
+      [cand("X1"), cand("X2"), cand("Z")],
+      oracles,
+      async (admissible) => {
+        seen = admissible.map((c) => c.patch)
+        return admissible[1]?.index ?? null // pick X2
+      },
+    )
+    expect(seen.sort()).toEqual(["X1", "X2"])
+    expect(r.selected.patch).toBe("X2")
+  })
+})

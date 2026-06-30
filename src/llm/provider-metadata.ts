@@ -336,6 +336,22 @@ export const resolveModelEffortSupport = (model: string): ModelEffortSupport | u
   return undefined
 }
 
+/**
+ * Does this model accept a `temperature` sampling param on its wire request?
+ *
+ * Capability SSOT for the sampling-diversity seam (`withTemperature`). The ONLY
+ * models that REJECT `temperature` are OpenAI reasoning models — o-series (`o1`,
+ * `o3`, `o4…`) and the GPT-5 family on the Responses surface 400 on the field.
+ * Anthropic Claude accepts `temperature` even with extended thinking, and the
+ * OpenAI GPT-4o family accepts it — so `reasoning === true` is NOT the predicate
+ * (Claude is reasoning yet temperature-capable); the rejection is OpenAI-reasoning-
+ * specific, which the model-id pattern captures precisely (Claude slugs never
+ * match). Unknown/empty ⇒ `true` (assume capable; the wire conditional-spread +
+ * the breadth `allSettled` drop keep a wrong guess fail-safe).
+ */
+export const modelSupportsSamplingTemperature = (model: string): boolean =>
+  !(/(^|[^a-z])o\d/i.test(model) || /gpt-5/i.test(model))
+
 /** The closed set of spellings we accept as a truthy boolean env value. We
  *  accept the four the user community uses and reject everything else —
  *  including the empty string, `"0"`, `"false"`, and arbitrary numbers (`"2"`

@@ -18,6 +18,7 @@ const redPlan: VerificationPlan = {
   required: [],
   optional: [],
   baseValidatedRed: true,
+  primaryRailBaseValidatedRed: true,
 }
 
 describe("bench repair-phase policy", () => {
@@ -53,6 +54,42 @@ describe("bench repair-phase policy", () => {
         gateAction: "verify",
         primaryRailStep: railStep,
         verificationPlan: redPlan,
+      }),
+    ).toBe(true)
+  })
+
+  test("owner-test primary rail with observed base-red proof also admits repair", () => {
+    expect(
+      benchShouldRunRepairPhase({
+        eligible: true,
+        primaryRailEnabled: true,
+        gateAction: "verify",
+        primaryRailStep: railStep,
+        verificationPlan: {
+          primaryRail: { kind: "owner-test", cmd: "python -m pytest tests/test_owner.py" },
+          required: [],
+          optional: [],
+          baseValidatedRed: false,
+          primaryRailBaseValidatedRed: true,
+        },
+      }),
+    ).toBe(true)
+  })
+
+  test("module-smoke primary rail with observed base-red proof also admits repair", () => {
+    expect(
+      benchShouldRunRepairPhase({
+        eligible: true,
+        primaryRailEnabled: true,
+        gateAction: "verify",
+        primaryRailStep: { ...railStep, kind: "module-smoke" },
+        verificationPlan: {
+          primaryRail: { kind: "module-smoke", cmd: 'node -e "process.exit(1)"' },
+          required: [],
+          optional: [],
+          baseValidatedRed: false,
+          primaryRailBaseValidatedRed: true,
+        },
       }),
     ).toBe(true)
   })

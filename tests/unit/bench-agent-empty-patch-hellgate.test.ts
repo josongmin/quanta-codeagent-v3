@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { execSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -137,6 +138,49 @@ describe("bench agent empty patch boundary", () => {
       expect(result.budget?.attemptOutcomes).toEqual([
         { kind: "real-fail", subkind: "budget_exhausted" },
       ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test("repair path reuses ONE attempt-scoped budget meter across nested agent runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bench-agent-repair-budget-"))
+    const repo = join(dir, "repo")
+    try {
+      mkdirSync(repo, { recursive: true })
+      writeFileSync(join(repo, "marker.txt"), "seed\n")
+      execSync("git init -q", { cwd: repo })
+      execSync("git config user.email b@b", { cwd: repo })
+      execSync("git config user.name b", { cwd: repo })
+      execSync("git add marker.txt", { cwd: repo })
+      execSync("git commit -qm init", { cwd: repo })
+      const baseCommit = execSync("git rev-parse HEAD", { cwd: repo }).toString().trim()
+
+      const instance: Instance = {
+        id: "repair-budget-shared-meter",
+        repoPath: repo,
+        problemStatement: "Do not edit anything.",
+        testCmd: "true",
+        swebench: { instanceId: "x__repair-budget-1", repo: "x/x", baseCommit },
+      }
+
+      let calls = 0
+      const result = await runInstance(instance, {
+        llm: new CompletedNoEditLLM(),
+        maxTurns: 3,
+        timeoutMs: 20_000,
+        repair: {
+          maxRounds: 2,
+          validate: async () => ({ ok: false, failTail: "still red" }),
+        },
+        budgetMeterFactory: () => {
+          calls += 1
+          return new BudgetMeter()
+        },
+      })
+
+      expect(result.passed).toBe(false)
+      expect(calls).toBe(1)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

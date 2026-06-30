@@ -1,11 +1,18 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import type { Candidate } from "@/runner/batch/eval/selection-executor"
 import {
   type PrepareIssueSmokeSelectionPortDeps,
   prepareIssueSmokeAux,
   prepareIssueSmokeSelectionPort,
+  runIssueSmokeScript,
   seedFromIssueSmoke,
 } from "@/runner/batch/eval/selection-smoke"
+
+// Phase 2b image backend (QUANTA_BENCH_REPRO_IMAGE_EXEC) is opt-in; clear it after
+// every test so a gated case can't leak into the default-OFF cases (pollution guard).
+afterEach(() => {
+  delete process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC
+})
 
 const mkCandidate = (patch: string): Candidate => ({
   id: "cand-0",
@@ -136,6 +143,50 @@ describe("prepareIssueSmokeSelectionPort (base-RED executed-authority gate)", ()
     expect(port).toBeUndefined()
     // And it never executed any CANDIDATE (authority was refused at the base gate).
     expect(candidateRuns).toEqual([])
+  })
+})
+
+describe("runIssueSmokeScript", () => {
+  test("Pro python + dockerhubTag + REPRO_IMAGE_EXEC=1 ⇒ issue smoke runs inside the instance image", async () => {
+    process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC = "1" // Phase 2b image backend is opt-in
+    const seen: (readonly string[])[] = []
+    const ok = await runIssueSmokeScript(
+      {
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          version: "1.0",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      },
+      "/tmp/sb",
+      "print('ok')",
+      1000,
+      {
+        writeFile: async () => {},
+        removeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "", stderr: "" }
+        },
+      },
+    )
+    expect(ok).toBe(true)
+    expect(seen[0]).toEqual([
+      "docker",
+      "run",
+      "--rm",
+      "-v",
+      "/tmp/sb:/tmp/sb",
+      "-w",
+      "/tmp/sb",
+      "jefzda/sweap-images:qutebrowser.demo",
+      "python",
+      "-s",
+      "/tmp/sb/.quanta-issue-smoke.py",
+    ])
   })
 })
 

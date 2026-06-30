@@ -266,7 +266,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench CLI: allow box commands to operate when extra remote boxes are present.",
-    readSite: "apps/bench/cli.ts",
+    readSite: "apps/bench/commands/shared.ts",
   },
   {
     envKey: "QUANTA_BENCH_AUTH_FILE",
@@ -377,7 +377,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench CLI: wait for a remote box to become idle before taking ownership.",
-    readSite: "apps/bench/cli.ts",
+    readSite: "apps/bench/commands/shared.ts",
   },
   {
     envKey: "QUANTA_FULL_REMOTE_REGION",
@@ -386,7 +386,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Full-remote bench: AWS region override for box commands.",
-    readSite: "apps/bench/cli.ts",
+    readSite: "apps/bench/commands/box.ts",
   },
   // web-daemon persistence / serving
   {

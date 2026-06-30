@@ -201,6 +201,99 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "closure-repair": "5",
     "repair-spec-gate": "1",
   },
+  // jun-29 oracle lever: closure-tuned + repro-grounding. The repair validator
+  // runs the AGENT'S repro (not the official FAIL_TO_PASS — that would be answer-key
+  // gaming), so grounded repro is the prerequisite for a real oracle signal that
+  // rejects under-edit / wrong-predicate patches (docs/analysis/competitor-study).
+  "agentless-v6-oracle": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+  },
+  // jun-29 A/B treatment arm: oracle + PUBLIC-only oracle hardening (repro-vote
+  // K-of-N consensus + repair-strong-oracle declared-expected match). Targets the
+  // measured oracleGapFalseGreen — both knobs read agent-side public signals ONLY,
+  // never FAIL_TO_PASS / the official report (no answer-key leak).
+  "agentless-v6-oracle-hardened": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+    "repro-vote": "1",
+    "repair-strong-oracle": "1",
+  },
+  // jun-30 structural Pro arm: oracle-hardened + REAL multi-file repair breadth.
+  // Targets the measured Pro ceiling where owner_recall@1 is high but the agent
+  // still collapses to a single-file patch on 2-5 file golds. The existing
+  // breadth/fanout/co-change machinery is already implemented; this preset is the
+  // first versioned arm that actually bundles it with the hardened public oracle:
+  //   - repair-breadth=3          => generate B candidates per repair round
+  //   - bench-location-fanout=1  => each candidate leads at a distinct ranked file
+  //   - cha-multisite-*          => inject concrete sibling/co-change steering
+  //   - model-lane-diversity=1   => use provider lanes when available, else no-op
+  //   - acceptance=1             => when none clear green, keep the strongest
+  //                                 public-oracle candidate instead of raw order
+  //   - paired-control=1         => reject env-broken false-red repros
+  //   - adversarial-repro=1      => keep a stronger advisory hardening repro set
+  "agentless-v7-oracle-multifile": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+    "repro-vote": "1",
+    "repair-strong-oracle": "1",
+    acceptance: "1",
+    "paired-control": "1",
+    "adversarial-repro": "1",
+    "repair-breadth": "3",
+    "bench-location-fanout": "1",
+    "cha-multisite-steer": "1",
+    "cha-multisite-general": "1",
+    "model-lane-diversity": "1",
+  },
   // jun-20 strict arm:
   // mini-first + hard patch-budget admission + source-only sanitizer. It keeps
   // the localization stack, turns host in-loop execution OFF for round-0 thinness,

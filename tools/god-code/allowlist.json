@@ -3,9 +3,7 @@
   "godModuleMaxLines": 1000,
   "godFunctionMaxLines": 150,
   "modules": [
-    "src/apps/bench/cli.ts",
     "src/apps/bench/eval/driver.ts",
-    "src/apps/bench/index.ts",
     "src/lsp/adapters/base.ts",
     "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts"

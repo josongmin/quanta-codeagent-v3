@@ -69,7 +69,7 @@ export const fullRemoteAmiSchema: KnobSchema<string> = {
   default: undefined,
   describe:
     "Full-remote: EC2 AMI override (--ami or env). Prebaked image with docker+uv+django; unset ⇒ stock/default AMI selection.",
-  readSite: "apps/bench/cli.ts",
+  readSite: "apps/bench/commands/box.ts",
   surfaces: BENCH,
   parse: parseTrimmedString,
 }
@@ -111,7 +111,7 @@ export const fullRemoteOndemandSchema: KnobSchema<true> = {
   default: undefined,
   describe:
     "Full-remote: on-demand (non-spot) EC2 escape hatch for capacity crunches. Default-OFF.",
-  readSite: "apps/bench/cli.ts",
+  readSite: "apps/bench/commands/box.ts",
   surfaces: BENCH,
   parse: parseGateOn,
 }

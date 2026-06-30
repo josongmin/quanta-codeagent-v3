@@ -751,6 +751,81 @@ const maybeWireSkillMcp = (cfg: AgentConfig, env: AssemblerEnv): void => {
 /** Single source of truth for "config for this mode" assembly. `env` is the
  *  surface-owned env view (see file header) — this module never reads the
  *  `process.env` global. */
+/**
+ * Wire the ADR-0347/0358/0360/0372 session-resource + system-prompt-cache +
+ * Codex-R2 history block onto a freshly-assembled `cfg`. Extracted verbatim from
+ * `assembleAgentConfig` so that closure stays under the god-function line cap;
+ * input is the cfg (read for sessionId/metrics/cwd/…, mutated for the wires) +
+ * the surface env (for the @file mention resolver). Behaviour-identical — every
+ * caller-override-precedence + byte-identical-replay note moved with the code.
+ */
+const wireSessionResourcesAndCodexR2 = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  // ADR-0358 — when `cfg.metrics` is structurally a MetricsRegistry
+  // (ADR-0144 port) AND the caller has NOT pre-supplied a cache, wrap
+  // the session-scoped cache with `withCacheMetrics` so cache hit/miss/
+  // invalidation counters land on the operator registry. NO-THROW
+  // (looksLikeMetricsRegistry is a pure shape check + adapter is pure
+  // delegation).
+  const metricsEmitter: MetricEmitterPort | undefined =
+    cfg.metrics !== undefined && looksLikeMetricsRegistry(cfg.metrics)
+      ? adaptMetricsRegistryToEmitter(cfg.metrics)
+      : undefined
+  // ADR-0372 — Caller-owned registry path for flock telemetry. When
+  // `cfg.metrics` is a real MetricsRegistry (i.e. `metricsEmitter` is
+  // set), mint a FRESH disk-adapter with the emitter injected so the
+  // ADR-0364 lock counters land on the same registry instead of being
+  // dropped on the floor (ADR-0368 documented why the global singleton
+  // cannot accept the emitter). When `metricsEmitter` is absent, the
+  // legacy global-singleton path is preserved verbatim ⇒ byte-identical
+  // for hosts that do NOT thread metrics through.
+  const sessionResources =
+    cfg.sessionId !== undefined
+      ? metricsEmitter !== undefined
+        ? buildCallerOwnedRegistryWithTelemetry({
+            emitter: metricsEmitter,
+            sessionId: cfg.sessionId,
+          }).getOrCreate(cfg.sessionId)
+        : getGlobalSessionResourceRegistry().getOrCreate(cfg.sessionId)
+      : null
+  // Caller-override-precedence (ADR-0332): a pre-set
+  // `cfg.systemPromptCache` is preserved by `installCodexR2Wires`,
+  // so the wrap here only affects the default cache we are about to
+  // install — we never re-wrap a caller-supplied cache. Bench surface
+  // (sessionResources === null) ⇒ wrap skipped ⇒ byte-identical replay.
+  const baseCache: SystemPromptCachePort =
+    sessionResources?.cache ?? createInMemorySystemPromptCache()
+  const wrappedCache: SystemPromptCachePort =
+    metricsEmitter !== undefined && sessionResources !== null && cfg.systemPromptCache === undefined
+      ? withCacheMetrics(baseCache, { emitter: metricsEmitter })
+      : baseCache
+  // ADR-0360 — expose the adapted emitter on `cfg` via structural side-
+  // channel so `resolvePluginActivationForTurn` (ADR-0346) can emit
+  // per-turn activation telemetry. Structural-only — does NOT mutate
+  // AgentConfig type surface; absent emitter ⇒ field stays unset ⇒
+  // the activation hook degrades to legacy no-emit.
+  if (metricsEmitter !== undefined) {
+    ;(cfg as { metricsEmitter?: MetricEmitterPort }).metricsEmitter = metricsEmitter
+  }
+  installCodexR2Wires(cfg, {
+    ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
+    systemPromptCache: wrappedCache,
+    store: sessionResources?.store ?? createInMemoryTypedHistoryEventStore(),
+    // ADR-0418 — @file mention resolver (helper keeps this closure under the
+    // cognitive-complexity cap). Default-ON; QUANTA_MENTION_FILE=off opts out.
+    ...mentionResolverDep(cfg.cwd, env),
+    getSnapshot: () =>
+      captureSnapshot({
+        cwd: cfg.cwd,
+        mode: typeof cfg.mode === "string" ? cfg.mode : "default",
+        model: (cfg.llm as { model?: string }).model ?? "",
+        repoRulesPaths:
+          cfg.repoRules?.layers?.map((l) => l.sourcePath) ??
+          (cfg.repoRules !== undefined ? [cfg.repoRules.sourcePath] : []),
+        activeSkills: [],
+      }),
+  })
+}
+
 export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): AgentConfig => {
   const policy: ModePolicy = MODE_PRESETS[req.mode]
   assertModeMatrix(policy)
@@ -833,70 +908,9 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // callers / one-shot bench-style usage) fall back to the fresh
   // factory pair — byte-identical to the ADR-0334 baseline.
   //
-  // ADR-0358 — when `cfg.metrics` is structurally a MetricsRegistry
-  // (ADR-0144 port) AND the caller has NOT pre-supplied a cache, wrap
-  // the session-scoped cache with `withCacheMetrics` so cache hit/miss/
-  // invalidation counters land on the operator registry. NO-THROW
-  // (looksLikeMetricsRegistry is a pure shape check + adapter is pure
-  // delegation).
-  const metricsEmitter: MetricEmitterPort | undefined =
-    cfg.metrics !== undefined && looksLikeMetricsRegistry(cfg.metrics)
-      ? adaptMetricsRegistryToEmitter(cfg.metrics)
-      : undefined
-  // ADR-0372 — Caller-owned registry path for flock telemetry. When
-  // `cfg.metrics` is a real MetricsRegistry (i.e. `metricsEmitter` is
-  // set), mint a FRESH disk-adapter with the emitter injected so the
-  // ADR-0364 lock counters land on the same registry instead of being
-  // dropped on the floor (ADR-0368 documented why the global singleton
-  // cannot accept the emitter). When `metricsEmitter` is absent, the
-  // legacy global-singleton path is preserved verbatim ⇒ byte-identical
-  // for hosts that do NOT thread metrics through.
-  const sessionResources =
-    cfg.sessionId !== undefined
-      ? metricsEmitter !== undefined
-        ? buildCallerOwnedRegistryWithTelemetry({
-            emitter: metricsEmitter,
-            sessionId: cfg.sessionId,
-          }).getOrCreate(cfg.sessionId)
-        : getGlobalSessionResourceRegistry().getOrCreate(cfg.sessionId)
-      : null
-  // Caller-override-precedence (ADR-0332): a pre-set
-  // `cfg.systemPromptCache` is preserved by `installCodexR2Wires`,
-  // so the wrap here only affects the default cache we are about to
-  // install — we never re-wrap a caller-supplied cache. Bench surface
-  // (sessionResources === null) ⇒ wrap skipped ⇒ byte-identical replay.
-  const baseCache: SystemPromptCachePort =
-    sessionResources?.cache ?? createInMemorySystemPromptCache()
-  const wrappedCache: SystemPromptCachePort =
-    metricsEmitter !== undefined && sessionResources !== null && cfg.systemPromptCache === undefined
-      ? withCacheMetrics(baseCache, { emitter: metricsEmitter })
-      : baseCache
-  // ADR-0360 — expose the adapted emitter on `cfg` via structural side-
-  // channel so `resolvePluginActivationForTurn` (ADR-0346) can emit
-  // per-turn activation telemetry. Structural-only — does NOT mutate
-  // AgentConfig type surface; absent emitter ⇒ field stays unset ⇒
-  // the activation hook degrades to legacy no-emit.
-  if (metricsEmitter !== undefined) {
-    ;(cfg as { metricsEmitter?: MetricEmitterPort }).metricsEmitter = metricsEmitter
-  }
-  installCodexR2Wires(cfg, {
-    ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
-    systemPromptCache: wrappedCache,
-    store: sessionResources?.store ?? createInMemoryTypedHistoryEventStore(),
-    // ADR-0418 — @file mention resolver (helper keeps this closure under the
-    // cognitive-complexity cap). Default-ON; QUANTA_MENTION_FILE=off opts out.
-    ...mentionResolverDep(cfg.cwd, env),
-    getSnapshot: () =>
-      captureSnapshot({
-        cwd: cfg.cwd,
-        mode: typeof cfg.mode === "string" ? cfg.mode : "default",
-        model: (cfg.llm as { model?: string }).model ?? "",
-        repoRulesPaths:
-          cfg.repoRules?.layers?.map((l) => l.sourcePath) ??
-          (cfg.repoRules !== undefined ? [cfg.repoRules.sourcePath] : []),
-        activeSkills: [],
-      }),
-  })
+  // (ADR-0358/0372/0360 + the Codex-R2 install moved into the helper below
+  // to keep this closure under the god-function line cap — behaviour-identical.)
+  wireSessionResourcesAndCodexR2(cfg, env)
   // ADR-0350 — auto-wire `cfg.activatePlugins` from a workspace-anchored
   // plugin scan so the ADR-0346 loop hook gets a real activator instead
   // of remaining a no-op. NO-THROW + caller-override-precedence: a host

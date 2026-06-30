@@ -9,7 +9,10 @@ import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import type { SessionHost } from "@/kernel/session"
 import type { LLMPort, Message } from "@/llm"
 import type { CapabilityManifest, SessionEvent } from "@/protocol/session"
-import { runAdaptiveBenchAttempt } from "@/runner/batch/eval/adaptive-escalation"
+import {
+  resolveEffortLadderLimits,
+  runAdaptiveBenchAttempt,
+} from "@/runner/batch/eval/adaptive-escalation"
 import { buildAdaptiveRouterModelCall } from "@/runner/batch/eval/adaptive-escalation/live-model-call"
 import {
   classifyDoneTimeCapture,
@@ -27,10 +30,12 @@ import {
   type BenchKnobState,
   BenchObserver,
   type BenchPosture,
+  benchBudgetMeterFromEnv,
   benchOptIns,
   benchPostureFromState,
   benchVerifyAuthorityCommandsOf,
   buildAdaptivePhasePacket,
+  buildRepairBreadthRunCandidates,
   buildReproVoteValidate,
   buildConfig as buildRunnerConfig,
   composeWithReproHint,
@@ -50,6 +55,7 @@ import {
   makeReproConsensusSelectionPort,
   makeSelectionRegressionPort,
   makeSelectionStaticSanityPort,
+  maybeReviewSubmission,
   maybeRunRepairEscalationFollowup,
   maybeValidateTerminalResult,
   type PreparedAttemptContext,
@@ -70,8 +76,11 @@ import {
   repairLocalizePhaseSuppressed,
   reproHintMessage,
   resetReproVoteOutcomes,
+  resolveAcceptanceLlmRerank,
   resolveBenchKnobs,
   resolveLaneLlm,
+  resolveLocationFanoutSeeder,
+  runRepairRoundsInSnapshot,
   runRetryLoop,
   type RunInstanceDeps as SharedRunInstanceDeps,
   StrictLspGroundingDegradedError,
@@ -90,20 +99,19 @@ import {
   type VerificationTargetFact,
   verificationTargetFromPlan,
 } from "@/runner/batch/eval/llm-evidence-packet"
+import {
+  buildRepairFanoutFiles,
+  buildRepairFanoutSymbols,
+  type PerCandidateSeed,
+} from "@/runner/batch/eval/location-set-fanout"
 import { prepareMweProofSelectionPort } from "@/runner/batch/eval/mwe-proof-port"
 import { installProjectEnvPythonShim } from "@/runner/batch/eval/project-env-python-shim"
 import { buildCleanSelectionAuthorityContracts } from "@/runner/batch/eval/public-contract-bundle"
 import type { SelectionContractBundle } from "@/runner/batch/eval/public-contract-types"
 import {
-  applyCandidatePatch,
   candidatePatchAppliesCleanly,
   materializeBuildEnv,
-  resetToBase,
 } from "@/runner/batch/eval/rematerialize"
-import {
-  buildRepairRoundsConfig,
-  makeRepairBreadthRunCandidates,
-} from "@/runner/batch/eval/repair-breadth"
 import {
   benchInstallsReproHint,
   benchRunsRepairPhase,
@@ -147,8 +155,6 @@ import type {
 } from "../types"
 import { runEnvPrep } from "./env-prep"
 import { exec } from "./exec"
-import { runRepairRounds } from "./repair/index"
-import { buildRepairRoundSeedMessage } from "./repair/llm-evidence"
 import type { RunOnceResult } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
 import { buildWiring, emitSandbox, NullStream, ObservationError, type Wiring } from "./report"
@@ -632,6 +638,7 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  ownerNearRegressionSet: readonly string[],
   verificationTarget: VerificationTargetFact | undefined,
   /** jun-26 repair spec gate: PUBLIC issue-declared expected output (from the
    *  closure session). Only consumed when `QUANTA_BENCH_REPAIR_SPEC_GATE` is on AND
@@ -639,6 +646,11 @@ const runRepairPhase = async (
   issueDeclaredExpected: IssueDeclaredExpected | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaRepairTargets?: PreparedAttemptContext["chaRepairTargets"],
+  /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
+   *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
+   *  (byte-identical). */
+  perCandidateSeed?: PerCandidateSeed,
 ): Promise<Phase> => {
   // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds (mirrors
   // the runner-core driver). The fault is already localized in repair (patch
@@ -656,13 +668,6 @@ const runRepairPhase = async (
   // its owner evidence carries exact slices (paired with issue symbols) and it
   // names the active proof target — parity with the selector-repair sibling.
   const repairIssueSymbols = extractIssueHint(instance.problemStatement).symbols
-  let turns = 0
-  let finalPatch = ""
-  let repairValidated = false
-  let repairFalseGreen = false
-  let repairFalseRed = false
-  let repairValidationDecision: Phase["repairValidationDecision"]
-  let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: K-of-N RESOLVED majority gate when the knob is on AND a
   // reproducing set exists; else byte-identical `repair.validate ?? defaultValidate`.
@@ -689,140 +694,104 @@ const runRepairPhase = async (
   // candidates and continue from the one the SAME validator turns green (else the
   // best validator signal). B=1 (default) ⇒ `runCandidates` is undefined ⇒ the
   // orchestrator takes the legacy single `runOnce`+`validate` path (byte-identical).
+  // jun-28 repair-loop BREADTH via the SHARED `buildRepairBreadthRunCandidates`
+  // (defined in the runner core driver, reused here): B>1 ⇒ fan a repair round
+  // out to B forked candidates. The app does NOT thread `chaMultisiteSteer` into
+  // the forked agent — that divergence lives in the injected `runAgentOnFork`.
   const repairBreadth = repair.breadth ?? repairPosture.repairBreadth
-  const runCandidates =
-    repairBreadth > 1
-      ? makeRepairBreadthRunCandidates({
-          instanceId: instance.id,
-          mainSandbox: sandbox,
-          baseCommit: instance.swebench?.baseCommit,
-          repo: instance.swebench?.repo,
-          timeoutMs: deps.timeoutMs,
-          resolveLaneLlm: (index) => resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
-          runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
-            runAgentOnce(
-              instance,
-              deps,
-              forkSandbox,
-              signal,
-              w,
-              seedMsg,
-              deps.timeoutMs,
-              precomputedHint,
-              reproHint,
-              closureHint,
-              repairPosture,
-              stateOverride,
-              laneLlm,
-            ),
-          validate,
-          validateInputs: {
-            exec,
-            timeoutMs: deps.timeoutMs,
-            readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-            evaluatePredicate: repairEvaluatePredicate,
-            ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
-          },
-          sandboxPorts: { forkSandbox, cleanupSandbox },
-          gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
-        })
-      : undefined
-  // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only) — SHARED
-  // wiring with the runner driver. ABSENT ⇒ legacy selection (byte-identical).
+  const runCandidates = buildRepairBreadthRunCandidates({
+    instance,
+    deps,
+    sandbox,
+    signal,
+    repairPosture,
+    repairBreadth,
+    validate,
+    repairEvaluatePredicate,
+    primaryRailStep,
+    chaRepairTargets,
+    perCandidateSeed,
+    runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
+      runAgentOnce(
+        instance,
+        deps,
+        forkSandbox,
+        signal,
+        w,
+        seedMsg,
+        deps.timeoutMs,
+        precomputedHint,
+        reproHint,
+        closureHint,
+        repairPosture,
+        stateOverride,
+        laneLlm,
+      ),
+  })
+  // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
+  // reproducing set and the owner-near PUBLIC regression set that was confirmed
+  // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
     sandbox,
     deps.timeoutMs,
     repairPosture.acceptance,
+    ownerNearRegressionSet,
+    resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
-  const patch = await withGitSnapshot(
+  // Repair-round orchestration inside a git snapshot via the SHARED
+  // `runRepairRoundsInSnapshot` (runner core, reused here). The app's per-round
+  // agent run omits `chaMultisiteSteer` — that divergence lives in `runOnce`.
+  const { patch, out } = await runRepairRoundsInSnapshot({
+    instance,
+    deps,
     sandbox,
-    deps.timeoutMs,
-    instance.swebench?.baseCommit,
-    async () => {
-      await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const out = await runRepairRounds({
-        config: buildRepairRoundsConfig(
-          repair.maxRounds,
-          repairBreadth,
-          repairPosture.repairStrongOracle,
-        ),
-        problem: instance.problemStatement,
-        runOnce: (seedMsg) =>
-          runAgentOnce(
-            instance,
-            deps,
-            sandbox,
-            signal,
-            w,
-            seedMsg,
-            deps.timeoutMs,
-            precomputedHint,
-            reproHint,
-            closureHint,
-            // Repair posture with the localize-phase edit-block stripped (see
-            // `repairLocalizePhaseSuppressed`). Always explicit so `buildConfig`
-            // does NOT re-resolve the block-active env posture.
-            repairPosture,
-            stateOverride,
-          ),
-        validate,
-        buildContext: (ctxArgs) => {
-          const repairArgs = {
-            ...ctxArgs,
-            siblingOwners,
-            issueSymbols: repairIssueSymbols,
-            readSource: (rel: string) => readSandboxSource(sandbox, rel),
-            ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-          }
-          const repairSeed = buildRepairRoundSeedMessage(
-            repairArgs,
-            repair.buildContext?.(repairArgs),
-          )
-          recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
-          return repairSeed.seedMsg
-        },
+    w,
+    repair,
+    repairPosture,
+    repairBreadth,
+    validate,
+    repairEvaluatePredicate,
+    primaryRailStep,
+    runCandidates,
+    acceptanceSelectCandidates,
+    siblingOwners,
+    repairIssueSymbols,
+    verificationTarget,
+    repairLlmEvidence,
+    runOnce: (seedMsg) =>
+      runAgentOnce(
+        instance,
+        deps,
         sandbox,
-        exec,
-        // PARITY with the runner-core driver (src/runner/batch/eval/driver.ts):
-        // the repro-rail validator reads the pytest report via `readFile` to
-        // classify resolved/red; WITHOUT it `classifyPytestReport` short-circuits
-        // to "exec_failed" every round (validator.ts: `readFile === undefined`),
-        // so a `repro` primary rail can never clear — the repair loop runs but is
-        // inert. Threading the same Bun.file reader makes the rail evaluable.
-        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-        timeoutMs: deps.timeoutMs,
-        evaluatePredicate: repairEvaluatePredicate,
-        ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
-        // jun-28 BREADTH: present only when B>1 (else undefined ⇒ the orchestrator
-        // takes the legacy single path, byte-identical).
-        ...(runCandidates !== undefined ? { runCandidates } : {}),
-        // jun-28 SOTA++ acceptance: present only when the opt-in is on + a repro set
-        // exists (else undefined ⇒ legacy validator-rank selection, byte-identical).
-        ...(acceptanceSelectCandidates !== undefined
-          ? { selectCandidates: acceptanceSelectCandidates }
-          : {}),
-      })
-      turns = out.turns
-      finalPatch = out.patch
-      repairValidated = out.validated
-      repairFalseGreen = out.primaryFalseGreen
-      repairFalseRed = out.primaryFalseRed
-      repairValidationDecision = out.validationDecision
-      repairRounds = out.rounds
-    },
-    instance.swebench?.repo,
-  )
+        signal,
+        w,
+        seedMsg,
+        deps.timeoutMs,
+        precomputedHint,
+        reproHint,
+        closureHint,
+        // Repair posture with the localize-phase edit-block stripped; explicit so
+        // `buildConfig` does NOT re-resolve the block-active env posture.
+        repairPosture,
+        stateOverride,
+      ),
+  })
+  const capturedPatch = patch !== "" ? patch : out.patch
+  const submissionReview = maybeReviewSubmission(capturedPatch)
   return {
-    patch: patch !== "" ? patch : finalPatch,
-    turns,
-    validated: repairValidated,
-    primaryFalseGreen: repairFalseGreen,
-    primaryFalseRed: repairFalseRed,
-    ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
-    ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
+    patch: capturedPatch,
+    turns: out.turns,
+    validated: out.validated,
+    primaryFalseGreen: out.primaryFalseGreen,
+    primaryFalseRed: out.primaryFalseRed,
+    ...(out.validationDecision !== undefined
+      ? { repairValidationDecision: out.validationDecision }
+      : {}),
+    ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
+    ...(submissionReview !== undefined ? { submissionReview } : {}),
   }
 }
 
@@ -1640,6 +1609,12 @@ const runAppMainPhase = async (args: {
     )
   }
   if (args.prepared.runRepair && args.prepared.effectiveRepair !== undefined) {
+    const repairFanoutFiles = buildRepairFanoutFiles({
+      localizeCandidates: args.prepared.localizeCandidates,
+      stage1Files: args.prepared.closureSession?.input.evidence.stage1Files,
+      ownerResolved: args.prepared.ownerResolved,
+      witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+    })
     return runRepairPhase(
       args.instance,
       args.deps,
@@ -1653,10 +1628,23 @@ const runAppMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      args.prepared.ownerNearRegressionSet,
       verificationTargetFromPlan(args.prepared.verificationPlan),
       args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
+      args.prepared.chaRepairTargets,
+      resolveLocationFanoutSeeder(
+        args.prepared.posture.locationFanout,
+        repairFanoutFiles,
+        args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,
+        buildRepairFanoutSymbols({
+          issueSymbols: extractIssueHint(args.instance.problemStatement).symbols,
+          fanoutFiles: repairFanoutFiles,
+          ownerResolved: args.prepared.ownerResolved,
+          witnessOwners: args.prepared.closureSession?.input.evidence.witnessOwners,
+        }),
+      ),
     )
   }
   return runAgentPhase(
@@ -1712,6 +1700,7 @@ const runAdaptiveAttempt = async (args: {
     sandbox,
   })
   revisions.push(initialPacket.evidenceRevision)
+  const effortLimits = resolveEffortLadderLimits(process.env)
   const adaptive = await runAdaptiveBenchAttempt({
     intakePacket: initialPacket,
     base: preparedContext.state,
@@ -1754,6 +1743,9 @@ const runAdaptiveAttempt = async (args: {
       revisions.push(packet.evidenceRevision)
       return { packet }
     },
+    // #8 effort ladder: raise the bounded-loop ceiling by the opt-in tier (OFF ⇒
+    // undefined ⇒ DEFAULT_ADAPTIVE_LIMITS ⇒ byte-identical).
+    ...(effortLimits !== undefined ? { limits: effortLimits } : {}),
   })
   const adaptiveRoute = {
     outcome: adaptive.outcome,
@@ -2004,6 +1996,17 @@ const runInstanceOnce = async (
   resetReproVoteOutcomes()
   const sandbox = await createSandbox(instance)
   const abort = new AbortController()
+  // Attempt-scoped bench budget: one meter spans the nested agent runs inside
+  // THIS attempt (repair rounds, breadth candidates, verify-select generation),
+  // so batch dials bound aggregate churn instead of resetting on every internal
+  // `runAgent` invocation.
+  const attemptBudgetMeter = (
+    deps.budgetMeterFactory ?? (() => benchBudgetMeterFromEnv(process.env))
+  )()
+  const effectiveDeps: RunInstanceDeps = {
+    ...deps,
+    budgetMeterFactory: () => attemptBudgetMeter,
+  }
   // The per-instance wall-clock deadline bounds the AGENT SOLVE only — NOT env
   // setup (copyRepo + setupCmd + hint/repro install), which have their own
   // timeouts (runEnvPrep). Starting the timer here (pre-setup) let cold-start
@@ -2018,7 +2021,7 @@ const runInstanceOnce = async (
   try {
     return await runInstanceBody({
       instance,
-      deps,
+      deps: effectiveDeps,
       sandbox,
       abort,
       startedAt,

@@ -182,6 +182,19 @@ describe("loop ↔ BudgetMeter — exhaustion firing", () => {
     expect(meter.snapshot().shellCommands).toBeGreaterThanOrEqual(1)
   })
 
+  test("bash verify command increments BOTH shell_command and test_run", async () => {
+    const llm = new FakeLLM([
+      toolUse("c1", "bash", { command: "python -m pytest tests/ -q" }),
+      text("done"),
+    ])
+    const meter = new BudgetMeter()
+    const cfg = baseCfg({ llm, cwd: dir, budgetMeter: meter })
+    await runAgent(cfg)
+    const snap = meter.snapshot()
+    expect(snap.shellCommands).toBeGreaterThanOrEqual(1)
+    expect(snap.testRuns).toBeGreaterThanOrEqual(1)
+  })
+
   test("uncapped meter never trips exhaustion", async () => {
     const llm = new FakeLLM([text("done")])
     const meter = new BudgetMeter() // no dials

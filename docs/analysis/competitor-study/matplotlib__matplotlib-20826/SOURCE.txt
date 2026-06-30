@@ -1,0 +1,3 @@
+competitor_scaffold: 20251215_livesweagent_claude-opus-4-5
+instance: matplotlib__matplotlib-20826
+patch_pull: OK

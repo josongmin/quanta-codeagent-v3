@@ -1,0 +1,3 @@
+competitor_scaffold: 20251127_openhands_claude-opus-4-5
+instance: sympy__sympy-15976
+patch_pull: OK

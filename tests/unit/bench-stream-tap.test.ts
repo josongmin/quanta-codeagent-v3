@@ -83,6 +83,28 @@ describe("BenchStreamTap", () => {
     expect(tap.lastVerifyCmd).toBe("pytest")
   })
 
+  test("actionTrace records EVERY tool_call as `<tool> <target>` in order, bounded to the recent window", () => {
+    const tap = new BenchStreamTap(new Capture())
+    tap.emit(toolCall("read", { file_path: "/s/look.py" }))
+    tap.emit(toolCall("edit", { file_path: "/s/core.py" }))
+    tap.emit(toolCall("bash", { command: "pytest tests/foo.py" }))
+    // Records actions (incl. read/bash, unlike editCount) with their detail.
+    expect(tap.actionTrace).toEqual([
+      "read /s/look.py",
+      "edit /s/core.py",
+      "bash pytest tests/foo.py",
+    ])
+  })
+
+  test("actionTrace is capped (most-recent window) — never grows unbounded", () => {
+    const tap = new BenchStreamTap(new Capture())
+    for (let i = 0; i < 100; i++) tap.emit(toolCall("bash", { command: `echo ${i}` }))
+    expect(tap.actionTrace.length).toBeLessThanOrEqual(40) // ACTION_TRACE_CAP
+    // keeps the LATEST actions (the convergence tail), not the first.
+    expect(tap.actionTrace.at(-1)).toBe("bash echo 99")
+    expect(tap.actionTrace).not.toContain("bash echo 0")
+  })
+
   test("onAction fires ONCE per tool_call with (name, detail) and still forwards downstream", () => {
     // The live per-action run.log line ("· <instance> <tool> <detail>") the bench
     // drivers wire on the 4th arg. RCA jun-25: this was wired ONLY on the verify-

@@ -73,6 +73,7 @@ describe("assembleClosureBundle — SSOT", () => {
     const b = assembleClosureBundle(baseInput({ plan: { ownerNearTests: ["pytest test_a.py"] } }))
     expect(b.plan.primaryRail?.kind).toBe("owner-test")
     expect(b.plan.baseValidatedRed).toBe(false)
+    expect(b.plan.primaryRailBaseValidatedRed).toBe(false)
   })
 
   test("ambiguous owner / high stakes ⇒ gate is verify-first (no commit-fast)", () => {

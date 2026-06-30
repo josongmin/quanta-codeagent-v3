@@ -1,0 +1,3 @@
+competitor_scaffold: 20250522_sweagent_claude-4-sonnet-20250514
+instance: django__django-15563
+patch_pull: OK

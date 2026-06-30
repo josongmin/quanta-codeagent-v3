@@ -213,6 +213,134 @@ export const AGENTLESS_V6_CLOSURE_TUNED: PresetSpec = {
 }
 
 /**
+ * `agentless-v6-oracle` — jun-29 SYNTHESIS-CONVERGENCE lever. `closure-tuned`
+ * (fail-to-pass oracle LOOP + round-0 false-green guard) PLUS `repro-grounding`.
+ *
+ * WHY the one added param is load-bearing: the repair validator re-runs the
+ * AGENT'S OWN repro (validator.ts — deliberately NOT the official FAIL_TO_PASS,
+ * which would be answer-key gaming), so the loop's signal is only as good as the
+ * generated repro (~45% historical repro failure, jun-20). `repro-grounding`
+ * lifts repro quality → a REAL oracle signal that can reject the under-edit /
+ * wrong-predicate patches (docs/analysis/competitor-study). OPT-IN measurement
+ * arm; the v6 winner + closure-tuned stay byte-identical.
+ */
+export const AGENTLESS_V6_ORACLE: PresetSpec = {
+  id: "agentless-v6-oracle",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+  },
+  note: "jun-29 oracle lever: closure-tuned + repro-grounding (the validator runs the agent's repro, so grounded repro is the prerequisite for a real fail-to-pass oracle signal).",
+}
+
+/**
+ * `agentless-v6-oracle-hardened` — jun-29 A/B TREATMENT arm against the measured
+ * `oracleGapFalseGreen` failure mode. `agentless-v6-oracle` PLUS PUBLIC-ONLY oracle
+ * hardening: `repro-vote` (K-of-N consensus over the agent's OWN reproducing scripts)
+ * + `repair-strong-oracle` (a green round clears ONLY when the PUBLIC issue-declared
+ * expected output matches AND the repro-vote reached consensus).
+ *
+ * WHY: the pilot showed the agent-side canonical oracle is too lenient — a weak repro
+ * the under-edit patch passes false-clears the loop (issueResolved=true) while the
+ * official harness still fails. Both added knobs harden the AGENT-SIDE oracle using
+ * PUBLIC signals ONLY (repro-vote.ts/strong-oracle.ts never read FAIL_TO_PASS / the
+ * official report — no answer-key leak). A/B vs agentless-v6-oracle measures whether
+ * stronger public oracles cut the oracleGapFalseGreen rate without leaking.
+ */
+export const AGENTLESS_V6_ORACLE_HARDENED: PresetSpec = {
+  id: "agentless-v6-oracle-hardened",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+    "repro-vote": "1",
+    "repair-strong-oracle": "1",
+  },
+  note: "jun-29 A/B treatment: oracle + repro-vote + repair-strong-oracle (PUBLIC-only oracle hardening vs oracleGapFalseGreen).",
+}
+
+/**
+ * `agentless-v7-oracle-multifile` — jun-30 structural Pro arm.
+ *
+ * WHY: the Pro closure audit converged on a second bottleneck after oracle
+ * quality: the runtime already localizes the first owner file, but repair
+ * generation collapses back to a single-file candidate on 2-5 file golds. The
+ * breadth/fanout/co-change machinery already exists in the driver; this preset is
+ * the first frozen arm that bundles those levers with the hardened PUBLIC oracle:
+ * repair-breadth + location-fanout + multisite steer + lane diversity +
+ * acceptance, plus the repro-admission hardening pair (paired-control /
+ * adversarial-repro) to lift base-red signal quality.
+ */
+export const AGENTLESS_V7_ORACLE_MULTIFILE: PresetSpec = {
+  id: "agentless-v7-oracle-multifile",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+    "repro-vote": "1",
+    "repair-strong-oracle": "1",
+    acceptance: "1",
+    "paired-control": "1",
+    "adversarial-repro": "1",
+    "repair-breadth": "3",
+    "bench-location-fanout": "1",
+    "cha-multisite-steer": "1",
+    "cha-multisite-general": "1",
+    "model-lane-diversity": "1",
+  },
+  note: "jun-30 structural Pro arm: oracle-hardened + breadth/fanout/co-change/lane diversity for multi-file repair completeness.",
+}
+
+/**
  * `agentless-v3-thin-strict` — jun-20 strict arm: mini-first + hard patch-budget
  * admission + source-only sanitizer. Keeps the localization stack but turns host
  * in-loop execution OFF for round-0 thinness and blocks over-budget final patches
@@ -321,6 +449,9 @@ export const PRESET_SPECS: Readonly<Record<string, PresetSpec>> = Object.freeze(
   [AGENTLESS_V6_CLOSURE_CONTROL.id]: AGENTLESS_V6_CLOSURE_CONTROL,
   [AGENTLESS_V6_CLOSURE_REPAIR.id]: AGENTLESS_V6_CLOSURE_REPAIR,
   [AGENTLESS_V6_CLOSURE_TUNED.id]: AGENTLESS_V6_CLOSURE_TUNED,
+  [AGENTLESS_V6_ORACLE.id]: AGENTLESS_V6_ORACLE,
+  [AGENTLESS_V6_ORACLE_HARDENED.id]: AGENTLESS_V6_ORACLE_HARDENED,
+  [AGENTLESS_V7_ORACLE_MULTIFILE.id]: AGENTLESS_V7_ORACLE_MULTIFILE,
   [AGENTLESS_V3_THIN_STRICT.id]: AGENTLESS_V3_THIN_STRICT,
   [AGENTLESS_V5_THIN_AND_EXPANDED.id]: AGENTLESS_V5_THIN_AND_EXPANDED,
   [HINT_ONLY.id]: HINT_ONLY,

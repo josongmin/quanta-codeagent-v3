@@ -18,8 +18,10 @@
 import { basename } from "node:path"
 import { resolveNoProgressBudgetMs } from "@/runner/batch/eval/no-progress-watchdog"
 import { errMessage } from "@/shared"
+import { resolveDatasetFamily } from "../dataset-family"
 import { resolveBenchTrajectoryDefault } from "../trajectory"
 import {
+  assertProDatasetGradeable,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,
@@ -46,6 +48,7 @@ import { absorbFullRemoteResult } from "./verdict-buckets"
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
 export {
+  assertProDatasetGradeable,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,
@@ -466,6 +469,12 @@ export const createFullRemoteBackend = (
     assertRemoteDatasetLaunchable({
       datasetPath: cfg.datasetPath,
       surface: "full-remote",
+    })
+    assertProDatasetGradeable({
+      datasetPath: cfg.datasetPath,
+      ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
+      surface: "full-remote",
+      family: resolveDatasetFamily(undefined, process.env),
     })
     assertRemoteDatasetSelectionExists({
       datasetPath: cfg.datasetPath,

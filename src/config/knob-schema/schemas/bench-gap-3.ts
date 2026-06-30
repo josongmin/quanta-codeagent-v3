@@ -226,6 +226,137 @@ export const benchSiblingSchema: KnobSchema<boolean> = {
   parse: parseGateBool,
 }
 
+/* ── QUANTA_BENCH_SAMPLE_TEMP (env-direct, driver.ts via gateOn) ───────────── */
+export const benchSampleTempSchema: KnobSchema<boolean> = {
+  id: "bench-sample-temp",
+  envKey: "QUANTA_BENCH_SAMPLE_TEMP",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: Agentless-style sampling diversity for the repair-breadth fanout. Candidate 0 stays greedy (byte-identical lane); candidates ≥1 sample at temperature 0.8 (Agentless repair.py greedy+temp schedule) so the best-of-N pool spans diverse fixes instead of N near-identical resamples. Auth-independent (same model, temperature only). Needs repair-breadth B>1. Default-OFF ⇒ unwrapped lanes ⇒ byte-identical. (Do NOT enable on OpenAI reasoning surfaces that reject temperature.)",
+  knobDescribe:
+    "Sampling-temperature diversity for breadth fanout (greedy lead + temp 0.8 samples, Agentless parity)",
+  readSite: "runner/batch/eval/driver.ts",
+  surfaces: BENCH,
+  parse: parseGateBool,
+}
+
+/* ── QUANTA_BENCH_REPRO_IMAGE_EXEC (env-direct, repro-adapter.ts via gateOn) ── */
+export const benchReproImageExecSchema: KnobSchema<boolean> = {
+  id: "bench-repro-image-exec",
+  envKey: "QUANTA_BENCH_REPRO_IMAGE_EXEC",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: run the repro-oracle EXEC inside the instance's prebuilt Docker image (Pro `jefzda/sweap-images:<tag>`) via `docker run`, instead of the host uv project-env. RFC jun-29-repro-adapter-polyglot Phase 2b — the `image` backend selection. DEFERRED/runtime-gated BY DESIGN: Python parity inside the image (does the mounted, patched sandbox shadow the image's own pip-installed copy?) is UNPROVEN and must be validated on a box before promotion. Default-OFF ⇒ host backend ⇒ byte-identical (every existing Pro/Live/Verified repro run unchanged).",
+  knobDescribe:
+    "Repro EXEC inside the instance Docker image (Pro sweap-images) — Phase 2b, unproven parity, opt-in only",
+  readSite: "runner/batch/eval/repro-adapter.ts",
+  surfaces: BENCH,
+  parse: parseGateBool,
+}
+
+/* ── QUANTA_BENCH_VOTE_NORMALIZE (env-direct, driver.ts via gateOn) ────────── */
+export const benchVoteNormalizeSchema: KnobSchema<boolean> = {
+  id: "bench-vote-normalize",
+  envKey: "QUANTA_BENCH_VOTE_NORMALIZE",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: stronger acceptance vote-key (Agentless rerank.py parity). Dedup candidate patches on a comment/blank/whitespace-insensitive key so cosmetic-variant samples reinforce the majority instead of splitting it (Agentless normalize_code does the AST round-trip; we compose the existing diff normalizer + whole-line comment strip, no AST). Only affects the acceptance selector's vote key. Default-OFF ⇒ raw-trim key ⇒ byte-identical.",
+  knobDescribe:
+    "Stronger acceptance vote-key: comment/blank/whitespace-insensitive patch dedup (Agentless majority-vote parity)",
+  readSite: "runner/batch/eval/driver.ts",
+  surfaces: BENCH,
+  parse: parseGateBool,
+}
+
+/* ── QUANTA_BENCH_SUBMIT_REVIEW (env-direct, driver.ts via gateOn) ─────────── */
+export const benchSubmitReviewSchema: KnobSchema<boolean> = {
+  id: "bench-submit-review",
+  envKey: "QUANTA_BENCH_SUBMIT_REVIEW",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: submission review (SWE-agent review_on_submit deterministic check). OBSERVE-ONLY verdict over the final captured patch (clean / empty / test-edits) surfaced in the report. The test-revert itself is ALREADY unconditional (sourceOnlyDiff strips test edits on every capture path) — this is the verdict/sentinel layer, reusing isTestFilePath+patchFiles (no re-implementation). Default-OFF ⇒ nothing attached ⇒ byte-identical.",
+  knobDescribe:
+    "Submission review verdict (clean/empty/test-edits) on the final patch — observe-only sentinel over the unconditional test-strip",
+  readSite: "runner/batch/eval/driver.ts",
+  surfaces: BENCH,
+  parse: parseGateBool,
+}
+
+/* ── QUANTA_BENCH_EFFORT_LADDER (env-direct int, adaptive-escalation) ───────── */
+// MIRROR of `resolveEffortLadderLimits`: positive integer tier turns it on; 0 /
+// negative / non-integer / unset ⇒ off (the controller uses DEFAULT limits).
+const parseEffortLadder = (raw: string | undefined): number | undefined => {
+  const s = raw?.trim()
+  if (s === undefined || s === "" || !/^\d+$/.test(s)) return undefined
+  const tier = Number.parseInt(s, 10)
+  return tier >= 1 ? tier : undefined
+}
+export const benchEffortLadderSchema: KnobSchema<number | undefined> = {
+  id: "bench-effort-ladder",
+  envKey: "QUANTA_BENCH_EFFORT_LADDER",
+  kind: "int",
+  domain: { range: [1, 4] },
+  default: undefined,
+  describe:
+    "Bench: effort ladder (progressive-effort absorption) for the v5 adaptive-escalation loop. A positive TIER raises the bounded-loop ceiling (DEFAULT 4 steps / 2 expensive) by +2 steps / +1 expensive / +1 per-action per tier (clamped to tier 4), letting the existing action ladder climb to the heavy rails on hard instances. Reuses the controller's `limits` seam — no new loop. Default-OFF / tier 0 ⇒ DEFAULT limits ⇒ byte-identical.",
+  knobDescribe:
+    "Effort ladder tier: raise the adaptive-escalation bounded-loop ceiling (more headroom for the heavy rails)",
+  unit: "tier",
+  source: "progressive-effort / effort-ladder (competitor-strategy absorption)",
+  readSite: "runner/batch/eval/adaptive-escalation/effort-ladder.ts",
+  surfaces: BENCH,
+  parse: parseEffortLadder,
+}
+
+/* ── QUANTA_BENCH_LOCATION_FANOUT (bench posture, repair driver fanout) ────── */
+export const benchLocationFanoutSchema: KnobSchema<boolean> = {
+  id: "bench-location-fanout",
+  envKey: "QUANTA_BENCH_LOCATION_FANOUT",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: multi-location-set fanout (Agentless §4.2 absorption). With repair-breadth B>1, seed each breadth candidate to LEAD at a distinct ranked-localizer file (location diversity instead of B resamples of the top-1 site). Reuses the repair-breadth fork machinery + the localizer's ranked files; pure rotation, no-leak. Needs B>1 + ≥2 localized files. Default-OFF ⇒ candidates share the base seed ⇒ byte-identical.",
+  knobDescribe:
+    "Multi-location-set fanout: each breadth candidate leads at a distinct ranked file (Agentless edit-per-location)",
+  readSite: "runner/batch/eval/knobs-bench.ts",
+  surfaces: BENCH,
+  source:
+    "Agentless edit-per-location absorption (preset-addressable multi-file repair breadth diversity)",
+  parse: parseGateBool,
+}
+
+/* ── QUANTA_BENCH_LLM_SELECT (env-direct enum, acceptance-llm-rerank-wire.ts) ── */
+// MIRROR of `resolveLlmSelectMode` (the read site): trim+lowercase, only the two
+// exact modes turn it on; everything else (incl. "1"/"on") is OFF.
+type LlmSelectModeKnob = "chooser" | "reviewer"
+const parseLlmSelect = (raw: string | undefined): LlmSelectModeKnob | undefined => {
+  const s = raw?.trim().toLowerCase()
+  if (s === "chooser") return "chooser"
+  if (s === "reviewer") return "reviewer"
+  return undefined
+}
+export const benchLlmSelectSchema: KnobSchema<LlmSelectModeKnob | "off"> = {
+  id: "bench-llm-select",
+  envKey: "QUANTA_BENCH_LLM_SELECT",
+  kind: "enum",
+  domain: { enum: ["chooser", "reviewer"] },
+  // "off" is the sentinel unset-disposition (parse never RETURNS it); see issue-hint.
+  default: "off",
+  describe:
+    "Bench: LLM soft-rerank over the acceptance admissible survivors (SWE-agent Chooser/Score retry-loop absorption). chooser = show all admissible diffs, model picks the best index; reviewer = per-candidate rubric score, highest wins. Re-ranks WITHIN the deterministic admissible set only (never-veto) and fails open to the vote winner. Needs the acceptance selector active. Default-OFF ⇒ byte-identical.",
+  knobDescribe:
+    "LLM soft-rerank of acceptance candidates (chooser/reviewer) — never-veto, fail-open; ~N× one-shot LLM cost",
+  unit: "mode",
+  source: "SWE-agent ScoreRetryLoop / ChooserRetryLoop (competitor-strategy absorption)",
+  readSite: "runner/batch/eval/acceptance-llm-rerank-wire.ts",
+  surfaces: BENCH,
+  parse: parseLlmSelect,
+}
+
 /* ── QUANTA_BENCH_PROTECT_TESTS (env-direct kill-switch, driver.ts) ────────── */
 export const benchProtectTestsSchema: KnobSchema<boolean> = {
   id: "bench-protect-tests",

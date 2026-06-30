@@ -103,7 +103,10 @@ const toTask = (raw: Record<string, unknown>): SwebenchTask | null => {
  * malformed lines are skipped, rows missing any required field are skipped.
  * Never throws.
  */
-export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
+export const parseSwebenchJsonl = (
+  text: string,
+  normalize: (raw: Record<string, unknown>) => Record<string, unknown> = (r) => r,
+): SwebenchTask[] => {
   const out: SwebenchTask[] = []
   for (const line of text.split("\n")) {
     const trimmed = line.trim()
@@ -111,7 +114,7 @@ export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
     try {
       const row = JSON.parse(trimmed) as unknown
       if (typeof row !== "object" || row === null) continue
-      const task = toTask(row as Record<string, unknown>)
+      const task = toTask(normalize(row as Record<string, unknown>))
       if (task) out.push(task)
     } catch {
       // skip malformed line
@@ -119,6 +122,30 @@ export const parseSwebenchJsonl = (text: string): SwebenchTask[] => {
   }
   return out
 }
+
+/**
+ * Normalize a SWE-bench **Pro** (ScaleAI) row into the canonical raw shape this
+ * module's downstream readers expect (RFC jun-29). Pro ships lowercase
+ * `fail_to_pass`/`pass_to_pass`; {@link synthesizeTestCmd}/{@link parseTestNameList}
+ * read the UPPERCASE official keys — without this mapping a Pro row yields the
+ * `testCmd:"true"` no-op (fake-green risk). Originals + Pro's extra fields
+ * (`dockerhub_tag`, `repo_language`, `before_repo_set_cmd`,
+ * `selected_test_files_to_run`) are preserved; {@link toInstance} carries the
+ * image tag + language onward. Pure — the Pro profile passes this as the
+ * `parseSwebenchJsonl` normalizer.
+ */
+export const normalizeProRow = (raw: Record<string, unknown>): Record<string, unknown> => ({
+  ...raw,
+  // Guard `!= null` (not just `!== undefined`) — a JSON `null` fail_to_pass (common in
+  // datasets) would otherwise copy `FAIL_TO_PASS: null`, which decodes to the no-op
+  // testCmd silently (audit #8). `!= null` excludes both null and undefined.
+  ...(raw.FAIL_TO_PASS === undefined && raw.fail_to_pass != null
+    ? { FAIL_TO_PASS: raw.fail_to_pass }
+    : {}),
+  ...(raw.PASS_TO_PASS === undefined && raw.pass_to_pass != null
+    ? { PASS_TO_PASS: raw.pass_to_pass }
+    : {}),
+})
 
 /** Check out `ref` in `destDir`, deepening a shallow clone once on failure.
  *  Throws a precise Error (with `label` for context) on any git failure. */
@@ -346,6 +373,17 @@ const djangoRuntestsLabel = (name: string): string => {
  *  path. The FAIL_TO_PASS names are the grading answer key (existing oracle
  *  behavior) and are appended here. */
 export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
+  // Pro non-Python (RFC jun-29 / audit #7): repo_language go/js/ts/java does NOT run
+  // under pytest — synthesizing `uv run pytest` for a Go repo is a fake-grade vector
+  // (verdict.ts would run it on a non-Python tree). Return the `"true"` no-op so the
+  // harness-required guard fires (verdict.ts refuses to fake-grade swebench without the
+  // authoritative harness). Verified/Live carry no repo_language ⇒ unaffected.
+  const lang =
+    typeof raw.repo_language === "string" ? raw.repo_language.trim().toLowerCase() : undefined
+  // Treat every python spelling as python (audit EDGE-2): `python3`, `py`, `cpython`,
+  // `python 3.11` must NOT be fenced as non-python (that would no-op a gradeable repo).
+  const isPython = lang === undefined || lang === "" || lang.startsWith("python") || lang === "py" || lang === "cpython"
+  if (!isPython) return "true"
   const names = decodeTestNameList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
   const repo = typeof raw.repo === "string" ? raw.repo : ""
@@ -435,6 +473,9 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
   const goldPatch = str(task.raw.patch)
   const passToPass = parseTestNameList(task.raw, "PASS_TO_PASS")
   const version = typeof task.raw.version === "string" ? task.raw.version : undefined
+  // Pro-only carry (RFC jun-29) — absent for Verified/Live ⇒ byte-identical.
+  const dockerhubTag = str(task.raw.dockerhub_tag)
+  const repoLanguage = str(task.raw.repo_language)
   return {
     id: task.instanceId,
     repoPath,
@@ -450,6 +491,8 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
         ? { environmentSetupCommit: task.environmentSetupCommit }
         : {}),
       ...(passToPass !== undefined ? { passToPass } : {}),
+      ...(dockerhubTag !== undefined ? { dockerhubTag } : {}),
+      ...(repoLanguage !== undefined ? { repoLanguage } : {}),
     },
   }
 }

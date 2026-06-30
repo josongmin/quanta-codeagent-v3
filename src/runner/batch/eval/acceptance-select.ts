@@ -20,13 +20,32 @@
  * never called ⇒ no repro/regression exec ⇒ byte-identical. No hidden field read.
  */
 
-import { type RerankCandidate, type RerankResult, rerankSelect } from "./acceptance-rerank"
+import {
+  type RerankCandidate,
+  type RerankResult,
+  rerankSelect,
+  selectAdmissible,
+} from "./acceptance-rerank"
+import type { CandidateLocationFocus } from "./location-set-fanout"
 
 export interface AcceptanceCandidate {
   /** The patch we would submit if this candidate wins. */
   readonly patch: string
   /** Normalized vote key (AST-canonical upstream; raw patch an acceptable fallback). */
   readonly patchKey: string
+  /** jun-30 SOTA++ per-candidate execution evidence for the LLM soft-reranker
+   *  (optional). The agent's last verification command. Absent ⇒ not forwarded. */
+  readonly verifyCmd?: string
+  /** REDACTED tail of this candidate's validator failure output (already passed
+   *  through {@link redactReviewerEvidence} by the adapter — this orchestrator
+   *  only forwards it). Absent ⇒ not forwarded. */
+  readonly failureOutput?: string
+  /** REDACTED agent action trace (already bounded+redacted by the adapter — this
+   *  orchestrator only forwards it). Absent ⇒ not forwarded. */
+  readonly actionSummary?: string
+  /** Typed lead-file/lead-symbol focus this candidate was seeded from. Optional:
+   *  only breadth-location fanout candidates carry it. */
+  readonly locationFocus?: CandidateLocationFocus
 }
 
 /** Injected acceptance oracles. Each is OPTIONAL — its presence turns on the
@@ -41,13 +60,35 @@ export interface AcceptanceOracles {
 export interface AcceptanceScored extends RerankCandidate {
   /** Position in the input candidate list (stable join key for telemetry). */
   readonly index: number
+  /** jun-30 SOTA++ per-candidate execution evidence, carried through from the
+   *  input candidate so the LLM soft-reranker can see it. Optional. */
+  readonly verifyCmd?: string
+  /** REDACTED failure-output tail (see {@link AcceptanceCandidate.failureOutput}). */
+  readonly failureOutput?: string
+  /** REDACTED agent action trace (see {@link AcceptanceCandidate.actionSummary}). */
+  readonly actionSummary?: string
+  /** Typed candidate-local breadth focus (lead file / symbol), if any. */
+  readonly locationFocus?: CandidateLocationFocus
 }
 
 export interface AcceptanceResult {
   readonly selected: RerankResult
   /** Per-candidate verdicts (score-once), in input order — for report / RCA. */
   readonly scored: readonly AcceptanceScored[]
+  /** Set when an injected LLM soft-reranker overrode the deterministic vote winner
+   *  (the chosen `index` into `scored`). Absent ⇒ deterministic selection stood. */
+  readonly llmChosenIndex?: number
 }
+
+/**
+ * Optional LLM soft-reranker. Given the ADMISSIBLE scored candidates (the tier
+ * survivors — never the full pool, so it cannot resurrect an inadmissible patch),
+ * returns the chosen candidate's `index` (into the full `scored` array) or null to
+ * keep the deterministic vote winner. FAIL-OPEN: null / throw ⇒ deterministic.
+ */
+export type AcceptanceLlmRerank = (
+  admissible: readonly AcceptanceScored[],
+) => Promise<number | null>
 
 /**
  * Score each candidate ONCE through the available oracles, then select via the
@@ -85,6 +126,7 @@ const safeRegression = async (
 export const selectByAcceptance = async (
   candidates: readonly AcceptanceCandidate[],
   oracles: AcceptanceOracles,
+  llmRerank?: AcceptanceLlmRerank,
 ): Promise<AcceptanceResult> => {
   const scored: AcceptanceScored[] = []
   let index = 0
@@ -97,12 +139,46 @@ export const selectByAcceptance = async (
       patchKey: candidate.patchKey,
       reproPass,
       regressionFailures,
+      ...(candidate.verifyCmd !== undefined ? { verifyCmd: candidate.verifyCmd } : {}),
+      ...(candidate.failureOutput !== undefined ? { failureOutput: candidate.failureOutput } : {}),
+      ...(candidate.actionSummary !== undefined ? { actionSummary: candidate.actionSummary } : {}),
+      ...(candidate.locationFocus !== undefined ? { locationFocus: candidate.locationFocus } : {}),
     })
     index += 1
   }
-  const selected = rerankSelect(scored, {
+  const opts = {
     regression: oracles.runRegression !== undefined,
     reproduction: oracles.runRepro !== undefined,
-  })
+  }
+  const selected = rerankSelect(scored, opts)
+
+  // Optional LLM soft-rerank over the ADMISSIBLE survivors only (never-veto). Runs
+  // only with ≥2 admissible candidates (a single survivor has nothing to choose).
+  // FAIL-OPEN: a null / out-of-set / thrown result keeps the deterministic winner.
+  if (llmRerank !== undefined && selected.tier !== "none") {
+    const admissibleIds = selectAdmissible(scored, opts).ids
+    if (admissibleIds.length >= 2) {
+      const admissible = admissibleIds.map((i) => scored[i] as AcceptanceScored)
+      const admissibleSet = new Set(admissibleIds)
+      let chosen: number | null = null
+      try {
+        chosen = await llmRerank(admissible)
+      } catch {
+        chosen = null
+      }
+      if (chosen !== null && admissibleSet.has(chosen)) {
+        const winner = scored[chosen] as AcceptanceScored
+        // `votes` reports the chosen patch's OWN vote count (candidates sharing its
+        // patchKey), not the deterministic winner's — so the result stays honest
+        // about what was submitted. `llmChosenIndex` flags that the LLM overrode.
+        const votes = scored.filter((s) => s.patchKey === winner.patchKey).length
+        return {
+          selected: { patch: winner.patch, tier: selected.tier, votes },
+          scored,
+          llmChosenIndex: chosen,
+        }
+      }
+    }
+  }
   return { selected, scored }
 }

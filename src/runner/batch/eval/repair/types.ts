@@ -24,6 +24,8 @@ import type {
   SuccessPredicate,
 } from "@/agent/closure"
 import type { VerificationTargetFact } from "@/runner/batch/eval/llm-evidence-packet"
+import type { CandidateFamilyId } from "../candidate-families"
+import type { CandidateLocationFocus } from "../location-set-fanout"
 
 /** Caller-facing config (mirror the optional-feature pattern). */
 export interface RepairConfig {
@@ -142,6 +144,11 @@ export interface RunOnceResult {
    *  When present and `lastVerifyCmd` absent, this is the only runnable repro
    *  fallback the validator may execute. */
   reproCmd?: string
+  /** Bounded ACTION TRACE (`<tool> <target/cmd-head>` per call, most-recent window)
+   *  captured by the stream tap — the agent's what-it-did sequence for the LLM
+   *  reviewer (SWE-agent reviewer parity). Tool names + targets only, no observation
+   *  bodies. Telemetry/selection-evidence only; the validator never reads it. */
+  actionTrace?: readonly string[]
 }
 
 /** Minimal shell-exec port for the validator. SAME shape as `runner.ts`'s
@@ -237,6 +244,17 @@ export interface RepairCandidateOutcome {
   /** The SAME validator (re-)run against this candidate's patched fork. Selection
    *  reads ONLY this — never a gold/hidden field. */
   readonly validator: ValidatorResult
+  /** Typed structural family this candidate was derived against, when the clean
+   *  repair-breadth path could recover one from public source evidence. */
+  readonly familyId?: CandidateFamilyId
+  /** Remaining family owner files this candidate still misses. `[]` means the
+   *  candidate satisfied the typed family coverage postcondition; absent means no
+   *  typed family was derived for this candidate. Observe/tie-break only. */
+  readonly familyCoverageMissing?: readonly string[]
+  /** Typed location focus this breadth candidate was seeded from, when a
+   *  location/symbol fanout generated it. Observe/selection evidence only:
+   *  never submit authority. */
+  readonly locationFocus?: CandidateLocationFocus
   /** ADOPT this candidate as the continuation point: the driver makes the MAIN
    *  sandbox reflect this candidate's cumulative tree (reset-to-base + apply its
    *  diff) so the next repair round AND the final grader-bound capture see it.

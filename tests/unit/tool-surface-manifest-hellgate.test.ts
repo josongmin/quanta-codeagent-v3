@@ -20,13 +20,15 @@ import {
   ALL_MANIFEST_TOOL_NAMES,
   BASE_TOOL_NAMES,
   buildDefaultTools,
+  buildTerminalTools,
   entryToolNames,
   GATED_TOOLS,
   seedEnvVarsForSurface,
-  type Tool,
   TOOL_SURFACES,
+  type Tool,
 } from "@/tool"
 import { objectiveTools } from "@/tool/objective"
+import { createTmuxAdapter } from "@/tool/pty"
 import { subagentMailboxTools } from "@/tool/subagent-mailbox"
 
 const names = (tools: readonly Tool[]): string[] => tools.map((t) => t.name).sort()
@@ -62,6 +64,35 @@ describe("tool-surface manifest — no orphans / no dups", () => {
     expect(names(buildDefaultTools())).not.toContain("apply_patch_structured")
     expect(names(buildDefaultTools({ structuredPatch: true }))).toContain("apply_patch_structured")
   })
+})
+
+describe("tool-surface manifest — terminal:'on' rows are BUILD-PROVEN by buildTerminalTools", () => {
+  // Closes the drift-guard blind spot (R1 audit): the full-universe scan proves a `name:"x"`
+  // literal is CATALOGUED, but not that any builder EMITS it. A manifest row claiming
+  // `default.terminal === "on"` must be produced by the real terminal builder — else the row
+  // is a lie. Wire BOTH ports so every terminal-default tool can mint.
+  const terminalBuilt = new Set(
+    buildTerminalTools({
+      containerExec: { exec: async () => ({ stdout: "", stderr: "", code: 0 }) },
+      ptySession: createTmuxAdapter({ exec: { run: async () => ({ ok: true, stdout: "" }) } }),
+    }).map((t) => t.name),
+  )
+  const terminalRows = GATED_TOOLS.filter((e) => e.default.terminal === "on")
+  // Anti-vacuum: a loop that generates zero tests passes silently. Pin the row count + built size
+  // so deleting the terminal:on defaults (or the builder) trips THIS non-looped assertion.
+  test("there ARE terminal:on rows and the builder emits them all (not a vacuous loop)", () => {
+    expect(terminalRows.length).toBeGreaterThan(0)
+    const expected = terminalRows.flatMap((e) => [...entryToolNames(e)])
+    expect(expected.length).toBeGreaterThanOrEqual(7) // container_exec + 6 pty_*
+    for (const n of expected) expect(terminalBuilt.has(n)).toBe(true)
+  })
+  for (const entry of terminalRows) {
+    for (const toolName of entryToolNames(entry)) {
+      test(`buildTerminalTools emits "${toolName}" (manifest row claims terminal:on)`, () => {
+        expect(terminalBuilt.has(toolName)).toBe(true)
+      })
+    }
+  }
 })
 
 describe("tool-surface manifest — GATED factories match the manifest two-way", () => {

@@ -64,7 +64,11 @@ const mkInstance = (overrides: Partial<Instance> = {}): Instance => ({
 const uvRunIndex = (argv: readonly string[]): number =>
   argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
 
-const ENV_KEYS = ["QUANTA_BENCH_REPRO_TEST", "QUANTA_BENCH_ISSUE_HINT"] as const
+const ENV_KEYS = [
+  "QUANTA_BENCH_REPRO_TEST",
+  "QUANTA_BENCH_ISSUE_HINT",
+  "QUANTA_BENCH_REPRO_IMAGE_EXEC",
+] as const
 
 const snapshot = (): Map<string, string | undefined> => {
   const m = new Map<string, string | undefined>()
@@ -156,6 +160,41 @@ describe("prepareReproTest", () => {
     expect(sel).not.toBeNull()
     expect(sel?.selected).toBe(STUB_RETURNED)
     expect(sel?.reproducedCount).toBe(3)
+  })
+
+  test("jun-29 regression: installed-success telemetry PRESERVES grounding (not dropped on rebuild)", async () => {
+    // The bug: prepareSelectionReproSources / installReproTestHint rebuild a fresh
+    // {installed:true,...} telemetry on the reproduced path, dropping the grounding
+    // field that prepareReproTestDetailed attached via withG → the A/B read None.
+    const out = await prepareSelectionReproSources(
+      mkInstance(),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 3,
+        verifySelectRepro: "positive",
+        reproTestK: 3,
+        reproExecTimeoutMs: undefined,
+        adversarialRepro: false,
+        pairedControl: false,
+        reproGrounding: true,
+      },
+      {
+        execute: async ({ tests }: { tests: readonly string[] }) => reproducedSamples(tests),
+        writeFile: async () => {},
+        reproGrounding: true,
+        groundingSourceFiles: ["pkg/foo.py"],
+        groundingPorts: {
+          relatedTests: async () => [
+            { path: "tests/test_x.py", text: "import pkg\ndef test_a():\n    assert pkg" },
+          ],
+        },
+      },
+    )
+    expect(out.telemetry?.installed).toBe(true)
+    const g = (out.telemetry as { grounding?: { engaged: boolean; exemplars: number } }).grounding
+    expect(g?.engaged).toBe(true)
+    expect(g?.exemplars).toBe(1)
   })
 
   test("LLM stream failure ⇒ samples all '' ⇒ null selection", async () => {
@@ -259,6 +298,78 @@ describe("prepareReproTest", () => {
     expect(seen[0]).toContain("PYTHONNOUSERSITE=1")
     expect(seen[0]?.[seen[0].length - 3]).toBe("python")
     expect(seen[0]?.[seen[0].length - 2]).toBe("-s")
+  })
+
+  test("WIRING: Pro python + dockerhubTag + REPRO_IMAGE_EXEC=1 ⇒ repro runs inside the instance image", async () => {
+    // Phase 2b image backend is DEFAULT-OFF (gated); this opt-in arm asserts the
+    // image command shape when the operator enables QUANTA_BENCH_REPRO_IMAGE_EXEC.
+    process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC = "1"
+    const seen: (readonly string[])[] = []
+    await prepareReproTestDetailed(
+      mkInstance({
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      }),
+      "/tmp/sb",
+      1,
+      {
+        llm: new StubLLM(),
+        writeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "Issue reproduced\n", stderr: "" }
+        },
+      },
+    )
+    expect(seen[0]?.slice(0, 10)).toEqual([
+      "docker",
+      "run",
+      "--rm",
+      "-v",
+      "/tmp/sb:/tmp/sb",
+      "-w",
+      "/tmp/sb",
+      "jefzda/sweap-images:qutebrowser.demo",
+      "python",
+      "-s",
+    ])
+    expect(seen[0]?.[10]).toContain("/tmp/sb/__repro_0_")
+    expect(seen[0]).not.toContain("--with")
+  })
+
+  test("WIRING: Pro python + dockerhubTag but gate UNSET ⇒ HOST uv (Phase 2b default-OFF, byte-identical)", async () => {
+    // REGRESSION GUARD: without QUANTA_BENCH_REPRO_IMAGE_EXEC the image backend must
+    // NOT engage — Pro repro stays on the proven host path (the RFC defers image
+    // parity to a box). A default `docker run` would silently confound every Pro run.
+    const seen: (readonly string[])[] = []
+    await prepareReproTestDetailed(
+      mkInstance({
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      }),
+      "/tmp/sb",
+      1,
+      {
+        llm: new StubLLM(),
+        writeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "Issue reproduced\n", stderr: "" }
+        },
+      },
+    )
+    expect(seen[0]?.[0]).not.toBe("docker")
+    expect(seen[0]?.join(" ")).not.toContain("jefzda/sweap-images")
   })
 
   test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uv-run)", async () => {
@@ -422,6 +533,42 @@ describe("prepareReproTest", () => {
     expect(out.hint).toContain("--with-editable .")
     expect(out.hint).toContain("python -s reproduce_issue.py")
     expect(out.hint).not.toContain("`python reproduce_issue.py`")
+  })
+
+  test("selection-only Pro python repro hint uses the image command when REPRO_IMAGE_EXEC=1", async () => {
+    process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC = "1"
+    const out = await prepareSelectionReproSources(
+      mkInstance({
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      }),
+      "/tmp/sb",
+      new StubLLM(),
+      {
+        verifySelectN: 1,
+        verifySelectRepro: "positive",
+        reproTestK: undefined,
+        reproExecTimeoutMs: undefined,
+        adversarialRepro: false,
+        pairedControl: false,
+        reproGrounding: false,
+      },
+      {
+        generate: async () => [STUB_SOURCE],
+        execute: async ({ tests }) => reproducedSamples(tests),
+        writeFile: async () => {},
+      },
+    )
+
+    expect(out.hint).toContain("docker run --rm")
+    expect(out.hint).toContain("jefzda/sweap-images:qutebrowser.demo")
+    expect(out.hint).toContain("python -s reproduce_issue.py")
+    expect(out.hint).not.toContain("uv run")
   })
 
   test("selection-only repro prep stays inert when verify-select repro is off", async () => {

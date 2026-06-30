@@ -200,6 +200,13 @@ export const buildAnthropicMessagesRequest = (
   const toolNames = input.tools.map((t) => t.name)
   const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
   const tier = normalizeAnthropicServiceTier(serviceTier)
+  // Anthropic REJECTS `temperature` != 1 whenever extended thinking is active
+  // (`{type:"enabled"|"adaptive"}`) — HTTP 400 "temperature may only be set to 1
+  // when thinking is enabled". A repair-breadth fanout lane that sampled at 0.8
+  // would 400 every candidate on a thinking model. Suppress the field when
+  // thinking is active so the request defaults to the required temperature=1
+  // (an explicitly `disabled`/absent thinking turn keeps the caller's value).
+  const thinkingActive = input.thinking !== undefined && input.thinking.type !== "disabled"
   return {
     model,
     max_tokens: maxTokens,
@@ -224,5 +231,14 @@ export const buildAnthropicMessagesRequest = (
       input_schema: t.input_schema as Anthropic.Tool.InputSchema,
     })),
     ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
+    // Per-call sampling temperature (repair-breadth fanout). Present ⇒ spread
+    // Anthropic's `temperature` field; absent (or thinking active, see above) ⇒
+    // OMIT the key entirely (byte-identical to the pre-feature wire — same
+    // conditional-spread pattern as `service_tier`/`tool_choice` above).
+    // Anthropic Messages accepts `temperature` (0–1) on the surface we drive; the
+    // caller owns the value — except under active thinking, which forces 1.
+    ...(input.temperature !== undefined && !thinkingActive
+      ? { temperature: input.temperature }
+      : {}),
   }
 }

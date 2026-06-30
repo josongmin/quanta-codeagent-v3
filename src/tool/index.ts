@@ -10,6 +10,7 @@ import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
 import { codeCellTool } from "./codemode-tool"
 import { createCommunicateUpdateTool } from "./communicate-update"
+import { containerExecTool } from "./container-exec"
 import { coverageCheckTool } from "./coverage_check"
 import { makeDebugInspectTool } from "./debug/tool"
 import type { DefaultToolPorts } from "./default-tool-ports"
@@ -928,6 +929,23 @@ const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
  */
 export const defaultTools: Tool[] = buildDefaultTools()
 
+/**
+ * The `terminal` ToolSurface registry (RFC jun-29, spec S2) — a terminal
+ * operator drives a live container terminal, so its tool set is the `pty_*` family ONLY and
+ * deliberately does NOT inherit the BASE repo-edit/host-exec tools ({@link buildBaseDefaultTools}
+ * = read/write/edit/apply_patch/bash/grep/test_runner…). Assembled by an EXPLICIT builder
+ * (not `buildDefaultTools` with surface-default overrides) precisely so BASE can never leak in.
+ * Container-bound exec is enforced by wiring `ports.ptySession` over a container-bound
+ * {@link ./pty/docker-exec-tmux} TmuxExec (host bash is never registered — spec S3). No port ⇒
+ * empty (fail-safe; never falls back to the BASE set).
+ */
+export const buildTerminalTools = (ports: DefaultToolPorts = {}): Tool[] => [
+  // one-shot container exec (the workhorse — exit-code completion, non-interactive steps)
+  ...(ports.containerExec !== undefined ? [containerExecTool(ports.containerExec)] : []),
+  // interactive tmux pane (vim/REPL/TUI)
+  ...(ports.ptySession !== undefined ? ptyTools(ports.ptySession) : []),
+]
+
 // jun-03 — tool-surface SSOT (managed catalog of the LLM tool-access axis:
 // gate + per-surface default). Companion to the feature catalog; pinned by
 // tests/unit/tool-surface-manifest-hellgate.test.ts (two-way drift guard).
@@ -946,3 +964,6 @@ export {
   type ToolSurface,
   type ToolSurfaceEntry,
 } from "./surface/manifest"
+// Capability guidance the terminal entry-point injects alongside the surface tools (RFC §4.5 /
+// §13 #5 — closes the #1 failure, exe-not-in-PATH). General operator habits, no answer-key.
+export { TERMINAL_OPERATOR_GUIDE, terminalOperatorGuide } from "./terminal-capability-guide"

@@ -5,6 +5,8 @@
  * `.Z`/`.br` class). Everything else (owner-outside, file count) is telemetry.
  */
 
+import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
+
 export interface PatchHygieneReport {
   patchFileCount: number
   addedFiles: string[]
@@ -13,7 +15,11 @@ export interface PatchHygieneReport {
   violation: boolean
 }
 
-export const HYGIENE_ALLOWLIST: readonly string[] = ["reproduce_issue.py"]
+// The canonical repro scaffold is a bench artifact, not a submitted edit — allowlisted from the
+// stray-added-file violation. Sourced from the repro-scaffold SSOT (RFC Phase 1b) so it tracks
+// the rail's naming. (Per-sample `__repro_N_*.py` never reach the SUBMITTED diff — hygiene runs
+// on the cumulative patch, which only ever carries the canonical name.)
+export const HYGIENE_ALLOWLIST: readonly string[] = [REPRO_CANONICAL_BASENAME]
 
 const JUNK_EXT = /\.(Z|br|orig|rej|bak|swp|tmp)$/i
 const JUNK_NAME = /(^|\/)test\.html\./

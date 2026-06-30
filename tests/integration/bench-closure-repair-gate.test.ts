@@ -312,6 +312,50 @@ describe("CR-2 false-green killed (driver level)", () => {
     ).toBe(false)
   })
 
+  test("(a'') owner-test primary rail with observed base-red proof ⇒ verify + runRepair true", () => {
+    const session = buildClosureSession({
+      problemStatement: "Fix foo in src/foo.py.",
+      stage1Files: [{ file: "src/foo.py", score: 5 }],
+      ownerNearTests: ["python -m pytest -q tests/test_foo.py"],
+      ownerNearPrimaryBaseValidatedRed: true,
+      posture: { lspNav: true, primaryRail: true, faultEvidence: false },
+    })
+    expect(session.primaryRailStep?.kind).toBe("owner-test")
+    expect(session.bundle.plan.primaryRailBaseValidatedRed).toBe(true)
+    expect(session.bundle.gate.action).toBe("verify")
+    expect(
+      benchShouldRunRepairPhase({
+        eligible: true,
+        primaryRailEnabled: true,
+        gateAction: session.bundle.gate.action,
+        primaryRailStep: session.primaryRailStep,
+        verificationPlan: session.bundle.plan,
+      }),
+    ).toBe(true)
+  })
+
+  test("(a''') module-smoke primary rail with observed base-red proof ⇒ verify + runRepair true", () => {
+    const session = buildClosureSession({
+      problemStatement: PROBLEM,
+      stage1Files: [{ file: "math.js", score: 1 }],
+      touchedModuleSmoke: [ADD_CHECK],
+      moduleSmokePrimaryBaseValidatedRed: true,
+      posture: { lspNav: false, primaryRail: true, faultEvidence: false },
+    })
+    expect(session.primaryRailStep?.kind).toBe("module-smoke")
+    expect(session.bundle.plan.primaryRailBaseValidatedRed).toBe(true)
+    expect(session.bundle.gate.action).toBe("verify")
+    expect(
+      benchShouldRunRepairPhase({
+        eligible: true,
+        primaryRailEnabled: true,
+        gateAction: session.bundle.gate.action,
+        primaryRailStep: session.primaryRailStep,
+        verificationPlan: session.bundle.plan,
+      }),
+    ).toBe(true)
+  })
+
   test("(b) false-green killer: agent verify GREEN but RAIL RED ⇒ round NOT cleared (prod validate)", async () => {
     const AGENT_CMD = "node -e 'process.exit(0)'" // the agent's own (green) verify
     const RAIL_CMD = `python "/repro.py"` // the typed primary rail

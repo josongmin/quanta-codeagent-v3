@@ -36,12 +36,13 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mirrorReportToSsot } from "@/runner/batch/report"
-import { errMessage, foldGroundingReceipts } from "@/shared"
+import { foldGroundingReceipts } from "@/shared"
 import { benchHome } from "../corpus"
 import { presetRequiresLiveLspGrounding } from "../preset"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
+import { resolveSwebenchNamespace } from "./box-session/ec2-lifecycle"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
 import {
@@ -149,6 +150,18 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
   // that mixes many concurrent runs. Without forwarding it the box's spans carry
   // no run id and the operator's run-link shows nothing.
   "QUANTA_OTEL_RUN_ID",
+  // jun-29 (RFC multi-dataset): buildBenchCommand hardcodes QUANTA_SWEBENCH_NAMESPACE
+  // =swebench and defaults dataset_name to Verified. Live/Pro grade against a DIFFERENT
+  // HF dataset + Docker namespace (Live: SWE-bench-Live/SWE-bench-Live + `starryzhang`).
+  // These are appended AFTER the hardcoded assignment in the env prefix, so the shell's
+  // last-wins override applies — a Live/Pro launch reaches the box with no per-dataset
+  // fork. Absent ⇒ box stays on the Verified default (byte-identical for Verified runs).
+  "QUANTA_SWEBENCH_NAMESPACE",
+  "QUANTA_SWEBENCH_DATASET_NAME",
+  // The box's own `datasetFamily()` (index.ts) reads this to pick the Live grading dataset
+  // default + the Pro/Live parse path. Without forwarding it, a `--dataset-family live` launch
+  // reaches the box as "verified" → grades Live ids against the Verified dataset (audit r2 BUG#1).
+  "QUANTA_SWEBENCH_DATASET_FAMILY",
 ])
 
 /**
@@ -301,6 +314,34 @@ const buildResumePrelaunchStep = (forwardedBenchEnv: string): string => {
   )
 }
 
+/**
+ * Build the Pro-only `KEY=val ` env prefix that points the on-box Scale verifier at
+ * the harness clone + venv python + shipped dataset, and forwards the operator's
+ * DockerHub-username / model-name overrides. PURE — deterministic over the given env.
+ *
+ * Returns "" for any non-Pro family ⇒ byte-identical to the Verified/Live path.
+ *
+ * WHY the override forward exists as a tested seam: QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
+ * and QUANTA_SWEBENCH_PRO_MODEL_NAME are read by buildProGradeVerifier (apps/bench/index.ts)
+ * to override the verifier defaults (jefzda / quanta). They are NOT `QUANTA_BENCH_*`-prefixed
+ * and are NOT in FORWARD_EXTRA_ENV, so without this they are SILENTLY DROPPED on the box — a
+ * fork whose Pro images live under a different DockerHub user would have every image-pull fail
+ * (all-infra) while the local operator's override is ignored. Forwarded ONLY when set so an
+ * unset var stays absent (byte-identical).
+ */
+export const buildProEnv = (env: NodeJS.ProcessEnv, datasetPath: string): string => {
+  if ((env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() !== "pro") return ""
+  let proEnv =
+    `QUANTA_SWEBENCH_PRO_HARNESS_DIR="$HOME/swebench-pro" ` +
+    `QUANTA_SWEBENCH_PRO_PYTHON_BIN="$HOME/swebench-pro-venv/bin/python" ` +
+    `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH=${shq(datasetPath)} `
+  if (env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)
+    proEnv += `QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME=${shq(env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)} `
+  if (env.QUANTA_SWEBENCH_PRO_MODEL_NAME)
+    proEnv += `QUANTA_SWEBENCH_PRO_MODEL_NAME=${shq(env.QUANTA_SWEBENCH_PRO_MODEL_NAME)} `
+  return proEnv
+}
+
 const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string => {
   const idsFlag =
     params.instanceIds && params.instanceIds.length > 0
@@ -310,6 +351,11 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
     ? `QUANTA_BENCH_RECORD_TRAJECTORY="${paths.trajectory}" `
     : ""
   const resumePrelaunch = buildResumePrelaunchStep(params.forwardedBenchEnv)
+  // Pro (RFC jun-29): point the Scale verifier at the on-box harness clone + its venv python +
+  // the shipped dataset (which doubles as the Scale --raw_sample_path), and forward the operator's
+  // DockerHub-username / model-name overrides. Empty for Verified/Live ⇒ byte-identical. The
+  // verifier reads these (buildProGradeVerifier).
+  const proEnv = buildProEnv(process.env, paths.dataset)
   return (
     // FORK-STORM GUARD (jun-28): on some repos (measured: pydata/xarray) the
     // model's repo commands run via `uv run` leaked ~4700 live `uv` processes
@@ -324,7 +370,11 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
     `QUANTA_BENCH_PRESET=${shq(params.preset)} QUANTA_PROVIDER=chatgpt-oauth QUANTA_SWEBENCH_PYTHON=1 ` +
     `QUANTA_PREFS_HOME="$HOME/.quanta" ` +
     `QUANTA_SWEBENCH_PYTHON_BIN="$HOME/swebench-python" ` +
-    `QUANTA_SWEBENCH_NAMESPACE=swebench QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
+    // Live publishes prebuilt images under `starryzhang`, not `swebench` — derive the
+    // namespace from the dataset (parallel to the grading-shim pip-spec). A forwarded
+    // QUANTA_SWEBENCH_NAMESPACE (operator override) still comes after and last-wins.
+    `QUANTA_SWEBENCH_NAMESPACE=${shq(resolveSwebenchNamespace(process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "", undefined, process.env.QUANTA_SWEBENCH_DATASET_FAMILY))} QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
+    proEnv +
     params.forwardedBenchEnv +
     trajectoryRecordEnv +
     `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ${paths.dataset}${idsFlag} ` +
@@ -426,10 +476,8 @@ const runChunkBench = async (args: {
 const fetchRemoteFile = async (ssh: BoxSession["ssh"], remotePath: string): Promise<SpawnResult> =>
   await ssh(`cat ${remotePath} 2>/dev/null`)
 
-const fetchRemoteCommand = async (
-  ssh: BoxSession["ssh"],
-  command: string,
-): Promise<SpawnResult> => await ssh(command)
+const fetchRemoteCommand = async (ssh: BoxSession["ssh"], command: string): Promise<SpawnResult> =>
+  await ssh(command)
 
 const saveLocalArtifact = (
   localPath: string,
@@ -774,6 +822,7 @@ export const gradeChunkOnBox = async (
 
 export { PHANTOM_DEPS, stripToAccessToken } from "./box-session/auth"
 export {
+  assertProDatasetGradeable,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,

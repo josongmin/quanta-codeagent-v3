@@ -70,6 +70,10 @@ const RULES: readonly Rule[] = [
       "apps/cli/fetch-rules-wire.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
+      "apps/bench/run-main.ts":
+        "Bench local-run composition root extracted verbatim from apps/bench/index.ts (already allowlisted) — owns the same dotenv shim + QUANTA_BENCH_* / QUANTA_SWEBENCH_* launch-time reads; downstream logic receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/bench/run-args.ts":
+        "Bench CLI-arg parsing concern extracted verbatim from apps/bench/run-main.ts — the tiny dotenv shim (loadEnv writes process.env before any runtimeConfig() read) + the QUANTA_BENCH_CONCURRENCY launch-time read; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "runner/batch/eval/driver.ts":
@@ -84,6 +88,20 @@ const RULES: readonly Rule[] = [
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count.",
       "apps/bench/remote/box-session/types.ts":
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_INSTANCE_TYPE) read in the provision-config defaults; same bench-only opt-in env posture as the sibling ec2-lifecycle.ts. Downstream gets the resolved instance type.",
+      "apps/bench/remote/box-session.ts":
+        "Bench full-remote box-LAUNCH command composition — resolves the dataset family/namespace (QUANTA_SWEBENCH_DATASET_FAMILY / _DATASET_NAME, RFC jun-29 Pro verifier env) at box-provision time to assemble the on-box run command string; same bench-only opt-in launch posture as the sibling box-session/ec2-lifecycle.ts + box-session/types.ts entries. The box receives a resolved command, not live env.",
+      "apps/bench/remote/pool.ts":
+        "Bench full-remote pool composition root — `resolveDatasetFamily(undefined, process.env)` resolves the dataset family at pool-launch; same bench-only opt-in launch posture as box-session/ec2-lifecycle.ts. Downstream chunks receive the resolved family.",
+      "apps/bench/remote/pool/worker.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param of `resumeForwardEnvFor`; the resume config + aws creds are read off that param, tests pass a fake env. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
+      "apps/bench/resume/resume-launch.ts":
+        "BOX-SIDE prelaunch entrypoint (`bun run resume-launch.ts`) — reads QUANTA_BENCH_INSTANCE_ID at launch and threads `process.env` into `prepareResume(env, id)` (which reads off the param); composition-root posture same as apps/bench/index.ts. Downstream gets the resolved replay env.",
+      "runner/batch/eval/sandbox.ts":
+        "Bench-only opt-in resume gate (QUANTA_BENCH_RESUME) read inline at the deterministic-sandbox-path decision (the file documents it is intentionally inline, owned elsewhere — not a config module); same bench-only opt-in env-gate posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/repro-adapter.ts":
+        "Bench-only opt-in gate (QUANTA_BENCH_REPRO_IMAGE_EXEC, RFC jun-29-repro-adapter-polyglot Phase 2b — DEFERRED/default-OFF, byte-identical when unset) read inline at the repro exec-backend decision; same bench-only opt-in env-gate posture as runner/batch/eval/driver.ts + sandbox.ts.",
+      "lsp/server-rss-watchdog.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param; the RSS-watchdog reads its budget gate off that param, tests pass a fake env. Same DI-boundary posture as lsp/server-mem-budget.ts.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",
@@ -272,6 +290,20 @@ const RULES: readonly Rule[] = [
         "Injection-first: `env: Readonly<...> = process.env` DI fallback at the init-scaffold composition root (EDITOR resolution); tests inject explicit env. Same posture as raw-line-reader-editor.ts.",
       "apps/bench/cli.ts":
         "Bench CLI sub-command composition root — reads HOME + QUANTA_SWEBENCH_DATASET + QUANTA_BENCH_PRESET at launch time (same bootstrap posture as apps/bench/index.ts, which is already allowlisted); downstream logic receives resolved values, not live env.",
+      "apps/bench/commands/shared.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the shared argv/env-parse primitives (allowExtraBoxes/waitForIdleBox gates, resolveCliAuthSource `env: process.env`) read launch-time env at the CLI sub-command composition boundary; downstream handlers receive resolved values. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/grade.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `grade` / `--mode full` handler resolves HOME + QUANTA_SWEBENCH_DATASET + QUANTA_FULL_REMOTE_* + the QUANTA_FULL_REMOTE_ONDEMAND gate + `ensureBenchTraceSink(process.env)` / `resolveBenchExecutionPreset({envVars: process.env})` at launch time. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/pool.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `pool` handler reads QUANTA_FULL_REMOTE_CONCURRENCY / QUANTA_BENCH_CONCURRENCY launch dials + QUANTA_FULL_REMOTE_* + the QUANTA_BENCH_RECORD_TRAJECTORY gate, and `buildForwardedBenchEnv(process.env)` is ENV PROPAGATION into the spawned box. Same posture as apps/bench/remote/full.ts.",
+      "apps/bench/commands/box.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `box` handler resolves QUANTA_FULL_REMOTE_REGION / QUANTA_FULL_REMOTE_AMI + the QUANTA_FULL_REMOTE_ONDEMAND gate at launch time for box provisioning/inspection. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/auth.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `auth login` handler resolves QUANTA_BENCH_AUTH_POOL + passes `env: process.env` into runBenchLogin (injection-first DI boundary) at launch time. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/analyze.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the analysis handlers (explain) read QUANTA_SWEBENCH_DATASET at launch time as a `--dataset` fallback; downstream logic receives resolved values. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/trace.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `trace` handler resolves the durable span sink from QUANTA_OTEL_SINK / QUANTA_OTEL_SAVE via `resolveSpanSink(process.env)` at launch time; `runTraceSink` itself is pure (opts only). Same composition-root posture as apps/bench/otel-trace-sink.ts.",
       "apps/bench/otel-trace-sink.ts":
         "Standalone OTLP/JSON receiver + waterfall-UI script (`quanta-bench trace` / `bun … otel-trace-sink.ts`). `runTraceSink` is PURE (opts only); the SOLE env reads live in the `import.meta.main` script entry point, which resolves PORT / QUANTA_OTEL_SAVE / QUANTA_OTEL_RING via a NaN-guarded `envInt` parser and hands fully-validated options down. Same composition-root posture as apps/bench/cli.ts / index.ts.",
       "apps/bench/remote/ssh.ts":
@@ -362,6 +394,10 @@ const RULES: readonly Rule[] = [
         "jun-06 atomic-write harden: temp-file cleanup on a FAILED rename (`unlink(tmp).catch(() => {})`) — the real rename error is about to be RETHROWN, so a cleanup failure is non-fatal and there is nothing to surface (same best-effort posture as tool/browser/session-holder.ts).",
       "apps/bench/python-swebench.ts":
         "Grading-lock chain: `await prev.catch(() => {})` waits for the PREVIOUS grading task and explicitly ignores its outcome — the lock is used for sequencing, not error detection, and the caller always receives the current task's result via the finally/release path. Documented inline.",
+      "apps/bench/otel-trace-sink.ts":
+        "Embedded-sink shutdown drain: `spanSink.flush().catch(() => {})` in the idempotent `stop()` — the trace server is being torn down, the last-batch flush is best-effort and there is nowhere to surface a drain error. Same session-ending best-effort posture as agent/loop.ts.",
+      "apps/bench/remote/bootstrap-tracer.ts":
+        "Bootstrap-span emission/teardown best-effort (2 sites): `exporter.flush().catch(() => {})` and `exporter.teardown().catch(() => {})` — the comment documents that the exporter already swallows a dead sink via its own warn, and a bootstrap-trace error must never escape into the box-provision path. Same inner-layer-already-warns posture as stream/adapters/jsonl-recorder.ts.",
       "runner/batch/eval/selection-smoke.ts":
         "`finally`-block best-effort temp-file cleanup (`(deps.removeFile ?? defaultRemoveFile)(path).catch(() => {})`) — the smoke compile already returned its verdict; a cleanup failure on the scratch file is non-fatal and absence is the success state. Same posture as session/store.ts.",
       "runner/batch/eval/patch-static-sanity.ts":
@@ -468,6 +504,10 @@ const RULES: readonly Rule[] = [
         "Headless DEV/test fake-deps fixture (idleMs/snoozeDefaultMs) — fixture values for the fake runtime, not a production wall-clock policy.",
       "apps/bench/cli.ts":
         "Bench CLI minutes→ms conversions (`mins * 60_000`, `(Number(wallMin) || 0) * 60_000`) at the flag-parse boundary — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
+      "apps/bench/commands/shared.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — `positiveMinutesFlagMs` does a minutes→ms `mins * 60_000` conversion at the flag-parse boundary; surface unit conversion, not a wall-clock policy literal. Same posture as apps/bench/cli.ts.",
+      "apps/bench/commands/pool.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `pool` handler's `(Number(wallMin) || 0) * 60_000` minutes→ms conversion at the `--max-box-wall-min` flag boundary; surface unit conversion, not a wall-clock policy literal. Same posture as apps/bench/cli.ts.",
       "apps/bench/remote/fresh-auth.ts":
         "ms→minutes conversion for a LOG message (`Math.round(remaining / 60_000)` shows token-remaining minutes) — display unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
     },

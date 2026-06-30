@@ -28,8 +28,16 @@
  */
 
 import type { LLMPort } from "@/llm"
+import { candidateFamilyCoverageMissing, type CandidateFamily } from "./candidate-families"
+import type { PerCandidateSeed } from "./location-set-fanout"
 import type { RepairValidateArgsInputs } from "./repair/index"
 import { buildRepairValidateArgs } from "./repair/index"
+import { filesFromPatch } from "./selection-paths"
+import type {
+  Candidate,
+  DerivedCandidateStructuralRepair,
+  FamilyCoverageRepairArgs,
+} from "./selection-types"
 import type {
   RepairCandidateOutcome,
   RepairConfig,
@@ -126,6 +134,33 @@ export interface RepairBreadthDeps {
   readonly validateInputs: Omit<RepairValidateArgsInputs, "sandbox">
   readonly sandboxPorts: RepairBreadthSandboxPorts
   readonly gitPorts: RepairBreadthGitPorts
+  /** jun-29 OBSERVE-ONLY: persist the WHOLE candidate pool (not just the adopted
+   *  winner) so "was there a winning candidate the selector missed?" is answerable
+   *  post-hoc. Called with every round's outcomes BEFORE selection. Decision impact
+   *  ZERO — never read by select/adopt; fail-open. Absent ⇒ byte-identical. */
+  readonly recordCandidates?: (
+    round: number,
+    candidates: readonly RepairCandidateOutcome[],
+  ) => void | Promise<void>
+  /** OPTIONAL typed structural family derivation for a repair-breadth candidate,
+   *  reusing the clean selection seam on the candidate's OWN forked sandbox. */
+  readonly deriveCandidateStructuralRepair?: (
+    candidate: Candidate,
+    sandbox: string,
+  ) => Promise<DerivedCandidateStructuralRepair | undefined>
+  /** OPTIONAL bounded family-coverage co-edit for a partial repair candidate.
+   *  Runs on the candidate's OWN forked sandbox and may only extend the existing
+   *  patch across already-derived family files. */
+  readonly repairFamilyCoverage?: (
+    args: FamilyCoverageRepairArgs & { readonly sandbox: string },
+  ) => Promise<Candidate | undefined>
+  /** Strategy #7 multi-location-set fanout (QUANTA_BENCH_LOCATION_FANOUT): map a
+   *  candidate `index` + the round's base seed → a seed that LEADS the candidate at
+   *  a distinct ranked file (location diversity instead of N resamples). Returning
+   *  `undefined` (or this port being absent) ⇒ the base seed is used unchanged ⇒
+   *  byte-identical. Pure (built from the localizer's ranked files); see
+   *  {@link buildLocationSeeder}. */
+  readonly perCandidateSeed?: PerCandidateSeed
 }
 
 /**
@@ -145,16 +180,82 @@ export const makeRepairBreadthRunCandidates =
     // settles independently; a candidate that THROWS during generation is dropped
     // (Promise.allSettled) so one bad lane never sinks the whole round.
     const settled = await Promise.allSettled(
-      Array.from({ length: args.breadth }, (_unused, index) =>
-        runOneBreadthCandidate(deps, args.seedMsg, index),
-      ),
+      Array.from({ length: args.breadth }, (_unused, index) => {
+        // #7 location fanout: distinct lead-file seed per candidate (OFF ⇒ undefined
+        // ⇒ base seed ⇒ byte-identical).
+        const seed = deps.perCandidateSeed?.(index, args.seedMsg) ?? args.seedMsg
+        return runOneBreadthCandidate(deps, seed, index)
+      }),
     )
     const outcomes: RepairCandidateOutcome[] = []
     for (const s of settled) {
       if (s.status === "fulfilled" && s.value !== undefined) outcomes.push(s.value)
     }
+    // OBSERVE-ONLY pool capture (jun-29): record the FULL pool before the
+    // orchestrator selects+adopts the winner. Fail-open — a sink throw must never
+    // affect the round (the pool ledger is post-hoc analysis, not control flow).
+    if (deps.recordCandidates !== undefined) {
+      try {
+        await deps.recordCandidates(args.round, outcomes)
+      } catch {
+        /* observe-only: never let a ledger write perturb the repair round */
+      }
+    }
     return outcomes
   }
+
+const breadthCandidateOf = (run: RunOnceResult, index: number): Candidate => ({
+  id: `repair-${index}`,
+  patch: run.patch,
+  turns: run.turns,
+  files: filesFromPatch(run.patch),
+  baseValidatedRed: null,
+})
+
+const withCandidatePatch = (run: RunOnceResult, patch: string): RunOnceResult =>
+  patch === run.patch ? run : { ...run, patch }
+
+const reducedFamilyCoverage = (
+  family: CandidateFamily,
+  beforeFiles: readonly string[],
+  after: Candidate,
+): boolean =>
+  candidateFamilyCoverageMissing(family, after.files).length <
+  candidateFamilyCoverageMissing(family, beforeFiles).length
+
+const maybeWidenCandidateFamilyCoverage = async (
+  deps: RepairBreadthDeps,
+  run: RunOnceResult,
+  index: number,
+  sandbox: string,
+): Promise<RunOnceResult> => {
+  if (
+    deps.deriveCandidateStructuralRepair === undefined ||
+    deps.repairFamilyCoverage === undefined ||
+    run.patch.trim() === ""
+  ) {
+    return run
+  }
+  const candidate = breadthCandidateOf(run, index)
+  if (candidate.files.length === 0) return run
+  const derived = await deps.deriveCandidateStructuralRepair(candidate, sandbox).catch(() => undefined)
+  const family = derived?.family
+  if (family === undefined) return run
+  const missingFiles = candidateFamilyCoverageMissing(family, candidate.files)
+  if (missingFiles.length === 0) return run
+  const widened = await deps
+    .repairFamilyCoverage({
+      sandbox,
+      candidate,
+      family,
+      missingFiles,
+    })
+    .catch(() => undefined)
+  if (widened === undefined || widened.patch.trim() === "") return run
+  return reducedFamilyCoverage(family, candidate.files, widened)
+    ? withCandidatePatch(run, widened.patch)
+    : run
+}
 
 /** Fork → agent (lane index) → validate ONE candidate. Returns the outcome, or
  *  `undefined` when the fork could not even be created (the candidate is dropped;
@@ -167,7 +268,9 @@ const runOneBreadthCandidate = async (
   const fork = await deps.sandboxPorts.forkSandbox(deps.instanceId, deps.mainSandbox)
   try {
     const laneLlm = deps.resolveLaneLlm(index)
-    const run = await deps.runAgentOnFork(fork, seedMsg, laneLlm)
+    const locationFocus = deps.perCandidateSeed?.focusOf?.(index)
+    const generatedRun = await deps.runAgentOnFork(fork, seedMsg, laneLlm)
+    const run = await maybeWidenCandidateFamilyCoverage(deps, generatedRun, index, fork)
     // Validate the fork through the SAME repair-gate policy as the single path,
     // with `sandbox` pointed at THIS fork (so primary-rail / agent-cmd / repro all
     // execute against the candidate's own tree).
@@ -181,7 +284,12 @@ const runOneBreadthCandidate = async (
     const adopt = async (): Promise<void> => {
       await adoptCandidateOntoMain(deps, cumulativeDiff)
     }
-    return { run, validator, adopt }
+    return {
+      run,
+      validator,
+      ...(locationFocus !== undefined ? { locationFocus } : {}),
+      adopt,
+    }
   } finally {
     // The fork is never the continuation point — the winner is re-applied to main
     // by `adopt`, losers are discarded — so every fork is cleaned up here.

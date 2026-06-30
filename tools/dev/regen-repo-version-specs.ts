@@ -21,7 +21,7 @@ const OUT = join(import.meta.dir, "..", "..", "src/runner/batch/corpus/repo-vers
 const PY = [
   "import json",
   "from swebench.harness.constants import MAP_REPO_VERSION_TO_SPECS as M",
-  "out={r:{v:{k:s[k] for k in ('test_cmd','install','pre_install','eval_commands') if s.get(k)}",
+  "out={r:{v:{k:s[k] for k in ('test_cmd','install','pre_install','eval_commands','pip_packages') if s.get(k)}",
   "  for v,s in vs.items()} for r,vs in M.items()}",
   "print(json.dumps(out))",
 ].join("\n")
@@ -51,6 +51,7 @@ for (const repo of Object.keys(M).sort()) {
     if (e.install !== undefined) parts.push(`install: ${q(str(e.install))}`)
     if (e.pre_install !== undefined) parts.push(`preInstall: ${q(arr(e.pre_install))}`)
     if (e.eval_commands !== undefined) parts.push(`evalCommands: ${q(arr(e.eval_commands))}`)
+    if (e.pip_packages !== undefined) parts.push(`pipPackages: ${q(arr(e.pip_packages))}`)
     body += `    ${q(v)}: { ${parts.join(", ")} },\n`
   }
   body += "  },\n"
@@ -82,6 +83,11 @@ export interface RepoVersionSpec {
   readonly install?: string
   readonly preInstall?: readonly string[]
   readonly evalCommands?: readonly string[]
+  /** Official \`pip_packages\` — the era-correct dependency PINS the SWE-bench env
+   *  installs (e.g. sphinx 3.5: \`Jinja2==3.0.3\`). Applied as uv \`--with\` so the
+   *  repro/test env resolves these instead of latest — fixes old instances whose
+   *  free-resolved deps broke their own API (RCA jun-29). */
+  readonly pipPackages?: readonly string[]
 }
 
 const REPO_VERSION_SPECS: Readonly<Record<string, Readonly<Record<string, RepoVersionSpec>>>> = {
@@ -105,6 +111,13 @@ export const specInstall = (repo: string, version: string | undefined): string |
 /** Spec pre-install command list for (repo, version). */
 export const specPreInstall = (repo: string, version: string | undefined): readonly string[] =>
   (version === undefined ? undefined : REPO_VERSION_SPECS[repo]?.[version]?.preInstall) ?? []
+
+/** Official \`pip_packages\` PINS for (repo, version) — era-correct dep versions
+ *  applied as uv \`--with\` so the repro/test env stops free-resolving deps to
+ *  latest (RCA jun-29: sphinx 3.5 needs \`Jinja2==3.0.3\`, not 3.1+). Empty when
+ *  unmapped (⇒ no pins, the pre-fix behavior). */
+export const specPipPackages = (repo: string, version: string | undefined): readonly string[] =>
+  (version === undefined ? undefined : REPO_VERSION_SPECS[repo]?.[version]?.pipPackages) ?? []
 
 /** Whether the spec knows this (repo, version). */
 export const hasRepoVersionSpec = (repo: string, version: string | undefined): boolean =>

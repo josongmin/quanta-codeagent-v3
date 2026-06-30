@@ -94,6 +94,10 @@ export const relFromSandbox = (sandbox: string, p: string | undefined): string |
   return fwd(rel)
 }
 
+/** Max actions retained in {@link BenchStreamTap.actionTrace} (most-recent window).
+ *  Bounds prompt size + memory; the convergence tail is the informative part. */
+export const ACTION_TRACE_CAP = 40
+
 export class BenchStreamTap implements StreamPort {
   lastVerifyCmd: string | undefined
   lastErrorMessage: string | undefined
@@ -113,6 +117,13 @@ export class BenchStreamTap implements StreamPort {
   /** Successful SOURCE edit count. This is the only edit counter safe for
    *  done-time source-capture classification. */
   sourceAppliedEditCount = 0
+  /** Bounded ACTION TRACE (`<tool> <target/cmd-head>` per call) — the agent's
+   *  what-it-did sequence for the LLM reviewer (SWE-agent reviewer parity). Tool
+   *  NAMES + targets/command-heads only (NO observation bodies / file contents), so
+   *  the leak surface is the agent's own public actions. Capped at
+   *  {@link ACTION_TRACE_CAP} (keeps the most RECENT actions — the convergence tail
+   *  is the most informative). Recording only; never alters control flow. */
+  readonly actionTrace: string[] = []
   private currentTurn = 0
   /** tool_call ids whose invocation was a VERIFY (test_runner / test-like bash),
    *  awaiting their `tool_result` to decide pass/fail. Only populated when
@@ -172,9 +183,11 @@ export class BenchStreamTap implements StreamPort {
   }
 
   private handleToolCall(event: ToolCallEvent): void {
-    if (this.onAction !== undefined) {
-      this.onAction(event.name, this.actionDetailOf(event.name, event.input))
-    }
+    const detail = this.actionDetailOf(event.name, event.input)
+    if (this.onAction !== undefined) this.onAction(event.name, detail)
+    // Record the action for the reviewer trace (most-recent window, bounded).
+    this.actionTrace.push(detail !== "" ? `${event.name} ${detail}` : event.name)
+    if (this.actionTrace.length > ACTION_TRACE_CAP) this.actionTrace.shift()
     this.trackVerifyCall(event)
     this.trackEditCall(event)
   }

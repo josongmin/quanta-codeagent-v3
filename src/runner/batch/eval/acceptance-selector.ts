@@ -16,6 +16,7 @@
  * passing-set capture); this lands the repro-only acceptance first.
  */
 
+import type { AcceptanceLlmRerank } from "./acceptance-select"
 import { maybeAcceptanceSelector } from "./acceptance-wire"
 import type { RepairCandidateOutcome } from "./repair/types"
 
@@ -49,6 +50,12 @@ export interface ReproAcceptancePorts {
    *  sandbox → COUNT of failed tests. Present ⇒ the rerank gains the regression
    *  guard (Agentless dual-oracle); absent ⇒ repro-only. */
   readonly regressionFailuresOnSandbox?: (sandbox: string) => Promise<number>
+  /** OPTIONAL LLM soft-reranker over the admissible survivors (chooser/reviewer
+   *  knobs). Absent ⇒ deterministic vote only. Fail-open / never-veto. */
+  readonly llmRerank?: AcceptanceLlmRerank
+  /** OPTIONAL stronger vote-key normalizer (#3 Agentless-parity dedup,
+   *  `QUANTA_BENCH_VOTE_NORMALIZE`). Absent ⇒ raw-trim key (byte-identical). */
+  readonly normalizePatch?: (patch: string) => string
 }
 
 /** Build the repair `selectCandidates` port for the acceptance path (repro-only,
@@ -76,5 +83,7 @@ export const buildReproAcceptanceSelector = (
     enabled: true,
     runReproOnPatch,
     ...(runRegressionOnPatch !== undefined ? { runRegressionOnPatch } : {}),
+    ...(ports.llmRerank !== undefined ? { llmRerank: ports.llmRerank } : {}),
+    ...(ports.normalizePatch !== undefined ? { normalizePatch: ports.normalizePatch } : {}),
   })
 }

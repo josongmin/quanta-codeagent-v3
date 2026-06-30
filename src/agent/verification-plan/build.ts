@@ -147,6 +147,8 @@ const attachRequiredPredicates = (
 export const buildVerificationPlan = (input: VerificationPlanInput): VerificationPlan => {
   const maxRequired = input.maxRequired ?? DEFAULT_MAX_REQUIRED
   const baseValidatedRed = input.reproScript?.baseValidatedRed ?? false
+  const ownerNearPrimaryBaseValidatedRed = input.ownerNearPrimaryBaseValidatedRed === true
+  const moduleSmokePrimaryBaseValidatedRed = input.moduleSmokePrimaryBaseValidatedRed === true
   const ownerSteps = ownerStepsOf(input)
   const smokeSteps = smokeStepsOf(input)
   const reproStep = reproStepOf(input)
@@ -161,5 +163,14 @@ export const buildVerificationPlan = (input: VerificationPlanInput): Verificatio
   })
   attachRequiredPredicates(required, input.issueDeclaredExpected)
 
-  return { primaryRail, required, optional, baseValidatedRed }
+  const primaryRailBaseValidatedRed =
+    primaryRail?.kind === "repro"
+      ? baseValidatedRed
+      : primaryRail?.kind === "owner-test"
+        ? ownerNearPrimaryBaseValidatedRed
+        : primaryRail?.kind === "module-smoke"
+          ? moduleSmokePrimaryBaseValidatedRed
+          : false
+
+  return { primaryRail, required, optional, baseValidatedRed, primaryRailBaseValidatedRed }
 }

@@ -19,12 +19,25 @@
  * imports from the app — it runs standalone on plain Bun.
  */
 import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs"
-import { homedir } from "node:os"
+import { homedir, tmpdir } from "node:os"
 import { basename, join } from "node:path"
+import { ActionError } from "./bench-actions"
+import { BenchControl } from "./bench-control"
+import { iidFromBody, launchSpecFromBody, presetsFromCatalog } from "./bench-request"
+import type { ExternalBaselines } from "./external-baselines"
+import { campaignKeyOf } from "./family-partition"
 
 const HOME = homedir()
 const REPO = join(import.meta.dir, "..", "..")
 const PORT = Number(argOf("--port") ?? 7878)
+// SECURITY (RFC jun-29): the console has endpoints that spawn EC2 boxes ($), terminate them,
+// and serve run logs that carry the grade's creds-bearing stdout. Bind LOOPBACK by default so
+// the network can't reach the console; an operator who wants remote VIEWING of the legacy
+// report tabs opts in with QUANTA_DASH_HOST=0.0.0.0 — and even then the ENTIRE bench console
+// (mutating AND its log/box-id reads) is gated to loopback clients (see routeBench).
+// ⚠️ The loopback gate trusts the SOCKET PEER. Do NOT put this behind a reverse proxy (nginx/
+// caddy) on 0.0.0.0 — every proxied request's peer becomes 127.0.0.1 and the gate opens to all.
+const DASH_HOST = process.env.QUANTA_DASH_HOST ?? "127.0.0.1"
 // The live OTEL trace waterfall (otel-trace-sink) is shown as a tab here via an
 // iframe. By default the dashboard auto-spawns the sink as a child so ONE command
 // brings up BOTH surfaces; `--no-trace` opts out, `--trace-port N` overrides.
@@ -204,6 +217,11 @@ interface Run {
   file: string
   model: string
   preset: string
+  /** Dataset family (RFC jun-29 R4) from report.datasetFamily. Absent in the
+   *  report ⇒ "verified" (the legacy default), so verified runs are unchanged and
+   *  pro/live runs partition into their own campaigns instead of being averaged
+   *  into one bogus resolved-rate. */
+  datasetFamily: string
   mtime: number
   resolved: number
   // Denominator EXCLUDING re-runnable measurement-holes (FLAG-B). A campaign
@@ -218,6 +236,11 @@ interface Run {
     turns: number
     durationMs: number
     fail: FailInfo | null
+    // SOLVABILITY (RFC jun-29): did the GOLD patch pass the instance's verifier?
+    //   true  = instance solvable + verifier sound (a fail here is a genuine model miss)
+    //   false = gold FAILED / verifier broken → NOT a model miss, exclude from blame
+    //   undefined = not checked
+    goldResolved?: boolean
   }[]
 }
 
@@ -413,6 +436,8 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
       turns: Number(row?.turns) || 0,
       durationMs: Number(row?.durationMs) || 0,
       fail: classifyFail(pi),
+      // Only the explicit boolean is meaningful — absent stays absent (not checked).
+      ...(typeof row?.goldResolved === "boolean" ? { goldResolved: row.goldResolved } : {}),
     }
   })
   const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length
@@ -424,6 +449,7 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     file: f,
     model: asString(report.model) ?? "?",
     preset: presetLabel(f, asRecord(report.knobs)),
+    datasetFamily: asString(report.datasetFamily) ?? "verified",
     mtime,
     resolved,
     total: perInstance.length - unmeasured,
@@ -601,6 +627,10 @@ interface Campaign {
   members: string[] // file labels that rolled up into this campaign
   model: string
   preset: string
+  /** Dataset family (RFC jun-29 R4) — "verified" | "pro" | "live". Lets the UI
+   *  filter/group by dataset so a pro resolved-rate is never shown beside (or
+   *  averaged into) the verified leaderboard number. */
+  datasetFamily: string
   mtime: number
   resolved: number
   // Denominator EXCLUDING re-runnable holes (FLAG-B). An instance counts as
@@ -618,14 +648,8 @@ interface SeenInstance {
   measured: boolean // at least one run produced a graded/real outcome (not a hole)
 }
 
-const campaignKeyOf = (run: Run): string => {
-  const dir = basename(run.file.replace(/\/[^/]+$/, ""))
-  const shardMatch = run.label.match(/^(.*?)[-_]?shard(\d+)$/i)
-  if (/^report-i-/.test(run.label)) return `${dir} · full-remote (${run.model})`
-  if (shardMatch) return `${dir}/${shardMatch[1] || "shard"}`
-  if (/^local-/.test(run.label)) return `${dir}/local-singles`
-  return run.label
-}
+// campaignKeyOf moved to ./family-partition (testable — server.ts calls Bun.serve at
+// import, so a unit test cannot import it). RFC jun-29 R4 partition lives there.
 
 const addRunToCampaign = (
   groups: Map<string, Campaign & { seen: Map<string, SeenInstance> }>,
@@ -639,6 +663,7 @@ const addRunToCampaign = (
       members: [],
       model: run.model,
       preset: run.preset,
+      datasetFamily: run.datasetFamily,
       mtime: 0,
       resolved: 0,
       total: 0,
@@ -688,6 +713,7 @@ function groupRuns(runs: Run[]): Campaign[] {
       resolved: group.resolved,
       total: group.total,
       unmeasured: group.unmeasured,
+      datasetFamily: group.datasetFamily,
     })
   }
   // Rank on the REAL solve-rate (resolved / measured-total), so throttle noise
@@ -716,6 +742,11 @@ interface QuantaSummary {
   passedBy: string[]
   fail: FailInfo | null
   failMtime: number
+  // SOLVABILITY rollup (RFC jun-29). goldResolved === false on ANY run ⇒ the
+  // instance's verifier was broken / gold failed: a miss here is NOT a model miss,
+  // so the matrix flags it "⚠ verifier-broken (excluded)". A true anywhere clears
+  // the flag (a sound verifier somewhere wins). undefined throughout ⇒ not checked.
+  goldBroken: boolean
 }
 
 const datasetPreviewOf = (
@@ -745,6 +776,7 @@ const createQuantaSummary = (): QuantaSummary => ({
   passedBy: [],
   fail: null,
   failMtime: 0,
+  goldBroken: false,
 })
 
 const ensureQuantaSummary = (quanta: Record<string, QuantaSummary>, id: string): QuantaSummary => {
@@ -805,6 +837,9 @@ const quantaSummaryOf = (runs: readonly Run[]): Record<string, QuantaSummary> =>
       if (!sid || !isRealSwebenchInstanceId(sid)) continue
       const summary = ensureQuantaSummary(quanta, sid)
       addRunMetadata(summary, run)
+      // gold === false anywhere ⇒ verifier broken (sticky); a later sound run can't
+      // un-break it, but a passing instance is obviously solvable so we never set it.
+      if (perInstance.goldResolved === false && !perInstance.passed) summary.goldBroken = true
       if (perInstance.passed)
         recordPassingAttempt(summary, run, perInstance.turns, perInstance.durationMs)
       else recordFailingAttempt(summary, run, perInstance.turns, perInstance.fail)
@@ -834,6 +869,26 @@ const frontierTurnsOf = (
   return turns
 }
 
+// External SOTA baselines (RFC jun-29). Generated by external-baselines.ts into
+// external-baselines.json next to this file. Read fresh each request (re-running the
+// generator reflects live, no restart). DEFENSIVE: the file may be absent / malformed —
+// return null so the comparison feature degrades to "—" instead of crashing the page.
+function loadExternalBaselines(): ExternalBaselines | null {
+  const p = join(import.meta.dir, "external-baselines.json")
+  if (!existsSync(p)) return null
+  try {
+    const parsed = asRecord(JSON.parse(readFileSync(p, "utf8")))
+    if (parsed === null || !Array.isArray(parsed.models)) return null
+    return {
+      generatedFrom: asString(parsed.generatedFrom) ?? "",
+      models: parsed.models as ExternalBaselines["models"],
+      liveResolvedBy: asRecord(parsed.liveResolvedBy) ?? {},
+    } as ExternalBaselines
+  } catch {
+    return null
+  }
+}
+
 function buildData() {
   const matrix = parseMatrix()
   const fullDataset = loadDataset()
@@ -857,6 +912,8 @@ function buildData() {
     coverage,
     live: parseLive(),
     reportRoots: REPORT_ROOTS,
+    // null when the file is absent/malformed → client renders no external column (—).
+    externalBaselines: loadExternalBaselines(),
   }
 }
 
@@ -927,6 +984,84 @@ const jsonResponse = (body: unknown, init?: ResponseInit): Response => {
 const knobCatalogResponse = (): Response =>
   jsonResponse(loadKnobCatalog(), { headers: { "cache-control": "no-store" } })
 
+// ---------------------------------------------------------------------------
+// Benchmark MANAGEMENT console (RFC jun-29). The control plane (spawn registry,
+// box queries, log tailing, argv validation) lives in BenchControl + bench-actions;
+// the routes below are a THIN adapter — parse the request → call a control method →
+// JSON. No spawning / validation / business logic here. Constructed ONCE (lazy).
+let _benchControl: BenchControl | undefined
+const benchControl = (): BenchControl => {
+  if (_benchControl === undefined) {
+    _benchControl = new BenchControl({
+      repoDir: process.cwd(),
+      runDir: join(tmpdir(), "bench-launches"),
+      // Live preset allowlist = knob-catalog keys (read fresh so a regenerated
+      // catalog reflects without restart); falls back to a built-in safe set.
+      validPresets: () => presetsFromCatalog(loadKnobCatalog().presets),
+    })
+  }
+  return _benchControl
+}
+
+/** Map an ActionError (bad input) → 400, anything else → 500. Thin adapter only. */
+const benchError = (e: unknown): Response =>
+  jsonResponse(
+    { error: e instanceof Error ? e.message : String(e) },
+    { status: e instanceof ActionError ? 400 : 500 },
+  )
+
+const launchResponse = async (req: Request): Promise<Response> => {
+  try {
+    const body = await req.json().catch(() => ({}))
+    return jsonResponse(benchControl().launch(launchSpecFromBody(body)))
+  } catch (e) {
+    return benchError(e)
+  }
+}
+
+const runningResponse = async (): Promise<Response> => {
+  try {
+    const launches = benchControl().listLaunches()
+    // boxStatus hits AWS and may be slow/unavailable — never let it sink the view.
+    const boxStatus = await benchControl()
+      .boxStatus()
+      .catch(() => ({}))
+    return jsonResponse({ launches, boxStatus }, { headers: { "cache-control": "no-store" } })
+  } catch (e) {
+    return benchError(e) // mirror sibling handlers — never an unwrapped 500
+  }
+}
+
+const launchLogResponse = (url: URL): Response => {
+  const id = url.searchParams.get("id") || ""
+  try {
+    return new Response(benchControl().readLaunchLog(id), {
+      headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+    })
+  } catch (e) {
+    return benchError(e)
+  }
+}
+
+const boxStopResponse = async (req: Request): Promise<Response> => {
+  try {
+    const body = await req.json().catch(() => ({}))
+    return jsonResponse(await benchControl().stopBox(iidFromBody(body)))
+  } catch (e) {
+    return benchError(e)
+  }
+}
+
+const boxesResponse = async (): Promise<Response> => {
+  try {
+    return jsonResponse(await benchControl().listBoxes(), {
+      headers: { "cache-control": "no-store" },
+    })
+  } catch (e) {
+    return benchError(e)
+  }
+}
+
 const oracleResponse = (url: URL): Response => {
   const id = url.searchParams.get("id") || ""
   const row = loadDataset()[id]
@@ -976,10 +1111,61 @@ const routeRequest = (url: URL): Response => {
   return new Response(HTML, { headers: { "content-type": "text/html; charset=utf-8" } })
 }
 
+// Benchmark-console routes (async: POST bodies + AWS-backed box queries). Each is a
+// 3-liner thin adapter (parse → control method → JSON); returns undefined if the
+// path isn't a bench route so the sync router handles the rest.
+// ALL bench-console routes are operator-only and loopback-gated — NOT just the mutating ones.
+// Round-3 audit: the READ routes leak privileged output too — launch logs carry the detached
+// grade's stdout (the run inherits process.env incl. cloud creds + runs --allow-remote-secrets),
+// and running/boxes enumerate live EC2 instance ids. So a non-loopback client must reach NONE of
+// them. (The legacy report-view routes /api/data·/api/knobs·/api/oracle stay open — no secrets.)
+const BENCH_ROUTES: ReadonlySet<string> = new Set([
+  "/api/launch",
+  "/api/running",
+  "/api/launch-log",
+  "/api/box/stop",
+  "/api/boxes",
+])
+
+const routeBench = (
+  req: Request,
+  url: URL,
+  fromLoopback: boolean,
+): Promise<Response> | undefined => {
+  if (!BENCH_ROUTES.has(url.pathname)) return undefined
+  // Defense-in-depth: even if QUANTA_DASH_HOST exposes the dashboard to the network, the whole
+  // bench console (spawn/terminate AND its secret-bearing logs/box-ids) is loopback-only.
+  if (!fromLoopback) {
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "bench console is loopback-only" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+  }
+  if (url.pathname === "/api/launch" && req.method === "POST") return launchResponse(req)
+  if (url.pathname === "/api/running") return runningResponse()
+  if (url.pathname === "/api/launch-log") return Promise.resolve(launchLogResponse(url))
+  if (url.pathname === "/api/box/stop" && req.method === "POST") return boxStopResponse(req)
+  if (url.pathname === "/api/boxes") return boxesResponse()
+  return undefined
+}
+
+const isLoopbackAddr = (addr: string | undefined): boolean =>
+  addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1"
+
+// When the dashboard is BOUND to loopback (the default), every connection is local by
+// construction — so don't depend on requestIP (which can be undefined): treat all as loopback.
+// Only when an operator opts into a non-loopback bind do we gate mutations on the client IP.
+const BIND_IS_LOOPBACK = isLoopbackAddr(DASH_HOST) || DASH_HOST === "localhost"
+
 const server = Bun.serve({
   port: PORT,
-  fetch(req) {
-    return routeRequest(new URL(req.url))
+  hostname: DASH_HOST,
+  fetch(req, srv) {
+    const url = new URL(req.url)
+    const fromLoopback = BIND_IS_LOOPBACK || isLoopbackAddr(srv.requestIP(req)?.address)
+    return routeBench(req, url, fromLoopback) ?? routeRequest(url)
   },
 })
 // Auto-spawn the live-trace receiver (otel-trace-sink) so the "🔭 트레이스" tab's
@@ -1031,6 +1217,12 @@ const HTML = /* html */ `<!doctype html>
            align-items: baseline; gap: 14px; flex-wrap: wrap; }
   h1 { font-size: 15px; margin: 0; color: #e6edf3; }
   .muted { color: #768390; }
+  /* RFC jun-29 R4 dataset-family chips — pro/live are visually fenced off from verified. */
+  .fam { display: inline-block; padding: 0 5px; border-radius: 4px; font-size: 10px;
+         font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+         vertical-align: 1px; border: 1px solid transparent; }
+  .fam-pro { background: #3a2d12; color: #e3b341; border-color: #5c4516; }
+  .fam-live { background: #122a3a; color: #58a6ff; border-color: #1f4a6b; }
   .cards { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 18px; }
   .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px;
           padding: 10px 14px; min-width: 120px; }
@@ -1081,6 +1273,18 @@ const HTML = /* html */ `<!doctype html>
   .modal-close { background: #21262d; color: #adbac7; border: 1px solid #30363d; border-radius: 6px;
                  cursor: pointer; font-size: 14px; line-height: 1; padding: 4px 9px; }
   .modal-close:hover { background: #30363d; color: #e6edf3; }
+  /* 🛠 관리 tab form */
+  .mng-l { display: block; font-size: 11px; color: #768390; margin-bottom: 8px; }
+  .mng-l input[type=text], .mng-l select { display: block; width: 100%; margin-top: 3px;
+            background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px;
+            padding: 5px 7px; font: inherit; }
+  .mng-l.mng-cb { display: flex; align-items: center; gap: 6px; }
+  .mng-l.mng-cb input { margin: 0; }
+  .mng-btn { background: #1f6feb; color: #fff; border: 1px solid #2f81f7; border-radius: 6px;
+             padding: 6px 14px; cursor: pointer; font: inherit; margin-top: 4px; }
+  .mng-btn:hover { background: #388bfd; }
+  .mng-stop { background: #4d1f1f; border-color: #6b2222; color: #ffb4ab; }
+  .mng-stop:hover { background: #6b2222; }
 </style>
 </head>
 <body>
@@ -1097,6 +1301,7 @@ const HTML = /* html */ `<!doctype html>
   <button data-tab="knobs">Knob / 프로필</button>
   <button data-tab="live">라이브</button>
   <button data-tab="trace">🔭 트레이스</button>
+  <button data-tab="manage">🛠 관리</button>
 </nav>
 <div class="wrap" id="view"></div>
 <div class="modal-overlay" id="modal">
@@ -1160,6 +1365,7 @@ function render() {
   else if (TAB === "scaffolds") v.innerHTML = renderScaffolds();
   else if (TAB === "knobs") renderKnobs(v);
   else if (TAB === "trace") { if (!document.getElementById("trace-frame")) v.innerHTML = renderTrace(); }
+  else if (TAB === "manage") { if (!document.getElementById("mng")) { v.innerHTML = renderManage(); mngInit(); } }
   else v.innerHTML = renderLive();
 }
 
@@ -1333,18 +1539,77 @@ function renderCards() {
     (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
 }
 
+// RFC jun-29 R4: dataset family is a partition, not a flavor — a pro resolved-rate must
+// never sit in the same row-space as a verified one without a label. verified shows no
+// chip (byte-identical to the legacy look); pro/live get a colored chip.
+var FAM_FILTER = "";
+function famChip(fam) {
+  if (!fam || fam === "verified") return "";
+  return '<span class="fam fam-'+esc(fam)+'">'+esc(fam)+'</span> ';
+}
+// RFC jun-29: our datasetFamily → external (dataset,set) we're measured against.
+// verified ⇒ null (its own surface; byte-identical, no external column). Mirrors the
+// unit-tested externalCoordFor in external-comparison.ts (kept in sync there).
+function extCoordFor(fam) {
+  if (fam === "pro") return { dataset: "pro", sets: ["public-731"] };
+  if (fam === "live") return { dataset: "live", sets: ["verified", "lite"] };
+  return null;
+}
+// Top external model for a family from DATA.externalBaselines, or null. Defensive:
+// missing/empty baselines ⇒ null (the column shows —, never crashes).
+function extSotaForFamily(fam) {
+  var b = DATA.externalBaselines;
+  if (!b || !Array.isArray(b.models)) return null;
+  var coord = extCoordFor(fam);
+  if (!coord) return null;
+  for (var si = 0; si < coord.sets.length; si++) {
+    var set = coord.sets[si];
+    var top = null;
+    for (var i = 0; i < b.models.length; i++) {
+      var m = b.models[i];
+      if (m.dataset !== coord.dataset || m.set !== set) continue;
+      if (top === null || m.rate > top.rate) top = m;
+    }
+    if (top) return top;
+  }
+  return null;
+}
 function renderRuns() {
   // Campaigns roll shards up into one logical run (clean-shard×6 → SOTA-clean).
-  const camps = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)));
+  let camps = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)));
+  const fams = [...new Set(camps.map(c => c.datasetFamily || "verified"))].sort();
+  if (FAM_FILTER) camps = camps.filter(c => (c.datasetFamily||"verified") === FAM_FILTER);
   let h = '<p class="muted">샤드는 한 캠페인으로 묶음. 행 펼치면 멤버 리포트. 해결률 분모는 측정된 시도만(throttle/인프라/env=미측정 제외).</p>';
-  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th><th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
+  if (fams.length > 1) {
+    h += '<p class="muted">데이터셋: <select onchange="FAM_FILTER=this.value;render()">'+
+      '<option value=""'+(FAM_FILTER===""?" selected":"")+'>전체 ('+fams.length+')</option>'+
+      fams.map(f => '<option value="'+esc(f)+'"'+(FAM_FILTER===f?" selected":"")+'>'+esc(f)+'</option>').join("")+
+      '</select> <span class="muted">— pro/live는 verified와 분모를 절대 섞지 않음 (R4)</span></p>';
+  }
+  // External SOTA column only when a non-verified (pro/live) campaign is in view AND
+  // baselines loaded — keeps an all-verified dashboard byte-identical (no ext column,
+  // no external-baselines references rendered).
+  const showExt = !!DATA.externalBaselines &&
+    camps.some(c => { const f = c.datasetFamily || "verified"; return (f === "pro" || f === "live") && !!extSotaForFamily(f); });
+  const extHead = showExt ? '<th title="이 데이터셋의 공개 외부 SOTA 해결률 (pro=public-731 · live=verified/lite) — 우리 % 옆에 나란히 (R4: verified는 비교 안 함)">외부 SOTA</th>' : '';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">캠페인</th><th>모델</th><th>preset</th><th>멤버</th><th>해결</th><th>%</th>'+extHead+'<th title="throttle/인프라/env로 측정 못해 분모서 제외 — 재런 대상">미측정</th><th>갱신</th></tr></thead><tbody>';
   for (const r of camps) {
     const pct = r.total ? Math.round(100*r.resolved/r.total) : 0;
     const unmeasured = r.unmeasured || 0;
-    h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
+    let extCell = '';
+    if (showExt) {
+      const fam = r.datasetFamily || "verified";
+      const top = (fam === "pro" || fam === "live") ? extSotaForFamily(fam) : null;
+      // External names + set come from external JSON → esc() at this HTML boundary.
+      extCell = top
+        ? '<td class="muted" title="'+esc(top.name)+' · '+esc(top.set)+' · '+top.resolved+'/'+top.total+'">ext SOTA '+Math.round(100*top.rate)+'% <span style="font-size:10px">('+esc(top.name)+')</span></td>'
+        : '<td class="muted">—</td>';
+    }
+    h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+famChip(r.datasetFamily)+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
       '<td class="muted">'+r.members.length+'</td>'+
       '<td>'+r.resolved+'/'+r.total+'</td>'+
       '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%</td>'+
+      extCell+
       '<td class="muted" title="재런 가능한 측정 구멍 — 해결률 분모서 제외됨">'+(unmeasured? '⟳ '+unmeasured : '·')+'</td>'+
       '<td class="muted">'+ (r.mtime? new Date(r.mtime).toLocaleString() : '—') +'</td></tr>';
   }
@@ -1376,6 +1641,7 @@ function renderMatrix(v) {
       <b>타임아웃</b> · <b>미제출(불명)</b>
       &nbsp;|&nbsp; preset <b>*</b> = 파일경로서 추정(리포트에 미기록) · 🏆 = 경쟁사 풀이 트랜스크립트 보유(4개뿐)
     </div>
+    \${DATA.externalBaselines ? '<div class="muted" style="font-size:11px;margin-bottom:8px;line-height:1.7">해결가능성 — <span class="pill" style="background:#1e3a2a;color:#7ee2a8;font-size:10px">ext✓</span> 외부 모델이 푼 인스턴스(provably solvable → 우리 미스는 진짜 격차) · <span class="pill" style="background:#5a1e1e;color:#f0a0a0;font-size:10px">⚠ verifier-broken</span> gold 패치가 verifier 통과 못함 → 모델 미스 아님(제외)</div>' : ''}
     <div id="mtable"></div>\`;
   const sel = v.querySelector("#filter"); sel.value = MATRIX_FILTER.kind;
   const repoSel = v.querySelector("#repo");
@@ -1527,8 +1793,21 @@ function drawMatrix() {
     const tierCell = r.tier === '?' ? '<span class="muted">—</span>' : '<span class="'+tierClass(r.tier)+'">'+r.tier+'</span>';
     const ftn = (DATA.frontierTurns||{})[r.id];
     const ftBadge = ftn ? ' <span class="pill" title="프론티어 경쟁사 풀이 턴">🏆'+ftn+'t</span>' : '';
+    // SOLVABILITY markers (RFC jun-29): WHY did an instance fail?
+    //  ⚠ verifier-broken — gold patch failed the verifier → NOT a model miss (excluded).
+    //  ext✓ — ≥1 external model resolved it (DATA.externalBaselines.liveResolvedBy) →
+    //         provably solvable, so OUR miss is a genuine capability gap.
+    let solvBadge = '';
+    if (me && me.goldBroken) {
+      solvBadge += ' <span class="pill" title="gold 패치가 이 인스턴스 verifier를 통과 못함 → 모델 미스 아님, 해결률서 제외" style="background:#5a1e1e;color:#f0a0a0;font-size:10px">⚠ verifier-broken</span>';
+    }
+    const resolvers = ((DATA.externalBaselines||{}).liveResolvedBy||{})[r.id];
+    if (Array.isArray(resolvers) && resolvers.length) {
+      // resolver names come from external JSON → esc().
+      solvBadge += ' <span class="pill" title="외부 모델이 푼 인스턴스 (provably solvable): '+esc(resolvers.slice(0,8).join(", "))+'" style="background:#1e3a2a;color:#7ee2a8;font-size:10px">ext✓'+(resolvers.length>1?' '+resolvers.length:'')+'</span>';
+    }
     h += '<tr class="mrow" data-id="'+esc(r.id)+'"><td class="inst">'+esc(r.id)+
-      ' <span class="dbtn" data-id="'+esc(r.id)+'" title="문제·오라클·trajectory 상세" style="cursor:pointer;color:#58a6ff;font-weight:700;padding:0 4px">ⓘ</span>'+ftBadge+'</td>'+qcell+
+      ' <span class="dbtn" data-id="'+esc(r.id)+'" title="문제·오라클·trajectory 상세" style="cursor:pointer;color:#58a6ff;font-weight:700;padding:0 4px">ⓘ</span>'+ftBadge+solvBadge+'</td>'+qcell+
       '<td class="muted">'+turns+'</td><td class="profile muted">'+presetCell+'</td><td class="muted" style="font-size:11px">'+r.difficulty+'</td>';
     for (const s of SCAF_SHOW) h += '<td class="'+(r.cells[s]?'yes':'no')+'">'+(r.cells[s]?'✅':'·')+'</td>';
     h += '<td>'+hashCell+'</td><td>'+tierCell+'</td></tr>';
@@ -1575,6 +1854,194 @@ function renderTrace() {
     + '비면 싱크가 꺼진 것(대시보드가 자동 spawn하지만, 아니면 <code>quanta-bench trace</code>). '
     + '<a href="' + url + '" target="_blank" style="color:#2f81f7">↗ 새 탭</a></div>'
     + '<iframe id="trace-frame" src="' + url + '" style="width:100%;height:78vh;border:1px solid #21262d;border-radius:8px;background:#0b0e14"></iframe>';
+}
+
+// === 🛠 관리 (Manage) tab — benchmark management console =====================
+// THIN client over the /api/launch · /api/running · /api/launch-log · /api/box/stop
+// routes. ALL strings that reach innerHTML go through esc() (XSS): launchId, dataset,
+// preset, family, box iid, log/output text. Built ONCE per tab-open (the #mng guard
+// in render()); its own pollers (running 5s / log 3s) own its live state thereafter.
+var MNG_DEFAULTS = {
+  verified: "tools/leaderboard-dashboard/rawdata/verified-full.jsonl",
+  pro: "~/.quanta/bench/datasets/pro-5.jsonl",
+  live: "~/.quanta/bench/datasets/live-5.jsonl"
+};
+var MNG_SEL = null;          // selected launchId (console tail target)
+var MNG_RUN_TIMER = null, MNG_LOG_TIMER = null;
+
+function renderManage() {
+  var presets = (KNOBS && KNOBS.presetOrder && KNOBS.presetOrder.length)
+    ? KNOBS.presetOrder
+    : ["agentless-v1","agentless-v3-thin-strict","baseline"];
+  var presetOpts = presets.map(function(p){ return '<option value="'+esc(p)+'">'+esc(p)+'</option>'; }).join("");
+  return '<div id="mng">'
+    + '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'
+    // --- Run launcher ---
+    + '<div class="card" style="min-width:320px;max-width:380px">'
+    +   '<div class="l" style="margin-bottom:8px">런 발사</div>'
+    +   '<label class="mng-l">데이터셋 패밀리'
+    +     '<select id="mng-family">'
+    +       '<option value="verified">verified</option>'
+    +       '<option value="pro">pro</option>'
+    +       '<option value="live">live</option>'
+    +     '</select></label>'
+    +   '<label class="mng-l">데이터셋 경로<input id="mng-dataset" type="text" value="'+esc(MNG_DEFAULTS.verified)+'"></label>'
+    +   '<label class="mng-l">프리셋<select id="mng-preset">'+presetOpts+'</select></label>'
+    +   '<label class="mng-l">모델<input id="mng-model" type="text" value="gpt-5.5"></label>'
+    +   '<label class="mng-l">인스턴스 필터 (선택)<input id="mng-instances" type="text" placeholder="예: django__django-12345"></label>'
+    +   '<label class="mng-l mng-cb"><input id="mng-ondemand" type="checkbox"> on-demand 박스 (spot 회수 없음)</label>'
+    +   '<button id="mng-launch" class="mng-btn">🚀 발사</button>'
+    +   '<div id="mng-launch-msg" class="muted" style="font-size:11px;margin-top:6px;min-height:14px"></div>'
+    + '</div>'
+    // --- Running now ---
+    + '<div style="flex:1;min-width:420px">'
+    +   '<div class="l" style="margin-bottom:8px">현재 실행 중</div>'
+    +   '<div id="mng-box-summary" class="muted" style="font-size:11px;margin-bottom:6px"></div>'
+    +   '<table style="font-size:12px"><thead><tr><th>패밀리</th><th>데이터셋</th><th>프리셋</th><th>상태</th><th>PID</th><th>경과</th></tr></thead>'
+    +   '<tbody id="mng-launches"><tr><td colspan="6" class="muted">로딩…</td></tr></tbody></table>'
+    +   '<div class="l" style="margin:14px 0 6px">박스</div>'
+    +   '<table style="font-size:12px"><thead><tr><th>인스턴스</th><th></th></tr></thead>'
+    +   '<tbody id="mng-boxes"><tr><td colspan="2" class="muted">로딩…</td></tr></tbody></table>'
+    + '</div>'
+    + '</div>'
+    // --- Console ---
+    + '<div class="l" style="margin:16px 0 6px">콘솔 <span id="mng-con-id" class="muted" style="font-size:11px"></span></div>'
+    + '<pre id="mng-console" style="background:#0b0e14;border:1px solid #21262d;border-radius:8px;padding:10px;height:46vh;overflow:auto;white-space:pre-wrap;font-size:11px">런을 선택하면 로그가 여기 흐른다.</pre>'
+    + '</div>';
+}
+
+function mngInit() {
+  // family change → swap the dataset default (only if user hasn't typed a custom one).
+  var famSel = document.getElementById("mng-family");
+  var dsIn = document.getElementById("mng-dataset");
+  famSel.onchange = function(){
+    var def = MNG_DEFAULTS[famSel.value];
+    // only auto-fill if the box still holds a known default (don't clobber edits)
+    if (dsIn.value === MNG_DEFAULTS.verified || dsIn.value === MNG_DEFAULTS.pro || dsIn.value === MNG_DEFAULTS.live || dsIn.value === "")
+      dsIn.value = def;
+  };
+  document.getElementById("mng-launch").onclick = mngLaunch;
+  mngPollRunning();
+  if (MNG_RUN_TIMER) clearInterval(MNG_RUN_TIMER);
+  if (MNG_LOG_TIMER) clearInterval(MNG_LOG_TIMER);
+  MNG_RUN_TIMER = setInterval(function(){ if (TAB === "manage") mngPollRunning(); }, 5000);
+  MNG_LOG_TIMER = setInterval(function(){ if (TAB === "manage" && MNG_SEL) mngPollLog(); }, 3000);
+}
+
+async function mngLaunch() {
+  var msg = document.getElementById("mng-launch-msg");
+  var body = {
+    family: document.getElementById("mng-family").value,
+    dataset: document.getElementById("mng-dataset").value,
+    preset: document.getElementById("mng-preset").value,
+    model: document.getElementById("mng-model").value,
+    instances: document.getElementById("mng-instances").value,
+    onDemand: document.getElementById("mng-ondemand").checked
+  };
+  msg.style.color = "#768390"; msg.textContent = "발사 중…";
+  try {
+    var r = await fetch("/api/launch", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!r.ok) { msg.style.color = "#f85149"; msg.textContent = "실패: " + esc(j.error || ("HTTP "+r.status)); return; }
+    msg.style.color = "#3fb950"; msg.innerHTML = "발사됨: " + esc(j.launchId) + " (pid " + esc(j.pid) + ")";
+    MNG_SEL = j.launchId;
+    mngPollRunning(); mngPollLog();
+  } catch (e) { msg.style.color = "#f85149"; msg.textContent = "오류: " + esc(e); }
+}
+
+async function mngPollRunning() {
+  try {
+    var r = await fetch("/api/running");
+    var j = await r.json();
+    var rows = (j.launches || []).map(function(l){
+      var age = mngAge(l.startedAt);
+      var sel = (l.launchId === MNG_SEL) ? ' style="background:#161b22"' : '';
+      var st = l.status === "running"
+        ? '<span class="q-yes">running</span>'
+        : '<span class="muted">exited'+(l.exitCode!=null?'('+esc(l.exitCode)+')':'')+'</span>';
+      return '<tr class="mng-lrow" data-id="'+esc(l.launchId)+'"'+sel+' style="cursor:pointer">'
+        + '<td>'+famChip(l.family)+'</td>'
+        + '<td class="muted" title="'+esc(l.dataset)+'" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+esc(l.dataset)+'</td>'
+        + '<td class="muted">'+esc(l.preset)+'</td>'
+        + '<td>'+st+'</td>'
+        + '<td class="muted">'+esc(l.pid)+'</td>'
+        + '<td class="muted">'+esc(age)+'</td></tr>';
+    }).join("");
+    document.getElementById("mng-launches").innerHTML = rows || '<tr><td colspan="6" class="muted">아직 발사된 런 없음.</td></tr>';
+    document.querySelectorAll(".mng-lrow").forEach(function(tr){
+      tr.onclick = function(){ MNG_SEL = tr.dataset.id; mngPollRunning(); mngPollLog(); };
+    });
+    mngRenderBoxes(j.boxStatus);
+  } catch (e) { /* transient — keep last view */ }
+}
+
+// box status is whatever 'box status --json' emits; render a compact summary + a
+// terminate button per instance id we can find. Shape-tolerant (esc all text).
+function mngRenderBoxes(bs) {
+  bs = bs || {};
+  var summary = "";
+  try { summary = JSON.stringify(bs).slice(0, 400); } catch (e) { summary = ""; }
+  document.getElementById("mng-box-summary").textContent = summary ? ("box status: " + summary) : "";
+  // collect instance ids (i-…) anywhere in the status payload.
+  var ids = mngCollectIids(bs);
+  var rows = ids.map(function(id){
+    return '<tr><td class="inst">'+esc(id)+'</td>'
+      + '<td><button class="mng-btn mng-stop" data-iid="'+esc(id)+'" style="padding:2px 8px;font-size:11px">종료</button></td></tr>';
+  }).join("");
+  document.getElementById("mng-boxes").innerHTML = rows || '<tr><td colspan="2" class="muted">실행 중인 박스 없음.</td></tr>';
+  document.querySelectorAll(".mng-stop").forEach(function(btn){
+    btn.onclick = function(){ mngStopBox(btn.dataset.iid); };
+  });
+}
+
+// Walk an arbitrary JSON value, collecting unique EC2 instance-id strings.
+function mngCollectIids(v) {
+  var out = {}, re = /^i-[0-9a-f]{8,}$/;
+  (function walk(x){
+    if (x == null) return;
+    if (typeof x === "string") { if (re.test(x)) out[x] = 1; return; }
+    if (Array.isArray(x)) { x.forEach(walk); return; }
+    if (typeof x === "object") { for (var k in x) walk(x[k]); }
+  })(v);
+  return Object.keys(out);
+}
+
+async function mngStopBox(iid) {
+  if (!confirm("박스 종료: " + iid + " ?")) return;
+  try {
+    var r = await fetch("/api/box/stop", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ iid: iid }) });
+    var j = await r.json();
+    var msg = document.getElementById("mng-launch-msg");
+    if (!r.ok) { msg.style.color = "#f85149"; msg.textContent = "종료 실패: " + esc(j.error || ("HTTP "+r.status)); }
+    else { msg.style.color = j.ok ? "#3fb950" : "#d29922"; msg.innerHTML = "종료 " + (j.ok?"OK":"비정상") + ": " + esc((j.output||"").slice(-200)); }
+    mngPollRunning();
+  } catch (e) { /* surface nothing fatal */ }
+}
+
+async function mngPollLog() {
+  if (!MNG_SEL) return;
+  var con = document.getElementById("mng-console");
+  if (!con) return;
+  document.getElementById("mng-con-id").textContent = MNG_SEL;
+  try {
+    var r = await fetch("/api/launch-log?id=" + encodeURIComponent(MNG_SEL));
+    var txt = await r.text();
+    if (!r.ok) { con.textContent = "로그 읽기 실패: " + txt; return; }
+    var lines = txt.split("\\n");
+    var tail = lines.slice(-400).join("\\n");
+    var atBottom = (con.scrollTop + con.clientHeight >= con.scrollHeight - 30);
+    con.textContent = tail || "(로그 비어 있음)";
+    if (atBottom) con.scrollTop = con.scrollHeight;
+  } catch (e) { /* transient */ }
+}
+
+function mngAge(startedAt) {
+  if (!startedAt) return "";
+  var s = (Date.now() - startedAt) / 1000;
+  if (s < 90) return Math.round(s) + "s";
+  var m = s / 60;
+  if (m < 90) return (m < 10 ? m.toFixed(1) : Math.round(m)) + "m";
+  return (m / 60).toFixed(1) + "h";
 }
 
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => { TAB = b.dataset.tab; render(); });

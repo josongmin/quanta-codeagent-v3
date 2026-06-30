@@ -31,6 +31,7 @@
  */
 
 import type { Plan, TodoItem, TodoStatus } from "@/agent/plan/types"
+import { byteCompare } from "@/shared/byte-compare"
 import type { FocusChainPort, FocusTodo } from "./port"
 
 /** Map a producer {@link TodoStatus} onto the 3-state {@link FocusTodo} arm.
@@ -61,7 +62,7 @@ const mapState = (status: TodoStatus): FocusTodo["state"] => {
 /** Deterministic display order for a {@link Plan}'s todo Record: `createdAt`
  *  ascending, tie-broken by `id` (the order the type doc prescribes). */
 const orderedTodos = (plan: Plan): TodoItem[] =>
-  Object.values(plan.todos).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+  Object.values(plan.todos).sort((a, b) => a.createdAt - b.createdAt || byteCompare(a.id, b.id))
 
 /** Project a {@link Plan} (or `null`) onto the {@link FocusTodo[]} the tracker
  *  consumes. `null` ⇒ empty list (a dropped plan clears the focus chain). */
