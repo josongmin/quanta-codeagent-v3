@@ -117,18 +117,53 @@ async def _spawn_brain(
     """Spawn the quanta-TS brain subprocess wired for the bridge. SEAM: unit tests
     monkeypatch this to return a fake brain, so the wiring is proven without ever
     launching a real process. ``report_path`` is already encoded in ``argv``
-    (``--report-out``); it is passed explicitly so a fake can target it directly."""
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        env=env,
-    )
+    (``--report-out``); it is passed explicitly so a fake can target it directly.
+
+    Observability: the brain logs (turns / tool calls / errors) to STDERR (stdout is
+    reserved for protocol frames). When ``QUANTA_TB_BRAIN_LOG_DIR`` is set, the brain's
+    stderr is captured to a file there (one per run) so a run can be inspected after the
+    fact; absent ⇒ stderr is inherited (default, byte-identical)."""
+    log_dir = env.get("QUANTA_TB_BRAIN_LOG_DIR")
+    stderr_dest = None
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+        stamp = os.path.basename(os.path.dirname(report_path)) or "brain"
+        stderr_dest = open(os.path.join(log_dir, f"brain-{stamp}.stderr.log"), "ab")  # noqa: SIM115
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=stderr_dest,  # None ⇒ inherit (default); a file ⇒ captured for inspection
+            env=env,
+        )
+    finally:
+        if stderr_dest is not None:
+            stderr_dest.close()  # the child holds its own dup'd fd; the parent handle is done
     return _AsyncSubprocessBrain(proc)
 
 
 def _brain_cmd() -> str:
     return os.environ.get("QUANTA_TERMINAL_BRAIN_CMD") or _DEFAULT_BRAIN_CMD
+
+
+async def _probe_brain_version(brain: str, env: "dict[str, str]") -> "tuple[int, str]":
+    """Run ``<brain> --version`` ON THE HOST (where ``run`` spawns the brain — it is a host
+    subprocess that drives the task container via ``container_exec``, NOT installed inside the
+    environment). Returns ``(return_code, stderr)``; a missing binary maps to ``(127, …)``. SEAM:
+    unit tests monkeypatch this so ``setup`` is verified without a real brain."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            brain,
+            "--version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+    except FileNotFoundError as e:
+        return 127, str(e)
+    _, stderr = await proc.communicate()
+    return (proc.returncode or 0), stderr.decode("utf-8", errors="replace")
 
 
 def _brain_env() -> "dict[str, str]":
@@ -170,10 +205,18 @@ class QuantaAgent(BaseAgent):  # type: ignore[misc]
     ``model`` is resolved from (constructor arg) → (``QUANTA_TERMINAL_MODEL`` env)
     and forwarded to the brain via ``--model``."""
 
-    def __init__(self, *, model: "str | None" = None, **_kwargs: Any) -> None:
-        # **_kwargs: harbor may construct agents with extra config; swallow unknown
-        # keys so construction never breaks on a harbor-side addition.
-        self._model = model or os.environ.get("QUANTA_TERMINAL_MODEL")
+    def __init__(self, *args: Any, model: "str | None" = None, **kwargs: Any) -> None:
+        # Harbor constructs BaseAgent subclasses with (logs_dir, model_name=…, logger=…, …) and
+        # relies on BaseAgent.__init__ → _init_model_info() to set _parsed_model_name/_provider
+        # (read by to_agent_info()). Forward those so harbor's init runs. The `object` fallback
+        # (no harbor installed — unit env) takes NO args, so guard the super() call.
+        if BaseAgent is not object:
+            super().__init__(*args, **kwargs)  # type: ignore[misc]
+        # Model resolution: explicit ctor arg → harbor's parsed model_name → env override. Under
+        # harbor, `model_name` is set by super(); under the object fallback it is simply absent.
+        self._model = (
+            model or getattr(self, "model_name", None) or os.environ.get("QUANTA_TERMINAL_MODEL")
+        )
 
     @staticmethod
     def name() -> str:
@@ -188,20 +231,20 @@ class QuantaAgent(BaseAgent):  # type: ignore[misc]
         return self._model
 
     async def setup(self, environment: "BaseEnvironment") -> None:
-        """Box phase: verify the quanta brain is runnable in/alongside the env.
-
-        Probes ``<brain> --version`` and raises a clear ``RuntimeError`` if it is
-        not present (non-zero exit / not found), so a misprovisioned box fails loud
-        at setup instead of mid-run. Testable with a fake environment."""
-        adapter = HarborEnvironmentAdapter(environment)
+        """Verify the quanta brain is runnable ON THE HOST (where ``run`` spawns it as a
+        subprocess that drives the task container via ``container_exec`` — the brain is NOT
+        installed inside ``environment``). Probes ``<brain> --version`` and raises a clear
+        ``RuntimeError`` on failure, so a misconfigured host fails loud at setup instead of
+        mid-run. ``environment`` is unused here (the brain is host-side); kept for the
+        harbor ``setup(self, environment)`` contract."""
+        del environment  # host-side brain — no container probe (see _probe_brain_version)
         brain = _brain_cmd()
-        result = await adapter.exec(f"{brain} --version")
-        if result.return_code != 0:
+        rc, stderr = await _probe_brain_version(brain, _brain_env())
+        if rc != 0:
             raise RuntimeError(
-                f"quanta brain '{brain}' is not runnable in the environment "
-                f"(`{brain} --version` exited {result.return_code}); "
-                f"install it or set QUANTA_TERMINAL_BRAIN_CMD. "
-                f"stderr={result.stderr!r}"
+                f"quanta brain '{brain}' is not runnable on the host "
+                f"(`{brain} --version` exited {rc}); install it or set "
+                f"QUANTA_TERMINAL_BRAIN_CMD. stderr={stderr!r}"
             )
 
     async def run(

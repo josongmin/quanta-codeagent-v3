@@ -230,16 +230,27 @@ class ProbeEnv:
         return ExecResult(stdout="quanta-brain 0.1", stderr="", return_code=self._code)
 
 
-def test_setup_passes_when_brain_present():
-    env = ProbeEnv(version_code=0)
-    asyncio.run(QuantaAgent().setup(env))
-    assert any("--version" in c for c in env.calls)
+def test_setup_passes_when_brain_present(monkeypatch):
+    # The brain is HOST-side (run() spawns it as a subprocess), so setup() probes the host via
+    # _probe_brain_version — NOT environment.exec. A present brain ⇒ (0, "") ⇒ no raise.
+    seen = {}
+
+    async def fake_probe(brain, env):
+        seen["brain"] = brain
+        return 0, ""
+
+    monkeypatch.setattr(quanta_agent, "_probe_brain_version", fake_probe)
+    asyncio.run(QuantaAgent().setup(ProbeEnv(version_code=0)))
+    assert seen["brain"]  # the host probe ran against the resolved brain cmd
 
 
-def test_setup_raises_when_brain_absent():
-    env = ProbeEnv(version_code=127)  # command not found
+def test_setup_raises_when_brain_absent(monkeypatch):
+    async def fake_probe(brain, env):
+        return 127, "command not found"  # host PATH miss
+
+    monkeypatch.setattr(quanta_agent, "_probe_brain_version", fake_probe)
     try:
-        asyncio.run(QuantaAgent().setup(env))
+        asyncio.run(QuantaAgent().setup(ProbeEnv(version_code=127)))
     except RuntimeError as e:
         assert "brain" in str(e).lower()
     else:  # pragma: no cover
