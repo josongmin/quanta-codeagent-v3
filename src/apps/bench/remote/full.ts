@@ -472,6 +472,7 @@ export const createFullRemoteBackend = (
     })
     assertProDatasetGradeable({
       datasetPath: cfg.datasetPath,
+      ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
       surface: "full-remote",
       family: resolveDatasetFamily(undefined, process.env),
     })

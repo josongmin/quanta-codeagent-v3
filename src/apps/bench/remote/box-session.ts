@@ -314,6 +314,34 @@ const buildResumePrelaunchStep = (forwardedBenchEnv: string): string => {
   )
 }
 
+/**
+ * Build the Pro-only `KEY=val ` env prefix that points the on-box Scale verifier at
+ * the harness clone + venv python + shipped dataset, and forwards the operator's
+ * DockerHub-username / model-name overrides. PURE — deterministic over the given env.
+ *
+ * Returns "" for any non-Pro family ⇒ byte-identical to the Verified/Live path.
+ *
+ * WHY the override forward exists as a tested seam: QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
+ * and QUANTA_SWEBENCH_PRO_MODEL_NAME are read by buildProGradeVerifier (apps/bench/index.ts)
+ * to override the verifier defaults (jefzda / quanta). They are NOT `QUANTA_BENCH_*`-prefixed
+ * and are NOT in FORWARD_EXTRA_ENV, so without this they are SILENTLY DROPPED on the box — a
+ * fork whose Pro images live under a different DockerHub user would have every image-pull fail
+ * (all-infra) while the local operator's override is ignored. Forwarded ONLY when set so an
+ * unset var stays absent (byte-identical).
+ */
+export const buildProEnv = (env: NodeJS.ProcessEnv, datasetPath: string): string => {
+  if ((env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() !== "pro") return ""
+  let proEnv =
+    `QUANTA_SWEBENCH_PRO_HARNESS_DIR="$HOME/swebench-pro" ` +
+    `QUANTA_SWEBENCH_PRO_PYTHON_BIN="$HOME/swebench-pro-venv/bin/python" ` +
+    `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH=${shq(datasetPath)} `
+  if (env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)
+    proEnv += `QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME=${shq(env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)} `
+  if (env.QUANTA_SWEBENCH_PRO_MODEL_NAME)
+    proEnv += `QUANTA_SWEBENCH_PRO_MODEL_NAME=${shq(env.QUANTA_SWEBENCH_PRO_MODEL_NAME)} `
+  return proEnv
+}
+
 const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string => {
   const idsFlag =
     params.instanceIds && params.instanceIds.length > 0
@@ -324,12 +352,10 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
     : ""
   const resumePrelaunch = buildResumePrelaunchStep(params.forwardedBenchEnv)
   // Pro (RFC jun-29): point the Scale verifier at the on-box harness clone + its venv python +
-  // the shipped dataset (which doubles as the Scale --raw_sample_path). Empty for Verified/Live
-  // ⇒ byte-identical. The verifier reads these (buildProGradeVerifier).
-  const proEnv =
-    (process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() === "pro"
-      ? `QUANTA_SWEBENCH_PRO_HARNESS_DIR="$HOME/swebench-pro" QUANTA_SWEBENCH_PRO_PYTHON_BIN="$HOME/swebench-pro-venv/bin/python" QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH=${shq(paths.dataset)} `
-      : ""
+  // the shipped dataset (which doubles as the Scale --raw_sample_path), and forward the operator's
+  // DockerHub-username / model-name overrides. Empty for Verified/Live ⇒ byte-identical. The
+  // verifier reads these (buildProGradeVerifier).
+  const proEnv = buildProEnv(process.env, paths.dataset)
   return (
     // FORK-STORM GUARD (jun-28): on some repos (measured: pydata/xarray) the
     // model's repo commands run via `uv run` leaked ~4700 live `uv` processes

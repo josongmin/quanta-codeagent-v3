@@ -261,6 +261,102 @@ export interface RunHealthSummary {
  *  empty marker that distinguishes "no knobs section was wired" (impossible
  *  after this change) from "registry was empty for this run" (legitimate
  *  pre-knob baseline). */
+/**
+ * Project one graded {@link InstanceResult} (+ its {@link FailureClassification})
+ * onto its {@link PerInstanceReport} JSON entry. Extracted verbatim from the
+ * `buildReport` `perInstance.map` callback so that closure stays under the
+ * god-function line cap — pure, behaviour-identical, every conditional-spread
+ * keeps its byte-identical-legacy posture.
+ */
+const buildPerInstanceReportEntry = (
+  r: InstanceResult,
+  c: FailureClassification,
+): PerInstanceReport => {
+  const proofSummary: SelectionProofSummary | undefined = r.selectionTelemetry?.proofSummary
+  const llmEvidenceSummary =
+    r.llmEvidence !== undefined ? summarizeLlmEvidenceArtifacts(r.llmEvidence) : undefined
+  const patchBytes = Buffer.byteLength(r.patch, "utf8")
+  const touchedFiles = filesFromPatch(r.patch)
+  return {
+    id: r.id,
+    passed: r.passed,
+    turns: r.turns,
+    patchBytes,
+    ...(r.patch.trim() !== ""
+      ? {
+          modelPatchDigest: createHash("sha256").update(r.patch, "utf8").digest("hex"),
+        }
+      : {}),
+    ...(touchedFiles.length > 0 ? { touchedFiles } : {}),
+    ...(r.error !== undefined ? { error: r.error } : {}),
+    ...(r.reproArtifactPath !== undefined ? { reproArtifactPath: r.reproArtifactPath } : {}),
+    // Cost-analysis SSOT: forward the observed token usage + wall-clock so
+    // `report.json` carries what `cost.ts` reads (Gap 1). Both are omitted
+    // when observability did not capture them ⇒ byte-identical legacy shape.
+    ...(r.usage !== undefined ? { usage: r.usage } : {}),
+    ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
+    ...(c.termination !== "passed" ? { failure: c } : {}),
+    ...(r.budget !== undefined ? { budget: r.budget } : {}),
+    ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
+    ...(r.reproVoteOutcomes !== undefined ? { reproVoteOutcomes: r.reproVoteOutcomes } : {}),
+    ...(r.repairValidationDecision !== undefined
+      ? { repairValidationDecision: r.repairValidationDecision }
+      : {}),
+    ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
+    // jun-29 — forward the repair-loop diagnostics that were typed but dropped.
+    ...(r.verifyRounds !== undefined ? { verifyRounds: r.verifyRounds } : {}),
+    ...(r.primaryFalseGreen !== undefined ? { primaryFalseGreen: r.primaryFalseGreen } : {}),
+    ...(r.primaryFalseRed !== undefined ? { primaryFalseRed: r.primaryFalseRed } : {}),
+    // jun-29 — DERIVED, observe-only: the agent-side canonical oracle cleared
+    // the repair gate but the OFFICIAL harness graded unresolved (agent repro
+    // weaker than the held-out test). Computed from already-graded fields ONLY;
+    // never consulted by repair selection (no answer-key leak).
+    ...(r.repairValidationDecision?.authority === "canonical-sidecar" &&
+    r.repairValidationDecision?.issueResolved === true &&
+    r.gradeBreakdown?.resolved === false
+      ? { oracleGapFalseGreen: true }
+      : {}),
+    ...(r.reproOracleCalibration !== undefined
+      ? { reproOracleCalibration: r.reproOracleCalibration }
+      : {}),
+    ...(r.selectionTelemetry !== undefined ? { selectionTelemetry: r.selectionTelemetry } : {}),
+    ...(proofSummary !== undefined
+      ? {
+          proofState: proofSummary.proofState,
+          proofSource: proofSummary.proofSource,
+          proofRequiredMissing: proofSummary.proofRequiredMissing,
+          contractOnlySubmitted: proofSummary.contractOnlySubmitted,
+          contractOnlyBlocked: proofSummary.contractOnlyBlocked,
+          ...(proofSummary.publicMweState !== undefined
+            ? { publicMweState: proofSummary.publicMweState }
+            : {}),
+          ...(proofSummary.publicRegressionState !== undefined
+            ? { publicRegressionState: proofSummary.publicRegressionState }
+            : {}),
+          ...(proofSummary.reproConsensusState !== undefined
+            ? { reproConsensusState: proofSummary.reproConsensusState }
+            : {}),
+          repairOnlyCandidates: proofSummary.repairOnlyCandidates,
+          submittedCandidateProof: proofSummary.submittedCandidateProof,
+        }
+      : {}),
+    ...(r.verdict === "env_prep_failed" ? { envPrepFailed: true } : {}),
+    ...(r.goldResolved !== undefined ? { goldResolved: r.goldResolved } : {}),
+    ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
+    ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
+    ...(r.ownerWidening !== undefined ? { ownerWidening: r.ownerWidening } : {}),
+    ...(r.submissionReview !== undefined ? { submissionReview: r.submissionReview } : {}),
+    ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
+    ...(llmEvidenceSummary !== undefined
+      ? {
+          llmEvidenceStages: llmEvidenceSummary.stages,
+          llmEvidenceRevision: llmEvidenceSummary.revisionByStage,
+          llmEvidenceMissingKinds: llmEvidenceSummary.missingKinds,
+        }
+      : {}),
+  }
+}
+
 export const buildReport = (
   meta: BenchReportMeta & {
     n: number
@@ -331,92 +427,9 @@ export const buildReport = (
     proofTotals,
     llmEvidenceTotals,
     failureBreakdown: aggregate(failedClassifications),
-    perInstance: results.map((r, i) => {
-      const c = classifications[i] ?? { termination: "unknown", signals: [] }
-      const proofSummary: SelectionProofSummary | undefined = r.selectionTelemetry?.proofSummary
-      const llmEvidenceSummary =
-        r.llmEvidence !== undefined ? summarizeLlmEvidenceArtifacts(r.llmEvidence) : undefined
-      const patchBytes = Buffer.byteLength(r.patch, "utf8")
-      const touchedFiles = filesFromPatch(r.patch)
-      return {
-        id: r.id,
-        passed: r.passed,
-        turns: r.turns,
-        patchBytes,
-        ...(r.patch.trim() !== ""
-          ? {
-              modelPatchDigest: createHash("sha256").update(r.patch, "utf8").digest("hex"),
-            }
-          : {}),
-        ...(touchedFiles.length > 0 ? { touchedFiles } : {}),
-        ...(r.error !== undefined ? { error: r.error } : {}),
-        ...(r.reproArtifactPath !== undefined ? { reproArtifactPath: r.reproArtifactPath } : {}),
-        // Cost-analysis SSOT: forward the observed token usage + wall-clock so
-        // `report.json` carries what `cost.ts` reads (Gap 1). Both are omitted
-        // when observability did not capture them ⇒ byte-identical legacy shape.
-        ...(r.usage !== undefined ? { usage: r.usage } : {}),
-        ...(r.durationMs !== undefined ? { durationMs: r.durationMs } : {}),
-        ...(c.termination !== "passed" ? { failure: c } : {}),
-        ...(r.budget !== undefined ? { budget: r.budget } : {}),
-        ...(r.reproTest !== undefined ? { reproTest: r.reproTest } : {}),
-        ...(r.reproVoteOutcomes !== undefined ? { reproVoteOutcomes: r.reproVoteOutcomes } : {}),
-        ...(r.repairValidationDecision !== undefined
-          ? { repairValidationDecision: r.repairValidationDecision }
-          : {}),
-        ...(r.gradeBreakdown !== undefined ? { gradeBreakdown: r.gradeBreakdown } : {}),
-        // jun-29 — forward the repair-loop diagnostics that were typed but dropped.
-        ...(r.verifyRounds !== undefined ? { verifyRounds: r.verifyRounds } : {}),
-        ...(r.primaryFalseGreen !== undefined ? { primaryFalseGreen: r.primaryFalseGreen } : {}),
-        ...(r.primaryFalseRed !== undefined ? { primaryFalseRed: r.primaryFalseRed } : {}),
-        // jun-29 — DERIVED, observe-only: the agent-side canonical oracle cleared
-        // the repair gate but the OFFICIAL harness graded unresolved (agent repro
-        // weaker than the held-out test). Computed from already-graded fields ONLY;
-        // never consulted by repair selection (no answer-key leak).
-        ...(r.repairValidationDecision?.authority === "canonical-sidecar" &&
-        r.repairValidationDecision?.issueResolved === true &&
-        r.gradeBreakdown?.resolved === false
-          ? { oracleGapFalseGreen: true }
-          : {}),
-        ...(r.reproOracleCalibration !== undefined
-          ? { reproOracleCalibration: r.reproOracleCalibration }
-          : {}),
-        ...(r.selectionTelemetry !== undefined ? { selectionTelemetry: r.selectionTelemetry } : {}),
-        ...(proofSummary !== undefined
-          ? {
-              proofState: proofSummary.proofState,
-              proofSource: proofSummary.proofSource,
-              proofRequiredMissing: proofSummary.proofRequiredMissing,
-              contractOnlySubmitted: proofSummary.contractOnlySubmitted,
-              contractOnlyBlocked: proofSummary.contractOnlyBlocked,
-              ...(proofSummary.publicMweState !== undefined
-                ? { publicMweState: proofSummary.publicMweState }
-                : {}),
-              ...(proofSummary.publicRegressionState !== undefined
-                ? { publicRegressionState: proofSummary.publicRegressionState }
-                : {}),
-              ...(proofSummary.reproConsensusState !== undefined
-                ? { reproConsensusState: proofSummary.reproConsensusState }
-                : {}),
-              repairOnlyCandidates: proofSummary.repairOnlyCandidates,
-              submittedCandidateProof: proofSummary.submittedCandidateProof,
-            }
-          : {}),
-        ...(r.verdict === "env_prep_failed" ? { envPrepFailed: true } : {}),
-        ...(r.goldResolved !== undefined ? { goldResolved: r.goldResolved } : {}),
-        ...(r.scoreLabel !== undefined ? { scoreLabel: r.scoreLabel } : {}),
-        ...(r.scoreEvidence !== undefined ? { scoreEvidence: r.scoreEvidence } : {}),
-        ...(r.ownerWidening !== undefined ? { ownerWidening: r.ownerWidening } : {}),
-        ...(r.submissionReview !== undefined ? { submissionReview: r.submissionReview } : {}),
-        ...(r.llmEvidence !== undefined ? { llmEvidence: r.llmEvidence } : {}),
-        ...(llmEvidenceSummary !== undefined
-          ? {
-              llmEvidenceStages: llmEvidenceSummary.stages,
-              llmEvidenceRevision: llmEvidenceSummary.revisionByStage,
-              llmEvidenceMissingKinds: llmEvidenceSummary.missingKinds,
-            }
-          : {}),
-      }
-    }),
+    perInstance: results.map((r, i) =>
+      buildPerInstanceReportEntry(r, classifications[i] ?? { termination: "unknown", signals: [] }),
+    ),
     knobs,
     // Emit the run-health verdict ONLY when it carries signal — an abort or a
     // non-healthy diagnosis. A plain `verdict:"healthy"` run omits the field so

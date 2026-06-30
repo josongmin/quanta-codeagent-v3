@@ -26,6 +26,7 @@ import {
   rerankSelect,
   selectAdmissible,
 } from "./acceptance-rerank"
+import type { CandidateLocationFocus } from "./location-set-fanout"
 
 export interface AcceptanceCandidate {
   /** The patch we would submit if this candidate wins. */
@@ -42,6 +43,9 @@ export interface AcceptanceCandidate {
   /** REDACTED agent action trace (already bounded+redacted by the adapter — this
    *  orchestrator only forwards it). Absent ⇒ not forwarded. */
   readonly actionSummary?: string
+  /** Typed lead-file/lead-symbol focus this candidate was seeded from. Optional:
+   *  only breadth-location fanout candidates carry it. */
+  readonly locationFocus?: CandidateLocationFocus
 }
 
 /** Injected acceptance oracles. Each is OPTIONAL — its presence turns on the
@@ -63,6 +67,8 @@ export interface AcceptanceScored extends RerankCandidate {
   readonly failureOutput?: string
   /** REDACTED agent action trace (see {@link AcceptanceCandidate.actionSummary}). */
   readonly actionSummary?: string
+  /** Typed candidate-local breadth focus (lead file / symbol), if any. */
+  readonly locationFocus?: CandidateLocationFocus
 }
 
 export interface AcceptanceResult {
@@ -136,6 +142,7 @@ export const selectByAcceptance = async (
       ...(candidate.verifyCmd !== undefined ? { verifyCmd: candidate.verifyCmd } : {}),
       ...(candidate.failureOutput !== undefined ? { failureOutput: candidate.failureOutput } : {}),
       ...(candidate.actionSummary !== undefined ? { actionSummary: candidate.actionSummary } : {}),
+      ...(candidate.locationFocus !== undefined ? { locationFocus: candidate.locationFocus } : {}),
     })
     index += 1
   }

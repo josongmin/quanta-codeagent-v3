@@ -62,6 +62,34 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     ).toThrow(/fail_to_pass/)
   })
 
+  test("pro + malformed UNSELECTED row + valid SELECTED instance ⇒ passes (validate only selection)", () => {
+    const bad = validProRow("scale__bad")
+    delete (bad as Record<string, unknown>).before_repo_set_cmd
+    const path = writeJsonl([validProRow("scale__good"), bad])
+    expect(() =>
+      assertProDatasetGradeable({
+        datasetPath: path,
+        instanceIds: ["scale__good"],
+        surface: "full-remote",
+        family: "pro",
+      }),
+    ).not.toThrow()
+  })
+
+  test("pro + malformed SELECTED row ⇒ still throws (fail-closed on genuine selection)", () => {
+    const bad = validProRow("scale__bad")
+    delete (bad as Record<string, unknown>).before_repo_set_cmd
+    const path = writeJsonl([validProRow("scale__good"), bad])
+    expect(() =>
+      assertProDatasetGradeable({
+        datasetPath: path,
+        instanceIds: ["scale__bad"],
+        surface: "full-remote",
+        family: "pro",
+      }),
+    ).toThrow(RemoteDatasetPreflightError)
+  })
+
   test("pro + uppercase-ONLY FAIL_TO_PASS ⇒ throws (Scale reads lowercase fail_to_pass only)", () => {
     // Scale's create_entryscript does `eval(raw_sample["fail_to_pass"])` (lowercase) — an
     // uppercase-only row would KeyError there → all-infra. The preflight must catch it.

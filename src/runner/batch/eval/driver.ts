@@ -293,7 +293,10 @@ import {
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 import { extractVerificationOwnerTestExpectations } from "./verification-owner-test-expectations"
-import { discoverVerificationOwnerTests } from "./verification-owner-tests"
+import {
+  discoverVerificationOwnerTestsPlan,
+  type VerificationOwnerTestsPlan,
+} from "./verification-owner-tests"
 
 export {
   buildSelectionCandidateFamilyBundle,
@@ -2740,26 +2743,37 @@ const wirePostureAgentPorts = (args: {
  * Bench budget meter (reused attempt-wide by the apps driver, or per-config by
  * direct callers). The bench harness assembles its config via `buildConfig`
  * (NOT the host `assembleAgentConfig`), so the batch preset dials and the
- * autonomous-mode cost caps never reached it directly. This mints a real
- * `BudgetMeter` from the canonical `BUDGET_PRESETS.batch` dials, but it strips
- * the preset's default `maxCostUsd` so bench does NOT silently acquire a new
- * default dollar cap. Operators may still opt into cumulative and/or per-turn
- * cost ceilings via `QUANTA_BENCH_MAX_COST_USD` and
- * `QUANTA_BENCH_MAX_COST_PER_TURN_USD` (positive USD, fractional allowed).
- * Once the meter exists, the SAME L0/L2/L3 machinery engages: `emitUsage` ticks
- * the priced cost, the turn epilogue `checkExhausted` stops on the first
- * tripped dial, and the pre-flight refuses a guaranteed-breach call. A
- * caller-provided `budgetMeterFactory` still wins. Exported for direct unit
- * testing. */
-export const benchBudgetMeterFromEnv = (env: Record<string, string | undefined>): BudgetMeter => {
+ * autonomous-mode cost caps never reached it directly.
+ *
+ * DEFAULT-OFF (HARD byte-identical invariant): with NO operator cost cap set, this
+ * returns `undefined` ⇒ no meter ⇒ the bench loop keeps its prior behavior exactly
+ * (no new always-on `maxTurns`/`maxWallClockMs`/`maxConsecutiveFailures`/call caps
+ * that could abort a legitimate hard-instance repair trajectory mid-solve and
+ * record it as a real miss — a measurement confound). Bounding bench unconditionally
+ * is a posture change that must ride its OWN opt-in knob + an A/B, not the default.
+ *
+ * A meter is minted ONLY when an operator opts into a cumulative and/or per-turn
+ * cost ceiling via `QUANTA_BENCH_MAX_COST_USD` / `QUANTA_BENCH_MAX_COST_PER_TURN_USD`
+ * (positive USD, fractional allowed). Once opted in, it ALSO carries the canonical
+ * batch dials (minus the preset's default dollar cap) so a cost-capped run is fully
+ * bounded, and the SAME L0/L2/L3 machinery engages: `emitUsage` ticks the priced
+ * cost, the turn epilogue `checkExhausted` stops on the first tripped dial, and the
+ * pre-flight refuses a guaranteed-breach call. A caller-provided
+ * `budgetMeterFactory` still wins. Exported for direct unit testing. */
+export const benchBudgetMeterFromEnv = (
+  env: Record<string, string | undefined>,
+): BudgetMeter | undefined => {
   const posUsd = (raw: string | undefined): number | undefined => {
     if (raw === undefined) return undefined
     const n = Number.parseFloat(raw.trim())
     return Number.isFinite(n) && n > 0 ? n : undefined
   }
-  const { maxCostUsd: _defaultBatchCostCap, ...batchDialsSansDefaultCost } = BUDGET_PRESETS.batch
   const maxCostUsd = posUsd(env.QUANTA_BENCH_MAX_COST_USD)
   const maxCostPerTurnUsd = posUsd(env.QUANTA_BENCH_MAX_COST_PER_TURN_USD)
+  // No operator cost cap ⇒ NO meter (byte-identical default-OFF). The batch dials
+  // engage only as a side-effect of an opted-in cost cap below.
+  if (maxCostUsd === undefined && maxCostPerTurnUsd === undefined) return undefined
+  const { maxCostUsd: _defaultBatchCostCap, ...batchDialsSansDefaultCost } = BUDGET_PRESETS.batch
   return new BudgetMeter({
     dials: {
       ...batchDialsSansDefaultCost,
@@ -3649,6 +3663,7 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  ownerNearRegressionSet: readonly string[],
   verificationTarget: VerificationTargetFact | undefined,
   /** jun-26 repair spec gate / jun-28 strong-oracle: PUBLIC issue-declared expected
    *  output (from the closure session). Composed into the repair `evaluatePredicate`
@@ -3658,6 +3673,7 @@ const runRepairPhase = async (
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
   chaMultisiteSteer?: string,
+  chaRepairTargets?: readonly ChaRepairTarget[],
   /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
    *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
    *  (byte-identical). Passed into the repair-breadth deps. */
@@ -3772,21 +3788,58 @@ const runRepairPhase = async (
                   ),
               }
             : {}),
+          ...(repairPosture.selectorMode === "clean"
+            ? {
+                deriveCandidateStructuralRepair: (candidate: Candidate, candidateSandbox: string) =>
+                  deriveCandidateStructuralRepair({
+                    instance,
+                    candidate,
+                    sandbox: candidateSandbox,
+                    signal,
+                    ...(chaRepairTargets !== undefined
+                      ? { preferredTargets: chaRepairTargets }
+                      : {}),
+                  }),
+              }
+            : {}),
+          ...(repairPosture.selectorMode === "clean" &&
+          familyCoverageCoeditEnabled(process.env)
+            ? {
+                repairFamilyCoverage: ({
+                  sandbox: candidateSandbox,
+                  candidate,
+                  family,
+                  missingFiles,
+                }) =>
+                  coeditFamilyCoverageCandidate({
+                    sandbox: candidateSandbox,
+                    candidate,
+                    family,
+                    missingFiles,
+                    timeoutMs: deps.timeoutMs,
+                    baseCommit: instance.swebench?.baseCommit,
+                    repo: instance.swebench?.repo,
+                    ...(chaRepairTargets !== undefined
+                      ? { preferredTargets: chaRepairTargets }
+                      : {}),
+                  }),
+              }
+            : {}),
           // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined
           // ⇒ shared base seed ⇒ byte-identical).
           ...(perCandidateSeed !== undefined ? { perCandidateSeed } : {}),
         })
       : undefined
-  // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only). SHARED
-  // wiring (`makeAcceptanceSelectCandidates`) so both drivers agree. ABSENT ⇒
-  // legacy validator-rank selection (byte-identical).
+  // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
+  // reproducing set and the owner-near PUBLIC regression set that was confirmed
+  // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
     sandbox,
     deps.timeoutMs,
     repairPosture.acceptance,
-    undefined,
+    ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
   const patch = await withGitSnapshot(
@@ -4973,6 +5026,7 @@ export interface PreparedAttemptContext extends HintReproContext {
   readonly closureSession: ClosureSessionState | undefined
   readonly verificationPlan: ClosureSessionState["bundle"]["plan"] | undefined
   readonly existingTestExpectations: readonly string[]
+  readonly ownerNearRegressionSet: readonly string[]
   readonly primaryRailStep: PrimaryRailStep | undefined
   readonly closureHint: string | undefined
   readonly intakeLlmEvidence: LlmEvidencePacket
@@ -5306,6 +5360,7 @@ const buildClosureAttemptState = (args: {
   readonly witnessOwners?: readonly { file: string; forSymbol?: string }[]
   readonly reproTest: BenchReproTestTelemetry | undefined
   readonly ownerNearTests?: readonly string[]
+  readonly ownerNearPrimaryBaseValidatedRed?: boolean
 }): ClosureSessionState | undefined =>
   args.instance.swebench === undefined
     ? undefined
@@ -5327,6 +5382,9 @@ const buildClosureAttemptState = (args: {
           : {}),
         ...(args.ownerNearTests !== undefined && args.ownerNearTests.length > 0
           ? { ownerNearTests: args.ownerNearTests }
+          : {}),
+        ...(args.ownerNearPrimaryBaseValidatedRed === true
+          ? { ownerNearPrimaryBaseValidatedRed: true }
           : {}),
         posture: {
           lspNav: args.posture.lspNav,
@@ -5448,16 +5506,19 @@ export const prepareAttemptContext = async (
     ownerResolved,
     stage1Files,
   })
-  const ownerNearTests =
+  const ownerNearTestPlan: VerificationOwnerTestsPlan =
     instance.swebench === undefined ||
     !(hintRepro.posture.verificationPlan || hintRepro.posture.primaryRail)
-      ? []
-      : await discoverVerificationOwnerTests({
+      ? { commands: [], testPaths: [], baseGreenTestPaths: [], primaryBaseState: "unavailable" }
+      : await discoverVerificationOwnerTestsPlan({
           instance,
           sandbox,
           timeoutMs: deps.timeoutMs,
           ownerCandidates,
         })
+  const ownerNearTests = ownerNearTestPlan.commands
+  const ownerNearRegressionSet = ownerNearTestPlan.baseGreenTestPaths
+  const ownerNearPrimaryBaseValidatedRed = ownerNearTestPlan.primaryBaseState === "red"
   // T2 — command-derived test paths take precedence; when empty, the extractor
   // falls back to a bounded convention-based source search over the localized
   // owner modules (only files that exist are read). Gated to the SAME condition
@@ -5481,6 +5542,7 @@ export const prepareAttemptContext = async (
     witnessOwners,
     reproTest: hintRepro.reproTest,
     ownerNearTests,
+    ...(ownerNearPrimaryBaseValidatedRed ? { ownerNearPrimaryBaseValidatedRed } : {}),
   })
   const intakeLlmEvidence = buildIntakeLlmEvidencePacket({
     problemStatement: instance.problemStatement,
@@ -5500,6 +5562,7 @@ export const prepareAttemptContext = async (
     closureSession,
     verificationPlan: closureSession?.bundle.plan,
     existingTestExpectations,
+    ownerNearRegressionSet,
     primaryRailStep: closureSession?.primaryRailStep,
     closureHint: closureSession?.closureHint,
     intakeLlmEvidence,
@@ -5583,11 +5646,13 @@ const runMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      args.prepared.ownerNearRegressionSet,
       verificationTargetFromPlan(args.prepared.verificationPlan),
       args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
       args.prepared.chaMultisiteSteer,
+      args.prepared.chaRepairTargets,
       resolveLocationFanoutSeeder(
         repairFanoutFiles,
         args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,

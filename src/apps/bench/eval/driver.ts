@@ -646,6 +646,7 @@ const runRepairPhase = async (
   primaryRailStep: PrimaryRailStep | undefined,
   siblingOwners: readonly string[],
   reproSources: readonly string[],
+  ownerNearRegressionSet: readonly string[],
   verificationTarget: VerificationTargetFact | undefined,
   /** jun-26 repair spec gate: PUBLIC issue-declared expected output (from the
    *  closure session). Only consumed when `QUANTA_BENCH_REPAIR_SPEC_GATE` is on AND
@@ -653,6 +654,7 @@ const runRepairPhase = async (
   issueDeclaredExpected: IssueDeclaredExpected | undefined,
   postureOverride?: BenchPosture,
   stateOverride?: BenchKnobState,
+  chaRepairTargets?: PreparedAttemptContext["chaRepairTargets"],
   /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
    *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
    *  (byte-identical). */
@@ -761,20 +763,61 @@ const runRepairPhase = async (
                   ),
               }
             : {}),
+          ...(repairPosture.selectorMode === "clean"
+            ? {
+                deriveCandidateStructuralRepair: (
+                  candidate: Candidate,
+                  candidateSandbox: string,
+                ) =>
+                  deriveCandidateStructuralRepair({
+                    instance,
+                    candidate,
+                    sandbox: candidateSandbox,
+                    signal,
+                    ...(chaRepairTargets !== undefined
+                      ? { preferredTargets: chaRepairTargets }
+                      : {}),
+                  }),
+              }
+            : {}),
+          ...(repairPosture.selectorMode === "clean" &&
+          familyCoverageCoeditEnabled(process.env)
+            ? {
+                repairFamilyCoverage: ({
+                  sandbox: candidateSandbox,
+                  candidate,
+                  family,
+                  missingFiles,
+                }) =>
+                  coeditFamilyCoverageCandidate({
+                    sandbox: candidateSandbox,
+                    candidate,
+                    family,
+                    missingFiles,
+                    timeoutMs: deps.timeoutMs,
+                    baseCommit: instance.swebench?.baseCommit,
+                    repo: instance.swebench?.repo,
+                    ...(chaRepairTargets !== undefined
+                      ? { preferredTargets: chaRepairTargets }
+                      : {}),
+                  }),
+              }
+            : {}),
           // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined
           // ⇒ shared base seed ⇒ byte-identical).
           ...(perCandidateSeed !== undefined ? { perCandidateSeed } : {}),
         })
       : undefined
-  // jun-28 SOTA++ Phase-A acceptance selector (default-OFF, repro-only) — SHARED
-  // wiring with the runner driver. ABSENT ⇒ legacy selection (byte-identical).
+  // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
+  // reproducing set and the owner-near PUBLIC regression set that was confirmed
+  // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
     sandbox,
     deps.timeoutMs,
     repairPosture.acceptance,
-    undefined,
+    ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
   const patch = await withGitSnapshot(
@@ -1703,10 +1746,12 @@ const runAppMainPhase = async (args: {
       args.prepared.primaryRailStep,
       args.prepared.ownerResolved?.map((o) => o.file) ?? [],
       args.prepared.reproSources,
+      args.prepared.ownerNearRegressionSet,
       verificationTargetFromPlan(args.prepared.verificationPlan),
       args.prepared.closureSession?.issueDeclaredExpected,
       args.prepared.posture,
       args.prepared.state,
+      args.prepared.chaRepairTargets,
       resolveLocationFanoutSeeder(
         repairFanoutFiles,
         args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,

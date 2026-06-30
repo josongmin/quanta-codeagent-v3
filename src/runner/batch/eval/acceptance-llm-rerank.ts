@@ -36,6 +36,7 @@ const toSelectCandidate = (c: AcceptanceScored): LlmSelectCandidate => ({
   touchedFiles: patchFiles(c.patch),
   reproPass: c.reproPass,
   regressionFailures: c.regressionFailures,
+  ...(c.locationFocus !== undefined ? { locationFocus: c.locationFocus } : {}),
   ...(c.verifyCmd !== undefined ? { verifyCmd: c.verifyCmd } : {}),
   ...(c.failureOutput !== undefined ? { failureOutput: c.failureOutput } : {}),
   ...(c.actionSummary !== undefined ? { actionSummary: c.actionSummary } : {}),

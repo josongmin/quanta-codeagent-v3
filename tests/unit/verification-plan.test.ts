@@ -16,6 +16,7 @@ describe("buildVerificationPlan", () => {
     expect(p.primaryRail?.cmd).toBe("python reproduce_issue.py")
     expect(p.required[0]).toBe(p.primaryRail ?? undefined)
     expect(p.baseValidatedRed).toBe(true)
+    expect(p.primaryRailBaseValidatedRed).toBe(true)
   })
 
   test("repro NOT validated red is demoted to optional, never primaryRail/required", () => {
@@ -27,12 +28,24 @@ describe("buildVerificationPlan", () => {
     expect(p.primaryRail?.cmd).toBe("pytest tests/owner_test.py")
     expect(p.required.some((s) => s.kind === "repro")).toBe(false)
     expect(p.optional.some((s) => s.kind === "repro")).toBe(true)
+    expect(p.primaryRailBaseValidatedRed).toBe(false)
   })
 
   test("no repro → primary from owner-near test (public evidence)", () => {
     const p = buildVerificationPlan({ ownerNearTests: ["pytest a.py", "pytest b.py"] })
     expect(p.primaryRail?.kind).toBe("owner-test")
     expect(p.primaryRail?.cmd).toBe("pytest a.py")
+    expect(p.primaryRailBaseValidatedRed).toBe(false)
+  })
+
+  test("owner-test base-red proof is tracked separately from synth repro proof", () => {
+    const p = buildVerificationPlan({
+      ownerNearTests: ["pytest owner.py"],
+      ownerNearPrimaryBaseValidatedRed: true,
+    })
+    expect(p.primaryRail?.kind).toBe("owner-test")
+    expect(p.baseValidatedRed).toBe(false)
+    expect(p.primaryRailBaseValidatedRed).toBe(true)
   })
 
   test("required hard-capped at 3, overflow → optional", () => {

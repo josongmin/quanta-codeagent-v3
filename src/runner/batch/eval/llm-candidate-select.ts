@@ -19,6 +19,8 @@
  * deterministic winner. Default-OFF ⇒ never invoked ⇒ byte-identical.
  */
 
+import type { CandidateLocationFocus } from "./location-set-fanout"
+
 /** One candidate as the selector sees it (no full source — bounded diff + signals). */
 export interface LlmSelectCandidate {
   /** Stable id used to refer to the candidate in the prompt + returned by parse. */
@@ -29,6 +31,9 @@ export interface LlmSelectCandidate {
   /** Execution signals already computed by the deterministic rail. */
   readonly reproPass: boolean
   readonly regressionFailures: number
+  /** Typed lead-file / lead-symbol focus that generated this candidate. Optional:
+   *  present only when breadth fanout deliberately diversified edit sites. */
+  readonly locationFocus?: CandidateLocationFocus
   /** jun-30 SOTA++ per-candidate EXECUTION EVIDENCE (optional). The agent's last
    *  verification command — the exact command whose output discriminates a
    *  correct edit from a "right file, wrong edit". Absent ⇒ no command section. */
@@ -71,10 +76,27 @@ const renderEvidence = (c: LlmSelectCandidate): readonly string[] => {
   return out
 }
 
+const renderLocationFocus = (c: LlmSelectCandidate): readonly string[] => {
+  const focus = c.locationFocus
+  if (focus === undefined || focus.leadFile.trim() === "") return []
+  return [
+    "location_focus:",
+    `- lead_file: ${focus.leadFile}`,
+    `- related_files: ${focus.relatedFiles.join(", ") || "(none)"}`,
+    ...(typeof focus.leadSymbol === "string" && focus.leadSymbol.trim() !== ""
+      ? [`- lead_symbol: ${focus.leadSymbol}`]
+      : []),
+    ...(focus.otherSymbols !== undefined
+      ? [`- other_symbols: ${focus.otherSymbols.join(", ") || "(none)"}`]
+      : []),
+  ]
+}
+
 const renderCandidate = (c: LlmSelectCandidate): string =>
   [
     `### candidate ${c.id}`,
     `files: ${c.touchedFiles.join(", ") || "(none)"}`,
+    ...renderLocationFocus(c),
     `repro_pass: ${c.reproPass} | regression_failures: ${c.regressionFailures}`,
     ...renderEvidence(c),
     "```diff",

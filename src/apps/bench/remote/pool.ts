@@ -78,6 +78,7 @@ const assertPoolChunksLaunchable = (chunks: readonly PoolChunk[], cfg: PoolConfi
     })
     assertProDatasetGradeable({
       datasetPath: chunk.datasetPath,
+      ...(chunk.instanceIds !== undefined ? { instanceIds: chunk.instanceIds } : {}),
       surface: `pool chunk ${chunk.runId}`,
       family: resolveDatasetFamily(undefined, process.env),
     })

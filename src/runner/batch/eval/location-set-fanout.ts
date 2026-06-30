@@ -107,8 +107,24 @@ export const renderSymbolHint = (set: SymbolLocationSet): string => {
   ].join("\n")
 }
 
-/** The `perCandidateSeed` port shape (matches repair-breadth's optional seam). */
-export type PerCandidateSeed = (index: number, baseSeed: string | undefined) => string | undefined
+/** Typed candidate-local location focus, carried alongside the textual seed so
+ *  downstream selection/review can compare WHICH owner surface each breadth fork
+ *  explored without reparsing prompt strings. SOURCE-ONLY: derived solely from the
+ *  localizer/owner-ranked files and optional same-file symbols. */
+export interface CandidateLocationFocus {
+  readonly leadFile: string
+  readonly relatedFiles: readonly string[]
+  readonly leadSymbol?: string
+  readonly otherSymbols?: readonly string[]
+}
+
+/** The `perCandidateSeed` port shape (matches repair-breadth's optional seam).
+ *  `focusOf(index)` is OPTIONAL typed metadata for the same candidate rotation.
+ *  Callers that only need the seed remain byte-identical. */
+export interface PerCandidateSeed {
+  (index: number, baseSeed: string | undefined): string | undefined
+  focusOf?: (index: number) => CandidateLocationFocus | undefined
+}
 
 const normalizeFileKey = (raw: string): string => {
   let file = raw.trim().replaceAll("\\", "/")
@@ -203,10 +219,20 @@ export const buildLocationSeeder = (
 ): PerCandidateSeed | undefined => {
   const fileSets = partitionLocationSets(rankedFiles, n)
   if (fileSets.length > 0) {
-    return (index, baseSeed) => {
+    const seed: PerCandidateSeed = (index, baseSeed) => {
       const set = fileSets[index % fileSets.length]
       return set === undefined ? baseSeed : `${baseSeed ?? ""}${renderLocationHint(set)}`
     }
+    seed.focusOf = (index) => {
+      const set = fileSets[index % fileSets.length]
+      return set === undefined
+        ? undefined
+        : {
+            leadFile: set.lead,
+            relatedFiles: set.related,
+          }
+    }
+    return seed
   }
   // Single-file fallback: rotate the lead SYMBOL so the fanout is not inert when the
   // issue localizes to one file but names several candidate symbols.
@@ -214,10 +240,22 @@ export const buildLocationSeeder = (
   if (onlyFile !== undefined) {
     const symbolSets = partitionSymbolSets(onlyFile, issueSymbols, n)
     if (symbolSets.length > 0) {
-      return (index, baseSeed) => {
+      const seed: PerCandidateSeed = (index, baseSeed) => {
         const set = symbolSets[index % symbolSets.length]
         return set === undefined ? baseSeed : `${baseSeed ?? ""}${renderSymbolHint(set)}`
       }
+      seed.focusOf = (index) => {
+        const set = symbolSets[index % symbolSets.length]
+        return set === undefined
+          ? undefined
+          : {
+              leadFile: set.file,
+              relatedFiles: [],
+              leadSymbol: set.lead,
+              otherSymbols: set.otherSymbols,
+            }
+      }
+      return seed
     }
   }
   return undefined

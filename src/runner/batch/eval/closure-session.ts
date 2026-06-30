@@ -41,6 +41,8 @@ type BuildClosureSessionArgs = {
   witnessOwners?: readonly { file: string; forSymbol?: string }[]
   reproScript?: { cmd: string; baseValidatedRed: boolean; pytestReportPath?: string }
   ownerNearTests?: readonly string[]
+  /** Base-tree RED proof for the PRIMARY owner-test fallback rail. */
+  ownerNearPrimaryBaseValidatedRed?: boolean
   posture: ClosureSessionPosture
   /** T-OWN-12: opt into rule-based clean owner admission (authoritative/advisory
    *  lattice, no additive score). Default/omitted ⇒ legacy scored behavior,
@@ -84,6 +86,9 @@ const closureBundleInputOf = (args: {
       ...(args.session.ownerNearTests !== undefined && args.session.ownerNearTests.length > 0
         ? { ownerNearTests: args.session.ownerNearTests }
         : {}),
+      ...(args.session.ownerNearPrimaryBaseValidatedRed === true
+        ? { ownerNearPrimaryBaseValidatedRed: true }
+        : {}),
       ...(args.issueDeclaredExpected !== undefined
         ? { issueDeclaredExpected: args.issueDeclaredExpected }
         : {}),
@@ -107,7 +112,12 @@ const closureBundleInputOf = (args: {
       stakes: { patchFileCount: 1, crossFile: false, destructive: false },
       uncertainty: { sampleDisagreement: false, unresolvedSymbols: false },
       signal: {
-        reproAvailable: args.session.reproScript?.baseValidatedRed === true,
+        // GateDecision's `reproAvailable` bit is the practical "cheap execution
+        // rail already exists" signal. A base-red owner-test fallback rail is the
+        // same class of external execution evidence for commit-vs-verify purposes.
+        reproAvailable:
+          args.session.reproScript?.baseValidatedRed === true ||
+          args.session.ownerNearPrimaryBaseValidatedRed === true,
         lspAvailable: args.session.posture.lspNav,
       },
       issueProvidesFix: args.issueDeclaredExpected !== undefined,

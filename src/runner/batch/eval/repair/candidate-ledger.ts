@@ -31,6 +31,10 @@ export interface CandidatePoolRow {
   /** The validator's repro/consensus outcome label when present (resolved /
    *  reproduced / inconclusive / …) — the selection-authority signal. */
   readonly reproOutcome?: string
+  /** Typed lead site this candidate was seeded from, when repair breadth rotated
+   *  files/symbols. Observe-only RCA aid. */
+  readonly leadFile?: string
+  readonly leadSymbol?: string
 }
 
 /**
@@ -84,5 +88,9 @@ export const buildCandidatePoolRows = (
       touchedFiles: touchedFilesFromDiff(patch),
       validatorOk: c.validator.ok === true,
       ...(reproOutcome !== undefined ? { reproOutcome } : {}),
+      ...(c.locationFocus?.leadFile !== undefined ? { leadFile: c.locationFocus.leadFile } : {}),
+      ...(c.locationFocus?.leadSymbol !== undefined
+        ? { leadSymbol: c.locationFocus.leadSymbol }
+        : {}),
     }
   })

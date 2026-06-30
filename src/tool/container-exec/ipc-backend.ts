@@ -93,6 +93,16 @@ export const containerExecOverIpc = (duplex: JsonLineDuplex): ContainerExec => {
   return {
     exec(command: string, signal?: AbortSignal): Promise<ContainerExecResult> {
       if (closed) return Promise.reject(closed) // transport already dead — never register a never-settled call
+      // Already-aborted BEFORE start: reject immediately and send NO frame. Sending `exec` would run a
+      // command the caller already abandoned (the hands side has never seen this id, so a `cancel`
+      // frame is a no-op — it cannot recall an exec we have not yet sent). No id is consumed, no
+      // pending entry is registered, no listener is attached. Mirrors tool.ts's pre-start guard, but
+      // since the export rejects (the tool maps that to ok:false), surface a typed AbortError.
+      if (signal?.aborted) {
+        const e = new Error("aborted before start")
+        e.name = "AbortError"
+        return Promise.reject(e)
+      }
       const id = nextId++
       return new Promise<ContainerExecResult>((resolve, reject) => {
         // Settle wrapper removes the abort listener + the pending entry on EVERY exit path (resolve

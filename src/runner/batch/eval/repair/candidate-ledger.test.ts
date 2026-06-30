@@ -85,6 +85,22 @@ describe("buildCandidatePoolRows", () => {
     expect(rows[2]?.reproOutcome).toBeUndefined()
   })
 
+  test("typed lead file/symbol from location fanout is persisted for RCA", () => {
+    const [row] = buildCandidatePoolRows(0, [
+      {
+        ...fakeCandidate("diff --git a/pkg/core.py b/pkg/core.py\n@@", false),
+        locationFocus: {
+          leadFile: "pkg/core.py",
+          relatedFiles: ["pkg/utils.py"],
+          leadSymbol: "render",
+          otherSymbols: ["parse"],
+        },
+      },
+    ])
+    expect(row?.leadFile).toBe("pkg/core.py")
+    expect(row?.leadSymbol).toBe("render")
+  })
+
   test("empty pool ⇒ [] (degenerate fan-out, no rows)", () => {
     expect(buildCandidatePoolRows(0, [])).toEqual([])
   })

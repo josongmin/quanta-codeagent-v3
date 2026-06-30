@@ -22,6 +22,7 @@ from quanta_terminal_bridge import (  # noqa: E402
     parse_line,
     serve,
 )
+from quanta_terminal_bridge.serve import _SHUTDOWN_GRACE_SECONDS  # noqa: E402
 
 
 class FakeEnv:
@@ -255,6 +256,50 @@ def test_serve_reused_id_cancel_reaches_the_LIVE_second_task():
         return task2_cancelled.is_set()
 
     assert asyncio.run(scenario()) is True
+
+
+def test_serve_shutdown_drain_is_bounded_when_an_exec_is_wedged():
+    # SHUTDOWN-DEADLOCK guard. The brain closes its stdout (lines exhausted) while an exec is
+    # wedged inside env.exec — a hung container command that never returns: it awaits a Future
+    # nobody ever resolves. The OLD `finally` did an unbounded, un-cancelled
+    # `gather(*pending)` → serve() would block FOREVER at teardown, hanging the whole agent
+    # process. The fix bounds the drain (grace window, then cancel) so serve() RETURNS.
+    #
+    # We prove it by wrapping serve() in wait_for with a timeout comfortably larger than the
+    # bounded drain but still small: if serve hung, this raises TimeoutError; it must NOT.
+    async def scenario():
+        started = asyncio.Event()
+
+        class WedgedEnv:
+            async def exec(self, command):
+                started.set()
+                # Park forever on a Future nobody resolves — models a hung container command
+                # with no result and no progress. (On the drain's cancel this propagates and
+                # the task unwinds; the point under test is that we don't wait on it unbounded.)
+                await asyncio.get_event_loop().create_future()
+
+        async def line_iter():
+            yield json.dumps({"id": 0, "type": "exec", "command": "wedged"})
+            await started.wait()  # ensure the wedged exec is actually in flight
+            # ...then the brain closes stdout: iterator ends → serve breaks → drains `pending`.
+
+        async def write(_line):
+            pass
+
+        started_at = asyncio.get_event_loop().time()
+        # Headroom = 2 graces (grace window + post-cancel window) + slack, still small.
+        await asyncio.wait_for(
+            serve(line_iter(), write, WedgedEnv()),
+            timeout=_SHUTDOWN_GRACE_SECONDS * 2 + 1.0,
+        )
+        # Sanity: it must have actually entered the bounded drain (not returned trivially),
+        # i.e. it waited ~one grace before the cancel let it finish — but well under the cap.
+        elapsed = asyncio.get_event_loop().time() - started_at
+        assert elapsed >= _SHUTDOWN_GRACE_SECONDS  # the grace window really elapsed
+        assert elapsed < _SHUTDOWN_GRACE_SECONDS * 2 + 1.0  # and stayed bounded
+
+    # Must complete without TimeoutError — i.e. serve() returned despite the wedged exec.
+    asyncio.run(scenario())
 
 
 def test_cancel_AFTER_completion_emits_no_spurious_error_frame():

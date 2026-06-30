@@ -125,12 +125,43 @@ describe("closure-diagnostics-io", () => {
     expect(f.crossFile).toBe(true)
   })
 
-  test("buildFacts: absent patchBudget ⇒ budget facts null (metric unavailable, not false)", () => {
-    const r: InstanceResult = { id: "none", passed: true, patch: "diff --git a/x b/x\n", turns: 1 }
+  test("buildFacts: absent patchBudget still derives crossFile offline while other budget facts stay null", () => {
+    const r: InstanceResult = {
+      id: "none",
+      passed: true,
+      patch: "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n",
+      turns: 1,
+    }
     const f = buildFacts([r])[0]!
     expect(f.overBudget).toBeNull()
     expect(f.newDef).toBeNull()
-    expect(f.crossFile).toBeNull()
+    expect(f.crossFile).toBe(false)
+  })
+
+  test("buildFacts: absent patchBudget + multi-source diff ⇒ crossFile stays observable", () => {
+    const r: InstanceResult = {
+      id: "cross",
+      passed: false,
+      patch: [
+        "diff --git a/x.py b/x.py",
+        "--- a/x.py",
+        "+++ b/x.py",
+        "@@",
+        "-old",
+        "+new",
+        "diff --git a/y.py b/y.py",
+        "--- a/y.py",
+        "+++ b/y.py",
+        "@@",
+        "-old",
+        "+new",
+      ].join("\n"),
+      turns: 1,
+    }
+    const f = buildFacts([r])[0]!
+    expect(f.overBudget).toBeNull()
+    expect(f.newDef).toBeNull()
+    expect(f.crossFile).toBe(true)
   })
 
   test("buildFacts treats verdict-excluded instances as ungraded (resolved=null)", () => {

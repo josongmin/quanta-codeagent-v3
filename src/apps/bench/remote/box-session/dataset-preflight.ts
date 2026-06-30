@@ -208,6 +208,7 @@ const proRowMissingFields = (row: Record<string, unknown>): string[] => {
  *  lack the Scale-harness-required columns, rather than discovering it as an all-infra remote slice. */
 export const assertProDatasetGradeable = (args: {
   readonly datasetPath: string
+  readonly instanceIds?: readonly string[]
   readonly surface: string
   readonly family: string
 }): void => {
@@ -216,8 +217,16 @@ export const assertProDatasetGradeable = (args: {
     datasetPath: args.datasetPath,
     surface: args.surface,
   })
+  // Only validate the OPERATOR-SELECTED rows when an `--instance` filter is provided — an
+  // unselected malformed row must not refuse a run that targets a single sound instance. With no
+  // filter (`instanceIds` absent/empty) the whole dataset is validated, unchanged.
+  const selected =
+    args.instanceIds !== undefined && args.instanceIds.length > 0
+      ? new Set(args.instanceIds)
+      : undefined
   const offenders: string[] = []
   for (const { instanceId, record } of rows) {
+    if (selected !== undefined && !selected.has(instanceId)) continue
     const missing = proRowMissingFields(record)
     if (missing.length > 0) offenders.push(`${instanceId} (missing: ${missing.join(", ")})`)
   }

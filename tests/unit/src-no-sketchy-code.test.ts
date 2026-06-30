@@ -84,6 +84,18 @@ const RULES: readonly Rule[] = [
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count.",
       "apps/bench/remote/box-session/types.ts":
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_INSTANCE_TYPE) read in the provision-config defaults; same bench-only opt-in env posture as the sibling ec2-lifecycle.ts. Downstream gets the resolved instance type.",
+      "apps/bench/remote/box-session.ts":
+        "Bench full-remote box-LAUNCH command composition — resolves the dataset family/namespace (QUANTA_SWEBENCH_DATASET_FAMILY / _DATASET_NAME, RFC jun-29 Pro verifier env) at box-provision time to assemble the on-box run command string; same bench-only opt-in launch posture as the sibling box-session/ec2-lifecycle.ts + box-session/types.ts entries. The box receives a resolved command, not live env.",
+      "apps/bench/remote/pool.ts":
+        "Bench full-remote pool composition root — `resolveDatasetFamily(undefined, process.env)` resolves the dataset family at pool-launch; same bench-only opt-in launch posture as box-session/ec2-lifecycle.ts. Downstream chunks receive the resolved family.",
+      "apps/bench/remote/pool/worker.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param of `resumeForwardEnvFor`; the resume config + aws creds are read off that param, tests pass a fake env. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
+      "apps/bench/resume/resume-launch.ts":
+        "BOX-SIDE prelaunch entrypoint (`bun run resume-launch.ts`) — reads QUANTA_BENCH_INSTANCE_ID at launch and threads `process.env` into `prepareResume(env, id)` (which reads off the param); composition-root posture same as apps/bench/index.ts. Downstream gets the resolved replay env.",
+      "runner/batch/eval/sandbox.ts":
+        "Bench-only opt-in resume gate (QUANTA_BENCH_RESUME) read inline at the deterministic-sandbox-path decision (the file documents it is intentionally inline, owned elsewhere — not a config module); same bench-only opt-in env-gate posture as runner/batch/eval/driver.ts.",
+      "lsp/server-rss-watchdog.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param; the RSS-watchdog reads its budget gate off that param, tests pass a fake env. Same DI-boundary posture as lsp/server-mem-budget.ts.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
       "apps/probe/index.ts":
         "probe CLI bootstraps env before module loads (same posture as other CLI entries)",
@@ -362,6 +374,10 @@ const RULES: readonly Rule[] = [
         "jun-06 atomic-write harden: temp-file cleanup on a FAILED rename (`unlink(tmp).catch(() => {})`) — the real rename error is about to be RETHROWN, so a cleanup failure is non-fatal and there is nothing to surface (same best-effort posture as tool/browser/session-holder.ts).",
       "apps/bench/python-swebench.ts":
         "Grading-lock chain: `await prev.catch(() => {})` waits for the PREVIOUS grading task and explicitly ignores its outcome — the lock is used for sequencing, not error detection, and the caller always receives the current task's result via the finally/release path. Documented inline.",
+      "apps/bench/otel-trace-sink.ts":
+        "Embedded-sink shutdown drain: `spanSink.flush().catch(() => {})` in the idempotent `stop()` — the trace server is being torn down, the last-batch flush is best-effort and there is nowhere to surface a drain error. Same session-ending best-effort posture as agent/loop.ts.",
+      "apps/bench/remote/bootstrap-tracer.ts":
+        "Bootstrap-span emission/teardown best-effort (2 sites): `exporter.flush().catch(() => {})` and `exporter.teardown().catch(() => {})` — the comment documents that the exporter already swallows a dead sink via its own warn, and a bootstrap-trace error must never escape into the box-provision path. Same inner-layer-already-warns posture as stream/adapters/jsonl-recorder.ts.",
       "runner/batch/eval/selection-smoke.ts":
         "`finally`-block best-effort temp-file cleanup (`(deps.removeFile ?? defaultRemoveFile)(path).catch(() => {})`) — the smoke compile already returned its verdict; a cleanup failure on the scratch file is non-fatal and absence is the success state. Same posture as session/store.ts.",
       "runner/batch/eval/patch-static-sanity.ts":

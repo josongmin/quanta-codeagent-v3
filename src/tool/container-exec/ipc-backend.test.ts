@@ -103,6 +103,18 @@ describe("containerExecOverIpc — JSON-line bridge to the hands process", () =>
     expect(await pr).toEqual({ stdout: "partial", stderr: "", code: 137 })
   })
 
+  test("a PRE-ABORTED signal rejects WITHOUT sending an exec frame (no command runs)", async () => {
+    const { duplex, written } = makeDuplex()
+    const port = containerExecOverIpc(duplex)
+    const ac = new AbortController()
+    ac.abort() // already aborted BEFORE the call
+    const pr = port.exec("rm -rf /", ac.signal)
+    await expect(pr).rejects.toThrow("aborted before start")
+    // The command the caller already abandoned must NEVER be sent: no `exec` (and no `cancel`) frame.
+    expect(written.length).toBe(0)
+    expect(written.some((w) => parse(w).type === "exec")).toBe(false)
+  })
+
   test("a closed transport rejects every still-pending call (never hangs forever)", async () => {
     const { duplex, end } = makeDuplex()
     const port = containerExecOverIpc(duplex)

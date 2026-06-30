@@ -267,6 +267,36 @@ describe("repair-breadth fan-out — #7 location-set perCandidateSeed seam", () 
     expect(seeds).toEqual(["BASE::lead-0", "BASE::lead-1", "BASE::lead-2"])
   })
 
+  test("typed location focus rides with the candidate outcome (no prompt reparsing)", async () => {
+    const rec = freshRecorder()
+    const seed = ((index: number, base: string | undefined) =>
+      `${base ?? ""}::lead-${index}`) as NonNullable<RepairBreadthDeps["perCandidateSeed"]>
+    seed.focusOf = (index) => ({
+      leadFile: `f${index}.py`,
+      relatedFiles: index === 0 ? ["shared.py"] : [],
+      ...(index === 1 ? { leadSymbol: "render", otherSymbols: ["parse"] } : {}),
+    })
+    const deps: RepairBreadthDeps = {
+      ...makeDeps(rec, { patches: ["P0", "P1"], verdicts: [{ ok: false }, { ok: false }] }),
+      perCandidateSeed: seed,
+    }
+    const outcomes = await makeRepairBreadthRunCandidates(deps)({
+      seedMsg: "BASE",
+      breadth: 2,
+      round: 0,
+    })
+    expect(outcomes[0]?.locationFocus).toEqual({
+      leadFile: "f0.py",
+      relatedFiles: ["shared.py"],
+    })
+    expect(outcomes[1]?.locationFocus).toEqual({
+      leadFile: "f1.py",
+      relatedFiles: [],
+      leadSymbol: "render",
+      otherSymbols: ["parse"],
+    })
+  })
+
   test("perCandidateSeed returning undefined for an index ⇒ that candidate falls back to base (byte-identical)", async () => {
     const rec = freshRecorder()
     const deps: RepairBreadthDeps = {
@@ -277,6 +307,97 @@ describe("repair-breadth fan-out — #7 location-set perCandidateSeed seam", () 
     const byFork = new Map(rec.agentCalls.map((c) => [c.fork, c.seed]))
     expect(byFork.get("/fork#0")).toBe("BASE::lead-0")
     expect(byFork.get("/fork#1")).toBe("BASE") // undefined ⇒ base seed
+  })
+})
+
+describe("repair-breadth fan-out — structural family coverage widening", () => {
+  const BASE_PATCH = [
+    "diff --git a/pkg/base.py b/pkg/base.py",
+    "--- a/pkg/base.py",
+    "+++ b/pkg/base.py",
+    "@@",
+    "-old",
+    "+new",
+  ].join("\n")
+
+  const COEDITED_PATCH = [
+    "diff --git a/pkg/base.py b/pkg/base.py",
+    "--- a/pkg/base.py",
+    "+++ b/pkg/base.py",
+    "@@",
+    "-old",
+    "+new",
+    "diff --git a/pkg/pg.py b/pkg/pg.py",
+    "--- a/pkg/pg.py",
+    "+++ b/pkg/pg.py",
+    "@@",
+    "-old",
+    "+new",
+  ].join("\n")
+
+  test("bounded family co-edit widens a partial breadth candidate before adopt", async () => {
+    const rec = freshRecorder()
+    const deps: RepairBreadthDeps = {
+      ...makeDeps(rec, { patches: [BASE_PATCH], verdicts: [{ ok: true }] }),
+      deriveCandidateStructuralRepair: async (candidate, sandbox) => {
+        expect(sandbox).toBe("/fork#0")
+        expect(candidate.files).toEqual(["pkg/base.py"])
+        return {
+          family: {
+            familyId: "override-family",
+            ownerFiles: ["pkg/base.py", "pkg/pg.py"],
+            reason: "same symbol across backends",
+            seed: undefined,
+            sourceEvidence: ["static-witness:ast"],
+          },
+        }
+      },
+      repairFamilyCoverage: async ({ candidate, family, missingFiles, sandbox }) => {
+        expect(sandbox).toBe("/fork#0")
+        expect(candidate.patch).toBe(BASE_PATCH)
+        expect(family.ownerFiles).toEqual(["pkg/base.py", "pkg/pg.py"])
+        expect(missingFiles).toEqual(["pkg/pg.py"])
+        return {
+          ...candidate,
+          patch: COEDITED_PATCH,
+          files: ["pkg/base.py", "pkg/pg.py"],
+        }
+      },
+    }
+
+    const [only] = await makeRepairBreadthRunCandidates(deps)({
+      seedMsg: undefined,
+      breadth: 1,
+      round: 0,
+    })
+    expect(only?.run.patch).toBe(COEDITED_PATCH)
+
+    await only?.adopt()
+    expect(rec.applies).toEqual([{ sandbox: "/main", patch: COEDITED_PATCH }])
+  })
+
+  test("non-improving family co-edit is ignored and the original patch is kept", async () => {
+    const rec = freshRecorder()
+    const deps: RepairBreadthDeps = {
+      ...makeDeps(rec, { patches: [BASE_PATCH], verdicts: [{ ok: true }] }),
+      deriveCandidateStructuralRepair: async () => ({
+        family: {
+          familyId: "override-family",
+          ownerFiles: ["pkg/base.py", "pkg/pg.py"],
+          reason: "same symbol across backends",
+          seed: undefined,
+          sourceEvidence: ["static-witness:ast"],
+        },
+      }),
+      repairFamilyCoverage: async ({ candidate }) => candidate,
+    }
+
+    const [only] = await makeRepairBreadthRunCandidates(deps)({
+      seedMsg: undefined,
+      breadth: 1,
+      round: 0,
+    })
+    expect(only?.run.patch).toBe(BASE_PATCH)
   })
 })
 

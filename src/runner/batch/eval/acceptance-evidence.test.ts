@@ -31,6 +31,30 @@ describe("acceptance-select — evidence forwarded to scored[]", () => {
     expect(scored[1]?.verifyCmd).toBeUndefined()
     expect(scored[1]?.failureOutput).toBeUndefined()
   })
+
+  test("locationFocus is preserved on the scored candidate", async () => {
+    const { scored } = await selectByAcceptance(
+      [
+        {
+          patch: "diff p0",
+          patchKey: "p0",
+          locationFocus: {
+            leadFile: "pkg/core.py",
+            relatedFiles: ["pkg/utils.py"],
+            leadSymbol: "render",
+            otherSymbols: ["parse"],
+          },
+        },
+      ],
+      {},
+    )
+    expect(scored[0]?.locationFocus).toEqual({
+      leadFile: "pkg/core.py",
+      relatedFiles: ["pkg/utils.py"],
+      leadSymbol: "render",
+      otherSymbols: ["parse"],
+    })
+  })
 })
 
 describe("acceptance-llm-rerank — evidence reaches the LLM prompt", () => {
@@ -62,6 +86,41 @@ describe("acceptance-llm-rerank — evidence reaches the LLM prompt", () => {
     expect(chosen).toBe(0)
     expect(seen[0]).toContain("verify_command: pytest tests/test_a.py")
     expect(seen[0]).toContain("E assert 1 == 2")
+  })
+
+  test("the ask prompt carries the typed location focus for cross-file comparison", async () => {
+    const scored: AcceptanceScored[] = [
+      {
+        index: 0,
+        patch: "diff --git a/f0.py b/f0.py\n+x",
+        patchKey: "k0",
+        reproPass: false,
+        regressionFailures: 0,
+        locationFocus: {
+          leadFile: "pkg/core.py",
+          relatedFiles: ["pkg/utils.py", "pkg/config.py"],
+          leadSymbol: "render",
+          otherSymbols: ["parse"],
+        },
+      },
+      {
+        index: 1,
+        patch: "diff --git a/f1.py b/f1.py\n+y",
+        patchKey: "k1",
+        reproPass: false,
+        regressionFailures: 0,
+      },
+    ]
+    let prompt = ""
+    const rerank = buildAcceptanceLlmRerank("chooser", "the bug", async (nextPrompt) => {
+      prompt = nextPrompt
+      return "BEST: 0"
+    })
+    await rerank(scored)
+    expect(prompt).toContain("location_focus:")
+    expect(prompt).toContain("lead_file: pkg/core.py")
+    expect(prompt).toContain("related_files: pkg/utils.py, pkg/config.py")
+    expect(prompt).toContain("lead_symbol: render")
   })
 })
 
@@ -110,5 +169,23 @@ describe("acceptance-adapter — redaction is forced at the minting boundary", (
     ])
     expect(capturedPrompt).not.toContain("verify_command")
     expect(capturedPrompt).not.toContain("failure_output")
+  })
+
+  test("repair candidate location focus is forwarded from the outcome into the prompt", async () => {
+    let capturedPrompt = ""
+    const llmRerank = buildAcceptanceLlmRerank("chooser", "bug", async (prompt) => {
+      capturedPrompt = prompt
+      return "BEST: 0"
+    })
+    const select = buildAcceptanceSelector({}, undefined, llmRerank)
+    await select([
+      {
+        ...outcome("diff --git a/f0.py b/f0.py\n+a"),
+        locationFocus: { leadFile: "pkg/core.py", relatedFiles: ["pkg/utils.py"] },
+      },
+      outcome("diff --git a/f1.py b/f1.py\n+b"),
+    ])
+    expect(capturedPrompt).toContain("lead_file: pkg/core.py")
+    expect(capturedPrompt).toContain("related_files: pkg/utils.py")
   })
 })

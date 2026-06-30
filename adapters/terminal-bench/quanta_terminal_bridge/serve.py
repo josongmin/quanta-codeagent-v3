@@ -27,6 +27,13 @@ from typing import Any, AsyncIterator
 
 from .protocol import Environment, LineWriter, dispatch, encode, error_frame, parse_line
 
+# Shutdown grace: once `lines` is exhausted (brain closed its stdout) we give still-pending
+# execs this long to flush their replies, THEN cancel + bounded-wait so a wedged env.exec
+# (a hung container command that never returns and ignores cancellation) cannot block
+# teardown forever. Kept small — at shutdown the brain pipe is already gone, so no reply we
+# wait on can still matter; this is purely a courtesy window for tasks about to finish.
+_SHUTDOWN_GRACE_SECONDS = 2.0
+
 
 async def serve(lines: AsyncIterator[str], write: LineWriter, env: Environment) -> None:
     """Run the request/response loop until ``lines`` is exhausted OR the write
@@ -95,7 +102,26 @@ async def serve(lines: AsyncIterator[str], write: LineWriter, env: Environment) 
             pending[req_id] = task
             task.add_done_callback(lambda t, _id=req_id: _untrack(_id, t))
     finally:
-        # Drain: let in-flight execs finish (so their replies flush) — but surface no
-        # exception (a cancelled/failed task here is expected, not a serve error).
+        # Drain: let in-flight execs finish (so their replies flush) — but BOUND it so a
+        # wedged exec (a hung container command that never returns) can't block teardown
+        # forever. We use `asyncio.wait` (NOT wait_for+gather) deliberately: wait_for would
+        # cancel its inner future on timeout and then BLOCK until that cancellation actually
+        # takes effect — which never happens if the exec ignores CancelledError, re-creating
+        # the very hang we're fixing. `asyncio.wait(timeout=...)` instead returns a
+        # (done, still_pending) split WITHOUT waiting on stragglers, so the grace is a true
+        # upper bound regardless of how badly a task misbehaves.
         if pending:
-            await asyncio.gather(*pending.values(), return_exceptions=True)
+            tasks = list(pending.values())
+            # 1) Grace window: already-finished tasks reap instantly; ones about to finish get
+            #    a brief courtesy to flush. A clean shutdown (no in-flight work) returns at once.
+            _done, still_pending = await asyncio.wait(
+                tasks, timeout=_SHUTDOWN_GRACE_SECONDS
+            )
+            # 2) Anything still running is wedged: cancel it and give a final bounded window to
+            #    unwind. We do NOT wait for cancellation to be honored — if the task swallows
+            #    CancelledError, we still exit. (Cancelled tasks left behind are reaped by the
+            #    loop at process exit; the agent is shutting down regardless.)
+            if still_pending:
+                for t in still_pending:
+                    t.cancel()
+                await asyncio.wait(still_pending, timeout=_SHUTDOWN_GRACE_SECONDS)

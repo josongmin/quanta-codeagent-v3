@@ -41,5 +41,19 @@ describe("buildClosureSession", () => {
     expect(session.primaryRailStep?.cmd).toBe(
       "python -m pytest -x -p no:cacheprovider -q --no-header tests/test_foo.py",
     )
+    expect(session.bundle.plan.primaryRailBaseValidatedRed).toBe(false)
+  })
+
+  test("base-red owner-test proof is threaded into the plan and gate signal", () => {
+    const session = buildClosureSession({
+      problemStatement: "Fix foo in src/foo.py.",
+      stage1Files: [{ file: "src/foo.py", score: 5 }],
+      ownerNearTests: ["python -m pytest -q tests/test_foo.py"],
+      ownerNearPrimaryBaseValidatedRed: true,
+      posture: { lspNav: false, primaryRail: true, faultEvidence: false },
+    })
+    expect(session.bundle.plan.primaryRail?.kind).toBe("owner-test")
+    expect(session.bundle.plan.primaryRailBaseValidatedRed).toBe(true)
+    expect(session.bundle.gate.action).toBe("verify")
   })
 })

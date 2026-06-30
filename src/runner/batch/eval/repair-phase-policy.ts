@@ -22,15 +22,15 @@ export const benchShouldRunRepairPhase = (args: {
   if (!args.eligible) return false
   if (!args.primaryRailEnabled) return true
   // This is the ADMISSION gate (runs BEFORE the rail is re-run), so a 'green'
-  // outcome is not observable here — only "have a validated-red repro" (red) vs
-  // "don't" (unrun) are knowable from the static baseValidatedRed fact. The
-  // "rail already green ⇒ no repair" branch of decideRepairAdmission is therefore
-  // unreachable from THIS caller by design; the post-run green case is owned by
-  // decidePrimaryRailFinishGate / primaryRailRedAfterRepair, not here.
+  // outcome is not observable here — only "the selected primary rail was actually
+  // observed red on the base tree" vs "don't know / not red". The post-run green
+  // case is owned by decidePrimaryRailFinishGate / primaryRailRedAfterRepair.
   const repairAdmission = decideRepairAdmission({
     primaryRailPresent: args.primaryRailStep !== undefined,
     primaryRailState:
-      args.primaryRailStep !== undefined && args.verificationPlan?.baseValidatedRed === true
+      args.primaryRailStep !== undefined &&
+      (args.verificationPlan?.primaryRailBaseValidatedRed ??
+        args.verificationPlan?.baseValidatedRed) === true
         ? "red"
         : "unrun",
   })

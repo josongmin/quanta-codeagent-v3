@@ -95,6 +95,8 @@ describe("buildLocationSeeder — the perCandidateSeed seam", () => {
     const seed = buildLocationSeeder(["x", "y"], 2)
     expect(seed?.(0, "B")).toBe(seed?.(2, "B")) // wraps: 2 % 2 === 0
     expect(seed?.(1, "B")).toBe(seed?.(3, "B"))
+    expect(seed?.focusOf?.(0)).toEqual({ leadFile: "x", relatedFiles: ["y"] })
+    expect(seed?.focusOf?.(3)).toEqual({ leadFile: "y", relatedFiles: ["x"] })
   })
 
   test("undefined base seed ⇒ hint only (no 'undefined' string leak)", () => {
@@ -224,6 +226,18 @@ describe("buildLocationSeeder — single-file FALLS BACK to symbol rotation (fan
     expect(s0).toContain("parse") // candidate 0 leads with the first symbol
     expect(s1).toContain("render")
     expect(s0).not.toBe(s1)
+    expect(seed?.focusOf?.(0)).toEqual({
+      leadFile: "only.py",
+      relatedFiles: [],
+      leadSymbol: "parse",
+      otherSymbols: ["render", "emit"],
+    })
+    expect(seed?.focusOf?.(1)).toEqual({
+      leadFile: "only.py",
+      relatedFiles: [],
+      leadSymbol: "render",
+      otherSymbols: ["parse", "emit"],
+    })
   })
 
   test("≥2 files takes precedence over symbols (file-level diversity is coarser/preferred)", () => {

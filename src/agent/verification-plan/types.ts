@@ -68,6 +68,9 @@ export interface VerificationPlan {
   optional: VerificationStep[]
   /** True iff a synthesized repro proved RED on the unpatched base. */
   baseValidatedRed: boolean
+  /** True iff the SELECTED primary rail itself was actually observed RED on the
+   *  unpatched base tree. Absent ⇒ legacy objects / tests; treat as false. */
+  primaryRailBaseValidatedRed?: boolean
 }
 
 export interface VerificationPlanInput {
@@ -75,6 +78,8 @@ export interface VerificationPlanInput {
   reproScript?: { cmd: string; baseValidatedRed: boolean; pytestReportPath?: string }
   /** Owner-near test commands (public). */
   ownerNearTests?: readonly string[]
+  /** Base-tree RED proof for the PRIMARY owner-test candidate. */
+  ownerNearPrimaryBaseValidatedRed?: boolean
   /** Touched-module smoke commands (post-edit info). */
   touchedModuleSmoke?: readonly string[]
   /**

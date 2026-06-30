@@ -24,6 +24,7 @@ import type {
   SuccessPredicate,
 } from "@/agent/closure"
 import type { VerificationTargetFact } from "@/runner/batch/eval/llm-evidence-packet"
+import type { CandidateLocationFocus } from "../location-set-fanout"
 
 /** Caller-facing config (mirror the optional-feature pattern). */
 export interface RepairConfig {
@@ -242,6 +243,10 @@ export interface RepairCandidateOutcome {
   /** The SAME validator (re-)run against this candidate's patched fork. Selection
    *  reads ONLY this — never a gold/hidden field. */
   readonly validator: ValidatorResult
+  /** Typed location focus this breadth candidate was seeded from, when a
+   *  location/symbol fanout generated it. Observe/selection evidence only:
+   *  never submit authority. */
+  readonly locationFocus?: CandidateLocationFocus
   /** ADOPT this candidate as the continuation point: the driver makes the MAIN
    *  sandbox reflect this candidate's cumulative tree (reset-to-base + apply its
    *  diff) so the next repair round AND the final grader-bound capture see it.

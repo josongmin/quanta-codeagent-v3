@@ -85,6 +85,7 @@ export const buildAcceptanceSelector = (
     const accCandidates = candidates.map((c) => ({
       patch: c.run.patch,
       patchKey: normalizePatch(c.run.patch),
+      ...(c.locationFocus !== undefined ? { locationFocus: c.locationFocus } : {}),
       ...(llmRerank !== undefined ? evidenceOf(c) : {}),
     }))
     const { selected } = await selectByAcceptance(accCandidates, oracles, llmRerank)

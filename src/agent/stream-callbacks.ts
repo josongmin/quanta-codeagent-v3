@@ -110,10 +110,10 @@ type StreamDispatchOut = {
 }
 
 /** RFC may-22 Phase 1: BudgetMeter tick helper for tool dispatch. Folds the
- *  bash → shell_command and test_runner → test_run sub-counters into a single
- *  call site so the dispatch callback's cognitive complexity doesn't grow.
- *  Optional-chain on every read so a meter-less config is byte-for-byte
- *  identical to the pre-RFC path. */
+ *  bash → shell_command (+ test_run when the bash command is test-like) and
+ *  test_runner → test_run sub-counters into a single call site so the dispatch
+ *  callback's cognitive complexity doesn't grow. Optional-chain on every read so
+ *  a meter-less config is byte-for-byte identical to the pre-RFC path. */
 const bashCommandOf = (input: unknown): string | undefined => {
   if (typeof input !== "object" || input === null || !("command" in input)) return undefined
   const command = (input as { command: unknown }).command
@@ -341,9 +341,10 @@ export const createStreamDispatcher = (
 
   const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
     const s = recorder?.toolExec()
-    // RFC may-22 Phase 1: BudgetMeter tick — every tool dispatch counts
-    // as one tool_call; bash → shell_command; test_runner → test_run.
-    // Optional chain so absence is byte-identical to pre-RFC.
+    // RFC may-22 Phase 1: BudgetMeter tick — every tool dispatch counts as one
+    // tool_call; bash → shell_command (+ test_run when the bash command is
+    // test-like); test_runner → test_run. Optional chain so absence is
+    // byte-identical to pre-RFC.
     tickToolDispatch(config, call)
     try {
       // ADR-0011 / ADR-0512: enforce the active skill's tool allowlist. An

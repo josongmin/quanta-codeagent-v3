@@ -9,6 +9,7 @@
  * runtime path is byte-identical.
  */
 import { readFileSync, writeFileSync } from "node:fs"
+import { analyzePatchBudget } from "@/agent/patch-budget"
 import type { InstanceResult } from "../types"
 import {
   type ClosureDiagnostics,
@@ -64,12 +65,20 @@ const reproReproducedOf = (r: InstanceResult): boolean | null => {
 const resolvedOf = (r: InstanceResult): boolean | null =>
   r.verdict === undefined || r.verdict === "ok" ? r.passed : null
 
+const offlineCrossFileOf = (r: InstanceResult): boolean =>
+  analyzePatchBudget(r.patch ?? "").budget.crossFile
+
 const patchBudgetFieldsOf = (
   r: InstanceResult,
 ): Pick<ClosureRunFact, "overBudget" | "newDef" | "crossFile"> => ({
   overBudget: r.patchBudget !== undefined ? !r.patchBudget.withinBudget : null,
   newDef: r.patchBudget !== undefined ? r.patchBudget.budget.newDefs > 0 : null,
-  crossFile: r.patchBudget !== undefined ? r.patchBudget.budget.crossFile : null,
+  // `crossFile` is a pure structural fact over the diff's SOURCE-file set, so the
+  // offline sidecar can derive it even when the runtime patch-budget knob was OFF.
+  // This closes the `cross_file_rate = null` observability hole without changing
+  // any runtime decision path. By contrast, `overBudget`/`newDef` stay patchBudget-
+  // gated because their intended meaning rides the runtime admission posture.
+  crossFile: r.patchBudget !== undefined ? r.patchBudget.budget.crossFile : offlineCrossFileOf(r),
 })
 
 const telemetryFieldsOf = (
