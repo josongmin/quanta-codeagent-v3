@@ -215,13 +215,34 @@ const collectResolvedIds = async (dir: string): Promise<string[]> => {
   return ids
 }
 
-/** `{success:[…], failure:[…]}` → counts. Tolerant of missing/!array members. */
-const statusCounts = (node: unknown): { failed: number; total: number } => {
-  if (typeof node !== "object" || node === null) return { failed: 0, total: 0 }
+/** A pytest test id TRUNCATED mid-parameter by upstream dataset generation. SWE-bench-Live cut some
+ *  parametrized ids at the first whitespace inside `[...]`, dropping the closing `]` (e.g. stored
+ *  `test_x[2021.3-classic-Intel` vs the real `test_x[2021.3-classic-Intel C++ Compiler 19.2]`). A
+ *  valid pytest id is `path::test` (no `[`) or `path::test[params]` (balanced, ends in `]`); an id
+ *  with `[` that does NOT end in `]` cannot match any collectable test, so pytest reports it as a
+ *  collection error ("not found / no name in module") — NEITHER pass nor fail (zero signal). The
+ *  harness lists such an expected-but-unseen id as a PASS_TO_PASS *failure*, which wrongly makes
+ *  even the GOLD patch unresolvable. Excluding it is objective (a non-existent test), not gaming. */
+export const isTruncatedTestId = (id: string): boolean => id.includes("[") && !id.endsWith("]")
+
+/** `{success:[…], failure:[…]}` → counts, EXCLUDING truncated/non-existent ids from the failure
+ *  tally (they carry zero signal). `total` counts everything the harness listed (runnable basis);
+ *  `realFailed` excludes truncated; `truncated` is how many were dropped. Tolerant of missing/!array. */
+const failurePartition = (
+  node: unknown,
+): { realFailed: number; truncated: number; total: number } => {
+  if (typeof node !== "object" || node === null) return { realFailed: 0, truncated: 0, total: 0 }
   const rec = node as Record<string, unknown>
-  const s = Array.isArray(rec.success) ? rec.success.length : 0
-  const f = Array.isArray(rec.failure) ? rec.failure.length : 0
-  return { failed: f, total: s + f }
+  const success = Array.isArray(rec.success) ? rec.success.length : 0
+  const failureIds = Array.isArray(rec.failure)
+    ? rec.failure.filter((x): x is string => typeof x === "string")
+    : []
+  const truncated = failureIds.filter(isTruncatedTestId).length
+  return {
+    realFailed: failureIds.length - truncated,
+    truncated,
+    total: success + failureIds.length,
+  }
 }
 
 /**
@@ -240,13 +261,19 @@ export const extractGradeBreakdowns = (report: unknown): Map<string, GradeBreakd
     const ts = rec.tests_status
     if (typeof ts !== "object" || ts === null) continue // not a per-instance report
     const tsr = ts as Record<string, unknown>
-    const f2p = statusCounts(tsr.FAIL_TO_PASS)
-    const p2p = statusCounts(tsr.PASS_TO_PASS)
+    const f2p = failurePartition(tsr.FAIL_TO_PASS)
+    const p2p = failurePartition(tsr.PASS_TO_PASS)
+    const truncatedExcluded = f2p.truncated + p2p.truncated
     out.set(iid, {
-      resolved: rec.resolved === true,
-      failToPassFailed: f2p.failed,
-      passToPassFailed: p2p.failed,
+      // Re-derive resolution EXCLUDING truncated/non-existent ids: a dataset-corrupted test pytest
+      // cannot collect is neither pass nor fail, so it must not veto resolution. Identical to the
+      // harness's own `rec.resolved` when there are no truncated ids (no failures ⇒ both true);
+      // only UPGRADES the corrupted case (harness false, but the only "failures" are non-existent).
+      resolved: f2p.realFailed === 0 && p2p.realFailed === 0,
+      failToPassFailed: f2p.realFailed,
+      passToPassFailed: p2p.realFailed,
       passToPassTotal: p2p.total,
+      ...(truncatedExcluded > 0 ? { truncatedExcluded } : {}),
     })
   }
   return out
@@ -504,18 +531,26 @@ export const evaluateWithPythonSwebench = async (
     const harnessCfg = opts.harnessConfig ?? resolveHarnessConfig()
     const argv = buildArgv(python, predictionsPath, runId, meta.instanceId, datasetName, harnessCfg)
     const { run, resolvedIds, retried } = await gradeWithRetry(spawn, argv, work, opts)
-    const resolved = resolvedIds.includes(meta.instanceId)
     const gradingCompleted = harnessReachedSummary(run.stdout)
     // Capture the regression-vs-didn't-fix breakdown from the harness per-instance
     // report BEFORE the `finally` removes `work`. Best-effort: absent ⇒ omitted.
     const breakdown = (await collectGradeBreakdowns(work)).get(meta.instanceId)
+    // `resolved_ids` is the harness's RAW verdict; the breakdown re-derives it EXCLUDING upstream
+    // dataset-truncated test ids (non-existent tests pytest can't collect, which the harness wrongly
+    // counts as PASS_TO_PASS failures and uses to veto resolution — even for GOLD). Honor EITHER
+    // signal of success: the raw verdict, or a clean re-derived breakdown.
+    const resolved = resolvedIds.includes(meta.instanceId) || breakdown?.resolved === true
     const tail = (s: string): string => s.slice(-1500)
     const log = [
       `cmd: ${argv.join(" ")}`,
       `exit: ${run.code}`,
       `retried: ${retried}`,
       `gradingCompleted: ${gradingCompleted}`,
-      `resolved_ids: ${JSON.stringify(resolvedIds)}`,
+      `resolved_ids: ${JSON.stringify(resolvedIds)}${
+        breakdown?.truncatedExcluded
+          ? ` (resolve re-derived: ${breakdown.truncatedExcluded} truncated/non-existent test-ids excluded)`
+          : ""
+      }`,
       `stdout(tail): ${tail(run.stdout)}`,
       `stderr(tail): ${tail(run.stderr)}`,
     ].join("\n")

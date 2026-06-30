@@ -153,6 +153,12 @@ export interface GradeBreakdown {
   failToPassFailed: number
   passToPassFailed: number
   passToPassTotal: number
+  /** Count of FAIL_TO_PASS+PASS_TO_PASS ids the harness listed as failures that were actually
+   *  TRUNCATED/non-existent test ids (upstream dataset corruption — a parametrized id cut
+   *  mid-parameter that pytest cannot collect). Excluded from `*Failed` and from `resolved` since
+   *  a test that cannot be collected is neither pass nor fail. Present only when >0 (observability:
+   *  `resolved` may have been upgraded vs the harness's raw verdict because of these). */
+  truncatedExcluded?: number
 }
 
 /**
