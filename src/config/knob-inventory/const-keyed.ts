@@ -113,7 +113,7 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Reflection tool (opt-in).",
-    readSite: "tool/surface/manifest.ts",
+    readSite: "tool/surface/gated-tools.ts",
   },
   // NB: QUANTA_LANG_DETECT / NOTEBOOK_EDIT / DEBUG_TOOLS / TEST_RUNNER / EVIDENCE
   // are declared in @/shared/runtime-config-knobs.ts (their `home`), NOT here —
@@ -137,7 +137,7 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Shadow-workspace tooling (opt-in).",
-    readSite: "tool/surface/manifest.ts",
+    readSite: "tool/surface/gated-tools.ts",
   },
   {
     envKey: "QUANTA_THIN_CLIENT_DISPATCH",

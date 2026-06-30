@@ -21,7 +21,7 @@
  * The per-subcommand handlers live under `./commands/<name>.ts`; this file is
  * the thin argv parser + dispatcher + composition root (ADR-0536 P0 cleanup).
  */
-import { errMessage, logger, setTerminalIo } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import {
   cmdCost,
   cmdDiff,
@@ -37,19 +37,13 @@ import { cmdBox } from "./commands/box"
 import { cmdGrade } from "./commands/grade"
 import { cmdPool } from "./commands/pool"
 import { cmdTrace, cmdTraceUrl } from "./commands/trace"
+import { routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport } from "./otel"
 import { CURRENT_BENCH_BASE_PRESET } from "./preset"
 
-// Route `logger` to the real terminal (same wiring index.ts does — without it
+// Route `logger` to the real terminal (shared SSOT with index.ts — without it
 // logger.info writes nowhere).
-setTerminalIo({
-  stdout: (chunk) => {
-    void process.stdout.write(chunk)
-  },
-  stderr: (chunk) => {
-    void process.stderr.write(chunk)
-  },
-})
+routeBenchTerminalIo()
 
 const KNOWN_SUBCOMMANDS = new Set([
   "run",
