@@ -77,4 +77,42 @@ describe("bench verifier-command prompt wiring", () => {
     expect(text).not.toContain("Repository-local verifier for this task:")
     expect(text).not.toContain("host-global pytest/python")
   })
+
+  test("selected-test-files-derived Pro verifier stays hidden from the agent by default", () => {
+    const testCmd = "go test -count=1 ./... -run '^(?:TestEvents)$'"
+    const text = userText({
+      id: "go__1",
+      repoPath: "/tmp/x",
+      problemStatement: "fix it",
+      testCmd,
+      swebench: {
+        instanceId: "go__1",
+        repo: "navidrome/navidrome",
+        baseCommit: "deadbeef",
+        repoLanguage: "go",
+        selectedTestFilesToRun: ["TestEvents"],
+      },
+    })
+    expect(text).not.toContain("Repository-local verifier for this task:")
+    expect(text).not.toContain(testCmd)
+  })
+
+  test("selected-test-files-derived Pro verifier is surfaced only on explicit opt-in", () => {
+    process.env[EXPOSE_ENV] = "1"
+    const testCmd = "go test -count=1 ./... -run '^(?:TestEvents)$'"
+    const text = userText({
+      id: "go__1",
+      repoPath: "/tmp/x",
+      problemStatement: "fix it",
+      testCmd,
+      swebench: {
+        instanceId: "go__1",
+        repo: "navidrome/navidrome",
+        baseCommit: "deadbeef",
+        repoLanguage: "go",
+        selectedTestFilesToRun: ["TestEvents"],
+      },
+    })
+    expect(text).toContain(`Repository-local verifier for this task: ${testCmd}`)
+  })
 })

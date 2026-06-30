@@ -215,6 +215,12 @@ const breadthCandidateOf = (run: RunOnceResult, index: number): Candidate => ({
 const withCandidatePatch = (run: RunOnceResult, patch: string): RunOnceResult =>
   patch === run.patch ? run : { ...run, patch }
 
+interface PreparedRepairBreadthCandidate {
+  readonly run: RunOnceResult
+  readonly familyId?: CandidateFamily["familyId"]
+  readonly familyCoverageMissing?: readonly string[]
+}
+
 const reducedFamilyCoverage = (
   family: CandidateFamily,
   beforeFiles: readonly string[],
@@ -228,33 +234,41 @@ const maybeWidenCandidateFamilyCoverage = async (
   run: RunOnceResult,
   index: number,
   sandbox: string,
-): Promise<RunOnceResult> => {
-  if (
-    deps.deriveCandidateStructuralRepair === undefined ||
-    deps.repairFamilyCoverage === undefined ||
-    run.patch.trim() === ""
-  ) {
-    return run
+): Promise<PreparedRepairBreadthCandidate> => {
+  if (deps.deriveCandidateStructuralRepair === undefined || run.patch.trim() === "") {
+    return { run }
   }
   const candidate = breadthCandidateOf(run, index)
-  if (candidate.files.length === 0) return run
+  if (candidate.files.length === 0) return { run }
   const derived = await deps.deriveCandidateStructuralRepair(candidate, sandbox).catch(() => undefined)
   const family = derived?.family
-  if (family === undefined) return run
+  if (family === undefined) return { run }
   const missingFiles = candidateFamilyCoverageMissing(family, candidate.files)
-  if (missingFiles.length === 0) return run
-  const widened = await deps
-    .repairFamilyCoverage({
-      sandbox,
-      candidate,
-      family,
-      missingFiles,
-    })
-    .catch(() => undefined)
-  if (widened === undefined || widened.patch.trim() === "") return run
-  return reducedFamilyCoverage(family, candidate.files, widened)
-    ? withCandidatePatch(run, widened.patch)
-    : run
+  if (missingFiles.length === 0) {
+    return { run, familyId: family.familyId, familyCoverageMissing: [] }
+  }
+  const widened =
+    deps.repairFamilyCoverage === undefined
+      ? undefined
+      : await deps
+          .repairFamilyCoverage({
+            sandbox,
+            candidate,
+            family,
+            missingFiles,
+          })
+          .catch(() => undefined)
+  if (widened === undefined || widened.patch.trim() === "") {
+    return { run, familyId: family.familyId, familyCoverageMissing: missingFiles }
+  }
+  if (!reducedFamilyCoverage(family, candidate.files, widened)) {
+    return { run, familyId: family.familyId, familyCoverageMissing: missingFiles }
+  }
+  return {
+    run: withCandidatePatch(run, widened.patch),
+    familyId: family.familyId,
+    familyCoverageMissing: candidateFamilyCoverageMissing(family, widened.files),
+  }
 }
 
 /** Fork → agent (lane index) → validate ONE candidate. Returns the outcome, or
@@ -270,7 +284,8 @@ const runOneBreadthCandidate = async (
     const laneLlm = deps.resolveLaneLlm(index)
     const locationFocus = deps.perCandidateSeed?.focusOf?.(index)
     const generatedRun = await deps.runAgentOnFork(fork, seedMsg, laneLlm)
-    const run = await maybeWidenCandidateFamilyCoverage(deps, generatedRun, index, fork)
+    const prepared = await maybeWidenCandidateFamilyCoverage(deps, generatedRun, index, fork)
+    const run = prepared.run
     // Validate the fork through the SAME repair-gate policy as the single path,
     // with `sandbox` pointed at THIS fork (so primary-rail / agent-cmd / repro all
     // execute against the candidate's own tree).
@@ -287,6 +302,10 @@ const runOneBreadthCandidate = async (
     return {
       run,
       validator,
+      ...(prepared.familyId !== undefined ? { familyId: prepared.familyId } : {}),
+      ...(prepared.familyCoverageMissing !== undefined
+        ? { familyCoverageMissing: prepared.familyCoverageMissing }
+        : {}),
       ...(locationFocus !== undefined ? { locationFocus } : {}),
       adopt,
     }

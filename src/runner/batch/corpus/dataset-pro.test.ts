@@ -62,6 +62,28 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
     expect(inst.swebench?.dockerhubTag).toBe("demo-demo-1")
   })
 
+  test("non-Python Pro row with public selected tests synthesizes a repo-local verifier instead of the noop", () => {
+    const goRow = {
+      ...proRow,
+      repo_language: "go",
+      selected_test_files_to_run: JSON.stringify(["TestEvents"]),
+    }
+    const goTasks = parseSwebenchJsonl(JSON.stringify(goRow), normalizeProRow)
+    const goInst = toInstance(goTasks[0]!, "/tmp/repo")
+    expect(goInst.testCmd).toBe("go test -count=1 ./... -run '^(?:TestEvents)$'")
+    expect(goInst.swebench?.selectedTestFilesToRun).toEqual(["TestEvents"])
+
+    const jsRow = {
+      ...proRow,
+      repo_language: "js",
+      selected_test_files_to_run: JSON.stringify(["test/uploads.js"]),
+    }
+    const jsTasks = parseSwebenchJsonl(JSON.stringify(jsRow), normalizeProRow)
+    const jsInst = toInstance(jsTasks[0]!, "/tmp/repo")
+    expect(jsInst.testCmd).toBe("npm test -- test/uploads.js")
+    expect(jsInst.swebench?.selectedTestFilesToRun).toEqual(["test/uploads.js"])
+  })
+
   // audit EDGE-2: python SPELLINGS (python3 / py / cpython / "Python") must be treated as
   // python — NOT fenced to the "true" no-op (that would mute a gradeable Python repo).
   test("python spellings (python3/py/cpython/Python) ⇒ real testCmd, not fenced", () => {

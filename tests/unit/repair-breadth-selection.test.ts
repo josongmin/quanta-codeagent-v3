@@ -29,6 +29,8 @@ import type {
 interface CandSpec {
   readonly patch: string
   readonly validator: ValidatorResult
+  readonly familyId?: RepairCandidateOutcome["familyId"]
+  readonly familyCoverageMissing?: RepairCandidateOutcome["familyCoverageMissing"]
 }
 
 /** Build a `runCandidates` port from a per-round list of candidate specs, plus an
@@ -51,6 +53,10 @@ const makeRunCandidatesPort = (
       return {
         run,
         validator: spec.validator,
+        ...(spec.familyId !== undefined ? { familyId: spec.familyId } : {}),
+        ...(spec.familyCoverageMissing !== undefined
+          ? { familyCoverageMissing: spec.familyCoverageMissing }
+          : {}),
         adopt: async () => {
           sinks.adopted.push(spec.patch)
         },
@@ -151,6 +157,33 @@ describe("repair-breadth — GREEN-first selection (the oracle as selector)", ()
     expect(out.patch).toBe("GREEN_FIRST")
     expect(sinks.adopted).toEqual(["GREEN_FIRST"])
   })
+
+  test("among multiple greens, a structurally complete family candidate beats an earlier partial-family green", async () => {
+    const sinks = freshSinks()
+    const round0: readonly CandSpec[] = [
+      {
+        patch: "GREEN_PARTIAL",
+        validator: { ok: true },
+        familyId: "multi-site",
+        familyCoverageMissing: ["pkg/peer.py"],
+      },
+      {
+        patch: "GREEN_COMPLETE",
+        validator: { ok: true },
+        familyId: "multi-site",
+        familyCoverageMissing: [],
+      },
+    ]
+    const out = await runRepairRounds(
+      baseArgs({
+        config: { maxRounds: 1, breadth: 2 },
+        runCandidates: makeRunCandidatesPort([round0], sinks),
+      }),
+    )
+    expect(out.patch).toBe("GREEN_COMPLETE")
+    expect(sinks.adopted).toEqual(["GREEN_COMPLETE"])
+    expect(out.validated).toBe(true)
+  })
 })
 
 describe("repair-breadth — NONE-green ⇒ best validator signal seeds the next round", () => {
@@ -200,6 +233,33 @@ describe("repair-breadth — NONE-green ⇒ best validator signal seeds the next
     expect(sinks.adopted).toEqual(["PATCH_EXECFAIL"])
     expect(out.validated).toBe(false)
     expect(out.patch).toBe("PATCH_EXECFAIL")
+  })
+
+  test("same validator rank prefers a family-complete red over an earlier partial-family red", async () => {
+    const sinks = freshSinks()
+    const round0: readonly CandSpec[] = [
+      {
+        patch: "PATCH_PARTIAL",
+        validator: { ok: false, reproOutcome: "reproduced" },
+        familyId: "producer-consumer",
+        familyCoverageMissing: ["pkg/consumer.py"],
+      },
+      {
+        patch: "PATCH_COMPLETE",
+        validator: { ok: false, reproOutcome: "reproduced" },
+        familyId: "producer-consumer",
+        familyCoverageMissing: [],
+      },
+    ]
+    const out = await runRepairRounds(
+      baseArgs({
+        config: { maxRounds: 0, breadth: 2 },
+        runCandidates: makeRunCandidatesPort([round0], sinks),
+      }),
+    )
+    expect(sinks.adopted).toEqual(["PATCH_COMPLETE"])
+    expect(out.patch).toBe("PATCH_COMPLETE")
+    expect(out.validated).toBe(false)
   })
 })
 

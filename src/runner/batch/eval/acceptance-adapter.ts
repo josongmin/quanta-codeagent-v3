@@ -16,6 +16,7 @@
 import {
   type AcceptanceLlmRerank,
   type AcceptanceOracles,
+  type AcceptanceSelectionObserver,
   selectByAcceptance,
 } from "./acceptance-select"
 import { combinedFailureTailOf, type RepairCandidateOutcome } from "./repair/types"
@@ -62,6 +63,12 @@ const evidenceOf = (
   return out
 }
 
+const structuralPriorityOf = (candidate: RepairCandidateOutcome): number | undefined => {
+  const missing = candidate.familyCoverageMissing
+  if (missing === undefined) return undefined
+  return missing.length === 0 ? 2 : 0
+}
+
 /**
  * Build the `selectCandidates` port from acceptance oracles. The winner is chosen
  * by score-once + rerank (Agentless-faithful) over the candidates' cumulative
@@ -71,6 +78,9 @@ export const buildAcceptanceSelector = (
   oracles: AcceptanceOracles,
   normalizePatch: (patch: string) => string = trimKey,
   llmRerank?: AcceptanceLlmRerank,
+  /** OBSERVE-ONLY: emitted with the winning tier each round (operator readout).
+   *  Wrapped in a swallow — a telemetry throw must never sink the repair round. */
+  onSelection?: AcceptanceSelectionObserver,
 ): ((candidates: readonly RepairCandidateOutcome[]) => Promise<RepairCandidateOutcome>) => {
   return async (candidates) => {
     // The orchestrator guards `candidates.length > 0` before calling this port, so
@@ -82,13 +92,32 @@ export const buildAcceptanceSelector = (
     // Per-candidate execution evidence is ONLY consumed by the LLM soft-reranker
     // (renderCandidate); compute+redact it only when one is wired, so the
     // deterministic path pays nothing and stays byte-identical.
-    const accCandidates = candidates.map((c) => ({
-      patch: c.run.patch,
-      patchKey: normalizePatch(c.run.patch),
-      ...(c.locationFocus !== undefined ? { locationFocus: c.locationFocus } : {}),
-      ...(llmRerank !== undefined ? evidenceOf(c) : {}),
-    }))
-    const { selected } = await selectByAcceptance(accCandidates, oracles, llmRerank)
+    const accCandidates = candidates.map((c) => {
+      const structuralPriority = structuralPriorityOf(c)
+      return {
+        patch: c.run.patch,
+        patchKey: normalizePatch(c.run.patch),
+        ...(structuralPriority !== undefined ? { structuralPriority } : {}),
+        ...(c.locationFocus !== undefined ? { locationFocus: c.locationFocus } : {}),
+        ...(llmRerank !== undefined ? evidenceOf(c) : {}),
+      }
+    })
+    const { selected, llmChosenIndex } = await selectByAcceptance(accCandidates, oracles, llmRerank)
+    // OBSERVE-ONLY tier readout (no-leak: tier/votes/counts only, no patch). A
+    // throwing sink must never sink the round, so swallow.
+    if (onSelection !== undefined) {
+      try {
+        onSelection({
+          tier: selected.tier,
+          votes: selected.votes,
+          candidateCount: accCandidates.length,
+          llmOverrode: llmChosenIndex !== undefined,
+          winningPatch: selected.patch,
+        })
+      } catch {
+        /* observe-only: a telemetry throw never perturbs selection */
+      }
+    }
     // Map the winning patch back to its outcome. Distinct candidates with the SAME
     // patch are equivalent (adopt re-applies the diff ⇒ identical tree; deterministic
     // validation ⇒ identical verdict), so the first match is correct. `selected.patch`

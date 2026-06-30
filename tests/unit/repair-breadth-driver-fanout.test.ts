@@ -399,6 +399,32 @@ describe("repair-breadth fan-out — structural family coverage widening", () =>
     })
     expect(only?.run.patch).toBe(BASE_PATCH)
   })
+
+  test("derived family metadata is surfaced even when no co-edit port is wired", async () => {
+    const rec = freshRecorder()
+    const deps: RepairBreadthDeps = {
+      ...makeDeps(rec, { patches: [BASE_PATCH], verdicts: [{ ok: false, reproOutcome: "reproduced" }] }),
+      deriveCandidateStructuralRepair: async () => ({
+        family: {
+          familyId: "producer-consumer",
+          ownerFiles: ["pkg/base.py", "pkg/pg.py"],
+          reason: "writer + reader",
+          seed: undefined,
+          sourceEvidence: ["static-witness:ast"],
+        },
+      }),
+      repairFamilyCoverage: undefined,
+    }
+
+    const [only] = await makeRepairBreadthRunCandidates(deps)({
+      seedMsg: undefined,
+      breadth: 1,
+      round: 0,
+    })
+    expect(only?.familyId).toBe("producer-consumer")
+    expect(only?.familyCoverageMissing).toEqual(["pkg/pg.py"])
+    expect(only?.run.patch).toBe(BASE_PATCH)
+  })
 })
 
 describe("repair-breadth fan-out — resilience", () => {

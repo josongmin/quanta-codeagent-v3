@@ -188,14 +188,17 @@ const runRound = async (
  * SELECT the best of a breadth fan-out — the validated-red repro/primary-rail
  * oracle acting as SELECTOR.
  *
- * 1. GREEN-FIRST: the FIRST candidate the validator turns green (under the SAME
- *    finish-gate semantics as {@link clearedAsValidated}, so a primary-rail
- *    false-green does NOT win) — index order is the stable tie-break, so a
- *    deterministic run picks the same winner every time.
+ * 1. GREEN-FIRST: choose among the candidates the validator turns green (under
+ *    the SAME finish-gate semantics as {@link clearedAsValidated}, so a
+ *    primary-rail false-green does NOT win). Within that green set, a candidate
+ *    that SATISFIES a typed structural family coverage postcondition beats a
+ *    sibling that still misses required family owner files; otherwise index order
+ *    stays the stable tie-break.
  * 2. NONE-GREEN: keep the BEST by validator signal — highest
  *    {@link reproOutcomeRank} (resolved > reproduced > other > exec_failed >
- *    none), index order breaking ties — to seed the next round from the
- *    strongest red rather than an arbitrary one.
+ *    none). Equal validator rank reuses the same structural family tie-break, then
+ *    index order — so a full multi-file family candidate is preferred over a
+ *    partial single-file sibling when the oracle signal is otherwise tied.
  *
  * Selection consumes ONLY each candidate's injected `validator` — never a
  * gold/hidden field (the no-leak fence is structural: the candidate type has no
@@ -205,18 +208,56 @@ const selectCandidate = (
   args: RunRepairRoundsArgs,
   candidates: readonly RepairCandidateOutcome[],
 ): RepairCandidateOutcome => {
-  const green = candidates.find((c) => clearedAsValidated(args, c.validator))
+  const green = chooseBestCandidate(
+    candidates.filter((c) => clearedAsValidated(args, c.validator)),
+    (c) => 1,
+  )
   if (green !== undefined) return green
   // None green ⇒ argmax over the validator rank, first index wins ties. Seeded
   // with index 0 so an all-equal field deterministically yields the first.
-  let best = candidates[0] as RepairCandidateOutcome
-  let bestRank = reproOutcomeRank(reproOutcomeOf(best.validator))
+  return (
+    chooseBestCandidate(candidates, (c) => reproOutcomeRank(reproOutcomeOf(c.validator))) ??
+    (candidates[0] as RepairCandidateOutcome)
+  )
+}
+
+const familyCoverageClassOf = (candidate: RepairCandidateOutcome): number => {
+  const missing = candidate.familyCoverageMissing
+  if (missing === undefined) return 1
+  return missing.length === 0 ? 2 : 0
+}
+
+const betterFamilyCoverageTieBreak = (
+  left: RepairCandidateOutcome,
+  right: RepairCandidateOutcome,
+): boolean => {
+  const leftClass = familyCoverageClassOf(left)
+  const rightClass = familyCoverageClassOf(right)
+  if (leftClass !== rightClass) return leftClass > rightClass
+  if (leftClass !== 0) return false
+  return (left.familyCoverageMissing?.length ?? Number.POSITIVE_INFINITY) <
+    (right.familyCoverageMissing?.length ?? Number.POSITIVE_INFINITY)
+}
+
+const chooseBestCandidate = (
+  candidates: readonly RepairCandidateOutcome[],
+  scoreOf: (candidate: RepairCandidateOutcome) => number,
+): RepairCandidateOutcome | undefined => {
+  const first = candidates[0]
+  if (first === undefined) return undefined
+  let best = first
+  let bestScore = scoreOf(first)
   for (let i = 1; i < candidates.length; i++) {
-    const c = candidates[i] as RepairCandidateOutcome
-    const rank = reproOutcomeRank(reproOutcomeOf(c.validator))
-    if (rank > bestRank) {
-      best = c
-      bestRank = rank
+    const candidate = candidates[i]
+    if (candidate === undefined) continue
+    const score = scoreOf(candidate)
+    if (score > bestScore) {
+      best = candidate
+      bestScore = score
+      continue
+    }
+    if (score === bestScore && betterFamilyCoverageTieBreak(candidate, best)) {
+      best = candidate
     }
   }
   return best

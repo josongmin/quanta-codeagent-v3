@@ -46,6 +46,10 @@ export interface SwebenchMeta {
    *  non-Python repos from a fake pytest grade ({@link synthesizeTestCmd}); also available
    *  for a per-language report breakdown. Absent for Verified/Live. */
   repoLanguage?: string
+  /** Pro only — public test-file / suite selection from `selected_test_files_to_run`.
+   *  EVAL-ONLY: may synthesize a repo-local verifier for non-Python Pro instances,
+   *  but MUST NOT be routed into prompt/localization surfaces. */
+  selectedTestFilesToRun?: readonly string[]
 }
 
 /** A single SWE-bench-style task. `repoPath` is treated as read-only: the
@@ -89,6 +93,7 @@ export interface InstanceUsage {
 export type BenchReproTestReason =
   | "disabled"
   | "empty_problem"
+  | "unsupported_language"
   | "generation_failed"
   | "generation_empty"
   | "execution_failed"
@@ -365,6 +370,15 @@ export interface InstanceResult {
    * Offline-only measurement for `synth_repro_base_red_rate`.
    */
   synthReproBaseRed?: boolean
+  /**
+   * jun-30 SOTA++ — which acceptance rerank tier chose the submitted patch
+   * (`repro_and_regression` | `regression_only` | `all_patches` | `none`). Set only
+   * when the `acceptance` opt-in routed selection through the ladder; absent on
+   * legacy validator-rank (byte-identical). Drives `acceptance_tier_distribution` —
+   * `all_patches` dominance means the oracle gave NO real selection signal (the
+   * thin-oracle inert case the synthesis arm must detect before trusting a delta).
+   */
+  acceptanceTier?: import("./eval/acceptance-rerank").RerankTier
   /**
    * T-6 — patch touched files outside the admitted owner set. Telemetry-first:
    * exact diff fact only, never a semantic width judgment.

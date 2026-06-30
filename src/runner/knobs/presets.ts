@@ -294,6 +294,41 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "cha-multisite-general": "1",
     "model-lane-diversity": "1",
   },
+  // jun-30 SOTA++ synthesis-ONLY arm (RFC jun-30-python-pro-synthesis-measure-first):
+  // v6-oracle-hardened + the repair-CONVERGENCE levers only (acceptance + breadth +
+  // location-fanout + cha-multisite), DELIBERATELY EXCLUDING the env/admission/multi-
+  // lane levers (paired-control, adversarial-repro, model-lane-diversity) so a Pro
+  // A/B attributes a delta to SYNTHESIS, not to env-parity or sample decorrelation.
+  // Pairs with the acceptance_tier_*_rate readout: if this arm beats baseline only
+  // via tier-3 (all_patches) votes, the real next lever is the regression
+  // passing-set infra, NOT more breadth.
+  "agentless-v7-oracle-multifile-synthesis": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+    "repro-vote": "1",
+    "repair-strong-oracle": "1",
+    acceptance: "1",
+    "repair-breadth": "3",
+    "bench-location-fanout": "1",
+    "cha-multisite-steer": "1",
+    "cha-multisite-general": "1",
+  },
   // jun-20 strict arm:
   // mini-first + hard patch-budget admission + source-only sanitizer. It keeps
   // the localization stack, turns host in-loop execution OFF for round-0 thinness,

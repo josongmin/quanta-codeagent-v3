@@ -78,6 +78,33 @@ describe("verification module-smoke", () => {
     })
   })
 
+  test("selected-test-files-derived Pro verifier stays admissible as a public module-smoke rail", async () => {
+    const plan = await discoverVerificationModuleSmokePlan(
+      {
+        instance: {
+          testCmd: "go test -count=1 ./... -run '^(?:TestEvents)$'",
+          swebench: {
+            instanceId: "go__1",
+            repo: "navidrome/navidrome",
+            baseCommit: "deadbeef",
+            repoLanguage: "go",
+            selectedTestFilesToRun: ["TestEvents"],
+          },
+        },
+        sandbox: "/tmp/fake-repo",
+        timeoutMs: 1_000,
+      },
+      {
+        probeBaseCommand: async () => false,
+      },
+    )
+
+    expect(plan).toEqual({
+      commands: ["go test -count=1 ./... -run '^(?:TestEvents)$'"],
+      primaryBaseState: "red",
+    })
+  })
+
   test("custom-corpus verifier with the same shell shape stays admissible (reject only swebench hidden oracle)", async () => {
     const plan = await discoverVerificationModuleSmokePlan(
       {

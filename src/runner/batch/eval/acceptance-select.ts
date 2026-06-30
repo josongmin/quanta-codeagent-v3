@@ -33,6 +33,9 @@ export interface AcceptanceCandidate {
   readonly patch: string
   /** Normalized vote key (AST-canonical upstream; raw patch an acceptable fallback). */
   readonly patchKey: string
+  /** Optional structural tie-break priority carried from the breadth candidate.
+   *  Higher is better; used only when vote counts tie. */
+  readonly structuralPriority?: number
   /** jun-30 SOTA++ per-candidate execution evidence for the LLM soft-reranker
    *  (optional). The agent's last verification command. Absent ⇒ not forwarded. */
   readonly verifyCmd?: string
@@ -79,6 +82,51 @@ export interface AcceptanceResult {
    *  (the chosen `index` into `scored`). Absent ⇒ deterministic selection stood. */
   readonly llmChosenIndex?: number
 }
+
+/**
+ * jun-30 SOTA++ — OBSERVE-ONLY selection telemetry for the operator readout. The
+ * single fact that tells whether the acceptance ladder did real work: `tier`. On a
+ * thin oracle (F2P median 1) a `regression_only`/`repro_and_regression` tier means
+ * an oracle actually filtered candidates; `all_patches` means the ladder fell
+ * through to a pure majority vote (NO real selection — the synthesis arm is inert
+ * for that round). Carries no patch content (no-leak). Emitted via an injected
+ * callback so the deterministic selection path is never perturbed.
+ */
+export interface AcceptanceSelectionTelemetry {
+  /** Which rerank tier produced the winner. */
+  readonly tier: RerankResult["tier"]
+  /** The winning patch's vote count. */
+  readonly votes: number
+  /** How many candidates the selector scored this round. */
+  readonly candidateCount: number
+  /** True iff an injected LLM soft-rerank overrode the deterministic winner. */
+  readonly llmOverrode: boolean
+  /** The selected winner's patch. IN-PROCESS CORRELATION ONLY — the consumer uses
+   *  it to confirm THIS selection produced the finally-submitted patch (a later
+   *  repair round may fall back to a non-selected patch, in which case this round's
+   *  tier must NOT be attributed). NEVER serialized; only {@link tier} is persisted. */
+  readonly winningPatch: string
+}
+
+/** OBSERVE-ONLY sink for {@link AcceptanceSelectionTelemetry}. Wrapped in a swallow
+ *  at the call site (a telemetry write must never sink a repair round). */
+export type AcceptanceSelectionObserver = (t: AcceptanceSelectionTelemetry) => void
+
+/**
+ * Attribute an acceptance tier to a repair run ONLY when the last selection's
+ * winner is the finally-submitted patch. Guards the last-wins staleness trap: a
+ * trailing repair round that falls back to a non-selected `runOnce` patch leaves a
+ * stale tier whose patch no longer matches the submission ⇒ no attribution.
+ *
+ * @param last the last acceptance selection (tier + its winning patch), or undefined
+ *   if no selection ran (breadth=1 / acceptance off / all rounds fell back).
+ * @param submittedPatch the run's final submitted patch (orchestrator `out.patch`).
+ */
+export const attributeAcceptanceTier = (
+  last: { readonly tier: RerankResult["tier"]; readonly winningPatch: string } | undefined,
+  submittedPatch: string,
+): RerankResult["tier"] | undefined =>
+  last !== undefined && last.winningPatch === submittedPatch ? last.tier : undefined
 
 /**
  * Optional LLM soft-reranker. Given the ADMISSIBLE scored candidates (the tier
@@ -137,6 +185,9 @@ export const selectByAcceptance = async (
       index,
       patch: candidate.patch,
       patchKey: candidate.patchKey,
+      ...(candidate.structuralPriority !== undefined
+        ? { structuralPriority: candidate.structuralPriority }
+        : {}),
       reproPass,
       regressionFailures,
       ...(candidate.verifyCmd !== undefined ? { verifyCmd: candidate.verifyCmd } : {}),

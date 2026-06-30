@@ -134,6 +134,11 @@ export interface PerInstanceReport {
   verifyRounds?: number
   primaryFalseGreen?: boolean
   primaryFalseRed?: boolean
+  /** jun-30 SOTA++ — winning acceptance rerank tier (observe-only). Preserved at
+   *  serialization so a synthesis-arm A/B can read whether the ladder did real work
+   *  (`repro_and_regression`/`regression_only`) or fell through to `all_patches`
+   *  (no real selection). Omitted on legacy validator-rank ⇒ byte-identical. */
+  acceptanceTier?: import("./eval/acceptance-rerank").RerankTier
   /** jun-29 — DERIVED post-grade diagnostic (observe-ONLY; never fed back into
    *  repair selection). True ⇒ the agent-side canonical oracle cleared the repair
    *  gate (`canonical-sidecar` issueResolved) but the OFFICIAL harness graded it
@@ -307,6 +312,8 @@ const buildPerInstanceReportEntry = (
     ...(r.verifyRounds !== undefined ? { verifyRounds: r.verifyRounds } : {}),
     ...(r.primaryFalseGreen !== undefined ? { primaryFalseGreen: r.primaryFalseGreen } : {}),
     ...(r.primaryFalseRed !== undefined ? { primaryFalseRed: r.primaryFalseRed } : {}),
+    // jun-30 SOTA++ — preserve the acceptance rerank tier for synthesis-arm A/B.
+    ...(r.acceptanceTier !== undefined ? { acceptanceTier: r.acceptanceTier } : {}),
     // jun-29 — DERIVED, observe-only: the agent-side canonical oracle cleared
     // the repair gate but the OFFICIAL harness graded unresolved (agent repro
     // weaker than the held-out test). Computed from already-graded fields ONLY;

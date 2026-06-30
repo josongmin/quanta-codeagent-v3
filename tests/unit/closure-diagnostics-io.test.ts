@@ -197,6 +197,7 @@ describe("closure-diagnostics-io", () => {
         gold_coverage_rate: { value: 0.25, available: true, n: 4 },
         exact_file_set_match_rate: { value: 0, available: true, n: 4 },
         multi_file_full_coverage_rate: { value: 0, available: true, n: 3 },
+        multi_file_partial_overlap_rate: { value: 1, available: true, n: 3 },
         synth_repro_base_red_rate: { value: 0.25, available: true, n: 4 },
         repro_red_but_unresolved_rate: { value: 1, available: true, n: 1 },
       },
@@ -208,8 +209,13 @@ describe("closure-diagnostics-io", () => {
         "gold_coverage_rate=0.250(n=4)",
         "exact_file_set_match_rate=0.000(n=4)",
         "multi_file_full_coverage_rate=0.000(n=3)",
+        "multi_file_partial_overlap_rate=1.000(n=3)",
         "synth_repro_base_red_rate=0.250(n=4)",
         "repro_red_but_unresolved_rate=1.000(n=1)",
+        // jun-30 SOTA++ — acceptance tier canaries: "na" here because this fixture
+        // never routed selection through the rerank ladder (no acceptanceTier facts).
+        "acceptance_tier_all_patches_rate=na",
+        "acceptance_tier_regression_only_rate=na",
       ].join(" "),
     )
   })

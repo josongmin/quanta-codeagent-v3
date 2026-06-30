@@ -152,6 +152,33 @@ describe("prepareReproTest", () => {
     expect(sel).toBeNull()
   })
 
+  test("unsupported non-Python swebench language fails closed before generation", async () => {
+    let generateCalled = false
+    const detail = await prepareReproTestDetailed(
+      mkInstance({
+        swebench: {
+          instanceId: "navidrome__1",
+          repo: "navidrome/navidrome",
+          baseCommit: "abc",
+          repoLanguage: "go",
+          selectedTestFilesToRun: ["TestEvents"],
+        },
+      }),
+      "/tmp/sb",
+      3,
+      {
+        llm: new StubLLM(),
+        generate: async () => {
+          generateCalled = true
+          return [STUB_SOURCE]
+        },
+      },
+    )
+    expect(generateCalled).toBe(false)
+    expect(detail.selection).toBeNull()
+    expect(detail.telemetry).toEqual({ installed: false, reason: "unsupported_language" })
+  })
+
   test("happy path: K=3, mock LLM+exec ⇒ selection with non-null selected", async () => {
     const sel = await prepareReproTest(mkInstance(), "/tmp/sb", 3, {
       llm: new StubLLM(),
