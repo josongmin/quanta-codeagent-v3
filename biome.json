@@ -1551,6 +1551,55 @@
       }
     },
     {
+      "includes": ["**/src/apps/terminal/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/apps/cli",
+                      "**/apps/cli/**",
+                      "@/apps/cli",
+                      "@/apps/cli/**",
+                      "**/apps/bench",
+                      "**/apps/bench/**",
+                      "@/apps/bench",
+                      "@/apps/bench/**",
+                      "**/apps/agent",
+                      "**/apps/agent/**",
+                      "@/apps/agent",
+                      "@/apps/agent/**",
+                      "**/apps/headless",
+                      "**/apps/headless/**",
+                      "@/apps/headless",
+                      "@/apps/headless/**",
+                      "**/apps/eval",
+                      "**/apps/eval/**",
+                      "@/apps/eval",
+                      "@/apps/eval/**",
+                      "**/apps/probe",
+                      "**/apps/probe/**",
+                      "@/apps/probe",
+                      "@/apps/probe/**",
+                      "**/apps/web-daemon",
+                      "**/apps/web-daemon/**",
+                      "@/apps/web-daemon",
+                      "@/apps/web-daemon/**"
+                    ],
+                    "message": "Surface isolation (RFC jun-29 §10): src/apps/terminal is the terminal ToolSurface composition root. It MUST NOT import from sibling app surfaces (apps/cli, apps/bench, apps/agent, apps/headless, apps/eval, apps/probe, apps/web-daemon) — it composes only @/tool ports + the agent loop. Backends are injected (ContainerExec / PtySessionPort); no orchestrator/Harbor specifics leak here."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "includes": ["**/src/host/bootstrap/**"],
       "linter": {
         "rules": {
