@@ -286,6 +286,20 @@ const RULES: readonly Rule[] = [
         "Injection-first: `env: Readonly<...> = process.env` DI fallback at the init-scaffold composition root (EDITOR resolution); tests inject explicit env. Same posture as raw-line-reader-editor.ts.",
       "apps/bench/cli.ts":
         "Bench CLI sub-command composition root — reads HOME + QUANTA_SWEBENCH_DATASET + QUANTA_BENCH_PRESET at launch time (same bootstrap posture as apps/bench/index.ts, which is already allowlisted); downstream logic receives resolved values, not live env.",
+      "apps/bench/commands/shared.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the shared argv/env-parse primitives (allowExtraBoxes/waitForIdleBox gates, resolveCliAuthSource `env: process.env`) read launch-time env at the CLI sub-command composition boundary; downstream handlers receive resolved values. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/grade.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `grade` / `--mode full` handler resolves HOME + QUANTA_SWEBENCH_DATASET + QUANTA_FULL_REMOTE_* + the QUANTA_FULL_REMOTE_ONDEMAND gate + `ensureBenchTraceSink(process.env)` / `resolveBenchExecutionPreset({envVars: process.env})` at launch time. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/pool.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `pool` handler reads QUANTA_FULL_REMOTE_CONCURRENCY / QUANTA_BENCH_CONCURRENCY launch dials + QUANTA_FULL_REMOTE_* + the QUANTA_BENCH_RECORD_TRAJECTORY gate, and `buildForwardedBenchEnv(process.env)` is ENV PROPAGATION into the spawned box. Same posture as apps/bench/remote/full.ts.",
+      "apps/bench/commands/box.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `box` handler resolves QUANTA_FULL_REMOTE_REGION / QUANTA_FULL_REMOTE_AMI + the QUANTA_FULL_REMOTE_ONDEMAND gate at launch time for box provisioning/inspection. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/auth.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `auth login` handler resolves QUANTA_BENCH_AUTH_POOL + passes `env: process.env` into runBenchLogin (injection-first DI boundary) at launch time. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/analyze.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the analysis handlers (explain) read QUANTA_SWEBENCH_DATASET at launch time as a `--dataset` fallback; downstream logic receives resolved values. Same composition-root posture as apps/bench/cli.ts.",
+      "apps/bench/commands/trace.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `trace` handler resolves the durable span sink from QUANTA_OTEL_SINK / QUANTA_OTEL_SAVE via `resolveSpanSink(process.env)` at launch time; `runTraceSink` itself is pure (opts only). Same composition-root posture as apps/bench/otel-trace-sink.ts.",
       "apps/bench/otel-trace-sink.ts":
         "Standalone OTLP/JSON receiver + waterfall-UI script (`quanta-bench trace` / `bun … otel-trace-sink.ts`). `runTraceSink` is PURE (opts only); the SOLE env reads live in the `import.meta.main` script entry point, which resolves PORT / QUANTA_OTEL_SAVE / QUANTA_OTEL_RING via a NaN-guarded `envInt` parser and hands fully-validated options down. Same composition-root posture as apps/bench/cli.ts / index.ts.",
       "apps/bench/remote/ssh.ts":
@@ -486,6 +500,10 @@ const RULES: readonly Rule[] = [
         "Headless DEV/test fake-deps fixture (idleMs/snoozeDefaultMs) — fixture values for the fake runtime, not a production wall-clock policy.",
       "apps/bench/cli.ts":
         "Bench CLI minutes→ms conversions (`mins * 60_000`, `(Number(wallMin) || 0) * 60_000`) at the flag-parse boundary — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
+      "apps/bench/commands/shared.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — `positiveMinutesFlagMs` does a minutes→ms `mins * 60_000` conversion at the flag-parse boundary; surface unit conversion, not a wall-clock policy literal. Same posture as apps/bench/cli.ts.",
+      "apps/bench/commands/pool.ts":
+        "Extracted verbatim from apps/bench/cli.ts (already allowlisted) — the `pool` handler's `(Number(wallMin) || 0) * 60_000` minutes→ms conversion at the `--max-box-wall-min` flag boundary; surface unit conversion, not a wall-clock policy literal. Same posture as apps/bench/cli.ts.",
       "apps/bench/remote/fresh-auth.ts":
         "ms→minutes conversion for a LOG message (`Math.round(remaining / 60_000)` shows token-remaining minutes) — display unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
     },
