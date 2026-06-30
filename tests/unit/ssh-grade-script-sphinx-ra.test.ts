@@ -14,6 +14,10 @@
 
 import { describe, expect, test } from "bun:test"
 import { SPHINX_RA_SHIM } from "@/apps/bench/python-swebench"
+import {
+  resolveSwebenchNamespace,
+  resolveSwebenchPipSpec,
+} from "@/apps/bench/remote/box-session/ec2-lifecycle"
 import { buildRemoteGradeScript } from "@/apps/bench/remote/ssh"
 
 describe("ssh grade script — SPHINX_RA_SHIM wiring", () => {
@@ -43,5 +47,47 @@ describe("ssh grade script — SPHINX_RA_SHIM wiring", () => {
     expect(script).toContain("--run_id RUNID") // substituted by the caller
     expect(script).toContain("--dataset_name ~/instances.jsonl")
     expect(script).toContain("--max_workers 4")
+  })
+})
+
+/**
+ * ★ CONTRACT — the grade-only ssh path is DATASET-FAMILY-AWARE (RFC jun-29).
+ *
+ * Before: this path hardcoded `--from swebench` + `--namespace swebench`, so a
+ * `grade --backend ssh:host --dataset-family live` would install the STOCK swebench
+ * harness (which only knows the ORIGINAL repos) and pull `swebench/...` images →
+ * KeyError on every Live repo. Now the family selects the harness fork + image org
+ * via the SAME SSOT resolvers the full-remote box path uses, so the two never drift.
+ */
+describe("ssh grade script — dataset-family awareness (verified vs live)", () => {
+  const ds = "~/instances.jsonl"
+
+  test("verified (no family / undefined) ⇒ stock swebench fork + swebench namespace (byte-identical legacy)", () => {
+    const fromSpec = resolveSwebenchPipSpec(ds, undefined, "verified")
+    const namespace = resolveSwebenchNamespace(ds, undefined, "verified")
+    const s = buildRemoteGradeScript(4, fromSpec, namespace)
+    expect(s).toContain("--from swebench ")
+    expect(s).toContain("--namespace swebench")
+    // The no-arg call (legacy callers) must stay identical to the verified call.
+    expect(buildRemoteGradeScript(4)).toBe(s)
+  })
+
+  test("live ⇒ SWE-bench-Live harness fork + starryzhang prebuilt-image namespace", () => {
+    const fromSpec = resolveSwebenchPipSpec(ds, undefined, "live")
+    const namespace = resolveSwebenchNamespace(ds, undefined, "live")
+    const s = buildRemoteGradeScript(4, fromSpec, namespace)
+    expect(s).toContain("--from git+https://github.com/SWE-bench-Live/SWE-bench-Live ")
+    expect(s).toContain("--namespace starryzhang")
+    // RED-ON-INJECTION: reverting the family wiring (stock swebench for live) trips this.
+    expect(s).not.toContain("--from swebench ")
+    expect(s).not.toContain("--namespace swebench")
+  })
+
+  test("operator env override (QUANTA_SWEBENCH_PIP_SPEC / _NAMESPACE) still wins for live", () => {
+    const fromSpec = resolveSwebenchPipSpec(ds, "swebench==3.0.0", "live")
+    const namespace = resolveSwebenchNamespace(ds, "myorg", "live")
+    const s = buildRemoteGradeScript(4, fromSpec, namespace)
+    expect(s).toContain("--from swebench==3.0.0 ")
+    expect(s).toContain("--namespace myorg")
   })
 })

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { gateOn, logger, runtimeConfig } from "@/shared"
 import { describeAuthSource, resolveAuthLaunchFile } from "../auth-pool"
+import { resolveDatasetFamily } from "../dataset-family"
 import { ensureBenchTraceSink } from "../default-trace-sink"
 import { resolveBenchExecutionPreset } from "../preset"
 import type { GradeBackend } from "../remote/backend"
@@ -263,9 +264,14 @@ export const cmdGrade = async (): Promise<void> => {
   const backend = buildBackend(backendSpec, modelNameFromPredictions(gradePredictions))
   logger.info(`grading via ${backend.name}: ${gradePredictions} (run_id=${runId})`)
   const outDir = argValue("--out")
+  // RFC jun-29 — thread the dataset family so the ssh grade-only path picks the
+  // right harness fork + image namespace (live ⇒ SWE-bench-Live + starryzhang).
+  // Resolved from --dataset-family / QUANTA_SWEBENCH_DATASET_FAMILY (default verified).
+  const family = resolveDatasetFamily(argValue("--dataset-family"), process.env)
   const out = await backend.grade(gradePredictions, {
     datasetPath: dataset,
     runId,
+    family,
     ...(outDir !== undefined ? { outDir } : {}),
   })
   const mergedResolved = [...new Set([...priorResolved, ...out.resolved])].sort()
