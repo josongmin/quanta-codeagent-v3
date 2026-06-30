@@ -1,96 +1,39 @@
-# T3 — surface thinning and shared boot
+# T3 — surface thinning and shared boot — ENTRY SPLIT DONE, debt relocated
 
-**Priority:** P2  
-**Depends on:** T1, T2  
-**Parallelizable:** partial
+**Status:** entry surfaces thinned; god-code debt RELOCATED, not eliminated.
+**Priority:** P3 (watch the relocated near-cap modules)
 
-## Problem
+## Outcome (verified at HEAD `db63b8fd4`)
 
-`src/apps/bench/index.ts` and `src/apps/bench/cli.ts` are still fat surfaces:
+The premise — that `src/apps/bench/index.ts` (~1232 lines) and `cli.ts` (~2242 lines) are fat surfaces owning runtime logic — is **stale**. Two commits already did this work:
 
-- both own terminal boot wiring
-- both own OTel boot wiring
-- both duplicate argv helpers
-- `index.ts` still owns too much runtime/config mode selection
-- `cli.ts` owns large subcommand-specific orchestration bodies
+- `9872580b0 refactor(bench): split cli.ts god-MODULE into per-subcommand commands/ modules`
+- `11adab597 refactor(bench): split index.ts god-MODULE into run-main / run-args / run-report`
 
-## Goal
+Current state:
 
-Make `index.ts` and `cli.ts` thin host adapters:
+- `src/apps/bench/index.ts` — **131 lines**: terminal-IO binding, public re-exports, `import.meta.main` OTel-boot block. Runtime composition moved to `run-main.ts`.
+- `src/apps/bench/cli.ts` — **204 lines**: pure argv parse + `switch` dispatch; every handler lives under `commands/*.ts` (analyze, auth, box, grade, pool, trace).
+- Both files are **removed from the god-module allowlist** (`tools/god-code/allowlist.json`).
 
-- boot and dispatch only
-- no reusable runtime semantics
-- no duplicated boot/argv helpers
+The entry-file DoD (thin `index.ts`/`cli.ts`) is satisfied. **But the split relocated god-module debt, it did not eliminate it:**
 
-## Scope
+- `src/apps/bench/run-main.ts` — **910 lines** (91% of the 1000-line cap) and it carries the dataset-mode orchestration plus the family-bypass parse bug (T2)
+- `src/apps/bench/commands/box.ts` — **919 lines** (92% of cap)
+- `commands/pool.ts` (321), `commands/grade.ts` (290) — chunky but fine
 
-- `src/apps/bench/index.ts`
-- `src/apps/bench/cli.ts`
-- any new app-surface helpers such as `boot.ts`, `argv.ts`, `commands/*`
+Both near-cap files are one modest edit from tripping the ratchet. So T3's entry-thinning is done, but "surface thinning" as a posture is not — `run-main.ts` and `box.ts` are the next split candidates.
 
-## Entry conditions
+## Required action
 
-- `T2` typed config seam must exist, otherwise this ticket turns into sideways code motion
-- baseline line counts for `index.ts` and `cli.ts` should be recorded in the report
+- closeout note under `reports/` recording the two commits + final line counts
+- add `run-main.ts` (910) and `commands/box.ts` (919) to the deferred-decomposition list alongside the driver modules (T6 note). Do not re-thin `index.ts`/`cli.ts` — that part is done.
 
-## Exact edit surfaces
-
-Likely touched:
-
-- `src/apps/bench/index.ts`
-- `src/apps/bench/cli.ts`
-- any new `src/apps/bench/boot*.ts`, `argv*.ts`, `commands/*`
-- tests that pin surface ownership or shared bench adapter behavior
-
-## Required changes
-
-1. Extract shared surface-only boot helpers.
-   - terminal I/O setup
-   - OTel boot and teardown
-   - dotenv/env default load
-2. Extract shared argv/value-flag parsing helpers into one place.
-3. Move subcommand bodies out of `cli.ts` where that reduces owner-local size without pushing reusable runtime semantics back into `src/apps/**`.
-4. Keep surface concerns in `src/apps/bench/**`; if a helper becomes reusable runtime logic, move it below `src/apps/**`.
-
-## Suggested implementation order
-
-1. extract shared boot helper(s)
-2. extract shared argv helper(s)
-3. peel subcommand bodies into app-surface command modules
-4. verify no reusable runtime semantics were stranded in `src/apps/bench/**`
-
-## Explicit non-goals
-
-- moving boot helpers into `src/runner/**` if they are surface-specific
-- remote backend redesign; that belongs in `T4`
-- selection/repair decomposition; that belongs in `T5`
-
-## Definition of done
-
-- `index.ts` and `cli.ts` no longer duplicate boot or argv helpers
-- both files are materially smaller and read primarily as routing/composition surfaces
-- reusable runtime semantics stay outside `src/apps/**`
-
-## Deliverables
-
-- shared app-surface helper modules
-- reduced `index.ts` / `cli.ts`
-- report with before/after line counts and removed duplication list
-
-## Proof rails
+## Proof rails (confirm still green)
 
 ```sh
-bun run typecheck
+wc -l src/apps/bench/index.ts src/apps/bench/cli.ts   # expect ~131 / ~204
 bun test tests/unit/surface-coupling-ratchet.test.ts
 bun test tests/unit/terminal-defaults-ratchet.test.ts
-bun test tests/unit/apps/bench/shared-verify-select-adapters.test.ts
+rg -n "apps/bench/cli|apps/bench/index" tools/god-code/allowlist.json   # expect empty
 ```
-
-## Stop rule
-
-Do not satisfy this ticket by moving code sideways between `index.ts` and `cli.ts` only. Shared duplication must actually disappear.
-
-## Blocked if
-
-- the shared boot helper starts importing runner semantics
-- surface extraction cannot proceed because config ownership is still unresolved

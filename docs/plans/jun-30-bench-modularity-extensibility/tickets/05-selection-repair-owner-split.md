@@ -1,16 +1,24 @@
-# T5 — selection/repair owner split
+# T5 — guard + break the selection value-cycle (real hazard)
 
-**Priority:** P1  
-**Depends on:** T1, T2  
+**Priority:** P2 — adversarial audit reversed the earlier "benign/optional" call
+**Depends on:** T1
 **Parallelizable:** no
+
+## Why this is NOT optional (correction)
+
+The `selection-executor.ts ↔ selection-finalize.ts` reciprocal import is a real **bidirectional value-import cycle**, not type-only:
+
+- executor → finalize imports 8 runtime functions (`selection-executor.ts:98-107`: `finalize`, `generatedResult`, `maybeFinalizeEarlyAccept`, …)
+- finalize → executor imports back `postprocessGeneratedCandidate` + `sanitizeCandidatePublicContracts` (values, `selection-finalize.ts:44-54`, used at `:193,307,388`)
+
+It is "safe" today only because of an **unenforced** invariant the code itself flags (`selection-executor.ts:95-97`: refs are "FUNCTION references only, never called at module init"). The project already treats this exact pattern as dangerous — `tests/unit/agent-import-cycle.test.ts` + `tools/feature-catalog/.../agent-import-cycle-guard.yaml` build a Tarjan-SCC guard against it, documenting the failure mode: a top-level use of a cycle-edge symbol becomes an "ESM circular-init TDZ deadlock → runtime silent hang." But that guard is hardcoded to `AGENT_DIR = src/agent` — **`src/runner/batch/eval/` is entirely outside its scope.** So this is an unguarded twin of a bug class the project has already paid for once.
+
+The fix is therefore two-part and worth doing: (1) extend the import-cycle SCC guard to cover `src/runner/batch/eval/`, and (2) break the cycle by moving the two shared values (`postprocessGeneratedCandidate`, `sanitizeCandidatePublicContracts`) into a shared leaf module both import.
 
 ## Problem
 
-Selection and repair internals are still structurally tangled:
-
-- `selection-executor.ts` and `selection-finalize.ts` keep an intentional reciprocal import cycle
-- selection and repair evidence/fanout seams are spread across multiple files without a clean owner contract
-- several files in this cluster are already under surrounding local drift
+- the executor/finalize value-cycle relies on an unenforced "never call at module-init" rule, with no static guard protecting `runner/batch/eval`
+- selection reads as orchestration + scoring intermixed rather than by clear stage
 
 ## Goal
 

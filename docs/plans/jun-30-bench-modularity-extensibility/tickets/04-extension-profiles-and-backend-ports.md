@@ -1,106 +1,63 @@
-# T4 — extension profiles and backend ports
+# T4 — single `DatasetFamilyProfile` backend port (headline ticket)
 
-**Priority:** P1  
-**Depends on:** T2, T3  
+**Priority:** P1 — **this is the "통합 관리 편하게" payoff**
+**Depends on:** T2 (typed family config + the bypass fix)
 **Parallelizable:** partial
 
-## Problem
+## Why this is the real consolidation lever
 
-Bench is already evolving into a multi-dataset / multi-backend platform, but the current structure still makes extension expensive:
+SWE-bench Pro already landed. The dataset-family seam (`dataset-family.ts`: `DatasetFamily = "verified" | "live" | "pro"`) exists — but family behavior is smeared across **four owner layers**, each re-deciding family with raw string compares:
 
-- dataset family behavior is still partly env-driven in remote paths
-- local run, grade-only, full-remote, and pool paths do not yet share a clean typed execution profile boundary
-- adding a new dataset/backend/profile still risks edits across surface, remote, and runner layers
+1. **corpus-parse** — `runner/batch/corpus/dataset.ts` `normalizeProRow` + `parseTasksForFamily` (`dataset-family.ts:38`), today not wired into `readSwebenchTasks`
+2. **grade-harness selection** — `gradeEvaluatorForFamily` (`dataset-family.ts:46`) + `buildPythonSwebench` (`run-main.ts:699`), today hard-coding the official evaluator
+3. **remote env-profile** — `ec2-lifecycle.ts` `resolveSwebenchPipSpec` (:52), `resolveSwebenchNamespace` (:65, `starryzhang` vs `swebench`), `isLiveRun` (:43), shim staleness; `box-session.ts buildProEnv` (:332)
+4. **preflight** — `box-session/dataset-preflight.ts`
+
+This is exactly why T4 cannot fold into T2: making config typed fixes the *input plumbing* but not the per-family **backend port**. Adding a 5th family today means editing all four layers. This ticket makes it one.
 
 ## Goal
 
-Make future bench extension owner-local:
-
-- one dataset/profile selection site
-- one backend adapter boundary
-- explicit verifier / formatter / budget / remote behavior injection
+One typed `DatasetFamilyProfile` that owns all four family-conditional behaviors, with every consumer routed through it. Adding a dataset family becomes: implement one profile object + register it.
 
 ## Scope
 
-- `src/apps/bench/index.ts`
-- `src/apps/bench/dataset-family.ts`
-- `src/apps/bench/remote/backend.ts`
-- `src/apps/bench/remote/full.ts`
-- `src/apps/bench/remote/pool.ts`
-- `src/apps/bench/remote/box-session.ts`
-- any new `profiles/*` or equivalent typed composition surface
-
-## Entry conditions
-
-- `T2` typed config seam must exist
-- `T3` surface thinning should be far enough along that profile/backend composition has one obvious home
-
-## Exact edit surfaces
-
-Likely touched:
-
-- `src/apps/bench/index.ts`
-- `src/apps/bench/cli.ts`
-- `src/apps/bench/dataset-family.ts`
-- `src/apps/bench/remote/backend.ts`
-- `src/apps/bench/remote/full.ts`
-- `src/apps/bench/remote/pool.ts`
-- `src/apps/bench/remote/box-session.ts`
-- new `src/apps/bench/profiles/*` or equivalent
+- `src/apps/bench/dataset-family.ts` (promote to the profile registry / SSOT)
+- `src/runner/batch/corpus/dataset.ts` (parse/normalize behind the profile)
+- `src/apps/bench/run-main.ts` (`readSwebenchTasks`, `buildPythonSwebench` route through the profile)
+- `src/apps/bench/remote/box-session.ts`, `remote/box-session/ec2-lifecycle.ts`, `remote/box-session/dataset-preflight.ts` (pip-spec/namespace/preflight read from the profile, not raw env)
+- new `src/apps/bench/profiles/*` or an equivalent typed registry
 
 ## Required changes
 
-1. Introduce a typed bench execution profile boundary.
-   - dataset family
-   - verifier / prediction format policy
-   - budget / timeout policy
-   - remote launch policy
-2. Introduce or tighten backend adapter interfaces so local, grade-only, full-remote, and pool paths are explicit adapters rather than special-case branches.
-3. Remove remote-path dependence on env-bridged dataset family or similar hidden control flow.
-4. Preserve default Verified behavior when no explicit alternate profile is selected.
-
-## Suggested implementation order
-
-1. define the profile/backend interfaces
-2. choose the single composition site
-3. route local and remote paths through the typed profile
-4. remove hidden env-based family/profile discovery from remote paths
-5. prove that default Verified remains stable
-
-## Explicit non-goals
-
-- shipping every future dataset/backend in this ticket
-- reworking official grading semantics beyond what is needed for a stable extension seam
-- broad report/dashboard redesign beyond required profile tagging
+1. Define `DatasetFamilyProfile` with the four behaviors as typed fields/methods:
+   - `parseRow` (normalize) · `gradeEvaluator` (harness selection) · `remoteEnv` (pip-spec, docker namespace, on-box env) · `preflight`
+2. Build a small registry keyed by `DatasetFamily`; `verified`/`live`/`pro` each become one profile object.
+3. Route every consumer (local parse/grade in `run-main.ts`, remote env in `ec2-lifecycle.ts`/`box-session.ts`, preflight) through the resolved profile. Delete the raw `=== "pro"` / `.toLowerCase() !== "pro"` string compares.
+4. Preserve default Verified behavior byte-for-byte when no alternate family is selected.
 
 ## Definition of done
 
-- adding one new dataset or backend is owner-local and does not require deep edits across multiple layers
-- remote code receives typed family/profile inputs rather than discovering them from env side channels
-- default run path remains byte-compatible unless a non-default profile is selected
-
-## Deliverables
-
-- typed profile/backend interfaces
-- one composition site
-- report describing what file(s) a future dataset/backend now needs to touch
+- adding a dataset family touches **one place** (a new profile object + registration), provable by description in the report
+- no consumer reads `QUANTA_SWEBENCH_DATASET_FAMILY` raw to branch behavior — all go through the profile
+- local and remote paths share the same profile resolution (no divergent family logic)
+- default Verified path is unchanged unless a non-default family is selected
 
 ## Proof rails
 
 ```sh
 bun run typecheck
+rg -n "=== \"pro\"|!== \"pro\"|QUANTA_SWEBENCH_DATASET_FAMILY" src/apps/bench src/runner/batch   # expect: only the profile resolver, not scattered consumers
 bun test tests/unit/bench-sg-ingress-ssot-hellgate.test.ts
 bun test tests/unit/bench-detached-poll-box-death-hellgate.test.ts
-bun run src/apps/bench/cli.ts grade --mode full --dry-run --dataset <fixture> --backend ec2
+# add: a profile-registry unit test proving each family resolves all four behaviors
 ```
 
-Use a cheap dry-run or owner-local fake where possible. Do not require a live EC2 proof just to land the structural seam, but record what remains unverified live.
+Use owner-local fakes; do not require a live EC2 proof to land the seam, but record what stays unverified live.
 
 ## Stop rule
 
-If "extensibility" still means editing both surface code and deep runtime code for one new profile, the seam is not finished.
+If adding a hypothetical family #4 still means editing parse + grade + remote-env + preflight separately, the port is not finished — they must all resolve from the one profile.
 
 ## Blocked if
 
-- remote path behavior still depends on ad hoc env mutation from CLI code
-- the chosen profile/backend interface still leaks surface-specific concerns downward
+- T2's typed family field and bypass fix are not in place (parse/grade still ignore the seam)

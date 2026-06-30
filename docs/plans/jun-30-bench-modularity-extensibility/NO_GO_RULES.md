@@ -8,7 +8,7 @@
 6. Do not add new cross-surface runtime imports under `src/apps/**`.
 7. Do not merge bench-owned red and unrelated repo-global red into one "still failing" bucket. Split them.
 8. Do not refactor acceptance/location-fanout/repair-breadth files blindly while the current surrounding drift is unresolved.
-9. Do not keep the `selection-executor` / `selection-finalize` cycle as a permanent design state.
+9. The `selection-executor` / `selection-finalize` value-cycle relies on an UNENFORCED "never call at module-init" rule, and the project's TDZ import-cycle guard covers `src/agent` only — `runner/batch/eval` is unprotected. Do NOT leave it unguarded; T5 must extend the guard there and break the cycle.
 10. Do not claim extensibility if adding a new dataset/backend/profile still requires edits in more than one owner layer.
 11. Do not close a ticket without adding its report file.
 12. Do not collapse `partial`, `blocked`, and `done` into one status. Use the correct word.

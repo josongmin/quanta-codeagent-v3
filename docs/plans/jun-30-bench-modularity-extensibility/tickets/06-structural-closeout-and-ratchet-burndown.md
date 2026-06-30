@@ -1,8 +1,20 @@
-# T6 — structural closeout and ratchet burndown
+# T6 — structural closeout and ratchet burndown (scoped down)
 
-**Priority:** P1  
-**Depends on:** T1-T5  
+**Priority:** P2
+**Depends on:** T1 (which extracts the `runSelectionPhase` body)
 **Parallelizable:** no
+
+## Scope correction (read this first)
+
+Both ratchets are already GREEN (via grandfathering). Audit (HEAD `db63b8fd4`) found only **one** grandfather entry this packet can realistically retire:
+
+| grandfather entry | current | threshold | verdict |
+|---|---|---|---|
+| `runner/batch/eval/driver.ts::runSelectionPhase` (fn) | ~187 | 150 | **retireable** if T1 extracts the body to a thin call site |
+| `src/runner/batch/eval/driver.ts` (module) | 6889 | 1000 | **out of scope** — ~6.9× over; needs a dedicated multi-ticket decomposition |
+| `src/apps/bench/eval/driver.ts` (module) | 2089 | 1000 | **out of scope** — ~2× over; same |
+
+The `cli.ts`/`index.ts` module entries are already gone (T3). So T6's only in-packet job is the `runSelectionPhase` **function**. The two driver **module** grandfathers are explicitly deferred to a separate decomposition campaign — do not pretend T1+T5 retire them.
 
 ## Problem
 
@@ -41,11 +53,10 @@ Likely touched:
 
 ## Required changes
 
-1. Remove bench-owned grandfathered allowlist entries that T1–T5 made splittable (`runSelectionPhase` function once `selection` is decomposed; shrink the four grandfathered bench modules where the earlier tickets already moved logic out).
-2. After each removal, prove `god-code-ratchet` stays GREEN with fewer grandfathers — the ratchet's stale-entry guard fails if you remove an entry whose file still violates, so this is real proof, not prose.
-3. Leave bench `src-no-sketchy-code` allowlist entries in place if they remain legitimate composition-root reads; only remove ones T2 actually eliminated, and update their rationale otherwise.
-4. Replace any debt-preserving architecture tests with behavior/contract tests where needed.
-5. Report remaining unrelated repo-global grandfathers separately instead of folding them into bench closeout.
+1. After T1 extracts `runSelectionPhase`'s body to a thin call site, remove its allowlist function entry and prove `god-code-ratchet` stays GREEN (the ratchet's stale-entry guard fails if you remove an entry whose file still violates — that is real proof).
+2. Leave the two driver **module** grandfathers in place; record them as deferred decomposition work in the report (with current line counts), do not claim them closed. Add the near-cap relocated modules from T3 to the same deferred list: `run-main.ts` (910) and `commands/box.ts` (919) — under the 1000 cap today but one edit from tripping it.
+3. Leave bench `src-no-sketchy-code` allowlist entries that remain legitimate composition-root reads; only remove ones T2 actually eliminated, update rationale otherwise.
+4. Report remaining unrelated repo-global grandfathers separately instead of folding them into bench closeout.
 
 ## Suggested implementation order
 

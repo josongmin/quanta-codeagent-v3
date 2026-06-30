@@ -32,20 +32,31 @@ If a worker cannot prove a ticket's invariant from code + tests + the listed rai
 
 ## Target end state
 
-1. `src/runner/batch/eval/**` is the single owner of reusable per-instance bench runtime semantics.
-2. `src/apps/bench/**` is a thin host surface: argv/env parsing, boot wiring, subcommand dispatch, host-owned I/O.
-3. dataset family, verifier choice, backend choice, and remote launch behavior flow through typed config/profile objects, not env mutation.
-4. selection/repair helpers are cycle-free and decomposed by owner boundary, not only by file size.
-5. bench-owned structural rails are green or explicitly separated from unrelated repo-global red.
+1. The **app driver** (`src/apps/bench/eval/driver.ts`) stays the canonical per-instance orchestrator (it owns the SessionHost / RuntimeHost / capability-manifest wiring the live path needs); `src/runner/batch/eval/**` is the pure helper library it draws from. The runner driver's dead `runRepairPhase` / `runSelectionPhase` / `runInstance` twins are deleted, and shared *interiors* keep migrating down as exported pure helpers.
+2. `src/apps/bench/**` surfaces (`index.ts`, `cli.ts`) are already thin host adapters (boot + dispatch); keep them that way.
+3. dataset family, verifier choice, backend choice, and remote launch behavior flow through **one typed `DatasetFamilyProfile`** that owns the four scattered family layers (corpus-parse, grade-harness selection, remote env-profile, preflight) — not raw `process.env` string compares.
+4. the in-process run path actually routes Pro/Live through the family seam (today it bypasses it and mis-parses/mis-grades Pro).
+5. bench-owned structural rails stay green; the two driver-module god grandfathers are tracked as a separate decomposition campaign, not implied closed by this packet.
+
+## Reality corrections (verified 2026-06-30 against HEAD `db63b8fd4`)
+
+This packet was first drafted against a 2-commit-older tree. Live code overrode several premises:
+
+- "make runner the single owner" is **inverted** — runner's phase twins are dead; the app driver is the live owner, and an arch guard forbids runner from importing the host stack it would need. (Precise: `runInstance`/`runInstanceOnce` already deleted in `ac3a266f8`; the remaining dead `runRepairPhase`/`runSelectionPhase` sit on an orphan chain AND are pinned by source-text parity tests that must be rewritten when they go.) See T1.
+- T3 (thin `index.ts`/`cli.ts`) entry-split is done (131 / 204 lines, de-allowlisted) — but it **relocated** god-code debt into `run-main.ts` (910) and `commands/box.ts` (919), both just under the 1000 cap. Not "done" as a posture.
+- T5's reciprocal cycle is a **real bidirectional value-cycle** relying on an unenforced "never call at module-init" rule; the project's TDZ-hang import-cycle guard covers `src/agent` only, leaving `runner/batch/eval` unprotected. Not optional — guard it and break it.
+- The Pro family-bypass bug hits **remote runs too** — the full-remote box launches Pro via the same in-process entrypoint (`box-session.ts:380`), so every remote Pro run is currently vacuous-passing at the test-command level.
+- The real maintainability lever is **T4** (single `DatasetFamilyProfile`) plus the **T2 family-bypass bug fix**, not the driver ownership shuffle.
 
 ## Execution order
 
-1. [T1](./tickets/01-single-owner-runtime-cutover.md) — single-owner runtime cutover
-2. [T2](./tickets/02-typed-bench-config-ssot.md) — typed config and argv/env SSOT
-3. [T3](./tickets/03-surface-thinning-and-shared-boot.md) — thin `index.ts` / `cli.ts`
-4. [T4](./tickets/04-extension-profiles-and-backend-ports.md) — extension-friendly dataset/backend/profile seams
-5. [T5](./tickets/05-selection-repair-owner-split.md) — selection/repair decycle and owner-local split
-6. [T6](./tickets/06-structural-closeout-and-ratchet-burndown.md) — structural closeout and ratchet burndown
+0. **Commit-first gate** — land the in-flight acceptance-tier telemetry cluster (currently dirty, centered on `driver.ts`) and refresh the drift baseline before any ticket touches `driver.ts`.
+1. [T2](./tickets/02-typed-bench-config-ssot.md) — typed dataset/config SSOT **+ fix the Pro family bypass** (highest value; affects local AND remote Pro)
+2. [T4](./tickets/04-extension-profiles-and-backend-ports.md) — single `DatasetFamilyProfile` backend port (the headline "통합" ticket)
+3. [T1](./tickets/01-single-owner-runtime-cutover.md) — driver dedup, **app driver as canonical owner**, delete the dead runner chain + its pinning tests as a unit
+4. [T5](./tickets/05-selection-repair-owner-split.md) — extend the import-cycle guard to `runner/batch/eval` and break the selection value-cycle
+5. [T6](./tickets/06-structural-closeout-and-ratchet-burndown.md) — retire the `runSelectionPhase` function grandfather; scope module grandfathers + `run-main.ts`/`box.ts` as separate decomposition work
+6. [T3](./tickets/03-surface-thinning-and-shared-boot.md) — closeout note; flag `run-main.ts`/`box.ts` as near-cap follow-ups
 
 ## Packet map
 

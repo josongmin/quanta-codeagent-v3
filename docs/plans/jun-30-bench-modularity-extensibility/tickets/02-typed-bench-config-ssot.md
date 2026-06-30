@@ -1,21 +1,25 @@
-# T2 — typed bench config SSOT
+# T2 — typed dataset/config SSOT + fix the Pro local-path bypass
 
-**Priority:** P1  
-**Depends on:** T1  
-**Parallelizable:** partial, after T1 owner boundary is stable
+**Priority:** P1 — **this is the real start of the packet**
+**Depends on:** T0 (commit the dirty acceptance-tier cluster first)
+**Parallelizable:** partial
 
-## Problem
+## Premise correction (read this first)
 
-Bench control flow still depends on `process.env` as a cross-layer control bus:
+The original draft said T2 removes "argv→env mutation, e.g. dataset family bridging in cli.ts." **That mutation does not exist** — a broad grep for `process.env.X =` / `Object.assign(process.env` / `delete process.env` across all of `src/apps/bench/**` (non-test) returns empty. `cli.ts` has zero env writes.
 
-- `src/apps/bench/index.ts`
-- `src/apps/bench/cli.ts`
-- `src/apps/bench/remote/full.ts`
-- `src/apps/bench/remote/pool.ts`
-- `src/apps/bench/remote/box-session.ts`
-- `src/runner/batch/eval/driver.ts`
+The real problem is the opposite: dataset family is decided by **scattered raw env reads**, and the typed seam that exists is half-wired:
 
-There is also explicit argv-to-env mutation, for example dataset family bridging in `src/apps/bench/cli.ts`.
+- `src/apps/bench/dataset-family.ts:31` `resolveDatasetFamily` reads `QUANTA_SWEBENCH_DATASET_FAMILY` (the intended SSOT)
+- `remote/full.ts:477` + `remote/pool.ts:83` call `resolveDatasetFamily(undefined, process.env)` — they honor the seam but drop the argv `--dataset-family` flag (pass `undefined` for argv)
+- `remote/box-session.ts:333` (`buildProEnv`) + `:376` — raw `env.QUANTA_SWEBENCH_DATASET_FAMILY` string compares. **Bypass.**
+- `remote/box-session/ec2-lifecycle.ts:81,442,481` — multiple raw reads feeding `resolveSwebenchPipSpec` / `resolveSwebenchNamespace` / an `isLiveRun` gate. **Bypass.**
+
+### The load-bearing bug (highest value in this packet)
+
+`parseTasksForFamily` and `gradeEvaluatorForFamily` (`dataset-family.ts:38,46`) have **no production callers**. The in-process local run path uses `readSwebenchTasks` (`run-main.ts:362`) — which calls `parseSwebenchJsonl` *without* `normalizeProRow` — and `buildPythonSwebench` (`run-main.ts:699`) which calls the official evaluator *unconditionally*. So **a Pro dataset run is neither normalized nor routed to the Scale verifier → it silently mis-parses (`testCmd:"true"` no-op, fake-green risk) and mis-grades.**
+
+This is NOT a local-only edge case. The full-remote box launches Pro by invoking the **same in-process entrypoint**: `remote/box-session.ts:380` runs `bun run src/apps/bench/cli.ts run --swebench …` → `runMain` → `run-main.ts` → the un-normalized `readSwebenchTasks` + official-only `buildPythonSwebench`. The box even provisions the Scale Pro harness/venv (`ec2-lifecycle.ts:481`) and forwards `QUANTA_SWEBENCH_PRO_*` env — but nothing in the run path reads it. Confirmed precisely: a Pro row parses via `toTask` (lowercase keys present) then hits `synthesizeTestCmd` (`dataset.ts:398`) which reads UPPERCASE `FAIL_TO_PASS` → `undefined` → `return "true"`. **Every remote Pro run today is silently vacuous-passing at the test-command level.** Fix this as part of T2 — it is the highest-value correctness win in the packet.
 
 ## Goal
 
@@ -50,10 +54,12 @@ Likely touched:
 
 1. Introduce an explicit typed config boundary for bench.
    - acceptable shapes: `BenchRunConfig`, `BenchCliConfig`, `BenchRemoteConfig`, or an equivalent split
-2. Parse argv once and resolve env/defaults once.
-3. Remove control-path env mutation such as "bridge argv into env so lower layers notice".
-4. Replace lower-layer `process.env` reads that decide bench behavior with typed fields wherever the owner boundary allows.
-5. Keep `runtimeConfig()` or boot-level env reads only where they remain the declared boundary.
+   - the resolved `DatasetFamily` is a typed field on it (consumed by T4's `DatasetFamilyProfile`)
+2. Parse argv once, resolve env/defaults once. Fix the dropped `--dataset-family` argv on the remote path (`full.ts:477`, `pool.ts:83` pass `undefined` for argv).
+3. **Fix the in-process bypass bug:** route `readSwebenchTasks`/`buildPythonSwebench` (`run-main.ts:362,699`) through `parseTasksForFamily` + `gradeEvaluatorForFamily` so a local Pro run normalizes rows and uses the Scale verifier. Add a test that a Pro fixture parses non-trivially (not `testCmd:"true"`) and grades via the Pro evaluator.
+4. Replace the scattered raw `process.env.QUANTA_SWEBENCH_DATASET_FAMILY` reads (`box-session.ts:333,376`, `ec2-lifecycle.ts:81,442,481`) with the typed family field.
+5. Bring the family env vars (`QUANTA_SWEBENCH_DATASET_FAMILY/_NAME/_PIP_SPEC/_NAMESPACE`) into the knob-schema SSOT — today they are raw reads outside it.
+6. Keep `runtimeConfig()` or boot-level env reads only where they remain the declared boundary.
 
 ## Suggested implementation order
 
@@ -73,7 +79,9 @@ Likely touched:
 ## Definition of done
 
 - bench dataset family, remote mode, observe/trace decisions, and major run knobs flow through typed config
-- no bench behavior depends on argv mutating `process.env` for lower layers
+- the in-process local path routes Pro/Live through the family seam (the mis-grade bug is fixed, with a test)
+- the raw family env reads in `box-session.ts`/`ec2-lifecycle.ts` are replaced by the typed field (or explicitly justified as a remote-process boundary read)
+- family env vars are declared in the knob schema
 - config parsing is unit-testable without launching the CLI
 
 ## Deliverables
