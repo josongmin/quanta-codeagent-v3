@@ -66,6 +66,12 @@ export class TaskRegistry {
    *  caller of `register()` knows the token, so only that caller can
    *  successfully stop the task. Tokens are deleted on settle. */
   private readonly owners = new Map<string, TaskOwnerToken>()
+  /** Live fire-and-forget child-runner promises. A spawn site registers its
+   *  `runner(req).then(complete).catch(fail)` chain here so session cleanup can
+   *  AWAIT the actual runner unwind — not just the settler, which `forceStop`
+   *  resolves synchronously while the runner promise is still in flight. A
+   *  tracked promise removes itself once it settles, so the set self-trims. */
+  private readonly runnerPromises = new Set<Promise<void>>()
   private readonly maxRetained: number
 
   constructor(opts: TaskRegistryOptions = {}) {
@@ -188,6 +194,34 @@ export class TaskRegistry {
     this.owners.delete(id)
     this.evictIfOverCap()
     return true
+  }
+
+  /** Track a spawn site's fire-and-forget child-runner promise so {@link
+   *  drainRunners} can await its full unwind at session shutdown. The supplied
+   *  promise MUST already be terminal-safe (i.e. the spawn site has attached its
+   *  own `.then(complete).catch(fail)`); this method swallows any rejection of
+   *  the tracked chain so a late child error can never surface as an
+   *  unhandledRejection here. The promise self-removes once it settles. */
+  trackRunner(p: Promise<unknown>): void {
+    // Normalize to a never-rejecting `Promise<void>` so the set only holds
+    // settle markers — drain awaits completion, never failure.
+    const marker: Promise<void> = p.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.runnerPromises.add(marker)
+    void marker.then(() => {
+      this.runnerPromises.delete(marker)
+    })
+  }
+
+  /** Await every currently-tracked child-runner promise. Snapshot-then-await so
+   *  a runner that spawns another during unwind doesn't extend this drain
+   *  unboundedly. Resolves immediately when nothing is in flight. Never rejects
+   *  (each tracked marker is rejection-swallowed in {@link trackRunner}). */
+  drainRunners(): Promise<void> {
+    if (this.runnerPromises.size === 0) return Promise.resolve()
+    return Promise.all([...this.runnerPromises]).then(() => undefined)
   }
 
   /** Event-driven settle notifier. Returns a Promise that resolves the

@@ -671,11 +671,17 @@ export const handleSpawnAgent = async (
   // ever spawned. Idempotent + no-op when the host wired a `{set}`-only stub or
   // no side-table at all (byte-identical default-OFF path). Mirrors how the
   // registry record itself stops being a live `pendingIds()` entry on settle.
-  void deps
-    .runner(req)
-    .then((r) => deps.registry.complete(taskId, r))
-    .catch((e: unknown) => deps.registry.fail(taskId, errMessage(e)))
-    .finally(() => deps.agentMeta?.delete?.(taskId))
+  // Tracked on the registry so session `cleanup` can DRAIN the actual runner
+  // unwind (forceStop resolves the settler synchronously; the runner promise
+  // otherwise keeps running past teardown). The `.finally` agentMeta cleanup is
+  // wrapped INSIDE the tracked chain so it still fires on either terminal path.
+  deps.registry.trackRunner(
+    deps
+      .runner(req)
+      .then((r) => deps.registry.complete(taskId, r))
+      .catch((e: unknown) => deps.registry.fail(taskId, errMessage(e)))
+      .finally(() => deps.agentMeta?.delete?.(taskId)),
+  )
 
   return { kind: "success", agentId: taskId, ownerToken }
 }

@@ -356,10 +356,15 @@ const launchBackground = (
   recordOwner(taskId)
   const signaledReq: SubagentRequest = { ...req, signal: abort.signal }
   // Fire and forget; the registry record settles when the runner returns.
-  void opts
-    .runner(signaledReq)
-    .then((r) => registry.complete(taskId, r))
-    .catch((e: unknown) => registry.fail(taskId, errMessage(e)))
+  // Track the chain on the registry so session `cleanup` can DRAIN the actual
+  // runner unwind — `forceStop` resolves the settler synchronously, so without
+  // tracking the runner promise keeps running after teardown returns.
+  registry.trackRunner(
+    opts
+      .runner(signaledReq)
+      .then((r) => registry.complete(taskId, r))
+      .catch((e: unknown) => registry.fail(taskId, errMessage(e))),
+  )
   return {
     type: "result",
     result: {

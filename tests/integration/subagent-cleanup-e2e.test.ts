@@ -154,6 +154,37 @@ describe("buildSessionFeatures — cleanup() stops running tasks", () => {
     expect(cleanupSpy).toHaveBeenCalledTimes(1)
   })
 
+  test("cleanup() DRAINS a still-in-flight fire-and-forget runner promise", async () => {
+    // RED-ON-INJECTION: `forceStop` resolves the settler synchronously, so the
+    // `waitForSettle` await alone returns while the child-runner promise is
+    // still unwinding. `cleanup` must additionally `drainRunners()` so no child
+    // work outlives teardown. With the fix removed, `cleanup()` resolves before
+    // `release()` and `drained` stays false.
+    const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
+    if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")
+    const reg = f.taskRegistry
+
+    let release!: () => void
+    let drained = false
+    const runner = new Promise<void>((r) => {
+      release = r
+    }).then(() => {
+      drained = true
+    })
+    reg.trackRunner(runner)
+
+    const cleanupPromise = f.cleanup()
+    const beforeRelease = await raceTimer(cleanupPromise, 20)
+    // Cleanup MUST still be pending: the tracked runner has not settled yet.
+    expect(beforeRelease).toBe("timer")
+    expect(drained).toBe(false)
+
+    release()
+    await cleanupPromise
+    // The drain observed the runner's full unwind before cleanup returned.
+    expect(drained).toBe(true)
+  })
+
   test("a third-party already-stopped task does not break a subsequent cleanup", async () => {
     const f = await buildSessionFeatures(baseCfg({ subagent: {} }))
     if (!f.cleanup || !f.taskRegistry) throw new Error("expected cleanup + taskRegistry")

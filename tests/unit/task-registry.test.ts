@@ -198,3 +198,62 @@ describe("TaskRegistry — settled tasks are immutable", () => {
     expect(reg.forceStop("task_does_not_exist")).toBe(false)
   })
 })
+
+describe("TaskRegistry — trackRunner / drainRunners (deterministic teardown)", () => {
+  test("drainRunners() with nothing tracked resolves immediately", async () => {
+    const reg = new TaskRegistry()
+    const winner = await raceAgainst(reg.drainRunners(), 5)
+    expect(winner).toBe("settled")
+  })
+
+  test("drainRunners() AWAITS a runner promise that is still in flight", async () => {
+    // RED-ON-INJECTION: this is the exact gap the fix closes. `forceStop`
+    // resolves the settler synchronously, so a session that only awaits
+    // `waitForSettle` returns while the runner promise is still unwinding.
+    // `drainRunners` must NOT resolve until the tracked runner promise settles.
+    const reg = new TaskRegistry()
+    let release!: () => void
+    const runner = new Promise<void>((r) => {
+      release = r
+    })
+    reg.trackRunner(runner)
+
+    // Drain must still be pending while the runner is in flight.
+    const pending = await raceAgainst(reg.drainRunners(), 5)
+    expect(pending).toBe("timer")
+
+    // Once the runner settles, a fresh drain resolves.
+    release()
+    const done = await raceAgainst(reg.drainRunners(), 5)
+    expect(done).toBe("settled")
+  })
+
+  test("a tracked runner that REJECTS does not surface an unhandledRejection and drain still resolves", async () => {
+    const reg = new TaskRegistry()
+    const seen: unknown[] = []
+    const onRej = (e: unknown): void => {
+      seen.push(e)
+    }
+    process.on("unhandledRejection", onRej)
+    try {
+      reg.trackRunner(Promise.reject(new Error("child blew up")))
+      // drain awaits the rejection-swallowed marker — resolves, never throws.
+      await reg.drainRunners()
+      // Let any would-be unhandledRejection fire across a few micro/macro turns.
+      for (let i = 0; i < 4; i++) await Promise.resolve()
+      await new Promise<void>((r) => setTimeout(r, 0))
+      expect(seen).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onRej)
+    }
+  })
+
+  test("settled tracked runners self-trim from the set (drain stays bounded)", async () => {
+    const reg = new TaskRegistry()
+    reg.trackRunner(Promise.resolve())
+    // After the marker settles, a subsequent drain takes the empty fast path.
+    for (let i = 0; i < 4; i++) await Promise.resolve()
+    const winner = await raceAgainst(reg.drainRunners(), 5)
+    expect(winner).toBe("settled")
+  })
+})
