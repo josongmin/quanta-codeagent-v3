@@ -312,7 +312,7 @@ export const benchEffortLadderSchema: KnobSchema<number | undefined> = {
   parse: parseEffortLadder,
 }
 
-/* ── QUANTA_BENCH_LOCATION_FANOUT (env-direct, driver.ts via gateOn) ───────── */
+/* ── QUANTA_BENCH_LOCATION_FANOUT (bench posture, repair driver fanout) ────── */
 export const benchLocationFanoutSchema: KnobSchema<boolean> = {
   id: "bench-location-fanout",
   envKey: "QUANTA_BENCH_LOCATION_FANOUT",
@@ -322,8 +322,10 @@ export const benchLocationFanoutSchema: KnobSchema<boolean> = {
     "Bench: multi-location-set fanout (Agentless §4.2 absorption). With repair-breadth B>1, seed each breadth candidate to LEAD at a distinct ranked-localizer file (location diversity instead of B resamples of the top-1 site). Reuses the repair-breadth fork machinery + the localizer's ranked files; pure rotation, no-leak. Needs B>1 + ≥2 localized files. Default-OFF ⇒ candidates share the base seed ⇒ byte-identical.",
   knobDescribe:
     "Multi-location-set fanout: each breadth candidate leads at a distinct ranked file (Agentless edit-per-location)",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/knobs-bench.ts",
   surfaces: BENCH,
+  source:
+    "Agentless edit-per-location absorption (preset-addressable multi-file repair breadth diversity)",
   parse: parseGateBool,
 }
 

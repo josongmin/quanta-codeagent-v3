@@ -23,6 +23,7 @@ import { beforeAll, describe, expect, test } from "bun:test"
 import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { type AnyKnob, allKnobs, asAnyKnob, registerKnob } from "@/runner/knobs"
+import { acceptanceKnob } from "@/runner/knobs/knobs/acceptance"
 import { adversarialReproKnob } from "@/runner/knobs/knobs/adversarial-repro"
 import { advisorKnob } from "@/runner/knobs/knobs/advisor"
 import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
@@ -67,6 +68,7 @@ import { repairEscalationKnob } from "@/runner/knobs/knobs/repair-escalation"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproDoubtKnob } from "@/runner/knobs/knobs/repro-doubt"
 import { reproExecTimeoutKnob } from "@/runner/knobs/knobs/repro-exec-timeout"
+import { reproGroundingKnob } from "@/runner/knobs/knobs/repro-grounding"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 import { reproVoteKnob } from "@/runner/knobs/knobs/repro-vote"
 import { retryTransientKnob } from "@/runner/knobs/knobs/retry-transient"
@@ -90,6 +92,7 @@ import { verifySelectRiskGateKnob } from "@/runner/knobs/knobs/verify-select-ris
 import { workingStateKnob } from "@/runner/knobs/knobs/working-state"
 
 const ALL_KNOBS: readonly AnyKnob[] = [
+  asAnyKnob(acceptanceKnob),
   asAnyKnob(adversarialReproKnob),
   asAnyKnob(advisorKnob),
   asAnyKnob(benchInLoopExecKnob),
@@ -134,6 +137,7 @@ const ALL_KNOBS: readonly AnyKnob[] = [
   asAnyKnob(repoMapKnob),
   asAnyKnob(reproDoubtKnob),
   asAnyKnob(reproExecTimeoutKnob),
+  asAnyKnob(reproGroundingKnob),
   asAnyKnob(reproTestKnob),
   asAnyKnob(reproVoteKnob),
   asAnyKnob(retryTransientKnob),

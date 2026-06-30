@@ -290,6 +290,10 @@ export interface BenchPosture {
    * `repair-breadth` knob. Unset ⇒ projected to 1 (byte-identical single-pass).
    */
   readonly repairBreadth: number
+  /** Strategy #7 multi-location-set fanout. When true and repair breadth B>1,
+   *  seed each breadth candidate to lead with a distinct ranked file instead of
+   *  B resamples of the top-1 location. */
+  readonly locationFanout: boolean
   /**
    * Verify-and-select candidate count (N). PRESENT ⇒ runInstance generates N
    * closure-diversity-seeded candidates and submits the VerificationBundle's
@@ -601,6 +605,7 @@ export const benchPostureFromState = (
   // byte-identical no-fork path). The registry Knob carries no default, so an
   // unset/rejected env value reads `undefined` here and the `?? 1` fence applies.
   const repairBreadth = readKnobValue(state, "repair-breadth", isNumber) ?? 1
+  const locationFanout = readKnobValue(state, "bench-location-fanout", isTrue) === true
   const verifySelectN = readKnobValue(state, "verify-select", isNumber)
   const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
   const verifySelectEarlyAccept =
@@ -687,6 +692,7 @@ export const benchPostureFromState = (
     retryTransient,
     repairRounds,
     repairBreadth,
+    locationFanout,
     verifySelectN,
     verifySelectConcurrency,
     verifySelectEarlyAccept,

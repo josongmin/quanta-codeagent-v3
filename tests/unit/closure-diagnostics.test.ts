@@ -121,6 +121,22 @@ describe("computeClosureDiagnostics", () => {
     expect(d.metrics["owner_recall@1"]!.value).toBeCloseTo(3 / 4)
   })
 
+  test("gold coverage metrics expose the flattering owner_recall case", () => {
+    // coverage ratios: resolved-1=1, miss-owner=0, miss-multi=1/2, stray-1=1 => 2.5/4
+    expect(d.metrics.gold_coverage_rate!.n).toBe(4)
+    expect(d.metrics.gold_coverage_rate!.value).toBeCloseTo(2.5 / 4)
+    // exact set matches only the single-file exact cases: resolved-1 + stray-1
+    expect(d.metrics.exact_file_set_match_rate!.value).toBeCloseTo(2 / 4)
+    // the only multi-file gold case touched one of two files, so full=0, partial=1, disjoint=0
+    expect(d.metrics.multi_file_full_coverage_rate!.n).toBe(1)
+    expect(d.metrics.multi_file_full_coverage_rate!.value).toBeCloseTo(0)
+    expect(d.metrics.multi_file_partial_overlap_rate!.value).toBeCloseTo(1)
+    expect(d.metrics.multi_file_disjoint_rate!.value).toBeCloseTo(0)
+    const missMulti = d.perInstance.find((p) => p.instanceId === "miss-multi")
+    expect(missMulti?.goldCoverage).toBeCloseTo(1 / 2)
+    expect(missMulti?.goldCoverageClass).toBe("partial")
+  })
+
   test("first_edit_owner_match uses the first mutating edit, not the final diff", () => {
     // firstEditFile present on 4 patch-bearing; matches gold on resolved-1, miss-multi, stray-1 = 3/4
     expect(d.metrics.first_edit_owner_match!.available).toBe(true)

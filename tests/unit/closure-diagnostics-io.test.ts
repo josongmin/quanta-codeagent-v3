@@ -9,7 +9,9 @@ import {
   diagnoseRun,
   patchFiles,
   strayFilesOf,
+  summarizeClosureDiagnostics,
 } from "@/runner/batch/eval/closure-diagnostics-io"
+import type { ClosureDiagnostics } from "@/runner/batch/eval/closure-diagnostics"
 import type { InstanceResult } from "@/runner/batch/types"
 
 const DIFF = `diff --git a/pkg/a.py b/pkg/a.py
@@ -185,5 +187,30 @@ describe("closure-diagnostics-io", () => {
     const d = diagnoseRun([r], undefined)
     expect(d.total).toBe(1)
     expect(d.metrics["owner_recall@1"]!.available).toBe(false)
+  })
+
+  test("summarizeClosureDiagnostics surfaces the anti-flattering coverage/oracle signals", () => {
+    const diagnostics: ClosureDiagnostics = {
+      total: 4,
+      metrics: {
+        "owner_recall@1": { value: 1, available: true, n: 4 },
+        gold_coverage_rate: { value: 0.25, available: true, n: 4 },
+        exact_file_set_match_rate: { value: 0, available: true, n: 4 },
+        multi_file_full_coverage_rate: { value: 0, available: true, n: 3 },
+        synth_repro_base_red_rate: { value: 0.25, available: true, n: 4 },
+        repro_red_but_unresolved_rate: { value: 1, available: true, n: 1 },
+      },
+      perInstance: [],
+    }
+    expect(summarizeClosureDiagnostics(diagnostics)).toBe(
+      [
+        "owner_recall@1=1.000(n=4)",
+        "gold_coverage_rate=0.250(n=4)",
+        "exact_file_set_match_rate=0.000(n=4)",
+        "multi_file_full_coverage_rate=0.000(n=3)",
+        "synth_repro_base_red_rate=0.250(n=4)",
+        "repro_red_but_unresolved_rate=1.000(n=1)",
+      ].join(" "),
+    )
   })
 })

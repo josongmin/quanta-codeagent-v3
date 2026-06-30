@@ -728,7 +728,7 @@ const runDatasetMode = async (
     try {
       const dataset = argValue("--swebench") ?? process.env.QUANTA_SWEBENCH_DATASET
       const sc = writeClosureSidecar(reportPath, results, dataset)
-      logger.info(`closure diagnostics: ${sc}`)
+      logger.info(`closure diagnostics: ${sc.path} ${sc.summary}`)
     } catch (e) {
       logger.info(`closure diagnostics skipped: ${errMessage(e)}`)
     }

@@ -13,6 +13,7 @@ import { analyzePatchBudget } from "@/agent/patch-budget"
 import type { InstanceResult } from "../types"
 import {
   type ClosureDiagnostics,
+  type ClosureMetric,
   type ClosureOracle,
   type ClosureRunFact,
   computeClosureDiagnostics,
@@ -167,18 +168,44 @@ export const diagnoseRun = (
   return computeClosureDiagnostics(buildFacts(results), oracle)
 }
 
+const SUMMARY_METRICS = [
+  "owner_recall@1",
+  "gold_coverage_rate",
+  "exact_file_set_match_rate",
+  "multi_file_full_coverage_rate",
+  "synth_repro_base_red_rate",
+  "repro_red_but_unresolved_rate",
+] as const
+
+const formatSummaryMetric = (metric: ClosureMetric | undefined): string => {
+  if (metric?.available !== true || metric.value === null) return "na"
+  return `${metric.value.toFixed(3)}(n=${metric.n})`
+}
+
+/** Compact closeout string for the operator-facing run log. This lifts the
+ *  anti-flattering coverage/oracle signals out of the sidecar so a run with
+ *  `owner_recall@1=1` but weak gold coverage is visible immediately. */
+export const summarizeClosureDiagnostics = (diagnostics: ClosureDiagnostics): string =>
+  SUMMARY_METRICS.map((key) => `${key}=${formatSummaryMetric(diagnostics.metrics[key])}`).join(" ")
+
 /** Sidecar path next to the report (`x.json` -> `x.closure-diagnostics.json`). */
 export const sidecarPath = (reportPath: string): string =>
   `${reportPath.replace(/\.json$/i, "")}.closure-diagnostics.json`
 
-/** Write the sibling artifact. Returns the path written. Never throws on a
- *  malformed run — callers gate this and treat failure as best-effort. */
+/** Write the sibling artifact. Returns the path plus a compact summary for the
+ *  run log. Never throws on a malformed run — callers gate this and treat
+ *  failure as best-effort. */
 export const writeClosureSidecar = (
   reportPath: string,
   results: ReadonlyArray<InstanceResult>,
   datasetPath: string | undefined,
-): string => {
+): { path: string; diagnostics: ClosureDiagnostics; summary: string } => {
   const out = sidecarPath(reportPath)
-  writeFileSync(out, `${JSON.stringify(diagnoseRun(results, datasetPath), null, 2)}\n`)
-  return out
+  const diagnostics = diagnoseRun(results, datasetPath)
+  writeFileSync(out, `${JSON.stringify(diagnostics, null, 2)}\n`)
+  return {
+    path: out,
+    diagnostics,
+    summary: summarizeClosureDiagnostics(diagnostics),
+  }
 }

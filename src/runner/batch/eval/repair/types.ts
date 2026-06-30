@@ -24,6 +24,7 @@ import type {
   SuccessPredicate,
 } from "@/agent/closure"
 import type { VerificationTargetFact } from "@/runner/batch/eval/llm-evidence-packet"
+import type { CandidateFamilyId } from "../candidate-families"
 import type { CandidateLocationFocus } from "../location-set-fanout"
 
 /** Caller-facing config (mirror the optional-feature pattern). */
@@ -243,6 +244,13 @@ export interface RepairCandidateOutcome {
   /** The SAME validator (re-)run against this candidate's patched fork. Selection
    *  reads ONLY this — never a gold/hidden field. */
   readonly validator: ValidatorResult
+  /** Typed structural family this candidate was derived against, when the clean
+   *  repair-breadth path could recover one from public source evidence. */
+  readonly familyId?: CandidateFamilyId
+  /** Remaining family owner files this candidate still misses. `[]` means the
+   *  candidate satisfied the typed family coverage postcondition; absent means no
+   *  typed family was derived for this candidate. Observe/tie-break only. */
+  readonly familyCoverageMissing?: readonly string[]
   /** Typed location focus this breadth candidate was seeded from, when a
    *  location/symbol fanout generated it. Observe/selection evidence only:
    *  never submit authority. */

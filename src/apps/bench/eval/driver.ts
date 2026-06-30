@@ -1753,6 +1753,7 @@ const runAppMainPhase = async (args: {
       args.prepared.state,
       args.prepared.chaRepairTargets,
       resolveLocationFanoutSeeder(
+        args.prepared.posture.locationFanout,
         repairFanoutFiles,
         args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,
         buildRepairFanoutSymbols({

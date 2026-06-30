@@ -255,6 +255,7 @@ import {
   retrieveExemplarSkeletons,
 } from "./repro-grounding"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
+import { agentVisibleBenchVerifierCommand } from "./repo-local-verifier-command"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -2393,7 +2394,7 @@ export const composeWithReproHint = (
     : composePromptPrelude({ issueHint: hint, reproHint, baseText })
 
 const repoLocalVerifierHint = (instance: Instance): string => {
-  const testCmd = agentVisibleBenchVerifierCommand(instance)
+  const testCmd = agentVisibleBenchVerifierCommand(instance, process.env)
   if (instance.swebench === undefined || testCmd === undefined) return ""
   return [
     `Repository-local verifier for this task: ${testCmd}`,
@@ -2402,30 +2403,6 @@ const repoLocalVerifierHint = (instance: Instance): string => {
 }
 
 type BenchTestRunnerInput = Parameters<typeof testRunnerTool.execute>[0]
-
-const DATASET_VERIFIER_EXPOSE_ENV = "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER"
-
-// Recognize a command WE synthesized in `synthesizeTestCmd` (which bakes the
-// FAIL_TO_PASS answer key) so it stays hidden from the agent. Match our OWN
-// structural signature, not a per-framework runner name: every synthesized
-// command (django-runtests AND pytest) is built via buildProjectEnvUvRunArgv
-// with an injected `PYTEST_ADDOPTS=` env. The `pytest -x --no-header` arm also
-// catches a bare (env-less) synthesized pytest command.
-const isSynthesizedDatasetVerifierCommand = (cmd: string): boolean =>
-  cmd.includes("PYTEST_ADDOPTS=") || cmd.includes(" pytest -x --no-header")
-
-const agentVisibleBenchVerifierCommand = (instance: Instance): string | undefined => {
-  const cmd = instance.testCmd.trim()
-  if (cmd === "") return undefined
-  if (
-    instance.swebench !== undefined &&
-    isSynthesizedDatasetVerifierCommand(cmd) &&
-    !gateOn(process.env, DATASET_VERIFIER_EXPOSE_ENV)
-  ) {
-    return undefined
-  }
-  return cmd
-}
 
 const hasExplicitBenchTestRunnerCommand = (
   input: BenchTestRunnerInput,
@@ -2444,7 +2421,7 @@ const hasBenchTestRunnerPath = (input: BenchTestRunnerInput): boolean =>
  *  repo-local verify must go through explicit `bash`, whose exact command is
  *  already captured separately by the bench stream tap. */
 const benchBoundTestRunner = (instance: Instance): Tool<BenchTestRunnerInput> | undefined => {
-  const authoritative = agentVisibleBenchVerifierCommand(instance)
+  const authoritative = agentVisibleBenchVerifierCommand(instance, process.env)
   if (authoritative === undefined) return undefined
   return {
     ...testRunnerTool,
@@ -2492,7 +2469,7 @@ const localEnvSlotOf = (instance: Instance, sandbox: string): Pick<AgentConfig, 
 export const benchVerifyAuthorityCommandsOf = (
   instance: Instance,
 ): readonly string[] | undefined => {
-  const cmd = agentVisibleBenchVerifierCommand(instance)
+  const cmd = agentVisibleBenchVerifierCommand(instance, process.env)
   return cmd === undefined ? undefined : [cmd]
 }
 
@@ -2787,6 +2764,74 @@ export const benchBudgetMeterFromEnv = (
   })
 }
 
+/**
+ * Compose the user-message array for a bench agent config — the prompt text
+ * (base task + the agentless/repro/closure/multi-site hint sections) wrapped as
+ * user messages. Extracted verbatim from `buildConfig` so that closure stays
+ * under the god-function line cap; behaviour-identical — every hint stays
+ * conditionally spread (byte-identical when absent), and the prompt-composition
+ * methodology comments move here with the code they describe.
+ */
+const buildAgentMessages = (args: {
+  instance: Instance
+  sandbox: string
+  opt: BenchPosture
+  seedMsg?: string
+  precomputedHint?: string
+  reproHint?: string
+  closureHint?: string
+  chaMultisiteSteer?: string
+}): ReturnType<typeof userPromptMessages> => {
+  // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
+  // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
+  // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
+  // `bench-in-loop-exec` knob (default-FULL ⇒ byte-identical): FULL uses the
+  // test-running directive; REPRO-ONLY permits only a narrow reproducer; OFF
+  // swaps to edit-and-submit with no in-loop execution.
+  // LSP-nav GROUNDING steer (agentless-v2 / `lsp-steer`). The localize-phase
+  // guard ALSO carries this steer, but ONLY fires it when the model attempts an
+  // early edit during Phase 1 — a localize-first agent explores with read/grep
+  // for the whole phase and NEVER sees it (measured: 0 occurrences, 0 lsp_*
+  // calls in a real run). So we surface it as an ALWAYS-PRESENT directive line
+  // too, gated on the SAME `lspGroundingSteer` flag (not `lspNav`, so the
+  // frozen agentless-v1 prompt stays byte-identical and the v1↔v2 A/B is clean).
+  // ABSORBED METHODOLOGY (jun-19, #13417 class) — anti-SEMANTIC-over-engineering.
+  // quanta's directive already enforces DIFF-SIZE minimality ("smallest change",
+  // "no whole-file rewrite"), but the 13417 failure is SEMANTIC: a 1-2 line diff
+  // that reaches for a runtime/compiler API (`get_compiler()`) or invents a
+  // helper method (`has_results_ordering()`) — both pass the diff-size rule.
+  // mini/OpenHands solve it minimally because their system prompt carries an
+  // explicit "seek the simplest mechanism / reject over-engineering" philosophy
+  // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
+  // that philosophy verbatim-in-spirit. Default OFF; opt-in via
+  // QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).
+  // Earlier DEFAULT-ON claim (2026-06-19) lacked an in-repo A/B harness, so the
+  // steer is now opt-in to keep it cleanly measurable; OFF ⇒ "" ⇒ byte-identical
+  // prompt restoring the pre-absorption baseline.
+  // Lever A — sibling-completion / co-change check (ceiling multi-file class).
+  // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
+  // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
+  // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
+  //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
+  //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
+  //                                    threaded in via `precomputedHint`
+  //   - mode `"off"`                ⇒ empty hint (byte-identical)
+  // When `precomputedHint` is provided (any non-undefined value, including
+  // `""`), the Agentless pre-compute already ran; we honor it verbatim and do
+  // NOT re-extract. Empty pre-computed hint ⇒ "" ⇒ byte-identical.
+  const text = buildPromptText({
+    instance: args.instance,
+    sandbox: args.sandbox,
+    opt: args.opt,
+    ...(args.seedMsg !== undefined ? { seedMsg: args.seedMsg } : {}),
+    ...(args.precomputedHint !== undefined ? { precomputedHint: args.precomputedHint } : {}),
+    ...(args.reproHint !== undefined ? { reproHint: args.reproHint } : {}),
+    ...(args.closureHint !== undefined ? { closureHint: args.closureHint } : {}),
+    ...(args.chaMultisiteSteer !== undefined ? { chaMultisiteSteer: args.chaMultisiteSteer } : {}),
+  })
+  return userPromptMessages(text)
+}
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -2853,44 +2898,10 @@ export const buildConfig = (
   // per-instance sandbox is enforced by cwd, not by injected fs ports.
   const registry = buildBenchRegistry(instance, opt, sandbox)
   const permission: PermissionContext = { mode: "acceptEdits" }
-  // Default behavior (no seedMsg) is byte-identical to the pre-b2 prompt: the
-  // user message is `base` (+ SWEBENCH_DIRECTIVE for swebench instances). A
-  // seedMsg ⇒ appended after a blank line ONLY for repair rounds ≥1.
-  // `bench-in-loop-exec` knob (default-FULL ⇒ byte-identical): FULL uses the
-  // test-running directive; REPRO-ONLY permits only a narrow reproducer; OFF
-  // swaps to edit-and-submit with no in-loop execution.
-  // LSP-nav GROUNDING steer (agentless-v2 / `lsp-steer`). The localize-phase
-  // guard ALSO carries this steer, but ONLY fires it when the model attempts an
-  // early edit during Phase 1 — a localize-first agent explores with read/grep
-  // for the whole phase and NEVER sees it (measured: 0 occurrences, 0 lsp_*
-  // calls in a real run). So we surface it as an ALWAYS-PRESENT directive line
-  // too, gated on the SAME `lspGroundingSteer` flag (not `lspNav`, so the
-  // frozen agentless-v1 prompt stays byte-identical and the v1↔v2 A/B is clean).
-  // ABSORBED METHODOLOGY (jun-19, #13417 class) — anti-SEMANTIC-over-engineering.
-  // quanta's directive already enforces DIFF-SIZE minimality ("smallest change",
-  // "no whole-file rewrite"), but the 13417 failure is SEMANTIC: a 1-2 line diff
-  // that reaches for a runtime/compiler API (`get_compiler()`) or invents a
-  // helper method (`has_results_ordering()`) — both pass the diff-size rule.
-  // mini/OpenHands solve it minimally because their system prompt carries an
-  // explicit "seek the simplest mechanism / reject over-engineering" philosophy
-  // (OpenHands `system_prompt_tech_philosophy.j2`, Linus mode). This line ports
-  // that philosophy verbatim-in-spirit. Default OFF; opt-in via
-  // QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).
-  // Earlier DEFAULT-ON claim (2026-06-19) lacked an in-repo A/B harness, so the
-  // steer is now opt-in to keep it cleanly measurable; OFF ⇒ "" ⇒ byte-identical
-  // prompt restoring the pre-absorption baseline.
-  // Lever A — sibling-completion / co-change check (ceiling multi-file class).
-  // Knob-gated `QUANTA_BENCH_SIBLING`, DEFAULT-OFF for a clean A/B against the
-  // 0/6 ceiling baseline; OFF ⇒ "" ⇒ byte-identical prompt.
-  // Hint injection (default-OFF; opt-in via `QUANTA_BENCH_ISSUE_HINT`).
-  //   - mode `"regex"` (legacy)     ⇒ synchronous regex extractor here
-  //   - mode `"agentless"` (new)    ⇒ pre-computed by `prepareIssueHint`,
-  //                                    threaded in via `precomputedHint`
-  //   - mode `"off"`                ⇒ empty hint (byte-identical)
-  // When `precomputedHint` is provided (any non-undefined value, including
-  // `""`), the Agentless pre-compute already ran; we honor it verbatim and do
-  // NOT re-extract. Empty pre-computed hint ⇒ "" ⇒ byte-identical.
-  const text = buildPromptText({
+  // Prompt + hint composition (agentless / repro / closure / multi-site steer)
+  // lives in `buildAgentMessages` to keep this closure under the god-function
+  // line cap — behaviour-identical, every hint conditionally spread.
+  const messages = buildAgentMessages({
     instance,
     sandbox,
     opt,
@@ -2900,7 +2911,6 @@ export const buildConfig = (
     ...(closureHint !== undefined ? { closureHint } : {}),
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
-  const messages = userPromptMessages(text)
   const budgetMeter = deps.budgetMeterFactory?.() ?? benchBudgetMeterFromEnv(process.env)
   const baseConfig = {
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
@@ -3500,17 +3510,19 @@ export const maybeReviewSubmission = (patch: string): SubmissionReview | undefin
   gateOn(process.env, "QUANTA_BENCH_SUBMIT_REVIEW") ? reviewSubmission(patch) : undefined
 
 /**
- * Strategy #7 — resolve the optional per-candidate location-set seeder from
- * `QUANTA_BENCH_LOCATION_FANOUT`. OFF / no localizer files / <2 files / breadth≤1 ⇒
- * `undefined` ⇒ every breadth candidate uses the base seed (byte-identical). SHARED
- * by both drivers. Pure (built from the localizer's ranked files only — no-leak).
+ * Strategy #7 — resolve the optional per-candidate location-set seeder from the
+ * preset/env-projected bench posture. OFF / no localizer files / <2 files /
+ * breadth≤1 ⇒ `undefined` ⇒ every breadth candidate uses the base seed
+ * (byte-identical). SHARED by both drivers. Pure (built from the localizer's
+ * ranked files only — no-leak).
  */
 export const resolveLocationFanoutSeeder = (
+  enabled: boolean,
   rankedFiles: readonly string[],
   breadth: number,
   issueSymbols: readonly string[] = [],
 ): PerCandidateSeed | undefined => {
-  if (!gateOn(process.env, "QUANTA_BENCH_LOCATION_FANOUT") || breadth <= 1) return undefined
+  if (!enabled || breadth <= 1) return undefined
   return buildLocationSeeder(rankedFiles, breadth, issueSymbols)
 }
 
@@ -5679,6 +5691,7 @@ const runMainPhase = async (args: {
       args.prepared.chaMultisiteSteer,
       args.prepared.chaRepairTargets,
       resolveLocationFanoutSeeder(
+        args.prepared.posture.locationFanout,
         repairFanoutFiles,
         args.prepared.effectiveRepair.breadth ?? args.prepared.posture.repairBreadth,
         buildRepairFanoutSymbols({

@@ -86,6 +86,30 @@ describe("agentless-v6-oracle — the synthesis-convergence lever preset", () =>
     expect(KNOB_PRESETS[HARD]?.["repair-strong-oracle"]).toBe("1")
   })
 
+  test("v7 multifile arm = hardened oracle + structural breadth/fanout bundle", () => {
+    const HARD = "agentless-v6-oracle-hardened"
+    const V7 = "agentless-v7-oracle-multifile"
+    expect(PRESET_SPECS[V7]).toBeDefined()
+    const hard = PRESET_SPECS[HARD]?.params ?? {}
+    const v7 = PRESET_SPECS[V7]?.params ?? {}
+    for (const [k, v] of Object.entries(hard)) expect(v7[k]).toBe(v)
+    const added = Object.keys(v7).filter((k) => !(k in hard)).sort()
+    expect(added).toEqual([
+      "acceptance",
+      "adversarial-repro",
+      "bench-location-fanout",
+      "cha-multisite-general",
+      "cha-multisite-steer",
+      "model-lane-diversity",
+      "paired-control",
+      "repair-breadth",
+    ])
+    expect(KNOB_PRESETS[V7]?.["repair-breadth"]).toBe("3")
+    expect(KNOB_PRESETS[V7]?.["bench-location-fanout"]).toBe("1")
+    expect(KNOB_PRESETS[V7]?.["paired-control"]).toBe("1")
+    expect(KNOB_PRESETS[V7]?.["adversarial-repro"]).toBe("1")
+  })
+
   test("OPT-IN: the v6 winner and closure-tuned are NOT mutated", () => {
     // v6 must stay the byte-identical jun-24 winner (no oracle params leaked in)
     const v6 = PRESET_SPECS[V6]?.params ?? {}

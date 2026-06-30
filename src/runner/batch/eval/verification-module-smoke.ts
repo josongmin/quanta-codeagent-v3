@@ -11,12 +11,13 @@
 
 import type { Instance } from "../types"
 import { exec } from "./exec"
+import { publicRepoLocalVerifierCommand } from "./repo-local-verifier-command"
 import { localTestCmdPassed } from "./verdict"
 
 export type VerificationPrimaryBaseState = "red" | "green" | "unavailable"
 
 export interface DiscoverVerificationModuleSmokeArgs {
-  readonly instance: Pick<Instance, "testCmd" | "localEnv">
+  readonly instance: Pick<Instance, "testCmd" | "localEnv" | "swebench">
   readonly sandbox: string
   readonly timeoutMs: number
 }
@@ -32,15 +33,6 @@ export interface VerificationModuleSmokePlan {
   readonly primaryBaseState: VerificationPrimaryBaseState
 }
 
-const NOOP_TEST_COMMANDS = new Set(["", "true"])
-
-const repoLocalVerifierCommandOf = (
-  instance: Pick<Instance, "testCmd">,
-): string | undefined => {
-  const cmd = instance.testCmd.trim()
-  return NOOP_TEST_COMMANDS.has(cmd) ? undefined : cmd
-}
-
 const toPrimaryBaseState = (verdict: boolean | null): VerificationPrimaryBaseState =>
   verdict === true ? "green" : verdict === false ? "red" : "unavailable"
 
@@ -50,7 +42,7 @@ const toPrimaryBaseState = (verdict: boolean | null): VerificationPrimaryBaseSta
 export const probeModuleSmokeOnCurrentTree = async (
   args: DiscoverVerificationModuleSmokeArgs,
 ): Promise<boolean | null> => {
-  const cmd = repoLocalVerifierCommandOf(args.instance)
+  const cmd = publicRepoLocalVerifierCommand(args.instance)
   if (cmd === undefined) return null
   const result = await exec(cmd, args.sandbox, args.timeoutMs, {
     ...(args.instance.localEnv !== undefined ? { localEnv: args.instance.localEnv } : {}),
@@ -66,7 +58,7 @@ export const discoverVerificationModuleSmokePlan = async (
   args: DiscoverVerificationModuleSmokeArgs,
   deps: DiscoverVerificationModuleSmokeDeps = {},
 ): Promise<VerificationModuleSmokePlan> => {
-  const cmd = repoLocalVerifierCommandOf(args.instance)
+  const cmd = publicRepoLocalVerifierCommand(args.instance)
   if (cmd === undefined) {
     return { commands: [], primaryBaseState: "unavailable" }
   }
