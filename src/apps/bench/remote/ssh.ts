@@ -28,6 +28,7 @@ import {
   parseSwebenchReport,
   type SpawnFn,
 } from "./backend"
+import { resolveSwebenchNamespace, resolveSwebenchPipSpec } from "./box-session/ec2-lifecycle"
 
 export interface SshBackendConfig {
   /** `user@ip` ssh target. */
@@ -98,18 +99,28 @@ const sshFlags = (keyPath: string): readonly string[] => [
  * over stdin and a heredoc would steal that stdin. `python ra_shim.py <args>` makes
  * the shim's `runpy.run_module(..., run_name="__main__")` see `<args>` as argv.
  */
-export const buildRemoteGradeScript = (maxWorkers: number): string => {
+export const buildRemoteGradeScript = (
+  maxWorkers: number,
+  /** Harness install spec (`--from`): stock `swebench` for verified/pro, the
+   *  SWE-bench-Live fork for live. Resolved by the caller via the SSOT
+   *  {@link resolveSwebenchPipSpec} so this grade-only path agrees with the
+   *  full-remote box path. Defaults to `swebench` (byte-identical legacy). */
+  fromSpec = "swebench",
+  /** Prebuilt-image org (`--namespace`): `swebench` for verified/pro,
+   *  `starryzhang` for live (resolved via {@link resolveSwebenchNamespace}). */
+  namespace = "swebench",
+): string => {
   const shimB64 = Buffer.from(SPHINX_RA_SHIM, "utf8").toString("base64")
   return [
     "set -eu",
     "UVX=$(command -v uvx || echo ~/.local/bin/uvx)",
     `printf %s ${shimB64} | base64 -d > ~/ra_shim.py`,
-    'nohup "$UVX" --from swebench --python 3.11 python ~/ra_shim.py \\',
+    `nohup "$UVX" --from ${fromSpec} --python 3.11 python ~/ra_shim.py \\`,
     "  --predictions_path ~/preds.jsonl \\",
     "  --run_id RUNID \\",
     `  --max_workers ${maxWorkers} \\`,
     "  --cache_level instance \\",
-    "  --namespace swebench \\",
+    `  --namespace ${namespace} \\`,
     "  --dataset_name ~/instances.jsonl \\",
     "  > ~/grade.log 2>&1 &",
     "echo STARTED",
@@ -178,7 +189,24 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
     //    the streamed script (the script body is piped to `bash -s` via stdin).
     // Function replacer (not a string): a string replacement would interpret
     // `$` sequences in run_id (`$&`, `$1`, …) as patterns and corrupt the id.
-    const script = buildRemoteGradeScript(maxWorkers).replace("RUNID", () => opts.runId)
+    // Family-aware harness fork + image namespace (RFC jun-29): a `live` grade
+    // must install the SWE-bench-Live fork + pull `starryzhang` images, else the
+    // stock `swebench` harness KeyErrors on Live repos. Reuses the SAME SSOT
+    // resolvers as the full-remote box path; operator env overrides still win.
+    const fromSpec = resolveSwebenchPipSpec(
+      opts.datasetPath,
+      process.env.QUANTA_SWEBENCH_PIP_SPEC,
+      opts.family,
+    )
+    const namespace = resolveSwebenchNamespace(
+      opts.datasetPath,
+      process.env.QUANTA_SWEBENCH_NAMESPACE,
+      opts.family,
+    )
+    const script = buildRemoteGradeScript(maxWorkers, fromSpec, namespace).replace(
+      "RUNID",
+      () => opts.runId,
+    )
     const run = await spawn("ssh", [...flags, cfg.host, "bash", "-s"], { input: script })
     if (run.code !== 0) {
       throw new Error(

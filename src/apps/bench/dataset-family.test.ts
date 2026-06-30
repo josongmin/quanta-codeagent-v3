@@ -38,6 +38,31 @@ describe("parseTasksForFamily — Pro normalizes, verified does not (de-theaters
   })
 })
 
+describe("parseTasksForFamily — live uses the standard (verified-identical) parse", () => {
+  // A representative SWE-bench-Live row: snake_case core fields + UPPERCASE
+  // FAIL_TO_PASS/PASS_TO_PASS — the SAME schema as Verified. Pins the assumption
+  // (flagged untested by the family-coverage audit) that Live's JSONL parses with
+  // the standard schema, so a Live row yields a REAL testCmd (not the "true" no-op).
+  const liveRow = JSON.stringify({
+    instance_id: "getmoto__moto-7141",
+    repo: "getmoto/moto",
+    base_commit: "a".repeat(40),
+    problem_statement: "live issue text",
+    FAIL_TO_PASS: JSON.stringify(["tests/test_s3.py::test_live_thing"]),
+    PASS_TO_PASS: JSON.stringify([]),
+  })
+  test("family=live ⇒ core fields carry through + uppercase FAIL_TO_PASS yields a real testCmd", () => {
+    const inst = toInstance(parseTasksForFamily(liveRow, "live")[0]!, "/tmp")
+    expect(inst.swebench?.instanceId).toBe("getmoto__moto-7141")
+    expect(inst.swebench?.repo).toBe("getmoto/moto")
+    expect(inst.swebench?.baseCommit).toBe("a".repeat(40))
+    expect(inst.testCmd).toContain("test_live_thing") // NOT the "true" no-op
+  })
+  test("live parse === verified parse for the same standard row (no Pro normalization)", () => {
+    expect(parseTasksForFamily(liveRow, "live")).toEqual(parseTasksForFamily(liveRow, "verified"))
+  })
+})
+
 describe("gradeEvaluatorForFamily — routes to the right verifier (de-theaters the Pro verifier)", () => {
   const inst: Instance = {
     id: "scale__demo-1",

@@ -27,6 +27,11 @@ export interface GradeOptions {
   readonly instanceIds?: readonly string[]
   /** Where to write the retrieved report locally. Default: OS tmp dir. */
   readonly outDir?: string
+  /** Dataset family (RFC jun-29). Selects the grading harness fork + image
+   *  namespace for the remote grade: `live` ⇒ the SWE-bench-Live harness fork +
+   *  `starryzhang` prebuilt images; `verified`/`pro` ⇒ stock `swebench`. Absent ⇒
+   *  treated as `verified` (byte-identical to the pre-family grade path). */
+  readonly family?: "verified" | "live" | "pro"
 }
 
 /** Result of a grading run. */
