@@ -82,6 +82,7 @@ def load_reports() -> dict:
             for r in d.get("perInstance") or []:
                 if not isinstance(r, dict) or r.get("turns") is None:
                     continue
+                rvd = r.get("repairValidationDecision") or {}
                 by_inst[r.get("id")].append({
                     "preset": preset,
                     "weight": preset_weight(preset),
@@ -89,6 +90,11 @@ def load_reports() -> dict:
                     "turns": r.get("turns"),
                     "patchBytes": r.get("patchBytes"),
                     "model": model,
+                    # strong-oracle / round-0 signals for the gate simulation (D)
+                    "verifyRounds": r.get("verifyRounds"),
+                    "issueResolved": rvd.get("issueResolved") if isinstance(rvd, dict) else None,
+                    "regressionFailed": rvd.get("regressionFailed") if isinstance(rvd, dict) else None,
+                    "falseGreen": bool(r.get("primaryFalseGreen")),
                 })
     return by_inst
 
@@ -153,6 +159,53 @@ def heavy_value(by_inst: dict) -> None:
         print(f"  heavy-only wins (gate must NOT early-exit these): {', '.join(heavy_only_ex[:8])}")
 
 
+def gate_simulation(by_inst: dict) -> None:
+    """D) GATE COUNTERFACTUAL (the layer-2 point): simulate "early-exit when round-0
+    is strong-oracle-clean" over the RECORDED heavy runs — $0, no LLM, no box.
+
+    round-0-clean (gate would EXIT) proxied from the recorded strong-oracle fields:
+      verifyRounds <= 1  (didn't need extra repair rounds — resolved on the first)
+      AND issueResolved is True (the repro/sidecar oracle confirmed)
+      AND regressionFailed in (None/False/0)
+      AND NOT falseGreen   (the round-0 green was not a known false green)
+
+    Then the only RISK of exiting is a round-0 green that is actually wrong. We can
+    SEE that: a gate-exit run whose final verdict is FAIL = the gate would have
+    locked in a bad patch the heavy escalation might have repaired. Count those."""
+    heavy = [r for runs in by_inst.values() for r in runs
+             if r["weight"] == "heavy" and r["verifyRounds"] is not None]
+    if not heavy:
+        print("\n=== D) GATE SIMULATION ===\n  (no heavy runs carry verifyRounds — older reports)")
+        return
+
+    def round0_clean(r: dict) -> bool:
+        return (
+            (r["verifyRounds"] or 0) <= 1
+            and r["issueResolved"] is True
+            and (r["regressionFailed"] in (None, False, 0))
+            and not r["falseGreen"]
+        )
+
+    exits = [r for r in heavy if round0_clean(r)]
+    escalated = [r for r in heavy if not round0_clean(r)]
+    exit_pass = sum(1 for r in exits if r["passed"])
+    exit_fail = len(exits) - exit_pass
+    esc_pass = sum(1 for r in escalated if r["passed"])
+    print("\n=== D) GATE SIMULATION over recorded heavy runs ($0 counterfactual) ===")
+    print(f"  heavy runs with round-signal: {len(heavy)}")
+    print(f"  gate EXITS (round-0 strong-clean ⇒ skip breadth/vote escalation): {len(exits)}")
+    print(f"    of those: PASS={exit_pass} (gate keeps the win + saves cost) | "
+          f"FAIL={exit_fail} (gate risk — locked a round-0 green that final-failed)")
+    print(f"  gate ESCALATES (round-0 NOT clean ⇒ full heavy stack runs): {len(escalated)}")
+    print(f"    of those: PASS={esc_pass} (these GENUINELY needed the heavy stack)")
+    if exits:
+        risk = 100 * exit_fail // len(exits)
+        print(f"  ⇒ gate exit-rate={100*len(exits)//len(heavy)}% of heavy runs;"
+              f" exit-risk(false-green locked)={risk}%.")
+        print(f"    Low risk ⇒ the gate reclaims the breadth/vote cost on {len(exits)} runs"
+              f" while {esc_pass} hard wins still escalate. (turns saved: re-run A's ~2x on the exit set.)")
+
+
 def phase_profile(traj_path: str) -> dict | None:
     """From a trajectory cassette: total turns, first/last edit turn ⇒ phase split."""
     try:
@@ -209,4 +262,5 @@ if __name__ == "__main__":
     print(f"loaded {sum(len(v) for v in by_inst.values())} run-rows across {len(by_inst)} instances\n")
     over_verification_tax(by_inst)
     heavy_value(by_inst)
+    gate_simulation(by_inst)
     phase_report()
