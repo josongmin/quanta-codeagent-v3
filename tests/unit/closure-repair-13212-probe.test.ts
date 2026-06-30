@@ -189,27 +189,29 @@ describe("Part B — repro rail clears ONLY when readFile is supplied (the fix)"
   })
 })
 
-// ── Part C — WIRING GUARD: both drivers must pass readFile to runRepairRounds ──
-// Part B proves the orchestrator contract; this binds the PROD-DRIVER wiring so
-// reverting the fix (dropping `readFile` from the prod runRepairRounds call) is
-// RED. Source-level because the prod runRepairPhase is not exported and the
-// repro-rail e2e through runInstance needs host-python repro generation.
-describe("Part C — driver wiring passes readFile to runRepairRounds", () => {
+// ── Part C — WIRING GUARD: the repair loop must pass readFile to runRepairRounds ──
+// Part B proves the orchestrator contract; this binds the PROD wiring so reverting
+// the fix (dropping `readFile` from the prod runRepairRounds call) is RED. Post the
+// jun-30 keystone, the `runRepairRounds` call is shared by BOTH bench drivers via
+// the exported `runRepairRoundsInSnapshot` helper (runner core driver) — so the
+// readFile fix is wired ONCE there, and both drivers delegate to it (inheriting it).
+// Source-level because the helper is reached through the un-exported runRepairPhase.
+describe("Part C — repair loop wires readFile to runRepairRounds (shared SSOT)", () => {
   const repoRoot = join(import.meta.dir, "..", "..")
-  const driverHasReadFileInRepair = (rel: string): boolean => {
-    const src = readFileSync(join(repoRoot, rel), "utf8")
+  const read = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")
+
+  test("the shared runRepairRoundsInSnapshot passes readFile (the fix)", () => {
+    const src = read("src/runner/batch/eval/driver.ts")
     const callIdx = src.indexOf("runRepairRounds({")
     expect(callIdx).toBeGreaterThan(-1)
     // Scan from the call to the matching close of its single args object.
-    const region = src.slice(callIdx, callIdx + 2000)
-    return /readFile:\s*async/.test(region)
-  }
-
-  test("PROD driver (src/apps/bench/eval/driver.ts) passes readFile (the fix)", () => {
-    expect(driverHasReadFileInRepair("src/apps/bench/eval/driver.ts")).toBe(true)
+    expect(/readFile:\s*async/.test(src.slice(callIdx, callIdx + 2000))).toBe(true)
   })
 
-  test("runner-core driver (src/runner/batch/eval/driver.ts) passes readFile (parity)", () => {
-    expect(driverHasReadFileInRepair("src/runner/batch/eval/driver.ts")).toBe(true)
+  test("both drivers delegate repair rounds to the shared helper (inherit the wiring)", () => {
+    // Neither driver can silently drop the readFile wiring without also dropping
+    // the delegation — which this binds RED.
+    expect(read("src/apps/bench/eval/driver.ts")).toContain("runRepairRoundsInSnapshot({")
+    expect(read("src/runner/batch/eval/driver.ts")).toContain("runRepairRoundsInSnapshot({")
   })
 })

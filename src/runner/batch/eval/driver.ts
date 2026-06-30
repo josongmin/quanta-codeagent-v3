@@ -110,10 +110,7 @@ import type {
   ReproGroundingTelemetry,
   ReproOracleCalibration,
 } from "../types"
-import {
-  buildLlmRerankFromPort,
-  resolveLlmSelectMode,
-} from "./acceptance-llm-rerank-wire"
+import { buildLlmRerankFromPort, resolveLlmSelectMode } from "./acceptance-llm-rerank-wire"
 import type { AcceptanceLlmRerank } from "./acceptance-select"
 import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
 import {
@@ -177,6 +174,12 @@ import {
   type VerificationTargetFact,
   verificationTargetFromPlan,
 } from "./llm-evidence-packet"
+import {
+  buildLocationSeeder,
+  buildRepairFanoutFiles,
+  buildRepairFanoutSymbols,
+  type PerCandidateSeed,
+} from "./location-set-fanout"
 import { prepareMweProofSelectionPort } from "./mwe-proof-port"
 import { noPatchExhaustedErrorOf, wireNoPatchBreaker } from "./no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "./patch-budget-admission"
@@ -217,14 +220,6 @@ import type {
   ValidatorResult,
 } from "./repair/types"
 import { validate as defaultValidate } from "./repair/validator"
-import {
-  buildLocationSeeder,
-  buildRepairFanoutFiles,
-  buildRepairFanoutSymbols,
-  type PerCandidateSeed,
-} from "./location-set-fanout"
-import { reviewSubmission, type SubmissionReview } from "./submission-review"
-import { strongVoteKey } from "./vote-key-normalize"
 import { buildRepairRoundsConfig, makeRepairBreadthRunCandidates } from "./repair-breadth"
 import {
   benchInstallsReproHint,
@@ -232,6 +227,7 @@ import {
   benchShouldRunRepairPhase,
   primaryRailRedAfterRepair,
 } from "./repair-phase-policy"
+import { agentVisibleBenchVerifierCommand } from "./repo-local-verifier-command"
 import {
   listTrackedPythonFiles,
   makeDiscoveredRepoRegressionPort,
@@ -255,7 +251,6 @@ import {
   retrieveExemplarSkeletons,
 } from "./repro-grounding"
 import { calibrateReproOracle, unavailableReproOracleCalibration } from "./repro-oracle-calibration"
-import { agentVisibleBenchVerifierCommand } from "./repo-local-verifier-command"
 import {
   type AttemptOutcome,
   classifyOutcome,
@@ -292,6 +287,7 @@ import {
   staticWitnessLanguageDiagnostics,
 } from "./static-witness-adapter"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
+import { reviewSubmission, type SubmissionReview } from "./submission-review"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 import {
   discoverVerificationModuleSmokePlan,
@@ -302,6 +298,7 @@ import {
   discoverVerificationOwnerTestsPlan,
   type VerificationOwnerTestsPlan,
 } from "./verification-owner-tests"
+import { strongVoteKey } from "./vote-key-normalize"
 
 export {
   buildSelectionCandidateFamilyBundle,
@@ -1759,7 +1756,7 @@ const selectionTelemetry = (selection: ReproTestSelection): BenchReproTestTeleme
 type ReproSamples = Awaited<ReturnType<typeof executeReproTests>>
 
 const disabledReproResult = (
-  reason: "disabled" | "empty_problem",
+  reason: "disabled" | "empty_problem" | "unsupported_language",
 ): PrepareReproTestDetailedResult => ({
   selection: null,
   telemetry: { installed: false, reason },
@@ -2018,6 +2015,9 @@ export const prepareReproTestDetailed = async (
   }
   if (typeof instance.problemStatement !== "string" || instance.problemStatement.length === 0) {
     return disabledReproResult("empty_problem")
+  }
+  if (instance.swebench?.repoLanguage !== undefined && resolveReproAdapter(instance) === null) {
+    return disabledReproResult("unsupported_language")
   }
   const config: ReproTestConfig = {
     samples: k,
@@ -3666,6 +3666,187 @@ export const makeCalibratedReproConsensusPort = async (
  * cumulative final patch (no-leak invariant). The validator/buildContext are
  * injectable; production defaults are G1's `validate`/`buildRepairContext`.
  */
+/** Shared repair-loop BREADTH candidate factory (jun-28). Both bench drivers
+ *  (this runner core + `apps/bench/eval/driver.ts`) build the SAME B>1 fan-out
+ *  here; the ONLY per-driver divergence — how a forked round runs the agent
+ *  (the runner threads `chaMultisiteSteer`, the app does not) — is injected as
+ *  `runAgentOnFork`. B≤1 ⇒ undefined ⇒ the orchestrator takes the legacy single
+ *  path (byte-identical). Derives its types from `makeRepairBreadthRunCandidates`
+ *  so the seam can never silently drift from the breadth contract. */
+type RepairBreadthDeps = Parameters<typeof makeRepairBreadthRunCandidates>[0]
+export const buildRepairBreadthRunCandidates = (args: {
+  instance: Instance
+  deps: RunInstanceDeps
+  sandbox: string
+  signal: AbortSignal
+  repairPosture: BenchPosture
+  repairBreadth: number
+  validate: RepairBreadthDeps["validate"]
+  repairEvaluatePredicate: RepairBreadthDeps["validateInputs"]["evaluatePredicate"]
+  primaryRailStep: PrimaryRailStep | undefined
+  chaRepairTargets: readonly ChaRepairTarget[] | undefined
+  perCandidateSeed: PerCandidateSeed | undefined
+  runAgentOnFork: RepairBreadthDeps["runAgentOnFork"]
+}): ReturnType<typeof makeRepairBreadthRunCandidates> | undefined => {
+  if (args.repairBreadth <= 1) return undefined
+  return makeRepairBreadthRunCandidates({
+    instanceId: args.instance.id,
+    mainSandbox: args.sandbox,
+    baseCommit: args.instance.swebench?.baseCommit,
+    repo: args.instance.swebench?.repo,
+    timeoutMs: args.deps.timeoutMs,
+    resolveLaneLlm: (index) =>
+      applySampleTemperature(
+        resolveLaneLlm(args.deps, args.repairPosture.modelLaneDiversity, index),
+        index,
+      ),
+    runAgentOnFork: args.runAgentOnFork,
+    validate: args.validate,
+    validateInputs: {
+      exec,
+      timeoutMs: args.deps.timeoutMs,
+      readFile: async (path: string): Promise<string> => Bun.file(path).text(),
+      evaluatePredicate: args.repairEvaluatePredicate,
+      ...(args.primaryRailStep !== undefined ? { primaryRailStep: args.primaryRailStep } : {}),
+    },
+    sandboxPorts: { forkSandbox, cleanupSandbox },
+    gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
+    // jun-29 OBSERVE-ONLY pool capture: when a run artifact root exists, persist
+    // the FULL candidate pool per round (decision impact 0). Absent ⇒ no sink ⇒
+    // byte-identical.
+    ...(args.deps.reproArtifactRootPath !== undefined
+      ? {
+          recordCandidates: (round, candidates) =>
+            writeCandidatePool(
+              args.deps.reproArtifactRootPath as string,
+              args.instance.id,
+              round,
+              candidates,
+            ),
+        }
+      : {}),
+    ...(args.repairPosture.selectorMode === "clean"
+      ? {
+          deriveCandidateStructuralRepair: (candidate: Candidate, candidateSandbox: string) =>
+            deriveCandidateStructuralRepair({
+              instance: args.instance,
+              candidate,
+              sandbox: candidateSandbox,
+              signal: args.signal,
+              ...(args.chaRepairTargets !== undefined
+                ? { preferredTargets: args.chaRepairTargets }
+                : {}),
+            }),
+        }
+      : {}),
+    ...(args.repairPosture.selectorMode === "clean" && familyCoverageCoeditEnabled(process.env)
+      ? {
+          repairFamilyCoverage: ({ sandbox: candidateSandbox, candidate, family, missingFiles }) =>
+            coeditFamilyCoverageCandidate({
+              sandbox: candidateSandbox,
+              candidate,
+              family,
+              missingFiles,
+              timeoutMs: args.deps.timeoutMs,
+              baseCommit: args.instance.swebench?.baseCommit,
+              repo: args.instance.swebench?.repo,
+              ...(args.chaRepairTargets !== undefined
+                ? { preferredTargets: args.chaRepairTargets }
+                : {}),
+            }),
+        }
+      : {}),
+    // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined ⇒
+    // shared base seed ⇒ byte-identical).
+    ...(args.perCandidateSeed !== undefined ? { perCandidateSeed: args.perCandidateSeed } : {}),
+  })
+}
+
+/** Shared repair-round orchestration inside a git snapshot (jun-28). Both bench
+ *  drivers run the SAME `runRepairRounds` here — owner-evidence seed assembly,
+ *  acceptance/breadth wiring, repro-rail readFile. The ONLY per-driver divergence
+ *  (the runner threads `chaMultisiteSteer` into the per-round agent, the app does
+ *  not) is injected as `runOnce`. Returns the snapshot's final diff plus the raw
+ *  rounds result so the caller derives the Phase verdict (no closure mutation). */
+export const runRepairRoundsInSnapshot = async (args: {
+  instance: Instance
+  deps: RunInstanceDeps
+  sandbox: string
+  w: Wiring
+  repair: NonNullable<RunInstanceDeps["repair"]>
+  repairPosture: BenchPosture
+  repairBreadth: number
+  validate: RepairBreadthDeps["validate"]
+  repairEvaluatePredicate: RepairBreadthDeps["validateInputs"]["evaluatePredicate"]
+  primaryRailStep: PrimaryRailStep | undefined
+  runCandidates: ReturnType<typeof makeRepairBreadthRunCandidates> | undefined
+  acceptanceSelectCandidates: ReturnType<typeof makeAcceptanceSelectCandidates>
+  siblingOwners: readonly string[]
+  repairIssueSymbols: ReturnType<typeof extractIssueHint>["symbols"]
+  verificationTarget: VerificationTargetFact | undefined
+  repairLlmEvidence: Partial<LlmEvidenceArtifacts>
+  runOnce: Parameters<typeof runRepairRounds>[0]["runOnce"]
+}): Promise<{ patch: string; out: Awaited<ReturnType<typeof runRepairRounds>> }> => {
+  let captured: Awaited<ReturnType<typeof runRepairRounds>> | undefined
+  const patch = await withGitSnapshot(
+    args.sandbox,
+    args.deps.timeoutMs,
+    args.instance.swebench?.baseCommit,
+    async () => {
+      await emitSandbox(
+        args.w.observer,
+        args.sandbox,
+        args.instance.swebench?.baseCommit,
+        args.deps.timeoutMs,
+      )
+      captured = await runRepairRounds({
+        config: buildRepairRoundsConfig(
+          args.repair.maxRounds,
+          args.repairBreadth,
+          args.repairPosture.repairStrongOracle,
+        ),
+        problem: args.instance.problemStatement,
+        runOnce: args.runOnce,
+        validate: args.validate,
+        buildContext: (ctxArgs) => {
+          const repairArgs = {
+            ...ctxArgs,
+            siblingOwners: args.siblingOwners,
+            issueSymbols: args.repairIssueSymbols,
+            readSource: (rel: string) => readSandboxSource(args.sandbox, rel),
+            ...(args.verificationTarget !== undefined
+              ? { verificationTarget: args.verificationTarget }
+              : {}),
+          }
+          const repairSeed = buildRepairRoundSeedMessage(
+            repairArgs,
+            args.repair.buildContext?.(repairArgs),
+          )
+          recordLlmEvidencePacket(args.repairLlmEvidence, repairSeed.packet)
+          return repairSeed.seedMsg
+        },
+        sandbox: args.sandbox,
+        exec,
+        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
+        timeoutMs: args.deps.timeoutMs,
+        evaluatePredicate: args.repairEvaluatePredicate,
+        ...(args.primaryRailStep !== undefined ? { primaryRailStep: args.primaryRailStep } : {}),
+        // jun-28 BREADTH: present only when B>1 (else undefined ⇒ legacy single path).
+        ...(args.runCandidates !== undefined ? { runCandidates: args.runCandidates } : {}),
+        // jun-28 SOTA++ acceptance: present only when opt-in is on + a repro set exists.
+        ...(args.acceptanceSelectCandidates !== undefined
+          ? { selectCandidates: args.acceptanceSelectCandidates }
+          : {}),
+      })
+    },
+    args.instance.swebench?.repo,
+  )
+  // withGitSnapshot always invokes the callback, so `captured` is set; guard
+  // defensively so a future refactor that changes that contract fails loudly.
+  if (captured === undefined) throw new Error("runRepairRounds did not execute in snapshot")
+  return { patch, out: captured }
+}
+
 const runRepairPhase = async (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -3711,13 +3892,6 @@ const runRepairPhase = async (
   // its owner evidence carries exact slices (paired with issue symbols) and it
   // names the active proof target — parity with the selector-repair sibling.
   const repairIssueSymbols = extractIssueHint(instance.problemStatement).symbols
-  let turns = 0
-  let finalPatch = ""
-  let repairValidated = false
-  let repairFalseGreen = false
-  let repairFalseRed = false
-  let repairValidationDecision: Phase["repairValidationDecision"]
-  let repairRounds = 0
   const repairLlmEvidence: Partial<LlmEvidenceArtifacts> = {}
   // #2 repro-vote: when the knob is on AND we have a reproducing set, the
   // validator becomes the K-of-N RESOLVED majority vote (re-run the set on the
@@ -3745,107 +3919,43 @@ const runRepairPhase = async (
     issueDeclaredExpected,
     evaluateSuccessPredicate,
   )
-  // jun-28 repair-loop BREADTH (mirror of the apps driver): B>1 ⇒ fan a repair
-  // round out to B forked candidates, continue from the validator-green one (else
-  // best validator signal). B=1 (default) ⇒ undefined ⇒ legacy single path
-  // (byte-identical). Kept equivalent to src/apps/bench/eval/driver.ts.
+  // jun-28 repair-loop BREADTH (shared with apps/bench/eval/driver.ts via the
+  // exported `buildRepairBreadthRunCandidates`): B>1 ⇒ fan a repair round out to
+  // B forked candidates, continue from the validator-green one (else best signal).
+  // B=1 ⇒ undefined ⇒ legacy single path (byte-identical). The runner threads
+  // `chaMultisiteSteer` into the forked agent; that divergence lives in the
+  // injected `runAgentOnFork` closure (the app omits it).
   const repairBreadth = repair.breadth ?? repairPosture.repairBreadth
-  const runCandidates =
-    repairBreadth > 1
-      ? makeRepairBreadthRunCandidates({
-          instanceId: instance.id,
-          mainSandbox: sandbox,
-          baseCommit: instance.swebench?.baseCommit,
-          repo: instance.swebench?.repo,
-          timeoutMs: deps.timeoutMs,
-          resolveLaneLlm: (index) =>
-            applySampleTemperature(
-              resolveLaneLlm(deps, repairPosture.modelLaneDiversity, index),
-              index,
-            ),
-          runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
-            runAgentOnce(
-              instance,
-              deps,
-              forkSandbox,
-              signal,
-              w,
-              seedMsg,
-              deps.timeoutMs,
-              precomputedHint,
-              reproHint,
-              closureHint,
-              repairPosture,
-              stateOverride,
-              chaMultisiteSteer,
-              laneLlm,
-            ),
-          validate,
-          validateInputs: {
-            exec,
-            timeoutMs: deps.timeoutMs,
-            readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-            evaluatePredicate: repairEvaluatePredicate,
-            ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
-          },
-          sandboxPorts: { forkSandbox, cleanupSandbox },
-          gitPorts: { resetToBase, applyCandidatePatch, materializeBuildEnv },
-          // jun-29 OBSERVE-ONLY pool capture: when a run artifact root exists,
-          // persist the FULL candidate pool per round (decision impact 0). Absent
-          // root ⇒ no sink ⇒ byte-identical.
-          ...(deps.reproArtifactRootPath !== undefined
-            ? {
-                recordCandidates: (round, candidates) =>
-                  writeCandidatePool(
-                    deps.reproArtifactRootPath as string,
-                    instance.id,
-                    round,
-                    candidates,
-                  ),
-              }
-            : {}),
-          ...(repairPosture.selectorMode === "clean"
-            ? {
-                deriveCandidateStructuralRepair: (candidate: Candidate, candidateSandbox: string) =>
-                  deriveCandidateStructuralRepair({
-                    instance,
-                    candidate,
-                    sandbox: candidateSandbox,
-                    signal,
-                    ...(chaRepairTargets !== undefined
-                      ? { preferredTargets: chaRepairTargets }
-                      : {}),
-                  }),
-              }
-            : {}),
-          ...(repairPosture.selectorMode === "clean" &&
-          familyCoverageCoeditEnabled(process.env)
-            ? {
-                repairFamilyCoverage: ({
-                  sandbox: candidateSandbox,
-                  candidate,
-                  family,
-                  missingFiles,
-                }) =>
-                  coeditFamilyCoverageCandidate({
-                    sandbox: candidateSandbox,
-                    candidate,
-                    family,
-                    missingFiles,
-                    timeoutMs: deps.timeoutMs,
-                    baseCommit: instance.swebench?.baseCommit,
-                    repo: instance.swebench?.repo,
-                    ...(chaRepairTargets !== undefined
-                      ? { preferredTargets: chaRepairTargets }
-                      : {}),
-                  }),
-              }
-            : {}),
-          // #7 location-set fanout: per-candidate lead-file seed (OFF ⇒ undefined
-          // ⇒ shared base seed ⇒ byte-identical).
-          ...(perCandidateSeed !== undefined ? { perCandidateSeed } : {}),
-        })
-      : undefined
+  const runCandidates = buildRepairBreadthRunCandidates({
+    instance,
+    deps,
+    sandbox,
+    signal,
+    repairPosture,
+    repairBreadth,
+    validate,
+    repairEvaluatePredicate,
+    primaryRailStep,
+    chaRepairTargets,
+    perCandidateSeed,
+    runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
+      runAgentOnce(
+        instance,
+        deps,
+        forkSandbox,
+        signal,
+        w,
+        seedMsg,
+        deps.timeoutMs,
+        precomputedHint,
+        reproHint,
+        closureHint,
+        repairPosture,
+        stateOverride,
+        chaMultisiteSteer,
+        laneLlm,
+      ),
+  })
   // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
   // reproducing set and the owner-near PUBLIC regression set that was confirmed
   // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
@@ -3858,93 +3968,56 @@ const runRepairPhase = async (
     ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
   )
-  const patch = await withGitSnapshot(
+  const { patch, out } = await runRepairRoundsInSnapshot({
+    instance,
+    deps,
     sandbox,
-    deps.timeoutMs,
-    instance.swebench?.baseCommit,
-    async () => {
-      await emitSandbox(w.observer, sandbox, instance.swebench?.baseCommit, deps.timeoutMs)
-      const out = await runRepairRounds({
-        config: buildRepairRoundsConfig(
-          repair.maxRounds,
-          repairBreadth,
-          repairPosture.repairStrongOracle,
-        ),
-        problem: instance.problemStatement,
-        runOnce: (seedMsg) =>
-          runAgentOnce(
-            instance,
-            deps,
-            sandbox,
-            signal,
-            w,
-            seedMsg,
-            deps.timeoutMs,
-            precomputedHint,
-            reproHint,
-            closureHint,
-            // Repair posture with the localize-phase edit-block stripped (see
-            // `repairLocalizePhaseSuppressed`). Always an explicit override so
-            // `buildConfig` does NOT re-resolve the block-active env posture.
-            repairPosture,
-            stateOverride,
-            chaMultisiteSteer,
-          ),
-        validate,
-        buildContext: (ctxArgs) => {
-          const repairArgs = {
-            ...ctxArgs,
-            siblingOwners,
-            issueSymbols: repairIssueSymbols,
-            readSource: (rel: string) => readSandboxSource(sandbox, rel),
-            ...(verificationTarget !== undefined ? { verificationTarget } : {}),
-          }
-          const repairSeed = buildRepairRoundSeedMessage(
-            repairArgs,
-            repair.buildContext?.(repairArgs),
-          )
-          recordLlmEvidencePacket(repairLlmEvidence, repairSeed.packet)
-          return repairSeed.seedMsg
-        },
+    w,
+    repair,
+    repairPosture,
+    repairBreadth,
+    validate,
+    repairEvaluatePredicate,
+    primaryRailStep,
+    runCandidates,
+    acceptanceSelectCandidates,
+    siblingOwners,
+    repairIssueSymbols,
+    verificationTarget,
+    repairLlmEvidence,
+    runOnce: (seedMsg) =>
+      runAgentOnce(
+        instance,
+        deps,
         sandbox,
-        exec,
-        readFile: async (path: string): Promise<string> => Bun.file(path).text(),
-        timeoutMs: deps.timeoutMs,
-        evaluatePredicate: repairEvaluatePredicate,
-        ...(primaryRailStep !== undefined ? { primaryRailStep } : {}),
-        // jun-28 BREADTH: present only when B>1 (else undefined ⇒ legacy single
-        // path, byte-identical). Kept in parity with the apps driver.
-        ...(runCandidates !== undefined ? { runCandidates } : {}),
-        // jun-28 SOTA++ acceptance: present only when the opt-in is on + a repro set
-        // exists (else undefined ⇒ legacy validator-rank selection, byte-identical).
-        ...(acceptanceSelectCandidates !== undefined
-          ? { selectCandidates: acceptanceSelectCandidates }
-          : {}),
-      })
-      turns = out.turns
-      finalPatch = out.patch
-      repairValidated = out.validated
-      repairFalseGreen = out.primaryFalseGreen
-      repairFalseRed = out.primaryFalseRed
-      repairValidationDecision = out.validationDecision
-      repairRounds = out.rounds
-    },
-    instance.swebench?.repo,
-  )
-  // `patch` (from withGitSnapshot's final diff) is the canonical capture; if
-  // available we prefer it (it reflects the worktree at end of all rounds).
-  // `finalPatch` is the orchestrator's view of the last round's diff — they
-  // agree by construction (continue-from-patched-tree, single sandbox).
-  const capturedPatch = patch !== "" ? patch : finalPatch
+        signal,
+        w,
+        seedMsg,
+        deps.timeoutMs,
+        precomputedHint,
+        reproHint,
+        closureHint,
+        // Repair posture with the localize-phase edit-block stripped; explicit so
+        // `buildConfig` does NOT re-resolve the block-active env posture.
+        repairPosture,
+        stateOverride,
+        chaMultisiteSteer,
+      ),
+  })
+  // `patch` (withGitSnapshot's final diff) is the canonical capture; fall back to
+  // the orchestrator's last-round view. They agree by construction (single sandbox).
+  const capturedPatch = patch !== "" ? patch : out.patch
   const submissionReview = maybeReviewSubmission(capturedPatch)
   return {
     patch: capturedPatch,
-    turns,
-    validated: repairValidated,
-    primaryFalseGreen: repairFalseGreen,
-    primaryFalseRed: repairFalseRed,
-    ...(repairValidationDecision !== undefined ? { repairValidationDecision } : {}),
-    ...(repairRounds > 0 ? { verifyRounds: repairRounds } : {}),
+    turns: out.turns,
+    validated: out.validated,
+    primaryFalseGreen: out.primaryFalseGreen,
+    primaryFalseRed: out.primaryFalseRed,
+    ...(out.validationDecision !== undefined
+      ? { repairValidationDecision: out.validationDecision }
+      : {}),
+    ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
     ...(submissionReview !== undefined ? { submissionReview } : {}),
   }
@@ -5808,7 +5881,9 @@ const adaptiveBaseReproReceipts = (
     ]
   }
   const infraReason =
-    reproTest.reason === "not_installed" || reproTest.reason === "write_failed"
+    reproTest.reason === "not_installed" ||
+    reproTest.reason === "write_failed" ||
+    reproTest.reason === "unsupported_language"
       ? "env_prep_failed"
       : "execution_failed"
   return [{ source: "public_mwe", sourcePolicy: "public_repro", state: infraReason }]
