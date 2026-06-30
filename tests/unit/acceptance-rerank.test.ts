@@ -111,6 +111,17 @@ describe("rerankSelect — Agentless-faithful acceptance + vote", () => {
     expect(r.patch).toBe("A") // both 1 vote, ka appeared first
   })
 
+  test("structural tie-break: equal votes ⇒ higher structuralPriority beats earlier appearance", () => {
+    const r = rerankSelect(
+      [
+        c({ patch: "A", patchKey: "ka", reproPass: true, structuralPriority: 0 }),
+        c({ patch: "B", patchKey: "kb", reproPass: true, structuralPriority: 2 }),
+      ],
+      OPTS,
+    )
+    expect(r.patch).toBe("B")
+  })
+
   test("empty / whitespace patchKeys are not votable; all-empty ⇒ tier none, empty patch", () => {
     const r = rerankSelect(
       [c({ patch: "", patchKey: "" }), c({ patch: "  ", patchKey: "   " })],

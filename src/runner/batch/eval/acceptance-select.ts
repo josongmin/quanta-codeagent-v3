@@ -33,6 +33,9 @@ export interface AcceptanceCandidate {
   readonly patch: string
   /** Normalized vote key (AST-canonical upstream; raw patch an acceptable fallback). */
   readonly patchKey: string
+  /** Optional structural tie-break priority carried from the breadth candidate.
+   *  Higher is better; used only when vote counts tie. */
+  readonly structuralPriority?: number
   /** jun-30 SOTA++ per-candidate execution evidence for the LLM soft-reranker
    *  (optional). The agent's last verification command. Absent ⇒ not forwarded. */
   readonly verifyCmd?: string
@@ -137,6 +140,9 @@ export const selectByAcceptance = async (
       index,
       patch: candidate.patch,
       patchKey: candidate.patchKey,
+      ...(candidate.structuralPriority !== undefined
+        ? { structuralPriority: candidate.structuralPriority }
+        : {}),
       reproPass,
       regressionFailures,
       ...(candidate.verifyCmd !== undefined ? { verifyCmd: candidate.verifyCmd } : {}),

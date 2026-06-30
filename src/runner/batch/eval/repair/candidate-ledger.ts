@@ -35,6 +35,10 @@ export interface CandidatePoolRow {
    *  files/symbols. Observe-only RCA aid. */
   readonly leadFile?: string
   readonly leadSymbol?: string
+  /** Typed structural family, when clean-mode repair breadth derived one. */
+  readonly familyId?: string
+  /** Remaining typed family owner files this candidate still misses. */
+  readonly familyCoverageMissing?: readonly string[]
 }
 
 /**
@@ -91,6 +95,10 @@ export const buildCandidatePoolRows = (
       ...(c.locationFocus?.leadFile !== undefined ? { leadFile: c.locationFocus.leadFile } : {}),
       ...(c.locationFocus?.leadSymbol !== undefined
         ? { leadSymbol: c.locationFocus.leadSymbol }
+        : {}),
+      ...(c.familyId !== undefined ? { familyId: c.familyId } : {}),
+      ...(c.familyCoverageMissing !== undefined
+        ? { familyCoverageMissing: c.familyCoverageMissing }
         : {}),
     }
   })

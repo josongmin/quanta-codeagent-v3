@@ -62,6 +62,12 @@ const evidenceOf = (
   return out
 }
 
+const structuralPriorityOf = (candidate: RepairCandidateOutcome): number | undefined => {
+  const missing = candidate.familyCoverageMissing
+  if (missing === undefined) return undefined
+  return missing.length === 0 ? 2 : 0
+}
+
 /**
  * Build the `selectCandidates` port from acceptance oracles. The winner is chosen
  * by score-once + rerank (Agentless-faithful) over the candidates' cumulative
@@ -82,12 +88,16 @@ export const buildAcceptanceSelector = (
     // Per-candidate execution evidence is ONLY consumed by the LLM soft-reranker
     // (renderCandidate); compute+redact it only when one is wired, so the
     // deterministic path pays nothing and stays byte-identical.
-    const accCandidates = candidates.map((c) => ({
-      patch: c.run.patch,
-      patchKey: normalizePatch(c.run.patch),
-      ...(c.locationFocus !== undefined ? { locationFocus: c.locationFocus } : {}),
-      ...(llmRerank !== undefined ? evidenceOf(c) : {}),
-    }))
+    const accCandidates = candidates.map((c) => {
+      const structuralPriority = structuralPriorityOf(c)
+      return {
+        patch: c.run.patch,
+        patchKey: normalizePatch(c.run.patch),
+        ...(structuralPriority !== undefined ? { structuralPriority } : {}),
+        ...(c.locationFocus !== undefined ? { locationFocus: c.locationFocus } : {}),
+        ...(llmRerank !== undefined ? evidenceOf(c) : {}),
+      }
+    })
     const { selected } = await selectByAcceptance(accCandidates, oracles, llmRerank)
     // Map the winning patch back to its outcome. Distinct candidates with the SAME
     // patch are equivalent (adopt re-applies the diff ⇒ identical tree; deterministic

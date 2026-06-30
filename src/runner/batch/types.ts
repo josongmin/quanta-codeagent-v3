@@ -46,6 +46,10 @@ export interface SwebenchMeta {
    *  non-Python repos from a fake pytest grade ({@link synthesizeTestCmd}); also available
    *  for a per-language report breakdown. Absent for Verified/Live. */
   repoLanguage?: string
+  /** Pro only — public test-file / suite selection from `selected_test_files_to_run`.
+   *  EVAL-ONLY: may synthesize a repo-local verifier for non-Python Pro instances,
+   *  but MUST NOT be routed into prompt/localization surfaces. */
+  selectedTestFilesToRun?: readonly string[]
 }
 
 /** A single SWE-bench-style task. `repoPath` is treated as read-only: the
@@ -89,6 +93,7 @@ export interface InstanceUsage {
 export type BenchReproTestReason =
   | "disabled"
   | "empty_problem"
+  | "unsupported_language"
   | "generation_failed"
   | "generation_empty"
   | "execution_failed"

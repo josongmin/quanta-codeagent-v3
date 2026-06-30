@@ -50,6 +50,8 @@ SWE-bench Pro **공개 731문제**(ScaleAI/SWE-bench_Pro, test split)를 **문�
 ```
 swe-bench-pro-analysis/
   README.md                  ← 이 파일 (분포 + 함의)
+  PYTHON-FIRST-STRUCTURAL-RCA.md
+                            ← current-head 기준 Python-first bottleneck + 확장 가능한 polyglot 축 분리
   TAXONOMY.md                ← 분류 루브릭 (Verified 3축 L/S/K + 6tier 계승 + Pro 멀티언어 확장)
   _data/
     pro-full.jsonl           ← 원시 731 rows (HF ScaleAI/SWE-bench_Pro, test split)
@@ -90,6 +92,8 @@ frontmatter: `primary_type` / `tier` / `loc_axis` / `repair_strategy` / `knowled
 
 > 권장 순서: **Python-Pro(266) 먼저** — 우리 스택이 즉시 닿는 표면이라 분석↔측정 루프가 가장 빠름. 그담 js/ts(165+20, semantica 강), 마지막 go(280, 최대지만 우리 약점 레인).
 > 분석은 Verified와 동일하게 **per-instance 분석 에이전트**(gold patch + problem + Pro 고유필드 입력)로 스케일.
+>
+> 현재 헤드 기준 구조 RCA와 언어별 확장축 정리는 [PYTHON-FIRST-STRUCTURAL-RCA.md](PYTHON-FIRST-STRUCTURAL-RCA.md). 핵심은 "Python만 하자"가 아니라, `LanguageAdapter × ExecBackend × OracleSource` 축을 유지한 채 Python에서 먼저 실증하자는 것이다.
 
 ## 우리 실측 (live runs · 2026-06-29)
 

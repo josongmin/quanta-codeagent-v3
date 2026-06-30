@@ -101,6 +101,18 @@ describe("buildCandidatePoolRows", () => {
     expect(row?.leadSymbol).toBe("render")
   })
 
+  test("typed family coverage metadata is persisted for structural RCA", () => {
+    const [row] = buildCandidatePoolRows(0, [
+      {
+        ...fakeCandidate("diff --git a/pkg/core.py b/pkg/core.py\n@@", false),
+        familyId: "multi-site",
+        familyCoverageMissing: ["pkg/peer.py"],
+      },
+    ])
+    expect(row?.familyId).toBe("multi-site")
+    expect(row?.familyCoverageMissing).toEqual(["pkg/peer.py"])
+  })
+
   test("empty pool ⇒ [] (degenerate fan-out, no rows)", () => {
     expect(buildCandidatePoolRows(0, [])).toEqual([])
   })

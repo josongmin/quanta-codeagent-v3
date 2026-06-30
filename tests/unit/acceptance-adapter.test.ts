@@ -13,10 +13,14 @@ import { buildAcceptanceSelector } from "../../src/runner/batch/eval/acceptance-
 import type { AcceptanceOracles } from "../../src/runner/batch/eval/acceptance-select"
 import type { RepairCandidateOutcome } from "../../src/runner/batch/eval/repair/types"
 
-const outcome = (patch: string): RepairCandidateOutcome => ({
+const outcome = (
+  patch: string,
+  extra: Partial<RepairCandidateOutcome> = {},
+): RepairCandidateOutcome => ({
   run: { patch, turns: 1 },
   validator: { ok: false },
   adopt: async () => {},
+  ...extra,
 })
 
 describe("buildAcceptanceSelector — RepairCandidateOutcome bridge", () => {
@@ -58,6 +62,22 @@ describe("buildAcceptanceSelector — RepairCandidateOutcome bridge", () => {
     }
     await buildAcceptanceSelector(oracles)([outcome("A"), outcome("B"), outcome("C")])
     expect(seen).toEqual(["A", "B", "C"])
+  })
+
+  test("acceptance tie on votes/oracles prefers the structurally complete family candidate", async () => {
+    const cands = [
+      outcome("PARTIAL", {
+        familyId: "multi-site",
+        familyCoverageMissing: ["pkg/peer.py"],
+      }),
+      outcome("COMPLETE", {
+        familyId: "multi-site",
+        familyCoverageMissing: [],
+      }),
+    ]
+    const winner = await buildAcceptanceSelector({ runRepro: async () => true })(cands)
+    expect(winner.run.patch).toBe("COMPLETE")
+    expect(winner === cands[1]).toBe(true)
   })
 
   test("empty candidate list ⇒ THROWS (contract violation, not a cast-masked undefined)", async () => {

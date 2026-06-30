@@ -140,6 +140,10 @@ export const selectionGenerationEnvCaveats = (args: {
       return [
         "attempted public repro helper failed to execute on the base environment; no executable public repro command is attached",
       ]
+    case "unsupported_language":
+      return [
+        "public repro helper is unsupported for this repository language; no executable public repro command is attached",
+      ]
     case "no_reproduced_candidate":
       return [
         "generated public repro helpers did not reproduce on the base environment; no executable public repro command is attached",

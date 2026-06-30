@@ -173,6 +173,7 @@ const SUMMARY_METRICS = [
   "gold_coverage_rate",
   "exact_file_set_match_rate",
   "multi_file_full_coverage_rate",
+  "multi_file_partial_overlap_rate",
   "synth_repro_base_red_rate",
   "repro_red_but_unresolved_rate",
 ] as const

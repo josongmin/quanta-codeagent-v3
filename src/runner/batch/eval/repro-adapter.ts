@@ -16,6 +16,7 @@
  */
 import { dirname } from "node:path"
 import { reproRunArgv } from "../corpus/dataset"
+import { normalizeRepoLanguageWithPythonDefault } from "../repo-language"
 import type { Instance } from "../types"
 import { classifyPytest, classifyPytestReportText } from "@/agent/repro-test/execute"
 import { gateOn } from "@/shared"
@@ -114,12 +115,6 @@ export const pythonReproAdapter: ReproAdapter = {
     sidecarText !== undefined ? classifyPytestReportText(sidecarText) : classifyPytest(stdout, stderr, code),
 }
 
-/** Is a repo_language one of Python's spellings (or absent ⇒ Verified/Live default = python)? */
-const isPythonLanguage = (raw: string | undefined): boolean => {
-  const lang = (raw ?? "").trim().toLowerCase()
-  return lang === "" || lang.startsWith("python") || lang === "py" || lang === "cpython"
-}
-
 /**
  * Resolve the adapter for an instance from `instance.swebench.repoLanguage`. Python (incl.
  * absent = Verified/Live default) ⇒ {@link pythonReproAdapter}. Any other language ⇒ `null`
@@ -127,7 +122,9 @@ const isPythonLanguage = (raw: string | undefined): boolean => {
  * never a fake pytest run on a non-Python tree). Go / JS / TS adapters land in later phases.
  */
 export const resolveReproAdapter = (instance: Pick<Instance, "swebench">): ReproAdapter | null =>
-  isPythonLanguage(instance.swebench?.repoLanguage) ? pythonReproAdapter : null
+  normalizeRepoLanguageWithPythonDefault(instance.swebench?.repoLanguage) === "python"
+    ? pythonReproAdapter
+    : null
 
 /**
  * Docker image reference for the `image` exec backend, when CLEANLY derivable from the instance.

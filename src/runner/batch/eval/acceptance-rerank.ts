@@ -28,6 +28,10 @@ export interface RerankCandidate {
   /** Normalized vote key (AST-canonical upstream; raw patch is an acceptable
    *  fallback). Empty/whitespace ⇒ not votable. */
   readonly patchKey: string
+  /** Optional structural tie-break priority. Higher is better. Used only when
+   *  vote counts tie, before earliest appearance. Absent/0 preserves the legacy
+   *  first-appearance tie-break. */
+  readonly structuralPriority?: number
   /** COUNT of failed regression tests for this candidate (0 = none). Lower better;
    *  the bar is the MINIMUM across candidates, not absolute zero. */
   readonly regressionFailures: number
@@ -73,9 +77,11 @@ const voteWinner = (
     const bk = (candidates[best] as RerankCandidate).patchKey
     const v = vote.get(k) ?? 0
     const bv = vote.get(bk) ?? 0
+    const sp = (candidates[i] as RerankCandidate).structuralPriority ?? 0
+    const bsp = (candidates[best] as RerankCandidate).structuralPriority ?? 0
     const fa = firstAppear.get(k) ?? 0
     const bfa = firstAppear.get(bk) ?? 0
-    if (v > bv || (v === bv && fa < bfa)) best = i
+    if (v > bv || (v === bv && (sp > bsp || (sp === bsp && fa < bfa)))) best = i
   }
   const winner = candidates[best] as RerankCandidate
   return { patch: winner.patch, tier, votes: vote.get(winner.patchKey) ?? 0 }

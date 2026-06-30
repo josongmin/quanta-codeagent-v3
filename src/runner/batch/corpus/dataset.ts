@@ -26,6 +26,10 @@ import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
+import {
+  parseSelectedTestFilesToRun,
+  selectedTestFilesVerifierCommand,
+} from "./selected-test-files-verifier"
 import { specResolvedRunner, specRunnerKind } from "./repo-version-specs"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
@@ -383,7 +387,14 @@ export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   // Treat every python spelling as python (audit EDGE-2): `python3`, `py`, `cpython`,
   // `python 3.11` must NOT be fenced as non-python (that would no-op a gradeable repo).
   const isPython = lang === undefined || lang === "" || lang.startsWith("python") || lang === "py" || lang === "cpython"
-  if (!isPython) return "true"
+  if (!isPython) {
+    return (
+      selectedTestFilesVerifierCommand({
+        repoLanguage: lang,
+        selectedTestFilesToRun: raw.selected_test_files_to_run,
+      }) ?? "true"
+    )
+  }
   const names = decodeTestNameList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
   const repo = typeof raw.repo === "string" ? raw.repo : ""
@@ -476,6 +487,7 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
   // Pro-only carry (RFC jun-29) — absent for Verified/Live ⇒ byte-identical.
   const dockerhubTag = str(task.raw.dockerhub_tag)
   const repoLanguage = str(task.raw.repo_language)
+  const selectedTestFilesToRun = parseSelectedTestFilesToRun(task.raw.selected_test_files_to_run)
   return {
     id: task.instanceId,
     repoPath,
@@ -493,6 +505,7 @@ export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {
       ...(passToPass !== undefined ? { passToPass } : {}),
       ...(dockerhubTag !== undefined ? { dockerhubTag } : {}),
       ...(repoLanguage !== undefined ? { repoLanguage } : {}),
+      ...(selectedTestFilesToRun !== undefined ? { selectedTestFilesToRun } : {}),
     },
   }
 }
