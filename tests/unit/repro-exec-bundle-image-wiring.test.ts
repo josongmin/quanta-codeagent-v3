@@ -1,7 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { reproRunArgv } from "@/runner/batch/corpus/dataset"
 import { reproExecBundle } from "@/runner/batch/eval/driver"
 import type { Instance } from "@/runner/batch/types"
+
+// Phase 2b image backend (QUANTA_BENCH_REPRO_IMAGE_EXEC) is opt-in; clear it after
+// every test so a gated case can't leak into the default-OFF cases (pollution guard).
+afterEach(() => {
+  delete process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC
+})
 
 const mkInstance = (overrides: Partial<Instance> = {}): Instance => ({
   id: "test",
@@ -12,7 +18,8 @@ const mkInstance = (overrides: Partial<Instance> = {}): Instance => ({
 })
 
 describe("reproExecBundle image backend wiring", () => {
-  test("Pro python instance with dockerhubTag ⇒ vote/consensus repro exec uses the instance image", () => {
+  test("Pro python + dockerhubTag + REPRO_IMAGE_EXEC=1 ⇒ vote/consensus repro exec uses the instance image", () => {
+    process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC = "1" // Phase 2b image backend is opt-in
     const bundle = reproExecBundle(
       mkInstance({
         swebench: {

@@ -64,7 +64,11 @@ const mkInstance = (overrides: Partial<Instance> = {}): Instance => ({
 const uvRunIndex = (argv: readonly string[]): number =>
   argv.findIndex((arg, idx) => arg === "uv" && argv[idx + 1] === "run")
 
-const ENV_KEYS = ["QUANTA_BENCH_REPRO_TEST", "QUANTA_BENCH_ISSUE_HINT"] as const
+const ENV_KEYS = [
+  "QUANTA_BENCH_REPRO_TEST",
+  "QUANTA_BENCH_ISSUE_HINT",
+  "QUANTA_BENCH_REPRO_IMAGE_EXEC",
+] as const
 
 const snapshot = (): Map<string, string | undefined> => {
   const m = new Map<string, string | undefined>()
@@ -296,7 +300,10 @@ describe("prepareReproTest", () => {
     expect(seen[0]?.[seen[0].length - 2]).toBe("-s")
   })
 
-  test("WIRING: Pro python instance with dockerhubTag ⇒ repro runs inside the instance image", async () => {
+  test("WIRING: Pro python + dockerhubTag + REPRO_IMAGE_EXEC=1 ⇒ repro runs inside the instance image", async () => {
+    // Phase 2b image backend is DEFAULT-OFF (gated); this opt-in arm asserts the
+    // image command shape when the operator enables QUANTA_BENCH_REPRO_IMAGE_EXEC.
+    process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC = "1"
     const seen: (readonly string[])[] = []
     await prepareReproTestDetailed(
       mkInstance({
@@ -333,6 +340,36 @@ describe("prepareReproTest", () => {
     ])
     expect(seen[0]?.[10]).toContain("/tmp/sb/__repro_0_")
     expect(seen[0]).not.toContain("--with")
+  })
+
+  test("WIRING: Pro python + dockerhubTag but gate UNSET ⇒ HOST uv (Phase 2b default-OFF, byte-identical)", async () => {
+    // REGRESSION GUARD: without QUANTA_BENCH_REPRO_IMAGE_EXEC the image backend must
+    // NOT engage — Pro repro stays on the proven host path (the RFC defers image
+    // parity to a box). A default `docker run` would silently confound every Pro run.
+    const seen: (readonly string[])[] = []
+    await prepareReproTestDetailed(
+      mkInstance({
+        swebench: {
+          instanceId: "qutebrowser__qutebrowser-pro-1",
+          repo: "qutebrowser/qutebrowser",
+          baseCommit: "abc",
+          repoLanguage: "python",
+          dockerhubTag: "qutebrowser.demo",
+        },
+      }),
+      "/tmp/sb",
+      1,
+      {
+        llm: new StubLLM(),
+        writeFile: async () => {},
+        exec: async (argv) => {
+          seen.push(argv)
+          return { code: 0, stdout: "Issue reproduced\n", stderr: "" }
+        },
+      },
+    )
+    expect(seen[0]?.[0]).not.toBe("docker")
+    expect(seen[0]?.join(" ")).not.toContain("jefzda/sweap-images")
   })
 
   test("WIRING: non-swebench fixture ⇒ repro runs bare python3 (no uv-run)", async () => {
@@ -498,7 +535,8 @@ describe("prepareReproTest", () => {
     expect(out.hint).not.toContain("`python reproduce_issue.py`")
   })
 
-  test("selection-only Pro python repro hint uses the instance image command, not host uv", async () => {
+  test("selection-only Pro python repro hint uses the image command when REPRO_IMAGE_EXEC=1", async () => {
+    process.env.QUANTA_BENCH_REPRO_IMAGE_EXEC = "1"
     const out = await prepareSelectionReproSources(
       mkInstance({
         swebench: {
