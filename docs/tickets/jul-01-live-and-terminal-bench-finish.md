@@ -73,7 +73,10 @@ Ordered by what's needed first (audit + RFC). **Everything from B1 needs a box t
 
 **Dup-check:** protocol core (`serve.py`/`protocol.py`) + parity tests already exist and pass — B1–B7 are additive; do not rebuild the protocol.
 
-**Track B verdict:** NOT a setup tweak — a real box-phase build. `tb run` cannot launch quanta until ≥ B1–B5. Honest per the RFC's own status.
+**Track B verdict (UPDATED jul-01 — box-independent build COMPLETE + box-VERIFIED on real Docker/harbor):**
+- **B1–B7 all landed** (commits `75fdf6091` B7 · `8b45b645d` B3+buildRealLlm · `4fc0b8f1e` B1/B2/B5/B6 · `cae17d777` box fixes), each hellgate (RED→GREEN→self-audit), each agent finding+fixing a real bug (report-then-EOF order; non-dict-tokens crash; host-env key leak; setup `--version`). brain↔hands contract grep-proven identical; TS 58/0, python 27/0.
+- **Box-VERIFIED** (live Docker daemon + real harbor 0.16.1, jul-01): image builds end-to-end (1.7GB; fixed missing `git` for harbor's VCS pip dep); `quanta_agent:QuantaAgent` import_path resolves to a CONCRETE `harbor.agents.base.BaseAgent` subclass (zero abstract methods); real `AgentContext` accepts our token/cost/metadata fold (`rollout_details` is list[RolloutDetail] → report rides `metadata`); brain shim `--version`→0. Correct run flag is **`--agent-import-path`** (NOT `--agent` = built-in enum); harbor shells HOST docker to provision task containers.
+- **Remaining = a LIVE `tb run` only** (no new code): host harbor + a downloaded task + LLM tokens + the brain credential. Then score quanta+Opus-4.8 vs standardized-scaffold Opus-4.8 (58.3%).
 
 ---
 
