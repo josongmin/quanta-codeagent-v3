@@ -93,7 +93,7 @@ export const benchConcurrencySchema: KnobSchema<number> = {
   default: 1,
   describe:
     "Bench: max instances processed concurrently (default 1 = serial, byte-identical). >1 overlaps patch-gen across instances; Docker grading stays serialised by the python-swebench mutex (arm64-safe). Also settable via --concurrency. For parallel grading use an x86 backend (ADR-0536).",
-  readSite: "apps/bench/index.ts",
+  readSite: "apps/bench/run-args.ts",
   surfaces: BENCH,
   parse: parsePositiveInt,
 }
@@ -106,7 +106,7 @@ export const benchClosureDiagSchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: emit closure diagnostics (per-instance closeout telemetry) to the report. Default-OFF (gateOn). Observe-only.",
-  readSite: "apps/bench/index.ts",
+  readSite: "apps/bench/run-main.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -322,7 +322,7 @@ export const benchLocationFanoutSchema: KnobSchema<boolean> = {
     "Bench: multi-location-set fanout (Agentless §4.2 absorption). With repair-breadth B>1, seed each breadth candidate to LEAD at a distinct ranked-localizer file (location diversity instead of B resamples of the top-1 site). Reuses the repair-breadth fork machinery + the localizer's ranked files; pure rotation, no-leak. Needs B>1 + ≥2 localized files. Default-OFF ⇒ candidates share the base seed ⇒ byte-identical.",
   knobDescribe:
     "Multi-location-set fanout: each breadth candidate leads at a distinct ranked file (Agentless edit-per-location)",
-  readSite: "runner/batch/eval/knobs-bench.ts",
+  readSite: "runner/batch/eval/repair-breadth.ts",
   surfaces: BENCH,
   source:
     "Agentless edit-per-location absorption (preset-addressable multi-file repair breadth diversity)",
@@ -373,7 +373,7 @@ export const benchProtectTestsSchema: KnobSchema<boolean> = {
   parse: parseKillSwitchBool,
 }
 
-/* ── QUANTA_BENCH_EXPOSE_DATASET_VERIFIER (env-direct, driver.ts via gateOn) ─ */
+/* ── QUANTA_BENCH_EXPOSE_DATASET_VERIFIER (env-direct, repo-local-verifier-command.ts via gateOn) ─ */
 export const benchExposeDatasetVerifierSchema: KnobSchema<boolean> = {
   id: "bench-expose-dataset-verifier",
   envKey: "QUANTA_BENCH_EXPOSE_DATASET_VERIFIER",
@@ -381,7 +381,7 @@ export const benchExposeDatasetVerifierSchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench (jun-24): A/B lever that surfaces the dataset's repo-local verifier command to the agent (`agentVisibleBenchVerifierCommand`) so it prefers that over bare host-global pytest/python. Default-OFF ⇒ the verifier hint is withheld (byte-identical agent-visible context).",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/repo-local-verifier-command.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }

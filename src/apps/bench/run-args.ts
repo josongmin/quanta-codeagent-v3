@@ -9,6 +9,7 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { logger } from "@/shared"
+import { argValue } from "./entry-bootstrap"
 
 // ── tiny dotenv (no dependency, first-wins; apps/cli has its own copy) ──────
 const unquote = (v: string): string =>
@@ -38,13 +39,9 @@ export const loadEnv = (files: string[]): void => {
   }
 }
 
-export const argValue = (flag: string): string | undefined => {
-  const i = process.argv.indexOf(flag)
-  if (i >= 0) return process.argv[i + 1]
-  const pref = `${flag}=`
-  const eq = process.argv.find((a) => a.startsWith(pref))
-  return eq !== undefined ? eq.slice(pref.length) : undefined
-}
+// argValue (--flag value / --flag=value) is the SSOT in ./entry-bootstrap —
+// shared by both bench entrypoints; re-exported so run-main's consumers keep it.
+export { argValue }
 
 export const argFlag = (flag: string): boolean => process.argv.includes(flag)
 

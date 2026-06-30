@@ -10,8 +10,8 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe:
-      "ast_grep tool gate (opt-in everywhere) — structural AST code search; requires ast-grep binary on PATH, read-only, 50-match cap. Gate SSOT = tool/surface/manifest.ts.",
-    readSite: "tool/surface/manifest.ts",
+      "ast_grep tool gate (opt-in everywhere) — structural AST code search; requires ast-grep binary on PATH, read-only, 50-match cap. Gate SSOT = tool/surface/manifest.ts (GATED_TOOLS data split into gated-tools.ts).",
+    readSite: "tool/surface/gated-tools.ts",
   },
   // durable cross-session trust grants (CLI comp-root; opt-in, NOT default-seeded)
   {
@@ -203,7 +203,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench observation output dir.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/run-main.ts",
   },
   {
     envKey: "QUANTA_REPAIR_ROUNDS",
@@ -212,7 +212,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench repair-round count.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/run-main.ts",
   },
   {
     envKey: "QUANTA_SWEBENCH_REPO_BASE_URL",
@@ -221,7 +221,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "SWE-bench repo base URL.",
-    readSite: "apps/bench/index.ts",
+    readSite: "apps/bench/run-main.ts",
   },
   {
     envKey: "QUANTA_SWEBENCH_DATASET",

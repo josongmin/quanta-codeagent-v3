@@ -73,7 +73,8 @@
  *
  * Never crashes when keys are absent — prints guidance and exits 0.
  */
-import { errMessage, logger, setTerminalIo } from "@/shared"
+import { errMessage, logger } from "@/shared"
+import { routeBenchTerminalIo } from "./entry-bootstrap"
 import { bootBenchOtelExport } from "./otel"
 import { currentBenchExitFn, runMain } from "./run-main"
 
@@ -96,14 +97,7 @@ export {
 // the original byte-compatible public API after the split into ./trajectory.
 export { maybeRecordTrajectory, maybeReplayTrajectory } from "./trajectory"
 
-setTerminalIo({
-  stdout: (chunk) => {
-    void process.stdout.write(chunk)
-  },
-  stderr: (chunk) => {
-    void process.stderr.write(chunk)
-  },
-})
+routeBenchTerminalIo()
 
 // Gate the top-level `runMain()` so importing this module (e.g. from
 // `tests/unit/bench-write-artifacts.test.ts` for `writeArtifacts`) does NOT

@@ -7,6 +7,7 @@
 import { readFileSync } from "node:fs"
 import { gateOn } from "@/shared"
 import { type AuthSource, resolveAuthSource, selectAuthSourceLabel } from "../auth-pool"
+import { argValue } from "../entry-bootstrap"
 
 /** Every `instance_id` in a SWE-bench dataset jsonl — the expected set that
  *  instance-aware relaunch reconciles against to detect partial box loss.
@@ -32,15 +33,9 @@ export const readDatasetInstanceIds = (path: string): string[] => {
   return ids
 }
 
-/** Read a value flag in BOTH `--flag value` and `--flag=value` forms. The
- *  `=`-form previously fell through `indexOf` and was silently ignored. */
-export const argValue = (flag: string): string | undefined => {
-  const i = process.argv.indexOf(flag)
-  if (i >= 0) return process.argv[i + 1]
-  const pref = `${flag}=`
-  const eq = process.argv.find((a) => a.startsWith(pref))
-  return eq !== undefined ? eq.slice(pref.length) : undefined
-}
+// argValue (--flag value / --flag=value) is the SSOT in ../entry-bootstrap —
+// shared by both bench entrypoints; re-exported so cli.ts + the handlers keep it.
+export { argValue }
 export const hasFlag = (flag: string): boolean => process.argv.includes(flag)
 export const allowExtraBoxes = (): boolean =>
   hasFlag("--allow-extra-boxes") || gateOn(process.env, "QUANTA_ALLOW_EXTRA_BOXES")
