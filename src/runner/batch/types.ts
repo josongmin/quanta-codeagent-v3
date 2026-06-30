@@ -371,6 +371,15 @@ export interface InstanceResult {
    */
   synthReproBaseRed?: boolean
   /**
+   * jun-30 SOTA++ — which acceptance rerank tier chose the submitted patch
+   * (`repro_and_regression` | `regression_only` | `all_patches` | `none`). Set only
+   * when the `acceptance` opt-in routed selection through the ladder; absent on
+   * legacy validator-rank (byte-identical). Drives `acceptance_tier_distribution` —
+   * `all_patches` dominance means the oracle gave NO real selection signal (the
+   * thin-oracle inert case the synthesis arm must detect before trusting a delta).
+   */
+  acceptanceTier?: import("./eval/acceptance-rerank").RerankTier
+  /**
    * T-6 — patch touched files outside the admitted owner set. Telemetry-first:
    * exact diff fact only, never a semantic width judgment.
    */

@@ -84,6 +84,30 @@ export interface AcceptanceResult {
 }
 
 /**
+ * jun-30 SOTA++ — OBSERVE-ONLY selection telemetry for the operator readout. The
+ * single fact that tells whether the acceptance ladder did real work: `tier`. On a
+ * thin oracle (F2P median 1) a `regression_only`/`repro_and_regression` tier means
+ * an oracle actually filtered candidates; `all_patches` means the ladder fell
+ * through to a pure majority vote (NO real selection — the synthesis arm is inert
+ * for that round). Carries no patch content (no-leak). Emitted via an injected
+ * callback so the deterministic selection path is never perturbed.
+ */
+export interface AcceptanceSelectionTelemetry {
+  /** Which rerank tier produced the winner. */
+  readonly tier: RerankResult["tier"]
+  /** The winning patch's vote count. */
+  readonly votes: number
+  /** How many candidates the selector scored this round. */
+  readonly candidateCount: number
+  /** True iff an injected LLM soft-rerank overrode the deterministic winner. */
+  readonly llmOverrode: boolean
+}
+
+/** OBSERVE-ONLY sink for {@link AcceptanceSelectionTelemetry}. Wrapped in a swallow
+ *  at the call site (a telemetry write must never sink a repair round). */
+export type AcceptanceSelectionObserver = (t: AcceptanceSelectionTelemetry) => void
+
+/**
  * Optional LLM soft-reranker. Given the ADMISSIBLE scored candidates (the tier
  * survivors — never the full pool, so it cannot resurrect an inadmissible patch),
  * returns the chosen candidate's `index` (into the full `scored` array) or null to

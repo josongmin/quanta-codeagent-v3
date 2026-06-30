@@ -255,4 +255,39 @@ describe("computeClosureDiagnostics", () => {
       expect(d6.metrics.repro_red_but_unresolved_rate!.available).toBe(false)
     })
   })
+
+  describe("acceptance tier distribution (jun-30 SOTA++ selection-observable)", () => {
+    test("rates are over acceptance-ROUTED runs only; legacy runs excluded from n", () => {
+      const d = computeClosureDiagnostics(
+        [
+          // 4 acceptance-routed runs: 2 inert (all_patches), 1 dual-guard, 1 regression-only
+          fact({ instanceId: "a", patchFiles: ["x.py"], acceptanceTier: "all_patches" }),
+          fact({ instanceId: "b", patchFiles: ["x.py"], acceptanceTier: "all_patches" }),
+          fact({ instanceId: "c", patchFiles: ["x.py"], acceptanceTier: "repro_and_regression" }),
+          fact({ instanceId: "d", patchFiles: ["x.py"], acceptanceTier: "regression_only" }),
+          // legacy validator-rank run: acceptanceTier absent ⇒ MUST be excluded (null)
+          fact({ instanceId: "legacy", patchFiles: ["x.py"] }),
+        ],
+        new Map(),
+      )
+      const all = d.metrics.acceptance_tier_all_patches_rate
+      expect(all!.available).toBe(true)
+      expect(all!.n).toBe(4) // denominator excludes the legacy run, NOT 5
+      expect(all!.value).toBeCloseTo(2 / 4) // the inert-acceptance canary
+      expect(d.metrics.acceptance_tier_regression_only_rate!.value).toBeCloseTo(1 / 4)
+      expect(d.metrics.acceptance_tier_repro_and_regression_rate!.value).toBeCloseTo(1 / 4)
+      expect(d.metrics.acceptance_tier_none_rate!.value).toBeCloseTo(0)
+    })
+
+    test("unavailable (null, never invented) when NO run routed through acceptance", () => {
+      const d = computeClosureDiagnostics(
+        [fact({ instanceId: "legacy", patchFiles: ["x.py"] })],
+        new Map(),
+      )
+      // Revert-proof: mapping legacy (null tier) to `false` instead of `null` would
+      // make this available=true with value 0 — falsely implying acceptance ran.
+      expect(d.metrics.acceptance_tier_all_patches_rate!.available).toBe(false)
+      expect(d.metrics.acceptance_tier_all_patches_rate!.value).toBeNull()
+    })
+  })
 })

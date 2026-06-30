@@ -10,7 +10,10 @@
 
 import { describe, expect, test } from "bun:test"
 import { buildAcceptanceSelector } from "../../src/runner/batch/eval/acceptance-adapter"
-import type { AcceptanceOracles } from "../../src/runner/batch/eval/acceptance-select"
+import type {
+  AcceptanceOracles,
+  AcceptanceSelectionTelemetry,
+} from "../../src/runner/batch/eval/acceptance-select"
 import type { RepairCandidateOutcome } from "../../src/runner/batch/eval/repair/types"
 
 const outcome = (
@@ -86,5 +89,62 @@ describe("buildAcceptanceSelector — RepairCandidateOutcome bridge", () => {
     await expect(buildAcceptanceSelector({ runRepro: async () => true })([])).rejects.toThrow(
       "empty candidate list",
     )
+  })
+})
+
+describe("buildAcceptanceSelector — onSelection tier telemetry (observe-only)", () => {
+  test("emits the DUAL-GUARD tier when both oracles filter (repro + regression)", async () => {
+    // repro+regression present, P2 alone passes both ⇒ tier-1 selection did REAL work.
+    const oracles: AcceptanceOracles = {
+      runRepro: async (c) => c.patch === "P2",
+      runRegression: async () => 0,
+    }
+    let seen: AcceptanceSelectionTelemetry | undefined
+    const winner = await buildAcceptanceSelector(oracles, undefined, undefined, (t) => {
+      seen = t
+    })([outcome("P1"), outcome("P2"), outcome("P3")])
+    expect(winner.run.patch).toBe("P2")
+    expect(seen).toEqual({
+      tier: "repro_and_regression",
+      votes: 1,
+      candidateCount: 3,
+      llmOverrode: false,
+    })
+    // Revert-proof: dropping the onSelection call would leave `seen` undefined.
+  })
+
+  test("emits all_patches (the INERT canary) when NO oracle is available", async () => {
+    // No oracles ⇒ ladder falls through to a pure vote ⇒ tier-3 = no real selection.
+    let seen: AcceptanceSelectionTelemetry | undefined
+    await buildAcceptanceSelector({}, undefined, undefined, (t) => {
+      seen = t
+    })([outcome("A"), outcome("B")])
+    expect(seen?.tier).toBe("all_patches")
+    // Revert-proof: if the adapter passed `opts.reproduction` true when no oracle was
+    // wired, this would mis-report a working tier instead of the inert canary.
+  })
+
+  test("emits regression_only when only the regression oracle is wired", async () => {
+    let seen: AcceptanceSelectionTelemetry | undefined
+    await buildAcceptanceSelector({ runRegression: async () => 0 }, undefined, undefined, (t) => {
+      seen = t
+    })([outcome("A"), outcome("B")])
+    expect(seen?.tier).toBe("regression_only")
+  })
+
+  test("a THROWING onSelection sink never sinks the round (swallowed)", async () => {
+    // observe-only contract: telemetry failure must not crash the repair round.
+    const cands = [outcome("A"), outcome("B")]
+    const winner = await buildAcceptanceSelector({ runRepro: async () => true }, undefined, undefined, () => {
+      throw new Error("telemetry sink boom")
+    })(cands)
+    expect(cands.includes(winner)).toBe(true) // selection survived the throwing sink
+  })
+
+  test("absent onSelection ⇒ byte-identical (no telemetry, winner unchanged)", async () => {
+    // Default-OFF fence: the legacy 3-arg call shape still selects identically.
+    const cands = [outcome("A"), outcome("B")]
+    const winner = await buildAcceptanceSelector({ runRepro: async (c) => c.patch === "B" })(cands)
+    expect(winner.run.patch).toBe("B")
   })
 })

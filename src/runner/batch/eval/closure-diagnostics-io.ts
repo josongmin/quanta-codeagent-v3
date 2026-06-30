@@ -108,6 +108,7 @@ const telemetryFieldsOf = (
   gateBypassed: r.gateBypassed ?? null,
   verifyRounds: r.verifyRounds ?? null,
   synthReproBaseRed: r.synthReproBaseRed ?? null,
+  acceptanceTier: r.acceptanceTier ?? null,
   outOfScopeFiles: r.outOfScopeFiles ?? null,
 })
 
@@ -176,6 +177,11 @@ const SUMMARY_METRICS = [
   "multi_file_partial_overlap_rate",
   "synth_repro_base_red_rate",
   "repro_red_but_unresolved_rate",
+  // jun-30 SOTA++ — the inert-acceptance canary: high `all_patches` among
+  // acceptance-routed runs ⇒ the rerank ladder fell through to a pure vote (no
+  // real selection). "na" when the acceptance opt-in never routed selection.
+  "acceptance_tier_all_patches_rate",
+  "acceptance_tier_regression_only_rate",
 ] as const
 
 const formatSummaryMetric = (metric: ClosureMetric | undefined): string => {

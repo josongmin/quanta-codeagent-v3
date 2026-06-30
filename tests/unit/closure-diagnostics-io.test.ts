@@ -212,6 +212,10 @@ describe("closure-diagnostics-io", () => {
         "multi_file_partial_overlap_rate=1.000(n=3)",
         "synth_repro_base_red_rate=0.250(n=4)",
         "repro_red_but_unresolved_rate=1.000(n=1)",
+        // jun-30 SOTA++ — acceptance tier canaries: "na" here because this fixture
+        // never routed selection through the rerank ladder (no acceptanceTier facts).
+        "acceptance_tier_all_patches_rate=na",
+        "acceptance_tier_regression_only_rate=na",
       ].join(" "),
     )
   })

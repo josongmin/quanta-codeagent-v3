@@ -111,7 +111,8 @@ import type {
   ReproOracleCalibration,
 } from "../types"
 import { buildLlmRerankFromPort, resolveLlmSelectMode } from "./acceptance-llm-rerank-wire"
-import type { AcceptanceLlmRerank } from "./acceptance-select"
+import type { AcceptanceLlmRerank, AcceptanceSelectionObserver } from "./acceptance-select"
+import type { RerankTier } from "./acceptance-rerank"
 import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
 import {
   ADAPTIVE_ACTIONS,
@@ -3027,6 +3028,10 @@ interface Phase {
   primaryFalseRed?: boolean
   /** jun-28 A2 — final repair-gate authority decision (observe-only). */
   repairValidationDecision?: import("./repair/decision").ValidationDecision
+  /** jun-30 SOTA++ — winning acceptance rerank tier (observe-only). Set only when
+   *  the `acceptance` opt-in routed selection through the ladder; undefined on
+   *  legacy validator-rank. `all_patches` ⇒ the oracle gave no real selection. */
+  acceptanceTier?: RerankTier
   /** Number of repair/verify rounds consumed when verify-first ran. */
   verifyRounds?: number
   /** jun-20 — repro-oracle gold calibration for this verify-select run (eval-only
@@ -3435,6 +3440,9 @@ export const makeAcceptanceSelectCandidates = (
    *  knobs, `QUANTA_BENCH_LLM_SELECT`). Absent ⇒ deterministic vote only
    *  (byte-identical). Never-veto / fail-open (see acceptance-select). */
   llmRerank?: AcceptanceLlmRerank,
+  /** OPTIONAL observe-only tier-readout sink — called per repair round with the
+   *  winning rerank tier (operator selection telemetry). Absent ⇒ no telemetry. */
+  onSelection?: AcceptanceSelectionObserver,
 ) =>
   buildReproAcceptanceSelector(enabled, reproSources, {
     withCandidatePatch: (patch, probe) =>
@@ -3477,6 +3485,7 @@ export const makeAcceptanceSelectCandidates = (
           },
         }
       : {}),
+    ...(onSelection !== undefined ? { onSelection } : {}),
   })
 
 /**
@@ -3959,6 +3968,10 @@ const runRepairPhase = async (
   // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
   // reproducing set and the owner-near PUBLIC regression set that was confirmed
   // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
+  // OBSERVE-ONLY: capture the LAST round's winning tier for the operator readout
+  // (the final round chose the submitted patch). tier-3 dominance on Pro ⇒ the
+  // acceptance ladder gave no real selection signal (thin-oracle inert).
+  let acceptanceTier: RerankTier | undefined
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
@@ -3967,6 +3980,9 @@ const runRepairPhase = async (
     repairPosture.acceptance,
     ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
+    (t) => {
+      acceptanceTier = t.tier
+    },
   )
   const { patch, out } = await runRepairRoundsInSnapshot({
     instance,
@@ -4020,6 +4036,7 @@ const runRepairPhase = async (
     ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
     ...(submissionReview !== undefined ? { submissionReview } : {}),
+    ...(acceptanceTier !== undefined ? { acceptanceTier } : {}),
   }
 }
 
@@ -6294,6 +6311,9 @@ const attachRepairGateMetrics = (args: {
   if (args.phase.verifyRounds !== undefined) args.extra.verifyRounds = args.phase.verifyRounds
   if (args.phase.repairValidationDecision !== undefined) {
     args.extra.repairValidationDecision = args.phase.repairValidationDecision
+  }
+  if (args.phase.acceptanceTier !== undefined) {
+    args.extra.acceptanceTier = args.phase.acceptanceTier
   }
 }
 

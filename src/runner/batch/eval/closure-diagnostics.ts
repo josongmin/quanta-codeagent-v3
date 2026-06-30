@@ -55,6 +55,9 @@ export interface ClosureRunFact {
   gateBypassed?: boolean | null
   verifyRounds?: number | null
   synthReproBaseRed?: boolean | null
+  /** jun-30 SOTA++ — winning acceptance rerank tier (observe-only). null ⇒ legacy
+   *  validator-rank (acceptance opt-in off / no candidates routed through ladder). */
+  acceptanceTier?: import("./acceptance-rerank").RerankTier | null
   primaryRailPresent?: boolean | null
   primaryFalseGreen?: boolean | null
   primaryFalseRed?: boolean | null
@@ -258,6 +261,19 @@ export const computeClosureDiagnostics = (
     verify_rounds_per_run: metricOf(facts.map((f) => f.verifyRounds)),
     synth_repro_base_red_rate: metricOf(facts.map((f) => f.synthReproBaseRed)),
     out_of_scope_file_rate: metricOf(facts.map((f) => f.outOfScopeFiles)),
+    // jun-30 SOTA++ acceptance tier DISTRIBUTION — each rate's denominator (n) is
+    // the runs whose selection routed through the rerank ladder (acceptanceTier !=
+    // null); legacy validator-rank runs map to null ⇒ excluded. `all_patches`
+    // dominance ⇒ the oracle gave no real selection signal (thin-oracle inert).
+    ...Object.fromEntries(
+      (["repro_and_regression", "regression_only", "all_patches", "none"] as const).map(
+        (tier) =>
+          [
+            `acceptance_tier_${tier}_rate`,
+            metricOf(facts.map((f) => (f.acceptanceTier == null ? null : f.acceptanceTier === tier))),
+          ] as const,
+      ),
+    ),
   }
 
   return { total: facts.length, metrics, perInstance }
