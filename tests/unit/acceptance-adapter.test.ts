@@ -10,9 +10,10 @@
 
 import { describe, expect, test } from "bun:test"
 import { buildAcceptanceSelector } from "../../src/runner/batch/eval/acceptance-adapter"
-import type {
-  AcceptanceOracles,
-  AcceptanceSelectionTelemetry,
+import {
+  type AcceptanceOracles,
+  type AcceptanceSelectionTelemetry,
+  attributeAcceptanceTier,
 } from "../../src/runner/batch/eval/acceptance-select"
 import type { RepairCandidateOutcome } from "../../src/runner/batch/eval/repair/types"
 
@@ -109,6 +110,7 @@ describe("buildAcceptanceSelector — onSelection tier telemetry (observe-only)"
       votes: 1,
       candidateCount: 3,
       llmOverrode: false,
+      winningPatch: "P2",
     })
     // Revert-proof: dropping the onSelection call would leave `seen` undefined.
   })
@@ -146,5 +148,30 @@ describe("buildAcceptanceSelector — onSelection tier telemetry (observe-only)"
     const cands = [outcome("A"), outcome("B")]
     const winner = await buildAcceptanceSelector({ runRepro: async (c) => c.patch === "B" })(cands)
     expect(winner.run.patch).toBe("B")
+  })
+})
+
+describe("attributeAcceptanceTier — staleness guard (submitted-patch correlation)", () => {
+  test("attributes the tier when the last selection's winner IS the submitted patch", () => {
+    const tier = attributeAcceptanceTier(
+      { tier: "regression_only", winningPatch: "FINAL" },
+      "FINAL",
+    )
+    expect(tier).toBe("regression_only")
+  })
+
+  test("does NOT attribute when a trailing fallback changed the submitted patch", () => {
+    // The bug this guards: round N selected (tier set), round N+1 fell back to a
+    // non-selected runOnce patch ⇒ submitted patch ≠ last selection's winner ⇒ the
+    // stale tier must NOT be attributed to a patch acceptance never chose.
+    const tier = attributeAcceptanceTier(
+      { tier: "repro_and_regression", winningPatch: "ROUND_N_WINNER" },
+      "FALLBACK_RUNONCE_PATCH",
+    )
+    expect(tier).toBeUndefined()
+  })
+
+  test("no selection ran (breadth=1 / acceptance off) ⇒ undefined", () => {
+    expect(attributeAcceptanceTier(undefined, "ANY")).toBeUndefined()
   })
 })

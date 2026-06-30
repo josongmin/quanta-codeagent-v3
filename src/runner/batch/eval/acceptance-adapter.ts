@@ -112,6 +112,7 @@ export const buildAcceptanceSelector = (
           votes: selected.votes,
           candidateCount: accCandidates.length,
           llmOverrode: llmChosenIndex !== undefined,
+          winningPatch: selected.patch,
         })
       } catch {
         /* observe-only: a telemetry throw never perturbs selection */

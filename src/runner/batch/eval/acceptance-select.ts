@@ -101,11 +101,32 @@ export interface AcceptanceSelectionTelemetry {
   readonly candidateCount: number
   /** True iff an injected LLM soft-rerank overrode the deterministic winner. */
   readonly llmOverrode: boolean
+  /** The selected winner's patch. IN-PROCESS CORRELATION ONLY — the consumer uses
+   *  it to confirm THIS selection produced the finally-submitted patch (a later
+   *  repair round may fall back to a non-selected patch, in which case this round's
+   *  tier must NOT be attributed). NEVER serialized; only {@link tier} is persisted. */
+  readonly winningPatch: string
 }
 
 /** OBSERVE-ONLY sink for {@link AcceptanceSelectionTelemetry}. Wrapped in a swallow
  *  at the call site (a telemetry write must never sink a repair round). */
 export type AcceptanceSelectionObserver = (t: AcceptanceSelectionTelemetry) => void
+
+/**
+ * Attribute an acceptance tier to a repair run ONLY when the last selection's
+ * winner is the finally-submitted patch. Guards the last-wins staleness trap: a
+ * trailing repair round that falls back to a non-selected `runOnce` patch leaves a
+ * stale tier whose patch no longer matches the submission ⇒ no attribution.
+ *
+ * @param last the last acceptance selection (tier + its winning patch), or undefined
+ *   if no selection ran (breadth=1 / acceptance off / all rounds fell back).
+ * @param submittedPatch the run's final submitted patch (orchestrator `out.patch`).
+ */
+export const attributeAcceptanceTier = (
+  last: { readonly tier: RerankResult["tier"]; readonly winningPatch: string } | undefined,
+  submittedPatch: string,
+): RerankResult["tier"] | undefined =>
+  last !== undefined && last.winningPatch === submittedPatch ? last.tier : undefined
 
 /**
  * Optional LLM soft-reranker. Given the ADMISSIBLE scored candidates (the tier

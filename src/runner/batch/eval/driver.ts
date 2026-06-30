@@ -111,7 +111,11 @@ import type {
   ReproOracleCalibration,
 } from "../types"
 import { buildLlmRerankFromPort, resolveLlmSelectMode } from "./acceptance-llm-rerank-wire"
-import type { AcceptanceLlmRerank, AcceptanceSelectionObserver } from "./acceptance-select"
+import {
+  type AcceptanceLlmRerank,
+  type AcceptanceSelectionObserver,
+  attributeAcceptanceTier,
+} from "./acceptance-select"
 import type { RerankTier } from "./acceptance-rerank"
 import { buildReproAcceptanceSelector, regressionFailureCount } from "./acceptance-selector"
 import {
@@ -3968,10 +3972,13 @@ const runRepairPhase = async (
   // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
   // reproducing set and the owner-near PUBLIC regression set that was confirmed
   // green on the base tree during preparation. Empty set ⇒ repro-only legacy.
-  // OBSERVE-ONLY: capture the LAST round's winning tier for the operator readout
-  // (the final round chose the submitted patch). tier-3 dominance on Pro ⇒ the
-  // acceptance ladder gave no real selection signal (thin-oracle inert).
-  let acceptanceTier: RerankTier | undefined
+  // OBSERVE-ONLY: capture the last acceptance selection (tier + its winning patch).
+  // We do NOT blindly trust last-wins: a later repair round can fall back to a
+  // NON-selected `runOnce` patch (breadth fan-out fully failed), which would leave
+  // a STALE tier attributed to a patch acceptance never chose. After the loop we
+  // emit the tier ONLY if this selection's winner is the finally-submitted patch
+  // (`out.patch`). tier-3 dominance on Pro ⇒ the ladder gave no real selection.
+  let lastAcceptanceSelection: { tier: RerankTier; winningPatch: string } | undefined
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
@@ -3981,7 +3988,7 @@ const runRepairPhase = async (
     ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
     (t) => {
-      acceptanceTier = t.tier
+      lastAcceptanceSelection = { tier: t.tier, winningPatch: t.winningPatch }
     },
   )
   const { patch, out } = await runRepairRoundsInSnapshot({
@@ -4024,6 +4031,7 @@ const runRepairPhase = async (
   // the orchestrator's last-round view. They agree by construction (single sandbox).
   const capturedPatch = patch !== "" ? patch : out.patch
   const submissionReview = maybeReviewSubmission(capturedPatch)
+  const acceptanceTier = attributeAcceptanceTier(lastAcceptanceSelection, out.patch)
   return {
     patch: capturedPatch,
     turns: out.turns,
@@ -4036,6 +4044,10 @@ const runRepairPhase = async (
     ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
     ...(submissionReview !== undefined ? { submissionReview } : {}),
+    // Attribute the tier ONLY when the last selection's winner IS the submitted
+    // patch (`out.patch` = orchestrator final `prevRun.patch`, same string lineage
+    // as the adapter's `selected.patch`). A trailing non-selected fallback round
+    // changes `out.patch` ⇒ no attribution. Pure seam ⇒ unit-tested.
     ...(acceptanceTier !== undefined ? { acceptanceTier } : {}),
   }
 }
@@ -6312,9 +6324,6 @@ const attachRepairGateMetrics = (args: {
   if (args.phase.repairValidationDecision !== undefined) {
     args.extra.repairValidationDecision = args.phase.repairValidationDecision
   }
-  if (args.phase.acceptanceTier !== undefined) {
-    args.extra.acceptanceTier = args.phase.acceptanceTier
-  }
 }
 
 const attachClosureMetrics = (args: {
@@ -6327,6 +6336,13 @@ const attachClosureMetrics = (args: {
   attachLspClosureMetric(args.extra, args.prepared.lspGrounding)
   attachPrimaryRailMetrics(args)
   attachRepairGateMetrics(args)
+  // OBSERVE-ONLY acceptance tier — UNCONDITIONAL (not behind repairGateEligible):
+  // it is selection telemetry, not a gate decision, so it must surface for any
+  // repair run that routed through the rerank ladder (e.g. non-`full`/non-swebench
+  // modes too), not only gate-eligible ones. Absent ⇒ omitted (byte-identical).
+  if (args.phase.acceptanceTier !== undefined) {
+    args.extra.acceptanceTier = args.phase.acceptanceTier
+  }
 }
 
 const attachLlmEvidenceArtifacts = (args: {
