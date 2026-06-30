@@ -173,7 +173,11 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     agentTool,
     taskOutputTool,
     createTaskStopTool(reg),
-    ...workflowTools(config.subagent.enableWorkflow === true, runner, config.subagent.activityStore),
+    ...workflowTools(
+      config.subagent.enableWorkflow === true,
+      runner,
+      config.subagent.activityStore,
+    ),
     // GAP7-4 — `spawn_agents_on_csv` over the SAME runner (one child per CSV row,
     // ephemeral in-memory store). Default-OFF (QUANTA_SPAWN_AGENTS_CSV).
     ...(config.subagent.enableSpawnAgentsCsv === true
@@ -230,7 +234,6 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     // off (subagent6Cleanup is undefined).
     subagent6Cleanup?.()
     const ids = reg.pendingIds()
-    if (ids.length === 0) return
     // S17: host-side cleanup uses `forceStop` — not the token-gated `stop`.
     // The session owner has the authority to cancel ALL pending tasks at
     // shutdown regardless of who minted them; per-task owner tokens are
@@ -240,6 +243,13 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     // already-settled tasks, so this is bounded by the slowest in-flight
     // runner observing the abort and unwinding.
     await Promise.all(ids.map((id) => reg.waitForSettle(id)))
+    // `forceStop` resolves the settler SYNCHRONOUSLY, so the await above can
+    // return while the fire-and-forget child-runner promises are still
+    // unwinding. Drain those tracked promises too so teardown is deterministic
+    // (no child work outlives cleanup). Resolves immediately when none are in
+    // flight — keeps the no-pending fast path bounded. drainRunners never
+    // rejects (each tracked chain is rejection-swallowed).
+    await reg.drainRunners()
   }
   // B2/B3 — surface the 6-tool-only knobs for a `Subagent6Deps` assembler.
   // Conditional-spread so absent config fields ⇒ `{}` (the consumer falls back
