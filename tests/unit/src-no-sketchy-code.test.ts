@@ -94,6 +94,8 @@ const RULES: readonly Rule[] = [
         "BOX-SIDE prelaunch entrypoint (`bun run resume-launch.ts`) — reads QUANTA_BENCH_INSTANCE_ID at launch and threads `process.env` into `prepareResume(env, id)` (which reads off the param); composition-root posture same as apps/bench/index.ts. Downstream gets the resolved replay env.",
       "runner/batch/eval/sandbox.ts":
         "Bench-only opt-in resume gate (QUANTA_BENCH_RESUME) read inline at the deterministic-sandbox-path decision (the file documents it is intentionally inline, owned elsewhere — not a config module); same bench-only opt-in env-gate posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/repro-adapter.ts":
+        "Bench-only opt-in gate (QUANTA_BENCH_REPRO_IMAGE_EXEC, RFC jun-29-repro-adapter-polyglot Phase 2b — DEFERRED/default-OFF, byte-identical when unset) read inline at the repro exec-backend decision; same bench-only opt-in env-gate posture as runner/batch/eval/driver.ts + sandbox.ts.",
       "lsp/server-rss-watchdog.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param; the RSS-watchdog reads its budget gate off that param, tests pass a fake env. Same DI-boundary posture as lsp/server-mem-budget.ts.",
       "apps/eval/index.ts": "eval CLI bootstraps env BEFORE other modules read it (mirrors bench)",
