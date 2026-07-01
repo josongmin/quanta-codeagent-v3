@@ -28,6 +28,7 @@
  */
 
 import { createActivityStore } from "@/activity"
+import { buildSystemPrompt } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import { bootstrapSession } from "@/host/bootstrap"
@@ -55,6 +56,17 @@ const TERMINAL_BRAIN_SESSION_ID = "terminal-brain-session"
  *  inspects the trajectory for an end-to-end exercise of the deliverable and, if none is found,
  *  injects EXACTLY ONE bounded follow-up turn, then stamps an honest verification trichotomy. */
 export const TB_VERIFY_GATE_ENV = "QUANTA_TB_VERIFY_GATE"
+
+/** Lever #1 knob (RFC `jul-2-terminal-bench-levers/01`): the environment posture.
+ *  DEFAULT-OFF ⇒ byte-identical today (the brain's system prompt keeps the frozen
+ *  SWE-bench env guardrails — R-ENV / R-STOP-ENV). When ON, the brain rebuilds its
+ *  SYSTEM prompt with the `owned` posture (install/configure/build freely — a working
+ *  environment IS the deliverable), which the install-gated Terminal-Bench tasks need.
+ *  PROMPT-TEXT-ONLY: this swaps rendered rule text via `boot.systemSource`; it does NOT
+ *  set any `SandboxMode` / `SandboxPolicy` and does NOT loosen host enforcement — the
+ *  brain's tools stay `container_exec` / `pty_*` over the duplex (the container is the
+ *  isolation boundary). */
+export const TB_ENV_OWNED_ENV = "QUANTA_TB_ENV_OWNED"
 
 /** The single bounded follow-up nudge. References ONLY the task's own success criterion — never a
  *  hidden test / answer key (honors `no-answer-key-regex-heuristics`). Fired AT MOST ONCE. */
@@ -298,6 +310,21 @@ export const runTerminalBrain = async (
     if (opts.signal) {
       if (opts.signal.aborted) boot.abort.abort()
       else opts.signal.addEventListener("abort", () => boot.abort.abort(), { once: true })
+    }
+
+    // ── Lever #1: environment posture (default-OFF ⇒ this block is skipped, brain byte-identical) ──
+    // PROMPT-TEXT-ONLY (RFC jul-2 §Design): when `QUANTA_TB_ENV_OWNED` is ON, rebuild the SYSTEM
+    // prompt with the `owned` posture and publish it through `boot.systemSource` (the same mutable
+    // seam `refreshSystemPrompt` uses for identity swaps; the turn assembler reads `systemSource.get()`
+    // every turn). This swaps ONLY the rendered env-rule TEXT (drops R-ENV / R-STOP-ENV, adds
+    // R-ENV-OWNED / R-INSTALL-THRASH) — it sets NO SandboxMode / SandboxPolicy and does NOT touch host
+    // enforcement. The rebuild mirrors bootstrap's own frozen build for this surface exactly (persona
+    // "default", no identity, QUANTA_IDENTITY unset ⇒ the `buildSystemPrompt(cwd,{persona})` branch),
+    // so the ONLY delta vs the frozen prompt is the env-rule list.
+    if (gateOn(opts.env ?? {}, TB_ENV_OWNED_ENV)) {
+      boot.systemSource.set(
+        buildSystemPrompt(boot.cwd, { persona: "default", envPosture: "owned" }),
+      )
     }
     const { runtime: facade } = await createRuntimeFromBootstrap({
       boot,

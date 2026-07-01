@@ -104,3 +104,79 @@ export const CORE_RULES: readonly PromptRule[] = [
     ],
   },
 ]
+
+/** Look up a {@link CORE_RULES} entry by ID (build-time — throws if a rename ever
+ *  drops a rule {@link OWNED_RULES} reuses, so the two lists cannot silently drift). */
+const coreRule = (id: string): PromptRule => {
+  const rule = CORE_RULES.find((r) => r.id === id)
+  if (rule === undefined) throw new Error(`core rule "${id}" not found (OWNED_RULES references it)`)
+  return rule
+}
+
+/**
+ * `owned` environment posture (RFC jul-2-terminal-bench-levers/01) — the PARALLEL
+ * rule list used when a surface OWNS its container (the Terminal brain, Terminal-Bench).
+ *
+ * Prompt-TEXT-ONLY: this selects what the model is TOLD, never any runtime enforcement
+ * (`SandboxPolicy` / `os-sandbox` are untouched by construction — this is a string list).
+ *
+ * Relationship to {@link CORE_RULES} (`frozen`, the DEFAULT for every existing surface):
+ *   - REUSES the four universal rules verbatim (same object references, so a wording
+ *     change to a shared rule updates both lists at once — no drift): R-SEARCH-FIRST,
+ *     R-READ-FAILURE, R-NO-THRASH, R-FAILURE-MODE.
+ *   - DROPS R-ENV / R-STOP-ENV (the frozen "do not install / stop when env-blocked"
+ *     guardrails that are WRONG on an owned box where a working env IS the deliverable).
+ *   - REPLACES R-NO-SHIM with a diff-integrity-only shim rule ({@link R_NO_SHIM_OWNED}):
+ *     keeps the ban on stub/mock files that only silence import errors, but WITHOUT the
+ *     frozen "missing dep ⇒ declare env unavailable and stop" tail (on an owned box the
+ *     answer to a missing dep is to install it, not to stop).
+ *   - ADDS R-ENV-OWNED (install/configure/build freely; a working env is the deliverable)
+ *     and R-INSTALL-THRASH (diagnose a failed install before retrying — the install-scoped
+ *     analogue of the edit-scoped R-NO-THRASH).
+ */
+const R_ENV_OWNED: PromptRule = {
+  id: "R-ENV-OWNED",
+  lines: [
+    "- [R-ENV-OWNED] You own this environment. Install dependencies, configure",
+    "  services, and build tooling as needed (pip/apt/npm/cargo/…). A working",
+    "  environment IS part of the deliverable, not an obstacle. Prefer non-interactive",
+    "  flags; re-probe after installing; a clean exit code on the verifying command is",
+    "  the proof.",
+  ],
+}
+
+const R_INSTALL_THRASH: PromptRule = {
+  id: "R-INSTALL-THRASH",
+  lines: [
+    "- [R-INSTALL-THRASH] If an install or build fails, read the error and diagnose",
+    "  (wrong package name, missing index, missing build dep, permissions) before",
+    "  retrying — do not re-run the same install command unchanged.",
+  ],
+}
+
+/** Diff-integrity-only variant of R-NO-SHIM: the shim/stub ban stays, but the frozen
+ *  "declare the environment unavailable and stop" tail is removed (on an owned box the
+ *  fix for a missing dependency is to install it, not to stop). */
+const R_NO_SHIM_OWNED: PromptRule = {
+  id: "R-NO-SHIM",
+  lines: [
+    "- [R-NO-SHIM] Do NOT create stub/mock/shim files (e.g. a fake `toml.py`,",
+    "  `pytest.py`, or an empty package) to bypass a missing dependency or to",
+    "  force a test to pass. Files that exist only to silence an import error are",
+    "  not part of the fix and corrupt the diff — install/configure the real",
+    "  dependency instead.",
+  ],
+}
+
+/** The `owned` posture rule list — see {@link R_ENV_OWNED} for the full rationale.
+ *  Order mirrors the frozen list's universal-rule ordering; the owned-specific rules
+ *  ride at the end so the shared honesty rails read first. */
+export const OWNED_RULES: readonly PromptRule[] = [
+  coreRule("R-SEARCH-FIRST"),
+  coreRule("R-READ-FAILURE"),
+  coreRule("R-NO-THRASH"),
+  coreRule("R-FAILURE-MODE"),
+  R_NO_SHIM_OWNED,
+  R_ENV_OWNED,
+  R_INSTALL_THRASH,
+]

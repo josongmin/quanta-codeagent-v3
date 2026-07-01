@@ -597,4 +597,21 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "Terminal-Bench verify-before-finalize gate (opt-in). Inspects the trajectory for an end-to-end exercise of the deliverable (container_exec ran+observed OR pty_* drove+observed); if none, injects EXACTLY ONE bounded follow-up turn, then stamps an honest verified-pass/verified-fail/unverifiable trichotomy on the report. Cannot loop / over-persist.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain verify-before-finalize gate)",
   },
+  // Terminal-Bench lever #1 (RFC jul-2-terminal-bench-levers/01) — the ENVIRONMENT POSTURE.
+  // AGENT-SIDE read via `gateOn(env, "QUANTA_TB_ENV_OWNED")` in `apps/terminal/brain-mode.ts` (a
+  // terminal-surface gate, NOT a CLI-render knob — lives HERE per the read-site-domain ratchet).
+  // Default-OFF: absent ⇒ the brain keeps the frozen SWE-bench env guardrails (R-ENV / R-STOP-ENV)
+  // ⇒ byte-identical to the pre-lever brain. PROMPT-TEXT-ONLY: when ON it swaps the rendered env
+  // rule list via `boot.systemSource`; it sets NO SandboxMode / SandboxPolicy and does NOT loosen
+  // host enforcement.
+  {
+    envKey: "QUANTA_TB_ENV_OWNED",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "Terminal-Bench environment posture (opt-in). When ON, the terminal brain rebuilds its SYSTEM prompt with the `owned` posture — install/configure/build freely (a working environment IS the deliverable), dropping the frozen R-ENV/R-STOP-ENV install-prohibition and adding R-ENV-OWNED/R-INSTALL-THRASH. PROMPT-TEXT-ONLY: swaps rendered rule text via boot.systemSource; touches NO SandboxPolicy/os-sandbox/host enforcement. Off ⇒ byte-identical (frozen) brain.",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain env-posture systemSource swap)",
+  },
 ]

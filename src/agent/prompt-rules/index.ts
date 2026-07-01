@@ -18,7 +18,7 @@
 
 import { ASSISTANT_PACK } from "./assistant"
 import { BENCHMARK_PACK } from "./benchmark"
-import type { PromptRule } from "./core"
+import { OWNED_RULES, type PromptRule } from "./core"
 import { PR_AGENT_PACK } from "./pr-agent"
 import { TASK_RUNNER_PACK } from "./task-runner"
 
@@ -64,9 +64,17 @@ export const renderPackByMode = (mode: AgentMode): readonly string[] => {
  *  for interactive sessions never shifts. */
 export const renderToolUseRules = (): readonly string[] => renderPackByMode("interactive")
 
+/** Render the `owned` environment posture rule list (RFC jul-2-terminal-bench-levers/01)
+ *  — flattened to the same line-array shape `renderPackByMode` returns so the prompt
+ *  builder can splice it at the identical seam. PROMPT-TEXT-ONLY: this is the `owned`
+ *  posture's replacement for the CORE-based rules; it drops R-ENV / R-STOP-ENV and the
+ *  R-NO-SHIM stop-tail, and adds R-ENV-OWNED / R-INSTALL-THRASH. Never touches runtime
+ *  enforcement. `frozen` callers never reach this path. */
+export const renderOwnedRules = (): readonly string[] => OWNED_RULES.flatMap((r) => r.lines)
+
 export { ASSISTANT_PACK } from "./assistant"
 export { BENCHMARK_PACK } from "./benchmark"
-export { CORE_RULES } from "./core"
+export { CORE_RULES, OWNED_RULES } from "./core"
 export { PR_AGENT_PACK } from "./pr-agent"
 export { TASK_RUNNER_PACK } from "./task-runner"
 export type { PromptRule }

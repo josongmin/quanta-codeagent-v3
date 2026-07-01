@@ -17,7 +17,7 @@
  */
 
 import type { PersonaKind } from "../persona"
-import { buildSystemPrompt } from "../prompt"
+import { buildSystemPrompt, type EnvironmentPosture } from "../prompt"
 import type { AgentMode as PromptPackMode } from "../prompt-rules"
 import { DEFAULT_MODE_VARIANTS, UNKNOWN_MODE_VARIANT } from "./mode-variants"
 import {
@@ -78,6 +78,10 @@ export interface BuildSystemPromptForModeOpts {
   readonly registry?: SystemPromptVariantRegistry
   readonly persona?: PersonaKind
   readonly promptPack?: PromptPackMode
+  /** Environment posture (RFC jul-2) — a SEPARATE axis from `mode` (which is the
+   *  task-posture `ModeVariantKey`). Forwarded verbatim to `buildSystemPrompt`.
+   *  Absent / `"frozen"` ⇒ byte-identical to today. Prompt-text-only. */
+  readonly envPosture?: EnvironmentPosture
 }
 
 /** Build a mode-aware system prompt. Resolves the variant for `mode` via the
@@ -97,8 +101,10 @@ export const buildSystemPromptForMode = (opts: BuildSystemPromptForModeOpts): st
     persona?: PersonaKind
     promptPack?: PromptPackMode
     identity?: readonly string[]
+    envPosture?: EnvironmentPosture
   } = { identity: variant.identity }
   if (opts.persona !== undefined) promptOpts.persona = opts.persona
   if (opts.promptPack !== undefined) promptOpts.promptPack = opts.promptPack
+  if (opts.envPosture !== undefined) promptOpts.envPosture = opts.envPosture
   return buildSystemPrompt(undefined, promptOpts)
 }

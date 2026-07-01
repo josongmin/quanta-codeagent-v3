@@ -22,7 +22,12 @@ import type {
   PtySessionPort,
   ReadResult,
 } from "@/tool/pty/port"
-import { runTerminalBrain, TB_VERIFY_GATE_ENV, VERIFY_GATE_FOLLOWUP } from "./brain-mode"
+import {
+  runTerminalBrain,
+  TB_ENV_OWNED_ENV,
+  TB_VERIFY_GATE_ENV,
+  VERIFY_GATE_FOLLOWUP,
+} from "./brain-mode"
 
 /** Local minimal `LLMPort` (headless `FakeLlm` precedent, replicated to honor the terminal fence).
  *  Replays one `StreamEvent[]` script per assistant turn, in order; a turn beyond the list replays
@@ -266,6 +271,88 @@ type TerminalBrainReportShape = {
   final: string
   verification?: { state: string; evidence: string }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Lever #1 — environment posture (RFC jul-2-terminal-bench-levers/01).
+// HELLGATE: RED-first (the brain's SYSTEM prompt TODAY carries the frozen [R-ENV] guardrail), then
+// knob-ON behavior (owned posture: [R-ENV] / [R-STOP-ENV] gone, [R-ENV-OWNED] present) and the
+// DEFAULT-OFF byte-identical proof (unset ≡ explicit-off ≡ pre-lever system prompt).
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The SYSTEM prompt the loop fed the model on the FIRST turn, as a plain string (the `system`
+ *  channel is a string OR an ordered block list — flatten both to text for a substring match). */
+const firstSystemText = (llm: FakeLlm): string => {
+  const first = llm.seen[0]
+  if (!first) throw new Error("the loop must have streamed at least one turn to the model")
+  const sys = first.system
+  if (sys === undefined) return ""
+  if (typeof sys === "string") return sys
+  return sys.map((b) => b.text).join("\n")
+}
+
+/** Run the brain once and return the captured FakeLlm (for `firstSystemText`). */
+const runAndCaptureSystem = async (env?: Record<string, string>): Promise<FakeLlm> => {
+  const { stdin, stdout, endIn } = makeStdio()
+  const llm = new FakeLlm(execThenDoneScripts("echo hi"))
+  await runTerminalBrain({
+    instruction: "do the task",
+    reportOut: "/tmp/brain-envposture.json",
+    stdin,
+    stdout,
+    llm,
+    writeReport: () => undefined,
+    ...(env !== undefined ? { env } : {}),
+  })
+  endIn()
+  return llm
+}
+
+describe("environment posture (lever #1)", () => {
+  test("RED baseline (knob OFF, today): the brain SYSTEM prompt carries the frozen [R-ENV] guardrail", async () => {
+    const llm = await runAndCaptureSystem()
+    const system = firstSystemText(llm)
+    // The frozen install-prohibition rules are in the SYSTEM prompt (not the user turn).
+    expect(system).toContain("[R-ENV]")
+    expect(system).toContain("[R-STOP-ENV]")
+    // And the owned rule is NOT present when the knob is off.
+    expect(system).not.toContain("[R-ENV-OWNED]")
+  })
+
+  test("knob ON: the brain SYSTEM prompt swaps to the owned posture (no [R-ENV]/[R-STOP-ENV], has [R-ENV-OWNED])", async () => {
+    const llm = await runAndCaptureSystem({ [TB_ENV_OWNED_ENV]: "1" })
+    const system = firstSystemText(llm)
+    expect(system).not.toContain("[R-ENV]")
+    expect(system).not.toContain("[R-STOP-ENV]")
+    expect(system).toContain("[R-ENV-OWNED]")
+    expect(system).toContain("[R-INSTALL-THRASH]")
+    // The universal honesty rails survive the swap (posture drops ONLY env rules).
+    expect(system).toContain("[R-READ-FAILURE]")
+    expect(system).toContain("[R-FAILURE-MODE]")
+  })
+
+  test("DEFAULT-OFF byte-identical: the brain SYSTEM prompt is IDENTICAL unset vs explicit-off", async () => {
+    const unset = firstSystemText(await runAndCaptureSystem(undefined))
+    const explicitOff = firstSystemText(await runAndCaptureSystem({ [TB_ENV_OWNED_ENV]: "0" }))
+    expect(explicitOff).toBe(unset)
+    // And the off prompt is the frozen one (carries [R-ENV]).
+    expect(unset).toContain("[R-ENV]")
+  })
+
+  test("posture is PROMPT-TEXT-ONLY: knob ON does NOT change the offered tools or the permission mode", async () => {
+    // Same tool surface + no host-exec leak whether frozen or owned — the posture never touches
+    // runtime enforcement, only the rendered system-prompt rule text.
+    const frozen = await runAndCaptureSystem(undefined)
+    const owned = await runAndCaptureSystem({ [TB_ENV_OWNED_ENV]: "1" })
+    const toolsOf = (llm: FakeLlm) => (llm.seen[0]?.tools ?? []).map((t) => t.name).sort()
+    expect(toolsOf(owned)).toEqual(toolsOf(frozen))
+    // BASE host tools never leak under either posture.
+    for (const base of ["read", "write", "edit", "apply_patch", "bash", "grep", "ls"]) {
+      expect(toolsOf(owned)).not.toContain(base)
+    }
+    // container_exec is offered under both.
+    expect(toolsOf(owned)).toContain("container_exec")
+  })
+})
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // Lever #2 — verify-before-finalize gate (RFC jul-2-terminal-bench-levers/02).
