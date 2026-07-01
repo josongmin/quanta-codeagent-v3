@@ -648,7 +648,11 @@ const RULES: readonly Rule[] = [
     // pattern the fix INTRODUCES) is deliberately NOT matched. Seeded GREEN after
     // the FIX #5 edits (reranker/registry.ts, ui/ui-helpers.ts) removed the last
     // member reads; health-snapshot.ts never had one in code (comment only).
-    pattern: /process\.env\.[A-Za-z_$]/,
+    // Matches BOTH the dot form `process.env.X` and the bracket form
+    // `process.env["X"]` (a bracket-form regression would otherwise slip past,
+    // and these files are exempt from the global `\bprocess\.env\b` rule so it is
+    // no backstop); the binding form is never followed by `.`/`[` so stays clear.
+    pattern: /process\.env\s*[.[]/,
     scope: /^(retrieval|observability|ui)\//,
     why: "Domain slices must inject the env seam (`env: NodeJS.ProcessEnv = process.env`, read `env.X`) instead of raw `process.env.<ident>` — bind the global only at the call boundary so the unit is testable. See src/retrieval/reranker/registry.ts / src/ui/ui-helpers.ts for the pattern.",
   },
