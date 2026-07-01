@@ -154,6 +154,20 @@ const R_INSTALL_THRASH: PromptRule = {
   ],
 }
 
+/** Completion signal for the owned posture. Dropping R-STOP-ENV removed its second
+ *  function — "you've made the minimum coherent change, STOP". On an owned box where
+ *  "a working environment IS the deliverable" an agent can rabbit-hole on env polish
+ *  when env is only a MEANS; this restores a task-completion stop rail. */
+const R_ENV_DONE: PromptRule = {
+  id: "R-ENV-DONE",
+  lines: [
+    "- [R-ENV-DONE] Configuring the environment is a MEANS, not the goal. Once the",
+    "  verifying command exits clean and the deliverable is in place, STOP — do not",
+    "  keep installing, configuring, or polishing the environment past what the task",
+    "  needs.",
+  ],
+}
+
 /** Diff-integrity-only variant of R-NO-SHIM: the shim/stub ban stays, but the frozen
  *  "declare the environment unavailable and stop" tail is removed (on an owned box the
  *  fix for a missing dependency is to install it, not to stop). */
@@ -179,4 +193,5 @@ export const OWNED_RULES: readonly PromptRule[] = [
   R_NO_SHIM_OWNED,
   R_ENV_OWNED,
   R_INSTALL_THRASH,
+  R_ENV_DONE,
 ]

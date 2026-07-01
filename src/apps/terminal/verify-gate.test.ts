@@ -12,6 +12,7 @@ import type { AgentEvent } from "@/stream"
 import {
   deriveVerificationState,
   inspectExerciseEvidence,
+  isExerciseCommand,
   type VerificationState,
 } from "./verify-gate"
 
@@ -128,32 +129,66 @@ describe("inspectExerciseEvidence — container_exec", () => {
   })
 })
 
-describe("inspectExerciseEvidence — pty_* (review P1: interactive deliverable must count)", () => {
-  test("driving a program (pty_write) AND observing its response (pty_read) ⇒ exercised", () => {
+describe("inspectExerciseEvidence — pty_* (review P1: interactive deliverable must count; P0: shell chatter must NOT)", () => {
+  test("a pane RUNNING THE DELIVERABLE, driven + observed ⇒ exercised", () => {
     const events: AgentEvent[] = [
-      call("p0", "pty_attach", { command: "python3" }),
-      call("p1", "pty_write", { handle: "h", data: "print(2+2)", appendNewline: true }),
+      call("p0", "pty_start", { command: "python3 game.py" }), // pane runs the produced program
+      call("p1", "pty_write", { handle: "h", data: "north", appendNewline: true }),
       result("p1", "pty_write", { preview: "ok" }),
       call("p2", "pty_read", { handle: "h" }),
-      result("p2", "pty_read", { preview: "4\n[nextSeq=3]" }),
+      result("p2", "pty_read", { preview: "You move north.\n[nextSeq=3]" }),
     ]
     const v = inspectExerciseEvidence(events)
     expect(v.exercised).toBe(true)
     expect(v.evidence).toContain("pty_")
   })
 
-  test("attaching a pane WITHOUT driving it (no pty_write) ⇒ NOT exercised", () => {
+  test("typing an EXERCISE command into a bash pane (`./mystery`) + observing ⇒ exercised", () => {
     const events: AgentEvent[] = [
-      call("p0", "pty_attach", { command: "vim" }),
+      call("p0", "pty_start", { command: "bash" }),
+      call("p1", "pty_write", { handle: "h", data: "./mystery in.txt", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
       call("p2", "pty_read", { handle: "h" }),
-      result("p2", "pty_read", { preview: "~\n~\n" }),
+      result("p2", "pty_read", { preview: "42\n[nextSeq=3]" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(true)
+  })
+
+  test("P0 fail-closed: a bare bash pane driven with SHELL CHATTER (`ls`/`cd`) + read ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "bash" }),
+      call("p1", "pty_write", { handle: "h", data: "ls -la", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "solution.py  Makefile\n[nextSeq=3]" }),
     ]
     expect(inspectExerciseEvidence(events).exercised).toBe(false)
   })
 
-  test("driving without ever reading back the response ⇒ NOT exercised", () => {
+  test("P0 fail-closed: a bare `python3` REPL driven with a probe expression ⇒ NOT exercised", () => {
+    // Attaching a generic interpreter and typing `print(2+2)` is NOT a clear deliverable exercise.
     const events: AgentEvent[] = [
-      call("p1", "pty_write", { handle: "h", data: "run", appendNewline: true }),
+      call("p0", "pty_start", { command: "python3" }),
+      call("p1", "pty_write", { handle: "h", data: "print(2+2)", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "4\n[nextSeq=3]" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("attaching a pane WITHOUT driving it (no pty_write) ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "./server" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "listening\n" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("driving the deliverable without ever reading back the response ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p1", "pty_write", { handle: "h", data: "./run", appendNewline: true }),
       result("p1", "pty_write", { preview: "ok" }),
     ]
     expect(inspectExerciseEvidence(events).exercised).toBe(false)
@@ -161,12 +196,66 @@ describe("inspectExerciseEvidence — pty_* (review P1: interactive deliverable 
 
   test("a pty_read that observed NOTHING (empty preview, no exitCode) ⇒ NOT exercised", () => {
     const events: AgentEvent[] = [
-      call("p1", "pty_write", { handle: "h", data: "x", appendNewline: true }),
+      call("p1", "pty_write", { handle: "h", data: "./run", appendNewline: true }),
       result("p1", "pty_write", { preview: "ok" }),
       call("p2", "pty_read", { handle: "h" }),
       result("p2", "pty_read", { preview: "" }),
     ]
     expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+})
+
+describe("isExerciseCommand — fail-closed (review P0: install/build/probe/chatter must NOT satisfy the gate)", () => {
+  test.each([
+    "pip install grpcio",
+    "pip3 install -r requirements.txt",
+    "python -m pip install numpy",
+    "npm install",
+    "npm ci",
+    "yarn add express",
+    "cargo build --release",
+    "make",
+    "make -j4 all",
+    "cmake --build build",
+    "gcc -o mystery mystery.c",
+    "g++ solve.cpp -o solve",
+    "go build ./...",
+    "python -c \"import grpc; print(grpc.__version__)\"",
+    "python3 -c 'print(1)'",
+    "bash -lc 'echo ok'",
+    "sh -c 'echo hi'",
+    "apt-get install -y qemu",
+    "./configure --prefix=/usr",
+    "conda install pytorch",
+    "ls -la",
+    "cat solution.py",
+    "git status",
+    "grep -r TODO .",
+    "echo done",
+    "which python3",
+  ])("NON-exercise: %p ⇒ false", (cmd) => {
+    expect(isExerciseCommand(cmd)).toBe(false)
+  })
+
+  test.each([
+    "./mystery input.txt",
+    "/app/server --port 8080",
+    "../bin/solve",
+    "python solve.py",
+    "python3 game.py --seed 1",
+    "node app.js",
+    "bash run_tests.sh",
+    "diff out.ppm /app/reference.ppm",
+    "cmp a.bin b.bin",
+    "pytest tests/",
+    "curl -s localhost:8080/health",
+    "python -m http.server 8000",
+    "LD_LIBRARY_PATH=/lib ./solver in.txt",
+    "timeout 5 ./run",
+    "pip install x && ./mystery run", // compound: the run segment counts
+    "bash -c './mystery > out.txt'", // shell wrapper unwraps to a real run
+  ])("EXERCISE: %p ⇒ true", (cmd) => {
+    expect(isExerciseCommand(cmd)).toBe(true)
   })
 })
 

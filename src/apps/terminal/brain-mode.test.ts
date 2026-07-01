@@ -487,7 +487,9 @@ describe("verify-before-finalize gate (lever #2)", () => {
 
   test("knob ON + a pty_* interactive exercise (drive + observe) ⇒ NO follow-up, verified-pass", async () => {
     const { stdin, stdout, endIn } = makeStdio()
-    // Script: attach a REPL, write to it, read its response — all via pty_* (no container_exec).
+    // Script: run the produced deliverable in a pane, drive it, read its response — all via pty_*
+    // (no container_exec). Fail-closed contract: the pty_write must TYPE an exercise command (running
+    // the deliverable), not bare shell/REPL chatter, for the gate to accept it.
     const scripts: StreamEvent[][] = [
       [
         { type: "tool_use_start", id: "a1", name: "pty_attach" },
@@ -499,7 +501,7 @@ describe("verify-before-finalize gate (lever #2)", () => {
         {
           type: "tool_use_end",
           id: "w1",
-          input: { handle: "pty:1", data: "print(2+2)", appendNewline: true },
+          input: { handle: "pty:1", data: "python game.py --seed 1", appendNewline: true },
         },
         { type: "message_stop", stop_reason: "tool_use" },
       ],

@@ -64,9 +64,10 @@ a `docker history` / layer grep finds nothing. Creds flow in at **run time**:
 
 ```
 host shell / CI secret store
-   └─ harbor / tb run injects into the CONTAINER env  (task-env / -e KEY=VAL)
-        └─ QuantaAgent.run() -> _brain_env() copies the parent env
-             └─ quanta-terminal-brain shim -> bun -> brain-mode.ts
+   ├─ host `export KEY=VAL`               (→ os.environ)            ┐
+   └─ harbor `--agent-env KEY=VAL`        (→ agent extra_env)       ┘  both merge:
+        └─ QuantaAgent._brain_run_env() = { ...os.environ, ...extra_env }  (extra_env wins)
+             └─ _spawn_brain(argv, env=…) -> quanta-terminal-brain shim -> bun -> brain-mode.ts
                   └─ quanta LLM factory reads ANTHROPIC_API_KEY / OPENAI_API_KEY
 ```
 
@@ -80,15 +81,28 @@ exactly those plus `QUANTA_API_KEY`. Provide **at least one** of:
 | `OPENAI_API_KEY`    | brain LLM (OpenAI BYOK)        |
 | `QUANTA_API_KEY`    | brain LLM (quanta gateway)     |
 
-Pass them at run time, e.g.:
+Pass them at run time via **host export** or harbor **`--agent-env`** (NOT harbor `-e`, which selects
+the environment TYPE, not env vars). Both land in the brain via `_brain_run_env()`:
 
 ```sh
 # box-phase — requires Docker daemon + harbor installed
+export OPENAI_API_KEY="$OPENAI_API_KEY"        # host export → os.environ → brain
 harbor run \
   -d terminal-bench/terminal-bench-2 \
   -m gpt-5 \
   --agent-import-path quanta_agent:QuantaAgent \
-  -e OPENAI_API_KEY="$OPENAI_API_KEY"          # or ANTHROPIC_API_KEY / QUANTA_API_KEY
+  --agent-env OPENAI_API_KEY="$OPENAI_API_KEY" # equivalently via --agent-env (extra_env overlay)
+```
+
+### Feature knobs (default-OFF; turn on for A/B the SAME way as creds)
+
+Both the env-posture and verify-before-finalize levers read their knobs from the merged brain env, so
+either delivery path works:
+
+```sh
+export QUANTA_TB_ENV_OWNED=1        # lever #1: brain may install/build/configure (owned env posture)
+export QUANTA_TB_VERIFY_GATE=1      # lever #2: pre-report exercise-evidence gate
+# …or per-run:  harbor run … --agent-env QUANTA_TB_ENV_OWNED=1 --agent-env QUANTA_TB_VERIFY_GATE=1
 ```
 
 > Harbor itself shells out to the host `docker` to provision each task's container

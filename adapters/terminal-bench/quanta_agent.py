@@ -143,8 +143,18 @@ async def _spawn_brain(
     return _AsyncSubprocessBrain(proc)
 
 
-def _brain_cmd() -> str:
-    return os.environ.get("QUANTA_TERMINAL_BRAIN_CMD") or _DEFAULT_BRAIN_CMD
+def _brain_cmd(env: "dict[str, str]") -> str:
+    return env.get("QUANTA_TERMINAL_BRAIN_CMD") or _DEFAULT_BRAIN_CMD
+
+
+def _overlay_env(extra_env: "Optional[dict[str, str]]") -> "dict[str, str]":
+    """Brain subprocess env = the host env (``os.environ``) with Harbor's ``--agent-env`` values
+    (``extra_env``) OVERLAID on top. Overlay order matters: ``extra_env`` WINS, so
+    ``--agent-env QUANTA_TB_ENV_OWNED=1`` flips the knob even when the host env leaves it unset — and
+    a plain host ``export`` still works (os.environ is the base). This is the SINGLE env source for
+    ``_brain_cmd`` / ``_probe_brain_version`` / ``_spawn_brain`` / model resolution, so both delivery
+    paths (host export AND ``--agent-env``) light up the same knobs (review P0)."""
+    return {**os.environ, **(extra_env or {})}
 
 
 async def _probe_brain_version(brain: str, env: "dict[str, str]") -> "tuple[int, str]":
@@ -164,13 +174,6 @@ async def _probe_brain_version(brain: str, env: "dict[str, str]") -> "tuple[int,
         return 127, str(e)
     _, stderr = await proc.communicate()
     return (proc.returncode or 0), stderr.decode("utf-8", errors="replace")
-
-
-def _brain_env() -> "dict[str, str]":
-    """Env handed to the brain: the parent env wholesale (so creds in
-    ``_CRED_ENV_ALLOWLIST`` and PATH pass through). B6 will narrow this to an
-    explicit allowlist; the wholesale copy is the permissive interim."""
-    return dict(os.environ)
 
 
 def _apply_report_to_context(report: "dict[str, Any]", context: Any) -> None:
@@ -212,11 +215,24 @@ class QuantaAgent(BaseAgent):  # type: ignore[misc]
         # (no harbor installed — unit env) takes NO args, so guard the super() call.
         if BaseAgent is not object:
             super().__init__(*args, **kwargs)  # type: ignore[misc]
-        # Model resolution: explicit ctor arg → harbor's parsed model_name → env override. Under
-        # harbor, `model_name` is set by super(); under the object fallback it is simply absent.
+        # Harbor delivers `--agent-env KEY=VAL` as the `extra_env` kwarg (agents/factory.py:144,191).
+        # We CAPTURE it (without consuming — super() still gets it via kwargs for harbor's own
+        # container overlay) so the brain subprocess env can overlay it on os.environ. This is what
+        # makes `--agent-env QUANTA_TB_*=1` actually flip the knobs, closing the review-P0 gap where
+        # only a host `export` worked.
+        self._extra_env: "dict[str, str]" = dict(kwargs.get("extra_env") or {})
+        # Model resolution: explicit ctor arg → harbor's parsed model_name → env override (merged, so
+        # `--agent-env QUANTA_TERMINAL_MODEL=…` works too). Under harbor, `model_name` is set by
+        # super(); under the object fallback it is simply absent.
         self._model = (
-            model or getattr(self, "model_name", None) or os.environ.get("QUANTA_TERMINAL_MODEL")
+            model
+            or getattr(self, "model_name", None)
+            or self._brain_run_env().get("QUANTA_TERMINAL_MODEL")
         )
+
+    def _brain_run_env(self) -> "dict[str, str]":
+        """The env handed to the brain subprocess: host env with `--agent-env` overlaid (SSOT)."""
+        return _overlay_env(self._extra_env)
 
     @staticmethod
     def name() -> str:
@@ -238,8 +254,9 @@ class QuantaAgent(BaseAgent):  # type: ignore[misc]
         mid-run. ``environment`` is unused here (the brain is host-side); kept for the
         harbor ``setup(self, environment)`` contract."""
         del environment  # host-side brain — no container probe (see _probe_brain_version)
-        brain = _brain_cmd()
-        rc, stderr = await _probe_brain_version(brain, _brain_env())
+        env = self._brain_run_env()
+        brain = _brain_cmd(env)
+        rc, stderr = await _probe_brain_version(brain, env)
         if rc != 0:
             raise RuntimeError(
                 f"quanta brain '{brain}' is not runnable on the host "
@@ -273,12 +290,13 @@ class QuantaAgent(BaseAgent):  # type: ignore[misc]
             instruction_file.write_text(instruction)
             report_path = str(Path(tmp) / "report.json")
 
-            argv = [_brain_cmd(), "--instruction-file", str(instruction_file)]
+            env = self._brain_run_env()
+            argv = [_brain_cmd(env), "--instruction-file", str(instruction_file)]
             if self._model:
                 argv += ["--model", self._model]
             argv += ["--report-out", report_path]
 
-            brain = await _spawn_brain(argv, _brain_env(), report_path)
+            brain = await _spawn_brain(argv, env, report_path)
 
             # The bridge: serve drains the brain's stdout, runs each exec via the
             # adapter, and replies on the brain's stdin. Returns on brain EOF.

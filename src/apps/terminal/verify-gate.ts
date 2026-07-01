@@ -9,102 +9,159 @@
  * against spec* ("the output matches the reference"). This module is a PURE inspection over the
  * recorded agent event stream that asks a single, conservative question: does the trajectory
  * contain at least one tool interaction that both (a) RUNS the produced deliverable and
- * (b) OBSERVES its output/behavior — as opposed to merely creating, listing, or reading a file?
+ * (b) OBSERVES its output/behavior — as opposed to install/build/probe/scaffolding?
  *
  * WHY A NEW TERMINAL-SPECIFIC CLASSIFIER (not the existing `verify-guard`). The SWE-bench
- * `verify-guard` (`src/agent/verify-guard.ts`) recognizes ONLY the `test_runner` tool or a
- * `bash` command matching a test regex, and its "mutating" notion is FS edit tools. The terminal
- * brain surface has NONE of those tools — no `bash`, no `test_runner`, no FS-edit tools; only
- * `container_exec` + `pty_*` (`src/apps/terminal/index.ts:37`). So the exercise contract MUST be
- * expressed over THIS surface's tools. This is honestly new work, with `verify-guard` as a
- * *philosophical* reference (sticky-red "don't accept until verified"), NOT a code dependency.
+ * `verify-guard` recognizes ONLY the `test_runner` tool or a `bash` command matching a test regex,
+ * and its "mutating" notion is FS edit tools. The terminal brain surface has NONE of those tools —
+ * only `container_exec` + `pty_*` (`src/apps/terminal/index.ts:37`). So the exercise contract MUST
+ * be expressed over THIS surface's tools. `verify-guard` is a *philosophical* reference
+ * (sticky-red "don't accept until verified"), NOT a code dependency.
  *
- * BOTH TOOLS COUNT (review P1). The surface deliberately routes interactive work (REPL / TUI /
- * long-lived server) to `pty_*` while one-shot commands go to `container_exec`
- * (`src/tool/terminal-capability-guide.ts:23`). A `container_exec`-only inspector would mis-flag
- * a genuinely-exercised REPL / TUI / server as unverified. Evidence is counted from EITHER tool:
- *   - `container_exec` that RUNS the deliverable AND its result carries observed output; or
- *   - a `pty_*` session that DRIVES the interactive deliverable (a `pty_write`) AND OBSERVES its
- *     response (a `pty_read` returning output).
- *
- * CONSERVATIVE + DOCUMENTED HEURISTIC. We deliberately under-claim rather than over-claim (a
- * false "exercised:true" defeats the gate; a false "exercised:false" only costs one bounded
- * follow-up turn, which is cheap and honest):
- *   - `container_exec`: a command is an EXERCISE only when it is NOT purely a scaffolding /
- *     inspection command (see {@link NON_EXERCISE_LEADERS}: mkdir / ls / cat / echo / touch /
- *     cd / cp / mv / rm / pwd / which / chmod / mkfifo / …) AND the tool result carried some
- *     observed output (a non-empty `preview`, OR an `exitCode` we could read — running the thing
- *     and reading its exit code / stdout is the observation). "Created a file" and "listed a
- *     directory" are NOT exercises; "ran ./build/mystery and read its stdout" IS.
- *   - `pty_*`: at least one `pty_write` (drove the interactive deliverable) AND at least one
- *     `pty_read` whose result carried observed output (read the program's response). Attaching a
- *     pane alone, or writing without ever reading back, is NOT an exercise.
+ * FAIL-CLOSED (review P0 — the prior version was BROKEN). The first version was fail-OPEN: any
+ * `container_exec` whose leader was NOT in a small denylist counted as an exercise, and since
+ * `container_exec` ALWAYS returns an exit code, "observed output" was trivially true. So
+ * `pip install …`, `make`, `cargo build`, `python -c …`, and a bare PTY shell round-trip all
+ * FALSELY satisfied the gate — defeating it on exactly the install-heavy tasks it exists for. This
+ * version recognizes an exercise ONLY by an AFFIRMATIVE match:
+ *   - `container_exec` (or a PTY-typed command) that RUNS the produced deliverable — a path
+ *     invocation (`./mystery`, `/app/server`), an interpreter running a project FILE
+ *     (`python solve.py`, NOT `python -c …`), a `bash script.sh`, or an acceptance/observe runner
+ *     (`pytest`, `diff out ref`, `cmp`, `curl localhost/…`) — AND whose result carried observed
+ *     output; OR
+ *   - a `pty_*` session where a `pty_write` TYPED an exercise command (per the same classifier) AND
+ *     a `pty_read` observed the response.
+ * Everything else — package managers, build/compile tools, env probes, `ls`/`cat`/`grep`/`git`,
+ * unknown bare words, interactive-shell chatter — is NON-exercise. A false "not exercised" costs
+ * only ONE bounded follow-up turn (cheap + honest); a false "exercised" silently defeats the gate,
+ * so we bias hard toward under-claiming.
  *
  * PURE / LEAF. No model calls, no IO, no `process.*`. Input is the captured `AgentEvent[]`;
- * output is a small typed verdict. This keeps the gate's decision unit-testable and deterministic.
+ * output is a small typed verdict. Deterministic + unit-testable.
  */
 
 import type { AgentEvent } from "@/stream"
 
-/** The terminal surface's interactive tool family (`src/tool/pty/tools.ts`). Any tool whose name
- *  begins with `pty_` is a PTY interaction; the two we score are `pty_write` (drive) and
- *  `pty_read` (observe). */
 const PTY_WRITE = "pty_write"
 const PTY_READ = "pty_read"
 const CONTAINER_EXEC = "container_exec"
 
-/**
- * Command LEADERS (the first shell token) that, on their own, are scaffolding / inspection — NOT
- * an end-to-end exercise of a produced deliverable. Running one of these proves *existence* or
- * *setup*, never *behavior against spec*. Kept conservative and DOCUMENTED: the set is the common
- * filesystem-plumbing verbs the "fake green" finals leaned on ("I created the file / listed the
- * dir / cat'd the artifact"). Anything NOT in this set (running a binary, a script, a server, a
- * test harness the task itself specified, a diff against a reference) is treated as a candidate
- * exercise. We match on the FIRST bare token only (see {@link firstCommandLeader}).
- */
-const NON_EXERCISE_LEADERS: ReadonlySet<string> = new Set([
-  "mkdir",
-  "rmdir",
-  "ls",
-  "ll",
-  "dir",
-  "cat",
-  "echo",
-  "printf",
-  "touch",
-  "cd",
-  "pwd",
-  "cp",
-  "mv",
-  "rm",
-  "ln",
-  "chmod",
-  "chown",
-  "which",
-  "command", // `command -v foo` — a PATH probe, not an exercise
-  "type",
-  "mkfifo",
-  "mktemp",
-  "true",
-  "false",
-  "export",
-  "set",
-  "unset",
-  "head", // reading a file's head/tail is inspection, not exercising the deliverable
-  "tail",
-  "wc",
-  "stat",
-  "file",
-  "tree",
-  "find", // locating files is inspection
-  "git", // `git status`/`git add` is repo plumbing — the exact "noise verify" escape the SWE-bench
-  //         verify-guard was tightened against (a `git status` was wrongly treated as "verified").
-  "grep", // searching source is inspection, not running the deliverable
-  "sed",
-  "awk",
-  "sleep",
-  "clear",
+/** Package managers, build/compile tools, and env probes. Running one proves *setup*, never
+ *  *behavior against spec* — NEVER an exercise, even though it "runs something" and returns output. */
+const BUILD_OR_INSTALL_TOOLS: ReadonlySet<string> = new Set([
+  "pip", "pip3", "pip2", "pipx", "poetry", "uv", "conda", "mamba", "ensurepip", "easy_install",
+  "npm", "pnpm", "yarn", "npx", "corepack",
+  "cargo", "rustup", "go", "gem", "bundle", "composer", "mix", "sbt", "leiningen", "lein",
+  "apt", "apt-get", "aptitude", "dpkg", "apk", "yum", "dnf", "pacman", "zypper", "brew", "port",
+  "make", "cmake", "ninja", "meson", "bazel", "buck", "gradle", "gradlew", "mvn", "ant", "scons", "waf",
+  "gcc", "g++", "cc", "c++", "clang", "clang++", "rustc", "tsc", "javac", "kotlinc", "ld", "ar", "as", "nvcc", "nasm",
+  "configure", "autoconf", "automake", "autoreconf", "libtool", "pkg-config", "ldconfig",
+  "docker", "docker-compose", "podman", "systemctl", "service", "modprobe", "update-alternatives",
 ])
+
+/** Language interpreters that EXERCISE the deliverable when handed a FILE to run (not `-c`, not a
+ *  package-manager `-m`). `python foo.py` exercises; `python -c "import x"` is a probe. */
+const INTERPRETERS: ReadonlySet<string> = new Set([
+  "python", "python3", "python2", "node", "nodejs", "ruby", "perl", "php", "lua",
+  "rscript", "julia", "deno", "bun", "tclsh",
+])
+
+/** Runners that inherently RUN-AND-OBSERVE against the produced deliverable or a reference —
+ *  `diff`/`cmp` compare to a reference, `curl`/`nc` hit a server, `pytest` runs behavior. */
+const ACCEPTANCE_RUNNERS: ReadonlySet<string> = new Set([
+  "pytest", "py.test", "tox", "nose", "nosetests",
+  "diff", "cmp", "sdiff", "colordiff",
+  "curl", "wget", "http", "nc", "ncat", "netcat", "ab", "wrk", "hey", "siege", "grpcurl",
+])
+
+/** POSIX shells — a `-c`/`-lc`/`-ic` wrapper is unwrapped and its inner command re-classified;
+ *  a shell handed a `*.sh` script runs that script (exercise). A bare interactive shell is not. */
+const SHELLS: ReadonlySet<string> = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"])
+
+/** Wrappers that prefix a command without changing what runs. */
+const TRANSPARENT_WRAPPERS: ReadonlySet<string> = new Set([
+  "sudo", "env", "nohup", "time", "stdbuf", "nice", "setsid", "timeout", "xargs", "unbuffer", "script",
+])
+
+/** basename of a leader token (strip any path), lower-cased. */
+const baseName = (leader: string): string => {
+  const slash = leader.lastIndexOf("/")
+  return (slash >= 0 ? leader.slice(slash + 1) : leader).toLowerCase()
+}
+
+/** Tokenize a single command segment, skipping leading `VAR=val` assignments and transparent
+ *  wrappers (`sudo`, `env`, `nohup`, `timeout N`, …). Returns the raw leader (may contain a path)
+ *  + remaining arg tokens. `timeout`/`xargs` consume their own numeric/flag args crudely — we just
+ *  skip a following bare-number/flag so `timeout 5 ./run` reduces to `./run`. */
+const leaderAndArgs = (segment: string): { leader: string; args: readonly string[] } => {
+  const tokens = segment.trim().split(/\s+/).filter((t) => t.length > 0)
+  let i = 0
+  while (i < tokens.length) {
+    const t = tokens[i]
+    if (t === undefined) break
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t) || TRANSPARENT_WRAPPERS.has(t)) {
+      i += 1
+      // `timeout 5s`, `nice -n 10`, `stdbuf -oL` — skip a following number/flag arg.
+      const nxt = tokens[i]
+      if (nxt !== undefined && /^(-|\d)/.test(nxt)) i += 1
+      continue
+    }
+    break
+  }
+  return { leader: tokens[i] ?? "", args: tokens.slice(i + 1) }
+}
+
+/** True iff a SINGLE command segment affirmatively RUNS the deliverable (fail-closed: anything not
+ *  affirmatively an exercise returns false). */
+const isExerciseSegment = (segment: string): boolean => {
+  const { leader, args } = leaderAndArgs(segment)
+  if (leader === "") return false
+  const base = baseName(leader)
+
+  // 1. shell wrapper: `bash -c '…'` → classify the INNER command; `bash foo.sh` → running a script.
+  if (SHELLS.has(base)) {
+    const cIdx = args.findIndex((a) => a === "-c" || a === "-lc" || a === "-ic" || a === "-ilc")
+    if (cIdx >= 0) {
+      const inner = args
+        .slice(cIdx + 1)
+        .join(" ")
+        .replace(/^['"]|['"]$/g, "")
+      return isExerciseCommand(inner)
+    }
+    return args.some((a) => !a.startsWith("-") && /\.(sh|bash|zsh|ksh)$/.test(a))
+  }
+
+  // 2. package managers / build tools / probes → NEVER an exercise (setup, not behavior).
+  if (BUILD_OR_INSTALL_TOOLS.has(base)) return false
+
+  // 3. acceptance / observe runners → exercise (run-and-observe against the deliverable/reference).
+  if (ACCEPTANCE_RUNNERS.has(base)) return true
+
+  // 4. interpreter → exercise ONLY when running a FILE (not `-c`, not a pkg-manager `-m`).
+  if (INTERPRETERS.has(base)) {
+    if (args.includes("-c")) return false // inline snippet / probe, not a run of a produced file
+    const mIdx = args.findIndex((a) => a === "-m")
+    if (mIdx >= 0) {
+      const mod = (args[mIdx + 1] ?? "").toLowerCase()
+      return !["pip", "pip3", "venv", "virtualenv", "ensurepip", "build", "installer", "wheel"].includes(mod)
+    }
+    return args.some((a) => !a.startsWith("-")) // a non-flag arg = a script/file to run
+  }
+
+  // 5. a path-invoked leader (`./x`, `/abs/x`, `../x`, `dir/x`) = running a produced artifact —
+  //    UNLESS its basename is itself a build/install tool (`/usr/bin/make`).
+  if (leader.includes("/")) return !BUILD_OR_INSTALL_TOOLS.has(base)
+
+  // 6. anything else (bare unknown word, `ls`/`cat`/`grep`/`git`/`echo`, scaffolding) → FAIL CLOSED.
+  return false
+}
+
+/** True iff ANY segment of a (possibly compound `a && b | c ; d`) command is an exercise. Catches
+ *  `pip install x && ./run` (the run segment counts) without letting `mkdir x && ls` pass. */
+export const isExerciseCommand = (command: string): boolean =>
+  command
+    .split(/(?:&&|\|\||[;|&\n])/)
+    .some((seg) => seg.trim().length > 0 && isExerciseSegment(seg))
 
 /** The verdict: did the trajectory exercise the deliverable end-to-end, and (if so) what was the
  *  single most-load-bearing piece of evidence (for the report's `evidence` string)? */
@@ -120,51 +177,38 @@ export interface ExerciseVerdict {
 type ToolCallEvent = Extract<AgentEvent, { type: "tool_call" }>
 type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>
 
-/** The first bare shell token of a command string, lower-cased, with a leading env-assignment
- *  prefix (`FOO=bar cmd`), `sudo`, and a `./`/absolute path stripped so `./build/mystery` and
- *  `/app/mystery` both reduce to the RUN of a produced artifact (NOT a scaffolding leader). A
- *  command whose real leader is a path to a produced binary is therefore NOT filtered out. */
-const firstCommandLeader = (command: string): string => {
-  const tokens = command.trim().split(/\s+/)
-  let i = 0
-  // skip leading `VAR=value` assignments and a `sudo`/`env` wrapper
-  while (i < tokens.length) {
-    const t = tokens[i]
-    if (t === undefined) break
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(t) || t === "sudo" || t === "env") {
-      i += 1
-      continue
-    }
-    break
-  }
-  // A path invocation (`./x`, `/abs/x`, `../x`, `bin/x`) is a RUN of a produced artifact — its
-  // leader contains `/`, so it is never in NON_EXERCISE_LEADERS and always counts as a candidate
-  // exercise. A bare word (`ls`, `mystery`) is compared against the scaffolding set as-is.
-  return (tokens[i] ?? "").toLowerCase()
-}
-
-/** True when a `container_exec` command, on its own, is scaffolding/inspection (NOT an exercise).
- *  Reads the first meaningful leader; a compound command (`a && b`) is judged by its FIRST leader
- *  conservatively — if the first thing it does is scaffolding we still let a later run count via a
- *  DIFFERENT tool call, but a single `mkdir -p x` call is correctly excluded. A leader with a path
- *  (running a produced binary) is never in the non-exercise set, so it always counts. */
-const isNonExerciseCommand = (command: string): boolean => {
-  const lead = firstCommandLeader(command)
-  if (lead === "") return true // empty / whitespace command observes nothing
-  // A `/`-containing leader (a produced-artifact run) is never in the set → counts as an exercise.
-  return NON_EXERCISE_LEADERS.has(lead)
-}
-
 /** A tool result "observed output" when it carries a non-empty stdout preview OR a readable exit
- *  code (running the deliverable and reading its exit code / stdout IS the observation the gate
- *  wants). An `ok:false` result still counts as an observation — a failing run that the agent SAW
- *  is honest evidence (it may finalize as `verified-fail`); what we reject is NO run at all. */
+ *  code. An `ok:false` result still counts as an observation — a failing run the agent SAW is
+ *  honest evidence (it may finalize as `verified-fail`); what we reject is NO run at all. */
 const resultObservedOutput = (r: ToolResultEvent): boolean =>
   (typeof r.preview === "string" && r.preview.trim().length > 0) || typeof r.exitCode === "number"
 
-/** Extract the command string a `container_exec` tool_call carried (its input is `{ command }`).
- *  Defensive: unknown-shaped input yields `undefined` (no crash on a malformed event). */
+/** Extract the command string a `container_exec` tool_call carried (its input is `{ command }`). */
 const containerExecCommand = (call: ToolCallEvent): string | undefined => {
+  const input = call.input
+  if (input !== null && typeof input === "object" && "command" in input) {
+    const c = (input as { command?: unknown }).command
+    if (typeof c === "string") return c
+  }
+  return undefined
+}
+
+/** Extract the bytes a `pty_write` tool_call TYPED (its input is `{ handle, data, appendNewline }`).
+ *  This is the same field the dispatch seam screens as `shellCommand` — the payload that runs. */
+const ptyWriteData = (call: ToolCallEvent): string | undefined => {
+  const input = call.input
+  if (input !== null && typeof input === "object" && "data" in input) {
+    const d = (input as { data?: unknown }).data
+    if (typeof d === "string") return d
+  }
+  return undefined
+}
+
+/** Extract the `command` a pane-starting `pty_*` call launched (e.g. `pty_start`/`pty_attach` with a
+ *  `command`). When that command RUNS the deliverable (a produced binary / server / REPL of the
+ *  produced program), driving+observing the pane is a real interactive exercise; when it is a bare
+ *  `bash`/`python3` shell, it is not (the typed commands are then judged individually). */
+const ptyPaneCommand = (call: ToolCallEvent): string | undefined => {
   const input = call.input
   if (input !== null && typeof input === "object" && "command" in input) {
     const c = (input as { command?: unknown }).command
@@ -177,19 +221,14 @@ const containerExecCommand = (call: ToolCallEvent): string | undefined => {
  * Inspect the recorded event stream for evidence of an END-TO-END exercise of the deliverable.
  *
  * Returns `exercised:true` iff EITHER:
- *   (A) a `container_exec` ran a NON-scaffolding command (per {@link isNonExerciseCommand}) AND
- *       its paired `tool_result` observed output (stdout / exit code); OR
- *   (B) a `pty_write` drove an interactive program AND a `pty_read` observed its response.
+ *   (A) a `container_exec` ran an EXERCISE command (per {@link isExerciseCommand}) AND its paired
+ *       `tool_result` observed output (stdout / exit code); OR
+ *   (B) a `pty_write` TYPED an exercise command AND a `pty_read` observed a response.
  *
- * The pairing is by tool-call `id` for (A); for (B) we require the co-PRESENCE of at least one
- * observing `pty_read` result and at least one driving `pty_write` in the trajectory (an
- * interactive session's write→read cycle), which is the conservative signal that a REPL / TUI /
- * server was actually driven and observed.
+ * Fail-closed throughout: install/build/probe/scaffolding and bare-shell chatter never satisfy it.
  */
 export const inspectExerciseEvidence = (events: readonly AgentEvent[]): ExerciseVerdict => {
-  // Index tool_result observation by call id so a container_exec run can be paired with its result.
   const resultObservedById = new Map<string, boolean>()
-  let anyPtyWrite = false
   let ptyReadObserved = false
 
   for (const ev of events) {
@@ -199,16 +238,31 @@ export const inspectExerciseEvidence = (events: readonly AgentEvent[]): Exercise
     }
   }
 
+  // PTY exercise needs THREE things: we drove the pane (a pty_write), we observed a response (a
+  // pty_read with output), and what we drove is the DELIVERABLE — signalled by EITHER a pty_write
+  // that TYPED an exercise command, OR a pane started running an exercise command (a REPL/server of
+  // the produced program). A bare `bash`/`python3` pane driven with `ls`/`print(1)` yields neither
+  // signal ⇒ fail-closed, not an exercise.
+  let anyPtyWrite = false
+  let ptyExerciseSignal: string | undefined
   for (const ev of events) {
     if (ev.type !== "tool_call") continue
-    if (ev.name === PTY_WRITE) {
-      anyPtyWrite = true
+    if (ev.name.startsWith("pty_")) {
+      if (ev.name === PTY_WRITE) {
+        anyPtyWrite = true
+        const data = ptyWriteData(ev)
+        if (data !== undefined && isExerciseCommand(data)) ptyExerciseSignal ??= `pty_write \`${data.trim().slice(0, 120)}\``
+      } else {
+        const paneCmd = ptyPaneCommand(ev)
+        if (paneCmd !== undefined && isExerciseCommand(paneCmd))
+          ptyExerciseSignal ??= `pane running \`${paneCmd.trim().slice(0, 120)}\``
+      }
       continue
     }
     if (ev.name === CONTAINER_EXEC) {
       const command = containerExecCommand(ev)
       if (command === undefined) continue
-      if (isNonExerciseCommand(command)) continue
+      if (!isExerciseCommand(command)) continue
       if (resultObservedById.get(ev.id) === true) {
         return {
           exercised: true,
@@ -218,26 +272,26 @@ export const inspectExerciseEvidence = (events: readonly AgentEvent[]): Exercise
     }
   }
 
-  // (B) interactive exercise: drove the program (write) AND observed a response (read).
-  if (anyPtyWrite && ptyReadObserved) {
+  // (B) interactive exercise: drove the DELIVERABLE (typed an exercise command OR a deliverable
+  // pane) AND observed a response — never a bare-shell round-trip.
+  if (anyPtyWrite && ptyExerciseSignal !== undefined && ptyReadObserved) {
     return {
       exercised: true,
-      evidence:
-        "pty_* session drove the interactive deliverable (pty_write) and observed its response (pty_read)",
+      evidence: `pty_* session ran the deliverable (${ptyExerciseSignal}) and observed its response (pty_read)`,
     }
   }
 
   return {
     exercised: false,
     evidence:
-      "no end-to-end exercise found: the trajectory only created/listed/read artifacts (or drove a program without observing its output) — the deliverable was never run and observed against the task's success criterion",
+      "no end-to-end exercise found: the trajectory only installed/built/inspected artifacts (or drove a shell without running the deliverable) — the deliverable was never run and observed against the task's success criterion",
   }
 }
 
 /** The honest trichotomy the report stamps. `verified-pass` and `verified-fail` both mean the
  *  deliverable was EXERCISED and an outcome was observed; `unverifiable` means the gate could not
- *  confirm an exercise even after the one bounded follow-up (this is the accepted, non-penalized
- *  terminal state that STRUCTURALLY prevents over-persistence). */
+ *  confirm an exercise even after the one bounded follow-up (the accepted, non-penalized terminal
+ *  state that STRUCTURALLY prevents over-persistence). */
 export type VerificationState = "verified-pass" | "verified-fail" | "unverifiable"
 
 /** The report's verification stamp. `evidence` names only the model's own trajectory / stated
@@ -245,16 +299,18 @@ export type VerificationState = "verified-pass" | "verified-fail" | "unverifiabl
 export interface VerificationStamp {
   readonly state: VerificationState
   readonly evidence: string
+  /** Whether the one bounded follow-up turn was actually injected (vs an exercise already present
+   *  in the main run). Lets per-task A/B analysis attribute a flip to the gate's nudge rather than
+   *  the base loop. Absent on the OFF path (the whole stamp is absent then). */
+  readonly followUpFired?: boolean
 }
 
 /**
- * Outcome classification of the model's final SAY. ORDER MATTERS and is applied in
- * {@link deriveVerificationState} as: UNCERTAIN → NEGATIVE → (else) positive/silent. The design
- * priority is HONESTY over optimism — an explicit uncertainty or a stated failure is trusted over
- * a co-occurring positive word, because "fake green" is precisely the failure of trusting an
- * optimistic self-report. The only subtlety is SUCCESS-BY-NEGATION ("does not fail", "no errors",
- * "without error"), which superficially contains a negative word but ASSERTS success — those are
- * suppressed by {@link NEGATED_NEGATIVE} so they are NOT mis-read as `verified-fail`.
+ * Outcome classification of the model's final SAY. ORDER MATTERS: UNCERTAIN → NEGATIVE → (else)
+ * positive/silent. HONESTY over optimism — an explicit uncertainty or stated failure is trusted
+ * over a co-occurring positive word, because "fake green" is precisely the failure of trusting an
+ * optimistic self-report. SUCCESS-BY-NEGATION ("does not fail", "no errors") is suppressed by
+ * {@link NEGATED_NEGATIVE} so it is NOT mis-read as `verified-fail`.
  */
 const UNCERTAIN_OUTCOME =
   /\b(could ?n['o]?t verify|cannot verify|can['o]?t verify|unable to verify|unverifiable|not (?:sure|certain)|unclear|no way to (?:verify|check)|couldn['o]?t (?:confirm|check|run))\b/i
@@ -267,14 +323,10 @@ const NEGATED_NEGATIVE =
 
 /**
  * Derive the honest verification state from the (post-follow-up) exercise verdict + the model's
- * final stated outcome. This is deliberately conservative and NEVER over-persists:
- *   - No exercise evidence at all ⇒ `unverifiable` (the gate asked once; nothing was exercised —
- *     finalize honestly rather than loop).
- *   - Exercised, and the final text asserts an uncertain/negative outcome ⇒ `unverifiable` /
- *     `verified-fail` respectively (honest surfacing of the real state, still finalizes).
- *   - Exercised, and the final text asserts a positive outcome (or is silent) ⇒ `verified-pass`.
- * The `finalText` is the model's OWN final SAY; the `evidence` we stamp comes from the exercise
- * verdict (its own tool calls) — no hidden-test reference ever enters.
+ * final stated outcome. Conservative and NEVER over-persists:
+ *   - No exercise evidence ⇒ `unverifiable` (asked once; nothing exercised — finalize honestly).
+ *   - Exercised + uncertain/negative final ⇒ `unverifiable` / `verified-fail` (honest surfacing).
+ *   - Exercised + positive/silent final ⇒ `verified-pass`.
  */
 export const deriveVerificationState = (
   verdict: ExerciseVerdict,
@@ -282,18 +334,12 @@ export const deriveVerificationState = (
 ): VerificationStamp => {
   const evidence = verdict.evidence ?? ""
   if (!verdict.exercised) {
-    return {
-      state: "unverifiable",
-      evidence: `unverifiable — ${evidence}`,
-    }
+    return { state: "unverifiable", evidence: `unverifiable — ${evidence}` }
   }
   const text = finalText ?? ""
-  // Uncertain claim wins first (the agent itself said it could not confirm).
   if (UNCERTAIN_OUTCOME.test(text)) {
     return { state: "unverifiable", evidence: `agent could not confirm the outcome; ${evidence}` }
   }
-  // A stated failure is trusted (honesty over optimism), UNLESS it is success-by-negation
-  // ("no errors" / "does not fail"), which asserts success and must not be read as a failure.
   if (NEGATIVE_OUTCOME.test(text) && !NEGATED_NEGATIVE.test(text)) {
     return { state: "verified-fail", evidence: `agent observed a failing outcome; ${evidence}` }
   }

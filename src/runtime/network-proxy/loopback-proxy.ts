@@ -300,7 +300,14 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     // the outbound BODY + HEADERS (plaintext-HTTP only; see onConnect for the
     // honest HTTPS gap) before forwarding. Absent ⇒ host-only, byte-identical.
     if (this.config.secretEgress !== undefined) {
-      void this.scanAndPipeHttp(req, res, target, this.config.secretEgress)
+      // Defense-in-depth: the scan path resolves-on-error today (bufferBody
+      // never rejects), but a future throw must not become an unhandled
+      // rejection + a hung client socket. Fail closed to 502, mirroring the
+      // `upstream.on("error")` idiom below.
+      void this.scanAndPipeHttp(req, res, target, this.config.secretEgress).catch(() => {
+        if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" }).end("egress-scan error")
+        else res.end()
+      })
       return
     }
     this.pipeHttp(req, res, target)

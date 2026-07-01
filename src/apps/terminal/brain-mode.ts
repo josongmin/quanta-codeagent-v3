@@ -86,6 +86,10 @@ export interface TerminalBrainReport {
    *  gate ran (knob ON) — absent ⇒ byte-identical to the pre-lever report. `unverifiable` /
    *  `verified-fail` finalize immediately (the honest exits that make over-persistence impossible). */
   readonly verification?: VerificationStamp
+  /** Lever #1 (`QUANTA_TB_ENV_OWNED`): stamped `"owned"` ONLY when the owned posture was applied
+   *  (knob ON) — absent ⇒ byte-identical to the pre-lever report. Lets per-task A/B analysis confirm
+   *  the owned prompt actually rendered for this task (guards against a silent env-plumbing miss). */
+  readonly envPosture?: "owned"
 }
 
 /** Result returned to the caller (and to the process `main()`) after one brain run. */
@@ -304,6 +308,8 @@ export const runTerminalBrain = async (
   let outcomeTurns = 0
   let messages: readonly Message[] = []
   let verification: VerificationStamp | undefined
+  let envOwnedApplied = false
+  let followUpFired = false
   let runError: unknown
   try {
     const boot = await bootstrapSession(deps, runtime, {})
@@ -325,6 +331,7 @@ export const runTerminalBrain = async (
       boot.systemSource.set(
         buildSystemPrompt(boot.cwd, { persona: "default", envPosture: "owned" }),
       )
+      envOwnedApplied = true
     }
     const { runtime: facade } = await createRuntimeFromBootstrap({
       boot,
@@ -373,9 +380,13 @@ export const runTerminalBrain = async (
       //    `unverifiable` and `verified-fail` finalize immediately (accepted terminal states).
       if (verifyGateOn) {
         const preVerdict = inspectExerciseEvidence(stream.events)
-        if (!preVerdict.exercised) {
-          // ONE bounded follow-up on the SAME live session (appends to the conversation). It cannot
-          // loop: we run it exactly once and derive the state from whatever it produced.
+        // BOUNDED (RFC jul-2 §Design Phase 3): fire the ONE follow-up ONLY when there is no exercise
+        // evidence AND the run has NOT already exhausted its turn budget. The budget guard is what the
+        // RFC promised — without it the gate could inject a turn PAST the cap on a run that already ran
+        // out (reproducing the over-persist that got the prior blanket steer reverted). At budget we
+        // skip the follow-up and stamp the honest pre-verdict (`unverifiable`). It cannot loop: at most
+        // one `runSessionTurn`, ever.
+        if (!preVerdict.exercised && outcomeTurns < (opts.maxTurns ?? 30)) {
           const followUp = await runSessionTurn({
             session,
             resolveApproval: async () => "approve",
@@ -385,13 +396,18 @@ export const runTerminalBrain = async (
           })
           outcomeTurns = followUp.outcome.turns
           messages = followUp.messages
+          followUpFired = true
         }
         // Re-inspect the (possibly-extended) trajectory + read the model's final stated outcome.
         // If the follow-up STILL shows no exercise ⇒ `unverifiable` (finalize; never re-ask).
-        verification = deriveVerificationState(
-          inspectExerciseEvidence(stream.events),
-          finalAssistantText(messages),
-        )
+        // `followUpFired` rides the stamp so the A/B can attribute a flip to the gate's nudge.
+        verification = {
+          ...deriveVerificationState(
+            inspectExerciseEvidence(stream.events),
+            finalAssistantText(messages),
+          ),
+          followUpFired,
+        }
       }
     } finally {
       await session.close().catch(() => undefined)
@@ -420,6 +436,9 @@ export const runTerminalBrain = async (
     // Lever #2 stamp — PRESENT only when the gate ran (knob ON). Exact-optional spread ⇒ the field
     // is entirely ABSENT when the gate is off, keeping the report byte-identical to pre-lever.
     ...(verification !== undefined ? { verification } : {}),
+    // Lever #1 stamp — PRESENT only when the owned posture was applied (knob ON). Exact-optional
+    // spread ⇒ ABSENT when off, keeping the report byte-identical to pre-lever.
+    ...(envOwnedApplied ? { envPosture: "owned" as const } : {}),
   }
   opts.writeReport(opts.reportOut, report)
   opts.closeStdout?.()

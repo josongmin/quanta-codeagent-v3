@@ -178,6 +178,43 @@ def test_run_spawn_contract_argv_and_instruction_file(monkeypatch):
     assert isinstance(captured["env"], dict)
 
 
+def test_agent_env_overlays_into_brain_env(monkeypatch):
+    """review P0: `--agent-env` (delivered by harbor as the ``extra_env`` kwarg) must reach the brain
+    subprocess env, so `--agent-env QUANTA_TB_ENV_OWNED=1` flips the knob — not only a host export."""
+    monkeypatch.delenv("QUANTA_TB_ENV_OWNED", raising=False)
+    monkeypatch.delenv("QUANTA_TB_VERIFY_GATE", raising=False)
+    env = FakeEnv(ExecResult(stdout="", stderr="", return_code=0))
+    ctx = FakeContext()
+    captured = {}
+    _patch_spawn(monkeypatch, frames=[], report_payload={"final": "x"}, captured=captured)
+
+    agent = QuantaAgent(extra_env={"QUANTA_TB_ENV_OWNED": "1", "QUANTA_TB_VERIFY_GATE": "1"})
+    asyncio.run(agent.run("x", env, ctx))
+
+    brain_env = captured["env"]
+    assert brain_env["QUANTA_TB_ENV_OWNED"] == "1"  # the knob reaches the brain via --agent-env
+    assert brain_env["QUANTA_TB_VERIFY_GATE"] == "1"
+    assert "PATH" in brain_env  # host env still forwarded (os.environ base preserved)
+
+
+def test_agent_env_overlay_wins_over_host_and_drives_brain_cmd_and_model(monkeypatch):
+    """extra_env OVERLAYS os.environ (extra wins) and is the single source for brain-cmd + model."""
+    monkeypatch.setenv("QUANTA_TERMINAL_BRAIN_CMD", "host-brain")  # host value…
+    monkeypatch.delenv("QUANTA_TERMINAL_MODEL", raising=False)
+    env = FakeEnv(ExecResult(stdout="", stderr="", return_code=0))
+    ctx = FakeContext()
+    captured = {}
+    _patch_spawn(monkeypatch, frames=[], report_payload={"final": "x"}, captured=captured)
+
+    agent = QuantaAgent(
+        extra_env={"QUANTA_TERMINAL_BRAIN_CMD": "agent-env-brain", "QUANTA_TERMINAL_MODEL": "gpt-5.5"}
+    )
+    asyncio.run(agent.run("x", env, ctx))
+
+    assert captured["argv"][0] == "agent-env-brain"  # --agent-env overrides the host brain cmd
+    assert _flag_value(captured["argv"], "--model") == "gpt-5.5"  # model resolved from merged env
+
+
 def test_run_tolerates_missing_report_fields(monkeypatch):
     """A thin/partial report must degrade gracefully, never crash the box run."""
     env = FakeEnv(ExecResult(stdout="", stderr="", return_code=0))
