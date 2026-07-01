@@ -78,8 +78,39 @@ export {
 } from "./runtime-config/parsers"
 export type { RuntimeConfig } from "./runtime-config/types"
 
+/** Thin composer. Spreads the per-domain slices (declared below) in their
+ *  ORIGINAL field-declaration order and freezes once — byte-identical to the
+ *  legacy single object literal (same keys, defaults, coercion, insertion order).
+ *  Each slice is a `const` arrow initialized during module eval, so it is defined
+ *  before the first `loadFromEnv` call (which only happens later, from
+ *  `runtimeConfig()`). Kept ABOVE the slices so the runtime-config-knobs parity
+ *  gate — which scans the source between `const loadFromEnv = ` and `let cached`
+ *  — still sees every `env.QUANTA_*` read (they now live in the slices). */
 const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
   return Object.freeze({
+    ...parseCompactionSlice(env),
+    ...parseCapabilitySlice(env),
+    ...parseToolSurfaceSlice(env),
+    ...parseSessionBenchSlice(env),
+    ...parseSecuritySlice(env),
+    ...parseConfigTailSlice(env),
+  }) as RuntimeConfig
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-domain env sub-parsers. Each is a PURE function that reads only from `env`
+// and returns its contiguous slice of the config as a `Partial<RuntimeConfig>`.
+// The composer (`loadFromEnv`) spreads them in the SAME order the fields were
+// originally declared, so the assembled object is BYTE-IDENTICAL to the legacy
+// single object literal (same keys, same defaults, same coercion, same insertion
+// order) — this is a mechanical size split of a god-function, not a behavior
+// change. The single `Object.freeze` is applied once, at the end, in the composer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Compaction, micro-compaction, and the dispatch/edit/skill/MCP capability
+ *  gates (the leading run of the legacy literal, up to `mcpSampling`). */
+const parseCompactionSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+  return {
     logLevel: parseLogLevel(env["QUANTA_LOG_LEVEL"]),
     compactTokens: parsePositiveInt(env["QUANTA_COMPACT_TOKENS"], "QUANTA_COMPACT_TOKENS"),
     // ADR-0473 — strict `=== "1"` opt-in (matches the `bgCompactionEnabled`
@@ -131,6 +162,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     // end state: the composition root wires a handler (and advertises) only when
     // this is on AND an LLM + consent prompter are present.
     mcpSampling: gateOn(env, "QUANTA_MCP_SAMPLING"),
+  }
+}
+
+/** Token-accounting, MCP roots/oauth, read/vcs/lang tool gates, and the
+ *  capability/team/artifact/code-mode cluster. */
+const parseCapabilitySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+  return {
     // delta-token-accounting (RFC jun-6) — strict `=== "1"` opt-in. Default
     // false ⇒ the loop never constructs the counter and calls `estimateTokens`
     // directly at every site (byte-identical). ON guards CONSTRUCTION/perf only;
@@ -228,6 +266,14 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_CODE_MODE_OUTPUT_CAP"],
       "QUANTA_CODE_MODE_OUTPUT_CAP",
     ),
+  }
+}
+
+/** File-history, remember-patterns, paste/skill-creator, deny-reason/hunk,
+ *  sandbox-escalation, rate-limit, PTY, subagent/appshot, MCP connectors/
+ *  resources/annotations, mid-turn capture, and the prompt-directive bundle. */
+const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+  return {
     // file_history_rewind — opt-in (`gateOn` vocab; #24). Default false ⇒ no per-file
     // history store, no capture sink, no file_history_rewind tool (byte-identical).
     fileHistory: gateOn(env, "QUANTA_FILE_HISTORY"),
@@ -332,6 +378,13 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
     adaptiveThinking: gateOn(env, "QUANTA_ADAPTIVE_THINKING"),
     // RFC jun-6 §5.1 — advisor full-history forward (opt-in (`gateOn` vocab; #24)).
     advisorForwardHistory: gateOn(env, "QUANTA_ADVISOR_FORWARD_HISTORY"),
+  }
+}
+
+/** FS-jail / cap-enforce, session + transcript, tool-output caps, LLM stream
+ *  timings, bench/swebench dirs + knobs, hooks, deferred/async, auto-dream. */
+const parseSessionBenchSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+  return {
     // SECURITY protection (filesystem jail) — tearing it down requires the
     // deliberate, unambiguous `=off`; a loose `=0` must NOT silently drop the jail.
     fsJailDisabled: gateDisabledStrict(env, "QUANTA_FS_JAIL"),
@@ -416,6 +469,15 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       "QUANTA_AUTO_DREAM_SESSIONS",
     ),
     autoDreamHours: parsePositiveNumber(env["QUANTA_AUTO_DREAM_HOURS"], "QUANTA_AUTO_DREAM_HOURS"),
+  }
+}
+
+/** Log-rate-limit, cloud credential helpers + transport, prompt-cache TTL,
+ *  oauth-revoke, ipynb outputs, BYOK, session auto-title, tool-interrupt +
+ *  critical-section, permission hook, and the exfil-rail (glob/budget/scouting/
+ *  secret-egress). */
+const parseSecuritySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+  return {
     // Log rate-limit is a DoS guard; disabling it requires the unambiguous `=off`.
     logRateLimitDisabled: gateDisabledStrict(env, "QUANTA_LOG_RATE_LIMIT"),
     // H7 — rotating cloud credentials. All default-UNSET ⇒ no helper, no
@@ -501,6 +563,15 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_SECRET_EGRESS_MAX_BODY"],
       "QUANTA_SECRET_EGRESS_MAX_BODY",
     ),
+  }
+}
+
+/** TLS-MITM, syntax-chunk / read-outline / tree-sitter, manifest-compat,
+ *  guardian/auto-review/approval-ladder, auto-mode/circumvent, fs-ownership,
+ *  central-config (dir/sources/trusted-paths), fast-apply, MCP protocol max,
+ *  and the scriptable status-line config (the trailing run of the legacy literal). */
+const parseConfigTailSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+  return {
     // jun-7 TLS-MITM — OPERATOR-OPT-IN (stronger gate). Requires BOTH the master
     // switch `=1` AND the verbatim ack phrase, so a stray `=1` cannot mint a
     // trust anchor. Either missing ⇒ false ⇒ CONNECT stays a raw tunnel
@@ -595,7 +666,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
       env["QUANTA_STATUS_LINE"],
       env["QUANTA_STATUS_LINE_CONFIG"],
     ),
-  })
+  }
 }
 
 let cached: RuntimeConfig | undefined
