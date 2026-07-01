@@ -3860,7 +3860,26 @@ export const runRepairRoundsInSnapshot = async (args: {
   return { patch, out: captured }
 }
 
-const runRepairPhase = async (
+/** Derived inputs for a repair phase — the setup portion of `runRepairPhase`
+ *  (posture resolution, repro-vote validator, spec-gate/strong-oracle predicate,
+ *  breadth-candidate seeding, acceptance chooser). Split out (jul-02) so the
+ *  orchestrator stays under the god-FN body threshold; pure behavior-preserving
+ *  seam. `acceptanceSelection` is a mutable holder the acceptance callback writes
+ *  to and the orchestrator reads after the loop (identical to the prior closure
+ *  over a `let`). */
+interface RepairPhaseInputs {
+  readonly repairPosture: BenchPosture
+  readonly repairBreadth: number
+  readonly repairIssueSymbols: ReturnType<typeof extractIssueHint>["symbols"]
+  readonly repairLlmEvidence: Partial<LlmEvidenceArtifacts>
+  readonly validate: RepairBreadthDeps["validate"]
+  readonly repairEvaluatePredicate: RepairBreadthDeps["validateInputs"]["evaluatePredicate"]
+  readonly runCandidates: ReturnType<typeof makeRepairBreadthRunCandidates> | undefined
+  readonly acceptanceSelectCandidates: ReturnType<typeof makeAcceptanceSelectCandidates>
+  readonly acceptanceSelection: { current?: { tier: RerankTier; winningPatch: string } }
+}
+
+const buildRepairPhaseInputs = (
   instance: Instance,
   deps: RunInstanceDeps,
   sandbox: string,
@@ -3871,24 +3890,15 @@ const runRepairPhase = async (
   reproHint: string | undefined,
   closureHint: string | undefined,
   primaryRailStep: PrimaryRailStep | undefined,
-  siblingOwners: readonly string[],
   reproSources: readonly string[],
   ownerNearRegressionSet: readonly string[],
-  verificationTarget: VerificationTargetFact | undefined,
-  /** jun-26 repair spec gate / jun-28 strong-oracle: PUBLIC issue-declared expected
-   *  output (from the closure session). Composed into the repair `evaluatePredicate`
-   *  ONLY when `repairSpecGate` or `repairStrongOracle` is on; absent / both off ⇒
-   *  the raw evaluator is used (byte-identical). */
   issueDeclaredExpected: IssueDeclaredExpected | undefined,
-  postureOverride?: BenchPosture,
-  stateOverride?: BenchKnobState,
-  chaMultisiteSteer?: string,
-  chaRepairTargets?: readonly ChaRepairTarget[],
-  /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
-   *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
-   *  (byte-identical). Passed into the repair-breadth deps. */
-  perCandidateSeed?: PerCandidateSeed,
-): Promise<Phase> => {
+  postureOverride: BenchPosture | undefined,
+  stateOverride: BenchKnobState | undefined,
+  chaMultisiteSteer: string | undefined,
+  chaRepairTargets: readonly ChaRepairTarget[] | undefined,
+  perCandidateSeed: PerCandidateSeed | undefined,
+): RepairPhaseInputs => {
   // jun-25 — suppress the localize-phase EDIT-BLOCK for repair rounds. The fault
   // is already localized in repair (patch exists + failing gate named), so the
   // Phase-1 edit-block is a straitjacket that re-fires every fresh repair session
@@ -3978,7 +3988,7 @@ const runRepairPhase = async (
   // a STALE tier attributed to a patch acceptance never chose. After the loop we
   // emit the tier ONLY if this selection's winner is the finally-submitted patch
   // (`out.patch`). tier-3 dominance on Pro ⇒ the ladder gave no real selection.
-  let lastAcceptanceSelection: { tier: RerankTier; winningPatch: string } | undefined
+  const acceptanceSelection: { current?: { tier: RerankTier; winningPatch: string } } = {}
   const acceptanceSelectCandidates = makeAcceptanceSelectCandidates(
     instance,
     reproSources,
@@ -3988,8 +3998,82 @@ const runRepairPhase = async (
     ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
     (t) => {
-      lastAcceptanceSelection = { tier: t.tier, winningPatch: t.winningPatch }
+      acceptanceSelection.current = { tier: t.tier, winningPatch: t.winningPatch }
     },
+  )
+  return {
+    repairPosture,
+    repairBreadth,
+    repairIssueSymbols,
+    repairLlmEvidence,
+    validate,
+    repairEvaluatePredicate,
+    runCandidates,
+    acceptanceSelectCandidates,
+    acceptanceSelection,
+  }
+}
+
+const runRepairPhase = async (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  sandbox: string,
+  signal: AbortSignal,
+  w: Wiring,
+  repair: NonNullable<RunInstanceDeps["repair"]>,
+  precomputedHint: string | undefined,
+  reproHint: string | undefined,
+  closureHint: string | undefined,
+  primaryRailStep: PrimaryRailStep | undefined,
+  siblingOwners: readonly string[],
+  reproSources: readonly string[],
+  ownerNearRegressionSet: readonly string[],
+  verificationTarget: VerificationTargetFact | undefined,
+  /** jun-26 repair spec gate / jun-28 strong-oracle: PUBLIC issue-declared expected
+   *  output (from the closure session). Composed into the repair `evaluatePredicate`
+   *  ONLY when `repairSpecGate` or `repairStrongOracle` is on; absent / both off ⇒
+   *  the raw evaluator is used (byte-identical). */
+  issueDeclaredExpected: IssueDeclaredExpected | undefined,
+  postureOverride?: BenchPosture,
+  stateOverride?: BenchKnobState,
+  chaMultisiteSteer?: string,
+  chaRepairTargets?: readonly ChaRepairTarget[],
+  /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
+   *  localizer's ranked files). Absent ⇒ breadth candidates share the base seed
+   *  (byte-identical). Passed into the repair-breadth deps. */
+  perCandidateSeed?: PerCandidateSeed,
+): Promise<Phase> => {
+  // Setup (posture / validator / predicate / breadth-seed / acceptance chooser)
+  // is derived in `buildRepairPhaseInputs`; this orchestrator runs the rounds.
+  const {
+    repairPosture,
+    repairBreadth,
+    repairIssueSymbols,
+    repairLlmEvidence,
+    validate,
+    repairEvaluatePredicate,
+    runCandidates,
+    acceptanceSelectCandidates,
+    acceptanceSelection,
+  } = buildRepairPhaseInputs(
+    instance,
+    deps,
+    sandbox,
+    signal,
+    w,
+    repair,
+    precomputedHint,
+    reproHint,
+    closureHint,
+    primaryRailStep,
+    reproSources,
+    ownerNearRegressionSet,
+    issueDeclaredExpected,
+    postureOverride,
+    stateOverride,
+    chaMultisiteSteer,
+    chaRepairTargets,
+    perCandidateSeed,
   )
   const { patch, out } = await runRepairRoundsInSnapshot({
     instance,
@@ -4031,7 +4115,7 @@ const runRepairPhase = async (
   // the orchestrator's last-round view. They agree by construction (single sandbox).
   const capturedPatch = patch !== "" ? patch : out.patch
   const submissionReview = maybeReviewSubmission(capturedPatch)
-  const acceptanceTier = attributeAcceptanceTier(lastAcceptanceSelection, out.patch)
+  const acceptanceTier = attributeAcceptanceTier(acceptanceSelection.current, out.patch)
   return {
     patch: capturedPatch,
     turns: out.turns,

@@ -64,7 +64,6 @@
     "src/runtime/shell.ts::runShell",
     "src/scheduler/automation-engine/in-memory.ts::inMemoryAutomationEngine",
     "src/scheduler/runtime.ts::processAutomation",
-    "src/shared/runtime-config.ts::loadFromEnv",
     "src/side-agent/registry.ts::createSideAgentDaemonRegistry",
     "src/stream/adapters/stdout.ts::emit",
     "src/subagent/handlers-6.ts::handleExecCommand",
