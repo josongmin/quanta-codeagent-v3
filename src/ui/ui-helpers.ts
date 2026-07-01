@@ -49,6 +49,16 @@ type ResolvedMode = "on" | "off"
  *  or a parallel test harness) can instantiate their own resolver. */
 export class ColorPolicyResolver {
   private cached: ResolvedMode | null = null
+  private readonly env: NodeJS.ProcessEnv
+
+  /** @param env Injectable env seam — the global is bound only at the call
+   *  boundary (the constructor) so the resolver is testable without touching
+   *  the real `process.env`. Defaults to `process.env`; the `NO_COLOR` /
+   *  `FORCE_COLOR` reads go through `this.env`. Byte-identical to the prior
+   *  direct `process.env.*` reads when unset. */
+  constructor(env: NodeJS.ProcessEnv = process.env) {
+    this.env = env
+  }
 
   /** Resolve color mode lazily on first use. Order:
    *   1. Explicit override via `set()` (test seam).
@@ -57,11 +67,11 @@ export class ColorPolicyResolver {
    *   4. `process.stdout.isTTY` truthy → on, else off. */
   resolve(): ResolvedMode {
     if (this.cached !== null) return this.cached
-    if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") {
+    if (this.env.NO_COLOR !== undefined && this.env.NO_COLOR !== "") {
       this.cached = "off"
       return this.cached
     }
-    if (process.env.FORCE_COLOR === "1") {
+    if (this.env.FORCE_COLOR === "1") {
       this.cached = "on"
       return this.cached
     }

@@ -73,7 +73,10 @@ export interface HealthSnapshotBuildOpts {
   /** Slices intentionally absent from the bag: snapshot keeps `wired=false`
    *  but surfaces operator intent as `note="skipped intentionally"`. */
   readonly skippedExpected?: ReadonlySet<keyof ObservabilityBag>
-  /** Caller version. Default reads from `process.env.QUANTA_VERSION` || "unknown". */
+  /** Caller version. The composition root resolves the version (e.g. from
+   *  `QUANTA_VERSION`) and passes it here; when omitted the snapshot records
+   *  `"unknown"`. Slice invariant (ADR-0144): `@/observability` never reads
+   *  `process.env` itself — the env is bound only at the call boundary. */
   readonly quantaVersion?: string
   /** Test seam — inject clock (epoch ms). Default `Date.now`. */
   readonly now?: () => number
