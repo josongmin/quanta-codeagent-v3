@@ -215,6 +215,13 @@ const buildTerminalBootstrapDeps = (
   }
 }
 
+/** Idle-input timeout for the offline brain runtime. There is NO human at the
+ *  keyboard on the box, so this only bounds "no inbound frame" — 60s is long
+ *  enough that a slow model turn or tool exec is not mistaken for idle, short
+ *  enough that a genuinely wedged run surfaces instead of hanging the box.
+ *  Named (no-magic-timeout guard). */
+const TERMINAL_BRAIN_IDLE_TIMEOUT_MS = 60_000
+
 /** Build the leanest valid {@link SessionRuntimeConfigShape} for an offline brain run. No
  *  `process.*` reads — the surface entry threads argv-derived values in. */
 const buildTerminalRuntime = (opts: RunTerminalBrainOpts): SessionRuntimeConfigShape => ({
@@ -232,7 +239,7 @@ const buildTerminalRuntime = (opts: RunTerminalBrainOpts): SessionRuntimeConfigS
   stdoutIsTTY: false,
   newSession: false,
   title: undefined,
-  idleMs: 60_000,
+  idleMs: TERMINAL_BRAIN_IDLE_TIMEOUT_MS,
   snoozeDefaultMs: 300_000,
   rejectLimit: 20,
   idleSuppressOn: false,
@@ -286,6 +293,92 @@ const finalAssistantText = (messages: readonly Message[]): string => {
  * loop with the operator guide + instruction, write the report, and signal EOF. Fully injected —
  * the hellgate drives it network-free / fs-free. Returns the turn count + the written report.
  */
+/** Lever #2 — verify-before-finalize gate (STRUCTURAL/SELECTIVE/BOUNDED/HONEST,
+ *  RFC jul-2). The harness (not a prompt line) inspects the recorded trajectory
+ *  for evidence the deliverable was RUN AND OBSERVED; when absent AND the run has
+ *  turn budget left, it fires the ONE follow-up (at most once — no loop, so the
+ *  ~3× over-persist that got the prior blanket steer reverted is structurally
+ *  impossible), then re-inspects and stamps a verified-pass/fail/unverifiable
+ *  trichotomy. `followUpFired` rides the stamp for A/B attribution. Extracted
+ *  from `runTerminalBrain` to keep it under the god-FUNCTION cap. */
+const runVerifyBeforeFinalizeGate = async (args: {
+  session: Parameters<typeof runSessionTurn>[0]["session"]
+  stream: CapturingStream
+  turnSignal: AbortSignal
+  maxTurns: number
+  outcomeTurns: number
+  messages: readonly Message[]
+}): Promise<{
+  outcomeTurns: number
+  messages: readonly Message[]
+  verification: VerificationStamp
+}> => {
+  let outcomeTurns = args.outcomeTurns
+  let messages = args.messages
+  let followUpFired = false
+  const preVerdict = inspectExerciseEvidence(args.stream.events)
+  // Fire the ONE follow-up ONLY when there is no exercise evidence AND the run has
+  // not already exhausted its turn budget (the budget guard is what stops a nudge
+  // PAST the cap on an exhausted run — the over-persist the RFC forbids).
+  if (!preVerdict.exercised && outcomeTurns < args.maxTurns) {
+    const followUp = await runSessionTurn({
+      session: args.session,
+      resolveApproval: async () => "approve",
+      text: VERIFY_GATE_FOLLOWUP,
+      turnSignal: args.turnSignal,
+      env: {},
+    })
+    outcomeTurns = followUp.outcome.turns
+    messages = followUp.messages
+    followUpFired = true
+  }
+  const verification = {
+    ...deriveVerificationState(
+      inspectExerciseEvidence(args.stream.events),
+      finalAssistantText(messages),
+    ),
+    followUpFired,
+  }
+  return { outcomeTurns, messages, verification }
+}
+
+/** Emit the brain's contract output (report file THEN stdout EOF — order matters,
+ *  spec B3: the hands `serve` loop ends on EOF and immediately reads the report,
+ *  so EOF before the write would race a missing/stale report) and produce the
+ *  result. Re-throws a captured mid-run error AFTER the channel is closed so the
+ *  process still exits non-zero. Extracted to keep `runTerminalBrain` under the
+ *  god-FUNCTION cap. */
+const finalizeTerminalBrain = (
+  opts: RunTerminalBrainOpts,
+  stream: CapturingStream,
+  state: {
+    outcomeTurns: number
+    messages: readonly Message[]
+    verification: VerificationStamp | undefined
+    envOwnedApplied: boolean
+    runError: unknown
+  },
+): TerminalBrainResult => {
+  const tokens = totalTokens(stream.events)
+  const report: TerminalBrainReport = {
+    instruction: opts.instruction,
+    turns: state.outcomeTurns,
+    tokens,
+    // cost is computed host-side from a pricing table the brain surface does not
+    // own; the report carries 0 here and the hands/orchestrator may enrich it.
+    cost_usd: 0,
+    final: finalAssistantText(state.messages),
+    // Lever #2 / #1 stamps — exact-optional spread ⇒ the field is entirely ABSENT
+    // when the gate/posture is off, keeping the report byte-identical to pre-lever.
+    ...(state.verification !== undefined ? { verification: state.verification } : {}),
+    ...(state.envOwnedApplied ? { envPosture: "owned" as const } : {}),
+  }
+  opts.writeReport(opts.reportOut, report)
+  opts.closeStdout?.()
+  if (state.runError !== undefined) throw state.runError
+  return { turns: state.outcomeTurns, report }
+}
+
 export const runTerminalBrain = async (
   opts: RunTerminalBrainOpts,
 ): Promise<TerminalBrainResult> => {
@@ -309,7 +402,6 @@ export const runTerminalBrain = async (
   let messages: readonly Message[] = []
   let verification: VerificationStamp | undefined
   let envOwnedApplied = false
-  let followUpFired = false
   let runError: unknown
   try {
     const boot = await bootstrapSession(deps, runtime, {})
@@ -368,46 +460,20 @@ export const runTerminalBrain = async (
       outcomeTurns = turnResult.outcome.turns
       messages = turnResult.messages
 
-      // ── Lever #2: verify-before-finalize gate (default-OFF ⇒ this whole block is skipped) ──
-      // STRUCTURAL, SELECTIVE, BOUNDED, HONEST (RFC jul-2 §Design):
-      //  - STRUCTURAL: the harness (not a prompt line the model may ignore) inspects the recorded
-      //    trajectory for evidence the deliverable was RUN AND OBSERVED (not merely created/listed).
-      //  - SELECTIVE: the follow-up fires ONLY when no such evidence exists.
-      //  - BOUNDED: the follow-up fires AT MOST ONCE (one `runSessionTurn`, no loop) — the ~3×
-      //    over-persist that got the prior blanket "verify-before-submit" steer reverted is
-      //    structurally impossible here (there is no re-check-and-retry cycle).
-      //  - HONEST: the verdict is a `verified-pass` / `verified-fail` / `unverifiable` trichotomy;
-      //    `unverifiable` and `verified-fail` finalize immediately (accepted terminal states).
+      // ── Lever #2: verify-before-finalize gate (default-OFF ⇒ skipped, brain byte-identical) ──
+      // See {@link runVerifyBeforeFinalizeGate} for the STRUCTURAL/SELECTIVE/BOUNDED/HONEST contract.
       if (verifyGateOn) {
-        const preVerdict = inspectExerciseEvidence(stream.events)
-        // BOUNDED (RFC jul-2 §Design Phase 3): fire the ONE follow-up ONLY when there is no exercise
-        // evidence AND the run has NOT already exhausted its turn budget. The budget guard is what the
-        // RFC promised — without it the gate could inject a turn PAST the cap on a run that already ran
-        // out (reproducing the over-persist that got the prior blanket steer reverted). At budget we
-        // skip the follow-up and stamp the honest pre-verdict (`unverifiable`). It cannot loop: at most
-        // one `runSessionTurn`, ever.
-        if (!preVerdict.exercised && outcomeTurns < (opts.maxTurns ?? 30)) {
-          const followUp = await runSessionTurn({
-            session,
-            resolveApproval: async () => "approve",
-            text: VERIFY_GATE_FOLLOWUP,
-            turnSignal: boot.abort.signal,
-            env: {},
-          })
-          outcomeTurns = followUp.outcome.turns
-          messages = followUp.messages
-          followUpFired = true
-        }
-        // Re-inspect the (possibly-extended) trajectory + read the model's final stated outcome.
-        // If the follow-up STILL shows no exercise ⇒ `unverifiable` (finalize; never re-ask).
-        // `followUpFired` rides the stamp so the A/B can attribute a flip to the gate's nudge.
-        verification = {
-          ...deriveVerificationState(
-            inspectExerciseEvidence(stream.events),
-            finalAssistantText(messages),
-          ),
-          followUpFired,
-        }
+        const gated = await runVerifyBeforeFinalizeGate({
+          session,
+          stream,
+          turnSignal: boot.abort.signal,
+          maxTurns: opts.maxTurns ?? 30,
+          outcomeTurns,
+          messages,
+        })
+        outcomeTurns = gated.outcomeTurns
+        messages = gated.messages
+        verification = gated.verification
       }
     } finally {
       await session.close().catch(() => undefined)
@@ -421,30 +487,13 @@ export const runTerminalBrain = async (
     runError = err
   }
 
-  // ORDER MATTERS (spec B3): write the report FIRST, THEN signal EOF on stdout — the hands-side
-  // `serve` loop ends on EOF and immediately reads the report file, so EOF before the write would
-  // race a missing/stale report.
-  const tokens = totalTokens(stream.events)
-  const report: TerminalBrainReport = {
-    instruction: opts.instruction,
-    turns: outcomeTurns,
-    tokens,
-    // cost is computed host-side from a pricing table the brain surface does not own; the report
-    // carries 0 here and the hands/orchestrator may enrich it. Kept explicit so the shape is fixed.
-    cost_usd: 0,
-    final: finalAssistantText(messages),
-    // Lever #2 stamp — PRESENT only when the gate ran (knob ON). Exact-optional spread ⇒ the field
-    // is entirely ABSENT when the gate is off, keeping the report byte-identical to pre-lever.
-    ...(verification !== undefined ? { verification } : {}),
-    // Lever #1 stamp — PRESENT only when the owned posture was applied (knob ON). Exact-optional
-    // spread ⇒ ABSENT when off, keeping the report byte-identical to pre-lever.
-    ...(envOwnedApplied ? { envPosture: "owned" as const } : {}),
-  }
-  opts.writeReport(opts.reportOut, report)
-  opts.closeStdout?.()
-
-  if (runError !== undefined) throw runError
-  return { turns: outcomeTurns, report }
+  return finalizeTerminalBrain(opts, stream, {
+    outcomeTurns,
+    messages,
+    verification,
+    envOwnedApplied,
+    runError,
+  })
 }
 
 /* c8 ignore start — process-level shim: argv / real stdio / real fs binding. The testable core

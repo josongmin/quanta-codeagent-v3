@@ -72,6 +72,8 @@ const RULES: readonly Rule[] = [
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
       "apps/bench/run-main.ts":
         "Bench local-run composition root extracted verbatim from apps/bench/index.ts (already allowlisted) — owns the same dotenv shim + QUANTA_BENCH_* / QUANTA_SWEBENCH_* launch-time reads; downstream logic receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/terminal/brain-mode.ts":
+        "The 3 reads live ONLY in the `c8 ignore` process-level shim (`runMain`/`buildRealLlm`): launch-time provider/LLM selection off `process.env` (`pickProvider`/`tryCreateLLM`) + threading `process.env` into the pure `runTerminalBrain` core as the DEFAULT of its injected `env` param (tests pass a fake env). Provider selection is a launch-time decision, not a feature read — same shim posture as apps/cli/index.ts. The testable core reads NO ambient env.",
       "apps/bench/run-args.ts":
         "Bench CLI-arg parsing concern extracted verbatim from apps/bench/run-main.ts — the tiny dotenv shim (loadEnv writes process.env before any runtimeConfig() read) + the QUANTA_BENCH_CONCURRENCY launch-time read; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/dataset-family.ts":
