@@ -32,6 +32,7 @@ import type { ReproArtifactSink } from "../repro-artifacts-sink"
 import type { RetryPolicy } from "../retry-policy"
 import type { SelectionTelemetry } from "../selection-executor"
 import type { SubmissionReview } from "../submission-review"
+import type { ReproViabilityReview } from "../repro-viability"
 import type { PythonSwebenchEvaluate } from "../verdict"
 
 export interface RunInstanceDeps {
@@ -222,6 +223,10 @@ export interface Phase {
   /** #6 submit-review (QUANTA_BENCH_SUBMIT_REVIEW): observe-only verdict over the
    *  final captured patch (clean / empty / test-edits). Absent ⇒ knob off. */
   submissionReview?: SubmissionReview
+  /** Spec step-5 (QUANTA_BENCH_REPRO_VIABILITY): observe-only fix-free viability
+   *  label over the captured patch vs the ACTUAL reproducing test source. Telemetry
+   *  only — reject-mode NOT wired. Absent ⇒ knob off ⇒ byte-identical. */
+  reproViabilityReview?: ReproViabilityReview
 }
 
 export type RepairConfig = NonNullable<RunInstanceDeps["repair"]>

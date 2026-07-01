@@ -286,6 +286,21 @@ export const benchSubmitReviewSchema: KnobSchema<boolean> = {
   parse: parseGateBool,
 }
 
+/* ── QUANTA_BENCH_REPRO_VIABILITY (env-direct, driver.ts via gateOn) ────────── */
+export const benchReproViabilitySchema: KnobSchema<boolean> = {
+  id: "bench-repro-viability",
+  envKey: "QUANTA_BENCH_REPRO_VIABILITY",
+  kind: "bool",
+  default: false,
+  describe:
+    "Bench: post-fix repro-viability review (spec step-5 cheap fix-free viability). OBSERVE-ONLY / telemetry only — after the repair phase captures a patch, the model labels whether that patch is STRUCTURALLY capable of making the ACTUAL reproducing test source pass (viable / nonviable / unparseable). It reuses the reproSources (real reproduce_issue.py bodies) already threaded into runRepairPhase plus the problem statement and captured patch — no boilerplate hint, no heuristic/threshold/regex. The reject-mode (skip the expensive re-grade for a nonviable patch) is NOT wired: the observation NEVER alters the instance result or control flow (fail-open, THROW-free). Future reject-mode wiring point = pre-repair, just before runRepairRoundsInSnapshot. Default-OFF ⇒ 0 llm calls ⇒ nothing attached ⇒ byte-identical.",
+  knobDescribe:
+    "Repro-viability review (viable/nonviable/unparseable) on the final patch vs the actual reproducing test source — observe-only telemetry, reject-mode not wired",
+  readSite: "runner/batch/eval/driver.ts",
+  surfaces: BENCH,
+  parse: parseGateBool,
+}
+
 /* ── QUANTA_BENCH_EFFORT_LADDER (env-direct int, adaptive-escalation) ───────── */
 // MIRROR of `resolveEffortLadderLimits`: positive integer tier turns it on; 0 /
 // negative / non-integer / unset ⇒ off (the controller uses DEFAULT limits).

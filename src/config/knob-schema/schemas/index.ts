@@ -88,6 +88,7 @@ import {
   benchEffortLadderSchema,
   benchFindRefsSchema,
   benchReproImageExecSchema,
+  benchReproViabilitySchema,
   benchSampleTempSchema,
   benchSubmitReviewSchema,
   benchVoteNormalizeSchema,
@@ -190,6 +191,7 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   benchLocationFanoutSchema, // QUANTA_BENCH_LOCATION_FANOUT
   benchEffortLadderSchema, // QUANTA_BENCH_EFFORT_LADDER
   benchSubmitReviewSchema, // QUANTA_BENCH_SUBMIT_REVIEW
+  benchReproViabilitySchema, // QUANTA_BENCH_REPRO_VIABILITY
   benchVoteNormalizeSchema, // QUANTA_BENCH_VOTE_NORMALIZE
   benchSampleTempSchema, // QUANTA_BENCH_SAMPLE_TEMP
   benchReproImageExecSchema, // QUANTA_BENCH_REPRO_IMAGE_EXEC

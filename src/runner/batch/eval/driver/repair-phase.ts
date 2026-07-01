@@ -45,6 +45,7 @@ import { deriveCandidateStructuralRepair } from "./candidate-family-ports"
 import { repairLocalizePhaseSuppressed } from "./config-build"
 import { type Phase, type RunInstanceDeps, readSandboxSource } from "./context-types"
 import { familyCoverageCoeditEnabled, resolveLaneLlm } from "./selection-phase"
+import { maybeReviewReproViability } from "../repro-viability-wire"
 import {
   applySampleTemperature,
   buildReproVoteValidate,
@@ -489,6 +490,16 @@ export const runRepairPhase = async (
   // the orchestrator's last-round view. They agree by construction (single sandbox).
   const capturedPatch = patch !== "" ? patch : out.patch
   const submissionReview = maybeReviewSubmission(capturedPatch)
+  // Spec step-5 observe-only fix-free viability label (default-OFF ⇒ undefined ⇒
+  // byte-identical; fail-open, never diverts control flow). Reuses `reproSources`
+  // (the ACTUAL reproduce_issue.py bodies already threaded into this phase).
+  const reproViabilityReview = await maybeReviewReproViability({
+    llm: deps.llm,
+    problemStatement: instance.problemStatement,
+    reproSources,
+    capturedPatch,
+    signal,
+  })
   const acceptanceTier = attributeAcceptanceTier(acceptanceSelection.current, out.patch)
   return {
     patch: capturedPatch,
@@ -502,6 +513,7 @@ export const runRepairPhase = async (
     ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
     ...(submissionReview !== undefined ? { submissionReview } : {}),
+    ...(reproViabilityReview !== undefined ? { reproViabilityReview } : {}),
     // Attribute the tier ONLY when the last selection's winner IS the submitted
     // patch (`out.patch` = orchestrator final `prevRun.patch`, same string lineage
     // as the adapter's `selected.patch`). A trailing non-selected fallback round

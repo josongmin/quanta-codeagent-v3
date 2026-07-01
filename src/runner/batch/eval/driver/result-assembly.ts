@@ -454,6 +454,9 @@ const attachSelectionAndClosureArtifacts = (args: {
   if (args.phase.submissionReview !== undefined) {
     args.extra.submissionReview = args.phase.submissionReview
   }
+  if (args.phase.reproViabilityReview !== undefined) {
+    args.extra.reproViabilityReview = args.phase.reproViabilityReview
+  }
   attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
   const hygiene =
