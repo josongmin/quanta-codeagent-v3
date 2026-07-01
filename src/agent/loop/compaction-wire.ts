@@ -129,6 +129,16 @@ const maybeMicrocompact = (
 export const compactNowOnDemand = async (
   config: AgentConfig,
   wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number },
+  // D5 (jul-2) — the per-session token-baseline BOX. On-demand `/summarize-now`
+  // shrinks the prefix via `wm.replace` below, so the baseline measured against
+  // the OLD prefix is now stale (its `measuredAtMessageCount` index no longer maps
+  // onto the new transcript). Every OTHER replace site invalidates it (the
+  // proactive path at ~L202, the reactive path in recovery-executor); this one did
+  // NOT, so once the transcript regrew past the stale index the `> length`
+  // fail-safe stopped firing and a later turn compacted prematurely. Thread the box
+  // (same shape the proactive path takes) and invalidate AFTER the replace.
+  // `undefined` ⇒ no box wired ⇒ byte-identical to the pre-fix behaviour.
+  tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined = undefined,
   activeModel: string = configuredModel(config.llm),
 ): Promise<boolean> => {
   if (!config.compaction) return false
@@ -147,9 +157,18 @@ export const compactNowOnDemand = async (
       : {}),
   })
   if (!result.compacted) return false
+  const before = wm.snapshot().length
   // CRITICAL (§4.6): install via `wm.replace` so the delta-token counter reseeds
   // (a direct `wm.messages[i]` write would bypass it and drift `tokenTotal()`).
   wm.replace([...result.messages])
+  // D5 (jul-2) — the on-demand summarize just replaced the prefix. If it SHRANK
+  // the transcript, the token baseline measured against the old prefix is stale;
+  // invalidate it via the owner method (the same `invalidateOnShrink` seam the
+  // proactive path in `prepareTurnContext` uses) so a stale index cannot force a
+  // premature compaction on a later turn. No-op when no box is wired or the
+  // transcript did not shrink (byte-identical).
+  if (tokenBaselineBox !== undefined)
+    TokenBaselineBox.wrap(tokenBaselineBox).invalidateOnShrink(before, wm.snapshot().length)
   return true
 }
 
@@ -366,7 +385,16 @@ export const resolveContextEventsForTurn = (
   if (config.contextEventsForTurn === undefined) return []
   try {
     return config.contextEventsForTurn()
-  } catch {
+  } catch (e) {
+    // A throwing context-events provider must be OBSERVABLE, not silently
+    // indistinguishable from "no events" — mirror the sibling `resolveMemoryContext`
+    // (context-assembler) which surfaces a NON-FATAL `error` event on throw. We
+    // still degrade clean (return `[]`); the emit only ADDS visibility. The SUCCESS
+    // path is untouched (no emit when nothing throws) ⇒ byte-identical.
+    config.stream.emit({
+      type: "error",
+      message: `context-events provider failed: ${errMessage(e)}`,
+    })
     return []
   }
 }

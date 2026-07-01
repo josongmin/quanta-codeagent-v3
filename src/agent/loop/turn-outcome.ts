@@ -58,25 +58,33 @@ export const resolveTurnLoopOutcome = async (args: {
     }
   }
   args.recorder?.turn()
-  const exhausted = args.cfg.budgetMeter?.checkExhausted()
-  if (exhausted?.exhausted) {
-    if (args.result.kind === "tools") {
-      appendPendingToolResults(args.wm, args.result.resultBlocks)
+  if (args.result.kind === "completed") {
+    // A cleanly-completed FINAL turn is terminal on its OWN merit — the natural
+    // outcome WINS even if this turn also crossed the post-turn budget meter
+    // (mirrors the L4 ledger placement in turn-loop.ts, which is deliberately
+    // AFTER the natural outcome). Meter exhaustion only pre-empts a CONTINUATION
+    // (the `tools` case below), never a completion.
+    return {
+      kind: "finish",
+      reason: "completed",
+      turns: args.turn,
+      stopCategory: completedCategory("normal"),
     }
+  }
+  // Meter-exhaustion is terminal only when the turn is about to CONTINUE
+  // (kind === "tools"): the loop would otherwise append tool_results and loop
+  // again, so a crossed budget stops it here. Preserve appendPendingToolResults
+  // for that case so the transcript stays well-formed.
+  const exhausted =
+    args.result.kind === "tools" ? args.cfg.budgetMeter?.checkExhausted() : undefined
+  if (exhausted?.exhausted) {
+    appendPendingToolResults(args.wm, args.result.resultBlocks)
     emitBudgetExhaustedDecision(args.cfg.decisionEmitter, exhausted, { turn: args.turn })
     return {
       kind: "finish",
       reason: "budget_exhausted",
       turns: args.turn,
       stopCategory: completedCategory("max_turns"),
-    }
-  }
-  if (args.result.kind === "completed") {
-    return {
-      kind: "finish",
-      reason: "completed",
-      turns: args.turn,
-      stopCategory: completedCategory("normal"),
     }
   }
   args.breaker?.noteProgress()

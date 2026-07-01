@@ -82,7 +82,17 @@ export const resolveMentionInjectionMessages = async (
   if (userText === undefined || userText.length === 0) return []
   try {
     return await config.mentionInjector(userText)
-  } catch {
+  } catch (e) {
+    // A throwing mention/@-file injector must be OBSERVABLE — otherwise a failed
+    // `@file` expansion is indistinguishable from "no mentions to inject" and the
+    // user's referenced context silently vanishes. Mirror the sibling
+    // `resolveMemoryContext` above which surfaces a NON-FATAL `error` event on
+    // throw. Still degrade clean (return `[]`); the emit only ADDS visibility. The
+    // SUCCESS path is untouched (no emit when nothing throws) ⇒ byte-identical.
+    config.stream.emit({
+      type: "error",
+      message: `mention injection failed: ${errMessage(e)}`,
+    })
     return []
   }
 }

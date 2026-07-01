@@ -5,7 +5,7 @@ import {
   snapshotToNotice,
 } from "@/llm/ratelimit-snapshot"
 import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from "@/observability"
-import { abortReasonOf, errMessage, LLMError, runtimeConfig } from "@/shared"
+import { abortReasonOf, errMessage, LLMError } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
@@ -116,11 +116,18 @@ export const streamConsume = async (
   const { config, specs, recorder, skillGate, rateLimitProactive } = session
   const { collector, toolChoiceState, onTurnTiming, taskSpend } = state
   const { messages, system } = ctx
-  // ADR-0512 L1 — availability filter. When skill-scope v2 is ON, the model
-  // sees ONLY the tools in scope (nav-base ∪ active skill allowlist); OFF ⇒
-  // `specs` unchanged (byte-identical). Reuses `skillGate.allow` so the visible
-  // set and the dispatch gate share one predicate.
-  const visibleSpecs = runtimeConfig().skillScopeV2 ? filterSpecsByScope(specs, skillGate) : specs
+  // ADR-0512 L1 — availability filter. The model must never SEE a tool the
+  // dispatch gate (`handleSkillScope` → `skillGate.allow`) will deny, or it
+  // fumbles into a guaranteed "not permitted" tool_result (see-but-can't-call).
+  // The dispatch deny fires whenever a `skillGate` with an armed allowlist is
+  // active — INDEPENDENT of `skillScopeV2` — so the visible-spec filter must fire
+  // on the SAME condition. Both sites share the `skillGate.allow` predicate via
+  // `filterSpecsByScope`, so visible == dispatchable in BOTH flag states. When no
+  // skill is armed (`skillGate` absent, or `allow` returns true for every tool)
+  // `filterSpecsByScope` returns the SAME `specs` reference (byte-identical). v2
+  // ON is unchanged (it already filtered). NOTE: the flag still gates the v2
+  // escalation UX in `handleSkillScope`; only the VISIBILITY filter is unified.
+  const visibleSpecs = filterSpecsByScope(specs, skillGate)
   const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
   session.ttfm?.markFirstDispatch()
   emitLlmRequest(
@@ -223,7 +230,11 @@ export const streamConsume = async (
     }
   } catch (e) {
     if (isSessionApprovalRequiredError(e)) {
-      samplingStatus = "error"
+      // An approval-required PAUSE is an intentional HITL hand-off, NOT a hard
+      // failure — record the sampling span as "aborted" (paused), not "error",
+      // so the interrupt is not mislabeled as a provider/runtime error. Control
+      // flow is unchanged: the error is rethrown so the caller pauses the turn.
+      samplingStatus = "aborted"
       throw e
     }
     if (
