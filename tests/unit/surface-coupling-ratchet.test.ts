@@ -20,7 +20,23 @@ const APP_NAMES: ReadonlySet<string> = new Set(
     .map((e) => e.name),
 )
 
-const ALLOWED_CROSS_SURFACE_IMPORTS = new Set<string>()
+// Documented, reviewed cross-surface edges. Each entry is a DECLARED contract
+// defended at review time — a new UNLISTED cross-surface import (including the
+// const-alias dynamic-import trick the scanner now resolves) still fails.
+//
+//  • `agent/mode-presets/batch.ts -> @/apps/bench/eval` — the batch mode-preset's
+//    LAZY fallback to the app-owned bench eval driver. The PRIMARY path is the
+//    injected `req.seams?.runInstance` seam (assemble.ts keeps the preset
+//    slice-isolated from `apps/bench`); the `import("@/apps/bench/eval")` in
+//    `resolveRunInstance` only runs when no seam was injected (a real
+//    `bun run bench`-style production call). The specifier was hoisted into the
+//    `BENCH_EVAL_MODULE` const, which previously hid this edge from the literal-
+//    only dynamic-import scanner; the scanner now const-resolves it, so the edge
+//    is VISIBLE and explicitly sanctioned here rather than silent. (RFC
+//    may-22-unified-agent-runtime / Phase 4+; see the batch.ts docblock.)
+const ALLOWED_CROSS_SURFACE_IMPORTS = new Set<string>([
+  "agent/mode-presets/batch.ts -> @/apps/bench/eval",
+])
 
 const toPosix = (path: string): string => path.replaceAll("\\", "/")
 

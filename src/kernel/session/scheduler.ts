@@ -2,6 +2,7 @@ import type { Message } from "@/llm"
 import type { ArtifactRef, SessionCommand, SessionEvent, TurnRunCommand } from "@/protocol/session"
 import { SessionProtocolValidationError } from "@/protocol/session"
 import { isAbort } from "@/shared/abortable"
+import { writeStderr } from "@/shared/terminal-io"
 import type {
   KernelCommittedEvents,
   KernelDispatchContext,
@@ -62,14 +63,16 @@ const composeTurnSignal = (
  * mistaken for a turn failure. We isolate the call so its rejection cannot
  * bubble into the turn try/catch that classifies terminal outcome. There is no
  * silent swallow: the error is surfaced via the kernel-global observer-error
- * sink (defaulting to `console.error`) so it stays visible without redefining
- * turn success/failure.
+ * sink (defaulting to the ADR-0303 injected `writeStderr` terminal sink) so it
+ * stays visible without redefining turn success/failure.
  */
 let observerErrorSink: (error: unknown) => void = (error) => {
-  // biome-ignore lint/suspicious/noConsole: kernel leaf cannot import a structured logger; this is the documented diagnostic surface (overridable via setKernelObserverErrorSink)
-  console.error(
-    "[kernel.session] onCommitted observer threw (diagnostic, not a turn failure):",
-    error,
+  // Documented diagnostic surface — routed through the ADR-0303 injected terminal
+  // sink (default NOOP) so this kernel module owns no raw terminal; overridable
+  // via `setKernelObserverErrorSink` to route into structured telemetry.
+  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  writeStderr(
+    `[kernel.session] onCommitted observer threw (diagnostic, not a turn failure): ${detail}\n`,
   )
 }
 
