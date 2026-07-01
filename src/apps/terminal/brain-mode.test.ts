@@ -15,7 +15,14 @@
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { TERMINAL_OPERATOR_GUIDE } from "@/tool"
-import { runTerminalBrain } from "./brain-mode"
+import type {
+  AttachResult,
+  PtyHandle,
+  PtyResult,
+  PtySessionPort,
+  ReadResult,
+} from "@/tool/pty/port"
+import { runTerminalBrain, TB_VERIFY_GATE_ENV, VERIFY_GATE_FOLLOWUP } from "./brain-mode"
 
 /** Local minimal `LLMPort` (headless `FakeLlm` precedent, replicated to honor the terminal fence).
  *  Replays one `StreamEvent[]` script per assistant turn, in order; a turn beyond the list replays
@@ -257,4 +264,294 @@ type TerminalBrainReportShape = {
   tokens: { input: number; output: number }
   cost_usd: number
   final: string
+  verification?: { state: string; evidence: string }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Lever #2 — verify-before-finalize gate (RFC jul-2-terminal-bench-levers/02).
+// HELLGATE: RED-first (knob OFF today = no verification field, no extra turn), then knob-ON
+// behaviors (one bounded follow-up, honest trichotomy), boundedness (≤1 turn, cannot loop), and
+// the exercise recognizer for BOTH tools (container_exec + pty_*).
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** A fake `PtySessionPort` so the `pty_*` tools are minted and emit real tool_result events with
+ *  observed output — lets a scripted pty exercise reach the inspector. */
+const makeFakePty = (): PtySessionPort => ({
+  list: async () => [],
+  attach: async (handle: PtyHandle): Promise<PtyResult<AttachResult>> => ({
+    ok: true,
+    value: { handle, cursor: 0 },
+  }),
+  write: async (): Promise<PtyResult<void>> => ({ ok: true, value: undefined }),
+  read: async (): Promise<PtyResult<ReadResult>> => ({
+    ok: true,
+    value: { chunks: [{ seq: 1, data: "4\n" }], nextSeq: 2 },
+  }),
+  resize: async (): Promise<PtyResult<void>> => ({ ok: true, value: undefined }),
+  detach: async (): Promise<PtyResult<void>> => ({ ok: true, value: undefined }),
+  kill: async (): Promise<PtyResult<void>> => ({ ok: true, value: undefined }),
+})
+
+/** One `container_exec` tool call turn (with `command`), then a text completion turn (`final`). */
+const execThenFinalScripts = (command: string, finalText: string): StreamEvent[][] => [
+  [
+    { type: "tool_use_start", id: "call-1", name: "container_exec" },
+    { type: "tool_use_end", id: "call-1", input: { command } },
+    { type: "usage", inputTokens: 9, outputTokens: 4, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "tool_use" },
+  ],
+  [
+    { type: "text_delta", delta: finalText },
+    { type: "usage", inputTokens: 3, outputTokens: 2, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "end_turn" },
+  ],
+]
+
+describe("verify-before-finalize gate (lever #2)", () => {
+  test("RED (knob OFF, today): an artifact-only run finalizes with NO verification field + NO extra turn", async () => {
+    const { stdin, stdout, handsServed, endIn } = makeStdio()
+    // Trajectory only CREATES an artifact (mkdir) — never runs+observes the deliverable.
+    const llm = new FakeLlm(execThenFinalScripts("mkdir -p build", "Implemented and verified green."))
+    const result = await runTerminalBrain({
+      instruction: "build the solver",
+      reportOut: "/tmp/vg-off.json",
+      stdin,
+      stdout,
+      llm,
+      writeReport: () => undefined,
+      // env omitted ⇒ gate default-OFF.
+    })
+    // No verification stamp, and exactly ONE served exec (the mkdir) — no gate follow-up turn.
+    expect(result.report.verification).toBeUndefined()
+    expect(handsServed.length).toBe(1)
+    // The follow-up prompt was NEVER shown to the model (the gate did not run at all).
+    const sawFollowUp = llm.seen.some((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    )
+    expect(sawFollowUp).toBe(false)
+    endIn()
+  })
+
+  test("knob ON + artifact-only run ⇒ exactly ONE follow-up turn, and an honest verification stamp", async () => {
+    const { stdin, stdout, handsServed, endIn } = makeStdio()
+    // First turn: mkdir (no exercise). Follow-up turn: model STILL only says 'done' (scripts run
+    // out → the FakeLlm replays its last text-completion script) → no exercise emerges → unverifiable.
+    const llm = new FakeLlm(execThenFinalScripts("mkdir -p build", "done, looks good"))
+    const result = await runTerminalBrain({
+      instruction: "build the solver",
+      reportOut: "/tmp/vg-on.json",
+      stdin,
+      stdout,
+      llm,
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    // The gate injected the bounded follow-up: the model saw the follow-up prompt on a LATER turn.
+    const sawFollowUp = llm.seen.some((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    )
+    expect(sawFollowUp).toBe(true)
+    // Still no exercise after the single follow-up ⇒ honest terminal state (never loops).
+    expect(result.report.verification).toBeDefined()
+    expect(result.report.verification?.state).toBe("unverifiable")
+    // The follow-up prompt references only the task's own criterion — never a hidden test.
+    expect(VERIFY_GATE_FOLLOWUP.toLowerCase()).not.toContain("test")
+    expect(VERIFY_GATE_FOLLOWUP.toLowerCase()).not.toContain("hidden")
+    // handsServed = mkdir (turn 1). The follow-up turn produced only text (no new exec).
+    expect(handsServed.length).toBe(1)
+    endIn()
+  })
+
+  test("knob ON + a run that DID exercise (container_exec ran+observed) ⇒ NO follow-up, verified-pass", async () => {
+    const { stdin, stdout, handsServed, endIn } = makeStdio()
+    // Runs the produced binary; the fake hands returns stdout `ran:./solver` (observed output).
+    const llm = new FakeLlm(execThenFinalScripts("./solver input.txt", "Output matches. Pass."))
+    const result = await runTerminalBrain({
+      instruction: "run the solver",
+      reportOut: "/tmp/vg-exercised.json",
+      stdin,
+      stdout,
+      llm,
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    // No follow-up prompt was injected (the exercise was already present).
+    const sawFollowUp = llm.seen.some((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    )
+    expect(sawFollowUp).toBe(false)
+    expect(result.report.verification?.state).toBe("verified-pass")
+    // Exactly the one exec the model ran — the gate added no turn.
+    expect(handsServed.length).toBe(1)
+    endIn()
+  })
+
+  test("knob ON + a pty_* interactive exercise (drive + observe) ⇒ NO follow-up, verified-pass", async () => {
+    const { stdin, stdout, endIn } = makeStdio()
+    // Script: attach a REPL, write to it, read its response — all via pty_* (no container_exec).
+    const scripts: StreamEvent[][] = [
+      [
+        { type: "tool_use_start", id: "a1", name: "pty_attach" },
+        { type: "tool_use_end", id: "a1", input: { handle: "pty:1" } },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "w1", name: "pty_write" },
+        {
+          type: "tool_use_end",
+          id: "w1",
+          input: { handle: "pty:1", data: "print(2+2)", appendNewline: true },
+        },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ],
+      [
+        { type: "tool_use_start", id: "r1", name: "pty_read" },
+        { type: "tool_use_end", id: "r1", input: { handle: "pty:1", sinceSeq: 0 } },
+        { type: "usage", inputTokens: 4, outputTokens: 2, model: "terminal-fake" },
+        { type: "message_stop", stop_reason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", delta: "REPL returned 4, matches expected. Verified." },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
+    ]
+    const llm = new FakeLlm(scripts)
+    const result = await runTerminalBrain({
+      instruction: "drive the repl",
+      reportOut: "/tmp/vg-pty.json",
+      stdin,
+      stdout,
+      llm,
+      ptySession: makeFakePty(),
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    const sawFollowUp = llm.seen.some((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    )
+    expect(sawFollowUp).toBe(false)
+    expect(result.report.verification?.state).toBe("verified-pass")
+    endIn()
+  })
+
+  test("BOUNDEDNESS: the gate adds AT MOST ONE turn and cannot loop even if the follow-up still shows no exercise", async () => {
+    const { stdin, stdout, endIn } = makeStdio()
+    // Every turn: the model ONLY emits text (never a tool call) — so no exercise EVER appears. The
+    // gate must still fire the follow-up exactly ONCE and finalize `unverifiable`, never re-asking.
+    const textOnly: StreamEvent[][] = [
+      [
+        { type: "text_delta", delta: "I created the file. Done." },
+        { type: "usage", inputTokens: 3, outputTokens: 2, model: "terminal-fake" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ],
+    ]
+    const llm = new FakeLlm(textOnly)
+    const result = await runTerminalBrain({
+      instruction: "noop task",
+      reportOut: "/tmp/vg-bounded.json",
+      stdin,
+      stdout,
+      llm,
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    // Count how many times the follow-up prompt was fed to the model: EXACTLY ONE (never a loop).
+    const followUpCount = llm.seen.filter((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    ).length
+    expect(followUpCount).toBe(1)
+    expect(result.report.verification?.state).toBe("unverifiable")
+    endIn()
+  })
+
+  test("BOUNDEDNESS (fault path): if the ONE follow-up turn itself throws, the run finalizes (report written) and still does not loop", async () => {
+    const { stdin, stdout } = makeStdio()
+    // First turn: a mkdir (no exercise) so the gate WILL inject the follow-up. The follow-up turn
+    // is the SECOND stream — make it throw. The agent loop folds a mid-turn throw into an error
+    // outcome, so the brain must still write a report exactly once (no hang, no re-ask loop).
+    let streamCount = 0
+    const throwOnFollowUp: LLMPort = {
+      model: "terminal-fake",
+      provider: "terminal",
+      authMode: "fake",
+      async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+        streamCount += 1
+        if (streamCount === 1) {
+          // turn 1: emit a mkdir tool call then finish
+          yield { type: "tool_use_start", id: "c1", name: "container_exec" }
+          yield { type: "tool_use_end", id: "c1", input: { command: "mkdir build" } }
+          yield { type: "message_stop", stop_reason: "tool_use" }
+          return
+        }
+        if (streamCount === 2) {
+          yield { type: "text_delta", delta: "created" }
+          yield { type: "message_stop", stop_reason: "end_turn" }
+          return
+        }
+        // Any turn from the follow-up onward throws (the model died). Reference `input` so the
+        // signature is honored.
+        void input
+        throw new Error("model died during follow-up")
+      },
+    }
+    const reports: unknown[] = []
+    const result = await runTerminalBrain({
+      instruction: "will throw on follow-up",
+      reportOut: "/tmp/vg-throw.json",
+      stdin,
+      stdout,
+      llm: throwOnFollowUp,
+      writeReport: (_p, obj) => reports.push(obj),
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    // The report was still written exactly once (the surface contract survives a follow-up throw).
+    expect(reports.length).toBe(1)
+    expect(result.report.instruction).toBe("will throw on follow-up")
+    // The loop opened at most 3 streams: turn1 + turn1-completion + the SINGLE follow-up (which
+    // threw). It did NOT re-ask (no 4th+ stream) — the gate is a one-shot, not a loop.
+    expect(streamCount).toBeLessThanOrEqual(3)
+  })
+
+  test("DEFAULT-OFF byte-identical: the report is identical with the knob unset vs explicitly falsy (no verification field either way)", async () => {
+    const run = async (env?: Record<string, string>) => {
+      const { stdin, stdout, endIn } = makeStdio()
+      const r = await runTerminalBrain({
+        instruction: "same task",
+        reportOut: "/tmp/vg-ident.json",
+        stdin,
+        stdout,
+        llm: new FakeLlm(execThenFinalScripts("mkdir build", "done")),
+        writeReport: () => undefined,
+        ...(env !== undefined ? { env } : {}),
+      })
+      endIn()
+      return r.report
+    }
+    const unset = await run(undefined)
+    const explicitOff = await run({ [TB_VERIFY_GATE_ENV]: "0" })
+    expect(unset.verification).toBeUndefined()
+    expect(explicitOff.verification).toBeUndefined()
+    // Full report equality (turns / tokens / final / instruction) — the gate changed nothing.
+    expect(explicitOff).toEqual(unset)
+  })
+})

@@ -40,9 +40,28 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, ToolRegistry } from "@/tool"
 import type { JsonLineDuplex } from "@/tool/container-exec"
 import type { PtySessionPort } from "@/tool/pty"
+import { gateOn } from "@/shared/env-flag"
 import { terminalSurfaceOverDuplex } from "./index"
+import {
+  deriveVerificationState,
+  inspectExerciseEvidence,
+  type VerificationStamp,
+} from "./verify-gate"
 
 const TERMINAL_BRAIN_SESSION_ID = "terminal-brain-session"
+
+/** Lever #2 knob (RFC `jul-2-terminal-bench-levers/02`): the verify-before-finalize gate.
+ *  DEFAULT-OFF ⇒ byte-identical today (no `verification` field, no extra turn). When ON, the brain
+ *  inspects the trajectory for an end-to-end exercise of the deliverable and, if none is found,
+ *  injects EXACTLY ONE bounded follow-up turn, then stamps an honest verification trichotomy. */
+export const TB_VERIFY_GATE_ENV = "QUANTA_TB_VERIFY_GATE"
+
+/** The single bounded follow-up nudge. References ONLY the task's own success criterion — never a
+ *  hidden test / answer key (honors `no-answer-key-regex-heuristics`). Fired AT MOST ONCE. */
+export const VERIFY_GATE_FOLLOWUP =
+  "You are about to finalize. Exercise your deliverable end-to-end against the task's success " +
+  "criterion (run it and observe the result), then report the observed outcome as pass / fail / " +
+  "could-not-verify."
 
 /** Report JSON the hands side reads into harbor's `AgentContext` (spec B3). Trajectory optional. */
 export interface TerminalBrainReport {
@@ -51,6 +70,10 @@ export interface TerminalBrainReport {
   readonly tokens: { readonly input: number; readonly output: number }
   readonly cost_usd: number
   readonly final: string
+  /** Lever #2 (`QUANTA_TB_VERIFY_GATE`): the verify-before-finalize verdict. PRESENT ONLY when the
+   *  gate ran (knob ON) — absent ⇒ byte-identical to the pre-lever report. `unverifiable` /
+   *  `verified-fail` finalize immediately (the honest exits that make over-persistence impossible). */
+  readonly verification?: VerificationStamp
 }
 
 /** Result returned to the caller (and to the process `main()`) after one brain run. */
@@ -87,6 +110,10 @@ export interface RunTerminalBrainOpts {
   readonly cwd?: string
   /** Caller abort signal. Default: never abort. */
   readonly signal?: AbortSignal
+  /** Env THREADED from the composition root (`main()` binds `process.env`) so the verify-gate knob
+   *  (`QUANTA_TB_VERIFY_GATE`) is read here, not from an ambient `process.env`. Default `{}` ⇒ gate
+   *  OFF ⇒ byte-identical (no `verification` field, no extra turn). */
+  readonly env?: Record<string, string | undefined>
 }
 
 /** Capture stream: the loop emits every `AgentEvent` here so the core can total token usage for the
@@ -261,8 +288,10 @@ export const runTerminalBrain = async (
   // turn is a real, observable injection and keeps this slice self-contained.)
   const turnText = `${surface.operatorGuide}\n\n# Task\n${opts.instruction}`
 
+  const verifyGateOn = gateOn(opts.env ?? {}, TB_VERIFY_GATE_ENV)
   let outcomeTurns = 0
   let messages: readonly Message[] = []
+  let verification: VerificationStamp | undefined
   let runError: unknown
   try {
     const boot = await bootstrapSession(deps, runtime, {})
@@ -304,6 +333,39 @@ export const runTerminalBrain = async (
       })
       outcomeTurns = turnResult.outcome.turns
       messages = turnResult.messages
+
+      // ── Lever #2: verify-before-finalize gate (default-OFF ⇒ this whole block is skipped) ──
+      // STRUCTURAL, SELECTIVE, BOUNDED, HONEST (RFC jul-2 §Design):
+      //  - STRUCTURAL: the harness (not a prompt line the model may ignore) inspects the recorded
+      //    trajectory for evidence the deliverable was RUN AND OBSERVED (not merely created/listed).
+      //  - SELECTIVE: the follow-up fires ONLY when no such evidence exists.
+      //  - BOUNDED: the follow-up fires AT MOST ONCE (one `runSessionTurn`, no loop) — the ~3×
+      //    over-persist that got the prior blanket "verify-before-submit" steer reverted is
+      //    structurally impossible here (there is no re-check-and-retry cycle).
+      //  - HONEST: the verdict is a `verified-pass` / `verified-fail` / `unverifiable` trichotomy;
+      //    `unverifiable` and `verified-fail` finalize immediately (accepted terminal states).
+      if (verifyGateOn) {
+        const preVerdict = inspectExerciseEvidence(stream.events)
+        if (!preVerdict.exercised) {
+          // ONE bounded follow-up on the SAME live session (appends to the conversation). It cannot
+          // loop: we run it exactly once and derive the state from whatever it produced.
+          const followUp = await runSessionTurn({
+            session,
+            resolveApproval: async () => "approve",
+            text: VERIFY_GATE_FOLLOWUP,
+            turnSignal: boot.abort.signal,
+            env: {},
+          })
+          outcomeTurns = followUp.outcome.turns
+          messages = followUp.messages
+        }
+        // Re-inspect the (possibly-extended) trajectory + read the model's final stated outcome.
+        // If the follow-up STILL shows no exercise ⇒ `unverifiable` (finalize; never re-ask).
+        verification = deriveVerificationState(
+          inspectExerciseEvidence(stream.events),
+          finalAssistantText(messages),
+        )
+      }
     } finally {
       await session.close().catch(() => undefined)
       await facade.close().catch(() => undefined)
@@ -328,6 +390,9 @@ export const runTerminalBrain = async (
     // carries 0 here and the hands/orchestrator may enrich it. Kept explicit so the shape is fixed.
     cost_usd: 0,
     final: finalAssistantText(messages),
+    // Lever #2 stamp — PRESENT only when the gate ran (knob ON). Exact-optional spread ⇒ the field
+    // is entirely ABSENT when the gate is off, keeping the report byte-identical to pre-lever.
+    ...(verification !== undefined ? { verification } : {}),
   }
   opts.writeReport(opts.reportOut, report)
   opts.closeStdout?.()
@@ -373,6 +438,9 @@ const runMain = async (): Promise<void> => {
     llm: await buildRealLlm(model),
     writeReport: (path, obj) => writeFileSync(path, `${JSON.stringify(obj, null, 2)}\n`),
     closeStdout: () => process.stdout.end(),
+    // Thread the real env so the verify-gate knob (`QUANTA_TB_VERIFY_GATE`) is read here, not from
+    // an ambient `process.env` inside the pure core. Default-OFF when unset ⇒ byte-identical.
+    env: process.env,
   })
   rl.close()
 }

@@ -582,4 +582,19 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "§7.3 ci_finding structured CI-investigation record tool (opt-in).",
     readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghTools opts.ciFindingStore)",
   },
+  // Terminal-Bench lever #2 (RFC jul-2-terminal-bench-levers/02) — the verify-before-finalize
+  // gate in the terminal brain. AGENT-SIDE read via `gateOn(env, "QUANTA_TB_VERIFY_GATE")` in
+  // `apps/terminal/brain-mode.ts` (a terminal-surface gate, NOT a CLI-render knob, so it lives
+  // HERE per the read-site-domain ratchet). Default-OFF: absent ⇒ no `verification` field on the
+  // report and no extra turn ⇒ byte-identical to the pre-lever brain.
+  {
+    envKey: "QUANTA_TB_VERIFY_GATE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "Terminal-Bench verify-before-finalize gate (opt-in). Inspects the trajectory for an end-to-end exercise of the deliverable (container_exec ran+observed OR pty_* drove+observed); if none, injects EXACTLY ONE bounded follow-up turn, then stamps an honest verified-pass/verified-fail/unverifiable trichotomy on the report. Cannot loop / over-persist.",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain verify-before-finalize gate)",
+  },
 ]
