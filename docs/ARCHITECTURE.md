@@ -42,6 +42,56 @@ Biome rule shape (in `biome.json`):
 ```
 **Watch-out:** the `includes` matcher needs `**/src/X/**`, not bare `src/X/**` — without the prefix Biome's auto-discovery from project root silently fails to match and the rule becomes dead config. The fence is verified by transiently adding the banned import and confirming Biome trips.
 
+### 1.1 Machine-enforced contract is a DENYLIST (SSOT)
+
+The table above is an **allowlist**-shaped summary of the RFC §3.1 intent (and mirrors the per-path `noRestrictedImports` rules in `biome.json`). The **actual machine-enforced slice boundary** is a **denylist**, driven by an AST scanner test suite. Its single source of truth is:
+
+> **`tests/unit/_arch/slice-boundary-configs.ts`** — `SLICE_BOUNDARY_CONFIGS`.
+
+Each registered slice declares a `denyImports` list; **anything not denied is permitted** (open-by-default), which is the inverse shape of the table above. Consumed by the `*-slice-boundary.test.ts` suites via `registerSliceBoundarySuite` / the scanner in `tests/unit/_arch/slice-boundary-scanner.ts`. Semantics to know when reading a config:
+
+- **`import type` is invisible** to the scanner — type-only cross-slice references are always allowed (they erase at compile time). Only **VALUE** imports can trip a deny rule.
+- **Self-prefix is stripped** — a slice may always import its own sub-modules even though the shared deny constant lists its own `@/<slice>` prefix.
+- **`allowImports`** are reviewed carve-outs: specifiers that match a `denyImports` prefix but are explicitly re-permitted (documented in-line in the config).
+- **`surfaceIsolationOnly: true`** means the slice runs ONLY the surface-isolation check (must not import/type-reference `apps/**`) and is otherwise exempt from the library-purity deny — used for the Layer-2 composition seams `@/host`, `@/sdk`, `@/kernel`.
+- `envAllowFiles` / `stdioAllowFiles` / `consoleAllowFiles` / `requireSliceBarrel` are orthogonal purity carve-outs, not import-deny rules.
+
+Two shared deny constants are reused across slices:
+
+- **`PEER_LIBRARY_DENY`** — the peer Layer-0/1 library set: `@/agent, @/tool, @/mcp, @/rules, @/migration, @/session, @/subagent, @/skill, @/observability, @/llm, @/memory, @/storage, @/permission, @/lsp, @/stream` (the self-prefix is dropped per slice).
+- **`LAYER2_DENY`** — the Layer-2 composition/surface set no lower slice may up-import: `@/runner, @/host, @/ipc, @/apps`.
+
+**Slices registered in the SSOT but NOT shown in the §1 table above** (with their actual deny rules — mirror of `slice-boundary-configs.ts`, do not edit here without editing there):
+
+| Slice | Enforced deny rule (from `SLICE_BOUNDARY_CONFIGS`) |
+|---|---|
+| `@/auth` | `PEER_LIBRARY_DENY` |
+| `@/git` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (pure leaf; only runtime dep `@/shared`) |
+| `@/browser` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (pure leaf; only `@/shared`) |
+| `@/scheduler` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (pure leaf; only `@/shared`) |
+| `@/stream` | `PEER_LIBRARY_DENY` + `LAYER2_DENY` (leaf; only `@/shared`) |
+| `@/reactor` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; carve-out: `import type { AgentOutcome } from "@/agent"` (type-only, allowed) |
+| `@/side-agent` | `PEER_LIBRARY_DENY` + `LAYER2_DENY`; `allowImports`: `@/agent/side-agent-runner`, `@/agent/subagent-runner`, `@/llm`, `@/llm/replay`, `@/tool` (worker composition-root carve-out) |
+| `@/patch` | `PEER_LIBRARY_DENY` (pure leaf; OTel binding lives in the `apply_patch` tool root) |
+| `@/security` | `PEER_LIBRARY_DENY` + `@/auth` |
+| `@/rules` | `PEER_LIBRARY_DENY` + `@/auth` |
+| `@/storage` | `PEER_LIBRARY_DENY` (includes `@/tool` — the storage→tool inversion guard) |
+| `@/mcp` | `@/agent, @/tool, @/rules, @/migration, @/session, @/subagent, @/skill, @/observability, @/llm, @/memory, @/storage, @/permission, @/lsp, @/stream` |
+| `@/skill` | same peer set as `@/mcp` minus `@/tool` (i.e. `@/agent, @/mcp, @/rules, @/migration, @/session, @/subagent, @/observability, @/llm, @/memory, @/storage, @/permission, @/lsp, @/stream`) |
+| `@/session` | `@/agent, @/mcp, @/rules, @/migration, @/subagent, @/skill, @/observability, @/permission, @/lsp, @/stream, @/memory` |
+| `@/subagent` | peer set incl. `@/agent, @/mcp, @/rules, @/migration, @/session, @/skill, @/observability, @/llm, @/memory, @/storage, @/permission, @/lsp, @/stream` |
+| `@/agent` | `@/migration` only (agent is the cross-slice bridge; see table above) |
+| `@/tool` | `@/agent, @/mcp, @/rules, @/migration, @/memory, @/session, @/subagent, @/skill, @/observability, @/permission, @/lsp, @/stream`; `allowImports`: `@/observability/coverage`, `@/observability/patch-trace` |
+| `@/llm` | `PEER_LIBRARY_DENY`; `allowImports`: `@/memory/history-sanitization` (typed port) |
+| `@/memory` | `PEER_LIBRARY_DENY` |
+| `@/permission` | `@/agent, @/tool, @/mcp, @/rules, @/migration, @/memory, @/session, @/subagent, @/skill, @/observability, @/llm, @/lsp, @/stream, @/storage` |
+| `@/observability` | `PEER_LIBRARY_DENY` |
+| `@/runner` | `@/rules, @/patch, @/migration` |
+| `@/ipc` | `@/rules, @/patch, @/migration` |
+| `@/host`, `@/sdk`, `@/kernel` | `surfaceIsolationOnly` — no import-deny; only the "must not import `apps/**`" fence |
+
+**Not (yet) in the SSOT:** several `src/` slices have **no** `SLICE_BOUNDARY_CONFIGS` entry, so this scanner suite enforces **no** import-deny for them today — e.g. `activity`, `codemode`, `retrieval`, `workflow`, `runtime`, `radar`, `realtime`, `remote`, `media`, `voice`, `ui`, `protocol`, `connectors`, `integrations`, `plugin-isolation`, `capability`, `artifact`, `config`, `migration`. Adding a boundary config for one of these is the mechanism to bring it under the fence (see §6). This list is descriptive of the SSOT's current coverage, not a statement that those slices have no layering intent.
+
 ---
 
 ## 2. Ports & adapters catalog
