@@ -11,6 +11,7 @@ import type { LocalEnvSelection } from "@/runtime"
 import type { LspGroundingStatus } from "@/shared"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 import type { SubmissionReview } from "./eval/submission-review"
+import type { ReproViabilityReview } from "./eval/repro-viability"
 
 /** Official SWE-bench instance metadata, present only for instances loaded
  *  from the real `swebench.verified` corpus. Consumed by the optional Python
@@ -467,6 +468,10 @@ export interface InstanceResult {
    *  test-edits). Present only when `QUANTA_BENCH_SUBMIT_REVIEW` is on (observe-
    *  only; the test-revert itself is unconditional via `sourceOnlyDiff`). */
   submissionReview?: SubmissionReview
+  /** Spec step-5 repro-viability review (QUANTA_BENCH_REPRO_VIABILITY): observe-only
+   *  fix-free viability label over the final patch vs the actual reproducing test
+   *  source. Present only when the knob is on (telemetry only; ABSENT ⇒ byte-identical). */
+  reproViabilityReview?: ReproViabilityReview
   /**
    * A5 — repro-vote outcome telemetry drained from the module sink after the
    * repair/selection rounds finish. Present only when a repro-vote validator

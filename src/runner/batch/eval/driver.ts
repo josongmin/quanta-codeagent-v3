@@ -293,6 +293,8 @@ import {
 } from "./static-witness-adapter"
 import { BenchStreamTap, relFromSandbox } from "./stream-tap"
 import { reviewSubmission, type SubmissionReview } from "./submission-review"
+import { maybeReviewReproViability } from "./repro-viability-wire"
+import type { ReproViabilityReview } from "./repro-viability"
 import { type PythonSwebenchEvaluate, verify } from "./verdict"
 import {
   discoverVerificationModuleSmokePlan,
@@ -3052,6 +3054,10 @@ interface Phase {
   /** #6 submit-review (QUANTA_BENCH_SUBMIT_REVIEW): observe-only verdict over the
    *  final captured patch (clean / empty / test-edits). Absent ⇒ knob off. */
   submissionReview?: SubmissionReview
+  /** Spec step-5 (QUANTA_BENCH_REPRO_VIABILITY): observe-only fix-free viability
+   *  label over the captured patch vs the ACTUAL reproducing test source. Telemetry
+   *  only — reject-mode NOT wired. Absent ⇒ knob off ⇒ byte-identical. */
+  reproViabilityReview?: ReproViabilityReview
 }
 
 /**
@@ -4115,6 +4121,16 @@ const runRepairPhase = async (
   // the orchestrator's last-round view. They agree by construction (single sandbox).
   const capturedPatch = patch !== "" ? patch : out.patch
   const submissionReview = maybeReviewSubmission(capturedPatch)
+  // Spec step-5 observe-only fix-free viability label (default-OFF ⇒ undefined ⇒
+  // byte-identical; fail-open, never diverts control flow). Reuses `reproSources`
+  // (the ACTUAL reproduce_issue.py bodies already threaded into this phase).
+  const reproViabilityReview = await maybeReviewReproViability({
+    llm: deps.llm,
+    problemStatement: instance.problemStatement,
+    reproSources,
+    capturedPatch,
+    signal,
+  })
   const acceptanceTier = attributeAcceptanceTier(acceptanceSelection.current, out.patch)
   return {
     patch: capturedPatch,
@@ -4128,6 +4144,7 @@ const runRepairPhase = async (
     ...(out.rounds > 0 ? { verifyRounds: out.rounds } : {}),
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
     ...(submissionReview !== undefined ? { submissionReview } : {}),
+    ...(reproViabilityReview !== undefined ? { reproViabilityReview } : {}),
     // Attribute the tier ONLY when the last selection's winner IS the submitted
     // patch (`out.patch` = orchestrator final `prevRun.patch`, same string lineage
     // as the adapter's `selected.patch`). A trailing non-selected fallback round
@@ -6479,6 +6496,9 @@ const attachSelectionAndClosureArtifacts = (args: {
   }
   if (args.phase.submissionReview !== undefined) {
     args.extra.submissionReview = args.phase.submissionReview
+  }
+  if (args.phase.reproViabilityReview !== undefined) {
+    args.extra.reproViabilityReview = args.phase.reproViabilityReview
   }
   attachLlmEvidenceArtifacts(args)
   const ownerHint = relFromSandbox(args.sandbox, args.phase.firstEditFile)
