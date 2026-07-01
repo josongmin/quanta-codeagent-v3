@@ -31,6 +31,9 @@ terminal-bench-analysis/
 ├── README.md          ← 여기 (개요 + 분포 + 네비)
 ├── TAXONOMY.md        분류 루브릭 (category/difficulty/skill-class/terminal-native/interaction 축)
 ├── SYNTHESIS.md       횡단 종합 (TB 3분할 · SYSADMIN=high · 공략 우선순위 · 우리 2/5 교차)
+├── FAILURE-RCA.md     실패 RCA + 타입별 해결법 (스캐폴드 vs 모델천장; steer 시도→revert)
+├── SOLUTIONS-CROSSREF.md  우리(gpt-5.4/5.5) vs 공개 리더보드 풀이 교차표 (누가 뭘 풀었나)
+├── <task>/            우리가 돌린 10개 task별 풀이 이력 폴더 (README 표 + scaffolds/ trajectory 덤프 + reference-solve.sh)
 ├── _data/
 │   ├── tasks.jsonl        89 task 원본 메타+instruction+solution 덤프
 │   └── classified.json    89 task 분류결과(frontmatter 집계 SSOT)

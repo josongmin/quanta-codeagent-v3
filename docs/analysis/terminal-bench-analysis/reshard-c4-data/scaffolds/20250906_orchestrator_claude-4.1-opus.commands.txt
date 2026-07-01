@@ -1,0 +1,22 @@
+### run=20250906_orchestrator_claude-4.1-opus attempt=1-of-5  is_resolved=false  parser={reformat:FAILED, revert:PASSED} (near-miss: got revert right, resharding wrong)
+### NOTE: orchestrator runs its agent out-of-band; sessions/agent.log + commands.txt capture ONLY harness recording keystrokes, NOT the agent's shell trajectory. No usable per-command trace exists for this scaffold. Raw commands.txt below for completeness.
+
+----- commands.txt -----
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']
+
+----- sessions/agent.log -----
+[?2004hroot@22069b5adade:/app# asciinema rec --stdin /logs/agent.cast
+[?2004l[0;32masciinema: recording asciicast to /logs/agent.cast[0m
+[0;32masciinema: press <ctrl-d> or type "exit" when you're done[0m
+[?2004hroot@22069b5adade:/app# clear
+[?2004l[H[J[3J[?2004hroot@22069b5adade:/app# [?2004l
+exit
+[0;32masciinema: recording finished[0m
+[0;32masciinema: asciicast saved to /logs/agent.cast[0m
+[?2004hroot@22069b5adade:/app# 

@@ -1,0 +1,47 @@
+### NOTE: The orchestrator scaffold runs the agent OUT-OF-BAND.
+### commands.txt below is ONLY the terminal-bench harness wrapper (asciinema rec + run-tests).
+### The agent's real LLM tool-calls / shell commands are NOT recorded anywhere in the results tree
+### (agent.cast shows only a multi-hundred-second gap of invisible work, then exit).
+### The real ground-truth of what the agent PRODUCED is the per-test outcome from sessions/tests.log,
+### appended below. Trajectory = artifacts left behind, reconstructed from test assertions.
+### FAILED 1/6 — only weights.json produced; cli_tool binary never built (ran out of time)
+
+===== commands.txt (harness wrapper, verbatim) =====
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']
+
+===== reconstructed outcome from sessions/tests.log (ANSI-stripped, relevant lines) =====
+../tests/test_outputs.py::test_weights_file_exists PASSED                                                                                                [ 16%]
+../tests/test_outputs.py::test_cli_tool_exists FAILED                                                                                                    [ 33%]
+../tests/test_outputs.py::test_prediction_file_exists FAILED                                                                                             [ 50%]
+../tests/test_outputs.py::test_prediction_file_content FAILED                                                                                            [ 66%]
+../tests/test_outputs.py::test_cli_tool_executable FAILED                                                                                                [ 83%]
+../tests/test_outputs.py::test_cli_tool_output FAILED                                                                                                    [100%]
+>       assert cli_path.exists(), f"File {cli_path} does not exist"
+E       AssertionError: File /app/cli_tool does not exist
+E       assert False
+/tests/test_outputs.py:21: AssertionError
+>       assert prediction_path.exists(), f"File {prediction_path} does not exist"
+E       AssertionError: File /app/prediction.txt does not exist
+E       assert False
+/tests/test_outputs.py:27: AssertionError
+E       FileNotFoundError: [Errno 2] No such file or directory: '/app/prediction.txt'
+/tests/test_outputs.py:33: FileNotFoundError
+>       assert text == "2", f"Command returned {result}, expected 2"
+E       AssertionError: Command returned CompletedProcess(args='/app/cli_tool /app/weights.json /app/image.png', returncode=127, stdout='', stderr='/bin/sh: 1: /app/cli_tool: not found\n'), expected 2
+E       assert '' == '2'
+/tests/test_outputs.py:45: AssertionError
+E           ValueError: invalid literal for int() with base 10: ''
+/tests/test_outputs.py:138: ValueError
+--------------------------------------------------------------------- Captured stderr call ---------------------------------------------------------------------
+PASSED ../tests/test_outputs.py::test_weights_file_exists
+FAILED ../tests/test_outputs.py::test_cli_tool_exists - AssertionError: File /app/cli_tool does not exist
+FAILED ../tests/test_outputs.py::test_prediction_file_exists - AssertionError: File /app/prediction.txt does not exist
+FAILED ../tests/test_outputs.py::test_prediction_file_content - FileNotFoundError: [Errno 2] No such file or directory: '/app/prediction.txt'
+FAILED ../tests/test_outputs.py::test_cli_tool_executable - AssertionError: Command returned CompletedProcess(args='/app/cli_tool /app/weights.json /app/image.png', returncode=127, stdout='', stderr='/bin/sh: 1: /ap...
+FAILED ../tests/test_outputs.py::test_cli_tool_output - ValueError: invalid literal for int() with base 10: ''
