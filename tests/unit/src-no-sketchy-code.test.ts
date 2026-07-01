@@ -74,6 +74,8 @@ const RULES: readonly Rule[] = [
         "Bench local-run composition root extracted verbatim from apps/bench/index.ts (already allowlisted) — owns the same dotenv shim + QUANTA_BENCH_* / QUANTA_SWEBENCH_* launch-time reads; downstream logic receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/run-args.ts":
         "Bench CLI-arg parsing concern extracted verbatim from apps/bench/run-main.ts — the tiny dotenv shim (loadEnv writes process.env before any runtimeConfig() read) + the QUANTA_BENCH_CONCURRENCY launch-time read; downstream receives resolved values. Same bench-bootstrap posture as apps/bench/index.ts.",
+      "apps/bench/dataset-family.ts":
+        "Injection-first (jul-01 A1): `process.env` is ONLY the default for the injected `env` param of `bridgeDatasetFamilyToEnv` (tests pass a fake env); the flag→QUANTA_SWEBENCH_DATASET_FAMILY bridge writes that injected param at the bench composition root. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "runner/batch/eval/driver.ts":
@@ -646,7 +648,11 @@ const RULES: readonly Rule[] = [
     // pattern the fix INTRODUCES) is deliberately NOT matched. Seeded GREEN after
     // the FIX #5 edits (reranker/registry.ts, ui/ui-helpers.ts) removed the last
     // member reads; health-snapshot.ts never had one in code (comment only).
-    pattern: /process\.env\.[A-Za-z_$]/,
+    // Matches BOTH the dot form `process.env.X` and the bracket form
+    // `process.env["X"]` (a bracket-form regression would otherwise slip past,
+    // and these files are exempt from the global `\bprocess\.env\b` rule so it is
+    // no backstop); the binding form is never followed by `.`/`[` so stays clear.
+    pattern: /process\.env\s*[.[]/,
     scope: /^(retrieval|observability|ui)\//,
     why: "Domain slices must inject the env seam (`env: NodeJS.ProcessEnv = process.env`, read `env.X`) instead of raw `process.env.<ident>` — bind the global only at the call boundary so the unit is testable. See src/retrieval/reranker/registry.ts / src/ui/ui-helpers.ts for the pattern.",
   },
