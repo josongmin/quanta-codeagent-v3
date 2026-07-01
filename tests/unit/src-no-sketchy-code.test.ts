@@ -614,6 +614,42 @@ const RULES: readonly Rule[] = [
         "CLI composition root — `loadPermissionStore` is EXACTLY where the rule says the singleton should be wired (`src/apps/**`); the store is then injected downstream via AgentConfig.",
     },
   },
+  {
+    id: "no-eager-defaultTools-outside-composition",
+    // Importing/using the EAGER `defaultTools` singleton (module-load
+    // `buildDefaultTools()`) — banned outside composition roots. Matches a bare
+    // `defaultTools` token NOT preceded by `build` (so `buildDefaultTools` is
+    // clean) and NOT a member access `.defaultTools` (unrelated properties stay
+    // clean). ARCHITECTURE.md §3: composition roots must call
+    // `buildDefaultTools(...)`; the eager singleton is kept ONLY for back-compat
+    // + tests. A domain slice that reaches for it takes an ambient module-load
+    // tool set instead of an injected one.
+    pattern: /(?<![A-Za-z0-9_.])defaultTools\b/,
+    why: "Don't import the eager `defaultTools` singleton in a domain slice — call `buildDefaultTools(...)` at the composition root (ARCHITECTURE.md §3). The singleton is back-compat/tests only.",
+    allowlist: {
+      "tool/index.ts":
+        "THE definition site — `export const defaultTools = buildDefaultTools()` is the sanctioned back-compat singleton the rule protects (plus every JSDoc mention here is a comment the scanner skips).",
+      "apps/cli/permission-explain.ts":
+        "Composition root (`src/apps/**`) — the `/permission explain` command legitimately enumerates the back-compat default tool set to render the static permission table; same sanctioned-back-compat posture the rule allows under apps/.",
+      "apps/cli/side-cmd.ts":
+        "FALSE POSITIVE — `readonly defaultTools?: readonly string[]` is an interface PROPERTY NAME on the side-cmd context (a surface-resolved allowlist of tool NAMES), not the eager `@/tool` singleton; and it lives under the composition layer (`src/apps/**`).",
+    },
+  },
+  {
+    id: "no-raw-process-env-member-read-in-fixed-slices",
+    // Ban RAW `process.env.<ident>` MEMBER reads in the retrieval / observability
+    // / ui domain slices — those must accept an injected env seam
+    // (`env: NodeJS.ProcessEnv = process.env`, reading `env.X`) so the global is
+    // bound only at the call boundary and the unit is testable. This targets ONLY
+    // the member-access form `process.env.QUANTA_X`; the sanctioned injection
+    // idiom `= process.env` / `: process.env` (the default-parameter binding, the
+    // pattern the fix INTRODUCES) is deliberately NOT matched. Seeded GREEN after
+    // the FIX #5 edits (reranker/registry.ts, ui/ui-helpers.ts) removed the last
+    // member reads; health-snapshot.ts never had one in code (comment only).
+    pattern: /process\.env\.[A-Za-z_$]/,
+    scope: /^(retrieval|observability|ui)\//,
+    why: "Domain slices must inject the env seam (`env: NodeJS.ProcessEnv = process.env`, read `env.X`) instead of raw `process.env.<ident>` — bind the global only at the call boundary so the unit is testable. See src/retrieval/reranker/registry.ts / src/ui/ui-helpers.ts for the pattern.",
+  },
 ]
 
 const isAllowed = (rule: Rule, relativePath: string): boolean =>

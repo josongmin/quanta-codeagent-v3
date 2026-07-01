@@ -42,7 +42,7 @@ import { createLLM, pickProvider } from "@/llm"
 import { jsonlReplayStore, replayLlmPort } from "@/llm/replay"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, ToolRegistry } from "@/tool"
 
 /** The charter the supervisor hands the child (mirror of the IPC `charter`). */
 export interface CharterInput {
@@ -102,7 +102,11 @@ const buildLlmPort = (env: EnvLike, seams: CharterRunnerSeams): LLMPort | null =
 
 /**
  * Assemble a MINIMAL but REAL read-biased `AgentConfig` the subagent runner can
- * drive. The registry is the full `defaultTools`; the read-bias is applied by
+ * drive. The registry is the full default tool set (built via the DIP-clean
+ * `buildDefaultTools()` composition entry — ARCHITECTURE.md §3: composition roots
+ * must call `buildDefaultTools(...)`, not import the eager `defaultTools`
+ * singleton; called with no ports it is id-/behavior-identical to that
+ * singleton); the read-bias is applied by
  * `subagentRunnerToSidePass`, which passes `SIDE_AGENT_READONLY_TOOLS` as the
  * spawn's `toolFilter` (intersected against this registry inside the runner). A
  * permissive `acceptEdits` permission is harmless here because the tool surface
@@ -112,7 +116,7 @@ const assembleChildConfig = (llm: LLMPort, cwd: string): AgentConfig => {
   const seed: Message[] = [{ role: "user", content: [{ type: "text", text: "side-agent" }] }]
   return {
     llm,
-    registry: new ToolRegistry(defaultTools),
+    registry: new ToolRegistry(buildDefaultTools()),
     stream: discardStream,
     permission: { mode: "acceptEdits" } as PermissionContext,
     messages: seed,

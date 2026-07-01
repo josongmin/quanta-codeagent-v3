@@ -33,19 +33,28 @@ export interface RerankerFromEnvOptions<T> {
    * Tests pass an explicit value to avoid touching the real environment.
    */
   readonly providerOverride?: string
+  /**
+   * Injectable env seam — the global is bound only at the call boundary so the
+   * factory is testable without touching `process.env`. Defaults to
+   * `process.env`; the `QUANTA_RERANKER` / `COHERE_API_KEY` / `VOYAGE_API_KEY`
+   * reads below go through this member. Byte-identical to the prior direct
+   * `process.env.*` reads when unset.
+   */
+  readonly env?: NodeJS.ProcessEnv
 }
 
 export const createRerankerFromEnv = <T = unknown>(
   opts: RerankerFromEnvOptions<T>,
 ): Reranker<T> => {
-  const provider = opts.providerOverride ?? process.env.QUANTA_RERANKER ?? "identity"
+  const env: NodeJS.ProcessEnv = opts.env ?? process.env
+  const provider = opts.providerOverride ?? env.QUANTA_RERANKER ?? "identity"
   switch (provider) {
     case "identity":
       return identityReranker<T>()
     case "headless":
       return headlessReranker<T>({ documentOf: opts.documentOf })
     case "cohere": {
-      const apiKey = opts.cohereApiKey ?? process.env.COHERE_API_KEY
+      const apiKey = opts.cohereApiKey ?? env.COHERE_API_KEY
       if (apiKey === undefined || apiKey.length === 0) {
         throw new Error("QUANTA_RERANKER=cohere requires cohereApiKey or COHERE_API_KEY env")
       }
@@ -53,7 +62,7 @@ export const createRerankerFromEnv = <T = unknown>(
       return createCohereReranker<T>({ apiKey, http, documentOf: opts.documentOf })
     }
     case "voyage": {
-      const apiKey = opts.voyageApiKey ?? process.env.VOYAGE_API_KEY
+      const apiKey = opts.voyageApiKey ?? env.VOYAGE_API_KEY
       if (apiKey === undefined || apiKey.length === 0) {
         throw new Error("QUANTA_RERANKER=voyage requires voyageApiKey or VOYAGE_API_KEY env")
       }
