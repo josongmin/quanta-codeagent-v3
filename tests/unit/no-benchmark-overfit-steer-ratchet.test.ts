@@ -35,8 +35,11 @@ const root = (rel: string) => join(import.meta.dir, "../../", rel)
 const read = (rel: string) => readFileSync(root(rel), "utf8")
 
 // Every source file that declares a static string injected into the agent prompt.
+// jul-02 god-file split: the `*_STEER` / `SWEBENCH_DIRECTIVE*` prompt constants were
+// extracted, PURE code motion, from `src/runner/batch/eval/driver.ts` into the
+// dedicated `./driver/prompt-directives.ts` module — scan there now.
 const STEER_SOURCES = [
-  "src/runner/batch/eval/driver.ts", // SIMPLICITY / SIBLING_COMPLETION / SWEBENCH_DIRECTIVE*
+  "src/runner/batch/eval/driver/prompt-directives.ts", // SIMPLICITY / SIBLING_COMPLETION / SWEBENCH_DIRECTIVE*
   "src/agent/localize-phase-guard.ts", // LSP_GROUNDING / FIND_REFS / SPEC_FIDELITY
 ] as const
 

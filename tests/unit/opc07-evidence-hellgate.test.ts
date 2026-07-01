@@ -225,9 +225,18 @@ describe("OPC-07 hellgate — live wiring (result.llmEvidence reaches the live p
   })
 
   test("shared successful-result extra attaches LLM evidence artifacts", () => {
-    const runner = readSrc("src/runner/batch/eval/driver.ts")
-    const extraBlock = runner.slice(runner.indexOf("const buildSuccessfulResultExtra"))
-    expect(extraBlock.slice(0, 1200)).toContain("attachSelectionAndClosureArtifacts")
+    // jul-02 god-file split: the runner core's result-assembly slice (incl.
+    // `buildSuccessfulResultExtra`) was extracted, PURE code motion, into
+    // `./driver/result-assembly.ts` (the `driver.ts` barrel re-exports it).
+    const runner = readSrc("src/runner/batch/eval/driver/result-assembly.ts")
+    // Bound the assertion to the `buildSuccessfulResultExtra` function body — from
+    // its declaration to the next top-level `const` — so it stays scoped to that
+    // function (not the whole module) yet is robust to the body's length.
+    const declIdx = runner.indexOf("const buildSuccessfulResultExtra")
+    const rest = runner.slice(declIdx + 1)
+    const endRel = rest.search(/\n(?:export )?const \w+ = /)
+    const extraBlock = endRel === -1 ? rest : rest.slice(0, endRel)
+    expect(extraBlock).toContain("attachSelectionAndClosureArtifacts")
     expect(runner).toContain("args.extra.llmEvidence")
   })
 })

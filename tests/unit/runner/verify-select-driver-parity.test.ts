@@ -1,9 +1,22 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
-const DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8")
+// The runner core driver was split (jul-02 god-file reduction) into `./driver/*`
+// submodules — PURE code motion. The verify-select / patch-budget / proof-port /
+// owner-widening definitions the runner core OWNS now live across those submodules
+// (`selection-phase.ts`, `localize-prep.ts`, `config-build.ts`, `repair-phase.ts`,
+// …). Aggregate the barrel + every submodule source so these "runner core DEFINES
+// X" parity assertions still resolve against the runner-core-owned code, unchanged
+// in intent by the file split.
+const DRIVER_DIR = join(REPO_ROOT, "src/runner/batch/eval/driver")
+const DRIVER_SRC = [
+  readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8"),
+  ...readdirSync(DRIVER_DIR)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => readFileSync(join(DRIVER_DIR, f), "utf8")),
+].join("\n")
 const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
 
 describe("runner verify-select and patch-budget driver parity", () => {
