@@ -19,6 +19,7 @@ import {
   mask,
   type SecretFinding,
   type SecretKind,
+  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
 } from "./port"
@@ -188,11 +189,13 @@ export const patternScanner = (opts: SecretScannerOpts = {}): SecretScanner => (
     let text: string
     try {
       text = await readFile(path, "utf8")
-    } catch {
-      // Binary / unreadable — return empty. Decode-fail tolerance is the
-      // documented contract; pre-commit hooks must not crash on a stray
-      // PDF in the staging area.
-      return []
+    } catch (e) {
+      // SECURITY (jun-10 finding #12): an unreadable file must NOT scan as
+      // "clean" — `[]` is byte-identical to a genuinely clean file. Throw a
+      // typed failure naming the path, matching the entropy/composite siblings
+      // so the 4-way scanFile invariant holds. Binary tolerance is unaffected
+      // ("utf8" never throws on weird bytes — it decodes with replacement chars).
+      throw new SecretScanReadError(path, { cause: e })
     }
     return scanTextWithPatterns(text, path, opts)
   },

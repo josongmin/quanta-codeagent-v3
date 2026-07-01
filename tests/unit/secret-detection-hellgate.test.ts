@@ -302,6 +302,34 @@ describe("E. scanFile — disk + binary tolerance", () => {
     expect((thrown as SecretScanReadError).message).toContain(p)
   })
 
+  test("E29b2 — 4-WAY scanFile read-error invariant: EVERY adapter throws (never fail-open)", async () => {
+    // Drift guard (jul-2 SE re-audit): pattern/secretlint `scanFile` had silently
+    // regressed to `return []` on read failure while composite/entropy threw —
+    // the individual adapters were untested, so the drift slipped through. This
+    // asserts all four propagate a typed failure, so no single adapter can go
+    // back to scanning an unreadable file as "clean" (jun-10 finding #12).
+    const p = join(dir, "missing-for-4way-invariant")
+    const adapters = {
+      pattern: patternScanner(),
+      secretlint: secretlintScanner(),
+      entropy: entropyScanner(),
+      composite: compositeSecretScanner(),
+    }
+    for (const [name, scanner] of Object.entries(adapters)) {
+      let thrown: unknown
+      try {
+        await scanner.scanFile(p)
+      } catch (e) {
+        thrown = e
+      }
+      expect(
+        thrown,
+        `${name} adapter must throw SecretScanReadError on an unreadable file, not fail-open`,
+      ).toBeInstanceOf(SecretScanReadError)
+      expect((thrown as SecretScanReadError).path).toBe(p)
+    }
+  })
+
   test("E29c — path that is a DIRECTORY (EISDIR read failure) → typed error, not silent-clean", async () => {
     let thrown: unknown
     try {
