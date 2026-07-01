@@ -23,6 +23,7 @@
  */
 import { errMessage, logger } from "@/shared"
 import {
+  cmdBestkPassk,
   cmdCost,
   cmdDiff,
   cmdExplain,
@@ -56,6 +57,7 @@ const KNOWN_SUBCOMMANDS = new Set([
   "explain",
   "leaderboard",
   "cost",
+  "bestk-passk",
   "wave2-ab",
   "wave2-coverage",
   "wave2-backlog",
@@ -79,6 +81,7 @@ const HELP = `quanta-bench — unified SWE-bench CLI (ADR-0536)
   explain      agent-vs-gold failure analysis for one instance
   leaderboard  render an official/local/research split table from run report(s)
   cost         token / $ / wall-clock summary for a run report
+  bestk-passk  OFFLINE Best@K-vs-Pass@K ceiling: re-grade the repair-breadth candidate pool (gated QUANTA_BENCH_BESTK_PASSK)
   wave2-ab     compare thin-strict vs execfull with clean report/prediction provenance
   wave2-coverage  classify multi-file misses as same/partial/disjoint
   wave2-backlog   bucket clean receipts into completeness / generation / oracle
@@ -134,6 +137,9 @@ const main = async (): Promise<void> => {
       return
     case "cost":
       cmdCost()
+      return
+    case "bestk-passk":
+      await cmdBestkPassk()
       return
     case "wave2-ab":
       cmdWave2Ab()

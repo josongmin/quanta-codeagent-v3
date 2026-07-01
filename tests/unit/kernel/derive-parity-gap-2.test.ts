@@ -26,6 +26,7 @@ import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
+  benchBestkPasskSchema,
   campaignIdSchema,
   fullRemoteAmiSchema,
   fullRemoteConcurrencySchema,
@@ -59,6 +60,7 @@ const SCHEMAS: readonly Entry[] = [
   { name: "resume-iam-profile", schema: resumeIamProfileSchema },
   { name: "instance-id", schema: instanceIdSchema },
   { name: "model-lanes", schema: modelLanesSchema },
+  { name: "bestk-passk", schema: benchBestkPasskSchema },
 ]
 
 describe("Pillar A derive parity (slice GAP-2, env-direct) — inventory entry", () => {

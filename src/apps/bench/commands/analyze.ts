@@ -3,8 +3,18 @@
  * wave2-{ab,coverage,backlog} / presets. Extracted from cli.ts (ADR-0536 P0).
  * Thin glue over the analyze/ layer (separately tested). Moved verbatim.
  */
-import { readFileSync } from "node:fs"
-import { logger } from "@/shared"
+import { readFileSync, readdirSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { writePredictions } from "@/runner/batch/corpus/dataset"
+import { gateOn, logger } from "@/shared"
+import {
+  type CandidatePoolFs,
+  type Prediction,
+  type SlotKey,
+  renderBestKPassK,
+  runBestKPassKGrade,
+} from "../analyze/bestk-passk-grade"
 import { costSummaryFromReport, renderCost } from "../analyze/cost"
 import { diffRuns, renderDiff } from "../analyze/diff"
 import { explainFailure } from "../analyze/explain"
@@ -18,8 +28,16 @@ import {
   renderWave2BacklogMarkdown,
   renderWave2CoverageMarkdown,
 } from "../analyze/wave2-analysis"
+import { resolveDatasetFamily } from "../dataset-family"
 import { renderBenchPresetListLines } from "../preset"
-import { argValue, positionals, printBlock } from "./shared"
+import { buildBackend } from "./grade"
+import {
+  argValue,
+  modelNameFromPredictions,
+  positionals,
+  printBlock,
+  resolvedIdsFromReport,
+} from "./shared"
 
 export const cmdDiff = (): void => {
   const [a, b] = positionals()
@@ -168,6 +186,68 @@ export const cmdWave2Backlog = (): void => {
       }),
     ),
   )
+}
+
+/**
+ * `quanta-bench bestk-passk` — OFFLINE Best@K-vs-Pass@K ceiling analyzer.
+ *
+ * Gated behind QUANTA_BENCH_BESTK_PASSK (default-OFF): when unset the subcommand
+ * exits immediately with usage, does NO grading, and touches nothing — byte-identical.
+ * When on, it re-grades the whole repair-breadth candidate pool
+ * (`<observe-root>/repair-candidates/<id>/cand-r*-i*.patch`) through the official
+ * harness (SERIAL, max_workers:1) and reports how much a perfect selector could add
+ * over the run's submitted Best@K (=report.resolved_ids).
+ */
+export const cmdBestkPassk = async (): Promise<void> => {
+  if (!gateOn(process.env, "QUANTA_BENCH_BESTK_PASSK")) {
+    logger.info(
+      "quanta-bench bestk-passk is gated OFF. Set QUANTA_BENCH_BESTK_PASSK=1 to enable this " +
+        "offline candidate-pool re-grade (observe-only; SERIAL; re-grades the WHOLE pool).",
+    )
+    process.exit(2)
+  }
+  const observeRoot = argValue("--observe-root")
+  const dataset = argValue("--dataset") ?? process.env.QUANTA_SWEBENCH_DATASET
+  const backendSpec = argValue("--backend")
+  const report = argValue("--report")
+  if (
+    observeRoot === undefined ||
+    dataset === undefined ||
+    backendSpec === undefined ||
+    report === undefined
+  ) {
+    logger.info(
+      "usage: quanta-bench bestk-passk --observe-root <run-observe-dir> --dataset <instances.jsonl> " +
+        "--backend <ec2|ssh:user@host> --report <run-report.json> [--dataset-family verified|live|pro]",
+    )
+    process.exit(2)
+  }
+  const meta = JSON.parse(readFileSync(report, "utf8")) as {
+    model?: string
+    resolved_ids?: unknown
+  }
+  const submittedResolvedIds = resolvedIdsFromReport(meta.resolved_ids)
+  const modelName = meta.model ?? "quanta"
+  const family = resolveDatasetFamily(argValue("--dataset-family"), process.env)
+  // Inject node:fs (fail-loud reads) + the official backend into the pure core.
+  const fs: CandidatePoolFs = {
+    listDir: (dir) => readdirSync(dir),
+    readText: (path) => readFileSync(path, "utf8"),
+  }
+  const backend = buildBackend(backendSpec, modelNameFromPredictions(report) ?? modelName)
+  const result = await runBestKPassKGrade(
+    { observeRoot, datasetPath: dataset, modelName, family, submittedResolvedIds },
+    {
+      fs,
+      writePredictions: async (rows: readonly Prediction[], slot: SlotKey) => {
+        const file = join(tmpdir(), `quanta-bestk-preds-r${slot.round}i${slot.index}-${Date.now()}.jsonl`)
+        await writePredictions(file, [...rows])
+        return file
+      },
+      backend,
+    },
+  )
+  printBlock(renderBestKPassK(result))
 }
 
 export const cmdPresets = (): void => {
