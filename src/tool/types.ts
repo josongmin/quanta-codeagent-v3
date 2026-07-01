@@ -729,25 +729,31 @@ export interface ToolInterruptPolicy {
 
 /**
  * Optional result-shape contract (absorb #1). Wired into the registry/factory
- * seams but no built-in tool sets these today — they exist so a custom or
- * subagent-side tool can opt in WITHOUT changing dispatch. Removing one would
- * break its seam, NOT just its callers.
+ * seams so a tool can opt in WITHOUT changing dispatch. Removing a field would
+ * break its seam, NOT just its callers. See STATUS below for per-field live use.
  *
  *   - `outputSchema`           → `factory.enforceOutputSchema` +
  *                                `registry.run` (also `@/subagent/tools-6`).
  *   - `toModelOutput`          → `factory.renderToolOutput` + `registry.run`.
  *   - `supportsDeferredResults` → `@/tool/deferred` registry + dispatch.
  *
- * @deprecated AS A GROUP — every field on this interface is currently set by
- * ZERO production tools (the subagent's external `outputSchema` use is the
- * only live consumer surface). The dispatch/factory wiring is retained because
- * deleting it risks breaking that external use; new built-in tools SHOULD NOT
- * opt in. Prefer: (a) put structured payloads in the `output` text directly,
- * (b) keep result rendering inside the tool (`result.output` IS the model-
- * facing text), (c) use the orchestrator's polling for long-running work
- * rather than an in-band deferred handle. If you genuinely need one of these,
- * file an ADR — the audit decision is to NOT delete (would break the seam,
- * not just callers) but also NOT to grow new use.
+ * STATUS — do NOT treat this interface as dead:
+ *   - `toModelOutput` IS LIVE: set by the `apply_patch_structured` production
+ *     tool (`makeApplyPatchStructuredTool`, `apply-patch-structured-tool.ts`),
+ *     which is conditionally registered at `index.ts` when
+ *     `ports.structuredPatch === true` (ADR-0464). Deleting the seam breaks a
+ *     live tool, not just a latent one.
+ *   - `outputSchema` has an external live consumer surface: the subagent's
+ *     `output_schema` use (`@/subagent/tools-6`).
+ *   - `supportsDeferredResults` is set only by the `defineToolAsync` helper
+ *     (`async-helper.ts`), not by any registered tool — no live in-tree
+ *     consumer today.
+ * The dispatch/factory wiring is retained; new built-in tools SHOULD still be
+ * conservative here. Prefer: (a) put structured payloads in the `output` text
+ * directly, (b) keep result rendering inside the tool (`result.output` IS the
+ * model-facing text) unless a compact model rendering genuinely helps (as
+ * `apply_patch_structured` does), (c) use the orchestrator's polling for
+ * long-running work rather than an in-band deferred handle.
  */
 export interface ToolResultShape<O = unknown> {
   /** @deprecated Schema for the tool's STRUCTURED result
@@ -758,11 +764,13 @@ export interface ToolResultShape<O = unknown> {
    *  No built-in tool sets this today; the subagent's external use is the
    *  only live consumer. Prefer placing structured data in `output` directly. */
   outputSchema: z.ZodType<O>
-  /** @deprecated Produce a COMPACT, model-facing rendering of a result,
-   *  distinct from the richer UI/`output` text, to save tokens. When absent
-   *  the dispatch seam uses `result.output` as today (byte-identical). No
-   *  built-in tool sets this today; keep rendering inside the tool so
-   *  `result.output` is the single source of model-facing text. */
+  /** Produce a COMPACT, model-facing rendering of a result, distinct from the
+   *  richer UI/`output` text, to save tokens. When absent the dispatch seam
+   *  uses `result.output` as today (byte-identical). LIVE: set by the
+   *  `apply_patch_structured` tool to render its per-file `AppliedChange[]` so
+   *  the model can self-correct only the failed file(s). Other tools should
+   *  keep rendering inside the tool so `result.output` is the single source of
+   *  model-facing text unless a compact model rendering genuinely helps. */
   toModelOutput(result: ToolResult): string
   /** @deprecated When `true`, this tool may return a deferred result (a
    *  `{type:"deferred"}` event or `ToolResult.deferred`) that a
