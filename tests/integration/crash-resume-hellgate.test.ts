@@ -144,6 +144,7 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
       wm: wm as never,
       sessionId: SESSION_ID,
       taskRegistry: undefined,
+      tokenBaseline: undefined,
     })
     expect(outcome).toBe("aborted")
     expect(liveBuffer.has()).toBe(true)

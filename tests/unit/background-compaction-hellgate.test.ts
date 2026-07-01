@@ -67,17 +67,20 @@ type Summary = { text: string }
 /** Build an immediately-resolving summarize port returning a good summary. */
 const okSummarizer =
   (resultingTokens: number): SpeculativeSummarizeFn<Summary> =>
-  async () => ({ ok: true, value: { summary: { text: "brief" }, resultingTokens } })
+  async () => ({
+    ok: true,
+    value: { summary: { text: "brief" }, resultingTokens, summarizedPrefixLen: 0 },
+  })
 
 /** A summarize port that records whether it observed the abort, and resolves
  *  with a (deferred) result the test controls. */
 const deferredSummarizer = () => {
   let resolveFn: (
-    r: Result<{ summary: Summary; resultingTokens: number }, SummarizeError>,
+    r: Result<{ summary: Summary; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>,
   ) => void = () => {}
   let sawAbort = false
   const promise = new Promise<
-    Result<{ summary: Summary; resultingTokens: number }, SummarizeError>
+    Result<{ summary: Summary; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>
   >((res) => {
     resolveFn = res
   })
@@ -91,7 +94,7 @@ const deferredSummarizer = () => {
     fn,
     resolve: resolveFn,
     sawAbort: () => sawAbort,
-    settle: (r: Result<{ summary: Summary; resultingTokens: number }, SummarizeError>) =>
+    settle: (r: Result<{ summary: Summary; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>) =>
       resolveFn(r),
   }
 }
@@ -144,7 +147,10 @@ describe("BackgroundSummarizationController (ADR-0473)", () => {
     let calls = 0
     const summ: SpeculativeSummarizeFn<Summary> = async () => {
       calls++
-      return { ok: true, value: { summary: { text: "x" }, resultingTokens: 70_000 } }
+      return {
+        ok: true,
+        value: { summary: { text: "x" }, resultingTokens: 70_000, summarizedPrefixLen: 0 },
+      }
     }
     const ctl = new BackgroundSummarizationController(summ, fakeClock(), CFG)
     const usage = { usedTokens: 95_000, limitTokens: 100_000 }
@@ -176,7 +182,10 @@ describe("BackgroundSummarizationController (ADR-0473)", () => {
     ctl.maybeStart(usage)
     ctl.cancelIfPending() // turn ended early
     // now the summarizer's deferred body can resolve; it observes the abort.
-    def.settle({ ok: true, value: { summary: { text: "late" }, resultingTokens: 70_000 } })
+    def.settle({
+      ok: true,
+      value: { summary: { text: "late" }, resultingTokens: 70_000, summarizedPrefixLen: 0 },
+    })
     const out = await ctl.reconcileAtTurnBoundary(usage)
     expect(out).toEqual({ kind: "discard", reason: "cancelled" })
     // allow microtasks so the deferred body runs and records sawAbort.

@@ -8,6 +8,8 @@ import {
   estimateTokens,
   resolveCompactionLimitTokens,
   TokenBaselineBox,
+  toolResultRefs,
+  toolUseIds,
 } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
@@ -172,6 +174,71 @@ export const compactNowOnDemand = async (
   return true
 }
 
+/**
+ * H1 (jul-2) — rebuild a background-compaction install against the LIVE working
+ * memory instead of installing the FROZEN snapshot suffix the bg pass produced.
+ *
+ * The bg pass (`speculativeSummarizeAdapter`) snapshots the wm at `maybeStart`
+ * time (turn N), folds `snapshot[0..prefixLen)` into a synthetic summary, and
+ * returns `[synthetic, ...snapshot[prefixLen..]]`. By the reconcile boundary the
+ * LIVE wm has usually GROWN — turn N+1 appended messages AFTER the snapshot.
+ * Installing the frozen payload verbatim would `wm.replace(...)` those appends
+ * away (history loss, and a possible orphaned tool_use/tool_result at the seam).
+ *
+ * This recomputes `[synthetic, ...liveWm.slice(prefixLen)]` so the post-snapshot
+ * appends survive. It returns `undefined` (⇒ DISCARD, caller falls back to the
+ * synchronous path and leaves live history untouched) when the boundary is stale
+ * or the seam would orphan a tool_result:
+ *   - `prefixLen` out of range for the live wm (the wm was shrunk/replaced under
+ *     us between maybeStart and reconcile), OR
+ *   - the FROZEN suffix (what the pass captured at `snapshot[prefixLen..]`) is no
+ *     longer a prefix of the live suffix (`liveWm[prefixLen..]`). Turn N+1 only
+ *     APPENDS, so the frozen suffix must still sit at the head of the live suffix
+ *     by reference (the wm hands back the SAME stored objects). A mismatch means
+ *     the live history was REWRITTEN/replaced (e.g. a microcompact or a reactive
+ *     squeeze) under us ⇒ our synthetic no longer summarizes the right prefix ⇒
+ *     installing would corrupt. This subsumes a bare length check and catches a
+ *     same-length in-place rewrite. OR
+ *   - the LIVE suffix contains a tool_result whose tool_use lived in the
+ *     summarized prefix (the synthetic carries no tool_use ⇒ it would dangle).
+ *
+ * PURE + side-effect-free; the caller applies `wm.replace`.
+ */
+export const rebuildBgInstallAgainstLive = (
+  frozenSummary: readonly Message[],
+  summarizedPrefixLen: number,
+  liveMessages: readonly Message[],
+): Message[] | undefined => {
+  // The bg payload is ALWAYS `[synthetic, ...suffix]` (length ≥ 1); a malformed
+  // empty payload is a discard.
+  const synthetic = frozenSummary[0]
+  if (synthetic === undefined) return undefined
+  // STALE-BOUNDARY GUARD — the boundary must still index into the live wm.
+  if (summarizedPrefixLen < 0 || summarizedPrefixLen > liveMessages.length) return undefined
+  const liveSuffix = liveMessages.slice(summarizedPrefixLen)
+  // STALE-HISTORY GUARD — the frozen suffix must still be the HEAD of the live
+  // suffix (turn N+1 only appends). A reference mismatch ⇒ the wm was rewritten/
+  // replaced between maybeStart and reconcile ⇒ discard (do NOT corrupt). The
+  // live suffix must be at least as long as the frozen one (appends grow it).
+  const frozenSuffix = frozenSummary.slice(1)
+  if (liveSuffix.length < frozenSuffix.length) return undefined
+  for (let i = 0; i < frozenSuffix.length; i++)
+    if (frozenSuffix[i] !== liveSuffix[i]) return undefined
+  // ORPHAN RE-CHECK at the synthetic↔suffix seam. The synthetic replaces the
+  // whole summarized prefix and carries NO tool_use, so any tool_result in the
+  // live suffix whose matching tool_use lived in the (now-summarized) prefix is
+  // orphaned (Anthropic rejects an unpaired tool_result). Reuse the SAME id
+  // helpers `findBoundary` uses: gather every tool_use id the suffix itself
+  // produces, then reject if any suffix tool_result references an id NOT in that
+  // set. (The suffix interior was already self-consistent in the live wm; the
+  // only NEW risk is refs into the removed prefix — this catches all of them.)
+  const suffixToolUseIds = new Set<string>()
+  for (const m of liveSuffix) for (const id of toolUseIds(m)) suffixToolUseIds.add(id)
+  for (const m of liveSuffix)
+    for (const ref of toolResultRefs(m)) if (!suffixToolUseIds.has(ref)) return undefined
+  return [synthetic, ...liveSuffix]
+}
+
 export const maybeCompact = async (
   config: AgentConfig,
   system: SystemPromptInput,
@@ -250,13 +317,25 @@ export const maybeCompact = async (
         }
       }
     : undefined
+  // H1 (jul-2) — recompute a bg-compaction install against the LIVE wm (`snapshot`
+  // is `[...wm.snapshot()]` at reconcile time, already reflecting turn N+1's
+  // appends). Installing `borrowed.summary` verbatim would `wm.replace(...)` those
+  // appends away. `undefined` ⇒ stale/orphan-unsafe ⇒ fall through to the
+  // synchronous path (leave live history untouched). NB: `bgController` is only
+  // wired when QUANTA_BG_COMPACTION==="1"; OFF ⇒ `borrowed` is undefined ⇒ this is
+  // never entered ⇒ byte-identical.
+  const bgInstall =
+    borrowed?.kind === "install"
+      ? rebuildBgInstallAgainstLive(borrowed.summary, borrowed.summarizedPrefixLen, snapshot)
+      : undefined
+  if (borrowed?.kind === "install" && bgInstall === undefined)
+    emitRecovery(config, "compact", "bg-install-stale")
   try {
-    if (borrowed?.kind === "install") {
-      const installed = [...borrowed.summary]
+    if (bgInstall !== undefined) {
       result = {
         compacted: true,
-        messages: installed,
-        summaryTokens: estimateTokens(installed.slice(0, 1)),
+        messages: bgInstall,
+        summaryTokens: estimateTokens(bgInstall.slice(0, 1)),
       }
     } else {
       result = await compactIfNeeded({
@@ -310,6 +389,17 @@ export const maybeCompact = async (
       type: "error",
       message: `proactive compaction failed: ${message}`,
     })
+    // M9 (jul-2) — a proactive compaction that THREW freed nothing, so it must
+    // accrue a no-progress strike (identical to the `no_boundary` branch below).
+    // Otherwise a summarizer that keeps throwing over threshold spins forever and
+    // the futility breaker never trips in the exact mode it exists for. We do NOT
+    // fail-close here: proactive runs pre-sampling and the reactive PTL path is
+    // the correct fail-closed backstop (there is no hardWindow concept here), so
+    // we keep `return {abort:false}` — the strike surfaces at the NEXT
+    // `maybeCompact` via `breaker.check()`. Emit a `proactive-failed` recovery
+    // detail so the trajectory distinguishes a throw from a successful compact.
+    breaker?.recordProactive(before, before)
+    emitRecovery(config, "compact", "proactive-failed")
     return { abort: false }
   }
   if (result.compacted) {

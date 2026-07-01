@@ -75,8 +75,12 @@ export const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> 
       sessionId: ctx.sessionId,
       taskRegistry: ctx.features.taskRegistry,
     })
-    if (startOutcome === "aborted") {
-      return ctx.finish("aborted", 0, interruptedCategory("user"))
+    if (startOutcome.status === "aborted") {
+      // Attribute the abort to its CAUSE (same class as FIX 2c parkSettleFinish):
+      // a UserPromptSubmit hook DENY is a policy/system block (SYSTEM bucket),
+      // while the `interrupt` submission op is a genuine user interrupt (USER).
+      const cause = startOutcome.cause === "hook_deny" ? "system" : "user"
+      return ctx.finish("aborted", 0, interruptedCategory(cause))
     }
     const finished = await runAgentTurnLoop(ctx)
     if (finished !== undefined) {

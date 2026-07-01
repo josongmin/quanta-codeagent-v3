@@ -118,6 +118,11 @@ interface PassState<S> {
 interface SummarizeOk<S> {
   summary: S
   resultingTokens: number
+  /** H1 (jul-2) — the prefix length the adapter folded into `summary` (boundary
+   *  index into the snapshot it summarized). Threaded to the install outcome so
+   *  the host recomputes the suffix against the LIVE transcript instead of the
+   *  frozen snapshot suffix. Pure count; no @/llm coupling. */
+  summarizedPrefixLen: number
 }
 
 /** How many microtask turns reconcile yields before reading the settlement
@@ -292,7 +297,14 @@ export class BackgroundSummarizationController<S> {
     logger.debug(
       `bg-compaction.reconcile: install freed ${freedTokens} tokens after ${elapsedMs}ms`,
     )
-    return { kind: "install", summary: settled.value.summary, freedTokens }
+    return {
+      kind: "install",
+      summary: settled.value.summary,
+      freedTokens,
+      // H1 (jul-2) — carry the summarized-prefix boundary so the host recomputes
+      // the suffix against LIVE history at install (not the frozen snapshot).
+      summarizedPrefixLen: settled.value.summarizedPrefixLen,
+    }
   }
 
   /** Swallow the result of an abandoned promise so an aborted/late summarize

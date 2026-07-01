@@ -59,12 +59,14 @@ export {
 
 const DEFAULT_KEEP_TURNS = 6
 
-/** tool_use ids referenced by tool_result blocks in `m` (if any). */
-const toolResultRefs = (m: Message): string[] =>
+/** tool_use ids referenced by tool_result blocks in `m` (if any). Exported (H1)
+ *  so the bg-compaction install seam can reuse the SAME orphan check as
+ *  {@link findBoundary} rather than re-deriving it. */
+export const toolResultRefs = (m: Message): string[] =>
   m.content.filter((b) => b.type === "tool_result").map((b) => b.tool_use_id)
 
-/** tool_use ids produced by `m` (if any). */
-const toolUseIds = (m: Message): string[] =>
+/** tool_use ids produced by `m` (if any). Exported (H1) — see {@link toolResultRefs}. */
+export const toolUseIds = (m: Message): string[] =>
   m.content.filter((b) => b.type === "tool_use").map((b) => b.id)
 
 /**
@@ -778,7 +780,12 @@ const speculativeSummarizeAdapter = (
 ): SpeculativeSummarizeFn<BgSummaryPayload> => {
   return async ({
     cancel,
-  }): Promise<Result<{ summary: BgSummaryPayload; resultingTokens: number }, SummarizeError>> => {
+  }): Promise<
+    Result<
+      { summary: BgSummaryPayload; resultingTokens: number; summarizedPrefixLen: number },
+      SummarizeError
+    >
+  > => {
     if (cancel.aborted) {
       return { ok: false, error: { kind: "other", detail: "cancelled before start" } }
     }
@@ -813,7 +820,15 @@ const speculativeSummarizeAdapter = (
       content: [{ type: "text", text: `<continuation summary>\n${summaryText}` }],
     }
     const summary: BgSummaryPayload = [synthetic, ...suffix]
-    return { ok: true, value: { summary, resultingTokens: estimateTokens(summary) } }
+    // H1 (jul-2) — report the prefix boundary we folded (`boundary` messages of
+    // the START snapshot). The host installs `[synthetic, ...liveSuffix]` where
+    // `liveSuffix = liveWm.slice(boundary)`, so turn N+1's appends (added after
+    // this snapshot) are PRESERVED instead of being overwritten by the frozen
+    // `suffix` captured here.
+    return {
+      ok: true,
+      value: { summary, resultingTokens: estimateTokens(summary), summarizedPrefixLen: boundary },
+    }
   }
 }
 

@@ -43,7 +43,7 @@
 
 import type { ContextEvent } from "@/agent/context-change"
 import { detectContextChanges } from "@/agent/context-change"
-import type { MentionResolverPort } from "@/agent/mention-injection"
+import type { MentionResolveErrorSink, MentionResolverPort } from "@/agent/mention-injection"
 import {
   buildInjectionFragments,
   buildMentionInjectionMessages,
@@ -139,13 +139,17 @@ const buildMentionInjector = (
   store: TypedHistoryEventStore | undefined,
   sessionId: string | undefined,
   now: () => number,
+  // Observability: invoked once per FAILING mention (a throwing `@file`/`@symbol`
+  // resolution) so the operator sees a failed reference instead of it silently
+  // vanishing. `undefined` ⇒ no sink ⇒ byte-identical (safeCall still logs.warn).
+  onError: MentionResolveErrorSink | undefined,
 ): ((userInputText: string) => Promise<readonly Message[]>) => {
   let turnSeq = 0
   return async (userInputText: string): Promise<readonly Message[]> => {
     try {
       const mentions = parseMentions(userInputText)
       if (mentions.length === 0) return []
-      const fragments = await buildInjectionFragments(mentions, resolver)
+      const fragments = await buildInjectionFragments(mentions, resolver, onError)
       if (fragments.length === 0) return []
       if (store !== undefined) {
         turnSeq++
@@ -228,7 +232,20 @@ const fillMentionInjector = (cfg: AgentConfig, deps: CodexR2WireDeps, now: () =>
   if (cfg.mentionInjector !== undefined) return
   if (deps.mentionResolver === undefined) return
   try {
-    const injector = buildMentionInjector(deps.mentionResolver, deps.store, deps.sessionId, now)
+    // Surface a failed `@`-mention resolution as a non-fatal stream error so it is
+    // not silently swallowed inside `safeCall` (mirror of `resolveMemoryContext`).
+    const onError: MentionResolveErrorSink = (err) =>
+      cfg.stream.emit({
+        type: "error",
+        message: `mention @${err.target} (${err.kind}) resolve failed: ${err.message}`,
+      })
+    const injector = buildMentionInjector(
+      deps.mentionResolver,
+      deps.store,
+      deps.sessionId,
+      now,
+      onError,
+    )
     safeSet(cfg, "mentionInjector", injector)
   } catch {
     // Injector factory throw ⇒ slot stays unwired.
