@@ -14,9 +14,10 @@
  * `invalidateAll(callbacks)` calls every registered callback. One callback
  * throwing does NOT prevent the others from running (HELL-MT-12). The
  * function itself never throws. Failures are reported via `onCallbackError`
- * (default: `console.warn` with the callback name + reason).
+ * (default: the injected `writeStderr` sink with the callback name + reason).
  */
 
+import { writeStderr } from "@/shared"
 import type { InvalidationCallback, Invalidator } from "./port"
 import type { InvalidationDecision, ModelTag } from "./types"
 
@@ -48,7 +49,8 @@ const majorOf = (version: string): number => {
 export interface DefaultInvalidatorOptions {
   /**
    * Called when a registered callback throws during `invalidateAll`.
-   * Default: `console.warn` with `[ModelTag invalidator] callback {name} failed: {error}`.
+   * Default: the injected `writeStderr` sink with `[ModelTag invalidator]
+   * callback {name} failed: {error}`.
    * Override to silence the warn or route to a structured logger.
    */
   readonly onCallbackError?: (failure: { callback: string; error: unknown }) => void
@@ -57,9 +59,10 @@ export interface DefaultInvalidatorOptions {
 const defaultOnCallbackError = (failure: { callback: string; error: unknown }): void => {
   const msg =
     failure.error instanceof Error ? failure.error.message : String(failure.error ?? "<unknown>")
-  // OPS surface — single warn per failed callback, never throws.
-  // biome-ignore lint/suspicious/noConsole: OPS warn is the documented surface
-  console.warn(`[ModelTag invalidator] callback ${failure.callback} failed: ${msg}`)
+  // OPS surface — single warn per failed callback, never throws. Routed through
+  // the ADR-0303 injected terminal sink (default NOOP) so this non-app leaf owns
+  // no raw terminal; override via `onCallbackError` for structured telemetry.
+  writeStderr(`[ModelTag invalidator] callback ${failure.callback} failed: ${msg}\n`)
 }
 
 const checkPure = (stored: ModelTag, current: ModelTag): InvalidationDecision => {

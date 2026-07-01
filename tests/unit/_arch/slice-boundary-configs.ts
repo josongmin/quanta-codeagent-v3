@@ -411,6 +411,176 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     ],
     requireSliceBarrel: true,
   },
+
+  // ────────────────────────────────────────────────────────────────────────
+  // S4b — previously-UNREGISTERED slices. Each had NO per-slice boundary config
+  // (no console/env/deny/surface battery). Every config below is SEEDED GREEN
+  // against current code: the leaf slices carry the canonical
+  // `[...PEER_LIBRARY_DENY, ...LAYER2_DENY]` deny-list (mirror of @/git /
+  // @/browser / @/scheduler / @/stream), with `envAllowFiles` carve-outs for the
+  // exact leaf names that legitimately resolve env AT CALL TIME (verified by the
+  // scanner probe — no surface / stdio / alt-runtime / node-surface / console
+  // violations exist in any of these today). Two peer-crossing edges are
+  // declared as reviewed `allowImports` carve-outs rather than silently dropped.
+  // Slices WITHOUT an `index.ts` barrel (integrations, protocol) omit
+  // `requireSliceBarrel` so the config stays GREEN; adding those barrels is a
+  // noted follow-up.
+  // ────────────────────────────────────────────────────────────────────────
+
+  activity: {
+    slice: "activity",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  artifact: {
+    slice: "artifact",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  capability: {
+    slice: "capability",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  codemode: {
+    slice: "codemode",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  config: {
+    slice: "config",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  connectors: {
+    slice: "connectors",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // `connector-marketplace.ts` / `marketplace-policy.ts` resolve the
+    // marketplace posture from env AT CALL TIME (the documented env boundary for
+    // this slice; both leaf names are unique within the slice).
+    envAllowFiles: ["connector-marketplace.ts", "marketplace-policy.ts"],
+    requireSliceBarrel: true,
+  },
+  integrations: {
+    slice: "integrations",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // Reviewed carve-out: `github/adapters/delivery-persist-fs.ts` persists
+    // delivery records through the `@/storage` fs port (an adapter reaching the
+    // storage leaf — a declared, defended cross-slice contract, not a silent
+    // widening). Any OTHER peer-library / Layer-2 import still fires.
+    allowImports: ["@/storage"],
+    // No `src/integrations/index.ts` barrel today → omit `requireSliceBarrel`
+    // to seed GREEN (adding the barrel is a noted follow-up).
+  },
+  lsp: {
+    slice: "lsp",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // `base.ts` (server spawn env), `server-mem-budget.ts` /
+    // `server-rss-watchdog.ts` (resource-cap env knobs) read env at call time.
+    envAllowFiles: ["base.ts", "server-mem-budget.ts", "server-rss-watchdog.ts"],
+    requireSliceBarrel: true,
+  },
+  media: {
+    slice: "media",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // `registry.ts` resolves media-backend selection from env at call time
+    // (unique leaf name within the slice).
+    envAllowFiles: ["registry.ts"],
+    requireSliceBarrel: true,
+  },
+  migration: {
+    slice: "migration",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // Reviewed carve-outs: the external-config CONVERTER
+    // (`external-config/convert.ts`) reads the `@/agent` glob/repo-rule shapes +
+    // `@/skill` frontmatter shape to translate foreign config into ours. These
+    // are named sub-barrels (typed conversion contracts), declared here so a NEW
+    // peer-library crossing still fires. (`@/migration` is itself in
+    // PEER_LIBRARY_DENY — the self-prefix filter drops it.)
+    allowImports: ["@/agent/glob-rules", "@/agent/repo-rules", "@/skill/frontmatter"],
+    requireSliceBarrel: true,
+  },
+  "plugin-isolation": {
+    slice: "plugin-isolation",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // `bun-spawner.ts` passes the parent env to the spawned isolated-plugin
+    // child so PATH resolves the runtime (same spawner env-boundary precedent as
+    // `@/tool`'s `port.ts` / `@/storage`'s `runner.ts`).
+    envAllowFiles: ["bun-spawner.ts"],
+    requireSliceBarrel: true,
+  },
+  protocol: {
+    slice: "protocol",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // No `src/protocol/index.ts` barrel today → omit `requireSliceBarrel` to
+    // seed GREEN (adding the barrel is a noted follow-up).
+  },
+  radar: {
+    slice: "radar",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  realtime: {
+    slice: "realtime",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  remote: {
+    slice: "remote",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  retrieval: {
+    slice: "retrieval",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // `registry.ts` resolves backend selection from env at call time. NOTE: the
+    // leaf name is NOT unique (5 `registry.ts` under the slice); basename
+    // allowlisting is the only mechanism the scanner supports, so this exempts
+    // all five from the env check. Only `cache/registry.ts` + `reranker/
+    // registry.ts` actually read env today; the exemption is over-broad but
+    // SAFE (can only make the test pass). Tightening to path-scoped exemption is
+    // a noted follow-up.
+    envAllowFiles: ["registry.ts"],
+    requireSliceBarrel: true,
+  },
+  runtime: {
+    slice: "runtime",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // Env-boundary leaves: `os-sandbox/env.ts` (sandbox env allowlist scrub),
+    // `sandbox.ts`, `shell-argv.ts`, `shell.ts` resolve shell/sandbox posture
+    // from env at call time. `env.ts` basename also covers the clean
+    // `network-proxy/env.ts` (no env read) — safe.
+    envAllowFiles: ["env.ts", "sandbox.ts", "shell-argv.ts", "shell.ts"],
+    requireSliceBarrel: true,
+  },
+  shared: {
+    slice: "shared",
+    // `@/shared` is the base leaf every slice depends on; it imports NOTHING
+    // upward. Full peer + Layer-2 deny locks that (self-prefix drops `@/shared`
+    // if ever added). `env-files.ts` + `runtime-config.ts` ARE the env
+    // composition primitives (the documented env-resolution boundary the whole
+    // repo threads through) — exempted from the no-env-read invariant.
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    envAllowFiles: ["env-files.ts", "runtime-config.ts"],
+    requireSliceBarrel: true,
+  },
+  ui: {
+    slice: "ui",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    // `ui-helpers.ts` reads a display-posture env flag at call time.
+    envAllowFiles: ["ui-helpers.ts"],
+    requireSliceBarrel: true,
+  },
+  voice: {
+    slice: "voice",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
+  workflow: {
+    slice: "workflow",
+    denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
+    requireSliceBarrel: true,
+  },
 }
 
 export const getSliceBoundaryConfig = (slice: string): SliceBoundaryConfig => {

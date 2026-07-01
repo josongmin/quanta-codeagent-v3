@@ -123,9 +123,46 @@ const collectAstHits = (
   return out
 }
 
+/**
+ * Single-file const-alias table: `const IDENT = "literal"` at MODULE scope with
+ * a plain string-literal initializer. Used to resolve a dynamic `import(IDENT)`
+ * whose specifier was hoisted into a const variable — the exact trick
+ * `apps/agent/mode-presets/batch.ts` used (`const BENCH_EVAL_MODULE =
+ * "@/apps/bench/eval"` → `await import(BENCH_EVAL_MODULE)`) to make a real
+ * cross-surface edge invisible to the literal-only dynamic-import scanner.
+ *
+ * Deliberately conservative: only top-level `const` declarations with a bare
+ * string-literal initializer are collected (no `let`, no member/computed access,
+ * no concatenation, no cross-file resolution). Anything else stays unresolved
+ * (as before) rather than risk a false edge.
+ */
+const collectModuleConstStringLiterals = (sf: ts.SourceFile): ReadonlyMap<string, string> => {
+  const table = new Map<string, string>()
+  for (const stmt of sf.statements) {
+    if (
+      !ts.isVariableStatement(stmt) ||
+      (stmt.declarationList.flags & ts.NodeFlags.Const) === 0
+    ) {
+      continue
+    }
+    for (const decl of stmt.declarationList.declarations) {
+      if (
+        ts.isIdentifier(decl.name) &&
+        decl.initializer &&
+        ts.isStringLiteralLike(decl.initializer)
+      ) {
+        // First binding wins (a re-declared const is a compile error anyway).
+        if (!table.has(decl.name.text)) table.set(decl.name.text, decl.initializer.text)
+      }
+    }
+  }
+  return table
+}
+
 export const extractImports = (src: string): Array<{ line: number; spec: string }> => {
   const out: Array<{ line: number; spec: string }> = []
   const sf = parseSourceFile(src)
+  const constStrings = collectModuleConstStringLiterals(sf)
   const visit = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
@@ -168,6 +205,19 @@ export const extractImports = (src: string): Array<{ line: number; spec: string 
           line: lineOf(sf, node.getStart(sf)),
           spec: firstArg.text,
         })
+      } else if (firstArg && ts.isIdentifier(firstArg)) {
+        // Const-alias resolution: `const M = "@/apps/…"; await import(M)`. Resolve
+        // to the literal so hoisting the specifier into a variable can no longer
+        // hide a cross-slice / cross-surface dynamic import edge. Conservative:
+        // only a MODULE-scope `const IDENT = "literal"` in THIS file resolves;
+        // anything dynamic stays unrecorded (as before).
+        const resolved = constStrings.get(firstArg.text)
+        if (resolved !== undefined) {
+          out.push({
+            line: lineOf(sf, node.getStart(sf)),
+            spec: resolved,
+          })
+        }
       }
     }
     ts.forEachChild(node, visit)
@@ -297,7 +347,11 @@ const scanProcessStdio = (src: string): Array<{ line: number; hit: string }> =>
     return node.expression.getText() === "process" ? `process.${node.name.text}` : null
   })
 
-const scanConsoleCalls = (src: string): Array<{ line: number; hit: string }> =>
+/** AST-based `console.<method>(` detector (ignores string literals and comments
+ *  natively — a `"console.log($A)"` inside a string or a commented-out call is
+ *  NOT a hit). Exported so the terminal-defaults ratchet can reuse the SAME
+ *  detector the per-slice battery uses (no second, regex-based copy to drift). */
+export const scanConsoleCalls = (src: string): Array<{ line: number; hit: string }> =>
   collectAstHits(src, (node) => {
     if (!ts.isCallExpression(node) || !isPropertyAccessLike(node.expression)) return null
     const callee = node.expression

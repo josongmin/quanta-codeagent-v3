@@ -43,6 +43,7 @@ import {
   type Invalidator,
   registerInvalidationCallback,
 } from "@/retrieval/versioning"
+import { writeStderr } from "@/shared"
 import type { AutoHookRegistrar, AutoHookRegistrarOptions, CacheLike, StoreLike } from "./port"
 import type { UnregisterAll } from "./types"
 
@@ -51,15 +52,16 @@ import type { UnregisterAll } from "./types"
  * silence everything without bypassing the production OPS channel.
  */
 const defaultOnWarn = (msg: string): void => {
-  // biome-ignore lint/suspicious/noConsole: OPS warn is the documented surface
-  console.warn(`[auto-hook] ${msg}`)
+  // OPS warn — routed through the ADR-0303 injected terminal sink (default
+  // NOOP) so this non-app leaf owns no raw terminal. Tests override via `onWarn`.
+  writeStderr(`[auto-hook] ${msg}\n`)
 }
 
 const defaultOnUnregisterError = (failure: { hook: string; error: unknown }): void => {
   const m =
     failure.error instanceof Error ? failure.error.message : String(failure.error ?? "<unknown>")
-  // biome-ignore lint/suspicious/noConsole: OPS warn is the documented surface
-  console.warn(`[auto-hook] unregister of ${failure.hook} failed: ${m}`)
+  // OPS warn — routed through the ADR-0303 injected terminal sink (default NOOP).
+  writeStderr(`[auto-hook] unregister of ${failure.hook} failed: ${m}\n`)
 }
 
 /**
