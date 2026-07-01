@@ -1,6 +1,7 @@
 import type { AgentMode } from "@/agent"
 import type { WorkingState } from "@/agent/working-state"
 import type { ContextUpdateField } from "@/memory/typed-event"
+import { isRecord } from "@/shared"
 import type { UseCaseId } from "../types"
 
 export const GROUNDING_SCHEMA_VERSION = 2 as const
@@ -209,9 +210,6 @@ export interface GroundingCase {
   pairId?: string
   pairRole?: GroundingPairRole
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isOneOf = <T extends readonly string[]>(value: unknown, items: T): value is T[number] =>
   typeof value === "string" && (items as readonly string[]).includes(value)

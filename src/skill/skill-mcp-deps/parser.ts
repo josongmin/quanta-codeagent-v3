@@ -32,7 +32,7 @@
  * Slices imported: `@/shared` ONLY.
  */
 
-import { errMessage } from "@/shared"
+import { errMessage, isRecord } from "@/shared"
 import {
   HTTP_DEP_TRANSPORTS,
   MCP_DEP_TRANSPORTS,
@@ -43,9 +43,6 @@ import {
 } from "./types"
 
 /** Type guard: a non-null plain object (record). */
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
-
 /** Read a required non-empty string field, TRIMMED, or null. The trim is
  *  load-bearing: the returned value feeds {@link depIdentity} (dedupe key) and
  *  the launcher's serverId. Returning the raw value would let `value: " svc "`

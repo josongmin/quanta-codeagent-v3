@@ -20,6 +20,7 @@
  * other quanta slice — keeps the scanner portable to a Tauri sidecar / worker.
  */
 import { readFile } from "node:fs/promises"
+import { isRecord } from "@/shared"
 import { lintSource } from "@secretlint/core"
 import { creator as recommendedPreset } from "@secretlint/secretlint-rule-preset-recommend"
 import type { SecretLintCoreConfig, SecretLintCoreResultMessage } from "@secretlint/types"
@@ -148,9 +149,6 @@ interface ScanContext {
   readonly config: SecretLintCoreConfig
   readonly isGcpServiceAccountJson: boolean
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isGcpServiceAccountJson = (text: string): boolean => {
   try {

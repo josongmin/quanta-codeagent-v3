@@ -23,7 +23,7 @@
  * NOT an error — DDG returns this for the majority of queries.
  */
 
-import { errMessage } from "@/shared"
+import { errMessage, isRecord } from "@/shared"
 import type { WebSearchHit, WebSearchProvider } from "../search"
 /** Default DuckDuckGo Instant Answer endpoint. */
 export const DDG_DEFAULT_ENDPOINT = "https://api.duckduckgo.com/"
@@ -47,9 +47,6 @@ interface DdgRelatedTopic {
    *  flatten one level deep — same posture as a typical UI render. */
   readonly Topics?: unknown
 }
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** Coerce one related-topic row to a `WebSearchHit`. Title falls back to
  *  the URL when `Text` is missing so the formatter still has something

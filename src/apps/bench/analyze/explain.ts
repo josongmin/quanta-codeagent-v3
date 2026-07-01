@@ -12,6 +12,7 @@
  */
 
 import { readFileSync } from "node:fs"
+import { isRecord } from "@/shared"
 import { modelPatchFromPredictionArtifact } from "./wave2-guards"
 
 export interface FailureExplanation {
@@ -52,9 +53,6 @@ export const filesInDiff = (patch: string): string[] => {
   }
   return files
 }
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** FAIL_TO_PASS may be a real array OR a JSON-encoded string array (the
  *  upstream SWE-bench parquet→jsonl export double-encodes it). Both → string[]. */

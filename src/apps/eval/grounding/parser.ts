@@ -1,4 +1,4 @@
-import { errMessage } from "@/shared"
+import { errMessage, isRecord } from "@/shared"
 import { classifyGroundingParserError, type GroundingErrorKind } from "./diagnostics"
 import {
   GROUNDING_CONFIDENCE,
@@ -15,9 +15,6 @@ export interface GroundingParseResult {
   error?: string
   errorKind?: GroundingErrorKind
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isOneOf = <T extends readonly string[]>(value: unknown, items: T): value is T[number] =>
   typeof value === "string" && (items as readonly string[]).includes(value)

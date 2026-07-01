@@ -41,6 +41,7 @@ export {
   ToolInputError,
   toError,
 } from "./errors"
+export { isRecord } from "./is-record"
 export type {
   ItemStreamCompleted,
   ItemStreamCore,

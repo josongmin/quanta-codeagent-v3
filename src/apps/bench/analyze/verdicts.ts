@@ -20,6 +20,7 @@
  */
 
 import { readFileSync } from "node:fs"
+import { isRecord } from "@/shared"
 
 export interface RunVerdicts {
   readonly resolved: ReadonlySet<string>
@@ -80,9 +81,6 @@ const VERDICT_STRENGTH: Record<VerdictStatus, number> = {
   localStructural: 4,
   resolved: 5,
 }
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
 
 /** Best-effort string-array coercion. Accepts a real array of strings OR a
  *  JSON-encoded string array (some swebench exports double-encode the id
