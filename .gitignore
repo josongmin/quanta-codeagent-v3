@@ -92,3 +92,6 @@ src/observability/coverage/*.js
 
 # python editable-install build artifacts (adapters/terminal-bench)
 *.egg-info/
+
+# terminal-bench task download (harbor download terminal-bench) — regenerable, not source
+/terminal-bench/
