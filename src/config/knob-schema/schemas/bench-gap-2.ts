@@ -194,6 +194,21 @@ export const instanceIdSchema: KnobSchema<string> = {
   parse: parseTrimmedString,
 }
 
+/* ── bestk-passk (QUANTA_BENCH_BESTK_PASSK) — bool ─────────────────────────── */
+export const benchBestkPasskSchema: KnobSchema<true> = {
+  id: "bestk-passk",
+  envKey: "QUANTA_BENCH_BESTK_PASSK",
+  kind: "bool",
+  // T = true (no falsy member); inventory off-default `false` is derived by
+  // deriveInventoryDefault from kind="bool" + undefined.
+  default: undefined,
+  describe:
+    "Offline bestk-passk analyze subcommand gate: grade ALL repair-breadth candidate patches (repair-candidates/<id>/cand-r*-i*.patch) via the official harness to compute Pass@K ceiling vs Best@K (=totals.resolved). Observe-only offline job; SERIAL max_workers=1; never concurrent with a live bench. Default-OFF (gateOn) ⇒ subcommand exits, no grading, byte-identical.",
+  readSite: "apps/bench/commands/analyze.ts",
+  surfaces: BENCH,
+  parse: parseGateOn,
+}
+
 /* ── model-lanes (QUANTA_BENCH_MODEL_LANES) — string ───────────────────────── */
 export const modelLanesSchema: KnobSchema<string> = {
   id: "model-lanes",

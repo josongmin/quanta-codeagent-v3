@@ -68,6 +68,7 @@ import {
   verifySelectRiskGateSchema,
 } from "./bench-gap-1"
 import {
+  benchBestkPasskSchema,
   campaignIdSchema,
   fullRemoteAmiSchema,
   fullRemoteConcurrencySchema,
@@ -118,7 +119,7 @@ import {
 } from "./bench-repro"
 
 /**
- * ALL 77 bench knob schemas, IN THE EXACT ORDER their entries appear in
+ * ALL 88 bench knob schemas, IN THE EXACT ORDER their entries appear in
  * src/config/knob-inventory/bench.ts (envKey order). Do NOT reorder.
  */
 export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
@@ -209,4 +210,5 @@ export const ALL_BENCH_SCHEMAS: readonly AnyKnobSchema[] = [
   campaignIdSchema, // QUANTA_BENCH_CAMPAIGN_ID
   resumeIamProfileSchema, // QUANTA_BENCH_RESUME_IAM_PROFILE
   instanceIdSchema, // QUANTA_BENCH_INSTANCE_ID
+  benchBestkPasskSchema, // QUANTA_BENCH_BESTK_PASSK
 ]

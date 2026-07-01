@@ -243,6 +243,18 @@ export interface BenchReport {
    *  diagnosis (e.g. the gate was disabled but the run was systemically broken).
    *  `verdict:"healthy"` runs omit it so a normal report is unchanged. */
   runHealth?: RunHealthSummary
+  /** jul-02 — OFFLINE Best@K-vs-Pass@K ceiling (observe-only). Populated ONLY by
+   *  the post-hoc `quanta-bench bestk-passk` analyzer (QUANTA_BENCH_BESTK_PASSK),
+   *  which re-grades the repair-breadth candidate pool through the official harness
+   *  to measure the selector's missed-winner headroom. The LIVE batch/submission
+   *  path NEVER sets this field — `buildReport` does not populate it — so a normal
+   *  run stays byte-identical (absent ⇒ not serialized). */
+  bestKPassKGap?: {
+    readonly k: number
+    readonly passK: number
+    readonly bestK: number
+    readonly gap: number
+  }
 }
 
 /** Serialisable run-health verdict embedded in the report. Mirrors
