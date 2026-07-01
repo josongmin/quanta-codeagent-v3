@@ -53,6 +53,7 @@
 
 import { createHash } from "node:crypto"
 import { join } from "node:path"
+import { isRecord } from "@/shared"
 import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import { createJsonStateFile, type ParseOutcome } from "./json-state-file"
@@ -195,9 +196,6 @@ const validationError = <T = never>(reason: string): ValidationResult<T> => ({
   ok: false,
   reason,
 })
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value)

@@ -1,3 +1,4 @@
+import { isRecord } from "@/shared"
 import type { ReproTestOutcome } from "./types"
 
 export const PYTEST_REPORT_SUFFIX = ".pytest-report.json"
@@ -19,9 +20,6 @@ export interface PytestExecutionReport {
   readonly exitstatus: number
   readonly reports: readonly PytestReportRecord[]
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const isReportRecord = (value: unknown): value is PytestReportRecord => {
   if (!isRecord(value)) return false

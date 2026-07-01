@@ -16,6 +16,7 @@
  * this file (and the transport encoders) — there is no `unknown` escape.
  */
 
+import { isRecord } from "@/shared"
 import type { AgentEvent } from "@/stream"
 
 /* ------------------------------------------------------------------ */
@@ -118,8 +119,6 @@ export interface BridgeOutcomeSummary {
   readonly reason: string
   readonly turns: number
 }
-
-type UnknownRecord = Record<string, unknown>
 
 /* ------------------------------------------------------------------ */
 /* Transport contract.                                                  */
@@ -264,9 +263,6 @@ export const createEventBridge = (opts: CreateEventBridgeOpts): EventBridge => {
 
 /** Default ISO 8601 timestamp factory (UTC). */
 export const isoNow = (): string => new Date().toISOString()
-
-const isRecord = (value: unknown): value is UnknownRecord =>
-  value !== null && typeof value === "object" && !Array.isArray(value)
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0

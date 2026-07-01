@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { isRecord } from "@/shared"
 import { byteCompare } from "@/shared/byte-compare"
 import { filesFromPatch } from "@/runner/batch/eval/selection-paths"
 import type { BenchReport, PerInstanceReport } from "@/runner/batch/report"
@@ -77,9 +78,6 @@ export interface Wave2BacklogArtifact {
     readonly reason: string
   }[]
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const parseReport = (path: string): BenchReport => {
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))

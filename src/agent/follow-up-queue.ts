@@ -15,7 +15,7 @@
  * for this cluster — see ADR-0037 §한계.
  */
 
-import type { Id } from "@/shared"
+import { type Id, isRecord } from "@/shared"
 
 /** Turn id alias (raw string). Defined locally because user's ADR-0030
  *  steering module ({@link ./steering}) uses `string` directly rather than a
@@ -147,9 +147,6 @@ const parseSeq = (id: string): number => {
   const seq = Number.parseInt(m[1] ?? "0", 36)
   return Number.isFinite(seq) ? seq : -1
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const assertFollowUp = (value: unknown): FollowUp => {
   if (!isRecord(value)) throw new Error("Malformed FollowUpQueueSnapshot entry")

@@ -31,7 +31,7 @@
  * results for "<query>"` exactly as designed for empty searches.
  */
 
-import { errMessage } from "@/shared"
+import { errMessage, isRecord } from "@/shared"
 import type { WebSearchHit, WebSearchProvider } from "../search"
 /** Default Brave Search REST endpoint. Overridable for tests (in-process
  *  fake) and for self-hosted / reverse-proxy deployments. */
@@ -114,9 +114,6 @@ interface BraveWebResult {
 
 /** Type-guard: a value is a plain object with at least one accessible
  *  property (used before reading `.web.results`). */
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v)
-
 /** Coerce one Brave result row into a `WebSearchHit`. Missing strings
  *  collapse to `""` — the formatter happily renders a hit with an empty
  *  title or snippet, and dropping the row would mis-count against the

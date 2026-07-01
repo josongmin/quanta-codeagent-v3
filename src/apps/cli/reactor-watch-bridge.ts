@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import type { ProactiveTrigger, TriggerEvidence, TriggerReason } from "@/reactor"
 import { sanitizeId } from "@/session"
+import { isRecord } from "@/shared"
 
 const REACTOR_WATCH_PROTOCOL = "quanta.reactor_watch.v1" as const
 
@@ -52,9 +53,6 @@ const unlinkIfExists = async (path: string): Promise<void> => {
     }
   }
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 export const parseReactorWatchEnvelope = (raw: string): ReactorWatchEnvelope | undefined => {
   let parsed: unknown
