@@ -28,6 +28,8 @@ import type { ClockPort, RRule, Weekday, WeekdayDay } from "./types"
 import { allOccurrencesInMonth, daysInUtcMonth, nthWeekdayOfMonth } from "./weekday"
 
 const MS_PER_DAY = 86_400_000
+const MS_PER_HOUR = 3_600_000
+const MS_PER_MINUTE = 60_000
 const MAX_SCAN_DAYS = 366 * 10 // 10 years — defensive cap so we never spin forever.
 const MAX_SCAN_MONTHS = 120 // 10 years.
 
@@ -88,6 +90,10 @@ export function* iterateFires(rule: RRule, from: number): Generator<number, void
 
 const scanForward = (rule: RRule, from: number): number | undefined => {
   switch (rule.freq) {
+    case "MINUTELY":
+      return scanFixedDelta(rule, from, MS_PER_MINUTE)
+    case "HOURLY":
+      return scanFixedDelta(rule, from, MS_PER_HOUR)
     case "DAILY":
       return scanDaily(rule, from)
     case "WEEKLY":
@@ -95,6 +101,21 @@ const scanForward = (rule: RRule, from: number): number | undefined => {
     case "MONTHLY":
       return scanMonthly(rule, from)
   }
+}
+
+/**
+ * HOURLY / MINUTELY scan: the next fire is a single fixed wall-clock step of
+ * `INTERVAL * unitMs` from `from`. Strict `>` boundary is inherent (the step is
+ * always ≥ one unit, so the returned instant is strictly after `from`). No
+ * BYDAY/BYMONTHDAY refinement — sub-daily rules fire on the raw cadence; if a
+ * caller supplied those fields they simply have no effect at this frequency
+ * (mirrors RFC 5545, where BYDAY on HOURLY would be an EXPANDED filter we do
+ * not implement). `UNTIL`/`COUNT` exhaustion is enforced by the caller
+ * (`computeNextFire`), so this only computes the raw next step.
+ */
+const scanFixedDelta = (rule: RRule, from: number, unitMs: number): number | undefined => {
+  const interval = Math.max(1, rule.interval ?? 1)
+  return from + interval * unitMs
 }
 
 /**

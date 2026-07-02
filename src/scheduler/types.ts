@@ -23,14 +23,21 @@
 // ============================================================================
 
 /**
- * Supported FREQ values. HOURLY / MINUTELY / SECONDLY / YEARLY are
- * intentionally out of scope — Codex `automation-schedule-BpeIuMts.js` also
- * uses only DAILY / WEEKLY / MONTHLY in production.
+ * Supported FREQ values. SECONDLY / YEARLY remain out of scope. HOURLY /
+ * MINUTELY are supported (B2) for sub-daily cadences — the evaluator advances
+ * by fixed wall-clock deltas honoring `INTERVAL` (no BYHOUR/BYMINUTE refinement,
+ * which stays out of scope).
  */
-export type Frequency = "DAILY" | "WEEKLY" | "MONTHLY"
+export type Frequency = "MINUTELY" | "HOURLY" | "DAILY" | "WEEKLY" | "MONTHLY"
 
 /** All supported FREQ — closed array for runtime exhaustiveness checks. */
-export const ALL_FREQUENCIES: ReadonlyArray<Frequency> = ["DAILY", "WEEKLY", "MONTHLY"]
+export const ALL_FREQUENCIES: ReadonlyArray<Frequency> = [
+  "MINUTELY",
+  "HOURLY",
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+]
 
 /** RFC 5545 weekday tokens (BYDAY). */
 export type WeekdayDay = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU"

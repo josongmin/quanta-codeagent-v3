@@ -85,6 +85,13 @@ export interface EngineAutomation {
   /** ms-epoch when the row was claimed. Present ONLY while
    *  `status === 'running'`; used to reclaim stale claims after a crash. */
   readonly claimedAt?: number
+  /** B2 — per-task first-choice model (Codex `automations.model`). The engine
+   *  stores + returns it verbatim; model reroute is the host's job. KEY OMITTED
+   *  when absent (byte-identical to a modelless row). */
+  readonly model?: string
+  /** B2 — ordered fallback probe list (Codex `automations.model_fallbacks`).
+   *  KEY OMITTED when absent. */
+  readonly modelFallbacks?: ReadonlyArray<string>
 }
 
 /** Input to `schedule()` — caller already computed `nextRunAt`. */
@@ -95,6 +102,11 @@ export interface ScheduleInput {
   readonly prompt: string
   readonly nextRunAt: number
   readonly createdAt: number
+  /** B2 — OPTIONAL per-task first-choice model. Absent ⇒ the row carries no
+   *  model (host falls back to its global default). Persisted + returned. */
+  readonly model?: string
+  /** B2 — OPTIONAL ordered fallback probe list. Absent ⇒ omitted. */
+  readonly modelFallbacks?: ReadonlyArray<string>
 }
 
 /**

@@ -10,10 +10,10 @@ import type { Database, Statement } from "bun:sqlite"
 export const INSERT_SQL = `
     INSERT INTO automations
       (id, title, rule_json, prompt, next_run_at, last_run_at, status,
-       last_error, created_at, fire_count)
+       last_error, created_at, fire_count, model, model_fallbacks)
     VALUES
       ($id, $title, $rule, $prompt, $next_run_at, NULL, 'scheduled',
-       NULL, $created_at, 0)
+       NULL, $created_at, 0, $model, $model_fallbacks)
   `
 
 export const EXISTS_SQL = "SELECT 1 AS n FROM automations WHERE id = ?"

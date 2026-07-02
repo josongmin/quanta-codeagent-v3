@@ -193,7 +193,9 @@ describe("JSONL store hellgate", () => {
       })
       await store.save("/w", sample("ok"))
       const file = join(dir, "wsh", "automations.jsonl")
-      const bad = { ...sample("evil"), rule: { freq: "HOURLY" } }
+      // SECONDLY remains an unsupported freq (HOURLY/MINUTELY became valid in
+      // B2, so they can no longer serve as the "invalid" sentinel here).
+      const bad = { ...sample("evil"), rule: { freq: "SECONDLY" } }
       await appendFile(file, `${JSON.stringify(bad)}\n`, "utf8")
       const loaded = await store.load("/w")
       expect(loaded.map((a) => a.id)).toEqual(["ok"])

@@ -54,6 +54,7 @@ import { scriptedReplaceTool } from "./scripted-replace"
 import { sessionConfigTool } from "./session_config"
 import { testRunnerTool } from "./test-runner"
 import { makeRunTestsTool } from "./testrun/tool"
+import { threadsHandoffTool } from "./threads_handoff"
 import type { Tool } from "./types"
 import { webFetchTool } from "./web"
 import { makeWriteTool, writeTool } from "./write"
@@ -112,6 +113,8 @@ export {
 // hint if the binary is missing). Read-only + concurrency-safe.
 export { astGrepTool } from "./ast-grep"
 export { automationUpdateTool } from "./automation_update"
+// B2 — cross-surface handoff leaf tool (shares the automation-engine gate).
+export { threadsHandoffTool } from "./threads_handoff"
 // ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
 export {
   type BashAwaitInput,
@@ -686,6 +689,9 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   // tool). Present ⇒ closure-over-engine tool is appended.
   if (ports.automationEngine !== undefined) {
     base.push(automationUpdateTool(ports.automationEngine) as Tool)
+    // B2 — cross-surface handoff shares the automation-engine gate (no second
+    // flag). Pure leaf tool; absent engine ⇒ never registered (byte-identical).
+    base.push(threadsHandoffTool() as Tool)
   }
   // ADR-0464 — conditional registration of apply_patch_structured. Absent/false
   // ⇒ default set is byte-identical. Present ⇒ per-file-isolated apply tool is

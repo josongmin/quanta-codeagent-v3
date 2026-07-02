@@ -45,6 +45,8 @@ interface AutomationRow {
   fire_count: number
   claim_token: string | null
   claimed_at: number | null
+  model: string | null
+  model_fallbacks: string | null
 }
 
 const isEngineStatus = (s: string): s is EngineStatus =>
@@ -59,7 +61,15 @@ const parseRuleJson = (raw: string): RRule | undefined => {
   }
   if (typeof parsed !== "object" || parsed === null) return undefined
   const r = parsed as Partial<RRule>
-  if (r.freq !== "DAILY" && r.freq !== "WEEKLY" && r.freq !== "MONTHLY") return undefined
+  if (
+    r.freq !== "MINUTELY" &&
+    r.freq !== "HOURLY" &&
+    r.freq !== "DAILY" &&
+    r.freq !== "WEEKLY" &&
+    r.freq !== "MONTHLY"
+  ) {
+    return undefined
+  }
   const base = { freq: r.freq } as { freq: RRule["freq"] }
   return {
     ...base,
@@ -69,6 +79,21 @@ const parseRuleJson = (raw: string): RRule | undefined => {
     ...(Array.isArray(r.byDay) ? { byDay: r.byDay as ReadonlyArray<Weekday> } : {}),
     ...(Array.isArray(r.byMonthDay) ? { byMonthDay: r.byMonthDay as ReadonlyArray<number> } : {}),
   }
+}
+
+/** Parse the persisted `model_fallbacks` JSON array. NULL / malformed / non-
+ *  string-array ⇒ undefined (key omitted). Never throws. */
+const parseModelFallbacks = (raw: string | null): ReadonlyArray<string> | undefined => {
+  if (raw === null) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  if (!Array.isArray(parsed)) return undefined
+  if (!parsed.every((x): x is string => typeof x === "string")) return undefined
+  return parsed
 }
 
 const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined => {
@@ -85,12 +110,15 @@ const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined
     createdAt: row.created_at,
     fireCount: row.fire_count,
   } as const
+  const modelFallbacks = parseModelFallbacks(row.model_fallbacks)
   return {
     ...base,
     ...(row.last_run_at !== null ? { lastRunAt: row.last_run_at } : {}),
     ...(row.last_error !== null ? { lastError: row.last_error } : {}),
     ...(row.claim_token !== null ? { claimToken: row.claim_token } : {}),
     ...(row.claimed_at !== null ? { claimedAt: row.claimed_at } : {}),
+    ...(row.model !== null ? { model: row.model } : {}),
+    ...(modelFallbacks !== undefined ? { modelFallbacks } : {}),
   }
 }
 
@@ -127,6 +155,9 @@ export const schedule = (
       $prompt: input.prompt,
       $next_run_at: input.nextRunAt,
       $created_at: input.createdAt,
+      $model: input.model ?? null,
+      $model_fallbacks:
+        input.modelFallbacks !== undefined ? JSON.stringify(input.modelFallbacks) : null,
     })
   } catch (e) {
     return Promise.resolve(ioFail(`schedule failed: ${errMessage(e)}`))

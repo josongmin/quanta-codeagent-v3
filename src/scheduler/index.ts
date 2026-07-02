@@ -57,6 +57,12 @@ export {
 export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
 // Model reroute
 export { chooseModel } from "./model-reroute"
+// B2 — cross-surface thread deeplink (pure)
+export {
+  buildThreadDeeplink,
+  parseThreadDeeplink,
+  THREAD_DEEPLINK_PREFIX,
+} from "./deeplink"
 // Evaluator
 export { computeNextFire, iterateFires } from "./next-fire"
 export type { RRuleParseResult } from "./rrule-parser"

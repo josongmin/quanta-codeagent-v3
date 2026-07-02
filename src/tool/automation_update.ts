@@ -52,6 +52,17 @@ const createSchema = z.object({
     .nonnegative()
     .optional()
     .describe("ms-epoch of creation. Defaults to Date.now() when omitted."),
+  model: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Optional per-task first-choice model. Omitted ⇒ host default."),
+  modelFallbacks: z
+    .array(z.string().min(1).max(200))
+    .max(20)
+    .optional()
+    .describe("Optional ordered fallback model probe list."),
 })
 
 const idOnlySchema = z.object({
@@ -138,6 +149,8 @@ const actionCreate = async (
     prompt: input.prompt,
     nextRunAt: input.nextRunAt,
     createdAt,
+    ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.modelFallbacks !== undefined ? { modelFallbacks: input.modelFallbacks } : {}),
   })
   if (!r.ok) {
     return errResult(`schedule failed: ${r.code} — ${r.message}`)
@@ -205,4 +218,6 @@ const shapeFor = (a: EngineAutomation): Record<string, unknown> => ({
   fireCount: a.fireCount,
   ...(a.lastRunAt !== undefined ? { lastRunAt: a.lastRunAt } : {}),
   ...(a.lastError !== undefined ? { lastError: a.lastError } : {}),
+  ...(a.model !== undefined ? { model: a.model } : {}),
+  ...(a.modelFallbacks !== undefined ? { modelFallbacks: a.modelFallbacks } : {}),
 })

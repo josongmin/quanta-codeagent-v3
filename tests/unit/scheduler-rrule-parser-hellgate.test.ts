@@ -24,16 +24,24 @@ describe("parseRRule hellgate", () => {
     fail("INTERVAL=1", "malformed")
   })
 
-  test("[3] FREQ=HOURLY → unsupported-freq", () => {
-    fail("FREQ=HOURLY", "unsupported-freq")
+  test("[3] FREQ=HOURLY → supported (B2)", () => {
+    const r = parseRRule("FREQ=HOURLY")
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.freq).toBe("HOURLY")
   })
 
   test("[3b] FREQ=YEARLY → unsupported-freq", () => {
     fail("FREQ=YEARLY", "unsupported-freq")
   })
 
-  test("[3c] FREQ=MINUTELY → unsupported-freq", () => {
-    fail("FREQ=MINUTELY", "unsupported-freq")
+  test("[3b2] FREQ=SECONDLY → unsupported-freq", () => {
+    fail("FREQ=SECONDLY", "unsupported-freq")
+  })
+
+  test("[3c] FREQ=MINUTELY → supported (B2)", () => {
+    const r = parseRRule("FREQ=MINUTELY")
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.freq).toBe("MINUTELY")
   })
 
   test("[4] COUNT + UNTIL together → count-and-until", () => {

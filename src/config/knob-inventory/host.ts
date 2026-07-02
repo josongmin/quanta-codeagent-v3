@@ -427,6 +427,15 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
+    envKey: "QUANTA_AUTOMATION_STORE",
+    kind: "string",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "Automation engine durable store selector ('sqlite' ⇒ on-disk; else in-memory).",
+    readSite: "scheduler/runtime-wire.ts",
+  },
+  {
     envKey: "QUANTA_AUTORUN_POLICY",
     kind: "string",
     default: undefined,

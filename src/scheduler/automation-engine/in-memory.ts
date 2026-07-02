@@ -83,6 +83,8 @@ export const inMemoryAutomationEngine = (
     lastError?: string
     claimToken?: string
     claimedAt?: number
+    model?: string
+    modelFallbacks?: ReadonlyArray<string>
   }): EngineAutomation => {
     const base = {
       id: over.id,
@@ -100,6 +102,8 @@ export const inMemoryAutomationEngine = (
       ...(over.lastError !== undefined ? { lastError: over.lastError } : {}),
       ...(over.claimToken !== undefined ? { claimToken: over.claimToken } : {}),
       ...(over.claimedAt !== undefined ? { claimedAt: over.claimedAt } : {}),
+      ...(over.model !== undefined ? { model: over.model } : {}),
+      ...(over.modelFallbacks !== undefined ? { modelFallbacks: over.modelFallbacks } : {}),
     }
   }
 
@@ -148,6 +152,12 @@ export const inMemoryAutomationEngine = (
       ...(input.outcome === "errored" && input.errorMessage !== undefined
         ? { lastError: input.errorMessage }
         : {}),
+      // B2 — model/modelFallbacks are immutable per-automation fields; carry
+      // them across the fire so a fired/retrying row keeps its routing config.
+      ...(existing.model !== undefined ? { model: existing.model } : {}),
+      ...(existing.modelFallbacks !== undefined
+        ? { modelFallbacks: existing.modelFallbacks }
+        : {}),
       // claimToken/claimedAt cleared on finalize (omitted ⇒ absent).
     })
     rows.set(advanced.id, advanced)
@@ -175,6 +185,8 @@ export const inMemoryAutomationEngine = (
         status: "scheduled",
         createdAt: input.createdAt,
         fireCount: 0,
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.modelFallbacks !== undefined ? { modelFallbacks: input.modelFallbacks } : {}),
       })
       rows.set(row.id, row)
       return Promise.resolve({ ok: true, value: row })
@@ -257,6 +269,8 @@ export const inMemoryAutomationEngine = (
         fireCount: best.fireCount,
         ...(best.lastRunAt !== undefined ? { lastRunAt: best.lastRunAt } : {}),
         ...(best.lastError !== undefined ? { lastError: best.lastError } : {}),
+        ...(best.model !== undefined ? { model: best.model } : {}),
+        ...(best.modelFallbacks !== undefined ? { modelFallbacks: best.modelFallbacks } : {}),
         claimToken,
         claimedAt: now,
       })

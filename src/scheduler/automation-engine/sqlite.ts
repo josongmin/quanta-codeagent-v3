@@ -66,7 +66,9 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
       created_at      INTEGER NOT NULL,
       fire_count      INTEGER NOT NULL DEFAULT 0,
       claim_token     TEXT,
-      claimed_at      INTEGER
+      claimed_at      INTEGER,
+      model           TEXT,
+      model_fallbacks TEXT
     )
   `)
   // T10 — additive migration for DBs created before the claim/finalize run
@@ -74,6 +76,11 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
   // throws on a duplicate column), so guard on the pragma column list.
   ensureColumn(db, "automations", "claim_token", "TEXT")
   ensureColumn(db, "automations", "claimed_at", "INTEGER")
+  // B2 — additive migration for the per-task model columns (Codex
+  // `automations.model` / `.model_fallbacks`). `model_fallbacks` stores a JSON
+  // array string; NULL ⇒ key omitted on read.
+  ensureColumn(db, "automations", "model", "TEXT")
+  ensureColumn(db, "automations", "model_fallbacks", "TEXT")
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_automations_next_run
       ON automations(status, next_run_at)

@@ -16,11 +16,15 @@
  * Slice: `@/scheduler` (additive helper; existing files unchanged).
  */
 
-import { logger, writeStderr } from "@/shared"
+import { Database } from "bun:sqlite"
+import { mkdirSync } from "node:fs"
+import { dirname } from "node:path"
+import { logger, quantaHomePath, writeStderr } from "@/shared"
 import {
   type AutomationEnginePort,
   type AutomationHandler,
   inMemoryAutomationEngine,
+  sqliteAutomationEngine,
   type TickEligibilityVerdict,
   type TickOutcome,
 } from "./automation-engine"
@@ -34,6 +38,20 @@ export const AUTOMATION_ENV_FLAG = "QUANTA_AUTOMATION" as const
 /** ENV knob — tick interval in ms. Absent ⇒ {@link DEFAULT_AUTOMATION_INTERVAL_MS}.
  *  Invalid (NaN / ≤ 0 / non-numeric) ⇒ `null` slot + `logger.warn`. */
 export const AUTOMATION_INTERVAL_ENV = "QUANTA_AUTOMATION_INTERVAL_MS" as const
+
+/** ENV knob — durable store selector. The EXACT value `"sqlite"` swaps the
+ *  in-memory engine for the SQLite-backed durable adapter (rows survive a
+ *  restart). Absent / any other value ⇒ in-memory (default-OFF byte-identical
+ *  — the legacy path). */
+export const AUTOMATION_STORE_ENV = "QUANTA_AUTOMATION_STORE" as const
+
+/** Canonical value of {@link AUTOMATION_STORE_ENV} that enables persistence. */
+export const AUTOMATION_STORE_SQLITE = "sqlite" as const
+
+/** Default on-disk path for the durable automations DB. Under the unified
+ *  Quanta home (`~/.quanta/sqlite/automations.db`); a subsystem override is
+ *  out of scope for v1. */
+export const defaultAutomationDbPath = (): string => quantaHomePath("sqlite", "automations.db")
 
 /** Default tick cadence — one minute, matching Codex `automation-schedule`'s
  *  ONE_MINUTE refetch. Aligned with `DEFAULT_TICK_INTERVAL_MS` (sibling). */
@@ -61,10 +79,15 @@ export interface AutomationEngineSlot {
 export interface AssembleAutomationDeps {
   /** Required: the agent-loop seam the handler dispatches to. */
   readonly agentLoop: AgentLoopPort
-  /** Optional engine override (tests inject; prod default = in-memory).
-   *  A future sqlite path will read `QUANTA_AUTOMATION_STORE=sqlite` and
-   *  open a Database here — out of scope for v1. */
+  /** Optional engine override (tests inject; takes precedence over the
+   *  env-driven store selector). When present the engine-select branch is
+   *  bypassed entirely. */
   readonly engine?: AutomationEnginePort
+  /** OPTIONAL sqlite-engine factory (test seam). Invoked ONLY when
+   *  `deps.engine` is absent AND `QUANTA_AUTOMATION_STORE=sqlite`. Default opens
+   *  a `Database` at {@link defaultAutomationDbPath} (creating the parent dir).
+   *  Tests inject a `:memory:` factory so no disk is touched. */
+  readonly sqliteEngineFactory?: () => AutomationEnginePort
   /** Optional clock injection. Default `Date.now`. */
   readonly now?: () => number
   /** Optional stderr writer (test injection). Default `process.stderr.write`.
@@ -113,7 +136,7 @@ export const assembleAutomation = (
     return null
   }
 
-  const engine = deps.engine ?? inMemoryAutomationEngine()
+  const engine = selectEngine(env, deps)
   const stderrWrite = deps.stderr ?? writeStderr
 
   // Handler: dispatch the automation's prompt onto the agent loop. The
@@ -145,6 +168,37 @@ export const assembleAutomation = (
     ...(deps.eligibility !== undefined ? { eligibility: deps.eligibility } : {}),
   }
   return slot
+}
+
+/**
+ * Choose the engine adapter. Precedence:
+ *   1. `deps.engine` (explicit override — tests / a host that pre-built one).
+ *   2. `QUANTA_AUTOMATION_STORE === "sqlite"` ⇒ the durable SQLite adapter
+ *      (via `deps.sqliteEngineFactory` when injected, else the default disk DB).
+ *   3. otherwise ⇒ in-memory (default-OFF byte-identical — the legacy path).
+ *
+ * ONLY the exact canonical value `"sqlite"` flips the store; any other value
+ * (unset / "off" / "postgres") falls through to in-memory, so a typo never
+ * silently changes durability.
+ */
+const selectEngine = (env: EnvReader, deps: AssembleAutomationDeps): AutomationEnginePort => {
+  if (deps.engine !== undefined) return deps.engine
+  if (env.get(AUTOMATION_STORE_ENV) === AUTOMATION_STORE_SQLITE) {
+    return (deps.sqliteEngineFactory ?? defaultSqliteEngineFactory)()
+  }
+  return inMemoryAutomationEngine()
+}
+
+/** Default durable-engine factory: open (creating the parent dir) the on-disk
+ *  automations DB and build the SQLite adapter over it. */
+const defaultSqliteEngineFactory = (): AutomationEnginePort => {
+  // A top-level `import { Database }` opens NO connection — only `new Database()`
+  // does, and that is reached ONLY here (STORE=sqlite). Default-OFF: this factory
+  // is never invoked when the store selector is unset, so importing this module
+  // touches no disk.
+  const path = defaultAutomationDbPath()
+  mkdirSync(dirname(path), { recursive: true })
+  return sqliteAutomationEngine(new Database(path))
 }
 
 /** Parse the interval env var. Returns the ms when valid (positive, finite,

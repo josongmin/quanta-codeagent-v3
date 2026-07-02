@@ -2,7 +2,7 @@
  * ADR-0161 Phase A — RFC 5545 §3.3.10 BASIC RECUR rule parser (strict subset).
  *
  * Supported:
- *   FREQ=<DAILY|WEEKLY|MONTHLY>
+ *   FREQ=<MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY>
  *   [;INTERVAL=<n>]            (positive integer)
  *   [;COUNT=<n>]               (positive integer, mutually exclusive with UNTIL)
  *   [;UNTIL=<YYYYMMDDTHHMMSSZ>] (UTC only — trailing Z required)
@@ -10,7 +10,7 @@
  *   [;BYMONTHDAY=<n-list>]     (1..31; 0 + 32+ rejected)
  *
  * Out of scope (returns `unsupported-freq` / `malformed`):
- *   HOURLY / MINUTELY / SECONDLY / YEARLY
+ *   SECONDLY / YEARLY
  *   BYSETPOS / BYWEEKNO / BYYEARDAY / BYMONTH / BYHOUR / BYMINUTE / BYSECOND
  *   WKST / RDATE / EXDATE / DTSTART (those are siblings to RRULE in iCal)
  *
@@ -246,7 +246,15 @@ const truncate = (s: string): string =>
 
 const parseFreq = (raw: string): Frequency | undefined => {
   const up = raw.toUpperCase()
-  if (up === "DAILY" || up === "WEEKLY" || up === "MONTHLY") return up
+  if (
+    up === "MINUTELY" ||
+    up === "HOURLY" ||
+    up === "DAILY" ||
+    up === "WEEKLY" ||
+    up === "MONTHLY"
+  ) {
+    return up
+  }
   return undefined
 }
 

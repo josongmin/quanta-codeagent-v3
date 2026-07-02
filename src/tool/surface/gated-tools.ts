@@ -352,6 +352,18 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Opt-in — registered only when an automation engine is wired.",
   },
   {
+    name: "threads_handoff",
+    origin: "@/tool threads_handoff",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.automationEngine",
+      env: "QUANTA_AUTOMATION",
+    },
+    default: { cli: "opt-in" },
+    risk: "read-only",
+    note: "B2 — cross-surface handoff. Shares the automation-engine gate (no second flag); emits a quanta://threads/{id} deeplink. Pure leaf tool (no I/O); session state travels over the existing spot-resume transport.",
+  },
+  {
     name: "enter_worktree",
     group: ["exit_worktree", "worktree_status"],
     origin: "@/tool/worktree worktreeTools",
