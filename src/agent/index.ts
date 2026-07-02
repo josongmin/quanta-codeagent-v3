@@ -301,6 +301,12 @@ export {
   maybeProposeRadarCard,
   type RadarProducerBlock,
 } from "./radar-producer-hook"
+export {
+  type ComposeForSurfaceOpts,
+  composeSystemPromptForSurface,
+  FROZEN_SURFACE_PROFILE,
+  type SurfaceProfile,
+} from "./surface-profile"
 export { RECOVERY_CAPS } from "./recovery"
 export {
   loadRepoRules,

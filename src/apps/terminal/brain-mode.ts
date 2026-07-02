@@ -28,7 +28,7 @@
  */
 
 import { createActivityStore } from "@/activity"
-import { buildSystemPrompt } from "@/agent"
+import { composeSystemPromptForSurface, type SurfaceProfile } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import { bootstrapSession } from "@/host/bootstrap"
@@ -38,7 +38,7 @@ import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/
 import { runSessionTurn } from "@/runner/orchestrate/session-turn-driver"
 import { createRuntimeFromBootstrap } from "@/sdk/runtime"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { type Tool, ToolRegistry } from "@/tool"
+import { TERMINAL_OPERATOR_GUIDE, type Tool, ToolRegistry } from "@/tool"
 import type { JsonLineDuplex } from "@/tool/container-exec"
 import type { PtySessionPort } from "@/tool/pty"
 import { gateOn } from "@/shared/env-flag"
@@ -67,6 +67,20 @@ export const TB_VERIFY_GATE_ENV = "QUANTA_TB_VERIFY_GATE"
  *  brain's tools stay `container_exec` / `pty_*` over the duplex (the container is the
  *  isolation boundary). */
 export const TB_ENV_OWNED_ENV = "QUANTA_TB_ENV_OWNED"
+
+/** The terminal brain's DECLARED surface profile (RFC `jul-2-terminal-bench-levers/00` §X).
+ *  The terminal entry point is a *deployment fact*: it owns its container, so its profile
+ *  declares `envPosture: "owned"` + the terminal operator guide. Declaring it here — rather
+ *  than an inline `buildSystemPrompt({ envPosture: "owned" })` at the launch site — keeps the
+ *  prompt core a pure composer (no per-surface `if`) and lets OTHER surfaces (CLI / bench /
+ *  web-daemon) declare their own profile later without a core edit. PROMPT-TEXT-ONLY: this is
+ *  a string value object; it sets NO `SandboxPolicy` / `SandboxMode` and never touches host
+ *  enforcement. The `QUANTA_TB_ENV_OWNED` knob GATES whether this profile is applied at launch
+ *  (default-OFF ⇒ the frozen default ⇒ byte-identical to today). */
+export const TERMINAL_SURFACE_PROFILE: SurfaceProfile = {
+  envPosture: "owned",
+  operatorGuide: TERMINAL_OPERATOR_GUIDE,
+}
 
 /** The single bounded follow-up nudge. References ONLY the task's own success criterion — never a
  *  hidden test / answer key (honors `no-answer-key-regex-heuristics`). Fired AT MOST ONCE. */
@@ -428,18 +442,24 @@ export const runTerminalBrain = async (
       else opts.signal.addEventListener("abort", () => boot.abort.abort(), { once: true })
     }
 
-    // ── Lever #1: environment posture (default-OFF ⇒ this block is skipped, brain byte-identical) ──
-    // PROMPT-TEXT-ONLY (RFC jul-2 §Design): when `QUANTA_TB_ENV_OWNED` is ON, rebuild the SYSTEM
-    // prompt with the `owned` posture and publish it through `boot.systemSource` (the same mutable
-    // seam `refreshSystemPrompt` uses for identity swaps; the turn assembler reads `systemSource.get()`
-    // every turn). This swaps ONLY the rendered env-rule TEXT (drops R-ENV / R-STOP-ENV, adds
-    // R-ENV-OWNED / R-INSTALL-THRASH) — it sets NO SandboxMode / SandboxPolicy and does NOT touch host
-    // enforcement. The rebuild mirrors bootstrap's own frozen build for this surface exactly (persona
-    // "default", no identity, QUANTA_IDENTITY unset ⇒ the `buildSystemPrompt(cwd,{persona})` branch),
-    // so the ONLY delta vs the frozen prompt is the env-rule list.
+    // ── Lever #1 via the SurfaceProfile seam (default-OFF ⇒ this block is skipped, byte-identical) ──
+    // The terminal entry point DECLARES its surface profile (`TERMINAL_SURFACE_PROFILE`,
+    // envPosture:"owned"); `QUANTA_TB_ENV_OWNED` GATES whether it is applied at launch. When ON we
+    // compose the SYSTEM prompt for that profile via the pure composer `composeSystemPromptForSurface`
+    // (no per-surface `if` in the prompt core) and publish it through `boot.systemSource` — the SAME
+    // mutable seam `refreshSystemPrompt` uses for identity swaps; the turn assembler reads
+    // `systemSource.get()` every turn. This swaps ONLY the rendered env-rule TEXT (drops R-ENV /
+    // R-STOP-ENV, adds R-ENV-OWNED / R-INSTALL-THRASH) — PROMPT-TEXT-ONLY: it sets NO SandboxMode /
+    // SandboxPolicy and does NOT touch host enforcement. Composition mirrors bootstrap's own frozen
+    // build for this surface exactly (persona "default", no identity), so the ONLY delta vs the frozen
+    // prompt is the env-rule list. The `operatorGuide` field of the profile is injected per-turn on
+    // the instruction (see `turnText`), kept off the cached system prefix on purpose.
     if (gateOn(opts.env ?? {}, TB_ENV_OWNED_ENV)) {
       boot.systemSource.set(
-        buildSystemPrompt(boot.cwd, { persona: "default", envPosture: "owned" }),
+        composeSystemPromptForSurface(TERMINAL_SURFACE_PROFILE, {
+          cwd: boot.cwd,
+          persona: "default",
+        }),
       )
       envOwnedApplied = true
     }
