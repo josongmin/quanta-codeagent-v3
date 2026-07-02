@@ -87,6 +87,20 @@ describe("auto-Other free-text escape", () => {
     if (!r.ok) expect(r.reason).toBe("empty-enum")
   })
 
+  test("AUDIT jul-03: a caller-supplied Other sentinel is NOT double-added (de-dup guard)", async () => {
+    // The menu already carries the exact sentinel label; the escape must de-dup
+    // (append only when absent) so the user never sees two identical "Other" rows.
+    const { io, written } = scriptedIo(["1"]) // pick first real option, just to render
+    const p = buildPrompter(io)
+    await p.promptEnum({
+      prompt: "pick",
+      options: ["a", "Other (type your own answer)"],
+    })
+    const menu = written()
+    const occurrences = menu.split("Other (type your own answer)").length - 1
+    expect(occurrences).toBe(1)
+  })
+
   test("AUDIT R3: structured options keep the escape (label is the free-text sentinel)", async () => {
     // structured options + pick Other (index 3) ⇒ free text returned, not a struct.
     const { io } = scriptedIo(["3", "hand-typed"])

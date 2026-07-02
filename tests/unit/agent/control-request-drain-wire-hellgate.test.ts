@@ -89,6 +89,7 @@ describe("control-request drain — WIRE activation", () => {
       wm: fakeWm() as never,
       sessionId: "s1",
       taskRegistry: undefined,
+      tokenBaseline: undefined,
     })
     expect(outcome).toBe("continue")
     // The drain edge is REACHED (not dead-code) and the effect landed on the host.
@@ -131,6 +132,7 @@ describe("control-request drain — WIRE activation", () => {
       wm: fakeWm() as never,
       sessionId: "s1",
       taskRegistry: undefined,
+      tokenBaseline: undefined,
     })
     expect(outcome).toBe("continue")
   })

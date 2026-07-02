@@ -22,6 +22,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { askUserPortFromPrompter } from "@/apps/cli/ask-user-wire"
+import { type CliPrompterIO, cliPrompter } from "@/mcp"
 import type { ElicitationPrompter, ElicitationResult, EnumOption } from "@/mcp"
 import { askUserTool } from "@/tool/ask-user"
 import type { ToolContext, ToolEvent } from "@/tool/types"
@@ -146,5 +147,98 @@ describe("ask_user structured options — survive tool→port→prompter", () =>
     expect(cap.enumSeen?.options).toEqual(["a", "b"])
     expect(cap.enumSeen?.header).toBeUndefined()
     expect(r.output).toContain("a")
+  })
+})
+
+/** Scripted IO for the REAL `cliPrompter` — writes accumulate; reads pop from a
+ *  fixed answer script. Mirrors the auto-Other hellgate's helper so we exercise
+ *  the SAME menu-render + answer-match path a live user hits. */
+const scriptedIo = (answers: string[]): { io: CliPrompterIO; written: () => string } => {
+  const out: string[] = []
+  const script = [...answers]
+  return {
+    io: {
+      write: (s) => {
+        out.push(s)
+      },
+      read: () => Promise.resolve(script.shift() ?? null),
+    },
+    written: () => out.join(""),
+  }
+}
+
+/**
+ * SUPPLEMENT (adversarial-audit jul-03): the fake capturing prompter above proves
+ * the structured shape THREADS to the prompter, but it never exercises the REAL
+ * `cliPrompter`'s menu render (`renderOption`) or answer resolution (`matchEnum` /
+ * `enumOptionLabel`). Two live-prompter regressions ship green against the fake:
+ *   - dropping `description`/`preview` from the rendered menu (user never sees the
+ *     affordance);
+ *   - returning the whole struct blob (or JSON) instead of the LABEL on an index
+ *     pick.
+ * These pins drive the real prompter to red-on-injection both.
+ */
+describe("ask_user structured options — REAL cliPrompter render + label-return", () => {
+  test("RENDER: description AND preview appear in the live menu", async () => {
+    const { io, written } = scriptedIo(["1"])
+    const p = cliPrompter(io)
+    const r = await p.promptEnum({
+      prompt: "which backend?",
+      options: [
+        { label: "Postgres", description: "durable relational", preview: "db/pg.ts" },
+        { label: "SQLite", description: "embedded" },
+      ],
+    })
+    expect(r.ok).toBe(true)
+    const menu = written()
+    // The display-only affordances MUST reach the user (renderOption drop ⇒ red).
+    expect(menu).toContain("durable relational")
+    expect(menu).toContain("db/pg.ts")
+    expect(menu).toContain("Postgres")
+  })
+
+  test("VALUE-IS-LABEL (index pick): returns the LABEL, never the struct/blob", async () => {
+    const { io } = scriptedIo(["1"]) // pick option 1 by index
+    const p = cliPrompter(io)
+    const r = await p.promptEnum({
+      prompt: "which backend?",
+      options: [
+        { label: "Postgres", description: "durable relational", preview: "db/pg.ts" },
+        { label: "SQLite", description: "embedded" },
+      ],
+    })
+    expect(r.ok).toBe(true)
+    // A matchEnum that returned JSON.stringify(o) or o.description would fail here.
+    if (r.ok) {
+      expect(r.value).toBe("Postgres")
+      expect(r.value).not.toContain("durable relational")
+      expect(r.value).not.toContain("{")
+    }
+  })
+
+  test("VALUE-IS-LABEL (label text pick): typing the label resolves to the label", async () => {
+    const { io } = scriptedIo(["SQLite"]) // pick by literal label text
+    const p = cliPrompter(io)
+    const r = await p.promptEnum({
+      prompt: "which backend?",
+      options: [
+        { label: "Postgres", description: "durable relational" },
+        { label: "SQLite", description: "embedded" },
+      ],
+    })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.value).toBe("SQLite")
+  })
+
+  test("DESCRIPTION/PREVIEW never match as an answer (only the label is pickable)", async () => {
+    // Typing the description text must NOT resolve — the base retries then fails.
+    const { io } = scriptedIo(["durable relational", "durable relational"])
+    const p = cliPrompter(io)
+    const r = await p.promptEnum({
+      prompt: "which backend?",
+      options: [{ label: "Postgres", description: "durable relational" }],
+    })
+    // Two failed attempts ⇒ withRetry surfaces a non-ok result (never a match).
+    expect(r.ok).toBe(false)
   })
 })
