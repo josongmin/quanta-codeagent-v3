@@ -174,9 +174,11 @@ describe("best-of-N fair selector — CARDINAL no-leak (never credit a hidden-te
     const s = deriveCandidateStamp(peekOnly, "The expected output is 42, so I'm confident.")
     expect(s.state).toBe("unverifiable")
 
-    // Contrast: a run that actually RAN the deliverable + observed a matching outcome is verified-pass.
+    // Contrast: a run that COMPARED its output to a (non-test) reference + observed a match is
+    // verified-pass. (verify-gate v2 requires an observed L1 comparison — a bare `./solver` RUN with no
+    // diff is only L0 ⇒ unverifiable; the legit pass must diff against a task-provided reference.)
     const s2 = deriveCandidateStamp(
-      exerciseEvents("./solver input.txt"),
+      exerciseEvents("diff out.txt reference.txt"),
       "Output matches the reference.",
     )
     expect(s2.state).toBe("verified-pass")
