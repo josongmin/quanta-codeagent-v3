@@ -7,6 +7,7 @@
  */
 
 export type {
+  ArtifactReadyMessage,
   CanvasMessage,
   CanvasMessageKind,
   CanvasWireEnvelope,

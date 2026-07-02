@@ -57,11 +57,13 @@ import {
   type CompositionSeams,
   fileHistorySinkSlot,
   permissionPatternStoreSlot,
+  resolveArtifactRegistrySlice,
   resolveFileHistorySlice,
   resolvePermissionPatternSlice,
 } from "./agent-arg-builder/gated-tool-ports"
 import { resolveObservabilitySlots } from "./agent-arg-builder/observability-wire"
 import { resolvePermissionProfileWiring } from "./agent-arg-builder/permission-profile"
+import { createArtifactPreviewResolver } from "./artifact-preview-resolver"
 
 export { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 // ADR-0303 god-module split — re-export the relocated composition-root clusters'
@@ -75,6 +77,7 @@ export {
   type CompositionSeams,
   type FileHistorySlice,
   type PermissionPatternSlice,
+  resolveArtifactRegistrySlice,
   resolveFileHistorySlice,
   resolvePermissionPatternSlice,
 } from "./agent-arg-builder/gated-tool-ports"
@@ -669,6 +672,19 @@ export const buildBaseFromArgs = (
   // the sink wires `AgentConfig.fileHistory` (write side, the write/edit capture).
   // Absent ⇒ both omitted ⇒ no capture, no tool — byte-identical.
   const fileHistorySlice = resolveFileHistorySlice()
+  // A2 — mint the SHARED per-session artifact registry ONCE (behind
+  // QUANTA_ARTIFACT_STORE). The SAME instance backs (1) the `artifact_*` tools +
+  // generation-tool `artifactSink` (via `buildBaseRegistry` → `buildGatedToolPorts`)
+  // and (2) `base.artifactRegistry` (the capability bit + the turn runner's
+  // `artifact.ready` producer drain). Absent ⇒ both omitted (byte-identical).
+  const artifactRegistry = resolveArtifactRegistrySlice(env)
+  // A2 — the host-side READ-ONLY preview resolver over the SAME registry (jailed
+  // to the workspace cwd). Minted next to the registry so a future IPC handler can
+  // serve `quanta-artifact://<id>` bytes read-only. Absent ⇒ no preview channel.
+  const artifactPreviewResolver =
+    artifactRegistry !== undefined
+      ? createArtifactPreviewResolver({ registry: artifactRegistry, jailRoot: process.cwd() })
+      : undefined
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
   // hard-force the slot OFF. Today no host defaults it on, so the flag has no
@@ -689,6 +705,7 @@ export const buildBaseFromArgs = (
       permissionPatternSlice,
       fileHistorySlice,
       llm,
+      artifactRegistry,
     }),
     stream,
     // GAP2 — when a named permission profile is selected the live permission
@@ -763,6 +780,14 @@ export const buildBaseFromArgs = (
     // the SAME store `file_history_rewind` reads. `{}` when off ⇒ no branch here ⇒
     // `ctx.fileHistory` absent ⇒ capture is a no-op (byte-identical).
     ...fileHistorySinkSlot(fileHistorySlice),
+    // A2 — lift the SHARED artifact registry onto the base so (1) the capability
+    // manifest sets `artifacts: true` iff present and (2) the turn runner drains
+    // it into `result.artifacts` (the `artifact.ready` producer). Same instance
+    // the tool ports use. `{}` when off ⇒ capability false, no producer.
+    ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
+    // A2 — lift the read-only preview resolver (same shared registry). `{}` when
+    // off ⇒ no preview channel (byte-identical).
+    ...(artifactPreviewResolver !== undefined ? { artifactPreviewResolver } : {}),
   }
 
   attachExecutionPlaneSlots(base, p)

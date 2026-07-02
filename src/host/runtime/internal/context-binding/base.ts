@@ -63,7 +63,11 @@ export const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =
       base.store !== undefined ||
       base.memoryConsolidator !== undefined ||
       base.memory !== undefined,
-    artifacts: false,
+    // A2 — the artifacts capability is TRUE iff the Canvas store is wired (the
+    // composition root lifted a session `artifactRegistry` onto the base behind
+    // `QUANTA_ARTIFACT_STORE`). Mirrors the adjacent memory/subagents presence
+    // pattern. Absent ⇒ false ⇒ no producer, no preview channel (byte-identical).
+    artifacts: base.artifactRegistry !== undefined,
     subagents:
       base.subagent !== undefined ||
       base.delegation !== undefined ||
@@ -104,6 +108,12 @@ const buildTurnAssemblerDeps = (args: {
 }): RuntimeAgentTurnDeps => {
   const {
     approvalProtocol: _approvalProtocol,
+    // A2 — the artifact registry + preview resolver are HOST-runtime concerns
+    // (capability bit + per-turn drain + IPC preview); they are NOT `AgentConfig`
+    // fields, so strip them before the deps flow into a turn assembler (mirrors
+    // `approvalProtocol`).
+    artifactRegistry: _artifactRegistry,
+    artifactPreviewResolver: _artifactPreviewResolver,
     systemSource,
     messages: _baseMessages,
     signal: _baseSignal,
@@ -144,6 +154,10 @@ export const buildAgentConfigFromBase = (args: {
 
   const {
     approvalProtocol: _approvalProtocol,
+    // A2 — strip the host-only artifact registry + preview resolver (see
+    // buildTurnAssemblerDeps).
+    artifactRegistry: _artifactRegistry,
+    artifactPreviewResolver: _artifactPreviewResolver,
     systemSource,
     toolProfileState,
     identityModeState,

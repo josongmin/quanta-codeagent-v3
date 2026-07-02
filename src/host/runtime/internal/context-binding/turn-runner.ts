@@ -1,12 +1,13 @@
 import { type AgentConfig, type AgentOutcome, runAgent } from "@/agent"
 import type { SessionHostTurnEvent } from "@/kernel/session"
 import type { ContentBlock, ImageBlock, Message } from "@/llm"
-import type { PendingApprovalView } from "@/protocol/session"
+import type { ArtifactRef, PendingApprovalView } from "@/protocol/session"
 import { persistTurn } from "@/runner/orchestrate/persist-turn"
 import type { RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
 import type { AgentEvent } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
+import { drainNewArtifacts } from "../../artifact-drain"
 import { toSessionHostTurnEvent } from "../session-host-turn-event-bridge"
 import { approvalPlaceholderOutcome, isRuntimeApprovalRequiredError } from "./approval-support"
 import { buildAgentConfigFromBase, buildAgentConfigFromBaseInput, getSessionId } from "./base"
@@ -17,6 +18,11 @@ export interface RuntimeTurnResult {
   readonly messages: Message[]
   readonly approvalRequest?: PendingApprovalView
   readonly errorMessage?: string
+  /** A2 — artifacts registered during THIS turn (drained from the session
+   *  `artifactRegistry` via the per-session de-dup ledger). Absent when the store
+   *  is off OR no new artifact was registered. `toSessionHostTurnResult` forwards
+   *  it so the kernel scheduler emits one `artifact.ready` per ref. */
+  readonly artifacts?: readonly ArtifactRef[]
 }
 
 const extractTurnErrorMessage = (event: AgentEvent): string | undefined =>
@@ -69,6 +75,7 @@ const buildRuntimeTurnArgs = (args: {
   readonly idMeta: SessionMeta | undefined
   readonly signal?: AbortSignal
   readonly onEvent?: (event: SessionHostTurnEvent) => void
+  readonly emittedArtifactIds?: Set<string>
 }) => ({
   base: args.base,
   ...(args.turnAssembler !== undefined ? { turnAssembler: args.turnAssembler } : {}),
@@ -79,6 +86,7 @@ const buildRuntimeTurnArgs = (args: {
   idMeta: args.idMeta,
   ...(args.signal !== undefined ? { signal: args.signal } : {}),
   ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
+  ...(args.emittedArtifactIds !== undefined ? { emittedArtifactIds: args.emittedArtifactIds } : {}),
 })
 
 export const toSessionHostTurnResult = (result: RuntimeTurnResult) =>
@@ -88,11 +96,14 @@ export const toSessionHostTurnResult = (result: RuntimeTurnResult) =>
         messages: result.messages,
         approvalRequest: result.approvalRequest,
         ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+        // A2 — forward drained artifacts so the kernel emits `artifact.ready`.
+        ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
       }
     : {
         outcome: result.outcome,
         messages: result.messages,
         ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
+        ...(result.artifacts !== undefined ? { artifacts: result.artifacts } : {}),
       }
 
 export const runRuntimeTurn = async (args: {
@@ -105,6 +116,10 @@ export const runRuntimeTurn = async (args: {
   readonly idMeta: SessionMeta | undefined
   readonly signal?: AbortSignal
   readonly onEvent?: (event: SessionHostTurnEvent) => void
+  /** A2 — per-session artifact de-dup ledger (see {@link drainNewArtifacts}).
+   *  Absent ⇒ a fresh empty set per turn (still correct within a turn); the
+   *  session host threads ONE shared set so cross-turn de-dup holds. */
+  readonly emittedArtifactIds?: Set<string>
 }): Promise<RuntimeTurnResult> => {
   const turnStream = createTurnStreamPort({
     baseStream: args.base.stream,
@@ -136,10 +151,29 @@ export const runRuntimeTurn = async (args: {
       messages,
       outcome,
     })
+    // A2 — drain artifacts registered during THIS turn into protocol refs. The
+    // registry is present ONLY when `QUANTA_ARTIFACT_STORE` lifted it onto the
+    // base; absent ⇒ `[]` ⇒ the `artifacts` field is omitted (byte-identical
+    // default-OFF). The ledger de-dups across turns (see the session host).
+    //
+    // GUARD: only drain on a NON-error outcome. The kernel scheduler emits
+    // `artifact.ready` ONLY from its completed-turn arm (`onTurnCompleted`) —
+    // its error arm (`onTurnErrored`) ignores `result.artifacts`. Draining on an
+    // errored turn would mark the artifacts "seen" in the ledger yet never emit
+    // them, so a later completed turn could never re-surface them. Leaving them
+    // undrained keeps them pending for the next completed turn (each ready once).
+    const artifacts =
+      outcome.reason === "error"
+        ? []
+        : drainNewArtifacts(
+            args.base.artifactRegistry,
+            args.emittedArtifactIds ?? new Set<string>(),
+          )
     return {
       outcome,
       messages,
       ...(errorMessage !== undefined ? { errorMessage } : {}),
+      ...(artifacts.length > 0 ? { artifacts } : {}),
     }
   } catch (error) {
     if (isRuntimeApprovalRequiredError(error)) {

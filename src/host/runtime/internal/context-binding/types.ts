@@ -1,5 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import type { ArtifactRegistry } from "@/artifact"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { Message, ResponsesContinuationStore } from "@/llm"
 import type { CrossSessionDreamTrigger } from "@/memory"
@@ -11,6 +12,7 @@ import type {
 } from "@/runner/assemble/session-state"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import type { SessionMeta } from "@/session"
+import type { ArtifactPreviewResolver } from "../../artifact-preview-resolver"
 import type { RuntimeHost } from "../../types"
 
 export type RuntimeBase = RuntimeAgentConfigBase & {
@@ -20,6 +22,19 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  {@link createTurnStreamPort} runs a fresh {@link ItemStreamProjector} so the
    *  session wire carries `item.*` events. Absent ⇒ no projector, byte-identical. */
   itemStream?: boolean
+  /** A2 — the SINGLE per-session Canvas artifact registry (the SAME instance the
+   *  `artifact_*` tools + generation-tool `artifactSink` write into), lifted onto
+   *  the base by the composition root ONLY when `QUANTA_ARTIFACT_STORE` is on.
+   *  Two consumers: (1) `buildCapabilityManifest` sets the `artifacts` capability
+   *  bit true iff present; (2) the turn runner drains newly-registered artifacts
+   *  from it into `result.artifacts` (the MISSING PRODUCER for `artifact.ready`).
+   *  Absent ⇒ capability false, no producer (byte-identical default-OFF). */
+  artifactRegistry?: ArtifactRegistry
+  /** A2 — the host-side READ-ONLY `quanta-artifact://` preview resolver over the
+   *  SAME shared registry (see {@link artifactRegistry}). Minted at the comp root
+   *  behind `QUANTA_ARTIFACT_STORE`; a future IPC handler reads it here to serve
+   *  jailed preview bytes. Absent ⇒ no preview channel (byte-identical). */
+  artifactPreviewResolver?: ArtifactPreviewResolver
   systemSource?: SystemSource
   toolProfileState?: ToolProfileSessionState
   identityModeState?: IdentityModeSessionState

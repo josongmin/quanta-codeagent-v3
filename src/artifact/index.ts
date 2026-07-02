@@ -16,3 +16,10 @@ export {
   monotonicIdFactory,
   previewUrl,
 } from "./registry"
+export {
+  detectRichSegments,
+  detectRichSegmentsGated,
+  hasRichSegments,
+  type RichSegment,
+  segmentsToText,
+} from "./rich-markers"

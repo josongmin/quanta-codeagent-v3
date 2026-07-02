@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import { createOnConfirmReviewerPort } from "@/agent"
+import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import { deriveCapabilityManifest } from "@/host/runtime"
 import { createRuntimeContextBindingFromAgentConfigBase } from "@/host/runtime/internal/context-binding"
 import type { LLMPort, StreamEvent } from "@/llm"
@@ -142,6 +143,38 @@ describe("host runtime capability derivation", () => {
       transport: "inproc",
     })
     expect(Object.isFrozen(manifest)).toBe(true)
+  })
+
+  test("A2 — artifacts capability is TRUE iff the artifact store is wired onto the base", async () => {
+    const describeManifest = async (base: RuntimeAgentConfigBase) => {
+      const host = await createRuntimeContextBindingFromAgentConfigBase({ base })
+        .createRuntimeHost({
+          history: [],
+          state: undefined,
+          idMeta: undefined,
+          shutdown: async () => undefined,
+        })
+        .createSessionHost({})
+      return host.describe().capabilityManifest
+    }
+
+    // Store OFF (no registry) ⇒ artifacts:false (byte-identical default-OFF).
+    const off = await describeManifest(makeBase())
+    expect(off.artifacts).toBe(false)
+
+    // Store ON (registry lifted onto the base) ⇒ artifacts:true. Mirrors the
+    // adjacent memory/subagents presence pattern.
+    const on = await describeManifest(
+      makeBase({
+        artifactRegistry: createArtifactRegistry({
+          now: () => 1,
+          idFactory: monotonicIdFactory("art"),
+        }),
+      }),
+    )
+    expect(on.artifacts).toBe(true)
+    // No other capability flipped as a side-effect of wiring the registry.
+    expect({ ...on, artifacts: false }).toEqual(off)
   })
 
   test("runtime session host surfaces approval requests and replays the approved action once", async () => {

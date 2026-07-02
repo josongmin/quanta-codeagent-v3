@@ -181,6 +181,29 @@ export const resolveFileHistorySlice = (): FileHistorySlice | undefined => {
   return { store, sink: createFileHistorySink(store) }
 }
 
+/** A2 — mint the SHARED per-session artifact registry when `QUANTA_ARTIFACT_STORE`
+ *  is on (strict gate via `gateOn`). The SAME instance is threaded into BOTH
+ *  {@link buildGatedToolPorts} (backs the `artifact_*` tools + the appshot/office
+ *  `artifactSink`) AND `base.artifactRegistry` (the capability bit + the turn
+ *  runner's `artifact.ready` drain). Absent ⇒ `undefined` ⇒ capability false, no
+ *  producer, tools omitted — byte-identical default-OFF. Real clock + monotonic
+ *  id factory (the pure registry takes both injected). */
+export const resolveArtifactRegistrySlice = (
+  env: NodeJS.ProcessEnv,
+): ReturnType<typeof createArtifactRegistry> | undefined =>
+  gateOn(env, "QUANTA_ARTIFACT_STORE")
+    ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
+    : undefined
+
+/** A2 — the effective registry `buildGatedToolPorts` uses: the SHARED instance
+ *  threaded from the composition root when present, else a gate-driven mint (the
+ *  legacy byte-identical fallback for callers that do not share one). Extracted
+ *  so the (shared × gate) choice adds no cognitive-complexity to the builder. */
+const resolveEffectiveArtifactRegistry = (
+  shared: ReturnType<typeof createArtifactRegistry> | undefined,
+): ReturnType<typeof createArtifactRegistry> | undefined =>
+  shared ?? resolveArtifactRegistrySlice(process.env)
+
 /** Spread-ready `DefaultToolPorts.fileHistory` slot (the tool read side). `{}`
  *  when the slice is absent ⇒ `buildGatedToolPorts` literal carries no branch. */
 const fileHistoryPortSlot = (
@@ -236,16 +259,22 @@ export const buildGatedToolPorts = (
    *  `reflect` port when `QUANTA_REFLECT` is on. `null` (no provider) ⇒ no reflect
    *  port ⇒ tool absent (byte-identical). */
   llm?: LLMPort | null,
+  /** A2 — the SHARED per-session artifact registry, minted ONCE at the
+   *  composition root ({@link resolveArtifactRegistrySlice}) so the SAME instance
+   *  backs BOTH the tool ports here AND `base.artifactRegistry` (capability bit +
+   *  turn-drain producer). Absent ⇒ this builder mints its own from the gate (the
+   *  legacy byte-identical behaviour for callers that do not thread a shared
+   *  instance). */
+  sharedArtifactRegistry?: ReturnType<typeof createArtifactRegistry>,
 ): DefaultToolPorts => {
   const cfg = runtimeConfig()
-  // C1 — ONE per-session artifact registry when the Canvas store is enabled.
-  // Computed up front (not inline) so the appshot slot below can reuse the SAME
-  // instance as its artifact sink (the loop registers the final scaffold into the
-  // very registry the artifact_* tools read). Absent ⇒ `undefined` ⇒ both the
-  // `artifactRegistry` slot AND the appshot sink stay omitted (byte-identical).
-  const artifactRegistry = gateOn(process.env, "QUANTA_ARTIFACT_STORE")
-    ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
-    : undefined
+  // C1/A2 — ONE per-session artifact registry when the Canvas store is enabled.
+  // Prefer the SHARED instance threaded from the composition root (so the SAME
+  // registry backs the capability bit + turn-drain); fall back to minting our own
+  // from the gate for callers that do not thread one. Resolved by the extracted
+  // helper so the (shared × gate) choice adds no complexity here. Absent ⇒ both
+  // the `artifactRegistry` slot AND the appshot sink stay omitted (byte-identical).
+  const artifactRegistry = resolveEffectiveArtifactRegistry(sharedArtifactRegistry)
   return {
     // ADR-0464 — gated structured-apply tool. Default-OFF: tool menu is
     // byte-identical unless QUANTA_ENABLE_STRUCTURED_PATCH === "1".
@@ -421,6 +450,11 @@ export const buildBaseRegistry = (args: {
   /** gap GAP 11 (ADR-0504) — assembled main LLM for the gated `reflect` port.
    *  `null` ⇒ no reflect port (byte-identical). */
   readonly llm: LLMPort | null
+  /** A2 — the SHARED per-session artifact registry ({@link resolveArtifactRegistrySlice}),
+   *  threaded so the tool ports here AND `base.artifactRegistry` reference the SAME
+   *  instance. Absent ⇒ `buildGatedToolPorts` falls back to its gate-driven mint
+   *  (byte-identical for callers that do not share one). */
+  readonly artifactRegistry: ReturnType<typeof createArtifactRegistry> | undefined
 }): ToolRegistry =>
   // ADR-0268 metric egress — wrap tools with per-call instruments WHEN OTLP
   // export is live (process-default metric sink set); byte-identical otherwise.
@@ -435,6 +469,7 @@ export const buildBaseRegistry = (args: {
           args.permissionPatternSlice,
           args.fileHistorySlice,
           args.llm,
+          args.artifactRegistry,
         ),
       }),
       ...(args.searchWire !== null ? [args.searchWire.tool] : []),

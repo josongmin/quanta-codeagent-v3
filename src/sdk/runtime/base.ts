@@ -35,6 +35,20 @@ export interface RuntimeAgentConfigAugments {
    *  here so a future loop consumer can read the per-thread layered policy.
    *  Absent ⇒ slot omitted (byte-identical legacy). */
   permissionProfileManager?: unknown
+  /** A2 — the SHARED per-session Canvas artifact registry, lifted onto the base
+   *  by the composition root ONLY when `QUANTA_ARTIFACT_STORE` is on. Typed
+   *  `unknown` at this SDK layer (the `@/artifact` slice is not importable here);
+   *  the host-runtime `RuntimeBase` re-declares it as the concrete
+   *  `ArtifactRegistry`. Two consumers: the capability manifest's `artifacts` bit
+   *  and the turn runner's `artifact.ready` producer drain. Absent ⇒ both off
+   *  (byte-identical default-OFF). */
+  artifactRegistry?: unknown
+  /** A2 — the host-side READ-ONLY `quanta-artifact://` preview resolver, minted
+   *  at the composition root over the SAME shared registry when the store is on.
+   *  Typed `unknown` at this SDK layer; the host-runtime `RuntimeBase` re-declares
+   *  it as `ArtifactPreviewResolver`. A future IPC handler reads it off the base to
+   *  serve jailed preview bytes. Absent ⇒ no preview channel (byte-identical). */
+  artifactPreviewResolver?: unknown
 }
 
 export type RuntimeAgentConfigBase = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &

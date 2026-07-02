@@ -139,6 +139,46 @@ export interface SessionHostFleet {
   live: number
 }
 
+/** SessionHost.runTurn body — extracted from {@link createRuntimeSessionHost} so
+ *  that factory stays under the god-FUNCTION cap. Assembles the per-turn args
+ *  (threading the A2 per-session artifact ledger so a registered artifact drains
+ *  into `result.artifacts` exactly once across turns), runs the turn under the
+ *  approval protocol, and maps the runtime result onto the SessionHost result. */
+const runSessionHostTurn = async (deps: {
+  readonly args: {
+    readonly state: RuntimeContextBindingState
+    readonly options: CreateRuntimeContextHostArgs
+  }
+  readonly base: RuntimeBase
+  readonly approvalProtocol: ReturnType<typeof createRuntimeApprovalProtocolController>
+  readonly emittedArtifactIds: Set<string>
+  readonly turnArgs: Parameters<SessionHost["runTurn"]>[0]
+}): Promise<Awaited<ReturnType<SessionHost["runTurn"]>>> => {
+  const { args, base, approvalProtocol, emittedArtifactIds, turnArgs } = deps
+  const { history, prompt, images, signal, onEvent } = turnArgs
+  const result = await approvalProtocol.runWithProtocol(
+    async () =>
+      await runRuntimeTurn(
+        buildRuntimeTurnArgs({
+          base,
+          ...(args.state.turnAssembler !== undefined
+            ? { turnAssembler: args.state.turnAssembler }
+            : {}),
+          history,
+          prompt,
+          ...(images !== undefined ? { images } : {}),
+          state: args.options.state,
+          idMeta: args.options.idMeta,
+          ...(signal !== undefined ? { signal } : {}),
+          ...(onEvent !== undefined ? { onEvent } : {}),
+          // A2 — per-session artifact de-dup ledger (drain each artifact once).
+          emittedArtifactIds,
+        }),
+      ),
+  )
+  return toSessionHostTurnResult(result)
+}
+
 const createRuntimeSessionHost = (args: {
   readonly state: RuntimeContextBindingState
   readonly options: CreateRuntimeContextHostArgs
@@ -149,6 +189,12 @@ const createRuntimeSessionHost = (args: {
   const base = args.state.base
   const approvalProtocol = createRuntimeApprovalProtocolController(base)
   const capabilityManifest = buildCapabilityManifest(base)
+  // A2 — per-SESSION artifact de-dup ledger. The turn runner drains
+  // `base.artifactRegistry` into `result.artifacts` (the MISSING PRODUCER for
+  // `artifact.ready`); this Set records already-emitted ids so a later turn does
+  // not re-emit an artifact registered on an earlier turn. Empty + never touched
+  // when the store is off (no registry ⇒ drain is a no-op).
+  const emittedArtifactIds = new Set<string>()
 
   const close = async (): Promise<void> => {
     if (shutdownComplete) return
@@ -216,27 +262,15 @@ const createRuntimeSessionHost = (args: {
       // a `model` field just leave it undefined.
       ...(base.llm.model !== undefined ? { modelSlug: base.llm.model } : {}),
     }),
-    runTurn: async ({ history, prompt, images, signal, onEvent }) => {
+    runTurn: async (turnArgs) => {
       if (closed) throw new Error("runtime session host is closed")
-      const result = await approvalProtocol.runWithProtocol(
-        async () =>
-          await runRuntimeTurn(
-            buildRuntimeTurnArgs({
-              base,
-              ...(args.state.turnAssembler !== undefined
-                ? { turnAssembler: args.state.turnAssembler }
-                : {}),
-              history,
-              prompt,
-              ...(images !== undefined ? { images } : {}),
-              state: args.options.state,
-              idMeta: args.options.idMeta,
-              ...(signal !== undefined ? { signal } : {}),
-              ...(onEvent !== undefined ? { onEvent } : {}),
-            }),
-          ),
-      )
-      return toSessionHostTurnResult(result)
+      return await runSessionHostTurn({
+        args,
+        base,
+        approvalProtocol,
+        emittedArtifactIds,
+        turnArgs,
+      })
     },
     resolveApproval: async ({ approvalId, decision, scope, steer, selectedHunks }) => {
       // ADR-0512 P3 — forward the escalation's once/session scope + corrective

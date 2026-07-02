@@ -82,11 +82,38 @@ export interface ContextUsageMessage {
   readonly emittedAt: number
 }
 
+/**
+ * A2 — a rich artifact is READY to preview. The daemon emits this alongside the
+ * session `artifact.ready` event (the SAME producer drain) so the Canvas surface
+ * can render a preview card for a generated image / spreadsheet / document /
+ * presentation WITHOUT a session-event round-trip. Carries ONLY the opaque
+ * `quanta-artifact://<id>` locator (never the absolute fs path — the host's
+ * jailed preview resolver serves the bytes read-only), the closed artifact kind,
+ * the recorded mime type, and an optional human name.
+ */
+export interface ArtifactReadyMessage {
+  readonly kind: "artifact.ready"
+  /** Registry-minted artifact id — correlates with the `artifact.ready` session
+   *  event's `ArtifactRef.artifactId`. */
+  readonly artifactId: string
+  /** Artifact kind (`image` / `spreadsheet` / `document` / `presentation` /
+   *  `other`). Carried verbatim from the registry — the wire does not close the
+   *  vocabulary so a future kind is forward-compatible. */
+  readonly artifactKind: string
+  readonly mimeType: string
+  /** Opaque `quanta-artifact://<id>` reference the host resolves to jailed bytes.
+   *  NEVER the absolute fs path (no path leak onto the wire). */
+  readonly locator: string
+  /** Optional human label (the registry `label`). */
+  readonly name?: string
+  readonly emittedAt: number
+}
+
 /** Closed discriminated union — every canvas message the wire carries. */
-export type CanvasMessage = ToolDiffMessage | ContextUsageMessage
+export type CanvasMessage = ToolDiffMessage | ContextUsageMessage | ArtifactReadyMessage
 
 /** Closed enum of canvas message tags — keep in lock-step with the union. */
-export const CANVAS_MESSAGE_KINDS = ["tool.diff", "context.usage"] as const
+export const CANVAS_MESSAGE_KINDS = ["tool.diff", "context.usage", "artifact.ready"] as const
 
 export type CanvasMessageKind = (typeof CANVAS_MESSAGE_KINDS)[number]
 
@@ -107,6 +134,29 @@ const isToolDiffShape = (rec: Record<string, unknown>): boolean =>
 const isContextUsageShape = (rec: Record<string, unknown>): boolean =>
   Array.isArray(rec.segments) && typeof rec.total === "number" && typeof rec.max === "number"
 
+/** A2 — minimal `artifact.ready` frame shape. The four load-bearing string
+ *  fields (id / kind / mime / locator) must be present; `name` is optional and
+ *  not checked here. */
+const isArtifactReadyShape = (rec: Record<string, unknown>): boolean =>
+  typeof rec.artifactId === "string" &&
+  typeof rec.artifactKind === "string" &&
+  typeof rec.mimeType === "string" &&
+  typeof rec.locator === "string"
+
+/** Per-kind shape check — a closed switch on the (already-validated) tag so a
+ *  future kind added to {@link CANVAS_MESSAGE_KINDS} without a shape branch is a
+ *  compile-visible gap here (exhaustiveness), not a silent accept. */
+const isCanvasMessageShape = (kind: CanvasMessageKind, rec: Record<string, unknown>): boolean => {
+  switch (kind) {
+    case "tool.diff":
+      return isToolDiffShape(rec)
+    case "context.usage":
+      return isContextUsageShape(rec)
+    case "artifact.ready":
+      return isArtifactReadyShape(rec)
+  }
+}
+
 /** Best-effort structural guard. Returns true iff `value` has a recognised
  *  `kind` tag + the minimal per-kind shape. The encoder enforces full shape
  *  on emit; consumers treat unknown fields as forward-compatible. */
@@ -114,7 +164,7 @@ export const isCanvasMessage = (value: unknown): value is CanvasMessage => {
   if (!isPlainObject(value)) return false
   if (!isCanvasMessageKind(value.kind)) return false
   if (typeof value.emittedAt !== "number" || !Number.isFinite(value.emittedAt)) return false
-  return value.kind === "tool.diff" ? isToolDiffShape(value) : isContextUsageShape(value)
+  return isCanvasMessageShape(value.kind, value)
 }
 
 /* ------------------------------------------------------------------ */
