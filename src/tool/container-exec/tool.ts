@@ -99,7 +99,20 @@ export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput>
           ].join("\n")
           // A non-zero exit is NOT a tool failure — it's a real, useful observation the agent
           // reasons over (the command ran). Surface it as ok:true with the exit code visible.
-          result = { ok: true, output: body }
+          // RFC-0002 §5.2 evidence: ALSO carry the exit code on the TYPED seam
+          // (`ToolResult.evidence`) — dispatch flattens it onto the enriched `tool_result`
+          // AgentEvent, which is what the verify-gate/OC1 inspectors and the report cassette
+          // read. Text-only exit (`output`) left them blind: every run looked exitCode-less,
+          // so a crash (exit 2) was indistinguishable from a clean run (jul-3 RCA).
+          result = {
+            ok: true,
+            output: body,
+            evidence: {
+              exitCode: r.code,
+              executedCommand: parsed.data.command,
+              ...(r.stderr ? { stderr: r.stderr } : {}),
+            },
+          }
         } catch (e) {
           const msg = errMessage(e)
           result = {

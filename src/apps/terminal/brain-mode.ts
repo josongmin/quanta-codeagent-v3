@@ -47,6 +47,7 @@ import {
   comparedToReference,
   deriveVerificationState,
   inspectExerciseEvidence,
+  outputContractVerdict,
   type VerificationStamp,
 } from "./verify-gate"
 
@@ -57,6 +58,28 @@ const TERMINAL_BRAIN_SESSION_ID = "terminal-brain-session"
  *  inspects the trajectory for an end-to-end exercise of the deliverable and, if none is found,
  *  injects EXACTLY ONE bounded follow-up turn, then stamps an honest verification trichotomy. */
 export const TB_VERIFY_GATE_ENV = "QUANTA_TB_VERIFY_GATE"
+
+/** OC1 (RFC 07) — output-contract sub-lever. When ON (and the verify-gate is ON), the single bounded
+ *  follow-up ALSO fires when the deliverable never ran END-TO-END to a CLEAN exit (not just when no L1
+ *  comparison happened), and uses the {@link OUTPUT_CONTRACT_FOLLOWUP} nudge. Default-OFF ⇒ the gate is
+ *  byte-identical to verify-gate v2. Separate knob so its effect is measured in isolation (A/B). */
+export const TB_OUTPUT_CONTRACT_ENV = "QUANTA_TB_OUTPUT_CONTRACT"
+
+/** Cassette knob (RFC 07). Trajectory recording is ON by DEFAULT — set `QUANTA_TB_TRAJECTORY=0`
+ *  (or `false`/`off`) to suppress it. Default-on because the jul-3 regression could not be RCA'd
+ *  without a record of what the agent actually did. */
+export const TB_TRAJECTORY_ENV = "QUANTA_TB_TRAJECTORY"
+
+/** Resolve whether to record the trajectory. Default TRUE; only an explicit `0`/`false`/`off` disables. */
+export const resolveTrajectoryOn = (env: Record<string, string | undefined>): boolean => {
+  const raw = (env[TB_TRAJECTORY_ENV] ?? "").trim().toLowerCase()
+  return raw !== "0" && raw !== "false" && raw !== "off"
+}
+
+/** Max trajectory steps recorded (bound the report size); the last N are kept (the tail is where a
+ *  finalize/regression happens). Preview per step is truncated to keep the JSON readable. */
+const TRAJECTORY_MAX_STEPS = 200
+const TRAJECTORY_PREVIEW_MAX = 240
 
 /** Lever #1 knob (RFC `jul-2-terminal-bench-levers/01`): the environment posture.
  *  DEFAULT-OFF ⇒ byte-identical today (the brain's system prompt keeps the frozen
@@ -93,7 +116,31 @@ export const VERIFY_GATE_FOLLOWUP =
   "output is the correct answer, or a deterministic expected value stated in the task — run your " +
   "deliverable and DIFF its output against that reference, then report the concrete comparison result " +
   "(matches / differs-here / no-reference-available). Rely only on those task-provided materials; do " +
-  "not seek out any concealed evaluation harness or reference key."
+  "not seek out any concealed evaluation harness or reference key. " +
+  "IMPORTANT: this is a CHECK, not a rework — if the comparison matches (or no reference exists), do " +
+  "NOT modify any files; finalize as-is. Only fix something if the comparison shows a CONCRETE mismatch."
+
+/** OC1 (RFC 07) output-contract follow-up — fired (in place of {@link VERIFY_GATE_FOLLOWUP}) when the
+ *  deliverable never ran END-TO-END to a clean exit. Directs the model to satisfy the task's OWN output
+ *  contract: invoke the deliverable exactly as the task states, confirm success, confirm the required
+ *  outputs exist and NO stray build artifacts remain. No-leak: names only the task's own spec, never a
+ *  test/verifier/answer key. (Targets the polyglot stray-file / rstan missing-file / sam-cell-seg
+ *  crash-at-invocation class — RFC 07 Type 1.) */
+export const OUTPUT_CONTRACT_FOLLOWUP =
+  "Before finalizing: verify your deliverable against the TASK'S OWN output contract. " +
+  "(1) Run it EXACTLY as the task describes it will be invoked and confirm it completes successfully " +
+  "(exits without error). " +
+  "(2) Confirm the working directory contains EXACTLY what the task asks for — every required output " +
+  "file is present AND no stray artifacts remain (leftover build/compile outputs like a compiled binary, " +
+  "temp files, scratch copies). " +
+  "(3) Using ONLY task-provided materials (an input/original artifact, a baseline command whose output " +
+  "is correct, or a value the task states), DIFF your output against that reference and report the result " +
+  "(matches / differs-here / no-reference-available). " +
+  "If the run errors, the file set does not match the task's stated deliverable, or the comparison " +
+  "differs, fix it now. Use ONLY the task's own description; do not consult any concealed evaluation " +
+  "harness, verifier, or answer key. " +
+  "IMPORTANT: this is a CHECK, not a rework — if everything already satisfies the contract, do NOT " +
+  "modify any files; finalize as-is. Only change something on a CONCRETE observed failure."
 
 /** Report JSON the hands side reads into harbor's `AgentContext` (spec B3). Trajectory optional. */
 export interface TerminalBrainReport {
@@ -119,6 +166,25 @@ export interface TerminalBrainReport {
     readonly winnerIndex: number
     readonly rationale: string
   }
+  /** Cassette (RFC 07): a COMPACT, ordered trajectory of the run — every tool_call command paired
+   *  with its result (ok / exit code / truncated stdout) plus assistant text turns. Present by DEFAULT
+   *  (the pain of jul-3: a regression could not be RCA'd because nothing recorded WHAT the agent did);
+   *  suppressed only by `QUANTA_TB_TRAJECTORY=0`. Bounded (event cap + preview truncation) so it never
+   *  bloats the report. No-leak: it records only the model's own actions, never a hidden test. */
+  readonly trajectory?: readonly TrajectoryStep[]
+}
+
+/** One compact trajectory step (a tool call + its observed result, OR an assistant text turn). */
+export interface TrajectoryStep {
+  readonly kind: "exec" | "pty" | "text" | "tool"
+  /** The command run (exec/pty) or a short label (tool); omitted for pure text. */
+  readonly cmd?: string
+  /** Result observation for a tool step: ok flag + exit code + truncated stdout preview. */
+  readonly ok?: boolean
+  readonly exitCode?: number
+  readonly preview?: string
+  /** Assistant text (truncated) for a text step. */
+  readonly text?: string
 }
 
 /** Result returned to the caller (and to the process `main()`) after one brain run. */
@@ -168,6 +234,43 @@ class CapturingStream implements StreamPort {
   emit(event: AgentEvent): void {
     this.events.push(event)
   }
+}
+
+/** Compact the captured event stream into a bounded, readable {@link TrajectoryStep}[] for the
+ *  report cassette (RFC 07). Pairs each tool_call with its tool_result; keeps assistant text turns.
+ *  Truncates previews and caps the step count (keeps the TAIL — where finalize/regression happens).
+ *  PURE + no-leak: reads only the model's own calls/results/text. */
+export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep[] => {
+  const trunc = (s: string | undefined): string | undefined =>
+    s === undefined || s === "" ? undefined : s.slice(0, TRAJECTORY_PREVIEW_MAX)
+  const resultById = new Map<string, Extract<AgentEvent, { type: "tool_result" }>>()
+  for (const ev of events) if (ev.type === "tool_result") resultById.set(ev.id, ev)
+  const steps: TrajectoryStep[] = []
+  for (const ev of events) {
+    if (ev.type === "tool_call") {
+      const res = resultById.get(ev.id)
+      const obs =
+        res !== undefined
+          ? {
+              ok: res.ok,
+              ...(res.exitCode !== undefined ? { exitCode: res.exitCode } : {}),
+              ...(trunc(res.preview) !== undefined ? { preview: trunc(res.preview) } : {}),
+            }
+          : {}
+      if (ev.name === "container_exec") {
+        const c = ((ev.input as { command?: unknown } | null)?.command ?? "") as string
+        steps.push({ kind: "exec", cmd: trunc(c) ?? "", ...obs })
+      } else if (ev.name.startsWith("pty_")) {
+        const c = ((ev.input as { data?: unknown; command?: unknown } | null)?.data ??
+          (ev.input as { command?: unknown } | null)?.command ??
+          "") as string
+        steps.push({ kind: "pty", cmd: trunc(String(c)) ?? "", ...obs })
+      } else {
+        steps.push({ kind: "tool", cmd: ev.name, ...obs })
+      }
+    }
+  }
+  return steps.length > TRAJECTORY_MAX_STEPS ? steps.slice(-TRAJECTORY_MAX_STEPS) : steps
 }
 
 /** Build a complete, offline {@link SessionBootstrapDeps} bundle wired to the injected LLM, capture
@@ -338,6 +441,24 @@ const finalAssistantText = (messages: readonly Message[]): string => {
  *  a surfaced mismatch (diff→fix→re-diff), not just report it. Ships as a SEPARATE A/B arm with a
  *  hard-ceiling turn-budget watchdog — NOT here (K=0 surface-only first; the recovery loop
  *  re-introduces R2's over-persist and must be measured, never enabled by default). */
+/** PURE follow-up decision (extracted so the OC1 trigger is wiring-provable without the loop).
+ *  - OC1 OFF: v2 — fire the COMPARE nudge iff no L1 comparison happened (byte-identical to verify-gate v2).
+ *  - OC1 ON: fire the CONTRACT nudge whenever on the pass path (`compared` ⇒ about to stamp verified-pass;
+ *    catches the polyglot clean-run-with-stray-artifact class) OR the deliverable never ran to a clean exit
+ *    (`!ranClean`; catches the sam-cell-seg crash / never-run class). The contract nudge is a superset of the
+ *    compare nudge, so it also serves the no-compare case. Never fires past the turn budget (no over-persist). */
+export const decideGateFollowup = (args: {
+  compared: boolean
+  ranClean: boolean
+  outputContractOn: boolean
+  budgetLeft: boolean
+}): { fire: boolean; nudge: "compare" | "contract" | "none" } => {
+  const missingCompare = !args.compared
+  const contractCheck = args.outputContractOn && (args.compared || !args.ranClean)
+  if (!args.budgetLeft || !(missingCompare || contractCheck)) return { fire: false, nudge: "none" }
+  return { fire: true, nudge: contractCheck ? "contract" : "compare" }
+}
+
 const runVerifyBeforeFinalizeGate = async (args: {
   session: Parameters<typeof runSessionTurn>[0]["session"]
   stream: CapturingStream
@@ -345,6 +466,9 @@ const runVerifyBeforeFinalizeGate = async (args: {
   maxTurns: number
   outcomeTurns: number
   messages: readonly Message[]
+  /** OC1 (RFC 07): when true, the follow-up ALSO fires on an unmet output contract, using the
+   *  {@link OUTPUT_CONTRACT_FOLLOWUP} nudge. Default false ⇒ verify-gate v2 byte-identical. */
+  outputContractOn: boolean
 }): Promise<{
   outcomeTurns: number
   messages: readonly Message[]
@@ -354,18 +478,30 @@ const runVerifyBeforeFinalizeGate = async (args: {
   let messages = args.messages
   let followUpFired = false
   const preCompare = comparedToReference(args.stream.events)
-  // Fire the ONE follow-up ONLY when there is no OBSERVED L1 comparison AND the run has not
-  // already exhausted its turn budget (the budget guard is what stops a nudge PAST the cap on an
-  // exhausted run — the over-persist the RFC forbids). K=0: exactly one follow-up, never a loop.
-  if (!preCompare.compared && outcomeTurns < args.maxTurns) {
+  // OC1: the output contract is unmet when the deliverable never ran end-to-end to a clean exit.
+  // Only consulted when the sub-lever is ON (else the trigger + nudge are byte-identical to v2).
+  const preContract = args.outputContractOn
+    ? outputContractVerdict(args.stream.events)
+    : { ranClean: true }
+  const decision = decideGateFollowup({
+    compared: preCompare.compared,
+    ranClean: preContract.ranClean,
+    outputContractOn: args.outputContractOn,
+    budgetLeft: outcomeTurns < args.maxTurns,
+  })
+  if (decision.fire) {
     const followUp = await runSessionTurn({
       session: args.session,
       resolveApproval: async () => "approve",
-      text: VERIFY_GATE_FOLLOWUP,
+      text: decision.nudge === "contract" ? OUTPUT_CONTRACT_FOLLOWUP : VERIFY_GATE_FOLLOWUP,
       turnSignal: args.turnSignal,
       env: {},
     })
-    outcomeTurns = followUp.outcome.turns
+    // ACCUMULATE, don't overwrite: `AgentOutcome.turns` is PER-runAgent-CALL (the loop counter
+    // resets to 1 each call — turn-loop.ts), so the follow-up's count must ADD to the main run's.
+    // The overwrite bug made an M0 report say `turns:2` after a 20-turn main run (jul-3 audit R2),
+    // poisoning per-task A/B turn analysis.
+    outcomeTurns += followUp.outcome.turns
     messages = followUp.messages
     followUpFired = true
   }
@@ -412,6 +548,11 @@ const finalizeTerminalBrain = (
     // when the gate/posture is off, keeping the report byte-identical to pre-lever.
     ...(state.verification !== undefined ? { verification: state.verification } : {}),
     ...(state.envOwnedApplied ? { envPosture: "owned" as const } : {}),
+    // Cassette (RFC 07): record the compact trajectory by DEFAULT so a run is always RCA-able;
+    // `QUANTA_TB_TRAJECTORY=0` opts out (then the field is absent ⇒ byte-identical to pre-cassette).
+    ...(resolveTrajectoryOn(opts.env ?? {})
+      ? { trajectory: compactTrajectory(stream.events) }
+      : {}),
   }
   opts.writeReport(opts.reportOut, report)
   opts.closeStdout?.()
@@ -456,6 +597,7 @@ export const runTerminalBrain = async (
   const turnText = `${surface.operatorGuide}\n\n# Task\n${opts.instruction}`
 
   const verifyGateOn = gateOn(opts.env ?? {}, TB_VERIFY_GATE_ENV)
+  const outputContractOn = gateOn(opts.env ?? {}, TB_OUTPUT_CONTRACT_ENV)
   let outcomeTurns = 0
   let messages: readonly Message[] = []
   let verification: VerificationStamp | undefined
@@ -534,6 +676,7 @@ export const runTerminalBrain = async (
           maxTurns: opts.maxTurns ?? 30,
           outcomeTurns,
           messages,
+          outputContractOn,
         })
         outcomeTurns = gated.outcomeTurns
         messages = gated.messages

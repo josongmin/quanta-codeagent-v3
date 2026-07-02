@@ -14,6 +14,7 @@ import {
   deriveVerificationState,
   inspectExerciseEvidence,
   isExerciseCommand,
+  outputContractVerdict,
   type VerificationState,
 } from "./verify-gate"
 
@@ -37,6 +38,47 @@ const result = (
   ok: extra.ok ?? true,
   preview: extra.preview ?? "",
   ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
+})
+
+describe("outputContractVerdict (OC1, RFC 07) — clean end-to-end run", () => {
+  test("ranClean=true on an exercise command with ok+exit 0", () => {
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "./build/mystery input.txt" }),
+      result("c1", "container_exec", { preview: "42 43 44\n", exitCode: 0 }),
+    ])
+    expect(v.ranClean).toBe(true)
+    expect(v.evidence).toContain("clean exit")
+  })
+
+  test("red-on-injection: a deliverable that CRASHES at invocation (exit 2) is NOT clean", () => {
+    // sam-cell-seg class: the script runs but exits non-zero → contract unmet, nudge must fire.
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "python /app/convert_masks.py --out x.csv" }),
+      result("c1", "container_exec", { preview: "Traceback", exitCode: 2, ok: false }),
+    ])
+    expect(v.ranClean).toBe(false)
+    expect(v.evidence).toContain("output contract unmet")
+  })
+
+  test("ok:false with no exit code is NOT clean (failure the agent saw)", () => {
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "/app/mystery" }),
+      result("c1", "container_exec", { preview: "boom", ok: false }),
+    ])
+    expect(v.ranClean).toBe(false)
+  })
+
+  test("install/build only (no exercise run) ⇒ not clean (fail-closed)", () => {
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "pip install numpy" }),
+      result("c1", "container_exec", { preview: "Successfully installed", exitCode: 0 }),
+    ])
+    expect(v.ranClean).toBe(false)
+  })
+
+  test("no events ⇒ not clean", () => {
+    expect(outputContractVerdict([]).ranClean).toBe(false)
+  })
 })
 
 describe("inspectExerciseEvidence — container_exec", () => {

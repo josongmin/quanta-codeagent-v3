@@ -23,12 +23,80 @@ import type {
   ReadResult,
 } from "@/tool/pty/port"
 import {
+  compactTrajectory,
+  decideGateFollowup,
   resolveMaxTurnsFromEnv,
+  resolveTrajectoryOn,
   runTerminalBrain,
   TB_ENV_OWNED_ENV,
+  TB_OUTPUT_CONTRACT_ENV,
   TB_VERIFY_GATE_ENV,
   VERIFY_GATE_FOLLOWUP,
 } from "./brain-mode"
+
+describe("cassette trajectory (RFC 07) — default-on recording", () => {
+  test("resolveTrajectoryOn: DEFAULT true; only 0/false/off disable", () => {
+    expect(resolveTrajectoryOn({})).toBe(true) // default ON
+    expect(resolveTrajectoryOn({ QUANTA_TB_TRAJECTORY: "1" })).toBe(true)
+    expect(resolveTrajectoryOn({ QUANTA_TB_TRAJECTORY: "0" })).toBe(false)
+    expect(resolveTrajectoryOn({ QUANTA_TB_TRAJECTORY: "false" })).toBe(false)
+    expect(resolveTrajectoryOn({ QUANTA_TB_TRAJECTORY: "off" })).toBe(false)
+  })
+
+  test("compactTrajectory pairs each command with ok/exit/preview (the RCA record)", () => {
+    const steps = compactTrajectory([
+      { type: "tool_call", id: "1", name: "container_exec", input: { command: "gcc main.c -o cmain" } },
+      { type: "tool_result", id: "1", name: "container_exec", ok: true, preview: "", exitCode: 0 },
+      { type: "tool_call", id: "2", name: "container_exec", input: { command: "./cmain" } },
+      { type: "tool_result", id: "2", name: "container_exec", ok: false, preview: "Segfault", exitCode: 139 },
+    ] as never)
+    expect(steps).toHaveLength(2)
+    expect(steps[0]).toMatchObject({ kind: "exec", cmd: "gcc main.c -o cmain", ok: true, exitCode: 0 })
+    expect(steps[1]).toMatchObject({ kind: "exec", ok: false, exitCode: 139, preview: "Segfault" })
+  })
+})
+
+describe("decideGateFollowup (OC1, RFC 07) — trigger truth table", () => {
+  const D = (o: Partial<Parameters<typeof decideGateFollowup>[0]>) =>
+    decideGateFollowup({ compared: false, ranClean: true, outputContractOn: false, budgetLeft: true, ...o })
+
+  test("OC1 OFF = verify-gate v2 byte-identical: fire compare nudge iff no L1 compare", () => {
+    expect(D({ compared: false })).toEqual({ fire: true, nudge: "compare" })
+    expect(D({ compared: true })).toEqual({ fire: false, nudge: "none" }) // compared ⇒ pass, no nudge
+  })
+
+  test("R3 HARDENING: OC1 ON + pass path (compared, ranClean) STILL fires the contract nudge", () => {
+    // polyglot class: it compiled+ran clean (ranClean) and compared partial output (compared) → v2 would
+    // finalize verified-pass and NEVER catch the stray `cmain`. OC1 fires the contract self-check anyway.
+    expect(D({ compared: true, ranClean: true, outputContractOn: true })).toEqual({
+      fire: true,
+      nudge: "contract",
+    })
+    // Proof it is the OC1 upgrade, not the base: the SAME inputs with OC1 OFF do NOT fire.
+    expect(D({ compared: true, ranClean: true, outputContractOn: false })).toEqual({
+      fire: false,
+      nudge: "none",
+    })
+  })
+
+  test("OC1 ON + crash/never-clean (sam-cell-seg exit 2) fires the contract nudge", () => {
+    expect(D({ compared: false, ranClean: false, outputContractOn: true })).toEqual({
+      fire: true,
+      nudge: "contract",
+    })
+  })
+
+  test("budget exhausted ⇒ NEVER fires (no over-persist past the cap), even under OC1", () => {
+    expect(D({ compared: true, ranClean: false, outputContractOn: true, budgetLeft: false })).toEqual({
+      fire: false,
+      nudge: "none",
+    })
+  })
+
+  test("the OC1 knob name is the declared sub-lever env var", () => {
+    expect(TB_OUTPUT_CONTRACT_ENV).toBe("QUANTA_TB_OUTPUT_CONTRACT")
+  })
+})
 
 /** Local minimal `LLMPort` (headless `FakeLlm` precedent, replicated to honor the terminal fence).
  *  Replays one `StreamEvent[]` script per assistant turn, in order; a turn beyond the list replays
