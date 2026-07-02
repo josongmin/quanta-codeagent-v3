@@ -48,6 +48,11 @@ describe("classifyErrorReason — matrix coverage", () => {
       STOP_REASON_CODE.COMPACTION_THRASH,
     ],
     ["LLM request failed", "failed", STOP_REASON_CODE.PROVIDER_UNKNOWN],
+    [
+      "[empty-turn] model returned only empty responses after the budget",
+      "failed",
+      STOP_REASON_CODE.MODEL_EMPTY_EXHAUSTED,
+    ],
     ["something totally unexpected exploded", "failed", STOP_REASON_CODE.RUNTIME_UNKNOWN_ERROR],
   ])("%s → kind=%s reasonCode=%s", (reason, kind, code) => {
     const cat = classifyErrorReason(reason)

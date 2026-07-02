@@ -649,7 +649,16 @@ export const benchPostureFromState = (
   // unset/rejected env value reads `undefined` here and the `?? 1` fence applies.
   const repairBreadth = readKnobValue(state, "repair-breadth", isNumber) ?? 1
   const locationFanout = readKnobValue(state, "bench-location-fanout", isTrue) === true
-  const verifySelectN = readKnobValue(state, "verify-select", isNumber)
+  // B1 FAIL-CLOSED: the verify-select best-of-N veto SELECTION plane is a RETIRED
+  // footgun (jun-27 — it laundered correct patches to empty when no candidate
+  // passed the hard gates). Its knob is honored ONLY behind an explicit operator
+  // ESCAPE hatch; without it the plane stays inert (verifySelectN ⇒ undefined ⇒
+  // single-pass path). Default runs never set the escape, so this is
+  // byte-identical for every shipped preset (verify-select is not in any of them).
+  const verifySelectEscape = gateOn(env, "QUANTA_BENCH_VERIFY_SELECT_ESCAPE")
+  const verifySelectN = verifySelectEscape
+    ? readKnobValue(state, "verify-select", isNumber)
+    : undefined
   const verifySelectConcurrency = readKnobValue(state, "verify-select-concurrency", isNumber)
   const verifySelectEarlyAccept =
     readKnobValue(state, "verify-select-early-accept", isTrue) === true

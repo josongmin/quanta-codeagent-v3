@@ -510,10 +510,11 @@ describe("runAgent hell-cases — malformed LLM responses", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("(H1.a) assistant message with empty content[] → empty-recovery nudges then completes", async () => {
+  test("(H1.a) assistant message with empty content[] → empty-recovery nudges then NON-success terminal (jul-3 C1)", async () => {
     // The loop has a same-turn empty-turn recovery (`isEmptyTurn` → nudge,
     // capped at MAX_CONSECUTIVE_EMPTIES=2). Three consecutive empties exhaust
-    // the budget and the loop completes (not max_turns).
+    // the budget; jul-3 (C1) the loop then seals a NON-success `error` terminal
+    // (was `completed`) — a produced-NOTHING stall is not reported as success.
     const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
     const llm = new CountingLLM([empty, empty, empty])
     const stream = new RecordingStream()
@@ -534,9 +535,10 @@ describe("runAgent hell-cases — malformed LLM responses", () => {
       "empty-content",
     )
 
-    expect(out.reason).toBe("completed")
+    // TEETH: pre-fix `completed`. jul-3 (C1) — exhausted empty budget ⇒ error.
+    expect(out.reason).toBe("error")
     // SAME-TURN empty recoveries: 2 fired (consumed both MAX_CONSECUTIVE_EMPTIES
-    // budget slots), then the 3rd empty exhausted ⇒ accepted-as-completed.
+    // budget slots), then the 3rd empty exhausted ⇒ NON-success error terminal.
     const empties = stream.events.filter((e) => e.type === "recovery" && e.reason === "empty")
     expect(empties).toHaveLength(2)
     // No tool_use ever happened.
@@ -544,7 +546,8 @@ describe("runAgent hell-cases — malformed LLM responses", () => {
     expect(toolCalls).toHaveLength(0)
     // 3 stream calls — all same-turn (turns is the bounded productive count).
     expect(llm.calls).toBe(3)
-    expect(out.turns).toBe(1)
+    // jul-3 (C1): error terminal ⇒ turns=turn-1=0 (produced-nothing stall).
+    expect(out.turns).toBe(0)
   })
 
   test("(H1.b) message_stop says tool_use but ZERO tool_use blocks → malformed recovery", async () => {
@@ -1003,11 +1006,12 @@ describe("runAgent hell-cases — recovery storm", () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  test("(H5.a) malformed + empty in the same turn → both recoveries fire, then completes", async () => {
+  test("(H5.a) malformed + empty in the same turn → both recoveries fire, then NON-success terminal (jul-3 C1)", async () => {
     // 1st stream: malformed (stop=tool_use, no tool_use blocks) ⇒ 1 malformed
     // recovery (budget=1). 2nd stream: empty content ⇒ 1 empty recovery
     // (budget=2). 3rd stream: another empty ⇒ 1 more empty recovery (budget
-    // exhausted at 2). 4th stream: another empty ⇒ exhausted ⇒ completed.
+    // exhausted at 2). 4th stream: another empty ⇒ exhausted ⇒ NON-success
+    // `error` terminal (jul-3 C1 — was `completed`).
     const malformed: StreamEvent[] = [{ type: "message_stop", stop_reason: "tool_use" }]
     const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
     const llm = new CountingLLM([malformed, empty, empty, empty])
@@ -1029,7 +1033,8 @@ describe("runAgent hell-cases — recovery storm", () => {
       "recovery-storm",
     )
 
-    expect(out.reason).toBe("completed")
+    // TEETH: pre-fix `completed`. jul-3 (C1) — exhausted empty budget ⇒ error.
+    expect(out.reason).toBe("error")
     // BOTH recovery kinds fired in the same turn — budgets are independent.
     const malformedRec = stream.events.filter(
       (e) => e.type === "recovery" && e.reason === "malformed",
@@ -1037,13 +1042,14 @@ describe("runAgent hell-cases — recovery storm", () => {
     const emptyRec = stream.events.filter((e) => e.type === "recovery" && e.reason === "empty")
     expect(malformedRec).toHaveLength(1)
     expect(emptyRec).toHaveLength(2) // MAX_CONSECUTIVE_EMPTIES=2 = exactly two nudges
-    // Same-turn retries never consume the maxTurns slot.
-    expect(out.turns).toBe(1)
+    // Same-turn retries never consume the maxTurns slot; jul-3 (C1) the error
+    // terminal resolves turns=turn-1=0 (the empty turn produced nothing).
+    expect(out.turns).toBe(0)
     // Stream called exactly 4 times (initial malformed + 1 empty nudge + 2 caps).
     expect(llm.calls).toBe(4)
   })
 
-  test("(H5.b) recovery budget exhausted by 5 consecutive empties → completes (no infinite loop)", async () => {
+  test("(H5.b) recovery budget exhausted by 5 consecutive empties → NON-success terminal (no infinite loop, jul-3 C1)", async () => {
     // Repeated empties past the cap MUST terminate (not max_turns), proving
     // the recovery budget is finite. Pin exact stream-call count = 3
     // (MAX_CONSECUTIVE_EMPTIES=2 + the final exhaustion call).
@@ -1067,12 +1073,14 @@ describe("runAgent hell-cases — recovery storm", () => {
       "recovery-exhausted",
     )
 
-    // Per the recovery FSM the loop accepts the exhausted empty turn as
-    // "completed" rather than running until max_turns.
-    expect(out.reason).toBe("completed")
-    expect(out.turns).toBe(1)
+    // Per the recovery FSM the loop terminates the exhausted empty turn rather
+    // than running until max_turns. jul-3 (C1): the terminal is a NON-success
+    // `error` (was `completed`) — a produced-NOTHING stall is not success.
+    expect(out.reason).toBe("error")
+    // jul-3 (C1): error terminal ⇒ turns=turn-1=0 (produced-nothing stall).
+    expect(out.turns).toBe(0)
     // Exactly MAX_CONSECUTIVE_EMPTIES=2 nudges fire; the 3rd empty exhausts
-    // and is accepted as completed.
+    // and seals the NON-success error terminal.
     const emptyRec = stream.events.filter((e) => e.type === "recovery" && e.reason === "empty")
     expect(emptyRec).toHaveLength(2)
     // Stream called 3 times, NOT 5 — the extra scripts are never reached.

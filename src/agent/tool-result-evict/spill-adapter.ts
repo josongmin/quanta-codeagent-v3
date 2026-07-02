@@ -49,10 +49,17 @@ const defaultWrite = (path: string, data: string): void => {
   writeFileSync(path, data)
 }
 
-/** Compact one-line retrieval marker (the cleared block's ref suffix). */
+/** Compact one-line retrieval marker (the cleared block's ref suffix). The
+ *  best-effort caveat is LOAD-BEARING copy: the spill file is bounded by the
+ *  shared `pruneSpillDir(keep)` retention (`QUANTA_TOOL_OUTPUT_SPILL_KEEP`), so a
+ *  later eviction can GC this file before the model reads it. Telling the model
+ *  the read is best-effort (may be gone) stops it treating a failed `Read` of a
+ *  reclaimed path as a hard error. */
 const refMarker = (path: string, originalChars: number): string =>
   `<persisted-output path="${path}" chars="${originalChars}">` +
   ` full original tool output persisted to disk; Read that file to see it ` +
+  `(best-effort: the file may have been reclaimed by spill retention — if the ` +
+  `Read fails, proceed without it) ` +
   `</persisted-output>`
 
 export const createEvictionSpillPort = (opts: DefaultEvictionSpillOptions): EvictionSpillPort => {

@@ -22,12 +22,9 @@ import {
 import {
   buildRetrievalStackCore,
   DEFAULT_RETRIEVAL_RERANKER,
-  type LexicalHit,
-  lexicalHitsToCandidates,
   RETRIEVAL_BUILTIN_RERANKERS,
   type RetrievalStack,
   rankWithRetrievalStack,
-  runLocalizeHybrid,
 } from "@/runner/assemble"
 
 const entry = (id: string, text: string, extra?: Partial<MemoryEntry>): MemoryEntry => ({
@@ -180,71 +177,6 @@ describe("rankWithRetrievalStack — bridge identity + wire", () => {
     }
     const out = await rankWithRetrievalStack(candidates, query, 1_700_000_001_000, fakeStack)
     expect(out.every((e) => ["a", "b", "c"].includes(e.id))).toBe(true)
-  })
-})
-
-// ─── Phase C — localize bridge identity / wire ───────────────────────────
-
-describe("runLocalizeHybrid — bridge identity + wire", () => {
-  const hits: LexicalHit[] = [
-    { file: "src/x.ts", line: 10, text: "alpha" },
-    { file: "src/y.ts", line: 20, text: "beta" },
-  ]
-  const bm25Source = async (): Promise<readonly LexicalHit[]> => hits
-
-  test("lexicalHitsToCandidates preserves order + injects ordinal score", () => {
-    const cands = lexicalHitsToCandidates(hits)
-    expect(cands.length).toBe(2)
-    expect(cands[0]?.id).toBe("src/x.ts:10")
-    expect(cands[0]?.score).toBeGreaterThan(cands[1]?.score ?? Number.POSITIVE_INFINITY)
-  })
-
-  test("stack=undefined returns lexical candidates (identity wire)", async () => {
-    const out = await runLocalizeHybrid({
-      query: "alpha",
-      type: "keywords",
-      bm25Source,
-    })
-    expect(out.length).toBe(2)
-    expect(out.map((c) => c.id)).toEqual(["src/x.ts:10", "src/y.ts:20"])
-  })
-
-  test("stack present routes through runHybridQuery + reranker", async () => {
-    let rerankCalls = 0
-    const fakeStack: RetrievalStack = {
-      registry: new RerankRegistry(),
-      defaultReranker: {
-        kind: "identity",
-        async rerank(input) {
-          rerankCalls++
-          return [...input.candidates].reverse()
-        },
-      },
-    }
-    const out = await runLocalizeHybrid({
-      query: "alpha",
-      type: "keywords",
-      bm25Source,
-      stack: fakeStack,
-    })
-    expect(rerankCalls).toBe(1)
-    expect(out.map((c) => c.id)).toEqual(["src/y.ts:20", "src/x.ts:10"])
-  })
-
-  test("hybrid type with no embedding source uses empty list (well-defined)", async () => {
-    const fakeStack: RetrievalStack = {
-      registry: new RerankRegistry(),
-      defaultReranker: identityReranker,
-    }
-    const out = await runLocalizeHybrid({
-      query: "alpha",
-      type: "hybrid",
-      bm25Source,
-      stack: fakeStack,
-    })
-    // BM25 results fuse with empty embedding ⇒ output is BM25 reranked by
-    // RRF; identity rerank means we keep that order.
-    expect(out.length).toBe(2)
   })
 })
 

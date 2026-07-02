@@ -208,14 +208,19 @@ describe("recovery e2e — integrated runAgent", () => {
     expect(llm.calls).toBe(2)
   })
 
-  test("6. consecutive empty turns are capped → terminates completed", async () => {
+  test("6. consecutive empty turns are capped → terminates NON-success (jul-3 C1)", async () => {
     const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
     const llm = new ScriptedLLM([ev(empty), ev(empty), ev(empty), ev(empty)])
     const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 3 })), 15_000, "empty-turns")
-    expect(out.reason).toBe("completed")
-    // MAX_CONSECUTIVE_EMPTIES=2 → 2 nudges then completed = 3 calls, no spin.
+    // TEETH: pre-fix `completed`. jul-3 (C1) — a produced-NOTHING stall seals as
+    // a NON-success `error` terminal (twin of the malformed FIX-2 above).
+    expect(out.reason).toBe("error")
+    // MAX_CONSECUTIVE_EMPTIES=2 → 2 nudges then the error terminal = 3 calls, no spin.
     expect(llm.calls).toBe(3)
-    expect(out.turns).toBe(1)
+    // jul-3 (C1): the error terminal resolves `turns: turn-1` (the empty turn
+    // produced nothing), so a single-turn empty stall reports 0 productive turns
+    // (was 1 under the old `completed` path).
+    expect(out.turns).toBe(0)
   })
 
   test("7. genuine multi-turn tool loop (6 rounds) → completed, turns = real rounds only", async () => {
@@ -285,14 +290,18 @@ describe("recovery e2e — integrated runAgent", () => {
     ).toBe(true)
   })
 
-  test("9. C5: empty-exhausted completion keeps the final assistant turn last", async () => {
-    // MAX_CONSECUTIVE_EMPTIES=2 → 2 empty nudges then the 3rd empty turn is
-    // completed-via-exhaustion. The (empty) final assistant turn must still be
-    // appended — last entry is the assistant turn, NOT the empty-nudge `user`.
+  test("9. C5: empty-exhausted terminal keeps the final assistant turn last (jul-3 C1)", async () => {
+    // MAX_CONSECUTIVE_EMPTIES=2 → 2 empty nudges then the 3rd empty turn seals a
+    // NON-success `error` terminal (jul-3 C1 — was `completed`). The C5 invariant
+    // still holds: the final (empty) assistant turn is appended by the error path
+    // (`applyNonSuccessRecoveryAction` appends the assembled message before the
+    // `error` seal, just like the malformed path in test 8) — the last entry is
+    // the assistant turn, NOT the empty-nudge `user`.
     const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
     const llm = new ScriptedLLM([ev(empty), ev(empty), ev(empty), ev(empty)])
     const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 3 })), 15_000, "c5-empty-exhausted")
-    expect(out.reason).toBe("completed")
+    // TEETH: pre-fix `completed`. jul-3 (C1) — empty exhaustion is NON-success.
+    expect(out.reason).toBe("error")
     const last = out.messages.at(-1)
     expect(last?.role).toBe("assistant")
   })
@@ -409,14 +418,18 @@ describe("recovery e2e — hell cases: budget exhaustion per recovery kind", () 
     expect(llm.calls).toBe(2)
   }, 15_000)
 
-  test("hc-empty: 3 empties (budget=2) → 3rd is completed-via-exhaustion", async () => {
+  test("hc-empty: 3 empties (budget=2) → 3rd is NON-success-via-exhaustion (jul-3 C1)", async () => {
     const empty: StreamEvent[] = [{ type: "message_stop", stop_reason: "end_turn" }]
     const llm = new ScriptedLLM([ev(empty), ev(empty), ev(empty), ev(text("never"))])
     const out = await withTimeout(runAgent(cfg({ llm, maxTurns: 3 })), 15_000, "hc-empty-exhaust")
-    expect(out.reason).toBe("completed")
-    // 2 nudges then 3rd empty → completed (3 calls total).
+    // TEETH: pre-fix `completed`. jul-3 (C1) — exhausted empty budget seals as
+    // a NON-success `error` terminal, mirroring the malformed exhaustion above.
+    expect(out.reason).toBe("error")
+    expect(out.reason).not.toBe("completed")
+    // 2 nudges then 3rd empty → error terminal (3 calls total).
     expect(llm.calls).toBe(3)
-    expect(out.turns).toBe(1)
+    // jul-3 (C1): error terminal ⇒ turns=turn-1=0 (produced-nothing stall).
+    expect(out.turns).toBe(0)
   }, 15_000)
 
   test("hc-compact: PTL → compaction breaker eventually stops on thrash (3 unproductive — outcome=error, not signal-driven)", async () => {

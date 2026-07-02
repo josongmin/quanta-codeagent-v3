@@ -4,8 +4,8 @@
  * Verifies the END-TO-END wire: the surface assembler builds a
  * {@link RetrievalStack}, attaches it to `AgentConfig.retrievalStack`,
  * passes it through `runAgent` (which never touches it), and the bridge
- * consumers (`rankWithRetrievalStack`, `runLocalizeHybrid`) read it back
- * from the config to invoke the funnel.
+ * consumer (`rankWithRetrievalStack`) reads it back from the config to
+ * invoke the funnel.
  *
  * This is the OPPOSITE of the unit hellgate — that file pokes the builder
  * in isolation; this file pokes the full path from "surface env flag" →
@@ -20,10 +20,8 @@ import { InMemoryStore, type MemoryEntry, type MemoryQuery } from "@/memory"
 import { identityReranker, RerankRegistry } from "@/retrieval"
 import {
   buildRetrievalStackCore,
-  type LexicalHit,
   type RetrievalStack,
   rankWithRetrievalStack,
-  runLocalizeHybrid,
 } from "@/runner/assemble"
 import { assembleConfig } from "@/runner/assemble/config"
 import { baseConfig, FakeLLM, text } from "./_harness"
@@ -158,33 +156,6 @@ describe("ADR-0159 retrieval composition — consumer reads slot", () => {
     expect(ranked.length).toBe(2)
   })
 
-  test("localize bridge reads AgentConfig.retrievalStack and runs hybrid funnel", async () => {
-    let rerankCalls = 0
-    const stack: RetrievalStack = {
-      registry: new RerankRegistry(),
-      defaultReranker: {
-        kind: "identity",
-        async rerank(input) {
-          rerankCalls++
-          return [...input.candidates]
-        },
-      },
-    }
-    const cfg: AgentConfig = baseConfig({ retrievalStack: stack })
-    const hits: LexicalHit[] = [
-      { file: "src/a.ts", line: 1, text: "alpha" },
-      { file: "src/b.ts", line: 2, text: "beta" },
-    ]
-    const out = await runLocalizeHybrid({
-      query: "alpha",
-      type: "keywords",
-      bm25Source: async () => hits,
-      ...(cfg.retrievalStack !== undefined ? { stack: cfg.retrievalStack } : {}),
-    })
-    expect(rerankCalls).toBe(1)
-    expect(out.length).toBe(2)
-  })
-
   test("bridges with absent slot return identity (no rerank invocations)", async () => {
     const cfg: AgentConfig = baseConfig({}) // no retrievalStack
     const entries: MemoryEntry[] = [
@@ -195,17 +166,14 @@ describe("ADR-0159 retrieval composition — consumer reads slot", () => {
     // No reranker was wired ⇒ the bridge returned rankEntries verbatim.
   })
 
-  test("cross-cut: same stack instance feeds both memory and localize bridges", async () => {
+  test("cross-cut: same stack instance is reusable across memory-bridge calls", async () => {
     let memCalls = 0
-    let locCalls = 0
     const stack: RetrievalStack = {
       registry: new RerankRegistry(),
       defaultReranker: {
         kind: "identity",
         async rerank(input) {
-          // Tag which bridge invoked us via the candidate count.
-          if (input.candidates.length === 1) memCalls++
-          else locCalls++
+          memCalls++
           return [...input.candidates]
         },
       },
@@ -217,17 +185,13 @@ describe("ADR-0159 retrieval composition — consumer reads slot", () => {
       1000,
       cfg.retrievalStack,
     )
-    await runLocalizeHybrid({
-      query: "y",
-      type: "keywords",
-      bm25Source: async () => [
-        { file: "a.ts", line: 1, text: "y" },
-        { file: "b.ts", line: 2, text: "y" },
-      ],
-      ...(cfg.retrievalStack !== undefined ? { stack: cfg.retrievalStack } : {}),
-    })
-    expect(memCalls).toBe(1)
-    expect(locCalls).toBe(1)
+    await rankWithRetrievalStack(
+      [{ id: "n", kind: "fact", text: "x", tags: [], createdAt: 2 }],
+      { text: "x" },
+      1000,
+      cfg.retrievalStack,
+    )
+    expect(memCalls).toBe(2)
   })
 
   test("abort signal flows: aborted store still respects bridge identity (no hang)", async () => {

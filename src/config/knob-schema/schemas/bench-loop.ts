@@ -38,7 +38,7 @@ export const localizePhaseSchema: KnobSchema<LocalizePhaseValue> = {
   default: undefined,
   describe: "Bench: localization phase turns.",
   knobDescribe: "Block mutating tools during first N turns; force localize-first (Agentless §3.1)",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/localize-phase.ts",
   surfaces: BENCH,
   parse: parseLocalizePhase,
   unit: "turns",

@@ -63,7 +63,7 @@ export const subagentSchema: KnobSchema<boolean> = {
   describe: "Bench: enable subagent spawning.",
   knobDescribe: "Wire the Tier-1 subagent system (Agent/Task/TaskOutput/TaskStop tools)",
   source: "Codex absorption Phase 0-8",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/subagent.ts",
   surfaces: BENCH,
   parse: parseSubagent,
 }
@@ -109,7 +109,7 @@ export const branchSearchSchema: KnobSchema<BranchSearchValue> = {
   costMultiplier: 8,
   unit: "candidates",
   source: "ADR-0084 / Agentless paper",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/branch-search.ts",
   surfaces: BENCH,
   parse: parseBranchSearch,
 }
@@ -136,7 +136,7 @@ export const issueHintSchema: KnobSchema<IssueHintMode | "off"> = {
   knobDescribe: "Issue verbatim/agentless localization hint",
   unit: "mode",
   source: "Agentless paper §3.1",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/issue-hint-expected-actual.ts",
   surfaces: BENCH,
   parse: parseIssueHint,
 }

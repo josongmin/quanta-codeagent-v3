@@ -471,8 +471,7 @@ export interface WireSlotsSessionConfig {
   /**
    * ADR-0159 retrieval-stack slot (composition-root wire). When set,
    * consumers downstream of the loop (memory recall via
-   * `rankWithRetrievalStack`, localize hybrid via `runLocalizeHybrid`,
-   * future `hybrid_localize` tool) may route their candidate lists through
+   * `rankWithRetrievalStack`) may route their candidate lists through
    * the 3-stage retrieval funnel (BM25 → embedding → reranker).
    *
    * Default-OFF: absent ⇒ the loop is byte-identical for every legacy

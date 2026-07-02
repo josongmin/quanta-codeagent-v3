@@ -112,7 +112,11 @@ const maybeMicrocompact = (
   emitCompactionEvent(config, {
     kind: "compaction_event",
     trigger: "pre_sampling",
-    reason: "context_limit",
+    // jul-3: a tier-1 microcompaction fired by the time-based CADENCE gate, not a
+    // hard context/token limit. Emitting `cadence` (vs the tier-2 proactive
+    // path's `context_limit`) lets a consumer tell a cheap periodic eviction
+    // apart from a real limit-driven summarize in the typed narrative.
+    reason: "cadence",
     tokensBefore: estimateTokens([...snapshot]),
     tokensAfter: estimateTokens([...result.messages]),
     messagesRemoved: 0,
@@ -159,7 +163,25 @@ export const compactNowOnDemand = async (
       : {}),
   })
   if (!result.compacted) return false
-  const before = wm.snapshot().length
+  const beforeMessages = [...wm.snapshot()]
+  const before = beforeMessages.length
+  // jul-3 — emit the typed compaction narrative for the ON-DEMAND `/summarize-now`
+  // verb. Every OTHER compaction site (proactive tier-2 ~L409, tier-1 micro ~L112)
+  // emits a `compaction_event`; this hand-triggered path did NOT, so a manual
+  // summarize was invisible in the typed history stream. `trigger:"user_requested"`
+  // + `reason:"manual"` (both pre-existing enum members) mark it distinctly from a
+  // limit-driven pass. Emitted BEFORE `wm.replace` so `tokensBefore` measures the
+  // pre-compaction transcript. No-op emitter (config.compactionEventEmit absent) ⇒
+  // byte-identical (the emit swallows on undefined port).
+  emitCompactionEvent(config, {
+    kind: "compaction_event",
+    trigger: "user_requested",
+    reason: "manual",
+    tokensBefore: estimateTokens(beforeMessages),
+    tokensAfter: estimateTokens([...result.messages]),
+    messagesRemoved: Math.max(before - result.messages.length, 0),
+    at: Date.now(),
+  })
   // CRITICAL (§4.6): install via `wm.replace` so the delta-token counter reseeds
   // (a direct `wm.messages[i]` write would bypass it and drift `tokenTotal()`).
   wm.replace([...result.messages])

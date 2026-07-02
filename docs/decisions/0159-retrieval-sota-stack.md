@@ -223,12 +223,6 @@ perspective. The wire adds:
   dominate the rerank). `@/memory` is UNTOUCHED — bridge lives in `@/runner`
   so the memory slice fence (memory MUST NOT import @/retrieval) is
   respected.
-- `src/runner/assemble/retrieval-localize-bridge.ts` — `runLocalizeHybrid
-  ({query, type, bm25Source, embeddingSource?, stack?, limit?})`.
-  Localize↔retrieval bridge. Stack absent ⇒ identity (lexical hits as
-  candidates). Stack present ⇒ 3-stage funnel (BM25 / embedding / hybrid+RRF)
-  with the stack's `defaultReranker` as final stage. `@/tool/localize/`
-  is UNTOUCHED.
 - `src/agent/types.ts` — `AgentConfig.retrievalStack?: { registry, default
   Reranker, embedding?, commitEmbedder? }`. Typed against `@/retrieval` (the
   conventional direction — `@/retrieval` forbidden from importing `@/agent`

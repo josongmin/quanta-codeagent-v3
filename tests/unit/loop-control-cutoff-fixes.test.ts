@@ -27,6 +27,7 @@ import {
   turnBudgetReminderText,
 } from "@/agent/loop/turn-iteration"
 import {
+  EMPTY_TURN_EXHAUSTED_REASON,
   MALFORMED_TOOL_USE_REASON,
   OUTPUT_TRUNCATED_MARKER,
   RECOVERY_CAPS,
@@ -43,9 +44,13 @@ const toolMsg = (id: string): Message =>
 const thinkingMsg = (think: string): Message => assistant({ type: "thinking", thinking: think })
 const empty = (): Message => assistant()
 
-// ─── (a) CONTROL — empty×2 ⇒ completed (UNCHANGED) ────────────────────────
+// ─── (a) empty-turn — nudge under cap, NON-success terminal at cap ─────────
+// jul-3: the empty-exhaustion path now seals NON-success (was `completed`), the
+// twin of FIX-2. The dedicated hell-gate lives in
+// tests/unit/agent/empty-turn-exhaustion-hellgate.test.ts; this block keeps the
+// under-cap nudge control and the flipped at-cap seal in the FIX battery.
 
-describe("decideOnAssembled — empty-turn control (unchanged)", () => {
+describe("decideOnAssembled — empty-turn nudge/exhaustion", () => {
   test("first empty turn ⇒ nudge (consumes one empty slot), NOT completed", () => {
     const rec = freshRecovery()
     const a = decideOnAssembled("end_turn", empty(), rec)
@@ -53,7 +58,7 @@ describe("decideOnAssembled — empty-turn control (unchanged)", () => {
     expect(rec.consecutiveEmpties).toBe(1)
   })
 
-  test("empty×(cap) then one more empty ⇒ completed (control path preserved)", () => {
+  test("empty×(cap) then one more empty ⇒ NON-success terminal, NOT completed", () => {
     const rec = freshRecovery()
     // Drive the empty counter to the cap via repeated empties.
     for (let i = 0; i < RECOVERY_CAPS.consecutiveEmpties; i++) {
@@ -61,8 +66,11 @@ describe("decideOnAssembled — empty-turn control (unchanged)", () => {
       expect(a.do).toBe("nudge")
     }
     const sealed = decideOnAssembled("end_turn", empty(), rec)
-    // TEETH: this path is the one we did NOT change — must still seal completed.
-    expect(sealed.do).toBe("completed")
+    // TEETH: pre-fix (jul-3) this returned { do: "completed" } — a produced-
+    // NOTHING stall sealed as SUCCESS. It must now be a non-success terminal.
+    expect(sealed.do).not.toBe("completed")
+    expect(sealed.do).toBe("error")
+    if (sealed.do === "error") expect(sealed.reason).toBe(EMPTY_TURN_EXHAUSTED_REASON)
   })
 
   test("a turn with text ⇒ proceed and resets the empty counter (unchanged)", () => {

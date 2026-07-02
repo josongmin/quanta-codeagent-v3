@@ -121,8 +121,11 @@ export interface ReasoningEchoEvent {
 export type CompactionEventTrigger = "pre_sampling" | "mid_turn" | "user_requested"
 
 /** Reason that drove a {@link CompactionEventVariant} — why the
- *  compaction was needed. */
-export type CompactionEventReason = "context_limit" | "token_budget" | "manual"
+ *  compaction was needed. `cadence` (jul-3) marks a tier-1 microcompaction
+ *  fired by the time-based cadence gate (NOT a hard context/token limit) —
+ *  distinguishing a cheap periodic tool-result eviction from a real
+ *  limit-driven summarize in the typed narrative. */
+export type CompactionEventReason = "context_limit" | "token_budget" | "manual" | "cadence"
 
 /**
  * A compaction pass executed on the working memory. Emitted alongside

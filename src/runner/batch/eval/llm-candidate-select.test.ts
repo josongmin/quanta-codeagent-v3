@@ -24,9 +24,12 @@ describe("parseChooserIndex — tolerant, fail-open", () => {
     expect(parseChooserIndex("reasoning...\nBEST: 2", valid)).toBe(2)
     expect(parseChooserIndex("BEST:0", valid)).toBe(0)
   })
-  test("invalid/absent id ⇒ fallback to last valid integer, else null", () => {
-    expect(parseChooserIndex("I pick candidate 1 finally", valid)).toBe(1)
-    expect(parseChooserIndex("BEST: 9 — actually candidate 2", valid)).toBe(2) // 9 invalid → last valid int (2)
+  test("invalid/absent `BEST:` id ⇒ null (NO free-integer fallback)", () => {
+    // B3: the free-integer fallback laundered any stray digit in prose into a
+    // "selection". Dropped — only an explicit, VALID `BEST: <id>` selects; anything
+    // else fails open to null so the caller keeps the deterministic winner.
+    expect(parseChooserIndex("I pick candidate 1 finally", valid)).toBeNull() // no BEST: line ⇒ null
+    expect(parseChooserIndex("BEST: 9 — actually candidate 2", valid)).toBeNull() // 9 invalid, no fallback ⇒ null
     expect(parseChooserIndex("BEST: 9", valid)).toBeNull() // only invalid id present ⇒ null
     expect(parseChooserIndex("no number here", valid)).toBeNull()
     expect(parseChooserIndex("BEST: 7", new Set([0]))).toBeNull()
@@ -41,6 +44,28 @@ describe("parseReviewerScore — clamp [0,1], fail-open", () => {
   })
   test("no score ⇒ null", () => {
     expect(parseReviewerScore("the patch looks good")).toBeNull()
+  })
+  // B4: the old regex `[01](?:\.\d+)?|0?\.\d+` matched a PREFIX of an
+  // out-of-range value — `SCORE: 0.85` matched `0.85` fine, but `SCORE: 85`
+  // matched only the leading `8`? no: it matched nothing (8 not in [01]) →
+  // NULL, silently DROPPING a valid-but-out-of-range score, and a model that
+  // answers on a 0..100 or percent scale was discarded entirely. General
+  // numeric parse + clamp + %-handling recovers those.
+  test("general numeric clamp — out-of-range values clamp, not drop", () => {
+    expect(parseReviewerScore("SCORE: 2")).toBe(1) // >1 ⇒ clamp to 1 (was: null)
+    expect(parseReviewerScore("SCORE: 42")).toBe(1) // 0..100 scale ⇒ clamp to 1 (was: null)
+    expect(parseReviewerScore("SCORE: -0.5")).toBe(0) // <0 ⇒ clamp to 0
+    expect(parseReviewerScore("SCORE: 1.7")).toBe(1) // >1 ⇒ clamp to 1 (was: null)
+  })
+  test("percent handling — `<n>%` normalizes to [0,1]", () => {
+    expect(parseReviewerScore("SCORE: 85%")).toBeCloseTo(0.85) // percent ⇒ /100
+    expect(parseReviewerScore("SCORE: 100%")).toBe(1)
+    expect(parseReviewerScore("SCORE: 0%")).toBe(0)
+    expect(parseReviewerScore("SCORE: 150%")).toBe(1) // >100% ⇒ clamp
+  })
+  test("non-numeric SCORE ⇒ null (fail-open preserved)", () => {
+    expect(parseReviewerScore("SCORE: high")).toBeNull()
+    expect(parseReviewerScore("SCORE:")).toBeNull()
   })
 })
 

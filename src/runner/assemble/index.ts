@@ -67,13 +67,6 @@ export {
   type RetrievalAssembleInput,
   type RetrievalStack,
 } from "./retrieval"
-export {
-  type LexicalHit,
-  type LocalizeHybridInput,
-  lexicalHitsToCandidates,
-  lexicalHitToCandidate,
-  runLocalizeHybrid,
-} from "./retrieval-localize-bridge"
 export { rankWithRetrievalStack } from "./retrieval-memory-bridge"
 export {
   buildSemanticBackend,

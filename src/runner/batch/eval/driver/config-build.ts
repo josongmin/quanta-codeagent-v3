@@ -561,7 +561,11 @@ export const buildConfig = (
     stream,
     permission,
     messages,
-    system: buildSystemPrompt(sandbox),
+    // A2 (jul-3 strategy-audit): batch driver runs are graded by an external
+    // harness — thread the `batch` pack so the system prompt carries
+    // R-NO-EXPLORE-OVER-EDIT (stop exploring once you have a coherent edit +
+    // verify step). Batch path only; measure-first (flat A/B ⇒ revert).
+    system: buildSystemPrompt(sandbox, { promptPack: "batch" }),
     cwd: sandbox,
     // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
     // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not

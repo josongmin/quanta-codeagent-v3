@@ -123,7 +123,16 @@ export const buildChooserPrompt = (
     "Reply with EXACTLY one line: `BEST: <id>` where <id> is the chosen candidate number.",
   ].join("\n")
 
-/** Parse `BEST: <id>` (tolerant: last integer that is a valid candidate id). Fail-open ⇒ null. */
+/**
+ * Parse `BEST: <id>` where `<id>` is a VALID candidate id. Fail-open ⇒ null.
+ *
+ * B3: the former "tolerant" fallback (last standalone integer anywhere in the
+ * text that happened to be a valid id) laundered ANY stray digit in the model's
+ * prose ("I fixed 3 tests", "issue #2") into a candidate SELECTION — an unbounded
+ * false-positive surface for a plane whose only safe failure is "no opinion".
+ * Only an explicit, valid `BEST: <id>` now selects; everything else returns null
+ * so the caller keeps the deterministic winner (never-veto / fail-open invariant).
+ */
 export const parseChooserIndex = (
   text: string,
   validIds: ReadonlySet<number>,
@@ -132,12 +141,6 @@ export const parseChooserIndex = (
   if (m !== null) {
     const id = Number.parseInt(m[1] as string, 10)
     if (validIds.has(id)) return id
-  }
-  // fallback: last standalone integer that is a valid id
-  const nums = [...text.matchAll(/\b(\d+)\b/g)].map((x) => Number.parseInt(x[1] as string, 10))
-  for (let i = nums.length - 1; i >= 0; i--) {
-    const n = nums[i] as number
-    if (validIds.has(n)) return n
   }
   return null
 }
@@ -156,12 +159,24 @@ export const buildReviewerPrompt = (c: LlmSelectCandidate, problemStatement: str
     "Reply with EXACTLY one line: `SCORE: <0..1>`.",
   ].join("\n")
 
-/** Parse `SCORE: <float>` clamped to [0,1]. Fail-open ⇒ null. */
+/**
+ * Parse `SCORE: <number>[%]` and normalize to [0,1]. Fail-open ⇒ null.
+ *
+ * B4: the former regex `[01](?:\.\d+)?|0?\.\d+` accepted ONLY canonical 0..1
+ * literals; a model that answered `SCORE: 2`, `SCORE: 42` (0..100 scale), or
+ * `SCORE: 85%` matched NOTHING and was silently DROPPED (score → null ⇒ that
+ * candidate skipped), an out-of-range value discarding a real opinion. Now parse
+ * a general signed decimal, treat a trailing `%` as a percentage (÷100), and
+ * CLAMP into [0,1] — an out-of-range answer is corrected, not thrown away. Only a
+ * genuinely non-numeric SCORE still fails open to null.
+ */
 export const parseReviewerScore = (text: string): number | null => {
-  const m = text.match(/SCORE:\s*([01](?:\.\d+)?|0?\.\d+)/i)
+  const m = text.match(/SCORE:\s*([+-]?\d*\.?\d+)\s*(%?)/i)
   if (m === null) return null
-  const v = Number.parseFloat(m[1] as string)
-  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null
+  let v = Number.parseFloat(m[1] as string)
+  if (!Number.isFinite(v)) return null
+  if (m[2] === "%") v /= 100
+  return Math.min(1, Math.max(0, v))
 }
 
 /**

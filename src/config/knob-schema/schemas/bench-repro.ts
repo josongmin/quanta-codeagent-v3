@@ -42,7 +42,7 @@ export const reproTestSchema: KnobSchema<ReproTestValue> = {
   default: undefined,
   describe: "Bench: repro-test selection K.",
   knobDescribe: "Agentless §3.3.1 reproduction-test K-sample generation",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/repro-test.ts",
   surfaces: BENCH,
   parse: parseReproTest,
   costMultiplier: 40,
@@ -85,7 +85,7 @@ export const acceptanceSchema: KnobSchema<boolean> = {
   kind: "bool",
   default: false,
   describe:
-    "Bench: SOTA++ Phase-A acceptance selector — the repair breadth winner is chosen by score-once acceptance oracle (reproduction-resolved + regression-fail-count) rerank instead of legacy validator-rank. Requires repro-test. Default-OFF ⇒ byte-identical.",
+    "Bench: SOTA++ Phase-A acceptance selector — the repair breadth winner is chosen by score-once acceptance oracle (reproduction-resolved + regression-fail-count) rerank instead of legacy validator-rank. Requires repro-test AND repair-breadth > 1: it re-ranks the breadth fan-out candidates, so with a single candidate (repair-breadth unset ⇒ 1) it is a no-op. Default-OFF ⇒ byte-identical.",
   knobDescribe:
     "SOTA++ acceptance selector: score each breadth candidate ONCE via the repro/regression oracle and rerank (Agentless-faithful patch vote + 3-tier ladder) instead of the per-round validator-rank selection",
   readSite: "runner/knobs/knobs/acceptance.ts",

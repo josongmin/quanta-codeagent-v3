@@ -441,7 +441,29 @@ export const makeCalibratedReproConsensusPort = async (
     ...(instance.swebench?.repo !== undefined ? { repo: instance.swebench.repo } : {}),
     timeoutMs,
   })
-  // A confirmed-false-negative oracle must NEVER reject a candidate ⇒ fail-open.
-  const port = calibration.falseNegative ? () => Promise.resolve(null) : base
+  // An UNTRUSTWORTHY oracle must NEVER reject a candidate ⇒ fail-open.
+  const port = calibratedOracleMustFailOpen(calibration) ? () => Promise.resolve(null) : base
   return { port, calibration }
 }
+
+/**
+ * B2 — the calibrated repro-consensus port must fail-OPEN (return `null` for
+ * every candidate, contributing no reject/select signal) when the oracle is
+ * untrustworthy in EITHER direction:
+ *
+ *   - `falseNegative`: the oracle could NOT recognize the known-correct GOLD fix
+ *     as resolved ⇒ it would wrongly REJECT a correct candidate (jun-20: the
+ *     dominant miss mode). Failing open removes that false-RED.
+ *
+ *   - `vacuous`: the oracle reports RESOLVED on the UN-patched BASE tree ⇒ its
+ *     "green" is meaningless (it false-GREENs everything), so its resolved votes
+ *     could SELECT a WRONG candidate over the right one. Failing open removes
+ *     that false-GREEN. (Missed by the original guard, which keyed only on
+ *     `falseNegative` — a vacuous-but-gold-calibrated oracle sailed through as
+ *     trustworthy `base` even though it greens the base itself.)
+ *
+ * Pure predicate ⇒ unit-testable without running the (sandbox-mutating)
+ * calibration.
+ */
+export const calibratedOracleMustFailOpen = (calibration: ReproOracleCalibration): boolean =>
+  calibration.falseNegative || calibration.vacuous === true

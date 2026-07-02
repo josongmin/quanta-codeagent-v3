@@ -273,4 +273,24 @@ describe("microcompaction tool-result eviction — pure pre-pass", () => {
     const cleared = toolResults(r.messages)[0] as ToolResultBlock
     expect(cleared.content).toContain("/tmp/spill/f0.txt")
   })
+
+  test("C3 (jul-3) — default spill marker carries a best-effort retention caveat", () => {
+    // The spill file is bounded by the shared `pruneSpillDir` retention, so a
+    // later eviction can GC it before the model reads it. The default marker must
+    // tell the model the Read is best-effort so a failed Read of a reclaimed path
+    // is not treated as a hard error.
+    const port = createEvictionSpillPort({
+      spillDir: "/tmp/spill",
+      write: () => {},
+      fileName: () => "f0.txt",
+      spillFs: { readdir: () => [], mtimeMs: () => 0, remove: () => {} },
+    })
+    const marker = port.persist(bigBody("u0"), "u0")
+    expect(marker).toBeDefined()
+    // TEETH: pre-C3 the marker had no best-effort caveat.
+    expect(marker as string).toContain("best-effort")
+    // The path + retrieval instruction are still present (non-regression).
+    expect(marker as string).toContain("/tmp/spill/f0.txt")
+    expect(marker as string).toContain("Read that file")
+  })
 })

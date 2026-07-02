@@ -185,7 +185,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench LSP-nav tools (=full).",
-    readSite: "runner/batch/eval/driver.ts",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_MODEL",
@@ -213,6 +213,21 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe: "Bench repair-round count.",
     readSite: "apps/bench/run-main.ts",
+  },
+  {
+    // B1 (jul-03): operator ESCAPE hatch for the RETIRED verify-select best-of-N
+    // veto SELECTION plane. Read DIRECTLY from env at the bench posture site (a
+    // fail-closed gate on the QUANTA_BENCH_VERIFY_SELECT knob), NOT a layered
+    // knob — declared here so the completeness ratchet (ADR-0503) sees the read.
+    // Default-OFF ⇒ the plane stays inert ⇒ byte-identical to every shipped preset.
+    envKey: "QUANTA_BENCH_VERIFY_SELECT_ESCAPE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "bench",
+    describe:
+      "Bench: opt-in ESCAPE hatch that re-enables the RETIRED verify-select best-of-N veto SELECTION plane (jun-27 footgun — it laundered correct patches to empty when no candidate passed the hard gates). Without this, QUANTA_BENCH_VERIFY_SELECT is inert (fail-closed). Default-OFF ⇒ byte-identical.",
+    readSite: "runner/batch/eval/knobs-bench.ts",
   },
   {
     envKey: "QUANTA_SWEBENCH_REPO_BASE_URL",
@@ -293,7 +308,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench prompt: use the lean directive family instead of the full directive block.",
-    readSite: "runner/batch/eval/driver.ts",
+    readSite: "runner/batch/eval/driver/config-build.ts",
   },
   {
     envKey: "QUANTA_BENCH_PATCH_GEN_BUDGET",
@@ -340,7 +355,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench eval (T1, jun-25): deterministic family-coverage coedit patch synthesis (exact-replay donor hunks onto sibling files). Default OFF; opt-in via QUANTA_BENCH_FAMILY_COVERAGE_COEDIT.",
-    readSite: "runner/batch/eval/driver.ts",
+    readSite: "runner/batch/eval/driver/selection-phase.ts",
   },
   {
     envKey: "QUANTA_BENCH_NONEMPTY_FALLBACK",

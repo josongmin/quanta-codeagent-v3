@@ -195,7 +195,7 @@ export const benchFindRefsSchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: enable find_references tool + steer (timeout-immune ripgrep replacement for lsp_references on large repos). Default-OFF ⇒ byte-identical.",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/driver/config-build.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -208,7 +208,7 @@ export const benchSimplicitySchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: minimal-mechanism simplicity steer in SWE-bench prompt (OpenHands/Linus philosophy). Default OFF; opt-in via QUANTA_BENCH_SIMPLICITY (unvalidated absorbed steer — A/B before promoting).",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/acceptance-llm-rerank-wire.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -221,7 +221,7 @@ export const benchSiblingSchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: sibling-completion / co-change steer (ceiling multi-file class). Default-OFF ⇒ byte-identical prompt.",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/driver/config-build.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -236,7 +236,7 @@ export const benchSampleTempSchema: KnobSchema<boolean> = {
     "Bench: Agentless-style sampling diversity for the repair-breadth fanout. Candidate 0 stays greedy (byte-identical lane); candidates ≥1 sample at temperature 0.8 (Agentless repair.py greedy+temp schedule) so the best-of-N pool spans diverse fixes instead of N near-identical resamples. Auth-independent (same model, temperature only). Needs repair-breadth B>1. Default-OFF ⇒ unwrapped lanes ⇒ byte-identical. (Do NOT enable on OpenAI reasoning surfaces that reject temperature.)",
   knobDescribe:
     "Sampling-temperature diversity for breadth fanout (greedy lead + temp 0.8 samples, Agentless parity)",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/driver/selection-port-factories.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -266,7 +266,7 @@ export const benchVoteNormalizeSchema: KnobSchema<boolean> = {
     "Bench: stronger acceptance vote-key (Agentless rerank.py parity). Dedup candidate patches on a comment/blank/whitespace-insensitive key so cosmetic-variant samples reinforce the majority instead of splitting it (Agentless normalize_code does the AST round-trip; we compose the existing diff normalizer + whole-line comment strip, no AST). Only affects the acceptance selector's vote key. Default-OFF ⇒ raw-trim key ⇒ byte-identical.",
   knobDescribe:
     "Stronger acceptance vote-key: comment/blank/whitespace-insensitive patch dedup (Agentless majority-vote parity)",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/acceptance-selector.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -281,7 +281,7 @@ export const benchSubmitReviewSchema: KnobSchema<boolean> = {
     "Bench: submission review (SWE-agent review_on_submit deterministic check). OBSERVE-ONLY verdict over the final captured patch (clean / empty / test-edits) surfaced in the report. The test-revert itself is ALREADY unconditional (sourceOnlyDiff strips test edits on every capture path) — this is the verdict/sentinel layer, reusing isTestFilePath+patchFiles (no re-implementation). Default-OFF ⇒ nothing attached ⇒ byte-identical.",
   knobDescribe:
     "Submission review verdict (clean/empty/test-edits) on the final patch — observe-only sentinel over the unconditional test-strip",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/repro-viability-wire.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -296,7 +296,7 @@ export const benchReproViabilitySchema: KnobSchema<boolean> = {
     "Bench: post-fix repro-viability review (spec step-5 cheap fix-free viability). OBSERVE-ONLY / telemetry only — after the repair phase captures a patch, the model labels whether that patch is STRUCTURALLY capable of making the ACTUAL reproducing test source pass (viable / nonviable / unparseable). It reuses the reproSources (real reproduce_issue.py bodies) already threaded into runRepairPhase plus the problem statement and captured patch — no boilerplate hint, no heuristic/threshold/regex. The reject-mode (skip the expensive re-grade for a nonviable patch) is NOT wired: the observation NEVER alters the instance result or control flow (fail-open, THROW-free). Future reject-mode wiring point = pre-repair, just before runRepairRoundsInSnapshot. Default-OFF ⇒ 0 llm calls ⇒ nothing attached ⇒ byte-identical.",
   knobDescribe:
     "Repro-viability review (viable/nonviable/unparseable) on the final patch vs the actual reproducing test source — observe-only telemetry, reject-mode not wired",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/repro-viability-wire.ts",
   surfaces: BENCH,
   parse: parseGateBool,
 }
@@ -383,7 +383,7 @@ export const benchProtectTestsSchema: KnobSchema<boolean> = {
   default: true,
   describe:
     "Bench: dispatch test-scope guard — ENFORCING: DENIES mutating tools (edit/write/apply_patch) on test paths during swebench runs (source-only invariant; prevents PASS_TO_PASS gaming). DEFAULT-ON; QUANTA_BENCH_PROTECT_TESTS=0 disables.",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/batch/eval/driver/config-build.ts",
   surfaces: BENCH,
   parse: parseKillSwitchBool,
 }

@@ -117,7 +117,7 @@ export const lspSchema: KnobSchema<boolean> = {
   default: false,
   describe:
     "Bench: LSP-nav tools gate with explicit boolean override semantics. `1`/`on`/`true` enable; `0`/`off`/`false` disable; unset leaves preset/default behavior. An explicit off beats a preset `lsp:1`; legacy `QUANTA_LSP_TOOLS=full` is consulted only when this knob is unset.",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/lsp.ts",
   surfaces: CROSS,
   parse: parseLspBool,
   category: "tool",
@@ -174,7 +174,7 @@ export const skillsSchema: KnobSchema<true> = {
   // yields `false`, matching the bench.ts `false` cell (repo-map pattern).
   default: undefined,
   describe: "Bench: system skills bundling.",
-  readSite: "runner/batch/eval/driver.ts",
+  readSite: "runner/knobs/knobs/skills.ts",
   surfaces: CROSS,
   parse: parseSkills,
   category: "agent",

@@ -59,7 +59,8 @@ export type StopCategoryKind =
  *       provider.auth, provider.bad_request, provider.unknown,
  *       compaction.thrash, user.interrupt, system.abort, shell.needs_approval,
  *       runtime.unknown_error, completed.normal, completed.max_turns,
- *       completed.empty_exhausted, completed.malformed_exhausted.
+ *       completed.empty_exhausted, completed.malformed_exhausted,
+ *       model.empty_exhausted.
  *   - `hint` — optional surface-facing copy, never used for control flow.
  */
 export interface StopCategory {
@@ -116,6 +117,11 @@ export const STOP_REASON_CODE = {
    *  retry budget was spent. A FUMBLED tool call — NON-success (the model
    *  intended to act and could not), distinct from a clean completion. */
   MODEL_MALFORMED_TOOL_USE: "model.malformed_tool_use",
+  /** Loop-control fix (jul-3): the model returned only empty turns for the whole
+   *  same-turn empty-retry budget (`consecutiveEmpties` exhausted). A produced-
+   *  NOTHING stall — NON-success (the model never gave text, a tool call, OR a
+   *  final answer), distinct from a clean completion. */
+  MODEL_EMPTY_EXHAUSTED: "model.empty_exhausted",
 } as const
 
 export type StopReasonCode = (typeof STOP_REASON_CODE)[keyof typeof STOP_REASON_CODE]
@@ -155,6 +161,18 @@ export const classifyErrorReason = (reason: string): StopCategory => {
       kind: "failed",
       reasonCode: STOP_REASON_CODE.MODEL_MALFORMED_TOOL_USE,
       hint: "Model signalled a tool call but could not emit a valid one.",
+    }
+  }
+  // Loop-control fix (jul-3): empty-turn exhaustion. The empty-exhausted terminal
+  // (recovery.ts EMPTY_TURN_EXHAUSTED_REASON) carries a fixed `[empty-turn]`
+  // prefix so a host renders "the model stalled producing nothing" distinctly
+  // from a provider/runtime failure. Checked BEFORE the provider patterns (its
+  // prefix is unambiguous), same as the malformed arm above.
+  if (/^\[empty-turn\]/.test(reason)) {
+    return {
+      kind: "failed",
+      reasonCode: STOP_REASON_CODE.MODEL_EMPTY_EXHAUSTED,
+      hint: "Model returned only empty responses; stopped after the retry budget.",
     }
   }
   // Provider-classified failures. The loop stringifies the LLMError; the

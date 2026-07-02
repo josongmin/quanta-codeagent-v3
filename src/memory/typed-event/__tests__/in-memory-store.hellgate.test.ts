@@ -24,8 +24,8 @@
  *   - app_activation: 3 surfaces × 3 triggers round-trip (9 combos)
  *   - app_activation: empty appId accepted (validation = producer)
  *   - 8-variant union exhaustiveness (compile-time)
- *   - compaction_event: 3-reason set (context_limit / token_budget /
- *     manual) producer-emit verified
+ *   - compaction_event: 4-reason set (context_limit / token_budget /
+ *     manual / cadence) producer-emit verified
  */
 
 import { describe, expect, test } from "bun:test"
@@ -280,9 +280,15 @@ describe("ADR-0320 typed-event in-memory store — hellgate", () => {
     expect((snap[2] as CompactionEventVariant).trigger).toBe("user_requested")
   })
 
-  test("compaction_event: all 3 reason values round-trip", () => {
+  test("compaction_event: all 4 reason values round-trip", () => {
     const store = createInMemoryTypedHistoryEventStore()
-    const reasons: CompactionEventVariant["reason"][] = ["context_limit", "token_budget", "manual"]
+    // jul-3 — `cadence` (tier-1 microcompaction, cadence-gated) joined the set.
+    const reasons: CompactionEventVariant["reason"][] = [
+      "context_limit",
+      "token_budget",
+      "manual",
+      "cadence",
+    ]
     for (let i = 0; i < reasons.length; i++) {
       const r = reasons[i] as CompactionEventVariant["reason"]
       store.append({
@@ -296,10 +302,11 @@ describe("ADR-0320 typed-event in-memory store — hellgate", () => {
       })
     }
     const snap = store.snapshot()
-    expect(snap.length).toBe(3)
+    expect(snap.length).toBe(4)
     expect((snap[0] as CompactionEventVariant).reason).toBe("context_limit")
     expect((snap[1] as CompactionEventVariant).reason).toBe("token_budget")
     expect((snap[2] as CompactionEventVariant).reason).toBe("manual")
+    expect((snap[3] as CompactionEventVariant).reason).toBe("cadence")
   })
 
   test("compaction_event: messagesRemoved=0 (trivial pass) is accepted", () => {

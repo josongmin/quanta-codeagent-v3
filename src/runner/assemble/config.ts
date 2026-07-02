@@ -83,8 +83,7 @@ export interface SessionDeps {
    *  Absent ⇒ omitted from AgentConfig entirely (byte-identical default-OFF:
    *  consumers' bridge functions return identity behavior when the slot is
    *  undefined). The agent loop itself NEVER reads this slot — only the
-   *  bridge consumers (`rankWithRetrievalStack` / `runLocalizeHybrid` /
-   *  future hybrid_localize tool) do. */
+   *  bridge consumer (`rankWithRetrievalStack`) does. */
   retrievalStack?: AgentConfig["retrievalStack"]
   /** Helper-only search pipeline slot paired with any surface-registered
    *  `search_codebase` facade. Absent ⇒ omitted from AgentConfig entirely. */

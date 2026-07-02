@@ -13,8 +13,8 @@
  * Budgets (from src/agent/recovery.ts):
  *   MAX_TURN_STREAM_RETRIES = 3   → backoff on attempts 0,1,2 then 4th call errors
  *   MAX_OUTPUT_CONTINUES    = 3   → nudge ×3 then proceed/complete
- *   MAX_MALFORMED_RETRIES   = 1   → nudge ×1 then completed-via-exhaustion
- *   MAX_CONSECUTIVE_EMPTIES = 2   → nudge ×2 then completed-via-exhaustion
+ *   MAX_MALFORMED_RETRIES   = 1   → nudge ×1 then NON-success error terminal (FIX-2)
+ *   MAX_CONSECUTIVE_EMPTIES = 2   → nudge ×2 then NON-success error terminal (jul-3 C1)
  *
  * INVARIANTS PROVEN HERE:
  *   1. Off-by-one boundary: the Nth retry is allowed, the (N+1)th is terminal.
@@ -169,14 +169,16 @@ describe("A3 boundary — stream-error backoff budget (=3)", () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 describe("A3 boundary — empty-turn budget (=2)", () => {
-  test("nudge,nudge,(3rd) completed — the 3rd empty is exhaustion, not a 3rd nudge", () => {
+  test("nudge,nudge,(3rd) NON-success terminal — the 3rd empty is exhaustion, not a 3rd nudge (jul-3)", () => {
     const rec = freshRecovery()
     expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("nudge")
     expect(rec.consecutiveEmpties).toBe(1)
     expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("nudge")
     expect(rec.consecutiveEmpties).toBe(2)
-    // 3rd: budget exhausted ⇒ completed (terminal), counter does NOT go to 3.
-    expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("completed")
+    // 3rd: budget exhausted. jul-3 (C1): a produced-NOTHING stall now seals as a
+    // NON-success `error` terminal (was `completed`/success), the twin of the
+    // malformed-tool-use FIX-2 below. Counter does NOT go to 3.
+    expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("error")
     expect(rec.consecutiveEmpties).toBe(2)
   })
 })
@@ -224,10 +226,11 @@ describe("A3 interleaving — what a successful `proceed` turn resets (DOCUMENTE
     // A successful real tool turn → proceed; decideOnAssembled resets empties.
     expect(decideOnAssembled("tool_use", toolMsg("t1"), rec).do).toBe("proceed")
     expect(rec.consecutiveEmpties).toBe(0)
-    // Therefore a subsequent empty run gets the FULL budget again: nudge twice.
+    // Therefore a subsequent empty run gets the FULL budget again: nudge twice,
+    // then the exhaustion NON-success terminal (jul-3 C1 — was `completed`).
     expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("nudge")
     expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("nudge")
-    expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("completed")
+    expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("error")
   })
 
   test("DOCUMENTED: a proceed turn does NOT reset outputContinues / malformedRetries", () => {
@@ -426,11 +429,13 @@ describe("decideOnAssembled", () => {
     expect(decideOnAssembled("tool_use", textMsg("oops"), rec).do).toBe("error")
   })
 
-  test("empty turn: capped nudges then completed", () => {
+  test("empty turn: capped nudges then NON-success terminal (jul-3 C1)", () => {
     const rec = freshRecovery()
     expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("nudge")
     expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("nudge")
-    expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("completed")
+    // jul-3 (C1): exhausted empty-retry budget seals as `error` (non-success),
+    // not `completed` — a produced-NOTHING stall is never reported as success.
+    expect(decideOnAssembled("end_turn", empty(), rec).do).toBe("error")
   })
 
   test("real tool call → proceed; plain text → proceed (loop decides completion)", () => {

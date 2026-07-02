@@ -57,6 +57,18 @@ export const OUTPUT_TRUNCATED_MARKER = "\n\n[output truncated at token budget]"
 export const MALFORMED_TOOL_USE_REASON =
   "[malformed-tool-use] model signalled a tool call but could not emit a valid one after retries"
 
+/** Loop-control fix (jul-3): reason tag prefixed onto the `error`-class terminal
+ *  minted when the model returned only empty turns for the whole same-turn
+ *  empty-retry budget (`consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES`). Sealing
+ *  this as `completed` (success) misclassifies a model that produced NOTHING
+ *  usable as a clean finish — a repeated empty completion is a NON-success stall,
+ *  mirroring the malformed-tool-use seal. Routed to a NON-success `error`-class
+ *  terminal so `classifyErrorReason` buckets it (`MODEL_EMPTY_EXHAUSTED`) and the
+ *  subagent runner's `ok:reason==="completed"` map flips a stalled child to
+ *  `ok:false`. `classifyErrorReason` recognises the `[empty-turn]` prefix. */
+export const EMPTY_TURN_EXHAUSTED_REASON =
+  "[empty-turn] model returned only empty responses after the same-turn empty-retry budget"
+
 /** Mutable per-turn recovery counters, threaded so the budgets are SAME-TURN
  *  (a fresh turn resets them; same-turn retries decrement the shared budget). */
 export interface RecoveryState {
@@ -236,7 +248,15 @@ export const decideOnAssembled = (
     return { do: "error", reason: MALFORMED_TOOL_USE_REASON }
   }
   if (!hasTools && isEmptyTurn(message)) {
-    if (rec.consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES) return { do: "completed" }
+    // Loop-control fix (jul-3): the same-turn empty-retry budget is spent and the
+    // model is STILL returning empty turns. Sealing this as `completed` (success)
+    // reads a produced-NOTHING stall as a clean finish. Seal as a DISTINCT
+    // NON-SUCCESS `error`-class terminal — the outer resolver maps `error` →
+    // reason `"error"`, `classifyErrorReason` buckets the tagged reason
+    // (MODEL_EMPTY_EXHAUSTED), and the error path still appends the assembled
+    // message (recovery-executor C5 invariant), mirroring the malformed seal.
+    if (rec.consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES)
+      return { do: "error", reason: EMPTY_TURN_EXHAUSTED_REASON }
     rec.consecutiveEmpties += 1
     return {
       do: "nudge",

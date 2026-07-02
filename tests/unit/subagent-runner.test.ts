@@ -335,6 +335,24 @@ describe("createSubagentRunner — outcome mapping", () => {
     }
   })
 
+  test("empty-turn STALL (loop sealed `error`) ⇒ ok:false, not a silent ok:true", async () => {
+    // jul-3 C1 — a subagent whose loop stalled on repeated empty turns now ends
+    // its AgentOutcome with `reason:"error"` (recovery.ts EMPTY_TURN_EXHAUSTED_
+    // REASON routes through the error terminal), NOT `completed`. The runner's
+    // `ok: reason==="completed"` map must therefore flip it to ok:false — the
+    // parent surfaces a failed child, never a spurious success. finalText still
+    // reflects whatever the last assistant turn held (here: none ⇒ "").
+    const { run } = capturing(
+      outcome({
+        reason: "error",
+        messages: [{ role: "user", content: [{ type: "text", text: "do it" }] }],
+      }),
+    )
+    const r = await createSubagentRunner(parentConfig(), { run })(req())
+    expect(r.ok).toBe(false)
+    expect(r.finalText).toBe("")
+  })
+
   test("no assistant text ⇒ empty finalText (no throw)", async () => {
     const { run } = capturing(
       outcome({ messages: [{ role: "user", content: [{ type: "text", text: "x" }] }] }),
