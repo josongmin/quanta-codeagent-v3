@@ -122,6 +122,7 @@ const flakyPort = () => {
     mouseClickXY: async () => ok(undefined),
     screenshot: async () => ok(new Uint8Array()),
     consoleMessages: async () => ok({ entries: [], dropped: 0 }),
+    networkMessages: async () => ok({ entries: [], dropped: 0 }),
     wait: async () => ok(undefined),
     read: async () => ok({ value: "" }),
     getBoundingBox: async () => ok({ x: 0, y: 0, w: 0, h: 0, visible: true }),

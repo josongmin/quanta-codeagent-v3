@@ -17,6 +17,12 @@ export {
   realClock,
   realScheduler,
 } from "./cdp/defaults"
+export {
+  buildNetworkEntry,
+  createNetworkBuffer,
+  type NetworkBuffer,
+  type NetworkBufferOpts,
+} from "./cdp/network-buffer"
 export type {
   BrowserFs,
   CdpConnection,
@@ -54,6 +60,9 @@ export type {
   ConsoleOpts,
   DomModel,
   DomNode,
+  LocatorHint,
+  NetworkEntry,
+  NetworkOpts,
   PageSnapshot,
   ReadOpts,
   ReadWhat,

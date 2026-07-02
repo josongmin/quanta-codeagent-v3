@@ -18,6 +18,7 @@ import {
   mapConsoleApiType,
   mapLogEntryLevel,
 } from "../cdp/console-buffer"
+import { buildNetworkEntry, createNetworkBuffer, type NetworkBuffer } from "../cdp/network-buffer"
 import type { BrowserError, ConsoleEntry } from "../types"
 import type { CdpBrowserDeps } from "./deps"
 
@@ -27,6 +28,8 @@ import type { CdpBrowserDeps } from "./deps"
 export interface BringUp {
   readonly session: CdpSession
   readonly console: ConsoleBuffer
+  /** Bounded metadata-only network capture (S1 strengthen). */
+  readonly network: NetworkBuffer
   /** The first tab's CDP target + flat-protocol page session (TICKET-24 Wave B). */
   readonly targetId: string
   readonly sessionId: string
@@ -40,6 +43,7 @@ export interface BringUp {
 const installPageObservers = async (
   session: CdpSession,
   buffer: ConsoleBuffer,
+  network: NetworkBuffer,
   opts: { signal?: AbortSignal } | undefined,
 ): Promise<void> => {
   // consoleAPICalled.type → level; args flattened to text.
@@ -84,8 +88,23 @@ const installPageObservers = async (
   session.onEvent("Page.javascriptDialogOpening", () => {
     void session.request("Page.handleJavaScriptDialog", { accept: false })
   })
+  // ★ Network capture — METADATA ONLY. Each event is projected through
+  // buildNetworkEntry (method/url/status/mime/size), which reads NONE of the
+  // headers/postData/body the event also carries, so cookies/auth tokens/PII can
+  // never enter the buffer (leak guard enforced at the source, not by redaction).
+  for (const evt of [
+    "Network.requestWillBeSent",
+    "Network.responseReceived",
+    "Network.loadingFinished",
+    "Network.loadingFailed",
+  ] as const) {
+    session.onEvent(evt, (p) => network.push(buildNetworkEntry(evt, p)))
+  }
   await session.request("Runtime.enable", undefined, opts)
   await session.request("Log.enable", undefined, opts)
+  // Network.enable is on the CDP allowlist (cdp-allowlist.ts) — best-effort like
+  // Runtime/Log: a failure leaves the network buffer empty, page still drives.
+  await session.request("Network.enable", undefined, opts)
 }
 
 export const connectAndEnable = async (
@@ -145,6 +164,7 @@ export const connectAndEnable = async (
   // dialog auto-dismiss, and enable the producing domains. Non-fatal — a console
   // capture failure leaves the buffer empty but the page still drives.
   const consoleBuffer = createConsoleBuffer()
-  await installPageObservers(session, consoleBuffer, opts)
-  return ok({ session, console: consoleBuffer, targetId, sessionId })
+  const networkBuffer = createNetworkBuffer()
+  await installPageObservers(session, consoleBuffer, networkBuffer, opts)
+  return ok({ session, console: consoleBuffer, network: networkBuffer, targetId, sessionId })
 }

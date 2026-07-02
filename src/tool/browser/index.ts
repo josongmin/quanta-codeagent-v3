@@ -34,7 +34,9 @@ import {
   type MouseClickXyInput,
   mouseClickXySchema,
   type NavigateInput,
+  type NetworkInput,
   navigateSchema,
+  networkSchema,
   type PressKeyInput,
   pressKeySchema,
   type ReadInput,
@@ -46,14 +48,14 @@ import {
   selectOptionSchema,
   snapshotSchema,
   type TabCloseInput,
-  tabCloseSchema,
   type TabListInput,
-  tabListSchema,
   type TabNewInput,
-  tabNewSchema,
   type TabSwitchInput,
-  tabSwitchSchema,
   type TypeInput,
+  tabCloseSchema,
+  tabListSchema,
+  tabNewSchema,
+  tabSwitchSchema,
   typeSchema,
   type WaitInput,
   waitSchema,
@@ -64,6 +66,12 @@ const CDP_OUTPUT_CAP = 20_000
 /** Cap the console dump rendered to the model (defense-in-depth on top of the
  *  port's bounded ring buffer). */
 const CONSOLE_OUTPUT_CAP = 20_000
+/** Cap the network dump rendered to the model (defense-in-depth on top of the
+ *  port's bounded ring buffer). */
+const NETWORK_OUTPUT_CAP = 20_000
+/** Max network rows rendered (newest kept) — bounds the row count independently
+ *  of the byte cap so a burst of tiny requests can't flood the view. */
+const NETWORK_ROW_CAP = 100
 /** Cap a single read's text/attribute output. */
 const READ_OUTPUT_CAP = 8_000
 /** Raw PNG byte cap before a screenshot is refused (≈ a few MB of base64). */
@@ -446,6 +454,53 @@ const consoleTool = (port: BrowserPort, session: BrowserSession): Tool =>
     },
   })
 
+const networkTool = (port: BrowserPort, session: BrowserSession): Tool =>
+  defineTool<NetworkInput>({
+    name: "browser_network",
+    description:
+      "Read the captured network activity since the page loaded (a bounded ring buffer). METADATA ONLY — method, url, status, mime, size; NO bodies or headers are ever captured. Use it to verify the front end: did a fetch 404/500, what did the API return, how big was the payload? Pass clear:true to drain the buffer.",
+    inputSchema: networkSchema,
+    isReadOnly: () => true,
+    isConcurrencySafe: () => false,
+    hitlTier: () => "pre-approval-ok",
+    async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+      const ens = await ensureHandle(session, ctx.signal)
+      if (!ens.ok) return yield { type: "result", result: ens.result }
+      const r = await port.networkMessages(
+        ens.handle,
+        input.clear === true ? { clear: true } : undefined,
+      )
+      if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      // Keep the NEWEST NETWORK_ROW_CAP rows (row-count bound on top of the port's
+      // byte/count bounded buffer). Each `url` is PAGE-CONTROLLED → guard it
+      // (strengthen #3); status/mime/size are numbers/enums we control.
+      const rows = r.value.entries.slice(-NETWORK_ROW_CAP)
+      const lines = rows.map((e) => {
+        const parts: string[] = []
+        // method/url/mime are all page/server-controlled strings → guard EACH so a
+        // page cannot forge a <system-reminder> boundary via a custom HTTP method
+        // or MIME type. status/size are our own numbers (safe).
+        if (e.method) parts.push(guardPageText(e.method))
+        if (e.status !== undefined) parts.push(String(e.status))
+        parts.push(guardPageText(e.url) || "(no-url)")
+        if (e.mime !== undefined) parts.push(guardPageText(e.mime))
+        if (e.size !== undefined) parts.push(`${e.size}B`)
+        return parts.join(" ")
+      })
+      const droppedByCap = r.value.entries.length - rows.length
+      const droppedTotal = r.value.dropped + droppedByCap
+      const header =
+        droppedTotal > 0
+          ? `(${droppedTotal} earlier entr${droppedTotal === 1 ? "y" : "ies"} dropped — buffer/row cap)\n`
+          : ""
+      const body = lines.length === 0 ? "(network empty)" : lines.join("\n")
+      yield {
+        type: "result",
+        result: { ok: true, output: (header + body).slice(0, NETWORK_OUTPUT_CAP) },
+      }
+    },
+  })
+
 const waitTool = (port: BrowserPort, session: BrowserSession): Tool =>
   defineTool<WaitInput>({
     name: "browser_wait",
@@ -554,7 +609,10 @@ const highlightTool = (port: BrowserPort, session: BrowserSession): Tool =>
       if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
       yield {
         type: "result",
-        result: { ok: true, output: `highlighted ${input.ref} — pair with browser_screenshot to confirm` },
+        result: {
+          ok: true,
+          output: `highlighted ${input.ref} — pair with browser_screenshot to confirm`,
+        },
       }
     },
   })
@@ -668,6 +726,8 @@ export interface BrowserToolsetOpts {
   readonly highlight?: boolean
   /** TICKET-24 Wave B — gate the 4 `browser_tab_*` tools (QUANTA_BROWSER_TABS). Default-OFF. */
   readonly tabs?: boolean
+  /** S1 strengthen — gate `browser_network` (QUANTA_BROWSER_NETWORK). Default-OFF. */
+  readonly network?: boolean
 }
 
 /** Build the browser toolset over a wired `BrowserPort`. The 15 tools share ONE
@@ -698,6 +758,8 @@ export const createBrowserToolset = (
   // when its flag is set, so the unflagged toolset is byte-identical to the 15.
   if (opts.bounds === true) tools.push(boundsTool(port, session))
   if (opts.highlight === true) tools.push(highlightTool(port, session))
+  // S1 strengthen — network capture, independent default-OFF gate.
+  if (opts.network === true) tools.push(networkTool(port, session))
   if (opts.tabs === true) {
     tools.push(
       tabListTool(port, session),

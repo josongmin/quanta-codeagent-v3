@@ -20,6 +20,8 @@ import type {
   DomNode,
   DragTarget,
   HighlightOpts,
+  NetworkEntry,
+  NetworkOpts,
   PageSnapshot,
   ReadOpts,
   ScrollOpts,
@@ -54,6 +56,8 @@ export interface SessionState {
   refMap: RefMap
   consoleEntries: ConsoleEntry[]
   consoleDropped: number
+  networkEntries: NetworkEntry[]
+  networkDropped: number
   /** TICKET-24 Wave B — open tabs (ALWAYS non-empty) + the active id. */
   tabs: StubTab[]
   activeTabId: string
@@ -67,6 +71,8 @@ export interface StubDeps {
   readonly seq: { n: number }
   readonly consoleEntries?: readonly ConsoleEntry[] | undefined
   readonly consoleDropped?: number | undefined
+  readonly networkEntries?: readonly NetworkEntry[] | undefined
+  readonly networkDropped?: number | undefined
   live(h: BrowserHandle): Result<SessionState, BrowserError>
 }
 
@@ -120,6 +126,8 @@ export const spawn = async (
     refMap: tab0.refMap,
     consoleEntries: [...(d.consoleEntries ?? [])],
     consoleDropped: d.consoleDropped ?? 0,
+    networkEntries: [...(d.networkEntries ?? [])],
+    networkDropped: d.networkDropped ?? 0,
     tabs: [tab0],
     activeTabId: tab0.id,
   })
@@ -293,6 +301,18 @@ export const consoleMessages = async (d: StubDeps, h: BrowserHandle, cOpts?: Con
   if (cOpts?.clear === true) {
     s.value.consoleEntries = []
     s.value.consoleDropped = 0
+  }
+  return ok({ entries, dropped })
+}
+
+export const networkMessages = async (d: StubDeps, h: BrowserHandle, nOpts?: NetworkOpts) => {
+  const s = d.live(h)
+  if (!s.ok) return s
+  const entries = s.value.networkEntries.slice()
+  const dropped = s.value.networkDropped
+  if (nOpts?.clear === true) {
+    s.value.networkEntries = []
+    s.value.networkDropped = 0
   }
   return ok({ entries, dropped })
 }

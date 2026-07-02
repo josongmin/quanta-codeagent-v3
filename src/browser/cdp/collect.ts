@@ -13,10 +13,19 @@
  */
 
 import { err, ok, type Result } from "@/shared"
-import type { DomModel, DomNode } from "../types"
+import { type DomModel, type DomNode, LOCATOR_DATA_WHITELIST, type LocatorHint } from "../types"
+
+// Re-export the SSOT whitelist so existing importers of `cdp/collect` keep working.
+export { LOCATOR_DATA_WHITELIST } from "../types"
 
 export const NAME_CAP = 200
 export const VALUE_CAP = 100
+/** Max locator hints retained per node (DoS guard — a page could spam dozens of
+ *  whitelisted data-* attrs). The whitelist order is the ladder, so we keep the
+ *  first {@link LOCATOR_MAX} in whitelist order. */
+export const LOCATOR_MAX = 4
+/** Per-hint value cap (bytes/chars) at the trust boundary. */
+export const LOCATOR_VALUE_CAP = 200
 /** Max recursion depth — a pathological/attacker DOM (10k+ deep) would otherwise
  *  blow the JS stack (in-page walk AND the parse trust boundary) and allocate a
  *  giant tree (R4 audit [5]). Past the cap, children are dropped. */
@@ -86,9 +95,22 @@ export function pageAccName(el: PageEl): string {
  *  embedding). The rest of the walk is a real-browser smoke concern. */
 export const COLLECT_SCRIPT = `(() => {
   const NAME_CAP = ${NAME_CAP}, VALUE_CAP = ${VALUE_CAP};
+  const LOCATOR_WHITELIST = ${JSON.stringify(LOCATOR_DATA_WHITELIST)};
+  const LOCATOR_MAX = ${LOCATOR_MAX}, LOCATOR_VALUE_CAP = ${LOCATOR_VALUE_CAP};
   const INTERACTIVE = 'input,textarea,select,button,a[href],summary,[role],[tabindex]:not([tabindex="-1"]),[contenteditable="true"]';
   const accName = ${pageAccName.toString()};
   const roleOf = (el) => el.getAttribute('role') || el.tagName.toLowerCase();
+  // Stable locators — READ-ONLY getAttribute over the whitelist, in ladder order.
+  // Never writes attributes back into the page (no data-*-ref pollution).
+  const locatorsOf = (el) => {
+    const out = [];
+    for (let i = 0; i < LOCATOR_WHITELIST.length && out.length < LOCATOR_MAX; i++) {
+      const key = LOCATOR_WHITELIST[i];
+      const v = el.getAttribute(key);
+      if (v != null && v !== '') out.push({ key: key, value: String(v).slice(0, LOCATOR_VALUE_CAP) });
+    }
+    return out;
+  };
   const states = (el) => {
     const s = [];
     if (el.disabled) s.push('disabled');
@@ -106,6 +128,7 @@ export const COLLECT_SCRIPT = `(() => {
     const lvl = /^H([1-6])$/.exec(el.tagName); if (lvl) node.level = Number(lvl[1]);
     else if (el.getAttribute('aria-level')) node.level = Number(el.getAttribute('aria-level'));
     if (el.tagName === 'A' && el.href) node.url = el.href;
+    const locs = locatorsOf(el); if (locs.length) node.locators = locs;
     if (depth >= MAX_DEPTH) return node;
     const kids = [];
     const children = el.shadowRoot ? el.shadowRoot.children : el.children;
@@ -131,6 +154,45 @@ const asStringArray = (v: unknown): readonly string[] | undefined => {
 
 type MutableNode = { -readonly [K in keyof DomNode]: DomNode[K] }
 
+/**
+ * TRUST BOUNDARY for locator hints. The page is attacker-controlled, so:
+ *   - only WHITELISTED keys survive (an arbitrary `data-secret` carrying a
+ *     token/PII is dropped — never reaches model context);
+ *   - the result is ordered by WHITELIST PRIORITY (not page source order), so a
+ *     page cannot reorder the ladder to demote `data-testid`;
+ *   - each value is length-capped and the count is capped at {@link LOCATOR_MAX};
+ *   - a duplicate key keeps only the FIRST value (deterministic).
+ * Returns undefined when nothing survives (keeps the field absent → byte-stable).
+ */
+/** Extract the (key,value) of ONE raw locator entry iff it is a whitelisted,
+ *  well-typed pair; null otherwise. Keeps {@link parseLocators} flat. */
+const asWhitelistedLocator = (item: unknown): { key: string; value: string } | null => {
+  if (typeof item !== "object" || item === null) return null
+  const rec = item as Record<string, unknown>
+  const { key, value } = rec
+  if (typeof key !== "string" || typeof value !== "string") return null
+  if (!(LOCATOR_DATA_WHITELIST as readonly string[]).includes(key)) return null
+  return { key, value }
+}
+
+const parseLocators = (raw: unknown): readonly LocatorHint[] | undefined => {
+  if (!Array.isArray(raw)) return undefined
+  // Map whitelisted key → first seen (capped) value (dedupe, deterministic).
+  const seen = new Map<string, string>()
+  for (const item of raw) {
+    const hit = asWhitelistedLocator(item)
+    if (hit !== null && !seen.has(hit.key)) seen.set(hit.key, cap(hit.value, LOCATOR_VALUE_CAP))
+  }
+  // Emit in WHITELIST PRIORITY order (not page source order), capped in count.
+  const out: LocatorHint[] = []
+  for (const key of LOCATOR_DATA_WHITELIST) {
+    if (out.length >= LOCATOR_MAX) break
+    const value = seen.get(key)
+    if (value !== undefined) out.push({ key, value })
+  }
+  return out.length > 0 ? out : undefined
+}
+
 const applyOptionalFields = (node: MutableNode, o: Record<string, unknown>): void => {
   if (typeof o.tag === "string") node.tag = o.tag
   const states = asStringArray(o.states)
@@ -141,6 +203,8 @@ const applyOptionalFields = (node: MutableNode, o: Record<string, unknown>): voi
     node.level = o.level
   }
   if (typeof o.url === "string") node.url = o.url
+  const locators = parseLocators(o.locators)
+  if (locators !== undefined) node.locators = locators
 }
 
 // fail-closed: a single malformed child rejects the whole subtree (null), an

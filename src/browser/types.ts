@@ -97,6 +97,32 @@ export interface ConsoleOpts {
   readonly clear?: boolean
 }
 
+/** One captured network exchange — METADATA ONLY. Bodies + headers (and thus
+ *  cookies / auth tokens / PII) are NEVER captured: the producer projects each
+ *  CDP `Network.*` event down to this shape at the source, so a leak is
+ *  structurally impossible, not merely redacted. `url` is PAGE-CONTROLLED
+ *  (untrusted) — the tool layer routes it through `guardPageText`. All fields but
+ *  `method`/`url` are optional because they arrive across distinct events
+ *  (requestWillBeSent has no status; loadingFinished carries only size). */
+export interface NetworkEntry {
+  /** HTTP method (from requestWillBeSent). "" when the event carries none. */
+  readonly method: string
+  /** Request/response URL. "" when the event carries none (loadingFinished). */
+  readonly url: string
+  /** HTTP status code (from responseReceived) or undefined. */
+  readonly status?: number
+  /** Response MIME type (from responseReceived) or undefined. */
+  readonly mime?: string
+  /** Encoded body byte length (from loadingFinished) — a SIZE, never the body. */
+  readonly size?: number
+}
+
+/** Read options for the network ring buffer — same drain contract as console. */
+export interface NetworkOpts {
+  /** Drain the ring buffer (and reset the dropped counter) after reading. */
+  readonly clear?: boolean
+}
+
 export interface WaitOpts {
   readonly selector: string
   /** Poll budget before `Err{timeout}` (default 5000). */
@@ -135,6 +161,33 @@ export interface ReadOpts {
   readonly attr?: string
 }
 
+/**
+ * Closed WHITELIST of stable locator attributes, in LADDER PRIORITY ORDER
+ * (index 0 = strongest). SSOT for both the parse trust boundary
+ * (`cdp/collect.ts`) and the render ladder (`snapshot.ts`), so priority can
+ * never drift between them. The page/DOM is attacker-controlled, so ONLY these
+ * audited keys survive — an arbitrary `data-secret` (which could carry a token /
+ * PII) is dropped. These are the widely-used test-id conventions across React
+ * Testing Library / Cypress / Playwright / Vue. Lives here (the pure, dep-free
+ * types module) so `snapshot.ts` can order without importing `cdp/collect`.
+ */
+export const LOCATOR_DATA_WHITELIST = [
+  "data-testid",
+  "data-test-id",
+  "data-test",
+  "data-cy",
+  "data-qa",
+] as const
+
+/** A stable locator hint mined from the page (S1 strengthen). `key` is drawn
+ *  from {@link LOCATOR_DATA_WHITELIST} — arbitrary `data-*` keys (which could
+ *  carry tokens/PII) are dropped at the parse trust boundary. `value` is capped.
+ *  Ladder priority is the WHITELIST order (index), NOT the page's source order. */
+export interface LocatorHint {
+  readonly key: string
+  readonly value: string
+}
+
 /** A single accessibility-tree node, already normalized by the in-page
  *  collector (name capped, hidden nodes dropped, iframes excluded). */
 export interface DomNode {
@@ -150,6 +203,9 @@ export interface DomNode {
   /** Heading level 1-6 for h1..h6 / role=heading. */
   readonly level?: number
   readonly url?: string
+  /** Ladder-ordered stable locator hints (data-testid > audited data-*). Present
+   *  only when the element carried at least one whitelisted attribute. */
+  readonly locators?: readonly LocatorHint[]
   readonly children?: readonly DomNode[]
 }
 

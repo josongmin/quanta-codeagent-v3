@@ -76,6 +76,11 @@ export const consoleSchema = z.object({
 })
 export type ConsoleInput = z.infer<typeof consoleSchema>
 
+export const networkSchema = z.object({
+  clear: z.boolean().optional().describe("drain the buffer after reading"),
+})
+export type NetworkInput = z.infer<typeof networkSchema>
+
 export const waitSchema = z.object({
   selector: z.string().describe("CSS selector to wait for (e.g. '#result', '.error')"),
   timeoutMs: z.number().finite().optional().describe("max wait in ms (default 5000)"),

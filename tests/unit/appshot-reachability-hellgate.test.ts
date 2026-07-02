@@ -78,6 +78,7 @@ const fakeBrowser = (): BrowserPort & { calls: { navigate: number; screenshot: n
     drag: async () => err({ kind: "closed" }),
     mouseClickXY: async () => err({ kind: "closed" }),
     consoleMessages: async () => err({ kind: "closed" }),
+    networkMessages: async () => err({ kind: "closed" }),
     wait: async () => err({ kind: "closed" }),
     read: async () => err({ kind: "closed" }),
     getBoundingBox: async () => err({ kind: "closed" }),

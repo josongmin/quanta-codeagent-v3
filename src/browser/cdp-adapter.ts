@@ -23,6 +23,7 @@ import type { CdpSession } from "./cdp/cdp-session"
 import { COLLECT_SCRIPT, parseDomModel } from "./cdp/collect"
 import type { ConsoleBuffer } from "./cdp/console-buffer"
 import { readDevToolsEndpoint } from "./cdp/dev-tools-endpoint"
+import type { NetworkBuffer } from "./cdp/network-buffer"
 import type { Clock, Scheduler, SpawnedProcess } from "./cdp/ports"
 import { connectAndEnable } from "./cdp-adapter/bring-up"
 import { type CdpBrowserDeps, resolveChromeBinary } from "./cdp-adapter/deps"
@@ -51,6 +52,7 @@ import type {
   ConsoleOpts,
   DragTarget,
   HighlightOpts,
+  NetworkOpts,
   PageSnapshot,
   ReadOpts,
   ScrollOpts,
@@ -86,6 +88,9 @@ interface SessionState {
   readonly session: CdpSession
   readonly profileDir: string
   readonly console: ConsoleBuffer
+  /** Bounded metadata-only network capture (S1 strengthen). Session-level (mirrors
+   *  `console`): shared across tabs, drained by `networkMessages`. */
+  readonly network: NetworkBuffer
   /** Open tabs keyed by targetId. ALWAYS non-empty (spawn adds one; closeTab
    *  refuses the last). */
   readonly tabs: Map<string, TabState>
@@ -345,6 +350,7 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
           session,
           profileDir,
           console: brought.value.console,
+          network: brought.value.network,
           tabs: new Map([[tab0.targetId, tab0]]),
           activeTabId: tab0.targetId,
         }
@@ -619,6 +625,13 @@ export const createCdpBrowser = (deps: CdpBrowserDeps): BrowserPort => {
       const s = live(h)
       if (!s.ok) return s
       const { entries, dropped } = s.value.console.drain(opts?.clear === true)
+      return ok({ entries, dropped })
+    },
+
+    async networkMessages(h: BrowserHandle, opts?: NetworkOpts) {
+      const s = live(h)
+      if (!s.ok) return s
+      const { entries, dropped } = s.value.network.drain(opts?.clear === true)
       return ok({ entries, dropped })
     },
 

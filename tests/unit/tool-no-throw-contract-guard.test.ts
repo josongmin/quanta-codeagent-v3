@@ -242,14 +242,15 @@ const ALLOWLIST: ReadonlyArray<{
 }> = [
   {
     file: "src/tool/browser/index.ts",
-    count: 21,
+    count: 22,
     reason:
-      "Headless-browser tools: 21 `await port.<verb>(handle, …)` sites that " +
+      "Headless-browser tools: 22 `await port.<verb>(handle, …)` sites that " +
       "assume the `BrowserPort` returns a typed Result and never rejects (ticket-24 " +
-      "added 6: getBoundingBox/highlight + newTab/switchTab/closeTab/listTabs — same " +
-      "no-throw-Result-port pattern as the original 15). A single shared `callBrowser` " +
-      "no-throw wrapper would close all 21 at once; the mechanical wrap stays deferred " +
-      "(large, stable slice) and is tracked here so it cannot grow further.",
+      "added 6: getBoundingBox/highlight + newTab/switchTab/closeTab/listTabs; S1 " +
+      "added 1: networkMessages — same no-throw-Result-port pattern as the original " +
+      "15). A single shared `callBrowser` no-throw wrapper would close all 22 at once; " +
+      "the mechanical wrap stays deferred (large, stable slice) and is tracked here so " +
+      "it cannot grow further.",
   },
   {
     file: "src/tool/bash/kill.ts",

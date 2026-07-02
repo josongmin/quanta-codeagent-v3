@@ -18,7 +18,14 @@
  *     back to a concrete element.
  */
 
-import type { DomModel, DomNode } from "./types"
+import { type DomModel, type DomNode, LOCATOR_DATA_WHITELIST } from "./types"
+
+/** Ladder rank of a locator key (lower = stronger). Unknown keys — which the
+ *  parse boundary should already have dropped — sort last, defensively. */
+const locatorRank = (key: string): number => {
+  const i = (LOCATOR_DATA_WHITELIST as readonly string[]).indexOf(key)
+  return i === -1 ? Number.MAX_SAFE_INTEGER : i
+}
 
 export interface RefMap {
   /** Walk the model in pre-order: assign a ref to each new backendPath, keep
@@ -94,6 +101,14 @@ const renderNode = (node: DomNode, depth: number, refMap: RefMap, lines: string[
   if (node.value !== undefined) line += ` =${JSON.stringify(node.value)}`
   if (node.placeholder !== undefined) line += ` ph=${JSON.stringify(node.placeholder)}`
   if (node.url !== undefined) line += ` (${node.url})`
+  // Locator-stability ladder — render the strongest hint first so the model
+  // prefers a stable author-provided id (data-testid > data-cy > …) over the
+  // positional ref. Sort by whitelist rank HERE too (not just at parse) so a raw
+  // DomModel handed straight to buildSnapshot still renders ladder-ordered.
+  if (node.locators !== undefined && node.locators.length > 0) {
+    const ordered = [...node.locators].sort((a, b) => locatorRank(a.key) - locatorRank(b.key))
+    line += ` loc=${ordered.map((l) => `${l.key}=${l.value}`).join(",")}`
+  }
   lines.push(line)
   for (const child of node.children ?? []) renderNode(child, depth + 1, refMap, lines)
 }

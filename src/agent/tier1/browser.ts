@@ -27,6 +27,8 @@ interface BrowserConfigSlot {
     readonly bounds?: boolean
     readonly highlight?: boolean
     readonly tabs?: boolean
+    /** S1 strengthen — default-OFF gate (QUANTA_BROWSER_NETWORK). */
+    readonly network?: boolean
   }
 }
 
@@ -41,5 +43,6 @@ export const buildBrowserBlock = (config: AgentConfig): BrowserToolset => {
     ...(slot.bounds === true ? { bounds: true } : {}),
     ...(slot.highlight === true ? { highlight: true } : {}),
     ...(slot.tabs === true ? { tabs: true } : {}),
+    ...(slot.network === true ? { network: true } : {}),
   })
 }

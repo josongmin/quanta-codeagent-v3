@@ -302,6 +302,7 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
       bounds?: boolean
       highlight?: boolean
       tabs?: boolean
+      network?: boolean
     }
   }
   if (slot.browser !== undefined) return // caller-override-precedence (ADR-0332)
@@ -323,6 +324,7 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
       bounds: gateOn(env, "QUANTA_BROWSER_BOUNDS"),
       highlight: gateOn(env, "QUANTA_BROWSER_HIGHLIGHT"),
       tabs: gateOn(env, "QUANTA_BROWSER_TABS"),
+      network: gateOn(env, "QUANTA_BROWSER_NETWORK"),
     }
   }
 }

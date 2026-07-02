@@ -202,6 +202,15 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "TICKET-24 — element pixel bounding box {x,y,w,h,visible} by snapshot ref. Read-only (turns the blind browser_mouse_click_xy into ref→bounds→precise coords). Triple-gate: QUANTA_BROWSER_TOOL=on + chrome present + QUANTA_BROWSER_BOUNDS=on. Off ⇒ tool absent, byte-identical menu.",
   },
   {
+    name: "browser_network",
+    origin: "@/agent/tier1/browser (CDP)",
+    gate: { kind: "resource", resource: "chrome/chromium on PATH", env: "QUANTA_BROWSER_NETWORK" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    adr: "0427",
+    note: "S1 strengthen — bounded network capture, METADATA ONLY (method/url/status/mime/size; NO bodies/headers, so no cookies/tokens/PII — leak guard enforced at the producer, not by redaction). Read-only. Triple-gate: QUANTA_BROWSER_TOOL=on + chrome present + QUANTA_BROWSER_NETWORK=on. Off ⇒ tool absent, byte-identical menu.",
+  },
+  {
     name: "browser_highlight",
     origin: "@/agent/tier1/browser (CDP)",
     gate: {

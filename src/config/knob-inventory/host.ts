@@ -68,6 +68,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
+    envKey: "QUANTA_BROWSER_NETWORK",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "browser_network tool — bounded metadata-only network capture (method/url/status/mime/size; no bodies/headers) (S1 strengthen; opt-in, needs QUANTA_BROWSER_TOOL).",
+    readSite: "host/runtime/agent-config-assembler.ts",
+  },
+  {
     envKey: "QUANTA_INIT_SLASH",
     kind: "bool",
     default: false,

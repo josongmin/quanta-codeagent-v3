@@ -19,7 +19,7 @@ import { err, ok, type Result } from "@/shared"
 import type { SessionState, StubDeps } from "./headless-stub/methods"
 import * as m from "./headless-stub/methods"
 import type { BrowserPort } from "./port"
-import type { BrowserError, BrowserHandle, ConsoleEntry } from "./types"
+import type { BrowserError, BrowserHandle, ConsoleEntry, NetworkEntry } from "./types"
 
 export type { HeadlessPage } from "./headless-stub/methods"
 
@@ -31,6 +31,10 @@ export interface HeadlessBrowserOpts {
   readonly consoleEntries?: readonly ConsoleEntry[]
   /** Already-dropped count the stub reports (to exercise the truncation path). */
   readonly consoleDropped?: number
+  /** Seed the network buffer the deterministic `networkMessages` returns. */
+  readonly networkEntries?: readonly NetworkEntry[]
+  /** Already-dropped network count the stub reports (truncation path). */
+  readonly networkDropped?: number
   /** Selectors `wait` resolves `ok` for; any other selector ⇒ `timeout`. */
   readonly presentSelectors?: ReadonlySet<string>
 }
@@ -49,6 +53,8 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
     seq: { n: 0 },
     consoleEntries: opts.consoleEntries,
     consoleDropped: opts.consoleDropped,
+    networkEntries: opts.networkEntries,
+    networkDropped: opts.networkDropped,
     live,
   }
 
@@ -70,6 +76,7 @@ export const createHeadlessBrowser = (opts: HeadlessBrowserOpts = {}): BrowserPo
     mouseClickXY: (h) => m.mouseClickXY(d, h),
     screenshot: (h) => m.screenshot(d, h),
     consoleMessages: (h, o) => m.consoleMessages(d, h, o),
+    networkMessages: (h, o) => m.networkMessages(d, h, o),
     wait: (h, o, signal) => m.wait(d, h, o, signal),
     read: (h, ref, o) => m.read(d, h, ref, o),
     newTab: (h, url) => m.newTab(d, h, url),

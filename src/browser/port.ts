@@ -34,6 +34,8 @@ import type {
   ConsoleOpts,
   DragTarget,
   HighlightOpts,
+  NetworkEntry,
+  NetworkOpts,
   PageSnapshot,
   ReadOpts,
   ScrollOpts,
@@ -111,6 +113,15 @@ export interface BrowserPort {
   ): Promise<
     Result<{ readonly entries: readonly ConsoleEntry[]; readonly dropped: number }, BrowserError>
   >
+  /** Read the bounded METADATA-ONLY network ring buffer captured since bring-up
+   *  (method/url/status/mime/size — never bodies/headers). Each entry's `url` is
+   *  page-controlled — the tool layer guards it. `clear` drains the buffer. */
+  networkMessages(
+    h: BrowserHandle,
+    opts?: NetworkOpts,
+  ): Promise<
+    Result<{ readonly entries: readonly NetworkEntry[]; readonly dropped: number }, BrowserError>
+  >
   /** Wait for `opts.selector` to appear (poll on the injected scheduler), or
    *  `Err{timeout}` after `opts.timeoutMs`. Honors the abort signal. */
   wait(h: BrowserHandle, opts: WaitOpts, signal?: AbortSignal): Promise<Result<void, BrowserError>>
@@ -174,6 +185,9 @@ export interface BrowserPort {
     signal?: AbortSignal,
   ): Promise<Result<void, BrowserError>>
   /** List open tabs (active flag + live title). */
-  listTabs(h: BrowserHandle, signal?: AbortSignal): Promise<Result<readonly TabInfo[], BrowserError>>
+  listTabs(
+    h: BrowserHandle,
+    signal?: AbortSignal,
+  ): Promise<Result<readonly TabInfo[], BrowserError>>
   close(h: BrowserHandle): Promise<Result<void, BrowserError>>
 }
