@@ -379,6 +379,24 @@ const finalizeTerminalBrain = (
   return { turns: state.outcomeTurns, report }
 }
 
+/**
+ * Resolve the brain's per-run turn cap from the SHARED `QUANTA_MAX_TURNS` knob — the SAME env var the
+ * CLI REPL (`session-runtime-config.ts`) and the bench runner (`runtime-config.ts` → `maxTurnsBatch`)
+ * already honor. NOT a new knob (review: reuse, don't reinvent): the terminal brain was the only
+ * surface that ignored it, hardcoding 30 (`buildTerminalRuntime`), while top TB scaffolds (Terminus 2)
+ * run turns UNBOUNDED — a structural cap that made >30-turn tasks (e.g. make-mips-interpreter, which
+ * hit exactly 30) unreachable. Absent / blank / non-positive ⇒ `undefined` ⇒ the core's default (30),
+ * byte-identical to today. A positive integer raises (or lowers) the cap.
+ */
+export const resolveMaxTurnsFromEnv = (
+  env: Record<string, string | undefined>,
+): number | undefined => {
+  const raw = env.QUANTA_MAX_TURNS
+  if (raw === undefined || raw.trim() === "") return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
+}
+
 export const runTerminalBrain = async (
   opts: RunTerminalBrainOpts,
 ): Promise<TerminalBrainResult> => {
@@ -523,9 +541,11 @@ const runMain = async (): Promise<void> => {
   const rl = createInterface({ input: process.stdin })
   const stdinLines: AsyncIterable<string> = rl as unknown as AsyncIterable<string>
 
+  const maxTurns = resolveMaxTurnsFromEnv(process.env)
   await runTerminalBrain({
     instruction,
     ...(model !== undefined ? { model } : {}),
+    ...(maxTurns !== undefined ? { maxTurns } : {}),
     reportOut,
     stdin: stdinLines,
     // stdout is RESERVED for protocol frames; all logs go to stderr.

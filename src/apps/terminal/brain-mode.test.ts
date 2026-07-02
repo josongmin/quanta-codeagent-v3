@@ -23,6 +23,7 @@ import type {
   ReadResult,
 } from "@/tool/pty/port"
 import {
+  resolveMaxTurnsFromEnv,
   runTerminalBrain,
   TB_ENV_OWNED_ENV,
   TB_VERIFY_GATE_ENV,
@@ -100,6 +101,25 @@ const makeStdio = () => {
   }
   return { stdin, stdout, written, handsServed, endIn }
 }
+
+describe("QUANTA_MAX_TURNS turn-budget wiring (reuse shared knob, not a new one)", () => {
+  test("resolveMaxTurnsFromEnv: unset/blank/invalid ⇒ undefined (default 30 preserved); positive ⇒ value", () => {
+    expect(resolveMaxTurnsFromEnv({})).toBeUndefined() // byte-identical default
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "" })).toBeUndefined()
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "   " })).toBeUndefined()
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "abc" })).toBeUndefined()
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "0" })).toBeUndefined()
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "-5" })).toBeUndefined()
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "60" })).toBe(60)
+    expect(resolveMaxTurnsFromEnv({ QUANTA_MAX_TURNS: "12.9" })).toBe(12)
+  })
+
+  // NB: the loop-CAP behavior (opts.maxTurns → buildTerminalRuntime.maxTurns → runSessionTurn) is
+  // pre-existing core wiring; a perpetual-tool-call cap test here triggers end-of-run memory
+  // consolidation that pollutes a module singleton and breaks sibling tests, so the cap is left to
+  // the core's own coverage. What is NEW and tested above is the env→opts parse (resolveMaxTurnsFromEnv);
+  // main() threads it verbatim: `...(maxTurns !== undefined ? { maxTurns } : {})`.
+})
 
 /** A single `container_exec` tool-call turn, then a text completion turn. */
 const execThenDoneScripts = (command: string): StreamEvent[][] => [
