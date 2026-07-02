@@ -125,6 +125,53 @@ describe("projects-kb — store (deterministic)", () => {
     expect(line).not.toContain(SENTINEL)
     expect(line).not.toContain("secret.txt")
   })
+
+  // HELLGATE (store-level): the lexical fallback's WHOLE danger is a snippet
+  // centered on the matched needle — that is the branch that would leak
+  // whatever bytes surround the match. Query a token that sits DIRECTLY
+  // adjacent to the sentinel so any snippet-window mutation surfaces it, and
+  // pin that NO hit.text carries even a fragment of the body. This is the
+  // gating test for the "body-FREE match indicator" invariant the store
+  // documents; the prior suite only queried the tool with a token whose window
+  // did NOT fully cover the sentinel, so a snippet-leak mutation stayed green.
+  test("searchLexical returns a body-FREE match indicator even when the query abuts the sentinel", () => {
+    const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
+    // Query token "MARKER" sits immediately before the sentinel: any snippet
+    // that slices around the match would drag the sentinel into `text`.
+    store.index("adj.txt", new TextEncoder().encode(`lead MARKER${SENTINEL}MARKER tail`))
+    const hits = store.searchLexical("marker", 10)
+    expect(hits.length).toBe(1)
+    const hit = hits[0]
+    if (hit === undefined) throw new Error("expected one hit")
+    expect(hit.doc_uuid).toBe("pk-0")
+    // the indicator carries the doc_uuid + a body-FREE match count, NEVER bytes
+    expect(hit.text).not.toContain(SENTINEL)
+    // and it must not echo the raw QUERY-match region either (belt & braces):
+    // the whole serialized hit is body-free.
+    expect(JSON.stringify(hit)).not.toContain(SENTINEL)
+    // the indicator IS the FIXED body-free format (proves it matched, and that
+    // a snippet-leak mutation slicing body bytes into `text` cannot pass).
+    expect(hit.text).toMatch(/^match \(\d+× in \d+B\)$/)
+  })
+
+  test("searchLexical never surfaces the body when the QUERY IS a token whose match window spans the sentinel", () => {
+    const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
+    // Two occurrences of the query bracket the sentinel — a match-centered
+    // snippet between them would leak the entire secret span.
+    store.index(
+      "span.txt",
+      new TextEncoder().encode(`start NEEDLE ${SENTINEL} NEEDLE end`),
+    )
+    const hits = store.searchLexical("needle", 10)
+    expect(hits.length).toBe(1)
+    const hit = hits[0]
+    if (hit === undefined) throw new Error("expected one hit")
+    expect(JSON.stringify(hits)).not.toContain(SENTINEL)
+    // Tight gate: the indicator is the FIXED body-free format — a snippet-leak
+    // mutation (which would slice body bytes into `text`) breaks this even when
+    // its truncated window does not happen to contain the full sentinel string.
+    expect(hit.text).toMatch(/^match \(\d+× in \d+B\)$/)
+  })
 })
 
 describe("projects-kb — tool: raw contents NEVER enter model context (red-on-injection)", () => {
@@ -215,6 +262,48 @@ describe("projects-kb — tool: raw contents NEVER enter model context (red-on-i
     expect(res.ok).toBe(false)
   })
 
+  test("project_write of an ABSOLUTE local_path is jailed to a typed ok:false (audit item 5)", async () => {
+    const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
+    const tool = projectsKbTool({ store })
+    // An absolute path outside the jail root must be refused — resolve() keeps
+    // the absolute path, enforceJail rejects it. No throw escapes the loop and
+    // nothing was indexed.
+    const res = await runTool(tool, { op: "project_write", local_path: "/etc/passwd" }, "/repo")
+    expect(res.ok).toBe(false)
+    expect(store.size()).toBe(0)
+  })
+
+  test("project_write of a NUL-byte local_path is a typed ok:false (path-truncation guard)", async () => {
+    const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
+    const tool = projectsKbTool({ store })
+    const res = await runTool(tool, { op: "project_write", local_path: "ok.txt\0evil" }, "/repo")
+    expect(res.ok).toBe(false)
+    expect(store.size()).toBe(0)
+  })
+
+  // HELLGATE (tool-level lexical fallback): the tool with NO pipeline falls back
+  // to searchLexical; a snippet-leak there would surface the sentinel through
+  // ToolResult.output/structured. Query a token abutting the sentinel so the
+  // leak window covers the FULL secret; assert absent from the model surface.
+  test("project_search lexical fallback never leaks the body when the query abuts the sentinel", async () => {
+    const { cwd, name } = writeFixture(`prefix MARK${SENTINEL}MARK suffix`)
+    const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
+    const tool = projectsKbTool({ store }) // NO pipeline ⇒ lexical fallback
+    await runTool(tool, { op: "project_write", local_path: name }, cwd)
+    const res = await runTool(tool, { op: "project_search", query: "mark" }, cwd)
+    expect(res.ok).toBe(true)
+    // a hit references the doc by uuid …
+    expect(fullModelSurface(res)).toContain("pk-0")
+    // … but the full sentinel body never reaches the model surface.
+    expect(fullModelSurface(res)).not.toContain(SENTINEL)
+    // Tight gate on the structured hit text: the FIXED body-free indicator —
+    // a snippet-leak mutation slicing body bytes into the hit breaks this even
+    // when the truncated window omits the full sentinel token.
+    const hits = (res.structured as { hits?: { text?: string }[] } | undefined)?.hits ?? []
+    expect(hits.length).toBe(1)
+    expect(hits[0]?.text).toMatch(/^match \(\d+× in \d+B\)$/)
+  })
+
   test("project_delete removes a doc; subsequent read is ok:false", async () => {
     const { cwd, name } = writeFixture(`del ${SENTINEL}`)
     const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
@@ -288,5 +377,22 @@ describe("projects-kb — default-OFF byte-identity", () => {
     const store = createProjectsKbStore({})
     const names = buildDefaultTools({ projectsKb: { store } }).map((t) => t.name)
     expect(names).toContain("projects_kb")
+  })
+
+  // Drift guard BOTH directions: wiring the slot must append EXACTLY the one
+  // projects_kb tool and perturb NOTHING else — the unwired menu is the wired
+  // menu minus projects_kb, in the same order. Catches an accidental reorder /
+  // duplicate / drop of any other tool when the A3 slot is present.
+  test("wiring the slot appends EXACTLY projects_kb and leaves the rest of the menu byte-identical", () => {
+    const store = createProjectsKbStore({})
+    const off = buildDefaultTools().map((t) => t.name)
+    const on = buildDefaultTools({ projectsKb: { store } }).map((t) => t.name)
+    // exactly one net-new tool
+    expect(on.length).toBe(off.length + 1)
+    expect(on.filter((n) => n === "projects_kb").length).toBe(1)
+    // the OFF menu is the ON menu with projects_kb removed — order preserved
+    expect(on.filter((n) => n !== "projects_kb")).toEqual(off)
+    // and the OFF menu never contained it (no leak into BASE)
+    expect(off).not.toContain("projects_kb")
   })
 })
