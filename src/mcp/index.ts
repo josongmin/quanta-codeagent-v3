@@ -25,6 +25,10 @@ export {
   ElicitationLeasePool,
   type ElicitationPrompter,
   type ElicitationResult,
+  // jul-03 A1 — AskUserQuestion structured-option parity (surface renderers +
+  // hellgates import the option shape/label helper from `@/mcp`).
+  type EnumOption,
+  enumOptionLabel,
   headlessRejecter,
   type LeaseContext,
   // TICKET-22 — URL elicitation variant (hellgates import these from `@/mcp`).

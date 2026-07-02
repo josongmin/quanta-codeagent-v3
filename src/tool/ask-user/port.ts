@@ -12,6 +12,15 @@
  *  reason:"headless-denied" }` — the agent never blocks waiting on a human that
  *  is not there. */
 
+/** AskUserQuestion parity (jul-03 A1) — a select/multiselect option is EITHER a
+ *  bare string (legacy) OR a structured chip `{label, description?, preview?}`.
+ *  The `label` is the pickable+returned value; description/preview are display-
+ *  only. Structurally IDENTICAL to `@/mcp`'s `EnumOption` (this port stays
+ *  plane-clean — no `@/mcp` import — so the shape is mirrored, not imported). */
+export type AskUserOption =
+  | string
+  | { readonly label: string; readonly description?: string; readonly preview?: string }
+
 /** A structured question. Discriminated on `kind`. */
 export type AskUserRequest =
   | {
@@ -41,13 +50,16 @@ export type AskUserRequest =
       readonly kind: "select"
       readonly prompt: string
       readonly title?: string
-      readonly options: readonly string[]
+      /** AskUserQuestion chip header (≤12-char parity; display-only). */
+      readonly header?: string
+      readonly options: readonly AskUserOption[]
     }
   | {
       readonly kind: "multiselect"
       readonly prompt: string
       readonly title?: string
-      readonly options: readonly string[]
+      readonly header?: string
+      readonly options: readonly AskUserOption[]
       readonly minSelected?: number
       readonly maxSelected?: number
     }

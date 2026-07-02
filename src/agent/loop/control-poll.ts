@@ -1,6 +1,7 @@
 import type { Message } from "@/llm"
 import { errMessage } from "@/shared"
 import { cancelSubagent } from "../control-op-handler"
+import { drainControlRequests, isControlRequestEnabled } from "../control-request"
 import { decideAction } from "../conversation-action"
 import { threadId as makeThreadId } from "../follow-up-queue"
 import { buildResumeMessage } from "../interrupted-turn"
@@ -101,6 +102,33 @@ export const pollPeerInbox = (cfg: AgentConfig): Message | null => {
   } catch (e) {
     cfg.stream.emit({ type: "error", message: `peerInbox.drainFor failed: ${errMessage(e)}` })
     return null
+  }
+}
+
+/**
+ * Control-request drain (ADR-0496, jul-03 A1 activation).
+ *
+ * The turn-top edge that ACTIVATES the inert `drainControlRequests`/
+ * `applyControlEffect` surface (previously ZERO loop callers). Sibling of
+ * {@link pollPeerInbox}: default-OFF (absent slot OR gate off ⇒ the port is
+ * NEVER polled, byte-identical), BOUNDED + NO-THROW (delegated to
+ * `drainControlRequests`, which caps the drain and swallows a hostile
+ * port/applier). Effects land on the host via `slot.applier`; nothing is
+ * appended to `wm` (control requests mutate runtime state, not the transcript).
+ *
+ * The gate is load-bearing: a wired slot with `QUANTA_CONTROL_REQUEST` off is a
+ * strict no-op — the port is not even queried.
+ */
+export const pollControlRequests = (cfg: AgentConfig): void => {
+  const slot = cfg.controlRequest
+  if (slot === undefined) return
+  if (!isControlRequestEnabled(slot.env ?? process.env)) return
+  try {
+    drainControlRequests(slot.port, slot.context, slot.applier)
+  } catch (e) {
+    // Defense-in-depth: `drainControlRequests` is already NO-THROW, but a future
+    // regression must never crash the turn seam.
+    cfg.stream.emit({ type: "error", message: `controlRequest drain failed: ${errMessage(e)}` })
   }
 }
 

@@ -34,7 +34,66 @@ import {
   cliPrompter,
   ElicitationLeasePool,
   type ElicitationPrompter,
+  type ElicitationResult,
+  type EnumOption,
+  enumOptionLabel,
 } from "@/mcp"
+
+/** AskUserQuestion parity (jul-03 A1) — the synthetic free-text escape option
+ *  the framework auto-adds so the user is never boxed into the model's
+ *  enumerated choices. The label is the sentinel the decorator detects on the
+ *  way back; a real option colliding with it is de-duped (the escape is only
+ *  appended when no option already carries the label). */
+const OTHER_LABEL = "Other (type your own answer)"
+const OTHER_PROMPT = "Your answer"
+
+/** Append the synthetic Other escape to an option list. Two guards preserve
+ *  base semantics:
+ *   - an EMPTY list is left empty (never add "Other") so the base prompter still
+ *     short-circuits to `empty-enum` — the escape must not mask that failure;
+ *   - a list already carrying the sentinel label is not double-added. */
+const withOther = (options: readonly EnumOption[]): EnumOption[] => {
+  if (options.length === 0) return []
+  const has = options.some((o) => enumOptionLabel(o) === OTHER_LABEL)
+  return has ? [...options] : [...options, { label: OTHER_LABEL }]
+}
+
+/**
+ * Wrap a base prompter so every enum prompt carries the auto-"Other" free-text
+ * escape (AskUserQuestion parity). Picking "Other" re-prompts via the base
+ * `promptString` and returns the typed value in place of the sentinel — the
+ * sentinel NEVER leaks as the answer. Non-enum prompts pass straight through.
+ * Picking a REAL option is byte-identical to the un-decorated prompter (the
+ * extra option never shifts a real answer).
+ */
+export const withOtherEscape = (base: ElicitationPrompter): ElicitationPrompter => {
+  const freeText = async (signal?: AbortSignal): Promise<ElicitationResult<string>> =>
+    base.promptString({ prompt: OTHER_PROMPT }, signal)
+  return {
+    ...base,
+    async promptEnum(req, signal) {
+      const r = await base.promptEnum({ ...req, options: withOther(req.options) }, signal)
+      if (r.ok && r.value === OTHER_LABEL) return freeText(signal)
+      return r
+    },
+    async promptSingleEnum(req, signal) {
+      const r = await base.promptSingleEnum({ ...req, options: withOther(req.options) }, signal)
+      if (r.ok && r.value === OTHER_LABEL) return freeText(signal)
+      return r
+    },
+    async promptMultiEnum(req, signal) {
+      const r = await base.promptMultiEnum({ ...req, options: withOther(req.options) }, signal)
+      if (!r.ok) return r
+      // Replace any picked sentinel with the user's free-typed value. When the
+      // ONLY pick was Other, the result is the single free-text value.
+      if (!r.value.includes(OTHER_LABEL)) return r
+      const typed = await freeText(signal)
+      if (!typed.ok) return typed
+      const rest = r.value.filter((v) => v !== OTHER_LABEL)
+      return { ok: true, value: [...rest, typed.value] }
+    },
+  }
+}
 
 /** Ad-hoc readline read mirroring the REPL's `askLine` (prompt → stderr, read
  *  one line from stdin). Resolves `null` on EOF / abort so `cliPrompter`'s
@@ -81,7 +140,11 @@ export const buildCliElicitationPrompterFactory = (opts?: {
   const interactive = opts?.interactive ?? (process.stdin as { isTTY?: boolean }).isTTY === true
   if (!interactive) return undefined
   const io = opts?.io ?? interactiveCliPrompterIo()
-  const base: ElicitationPrompter = cliPrompter(io)
+  // Auto-"Other" free-text escape (AskUserQuestion parity) wraps the base
+  // prompter BEFORE the lease pool so every enum prompt — whether it arrives
+  // via the MCP elicitation path or the agent's `ask_user` tool — gains the
+  // escape uniformly.
+  const base: ElicitationPrompter = withOtherEscape(cliPrompter(io))
   const pool = new ElicitationLeasePool(base)
   return (serverId: string): ElicitationPrompter => pool.forContext({ serverId })
 }

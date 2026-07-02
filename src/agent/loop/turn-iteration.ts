@@ -13,7 +13,12 @@ import type { AgentConfig } from "../types"
 import { injectWorkflowKeywordNudge } from "../workflow-keyword"
 import { compactNowOnDemand } from "./compaction-wire"
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
-import { pollConversationAction, pollFollowUpQueue, pollPeerInbox } from "./control-poll"
+import {
+  pollControlRequests,
+  pollConversationAction,
+  pollFollowUpQueue,
+  pollPeerInbox,
+} from "./control-poll"
 
 export const applySteerBarrierMessages = async (
   cfg: AgentConfig,
@@ -60,6 +65,13 @@ export const syncQueuedTurnInputs = async (args: {
   // is byte-identical (one extra null-returning call, no `wm` append).
   const peerMail = pollPeerInbox(args.cfg)
   if (peerMail !== null) args.wm.append(peerMail)
+  // Control-request drain (ADR-0496, jul-03 A1) — ACTIVATES the previously-inert
+  // `drainControlRequests` surface. Runtime-control (set_model / set_permission_
+  // mode / set_thinking / get_context_usage) lands on the host via the wired
+  // applier; it appends NOTHING to `wm` (these mutate runtime state, not the
+  // transcript). Default-OFF: no slot / gate off ⇒ the port is never polled
+  // (byte-identical), sibling of the peer-inbox drain above.
+  pollControlRequests(args.cfg)
   const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
   if (actionOutcome.kind === "finish_aborted") {
     // §11.5 — capture the partial turn into the session buffer so a later

@@ -13,7 +13,9 @@ import { spawn } from "node:child_process"
 import type { ElicitationFailureReason, ElicitationPrompter, ElicitationResult } from "./port"
 import {
   type BooleanRequest,
+  type EnumOption,
   type EnumRequest,
+  enumOptionLabel,
   type IntegerRequest,
   type MultiSelectEnumRequest,
   type NumberRequest,
@@ -59,8 +61,24 @@ const defaultOpener = (url: string): void => {
   }
 }
 
-const renderOptions = (options: ReadonlyArray<string>): string =>
-  options.map((o, i) => `  ${i + 1}. ${o}`).join("\n")
+/** Render one option row. A structured option shows its label plus (when set) a
+ *  `— description` and a `[preview]` affordance; a bare string renders as before
+ *  (byte-identical to the pre-widening single-line form). */
+const renderOption = (o: EnumOption, i: number): string => {
+  if (typeof o === "string") return `  ${i + 1}. ${o}`
+  const desc = o.description !== undefined ? ` — ${o.description}` : ""
+  const prev = o.preview !== undefined ? ` [${o.preview}]` : ""
+  return `  ${i + 1}. ${o.label}${desc}${prev}`
+}
+
+const renderOptions = (options: ReadonlyArray<EnumOption>): string =>
+  options.map(renderOption).join("\n")
+
+/** The chip-header prefix (`(Header) `) when a request carries one, else "".
+ *  Combined AFTER the title prefix so both render (title is the port label, the
+ *  header is the AskUserQuestion chip). */
+const headerPrefix = (header: string | undefined): string =>
+  header !== undefined ? `(${header}) ` : ""
 
 const fail = <T>(reason: ElicitationFailureReason): ElicitationResult<T> => ({
   ok: false,
@@ -87,17 +105,19 @@ const withRetry = async <T>(
 }
 
 /** Validate the answer "n" against a typed enum option list. The CLI accepts
- *  either the 1-based index or the literal option text. */
+ *  either the 1-based index or the literal option LABEL. A structured option's
+ *  `label` is the pickable+returned text; description/preview never match. */
 const matchEnum = (
-  options: ReadonlyArray<string>,
+  options: ReadonlyArray<EnumOption>,
   raw: string,
 ): { ok: true; value: string } | { ok: false } => {
   const trimmed = raw.trim()
   const asIdx = Number.parseInt(trimmed, 10)
   if (Number.isInteger(asIdx) && asIdx >= 1 && asIdx <= options.length) {
-    return { ok: true, value: options[asIdx - 1] as string }
+    return { ok: true, value: enumOptionLabel(options[asIdx - 1] as EnumOption) }
   }
-  if (options.includes(trimmed)) return { ok: true, value: trimmed }
+  const byLabel = options.find((o) => enumOptionLabel(o) === trimmed)
+  if (byLabel !== undefined) return { ok: true, value: enumOptionLabel(byLabel) }
   return { ok: false }
 }
 
@@ -154,7 +174,7 @@ export const cliPrompter = (
     if (req.options.length === 0) return fail<string>("empty-enum")
     const s = signal ?? new AbortController().signal
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}\n${renderOptions(req.options)}\n> `,
+      `${req.title !== undefined ? `[${req.title}] ` : ""}${headerPrefix(req.header)}${req.prompt}\n${renderOptions(req.options)}\n> `,
     )
     return withRetry<string>(io, s, (raw) => matchEnum(req.options, raw))
   },
@@ -162,7 +182,7 @@ export const cliPrompter = (
     if (req.options.length === 0) return fail<ReadonlyArray<string>>("empty-enum")
     const s = signal ?? new AbortController().signal
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}\n${renderOptions(req.options)}\n(comma-separated)> `,
+      `${req.title !== undefined ? `[${req.title}] ` : ""}${headerPrefix(req.header)}${req.prompt}\n${renderOptions(req.options)}\n(comma-separated)> `,
     )
     return withRetry<ReadonlyArray<string>>(io, s, (raw) => matchMultiEnum(req, raw))
   },
@@ -170,7 +190,7 @@ export const cliPrompter = (
     if (req.options.length === 0) return fail<string>("empty-enum")
     const s = signal ?? new AbortController().signal
     io.write(
-      `${req.title !== undefined ? `[${req.title}] ` : ""}${req.prompt}\n${renderOptions(req.options)}\n> `,
+      `${req.title !== undefined ? `[${req.title}] ` : ""}${headerPrefix(req.header)}${req.prompt}\n${renderOptions(req.options)}\n> `,
     )
     return withRetry<string>(io, s, (raw) => matchEnum(req.options, raw))
   },

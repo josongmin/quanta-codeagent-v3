@@ -22,6 +22,21 @@ import { errMessage, omitUndef } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import type { AskUserPort, AskUserRequest, AskUserResult } from "./port"
 
+/** AskUserQuestion parity (jul-03 A1) — an option is EITHER a bare string
+ *  (legacy, back-compat) OR a structured chip `{label, description?, preview?}`.
+ *  The `label` is the pickable+returned value; description/preview are display-
+ *  only affordances the surface may render. Mirrors `@/mcp`'s `enumOptionSchema`
+ *  (the tool plane stays leaf-fenced: `../types` + `zod` + `@/shared` only). */
+export const askUserOptionSchema = z.union([
+  z.string(),
+  z.object({
+    label: z.string().min(1),
+    description: z.string().min(1).optional(),
+    preview: z.string().min(1).optional(),
+  }),
+])
+export type AskUserOptionInput = z.infer<typeof askUserOptionSchema>
+
 export const askUserInputSchema = z
   .discriminatedUnion("kind", [
     z.object({
@@ -57,13 +72,15 @@ export const askUserInputSchema = z
       kind: z.literal("select"),
       prompt: z.string().min(1),
       title: z.string().min(1).optional(),
-      options: z.array(z.string()),
+      header: z.string().min(1).optional(),
+      options: z.array(askUserOptionSchema),
     }),
     z.object({
       kind: z.literal("multiselect"),
       prompt: z.string().min(1),
       title: z.string().min(1).optional(),
-      options: z.array(z.string()),
+      header: z.string().min(1).optional(),
+      options: z.array(askUserOptionSchema),
       minSelected: z.number().int().nonnegative().optional(),
       maxSelected: z.number().int().positive().optional(),
     }),
@@ -120,10 +137,13 @@ export const askUserTool = (port: AskUserPort): Tool<AskUserInput> => ({
   description:
     "Ask the USER a STRUCTURED question mid-task and get a typed answer back: " +
     "free text (kind:string), yes/no (kind:boolean), a number/integer, a single " +
-    "pick (kind:select, options:[…]), or a multi-pick (kind:multiselect). Use it " +
-    "when you genuinely need a decision only the user can make — NOT for routine " +
-    "choices you can resolve yourself or from the code. If the user is not " +
-    "reachable (headless), the call returns a typed denial; do not loop on it.",
+    "pick (kind:select, options:[…]), or a multi-pick (kind:multiselect). Each " +
+    "select/multiselect option may be a bare string OR a structured chip " +
+    '{label,description?,preview?} (the label is the chosen value); add an optional ' +
+    "short `header` chip to label the question. Use it when you genuinely need a " +
+    "decision only the user can make — NOT for routine choices you can resolve " +
+    "yourself or from the code. If the user is not reachable (headless), the call " +
+    "returns a typed denial; do not loop on it.",
   inputSchema: askUserInputSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

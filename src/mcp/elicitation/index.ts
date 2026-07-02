@@ -11,7 +11,10 @@ export type {
 export {
   type BooleanRequest,
   booleanRequestSchema,
+  type EnumOption,
   type EnumRequest,
+  enumOptionLabel,
+  enumOptionSchema,
   enumRequestSchema,
   type IntegerRequest,
   integerRequestSchema,

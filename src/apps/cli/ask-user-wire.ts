@@ -45,6 +45,12 @@ const toResult = <T extends AskUserValue>(r: ElicitationResult<T>): AskUserResul
 const optTitle = (req: { title?: string }): { title?: string } =>
   req.title !== undefined ? { title: req.title } : {}
 
+/** Thread the AskUserQuestion chip `header` onto the MCP enum request when set
+ *  (omitted under exactOptionalPropertyTypes so a headerless caller stays
+ *  byte-identical). */
+const optHeader = (req: { header?: string }): { header?: string } =>
+  req.header !== undefined ? { header: req.header } : {}
+
 /** Route one structured request to the matching prompter method. The request
  *  shapes mirror the MCP elicitation schemas 1:1 (omitting undefined optionals
  *  under exactOptionalPropertyTypes; options copied to a mutable array). */
@@ -67,7 +73,7 @@ const dispatch = async (
     case "select":
       return toResult(
         await prompter.promptEnum(
-          { prompt: req.prompt, options: [...req.options], ...optTitle(req) },
+          { prompt: req.prompt, options: [...req.options], ...optTitle(req), ...optHeader(req) },
           signal,
         ),
       )
@@ -78,6 +84,7 @@ const dispatch = async (
             prompt: req.prompt,
             options: [...req.options],
             ...optTitle(req),
+            ...optHeader(req),
             ...(req.minSelected !== undefined ? { minSelected: req.minSelected } : {}),
             ...(req.maxSelected !== undefined ? { maxSelected: req.maxSelected } : {}),
           }) as MultiSelectEnumRequest,

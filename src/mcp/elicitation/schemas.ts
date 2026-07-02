@@ -20,7 +20,30 @@ const finiteInteger = (): z.ZodType<number> =>
     .int()
     .refine((v) => Number.isFinite(v), { message: "non-finite integer rejected" })
 
-const nonEmpty = z.array(z.string()).min(1, "empty options list")
+/** AskUserQuestion parity (jul-03 A1) — a select/multiselect option is EITHER a
+ *  bare string (legacy, back-compat) OR a structured chip
+ *  `{label, description?, preview?}`. The `label` is the PICKABLE + returned
+ *  value; `description`/`preview` are display-only affordances the surface may
+ *  render but that never change the answer. Widened at the DEEPEST hop (MCP)
+ *  so `ask_user`→port→wire→prompter all thread ONE shape. */
+export const enumOptionSchema = z.union([
+  z.string(),
+  z.object({
+    label: z.string().min(1),
+    description: z.string().min(1).optional(),
+    preview: z.string().min(1).optional(),
+  }),
+])
+export type EnumOption = z.infer<typeof enumOptionSchema>
+
+/** The pickable/returned text of an option — the string itself, or its label. */
+export const enumOptionLabel = (o: EnumOption): string => (typeof o === "string" ? o : o.label)
+
+const nonEmpty = z.array(enumOptionSchema).min(1, "empty options list")
+
+/** Chip `header` (≤12-char AskUserQuestion parity, not hard-capped here — the
+ *  surface truncates for display). Optional; omitted callers stay byte-identical. */
+const optionalHeader = z.string().min(1).optional()
 
 export const stringRequestSchema = z.object({
   prompt: z.string().min(1),
@@ -56,6 +79,7 @@ export type BooleanRequest = z.infer<typeof booleanRequestSchema>
 export const enumRequestSchema = z.object({
   prompt: z.string().min(1),
   title: z.string().min(1).optional(),
+  header: optionalHeader,
   options: nonEmpty,
 })
 export type EnumRequest = z.infer<typeof enumRequestSchema>
@@ -63,6 +87,7 @@ export type EnumRequest = z.infer<typeof enumRequestSchema>
 export const multiSelectEnumRequestSchema = z.object({
   prompt: z.string().min(1),
   title: z.string().min(1).optional(),
+  header: optionalHeader,
   options: nonEmpty,
   minSelected: z.number().int().min(0).optional(),
   maxSelected: z.number().int().min(1).optional(),
@@ -72,6 +97,7 @@ export type MultiSelectEnumRequest = z.infer<typeof multiSelectEnumRequestSchema
 export const singleSelectEnumRequestSchema = z.object({
   prompt: z.string().min(1),
   title: z.string().min(1).optional(),
+  header: optionalHeader,
   options: nonEmpty,
 })
 export type SingleSelectEnumRequest = z.infer<typeof singleSelectEnumRequestSchema>

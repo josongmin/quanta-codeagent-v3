@@ -23,6 +23,11 @@ import type { BudgetMeter, TaskBudget } from "../budget"
 import type { BudgetLedger } from "../budget-ledger"
 import type { CapEnforcer } from "../cap-enforcer"
 import type { GranularRegistryPort } from "../checkpoint/granular-registry"
+import type {
+  ControlEffectApplier,
+  ControlRequestContext,
+  ControlRequestPort,
+} from "../control-request"
 import type { ConversationActionPort } from "../conversation-action"
 import type { ConversationCheckpointStore } from "../conversation-checkpoint"
 import type { FollowUpQueue, PausedReason } from "../follow-up-queue"
@@ -171,6 +176,27 @@ export interface WireSlotsSessionConfig {
    * `QUANTA_TEAM_PEER_MSG` is on.
    */
   peerInbox?: import("../loop/control-poll").PeerInboxDrain
+  /**
+   * Control-request drain (ADR-0496, jul-03 A1 activation). The pure
+   * `drainControlRequests`/`applyControlEffect` surface existed with ZERO loop
+   * callers (inert). When this slot is wired AND `QUANTA_CONTROL_REQUEST` is on
+   * (see `env`, defaulting to `process.env`), `pollControlRequests` drains the
+   * `port` at the turn-top seam (sibling of `pollPeerInbox`), plans each request
+   * against `context`'s live allowlists, and applies the effect via `applier`.
+   *
+   * SURFACE NOTE: the thick CLI has no control channel — this is the IDE / web-
+   * host protocol surface (Claude Code control-request parity). Absent slot OR
+   * gate-off ⇒ `pollControlRequests` never polls the port (byte-identical,
+   * default-OFF). The gate is load-bearing: a wired slot with the gate off is a
+   * strict no-op.
+   */
+  controlRequest?: {
+    readonly port: ControlRequestPort
+    readonly applier: ControlEffectApplier
+    readonly context: ControlRequestContext
+    /** Env for the gate check. Defaults to `process.env` at poll time. */
+    readonly env?: Record<string, string | undefined>
+  }
   /**
    * L4 wiring — control-op cluster (2026-05-23). Per-thread paused-reason
    * inspector (ADR-0037). When set, the loop calls this BEFORE each
