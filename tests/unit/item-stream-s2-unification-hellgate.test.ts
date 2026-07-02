@@ -24,13 +24,16 @@
 import { describe, expect, test } from "bun:test"
 import { createKernelSessionState } from "@/kernel/session"
 import { projectSessionHostTurnEvent } from "@/kernel/session/session-host-turn-event-projection"
-import type { AgentStateMessage } from "@/protocol/agent-state"
+import type { AgentStateMessage, AgentStateObservation } from "@/protocol/agent-state"
 import { itemCoreToAgentStateMessage } from "@/protocol/agent-state"
 import { projectAgentEventToItemStreamObservationsGated } from "@/agent/optional-ports"
+import { wireOptionalAgentPorts } from "@/agent/optional-ports"
+import type { AgentConfig } from "@/agent/types"
+import type { LLMPort } from "@/llm"
 import { fleetToItemStream } from "@/activity"
 import type { SessionEvent } from "@/protocol/session"
 import type { ItemStreamCore } from "@/shared"
-import type { AgentEvent, PlanReadonlyMirror } from "@/stream"
+import type { AgentEvent, PlanReadonlyMirror, StreamPort } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
 
 const manifest = {
@@ -189,6 +192,30 @@ describe("S2 dual-plane — plan + subagent cores carry byte-identically on BOTH
   })
 })
 
+describe("S2 progressCard — taxonomy-only, NO projector arm (byte-safe inert)", () => {
+  test("a progress_update event produces NO item core (progressCard has no producer)", () => {
+    // The `progressCard` itemType + `progressCard.step` deltaKind are additive
+    // taxonomy ONLY — S2 shipped no projector arm for them. A `progress_update`
+    // AgentEvent must therefore fall to the default arm and emit nothing. If a
+    // future edit adds an unguarded producer arm, this goes red (visible, not a
+    // silent 4th surface path).
+    const p = new ItemStreamProjector()
+    const progressUpdate: AgentEvent = { type: "progress_update", currentStep: "step 1", turn: 0 }
+    expect(p.project(progressUpdate)).toEqual([])
+  })
+
+  test("progress_update interleaved in a reasoning run does NOT split it (transient)", () => {
+    const p = new ItemStreamProjector()
+    p.project({ type: "assistant_thinking", delta: "a" })
+    const progressUpdate: AgentEvent = { type: "progress_update", currentStep: "mid" }
+    expect(p.project(progressUpdate)).toEqual([])
+    const more = p.project({ type: "assistant_thinking", delta: "b" })
+    // Same reasoning run — a delta only, no fresh `started` (progress_update did
+    // not close reasoning), proving the default arm is truly inert.
+    expect(more.map((c) => c.phase)).toEqual(["delta"])
+  })
+})
+
 describe("S2 fleet bridge — ActivityStore subagent snapshot folds into a subagent item core", () => {
   test("a running row is an OPEN subagent item (started only, live spinner)", () => {
     const cores = fleetToItemStream([
@@ -231,6 +258,31 @@ describe("S2 fleet bridge — ActivityStore subagent snapshot folds into a subag
       (starts[0] as { index: number }).index,
     )
   })
+
+  // The fleet bridge is currently an INERT producer — no production caller feeds
+  // its cores onto the wire yet (only this suite exercises it). It is a leaf
+  // producer awaiting a consumer, so we pin the CONTRACT it must honour: the two
+  // subagent producers (the projector's `subagent_cancel` arm and this fleet
+  // bridge) MUST mint the SAME `item-subagent-<id>` itemId so a surface joins the
+  // fleet row to its cancel/L0 root on ONE item taxonomy (the "unify" claim). If
+  // either producer's id scheme drifts, the join silently breaks — red here.
+  test("fleet bridge + subagent_cancel arm agree on the item-subagent-<id> join key", () => {
+    const [fleetStart] = fleetToItemStream([
+      { id: "sub-9", description: "scout", status: "running", startedAt: 1 },
+    ])
+    const cancelCores = collect([
+      {
+        type: "subagent_cancel",
+        subagentId: "sub-9",
+        outcome: "stopped",
+        source: "submission_op",
+      } as AgentEvent,
+    ])
+    expect(fleetStart?.itemId).toBe("item-subagent-sub-9")
+    expect(cancelCores.every((c) => c.itemId === "item-subagent-sub-9")).toBe(true)
+    expect(fleetStart?.itemType).toBe("subagent")
+    expect(cancelCores.every((c) => c.itemType === "subagent")).toBe(true)
+  })
 })
 
 describe("S2 no-4th-path — plan.* host-mirror is suppressed when item-stream owns plan", () => {
@@ -253,5 +305,64 @@ describe("S2 no-4th-path — plan.* host-mirror is suppressed when item-stream o
       const obs = projectAgentEventToItemStreamObservationsGated(ev, off)
       expect(obs).not.toBeNull()
     }
+  })
+})
+
+/**
+ * S2 no-4th-path AT THE LIVE WIRE (audit jul-03) — the isolated-function tests
+ * above prove `projectAgentEventToItemStreamObservationsGated` returns null, but
+ * do NOT prove the composition seam (`wireAgentStateTap` inside
+ * `wireOptionalAgentPorts`) actually CALLS the gated projector. A de-wire at that
+ * seam (reverting to the raw `projectAgentEventToAgentStateObservation`) leaves
+ * both the isolated function AND the reasoning-only tap-wire test green while the
+ * web plane silently double-carries plan on BOTH `plan.*` AND `item.*` — the 4th
+ * path this feature forbids. These tests drive a plan event THROUGH the fully
+ * composed stream and assert the plane split by BEHAVIOUR.
+ */
+const wiredCapture = (
+  env: Record<string, string | undefined>,
+): { stream: StreamPort; captured: AgentStateObservation[] } => {
+  const captured: AgentStateObservation[] = []
+  const base = {
+    llm: { model: "m" } as unknown as LLMPort,
+    signal: new AbortController().signal,
+    stream: { emit: () => {} },
+    onAgentState: { capture: (e: AgentStateObservation) => void captured.push(e) },
+  } as unknown as AgentConfig
+  const out = wireOptionalAgentPorts(base, env)
+  return { stream: out.stream as StreamPort, captured }
+}
+
+describe("S2 no-4th-path — WIRED: the composition seam actually enforces the split", () => {
+  test("gate ON ⇒ plan flows as item_stream cores AND NO plan.* observation reaches the sink", () => {
+    const { stream, captured } = wiredCapture({
+      QUANTA_ITEM_STREAM: "1",
+      QUANTA_WEB_AGENT_STATE: "1",
+    })
+    stream.emit(planCreated)
+    stream.emit(planUpdated)
+
+    const itemObs = captured.filter((o) => o.type === "item_stream")
+    // Not vacuous — plan folded onto item cores DID reach the item plane.
+    expect(itemObs.length).toBeGreaterThan(0)
+    expect(itemObs.every((o) => (o.type === "item_stream" ? o.item.itemType === "plan" : false))).toBe(
+      true,
+    )
+    // THE no-4th-path invariant: the raw plan.* host-mirror observation is
+    // suppressed at the LIVE seam, so plan never double-carries.
+    const planMirror = captured.filter(
+      (o) => o.type === "plan_created" || o.type === "plan_updated" || o.type === "plan_snapshot",
+    )
+    expect(planMirror.length).toBe(0)
+  })
+
+  test("gate OFF ⇒ the legacy plan.* host-mirror DOES flow at the wire (byte-identical legacy)", () => {
+    // WEB_AGENT_STATE on, ITEM_STREAM off: the item-stream does not own plan, so
+    // the host-mirror plan.* observation must still reach the sink unchanged.
+    const { stream, captured } = wiredCapture({ QUANTA_WEB_AGENT_STATE: "1" })
+    stream.emit(planCreated)
+    const planMirror = captured.filter((o) => o.type === "plan_created")
+    expect(planMirror.length).toBe(1)
+    expect(captured.some((o) => o.type === "item_stream")).toBe(false)
   })
 })
