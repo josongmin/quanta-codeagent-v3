@@ -84,8 +84,19 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
   let sent = 0
   let suppressedUserPresent = 0
   // True iff a push at THIS moment must be held back because the user is present.
-  // Absent probe ⇒ always false ⇒ byte-identical.
-  const presentNow = (): boolean => isUserPresent?.() === true
+  // Absent probe ⇒ always false ⇒ byte-identical. THROW-SAFE: a probe that
+  // throws must not crash the notify event (the call sites in the REPL loop —
+  // prompt-pipeline / turn-helpers — have no try/catch). Fail-OPEN toward
+  // NOTIFYING (treat a broken probe as "not present"): a notification beats a
+  // crashed turn, and it matches the always-notify default when presence is off.
+  const presentNow = (): boolean => {
+    if (isUserPresent === undefined) return false
+    try {
+      return isUserPresent() === true
+    } catch {
+      return false
+    }
+  }
 
   if (channel === "off") {
     return {
