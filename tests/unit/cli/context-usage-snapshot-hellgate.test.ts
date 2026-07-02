@@ -122,6 +122,69 @@ describe("Track D REPL holder — retain + expose", () => {
   })
 })
 
+describe("S3 — reasoning-token split threaded through the holder to /context", () => {
+  test("observeUsage threads reasoningTokens onto view() (wire→gauge, not inert)", () => {
+    const holder = createContextUsageHolder()
+    holder.sink(snapshot())
+    // Before any usage observation the split is absent (Anthropic byte-identical).
+    expect("reasoningTokens" in (holder.view() ?? {})).toBe(false)
+    holder.observeUsage({ reasoningTokens: 4200 })
+    const view = holder.view()
+    expect(view?.reasoningTokens).toBe(4200)
+  })
+
+  test("view() omits reasoningTokens when the provider reported no split (absent, not 0)", () => {
+    const holder = createContextUsageHolder()
+    holder.sink(snapshot())
+    holder.observeUsage({}) // usage event with no split (Anthropic)
+    const view = holder.view()
+    expect("reasoningTokens" in (view ?? {})).toBe(false)
+  })
+
+  test("an explicit zero split is retained verbatim (not dropped by a truthiness guard)", () => {
+    const holder = createContextUsageHolder()
+    holder.sink(snapshot())
+    holder.observeUsage({ reasoningTokens: 0 })
+    // Retained as a real datum (view carries 0) — the gauge omits it downstream,
+    // but the holder must not fabricate/drop the provider's explicit 0.
+    expect(holder.view()?.reasoningTokens).toBe(0)
+  })
+
+  test("/context RENDERS the reasoning annotation end-to-end once observed (render-root proof)", async () => {
+    const holder = createContextUsageHolder()
+    holder.sink(snapshot())
+    holder.observeUsage({ reasoningTokens: 12_000 })
+    const ctx = buildReplSlashCtx({ ...minimalArgs(), contextUsage: () => holder.view() })
+    const c = collect()
+    const exit = await runSlashCommand("/context", {
+      out: c.outFn,
+      err: () => {},
+      cwd: process.cwd(),
+      ...(ctx.contextUsage !== undefined ? { contextUsage: ctx.contextUsage } : {}),
+    })
+    expect(exit).toBe(0)
+    const text = c.text()
+    // The distinct output-side annotation is present, and the split is NOT summed
+    // into any input-context segment total.
+    expect(text).toContain("Reasoning")
+    expect(text).toContain("12.0k")
+  })
+
+  test("/context OMITS the reasoning line when no split was observed (byte-identical)", async () => {
+    const holder = createContextUsageHolder()
+    holder.sink(snapshot())
+    const ctx = buildReplSlashCtx({ ...minimalArgs(), contextUsage: () => holder.view() })
+    const c = collect()
+    await runSlashCommand("/context", {
+      out: c.outFn,
+      err: () => {},
+      cwd: process.cwd(),
+      ...(ctx.contextUsage !== undefined ? { contextUsage: ctx.contextUsage } : {}),
+    })
+    expect(c.text()).not.toContain("Reasoning")
+  })
+})
+
 describe("Track D /context slash — render vs fallback", () => {
   test("contextUsage absent ⇒ /context prints the legacy fallback", async () => {
     const ctx = buildReplSlashCtx(minimalArgs())

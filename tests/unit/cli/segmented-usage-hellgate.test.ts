@@ -1,14 +1,16 @@
 /**
- * Track D hellgate — segmented usage RENDER + single-bar regression anchor.
+ * Track D hellgate — segmented usage RENDER.
  *
  * Pins: segmented bar width is STABLE regardless of segment count / total;
  * legend rows per present category; "Full" fullness label; deterministic
- * render; and — load-bearing — the existing single-bar `formatContextUsage`
- * stays byte-identical (it must remain the default status line).
+ * render.
+ *
+ * (The single-bar `formatContextUsage` regression anchor was removed jul-03 S3
+ * along with the function itself — it had ZERO production callers and the
+ * segmented view is now the sole renderer.)
  */
 import { describe, expect, test } from "bun:test"
 import {
-  formatContextUsage,
   formatSegmentedUsage,
   SEGMENTED_BAR_CELLS,
   type SegmentedUsageView,
@@ -77,23 +79,5 @@ describe("formatSegmentedUsage — labels", () => {
 
   test("render is deterministic", () => {
     expect(formatSegmentedUsage(view(1234, 8000))).toBe(formatSegmentedUsage(view(1234, 8000)))
-  })
-})
-
-describe("REGRESSION — single-bar formatContextUsage byte-identical anchor", () => {
-  test("50% bar is exactly the pre-Track-D string", () => {
-    expect(formatContextUsage(100_000, 200_000, "claude-sonnet-4-5")).toBe(
-      "[██████████░░░░░░░░░░] 100k/200k (50%) · claude-sonnet-4-5",
-    )
-  })
-
-  test("25% bar unchanged", () => {
-    expect(formatContextUsage(50_000, 200_000, "claude-sonnet-4-5")).toBe(
-      "[█████░░░░░░░░░░░░░░░] 50.0k/200k (25%) · claude-sonnet-4-5",
-    )
-  })
-
-  test("single-bar output stays single-line", () => {
-    expect(formatContextUsage(50_000, 200_000, "m").includes("\n")).toBe(false)
   })
 })
