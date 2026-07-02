@@ -157,4 +157,70 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
       parseAgentArgs(["--mode", "interactive", "--identity-mode", "definitely-not-a-mode"]),
     ).toThrow()
   })
+
+  test("HELL-PO-5: --identity-mode onboarding resolves to a LIVE non-empty onboarding prompt, NOT the unknown-mode fallback (red if arg-builder branch removed)", async () => {
+    // THE inert-config guard. HELL-PO-4 only proves the CLI TOKEN parses. It
+    // does NOT prove the token resolves to the real onboarding identity: because
+    // `onboarding` is not a `ModeVariantKey`, if the dedicated arg-builder branch
+    // is deleted the token silently falls through to the mode-variant registry,
+    // whose `variantFor("onboarding")` returns the UNKNOWN_MODE_VARIANT fallback
+    // — a wrong-but-non-empty prompt. This test drives the real resolver seam and
+    // discriminates the LIVE onboarding line from the unknown-mode line, so the
+    // mutation (remove the branch) goes RED here.
+    const { resolveIdentitySystemPrompt } = await import("@/host/runtime/agent-arg-builder")
+    const { DEFAULT_IDENTITIES, UNKNOWN_MODE_IDENTITY } = await import("@/agent/identity")
+
+    const onboardingLine = DEFAULT_IDENTITIES.onboarding[0]
+    expect(onboardingLine, "fixture: onboarding identity must be non-empty").toBeTruthy()
+    // Fixture sanity: the LIVE line and the fallback line MUST differ, else the
+    // discriminator below is vacuous.
+    expect(onboardingLine).not.toBe(UNKNOWN_MODE_IDENTITY[0])
+
+    const resolved = resolveIdentitySystemPrompt("onboarding", {})
+    // LIVE prompt: non-empty AND carries the real onboarding identity verbatim.
+    expect(resolved.system.length).toBeGreaterThan(0)
+    expect(
+      resolved.system.includes(onboardingLine as string),
+      "onboarding prompt must splice the real onboarding identity line",
+    ).toBe(true)
+    // Must NOT be the unknown-mode fall-through (the mutation's symptom).
+    expect(
+      resolved.system.includes(UNKNOWN_MODE_IDENTITY[0] as string),
+      "onboarding must NOT fall through to the unknown-mode posture",
+    ).toBe(false)
+    // onboarding is identity-only: no mode-variant registry is published for it
+    // (unlike a real ModeVariantKey), so `/identity` never targets it.
+    expect(resolved.identityModeVariant).toBeUndefined()
+
+    // Paired control: a REAL ModeVariantKey (`plan`) DOES publish the registry —
+    // proves the onboarding-branch's registry omission is a deliberate divergence,
+    // not a broken resolver.
+    const planResolved = resolveIdentitySystemPrompt("plan", {})
+    expect(planResolved.identityModeVariant).toBeDefined()
+  })
+
+  test("HELL-PO-6: VALID_IDENTITY_MODES ↔ IDENTITY_MODES bidirectional parity through the real parser (no drift)", async () => {
+    // Parity guard for the CLI token set vs the identity SSOT. If a mode is added
+    // to one side only, this drifts. Assert BOTH directions through the real
+    // `parseAgentArgs` boundary (no private-const import).
+    const { parseAgentArgs } = await import("@/host/runtime/agent-args")
+    const { IDENTITY_MODES } = await import("@/agent/identity")
+
+    // Direction 1: every IdentityMode SSOT entry is an accepted --identity-mode token.
+    for (const mode of IDENTITY_MODES) {
+      const parsed = parseAgentArgs(["--mode", "interactive", "--identity-mode", mode])
+      expect(parsed.identityMode, `IDENTITY_MODES entry '${mode}' must be a valid CLI token`).toBe(
+        mode,
+      )
+    }
+    // 'onboarding' specifically must be present in the SSOT (guards its removal).
+    expect(IDENTITY_MODES.includes("onboarding")).toBe(true)
+
+    // Direction 2: a token NOT in IDENTITY_MODES is rejected (the accepted set is
+    // not wider than the SSOT). Uses a value known to be outside IDENTITY_MODES.
+    expect(IDENTITY_MODES.includes("onboarding-XYZ" as never)).toBe(false)
+    expect(() =>
+      parseAgentArgs(["--mode", "interactive", "--identity-mode", "onboarding-XYZ"]),
+    ).toThrow()
+  })
 })

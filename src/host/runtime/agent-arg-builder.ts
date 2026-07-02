@@ -322,8 +322,15 @@ const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | un
  *    3. neither ⇒ empty system prompt; mode-preset's
  *       `req.base.system ?? buildSystemPrompt(cwd)` fallback runs.
  *
- *  Pure of process.env aside from the legacy fallback. */
-const resolveIdentitySystemPrompt = (
+ *  Pure of process.env aside from the legacy fallback.
+ *
+ *  Exported for unit testing (B1 jul-03): the `onboarding` identity-only
+ *  virtual-mode branch is otherwise unreachable from any lightweight seam
+ *  (`buildBaseFromArgs` demands a live LLM key), so a hellgate that pins the
+ *  LIVE onboarding prompt — and red-fires if the branch is removed and
+ *  `onboarding` silently falls through to the mode-variant registry's
+ *  unknown-mode fallback — drives this seam directly. */
+export const resolveIdentitySystemPrompt = (
   cliIdentityMode: IdentityModeToken | undefined,
   env: NodeJS.ProcessEnv,
 ): {
