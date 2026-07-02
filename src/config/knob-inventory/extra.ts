@@ -582,4 +582,53 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "§7.3 ci_finding structured CI-investigation record tool (opt-in).",
     readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghTools opts.ciFindingStore)",
   },
+  // Terminal-Bench lever #2 / v2 (RFC jul-2-terminal-bench-levers/03) — the verify-gate v2
+  // compare-to-reference gate in the terminal brain. AGENT-SIDE read via
+  // `gateOn(env, "QUANTA_TB_VERIFY_GATE")` in `apps/terminal/brain-mode.ts` (a terminal-surface
+  // gate, NOT a CLI-render knob, so it lives HERE per the read-site-domain ratchet). Default-OFF:
+  // absent ⇒ no `verification` field on the report and no extra turn ⇒ byte-identical to the
+  // pre-lever brain. ON ⇒ the v2 L1-gated logic (the broken v1 rubber-stamp is RETIRED, not a level).
+  {
+    envKey: "QUANTA_TB_VERIFY_GATE",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "Terminal-Bench verify-gate v2 (compare-to-reference, opt-in). Inspects the trajectory for an OBSERVED L1 comparison of the deliverable's output against a distinct, NON-test reference (diff/cmp/sdiff/colordiff of two operands, or a script naming a reference); no-leak (R1): a comparison against a verifier/test path is REFUSED. If no L1 comparison, injects EXACTLY ONE bounded follow-up (K=0, cannot loop/over-persist), then stamps an honest verified-pass/verified-fail/unverifiable trichotomy — verified-pass is UNREACHABLE without an observed comparison (the v1 rubber-stamp is closed).",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain verify-gate v2 compare-to-reference)",
+  },
+  // Terminal-Bench lever #1 (RFC jul-2-terminal-bench-levers/01) — the ENVIRONMENT POSTURE.
+  // AGENT-SIDE read via `gateOn(env, "QUANTA_TB_ENV_OWNED")` in `apps/terminal/brain-mode.ts` (a
+  // terminal-surface gate, NOT a CLI-render knob — lives HERE per the read-site-domain ratchet).
+  // Default-OFF: absent ⇒ the brain keeps the frozen SWE-bench env guardrails (R-ENV / R-STOP-ENV)
+  // ⇒ byte-identical to the pre-lever brain. PROMPT-TEXT-ONLY: when ON it swaps the rendered env
+  // rule list via `boot.systemSource`; it sets NO SandboxMode / SandboxPolicy and does NOT loosen
+  // host enforcement.
+  {
+    envKey: "QUANTA_TB_ENV_OWNED",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "Terminal-Bench environment posture (opt-in). When ON, the terminal brain rebuilds its SYSTEM prompt with the `owned` posture — install/configure/build freely (a working environment IS the deliverable), dropping the frozen R-ENV/R-STOP-ENV install-prohibition and adding R-ENV-OWNED/R-INSTALL-THRASH. PROMPT-TEXT-ONLY: swaps rendered rule text via boot.systemSource; touches NO SandboxPolicy/os-sandbox/host enforcement. Off ⇒ byte-identical (frozen) brain.",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain env-posture systemSource swap)",
+  },
+  // Terminal-Bench lever #3 (RFC jul-2-terminal-bench-levers/04) — best-of-N FAIR candidate selection.
+  // AGENT-SIDE read via `resolveBestOfN(env)` in `apps/terminal/best-of-n-runner.ts` (a terminal-
+  // surface gate — lives HERE per the read-site-domain ratchet). INTEGER, hard-capped at 4. Default
+  // (unset / blank / non-integer / ≤1) ⇒ a SINGLE brain run ⇒ byte-identical to the pre-lever brain.
+  // Selection reuses each candidate's OWN verify-gate stamp (Lever #2) as the fair signal — it NEVER
+  // reads the hidden verifier / test (no-answer-key red line).
+  {
+    envKey: "QUANTA_TB_BEST_OF_N",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "Terminal-Bench best-of-N fair candidate selection (opt-in, integer, hard-capped at 4). When ≥2, the terminal brain runs N independent attempts (fresh session each, serial) and selects the best via a FAIR, no-leak ranking over each candidate's OWN verify-gate signal (verified-pass > unverifiable > verified-fail; tie-break by evidence strength; attempt-1 floor). NEVER reads the hidden verifier/test. Unset / ≤1 ⇒ single run ⇒ byte-identical.",
+    readSite: "apps/terminal/best-of-n-runner.ts (runTerminalBrainBestOfN resolveBestOfN)",
+  },
 ]

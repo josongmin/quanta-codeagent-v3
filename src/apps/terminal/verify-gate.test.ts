@@ -1,0 +1,505 @@
+/**
+ * Unit hellgate for the terminal verify-before-finalize EVIDENCE INSPECTOR (Lever #2).
+ *
+ * The inspector is a PURE function over the recorded `AgentEvent[]` — this suite pins its exercise
+ * contract for BOTH terminal tools (`container_exec` + `pty_*`, review P1), the conservative
+ * scaffolding/inspection exclusions, and the honest verified-pass/verified-fail/unverifiable
+ * trichotomy. No loop / no IO is exercised here; the gate wiring + ≤1-turn cap live in
+ * `brain-mode.test.ts`.
+ */
+import { describe, expect, test } from "bun:test"
+import type { AgentEvent } from "@/stream"
+import {
+  comparedToReference,
+  deriveVerificationState,
+  inspectExerciseEvidence,
+  isExerciseCommand,
+  type VerificationState,
+} from "./verify-gate"
+
+/** Build a `tool_call` AgentEvent. */
+const call = (id: string, name: string, input: unknown): AgentEvent => ({
+  type: "tool_call",
+  id,
+  name,
+  input,
+})
+/** Build a `tool_result` AgentEvent. `preview` defaults empty; pass `exitCode`/`preview` to shape
+ *  observation. */
+const result = (
+  id: string,
+  name: string,
+  extra: { preview?: string; exitCode?: number; ok?: boolean } = {},
+): AgentEvent => ({
+  type: "tool_result",
+  id,
+  name,
+  ok: extra.ok ?? true,
+  preview: extra.preview ?? "",
+  ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
+})
+
+describe("inspectExerciseEvidence — container_exec", () => {
+  test("running a produced binary AND observing stdout ⇒ exercised", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "./build/mystery input.txt" }),
+      result("c1", "container_exec", { preview: "42 43 44\n", exitCode: 0 }),
+    ]
+    const v = inspectExerciseEvidence(events)
+    expect(v.exercised).toBe(true)
+    expect(v.evidence).toContain("container_exec")
+  })
+
+  test("running a produced binary whose result has ONLY an exit code (no stdout) ⇒ exercised", () => {
+    // Reading the exit code IS an observation (exit 0 = the completion signal per the op guide).
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "/app/mystery" }),
+      result("c1", "container_exec", { preview: "", exitCode: 1, ok: true }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(true)
+  })
+
+  test("a diff against a reference binary's output ⇒ exercised", () => {
+    // The canonical path-tracing-reverse fix: run + diff against reference. `diff` is NOT a
+    // scaffolding leader, and it observes output.
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "diff image.ppm /app/reference.ppm" }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(true)
+  })
+
+  test.each([
+    ["mkdir -p out", "mkdir"],
+    ["ls -la /app", "ls"],
+    ["cat solution.py", "cat"],
+    ["echo done > flag", "echo"],
+    ["touch artifact", "touch"],
+    ["cp a b", "cp"],
+    ["command -v python", "command -v probe"],
+    ["find / -name mystery", "find"],
+    ["git status", "git (noise-verify escape)"],
+    ["grep -r TODO src", "grep"],
+  ])("scaffolding/inspection %p (%s) alone ⇒ NOT exercised", (command) => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command }),
+      result("c1", "container_exec", { preview: "some text", exitCode: 0 }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("running the binary but the result was NEVER observed (no preview, no exitCode) ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "./mystery" }),
+      result("c1", "container_exec", { preview: "" }), // no exitCode, empty preview
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("a leading env-assignment + sudo wrapper does not hide the scaffolding leader", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "FOO=1 sudo mkdir /x" }),
+      result("c1", "container_exec", { preview: "ok", exitCode: 0 }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("a leading env-assignment before a real RUN still counts as exercise", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "LD_LIBRARY_PATH=/lib ./solver in.txt" }),
+      result("c1", "container_exec", { preview: "solved", exitCode: 0 }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(true)
+  })
+
+  test("malformed / non-string command input does not crash and is ignored", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: 42 }),
+      call("c2", "container_exec", {}),
+      call("c3", "container_exec", null),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("a failing (ok:false) run that WAS observed still counts as exercised (honest fail evidence)", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "python solver.py" }),
+      result("c1", "container_exec", { preview: "Traceback...", exitCode: 1, ok: false }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(true)
+  })
+})
+
+describe("inspectExerciseEvidence — pty_* (review P1: interactive deliverable must count; P0: shell chatter must NOT)", () => {
+  test("a pane RUNNING THE DELIVERABLE, driven + observed ⇒ exercised", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "python3 game.py" }), // pane runs the produced program
+      call("p1", "pty_write", { handle: "h", data: "north", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "You move north.\n[nextSeq=3]" }),
+    ]
+    const v = inspectExerciseEvidence(events)
+    expect(v.exercised).toBe(true)
+    expect(v.evidence).toContain("pty_")
+  })
+
+  test("typing an EXERCISE command into a bash pane (`./mystery`) + observing ⇒ exercised", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "bash" }),
+      call("p1", "pty_write", { handle: "h", data: "./mystery in.txt", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "42\n[nextSeq=3]" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(true)
+  })
+
+  test("P0 fail-closed: a bare bash pane driven with SHELL CHATTER (`ls`/`cd`) + read ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "bash" }),
+      call("p1", "pty_write", { handle: "h", data: "ls -la", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "solution.py  Makefile\n[nextSeq=3]" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("P0 fail-closed: a bare `python3` REPL driven with a probe expression ⇒ NOT exercised", () => {
+    // Attaching a generic interpreter and typing `print(2+2)` is NOT a clear deliverable exercise.
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "python3" }),
+      call("p1", "pty_write", { handle: "h", data: "print(2+2)", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "4\n[nextSeq=3]" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("attaching a pane WITHOUT driving it (no pty_write) ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "./server" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "listening\n" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("driving the deliverable without ever reading back the response ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p1", "pty_write", { handle: "h", data: "./run", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+
+  test("a pty_read that observed NOTHING (empty preview, no exitCode) ⇒ NOT exercised", () => {
+    const events: AgentEvent[] = [
+      call("p1", "pty_write", { handle: "h", data: "./run", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "" }),
+    ]
+    expect(inspectExerciseEvidence(events).exercised).toBe(false)
+  })
+})
+
+describe("isExerciseCommand — fail-closed (review P0: install/build/probe/chatter must NOT satisfy the gate)", () => {
+  test.each([
+    "pip install grpcio",
+    "pip3 install -r requirements.txt",
+    "python -m pip install numpy",
+    "npm install",
+    "npm ci",
+    "yarn add express",
+    "cargo build --release",
+    "make",
+    "make -j4 all",
+    "cmake --build build",
+    "gcc -o mystery mystery.c",
+    "g++ solve.cpp -o solve",
+    "go build ./...",
+    "python -c \"import grpc; print(grpc.__version__)\"",
+    "python3 -c 'print(1)'",
+    "bash -lc 'echo ok'",
+    "sh -c 'echo hi'",
+    "apt-get install -y qemu",
+    "./configure --prefix=/usr",
+    "conda install pytorch",
+    "ls -la",
+    "cat solution.py",
+    "git status",
+    "grep -r TODO .",
+    "echo done",
+    "which python3",
+  ])("NON-exercise: %p ⇒ false", (cmd) => {
+    expect(isExerciseCommand(cmd)).toBe(false)
+  })
+
+  test.each([
+    "./mystery input.txt",
+    "/app/server --port 8080",
+    "../bin/solve",
+    "python solve.py",
+    "python3 game.py --seed 1",
+    "node app.js",
+    "bash run_tests.sh",
+    "diff out.ppm /app/reference.ppm",
+    "cmp a.bin b.bin",
+    "pytest tests/",
+    "curl -s localhost:8080/health",
+    "python -m http.server 8000",
+    "LD_LIBRARY_PATH=/lib ./solver in.txt",
+    "timeout 5 ./run",
+    "pip install x && ./mystery run", // compound: the run segment counts
+    "bash -c './mystery > out.txt'", // shell wrapper unwraps to a real run
+  ])("EXERCISE: %p ⇒ true", (cmd) => {
+    expect(isExerciseCommand(cmd)).toBe(true)
+  })
+})
+
+describe("inspectExerciseEvidence — empty / no-tool trajectories", () => {
+  test("no tool calls at all ⇒ NOT exercised with an honest reason", () => {
+    const v = inspectExerciseEvidence([{ type: "assistant_text", delta: "all done, verified green" }])
+    expect(v.exercised).toBe(false)
+    expect(v.evidence).toContain("no end-to-end exercise")
+  })
+})
+
+describe("deriveVerificationState — v2 honest trichotomy (L1-gated; verified-pass requires a compare)", () => {
+  const compared = { compared: true, refusedTestPath: false, evidence: "diffed+observed" } as const
+  const notCompared = { compared: false, refusedTestPath: false, evidence: "never compared" } as const
+  const ranButUnchecked = { exercised: true, evidence: "ran the deliverable" } as const
+
+  test("no L1 comparison ⇒ unverifiable (the anti-over-persist terminal state)", () => {
+    expect(deriveVerificationState(notCompared, "I think it works").state).toBe("unverifiable")
+  })
+
+  // ── The v2 CORE: L0-without-L1 is NO LONGER verified-pass (v1's rubber-stamp is retired). ──
+  test("RED-for-v1: RAN but NEVER COMPARED + a positive/silent final ⇒ unverifiable (NOT verified-pass)", () => {
+    // v1 stamped this `verified-pass` on the bare run — the false-green this whole lever kills.
+    expect(deriveVerificationState(notCompared, "Output looks correct. Verified green.", ranButUnchecked).state).toBe(
+      "unverifiable",
+    )
+    expect(deriveVerificationState(notCompared, "", ranButUnchecked).state).toBe("unverifiable")
+    // The evidence names the ran-but-unchecked gap honestly (no false pass claim).
+    expect(
+      deriveVerificationState(notCompared, "done", ranButUnchecked).evidence.toLowerCase(),
+    ).toContain("never compared")
+  })
+
+  test("L1 compared + a positive stated outcome ⇒ verified-pass", () => {
+    expect(deriveVerificationState(compared, "Output matches the reference. Verified pass.").state).toBe(
+      "verified-pass",
+    )
+  })
+
+  test("L1 compared + silent final ⇒ verified-pass (a comparison was observed)", () => {
+    expect(deriveVerificationState(compared, "").state).toBe("verified-pass")
+  })
+
+  test("L1 compared + a NEGATIVE stated outcome ⇒ verified-fail (honest, not false green)", () => {
+    expect(deriveVerificationState(compared, "The output does not match; it differs.").state).toBe(
+      "verified-fail",
+    )
+  })
+
+  test("L1 compared + an UNCERTAIN stated outcome ⇒ unverifiable (agent itself could not confirm)", () => {
+    expect(deriveVerificationState(compared, "I could not verify the result.").state).toBe(
+      "unverifiable",
+    )
+  })
+
+  test.each([
+    "It passes: the output is correct and matches.",
+    "The comparison completed with no errors and the output matches.",
+    "Diff shows no differences; it does not fail.",
+    "Compared to the baseline; zero failures.",
+  ])("success-by-negation / positive phrasing %p ⇒ verified-pass (not mis-read as fail)", (t) => {
+    const s: VerificationState = deriveVerificationState(compared, t).state
+    expect(s).toBe("verified-pass")
+  })
+
+  test("evidence never references a hidden test — it only names the model's own trajectory", () => {
+    const stamp = deriveVerificationState(compared, "pass")
+    expect(stamp.evidence).toBe("diffed+observed")
+    expect(stamp.evidence.toLowerCase()).not.toContain("hidden")
+    expect(stamp.evidence.toLowerCase()).not.toContain("answer key")
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// P1 — the v2 L1 inspector `comparedToReference` (RFC jul-2 §03). Adversarial fixtures pin: R1
+// (test-path reference REFUSED, load-bearing — query-optimize's golden lives in /tests/), R4 (L1
+// gaming: `diff a a` / `/dev/null` / <2 operands / bare `echo` never count), and the true-positives
+// (a real `diff out ref`, a `cmp a.npy b.npy`, a `python check.py out --expected ref`). Observation
+// is required: a comparison whose result was never read back is NOT L1.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe("comparedToReference — L1 accept (a real observed comparison against a non-test reference)", () => {
+  test("`diff out.txt /app/reference.txt` observed ⇒ compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "diff out.txt /app/reference.txt" }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ]
+    const v = comparedToReference(events)
+    expect(v.compared).toBe(true)
+    expect(v.evidence).toContain("compared")
+    // no-leak: the evidence names only the model's own command, never a hidden oracle.
+    expect(v.evidence?.toLowerCase()).not.toContain("hidden")
+  })
+
+  test("`cmp stolen.npy original.npy` observed (two data artifacts) ⇒ compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "cmp stolen.npy original.npy" }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(true)
+  })
+
+  test("a script run naming a reference operand (`python check.py out.txt --expected ref.txt`) observed ⇒ compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "python check.py out.txt --expected ref.txt" }),
+      result("c1", "container_exec", { preview: "MATCH", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(true)
+  })
+
+  test("a script handed TWO data artifacts (`node cmp.js result.json baseline.json`) observed ⇒ compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "node cmp.js result.json baseline.json" }),
+      result("c1", "container_exec", { preview: "equal", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(true)
+  })
+
+  test("a diff TYPED into a pane + observed via pty_read ⇒ compared", () => {
+    const events: AgentEvent[] = [
+      call("p0", "pty_start", { command: "bash" }),
+      call("p1", "pty_write", { handle: "h", data: "diff mine.out baseline.out", appendNewline: true }),
+      result("p1", "pty_write", { preview: "ok" }),
+      call("p2", "pty_read", { handle: "h" }),
+      result("p2", "pty_read", { preview: "< foo\n> bar\n[nextSeq=3]" }),
+    ]
+    expect(comparedToReference(events).compared).toBe(true)
+  })
+
+  test("`bash -c 'diff a.txt b.txt'` unwraps to a real comparison ⇒ compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "bash -c 'diff a.txt b.txt'" }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(true)
+  })
+})
+
+describe("comparedToReference — R4 L1 gaming must NOT count", () => {
+  test.each([
+    ["diff a.txt a.txt", "same file twice (no real reference)"],
+    ["diff /dev/null /dev/null", "dev-null sinks"],
+    ["diff out.txt", "only one operand"],
+    ["diff", "no operands"],
+    ["echo matches", "bare echo claim"],
+    ["echo 'outputs are identical'", "text claim, no tool comparison"],
+    ["cmp -s x", "one operand"],
+  ])("gaming %p (%s) ⇒ NOT compared", (command) => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command }),
+      result("c1", "container_exec", { preview: "some text", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(false)
+  })
+
+  test("a real diff whose RESULT was never observed (no preview, no exitCode) ⇒ NOT compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "diff out.txt ref.txt" }),
+      result("c1", "container_exec", { preview: "" }), // never read the outcome
+    ]
+    expect(comparedToReference(events).compared).toBe(false)
+  })
+
+  test("a plain run (no comparator, no reference operand) ⇒ NOT compared", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "./solver input.txt" }),
+      result("c1", "container_exec", { preview: "42\n", exitCode: 0 }),
+    ]
+    const v = comparedToReference(events)
+    expect(v.compared).toBe(false)
+    expect(v.evidence).toContain("never")
+  })
+
+  // R4-b (audit): a SCRIPT run with two data files but NO reference-naming signal is an L0 RUN,
+  // not a comparison — `solve.py in.json out.json` must NOT masquerade as L1 (that would re-open a
+  // mini-rubber-stamp: the very thing v2 kills). The script branch requires a NAMED reference.
+  test.each([
+    "python solve.py input.json output.json",
+    "python solve.py in.csv out.csv",
+    "./solver data.npy result.npy",
+    "python check.py out.txt", // single operand, no reference
+  ])("a bare script run with no NAMED reference %p ⇒ NOT compared (no mini-rubber-stamp)", (command) => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command }),
+      result("c1", "container_exec", { preview: "ok", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(false)
+  })
+
+  test("a script that NAMES its reference (via flag or filename) IS accepted (the true-positive)", () => {
+    const flag: AgentEvent[] = [
+      call("c1", "container_exec", { command: "python check.py out.txt --expected ref.txt" }),
+      result("c1", "container_exec", { preview: "MATCH", exitCode: 0 }),
+    ]
+    const named: AgentEvent[] = [
+      call("c2", "container_exec", { command: "node cmp.js result.json baseline.json" }),
+      result("c2", "container_exec", { preview: "equal", exitCode: 0 }),
+    ]
+    expect(comparedToReference(flag).compared).toBe(true)
+    expect(comparedToReference(named).compared).toBe(true)
+  })
+})
+
+describe("comparedToReference — R1 no-leak (CRITICAL, box-proven): a test-path reference is REFUSED", () => {
+  test.each([
+    "diff out.sql /app/tests/golden.sql", // query-optimize's real layout — the load-bearing case
+    "diff result.txt tests/expected_output.txt",
+    "cmp mine.npy /verifier/original.npy",
+    "diff out.txt /private/answer.txt",
+    "diff out.json grader/solution.json",
+    "python check.py out.txt --expected tests/golden.txt",
+    // R1-a (audit): RUNNING the hidden verifier/grader SCRIPT itself is peeking too, even when the
+    // compared operands look clean — the leader path must be excluded, not just the operands.
+    "/app/tests/verify.py mine.out baseline.out",
+    "python /app/grader/check.py out.txt --reference ref.txt",
+    "node tests/compare.js result.json baseline.json",
+  ])("comparison against a test/verifier path %p ⇒ NOT compared (refused)", (command) => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ]
+    const v = comparedToReference(events)
+    expect(v.compared).toBe(false)
+    expect(v.refusedTestPath).toBe(true)
+    // The refusal evidence must NOT teach peeking (never names the model to go look at the golden).
+    expect(v.evidence?.toLowerCase()).not.toContain("golden.sql")
+  })
+
+  test("a REFUSED test-path diff does NOT mask a later FAIR comparison in the same trajectory", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: "diff out.txt /app/tests/golden.txt" }), // refused
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+      call("c2", "container_exec", { command: "diff out.txt /app/baseline.txt" }), // fair
+      result("c2", "container_exec", { preview: "", exitCode: 0 }),
+    ]
+    expect(comparedToReference(events).compared).toBe(true)
+  })
+
+  test("malformed / non-string command input does not crash and is not a comparison", () => {
+    const events: AgentEvent[] = [
+      call("c1", "container_exec", { command: 42 }),
+      call("c2", "container_exec", {}),
+      call("c3", "container_exec", null),
+    ]
+    expect(comparedToReference(events).compared).toBe(false)
+  })
+})

@@ -1,0 +1,31 @@
+### NOTE: The orchestrator scaffold runs the agent OUT-OF-BAND.
+### commands.txt below is ONLY the terminal-bench harness wrapper (asciinema rec + run-tests).
+### The agent's real LLM tool-calls / shell commands are NOT recorded anywhere in the results tree
+### (agent.cast shows only a multi-hundred-second gap of invisible work, then exit).
+### The real ground-truth of what the agent PRODUCED is the per-test outcome from sessions/tests.log,
+### appended below. Trajectory = artifacts left behind, reconstructed from test assertions.
+### SOLVED 6/6 — opus best-of-5 = 4/5 resolved
+
+===== commands.txt (harness wrapper, verbatim) =====
+['asciinema rec --stdin /logs/agent.cast', 'Enter']
+['clear', 'Enter']
+['asciinema rec --stdin /logs/tests.cast', 'Enter']
+['clear', 'Enter']
+['bash ', '/tests/run-tests.sh', 'Enter']
+['C-d']
+['C-d']
+
+===== reconstructed outcome from sessions/tests.log (ANSI-stripped, relevant lines) =====
+../tests/test_outputs.py::test_weights_file_exists PASSED                                                                                                [ 16%]
+../tests/test_outputs.py::test_cli_tool_exists PASSED                                                                                                    [ 33%]
+../tests/test_outputs.py::test_prediction_file_exists PASSED                                                                                             [ 50%]
+../tests/test_outputs.py::test_prediction_file_content PASSED                                                                                            [ 66%]
+../tests/test_outputs.py::test_cli_tool_executable PASSED                                                                                                [ 83%]
+../tests/test_outputs.py::test_cli_tool_output PASSED                                                                                                    [100%]
+--------------------------------------------------------------------- Captured stderr call ---------------------------------------------------------------------
+PASSED ../tests/test_outputs.py::test_weights_file_exists
+PASSED ../tests/test_outputs.py::test_cli_tool_exists
+PASSED ../tests/test_outputs.py::test_prediction_file_exists
+PASSED ../tests/test_outputs.py::test_prediction_file_content
+PASSED ../tests/test_outputs.py::test_cli_tool_executable
+PASSED ../tests/test_outputs.py::test_cli_tool_output

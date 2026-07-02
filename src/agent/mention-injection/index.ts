@@ -31,7 +31,12 @@ export { nodeFsAnchorDirLister, synthesizeLspAnchors } from "./anchor-synth"
 export { emitMentionEvents } from "./event-emitter"
 export { buildMentionInjectionMessages } from "./inject-messages"
 export { parseMentions } from "./parser"
-export type { MentionResolverPort, MentionResolverResult } from "./resolver"
+export type {
+  MentionResolutionError,
+  MentionResolveErrorSink,
+  MentionResolverPort,
+  MentionResolverResult,
+} from "./resolver"
 export { buildInjectionFragments } from "./resolver"
 export type { LspSymbolLookupOptions, UnionLspSymbolLookupOptions } from "./symbol-lookup-lsp"
 export { createLspSymbolLookup, createUnionLspSymbolLookup } from "./symbol-lookup-lsp"

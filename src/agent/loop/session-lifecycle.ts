@@ -264,12 +264,28 @@ export const finishAgentSession = async (args: {
   })
 }
 
+/**
+ * Outcome of {@link runSessionStartSequence}. `"continue"` proceeds to the turn
+ * loop; the `aborted` variant carries the abort CAUSE so the caller can attribute
+ * the right stop category — mirroring FIX 2c (`parkSettleFinish`), which split a
+ * SYSTEM-originated interrupt (subagent-wake settle) from a genuine user Ctrl+C.
+ *
+ * There are exactly TWO abort causes here:
+ *   - `"hook_deny"`  — a UserPromptSubmit hook DENIED the prompt: a policy /
+ *                      system block, NOT a user interrupt ⇒ SYSTEM bucket.
+ *   - `"interrupt"`  — an `interrupt` submission op (the genuine user interrupt)
+ *                      observed by {@link handleSubmissionControlOp} ⇒ USER bucket.
+ */
+export type SessionStartOutcome =
+  | { readonly status: "continue" }
+  | { readonly status: "aborted"; readonly cause: "hook_deny" | "interrupt" }
+
 export const runSessionStartSequence = async (args: {
   readonly cfg: AgentConfig
   readonly wm: import("@/memory").WorkingMemory<Message>
   readonly sessionId: string
   readonly taskRegistry: { forceStop(id: string): boolean } | undefined
-}): Promise<"continue" | "aborted"> => {
+}): Promise<SessionStartOutcome> => {
   args.cfg.stream.emit({ type: "session_start" })
   if (args.cfg.hooks) {
     await args.cfg.hooks.emit({ type: "session_start", sessionId: args.sessionId })
@@ -285,14 +301,16 @@ export const runSessionStartSequence = async (args: {
   }
   if (args.cfg.hooks !== undefined) {
     const denied = await emitUserPromptSubmitHook(args.cfg, args.wm, args.sessionId)
-    if (denied !== null) return "aborted"
+    // Hook DENY = policy/system block on the prompt (NOT a user Ctrl+C).
+    if (denied !== null) return { status: "aborted", cause: "hook_deny" }
   }
   observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
   await restoreFollowUpQueueSnapshot(args.cfg)
   await restorePlanSnapshot(args.cfg)
+  // `interrupt` submission op = the genuine user interrupt.
   return handleSubmissionControlOp(args.cfg, args.taskRegistry) === "aborted"
-    ? "aborted"
-    : "continue"
+    ? { status: "aborted", cause: "interrupt" }
+    : { status: "continue" }
 }
 
 export const handleSubmissionControlOp = (

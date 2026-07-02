@@ -2,19 +2,19 @@
  * Terminal-operator CAPABILITY GUIDANCE (RFC jun-29 §4.5 / §13 lever #5). A general
  * "how to drive a terminal well" prompt section — NOT a preset, NOT task-specific, and
  * deliberately free of any benchmark/gold-answer hint (it steers HOW to operate, never
- * WHAT the answer is). The composition root that assembles the `terminal` surface
- * (`buildTerminalTools`) WILL inject this as a capability section (NOT yet wired); it is a pure
- * string artifact with no wiring of its own, so it stays inert until that entry-point lands.
+ * WHAT the answer is). WIRED (jul-01): `src/apps/terminal` (`assembleTerminalSurface`) injects
+ * this alongside the surface tools and the brain (`brain-mode.ts`) puts it in the model's system
+ * turn (proven by the brain-mode hellgate, which asserts the full body reaches the model).
  *
  * Why it exists: the #1 real-world terminal-agent failure is "executable not in PATH"
  * (~24% of failures per the TB2.0 paper) — a pure environment-state problem the base loop
  * gives no guidance on. This encodes the SOTA habits that close it: probe before assuming,
  * exit-code = completion, install-on-demand, structured-exec over keystroke-typing.
  *
- * STATUS: content artifact only — NOT yet wired. `buildTerminalTools` returns tools, not this
- * string; the terminal entry-point (P2, box phase) WILL inject it as a capability section when it
- * assembles the surface. Until then it is inert (no consumer). Do not read the lines below as
- * "active behavior" — they describe the INTENDED injection point, not a wired one.
+ * NB (jul-01): a measure-to-gate / verify-before-submit / no-overfit steer was tried here and
+ * REVERTED — on the TB 3-task probe it produced zero solve-flips and made the agent over-persist
+ * (an unsolvable task ran ~3× longer for no gain). Net-negative at n=1; not shipped. See
+ * docs/analysis/terminal-bench-analysis/FAILURE-RCA.md.
  */
 
 /** The capability section text. General terminal-operator habits only. */

@@ -8,11 +8,42 @@ import { completedCategory, interruptedCategory } from "../stop-category"
 import { flushTurnObservability } from "../turn-closeout"
 import type { TurnState } from "../turn-context"
 import type { AgentOutcome } from "../types"
+import { isSessionApprovalRequiredError } from "./emit-helpers"
 import { runTurn } from "./same-turn-engine"
 import { resolveActiveModelId } from "./skill-gate"
 import { prepareTurnIteration, projectCostPreflight } from "./turn-iteration"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "./turn-outcome"
 import type { RunAgentContext, TurnResult } from "./types"
+
+/** Classify a throw out of `runTurn` into the observability labels the finally
+ *  block flushes. An approval-required PAUSE (HITL hand-off) is deliberately
+ *  labeled "aborted" (a pause, which `emitWorkMetrics` suppresses) rather than
+ *  "error" so it is not recorded as a hard run failure; every other throw stays
+ *  "error" (byte-identical to the prior unconditional `turnSpanStatus="error"`).
+ *  Pure — no throw, no IO. */
+export const classifyTurnThrow = (
+  e: unknown,
+): {
+  readonly turnSpanStatus: "ok" | "error" | "aborted"
+  readonly flushKind: "tools" | "completed" | "aborted" | "interrupted" | "error" | "refusal"
+} =>
+  isSessionApprovalRequiredError(e)
+    ? { turnSpanStatus: "aborted", flushKind: "aborted" }
+    : { turnSpanStatus: "error", flushKind: "error" }
+
+/** The finish tuple for the park/gate SETTLE path (a parked turn whose gate
+ *  wait resolved to "settle", or a park with no gate to keep waiting on). This
+ *  is a SYSTEM-originated interrupt (subagent wake), NOT a user Ctrl+C — so it
+ *  is attributed to `interruptedCategory("system")`. The true user-abort path
+ *  (`turnReady === "aborted"`, the `config.signal` abort) keeps
+ *  `interruptedCategory("user")`. Pure. */
+export const parkSettleFinish = (
+  turns: number,
+): {
+  readonly reason: "aborted"
+  readonly turns: number
+  readonly stopCategory: ReturnType<typeof interruptedCategory>
+} => ({ reason: "aborted", turns, stopCategory: interruptedCategory("system") })
 
 export const executeTurnWithObservability = async (args: {
   readonly ctx: RunAgentContext
@@ -47,7 +78,14 @@ export const executeTurnWithObservability = async (args: {
           ? "error"
           : "ok"
   } catch (e) {
-    turnSpanStatus = "error"
+    // An approval-required PAUSE (SessionApprovalRequiredError) is an intentional
+    // HITL hand-off, not a hard error — label the span + work-metrics as
+    // "aborted" (which `emitWorkMetrics` deliberately suppresses) instead of
+    // "error", so the pause is not recorded as a run failure. Any OTHER throw
+    // stays "error". Control flow is unchanged (the error is always rethrown).
+    const classification = classifyTurnThrow(e)
+    turnSpanStatus = classification.turnSpanStatus
+    flushKind = classification.flushKind
     throw e
   } finally {
     try {
@@ -93,6 +131,7 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
       dedupGate: ctx.dedupGate,
       shellSnapshotSession: ctx.shellSnapshotSession,
       hookPromptPending: ctx.hookPromptPending,
+      tokenBaseline: ctx.turnStateSeed.tokenBaseline,
     })
     if (turnReady === "aborted") {
       return ctx.finish("aborted", turn - 1, interruptedCategory("user"))
@@ -132,7 +171,8 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
     if (resolution.kind === "park") {
       const gate = ctx.cfg.subagentTurnGate
       if (gate !== undefined && (await gate.wait(ctx.cfg.signal)) !== "settle") continue
-      return ctx.finish("aborted", resolution.turns, interruptedCategory("user"))
+      const f = parkSettleFinish(resolution.turns)
+      return ctx.finish(f.reason, f.turns, f.stopCategory)
     }
     if (resolution.kind === "finish") {
       if (await shouldParkOnGate(ctx, resolution)) continue

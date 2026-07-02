@@ -294,13 +294,19 @@ export {
   planExitAllowsMutation,
   planExitStaysInPlan,
 } from "./plan-exit"
-export type { AgentMode, TurnContext, TurnContextInput } from "./prompt"
+export type { AgentMode, EnvironmentPosture, TurnContext, TurnContextInput } from "./prompt"
 export { buildSystemPrompt, buildTurnContext, escapeReminderBoundary } from "./prompt"
 export {
   type MaybeProposeRadarCardArgs,
   maybeProposeRadarCard,
   type RadarProducerBlock,
 } from "./radar-producer-hook"
+export {
+  type ComposeForSurfaceOpts,
+  composeSystemPromptForSurface,
+  FROZEN_SURFACE_PROFILE,
+  type SurfaceProfile,
+} from "./surface-profile"
 export { RECOVERY_CAPS } from "./recovery"
 export {
   loadRepoRules,

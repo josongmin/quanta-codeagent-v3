@@ -75,12 +75,61 @@ export interface MentionResolverPort {
   resolveGit?(target: string): Promise<MentionResolverResult | null>
 }
 
+/**
+ * A per-mention resolution FAILURE (adapter threw / rejected). Distinct
+ * from "unknown target" (a clean `null`), which is intentional + silent.
+ * Handed to an OPTIONAL {@link MentionResolveErrorSink} so a failed
+ * `@file` / `@skill` / `@symbol` reference is OPERATOR-VISIBLE instead of
+ * vanishing indistinguishably from "no mentions".
+ */
+export interface MentionResolutionError {
+  readonly kind: MentionKind
+  readonly target: string
+  readonly message: string
+}
+
+/**
+ * Optional non-fatal error sink. Invoked once per FAILING mention (throw /
+ * reject). MUST NOT be relied upon for control flow — the mention is still
+ * dropped and resolution still degrades clean. A sink that itself throws is
+ * swallowed (belt-and-suspenders); it can never abort the pipeline. When
+ * omitted, behaviour is byte-identical to the pre-fix path.
+ */
+export type MentionResolveErrorSink = (error: MentionResolutionError) => void
+
+/** Report a per-mention failure to the optional sink WITHOUT letting the
+ *  sink's own throw escape (it is a side-channel — dropping the signal is
+ *  preferable to crashing the turn, mirroring `safeCall` itself). */
+const reportError = (
+  sink: MentionResolveErrorSink | undefined,
+  kind: MentionKind,
+  target: string,
+  message: string,
+): void => {
+  if (sink === undefined) return
+  try {
+    sink({ kind, target, message })
+  } catch (e) {
+    logger.warn(`mention.resolver.sink: ${errMessage(e)}`)
+    /* swallow — side-channel, never crash the turn */
+  }
+}
+
 /** Belt-and-suspenders NO-THROW wrapper around a single resolver call.
  *  Hostile / buggy adapter throwing OR rejecting ⇒ treated as `null`
- *  (skip). `undefined` results are also normalized to `null`. */
+ *  (skip). `undefined` results are also normalized to `null`.
+ *
+ *  A THROW / REJECT (as opposed to a clean `null` = "unknown target") is
+ *  additionally reported to the optional {@link MentionResolveErrorSink} so
+ *  a failed reference is OPERATOR-VISIBLE. Mirrors the outer-wrapper
+ *  (`resolveMentionInjectionMessages`) emit-on-throw fix, whose `stream`
+ *  handle never reaches this inner path because `safeCall` catches first.
+ *  The `logger.warn` is RETAINED (the sink only ADDS visibility). */
 const safeCall = async (
   fn: ((target: string) => Promise<MentionResolverResult | null>) | undefined,
+  kind: MentionKind,
   target: string,
+  onError: MentionResolveErrorSink | undefined,
 ): Promise<MentionResolverResult | null> => {
   if (typeof fn !== "function") return null
   try {
@@ -88,7 +137,9 @@ const safeCall = async (
     if (v === null || v === undefined) return null
     return v
   } catch (e) {
-    logger.warn(`mention.resolver: ${errMessage(e)}`)
+    const message = errMessage(e)
+    logger.warn(`mention.resolver: ${message}`)
+    reportError(onError, kind, target, message)
     return null
   }
 }
@@ -122,9 +173,10 @@ const pickResolver = (
 const resolveOne = async (
   mention: ParsedMention,
   resolver: MentionResolverPort,
+  onError: MentionResolveErrorSink | undefined,
 ): Promise<InjectionFragment | null> => {
   const fn = pickResolver(resolver, mention.kind)
-  const result = await safeCall(fn, mention.target)
+  const result = await safeCall(fn, mention.kind, mention.target, onError)
   if (result === null) return null
 
   return {
@@ -148,13 +200,22 @@ const resolveOne = async (
  *
  * NO-THROW: any resolver exception / rejection is swallowed and the
  * mention is skipped. Empty `mentions` ⇒ `[]`.
+ *
+ * Observability: an OPTIONAL `onError` sink is invoked once per FAILING
+ * mention (adapter threw / rejected — NOT for a clean `null` "unknown
+ * target"). Without it, behaviour is byte-identical to the pre-fix path;
+ * with it, a failed `@file` / `@skill` / `@symbol` reference becomes
+ * operator-visible instead of vanishing like "no mentions". A caller can
+ * bridge the sink to its stream (`stream.emit({ type: "error", ... })`) at
+ * the wire-up seam — mirroring the outer-wrapper emit-on-throw fix.
  */
 export const buildInjectionFragments = async (
   mentions: readonly ParsedMention[],
   resolver: MentionResolverPort,
+  onError?: MentionResolveErrorSink,
 ): Promise<readonly InjectionFragment[]> => {
   if (mentions.length === 0) return []
-  const results = await Promise.all(mentions.map((m) => resolveOne(m, resolver)))
+  const results = await Promise.all(mentions.map((m) => resolveOne(m, resolver, onError)))
   const out: InjectionFragment[] = []
   for (const r of results) {
     if (r !== null) out.push(r)

@@ -65,6 +65,7 @@ describe("interrupt → capture → resume (E2E)", () => {
       wm: wm as never,
       sessionId: "s1",
       taskRegistry: undefined,
+      tokenBaseline: undefined,
     })
 
     expect(outcome).toBe("aborted")
@@ -121,6 +122,7 @@ describe("interrupt → capture → resume (E2E)", () => {
       wm: wm as never,
       sessionId: "s",
       taskRegistry: undefined,
+      tokenBaseline: undefined,
     })
     expect(outcome).toBe("aborted") // aborts exactly as before — just no capture
   })
@@ -149,7 +151,13 @@ describe("interrupt → capture → resume (E2E)", () => {
     surface.pushCancel("interrupt")
     const wm = fakeWm([msg("user", "the big task"), msg("assistant", "halfway done")])
     expect(
-      await syncQueuedTurnInputs({ cfg, wm: wm as never, sessionId: "s", taskRegistry: undefined }),
+      await syncQueuedTurnInputs({
+        cfg,
+        wm: wm as never,
+        sessionId: "s",
+        taskRegistry: undefined,
+        tokenBaseline: undefined,
+      }),
     ).toBe("aborted")
 
     // 2) resume → re-inject the captured task

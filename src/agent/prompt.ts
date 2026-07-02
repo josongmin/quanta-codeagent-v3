@@ -23,6 +23,7 @@ import {
 import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
   type AgentMode as PromptPackMode,
+  renderOwnedRules,
   renderPackByMode,
   renderToolUseRules,
 } from "./prompt-rules"
@@ -49,6 +50,14 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  * `<system-reminder>` user message so the cached prefix never shifts.
  */
 
+/** Environment posture (RFC jul-2-terminal-bench-levers/01) — selects which env
+ *  RULE TEXT the model is told, and NOTHING ELSE. `"frozen"` (DEFAULT) = today's
+ *  SWE-bench guardrails verbatim (do-not-install / stop-when-env-blocked). `"owned"`
+ *  = the surface owns its container, so install/configure/build freely (Terminal
+ *  brain / Terminal-Bench). PROMPT-TEXT-ONLY: this NEVER touches `SandboxPolicy` /
+ *  `os-sandbox` / any runtime enforcement — it only swaps the rendered rule list. */
+export type EnvironmentPosture = "frozen" | "owned"
+
 /** The static system prompt. No per-turn data — keep it byte-stable so the
  *  provider cache prefix holds across the whole session. The legacy `cwd`
  *  parameter is accepted but ignored: cwd is now per-turn dynamic context
@@ -65,6 +74,12 @@ export const buildSystemPrompt = (
      *  pre-ADR base prompt; the slot's contract is "1..=3 single-line
      *  strings", validated at build time. */
     identity?: readonly string[]
+    /** Environment posture (RFC jul-2). `"frozen"` / absent ⇒ IDENTICAL code path
+     *  as today (byte-identical). `"owned"` ⇒ render {@link renderOwnedRules} in
+     *  place of the CORE-based tool-use rules (a NEW, separate axis from the
+     *  task-posture `promptPack` / `mode`; posture is env-ownership, not task-mode).
+     *  Prompt-text-only — never touches runtime enforcement. */
+    envPosture?: EnvironmentPosture
   },
 ): string =>
   [
@@ -79,11 +94,19 @@ export const buildSystemPrompt = (
     // splice the persona body + a blank-line separator before Policy stack.
     ...personaLines(opts?.persona ?? "default"),
     ...BODY_AFTER_PERSONA,
-    // Pack-selection seam: when `promptPack` is set the caller gets the
-    // mode-specific rule set (headless / batch / ci-bot); when absent we
-    // call `renderToolUseRules()` so the interactive default stays byte-
-    // identical to pre-slice output and the cached prefix is unchanged.
-    ...(opts?.promptPack !== undefined ? renderPackByMode(opts.promptPack) : renderToolUseRules()),
+    // Env-posture seam (RFC jul-2): `owned` renders the install-permitted rule
+    // list in place of the CORE-based rules. Guarded so `frozen` / absent takes
+    // the EXACT pre-change code path below (byte-identical, cached prefix intact).
+    // Prompt-text-only — no runtime enforcement is touched here.
+    ...(opts?.envPosture === "owned"
+      ? renderOwnedRules()
+      : // Pack-selection seam: when `promptPack` is set the caller gets the
+        // mode-specific rule set (headless / batch / ci-bot); when absent we
+        // call `renderToolUseRules()` so the interactive default stays byte-
+        // identical to pre-slice output and the cached prefix is unchanged.
+        opts?.promptPack !== undefined
+        ? renderPackByMode(opts.promptPack)
+        : renderToolUseRules()),
     ...BODY_AFTER_PROMPT_PACK,
   ].join("\n")
 

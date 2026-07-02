@@ -5,6 +5,7 @@ import {
   estimateTokens,
   reactiveCompact,
   resolveCompactionLimitTokens,
+  TokenBaselineBox,
 } from "../compaction"
 import { metaUser, runGuardChain } from "../guards"
 import type { AssembledMessage, RecoveryAction, RecoveryState } from "../recovery"
@@ -144,8 +145,12 @@ export const applyNonSuccessRecoveryAction = async (
   // D5 (jun-7) — reactive compaction replaced the transcript prefix, so any
   // token-baseline measured against the OLD prefix is now stale (its index would
   // mis-map once the transcript regrows). Invalidate it; a fresh exact usage
-  // re-establishes the baseline against the new prefix.
-  if (state.tokenBaseline !== undefined) state.tokenBaseline.current = undefined
+  // re-establishes the baseline against the new prefix. SSOT (jul-2): route through
+  // the owner method instead of poking `.current` raw — `invalidateOnContentChange`
+  // is the unconditional clear (identical effect to the prior raw assignment) so
+  // every invalidation site now goes through {@link TokenBaselineBox}.
+  if (state.tokenBaseline !== undefined)
+    TokenBaselineBox.wrap(state.tokenBaseline).invalidateOnContentChange()
   resetEffortClassifier(config.effortClassifier)
   try {
     const provenance: import("../recovery-reason").RecoveryProvenance = {

@@ -258,10 +258,14 @@ const resetForTombstone = (state: TurnState): void => {
 
 /** Abandon every in-flight (early-started) dispatch on an ABORT short-circuit.
  *  When `streamingTurn` returns `{kind:"aborted"}` it walks away from any slot
- *  whose `dispatch(call)` was already fired in flight (a concurrency-safe
- *  read-only overlap call, OR an early-dispatch-safe `agent` spawn per
- *  ADR-0298 — isolated child loop, not read-only). The abort has DECIDED to
- *  discard those results, so nobody awaits them anymore. If such a promise
+ *  whose `dispatch(call)` was already fired in flight. Post FIX 6, the ONLY
+ *  early-started slots are STRICTLY read-only overlap calls (a read-only tool
+ *  commits no side effect, so discarding its result on abort loses nothing that
+ *  a resume would double-execute). `agent` (non-read-only) is no longer
+ *  early-started — it runs deferred in the Phase-3 serial drain — precisely so
+ *  the abort path can never discard a committed-but-unrecorded mutation. The
+ *  abort has DECIDED to discard those (read-only) results, so nobody awaits them
+ *  anymore. If such a promise
  *  later rejects (the spawned child throws on its own abort; a tool rejects
  *  post-abort) with no handler attached, Bun/Node raises an
  *  `unhandledRejection`. We attach a noop `.catch` to each STARTED slot so that
@@ -354,19 +358,33 @@ const scheduleResolvedCall = (
   // commit that mutating side effect, breaking the "refusal executes nothing"
   // invariant (ADR-0076 Gap-5).
   //
-  // Eligibility = `isEarlyDispatchSafe(name)` (== `registry.isEarlyDispatchSafe`,
-  // which itself falls back to `isReadOnly()` for tools that don't opt in). This
-  // keeps read-only tools eligible AND admits `agent` (ADR-0298): an `agent`
-  // spawn is NOT read-only, but its effects run inside an ISOLATED child loop
-  // with its own abort signal — not at the parent seam — so early-starting it is
-  // not a parent-seam mutation. Tools that mutate at the parent seam do NOT opt
-  // in and remain deferred (T02 guard intact). When the loop did not wire
-  // `isEarlyDispatchSafe`, fall back to `isReadOnly` so behaviour is identical
-  // to the original T02 path. Fail-safe: an unwired predicate (undefined) or a
-  // throwing predicate ⇒ NOT early-safe ⇒ defer.
+  // FIX 6 (early-dispatch abort hole) — eligibility = `isReadOnly(name)`,
+  // STRICTLY read-only. The prior gate also admitted `agent` via
+  // `isEarlyDispatchSafe` (ADR-0298: an `agent` spawn is NOT read-only but its
+  // effects run inside an isolated child loop). That opened an ABORT hole: an
+  // early-started `agent` is fired in flight and, on a `config.signal` abort,
+  // `abandonInFlight` discards its in-flight promise (fire-and-forget `.catch`)
+  // and `streamingTurn` returns `{kind:"aborted"}` BEFORE the slot's
+  // `tool_result` is appended. If the child `agent` already committed a side
+  // effect (write/bash) before observing the shared signal, that mutation
+  // PERSISTS but its `tool_result` is never recorded — on resume the transcript
+  // has no record it ran → double-exec risk. Recording it on the abort path
+  // would require carrying `resultBlocks` on the `aborted` variant AND having
+  // the sole consumer (`loop/stream-consume.ts`, which currently discards the
+  // aborted outcome) persist them — an out-of-fence change. The fence-clean,
+  // hole-closing fix is to NEVER early-start a NON-read-only tool: `agent` still
+  // runs, just in the Phase-3 serial drain (deferred slot), so on abort it has
+  // `promise === undefined` and never commits an unrecorded side effect. Only
+  // `agent`'s in-flight OVERLAP is lost; `resultBlocks`/ordering are unchanged.
+  // Read-only early-dispatch is byte-identical. Note `isEarlyDispatchSafe` is
+  // retained on the args (still wired by the loop) but intentionally NOT
+  // consulted by this gate — removing it from the type would ripple to the
+  // out-of-fence wiring. Fail-safe: an unwired predicate (undefined) or a
+  // throwing predicate ⇒ NOT read-only ⇒ defer.
+  void isEarlyDispatchSafe
   let earlySafe: boolean
   try {
-    earlySafe = (isEarlyDispatchSafe ?? isReadOnly)?.(call.name) ?? false
+    earlySafe = isReadOnly?.(call.name) ?? false
   } catch {
     earlySafe = false
   }

@@ -76,7 +76,13 @@ const BARE_CATCH_BASELINE: Readonly<Record<string, number>> = {
   "src/agent/approval-state-machine/store.ts": 12,
   "src/agent/codex-r2-wire-install/install.ts": 4,
   "src/agent/compaction.ts": 0,
-  "src/agent/loop.ts": 6,
+  // jul-2 (FIX 5): two silent `} catch {` in the loop slice
+  // (compaction-wire `resolveContextEventsForTurn`, context-assembler
+  // `resolveMentionInjectionMessages`) were migrated to bound
+  // `} catch (e) { config.stream.emit({type:"error", ...}) }` so a throwing
+  // context-events / @mention provider is observable instead of silently
+  // indistinguishable from "nothing to inject". Ratchet tightened 6 → 4.
+  "src/agent/loop.ts": 4,
   "src/agent/observability-wire/wire.ts": 1,
 }
 

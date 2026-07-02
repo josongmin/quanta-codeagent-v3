@@ -24,6 +24,32 @@ import type { WorkingStateSession } from "../working-state"
 import { maybeCompact, resolveContextEventsForTurn, staticSystemFor } from "./compaction-wire"
 import { configuredModel, resolveWindowModel } from "./emit-helpers"
 
+/** The memory-recall QUERY = the last user message with NON-EMPTY text, skipping
+ *  pure `tool_result` carrier turns and whitespace-only user turns. After a tools
+ *  turn the loop appends `{role:"user", content:[tool_result…]}` whose text is
+ *  empty; the naive "last user message" pick collapsed the query to "" on EVERY
+ *  turn following a tools turn, so recall ran unfocused. Mirrors the
+ *  `captureInterruptedTurn` skip-carrier predicate. Returns `undefined` when no
+ *  user message carries real text (byte-identical to the prior empty-query path).
+ *  NOTE: intentionally LOCAL to recall — `latestUserTextFromWm` must NOT adopt
+ *  this walk-back (mention injection relies on it going empty after a tools turn
+ *  so `@`-mentions are not re-injected every subsequent turn). */
+export const deriveRecallQuery = (wm: WorkingMemory<Message>): string | undefined => {
+  const snap = wm.snapshot()
+  for (let i = snap.length - 1; i >= 0; i--) {
+    const m = snap[i]
+    if (m === undefined || m.role !== "user") continue
+    const t = m.content
+      .filter((b) => b.type === "text")
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join(" ")
+      .trim()
+    if (t.length === 0) continue
+    return t
+  }
+  return undefined
+}
+
 export const resolveMemoryContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -31,12 +57,7 @@ export const resolveMemoryContext = async (
   citations: MemoryCitation[],
 ): Promise<string | undefined> => {
   if (!config.store) return undefined
-  const lastUser = [...wm.snapshot()].reverse().find((m) => m.role === "user")
-  const queryText = lastUser?.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .join(" ")
-    .trim()
+  const queryText = deriveRecallQuery(wm)
   try {
     const block = await recallContext(
       {
@@ -82,7 +103,17 @@ export const resolveMentionInjectionMessages = async (
   if (userText === undefined || userText.length === 0) return []
   try {
     return await config.mentionInjector(userText)
-  } catch {
+  } catch (e) {
+    // A throwing mention/@-file injector must be OBSERVABLE — otherwise a failed
+    // `@file` expansion is indistinguishable from "no mentions to inject" and the
+    // user's referenced context silently vanishes. Mirror the sibling
+    // `resolveMemoryContext` above which surfaces a NON-FATAL `error` event on
+    // throw. Still degrade clean (return `[]`); the emit only ADDS visibility. The
+    // SUCCESS path is untouched (no emit when nothing throws) ⇒ byte-identical.
+    config.stream.emit({
+      type: "error",
+      message: `mention injection failed: ${errMessage(e)}`,
+    })
     return []
   }
 }

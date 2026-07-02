@@ -147,12 +147,26 @@ export type SummarizeError =
  * post-install transcript size — the controller compares it against the live
  * `usedTokens` to apply the persist threshold WITHOUT importing the token
  * estimator (keeps the slice @/llm-free).
+ *
+ * `summarizedPrefixLen` (H1, jul-2) is the length of the transcript PREFIX the
+ * adapter folded into the summary (the boundary index into the snapshot it
+ * summarized). The payload `S` freezes a `[synthetic, ...suffix]` built from that
+ * snapshot; by the turn boundary the LIVE transcript has usually grown (turn
+ * N+1's appends), so the host must NOT install the frozen suffix verbatim (that
+ * drops the appends). Instead it recomputes `liveSuffix = liveWm.slice(
+ * summarizedPrefixLen)` at install so post-snapshot appends survive. A pure count
+ * (no @/llm dependency), so the slice stays Message-free.
  */
 export type SpeculativeSummarizeFn<S> = (req: {
   cancel: CancelToken
-}) => Promise<Result<{ summary: S; resultingTokens: number }, SummarizeError>>
+}) => Promise<
+  Result<{ summary: S; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>
+>
 
-/** Reconcile outcome: install the produced summary, or discard with a reason. */
+/** Reconcile outcome: install the produced summary, or discard with a reason.
+ *  `summarizedPrefixLen` rides the install (H1) so the host recomputes the suffix
+ *  against the LIVE transcript rather than installing the frozen snapshot suffix
+ *  (which would drop any messages appended after the speculative snapshot). */
 export type ReconcileOutcome<S> =
-  | { kind: "install"; summary: S; freedTokens: number }
+  | { kind: "install"; summary: S; freedTokens: number; summarizedPrefixLen: number }
   | { kind: "discard"; reason: DiscardReason }

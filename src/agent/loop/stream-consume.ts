@@ -5,7 +5,7 @@ import {
   snapshotToNotice,
 } from "@/llm/ratelimit-snapshot"
 import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from "@/observability"
-import { abortReasonOf, errMessage, LLMError, runtimeConfig } from "@/shared"
+import { abortReasonOf, errMessage, LLMError } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
@@ -108,6 +108,46 @@ const applyProactiveRateLimitBackoff = async (
   if (rl.proactive) await rl.sleep(delayMs)
 }
 
+/** Fire the optional per-turn stream-input observer, isolating a thrown observer
+ *  as a soft stream error (never fails the turn). Extracted from `streamConsume`
+ *  to keep it under the god-FUNCTION size cap — behavior identical. */
+const notifyTurnStreamInput = (
+  config: AgentConfig,
+  input: Parameters<NonNullable<AgentConfig["onTurnStreamInput"]>>[0],
+): void => {
+  if (config.onTurnStreamInput === undefined) return
+  try {
+    config.onTurnStreamInput(input)
+  } catch (e) {
+    config.stream.emit({
+      type: "error",
+      message: `onTurnStreamInput observer threw: ${errMessage(e)}`,
+    })
+  }
+}
+
+type StreamTurnErrorOutcome =
+  | { status: "aborted"; rethrow: true }
+  | { status: "aborted"; result: StreamConsumeResult }
+  | { status: "error"; result: StreamConsumeResult }
+
+/** Classify a thrown streaming-turn error into (sampling-span status, control
+ *  flow). An approval-required PAUSE is an intentional HITL hand-off — record it
+ *  as "aborted" (paused), NOT "error", and rethrow so the caller pauses the turn.
+ *  Abort signals ⇒ soft aborted; anything else ⇒ a hard error result. Extracted
+ *  to keep `streamConsume` under the god-FUNCTION cap — behavior identical. */
+const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErrorOutcome => {
+  if (isSessionApprovalRequiredError(e)) return { status: "aborted", rethrow: true }
+  if (
+    config.signal.aborted ||
+    (e instanceof LLMError && e.kind === "aborted") ||
+    abortReasonOf(e) !== null
+  )
+    return { status: "aborted", result: { aborted: true } }
+  const message = e instanceof LLMError ? e.message : errMessage(e)
+  return { status: "error", result: { error: e, message } }
+}
+
 export const streamConsume = async (
   session: TurnSession,
   state: TurnState,
@@ -116,11 +156,18 @@ export const streamConsume = async (
   const { config, specs, recorder, skillGate, rateLimitProactive } = session
   const { collector, toolChoiceState, onTurnTiming, taskSpend } = state
   const { messages, system } = ctx
-  // ADR-0512 L1 — availability filter. When skill-scope v2 is ON, the model
-  // sees ONLY the tools in scope (nav-base ∪ active skill allowlist); OFF ⇒
-  // `specs` unchanged (byte-identical). Reuses `skillGate.allow` so the visible
-  // set and the dispatch gate share one predicate.
-  const visibleSpecs = runtimeConfig().skillScopeV2 ? filterSpecsByScope(specs, skillGate) : specs
+  // ADR-0512 L1 — availability filter. The model must never SEE a tool the
+  // dispatch gate (`handleSkillScope` → `skillGate.allow`) will deny, or it
+  // fumbles into a guaranteed "not permitted" tool_result (see-but-can't-call).
+  // The dispatch deny fires whenever a `skillGate` with an armed allowlist is
+  // active — INDEPENDENT of `skillScopeV2` — so the visible-spec filter must fire
+  // on the SAME condition. Both sites share the `skillGate.allow` predicate via
+  // `filterSpecsByScope`, so visible == dispatchable in BOTH flag states. When no
+  // skill is armed (`skillGate` absent, or `allow` returns true for every tool)
+  // `filterSpecsByScope` returns the SAME `specs` reference (byte-identical). v2
+  // ON is unchanged (it already filtered). NOTE: the flag still gates the v2
+  // escalation UX in `handleSkillScope`; only the VISIBILITY filter is unified.
+  const visibleSpecs = filterSpecsByScope(specs, skillGate)
   const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
   session.ttfm?.markFirstDispatch()
   emitLlmRequest(
@@ -153,22 +200,13 @@ export const streamConsume = async (
   const turnTimingCapture = createTurnTimingCapture()
   const anchors: TurnTimingAnchors = { turnTimingCapture }
   const callbacks = createStreamDispatcher(session, state, anchors)
-  if (config.onTurnStreamInput !== undefined) {
-    try {
-      config.onTurnStreamInput({
-        messages,
-        system,
-        tools: visibleSpecs,
-        ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
-        ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
-      })
-    } catch (e) {
-      config.stream.emit({
-        type: "error",
-        message: `onTurnStreamInput observer threw: ${errMessage(e)}`,
-      })
-    }
-  }
+  notifyTurnStreamInput(config, {
+    messages,
+    system,
+    tools: visibleSpecs,
+    ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
+    ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+  })
   if (rateLimitProactive !== undefined)
     await applyProactiveRateLimitBackoff(config, rateLimitProactive)
   try {
@@ -222,21 +260,10 @@ export const streamConsume = async (
       resultBlocks: outcome.resultBlocks,
     }
   } catch (e) {
-    if (isSessionApprovalRequiredError(e)) {
-      samplingStatus = "error"
-      throw e
-    }
-    if (
-      config.signal.aborted ||
-      (e instanceof LLMError && e.kind === "aborted") ||
-      abortReasonOf(e) !== null
-    ) {
-      samplingStatus = "aborted"
-      return { aborted: true }
-    }
-    samplingStatus = "error"
-    const message = e instanceof LLMError ? e.message : errMessage(e)
-    return { error: e, message }
+    const outcome = classifyStreamTurnError(e, config)
+    samplingStatus = outcome.status
+    if ("rethrow" in outcome) throw e
+    return outcome.result
   } finally {
     stop?.()
     turnTimingCapture.markStreamEnd()

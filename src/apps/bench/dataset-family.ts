@@ -15,7 +15,7 @@ import {
   type SwebenchTask,
 } from "@/runner/batch/corpus/dataset"
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
-import { type ProSwebenchOpts, evaluateWithProSwebench } from "./pro-swebench"
+import { evaluateWithProSwebench, type ProSwebenchOpts } from "./pro-swebench"
 import { evaluateWithPythonSwebench } from "./python-swebench"
 import type { Instance } from "./types"
 
@@ -30,6 +30,23 @@ export const resolveDatasetFamily = (
 ): DatasetFamily => {
   const raw = (argvValue ?? env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "verified").toLowerCase()
   return raw === "pro" || raw === "live" ? raw : "verified"
+}
+
+/** Bridge the `--dataset-family` CLI flag into the canonical
+ *  `QUANTA_SWEBENCH_DATASET_FAMILY` env var so EVERY downstream reader sees it: the
+ *  full-remote/pool pre-flight (`resolveDatasetFamily(undefined, env)`) AND the on-box
+ *  grade (box-session forwards this env to the box). WITHOUT this, a
+ *  `--dataset-family live` on the full-remote/pool path was a SILENT no-op (only an
+ *  explicit `export` worked) → Live was graded as Verified (RFC jun-29 / jul-01 audit
+ *  gap A1). Flag absent/empty ⇒ NO write (env/default untouched ⇒ byte-identical).
+ *  Returns the resolved family. */
+export const bridgeDatasetFamilyToEnv = (
+  argvValue: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): DatasetFamily => {
+  const family = resolveDatasetFamily(argvValue, env)
+  if (argvValue !== undefined && argvValue !== "") env.QUANTA_SWEBENCH_DATASET_FAMILY = family
+  return family
 }
 
 /** Parse the dataset JSONL for the family: Pro rows carry lowercase `fail_to_pass`

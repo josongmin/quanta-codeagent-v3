@@ -37,9 +37,13 @@ const textOf = (m: Message): string =>
 
 /**
  * Capture the interrupted turn from the working-memory message list. The
- * originating prompt is the LAST `user` message; the partial progress is the
- * concatenation of every `assistant` message AFTER it. Defensive: no user
- * message ⇒ empty `userText`; no assistant work ⇒ empty `partialAssistantText`.
+ * originating prompt is the LAST `user` message with NON-EMPTY text — after a
+ * tools turn the loop appends a `{role:"user", content:[tool_result…]}` message
+ * whose `textOf` is "" (turn-outcome.ts); picking that as the prompt silently
+ * loses the task, so those pure tool_result carriers are skipped. The partial
+ * progress is the concatenation of every `assistant` message AFTER the chosen
+ * user message. Defensive: no user text ⇒ empty `userText`; no assistant work ⇒
+ * empty `partialAssistantText`.
  */
 export const captureInterruptedTurn = (
   messages: ReadonlyArray<Message>,
@@ -47,13 +51,19 @@ export const captureInterruptedTurn = (
   now: number,
 ): InterruptedTurn => {
   let lastUserIdx = -1
+  let userText = ""
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]?.role === "user") {
-      lastUserIdx = i
-      break
-    }
+    if (messages[i]?.role !== "user") continue
+    const t = textOf(messages[i] as Message)
+    // Skip pure tool_result carrier messages AND whitespace-only user turns — a
+    // blank/steer-injected user message must not shadow the real earlier prompt
+    // (else `buildResumeMessage` emits a blank task body, the same loss the fix
+    // targets). Mirrors the `.trim()` gate `buildResumeMessage` uses for partials.
+    if (t.trim().length === 0) continue
+    lastUserIdx = i
+    userText = t
+    break
   }
-  const userText = lastUserIdx >= 0 ? textOf(messages[lastUserIdx] as Message) : ""
   const partial: string[] = []
   for (let i = lastUserIdx + 1; i < messages.length; i++) {
     const m = messages[i] as Message

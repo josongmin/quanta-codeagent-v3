@@ -1,0 +1,57 @@
+# quanta ↔ Terminal-Bench (Harbor) adapter — installable package.
+#
+# Exposes BOTH the pure box-free bridge (`quanta_terminal_bridge`) and the Harbor
+# `BaseAgent` glue module (`quanta_agent`) so Harbor can load the agent by import
+# selector:  `harbor run … --agent quanta_agent:QuantaAgent`
+# (RFC §3 `docs/rfc/jun-29-rfc-terminal-bench-integration.md` line 61 spells the
+# `--agent module:Class` shape — the `module` here is the top-level `quanta_agent`
+# py-module this package installs, the `Class` is `QuantaAgent`).
+#
+# LOCAL DEV (no Docker, no Harbor): `pip install -e .` installs ONLY the bridge +
+# glue. harbor is an OPTIONAL extra (`.[harbor]`) — `quanta_agent` imports it under
+# a try/except fallback, so `import quanta_agent` works with harbor absent (the
+# `BaseAgent = object` path). Install `.[harbor]` only inside the box image.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quanta-terminal-bench"
+version = "0.1.0"
+description = "quanta terminal-operator as a Harbor BaseAgent for Terminal-Bench (hands-side bridge + glue)"
+readme = "README.md"
+# 3.9 floor: the bridge + glue py_compile + run on 3.9 (local dev box is 3.9);
+# the box image ships a newer python for harbor, but the adapter itself stays 3.9-safe.
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+# Core has ZERO third-party runtime deps — the bridge/glue are stdlib-only
+# (asyncio/json/os/tempfile/pathlib). This is what keeps `import quanta_agent`
+# green without harbor.
+dependencies = []
+
+[project.optional-dependencies]
+# box-only: the real Harbor framework. NOT on PyPI as a usable package — the PyPI
+# `harbor` (0.1.20) is a yanked squat (RFC §10 line 132); the real one is the git
+# repo `harbor-framework/harbor`. Installed in the box image (see Dockerfile), NOT
+# here, so this extra is a documented pin target rather than a resolvable PyPI dep.
+# box-verify: confirm the exact ref/tag harbor pins to on the provisioned box and
+# replace the VCS URL below with the box's pinned commit before `tb run`.
+harbor = [
+  # box-verify — pin to the commit the box uses; this VCS spec is the placeholder.
+  "harbor @ git+https://github.com/harbor-framework/harbor.git",
+]
+dev = [
+  "pytest>=7,<9",
+]
+
+[tool.setuptools]
+# Top-level py-module `quanta_agent` (the Harbor selector target) + the bridge package.
+py-modules = ["quanta_agent"]
+
+[tool.setuptools.packages.find]
+include = ["quanta_terminal_bridge*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

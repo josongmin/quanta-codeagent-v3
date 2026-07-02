@@ -46,6 +46,10 @@ export const syncQueuedTurnInputs = async (args: {
   readonly wm: WorkingMemory<Message>
   readonly sessionId: string
   readonly taskRegistry: { forceStop(id: string): boolean } | undefined
+  // D5 (jul-2) — the per-session token-baseline box, threaded so the
+  // `/summarize-now` verb (`compactNowOnDemand` below) can invalidate it after it
+  // shrinks the prefix. `undefined` ⇒ no box wired ⇒ byte-identical.
+  readonly tokenBaseline: import("../compaction").TokenBaselineBoxState | undefined
 }): Promise<"continue" | "aborted"> => {
   const followUpResult = pollFollowUpQueue(args.cfg, args.sessionId)
   if (followUpResult !== null) args.wm.append(followUpResult)
@@ -73,7 +77,8 @@ export const syncQueuedTurnInputs = async (args: {
   if (actionOutcome.kind === "summarize") {
     // §11.5 — the `/summarize-now` verb: run an on-demand force-compaction over
     // working memory. No-op when `config.compaction` is absent (degrades clean).
-    await compactNowOnDemand(args.cfg, args.wm)
+    // Pass the token-baseline box so the shrunk prefix invalidates it (D5).
+    await compactNowOnDemand(args.cfg, args.wm, args.tokenBaseline)
   }
   return "continue"
 }
@@ -170,6 +175,9 @@ export const prepareTurnIteration = async (args: {
   readonly dedupGate: unknown
   readonly shellSnapshotSession: ShellSnapshotSession | undefined
   readonly hookPromptPending: import("../hooks").HookPromptInject[]
+  // D5 (jul-2) — token-baseline box forwarded to `syncQueuedTurnInputs` so
+  // `/summarize-now` can invalidate it. `undefined` ⇒ byte-identical.
+  readonly tokenBaseline: import("../compaction").TokenBaselineBoxState | undefined
 }): Promise<"continue" | "aborted"> => {
   if (args.cfg.signal.aborted) return "aborted"
   if (args.localizePhaseState !== undefined) args.localizePhaseState.turn = args.turn - 1

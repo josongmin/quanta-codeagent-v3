@@ -270,7 +270,7 @@ describe("T02 M5 — turn observability closeout", () => {
   // THROWS out of `runTurn` (a HITL approval-required escape). The prior M5
   // cases only drove `completed` / `refusal` (normal RETURNS) and so never
   // exercised the throw/pause path the move existed to fix.
-  test("turn that THROWS (HITL approval escape) STILL flushes diff+directive+work-metrics exactly once, and the throw propagates", async () => {
+  test("turn that THROWS (HITL approval escape) STILL flushes diff+directive once, SUPPRESSES work-metrics (approval PAUSE ≠ error), and the throw propagates", async () => {
     const diff = new CountingDiffSession()
     const collector = new CountingDirectiveCollector()
     const work = new CountingWorkMetricsSink()
@@ -291,13 +291,17 @@ describe("T02 M5 — turn observability closeout", () => {
     })
     expect(threw).toBe(true)
     // Despite the throw, the closeout flush in the `finally` fired EXACTLY ONCE
-    // for the (single) thrown turn: turn-diff endTurn, git-directive flush, and
-    // work-metrics emit (the throw classifies as `error`, which still emits
-    // metrics — only `aborted` suppresses them).
+    // for the (single) thrown turn: turn-diff endTurn + git-directive flush
+    // (these are UNCONDITIONAL on the result kind). Work-metrics, however, are
+    // SUPPRESSED: an approval-required escape is an intentional HITL PAUSE, not a
+    // hard failure, so `classifyTurnThrow` labels it `aborted` (which
+    // `emitWorkMetrics` deliberately suppresses) — it must NOT be recorded as a
+    // completed unit of work. (Prior to the FIX-2b classification, this threw
+    // path mislabeled the pause as `error` and wrongly emitted a metric.)
     expect(diff.startTurns).toBe(1)
     expect(diff.endTurns).toBe(1)
     expect(collector.flushes).toBe(1)
-    expect(work.emits).toBe(1)
+    expect(work.emits).toBe(0)
   })
 })
 
