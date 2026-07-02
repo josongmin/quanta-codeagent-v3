@@ -48,7 +48,7 @@ class FakeServer implements McpTransport {
   constructor(
     private readonly caps: { resources?: boolean; prompts?: boolean },
     private readonly catalog: {
-      resources?: Array<{ uri: string; name?: string }>
+      resources?: Array<{ uri: string; name?: string; mimeType?: string }>
       contents?: Record<string, { mimeType?: string; text?: string }>
       prompts?: Array<{ name: string }>
       promptText?: Record<string, string>
@@ -176,6 +176,7 @@ const N3_TOOLS = [
   "mcp_list_resources",
   "mcp_list_resource_templates",
   "mcp_read_resource",
+  "mcp_read_resource_dir", // B4
   "mcp_list_prompts",
   "mcp_get_prompt",
 ] as const
@@ -223,7 +224,15 @@ describe("N3 host-wire — multi-client aggregation", () => {
     const a = new FakeServer(
       { resources: true, prompts: true },
       {
-        resources: [{ uri: "a://one", name: "A1" }],
+        resources: [
+          { uri: "a://one", name: "A1" },
+          // B4 — a directory-shaped layout under `a://dir/` to exercise
+          // readResourceDir over the LIVE client → aggregate (wiring-proof).
+          { uri: "a://dir/", mimeType: "inode/directory" },
+          { uri: "a://dir/child.txt" },
+          { uri: "a://dir/sub", mimeType: "inode/directory" },
+          { uri: "a://dir/sub/grandchild.txt" },
+        ],
         contents: { "a://one": { text: "alpha" } },
         prompts: [{ name: "pa" }],
         promptText: { pa: "from-A" },
@@ -247,7 +256,14 @@ describe("N3 host-wire — multi-client aggregation", () => {
       const list = await handle.listResources()
       expect(list.ok).toBe(true)
       if (!list.ok) throw new Error("unreachable")
-      expect(list.value.map((r) => r.uri).sort()).toEqual(["a://one", "b://two"])
+      expect(list.value.map((r) => r.uri).sort()).toEqual([
+        "a://dir/",
+        "a://dir/child.txt",
+        "a://dir/sub",
+        "a://dir/sub/grandchild.txt",
+        "a://one",
+        "b://two",
+      ])
 
       const prompts = await handle.listPrompts()
       expect(prompts.ok).toBe(true)
@@ -270,6 +286,17 @@ describe("N3 host-wire — multi-client aggregation", () => {
       // never a throw.
       const miss = await handle.readResource("z://nope")
       expect(miss.ok).toBe(false)
+
+      // B4 — readResourceDir over the LIVE aggregate returns ONLY direct children
+      // of `a://dir/` (the dir entry + grandchild excluded), and a subdir keeps
+      // its inode/directory mimeType. This exercises McpClient.readResourceDir +
+      // the concat aggregate, not a hand-rolled fake.
+      const dir = await handle.readResourceDir("a://dir/")
+      expect(dir.ok).toBe(true)
+      if (!dir.ok) throw new Error("unreachable")
+      expect(dir.value.map((e) => e.uri).sort()).toEqual(["a://dir/child.txt", "a://dir/sub"])
+      const sub = dir.value.find((e) => e.uri === "a://dir/sub")
+      expect(sub?.mimeType).toBe("inode/directory")
     } finally {
       await loaded.stop()
     }

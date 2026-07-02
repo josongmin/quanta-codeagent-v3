@@ -62,6 +62,27 @@ export const parseResourceList = (result: unknown): McpResource[] | null => {
   return out
 }
 
+/** B4 — PURE direct-children filter over a `resources/list` result. MCP has no
+ *  native `resources/read-dir` RPC; a directory is modeled as a list prefix
+ *  (Claude tags subdirs with mimeType `inode/directory`). A "direct child" is an
+ *  entry strictly under `dirUri` with NO further `/`-separated segment. The dir
+ *  entry itself and grandchildren are excluded; a trailing slash on either side
+ *  is normalized. DUPLICATED as `filterDirectChildren` in `@/tool/mcp_resources`
+ *  (slice isolation forbids `@/mcp`→`@/tool`); the aggregation hellgate pins that
+ *  the two stay behaviorally identical. */
+export const directResourceChildren = (
+  entries: ReadonlyArray<McpResource>,
+  dirUri: string,
+): McpResource[] => {
+  const base = dirUri.endsWith("/") ? dirUri : `${dirUri}/`
+  return entries.filter((e) => {
+    if (e.uri === dirUri || e.uri === base) return false
+    if (!e.uri.startsWith(base)) return false
+    const rest = e.uri.slice(base.length).replace(/\/+$/, "")
+    return rest.length > 0 && !rest.includes("/")
+  })
+}
+
 /** TICKET-20 — Parse a `resources/templates/list` result →
  *  `McpResourceTemplate[]`, or null if `resourceTemplates` is not an array.
  *  Entries WITHOUT a string `uriTemplate` (the spec's required field, RFC 6570)

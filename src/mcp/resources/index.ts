@@ -2,6 +2,7 @@
 
 export {
   type CappedResourceRead,
+  directResourceChildren,
   parseCompletionResult,
   parsePromptGet,
   parsePromptList,

@@ -16,8 +16,10 @@ import { wrapToolResult } from "@/agent/untrusted-envelope"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { buildDefaultTools, deriveProvenance } from "@/tool"
 import {
+  filterDirectChildren,
   type HandleResult,
   MAX_OUTPUT,
+  mcpReadResourceTool,
   mcpResourcesTools,
   type PromptEntry,
   type PromptResult,
@@ -27,6 +29,18 @@ import {
   type ResourcesHandle,
   type ResourceTemplateEntry,
 } from "@/tool/mcp_resources"
+import type { ImageWritePort } from "@/tool/image-gen/store"
+
+/** In-memory write double so the blob-to-disk read tool doesn't hit the real FS
+ *  (the test cwd `/repo` is not writable). Records bytes for readback. */
+const memWrite = (): ImageWritePort & { writes: Map<string, Uint8Array> } => {
+  const writes = new Map<string, Uint8Array>()
+  return {
+    writes,
+    exists: async (p) => writes.has(p),
+    writeBytes: async (p, b) => void writes.set(p, b),
+  }
+}
 
 const ctx = (aborted = false): ToolContext => {
   const ac = new AbortController()
@@ -77,6 +91,11 @@ const fakeHandle = (cfg: FakeConfig): ResourcesHandle => ({
   },
   async readResource(_uri: string) {
     return cfg.content ?? { ok: true, value: [] }
+  },
+  async readResourceDir(uri: string) {
+    const listed = cfg.resources ?? { ok: true, value: [] }
+    if (!listed.ok) return listed
+    return { ok: true, value: filterDirectChildren(listed.value, uri) }
   },
   async listPrompts() {
     return cfg.prompts ?? { ok: true, value: [] }
@@ -274,6 +293,9 @@ describe("N3 — typed failures map to ok:false (no throw)", () => {
       async readResource() {
         throw new Error("boom")
       },
+      async readResourceDir() {
+        throw new Error("boom")
+      },
       async listPrompts() {
         throw new Error("boom")
       },
@@ -349,19 +371,24 @@ describe("N3 — DoS / size guards", () => {
     expect(r.output).toContain("truncated")
   })
 
-  test("blob-only block ⇒ placeholder, base64 NOT inlined", async () => {
+  test("B4 blob-only block ⇒ saved to a jailed file, base64 NOT inlined", async () => {
     const b64 = "QUJDREVG".repeat(5000)
-    const t = byName(
-      tools({
+    const mem = memWrite()
+    // build the read tool directly with the in-memory write port (the array
+    // helper uses the real FS-backed default port).
+    const t = mcpReadResourceTool(
+      fakeHandle({
         content: { ok: true, value: [{ uri: "file:///bin", mimeType: "image/png", blob: b64 }] },
       }),
-      "mcp_read_resource",
-    )
+      { writePort: mem },
+    ) as Tool
     const r = await run(t, { uri: "file:///bin" })
     expect(r.ok).toBe(true)
-    expect(r.output).toContain("binary block")
-    expect(r.output).toContain("not inlined")
+    // NEW contract: the blob is written, not placeholdered; base64 never inlined.
+    expect(r.output).toContain("blobSavedTo:")
+    expect(r.output).not.toContain("not inlined")
     expect(r.output).not.toContain(b64)
+    expect(mem.writes.size).toBe(1)
   })
 
   test("a giant failure message (hostile transport error) is capped, not emitted whole", async () => {
@@ -448,14 +475,21 @@ describe("N3 — untrusted-content: mcp origin ⇒ H2 envelope (the critical inv
 // --------------------------------------------------------------------------
 
 describe("N3 — default-OFF registration", () => {
-  const N3 = ["mcp_list_resources", "mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"]
+  // B4 — `mcp_read_resource_dir` added after `mcp_read_resource` (stable order).
+  const N3 = [
+    "mcp_list_resources",
+    "mcp_read_resource",
+    "mcp_read_resource_dir",
+    "mcp_list_prompts",
+    "mcp_get_prompt",
+  ]
 
   test("absent port ⇒ none of the N3 tools in the default menu", () => {
     const off = buildDefaultTools().map((t) => t.name)
     for (const n of N3) expect(off).not.toContain(n)
   })
 
-  test("wired port ⇒ all four registered, stable order", () => {
+  test("wired port ⇒ all registered, stable order", () => {
     const built = buildDefaultTools({ mcpResources: fakeHandle({}) }).map((t) => t.name)
     for (const n of N3) expect(built).toContain(n)
     // stable order among the slice's own tools (list_resources first, get_prompt last).
@@ -463,10 +497,16 @@ describe("N3 — default-OFF registration", () => {
     expect(onlyN3).toEqual(N3)
   })
 
-  test("all five tools are read-only + concurrency-safe", () => {
+  test("B4 — read tools are read-only EXCEPT mcp_read_resource (blob-to-disk = mutating); all concurrency contracts hold", () => {
     for (const t of mcpResourcesTools(fakeHandle({}))) {
-      expect(t.isReadOnly()).toBe(true)
-      expect(t.isConcurrencySafe({} as never)).toBe(true)
+      if (t.name === "mcp_read_resource") {
+        // the blob writer is mutating: NOT read-only + NOT concurrency-safe.
+        expect(t.isReadOnly()).toBe(false)
+        expect(t.isConcurrencySafe({} as never)).toBe(false)
+      } else {
+        expect(t.isReadOnly()).toBe(true)
+        expect(t.isConcurrencySafe({} as never)).toBe(true)
+      }
     }
   })
 })

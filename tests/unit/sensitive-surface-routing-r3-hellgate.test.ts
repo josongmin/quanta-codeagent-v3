@@ -105,6 +105,9 @@ const resourceHandleReturning = (secretText: string): ResourcesHandle => ({
   async readResource(uri: string) {
     return { ok: true, value: [{ uri, mimeType: "text/plain", text: secretText }] }
   },
+  async readResourceDir() {
+    return { ok: true, value: [] }
+  },
   async listPrompts() {
     return { ok: true, value: [] }
   },
@@ -112,6 +115,15 @@ const resourceHandleReturning = (secretText: string): ResourcesHandle => ({
     return { ok: true, value: { messages: [] } }
   },
 })
+
+/** In-memory blob write double (the D4 blob test cwd `/repo` is not writable). */
+const memWritePort = (): import("@/tool/image-gen/store").ImageWritePort => {
+  const writes = new Map<string, Uint8Array>()
+  return {
+    exists: async (p) => writes.has(p),
+    writeBytes: async (p, b) => void writes.set(p, b),
+  }
+}
 
 const ptyPortReturning = (paneText: string): PtySessionPort =>
   ({
@@ -227,17 +239,22 @@ describe("D. surface output is masked at the dispatch seam", () => {
     expect(res.preview).toContain("[REDACTED:aws_access_key_id]")
   })
 
-  test("D4 — mcp_read_resource: a BLOB block is NEVER inlined (no base64 dump)", async () => {
+  test("D4 — mcp_read_resource: a BLOB block is NEVER inlined (B4: saved to disk)", async () => {
     // Defensive: a blob that DECODES to a secret must not be inlined raw either.
-    const tool = mcpReadResourceTool({
-      ...resourceHandleReturning(""),
-      async readResource(uri: string) {
-        return {
-          ok: true,
-          value: [{ uri, mimeType: "application/octet-stream", blob: "QUtJQQ==" }],
-        }
+    // B4 writes the blob to a jailed file instead of a placeholder — the raw
+    // base64 (and thus the decoded secret) still never reaches the transcript.
+    const tool = mcpReadResourceTool(
+      {
+        ...resourceHandleReturning(""),
+        async readResource(uri: string) {
+          return {
+            ok: true,
+            value: [{ uri, mimeType: "application/octet-stream", blob: "QUtJQQ==" }],
+          }
+        },
       },
-    })
+      { writePort: memWritePort() },
+    )
     const res = await dispatchTool(
       call("mcp_read_resource", { uri: "mem://blob" }),
       baseConfig(tool),
@@ -245,6 +262,6 @@ describe("D. surface output is masked at the dispatch seam", () => {
     )
     expect(res.ok).toBe(true)
     expect(res.preview).not.toContain("QUtJQQ==")
-    expect(res.preview).toContain("not inlined")
+    expect(res.preview).toContain("blobSavedTo:")
   })
 })

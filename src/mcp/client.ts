@@ -46,6 +46,7 @@ import {
   type McpResourceContent,
   type McpResourceObserver,
   type McpResult,
+  directResourceChildren,
   parseCompletionResult,
   parsePromptGet,
   parsePromptList,
@@ -492,6 +493,17 @@ export class McpClient {
       return unsupported("resources", this.config.name)
     }
     return this.typedRequest("resources/list", {}, parseResourceList)
+  }
+
+  /** B4 — `resources/list` filtered to the DIRECT children of `uri` (MCP has no
+   *  native read-dir RPC). Composes {@link listResources} + the pure
+   *  {@link directResourceChildren} filter — no new wire method, no new
+   *  capability. Same no-throw / capability-gate contract as `listResources`:
+   *  the whole `unsupported`/`transport` failure propagates unchanged. */
+  async readResourceDir(uri: string): Promise<McpResult<McpResource[]>> {
+    const listed = await this.listResources()
+    if (!listed.ok) return listed
+    return { ok: true, value: directResourceChildren(listed.value, uri) }
   }
 
   /** `resources/read` → typed `McpResourceContent[]` (text and/or blob blocks).

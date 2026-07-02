@@ -378,13 +378,17 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   pty_write: "bash_mutating",
   pty_resize: "bash_mutating",
   pty_kill: "bash_mutating",
-  // N3 — MCP resource/prompt read surface (RFC jun-4-mcp-resource-tools). All
-  // four are read-only enumerations/reads over a connected MCP server (the
-  // output is mcp-origin untrusted DATA wrapped by the H2 envelope, but the
-  // call performs no local state mutation). Safe in plan mode.
+  // N3 — MCP resource/prompt read surface (RFC jun-4-mcp-resource-tools; B4).
+  // The enumerations/reads are read-only over a connected MCP server (output is
+  // mcp-origin untrusted DATA wrapped by the H2 envelope). EXCEPTION: B4 makes
+  // `mcp_read_resource` WRITE binary blob blocks to a jailed workspace file
+  // (`blobSavedTo:`) — a `write_filesystem` mutation, so plan mode must forbid it
+  // (a plan proposes, does not commit, file writes). `mcp_read_resource_dir` is a
+  // pure resources/list + filter (no write) ⇒ null. Safe in plan mode.
   mcp_list_resources: null,
   mcp_list_resource_templates: null,
-  mcp_read_resource: null,
+  mcp_read_resource: "write_filesystem",
+  mcp_read_resource_dir: null,
   mcp_list_prompts: null,
   mcp_get_prompt: null,
   // N2 — MCP connector discovery. `mcp_connector_list` is a read-only catalog
@@ -629,6 +633,7 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   "mcp_list_resources",
   "mcp_list_resource_templates",
   "mcp_read_resource",
+  "mcp_read_resource_dir",
   "mcp_list_prompts",
   "mcp_get_prompt",
   "mcp_connector_list",

@@ -199,7 +199,13 @@ export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freez
   "mcp_list_prompts",
   "mcp_list_resources",
   "mcp_list_resource_templates",
-  "mcp_read_resource",
+  // B4 — `mcp_read_resource` is now `write_filesystem` (blob-to-disk), so it is
+  // excluded from a read-only side-conversation by its MUTATION, not by this
+  // conscious read-only-exclusion list (which the drift detector requires to hold
+  // only `null`/read-only entries). `mcp_read_resource_dir` stays: it is a pure
+  // read-only resources/list + filter, consciously excluded like the sibling
+  // browsing tools above.
+  "mcp_read_resource_dir",
   "pty_list",
   "pty_read",
   "side_agent_findings",

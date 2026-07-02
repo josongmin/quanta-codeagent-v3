@@ -18,6 +18,7 @@
 import { errMessage } from "@/shared"
 import { McpError } from "../client"
 import type { McpProgressHandler } from "../progress"
+import { directResourceChildren } from "../resources"
 import type {
   McpPrompt,
   McpPromptResult,
@@ -216,6 +217,17 @@ export class McpReconnectSupervisor {
         ? () => (c.listResources as () => Promise<McpResult<McpResource[]>>)()
         : undefined,
     )
+  }
+
+  /** B4 — `resources/list` filtered to the DIRECT children of `uri`. Composes
+   *  THIS supervisor's proxied {@link listResources} + the pure
+   *  {@link directResourceChildren} filter, so it needs no new wire method on the
+   *  underlying `SupervisableMcpClient` and inherits the same no-throw reconnect
+   *  policy (a `transport` failure during a gap propagates unchanged). */
+  async readResourceDir(uri: string): Promise<McpResult<McpResource[]>> {
+    const listed = await this.listResources()
+    if (!listed.ok) return listed
+    return { ok: true, value: directResourceChildren(listed.value, uri) }
   }
 
   /** Proxy `resources/templates/list` through the current live client. See {@link listResources}. */

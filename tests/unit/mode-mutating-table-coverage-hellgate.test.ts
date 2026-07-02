@@ -182,7 +182,10 @@ const SESSION_READ_ONLY_ENTRIES = [
   "pty_list",
   "pty_read",
   "mcp_list_resources",
-  "mcp_read_resource",
+  // B4 — `mcp_read_resource_dir` is a pure resources/list + direct-children
+  // filter (no write) ⇒ read-only. Its sibling `mcp_read_resource` moved to the
+  // MUTATING list (blob-to-disk write).
+  "mcp_read_resource_dir",
   "mcp_list_prompts",
   "mcp_get_prompt",
   "mcp_connector_list",
@@ -197,6 +200,9 @@ const SESSION_MUTATING_ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ["pty_resize", "bash_mutating"],
   ["pty_kill", "bash_mutating"],
   ["mcp_connector_install", "write_filesystem"],
+  // B4 — `mcp_read_resource` base64-decodes a binary blob block and WRITES it to
+  // a jailed workspace file (`blobSavedTo:`) ⇒ write_filesystem; plan mode blocks.
+  ["mcp_read_resource", "write_filesystem"],
   ["side_agent_spawn", "subagent_spawn"],
   ["side_agent_stop", "subagent_control"],
   // file_history_rewind — caller-wire (DefaultToolPorts.fileHistory, gated on

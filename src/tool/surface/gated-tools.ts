@@ -715,6 +715,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     group: [
       "mcp_list_resource_templates",
       "mcp_read_resource",
+      "mcp_read_resource_dir",
       "mcp_list_prompts",
       "mcp_get_prompt",
     ],
@@ -727,7 +728,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
     risk: "network",
     adr: "N3",
-    note: "MCP resource/prompt read surface (§7, RFC jun-4-mcp-resource-tools) over the H19-landed McpClient resources/* + prompts/* methods. The model enumerates + reads a connected MCP server's resources and prompt templates. Wired only when an MCP server advertises resources/prompts + the apps layer wires a ResourcesHandle (the duck-typed mirror of @/mcp/resources McpResourcesPort, adapted over a live McpClient). risk:network because each call is an outbound RPC and resource READ exfiltrates server data into the transcript. Output is mcp-origin ⇒ deriveProvenance→mcp ⇒ the H2/ADR-0471 <untrusted-source> envelope wraps it at dispatch (third-party content is adversary-controllable DATA). BLOB blocks are never inlined (placeholder); text is capped. Opt-in EVERYWHERE (QUANTA_MCP_RESOURCES). Duck-typed port keeps @/tool fence-clean.",
+    note: "MCP resource/prompt read surface (§7, RFC jun-4-mcp-resource-tools; B4 read-dir + blob-to-disk) over the H19-landed McpClient resources/* + prompts/* methods. The model enumerates + reads a connected MCP server's resources and prompt templates, including mcp_read_resource_dir (DIRECT children of a directory-shaped uri, composed from resources/list; subdirs carry mimeType inode/directory). Wired only when an MCP server advertises resources/prompts + the apps layer wires a ResourcesHandle (the duck-typed mirror of @/mcp/resources McpResourcesPort, adapted over a live McpClient). risk:network because each call is an outbound RPC and resource READ exfiltrates server data into the transcript. Output is mcp-origin ⇒ deriveProvenance→mcp ⇒ the H2/ADR-0471 <untrusted-source> envelope wraps it at dispatch (third-party content is adversary-controllable DATA). B4: mcp_read_resource is MUTATING (isReadOnly()===false, hitl pre-approval-ok) — a binary BLOB block is base64-decoded and WRITTEN to a jailed workspace path (blobSavedTo:<path>) via the SAME @/storage#resolveJailed chokepoint write/image_gen use, never inlined; a '../' escape is refused, byte-capped at 8MB. mcp_read_resource_dir + the list tools stay read-only. Opt-in EVERYWHERE (QUANTA_MCP_RESOURCES) — the whole group (including the blob writer) is default-OFF. Duck-typed port keeps @/tool fence-clean.",
   },
   {
     name: "pty_attach",

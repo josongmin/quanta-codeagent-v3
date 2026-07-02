@@ -84,6 +84,11 @@ export interface ResourcesHandle {
   listResources(): Promise<HandleResult<ResourceEntry[]>>
   listResourceTemplates(): Promise<HandleResult<ResourceTemplateEntry[]>>
   readResource(uri: string): Promise<HandleResult<ResourceBlock[]>>
+  /** B4 — DIRECT children of a directory-shaped resource uri. MCP has no native
+   *  read-dir RPC, so this composes `resources/list` + a direct-children filter
+   *  (subdirs carry mimeType `inode/directory`). Same `HandleResult` no-throw
+   *  contract. */
+  readResourceDir(uri: string): Promise<HandleResult<ResourceEntry[]>>
   listPrompts(): Promise<HandleResult<PromptEntry[]>>
   getPrompt(name: string, args?: Record<string, unknown>): Promise<HandleResult<PromptResult>>
 }

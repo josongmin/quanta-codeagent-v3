@@ -23,6 +23,7 @@ import {
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { errMessage, logger } from "@/shared"
 import {
+  filterDirectChildren,
   type ResourcesHandleResult as HandleResult,
   mcpTasksTools,
   type PromptEntry,
@@ -464,6 +465,10 @@ export interface McpResourcesClient {
   listResources(): Promise<HandleResult<ResourceEntry[]>>
   listResourceTemplates(): Promise<HandleResult<ResourceTemplateEntry[]>>
   readResource(uri: string): Promise<HandleResult<ResourceBlock[]>>
+  /** B4 — direct children of a directory-shaped resource uri. STRING-IDENTICAL
+   *  to the source `McpClient.readResourceDir` + the `@/tool` `ResourcesHandle`
+   *  member; drift is a TYPE error at {@link aggregateResourcesHandle}. */
+  readResourceDir(uri: string): Promise<HandleResult<ResourceEntry[]>>
   listPrompts(): Promise<HandleResult<PromptEntry[]>>
   getPrompt(name: string, args?: Record<string, unknown>): Promise<HandleResult<PromptResult>>
 }
@@ -535,6 +540,11 @@ export const aggregateResourcesHandle = (clients: McpResourcesClient[]): Resourc
     listResources: () => concat((c) => c.listResources()),
     listResourceTemplates: () => concat((c) => c.listResourceTemplates()),
     readResource: (uri) => route((c) => c.readResource(uri)),
+    // B4 — CONCAT (like listResources): a dir uri may be served by exactly one
+    // server, but the aggregate doesn't know which; each client already filters
+    // to ITS OWN direct children, so concatenating is correct (a non-owning
+    // server contributes an empty child set) and best-effort no-throw.
+    readResourceDir: (uri) => concat((c) => c.readResourceDir(uri)),
     listPrompts: () => concat((c) => c.listPrompts()),
     getPrompt: (name, args) => route((c) => c.getPrompt(name, args)),
   }

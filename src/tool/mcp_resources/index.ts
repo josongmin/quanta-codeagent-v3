@@ -18,6 +18,7 @@ import { mcpListResourceTemplatesTool } from "./list_resource_templates"
 import { mcpListResourcesTool } from "./list_resources"
 import type { ResourcesHandle } from "./port"
 import { mcpReadResourceTool } from "./read_resource"
+import { mcpReadResourceDirTool } from "./read_resource_dir"
 
 export { type GetPromptInput, getPromptInputSchema, mcpGetPromptTool } from "./get_prompt"
 export { type ListPromptsInput, listPromptsInputSchema, mcpListPromptsTool } from "./list_prompts"
@@ -47,24 +48,36 @@ export {
   mcpReadResourceTool,
   type ReadResourceInput,
   readResourceInputSchema,
+  type ReadResourceToolOptions,
 } from "./read_resource"
 export {
+  mcpReadResourceDirTool,
+  type ReadResourceDirInput,
+  readResourceDirInputSchema,
+} from "./read_resource_dir"
+export {
+  BLOB_MAX_BYTES,
+  filterDirectChildren,
   MAX_OUTPUT,
   mapFailure,
   renderPromptList,
   renderPromptResult,
   renderResourceContent,
+  renderResourceContentSavingBlobs,
+  renderResourceDirList,
   renderResourceList,
   renderResourceTemplateList,
 } from "./render"
 
-/** Build all five tools wired to a single `ResourcesHandle`. Stable order:
- *  list_resources → list_resource_templates → read_resource → list_prompts →
- *  get_prompt (all read-only). */
+/** Build all six tools wired to a single `ResourcesHandle`. Stable order:
+ *  list_resources → list_resource_templates → read_resource → read_resource_dir
+ *  → list_prompts → get_prompt. All read-only EXCEPT `read_resource`, whose
+ *  blob-to-disk write makes it mutating (`isReadOnly() === false`). */
 export const mcpResourcesTools = (port: ResourcesHandle): Tool[] => [
   mcpListResourcesTool(port) as Tool,
   mcpListResourceTemplatesTool(port) as Tool,
   mcpReadResourceTool(port) as Tool,
+  mcpReadResourceDirTool(port) as Tool,
   mcpListPromptsTool(port) as Tool,
   mcpGetPromptTool(port) as Tool,
 ]
