@@ -226,7 +226,7 @@ describe("dashboard XSS escaping", () => {
     const DATA = {
       topScaffolds: [{ key: HOSTILE, model: HOSTILE, resolved: 1, pct: 50 }],
     }
-    const src = [extractEsc(), extractFn("renderScaffolds"), "return renderScaffolds();"].join("\n")
+    const src = ['var BENCH="verified";', extractEsc(), extractFn("renderScaffolds"), "return renderScaffolds();"].join("\n")
     const out = new Function("DATA", "document", src)(DATA, {}) as string
     expect(out).not.toContain("<script>")
     expect(out).toContain("&lt;script&gt;")
@@ -370,7 +370,7 @@ describe("dashboard XSS escaping", () => {
       live: [],
       coverage: null,
     }
-    const src = [extractEsc(), extractFn("renderCards"), "renderCards(); return null;"].join("\n")
+    const src = ['var BENCH="verified";', extractEsc(), extractFn("renderCards"), "renderCards(); return null;"].join("\n")
     const doc = {
       sink: "",
       getElementById() {
@@ -717,7 +717,7 @@ describe("realMiss card excludes re-runnable holes (FLAG-C)", () => {
   // capture the rendered cards via a fake document, then assert the 진짜 격차
   // value does NOT count a throttled hash>1 instance.
   function runRenderCards(DATA: unknown): string {
-    const src = [extractEsc(), extractFn("renderCards"), "renderCards(); return null;"].join("\n")
+    const src = ['var BENCH="verified";', extractEsc(), extractFn("renderCards"), "renderCards(); return null;"].join("\n")
     let sink = ""
     const doc = {
       getElementById() {

@@ -26,6 +26,7 @@ import { BenchControl } from "./bench-control"
 import { iidFromBody, launchSpecFromBody, presetsFromCatalog } from "./bench-request"
 import type { ExternalBaselines } from "./external-baselines"
 import { campaignKeyOf } from "./family-partition"
+import { parseTbPertask, type TbPertask } from "./tb-pertask"
 
 const HOME = homedir()
 const REPO = join(import.meta.dir, "..", "..")
@@ -65,6 +66,9 @@ const RAWDATA = join(import.meta.dir, "rawdata")
 const MATRIX_MD = argOf("--matrix") ?? join(RAWDATA, "scaffold-solving-summary.md")
 // SWE-bench Verified dataset (500) → problem statement + official difficulty.
 const DATASET_JSONL = argOf("--dataset") ?? join(RAWDATA, "verified-full.jsonl")
+// Terminal-Bench per-task competitor matrix (RFC 06) — the TB analogue of the SWE
+// scaffold matrix. Absent ⇒ TB view still shows our runs, just no competitor column.
+const TB_PERTASK_MD = argOf("--tb-matrix") ?? join(RAWDATA, "tb-pertask.md")
 const LIVE_ROOTS = [...argsOf("--live"), join(HOME, "easy-more")]
 // Competitor (frontier-winning) full trajectories — the only ones still on
 // disk. The broad per-submission turn data lived in a swe-bench/experiments
@@ -393,6 +397,12 @@ const presetFromFingerprint = (knobs: JsonRecord | null): string => {
 function presetLabel(file: string, knobs: JsonRecord | null): string {
   const name = basename(file).toLowerCase()
   const dir = basename(file.replace(/\/[^/]+$/, "")).toLowerCase()
+  // Terminal-Bench (RFC 06): harbor-emitted reports carry the lever set verbatim in
+  // knobs.preset — surface it directly instead of the SWE-oriented fingerprint fallback.
+  if (/terminal-bench/.test(name)) {
+    const p = asString(knobs?.preset)
+    return p && p.trim() ? p : "terminal-bench"
+  }
   const encoded = presetFromEncodedFileName(name)
   if (encoded !== undefined) return encoded
   if (dir === "sota" || /shard/.test(name)) return "agentless-v2 (SOTA)*"
@@ -832,6 +842,11 @@ const recordFailingAttempt = (
 const quantaSummaryOf = (runs: readonly Run[]): Record<string, QuantaSummary> => {
   const quanta: Record<string, QuantaSummary> = {}
   for (const run of runs) {
+    // Terminal-Bench (RFC 06) is a SEPARATE benchmark with its own task space + its
+    // own render path (DATA.tb). Its task names can accidentally match the SWE-bench
+    // instance-id shape (e.g. `caffe-cifar-10` → `…-10`), so they MUST be excluded
+    // from the SWE-bench quanta/matrix or they leak into the Verified leaderboard.
+    if ((run.datasetFamily || "verified") === "terminal-bench") continue
     for (const perInstance of run.perInstance) {
       const sid = shortId(perInstance.id)
       if (!sid || !isRealSwebenchInstanceId(sid)) continue
@@ -889,6 +904,34 @@ function loadExternalBaselines(): ExternalBaselines | null {
   }
 }
 
+// TB competitor matrix — parsed fresh each request (small file); null-safe if absent.
+function loadTbPertask(): TbPertask {
+  try {
+    if (!existsSync(TB_PERTASK_MD)) return { scaffolds: [], tasks: [] }
+    return parseTbPertask(readFileSync(TB_PERTASK_MD, "utf8"))
+  } catch {
+    return { scaffolds: [], tasks: [] }
+  }
+}
+
+// Benchmarks present in the dashboard: verified is always shown; any other family
+// found in the runs (pro/live/terminal-bench) adds a selectable benchmark. This
+// drives the client's top-level benchmark selector (RFC 06).
+function benchmarksOf(runs: readonly Run[]): { id: string; label: string }[] {
+  const LABELS: Record<string, string> = {
+    verified: "SWE-bench Verified",
+    pro: "SWE-bench Pro",
+    live: "SWE-bench Live",
+    "terminal-bench": "Terminal-Bench",
+  }
+  const fams = new Set<string>(["verified"])
+  for (const r of runs) fams.add(r.datasetFamily || "verified")
+  const order = ["verified", "pro", "live", "terminal-bench"]
+  return [...fams]
+    .sort((a, b) => order.indexOf(a) - order.indexOf(b))
+    .map((id) => ({ id, label: LABELS[id] ?? id }))
+}
+
 function buildData() {
   const matrix = parseMatrix()
   const fullDataset = loadDataset()
@@ -914,6 +957,9 @@ function buildData() {
     reportRoots: REPORT_ROOTS,
     // null when the file is absent/malformed → client renders no external column (—).
     externalBaselines: loadExternalBaselines(),
+    // RFC 06 — TB benchmark: selectable benchmarks + TB per-task competitor matrix.
+    benchmarks: benchmarksOf(runs),
+    tb: loadTbPertask(),
   }
 }
 
@@ -1223,6 +1269,14 @@ const HTML = /* html */ `<!doctype html>
          vertical-align: 1px; border: 1px solid transparent; }
   .fam-pro { background: #3a2d12; color: #e3b341; border-color: #5c4516; }
   .fam-live { background: #122a3a; color: #58a6ff; border-color: #1f4a6b; }
+  .fam-terminal-bench { background: #13233a; color: #79c0ff; border-color: #1f6feb; }
+  /* RFC 06 — top-level benchmark selector */
+  .benchsel { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .benchsel button { background: #161b22; color: #adbac7; border: 1px solid #30363d;
+    border-radius: 999px; padding: 6px 16px; cursor: pointer; font: inherit; font-size: 13px; }
+  .benchsel button:hover { border-color: #388bfd; color: #e6edf3; }
+  .benchsel button.active { background: #1f6feb; color: #fff; border-color: #2f81f7; font-weight: 600; }
+  .benchsel button .bn { font-size: 10px; color: inherit; opacity: .75; margin-left: 6px; }
   .cards { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 18px; }
   .card { background: #161b22; border: 1px solid #21262d; border-radius: 8px;
           padding: 10px 14px; min-width: 120px; }
@@ -1289,10 +1343,11 @@ const HTML = /* html */ `<!doctype html>
 </head>
 <body>
 <header>
-  <h1>SWE-bench Verified — Leaderboard</h1>
+  <h1 id="h1title">SWE-bench Verified — Leaderboard</h1>
   <span class="muted" id="stamp"></span>
   <span class="muted">auto-refresh <span id="cd">5</span>s</span>
 </header>
+<div class="benchsel" id="benchsel"></div>
 <div class="cards" id="cards"></div>
 <nav>
   <button data-tab="matrix" class="active">전체 문제 매트릭스</button>
@@ -1313,6 +1368,10 @@ const HTML = /* html */ `<!doctype html>
 
 <script>
 let DATA = null, TAB = "matrix", SORT = { key: "hash", dir: -1 };
+// RFC 06 — active benchmark (dataset family). Scopes cards/matrix/runs to one
+// benchmark; default verified = byte-identical to the pre-RFC single-benchmark view.
+let BENCH = "verified";
+let TB_MFILTER = { q: "", f: "all" };
 const TRACE_PORT = ${TRACE_PORT};
 const SCAF_SHOW = ["sonar-o45","trae-dbo","OH-o45","live-gem3","prom-gpt5","mini-o45"];
 const SCAF_LABEL = { "sonar-o45":"Sonar", "trae-dbo":"Trae", "OH-o45":"OpenHands", "live-gem3":"Live-SWE", "prom-gpt5":"Prometheus", "mini-o45":"mini+Opus4.5" };
@@ -1352,14 +1411,17 @@ function fmtWhen(ms){
 function render() {
   if (!DATA) return;
   document.getElementById("stamp").textContent = "as of " + new Date(DATA.generatedAt).toLocaleTimeString();
+  renderBenchSel();
+  document.getElementById("h1title").textContent = benchLabel(BENCH) + " — Leaderboard";
   renderCards();
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === TAB));
   const v = document.getElementById("view");
   if (TAB === "runs") v.innerHTML = renderRuns();
   else if (TAB === "matrix") {
+    if (BENCH === "terminal-bench") { renderTbMatrix(v); }
     // On a background refresh, only redraw the table body so the search box
     // keeps focus and scroll position; full rebuild only on first open.
-    if (document.getElementById("mtable")) drawMatrix();
+    else if (document.getElementById("mtable")) drawMatrix();
     else renderMatrix(v);
   }
   else if (TAB === "scaffolds") v.innerHTML = renderScaffolds();
@@ -1509,7 +1571,46 @@ function drawKnobs(v) {
   v.querySelectorAll(".kp").forEach(e => e.onclick = () => showPresetModal(e.dataset.p));
 }
 
+// ── RFC 06: benchmark selector + Terminal-Bench view ────────────────────────
+function benchLabel(id) {
+  const bs = (DATA && DATA.benchmarks) || [];
+  for (const b of bs) if (b.id === id) return b.label;
+  return id === "verified" ? "SWE-bench Verified" : id;
+}
+function renderBenchSel() {
+  const el = document.getElementById("benchsel");
+  const bs = (DATA && DATA.benchmarks) || [{ id: "verified", label: "SWE-bench Verified" }];
+  // one solved/total badge per benchmark so the selector doubles as a scoreboard.
+  const badge = function(id) {
+    const camps = (DATA.campaigns || []).filter(c => (c.datasetFamily || "verified") === id);
+    if (!camps.length) return "";
+    const best = camps.slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)))[0];
+    return best ? '<span class="bn">'+best.resolved+'/'+best.total+'</span>' : "";
+  };
+  el.innerHTML = bs.map(b =>
+    '<button data-bench="'+esc(b.id)+'" class="'+(BENCH===b.id?"active":"")+'">'+esc(b.label)+badge(b.id)+'</button>'
+  ).join("");
+  el.querySelectorAll("button").forEach(function(btn){
+    btn.onclick = function(){ BENCH = btn.dataset.bench; TAB = (TAB==="knobs"||TAB==="trace"||TAB==="manage")?TAB:"matrix"; render(); };
+  });
+}
+// Our TB result per task, folded from the terminal-bench runs (any-pass wins),
+// split into baseline vs levers arms by preset text. Pure over DATA.runs (SSOT).
+function tbOurResults() {
+  const runs = (DATA.runs || []).filter(r => (r.datasetFamily || "verified") === "terminal-bench");
+  const base = {}, lev = {};
+  for (const r of runs) {
+    const isLev = (r.preset || "").toLowerCase().indexOf("levers") >= 0;
+    const sink = isLev ? lev : base;
+    for (const pi of (r.perInstance || [])) {
+      if (sink[pi.id] === undefined || pi.passed) sink[pi.id] = pi.passed;
+    }
+  }
+  return { base: base, lev: lev };
+}
+
 function renderCards() {
+  if (BENCH === "terminal-bench") return renderTbCards();
   const q = DATA.quanta;
   const ids = Object.keys(q);
   const solved = ids.filter(i => q[i].passed).length;
@@ -1537,6 +1638,86 @@ function renderCards() {
   document.getElementById("cards").innerHTML = cards.map(c =>
     '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
     (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
+}
+
+// Terminal-Bench summary cards (RFC 06): projection = baseline ∪ levers over the 89
+// tasks; winnable-remaining = our miss ∩ a competitor solved (the actionable gap).
+function renderTbCards() {
+  const tasks = ((DATA.tb && DATA.tb.tasks) || []);
+  const our = tbOurResults();
+  const solved = function(t){ return our.base[t]===true || our.lev[t]===true; };
+  const baseIds = Object.keys(our.base), levIds = Object.keys(our.lev);
+  const baseSolved = baseIds.filter(function(t){return our.base[t]===true;}).length;
+  const levSolved = levIds.filter(function(t){return our.lev[t]===true;}).length;
+  const proj = tasks.filter(function(t){return solved(t.task);}).length;
+  const winnable = tasks.filter(function(t){return !solved(t.task) && !t.hardCeiling && t.avg>0;}).length;
+  const ceil = tasks.filter(function(t){return t.hardCeiling;}).length;
+  const cards = [
+    ["해결 (투영)", proj + " / " + tasks.length, "baseline ∪ levers"],
+    ["레버 회복", levSolved + " / " + levIds.length, "실패셋 재도전 (baseline 0)"],
+    ["베이스라인", baseSolved + " / " + baseIds.length, "knob-off"],
+    ["승산 타겟 남음", winnable, "우리 미해결 ∩ 남들 성공"],
+    ["하드천장", ceil, "아무 스캐폴드도 못 푼 것"],
+  ];
+  document.getElementById("cards").innerHTML = cards.map(function(c){
+    return '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
+      (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>';
+  }).join("");
+}
+// Terminal-Bench per-task matrix: our baseline vs levers result × competitor pass-
+// rates, keyed on the 89 TB tasks (DATA.tb). Winnable targets (our miss ∩ someone
+// solved) float to the top and are tinted; hard ceilings (nobody solved) are greyed.
+function renderTbMatrix(v) {
+  const tasks = ((DATA.tb && DATA.tb.tasks) || []).slice();
+  const scaffs = (DATA.tb && DATA.tb.scaffolds) || [];
+  const our = tbOurResults();
+  const solved = function(t){ return our.base[t]===true || our.lev[t]===true; };
+  const mark = function(res){
+    if (res === true) return '<span class="q-ok">✅</span>';
+    if (res === false) return '<span class="q-no">❌</span>';
+    return '<span class="muted">—</span>';
+  };
+  const isWinnable = function(t){ return !solved(t.task) && !t.hardCeiling && t.avg>0; };
+  // filter
+  const f = TB_MFILTER.f, q = (TB_MFILTER.q||"").toLowerCase();
+  let rows = tasks.filter(function(t){
+    if (q && t.task.toLowerCase().indexOf(q) < 0) return false;
+    if (f === "winnable") return isWinnable(t);
+    if (f === "solved") return solved(t.task);
+    if (f === "missed") return !solved(t.task);
+    if (f === "ceiling") return t.hardCeiling;
+    return true;
+  });
+  // winnable first, then by competitor avg desc (highest-ROI targets on top).
+  rows.sort(function(a,b){
+    const wa = isWinnable(a)?1:0, wb = isWinnable(b)?1:0;
+    if (wa !== wb) return wb - wa;
+    return b.avg - a.avg;
+  });
+  let h = '<div class="controls">'+
+    '<input id="tbsearch" placeholder="task 검색…" value="'+esc(TB_MFILTER.q)+'" />'+
+    '<select id="tbfilter">'+
+      ['all|전체','winnable|승산 타겟(우리 미스 ∩ 남들 성공)','solved|우리 해결','missed|우리 미스','ceiling|하드천장']
+        .map(function(o){var p=o.split("|");return '<option value="'+p[0]+'"'+(f===p[0]?" selected":"")+'>'+esc(p[1])+'</option>';}).join("")+
+    '</select> <span class="muted">'+rows.length+'개</span></div>';
+  h += '<p class="muted">✅/❌ = 우리 결과 · 우측 = 공개 스캐폴드 pass율(HF) · <b>승산 타겟</b>=우리 미스인데 최소 한 곳은 푼 것(파란 배경) · 회색 행=하드천장(아무도 못 푼 것)</p>';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">task</th><th>난이도</th><th style="text-align:left">category</th>'+
+    '<th title="knob-off">우리<br>base</th><th title="env-owned·maxTurns·verify-gate">우리<br>+레버</th><th>경쟁사<br>평균</th>'+
+    scaffs.map(function(s){return '<th title="'+esc(s)+'">'+esc(s.slice(0,4))+'</th>';}).join("")+'</tr></thead><tbody>';
+  for (const t of rows) {
+    const cls = t.hardCeiling ? ' style="opacity:.45"' : (isWinnable(t) ? ' style="background:#12233a"' : '');
+    h += '<tr'+cls+'><td class="inst">'+esc(t.task)+(isWinnable(t)?' <span class="fam fam-terminal-bench">타겟</span>':'')+'</td>'+
+      '<td class="muted" style="text-align:center">'+esc(t.difficulty)+'</td>'+
+      '<td class="muted">'+esc(t.category)+'</td>'+
+      '<td style="text-align:center">'+mark(our.base[t.task])+'</td>'+
+      '<td style="text-align:center">'+mark(our.lev[t.task])+'</td>'+
+      '<td style="text-align:center"><b>'+t.avg+'%</b></td>'+
+      scaffs.map(function(s){var p=t.scaffolds[s];return '<td class="muted" style="text-align:center">'+(p===undefined?'·':(p+'%'))+'</td>';}).join("")+
+      '</tr>';
+  }
+  v.innerHTML = h + '</tbody></table>';
+  const si = document.getElementById("tbsearch"); if (si) si.oninput = function(){ TB_MFILTER.q = si.value; renderTbMatrix(v); };
+  const fi = document.getElementById("tbfilter"); if (fi) fi.onchange = function(){ TB_MFILTER.f = fi.value; renderTbMatrix(v); };
 }
 
 // RFC jun-29 R4: dataset family is a partition, not a flavor — a pro resolved-rate must
@@ -1576,16 +1757,12 @@ function extSotaForFamily(fam) {
 }
 function renderRuns() {
   // Campaigns roll shards up into one logical run (clean-shard×6 → SOTA-clean).
+  // The runs tab lists ALL families with a chip + optional per-family FAM_FILTER; the
+  // top-level BENCH selector governs the matrix/cards/scaffolds tabs (benchmark-scoped
+  // views), NOT this flat list — so a mixed pro+live+verified run history stays visible.
   let camps = (DATA.campaigns||[]).slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)));
-  const fams = [...new Set(camps.map(c => c.datasetFamily || "verified"))].sort();
   if (FAM_FILTER) camps = camps.filter(c => (c.datasetFamily||"verified") === FAM_FILTER);
   let h = '<p class="muted">샤드는 한 캠페인으로 묶음. 행 펼치면 멤버 리포트. 해결률 분모는 측정된 시도만(throttle/인프라/env=미측정 제외).</p>';
-  if (fams.length > 1) {
-    h += '<p class="muted">데이터셋: <select onchange="FAM_FILTER=this.value;render()">'+
-      '<option value=""'+(FAM_FILTER===""?" selected":"")+'>전체 ('+fams.length+')</option>'+
-      fams.map(f => '<option value="'+esc(f)+'"'+(FAM_FILTER===f?" selected":"")+'>'+esc(f)+'</option>').join("")+
-      '</select> <span class="muted">— pro/live는 verified와 분모를 절대 섞지 않음 (R4)</span></p>';
-  }
   // External SOTA column only when a non-verified (pro/live) campaign is in view AND
   // baselines loaded — keeps an all-verified dashboard byte-identical (no ext column,
   // no external-baselines references rendered).
@@ -1823,6 +2000,21 @@ function drawMatrix() {
 }
 
 function renderScaffolds() {
+  // RFC 06: Terminal-Bench has its own scaffold set — average per-task pass-rate
+  // from the TB competitor matrix (DATA.tb), not the SWE scaffold-summary.
+  if (BENCH === "terminal-bench") {
+    const tasks = (DATA.tb && DATA.tb.tasks) || [];
+    const scaffs = (DATA.tb && DATA.tb.scaffolds) || [];
+    const avg = scaffs.map(function(s){
+      let sum=0,n=0; for (const t of tasks){ const p=t.scaffolds[s]; if (p!==undefined){sum+=p;n++;} }
+      return { key: s, pct: n? Math.round(sum/n):0, n: n };
+    }).sort(function(a,b){return b.pct-a.pct;});
+    let th = '<p class="muted">공개 스캐폴드별 TB 태스크 평균 pass율 (HF 리더보드 파싱, n='+tasks.length+' tasks).</p>';
+    th += '<table><thead><tr><th class="inst" style="text-align:left">스캐폴드</th><th>평균 pass율</th><th>%</th></tr></thead><tbody>';
+    for (const s of avg) th += '<tr><td class="inst">'+esc(s.key)+'</td><td>'+s.pct+'%</td>'+
+      '<td><span class="bar"><i style="width:'+s.pct+'%"></i></span> '+s.pct+'%</td></tr>';
+    return th + '</tbody></table>';
+  }
   let h = '<table><thead><tr><th class="inst" style="text-align:left">스캐폴드</th><th>모델</th><th>resolved/500</th><th>%</th></tr></thead><tbody>';
   for (const s of DATA.topScaffolds) {
     h += '<tr><td class="inst">'+esc(s.key)+'</td><td class="muted">'+esc(s.model)+'</td><td>'+s.resolved+'</td>'+
