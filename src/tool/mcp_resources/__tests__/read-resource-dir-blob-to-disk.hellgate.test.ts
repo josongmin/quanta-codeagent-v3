@@ -24,8 +24,11 @@
 
 import { describe, expect, it } from "bun:test"
 import { aggregateResourcesHandle, type McpResourcesClient } from "@/agent/mcp-bridge"
+import { directResourceChildren } from "@/mcp/resources"
 import type { ImageWritePort } from "@/tool/image-gen/store"
 import {
+  BLOB_MAX_BYTES,
+  filterDirectChildren,
   type HandleResult,
   mcpReadResourceDirTool,
   mcpReadResourceTool,
@@ -245,5 +248,126 @@ describe("B4 hellaudit invariants (load-bearing mitigations)", () => {
   it("the read-dir tool IS read-only (pure list+filter, no disk write)", () => {
     const tool = mcpReadResourceDirTool(handleWith({}))
     expect(tool.isReadOnly()).toBe(true)
+  })
+})
+
+// ===========================================================================
+// AUDIT closeouts (independent adversarial pass over commit 321329668).
+// Each block below was RED before the fix it guards; a mutation that breaks the
+// guarded behavior turns it red again (mutation-witnessed in the audit report).
+// ===========================================================================
+
+describe("AUDIT B4-h1 — @/tool filterDirectChildren is load-bearing (was UNTESTED)", () => {
+  // The commit dedups the direct-children filter as `filterDirectChildren`
+  // (@/tool) + `directResourceChildren` (@/mcp) and claims the host-wire
+  // hellgate pins them identical. It pins only the @/mcp copy over a LIVE
+  // client; the @/tool copy (a public @/tool export, re-imported by mcp-bridge)
+  // had NO test asserting its semantics — a drift to "include grandchildren" or
+  // "include the dir itself" passed the whole B4 suite. These pin it directly.
+  const E = (uri: string, mimeType?: string): ResourceEntry =>
+    mimeType === undefined ? { uri } : { uri, mimeType }
+
+  const corpus: ResourceEntry[] = [
+    E("file:///a/"), // the dir itself — excluded
+    E("file:///a"), // the dir itself (no slash) — excluded
+    E("file:///a/child.txt", "text/plain"), // direct child
+    E("file:///a/sub", "inode/directory"), // direct child subdir
+    E("file:///a/sub/deep.txt"), // grandchild — MUST be excluded
+    E("file:///a/x/y/z"), // deep grandchild — MUST be excluded
+    E("file:///ab/sibling.txt"), // sibling-prefix trap — MUST be excluded
+  ]
+
+  it("keeps ONLY direct children (no dir-self, no grandchildren, no prefix-sibling)", () => {
+    const got = filterDirectChildren(corpus, "file:///a")
+      .map((e) => e.uri)
+      .sort()
+    expect(got).toEqual(["file:///a/child.txt", "file:///a/sub"])
+    // explicit red-on-injection: the grandchild must NOT be present (this line
+    // goes red the instant the `!rest.includes("/")` guard is dropped).
+    expect(got).not.toContain("file:///a/sub/deep.txt")
+    // the dir itself must NOT be present.
+    expect(got).not.toContain("file:///a/")
+    expect(got).not.toContain("file:///a")
+    // the sibling-prefix (`file:///ab/...`) must NOT be captured by `file:///a`.
+    expect(got).not.toContain("file:///ab/sibling.txt")
+  })
+
+  it("trailing-slash on the dir uri is normalized (file:///a === file:///a/)", () => {
+    const a = filterDirectChildren(corpus, "file:///a")
+      .map((e) => e.uri)
+      .sort()
+    const aSlash = filterDirectChildren(corpus, "file:///a/")
+      .map((e) => e.uri)
+      .sort()
+    expect(a).toEqual(aSlash)
+  })
+
+  it("stays behaviorally identical to the @/mcp directResourceChildren twin (dedup parity)", () => {
+    // The two copies straddle the @/tool ↔ @/mcp slice fence; the commit relies
+    // on them agreeing. Pin the invariant DIRECTLY (not only via a live client).
+    for (const dir of ["file:///a", "file:///a/", "file:///ab", "file:///none"]) {
+      const tool = filterDirectChildren(corpus, dir)
+        .map((e) => e.uri)
+        .sort()
+      const mcp = directResourceChildren(corpus, dir)
+        .map((e) => e.uri)
+        .sort()
+      expect(tool).toEqual(mcp)
+    }
+  })
+})
+
+describe("AUDIT B4-h2 — 8MB blob byte cap is load-bearing (was UNTESTED)", () => {
+  // The commit adds BLOB_MAX_BYTES (8MB) so a hostile server cannot drop an
+  // unbounded artifact into the workspace via one resources/read. No test
+  // exercised it — removing the cap check passed the whole suite. Pin it.
+  it("refuses a decoded blob larger than BLOB_MAX_BYTES and NEVER writes it", async () => {
+    // one byte over the cap — base64-encode a buffer of exactly cap+1 bytes.
+    const oversize = Buffer.alloc(BLOB_MAX_BYTES + 1, 0x41)
+    const b64 = oversize.toString("base64")
+    const mem = makeMemWrite()
+    const port = handleWith({
+      blocks: [{ uri: "file:///huge.bin", mimeType: "application/octet-stream", blob: b64 }],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: mem })
+    const res = await run(tool, { uri: "file:///huge.bin" }, "/tmp/jail-b4")
+    // no throw, nothing written, and the model is told why.
+    expect(mem.writes.size).toBe(0)
+    expect(res.output.toLowerCase()).toMatch(/exceeds|cap|not written/)
+    // the raw base64 must never be inlined even on refusal.
+    expect(res.output).not.toContain(b64)
+  })
+
+  it("a blob EXACTLY at the cap is still written (boundary is inclusive, off-by-one guard)", async () => {
+    const atCap = Buffer.alloc(BLOB_MAX_BYTES, 0x42)
+    const b64 = atCap.toString("base64")
+    const mem = makeMemWrite()
+    const port = handleWith({
+      blocks: [{ uri: "file:///atcap.bin", mimeType: "application/octet-stream", blob: b64 }],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: mem })
+    const res = await run(tool, { uri: "file:///atcap.bin" }, "/tmp/jail-b4")
+    expect(mem.writes.size).toBe(1)
+    expect(res.output).toContain("blobSavedTo:")
+  })
+})
+
+describe("AUDIT B4-h3 — NUL byte in a blob uri path is refused (was UNTESTED)", () => {
+  // The commit screens a NUL byte in the derived path (a NUL would otherwise
+  // make the write syscall throw / could truncate a C-string path). No test
+  // covered it. Pin the typed refusal + no-write.
+  it("refuses a uri whose path segment contains a NUL and NEVER writes", async () => {
+    const raw = new Uint8Array([7, 7, 7])
+    const b64 = Buffer.from(raw).toString("base64")
+    const mem = makeMemWrite()
+    // explicit NUL via escape (not an invisible literal byte in the source).
+    const nulUri = `file:///ev${"\u0000"}il.bin`
+    const port = handleWith({
+      blocks: [{ uri: nulUri, mimeType: "application/octet-stream", blob: b64 }],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: mem })
+    const res = await run(tool, { uri: nulUri }, "/tmp/jail-b4")
+    expect(mem.writes.size).toBe(0)
+    expect(res.output.toLowerCase()).toMatch(/nul|refused|not allowed|jail/)
   })
 })
