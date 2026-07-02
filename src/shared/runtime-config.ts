@@ -661,7 +661,7 @@ const parseConfigTailSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
     // ticket-15 (§11.7) — DOUBLE-gated default-OFF scriptable statusLine config.
     // `undefined` unless QUANTA_STATUS_LINE is on AND QUANTA_STATUS_LINE_CONFIG
     // is a valid JSON object with a usable `command` (byte-identical otherwise —
-    // the fixed formatContextUsage status line stays the sole render).
+    // the built-in segmented `/context` status render stays the sole render).
     statusLineConfig: parseStatusLineConfig(
       env["QUANTA_STATUS_LINE"],
       env["QUANTA_STATUS_LINE_CONFIG"],

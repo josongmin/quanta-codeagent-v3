@@ -1,38 +1,20 @@
 /**
- * Surface-agnostic context-usage formatter (Claude Desktop 1.7196.3
- * `getContextUsage` parity).
+ * Surface-agnostic context-usage formatter (Cursor Canvas UsageBar parity).
  *
- * Renders a single-line ASCII progress bar suitable for a CLI prompt prefix,
- * a Tauri sidebar, a Web REPL header, or any other surface — pure function,
- * no I/O, NO `@/agent` import. The only allowed imports here are `node:*`
- * (currently none needed), so this helper can be lifted verbatim into a
- * future Tauri / Web bundle.
+ * Renders the segmented, multi-category `/context` gauge — a fixed-width ASCII
+ * bar plus a per-category legend — suitable for a CLI prompt prefix, a Tauri
+ * sidebar, a Web REPL header, or any other surface. Pure functions, no I/O,
+ * NO `@/agent` import. The only allowed imports here are `node:*` (currently
+ * none needed), so these helpers can be lifted verbatim into a future Tauri /
+ * Web bundle.
  *
- * Format: `[<bar>] <used>/<max> (<pct>%) · <model>`
- *
- * Examples:
- *   formatContextUsage(50_000,  200_000, "claude-sonnet-4-5")
- *     → "[█████░░░░░░░░░░░░░░░] 50.0k/200k (25%) · claude-sonnet-4-5"
- *
- *   formatContextUsage(250_000, 200_000, "claude-sonnet-4-5")
- *     → "[████████████████████] 250k/200k (125%!) · claude-sonnet-4-5"
- *      (saturated bar + `!` oversize indicator)
- *
- *   formatContextUsage(50_000, 200_000)
- *     → "[█████░░░░░░░░░░░░░░░] 50.0k/200k (25%) · unknown"
- *
- * Bar contract:
- *   - Exactly 20 cells, `█` = filled, `░` = empty (5% per cell).
- *   - 0% ⇒ 20 empty cells; 100% ⇒ 20 filled cells.
- *   - >100% ⇒ bar saturates at 20 filled, percentage is suffixed with `!`.
- *   - Negative `used` ⇒ clamps to 0%.
- *   - `max <= 0` ⇒ bar empty, pct rendered as `?` (never NaN/Infinity).
+ * (Historical note: a single-bar `formatContextUsage(used, max, model)` variant
+ * used to live here as the "status line default". It had ZERO production
+ * callers — the status line was never composed at the render root — so it was
+ * deleted (jul-03 S3). The segmented view below is the sole renderer.)
  */
 
-/** Width of the rendered bar in cells. 5% per cell — keep in sync if changed. */
-const BAR_WIDTH = 20
-
-const FILLED_CELL = "█" // █
+/** Empty bar cell. */
 const EMPTY_CELL = "░" // ░
 
 /** Format a token count: `523`, `50.0k`, `200k`.
@@ -46,52 +28,9 @@ const formatTokens = (n: number): string => {
   return k >= 100 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`
 }
 
-/** Render the ASCII bar; `pct` in [0, 1+]. Saturates at full above 100%. */
-const renderBar = (pct: number): string => {
-  if (!Number.isFinite(pct) || pct <= 0) {
-    return `[${EMPTY_CELL.repeat(BAR_WIDTH)}]`
-  }
-  const cells = Math.min(BAR_WIDTH, Math.round(pct * BAR_WIDTH))
-  return `[${FILLED_CELL.repeat(cells)}${EMPTY_CELL.repeat(BAR_WIDTH - cells)}]`
-}
-
-/** Trim + fall back to `"unknown"` for missing/blank model names. */
-const formatModel = (model: string | undefined): string => {
-  if (model === undefined) return "unknown"
-  const trimmed = model.trim()
-  return trimmed === "" ? "unknown" : trimmed
-}
-
-/**
- * Format a one-line context-usage string. Pure function, no I/O.
- *
- * @param used  tokens consumed so far (negative ⇒ clamped to 0)
- * @param max   context window size for the active model (≤0 ⇒ degraded `?` pct)
- * @param model optional model id; blank/missing ⇒ "unknown"
- */
-export const formatContextUsage = (used: number, max: number, model?: string): string => {
-  const modelLabel = formatModel(model)
-
-  // Degraded path: unknown context size. Bar empty, pct "?", no division.
-  if (!(max > 0) || !Number.isFinite(max)) {
-    const usedSafe = Number.isFinite(used) && used > 0 ? used : 0
-    return `${renderBar(0)} ${formatTokens(usedSafe)}/? (?) · ${modelLabel}`
-  }
-
-  const usedClamped = Number.isFinite(used) && used > 0 ? used : 0
-  const ratio = usedClamped / max
-  const pctNum = Math.round(ratio * 100)
-  const oversize = ratio > 1
-  const pctLabel = oversize ? `${pctNum}%!` : `${pctNum}%`
-
-  return `${renderBar(ratio)} ${formatTokens(usedClamped)}/${formatTokens(max)} (${pctLabel}) · ${modelLabel}`
-}
-
 // ── Track D: segmented multi-category usage bar (Cursor UsageBar shape) ──────
 //
-// Additive + default-OFF: the single-bar `formatContextUsage` above is left
-// byte-identical and remains the status-line default. This view is surfaced
-// only via the `/context` slash command.
+// Surfaced via the `/context` slash command.
 //
 // The bar has a FIXED width (`SEGMENTED_BAR_CELLS`) so it is stable regardless
 // of how many categories are present. Each category occupies a number of cells
@@ -110,6 +49,16 @@ export interface SegmentedUsageView {
   readonly total: number
   readonly max: number
   readonly model?: string
+  /**
+   * S3 (jul-03) — OpenAI-Responses-ONLY reasoning-token split (portion of the
+   * turn's OUTPUT tokens the model spent on hidden reasoning). Rendered as a
+   * SEPARATE legend annotation, NOT a bar segment: reasoning is output-side, so
+   * folding it into the input-context `total` / bar would misrepresent the
+   * window. OMITTED for providers with no split (Anthropic bills thinking as
+   * ordinary output) — the annotation then simply does not appear (no synthetic
+   * value). `0` is treated as "nothing to show" and also omitted.
+   */
+  readonly reasoningTokens?: number
 }
 
 /** Percentage (0–100, rounded) of the window consumed. Never NaN. */
@@ -183,6 +132,13 @@ export const formatSegmentedUsage = (b: SegmentedUsageView): string => {
     const glyph = SEGMENT_GLYPH[i % SEGMENT_GLYPH.length] ?? "█"
     const share = b.total > 0 ? Math.round((s.tokens / b.total) * 100) : 0
     lines.push(`  ${glyph} ${s.id.padEnd(12)} ${formatTokens(s.tokens)} (${share}%)`)
+  }
+  // S3 (jul-03): reasoning-token split (OpenAI-Responses-only) as a distinct
+  // annotation — OUTPUT-side, so it is NOT a bar segment and is NOT summed into
+  // the input-context total above. Absent/0 ⇒ omitted (Anthropic byte-identical,
+  // no synthetic value).
+  if (b.reasoningTokens !== undefined && b.reasoningTokens > 0) {
+    lines.push(`  · ${"Reasoning".padEnd(12)} ${formatTokens(b.reasoningTokens)} (output)`)
   }
   return lines.join("\n")
 }

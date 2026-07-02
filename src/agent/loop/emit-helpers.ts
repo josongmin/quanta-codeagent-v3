@@ -24,6 +24,11 @@ export const emitUsage = (
     ...(ev.cacheCreationTokens !== undefined
       ? { cacheCreationTokens: ev.cacheCreationTokens }
       : {}),
+    // S3 (jul-03) — forward the OpenAI-Responses reasoning-token split onto the
+    // AgentEvent so surface sinks (the `/context` gauge tap) can render it.
+    // `!== undefined` (not truthiness) keeps an explicit `0` split; omission
+    // stays omitted (Anthropic byte-identical, no synthetic value).
+    ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
   })
   recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
   config.budgetMeter?.tick("input_tokens", ev.inputTokens)

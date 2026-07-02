@@ -1,8 +1,8 @@
 /**
  * Segmented context-window usage breakdown (Cursor Canvas UsageBar shape).
  *
- * GAP closed: the CLI previously had only a single total + one-color bar
- * (`formatContextUsage`). Cursor's Canvas UsageBar instead shows the window as
+ * GAP closed: the CLI previously had only a single total + one-color bar (the
+ * now-deleted `formatContextUsage`). Cursor's Canvas UsageBar instead shows the window as
  * proportional, colored per-CATEGORY segments. This module produces a
  * {@link ContextUsageBreakdown} carrying those segments so a renderer can paint
  * them.

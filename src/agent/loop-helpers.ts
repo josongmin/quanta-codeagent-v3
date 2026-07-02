@@ -367,6 +367,9 @@ export interface SamplingUsage {
   readonly outputTokens: number
   readonly cacheReadTokens?: number
   readonly cacheCreationTokens?: number
+  /** OpenAI-Responses-ONLY reasoning-token split (portion of `outputTokens`).
+   *  Omitted for providers with no split (Anthropic) — never guessed. */
+  readonly reasoningTokens?: number
 }
 
 /** Project a provider `usage` stream event into the {@link SamplingUsage} shape
@@ -378,12 +381,14 @@ export const samplingUsageFromEvent = (ev: {
   readonly outputTokens: number
   readonly cacheReadTokens?: number
   readonly cacheCreationTokens?: number
+  readonly reasoningTokens?: number
 }): SamplingUsage => ({
   model: ev.model,
   inputTokens: ev.inputTokens,
   outputTokens: ev.outputTokens,
   ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
   ...(ev.cacheCreationTokens !== undefined ? { cacheCreationTokens: ev.cacheCreationTokens } : {}),
+  ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
 })
 
 /** gen_ai.* attributes for a `run_sampling_request` span: TTFT (existing) PLUS

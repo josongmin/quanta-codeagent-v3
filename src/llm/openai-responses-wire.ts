@@ -798,6 +798,10 @@ function* emitUsage(usage: AccumulatedUsage | null, fallbackModel: string): Gene
     inputTokens: usage.input,
     outputTokens: usage.output,
     ...(usage.cached !== undefined ? { cacheReadTokens: usage.cached } : {}),
+    // S3 (jul-03): forward the reasoning-token split so the gauge/recorder/ledger
+    // can see it. OpenAI-Responses-only (Anthropic omits it ⇒ byte-identical).
+    // `!== undefined` (not truthiness) so an explicit `0` split rides through.
+    ...(usage.reasoning !== undefined ? { reasoningTokens: usage.reasoning } : {}),
     model: usage.model ?? fallbackModel,
   }
 }

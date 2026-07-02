@@ -197,6 +197,15 @@ export type StreamEvent =
       outputTokens: number
       cacheReadTokens?: number
       cacheCreationTokens?: number
+      /** OpenAI-Responses-ONLY reasoning-token split (the portion of
+       *  `outputTokens` the model spent on hidden reasoning; from
+       *  `response.usage.output_tokens_details.reasoning_tokens`). OPTIONAL
+       *  (exactOptionalPropertyTypes): OMITTED for providers with no split —
+       *  Anthropic bills thinking as ordinary output and emits no reasoning
+       *  field, so it is simply absent (never a synthetic/guessed value), which
+       *  keeps the Anthropic path byte-identical. `0` is a real provider datum
+       *  (reasoned zero) and is forwarded verbatim, distinct from omission. */
+      reasoningTokens?: number
       model: string
     }
   /** Live output-token progress for the in-flight response (the rising "·

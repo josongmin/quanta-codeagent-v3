@@ -547,8 +547,8 @@ export interface RuntimeConfigPaths {
   /** ticket-15 (§11.7) — scriptable statusLine config (CC `statusLine{}` shape).
    *  DOUBLE-gated default-OFF: `undefined` UNLESS `QUANTA_STATUS_LINE` is on
    *  (gateOn vocab) AND `QUANTA_STATUS_LINE_CONFIG` is a JSON object carrying a
-   *  usable `command`. Absent ⇒ the fixed `formatContextUsage` status line is
-   *  the only render (byte-identical).
+   *  usable `command`. Absent ⇒ the built-in segmented `/context` status render
+   *  is the only render (byte-identical).
    *  SEAM (validated, not yet composed at the render root): the runner
    *  (`apps/cli/status-command-runner.ts` `runStatusCommand`), the payload
    *  assembler (`buildStatusPayload`), and the palette SSOT (`getColorPalette`)

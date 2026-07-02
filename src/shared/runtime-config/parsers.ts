@@ -171,8 +171,8 @@ export interface StatusLineConfig {
 }
 
 /** Parse the scriptable-statusLine config from env. DOUBLE-gated, default-OFF:
- *  returns `undefined` (byte-identical — the fixed `formatContextUsage` status
- *  line stays the only render) UNLESS the master gate `QUANTA_STATUS_LINE` is on
+ *  returns `undefined` (byte-identical — the built-in segmented `/context`
+ *  status render stays the only render) UNLESS the master gate `QUANTA_STATUS_LINE` is on
  *  (gateOn vocab) AND `QUANTA_STATUS_LINE_CONFIG` parses to a JSON object with a
  *  usable `command`. Any defect (gate off / absent / malformed JSON / no
  *  command) ⇒ `undefined` + a single stderr warn on a malformed-but-present

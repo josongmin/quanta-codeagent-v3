@@ -304,6 +304,13 @@ export type AgentEvent =
       // (exactOptionalPropertyTypes): OMITTED for non-caching providers so the
       // default-OFF byte-identical contract holds (OpenAI never sets it).
       cacheCreationTokens?: number
+      // S3 (jul-03) — OpenAI-Responses-ONLY reasoning-token split, forwarded
+      // from the adapter `usage` StreamEvent when the provider reported it (the
+      // portion of `outputTokens` spent on hidden reasoning). OPTIONAL
+      // (exactOptionalPropertyTypes): OMITTED for providers with no split
+      // (Anthropic bills thinking as output ⇒ absent, byte-identical). `0` is a
+      // real provider datum and is forwarded verbatim, distinct from omission.
+      reasoningTokens?: number
       model: string
     }
   // Live output-token progress for the in-flight response — the rising
