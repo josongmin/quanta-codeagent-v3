@@ -199,6 +199,70 @@ interface CachedState {
   terminal: boolean
 }
 
+/** Injected-closure deps shared across a single adapter instance. */
+interface DockerAdapterDeps {
+  readonly proc: DockerProcess
+  readonly cache: Map<string, CachedState>
+  readonly known: Set<string>
+  readonly nowMs: () => number
+  readonly allocName: () => string
+}
+
+/** `spawn(spec)` → `docker run -d …`. Extracted from {@link createDockerAdapter}
+ *  with explicit instance deps; behavior is byte-identical to the inlined method. */
+const dockerSpawn = async (
+  deps: DockerAdapterDeps,
+  spec: RemoteSpec,
+): Promise<Result<RemoteHandle, RemoteError>> => {
+  const { proc, cache, known, nowMs, allocName } = deps
+  const validation = validateSpec(spec)
+  if (!validation.ok) return err(validation.error)
+
+  // HELL-RR-07: timeout 0 → never spawn; emit terminal-failed immediately.
+  if (spec.timeoutMs === 0) {
+    const id = allocName()
+    known.add(id)
+    cache.set(id, {
+      status: "failed",
+      exitCode: undefined,
+      reason: "timeout",
+      observedAtMs: nowMs(),
+      terminal: true,
+    })
+    return ok({ id, backend: "docker" })
+  }
+
+  if (spec.signal?.aborted === true) {
+    return err(new RemoteError("cancelled", "aborted pre-spawn", "docker"))
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const name = allocName()
+    const argv = composeDockerRunArgv(spec, name)
+    const result = await proc.exec(argv)
+    if (result.exitCode === 0) {
+      known.add(name)
+      cache.set(name, {
+        status: "pending",
+        exitCode: undefined,
+        reason: undefined,
+        observedAtMs: nowMs(),
+        terminal: false,
+      })
+      return ok({ id: name, backend: "docker" })
+    }
+    // Naming collision → loop; otherwise classify + return.
+    const lower = result.stderr.toLowerCase()
+    const collision =
+      lower.includes("is already in use by container") ||
+      lower.includes("conflict. the container name")
+    if (collision) continue
+    const cls = classifyDockerStderr(result.stderr)
+    return err(new RemoteError(cls.kind, cls.message, "docker"))
+  }
+  return err(new RemoteError("transport", "naming collision retry exhausted", "docker"))
+}
+
 export const createDockerAdapter = (opts: DockerAdapterOpts): RemoteRunner => {
   const proc = opts.process
   const prefix = opts.namePrefix ?? "quanta-remote"
@@ -225,52 +289,7 @@ export const createDockerAdapter = (opts: DockerAdapterOpts): RemoteRunner => {
 
   return {
     async spawn(spec: RemoteSpec): Promise<Result<RemoteHandle, RemoteError>> {
-      const validation = validateSpec(spec)
-      if (!validation.ok) return err(validation.error)
-
-      // HELL-RR-07: timeout 0 → never spawn; emit terminal-failed immediately.
-      if (spec.timeoutMs === 0) {
-        const id = allocName()
-        known.add(id)
-        cache.set(id, {
-          status: "failed",
-          exitCode: undefined,
-          reason: "timeout",
-          observedAtMs: nowMs(),
-          terminal: true,
-        })
-        return ok({ id, backend: "docker" })
-      }
-
-      if (spec.signal?.aborted === true) {
-        return err(new RemoteError("cancelled", "aborted pre-spawn", "docker"))
-      }
-
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const name = allocName()
-        const argv = composeDockerRunArgv(spec, name)
-        const result = await proc.exec(argv)
-        if (result.exitCode === 0) {
-          known.add(name)
-          cache.set(name, {
-            status: "pending",
-            exitCode: undefined,
-            reason: undefined,
-            observedAtMs: nowMs(),
-            terminal: false,
-          })
-          return ok({ id: name, backend: "docker" })
-        }
-        // Naming collision → loop; otherwise classify + return.
-        const lower = result.stderr.toLowerCase()
-        const collision =
-          lower.includes("is already in use by container") ||
-          lower.includes("conflict. the container name")
-        if (collision) continue
-        const cls = classifyDockerStderr(result.stderr)
-        return err(new RemoteError(cls.kind, cls.message, "docker"))
-      }
-      return err(new RemoteError("transport", "naming collision retry exhausted", "docker"))
+      return await dockerSpawn({ proc, cache, known, nowMs, allocName }, spec)
     },
 
     async status(handle: RemoteHandle): Promise<Result<RemoteStatus, RemoteError>> {

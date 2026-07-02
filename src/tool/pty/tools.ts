@@ -127,6 +127,30 @@ const guard = <S extends z.ZodTypeAny>(
   return { ok: true, data: parsed.data }
 }
 
+/** Render `port.list()` infos into the model-facing `pty_list` body. H14: a
+ *  session NAME / cwd / title is attacker-controllable (a human/CI names a
+ *  session, or a process sets its title via `ESC]2;…BEL`). These strings render
+ *  straight into the transcript, so defang any embedded escape the SAME way
+ *  `pty_read` defangs pane output — a session named `quanta-\x1b[32mGREEN` must
+ *  not carry a live escape into the model view. */
+const formatSessionList = (infos: Awaited<ReturnType<PtySessionPort["list"]>>): string => {
+  if (infos.length === 0) return "(no attachable sessions)"
+  return infos
+    .map((i) => {
+      const handle = neutralizeTerminalOutput(i.handle)
+      const title = i.title ? ` ${neutralizeTerminalOutput(i.title)}` : ""
+      const cwd = i.cwd ? ` (${neutralizeTerminalOutput(i.cwd)})` : ""
+      return `  ${handle} [${i.kind}${i.owned ? ",owned" : ""}]${title}${cwd}`
+    })
+    .join("\n")
+}
+
+/** Map a settled `PtyResult` to a `ToolResult`: on success run `ok` to build the
+ *  output; on failure route through {@link failFromPty}. Collapses the identical
+ *  success/failure fork shared by attach/write/resize/kill. */
+const okOrFail = <T>(r: PtyResult<T>, ok: (value: T) => ToolResult): ToolResult =>
+  r.ok ? ok(r.value) : failFromPty(r)
+
 export const ptyTools = (port: PtySessionPort): Tool[] => {
   const ptyList: Tool<Record<string, never>> = {
     name: "pty_list",
@@ -140,23 +164,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const infos = await port.list()
-        // H14: a session NAME / cwd / title is attacker-controllable (a human/CI
-        // names a session, or a process sets its title via `ESC]2;…BEL`). These
-        // strings render straight into the transcript, so defang any embedded
-        // escape the SAME way `pty_read` defangs pane output — a session named
-        // `quanta-\x1b[32mGREEN` must not carry a live escape into the model view.
-        const lines =
-          infos.length === 0
-            ? "(no attachable sessions)"
-            : infos
-                .map((i) => {
-                  const handle = neutralizeTerminalOutput(i.handle)
-                  const title = i.title ? ` ${neutralizeTerminalOutput(i.title)}` : ""
-                  const cwd = i.cwd ? ` (${neutralizeTerminalOutput(i.cwd)})` : ""
-                  return `  ${handle} [${i.kind}${i.owned ? ",owned" : ""}]${title}${cwd}`
-                })
-                .join("\n")
-        return { ok: true, output: `PTY sessions:\n${lines}` }
+        return { ok: true, output: `PTY sessions:\n${formatSessionList(infos)}` }
       })
     },
   }
@@ -173,9 +181,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const r = await port.attach(g.data.handle)
-        return r.ok
-          ? { ok: true, output: `attached ${r.value.handle} (cursor=${r.value.cursor})` }
-          : failFromPty(r)
+        return okOrFail(r, (v) => ({ ok: true, output: `attached ${v.handle} (cursor=${v.cursor})` }))
       })
     },
   }
@@ -214,7 +220,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
           g.data.data,
           g.data.appendNewline !== undefined ? { appendNewline: g.data.appendNewline } : {},
         )
-        return r.ok ? { ok: true, output: "ok" } : failFromPty(r)
+        return okOrFail(r, () => ({ ok: true, output: "ok" }))
       })
     },
   }
@@ -231,12 +237,13 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const r = await port.read(g.data.handle, g.data.sinceSeq ?? 0)
-        if (!r.ok) return failFromPty(r)
-        // H14: a hostile pane can plant raw ANSI/CSI/OSC escapes in `capture-pane`
-        // output. Defang them to visible caret forms BEFORE the surrogate-safe cap
-        // so no raw control byte reaches the model-facing transcript (forge guard).
-        const body = capOutput(neutralizeTerminalOutput(r.value.chunks.map((c) => c.data).join("")))
-        return { ok: true, output: `${body}\n[nextSeq=${r.value.nextSeq}]` }
+        return okOrFail(r, (v) => {
+          // H14: a hostile pane can plant raw ANSI/CSI/OSC escapes in `capture-pane`
+          // output. Defang them to visible caret forms BEFORE the surrogate-safe cap
+          // so no raw control byte reaches the model-facing transcript (forge guard).
+          const body = capOutput(neutralizeTerminalOutput(v.chunks.map((c) => c.data).join("")))
+          return { ok: true, output: `${body}\n[nextSeq=${v.nextSeq}]` }
+        })
       })
     },
   }
@@ -252,9 +259,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const r = await port.resize(g.data.handle, g.data.cols, g.data.rows)
-        return r.ok
-          ? { ok: true, output: `resized to ${g.data.cols}x${g.data.rows}` }
-          : failFromPty(r)
+        return okOrFail(r, () => ({ ok: true, output: `resized to ${g.data.cols}x${g.data.rows}` }))
       })
     },
   }
@@ -270,7 +275,7 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const r = await port.kill(g.data.handle)
-        return r.ok ? { ok: true, output: `killed ${g.data.handle}` } : failFromPty(r)
+        return okOrFail(r, () => ({ ok: true, output: `killed ${g.data.handle}` }))
       })
     },
   }

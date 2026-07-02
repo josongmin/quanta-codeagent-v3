@@ -1,7 +1,19 @@
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { errMessage, runtimeConfig } from "@/shared"
 import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
-import { httpStatusOf, isUnauthorizedError, McpError, unsupported } from "./client/errors"
+import {
+  serverSupportsCompletions,
+  serverSupportsPrompts,
+  serverSupportsResources,
+  serverSupportsResourceSubscribe,
+  serverSupportsTasks,
+} from "./client/capabilities-gate"
+import { isUnauthorizedError, McpError, unsupported } from "./client/errors"
+import {
+  dispatch as routeInbound,
+  type InboundRouterContext,
+  type PendingRequest,
+} from "./client/inbound-router"
 import { initializeWithDowngrade, pinNegotiatedVersion } from "./client/negotiate"
 import {
   asRecord,
@@ -15,16 +27,11 @@ import {
 } from "./client/result-folding"
 import { defaultTransportFor, type McpClientTransport } from "./client/transport-factory"
 import { headlessRejecter } from "./elicitation"
-import {
-  type ElicitationResponse,
-  isElicitationMethod,
-  routeElicitation,
-} from "./elicitation/inbound-router"
 import type { ElicitationPrompter } from "./elicitation/port"
-import { isResponse, type JsonRpcMessage, type JsonRpcResponse } from "./jsonrpc"
+import type { JsonRpcMessage } from "./jsonrpc"
 import { headlessOAuthRejecter } from "./oauth"
 import type { McpOAuthProviderPort } from "./oauth/port"
-import { isProgressMethod, type McpProgressHandler, parseProgress } from "./progress"
+import type { McpProgressHandler } from "./progress"
 import { resolveOfferedVersion } from "./protocol-version"
 import type {
   McpCompletionArgument,
@@ -34,8 +41,6 @@ import type {
   McpResourceTemplate,
 } from "./resources"
 import {
-  isResourceNotificationMethod,
-  isRootsMethod,
   type McpPromptResult,
   type McpResource,
   type McpResourceContent,
@@ -49,11 +54,8 @@ import {
   parseResourceTemplateList,
   RESOURCE_READ_MAX_CONTENT_CHARS,
   type RootsProviderPort,
-  routeResourceNotification,
-  routeRootsList,
 } from "./resources"
 import { headlessSamplingRejecter } from "./sampling"
-import { isSamplingMethod, routeSampling, type SamplingResponse } from "./sampling/inbound-router"
 import type { SamplingHandlerPort } from "./sampling/port"
 import type { McpTransport } from "./transports/port"
 import type { McpCallResult, McpServerConfig, McpToolDef } from "./types"
@@ -62,29 +64,12 @@ const CLIENT_INFO = { name: "quanta", version: "0.1.0" }
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
 const MAX_TOOLS_LIST_PAGES = 256
 
-/** ADVERSARIAL inbound-DoS bound (jun-06) — the maximum number of inbound
- *  `sampling/createMessage` requests serviced concurrently. A malicious MCP
- *  server can fire an unbounded stream of inbound sampling requests; each can
- *  fan out to a consent prompt + an LLM completion, so without a cap they spawn
- *  unbounded in-flight async tasks (memory) and unbounded inference (cost). At
- *  the cap the client replies with a JSON-RPC `busy` error rather than spawning
- *  another task — back-pressure the server can observe. 8 is generous for any
- *  legitimate server (sampling is interactive, consent-gated) while bounding a
- *  flood. */
-const MAX_INBOUND_SAMPLING_IN_FLIGHT = 8
-
 /** Re-export the public surface (error class + folding cluster + transport
  *  factory type) so EVERY external importer of `@/mcp/client` stays
  *  byte-compatible after the split. */
 export { McpError } from "./client/errors"
 export { extractMedia, sanitizeAnnotations, unsupportedTypeMarker } from "./client/result-folding"
 export type { McpClientTransport } from "./client/transport-factory"
-
-interface PendingRequest {
-  resolve: (value: unknown) => void
-  reject: (reason: Error) => void
-  timer: ReturnType<typeof setTimeout>
-}
 
 /** A real MCP client speaking newline-delimited JSON-RPC 2.0 over a pluggable
  *  {@link McpTransport} (default: stdio).
@@ -150,14 +135,17 @@ export class McpClient {
   private exited = false
   private unsubscribeMessage: (() => void) | null = null
   private unsubscribeExit: (() => void) | null = null
-  /** ADVERSARIAL inbound-DoS bound (jun-06) — the number of inbound
+  /** The receive-side routing context handed to `./client/inbound-router`. It
+   *  proxies the client-owned surface (send / takePending / the injected ports)
+   *  and OWNS the mutable ADVERSARIAL inbound-DoS counter
+   *  (`inboundSamplingInFlight`, jun-06): the number of inbound
    *  `sampling/createMessage` requests currently being serviced. Each inbound
    *  sampling request can fan out to a consent prompt + an LLM completion; a
    *  hostile server that fires thousands concurrently would otherwise spawn
    *  thousands of in-flight async tasks (unbounded promises + inference spend).
-   *  When this reaches {@link MAX_INBOUND_SAMPLING_IN_FLIGHT} the client replies
-   *  with a JSON-RPC `busy` error INSTEAD of spawning another task. */
-  private inboundSamplingInFlight = 0
+   *  When it reaches the router's cap the client replies with a JSON-RPC `busy`
+   *  error INSTEAD of spawning another task. Built once in the constructor. */
+  private readonly inbound: InboundRouterContext
   /** H18 — a shared in-flight mid-session re-auth (invalidate → fresh bearer →
    *  carrier rebuild). `null` when idle; set while a re-auth runs so concurrent
    *  401s coalesce into a single rebuild rather than racing the carrier swap. */
@@ -262,6 +250,28 @@ export class McpClient {
     // existing caller. The composition root wires these from the workspace.
     this.rootsProvider = opts?.rootsProvider
     this.resourceObserver = opts?.resourceObserver
+    // Receive-side routing context (see `./client/inbound-router`). Proxies the
+    // client-owned surface + carries the mutable inbound-sampling counter. Bound
+    // once so the router's byte-identical behavior is preserved verbatim.
+    const client = this
+    this.inbound = {
+      send: (payload) => client.send(payload),
+      takePending: (id) => client.takePending(id),
+      progressHandlers: this.progressHandlers,
+      get resourceObserver() {
+        return client.resourceObserver
+      },
+      get rootsProvider() {
+        return client.rootsProvider
+      },
+      get samplingHandler() {
+        return client.samplingHandler
+      },
+      get elicitationPrompter() {
+        return client.elicitationPrompter
+      },
+      inboundSamplingInFlight: 0,
+    }
   }
 
   async start(): Promise<void> {
@@ -346,9 +356,7 @@ export class McpClient {
    *  omits the slot, or when the slot is not an object. The composition root
    *  uses this to gate the optional MCP-tasks tool surface (default-OFF). */
   serverSupportsTasks(): boolean {
-    const caps = this.serverCapabilities
-    if (caps === null) return false
-    return asRecord(caps.tasks) !== null
+    return serverSupportsTasks(this.serverCapabilities)
   }
 
   /** §1.2 (ticket-09) — the last SSE event id seen on the standalone stream, for
@@ -363,23 +371,19 @@ export class McpClient {
   /** H19 — does the connected server advertise `resources`? Reads the
    *  `capabilities.resources` slot from the `initialize` response. */
   serverSupportsResources(): boolean {
-    const caps = this.serverCapabilities
-    return caps !== null && asRecord(caps.resources) !== null
+    return serverSupportsResources(this.serverCapabilities)
   }
 
   /** H19 — does the server advertise `resources.subscribe`? A subscribe call is
    *  refused (typed `unsupported`) unless this is true, so we never emit a
    *  `resources/subscribe` the server answers with a raw `-32601`. */
   serverSupportsResourceSubscribe(): boolean {
-    const caps = this.serverCapabilities
-    if (caps === null) return false
-    return asRecord(caps.resources)?.subscribe === true
+    return serverSupportsResourceSubscribe(this.serverCapabilities)
   }
 
   /** H19 — does the connected server advertise `prompts`? */
   serverSupportsPrompts(): boolean {
-    const caps = this.serverCapabilities
-    return caps !== null && asRecord(caps.prompts) !== null
+    return serverSupportsPrompts(this.serverCapabilities)
   }
 
   /** TICKET-20 — does the connected server advertise `completions`? An
@@ -387,8 +391,7 @@ export class McpClient {
    *  unless this is true, so we never emit a request the server answers with a
    *  raw `-32601`. */
   serverSupportsCompletions(): boolean {
-    const caps = this.serverCapabilities
-    return caps !== null && asRecord(caps.completions) !== null
+    return serverSupportsCompletions(this.serverCapabilities)
   }
 
   /** ADR-0431 — dispatch a single outbound JSON-RPC request and return the raw
@@ -799,166 +802,13 @@ export class McpClient {
     return true
   }
 
+  /** Route one decoded transport message through the receive-side router
+   *  (`./client/inbound-router`): responses settle their pending request;
+   *  server→client requests (elicitation / sampling / roots) and change
+   *  notifications route to the wired ports/observer. Delegated verbatim so the
+   *  dispatch/response/inbound-request behavior is byte-identical. */
   private dispatch(msg: JsonRpcMessage): void {
-    if (isResponse(msg)) {
-      this.resolveResponse(msg)
-      return
-    }
-    if (!("method" in msg)) return
-    const params = "params" in msg ? msg.params : undefined
-    // Track C: an inbound REQUEST (has both `id` and `method`) is a call FROM the
-    // server (elicitation / sampling / roots) and carries a reply obligation.
-    if ("id" in msg) {
-      this.handleInboundRequest(msg.id, msg.method, params)
-      return
-    }
-    // A `method` WITHOUT an `id` is a NOTIFICATION (no reply obligation).
-    // §19.4 progress routes to the per-call sink; H19/§19.5 resource/prompt/tool
-    // change notifications route to the optional observer; anything else is
-    // ignored (byte-identical to the pre-notification client).
-    if (isProgressMethod(msg.method)) {
-      this.routeProgressNotification(params)
-      return
-    }
-    if (isResourceNotificationMethod(msg.method)) {
-      routeResourceNotification(this.resourceObserver, msg.method, params)
-    }
-  }
-
-  /** Settle the pending request a server RESPONSE correlates to. Extracted from
-   *  {@link dispatch} so the dispatcher stays a flat router. R4 (structured-401):
-   *  a carrier-surfaced `error.data.httpStatus` is copied onto the typed error so
-   *  `isUnauthorizedError` keys off the STRUCTURED number, not a substring. */
-  private resolveResponse(msg: JsonRpcResponse): void {
-    const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
-    const entry = this.takePending(id)
-    if (!entry) return
-    if (msg.error) {
-      const httpStatus = httpStatusOf(msg.error.data)
-      // Ticket misc-jun-7/01 R2 — carry the JSON-RPC code structurally so the
-      // §4.c re-offer can scope itself to a genuine version-rejection rather than
-      // firing on any McpError (timeout / transient fault).
-      const code = typeof msg.error.code === "number" ? msg.error.code : undefined
-      entry.reject(
-        new McpError(`mcp error ${msg.error.code}: ${msg.error.message}`, {
-          ...(httpStatus !== undefined ? { httpStatus } : {}),
-          ...(code !== undefined ? { jsonRpcCode: code } : {}),
-        }),
-      )
-      return
-    }
-    entry.resolve(msg.result)
-  }
-
-  /** §19.4 — route an inbound `notifications/progress` to the PER-CALL sink
-   *  registered under its `progressToken`. Unknown/expired token ⇒ dropped. The
-   *  sink is no-throw by contract, but we guard so a buggy one can never crash
-   *  the transport message pump. */
-  private routeProgressNotification(params: unknown): void {
-    const p = parseProgress(params)
-    if (p === null) return
-    const handler = this.progressHandlers.get(p.progressToken)
-    if (handler === undefined) return
-    try {
-      handler(p)
-    } catch {
-      // swallow — a throwing progress sink must not break dispatch
-    }
-  }
-
-  /** Service an inbound server→client JSON-RPC request. Two inbound methods are
-   *  handled — `elicitation/*` (routes to the prompter) and `sampling/
-   *  createMessage` (ADR-0470, routes to the sampling handler). Any other
-   *  inbound method gets a `-32601 method not found` JSON-RPC error so the
-   *  server is never left hanging on a dropped request. Never throws (both port
-   *  contracts are no-throw, and any unexpected failure is mapped to a typed
-   *  decline response). */
-  private handleInboundRequest(id: number | string, method: string, params: unknown): void {
-    // H19 — inbound `roots/list` (server → client). We answer from the wired
-    // `RootsProviderPort`; with none wired the provider defaults to an empty
-    // list (we recognize the method, so we never reply `-32601` — a server that
-    // asks gets a well-defined empty result rather than a dropped request).
-    if (isRootsMethod(method)) {
-      const provider = this.rootsProvider ?? { listRoots: () => [] }
-      const result = routeRootsList(provider, method)
-      this.send({ jsonrpc: "2.0", id, result })
-      return
-    }
-    // ADR-0470 — sampling/createMessage routes to the injected handler. With no
-    // handler wired the default rejecter declines (and the client does not
-    // advertise `sampling`, so a well-behaved server never reaches here). A
-    // decline is shaped as a JSON-RPC *error*, not a dropped request.
-    if (isSamplingMethod(method)) {
-      this.handleInboundSampling(id, method, params)
-      return
-    }
-    if (!isElicitationMethod(method)) {
-      this.send({
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32601, message: `method not found: ${method}` },
-      })
-      return
-    }
-    void routeElicitation(this.elicitationPrompter, method, params).then(
-      (response: ElicitationResponse) => {
-        this.send({ jsonrpc: "2.0", id, result: response })
-      },
-      // Defensive: the prompter contract is no-throw, but if a custom impl
-      // rejects we still must answer rather than drop the request.
-      () => {
-        this.send({ jsonrpc: "2.0", id, result: { action: "decline" } })
-      },
-    )
-  }
-
-  /** ADR-0470 — route an inbound `sampling/createMessage` request to the
-   *  injected {@link SamplingHandlerPort} and reply. A fulfilled completion is
-   *  sent as the JSON-RPC `result`; a typed decline (the default-OFF case is
-   *  `no-handler`) is sent as a JSON-RPC `error` so the server learns the
-   *  client refused rather than being left hanging. Never throws — the router
-   *  contract is total and a rejecting custom handler is mapped to a decline. */
-  private handleInboundSampling(id: number | string, method: string, params: unknown): void {
-    // ADVERSARIAL inbound-DoS bound — refuse (with observable back-pressure)
-    // once too many inbound sampling requests are already in flight, rather
-    // than spawning an unbounded number of consent/LLM tasks. The server gets a
-    // typed `busy` error and can retry; it cannot wedge us into OOM/spend.
-    if (this.inboundSamplingInFlight >= MAX_INBOUND_SAMPLING_IN_FLIGHT) {
-      this.send({
-        jsonrpc: "2.0",
-        id,
-        error: { code: -32000, message: "sampling: too many in-flight requests" },
-      })
-      return
-    }
-    this.inboundSamplingInFlight++
-    const done = (): void => {
-      this.inboundSamplingInFlight--
-    }
-    void routeSampling(this.samplingHandler, method, params).then(
-      (response: SamplingResponse) => {
-        done()
-        if (response.kind === "result") {
-          this.send({ jsonrpc: "2.0", id, result: response.result })
-        } else {
-          this.send({
-            jsonrpc: "2.0",
-            id,
-            error: { code: response.code, message: response.message },
-          })
-        }
-      },
-      // Defensive: routeSampling is no-throw, but if it ever rejects we still
-      // answer rather than drop the request.
-      () => {
-        done()
-        this.send({
-          jsonrpc: "2.0",
-          id,
-          error: { code: -32000, message: "sampling: internal error" },
-        })
-      },
-    )
+    routeInbound(this.inbound, msg)
   }
 
   /** Subscribe to a one-shot transport-exit notification (ADR-0435). Returns an

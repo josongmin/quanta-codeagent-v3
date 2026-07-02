@@ -544,6 +544,50 @@ const runTurn = async (args: {
   }
 }
 
+/** T03 (audit L5 H-8 / R1 H1) — settle a `turn.run` whose external signal is
+ *  ALREADY aborted at the dispatch boundary. We reuse the reducer's
+ *  `turn.cancel` transition rather than throwing past the reducer. When that
+ *  transition emits NOTHING (pre-aborted run against an already-idle session)
+ *  we synthesize an explicit `session.state.updated` (+ bump revision/seq) so
+ *  the event log never diverges from the returned state. */
+const settlePreAbortedTurnRun = async (args: {
+  readonly state: KernelSessionState
+  readonly command: TurnRunCommand
+  readonly ctx: KernelDispatchContext
+  readonly emittedAt: string
+}): Promise<KernelDispatchResult> => {
+  const { state, command, ctx, emittedAt } = args
+  const cancelReduced = reduceSessionCommand(state, { ...command, type: "turn.cancel" }, emittedAt)
+  let cancelEvents = [...cancelReduced.events]
+  let cancelledState: KernelSessionState = {
+    ...cancelReduced.state,
+    status: "idle",
+    lastOutcomeReason: "aborted",
+    seq: state.seq + cancelEvents.length,
+  }
+  if (cancelEvents.length === 0) {
+    cancelledState = {
+      ...cancelledState,
+      revision: state.revision + 1,
+      seq: state.seq + 1,
+    }
+    cancelEvents = [
+      {
+        eventId: crypto.randomUUID(),
+        seq: cancelledState.seq,
+        revision: cancelledState.revision,
+        emittedAt,
+        causedByCommandId: command.commandId,
+        type: "session.state.updated",
+        state: toSessionStateView(cancelledState),
+      },
+    ]
+  }
+  await appendEvents(ctx.eventLog, cancelEvents)
+  await notifyCommitted(ctx, { state: cancelledState, events: cancelEvents })
+  return { state: cancelledState, events: cancelEvents }
+}
+
 export const dispatchSessionCommand = async (
   state: KernelSessionState,
   command: SessionCommand,
@@ -580,45 +624,7 @@ export const dispatchSessionCommand = async (
     // the reducer; the running-turn catch path uses the shared `isAbort`
     // primitive for the symmetric mid-flight case.
     if (command.type === "turn.run" && ctx.signal?.aborted === true) {
-      const cancelReduced = reduceSessionCommand(
-        state,
-        { ...command, type: "turn.cancel" },
-        emittedAt,
-      )
-      let cancelEvents = [...cancelReduced.events]
-      let cancelledState: KernelSessionState = {
-        ...cancelReduced.state,
-        status: "idle",
-        lastOutcomeReason: "aborted",
-        seq: state.seq + cancelEvents.length,
-      }
-      // Audit R1 H1: a pre-aborted `turn.run` against an already-idle session
-      // makes the reducer's `turn.cancel` emit NOTHING (its `!hasActiveTurn`
-      // branch leaves state untouched) — yet this IS a terminal `aborted`
-      // outcome. Synthesize an explicit `session.state.updated` (+ bump
-      // revision/seq) so the event log never diverges from the returned state;
-      // otherwise a persisted-then-replayed session loses the abort entirely.
-      if (cancelEvents.length === 0) {
-        cancelledState = {
-          ...cancelledState,
-          revision: state.revision + 1,
-          seq: state.seq + 1,
-        }
-        cancelEvents = [
-          {
-            eventId: crypto.randomUUID(),
-            seq: cancelledState.seq,
-            revision: cancelledState.revision,
-            emittedAt,
-            causedByCommandId: command.commandId,
-            type: "session.state.updated",
-            state: toSessionStateView(cancelledState),
-          },
-        ]
-      }
-      await appendEvents(ctx.eventLog, cancelEvents)
-      await notifyCommitted(ctx, { state: cancelledState, events: cancelEvents })
-      return { state: cancelledState, events: cancelEvents }
+      return await settlePreAbortedTurnRun({ state, command, ctx, emittedAt })
     }
     const reduced = reduceSessionCommand(state, command, emittedAt)
     const immediateEvents = [...reduced.events]
