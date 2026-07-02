@@ -615,4 +615,20 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "Terminal-Bench environment posture (opt-in). When ON, the terminal brain rebuilds its SYSTEM prompt with the `owned` posture — install/configure/build freely (a working environment IS the deliverable), dropping the frozen R-ENV/R-STOP-ENV install-prohibition and adding R-ENV-OWNED/R-INSTALL-THRASH. PROMPT-TEXT-ONLY: swaps rendered rule text via boot.systemSource; touches NO SandboxPolicy/os-sandbox/host enforcement. Off ⇒ byte-identical (frozen) brain.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain env-posture systemSource swap)",
   },
+  // Terminal-Bench lever #3 (RFC jul-2-terminal-bench-levers/04) — best-of-N FAIR candidate selection.
+  // AGENT-SIDE read via `resolveBestOfN(env)` in `apps/terminal/best-of-n-runner.ts` (a terminal-
+  // surface gate — lives HERE per the read-site-domain ratchet). INTEGER, hard-capped at 4. Default
+  // (unset / blank / non-integer / ≤1) ⇒ a SINGLE brain run ⇒ byte-identical to the pre-lever brain.
+  // Selection reuses each candidate's OWN verify-gate stamp (Lever #2) as the fair signal — it NEVER
+  // reads the hidden verifier / test (no-answer-key red line).
+  {
+    envKey: "QUANTA_TB_BEST_OF_N",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "Terminal-Bench best-of-N fair candidate selection (opt-in, integer, hard-capped at 4). When ≥2, the terminal brain runs N independent attempts (fresh session each, serial) and selects the best via a FAIR, no-leak ranking over each candidate's OWN verify-gate signal (verified-pass > unverifiable > verified-fail; tie-break by evidence strength; attempt-1 floor). NEVER reads the hidden verifier/test. Unset / ≤1 ⇒ single run ⇒ byte-identical.",
+    readSite: "apps/terminal/best-of-n-runner.ts (runTerminalBrainBestOfN resolveBestOfN)",
+  },
 ]

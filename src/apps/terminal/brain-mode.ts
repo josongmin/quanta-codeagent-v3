@@ -110,6 +110,15 @@ export interface TerminalBrainReport {
    *  (knob ON) — absent ⇒ byte-identical to the pre-lever report. Lets per-task A/B analysis confirm
    *  the owned prompt actually rendered for this task (guards against a silent env-plumbing miss). */
   readonly envPosture?: "owned"
+  /** Lever #3 (`QUANTA_TB_BEST_OF_N`): PRESENT ONLY when best-of-N ran (N≥2, set by the
+   *  `best-of-n-runner` wrapper) — absent ⇒ byte-identical single-run report. Records how many
+   *  attempts ran, which won, and the FAIR (no-hidden-test) selection rationale, for A/B attribution.
+   *  The single `runTerminalBrain` core never sets this; only the outer wrapper does. */
+  readonly bestOfN?: {
+    readonly attempts: number
+    readonly winnerIndex: number
+    readonly rationale: string
+  }
 }
 
 /** Result returned to the caller (and to the process `main()`) after one brain run. */
@@ -579,7 +588,10 @@ const runMain = async (): Promise<void> => {
   const stdinLines: AsyncIterable<string> = rl as unknown as AsyncIterable<string>
 
   const maxTurns = resolveMaxTurnsFromEnv(process.env)
-  await runTerminalBrain({
+  // Lever #3 (`QUANTA_TB_BEST_OF_N`): route through the best-of-N wrapper. It is a byte-identical
+  // passthrough to `runTerminalBrain` when N is unset/1 (default), and only fans out when N≥2.
+  const { runTerminalBrainBestOfN } = await import("./best-of-n-runner")
+  await runTerminalBrainBestOfN({
     instruction,
     ...(model !== undefined ? { model } : {}),
     ...(maxTurns !== undefined ? { maxTurns } : {}),
