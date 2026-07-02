@@ -213,8 +213,12 @@ describe("ADR-0432 lineSpanOf invariants (1-based, in-bounds, never degenerate)"
 })
 
 describe("ADR-0432 citation line numbers are 1-based + within record bounds", () => {
-  test("emitted [L<s>-<e>] has s==1 and e<=record line count", async () => {
+  // jul-03 B3: the emitted span is now the REAL sub-range the query matches, no
+  // longer the degenerate whole-record L1..N. "line" first hits line 1 ("line
+  // one") ⇒ [L1-1]. The bounds invariant (1 <= s <= e <= totalLines) still holds.
+  test("emitted [L<s>-<e>] is the real matched sub-span within record bounds", async () => {
     const text = "line one\nline two\nline three"
+    const total = text.split("\n").length
     const store = new SpyStore([entry("m1", text)])
     const tools = memoryTools({ store, lineCitations: true })
     const ev = await run(byName(tools, "memory_search"), { query: "line" })
@@ -225,10 +229,27 @@ describe("ADR-0432 citation line numbers are 1-based + within record bounds", ()
       if (m) {
         const start = Number(m[1])
         const end = Number(m[2])
+        // Real sub-span: "line" first matches on line 1.
         expect(start).toBe(1)
-        expect(end).toBe(text.split("\n").length)
+        expect(end).toBe(1)
+        // Bounds invariant preserved.
+        expect(start).toBeGreaterThanOrEqual(1)
         expect(end).toBeGreaterThanOrEqual(start)
+        expect(end).toBeLessThanOrEqual(total)
       }
+    }
+  })
+
+  test("a query matching a LATER line yields a non-degenerate span (proves real offset carry)", async () => {
+    const text = "line one\nline two\nline three"
+    const store = new SpyStore([entry("m1", text)])
+    const tools = memoryTools({ store, lineCitations: true })
+    const ev = await run(byName(tools, "memory_search"), { query: "three" })
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      // "three" only appears on line 3 ⇒ [L3-3], NOT the whole-record L1-3.
+      expect(ev.result.output).toContain("[L3-3]")
+      expect(ev.result.output).not.toContain("[L1-3]")
     }
   })
 })

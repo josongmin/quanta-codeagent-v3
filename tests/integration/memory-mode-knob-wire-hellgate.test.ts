@@ -160,17 +160,23 @@ describe("ADR-0432 buildToolingCore threads deps to a REAL tool dispatch", () =>
     expect(await store.all()).toHaveLength(0)
   })
 
-  test("line-citations env ⇒ real memory_search output carries [L1-2]", async () => {
+  test("line-citations env ⇒ real memory_search output carries the matched sub-span", async () => {
     const store = seeded()
     const cfg = seededCfg({ QUANTA_MEMORY_LINE_CITATIONS: "1" }, store)
     const tooling = buildToolingCore(baseToolingInput(store, cfg))
     const search = tooling.registry.get("memory_search")
     if (!search) throw new Error("no memory_search")
+    // Record is "alpha\nbeta"; "alpha" matches on line 1 ⇒ REAL sub-span [L1-1],
+    // NOT the degenerate whole-record [L1-2] (jul-03 B3).
     const ev = await run(search, { query: "alpha" })
     if (ev.type === "result") {
       expect(ev.result.output).toContain("#m1")
-      expect(ev.result.output).toContain("L1-2")
+      expect(ev.result.output).toContain("[L1-1]")
+      expect(ev.result.output).not.toContain("[L1-2]")
     }
+    // "beta" matches on line 2 ⇒ [L2-2] (proves the offset is really carried).
+    const ev2 = await run(search, { query: "beta" })
+    if (ev2.type === "result") expect(ev2.result.output).toContain("[L2-2]")
   })
 
   test("write-guard env + live meter closure ⇒ real write blocked when budget low", async () => {

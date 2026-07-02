@@ -261,9 +261,11 @@ export {
 } from "./memory-stats"
 export {
   type LineCitation,
+  type LineCitationProvenance,
   lineSpanOf,
   type MemoryToolsDeps,
   type MemoryWriteGuard,
+  type MemoryWriteGuardArm,
   memoryTools,
   type ThreadMemoryMode,
 } from "./memory-tools"

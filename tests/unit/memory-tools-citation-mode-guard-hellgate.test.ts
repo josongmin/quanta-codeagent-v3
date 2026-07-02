@@ -35,15 +35,17 @@ const seeded = () =>
   ])
 
 describe("ADR-0432 line-level citations", () => {
-  test("memory_search appends source-line spans when lineCitations on", async () => {
+  test("memory_search appends REAL matched sub-span when lineCitations on", async () => {
     const tools = memoryTools({ store: seeded(), lineCitations: true })
     const ev = await run(byName(tools, "memory_search"), { query: "line" })
     expect(ev.type).toBe("result")
     if (ev.type === "result") {
       expect(ev.result.ok).toBe(true)
-      // A 3-line record cites L1-L3, anchored to the record id.
       expect(ev.result.output).toContain("#m1")
-      expect(ev.result.output).toContain("L1-3")
+      // jul-03 B3: "line" first matches on line 1 ⇒ [L1-1] (REAL sub-span),
+      // NOT the degenerate whole-record L1-3.
+      expect(ev.result.output).toContain("[L1-1]")
+      expect(ev.result.output).not.toContain("[L1-3]")
     }
   })
 

@@ -790,6 +790,12 @@ export const buildTooling = (
    *  surface passes the SAME instance it hands the slash surface. Unset ⇒ no
    *  recording (byte-identical). */
   activityStore?: import("@/activity").ActivityStore,
+  /** jul-03 B3 — live PROVIDER rate-limit remaining % (0..100) / `undefined`,
+   *  SEPARATE from `budgetRemainingPercent`. The surface passes
+   *  `() => meter.providerRateLimitRemainingPercent()` so the memory write-guard's
+   *  provider arm reads the REAL provider window. Unset ⇒ provider arm unarmed
+   *  (byte-identical). */
+  providerRateLimitRemainingPercent?: () => number | undefined,
 ): Tooling => {
   const store = buildStore()
   const embedder = buildEmbedder(store)
@@ -873,6 +879,9 @@ export const buildTooling = (
     // default-ON via the SSOT-derived gate-default seed in index.ts.
     ...(readCliKnob("QUANTA_COVERAGE_TOOL", "bool") ? { coverageCheck: true } : {}),
     ...(budgetRemainingPercent !== undefined ? { budgetRemainingPercent } : {}),
+    ...(providerRateLimitRemainingPercent !== undefined
+      ? { providerRateLimitRemainingPercent }
+      : {}),
   })
 }
 

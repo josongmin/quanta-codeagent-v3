@@ -27,18 +27,59 @@ import type { Tool, ToolContext, ToolEvent } from "@/tool"
 export type ThreadMemoryMode = "enabled" | "disabled" | "read-only"
 
 /**
- * Write-guard (ADR-0432). When configured, a `memory_write` / `memory_update`
- * is SKIPPED (typed `ok:false`, store untouched) if the run's remaining budget
- * percentage is strictly below `minRemainingPercent`. Default-OFF: absent ⇒ no
- * guard, every write proceeds (byte-identical). `remainingPercent` is supplied
- * by the caller from `BudgetMeter` (ADR-0138) — the memory slice never owns a
- * meter; it only reads the 0..100 remaining signal at write time.
+ * Which guard arm evaluated a write, for arm-state telemetry (jul-03 B3). The
+ * guard is fail-open UNLESS a threshold knob AND a live source both exist — a
+ * latent-config trap. Emitting the arm state on every write-guard evaluation
+ * proves the guard is actually LIVE (armed, reading a real source) rather than
+ * silently inert. `source` distinguishes the LOCAL cost fraction from the REAL
+ * provider rate-limit signal.
+ */
+export interface MemoryWriteGuardArm {
+  /** `cost` = local `BudgetMeter.remainingPercent()`; `provider` = provider
+   *  `x-ratelimit-remaining` tap. */
+  source: "cost" | "provider"
+  /** True when a live source produced a comparable number (a real reading), so
+   *  the arm actually participated. `provider` is unarmed when its tap returns
+   *  `undefined` (no snapshot yet). */
+  armed: boolean
+  /** The observed 0..100 remaining percentage, when `armed`. */
+  observed?: number
+  /** True iff this arm refused the write (`observed < minRemainingPercent`). */
+  blocked: boolean
+}
+
+/**
+ * Write-guard (ADR-0432, jul-03 B3). When configured, a `memory_write` /
+ * `memory_update` is SKIPPED (typed `ok:false`, store untouched) if EITHER the
+ * run's remaining budget percentage OR the provider's live rate-limit window is
+ * strictly below `minRemainingPercent`. Default-OFF: absent ⇒ no guard, every
+ * write proceeds (byte-identical).
+ *
+ * TWO independent signals (jul-03 B3 — kept SEPARATE by design):
+ *   - `remainingPercent()` — LOCAL cost/token fraction from `BudgetMeter`
+ *     (ADR-0138). Returns 100 with no cost dial (a human REPL), so on its own it
+ *     mirrors Codex `min_rate_limit_remaining_percent` by NAME only.
+ *   - `providerRateLimitRemainingPercent()` — the REAL provider quota window
+ *     (`x-ratelimit-remaining` / `x-codex-*-used-percent`). Returns `undefined`
+ *     until the provider actually reports one, so the provider arm fails OPEN on
+ *     "unknown" and only refuses on a genuinely low window.
+ * The memory slice never owns a meter; it only reads these 0..100 signals at
+ * write time.
  */
 export interface MemoryWriteGuard {
-  /** Skip the write when `remainingPercent() < minRemainingPercent`. */
+  /** Skip the write when a signal is strictly below this 0..100 threshold. */
   minRemainingPercent: number
-  /** Returns the run's remaining budget as a 0..100 percentage. */
+  /** Returns the run's LOCAL remaining budget as a 0..100 percentage. */
   remainingPercent: () => number
+  /**
+   * Returns the PROVIDER's live rate-limit remaining percentage (0..100), or
+   * `undefined` when the provider has not reported one yet. Absent closure ⇒ the
+   * provider arm is never armed (byte-identical to the cost-only guard).
+   */
+  providerRateLimitRemainingPercent?: () => number | undefined
+  /** Optional arm-state telemetry sink (jul-03 B3). Called once per evaluated
+   *  arm on every write-guard check. Absent ⇒ no telemetry (byte-identical). */
+  onArm?: (arm: MemoryWriteGuardArm) => void
 }
 
 /**
@@ -52,15 +93,70 @@ export interface LineCitation {
   recordId: string
   lineStart: number
   lineEnd: number
+  /** Provenance (jul-03 B3, Codex `MemoryCitationEntry.threadIds`): the session
+   *  that originated the cited record. Omitted when unknown. */
+  threadId?: string
+  /** Provenance (jul-03 B3, Codex `MemoryCitationEntry.entries[].note`): advisory
+   *  reuse guidance carried with the record. Omitted when absent. */
+  note?: string
 }
 
-/** 1-based inclusive line span of a record's text (always L1..N). */
-export const lineSpanOf = (recordId: string, text: string): LineCitation => {
-  // A non-empty record always spans at least line 1. `split("\n").length`
-  // counts lines including a trailing-newline empty segment; a lone empty
-  // string still cites L1-1 so the span is never degenerate.
-  const lines = text.length === 0 ? 1 : text.split("\n").length
-  return { recordId, lineStart: 1, lineEnd: lines }
+/** Optional provenance carried onto a {@link LineCitation}. */
+export interface LineCitationProvenance {
+  threadId?: string
+  note?: string
+}
+
+/** Count 1-based lines in `text` (an empty string is a single L1 line). */
+const lineCountOf = (text: string): number => (text.length === 0 ? 1 : text.split("\n").length)
+
+/** 1-based (inclusive) line index of char offset `pos` within `text`: one more
+ *  than the number of newlines strictly before `pos`. */
+const lineAtOffset = (text: string, pos: number): number => {
+  let line = 1
+  for (let i = 0; i < pos && i < text.length; i++) {
+    if (text.charCodeAt(i) === 0x0a) line++
+  }
+  return line
+}
+
+/**
+ * 1-based inclusive line span of a record's text (jul-03 B3).
+ *
+ * When `matchText` is supplied and is found (case-insensitive substring, exactly
+ * the `ranking.textScore` `lc/includes` match semantics), the span is the REAL
+ * sub-range of lines the FIRST match occupies — `[first-line, last-line]` of the
+ * matched substring — so `[L{s}-{e}]` is informative, not the degenerate
+ * whole-record `L1..N`. When `matchText` is absent or NOT found, it falls back
+ * to the whole record (`L1..N`), byte-identical to the legacy behaviour so
+ * callers that carry no query are unaffected. `provenance` (threadId / note) is
+ * appended when present (fields omitted otherwise — exactOptionalPropertyTypes).
+ */
+export const lineSpanOf = (
+  recordId: string,
+  text: string,
+  matchText?: string,
+  provenance?: LineCitationProvenance,
+): LineCitation => {
+  const total = lineCountOf(text)
+  let lineStart = 1
+  let lineEnd = total
+  if (matchText !== undefined && matchText.length > 0) {
+    const idx = text.toLowerCase().indexOf(matchText.toLowerCase())
+    if (idx >= 0) {
+      lineStart = lineAtOffset(text, idx)
+      // `idx + len - 1` is the last matched char; a match ending exactly at a
+      // boundary still lands on the line that char belongs to.
+      lineEnd = lineAtOffset(text, idx + matchText.length - 1)
+    }
+  }
+  return {
+    recordId,
+    lineStart,
+    lineEnd,
+    ...(provenance?.threadId !== undefined ? { threadId: provenance.threadId } : {}),
+    ...(provenance?.note !== undefined ? { note: provenance.note } : {}),
+  }
 }
 
 export interface MemoryToolsDeps {
@@ -178,15 +274,42 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
   const mode: ThreadMemoryMode = deps.threadMode ?? "enabled"
   const recallDisabled = mode === "disabled"
   const writesDisabled = mode === "disabled" || mode === "read-only"
-  /** Returns a typed-block reason iff a write must be refused, else undefined. */
+  /** Returns a typed-block reason iff a write must be refused, else undefined.
+   *  jul-03 B3: evaluates TWO independent arms — the LOCAL cost fraction and the
+   *  REAL provider rate-limit window — emitting arm-state telemetry for each so
+   *  the guard is demonstrably LIVE (not a latent inert config). The provider
+   *  arm fails OPEN when its tap returns `undefined` (no snapshot yet). */
   const writeBlockReason = (verb: string): string | undefined => {
     if (writesDisabled) return `${verb} blocked: memory mode is '${mode}' for this thread.`
     const guard = deps.writeGuard
-    if (guard) {
-      const remaining = guard.remainingPercent()
-      if (Number.isFinite(remaining) && remaining < guard.minRemainingPercent) {
-        return `${verb} skipped: ${remaining.toFixed(0)}% budget remaining < ${guard.minRemainingPercent}% threshold.`
-      }
+    if (!guard) return undefined
+    const threshold = guard.minRemainingPercent
+    // Local cost/token arm (existing signal).
+    const cost = guard.remainingPercent()
+    const costArmed = Number.isFinite(cost)
+    const costBlocked = costArmed && cost < threshold
+    guard.onArm?.({
+      source: "cost",
+      armed: costArmed,
+      ...(costArmed ? { observed: cost } : {}),
+      blocked: costBlocked,
+    })
+    if (costBlocked) {
+      return `${verb} skipped: ${cost.toFixed(0)}% budget remaining < ${threshold}% threshold.`
+    }
+    // Provider rate-limit arm (jul-03 B3 — the REAL provider signal, separate
+    // from cost). Unarmed when the tap is absent or reports `undefined`.
+    const provider = guard.providerRateLimitRemainingPercent?.()
+    const providerArmed = provider !== undefined && Number.isFinite(provider)
+    const providerBlocked = providerArmed && provider < threshold
+    guard.onArm?.({
+      source: "provider",
+      armed: providerArmed,
+      ...(providerArmed ? { observed: provider } : {}),
+      blocked: providerBlocked,
+    })
+    if (providerBlocked) {
+      return `${verb} skipped: ${provider.toFixed(0)}% provider rate-limit remaining < ${threshold}% threshold.`
     }
     return undefined
   }
@@ -224,10 +347,17 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
         const lines = entries.map((e) => {
           const base = `#${e.id} (${e.kind}, ${(e.importance ?? 0.5).toFixed(2)}) ${e.text}`
           if (!deps.lineCitations) return base
-          // ADR-0432: append a 1-based inclusive source-line span so the model
-          // can ground a recalled claim (`[L1-3]`).
-          const span = lineSpanOf(e.id, e.text)
-          return `${base} [L${span.lineStart}-${span.lineEnd}]`
+          // ADR-0432 + jul-03 B3: append a REAL 1-based inclusive sub-span — the
+          // lines the query actually matches (`[L2-2]`), not the degenerate
+          // whole-record span. Provenance (originating session ⇒ threadId,
+          // reuse guidance ⇒ note) mirrors Codex `MemoryCitationEntry`.
+          const provenance: LineCitationProvenance = {
+            ...(e.sessionId !== undefined ? { threadId: e.sessionId } : {}),
+            ...(e.reuseRule !== undefined ? { note: e.reuseRule } : {}),
+          }
+          const span = lineSpanOf(e.id, e.text, input.query, provenance)
+          const prov = span.note !== undefined ? ` {${span.note}}` : ""
+          return `${base} [L${span.lineStart}-${span.lineEnd}]${prov}`
         })
         yield { type: "result", result: { ok: true, output: lines.join("\n") } }
       } catch (e) {

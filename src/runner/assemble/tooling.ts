@@ -105,6 +105,14 @@ export interface ToolingAssembleInput {
    *  boundary). Absent + guard configured ⇒ the guard is inert (no meter ⇒ no
    *  block) so the write proceeds; absent + no guard ⇒ byte-identical. */
   budgetRemainingPercent?: (() => number) | undefined
+  /** jul-03 B3 — live PROVIDER rate-limit remaining percentage (0..100), or
+   *  `undefined` when the provider has not reported one. SEPARATE from the local
+   *  cost fraction above: the surface supplies a closure over its live provider
+   *  rate-limit source (`BudgetMeter.providerRateLimitRemainingPercent()` fed
+   *  from `x-ratelimit-*` headers). ONLY consulted when the write-guard threshold
+   *  is set. Absent ⇒ the provider arm is never armed (byte-identical to the
+   *  cost-only guard); the memory slice never imports the budget module. */
+  providerRateLimitRemainingPercent?: (() => number | undefined) | undefined
 }
 
 /** Assemble the tool registry and aggregate the per-run config dependencies.
@@ -149,6 +157,7 @@ const buildSearchSlots = (
 const buildMemoryExtras = (
   memoryConfig: AgentConfig["memory"] | undefined,
   budgetRemainingPercent: (() => number) | undefined,
+  providerRateLimitRemainingPercent: (() => number | undefined) | undefined,
 ): Pick<MemoryToolsDeps, "threadMode" | "lineCitations" | "writeGuard"> => {
   if (memoryConfig === undefined) return {}
   const guard: MemoryWriteGuard | undefined =
@@ -156,6 +165,12 @@ const buildMemoryExtras = (
       ? {
           minRemainingPercent: memoryConfig.writeGuardMinRemainingPercent,
           remainingPercent: budgetRemainingPercent,
+          // jul-03 B3 — thread the REAL provider rate-limit tap onto the guard,
+          // SEPARATE from the local cost fraction. Omitted when absent so the
+          // provider arm stays unarmed (byte-identical to the cost-only guard).
+          ...(providerRateLimitRemainingPercent !== undefined
+            ? { providerRateLimitRemainingPercent }
+            : {}),
         }
       : undefined
   return {
@@ -201,7 +216,11 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
       ? memoryTools({
           store: input.store,
           ...(input.embedder ? { embedder: input.embedder } : {}),
-          ...buildMemoryExtras(input.memoryConfig, input.budgetRemainingPercent),
+          ...buildMemoryExtras(
+            input.memoryConfig,
+            input.budgetRemainingPercent,
+            input.providerRateLimitRemainingPercent,
+          ),
         })
       : []
   // Origin map tags only the non-builtin source arrays (mcp / lsp / git).

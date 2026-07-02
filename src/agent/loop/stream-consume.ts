@@ -1,5 +1,6 @@
 import type { StreamEvent } from "@/llm"
 import {
+  parseDualWindowSnapshot,
   parseRateLimitSnapshot,
   proactiveDelayMs,
   snapshotToNotice,
@@ -106,6 +107,26 @@ const applyProactiveRateLimitBackoff = async (
   if (delayMs <= 0) return
   config.stream.emit(snapshotToNotice(snapshot))
   if (rl.proactive) await rl.sleep(delayMs)
+}
+
+/** jul-03 B3 — feed the live provider rate-limit window into the BudgetMeter tap
+ *  the memory write-guard reads. The Codex dual-window meter reports
+ *  `usedPercent`; remaining% = 100 − usedPercent (the PRIMARY/fast window governs,
+ *  falling back to the secondary). NO-OP when no meter is wired OR the provider
+ *  did not report a `usedPercent` this response (byte-identical). Kept SEPARATE
+ *  from the local cost fraction. */
+const feedProviderRateLimitToMeter = (
+  config: AgentConfig,
+  get: (name: string) => string | null,
+  now: () => number,
+): void => {
+  const meter = config.budgetMeter
+  if (meter === undefined) return
+  const snap = parseDualWindowSnapshot(get, now)
+  if (snap === undefined) return
+  const used = snap.primary?.usedPercent ?? snap.secondary?.usedPercent
+  if (used === undefined) return
+  meter.observeProviderRateLimitRemainingPercent(100 - used)
 }
 
 /** Fire the optional per-turn stream-input observer, isolating a thrown observer
@@ -230,6 +251,14 @@ export const streamConsume = async (
                   rateLimitProactive.store.update(
                     parseRateLimitSnapshot(get, rateLimitProactive.now),
                   )
+                  // jul-03 B3 — feed the REAL provider rate-limit window into the
+                  // BudgetMeter tap the memory write-guard reads. The dual-window
+                  // meter reports `usedPercent` (Codex `x-codex-*-used-percent`),
+                  // so remaining% = 100 - usedPercent. NO invented number: only a
+                  // window that actually reported `usedPercent` updates the tap;
+                  // absent ⇒ no-op (byte-identical). Kept SEPARATE from the cost
+                  // fraction — this is the provider signal, not local spend.
+                  feedProviderRateLimitToMeter(config, get, rateLimitProactive.now)
                 },
               }
             : {}),

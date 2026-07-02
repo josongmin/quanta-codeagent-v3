@@ -209,6 +209,13 @@ export type BuildToolingFactory = (
    *  the lifecycle bundle so `run_workflow` records its live run into the SAME
    *  instance `/activity` renders. Absent ⇒ no recording (byte-identical). */
   activityStore?: import("@/activity").ActivityStore,
+  /** jul-03 B3 — live PROVIDER rate-limit remaining % (0..100) or `undefined`,
+   *  SEPARATE from `budgetRemainingPercent` (local cost). The bootstrap threads
+   *  `() => meter.providerRateLimitRemainingPercent()` so the memory write-guard's
+   *  provider arm reads the REAL `x-ratelimit-remaining` window (fed by the loop
+   *  from response headers). Absent ⇒ the provider arm is never armed
+   *  (byte-identical). */
+  providerRateLimitRemainingPercent?: () => number | undefined,
 ) => Tooling
 
 /** Resolve default-OFF feature flags + bridged MCP/LSP/git tools from the

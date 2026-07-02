@@ -219,7 +219,11 @@ export const HOST: readonly KnobInventoryEntry[] = [
     default: undefined,
     group: "memory",
     home: "runtime-config",
-    describe: "Write-guard budget meter %.",
+    // jul-03 B3: refuses a memory write when EITHER the local budget-meter % OR
+    // the provider rate-limit remaining % falls below this floor. No shipped
+    // default (opt-in). TODO(measure-first): pick a validated floor from a bench
+    // run before shipping a default — do NOT guess a cutoff (no-heuristics).
+    describe: "Write-guard floor % (local budget OR provider rate-limit remaining).",
     readSite: "host/bootstrap/bootstrap-session.ts",
   },
   {

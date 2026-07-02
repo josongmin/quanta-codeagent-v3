@@ -66,6 +66,15 @@ export class BudgetMeter {
   // boundary, accumulated by `tick("cost_usd")`, compared against
   // `maxCostPerTurnUsd`. Distinct from `costUsdAccum` (cumulative across the run).
   private costUsdThisTurn = 0
+  // jul-03 B3 — LAST observed PROVIDER rate-limit remaining percentage (0..100),
+  // parsed off `x-ratelimit-*` / `x-codex-*-used-percent` response headers by the
+  // composition root and pushed here via `observeProviderRateLimitRemainingPercent`.
+  // This is a REAL provider quota signal, DELIBERATELY SEPARATE from the local
+  // cost/token fractions in `remainingPercent()` (which returns 100 with no dial —
+  // the fake `min_rate_limit_remaining_percent`-by-name signal). `undefined` until
+  // the provider actually reports one, so a consumer can distinguish "no provider
+  // snapshot yet" (fail-open) from "provider window nearly exhausted".
+  private providerRateLimitRemainingPct: number | undefined = undefined
 
   constructor(opts: BudgetMeterOptions = {}) {
     this.dials = opts.dials ?? {}
@@ -152,6 +161,33 @@ export class BudgetMeter {
   /** Reset the consecutive-failure counter (called on successful dispatch). */
   recordSuccess(): void {
     this.consecutiveFailures = 0
+  }
+
+  /**
+   * jul-03 B3 — record the PROVIDER's live rate-limit remaining percentage
+   * (0..100), as parsed off the response headers by the composition root. This
+   * is the REAL provider quota signal, orthogonal to the local cost/token dials.
+   *
+   * NO invented number (project rule): a non-finite / out-of-band value is a
+   * NO-OP so a single garbage header can never poison the tap (mirrors the
+   * `tick` guard). Only a finite value in the documented [0,100] band updates
+   * the stored percentage; last-write-wins so a fresher response refines it.
+   * Does NOT touch any cost/token counter — the two signals stay separate.
+   */
+  observeProviderRateLimitRemainingPercent(pct: number): void {
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) return
+    this.providerRateLimitRemainingPct = pct
+  }
+
+  /**
+   * The LAST observed provider rate-limit remaining percentage, or `undefined`
+   * when the provider has not reported one this run. UNLIKE {@link remainingPercent}
+   * (local cost, defaults to 100 with no dial), this stays `undefined` until a
+   * real provider signal arrives — so a guard reading it can fail-open on
+   * "unknown" while still refusing on a genuinely low provider window.
+   */
+  providerRateLimitRemainingPercent(): number | undefined {
+    return this.providerRateLimitRemainingPct
   }
 
   /**

@@ -601,6 +601,13 @@ const buildToolingBundle = (
     features.metrics,
     budgetMeter !== undefined ? () => budgetMeter.remainingPercent() : undefined,
     lifecycleActivityStore,
+    // jul-03 B3 — the REAL provider rate-limit window closure, SEPARATE from the
+    // local cost fraction above. Reads the SAME session meter, whose provider tap
+    // the loop feeds from `x-ratelimit-*` response headers. Absent meter ⇒ the
+    // provider arm stays unarmed (byte-identical).
+    budgetMeter !== undefined
+      ? () => budgetMeter.providerRateLimitRemainingPercent()
+      : undefined,
   )
 
   const mcpSurface = deps.buildMcpSurfaceInfo({
