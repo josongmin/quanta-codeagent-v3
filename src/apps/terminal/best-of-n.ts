@@ -43,7 +43,12 @@
 
 import type { AgentEvent } from "@/stream"
 import type { VerificationStamp, VerificationState } from "./verify-gate"
-import { deriveVerificationState, inspectExerciseEvidence, isExerciseCommand } from "./verify-gate"
+import {
+  comparedToReference,
+  deriveVerificationState,
+  inspectExerciseEvidence,
+  isExerciseCommand,
+} from "./verify-gate"
 
 /** One candidate produced by an independent brain attempt. The `stamp` is the FAIR signal (produced
  *  by the verify-gate, {@link deriveVerificationState}); `events` is that attempt's captured stream,
@@ -201,4 +206,6 @@ export const deriveCandidateStamp = (
 ): VerificationStamp =>
   // The gate's own `deriveVerificationState` is the SSOT for the trichotomy (outcome regexes live
   // there) — we route through it over this candidate's own inspected evidence, never re-declaring it.
-  deriveVerificationState(inspectExerciseEvidence(events), finalText)
+  // verify-gate v2: verdict order is (L1 compareVerdict, finalText, L0 exerciseVerdict) — a candidate is
+  // verified-pass ONLY with an observed L1 reference-comparison (the fail-closed no-leak gate).
+  deriveVerificationState(comparedToReference(events), finalText, inspectExerciseEvidence(events))
