@@ -114,8 +114,15 @@ const applyProactiveRateLimitBackoff = async (
  *  `usedPercent`; remaining% = 100 − usedPercent (the PRIMARY/fast window governs,
  *  falling back to the secondary). NO-OP when no meter is wired OR the provider
  *  did not report a `usedPercent` this response (byte-identical). Kept SEPARATE
- *  from the local cost fraction. */
-const feedProviderRateLimitToMeter = (
+ *  from the local cost fraction.
+ *
+ *  EXPORTED (jul-03 B3 audit) so the header→meter seam — the LIVE half of the
+ *  provider rate-limit guard chain that the `buildToolingCore` wire test cannot
+ *  reach (it seeds the meter by calling `observeProviderRateLimitRemainingPercent`
+ *  directly) — is unit-pinned: deleting this feed from the loop must turn a test
+ *  RED. Without this, the whole `x-codex-*-used-percent` → guard chain could rot
+ *  silently and the provider arm would fail-open forever (wired-but-inert). */
+export const feedProviderRateLimitToMeter = (
   config: AgentConfig,
   get: (name: string) => string | null,
   now: () => number,

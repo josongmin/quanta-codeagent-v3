@@ -68,6 +68,17 @@ describe("B3 (1) real sub-spans", () => {
     expect(span.lineEnd).toBe(2)
   })
 
+  test("AUDIT: length-changing lowercase BEFORE the match does not skew the line", () => {
+    // `İ` (U+0130) lowercases to TWO code units, so a whole-string
+    // `toLowerCase().indexOf(...)` returns an index into the (longer) lowercased
+    // string; mapping THAT onto the original text crosses the newline and reports
+    // the WRONG line. The match `z` is genuinely on line 1. Regressing `ciIndexOf`
+    // back to `text.toLowerCase().indexOf(...)` turns this RED (reports L2-2).
+    const span = lineSpanOf("m", "İİz\nrest", "z")
+    expect(span.lineStart).toBe(1)
+    expect(span.lineEnd).toBe(1)
+  })
+
   test("no match text carried ⇒ whole-record fallback (byte-identical legacy)", () => {
     const span = lineSpanOf("m", REC)
     expect(span.lineStart).toBe(1)

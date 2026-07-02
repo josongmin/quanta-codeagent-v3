@@ -70,6 +70,7 @@ const writeToolFor = (args: {
   readonly writeGuardMinRemainingPercent?: number
   readonly budgetRemainingPercent?: () => number
   readonly providerRateLimitRemainingPercent?: () => number | undefined
+  readonly slog?: StructuredLogger
 }): { tool: Tool; store: TinyStore } => {
   const store = new TinyStore()
   const tooling = buildToolingCore({
@@ -88,7 +89,7 @@ const writeToolFor = (args: {
     lspTools: [],
     lspNavTools: [],
     gitToolList: [],
-    slog,
+    slog: args.slog ?? slog,
     ...(args.budgetRemainingPercent !== undefined
       ? { budgetRemainingPercent: args.budgetRemainingPercent }
       : {}),
@@ -158,5 +159,69 @@ describe("memory write-guard — provider rate-limit tap threaded through buildT
     const ev = await run(tool, { text: "remember" })
     if (ev.type === "result") expect(ev.result.ok).toBe(true)
     expect(await store.all()).toHaveLength(1)
+  })
+
+  // jul-03 B3 AUDIT — the arm-state telemetry (`onArm`, commit item #4) was
+  // DEFINED but never wired in PRODUCTION: only tests passed `onArm`, so the
+  // guard's fail-open was silently inert in a real run (contradicting dispatch
+  // #3 "fail-open is OBSERVABLE"). The assembler now wires it to the SAME
+  // StructuredLogger it uses for config-liveness. This pins that seam: dropping
+  // the `onArm` wiring in `buildMemoryExtras` turns these RED.
+  test("arm-state telemetry reaches the assembler's StructuredLogger (OBSERVABLE fail-open)", async () => {
+    const events: Array<{ event: string; fields?: Record<string, unknown> }> = []
+    const spyLog = new StructuredLogger()
+    // Capture the exact (event, fields) the guard emits through the real logger.
+    ;(spyLog as unknown as { debug: unknown }).debug = (
+      event: string,
+      fields?: Record<string, unknown>,
+    ): void => {
+      events.push({ event, ...(fields !== undefined ? { fields } : {}) })
+    }
+    const meter = new BudgetMeter()
+    meter.observeProviderRateLimitRemainingPercent(5) // provider window low ⇒ blocks
+    const { tool, store } = writeToolFor({
+      writeGuardMinRemainingPercent: 25,
+      budgetRemainingPercent: () => meter.remainingPercent(), // 100 (cost arm passes)
+      providerRateLimitRemainingPercent: () => meter.providerRateLimitRemainingPercent(),
+      slog: spyLog,
+    })
+    await run(tool, { text: "remember" })
+    const armEvents = events.filter((e) => e.event === "memory.write_guard.arm")
+    // BOTH arms evaluated ⇒ both emit; the provider arm is armed+blocked.
+    expect(armEvents.length).toBe(2)
+    expect(armEvents).toContainEqual(
+      expect.objectContaining({
+        event: "memory.write_guard.arm",
+        fields: expect.objectContaining({ source: "provider", armed: true, blocked: true }),
+      }),
+    )
+    expect(await store.all()).toHaveLength(0)
+  })
+
+  test("provider arm UNARMED (fail-open) is still OBSERVABLE in telemetry, not silent", async () => {
+    const events: Array<{ event: string; fields?: Record<string, unknown> }> = []
+    const spyLog = new StructuredLogger()
+    ;(spyLog as unknown as { debug: unknown }).debug = (
+      event: string,
+      fields?: Record<string, unknown>,
+    ): void => {
+      events.push({ event, ...(fields !== undefined ? { fields } : {}) })
+    }
+    const meter = new BudgetMeter() // provider never observed ⇒ undefined ⇒ fails open
+    const { tool } = writeToolFor({
+      writeGuardMinRemainingPercent: 25,
+      budgetRemainingPercent: () => meter.remainingPercent(),
+      providerRateLimitRemainingPercent: () => meter.providerRateLimitRemainingPercent(),
+      slog: spyLog,
+    })
+    await run(tool, { text: "remember" })
+    // The fail-open (unarmed) provider evaluation is RECORDED — proving it is not
+    // a silent inert config: an operator can SEE the arm was unarmed.
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: "memory.write_guard.arm",
+        fields: expect.objectContaining({ source: "provider", armed: false, blocked: false }),
+      }),
+    )
   })
 })

@@ -158,6 +158,7 @@ const buildMemoryExtras = (
   memoryConfig: AgentConfig["memory"] | undefined,
   budgetRemainingPercent: (() => number) | undefined,
   providerRateLimitRemainingPercent: (() => number | undefined) | undefined,
+  slog: StructuredLogger,
 ): Pick<MemoryToolsDeps, "threadMode" | "lineCitations" | "writeGuard"> => {
   if (memoryConfig === undefined) return {}
   const guard: MemoryWriteGuard | undefined =
@@ -171,6 +172,14 @@ const buildMemoryExtras = (
           ...(providerRateLimitRemainingPercent !== undefined
             ? { providerRateLimitRemainingPercent }
             : {}),
+          // jul-03 B3 audit — wire the arm-state telemetry to the SAME
+          // StructuredLogger the assembler uses for config-liveness (mirrors
+          // `slog.debug("subagent.on", …)`). Without this the guard's fail-open
+          // is silently inert in PRODUCTION (only tests passed `onArm`); emitting
+          // it makes "provider arm unarmed / cost arm blocked" observable in a
+          // real run. Only wired when the guard itself exists (byte-identical
+          // when no threshold knob is set).
+          onArm: (arm) => slog.debug("memory.write_guard.arm", { ...arm }),
         }
       : undefined
   return {
@@ -220,6 +229,7 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
             input.memoryConfig,
             input.budgetRemainingPercent,
             input.providerRateLimitRemainingPercent,
+            input.slog,
           ),
         })
       : []

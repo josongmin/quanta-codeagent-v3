@@ -121,6 +121,27 @@ const lineAtOffset = (text: string, pos: number): number => {
 }
 
 /**
+ * Case-insensitive first index of `needle` in `hay`, in ORIGINAL-string offsets.
+ *
+ * jul-03 B3 audit: `hay.toLowerCase().indexOf(needle.toLowerCase())` returns an
+ * index into the LOWERCASED string, which can differ in length from the original
+ * (e.g. `İ`/U+0130 lowercases to TWO code units). Mapping that skewed index back
+ * onto the original text via {@link lineAtOffset} then reports the WRONG line when
+ * a length-changing lowercase precedes the match. Scanning the ORIGINAL string
+ * and lowercasing only the candidate window keeps the returned offset aligned to
+ * the original, so the line mapping is always correct. Retains the `lc/includes`
+ * case-fold match semantics (both sides lowercased before comparison). `-1` when
+ * not found. */
+const ciIndexOf = (hay: string, needle: string): number => {
+  const nlc = needle.toLowerCase()
+  const last = hay.length - needle.length
+  for (let i = 0; i <= last; i++) {
+    if (hay.slice(i, i + needle.length).toLowerCase() === nlc) return i
+  }
+  return -1
+}
+
+/**
  * 1-based inclusive line span of a record's text (jul-03 B3).
  *
  * When `matchText` is supplied and is found (case-insensitive substring, exactly
@@ -142,7 +163,9 @@ export const lineSpanOf = (
   let lineStart = 1
   let lineEnd = total
   if (matchText !== undefined && matchText.length > 0) {
-    const idx = text.toLowerCase().indexOf(matchText.toLowerCase())
+    // ORIGINAL-string offset (aligned): whole-string `toLowerCase().indexOf`
+    // skews on length-changing lowercase (e.g. `İ`) and mis-reports the line.
+    const idx = ciIndexOf(text, matchText)
     if (idx >= 0) {
       lineStart = lineAtOffset(text, idx)
       // `idx + len - 1` is the last matched char; a match ending exactly at a
