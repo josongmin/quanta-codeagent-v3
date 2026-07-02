@@ -588,10 +588,14 @@ const runMain = async (): Promise<void> => {
   const stdinLines: AsyncIterable<string> = rl as unknown as AsyncIterable<string>
 
   const maxTurns = resolveMaxTurnsFromEnv(process.env)
-  // Lever #3 (`QUANTA_TB_BEST_OF_N`): route through the best-of-N wrapper. It is a byte-identical
-  // passthrough to `runTerminalBrain` when N is unset/1 (default), and only fans out when N≥2.
-  const { runTerminalBrainBestOfN } = await import("./best-of-n-runner")
-  await runTerminalBrainBestOfN({
+  // Lever #3 (`QUANTA_TB_BEST_OF_N`) is NOT run in-process here (structural RCA jul-2): the brain drives
+  // ONE harbor `serve` connection (a single-use stdin duplex + a SINGLE container). Re-running the loop
+  // N times in-process reuses that exhausted duplex (attempt ≥2 hangs waiting for exec results) AND
+  // shares one container (attempts aren't independent). best-of-N is therefore a TRIAL-LEVEL concern —
+  // the supervisor runs the task as N fresh harbor trials (fresh container + duplex each) and fair-
+  // selects across their reports via the pure `best-of-n#selectBestCandidate`. The brain stays a single
+  // clean run. (The `best-of-n.ts` selector + `resolveBestOfN` remain, consumed by the supervisor.)
+  await runTerminalBrain({
     instruction,
     ...(model !== undefined ? { model } : {}),
     ...(maxTurns !== undefined ? { maxTurns } : {}),
