@@ -56,11 +56,22 @@ export type ToolRiskMirror =
 export type EscalationOption = "allow_once" | "allow_session" | "deny" | "deny_and_steer"
 
 /** Single todo entry inside a plan — mirrors `TodoReadonly` in
- *  `@/agent/plan/types.ts`. */
+ *  `@/agent/plan/types.ts`.
+ *
+ *  S2 unified-observability (jul-03, append-only): `dependencies` (the DAG
+ *  blocked-by edges — todo ids this one waits on), `assignee` (the owner —
+ *  ADR-0042 subagent nickname), and `activeForm` (present-tense in-progress
+ *  label) are OPTIONAL mirrors of the canonical {@link TodoItem} fields so the
+ *  folded `plan` item core carries the DAG + owner + active label. Absent ⇒ the
+ *  legacy 3-field wire shape (byte-stable). Adding one here MUST extend
+ *  `todoToMirror` in `@/agent/plan/stream-mirror.ts`. */
 export interface TodoReadonlyMirror {
   readonly id: string
   readonly title: string
   readonly status: TodoStatusMirror
+  readonly dependencies?: readonly string[]
+  readonly assignee?: string
+  readonly activeForm?: string
 }
 
 /** Read-only plan snapshot — mirrors `PlanReadonly` in

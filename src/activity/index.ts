@@ -7,7 +7,13 @@
  * from the producers. Pure-of-I/O leaf: imports only its own files + node types.
  */
 
-export { type FleetRowLike, fleetRowToActivity, fleetToActivity } from "./producers/fleet"
+export {
+  type FleetRowLike,
+  fleetRowToActivity,
+  fleetRowToItemStream,
+  fleetToActivity,
+  fleetToItemStream,
+} from "./producers/fleet"
 export {
   type SideAgentSnapshotLike,
   type SideAgentStatusLike,

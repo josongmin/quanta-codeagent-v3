@@ -28,8 +28,32 @@ export type ItemStreamPhase = "started" | "delta" | "completed"
  * edit/patch-class tool; `tool` ← any other tool (the neutral fallback so an
  * unrecognised tool is NEVER mislabelled as exec/patch — see
  * {@link classifyToolItemType}).
+ *
+ * S2 unified-observability (jul-03, additive/append-only): the plan-mode + fleet
+ * models — previously disjoint wire shapes (`plan.*` host-mirror messages, the
+ * activity-spine `subagent` L0 roots) — FOLD into this ONE item-stream so a
+ * surface renders every agent-interior concern from a single stream:
+ *   - `plan`          ← a plan snapshot / delta (the DAG rides `completed.text`
+ *                        as JSON: `TodoItem.dependencies` = blockedBy edges,
+ *                        `assignee` = owner). A todo's `blocked` state is a
+ *                        STATUS carried INSIDE the plan payload, NOT a 5th item
+ *                        type (mirrors {@link StuckReason} on the activity spine).
+ *   - `subagent`      ← an in-process subagent's lifecycle (bridged from the
+ *                        activity-spine fleet rows, L0→L2 drilldown in the body).
+ *   - `progressCard`  ← a typed `progress_update` triple (currentStep/summary).
+ * These are APPEND-ONLY: an existing member is never renamed/removed, so both
+ * wire planes (session.v1 `item.*`, web agent-state `item.*`) stay byte-stable
+ * for the legacy members. The two planes carry `itemType` VERBATIM (they do not
+ * switch on it), so a new member propagates to both with no transport edit.
  */
-export type ItemStreamItemType = "reasoning" | "commandExecution" | "fileChange" | "tool"
+export type ItemStreamItemType =
+  | "reasoning"
+  | "commandExecution"
+  | "fileChange"
+  | "tool"
+  | "plan"
+  | "subagent"
+  | "progressCard"
 
 /**
  * The KIND of a delta payload. Closed union, 1:1 derivable from the owning
@@ -43,6 +67,13 @@ export type ItemStreamDeltaKind =
   | "command.output"
   | "file.patch"
   | "tool.progress"
+  // S2 unified-observability (append-only): the delta kinds for the folded
+  // members. `plan.patch` ← an incremental plan delta (a `plan_updated`);
+  // `subagent.progress` ← an in-flight subagent status/drilldown line;
+  // `progressCard.step` ← a rolling `currentStep` update.
+  | "plan.patch"
+  | "subagent.progress"
+  | "progressCard.step"
 
 /** An item opened. `index` is monotonic across ALL items in a turn-stream. */
 export interface ItemStreamStarted {
@@ -79,6 +110,9 @@ export const ITEM_DELTA_KIND_BY_ITEM_TYPE = {
   commandExecution: "command.output",
   fileChange: "file.patch",
   tool: "tool.progress",
+  plan: "plan.patch",
+  subagent: "subagent.progress",
+  progressCard: "progressCard.step",
 } as const satisfies Record<ItemStreamItemType, ItemStreamDeltaKind>
 
 /**

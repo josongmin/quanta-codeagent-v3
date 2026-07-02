@@ -41,7 +41,7 @@ import {
   type ItemStreamCore,
   type ItemStreamItemType,
 } from "@/shared"
-import type { AgentEvent } from "./types"
+import type { AgentEvent, PlanDeltaReadonlyMirror, PlanReadonlyMirror } from "./types"
 
 interface OpenTool {
   readonly itemId: string
@@ -54,6 +54,12 @@ export class ItemStreamProjector {
   private openReasoning: { readonly itemId: string; text: string } | null = null
   /** Tool items started but not yet completed, keyed by tool-call id. */
   private readonly openTools = new Map<string, OpenTool>()
+  /** S2 — the currently-open PLAN item (at most one). A plan snapshot opens it
+   *  and immediately completes a full-state copy; a `plan_updated` re-opens (or
+   *  re-uses) it to carry an incremental `plan.patch` delta. The plan item's
+   *  lifespan is the plan's, not a turn's, so it is NOT closed at a turn
+   *  boundary (`closeAll`) — a plan persists across turns. */
+  private openPlanItemId: string | null = null
   private index = 0
 
   /** Project the item cores to surface alongside `ev`. Mutates only this
@@ -71,6 +77,21 @@ export class ItemStreamProjector {
         return this.onToolProgress(ev.id, ev.message)
       case "tool_result":
         return this.onToolResult(ev.id)
+      // S2 unified-observability (jul-03): FOLD the plan + subagent models onto
+      // co-equal plan/subagent item cores — the ONE stream, so a surface renders
+      // every agent-interior concern (reasoning / tool / plan / subagent) from a
+      // single item taxonomy. Previously dropped by the `default` arm (plan state
+      // rode the separate `plan.*` host-mirror channel; subagents rode the
+      // activity spine). A plan `started+completed` pair per snapshot carries the
+      // DAG in `completed.text` (JSON) — blockedBy=dependencies, owner=assignee,
+      // a `blocked` status carried INSIDE the payload (NOT a 5th itemType).
+      case "plan_created":
+      case "plan_snapshot":
+        return this.onPlanSnapshot(ev.plan)
+      case "plan_updated":
+        return this.onPlanUpdate(ev.delta, ev.version)
+      case "subagent_cancel":
+        return this.onSubagentCancel(ev.subagentId, ev.outcome)
       case "turn_start":
       case "done":
         return this.closeAll()
@@ -141,6 +162,64 @@ export class ItemStreamProjector {
     if (open === undefined) return []
     this.openTools.delete(id)
     return [completedOf(open.itemId, open.itemType, open.text)]
+  }
+
+  /**
+   * S2 — project a plan snapshot (`plan_created` / `plan_snapshot`) onto a
+   * `plan` item. Deterministic id from the plan's id so a later `plan_updated`
+   * delta attaches to the SAME item. The full DAG snapshot rides `completed.text`
+   * as JSON (blockedBy=dependencies, owner=assignee, `blocked` status carried
+   * INSIDE the payload). A re-snapshot of an already-open plan re-completes the
+   * same item id (idempotent re-paint) rather than opening a duplicate.
+   */
+  private onPlanSnapshot(plan: PlanReadonlyMirror): ItemStreamCore[] {
+    const itemId = `item-plan-${plan.id}`
+    const out: ItemStreamCore[] = []
+    if (this.openPlanItemId !== itemId) {
+      out.push({ phase: "started", itemId, itemType: "plan", index: this.index++ })
+      this.openPlanItemId = itemId
+    }
+    out.push({ phase: "completed", itemId, itemType: "plan", text: JSON.stringify(plan) })
+    return out
+  }
+
+  /**
+   * S2 — project a `plan_updated` onto a `plan.patch` delta on the open plan
+   * item. If no plan item is open yet (an update arrived before any snapshot —
+   * e.g. a late-attaching surface), a fresh plan item is opened first so the
+   * delta is never orphaned. The delta body carries the incremental change +
+   * new version as JSON.
+   */
+  private onPlanUpdate(delta: PlanDeltaReadonlyMirror, version: number): ItemStreamCore[] {
+    const out: ItemStreamCore[] = []
+    let itemId = this.openPlanItemId
+    if (itemId === null) {
+      itemId = `item-plan-v${version}`
+      out.push({ phase: "started", itemId, itemType: "plan", index: this.index++ })
+      this.openPlanItemId = itemId
+    }
+    out.push({
+      phase: "delta",
+      itemId,
+      itemType: "plan",
+      deltaKind: ITEM_DELTA_KIND_BY_ITEM_TYPE.plan,
+      delta: JSON.stringify({ delta, version }),
+    })
+    return out
+  }
+
+  /**
+   * S2 — project a `subagent_cancel` onto a `subagent` item (started+completed).
+   * The item id reuses the subagent id so a surface joins it to the fleet row /
+   * L0 root. The `outcome` rides `completed.text` (drilldown detail). A cancel
+   * is terminal, so the item opens and closes in one shot (no open-item state).
+   */
+  private onSubagentCancel(subagentId: string, outcome: string): ItemStreamCore[] {
+    const itemId = `item-subagent-${subagentId}`
+    return [
+      { phase: "started", itemId, itemType: "subagent", index: this.index++ },
+      { phase: "completed", itemId, itemType: "subagent", text: outcome },
+    ]
   }
 
   private closeReasoning(): ItemStreamCore[] {

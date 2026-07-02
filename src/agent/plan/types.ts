@@ -88,6 +88,16 @@ export interface TodoItem {
   readonly phaseId?: string
   readonly assignee?: string
   readonly verifyHint?: string
+  /**
+   * S2 unified-observability (jul-03) — present-tense "active form" label shown
+   * while this todo is `in_progress` (e.g. content "Fix the parser" →
+   * activeForm "Fixing the parser"), mirroring the TodoWrite `activeForm`
+   * convention. APPEND-ONLY / OPTIONAL: absent ⇒ a surface falls back to
+   * `content`, and the snapshot round-trip (`snapshot.ts`) stays byte-stable
+   * (an absent field never serialises). Never used for control flow — a pure
+   * display affordance folded onto the `plan` item core.
+   */
+  readonly activeForm?: string
 }
 
 /**

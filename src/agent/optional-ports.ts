@@ -208,6 +208,7 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // is unset OR no `onAgentState` sink (byte-identical).
   return wireAgentStateTap(
     wireItemStreamTap(wireItemLifecycleStream(wireCloseoutCritic(next, env), env), env),
+    env,
   )
 }
 
@@ -220,6 +221,36 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
  * byte-identical default-OFF. The base stream emits FIRST + verbatim; a throwing
  * sink can never break the emit (the item fan-out is observation-only).
  */
+/**
+ * S2 unified-observability (jul-03) — the plan events the item-stream OWNS once
+ * `QUANTA_ITEM_STREAM` is on. When the item-stream is the owner, plan state
+ * flows as `plan` item cores (from {@link ItemStreamProjector}); the legacy
+ * `plan.*` host-mirror observation MUST be suppressed for these so the web plane
+ * does not double-carry plan state on BOTH `plan.*` AND `item.*` (which would be
+ * a 4th parallel path — the re-fragmentation this whole absorption forbids). Only
+ * the plan trio is owned; every OTHER agent-state observation (mode/tool_progress/
+ * compaction/ratelimit/plan-input) still flows on the host-mirror channel.
+ */
+const ITEM_STREAM_OWNED_PLAN_EVENTS: ReadonlySet<string> = new Set([
+  "plan_created",
+  "plan_updated",
+  "plan_snapshot",
+])
+
+/**
+ * S2 — the agent-state observation for `event`, gated on item-stream ownership.
+ * Returns `null` (suppressed) for the plan trio when `QUANTA_ITEM_STREAM` is on
+ * (the item-stream owns plan) — otherwise the unchanged host-mirror projection.
+ * This is the ONE seam where the two channels are reconciled to a single path.
+ */
+export const projectAgentEventToItemStreamObservationsGated = (
+  event: AgentEvent,
+  env: OptionalPortEnv,
+) => {
+  if (itemStreamEnabled(env) && ITEM_STREAM_OWNED_PLAN_EVENTS.has(event.type)) return null
+  return projectAgentEventToAgentStateObservation(event)
+}
+
 const wireItemStreamTap = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
   const sink = (base as Partial<AgentConfig>).onAgentState
   if (sink === undefined) return base
@@ -258,7 +289,7 @@ const wireItemStreamTap = <T extends OptionalPortBase>(base: T, env: OptionalPor
  * proving byte-identical default-OFF. A `base` without a `stream` likewise
  * passes through unchanged.
  */
-const wireAgentStateTap = <T extends OptionalPortBase>(base: T): T => {
+const wireAgentStateTap = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
   const sink = (base as Partial<AgentConfig>).onAgentState
   if (sink === undefined) return base
   const source = base.stream
@@ -267,7 +298,10 @@ const wireAgentStateTap = <T extends OptionalPortBase>(base: T): T => {
     emit(event: AgentEvent): void {
       // Base emit FIRST + verbatim — every existing consumer is byte-identical.
       source.emit(event)
-      const observation = projectAgentEventToAgentStateObservation(event)
+      // S2 — gated projection: when the item-stream owns plan (`QUANTA_ITEM_STREAM`
+      // on), the plan trio is suppressed here so it flows ONLY as `item.*` cores
+      // (unify, not a 4th path). Item-stream OFF ⇒ unchanged host-mirror.
+      const observation = projectAgentEventToItemStreamObservationsGated(event, env)
       if (observation === null) return
       try {
         sink.capture(observation)

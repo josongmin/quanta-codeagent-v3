@@ -39,6 +39,13 @@ const todoToMirror = (t: TodoItem): TodoReadonlyMirror => ({
   id: t.id,
   title: t.content,
   status: todoStatusMirror(t.status),
+  // S2 unified-observability (append-only): carry the DAG blocked-by edges +
+  // owner + active label so the folded `plan` item core can render the full
+  // graph. Emitted ONLY when present (exactOptionalPropertyTypes) so an
+  // edge-free / owner-less todo keeps the legacy 3-field byte shape.
+  ...(t.dependencies.length > 0 ? { dependencies: t.dependencies } : {}),
+  ...(t.assignee !== undefined ? { assignee: t.assignee } : {}),
+  ...(t.activeForm !== undefined ? { activeForm: t.activeForm } : {}),
 })
 
 /**

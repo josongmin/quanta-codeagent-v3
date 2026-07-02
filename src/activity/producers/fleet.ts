@@ -9,6 +9,7 @@
  * `stopped`).
  */
 
+import type { ItemStreamCore } from "@/shared"
 import type { ActivityStatus, AgentActivityEvent } from "../types"
 
 /** Structural mirror of `AgentFleetRow` (no `@/subagent` value import). */
@@ -64,3 +65,43 @@ export const fleetRowToActivity = (row: FleetRowLike): readonly AgentActivityEve
 /** Map a whole fleet snapshot. */
 export const fleetToActivity = (rows: readonly FleetRowLike[]): readonly AgentActivityEvent[] =>
   rows.flatMap(fleetRowToActivity)
+
+/**
+ * S2 unified-observability (jul-03) — bridge an ActivityStore subagent snapshot
+ * (a fleet row) into the ONE item-stream as a `subagent` item core, so the
+ * fleet view is NOT a disjoint model but a projection of the same item taxonomy
+ * a surface already renders reasoning / tool / plan from.
+ *
+ * L0→L2 drilldown rides the item body (JSON): L0 = the root identity
+ * (`id`/`description`/`agentType`), L1 = the run status, L2 = the settled detail
+ * (`turns`/`finalText`/`error`). A running row is an OPEN item (started only —
+ * the surface shows a live spinner); a settled row completes with the drilldown
+ * body. This uses the SAME {@link ItemStreamCore} contract both wire planes carry
+ * verbatim, so no transport edit is needed.
+ *
+ * Pure + additive: this is a NEW projection alongside {@link fleetRowToActivity}
+ * (the spine mapping is untouched, byte-stable). The caller (a host that has
+ * `QUANTA_ITEM_STREAM` on) feeds these cores onto the item wire; absent that
+ * gate, this function is simply never called.
+ */
+export const fleetRowToItemStream = (row: FleetRowLike, index: number): readonly ItemStreamCore[] => {
+  const itemId = `item-subagent-${row.id}`
+  const started: ItemStreamCore = { phase: "started", itemId, itemType: "subagent", index }
+  if (STATUS[row.status] === "running") return [started]
+  // L0→L2 drilldown detail carried on the completed body.
+  const detail: Record<string, unknown> = {
+    id: row.id,
+    description: row.description,
+    status: STATUS[row.status],
+    ...(row.agentType !== undefined ? { agentType: row.agentType } : {}),
+    ...(row.result !== undefined
+      ? { turns: row.result.turns, finalText: row.result.finalText, ok: row.result.ok }
+      : {}),
+    ...(row.error !== undefined ? { error: row.error } : {}),
+  }
+  return [started, { phase: "completed", itemId, itemType: "subagent", text: JSON.stringify(detail) }]
+}
+
+/** Map a whole fleet snapshot into item-stream cores (monotonic index). */
+export const fleetToItemStream = (rows: readonly FleetRowLike[]): readonly ItemStreamCore[] =>
+  rows.flatMap((row, i) => fleetRowToItemStream(row, i))
