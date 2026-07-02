@@ -36,6 +36,14 @@
  * only ONE bounded follow-up turn (cheap + honest); a false "exercised" silently defeats the gate,
  * so we bias hard toward under-claiming.
  *
+ * v2 — COMPARE-TO-REFERENCE (RFC jul-2 §03). L0 (ran+observed, {@link inspectExerciseEvidence})
+ * is retained but is NO LONGER sufficient for `verified-pass`: v1's bug was rubber-stamping a mere
+ * L0 run as green (the "ran it, declared green, never compared" cluster-A failure). v2 adds an L1
+ * inspector ({@link comparedToReference}) — `verified-pass` now requires an OBSERVED comparison of
+ * the deliverable's output against a DISTINCT, non-test reference. no-leak (R1): a comparison whose
+ * reference is under a verifier/test path is REFUSED (a diff-against-the-hidden-golden must never
+ * satisfy the gate). Behind `QUANTA_TB_VERIFY_GATE`; unset ⇒ NO gate (byte-identical).
+ *
  * PURE / LEAF. No model calls, no IO, no `process.*`. Input is the captured `AgentEvent[]`;
  * output is a small typed verdict. Deterministic + unit-testable.
  */
@@ -163,6 +171,199 @@ export const isExerciseCommand = (command: string): boolean =>
     .split(/(?:&&|\|\||[;|&\n])/)
     .some((seg) => seg.trim().length > 0 && isExerciseSegment(seg))
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// v2 — L1 "CHECKED" inspector: was the output COMPARED against a reference? (RFC jul-2 §03)
+//
+// L0 (ran+observed, above) is NECESSARY but NOT SUFFICIENT — v1's bug was stamping `verified-pass`
+// on L0 alone (the "ran it, declared green, never compared" rubber-stamp). v2 requires an OBSERVED
+// L1 comparison: a `diff`/`cmp`/… of TWO DISTINCT non-test artifacts, OR a script run referencing
+// BOTH an output AND a reference operand, with the result observed. Fail-closed + no-leak (R1): a
+// reference operand under a verifier/test path is NOT L1 (a diff-against-the-hidden-golden must
+// never satisfy the gate — that would teach peeking).
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The COMPARATOR leaders whose job IS to diff two artifacts. Two distinct non-test operands ⇒ L1. */
+const COMPARATORS: ReadonlySet<string> = new Set(["diff", "cmp", "sdiff", "colordiff"])
+
+/** R1 (CRITICAL, box-proven): a path under a verifier/test/answer corpus is NOT a fair reference —
+ *  diffing against it is peeking at the hidden oracle. query-optimize's `golden.sql` lives in
+ *  `/tests/`, so this exclusion is LOAD-BEARING, not a precaution. Matched on the operand path. */
+const TEST_PATH_MARKERS: readonly RegExp[] = [
+  /(^|\/)tests?(\/|$)/i, // /tests/, tests/, a `test`/`tests` dir segment
+  /(^|\/)test_[^/]*/i, // test_*.py-style fixtures
+  /(^|\/)[^/]*_test(\.[^/]*)?$/i, // *_test.py-style fixtures
+  /verifier/i,
+  /grader/i,
+  /(^|\/)private(\/|$)/i,
+  /answer/i,
+  /solution/i,
+  /golden/i,
+  /expected_output/i,
+]
+
+/** True iff a path operand points into a verifier/test/answer corpus (R1 — never a fair reference). */
+const isTestPath = (operand: string): boolean => TEST_PATH_MARKERS.some((re) => re.test(operand))
+
+/** A non-flag, non-redirection token that looks like a filesystem operand (has a slash, an extension,
+ *  or is a plain word) — used to count the DISTINCT operands a comparator was handed. Excludes the
+ *  `/dev/null` sink (R4: `diff /dev/null /dev/null` is not a real comparison). */
+const isPathOperand = (tok: string): boolean => {
+  if (tok.startsWith("-")) return false // a flag (`-u`, `--brief`)
+  if (tok === "" || tok === "<" || tok === ">" || tok === ">>" || tok === "|") return false
+  if (/^\/dev\/(null|zero|stdin|stdout)$/i.test(tok)) return false // not a real artifact
+  return true
+}
+
+/** Reference-shaped flag/operand names a comparison SCRIPT uses to name its oracle (R: script L1).
+ *  Matches an explicit compare FLAG (`--expected`/`--reference`/…) OR a reference-shaped WORD in a
+ *  filename (`baseline`/`reference`/`expected`/`original`/`golden`/`oracle`/`truth`/a trailing
+ *  `_ref`). This is the honest "this operand IS the reference" signal — a bare `out.json` in.json`
+ *  run of the solver (no such signal) is NOT a comparison (fail-closed; costs one follow-up). */
+const REFERENCE_HINT =
+  /(--expected\b|--reference\b|--baseline\b|--golden\b|--oracle\b|--truth\b|--gold\b|--ref\b|expected[_-]?(output|value|result)|baseline|reference|original|golden|oracle|truth|[_-]ref\b|\bref[_./-])/i
+
+/** Result of judging ONE command segment for an L1 comparison. `matchesTestPath` distinguishes the
+ *  R1 fail-closed reject (a comparison AGAINST a test-path — recognized-but-refused) from "no
+ *  comparison at all", so the caller can keep the honest "never compared" reason. */
+interface SegmentL1 {
+  readonly isCompare: boolean
+  readonly refIsTestPath: boolean
+}
+
+/** Judge a SINGLE command segment for an L1 comparison (pure, fail-closed). */
+const segmentComparesToReference = (segment: string): SegmentL1 => {
+  const { leader, args } = leaderAndArgs(segment)
+  if (leader === "") return { isCompare: false, refIsTestPath: false }
+  const base = baseName(leader)
+
+  // shell wrapper: `bash -c '…'` → judge the INNER command (the actual comparison runs there).
+  if (SHELLS.has(base)) {
+    const cIdx = args.findIndex((a) => a === "-c" || a === "-lc" || a === "-ic" || a === "-ilc")
+    if (cIdx >= 0) {
+      const inner = args
+        .slice(cIdx + 1)
+        .join(" ")
+        .replace(/^['"]|['"]$/g, "")
+      return anySegmentComparesToReference(inner)
+    }
+    return { isCompare: false, refIsTestPath: false }
+  }
+
+  // (1) a COMPARATOR (`diff`/`cmp`/`sdiff`/`colordiff`) with TWO DISTINCT real operands.
+  if (COMPARATORS.has(base)) {
+    const operands = args.filter(isPathOperand)
+    const distinct = [...new Set(operands)]
+    if (distinct.length < 2) return { isCompare: false, refIsTestPath: false } // R4: `diff a a`, <2 operands
+    // no-leak (R1): if ANY operand is under a verifier/test path, this is NOT a fair L1 comparison.
+    if (distinct.some(isTestPath)) return { isCompare: false, refIsTestPath: true }
+    return { isCompare: true, refIsTestPath: false }
+  }
+
+  // (2) an interpreter/script run that references a reference-shaped operand OR two data artifacts —
+  //     e.g. `python check.py out.npy --expected ref.npy` or `node cmp.js a.json b.json`.
+  if (INTERPRETERS.has(base) || leader.includes("/")) {
+    if (args.includes("-c")) return { isCompare: false, refIsTestPath: false } // inline probe, not a run
+    const operands = args.filter(isPathOperand)
+    // A script is L1 ONLY when it NAMES its reference — an explicit compare flag
+    // (`--expected`/`--reference`/…) OR a reference-shaped operand name (`baseline.json`,
+    // `ref.npy`, `expected_output.txt`). A bare `solve.py in.json out.json` names no reference ⇒
+    // it is an L0 RUN, NOT a comparison (fail-closed — this is the mini-rubber-stamp v2 must not
+    // re-open: two data files alone do NOT prove a compare happened).
+    const namesReference = args.some((a) => REFERENCE_HINT.test(a))
+    if (!namesReference) return { isCompare: false, refIsTestPath: false }
+    // no-leak (R1): neither the SCRIPT ITSELF nor any operand may be under a verifier/test path —
+    // RUNNING the hidden verifier/grader script (`python /app/tests/verify.py …`) is peeking too,
+    // even when the compared operands look clean. Reject leader-in-test-path AND operand-in-test-path.
+    if (isTestPath(leader) || operands.some(isTestPath)) return { isCompare: false, refIsTestPath: true }
+    return { isCompare: true, refIsTestPath: false }
+  }
+
+  return { isCompare: false, refIsTestPath: false }
+}
+
+/** Judge a (possibly compound) command for an L1 comparison in ANY segment. */
+const anySegmentComparesToReference = (command: string): SegmentL1 => {
+  let refIsTestPath = false
+  for (const seg of command.split(/(?:&&|\|\||[;|&\n])/)) {
+    if (seg.trim().length === 0) continue
+    const r = segmentComparesToReference(seg)
+    if (r.isCompare) return { isCompare: true, refIsTestPath: false }
+    if (r.refIsTestPath) refIsTestPath = true
+  }
+  return { isCompare: false, refIsTestPath }
+}
+
+/** The L1 verdict: did the trajectory OBSERVE a comparison of its output against a reference? */
+export interface CompareVerdict {
+  /** True iff an observed L1 comparison (per §03) was found — the sole path to `verified-pass`. */
+  readonly compared: boolean
+  /** True iff the ONLY comparison(s) found were AGAINST a verifier/test path (R1 fail-closed reject).
+   *  Distinguishes "peeked at the hidden oracle" from "never compared" for honest evidence. */
+  readonly refusedTestPath: boolean
+  /** One human-readable line naming the model's OWN comparison command (never a hidden test). */
+  readonly evidence?: string
+}
+
+/**
+ * PURE L1 inspector (RFC jul-2 §03). Returns `compared:true` iff the trajectory contains an OBSERVED
+ * comparison of the deliverable's output against a DISTINCT, non-test reference — a comparator
+ * (`diff`/`cmp`/`sdiff`/`colordiff`) of two distinct non-test operands, OR a script run referencing
+ * both an output and a reference operand — whose paired `tool_result` observed output.
+ *
+ * Fail-closed + no-leak: `diff a a` / `<2 operands` / `/dev/null` sinks / bare `echo matches` never
+ * count (R4); a comparison whose reference is under a verifier/test path is REFUSED (R1) — recognized
+ * but rejected, and surfaced via `refusedTestPath` so the gate can never teach peeking.
+ */
+export const comparedToReference = (events: readonly AgentEvent[]): CompareVerdict => {
+  const resultObservedById = new Map<string, boolean>()
+  let ptyReadObserved = false
+  for (const ev of events) {
+    if (ev.type === "tool_result") {
+      resultObservedById.set(ev.id, resultObservedOutput(ev))
+      if (ev.name === PTY_READ && resultObservedOutput(ev)) ptyReadObserved = true
+    }
+  }
+
+  let refusedTestPath = false
+  for (const ev of events) {
+    if (ev.type !== "tool_call") continue
+    if (ev.name === CONTAINER_EXEC) {
+      const command = containerExecCommand(ev)
+      if (command === undefined) continue
+      const r = anySegmentComparesToReference(command)
+      if (r.refIsTestPath) refusedTestPath = true
+      if (r.isCompare && resultObservedById.get(ev.id) === true) {
+        return {
+          compared: true,
+          refusedTestPath: false,
+          evidence: `compared output to a reference and observed the result: \`${command.trim().slice(0, 160)}\``,
+        }
+      }
+    } else if (ev.name === PTY_WRITE) {
+      const data = ptyWriteData(ev)
+      if (data === undefined) continue
+      const r = anySegmentComparesToReference(data)
+      if (r.refIsTestPath) refusedTestPath = true
+      // A comparison TYPED into a pane counts only when the pane response was observed (a pty_read).
+      if (r.isCompare && ptyReadObserved) {
+        return {
+          compared: true,
+          refusedTestPath: false,
+          evidence: `compared output to a reference in a pane and observed the result: \`${data.trim().slice(0, 160)}\``,
+        }
+      }
+    }
+  }
+
+  return {
+    compared: false,
+    refusedTestPath,
+    evidence: refusedTestPath
+      ? "no fair comparison found: the only comparison referenced a verifier/test path (refused — the gate never peeks at a hidden oracle)"
+      : "no comparison found: the deliverable's output was never diffed/checked against a task-provided reference",
+  }
+}
+
 /** The verdict: did the trajectory exercise the deliverable end-to-end, and (if so) what was the
  *  single most-load-bearing piece of evidence (for the report's `evidence` string)? */
 export interface ExerciseVerdict {
@@ -288,10 +489,12 @@ export const inspectExerciseEvidence = (events: readonly AgentEvent[]): Exercise
   }
 }
 
-/** The honest trichotomy the report stamps. `verified-pass` and `verified-fail` both mean the
- *  deliverable was EXERCISED and an outcome was observed; `unverifiable` means the gate could not
- *  confirm an exercise even after the one bounded follow-up (the accepted, non-penalized terminal
- *  state that STRUCTURALLY prevents over-persistence). */
+/** The honest trichotomy the report stamps (v2 semantics). `verified-pass` / `verified-fail` both
+ *  mean an OBSERVED L1 comparison happened (output diffed/checked against a non-test reference) and
+ *  the result was match / mismatch respectively; `unverifiable` means no fair L1 comparison was
+ *  found even after the one bounded follow-up — the accepted, non-penalized terminal state that
+ *  STRUCTURALLY prevents over-persistence, and the state that (post-v2) a mere ran-but-unchecked
+ *  run resolves to (never a false `verified-pass`). */
 export type VerificationState = "verified-pass" | "verified-fail" | "unverifiable"
 
 /** The report's verification stamp. `evidence` names only the model's own trajectory / stated
@@ -322,26 +525,37 @@ const NEGATED_NEGATIVE =
   /\b(no (?:errors?|failures?|mismatch(?:es)?|diff(?:erences?)?)|without (?:error|failure)|does ?n['o]?t fail|did ?n['o]?t fail|zero (?:errors?|failures?))\b/i
 
 /**
- * Derive the honest verification state from the (post-follow-up) exercise verdict + the model's
- * final stated outcome. Conservative and NEVER over-persists:
- *   - No exercise evidence ⇒ `unverifiable` (asked once; nothing exercised — finalize honestly).
- *   - Exercised + uncertain/negative final ⇒ `unverifiable` / `verified-fail` (honest surfacing).
- *   - Exercised + positive/silent final ⇒ `verified-pass`.
+ * v2 GATE POLICY (RFC jul-2 §03) — derive the honest verification state from the (post-follow-up)
+ * L1 COMPARE verdict + the model's final stated outcome. `verified-pass` is UNREACHABLE without an
+ * OBSERVED L1 comparison — this closes v1's rubber-stamp (which stamped `verified-pass` on a mere
+ * L0 run). NEVER over-persists (the caller fires at most one follow-up; this is a pure classifier):
+ *   - L1 present + agent reports mismatch/uncertain ⇒ `verified-fail` / `unverifiable` (honest).
+ *   - L1 present + agent reports match / silent     ⇒ `verified-pass` (the ONLY path to pass).
+ *   - No L1 (ran but never compared, or nothing ran) ⇒ `unverifiable` (honest — never a false pass).
+ *
+ * The exercise (L0) verdict is retained ONLY to color the evidence line (ran-but-unchecked vs
+ * nothing-ran); it can NO LONGER by itself yield `verified-pass`.
  */
 export const deriveVerificationState = (
-  verdict: ExerciseVerdict,
+  compareVerdict: CompareVerdict,
   finalText: string,
+  exerciseVerdict?: ExerciseVerdict,
 ): VerificationStamp => {
-  const evidence = verdict.evidence ?? ""
-  if (!verdict.exercised) {
-    return { state: "unverifiable", evidence: `unverifiable — ${evidence}` }
+  const evidence = compareVerdict.evidence ?? ""
+  // No observed L1 comparison ⇒ unverifiable, whatever the model SAYS (the rubber-stamp is dead).
+  if (!compareVerdict.compared) {
+    const ran = exerciseVerdict?.exercised === true
+    const reason = ran
+      ? `ran the deliverable but never compared its output to a reference — ${evidence}`
+      : evidence
+    return { state: "unverifiable", evidence: `unverifiable — ${reason}` }
   }
   const text = finalText ?? ""
   if (UNCERTAIN_OUTCOME.test(text)) {
-    return { state: "unverifiable", evidence: `agent could not confirm the outcome; ${evidence}` }
+    return { state: "unverifiable", evidence: `compared, but the agent could not confirm the outcome; ${evidence}` }
   }
   if (NEGATIVE_OUTCOME.test(text) && !NEGATED_NEGATIVE.test(text)) {
-    return { state: "verified-fail", evidence: `agent observed a failing outcome; ${evidence}` }
+    return { state: "verified-fail", evidence: `compared and observed a mismatch; ${evidence}` }
   }
   return { state: "verified-pass", evidence }
 }

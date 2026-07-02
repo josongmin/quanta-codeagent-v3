@@ -44,6 +44,7 @@ import type { PtySessionPort } from "@/tool/pty"
 import { gateOn } from "@/shared/env-flag"
 import { terminalSurfaceOverDuplex } from "./index"
 import {
+  comparedToReference,
   deriveVerificationState,
   inspectExerciseEvidence,
   type VerificationStamp,
@@ -82,12 +83,17 @@ export const TERMINAL_SURFACE_PROFILE: SurfaceProfile = {
   operatorGuide: TERMINAL_OPERATOR_GUIDE,
 }
 
-/** The single bounded follow-up nudge. References ONLY the task's own success criterion — never a
- *  hidden test / answer key (honors `no-answer-key-regex-heuristics`). Fired AT MOST ONCE. */
+/** The single bounded follow-up nudge (v2, RFC jul-2 §03 "Follow-up prompt" — VERBATIM). Fired AT
+ *  MOST ONCE, only when the run RAN but never COMPARED its output to a reference (L0-without-L1). It
+ *  is no-leak by construction: it directs the model to use ONLY task-provided materials and contains
+ *  none of {test, verifier, grader, hidden, answer key} — the gate can never teach peeking. */
 export const VERIFY_GATE_FOLLOWUP =
-  "You are about to finalize. Exercise your deliverable end-to-end against the task's success " +
-  "criterion (run it and observe the result), then report the observed outcome as pass / fail / " +
-  "could-not-verify."
+  "Before finalizing: your deliverable ran, but you have not COMPARED its output against a reference. " +
+  "Using ONLY materials the task itself provides — an original/input artifact, a baseline command whose " +
+  "output is the correct answer, or a deterministic expected value stated in the task — run your " +
+  "deliverable and DIFF its output against that reference, then report the concrete comparison result " +
+  "(matches / differs-here / no-reference-available). Rely only on those task-provided materials; do " +
+  "not seek out any concealed evaluation harness or reference key."
 
 /** Report JSON the hands side reads into harbor's `AgentContext` (spec B3). Trajectory optional. */
 export interface TerminalBrainReport {
@@ -307,14 +313,22 @@ const finalAssistantText = (messages: readonly Message[]): string => {
  * loop with the operator guide + instruction, write the report, and signal EOF. Fully injected —
  * the hellgate drives it network-free / fs-free. Returns the turn count + the written report.
  */
-/** Lever #2 — verify-before-finalize gate (STRUCTURAL/SELECTIVE/BOUNDED/HONEST,
- *  RFC jul-2). The harness (not a prompt line) inspects the recorded trajectory
- *  for evidence the deliverable was RUN AND OBSERVED; when absent AND the run has
- *  turn budget left, it fires the ONE follow-up (at most once — no loop, so the
- *  ~3× over-persist that got the prior blanket steer reverted is structurally
- *  impossible), then re-inspects and stamps a verified-pass/fail/unverifiable
- *  trichotomy. `followUpFired` rides the stamp for A/B attribution. Extracted
- *  from `runTerminalBrain` to keep it under the god-FUNCTION cap. */
+/** Lever #2 — verify-gate v2 (compare-to-reference; STRUCTURAL/SELECTIVE/BOUNDED/HONEST,
+ *  RFC jul-2 §03). The harness (not a prompt line) inspects the recorded trajectory for an
+ *  OBSERVED L1 COMPARISON — the deliverable's output diffed/checked against a distinct,
+ *  non-test reference ({@link comparedToReference}). v1 fired on missing L0 (ran-or-not) and
+ *  rubber-stamped a bare run as `verified-pass`; v2 fires on missing L1 (compared-or-not) and
+ *  `verified-pass` is UNREACHABLE without an observed comparison. When L1 is absent AND the run
+ *  has turn budget left, it fires the ONE §"Follow-up prompt" nudge (K=0 surface-only, at most
+ *  once — no loop, so the ~3× over-persist that got the prior blanket steer reverted is
+ *  structurally impossible), then re-inspects and stamps a verified-pass/fail/unverifiable
+ *  trichotomy. `followUpFired` rides the stamp for A/B attribution. Extracted from
+ *  `runTerminalBrain` to keep it under the god-FUNCTION cap.
+ *
+ *  TODO(R8, open risk): a BOUNDED ≤K recovery loop (K=2-3, hard counter) so the agent can ACT on
+ *  a surfaced mismatch (diff→fix→re-diff), not just report it. Ships as a SEPARATE A/B arm with a
+ *  hard-ceiling turn-budget watchdog — NOT here (K=0 surface-only first; the recovery loop
+ *  re-introduces R2's over-persist and must be measured, never enabled by default). */
 const runVerifyBeforeFinalizeGate = async (args: {
   session: Parameters<typeof runSessionTurn>[0]["session"]
   stream: CapturingStream
@@ -330,11 +344,11 @@ const runVerifyBeforeFinalizeGate = async (args: {
   let outcomeTurns = args.outcomeTurns
   let messages = args.messages
   let followUpFired = false
-  const preVerdict = inspectExerciseEvidence(args.stream.events)
-  // Fire the ONE follow-up ONLY when there is no exercise evidence AND the run has
-  // not already exhausted its turn budget (the budget guard is what stops a nudge
-  // PAST the cap on an exhausted run — the over-persist the RFC forbids).
-  if (!preVerdict.exercised && outcomeTurns < args.maxTurns) {
+  const preCompare = comparedToReference(args.stream.events)
+  // Fire the ONE follow-up ONLY when there is no OBSERVED L1 comparison AND the run has not
+  // already exhausted its turn budget (the budget guard is what stops a nudge PAST the cap on an
+  // exhausted run — the over-persist the RFC forbids). K=0: exactly one follow-up, never a loop.
+  if (!preCompare.compared && outcomeTurns < args.maxTurns) {
     const followUp = await runSessionTurn({
       session: args.session,
       resolveApproval: async () => "approve",
@@ -346,10 +360,13 @@ const runVerifyBeforeFinalizeGate = async (args: {
     messages = followUp.messages
     followUpFired = true
   }
+  // Re-inspect AFTER the (single) follow-up. `verified-pass` requires an observed L1 comparison;
+  // the L0 exercise verdict only colors the evidence line (ran-but-unchecked vs nothing-ran).
   const verification = {
     ...deriveVerificationState(
-      inspectExerciseEvidence(args.stream.events),
+      comparedToReference(args.stream.events),
       finalAssistantText(messages),
+      inspectExerciseEvidence(args.stream.events),
     ),
     followUpFired,
   }

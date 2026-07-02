@@ -414,6 +414,35 @@ const execThenFinalScripts = (command: string, finalText: string): StreamEvent[]
   ],
 ]
 
+/** A pty exercise turn set: attach a pane, TYPE `data` (a command), READ back its response, then a
+ *  text-completion turn (`final`). Uses the `pty_*` tool surface (via {@link makeFakePty}) — the ONE
+ *  terminal tool path that round-trips fully in the fake harness, so v2 GATE wiring can be exercised
+ *  end-to-end here regardless of the container_exec duplex. `data` is what the inspector judges:
+ *  a `diff …`/`cmp …` TYPED into the pane is an L1 comparison; a bare `./run` is L0-only. */
+const ptyTypeThenFinalScripts = (data: string, finalText: string): StreamEvent[][] => [
+  [
+    { type: "tool_use_start", id: "a1", name: "pty_attach" },
+    { type: "tool_use_end", id: "a1", input: { handle: "pty:1" } },
+    { type: "message_stop", stop_reason: "tool_use" },
+  ],
+  [
+    { type: "tool_use_start", id: "w1", name: "pty_write" },
+    { type: "tool_use_end", id: "w1", input: { handle: "pty:1", data, appendNewline: true } },
+    { type: "message_stop", stop_reason: "tool_use" },
+  ],
+  [
+    { type: "tool_use_start", id: "r1", name: "pty_read" },
+    { type: "tool_use_end", id: "r1", input: { handle: "pty:1", sinceSeq: 0 } },
+    { type: "usage", inputTokens: 4, outputTokens: 2, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "tool_use" },
+  ],
+  [
+    { type: "text_delta", delta: finalText },
+    { type: "usage", inputTokens: 3, outputTokens: 2, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "end_turn" },
+  ],
+]
+
 describe("verify-before-finalize gate (lever #2)", () => {
   test("RED (knob OFF, today): an artifact-only run finalizes with NO verification field + NO extra turn", async () => {
     const { stdin, stdout, handsServed, endIn } = makeStdio()
@@ -477,20 +506,30 @@ describe("verify-before-finalize gate (lever #2)", () => {
     endIn()
   })
 
-  test("knob ON + a run that DID exercise (container_exec ran+observed) ⇒ NO follow-up, verified-pass", async () => {
-    const { stdin, stdout, handsServed, endIn } = makeStdio()
-    // Runs the produced binary; the fake hands returns stdout `ran:./solver` (observed output).
-    const llm = new FakeLlm(execThenFinalScripts("./solver input.txt", "Output matches. Pass."))
+  // NB: the following four tests drive the pty_* tool path (via ptyTypeThenFinalScripts +
+  // makeFakePty) — the ONE terminal-tool round-trip that works end-to-end in the fake harness on
+  // this base (the container_exec duplex is broken by a concurrent memory-consolidation change; see
+  // the 9 pre-existing failures noted in the dispatch). The v2 L1/no-leak DETECTION over BOTH tools
+  // is exhaustively pinned as pure units in verify-gate.test.ts; here we prove the GATE WIRING
+  // (fire-on-missing-L1, trichotomy, verified-pass-requires-L1) end-to-end.
+
+  test("v2: knob ON + a run that COMPARED to a reference (pty diff, observed) ⇒ NO follow-up, verified-pass", async () => {
+    const { stdin, stdout, endIn } = makeStdio()
+    // The v2 happy path: the model DIFFED its output against a task-provided baseline (observed).
+    const llm = new FakeLlm(
+      ptyTypeThenFinalScripts("diff mine.out /app/baseline.out", "No diff; matches the baseline. Pass."),
+    )
     const result = await runTerminalBrain({
-      instruction: "run the solver",
-      reportOut: "/tmp/vg-exercised.json",
+      instruction: "run the solver and check it",
+      reportOut: "/tmp/vg-compared.json",
       stdin,
       stdout,
       llm,
+      ptySession: makeFakePty(),
       writeReport: () => undefined,
       env: { [TB_VERIFY_GATE_ENV]: "1" },
     })
-    // No follow-up prompt was injected (the exercise was already present).
+    // No follow-up prompt was injected (an observed L1 comparison was already present).
     const sawFollowUp = llm.seen.some((s) =>
       s.messages.some(
         (m) =>
@@ -500,16 +539,105 @@ describe("verify-before-finalize gate (lever #2)", () => {
     )
     expect(sawFollowUp).toBe(false)
     expect(result.report.verification?.state).toBe("verified-pass")
-    // Exactly the one exec the model ran — the gate added no turn.
-    expect(handsServed.length).toBe(1)
     endIn()
   })
 
-  test("knob ON + a pty_* interactive exercise (drive + observe) ⇒ NO follow-up, verified-pass", async () => {
+  test("v2 RED-for-v1: knob ON + a run that RAN but NEVER COMPARED ⇒ fires the follow-up (no false verified-pass)", async () => {
     const { stdin, stdout, endIn } = makeStdio()
-    // Script: run the produced deliverable in a pane, drive it, read its response — all via pty_*
-    // (no container_exec). Fail-closed contract: the pty_write must TYPE an exercise command (running
-    // the deliverable), not bare shell/REPL chatter, for the gate to accept it.
+    // v1 rubber-stamped a bare L0 run (`./solver`) as `verified-pass`. Under v2, running without
+    // COMPARING to a reference is L0-without-L1 ⇒ the gate MUST fire the compare follow-up. The
+    // model then only re-runs (still no diff) ⇒ honest `unverifiable`, NEVER a false green.
+    const llm = new FakeLlm(ptyTypeThenFinalScripts("./solver input.txt", "Output looks correct. Verified green."))
+    const result = await runTerminalBrain({
+      instruction: "run the solver",
+      reportOut: "/tmp/vg-ran-not-compared.json",
+      stdin,
+      stdout,
+      llm,
+      ptySession: makeFakePty(),
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    const sawFollowUp = llm.seen.some((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    )
+    expect(sawFollowUp).toBe(true)
+    // The critical v2 invariant: a ran-but-unchecked run is NOT verified-pass (rubber-stamp dead).
+    expect(result.report.verification?.state).not.toBe("verified-pass")
+    expect(result.report.verification?.state).toBe("unverifiable")
+    endIn()
+  })
+
+  test("v2 P0b OUTCOME-CORRELATION backstop: an exercised-but-WRONG-output run must NOT be verified-pass", async () => {
+    const { stdin, stdout, endIn } = makeStdio()
+    // The backstop the v1 unit suite LACKED (why the rubber-stamp passed CI): the deliverable RAN
+    // and the agent even DIFFED it — but the diff showed a MISMATCH and the agent SAYS so. The
+    // verdict must correlate with the OUTCOME (verified-FAIL), never a `verified-pass`.
+    const llm = new FakeLlm(
+      ptyTypeThenFinalScripts(
+        "diff mine.out /app/baseline.out",
+        "The output differs from the baseline; the results do not match.",
+      ),
+    )
+    const result = await runTerminalBrain({
+      instruction: "produce the answer",
+      reportOut: "/tmp/vg-wrong.json",
+      stdin,
+      stdout,
+      llm,
+      ptySession: makeFakePty(),
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    // Compared (L1 present) but the observed outcome was a mismatch ⇒ honest verified-fail.
+    expect(result.report.verification?.state).toBe("verified-fail")
+    expect(result.report.verification?.state).not.toBe("verified-pass")
+    endIn()
+  })
+
+  test("v2 R1 no-leak: knob ON + a diff AGAINST A TEST-PATH golden ⇒ refused (fires follow-up, no verified-pass)", async () => {
+    const { stdin, stdout, endIn } = makeStdio()
+    // query-optimize's golden lives in /tests/ — a diff against it is peeking at the hidden oracle.
+    // The inspector REFUSES it (not L1), so the gate fires the compare follow-up and, with no fair
+    // comparison forthcoming, finalizes `unverifiable` — the gate can never TEACH peeking.
+    const llm = new FakeLlm(
+      ptyTypeThenFinalScripts("diff out.sql /app/tests/golden.sql", "Matches the golden. Verified."),
+    )
+    const result = await runTerminalBrain({
+      instruction: "optimize the query",
+      reportOut: "/tmp/vg-leak.json",
+      stdin,
+      stdout,
+      llm,
+      ptySession: makeFakePty(),
+      writeReport: () => undefined,
+      env: { [TB_VERIFY_GATE_ENV]: "1" },
+    })
+    const sawFollowUp = llm.seen.some((s) =>
+      s.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
+      ),
+    )
+    expect(sawFollowUp).toBe(true)
+    expect(result.report.verification?.state).not.toBe("verified-pass")
+    // The no-leak guard is also pinned at the source: the follow-up text names no hidden-oracle terms.
+    for (const w of ["test", "verifier", "grader", "hidden", "answer key"]) {
+      expect(VERIFY_GATE_FOLLOWUP.toLowerCase()).not.toContain(w)
+    }
+    endIn()
+  })
+
+  test("v2: knob ON + a pty_* COMPARISON (diff typed + observed) ⇒ NO follow-up, verified-pass", async () => {
+    const { stdin, stdout, endIn } = makeStdio()
+    // v2 contract for the pty path: a bare run (`python game.py`) is L0 and no longer suffices — the
+    // pty_write must TYPE an actual COMPARISON (a diff of output vs a task reference) and a pty_read
+    // must observe its result for the gate to reach verified-pass.
     const scripts: StreamEvent[][] = [
       [
         { type: "tool_use_start", id: "a1", name: "pty_attach" },
@@ -521,7 +649,7 @@ describe("verify-before-finalize gate (lever #2)", () => {
         {
           type: "tool_use_end",
           id: "w1",
-          input: { handle: "pty:1", data: "python game.py --seed 1", appendNewline: true },
+          input: { handle: "pty:1", data: "diff mine.out /app/baseline.out", appendNewline: true },
         },
         { type: "message_stop", stop_reason: "tool_use" },
       ],
@@ -532,7 +660,7 @@ describe("verify-before-finalize gate (lever #2)", () => {
         { type: "message_stop", stop_reason: "tool_use" },
       ],
       [
-        { type: "text_delta", delta: "REPL returned 4, matches expected. Verified." },
+        { type: "text_delta", delta: "No diff output; matches the baseline. Verified." },
         { type: "message_stop", stop_reason: "end_turn" },
       ],
     ]
