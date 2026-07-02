@@ -195,13 +195,16 @@ describe("Part B — repro rail clears ONLY when readFile is supplied (the fix)"
 // jun-30 keystone, the `runRepairRounds` call is shared by BOTH bench drivers via
 // the exported `runRepairRoundsInSnapshot` helper (runner core driver) — so the
 // readFile fix is wired ONCE there, and both drivers delegate to it (inheriting it).
-// Source-level because the helper is reached through the un-exported runRepairPhase.
+// Source-level because the helper is reached through the runRepairPhase orchestrator.
+// jul-02 god-file split: the runner core's repair phase (`runRepairRoundsInSnapshot`
+// + `runRepairPhase`) was extracted, PURE code motion, into `./driver/repair-phase.ts`
+// — so the runner-side wiring now lives there (the `driver.ts` barrel re-exports it).
 describe("Part C — repair loop wires readFile to runRepairRounds (shared SSOT)", () => {
   const repoRoot = join(import.meta.dir, "..", "..")
   const read = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")
 
   test("the shared runRepairRoundsInSnapshot passes readFile (the fix)", () => {
-    const src = read("src/runner/batch/eval/driver.ts")
+    const src = read("src/runner/batch/eval/driver/repair-phase.ts")
     const callIdx = src.indexOf("runRepairRounds({")
     expect(callIdx).toBeGreaterThan(-1)
     // Scan from the call to the matching close of its single args object.
@@ -212,6 +215,8 @@ describe("Part C — repair loop wires readFile to runRepairRounds (shared SSOT)
     // Neither driver can silently drop the readFile wiring without also dropping
     // the delegation — which this binds RED.
     expect(read("src/apps/bench/eval/driver.ts")).toContain("runRepairRoundsInSnapshot({")
-    expect(read("src/runner/batch/eval/driver.ts")).toContain("runRepairRoundsInSnapshot({")
+    expect(read("src/runner/batch/eval/driver/repair-phase.ts")).toContain(
+      "runRepairRoundsInSnapshot({",
+    )
   })
 })

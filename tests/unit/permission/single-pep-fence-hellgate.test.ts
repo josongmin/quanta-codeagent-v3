@@ -29,8 +29,10 @@ const ALLOWLIST: Record<string, string> = {
     "DECORATOR — wraps a tool's execute for dedup metrics; adds no separate dispatch path",
   "apps/cli/web-cmd.ts":
     "USER-DIRECT /web slash command — the operator typed the URL (authoritative), not an agent-chosen tool call",
-  "runner/batch/eval/driver.ts":
-    "BENCH-INTERNAL decorator/helper — scoped localize probes and bench-bound test_runner delegate to fixed inputs, not agent-chosen arbitrary tool calls",
+  "runner/batch/eval/driver/config-build.ts":
+    "BENCH-INTERNAL decorator/helper — bench-bound test_runner delegates to fixed inputs, not agent-chosen arbitrary tool calls. jul-02 god-file split of runner/batch/eval/driver.ts (PURE code motion).",
+  "runner/batch/eval/driver/localize-prep.ts":
+    "BENCH-INTERNAL decorator/helper — scoped localize probes delegate to fixed inputs, not agent-chosen arbitrary tool calls. jul-02 god-file split of runner/batch/eval/driver.ts (PURE code motion).",
 }
 
 const walk = (dir: string, acc: string[] = []): string[] => {

@@ -80,6 +80,24 @@ const RULES: readonly Rule[] = [
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
       "runner/batch/eval/driver.ts":
         "Extracted batch core keeps the same bench-only opt-in env gates (`QUANTA_BENCH_*`) while the app surface becomes thin. Same posture as the prior apps/bench/eval/driver.ts entry; follow-up work can move these dials behind typed config.",
+      "runner/batch/eval/driver/config-build.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only opt-in `QUANTA_BENCH_*` / `QUANTA_LSP_*` gates moved here verbatim with the AgentConfig-assembly slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/selection-port-factories.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only opt-in `QUANTA_BENCH_*` gates moved here verbatim with the selection/repair port-factory slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/repro-test-prep.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only verifier-command env read moved here verbatim with the repro-test-prep slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/repair-phase.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only opt-in gates (`familyCoverageCoeditEnabled(process.env)` / posture resolution) moved here verbatim with the repair-phase slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/attempt-context.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-knob/posture resolution (`resolveBenchKnobs`/`benchPostureFromState` off process.env defaults) moved here verbatim with the attempt-context slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/agent-phase.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The `emitKnobsApplied(tap, process.env, …)` knob-telemetry read moved here verbatim with the agent-phase slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/env-knob-parse.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench env-var parsers (`resolveBenchKnobs`/`benchPostureFromState` off process.env) moved here verbatim with the env-knob-parse slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/driver/selection-phase.ts":
+        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only opt-in gates (`QUANTA_BENCH_*` / posture resolution / `familyCoverageCoeditEnabled`) moved here verbatim with the selection-phase slice. Same posture as runner/batch/eval/driver.ts.",
+      "runner/batch/eval/repro-viability-wire.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param (`args.env ?? process.env`); the QUANTA_BENCH_REPRO_VIABILITY gate is read off that param via resolveReproViabilityMode, never module-level. Same bench-only opt-in gate posture as runner/batch/eval/run-health.ts; tests inject a fake env.",
       "runner/batch/eval/run-health.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (`opts.env ?? process.env`); the QUANTA_BENCH_HEALTH_ABORT gate is read off that param via gateDisabled, never module-level. Same bench-only opt-in gate posture as runner/batch/eval/driver.ts; tests inject a fake env.",
       "lsp/server-mem-budget.ts":

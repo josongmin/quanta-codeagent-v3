@@ -9,17 +9,22 @@
  * long as no SECOND setter reappears in the driver.
  *
  * This grep-ratchet (god-code-ratchet pattern) asserts every CODE occurrence of
- * `verifyGuard` in driver.ts lives inside the `reconcileBenchGuards` function.
- * Comments are ignored. Robust to line-number drift (bounds are scanned, not
- * hardcoded). If a new bench verifyGuard setter is added elsewhere, this goes
- * RED — forcing it back through the single authority.
+ * `verifyGuard` in the AgentConfig-assembly module lives inside the
+ * `reconcileBenchGuards` function. Comments are ignored. Robust to line-number
+ * drift (bounds are scanned, not hardcoded). If a new bench verifyGuard setter is
+ * added elsewhere, this goes RED — forcing it back through the single authority.
+ *
+ * jul-02 god-file split: `reconcileBenchGuards` (and its `verifyGuard` writes)
+ * were extracted, PURE code motion, from `src/runner/batch/eval/driver.ts` into
+ * `./driver/config-build.ts` (the AgentConfig-assembly slice). Point the ratchet
+ * at the module that now owns the authority; the invariant is unchanged.
  */
 
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
-const DRIVER = join(import.meta.dir, "../../src/runner/batch/eval/driver.ts")
+const DRIVER = join(import.meta.dir, "../../src/runner/batch/eval/driver/config-build.ts")
 
 const isCommentLine = (line: string): boolean => {
   const t = line.trim()

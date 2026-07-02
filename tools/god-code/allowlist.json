@@ -5,7 +5,6 @@
   "modules": [
     "src/apps/bench/eval/driver.ts",
     "src/lsp/adapters/base.ts",
-    "src/runner/batch/eval/driver.ts",
     "src/runner/batch/eval/llm-evidence-packet.ts"
   ],
   "functions": [
@@ -71,7 +70,7 @@
     "src/tool/index.ts::buildDefaultTools",
     "src/tool/lsp_nav/index.ts::lspNavTools",
     "src/agent/dispatch/tool-context.ts::buildToolContext",
-    "src/runner/batch/eval/driver.ts::runSelectionPhase",
+    "src/runner/batch/eval/driver/selection-phase.ts::runSelectionPhase",
     "src/runner/batch/eval/repo-regression-discovery-adapter.ts::makeDiscoveredRepoRegressionWitness",
     "src/tool/pty/bun-pty-adapter.ts::createBunPtyAdapter",
     "src/workflow/executor.ts::runWorkflow"
