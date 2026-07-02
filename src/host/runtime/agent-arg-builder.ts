@@ -328,6 +328,16 @@ const resolveIdentitySystemPrompt = (
   readonly identityModeVariant?: { readonly registry: SystemPromptVariantRegistry }
 } => {
   if (cliIdentityMode !== undefined) {
+    // B1 (jul-03) — `onboarding` is an identity-only virtual mode: it lives in
+    // `IdentityMode` (superset) but is NOT a `ModeVariantKey`, so it cannot ride
+    // the mode-variant registry (`buildSystemPromptForMode` is `ModeVariantKey`-
+    // typed and would type-error). Resolve its identity lines directly through
+    // the identity provider instead. No mode-variant registry is published for
+    // it — `/identity` (ModeVariantKey-keyed) never targets onboarding.
+    if (cliIdentityMode === "onboarding") {
+      const identity = defaultIdentityProvider().identityFor("onboarding")
+      return { system: buildSystemPrompt(process.cwd(), { identity }) }
+    }
     const registry = defaultModeVariantRegistry()
     const system = buildSystemPromptForMode({ mode: cliIdentityMode, registry })
     return { system, identityModeVariant: { registry } }

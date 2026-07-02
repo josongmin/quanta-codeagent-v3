@@ -119,8 +119,21 @@ export type OutputFormatToken = "text" | "json" | "stream-json"
 /** ADR-0236 — closed set of tool-profile names accepted on `--tool-profile`. */
 export type ToolProfileToken = "write" | "ask" | "minimal" | "code-only"
 /** ADR-0236 — closed set of identity modes accepted on `--identity-mode`.
- *  Aligned 1:1 with `ModeVariantKey` (ADR-0211). */
-export type IdentityModeToken = "default" | "plan" | "review" | "audit" | "architect" | "editor"
+ *  Mirrors `IdentityMode` (ADR-0198) — the `ModeVariantKey` set (ADR-0211)
+ *  PLUS the identity-only virtual mode `onboarding` (B1, jul-03). `onboarding`
+ *  is a real `IdentityMode` shipped in `DEFAULT_IDENTITIES` / `IDENTITY_MODES`
+ *  but is NOT a `ModeVariantKey` (it is not an `AgentMode`); it is admitted at
+ *  the CLI surface here and resolved to its identity lines at the arg-builder
+ *  boundary (see `resolveIdentitySystemPrompt`), never cast blindly into the
+ *  `ModeVariantKey`-typed prompt path. */
+export type IdentityModeToken =
+  | "default"
+  | "plan"
+  | "review"
+  | "audit"
+  | "architect"
+  | "editor"
+  | "onboarding"
 /** Track A2 — closed set of named permission profiles accepted on
  *  `--permission-profile`. Mirror of the resolvable subset of the
  *  named-profile registry (`default | restricted | trusted`); `custom` is
@@ -166,7 +179,9 @@ const VALID_TOOL_PROFILES = [
   "code-only",
 ] as const satisfies readonly ToolProfileToken[]
 
-/** ADR-0236 — closed set for `--identity-mode`. */
+/** ADR-0236 — closed set for `--identity-mode`. B1 (jul-03) adds `onboarding`
+ *  so the identity-only virtual mode already present in `DEFAULT_IDENTITIES` /
+ *  `IDENTITY_MODES` is finally reachable from the CLI token surface. */
 const VALID_IDENTITY_MODES = [
   "default",
   "plan",
@@ -174,6 +189,7 @@ const VALID_IDENTITY_MODES = [
   "audit",
   "architect",
   "editor",
+  "onboarding",
 ] as const satisfies readonly IdentityModeToken[]
 
 /** Track A2 — closed set for `--permission-profile`. */
