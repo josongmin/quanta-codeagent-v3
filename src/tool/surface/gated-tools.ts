@@ -857,6 +857,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     risk: "read-only",
     note: "Fast whole-word reference search (ripgrep -F -w). The timeout-immune replacement for the localize grounding steer's lsp_references recommendation — jun-19 MEASURED: pyright textDocument/references is INTRACTABLE on large repos (timed out on sympy at BOTH 15s and 60s, because it type-analyzes every possibly-referencing file). This returns every file:line where the symbol appears as a word in milliseconds (repo-size-independent), definition-like lines marked [def] first. Opt-in via QUANTA_BENCH_FIND_REFS (forwarded to the full-remote box); when on, the driver also appends a co-change steer redirecting the model from lsp_references to this tool. Read-only + concurrency-safe. Lexical/approximate (same-named symbol in another scope also matches) — confirm the owner with lsp_definition. Capped at 200 rows.",
   },
+  {
+    name: "projects_kb",
+    origin: "@/tool/projects-kb (via DefaultToolPorts.projectsKb)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.projectsKb",
+      env: "QUANTA_PROJECTS_KB",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    adr: "A3",
+    note: "A3 (Projects knowledge-base / context-offloading, Cursor·Claude project-knowledge parity) — index a LOCAL file into a session KB (project_write) then search / inspect it WITHOUT the raw bytes ever entering the model's context window. op: project_info | project_read | project_search | project_write | project_delete. THE VALUE PROP is the 'never enters context' invariant: project_write encodes bytes THROUGH resolveJailedDoc (the same FS-jail chokepoint the document readers use), indexes them, and returns ONLY metadata (doc_uuid + byte size) — the raw contents are NEVER placed in the tool ToolResult.output/structured that feeds the model; project_search returns bounded snippets + doc_uuids. Delegates search to the EXISTING @/retrieval/pipeline SearchPipeline seam (the same interface search_codebase injects) scoped to a KB namespace, with a lexical-substring fallback when no pipeline is wired (fail-soft). knowledge{} accounting (knowledge_size / max_knowledge_size / search_threshold / rag_active / remaining_budget) is a REAL byte count of the indexed corpus; rag_active flips at a knob-DEFAULTED byte threshold (DEFAULT_PROJECTS_KB_RAG_THRESHOLD_BYTES — measure-first, NOT a validated cutoff) and `force` bypasses it. risk:read-only (records into the in-session store; the local file is READ, never mutated) — self-reports isReadOnly + hitlTier:none like ci_finding / communicate_update. NO-THROW: a thrown store/backend-port/pipeline collapses to a leak-SAFE ok:false whose message never echoes the doc body. Pure in-memory store (injected clock + id-factory, oldest-evicted ring). Registered only when DefaultToolPorts.projectsKb is wired (QUANTA_PROJECTS_KB); absent ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

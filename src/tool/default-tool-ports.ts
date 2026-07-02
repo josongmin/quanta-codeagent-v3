@@ -14,6 +14,7 @@ import type { ImageGenPort } from "./image-gen"
 import type { ResourcesHandle } from "./mcp_resources"
 import type { McpConnectorDiscoveryPort } from "./mcp-connector"
 import type { PermissionPatternProposePort } from "./permission-propose"
+import type { ProjectsKbSlot } from "./projects-kb"
 import type { PtySessionPort } from "./pty"
 import type { ReflectPort } from "./reflect"
 
@@ -209,6 +210,14 @@ export interface DefaultToolPorts {
    *  (`now`), only when `QUANTA_APPSHOT` is on. ALL effects ride the injected
    *  port; the slice imports no `@/browser`/`@/agent`/`@/llm`. */
   appshot?: AppshotSlot
+  /** A3 (Projects knowledge-base) — when set, append `projects_kb` (index a
+   *  LOCAL file into a session KB then search it WITHOUT its raw bytes ever
+   *  entering the model context). Absent ⇒ tool NOT registered (byte-identical
+   *  default menu). The composition root mints a `createProjectsKbStore()` (and
+   *  OPTIONALLY threads the KB-namespace-scoped SearchPipeline) ONLY when
+   *  `QUANTA_PROJECTS_KB` is on. The "never enters context" invariant lives in
+   *  the tool: project_write returns ONLY metadata (doc_uuid + byte size). */
+  projectsKb?: ProjectsKbSlot
 }
 
 /** Host-wired appshot slot (G1) — the verify-loop port + injected clock + an

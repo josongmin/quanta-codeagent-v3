@@ -46,6 +46,7 @@ import { mcpConnectorTools } from "./mcp-connector"
 import { makeNotebookEditTool } from "./notebook-edit/tool"
 import { parseTestFailureTool } from "./parse-test-failure"
 import { permissionProposeTools } from "./permission-propose"
+import { projectsKbTool } from "./projects-kb"
 import { ptyTools } from "./pty"
 import { makeReadTool, readTool } from "./read"
 import { reflectTool } from "./reflect"
@@ -844,6 +845,14 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
           : {}),
       }) as Tool,
     )
+  }
+  // A3 (Projects knowledge-base) — conditional registration of projects_kb.
+  // Absent slot ⇒ default set byte-identical (the model never sees the tool).
+  // Present ⇒ a tool bound to the host's session KB store (+ optional
+  // KB-namespace SearchPipeline) is appended. The "never enters context"
+  // invariant lives in the tool: project_write returns ONLY metadata.
+  if (ports.projectsKb !== undefined) {
+    base.push(projectsKbTool(ports.projectsKb) as Tool)
   }
   return base
 }
