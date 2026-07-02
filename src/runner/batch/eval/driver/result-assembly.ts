@@ -47,7 +47,7 @@ export const okResult = (
   }
 }
 
-export const reproResultExtra = (
+const reproResultExtra = (
   reproTest: BenchReproTestTelemetry | undefined,
   reproArtifactPath: string | undefined,
 ): Partial<InstanceResult> =>
