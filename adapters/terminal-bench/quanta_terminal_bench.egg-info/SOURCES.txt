@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+quanta_agent.py
+quanta_terminal_bench.egg-info/PKG-INFO
+quanta_terminal_bench.egg-info/SOURCES.txt
+quanta_terminal_bench.egg-info/dependency_links.txt
+quanta_terminal_bench.egg-info/requires.txt
+quanta_terminal_bench.egg-info/top_level.txt
+quanta_terminal_bridge/__init__.py
+quanta_terminal_bridge/protocol.py
+quanta_terminal_bridge/serve.py
+tests/test_agent_adapter.py
+tests/test_golden_parity.py
+tests/test_protocol.py
+tests/test_quanta_agent_run.py

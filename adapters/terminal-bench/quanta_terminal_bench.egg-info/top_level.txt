@@ -1,0 +1,2 @@
+quanta_agent
+quanta_terminal_bridge

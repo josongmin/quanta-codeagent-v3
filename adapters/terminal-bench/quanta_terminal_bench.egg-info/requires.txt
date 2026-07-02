@@ -1,0 +1,6 @@
+
+[dev]
+pytest<9,>=7
+
+[harbor]
+harbor @ git+https://github.com/harbor-framework/harbor.git
