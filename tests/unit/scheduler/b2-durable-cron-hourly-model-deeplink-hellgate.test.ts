@@ -133,6 +133,37 @@ describe("B2 engine-select (assembleAutomation live wire)", () => {
     expect(calls).toBe(0)
     expect((slot.engine as { runs?: unknown }).runs).toBeDefined()
   })
+
+  test("B2-ES-04: explicit deps.engine WINS over STORE=sqlite (precedence; factory never called)", async () => {
+    // The docstring contract: an explicit `deps.engine` "takes precedence over
+    // the env-driven store selector … the engine-select branch is bypassed
+    // entirely." Without this, a host that pre-builds an engine while
+    // QUANTA_AUTOMATION_STORE=sqlite lives in the ambient env would silently be
+    // swapped onto the disk DB (and open a Database it never asked for). RED
+    // when the deps.engine short-circuit is checked AFTER the store branch.
+    let factoryCalls = 0
+    const injected = inMemoryAutomationEngine()
+    const slot = assembleAutomation(
+      makeEnv({ [AUTOMATION_ENV_FLAG]: "on", [AUTOMATION_STORE_ENV]: "sqlite" }),
+      {
+        agentLoop: noopLoop,
+        engine: injected,
+        sqliteEngineFactory: () => {
+          factoryCalls += 1
+          return sqliteAutomationEngine(new Database(":memory:"))
+        },
+      },
+    )
+    if (slot === null) throw new Error("unreachable")
+    // The sqlite factory must NOT have been consulted at all.
+    expect(factoryCalls).toBe(0)
+    // The slot carries the EXACT injected engine instance (identity), not a
+    // wrapper and not the sqlite adapter.
+    expect(slot.engine).toBe(injected)
+    // And it is the in-memory adapter (exposes the `runs` inspection seam that
+    // the sqlite adapter lacks) — a second, adapter-shape witness.
+    expect((slot.engine as { runs?: unknown }).runs).toBeDefined()
+  })
 })
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -223,6 +254,34 @@ describe("B2 per-task model round-trip", () => {
       if (got === undefined) throw new Error("unreachable")
       expect("model" in got).toBe(false)
       expect("modelFallbacks" in got).toBe(false)
+    })
+  }
+
+  for (const { name, eng } of bothEngines()) {
+    test(`B2-MD-05: ${name} preserves an EMPTY modelFallbacks array (distinct from absent)`, async () => {
+      // An explicit empty list `[]` is semantically distinct from an absent
+      // list: it means "this task has NO fallbacks" (host must not fall through
+      // to a global default chain). On sqlite it round-trips as the JSON string
+      // "[]" — a naive `if (fallbacks.length)` persist/read guard would collapse
+      // it to absent, and an over-eager parser would drop it. Pin the distinction.
+      await eng.schedule({
+        id: "me1",
+        title: "T",
+        rule: ruleOf("FREQ=DAILY"),
+        prompt: "p",
+        nextRunAt: utc(2026, 5, 25, 10),
+        createdAt: utc(2026, 5, 25),
+        model: "gpt-5.5",
+        modelFallbacks: [],
+      })
+      const list = await eng.list()
+      if (!list.ok) throw new Error("unreachable")
+      const got = list.value.find((a) => a.id === "me1")
+      if (got === undefined) throw new Error("unreachable")
+      expect(got.model).toBe("gpt-5.5")
+      // The key is PRESENT and its value is the empty array — NOT dropped.
+      expect("modelFallbacks" in got).toBe(true)
+      expect(got.modelFallbacks).toEqual([])
     })
   }
 })
