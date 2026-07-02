@@ -42,6 +42,15 @@ export interface IdleInfo {
   readonly cwdBasename: string
 }
 
+/** B5 (jul-03) — measurable presence-suppression accounting. `sent` counts
+ *  pushes actually written; `suppressedUserPresent` counts pushes held back
+ *  ONLY because the user was present (`!idle.isIdle()`). Fast-turn anti-spam
+ *  and the idle latch are NOT counted here — they are not presence gates. */
+export interface PushStats {
+  readonly sent: number
+  readonly suppressedUserPresent: number
+}
+
 export interface NotificationPort {
   /** A REPL turn finished. The adapter gates on `durationMs` so only SLOW
    *  turns notify (fast turns are silent — anti-spam). */
@@ -54,4 +63,7 @@ export interface NotificationPort {
   markActive(): void
   /** Session teardown — restore the terminal title to a neutral value. Idempotent. */
   dispose(): void
+  /** B5 (jul-03) — optional presence-suppression counters. Optional so existing
+   *  test doubles / callers stay assignable; the OSC adapter always provides it. */
+  getPushStats?(): PushStats
 }

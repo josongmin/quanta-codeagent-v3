@@ -14,7 +14,7 @@
  * to a real `process.stdout.write` only when the TTY gate allows it.
  */
 
-import type { IdleInfo, NotificationPort, TurnCompleteInfo } from "./port"
+import type { IdleInfo, NotificationPort, PushStats, TurnCompleteInfo } from "./port"
 
 /** BEL — Claude `_cli-symbols :13717`. Doubles as the OSC string terminator. */
 const BEL = "\x07"
@@ -59,6 +59,12 @@ export interface OscNotifyDeps {
   readonly slowTurnThresholdMs?: number
   /** Optional clock (reserved for future rate-limiting; not used in v1). */
   readonly now?: () => number
+  /** B5 (jul-03) — optional presence probe. When injected AND it returns true,
+   *  the adapter SUPPRESSES the OSC/BEL push (the user is at the keyboard; the
+   *  notification is for when they have looked away). The composition root binds
+   *  this to `() => !idle.isIdle()` — the SSOT idle signal, no parallel focus
+   *  tracker. ABSENT (default) ⇒ never suppressed ⇒ byte-identical legacy. */
+  readonly isUserPresent?: () => boolean
 }
 
 const DEFAULT_SLOW_TURN_MS = 10_000
@@ -71,6 +77,15 @@ const DEFAULT_SLOW_TURN_MS = 10_000
 export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort => {
   const { write, channel } = deps
   const slowTurnThresholdMs = deps.slowTurnThresholdMs ?? DEFAULT_SLOW_TURN_MS
+  const isUserPresent = deps.isUserPresent
+
+  // B5 — presence-suppression accounting (measurable). Zero when the presence
+  // probe is absent (nothing is ever suppressed by presence).
+  let sent = 0
+  let suppressedUserPresent = 0
+  // True iff a push at THIS moment must be held back because the user is present.
+  // Absent probe ⇒ always false ⇒ byte-identical.
+  const presentNow = (): boolean => isUserPresent?.() === true
 
   if (channel === "off") {
     return {
@@ -78,6 +93,7 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
       onIdleAwaitingInput: () => undefined,
       markActive: () => undefined,
       dispose: () => undefined,
+      getPushStats: (): PushStats => ({ sent: 0, suppressedUserPresent: 0 }),
     }
   }
 
@@ -98,17 +114,32 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
     onTurnComplete: (info: TurnCompleteInfo): void => {
       lastBasename = info.cwdBasename
       // Anti-spam: fast turns are silent. A non-finite/negative duration is
-      // treated as "not slow" (fail-closed — no notification on bad data).
+      // treated as "not slow" (fail-closed — no notification on bad data). This
+      // is NOT presence suppression, so it is not counted in getPushStats.
       if (!(info.durationMs >= slowTurnThresholdMs)) return
+      // B5 — presence gate: user at the keyboard ⇒ hold the push (counted).
+      if (presentNow()) {
+        suppressedUserPresent += 1
+        return
+      }
       write(oscTitle(`${info.ok ? "✓" : "✗"} ${info.cwdBasename} — done`))
       bell()
+      sent += 1
     },
     onIdleAwaitingInput: (info: IdleInfo): void => {
       lastBasename = info.cwdBasename
       if (idleNotified) return
+      // B5 — presence gate: hold the push while the user is present, but do NOT
+      // consume the once-per-entry latch (so the push still fires if they go
+      // idle before the next markActive). Counted as presence suppression.
+      if (presentNow()) {
+        suppressedUserPresent += 1
+        return
+      }
       idleNotified = true
       write(oscTitle(`… ${info.cwdBasename} — waiting`))
       bell()
+      sent += 1
     },
     markActive: (): void => {
       idleNotified = false
@@ -120,5 +151,6 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
       // "✓ done" / "… waiting" label after the session ends.
       write(oscTitle(lastBasename))
     },
+    getPushStats: (): PushStats => ({ sent, suppressedUserPresent }),
   }
 }

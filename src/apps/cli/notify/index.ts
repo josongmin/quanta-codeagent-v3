@@ -8,4 +8,10 @@ export {
   type OscNotifyDeps,
   sanitizeTitle,
 } from "./osc-adapter"
-export type { IdleInfo, NotificationPort, TurnCompleteInfo } from "./port"
+export type { IdleInfo, NotificationPort, PushStats, TurnCompleteInfo } from "./port"
+export {
+  type PushDecision,
+  type PushDecisionInput,
+  type PushDisabledReason,
+  shouldPush,
+} from "./push-decision"

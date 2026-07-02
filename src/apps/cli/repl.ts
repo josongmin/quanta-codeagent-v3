@@ -328,6 +328,11 @@ export const runRepl = async (): Promise<void> => {
     const rfc09 = buildNotifyAndContextWarning({
       cwd: setup.cwd,
       contextUsageView: wires.contextUsageView,
+      // B5 (jul-03) — SSOT presence probe: reuse the existing IdleMonitor's idle
+      // signal (`QUANTA_IDLE_MS` window), no parallel focus tracker. The factory
+      // attaches this ONLY when QUANTA_NOTIFY_PRESENCE opts in (default-OFF); when
+      // idleMonitor.isIdle() is false the user is present ⇒ push suppressed.
+      isUserPresent: () => !setup.idleMonitor.isIdle(),
     })
     // ADR-0528 L2 — crash-resume on restart. Gate FIRST so a gate-off / one-shot
     // / non-TTY launch never even lists sessions (byte-identical). The CURRENT

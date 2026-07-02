@@ -45,8 +45,21 @@ export interface NotifyAndWarningBundle {
 export const buildNotifyAndContextWarning = (args: {
   readonly cwd: string
   readonly contextUsageView: () => SegmentedUsageView | undefined
+  /** B5 (jul-03) — SSOT presence probe (`() => !idle.isIdle()`) from the
+   *  composition root. Attached to the notify port ONLY when the presence gate
+   *  `QUANTA_NOTIFY_PRESENCE` is opted in; otherwise the port is built WITHOUT
+   *  `isUserPresent` ⇒ byte-identical always-notify (no silent inversion). */
+  readonly isUserPresent?: () => boolean
 }): NotifyAndWarningBundle => {
   const channel = resolveNotifyChannel(process.env, process.stdout.isTTY)
+  // B5 — default-OFF gate. Absent / falsy ⇒ presence probe NOT attached ⇒ the
+  // legacy always-notify behavior is preserved byte-for-byte. Only an explicit
+  // opt-in (1/on/true/yes) turns on presence suppression, matching the
+  // competitor "suppress while the user is present" push semantics.
+  const presenceRaw = (process.env.QUANTA_NOTIFY_PRESENCE ?? "").trim().toLowerCase()
+  const presenceOn =
+    presenceRaw === "1" || presenceRaw === "on" || presenceRaw === "true" || presenceRaw === "yes"
+  const presenceProbe = presenceOn ? args.isUserPresent : undefined
   const notify =
     channel === "off"
       ? undefined
@@ -55,6 +68,7 @@ export const buildNotifyAndContextWarning = (args: {
           write: (s) => {
             process.stdout.write(s)
           },
+          ...(presenceProbe !== undefined ? { isUserPresent: presenceProbe } : {}),
         })
 
   const contextWarning =
