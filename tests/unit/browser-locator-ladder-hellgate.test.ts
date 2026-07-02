@@ -65,7 +65,7 @@ describe("HELLGATE locator ladder — parse trust boundary", () => {
     expect(JSON.stringify(r.value)).not.toContain("leak-me")
   })
 
-  test("HELL-LADDER-03: locators are count-capped + value-capped", () => {
+  test("HELL-LADDER-03: value-capped (dedupe collapses same-key spam to one)", () => {
     const many = Array.from({ length: LOCATOR_MAX + 20 }, () => ({
       key: "data-testid",
       value: "v".repeat(1000),
@@ -74,8 +74,33 @@ describe("HELLGATE locator ladder — parse trust boundary", () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     const locs = r.value.root.locators ?? []
-    expect(locs.length).toBeLessThanOrEqual(LOCATOR_MAX)
+    // NOTE: identical keys DEDUPE to a single hint — this case exercises the
+    // value cap + dedupe, NOT the count cap (see HELL-LADDER-03c for that).
+    expect(locs).toHaveLength(1)
     for (const l of locs) expect(l.value.length).toBeLessThanOrEqual(200)
+  })
+
+  test("HELL-LADDER-03c: distinct keys are count-capped + kept in WHITELIST order at PARSE", () => {
+    // The whitelist has ≥ LOCATOR_MAX+1 distinct keys, so feeding one hint per key
+    // ACTUALLY forces count-cap eviction (dedupe cannot mask it). Removing the
+    // `out.length >= LOCATOR_MAX` break makes this go red — the prior HELL-LADDER-03
+    // used one repeated key that deduped to 1 and never touched the cap.
+    //
+    // Keys are fed in REVERSED page order so that emitting over the page/insertion
+    // order (`for (const key of seen.keys())`) instead of `LOCATOR_DATA_WHITELIST`
+    // yields the WRONG keys/order and fails here. This pins the parse-layer ladder
+    // ordering directly (snapshot.ts re-sorts, so HELL-LADDER-04 alone could not).
+    const reversed = [...LOCATOR_DATA_WHITELIST].reverse().map((k) => ({ key: k, value: `v-${k}` }))
+    expect(reversed.length).toBeGreaterThan(LOCATOR_MAX) // guards the premise
+    const r = parseDomModel(wrap({ locators: reversed }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const locs = r.value.root.locators ?? []
+    // capped to EXACTLY LOCATOR_MAX (premise asserts whitelist is larger) and kept
+    // in WHITELIST-PRIORITY order (the first LOCATOR_MAX keys) despite reversed
+    // input — a page cannot push data-testid off the cap by ordering.
+    expect(locs).toHaveLength(LOCATOR_MAX)
+    expect(locs.map((l) => l.key)).toEqual([...LOCATOR_DATA_WHITELIST].slice(0, LOCATOR_MAX))
   })
 
   test("HELL-LADDER-03b: malformed locator entries are dropped, not throwing", () => {
