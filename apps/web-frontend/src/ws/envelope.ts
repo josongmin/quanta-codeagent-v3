@@ -168,12 +168,15 @@ export const encodeConnectFrame = (
   })
 
 /**
- * Best-effort decode of a wire frame into a `SessionEvent`. Returns null on
- * any structural mismatch (callers should log + drop). The frontend never
- * receives commands — only events / snapshots / rejections — but we keep
- * the decode surface symmetric for future use.
+ * Parse a raw wire frame to its envelope record ONCE, or null on any
+ * structural mismatch (non-string, non-JSON, non-object). This is the single
+ * shared parse step every decoder funnels through — the raw-string entry
+ * points below call it and delegate to their `*FromEnvelope` body, and the
+ * client's hot receive path calls it ONCE per frame and routes the resulting
+ * record by `kind` (see {@link peekEnvelopeKindFromParsed}), so a frame is
+ * never JSON-parsed more than once. NO-THROW.
  */
-export const decodeEventFrame = (raw: unknown): SessionEvent | null => {
+export const parseEnvelope = (raw: unknown): Record<string, unknown> | null => {
   if (!isString(raw)) return null
   let parsed: unknown
   try {
@@ -181,7 +184,26 @@ export const decodeEventFrame = (raw: unknown): SessionEvent | null => {
   } catch {
     return null
   }
-  if (!isRecord(parsed)) return null
+  return isRecord(parsed) ? parsed : null
+}
+
+/**
+ * Best-effort decode of a wire frame into a `SessionEvent`. Returns null on
+ * any structural mismatch (callers should log + drop). The frontend never
+ * receives commands — only events / snapshots / rejections — but we keep
+ * the decode surface symmetric for future use.
+ */
+export const decodeEventFrame = (raw: unknown): SessionEvent | null => {
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return decodeEventFromEnvelope(parsed)
+}
+
+/** Validation body for {@link decodeEventFrame}, over an already-parsed
+ *  envelope record. Split out so the client's single-parse dispatch can route
+ *  to it without re-running `JSON.parse`. Semantics are byte-identical to the
+ *  raw entry point (parse-failure ⇒ null is handled by {@link parseEnvelope}). */
+export const decodeEventFromEnvelope = (parsed: Record<string, unknown>): SessionEvent | null => {
   if (parsed.kind !== "event") return null
   const payload = parsed.payload
   if (!isRecord(payload)) return null
@@ -199,14 +221,15 @@ export const decodeEventFrame = (raw: unknown): SessionEvent | null => {
  *  The daemon sends this when the client's connect-frame sessionId doesn't
  *  match the server's session; `sessionId` is the canonical id to adopt. */
 export const decodeRejectedFrame = (raw: unknown): SessionRejectedFrame | null => {
-  if (!isString(raw)) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (!isRecord(parsed)) return null
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return decodeRejectedFromEnvelope(parsed)
+}
+
+/** Validation body for {@link decodeRejectedFrame} over a parsed envelope. */
+export const decodeRejectedFromEnvelope = (
+  parsed: Record<string, unknown>,
+): SessionRejectedFrame | null => {
   if (parsed.kind !== "rejected") return null
   const target = parsed.target
   if (target !== "connect" && target !== "command") return null
@@ -235,14 +258,15 @@ export const decodeRejectedFrame = (raw: unknown): SessionRejectedFrame | null =
 
 /** Decode a snapshot control frame into the UI-visible snapshot view. */
 export const decodeSnapshotFrame = (raw: unknown): SessionSnapshotLite | null => {
-  if (!isString(raw)) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (!isRecord(parsed)) return null
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return decodeSnapshotFromEnvelope(parsed)
+}
+
+/** Validation body for {@link decodeSnapshotFrame} over a parsed envelope. */
+export const decodeSnapshotFromEnvelope = (
+  parsed: Record<string, unknown>,
+): SessionSnapshotLite | null => {
   if (parsed.kind !== "snapshot") return null
   const payload = parsed.payload
   if (!isRecord(payload)) return null
@@ -264,14 +288,15 @@ export const decodeSnapshotFrame = (raw: unknown): SessionSnapshotLite | null =>
 
 /** Decode an `observability` envelope into the snapshot/delta payload. */
 export const decodeObservabilityFrame = (raw: unknown): ObservabilityMessage | null => {
-  if (!isString(raw)) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (!isRecord(parsed)) return null
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return decodeObservabilityFromEnvelope(parsed)
+}
+
+/** Validation body for {@link decodeObservabilityFrame} over a parsed envelope. */
+export const decodeObservabilityFromEnvelope = (
+  parsed: Record<string, unknown>,
+): ObservabilityMessage | null => {
   if (parsed.kind !== "observability") return null
   if (!isString(parsed.version) || parsed.version.length === 0) return null
   return isObservabilityMessage(parsed.payload) ? parsed.payload : null
@@ -342,14 +367,15 @@ const isCanvasMessage = (value: unknown): value is CanvasMessage => {
  * NO-THROW: the client logs + drops on null.
  */
 export const decodeCanvasFrame = (raw: unknown): CanvasMessage | null => {
-  if (!isString(raw)) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (!isRecord(parsed)) return null
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return decodeCanvasFromEnvelope(parsed)
+}
+
+/** Validation body for {@link decodeCanvasFrame} over a parsed envelope. */
+export const decodeCanvasFromEnvelope = (
+  parsed: Record<string, unknown>,
+): CanvasMessage | null => {
   if (parsed.kind !== "canvas") return null
   if (!isString(parsed.version) || parsed.version.length === 0) return null
   // Gate the version we claim to carry: a v2 emitter read with the v1 schema
@@ -406,14 +432,15 @@ const isAgentStateMessage = (value: unknown): value is AgentStateMessage => {
  * "agentState", payload }`. NO-THROW: the client logs + drops on null.
  */
 export const decodeAgentStateFrame = (raw: unknown): AgentStateMessage | null => {
-  if (!isString(raw)) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (!isRecord(parsed)) return null
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return decodeAgentStateFromEnvelope(parsed)
+}
+
+/** Validation body for {@link decodeAgentStateFrame} over a parsed envelope. */
+export const decodeAgentStateFromEnvelope = (
+  parsed: Record<string, unknown>,
+): AgentStateMessage | null => {
   if (parsed.kind !== "agentState") return null
   if (!isString(parsed.version) || parsed.version.length === 0) return null
   // Gate the version we claim to carry: a v2 emitter read with the v1 schema
@@ -427,16 +454,16 @@ export const decodeAgentStateFrame = (raw: unknown): AgentStateMessage | null =>
  * envelope kinds (snapshot, rejected control frames) without crashing.
  */
 export const peekEnvelopeKind = (raw: unknown): string | null => {
-  if (!isString(raw)) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (!isRecord(parsed)) return null
-  return isString(parsed.kind) ? parsed.kind : null
+  const parsed = parseEnvelope(raw)
+  if (parsed === null) return null
+  return peekEnvelopeKindFromParsed(parsed)
 }
+
+/** Read the `kind` tag from an already-parsed envelope record (or null if it
+ *  is absent / non-string). The client's single-parse dispatch calls this on
+ *  the record returned by {@link parseEnvelope} to route without re-parsing. */
+export const peekEnvelopeKindFromParsed = (parsed: Record<string, unknown>): string | null =>
+  isString(parsed.kind) ? parsed.kind : null
 
 /**
  * Type predicate exported for tests + handler narrowing — used by the React

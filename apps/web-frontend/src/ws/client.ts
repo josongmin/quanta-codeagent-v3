@@ -40,15 +40,16 @@ import type {
 } from "../types/protocol"
 import { DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION } from "../types/protocol"
 import {
-  decodeAgentStateFrame,
-  decodeCanvasFrame,
-  decodeEventFrame,
-  decodeObservabilityFrame,
-  decodeRejectedFrame,
-  decodeSnapshotFrame,
+  decodeAgentStateFromEnvelope,
+  decodeCanvasFromEnvelope,
+  decodeEventFromEnvelope,
+  decodeObservabilityFromEnvelope,
+  decodeRejectedFromEnvelope,
+  decodeSnapshotFromEnvelope,
   encodeCommandFrame,
   encodeConnectFrame,
-  peekEnvelopeKind,
+  parseEnvelope,
+  peekEnvelopeKindFromParsed,
   SESSION_PROTOCOL_VERSION,
 } from "./envelope"
 import { computeRetryDelayMs } from "./reconnect"
@@ -153,18 +154,11 @@ const HEARTBEAT_PING_FRAME = JSON.stringify({
   phase: "ping",
 })
 
-/** Best-effort: return a heartbeat frame's `phase`, or null if `raw` is not a
- *  heartbeat frame. NO-THROW — used to consume keepalive frames off the
- *  receive path before the per-kind decoders run. */
-const peekHeartbeatPhase = (raw: string): "ping" | "pong" | null => {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw) as unknown
-  } catch {
-    return null
-  }
-  if (parsed === null || typeof parsed !== "object") return null
-  const rec = parsed as Record<string, unknown>
+/** Best-effort: return a heartbeat frame's `phase`, or null if the (already-
+ *  parsed) envelope is not a heartbeat frame. NO-THROW — used to consume
+ *  keepalive frames off the receive path before the per-kind decoders run.
+ *  Operates on the parsed record so the single-parse dispatch never re-parses. */
+const peekHeartbeatPhase = (rec: Record<string, unknown>): "ping" | "pong" | null => {
   if (rec.kind !== "heartbeat") return null
   return rec.phase === "ping" || rec.phase === "pong" ? rec.phase : null
 }
@@ -555,128 +549,161 @@ export class SessionClient {
       )
       return
     }
+    // SINGLE-PARSE dispatch: parse the raw frame EXACTLY ONCE, then route by
+    // envelope `kind`. Historically this method ran a sequential try-chain of
+    // per-kind decoders, each of which re-ran `JSON.parse(raw)` — so the hot
+    // `turn.output.delta` event (matched by the LAST decoder) was parsed 7×
+    // per frame. We now parse up-front and dispatch the ALREADY-PARSED record
+    // to the matching `*FromEnvelope` validator. Routing is by `kind`, which is
+    // exactly the discriminator each decoder used internally, so semantics are
+    // identical to the old try-chain (each decoder only accepted its own kind).
+    const parsed = parseEnvelope(data)
+    if (parsed === null) {
+      // Non-JSON / non-object frame. The old chain fell all the way through and
+      // logged `kind=null` as unrecognised — preserve that exactly.
+      this.#log("warn", "[SessionClient] dropping unrecognised frame (kind=null)")
+      return
+    }
+    const kind = peekEnvelopeKindFromParsed(parsed)
+
     // A heartbeat frame is connection-level bookkeeping; the liveness reset
     // above is its entire effect on the client. Consume it here so it never
     // reaches the per-kind decoders below (which would log it as unrecognised).
-    const heartbeatPhase = peekHeartbeatPhase(data)
-    if (heartbeatPhase !== null) return
-    const canvas = decodeCanvasFrame(data)
-    if (canvas !== null) {
-      this.#lastCanvas = canvas
-      // A replayed canvas frame proves the resume handshake settled (see
-      // {@link #settleResume}) — otherwise an events-only resume that leads with
-      // a canvas frame would stay stuck in `connecting`.
-      this.#settleResume()
-      for (const handler of [...this.#canvasHandlers]) {
-        try {
-          handler(canvas)
-        } catch (err) {
-          this.#log("warn", `[SessionClient] canvas handler threw: ${String(err)}`)
-        }
-      }
+    if (kind === "heartbeat") {
+      // peekHeartbeatPhase gates phase ∈ {ping,pong}; a heartbeat frame with a
+      // bad phase is still a known kind ⇒ silently dropped (no warning), which
+      // matches the old chain (all decoders returned null, kind ∈ known-set).
+      peekHeartbeatPhase(parsed)
       return
     }
-    const agentState = decodeAgentStateFrame(data)
-    if (agentState !== null) {
-      this.#lastAgentState = agentState
-      // A replayed agent-state frame likewise settles an events-only resume
-      // (mirrors the canvas branch above).
-      this.#settleResume()
-      for (const handler of [...this.#agentStateHandlers]) {
-        try {
-          handler(agentState)
-        } catch (err) {
-          this.#log("warn", `[SessionClient] agent-state handler threw: ${String(err)}`)
-        }
-      }
-      return
-    }
-    const rejected = decodeRejectedFrame(data)
-    if (rejected !== null) {
-      if (
-        rejected.target === "connect" &&
-        rejected.sessionId !== undefined &&
-        rejected.sessionId.length > 0 &&
-        this.#sessionId !== rejected.sessionId
-      ) {
-        this.#adoptSessionId(rejected.sessionId)
-        if (this.#ws !== null && this.#ws.readyState === READYSTATE_OPEN) {
+    if (kind === "canvas") {
+      const canvas = decodeCanvasFromEnvelope(parsed)
+      if (canvas !== null) {
+        this.#lastCanvas = canvas
+        // A replayed canvas frame proves the resume handshake settled (see
+        // {@link #settleResume}) — otherwise an events-only resume that leads with
+        // a canvas frame would stay stuck in `connecting`.
+        this.#settleResume()
+        for (const handler of [...this.#canvasHandlers]) {
           try {
-            // Re-handshake with the canonical id. Carry the resume cursor if we
-            // already have one (a reconnect that re-discovers the id); the
-            // bootstrap discovery on a fresh session has no seq yet ⇒ omitted.
-            this.#ws.send(this.#buildConnectFrame(rejected.sessionId))
+            handler(canvas)
           } catch (err) {
-            this.#log("warn", `[SessionClient] connect-retry failed: ${String(err)}`)
+            this.#log("warn", `[SessionClient] canvas handler threw: ${String(err)}`)
           }
         }
       }
-      if (rejected.target === "command") {
-        for (const handler of [...this.#rejectedHandlers]) {
+      // Malformed canvas payload ⇒ silent drop (kind is known), as before.
+      return
+    }
+    if (kind === "agentState") {
+      const agentState = decodeAgentStateFromEnvelope(parsed)
+      if (agentState !== null) {
+        this.#lastAgentState = agentState
+        // A replayed agent-state frame likewise settles an events-only resume
+        // (mirrors the canvas branch above).
+        this.#settleResume()
+        for (const handler of [...this.#agentStateHandlers]) {
           try {
-            handler(rejected)
+            handler(agentState)
           } catch (err) {
-            this.#log("warn", `[SessionClient] rejected handler threw: ${String(err)}`)
+            this.#log("warn", `[SessionClient] agent-state handler threw: ${String(err)}`)
           }
         }
       }
       return
     }
-    const snapshot = decodeSnapshotFrame(data)
-    if (snapshot !== null) {
-      this.#lastSnapshot = snapshot
-      this.#trackSeq(snapshot.seq)
-      if (this.#sessionId === null || this.#sessionId !== snapshot.sessionId) {
-        this.#adoptSessionId(snapshot.sessionId)
-      }
-      // A snapshot settles the handshake on either path (first-connect OR the
-      // resume fallback where the daemon sent a full snapshot). Clear the
-      // resume flag so a later event doesn't redundantly re-promote state.
-      this.#resuming = false
-      this.#setState({ kind: "connected" })
-      for (const handler of [...this.#snapshotHandlers]) {
-        try {
-          handler(snapshot)
-        } catch (err) {
-          this.#log("warn", `[SessionClient] snapshot handler threw: ${String(err)}`)
+    if (kind === "rejected") {
+      const rejected = decodeRejectedFromEnvelope(parsed)
+      if (rejected !== null) {
+        if (
+          rejected.target === "connect" &&
+          rejected.sessionId !== undefined &&
+          rejected.sessionId.length > 0 &&
+          this.#sessionId !== rejected.sessionId
+        ) {
+          this.#adoptSessionId(rejected.sessionId)
+          if (this.#ws !== null && this.#ws.readyState === READYSTATE_OPEN) {
+            try {
+              // Re-handshake with the canonical id. Carry the resume cursor if we
+              // already have one (a reconnect that re-discovers the id); the
+              // bootstrap discovery on a fresh session has no seq yet ⇒ omitted.
+              this.#ws.send(this.#buildConnectFrame(rejected.sessionId))
+            } catch (err) {
+              this.#log("warn", `[SessionClient] connect-retry failed: ${String(err)}`)
+            }
+          }
+        }
+        if (rejected.target === "command") {
+          for (const handler of [...this.#rejectedHandlers]) {
+            try {
+              handler(rejected)
+            } catch (err) {
+              this.#log("warn", `[SessionClient] rejected handler threw: ${String(err)}`)
+            }
+          }
         }
       }
       return
     }
-    const observability = decodeObservabilityFrame(data)
-    if (observability !== null) {
-      this.#lastObservability = observability
-      // A replayed observability frame likewise settles an events-only resume.
-      this.#settleResume()
-      for (const handler of [...this.#observabilityHandlers]) {
-        try {
-          handler(observability)
-        } catch (err) {
-          this.#log("warn", `[SessionClient] observability handler threw: ${String(err)}`)
+    if (kind === "snapshot") {
+      const snapshot = decodeSnapshotFromEnvelope(parsed)
+      if (snapshot !== null) {
+        this.#lastSnapshot = snapshot
+        this.#trackSeq(snapshot.seq)
+        if (this.#sessionId === null || this.#sessionId !== snapshot.sessionId) {
+          this.#adoptSessionId(snapshot.sessionId)
+        }
+        // A snapshot settles the handshake on either path (first-connect OR the
+        // resume fallback where the daemon sent a full snapshot). Clear the
+        // resume flag so a later event doesn't redundantly re-promote state.
+        this.#resuming = false
+        this.#setState({ kind: "connected" })
+        for (const handler of [...this.#snapshotHandlers]) {
+          try {
+            handler(snapshot)
+          } catch (err) {
+            this.#log("warn", `[SessionClient] snapshot handler threw: ${String(err)}`)
+          }
         }
       }
       return
     }
-    const event = decodeEventFrame(data)
-    if (event === null) {
-      const kind = peekEnvelopeKind(data)
-      if (
-        kind !== "snapshot" &&
-        kind !== "rejected" &&
-        kind !== "observability" &&
-        kind !== "canvas" &&
-        kind !== "agentState" &&
-        kind !== "heartbeat"
-      ) {
-        this.#log("warn", `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`)
+    if (kind === "observability") {
+      const observability = decodeObservabilityFromEnvelope(parsed)
+      if (observability !== null) {
+        this.#lastObservability = observability
+        // A replayed observability frame likewise settles an events-only resume.
+        this.#settleResume()
+        for (const handler of [...this.#observabilityHandlers]) {
+          try {
+            handler(observability)
+          } catch (err) {
+            this.#log("warn", `[SessionClient] observability handler threw: ${String(err)}`)
+          }
+        }
       }
       return
     }
-    // Events-only resume: the daemon replayed missed events without a snapshot.
-    // The first replayed frame proves the resume handshake settled → flip to
-    // `connected` so the composer unfreezes and `send()` stops dropping commands.
-    this.#settleResume()
-    this.#fanoutEvent(event)
+    if (kind === "event") {
+      const event = decodeEventFromEnvelope(parsed)
+      if (event !== null) {
+        // Events-only resume: the daemon replayed missed events without a
+        // snapshot. The first replayed frame proves the resume handshake settled
+        // → flip to `connected` so the composer unfreezes and `send()` stops
+        // dropping commands.
+        this.#settleResume()
+        this.#fanoutEvent(event)
+        return
+      }
+      // Malformed event payload. IMPORTANT: the old sequential chain did NOT
+      // list "event" in its known-kind allow-list, so a frame tagged `event`
+      // with an invalid payload fell through to the unrecognised-frame warning.
+      // Preserve that exactly (fall through to the warning below).
+    }
+    // Truly unknown kind, or an `event`-tagged frame whose payload failed
+    // validation. The old chain logged exactly this once all decoders +
+    // peekEnvelopeKind fell through.
+    this.#log("warn", `[SessionClient] dropping unrecognised frame (kind=${String(kind)})`)
   }
 
   /** Settle an events-only resume: ANY replayed data frame (event / canvas /

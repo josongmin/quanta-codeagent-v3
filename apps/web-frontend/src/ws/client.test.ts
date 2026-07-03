@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION,
   HEARTBEAT_INTERVAL_MS,
@@ -7,6 +7,7 @@ import {
   type WebSocketLike,
 } from "./client"
 import { SESSION_PROTOCOL_VERSION } from "./envelope"
+import type { SessionEvent } from "../types/protocol"
 
 /**
  * Minimal in-memory WebSocket stub — covers the surface SessionClient
@@ -902,5 +903,261 @@ describe("SessionClient", () => {
     )
 
     expect(warnings.filter((w) => w.includes("unrecognised"))).toEqual([])
+  })
+})
+
+/**
+ * Hot-path parse-count regression (perf). The historical `#handleMessage`
+ * ran a sequential try-chain of per-kind decoders, EACH re-running
+ * `JSON.parse(raw)` — so the hottest frame (`turn.output.delta`, an `event`,
+ * matched by the LAST decoder) was JSON-parsed 7× per inbound frame. Over an
+ * hour-long stream (tens of thousands of delta tokens) that is 6× wasted
+ * parses + allocations per token → main-thread CPU + GC. This suite pins the
+ * invariant that each inbound frame is parsed EXACTLY ONCE regardless of kind.
+ */
+describe("SessionClient #handleMessage — single JSON.parse per frame", () => {
+  const buildDeltaClient = (): { fake: FakeWebSocket; client: SessionClient } => {
+    const fakes: FakeWebSocket[] = []
+    class TestWebSocket extends FakeWebSocket {
+      constructor(url: string, protocols?: string | readonly string[]) {
+        super(url, protocols)
+        fakes.push(this)
+      }
+    }
+    const client = new SessionClient({
+      webSocketCtor: TestWebSocket as unknown as new (
+        url: string,
+        protocols?: string | readonly string[],
+      ) => WebSocketLike,
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+      log: () => undefined,
+    })
+    client.connect({ url: "ws://localhost/x" })
+    fakes[0]?._simulateOpen()
+    const fake = fakes[0]
+    if (fake === undefined) throw new Error("no fake ws")
+    return { fake, client }
+  }
+
+  /** Count how many times JSON.parse is invoked with EXACTLY this raw frame. */
+  const countParsesOfFrame = (fake: FakeWebSocket, frame: string): number => {
+    const realParse = JSON.parse.bind(JSON)
+    const spy = vi
+      .spyOn(JSON, "parse")
+      .mockImplementation((text: string, reviver?: (this: unknown, key: string, value: unknown) => unknown) =>
+        realParse(text, reviver as never),
+      )
+    try {
+      fake._simulateMessage(frame)
+      return spy.mock.calls.filter((c) => c[0] === frame).length
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  const deltaFrame = JSON.stringify({
+    version: SESSION_PROTOCOL_VERSION,
+    kind: "event",
+    payload: {
+      eventId: "e-delta-1",
+      seq: 7,
+      revision: 1,
+      emittedAt: "2026-07-03T00:00:00.000Z",
+      type: "turn.output.delta",
+      delta: "hello",
+    },
+  })
+
+  it("parses the hot turn.output.delta event frame exactly once (was 7×)", () => {
+    const { fake } = buildDeltaClient()
+    const count = countParsesOfFrame(fake, deltaFrame)
+    expect(count).toBe(1)
+  })
+
+  it("parses every frame kind exactly once (heartbeat/canvas/agentState/rejected/snapshot/observability/event)", () => {
+    const frames: Array<[string, string]> = [
+      [
+        "heartbeat",
+        JSON.stringify({ version: SESSION_PROTOCOL_VERSION, kind: "heartbeat", phase: "pong" }),
+      ],
+      [
+        "canvas",
+        JSON.stringify({
+          version: "canvas.v1",
+          kind: "canvas",
+          payload: { kind: "context.usage", segments: [], total: 1, max: 10, emittedAt: 1 },
+        }),
+      ],
+      [
+        "agentState",
+        JSON.stringify({
+          version: "agent-state.v1",
+          kind: "agentState",
+          payload: { kind: "mode.changed", emittedAt: 1 },
+        }),
+      ],
+      ["rejected", encodeRejectedFrame("srv-x")],
+      ["snapshot", encodeSnapshotFrame("srv-x")],
+      ["observability", encodeObservabilityFrame()],
+      ["event", encodeEventFrame(3)],
+    ]
+    for (const [label, frame] of frames) {
+      const { fake } = buildDeltaClient()
+      const count = countParsesOfFrame(fake, frame)
+      expect(count, `frame kind=${label} should parse exactly once`).toBe(1)
+    }
+  })
+
+  it("parses a malformed (non-JSON) frame at most once and does not throw", () => {
+    const { fake } = buildDeltaClient()
+    const malformed = "{not json"
+    expect(() => countParsesOfFrame(fake, malformed)).not.toThrow()
+    // Re-drive to measure count (fresh client to keep spy isolated).
+    const { fake: fake2 } = buildDeltaClient()
+    const count = countParsesOfFrame(fake2, malformed)
+    expect(count).toBeLessThanOrEqual(1)
+  })
+
+  it("still routes the delta to subscribers after single-parse dispatch", () => {
+    const { fake, client } = buildDeltaClient()
+    const seen: SessionEvent[] = []
+    client.onAny((e) => seen.push(e))
+    fake._simulateMessage(deltaFrame)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.type).toBe("turn.output.delta")
+  })
+})
+
+/**
+ * Adversarial parity audit: the single-parse dispatch MUST reproduce the old
+ * sequential try-chain's warning / drop semantics byte-for-byte. Each case
+ * pins a boundary where "route by kind then validate" could diverge from
+ * "try every decoder in order".
+ */
+describe("SessionClient #handleMessage — single-parse dispatch parity", () => {
+  const buildWarnClient = (): { fake: FakeWebSocket; warnings: string[] } => {
+    const warnings: string[] = []
+    const fakes: FakeWebSocket[] = []
+    class TestWebSocket extends FakeWebSocket {
+      constructor(url: string, protocols?: string | readonly string[]) {
+        super(url, protocols)
+        fakes.push(this)
+      }
+    }
+    const client = new SessionClient({
+      webSocketCtor: TestWebSocket as unknown as new (
+        url: string,
+        protocols?: string | readonly string[],
+      ) => WebSocketLike,
+      setTimer: () => 0,
+      clearTimer: () => undefined,
+      log: (level, msg) => {
+        if (level === "warn") warnings.push(msg)
+      },
+    })
+    client.connect({ url: "ws://localhost/x" })
+    fakes[0]?._simulateOpen()
+    const fake = fakes[0]
+    if (fake === undefined) throw new Error("no fake ws")
+    return { fake, warnings }
+  }
+
+  const unrecognised = (warnings: string[]): string[] =>
+    warnings.filter((w) => w.includes("unrecognised"))
+
+  it("malformed (non-JSON) frame → logs unrecognised(kind=null), no throw", () => {
+    const { fake, warnings } = buildWarnClient()
+    expect(() => fake._simulateMessage("{not json")).not.toThrow()
+    expect(unrecognised(warnings)).toEqual([
+      "[SessionClient] dropping unrecognised frame (kind=null)",
+    ])
+  })
+
+  it("empty and whitespace-only frames → unrecognised(kind=null)", () => {
+    for (const raw of ["", "   ", "\n\t"]) {
+      const { fake, warnings } = buildWarnClient()
+      expect(() => fake._simulateMessage(raw)).not.toThrow()
+      expect(unrecognised(warnings)).toEqual([
+        "[SessionClient] dropping unrecognised frame (kind=null)",
+      ])
+    }
+  })
+
+  it("valid-JSON non-object frames (primitive / array) → unrecognised(kind=null)", () => {
+    for (const raw of ["42", "true", "null", '"hi"', "[1,2,3]"]) {
+      const { fake, warnings } = buildWarnClient()
+      expect(() => fake._simulateMessage(raw)).not.toThrow()
+      expect(unrecognised(warnings)).toEqual([
+        "[SessionClient] dropping unrecognised frame (kind=null)",
+      ])
+    }
+  })
+
+  it("object frame with non-string kind → unrecognised(kind=null)", () => {
+    const { fake, warnings } = buildWarnClient()
+    fake._simulateMessage(JSON.stringify({ kind: 42, payload: {} }))
+    expect(unrecognised(warnings)).toEqual([
+      "[SessionClient] dropping unrecognised frame (kind=null)",
+    ])
+  })
+
+  it("genuinely unknown kind → unrecognised(kind=<that kind>)", () => {
+    const { fake, warnings } = buildWarnClient()
+    fake._simulateMessage(JSON.stringify({ kind: "command", payload: {} }))
+    expect(unrecognised(warnings)).toEqual([
+      "[SessionClient] dropping unrecognised frame (kind=command)",
+    ])
+  })
+
+  it("event-tagged frame with an INVALID payload → unrecognised(kind=event) (matches old allow-list gap)", () => {
+    // The old try-chain did NOT list "event" among its known kinds, so a frame
+    // tagged event with a bad payload fell through to the unrecognised warning.
+    const { fake, warnings } = buildWarnClient()
+    fake._simulateMessage(
+      JSON.stringify({
+        version: SESSION_PROTOCOL_VERSION,
+        kind: "event",
+        payload: { type: "turn.output.delta" }, // missing seq + eventId ⇒ invalid
+      }),
+    )
+    expect(unrecognised(warnings)).toEqual([
+      "[SessionClient] dropping unrecognised frame (kind=event)",
+    ])
+  })
+
+  it("known kind with an INVALID payload is dropped SILENTLY (canvas / snapshot / etc.)", () => {
+    // A frame whose kind matches a known channel but fails that channel's
+    // validation must NOT warn — the kind is recognised, only the payload is
+    // bad. This mirrors the old chain (decoder returns null, kind ∈ known-set).
+    const cases = [
+      { version: "canvas.v1", kind: "canvas", payload: { kind: "tool.diff" } },
+      {
+        version: "agent-state.v1",
+        kind: "agentState",
+        payload: { kind: "mode.changed" }, // missing emittedAt
+      },
+      { version: "observability.v1", kind: "observability", payload: {} },
+      { version: SESSION_PROTOCOL_VERSION, kind: "snapshot", payload: {} },
+      { version: SESSION_PROTOCOL_VERSION, kind: "rejected", target: "bogus" },
+      { version: SESSION_PROTOCOL_VERSION, kind: "heartbeat", phase: "nope" },
+    ]
+    for (const frame of cases) {
+      const { fake, warnings } = buildWarnClient()
+      fake._simulateMessage(JSON.stringify(frame))
+      expect(unrecognised(warnings), `kind=${frame.kind} should drop silently`).toEqual([])
+    }
+  })
+
+  it("a heartbeat frame is consumed first and never reaches the event fan-out", () => {
+    const { fake, warnings } = buildWarnClient()
+    fake._simulateMessage(
+      JSON.stringify({ version: SESSION_PROTOCOL_VERSION, kind: "heartbeat", phase: "ping" }),
+    )
+    expect(unrecognised(warnings)).toEqual([])
   })
 })
