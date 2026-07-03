@@ -61,3 +61,34 @@ would (a) duplicate those slash commands and (b) be hot-path surgery on every tu
 isn't the CLI. So control-request stays the verified host-wire vocabulary; its live consumer is the
 out-of-repo ide/web adapter (like the rest of §6/§10 in the IDE spec). This is an architectural decision,
 not an unfinished wire — `set_model`/`get_context_usage` are genuinely usable on CLI today via slash.
+
+## Web-daemon live wire (2026-07-03, jul-03 A1 producer)
+
+The jul-03 A1 round (7fd701f2b) activated the previously-inert loop drain
+(`pollControlRequests`) — but with NO producer feeding the port the protocol was still
+inert. This round wires the MISSING PRODUCER on the **web-daemon host surface** (the
+in-repo IDE/web adapter):
+
+- `src/apps/web-daemon/control-request-frame.ts` — `peekControlRequest(raw)`: decodes an
+  out-of-band `{kind:"controlRequest", request:<ControlRequest>}` WS frame (mirror of
+  `peekPlanInputAnswer` / `peekFollowerVerb`). Consumed at the connection layer BEFORE the
+  session bridge — NOT a `SessionCommand`, never touches the kernel reducer.
+- `src/apps/web-daemon/web-control-request-port.ts` — `createWebControlRequestPort({permission,…})`:
+  the `ControlRequestPort` (bounded latest-wins queue) + the `ControlEffectApplier` + the live
+  `ControlRequestContext`. The **load-bearing** effect: `set_permission_mode` mutates the daemon's
+  LIVE mutable `permission.mode` cell (the exact getter/setter `runtime-factory` builds), which the
+  per-turn permission gate reads FRESH — so the mode ACTUALLY flips mid-session. Permission is
+  fail-closed at the planner (an explicit allowlist is REQUIRED — the closed `ALL_PERMISSION_MODES`
+  SSOT).
+- `runtime-factory.ts` mints the port under `QUANTA_CONTROL_REQUEST`, wires the `controlRequest`
+  AgentConfig slot, and exposes it on the facade; `index.ts`/`server.ts`/`ws-handlers.ts` thread the
+  port bundle so a peeked frame is `enqueue`d. Gate OFF ⇒ no slot ⇒ the loop never drains and a stray
+  frame falls through to the bridge (byte-identical).
+
+HONEST SCOPE: `set_model` / `set_thinking` / `get_context_usage` have no live daemon CELL to land on
+today (there is no per-session model/thinking swap cell exposed the way permission is, and no live
+usage source is wired). Their applier callbacks SURFACE the planned effect through an optional
+`observe` sink (not silently dropped) rather than mutating runtime state — this is the honest
+remaining gap, not a faked applier. `set_permission_mode` is the one axis with a real end-to-end
+observable effect; the others become live the moment the daemon exposes those cells (a sticky-model
+store set + a live usage supplier).

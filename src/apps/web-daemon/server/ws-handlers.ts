@@ -18,6 +18,7 @@ import {
 import { resolveReadModels, type SurfaceSubscription } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, logger } from "@/shared"
+import { peekControlRequest } from "../control-request-frame"
 import { peekFollowerVerb } from "../follower-verb-frame"
 import type { WebDaemonServerConfig } from "../server"
 import type { RegisteredSession, SessionRegistry } from "../session-registry"
@@ -135,6 +136,25 @@ export const peekPlanInputAnswer = (
   }
 }
 
+/**
+ * QUANTA_CONTROL_REQUEST (ADR-0496 A1) — peek + CONSUME a `controlRequest` frame
+ * onto the wired control-request port. Returns `true` when the frame was a
+ * well-formed control request (enqueued + consumed — do NOT forward it to the
+ * bridge), else `false` (fall through to the adapter). Gate OFF ⇒ `ports` absent
+ * ⇒ always `false` (byte-identical: the frame reaches the bridge as before).
+ * Extracted so the `message` handler stays under the cognitive-complexity cap.
+ */
+export const consumeControlRequestFrame = (
+  ports: WebDaemonServerConfig["controlRequestPorts"],
+  raw: string,
+): boolean => {
+  if (ports === undefined) return false
+  const req = peekControlRequest(raw)
+  if (req === null) return false
+  ports.handle.enqueue(req)
+  return true
+}
+
 export interface WsHandlerDeps {
   readonly config: WebDaemonServerConfig
   readonly registry: SessionRegistry
@@ -210,6 +230,16 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
           )
           return
         }
+        // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — a `controlRequest` frame
+        // (set_model / set_permission_mode / set_thinking / get_context_usage)
+        // is CONSUMED here (NOT a SessionCommand, never reaches the kernel
+        // reducer): enqueue it onto the live session's control-request port so
+        // the turn loop's `pollControlRequests` drains + applies it (the
+        // load-bearing `set_permission_mode` lands on the live gate). Gate OFF ⇒
+        // `controlRequestPorts` absent ⇒ the frame falls through to the bridge
+        // (and the drain slot is unwired, byte-identical). Extracted to a helper
+        // so this handler stays under the cognitive-complexity cap.
+        if (consumeControlRequestFrame(config.controlRequestPorts, raw)) return
         // T02 — a `followerVerb` frame (steer/interrupt/set-queue-mode) from a
         // 2nd client is CONSUMED here (NOT a SessionCommand): route it to the
         // co-control dispatcher whose sinks drive the live conversation-action

@@ -20,6 +20,7 @@ import {
   createObservabilityEmitter,
   type ObservabilityEmitterHandle,
 } from "../observability-emitter"
+import type { WebControlRequestPortHandle } from "../web-control-request-port"
 import type { WebUserInputPortHandle } from "../web-user-input-port"
 
 /** Minimal `ServerWebSocket`-like surface the observability sink writes to.
@@ -283,6 +284,20 @@ export interface AgentStatePorts {
  */
 export interface UserInputPorts {
   readonly handle: WebUserInputPortHandle
+}
+
+/**
+ * QUANTA_CONTROL_REQUEST (ADR-0496 A1) — the OUT-OF-BAND INBOUND control-request
+ * port bundle handed to the server. Lets a peeked `controlRequest` frame
+ * `enqueue` a runtime-control request onto the live session's port (which the
+ * turn loop drains + applies — `set_permission_mode` lands on the live gate).
+ * Shared across the daemon's connections (the port lives on the single facade).
+ * Optional: the `index.ts` composition root only passes it when the facade
+ * exposes the port. Gate OFF ⇒ `index.ts` never builds this ⇒ no enqueue target
+ * ⇒ a stray control frame falls through to the session bridge (byte-identical).
+ */
+export interface ControlRequestPorts {
+  readonly handle: WebControlRequestPortHandle
 }
 
 /**

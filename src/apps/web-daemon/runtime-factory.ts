@@ -12,6 +12,7 @@
 import type { AgentConfig } from "@/agent"
 import { buildSystemPrompt, HookBus } from "@/agent"
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
+import { isControlRequestEnabled } from "@/agent/control-request"
 import {
   type ConversationActionSurface,
   createConversationActionSurface,
@@ -54,6 +55,10 @@ import {
   createCanvasToolDiffSource,
 } from "./canvas-tool-diff-source"
 import { type CanvasUsageSourceHandle, createCanvasUsageSource } from "./canvas-usage-source"
+import {
+  createWebControlRequestPort,
+  type WebControlRequestPortHandle,
+} from "./web-control-request-port"
 import { createWebUserInputPort, type WebUserInputPortHandle } from "./web-user-input-port"
 
 /**
@@ -122,6 +127,15 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * is not registered ⇒ the agent cannot ask on web (byte-identical).
    */
   readonly userInput?: WebUserInputPortHandle
+  /**
+   * QUANTA_CONTROL_REQUEST (ADR-0496 A1) — the OUT-OF-BAND INBOUND control
+   * channel. When present, `AgentConfig.controlRequest` is wired so a browser/IDE
+   * `controlRequest` frame drives a mid-session runtime control (the load-bearing
+   * `set_permission_mode` mutates this session's live `permission.mode` cell,
+   * honored by the per-turn gate). Minted only when `QUANTA_CONTROL_REQUEST` is
+   * on. Gate OFF ⇒ undefined ⇒ no slot ⇒ the loop never drains (byte-identical).
+   */
+  readonly controlRequest?: WebControlRequestPortHandle
   /**
    * T02 — thread-follower co-control dispatcher for a web 2nd-client. Present
    * only when `QUANTA_THIN_CLIENT_DISPATCH` is opted in: the server routes a
@@ -401,6 +415,17 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // T02 — thread-follower co-control slot for a web 2nd-client (gate
     // QUANTA_THIN_CLIENT_DISPATCH). Absent ⇒ no conversation-action port wired.
     const follower = buildFollowerCoControlSlot(env)
+    // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — the OUT-OF-BAND INBOUND control
+    // channel. Minted ONLY under the gate; binds the load-bearing
+    // `set_permission_mode` effect to THIS session's live `permission` cell (the
+    // per-turn gate reads `.mode` fresh ⇒ the change lands mid-session). Model /
+    // thinking / usage axes have no live daemon cell today (the applier surfaces
+    // them, honestly not faked). Gate OFF ⇒ undefined ⇒ no slot (byte-identical:
+    // the loop's `pollControlRequests` never polls, and a stray `controlRequest`
+    // frame falls through to the session bridge as an unknown frame).
+    const controlRequest = isControlRequestEnabled(env)
+      ? createWebControlRequestPort({ permission })
+      : undefined
     const base: RuntimeAgentConfigBase = {
       llm,
       // A2 — the default tools with the SHARED artifact registry threaded in so
@@ -431,6 +456,22 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // web (the tool registers iff this is present). Absent ⇒ tool not
       // registered (byte-identical).
       ...(userInput !== undefined ? { userInputPort: userInput.port } : {}),
+      // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — wire the control-request slot so
+      // the loop's turn-top `pollControlRequests` drains a browser/IDE control
+      // frame + applies the effect (set_permission_mode lands on the live
+      // `permission` cell). `env` is the daemon's own `process.env` so the
+      // load-bearing gate check inside the loop matches the mint gate. Absent ⇒
+      // no slot ⇒ the port is never polled (byte-identical).
+      ...(controlRequest !== undefined
+        ? {
+            controlRequest: {
+              port: controlRequest.port,
+              applier: controlRequest.applier,
+              context: controlRequest.context,
+              env,
+            },
+          }
+        : {}),
       // T02 — wire the conversation-action port + active-turn ref so a web
       // follower's steer lands as a mid-turn injection (the loop polls the port).
       ...(follower !== undefined
@@ -456,7 +497,8 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // Expose every optional live port as a read-only getter (present ⇒ the daemon
     // subscribes/reads it; absent ⇒ the field is undefined ⇒ no sink/route,
     // byte-identical). ADR-0440 canvas usage/tool-diff/artifact; A2 registry +
-    // preview resolver; QUANTA_WEB_AGENT_STATE agent-state + inbound; T02 follower.
+    // preview resolver; QUANTA_WEB_AGENT_STATE agent-state + inbound; ADR-0496 A1
+    // control-request; T02 follower.
     defineOptionalFacadeGetters(facade, {
       canvasUsage,
       canvasToolDiff,
@@ -465,6 +507,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       artifactPreviewResolver,
       agentState,
       ...(userInput !== undefined ? { userInput } : {}),
+      // QUANTA_CONTROL_REQUEST — expose the control-request port so the daemon's
+      // server can `enqueue(req)` a peeked `controlRequest` frame. Absent ⇒ no
+      // enqueue target (byte-identical).
+      ...(controlRequest !== undefined ? { controlRequest } : {}),
       ...(follower !== undefined ? { followerCoControl: follower.dispatcher } : {}),
     })
     return facade

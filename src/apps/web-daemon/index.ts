@@ -22,14 +22,15 @@
 
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import { isFollowerCoControlEnabled } from "@/agent/thread-follower"
+import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { type SupportedReadModels, supported } from "@/protocol/session"
 import type { RuntimeFacade } from "@/sdk/runtime"
 import { errMessage, gateOn } from "@/shared"
-import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
   type AgentStatePorts,
   type CanvasPorts,
+  type ControlRequestPorts,
   type ObservabilityPorts,
   startWebDaemon,
   type UserInputPorts,
@@ -88,6 +89,10 @@ const resolveObservableFactory = async (
     // IPC preview channel is independent of the Canvas WS frames). Absent ⇒ the
     // route 404s but the daemon still serves the session (byte-identical legacy).
     !gateOn(env, "QUANTA_ARTIFACT_STORE") &&
+    // ADR-0496 A1 — the control-request channel needs the ONE shared facade so
+    // the server can enqueue peeked `controlRequest` frames into the live
+    // session's port. Gate OFF ⇒ facade not eagerly minted for this reason.
+    !gateOn(env, "QUANTA_CONTROL_REQUEST") &&
     // T02 — the follower co-control dispatcher also needs the ONE shared facade
     // so the server can route follower frames into the live session.
     !isFollowerCoControlEnabled(env)
@@ -189,6 +194,22 @@ const buildUserInputPorts = (
   return { handle: facade.userInput }
 }
 
+/**
+ * QUANTA_CONTROL_REQUEST (ADR-0496 A1) — project the live facade's control-
+ * request port into the per-connection bundle the server uses to `enqueue` a
+ * peeked `controlRequest` frame. Returns `undefined` when the facade is absent
+ * (gate OFF) or carries no control-request port (`QUANTA_CONTROL_REQUEST` off),
+ * so the server has nothing to enqueue into (and the loop's drain slot is
+ * unwired ⇒ byte-identical).
+ */
+const buildControlRequestPorts = (
+  facade: ObservableRuntimeFacade | undefined,
+): ControlRequestPorts | undefined => {
+  if (facade === undefined) return undefined
+  if (facade.controlRequest === undefined) return undefined
+  return { handle: facade.controlRequest }
+}
+
 /** T02 — project the session facade's follower co-control dispatcher (if the
  *  `QUANTA_THIN_CLIENT_DISPATCH` gate minted one) so the server can route a
  *  decoded `followerVerb` frame to it. Absent ⇒ undefined ⇒ follower frames fall
@@ -247,6 +268,10 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // Gate OFF ⇒ undefined ⇒ the server has no port to resolve into AND the tool
   // was never registered (byte-identical legacy).
   const userInputPorts = buildUserInputPorts(observableFacade)
+  // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — the OUT-OF-BAND INBOUND control-
+  // request port. Gate OFF ⇒ undefined ⇒ the server has no enqueue target AND
+  // the loop's drain slot is unwired (byte-identical legacy).
+  const controlRequestPorts = buildControlRequestPorts(observableFacade)
   const followerCoControl = buildFollowerCoControl(observableFacade)
   const supportedReadModels = buildSupportedReadModels({
     observabilityPorts,
@@ -277,6 +302,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     ...(artifactPreviewResolver !== undefined ? { artifactPreviewResolver } : {}),
     ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
     ...(userInputPorts !== undefined ? { userInputPorts } : {}),
+    ...(controlRequestPorts !== undefined ? { controlRequestPorts } : {}),
     ...(followerCoControl !== undefined ? { followerCoControl } : {}),
   }
 

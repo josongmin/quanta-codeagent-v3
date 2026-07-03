@@ -26,6 +26,7 @@ import { setupThreadPersistence } from "./server/persistence"
 import type {
   AgentStatePorts,
   CanvasPorts,
+  ControlRequestPorts,
   ObservabilityPorts,
   UserInputPorts,
 } from "./server/sinks"
@@ -51,6 +52,7 @@ export type {
   CanvasToolDiff,
   CanvasToolDiffSource,
   CanvasUsageSource,
+  ControlRequestPorts,
   ObservabilityPorts,
   UserInputPorts,
 } from "./server/sinks"
@@ -112,6 +114,14 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * `QUANTA_WEB_AGENT_STATE=1`.
    */
   readonly userInputPorts?: UserInputPorts
+  /**
+   * QUANTA_CONTROL_REQUEST (ADR-0496 A1) — optional OUT-OF-BAND INBOUND
+   * control-request port bundle. Gate OFF ⇒ absent ⇒ a peeked `controlRequest`
+   * frame has no enqueue target (and the loop's drain slot is unwired,
+   * byte-identical). The composition root (`./index.ts`) populates it only when
+   * `QUANTA_CONTROL_REQUEST` is on.
+   */
+  readonly controlRequestPorts?: ControlRequestPorts
   /**
    * T02 — optional thread-follower co-control dispatcher. Gate OFF
    * (`QUANTA_THIN_CLIENT_DISPATCH` unset) ⇒ absent ⇒ a `followerVerb` frame
