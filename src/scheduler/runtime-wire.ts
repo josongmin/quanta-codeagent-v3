@@ -13,7 +13,14 @@
  * The handler closure rethrows AgentLoopPort errors so `tickScheduler` can
  * mark the run as `errored` — `tickScheduler` itself is no-throw by contract.
  *
- * Slice: `@/scheduler` (additive helper; existing files unchanged).
+ * B2 per-task model reroute: the handler consults the automation's stored
+ * `model` / `modelFallbacks` at FIRE time via {@link chooseModel} and dispatches
+ * with the chosen model as `modelOverride`. A task with no `model` is
+ * byte-identical to the pre-B2 handler (no override). An all-candidates-down
+ * outcome throws (⇒ `tickScheduler` records `errored`) rather than silently
+ * firing on the host default.
+ *
+ * Slice: `@/scheduler` (additive helper).
  */
 
 import { Database } from "bun:sqlite"
@@ -23,12 +30,14 @@ import { logger, quantaHomePath, writeStderr } from "@/shared"
 import {
   type AutomationEnginePort,
   type AutomationHandler,
+  type EngineAutomation,
   inMemoryAutomationEngine,
   sqliteAutomationEngine,
   type TickEligibilityVerdict,
   type TickOutcome,
 } from "./automation-engine"
-import type { AgentLoopPort } from "./types"
+import { chooseModel } from "./model-reroute"
+import type { AgentLoopPort, ModelAvailabilityPort } from "./types"
 
 /** ENV gate — strict `"on"` enables the wire. Absent / any other value
  *  ⇒ `null` slot (default-OFF). Mirrors {@link SCHEDULER_ENV_FLAG}'s
@@ -88,6 +97,16 @@ export interface AssembleAutomationDeps {
    *  a `Database` at {@link defaultAutomationDbPath} (creating the parent dir).
    *  Tests inject a `:memory:` factory so no disk is touched. */
   readonly sqliteEngineFactory?: () => AutomationEnginePort
+  /** B2 — OPTIONAL model-availability probe used to reroute a fire onto the
+   *  automation's per-task `model` / `modelFallbacks` (ADR-0161 `chooseModel`).
+   *  ABSENT ⇒ every candidate is treated as available, so a task with a
+   *  configured `model` fires on EXACTLY that model (its first choice); a task
+   *  with NO `model` is byte-identical to the pre-B2 path (no override passed).
+   *  When injected, the probe drives the fallback chain: the first available
+   *  model wins, and an all-unavailable outcome fails the fire (recorded
+   *  `errored` by `tickScheduler`) rather than silently running on the wrong
+   *  model. */
+  readonly modelAvailability?: ModelAvailabilityPort
   /** Optional clock injection. Default `Date.now`. */
   readonly now?: () => number
   /** Optional stderr writer (test injection). Default `process.stderr.write`.
@@ -139,11 +158,21 @@ export const assembleAutomation = (
   const engine = selectEngine(env, deps)
   const stderrWrite = deps.stderr ?? writeStderr
 
-  // Handler: dispatch the automation's prompt onto the agent loop. The
-  // contract with tickScheduler is that any throw here surfaces as
-  // `outcome:"errored"` + `kind:"errored"` — we don't swallow.
+  // Always-available default: when no probe is injected, every model is
+  // "available", so a configured per-task `model` is chosen verbatim (its first
+  // choice) and passed as `modelOverride`. A modelless task never invokes this.
+  const availability: ModelAvailabilityPort = deps.modelAvailability ?? ALWAYS_AVAILABLE
+
+  // Handler: dispatch the automation's prompt onto the agent loop, rerouting
+  // onto the per-task model when the automation carries one (B2). The contract
+  // with tickScheduler is that any throw here surfaces as `outcome:"errored"` +
+  // `kind:"errored"` — we don't swallow.
   const handler: AutomationHandler = async (a) => {
-    await deps.agentLoop.enqueueUserMessage(a.prompt)
+    const override = await resolveFireModel(a, availability)
+    await deps.agentLoop.enqueueUserMessage(
+      a.prompt,
+      override !== undefined ? { modelOverride: override } : undefined,
+    )
   }
 
   // onTick: surface telemetry. Errors go to stderr; idle / fired / engine-
@@ -187,6 +216,44 @@ const selectEngine = (env: EnvReader, deps: AssembleAutomationDeps): AutomationE
     return (deps.sqliteEngineFactory ?? defaultSqliteEngineFactory)()
   }
   return inMemoryAutomationEngine()
+}
+
+/** Availability probe used when the composition root injects none: every model
+ *  is available, so a configured per-task `model` is chosen verbatim. This is
+ *  what makes the STORED per-task model actually REROUTE the live fire without
+ *  requiring a real provider-availability adapter to exist yet. */
+const ALWAYS_AVAILABLE: ModelAvailabilityPort = { isAvailable: () => Promise.resolve(true) }
+
+/**
+ * Resolve the model an automation should fire on (B2 per-task reroute).
+ *
+ *   - No per-task `model` ⇒ `undefined`: the fire passes NO `modelOverride`, so
+ *     the host uses its global default (byte-identical to the pre-B2 handler).
+ *   - A per-task `model` ⇒ probe `[model, ...modelFallbacks]` in order via
+ *     {@link chooseModel}; the first available one is returned as the override.
+ *   - All candidates unavailable ⇒ THROW so `tickScheduler` records the fire as
+ *     `errored` (the task's configured models are down — running it on the
+ *     host's default would silently violate the per-task routing contract).
+ *
+ * `chooseModel` is non-throwing; the throw here is the deliberate translation of
+ * its `all-unavailable` arm into the ticker's errored path.
+ */
+const resolveFireModel = async (
+  a: EngineAutomation,
+  availability: ModelAvailabilityPort,
+): Promise<string | undefined> => {
+  if (a.model === undefined) return undefined
+  const chosen = await chooseModel({
+    preference: a.model,
+    fallbacks: a.modelFallbacks ?? [],
+    availability,
+  })
+  if (chosen.reason === "all-unavailable") {
+    throw new Error(
+      `automation '${a.id}' has no available model (preference '${a.model}' and all fallbacks unavailable)`,
+    )
+  }
+  return chosen.chosen
 }
 
 /** Default durable-engine factory: open (creating the parent dir) the on-disk
