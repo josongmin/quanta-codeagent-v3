@@ -14,8 +14,10 @@
 
 pub mod commands;
 pub mod daemon;
+pub mod deeplink;
 pub mod error;
 pub mod hotkey;
+pub mod notify;
 pub mod ocr;
 
 pub use commands::*;

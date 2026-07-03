@@ -61,6 +61,13 @@ export interface IdleMonitor {
    *  UI-lie when an operator overrides `QUANTA_IDLE_MS`. Optional so existing
    *  test doubles stay assignable; the real factory always sets it. */
   readonly thresholdMs?: number
+  /** B5 (jul-04) — ms since the last `markActive()` (`now - lastActive`).
+   *  Exposed so the surface can feed the SHARED `computePresence` decision the
+   *  SAME activity age this monitor's `isIdle()` uses (no parallel clock). The
+   *  CLI presence probe routes through `computePresence({ tabVisible:true,
+   *  thresholdMs, ... })` so the web and CLI share one presence rule. Optional
+   *  so existing test doubles stay assignable; the real factory always sets it. */
+  msSinceActive?(): number
 }
 
 export interface IdleMonitorOptions {
@@ -147,6 +154,8 @@ export const createIdleMonitor = (opts?: IdleMonitorOptions): IdleMonitor => {
       if (idleMs <= 0) return false
       return now() - lastActive >= idleMs
     },
+    // B5 (jul-04) — raw activity age for the shared computePresence decision.
+    msSinceActive: (): number => now() - lastActive,
     snooze: (durationMs?: number): void => {
       const dur = durationMs ?? snoozeMs
       if (!Number.isFinite(dur) || dur <= 0) return

@@ -15,7 +15,7 @@
 )]
 #![deny(unsafe_code)]
 
-use quanta_tauri_shell_lib::{commands, daemon, hotkey, ocr};
+use quanta_tauri_shell_lib::{commands, daemon, deeplink, hotkey, notify, ocr};
 use tauri::{Manager, RunEvent};
 
 fn main() {
@@ -28,6 +28,13 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // B2 (jul-04) — custom-scheme deep link (`quanta://threads/{id}`).
+        // Scheme association lives in tauri.conf.json > plugins.deep-link.
+        // REBUILD-GATED: only a signed, installed .app registers the scheme.
+        .plugin(tauri_plugin_deep_link::init())
+        // B5 (jul-04) — native OS notification (presence decided on the
+        // frontend; the shell is a dumb sink). REBUILD-GATED.
+        .plugin(tauri_plugin_notification::init())
         .on_page_load(|webview, _payload| {
             if webview.label() != "main" {
                 return;
@@ -50,6 +57,10 @@ fn main() {
             ocr::install(&handle);
             hotkey::install(&handle);
             daemon::install(&handle);
+            // B2 (jul-04) — register the deep-link `on_open_url` handler and
+            // drain any cold-start `quanta://threads/{id}` that launched the
+            // app. Non-fatal / rebuild-gated (see deeplink.rs).
+            deeplink::install(&handle);
 
             // Auto-enable the active-monitor capture (`Cmd+Ctrl+Shift+[`)
             // and Send-trigger (`Cmd+Ctrl+Shift+]`) hotkeys. Default-ON
@@ -102,6 +113,7 @@ fn main() {
             commands::disable_hotkey,
             commands::hotkey_status,
             commands::open_external_url,
+            notify::notify_turn_complete,
         ])
         .build(tauri::generate_context!());
 

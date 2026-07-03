@@ -63,6 +63,12 @@ export {
   parseThreadDeeplink,
   THREAD_DEEPLINK_PREFIX,
 } from "./deeplink"
+// B2 — thread deeplink ROUTE resolver (the missing consumer; pure)
+export {
+  resolveThreadRoute,
+  type ThreadRouteIntent,
+  THREAD_WEB_PARAM,
+} from "./deeplink-route"
 // Evaluator
 export { computeNextFire, iterateFires } from "./next-fire"
 export type { RRuleParseResult } from "./rrule-parser"

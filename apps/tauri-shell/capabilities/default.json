@@ -23,6 +23,9 @@
 
     "log:default",
 
+    "deep-link:default",
+    "notification:default",
+
     {
       "identifier": "shell:allow-execute",
       "allow": [

@@ -29,6 +29,14 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 tauri-plugin-log = "2"
+# B2 (jul-04) — OS custom-scheme deep link (`quanta://threads/{id}`). The plugin
+# associates the `quanta` scheme (declared in tauri.conf.json > plugins.deep-link
+# > desktop.schemes) with this .app so `open quanta://threads/x` routes here.
+# WRITE-ONLY / rebuild-gated: verifying scheme registration needs a signed .app.
+tauri-plugin-deep-link = "2"
+# B5 (jul-04) — native OS notification on turn-complete (presence-gated by the
+# frontend visibility probe before it asks the shell to fire). Rebuild-gated.
+tauri-plugin-notification = "2"
 
 # Serialization for tauri::command payloads + sidecar JSON parsing.
 serde = { version = "1", features = ["derive"] }

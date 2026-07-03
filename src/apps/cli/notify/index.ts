@@ -15,3 +15,4 @@ export {
   type PushDisabledReason,
   shouldPush,
 } from "./push-decision"
+export { computePresence, type PresenceSignals } from "./presence-decision"

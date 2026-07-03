@@ -26,6 +26,7 @@ import { buildAuthSlashCommands } from "./components/slash-auth"
 import type { KnobsEndpoint } from "./components/slash-knobs"
 import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
 import { buildReadoutSlashCommands, READOUT_SLUGS } from "./components/slash-readout"
+import { ThreadDeeplinkBanner } from "./components/ThreadDeeplinkBanner"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
@@ -757,6 +758,13 @@ export const App = (): JSX.Element => {
         onCancel={sendCancel}
         onSetPermission={onSetPermission}
       />
+      {/* B2 — thread deeplink affordance. Reads `?thread=`/`#thread=` (or a
+          Tauri-forwarded `quanta://threads/{id}` postMessage) on load and shows
+          which thread was requested. No `onOpen` yet: web thread-resume is not
+          wired (the SessionClient id is server-minted; ConnectOptions carries no
+          requested-thread field), so the banner is informational — it does NOT
+          fake a resume. */}
+      <ThreadDeeplinkBanner />
       <div className="flex min-h-0 flex-1 flex-row">
         <ChatPanel
           messages={messages}

@@ -14,7 +14,8 @@ import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/ses
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
-import { createIdleMonitor } from "./idle-monitor"
+import { createIdleMonitor, DEFAULT_IDLE_MS } from "./idle-monitor"
+import { computePresence } from "./notify"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
 import {
@@ -328,11 +329,22 @@ export const runRepl = async (): Promise<void> => {
     const rfc09 = buildNotifyAndContextWarning({
       cwd: setup.cwd,
       contextUsageView: wires.contextUsageView,
-      // B5 (jul-03) — SSOT presence probe: reuse the existing IdleMonitor's idle
-      // signal (`QUANTA_IDLE_MS` window), no parallel focus tracker. The factory
-      // attaches this ONLY when QUANTA_NOTIFY_PRESENCE opts in (default-OFF); when
-      // idleMonitor.isIdle() is false the user is present ⇒ push suppressed.
-      isUserPresent: () => !setup.idleMonitor.isIdle(),
+      // B5 (jul-03→jul-04) — SSOT presence probe. Reuses the existing
+      // IdleMonitor's idle window (`QUANTA_IDLE_MS`), no parallel focus tracker.
+      // Now routed through the SHARED `computePresence` decision (the same rule
+      // the web reuses): the CLI has no tab ⇒ `tabVisible: true`, so this reduces
+      // to the legacy activity-only `!isIdle()` while pinning ONE presence rule
+      // across surfaces. Activity age comes from the monitor's own clock
+      // (`msSinceActive`) so there is no second clock; `now - lastActivityAt`
+      // therefore equals `msSinceActive()`. The factory attaches this ONLY when
+      // QUANTA_NOTIFY_PRESENCE opts in (default-OFF).
+      isUserPresent: () =>
+        computePresence({
+          tabVisible: true,
+          now: setup.idleMonitor.msSinceActive?.() ?? 0,
+          lastActivityAt: 0,
+          thresholdMs: setup.idleMonitor.thresholdMs ?? DEFAULT_IDLE_MS,
+        }),
     })
     // ADR-0528 L2 — crash-resume on restart. Gate FIRST so a gate-off / one-shot
     // / non-TTY launch never even lists sessions (byte-identical). The CURRENT
