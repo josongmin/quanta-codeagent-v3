@@ -96,4 +96,10 @@ export { BENCHMARK_PACK } from "./benchmark"
 export { CORE_RULES, OWNED_RULES } from "./core"
 export { PR_AGENT_PACK } from "./pr-agent"
 export { TASK_RUNNER_PACK } from "./task-runner"
+export {
+  REPRODUCE_FIRST_RULE,
+  renderVerifyStrategy,
+  VERIFY_AFTER_EDIT_RULE,
+  type VerifyStrategy,
+} from "./verify-strategy"
 export type { PromptRule }

@@ -29,7 +29,7 @@
 
 import type { PersonaKind } from "./persona"
 import { buildSystemPrompt, type EnvironmentPosture } from "./prompt"
-import type { AgentMode as RulePackMode } from "./prompt-rules"
+import type { AgentMode as RulePackMode, VerifyStrategy } from "./prompt-rules"
 
 /**
  * A declared surface profile — the L-surface layer. Every field is optional
@@ -55,6 +55,16 @@ export interface SurfaceProfile {
   readonly envPosture: EnvironmentPosture
   readonly operatorGuide?: string
   readonly rulePack?: RulePackMode
+  /**
+   * Verify-strategy axis (jul-4, third slot) — how this surface confirms its own
+   * work (`reproduce-first` = SWE, `verify-after-edit` = general). Absent ⇒ no
+   * verify rule (byte-identical). A fully INDEPENDENT axis from `envPosture` /
+   * `rulePack`; threaded straight through to `buildSystemPrompt({ verifyStrategy })`.
+   * MEASURE-FIRST: entry points set this only behind a default-OFF knob, so the
+   * default profiles omit it and stay byte-identical. TB's self-test is its own
+   * knob + machinery, not this field.
+   */
+  readonly verifyStrategy?: VerifyStrategy
 }
 
 /**
@@ -129,6 +139,7 @@ export const composeSystemPromptForSurface = (
     persona?: PersonaKind
     promptPack?: RulePackMode
     envPosture?: EnvironmentPosture
+    verifyStrategy?: VerifyStrategy
   } = {}
   if (opts.persona !== undefined) promptOpts.persona = opts.persona
   // Only forward a non-frozen posture — a `"frozen"` posture must take the
@@ -142,6 +153,11 @@ export const composeSystemPromptForSurface = (
   // owned + a pack yet, so this widens the accepted inputs, not the outputs).
   if (profile.rulePack !== undefined) {
     promptOpts.promptPack = profile.rulePack
+  }
+  // Verify axis (jul-4, third slot) — forwarded straight through. Absent ⇒ the key
+  // is never set, so `buildSystemPrompt` renders no verify rule (byte-identical).
+  if (profile.verifyStrategy !== undefined) {
+    promptOpts.verifyStrategy = profile.verifyStrategy
   }
   return buildSystemPrompt(opts.cwd, promptOpts)
 }

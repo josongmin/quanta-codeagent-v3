@@ -25,6 +25,8 @@ import {
   type AgentMode as PromptPackMode,
   renderPostureBase,
   renderTaskRules,
+  renderVerifyStrategy,
+  type VerifyStrategy,
 } from "./prompt-rules"
 import {
   buildSectionedSystemBlocks,
@@ -79,6 +81,12 @@ export const buildSystemPrompt = (
      *  task-posture `promptPack` / `mode`; posture is env-ownership, not task-mode).
      *  Prompt-text-only — never touches runtime enforcement. */
     envPosture?: EnvironmentPosture
+    /** Verify-strategy axis (jul-4, THIRD slot) — how the agent confirms its own
+     *  work. Absent ⇒ NO verify rule, byte-identical to today. `reproduce-first`
+     *  (SWE) / `verify-after-edit` (general) render one content rule after the task
+     *  axis; each rides a default-OFF knob at its entry point (measure-first). TB's
+     *  self-test is its own knob + machinery, not this slot. Prompt-text-only. */
+    verifyStrategy?: VerifyStrategy
   },
 ): string =>
   [
@@ -102,6 +110,9 @@ export const buildSystemPrompt = (
     // (2) TASK axis — mode-specific narrowing (batch/headless/ci-bot); interactive/ide/absent = none.
     //     A frozen pack == CORE + task rules == the prior `renderPackByMode(pack)` byte-for-byte.
     ...renderTaskRules(opts?.promptPack ?? "interactive"),
+    // (3) VERIFY axis — how the surface confirms its own work (reproduce-first / verify-after-edit).
+    //     Absent/undefined ⇒ NO lines, byte-identical. Each rides a default-OFF entry-point knob.
+    ...renderVerifyStrategy(opts?.verifyStrategy),
     ...BODY_AFTER_PROMPT_PACK,
   ].join("\n")
 

@@ -568,8 +568,16 @@ export const buildConfig = (
     // edit + verify step). Routed through the SurfaceProfile seam (jul-4) rather
     // than a raw `buildSystemPrompt({ promptPack: "batch" })` so bench declares its
     // surface like every other entry point — byte-identical to the prior call.
-    // Batch path only; measure-first (flat A/B ⇒ revert).
-    system: composeSystemPromptForSurface(SWE_SURFACE_PROFILE, { cwd: sandbox }),
+    // VERIFY axis (jul-4, default-OFF `QUANTA_BENCH_REPRODUCE_FIRST`): on a SWE
+    // instance the knob adds the reproduce-first rule (reproduce the reported
+    // failure → fix → rerun). Absent ⇒ SWE_SURFACE_PROFILE unchanged ⇒ byte-identical.
+    // Measure-first (flat A/B ⇒ revert).
+    system: composeSystemPromptForSurface(
+      instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
+        ? { ...SWE_SURFACE_PROFILE, verifyStrategy: "reproduce-first" }
+        : SWE_SURFACE_PROFILE,
+      { cwd: sandbox },
+    ),
     cwd: sandbox,
     // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
     // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not

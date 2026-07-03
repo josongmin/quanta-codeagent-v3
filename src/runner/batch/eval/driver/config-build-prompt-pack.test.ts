@@ -40,6 +40,20 @@ const makeInstance = (sandbox: string): Instance => ({
   testCmd: "true",
 })
 
+/** A SWE instance (has `swebench` meta) — the reproduce-first knob only engages
+ *  on these (reproduce-first needs a reported failure to reproduce). */
+const makeSwebenchInstance = (sandbox: string): Instance => ({
+  ...makeInstance(sandbox),
+  id: "wiring__reproduce-first",
+  swebench: {
+    instanceId: "wiring__reproduce-first",
+    repo: "acme/widget",
+    baseCommit: "0000000000000000000000000000000000000000",
+  },
+})
+
+const REPRODUCE_FIRST_MARKER = "[R-REPRODUCE-FIRST]"
+
 const makeDeps = (): RunInstanceDeps => ({
   llm: stubLlm,
   maxTurns: 1,
@@ -66,5 +80,43 @@ describe("A2 — batch eval driver threads promptPack:'batch' into config.system
     expect(buildSystemPrompt(process.cwd())).not.toContain(BATCH_RULE_MARKER)
     // And the exact pack the driver selects DOES carry it (the seam value).
     expect(buildSystemPrompt(process.cwd(), { promptPack: "batch" })).toContain(BATCH_RULE_MARKER)
+  })
+})
+
+describe("verify axis (jul-4) — QUANTA_BENCH_REPRODUCE_FIRST gates reproduce-first into config.system", () => {
+  const KNOB = "QUANTA_BENCH_REPRODUCE_FIRST"
+  const withKnob = <T>(value: string | undefined, fn: () => T): T => {
+    const prev = process.env[KNOB]
+    if (value === undefined) delete process.env[KNOB]
+    else process.env[KNOB] = value
+    try {
+      return fn()
+    } finally {
+      if (prev === undefined) delete process.env[KNOB]
+      else process.env[KNOB] = prev
+    }
+  }
+  const systemFor = (instance: Instance): string => {
+    const sandbox = process.cwd()
+    const config = buildConfig(instance, makeDeps(), sandbox, new AbortController().signal, nullStream)
+    return String(config.system)
+  }
+
+  test("OFF (knob unset) ⇒ config.system does NOT carry reproduce-first (byte-identical default)", () => {
+    withKnob(undefined, () => {
+      expect(systemFor(makeSwebenchInstance(process.cwd()))).not.toContain(REPRODUCE_FIRST_MARKER)
+    })
+  })
+  test("ON + SWE instance ⇒ config.system carries the reproduce-first rule (WIRING)", () => {
+    withKnob("1", () => {
+      expect(systemFor(makeSwebenchInstance(process.cwd()))).toContain(REPRODUCE_FIRST_MARKER)
+    })
+  })
+  test("ON but NON-swebench instance ⇒ reproduce-first stays OFF (gate needs a reported failure)", () => {
+    // The knob is guarded by `instance.swebench !== undefined`; a plain local instance
+    // has no reported failure to reproduce, so the rule must not inject.
+    withKnob("1", () => {
+      expect(systemFor(makeInstance(process.cwd()))).not.toContain(REPRODUCE_FIRST_MARKER)
+    })
   })
 })

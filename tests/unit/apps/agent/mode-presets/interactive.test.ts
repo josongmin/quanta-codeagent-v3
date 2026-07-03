@@ -95,6 +95,36 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
     expect(out.exitCode).toBe(1)
   })
 
+  test("verify axis WIRING: QUANTA_VERIFY_AFTER_EDIT=1 threads verify-after-edit into cfg.system", async () => {
+    // Proves the GENERAL-surface verify knob is not inert: with no pre-built
+    // base.system the interactive fallback composes the GENERAL profile + the knob,
+    // so cfg.system carries [R-VERIFY-AFTER-EDIT]. OFF (unset) ⇒ absent (byte-identical).
+    const prev = process.env.QUANTA_VERIFY_AFTER_EDIT
+    const capture = async (): Promise<string> => {
+      let seen: AgentConfig | undefined
+      const req = baseReq({
+        seams: {
+          runAgent: async (cfg: AgentConfig) => {
+            seen = cfg
+            return fakeOutcome("completed")
+          },
+        },
+      })
+      delete (req.base as { system?: string }).system // force the fallback path (?? fires)
+      await runMode(req)
+      return String(seen?.system)
+    }
+    try {
+      process.env.QUANTA_VERIFY_AFTER_EDIT = "1"
+      expect(await capture()).toContain("[R-VERIFY-AFTER-EDIT]")
+      delete process.env.QUANTA_VERIFY_AFTER_EDIT
+      expect(await capture()).not.toContain("[R-VERIFY-AFTER-EDIT]")
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_VERIFY_AFTER_EDIT
+      else process.env.QUANTA_VERIFY_AFTER_EDIT = prev
+    }
+  })
+
   test("createRuntimeFromAgentConfigBase preserves the live optional session slots", async () => {
     const systemSource = { get: () => "SYS", set: () => undefined }
     const toolProfileState = { get: () => "write", set: () => undefined } as never
