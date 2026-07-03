@@ -31,6 +31,13 @@
  *   HELL-PO-4  IdentityMode `onboarding` is reachable from the CLI token table:
  *              VALID_IDENTITY_MODES includes 'onboarding' and the type guard
  *              accepts it — parity with DEFAULT_IDENTITIES / IDENTITY_MODES.
+ *   HELL-PO-7  QUALITY/COHERENCE: step 4 (`first-artifact`) mandates a WRITE
+ *              artifact, but `allowedTools` is an ENFORCED tool-scope (ADR-0512
+ *              /ADR-0011). Driving the REAL `buildSkillGate` proves a
+ *              write-capable tool stays in-scope while the skill is active — else
+ *              the skill would demand an artifact while the gate hides every tool
+ *              that can produce one (step 4 unachievable). Paired non-vacuity
+ *              control: an unrelated tool stays OUT of scope.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -222,5 +229,56 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
     expect(() =>
       parseAgentArgs(["--mode", "interactive", "--identity-mode", "onboarding-XYZ"]),
     ).toThrow()
+  })
+
+  test("HELL-PO-7: step-4 (first-artifact) mandates a WRITE, so the allowlist must grant a write-capable tool that the REAL skill-gate leaves in-scope (else step 4 is unachievable)", async () => {
+    // QUALITY/COHERENCE guard. `allowedTools` is not advisory — it is an
+    // ENFORCED tool-scope (ADR-0512 / ADR-0011): when this skill is the active
+    // skill, `buildSkillGate` REMOVES every tool that is neither in the
+    // allowlist, a skill-meta tool, nor a read-only nav-base primitive. The body
+    // instructs step 4 (`first-artifact`) to "produce ONE real artifact (a
+    // passing test, a small diff, a committed file)" — a WRITE. If the allowlist
+    // carries no write-capable tool, the gate hides Edit/Write/Bash from the
+    // model and step 4 becomes literally impossible to execute (the skill would
+    // demand an artifact while denying every tool that can make one). This test
+    // drives the REAL gate and asserts at least one write-capable tool survives
+    // scoping while the skill is active.
+    const raw = readRaw()
+    const parsed = parseSkillMarkdown(raw)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const body = parsed.value.body
+    const allowed = parsed.value.frontmatter.allowedTools
+
+    // Fixture: the body really does mandate a write-producing artifact at step 4
+    // (else this coherence check would be vacuous).
+    expect(body.includes("first-artifact"), "fixture: step 4 present").toBe(true)
+    expect(
+      /passing test|small diff|committed file|real artifact/i.test(body),
+      "fixture: step 4 mandates a concrete write artifact",
+    ).toBe(true)
+
+    // Build the REAL skill gate from THIS skill's declared allowlist and observe
+    // the skill as active (exactly how session-bootstrap arms scoping).
+    const { buildSkillGate } = await import("@/agent/loop/skill-gate")
+    const gate = buildSkillGate(new Map([[PO_DIR, [...allowed]]]), undefined)
+    expect(gate, "an allowlist-bearing skill must produce a gate").toBeDefined()
+    if (gate === undefined) return
+    // Arm the scope by observing a successful Skill(name=product-onboard) call.
+    gate.observe("Skill", { name: PO_DIR }, true)
+
+    // At least one write-capable tool must be dispatchable while onboarding is
+    // active. Read-only nav-base (read/glob/grep/ls/file_tree_summary) does NOT
+    // count — those cannot produce the artifact step 4 demands.
+    const WRITE_TOOLS = ["Edit", "Write", "Bash", "write", "edit", "bash"] as const
+    const writable = WRITE_TOOLS.filter((t) => gate.allow(t))
+    expect(
+      writable.length,
+      `step 4 mandates a write artifact but the gate grants no write tool; allowlist=${JSON.stringify(allowed)}, writable=${JSON.stringify(writable)}`,
+    ).toBeGreaterThan(0)
+
+    // Paired control (no-vacuity): a random non-write, non-nav, non-declared tool
+    // stays OUT of scope — proves the gate is really scoping, not fail-open.
+    expect(gate.allow("some_unrelated_network_tool")).toBe(false)
   })
 })

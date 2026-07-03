@@ -2,7 +2,7 @@
 name: product-onboard
 description: "Guided first-run for a NEW USER of Quanta — the get-started flow. Triggers on \"onboard me\", \"get started\", \"first task\", \"new user\", \"how do I use this\", \"help me begin\". Drives a 5-step update_plan checklist (pick a role → connect context → scope a first task → ship a first artifact → recap) so a newcomer reaches a real result. This is USER onboarding, NOT repo reconnaissance — for cold-starting an unfamiliar codebase use the `onboard` skill instead."
 userInvocable: true
-allowedTools: ["update_plan", "Read", "Glob"]
+allowedTools: ["update_plan", "Read", "Glob", "Edit", "Bash"]
 category: skill
 stability: experimental
 ---

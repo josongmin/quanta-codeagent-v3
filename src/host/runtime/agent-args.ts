@@ -80,11 +80,16 @@ export interface AgentArgs {
    *  survives across sessions. Absent ⇒ slot omitted; global default model
    *  wins for every mode. */
   stickyModel?: boolean
-  /** ADR-0236 — `--identity-mode <default|plan|review|audit|architect|editor>`.
-   *  When set, the composition root builds the system prompt through the
-   *  mode-variant registry (ADR-0211) for the given mode. The runtime
-   *  AgentMode (the run-mode lever) is INDEPENDENT — this flag drives ONLY
-   *  the prompt-side persona. Absent ⇒ legacy single-identity prompt. */
+  /** ADR-0236 — `--identity-mode <default|plan|review|audit|architect|editor|
+   *  onboarding>`. The accepted set is the SSOT {@link VALID_IDENTITY_MODES}
+   *  (surfaced verbatim in the usage/error text). For a `ModeVariantKey` mode
+   *  the composition root builds the system prompt through the mode-variant
+   *  registry (ADR-0211); the identity-only virtual mode `onboarding` (B1,
+   *  jul-03) is NOT a `ModeVariantKey`, so it is resolved directly through the
+   *  identity provider at the arg-builder boundary instead (see
+   *  `resolveIdentitySystemPrompt`). The runtime AgentMode (the run-mode lever)
+   *  is INDEPENDENT — this flag drives ONLY the prompt-side persona. Absent ⇒
+   *  legacy single-identity prompt. */
   identityMode?: IdentityModeToken
   /** ADR-0236 — `--focus-chain-every <N>`. When set (N > 0), the composition
    *  root constructs `defaultFocusChainTracker({ reinjectEveryN: N })` and
