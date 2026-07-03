@@ -57,6 +57,15 @@ const TOKENS_REMAINING = [
 ] as const
 const TOKENS_RESET = ["anthropic-ratelimit-tokens-reset", "x-ratelimit-reset-tokens"] as const
 
+// jul-03 B3 — the PAIRED window CAPACITY (the denominator for a count-based
+// remaining%). OpenAI reports `x-ratelimit-limit-{requests,tokens}`; Anthropic
+// mirrors with `anthropic-ratelimit-{requests,tokens}-limit`. Unlike Codex
+// (which sends a used-PERCENT directly), these providers send raw COUNTS, so the
+// remaining fraction is `remaining / limit`. Same lowercase-canonical / vendor-
+// family posture as the `*-remaining` allowlists above.
+const REQUESTS_LIMIT = ["anthropic-ratelimit-requests-limit", "x-ratelimit-limit-requests"] as const
+const TOKENS_LIMIT = ["anthropic-ratelimit-tokens-limit", "x-ratelimit-limit-tokens"] as const
+
 /** First non-null value across an allowlist of spellings. No-throw: a hostile
  *  getter is caught and treated as "absent". */
 const firstOf = (get: HeaderLookup, names: readonly string[]): string | null => {
@@ -190,4 +199,76 @@ export const parseRateLimitSnapshot = (
     ...(tokensResetMs !== undefined ? { tokensResetMs } : {}),
     observedAt: now(),
   }
+}
+
+/** Parse a `*-limit` CAPACITY: a STRICTLY-positive SAFE integer (a window
+ *  denominator). Zero / negative / non-integer / unsafe-magnitude ⇒ `undefined`
+ *  so a junk capacity can never drive a divide-by-zero or an out-of-band
+ *  fraction (mirrors {@link parseRemaining}, but excludes 0 — a zero-capacity
+ *  window carries no usable fraction). */
+const parseLimit = (raw: string | null): number | undefined => {
+  if (raw === null) return undefined
+  const trimmed = raw.trim()
+  if (trimmed === "") return undefined
+  const n = Number(trimmed)
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined
+}
+
+/** Remaining% for ONE count-based window, or `undefined` when the pair is
+ *  incomplete or nonsensical. A window contributes ONLY when BOTH a well-formed
+ *  non-negative remaining AND a well-formed positive limit are present, and
+ *  `remaining <= limit` (a provider that reports remaining>limit is malformed —
+ *  skip rather than fabricate a >100 figure). NO invented number: a missing or
+ *  garbage side ⇒ `undefined`. */
+const windowRemainingPercent = (
+  get: HeaderLookup,
+  remainingNames: readonly string[],
+  limitNames: readonly string[],
+): number | undefined => {
+  const remaining = parseRemaining(firstOf(get, remainingNames))
+  const limit = parseLimit(firstOf(get, limitNames))
+  if (remaining === undefined || limit === undefined) return undefined
+  if (remaining > limit) return undefined
+  // `remaining * 100 / limit` (multiply FIRST): for integer counts this yields
+  // an exact result whenever `limit` divides `remaining * 100` (e.g. 7/100 ⇒ 7,
+  // not 7.000000000000001), avoiding a float artifact that `(remaining/limit)*100`
+  // introduces. Guard the intermediate: only multiply-first while `remaining*100`
+  // stays a SAFE integer (real token/request counts are ≤ millions, so this always
+  // holds); a pathological near-2^53 limit falls back to divide-first so we never
+  // return a value corrupted by silent integer-overflow rounding.
+  const scaled = remaining * 100
+  return Number.isSafeInteger(scaled) ? scaled / limit : (remaining / limit) * 100
+}
+
+/**
+ * jul-03 B3 — provider rate-limit remaining PERCENTAGE derived from the
+ * count/limit header pairs OpenAI (`x-ratelimit-{remaining,limit}-{requests,
+ * tokens}`) and Anthropic (`anthropic-ratelimit-{requests,tokens}-{remaining,
+ * limit}`) send on EVERY response. This is the second provider source for the
+ * memory write-guard's provider arm: those vendors report raw COUNTS (unlike
+ * Codex's used-PERCENT), so with no count→percent derivation the guard's
+ * provider tap stayed `undefined` and fail-open forever on them.
+ *
+ * remaining% = remaining / limit * 100, computed PER window (requests, tokens);
+ * the MIN across the recognized windows governs (the tightest constraint is the
+ * one about to throttle — parity with the Codex "fast window governs" choice).
+ * Result clamped into the documented [0,100] band (defensive; the pair-validity
+ * checks already bound it). Returns `undefined` when NEITHER window carries a
+ * complete, well-formed pair, so the caller keeps its last value / fails open.
+ *
+ * Constraints (project rules — identical posture to {@link parseRateLimitSnapshot}):
+ *   - NO invented number: an incomplete / garbage pair contributes nothing.
+ *   - NO-THROW: a hostile getter degrades to "no percentage" (via `firstOf`).
+ *   - Stateless / clock-free: a pure projection of the current headers.
+ */
+export const parseCountRemainingPercent = (get: HeaderLookup): number | undefined => {
+  const perWindow = [
+    windowRemainingPercent(get, REQUESTS_REMAINING, REQUESTS_LIMIT),
+    windowRemainingPercent(get, TOKENS_REMAINING, TOKENS_LIMIT),
+  ].filter((p): p is number => p !== undefined)
+  if (perWindow.length === 0) return undefined
+  const min = Math.min(...perWindow)
+  // Defensive clamp: the pair checks already keep this in [0,100], but never let
+  // a rounding artifact or future spelling drift emit an out-of-band percentage.
+  return Math.min(100, Math.max(0, min))
 }

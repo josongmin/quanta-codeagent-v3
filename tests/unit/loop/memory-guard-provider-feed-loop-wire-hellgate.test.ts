@@ -14,18 +14,19 @@
  * `x-codex-primary-used-percent` response header, and asserts the meter's
  * provider tap is populated (100 − used). Deleting the loop feed call ⇒ RED.
  *
- * SECOND INVARIANT PINNED (inertness coupling): the feed is only reachable when
- * the header hook is wired, which today requires QUANTA_RATELIMIT_NOTICE or
- * QUANTA_RATELIMIT_PROACTIVE. With NEITHER knob set, the hook is never wired ⇒
- * the provider tap stays `undefined` ⇒ the memory guard's provider arm silently
- * fails-open forever. This test documents that coupling (knob-OFF ⇒ tap
- * undefined) so a future change that decouples it will visibly flip this pin.
+ * SECOND INVARIANT PINNED (jul-03 gap #2 — DECOUPLED): the provider-tap feed is
+ * now reachable whenever the write-guard's `budgetMeter` is wired, INDEPENDENT of
+ * the unrelated QUANTA_RATELIMIT_NOTICE/_PROACTIVE knob. With a meter present and
+ * NEITHER rate-limit knob set, the hook STILL wires and the tap is fed (Codex OR
+ * OpenAI/Anthropic count headers). With NO meter and no rate-limit knob, the hook
+ * stays unwired (byte-identical — no over-broadening). MUTATION: reverting the
+ * hook to the `rateLimitProactive`-only gate turns the decoupled pins RED.
  */
 
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
-import { BudgetMeter, runAgent } from "@/agent"
 import type { AgentConfig } from "@/agent"
+import { BudgetMeter, runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
@@ -149,10 +150,15 @@ describe("B3 loop wire — onResponseHeaders feeds the BudgetMeter provider tap"
     expect(meter.providerRateLimitRemainingPercent()).toBe(12)
   })
 
-  test("no used-percent header ⇒ tap stays undefined (byte-identical, arm fails-open)", async () => {
+  test("NO-LEAK: remaining COUNT with no paired limit ⇒ tap stays undefined (never fabricate %)", async () => {
+    // Post-broaden: `anthropic-ratelimit-tokens-remaining` IS a recognized header,
+    // but the count→percent derivation needs its paired `-limit` denominator. A
+    // remaining without a limit must NOT fabricate a percentage — the tap stays
+    // undefined and the provider arm fails open (byte-identical). This pins that the
+    // broadened source honors the NO-invented-number rule end-to-end in the loop.
     const meter = new BudgetMeter()
     const llm = new ScriptedLLM(toolThenFinal(), [
-      { "anthropic-ratelimit-tokens-remaining": "9000" }, // unrelated, no used-percent
+      { "anthropic-ratelimit-tokens-remaining": "9000" }, // remaining, but NO -limit
       undefined,
     ])
     await withKnobs({ QUANTA_RATELIMIT_NOTICE: "1" }, () =>
@@ -161,11 +167,13 @@ describe("B3 loop wire — onResponseHeaders feeds the BudgetMeter provider tap"
     expect(meter.providerRateLimitRemainingPercent()).toBeUndefined()
   })
 
-  test("INERTNESS COUPLING (documented): no rate-limit knob ⇒ hook unwired ⇒ tap never fed", async () => {
-    // With NEITHER QUANTA_RATELIMIT_NOTICE nor _PROACTIVE, the loop never wires
-    // `onResponseHeaders`, so even a low-window header can NOT reach the meter —
-    // the memory guard's provider arm is inert. Pinned so a future decoupling of
-    // the provider-guard feed from the rate-limit-notice knob flips this visibly.
+  test("DECOUPLED (gap #2): budgetMeter armed, NO rate-limit knob ⇒ hook STILL wired ⇒ tap fed", async () => {
+    // jul-03 B3 audit gap #2: the write-guard's activation gate constructs the
+    // `budgetMeter`. Its provider tap must be fed INDEPENDENTLY of the unrelated
+    // QUANTA_RATELIMIT_NOTICE/_PROACTIVE knob. With NEITHER rate-limit knob set,
+    // the header hook must STILL wire (because a meter is present) and a low-window
+    // header must reach the meter tap the guard reads. MUTATION: reverting the hook
+    // to the `rateLimitProactive`-only gate ⇒ hook undefined ⇒ tap undefined ⇒ RED.
     const meter = new BudgetMeter()
     const llm = new ScriptedLLM(toolThenFinal(), [
       { "x-codex-primary-used-percent": "99", "x-codex-primary-window-minutes": "300" },
@@ -175,7 +183,41 @@ describe("B3 loop wire — onResponseHeaders feeds the BudgetMeter provider tap"
       { QUANTA_RATELIMIT_NOTICE: undefined, QUANTA_RATELIMIT_PROACTIVE: undefined },
       () => runAgent(baseCfg({ llm, budgetMeter: meter })),
     )
+    // The hook wired PURELY because a budgetMeter is present (no rate-limit knob).
+    expect(llm.inputs[0]?.onResponseHeaders).toBeDefined()
+    // ...and fed 100 − 99 = 1 into the provider tap the guard reads.
+    expect(meter.providerRateLimitRemainingPercent()).toBe(1)
+  })
+
+  test("DECOUPLED + BROADEN: OpenAI count header with NO rate-limit knob ⇒ tap fed across providers", async () => {
+    // Both gaps at once: an OpenAI COUNT/limit header (not Codex used-percent),
+    // with NEITHER rate-limit knob, must arm the tap purely off the write-guard's
+    // meter. Proves the guard is armed on OpenAI/Anthropic, not just Codex.
+    const meter = new BudgetMeter()
+    const llm = new ScriptedLLM(toolThenFinal(), [
+      { "x-ratelimit-remaining-requests": "7", "x-ratelimit-limit-requests": "100" },
+      undefined,
+    ])
+    await withKnobs(
+      { QUANTA_RATELIMIT_NOTICE: undefined, QUANTA_RATELIMIT_PROACTIVE: undefined },
+      () => runAgent(baseCfg({ llm, budgetMeter: meter })),
+    )
+    expect(llm.inputs[0]?.onResponseHeaders).toBeDefined()
+    expect(meter.providerRateLimitRemainingPercent()).toBe(7)
+  })
+
+  test("BYTE-IDENTICAL: NO meter AND no rate-limit knob ⇒ hook stays unwired (no over-wiring)", async () => {
+    // The decoupling must NOT wire the hook when there is nothing to feed: with no
+    // budgetMeter and no rate-limit knob, `onResponseHeaders` must stay undefined
+    // (byte-identical to the pre-B3 no-hook path). Guards against over-broadening.
+    const llm = new ScriptedLLM(toolThenFinal(), [
+      { "x-codex-primary-used-percent": "50", "x-codex-primary-window-minutes": "300" },
+      undefined,
+    ])
+    await withKnobs(
+      { QUANTA_RATELIMIT_NOTICE: undefined, QUANTA_RATELIMIT_PROACTIVE: undefined },
+      () => runAgent(baseCfg({ llm })), // no budgetMeter
+    )
     expect(llm.inputs.every((i) => i.onResponseHeaders === undefined)).toBe(true)
-    expect(meter.providerRateLimitRemainingPercent()).toBeUndefined()
   })
 })

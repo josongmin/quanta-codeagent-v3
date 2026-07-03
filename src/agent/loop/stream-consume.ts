@@ -1,5 +1,6 @@
 import type { StreamEvent } from "@/llm"
 import {
+  parseCountRemainingPercent,
   parseDualWindowSnapshot,
   parseRateLimitSnapshot,
   proactiveDelayMs,
@@ -109,19 +110,41 @@ const applyProactiveRateLimitBackoff = async (
   if (rl.proactive) await rl.sleep(delayMs)
 }
 
+/** jul-03 B3 — provider rate-limit remaining% from a response's headers, ACROSS
+ *  providers. Two REAL header-derived sources, in precedence order:
+ *    1. Codex dual-window `x-codex-*-used-percent` ⇒ remaining% = 100 − used
+ *       (PRIMARY/fast window governs, falling back to the secondary). A DIRECT
+ *       provider percentage, so it is the primary source.
+ *    2. OpenAI / Anthropic `x-ratelimit-{remaining,limit}-*` COUNTS ⇒ remaining%
+ *       = remaining / limit * 100 (tightest window governs) — the broadened
+ *       source (jul-03 B3) so the guard is armed on those providers too, not just
+ *       Codex.
+ *  Returns `undefined` when NEITHER family reports a well-formed signal (NO
+ *  invented number: the caller then keeps its last value / fails open). */
+const providerRemainingPercentFromHeaders = (
+  get: (name: string) => string | null,
+  now: () => number,
+): number | undefined => {
+  const snap = parseDualWindowSnapshot(get, now)
+  const used = snap?.primary?.usedPercent ?? snap?.secondary?.usedPercent
+  if (used !== undefined) return 100 - used
+  // Broadened source: count/limit-based providers (OpenAI/Anthropic) send raw
+  // COUNTS, not a used-percent, so the Codex path above leaves `used` undefined.
+  return parseCountRemainingPercent(get)
+}
+
 /** jul-03 B3 — feed the live provider rate-limit window into the BudgetMeter tap
- *  the memory write-guard reads. The Codex dual-window meter reports
- *  `usedPercent`; remaining% = 100 − usedPercent (the PRIMARY/fast window governs,
- *  falling back to the secondary). NO-OP when no meter is wired OR the provider
- *  did not report a `usedPercent` this response (byte-identical). Kept SEPARATE
- *  from the local cost fraction.
+ *  the memory write-guard reads, ACROSS providers (Codex used-percent AND
+ *  OpenAI/Anthropic count/limit — see {@link providerRemainingPercentFromHeaders}).
+ *  NO-OP when no meter is wired OR no provider reported a recognized signal this
+ *  response (byte-identical). Kept SEPARATE from the local cost fraction.
  *
  *  EXPORTED (jul-03 B3 audit) so the header→meter seam — the LIVE half of the
  *  provider rate-limit guard chain that the `buildToolingCore` wire test cannot
  *  reach (it seeds the meter by calling `observeProviderRateLimitRemainingPercent`
  *  directly) — is unit-pinned: deleting this feed from the loop must turn a test
- *  RED. Without this, the whole `x-codex-*-used-percent` → guard chain could rot
- *  silently and the provider arm would fail-open forever (wired-but-inert). */
+ *  RED. Without this, the whole headers → guard chain could rot silently and the
+ *  provider arm would fail-open forever (wired-but-inert). */
 export const feedProviderRateLimitToMeter = (
   config: AgentConfig,
   get: (name: string) => string | null,
@@ -129,11 +152,50 @@ export const feedProviderRateLimitToMeter = (
 ): void => {
   const meter = config.budgetMeter
   if (meter === undefined) return
-  const snap = parseDualWindowSnapshot(get, now)
-  if (snap === undefined) return
-  const used = snap.primary?.usedPercent ?? snap.secondary?.usedPercent
-  if (used === undefined) return
-  meter.observeProviderRateLimitRemainingPercent(100 - used)
+  const remaining = providerRemainingPercentFromHeaders(get, now)
+  if (remaining === undefined) return
+  meter.observeProviderRateLimitRemainingPercent(remaining)
+}
+
+/**
+ * jul-03 B3 (audit gap #2 — DECOUPLE) — build the per-response `onResponseHeaders`
+ * hook, wired on the UNION of its two independent consumers so neither is silently
+ * coupled to the other's knob:
+ *   - The F3 rate-limit-notice / proactive-backoff snapshot store — present ONLY
+ *     when `QUANTA_RATELIMIT_NOTICE` / `_PROACTIVE` armed `rateLimitProactive`.
+ *   - The memory write-guard's PROVIDER rate-limit tap on the `BudgetMeter` —
+ *     present whenever a `budgetMeter` is wired (the write-guard's activation gate,
+ *     `QUANTA_MEMORY_WRITE_GUARD_PCT`, constructs it). BEFORE this decoupling the
+ *     feed lived INSIDE the `rateLimitProactive`-gated hook, so a run that armed
+ *     ONLY the write guard never wired the hook ⇒ the provider tap stayed
+ *     `undefined` ⇒ the provider arm fail-open FOREVER (arming coupled to an
+ *     UNRELATED knob). Now the hook wires when EITHER consumer needs it.
+ *
+ * Returns `undefined` when NEITHER consumer is active, so the stream input omits
+ * `onResponseHeaders` entirely (byte-identical to the pre-B3 no-hook path). The
+ * clock is `rateLimitProactive.now` when present (its injected test clock),
+ * else `Date.now`; the provider feed only reads header PERCENT/COUNT fields, so
+ * the clock affects nothing it consumes (it drives reset-ms parsing the feed
+ * discards) — kept only for the store update's determinism.
+ */
+const buildResponseHeadersHook = (
+  config: AgentConfig,
+  rateLimitProactive: TurnSession["rateLimitProactive"],
+): ((get: (name: string) => string | null) => void) | undefined => {
+  const wantStore = rateLimitProactive !== undefined
+  const wantMeterFeed = config.budgetMeter !== undefined
+  if (!wantStore && !wantMeterFeed) return undefined
+  const now = rateLimitProactive?.now ?? Date.now
+  return (get: (name: string) => string | null): void => {
+    if (rateLimitProactive !== undefined) {
+      rateLimitProactive.store.update(parseRateLimitSnapshot(get, rateLimitProactive.now))
+    }
+    // Feed the REAL provider rate-limit window into the BudgetMeter tap the memory
+    // write-guard reads — ACROSS providers (Codex used-percent AND OpenAI/Anthropic
+    // count/limit). NO-OP without a meter OR a recognized header (byte-identical).
+    // Kept SEPARATE from the local cost fraction — this is the provider signal.
+    feedProviderRateLimitToMeter(config, get, now)
+  }
 }
 
 /** Fire the optional per-turn stream-input observer, isolating a thrown observer
@@ -228,6 +290,10 @@ export const streamConsume = async (
   const turnTimingCapture = createTurnTimingCapture()
   const anchors: TurnTimingAnchors = { turnTimingCapture }
   const callbacks = createStreamDispatcher(session, state, anchors)
+  // jul-03 B3 (audit gap #2) — the response-header hook now wires on the UNION of
+  // its consumers (rate-limit store OR the write-guard's provider tap), so the
+  // memory guard's provider arm is fed independently of the rate-limit knob.
+  const onResponseHeaders = buildResponseHeadersHook(config, rateLimitProactive)
   notifyTurnStreamInput(config, {
     messages,
     system,
@@ -252,23 +318,7 @@ export const streamConsume = async (
             : {}),
           signal: config.signal,
           turnTimingCapture,
-          ...(rateLimitProactive !== undefined
-            ? {
-                onResponseHeaders: (get: (name: string) => string | null): void => {
-                  rateLimitProactive.store.update(
-                    parseRateLimitSnapshot(get, rateLimitProactive.now),
-                  )
-                  // jul-03 B3 — feed the REAL provider rate-limit window into the
-                  // BudgetMeter tap the memory write-guard reads. The dual-window
-                  // meter reports `usedPercent` (Codex `x-codex-*-used-percent`),
-                  // so remaining% = 100 - usedPercent. NO invented number: only a
-                  // window that actually reported `usedPercent` updates the tap;
-                  // absent ⇒ no-op (byte-identical). Kept SEPARATE from the cost
-                  // fraction — this is the provider signal, not local spend.
-                  feedProviderRateLimitToMeter(config, get, rateLimitProactive.now)
-                },
-              }
-            : {}),
+          ...(onResponseHeaders !== undefined ? { onResponseHeaders } : {}),
         }),
         recorder,
         collector,

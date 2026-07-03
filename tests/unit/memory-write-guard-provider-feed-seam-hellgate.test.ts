@@ -78,6 +78,50 @@ describe("B3 feed seam — x-codex-*-used-percent header → BudgetMeter provide
     expect(meter.providerRateLimitRemainingPercent()).toBe(90)
   })
 
+  test("BROADEN — OpenAI count/limit header ⇒ meter observes remaining/limit*100 (not Codex-only)", () => {
+    const meter = new BudgetMeter()
+    // OpenAI: 15 of 100 requests remaining ⇒ 15% remaining.
+    feedProviderRateLimitToMeter(
+      cfgWith(meter),
+      getter({
+        "x-ratelimit-remaining-requests": "15",
+        "x-ratelimit-limit-requests": "100",
+      }),
+      NOW,
+    )
+    expect(meter.providerRateLimitRemainingPercent()).toBe(15)
+  })
+
+  test("BROADEN — Anthropic count/limit header ⇒ meter observes remaining/limit*100", () => {
+    const meter = new BudgetMeter()
+    feedProviderRateLimitToMeter(
+      cfgWith(meter),
+      getter({
+        "anthropic-ratelimit-tokens-remaining": "2000",
+        "anthropic-ratelimit-tokens-limit": "10000",
+      }),
+      NOW,
+    )
+    expect(meter.providerRateLimitRemainingPercent()).toBe(20)
+  })
+
+  test("BROADEN — Codex used-percent PREFERRED when BOTH families present on one response", () => {
+    const meter = new BudgetMeter()
+    // Codex says 8% remaining (92 used); the count pair would say 50%. The
+    // dual-window (direct provider percent) is the primary source.
+    feedProviderRateLimitToMeter(
+      cfgWith(meter),
+      getter({
+        "x-codex-primary-used-percent": "92",
+        "x-codex-primary-window-minutes": "300",
+        "x-ratelimit-remaining-requests": "50",
+        "x-ratelimit-limit-requests": "100",
+      }),
+      NOW,
+    )
+    expect(meter.providerRateLimitRemainingPercent()).toBe(8)
+  })
+
   test("no recognized header ⇒ tap stays undefined (byte-identical, provider arm fails-open)", () => {
     const meter = new BudgetMeter()
     feedProviderRateLimitToMeter(cfgWith(meter), getter({ "x-unrelated": "1" }), NOW)
@@ -126,6 +170,42 @@ describe("B3 feed seam — x-codex-*-used-percent header → BudgetMeter provide
         minRemainingPercent: 25,
         remainingPercent: () => meter.remainingPercent(), // 100, would allow
         providerRateLimitRemainingPercent: () => meter.providerRateLimitRemainingPercent(), // 5
+      },
+    })
+    const write = tools.find((t) => t.name === "memory_write")
+    if (!write) throw new Error("no memory_write")
+    const ctx = { cwd: "/tmp", signal: new AbortController().signal }
+    let last: unknown
+    for await (const ev of write.execute({ text: "x" }, ctx)) last = ev
+    const result = (last as { type: string; result: { ok: boolean; output: string } }).result
+    expect(result.ok).toBe(false)
+    expect(result.output).toContain("provider rate-limit")
+    expect(await store.all()).toHaveLength(0)
+  })
+
+  test("BROADEN END-TO-END: an OpenAI COUNT header alone arms the provider block (not Codex-only)", async () => {
+    // The full cross-provider proof: seed the meter ONLY via an OpenAI count/limit
+    // header feed (no Codex used-percent, no direct observe), then let the real
+    // memory write-guard read the SAME meter. Proves the write is REFUSED on a
+    // count-based provider — i.e. the guard is now armed on OpenAI/Anthropic, not
+    // just Codex. MUTATION (drop count parsing) ⇒ tap undefined ⇒ write PROCEEDS.
+    const { memoryTools } = await import("@/agent/memory-tools")
+    const { InMemoryStore } = await import("@/memory")
+    const meter = new BudgetMeter()
+    feedProviderRateLimitToMeter(
+      cfgWith(meter),
+      // 3 of 100 requests remaining ⇒ 3% provider remaining, below the 25% threshold.
+      getter({ "x-ratelimit-remaining-requests": "3", "x-ratelimit-limit-requests": "100" }),
+      NOW,
+    )
+    expect(meter.providerRateLimitRemainingPercent()).toBe(3)
+    const store = new InMemoryStore()
+    const tools = memoryTools({
+      store,
+      writeGuard: {
+        minRemainingPercent: 25,
+        remainingPercent: () => meter.remainingPercent(), // 100, would allow
+        providerRateLimitRemainingPercent: () => meter.providerRateLimitRemainingPercent(), // 3
       },
     })
     const write = tools.find((t) => t.name === "memory_write")
