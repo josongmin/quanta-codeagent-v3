@@ -462,8 +462,8 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     model: asString(report.model) ?? "?",
     preset: presetLabel(f, asRecord(report.knobs)),
     datasetFamily: asString(report.datasetFamily) ?? "verified",
-    // P1-C (RFC jul-3): explicit A/B arm stamped by tb-report-emit; absent on old reports.
-    ...(asString(report.arm) !== undefined ? { arm: asString(report.arm) } : {}),
+    // P1-C (RFC jul-3): explicit A/B arm; typeof-narrowed like goldResolved so exactOptional is happy.
+    ...(typeof report.arm === "string" ? { arm: report.arm } : {}),
     mtime,
     resolved,
     total: perInstance.length - unmeasured,
@@ -1610,10 +1610,13 @@ function tbOurResults() {
     const isLev = r.arm ? r.arm === "levers" : (r.preset || "").toLowerCase().indexOf("levers") >= 0;
     const sink = isLev ? lev : base;
     for (const pi of (r.perInstance || [])) {
-      // D1: an infra fault (agent-timeout/crash) is NOT a graded miss — exclude it ENTIRELY so it
-      // never inflates the miss denominator (score deflation). A task with only errored trials
-      // shows as unmeasured (re-run), not a capability miss.
-      if (pi.error) continue;
+      // D1: an agent-CRASH (auth-death / harness exception — a re-runnable infra hole, jun-20
+      // real_attempt precedent) is excluded so it never counts as a capability miss. An
+      // agent-TIMEOUT STAYS in the denominator as a genuine miss: the agent spent its budget and
+      // failed — the HF competitor columns are trial-averaged with timeouts scored 0, and
+      // RE_RUNNABLE_TERMINATIONS above deliberately keeps timeout out of the re-runnable set;
+      // excluding it here would inflate our number vs the very columns we compare against.
+      if (pi.error && pi.error.kind === "agent-crash") continue;
       if (sink[pi.id] === undefined || pi.passed) sink[pi.id] = pi.passed;
     }
   }

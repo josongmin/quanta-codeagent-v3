@@ -45,3 +45,18 @@
 0. 전략어딧 14건 먼저 랜딩(별 워크스트림) → 그 다음 이 P0-P3.
 1. 3번째 적대어딧(이 플랜 대상) → 하드닝.
 2. 헬게이트 P0→P1→P2→P3, 각 단계 로컬+오리진메인 커밋.
+
+## 랜딩 상태 (jul-3 밤샘)
+전략어딧 14건 + readSite 15 → `ea787de4a`. TB-레버 3rd어딧 하드닝 후 default-safe 랜딩:
+- ✅ **P1-B/P1-C/P3-A/P1-F** (dashboard) → `0dfcc5932`: crash 분류(exception_info→perInstance.error, denominator 제외)·명시 --arm·model 날조제거·dedup(FAIL은 longer 우선).
+- ✅ **P1-A wire + P3-C** (container-exec) → `271f2303e`: exitCode evidence red-on-injection 테스트·stream cap env-tunable(QUANTA_TB_STREAM_CAP, clamp[1024,32768]).
+- ✅ **P2-A/P2-B/P1-A/P1-E/P0-B** (terminal) → `77f391f96`: 마커셋 분리(name-heuristic 제거, /tests/ 유지)·test-runner exercise 제외(pytest/-m pytest)·resultRanClean container_exec fail-closed·real-shape 크래시 픽스처·compactTrajectory text 코얼레서·idle-stub 삭제.
+- ✅ RED-8 이미 랜딩(brain-mode.ts memoryAuto QUANTA_MEMORY_AUTO=0), 26/26 green.
+
+### 보류/후속 (box-gated or 별 hellgate)
+- ⛔ **C1 owned-default-ON**: BLOCKED — witness런(cassette-on owned-ONLY 3태스크: extract-elf/path-tracing/headless-terminal) 미기록 + smoke baseline `=0` confound-fix가 flip과 atomic이어야. witness가 owned 무죄 확인해야 flip. 유일한 agent-behavior 변경.
+- ⬜ **B1-core timeoutMs opt-in**: 미구현(순수 opt-in, default kill 금지, SpawnPort에 param 스레딩). idle-stub만 삭제됨.
+- ⬜ **B1-docker typed timeout**: measure-first 별 커밋(60s 사일런트 킬 승격 + 값 param화).
+- ⬜ **P3-B container_write_file**(QUANTA_TB_WRITE_TOOL): 별 hellgate(manifest 등록+드리프트가드+HARD_DENY 경로스크린).
+- ⬜ **P3-D** 잔여 UX(포커스/pro-live 라벨): cosmetic.
+- ⬜ cp/symlink 세탁(A2 no-leak 한계): provenance RFC 별도.
