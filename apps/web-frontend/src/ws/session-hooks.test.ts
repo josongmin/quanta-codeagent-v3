@@ -396,6 +396,22 @@ describe("session-hooks transcript projection", () => {
     expect(seen.has("e2")).toBe(true)
   })
 
+  it("markEventSeen is FIFO-bounded: caps memory yet still dedups the recent window", () => {
+    const cap = 8
+    const seen = new Set<string>()
+    for (let i = 0; i < cap * 3; i++) {
+      expect(markEventSeen(seen, `e${i}`, cap)).toBe(true)
+    }
+    // Bound holds — the set never grows past cap despite 3× the ids.
+    expect(seen.size).toBe(cap)
+    // Recent window still dedups (the last `cap` ids are remembered).
+    expect(markEventSeen(seen, `e${cap * 3 - 1}`, cap)).toBe(false)
+    // The oldest evicted id is forgotten (a stale replay far outside the
+    // overlap window is treated as first-sight — acceptable, never replayed).
+    expect(seen.has("e0")).toBe(false)
+    expect(markEventSeen(seen, "e0", cap)).toBe(true)
+  })
+
   it("renders rejected command frames as error transcript rows", () => {
     const frame: SessionRejectedFrame = {
       target: "command",

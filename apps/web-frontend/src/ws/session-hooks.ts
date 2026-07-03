@@ -626,15 +626,39 @@ export const transcriptReducer = (
 }
 
 /**
+ * Bound on the dedup set. The set only needs to cover the hydration-replay ↔
+ * live-WS OVERLAP window (the most-recent persisted events that can arrive
+ * twice), NOT all history — so we cap it and FIFO-evict the oldest ids. An
+ * hour-long agent session emits tens of thousands of `turn.output.delta`
+ * events (each a unique eventId); an unbounded set would grow that memory for
+ * the whole session. 4096 is far larger than any realistic replay overlap, so
+ * eviction never resurfaces an id that could actually be replayed.
+ */
+export const EVENT_DEDUP_CAP = 4096
+
+/**
  * Dedup gate over a `Set<eventId>`: returns `true` (and records the id) the
  * FIRST time an eventId is seen, `false` on every repeat. This is the exact
  * guard `useSessionEvents` applies before dispatching — extracted so the
  * "replayed + live overlap never double-renders" invariant is testable without
  * a React renderer (the test env is `node`, no DOM). Mutates `seen`.
+ *
+ * Bounded (FIFO): once `seen.size` exceeds `cap`, the oldest inserted id is
+ * evicted. `Set` preserves insertion order, so the first value is the oldest.
  */
-export const markEventSeen = (seen: Set<string>, eventId: string): boolean => {
+export const markEventSeen = (
+  seen: Set<string>,
+  eventId: string,
+  cap: number = EVENT_DEDUP_CAP,
+): boolean => {
   if (seen.has(eventId)) return false
   seen.add(eventId)
+  if (seen.size > cap) {
+    for (const oldest of seen) {
+      seen.delete(oldest)
+      break
+    }
+  }
   return true
 }
 
