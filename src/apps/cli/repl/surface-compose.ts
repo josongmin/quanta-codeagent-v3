@@ -24,7 +24,7 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
-import { errMessage, gateOn, logger } from "@/shared"
+import { errMessage, gateOn, type ItemStreamSink, itemStreamEnabled, logger } from "@/shared"
 import { defaultShadowOdb, type ShadowOdb } from "@/storage"
 import type { DreamSlashState } from "../dream-cmd"
 import { DEFAULT_IDLE_MS } from "../idle-monitor"
@@ -534,6 +534,25 @@ export const composeSurfaceWires = (
   // typed slot.
   const sessionIo = buildDefaultSessionIo()
 
+  // S2 unified-observability (jul-03) — the item-stream sink the `/activity`
+  // fleet snapshot is pumped onto. PRESENCE-GATED at the composition root: minted
+  // ONLY when `QUANTA_ITEM_STREAM` is on (the SAME env the session.v1 item plane
+  // reads at `context-binding/base.ts`), so an absent slot ⇒ no fleet→item pump ⇒
+  // the `/activity` render is byte-identical for the legacy default-OFF path. The
+  // sink forwards each subagent item core onto the session's structured-log
+  // observability plane (a real, always-present out-of-band wire) so a live
+  // subagent lifecycle surfaces as a co-equal `subagent` item core carrying the
+  // SAME `item-subagent-<id>` join key the projector's `subagent_cancel` arm and
+  // both wire transports use. NO-THROW inside the pump (fail-silent) so a logging
+  // hiccup can never break the `/activity` render. */
+  const itemStreamSink: ItemStreamSink | undefined = itemStreamEnabled(envSource)
+    ? {
+        capture: (item) => {
+          logger.debug(`item-stream fleet core: ${JSON.stringify(item)}`)
+        },
+      }
+    : undefined
+
   const slashCtx = buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig),
     idleMonitor: setup.idleMonitor,
@@ -550,6 +569,10 @@ export const composeSurfaceWires = (
     // writes its live run into (threaded onto the subagent config via
     // buildTooling), so the slash view and the loop share ONE spine.
     activityStore: setup.lifecycleActivityStore,
+    // S2 (jul-03) `/activity` — the item-stream sink the fleet snapshot is pumped
+    // onto (presence-gated on QUANTA_ITEM_STREAM above). Absent ⇒ no pump
+    // (byte-identical); the pump self-no-ops on an undefined sink.
+    ...(itemStreamSink !== undefined ? { itemStreamSink } : {}),
     // ADR-0231 — `/radar` live store: the SAME instance wired into
     // `AgentConfig.radar.store` above, so the slash surface and the loop's
     // producer hook share ONE queue. Absent ⇒ slot omitted ⇒ "not wired".

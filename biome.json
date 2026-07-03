@@ -1148,6 +1148,7 @@
         "!tests/unit/migration-import-redaction-hellgate.test.ts",
         "!tests/unit/cli-resume-heuristic.test.ts",
         "!tests/unit/slash-commands.test.ts",
+        "!tests/unit/item-stream-s2-unification-hellgate.test.ts",
         "!tests/unit/memory-cmd.test.ts",
         "!tests/unit/mcp-cmd.test.ts",
         "!tests/unit/mcp-surface-wire.test.ts",

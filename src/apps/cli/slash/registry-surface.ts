@@ -27,6 +27,7 @@ import { dirname, join } from "node:path"
 import {
   createActivityStore,
   fleetToActivity,
+  pumpFleetRowsToItemStream,
   renderActivity,
   seedStoreFromSnapshot,
 } from "@/activity"
@@ -476,7 +477,18 @@ const activityCmd: SlashCommand = {
       ctx.activityStore !== undefined
         ? seedStoreFromSnapshot(ctx.activityStore.snapshot())
         : createActivityStore()
-    if (ctx.agents !== undefined) view.emitAll(fleetToActivity(ctx.agents()))
+    if (ctx.agents !== undefined) {
+      const rows = ctx.agents()
+      view.emitAll(fleetToActivity(rows))
+      // S2 unified-observability (jul-03) — the SAME fleet snapshot that paints
+      // the `/activity` tree is ALSO pumped onto the item-stream sink so the
+      // subagent lifecycle folds into the ONE item taxonomy the wire planes
+      // carry (join key `item-subagent-<id>`, matching the projector's
+      // `subagent_cancel` arm). The sink is threaded by surface-compose ONLY
+      // when `QUANTA_ITEM_STREAM` is on (presence-gate at the composition root),
+      // so an absent slot ⇒ NO pump ⇒ byte-identical render + wire.
+      pumpFleetRowsToItemStream(rows, ctx.itemStreamSink)
+    }
     const now = ctx.now?.() ?? Date.now()
     ctx.out(`${renderActivity(view.snapshot(), { now }).join("\n")}\n`)
     return 0

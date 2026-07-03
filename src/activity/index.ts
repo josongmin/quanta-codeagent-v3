@@ -13,6 +13,7 @@ export {
   fleetRowToItemStream,
   fleetToActivity,
   fleetToItemStream,
+  pumpFleetRowsToItemStream,
 } from "./producers/fleet"
 export {
   type SideAgentSnapshotLike,

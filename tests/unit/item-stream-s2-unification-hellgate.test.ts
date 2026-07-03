@@ -22,17 +22,22 @@
  *      state on both `plan.*` AND `item.*`.
  */
 import { describe, expect, test } from "bun:test"
+import { fleetToItemStream, pumpFleetRowsToItemStream } from "@/activity"
+import {
+  projectAgentEventToItemStreamObservationsGated,
+  wireOptionalAgentPorts,
+} from "@/agent/optional-ports"
+import type { AgentConfig } from "@/agent/types"
+import type { AgentFleetRow } from "@/apps/cli/agents-fleet-panel"
+import { BUILTINS, runSlashCommand } from "@/apps/cli/slash-commands"
+import type { SlashContext } from "@/apps/cli/slash-contract"
 import { createKernelSessionState } from "@/kernel/session"
 import { projectSessionHostTurnEvent } from "@/kernel/session/session-host-turn-event-projection"
+import type { LLMPort } from "@/llm"
 import type { AgentStateMessage, AgentStateObservation } from "@/protocol/agent-state"
 import { itemCoreToAgentStateMessage } from "@/protocol/agent-state"
-import { projectAgentEventToItemStreamObservationsGated } from "@/agent/optional-ports"
-import { wireOptionalAgentPorts } from "@/agent/optional-ports"
-import type { AgentConfig } from "@/agent/types"
-import type { LLMPort } from "@/llm"
-import { fleetToItemStream } from "@/activity"
 import type { SessionEvent } from "@/protocol/session"
-import type { ItemStreamCore } from "@/shared"
+import type { ItemStreamCore, ItemStreamSink } from "@/shared"
 import type { AgentEvent, PlanReadonlyMirror, StreamPort } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
 
@@ -61,7 +66,12 @@ const planCreated: AgentEvent = { type: "plan_created", plan: PLAN }
 const planSnapshot: AgentEvent = { type: "plan_snapshot", plan: PLAN }
 const planUpdated: AgentEvent = {
   type: "plan_updated",
-  delta: { kind: "todo_status_changed", todoId: "b", fromStatus: "blocked", toStatus: "in_progress" },
+  delta: {
+    kind: "todo_status_changed",
+    todoId: "b",
+    fromStatus: "blocked",
+    toStatus: "in_progress",
+  },
   version: 2,
 }
 const subagentCancel: AgentEvent = {
@@ -134,7 +144,13 @@ const sessionEventFields = (e: SessionEvent): Record<string, unknown> => {
     return { phase: "started", itemId: e.itemId, itemType: e.itemType, index: e.itemIndex }
   }
   if (e.type === "item.delta") {
-    return { phase: "delta", itemId: e.itemId, itemType: e.itemType, deltaKind: e.deltaKind, delta: e.delta }
+    return {
+      phase: "delta",
+      itemId: e.itemId,
+      itemType: e.itemType,
+      deltaKind: e.deltaKind,
+      delta: e.delta,
+    }
   }
   if (e.type === "item.completed") {
     return {
@@ -152,7 +168,13 @@ const agentStateFields = (m: AgentStateMessage): Record<string, unknown> => {
     return { phase: "started", itemId: m.itemId, itemType: m.itemType, index: m.itemIndex }
   }
   if (m.kind === "item.delta") {
-    return { phase: "delta", itemId: m.itemId, itemType: m.itemType, deltaKind: m.deltaKind, delta: m.delta }
+    return {
+      phase: "delta",
+      itemId: m.itemId,
+      itemType: m.itemType,
+      deltaKind: m.deltaKind,
+      delta: m.delta,
+    }
   }
   if (m.kind === "item.completed") {
     return {
@@ -345,9 +367,9 @@ describe("S2 no-4th-path — WIRED: the composition seam actually enforces the s
     const itemObs = captured.filter((o) => o.type === "item_stream")
     // Not vacuous — plan folded onto item cores DID reach the item plane.
     expect(itemObs.length).toBeGreaterThan(0)
-    expect(itemObs.every((o) => (o.type === "item_stream" ? o.item.itemType === "plan" : false))).toBe(
-      true,
-    )
+    expect(
+      itemObs.every((o) => (o.type === "item_stream" ? o.item.itemType === "plan" : false)),
+    ).toBe(true)
     // THE no-4th-path invariant: the raw plan.* host-mirror observation is
     // suppressed at the LIVE seam, so plan never double-carries.
     const planMirror = captured.filter(
@@ -364,5 +386,207 @@ describe("S2 no-4th-path — WIRED: the composition seam actually enforces the s
     const planMirror = captured.filter((o) => o.type === "plan_created")
     expect(planMirror.length).toBe(1)
     expect(captured.some((o) => o.type === "item_stream")).toBe(false)
+  })
+})
+
+/**
+ * S2 fleet PUMP (jul-03 deferred-wiring closure) — the production bridge
+ * `pumpFleetRowsToItemStream` makes the fleet (subagent) side of the unification
+ * REACHABLE. Before this, `fleetToItemStream` had NO production caller (the audit
+ * flagged it INERT). These tests pin the gate contract of the pump itself + the
+ * fail-silent posture, RED-on-injection.
+ */
+const rows = (): AgentFleetRow[] => [
+  { id: "s1", description: "scout", status: "running", startedAt: 1 },
+  {
+    id: "s2",
+    description: "builder",
+    status: "completed",
+    startedAt: 1,
+    endedAt: 9,
+    result: { ok: true, finalText: "done", turns: 3 },
+  },
+]
+
+const collectSink = (): { sink: ItemStreamSink; got: ItemStreamCore[] } => {
+  const got: ItemStreamCore[] = []
+  return { sink: { capture: (item) => void got.push(item) }, got }
+}
+
+describe("S2 fleet PUMP — the production bridge gates + reaches the item wire", () => {
+  test("gate ON (env) ⇒ fleet rows are pumped onto the sink as subagent item cores", () => {
+    const { sink, got } = collectSink()
+    const n = pumpFleetRowsToItemStream(rows(), sink, { QUANTA_ITEM_STREAM: "1" })
+    // Not vacuous: the pump minted cores AND they landed on the sink.
+    expect(n).toBeGreaterThan(0)
+    expect(got.length).toBe(n)
+    expect(got.every((c) => c.itemType === "subagent")).toBe(true)
+    // The running row is an OPEN item; the settled row completes with detail.
+    expect(got.some((c) => c.phase === "started" && c.itemId === "item-subagent-s1")).toBe(true)
+    expect(got.some((c) => c.phase === "completed" && c.itemId === "item-subagent-s2")).toBe(true)
+  })
+
+  test("gate OFF (env) ⇒ NO core is minted and the sink is NEVER touched (byte-identical)", () => {
+    const { sink, got } = collectSink()
+    // Mutation guard: dropping the `env !== undefined && !enabled` gate turns this
+    // red (the pump would fire with the flag off).
+    expect(pumpFleetRowsToItemStream(rows(), sink, {})).toBe(0)
+    expect(got.length).toBe(0)
+  })
+
+  test("absent sink ⇒ no-op (a surface with no wire plane; presence-gate byte-identical)", () => {
+    // env says ON, but the composition root threaded no sink ⇒ nothing happens.
+    expect(pumpFleetRowsToItemStream(rows(), undefined, { QUANTA_ITEM_STREAM: "1" })).toBe(0)
+  })
+
+  test("presence-gated caller (no env arg) ⇒ pump fires (the CLI /activity path)", () => {
+    // The CLI seam presence-gates the sink at the composition root, so it calls
+    // the pump WITHOUT an env arg; a non-undefined sink is the proof the gate
+    // already passed. Mutation guard: making the `env === undefined` branch skip
+    // the pump turns this red.
+    const { sink, got } = collectSink()
+    const n = pumpFleetRowsToItemStream(rows(), sink)
+    expect(n).toBeGreaterThan(0)
+    expect(got.length).toBe(n)
+  })
+
+  test("throwing sink is fail-silent (never breaks the caller's activity render)", () => {
+    const boom: ItemStreamSink = {
+      capture: () => {
+        throw new Error("sink blew up")
+      },
+    }
+    // No throw escapes; the count still reflects the cores it attempted.
+    let n = -1
+    expect(() => {
+      n = pumpFleetRowsToItemStream(rows(), boom, { QUANTA_ITEM_STREAM: "1" })
+    }).not.toThrow()
+    expect(n).toBeGreaterThan(0)
+  })
+
+  test("pump preserves the item-subagent-<id> join key (cross-producer contract)", () => {
+    // The pumped fleet core and the projector's subagent_cancel arm MUST agree on
+    // the join key so a surface stitches the fleet row to its cancel on ONE id.
+    const { sink, got } = collectSink()
+    pumpFleetRowsToItemStream(
+      [{ id: "sub-9", description: "x", status: "running", startedAt: 1 }],
+      sink,
+      { QUANTA_ITEM_STREAM: "1" },
+    )
+    const cancelCores = collect([
+      {
+        type: "subagent_cancel",
+        subagentId: "sub-9",
+        outcome: "stopped",
+        source: "submission_op",
+      } as AgentEvent,
+    ])
+    expect(got[0]?.itemId).toBe("item-subagent-sub-9")
+    expect(cancelCores.every((c) => c.itemId === "item-subagent-sub-9")).toBe(true)
+  })
+})
+
+/**
+ * S2 fleet PUMP AT THE LIVE `/activity` SEAM (jul-03) — the isolated pump tests
+ * above prove the function gates, but do NOT prove the `/activity` command
+ * actually CALLS it at the fleet→tree seam. De-wiring the `pumpFleetRowsToItemStream`
+ * call in `activityCmd` leaves the whole pump suite green while the fleet never
+ * reaches the wire — the exact INERT state this closure removes. These drive a
+ * fleet snapshot THROUGH `runSlashCommand("/activity")` and assert by BEHAVIOUR.
+ */
+const baseActivityCtx = (out: string[]): SlashContext =>
+  ({
+    out: (s: string) => void out.push(s),
+    err: () => {},
+    cwd: "/tmp",
+    now: () => 1000,
+    agents: (): readonly AgentFleetRow[] => [
+      { id: "sub-live", description: "live scout", status: "running", startedAt: 1 },
+    ],
+  }) as unknown as SlashContext
+
+describe("S2 fleet PUMP — WIRED: /activity actually pumps the fleet onto the sink", () => {
+  test("sink present ⇒ /activity pumps the live fleet as a subagent item core", async () => {
+    const out: string[] = []
+    const got: ItemStreamCore[] = []
+    const ctx = {
+      ...baseActivityCtx(out),
+      itemStreamSink: { capture: (i: ItemStreamCore) => void got.push(i) },
+    } as unknown as SlashContext
+    const code = await runSlashCommand("/activity", ctx)
+    expect(code).toBe(0)
+    // The tree still rendered (byte-identical render path).
+    expect(out.join("")).toContain("live scout")
+    // AND the live subagent surfaced as a co-equal item core on the wire.
+    expect(got.length).toBeGreaterThan(0)
+    expect(got[0]?.itemType).toBe("subagent")
+    expect(got[0]?.itemId).toBe("item-subagent-sub-live")
+  })
+
+  test("sink ABSENT ⇒ /activity renders identically and touches NO wire (byte-identical OFF)", async () => {
+    const outWith: string[] = []
+    const outWithout: string[] = []
+    // Same fleet, one ctx with the sink slot present-but-omitted (default-OFF).
+    const ctxOff = baseActivityCtx(outWithout)
+    const codeOff = await runSlashCommand("/activity", ctxOff)
+    expect(codeOff).toBe(0)
+
+    // Control: the render is IDENTICAL whether or not a sink is threaded — the
+    // pump is a pure side-channel; it never perturbs the /activity output.
+    const got: ItemStreamCore[] = []
+    const ctxOn = {
+      ...baseActivityCtx(outWith),
+      itemStreamSink: { capture: (i: ItemStreamCore) => void got.push(i) },
+    } as unknown as SlashContext
+    await runSlashCommand("/activity", ctxOn)
+    expect(outWith.join("")).toBe(outWithout.join(""))
+    // And with no sink, nothing was captured (there is nowhere to capture TO).
+    expect(got.length).toBeGreaterThan(0) // sanity: the ON path DID capture
+  })
+})
+
+describe("S2 fleet PUMP — dual-plane: fleet-produced cores carry byte-identically", () => {
+  test("a fleet completed core round-trips identically on session.v1 AND agent-state", () => {
+    // The pump emits the SAME ItemStreamCore shape both wire transports carry
+    // verbatim. Prove the fleet-produced core (a JSON drilldown body — NOT the
+    // cancel arm) is byte-identical across planes, closing the audit's
+    // "drift on both planes" for the SUBAGENT-via-fleet path specifically.
+    const cores = fleetToItemStream([
+      {
+        id: "sX",
+        description: "b",
+        agentType: "coder",
+        status: "completed",
+        startedAt: 1,
+        endedAt: 9,
+        result: { ok: true, finalText: "ok", turns: 2 },
+      },
+    ])
+    expect(cores.some((c) => c.itemType === "subagent")).toBe(true)
+    const state = createKernelSessionState({
+      sessionId: "s2-fleet-drift",
+      permissionMode: "default",
+      capabilityManifest: manifest,
+    })
+    for (const core of cores) {
+      const sessionEvent = projectSessionHostTurnEvent({
+        state,
+        commandId: "c1",
+        emittedAt: "2026-07-03T00:00:00.000Z",
+        event: { type: "item.stream", item: core },
+      }).emitted
+      const message = itemCoreToAgentStateMessage(core, 1)
+      const expected = coreFields(core)
+      expect(sessionEventFields(sessionEvent)).toEqual(expected)
+      expect(agentStateFields(message)).toEqual(expected)
+    }
+  })
+})
+
+// Registry hygiene: /activity is still a registered surface builtin (the wiring
+// did not drop or rename it).
+describe("S2 fleet PUMP — /activity remains a registered builtin", () => {
+  test("/activity is in BUILTINS", () => {
+    expect(BUILTINS.map((c) => c.name)).toContain("/activity")
   })
 })

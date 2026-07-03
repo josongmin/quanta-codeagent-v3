@@ -49,6 +49,7 @@ export type {
   ItemStreamDeltaKind,
   ItemStreamItemType,
   ItemStreamPhase,
+  ItemStreamSink,
   ItemStreamStarted,
 } from "./item-stream"
 export {

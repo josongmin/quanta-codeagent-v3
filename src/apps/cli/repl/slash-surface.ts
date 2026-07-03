@@ -163,6 +163,13 @@ export type ReplSlashCtx = Partial<{
   /** jun-15 P0-b `/activity` — the session Activity Spine store (shared with the
    *  loop's `run_workflow` writer). Absent ⇒ ephemeral fleet-only view. */
   activityStore: import("@/activity").ActivityStore
+  /** S2 unified-observability (jul-03) `/activity` — the item-stream sink the
+   *  fleet snapshot is ALSO pumped onto (under `QUANTA_ITEM_STREAM`), so the
+   *  subagent lifecycle folds into the ONE item taxonomy the wire planes carry.
+   *  Absent ⇒ no pump (the CLI has no wire plane; byte-identical). The GATE lives
+   *  in `pumpFleetRowsToItemStream`, so even a present sink is inert when the flag
+   *  is off. */
+  itemStreamSink: import("@/shared").ItemStreamSink
   /** ADR-0231 `/radar` — the live radar proposal-queue store (SAME instance the
    *  loop's producer hook writes). Absent ⇒ `/radar` prints "not wired". */
   radar: import("@/radar").RadarStore
@@ -188,6 +195,11 @@ export interface BuildReplSlashCtxArgs {
    *  loop's `run_workflow` writer). Absent ⇒ `/activity` falls back to an
    *  ephemeral fleet-only view. */
   activityStore?: import("@/activity").ActivityStore | undefined
+  /** S2 unified-observability (jul-03) `/activity` — the item-stream sink the
+   *  fleet snapshot is pumped onto. Threaded ONLY when `QUANTA_ITEM_STREAM` is on
+   *  AND a wire-plane sink exists (composition-root presence-gate). Absent ⇒ no
+   *  pump (byte-identical). */
+  itemStreamSink?: import("@/shared").ItemStreamSink | undefined
   /** ADR-0231 `/radar` — the gated radar proposal-queue store. Surface-compose
    *  threads the SAME instance it wires into `AgentConfig.radar.store` ONLY when
    *  `QUANTA_RADAR` is on; absent/omitted ⇒ the `radar` ctx slot is omitted and
@@ -462,6 +474,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     contextUsage,
     taskRegistry,
     activityStore,
+    itemStreamSink,
     radar,
     radarPruneOlderThanMs,
   } = args
@@ -517,6 +530,7 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // ADR-0231 — `/radar` live store + prune cutoff. Absent store ⇒ slot
     // omitted ⇒ `/radar` "not wired" (default-OFF byte-identical).
     ...(activityStore !== undefined ? { activityStore } : {}),
+    ...(itemStreamSink !== undefined ? { itemStreamSink } : {}),
     ...(radar !== undefined ? { radar } : {}),
     ...(radarPruneOlderThanMs !== undefined ? { radarPruneOlderThanMs } : {}),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
@@ -550,6 +564,7 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.contextUsage !== undefined ? { contextUsage: s.contextUsage } : {}),
   ...(s.agents !== undefined ? { agents: s.agents } : {}),
   ...(s.activityStore !== undefined ? { activityStore: s.activityStore } : {}),
+  ...(s.itemStreamSink !== undefined ? { itemStreamSink: s.itemStreamSink } : {}),
   ...(s.radar !== undefined ? { radar: s.radar } : {}),
   ...(s.radarPruneOlderThanMs !== undefined
     ? { radarPruneOlderThanMs: s.radarPruneOlderThanMs }

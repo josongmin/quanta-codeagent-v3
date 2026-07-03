@@ -104,6 +104,20 @@ export interface ItemStreamCompleted {
 /** Closed discriminated union — every item core the projector emits. */
 export type ItemStreamCore = ItemStreamStarted | ItemStreamDelta | ItemStreamCompleted
 
+/**
+ * S2 unified-observability (jul-03) — the plane-agnostic sink an out-of-band
+ * producer (e.g. the fleet/subagent snapshot bridge) pushes {@link ItemStreamCore}s
+ * onto. The two wire transports adapt their own carrier to this ONE shape:
+ *   - web agent-state plane: `capture({ type: "item_stream", item })`
+ *   - session.v1 plane:      `onEvent({ type: "item.stream", item })`
+ * so a producer that does NOT ride the `AgentEvent` stream (the fleet lifecycle
+ * is polled from the TaskRegistry, never an `AgentEvent`) still lands on the SAME
+ * item taxonomy the projector-driven cores use. Pure port — no I/O, no slice dep.
+ */
+export interface ItemStreamSink {
+  capture(item: ItemStreamCore): void
+}
+
 /** The 1:1 delta-kind for an item type (the kind a `delta` of that item carries). */
 export const ITEM_DELTA_KIND_BY_ITEM_TYPE = {
   reasoning: "reasoning.text",

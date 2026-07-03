@@ -217,6 +217,16 @@ export interface SlashContext {
    *  shows workflows + agents + daemons in one tree. Absent ⇒ ephemeral
    *  fleet-only view. Duck-typed so this contract never imports activity VALUES. */
   readonly activityStore?: import("@/activity").ActivityStore | undefined
+  /** S2 unified-observability (jul-03) `/activity` — the item-stream sink the
+   *  subagent fleet snapshot is ALSO pumped onto so the fleet lifecycle folds
+   *  into the ONE item taxonomy the wire planes (session.v1 `item.*` / web
+   *  agent-state `item.*`) carry verbatim. Threaded by surface-compose ONLY when
+   *  `QUANTA_ITEM_STREAM` is on AND the surface exposes a wire-plane sink (the
+   *  presence-gate lives at the composition root where the env is loaded — same
+   *  posture as `radar`/`background`). Absent ⇒ no pump (byte-identical: the
+   *  `/activity` render is untouched). Duck-typed via `@/shared` so this contract
+   *  never imports activity/stream VALUES. */
+  readonly itemStreamSink?: import("@/shared").ItemStreamSink | undefined
   /** ADR-0231 `/radar` — the radar proposal-queue store. The SAME instance the
    *  agent loop's producer hook writes to (`AgentConfig.radar.store`), threaded
    *  by surface-compose ONLY when `QUANTA_RADAR` is on so list/adopt/dismiss/

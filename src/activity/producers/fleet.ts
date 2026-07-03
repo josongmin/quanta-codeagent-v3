@@ -9,7 +9,7 @@
  * `stopped`).
  */
 
-import type { ItemStreamCore } from "@/shared"
+import { type ItemStreamCore, type ItemStreamSink, itemStreamEnabled } from "@/shared"
 import type { ActivityStatus, AgentActivityEvent } from "../types"
 
 /** Structural mirror of `AgentFleetRow` (no `@/subagent` value import). */
@@ -84,7 +84,10 @@ export const fleetToActivity = (rows: readonly FleetRowLike[]): readonly AgentAc
  * `QUANTA_ITEM_STREAM` on) feeds these cores onto the item wire; absent that
  * gate, this function is simply never called.
  */
-export const fleetRowToItemStream = (row: FleetRowLike, index: number): readonly ItemStreamCore[] => {
+export const fleetRowToItemStream = (
+  row: FleetRowLike,
+  index: number,
+): readonly ItemStreamCore[] => {
   const itemId = `item-subagent-${row.id}`
   const started: ItemStreamCore = { phase: "started", itemId, itemType: "subagent", index }
   if (STATUS[row.status] === "running") return [started]
@@ -99,9 +102,62 @@ export const fleetRowToItemStream = (row: FleetRowLike, index: number): readonly
       : {}),
     ...(row.error !== undefined ? { error: row.error } : {}),
   }
-  return [started, { phase: "completed", itemId, itemType: "subagent", text: JSON.stringify(detail) }]
+  return [
+    started,
+    { phase: "completed", itemId, itemType: "subagent", text: JSON.stringify(detail) },
+  ]
 }
 
 /** Map a whole fleet snapshot into item-stream cores (monotonic index). */
 export const fleetToItemStream = (rows: readonly FleetRowLike[]): readonly ItemStreamCore[] =>
   rows.flatMap((row, i) => fleetRowToItemStream(row, i))
+
+/**
+ * S2 unified-observability (jul-03) — the PRODUCTION bridge that makes the fleet
+ * side of the unification reachable. This is the caller the audit flagged as
+ * missing: at the seam where a subagent (fleet) snapshot feeds the `/activity`
+ * tree, the SAME snapshot is ALSO pumped onto the item-stream sink so the fleet
+ * lifecycle becomes co-equal `subagent` item cores on whichever wire plane the
+ * sink adapts (web agent-state `item.*` / session.v1 `item.*`).
+ *
+ * The fleet lifecycle is polled from the TaskRegistry — it is NOT an `AgentEvent`,
+ * so the projector-driven tap in `optional-ports` can never see it; THIS is the
+ * only path that folds it into the ONE item-stream.
+ *
+ * Default-OFF byte-identical: `QUANTA_ITEM_STREAM` unset ⇒ NO core is minted and
+ * the sink is NEVER touched, so the `/activity` render + every wire plane are
+ * byte-identical. A `null`/absent sink is likewise a no-op (a surface with no
+ * wire plane). The sink capture is wrapped so a throwing consumer can never break
+ * the caller's activity render (observation-only, fail-silent — mirrors the
+ * agent-state tap).
+ *
+ * GATE placement: `env` is OPTIONAL. A caller that HOLDS the loaded env (the
+ * web-daemon / host composition root) passes it so THIS function self-gates
+ * (the SSOT gate, defense-in-depth). A caller that already presence-gated the
+ * sink at the composition root (the CLI `/activity` seam, where surface-compose
+ * only threads the sink when `itemStreamEnabled(env)` — the SAME env — is true)
+ * omits it; the presence of a non-undefined `sink` is then the proof the gate was
+ * already applied. Either way an item core only ever reaches the wire under the
+ * flag.
+ *
+ * Returns the count of cores pushed (0 when gated off / no sink / empty fleet) so
+ * a caller can assert the wire actually fired without reaching into the sink.
+ */
+export const pumpFleetRowsToItemStream = (
+  rows: readonly FleetRowLike[],
+  sink: ItemStreamSink | undefined,
+  env?: Record<string, string | undefined>,
+): number => {
+  if (sink === undefined) return 0
+  if (env !== undefined && !itemStreamEnabled(env)) return 0
+  const cores = fleetToItemStream(rows)
+  for (const core of cores) {
+    try {
+      sink.capture(core)
+    } catch {
+      // A throwing sink must never break the caller's activity render — the
+      // fleet→item pump is observation-only (same posture as wireAgentStateTap).
+    }
+  }
+  return cores.length
+}
