@@ -50,11 +50,11 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  * `<system-reminder>` user message so the cached prefix never shifts.
  */
 
-/** Environment posture (RFC jul-2-terminal-bench-levers/01) — selects which env
+/** Environment posture (RFC jul-2 TB levers /01) — selects which env
  *  RULE TEXT the model is told, and NOTHING ELSE. `"frozen"` (DEFAULT) = today's
  *  SWE-bench guardrails verbatim (do-not-install / stop-when-env-blocked). `"owned"`
- *  = the surface owns its container, so install/configure/build freely (Terminal
- *  brain / Terminal-Bench). PROMPT-TEXT-ONLY: this NEVER touches `SandboxPolicy` /
+ *  = the surface owns its container, so install/configure/build freely (the
+ *  Terminal brain). PROMPT-TEXT-ONLY: this NEVER touches `SandboxPolicy` /
  *  `os-sandbox` / any runtime enforcement — it only swaps the rendered rule list. */
 export type EnvironmentPosture = "frozen" | "owned"
 

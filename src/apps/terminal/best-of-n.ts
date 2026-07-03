@@ -48,6 +48,7 @@ import {
   deriveVerificationState,
   inspectExerciseEvidence,
   isExerciseCommand,
+  resultObservedOutput,
 } from "./verify-gate"
 
 /** One candidate produced by an independent brain attempt. The `stamp` is the FAIR signal (produced
@@ -94,17 +95,15 @@ const stringInputField = (input: unknown, field: string): string | undefined => 
   return typeof v === "string" ? v : undefined
 }
 
-/** Map of tool-call id → whether its paired result observed output (non-empty preview OR an exit
- *  code). Mirrors the verify-gate's `resultObservedOutput` contract. */
+/** Map of tool-call id → whether its paired result observed output. Delegates to the verify-gate's
+ *  EXPORTED {@link resultObservedOutput} — the single observation predicate — so the tie-break shares
+ *  byte-identical semantics (incl. the B1 timed-out exclusion) instead of a drifting local mirror
+ *  (the pre-B1 mirror here silently diverged the moment the gate's predicate learned new rules). */
 const observedResultIds = (events: readonly AgentEvent[]): Map<string, boolean> => {
   const observedById = new Map<string, boolean>()
   for (const ev of events) {
     if (ev.type !== "tool_result") continue
-    observedById.set(
-      ev.id,
-      (typeof ev.preview === "string" && ev.preview.trim().length > 0) ||
-        typeof ev.exitCode === "number",
-    )
+    observedById.set(ev.id, resultObservedOutput(ev))
   }
   return observedById
 }

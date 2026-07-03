@@ -1,29 +1,33 @@
 import { describe, expect, test } from "bun:test"
 import { dockerContainerExec } from "./docker-backend"
 import {
+  defaultDockerSpawn,
   type DockerLifecycle,
   dockerRunViaCli,
   type SpawnPort,
   type SpawnResult,
 } from "./docker-run"
 
-/** Fake SpawnPort: records every argv it is handed + scripts the result. The whole point of the
- *  spawn injection — drive the real `dockerRunViaCli`/lifecycle argv-builders + result-mapping
- *  WITHOUT a docker daemon (down locally). `script` may key off argv to vary per-call. */
+/** Fake SpawnPort: records every argv (and B1 deadline) it is handed + scripts the result. The
+ *  whole point of the spawn injection — drive the real `dockerRunViaCli`/lifecycle argv-builders +
+ *  result-mapping WITHOUT a docker daemon (down locally). `script` may key off argv to vary per-call. */
 const fakeSpawn = (script?: (argv: readonly string[]) => Partial<SpawnResult>) => {
   const calls: (readonly string[])[] = []
   const signals: (AbortSignal | undefined)[] = []
-  const port: SpawnPort = (argv, signal) => {
+  const timeouts: (number | undefined)[] = []
+  const port: SpawnPort = (argv, signal, timeoutMs) => {
     calls.push(argv)
     signals.push(signal)
+    timeouts.push(timeoutMs)
     const s = script?.(argv) ?? {}
     return Promise.resolve({
       stdout: s.stdout ?? "",
       stderr: s.stderr ?? "",
       code: s.code ?? 0,
+      ...(s.timedOut === true ? { timedOut: true } : {}),
     })
   }
-  return { port, calls, signals }
+  return { port, calls, signals, timeouts }
 }
 
 describe("dockerRunViaCli — real DockerRun over an injected spawn (no daemon)", () => {
@@ -131,5 +135,40 @@ describe("end-to-end composition: dockerContainerExec(id, dockerRunViaCli(fakeSp
     const r = await exec.exec("grep zzz f")
     expect(r.code).toBe(2)
     expect(r.stderr).toBe("grep: no match")
+  })
+})
+
+// B1 (RFC jul-3): the docker path's wall-clock kill is TYPED (timedOut) — the pre-B1 60s kill was
+// SILENT (a killed build was indistinguishable from a normal exit) — and the caller's per-command
+// deadline threads backend → runner → spawner.
+describe("B1 — per-command deadline through the docker path", () => {
+  test("timeoutMs threads exec → backend → runner → spawner; a timedOut spawn maps onto the result", async () => {
+    const { port, timeouts } = fakeSpawn(() => ({
+      stdout: "partial build log",
+      code: 137,
+      timedOut: true,
+    }))
+    const exec = dockerContainerExec("c123", dockerRunViaCli(port))
+    const r = await exec.exec("make world", undefined, 90_000)
+    expect(timeouts[0]).toBe(90_000)
+    expect(r.timedOut).toBe(true)
+    expect(r.stdout).toBe("partial build log") // salvaged partial output survives the mapping
+  })
+
+  test("defaultDockerSpawn: a REAL over-deadline process is killed, marked timedOut, partials drained", async () => {
+    // Prints, then `exec`s into the sleep so the DIRECT child (the one `proc.kill()` targets) is
+    // the pipe owner — mirroring the real usage, where the direct child is the `docker` CLI and
+    // killing it closes the host-side pipes. (A `sh -c "…; sleep 5"` fixture would leave a
+    // GRANDCHILD holding stdout and stall the drain — a fixture artifact, not the docker shape.)
+    const r = await defaultDockerSpawn(["sh", "-c", "echo started; exec sleep 5"], undefined, 150)
+    expect(r.timedOut).toBe(true)
+    expect(r.stdout).toContain("started")
+  }, 5000)
+
+  test("defaultDockerSpawn: a fast process is NOT marked timedOut (typed kill only on expiry)", async () => {
+    const r = await defaultDockerSpawn(["sh", "-c", "echo done"], undefined, 5000)
+    expect(r.timedOut).toBeUndefined()
+    expect(r.stdout).toContain("done")
+    expect(r.code).toBe(0)
   })
 })

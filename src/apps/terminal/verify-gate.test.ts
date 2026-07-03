@@ -10,6 +10,7 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentEvent } from "@/stream"
 import {
+  buildTaintedRefs,
   comparedToReference,
   deriveVerificationState,
   inspectExerciseEvidence,
@@ -30,7 +31,7 @@ const call = (id: string, name: string, input: unknown): AgentEvent => ({
 const result = (
   id: string,
   name: string,
-  extra: { preview?: string; exitCode?: number; ok?: boolean } = {},
+  extra: { preview?: string; exitCode?: number; ok?: boolean; timedOut?: boolean } = {},
 ): AgentEvent => ({
   type: "tool_result",
   id,
@@ -38,6 +39,7 @@ const result = (
   ok: extra.ok ?? true,
   preview: extra.preview ?? "",
   ...(extra.exitCode !== undefined ? { exitCode: extra.exitCode } : {}),
+  ...(extra.timedOut !== undefined ? { timedOut: extra.timedOut } : {}),
 })
 
 describe("outputContractVerdict (OC1, RFC 07) — clean end-to-end run", () => {
@@ -597,5 +599,116 @@ describe("comparedToReference — R1 no-leak (CRITICAL, box-proven): a test-path
       call("c3", "container_exec", null),
     ]
     expect(comparedToReference(events).compared).toBe(false)
+  })
+})
+
+// B1 (RFC jul-3): a result killed by the per-command deadline is TRUNCATED evidence — it must never
+// count as an observation, or a half-printed diff could stamp `verified-fail`/`verified-pass`.
+// Every case is PAIRED with its completed control so the exclusion (not some other rule) is what's
+// proven (paired-control discipline).
+describe("B1 — timed-out results are NOT observations (truncated evidence can't stamp verdicts)", () => {
+  test("a timed-out diff is NOT an observed L1 comparison; the SAME completed diff is", () => {
+    const timedOut = comparedToReference([
+      call("c1", "container_exec", { command: "diff out.csv baseline.csv" }),
+      result("c1", "container_exec", {
+        preview: "3c3\n< a\n> b",
+        exitCode: 124,
+        ok: false,
+        timedOut: true,
+      }),
+    ])
+    expect(timedOut.compared).toBe(false)
+    const completed = comparedToReference([
+      call("c1", "container_exec", { command: "diff out.csv baseline.csv" }),
+      result("c1", "container_exec", { preview: "3c3\n< a\n> b", exitCode: 1 }),
+    ])
+    expect(completed.compared).toBe(true)
+  })
+
+  test("a timed-out run is NOT L0 exercise evidence (fail-closed); the completed control is", () => {
+    const timedOut = inspectExerciseEvidence([
+      call("c1", "container_exec", { command: "./solver in.txt" }),
+      result("c1", "container_exec", {
+        preview: "working on it…",
+        exitCode: 124,
+        ok: false,
+        timedOut: true,
+      }),
+    ])
+    expect(timedOut.exercised).toBe(false)
+    const completed = inspectExerciseEvidence([
+      call("c1", "container_exec", { command: "./solver in.txt" }),
+      result("c1", "container_exec", { preview: "answer 42", exitCode: 0 }),
+    ])
+    expect(completed.exercised).toBe(true)
+  })
+
+  test("OC1 belt: a foreign transport surfacing a deadline kill as ok:true/exit 0 is still NOT clean", () => {
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "./run" }),
+      result("c1", "container_exec", { preview: "done?", exitCode: 0, ok: true, timedOut: true }),
+    ])
+    expect(v.ranClean).toBe(false)
+  })
+})
+
+// P2-C (RFC jul-3): the one-hop LAUNDERING guard — a compare operand whose CONTENT came from the
+// hidden oracle (cp/ln/mv/tee/redirect, transitively) is refused exactly like the oracle path.
+// Every leak case is PAIRED with a clean control so the taint (not some other rule) is what's proven.
+describe("P2-C — laundering: comparing against oracle-DERIVED content is refused", () => {
+  const obs = (id: string) => result(id, "container_exec", { preview: "out", exitCode: 0 })
+  const exec = (id: string, command: string) => call(id, "container_exec", { command })
+  const verdictFor = (commands: readonly string[]) =>
+    comparedToReference(commands.flatMap((c, i) => [exec(`c${i}`, c), obs(`c${i}`)]))
+
+  test("cp from /tests/ then diff against the copy ⇒ refused; clean-source cp ⇒ compared", () => {
+    const laundered = verdictFor(["cp /app/tests/golden.csv ref.csv", "diff out.csv ref.csv"])
+    expect(laundered.compared).toBe(false)
+    expect(laundered.refusedTestPath).toBe(true)
+    const clean = verdictFor(["cp /app/data/sample.csv ref.csv", "diff out.csv ref.csv"])
+    expect(clean.compared).toBe(true)
+  })
+
+  test("ln -s laundering ⇒ refused (symlink names the oracle without copying bytes)", () => {
+    const v = verdictFor(["ln -s /tests/expected.txt mirror.txt", "diff out.txt mirror.txt"])
+    expect(v.compared).toBe(false)
+    expect(v.refusedTestPath).toBe(true)
+  })
+
+  test("redirect laundering (`cat /tests/golden.sql > mine.sql`) ⇒ refused; clean redirect ⇒ compared", () => {
+    const laundered = verdictFor(["cat /app/tests/golden.sql > mine.sql", "diff out.sql mine.sql"])
+    expect(laundered.compared).toBe(false)
+    expect(laundered.refusedTestPath).toBe(true)
+    const clean = verdictFor(["cat input.sql > mine.sql", "diff out.sql mine.sql"])
+    expect(clean.compared).toBe(true)
+  })
+
+  test("pipe+tee laundering (`cat tests/expected.txt | tee snap.txt`) ⇒ refused", () => {
+    const v = verdictFor(["cat tests/expected.txt | tee snap.txt", "diff out.txt snap.txt"])
+    expect(v.compared).toBe(false)
+    expect(v.refusedTestPath).toBe(true)
+  })
+
+  test("TRANSITIVE: cp /tests/g a, cp a b ⇒ diff against b refused", () => {
+    const v = verdictFor(["cp /tests/g.csv a.csv", "cp a.csv b.csv", "diff out.csv b.csv"])
+    expect(v.compared).toBe(false)
+    expect(v.refusedTestPath).toBe(true)
+  })
+
+  test("NO over-taint: referencing tests/ without dataflow into the operand keeps the compare fair", () => {
+    // `ls tests/` mentions the dir but copies nothing into `b.csv` — the later diff must count.
+    const v = verdictFor(["ls tests/", "diff a.csv b.csv"])
+    expect(v.compared).toBe(true)
+  })
+
+  test("buildTaintedRefs is exported + transitive + quote/./-normalizing (direct pin)", () => {
+    const t = buildTaintedRefs([
+      "cp /tests/golden.csv './ref.csv'",
+      "cp ref.csv 'copy2.csv'",
+      "echo hi > unrelated.txt",
+    ])
+    expect(t.has("ref.csv")).toBe(true)
+    expect(t.has("copy2.csv")).toBe(true) // transitive through the tainted intermediate
+    expect(t.has("unrelated.txt")).toBe(false) // no unfair source in that command
   })
 })

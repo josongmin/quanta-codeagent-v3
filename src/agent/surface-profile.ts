@@ -1,5 +1,5 @@
 /**
- * Surface-adaptive prompt composition seam (RFC `jul-2-terminal-bench-levers/00` §X).
+ * Surface-adaptive prompt composition seam (RFC jul-2 TB levers /00 §X).
  *
  * The universal SOTA shape (Codex / Claude / Terminus parity) is three cleanly
  * separated layers:

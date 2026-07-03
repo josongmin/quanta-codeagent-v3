@@ -1,5 +1,5 @@
 /**
- * `dockerRunViaCli` — the REAL {@link DockerRun} for the standalone (non-Harbor / non-orchestrator)
+ * `dockerRunViaCli` — the REAL {@link DockerRun} for the standalone (non-orchestrator)
  * terminal backend (RFC P2 remainder). It shells out to the `docker` CLI so quanta can drive a
  * plain local container directly, with NO external orchestrator.
  *
@@ -24,17 +24,28 @@ import type { ContainerExecResult } from "./port"
 
 /** Drained result of one spawned process. Mirrors {@link ContainerExecResult} but stdout/stderr are
  *  ALWAYS strings here — a CLI spawn yields concrete streams (the null-coercion concern is the IPC
- *  bridge's, not ours). `code` is the process exit code (the completion signal). */
+ *  bridge's, not ours). `code` is the process exit code (the completion signal). `timedOut` (B1,
+ *  RFC jul-3) marks a WALL-CLOCK kill: the process was killed by the deadline timer, `code` is the
+ *  kill exit, and stdout/stderr hold the PARTIAL bytes drained up to the kill (real partials — the
+ *  streams are piped + drained concurrently, so a killed process yields what it wrote so far). */
 export interface SpawnResult {
   readonly stdout: string
   readonly stderr: string
   readonly code: number
+  readonly timedOut?: boolean
 }
 
-/** Injected subprocess boundary — full argv (binary first) + optional abort → drained result.
- *  REJECTS only on a spawn-level failure (binary missing, daemon socket down); a non-zero EXIT is a
- *  normal `SpawnResult` (resolves). The default ({@link defaultDockerSpawn}) wraps `Bun.spawn`. */
-export type SpawnPort = (argv: readonly string[], signal?: AbortSignal) => Promise<SpawnResult>
+/** Injected subprocess boundary — full argv (binary first) + optional abort + optional wall-clock
+ *  deadline → drained result. REJECTS only on a spawn-level failure (binary missing, daemon socket
+ *  down); a non-zero EXIT is a normal `SpawnResult` (resolves). `timeoutMs` overrides the module
+ *  default deadline ({@link defaultDockerSpawn} keeps a 60s backstop either way — this spawner also
+ *  serves `docker run`/`rm` lifecycle calls, which must never hang the host). The default wraps
+ *  `Bun.spawn`. */
+export type SpawnPort = (
+  argv: readonly string[],
+  signal?: AbortSignal,
+  timeoutMs?: number,
+) => Promise<SpawnResult>
 
 /**
  * Container lifecycle over the same injected spawner — the standalone backend needs to BRING UP a
@@ -86,7 +97,7 @@ const DOCKER_ENV_ALLOWLIST: readonly string[] = Object.freeze([
  *  rather than orphaned until the timeout), and a SCRUBBED env (provider creds never reach the host
  *  `docker` process). The abort listener is unhooked in `finally` so a long-lived signal never leaks
  *  listeners. Pattern lifted from `@/storage/git-runner` + `@/tool/gh`'s credential fence. */
-export const defaultDockerSpawn: SpawnPort = async (argv, signal) => {
+export const defaultDockerSpawn: SpawnPort = async (argv, signal, timeoutMs) => {
   const proc = Bun.spawn(argv as string[], {
     stdout: "pipe",
     stderr: "pipe",
@@ -99,7 +110,16 @@ export const defaultDockerSpawn: SpawnPort = async (argv, signal) => {
       // already exited — ignore
     }
   }
-  const timer = setTimeout(kill, DEFAULT_TIMEOUT_MS)
+  // B1 (RFC jul-3): the wall-clock kill is now TYPED — `timedOut: true` on the result — instead of
+  // the prior SILENT kill (indistinguishable from a normal exit; jul-3 audit R2-A). The caller's
+  // `timeoutMs` overrides the 60s module backstop (the backstop stays: this spawner also serves
+  // `docker run`/`rm`, which must never hang the host). Killing the pipes resolves the drains with
+  // the bytes collected so far, so a timed-out exec surfaces REAL partial output.
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    kill()
+  }, timeoutMs ?? DEFAULT_TIMEOUT_MS)
   let onAbort: (() => void) | undefined
   if (signal !== undefined) {
     if (signal.aborted) kill()
@@ -114,7 +134,7 @@ export const defaultDockerSpawn: SpawnPort = async (argv, signal) => {
       new Response(proc.stderr).text(),
     ])
     const code = await proc.exited
-    return { stdout, stderr, code }
+    return { stdout, stderr, code, ...(timedOut ? { timedOut: true } : {}) }
   } finally {
     clearTimeout(timer)
     if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort)
@@ -129,12 +149,18 @@ export const defaultDockerSpawn: SpawnPort = async (argv, signal) => {
  * failure rejects).
  */
 export const dockerRunViaCli = (spawn: SpawnPort = defaultDockerSpawn): DockerRunner => {
-  // The DockerRun call: prepend the `docker` binary to the backend-built argv, spawn, map result.
-  const runner = ((argv: readonly string[], signal?: AbortSignal): Promise<ContainerExecResult> =>
-    spawn(["docker", ...argv], signal).then((r) => ({
+  // The DockerRun call: prepend the `docker` binary to the backend-built argv, spawn, map result
+  // (incl. the typed `timedOut` deadline marker — B1).
+  const runner = ((
+    argv: readonly string[],
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<ContainerExecResult> =>
+    spawn(["docker", ...argv], signal, timeoutMs).then((r) => ({
       stdout: r.stdout,
       stderr: r.stderr,
       code: r.code,
+      ...(r.timedOut === true ? { timedOut: true } : {}),
     }))) as DockerRunner
 
   runner.run = async (image: string): Promise<string> => {

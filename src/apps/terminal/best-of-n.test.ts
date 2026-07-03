@@ -186,3 +186,47 @@ describe("best-of-N fair selector — CARDINAL no-leak (never credit a hidden-te
     expect(s2.state).toBe("verified-pass")
   })
 })
+
+// B1 (RFC jul-3): the tie-break counts only COMPLETED observations. This is the wiring proof that
+// the selector shares the verify-gate's exported `resultObservedOutput` (incl. the timed-out
+// exclusion) instead of a drifting local mirror — with the old mirror this test is RED.
+describe("best-of-N — timed-out results do not inflate the exercise tie-break", () => {
+  const timedOutExercise = (command: string, id: string): readonly AgentEvent[] => [
+    { type: "tool_call", id, name: "container_exec", input: { command } } as AgentEvent,
+    {
+      type: "tool_result",
+      id,
+      name: "container_exec",
+      ok: false,
+      preview: "partial…",
+      exitCode: 124,
+      timedOut: true,
+    } as AgentEvent,
+  ]
+
+  test("a candidate padding its count with deadline-killed runs does NOT out-rank an honest single run", () => {
+    const honest = exerciseEvents("./solver a.txt", "x1")
+    const padded: readonly AgentEvent[] = [
+      ...exerciseEvents("./solver a.txt", "x1"),
+      ...timedOutExercise("./solver b.txt", "x2"), // killed mid-run — not an observation
+    ]
+    const sel = selectBestCandidate([
+      { stamp: stamp("verified-pass", false), events: honest },
+      { stamp: stamp("verified-pass", false), events: padded },
+    ])
+    expect(sel.winnerIndex).toBe(0) // counts tie at 1 — attempt-1 floor holds
+    // paired control: the SAME second run, completed, flips the winner (proves the timedOut flag,
+    // not some other property of the fixture, is what the tie-break keyed on)
+    const sel2 = selectBestCandidate([
+      { stamp: stamp("verified-pass", false), events: honest },
+      {
+        stamp: stamp("verified-pass", false),
+        events: [
+          ...exerciseEvents("./solver a.txt", "x1"),
+          ...exerciseEvents("./solver b.txt", "x2"),
+        ],
+      },
+    ])
+    expect(sel2.winnerIndex).toBe(1)
+  })
+})

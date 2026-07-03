@@ -155,3 +155,42 @@ describe("containerExecOverIpc — JSON-line bridge to the hands process", () =>
     expect(written.length).toBe(before)
   })
 })
+
+// B1 (RFC jul-3): the bridge is completion-only (harbor env.exec returns only on completion), so
+// the deadline is HOST-SYNTHESIZED — cancel goes out best-effort, the caller gets a typed timeout
+// NOW, and the hands' late terminal frame for the abandoned id is dropped by the unknown-id rule.
+describe("containerExecOverIpc — B1 per-command deadline (host-synthesized timeout)", () => {
+  test("deadline expiry: resolves a TYPED timeout (code 124, timedOut) and sends cancel for the same id", async () => {
+    const { duplex, written } = makeDuplex()
+    const port = containerExecOverIpc(duplex)
+    const r = await port.exec("sleep 600", undefined, 10) // hands never answers
+    expect(r).toEqual({ stdout: null, stderr: null, code: 124, timedOut: true })
+    expect(written.map(parse).filter((m) => m.id === 0).map((m) => m.type)).toEqual([
+      "exec",
+      "cancel",
+    ])
+  })
+
+  test("a result BEFORE the deadline wins — and the cleared timer never sends a late cancel", async () => {
+    const { duplex, push, written } = makeDuplex()
+    const port = containerExecOverIpc(duplex)
+    const pr = port.exec("ls", undefined, 30)
+    push(JSON.stringify({ id: 0, type: "exec_result", stdout: "x", stderr: "", code: 0 }))
+    expect(await pr).toEqual({ stdout: "x", stderr: "", code: 0 })
+    await new Promise((res) => setTimeout(res, 60)) // past where the deadline would have fired
+    expect(written.map(parse).filter((m) => m.type === "cancel")).toHaveLength(0)
+  })
+
+  test("the hands' LATE terminal frame after a deadline is dropped — the bridge stays usable", async () => {
+    const { duplex, push, written } = makeDuplex()
+    const port = containerExecOverIpc(duplex)
+    const r = await port.exec("slow", undefined, 5)
+    expect(r.timedOut).toBe(true)
+    // the hands side finally answers the abandoned id — must be dropped (unknown id), not misrouted
+    push(JSON.stringify({ id: 0, type: "error", message: "cancelled" }))
+    const second = port.exec("echo ok")
+    const secondId = parse(written[written.length - 1] ?? "{}").id as number
+    push(JSON.stringify({ id: secondId, type: "exec_result", stdout: "ok", stderr: "", code: 0 }))
+    expect((await second).stdout).toBe("ok")
+  })
+})

@@ -399,6 +399,7 @@ export const createStreamDispatcher = (
         exitCode?: number
         executedCommand?: string
         fullLogPath?: string
+        timedOut?: boolean
       }
       config.stream.emit({
         type: "tool_result",
@@ -413,6 +414,9 @@ export const createStreamDispatcher = (
           ? { executedCommand: enriched.executedCommand }
           : {}),
         ...(enriched.fullLogPath !== undefined ? { fullLogPath: enriched.fullLogPath } : {}),
+        // B1 (RFC jul-3): deadline-kill marker — the verify-gate excludes timed-out results
+        // from observed-evidence so a truncated diff can never stamp a verdict.
+        ...(enriched.timedOut === true ? { timedOut: true } : {}),
       })
       return out
     } finally {

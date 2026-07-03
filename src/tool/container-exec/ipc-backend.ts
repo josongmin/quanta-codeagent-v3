@@ -91,7 +91,7 @@ export const containerExecOverIpc = (duplex: JsonLineDuplex): ContainerExec => {
   })()
 
   return {
-    exec(command: string, signal?: AbortSignal): Promise<ContainerExecResult> {
+    exec(command: string, signal?: AbortSignal, timeoutMs?: number): Promise<ContainerExecResult> {
       if (closed) return Promise.reject(closed) // transport already dead — never register a never-settled call
       // Already-aborted BEFORE start: reject immediately and send NO frame. Sending `exec` would run a
       // command the caller already abandoned (the hands side has never seen this id, so a `cancel`
@@ -105,15 +105,19 @@ export const containerExecOverIpc = (duplex: JsonLineDuplex): ContainerExec => {
       }
       const id = nextId++
       return new Promise<ContainerExecResult>((resolve, reject) => {
-        // Settle wrapper removes the abort listener + the pending entry on EVERY exit path (resolve
-        // OR reject) so a long-lived signal never accumulates listeners (R7 leak lesson).
+        // Settle wrapper removes the abort listener + the pending entry + the deadline timer on
+        // EVERY exit path (resolve OR reject) so a long-lived signal never accumulates listeners
+        // (R7 leak lesson) and a settled call never fires a stray timeout.
+        let deadline: ReturnType<typeof setTimeout> | undefined
         const done =
           <T>(fn: (v: T) => void) =>
           (v: T) => {
             pending.delete(id)
             signal?.removeEventListener("abort", onAbort)
+            if (deadline !== undefined) clearTimeout(deadline)
             fn(v)
           }
+        const resolveClean = done(resolve)
         const rejectClean = done(reject)
         // A failing transport `write` must route through `done` (clean pending + listener) and reject
         // ONCE — a raw throw out of the executor would reject but leak the entry + listener.
@@ -125,14 +129,32 @@ export const containerExecOverIpc = (duplex: JsonLineDuplex): ContainerExec => {
           }
         }
         const onAbort = () => safeWrite(JSON.stringify({ id, type: "cancel" }))
-        pending.set(id, { resolve: done(resolve), reject: rejectClean })
+        pending.set(id, { resolve: resolveClean, reject: rejectClean })
         if (signal) {
           if (signal.aborted) onAbort()
           else signal.addEventListener("abort", onAbort, { once: true })
         }
+        // B1 (RFC jul-3) HOST-SYNTHESIZED deadline: the bridge is completion-only (the
+        // orchestrator's env-exec returns only on completion; a cancelled exec yields
+        // `error("cancelled")`, never a partial result — serve-loop contract), so waiting for the hands' terminal frame after a
+        // deadline would block the turn for the full command duration. On expiry we best-effort
+        // `cancel` (frees the hands slot / kills the in-container process where the env supports it)
+        // and RESOLVE immediately with a typed timeout result (code 124 — the `timeout(1)` kill
+        // convention — and NO partial output, which this transport cannot produce). The pending
+        // entry is deleted by the settle wrapper, so the hands' late terminal frame for this id is
+        // dropped by `parseFrame` (unknown id) — structurally race-free.
+        if (timeoutMs !== undefined && timeoutMs > 0) {
+          deadline = setTimeout(() => {
+            safeWrite(JSON.stringify({ id, type: "cancel" }))
+            resolveClean({ stdout: null, stderr: null, code: 124, timedOut: true })
+          }, timeoutMs)
+        }
         // Abort: send `cancel` and KEEP awaiting — the hands side replies with a TERMINAL frame for
         // this id (an `error` "cancelled", or a partial `exec_result` if the env yields one), so the
         // call always settles (never hangs). Cross-end cancel contract; see the Python serve loop.
+        // (Deliberately different from the DEADLINE path above, which resolves without waiting:
+        // an abort is the caller tearing the turn down — a late frame is harmless; a deadline is a
+        // liveness bound — the turn must get its result NOW.)
         safeWrite(JSON.stringify({ id, type: "exec", command }))
       })
     },

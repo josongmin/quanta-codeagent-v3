@@ -64,11 +64,28 @@ const renderStream = (label: string, raw: string | null): string => {
   return `${label}:\n${cap(neutralizeTerminalOutput(raw))}`
 }
 
+/** B1 (RFC jul-3): model-settable per-command deadline. OPT-IN — no default kill (long builds are
+ *  legitimate on this surface; a default deadline was rejected as a regression risk for the
+ *  compile-compcert class). Cap mirrors the Claude-Code bash precedent (600s max). */
+const TIMEOUT_MS_MAX = 600_000
+
 const schema = z.object({
   command: z
     .string()
     .min(1)
     .describe("Shell command to run inside the container (e.g. `ls -la /`)."),
+  timeout_ms: z
+    .number()
+    .int()
+    .positive()
+    .max(TIMEOUT_MS_MAX)
+    .optional()
+    .describe(
+      "Optional per-command deadline in ms (max 600000). On expiry the result is exit 124 with " +
+        "timed-out marked and any partial output; the container-side process may keep running. " +
+        "Omit for no deadline. For work that legitimately runs long, either set a generous " +
+        "timeout or run it in the background (`nohup cmd > /tmp/log 2>&1 &`) and poll the log.",
+    ),
 })
 export type ContainerExecInput = z.infer<typeof schema>
 
@@ -103,7 +120,7 @@ export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput>
           // command (and may surface partial output + a code). No host-side race wrapper here —
           // it would leak a per-call abort listener on the long-lived turn signal AND discard the
           // transport's partial output. The pre-start guard + threaded signal matches the pty path.
-          const r = await port.exec(parsed.data.command, ctx.signal)
+          const r = await port.exec(parsed.data.command, ctx.signal, parsed.data.timeout_ms)
           // exit + both streams always render (renderStream emits `(empty)` for an empty/null
           // stream — the agent sees "no stderr" explicitly rather than an ambiguous omission).
           const body = [
@@ -111,21 +128,38 @@ export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput>
             renderStream("stdout", r.stdout),
             renderStream("stderr", r.stderr),
           ].join("\n")
-          // A non-zero exit is NOT a tool failure — it's a real, useful observation the agent
-          // reasons over (the command ran). Surface it as ok:true with the exit code visible.
-          // RFC-0002 §5.2 evidence: ALSO carry the exit code on the TYPED seam
-          // (`ToolResult.evidence`) — dispatch flattens it onto the enriched `tool_result`
-          // AgentEvent, which is what the verify-gate/OC1 inspectors and the report cassette
-          // read. Text-only exit (`output`) left them blind: every run looked exitCode-less,
-          // so a crash (exit 2) was indistinguishable from a clean run (jul-3 RCA).
-          result = {
-            ok: true,
-            output: body,
-            evidence: {
-              exitCode: r.code,
-              executedCommand: parsed.data.command,
-              ...(r.stderr ? { stderr: r.stderr } : {}),
-            },
+          // RFC-0002 §5.2 evidence: carry the exit code (and the B1 `timedOut` marker) on the
+          // TYPED seam (`ToolResult.evidence`) — dispatch flattens it onto the enriched
+          // `tool_result` AgentEvent, which is what the verify-gate/OC1 inspectors and the report
+          // cassette read. Text-only exit (`output`) left them blind: every run looked
+          // exitCode-less, so a crash (exit 2) was indistinguishable from a clean run (jul-3 RCA).
+          const evidence = {
+            exitCode: r.code,
+            executedCommand: parsed.data.command,
+            ...(r.stderr ? { stderr: r.stderr } : {}),
+            ...(r.timedOut === true ? { timedOut: true } : {}),
+          }
+          if (r.timedOut === true) {
+            // B1: a DEADLINE expiry is a typed TOOL FAILURE (the command did NOT complete — its
+            // exit code is a kill sentinel, not a completion signal). `failure.mode:"timeout"`
+            // lets the model branch per R-FAILURE-MODE (raise timeout_ms / background+poll /
+            // narrow the command) instead of regex-reading the body. Partial output still renders
+            // so a hung build is recoverable from what it printed before the deadline.
+            result = {
+              ok: false,
+              output: `command timed out after ${parsed.data.timeout_ms}ms (deadline; the container-side process may still be running)\n${body}`,
+              failure: {
+                mode: "timeout",
+                ...(parsed.data.timeout_ms !== undefined
+                  ? { timeoutMs: parsed.data.timeout_ms }
+                  : {}),
+              },
+              evidence,
+            }
+          } else {
+            // A non-zero exit is NOT a tool failure — it's a real, useful observation the agent
+            // reasons over (the command ran). Surface it as ok:true with the exit code visible.
+            result = { ok: true, output: body, evidence }
           }
         } catch (e) {
           const msg = errMessage(e)

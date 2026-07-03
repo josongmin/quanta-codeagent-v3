@@ -64,7 +64,7 @@ export const renderPackByMode = (mode: AgentMode): readonly string[] => {
  *  for interactive sessions never shifts. */
 export const renderToolUseRules = (): readonly string[] => renderPackByMode("interactive")
 
-/** Render the `owned` environment posture rule list (RFC jul-2-terminal-bench-levers/01)
+/** Render the `owned` environment posture rule list (RFC jul-2 TB levers /01)
  *  — flattened to the same line-array shape `renderPackByMode` returns so the prompt
  *  builder can splice it at the identical seam. PROMPT-TEXT-ONLY: this is the `owned`
  *  posture's replacement for the CORE-based rules; it drops R-ENV / R-STOP-ENV and the

@@ -269,3 +269,54 @@ describe("dockerContainerExec — container-bound (never host)", () => {
     }
   })
 })
+
+// B1 (RFC jul-3): the model-settable per-command deadline. OPT-IN — no default kill (long builds
+// are legitimate here); a timed-out transport result surfaces as the TYPED `failure.mode:"timeout"`
+// (R-FAILURE-MODE branchable) with the salvaged partial output still rendered.
+describe("container_exec tool — B1 timeout_ms surface", () => {
+  const fullPort = (
+    impl: (cmd: string, signal?: AbortSignal, timeoutMs?: number) => Promise<ContainerExecResult>,
+  ): ContainerExec => ({ exec: impl })
+
+  test("threads timeout_ms to the port; OMITTED ⇒ undefined (no implicit default deadline)", async () => {
+    const seen: (number | undefined)[] = []
+    const tool = containerExecTool(
+      fullPort(async (_c, _s, t) => {
+        seen.push(t)
+        return { stdout: "", stderr: "", code: 0 }
+      }),
+    )
+    await run(tool, { command: "ls" })
+    await run(tool, { command: "ls", timeout_ms: 30_000 })
+    expect(seen).toEqual([undefined, 30_000])
+  })
+
+  test("a timedOut result ⇒ ok:false + typed failure.mode=timeout + partial output + evidence marker", async () => {
+    const tool = containerExecTool(
+      fullPort(async () => ({ stdout: "partial log", stderr: null, code: 124, timedOut: true })),
+    )
+    const r = await run(tool, { command: "make world", timeout_ms: 2000 })
+    expect(r.ok).toBe(false)
+    expect(r.failure).toEqual({ mode: "timeout", timeoutMs: 2000 })
+    expect(r.output).toContain("timed out")
+    expect(r.output).toContain("partial log") // the salvage renders — a hung build stays recoverable
+    expect(r.evidence?.timedOut).toBe(true) // the verify-gate exclusion keys on this seam
+    expect(r.evidence?.exitCode).toBe(124)
+  })
+
+  test("schema: rejects timeout_ms over the 600s cap / non-positive / non-integer", async () => {
+    const tool = containerExecTool(fakePort(async () => ({ stdout: "", stderr: "", code: 0 })))
+    expect((await run(tool, { command: "ls", timeout_ms: 600_001 })).ok).toBe(false)
+    expect((await run(tool, { command: "ls", timeout_ms: 0 })).ok).toBe(false)
+    expect((await run(tool, { command: "ls", timeout_ms: -5 })).ok).toBe(false)
+    expect((await run(tool, { command: "ls", timeout_ms: 1.5 })).ok).toBe(false)
+  })
+
+  test("a COMPLETED run never carries the timeout failure (paired control)", async () => {
+    const tool = containerExecTool(fullPort(async () => ({ stdout: "done", stderr: "", code: 0 })))
+    const r = await run(tool, { command: "make", timeout_ms: 2000 })
+    expect(r.ok).toBe(true)
+    expect(r.failure).toBeUndefined()
+    expect(r.evidence?.timedOut).toBeUndefined()
+  })
+})

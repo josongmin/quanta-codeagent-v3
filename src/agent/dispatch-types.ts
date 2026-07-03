@@ -26,6 +26,10 @@ export interface DispatchResult {
   stderrTail?: string
   /** Process exit code for shell-class tools, when the ToolResult exposes it. */
   exitCode?: number
+  /** B1 (RFC jul-3): true only when the tool's evidence marked the run as killed by a wall-clock
+   *  deadline — the exit code is a kill sentinel, output is partial. Omitted on every completed
+   *  run (exactOptionalPropertyTypes: never `undefined`). */
+  timedOut?: boolean
   /** Exact shell command the tool actually executed, when surfaced as typed
    *  evidence by the tool (e.g. `test_runner` after resolving defaults). */
   executedCommand?: string

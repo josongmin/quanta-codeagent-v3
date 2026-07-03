@@ -14,7 +14,7 @@
  * NB (jul-01): a measure-to-gate / verify-before-submit / no-overfit steer was tried here and
  * REVERTED — on the TB 3-task probe it produced zero solve-flips and made the agent over-persist
  * (an unsolvable task ran ~3× longer for no gain). Net-negative at n=1; not shipped. See
- * docs/analysis/terminal-bench-analysis/FAILURE-RCA.md.
+ * docs/analysis — the terminal bench analysis dir's FAILURE-RCA.md.
  */
 
 /** The capability section text. General terminal-operator habits only. */
@@ -25,6 +25,7 @@ export const TERMINAL_OPERATOR_GUIDE = `You are operating a live terminal inside
 - When something is missing, discover the environment and install on demand: detect the package manager that is actually present (apt-get / dnf / apk / pip / npm / cargo / …) and use it, rather than assuming one. Re-probe after installing.
 - Do not assume the working directory, PATH, or environment variables — check them when they matter.
 - Prefer non-interactive invocations (pass flags that avoid prompts) so a step completes with a clean exit code instead of blocking on input.
+- A command that may hang (a server, a watcher, something waiting on input) should get a \`timeout_ms\` so a wedged step returns with partial output instead of stalling you. A command that legitimately runs long (a big build, training) should NOT be given a tight timeout — run it in the background (\`nohup cmd > /tmp/build.log 2>&1 &\`) and poll the log/exit status instead.
 - Verify before declaring done: re-run a check, inspect the exit code, or read the artifact you just produced. A zero exit on the verifying command is the proof, not your expectation.`
 
 /** Accessor (function form mirrors the surface builders — the entry-point WILL call this when it

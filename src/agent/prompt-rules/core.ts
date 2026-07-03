@@ -119,8 +119,8 @@ const coreRule = (id: string): PromptRule => {
 }
 
 /**
- * `owned` environment posture (RFC jul-2-terminal-bench-levers/01) — the PARALLEL
- * rule list used when a surface OWNS its container (the Terminal brain, Terminal-Bench).
+ * `owned` environment posture (RFC jul-2 TB levers /01) — the PARALLEL
+ * rule list used when a surface OWNS its container (the Terminal brain).
  *
  * Prompt-TEXT-ONLY: this selects what the model is TOLD, never any runtime enforcement
  * (`SandboxPolicy` / `os-sandbox` are untouched by construction — this is a string list).

@@ -11,10 +11,13 @@ import type { ContainerExec, ContainerExecResult } from "./port"
 /** Runs a docker argv → result. Injected by the caller (real `docker` runner). `signal` (when
  *  the caller threads it) is forwarded so the runner CAN terminate the spawned `docker exec` —
  *  best-effort (see ContainerExec.exec): killing the host-side `docker exec` does not by itself
- *  reap the in-container process, so a real reap needs a transport-level test when one lands. */
+ *  reap the in-container process, so a real reap needs a transport-level test when one lands.
+ *  `timeoutMs` (B1) is the per-command wall-clock deadline forwarded to the spawner, which kills
+ *  the host-side `docker exec` on expiry and marks the result `timedOut` (same orphan caveat). */
 export type DockerRun = (
   argv: readonly string[],
   signal?: AbortSignal,
+  timeoutMs?: number,
 ) => Promise<ContainerExecResult>
 
 /** Container id/name token (alnum + `_.-`, no leading `-`) — reject metachars + flag-injection
@@ -28,6 +31,7 @@ export const dockerContainerExec = (containerId: string, dockerRun: DockerRun): 
     throw new Error(`dockerContainerExec: invalid container id: ${containerId}`)
   }
   return {
-    exec: (command, signal) => dockerRun(["exec", containerId, "sh", "-lc", command], signal),
+    exec: (command, signal, timeoutMs) =>
+      dockerRun(["exec", containerId, "sh", "-lc", command], signal, timeoutMs),
   }
 }

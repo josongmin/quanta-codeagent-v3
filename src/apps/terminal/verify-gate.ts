@@ -220,6 +220,73 @@ const TEST_PATH_MARKERS: readonly RegExp[] = [
 /** True iff a path operand points into a verifier/test/answer corpus (R1 — never a fair reference). */
 const isTestPath = (operand: string): boolean => TEST_PATH_MARKERS.some((re) => re.test(operand))
 
+// ── P2-C (RFC jul-3): one-hop LAUNDERING guard ───────────────────────────────────────────────
+// R1's path markers are provenance-blind: `cp /app/tests/golden.csv ref.csv && diff out ref.csv`
+// diffs against a clean-LOOKING name whose CONTENT is the hidden oracle. This pre-pass walks the
+// model's own commands chronologically and TAINTS every path that received content from a
+// test path (or an already-tainted path — transitive): cp/mv/ln/install/rsync destinations,
+// `tee` targets, `dd of=`, and shell `>`/`>>` redirect targets in any command that references an
+// unfair source. A tainted operand is then refused for L1 exactly like the oracle itself
+// (recognized-but-refused, the same `refusedTestPath` channel). Token-level + no cwd/symlink
+// resolution BY DESIGN (bounded; the complete fix is a provenance RFC): over-tainting costs one
+// bounded follow-up, under-tainting would teach peeking — fail-closed picks the former.
+
+/** Copy-shaped leaders whose LAST operand receives the content of the earlier operands. */
+const TAINT_COPIERS: ReadonlySet<string> = new Set(["cp", "mv", "ln", "install", "rsync"])
+
+/** Strip wrapping quotes + a leading `./` so `'ref.csv'` / `"./ref.csv"` / `ref.csv` unify. */
+const normalizeToken = (tok: string): string =>
+  tok.replace(/^['"]+|['"]+$/g, "").replace(/^\.\//, "")
+
+/** All `>`/`>>` redirect targets in a raw command. Fd-redirects (`2>err`) included — the stderr of
+ *  a test-reading command is still oracle-derived; over-taint is the safe direction. */
+const redirectTargets = (command: string): string[] => {
+  const out: string[] = []
+  for (const m of command.matchAll(/>{1,2}\s*([^\s;|&<>]+)/g)) {
+    const t = m[1]
+    if (t !== undefined) out.push(t)
+  }
+  return out
+}
+
+/** Build the tainted-path set from the model's own commands, in order (transitive: `cp /tests/g a
+ *  && cp a b` taints both `a` and `b`). PURE; exported for direct unit-pinning. */
+export const buildTaintedRefs = (commands: readonly string[]): ReadonlySet<string> => {
+  const tainted = new Set<string>()
+  const unfairTok = (tok: string): boolean => {
+    const n = normalizeToken(tok)
+    return isTestPath(n) || tainted.has(n)
+  }
+  for (const command of commands) {
+    // Only commands that actually REFERENCE an unfair source can launder it somewhere.
+    const referencesUnfair = command.split(/\s+/).some((t) => t.length > 0 && unfairTok(t))
+    if (!referencesUnfair) continue
+    // (a) shell redirects + `dd of=` anywhere in the command (`cat /tests/g > mine`, `dd of=mine`).
+    for (const t of redirectTargets(command)) tainted.add(normalizeToken(t))
+    for (const m of command.matchAll(/\bof=([^\s;|&]+)/g)) {
+      const t = m[1]
+      if (t !== undefined) tainted.add(normalizeToken(t))
+    }
+    // (b) per pipe/compound segment: `tee` targets, and copy-shaped leaders whose SOURCE is unfair.
+    for (const seg of command.split(/(?:&&|\|\||[;|&\n])/)) {
+      const { leader, args } = leaderAndArgs(seg)
+      if (leader === "") continue
+      const base = baseName(leader)
+      if (base === "tee") {
+        for (const a of args) if (!a.startsWith("-")) tainted.add(normalizeToken(a))
+        continue
+      }
+      if (!TAINT_COPIERS.has(base)) continue
+      const operands = args.filter((a) => !a.startsWith("-"))
+      if (operands.length < 2) continue
+      const dst = operands[operands.length - 1]
+      const srcs = operands.slice(0, -1)
+      if (dst !== undefined && srcs.some(unfairTok)) tainted.add(normalizeToken(dst))
+    }
+  }
+  return tainted
+}
+
 /** A non-flag, non-redirection token that looks like a filesystem operand (has a slash, an extension,
  *  or is a plain word) — used to count the DISTINCT operands a comparator was handed. Excludes the
  *  `/dev/null` sink (R4: `diff /dev/null /dev/null` is not a real comparison). */
@@ -246,8 +313,13 @@ interface SegmentL1 {
   readonly refIsTestPath: boolean
 }
 
-/** Judge a SINGLE command segment for an L1 comparison (pure, fail-closed). */
-const segmentComparesToReference = (segment: string): SegmentL1 => {
+/** Judge a SINGLE command segment for an L1 comparison (pure, fail-closed). `unfair` is the
+ *  operand-refusal predicate — R1 path markers by default, R1+taint when the caller ran the
+ *  P2-C laundering pre-pass ({@link buildTaintedRefs}). */
+const segmentComparesToReference = (
+  segment: string,
+  unfair: (operand: string) => boolean,
+): SegmentL1 => {
   const { leader, args } = leaderAndArgs(segment)
   if (leader === "") return { isCompare: false, refIsTestPath: false }
   const base = baseName(leader)
@@ -260,7 +332,7 @@ const segmentComparesToReference = (segment: string): SegmentL1 => {
         .slice(cIdx + 1)
         .join(" ")
         .replace(/^['"]|['"]$/g, "")
-      return anySegmentComparesToReference(inner)
+      return anySegmentComparesToReference(inner, unfair)
     }
     return { isCompare: false, refIsTestPath: false }
   }
@@ -270,8 +342,9 @@ const segmentComparesToReference = (segment: string): SegmentL1 => {
     const operands = args.filter(isPathOperand)
     const distinct = [...new Set(operands)]
     if (distinct.length < 2) return { isCompare: false, refIsTestPath: false } // R4: `diff a a`, <2 operands
-    // no-leak (R1): if ANY operand is under a verifier/test path, this is NOT a fair L1 comparison.
-    if (distinct.some(isTestPath)) return { isCompare: false, refIsTestPath: true }
+    // no-leak (R1 + P2-C): if ANY operand is under a verifier/test path — or received its content
+    // FROM one (laundering taint) — this is NOT a fair L1 comparison.
+    if (distinct.some(unfair)) return { isCompare: false, refIsTestPath: true }
     return { isCompare: true, refIsTestPath: false }
   }
 
@@ -287,22 +360,26 @@ const segmentComparesToReference = (segment: string): SegmentL1 => {
     // re-open: two data files alone do NOT prove a compare happened).
     const namesReference = args.some((a) => REFERENCE_HINT.test(a))
     if (!namesReference) return { isCompare: false, refIsTestPath: false }
-    // no-leak (R1): neither the SCRIPT ITSELF nor any operand may be under a verifier/test path —
-    // RUNNING the hidden verifier/grader script (`python /app/tests/verify.py …`) is peeking too,
-    // even when the compared operands look clean. Reject leader-in-test-path AND operand-in-test-path.
-    if (isTestPath(leader) || operands.some(isTestPath)) return { isCompare: false, refIsTestPath: true }
+    // no-leak (R1 + P2-C): neither the SCRIPT ITSELF nor any operand may be under a verifier/test
+    // path — RUNNING the hidden verifier/grader script (`python /app/tests/verify.py …`) is peeking
+    // too, even when the compared operands look clean — nor oracle-DERIVED (tainted).
+    if (unfair(leader) || operands.some(unfair)) return { isCompare: false, refIsTestPath: true }
     return { isCompare: true, refIsTestPath: false }
   }
 
   return { isCompare: false, refIsTestPath: false }
 }
 
-/** Judge a (possibly compound) command for an L1 comparison in ANY segment. */
-const anySegmentComparesToReference = (command: string): SegmentL1 => {
+/** Judge a (possibly compound) command for an L1 comparison in ANY segment. `unfair` defaults to
+ *  the bare R1 path markers (taint-free) so segment-level callers stay byte-identical. */
+const anySegmentComparesToReference = (
+  command: string,
+  unfair: (operand: string) => boolean = isTestPath,
+): SegmentL1 => {
   let refIsTestPath = false
   for (const seg of command.split(/(?:&&|\|\||[;|&\n])/)) {
     if (seg.trim().length === 0) continue
-    const r = segmentComparesToReference(seg)
+    const r = segmentComparesToReference(seg, unfair)
     if (r.isCompare) return { isCompare: true, refIsTestPath: false }
     if (r.refIsTestPath) refIsTestPath = true
   }
@@ -333,11 +410,27 @@ export interface CompareVerdict {
 export const comparedToReference = (events: readonly AgentEvent[]): CompareVerdict => {
   const resultObservedById = new Map<string, boolean>()
   let ptyReadObserved = false
+  const ownCommands: string[] = []
   for (const ev of events) {
     if (ev.type === "tool_result") {
       resultObservedById.set(ev.id, resultObservedOutput(ev))
       if (ev.name === PTY_READ && resultObservedOutput(ev)) ptyReadObserved = true
+    } else if (ev.type === "tool_call") {
+      if (ev.name === CONTAINER_EXEC) {
+        const c = containerExecCommand(ev)
+        if (c !== undefined) ownCommands.push(c)
+      } else if (ev.name === PTY_WRITE) {
+        const d = ptyWriteData(ev)
+        if (d !== undefined) ownCommands.push(d)
+      }
     }
+  }
+  // P2-C: taint pre-pass over the model's OWN commands — a compare operand that RECEIVED oracle
+  // content (cp/ln/mv/tee/redirect laundering, transitively) is refused like the oracle itself.
+  const tainted = buildTaintedRefs(ownCommands)
+  const unfair = (operand: string): boolean => {
+    const n = normalizeToken(operand)
+    return isTestPath(n) || tainted.has(n)
   }
 
   let refusedTestPath = false
@@ -346,7 +439,7 @@ export const comparedToReference = (events: readonly AgentEvent[]): CompareVerdi
     if (ev.name === CONTAINER_EXEC) {
       const command = containerExecCommand(ev)
       if (command === undefined) continue
-      const r = anySegmentComparesToReference(command)
+      const r = anySegmentComparesToReference(command, unfair)
       if (r.refIsTestPath) refusedTestPath = true
       if (r.isCompare && resultObservedById.get(ev.id) === true) {
         return {
@@ -358,7 +451,7 @@ export const comparedToReference = (events: readonly AgentEvent[]): CompareVerdi
     } else if (ev.name === PTY_WRITE) {
       const data = ptyWriteData(ev)
       if (data === undefined) continue
-      const r = anySegmentComparesToReference(data)
+      const r = anySegmentComparesToReference(data, unfair)
       if (r.refIsTestPath) refusedTestPath = true
       // A comparison TYPED into a pane counts only when the pane response was observed (a pty_read).
       if (r.isCompare && ptyReadObserved) {
@@ -375,7 +468,7 @@ export const comparedToReference = (events: readonly AgentEvent[]): CompareVerdi
     compared: false,
     refusedTestPath,
     evidence: refusedTestPath
-      ? "no fair comparison found: the only comparison referenced a verifier/test path (refused — the gate never peeks at a hidden oracle)"
+      ? "no fair comparison found: the only comparison referenced a verifier/test path or a file derived from one (refused — the gate never peeks at a hidden oracle)"
       : "no comparison found: the deliverable's output was never diffed/checked against a task-provided reference",
   }
 }
@@ -396,9 +489,21 @@ type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>
 
 /** A tool result "observed output" when it carries a non-empty stdout preview OR a readable exit
  *  code. An `ok:false` result still counts as an observation — a failing run the agent SAW is
- *  honest evidence (it may finalize as `verified-fail`); what we reject is NO run at all. */
-const resultObservedOutput = (r: ToolResultEvent): boolean =>
-  (typeof r.preview === "string" && r.preview.trim().length > 0) || typeof r.exitCode === "number"
+ *  honest evidence (it may finalize as `verified-fail`); what we reject is NO run at all.
+ *
+ *  B1 (RFC jul-3) TIMEOUT EXCLUSION: a `timedOut` result is NOT an observation — the command was
+ *  killed mid-flight, its exit code is a kill sentinel and its output is a truncated prefix. A
+ *  timed-out `diff` must never count as an observed L1 comparison (a truncated diff could stamp
+ *  `verified-fail`/`verified-pass` on partial evidence); same for L0 run-evidence (fail-closed —
+ *  the honest cost is one bounded follow-up). EXPORTED as the single observation predicate so
+ *  `best-of-n`'s evidence tie-break shares byte-identical semantics (no drifting mirror). */
+export const resultObservedOutput = (r: ToolResultEvent): boolean => {
+  if (r.timedOut === true) return false
+  return (
+    (typeof r.preview === "string" && r.preview.trim().length > 0) ||
+    typeof r.exitCode === "number"
+  )
+}
 
 /** Extract the command string a `container_exec` tool_call carried (its input is `{ command }`). */
 const containerExecCommand = (call: ToolCallEvent): string | undefined => {
@@ -524,6 +629,10 @@ export interface OutputContractVerdict {
  *  code, so for them `undefined` stays tolerant (byte-identical). */
 const resultRanClean = (r: ToolResultEvent): boolean => {
   if (r.ok !== true) return false
+  // B1: a deadline kill is never clean regardless of ok/code — belt for a foreign transport that
+  // might surface a timed-out run as ok:true (our tool surfaces ok:false, but the predicate must
+  // not depend on that courtesy).
+  if (r.timedOut === true) return false
   if (r.name === CONTAINER_EXEC) return r.exitCode === 0 // fail-closed: undefined = broken wire
   return r.exitCode === undefined || r.exitCode === 0
 }

@@ -268,6 +268,11 @@ export interface ToolResultEvidence {
   /** Absolute path to a full log when output spilled. Caller-resolved
    *  (FS jail still applies to the path). */
   fullLogPath?: string
+  /** B1 (RFC jul-3): the command was killed by a wall-clock DEADLINE before completing — the
+   *  exit code is a kill sentinel and any output is PARTIAL. Downstream inspectors (the terminal
+   *  verify-gate) must not treat a timed-out result as a completed observation. Absent ⇒ ran to
+   *  completion. */
+  timedOut?: boolean
 }
 
 /**

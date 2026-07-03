@@ -19,6 +19,12 @@ export interface ContainerExecResult {
   readonly stderr: string | null
   /** Process exit code (the completion signal). */
   readonly code: number
+  /** True iff the transport DEADLINE (`timeoutMs`) elapsed before the command completed and the
+   *  result was synthesized/truncated by the transport (B1, RFC jul-3). The command did NOT run to
+   *  completion: `code` is a kill/sentinel code (124 on the IPC path), `stdout`/`stderr` are whatever
+   *  was salvaged (docker path) or empty (IPC path — the bridge is completion-only, so a timed-out
+   *  exec has NO partial output by construction). Absent/false ⇒ a genuine completion. */
+  readonly timedOut?: boolean
 }
 
 /** Run an arbitrary shell command in the bound container. NEVER the host.
@@ -27,7 +33,15 @@ export interface ContainerExecResult {
  *  `docker exec` backend only forwards it to the host-side runner — `docker exec` does not
  *  propagate a host kill into the container by default, so a real kill must be proven per-transport
  *  (P2: the IPC bridge / a Bun.spawn DockerRun with a red-on-injection reap test). A transport MAY
- *  instead resolve with the PARTIAL output collected so far + a code, which is surfaced normally. */
+ *  instead resolve with the PARTIAL output collected so far + a code, which is surfaced normally.
+ *
+ *  `timeoutMs` (optional, B1 RFC jul-3) is a PER-COMMAND deadline the transport enforces itself
+ *  (each transport knows how to bound its own wait and what it can salvage — a host-side race
+ *  wrapper in the tool would discard transport partials and leak abort listeners). On expiry the
+ *  transport RESOLVES with `timedOut: true` (never rejects/hangs) and best-effort-cancels the
+ *  in-flight command; in-container orphan-kill remains the same best-effort caveat as `signal`.
+ *  ABSENT ⇒ NO deadline (byte-identical to the pre-B1 contract) — long builds are legitimate on
+ *  this surface, so an implicit default kill is deliberately NOT part of the port contract. */
 export interface ContainerExec {
-  exec(command: string, signal?: AbortSignal): Promise<ContainerExecResult>
+  exec(command: string, signal?: AbortSignal, timeoutMs?: number): Promise<ContainerExecResult>
 }
