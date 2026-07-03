@@ -18,6 +18,8 @@ import type { Server } from "bun"
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { SupportedReadModels } from "@/protocol/session"
 import { errMessage, logger } from "@/shared"
+import type { ArtifactPreviewResolver } from "@/host/runtime"
+import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
 import { setupFollowerApproval } from "./server/follower-approval"
 import { setupThreadPersistence } from "./server/persistence"
@@ -81,6 +83,21 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    */
   readonly canvasPorts?: CanvasPorts
   /**
+   * A2 — the WRITE side of the Canvas artifact source. When present, the server
+   * subscribes the shared session's `artifact.ready` events into it so each
+   * connection's Canvas emitter forwards an `artifact.ready` frame. Gate OFF
+   * (`QUANTA_WEB_CANVAS` unset) ⇒ absent ⇒ no bridge (byte-identical). The
+   * composition root (`./index.ts`) populates it from `facade.canvasArtifact.sink`.
+   */
+  readonly canvasArtifactFeed?: CanvasArtifactFeed
+  /**
+   * A2 — the host-side READ-ONLY `quanta-artifact://` preview resolver. When
+   * present, the `GET /artifact/:id` route serves jailed preview bytes. Gate OFF
+   * (`QUANTA_ARTIFACT_STORE` unset) ⇒ absent ⇒ the route 404s (no channel,
+   * byte-identical). Populated by `./index.ts` from `facade.artifactPreviewResolver`.
+   */
+  readonly artifactPreviewResolver?: ArtifactPreviewResolver
+  /**
    * QUANTA_WEB_AGENT_STATE — optional agent-state port bundle. Gate OFF ⇒
    * absent ⇒ the server attaches no agent-state sink (byte-identical). The
    * composition root (`./index.ts`) populates it only when
@@ -119,6 +136,15 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // their `./server/` siblings — see those modules for the full contracts.
   const { threadStore, unsubPersist: unsubPersist0 } = setupThreadPersistence(sharedSession)
   let unsubPersist = unsubPersist0
+  // A2 — server-boot bridge: pump every session `artifact.ready` event into the
+  // Canvas artifact source so each connection's emitter forwards an
+  // `artifact.ready` Canvas frame. Gate OFF ⇒ `canvasArtifactFeed` absent ⇒ null
+  // unsub, no subscription (byte-identical).
+  const { unsub: canvasArtifactUnsub0 } = setupCanvasArtifactBridge(
+    sharedSession,
+    config.canvasArtifactFeed ?? null,
+  )
+  let canvasArtifactUnsub = canvasArtifactUnsub0
   const {
     followerApproval,
     followerApprovalUnsub: followerApprovalUnsub0,
@@ -141,6 +167,12 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       threadStore,
       sharedSession,
       getServer: () => server,
+      // A2 — the read-only preview resolver for `GET /artifact/:id`. Absent ⇒
+      // the route 404s (byte-identical). `void` marks the intentional unused when
+      // exactOptionalPropertyTypes strips it below.
+      ...(config.artifactPreviewResolver !== undefined
+        ? { artifactPreviewResolver: config.artifactPreviewResolver }
+        : {}),
     }),
     websocket: buildWebSocketHandlers({ config, registry, sharedSession, followerApproval }),
   })
@@ -178,6 +210,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       if (unsubPersist !== null) {
         unsubPersist()
         unsubPersist = null
+      }
+      // A2 — stop the artifact bridge so it never fires against a closed session.
+      if (canvasArtifactUnsub !== null) {
+        canvasArtifactUnsub()
+        canvasArtifactUnsub = null
       }
       // T02 — tear down the follower approval coordinator's subscription + sweep
       // timer so neither fires against a closed session.

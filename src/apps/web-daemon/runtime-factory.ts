@@ -34,11 +34,21 @@ import {
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
-import { createRuntimeFromAgentConfigBase, type RuntimeFacade } from "@/sdk/runtime"
+import {
+  createRuntimeFromAgentConfigBase,
+  type RuntimeAgentConfigBase,
+  type RuntimeFacade,
+} from "@/sdk/runtime"
 import { gateOn } from "@/shared"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
+import { type ArtifactPreviewResolver, createArtifactPreviewResolver } from "@/host/runtime"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
+import {
+  type CanvasArtifactSourceHandle,
+  createCanvasArtifactSource,
+} from "./canvas-artifact-source"
 import {
   type CanvasToolDiffSourceHandle,
   createCanvasToolDiffSource,
@@ -73,6 +83,29 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * `tool.diff` frames, byte-identical).
    */
   readonly canvasToolDiff?: CanvasToolDiffSourceHandle
+  /**
+   * A2 wire-finish — canvas artifact source fed by a server-boot bridge that
+   * maps every session `artifact.ready` event into `capture(ref)`. Present only
+   * when `QUANTA_WEB_CANVAS=1` (gate OFF ⇒ undefined ⇒ the server forwards no
+   * `artifact.ready` Canvas frames, byte-identical). The session `artifact.ready`
+   * event itself is gated on `QUANTA_ARTIFACT_STORE` (see `artifactRegistry`).
+   */
+  readonly canvasArtifact?: CanvasArtifactSourceHandle
+  /**
+   * A2 — the SHARED per-session artifact registry, minted behind
+   * `QUANTA_ARTIFACT_STORE`. The SAME instance backs `base.artifactRegistry` (the
+   * capability bit + the turn runner's `artifact.ready` producer drain) AND the
+   * preview resolver below. Gate OFF ⇒ undefined ⇒ no producer, no preview
+   * (byte-identical).
+   */
+  readonly artifactRegistry?: ArtifactRegistry
+  /**
+   * A2 — the host-side READ-ONLY `quanta-artifact://` preview resolver over the
+   * SAME registry. The daemon's `GET /artifact/:id` route reads it here to serve
+   * jailed preview bytes. Gate OFF ⇒ undefined ⇒ the route 404s (no channel,
+   * byte-identical).
+   */
+  readonly artifactPreviewResolver?: ArtifactPreviewResolver
   /**
    * QUANTA_WEB_AGENT_STATE — agent-state source fed by the session's
    * `onAgentState` seam (the out-of-band stream tap). Present only when
@@ -219,6 +252,54 @@ const wireSessionObservability = (
   return { handle, bus }
 }
 
+/** A2 — the daemon's default tool registry with the SHARED artifact registry
+ *  threaded in (gated) so the `artifact_*` tools register into the SAME instance
+ *  the turn-drain reads. Absent registry ⇒ the artifact tools are NOT registered
+ *  (byte-identical). Extracted to keep the factory closure under the god-FN cap. */
+const buildDaemonToolRegistry = (
+  artifactRegistry: ArtifactRegistry | undefined,
+): ToolRegistry =>
+  new ToolRegistry(
+    buildDefaultTools(artifactRegistry !== undefined ? { artifactRegistry } : {}),
+  )
+
+/**
+ * A2 — resolve the artifact slice for the web daemon. Two independent gates:
+ *  - `QUANTA_WEB_CANVAS` ⇒ the canvas artifact source (the server-boot bridge
+ *    feeds it session `artifact.ready` events; each connection forwards a Canvas
+ *    frame).
+ *  - `QUANTA_ARTIFACT_STORE` ⇒ the SHARED per-session registry (backs the
+ *    `artifact_*` tools + `base.artifactRegistry` producer drain + capability
+ *    bit) AND the READ-ONLY preview resolver over the SAME registry (jailed to
+ *    cwd), which the `GET /artifact/:id` route reads.
+ *
+ * Gate OFF ⇒ the field is undefined (byte-identical default-OFF).
+ *
+ * FOLLOW-UP (honest): the GENERATION tools (`image_gen` / office authoring) that
+ * AUTO-register via an `artifactSink` are NOT gated on the web surface yet (their
+ * ports live in the CLI's `buildGatedToolPorts`, not this factory) — so today the
+ * web producer is the explicit `artifact_register` tool, not auto-registration.
+ * The channel itself is fully wired.
+ */
+export const resolveArtifactSlots = (
+  env: Record<string, string | undefined>,
+  cwd: string,
+): {
+  readonly canvasArtifact: CanvasArtifactSourceHandle | undefined
+  readonly artifactRegistry: ArtifactRegistry | undefined
+  readonly artifactPreviewResolver: ArtifactPreviewResolver | undefined
+} => {
+  const canvasArtifact = gateOn(env, "QUANTA_WEB_CANVAS") ? createCanvasArtifactSource() : undefined
+  const artifactRegistry = gateOn(env, "QUANTA_ARTIFACT_STORE")
+    ? createArtifactRegistry({ now: () => Date.now(), idFactory: monotonicIdFactory() })
+    : undefined
+  const artifactPreviewResolver =
+    artifactRegistry !== undefined
+      ? createArtifactPreviewResolver({ registry: artifactRegistry, jailRoot: cwd })
+      : undefined
+  return { canvasArtifact, artifactRegistry, artifactPreviewResolver }
+}
+
 /**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
  * resolved ONCE at boot (env-driven provider pick); each invocation of the
@@ -293,6 +374,14 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     const canvasToolDiff = gateOn(env, "QUANTA_WEB_CANVAS")
       ? createCanvasToolDiffSource()
       : undefined
+    // A2 — the artifact slice: canvas source (QUANTA_WEB_CANVAS) + the SHARED
+    // registry & preview resolver (QUANTA_ARTIFACT_STORE). Extracted so this
+    // factory closure stays under the god-FN cap. Gate OFF ⇒ all undefined
+    // (byte-identical). See {@link resolveArtifactSlots}.
+    const { canvasArtifact, artifactRegistry, artifactPreviewResolver } = resolveArtifactSlots(
+      env,
+      cwd,
+    )
     // QUANTA_WEB_AGENT_STATE — agent-state source. Gate OFF ⇒ undefined ⇒ no
     // `onAgentState` wired ⇒ the stream tap is never installed (no capture,
     // byte-identical) + no facade port ⇒ the server forwards no `agentState`
@@ -312,9 +401,13 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // T02 — thread-follower co-control slot for a web 2nd-client (gate
     // QUANTA_THIN_CLIENT_DISPATCH). Absent ⇒ no conversation-action port wired.
     const follower = buildFollowerCoControlSlot(env)
-    const base: Omit<AgentConfig, "modePolicy" | "budgetMeter"> = {
+    const base: RuntimeAgentConfigBase = {
       llm,
-      registry: new ToolRegistry(buildDefaultTools()),
+      // A2 — the default tools with the SHARED artifact registry threaded in so
+      // the gated `artifact_*` tools register into the SAME instance the turn-drain
+      // reads (single instance, no split-brain; reachable producer). See
+      // {@link buildDaemonToolRegistry}.
+      registry: buildDaemonToolRegistry(artifactRegistry),
       stream: new StdoutStream(),
       permission,
       messages: [],
@@ -322,17 +415,17 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       cwd,
       maxTurns: 200,
       signal: abort.signal,
-      // SECURITY (jun-10) — enable the HITL 4-tier gate so the per-turn
-      // permission gate enforces `hand-off-required` ⇒ HARD DENY and
-      // `always-confirm` ⇒ ask EVEN under `bypass`/`acceptEdits`. Without this
-      // the daemon's `session.permission.set("bypass")` would blanket-allow
-      // every tool incl. hand-off-required ones — CLI parity
-      // (`apps/cli/.../runtime-context-compose.ts` wires the same rails).
+      // SECURITY (jun-10) — enable the HITL 4-tier gate so `hand-off-required` ⇒
+      // HARD DENY and `always-confirm` ⇒ ask EVEN under bypass/acceptEdits (CLI
+      // parity; without it `session.permission.set("bypass")` blanket-allows).
       hitl: { enabled: true },
       ...(subagent !== undefined ? { subagent } : {}),
       ...(skills !== undefined ? { skills } : {}),
       ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),
       ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
+      // A2 — lift the SHARED registry onto the base ⇒ capability bit + the turn
+      // runner's `artifact.ready` producer drain. `{}` when off (byte-identical).
+      ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
       ...(agentState !== undefined ? { onAgentState: agentState.sink } : {}),
       // QUANTA_WEB_AGENT_STATE — wire the inbound port so the agent can ask on
       // web (the tool registers iff this is present). Absent ⇒ tool not
@@ -360,48 +453,36 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // ADR-0415 — expose the wire ports on the facade so the daemon's emitter
     // reads live state. Gate OFF ⇒ getters read undefined ⇒ emitter silent.
     const facade = attachObservabilityPorts(runtime, observability.handle)
-    // ADR-0440 — expose the canvas usage source so the daemon's canvas sink
-    // subscribes to live per-turn usage. Gate OFF ⇒ undefined ⇒ no sink.
-    if (canvasUsage !== undefined) {
-      Object.defineProperty(facade, "canvasUsage", {
-        get: () => canvasUsage,
-        enumerable: true,
-      })
-    }
-    // ADR-0440 wire-finish — expose the tool-diff source so the daemon's canvas
-    // sink subscribes to live tool mutations. Gate OFF ⇒ undefined ⇒ no source.
-    if (canvasToolDiff !== undefined) {
-      Object.defineProperty(facade, "canvasToolDiff", {
-        get: () => canvasToolDiff,
-        enumerable: true,
-      })
-    }
-    // QUANTA_WEB_AGENT_STATE — expose the agent-state source so the daemon's
-    // agent-state sink subscribes to live captures. Gate OFF ⇒ undefined ⇒ no
-    // source.
-    if (agentState !== undefined) {
-      Object.defineProperty(facade, "agentState", {
-        get: () => agentState,
-        enumerable: true,
-      })
-    }
-    // QUANTA_WEB_AGENT_STATE — expose the inbound port so the daemon's server
-    // can `resolve(promptId, …)` an inbound answer frame + `cancelAll()` on
-    // disconnect. Gate OFF ⇒ undefined ⇒ no port (byte-identical).
-    if (userInput !== undefined) {
-      Object.defineProperty(facade, "userInput", {
-        get: () => userInput,
-        enumerable: true,
-      })
-    }
-    // T02 — expose the follower co-control dispatcher so the server can route a
-    // decoded `followerVerb` frame to it. Gate OFF ⇒ undefined ⇒ no routing.
-    if (follower !== undefined) {
-      Object.defineProperty(facade, "followerCoControl", {
-        get: () => follower.dispatcher,
-        enumerable: true,
-      })
-    }
+    // Expose every optional live port as a read-only getter (present ⇒ the daemon
+    // subscribes/reads it; absent ⇒ the field is undefined ⇒ no sink/route,
+    // byte-identical). ADR-0440 canvas usage/tool-diff/artifact; A2 registry +
+    // preview resolver; QUANTA_WEB_AGENT_STATE agent-state + inbound; T02 follower.
+    defineOptionalFacadeGetters(facade, {
+      canvasUsage,
+      canvasToolDiff,
+      canvasArtifact,
+      artifactRegistry,
+      artifactPreviewResolver,
+      agentState,
+      ...(userInput !== undefined ? { userInput } : {}),
+      ...(follower !== undefined ? { followerCoControl: follower.dispatcher } : {}),
+    })
     return facade
+  }
+}
+
+/** Define each present value as a read-only enumerable getter on the facade
+ *  (Object.defineProperty, NOT a shallow copy, so the facade's prototype-bound
+ *  methods keep working — same discipline as {@link attachObservabilityPorts}).
+ *  An `undefined` value is SKIPPED so an absent gate leaves the field truly
+ *  absent (byte-identical default-OFF). Collapses the per-port define blocks so
+ *  the factory closure stays under the god-FN cap. */
+const defineOptionalFacadeGetters = (
+  facade: ObservableRuntimeFacade,
+  ports: Readonly<Record<string, unknown>>,
+): void => {
+  for (const [key, value] of Object.entries(ports)) {
+    if (value === undefined) continue
+    Object.defineProperty(facade, key, { get: () => value, enumerable: true })
   }
 }

@@ -46,6 +46,12 @@ export {
 } from "./agent-config-assembler"
 export { createSingleSessionRuntimeHost } from "./builder"
 export {
+  type ArtifactPreview,
+  type ArtifactPreviewOutcome,
+  type ArtifactPreviewResolver,
+  createArtifactPreviewResolver,
+} from "./artifact-preview-resolver"
+export {
   assertCapabilityExpectation,
   buildCapabilityManifest,
   deriveCapabilityManifest,

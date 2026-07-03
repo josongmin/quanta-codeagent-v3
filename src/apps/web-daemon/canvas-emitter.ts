@@ -29,12 +29,14 @@
 
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
 import {
+  type ArtifactReadyMessage,
   type CanvasMessage,
   type ContextUsageMessage,
   type DiffLineData,
   encodeCanvasFrame,
   type ToolDiffMessage,
 } from "@/protocol/canvas"
+import type { ArtifactRef } from "@/protocol/session"
 import { diffOps, isBinary, resolveEnvCaps } from "@/runner/diff-ops"
 
 /* ------------------------------------------------------------------ */
@@ -128,9 +130,31 @@ export interface CanvasEmitterHandle {
   readonly feedToolDiff: (input: ToolDiffInput) => void
   /** Serialize + emit a `context.usage` frame from the loop's segmented view. */
   readonly feedUsage: (view: ContextUsageBreakdown) => void
+  /** A2 — map a session `ArtifactRef` (the SAME producer drain that emits the
+   *  `artifact.ready` session event) to an `artifact.ready` Canvas frame. */
+  readonly feedArtifactReady: (ref: ArtifactRef) => void
   /** Stop emitting (idempotent). After this every feed is a no-op. */
   readonly stop: () => void
 }
+
+/**
+ * A2 — lossless `ArtifactRef` → `ArtifactReadyMessage`. Pure form-conversion:
+ * the ref's OPAQUE `quanta-artifact://<id>` locator is carried VERBATIM (never
+ * an fs path — the host's jailed preview resolver serves the bytes read-only),
+ * and the closed artifact kind + mime type are the ref's own. `name` rides only
+ * when present (`exactOptionalPropertyTypes`). The registry already minted the
+ * ref on the producer drain — this map re-shapes it for the Canvas transport, it
+ * does NOT re-derive any field.
+ */
+const buildArtifactReadyMessage = (ref: ArtifactRef, now: number): ArtifactReadyMessage => ({
+  kind: "artifact.ready",
+  artifactId: ref.artifactId,
+  artifactKind: ref.kind,
+  mimeType: ref.mimeType,
+  locator: ref.locator,
+  ...(ref.name !== undefined ? { name: ref.name } : {}),
+  emittedAt: now,
+})
 
 const buildToolDiffMessage = (
   input: ToolDiffInput,
@@ -208,6 +232,10 @@ export const createCanvasEmitter = (opts: CanvasEmitterOptions = {}): CanvasEmit
     feedUsage: (view) => {
       if (stopped) return
       emit(buildUsageMessage(view, now()))
+    },
+    feedArtifactReady: (ref) => {
+      if (stopped) return
+      emit(buildArtifactReadyMessage(ref, now()))
     },
     stop: () => {
       stopped = true

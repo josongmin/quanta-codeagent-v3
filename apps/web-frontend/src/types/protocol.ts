@@ -679,7 +679,26 @@ export interface ContextUsageMessage {
   readonly emittedAt: number
 }
 
-export type CanvasMessage = ToolDiffMessage | ContextUsageMessage
+/**
+ * A2 — a rich artifact is READY to preview (mirrors upstream
+ * `ArtifactReadyMessage` in `src/protocol/canvas/messages.ts`). The daemon emits
+ * this alongside the session `artifact.ready` event so the Canvas surface can
+ * render a preview card WITHOUT a session-event round-trip. Carries ONLY the
+ * opaque `quanta-artifact://<id>` locator — the surface fetches the actual bytes
+ * from the daemon's `GET /artifact/<id>` route (the host resolves the locator to
+ * JAILED bytes read-only; the absolute fs path never reaches the wire).
+ */
+export interface ArtifactReadyMessage {
+  readonly kind: "artifact.ready"
+  readonly artifactId: string
+  readonly artifactKind: string
+  readonly mimeType: string
+  readonly locator: string
+  readonly name?: string
+  readonly emittedAt: number
+}
+
+export type CanvasMessage = ToolDiffMessage | ContextUsageMessage | ArtifactReadyMessage
 
 /* --- QUANTA_WEB_AGENT_STATE — agent-state protocol --------------------- */
 

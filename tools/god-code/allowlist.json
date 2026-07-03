@@ -40,7 +40,6 @@
     "src/apps/eval/grounding/compare.ts::evaluateGroundingRegression",
     "src/apps/eval/grounding/normalization/heuristic.ts::normalizeGroundingDecisionHeuristically",
     "src/apps/eval/grounding/normalization/structural.ts::normalizeGroundingDecisionStructurally",
-    "src/apps/web-daemon/runtime-factory.ts::<anonymous@241>",
     "src/apps/web-daemon/runtime-factory.ts::buildProductionRuntimeFactory",
     "src/browser/cdp-adapter.ts::createCdpBrowser",
     "src/browser/cdp/cdp-session.ts::createCdpSession",

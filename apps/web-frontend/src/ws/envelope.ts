@@ -289,7 +289,7 @@ export const decodeObservabilityFrame = (raw: unknown): ObservabilityMessage | n
  */
 export const CANVAS_PROTOCOL_VERSION = "canvas.v1" as const
 
-const CANVAS_MESSAGE_KINDS = ["tool.diff", "context.usage"] as const
+const CANVAS_MESSAGE_KINDS = ["tool.diff", "context.usage", "artifact.ready"] as const
 
 const isCanvasMessageKind = (value: unknown): value is CanvasMessage["kind"] =>
   isString(value) && (CANVAS_MESSAGE_KINDS as readonly string[]).includes(value)
@@ -303,6 +303,28 @@ const isToolDiffShape = (rec: Record<string, unknown>): boolean =>
 const isContextUsageShape = (rec: Record<string, unknown>): boolean =>
   Array.isArray(rec.segments) && isNumber(rec.total) && isNumber(rec.max)
 
+/** A2 — minimal `artifact.ready` shape (mirrors upstream `isArtifactReadyShape`):
+ *  the four load-bearing string fields; `name` is optional and not checked. */
+const isArtifactReadyShape = (rec: Record<string, unknown>): boolean =>
+  isString(rec.artifactId) &&
+  isString(rec.artifactKind) &&
+  isString(rec.mimeType) &&
+  isString(rec.locator)
+
+/** Per-kind shape check — a closed switch on the (already-validated) tag so a
+ *  future kind added to `CANVAS_MESSAGE_KINDS` without a shape branch is a
+ *  compile-visible gap here (exhaustiveness), not a silent accept. */
+const isCanvasMessageShape = (kind: CanvasMessage["kind"], rec: Record<string, unknown>): boolean => {
+  switch (kind) {
+    case "tool.diff":
+      return isToolDiffShape(rec)
+    case "context.usage":
+      return isContextUsageShape(rec)
+    case "artifact.ready":
+      return isArtifactReadyShape(rec)
+  }
+}
+
 /** Best-effort structural guard for a canvas message payload. Mirrors
  *  `isCanvasMessage` upstream — tag + per-kind minimal shape, no deep
  *  field validation (unknown fields are forward-compatible). */
@@ -310,7 +332,7 @@ const isCanvasMessage = (value: unknown): value is CanvasMessage => {
   if (!isRecord(value)) return false
   if (!isCanvasMessageKind(value.kind)) return false
   if (!isNumber(value.emittedAt)) return false
-  return value.kind === "tool.diff" ? isToolDiffShape(value) : isContextUsageShape(value)
+  return isCanvasMessageShape(value.kind, value)
 }
 
 /**

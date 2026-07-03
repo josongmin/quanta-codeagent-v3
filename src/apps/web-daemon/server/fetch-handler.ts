@@ -14,6 +14,7 @@
  */
 
 import type { Server } from "bun"
+import type { ArtifactPreviewResolver } from "@/host/runtime"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "../auth-routes"
 import {
@@ -38,6 +39,10 @@ export interface FetchHandlerDeps {
   readonly startedAt: number
   readonly threadStore: ThreadStore | null
   readonly sharedSession: RuntimeSession
+  /** A2 — the read-only `quanta-artifact://` preview resolver for
+   *  `GET /artifact/:id`. Absent (gate `QUANTA_ARTIFACT_STORE` off) ⇒ the route
+   *  404s (byte-identical). */
+  readonly artifactPreviewResolver?: ArtifactPreviewResolver
   /** Lazy accessor — the `Bun.serve` handle is assigned after this is built. */
   readonly getServer: () => Server<WSData>
 }
@@ -177,7 +182,54 @@ const tryReadRoutes = (
       })
     }
   }
+  // A2 — `GET /artifact/:id` serves a registered artifact's JAILED preview bytes
+  // read-only. The `:id` is the opaque registry id carried in the
+  // `quanta-artifact://<id>` locator (the surface strips the scheme). Disabled
+  // (404 `artifact_store_disabled`) when the resolver is absent (gate OFF). This
+  // is the consumer for the resolver minted at the composition root — the
+  // `quanta-artifact://` scheme is now resolvable by a surface.
+  {
+    const artifactMatch = url.pathname.match(/^\/artifact\/([^/]+)$/)
+    if (artifactMatch !== null && req.method === "GET") {
+      const denied = requireAuth(url, req)
+      if (denied !== null) return denied
+      return tryResolveArtifact(deps.artifactPreviewResolver, artifactMatch[1] ?? "")
+    }
+  }
   return undefined
+}
+
+/** A2 — resolve `:id` to jailed preview bytes via the read-only resolver. The
+ *  resolver id-only lookup rejects `file://` / absolute / `../` traversal (they
+ *  can never be a registry id) and jail-asserts the resolved path, so the bytes
+ *  stay JAILED. Maps the typed outcome to an HTTP status; a resolver read never
+ *  serves an fs path — only registry-recorded bytes. */
+const tryResolveArtifact = async (
+  resolver: ArtifactPreviewResolver | undefined,
+  rawId: string,
+): Promise<Response> => {
+  if (resolver === undefined) {
+    return jsonResponse(404, { error: "artifact_store_disabled" })
+  }
+  const id = decodeURIComponent(rawId)
+  const outcome = await resolver.resolve(id)
+  if (!outcome.ok) {
+    // `bad_locator` / `not_found` / `escaped` ⇒ 404 (never reveal WHY beyond a
+    // coarse not-found so a traversal probe learns nothing); `read_failed` ⇒ 500.
+    const status = outcome.reason === "read_failed" ? 500 : 404
+    return jsonResponse(status, { error: "artifact_unavailable", reason: outcome.reason })
+  }
+  // Serve the jailed bytes verbatim with the registry-recorded media type — the
+  // surface renders with the RIGHT type without re-sniffing. `X-Content-Type-
+  // Options: nosniff` so a browser cannot MIME-sniff the payload into a script.
+  return new Response(outcome.preview.bytes, {
+    status: 200,
+    headers: {
+      "content-type": outcome.preview.mediaType,
+      "x-content-type-options": "nosniff",
+      "cache-control": "no-store",
+    },
+  })
 }
 
 /** Authenticated mutation/OAuth routes — `POST /config` + the `/auth/*` ChatGPT

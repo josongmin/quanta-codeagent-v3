@@ -83,6 +83,11 @@ const resolveObservableFactory = async (
     !gateOn(env, "QUANTA_OBSERVABILITY") &&
     !gateOn(env, "QUANTA_WEB_CANVAS") &&
     !gateOn(env, "QUANTA_WEB_AGENT_STATE") &&
+    // A2 — the store gate ALSO needs the eager facade so the `GET /artifact/:id`
+    // route can read the facade's preview resolver, even when canvas is OFF (the
+    // IPC preview channel is independent of the Canvas WS frames). Absent ⇒ the
+    // route 404s but the daemon still serves the session (byte-identical legacy).
+    !gateOn(env, "QUANTA_ARTIFACT_STORE") &&
     // T02 — the follower co-control dispatcher also needs the ONE shared facade
     // so the server can route follower frames into the live session.
     !isFollowerCoControlEnabled(env)
@@ -136,12 +141,21 @@ const buildObservabilityPorts = (
  */
 const buildCanvasPorts = (facade: ObservableRuntimeFacade | undefined): CanvasPorts | undefined => {
   if (facade === undefined) return undefined
-  if (facade.canvasUsage === undefined && facade.canvasToolDiff === undefined) return undefined
+  if (
+    facade.canvasUsage === undefined &&
+    facade.canvasToolDiff === undefined &&
+    facade.canvasArtifact === undefined
+  ) {
+    return undefined
+  }
   return {
     ...(facade.canvasUsage !== undefined ? { usageSource: facade.canvasUsage } : {}),
     // ADR-0440 wire-finish — the canvas tool-diff source (subscribe-only). Each
     // connection's emitter forwards every capture as a `tool.diff` frame.
     ...(facade.canvasToolDiff !== undefined ? { toolDiffSource: facade.canvasToolDiff } : {}),
+    // A2 wire-finish — the canvas artifact source (subscribe-only). Each
+    // connection's emitter forwards every ready ref as an `artifact.ready` frame.
+    ...(facade.canvasArtifact !== undefined ? { artifactSource: facade.canvasArtifact } : {}),
   }
 }
 
@@ -240,6 +254,13 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     agentStatePorts,
   })
 
+  // A2 — the WRITE side of the Canvas artifact source (the server-boot bridge
+  // pumps session `artifact.ready` events into it) + the read-only preview
+  // resolver (the `GET /artifact/:id` route reads it). Both ride the eagerly-minted
+  // observable facade. Gate OFF ⇒ absent ⇒ no bridge, route 404s (byte-identical).
+  const canvasArtifactFeed = observableFacade?.canvasArtifact?.sink
+  const artifactPreviewResolver = observableFacade?.artifactPreviewResolver
+
   const config: WebDaemonServerConfig = {
     port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
     bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
@@ -252,6 +273,8 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     supportedReadModels,
     ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
     ...(canvasPorts !== undefined ? { canvasPorts } : {}),
+    ...(canvasArtifactFeed !== undefined ? { canvasArtifactFeed } : {}),
+    ...(artifactPreviewResolver !== undefined ? { artifactPreviewResolver } : {}),
     ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
     ...(userInputPorts !== undefined ? { userInputPorts } : {}),
     ...(followerCoControl !== undefined ? { followerCoControl } : {}),

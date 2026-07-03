@@ -14,6 +14,7 @@ import {
   agentStateObservationToMessage,
   encodeAgentStateFrame,
 } from "@/protocol/agent-state"
+import type { ArtifactRef } from "@/protocol/session"
 import { type CanvasEmitterHandle, createCanvasEmitter } from "../canvas-emitter"
 import {
   createObservabilityEmitter,
@@ -138,6 +139,19 @@ export interface CanvasToolDiffSource {
 }
 
 /**
+ * A2 wire-finish — canvas artifact source. Subscribe-only (like the tool-diff
+ * source: an `artifact.ready` is a point-in-time event, not retained state).
+ * Fed by a server-boot bridge that maps every session `artifact.ready` event
+ * into `capture(ref)`. Each connection's emitter forwards every subsequent ref
+ * as an `artifact.ready` Canvas frame. Structural mirror of
+ * `canvas-artifact-source.ts#CanvasArtifactSourceHandle.subscribe`.
+ */
+export interface CanvasArtifactSource {
+  /** Subscribe to subsequent ready artifacts. Returns an unsubscribe closure. */
+  subscribe(handler: (ref: ArtifactRef) => void): () => void
+}
+
+/**
  * ADR-0440 — canvas port bundle handed to each connection. All optional: the
  * `index.ts` composition root only passes what the live facade exposes. Gate
  * OFF ⇒ `index.ts` never builds this ⇒ no sink, byte-identical.
@@ -150,6 +164,14 @@ export interface CanvasPorts {
    * Absent ⇒ a connection forwards no `tool.diff` frames (byte-identical).
    */
   readonly toolDiffSource?: CanvasToolDiffSource
+  /**
+   * A2 wire-finish — live artifact source (a server-boot bridge feeds it every
+   * session `artifact.ready` ref). Present only when `QUANTA_WEB_CANVAS=1`.
+   * Absent ⇒ a connection forwards no `artifact.ready` Canvas frames
+   * (byte-identical; the session event itself is gated on
+   * `QUANTA_ARTIFACT_STORE`).
+   */
+  readonly artifactSource?: CanvasArtifactSource
 }
 
 /**
@@ -206,11 +228,21 @@ export const attachCanvasSink = (
       }),
     )
   }
+  // A2 wire-finish — subscribe this connection's emitter to the live artifact
+  // source so a drained session `artifact.ready` ref becomes an `artifact.ready`
+  // Canvas frame. NO snapshot-on-connect (a ready is a point-in-time event, not
+  // retained state) — artifacts render from the next ready forward.
+  let unsubscribeArtifacts: (() => void) | undefined
+  const artifactSource = ports.artifactSource
+  if (artifactSource !== undefined) {
+    unsubscribeArtifacts = artifactSource.subscribe((ref) => handle.feedArtifactReady(ref))
+  }
   return {
     handle,
     detach: () => {
       unsubscribe?.()
       unsubscribeDiffs?.()
+      unsubscribeArtifacts?.()
       handle.stop()
     },
   }
