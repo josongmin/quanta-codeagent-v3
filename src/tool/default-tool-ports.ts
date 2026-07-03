@@ -191,6 +191,12 @@ export interface DefaultToolPorts {
    *  surface's workhorse (non-interactive steps). Absent ⇒ NOT registered (byte-identical).
    *  Container-bound by construction; never the host. */
   containerExec?: ContainerExec
+  /** B2 (RFC jul-3) — when wired, append the `container_write_file` tool (exact-byte file
+   *  authoring over the SAME container transport, base64-inert + fresh-readback verify). A
+   *  SEPARATE port field (usually the same `ContainerExec` instance) so the composition root
+   *  gates it independently (`QUANTA_TB_WRITE_TOOL`, default-OFF). Absent ⇒ NOT registered
+   *  (byte-identical). */
+  containerWriteFile?: ContainerExec
   /** code-mode (RFC jun-6-code-mode, Phase 1) — when true, append the gated
    *  `code_cell` tool (run a model-authored JS program whose every `tools.X(args)`
    *  re-enters the REAL dispatchTool). Absent/false ⇒ tool NOT registered

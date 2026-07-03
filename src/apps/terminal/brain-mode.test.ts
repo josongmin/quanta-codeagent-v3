@@ -31,6 +31,7 @@ import {
   TB_ENV_OWNED_ENV,
   TB_OUTPUT_CONTRACT_ENV,
   TB_VERIFY_GATE_ENV,
+  TB_WRITE_TOOL_ENV,
   VERIFY_GATE_FOLLOWUP,
 } from "./brain-mode"
 
@@ -471,6 +472,32 @@ describe("environment posture (lever #1)", () => {
     }
     // container_exec is offered under both.
     expect(toolsOf(owned)).toContain("container_exec")
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// B2 — `container_write_file` knob (RFC jul-3, default-OFF). The gate is READ in runTerminalBrain
+// (env-threaded entry) and applied in the surface builder — this pins the whole wire at the
+// model-visible seam (the OFFERED tool list), the inert-prevention lesson (jun-27): a knob whose
+// read site drifts from the mint site silently dies.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe("B2 — container_write_file knob (default-OFF)", () => {
+  const toolsOf = (llm: FakeLlm) => (llm.seen[0]?.tools ?? []).map((t) => t.name)
+
+  test("OFF (unset) ⇒ NOT offered — byte-identical tool menu", async () => {
+    const llm = await runAndCaptureSystem()
+    expect(toolsOf(llm)).not.toContain("container_write_file")
+    expect(toolsOf(llm)).toContain("container_exec")
+  })
+
+  test("ON ⇒ offered alongside container_exec; BASE repo-edit/host tools still never leak", async () => {
+    const llm = await runAndCaptureSystem({ [TB_WRITE_TOOL_ENV]: "1" })
+    const names = toolsOf(llm)
+    expect(names).toContain("container_write_file")
+    expect(names).toContain("container_exec")
+    for (const base of ["bash", "write", "edit", "apply_patch", "grep"]) {
+      expect(names).not.toContain(base)
+    }
   })
 })
 

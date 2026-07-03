@@ -597,7 +597,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "§7.3 ci_finding structured CI-investigation record tool (opt-in).",
     readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghTools opts.ciFindingStore)",
   },
-  // Terminal-Bench lever #2 / v2 (RFC jul-2-terminal-bench-levers/03) — the verify-gate v2
+  // TB lever #2 / v2 (RFC jul-2 TB levers/03) — the verify-gate v2
   // compare-to-reference gate in the terminal brain. AGENT-SIDE read via
   // `gateOn(env, "QUANTA_TB_VERIFY_GATE")` in `apps/terminal/brain-mode.ts` (a terminal-surface
   // gate, NOT a CLI-render knob, so it lives HERE per the read-site-domain ratchet). Default-OFF:
@@ -610,10 +610,10 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "runtime-config",
     describe:
-      "Terminal-Bench verify-gate v2 (compare-to-reference, opt-in). Inspects the trajectory for an OBSERVED L1 comparison of the deliverable's output against a distinct, NON-test reference (diff/cmp/sdiff/colordiff of two operands, or a script naming a reference); no-leak (R1): a comparison against a verifier/test path is REFUSED. If no L1 comparison, injects EXACTLY ONE bounded follow-up (K=0, cannot loop/over-persist), then stamps an honest verified-pass/verified-fail/unverifiable trichotomy — verified-pass is UNREACHABLE without an observed comparison (the v1 rubber-stamp is closed).",
+      "TB verify-gate v2 (compare-to-reference, opt-in). Inspects the trajectory for an OBSERVED L1 comparison of the deliverable's output against a distinct, NON-test reference (diff/cmp/sdiff/colordiff of two operands, or a script naming a reference); no-leak (R1): a comparison against a verifier/test path is REFUSED. If no L1 comparison, injects EXACTLY ONE bounded follow-up (K=0, cannot loop/over-persist), then stamps an honest verified-pass/verified-fail/unverifiable trichotomy — verified-pass is UNREACHABLE without an observed comparison (the v1 rubber-stamp is closed).",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain verify-gate v2 compare-to-reference)",
   },
-  // Terminal-Bench lever #1 (RFC jul-2-terminal-bench-levers/01) — the ENVIRONMENT POSTURE.
+  // TB lever #1 (RFC jul-2 TB levers/01) — the ENVIRONMENT POSTURE.
   // AGENT-SIDE read via `gateOn(env, "QUANTA_TB_ENV_OWNED")` in `apps/terminal/brain-mode.ts` (a
   // terminal-surface gate, NOT a CLI-render knob — lives HERE per the read-site-domain ratchet).
   // Default-OFF: absent ⇒ the brain keeps the frozen SWE-bench env guardrails (R-ENV / R-STOP-ENV)
@@ -627,10 +627,10 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "runtime-config",
     describe:
-      "Terminal-Bench environment posture (opt-in). When ON, the terminal brain rebuilds its SYSTEM prompt with the `owned` posture — install/configure/build freely (a working environment IS the deliverable), dropping the frozen R-ENV/R-STOP-ENV install-prohibition and adding R-ENV-OWNED/R-INSTALL-THRASH. PROMPT-TEXT-ONLY: swaps rendered rule text via boot.systemSource; touches NO SandboxPolicy/os-sandbox/host enforcement. Off ⇒ byte-identical (frozen) brain.",
+      "TB environment posture (opt-in). When ON, the terminal brain rebuilds its SYSTEM prompt with the `owned` posture — install/configure/build freely (a working environment IS the deliverable), dropping the frozen R-ENV/R-STOP-ENV install-prohibition and adding R-ENV-OWNED/R-INSTALL-THRASH. PROMPT-TEXT-ONLY: swaps rendered rule text via boot.systemSource; touches NO SandboxPolicy/os-sandbox/host enforcement. Off ⇒ byte-identical (frozen) brain.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain env-posture systemSource swap)",
   },
-  // Terminal-Bench lever #3 (RFC jul-2-terminal-bench-levers/04) — best-of-N FAIR candidate selection.
+  // TB lever #3 (RFC jul-2 TB levers/04) — best-of-N FAIR candidate selection.
   // AGENT-SIDE read via `resolveBestOfN(env)` in `apps/terminal/best-of-n-runner.ts` (a terminal-
   // surface gate — lives HERE per the read-site-domain ratchet). INTEGER, hard-capped at 4. Default
   // (unset / blank / non-integer / ≤1) ⇒ a SINGLE brain run ⇒ byte-identical to the pre-lever brain.
@@ -643,7 +643,61 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "runtime-config",
     describe:
-      "Terminal-Bench best-of-N fair candidate selection (opt-in, integer, hard-capped at 4). When ≥2, the terminal brain runs N independent attempts (fresh session each, serial) and selects the best via a FAIR, no-leak ranking over each candidate's OWN verify-gate signal (verified-pass > unverifiable > verified-fail; tie-break by evidence strength; attempt-1 floor). NEVER reads the hidden verifier/test. Unset / ≤1 ⇒ single run ⇒ byte-identical.",
+      "TB best-of-N fair candidate selection (opt-in, integer, hard-capped at 4). When ≥2, the terminal brain runs N independent attempts (fresh session each, serial) and selects the best via a FAIR, no-leak ranking over each candidate's OWN verify-gate signal (verified-pass > unverifiable > verified-fail; tie-break by evidence strength; attempt-1 floor). NEVER reads the hidden verifier/test. Unset / ≤1 ⇒ single run ⇒ byte-identical.",
     readSite: "apps/terminal/best-of-n-runner.ts (runTerminalBrainBestOfN resolveBestOfN)",
+  },
+  // TB cassette (RFC jul-2 TB levers /07) — DEFAULT-ON trajectory recording on the brain report.
+  // The jul-3 M0 regression could not be RCA'd without a record of what the agent actually did, so
+  // this is the one deliberately default-ON TB knob; an explicit 0/false/off suppresses the field
+  // entirely (byte-identical to the pre-cassette report). AGENT-SIDE read via
+  // `resolveTrajectoryOn(env)` in `apps/terminal/brain-mode.ts`.
+  {
+    envKey: "QUANTA_TB_TRAJECTORY",
+    kind: "bool",
+    default: true,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "TB report cassette (DEFAULT-ON). Records a bounded compact trajectory on the brain report — every tool call paired with ok/exit/preview plus coalesced assistant-text claims — so a run is always RCA-able. No-leak: only the model's own actions/claims. Explicit 0/false/off suppresses the `trajectory` field (byte-identical to the pre-cassette report).",
+    readSite: "apps/terminal/brain-mode.ts (resolveTrajectoryOn report cassette)",
+  },
+  // TB OC1 sub-lever (RFC jul-2 TB levers /07) — output-contract check riding the verify-gate's
+  // single bounded follow-up. Default-OFF and INERT unless QUANTA_TB_VERIFY_GATE is also ON
+  // (separate knob so its effect is measured in isolation from v2).
+  {
+    envKey: "QUANTA_TB_OUTPUT_CONTRACT",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "TB OC1 output-contract sub-lever (opt-in; effective only with QUANTA_TB_VERIFY_GATE). When ON, the single bounded verify-gate follow-up ALSO fires when the deliverable never ran end-to-end to a CLEAN exit (crash-at-invocation / stray-artifact class) and uses the contract nudge instead of the compare nudge. OFF ⇒ byte-identical to verify-gate v2.",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain outputContractOn)",
+  },
+  // TB container_exec per-stream output cap (P3-C, jul-3) — env-tunable head+tail truncation
+  // budget for stdout/stderr EACH (per-stream so a stdout flood can never evict stderr). Unset ⇒
+  // 8192 (byte-identical); clamped to [1024, 32768] (pty_read's 32K pane cap is the in-house
+  // ceiling precedent).
+  {
+    envKey: "QUANTA_TB_STREAM_CAP",
+    kind: "int",
+    default: 8192,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "container_exec per-STREAM head+tail output cap in chars (stdout and stderr each get their own budget). Unset/non-numeric ⇒ 8192 (byte-identical default); values clamp to [1024, 32768] so a fat env cannot blow the token budget or starve stderr diagnostics.",
+    readSite: "tool/container-exec/tool.ts (resolveStreamCap MAX_STREAM)",
+  },
+  // TB write tool (B2, RFC jul-3) — exact-byte file authoring on the terminal surface. Default-OFF
+  // (measure-first: flips on only for A/B arms until the smoke battery proves it).
+  {
+    envKey: "QUANTA_TB_WRITE_TOOL",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "TB `container_write_file` tool (opt-in). When ON, the terminal surface additionally mints exact-byte file authoring over the SAME container transport — content travels base64 (inert bytes, no heredoc/quoting mangling) and the write is verified by an in-container byte-count readback. Targets the file-is-the-deliverable failure class (polyglot / code-from-image). OFF ⇒ byte-identical tool menu.",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain writeFile gate)",
   },
 ]

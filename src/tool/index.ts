@@ -10,7 +10,7 @@ import { bashAwaitTool } from "./bash/await"
 import { bashKillTool } from "./bash/kill"
 import { codeCellTool } from "./codemode-tool"
 import { createCommunicateUpdateTool } from "./communicate-update"
-import { containerExecTool } from "./container-exec"
+import { containerExecTool, containerWriteFileTool } from "./container-exec"
 import { coverageCheckTool } from "./coverage_check"
 import { makeDebugInspectTool } from "./debug/tool"
 import type { DefaultToolPorts } from "./default-tool-ports"
@@ -983,6 +983,11 @@ export const defaultTools: Tool[] = buildDefaultTools()
 export const buildTerminalTools = (ports: DefaultToolPorts = {}): Tool[] => [
   // one-shot container exec (the workhorse — exit-code completion, non-interactive steps)
   ...(ports.containerExec !== undefined ? [containerExecTool(ports.containerExec)] : []),
+  // B2 (RFC jul-3, default-OFF via composition root): exact-byte file authoring over the same
+  // container transport — the heredoc-mangle escape hatch for file-is-the-deliverable tasks.
+  ...(ports.containerWriteFile !== undefined
+    ? [containerWriteFileTool(ports.containerWriteFile) as Tool]
+    : []),
   // interactive tmux pane (vim/REPL/TUI)
   ...(ports.ptySession !== undefined ? ptyTools(ports.ptySession) : []),
 ]

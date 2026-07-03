@@ -30,6 +30,10 @@ import type { PtySessionPort } from "@/tool/pty"
 export interface TerminalSurfaceDeps {
   /** One-shot container exec backend (the workhorse). Absent ⇒ `container_exec` tool not minted. */
   containerExec?: ContainerExec
+  /** B2 (RFC jul-3): exact-byte file-authoring backend (usually the SAME `ContainerExec`
+   *  instance). Absent ⇒ `container_write_file` not minted (default-OFF; the entry point wires it
+   *  only when `QUANTA_TB_WRITE_TOOL` is on). */
+  containerWriteFile?: ContainerExec
   /** Interactive PTY / tmux backend. Absent ⇒ the `pty_*` tools are not minted. */
   ptySession?: PtySessionPort
 }
@@ -46,6 +50,9 @@ export interface TerminalSurface {
 export const assembleTerminalSurface = (deps: TerminalSurfaceDeps = {}): TerminalSurface => ({
   tools: buildTerminalTools({
     ...(deps.containerExec !== undefined ? { containerExec: deps.containerExec } : {}),
+    ...(deps.containerWriteFile !== undefined
+      ? { containerWriteFile: deps.containerWriteFile }
+      : {}),
     ...(deps.ptySession !== undefined ? { ptySession: deps.ptySession } : {}),
   }),
   operatorGuide: terminalOperatorGuide(),
@@ -54,12 +61,18 @@ export const assembleTerminalSurface = (deps: TerminalSurfaceDeps = {}): Termina
 /** Assemble the terminal surface with its `container_exec` backed by a JSON-line duplex to the
  *  hands process — the box-phase wiring (`containerExecOverIpc` over the brain↔hands stdio). The
  *  `ptySession` stays INJECTED (a tmux backend bound to the same container) so this root never
- *  reaches for one itself. */
+ *  reaches for one itself. `opts.writeFile` (B2, default false) additionally mints
+ *  `container_write_file` over the SAME bridge instance (one duplex, one id-space — a second
+ *  `containerExecOverIpc` would fork the id counter and cross frames). */
 export const terminalSurfaceOverDuplex = (
   duplex: JsonLineDuplex,
   ptySession?: PtySessionPort,
-): TerminalSurface =>
-  assembleTerminalSurface({
-    containerExec: containerExecOverIpc(duplex),
+  opts?: { writeFile?: boolean },
+): TerminalSurface => {
+  const exec = containerExecOverIpc(duplex)
+  return assembleTerminalSurface({
+    containerExec: exec,
+    ...(opts?.writeFile === true ? { containerWriteFile: exec } : {}),
     ...(ptySession !== undefined ? { ptySession } : {}),
   })
+}

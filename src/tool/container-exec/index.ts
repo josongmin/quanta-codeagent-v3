@@ -10,3 +10,8 @@ export {
 export { containerExecOverIpc, type JsonLineDuplex } from "./ipc-backend"
 export type { ContainerExec, ContainerExecResult } from "./port"
 export { type ContainerExecInput, containerExecTool } from "./tool"
+export {
+  type ContainerWriteFileInput,
+  containerWriteFileTool,
+  MAX_WRITE_BYTES,
+} from "./write-tool"

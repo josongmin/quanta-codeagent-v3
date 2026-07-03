@@ -92,6 +92,13 @@ const TRAJECTORY_PREVIEW_MAX = 240
  *  isolation boundary). */
 export const TB_ENV_OWNED_ENV = "QUANTA_TB_ENV_OWNED"
 
+/** B2 knob (RFC jul-3): the `container_write_file` tool. DEFAULT-OFF ⇒ byte-identical tool menu
+ *  (`container_exec` + `pty_*` only). When ON, the surface additionally mints exact-byte file
+ *  authoring over the SAME container transport (base64-inert content + fresh-readback verify) —
+ *  the heredoc-mangle escape hatch for file-is-the-deliverable tasks (polyglot / code-from-image
+ *  class). Measure-first: flips on only for A/B arms until the smoke battery proves it. */
+export const TB_WRITE_TOOL_ENV = "QUANTA_TB_WRITE_TOOL"
+
 /** The terminal brain's DECLARED surface profile (RFC `jul-2-terminal-bench-levers/00` §X).
  *  The terminal entry point is a *deployment fact*: it owns its container, so its profile
  *  declares `envPosture: "owned"` + the terminal operator guide. Declaring it here — rather
@@ -595,10 +602,12 @@ export const runTerminalBrain = async (
   opts: RunTerminalBrainOpts,
 ): Promise<TerminalBrainResult> => {
   const duplex = duplexOverStdio(opts.stdin, opts.stdout)
-  const surface = terminalSurfaceOverDuplex(
-    duplex,
-    ...(opts.ptySession !== undefined ? [opts.ptySession] : []),
-  )
+  // B2 (`QUANTA_TB_WRITE_TOOL`, default-OFF): gate read HERE (the env-threaded entry) so the
+  // surface builder stays env-free; ON additionally mints `container_write_file` over the same
+  // bridge instance.
+  const surface = terminalSurfaceOverDuplex(duplex, opts.ptySession, {
+    writeFile: gateOn(opts.env ?? {}, TB_WRITE_TOOL_ENV),
+  })
   const stream = new CapturingStream()
   const deps = buildTerminalBootstrapDeps(opts.llm, stream, surface.tools)
   const runtime = buildTerminalRuntime(opts)
