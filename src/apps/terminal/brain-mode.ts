@@ -50,6 +50,7 @@ import {
   inspectSelfTest,
   lastSelfTestFailure,
   outputContractVerdict,
+  runConvergeLoop,
   type SelfTestReceipt,
   type VerificationStamp,
 } from "./verify-gate"
@@ -528,14 +529,20 @@ interface OracleLoopOutcome {
 }
 
 /**
- * Phase C — HARNESS-ENFORCED bounded oracle-repair loop. While the agent's own self-test is observed
- * RED, feed its OWN failing output back as a follow-up turn and let the agent re-edit + re-run, until
- * it goes green OR a hard bound is hit. STRUCTURAL over-persist bounds (the R2 revert lesson): at most
- * `maxRounds` rounds AND a turn-budget watchdog (never fires past `maxTurns`). NO-LEAK: the only signal
- * is the agent's own taint-clean self-test receipt ({@link inspectSelfTest}) and its own failing output
- * ({@link lastSelfTestFailure}) — the hidden verifier is never read, and the fed-back text names only
- * the model's own self-test. A run with NO self-test (nothing to converge) is a no-op. Extracted to
- * keep `runTerminalBrain` under the god-FUNCTION cap.
+ * Phase C — HARNESS-ENFORCED bounded oracle-repair loop, now the TERMINAL ADAPTER over the shared
+ * {@link runConvergeLoop} core (`@/agent/converge/loop`). The neutral loop owns the policy (two
+ * over-persist bounds — `maxRounds` AND the turn-budget watchdog — plus the honest stop `reason`);
+ * this adapter supplies the terminal-specific ports:
+ *   - `inspect`  = the agent's own taint-clean self-test receipt ({@link inspectSelfTest});
+ *   - `fairFail` = the agent's OWN failing self-test output ({@link lastSelfTestFailure}) wrapped in
+ *     the {@link ORACLE_LOOP_FEEDBACK} nudge — NO hidden verifier is ever read;
+ *   - `runFollowUpTurn` = one `runSessionTurn` bound to this session.
+ * A run with NO self-test (nothing to converge) is a no-op (the core stops with `reason:"no-signal"`).
+ *
+ * Final-audit #4 (unchanged): we deliberately do NOT gate on `flippedFromRed` — it cannot distinguish
+ * an HONEST same-file red→fix→green iterate (the loop's whole point) from a switch to a weaker test;
+ * the distrust lives OFF-LINE (`report.selfTest.flippedFromRed`, and the verify-gate L1 compare still
+ * runs independently after ⇒ no vacuous verified-pass).
  */
 const runOracleRepairLoop = async (args: {
   session: Parameters<typeof runSessionTurn>[0]["session"]
@@ -546,37 +553,34 @@ const runOracleRepairLoop = async (args: {
   outcomeTurns: number
   messages: readonly Message[]
 }): Promise<OracleLoopOutcome> => {
-  let outcomeTurns = args.outcomeTurns
-  let messages = args.messages
-  let rounds = 0
-  while (rounds < args.maxRounds) {
-    const receipt = inspectSelfTest(args.stream.events)
-    // Stop when there is nothing to converge: no agent-authored self-test ran, or it went green. An
-    // UNEXECUTED self-test is not something the loop can drive (S1's steer is what makes the agent
-    // write one). Final-audit #4: the loop's convergence is only as strong as the agent's self-test —
-    // a vacuous/flipped green stops it early. We deliberately do NOT gate on `flippedFromRed` here,
-    // because it cannot distinguish an HONEST same-file red→fix→green iterate (the loop's whole point)
-    // from a switch to a weaker test — treating the honest case as unconverged would spin the loop on
-    // exactly the tasks it is meant to help. The distrust lives OFF-LINE instead: `report.selfTest`
-    // carries `flippedFromRed` and `report.oracleLoop.converged` is paired against the harbor reward
-    // for A/B, and the verify-gate L1 compare still runs independently after (no vacuous verified-pass).
-    if (!receipt.executed || receipt.green) break
-    // Watchdog: never spend past the turn budget (structural over-persist bound, independent of `rounds`).
-    if (outcomeTurns >= args.maxTurns) break
-    const failure = lastSelfTestFailure(args.stream.events)
-    if (failure === undefined) break // defensive: executed-red implies one exists, but never loop blind
-    const followUp = await runSessionTurn({
-      session: args.session,
-      resolveApproval: async () => "approve",
-      text: ORACLE_LOOP_FEEDBACK(receipt.evidence ?? "", failure.output),
-      turnSignal: args.turnSignal,
-      env: {},
-    })
-    outcomeTurns += followUp.outcome.turns
-    messages = followUp.messages
-    rounds += 1
+  const result = await runConvergeLoop(
+    {
+      inspect: () => inspectSelfTest(args.stream.events),
+      fairFail: (receipt) => {
+        const failure = lastSelfTestFailure(args.stream.events)
+        if (failure === undefined) return null // executed-red implies one exists, but never loop blind
+        return { feedback: ORACLE_LOOP_FEEDBACK(receipt.evidence ?? "", failure.output) }
+      },
+      runFollowUpTurn: async (text) => {
+        const followUp = await runSessionTurn({
+          session: args.session,
+          resolveApproval: async () => "approve",
+          text,
+          turnSignal: args.turnSignal,
+          env: {},
+        })
+        return { turns: followUp.outcome.turns, messages: followUp.messages }
+      },
+    },
+    { maxRounds: args.maxRounds, maxTurns: args.maxTurns },
+    { turnsConsumed: args.outcomeTurns, messages: args.messages },
+  )
+  return {
+    outcomeTurns: result.turnsConsumed,
+    messages: result.messages,
+    rounds: result.rounds,
+    converged: result.converged,
   }
-  return { outcomeTurns, messages, rounds, converged: inspectSelfTest(args.stream.events).green }
 }
 
 /** Drive the MAIN instruction turn, then (if their knobs are on) the oracle-repair loop and the
