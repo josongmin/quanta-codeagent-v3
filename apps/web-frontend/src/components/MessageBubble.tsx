@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useState } from "react"
+import { lazy, memo, Suspense, useCallback, useMemo, useState } from "react"
 import { cx } from "../lib/classnames"
 import type { UiMessage } from "../types/protocol"
 
@@ -32,6 +32,15 @@ const MessageBubbleInner = ({
   // as a layout bug.
   const isImageOnly = hasImages && message.text.length === 0
 
+  // The streaming bubble re-renders per token, but its `timestamp` is constant
+  // across the stream — memoize so we don't rebuild an Intl `toLocaleTimeString`
+  // formatter (one of the pricier DOM-free calls) on every delta for an
+  // identical result.
+  const formattedTime = useMemo(
+    () => formatTime(message.timestamp),
+    [message.timestamp],
+  )
+
   const body =
     message.text.length > 0 ? (
       isStreaming ? (
@@ -50,6 +59,12 @@ const MessageBubbleInner = ({
           key={`${message.id}-image-${index.toString()}`}
           src={`data:${image.mediaType};base64,${image.data}`}
           alt={`${ROLE_LABEL[role]} attachment ${index + 1}`}
+          // Inline base64 images can be multi-MB (up to 8 × 20 MB). `lazy` defers
+          // decode/paint until near the viewport; `async` keeps decode off the main
+          // thread so a large paste doesn't jank the stream. `max-h-80` already caps
+          // display size.
+          loading="lazy"
+          decoding="async"
           className="max-h-80 max-w-full rounded-lg border border-line object-contain"
         />
       ))}
@@ -71,7 +86,7 @@ const MessageBubbleInner = ({
             dateTime={message.timestamp}
             className="font-mono text-[11px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
           >
-            {formatTime(message.timestamp)}
+            {formattedTime}
           </time>
         </header>
         {message.text.length > 0 ? (

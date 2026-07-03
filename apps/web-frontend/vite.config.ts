@@ -27,27 +27,29 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    sourcemap: true,
+    // "hidden" still emits .map files (for manual/error-reporter upload) but
+    // drops the `//# sourceMappingURL=` comment from the shipped JS, so a client
+    // opening devtools no longer auto-fetches full un-minified source. Set to
+    // `false` if you want to further shrink the Tauri-bundled dist (no prod maps).
+    sourcemap: "hidden",
     target: "es2022",
     rollupOptions: {
       output: {
+        // IMPORTANT: do NOT manual-chunk the markdown/prism family. `MarkdownMessage`
+        // is loaded via `lazy(() => import("./MarkdownMessage"))` (MessageBubble.tsx),
+        // and it is the ONLY importer of react-markdown / remark-gfm /
+        // react-syntax-highlighter (+ refractor/prismjs/micromark/…). Left un-grouped,
+        // Rollup keeps that whole family inside MarkdownMessage's async chunk, so it
+        // stays BEHIND the lazy boundary and is fetched only when the first assistant
+        // markdown message renders. A previous `vendor-markdown` manualChunk defeated
+        // this: it pinned Rollup's `__vitePreload` helper into that chunk and made the
+        // entry `modulepreload` it — eagerly loading ~75 KB gzip of markdown/prism on
+        // first paint. Regression guard: after `bun run build`, `dist/index.html` must
+        // NOT contain a `modulepreload` for a markdown/prism chunk.
         manualChunks(id) {
           if (!id.includes("node_modules")) return
-          if (
-            id.includes("/react-markdown/") ||
-            id.includes("/remark-gfm/") ||
-            id.includes("/react-syntax-highlighter/") ||
-            id.includes("/refractor/") ||
-            id.includes("/prismjs/") ||
-            id.includes("/micromark/") ||
-            id.includes("/mdast-util-") ||
-            id.includes("/hast-util-") ||
-            id.includes("/unist-util-") ||
-            id.includes("/remark-") ||
-            id.includes("/rehype-")
-          ) {
-            return "vendor-markdown"
-          }
+          // Split ONLY react itself into an eager vendor chunk (the entry imports it
+          // directly, so it is legitimately part of first paint).
           if (
             id.includes("/react/") ||
             id.includes("/react-dom/") ||
