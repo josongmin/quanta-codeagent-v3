@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   BEST_OF_N_MAX,
+  isConfidentCleanPass,
   type RunOnce,
   resolveBestOfN,
   runTerminalBrainBestOfN,
@@ -183,7 +184,9 @@ describe("best-of-N runner — N≥2 picks the L1-verified candidate, not the fa
     }
     await runTerminalBrainBestOfN(
       opts,
-      scriptedRunOnce(() => stamp("verified-pass"), log),
+      // unverifiable every attempt ⇒ no confident-pass early-stop, so all 3 run (this test pins the
+      // single-write invariant, which must hold across the full fan-out).
+      scriptedRunOnce(() => stamp("unverifiable"), log),
     )
     // 3 attempts ran, but the REAL sink saw exactly ONE deliverable (the winner) — the per-attempt
     // reports went to the wrapper's isolated capture sinks, not the caller's.
@@ -200,5 +203,47 @@ describe("best-of-N runner — N≥2 picks the L1-verified candidate, not the fa
       scriptedRunOnce(() => stamp("verified-fail"), log),
     )
     expect(log.calls.length).toBe(BEST_OF_N_MAX)
+  })
+})
+
+describe("adaptive early-stop (RFC jul-3) — best-of-N is COST-GATED, not a fixed fan-out", () => {
+  test("isConfidentCleanPass: verified-pass w/o follow-up = true; nudged pass / fail / unverifiable = false", () => {
+    const rep = (v?: VerificationStamp): TerminalBrainReport => ({
+      instruction: "x", turns: 1, tokens: { input: 0, output: 0 }, cost_usd: 0, final: "",
+      ...(v !== undefined ? { verification: v } : {}),
+    })
+    expect(isConfidentCleanPass(rep({ state: "verified-pass", evidence: "", followUpFired: false }))).toBe(true)
+    expect(isConfidentCleanPass(rep({ state: "verified-pass", evidence: "", followUpFired: true }))).toBe(false) // needed the nudge ⇒ uncertain
+    expect(isConfidentCleanPass(rep({ state: "unverifiable", evidence: "" }))).toBe(false)
+    expect(isConfidentCleanPass(rep({ state: "verified-fail", evidence: "" }))).toBe(false)
+    expect(isConfidentCleanPass(rep(undefined))).toBe(false)
+    expect(isConfidentCleanPass(undefined)).toBe(false)
+  })
+
+  test("attempt-1 confident clean pass ⇒ STOPS after ONE attempt (does not spend the full N)", async () => {
+    const log = { calls: [] as RunTerminalBrainOpts[] }
+    await runTerminalBrainBestOfN(
+      baseOpts({ [TB_BEST_OF_N_ENV]: "4" }),
+      scriptedRunOnce(() => stamp("verified-pass"), log), // clean pass every attempt
+    )
+    expect(log.calls.length).toBe(1) // early-stop: no wasted trials on a first-try clean pass
+  })
+
+  test("attempt-1 uncertain ⇒ ESCALATES to more trials; stops as soon as a confident pass lands", async () => {
+    const log = { calls: [] as RunTerminalBrainOpts[] }
+    await runTerminalBrainBestOfN(
+      baseOpts({ [TB_BEST_OF_N_ENV]: "4" }),
+      scriptedRunOnce((i) => stamp(i < 2 ? "verified-fail" : "verified-pass"), log), // fail,fail,pass
+    )
+    expect(log.calls.length).toBe(3) // ran until the pass on attempt-3, not the full 4
+  })
+
+  test("never a confident pass ⇒ runs the full cap (then selects the best of the lot)", async () => {
+    const log = { calls: [] as RunTerminalBrainOpts[] }
+    await runTerminalBrainBestOfN(
+      baseOpts({ [TB_BEST_OF_N_ENV]: "3" }),
+      scriptedRunOnce(() => stamp("unverifiable"), log),
+    )
+    expect(log.calls.length).toBe(3)
   })
 })

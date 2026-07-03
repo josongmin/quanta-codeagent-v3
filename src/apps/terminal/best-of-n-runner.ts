@@ -81,6 +81,15 @@ export type RunOnce = (opts: RunTerminalBrainOpts) => Promise<TerminalBrainResul
  * inner verify-gate forced on (fair signal); selects the winner via {@link selectBestCandidate}; writes
  * the WINNER's report to the real `opts.reportOut` and closes stdout once (spec-B3 write-then-close).
  */
+/** ADAPTIVE early-stop predicate (RFC jul-3): a CONFIDENT clean pass — `verified-pass` earned on the
+ *  attempt's OWN evidence WITHOUT the bounded follow-up nudge (`followUpFired !== true`). A pass that
+ *  only appeared AFTER the nudge is treated as uncertain (worth another fresh trial), and any
+ *  fail/unverifiable escalates. PURE + no-leak: reads only the attempt's own stamp, never a hidden test. */
+export const isConfidentCleanPass = (report: TerminalBrainReport | undefined): boolean => {
+  const v = report?.verification
+  return v?.state === "verified-pass" && v.followUpFired !== true
+}
+
 export const runTerminalBrainBestOfN = async (
   opts: RunTerminalBrainOpts,
   runOnce: RunOnce = runTerminalBrain,
@@ -113,6 +122,12 @@ export const runTerminalBrainBestOfN = async (
       closeStdout: () => undefined,
     })
     attempts.push({ result: captured !== undefined ? { ...result, report: captured } : result })
+    // ADAPTIVE EARLY-STOP (RFC jul-3): best-of-N is a COST-GATED escalation, not a fixed fan-out.
+    // If THIS attempt is a CONFIDENT clean pass (verified-pass earned WITHOUT the follow-up nudge),
+    // there is nothing a further attempt can improve — stop and select it. Only an UNCERTAIN attempt
+    // (verified-fail / unverifiable / a pass that needed the nudge) escalates to more trials. So a
+    // task the agent nails first-try costs ONE run; only the hard/variance-prone tasks spend N.
+    if (isConfidentCleanPass(attempts[i]?.result.report)) break
   }
 
   // FAIR selection over the candidates' OWN verify-gate stamps (no hidden test anywhere).
@@ -130,7 +145,14 @@ export const runTerminalBrainBestOfN = async (
   const winningReport: TerminalBrainReport = {
     ...winner.result.report,
     instruction: opts.instruction,
-    bestOfN: { attempts: n, winnerIndex: selection.winnerIndex, rationale: selection.rationale },
+    // `attempts` = the number ACTUALLY run (adaptive early-stop may be < n) so per-task A/B cost
+    // analysis is truthful; `cap` records the ceiling requested.
+    bestOfN: {
+      attempts: attempts.length,
+      cap: n,
+      winnerIndex: selection.winnerIndex,
+      rationale: selection.rationale,
+    },
   }
   opts.writeReport(opts.reportOut, winningReport)
   opts.closeStdout?.()

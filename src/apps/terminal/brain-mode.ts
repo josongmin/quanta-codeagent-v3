@@ -169,7 +169,10 @@ export interface TerminalBrainReport {
    *  attempts ran, which won, and the FAIR (no-hidden-test) selection rationale, for A/B attribution.
    *  The single `runTerminalBrain` core never sets this; only the outer wrapper does. */
   readonly bestOfN?: {
+    /** attempts ACTUALLY run (adaptive early-stop may be < cap). */
     readonly attempts: number
+    /** the ceiling requested via `QUANTA_TB_BEST_OF_N` (cost analysis). */
+    readonly cap?: number
     readonly winnerIndex: number
     readonly rationale: string
   }
