@@ -551,10 +551,17 @@ const runOracleRepairLoop = async (args: {
   let rounds = 0
   while (rounds < args.maxRounds) {
     const receipt = inspectSelfTest(args.stream.events)
-    // Nothing to converge: no agent-authored self-test ran, or it is already green. (An UNEXECUTED
-    // self-test is not something the loop can drive — S1's steer is what makes the agent write one.)
+    // Stop when there is nothing to converge: no agent-authored self-test ran, or it went green. An
+    // UNEXECUTED self-test is not something the loop can drive (S1's steer is what makes the agent
+    // write one). Final-audit #4: the loop's convergence is only as strong as the agent's self-test —
+    // a vacuous/flipped green stops it early. We deliberately do NOT gate on `flippedFromRed` here,
+    // because it cannot distinguish an HONEST same-file red→fix→green iterate (the loop's whole point)
+    // from a switch to a weaker test — treating the honest case as unconverged would spin the loop on
+    // exactly the tasks it is meant to help. The distrust lives OFF-LINE instead: `report.selfTest`
+    // carries `flippedFromRed` and `report.oracleLoop.converged` is paired against the harbor reward
+    // for A/B, and the verify-gate L1 compare still runs independently after (no vacuous verified-pass).
     if (!receipt.executed || receipt.green) break
-    // Watchdog: never spend past the turn budget (structural over-persist bound).
+    // Watchdog: never spend past the turn budget (structural over-persist bound, independent of `rounds`).
     if (outcomeTurns >= args.maxTurns) break
     const failure = lastSelfTestFailure(args.stream.events)
     if (failure === undefined) break // defensive: executed-red implies one exists, but never loop blind

@@ -1196,4 +1196,26 @@ describe("runOracleRepairLoop e2e (Phase C) — drives the self-test to green", 
     expect(ol?.converged).toBe(true)
     expect(handsServed.filter((f) => String(f.command).includes("test_fib.py")).length).toBe(1)
   })
+
+  test("OVER-PERSIST BOUND (final-audit #6): a self-test that stays RED exhausts to exactly maxRounds, converged=false", async () => {
+    // test_fib.py is RED on EVERY run (code 1 always) — the agent never fixes it. The loop must NOT
+    // spin: the `rounds < maxRounds` hard counter bounds it independently of the turn watchdog.
+    const { stdin, stdout, endIn } = makeStdio((cmd) => (cmd.includes("test_fib.py") ? 1 : 0))
+    let report: Record<string, unknown> | undefined
+    await runTerminalBrain({
+      instruction: "cannot converge",
+      reportOut: "/tmp/oracle.json",
+      stdin,
+      stdout,
+      llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
+      writeReport: (_p, obj) => {
+        report = obj as Record<string, unknown>
+      },
+      env: { [TB_ORACLE_LOOP_ENV]: "2" }, // maxRounds = 2
+    })
+    endIn()
+    const ol2 = report?.oracleLoop as { rounds: number; converged: boolean } | undefined
+    expect(ol2?.rounds).toBe(2) // exhausted the hard round cap, did NOT spin past it
+    expect(ol2?.converged).toBe(false) // never went green
+  })
 })

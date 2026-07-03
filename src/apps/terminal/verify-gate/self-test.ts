@@ -142,29 +142,39 @@ export interface SelfTestReceipt {
   readonly evidence?: string
 }
 
+/** Collect ALL of the model's own executed/typed command strings (container_exec + pty_write) — the
+ *  SOURCE the laundering-taint pass walks. SHARED by {@link inspectSelfTest} and
+ *  {@link lastSelfTestFailure} so both build the IDENTICAL taint set (the F2 byte-identical-predicate
+ *  promise — a drift here would let one function credit a laundered self-test the other refuses). */
+const collectOwnCommands = (events: readonly AgentEvent[]): string[] => {
+  const out: string[] = []
+  for (const ev of events) {
+    if (ev.type !== "tool_call") continue
+    if (ev.name === CONTAINER_EXEC) {
+      const c = containerExecCommand(ev)
+      if (c !== undefined) out.push(c)
+    } else if (ev.name === PTY_WRITE) {
+      const d = ptyWriteData(ev)
+      if (d !== undefined) out.push(d)
+    }
+  }
+  return out
+}
+
 /** Inspect the stream for an agent-authored self-test run (S1b). Container-exec only for now (self-
  *  tests are non-interactive); a pty-driven self-test is out of scope and simply not credited. */
 export const inspectSelfTest = (events: readonly AgentEvent[]): SelfTestReceipt => {
   const observedById = new Map<string, boolean>()
   const cleanById = new Map<string, boolean>()
-  const ownCommands: string[] = []
   for (const ev of events) {
     if (ev.type === "tool_result") {
       observedById.set(ev.id, resultObservedOutput(ev))
       cleanById.set(ev.id, resultRanClean(ev))
-    } else if (ev.type === "tool_call") {
-      if (ev.name === CONTAINER_EXEC) {
-        const c = containerExecCommand(ev)
-        if (c !== undefined) ownCommands.push(c)
-      } else if (ev.name === PTY_WRITE) {
-        const d = ptyWriteData(ev)
-        if (d !== undefined) ownCommands.push(d)
-      }
     }
   }
   // F2: laundering taint from the same SSOT — but keyed on the oracle LOCATION as the source (an
   // agent's own `cp test_fib.py ref` must not taint `ref`; only a real oracle read does).
-  const tainted = buildTaintedRefs(ownCommands, isOracleLocation)
+  const tainted = buildTaintedRefs(collectOwnCommands(events), isOracleLocation)
 
   let executed = false
   let green = false
@@ -209,18 +219,15 @@ export const lastSelfTestFailure = (
   const previewById = new Map<string, string>()
   const cleanById = new Map<string, boolean>()
   const observedById = new Map<string, boolean>()
-  const ownCommands: string[] = []
   for (const ev of events) {
-    if (ev.type === "tool_result") {
-      previewById.set(ev.id, typeof ev.preview === "string" ? ev.preview : "")
-      cleanById.set(ev.id, resultRanClean(ev))
-      observedById.set(ev.id, resultObservedOutput(ev))
-    } else if (ev.type === "tool_call" && ev.name === CONTAINER_EXEC) {
-      const c = containerExecCommand(ev)
-      if (c !== undefined) ownCommands.push(c)
-    }
+    if (ev.type !== "tool_result") continue
+    previewById.set(ev.id, typeof ev.preview === "string" ? ev.preview : "")
+    cleanById.set(ev.id, resultRanClean(ev))
+    observedById.set(ev.id, resultObservedOutput(ev))
   }
-  const tainted = buildTaintedRefs(ownCommands, isOracleLocation)
+  // F2: SAME taint source as inspectSelfTest (collectOwnCommands: container_exec + pty_write) so both
+  // refuse a laundered self-test byte-identically — no drift (jul-3 final-audit finding #2).
+  const tainted = buildTaintedRefs(collectOwnCommands(events), isOracleLocation)
   let last: { command: string; output: string } | undefined
   for (const ev of events) {
     if (ev.type !== "tool_call" || ev.name !== CONTAINER_EXEC) continue
