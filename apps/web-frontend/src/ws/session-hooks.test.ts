@@ -14,9 +14,7 @@ import {
   transcriptReducer,
 } from "./session-hooks"
 
-const baseStateView = (
-  overrides: Partial<SessionStateView> = {},
-): SessionStateView => ({
+const baseStateView = (overrides: Partial<SessionStateView> = {}): SessionStateView => ({
   status: "idle",
   draftInput: "",
   permissionMode: "default",
@@ -158,13 +156,19 @@ describe("session-hooks transcript projection", () => {
     ])
   })
 
-  it("appends turn.output.delta chunks into a single assistant row", () => {
+  it("accumulates turn.output.delta chunks in the streaming slot, NOT the messages array", () => {
+    // PERF CONTRACT (streaming-out-of-array): the in-progress text lives ONLY in
+    // `streamingAssistant`; `messages` holds just the finalized user row and its
+    // reference stays STABLE across every delta (so the transcript viewport memo
+    // bails per token — see reconcile-count.test).
     let state = initialTranscript
     state = applySessionEventToTranscript(state, turnStartedEvent("hello"))
+    const messagesRefAfterUser = state.messages
     state = applySessionEventToTranscript(state, turnOutputDeltaEvent("real "))
     state = applySessionEventToTranscript(state, turnOutputDeltaEvent("assistant "))
     state = applySessionEventToTranscript(state, turnOutputDeltaEvent("answer"))
 
+    // messages: only the user row, and the SAME reference it was before any delta.
     expect(state.messages).toEqual([
       {
         id: "turn-1",
@@ -172,13 +176,15 @@ describe("session-hooks transcript projection", () => {
         text: "hello",
         timestamp: "2026-05-26T13:00:00.000Z",
       },
-      {
-        id: "assistant-stream-cmd-run-1",
-        role: "assistant",
-        text: "real assistant answer",
-        timestamp: "2026-05-26T13:00:02.000Z",
-      },
     ])
+    expect(state.messages).toBe(messagesRefAfterUser)
+
+    // The accumulated live text is in the streaming slot (rendered as the tail).
+    expect(state.streamingAssistant).toEqual({
+      id: "assistant-stream-cmd-run-1",
+      text: "real assistant answer",
+      timestamp: "2026-05-26T13:00:02.000Z",
+    })
   })
 
   it("REGRESSION: an unknown/forward-compat event type is a NO-OP that never poisons reducer state", () => {
@@ -200,15 +206,17 @@ describe("session-hooks transcript projection", () => {
     state = applySessionEventToTranscript(state, unknownEvent)
     expect(state).toBe(before) // exact same reference: pure no-op, never undefined
 
-    // The next REAL delta must still project without crashing.
+    // The next REAL delta must still project without crashing. The live text
+    // accumulates in the streaming slot (not `messages`) post streaming-out-of-array.
     state = applySessionEventToTranscript(state, turnOutputDeltaEvent("there"))
     expect(state).toBeDefined()
-    expect(state.messages.at(-1)?.text).toBe("hi there")
+    expect(state.streamingAssistant?.text).toBe("hi there")
   })
 
-  it("uses snapshot.streamingAssistantText to repair the live assistant row mid-turn", () => {
+  it("uses snapshot.streamingAssistantText to hydrate the live streaming slot mid-turn", () => {
     let state = initialTranscript
     state = applySessionEventToTranscript(state, turnStartedEvent("hello"))
+    const messagesRefAfterUser = state.messages
     state = transcriptReducer(state, {
       type: "snapshot",
       snapshot: snapshot(
@@ -222,6 +230,8 @@ describe("session-hooks transcript projection", () => {
       receivedAt: "2026-05-26T13:00:02.500Z",
     })
 
+    // The mid-turn streaming text hydrates the slot only — messages stays the
+    // stable user-only array (rendered tail comes from the slot).
     expect(state.messages).toEqual([
       {
         id: "turn-1",
@@ -229,13 +239,13 @@ describe("session-hooks transcript projection", () => {
         text: "hello",
         timestamp: "2026-05-26T13:00:00.000Z",
       },
-      {
-        id: "assistant-stream-2026-05-26T13:00:02.500Z",
-        role: "assistant",
-        text: "real assistant answer",
-        timestamp: "2026-05-26T13:00:02.500Z",
-      },
     ])
+    expect(state.messages).toBe(messagesRefAfterUser)
+    expect(state.streamingAssistant).toEqual({
+      id: "assistant-stream-2026-05-26T13:00:02.500Z",
+      text: "real assistant answer",
+      timestamp: "2026-05-26T13:00:02.500Z",
+    })
   })
 
   it("falls back to outcomeReason only when no assistant text is present", () => {

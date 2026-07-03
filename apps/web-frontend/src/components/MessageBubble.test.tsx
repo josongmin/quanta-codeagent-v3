@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { areMessageBubblePropsEqual, MessageBubble } from "./MessageBubble"
 import type { UiMessage } from "../types/protocol"
+import { areMessageBubblePropsEqual, MessageBubble, StreamingTail } from "./MessageBubble"
 
 const baseMessage: UiMessage = {
   id: "message-1",
@@ -52,9 +52,7 @@ describe("MessageBubble", () => {
       images: [{ type: "image", mediaType: "image/png", data: "ZmFrZQ==" }],
     }
 
-    expect(
-      areMessageBubblePropsEqual({ message: left }, { message: right }),
-    ).toBe(true)
+    expect(areMessageBubblePropsEqual({ message: left }, { message: right })).toBe(true)
   })
 
   it("invalidates the memo fence when the transcript content changes", () => {
@@ -68,9 +66,7 @@ describe("MessageBubble", () => {
       text: "after",
     }
 
-    expect(
-      areMessageBubblePropsEqual({ message: left }, { message: right }),
-    ).toBe(false)
+    expect(areMessageBubblePropsEqual({ message: left }, { message: right })).toBe(false)
   })
 
   it("invalidates the memo fence when streaming mode flips", () => {
@@ -81,10 +77,28 @@ describe("MessageBubble", () => {
     }
 
     expect(
-      areMessageBubblePropsEqual(
-        { message, isStreaming: true },
-        { message, isStreaming: false },
-      ),
+      areMessageBubblePropsEqual({ message, isStreaming: true }, { message, isStreaming: false }),
     ).toBe(false)
+  })
+})
+
+describe("StreamingTail", () => {
+  it("renders the live streaming text as a plain assistant bubble (visible mid-stream)", () => {
+    const markup = renderToStaticMarkup(
+      <StreamingTail text="live token stream" timestamp="2026-05-26T00:00:00.000Z" hasTranscript />,
+    )
+    // The in-progress text is visible, in plain (non-markdown) form — mirroring
+    // the pre-refactor mid-stream assistant bubble.
+    expect(markup).toContain("live token stream")
+    expect(markup).toContain("whitespace-pre-wrap")
+    // The assistant role label chrome is reused.
+    expect(markup).toContain("quanta")
+  })
+
+  it("renders nothing until the first token arrives (no empty stray bubble)", () => {
+    const markup = renderToStaticMarkup(
+      <StreamingTail text="" timestamp="2026-05-26T00:00:00.000Z" hasTranscript />,
+    )
+    expect(markup).toBe("")
   })
 })

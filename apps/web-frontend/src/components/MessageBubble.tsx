@@ -19,10 +19,7 @@ const LazyMarkdownMessage = lazy(async () => {
   return { default: module.MarkdownMessage }
 })
 
-const MessageBubbleInner = ({
-  message,
-  isStreaming = false,
-}: MessageBubbleProps): JSX.Element => {
+const MessageBubbleInner = ({ message, isStreaming = false }: MessageBubbleProps): JSX.Element => {
   const hasImages = message.images !== undefined && message.images.length > 0
   const role = message.role
   const isUser = role === "user"
@@ -36,10 +33,7 @@ const MessageBubbleInner = ({
   // across the stream — memoize so we don't rebuild an Intl `toLocaleTimeString`
   // formatter (one of the pricier DOM-free calls) on every delta for an
   // identical result.
-  const formattedTime = useMemo(
-    () => formatTime(message.timestamp),
-    [message.timestamp],
-  )
+  const formattedTime = useMemo(() => formatTime(message.timestamp), [message.timestamp])
 
   const body =
     message.text.length > 0 ? (
@@ -79,9 +73,7 @@ const MessageBubbleInner = ({
     <article className="group relative px-4 py-3">
       <div className="flex items-start gap-3">
         <header className="flex min-w-0 flex-1 items-center justify-between">
-          <span className="text-[11px] text-ink-tertiary">
-            {ROLE_LABEL[role]}
-          </span>
+          <span className="text-[11px] text-ink-tertiary">{ROLE_LABEL[role]}</span>
           <time
             dateTime={message.timestamp}
             className="font-mono text-[11px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
@@ -89,9 +81,7 @@ const MessageBubbleInner = ({
             {formattedTime}
           </time>
         </header>
-        {message.text.length > 0 ? (
-          <CopyButton text={message.text} />
-        ) : null}
+        {message.text.length > 0 ? <CopyButton text={message.text} /> : null}
       </div>
       {isUser ? (
         <div
@@ -128,14 +118,9 @@ const MessageBubbleInner = ({
 export const areMessageBubblePropsEqual = (
   prev: MessageBubbleProps,
   next: MessageBubbleProps,
-): boolean =>
-  prev.isStreaming === next.isStreaming &&
-  isSameUiMessage(prev.message, next.message)
+): boolean => prev.isStreaming === next.isStreaming && isSameUiMessage(prev.message, next.message)
 
-export const MessageBubble = memo(
-  MessageBubbleInner,
-  areMessageBubblePropsEqual,
-)
+export const MessageBubble = memo(MessageBubbleInner, areMessageBubblePropsEqual)
 
 const CopyButton = ({ text }: { readonly text: string }): JSX.Element => {
   const [copied, setCopied] = useState(false)
@@ -197,12 +182,41 @@ const CheckIcon = (): JSX.Element => (
 )
 
 const PlainMessageText = ({ text }: { readonly text: string }): JSX.Element => {
-  return (
-    <div className="whitespace-pre-wrap break-words font-sans text-chat text-ink">
-      {text}
-    </div>
-  )
+  return <div className="whitespace-pre-wrap break-words font-sans text-chat text-ink">{text}</div>
 }
+
+/**
+ * The LIVE streaming tail — the in-progress assistant text rendered OUTSIDE the
+ * memo'd transcript list (see ChatPanel). It reuses the exact `MessageBubble`
+ * assistant chrome in its `isStreaming` mode (plain text, not markdown — mirrors
+ * the pre-refactor mid-stream bubble byte-for-byte), so the visible bubble is
+ * identical to what the finalized row will become. A fixed synthetic id keeps
+ * the memoized time-formatter from rebuilding across tokens (timestamp is
+ * constant across the stream). Renders nothing until the first token arrives.
+ */
+export const StreamingTail = ({
+  text,
+  timestamp,
+  hasTranscript,
+}: {
+  readonly text: string
+  readonly timestamp: string | null
+  /** Reserved for future spacing/affordances relative to the transcript above;
+   *  accepted now so the call site is stable. */
+  readonly hasTranscript?: boolean
+}): JSX.Element | null => {
+  if (text.length === 0) return null
+  void hasTranscript
+  const message: UiMessage = {
+    id: STREAMING_TAIL_ID,
+    role: "assistant",
+    text,
+    timestamp: timestamp ?? "",
+  }
+  return <MessageBubble message={message} isStreaming />
+}
+
+const STREAMING_TAIL_ID = "streaming-tail"
 
 const formatTime = (iso: string): string => {
   const parsed = new Date(iso)

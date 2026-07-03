@@ -121,47 +121,50 @@ const assistantSignatureFromState = (state: SessionStateView): string | null => 
   return `${String(state.messageCount)}:${state.lastAssistantText}`
 }
 
+/**
+ * Update the in-progress streaming text. PERF: the live text lives ONLY in the
+ * `streamingAssistant` slot — it is NOT mirrored into `messages`. That keeps the
+ * `messages` array reference STABLE across every `turn.output.delta` token, so
+ * `TranscriptViewport`'s `prev.messages === next.messages` memo gate bails and
+ * the whole transcript subtree is skipped per token (see reconcile-count.test).
+ * The live tail is rendered from this slot as a SEPARATE component below the
+ * memo'd list (App → ChatPanel `streamingText`). Finalization converts the slot
+ * into an APPENDED message exactly once (see {@link finalizeStreamingAssistant}
+ * and the completion helpers below).
+ */
 const reconcileStreamingAssistant = (
   state: TranscriptState,
   text: string,
   timestamp: string,
   id: string,
-): TranscriptState => {
-  const nextStreaming = { id, text, timestamp }
-  const lastMessage = state.messages.at(-1)
-  if (
-    lastMessage?.role === "assistant" &&
-    state.streamingAssistant !== null &&
-    lastMessage.id === state.streamingAssistant.id
-  ) {
-    return {
-      ...state,
-      streamingAssistant: nextStreaming,
-      messages: [
-        ...state.messages.slice(0, -1),
-        {
-          ...lastMessage,
-          id,
-          text,
-          timestamp: state.streamingAssistant.timestamp,
-        },
-      ],
-    }
-  }
-  return {
-    ...state,
-    streamingAssistant: nextStreaming,
-    messages: [
-      ...state.messages,
-      {
-        id,
-        role: "assistant",
-        text,
-        timestamp,
-      },
-    ],
-  }
-}
+): TranscriptState => ({
+  ...state,
+  streamingAssistant: { id, text, timestamp },
+})
+
+/**
+ * Convert the active `streamingAssistant` slot into a single APPENDED assistant
+ * message and clear all completion tracking. This is the streaming-tail's
+ * finalization: the slot never lived in `messages`, so we append (not repair).
+ * `text` is the canonical/fallback body chosen by the caller; the row's id +
+ * timestamp are inherited from the slot so the finalized bubble keeps a stable
+ * identity and its first-token time.
+ */
+const finalizeStreamingAssistant = (args: {
+  readonly state: TranscriptState
+  readonly streaming: StreamingAssistant
+  readonly text: string
+  readonly signature?: string
+}): TranscriptState =>
+  appendTranscriptMessage(
+    clearCompletionTracking(args.state, args.signature ?? args.state.lastAssistantSignature),
+    {
+      id: args.streaming.id,
+      role: "assistant",
+      text: args.text,
+      timestamp: args.streaming.timestamp,
+    },
+  )
 
 const pendingCompletionMessage = (pending: PendingCompletion): UiMessage => ({
   id: pending.eventId,
@@ -257,16 +260,13 @@ const applyAssistantSignatureToTranscript = (args: {
   }
   const text = args.sessionState.lastAssistantText ?? "(turn completed)"
   const lastMessage = args.state.messages.at(-1)
-  if (
-    args.state.streamingAssistant !== null &&
-    lastMessage?.role === "assistant" &&
-    lastMessage.id === args.state.streamingAssistant.id
-  ) {
-    return repairTrailingAssistantMessage({
+  // Streaming in progress: the live text was never mirrored into `messages`, so
+  // finalize the slot into a NEW appended row (do not repair a trailing row).
+  if (args.state.streamingAssistant !== null) {
+    return finalizeStreamingAssistant({
       state: args.state,
-      lastMessage,
+      streaming: args.state.streamingAssistant,
       text,
-      timestamp: args.state.streamingAssistant.timestamp,
       signature,
     })
   }
@@ -304,24 +304,17 @@ const settlePendingCompletionOnIdle = (
     return null
   }
   const fallback = state.pendingCompletion
-  const lastMessage = state.messages.at(-1)
-  if (
-    state.streamingAssistant !== null &&
-    lastMessage?.role === "assistant" &&
-    lastMessage.id === state.streamingAssistant.id
-  ) {
-    return {
-      ...clearCompletionTracking(state),
-      messages: [
-        ...state.messages.slice(0, -1),
-        {
-          ...lastMessage,
-          text:
-            fallback.assistantText ??
-            (lastMessage.text.length > 0 ? lastMessage.text : fallbackTextOf(fallback)),
-        },
-      ],
-    }
+  // Streaming in progress: finalize the slot into an appended row. Prefer the
+  // completion's canonical `assistantText`; else the text we already streamed
+  // (if any); else the outcome-reason fallback. The row inherits the slot id +
+  // timestamp so the finalized bubble keeps the streaming row's identity.
+  if (state.streamingAssistant !== null) {
+    const streamed = state.streamingAssistant.text
+    return finalizeStreamingAssistant({
+      state,
+      streaming: state.streamingAssistant,
+      text: fallback.assistantText ?? (streamed.length > 0 ? streamed : fallbackTextOf(fallback)),
+    })
   }
   return appendTranscriptMessage(
     {
@@ -393,18 +386,33 @@ export const TRANSCRIPT_NOOP_SESSION_EVENT_TYPES = [
 const TRANSCRIPT_NOOP_SESSION_EVENT_TYPE_SET = new Set<string>(TRANSCRIPT_NOOP_SESSION_EVENT_TYPES)
 
 const TRANSCRIPT_EVENT_HANDLERS = {
-  "turn.started": (state, event) => ({
-    ...appendTranscriptMessage(state, {
-      id: event.eventId,
-      role: "user",
-      text: event.prompt,
-      timestamp: event.emittedAt,
-      ...(event.images !== undefined && event.images.length > 0
-        ? { images: cloneImages(event.images) }
-        : {}),
-    }),
-    streamingAssistant: null,
-  }),
+  "turn.started": (state, event) => {
+    // Defensive parity: normally the prior turn's completion has already
+    // finalized + cleared the streaming slot before the next turn starts. But if
+    // a `turn.started` arrives while a non-empty slot lingers, finalize it into a
+    // row first — pre-refactor that partial text lived in `messages` and would
+    // have survived, so dropping it here would be a silent regression.
+    const base =
+      state.streamingAssistant !== null && state.streamingAssistant.text.length > 0
+        ? finalizeStreamingAssistant({
+            state,
+            streaming: state.streamingAssistant,
+            text: state.streamingAssistant.text,
+          })
+        : state
+    return {
+      ...appendTranscriptMessage(base, {
+        id: event.eventId,
+        role: "user",
+        text: event.prompt,
+        timestamp: event.emittedAt,
+        ...(event.images !== undefined && event.images.length > 0
+          ? { images: cloneImages(event.images) }
+          : {}),
+      }),
+      streamingAssistant: null,
+    }
+  },
   "turn.output.delta": (state, event) => {
     const streamingId =
       state.streamingAssistant?.id ??
@@ -451,10 +459,22 @@ const TRANSCRIPT_EVENT_HANDLERS = {
       fallbackCompletion: null,
     }
   },
-  "turn.failed": (state, event) =>
-    appendTranscriptMessage(
+  "turn.failed": (state, event) => {
+    // Preserve any partial streamed text: BEFORE the streaming-out-of-array
+    // refactor the in-progress text lived in `messages`, so a mid-stream failure
+    // left the partial assistant bubble visible ABOVE the error row. Finalize
+    // the slot (if it holds real text) so that observable behavior is identical.
+    const withPartial =
+      state.streamingAssistant !== null && state.streamingAssistant.text.length > 0
+        ? finalizeStreamingAssistant({
+            state,
+            streaming: state.streamingAssistant,
+            text: state.streamingAssistant.text,
+          })
+        : state
+    return appendTranscriptMessage(
       {
-        ...state,
+        ...withPartial,
         streamingAssistant: null,
         pendingCompletion: null,
         fallbackCompletion: null,
@@ -465,7 +485,8 @@ const TRANSCRIPT_EVENT_HANDLERS = {
         text: event.message,
         timestamp: event.emittedAt,
       },
-    ),
+    )
+  },
   "session.created": (state, event) =>
     appendTranscriptMessage(
       event.model !== undefined && event.model.length > 0
@@ -689,6 +710,13 @@ export const useSessionEvents = (
 ): {
   messages: readonly UiMessage[]
   streamingMessageId: string | null
+  /** Live in-progress assistant text, held OUTSIDE the memo'd `messages` list so
+   *  a per-token stream never re-renders the transcript. `null` when no turn is
+   *  streaming. Rendered as a separate tail below the transcript viewport. */
+  streamingText: string | null
+  /** Timestamp of the first streamed token (stable across the stream), for the
+   *  streaming tail's `<time>` label. `null` when not streaming. */
+  streamingTimestamp: string | null
   sessionState: SessionStateView | null
   resetTranscript: () => void
   appendClientMessage: (role: "system" | "error", text: string) => void
@@ -759,6 +787,8 @@ export const useSessionEvents = (
   return {
     messages: transcript.messages,
     streamingMessageId: transcript.streamingAssistant?.id ?? null,
+    streamingText: transcript.streamingAssistant?.text ?? null,
+    streamingTimestamp: transcript.streamingAssistant?.timestamp ?? null,
     sessionState,
     resetTranscript,
     appendClientMessage,

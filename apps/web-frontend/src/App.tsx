@@ -249,6 +249,8 @@ export const App = (): JSX.Element => {
   const {
     messages,
     streamingMessageId,
+    streamingText,
+    streamingTimestamp,
     sessionState,
     resetTranscript,
     appendClientMessage,
@@ -733,6 +735,8 @@ export const App = (): JSX.Element => {
         <ChatPanel
           messages={messages}
           streamingMessageId={streamingMessageId}
+          streamingText={streamingText}
+          streamingTimestamp={streamingTimestamp}
           draft={draft}
           onDraftChange={setDraft}
           onSubmit={submit}
