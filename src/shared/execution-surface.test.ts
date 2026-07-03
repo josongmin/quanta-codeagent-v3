@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Surface as ContractsSurface } from "@/config/knob-schema/contracts"
 import type { Surface as KnobsSurface } from "@/runner/knobs/types"
-import type { SurfaceMirror } from "@/stream"
+import type { SurfaceMirror } from "@/stream/types"
 import { EXECUTION_SURFACES, type ExecutionSurface } from "./execution-surface"
 
 describe("execution-mode surface SSOT (H4-F1)", () => {

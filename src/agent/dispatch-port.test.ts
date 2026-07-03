@@ -11,17 +11,27 @@ import { describe, expect, test } from "bun:test"
 import { type DispatchPort, dispatchTool, resolveDispatchPort } from "./dispatch"
 
 describe("dispatch port (H1) — resolveDispatchPort default binding", () => {
+  // A fake that HONORS the real DispatchResult contract (block + ok + preview) — no `as unknown as`
+  // escape, so a contract-violating substitute would fail to compile (the port's whole promise).
+  const fakeDispatch =
+    (name: (n: string) => void): DispatchPort =>
+    async (call) => {
+      name(call.name)
+      return {
+        ok: true,
+        preview: "fake-dispatch",
+        block: { type: "tool_result", tool_use_id: call.id, content: "fake-dispatch" },
+      }
+    }
+
   test("unset port ⇒ the concrete dispatchTool (byte-identical default)", () => {
     expect(resolveDispatchPort({})).toBe(dispatchTool)
-    expect(resolveDispatchPort({ dispatchPort: undefined })).toBe(dispatchTool)
+    const explicitUnset: { dispatchPort?: DispatchPort } = {}
+    expect(resolveDispatchPort(explicitUnset)).toBe(dispatchTool)
   })
 
   test("wired port ⇒ the injected substitute is returned (not dispatchTool)", () => {
-    // A fake that satisfies DispatchPort structurally (a replay/dry-run stand-in would look like this).
-    const fake: DispatchPort = async () =>
-      ({ ok: true, preview: "fake-dispatch", output: "" }) as unknown as Awaited<
-        ReturnType<DispatchPort>
-      >
+    const fake = fakeDispatch(() => {})
     const resolved = resolveDispatchPort({ dispatchPort: fake })
     expect(resolved).toBe(fake)
     expect(resolved).not.toBe(dispatchTool)
@@ -29,11 +39,7 @@ describe("dispatch port (H1) — resolveDispatchPort default binding", () => {
 
   test("the resolved port is actually invoked (the substitute runs, not the default)", async () => {
     let calledWith: string | undefined
-    const fake: DispatchPort = async (call) => {
-      calledWith = call.name
-      return { ok: true, preview: "ran", output: "" } as unknown as Awaited<ReturnType<DispatchPort>>
-    }
-    const port = resolveDispatchPort({ dispatchPort: fake })
+    const port = resolveDispatchPort({ dispatchPort: fakeDispatch((n) => (calledWith = n)) })
     const r = await port(
       { type: "tool_use", id: "1", name: "some_tool", input: {} },
       {} as never,
@@ -41,5 +47,6 @@ describe("dispatch port (H1) — resolveDispatchPort default binding", () => {
     )
     expect(calledWith).toBe("some_tool")
     expect(r.ok).toBe(true)
+    expect(r.block.type).toBe("tool_result") // the contract's required field is honored
   })
 })

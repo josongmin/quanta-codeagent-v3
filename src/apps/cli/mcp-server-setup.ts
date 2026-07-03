@@ -214,7 +214,7 @@ const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Pr
   // deep-import pattern `@/host`/`@/apps` already use for agent internals.
   const [
     { parseAgentArgs, buildBaseFromArgs, toAssembleRequest, assembleAgentConfig },
-    { dispatchTool },
+    { resolveDispatchPort },
   ] = await Promise.all([import("@/host/runtime"), import("@/agent/dispatch")])
 
   // Build a headless AgentConfig. The `-p` placeholder satisfies headless arg
@@ -308,7 +308,9 @@ const assembleAndServe = async (io: McpServerCmdIo, deps?: McpServerCmdDeps): Pr
   const mintId = idMinter()
   const toolCall: ToolCallPort = async (name, args) => {
     try {
-      const result = await dispatchTool(
+      // H1 (DIP): route through the injectable dispatch port (default dispatchTool) — the SAME seam
+      // stream-callbacks/codemode use, so a wired substitute reaches MCP tool calls too. Byte-identical.
+      const result = await resolveDispatchPort(config)(
         { type: "tool_use", id: mintId(), name, input: args },
         config,
         serverPermission,
