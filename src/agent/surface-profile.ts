@@ -79,28 +79,25 @@ export const FROZEN_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen" }
 /**
  * Named per-surface profiles — the "per-target rendering strategy" made explicit
  * (jul-4). DECLARE-WHERE-CONSUMED: a profile constant exists only where an entry
- * point actually selects it, so there are no inert/dead surface constants. Both are
- * `frozen`, so `composeSystemPromptForSurface(<profile>)` is byte-identical to the
- * site's prior raw `buildSystemPrompt` call — the profiles NAME what the sites
- * already did, they do not change any rendered prompt.
+ * point actually selects it, so there are no inert/dead surface constants.
  *
- * - GENERAL — interactive CLI / IDE (consumed by the interactive mode-preset). Frozen,
- *   no task pack (== FROZEN_SURFACE_PROFILE). The `default`-env content lever rides a
- *   default-OFF knob at the CLI entry point, NOT this constant, so GENERAL stays byte-identical.
  * - SWE — externally-graded batch/bench (consumed by config-build). Frozen + the `batch`
- *   pack (R-NO-EXPLORE-OVER-EDIT). Matches config-build's `{ promptPack: "batch" }` byte-for-byte.
+ *   pack (R-NO-EXPLORE-OVER-EDIT). `composeSystemPromptForSurface(SWE_SURFACE_PROFILE)` is
+ *   byte-identical to config-build's prior `{ promptPack: "batch" }` call.
  *
  * TB (terminal) declares its own `owned` profile at its entry point
  * (`TERMINAL_SURFACE_PROFILE` in the terminal brain) — it carries an operator guide and is
  * knob-gated, so it lives next to that launch site rather than here.
  *
- * NOT declared here: PR (ci-bot) / HEADLESS. Their mode-presets deliberately render the
- * frozen no-pack base (see `headless.ts` "byte-identical"), so a PR/HEADLESS profile would
- * be an inert constant with no consumer. When a preset opts into its task pack (a deliberate,
- * measured behavior change), declare the profile THEN — the `ci-bot`/`headless` rule packs and
- * the `renderTaskRules` arms already exist; only the entry-point selection is missing.
+ * NOT declared here: GENERAL (interactive/IDE) / PR (ci-bot) / HEADLESS. Their mode-presets
+ * render the frozen no-pack base via a RAW `buildSystemPrompt(cwd)` fallback. That fallback is
+ * itself inert on the production dispatch (the composition root fills `base.system` with a
+ * non-empty string, so the `??` never reaches it) — so routing it through a named profile would
+ * be a same-behavior constant with no LIVE consumer. When a preset genuinely opts into a task
+ * pack or verify strategy (a deliberate, measured behavior change reached on a live path),
+ * declare the profile THEN — the rule packs and `renderTaskRules`/`renderVerifyStrategy` arms
+ * already exist; only the reachable entry-point selection is missing.
  */
-export const GENERAL_SURFACE_PROFILE: SurfaceProfile = FROZEN_SURFACE_PROFILE
 export const SWE_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen", rulePack: "batch" }
 
 /** Options for {@link composeSystemPromptForSurface} that are orthogonal to the

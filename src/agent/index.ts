@@ -307,7 +307,6 @@ export {
   type ComposeForSurfaceOpts,
   composeSystemPromptForSurface,
   FROZEN_SURFACE_PROFILE,
-  GENERAL_SURFACE_PROFILE,
   type SurfaceProfile,
   SWE_SURFACE_PROFILE,
 } from "./surface-profile"
