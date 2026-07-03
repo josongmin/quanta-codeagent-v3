@@ -2,7 +2,13 @@
   "name": "quanta-codeagent",
   "version": "1.0.023",
   "type": "module",
+  "exports": {
+    "./sdk": {
+      "import": "./dist/sdk/index.js"
+    }
+  },
   "scripts": {
+    "build:sdk": "bun build src/sdk/index.ts --outfile dist/sdk/index.js --target node --format esm",
     "dev": "bun --hot run src/apps/cli/index.ts",
     "start": "bun run src/apps/cli/index.ts",
     "agent": "bun run src/apps/agent/index.ts",

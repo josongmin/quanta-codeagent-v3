@@ -81,6 +81,7 @@
       "@/host/*": ["./src/host/*"],
       "@/protocol/*": ["./src/protocol/*"],
       "@/kernel/*": ["./src/kernel/*"],
+      "@/sdk": ["./src/sdk/index.ts"],
       "@/sdk/*": ["./src/sdk/*"],
       "@/ipc": ["./src/ipc/index.ts"],
       "@/ipc/*": ["./src/ipc/*"],
