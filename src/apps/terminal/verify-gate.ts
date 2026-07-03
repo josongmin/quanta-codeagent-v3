@@ -57,21 +57,102 @@ const CONTAINER_EXEC = "container_exec"
 /** Package managers, build/compile tools, and env probes. Running one proves *setup*, never
  *  *behavior against spec* — NEVER an exercise, even though it "runs something" and returns output. */
 const BUILD_OR_INSTALL_TOOLS: ReadonlySet<string> = new Set([
-  "pip", "pip3", "pip2", "pipx", "poetry", "uv", "conda", "mamba", "ensurepip", "easy_install",
-  "npm", "pnpm", "yarn", "npx", "corepack",
-  "cargo", "rustup", "go", "gem", "bundle", "composer", "mix", "sbt", "leiningen", "lein",
-  "apt", "apt-get", "aptitude", "dpkg", "apk", "yum", "dnf", "pacman", "zypper", "brew", "port",
-  "make", "cmake", "ninja", "meson", "bazel", "buck", "gradle", "gradlew", "mvn", "ant", "scons", "waf",
-  "gcc", "g++", "cc", "c++", "clang", "clang++", "rustc", "tsc", "javac", "kotlinc", "ld", "ar", "as", "nvcc", "nasm",
-  "configure", "autoconf", "automake", "autoreconf", "libtool", "pkg-config", "ldconfig",
-  "docker", "docker-compose", "podman", "systemctl", "service", "modprobe", "update-alternatives",
+  "pip",
+  "pip3",
+  "pip2",
+  "pipx",
+  "poetry",
+  "uv",
+  "conda",
+  "mamba",
+  "ensurepip",
+  "easy_install",
+  "npm",
+  "pnpm",
+  "yarn",
+  "npx",
+  "corepack",
+  "cargo",
+  "rustup",
+  "go",
+  "gem",
+  "bundle",
+  "composer",
+  "mix",
+  "sbt",
+  "leiningen",
+  "lein",
+  "apt",
+  "apt-get",
+  "aptitude",
+  "dpkg",
+  "apk",
+  "yum",
+  "dnf",
+  "pacman",
+  "zypper",
+  "brew",
+  "port",
+  "make",
+  "cmake",
+  "ninja",
+  "meson",
+  "bazel",
+  "buck",
+  "gradle",
+  "gradlew",
+  "mvn",
+  "ant",
+  "scons",
+  "waf",
+  "gcc",
+  "g++",
+  "cc",
+  "c++",
+  "clang",
+  "clang++",
+  "rustc",
+  "tsc",
+  "javac",
+  "kotlinc",
+  "ld",
+  "ar",
+  "as",
+  "nvcc",
+  "nasm",
+  "configure",
+  "autoconf",
+  "automake",
+  "autoreconf",
+  "libtool",
+  "pkg-config",
+  "ldconfig",
+  "docker",
+  "docker-compose",
+  "podman",
+  "systemctl",
+  "service",
+  "modprobe",
+  "update-alternatives",
 ])
 
 /** Language interpreters that EXERCISE the deliverable when handed a FILE to run (not `-c`, not a
  *  package-manager `-m`). `python foo.py` exercises; `python -c "import x"` is a probe. */
 const INTERPRETERS: ReadonlySet<string> = new Set([
-  "python", "python3", "python2", "node", "nodejs", "ruby", "perl", "php", "lua",
-  "rscript", "julia", "deno", "bun", "tclsh",
+  "python",
+  "python3",
+  "python2",
+  "node",
+  "nodejs",
+  "ruby",
+  "perl",
+  "php",
+  "lua",
+  "rscript",
+  "julia",
+  "deno",
+  "bun",
+  "tclsh",
 ])
 
 /** Runners that inherently RUN-AND-OBSERVE against the produced deliverable or a reference —
@@ -82,8 +163,21 @@ const INTERPRETERS: ReadonlySet<string> = new Set([
 // (b) an inflation of the best-of-N exercise tie-break (a candidate spamming the hidden suite would
 // outrank a cleaner one). See {@link TEST_RUNNERS}.
 const ACCEPTANCE_RUNNERS: ReadonlySet<string> = new Set([
-  "diff", "cmp", "sdiff", "colordiff",
-  "curl", "wget", "http", "nc", "ncat", "netcat", "ab", "wrk", "hey", "siege", "grpcurl",
+  "diff",
+  "cmp",
+  "sdiff",
+  "colordiff",
+  "curl",
+  "wget",
+  "http",
+  "nc",
+  "ncat",
+  "netcat",
+  "ab",
+  "wrk",
+  "hey",
+  "siege",
+  "grpcurl",
 ])
 
 /** P2-B: test-RUNNER leaders that run a suite (typically the hidden oracle), NOT an exercise of the
@@ -94,9 +188,29 @@ const TEST_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", "tox", "
  *  a shell handed a `*.sh` script runs that script (exercise). A bare interactive shell is not. */
 const SHELLS: ReadonlySet<string> = new Set(["bash", "sh", "zsh", "dash", "ksh", "fish"])
 
+/** Compound-command separator: `&&`, `||`, `;`, `|`, `&`, newline. Splits a command into segments
+ *  that each run (roughly) one program. The SINGLE SSOT for this split — shared by the exercise
+ *  and compare passes (a future separator variant updates both at once). */
+const COMPOUND_SEP = /(?:&&|\|\||[;|&\n])/
+
+/** STATEMENT separator: `&&`, `||`, `;`, `&`, newline — but NOT a single `|` (a pipe keeps data
+ *  flowing WITHIN one statement, so `cat /tests/g | tee ref` is ONE statement whose oracle content
+ *  reaches `ref`). The taint pass splits on this coarser boundary, then walks pipe stages inside. */
+const STATEMENT_SEP = /(?:&&|\|\||[;&\n])/
+
 /** Wrappers that prefix a command without changing what runs. */
 const TRANSPARENT_WRAPPERS: ReadonlySet<string> = new Set([
-  "sudo", "env", "nohup", "time", "stdbuf", "nice", "setsid", "timeout", "xargs", "unbuffer", "script",
+  "sudo",
+  "env",
+  "nohup",
+  "time",
+  "stdbuf",
+  "nice",
+  "setsid",
+  "timeout",
+  "xargs",
+  "unbuffer",
+  "script",
 ])
 
 /** basename of a leader token (strip any path), lower-cased. */
@@ -110,7 +224,10 @@ const baseName = (leader: string): string => {
  *  + remaining arg tokens. `timeout`/`xargs` consume their own numeric/flag args crudely — we just
  *  skip a following bare-number/flag so `timeout 5 ./run` reduces to `./run`. */
 const leaderAndArgs = (segment: string): { leader: string; args: readonly string[] } => {
-  const tokens = segment.trim().split(/\s+/).filter((t) => t.length > 0)
+  const tokens = segment
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
   let i = 0
   while (i < tokens.length) {
     const t = tokens[i]
@@ -165,7 +282,16 @@ const isExerciseSegment = (segment: string): boolean => {
     if (mIdx >= 0) {
       const mod = (args[mIdx + 1] ?? "").toLowerCase()
       if (TEST_RUNNERS.has(mod)) return false // `python -m pytest` = running the suite, not the deliverable
-      return !["pip", "pip3", "venv", "virtualenv", "ensurepip", "build", "installer", "wheel"].includes(mod)
+      return ![
+        "pip",
+        "pip3",
+        "venv",
+        "virtualenv",
+        "ensurepip",
+        "build",
+        "installer",
+        "wheel",
+      ].includes(mod)
     }
     return args.some((a) => !a.startsWith("-")) // a non-flag arg = a script/file to run
   }
@@ -181,9 +307,7 @@ const isExerciseSegment = (segment: string): boolean => {
 /** True iff ANY segment of a (possibly compound `a && b | c ; d`) command is an exercise. Catches
  *  `pip install x && ./run` (the run segment counts) without letting `mkdir x && ls` pass. */
 export const isExerciseCommand = (command: string): boolean =>
-  command
-    .split(/(?:&&|\|\||[;|&\n])/)
-    .some((seg) => seg.trim().length > 0 && isExerciseSegment(seg))
+  command.split(COMPOUND_SEP).some((seg) => seg.trim().length > 0 && isExerciseSegment(seg))
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // v2 — L1 "CHECKED" inspector: was the output COMPARED against a reference? (RFC jul-2 §03)
@@ -224,12 +348,21 @@ const isTestPath = (operand: string): boolean => TEST_PATH_MARKERS.some((re) => 
 // R1's path markers are provenance-blind: `cp /app/tests/golden.csv ref.csv && diff out ref.csv`
 // diffs against a clean-LOOKING name whose CONTENT is the hidden oracle. This pre-pass walks the
 // model's own commands chronologically and TAINTS every path that received content from a
-// test path (or an already-tainted path — transitive): cp/mv/ln/install/rsync destinations,
-// `tee` targets, `dd of=`, and shell `>`/`>>` redirect targets in any command that references an
-// unfair source. A tainted operand is then refused for L1 exactly like the oracle itself
-// (recognized-but-refused, the same `refusedTestPath` channel). Token-level + no cwd/symlink
-// resolution BY DESIGN (bounded; the complete fix is a provenance RFC): over-tainting costs one
-// bounded follow-up, under-tainting would teach peeking — fail-closed picks the former.
+// test path (or an already-tainted path — transitive): cp/mv/ln/install/rsync destinations
+// (incl. GNU `-t DIR` and a DIRECTORY destination via a `dir/` prefix), `tee` targets, `dd of=`,
+// and shell `>`/`>>` redirect targets. A tainted operand is then refused for L1 exactly like the
+// oracle itself (recognized-but-refused, the same `refusedTestPath` channel).
+//
+// TWO calibrations (jul-3 hell-audit R2):
+//   • A redirect target is NOT tainted when its segment RUNS THE DELIVERABLE (an exercise segment):
+//     `./solve tests/in.txt > out` produces `out` as the deliverable's OWN output, not laundered
+//     oracle — so the honest `diff out expected.txt` stays fair. `cat /tests/g > ref` (cat is not
+//     an exercise) still taints `ref`.
+//   • A DIRECTORY destination taints a `dir/` PREFIX (a `cp /tests/g d/` then `diff out d/g` is
+//     caught), and `-t DIR` inverts the operand order (DEST first) — both handled explicitly.
+// Token-level + no cwd/symlink resolution BY DESIGN (bounded; interpreter-copies like
+// `python -c 'shutil.copy(...)'`, tar round-trips, and `cp <file> <bareword-dir>` remain out of
+// scope — the complete fix is a provenance RFC). Fail-closed: under-taint would teach peeking.
 
 /** Copy-shaped leaders whose LAST operand receives the content of the earlier operands. */
 const TAINT_COPIERS: ReadonlySet<string> = new Set(["cp", "mv", "ln", "install", "rsync"])
@@ -238,11 +371,22 @@ const TAINT_COPIERS: ReadonlySet<string> = new Set(["cp", "mv", "ln", "install",
 const normalizeToken = (tok: string): string =>
   tok.replace(/^['"]+|['"]+$/g, "").replace(/^\.\//, "")
 
-/** All `>`/`>>` redirect targets in a raw command. Fd-redirects (`2>err`) included — the stderr of
- *  a test-reading command is still oracle-derived; over-taint is the safe direction. */
-const redirectTargets = (command: string): string[] => {
+/** True iff `tok` is an UNFAIR reference — a verifier/test path, an already-tainted path, or a file
+ *  UNDER a tainted DIRECTORY (a `dir/`-terminated taint entry that prefixes the operand). The SINGLE
+ *  operand-refusal predicate — shared by the taint pre-pass (transitive source check) and the L1
+ *  operand check in {@link comparedToReference}, so both refuse byte-identically. */
+const isUnfair = (tok: string, tainted: ReadonlySet<string>): boolean => {
+  const n = normalizeToken(tok)
+  if (isTestPath(n) || tainted.has(n)) return true
+  for (const t of tainted) if (t.endsWith("/") && n.startsWith(t)) return true
+  return false
+}
+
+/** All `>`/`>>` redirect targets in a command SEGMENT. Fd-redirects (`2>err`) included — the stderr
+ *  of a test-reading command is still oracle-derived; over-taint is the safe direction. */
+const redirectTargets = (segment: string): string[] => {
   const out: string[] = []
-  for (const m of command.matchAll(/>{1,2}\s*([^\s;|&<>]+)/g)) {
+  for (const m of segment.matchAll(/>{1,2}\s*([^\s;|&<>]+)/g)) {
     const t = m[1]
     if (t !== undefined) out.push(t)
   }
@@ -253,35 +397,61 @@ const redirectTargets = (command: string): string[] => {
  *  && cp a b` taints both `a` and `b`). PURE; exported for direct unit-pinning. */
 export const buildTaintedRefs = (commands: readonly string[]): ReadonlySet<string> => {
   const tainted = new Set<string>()
-  const unfairTok = (tok: string): boolean => {
-    const n = normalizeToken(tok)
-    return isTestPath(n) || tainted.has(n)
+  const unfairTok = (tok: string): boolean => isUnfair(tok, tainted)
+  /** Taint a copy DESTINATION verbatim: a `dir/`-terminated dst becomes a directory-prefix taint
+   *  (via {@link isUnfair}); an exact filename becomes an exact taint. */
+  const taintDest = (raw: string): void => {
+    tainted.add(normalizeToken(raw))
+  }
+  /** Taint a KNOWN-directory destination (a `-t DIR`) as a `dir/` prefix even without a trailing
+   *  slash — every file `cp -t` drops into it is oracle-derived. */
+  const taintDir = (raw: string): void => {
+    const d = normalizeToken(raw)
+    tainted.add(d.endsWith("/") ? d : `${d}/`)
   }
   for (const command of commands) {
-    // Only commands that actually REFERENCE an unfair source can launder it somewhere.
-    const referencesUnfair = command.split(/\s+/).some((t) => t.length > 0 && unfairTok(t))
-    if (!referencesUnfair) continue
-    // (a) shell redirects + `dd of=` anywhere in the command (`cat /tests/g > mine`, `dd of=mine`).
-    for (const t of redirectTargets(command)) tainted.add(normalizeToken(t))
-    for (const m of command.matchAll(/\bof=([^\s;|&]+)/g)) {
-      const t = m[1]
-      if (t !== undefined) tainted.add(normalizeToken(t))
-    }
-    // (b) per pipe/compound segment: `tee` targets, and copy-shaped leaders whose SOURCE is unfair.
-    for (const seg of command.split(/(?:&&|\|\||[;|&\n])/)) {
-      const { leader, args } = leaderAndArgs(seg)
-      if (leader === "") continue
-      const base = baseName(leader)
-      if (base === "tee") {
-        for (const a of args) if (!a.startsWith("-")) tainted.add(normalizeToken(a))
-        continue
+    // STATEMENT level (pipe kept inside): only a statement that REFERENCES an unfair source can
+    // launder it, and a pipe carries that source to a downstream `tee`/redirect in the SAME
+    // statement (`cat /tests/g | tee ref`).
+    for (const stmt of command.split(STATEMENT_SEP)) {
+      if (stmt.trim().length === 0) continue
+      if (!stmt.split(/\s+/).some((t) => t.length > 0 && unfairTok(t))) continue
+      // (a) redirect / `dd of=` / `tee` targets — SKIPPED when the statement RUNS THE DELIVERABLE
+      //     (its own stdout is output, not laundered oracle; `./solve tests/in > out` stays fair).
+      const runsDeliverable = isExerciseCommand(stmt)
+      if (!runsDeliverable) {
+        for (const t of redirectTargets(stmt)) taintDest(t)
+        for (const m of stmt.matchAll(/\bof=([^\s;|&]+)/g)) {
+          const t = m[1]
+          if (t !== undefined) taintDest(t)
+        }
       }
-      if (!TAINT_COPIERS.has(base)) continue
-      const operands = args.filter((a) => !a.startsWith("-"))
-      if (operands.length < 2) continue
-      const dst = operands[operands.length - 1]
-      const srcs = operands.slice(0, -1)
-      if (dst !== undefined && srcs.some(unfairTok)) tainted.add(normalizeToken(dst))
+      // (b) walk PIPE STAGES: `tee` targets (skipped for a deliverable run) + copy-shaped leaders.
+      for (const seg of stmt.split("|")) {
+        const { leader, args } = leaderAndArgs(seg)
+        if (leader === "") continue
+        const base = baseName(leader)
+        if (base === "tee") {
+          if (!runsDeliverable) for (const a of args) if (!a.startsWith("-")) taintDest(a)
+          continue
+        }
+        if (!TAINT_COPIERS.has(base)) continue
+        // GNU `-t DIR` / `--target-directory[=DIR]`: DEST is the flag arg, positionals are sources.
+        const tIdx = args.findIndex((a) => a === "-t" || a === "--target-directory")
+        const eqArg = args.find((a) => a.startsWith("--target-directory="))
+        if (tIdx >= 0 || eqArg !== undefined) {
+          const flagArg = tIdx >= 0 ? args[tIdx + 1] : undefined
+          const dir = tIdx >= 0 ? flagArg : eqArg?.slice((eqArg?.indexOf("=") ?? -1) + 1)
+          const srcs = args.filter((a) => !a.startsWith("-") && a !== flagArg)
+          if (dir !== undefined && srcs.some(unfairTok)) taintDir(dir)
+          continue
+        }
+        const operands = args.filter((a) => !a.startsWith("-"))
+        if (operands.length < 2) continue
+        const dst = operands[operands.length - 1]
+        const srcs = operands.slice(0, -1)
+        if (dst !== undefined && srcs.some(unfairTok)) taintDest(dst)
+      }
     }
   }
   return tainted
@@ -370,14 +540,15 @@ const segmentComparesToReference = (
   return { isCompare: false, refIsTestPath: false }
 }
 
-/** Judge a (possibly compound) command for an L1 comparison in ANY segment. `unfair` defaults to
- *  the bare R1 path markers (taint-free) so segment-level callers stay byte-identical. */
+/** Judge a (possibly compound) command for an L1 comparison in ANY segment. `unfair` is REQUIRED
+ *  (every caller threads the taint-aware predicate — a default would silently drop normalization
+ *  + taint and re-open the laundering hole). */
 const anySegmentComparesToReference = (
   command: string,
-  unfair: (operand: string) => boolean = isTestPath,
+  unfair: (operand: string) => boolean,
 ): SegmentL1 => {
   let refIsTestPath = false
-  for (const seg of command.split(/(?:&&|\|\||[;|&\n])/)) {
+  for (const seg of command.split(COMPOUND_SEP)) {
     if (seg.trim().length === 0) continue
     const r = segmentComparesToReference(seg, unfair)
     if (r.isCompare) return { isCompare: true, refIsTestPath: false }
@@ -390,8 +561,10 @@ const anySegmentComparesToReference = (
 export interface CompareVerdict {
   /** True iff an observed L1 comparison (per §03) was found — the sole path to `verified-pass`. */
   readonly compared: boolean
-  /** True iff the ONLY comparison(s) found were AGAINST a verifier/test path (R1 fail-closed reject).
-   *  Distinguishes "peeked at the hidden oracle" from "never compared" for honest evidence. */
+  /** True iff the ONLY comparison(s) found were UNFAIR — a reference under a verifier/test path
+   *  (R1) OR a file that received oracle content via laundering (P2-C taint). Distinguishes
+   *  "peeked at the hidden oracle (directly or laundered)" from "never compared" for honest
+   *  evidence. */
   readonly refusedTestPath: boolean
   /** One human-readable line naming the model's OWN comparison command (never a hidden test). */
   readonly evidence?: string
@@ -427,11 +600,9 @@ export const comparedToReference = (events: readonly AgentEvent[]): CompareVerdi
   }
   // P2-C: taint pre-pass over the model's OWN commands — a compare operand that RECEIVED oracle
   // content (cp/ln/mv/tee/redirect laundering, transitively) is refused like the oracle itself.
+  // Same {@link isUnfair} predicate the pre-pass used, so the L1 check refuses byte-identically.
   const tainted = buildTaintedRefs(ownCommands)
-  const unfair = (operand: string): boolean => {
-    const n = normalizeToken(operand)
-    return isTestPath(n) || tainted.has(n)
-  }
+  const unfair = (operand: string): boolean => isUnfair(operand, tainted)
 
   let refusedTestPath = false
   for (const ev of events) {
@@ -500,8 +671,7 @@ type ToolResultEvent = Extract<AgentEvent, { type: "tool_result" }>
 export const resultObservedOutput = (r: ToolResultEvent): boolean => {
   if (r.timedOut === true) return false
   return (
-    (typeof r.preview === "string" && r.preview.trim().length > 0) ||
-    typeof r.exitCode === "number"
+    (typeof r.preview === "string" && r.preview.trim().length > 0) || typeof r.exitCode === "number"
   )
 }
 
@@ -573,7 +743,8 @@ export const inspectExerciseEvidence = (events: readonly AgentEvent[]): Exercise
       if (ev.name === PTY_WRITE) {
         anyPtyWrite = true
         const data = ptyWriteData(ev)
-        if (data !== undefined && isExerciseCommand(data)) ptyExerciseSignal ??= `pty_write \`${data.trim().slice(0, 120)}\``
+        if (data !== undefined && isExerciseCommand(data))
+          ptyExerciseSignal ??= `pty_write \`${data.trim().slice(0, 120)}\``
       } else {
         const paneCmd = ptyPaneCommand(ev)
         if (paneCmd !== undefined && isExerciseCommand(paneCmd))
@@ -730,7 +901,10 @@ export const deriveVerificationState = (
   }
   const text = finalText ?? ""
   if (UNCERTAIN_OUTCOME.test(text)) {
-    return { state: "unverifiable", evidence: `compared, but the agent could not confirm the outcome; ${evidence}` }
+    return {
+      state: "unverifiable",
+      evidence: `compared, but the agent could not confirm the outcome; ${evidence}`,
+    }
   }
   if (NEGATIVE_OUTCOME.test(text) && !NEGATED_NEGATIVE.test(text)) {
     return { state: "verified-fail", evidence: `compared and observed a mismatch; ${evidence}` }

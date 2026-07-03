@@ -1639,11 +1639,16 @@ function tbOurResults() {
 }
 
 // Any-pass fold over ONE family's runs (the pro/live view scope) — same shape as tbOurResults
-// but unsplit (no arm semantics outside TB). Pure over DATA.runs.
+// but unsplit (no arm semantics outside TB). Pure over DATA.runs. Measurement-hole EXCLUSION
+// mirrors the sibling folds so pro/live is consistent with them: a re-runnable throttle/infra
+// hole (FLAG-B fail.reRunnable, like the verified view) or an agent-crash (D1, like the TB
+// view) is NOT a capability miss — skip it (else the jun-20 throttle/miss confound re-opens here).
 function famOurResults(fam) {
   const out = {};
   for (const r of (DATA.runs || []).filter(r => (r.datasetFamily || "verified") === fam)) {
     for (const pi of (r.perInstance || [])) {
+      if (pi.error && pi.error.kind === "agent-crash") continue;
+      if (!pi.passed && pi.fail && pi.fail.reRunnable) continue;
       if (out[pi.id] === undefined || pi.passed) out[pi.id] = pi.passed;
     }
   }

@@ -802,6 +802,29 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "RFC jun-29 §13 — one-shot shell exec INSIDE the bound container; returns stdout/stderr + EXIT CODE (the completion signal, lever #2), head+tail-capped (#4) and run through the shared neutralizeTerminalOutput forge-defence. Container-bound by construction (the injected ContainerExec port is docker exec / orchestrator env-exec, NEVER host bash — spec S3); command flows through the host HARD_DENY denylist via extractShellCommand. Minted ONLY when DefaultToolPorts.containerExec is wired (QUANTA_CONTAINER_EXEC, by the terminal entry-point adapter in src/apps/); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE except the terminal surface.",
   },
   {
+    name: "container_write_file",
+    origin: "@/tool (containerWriteFileTool, via DefaultToolPorts.containerWriteFile)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.containerWriteFile",
+      env: "QUANTA_TB_WRITE_TOOL",
+    },
+    // Opt-in EVERYWHERE incl. the terminal surface (default-OFF unlike container_exec): the
+    // composition root wires the port only when QUANTA_TB_WRITE_TOOL is on, so the terminal
+    // build-proof loop (which wires containerExec+ptySession only) must NOT expect it on-by-default.
+    default: {
+      cli: "opt-in",
+      bench: "opt-in",
+      web: "opt-in",
+      ide: "opt-in",
+      headless: "opt-in",
+      terminal: "opt-in",
+    },
+    risk: "exec",
+    adr: "N6",
+    note: "B2 (RFC jul-3) — exact-byte file authoring INSIDE the bound container over the SAME ContainerExec transport: content travels base64 (inert bytes, no heredoc/quoting mangling), decoded in-container by `base64 -d`, and an overwrite is verified by an in-container `wc -c` byte-count readback (silent truncation ⇒ typed failure). The constructed command flows through the host HARD_DENY denylist via extractShellCommand (fail-closed single-quotable path guard). Minted ONLY when DefaultToolPorts.containerWriteFile is wired (QUANTA_TB_WRITE_TOOL, by the terminal entry-point when the knob is on); off ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE.",
+  },
+  {
     name: "appshot_verify",
     origin: "@/tool (appshotVerifyTool, via DefaultToolPorts.appshot)",
     gate: {

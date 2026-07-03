@@ -145,9 +145,16 @@ export const containerExecTool = (port: ContainerExec): Tool<ContainerExecInput>
             // lets the model branch per R-FAILURE-MODE (raise timeout_ms / background+poll /
             // narrow the command) instead of regex-reading the body. Partial output still renders
             // so a hung build is recoverable from what it printed before the deadline.
+            // The deadline may be the caller's `timeout_ms` OR the transport's own backstop (the
+            // standalone docker path keeps a 60s wall-clock even with no `timeout_ms`), so the
+            // message must not interpolate a possibly-undefined value.
+            const deadlineLabel =
+              parsed.data.timeout_ms !== undefined
+                ? `after ${parsed.data.timeout_ms}ms`
+                : "at the transport's default deadline"
             result = {
               ok: false,
-              output: `command timed out after ${parsed.data.timeout_ms}ms (deadline; the container-side process may still be running)\n${body}`,
+              output: `command timed out ${deadlineLabel} (the container-side process may still be running)\n${body}`,
               failure: {
                 mode: "timeout",
                 ...(parsed.data.timeout_ms !== undefined

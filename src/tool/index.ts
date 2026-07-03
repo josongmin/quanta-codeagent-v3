@@ -986,7 +986,7 @@ export const buildTerminalTools = (ports: DefaultToolPorts = {}): Tool[] => [
   // B2 (RFC jul-3, default-OFF via composition root): exact-byte file authoring over the same
   // container transport — the heredoc-mangle escape hatch for file-is-the-deliverable tasks.
   ...(ports.containerWriteFile !== undefined
-    ? [containerWriteFileTool(ports.containerWriteFile) as Tool]
+    ? [containerWriteFileTool(ports.containerWriteFile)]
     : []),
   // interactive tmux pane (vim/REPL/TUI)
   ...(ports.ptySession !== undefined ? ptyTools(ports.ptySession) : []),
