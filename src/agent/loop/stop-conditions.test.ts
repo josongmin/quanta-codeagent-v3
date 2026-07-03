@@ -17,7 +17,11 @@ import type { RunAgentContext } from "./types"
  *  an absent key is truly OMITTED (exactOptionalPropertyTypes: never an explicit `undefined`). */
 const fakeCtx = (over: {
   budgetMeter?: unknown
-  budgetLedger?: { hardBreach: () => { limit: number; observed: number } | undefined }
+  // `| undefined` on the optional field: the tests pass `{ budgetLedger: undefined }` to mean "unset",
+  // which under exactOptionalPropertyTypes is NOT assignable to a bare `field?:` — the union permits
+  // the explicit-undefined call form. (bun test never type-checks this file, so this only surfaces
+  // under `typecheck:all`; caught by jul-4 audit R3.)
+  budgetLedger?: { hardBreach: () => { limit: number; observed: number } | undefined } | undefined
 }): RunAgentContext =>
   ({
     cfg: {

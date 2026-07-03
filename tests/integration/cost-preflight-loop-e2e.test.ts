@@ -28,6 +28,12 @@ describe("L2 cost pre-flight — loop e2e", () => {
     expect(outcome.reason).toBe("budget_exhausted")
     // The decisive proof: the model was NEVER called — pre-flight fired first.
     expect(llm.calls).toBe(0)
+    // FIRING `turn - 1` (jul-4 audit R3): the pre-flight fires in turn 1's PRE-TURN phase, before any
+    // turn produced model output, so `costPreflightCondition` returns `turns: turn - 1 === 0`. This is
+    // the ONLY assertion that pins that value — a unit can't reach it without stubbing the whole cost
+    // projection chain, and the stop-conditions unit only contrasts the LEDGER side. Mutating
+    // stop-conditions.ts `turn - 1` → `turn` makes this `1` and reddens here.
+    expect(outcome.turns).toBe(0)
   })
 
   test("CONTROL: no cost dial ⇒ loop runs the model normally (byte-identical)", async () => {
