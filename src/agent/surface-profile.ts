@@ -78,31 +78,30 @@ export const FROZEN_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen" }
 
 /**
  * Named per-surface profiles — the "per-target rendering strategy" made explicit
- * (jul-4). Each is a declared deployment fact an entry point selects at launch;
- * together they are the platform's surface vocabulary. All are `frozen` today, so
- * `composeSystemPromptForSurface(<profile>)` is byte-identical to the entry point's
- * prior raw `buildSystemPrompt` call — the profiles NAME what the sites already did,
- * they do not change any rendered prompt.
+ * (jul-4). DECLARE-WHERE-CONSUMED: a profile constant exists only where an entry
+ * point actually selects it, so there are no inert/dead surface constants. Both are
+ * `frozen`, so `composeSystemPromptForSurface(<profile>)` is byte-identical to the
+ * site's prior raw `buildSystemPrompt` call — the profiles NAME what the sites
+ * already did, they do not change any rendered prompt.
  *
- * - GENERAL — interactive CLI / IDE. Frozen, no task pack (== FROZEN_SURFACE_PROFILE).
- *   The `default`-env content lever (install-permitted UX) rides a default-OFF knob at
- *   the CLI entry point, NOT this constant, so GENERAL stays byte-identical.
- * - SWE — externally-graded batch/bench. Frozen + the `batch` pack (R-NO-EXPLORE-OVER-EDIT).
- *   Matches config-build's `{ promptPack: "batch" }` byte-for-byte.
- * - PR — ci-bot on a pull request. Frozen + the `ci-bot` pack (small-diff / explain / no-push-main).
- * - HEADLESS — one-shot headless/daemon. Frozen + the `headless` pack (R-SINGLE-COHERENT).
+ * - GENERAL — interactive CLI / IDE (consumed by the interactive mode-preset). Frozen,
+ *   no task pack (== FROZEN_SURFACE_PROFILE). The `default`-env content lever rides a
+ *   default-OFF knob at the CLI entry point, NOT this constant, so GENERAL stays byte-identical.
+ * - SWE — externally-graded batch/bench (consumed by config-build). Frozen + the `batch`
+ *   pack (R-NO-EXPLORE-OVER-EDIT). Matches config-build's `{ promptPack: "batch" }` byte-for-byte.
  *
  * TB (terminal) declares its own `owned` profile at its entry point
  * (`TERMINAL_SURFACE_PROFILE` in the terminal brain) — it carries an operator guide and is
  * knob-gated, so it lives next to that launch site rather than here.
+ *
+ * NOT declared here: PR (ci-bot) / HEADLESS. Their mode-presets deliberately render the
+ * frozen no-pack base (see `headless.ts` "byte-identical"), so a PR/HEADLESS profile would
+ * be an inert constant with no consumer. When a preset opts into its task pack (a deliberate,
+ * measured behavior change), declare the profile THEN — the `ci-bot`/`headless` rule packs and
+ * the `renderTaskRules` arms already exist; only the entry-point selection is missing.
  */
 export const GENERAL_SURFACE_PROFILE: SurfaceProfile = FROZEN_SURFACE_PROFILE
 export const SWE_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen", rulePack: "batch" }
-export const PR_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen", rulePack: "ci-bot" }
-export const HEADLESS_SURFACE_PROFILE: SurfaceProfile = {
-  envPosture: "frozen",
-  rulePack: "headless",
-}
 
 /** Options for {@link composeSystemPromptForSurface} that are orthogonal to the
  *  surface (they belong to the specific launch, not the surface *kind*): the cwd
