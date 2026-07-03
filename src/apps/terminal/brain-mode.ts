@@ -47,7 +47,9 @@ import {
   comparedToReference,
   deriveVerificationState,
   inspectExerciseEvidence,
+  inspectSelfTest,
   outputContractVerdict,
+  type SelfTestReceipt,
   type VerificationStamp,
 } from "./verify-gate"
 
@@ -148,6 +150,11 @@ export interface TerminalBrainReport {
    *  gate ran (knob ON) — absent ⇒ byte-identical to the pre-lever report. `unverifiable` /
    *  `verified-fail` finalize immediately (the honest exits that make over-persistence impossible). */
   readonly verification?: VerificationStamp
+  /** S1b (`QUANTA_TB_SELF_TEST`): OBSERVE-ONLY self-test receipt. PRESENT ONLY when the self-test
+   *  discipline was applied (knob ON) — absent ⇒ byte-identical. Records whether the agent ran an
+   *  authored self-test and whether it went green; NEVER gates. The top-line S1 metric (self-test↔
+   *  hidden alignment) is computed by pairing `green` with the harbor reward off-line. */
+  readonly selfTest?: SelfTestReceipt
   /** Lever #1 (`QUANTA_TB_ENV_OWNED`): stamped `"owned"` ONLY when the owned posture was applied
    *  (knob ON) — absent ⇒ byte-identical to the pre-lever report. Lets per-task A/B analysis confirm
    *  the owned prompt actually rendered for this task (guards against a silent env-plumbing miss). */
@@ -561,6 +568,11 @@ const finalizeTerminalBrain = (
     // Lever #2 / #1 stamps — exact-optional spread ⇒ the field is entirely ABSENT
     // when the gate/posture is off, keeping the report byte-identical to pre-lever.
     ...(state.verification !== undefined ? { verification: state.verification } : {}),
+    // S1b (`QUANTA_TB_SELF_TEST`): the OBSERVE-ONLY self-test receipt rides with the lever it measures
+    // — present only when the discipline was applied ⇒ byte-identical when the knob is OFF.
+    ...(gateOn(opts.env ?? {}, TB_SELF_TEST_ENV)
+      ? { selfTest: inspectSelfTest(stream.events) }
+      : {}),
     ...(state.envOwnedApplied ? { envPosture: "owned" as const } : {}),
     // Cassette (RFC 07): record the compact trajectory by DEFAULT so a run is always RCA-able;
     // `QUANTA_TB_TRAJECTORY=0` opts out (then the field is absent ⇒ byte-identical to pre-cassette).

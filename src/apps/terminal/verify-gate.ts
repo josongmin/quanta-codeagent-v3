@@ -838,6 +838,151 @@ export const outputContractVerdict = (events: readonly AgentEvent[]): OutputCont
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// S1b (RFC jul-3 /02) — SELF-TEST RECEIPT: OBSERVE-ONLY measurement of the self-test discipline.
+//
+// The receipt is the measurement rail for S1 (`QUANTA_TB_SELF_TEST`): did the agent actually build
+// and RUN its own spec-derived self-test, and did it go green? It is OBSERVE-ONLY by design (RFC
+// jul-3 hell-audit R2): coverage (case count / edge presence) is NOT deterministically recoverable
+// from a cassette, so this NEVER gates submission and carries no coverage claim — it records only
+// `executed` + `green`, and the top-line metric (self-test↔hidden alignment) is computed LATER by
+// pairing `green` against the harbor reward. It is deliberately CONSERVATIVE (fail-closed → prefers
+// to UNDER-count than to over-claim self-testing): it credits only a self-test the agent AUTHORED —
+// a test-named file it ran, an inline `assert`, or a test-runner naming a non-oracle file — and it
+// REFUSES any run that touches the hidden oracle location (a `/tests/` dir / verifier / grader /
+// private path), which is peeking, not self-testing. A bare `pytest` (no file operand — could
+// discover the hidden suite) is intentionally NOT credited.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The hidden-oracle LOCATION (a run touching it is peeking, never a credited self-test). Keyed on
+ *  the test/verifier DIRECTORY + role — NOT the test NAMING (`test_x.py`), which is exactly how the
+ *  agent names its OWN self-test and must stay creditable. */
+const SELF_TEST_ORACLE_MARKERS: readonly RegExp[] = [
+  /(^|\/)tests?(\/|$)/i,
+  /verifier/i,
+  /grader/i,
+  /(^|\/)private(\/|$)/i,
+]
+
+/** An agent-AUTHORED test artifact (its own self-test file), by conventional name. */
+const SELF_TEST_FILE_MARKERS: readonly RegExp[] = [
+  /(^|\/)test_[^/]*\.[a-z0-9_]+$/i, // test_fib.py
+  /(^|\/)[a-z0-9_]*_test\.[a-z0-9_]+$/i, // fib_test.go
+  /(^|\/)tests?\.[a-z0-9_]+$/i, // test.py / tests.py
+  /(^|\/)(self[_-]?test|run[_-]?tests?)[^/]*$/i, // selftest.sh / run_tests.sh
+]
+
+const touchesOracle = (tok: string): boolean => SELF_TEST_ORACLE_MARKERS.some((re) => re.test(tok))
+const isSelfTestFile = (tok: string): boolean => SELF_TEST_FILE_MARKERS.some((re) => re.test(tok))
+
+/** True iff a SINGLE command segment RUNS an agent-authored self-test (and touches NO hidden oracle).
+ *  Fail-closed: anything not affirmatively a self-test the agent wrote returns false. */
+const isSelfTestSegment = (segment: string): boolean => {
+  const { leader, args } = leaderAndArgs(segment)
+  if (leader === "") return false
+  const base = baseName(leader)
+
+  // shell wrapper: `bash -c '<inner>'` → judge the INNER command; `bash selftest.sh` → the script.
+  if (SHELLS.has(base)) {
+    const cIdx = args.findIndex((a) => a === "-c" || a === "-lc" || a === "-ic" || a === "-ilc")
+    if (cIdx >= 0) {
+      const inner = args
+        .slice(cIdx + 1)
+        .join(" ")
+        .replace(/^['"]|['"]$/g, "")
+      return isSelfTestCommand(inner)
+    }
+    return args.some((a) => !a.startsWith("-") && isSelfTestFile(a) && !touchesOracle(a))
+  }
+
+  // NB: the hidden-oracle PEEK guard is applied GLOBALLY in `isSelfTestCommand` (below) — a command
+  // that self-tests in one segment AND peeks in another is peeking, so it must be judged whole.
+
+  // signal 2 — ran an agent-authored test-named file (interpreter FILE, or path-invoked script).
+  if (args.some((a) => isSelfTestFile(normalizeToken(a)))) return true
+  if (leader.includes("/") && isSelfTestFile(normalizeToken(leader))) return true
+  // signal 3 — a real test-runner (pytest/unittest/tox/nose, incl. `python -m pytest`) that NAMES a
+  //   non-oracle file operand (a bare runner with no file — could discover the hidden suite — is NOT
+  //   credited). The oracle guard above already rejected any `/tests/` operand.
+  const runsTestRunner =
+    TEST_RUNNERS.has(base) ||
+    (INTERPRETERS.has(base) &&
+      (() => {
+        const mIdx = args.findIndex((a) => a === "-m")
+        return mIdx >= 0 && TEST_RUNNERS.has((args[mIdx + 1] ?? "").toLowerCase())
+      })())
+  if (runsTestRunner && args.some((a) => !a.startsWith("-") && !TEST_RUNNERS.has(a.toLowerCase())))
+    return true
+
+  return false
+}
+
+/** Interpreters whose `-c`/`-e` flag runs an INLINE program (where an `assert` = a self-test). */
+const INLINE_ASSERT_LEADER = /\b(python3?|node|nodejs|ruby|perl|deno|bun)\b[^\n]*\s-[ce]\b/i
+
+/** True iff ANY token in the whole command points at the hidden-oracle location. Applied GLOBALLY so a
+ *  command that self-tests in one segment but reads the oracle in another is refused (peeking wins). */
+const commandTouchesOracle = (command: string): boolean =>
+  command
+    .split(/\s+/)
+    .some((tok) => tok.length > 0 && touchesOracle(normalizeToken(tok)))
+
+/** True iff a (possibly compound) command runs an agent-AUTHORED self-test — and touches NO hidden
+ *  oracle anywhere. Two credited shapes: (1) an inline `-c`/`-e` assertion (judged on the WHOLE string
+ *  since the snippet may itself contain `;`), or (2) a segment that runs a test-named file / a
+ *  test-runner over a non-oracle file. Fail-closed + global peek guard. */
+export const isSelfTestCommand = (command: string): boolean => {
+  if (commandTouchesOracle(command)) return false // global peek guard (refuse if it reads the oracle)
+  if (INLINE_ASSERT_LEADER.test(command) && /\bassert\b/i.test(command)) return true
+  return command.split(COMPOUND_SEP).some((seg) => seg.trim().length > 0 && isSelfTestSegment(seg))
+}
+
+/** OBSERVE-ONLY self-test receipt (S1b). NEVER gates; measurement only. `executed` = the agent ran a
+ *  self-test it authored (observed output); `green` = the LAST such observed run was a clean success
+ *  (exit 0, not timed out — "iterate to green" makes the FINAL run the one that counts). */
+export interface SelfTestReceipt {
+  readonly executed: boolean
+  readonly green: boolean
+  /** Names only the model's OWN self-test command — never a hidden test. */
+  readonly evidence?: string
+}
+
+/** Inspect the stream for an agent-authored self-test run (S1b). Container-exec only for now (self-
+ *  tests are non-interactive); a pty-driven self-test is out of scope and simply not credited. */
+export const inspectSelfTest = (events: readonly AgentEvent[]): SelfTestReceipt => {
+  const observedById = new Map<string, boolean>()
+  const cleanById = new Map<string, boolean>()
+  for (const ev of events) {
+    if (ev.type === "tool_result") {
+      observedById.set(ev.id, resultObservedOutput(ev))
+      cleanById.set(ev.id, resultRanClean(ev))
+    }
+  }
+  let executed = false
+  let green = false
+  let evidence: string | undefined
+  // Chronological: the LAST observed self-test decides `green` (iterate-to-green ⇒ final run counts).
+  for (const ev of events) {
+    if (ev.type !== "tool_call" || ev.name !== CONTAINER_EXEC) continue
+    const command = containerExecCommand(ev)
+    if (command === undefined || !isSelfTestCommand(command)) continue
+    if (observedById.get(ev.id) !== true) continue
+    executed = true
+    green = cleanById.get(ev.id) === true
+    evidence = `ran a self-test the agent authored${green ? " (passed)" : " (did not pass)"}: \`${command.trim().slice(0, 160)}\``
+  }
+  return {
+    executed,
+    green,
+    ...(evidence !== undefined
+      ? { evidence }
+      : {
+          evidence:
+            "no agent-authored self-test observed: the trajectory ran no test-named file / inline assertion / non-oracle test-runner against the deliverable",
+        }),
+  }
+}
+
 /** The honest trichotomy the report stamps (v2 semantics). `verified-pass` / `verified-fail` both
  *  mean an OBSERVED L1 comparison happened (output diffed/checked against a non-test reference) and
  *  the result was match / mismatch respectively; `unverifiable` means no fair L1 comparison was

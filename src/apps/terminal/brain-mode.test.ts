@@ -389,6 +389,39 @@ describe("terminal brain-mode (B3) — drives the loop over the brain↔hands du
         expect(lower).not.toContain(w)
       }
     })
+
+    test("S1b receipt: knob ON ⇒ report.selfTest is emitted (OBSERVE-ONLY measurement rides the lever)", async () => {
+      const { stdin, stdout, endIn } = makeStdio()
+      const llm = new FakeLlm(execThenDoneScripts("python test_fib.py"))
+      const result = await runTerminalBrain({
+        instruction: "write fib(n)",
+        reportOut: "/tmp/brain-selftest-receipt-on.json",
+        stdin,
+        stdout,
+        llm,
+        writeReport: () => undefined,
+        env: { [TB_SELF_TEST_ENV]: "1" },
+      })
+      // The receipt is present and observed the authored self-test the fake run executed.
+      expect(result.report.selfTest).toBeDefined()
+      expect(result.report.selfTest?.executed).toBe(true)
+      endIn()
+    })
+
+    test("S1b receipt: knob OFF (default) ⇒ report.selfTest is ABSENT (byte-identical)", async () => {
+      const { stdin, stdout, endIn } = makeStdio()
+      const llm = new FakeLlm(execThenDoneScripts("python test_fib.py"))
+      const result = await runTerminalBrain({
+        instruction: "write fib(n)",
+        reportOut: "/tmp/brain-selftest-receipt-off.json",
+        stdin,
+        stdout,
+        llm,
+        writeReport: () => undefined,
+      })
+      expect(result.report.selfTest).toBeUndefined()
+      endIn()
+    })
   })
 
   test("report is written BEFORE EOF is signaled (spec B3 ordering: report, then close)", async () => {

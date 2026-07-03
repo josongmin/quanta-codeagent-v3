@@ -14,7 +14,9 @@ import {
   comparedToReference,
   deriveVerificationState,
   inspectExerciseEvidence,
+  inspectSelfTest,
   isExerciseCommand,
+  isSelfTestCommand,
   outputContractVerdict,
   type VerificationState,
 } from "./verify-gate"
@@ -742,5 +744,108 @@ describe("P2-C — laundering: comparing against oracle-DERIVED content is refus
     const launder = verdictFor(["cat tests/golden.txt > out", "diff mine.txt out"])
     expect(launder.compared).toBe(false)
     expect(launder.refusedTestPath).toBe(true)
+  })
+})
+
+describe("isSelfTestCommand — credits an agent-authored self-test, refuses hidden-oracle peeking", () => {
+  test("credits: interpreter running a test-named file (agent's OWN self-test)", () => {
+    expect(isSelfTestCommand("python test_fib.py")).toBe(true)
+    expect(isSelfTestCommand("python3 fib_test.py")).toBe(true)
+    expect(isSelfTestCommand("node tests.js")).toBe(true)
+    expect(isSelfTestCommand("bash selftest.sh")).toBe(true)
+    expect(isSelfTestCommand("./run_tests.sh")).toBe(true)
+  })
+
+  test("credits: an inline assertion snippet", () => {
+    expect(isSelfTestCommand("python -c 'from fib import fib; assert fib(5)==5'")).toBe(true)
+    expect(isSelfTestCommand("node -e 'const a=require(\"assert\"); assert.equal(f(0),0)'")).toBe(true)
+  })
+
+  test("credits: a real test-runner naming a NON-oracle file", () => {
+    expect(isSelfTestCommand("pytest my_check.py")).toBe(true)
+    expect(isSelfTestCommand("python -m pytest solution_test.py")).toBe(true)
+  })
+
+  test("REFUSES: any run touching the hidden-oracle location (peeking, not self-testing)", () => {
+    expect(isSelfTestCommand("pytest tests/")).toBe(false)
+    expect(isSelfTestCommand("pytest /app/tests/test_polyglot.py")).toBe(false)
+    expect(isSelfTestCommand("python -c 'assert True' && cat tests/expected.txt")).toBe(false)
+    expect(isSelfTestCommand("./verifier/check.sh")).toBe(false)
+    expect(isSelfTestCommand("python grader.py")).toBe(false)
+  })
+
+  test("REFUSES (conservative): a bare test-runner with no file operand (could discover the hidden suite)", () => {
+    expect(isSelfTestCommand("pytest")).toBe(false)
+    expect(isSelfTestCommand("python -m pytest")).toBe(false)
+    expect(isSelfTestCommand("tox")).toBe(false)
+  })
+
+  test("REFUSES: an ordinary run of the deliverable (no test artifact / assertion)", () => {
+    expect(isSelfTestCommand("./solver input.txt")).toBe(false)
+    expect(isSelfTestCommand("python fib.py")).toBe(false)
+    expect(isSelfTestCommand("cat out.txt")).toBe(false)
+  })
+})
+
+describe("inspectSelfTest — OBSERVE-ONLY receipt (executed + green), container_exec", () => {
+  const exec = "container_exec"
+  test("executed + green: an authored self-test ran and exited 0", () => {
+    const events: AgentEvent[] = [
+      call("1", exec, { command: "python test_fib.py" }),
+      result("1", exec, { exitCode: 0, preview: "ok", ok: true }),
+    ]
+    const r = inspectSelfTest(events)
+    expect(r.executed).toBe(true)
+    expect(r.green).toBe(true)
+    expect(r.evidence).toContain("self-test")
+  })
+
+  test("executed but NOT green: the self-test ran and FAILED (exit 1)", () => {
+    const events: AgentEvent[] = [
+      call("1", exec, { command: "python test_fib.py" }),
+      result("1", exec, { exitCode: 1, ok: false, preview: "AssertionError" }),
+    ]
+    const r = inspectSelfTest(events)
+    expect(r.executed).toBe(true)
+    expect(r.green).toBe(false)
+  })
+
+  test("iterate-to-green: the LAST observed self-test decides green (fail → fix → pass)", () => {
+    const events: AgentEvent[] = [
+      call("1", exec, { command: "python test_fib.py" }),
+      result("1", exec, { exitCode: 1, ok: false, preview: "AssertionError" }),
+      call("2", exec, { command: "python test_fib.py" }),
+      result("2", exec, { exitCode: 0, ok: true, preview: "ok" }),
+    ]
+    const r = inspectSelfTest(events)
+    expect(r.executed).toBe(true)
+    expect(r.green).toBe(true)
+  })
+
+  test("NOT executed: only ran the deliverable, never an authored self-test (extract-elf/sam class)", () => {
+    const events: AgentEvent[] = [
+      call("1", exec, { command: "python extract.py" }),
+      result("1", exec, { exitCode: 0, ok: true, preview: "done" }),
+    ]
+    const r = inspectSelfTest(events)
+    expect(r.executed).toBe(false)
+    expect(r.green).toBe(false)
+    expect(r.evidence).toContain("no agent-authored self-test")
+  })
+
+  test("no-leak: a run touching the hidden oracle is NOT credited as a self-test", () => {
+    const events: AgentEvent[] = [
+      call("1", exec, { command: "pytest /app/tests/test_polyglot.py" }),
+      result("1", exec, { exitCode: 0, ok: true, preview: "1 passed" }),
+    ]
+    expect(inspectSelfTest(events).executed).toBe(false)
+  })
+
+  test("fail-closed: an authored self-test whose result was never OBSERVED does not count", () => {
+    const events: AgentEvent[] = [
+      call("1", exec, { command: "python test_fib.py" }),
+      result("1", exec, { timedOut: true }),
+    ]
+    expect(inspectSelfTest(events).executed).toBe(false)
   })
 })
