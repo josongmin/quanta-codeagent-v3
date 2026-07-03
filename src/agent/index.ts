@@ -307,7 +307,11 @@ export {
   type ComposeForSurfaceOpts,
   composeSystemPromptForSurface,
   FROZEN_SURFACE_PROFILE,
+  GENERAL_SURFACE_PROFILE,
+  HEADLESS_SURFACE_PROFILE,
+  PR_SURFACE_PROFILE,
   type SurfaceProfile,
+  SWE_SURFACE_PROFILE,
 } from "./surface-profile"
 export { RECOVERY_CAPS } from "./recovery"
 export {

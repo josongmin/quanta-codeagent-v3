@@ -45,9 +45,11 @@ import type { AgentMode as RulePackMode } from "./prompt-rules"
  *   entry point rides it on the first user turn (kept off the cache prefix on
  *   purpose). Carried here so the profile is the single declared bundle.
  * - `rulePack` — optional task-posture rule-pack selector (headless / batch /
- *   ci-bot). Absent ⇒ the interactive default pack (byte-identical). This is a
- *   SEPARATE axis from `envPosture`; when `envPosture:"owned"` the owned rule
- *   list wins over `rulePack` (matching {@link buildSystemPrompt}'s precedence).
+ *   ci-bot). Absent ⇒ no task rules (the interactive default, byte-identical).
+ *   Since the jul-4 2-axis refactor this is a FULLY INDEPENDENT axis from
+ *   `envPosture`: the core composes `postureBase(envPosture) + taskRules(rulePack)`,
+ *   so `owned` + a pack now COMPOSE (owned base THEN the task rule) — no XOR, no
+ *   precedence. A surface may declare both and get both.
  */
 export interface SurfaceProfile {
   readonly envPosture: EnvironmentPosture
@@ -63,6 +65,34 @@ export interface SurfaceProfile {
  * "frozen == today" invariant has a named reference the tests pin.
  */
 export const FROZEN_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen" }
+
+/**
+ * Named per-surface profiles — the "per-target rendering strategy" made explicit
+ * (jul-4). Each is a declared deployment fact an entry point selects at launch;
+ * together they are the platform's surface vocabulary. All are `frozen` today, so
+ * `composeSystemPromptForSurface(<profile>)` is byte-identical to the entry point's
+ * prior raw `buildSystemPrompt` call — the profiles NAME what the sites already did,
+ * they do not change any rendered prompt.
+ *
+ * - GENERAL — interactive CLI / IDE. Frozen, no task pack (== FROZEN_SURFACE_PROFILE).
+ *   The `default`-env content lever (install-permitted UX) rides a default-OFF knob at
+ *   the CLI entry point, NOT this constant, so GENERAL stays byte-identical.
+ * - SWE — externally-graded batch/bench. Frozen + the `batch` pack (R-NO-EXPLORE-OVER-EDIT).
+ *   Matches config-build's `{ promptPack: "batch" }` byte-for-byte.
+ * - PR — ci-bot on a pull request. Frozen + the `ci-bot` pack (small-diff / explain / no-push-main).
+ * - HEADLESS — one-shot headless/daemon. Frozen + the `headless` pack (R-SINGLE-COHERENT).
+ *
+ * TB (terminal) declares its own `owned` profile at its entry point
+ * (`TERMINAL_SURFACE_PROFILE` in the terminal brain) — it carries an operator guide and is
+ * knob-gated, so it lives next to that launch site rather than here.
+ */
+export const GENERAL_SURFACE_PROFILE: SurfaceProfile = FROZEN_SURFACE_PROFILE
+export const SWE_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen", rulePack: "batch" }
+export const PR_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen", rulePack: "ci-bot" }
+export const HEADLESS_SURFACE_PROFILE: SurfaceProfile = {
+  envPosture: "frozen",
+  rulePack: "headless",
+}
 
 /** Options for {@link composeSystemPromptForSurface} that are orthogonal to the
  *  surface (they belong to the specific launch, not the surface *kind*): the cwd
@@ -105,9 +135,12 @@ export const composeSystemPromptForSurface = (
   // EXACT default code path in `buildSystemPrompt` (no `envPosture` key) so the
   // frozen output is byte-identical to a caller that never learned this seam.
   if (profile.envPosture !== "frozen") promptOpts.envPosture = profile.envPosture
-  // `rulePack` is inert when the owned posture is active (owned rules win in the
-  // core, mirroring buildSystemPrompt precedence) — forward it only for frozen.
-  if (profile.rulePack !== undefined && profile.envPosture === "frozen") {
+  // Task pack is an INDEPENDENT axis (jul-4 2-axis): forward it whenever declared,
+  // regardless of posture. The core composes postureBase + taskRules, so an owned
+  // surface can carry a task pack (owned base THEN the task rule) — no XOR, no
+  // precedence drop. Byte-identical for every current profile (none declares
+  // owned + a pack yet, so this widens the accepted inputs, not the outputs).
+  if (profile.rulePack !== undefined) {
     promptOpts.promptPack = profile.rulePack
   }
   return buildSystemPrompt(opts.cwd, promptOpts)

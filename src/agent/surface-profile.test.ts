@@ -74,12 +74,18 @@ describe("SurfaceProfile — surface-agnostic prompt composition", () => {
     expect(composeSystemPromptForSurface(ciBot)).not.toBe(buildSystemPrompt())
   })
 
-  test("owned posture WINS over a rulePack (env rules take precedence, mirroring the core)", () => {
+  test("owned + a rulePack COMPOSE independently (jul-4 2-axis: no XOR, both axes apply)", () => {
     const owned: SurfaceProfile = { envPosture: "owned", rulePack: "ci-bot" }
-    // rulePack is inert under owned — result equals plain owned, not the pack.
+    // Post-XOR-removal the seam forwards BOTH axes: the result is the core's
+    // owned base THEN the ci-bot task rule — NOT plain owned (the old crutch).
     expect(composeSystemPromptForSurface(owned)).toBe(
-      buildSystemPrompt(undefined, { envPosture: "owned" }),
+      buildSystemPrompt(undefined, { envPosture: "owned", promptPack: "ci-bot" }),
     )
+    // It is strictly LONGER than plain owned (the task pack really was appended)…
+    const ownedOnly = buildSystemPrompt(undefined, { envPosture: "owned" })
+    expect(composeSystemPromptForSurface(owned).length).toBeGreaterThan(ownedOnly.length)
+    // …and it is NOT the plain-owned prompt (guards a silent regression back to XOR).
+    expect(composeSystemPromptForSurface(owned)).not.toBe(ownedOnly)
   })
 
   test("cwd passthrough does not shift the cached system prefix (cwd is per-turn dynamic, ignored by build)", () => {

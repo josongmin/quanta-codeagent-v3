@@ -2,11 +2,12 @@ import {
   type AgentConfig,
   BUDGET_PRESETS,
   BudgetMeter,
-  buildSystemPrompt,
   composeIssueHint,
+  composeSystemPromptForSurface,
   extractIssueHint,
   lspNavCheapToolList,
   lspNavToolList,
+  SWE_SURFACE_PROFILE,
   wireOptionalAgentPorts,
 } from "@/agent"
 import {
@@ -562,10 +563,13 @@ export const buildConfig = (
     permission,
     messages,
     // A2 (jul-3 strategy-audit): batch driver runs are graded by an external
-    // harness — thread the `batch` pack so the system prompt carries
-    // R-NO-EXPLORE-OVER-EDIT (stop exploring once you have a coherent edit +
-    // verify step). Batch path only; measure-first (flat A/B ⇒ revert).
-    system: buildSystemPrompt(sandbox, { promptPack: "batch" }),
+    // harness — declare the SWE surface profile so the system prompt carries the
+    // `batch` pack (R-NO-EXPLORE-OVER-EDIT: stop exploring once you have a coherent
+    // edit + verify step). Routed through the SurfaceProfile seam (jul-4) rather
+    // than a raw `buildSystemPrompt({ promptPack: "batch" })` so bench declares its
+    // surface like every other entry point — byte-identical to the prior call.
+    // Batch path only; measure-first (flat A/B ⇒ revert).
+    system: composeSystemPromptForSurface(SWE_SURFACE_PROFILE, { cwd: sandbox }),
     cwd: sandbox,
     // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
     // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not

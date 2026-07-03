@@ -19,7 +19,7 @@ import {
   TASK_RUNNER_PACK,
 } from "./index"
 
-const lines = (rules: readonly { lines: readonly string[] }[]): readonly string[] =>
+const lines = (rules: readonly { lines: readonly string[] }[]): string[] =>
   rules.flatMap((r) => r.lines)
 
 describe("2-axis parity — frozen posture-base + task rules == legacy *_PACK (byte-identical)", () => {
