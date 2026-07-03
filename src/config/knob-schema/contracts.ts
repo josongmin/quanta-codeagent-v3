@@ -22,8 +22,8 @@
 
 /** Application surfaces a knob can apply to. Inlined (not imported from
  *  @/runner/knobs/types) to keep this contracts module dependency-light.
- *  Kept structurally equal to the runner `Surface` union. */
-export type Surface = "bench" | "cli" | "agent-batch" | "agent-interactive" | "ide"
+ *  jul-4 F1: now derived from the @/shared execution-mode surface SSOT (was a third copy-paste). */
+export type Surface = import("@/shared/execution-surface").ExecutionSurface
 
 /** Registry knob category (`--help` grouping). Inlined (not imported from
  *  @/runner/knobs/types) to keep this contracts module a config-light leaf.

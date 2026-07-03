@@ -27,7 +27,9 @@ import type { TurnPolicySnapshot } from "@/shared/turn-policy-types"
  * Adding a surface there MUST extend this union or the `knobs_applied`
  * exhaustiveness pin in adapters will not break.
  */
-export type SurfaceMirror = "bench" | "cli" | "agent-batch" | "agent-interactive" | "ide"
+// jul-4 F1: derived from the @/shared SSOT (was one of THREE copy-pasted identical unions). The
+// "mirror" intent (avoid importing knobs) is preserved — @/shared is the lowest layer, no new coupling.
+export type SurfaceMirror = import("@/shared/execution-surface").ExecutionSurface
 
 /** Closed taxonomy for a todo's status — mirrors `TodoStatus` in
  *  `@/agent/plan/types.ts`. Closed-union; no other value is valid. */

@@ -20,8 +20,9 @@
 import type { AgentConfig } from "@/agent"
 import type { Instance } from "@/runner/batch/types"
 
-/** Surface = where the agent loop is being driven from. */
-export type Surface = "bench" | "cli" | "agent-batch" | "agent-interactive" | "ide"
+/** Surface = where the agent loop is being driven from. jul-4 F1: the execution-mode surface SSOT
+ *  (was copy-pasted here + @/stream SurfaceMirror + @/config/knob-schema Surface). */
+export type Surface = import("@/shared/execution-surface").ExecutionSurface
 
 /** Per-application context handed to `Knob.apply`. */
 export interface ApplyContext {
