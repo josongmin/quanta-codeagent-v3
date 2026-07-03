@@ -25,10 +25,13 @@ import type {
 import {
   compactTrajectory,
   decideGateFollowup,
+  ORACLE_LOOP_FEEDBACK,
   resolveMaxTurnsFromEnv,
+  resolveOracleLoopRounds,
   resolveTrajectoryOn,
   runTerminalBrain,
   TB_ENV_OWNED_ENV,
+  TB_ORACLE_LOOP_ENV,
   TB_OUTPUT_CONTRACT_ENV,
   TB_SELF_TEST_ENV,
   TB_VERIFY_GATE_ENV,
@@ -47,13 +50,30 @@ describe("cassette trajectory (RFC 07) — default-on recording", () => {
 
   test("compactTrajectory pairs each command with ok/exit/preview (the RCA record)", () => {
     const steps = compactTrajectory([
-      { type: "tool_call", id: "1", name: "container_exec", input: { command: "gcc main.c -o cmain" } },
+      {
+        type: "tool_call",
+        id: "1",
+        name: "container_exec",
+        input: { command: "gcc main.c -o cmain" },
+      },
       { type: "tool_result", id: "1", name: "container_exec", ok: true, preview: "", exitCode: 0 },
       { type: "tool_call", id: "2", name: "container_exec", input: { command: "./cmain" } },
-      { type: "tool_result", id: "2", name: "container_exec", ok: false, preview: "Segfault", exitCode: 139 },
+      {
+        type: "tool_result",
+        id: "2",
+        name: "container_exec",
+        ok: false,
+        preview: "Segfault",
+        exitCode: 139,
+      },
     ] as never)
     expect(steps).toHaveLength(2)
-    expect(steps[0]).toMatchObject({ kind: "exec", cmd: "gcc main.c -o cmain", ok: true, exitCode: 0 })
+    expect(steps[0]).toMatchObject({
+      kind: "exec",
+      cmd: "gcc main.c -o cmain",
+      ok: true,
+      exitCode: 0,
+    })
     expect(steps[1]).toMatchObject({ kind: "exec", ok: false, exitCode: 139, preview: "Segfault" })
   })
 
@@ -83,7 +103,13 @@ describe("cassette trajectory (RFC 07) — default-on recording", () => {
 
 describe("decideGateFollowup (S4, RFC jul-3) — RUN-only trigger truth table", () => {
   const D = (o: Partial<Parameters<typeof decideGateFollowup>[0]>) =>
-    decideGateFollowup({ exercised: true, ranClean: true, outputContractOn: false, budgetLeft: true, ...o })
+    decideGateFollowup({
+      exercised: true,
+      ranClean: true,
+      outputContractOn: false,
+      budgetLeft: true,
+      ...o,
+    })
 
   test("S4 core: fire the RUN nudge iff the deliverable was NEVER exercised", () => {
     // extract-elf/sam fake-green: wrote the deliverable, declared done, ran it 0 times.
@@ -126,7 +152,9 @@ describe("decideGateFollowup (S4, RFC jul-3) — RUN-only trigger truth table", 
   })
 
   test("budget exhausted ⇒ NEVER fires (no over-persist past the cap)", () => {
-    expect(D({ exercised: false, ranClean: false, outputContractOn: true, budgetLeft: false })).toEqual({
+    expect(
+      D({ exercised: false, ranClean: false, outputContractOn: true, budgetLeft: false }),
+    ).toEqual({
       fire: false,
       nudge: "none",
     })
@@ -161,8 +189,10 @@ class FakeLlm implements LLMPort {
 
 /** In-memory line stdin/stdout pair + a programmable HANDS side. `stdout.write` captures the brain's
  *  outbound frames; the hands loop watches them and, on an `exec` frame, pushes an `exec_result`
- *  onto `stdin` (the brain's read side). Mirrors `terminal-surface.test.ts#makeDuplex`. */
-const makeStdio = () => {
+ *  onto `stdin` (the brain's read side). Mirrors `terminal-surface.test.ts#makeDuplex`.
+ *  `codeFor` (optional) chooses the exit code per exec command (default 0) — used by the Phase C
+ *  oracle-loop e2e to make a self-test go RED then GREEN on re-run (a stateful closure). */
+const makeStdio = (codeFor?: (command: string) => number) => {
   const written: string[] = []
   const inBuf: string[] = []
   const resolvers: Array<(v: IteratorResult<string>) => void> = []
@@ -200,7 +230,7 @@ const makeStdio = () => {
             type: "exec_result",
             stdout: `ran:${frame.command ?? ""}`,
             stderr: "",
-            code: 0,
+            code: codeFor?.(frame.command ?? "") ?? 0,
           }),
         )
       }
@@ -675,7 +705,9 @@ describe("verify-before-finalize gate (lever #2)", () => {
   test("RED (knob OFF, today): an artifact-only run finalizes with NO verification field + NO extra turn", async () => {
     const { stdin, stdout, handsServed, endIn } = makeStdio()
     // Trajectory only CREATES an artifact (mkdir) — never runs+observes the deliverable.
-    const llm = new FakeLlm(execThenFinalScripts("mkdir -p build", "Implemented and verified green."))
+    const llm = new FakeLlm(
+      execThenFinalScripts("mkdir -p build", "Implemented and verified green."),
+    )
     const result = await runTerminalBrain({
       instruction: "build the solver",
       reportOut: "/tmp/vg-off.json",
@@ -745,7 +777,10 @@ describe("verify-before-finalize gate (lever #2)", () => {
     const { stdin, stdout, endIn } = makeStdio()
     // The v2 happy path: the model DIFFED its output against a task-provided baseline (observed).
     const llm = new FakeLlm(
-      ptyTypeThenFinalScripts("diff mine.out /app/baseline.out", "No diff; matches the baseline. Pass."),
+      ptyTypeThenFinalScripts(
+        "diff mine.out /app/baseline.out",
+        "No diff; matches the baseline. Pass.",
+      ),
     )
     const result = await runTerminalBrain({
       instruction: "run the solver and check it",
@@ -776,7 +811,9 @@ describe("verify-before-finalize gate (lever #2)", () => {
     // reworked the already-working deliverable (2/3→1/3). Under S4 the nudge STAYS SILENT on an
     // exercised run — but the STAMP is independent: with no L1 compare it is still `unverifiable`,
     // never a false `verified-pass`. So: no nag, no rework, and no rubber-stamp either.
-    const llm = new FakeLlm(ptyTypeThenFinalScripts("./solver input.txt", "Output looks correct. Verified green."))
+    const llm = new FakeLlm(
+      ptyTypeThenFinalScripts("./solver input.txt", "Output looks correct. Verified green."),
+    )
     const result = await runTerminalBrain({
       instruction: "run the solver",
       reportOut: "/tmp/vg-ran-not-compared.json",
@@ -836,7 +873,10 @@ describe("verify-before-finalize gate (lever #2)", () => {
     // STAMP: comparedToReference rejects the /tests/ golden as an unfair reference (not L1) → the
     // verdict is `unverifiable`, NEVER a false `verified-pass`. The gate can still never TEACH peeking.
     const llm = new FakeLlm(
-      ptyTypeThenFinalScripts("diff out.sql /app/tests/golden.sql", "Matches the golden. Verified."),
+      ptyTypeThenFinalScripts(
+        "diff out.sql /app/tests/golden.sql",
+        "Matches the golden. Verified.",
+      ),
     )
     const result = await runTerminalBrain({
       instruction: "optimize the query",
@@ -1014,5 +1054,146 @@ describe("verify-before-finalize gate (lever #2)", () => {
     expect(explicitOff.verification).toBeUndefined()
     // Full report equality (turns / tokens / final / instruction) — the gate changed nothing.
     expect(explicitOff).toEqual(unset)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Phase C — HARNESS-enforced oracle-repair loop (RFC jul-3 /02). The structural convergence attack:
+// the harness (not a prompt line) drives the agent's OWN self-test to green with bounded feedback.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe("resolveOracleLoopRounds (Phase C) — bounded round budget", () => {
+  test("unset/blank/off/0 ⇒ 0 (loop off, byte-identical)", () => {
+    expect(resolveOracleLoopRounds({})).toBe(0)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "" })).toBe(0)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "0" })).toBe(0)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "off" })).toBe(0)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "false" })).toBe(0)
+  })
+  test("1/on/true ⇒ default depth 2; positive int floored + clamped to [1,4]", () => {
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "1" })).toBe(2)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "on" })).toBe(2)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "true" })).toBe(2)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "3" })).toBe(3)
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "99" })).toBe(4) // hard cap
+    expect(resolveOracleLoopRounds({ [TB_ORACLE_LOOP_ENV]: "2.9" })).toBe(2)
+  })
+})
+
+describe("ORACLE_LOOP_FEEDBACK (Phase C) — no-leak feedback text", () => {
+  test("names only the agent's own self-test + output; never a hidden oracle", () => {
+    const text = ORACLE_LOOP_FEEDBACK(
+      "ran a self-test the agent authored (did not pass): `python test_fib.py`",
+      "AssertionError: fib(5)",
+    )
+    expect(text).toContain("python test_fib.py")
+    expect(text).toContain("AssertionError")
+    expect(text.toLowerCase()).toContain("do not seek any concealed")
+    // the no-answer-key red line: the feedback must not direct the agent at the hidden oracle
+    expect(text.toLowerCase()).not.toMatch(/\/tests\/|hidden test|verifier output|answer key file/)
+  })
+})
+
+/** Phase C e2e scripts: main run does an exec (the self-test) + a text turn; the loop's feedback
+ *  turn does another exec (the re-run) + a text turn. FakeLlm consumes one script per stream turn. */
+const oracleLoopScripts = (selfTestCmd: string): StreamEvent[][] => [
+  // main run — turn 1: run the self-test
+  [
+    { type: "tool_use_start", id: "c1", name: "container_exec" },
+    { type: "tool_use_end", id: "c1", input: { command: selfTestCmd } },
+    { type: "usage", inputTokens: 10, outputTokens: 5, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "tool_use" },
+  ],
+  // main run — turn 2: finalize (self-test still red at this point)
+  [
+    { type: "text_delta", delta: "self-test not green yet" },
+    { type: "usage", inputTokens: 4, outputTokens: 2, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "end_turn" },
+  ],
+  // oracle-loop feedback — turn 1: agent re-runs the (now fixed) self-test
+  [
+    { type: "tool_use_start", id: "c2", name: "container_exec" },
+    { type: "tool_use_end", id: "c2", input: { command: selfTestCmd } },
+    { type: "usage", inputTokens: 8, outputTokens: 4, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "tool_use" },
+  ],
+  // oracle-loop feedback — turn 2: done
+  [
+    { type: "text_delta", delta: "fixed, self-test passes now" },
+    { type: "usage", inputTokens: 3, outputTokens: 2, model: "terminal-fake" },
+    { type: "message_stop", stop_reason: "end_turn" },
+  ],
+]
+
+describe("runOracleRepairLoop e2e (Phase C) — drives the self-test to green", () => {
+  test("ON: a RED self-test triggers a feedback round; the re-run goes green ⇒ converged", async () => {
+    // The self-test `python test_fib.py`: first run RED (code 1), any re-run GREEN (code 0).
+    let seen = 0
+    const { stdin, stdout, handsServed, endIn } = makeStdio((cmd) =>
+      cmd.includes("test_fib.py") ? (seen++ === 0 ? 1 : 0) : 0,
+    )
+    let report: Record<string, unknown> | undefined
+    await runTerminalBrain({
+      instruction: "make fib correct",
+      reportOut: "/tmp/oracle.json",
+      stdin,
+      stdout,
+      llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
+      writeReport: (_p, obj) => {
+        report = obj as Record<string, unknown>
+      },
+      env: { [TB_ORACLE_LOOP_ENV]: "1" },
+    })
+    endIn()
+    const ol = report?.oracleLoop as { rounds: number; converged: boolean } | undefined
+    expect(ol).toBeDefined()
+    expect(ol?.rounds).toBe(1) // exactly one repair round fired
+    expect(ol?.converged).toBe(true) // the re-run self-test went green
+    // the harness actually drove a SECOND self-test exec (the re-run), not just the original.
+    expect(handsServed.filter((f) => String(f.command).includes("test_fib.py")).length).toBe(2)
+  })
+
+  test("OFF (unset): byte-identical — no oracleLoop field, no extra turn", async () => {
+    let seen = 0
+    const { stdin, stdout, handsServed, endIn } = makeStdio((cmd) =>
+      cmd.includes("test_fib.py") ? (seen++ === 0 ? 1 : 0) : 0,
+    )
+    let report: Record<string, unknown> | undefined
+    await runTerminalBrain({
+      instruction: "make fib correct",
+      reportOut: "/tmp/oracle.json",
+      stdin,
+      stdout,
+      llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
+      writeReport: (_p, obj) => {
+        report = obj as Record<string, unknown>
+      },
+      // knob unset ⇒ loop off
+    })
+    endIn()
+    expect(report?.oracleLoop).toBeUndefined()
+    // no feedback round ⇒ the self-test ran exactly ONCE (only the main run's exec).
+    expect(handsServed.filter((f) => String(f.command).includes("test_fib.py")).length).toBe(1)
+  })
+
+  test("ON but self-test already GREEN ⇒ zero rounds (no over-persist)", async () => {
+    // test_fib.py green on the FIRST run ⇒ nothing to converge ⇒ loop is a no-op.
+    const { stdin, stdout, handsServed, endIn } = makeStdio(() => 0)
+    let report: Record<string, unknown> | undefined
+    await runTerminalBrain({
+      instruction: "already correct",
+      reportOut: "/tmp/oracle.json",
+      stdin,
+      stdout,
+      llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
+      writeReport: (_p, obj) => {
+        report = obj as Record<string, unknown>
+      },
+      env: { [TB_ORACLE_LOOP_ENV]: "1" },
+    })
+    endIn()
+    const ol = report?.oracleLoop as { rounds: number; converged: boolean } | undefined
+    expect(ol?.rounds).toBe(0) // no red ⇒ no feedback round
+    expect(ol?.converged).toBe(true)
+    expect(handsServed.filter((f) => String(f.command).includes("test_fib.py")).length).toBe(1)
   })
 })

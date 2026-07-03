@@ -37,17 +37,18 @@ import { defaultResponsesContinuationStore } from "@/llm/responses-continuation-
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
 import { runSessionTurn } from "@/runner/orchestrate/session-turn-driver"
 import { createRuntimeFromBootstrap } from "@/sdk/runtime"
+import { gateOn } from "@/shared/env-flag"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE, type Tool, ToolRegistry } from "@/tool"
 import type { JsonLineDuplex } from "@/tool/container-exec"
 import type { PtySessionPort } from "@/tool/pty"
-import { gateOn } from "@/shared/env-flag"
 import { terminalSurfaceOverDuplex } from "./index"
 import {
   comparedToReference,
   deriveVerificationState,
   inspectExerciseEvidence,
   inspectSelfTest,
+  lastSelfTestFailure,
   outputContractVerdict,
   type SelfTestReceipt,
   type VerificationStamp,
@@ -72,6 +73,39 @@ export const TB_OUTPUT_CONTRACT_ENV = "QUANTA_TB_OUTPUT_CONTRACT"
  *  deliverable to green (targets the measured synthesis-convergence bottleneck: polyglot/sam consistent
  *  0/3). Default-OFF ⇒ the instruction turn is byte-identical. Efficacy is measure-first (box A/B). */
 export const TB_SELF_TEST_ENV = "QUANTA_TB_SELF_TEST"
+
+/** Phase C (RFC jul-3) — the HARNESS-ENFORCED oracle-repair loop. S1 only STEERS the agent to write
+ *  a self-test and iterate; this knob makes the HARNESS drive the convergence: after the main run, if
+ *  the agent's own self-test ran RED, feed its OWN failing output back as a follow-up turn and let the
+ *  agent re-edit + re-run — bounded to K rounds, watchdog on the turn budget. `1`/`on`/`true` ⇒ K=2;
+ *  a positive integer ⇒ that many rounds (hard-capped). Default-OFF ⇒ byte-identical. NO-LEAK: the
+ *  loop reads ONLY the agent's own taint-clean self-test receipt + output — never the hidden verifier.
+ *  Efficacy is measure-first (box A/B); this is the structural attack on the synthesis-convergence
+ *  bottleneck (single-pass can't match competitors' multi-attempt without a real convergence harness). */
+export const TB_ORACLE_LOOP_ENV = "QUANTA_TB_ORACLE_LOOP"
+
+/** Hard cap on oracle-repair rounds (cost + over-persist bound; the K=0 verify-gate nudge's R2 lesson). */
+const ORACLE_LOOP_MAX_ROUNDS = 4
+
+/** Resolve the oracle-repair round budget. Unset/blank/off ⇒ 0 (loop off, byte-identical). `1`/`on`/
+ *  `true`/`yes` ⇒ 2 (the default depth). A positive integer ⇒ floored + clamped to [1, MAX]. PURE. */
+export const resolveOracleLoopRounds = (env: Record<string, string | undefined>): number => {
+  const raw = (env[TB_ORACLE_LOOP_ENV] ?? "").trim().toLowerCase()
+  if (raw === "" || raw === "0" || raw === "off" || raw === "false" || raw === "no") return 0
+  if (raw === "1" || raw === "on" || raw === "true" || raw === "yes") return 2
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.min(Math.floor(n), ORACLE_LOOP_MAX_ROUNDS)
+}
+
+/** The oracle-repair feedback (VERBATIM, no-leak). Names ONLY the agent's own self-test + its own
+ *  failing output; directs a fix using task-provided materials, never a concealed oracle. */
+export const ORACLE_LOOP_FEEDBACK = (evidence: string, output: string): string =>
+  `Your OWN self-test did not pass. ${evidence}\n\n--- self-test output ---\n${output}\n--- end output ---\n\n` +
+  "Diagnose the failure and FIX YOUR CODE so this self-test passes, then RE-RUN the self-test to " +
+  "confirm. If the self-test itself is wrong for the task's spec, correct it to reflect the spec — do " +
+  "NOT weaken it to pass trivially. Use ONLY the task's own materials; do not seek any concealed " +
+  "evaluation harness, verifier, or answer key."
 
 /** Cassette knob (RFC 07). Trajectory recording is ON by DEFAULT — set `QUANTA_TB_TRAJECTORY=0`
  *  (or `false`/`off`) to suppress it. Default-on because the jul-3 regression could not be RCA'd
@@ -155,6 +189,11 @@ export interface TerminalBrainReport {
    *  authored self-test and whether it went green; NEVER gates. The top-line S1 metric (self-test↔
    *  hidden alignment) is computed by pairing `green` with the harbor reward off-line. */
   readonly selfTest?: SelfTestReceipt
+  /** Phase C (`QUANTA_TB_ORACLE_LOOP`): PRESENT ONLY when the harness-enforced oracle-repair loop ran
+   *  (knob ON) — absent ⇒ byte-identical. `rounds` = repair follow-ups actually fired (0 when the
+   *  self-test was already green or never ran); `converged` = the self-test was green after the loop.
+   *  Pairing `converged` against the harbor reward is the A/B efficacy metric for the loop. */
+  readonly oracleLoop?: { readonly rounds: number; readonly converged: boolean }
   /** Lever #1 (`QUANTA_TB_ENV_OWNED`): stamped `"owned"` ONLY when the owned posture was applied
    *  (knob ON) — absent ⇒ byte-identical to the pre-lever report. Lets per-task A/B analysis confirm
    *  the owned prompt actually rendered for this task (guards against a silent env-plumbing miss). */
@@ -479,6 +518,127 @@ export const decideGateFollowup = (args: {
   return { fire: true, nudge: "run" }
 }
 
+/** The oracle-repair loop result: the accumulated turn count, the (possibly-extended) messages, and
+ *  how many repair rounds actually fired + whether the self-test converged green (A/B measurement). */
+interface OracleLoopOutcome {
+  readonly outcomeTurns: number
+  readonly messages: readonly Message[]
+  readonly rounds: number
+  readonly converged: boolean
+}
+
+/**
+ * Phase C — HARNESS-ENFORCED bounded oracle-repair loop. While the agent's own self-test is observed
+ * RED, feed its OWN failing output back as a follow-up turn and let the agent re-edit + re-run, until
+ * it goes green OR a hard bound is hit. STRUCTURAL over-persist bounds (the R2 revert lesson): at most
+ * `maxRounds` rounds AND a turn-budget watchdog (never fires past `maxTurns`). NO-LEAK: the only signal
+ * is the agent's own taint-clean self-test receipt ({@link inspectSelfTest}) and its own failing output
+ * ({@link lastSelfTestFailure}) — the hidden verifier is never read, and the fed-back text names only
+ * the model's own self-test. A run with NO self-test (nothing to converge) is a no-op. Extracted to
+ * keep `runTerminalBrain` under the god-FUNCTION cap.
+ */
+const runOracleRepairLoop = async (args: {
+  session: Parameters<typeof runSessionTurn>[0]["session"]
+  stream: CapturingStream
+  turnSignal: AbortSignal
+  maxTurns: number
+  maxRounds: number
+  outcomeTurns: number
+  messages: readonly Message[]
+}): Promise<OracleLoopOutcome> => {
+  let outcomeTurns = args.outcomeTurns
+  let messages = args.messages
+  let rounds = 0
+  while (rounds < args.maxRounds) {
+    const receipt = inspectSelfTest(args.stream.events)
+    // Nothing to converge: no agent-authored self-test ran, or it is already green. (An UNEXECUTED
+    // self-test is not something the loop can drive — S1's steer is what makes the agent write one.)
+    if (!receipt.executed || receipt.green) break
+    // Watchdog: never spend past the turn budget (structural over-persist bound).
+    if (outcomeTurns >= args.maxTurns) break
+    const failure = lastSelfTestFailure(args.stream.events)
+    if (failure === undefined) break // defensive: executed-red implies one exists, but never loop blind
+    const followUp = await runSessionTurn({
+      session: args.session,
+      resolveApproval: async () => "approve",
+      text: ORACLE_LOOP_FEEDBACK(receipt.evidence ?? "", failure.output),
+      turnSignal: args.turnSignal,
+      env: {},
+    })
+    outcomeTurns += followUp.outcome.turns
+    messages = followUp.messages
+    rounds += 1
+  }
+  return { outcomeTurns, messages, rounds, converged: inspectSelfTest(args.stream.events).green }
+}
+
+/** Drive the MAIN instruction turn, then (if their knobs are on) the oracle-repair loop and the
+ *  verify-before-finalize gate, in that order — the convergence loop runs BEFORE the gate so the gate
+ *  stamps the honest verdict on the CONVERGED state. Extracted from `runTerminalBrain` to keep it under
+ *  the god-FUNCTION cap; the ordering + default-OFF byte-identical contract is unchanged. */
+const driveMainTurnThenGates = async (args: {
+  session: Parameters<typeof runSessionTurn>[0]["session"]
+  stream: CapturingStream
+  turnText: string
+  turnSignal: AbortSignal
+  maxTurns: number
+  oracleLoopRounds: number
+  verifyGateOn: boolean
+  outputContractOn: boolean
+}): Promise<{
+  outcomeTurns: number
+  messages: readonly Message[]
+  verification: VerificationStamp | undefined
+  oracleLoop: { rounds: number; converged: boolean } | undefined
+}> => {
+  const turnResult = await runSessionTurn({
+    session: args.session,
+    // No human operator on the box — auto-approve so a tool that requests approval does not
+    // deadlock the run (same posture as headless).
+    resolveApproval: async () => "approve",
+    text: args.turnText,
+    turnSignal: args.turnSignal,
+    env: {},
+  })
+  let outcomeTurns = turnResult.outcome.turns
+  let messages = turnResult.messages
+  let verification: VerificationStamp | undefined
+  let oracleLoop: { rounds: number; converged: boolean } | undefined
+
+  // ── Phase C: harness-enforced oracle-repair loop (default-OFF ⇒ skipped, byte-identical) ──
+  if (args.oracleLoopRounds > 0) {
+    const looped = await runOracleRepairLoop({
+      session: args.session,
+      stream: args.stream,
+      turnSignal: args.turnSignal,
+      maxTurns: args.maxTurns,
+      maxRounds: args.oracleLoopRounds,
+      outcomeTurns,
+      messages,
+    })
+    outcomeTurns = looped.outcomeTurns
+    messages = looped.messages
+    oracleLoop = { rounds: looped.rounds, converged: looped.converged }
+  }
+
+  // ── Lever #2: verify-before-finalize gate (default-OFF ⇒ skipped, brain byte-identical) ──
+  if (args.verifyGateOn) {
+    const gated = await runVerifyBeforeFinalizeGate({
+      session: args.session,
+      stream: args.stream,
+      turnSignal: args.turnSignal,
+      maxTurns: args.maxTurns,
+      outcomeTurns,
+      messages,
+      outputContractOn: args.outputContractOn,
+    })
+    outcomeTurns = gated.outcomeTurns
+    messages = gated.messages
+    verification = gated.verification
+  }
+  return { outcomeTurns, messages, verification, oracleLoop }
+}
+
 const runVerifyBeforeFinalizeGate = async (args: {
   session: Parameters<typeof runSessionTurn>[0]["session"]
   stream: CapturingStream
@@ -552,6 +712,7 @@ const finalizeTerminalBrain = (
     outcomeTurns: number
     messages: readonly Message[]
     verification: VerificationStamp | undefined
+    oracleLoop: { rounds: number; converged: boolean } | undefined
     envOwnedApplied: boolean
     runError: unknown
   },
@@ -568,6 +729,7 @@ const finalizeTerminalBrain = (
     // Lever #2 / #1 stamps — exact-optional spread ⇒ the field is entirely ABSENT
     // when the gate/posture is off, keeping the report byte-identical to pre-lever.
     ...(state.verification !== undefined ? { verification: state.verification } : {}),
+    ...(state.oracleLoop !== undefined ? { oracleLoop: state.oracleLoop } : {}),
     // S1b (`QUANTA_TB_SELF_TEST`): the OBSERVE-ONLY self-test receipt rides with the lever it measures
     // — present only when the discipline was applied ⇒ byte-identical when the knob is OFF.
     ...(gateOn(opts.env ?? {}, TB_SELF_TEST_ENV)
@@ -632,9 +794,11 @@ export const runTerminalBrain = async (
 
   const verifyGateOn = gateOn(opts.env ?? {}, TB_VERIFY_GATE_ENV)
   const outputContractOn = gateOn(opts.env ?? {}, TB_OUTPUT_CONTRACT_ENV)
+  const oracleLoopRounds = resolveOracleLoopRounds(opts.env ?? {})
   let outcomeTurns = 0
   let messages: readonly Message[] = []
   let verification: VerificationStamp | undefined
+  let oracleLoop: { rounds: number; converged: boolean } | undefined
   let envOwnedApplied = false
   let runError: unknown
   try {
@@ -694,34 +858,20 @@ export const runTerminalBrain = async (
       permissionMode: boot.mode,
     })
     try {
-      const turnResult = await runSessionTurn({
+      const driven = await driveMainTurnThenGates({
         session,
-        // No human operator on the box — auto-approve so a tool that requests approval does not
-        // deadlock the run (same posture as headless).
-        resolveApproval: async () => "approve",
-        text: turnText,
+        stream,
+        turnText,
         turnSignal: boot.abort.signal,
-        env: {},
+        maxTurns: opts.maxTurns ?? 30,
+        oracleLoopRounds,
+        verifyGateOn,
+        outputContractOn,
       })
-      outcomeTurns = turnResult.outcome.turns
-      messages = turnResult.messages
-
-      // ── Lever #2: verify-before-finalize gate (default-OFF ⇒ skipped, brain byte-identical) ──
-      // See {@link runVerifyBeforeFinalizeGate} for the STRUCTURAL/SELECTIVE/BOUNDED/HONEST contract.
-      if (verifyGateOn) {
-        const gated = await runVerifyBeforeFinalizeGate({
-          session,
-          stream,
-          turnSignal: boot.abort.signal,
-          maxTurns: opts.maxTurns ?? 30,
-          outcomeTurns,
-          messages,
-          outputContractOn,
-        })
-        outcomeTurns = gated.outcomeTurns
-        messages = gated.messages
-        verification = gated.verification
-      }
+      outcomeTurns = driven.outcomeTurns
+      messages = driven.messages
+      verification = driven.verification
+      oracleLoop = driven.oracleLoop
     } finally {
       await session.close().catch(() => undefined)
       await facade.close().catch(() => undefined)
@@ -738,6 +888,7 @@ export const runTerminalBrain = async (
     outcomeTurns,
     messages,
     verification,
+    oracleLoop,
     envOwnedApplied,
     runError,
   })

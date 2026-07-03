@@ -714,6 +714,18 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "TB S1 self-test discipline (opt-in). When ON, appends a spec-derived self-test discipline block to the instruction turn: build an EXECUTABLE self-test from the task spec that covers the input RANGE + edges, run the deliverable against it, and iterate to green before finalizing. Targets the measured synthesis-convergence bottleneck (polyglot/sam consistent 0/3: a single-value self-compare passed a wrong general solution). No-leak: task spec only, never the hidden test/verifier. OFF ⇒ the instruction turn is byte-identical.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain selfTestOn)",
   },
+  // TB Phase C oracle-repair loop (RFC jul-3 /02) — HARNESS-enforced convergence (not just a prompt
+  // steer): drive the agent's own self-test to green with bounded feedback rounds. Default-OFF.
+  {
+    envKey: "QUANTA_TB_ORACLE_LOOP",
+    kind: "int",
+    default: undefined,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "TB harness-enforced oracle-repair loop (opt-in). After the main run, while the agent's OWN self-test is observed RED, the harness feeds that self-test's OWN failing output back as a follow-up turn and lets the agent re-edit + re-run — bounded to K rounds (1/on/true ⇒ 2; a positive int ⇒ that many, hard-capped at 4) with a turn-budget watchdog. The structural attack on the synthesis-convergence bottleneck (single-pass can't match multi-attempt without a real convergence harness). No-leak: reads ONLY the agent's own taint-clean self-test receipt + output, never the hidden verifier. Unset/0/off ⇒ byte-identical.",
+    readSite: "apps/terminal/brain-mode.ts (resolveOracleLoopRounds runOracleRepairLoop)",
+  },
   // TB container_exec per-stream output cap (P3-C, jul-3) — env-tunable head+tail truncation
   // budget for stdout/stderr EACH (per-stream so a stdout flood can never evict stderr). Unset ⇒
   // 8192 (byte-identical); clamped to [1024, 32768] (pty_read's 32K pane cap is the in-house

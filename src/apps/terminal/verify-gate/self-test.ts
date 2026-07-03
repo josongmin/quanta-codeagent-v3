@@ -196,3 +196,38 @@ export const inspectSelfTest = (events: readonly AgentEvent[]): SelfTestReceipt 
         }),
   }
 }
+
+/** The command + observed output of the LAST agent-authored self-test that ran RED (observed, not
+ *  clean). Used by the oracle-repair loop (Phase C) to feed a failing self-test's OWN output back to
+ *  the model. NO-LEAK by construction: it reads ONLY a command that {@link isSelfTestCommand} credits
+ *  as the agent's own self-test (the shared taint/oracle predicate rejects any run that touches or is
+ *  derived from the hidden oracle), and returns that command's OWN result preview — never a hidden
+ *  verifier's output. Undefined when no red agent-authored self-test was observed. */
+export const lastSelfTestFailure = (
+  events: readonly AgentEvent[],
+): { command: string; output: string } | undefined => {
+  const previewById = new Map<string, string>()
+  const cleanById = new Map<string, boolean>()
+  const observedById = new Map<string, boolean>()
+  const ownCommands: string[] = []
+  for (const ev of events) {
+    if (ev.type === "tool_result") {
+      previewById.set(ev.id, typeof ev.preview === "string" ? ev.preview : "")
+      cleanById.set(ev.id, resultRanClean(ev))
+      observedById.set(ev.id, resultObservedOutput(ev))
+    } else if (ev.type === "tool_call" && ev.name === CONTAINER_EXEC) {
+      const c = containerExecCommand(ev)
+      if (c !== undefined) ownCommands.push(c)
+    }
+  }
+  const tainted = buildTaintedRefs(ownCommands, isOracleLocation)
+  let last: { command: string; output: string } | undefined
+  for (const ev of events) {
+    if (ev.type !== "tool_call" || ev.name !== CONTAINER_EXEC) continue
+    const command = containerExecCommand(ev)
+    if (command === undefined || !isSelfTestCommand(command, tainted)) continue
+    if (observedById.get(ev.id) !== true || cleanById.get(ev.id) === true) continue // observed RED only
+    last = { command, output: (previewById.get(ev.id) ?? "").slice(0, 4000) }
+  }
+  return last
+}
