@@ -54,6 +54,29 @@ describe("cassette trajectory (RFC 07) — default-on recording", () => {
     expect(steps[0]).toMatchObject({ kind: "exec", cmd: "gcc main.c -o cmain", ok: true, exitCode: 0 })
     expect(steps[1]).toMatchObject({ kind: "exec", ok: false, exitCode: 139, preview: "Segfault" })
   })
+
+  test("P1-E: coalesces assistant_text between tool calls into ordered kind:text steps", () => {
+    const steps = compactTrajectory([
+      { type: "assistant_text", delta: "Let me " },
+      { type: "assistant_text", delta: "build it." },
+      { type: "tool_call", id: "1", name: "container_exec", input: { command: "make" } },
+      { type: "tool_result", id: "1", name: "container_exec", ok: true, preview: "", exitCode: 0 },
+      { type: "assistant_text", delta: "Verified green, done." },
+    ] as never)
+    expect(steps).toHaveLength(3)
+    expect(steps[0]).toMatchObject({ kind: "text", text: "Let me build it." }) // coalesced, before the call
+    expect(steps[1]).toMatchObject({ kind: "exec", cmd: "make" })
+    expect(steps[2]).toMatchObject({ kind: "text", text: "Verified green, done." }) // trailing claim captured
+  })
+
+  test("P1-E: no assistant text ⇒ steps unchanged (only tool steps)", () => {
+    const steps = compactTrajectory([
+      { type: "tool_call", id: "1", name: "container_exec", input: { command: "ls" } },
+      { type: "tool_result", id: "1", name: "container_exec", ok: true, preview: "x", exitCode: 0 },
+    ] as never)
+    expect(steps).toHaveLength(1)
+    expect(steps[0]?.kind).toBe("exec")
+  })
 })
 
 describe("decideGateFollowup (OC1, RFC 07) — trigger truth table", () => {
@@ -76,6 +99,15 @@ describe("decideGateFollowup (OC1, RFC 07) — trigger truth table", () => {
     expect(D({ compared: true, ranClean: true, outputContractOn: false })).toEqual({
       fire: false,
       nudge: "none",
+    })
+  })
+
+  test("P1-A F,T,T: OC1 ON + ran clean but NEVER compared ⇒ fire the COMPARE nudge (still needs L1)", () => {
+    // compared=false, ranClean=true, OC1-on: the clean run satisfies the contract's run-part, but with
+    // no L1 comparison it is still unverifiable — the compare nudge (not contract) is the right ask.
+    expect(D({ compared: false, ranClean: true, outputContractOn: true })).toEqual({
+      fire: true,
+      nudge: "compare",
     })
   })
 

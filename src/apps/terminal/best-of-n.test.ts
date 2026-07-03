@@ -110,7 +110,9 @@ describe("best-of-N fair selector — tie-breaks (same fair state)", () => {
     const one = exerciseEvents("./solver a.txt", "x1")
     const two: readonly AgentEvent[] = [
       ...exerciseEvents("./solver a.txt", "x1"),
-      ...exerciseEvents("pytest test_behavior.py", "x2"),
+      // a GENUINE second run of the deliverable (NOT `pytest …` — P2-B: a test-runner is not an
+      // exercise, so it can no longer inflate the tie-break; see the no-leak test below).
+      ...exerciseEvents("./solver b.txt", "x2"),
     ]
     const sel = selectBestCandidate([
       { stamp: stamp("verified-pass", false), events: one },

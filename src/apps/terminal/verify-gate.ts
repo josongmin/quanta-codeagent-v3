@@ -76,11 +76,19 @@ const INTERPRETERS: ReadonlySet<string> = new Set([
 
 /** Runners that inherently RUN-AND-OBSERVE against the produced deliverable or a reference —
  *  `diff`/`cmp` compare to a reference, `curl`/`nc` hit a server, `pytest` runs behavior. */
+// P2-B (RFC jul-3): OBSERVE runners only — comparators + network probes that run-and-observe the
+// DELIVERABLE. Test-RUNNERS (pytest/tox/nose) are DELIBERATELY excluded: `pytest tests/` runs the
+// task's own (often HIDDEN) tests, which is (a) peeking, not an exercise of the produced artifact, and
+// (b) an inflation of the best-of-N exercise tie-break (a candidate spamming the hidden suite would
+// outrank a cleaner one). See {@link TEST_RUNNERS}.
 const ACCEPTANCE_RUNNERS: ReadonlySet<string> = new Set([
-  "pytest", "py.test", "tox", "nose", "nosetests",
   "diff", "cmp", "sdiff", "colordiff",
   "curl", "wget", "http", "nc", "ncat", "netcat", "ab", "wrk", "hey", "siege", "grpcurl",
 ])
+
+/** P2-B: test-RUNNER leaders that run a suite (typically the hidden oracle), NOT an exercise of the
+ *  deliverable. Scoped OUT of the exercise classifier (bare, path-arg, or `python -m <runner>`). */
+const TEST_RUNNERS: ReadonlySet<string> = new Set(["pytest", "py.test", "tox", "nose", "nosetests"])
 
 /** POSIX shells — a `-c`/`-lc`/`-ic` wrapper is unwrapped and its inner command re-classified;
  *  a shell handed a `*.sh` script runs that script (exercise). A bare interactive shell is not. */
@@ -142,15 +150,21 @@ const isExerciseSegment = (segment: string): boolean => {
   // 2. package managers / build tools / probes → NEVER an exercise (setup, not behavior).
   if (BUILD_OR_INSTALL_TOOLS.has(base)) return false
 
+  // 2b. P2-B: test-RUNNERS (pytest/tox/nose) → NEVER an exercise (runs the suite/hidden oracle, not
+  //     the deliverable; and would inflate the best-of-N exercise tie-break).
+  if (TEST_RUNNERS.has(base)) return false
+
   // 3. acceptance / observe runners → exercise (run-and-observe against the deliverable/reference).
   if (ACCEPTANCE_RUNNERS.has(base)) return true
 
-  // 4. interpreter → exercise ONLY when running a FILE (not `-c`, not a pkg-manager `-m`).
+  // 4. interpreter → exercise ONLY when running a FILE (not `-c`, not a pkg-manager `-m`, not a
+  //    test-runner `-m pytest`).
   if (INTERPRETERS.has(base)) {
     if (args.includes("-c")) return false // inline snippet / probe, not a run of a produced file
     const mIdx = args.findIndex((a) => a === "-m")
     if (mIdx >= 0) {
       const mod = (args[mIdx + 1] ?? "").toLowerCase()
+      if (TEST_RUNNERS.has(mod)) return false // `python -m pytest` = running the suite, not the deliverable
       return !["pip", "pip3", "venv", "virtualenv", "ensurepip", "build", "installer", "wheel"].includes(mod)
     }
     return args.some((a) => !a.startsWith("-")) // a non-flag arg = a script/file to run
@@ -188,6 +202,12 @@ const COMPARATORS: ReadonlySet<string> = new Set(["diff", "cmp", "sdiff", "color
 /** R1 (CRITICAL, box-proven): a path under a verifier/test/answer corpus is NOT a fair reference —
  *  diffing against it is peeking at the hidden oracle. query-optimize's `golden.sql` lives in
  *  `/tests/`, so this exclusion is LOAD-BEARING, not a precaution. Matched on the operand path. */
+// P2-A (RFC jul-3): PATH markers ONLY. The bare-NAME heuristics (answer/solution/golden/
+// expected_output) were DROPPED — they self-contradicted REFERENCE_HINT (which BLESSES those same
+// words as a fair reference), so `diff mine.csv expected_output.csv` (a task-PROVIDED reference pair
+// in cwd) was refused. A hidden oracle still lives under a PATH marker (query-optimize's `golden.sql`
+// is in `/tests/`, caught by the tests marker), so no-leak is preserved; only the cwd bare-name
+// false-refusal is fixed.
 const TEST_PATH_MARKERS: readonly RegExp[] = [
   /(^|\/)tests?(\/|$)/i, // /tests/, tests/, a `test`/`tests` dir segment
   /(^|\/)test_[^/]*/i, // test_*.py-style fixtures
@@ -195,10 +215,6 @@ const TEST_PATH_MARKERS: readonly RegExp[] = [
   /verifier/i,
   /grader/i,
   /(^|\/)private(\/|$)/i,
-  /answer/i,
-  /solution/i,
-  /golden/i,
-  /expected_output/i,
 ]
 
 /** True iff a path operand points into a verifier/test/answer corpus (R1 — never a fair reference). */
@@ -493,16 +509,24 @@ export const inspectExerciseEvidence = (events: readonly AgentEvent[]): Exercise
  *  Distinct from L0 exercise (which counts an `ok:false`/non-zero run as an honest observation) and
  *  from L1 compare (which can pass on a PARTIAL output match while the full deliverable is broken or
  *  leaves stray artifacts — the polyglot `cmain` / sam-cell-seg `exit 2` class). `ranClean` requires an
- *  exercise command whose paired result was `ok:true` with exit 0 (or no exit code surfaced). */
+ *  exercise command whose paired result was `ok:true` with exit 0 — and for `container_exec` the exit
+ *  code MUST be present + 0 (a missing code there = a broken wire, fail-closed; P1-A). */
 export interface OutputContractVerdict {
   readonly ranClean: boolean
   readonly evidence?: string
 }
 
-/** True iff a tool_result observed a SUCCESSFUL run: `ok:true` and (exit 0 | no exit code). A run the
- *  agent saw FAIL is honest L0 evidence but is NOT a clean contract satisfaction. */
-const resultRanClean = (r: ToolResultEvent): boolean =>
-  r.ok === true && (r.exitCode === undefined || r.exitCode === 0)
+/** True iff a tool_result observed a SUCCESSFUL run: `ok:true` and exit 0.
+ *  P1-A (RFC jul-3) FAIL-CLOSED for `container_exec`: that tool ALWAYS surfaces an exit code, so a
+ *  `container_exec` result with `exitCode === undefined` means the exitCode WIRE broke — treat it as
+ *  NOT clean (else a silently-broken wire would rubber-stamp every crash as a clean run, defeating the
+ *  OC1 crash detection this gate exists for). OTHER tools (pty_*, etc.) legitimately surface no exit
+ *  code, so for them `undefined` stays tolerant (byte-identical). */
+const resultRanClean = (r: ToolResultEvent): boolean => {
+  if (r.ok !== true) return false
+  if (r.name === CONTAINER_EXEC) return r.exitCode === 0 // fail-closed: undefined = broken wire
+  return r.exitCode === undefined || r.exitCode === 0
+}
 
 /**
  * OC1 inspector (RFC 07). Returns `ranClean:true` iff a `container_exec` ran an EXERCISE command

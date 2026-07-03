@@ -246,8 +246,22 @@ export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep
   const resultById = new Map<string, Extract<AgentEvent, { type: "tool_result" }>>()
   for (const ev of events) if (ev.type === "tool_result") resultById.set(ev.id, ev)
   const steps: TrajectoryStep[] = []
+  // P1-E (RFC jul-3): coalesce consecutive assistant_text deltas (the model's reasoning/claims
+  // BETWEEN tool calls) into one ordered `kind:"text"` step. Without this the cassette recorded only
+  // commands — losing the intermediate "I verified it works" claims that fake-green RCA needs.
+  let textBuf = ""
+  const flushText = (): void => {
+    const t = trunc(textBuf)
+    if (t !== undefined) steps.push({ kind: "text", text: t })
+    textBuf = ""
+  }
   for (const ev of events) {
+    if (ev.type === "assistant_text") {
+      textBuf += ev.delta
+      continue
+    }
     if (ev.type === "tool_call") {
+      flushText() // the text preceding this call is its own step, in order
       const res = resultById.get(ev.id)
       const obs =
         res !== undefined
@@ -270,6 +284,7 @@ export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep
       }
     }
   }
+  flushText() // trailing reasoning after the last tool call (often the final "verified green" claim)
   return steps.length > TRAJECTORY_MAX_STEPS ? steps.slice(-TRAJECTORY_MAX_STEPS) : steps
 }
 
@@ -347,13 +362,6 @@ const buildTerminalBootstrapDeps = (
   }
 }
 
-/** Idle-input timeout for the offline brain runtime. There is NO human at the
- *  keyboard on the box, so this only bounds "no inbound frame" — 60s is long
- *  enough that a slow model turn or tool exec is not mistaken for idle, short
- *  enough that a genuinely wedged run surfaces instead of hanging the box.
- *  Named (no-magic-timeout guard). */
-const TERMINAL_BRAIN_IDLE_TIMEOUT_MS = 60_000
-
 /** Build the leanest valid {@link SessionRuntimeConfigShape} for an offline brain run. No
  *  `process.*` reads — the surface entry threads argv-derived values in. */
 const buildTerminalRuntime = (opts: RunTerminalBrainOpts): SessionRuntimeConfigShape => ({
@@ -371,7 +379,12 @@ const buildTerminalRuntime = (opts: RunTerminalBrainOpts): SessionRuntimeConfigS
   stdoutIsTTY: false,
   newSession: false,
   title: undefined,
-  idleMs: TERMINAL_BRAIN_IDLE_TIMEOUT_MS,
+  // INERT here: `idleMs` is only ever consulted by the interactive REPL path (repl.ts, gated on
+  // `idleSuppressOn`), which the brain NEVER runs — so this value has no effect. Kept as a required
+  // shape field with an explicit 0 (was a misleading `60_000` const whose comment claimed a live
+  // "no inbound frame" bound that nothing enforces — P0-B). The real per-command bound is the
+  // opt-in `timeoutMs` on the exec path; the task-level bound is harbor's AgentTimeout.
+  idleMs: 0,
   snoozeDefaultMs: 300_000,
   rejectLimit: 20,
   idleSuppressOn: false,
@@ -642,7 +655,13 @@ export const runTerminalBrain = async (
         envSource: {},
         responsesStore: defaultResponsesContinuationStore(),
       },
-      memoryAuto: { env: {}, homeDir: "/tmp" },
+      // The terminal brain owns NO persistent memory store (memoryConfig/store undefined) — it is a
+      // single-task box run. `assembleMemoryAuto` DEFAULTS ON (QUANTA_MEMORY_AUTO absent ⇒ true), so an
+      // empty env silently wired a session-start phase-2 consolidation LLM CALL: a wasted per-task LLM
+      // round-trip in prod AND (jul-3 RED-8) it stole the first scripted turn from every fake-LLM fence
+      // test (the consolidator's call landed as `seen[0]`, shifting the container_exec tool-call script).
+      // Explicitly OFF: this surface has nothing to consolidate.
+      memoryAuto: { env: { QUANTA_MEMORY_AUTO: "0" }, homeDir: "/tmp" },
       history: [...boot.history],
       state: boot.features.state,
       idMeta: boot.idMeta,

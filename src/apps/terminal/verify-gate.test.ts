@@ -68,6 +68,27 @@ describe("outputContractVerdict (OC1, RFC 07) — clean end-to-end run", () => {
     expect(v.ranClean).toBe(false)
   })
 
+  // P1-A (RFC jul-3) — the REAL crash shape: container_exec returns ok:TRUE with a non-zero exit
+  // (its contract). The prior ok:false fixture let a mutation dropping the `exitCode===0` check
+  // survive. This pins that a {ok:true, exitCode:2} crash is NOT clean.
+  test("REAL-SHAPE crash {ok:true, exitCode:2} on container_exec is NOT clean", () => {
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "python /app/convert.py" }),
+      result("c1", "container_exec", { preview: "Traceback", exitCode: 2, ok: true }),
+    ])
+    expect(v.ranClean).toBe(false)
+  })
+
+  // P1-A fail-closed: container_exec ALWAYS surfaces a code, so a missing exitCode = broken wire ⇒
+  // NOT clean (else a silently-broken exitCode wire rubber-stamps every crash).
+  test("container_exec with MISSING exitCode (broken wire) is NOT clean", () => {
+    const v = outputContractVerdict([
+      call("c1", "container_exec", { command: "./run" }),
+      result("c1", "container_exec", { preview: "done", ok: true }), // no exitCode
+    ])
+    expect(v.ranClean).toBe(false)
+  })
+
   test("install/build only (no exercise run) ⇒ not clean (fail-closed)", () => {
     const v = outputContractVerdict([
       call("c1", "container_exec", { command: "pip install numpy" }),
@@ -290,7 +311,6 @@ describe("isExerciseCommand — fail-closed (review P0: install/build/probe/chat
     "bash run_tests.sh",
     "diff out.ppm /app/reference.ppm",
     "cmp a.bin b.bin",
-    "pytest tests/",
     "curl -s localhost:8080/health",
     "python -m http.server 8000",
     "LD_LIBRARY_PATH=/lib ./solver in.txt",
@@ -299,6 +319,40 @@ describe("isExerciseCommand — fail-closed (review P0: install/build/probe/chat
     "bash -c './mystery > out.txt'", // shell wrapper unwraps to a real run
   ])("EXERCISE: %p ⇒ true", (cmd) => {
     expect(isExerciseCommand(cmd)).toBe(true)
+  })
+
+  // P2-B (RFC jul-3): test-RUNNERS run the suite / hidden oracle — NOT an exercise of the
+  // deliverable (peeking + best-of-N tie-break inflation). Observe-runners stay TRUE.
+  test.each(["pytest tests/", "pytest", "python -m pytest", "tox", "nose2", "nosetests"])(
+    "TEST-RUNNER: %p ⇒ NOT exercise",
+    (cmd) => {
+      expect(isExerciseCommand(cmd)).toBe(false)
+    },
+  )
+  test.each(["python -m http.server 8000", "curl -s localhost:8080/health"])(
+    "OBSERVE-RUNNER: %p ⇒ still exercise",
+    (cmd) => {
+      expect(isExerciseCommand(cmd)).toBe(true)
+    },
+  )
+})
+
+describe("comparedToReference — P2-A marker split (task-provided reference vs hidden oracle)", () => {
+  test("diff against a cwd `expected_output.csv` (task-provided pair) ⇒ compared (no longer refused)", () => {
+    const v = comparedToReference([
+      call("c1", "container_exec", { command: "diff mine.csv expected_output.csv" }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ])
+    expect(v.compared).toBe(true)
+    expect(v.refusedTestPath).toBe(false)
+  })
+  test("diff against a /tests/ path (hidden oracle) ⇒ still refused (no-leak preserved)", () => {
+    const v = comparedToReference([
+      call("c1", "container_exec", { command: "diff out.csv /app/tests/golden.csv" }),
+      result("c1", "container_exec", { preview: "", exitCode: 0 }),
+    ])
+    expect(v.compared).toBe(false)
+    expect(v.refusedTestPath).toBe(true)
   })
 })
 
