@@ -423,6 +423,9 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("shadowVerify", base.shadowVerify),
   ...whenDefined("radar", base.radar),
   ...whenDefined("dreamTrigger", base.dreamTrigger),
+  // S1 (jul-04) `/browser-net` — surface the net-capture sink on the snapshot so
+  // the per-turn base carries it into `maybeWireBrowser` (mirrors `radar`).
+  ...whenDefined("browserNet", base.browserNet),
 })
 
 export const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

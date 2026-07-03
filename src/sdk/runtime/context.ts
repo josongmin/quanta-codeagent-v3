@@ -88,6 +88,23 @@ export interface RuntimeFacadeComposeOptions {
    *  each COMPLETED turn boundary. Absent ⇒ slot omitted ⇒ no sampling
    *  (byte-identical). */
   readonly radar?: AgentConfig["radar"]
+  /** S1 (jul-04) `/browser-net` — the surface-owned network-capture holder. The
+   *  CLI mints ONE `BrowserNetHolder` and threads it DOWN here (mirrors the
+   *  `automationEngine` slot). It rides the runtime-context snapshot → the
+   *  per-turn base → `maybeWireBrowser`, which attaches it to
+   *  `config.browser.netHolder` so a `browser_network` drain mirrors its
+   *  METADATA-ONLY rows into the SAME holder the `/browser-net` slash reads
+   *  (single-instance, no split-brain). Absent ⇒ no mirror (byte-identical).
+   *  Structurally typed (`{ set }`) so this SDK layer imports no CLI/tool value. */
+  readonly browserNet?: RuntimeComposeBrowserNetSink
+}
+
+/** S1 (jul-04) — the write-only net-capture sink the CLI threads through
+ *  {@link RuntimeFacadeComposeOptions.browserNet}. Structural mirror of
+ *  `@/tool/browser`'s `BrowserNetSink` (kept local so the SDK runtime layer does
+ *  not depend on the tool slice). */
+export interface RuntimeComposeBrowserNetSink {
+  set(snapshot: { readonly rows: readonly unknown[]; readonly at: number }): void
 }
 
 export interface CreateRuntimeFacadeArgs extends InternalCreateRuntimeFacadeArgs {
@@ -207,6 +224,7 @@ const PASS_THROUGH_COMPOSE_KEYS = [
   "conversationActionPort",
   "activeTurnRef",
   "radar",
+  "browserNet",
 ] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]
 
 const applyRuntimeFacadeComposeOptions = (

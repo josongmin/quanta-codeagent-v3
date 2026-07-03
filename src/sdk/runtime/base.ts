@@ -17,6 +17,11 @@ export interface RuntimeAgentConfigAugments {
   conversationCheckpoint?: unknown
   stage1OutputsStore?: unknown
   automationEngine?: unknown
+  /** S1 (jul-04) `/browser-net` — surface-owned net-capture sink threaded DOWN
+   *  from the CLI compose seam onto the per-turn base, read duck-typed by
+   *  `maybeWireBrowser`. Typed `unknown` at this SDK layer (the tool slice is not
+   *  importable here). Absent ⇒ no mirror (byte-identical). */
+  browserNet?: unknown
   admissibility?: unknown
   planExitPort?: unknown
   userInputPort?: unknown

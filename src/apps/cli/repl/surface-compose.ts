@@ -37,6 +37,7 @@ import {
 } from "../mode-cycle"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
 import type { SessionIoState } from "../session-cmd"
+import { createBrowserNetHolder } from "../slash/browser-net-cmd"
 import type { SlashContext } from "../slash-commands"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import { type BackgroundTurnPortal, createBackgroundTurnPortal } from "./background-turn-portal"
@@ -422,6 +423,19 @@ export const composeSurfaceWires = (
   // loop sees. Absent gate ⇒ `undefined` ⇒ neither the slash slot nor the
   // producer block is wired (default-OFF byte-identical; zero sampling).
   const radarStore: RadarStore | undefined = buildRadarStore(envSource)
+  // S1 (jul-04) `/browser-net` — mint ONE surface-owned net-capture holder, gated
+  // on the SAME `QUANTA_BROWSER_NETWORK` env the `browser_network` tool rides. It
+  // is threaded DOWN via `runtimeFacadeCompose.browserNet` (→ the runtime-context
+  // snapshot → the per-turn base → `maybeWireBrowser` → `config.browser.netHolder`)
+  // so a `browser_network` drain mirrors its METADATA-ONLY rows into THIS holder,
+  // AND read UP by the `/browser-net` slash over the SAME instance (single-
+  // instance, no split-brain). Absent gate ⇒ `undefined` ⇒ neither the compose
+  // slot nor the ctx slot is wired ⇒ `/browser-net` prints "no browser capture
+  // yet" (default-OFF byte-identical; the mirror can never populate because the
+  // tool is unregistered too).
+  const browserNetHolder = gateOn(envSource, "QUANTA_BROWSER_NETWORK")
+    ? createBrowserNetHolder()
+    : undefined
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     // ADR-0231 — thread the producer block ONLY when the store is wired. The
     // idle source is adapted from the CLI idle monitor: when the monitor reports
@@ -497,6 +511,10 @@ export const composeSurfaceWires = (
       : {}),
     ...(interruptedTurnBuffer !== undefined ? { interruptedTurnBuffer } : {}),
     ...(shadowVerify !== undefined ? { shadowVerify } : {}),
+    // S1 (jul-04) `/browser-net` — DOWN-THREAD the surface net-capture holder so
+    // the per-turn `maybeWireBrowser` attaches it to `config.browser.netHolder`.
+    // Absent gate ⇒ omitted (byte-identical).
+    ...(browserNetHolder !== undefined ? { browserNet: browserNetHolder } : {}),
   }
   // ADR-0292 — turn-end record wire. Env-gated: `QUANTA_CHECKPOINT_CONV=on`
   // wires the live wire; anything else leaves the slot `null` so the slash
@@ -633,6 +651,11 @@ export const composeSurfaceWires = (
     // B4 (jul-04) `/mcp-resources` — read-only snapshot over the SAME capture the
     // mcp fetch tools write into. Omitted when the holder is absent (byte-identical).
     ...(mcpResourcesSlot !== undefined ? { mcpResources: mcpResourcesSlot } : {}),
+    // S1 (jul-04) `/browser-net` — read-only getter over the SAME net-capture
+    // holder threaded DOWN into `config.browser.netHolder` (the `browser_network`
+    // tool mirrors each drain into it). Omitted when the holder is absent
+    // (QUANTA_BROWSER_NETWORK off) ⇒ `/browser-net` "not wired" (byte-identical).
+    ...(browserNetHolder !== undefined ? { browserNet: () => browserNetHolder.get() } : {}),
     imageQueue: state.imageQueue,
     rewindState: state.rewindState,
     mcpSurface: setup.mcpSurface,

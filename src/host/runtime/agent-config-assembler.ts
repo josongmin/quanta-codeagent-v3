@@ -97,7 +97,7 @@ import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
 import { createSessionWriteBudget } from "@/tool/_shared/write-budget"
-import { type DnsResolver, nodeDnsResolver } from "@/tool/browser"
+import { type BrowserNetSink, type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
@@ -303,9 +303,19 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
       highlight?: boolean
       tabs?: boolean
       network?: boolean
+      netHolder?: BrowserNetSink
     }
+    /** S1 (jul-04) — the surface-owned `/browser-net` capture holder, threaded
+     *  DOWN from the CLI via `RuntimeFacadeComposeOptions.browserNet` → the
+     *  runtime-context snapshot → the per-turn base. Duck-typed here (same as the
+     *  `browser` slot itself). Absent ⇒ no mirror (byte-identical). */
+    browserNet?: BrowserNetSink
   }
   if (slot.browser !== undefined) return // caller-override-precedence (ADR-0332)
+  // S1 — the surface holder rides down as `base.browserNet` (the compose seam);
+  // it is threaded into the toolset ONLY when QUANTA_BROWSER_NETWORK is also on
+  // (the mirror rides the gated `browser_network` tool). Absent ⇒ undefined.
+  const netHolder = slot.browserNet
   const port = createCdpBrowser({
     spawner: defaultProcessSpawner,
     transport: defaultCdpTransport,
@@ -325,6 +335,10 @@ const maybeWireBrowser = (cfg: AgentConfig, env: AssemblerEnv): void => {
       highlight: gateOn(env, "QUANTA_BROWSER_HIGHLIGHT"),
       tabs: gateOn(env, "QUANTA_BROWSER_TABS"),
       network: gateOn(env, "QUANTA_BROWSER_NETWORK"),
+      // S1 (jul-04) — the surface `/browser-net` sink, threaded ONLY when present
+      // (CLI down-thread). `buildBrowserBlock` passes it to the toolset, which
+      // mirrors each `browser_network` drain into it. Absent ⇒ omitted.
+      ...(netHolder !== undefined ? { netHolder } : {}),
     }
   }
 }

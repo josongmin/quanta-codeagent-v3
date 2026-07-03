@@ -62,6 +62,11 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  `QUANTA_AUTO_DREAM=1` produced a trigger; undefined ⇒ `/dream` prints
    *  "not wired" (byte-identical default-OFF). */
   dreamTrigger?: CrossSessionDreamTrigger
+  /** S1 (jul-04) `/browser-net` — surface-owned net-capture sink threaded DOWN
+   *  from the CLI compose seam. Carried on the base so the per-turn assembler
+   *  (`maybeWireBrowser`) reads it off `req.base` and attaches it to
+   *  `config.browser.netHolder`. Absent ⇒ no mirror (byte-identical). */
+  browserNet?: SnapshotBrowserNetSink
 }
 
 export interface RuntimeConfirmSlot {
@@ -132,6 +137,18 @@ export interface RuntimeContextSnapshot {
    *  surfaced so the REPL can wire `/dream`. Present only when
    *  `QUANTA_AUTO_DREAM=1` produced a trigger. */
   readonly dreamTrigger?: CrossSessionDreamTrigger
+  /** S1 (jul-04) `/browser-net` — the surface-owned network-capture sink, threaded
+   *  DOWN from the CLI (mirrors `radar`). It flows onto the per-turn base so
+   *  `maybeWireBrowser` attaches it to `config.browser.netHolder`. Structurally
+   *  typed (`{ set }`) to avoid a cycle back into the tool/SDK slices. Absent ⇒
+   *  no mirror (byte-identical). */
+  readonly browserNet?: SnapshotBrowserNetSink
+}
+
+/** S1 (jul-04) — structural mirror of `@/tool/browser`'s `BrowserNetSink`, kept
+ *  local so the context-binding layer has no cycle into the tool slice. */
+export interface SnapshotBrowserNetSink {
+  set(snapshot: { readonly rows: readonly unknown[]; readonly at: number }): void
 }
 
 export type RuntimeContextPatch = Partial<
@@ -175,6 +192,7 @@ export type RuntimeContextPatch = Partial<
     | "activeTurnRef"
     | "shadowVerify"
     | "radar"
+    | "browserNet"
   >
 >
 

@@ -12,6 +12,7 @@
  * `BrowserPort` (the `availability()` + env gate decide that).
  */
 
+import type { NetworkEntry } from "@/browser"
 import { type BrowserHandle, type BrowserPort, CDP_ALLOWED_METHODS } from "@/browser"
 import { defineTool, type Tool, type ToolContext, type ToolEvent, type ToolResult } from "@/tool"
 import { type DnsResolver, guardNavigationUrl } from "./net-guard"
@@ -72,6 +73,59 @@ const NETWORK_OUTPUT_CAP = 20_000
 /** Max network rows rendered (newest kept) — bounds the row count independently
  *  of the byte cap so a burst of tiny requests can't flood the view. */
 const NETWORK_ROW_CAP = 100
+
+/** S1 (jul-04) — ONE captured network row, METADATA ONLY. Structurally identical
+ *  to `NetworkEntry` (method/url/status/mime/size), re-declared here so the sink
+ *  contract is closed at THIS layer — a body/header/cookie/token field is not
+ *  even expressible. */
+export interface BrowserNetMirrorRow {
+  readonly method?: string
+  readonly url: string
+  readonly status?: number
+  readonly mime?: string
+  readonly size?: number
+}
+
+/** S1 (jul-04) — the surface-owned capture snapshot the CLI `/browser-net` reads.
+ *  A structural SUPERSET-safe mirror of the slash `BrowserNetSnapshot` (kept
+ *  slice-decoupled: `@/tool/browser` imports NO CLI value). */
+export interface BrowserNetMirrorSnapshot {
+  readonly rows: readonly BrowserNetMirrorRow[]
+  readonly dropped?: number
+  readonly at: number
+}
+
+/** S1 (jul-04) — the write-only sink the surface threads DOWN into the browser
+ *  toolset. `createBrowserNetHolder()` (CLI) structurally satisfies it. */
+export interface BrowserNetSink {
+  set(snapshot: BrowserNetMirrorSnapshot): void
+}
+
+/** Project drained `NetworkEntry` rows onto the closed metadata mirror + push the
+ *  snapshot into the sink. ★ LEAK GUARD (defense-in-depth): we copy ONLY the five
+ *  metadata fields, so even if an upstream `NetworkEntry` were ever widened with a
+ *  stray body/header field, it cannot ride into the surface. No-throw: a
+ *  misbehaving sink can never break the model-facing tool result. Absent sink ⇒
+ *  no-op (byte-identical default-OFF). */
+const mirrorNetworkToSink = (
+  sink: BrowserNetSink | undefined,
+  entries: readonly NetworkEntry[],
+): void => {
+  if (sink === undefined) return
+  try {
+    const rows: BrowserNetMirrorRow[] = entries.slice(-NETWORK_ROW_CAP).map((e) => ({
+      ...(e.method ? { method: e.method } : {}),
+      url: e.url,
+      ...(e.status !== undefined ? { status: e.status } : {}),
+      ...(e.mime !== undefined ? { mime: e.mime } : {}),
+      ...(e.size !== undefined ? { size: e.size } : {}),
+    }))
+    const dropped = Math.max(0, entries.length - rows.length)
+    sink.set({ rows, ...(dropped > 0 ? { dropped } : {}), at: Date.now() })
+  } catch {
+    /* no-throw: the tool result is authoritative; a sink hiccup is swallowed */
+  }
+}
 /** Cap a single read's text/attribute output. */
 const READ_OUTPUT_CAP = 8_000
 /** Raw PNG byte cap before a screenshot is refused (≈ a few MB of base64). */
@@ -454,7 +508,7 @@ const consoleTool = (port: BrowserPort, session: BrowserSession): Tool =>
     },
   })
 
-const networkTool = (port: BrowserPort, session: BrowserSession): Tool =>
+const networkTool = (port: BrowserPort, session: BrowserSession, netSink?: BrowserNetSink): Tool =>
   defineTool<NetworkInput>({
     name: "browser_network",
     description:
@@ -471,6 +525,12 @@ const networkTool = (port: BrowserPort, session: BrowserSession): Tool =>
         input.clear === true ? { clear: true } : undefined,
       )
       if (!r.ok) return yield { type: "result", result: mapBrowserError(r.error) }
+      // S1 (jul-04) — mirror this LIVE drain into the surface-owned net sink so
+      // `/browser-net` renders the last capture WITHOUT the model in the loop.
+      // METADATA-ONLY projection (see `mirrorNetworkToSink`); runs on BOTH the
+      // peek and the clear:true path (we mirror the rows we just READ, before the
+      // port drains them). No-throw + absent-sink no-op.
+      mirrorNetworkToSink(netSink, r.value.entries)
       // Keep the NEWEST NETWORK_ROW_CAP rows (row-count bound on top of the port's
       // byte/count bounded buffer). Each `url` is PAGE-CONTROLLED → guard it
       // (strengthen #3); status/mime/size are numbers/enums we control.
@@ -728,6 +788,12 @@ export interface BrowserToolsetOpts {
   readonly tabs?: boolean
   /** S1 strengthen — gate `browser_network` (QUANTA_BROWSER_NETWORK). Default-OFF. */
   readonly network?: boolean
+  /** S1 (jul-04) — surface-owned net-capture sink. When present AND `network` is
+   *  on, each `browser_network` drain mirrors its METADATA-ONLY rows into this
+   *  holder so the CLI `/browser-net` slash can render the last capture. Absent ⇒
+   *  no mirror (byte-identical). Rides ONLY the gated tool — no `network` ⇒ never
+   *  populated. */
+  readonly netHolder?: BrowserNetSink
 }
 
 /** Build the browser toolset over a wired `BrowserPort`. The 15 tools share ONE
@@ -758,8 +824,11 @@ export const createBrowserToolset = (
   // when its flag is set, so the unflagged toolset is byte-identical to the 15.
   if (opts.bounds === true) tools.push(boundsTool(port, session))
   if (opts.highlight === true) tools.push(highlightTool(port, session))
-  // S1 strengthen — network capture, independent default-OFF gate.
-  if (opts.network === true) tools.push(networkTool(port, session))
+  // S1 strengthen — network capture, independent default-OFF gate. S1 (jul-04):
+  // thread the surface net-sink so a drain mirrors its metadata into the holder
+  // the CLI `/browser-net` reads. The sink rides ONLY this gated tool — no
+  // `network` gate ⇒ tool absent ⇒ holder never populated (byte-identical).
+  if (opts.network === true) tools.push(networkTool(port, session, opts.netHolder))
   if (opts.tabs === true) {
     tools.push(
       tabListTool(port, session),

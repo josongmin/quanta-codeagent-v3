@@ -15,7 +15,12 @@
  */
 
 import type { BrowserPort } from "@/browser"
-import { type BrowserToolset, createBrowserToolset, type DnsResolver } from "@/tool/browser"
+import {
+  type BrowserNetSink,
+  type BrowserToolset,
+  createBrowserToolset,
+  type DnsResolver,
+} from "@/tool/browser"
 import type { AgentConfig } from "../types"
 
 /** Narrow structural slot the composition root appends onto `AgentConfig`. */
@@ -29,6 +34,10 @@ interface BrowserConfigSlot {
     readonly tabs?: boolean
     /** S1 strengthen — default-OFF gate (QUANTA_BROWSER_NETWORK). */
     readonly network?: boolean
+    /** S1 (jul-04) — surface-owned net-capture sink the composition root threads
+     *  in so a `browser_network` drain mirrors its metadata into the holder the
+     *  CLI `/browser-net` slash reads. Absent ⇒ no mirror (byte-identical). */
+    readonly netHolder?: BrowserNetSink
   }
 }
 
@@ -44,5 +53,6 @@ export const buildBrowserBlock = (config: AgentConfig): BrowserToolset => {
     ...(slot.highlight === true ? { highlight: true } : {}),
     ...(slot.tabs === true ? { tabs: true } : {}),
     ...(slot.network === true ? { network: true } : {}),
+    ...(slot.netHolder !== undefined ? { netHolder: slot.netHolder } : {}),
   })
 }
