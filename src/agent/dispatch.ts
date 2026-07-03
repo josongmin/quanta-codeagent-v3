@@ -561,3 +561,23 @@ const toolCloseAttrs = (status: "success" | "error", output?: unknown) =>
       ? { [QUANTA_ATTRS.tool.output]: previewPayload(output) }
       : {}),
   })
+
+/**
+ * DIP port (H1, jul-4 hexagonal audit F3) — the tool-DISPATCH seam as an injectable port.
+ *
+ * `dispatchTool` is the gate + execute + permission + hooks chokepoint: the single most
+ * behavior/security-critical seam in the loop. Yet it was the ONLY driven collaborator reached by a
+ * HARD import (stream-callbacks.ts) while `llm`/`stream`/`registry` were all inverted as ports. This
+ * alias lets the composition root inject a substitute (replay / dry-run / policy-wrapped) exactly
+ * like the other ports, closing the last DIP hole. The default binding stays `dispatchTool`, so an
+ * unset port is byte-identical.
+ */
+export type DispatchPort = typeof dispatchTool
+
+/**
+ * Resolve the active dispatch port — the injected {@link DispatchPort} if the composition wired one,
+ * else the default `dispatchTool`. The ONE place the default binding lives, so every call site is a
+ * single `resolveDispatchPort(config)(...)` and the substitution is unit-testable (H1).
+ */
+export const resolveDispatchPort = (config: { readonly dispatchPort?: DispatchPort }): DispatchPort =>
+  config.dispatchPort ?? dispatchTool

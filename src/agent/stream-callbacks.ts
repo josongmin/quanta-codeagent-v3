@@ -52,7 +52,7 @@ import type { Span, TurnTimingCapture } from "@/observability"
 import { inferToolTier } from "@/permission"
 import type { RedactionHit } from "@/security"
 import { runtimeConfig } from "@/shared"
-import { dispatchTool } from "./dispatch"
+import { resolveDispatchPort } from "./dispatch"
 import { decideScopeEscalation, type ScopeVerdict } from "./skill-scope-escalation"
 import type { DispatchOutcome, InProgressIndicator, StreamingCall } from "./streaming-dispatch"
 import type { TurnSession, TurnState } from "./turn-context"
@@ -354,7 +354,9 @@ export const createStreamDispatcher = (
       const scoped = await handleSkillScope(call)
       const out =
         scoped ??
-        (await dispatchTool(
+        // H1 (DIP): resolve the injected dispatch port (default `dispatchTool` ⇒ byte-identical when
+        // unset). The last hard-import driven collaborator is now injectable (jul-4 hexagonal F3).
+        (await resolveDispatchPort(config)(
           { type: "tool_use", id: call.id, name: call.name, input: call.input },
           config,
           config.permission,

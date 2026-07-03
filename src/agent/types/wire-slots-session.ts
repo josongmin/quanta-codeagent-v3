@@ -616,4 +616,12 @@ export interface WireSlotsSessionConfig {
    * dispatch module (separate file, no module-private channel) can read it.
    */
   shellSnapshotSession?: import("../shell-snapshot-session").ShellSnapshotSession
+  /**
+   * DIP (H1, jul-4 hexagonal audit F3) — the tool-DISPATCH port. `dispatchTool` (gate + execute +
+   * permission + hooks) was the ONLY driven collaborator reached by a HARD import while `llm`/
+   * `stream`/`registry` were inverted; this injects it. Absent ⇒ the dispatch call site binds the
+   * default `dispatchTool` (byte-identical). Inline import-type to avoid a top-of-file cycle
+   * (dispatch → AgentConfig → this file).
+   */
+  dispatchPort?: import("../dispatch").DispatchPort
 }
