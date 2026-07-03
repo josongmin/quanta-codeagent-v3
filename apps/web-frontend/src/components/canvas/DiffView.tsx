@@ -17,6 +17,7 @@
  * new `SplitDiffView` (side-by-side 2-column + collapsible hunks).
  */
 
+import { memo } from "react"
 import { cx } from "../../lib/classnames"
 import type { DiffLineData } from "../../types/protocol"
 import { SplitDiffView } from "./SplitDiffView"
@@ -78,7 +79,7 @@ const stripColor = (type: DiffLineData["type"], theme: DiffTheme): string => {
   return "transparent"
 }
 
-export const DiffView = ({
+const DiffViewInner = ({
   lines,
   showLineNumbers = true,
   coloredLineNumbers = true,
@@ -116,6 +117,33 @@ export const DiffView = ({
     className,
   })
 }
+
+/**
+ * ADR-0440 perf (P2): memo comparator for {@link DiffView}. Every prop is
+ * either a PRIMITIVE (theme/mode/flags/counts/className) or the `lines` array,
+ * which — inside a `tool.diff` frame — is the SAME reference for an unchanged
+ * `toolCallId` (latest-wins Map; only the mutated entry gets a fresh object).
+ * So a reference check on `lines` plus equality on the primitives is exact: a
+ * re-render fires ONLY when the diff content or a display prop actually
+ * changed. Exported so the "unchanged panel bails" invariant is testable at the
+ * comparator boundary (the test env is `node`, no DOM renderer — mirrors
+ * `areMessageBubblePropsEqual`).
+ */
+export const areDiffViewPropsEqual = (prev: DiffViewProps, next: DiffViewProps): boolean =>
+  prev.lines === next.lines &&
+  prev.path === next.path &&
+  prev.language === next.language &&
+  prev.showLineNumbers === next.showLineNumbers &&
+  prev.coloredLineNumbers === next.coloredLineNumbers &&
+  prev.showAccentStrip === next.showAccentStrip &&
+  prev.theme === next.theme &&
+  prev.truncated === next.truncated &&
+  prev.moreLines === next.moreLines &&
+  prev.mode === next.mode &&
+  prev.contextLines === next.contextLines &&
+  prev.className === next.className
+
+export const DiffView = memo(DiffViewInner, areDiffViewPropsEqual)
 
 interface InlineTableProps {
   readonly lines: readonly DiffLineData[]

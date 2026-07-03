@@ -68,6 +68,35 @@ type DiffAction = { type: "message"; msg: ToolDiffMessage } | { type: "reset" }
 
 const EMPTY_DIFFS: ReadonlyMap<string, ToolDiffMessage> = new Map()
 
+/**
+ * P3 (memory backstop): FIFO cap on the number of DISTINCT `toolCallId`s the
+ * latest-wins diff Map retains. This is a BACKSTOP, not a tuned value —
+ * mirrors the `EVENT_DEDUP_CAP` precedent (`session-hooks.ts`): a cap so high
+ * it NEVER evicts anything in a normal session, only bounding memory for a
+ * pathological one. A long agent session accumulates a diff per distinct tool
+ * call, and each diff retains its full `lines[]`; without a cap that grows
+ * unbounded for the whole session. 256 distinct concurrent tool diffs is far
+ * beyond any realistic pane (the observability pane shows one panel each);
+ * eviction is oldest-first, so the recent window a surface actually renders is
+ * always retained. Measure-first: revisit if real sessions ever approach it.
+ */
+export const TOOL_DIFFS_CAP = 256
+
+/**
+ * Latest-wins insert into an insertion-ordered Map with a FIFO memory cap.
+ * `map.set` on an EXISTING key updates in place (latest-wins) WITHOUT changing
+ * its insertion position, so re-touching a recent key never evicts it. A NEW
+ * key is appended; if that pushes size over `cap`, the oldest inserted key
+ * (Map's first entry) is evicted. Mutates `next` (a caller-owned fresh copy).
+ */
+const setWithFifoCap = <V>(next: Map<string, V>, key: string, value: V, cap: number): void => {
+  next.set(key, value)
+  if (next.size > cap) {
+    const oldest = next.keys().next().value
+    if (oldest !== undefined) next.delete(oldest)
+  }
+}
+
 /** Reducer is exported so the codec / state semantics can be unit-tested in
  *  the node test environment (no DOM render needed). */
 export const toolDiffsReducer = (
@@ -75,9 +104,9 @@ export const toolDiffsReducer = (
   action: DiffAction,
 ): ReadonlyMap<string, ToolDiffMessage> => {
   if (action.type === "reset") return EMPTY_DIFFS
-  // Latest-wins per toolCallId.
+  // Latest-wins per toolCallId; FIFO-capped as a memory backstop (P3).
   const next = new Map(state)
-  next.set(action.msg.toolCallId, action.msg)
+  setWithFifoCap(next, action.msg.toolCallId, action.msg, TOOL_DIFFS_CAP)
   return next
 }
 

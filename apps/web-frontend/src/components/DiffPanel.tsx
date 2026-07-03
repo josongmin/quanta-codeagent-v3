@@ -8,6 +8,7 @@
  * only mount this when a `tool.diff` frame has arrived (see `useToolDiffs`).
  */
 
+import { memo } from "react"
 import { diffStatsFromMessage } from "../adapters/diff-adapter"
 import type { ToolDiffMessage } from "../types/protocol"
 import { DiffStats } from "./canvas/DiffStats"
@@ -23,7 +24,7 @@ export interface DiffPanelProps {
   readonly className?: string
 }
 
-export const DiffPanel = ({
+const DiffPanelInner = ({
   diff,
   theme = "dark",
   mode = "inline",
@@ -40,7 +41,9 @@ export const DiffPanel = ({
         .trim()}
     >
       <div className="flex items-center justify-between gap-2 border-b border-line-subtle px-3 py-1.5">
-        <span className="truncate font-mono text-xs text-ink-secondary">{diff.path ?? "(diff)"}</span>
+        <span className="truncate font-mono text-xs text-ink-secondary">
+          {diff.path ?? "(diff)"}
+        </span>
         <DiffStats additions={stats.additions} deletions={stats.deletions} />
       </div>
       {diff.binary === true ? (
@@ -61,3 +64,25 @@ export const DiffPanel = ({
     </div>
   )
 }
+
+/**
+ * ADR-0440 perf (P2): memo comparator for {@link DiffPanel}. `DiffsSection`
+ * renders one panel per `toolCallId` and passes each the STABLE per-id
+ * `ToolDiffMessage` from the latest-wins Map — so on any single `tool.diff`
+ * frame, only the ONE mutated entry gets a fresh object; the other N-1 panels
+ * receive the IDENTICAL `diff` reference. A reference check on `diff` (plus
+ * equality on the primitive theme/mode/className) is therefore EXACT: unchanged
+ * panels bail (no `<tr>`-per-line table rebuild), and the changed panel — whose
+ * `diff` object is genuinely new — re-renders. No stale risk: the daemon builds
+ * a fresh `ToolDiffMessage` for every emission, so a content change ALWAYS
+ * yields a new reference (never in-place mutation). Exported so the "unchanged
+ * panel bails" invariant is testable at the comparator boundary (the test env
+ * is `node`, no DOM renderer — mirrors `areMessageBubblePropsEqual`).
+ */
+export const areDiffPanelPropsEqual = (prev: DiffPanelProps, next: DiffPanelProps): boolean =>
+  prev.diff === next.diff &&
+  prev.theme === next.theme &&
+  prev.mode === next.mode &&
+  prev.className === next.className
+
+export const DiffPanel = memo(DiffPanelInner, areDiffPanelPropsEqual)

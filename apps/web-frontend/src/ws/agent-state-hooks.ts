@@ -124,6 +124,32 @@ export const isRatelimitSnapshotMsg = (m: AgentStateMessage): m is RatelimitSnap
 type AgentStateAction = { type: "message"; msg: AgentStateMessage } | { type: "reset" }
 
 /**
+ * P3 (memory backstop): FIFO cap on the number of DISTINCT `toolCallId`s the
+ * latest-wins `toolProgress` Map retains. BACKSTOP, not a tuned value — mirrors
+ * `EVENT_DEDUP_CAP` (`session-hooks.ts`) and `TOOL_DIFFS_CAP` (`canvas-hooks.ts`):
+ * a cap so high it never evicts in a normal session, only bounding memory for a
+ * pathological one where thousands of distinct tool calls each leave a progress
+ * marker. 256 is far beyond any realistic live-tool count; eviction is
+ * oldest-first, so the recent window the panel renders is always retained.
+ * Measure-first: revisit only if real sessions approach it.
+ */
+export const TOOL_PROGRESS_CAP = 256
+
+/**
+ * Latest-wins insert into an insertion-ordered Map with a FIFO memory cap.
+ * `set` on an existing key updates in place WITHOUT reordering (latest-wins,
+ * so re-touching a recent key never evicts it); a new key that pushes size over
+ * `cap` evicts the oldest inserted key (Map's first entry). Mutates `next`.
+ */
+const setWithFifoCap = <V>(next: Map<string, V>, key: string, value: V, cap: number): void => {
+  next.set(key, value)
+  if (next.size > cap) {
+    const oldest = next.keys().next().value
+    if (oldest !== undefined) next.delete(oldest)
+  }
+}
+
+/**
  * Fold one agent-state message onto the view. Pure (exported so the state
  * semantics are unit-tested in the node test env, no DOM render). Latest-wins
  * per kind; an unrecognised kind returns the prior state by reference (idle).
@@ -140,8 +166,9 @@ export const agentStateReducer = (
   }
   if (isToolProgressMsg(msg)) {
     // Latest-wins per toolCallId; insertion order preserved (Map iteration).
+    // FIFO-capped as a memory backstop (P3).
     const toolProgress = new Map(state.toolProgress)
-    toolProgress.set(msg.toolCallId, msg)
+    setWithFifoCap(toolProgress, msg.toolCallId, msg, TOOL_PROGRESS_CAP)
     return { ...state, toolProgress }
   }
   if (isContextCompactedMsg(msg)) {

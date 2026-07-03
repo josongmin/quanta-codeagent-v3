@@ -27,6 +27,7 @@ import {
   isPlanUpdatedMsg,
   isRatelimitSnapshotMsg,
   isToolProgressMsg,
+  TOOL_PROGRESS_CAP,
 } from "./agent-state-hooks"
 
 /* ------------------------------------------------------------------ */
@@ -198,6 +199,36 @@ describe("agentStateReducer — tool.progress", () => {
   it("preserves insertion order", () => {
     const s = reduceAll([toolProgress("c1", "a"), toolProgress("c2", "b")])
     expect([...s.toolProgress.keys()]).toEqual(["c1", "c2"])
+  })
+
+  // P3 (memory backstop): the toolProgress Map is FIFO-capped so a pathological
+  // session with thousands of distinct toolCallIds cannot grow it unbounded.
+  // BACKSTOP (256), not a tuned value — it never evicts in a normal session.
+  it("FIFO-caps at TOOL_PROGRESS_CAP with cap+ distinct toolCallIds", () => {
+    const overflow = TOOL_PROGRESS_CAP + 30
+    const s = reduceAll(Array.from({ length: overflow }, (_, i) => toolProgress(`c${i}`, `m${i}`)))
+    expect(s.toolProgress.size).toBe(TOOL_PROGRESS_CAP)
+    // Oldest evicted, most-recent window retained (what the panel renders).
+    expect(s.toolProgress.has("c0")).toBe(false)
+    expect(s.toolProgress.has(`c${overflow - 1}`)).toBe(true)
+    expect(s.toolProgress.has(`c${overflow - TOOL_PROGRESS_CAP}`)).toBe(true) // oldest survivor
+    expect(s.toolProgress.get(`c${overflow - 1}`)?.message).toBe(`m${overflow - 1}`)
+  })
+
+  it("latest-wins on an existing id does not evict / reorder under the cap", () => {
+    // Fill exactly to the cap, then re-touch the oldest id — it must update in
+    // place (latest-wins) WITHOUT growing past cap or being reordered.
+    const fill = Array.from({ length: TOOL_PROGRESS_CAP }, (_, i) => toolProgress(`c${i}`, `m${i}`))
+    let s = reduceAll(fill)
+    expect(s.toolProgress.size).toBe(TOOL_PROGRESS_CAP)
+    s = agentStateReducer(s, { type: "message", msg: toolProgress("c0", "updated") })
+    expect(s.toolProgress.size).toBe(TOOL_PROGRESS_CAP)
+    expect(s.toolProgress.get("c0")?.message).toBe("updated")
+    // A new id then evicts the still-oldest (c0, unmoved by the re-set).
+    s = agentStateReducer(s, { type: "message", msg: toolProgress("cNew", "n") })
+    expect(s.toolProgress.size).toBe(TOOL_PROGRESS_CAP)
+    expect(s.toolProgress.has("c0")).toBe(false)
+    expect(s.toolProgress.has("cNew")).toBe(true)
   })
 })
 

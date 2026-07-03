@@ -4,6 +4,7 @@ import {
   type CanvasSource,
   isContextUsageMessage,
   isToolDiffMessage,
+  TOOL_DIFFS_CAP,
   toolDiffsReducer,
 } from "./canvas-hooks"
 
@@ -65,6 +66,58 @@ describe("toolDiffsReducer", () => {
   it("reset clears", () => {
     const state = toolDiffsReducer(new Map(), { type: "message", msg: diff("t1", 1) })
     expect(toolDiffsReducer(state, { type: "reset" }).size).toBe(0)
+  })
+})
+
+// P3 (memory backstop): the latest-wins Map is FIFO-capped so a pathological
+// session with thousands of distinct toolCallIds cannot grow it unbounded
+// (each diff retains its full lines[]). The cap is a BACKSTOP (256), not a
+// tuned value — it never evicts anything in a normal pane.
+describe("toolDiffsReducer FIFO cap (P3 memory backstop)", () => {
+  it("bounds the Map size at TOOL_DIFFS_CAP even with cap+ distinct tool calls", () => {
+    let state: ReadonlyMap<string, ToolDiffMessage> = new Map()
+    const overflow = TOOL_DIFFS_CAP + 50
+    for (let i = 0; i < overflow; i += 1) {
+      state = toolDiffsReducer(state, { type: "message", msg: diff(`t${i}`, i) })
+    }
+    // Size is clamped to the cap, not the (cap+50) distinct ids fed in.
+    expect(state.size).toBe(TOOL_DIFFS_CAP)
+  })
+
+  it("retains the RECENT window and evicts the OLDEST (FIFO)", () => {
+    let state: ReadonlyMap<string, ToolDiffMessage> = new Map()
+    const overflow = TOOL_DIFFS_CAP + 50
+    for (let i = 0; i < overflow; i += 1) {
+      state = toolDiffsReducer(state, { type: "message", msg: diff(`t${i}`, i) })
+    }
+    // The oldest `overflow - cap` (= 50) entries (t0..t49) were evicted; the
+    // most-recent `cap` entries (t50..t305 — what a surface renders) are kept.
+    const evicted = overflow - TOOL_DIFFS_CAP // 50
+    expect(state.has("t0")).toBe(false)
+    expect(state.has(`t${evicted - 1}`)).toBe(false) // last evicted (t49)
+    expect(state.has(`t${evicted}`)).toBe(true) // oldest surviving (t50)
+    expect(state.has(`t${overflow - 1}`)).toBe(true) // newest
+    expect(state.get(`t${overflow - 1}`)?.additions).toBe(overflow - 1)
+  })
+
+  it("latest-wins on an EXISTING id does not evict and does not reorder (recent stays recent)", () => {
+    let state: ReadonlyMap<string, ToolDiffMessage> = new Map()
+    // Fill exactly to the cap.
+    for (let i = 0; i < TOOL_DIFFS_CAP; i += 1) {
+      state = toolDiffsReducer(state, { type: "message", msg: diff(`t${i}`, i) })
+    }
+    expect(state.size).toBe(TOOL_DIFFS_CAP)
+    // Re-touch the OLDEST id (t0). A Map.set on an existing key updates in place
+    // WITHOUT moving it, so size stays at cap and nothing is evicted.
+    state = toolDiffsReducer(state, { type: "message", msg: diff("t0", 777) })
+    expect(state.size).toBe(TOOL_DIFFS_CAP)
+    expect(state.get("t0")?.additions).toBe(777) // latest-wins preserved
+    // Now a genuinely NEW id pushes over the cap ⇒ the still-oldest (t0, since
+    // re-set didn't reorder it) is the one evicted.
+    state = toolDiffsReducer(state, { type: "message", msg: diff("tNew", 1) })
+    expect(state.size).toBe(TOOL_DIFFS_CAP)
+    expect(state.has("t0")).toBe(false)
+    expect(state.has("tNew")).toBe(true)
   })
 })
 

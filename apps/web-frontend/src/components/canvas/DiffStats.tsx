@@ -4,6 +4,7 @@
  * pair with tabular-nums. Both zero ⇒ `null` (Cursor contract).
  */
 
+import { memo } from "react"
 import { cx } from "../../lib/classnames"
 
 export interface DiffStatsProps {
@@ -12,7 +13,11 @@ export interface DiffStatsProps {
   readonly className?: string
 }
 
-export const DiffStats = ({
+// ADR-0440 perf (P2): every DiffStats prop is a PRIMITIVE (two numbers + an
+// optional string), so React's default shallow `memo` comparison is exact —
+// re-render only when a count or the className actually changes. The header is
+// re-rendered on every `tool.diff` frame otherwise (see `DiffPanel` memo).
+const DiffStatsInner = ({
   additions = 0,
   deletions = 0,
   className,
@@ -31,3 +36,5 @@ export const DiffStats = ({
     </span>
   )
 }
+
+export const DiffStats = memo(DiffStatsInner)

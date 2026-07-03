@@ -14,6 +14,7 @@
  * re-segmentation via `groupHunks`. Colors come ONLY from `tokens.ts`.
  */
 
+import { memo, useMemo } from "react"
 import { cx } from "../../lib/classnames"
 import type { DiffLineData } from "../../types/protocol"
 import { CollapsibleSection } from "./CollapsibleSection"
@@ -203,7 +204,7 @@ const SplitHunkRows = ({
   </table>
 )
 
-export const SplitDiffView = ({
+const SplitDiffViewInner = ({
   lines,
   theme = "dark",
   showLineNumbers = true,
@@ -213,7 +214,12 @@ export const SplitDiffView = ({
   moreLines = 0,
   className,
 }: SplitDiffViewProps): JSX.Element => {
-  const hunks = groupHunks(lines, contextLines)
+  // ADR-0440 perf (P2): `groupHunks` is O(lines) and re-runs on EVERY render.
+  // Memoize on the `lines` reference (stable per `toolCallId` in the latest-wins
+  // Map — a new object only for the mutated entry) + `contextLines`. A parent
+  // re-render for any OTHER reason (e.g. a sibling panel's frame) then reuses
+  // the cached segmentation instead of re-walking the flat line list.
+  const hunks = useMemo(() => groupHunks(lines, contextLines), [lines, contextLines])
   return (
     <section
       aria-label="file diff (split)"
@@ -254,3 +260,25 @@ export const SplitDiffView = ({
     </section>
   )
 }
+
+/**
+ * ADR-0440 perf (P2): memo comparator for {@link SplitDiffView}. Same shape as
+ * {@link areDiffViewPropsEqual} — `lines` is a per-`toolCallId` stable
+ * reference, the rest are primitives. Reference-checking `lines` plus primitive
+ * equality is exact: an unchanged split panel bails (skipping BOTH the
+ * `groupHunks` walk AND the row render), a genuinely changed one re-renders.
+ */
+export const areSplitDiffViewPropsEqual = (
+  prev: SplitDiffViewProps,
+  next: SplitDiffViewProps,
+): boolean =>
+  prev.lines === next.lines &&
+  prev.theme === next.theme &&
+  prev.showLineNumbers === next.showLineNumbers &&
+  prev.coloredLineNumbers === next.coloredLineNumbers &&
+  prev.contextLines === next.contextLines &&
+  prev.truncated === next.truncated &&
+  prev.moreLines === next.moreLines &&
+  prev.className === next.className
+
+export const SplitDiffView = memo(SplitDiffViewInner, areSplitDiffViewPropsEqual)

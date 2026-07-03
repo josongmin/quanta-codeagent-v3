@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import type { DiffLineData } from "../../types/protocol"
-import { DiffView } from "./DiffView"
-import { hunkToSplitRows, SplitDiffView } from "./SplitDiffView"
+import { areDiffViewPropsEqual, DiffView } from "./DiffView"
+import { areSplitDiffViewPropsEqual, hunkToSplitRows, SplitDiffView } from "./SplitDiffView"
 import { diffTokens } from "./tokens"
 
 const lines: DiffLineData[] = [
@@ -121,5 +121,50 @@ describe("DiffView mode prop (additive — inline default unchanged)", () => {
     expect(html).toContain("table-fixed")
     expect(html).toContain("old removed line")
     expect(html).toContain("new added line")
+  })
+})
+
+// ADR-0440 perf (P2): the memo comparators that make an unchanged panel bail.
+// The `lines` array is a per-`toolCallId` STABLE reference (latest-wins Map);
+// the rest are primitives. Reference-check on `lines` + primitive equality is
+// exact — no stale (a content change ALWAYS yields a new `lines` ref, since the
+// daemon builds a fresh message), no over-render (same ref ⇒ bail).
+describe("DiffView / SplitDiffView memo comparators (P2)", () => {
+  it("areDiffViewPropsEqual bails on the SAME lines ref + equal primitives", () => {
+    expect(areDiffViewPropsEqual({ lines }, { lines })).toBe(true)
+    expect(areDiffViewPropsEqual({ lines, theme: "dark" }, { lines, theme: "dark" })).toBe(true)
+  })
+
+  it("areDiffViewPropsEqual re-renders on a DIFFERENT lines ref (content change)", () => {
+    const other: DiffLineData[] = [{ type: "added", content: "x", lineNumber: 1 }]
+    expect(areDiffViewPropsEqual({ lines }, { lines: other })).toBe(false)
+  })
+
+  it("areDiffViewPropsEqual re-renders on a primitive display-prop change", () => {
+    expect(areDiffViewPropsEqual({ lines, theme: "dark" }, { lines, theme: "light" })).toBe(false)
+    expect(areDiffViewPropsEqual({ lines, mode: "inline" }, { lines, mode: "split" })).toBe(false)
+    expect(areDiffViewPropsEqual({ lines, truncated: false }, { lines, truncated: true })).toBe(
+      false,
+    )
+  })
+
+  it("areSplitDiffViewPropsEqual bails / re-renders on the same axes", () => {
+    expect(areSplitDiffViewPropsEqual({ lines }, { lines })).toBe(true)
+    const other: DiffLineData[] = [{ type: "removed", content: "y", lineNumber: 1 }]
+    expect(areSplitDiffViewPropsEqual({ lines }, { lines: other })).toBe(false)
+    expect(areSplitDiffViewPropsEqual({ lines, contextLines: 3 }, { lines, contextLines: 5 })).toBe(
+      false,
+    )
+  })
+
+  it("memoized split render is byte-IDENTICAL to the pre-memo output (no regression)", () => {
+    // The useMemo(groupHunks) + memo wrapper must not change a single byte of
+    // the rendered markup vs a direct render of the same lines.
+    const a = renderToStaticMarkup(<SplitDiffView lines={lines} contextLines={3} />)
+    const b = renderToStaticMarkup(<SplitDiffView lines={lines} contextLines={3} />)
+    expect(a).toBe(b)
+    // and split vs inline still diverge as before (mode coverage).
+    const inline = renderToStaticMarkup(<DiffView lines={lines} mode="inline" />)
+    expect(a).not.toBe(inline)
   })
 })
