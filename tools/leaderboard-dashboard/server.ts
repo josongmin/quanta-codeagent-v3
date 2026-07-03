@@ -1429,7 +1429,15 @@ function render() {
   const v = document.getElementById("view");
   if (TAB === "runs") v.innerHTML = renderRuns();
   else if (TAB === "matrix") {
-    if (BENCH === "terminal-bench") { renderTbMatrix(v); }
+    // TB mirrors the SWE shell/body split below: on a background refresh (or a keystroke) only
+    // the table body redraws, so the search box keeps focus + cursor (P3-D focus-loss fix).
+    if (BENCH === "terminal-bench") {
+      if (document.getElementById("tbtable")) drawTbMatrix();
+      else renderTbMatrix(v);
+    }
+    // pro/live: a FAMILY-scoped fold — never the verified matrix under a pro/live title (P3-D
+    // mislabel fix; the verified matrix is verified-only data).
+    else if (BENCH !== "verified") renderFamMatrix(v);
     // On a background refresh, only redraw the table body so the search box
     // keeps focus and scroll position; full rebuild only on first open.
     else if (document.getElementById("mtable")) drawMatrix();
@@ -1630,8 +1638,57 @@ function tbOurResults() {
   return { base: base, lev: lev };
 }
 
+// Any-pass fold over ONE family's runs (the pro/live view scope) — same shape as tbOurResults
+// but unsplit (no arm semantics outside TB). Pure over DATA.runs.
+function famOurResults(fam) {
+  const out = {};
+  for (const r of (DATA.runs || []).filter(r => (r.datasetFamily || "verified") === fam)) {
+    for (const pi of (r.perInstance || [])) {
+      if (out[pi.id] === undefined || pi.passed) out[pi.id] = pi.passed;
+    }
+  }
+  return out;
+}
+
+// pro/live summary cards — FAMILY-scoped (P3-D: a pro/live title must never sit over verified
+// numbers). any-pass across the family's runs; campaign best from the same family only.
+function renderFamCards() {
+  const fold = famOurResults(BENCH);
+  const ids = Object.keys(fold);
+  const solved = ids.filter(function(i){ return fold[i] === true; }).length;
+  const camps = (DATA.campaigns || []).filter(c => (c.datasetFamily || "verified") === BENCH);
+  const best = camps.slice().sort((a,b)=> (b.resolved/Math.max(1,b.total)) - (a.resolved/Math.max(1,a.total)))[0];
+  const runCount = (DATA.runs || []).filter(r => (r.datasetFamily || "verified") === BENCH).length;
+  const cards = [
+    ["해결 / 실행", solved + " / " + ids.length, "family=" + BENCH + " · any-pass(런 합산)"],
+    ["best 캠페인", best ? (best.resolved + "/" + best.total) : "—", best ? best.key : "이 family 캠페인 없음"],
+    ["리포트 파일", runCount, camps.length + " 캠페인"],
+  ];
+  document.getElementById("cards").innerHTML = cards.map(c =>
+    '<div class="card"><div class="n">'+esc(c[1])+'</div><div class="l">'+esc(c[0])+'</div>'+
+    (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
+}
+
+// pro/live per-instance matrix — the family's own rows (misses first), never verified data.
+function renderFamMatrix(v) {
+  const fold = famOurResults(BENCH);
+  const ids = Object.keys(fold).sort(function(a,b){
+    if (fold[a] !== fold[b]) return fold[a] ? 1 : -1; // misses first
+    return a.localeCompare(b);
+  });
+  const runCount = (DATA.runs || []).filter(r => (r.datasetFamily || "verified") === BENCH).length;
+  let h = '<p class="muted">family='+esc(BENCH)+' · '+ids.length+' instances · ✅=any-pass across '+runCount+' run(s)</p>';
+  h += '<table><thead><tr><th class="inst" style="text-align:left">instance</th><th>결과</th></tr></thead><tbody>';
+  for (const id of ids) {
+    h += '<tr><td class="inst">'+esc(id)+'</td><td style="text-align:center">'+
+      (fold[id] ? '<span class="q-ok">✅</span>' : '<span class="q-no">❌</span>')+'</td></tr>';
+  }
+  v.innerHTML = h + (ids.length ? '' : '<tr><td colspan="2" class="muted">이 family 리포트 없음</td></tr>') + '</tbody></table>';
+}
+
 function renderCards() {
   if (BENCH === "terminal-bench") return renderTbCards();
+  if (BENCH !== "verified") return renderFamCards();
   const q = DATA.quanta;
   const ids = Object.keys(q);
   const solved = ids.filter(i => q[i].passed).length;
@@ -1661,11 +1718,29 @@ function renderCards() {
     (c[2]? '<div class="muted" style="font-size:10px">'+esc(c[2])+'</div>':'')+'</div>').join("");
 }
 
+// TB task rows = HF per-task matrix ∪ OUR run task ids (P3-D md-absent fix: with the HF md
+// missing — or a harbor task name drifted from the HF name — our runs still render as rows
+// instead of silently vanishing; synthesized rows carry no competitor data, avg 0 ⇒ never
+// counted winnable).
+function tbTaskRows() {
+  const tasks = ((DATA.tb && DATA.tb.tasks) || []).slice();
+  const known = new Set(tasks.map(function(t){ return t.task; }));
+  const our = tbOurResults();
+  const ourIds = new Set(Object.keys(our.base).concat(Object.keys(our.lev)));
+  for (const id of ourIds) {
+    if (!known.has(id)) {
+      tasks.push({ task: id, difficulty: "?", category: "(HF 매트릭스에 없음)", avg: 0, scaffolds: {}, hardCeiling: false });
+    }
+  }
+  return { tasks: tasks, our: our };
+}
+
 // Terminal-Bench summary cards (RFC 06): projection = baseline ∪ levers over the 89
 // tasks; winnable-remaining = our miss ∩ a competitor solved (the actionable gap).
 function renderTbCards() {
-  const tasks = ((DATA.tb && DATA.tb.tasks) || []);
-  const our = tbOurResults();
+  const tb = tbTaskRows();
+  const tasks = tb.tasks;
+  const our = tb.our;
   const solved = function(t){ return our.base[t]===true || our.lev[t]===true; };
   const baseIds = Object.keys(our.base), levIds = Object.keys(our.lev);
   const baseSolved = baseIds.filter(function(t){return our.base[t]===true;}).length;
@@ -1674,7 +1749,9 @@ function renderTbCards() {
   const winnable = tasks.filter(function(t){return !solved(t.task) && !t.hardCeiling && t.avg>0;}).length;
   const ceil = tasks.filter(function(t){return t.hardCeiling;}).length;
   const cards = [
-    ["해결 (투영)", proj + " / " + tasks.length, "baseline ∪ levers"],
+    // P2-10: the aggregation is ANY-PASS (trials × runs × arms) — the HF competitor columns are
+    // TRIAL-AVERAGED, so this projection is optimistic vs them BY CONSTRUCTION; labeled, not hidden.
+    ["해결 (투영)", proj + " / " + tasks.length, "baseline ∪ levers · any-pass(trial×run 합)"],
     ["레버 회복", levSolved + " / " + levIds.length, "실패셋 재도전 (baseline 0)"],
     ["베이스라인", baseSolved + " / " + baseIds.length, "knob-off"],
     ["승산 타겟 남음", winnable, "우리 미해결 ∩ 남들 성공"],
@@ -1689,9 +1766,31 @@ function renderTbCards() {
 // rates, keyed on the 89 TB tasks (DATA.tb). Winnable targets (our miss ∩ someone
 // solved) float to the top and are tinted; hard ceilings (nobody solved) are greyed.
 function renderTbMatrix(v) {
-  const tasks = ((DATA.tb && DATA.tb.tasks) || []).slice();
+  // SHELL (built once — P3-D focus fix): the controls + legend stay in the DOM across keystrokes
+  // and background refreshes; only #tbtable's contents redraw (drawTbMatrix), mirroring the SWE
+  // matrix's mtable/drawMatrix split so the search box keeps focus + cursor.
+  v.innerHTML = '<div class="controls">'+
+    '<input id="tbsearch" placeholder="task 검색…" value="'+esc(TB_MFILTER.q)+'" />'+
+    '<select id="tbfilter">'+
+      ['all|전체','winnable|승산 타겟(우리 미스 ∩ 남들 성공)','solved|우리 해결','missed|우리 미스','ceiling|하드천장']
+        .map(function(o){var p=o.split("|");return '<option value="'+p[0]+'"'+(TB_MFILTER.f===p[0]?" selected":"")+'>'+esc(p[1])+'</option>';}).join("")+
+    '</select> <span class="muted" id="tbcount"></span></div>'+
+    // P2-10 metric label: our marks are ANY-PASS (trial×run×arm), competitor % is TRIAL-AVERAGE —
+    // different aggregations; ours reads optimistic on variance tasks by construction.
+    '<p class="muted">✅/❌ = 우리 결과(any-pass: trial×run 합) · 우측 = 공개 스캐폴드 pass율(HF, trial-평균 — 집계가 달라 우리 쪽이 낙관) · <b>승산 타겟</b>=우리 미스인데 최소 한 곳은 푼 것(파란 배경) · 회색 행=하드천장(아무도 못 푼 것)</p>'+
+    '<div id="tbtable"></div>';
+  const si = document.getElementById("tbsearch"); if (si) si.oninput = function(){ TB_MFILTER.q = si.value; drawTbMatrix(); };
+  const fi = document.getElementById("tbfilter"); if (fi) fi.onchange = function(){ TB_MFILTER.f = fi.value; drawTbMatrix(); };
+  drawTbMatrix();
+}
+// BODY (redraws on filter/search/refresh — never touches the controls above).
+function drawTbMatrix() {
+  const el = document.getElementById("tbtable");
+  if (!el) return;
+  const tb = tbTaskRows();
+  const tasks = tb.tasks;
   const scaffs = (DATA.tb && DATA.tb.scaffolds) || [];
-  const our = tbOurResults();
+  const our = tb.our;
   const solved = function(t){ return our.base[t]===true || our.lev[t]===true; };
   const mark = function(res){
     if (res === true) return '<span class="q-ok">✅</span>';
@@ -1715,14 +1814,8 @@ function renderTbMatrix(v) {
     if (wa !== wb) return wb - wa;
     return b.avg - a.avg;
   });
-  let h = '<div class="controls">'+
-    '<input id="tbsearch" placeholder="task 검색…" value="'+esc(TB_MFILTER.q)+'" />'+
-    '<select id="tbfilter">'+
-      ['all|전체','winnable|승산 타겟(우리 미스 ∩ 남들 성공)','solved|우리 해결','missed|우리 미스','ceiling|하드천장']
-        .map(function(o){var p=o.split("|");return '<option value="'+p[0]+'"'+(f===p[0]?" selected":"")+'>'+esc(p[1])+'</option>';}).join("")+
-    '</select> <span class="muted">'+rows.length+'개</span></div>';
-  h += '<p class="muted">✅/❌ = 우리 결과 · 우측 = 공개 스캐폴드 pass율(HF) · <b>승산 타겟</b>=우리 미스인데 최소 한 곳은 푼 것(파란 배경) · 회색 행=하드천장(아무도 못 푼 것)</p>';
-  h += '<table><thead><tr><th class="inst" style="text-align:left">task</th><th>난이도</th><th style="text-align:left">category</th>'+
+  const cnt = document.getElementById("tbcount"); if (cnt) cnt.textContent = rows.length + "개";
+  let h = '<table><thead><tr><th class="inst" style="text-align:left">task</th><th>난이도</th><th style="text-align:left">category</th>'+
     '<th title="knob-off">우리<br>base</th><th title="env-owned·maxTurns·verify-gate">우리<br>+레버</th><th>경쟁사<br>평균</th>'+
     scaffs.map(function(s){return '<th title="'+esc(s)+'">'+esc(s.slice(0,4))+'</th>';}).join("")+'</tr></thead><tbody>';
   for (const t of rows) {
@@ -1736,9 +1829,7 @@ function renderTbMatrix(v) {
       scaffs.map(function(s){var p=t.scaffolds[s];return '<td class="muted" style="text-align:center">'+(p===undefined?'·':(p+'%'))+'</td>';}).join("")+
       '</tr>';
   }
-  v.innerHTML = h + '</tbody></table>';
-  const si = document.getElementById("tbsearch"); if (si) si.oninput = function(){ TB_MFILTER.q = si.value; renderTbMatrix(v); };
-  const fi = document.getElementById("tbfilter"); if (fi) fi.onchange = function(){ TB_MFILTER.f = fi.value; renderTbMatrix(v); };
+  el.innerHTML = h + '</tbody></table>';
 }
 
 // RFC jun-29 R4: dataset family is a partition, not a flavor — a pro resolved-rate must

@@ -32,7 +32,10 @@ echo "[tb-smoke] profile=$PROFILE tasks=$(echo $ALL|wc -w) knobs: OWNED=${QUANTA
 harbor run -d terminal-bench $INC --agent-import-path quanta_agent:QuantaAgent -m gpt-5.5 -n 8 -o "$OUT" > "$HOME/smoke-$PROFILE-run.log" 2>&1
 
 # ── 결과 판정 ──
-res() { local t="$1"; local x; x=$(ls -d "$OUT"/*/${t}__* 2>/dev/null|head -1); [ -z "$x" ]&&{ echo "?"; return; }; local r; r=$(cat "$x/verifier/reward.txt" 2>/dev/null); [ "$r" = "1" ]&&echo PASS||echo FAIL; }
+# any-pass over ALL trial dirs for the task (P2-10: first-trial(head -1) was a THIRD aggregation
+# semantic next to the emit's any-pass and the HF trial-average — one smoke run has 1 trial/task
+# today, but a re-invoked OUT dir must judge like the dashboard does).
+res() { local t="$1" r out="?"; for x in "$OUT"/*/${t}__*; do [ -d "$x" ] || continue; r=$(cat "$x/verifier/reward.txt" 2>/dev/null); [ -z "$r" ] && continue; out=FAIL; [ "$r" = "1" ] && { echo PASS; return; }; done; echo "$out"; }
 echo "── GUARD 안정가드 (green이어야, red=SMOKE FAIL) ──"
 GUARD_FAIL=0
 for t in $GUARD; do v=$(res "$t"); echo "  $v  $t"; [ "$v" != "PASS" ]&&GUARD_FAIL=$((GUARD_FAIL+1)); done

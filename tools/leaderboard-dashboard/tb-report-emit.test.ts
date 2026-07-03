@@ -118,6 +118,18 @@ describe("buildTbReport — SSOT IR the dashboard consumes", () => {
     expect(r.perInstance).toHaveLength(1)
     expect(r.perInstance[0]?.passed).toBe(true)
   })
+  test("any-pass holds in BOTH orders (kills the last-wins mutation the one-order fixture blessed)", () => {
+    // [pass, fail]: an always-overwrite (last-wins) dedup would flip this to FAIL — the jul-3
+    // audit found the single-order fixture order-tautological.
+    const r = buildTbReport(
+      [
+        { id: "t", passed: true, durationMs: 999 },
+        { id: "t", passed: false, durationMs: 10 },
+      ],
+      { preset: "p", model: "m", timestamp: "T" },
+    )
+    expect(r.perInstance[0]?.passed).toBe(true)
+  })
 })
 
 describe("scanHarborTree — read reward.txt over an injected fs seam", () => {
@@ -164,5 +176,63 @@ describe("scanHarborTree — read reward.txt over an injected fs seam", () => {
   })
   test("missing root ⇒ empty (no throw)", () => {
     expect(scanHarborTree("/nope", fs)).toEqual([])
+  })
+})
+
+// jul-3 audit — the previously UNPINNED load-bearing edges (mutation-survivable before):
+describe("scanHarborTree / durationMs — fail-closed edges", () => {
+  /** Minimal fixture builder: one job dir with the given task dirs → file map + fs seam. */
+  const treeOf = (taskFiles: Record<string, Record<string, string>>) => {
+    const files: Record<string, string> = {}
+    const dirs = new Set<string>(["/r", "/r/j1"])
+    for (const [task, inner] of Object.entries(taskFiles)) {
+      dirs.add(`/r/j1/${task}`)
+      dirs.add(`/r/j1/${task}/verifier`)
+      for (const [rel, content] of Object.entries(inner)) files[`/r/j1/${task}/${rel}`] = content
+    }
+    const childrenOf = (p: string): string[] => {
+      const kids = new Set<string>()
+      for (const d of dirs) {
+        if (d !== p && d.startsWith(`${p}/`)) {
+          const rest = d.slice(p.length + 1)
+          if (!rest.includes("/")) kids.add(rest)
+        }
+      }
+      return [...kids]
+    }
+    return {
+      readdir: (p: string): string[] => childrenOf(p),
+      isDir: (p: string): boolean => dirs.has(p),
+      readFile: (p: string): string | null => files[p] ?? null,
+      exists: (p: string): boolean => dirs.has(p) || p in files,
+    }
+  }
+
+  // A mid-run tree emit must not mark still-running tasks as misses.
+  test("UNGRADED (no reward.txt) ⇒ SKIPPED, never stamped FAIL", () => {
+    const fs = treeOf({
+      running__h1: {}, // no verifier/reward.txt yet
+      done__h2: { "verifier/reward.txt": "1\n" },
+    })
+    const got = scanHarborTree("/r", fs)
+    expect(got.map((i) => i.id)).toEqual(["done"])
+  })
+
+  test("reward GARBAGE ('0.5' / '' / 'banana') ⇒ fail-closed passed:false (kills the !=='0' mutation)", () => {
+    const fs = treeOf({
+      frac__h1: { "verifier/reward.txt": "0.5\n" },
+      empty__h2: { "verifier/reward.txt": "" },
+      junk__h3: { "verifier/reward.txt": "banana\n" },
+    })
+    for (const inst of scanHarborTree("/r", fs)) expect(inst.passed).toBe(false)
+  })
+
+  test("NEGATIVE window (finished < started — clock skew) ⇒ durationMs 0, never negative", () => {
+    expect(
+      durationMsFromResult({
+        started_at: "2026-07-02T16:20:21.000",
+        finished_at: "2026-07-02T16:18:09.000",
+      }),
+    ).toBe(0)
   })
 })

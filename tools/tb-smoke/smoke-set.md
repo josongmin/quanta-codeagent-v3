@@ -4,13 +4,20 @@
 
 풀런 금지. `run-tb-smoke.sh <profile>`로 이 셋만 (~8 태스크, -n8, ~15-20분).
 
-## REGRESSION (회귀 가드 — 현재 통과, 저렴·카테고리 다양)
-green→red 로 뒤집히면 **SMOKE FAIL**(플랜 변경이 뭔가 깨뜨림).
+## GUARD (안정 가드 — 경쟁사 100% + 우리 baseline·레버 둘 다 통과여야)
+green→red 로 뒤집히면 **SMOKE FAIL**(플랜 변경이 뭔가 깨뜨림). ⚠️ 스크립트(run-tb-smoke.sh)가 SSOT — 이 표는 그 미러.
 | task | category | 이유 |
 |---|---|---|
 | fix-git | software-engineering (easy) | git 조작, 빠름 |
 | regex-log | data-processing | regex/텍스트, 빠름 |
-| extract-elf | file-operations | 바이너리 파싱, 빠름 |
+
+## LEVER_REGRESSION (레버-회귀 witness — 경쟁사 100%인데 레버 켜니 우리가 깨진 것, M0 jul-3 확정)
+green 되면 회귀가 복구된 것. 이 3건 green 전에 레버 디폴트 flip 금지.
+| task | category | 비고 |
+|---|---|---|
+| extract-elf | file-operations | 바이너리 파싱 (GUARD에서 승격 이동) |
+| path-tracing | software-engineering | M0 레버런서 red |
+| headless-terminal | system-administration | M0 레버런서 red |
 
 ## TARGETS (승산 타겟 — 우리 실패 ∩ 경쟁사 성공, 타입 대표)
 red→green 되면 그 타입 플랜이 먹힌 것.
