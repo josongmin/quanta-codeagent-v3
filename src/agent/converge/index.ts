@@ -25,14 +25,16 @@ export type { CompareVerdict } from "./compare"
 export { comparedToReference } from "./compare"
 export type { ExerciseVerdict } from "./exercise"
 export { inspectExerciseEvidence, isExerciseCommand, resultObservedOutput } from "./exercise"
+export type { ConvergePorts, ConvergeResult, FairFailSource } from "./loop"
+export { runConvergeLoop } from "./loop"
 export type {
   ConvergeBounds,
-  ConvergePorts,
+  ConvergeOutcome,
+  ConvergeProtocol,
   ConvergeReason,
-  ConvergeResult,
-  FairFailSource,
-} from "./loop"
-export { runConvergeLoop } from "./loop"
+  ConvergeVerdict,
+} from "./protocol"
+export { runConvergeProtocol } from "./protocol"
 export { buildTaintedRefs, isUnfair } from "./oracle-taint"
 export type { OutputContractVerdict } from "./output-contract"
 export { outputContractVerdict } from "./output-contract"

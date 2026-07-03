@@ -37,7 +37,17 @@
  */
 
 import type { Message } from "@/llm"
+import {
+  type ConvergeBounds,
+  type ConvergeProtocol,
+  type ConvergeReason,
+  runConvergeProtocol,
+} from "./protocol"
 import type { SelfTestReceipt } from "./self-test"
+
+// Re-export the protocol's shared policy vocabulary so existing `./loop` / barrel consumers are
+// unchanged (ConvergeBounds/ConvergeReason moved to the surface-neutral protocol SSOT).
+export type { ConvergeBounds, ConvergeReason } from "./protocol"
 
 /** A FAIR fail signal source — the pluggable convergence regime. Given the current receipt, either a
  *  feedback string to feed back (built ONLY from the agent's own output — NO hidden oracle), or null
@@ -45,7 +55,8 @@ import type { SelfTestReceipt } from "./self-test"
  *  a bench adapter would bind it to a driver-orchestrated repro-vote. */
 export type FairFailSource = (receipt: SelfTestReceipt) => { readonly feedback: string } | null
 
-/** The injected ports the loop drives. No gold/hidden field by construction (type-level no-leak). */
+/** The injected ports the TERMINAL loop drives (the terminal instance of {@link ConvergeProtocol}).
+ *  No gold/hidden field by construction (type-level no-leak). */
 export interface ConvergePorts {
   /** The surface's own taint-clean receipt over the CURRENT trajectory (re-read each round). */
   readonly inspect: () => SelfTestReceipt
@@ -56,17 +67,6 @@ export interface ConvergePorts {
     text: string,
   ) => Promise<{ readonly turns: number; readonly messages: readonly Message[] }>
 }
-
-/** The two independent over-persist bounds. */
-export interface ConvergeBounds {
-  /** Hard round cap (the caller clamps this, e.g. K∈[1,4]). */
-  readonly maxRounds: number
-  /** Turn-budget watchdog — the loop never spends past this cumulative turn count. */
-  readonly maxTurns: number
-}
-
-/** Why the loop stopped — B's honest cost accounting (never conflate "converged" with "out of budget"). */
-export type ConvergeReason = "green" | "rounds-exhausted" | "watchdog" | "no-signal"
 
 export interface ConvergeResult {
   /** True iff the FINAL receipt is green (the deliverable converged). */
@@ -81,51 +81,43 @@ export interface ConvergeResult {
   readonly reason: ConvergeReason
 }
 
+/** The TERMINAL verdict = the self-test receipt PLUS the protocol's `actionable` (a fair-fail signal
+ *  is possible iff a self-test actually executed). */
+type TerminalVerdict = SelfTestReceipt & { readonly actionable: boolean }
+
 /**
- * Run the bounded converge-to-green loop. PURE over `ports`. Stops on the FIRST of:
- *   - the receipt is green (converged) → `reason: "green"`;
- *   - no self-test executed, or the fair-fail source returns null (nothing to converge) → `"no-signal"`;
- *   - the turn-budget watchdog trips → `"watchdog"`;
- *   - `maxRounds` follow-ups ran → `"rounds-exhausted"` (the default if no earlier stop fired).
- * A surface with the loop OFF simply never calls this (byte-identical to no loop).
+ * Run the terminal bounded converge-to-green loop — the TERMINAL SPECIALIZATION of
+ * {@link runConvergeProtocol}. The generic protocol owns the skeleton + bounds + honest `reason`;
+ * this binds the terminal regime: `judge` = re-inspect the trajectory receipt (actionable ⇔ a
+ * self-test executed), `feedback` = the agent's own self-test failure, `generate` = one follow-up
+ * turn (carrying the message log). BYTE-IDENTICAL to the pre-protocol loop for every path.
+ * A surface with the loop OFF simply never calls this.
  */
 export const runConvergeLoop = async (
   ports: ConvergePorts,
   bounds: ConvergeBounds,
   init: { readonly turnsConsumed: number; readonly messages: readonly Message[] },
 ): Promise<ConvergeResult> => {
-  let turnsConsumed = init.turnsConsumed
-  let messages = init.messages
-  let rounds = 0
-  // Default: the loop ran its full round budget without an earlier stop. Overwritten by any break.
-  let reason: ConvergeReason = "rounds-exhausted"
-  while (rounds < bounds.maxRounds) {
-    const receipt = ports.inspect()
-    // Nothing to converge: no agent-authored self-test ran (the surface's steer is what makes the
-    // agent write one), or it already went green.
-    if (!receipt.executed) {
-      reason = "no-signal"
-      break
-    }
-    if (receipt.green) {
-      reason = "green"
-      break
-    }
-    // Watchdog: never spend past the turn budget (structural over-persist bound, independent of rounds).
-    if (turnsConsumed >= bounds.maxTurns) {
-      reason = "watchdog"
-      break
-    }
-    const ff = ports.fairFail(receipt)
-    if (ff === null) {
-      // Executed-red but no fair signal to feed back — never loop blind.
-      reason = "no-signal"
-      break
-    }
-    const turn = await ports.runFollowUpTurn(ff.feedback)
-    turnsConsumed += turn.turns
-    messages = turn.messages
-    rounds += 1
+  const proto: ConvergeProtocol<TerminalVerdict, readonly Message[]> = {
+    judge: () => {
+      const receipt = ports.inspect()
+      return { ...receipt, actionable: receipt.executed }
+    },
+    feedback: (verdict) => ports.fairFail(verdict),
+    generate: async (text) => {
+      const turn = await ports.runFollowUpTurn(text)
+      return { turns: turn.turns, carry: turn.messages }
+    },
   }
-  return { converged: ports.inspect().green, rounds, turnsConsumed, messages, reason }
+  const out = await runConvergeProtocol(proto, bounds, {
+    turnsConsumed: init.turnsConsumed,
+    carry: init.messages,
+  })
+  return {
+    converged: out.converged,
+    rounds: out.rounds,
+    turnsConsumed: out.turnsConsumed,
+    messages: out.carry,
+    reason: out.reason,
+  }
 }
