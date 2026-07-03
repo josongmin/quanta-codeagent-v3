@@ -14,7 +14,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { TERMINAL_OPERATOR_GUIDE } from "@/tool"
+import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE } from "@/tool"
 import type {
   AttachResult,
   PtyHandle,
@@ -30,6 +30,7 @@ import {
   runTerminalBrain,
   TB_ENV_OWNED_ENV,
   TB_OUTPUT_CONTRACT_ENV,
+  TB_SELF_TEST_ENV,
   TB_VERIFY_GATE_ENV,
   TB_WRITE_TOOL_ENV,
   VERIFY_GATE_FOLLOWUP,
@@ -326,6 +327,68 @@ describe("terminal brain-mode (B3) — drives the loop over the brain↔hands du
       expect(offered).not.toContain(base)
     }
     endIn()
+  })
+
+  describe("S1 self-test discipline (QUANTA_TB_SELF_TEST) — wiring", () => {
+    const firstUserText = (llm: FakeLlm): string => {
+      const first = llm.seen[0]
+      if (!first) throw new Error("the loop must have streamed at least one turn to the model")
+      return first.messages
+        .filter((m) => m.role === "user")
+        .flatMap((m) => m.content)
+        .filter((b): b is { type: "text"; text: string } => b.type === "text")
+        .map((b) => b.text)
+        .join("\n")
+    }
+
+    test("knob ON ⇒ the FULL self-test discipline body reaches the model (after the operator guide)", async () => {
+      const { stdin, stdout, endIn } = makeStdio()
+      const llm = new FakeLlm(execThenDoneScripts("echo hi"))
+      await runTerminalBrain({
+        instruction: "write fib(n)",
+        reportOut: "/tmp/brain-selftest-on.json",
+        stdin,
+        stdout,
+        llm,
+        writeReport: () => undefined,
+        env: { [TB_SELF_TEST_ENV]: "1" },
+      })
+      const text = firstUserText(llm)
+      // The FULL body (not just a header) rode into the instruction turn — a drop goes RED here.
+      expect(text).toContain(SELF_TEST_DISCIPLINE)
+      // It rides AFTER the operator guide and BEFORE the task, on the same turn.
+      expect(text).toContain(TERMINAL_OPERATOR_GUIDE)
+      expect(text.indexOf(TERMINAL_OPERATOR_GUIDE)).toBeLessThan(text.indexOf(SELF_TEST_DISCIPLINE))
+      expect(text.indexOf(SELF_TEST_DISCIPLINE)).toBeLessThan(text.indexOf("write fib(n)"))
+      endIn()
+    })
+
+    test("knob OFF (default) ⇒ the instruction turn is byte-identical: NO discipline block", async () => {
+      const { stdin, stdout, endIn } = makeStdio()
+      const llm = new FakeLlm(execThenDoneScripts("echo hi"))
+      await runTerminalBrain({
+        instruction: "write fib(n)",
+        reportOut: "/tmp/brain-selftest-off.json",
+        stdin,
+        stdout,
+        llm,
+        writeReport: () => undefined,
+      })
+      const text = firstUserText(llm)
+      expect(text).not.toContain(SELF_TEST_DISCIPLINE)
+      // The frozen turn shape is preserved: guide, blank line, then the task header — nothing spliced.
+      expect(text).toContain(`${TERMINAL_OPERATOR_GUIDE}\n\n# Task\nwrite fib(n)`)
+      endIn()
+    })
+
+    test("no-leak: the discipline names no hidden-oracle terms (can never teach peeking)", () => {
+      const lower = SELF_TEST_DISCIPLINE.toLowerCase()
+      // It may say "test" (it tells the agent to build ITS OWN self-test) but must forbid the hidden ones.
+      expect(lower).toContain("do not read, import, or run any provided test/verifier/answer files")
+      for (const w of ["golden", "answer key", "grader file", "hidden test"]) {
+        expect(lower).not.toContain(w)
+      }
+    })
   })
 
   test("report is written BEFORE EOF is signaled (spec B3 ordering: report, then close)", async () => {

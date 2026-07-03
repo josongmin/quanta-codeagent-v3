@@ -1012,4 +1012,8 @@ export {
 } from "./surface/manifest"
 // Capability guidance the terminal entry-point injects alongside the surface tools (RFC §4.5 /
 // §13 #5 — closes the #1 failure, exe-not-in-PATH). General operator habits, no answer-key.
-export { TERMINAL_OPERATOR_GUIDE, terminalOperatorGuide } from "./terminal-capability-guide"
+export {
+  SELF_TEST_DISCIPLINE,
+  TERMINAL_OPERATOR_GUIDE,
+  terminalOperatorGuide,
+} from "./terminal-capability-guide"

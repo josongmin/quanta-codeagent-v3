@@ -38,7 +38,7 @@ import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/
 import { runSessionTurn } from "@/runner/orchestrate/session-turn-driver"
 import { createRuntimeFromBootstrap } from "@/sdk/runtime"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { TERMINAL_OPERATOR_GUIDE, type Tool, ToolRegistry } from "@/tool"
+import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE, type Tool, ToolRegistry } from "@/tool"
 import type { JsonLineDuplex } from "@/tool/container-exec"
 import type { PtySessionPort } from "@/tool/pty"
 import { gateOn } from "@/shared/env-flag"
@@ -64,6 +64,12 @@ export const TB_VERIFY_GATE_ENV = "QUANTA_TB_VERIFY_GATE"
  *  exit (crashed), not only when it was never exercised at all (catches sam-cell-seg exit 2). Default-OFF
  *  ⇒ the gate only fires on never-exercised. Separate knob so its effect is measured in isolation (A/B). */
 export const TB_OUTPUT_CONTRACT_ENV = "QUANTA_TB_OUTPUT_CONTRACT"
+
+/** S1 self-test discipline (RFC jul-3). When ON, appends {@link SELF_TEST_DISCIPLINE} to the instruction
+ *  turn — steering the agent to build a spec-derived, range-covering executable self-test and iterate the
+ *  deliverable to green (targets the measured synthesis-convergence bottleneck: polyglot/sam consistent
+ *  0/3). Default-OFF ⇒ the instruction turn is byte-identical. Efficacy is measure-first (box A/B). */
+export const TB_SELF_TEST_ENV = "QUANTA_TB_SELF_TEST"
 
 /** Cassette knob (RFC 07). Trajectory recording is ON by DEFAULT — set `QUANTA_TB_TRAJECTORY=0`
  *  (or `false`/`off`) to suppress it. Default-on because the jul-3 regression could not be RCA'd
@@ -604,7 +610,13 @@ export const runTerminalBrain = async (
   // sees its terminal-surface operating habits before the task. (The surface fence forbids reaching
   // a sibling host hook to splice it into the static system prompt; threading it onto the first user
   // turn is a real, observable injection and keeps this slice self-contained.)
-  const turnText = `${surface.operatorGuide}\n\n# Task\n${opts.instruction}`
+  // S1 (`QUANTA_TB_SELF_TEST`, default-OFF): append the spec-derived self-test discipline between the
+  // guide and the task. Default-OFF ⇒ the block is absent ⇒ turnText byte-identical to today.
+  const selfTestOn = gateOn(opts.env ?? {}, TB_SELF_TEST_ENV)
+  const guideBlock = selfTestOn
+    ? `${surface.operatorGuide}\n\n${SELF_TEST_DISCIPLINE}`
+    : surface.operatorGuide
+  const turnText = `${guideBlock}\n\n# Task\n${opts.instruction}`
 
   const verifyGateOn = gateOn(opts.env ?? {}, TB_VERIFY_GATE_ENV)
   const outputContractOn = gateOn(opts.env ?? {}, TB_OUTPUT_CONTRACT_ENV)

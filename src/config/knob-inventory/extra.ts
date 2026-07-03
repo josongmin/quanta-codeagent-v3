@@ -671,8 +671,20 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "runtime-config",
     describe:
-      "TB OC1 output-contract sub-lever (opt-in; effective only with QUANTA_TB_VERIFY_GATE). When ON, the single bounded verify-gate follow-up ALSO fires when the deliverable never ran end-to-end to a CLEAN exit (crash-at-invocation / stray-artifact class) and uses the contract nudge instead of the compare nudge. OFF ⇒ byte-identical to verify-gate v2.",
+      "TB OC1 output-contract sub-lever (opt-in; effective only with QUANTA_TB_VERIFY_GATE). Since S4 (RFC jul-3) the single bounded verify-gate follow-up is RUN-only; OC1 ON additionally fires it when an EXERCISED deliverable ran to a DIRTY exit (crash-at-invocation, e.g. sam-cell-seg exit 2), not only when it was never exercised. OFF ⇒ the follow-up fires only on a never-exercised deliverable.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain outputContractOn)",
+  },
+  // TB S1 self-test discipline (RFC jul-3 /02 S1) — spec-derived, range-covering executable self-test
+  // steer on the instruction turn. Default-OFF (measure-first: box A/B before it ships on).
+  {
+    envKey: "QUANTA_TB_SELF_TEST",
+    kind: "bool",
+    default: false,
+    group: "bench",
+    home: "runtime-config",
+    describe:
+      "TB S1 self-test discipline (opt-in). When ON, appends a spec-derived self-test discipline block to the instruction turn: build an EXECUTABLE self-test from the task spec that covers the input RANGE + edges, run the deliverable against it, and iterate to green before finalizing. Targets the measured synthesis-convergence bottleneck (polyglot/sam consistent 0/3: a single-value self-compare passed a wrong general solution). No-leak: task spec only, never the hidden test/verifier. OFF ⇒ the instruction turn is byte-identical.",
+    readSite: "apps/terminal/brain-mode.ts (runTerminalBrain selfTestOn)",
   },
   // TB container_exec per-stream output cap (P3-C, jul-3) — env-tunable head+tail truncation
   // budget for stdout/stderr EACH (per-stream so a stdout flood can never evict stderr). Unset ⇒
