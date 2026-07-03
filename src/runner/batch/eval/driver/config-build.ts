@@ -571,7 +571,11 @@ export const buildConfig = (
     // VERIFY axis (jul-4, default-OFF `QUANTA_BENCH_REPRODUCE_FIRST`): on a SWE
     // instance the knob adds the reproduce-first rule (reproduce the reported
     // failure → fix → rerun). Absent ⇒ SWE_SURFACE_PROFILE unchanged ⇒ byte-identical.
-    // Measure-first (flat A/B ⇒ revert).
+    // Measure-first (flat A/B ⇒ revert). CONFOUND WARNING: do NOT A/B this together with
+    // the reproTestK repro-hint path (`prepareReproTest` writes reproduce_issue.py + threads
+    // REPRO_HINT_MESSAGE) — that tells the model a reproduction ALREADY EXISTS, which overlaps
+    // /contradicts this "write your own reproduction" rule. Hold reproTestK fixed (ideally 0)
+    // when measuring this lever.
     system: composeSystemPromptForSurface(
       instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
         ? { ...SWE_SURFACE_PROFILE, verifyStrategy: "reproduce-first" }

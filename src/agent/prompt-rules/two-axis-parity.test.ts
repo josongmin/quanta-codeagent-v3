@@ -6,6 +6,7 @@
  * slots or drop a rule and a case below fails.
  */
 import { describe, expect, test } from "bun:test"
+import { buildSystemPrompt } from "../prompt"
 import {
   ASSISTANT_PACK,
   BENCHMARK_PACK,
@@ -16,6 +17,7 @@ import {
   renderPackByMode,
   renderPostureBase,
   renderTaskRules,
+  renderVerifyStrategy,
   TASK_RUNNER_PACK,
 } from "./index"
 
@@ -63,5 +65,29 @@ describe("2-axis parity — frozen posture-base + task rules == legacy *_PACK (b
     const ownedBatch = [...renderPostureBase("owned"), ...renderTaskRules("batch")]
     expect(ownedBatch).toEqual([...lines(OWNED_RULES), ...renderTaskRules("batch")])
     expect(ownedBatch.length).toBeGreaterThan(renderPostureBase("owned").length) // task rules appended
+  })
+})
+
+// The cases above pin the RENDER helpers. This one pins the COMPOSER (buildSystemPrompt) itself —
+// the slot ORDER lives in prompt.ts (posture → task → verify), NOT in these helpers, so a swap
+// there would slip past every helper-level assertion. Assert the three axes appear in that order in
+// the actually-rendered prompt. RED-on-injection: reorder the spreads in prompt.ts and this fails.
+describe("3-axis COMPOSER order — posture BEFORE task BEFORE verify in the real rendered prompt", () => {
+  test("buildSystemPrompt(owned + batch + reproduce-first) emits the axes in slot order", () => {
+    const prompt = buildSystemPrompt("/w", {
+      envPosture: "owned",
+      promptPack: "batch",
+      verifyStrategy: "reproduce-first",
+    })
+    // Each axis's rendered lines are spliced contiguously, so the joined block is a
+    // substring of the prompt — its position marks where that slot landed.
+    const iPosture = prompt.indexOf(renderPostureBase("owned").join("\n"))
+    const iTask = prompt.indexOf(renderTaskRules("batch").join("\n"))
+    const iVerify = prompt.indexOf(renderVerifyStrategy("reproduce-first").join("\n"))
+    expect(iPosture).toBeGreaterThanOrEqual(0)
+    expect(iTask).toBeGreaterThanOrEqual(0)
+    expect(iVerify).toBeGreaterThanOrEqual(0)
+    expect(iPosture).toBeLessThan(iTask) // posture slot precedes task slot
+    expect(iTask).toBeLessThan(iVerify) // task slot precedes verify slot
   })
 })

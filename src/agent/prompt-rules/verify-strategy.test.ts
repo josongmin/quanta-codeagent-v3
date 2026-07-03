@@ -39,8 +39,9 @@ describe("renderVerifyStrategy — exhaustive + exact", () => {
 describe("buildSystemPrompt — verify axis (slot 3)", () => {
   test("OFF (absent verifyStrategy) ⇒ NO verify rule present in any posture/pack", () => {
     // exactOptionalPropertyTypes forbids passing `verifyStrategy: undefined`, so ABSENCE
-    // is the only OFF representation — and it must leak zero verify lines. (The exact
-    // byte-identical 5-target hashes are pinned separately in the byte-identical check.)
+    // is the only OFF representation — and it must leak zero verify lines. (There is no
+    // absolute-byte golden pin of the whole prompt; byte-identity is asserted structurally
+    // via the seam self-equivalence tests below + the 3-axis parity guard, not by a hash.)
     const OFF_OPTS: Array<Parameters<typeof buildSystemPrompt>[1]> = [
       {},
       { promptPack: "batch" },

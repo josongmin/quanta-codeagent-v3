@@ -7,11 +7,10 @@
 
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
-import { composeSystemPromptForSurface, GENERAL_SURFACE_PROFILE } from "@/agent"
+import { buildSystemPrompt } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { PermissionContext } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
-import { gateOn } from "@/shared"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -46,18 +45,7 @@ const buildInteractiveBase = (
     stream,
     permission,
     messages: req.base.messages ?? [],
-    // General/CLI surface declares the GENERAL profile through the SurfaceProfile
-    // seam (jul-4). VERIFY axis: default-OFF `QUANTA_VERIFY_AFTER_EDIT` adds the
-    // verify-after-edit rule; absent ⇒ GENERAL profile ⇒ byte-identical to the prior
-    // `buildSystemPrompt(cwd)`. Measure-first. (`req.base.system` override unchanged.)
-    system:
-      req.base.system ??
-      composeSystemPromptForSurface(
-        gateOn(process.env, "QUANTA_VERIFY_AFTER_EDIT")
-          ? { ...GENERAL_SURFACE_PROFILE, verifyStrategy: "verify-after-edit" }
-          : GENERAL_SURFACE_PROFILE,
-        { cwd },
-      ),
+    system: req.base.system ?? buildSystemPrompt(cwd),
     cwd,
     maxTurns: req.base.maxTurns ?? 200,
     signal,
