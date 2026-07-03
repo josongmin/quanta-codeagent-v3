@@ -288,7 +288,7 @@ describe("isExerciseCommand — fail-closed (review P0: install/build/probe/chat
     "gcc -o mystery mystery.c",
     "g++ solve.cpp -o solve",
     "go build ./...",
-    "python -c \"import grpc; print(grpc.__version__)\"",
+    'python -c "import grpc; print(grpc.__version__)"',
     "python3 -c 'print(1)'",
     "bash -lc 'echo ok'",
     "sh -c 'echo hi'",
@@ -327,18 +327,22 @@ describe("isExerciseCommand — fail-closed (review P0: install/build/probe/chat
 
   // P2-B (RFC jul-3): test-RUNNERS run the suite / hidden oracle — NOT an exercise of the
   // deliverable (peeking + best-of-N tie-break inflation). Observe-runners stay TRUE.
-  test.each(["pytest tests/", "pytest", "python -m pytest", "tox", "nose2", "nosetests"])(
-    "TEST-RUNNER: %p ⇒ NOT exercise",
-    (cmd) => {
-      expect(isExerciseCommand(cmd)).toBe(false)
-    },
-  )
-  test.each(["python -m http.server 8000", "curl -s localhost:8080/health"])(
-    "OBSERVE-RUNNER: %p ⇒ still exercise",
-    (cmd) => {
-      expect(isExerciseCommand(cmd)).toBe(true)
-    },
-  )
+  test.each([
+    "pytest tests/",
+    "pytest",
+    "python -m pytest",
+    "tox",
+    "nose2",
+    "nosetests",
+  ])("TEST-RUNNER: %p ⇒ NOT exercise", (cmd) => {
+    expect(isExerciseCommand(cmd)).toBe(false)
+  })
+  test.each([
+    "python -m http.server 8000",
+    "curl -s localhost:8080/health",
+  ])("OBSERVE-RUNNER: %p ⇒ still exercise", (cmd) => {
+    expect(isExerciseCommand(cmd)).toBe(true)
+  })
 })
 
 describe("comparedToReference — P2-A marker split (task-provided reference vs hidden oracle)", () => {
@@ -362,7 +366,9 @@ describe("comparedToReference — P2-A marker split (task-provided reference vs 
 
 describe("inspectExerciseEvidence — empty / no-tool trajectories", () => {
   test("no tool calls at all ⇒ NOT exercised with an honest reason", () => {
-    const v = inspectExerciseEvidence([{ type: "assistant_text", delta: "all done, verified green" }])
+    const v = inspectExerciseEvidence([
+      { type: "assistant_text", delta: "all done, verified green" },
+    ])
     expect(v.exercised).toBe(false)
     expect(v.evidence).toContain("no end-to-end exercise")
   })
@@ -370,7 +376,11 @@ describe("inspectExerciseEvidence — empty / no-tool trajectories", () => {
 
 describe("deriveVerificationState — v2 honest trichotomy (L1-gated; verified-pass requires a compare)", () => {
   const compared = { compared: true, refusedTestPath: false, evidence: "diffed+observed" } as const
-  const notCompared = { compared: false, refusedTestPath: false, evidence: "never compared" } as const
+  const notCompared = {
+    compared: false,
+    refusedTestPath: false,
+    evidence: "never compared",
+  } as const
   const ranButUnchecked = { exercised: true, evidence: "ran the deliverable" } as const
 
   test("no L1 comparison ⇒ unverifiable (the anti-over-persist terminal state)", () => {
@@ -380,9 +390,10 @@ describe("deriveVerificationState — v2 honest trichotomy (L1-gated; verified-p
   // ── The v2 CORE: L0-without-L1 is NO LONGER verified-pass (v1's rubber-stamp is retired). ──
   test("RED-for-v1: RAN but NEVER COMPARED + a positive/silent final ⇒ unverifiable (NOT verified-pass)", () => {
     // v1 stamped this `verified-pass` on the bare run — the false-green this whole lever kills.
-    expect(deriveVerificationState(notCompared, "Output looks correct. Verified green.", ranButUnchecked).state).toBe(
-      "unverifiable",
-    )
+    expect(
+      deriveVerificationState(notCompared, "Output looks correct. Verified green.", ranButUnchecked)
+        .state,
+    ).toBe("unverifiable")
     expect(deriveVerificationState(notCompared, "", ranButUnchecked).state).toBe("unverifiable")
     // The evidence names the ran-but-unchecked gap honestly (no false pass claim).
     expect(
@@ -391,9 +402,9 @@ describe("deriveVerificationState — v2 honest trichotomy (L1-gated; verified-p
   })
 
   test("L1 compared + a positive stated outcome ⇒ verified-pass", () => {
-    expect(deriveVerificationState(compared, "Output matches the reference. Verified pass.").state).toBe(
-      "verified-pass",
-    )
+    expect(
+      deriveVerificationState(compared, "Output matches the reference. Verified pass.").state,
+    ).toBe("verified-pass")
   })
 
   test("L1 compared + silent final ⇒ verified-pass (a comparison was observed)", () => {
@@ -477,7 +488,11 @@ describe("comparedToReference — L1 accept (a real observed comparison against 
   test("a diff TYPED into a pane + observed via pty_read ⇒ compared", () => {
     const events: AgentEvent[] = [
       call("p0", "pty_start", { command: "bash" }),
-      call("p1", "pty_write", { handle: "h", data: "diff mine.out baseline.out", appendNewline: true }),
+      call("p1", "pty_write", {
+        handle: "h",
+        data: "diff mine.out baseline.out",
+        appendNewline: true,
+      }),
       result("p1", "pty_write", { preview: "ok" }),
       call("p2", "pty_read", { handle: "h" }),
       result("p2", "pty_read", { preview: "< foo\n> bar\n[nextSeq=3]" }),
@@ -758,7 +773,9 @@ describe("isSelfTestCommand — credits an agent-authored self-test, refuses hid
 
   test("credits: an inline assertion snippet", () => {
     expect(isSelfTestCommand("python -c 'from fib import fib; assert fib(5)==5'")).toBe(true)
-    expect(isSelfTestCommand("node -e 'const a=require(\"assert\"); assert.equal(f(0),0)'")).toBe(true)
+    expect(isSelfTestCommand("node -e 'const a=require(\"assert\"); assert.equal(f(0),0)'")).toBe(
+      true,
+    )
   })
 
   test("credits: a real test-runner naming a NON-oracle file", () => {
@@ -847,5 +864,59 @@ describe("inspectSelfTest — OBSERVE-ONLY receipt (executed + green), container
       result("1", exec, { timedOut: true }),
     ]
     expect(inspectSelfTest(events).executed).toBe(false)
+  })
+})
+
+// jul-3 hell-audit — the self-test `green` gaming surfaces the receipt must refuse (F2/F3/F4).
+// Each attack is PAIRED with an honest control so the refusal (not some other rule) is proven.
+describe("inspectSelfTest — gaming defenses (F2 launder / F3 suite-discovery / F4 flip)", () => {
+  const exec = "container_exec"
+  test("F2: a self-test reading an oracle-LAUNDERED file is NOT credited; a clean-source copy is", () => {
+    // cp /tests/golden into a clean name, then a self-test that reads it = peeking one hop removed.
+    const laundered = inspectSelfTest([
+      call("1", exec, { command: "cp /app/tests/golden.txt exp.txt" }),
+      result("1", exec, { exitCode: 0, ok: true, preview: "" }),
+      call("2", exec, { command: "python test_it.py exp.txt" }),
+      result("2", exec, { exitCode: 0, ok: true, preview: "ok" }),
+    ])
+    expect(laundered.green).toBe(false)
+    expect(laundered.executed).toBe(false)
+    // paired control: SAME shape, clean source ⇒ credited (proves the taint, not the read, refused).
+    const clean = inspectSelfTest([
+      call("1", exec, { command: "cp data/sample.txt exp.txt" }),
+      result("1", exec, { exitCode: 0, ok: true, preview: "" }),
+      call("2", exec, { command: "python test_it.py exp.txt" }),
+      result("2", exec, { exitCode: 0, ok: true, preview: "ok" }),
+    ])
+    expect(clean.green).toBe(true)
+  })
+
+  test("F3: `pytest .` / bare / directory (hidden-suite discovery) is NOT a self-test; a named file is", () => {
+    expect(isSelfTestCommand("pytest .")).toBe(false)
+    expect(isSelfTestCommand("pytest")).toBe(false)
+    expect(isSelfTestCommand("pytest src")).toBe(false)
+    expect(isSelfTestCommand("python -m pytest .")).toBe(false)
+    // a concrete agent-authored file the runner is pointed at IS credited (control)
+    expect(isSelfTestCommand("pytest my_check.py")).toBe(true)
+    expect(isSelfTestCommand("pytest test_fib.py")).toBe(true)
+  })
+
+  test("F4: green reached only after an earlier RED self-test surfaces `flippedFromRed`", () => {
+    // A genuine red→fix→green on the SAME file is still green, but the flip is flagged so a gating
+    // consumer can distinguish it from a switch to a weaker test.
+    const flipped = inspectSelfTest([
+      call("1", exec, { command: "python test_fib.py" }),
+      result("1", exec, { exitCode: 1, ok: false, preview: "AssertionError" }),
+      call("2", exec, { command: "python -c 'assert True'" }),
+      result("2", exec, { exitCode: 0, ok: true, preview: "" }),
+    ])
+    expect(flipped.green).toBe(true)
+    expect(flipped.flippedFromRed).toBe(true)
+    // a clean single green run carries NO flip flag (control)
+    const straight = inspectSelfTest([
+      call("1", exec, { command: "python test_fib.py" }),
+      result("1", exec, { exitCode: 0, ok: true, preview: "ok" }),
+    ])
+    expect(straight.flippedFromRed).toBeUndefined()
   })
 })
