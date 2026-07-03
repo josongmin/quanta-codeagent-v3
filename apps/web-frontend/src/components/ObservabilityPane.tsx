@@ -18,14 +18,18 @@
 import { memo, useState } from "react"
 import type {
   ApprovalRequest,
+  ArtifactReadyMessage,
   ContextUsageMessage,
   Objective,
   RunEntry,
   ToolDiffMessage,
 } from "../types/protocol"
+import type { ItemStreamState } from "../ws/item-stream-hooks"
 import { type ObservabilityState, splitRunsByStatus } from "../ws/observability-hooks"
+import { ArtifactStrip } from "./canvas/ArtifactStrip"
 import { UsageBreakdownPanel } from "./canvas/UsageBreakdownPanel"
 import { DiffPanel } from "./DiffPanel"
+import { ItemStreamSection } from "./ItemStreamSection"
 
 export interface ObservabilityPaneProps {
   readonly state: ObservabilityState
@@ -43,6 +47,16 @@ export interface ObservabilityPaneProps {
    *  per captured tool mutation. Absent / empty ⇒ nothing renders (default-OFF
    *  — the pane is byte-unchanged when the canvas channel is OFF). */
   readonly diffs?: ReadonlyMap<string, ToolDiffMessage> | null
+  /** A2: the latest `artifact.ready` frame per `artifactId` from the canvas
+   *  channel (`useArtifacts`). When present + non-empty, an `ArtifactStrip`
+   *  mounts (per-kind preview / download cards). Absent / empty ⇒ nothing
+   *  renders (default-OFF — byte-unchanged when the canvas channel is OFF). */
+  readonly artifacts?: ReadonlyMap<string, ArtifactReadyMessage> | null
+  /** S2: the folded `item.*` stream state from `useItemStream`. When present +
+   *  non-empty, an `ItemStreamSection` mounts (subagent activity rows +
+   *  plan/blocked status). Absent / empty ⇒ nothing renders (default-OFF —
+   *  gated by `QUANTA_ITEM_STREAM`; no frames ⇒ empty). */
+  readonly itemStream?: ItemStreamState | null
 }
 
 /* shared card + section-label primitives (Codex-aligned tokens) */
@@ -54,7 +68,7 @@ const LABEL = "text-[11px] font-semibold uppercase tracking-wide text-ink-tertia
 /* ------------------------------------------------------------------ */
 
 export const ObservabilityPane = memo(
-  ({ state, onRetryRun, usage, diffs }: ObservabilityPaneProps): JSX.Element => {
+  ({ state, onRetryRun, usage, diffs, artifacts, itemStream }: ObservabilityPaneProps): JSX.Element => {
     const { running, waiting, completed } = splitRunsByStatus(state.runs)
     return (
       <aside
@@ -65,6 +79,8 @@ export const ObservabilityPane = memo(
         <UsageBreakdownPanel usage={usage ?? null} />
         <ObjectiveCard objective={state.objective} />
         <DiffsSection diffs={diffs ?? null} />
+        <ArtifactStrip artifacts={artifacts ?? null} />
+        <ItemStreamSection state={itemStream ?? null} />
         <ApprovalsList approvals={state.approvals} />
         <RunColumn title="Running" runs={running} tone="emerald" />
         <RunColumn title="Waiting" runs={waiting} tone="amber" />

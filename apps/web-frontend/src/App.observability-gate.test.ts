@@ -102,9 +102,18 @@ describe("computeHasObservabilityData (sidebar auto-hide gate)", () => {
     expect(computeHasObservabilityData(emptyObservability, null, false, true)).toBe(true)
   })
 
+  it("returns true when the canvas channel carries an artifact / item-stream (A2 / S2)", () => {
+    // `hasCanvasExtras=true` (a ready artifact OR an item-stream activity item)
+    // opens the sidebar so the ArtifactStrip / ItemStreamSection is not rendered
+    // into a collapsed pane.
+    expect(computeHasObservabilityData(emptyObservability, null, false, false, true)).toBe(true)
+  })
+
   it("stays hidden when ONLY the default-OFF flags are false (byte-identical)", () => {
-    // Both new opt-in flags default false ⇒ existing callers are byte-identical:
-    // an empty observability state + no usage + no diffs + no agent-state ⇒ hidden.
+    // Every new opt-in flag defaults false ⇒ existing callers are byte-identical:
+    // an empty observability state + no usage + no diffs + no agent-state + no
+    // canvas extras ⇒ hidden.
     expect(computeHasObservabilityData(emptyObservability, null, false, false)).toBe(false)
+    expect(computeHasObservabilityData(emptyObservability, null, false, false, false)).toBe(false)
   })
 })

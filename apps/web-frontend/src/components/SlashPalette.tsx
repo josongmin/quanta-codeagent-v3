@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { cx } from "../lib/classnames"
+import type { ContextUsageMessage } from "../types/protocol"
+import { renderContextGauge } from "./slash-context-gauge"
 
 /**
  * One entry in the slash-command catalogue. Client-side only for v1 — the
@@ -224,6 +226,11 @@ export interface SlashCommandContext {
     costMicroUsd: number
     turns: number
   }
+  /** S3 — the latest `context.usage` frame from the canvas channel
+   *  (`useContextUsage`). `null` when the channel is OFF / no frame yet ⇒
+   *  `/context` falls back to the transcript-count stub. Present ⇒ `/context`
+   *  renders the live segmented gauge (with the reasoning-token split). */
+  readonly contextUsage: ContextUsageMessage | null
 }
 
 export const buildDefaultSlashCommands = (deps: {
@@ -381,11 +388,15 @@ export const buildDefaultSlashCommands = (deps: {
     },
     {
       slug: "context",
-      description: "Show conversation context window usage",
-      action: clientSystem(
-        (c) =>
-          `Messages in transcript: ${c.messageCount}  ·  permission: ${c.permissionMode ?? "(unknown)"}`,
-      ),
+      description: "Show live segmented context-window usage (with reasoning split)",
+      action: clientSystem((c) => {
+        // S3 — live segmented gauge when the canvas `context.usage` frame is
+        // present; falls back to the transcript-count stub when the channel is
+        // OFF (byte-identical to the pre-S3 behaviour, default-OFF).
+        const gauge = renderContextGauge(c.contextUsage)
+        if (gauge !== null) return gauge
+        return `Messages in transcript: ${c.messageCount}  ·  permission: ${c.permissionMode ?? "(unknown)"}`
+      }),
     },
     {
       slug: "session",

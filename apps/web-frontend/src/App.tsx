@@ -37,7 +37,8 @@ import type {
   SessionStateView,
 } from "./types/protocol"
 import { type AgentStateSource, useAgentState } from "./ws/agent-state-hooks"
-import { type CanvasSource, useContextUsage, useToolDiffs } from "./ws/canvas-hooks"
+import { type CanvasSource, useArtifacts, useContextUsage, useToolDiffs } from "./ws/canvas-hooks"
+import { useItemStream } from "./ws/item-stream-hooks"
 import { SessionClient } from "./ws/client"
 import {
   type ObservabilitySource,
@@ -209,13 +210,20 @@ export const computeHasObservabilityData = (
    *  / plan-prompt). Opens the sidebar so the agent-state column is not rendered
    *  into a collapsed pane. Default `false` keeps existing callers byte-identical. */
   hasAgentState = false,
+  /** A2 / S2 — true when the canvas channel carries a ready artifact
+   *  (`useArtifacts`) OR the `item.*` stream carries an activity item
+   *  (`useItemStream`). Opens the sidebar so the strip / activity section is not
+   *  rendered into a collapsed pane. Default `false` keeps existing callers
+   *  byte-identical. */
+  hasCanvasExtras = false,
 ): boolean =>
   observability.runs.length > 0 ||
   observability.objective !== null ||
   observability.approvals.length > 0 ||
   contextUsage !== null ||
   hasDiffs ||
-  hasAgentState
+  hasAgentState ||
+  hasCanvasExtras
 
 const buildSlashContextSnapshot = (args: {
   readonly modelSlug: string | null
@@ -224,6 +232,9 @@ const buildSlashContextSnapshot = (args: {
   readonly sessionState: SessionStateView | null
   readonly messageCount: number
   readonly tokenUsage: CumulativeTokenUsage
+  /** S3 — latest `context.usage` frame (or null) so `/context` can render the
+   *  live segmented gauge. */
+  readonly contextUsage: ContextUsageMessage | null
 }): SlashCommandContext => ({
   modelSlug: args.modelSlug,
   connection: {
@@ -241,6 +252,7 @@ const buildSlashContextSnapshot = (args: {
   toolProfile: args.sessionState?.toolProfile ?? null,
   messageCount: args.sessionState?.messageCount ?? args.messageCount,
   tokenUsage: args.tokenUsage,
+  contextUsage: args.contextUsage,
 })
 
 export const App = (): JSX.Element => {
@@ -515,6 +527,28 @@ export const App = (): JSX.Element => {
 
   const inputDisabled = connection.kind !== "connected" || learnedSessionId === null
 
+  // ADR-0448 (RFC-10) / ADR-0440 / A2: the canvas WS channel — the rich
+  // context-usage breakdown (`useContextUsage`), the per-tool DiffPanels
+  // (`useToolDiffs`) and the ready-artifact strip (`useArtifacts`). Mounted
+  // HERE (above the slash-context ref) so the live `context.usage` frame is also
+  // available to the `/context` slash gauge (S3). Default-OFF: with no canvas
+  // frames (no `QUANTA_WEB_CANVAS=1`) the source never fires — `contextUsage`
+  // stays `null`, `toolDiffs` / `artifacts` stay empty, and every consumer
+  // self-hides (chat UI byte-identical).
+  const canvasSource = useMemo<CanvasSource>(
+    () => ({
+      subscribe: (handler) => client.onCanvas(handler),
+    }),
+    [client],
+  )
+  const contextUsage = useContextUsage(canvasSource)
+  const toolDiffs = useToolDiffs(canvasSource)
+  // A2 — `artifact.ready` frames off the SAME canvas channel. `useArtifacts`
+  // collects them latest-wins per id; the `ArtifactStrip` in the pane renders a
+  // per-kind preview/download card. Default-OFF: no canvas frames ⇒ empty Map ⇒
+  // strip self-hides (byte-identical).
+  const artifacts = useArtifacts(canvasSource)
+
   const slashContextRef = useRef<SlashCommandContext>(
     buildSlashContextSnapshot({
       modelSlug,
@@ -523,6 +557,7 @@ export const App = (): JSX.Element => {
       sessionState,
       messageCount: messages.length,
       tokenUsage,
+      contextUsage,
     }),
   )
   useEffect(() => {
@@ -533,8 +568,9 @@ export const App = (): JSX.Element => {
       sessionState,
       messageCount: messages.length,
       tokenUsage,
+      contextUsage,
     })
-  }, [modelSlug, connection, learnedSessionId, sessionState, messages.length, tokenUsage])
+  }, [modelSlug, connection, learnedSessionId, sessionState, messages.length, tokenUsage, contextUsage])
   const getSlashContext = useCallback((): SlashCommandContext => {
     return slashContextRef.current
   }, [])
@@ -626,24 +662,6 @@ export const App = (): JSX.Element => {
   )
   const observability = useObservabilityState(observabilitySource)
 
-  // ADR-0448 (RFC-10): mount point for the rich context-usage breakdown +
-  // (ADR-0440) the per-tool DiffPanels, both backed by the canvas WS channel.
-  // Mirrors `observabilitySource` above — wraps `client.onCanvas`. Both
-  // `context.usage` frames (`useContextUsage` → the `ObservabilityPane`'s usage
-  // breakdown) AND `tool.diff` frames (`useToolDiffs` → the pane's `DiffsSection`
-  // → mounted `DiffPanel`s) are now CONSUMED here. Default-OFF: when the daemon
-  // sends no canvas frames (no `QUANTA_WEB_CANVAS=1`) the source never fires,
-  // `contextUsage` stays `null` + `toolDiffs` stays empty, and the pane renders
-  // nothing (chat UI byte-identical).
-  const canvasSource = useMemo<CanvasSource>(
-    () => ({
-      subscribe: (handler) => client.onCanvas(handler),
-    }),
-    [client],
-  )
-  const contextUsage = useContextUsage(canvasSource)
-  const toolDiffs = useToolDiffs(canvasSource)
-
   // QUANTA_WEB_AGENT_STATE — the out-of-band agent-state channel (the 9 events
   // the in-band session protocol DROPS: plan.* / mode.changed / tool.progress /
   // context.compacted / ratelimit.snapshot). Mirrors `canvasSource` above —
@@ -681,6 +699,13 @@ export const App = (): JSX.Element => {
   }, [client])
   const agentState = useAgentState(agentStateHub.source)
 
+  // S2 (T01) — the `item.*` fine-grained item stream rides the SAME agent-state
+  // channel (the in-band session transcript drops it). `useItemStream` folds the
+  // frames into subagent-activity rows the `ItemStreamSection` renders. Gated by
+  // `QUANTA_ITEM_STREAM` at the daemon: OFF ⇒ no `item.*` frame ever decodes ⇒
+  // empty state ⇒ the section self-hides (byte-identical).
+  const itemStream = useItemStream(agentStateHub.source)
+
   // QUANTA_WEB_AGENT_STATE — close the OUT-OF-BAND INBOUND loop: a WEB user
   // answers (or cancels) the paused agent's `request_user_input` prompt. Sends
   // the raw `planInputAnswer` frame (NOT a SessionCommand) + optimistically
@@ -717,6 +742,7 @@ export const App = (): JSX.Element => {
     contextUsage,
     toolDiffs.size > 0,
     hasAgentState,
+    artifacts.size > 0 || itemStream.items.size > 0,
   )
 
   return (
@@ -771,7 +797,13 @@ export const App = (): JSX.Element => {
                 <AgentStatePanel state={agentState} onAnswer={onPlanInputAnswer} />
               </aside>
             ) : null}
-            <ObservabilityPane state={observability} usage={contextUsage} diffs={toolDiffs} />
+            <ObservabilityPane
+              state={observability}
+              usage={contextUsage}
+              diffs={toolDiffs}
+              artifacts={artifacts}
+              itemStream={itemStream}
+            />
           </>
         ) : null}
       </div>
