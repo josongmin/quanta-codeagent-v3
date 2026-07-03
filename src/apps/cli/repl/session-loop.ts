@@ -10,6 +10,7 @@ import {
   REACTOR_ENV_FLAG,
 } from "@/reactor"
 import { driveSessionTurn } from "@/runner/orchestrate"
+import { createCronSlashAdapter } from "@/scheduler"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import type {
   RuntimeFacadeComposeOptions,
@@ -142,6 +143,15 @@ export interface RunSessionLoopDeps {
       | ((inj: { readonly text: string }) => { ok: true } | { ok: false; reason: string })
       | undefined,
   ) => void
+  /** B2 (jul-04 CLI-surfacing) — `/cron` automation slash slot install. The loop
+   *  mints the automation engine (`liveAutomationSlot`) and, when present, builds
+   *  the thin `createCronSlashAdapter` over its port + installs it here so
+   *  `/cron`/`/schedule`/`/inbox` list/create/read against the LIVE engine. Absent
+   *  engine ⇒ never called ⇒ the slot stays undefined ⇒ `/cron` prints "not
+   *  wired" (default-OFF byte-identical). */
+  readonly registerAutomationSlash?: (
+    fn: import("../slash/cron-cmd").AutomationSlashState | undefined,
+  ) => void
   /** Constructor-time runtime composition payload threaded into
    *  `runtimeContext.createRuntimeFacade(...)`. Keeps the public SDK surface
    *  immutable after bootstrap while still letting the CLI supply
@@ -225,6 +235,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     registerReplaceMessages,
     registerSideConversationStart,
     registerPlanQueueSendNow,
+    registerAutomationSlash,
     runtimeFacadeCompose,
     playbookSeam,
     playbookCliFlag,
@@ -325,6 +336,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       },
     ) ??
     undefined
+  // B2 (jul-04 CLI-surfacing) `/cron` — LATE-BIND the automation slash slot the
+  // instant the engine exists. The engine is minted HERE (inside the loop, after
+  // the surface wire bundle was built), so the surface's `/cron` slot could not
+  // be populated at compose time (unlike `/kb`, whose store is minted in
+  // `buildTooling`). Mirrors `registerSideConversationStart` (installed once the
+  // live session method exists): build the thin adapter over the live engine port
+  // (RRULE parse + next-fire compute via `@/scheduler`, no new dep) and install it
+  // so `/cron`/`/schedule`/`/inbox` list/create/read the LIVE engine. Absent
+  // engine ⇒ never called ⇒ `/cron` stays "not wired" (default-OFF byte-identical).
+  if (liveAutomationSlot !== undefined && registerAutomationSlash !== undefined) {
+    registerAutomationSlash(createCronSlashAdapter({ engine: liveAutomationSlot.engine }))
+  }
   const activeIdentityModeState = runtimeContext.identityModeState()
   const activeToolProfileState = runtimeContext.toolProfileState()
   const runtimeCompose =

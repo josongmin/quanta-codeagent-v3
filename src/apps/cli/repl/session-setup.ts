@@ -143,6 +143,14 @@ export interface SessionSetupResult {
    *  (one store, both consumers). Absent ⇒ the tool was not registered ⇒ `/kb`
    *  prints "not wired" (byte-identical default-OFF). */
   readonly projectsKbStore: Tooling["projectsKbStore"]
+  /** B4 (jul-04 CLI-surfacing) `/mcp-resources` — the SAME bounded capture holder
+   *  the `mcp_read_resource_dir` / `mcp_read_resource` tools write each fetch into
+   *  (present iff `QUANTA_MCP_RESOURCES` is on + a capable server). Narrowed from
+   *  the host-opaque `boot.features` back to the CLI `Features` shape (the host
+   *  forwards it as `BootstrapFeatures`, which does not carry the field). The
+   *  surface wires `/mcp-resources` over the EXACT ring the tools write into (one
+   *  holder, both consumers). Absent ⇒ `/mcp-resources` prints "not wired". */
+  readonly mcpResourceCapture: import("@/tool").McpResourceCaptureHolder | undefined
   /** L5 M-11 — per-session search-wire teardown (delta-scan interval + indexer)
    *  forwarded from `boot.tooling`. The host threads this into
    *  `runSessionLoop({ searchPipelineDispose })` so session close releases THIS
@@ -380,6 +388,13 @@ export const setupSession = async (
     // A3 (jul-04) — forward the minted KB store so `/kb` reads the SAME instance
     // the `projects_kb` tool writes into. Absent (gate off) ⇒ `/kb` "not wired".
     projectsKbStore: boot.tooling.projectsKbStore,
+    // B4 (jul-04) — narrow the host-opaque `boot.features` back to the CLI
+    // `Features` shape to read the capture holder the mcp resource tools write
+    // into (the host forwards `Features` as `BootstrapFeatures`, which does not
+    // declare the field, but the runtime object still carries it — mirrors the
+    // `mcpClients` narrow below). Absent ⇒ `/mcp-resources` "not wired".
+    mcpResourceCapture: (boot.features as unknown as import("../internal/mcp").Features)
+      .mcpResourceCapture,
     searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,

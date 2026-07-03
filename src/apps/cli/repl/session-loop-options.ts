@@ -77,6 +77,9 @@ export const buildSessionLoopOptions = async (deps: {
     registerReplaceMessages: wires.setReplaceMessages,
     registerSideConversationStart: wires.setSideConversationStart,
     registerPlanQueueSendNow: wires.setPlanQueueSendNow,
+    // B2 (jul-04) — the loop installs the live `/cron` automation slash slot via
+    // this setter once it mints the automation engine (late-bind).
+    registerAutomationSlash: wires.setAutomationSlash,
     // #8 — the live plan-queue store, threaded so the loop can build the
     // mid-turn capture facade over it when QUANTA_MIDTURN_CAPTURE=1.
     planQueueStore: wires.planQueueStore,

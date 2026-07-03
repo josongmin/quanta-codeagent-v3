@@ -50,7 +50,12 @@ import { parseEnvFlag } from "@/runner/assemble"
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { errMessage, logger, quantaHomeDir, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
-import { mcpResourcesTools, type ResourcesHandle, type Tool } from "@/tool"
+import {
+  type McpResourceCaptureHolder,
+  mcpResourcesTools,
+  type ResourcesHandle,
+  type Tool,
+} from "@/tool"
 
 /**
  * ADR-0024 split — the CLI's MCP plumbing (auto-restart supervisor deps, the
@@ -483,6 +488,18 @@ export interface Features {
   /** Structural AST search via ast-grep (`QUANTA_AST_GREP=1`). Default-OFF;
    *  appended to extraTools when the gate is on. */
   astGrepTools: Tool[]
+  /** B4 (jul-04 CLI-surfacing) — the SAME bounded capture holder the
+   *  `mcp_read_resource_dir` / `mcp_read_resource` tools write each fetch into
+   *  (present iff `QUANTA_MCP_RESOURCES` is on AND a capable server produced a
+   *  live `ResourcesHandle`). The surface reads this to wire `/mcp-resources`
+   *  over the EXACT ring the tools write into (one holder, both consumers — the
+   *  surface-mints→down-thread contract). Absent ⇒ the tools were not registered
+   *  ⇒ `/mcp-resources` stays "not wired" (byte-identical default-OFF).
+   *
+   *  The host bootstrap forwards `Features` opaquely as `BootstrapFeatures`, so
+   *  the surface narrows `boot.features` back to this CLI shape at the setup seam
+   *  to read the holder (mirrors the `mcpClients` narrow). */
+  mcpResourceCapture?: McpResourceCaptureHolder
 }
 
 /** B1 (jun-04) — the stable elicitation-lease context id the inbound-sampling
@@ -669,5 +686,15 @@ export const loadMcpToolsOrEmpty = async (
  *  security invariant for these tools). Knob off OR no capable server ⇒ `[]` ⇒
  *  the tools are absent + the registry is byte-identical. Extracted so
  *  {@link loadFeatures} stays under biome's cognitive-complexity cap. */
-export const buildMcpResourceTools = (resources: ResourcesHandle | undefined): Tool[] =>
-  runtimeConfig().mcpResources && resources !== undefined ? mcpResourcesTools(resources) : []
+export const buildMcpResourceTools = (
+  resources: ResourcesHandle | undefined,
+  /** B4 (jul-04 CLI-surfacing) — OPTIONAL surface-owned capture holder threaded
+   *  into the two fetch tools so `/mcp-resources` lists what the model fetched.
+   *  The SAME instance is returned on {@link Features.mcpResourceCapture} so the
+   *  surface reads the exact ring the tools write into (one holder, both
+   *  consumers). Absent ⇒ the tools are byte-identical (no capture). */
+  capture?: McpResourceCaptureHolder,
+): Tool[] =>
+  runtimeConfig().mcpResources && resources !== undefined
+    ? mcpResourcesTools(resources, capture)
+    : []

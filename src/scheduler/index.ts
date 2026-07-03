@@ -47,6 +47,27 @@ export {
   sqliteAutomationEngine,
   tickScheduler,
 } from "./automation-engine"
+// B2 (jul-04 CLI-surfacing) — `/cron` slash ← automation-engine adapter.
+export {
+  type CronCreateResult,
+  type CronInboxRow,
+  type CronRow,
+  type CronSlashAdapterDeps,
+  type CronSlashState,
+  createCronSlashAdapter,
+} from "./cron-slash-adapter"
+// B2 — cross-surface thread deeplink (pure)
+export {
+  buildThreadDeeplink,
+  parseThreadDeeplink,
+  THREAD_DEEPLINK_PREFIX,
+} from "./deeplink"
+// B2 — thread deeplink ROUTE resolver (the missing consumer; pure)
+export {
+  resolveThreadRoute,
+  THREAD_WEB_PARAM,
+  type ThreadRouteIntent,
+} from "./deeplink-route"
 // H8 — heartbeat creation-boundary invariants (pure).
 export {
   activeHeartbeatForThread,
@@ -57,18 +78,6 @@ export {
 export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
 // Model reroute
 export { chooseModel } from "./model-reroute"
-// B2 — cross-surface thread deeplink (pure)
-export {
-  buildThreadDeeplink,
-  parseThreadDeeplink,
-  THREAD_DEEPLINK_PREFIX,
-} from "./deeplink"
-// B2 — thread deeplink ROUTE resolver (the missing consumer; pure)
-export {
-  resolveThreadRoute,
-  type ThreadRouteIntent,
-  THREAD_WEB_PARAM,
-} from "./deeplink-route"
 // Evaluator
 export { computeNextFire, iterateFires } from "./next-fire"
 export type { RRuleParseResult } from "./rrule-parser"

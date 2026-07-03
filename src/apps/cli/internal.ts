@@ -43,6 +43,7 @@ import { gateOn, logger, type RunContext, runtimeConfig } from "@/shared"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
   astGrepTool,
+  createMcpResourceCaptureHolder,
   createProjectsKbStore,
   gitTools,
   type ProjectsKbSlot,
@@ -624,7 +625,17 @@ export const loadFeatures = async (
   } = await loadMcpToolsOrEmpty(mcpConfigs, elicitationPrompterFor, mcpLoadOpts)
   // N3 (QUANTA_MCP_RESOURCES) — the four `mcp_*` resource/prompt tools, gated on
   // the knob AND a live aggregate handle (see {@link buildMcpResourceTools}).
-  const mcpResourceTools = buildMcpResourceTools(mcpResources)
+  // B4 (jul-04 CLI-surfacing) — MINT one bounded capture holder ONLY when those
+  // tools will actually register (knob ON + a live handle), then thread the SAME
+  // instance INTO the tools (producer) AND up on `Features.mcpResourceCapture`
+  // (consumer) so `/mcp-resources` reads the exact ring the tools write into —
+  // the surface-mints→down-thread contract (one holder, no split-brain). Absent
+  // gate / handle ⇒ `undefined` ⇒ no capture, byte-identical default-OFF.
+  const mcpResourceCapture =
+    runtimeConfig().mcpResources && mcpResources !== undefined
+      ? createMcpResourceCaptureHolder()
+      : undefined
+  const mcpResourceTools = buildMcpResourceTools(mcpResources, mcpResourceCapture)
   const mcpTools: Tool[] = [...mcpBridgedTools, ...mcpResourceTools]
 
   // LSP-backed diagnostics: only when opted in. The tool name matches the
@@ -674,6 +685,9 @@ export const loadFeatures = async (
     lspNavTools,
     gitToolList,
     astGrepTools,
+    // B4 (jul-04) — forward the SAME capture holder the mcp resource tools write
+    // into (undefined when the gate/handle absent ⇒ `/mcp-resources` "not wired").
+    ...(mcpResourceCapture !== undefined ? { mcpResourceCapture } : {}),
   }
 }
 

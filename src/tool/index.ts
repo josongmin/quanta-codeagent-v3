@@ -373,6 +373,10 @@ export {
 // over the H19-landed `resources/*` + `prompts/*` methods). Output is mcp-origin
 // ⇒ the H2 untrusted-source envelope wraps it at dispatch.
 export {
+  type CapturedResourceChild,
+  type CapturedResourceDir,
+  createMcpResourceCaptureHolder,
+  DEFAULT_MCP_RESOURCE_CAPTURE_CAP,
   filterDirectChildren,
   type GetPromptInput,
   getPromptInputSchema,
@@ -383,6 +387,7 @@ export {
   listPromptsInputSchema,
   listResourcesInputSchema,
   listResourceTemplatesInputSchema,
+  type McpResourceCaptureHolder,
   mcpGetPromptTool,
   mcpListPromptsTool,
   mcpListResourcesTool,

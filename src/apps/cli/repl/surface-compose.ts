@@ -168,6 +168,15 @@ export interface ReplSurfaceWires {
   readonly setPlanQueueSendNow: (
     fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
   ) => void
+  /** B2 (jul-04 CLI-surfacing) — install the `/cron` (+ `/schedule`/`/inbox`)
+   *  automation slash slot once the loop mints the automation engine (the engine
+   *  is born INSIDE `runSessionLoop`, after this bundle is built). The loop builds
+   *  the thin `createCronSlashAdapter` over the live engine port and calls this
+   *  setter; the dispatch closure reads the slot LIVE. Until installed ⇒ `/cron`
+   *  prints "not wired" (default-OFF byte-identical). */
+  readonly setAutomationSlash: (
+    fn: import("../slash/cron-cmd").AutomationSlashState | undefined,
+  ) => void
   /** §steer — the conversation-action surface (weave/interrupt sinks +
    *  activeTurnRef), present only when `QUANTA_CONVERSATION_ACTIONS=1`. Threaded
    *  to the session loop's in-turn reader for weave/interrupt routing. */
@@ -544,6 +553,22 @@ export const composeSurfaceWires = (
     planQueueSendNow = fn
   }
 
+  // B2 (jul-04 CLI-surfacing) `/cron` — LATE-BIND automation slash slot. The
+  // automation engine is minted INSIDE `runSessionLoop` (after this wire bundle
+  // is built), so the `/cron`/`/schedule`/`/inbox` slot cannot be populated at
+  // compose time. Mirror the `sendNowSink` / `setPlanQueueSendNow` precedent: a
+  // surface-owned mutable slot the loop SETS once the engine exists, read LIVE by
+  // the dispatch closure (which builds its ctx per-invocation). Until installed,
+  // the slot is `undefined` ⇒ `/cron` prints "not wired" (default-OFF byte-
+  // identical). No stale/null deref: the getter reads the current value each
+  // dispatch, and the slash guards `ctx.automation === undefined`.
+  let automationSlash: import("../slash/cron-cmd").AutomationSlashState | undefined
+  const setAutomationSlash = (
+    fn: import("../slash/cron-cmd").AutomationSlashState | undefined,
+  ): void => {
+    automationSlash = fn
+  }
+
   // ADR-0294 — sessionIo: always wire from the V2 session store. The slash
   // remains the only consumer; tests inject their own ctx.sessionIo via the
   // typed slot.
@@ -585,12 +610,29 @@ export const composeSurfaceWires = (
   // (gate off) ⇒ `undefined` ⇒ slot omitted ⇒ `/kb` "not wired" (byte-identical).
   const projectsKbSlot = buildKbSlashSlot(setup.projectsKbStore)
 
+  // B4 (jul-04 CLI-surfacing) `/mcp-resources` — read-only snapshot getter over
+  // the SAME capture holder the `mcp_read_resource_dir` / `mcp_read_resource`
+  // tools write into (minted once in `loadFeatures`, forwarded via
+  // `setup.mcpResourceCapture`). Absent holder (gate off / no capable server ⇒
+  // tools not registered) ⇒ `undefined` ⇒ slot omitted ⇒ `/mcp-resources` prints
+  // "not wired" (byte-identical default-OFF). The holder's `CapturedResourceDir`
+  // is structurally the slash's `McpResourceDirRecord` (metadata only, no bodies).
+  const mcpResourcesSlot:
+    | (() => readonly import("../slash/mcp-resources-cmd").McpResourceDirRecord[])
+    | undefined =
+    setup.mcpResourceCapture !== undefined
+      ? () => setup.mcpResourceCapture?.snapshot() ?? []
+      : undefined
+
   const slashCtx = buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig),
     idleMonitor: setup.idleMonitor,
     // A3 (jul-04) `/kb` — read-only accounting over the SAME store the tool writes
     // into. Omitted when the gate is off (byte-identical).
     ...(projectsKbSlot !== undefined ? { projectsKb: projectsKbSlot } : {}),
+    // B4 (jul-04) `/mcp-resources` — read-only snapshot over the SAME capture the
+    // mcp fetch tools write into. Omitted when the holder is absent (byte-identical).
+    ...(mcpResourcesSlot !== undefined ? { mcpResources: mcpResourcesSlot } : {}),
     imageQueue: state.imageQueue,
     rewindState: state.rewindState,
     mcpSurface: setup.mcpSurface,
@@ -795,6 +837,10 @@ export const composeSurfaceWires = (
       planMode: setup.planMode,
       candidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
     }),
+    // B2 (jul-04) `/cron` — read the LATE-BOUND automation slash slot LIVE per
+    // dispatch (the loop installs it via `setAutomationSlash` once the engine is
+    // minted). Absent until installed ⇒ `/cron` prints "not wired".
+    automation: () => automationSlash,
   })
 
   return {
@@ -812,6 +858,9 @@ export const composeSurfaceWires = (
     setSideConversationStart,
     planQueueStore,
     setPlanQueueSendNow,
+    // B2 (jul-04) — the loop calls this once it mints the automation engine to
+    // install the live `/cron` slash slot (late-bind, mirrors setPlanQueueSendNow).
+    setAutomationSlash,
     // §steer — the inbound delivery surface: the conversation-action surface (for
     // weave/interrupt sinks + activeTurnRef) and the mutable mode ref. Both are
     // threaded to the session loop's in-turn reader.

@@ -8,6 +8,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { McpResourceCaptureHolder } from "./capture"
 import type { ResourcesHandle } from "./port"
 import { callPort, renderFailure, renderResourceDirList } from "./render"
 
@@ -16,7 +17,23 @@ export const readResourceDirInputSchema = z.object({
 })
 export type ReadResourceDirInput = z.infer<typeof readResourceDirInputSchema>
 
-export const mcpReadResourceDirTool = (port: ResourcesHandle): Tool<ReadResourceDirInput> => ({
+/** Options for {@link mcpReadResourceDirTool}. */
+export interface ReadResourceDirToolOptions {
+  /** B4 (jul-04) — OPTIONAL surface-owned capture holder. When threaded, EACH
+   *  successful read-dir is recorded (uri + the DIRECT children it returned) so
+   *  the `/mcp-resources` slash can list what was fetched. ABSENT ⇒ no capture
+   *  (byte-identical to the pre-surfacing tool). METADATA ONLY — the children's
+   *  uri/name/mimeType, never a resource body. */
+  readonly capture?: McpResourceCaptureHolder
+  /** Injected clock (test seam). Default `Date.now`. Only read when a capture
+   *  is threaded. */
+  readonly now?: () => number
+}
+
+export const mcpReadResourceDirTool = (
+  port: ResourcesHandle,
+  options: ReadResourceDirToolOptions = {},
+): Tool<ReadResourceDirInput> => ({
   name: "mcp_read_resource_dir",
   description:
     "List the DIRECT children of a directory-shaped MCP resource uri (from " +
@@ -44,6 +61,24 @@ export const mcpReadResourceDirTool = (port: ResourcesHandle): Tool<ReadResource
       const { output, failure } = renderFailure(r)
       yield { type: "result", result: { ok: false, output, failure } }
       return
+    }
+    // B4 (jul-04) — record the fetch into the surface-owned capture (metadata
+    // only) so `/mcp-resources` can list it. No-throw: a capture failure MUST
+    // never break the tool result (guarded so a misbehaving holder is inert).
+    if (options.capture !== undefined) {
+      try {
+        options.capture.record({
+          uri,
+          children: r.value.map((e) => ({
+            uri: e.uri,
+            ...(e.name !== undefined ? { name: e.name } : {}),
+            ...(e.mimeType !== undefined ? { mimeType: e.mimeType } : {}),
+          })),
+          at: (options.now ?? Date.now)(),
+        })
+      } catch {
+        /* capture is best-effort — never fail the read over a bookkeeping hiccup */
+      }
     }
     yield { type: "result", result: { ok: true, output: renderResourceDirList(uri, r.value) } }
   },

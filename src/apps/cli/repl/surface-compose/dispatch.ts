@@ -90,6 +90,13 @@ export const buildSurfaceDispatch = (args: {
    *  Present iff `QUANTA_BG_TURN` is on; absent ⇒ slot omitted ⇒ `/background`
    *  prints "not wired" (default-OFF byte-identical). */
   readonly background?: SlashContext["background"]
+  /** B2 (jul-04) — LATE-BOUND `/cron` (alias `/schedule`) + `/inbox` automation
+   *  slash slot. Read as a GETTER (not a value) because the automation engine is
+   *  minted INSIDE `runSessionLoop`, after this dispatch is built — the loop
+   *  installs the adapter via a surface setter and this getter resolves it LIVE
+   *  per invocation. Returns `undefined` until installed ⇒ `/cron` prints "not
+   *  wired" (default-OFF byte-identical). */
+  readonly automation?: () => SlashContext["automation"]
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -161,6 +168,13 @@ export const buildSurfaceDispatch = (args: {
       // Ticket 18 (§V1) — `/background` read-only portal view. Present only when
       // QUANTA_BG_TURN is on; absent ⇒ slot omitted ⇒ "not wired" (default-OFF).
       ...(args.background !== undefined ? { background: args.background } : {}),
+      // B2 (jul-04) — `/cron` late-bound automation slot, resolved LIVE per
+      // dispatch (the loop installs it once the engine is minted). Undefined
+      // until installed ⇒ `/cron` prints "not wired" (default-OFF byte-identical).
+      ...(() => {
+        const automation = args.automation?.()
+        return automation !== undefined ? { automation } : {}
+      })(),
     }
     await runSlashCommand(input, ctx)
     return true
