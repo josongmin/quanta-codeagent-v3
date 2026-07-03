@@ -33,7 +33,21 @@ import type { ContainerExec } from "./port"
  *  the command echo/early errors AND the final result; tail-only loses the start.
  *  NB: this is PER-STREAM at 8K (so total ≤ ~16K); `pty_read` caps the whole pane at 32K
  *  (`PTY_MAX_READ_OUTPUT`) — deliberately different scopes (one pane vs two separable streams). */
-const MAX_STREAM = 8 * 1024
+const DEFAULT_MAX_STREAM = 8 * 1024
+const STREAM_CAP_HARD_MAX = 32 * 1024
+
+/** P3-C (RFC jul-3): per-stream cap, env-tunable via `QUANTA_TB_STREAM_CAP`. Unset / non-numeric /
+ *  ≤0 ⇒ the 8K default (byte-identical). A set value is floored and CLAMPED to `[1024, 32768]` so a
+ *  fat env can never blow the transcript / token budget (pty_read's 32K is the precedent ceiling). PURE. */
+export const resolveStreamCap = (env: Record<string, string | undefined>): number => {
+  const raw = env.QUANTA_TB_STREAM_CAP
+  if (raw === undefined || raw.trim() === "") return DEFAULT_MAX_STREAM
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_MAX_STREAM
+  return Math.min(Math.max(Math.floor(n), 1024), STREAM_CAP_HARD_MAX)
+}
+
+const MAX_STREAM = resolveStreamCap(process.env)
 
 const cap = (s: string): string => {
   if (s.length <= MAX_STREAM) return s

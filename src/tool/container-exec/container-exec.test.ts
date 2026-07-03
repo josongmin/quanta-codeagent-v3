@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { ToolContext, ToolEvent } from "../types"
 import { dockerContainerExec } from "./docker-backend"
 import type { ContainerExec, ContainerExecResult } from "./port"
-import { containerExecTool } from "./tool"
+import { containerExecTool, resolveStreamCap } from "./tool"
 
 const ctx = { signal: new AbortController().signal } as ToolContext
 const run = async (tool: ReturnType<typeof containerExecTool>, input: unknown) => {
@@ -37,6 +37,26 @@ describe("container_exec tool — exit-code completion + head/tail cap (RFC §13
     expect(r.ok).toBe(true) // command ran — agent reasons over the exit code
     expect(r.output).toContain("exit: 1")
     expect(r.output).toContain("boom")
+  })
+
+  // P1-A (RFC jul-3) — the load-bearing wire: the tool MUST carry the exit code on the TYPED
+  // `evidence` seam (not just in the output text), because dispatch flattens `evidence.exitCode`
+  // onto the tool_result AgentEvent that OC1 / verify-gate read. A crash is `{ok:true, code:2}`;
+  // if this seam breaks, OC1's crash detection silently rubber-stamps every crash as clean.
+  // RED-on-injection: delete the `evidence:{…}` block in tool.ts ⇒ this assertion fails.
+  test("carries exit code + executedCommand on the typed evidence seam (OC1 crash wire)", async () => {
+    const tool = containerExecTool(fakePort(async () => ({ stdout: "Traceback", stderr: "", code: 2 })))
+    const r = await run(tool, { command: "python /app/convert.py" })
+    expect(r.ok).toBe(true)
+    expect(r.evidence?.exitCode).toBe(2)
+    expect(r.evidence?.executedCommand).toBe("python /app/convert.py")
+  })
+
+  test("resolveStreamCap (P3-C): default 8K; env-tunable clamped to [1024,32768]", () => {
+    expect(resolveStreamCap({})).toBe(8 * 1024) // unset ⇒ byte-identical default
+    expect(resolveStreamCap({ QUANTA_TB_STREAM_CAP: "16384" })).toBe(16384)
+    expect(resolveStreamCap({ QUANTA_TB_STREAM_CAP: "999999" })).toBe(32768) // clamped to hard max
+    expect(resolveStreamCap({ QUANTA_TB_STREAM_CAP: "not-a-number" })).toBe(8 * 1024) // parse-guard
   })
 
   test("head+tail caps huge output (no transcript flood)", async () => {
