@@ -113,8 +113,6 @@ export {
 // hint if the binary is missing). Read-only + concurrency-safe.
 export { astGrepTool } from "./ast-grep"
 export { automationUpdateTool } from "./automation_update"
-// B2 — cross-surface handoff leaf tool (shares the automation-engine gate).
-export { threadsHandoffTool } from "./threads_handoff"
 // ADR-0296 — async-shell sibling tools to `bash` (timeout_behavior=background).
 export {
   type BashAwaitInput,
@@ -375,9 +373,9 @@ export {
 // over the H19-landed `resources/*` + `prompts/*` methods). Output is mcp-origin
 // ⇒ the H2 untrusted-source envelope wraps it at dispatch.
 export {
+  filterDirectChildren,
   type GetPromptInput,
   getPromptInputSchema,
-  filterDirectChildren,
   type HandleResult as ResourcesHandleResult,
   type ListPromptsInput,
   type ListResourcesInput,
@@ -397,12 +395,12 @@ export {
   type PromptResult,
   type ReadResourceDirInput,
   type ReadResourceInput,
-  readResourceDirInputSchema,
   type ResourceBlock,
   type ResourceEntry,
   type ResourcesFailureReason,
   type ResourcesHandle,
   type ResourceTemplateEntry,
+  readResourceDirInputSchema,
   readResourceInputSchema,
 } from "./mcp_resources"
 // MCP tasks tools (ADR-0196). Caller-wired: registered only when the apps
@@ -494,6 +492,28 @@ export {
   pollDeferredInputSchema,
   pollDeferredTool,
 } from "./poll_deferred"
+// A3 — Projects knowledge-base (context-offloading KB leaf). Caller-wired via
+// `DefaultToolPorts.projectsKb` (default-OFF; the composition root mints a
+// `createProjectsKbStore()` and threads the slot when `QUANTA_PROJECTS_KB` is
+// on). The store + slot + knob-default constants are re-exported here so the
+// composition root wires the slot with ONE `@/tool` import (mirrors
+// `createFileHistoryStore`). The "never enters context" invariant lives in the
+// tool: project_write returns ONLY metadata (doc_uuid + byte size).
+export {
+  createProjectsKbStore,
+  DEFAULT_PROJECTS_KB_MAX_KNOWLEDGE_BYTES,
+  DEFAULT_PROJECTS_KB_RAG_THRESHOLD_BYTES,
+  type ProjectsKbBackendPort,
+  type ProjectsKbDocMeta,
+  type ProjectsKbHit,
+  type ProjectsKbInput,
+  type ProjectsKbKnowledge,
+  type ProjectsKbSlot,
+  type ProjectsKbStore,
+  type ProjectsKbStoreOpts,
+  projectsKbTool,
+  renderKnowledge as renderProjectsKbKnowledge,
+} from "./projects-kb"
 // N6 (jun-4-pty-attach.md) — PTY/tmux session attach tools + the tmux backend.
 // Caller-wired via `DefaultToolPorts.ptySession` (default-OFF; host wires a
 // backend when `QUANTA_PTY_ATTACH === "1"`). `createTmuxAdapter` is the MVP-A
@@ -593,6 +613,8 @@ export {
   subagentPollInputSchema,
   subagentPollTool,
 } from "./subagent-bg"
+// B2 — cross-surface handoff leaf tool (shares the automation-engine gate).
+export { threadsHandoffTool } from "./threads_handoff"
 export type {
   ActiveWorktree,
   BlockerSurface,

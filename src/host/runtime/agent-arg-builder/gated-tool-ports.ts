@@ -26,6 +26,7 @@ import {
   buildDefaultTools,
   createFileHistorySink,
   createFileHistoryStore,
+  createProjectsKbStore,
   createTmuxAdapter,
   type DefaultToolPorts,
   type FileHistorySink,
@@ -203,6 +204,24 @@ const resolveEffectiveArtifactRegistry = (
   shared: ReturnType<typeof createArtifactRegistry> | undefined,
 ): ReturnType<typeof createArtifactRegistry> | undefined =>
   shared ?? resolveArtifactRegistrySlice(process.env)
+
+/** A3 — resolve the spread-ready `projectsKb` slot (`{}` when the knob is OFF so
+ *  the tool menu stays byte-identical). When `QUANTA_PROJECTS_KB` is on, mint ONE
+ *  per-session `createProjectsKbStore()` (real `Date.now` clock + the store's own
+ *  monotonic `pkb-<seq>` id factory + measure-first knob-DEFAULTED thresholds) and
+ *  set it as `DefaultToolPorts.projectsKb.store`. The optional KB-namespace
+ *  `SearchPipeline` is NOT reachable at this pre-assembler layer (like appshot's
+ *  BrowserPort), so it is intentionally omitted — the tool falls back to the
+ *  store's body-FREE lexical search (fail-soft), still leak-safe. Wiring the real
+ *  KB-scoped pipeline where the retrieval index lives is the remaining
+ *  adapter-assembly step (REPORTED). Extracted so the (knob × mint) choice adds no
+ *  cognitive-complexity to `buildGatedToolPorts`. */
+const resolveProjectsKbSlot = (
+  env: NodeJS.ProcessEnv,
+): { projectsKb: NonNullable<DefaultToolPorts["projectsKb"]> } | Record<string, never> =>
+  gateOn(env, "QUANTA_PROJECTS_KB")
+    ? { projectsKb: { store: createProjectsKbStore({ now: () => Date.now() }) } }
+    : {}
 
 /** Spread-ready `DefaultToolPorts.fileHistory` slot (the tool read side). `{}`
  *  when the slice is absent ⇒ `buildGatedToolPorts` literal carries no branch. */
@@ -395,6 +414,15 @@ export const buildGatedToolPorts = (
     // is the real `Date.now` and — when the artifact store is ALSO on — the SAME
     // registry is the artifact sink (final scaffold registered as a Canvas item).
     ...resolveAppshotSlot(cfg.appshot, seams, artifactRegistry),
+    // A3 (Projects knowledge-base) — gated `projects_kb` context-offloading tool.
+    // Default-OFF: tool menu byte-identical unless QUANTA_PROJECTS_KB is on. Mints
+    // ONE per-session KB store (real clock; the store owns its bounded oldest-
+    // evicted ring + measure-first byte thresholds). The optional KB-namespace
+    // SearchPipeline is not reachable at this layer ⇒ omitted (lexical fallback).
+    // The "never enters context" invariant lives in the tool (project_write
+    // returns ONLY metadata). Resolved by the extracted helper so the (knob × mint)
+    // choice adds no complexity here.
+    ...resolveProjectsKbSlot(env),
   }
 }
 

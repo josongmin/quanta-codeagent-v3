@@ -125,6 +125,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder/gated-tool-ports.ts",
   },
   {
+    envKey: "QUANTA_PROJECTS_KB",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "A3 projects_kb context-offloading KB tool gate — mints a per-session ProjectsKbStore.",
+    readSite: "host/runtime/agent-arg-builder/gated-tool-ports.ts",
+  },
+  {
     envKey: "QUANTA_ENABLE_STRUCTURED_PATCH",
     kind: "bool",
     default: false,

@@ -60,6 +60,7 @@ const DRIVEN = [
   "QUANTA_APPSHOT",
   "QUANTA_ARTIFACT_STORE",
   "QUANTA_MCP_RESOURCES",
+  "QUANTA_PROJECTS_KB",
   "QUANTA_PROVIDER",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
@@ -277,6 +278,89 @@ describe("composition-root ptySession — QUANTA_PTY_ATTACH", () => {
     // The tool maps the adapter's typed foreign-denied PtyResult to ok:false.
     expect(res.block.type).toBe("tool_result")
     expect(res.ok).toBe(false)
+  })
+})
+
+// ─────────────────────────── projectsKb (A3) ───────────────────────────────
+//
+// A3 wire closure: the composition root must mint a `createProjectsKbStore()`
+// and set `DefaultToolPorts.projectsKb` when QUANTA_PROJECTS_KB is on, so
+// `projects_kb` appears in a REAL session's registry. OFF ⇒ no slot ⇒ tool
+// absent + byte-identical menu. A dispatch through the real registry proves the
+// wired store is live AND that the "never enters context" leak invariant holds
+// across the production dispatch path (not just the unit-level tool test).
+
+const PKB_SENTINEL = "ZZ_CROOT_SENTINEL_a71f_NEVER_LEAK"
+
+describe("composition-root projectsKb — QUANTA_PROJECTS_KB", () => {
+  test("OFF ⇒ projects_kb ABSENT from the baseline menu (byte-identity pinned by the ON test's paired-control)", () => {
+    const baseline = baselineNames()
+    expect(toolNamed(baseline, "projects_kb")).toBe(false)
+  })
+
+  test("ON ⇒ projects_kb REGISTERED via the real composition root (store minted on the gate)", () => {
+    const baseline = baselineNames()
+    process.env.QUANTA_PROJECTS_KB = "1"
+    const on = registryNamesFromRoot()
+    expect(toolNamed(on, "projects_kb")).toBe(true)
+    // Only projects_kb is added over the baseline (no cross-bleed).
+    expect(on.filter((n) => !baseline.includes(n))).toEqual(["projects_kb"])
+  })
+
+  test("ON ⇒ projects_kb ACTIVATES through dispatch: write→read is metadata-only, the doc body NEVER enters the model surface", async () => {
+    process.env.QUANTA_PROJECTS_KB = "1"
+    __resetRuntimeConfig()
+    const base = buildBaseFromArgs(partial())
+    const dir = mkdtempSync(join(tmpdir(), "croot-pkb-"))
+    try {
+      await Bun.write(join(dir, "secret.txt"), `preamble ${PKB_SENTINEL} trailer`)
+      // write: indexes the local file through the wired store; returns ONLY meta.
+      const wrote = await dispatchTool(
+        call("projects_kb", { op: "project_write", local_path: "secret.txt" }),
+        config(base.registry as ToolRegistry, dir),
+        BYPASS,
+      )
+      expect(wrote.ok).toBe(true)
+      // metadata IS present (a doc_uuid the model can act on) …
+      expect(JSON.stringify(wrote.block)).toContain("pkb-")
+      // … but the raw doc body is NOT.
+      expect(JSON.stringify(wrote.block)).not.toContain(PKB_SENTINEL)
+      // info: knowledge{} accounting reflects the REAL indexed byte count (store
+      // is live — a fresh/unwired store would report knowledge_size=0).
+      const info = await dispatchTool(
+        call("projects_kb", { op: "project_info" }),
+        config(base.registry as ToolRegistry, dir),
+        BYPASS,
+      )
+      expect(info.ok).toBe(true)
+      const infoStr = JSON.stringify(info.block)
+      expect(infoStr).not.toContain(PKB_SENTINEL)
+      // proves the SAME wired store retained the doc across dispatch calls.
+      expect(infoStr).toMatch(/knowledge_size["\s:=]+[1-9]/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("ON but a jail-escaping path ⇒ typed ok:false through the real dispatch (no throw past the loop, nothing indexed)", async () => {
+    process.env.QUANTA_PROJECTS_KB = "1"
+    __resetRuntimeConfig()
+    const base = buildBaseFromArgs(partial())
+    const cfg = config(base.registry as ToolRegistry, "/repo")
+    const res = await dispatchTool(
+      call("projects_kb", { op: "project_write", local_path: "/etc/passwd" }),
+      cfg,
+      BYPASS,
+    )
+    expect(res.block.type).toBe("tool_result")
+    expect(res.ok).toBe(false)
+    // Red-on-injection guard: the ok:false must be the JAIL refusing the write
+    // BEFORE indexing — NOT an unrelated dispatch error. Prove nothing was
+    // indexed into the live wired store (knowledge_size stays 0). This fails if
+    // the jail were bypassed (the escape would index /etc/passwd's bytes).
+    const info = await dispatchTool(call("projects_kb", { op: "project_info" }), cfg, BYPASS)
+    expect(info.ok).toBe(true)
+    expect(JSON.stringify(info.block)).toMatch(/knowledge_size["\s:=]+0\b/)
   })
 })
 
