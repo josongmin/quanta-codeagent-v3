@@ -247,6 +247,9 @@ interface Run {
     //   false = gold FAILED / verifier broken → NOT a model miss, exclude from blame
     //   undefined = not checked
     goldResolved?: boolean
+    // P1-C/D1 (RFC jul-3): a harbor INFRA fault (agent-timeout/crash), NOT a capability miss —
+    // excluded from the TB miss denominator by tbOurResults.
+    error?: { kind: string }
   }[]
 }
 
@@ -442,6 +445,9 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
   if (report === null || !Array.isArray(report.perInstance)) return null
   const perInstance: Run["perInstance"] = report.perInstance.map((pi) => {
     const row = asRecord(pi)
+    // D1: carry the infra-fault classification through so tbOurResults can exclude it.
+    const errRec = asRecord(row?.error)
+    const errKind = errRec !== null && typeof errRec.kind === "string" ? errRec.kind : undefined
     return {
       id: asString(row?.id) ?? "",
       passed: row?.passed === true,
@@ -450,6 +456,7 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
       fail: classifyFail(pi),
       // Only the explicit boolean is meaningful — absent stays absent (not checked).
       ...(typeof row?.goldResolved === "boolean" ? { goldResolved: row.goldResolved } : {}),
+      ...(errKind !== undefined ? { error: { kind: errKind } } : {}),
     }
   })
   const resolved = perInstance.filter((p: (typeof perInstance)[number]) => p.passed).length

@@ -776,3 +776,39 @@ describe("realMiss card excludes re-runnable holes (FLAG-C)", () => {
     expect(html).toContain('<div class="n">1</div><div class="l">진짜 격차</div>')
   })
 })
+
+describe("tbOurResults (D1/P1-C) — infra-fault exclusion + explicit arm routing", () => {
+  const runTbOur = (DATA: unknown) => {
+    const src = ['var BENCH="terminal-bench";', extractFn("tbOurResults"), "return tbOurResults();"].join("\n")
+    return new Function("DATA", src)(DATA) as { base: Record<string, unknown>; lev: Record<string, unknown> }
+  }
+  test("agent-crash is EXCLUDED (not a miss); agent-timeout STAYS a fail; pass kept", () => {
+    const out = runTbOur({
+      runs: [
+        {
+          datasetFamily: "terminal-bench",
+          arm: "levers",
+          preset: "x",
+          perInstance: [
+            { id: "crashed", passed: false, error: { kind: "agent-crash" } },
+            { id: "timedout", passed: false, error: { kind: "agent-timeout" } },
+            { id: "solved", passed: true },
+          ],
+        },
+      ],
+    })
+    expect("crashed" in out.lev).toBe(false) // infra crash excluded from the denominator
+    expect(out.lev.timedout).toBe(false) // timeout stays a genuine miss (competitors score it 0 too)
+    expect(out.lev.solved).toBe(true)
+  })
+  test("explicit report.arm routes over the preset substring (an oc1 run does NOT poison baseline)", () => {
+    const out = runTbOur({
+      runs: [
+        // preset lacks "levers" but arm says levers ⇒ must land in lev, NOT base.
+        { datasetFamily: "terminal-bench", arm: "levers", preset: "TB +oc1", perInstance: [{ id: "t", passed: true }] },
+      ],
+    })
+    expect(out.lev.t).toBe(true)
+    expect("t" in out.base).toBe(false)
+  })
+})
