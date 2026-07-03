@@ -371,7 +371,7 @@ describe("terminal brain-mode (B3) — drives the loop over the brain↔hands du
         .join("\n")
     }
 
-    test("knob ON ⇒ the FULL self-test discipline body reaches the model (after the operator guide)", async () => {
+    test("knob ON ⇒ the FULL self-test discipline rides the SYSTEM prompt (lost-in-the-middle: durable head, not the buried first user turn)", async () => {
       const { stdin, stdout, endIn } = makeStdio()
       const llm = new FakeLlm(execThenDoneScripts("echo hi"))
       await runTerminalBrain({
@@ -383,17 +383,17 @@ describe("terminal brain-mode (B3) — drives the loop over the brain↔hands du
         writeReport: () => undefined,
         env: { [TB_SELF_TEST_ENV]: "1" },
       })
-      const text = firstUserText(llm)
-      // The FULL body (not just a header) rode into the instruction turn — a drop goes RED here.
-      expect(text).toContain(SELF_TEST_DISCIPLINE)
-      // It rides AFTER the operator guide and BEFORE the task, on the same turn.
-      expect(text).toContain(TERMINAL_OPERATOR_GUIDE)
-      expect(text.indexOf(TERMINAL_OPERATOR_GUIDE)).toBeLessThan(text.indexOf(SELF_TEST_DISCIPLINE))
-      expect(text.indexOf(SELF_TEST_DISCIPLINE)).toBeLessThan(text.indexOf("write fib(n)"))
+      const system = firstSystemText(llm)
+      // The FULL body (not just a header) rides the SYSTEM prompt — a drop goes RED here.
+      expect(system).toContain(SELF_TEST_DISCIPLINE)
+      // …and NOT on the first user turn (which sinks into the middle of a long trajectory).
+      expect(firstUserText(llm)).not.toContain(SELF_TEST_DISCIPLINE)
+      // The user turn keeps the frozen guide+task shape — the discipline moved OUT of it.
+      expect(firstUserText(llm)).toContain(`${TERMINAL_OPERATOR_GUIDE}\n\n# Task\nwrite fib(n)`)
       endIn()
     })
 
-    test("knob OFF (default) ⇒ the instruction turn is byte-identical: NO discipline block", async () => {
+    test("knob OFF (default) ⇒ BOTH the system prompt AND the instruction turn are byte-identical: NO discipline block", async () => {
       const { stdin, stdout, endIn } = makeStdio()
       const llm = new FakeLlm(execThenDoneScripts("echo hi"))
       await runTerminalBrain({
@@ -404,6 +404,7 @@ describe("terminal brain-mode (B3) — drives the loop over the brain↔hands du
         llm,
         writeReport: () => undefined,
       })
+      expect(firstSystemText(llm)).not.toContain(SELF_TEST_DISCIPLINE)
       const text = firstUserText(llm)
       expect(text).not.toContain(SELF_TEST_DISCIPLINE)
       // The frozen turn shape is preserved: guide, blank line, then the task header — nothing spliced.

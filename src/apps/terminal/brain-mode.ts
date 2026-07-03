@@ -795,13 +795,16 @@ export const runTerminalBrain = async (
   // sees its terminal-surface operating habits before the task. (The surface fence forbids reaching
   // a sibling host hook to splice it into the static system prompt; threading it onto the first user
   // turn is a real, observable injection and keeps this slice self-contained.)
-  // S1 (`QUANTA_TB_SELF_TEST`, default-OFF): append the spec-derived self-test discipline between the
-  // guide and the task. Default-OFF ⇒ the block is absent ⇒ turnText byte-identical to today.
+  const turnText = `${surface.operatorGuide}\n\n# Task\n${opts.instruction}`
+
+  // S1 (`QUANTA_TB_SELF_TEST`, default-OFF): the self-test DISCIPLINE is a DURABLE constraint (the
+  // agent must keep self-testing across a long trajectory), so it belongs in the SYSTEM prompt — the
+  // U-shaped-attention head that stays STRONG every turn — not on the first user turn, which sinks
+  // into the lost-in-the-middle zone once the trajectory grows (a 30-turn make-mips run would bury a
+  // first-turn discipline; the env-posture rules already ride the system prompt for exactly this
+  // reason). Composed below via `boot.systemSource` AFTER the env-posture swap (so it appends to
+  // whichever posture is active). Default-OFF ⇒ system prompt byte-identical.
   const selfTestOn = gateOn(opts.env ?? {}, TB_SELF_TEST_ENV)
-  const guideBlock = selfTestOn
-    ? `${surface.operatorGuide}\n\n${SELF_TEST_DISCIPLINE}`
-    : surface.operatorGuide
-  const turnText = `${guideBlock}\n\n# Task\n${opts.instruction}`
 
   const verifyGateOn = gateOn(opts.env ?? {}, TB_VERIFY_GATE_ENV)
   const outputContractOn = gateOn(opts.env ?? {}, TB_OUTPUT_CONTRACT_ENV)
@@ -839,6 +842,13 @@ export const runTerminalBrain = async (
         }),
       )
       envOwnedApplied = true
+    }
+    // S1 self-test discipline → SYSTEM prompt (lost-in-the-middle alignment). Appended AFTER the
+    // env-posture swap so it rides whichever posture is active (frozen or owned). Read every turn via
+    // `systemSource.get()`, so unlike a first-user-turn block it stays in the strong-attention head of
+    // a long trajectory. Default-OFF ⇒ this block is skipped ⇒ system prompt byte-identical.
+    if (selfTestOn) {
+      boot.systemSource.set(`${boot.systemSource.get()}\n\n${SELF_TEST_DISCIPLINE}`)
     }
     const { runtime: facade } = await createRuntimeFromBootstrap({
       boot,
