@@ -19,7 +19,7 @@ import {
   isSelfTestCommand,
   outputContractVerdict,
   type VerificationState,
-} from "./verify-gate"
+} from "./index"
 
 /** Build a `tool_call` AgentEvent. */
 const call = (id: string, name: string, input: unknown): AgentEvent => ({
