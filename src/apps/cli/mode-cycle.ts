@@ -75,6 +75,37 @@ export const MODE_CYCLE: readonly ModeCyclePosture[] = [
  *  reduce clutter — see status-pills `formatCyclePosture`). */
 export const DEFAULT_POSTURE: ModeCyclePosture = MODE_CYCLE[0] as ModeCyclePosture
 
+/**
+ * B1 (jul-03) — the `onboarding` rung.
+ *
+ * `onboarding` is an IDENTITY posture (first-session priming), NOT a permission
+ * posture, so it is DELIBERATELY kept OUT of the 4-rung permission {@link MODE_CYCLE}
+ * that shift+tab cycles: cycling permission postures must never land the user in a
+ * rung with no permission meaning (`onboarding` is `IdentityMode = AgentMode |
+ * "onboarding"` — it is NOT an `AgentMode`, so it cannot project onto a
+ * `permissionMode`/`agentMode` the way every {@link MODE_CYCLE} rung does — see
+ * `resolveIdentitySystemPrompt` in agent-arg-builder). Instead it is a distinct,
+ * explicitly-named identity rung the `/onboard` + `/identity onboarding` slash
+ * paths target, so onboarding is reachable BEYOND the `--identity-mode onboarding`
+ * launch flag. `key` is the identity token the surface hands to the identity
+ * provider; `label`/`desc`/`color` mirror the {@link ModeCyclePosture} render
+ * vocabulary so a future identity-cycle UI can paint it with the same chrome. */
+export interface OnboardingRung {
+  readonly key: "onboarding"
+  readonly label: string
+  readonly color: ModeCyclePosture["color"]
+  readonly desc: string
+}
+
+/** The single onboarding identity rung (SSOT for the `/onboard` + identity
+ *  wiring). Not spliced into {@link MODE_CYCLE} — see {@link OnboardingRung}. */
+export const ONBOARDING_RUNG: OnboardingRung = {
+  key: "onboarding",
+  label: "ONBOARDING",
+  color: "yellow",
+  desc: "first-session priming — explicit, asks before mutating",
+} as const
+
 /** Look a posture up by key. Unknown key (defensive) ⇒ the default rung. */
 export const postureByKey = (key: string): ModeCyclePosture =>
   MODE_CYCLE.find((p) => p.key === key) ?? DEFAULT_POSTURE

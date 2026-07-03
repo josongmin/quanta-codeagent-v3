@@ -227,6 +227,16 @@ export interface SlashContext {
    *  `/activity` render is untouched). Duck-typed via `@/shared` so this contract
    *  never imports activity/stream VALUES. */
   readonly itemStreamSink?: import("@/shared").ItemStreamSink | undefined
+  /** S2 unified-observability (jul-03) `/activity` — read-only snapshot of the
+   *  bounded {@link import("./repl/item-store").ItemStore} the fleet snapshot is
+   *  pumped INTO (the SAME store `itemStreamSink` captures onto). `/activity`
+   *  renders these as a "Subagent items" section so `QUANTA_ITEM_STREAM` produces
+   *  VISIBLE rows instead of `logger.debug`-only sink writes. Present iff the
+   *  surface minted an ItemStore (gated on `QUANTA_ITEM_STREAM`); absent ⇒
+   *  `/activity` omits the section (byte-identical). */
+  readonly activityItems?:
+    | (() => readonly import("./repl/item-store").RetainedItem[])
+    | undefined
   /** ADR-0231 `/radar` — the radar proposal-queue store. The SAME instance the
    *  agent loop's producer hook writes to (`AgentConfig.radar.store`), threaded
    *  by surface-compose ONLY when `QUANTA_RADAR` is on so list/adopt/dismiss/
@@ -243,6 +253,31 @@ export interface SlashContext {
    *  `/background` prints "not wired" + exit 0 (default-OFF byte-identical).
    *  The view CANNOT detach a new turn nor re-enter the loop. */
   readonly background?: import("./repl/background-turn-portal").BackgroundPortalView | undefined
+  /** A3 (jul-03) `/kb` — read-only Projects knowledge-base accounting wire. The
+   *  `projects_kb` context-offloading tool is model-invoke-only; this slot lets
+   *  `/kb` render the SAME `knowledge{}` byte-budget accounting the model sees, so
+   *  the operator can inspect what's been offloaded. Present iff `QUANTA_PROJECTS_KB`
+   *  is on AND the store is reachable at the surface; absent ⇒ `/kb` prints "not
+   *  wired" + exit 0 (default-OFF byte-identical). Bodies are NEVER exposed. */
+  readonly projectsKb?: import("./slash/kb-cmd").KbSlashState | undefined
+  /** B4 (jul-03) `/mcp-resources` — read-only snapshot of the resource dirs
+   *  fetched via `mcp_read_resource_dir` + any blob-to-disk paths. Present iff the
+   *  surface captured resource-dir reads; absent ⇒ `/mcp-resources` prints "not
+   *  wired" + exit 0 (default-OFF byte-identical). */
+  readonly mcpResources?:
+    | (() => readonly import("./slash/mcp-resources-cmd").McpResourceDirRecord[])
+    | undefined
+  /** S1 (jul-03) `/browser-net` — read-only getter over the last browser
+   *  network-capture + locator summary. Present iff the surface captured a browser
+   *  result; absent ⇒ `/browser-net` prints "not wired" + exit 0. */
+  readonly browserNet?:
+    | (() => import("./slash/browser-net-cmd").BrowserNetSnapshot | undefined)
+    | undefined
+  /** B2 (jul-03) `/cron` (alias `/schedule`) + `/inbox` — the automation-engine
+   *  slash wire (list/create schedules + read the notification inbox). Present iff
+   *  `QUANTA_AUTOMATION` is on AND the engine is reachable; absent ⇒ the commands
+   *  print "not wired" + exit 0 (default-OFF byte-identical). */
+  readonly automation?: import("./slash/cron-cmd").AutomationSlashState | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

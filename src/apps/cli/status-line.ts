@@ -67,6 +67,15 @@ const viewPercent = (b: SegmentedUsageView): number => {
   return Math.min(100, Math.round((b.total / b.max) * 100))
 }
 
+/** S3 (jul-03) — codex-rs `% context left` gauge value: the REMAINING share of
+ *  the window (100 − used%), clamped 0..100. Never NaN. Codex renders the head
+ *  as `Context N% left`; a full window is `0% left`, a fresh one `100% left`. */
+const viewPercentLeft = (b: SegmentedUsageView): number => 100 - viewPercent(b)
+
+/** S3 — raw tokens left in the window (max − total, floored at 0). Feeds the
+ *  codex `You have N tokens left in this context window.` annotation. */
+const viewTokensLeft = (b: SegmentedUsageView): number => Math.max(0, b.max - b.total)
+
 /** Fixed cell width of the segmented bar. */
 export const SEGMENTED_BAR_CELLS = 24
 
@@ -105,7 +114,6 @@ const allocateCells = (tokens: readonly number[], total: number, cells: number):
  *   `  ▒ Conversation  16.8k (22%)`
  */
 export const formatSegmentedUsage = (b: SegmentedUsageView): string => {
-  const pct = viewPercent(b)
   const cellsPerSegment = allocateCells(
     b.segments.map((s) => s.tokens),
     b.total,
@@ -120,12 +128,19 @@ export const formatSegmentedUsage = (b: SegmentedUsageView): string => {
   }
   bar += EMPTY_CELL.repeat(Math.max(0, SEGMENTED_BAR_CELLS - used))
 
-  const fullness = pct >= 100 ? "Full" : `${pct}% Full`
-  const head = `[${bar}] ${formatTokens(b.total)}/${formatTokens(b.max)} · ${fullness}${
+  // S3 (jul-03) — codex-rs `Context N% left` head (REMAINING, not used). The
+  // token counter is kept as `used/max` for the segment legend that follows, but
+  // the headline value now matches codex's `% context left` phrasing so a user
+  // reads "how much room is left" at a glance (parity with codex-rs
+  // `bottom_pane`'s `Context N% left`).
+  const left = viewPercentLeft(b)
+  const head = `[${bar}] ${formatTokens(b.total)}/${formatTokens(b.max)} · Context ${left}% left${
     b.model !== undefined && b.model !== "" ? ` · ${b.model}` : ""
   }`
 
   const lines: string[] = [head]
+  // S3 — codex `You have N tokens left in this context window.` annotation.
+  lines.push(`  ${formatTokens(viewTokensLeft(b))} tokens left in this context window`)
   for (let i = 0; i < b.segments.length; i++) {
     const s = b.segments[i]
     if (s === undefined) continue

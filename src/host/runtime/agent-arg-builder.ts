@@ -343,7 +343,11 @@ export const resolveIdentitySystemPrompt = (
     // the mode-variant registry (`buildSystemPromptForMode` is `ModeVariantKey`-
     // typed and would type-error). Resolve its identity lines directly through
     // the identity provider instead. No mode-variant registry is published for
-    // it — `/identity` (ModeVariantKey-keyed) never targets onboarding.
+    // it. This is the LAUNCH-time path (`--identity-mode onboarding`); the
+    // in-session path is `/onboard` + `/identity onboarding`, which the CLI
+    // identity adapter (identity-mode-adapter.ts) routes through its dedicated
+    // `onOnboarding` hook (also NOT the ModeVariantKey registry), so onboarding is
+    // now reachable BOTH at launch AND mid-session.
     if (cliIdentityMode === "onboarding") {
       const identity = defaultIdentityProvider().identityFor("onboarding")
       return { system: buildSystemPrompt(process.cwd(), { identity }) }

@@ -47,6 +47,7 @@ import {
   createConversationActionSurface,
 } from "./conversation-action-surface"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { createItemStore } from "./item-store"
 import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
 import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
 import {
@@ -545,13 +546,23 @@ export const composeSurfaceWires = (
   // SAME `item-subagent-<id>` join key the projector's `subagent_cancel` arm and
   // both wire transports use. NO-THROW inside the pump (fail-silent) so a logging
   // hiccup can never break the `/activity` render. */
-  const itemStreamSink: ItemStreamSink | undefined = itemStreamEnabled(envSource)
-    ? {
-        capture: (item) => {
-          logger.debug(`item-stream fleet core: ${JSON.stringify(item)}`)
-        },
-      }
-    : undefined
+  // S2 (jul-03) — the sink is now a BOUNDED in-memory ItemStore (was
+  // `logger.debug`-only, so `QUANTA_ITEM_STREAM` produced ZERO visible rows). The
+  // store IS an `ItemStreamSink` (the fleet pump captures into it) AND a snapshot
+  // source `/activity` renders as a "Subagent items" section. Still presence-gated
+  // on `QUANTA_ITEM_STREAM` at the composition root ⇒ absent ⇒ no pump, no section
+  // (byte-identical default-OFF). Kept as a `logger.debug` breadcrumb too so the
+  // structured-log plane still sees each core.
+  const itemStore = itemStreamEnabled(envSource) ? createItemStore() : undefined
+  const itemStreamSink: ItemStreamSink | undefined =
+    itemStore !== undefined
+      ? {
+          capture: (item) => {
+            itemStore.capture(item)
+            logger.debug(`item-stream fleet core: ${JSON.stringify(item)}`)
+          },
+        }
+      : undefined
 
   const slashCtx = buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig),
@@ -573,6 +584,10 @@ export const composeSurfaceWires = (
     // onto (presence-gated on QUANTA_ITEM_STREAM above). Absent ⇒ no pump
     // (byte-identical); the pump self-no-ops on an undefined sink.
     ...(itemStreamSink !== undefined ? { itemStreamSink } : {}),
+    // S2 (jul-03) `/activity` — the bounded ItemStore snapshot getter (the SAME
+    // store `itemStreamSink` captures onto). Absent ⇒ `/activity` omits the
+    // "Subagent items" section (byte-identical default-OFF).
+    ...(itemStore !== undefined ? { activityItems: () => itemStore.snapshot() } : {}),
     // ADR-0231 — `/radar` live store: the SAME instance wired into
     // `AgentConfig.radar.store` above, so the slash surface and the loop's
     // producer hook share ONE queue. Absent ⇒ slot omitted ⇒ "not wired".

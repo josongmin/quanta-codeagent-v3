@@ -48,6 +48,7 @@ import { buildLogoutCmd } from "../logout-cmd"
 import { pasteCmd } from "../paste-cmd"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "../plan-panel"
 import { queueCmd } from "../queue-cmd"
+import { renderItemSection } from "../repl/item-store"
 import { replayCmd } from "../replay-cmd"
 import { rulesCmd } from "../rules-cmd"
 import { sessionCmd } from "../session-cmd"
@@ -58,7 +59,12 @@ import { formatSegmentedUsage } from "../status-line"
 import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
 import { renderSkillScopePanel, renderWorkingStatePanel } from "../working-state-panel"
+import { browserNetCmd } from "./browser-net-cmd"
+import { cronCmd, inboxCmd, scheduleCmd } from "./cron-cmd"
+import { kbCmd } from "./kb-cmd"
+import { mcpResourcesCmd } from "./mcp-resources-cmd"
 import { modelCmd } from "./model-cmd"
+import { onboardCmd } from "./onboard-cmd"
 import { briefCmd, effortCmd, focusChainCmd } from "./registry-surface/focus-effort-brief"
 import { runSkillsRender } from "./render-helpers"
 
@@ -464,7 +470,11 @@ const activityCmd: SlashCommand = {
   describe: "Unified activity tree (agents/workflows/daemons) with inline why-stuck",
   category: "loop",
   async run(_args, ctx) {
-    if (ctx.agents === undefined && ctx.activityStore === undefined) {
+    if (
+      ctx.agents === undefined &&
+      ctx.activityStore === undefined &&
+      ctx.activityItems === undefined
+    ) {
       ctx.out("/activity: not wired in this surface\n")
       return 0
     }
@@ -491,6 +501,13 @@ const activityCmd: SlashCommand = {
     }
     const now = ctx.now?.() ?? Date.now()
     ctx.out(`${renderActivity(view.snapshot(), { now }).join("\n")}\n`)
+    // S2 unified-observability (jul-03) — append the bounded ItemStore rows so
+    // `QUANTA_ITEM_STREAM` produces VISIBLE `/activity` output (the fleet snapshot
+    // is ALSO pumped onto the SAME store via `pumpFleetRowsToItemStream` above).
+    // Empty store / absent slot ⇒ "" ⇒ nothing appended (byte-identical).
+    const itemSection =
+      ctx.activityItems !== undefined ? renderItemSection(ctx.activityItems()) : ""
+    if (itemSection !== "") ctx.out(`${itemSection}\n`)
     return 0
   },
 }
@@ -909,6 +926,22 @@ export const buildSurfaceSlashCommands = (
   inspectCmd,
   replayCmd,
   sessionCmd,
+  // jul-03 CLI-surfacing of landed features. Each command reads live surface
+  // state and prints "not wired" + exit 0 when its ctx slot is absent (default-OFF
+  // byte-identical, parity with /agents / /radar).
+  //   A3 — Projects knowledge-base accounting.
+  kbCmd,
+  //   B4 — fetched MCP resource dirs + blob-to-disk paths.
+  mcpResourcesCmd,
+  //   S1 — last browser network-capture + locator summary.
+  browserNetCmd,
+  //   B2 — automation schedules (+ /schedule alias) + the /inbox the banner refs.
+  cronCmd,
+  scheduleCmd,
+  inboxCmd,
+  //   B1 — onboarding identity reachability (the launch-flag `--identity-mode
+  //   onboarding` now has a slash counterpart).
+  onboardCmd,
 ]
 
 /** Static slot order — surface entries appended in the layered concatenation

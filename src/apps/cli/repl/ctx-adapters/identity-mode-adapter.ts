@@ -16,6 +16,14 @@ import {
   type SystemPromptVariantRegistry,
 } from "@/agent/system-prompt"
 
+/** B1 (jul-03) — the identity-only virtual mode token. `onboarding` lives in
+ *  `IdentityMode` (superset of `AgentMode`) but is NOT a `ModeVariantKey`, so it
+ *  is targeted through a DEDICATED hook (`onOnboarding`), never the mode-variant
+ *  registry (`buildSystemPromptForMode` is `ModeVariantKey`-typed and would
+ *  type-error). Kept as a string literal here so the adapter can offer it as a
+ *  reachable `/identity` / `/onboard` target without widening `ModeVariantKey`. */
+export const ONBOARDING_IDENTITY_KEY = "onboarding" as const
+
 export interface IdentityModeAdapter {
   readonly get: () => string
   readonly set: (
@@ -35,6 +43,13 @@ export interface IdentityModeAdapterArgs {
    *  reflects the new mode. NEVER fired on rejected (unknown) modes.
    *  Absent ⇒ adapter behavior is byte-identical to ADR-0291 ship. */
   readonly onChange?: (mode: ModeVariantKey) => void
+  /** B1 (jul-03) — hook fired when the caller targets the identity-only
+   *  `onboarding` virtual mode (via `/identity onboarding` or `/onboard`). When
+   *  supplied, the adapter accepts `onboarding` as a valid target and offers it in
+   *  `list()`; absent ⇒ `onboarding` is rejected as unknown (byte-identical to the
+   *  ADR-0291 ship, which only knew `ModeVariantKey`s). The surface routes this
+   *  through the identity provider's onboarding branch + a prompt rebuild. */
+  readonly onOnboarding?: () => void
 }
 
 const isModeVariantKey = (s: string): s is ModeVariantKey =>
@@ -42,13 +57,28 @@ const isModeVariantKey = (s: string): s is ModeVariantKey =>
 
 /** Build the adapter over the AgentConfig.identityModeVariant block. */
 export const buildIdentityModeAdapter = (args: IdentityModeAdapterArgs): IdentityModeAdapter => {
-  let active: ModeVariantKey = args.defaultMode ?? "default"
+  let active: ModeVariantKey | typeof ONBOARDING_IDENTITY_KEY = args.defaultMode ?? "default"
   const onChange = args.onChange
+  const onOnboarding = args.onOnboarding
+  // B1 — the reachable target list: the mode-variant keys PLUS the onboarding
+  // virtual mode when its hook is wired.
+  const knownTargets = (): readonly string[] =>
+    onOnboarding !== undefined ? [...MODE_VARIANT_KEYS, ONBOARDING_IDENTITY_KEY] : MODE_VARIANT_KEYS
   return {
     get: (): string => args.getActive?.() ?? active,
     set: (mode: string): "ok" | { readonly kind: "unknown"; readonly known: readonly string[] } => {
+      // B1 — the identity-only onboarding virtual mode routes through its dedicated
+      // hook (NOT the ModeVariantKey registry). Only reachable when wired.
+      if (mode === ONBOARDING_IDENTITY_KEY) {
+        if (onOnboarding === undefined) {
+          return { kind: "unknown", known: knownTargets() }
+        }
+        active = ONBOARDING_IDENTITY_KEY
+        onOnboarding()
+        return "ok"
+      }
       if (!isModeVariantKey(mode)) {
-        return { kind: "unknown", known: MODE_VARIANT_KEYS }
+        return { kind: "unknown", known: knownTargets() }
       }
       if (args.setActive !== undefined) args.setActive(mode)
       else active = mode
@@ -69,6 +99,6 @@ export const buildIdentityModeAdapter = (args: IdentityModeAdapterArgs): Identit
       }
       return "ok"
     },
-    list: (): readonly string[] => MODE_VARIANT_KEYS,
+    list: (): readonly string[] => knownTargets(),
   }
 }

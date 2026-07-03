@@ -49,3 +49,34 @@ describe("formatSegmentedUsage — reasoning annotation (S3)", () => {
     expect(out).not.toContain("Reasoning")
   })
 })
+
+describe("formatSegmentedUsage — codex-rs `% context left` head (S3 polish)", () => {
+  test("head renders `Context N% left` (remaining, not used) matching codex-rs", () => {
+    // 60k of 200k used ⇒ 30% used ⇒ 70% LEFT.
+    const head = formatSegmentedUsage(base).split("\n")[0] ?? ""
+    expect(head).toContain("Context 70% left")
+    // The used/max token counter is preserved for the legend context.
+    expect(head).toContain("60.0k/200k")
+  })
+
+  test("a fresh window is `100% left`, a full window is `0% left`", () => {
+    const fresh = formatSegmentedUsage({
+      ...base,
+      segments: [{ id: "System", tokens: 0 }],
+      total: 0,
+    })
+    expect(fresh.split("\n")[0] ?? "").toContain("Context 100% left")
+    const full = formatSegmentedUsage({
+      ...base,
+      segments: [{ id: "System", tokens: 200_000 }],
+      total: 200_000,
+    })
+    expect(full.split("\n")[0] ?? "").toContain("Context 0% left")
+  })
+
+  test("renders the codex `N tokens left in this context window` annotation", () => {
+    // 200k − 60k = 140k left.
+    const out = formatSegmentedUsage(base)
+    expect(out).toContain("140k tokens left in this context window")
+  })
+})

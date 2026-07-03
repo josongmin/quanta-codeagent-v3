@@ -170,6 +170,22 @@ export type ReplSlashCtx = Partial<{
    *  in `pumpFleetRowsToItemStream`, so even a present sink is inert when the flag
    *  is off. */
   itemStreamSink: import("@/shared").ItemStreamSink
+  /** S2 (jul-03) `/activity` — read-only snapshot of the bounded ItemStore the
+   *  fleet snapshot is pumped into (the SAME store `itemStreamSink` captures onto).
+   *  Absent ⇒ `/activity` omits the "Subagent items" section. */
+  activityItems: () => readonly import("./item-store").RetainedItem[]
+  /** A3 (jul-03) `/kb` — read-only Projects knowledge-base accounting getter (the
+   *  `knowledge{}` byte budget + doc count). Absent ⇒ `/kb` prints "not wired". */
+  projectsKb: import("../slash/kb-cmd").KbSlashState
+  /** B4 (jul-03) `/mcp-resources` — read-only fetched-resource-dir + blob-path
+   *  capture snapshot. Absent ⇒ `/mcp-resources` prints "not wired". */
+  mcpResources: () => readonly import("../slash/mcp-resources-cmd").McpResourceDirRecord[]
+  /** S1 (jul-03) `/browser-net` — last network-capture + locator summary getter.
+   *  Absent ⇒ `/browser-net` prints "not wired". */
+  browserNet: () => import("../slash/browser-net-cmd").BrowserNetSnapshot | undefined
+  /** B2 (jul-03) `/cron` — the automation-engine slash wire (list/create/inbox).
+   *  Absent ⇒ `/cron` + `/inbox` print "not wired". */
+  automation: import("../slash/cron-cmd").AutomationSlashState
   /** ADR-0231 `/radar` — the live radar proposal-queue store (SAME instance the
    *  loop's producer hook writes). Absent ⇒ `/radar` prints "not wired". */
   radar: import("@/radar").RadarStore
@@ -200,6 +216,21 @@ export interface BuildReplSlashCtxArgs {
    *  AND a wire-plane sink exists (composition-root presence-gate). Absent ⇒ no
    *  pump (byte-identical). */
   itemStreamSink?: import("@/shared").ItemStreamSink | undefined
+  /** S2 (jul-03) `/activity` — the bounded ItemStore snapshot getter. Threaded
+   *  ONLY when `QUANTA_ITEM_STREAM` is on (same gate as `itemStreamSink`). */
+  activityItems?: (() => readonly import("./item-store").RetainedItem[]) | undefined
+  /** A3 (jul-03) `/kb` — Projects knowledge-base accounting wire. Threaded ONLY
+   *  when `QUANTA_PROJECTS_KB` is on AND the store is reachable. */
+  projectsKb?: import("../slash/kb-cmd").KbSlashState | undefined
+  /** B4 (jul-03) `/mcp-resources` — fetched-dir + blob-path capture snapshot. */
+  mcpResources?:
+    | (() => readonly import("../slash/mcp-resources-cmd").McpResourceDirRecord[])
+    | undefined
+  /** S1 (jul-03) `/browser-net` — last network-capture + locator summary getter. */
+  browserNet?: (() => import("../slash/browser-net-cmd").BrowserNetSnapshot | undefined) | undefined
+  /** B2 (jul-03) `/cron` — automation-engine slash wire. Threaded ONLY when
+   *  `QUANTA_AUTOMATION` is on AND the engine is reachable. */
+  automation?: import("../slash/cron-cmd").AutomationSlashState | undefined
   /** ADR-0231 `/radar` — the gated radar proposal-queue store. Surface-compose
    *  threads the SAME instance it wires into `AgentConfig.radar.store` ONLY when
    *  `QUANTA_RADAR` is on; absent/omitted ⇒ the `radar` ctx slot is omitted and
@@ -374,6 +405,15 @@ const maybeIdentity = (
     ...(args.onIdentityModeChange !== undefined
       ? { onChange: () => args.onIdentityModeChange?.() }
       : {}),
+    // B1 (jul-03) — make the identity-only `onboarding` virtual mode reachable
+    // mid-session via `/identity onboarding` + `/onboard`. The adapter routes it
+    // through this hook (NOT the ModeVariantKey registry). The hook triggers the
+    // SAME prompt-rebuild the ModeVariantKey path uses so the next turn's system
+    // prompt reflects the change. Only offered when a rebuild seam is wired
+    // (byte-identical to the pre-B1 ship when absent).
+    ...(args.onIdentityModeChange !== undefined
+      ? { onOnboarding: () => args.onIdentityModeChange?.() }
+      : {}),
   })
 }
 
@@ -448,7 +488,26 @@ const toAgentFleetRow = (
     : {}),
 })
 
-/** Compose the REPL-owned slash adapters into one explicit surface object. */
+/** jul-03 CLI-surfacing — the S2/A3/B4/S1/B2 read-only ctx slots. Extracted so
+ *  BOTH the builder ({@link buildReplSlashCtx}) and the live-path projector
+ *  ({@link projectLegacySlots}) spread ONE presence-gated set (keeps each under
+ *  biome's cognitive-complexity budget; no drift between the two spread sites).
+ *  The input allows `| undefined` on each field (the builder passes destructured
+ *  args, the projector passes a `Partial` ctx) — both erased by the presence
+ *  spread under `exactOptionalPropertyTypes`. */
+type SurfacedSlots = Pick<
+  ReplSlashCtx,
+  "activityItems" | "projectsKb" | "mcpResources" | "browserNet" | "automation"
+>
+type SurfacedSlotsInput = { [K in keyof SurfacedSlots]?: SurfacedSlots[K] | undefined }
+const spreadSurfacedSlots = (s: SurfacedSlotsInput): Partial<SurfacedSlots> => ({
+  ...(s.activityItems !== undefined ? { activityItems: s.activityItems } : {}),
+  ...(s.projectsKb !== undefined ? { projectsKb: s.projectsKb } : {}),
+  ...(s.mcpResources !== undefined ? { mcpResources: s.mcpResources } : {}),
+  ...(s.browserNet !== undefined ? { browserNet: s.browserNet } : {}),
+  ...(s.automation !== undefined ? { automation: s.automation } : {}),
+})
+
 export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => {
   const {
     skillsCb,
@@ -475,6 +534,11 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     taskRegistry,
     activityStore,
     itemStreamSink,
+    activityItems,
+    projectsKb,
+    mcpResources,
+    browserNet,
+    automation,
     radar,
     radarPruneOlderThanMs,
   } = args
@@ -531,6 +595,17 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // omitted ⇒ `/radar` "not wired" (default-OFF byte-identical).
     ...(activityStore !== undefined ? { activityStore } : {}),
     ...(itemStreamSink !== undefined ? { itemStreamSink } : {}),
+    // jul-03 CLI-surfacing — S2/A3/B4/S1/B2 read-only slots (extracted helper so
+    // this function stays under biome's cognitive-complexity budget; each is
+    // presence-gated so an absent upstream port omits the ctx slot ⇒ the slash
+    // prints "not wired" / omits its section; default-OFF byte-identical).
+    ...spreadSurfacedSlots({
+      activityItems,
+      projectsKb,
+      mcpResources,
+      browserNet,
+      automation,
+    }),
     ...(radar !== undefined ? { radar } : {}),
     ...(radarPruneOlderThanMs !== undefined ? { radarPruneOlderThanMs } : {}),
     // ADR-0291 — 8 new slots; each gated by presence so omitting an
@@ -565,6 +640,8 @@ const projectLegacySlots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.agents !== undefined ? { agents: s.agents } : {}),
   ...(s.activityStore !== undefined ? { activityStore: s.activityStore } : {}),
   ...(s.itemStreamSink !== undefined ? { itemStreamSink: s.itemStreamSink } : {}),
+  // jul-03 CLI-surfacing — one presence-gated helper (shared with the builder).
+  ...spreadSurfacedSlots(s),
   ...(s.radar !== undefined ? { radar: s.radar } : {}),
   ...(s.radarPruneOlderThanMs !== undefined
     ? { radarPruneOlderThanMs: s.radarPruneOlderThanMs }
