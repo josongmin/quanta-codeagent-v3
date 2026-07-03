@@ -23,9 +23,8 @@ import {
 import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
   type AgentMode as PromptPackMode,
-  renderOwnedRules,
-  renderPackByMode,
-  renderToolUseRules,
+  renderPostureBase,
+  renderTaskRules,
 } from "./prompt-rules"
 import {
   buildSectionedSystemBlocks,
@@ -94,19 +93,15 @@ export const buildSystemPrompt = (
     // splice the persona body + a blank-line separator before Policy stack.
     ...personaLines(opts?.persona ?? "default"),
     ...BODY_AFTER_PERSONA,
-    // Env-posture seam (RFC jul-2): `owned` renders the install-permitted rule
-    // list in place of the CORE-based rules. Guarded so `frozen` / absent takes
-    // the EXACT pre-change code path below (byte-identical, cached prefix intact).
-    // Prompt-text-only — no runtime enforcement is touched here.
-    ...(opts?.envPosture === "owned"
-      ? renderOwnedRules()
-      : // Pack-selection seam: when `promptPack` is set the caller gets the
-        // mode-specific rule set (headless / batch / ci-bot); when absent we
-        // call `renderToolUseRules()` so the interactive default stays byte-
-        // identical to pre-slice output and the cached prefix is unchanged.
-        opts?.promptPack !== undefined
-        ? renderPackByMode(opts.promptPack)
-        : renderToolUseRules()),
+    // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
+    // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).
+    // (1) POSTURE-BASE axis — honesty rails + env guardrails, selected by envPosture:
+    //     `owned` = install-permitted (OWNED_RULES); `frozen`/absent = SWE guardrails (CORE_RULES).
+    //     Byte-identical to the pre-change path: owned == OWNED, frozen == CORE.
+    ...renderPostureBase(opts?.envPosture ?? "frozen"),
+    // (2) TASK axis — mode-specific narrowing (batch/headless/ci-bot); interactive/ide/absent = none.
+    //     A frozen pack == CORE + task rules == the prior `renderPackByMode(pack)` byte-for-byte.
+    ...renderTaskRules(opts?.promptPack ?? "interactive"),
     ...BODY_AFTER_PROMPT_PACK,
   ].join("\n")
 

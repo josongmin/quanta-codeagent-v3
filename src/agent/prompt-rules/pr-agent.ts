@@ -9,7 +9,9 @@
 
 import { CORE_RULES, type PromptRule } from "./core"
 
-const PR_RULES: readonly PromptRule[] = [
+/** TASK-only rules for ci-bot mode (env-independent — env posture is a
+ *  SEPARATE axis composed by `buildSystemPrompt`). */
+export const PR_RULES: readonly PromptRule[] = [
   {
     id: "R-SMALL-DIFF",
     lines: [

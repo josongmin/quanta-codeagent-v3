@@ -16,11 +16,10 @@
  * `AgentMode`. No `@/llm`, no `@/tool`, no `@/apps` — rules are pure text data.
  */
 
-import { ASSISTANT_PACK } from "./assistant"
-import { BENCHMARK_PACK } from "./benchmark"
-import { OWNED_RULES, type PromptRule } from "./core"
-import { PR_AGENT_PACK } from "./pr-agent"
-import { TASK_RUNNER_PACK } from "./task-runner"
+import { BATCH_RULES } from "./benchmark"
+import { CORE_RULES, OWNED_RULES, type PromptRule } from "./core"
+import { PR_RULES } from "./pr-agent"
+import { HEADLESS_RULES } from "./task-runner"
 
 /**
  * Pack-selection enum. Distinct from `prompt.ts`'s `AgentMode`
@@ -40,37 +39,57 @@ import type { AgentMode } from "../run-mode/types"
  *  a fifth without a case here is a compile error (the `mode satisfies never`
  *  pattern is not used because `switch` on a string literal type already gives
  *  the same narrowing under strict TS settings). */
-export const renderPackByMode = (mode: AgentMode): readonly string[] => {
+// ── 2-axis rendering (jul-4): env posture and task pack are INDEPENDENT axes ──
+// The prompt rules split into two orthogonal slots that `buildSystemPrompt` composes:
+//   1. POSTURE-BASE (env axis) — the honesty rails + env guardrails, selected by envPosture
+//      (`frozen` = SWE-bench "don't install / stop when env-blocked" = CORE_RULES;
+//       `owned`  = container-owned "install freely" = OWNED_RULES).
+//   2. TASK rules (task axis) — mode-specific narrowing, selected by promptPack
+//      (batch/headless/ci-bot; interactive/ide have none). Env-independent.
+// The prior code XOR'd these (owned XOR pack) so an owned surface could not carry a task
+// pack. Composing them independently removes the XOR while staying byte-identical for every
+// legacy combination (a frozen pack == CORE + task; owned == OWNED + no task).
+
+/** POSTURE-BASE rules (env axis). `frozen` = CORE_RULES (SWE guardrails, today's default);
+ *  `owned` = OWNED_RULES (container-owned, install-permitted). Flattened to the line array
+ *  `buildSystemPrompt` splices. */
+export const renderPostureBase = (posture: "frozen" | "owned"): readonly string[] =>
+  (posture === "owned" ? OWNED_RULES : CORE_RULES).flatMap((r) => r.lines)
+
+/** TASK-only rules (task axis) — env-independent mode narrowing. interactive/ide carry none;
+ *  headless/daemon → R-SINGLE-COHERENT; batch → R-NO-EXPLORE-OVER-EDIT; ci-bot → PR rules. */
+export const renderTaskRules = (mode: AgentMode): readonly string[] => {
   switch (mode) {
     case "interactive":
-      return ASSISTANT_PACK.flatMap((r) => r.lines)
-    case "headless":
-      return TASK_RUNNER_PACK.flatMap((r) => r.lines)
-    case "batch":
-      return BENCHMARK_PACK.flatMap((r) => r.lines)
-    case "ci-bot":
-      return PR_AGENT_PACK.flatMap((r) => r.lines)
-    // ADR-0092 (C1): ide/daemon reuse existing packs per their promptPack
-    // lever — ide = assistant (human-near), daemon = task-runner (autonomous).
     case "ide":
-      return ASSISTANT_PACK.flatMap((r) => r.lines)
+      return []
+    case "headless":
     case "daemon":
-      return TASK_RUNNER_PACK.flatMap((r) => r.lines)
+      return HEADLESS_RULES.flatMap((r) => r.lines)
+    case "batch":
+      return BATCH_RULES.flatMap((r) => r.lines)
+    case "ci-bot":
+      return PR_RULES.flatMap((r) => r.lines)
   }
 }
 
-/** Legacy entry point. Returns the assistant pack — byte-identical to the
+/** Legacy single-axis entry: `frozen` posture-base + the mode's task rules — byte-identical to
+ *  the prior pack dispatch (a `*_PACK` == CORE_RULES + its task rules). Kept for callers that
+ *  pass only a mode; `buildSystemPrompt` now composes the two axes directly. */
+export const renderPackByMode = (mode: AgentMode): readonly string[] => [
+  ...renderPostureBase("frozen"),
+  ...renderTaskRules(mode),
+]
+
+/** Legacy entry point. Returns the frozen interactive base — byte-identical to the
  *  prior single-file `renderToolUseRules()` so the cached system-prompt prefix
  *  for interactive sessions never shifts. */
 export const renderToolUseRules = (): readonly string[] => renderPackByMode("interactive")
 
-/** Render the `owned` environment posture rule list (RFC jul-2 TB levers /01)
- *  — flattened to the same line-array shape `renderPackByMode` returns so the prompt
- *  builder can splice it at the identical seam. PROMPT-TEXT-ONLY: this is the `owned`
- *  posture's replacement for the CORE-based rules; it drops R-ENV / R-STOP-ENV and the
- *  R-NO-SHIM stop-tail, and adds R-ENV-OWNED / R-INSTALL-THRASH. Never touches runtime
- *  enforcement. `frozen` callers never reach this path. */
-export const renderOwnedRules = (): readonly string[] => OWNED_RULES.flatMap((r) => r.lines)
+/** Render the `owned` environment posture rule list (RFC jul-2 TB levers /01).
+ *  Byte-identical to `renderPostureBase("owned")` — kept as the named legacy entry the
+ *  terminal surface calls; `frozen` callers never reach this path. */
+export const renderOwnedRules = (): readonly string[] => renderPostureBase("owned")
 
 export { ASSISTANT_PACK } from "./assistant"
 export { BENCHMARK_PACK } from "./benchmark"

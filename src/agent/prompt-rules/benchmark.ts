@@ -9,7 +9,9 @@
 
 import { CORE_RULES, type PromptRule } from "./core"
 
-const BATCH_RULES: readonly PromptRule[] = [
+/** TASK-only rules for batch mode (env-independent — env posture is a SEPARATE
+ *  axis composed by `buildSystemPrompt`, not baked into the pack). */
+export const BATCH_RULES: readonly PromptRule[] = [
   {
     id: "R-NO-EXPLORE-OVER-EDIT",
     lines: [

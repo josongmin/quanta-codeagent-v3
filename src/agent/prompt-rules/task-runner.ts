@@ -9,7 +9,9 @@
 
 import { CORE_RULES, type PromptRule } from "./core"
 
-const HEADLESS_RULES: readonly PromptRule[] = [
+/** TASK-only rules for headless mode (env-independent — env posture is a
+ *  SEPARATE axis composed by `buildSystemPrompt`). */
+export const HEADLESS_RULES: readonly PromptRule[] = [
   {
     id: "R-SINGLE-COHERENT",
     lines: [
