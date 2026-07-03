@@ -9,3 +9,8 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Emitted JS must never live in src (it shadows .ts at vite resolve: .js > .ts).
+# All frontend source is .ts/.tsx; build output goes to dist/.
+src/**/*.js
+src/**/*.js.map
