@@ -90,6 +90,20 @@ export { buildModelAdapterWire, buildRetryCandidates, extractApplyPatchPaths }
  *  diverged (unknown values were treated as truthy). One source of truth now. */
 const isEnvTruthy = (raw: string | undefined): boolean => parseEnvFlag(raw, false)
 
+/** A3 (jul-04 CLI-surfacing) — build the READ-ONLY `/kb` slash slot over the
+ *  host-minted `ProjectsKbStore` (the SAME instance the `projects_kb` tool writes
+ *  into). Maps `docCount ← store.size()` + `knowledge ← store.knowledge(false)` —
+ *  the store's own body-FREE byte-budget accounting, NEVER a doc body. `undefined`
+ *  store (gate off ⇒ tool not registered) ⇒ `undefined` slot ⇒ `/kb` "not wired"
+ *  (default-OFF byte-identical). Module-scope so `composeSurfaceWires` stays under
+ *  the cognitive-complexity budget (mirrors the other extracted slot helpers). */
+const buildKbSlashSlot = (
+  store: SessionSetupResult["projectsKbStore"],
+): import("../slash/kb-cmd").KbSlashState | undefined =>
+  store !== undefined
+    ? { docCount: () => store.size(), knowledge: () => store.knowledge(false) }
+    : undefined
+
 /** ADR-0310 — bundle of REPL-side wires constructed once per session. The
  *  surface (`runRepl`) keeps the references alive so the loop can:
  *    - record turn snapshots into `convWire` (ADR-0292 turn-end auto-record),
@@ -564,9 +578,19 @@ export const composeSurfaceWires = (
         }
       : undefined
 
+  // A3 (jul-04 CLI-surfacing) `/kb` — read-only accounting adapter over the SAME
+  // `ProjectsKbStore` the `projects_kb` tool was registered over (minted once in
+  // `buildTooling`, forwarded via `setup.projectsKbStore`). Extracted to a helper
+  // so this composer stays under the cognitive-complexity budget. Absent store
+  // (gate off) ⇒ `undefined` ⇒ slot omitted ⇒ `/kb` "not wired" (byte-identical).
+  const projectsKbSlot = buildKbSlashSlot(setup.projectsKbStore)
+
   const slashCtx = buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig),
     idleMonitor: setup.idleMonitor,
+    // A3 (jul-04) `/kb` — read-only accounting over the SAME store the tool writes
+    // into. Omitted when the gate is off (byte-identical).
+    ...(projectsKbSlot !== undefined ? { projectsKb: projectsKbSlot } : {}),
     imageQueue: state.imageQueue,
     rewindState: state.rewindState,
     mcpSurface: setup.mcpSurface,

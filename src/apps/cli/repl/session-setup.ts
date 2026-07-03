@@ -136,6 +136,13 @@ export interface SessionSetupResult {
   /** Optional embedder for `/memory search` semantic recall (same instance
    *  the loop's recall uses). Absent ⇒ lexical-only fallback. */
   readonly memoryEmbedder: Tooling["embedder"]
+  /** A3 (jul-04 CLI-surfacing) `/kb` — the SAME {@link ProjectsKbStore} the
+   *  `projects_kb` tool was registered over (built once in `tooling` when
+   *  `QUANTA_PROJECTS_KB` is on). Forwarded from `boot.tooling.projectsKbStore` so
+   *  the surface wires the `/kb` slash over the EXACT instance the tool writes into
+   *  (one store, both consumers). Absent ⇒ the tool was not registered ⇒ `/kb`
+   *  prints "not wired" (byte-identical default-OFF). */
+  readonly projectsKbStore: Tooling["projectsKbStore"]
   /** L5 M-11 — per-session search-wire teardown (delta-scan interval + indexer)
    *  forwarded from `boot.tooling`. The host threads this into
    *  `runSessionLoop({ searchPipelineDispose })` so session close releases THIS
@@ -370,6 +377,9 @@ export const setupSession = async (
     skillsConfig: boot.tooling.skillsConfig,
     memoryStore: boot.tooling.store,
     memoryEmbedder: boot.tooling.embedder,
+    // A3 (jul-04) — forward the minted KB store so `/kb` reads the SAME instance
+    // the `projects_kb` tool writes into. Absent (gate off) ⇒ `/kb` "not wired".
+    projectsKbStore: boot.tooling.projectsKbStore,
     searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,

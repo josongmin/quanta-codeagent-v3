@@ -2,7 +2,14 @@ import { type AgentConfig, type MemoryToolsDeps, type MemoryWriteGuard, memoryTo
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import { instrumentToolsForExport, type StructuredLogger } from "@/observability"
 import type { OsSandboxProfile } from "@/runtime"
-import { buildDefaultTools, type Tool, type ToolOrigin, ToolRegistry } from "@/tool"
+import {
+  buildDefaultTools,
+  type ProjectsKbSlot,
+  type ProjectsKbStore,
+  type Tool,
+  type ToolOrigin,
+  ToolRegistry,
+} from "@/tool"
 
 /**
  * Surface-agnostic tooling assembly. The pre-split `internal.ts#buildTooling`
@@ -38,6 +45,13 @@ export interface Tooling {
   skillsConfig: AgentConfig["skills"] | undefined
   compactionBreakerConfig: AgentConfig["compactionBreaker"] | undefined
   verifyGuardConfig: AgentConfig["verifyGuard"] | undefined
+  /** A3 (jul-04 CLI-surfacing) — the SAME per-session {@link ProjectsKbStore} the
+   *  `projects_kb` tool was registered over (present iff the surface threaded a
+   *  `projectsKb` slot, i.e. `QUANTA_PROJECTS_KB` on). The surface reads this to
+   *  wire the `/kb` slash over the EXACT instance the tool writes into (one store,
+   *  both consumers — the surface-mints→down-thread contract). Absent ⇒ the tool
+   *  was not registered ⇒ `/kb` stays "not wired" (byte-identical default-OFF). */
+  projectsKbStore?: ProjectsKbStore
 }
 
 /** Inputs to {@link buildToolingCore}. The surface resolves each field via
@@ -98,6 +112,14 @@ export interface ToolingAssembleInput {
    *  SURFACE owns the env read (`QUANTA_ENABLE_STRUCTURED_PATCH`); this slice
    *  never touches `process.env`. Absent/false ⇒ byte-identical tool menu. */
   structuredPatch?: boolean | undefined
+  /** A3 (jul-04 CLI-surfacing) — the host-minted Projects-KB slot (store + optional
+   *  KB-namespace pipeline). When present, `buildDefaultTools` registers the
+   *  `projects_kb` tool over it AND the resulting {@link Tooling.projectsKbStore}
+   *  carries the SAME store up so the surface wires `/kb` over the instance the
+   *  tool writes into. The SURFACE owns the env read (`QUANTA_PROJECTS_KB`) + the
+   *  mint (real clock); this slice never touches `process.env`. Absent ⇒ the tool
+   *  is NOT registered and no store is returned (byte-identical default-OFF). */
+  projectsKb?: ProjectsKbSlot | undefined
   /** ADR-0432 — live 0..100 remaining-budget signal for the self-edit memory
    *  write-guard. ONLY consulted when `memoryConfig.writeGuardMinRemainingPercent`
    *  is set. The surface supplies the closure over its `BudgetMeter`
@@ -130,18 +152,22 @@ export interface ToolingAssembleInput {
  *
  * When every opt-in tool array is empty and no config block is set, the
  * registry is byte-identical to a plain `new ToolRegistry(buildDefaultTools())`. */
-/** L5 M-11 — the two search slots (helper-only `searchPipeline` + the
- *  per-session `searchPipelineDispose`) are prepared together so the
- *  `buildToolingCore` `return` carries a SINGLE spread (keeps that function
- *  under biome's cognitive-complexity cap). Each key is omitted when absent so
- *  `exactOptionalPropertyTypes` never sees a literal `undefined`. */
+/** L5 M-11 (+ A3 jul-04) — the OPTIONAL output slots (helper-only `searchPipeline`
+ *  + the per-session `searchPipelineDispose` + the A3 `projectsKbStore`) are
+ *  prepared together so the `buildToolingCore` `return` carries a SINGLE spread
+ *  (keeps that function under biome's cognitive-complexity cap). Each key is
+ *  omitted when absent so `exactOptionalPropertyTypes` never sees a literal
+ *  `undefined`. `projectsKbStore` is the SAME store the `projects_kb` tool was
+ *  registered over (present iff `input.projectsKb` was threaded), so the surface
+ *  reads the exact instance the tool writes into. */
 const buildSearchSlots = (
-  input: Pick<ToolingAssembleInput, "searchPipeline" | "searchPipelineDispose">,
-): Pick<Tooling, "searchPipeline" | "searchPipelineDispose"> => ({
+  input: Pick<ToolingAssembleInput, "searchPipeline" | "searchPipelineDispose" | "projectsKb">,
+): Pick<Tooling, "searchPipeline" | "searchPipelineDispose" | "projectsKbStore"> => ({
   ...(input.searchPipeline !== undefined ? { searchPipeline: input.searchPipeline } : {}),
   ...(input.searchPipelineDispose !== undefined
     ? { searchPipelineDispose: input.searchPipelineDispose }
     : {}),
+  ...(input.projectsKb !== undefined ? { projectsKbStore: input.projectsKb.store } : {}),
 })
 
 /** ADR-0432 — project the `AgentConfig.memory` extras (threadMode /
@@ -207,6 +233,22 @@ const buildOriginMap = (
   return map
 }
 
+/** Project the surface-threaded gated ports into the {@link DefaultToolPorts}
+ *  literal `buildDefaultTools` consumes. Extracted so `buildToolingCore` stays
+ *  under biome's cognitive-complexity cap (each conditional spread here would
+ *  otherwise add to that function). Every key is omitted when absent so
+ *  `exactOptionalPropertyTypes` never sees a literal `undefined` AND the no-port
+ *  path is byte-identical to `buildDefaultTools()`. `projectsKb` (A3, jul-04)
+ *  registers `projects_kb` over the host-minted store when the surface threaded a
+ *  slot (`QUANTA_PROJECTS_KB` on); absent ⇒ the tool is not registered. */
+const buildDefaultToolPorts = (
+  input: Pick<ToolingAssembleInput, "sandboxProfile" | "structuredPatch" | "projectsKb">,
+): Parameters<typeof buildDefaultTools>[0] => ({
+  ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
+  ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
+  ...(input.projectsKb !== undefined ? { projectsKb: input.projectsKb } : {}),
+})
+
 export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
   if (input.store && input.memoryKindLabel !== undefined && input.onMemoryReady !== undefined) {
     input.onMemoryReady(
@@ -249,10 +291,7 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
     // byte-identical (verbatim tools) otherwise. `instrumentTool` spreads the
     // tool so names are preserved — `originMap` (keyed by name) still matches.
     instrumentToolsForExport([
-      ...buildDefaultTools({
-        ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
-        ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
-      }),
+      ...buildDefaultTools(buildDefaultToolPorts(input)),
       ...input.mcpTools,
       ...memTools,
       ...input.lspTools,
@@ -267,6 +306,9 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
     embedder: input.embedder,
     sessionId: input.sessionId,
     registry,
+    // A3 (jul-04) — `buildSearchSlots` now also carries `projectsKbStore` (the SAME
+    // store the `projects_kb` tool was registered over) so the surface wires `/kb`
+    // over the exact instance the tool writes into (one store, both consumers).
     ...buildSearchSlots(input),
     memoryConfig: input.memoryConfig,
     subagentConfig: input.subagentConfig,

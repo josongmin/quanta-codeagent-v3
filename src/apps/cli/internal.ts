@@ -39,9 +39,16 @@ import type { Tooling } from "@/runner/assemble/tooling"
 import { type AutoTitlePort, createAutoTitlePort } from "@/runner/session-ops/auto-title"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
 import { loadSessionById, renameSession } from "@/session"
-import { logger, type RunContext, runtimeConfig } from "@/shared"
+import { gateOn, logger, type RunContext, runtimeConfig } from "@/shared"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
-import { astGrepTool, gitTools, pollDeferredTool, type Tool } from "@/tool"
+import {
+  astGrepTool,
+  createProjectsKbStore,
+  gitTools,
+  type ProjectsKbSlot,
+  pollDeferredTool,
+  type Tool,
+} from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
@@ -836,6 +843,18 @@ export const buildTooling = (
   // description-only rules). Default-OFF: null unless QUANTA_FETCH_RULES is on.
   // The port lazily loads the requestable-rules index from the workspace cwd.
   const fetchRulesTool = buildCliFetchRulesTool(process.cwd(), process.env)
+  // A3 (jul-04 CLI-surfacing) — MINT the per-session Projects-KB store when
+  // QUANTA_PROJECTS_KB is on so the INTERACTIVE REPL registers `projects_kb`
+  // (the batch/mcp-server `buildBaseFromArgs` path already did; buildTooling did
+  // NOT). The SAME store is returned on `Tooling.projectsKbStore` so the surface
+  // wires `/kb` over the exact instance the tool writes into (one store, both
+  // consumers). Mirrors the composition-root `resolveProjectsKbSlot`: real
+  // `Date.now` clock; the KB-namespace SearchPipeline is not reachable here ⇒
+  // omitted (the tool's body-FREE lexical fallback, still leak-safe). Absent gate
+  // ⇒ `undefined` ⇒ no tool, no store (byte-identical default-OFF).
+  const projectsKbSlot: ProjectsKbSlot | undefined = gateOn(process.env, "QUANTA_PROJECTS_KB")
+    ? { store: createProjectsKbStore({ now: () => Date.now() }) }
+    : undefined
   const extraTools: Tool[] = [
     ...(searchWire !== null ? [searchWire.tool] : []),
     ...asyncDeferredTools,
@@ -882,6 +901,11 @@ export const buildTooling = (
     ...(providerRateLimitRemainingPercent !== undefined
       ? { providerRateLimitRemainingPercent }
       : {}),
+    // A3 (jul-04) — thread the minted Projects-KB slot so `buildDefaultTools`
+    // registers `projects_kb` over it AND `buildToolingCore` carries the SAME
+    // store up on `Tooling.projectsKbStore`. Omitted when the gate is off
+    // (byte-identical default-OFF menu).
+    ...(projectsKbSlot !== undefined ? { projectsKb: projectsKbSlot } : {}),
   })
 }
 
