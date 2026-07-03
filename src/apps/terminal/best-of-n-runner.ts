@@ -84,10 +84,19 @@ export type RunOnce = (opts: RunTerminalBrainOpts) => Promise<TerminalBrainResul
 /** ADAPTIVE early-stop predicate (RFC jul-3): a CONFIDENT clean pass — `verified-pass` earned on the
  *  attempt's OWN evidence WITHOUT the bounded follow-up nudge (`followUpFired !== true`). A pass that
  *  only appeared AFTER the nudge is treated as uncertain (worth another fresh trial), and any
- *  fail/unverifiable escalates. PURE + no-leak: reads only the attempt's own stamp, never a hidden test. */
+ *  fail/unverifiable escalates. PURE + no-leak: reads only the attempt's own stamp, never a hidden test.
+ *
+ *  P2 (RFC jul-3, audit R1): the verify-gate stamp ALONE is gameable — polyglot earned `verified-pass`
+ *  on a fib(0)-only self-compare and would have stopped the escalation on a wrong solution. So WHEN a
+ *  self-test receipt is present (the S1 discipline was active), a confident stop ADDITIONALLY requires
+ *  the agent's authored self-test to have RUN and gone GREEN — the strong "loopConverged" signal, not
+ *  the shallow stamp. Absent a receipt (S1 off) this is byte-identical to the stamp-only predicate. */
 export const isConfidentCleanPass = (report: TerminalBrainReport | undefined): boolean => {
   const v = report?.verification
-  return v?.state === "verified-pass" && v.followUpFired !== true
+  if (v?.state !== "verified-pass" || v.followUpFired === true) return false
+  const st = report?.selfTest
+  if (st !== undefined) return st.executed && st.green
+  return true
 }
 
 export const runTerminalBrainBestOfN = async (

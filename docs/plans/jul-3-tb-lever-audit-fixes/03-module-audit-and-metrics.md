@@ -63,8 +63,8 @@
 5. **Loop Controller**: 무진전 K회 or budget 소진 시 종료 — 기존 agent-loop maxTurns가 이미 담당; 별도 모듈 불필요(module-audit 결론).
 
 **P2 — supervisor + 측정**
-6. adaptive를 **loopConverged**로 게이팅(isConfidentCleanPass 폐기·measurement-only 격리).
-7. 5태스크(polyglot/sam 등) 측정 → **self-test↔hidden 정렬율** 확인. 낮으면 커버리지 게이트 강화(receipt.cases_count↑, edge 강제).
+6. ✅ **LANDED** — adaptive early-stop 신호 강화(audit R1 gameable-stamp 수정): `isConfidentCleanPass`가 self-test receipt 있으면 stamp만으론 부족하고 **selfTest.executed && green**(강 loopConverged) 요구; receipt 없으면(S1 off) byte-identical. polyglot fib(0) 얕은통과에 조기중단 차단. ⚠️ best-of-N in-process는 여전히 DEAD path라 **measurement-only**(trial-level -k 셀렉션서 재사용될 때 유효); 실 deployment 레버 아님.
+7. ⏳ **박스 대기(auth)** — 5태스크(polyglot/sam 등) A/B: `QUANTA_TB_SELF_TEST` on/off → report.selfTest.green × harbor-reward 페어링으로 **self-test↔hidden 정렬율** 측정. 낮으면 discipline 텍스트 커버리지 강화(edge 강제). 안 오르면 knob 삭제(measure-first).
 
 **P3 — 측정 후에만 (그리디 방지)**
 8. Lane diversity 재사용(수렴 안 될 때), 상위 모듈(Mutation/Property/RCA...)은 **정렬율이 여전히 낮을 때만** 하나씩. 안 오르면 버림.

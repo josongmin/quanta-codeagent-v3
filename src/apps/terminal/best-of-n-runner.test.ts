@@ -220,6 +220,23 @@ describe("adaptive early-stop (RFC jul-3) — best-of-N is COST-GATED, not a fix
     expect(isConfidentCleanPass(undefined)).toBe(false)
   })
 
+  test("P2 (audit R1): with a self-test receipt present, a confident stop REQUIRES self-test green", () => {
+    const rep = (v: VerificationStamp, st?: { executed: boolean; green: boolean }): TerminalBrainReport => ({
+      instruction: "x", turns: 1, tokens: { input: 0, output: 0 }, cost_usd: 0, final: "",
+      verification: v,
+      ...(st !== undefined ? { selfTest: st } : {}),
+    })
+    const cleanStamp: VerificationStamp = { state: "verified-pass", evidence: "", followUpFired: false }
+    // polyglot class: gameable stamp says pass, but the authored self-test did NOT go green ⇒ NOT confident.
+    expect(isConfidentCleanPass(rep(cleanStamp, { executed: true, green: false }))).toBe(false)
+    // never even ran a self-test ⇒ not confident (the receipt is present but empty).
+    expect(isConfidentCleanPass(rep(cleanStamp, { executed: false, green: false }))).toBe(false)
+    // stamp clean AND authored self-test ran green ⇒ the strong loopConverged stop.
+    expect(isConfidentCleanPass(rep(cleanStamp, { executed: true, green: true }))).toBe(true)
+    // no receipt (S1 off) ⇒ byte-identical stamp-only behavior.
+    expect(isConfidentCleanPass(rep(cleanStamp))).toBe(true)
+  })
+
   test("attempt-1 confident clean pass ⇒ STOPS after ONE attempt (does not spend the full N)", async () => {
     const log = { calls: [] as RunTerminalBrainOpts[] }
     await runTerminalBrainBestOfN(
