@@ -86,16 +86,25 @@ export type RunOnce = (opts: RunTerminalBrainOpts) => Promise<TerminalBrainResul
  *  only appeared AFTER the nudge is treated as uncertain (worth another fresh trial), and any
  *  fail/unverifiable escalates. PURE + no-leak: reads only the attempt's own stamp, never a hidden test.
  *
- *  P2 (RFC jul-3, audit R1): the verify-gate stamp ALONE is gameable — polyglot earned `verified-pass`
- *  on a fib(0)-only self-compare and would have stopped the escalation on a wrong solution. So WHEN a
- *  self-test receipt is present (the S1 discipline was active), a confident stop ADDITIONALLY requires
- *  the agent's authored self-test to have RUN and gone GREEN — the strong "loopConverged" signal, not
- *  the shallow stamp. Absent a receipt (S1 off) this is byte-identical to the stamp-only predicate. */
+ *  P2 (RFC jul-3, audit R1 F5): the verify-gate stamp ALONE is gameable — polyglot earned
+ *  `verified-pass` on a fib(0)-only self-compare and would have stopped the escalation on a wrong
+ *  solution. A confident stop therefore requires TWO independent agent-authored signals to AGREE,
+ *  which is much harder to game than either alone:
+ *    1. `verified-pass` earned WITHOUT the bounded follow-up nudge — this ALREADY implies an observed
+ *       L1 fair-compare (deriveVerificationState makes `verified-pass` unreachable without `compared`),
+ *       and no nudge means it was present in the agent's own run.
+ *    2. WHEN a self-test receipt is present (S1 active), the agent's authored self-test must have RUN
+ *       and gone GREEN — AND NOT via a suspicious flip (F4): a green reached only after an earlier RED
+ *       self-test (a switch to a weaker test) is NOT confident. `green` is itself hardened by F2/F3
+ *       (laundered-oracle + hidden-suite discovery are no longer credited).
+ *  Absent a receipt (S1 off) this is the stamp-only predicate (byte-identical to pre-P2). */
 export const isConfidentCleanPass = (report: TerminalBrainReport | undefined): boolean => {
   const v = report?.verification
+  // Signal 1 — L1 fair-compare agreement, present in the agent's own run (no nudge).
   if (v?.state !== "verified-pass" || v.followUpFired === true) return false
   const st = report?.selfTest
-  if (st !== undefined) return st.executed && st.green
+  // Signal 2 — the agent's own self-test corroborates, and was not flipped-to-green from a red run.
+  if (st !== undefined) return st.executed && st.green && st.flippedFromRed !== true
   return true
 }
 

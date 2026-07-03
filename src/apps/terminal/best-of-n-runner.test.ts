@@ -237,6 +237,25 @@ describe("adaptive early-stop (RFC jul-3) — best-of-N is COST-GATED, not a fix
     expect(isConfidentCleanPass(rep(cleanStamp))).toBe(true)
   })
 
+  test("F5 (audit R1): a green FLIPPED from an earlier red self-test is NOT confident", () => {
+    const rep = (
+      v: VerificationStamp,
+      st: { executed: boolean; green: boolean; flippedFromRed?: boolean },
+    ): TerminalBrainReport => ({
+      instruction: "x", turns: 1, tokens: { input: 0, output: 0 }, cost_usd: 0, final: "",
+      verification: v,
+      selfTest: st,
+    })
+    const cleanStamp: VerificationStamp = { state: "verified-pass", evidence: "", followUpFired: false }
+    // A green reached only after switching from a red self-test (F4 flip) is suspect ⇒ NOT confident,
+    // even though verified-pass + green both hold — the two signals no longer independently agree.
+    expect(
+      isConfidentCleanPass(rep(cleanStamp, { executed: true, green: true, flippedFromRed: true })),
+    ).toBe(false)
+    // control: the SAME green WITHOUT the flip flag is confident.
+    expect(isConfidentCleanPass(rep(cleanStamp, { executed: true, green: true }))).toBe(true)
+  })
+
   test("attempt-1 confident clean pass ⇒ STOPS after ONE attempt (does not spend the full N)", async () => {
     const log = { calls: [] as RunTerminalBrainOpts[] }
     await runTerminalBrainBestOfN(
