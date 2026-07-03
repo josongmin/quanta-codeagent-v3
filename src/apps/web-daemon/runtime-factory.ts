@@ -42,7 +42,8 @@ import {
 } from "@/sdk/runtime"
 import { gateOn } from "@/shared"
 import { StdoutStream } from "@/stream"
-import { buildDefaultTools, ToolRegistry } from "@/tool"
+import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
+import { askUserTool } from "@/tool/ask-user"
 import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import { type ArtifactPreviewResolver, createArtifactPreviewResolver } from "@/host/runtime"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
@@ -59,6 +60,7 @@ import {
   createWebControlRequestPort,
   type WebControlRequestPortHandle,
 } from "./web-control-request-port"
+import { createWebAskUserPort } from "./web-ask-user-port"
 import { createWebUserInputPort, type WebUserInputPortHandle } from "./web-user-input-port"
 
 /**
@@ -272,10 +274,12 @@ const wireSessionObservability = (
  *  (byte-identical). Extracted to keep the factory closure under the god-FN cap. */
 const buildDaemonToolRegistry = (
   artifactRegistry: ArtifactRegistry | undefined,
+  extraTools: readonly Tool[] = [],
 ): ToolRegistry =>
-  new ToolRegistry(
-    buildDefaultTools(artifactRegistry !== undefined ? { artifactRegistry } : {}),
-  )
+  new ToolRegistry([
+    ...buildDefaultTools(artifactRegistry !== undefined ? { artifactRegistry } : {}),
+    ...extraTools,
+  ])
 
 /**
  * A2 — resolve the artifact slice for the web daemon. Two independent gates:
@@ -426,13 +430,23 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     const controlRequest = isControlRequestEnabled(env)
       ? createWebControlRequestPort({ permission })
       : undefined
+    // QUANTA_ASK_USER (A1 jul-03) — the structured `ask_user` elicitation tool on
+    // web, ADAPTED onto the web user-input round-trip (so it needs `userInput`,
+    // i.e. QUANTA_WEB_AGENT_STATE, to have a channel to prompt on). Either gate
+    // OFF ⇒ empty ⇒ `ask_user` is NOT registered (byte-identical). The rich chip
+    // description/preview flatten to the option label over the existing panel
+    // (a rich structured frame is a documented follow-up).
+    const askUserTools: Tool[] =
+      gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
+        ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]
+        : []
     const base: RuntimeAgentConfigBase = {
       llm,
       // A2 — the default tools with the SHARED artifact registry threaded in so
       // the gated `artifact_*` tools register into the SAME instance the turn-drain
       // reads (single instance, no split-brain; reachable producer). See
-      // {@link buildDaemonToolRegistry}.
-      registry: buildDaemonToolRegistry(artifactRegistry),
+      // {@link buildDaemonToolRegistry}. A1 — plus the web `ask_user` tool (gated).
+      registry: buildDaemonToolRegistry(artifactRegistry, askUserTools),
       stream: new StdoutStream(),
       permission,
       messages: [],
