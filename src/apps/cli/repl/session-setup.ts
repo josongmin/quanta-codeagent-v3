@@ -32,7 +32,9 @@ import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
+import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { maybeRunEnvProbeWire } from "./env-probe-wire"
+import type { IndicatorUsageObserver } from "./factories/indicator-stream-port"
 import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
@@ -58,11 +60,15 @@ export interface SetupSessionDeps extends SessionBootstrapDeps {
     featureCfg: CliFeatureConfig,
     stream: StreamPort,
   ) => { collector: TurnSummaryCollector; stream: StreamPort }
-  /** Build the live turn indicator + indicator-tee'd stream. */
+  /** Build the live turn indicator + indicator-tee'd stream. S3 (jul-03) — the
+   *  optional `usageObserver` is threaded onto the indicator port so a live
+   *  `usage` AgentEvent's reasoning-token split feeds the `/context` gauge
+   *  holder (absent ⇒ no feed, byte-identical). */
   readonly buildTurnIndicatorAndStream: (
     featureCfg: CliFeatureConfig,
     statusBar: StatusBar,
     stream: StreamPort,
+    usageObserver?: IndicatorUsageObserver,
   ) => { indicator: TurnIndicator; turnStream: StreamPort }
   /** Track D — build the debug-tracer + tee-wrap the stream. Returns
    *  `{stream, debugHandle: undefined}` (literal input ref) when the
@@ -147,6 +153,12 @@ export interface SessionSetupResult {
   readonly idMeta: SessionBootstrapResult["idMeta"]
   readonly statusBar: StatusBar
   readonly turnIndicator: TurnIndicator
+  /** Track D / S3 — the `/context` gauge holder, created at setup so its
+   *  `observeUsage` rides the indicator tee (live `usage` AgentEvent →
+   *  reasoning-token split). surface-compose consumes THIS instance for the
+   *  `/context` `contextUsage` slot + the `onPromptAssembled` sink so the
+   *  gauge reads the same retained snapshot the tee feeds. */
+  readonly contextUsageHolder: ContextUsageHolder
   readonly turnSummary: TurnSummaryCollector
   /** Track D — present iff `QUANTA_DEBUG` enabled the debug tracer at
    *  boot AND stderr is a TTY. Absent ⇒ `/debug` slash prints "not wired". */
@@ -239,10 +251,21 @@ export const setupSession = async (
     featureCfg,
     debugStream,
   )
+  // Track D / S3 — the `/context` gauge holder. Created HERE (before the
+  // indicator tee) so its `observeUsage` can ride the indicator port that
+  // already consumes the live `usage` AgentEvent (the ordering constraint: the
+  // stream tee is built at setup time, but the holder was historically created
+  // later in surface-compose — hence the split flowed wire→event but nothing
+  // fed the holder). Its `sink`/`view` are forwarded on the result so
+  // surface-compose wires `/context` + `onPromptAssembled` against the SAME
+  // instance. `observeUsage` retains only a real reasoning split (absent ⇒
+  // no-op), so the tee stays byte-identical for providers with no split.
+  const contextUsageHolder = createContextUsageHolder()
   const { indicator: turnIndicator, turnStream } = deps.buildTurnIndicatorAndStream(
     featureCfg,
     statusBar,
     timelineStream,
+    { observeUsage: contextUsageHolder.observeUsage },
   )
 
   const { approvalPrompt, midTurnApprovalChannel, runtimeContext } = await composeCliRuntimeContext(
@@ -358,6 +381,7 @@ export const setupSession = async (
     idMeta: boot.idMeta,
     statusBar,
     turnIndicator,
+    contextUsageHolder,
     turnSummary,
     debugHandle,
     timelinePanel,

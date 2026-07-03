@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { AgentOutcome } from "@/agent"
+import { createContextUsageHolder } from "@/apps/cli/repl/context-usage-snapshot"
 import { createMidTurnApprovalChannel } from "@/apps/cli/repl/mid-turn-approval-channel"
 import { runSessionLoop, type SessionLoopSinks } from "@/apps/cli/repl/session-loop"
 import type { SessionSetupResult } from "@/apps/cli/repl/session-setup"
@@ -235,6 +236,7 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
       updateUsage: () => undefined,
       markFirstChunk: () => undefined,
     } as never,
+    contextUsageHolder: createContextUsageHolder(),
     turnSummary: {
       onEvent: () => undefined,
       render: () => "",
@@ -327,9 +329,7 @@ describe("T5 approval flow cli", () => {
   })
 
   test("a rich 'approve + scope:session' decision reaches approval.respond with scope INTACT (jun-10 'always' verb wire)", async () => {
-    const { setup, counters, respondCalls } = stubSetup([
-      { decision: "approve", scope: "session" },
-    ])
+    const { setup, counters, respondCalls } = stubSetup([{ decision: "approve", scope: "session" }])
     const sinks = buildSinks()
 
     await runSessionLoop({

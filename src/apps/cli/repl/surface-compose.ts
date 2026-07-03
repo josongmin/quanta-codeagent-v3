@@ -40,7 +40,7 @@ import type { SessionIoState } from "../session-cmd"
 import type { SlashContext } from "../slash-commands"
 import { createTextInbox, type TextInbox } from "../text-inbox"
 import { type BackgroundTurnPortal, createBackgroundTurnPortal } from "./background-turn-portal"
-import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
+import type { ContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import {
   type ConversationActionSurface,
@@ -64,7 +64,6 @@ import {
   buildRadarStore,
   buildReplaySlashState,
   buildRetryCandidates,
-  createPromptAssembledHolder,
   extractApplyPatchPaths,
   radarTaskDurationThresholdMs,
   renderRetryEvent,
@@ -271,12 +270,20 @@ export const composeSurfaceWires = (
     })
     registryToolMapper = (tool) => recorder.wrapTool(tool)
   }
-  // Prompt-assembled holder — the loop's `onPromptAssembled` sink writes the
-  // latest assembled-prompt breakdown here each turn; `/context` reads it via
-  // the `contextUsage` seam below. Mirrors the `granularRegistry` compose idiom:
-  // the sink is published on `runtimeFacadeCompose` and threaded into
-  // `createRuntimeFacade({ compose })` by the session loop.
-  const promptAssembled = createPromptAssembledHolder(setup.model)
+  // Prompt-assembled + S3 reasoning holder — SINGLE SSOT for `/context`. The
+  // loop's `onPromptAssembled` sink writes the latest assembled-prompt breakdown
+  // each turn (and clears the prior turn's reasoning split); the surface stream
+  // tee feeds `observeUsage` the live `usage` event's reasoning-token split; and
+  // `/context` reads the merged segmented view via the `contextUsage` seam.
+  //
+  // This is `setup.contextUsageHolder` (created at setup so its `observeUsage`
+  // could be teed onto the indicator port for the reasoning split). It REPLACES
+  // the former `createPromptAssembledHolder` (no reasoning support) AND resolves
+  // a latent structural rot: a SECOND `createContextUsageHolder` instance whose
+  // `.sink` had NO loop consumer (inert) and whose `.view()` only fed the
+  // pre-compaction warning. Now a single live holder backs `/context`, the
+  // pre-compaction warning, and the S3 reasoning annotation.
+  const contextUsageHolder = setup.contextUsageHolder
   // `/state` — working-state snapshot getter, installed by the loop's
   // `onWorkingStateReady` callback once features are built. Env-gated:
   // `QUANTA_WORKING_STATE` truthy ⇒ the loop builds the WorkingState session
@@ -409,7 +416,7 @@ export const composeSurfaceWires = (
         }
       : {}),
     granularRegistry,
-    onPromptAssembled: promptAssembled.sink,
+    onPromptAssembled: contextUsageHolder.sink,
     ...(registryToolMapper !== undefined ? { registryToolMapper } : {}),
     ...(workingStateEnabled
       ? {
@@ -476,11 +483,6 @@ export const composeSurfaceWires = (
   // ADR-0291 — composer + text inbox: surface-owned mutable holders.
   const composerHandle = createComposerHandle("")
   const textInbox = createTextInbox()
-  // Track D (runtime → REPL context wire) — surface-owned holder for the latest
-  // per-turn prompt snapshot. `view()` backs the `/context` `contextUsage` slot;
-  // `sink` is returned as `promptAssembledSink` for the integration layer to
-  // wire into `AgentConfig.onPromptAssembled`.
-  const contextUsageHolder = createContextUsageHolder()
   // ADR-0293 — playbook-trigger seam: attached by the loop AFTER it constructs
   // its `ExternalPromptQueue`. The seam is empty until then; `current()`
   // returns `null` and downstream stop/detach calls are no-ops.
@@ -684,7 +686,11 @@ export const composeSurfaceWires = (
     slashCtx,
     convCheckpointSlot,
     sessionIo,
-    contextUsage: () => promptAssembled.current(),
+    // LIVE `/context` seam — the merged segmented view (prompt-assembly segments
+    // + the S3 reasoning-token annotation). Reads the SAME `contextUsageHolder`
+    // the loop's `onPromptAssembled` writes and the stream tee feeds reasoning
+    // into, so `/context` shows "Reasoning" after a real OpenAI-Responses turn.
+    contextUsage: () => contextUsageHolder.view(),
     ...(voiceLive !== undefined ? { voiceLive } : {}),
     ...(memorySlot !== undefined ? { memory: memorySlot } : {}),
     ...(dreamSlot !== undefined ? { dream: dreamSlot } : {}),

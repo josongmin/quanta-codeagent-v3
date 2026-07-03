@@ -1,15 +1,8 @@
 import { resolveAgentMode } from "@/agent"
-import {
-  buildUsageBreakdownDefault,
-  type ContextUsageBreakdown,
-  type PromptAssembledSnapshot,
-  snapshotToBreakdownInput,
-} from "@/agent/context/usage-breakdown"
 import type { StickyModelStore } from "@/agent/sticky-model"
 import { type ModelCandidate, type Provider, type StreamEvent, tryCreateLLM } from "@/llm"
 import { PATCH_SENTINELS } from "@/patch/types"
 import { InMemoryRadarStore, JsonlFileRadarStore, type RadarStore } from "@/radar"
-import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime"
 import {
   loadSessionById,
   type SavedSession,
@@ -230,37 +223,11 @@ export const extractApplyPatchPaths = (patch: string): readonly string[] => {
   }
   return out
 }
-
-/** Holder for the latest `/context` segmented breakdown. The loop's
- *  `onPromptAssembled` sink writes here each turn; the slash command reads via
- *  `current()`. Null until the first turn assembles a prompt (so `/context`
- *  shows its legacy "no prompt assembled yet" fallback at session start). */
-export interface PromptAssembledHolder {
-  readonly sink: NonNullable<RuntimeFacadeComposeOptions["onPromptAssembled"]>
-  current(): ContextUsageBreakdown | undefined
-}
-
-/** Convert the loop's canonical {@link PromptAssembledSnapshot} (assembled
- *  `SystemBlock[]` + the turn's `promptPolicy` presence flags + model) into a
- *  segmented {@link ContextUsageBreakdown} via the SSOT `snapshotToBreakdownInput`
- *  + `buildUsageBreakdownDefault` (the loop's OWN token estimator — NO second
- *  heuristic). `max` rides through the snapshot (0 ⇒ unknown window ⇒ the
- *  renderer degrades to a `?`-percent bar; segments + totals still render). */
-const breakdownFromSnapshot = (snapshot: PromptAssembledSnapshot): ContextUsageBreakdown =>
-  buildUsageBreakdownDefault(snapshotToBreakdownInput(snapshot))
-
-/** Build the prompt-assembled holder + sink. Surface-owned mutable cell that
- *  the loop writes (via `onPromptAssembled`) and `/context` reads. */
-export const createPromptAssembledHolder = (model?: string): PromptAssembledHolder => {
-  let latest: ContextUsageBreakdown | undefined
-  return {
-    sink: (snapshot) => {
-      // Prefer the snapshot's own model id; fall back to the session model the
-      // holder was built with (the loop passes `max: 0` + may omit model).
-      const withModel: PromptAssembledSnapshot =
-        snapshot.model === undefined && model !== undefined ? { ...snapshot, model } : snapshot
-      latest = breakdownFromSnapshot(withModel)
-    },
-    current: () => latest,
-  }
-}
+// NOTE (S3, jul-03): the former `createPromptAssembledHolder` / `breakdownFromSnapshot`
+// lived here. They were consolidated away — `/context` now reads the single
+// `createContextUsageHolder` instance (see `repl/context-usage-snapshot.ts`),
+// created at `setupSession` so its `observeUsage` can be teed onto the indicator
+// port for the S3 reasoning-token split. The prior two-holder split left one
+// holder inert (its `.sink` had no loop consumer) and gave `/context` a holder
+// with no reasoning support; one live holder now backs `/context`, the
+// pre-compaction warning, and the reasoning annotation.

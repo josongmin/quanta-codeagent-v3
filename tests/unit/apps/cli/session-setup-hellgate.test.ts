@@ -151,6 +151,11 @@ type DepProbe = {
   buildPlanStoreOrUndefinedCalls: number
   buildTurnSummaryAndStreamCalls: number
   buildTurnIndicatorAndStreamCalls: number
+  /** S3 (jul-03) — the reasoning-gauge usage observer threaded onto the
+   *  indicator tee (captured so we can pin that setup wires it, not undefined). */
+  indicatorUsageObserver:
+    | { readonly observeUsage: (usage: { readonly reasoningTokens?: number }) => void }
+    | undefined
   buildDebugTracerAndStreamCalls: number
   buildTimelinePanelAndStreamCalls: number
   buildWorkMetricsSinkCalls: number
@@ -169,6 +174,7 @@ const makeStubDeps = (
     buildPlanStoreOrUndefinedCalls: 0,
     buildTurnSummaryAndStreamCalls: 0,
     buildTurnIndicatorAndStreamCalls: 0,
+    indicatorUsageObserver: undefined,
     buildDebugTracerAndStreamCalls: 0,
     buildTimelinePanelAndStreamCalls: 0,
     buildWorkMetricsSinkCalls: 0,
@@ -228,8 +234,11 @@ const makeStubDeps = (
       probe.buildTurnSummaryAndStreamCalls += 1
       return { collector: stubSummary as never, stream }
     },
-    buildTurnIndicatorAndStream: (_featureCfg, _statusBar, stream) => {
+    buildTurnIndicatorAndStream: (_featureCfg, _statusBar, stream, usageObserver) => {
       probe.buildTurnIndicatorAndStreamCalls += 1
+      // S3 — capture the observer so a test can pin that setup threads the
+      // reasoning-gauge holder's `observeUsage` here (was previously unwired).
+      probe.indicatorUsageObserver = usageObserver
       return { indicator: stubIndicator as never, turnStream: stream }
     },
     buildDebugTracerAndStream: (_featureCfg, stream) => {
@@ -503,6 +512,32 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     expect(result.idleMonitor).toBeDefined()
     expect(result.rejectCounter).toBeDefined()
     expect(result.statusBar).toBeDefined()
+  })
+
+  test("S3: threads the reasoning-gauge observer onto the indicator tee AND exposes the SAME holder", async () => {
+    const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+    const { deps, probe } = makeStubDeps()
+    const result = await setupSession(deps)
+    // The composition-root wire: setup MUST hand `buildTurnIndicatorAndStream`
+    // an observer (was previously unwired ⇒ undefined). RED-ON-INJECTION: drop
+    // the 4th arg in session-setup and this is undefined.
+    expect(probe.indicatorUsageObserver).toBeDefined()
+    // And it must be the SAME holder the result exposes (single instance, not a
+    // second inert holder): feeding the teed observer updates result.contextUsageHolder.
+    expect(result.contextUsageHolder).toBeDefined()
+    // Before a prompt snapshot, view() is undefined (fallback) — establish that
+    // the holder is live, then prove observer→view threading on the SAME object.
+    result.contextUsageHolder.sink({
+      system: [{ type: "text", text: "x".repeat(400) }],
+      layout: "single_block",
+      repoRulesPresent: false,
+      sessionCtxPresent: false,
+      userAppendPresent: false,
+      max: 200_000,
+      model: "gpt-5",
+    })
+    probe.indicatorUsageObserver?.observeUsage({ reasoningTokens: 8080 })
+    expect(result.contextUsageHolder.view()?.reasoningTokens).toBe(8080)
   })
 
   test("wires reviewer + plan-exit + user-input host ports into the runtime bridge", async () => {

@@ -51,29 +51,41 @@ export interface ContextUsageHolder {
  *  sessions each own their OWN holder (no module singleton). */
 export const createContextUsageHolder = (): ContextUsageHolder => {
   let latest: PromptAssembledSnapshot | undefined
-  // S3 — latest observed reasoning-token split (OpenAI-Responses-only).
+  // S3 — reasoning-token split (OpenAI-Responses-only) for the CURRENT turn.
   // `undefined` until a usage event with a split is seen; providers without a
-  // split never set it (Anthropic byte-identical).
-  let latestReasoningTokens: number | undefined
+  // split never set it (Anthropic byte-identical). TURN-SCOPED, not
+  // free-floating: `sink` (fired at turn START, when the next prompt is
+  // assembled) clears it so a stale split from turn N can never annotate turn
+  // N+1's snapshot (e.g. a same-session reasoning→non-reasoning model switch
+  // whose usage event omits the split). Within a turn: sink clears → the
+  // end-of-turn `usage` event's `observeUsage` sets the current split.
+  let currentReasoningTokens: number | undefined
   return {
     sink: (snapshot) => {
       latest = snapshot
+      // New turn's prompt ⇒ the previous turn's reasoning split no longer
+      // describes the window `/context` now renders. Clear so absence stays
+      // honest until THIS turn's usage event reports its own split.
+      currentReasoningTokens = undefined
     },
     observeUsage: (usage) => {
       // Only retain a REAL split. `!== undefined` (not truthiness) so an
       // explicit `0` from the provider is captured verbatim; the gauge then
-      // omits it (0 ⇒ nothing to show) but we never fabricate one.
-      if (usage.reasoningTokens !== undefined) latestReasoningTokens = usage.reasoningTokens
+      // omits it (0 ⇒ nothing to show) but we never fabricate one. Absent ⇒
+      // no-op, so the turn-scoped clear from `sink` stands (no stale carry).
+      if (usage.reasoningTokens !== undefined) currentReasoningTokens = usage.reasoningTokens
     },
     view: () => {
       if (latest === undefined) return undefined
       // `ContextUsageBreakdown` is structurally assignable to `SegmentedUsageView`
       // (segments:{id,tokens}[] ⊇ {id,tokens}[], total, max, model?).
       const base = buildUsageBreakdownDefault(snapshotToBreakdownInput(latest))
-      // S3 — thread the observed reasoning split onto the view so the `/context`
-      // gauge renders its distinct annotation. Absent ⇒ omitted (byte-identical).
-      return latestReasoningTokens !== undefined
-        ? { ...base, reasoningTokens: latestReasoningTokens }
+      // S3 — thread the current turn's reasoning split onto the view so the
+      // `/context` gauge renders its distinct annotation. Absent ⇒ omitted
+      // (byte-identical). Explicit `0` is retained here and omitted at the
+      // renderer (0 ⇒ nothing to show) — honest, no synthetic value.
+      return currentReasoningTokens !== undefined
+        ? { ...base, reasoningTokens: currentReasoningTokens }
         : base
     },
   }
