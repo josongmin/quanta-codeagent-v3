@@ -15,6 +15,7 @@
  */
 
 import type { IdleInfo, NotificationPort, PushStats, TurnCompleteInfo } from "./port"
+import { shouldPush } from "./push-decision"
 
 /** BEL — Claude `_cli-symbols :13717`. Doubles as the OSC string terminator. */
 const BEL = "\x07"
@@ -83,12 +84,12 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
   // probe is absent (nothing is ever suppressed by presence).
   let sent = 0
   let suppressedUserPresent = 0
-  // True iff a push at THIS moment must be held back because the user is present.
-  // Absent probe ⇒ always false ⇒ byte-identical. THROW-SAFE: a probe that
-  // throws must not crash the notify event (the call sites in the REPL loop —
-  // prompt-pipeline / turn-helpers — have no try/catch). Fail-OPEN toward
-  // NOTIFYING (treat a broken probe as "not present"): a notification beats a
-  // crashed turn, and it matches the always-notify default when presence is off.
+  // Read the injected presence probe. Absent ⇒ always false ⇒ byte-identical.
+  // THROW-SAFE: a probe that throws must not crash the notify event (the call
+  // sites in the REPL loop — prompt-pipeline / turn-helpers — have no try/catch).
+  // Fail-OPEN toward NOTIFYING (treat a broken probe as "not present"): a
+  // notification beats a crashed turn, and it matches the always-notify default
+  // when presence is off.
   const presentNow = (): boolean => {
     if (isUserPresent === undefined) return false
     try {
@@ -97,6 +98,18 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
       return false
     }
   }
+
+  // True iff a push at THIS moment must be held back because the user is present.
+  // The precedence ("should we actually write the push?") is owned by the pure
+  // SSOT {@link shouldPush} — this adapter does NOT re-encode it. At this point
+  // the channel-off gate (⇒ no-op port) and the write transport are already
+  // resolved, so we feed the fixed `status:"on" / transport:true` slice and let
+  // shouldPush decide the presence outcome. The adapter's OWN gates (fast-turn
+  // anti-spam, once-per-idle latch) sit OUTSIDE shouldPush's model and are
+  // composed by the call sites BEFORE this check — they are not presence gates.
+  const pushHeldByPresence = (): boolean =>
+    shouldPush({ status: "on", transport: true, present: presentNow() }).disabledReason ===
+    "user_present"
 
   if (channel === "off") {
     return {
@@ -128,8 +141,9 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
       // treated as "not slow" (fail-closed — no notification on bad data). This
       // is NOT presence suppression, so it is not counted in getPushStats.
       if (!(info.durationMs >= slowTurnThresholdMs)) return
-      // B5 — presence gate: user at the keyboard ⇒ hold the push (counted).
-      if (presentNow()) {
+      // B5 — presence gate (routed through the SSOT shouldPush): user at the
+      // keyboard ⇒ hold the push (counted).
+      if (pushHeldByPresence()) {
         suppressedUserPresent += 1
         return
       }
@@ -140,10 +154,11 @@ export const createOscNotificationPort = (deps: OscNotifyDeps): NotificationPort
     onIdleAwaitingInput: (info: IdleInfo): void => {
       lastBasename = info.cwdBasename
       if (idleNotified) return
-      // B5 — presence gate: hold the push while the user is present, but do NOT
-      // consume the once-per-entry latch (so the push still fires if they go
-      // idle before the next markActive). Counted as presence suppression.
-      if (presentNow()) {
+      // B5 — presence gate (routed through the SSOT shouldPush): hold the push
+      // while the user is present, but do NOT consume the once-per-entry latch
+      // (so the push still fires if they go idle before the next markActive).
+      // Counted as presence suppression.
+      if (pushHeldByPresence()) {
         suppressedUserPresent += 1
         return
       }

@@ -176,6 +176,49 @@ describe("B5 — getPushStats accounting", () => {
     expect(stats).toEqual({ sent: 0, suppressedUserPresent: 0 })
   })
 
+  // COMPOSITION ORDER (reconcile): the adapter-owned gates (fast-turn, latch) are
+  // composed BEFORE the shouldPush presence gate. A fast turn WHILE THE USER IS
+  // PRESENT must be attributed to fast-turn anti-spam (silent, NOT counted as
+  // presence) — if the presence check ran first it would wrongly bank a
+  // suppressedUserPresent. Pins fast-turn precedes presence.
+  test("fast turn WHILE PRESENT counts as fast-turn silence, not presence suppression", () => {
+    const { out, write } = makeSink()
+    const port = createOscNotificationPort({
+      write,
+      channel: "title_only",
+      slowTurnThresholdMs: 10_000,
+      isUserPresent: () => true, // present AND fast — fast-turn must win
+    })
+    port.onTurnComplete({ durationMs: 5, ok: true, cwdBasename: "p" })
+    expect(out).toEqual([])
+    // Not counted as presence — fast-turn gate returned before the presence gate.
+    expect(port.getPushStats?.()).toEqual({ sent: 0, suppressedUserPresent: 0 })
+  })
+
+  // COMPOSITION ORDER (reconcile): the once-per-idle latch is composed BEFORE the
+  // presence gate on idle-awaiting. A SECOND idle entry that is already latched
+  // must be attributed to the latch (already notified), NOT re-counted as a
+  // presence suppression even if the user happens to be present at that moment.
+  test("already-latched idle entry while present is latch-silence, not presence suppression", () => {
+    const { out, write } = makeSink()
+    let present = false
+    const port = createOscNotificationPort({
+      write,
+      channel: "title_only",
+      isUserPresent: () => present,
+    })
+    // First idle entry: absent ⇒ emits and LATCHES (idleNotified = true).
+    port.onIdleAwaitingInput({ cwdBasename: "p" })
+    expect(out).toEqual([osc("… p — waiting")])
+    expect(port.getPushStats?.()).toEqual({ sent: 1, suppressedUserPresent: 0 })
+    // Second idle entry while PRESENT: the latch returns before the presence
+    // gate ⇒ silent, and NOT counted as presence suppression.
+    present = true
+    port.onIdleAwaitingInput({ cwdBasename: "p" })
+    expect(out).toEqual([osc("… p — waiting")]) // unchanged
+    expect(port.getPushStats?.()).toEqual({ sent: 1, suppressedUserPresent: 0 })
+  })
+
   test("no getPushStats without a presence dep is fine (optional)", () => {
     const { write } = makeSink()
     const port = createOscNotificationPort({ write, channel: "title_only" })

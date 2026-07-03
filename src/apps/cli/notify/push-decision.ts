@@ -1,6 +1,11 @@
 /**
- * B5 (jul-03) — presence-aware push DECISION. Pure predicate; the ONLY place
- * that encodes the precedence of "should we actually write the OSC/BEL push?".
+ * B5 (jul-03) — presence-aware push DECISION. Pure predicate; the SSOT that
+ * encodes the precedence of "should we actually write the OSC/BEL push?". The
+ * OSC adapter (`osc-adapter.ts`) does NOT re-encode this precedence — it routes
+ * its presence decision THROUGH `shouldPush` (feeding the already-resolved
+ * `status:"on" / transport:true` slice at the wire point) so there is exactly
+ * one place that decides presence suppression. Breaking the `user_present` rule
+ * here therefore turns the adapter's presence tests red (it is live, not dead).
  *
  * Absorbed from Claude Code's presence-gated push: when the user is actively at
  * the keyboard we suppress the terminal push (the notification is for when they
@@ -14,6 +19,12 @@
  *   2. `no_transport` — there is no write sink / TTY to push to.
  *   3. `user_present` — the user is present (recent activity) ⇒ hold the push.
  * Only when NONE hold do we push.
+ *
+ * The adapter resolves `config_off` structurally (channel === "off" ⇒ a no-op
+ * port is built, so shouldPush is never reached) and `transport` structurally
+ * (a `write` sink is always injected at construction). It additionally owns two
+ * gates OUTSIDE this model — fast-turn anti-spam and the once-per-idle latch —
+ * which are composed around, not inside, the presence decision.
  *
  * Pure: no env / clock / I/O. The adapter injects the resolved booleans.
  */
