@@ -516,8 +516,9 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
   readonly mcpConnectors: boolean
   /** N3 — MCP resource/prompt tools (`QUANTA_MCP_RESOURCES`). Opt-in via the
    *  canonical `gateOn` vocab (`1`/`on`/`true`/`yes`; #24 doc-fix — resolver is
-   *  `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the four `mcp_list_resources` / `mcp_read_resource`
-   *  / `mcp_list_prompts` / `mcp_get_prompt` tools are NOT registered
+   *  `gateOn`, NOT strict the `gateOn` truthy vocab (#24)). Default false ⇒ the six `mcp_list_resources` /
+   *  `mcp_list_resource_templates` / `mcp_read_resource` / `mcp_read_resource_dir` / `mcp_list_prompts` /
+   *  `mcp_get_prompt` tools are NOT registered
    *  (byte-identical). When ON AND at least one connected MCP server advertises
    *  `resources`/`prompts`, the surface (`loadFeatures`) builds an aggregate
    *  `ResourcesHandle` over the live clients and threads it into

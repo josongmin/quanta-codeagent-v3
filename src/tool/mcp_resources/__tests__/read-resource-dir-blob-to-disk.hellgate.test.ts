@@ -26,6 +26,7 @@ import { describe, expect, it } from "bun:test"
 import { aggregateResourcesHandle, type McpResourcesClient } from "@/agent/mcp-bridge"
 import { directResourceChildren } from "@/mcp/resources"
 import type { ImageWritePort } from "@/tool/image-gen/store"
+import type { Tool, ToolContext, ToolEvent } from "../../types"
 import {
   BLOB_MAX_BYTES,
   filterDirectChildren,
@@ -34,10 +35,9 @@ import {
   mcpReadResourceTool,
   type ResourceBlock,
   type ResourceEntry,
-  renderResourceDirList,
   type ResourcesHandle,
+  renderResourceDirList,
 } from "../index"
-import type { Tool, ToolContext, ToolEvent } from "../../types"
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
@@ -191,7 +191,13 @@ describe("B4 (c) jail — '../' blob uri escape is rejected", () => {
     const mem = makeMemWrite()
     const port = handleWith({
       // an attacker-chosen uri that decodes to a traversal filename.
-      blocks: [{ uri: "file:///../../../../etc/evil.bin", mimeType: "application/octet-stream", blob: b64 }],
+      blocks: [
+        {
+          uri: "file:///../../../../etc/evil.bin",
+          mimeType: "application/octet-stream",
+          blob: b64,
+        },
+      ],
     })
     const tool = mcpReadResourceTool(port, { writePort: mem })
     const res = await run(tool, { uri: "file:///../../../../etc/evil.bin" }, "/tmp/jail-b4")
@@ -369,5 +375,133 @@ describe("AUDIT B4-h3 — NUL byte in a blob uri path is refused (was UNTESTED)"
     const res = await run(tool, { uri: nulUri }, "/tmp/jail-b4")
     expect(mem.writes.size).toBe(0)
     expect(res.output.toLowerCase()).toMatch(/nul|refused|not allowed|jail/)
+  })
+})
+
+// ===========================================================================
+// QUALITY closeouts (deep detail/polish pass). The blob-save + read-dir
+// GRACEFUL-DEGRADATION branches (decode-fail, write-port throw, existence-probe
+// throw, empty-after-decode, empty content, empty dir) were UNPINNED: a mutation
+// turning any into an iterator THROW (no-throw contract break) or dropping the
+// content-free reason would pass the whole suite. Each pin below asserts the
+// tool degrades to a clear, base64-free reason line and NEVER throws / writes.
+// ===========================================================================
+
+describe("QUALITY B4-q1 — undecodable / empty-after-decode blob degrades gracefully (no write, no throw)", () => {
+  it("a blob that base64-decodes to ZERO bytes is NOT written and the model is told why", async () => {
+    const mem = makeMemWrite()
+    // "" decodes to an empty buffer — a legitimately empty blob the tool must
+    // refuse to write (an empty file is not a useful artifact) without throwing.
+    const port = handleWith({
+      blocks: [{ uri: "file:///empty.bin", mimeType: "application/octet-stream", blob: "" }],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: mem })
+    const res = await run(tool, { uri: "file:///empty.bin" }, "/tmp/jail-b4")
+    expect(res.ok).toBe(true) // no-throw: a degraded block is still an ok read
+    expect(mem.writes.size).toBe(0)
+    expect(res.output.toLowerCase()).toMatch(/empty after base64|not written/)
+  })
+
+  it("a mixed resource still renders its TEXT block even when a sibling blob is refused", async () => {
+    // completeness: one bad block must not swallow a good one (per-block degrade).
+    const mem = makeMemWrite()
+    const port = handleWith({
+      blocks: [
+        { uri: "file:///readme.txt", mimeType: "text/plain", text: "keep me" },
+        { uri: "file:///empty.bin", mimeType: "application/octet-stream", blob: "" },
+      ],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: mem })
+    const res = await run(tool, { uri: "file:///readme.txt" }, "/tmp/jail-b4")
+    expect(res.ok).toBe(true)
+    expect(res.output).toContain("keep me") // good block survived
+    expect(res.output.toLowerCase()).toMatch(/not written|empty after base64/) // bad block surfaced
+    expect(mem.writes.size).toBe(0)
+  })
+})
+
+describe("QUALITY B4-q2 — a THROWING write port degrades to a typed reason (no-throw contract)", () => {
+  // The port is documented no-throw, but a real Bun.write can throw (ENOSPC /
+  // EACCES / disk-full). renderResourceContentSavingBlobs wraps writeBytes AND
+  // exists in try/catch → a reason line, never an iterator rejection. Pin both.
+  const raw = new Uint8Array([1, 2, 3, 4])
+  const b64 = Buffer.from(raw).toString("base64")
+
+  it("writeBytes throwing (e.g. disk-full) surfaces 'write failed' and never rejects the iterator", async () => {
+    const throwingWrite: ImageWritePort = {
+      async exists() {
+        return false
+      },
+      async writeBytes() {
+        throw new Error("ENOSPC: no space left on device")
+      },
+    }
+    const port = handleWith({
+      blocks: [{ uri: "file:///data/report.bin", mimeType: "application/octet-stream", blob: b64 }],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: throwingWrite })
+    // MUST NOT throw out of the async iterator.
+    const res = await run(tool, { uri: "file:///data/report.bin" }, "/tmp/jail-b4")
+    expect(res.ok).toBe(true)
+    expect(res.output.toLowerCase()).toContain("write failed")
+    // the disk-full detail is surfaced but the base64 is still never inlined.
+    expect(res.output).not.toContain(b64)
+  })
+
+  it("exists() throwing surfaces 'existence probe failed' and never writes / rejects", async () => {
+    const writes = new Map<string, Uint8Array>()
+    const throwingExists: ImageWritePort = {
+      async exists() {
+        throw new Error("EACCES: permission denied on stat")
+      },
+      async writeBytes(path, bytes) {
+        writes.set(path, bytes)
+      },
+    }
+    const port = handleWith({
+      blocks: [{ uri: "file:///data/report.bin", mimeType: "application/octet-stream", blob: b64 }],
+    })
+    const tool = mcpReadResourceTool(port, { writePort: throwingExists })
+    const res = await run(tool, { uri: "file:///data/report.bin" }, "/tmp/jail-b4")
+    expect(res.ok).toBe(true)
+    // a failed probe must FAIL-CLOSED — never fall through to a write.
+    expect(writes.size).toBe(0)
+    expect(res.output.toLowerCase()).toContain("existence probe failed")
+  })
+})
+
+describe("QUALITY B4-q3 — empty renders are clear, content-free lines (read + read-dir)", () => {
+  it("a read of a resource with NO content blocks renders an explicit empty note (no throw)", async () => {
+    const mem = makeMemWrite()
+    const port = handleWith({ blocks: [] })
+    const tool = mcpReadResourceTool(port, { writePort: mem })
+    const res = await run(tool, { uri: "file:///nothing" }, "/tmp/jail-b4")
+    expect(res.ok).toBe(true)
+    expect(res.output).toContain("file:///nothing")
+    expect(res.output.toLowerCase()).toContain("empty resource")
+    expect(mem.writes.size).toBe(0)
+  })
+
+  it("an empty directory listing renders '(no direct children)' tagged with the parent uri", () => {
+    // read-dir over a dir with zero children (empty dir, or a dir whose only
+    // entries are grandchildren the filter drops) must not render a bare/blank line.
+    const rendered = renderResourceDirList("file:///emptydir/", [])
+    expect(rendered).toContain("file:///emptydir/")
+    expect(rendered).toContain("(no direct children)")
+  })
+
+  it("a directory with ONLY subdirectories still lists them (subdir-only is not empty)", () => {
+    const onlySubdirs: ResourceEntry[] = [
+      { uri: "file:///d/sub1", mimeType: "inode/directory" },
+      { uri: "file:///d/sub2", mimeType: "inode/directory" },
+    ]
+    const kept = filterDirectChildren(onlySubdirs, "file:///d").map((e) => e.uri)
+    expect(kept).toEqual(["file:///d/sub1", "file:///d/sub2"])
+    const rendered = renderResourceDirList(
+      "file:///d",
+      filterDirectChildren(onlySubdirs, "file:///d"),
+    )
+    expect(rendered).toContain("inode/directory")
+    expect(rendered).not.toContain("(no direct children)")
   })
 })

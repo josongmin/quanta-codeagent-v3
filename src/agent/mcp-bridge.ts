@@ -23,7 +23,6 @@ import {
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import { errMessage, logger } from "@/shared"
 import {
-  filterDirectChildren,
   type ResourcesHandleResult as HandleResult,
   mcpTasksTools,
   type PromptEntry,
