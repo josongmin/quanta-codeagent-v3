@@ -13,6 +13,13 @@
  */
 
 import type { ImageBlock } from "../types/protocol"
+import {
+  type Base64ImagePayload,
+  createBrowserDownscaleDeps,
+  downscaleBase64Image,
+  type ImageDownscaleDeps,
+  isBrowserDownscaleSupported,
+} from "./image-downscale"
 
 export const MAX_INLINE_IMAGE_BYTES = 20 * 1024 * 1024
 /** Soft cap on accumulated attachments per turn. Prevents foot-guns when
@@ -43,9 +50,30 @@ export type NormalizeResult =
   | { readonly ok: true; readonly attachment: PendingImageAttachment }
   | { readonly ok: false; readonly error: string }
 
+/**
+ * Resolve the downscale deps to use. In the browser (paste/picker path) we use
+ * the real canvas-backed deps; when the DOM image APIs are absent (node tests,
+ * headless) we return `undefined` so the image is stored verbatim. Callers may
+ * inject deps directly for testing. Downscale failures fall back to the
+ * original payload inside `downscaleBase64Image`, so this never throws.
+ */
+const resolveDownscaleDeps = (injected?: ImageDownscaleDeps): ImageDownscaleDeps | undefined => {
+  if (injected !== undefined) return injected
+  return isBrowserDownscaleSupported() ? createBrowserDownscaleDeps() : undefined
+}
+
+const maybeDownscale = async (
+  payload: Base64ImagePayload,
+  deps: ImageDownscaleDeps | undefined,
+): Promise<Base64ImagePayload> => {
+  if (deps === undefined) return payload
+  return downscaleBase64Image(payload, deps)
+}
+
 export const normalizeFile = async (
   file: File,
   source: "picker" | "paste",
+  downscaleDeps?: ImageDownscaleDeps,
 ): Promise<NormalizeResult> => {
   const type = file.type.toLowerCase()
   const fileName = normalizedFileName(file)
@@ -62,20 +90,20 @@ export const normalizeFile = async (
     }
   }
   try {
-    const data = await readFileAsBase64(file)
+    const rawData = await readFileAsBase64(file)
+    const payload = await maybeDownscale(
+      { data: rawData, mediaType: type, byteSize: file.size },
+      resolveDownscaleDeps(downscaleDeps),
+    )
     return {
       ok: true,
       attachment: {
-        data,
-        mediaType: type,
-        byteSize: file.size,
+        data: payload.data,
+        mediaType: payload.mediaType,
+        byteSize: payload.byteSize,
         title:
-          fileName.length > 0
-            ? fileName
-            : source === "paste"
-              ? "Pasted image"
-              : "Selected image",
-        subtitle: `${describeImageSource(source)} · ${formatKilobytes(file.size)} KB · attached to next turn`,
+          fileName.length > 0 ? fileName : source === "paste" ? "Pasted image" : "Selected image",
+        subtitle: `${describeImageSource(source)} · ${formatKilobytes(payload.byteSize)} KB · attached to next turn`,
         previewAlt: fileName.length > 0 ? fileName : "Image attachment preview",
       },
     }
@@ -95,9 +123,7 @@ export interface HotkeyImagePayload {
   readonly byteSize: number
 }
 
-export const isHotkeyImagePayload = (
-  value: unknown,
-): value is HotkeyImagePayload => {
+export const isHotkeyImagePayload = (value: unknown): value is HotkeyImagePayload => {
   if (value === null || typeof value !== "object") return false
   const obj = value as Record<string, unknown>
   return (
@@ -109,25 +135,35 @@ export const isHotkeyImagePayload = (
   )
 }
 
-export const normalizeHotkeyPng = (
+export const normalizeHotkeyPng = async (
   payload: HotkeyImagePayload,
-): NormalizeResult => {
+  downscaleDeps?: ImageDownscaleDeps,
+): Promise<NormalizeResult> => {
   if (payload.byteSize > MAX_INLINE_IMAGE_BYTES) {
     return {
       ok: false,
       error: `screen capture is too large: ${formatMegabytes(payload.byteSize)} MB (max ${formatMegabytes(MAX_INLINE_IMAGE_BYTES)} MB)`,
     }
   }
-  const monitorLabel =
-    payload.monitorName.length > 0 ? payload.monitorName : "Active monitor"
-  return {
-    ok: true,
-    attachment: {
+  const monitorLabel = payload.monitorName.length > 0 ? payload.monitorName : "Active monitor"
+  // Active-monitor captures are the largest offenders (5K PNGs). Downscale
+  // before it enters the queue; failures fall back to the original bytes.
+  const scaled = await maybeDownscale(
+    {
       data: payload.pngBase64,
       mediaType: "image/png",
       byteSize: payload.byteSize,
+    },
+    resolveDownscaleDeps(downscaleDeps),
+  )
+  return {
+    ok: true,
+    attachment: {
+      data: scaled.data,
+      mediaType: scaled.mediaType,
+      byteSize: scaled.byteSize,
       title: monitorLabel,
-      subtitle: `${monitorLabel} · ${formatKilobytes(payload.byteSize)} KB · attached to next turn`,
+      subtitle: `${monitorLabel} · ${formatKilobytes(scaled.byteSize)} KB · attached to next turn`,
       previewAlt: `Screenshot from ${monitorLabel}`,
     },
   }
@@ -152,11 +188,9 @@ const normalizedFileName = (file: File): string => {
   return typeof raw === "string" ? raw.trim() : ""
 }
 
-const formatKilobytes = (bytes: number): string =>
-  Math.max(1, Math.round(bytes / 1024)).toString()
+const formatKilobytes = (bytes: number): string => Math.max(1, Math.round(bytes / 1024)).toString()
 
-const formatMegabytes = (bytes: number): string =>
-  (bytes / 1024 / 1024).toFixed(1)
+const formatMegabytes = (bytes: number): string => (bytes / 1024 / 1024).toFixed(1)
 
 const readFileAsBase64 = async (file: File): Promise<string> => {
   // `File.arrayBuffer()` is standard in browsers and modern Node — used

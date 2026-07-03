@@ -17,56 +17,47 @@ import type { ImageBlock } from "../types/protocol"
 import {
   type HotkeyImagePayload,
   MAX_PENDING_IMAGES,
-  type PendingImageAttachment,
   normalizeFile,
   normalizeHotkeyPng,
+  type PendingImageAttachment,
   toImageBlocks,
 } from "./image-attachment"
 
 export interface ImageAttachmentState {
   readonly pendingImages: readonly PendingImageAttachment[]
   readonly attachmentError: string | null
-  readonly attachFile: (
-    file: File,
-    source: "picker" | "paste",
-  ) => Promise<void>
-  readonly attachFromHotkey: (payload: HotkeyImagePayload) => void
+  readonly attachFile: (file: File, source: "picker" | "paste") => Promise<void>
+  readonly attachFromHotkey: (payload: HotkeyImagePayload) => Promise<void>
   readonly removeAt: (index: number) => void
   readonly clear: () => void
   readonly toImageBlocks: () => readonly ImageBlock[] | undefined
 }
 
-const tooManyError = (): string =>
-  `cannot attach more than ${MAX_PENDING_IMAGES} images per turn`
+const tooManyError = (): string => `cannot attach more than ${MAX_PENDING_IMAGES} images per turn`
 
 export const useImageAttachment = (): ImageAttachmentState => {
-  const [pendingImages, setPendingImages] = useState<
-    readonly PendingImageAttachment[]
-  >([])
+  const [pendingImages, setPendingImages] = useState<readonly PendingImageAttachment[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
 
-  const attachFile = useCallback(
-    async (file: File, source: "picker" | "paste"): Promise<void> => {
-      const result = await normalizeFile(file, source)
-      if (!result.ok) {
-        setAttachmentError(result.error)
-        return
+  const attachFile = useCallback(async (file: File, source: "picker" | "paste"): Promise<void> => {
+    const result = await normalizeFile(file, source)
+    if (!result.ok) {
+      setAttachmentError(result.error)
+      return
+    }
+    let rejected = false
+    setPendingImages((prev) => {
+      if (prev.length >= MAX_PENDING_IMAGES) {
+        rejected = true
+        return prev
       }
-      let rejected = false
-      setPendingImages((prev) => {
-        if (prev.length >= MAX_PENDING_IMAGES) {
-          rejected = true
-          return prev
-        }
-        return [...prev, result.attachment]
-      })
-      setAttachmentError(rejected ? tooManyError() : null)
-    },
-    [],
-  )
+      return [...prev, result.attachment]
+    })
+    setAttachmentError(rejected ? tooManyError() : null)
+  }, [])
 
-  const attachFromHotkey = useCallback((payload: HotkeyImagePayload): void => {
-    const result = normalizeHotkeyPng(payload)
+  const attachFromHotkey = useCallback(async (payload: HotkeyImagePayload): Promise<void> => {
+    const result = await normalizeHotkeyPng(payload)
     if (!result.ok) {
       setAttachmentError(result.error)
       return

@@ -1,12 +1,33 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
-  MAX_INLINE_IMAGE_BYTES,
   isHotkeyImagePayload,
+  MAX_INLINE_IMAGE_BYTES,
   normalizeFile,
   normalizeHotkeyPng,
-  toImageBlocks,
   type PendingImageAttachment,
+  toImageBlocks,
 } from "./image-attachment"
+import type { ImageDownscaleDeps } from "./image-downscale"
+
+/** Deps that report a large source and re-encode to a shrunk WEBP payload. */
+const shrinkingDeps = (): ImageDownscaleDeps => ({
+  decode: vi.fn(async () => ({ width: 4000, height: 2000 })),
+  encodeScaled: vi.fn(async () => ({
+    data: "SHRUNK",
+    mediaType: "image/webp",
+    byteSize: 100_000,
+  })),
+})
+
+/** Deps whose decode throws — the paste must survive with original bytes. */
+const failingDeps = (): ImageDownscaleDeps => ({
+  decode: vi.fn(async () => {
+    throw new Error("decode failed")
+  }),
+  encodeScaled: vi.fn(async () => {
+    throw new Error("should not reach")
+  }),
+})
 
 const makePngFile = (size = 1024, name = "shot.png"): File => {
   const bytes = new Uint8Array(size)
@@ -55,8 +76,8 @@ describe("normalizeFile", () => {
 })
 
 describe("normalizeHotkeyPng", () => {
-  it("accepts a small capture and labels it from monitor name", () => {
-    const result = normalizeHotkeyPng({
+  it("accepts a small capture and labels it from monitor name", async () => {
+    const result = await normalizeHotkeyPng({
       kind: "quanta:hotkey-image-capture",
       pngBase64: "AAAA",
       monitorName: "LG 27UK",
@@ -70,8 +91,8 @@ describe("normalizeHotkeyPng", () => {
     expect(result.attachment.previewAlt).toBe("Screenshot from LG 27UK")
   })
 
-  it("falls back to 'Active monitor' when monitorName is empty", () => {
-    const result = normalizeHotkeyPng({
+  it("falls back to 'Active monitor' when monitorName is empty", async () => {
+    const result = await normalizeHotkeyPng({
       kind: "quanta:hotkey-image-capture",
       pngBase64: "AAAA",
       monitorName: "",
@@ -84,8 +105,8 @@ describe("normalizeHotkeyPng", () => {
   })
 
   // Regression — the previous shape had this path bypass the cap entirely.
-  it("rejects a capture above MAX_INLINE_IMAGE_BYTES", () => {
-    const result = normalizeHotkeyPng({
+  it("rejects a capture above MAX_INLINE_IMAGE_BYTES", async () => {
+    const result = await normalizeHotkeyPng({
       kind: "quanta:hotkey-image-capture",
       pngBase64: "AAAA",
       monitorName: "5K Display",
@@ -128,6 +149,89 @@ describe("isHotkeyImagePayload", () => {
   })
 })
 
+describe("downscale wiring", () => {
+  const bigFile = (size = 6_000_000, name = "screenshot.png"): File => {
+    const bytes = new Uint8Array(Math.min(size, 4)) // small buffer, size lied via property
+    bytes.set([0x89, 0x50, 0x4e, 0x47], 0)
+    const f = new File([bytes], name, { type: "image/png" })
+    Object.defineProperty(f, "size", { value: size })
+    return f
+  }
+
+  it("normalizeFile replaces payload with the shrunk downscaled result", async () => {
+    const deps = shrinkingDeps()
+    const result = await normalizeFile(bigFile(), "paste", deps)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.attachment.data).toBe("SHRUNK")
+    expect(result.attachment.mediaType).toBe("image/webp")
+    expect(result.attachment.byteSize).toBe(100_000)
+    // subtitle KB reflects the SHRUNK size, not the original 6MB
+    expect(result.attachment.subtitle).toContain("98 KB")
+    expect(deps.encodeScaled).toHaveBeenCalledOnce()
+  })
+
+  it("normalizeFile keeps ORIGINAL bytes when decode fails (paste never crashes)", async () => {
+    const deps = failingDeps()
+    const result = await normalizeFile(bigFile(5_000_000), "paste", deps)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.attachment.byteSize).toBe(5_000_000)
+    expect(result.attachment.mediaType).toBe("image/png")
+    expect(deps.encodeScaled).not.toHaveBeenCalled()
+  })
+
+  it("normalizeFile leaves a genuinely small image untouched (no re-encode)", async () => {
+    const deps: ImageDownscaleDeps = {
+      decode: vi.fn(async () => ({ width: 640, height: 480 })),
+      encodeScaled: vi.fn(async () => {
+        throw new Error("should not encode small image")
+      }),
+    }
+    const result = await normalizeFile(makePngFile(50_000, "icon.png"), "picker", deps)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.attachment.byteSize).toBe(50_000)
+    expect(deps.encodeScaled).not.toHaveBeenCalled()
+  })
+
+  it("normalizeHotkeyPng downscales a large capture via injected deps", async () => {
+    const deps = shrinkingDeps()
+    const result = await normalizeHotkeyPng(
+      {
+        kind: "quanta:hotkey-image-capture",
+        pngBase64: "AAAA",
+        monitorName: "5K Display",
+        capturedAtMs: 0,
+        byteSize: 8_000_000,
+      },
+      deps,
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.attachment.data).toBe("SHRUNK")
+    expect(result.attachment.mediaType).toBe("image/webp")
+    expect(result.attachment.byteSize).toBe(100_000)
+  })
+
+  it("normalizeHotkeyPng still enforces the hard byte cap BEFORE downscaling", async () => {
+    const deps = shrinkingDeps()
+    const result = await normalizeHotkeyPng(
+      {
+        kind: "quanta:hotkey-image-capture",
+        pngBase64: "AAAA",
+        monitorName: "5K Display",
+        capturedAtMs: 0,
+        byteSize: MAX_INLINE_IMAGE_BYTES + 1,
+      },
+      deps,
+    )
+    expect(result.ok).toBe(false)
+    // over the hard cap => refused, decode/encode never attempted
+    expect(deps.decode).not.toHaveBeenCalled()
+  })
+})
+
 describe("toImageBlocks", () => {
   const make = (data: string, mediaType = "image/png"): PendingImageAttachment => ({
     data,
@@ -144,9 +248,7 @@ describe("toImageBlocks", () => {
 
   it("returns a single-element ImageBlock array for one pending", () => {
     const blocks = toImageBlocks([make("AAAA")])
-    expect(blocks).toEqual([
-      { type: "image", mediaType: "image/png", data: "AAAA" },
-    ])
+    expect(blocks).toEqual([{ type: "image", mediaType: "image/png", data: "AAAA" }])
   })
 
   it("preserves order across multiple pendings", () => {
