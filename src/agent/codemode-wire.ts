@@ -26,7 +26,7 @@ import type { CodeCellDispatchPort, DispatchOutcome } from "@/codemode"
 import type { ToolUseBlock } from "@/llm"
 import type { AutoModeClassifier, PermissionContext } from "@/permission"
 import { errMessage } from "@/shared"
-import { dispatchTool } from "./dispatch"
+import { resolveDispatchPort } from "./dispatch"
 import type { AgentConfig } from "./types"
 
 /** Inputs for {@link buildCodeCellDispatchPort}. The trio is the loop's LIVE
@@ -76,7 +76,9 @@ export const buildCodeCellDispatchPort = (input: CodeCellWireInput): CodeCellDis
     // is belt-and-braces so a pathological pre-execute throw becomes an
     // ok:false outcome the cell can branch on (never an uncaught host fault).
     try {
-      const result = await dispatchTool(call, config, permission, undefined, autoClassifier)
+      // H1 (DIP): the SAME injectable dispatch seam the loop uses (resolveDispatchPort ⇒ the wired
+      // port or the default dispatchTool) — code-mode cells route through the identical chokepoint.
+      const result = await resolveDispatchPort(config)(call, config, permission, undefined, autoClassifier)
       return { ok: result.ok, content: contentOf(result) }
     } catch (e) {
       return { ok: false, content: `code_cell dispatch failed for ${name}: ${errMessage(e)}` }
