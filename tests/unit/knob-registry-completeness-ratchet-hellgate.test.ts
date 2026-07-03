@@ -145,6 +145,20 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_OTEL_RUN_ID", "infra: OTEL trace-viewer deep-link run id (apps/bench/otel + default-trace-sink, operator tracing), not a user /config knob"],
   ["QUANTA_OTEL_SINK", "infra: OTEL durable span-sink target file/s3 (apps/bench/span-sink resolveSpanSink, operator tracing), not a user /config knob"],
   ["QUANTA_OTEL_S3_REGION", "infra: OTEL durable s3 span-sink region (apps/bench/span-sink, operator tracing), not a user /config knob"],
+  ["QUANTA_LSP_RSS_BUDGET_MB", "infra: LSP server RSS watchdog budget (lsp/server-rss-watchdog resolveLspRssBudgetMb — operator memory-budget tuning read at call site), sibling of QUANTA_LSP_MEM_BUDGET_MB, not a user /config knob"],
+  // BENCH-INTERNAL harness env (read at the bench/eval composition root to
+  // configure benchmark + SWE-bench-Pro grading runs — a test-harness concern,
+  // never a user-facing /config live-toggle). Same class as QUANTA_BENCH_HEALTH_ABORT.
+  ["QUANTA_BENCH_HOST_MONITOR", "bench-only: host-resource sampler kill-switch (apps/bench/run-main, jun-28 fork-storm OOM diagnostic), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_BENCH_MAX_COST_USD", "bench-only: per-run cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_BENCH_MAX_COST_PER_TURN_USD", "bench-only: per-turn cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_DATASET_FAMILY", "bench-only: SWE-bench dataset family selector verified|pro|live (apps/bench/dataset-family), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_PIP_SPEC", "bench-only: SWE-bench remote box pip spec override (apps/bench/remote/box-session/ec2-lifecycle), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_PRO_HARNESS_DIR", "bench-only: SWE-bench-Pro ScaleAI grading harness dir (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH", "bench-only: SWE-bench-Pro raw sample path (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_PRO_PYTHON_BIN", "bench-only: SWE-bench-Pro grading python bin (apps/bench/run-main), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_PRO_MODEL_NAME", "bench-only: SWE-bench-Pro report model-name label (apps/bench/run-main), read at the bench composition root, not a shipped /config knob"],
+  ["QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME", "bench-only: SWE-bench-Pro DockerHub namespace for prebuilt images (apps/bench/run-main), read at the bench composition root, not a shipped /config knob"],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {

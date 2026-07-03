@@ -1,5 +1,5 @@
 id: mcp-resource-tools
-title: MCP resource/prompt tools (N3 — list/read resources + list/get prompts)
+title: MCP resource/prompt tools (N3 — list/read/read-dir resources + list-templates + list/get prompts)
 section: 9
 subsystem: MCP / resources (§7, H19 resources/* + prompts/* client methods 위에 얹은 도구층)
 order: 169
@@ -12,21 +12,28 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "absorbed:cursor"]
 depends_on: [mcp-connector-discovery]
+config_refs:
+  env: [QUANTA_MCP_RESOURCES]
 surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-03"
   evidence:
-    cli: "runs in the interactive CLI — 13/13 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "agent calls to the 4 mcp resource/prompt tools render as tool cards via bridged tool_call/tool_result events"
+    cli: "runs in the interactive CLI — evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    web: "agent calls to the 6 mcp resource/prompt tools render as tool cards via bridged tool_call/tool_result events"
 purpose: |
   H19(LANDED)이 준 `McpClient`의 typed no-throw `listResources`/`readResource`/
-  `listPrompts`/`getPrompt` (resources/* + prompts/* method 패밀리) 위에 얹는
-  **agent-callable 도구층**. H19 메서드는 INTERNAL — 에이전트 루프가 못 부름. N3가
-  네 개의 caller-wired default-OFF 도구를 노출: `mcp_list_resources` /
-  `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` — 모델이 연결된 MCP
-  서버의 resources + prompt template을 열거·읽기.
+  `listResourceTemplates`/`listPrompts`/`getPrompt` (resources/* + prompts/*
+  method 패밀리) 위에 얹는 **agent-callable 도구층**. H19 메서드는 INTERNAL —
+  에이전트 루프가 못 부름. N3가 SIX caller-wired default-OFF 도구를 노출:
+  `mcp_list_resources` / `mcp_list_resource_templates` / `mcp_read_resource` /
+  `mcp_read_resource_dir` (B4) / `mcp_list_prompts` / `mcp_get_prompt` — 모델이
+  연결된 MCP 서버의 resources(+ URI templates) + prompt template을 열거·읽기.
+  READ tools split: list_resources/list_resource_templates/read_resource_dir +
+  the list/get-prompt pair stay read-only; `mcp_read_resource` (B4) is MUTATING
+  (a binary BLOB is base64-decoded + written to a jailed workspace path via the
+  shared @/storage#resolveJailed chokepoint, '../' refused, 8MB-capped).
 
   레퍼런스: Cursor `listMcpResources`/`readMcpResource` exec-args(per-server scoping +
   NotFound/Error/Rejected 닫힌 union) + Codex `rmcp-client` 5-method 패밀리
@@ -37,15 +44,17 @@ purpose: |
     - `port.ts` — duck-typed `ResourcesHandle` (=@/mcp/resources/port `McpResult<T>`
       + `Mcp*` shape의 string-identical mirror; 호스트가 live McpClient를 이 shape으로
       어댑트, drift=어댑터 사이트 TYPE error).
-    - 4 tool factory `(port: ResourcesHandle) => Tool` — 모두 read-only +
-      concurrency-safe, 각 execute가 zod 재파싱 → signal.aborted 체크 → handle 1회 호출
-      → 단일 `{type:"result"}`. typed failure(`unsupported`/`malformed`/`transport`/
-      `too-large`)는 throw 없이 `ok:false`.
+    - 6 tool factory `(port: ResourcesHandle) => Tool` — read tools(list*/
+      read_resource_dir/list/get-prompt) read-only, `mcp_read_resource` mutating
+      (jailed blob write); 각 execute가 zod 재파싱 → signal.aborted 체크 → handle
+      1회 호출 → 단일 `{type:"result"}`. typed failure(`unsupported`/`malformed`/
+      `transport`/`too-large`)는 throw 없이 `ok:false`.
     - `render.ts` — PURE 렌더 + failure 매핑. **untrusted-content 안전**: BLOB은 절대
       inline 안 함(placeholder만), text는 MAX_OUTPUT(50k, list_tasks와 동일값)로 cap,
       non-text prompt content는 typed placeholder(파싱 시도 안 함).
     - `index.ts` — `mcpResourcesTools(port): Tool[]` (stable order:
-      list_resources → read_resource → list_prompts → get_prompt).
+      list_resources → list_resource_templates → read_resource →
+      read_resource_dir → list_prompts → get_prompt).
 
   배선/보안 (jun-06 HOST-WIRE 완료): `QUANTA_MCP_RESOURCES` default-OFF
   (없으면 미등록=byte-identical, N2 `mcpConnectors` 미러). 도구 출력은 `mcp`-origin ⇒
@@ -64,7 +73,9 @@ evidence:
     - src/tool/mcp_resources/port.ts
     - src/tool/mcp_resources/render.ts
     - src/tool/mcp_resources/list_resources.ts
+    - src/tool/mcp_resources/list_resource_templates.ts
     - src/tool/mcp_resources/read_resource.ts
+    - src/tool/mcp_resources/read_resource_dir.ts
     - src/tool/mcp_resources/list_prompts.ts
     - src/tool/mcp_resources/get_prompt.ts
     - src/tool/mcp_resources/index.ts
@@ -94,10 +105,12 @@ knobs:
 notes: |
   L3: duck-typed port mirror + 4 tool factory + PURE render(cap/blob-guard/
   non-text-placeholder) + DefaultToolPorts wiring + knob + manifest row 완비,
-  default-OFF byte-identical. hellgate 39: happy(list/read/get/forward-args/
-  empty) + typed-failure×4×4도구 + malformed-args + abort×4 + DoS(cap/blob/
-  non-text) + **THE invariant(deriveProvenance=mcp + hostile-text defang 봉인)** +
-  default-OFF 등록.
+  default-OFF byte-identical. hellgate: happy(list/read/read-dir/list-templates/
+  get/forward-args/empty) + typed-failure×4×6도구 + malformed-args + abort×6 +
+  DoS(cap/blob/non-text) + **THE invariant(deriveProvenance=mcp + hostile-text
+  defang 봉인)** + default-OFF 등록. B4 added mcp_read_resource_dir (directory-
+  shaped uri children from resources/list, subdir mimeType inode/directory) +
+  mcp_list_resource_templates (resources/templates/list enumerator).
   **HOST-WIRE DONE (jun-06)**: 어댑터를 별도 `@/mcp/resources/client-port.ts`로
   만들 필요 없었음 — McpClient의 4 메서드 result shape이 `ResourcesHandle` 타입의
   string-identical 미러라 concrete McpClient가 `McpResourcesClient`를 구조적으로

@@ -16,12 +16,12 @@ config_refs:
   env: ["QUANTA_CONTROL_REQUEST"]
 surface_integration:
   cli: missing
-  web: missing
+  web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-03"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
-    web: "unwired control-request planner; rides no web command verb (protocol.ts SessionCommand B3 has no such verb) and is bridged by no event, does not reach the browser"
+    cli: "no CLI control-request port — the interactive REPL wires no createWebControlRequestPort/pollControlRequests slot (src/apps/cli has zero control-request refs); the surface is agent-loop + web-daemon only"
+    web: "WIRED (ADR-0496 A1, jul-03): src/apps/web-daemon/runtime-factory.ts:426 mints createWebControlRequestPort under isControlRequestEnabled(env) (QUANTA_CONTROL_REQUEST); the loop's turn-top pollControlRequests (src/agent/loop/control-poll.ts) drains a browser/IDE control frame (control-request-frame.ts) into a live planControlRequest effect over ws-handlers.ts"
 purpose: |
   A single closed ControlRequest union (set_model / set_permission_mode /
   set_thinking / get_context_usage) + an exhaustive ALL_CONTROL_REQUEST_KINDS + a
@@ -37,6 +37,10 @@ evidence:
     - src/agent/control-request/types.ts
     - src/agent/control-request/apply.ts
     - src/agent/control-request/index.ts
+    - src/agent/loop/control-poll.ts
+    - src/apps/web-daemon/web-control-request-port.ts
+    - src/apps/web-daemon/control-request-frame.ts
+    - src/apps/web-daemon/runtime-factory.ts
   adrs: [496]
   tests:
     unit:

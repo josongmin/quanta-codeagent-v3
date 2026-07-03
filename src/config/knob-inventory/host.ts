@@ -433,7 +433,8 @@ export const HOST: readonly KnobInventoryEntry[] = [
     default: false,
     group: "host-gate",
     home: "runtime-config",
-    describe: "Automation engine gate.",
+    describe:
+      "Automation engine gate. Wires the automation-engine port ⇒ the `automation_update` + `threads_handoff` (B2) tools register. Required for QUANTA_AUTOMATION_STORE to have any effect (the store selector is inert without the engine on).",
     readSite: "host/runtime/agent-arg-builder.ts",
   },
   {
@@ -442,7 +443,8 @@ export const HOST: readonly KnobInventoryEntry[] = [
     default: undefined,
     group: "host-gate",
     home: "runtime-config",
-    describe: "Automation engine durable store selector ('sqlite' ⇒ on-disk; else in-memory).",
+    describe:
+      "Automation engine durable store selector ('sqlite' ⇒ on-disk; else in-memory). INERT unless QUANTA_AUTOMATION=on wires the engine — setting sqlite alone does nothing.",
     readSite: "scheduler/runtime-wire.ts",
   },
   {
@@ -453,6 +455,65 @@ export const HOST: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "Scheduler autorun eligibility policy.",
     readSite: "permission/autorun-eligibility-wire.ts",
+  },
+  // ── operator cost caps + budget ledger (composition-root reads at the CLI /
+  // autonomous session bootstrap; no cap ⇒ dial-less, byte-identical default-OFF).
+  {
+    envKey: "QUANTA_MAX_COST_USD",
+    kind: "float",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "Operator per-run cost cap (USD). Unset ⇒ no meter (byte-identical).",
+    readSite: "host/bootstrap/bootstrap-session.ts",
+  },
+  {
+    envKey: "QUANTA_MAX_COST_PER_TURN_USD",
+    kind: "float",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "Operator per-turn cost cap (USD). Unset ⇒ no per-turn meter (byte-identical).",
+    readSite: "host/bootstrap/bootstrap-session.ts",
+  },
+  {
+    envKey: "QUANTA_BUDGET_LEDGER",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Budget-ledger gate (daily-scoped cost cap + budget_status per-model breakdown). Requires a SESSION or DAILY hard limit to take effect; absent ⇒ no ledger (byte-identical).",
+    readSite: "host/runtime/agent-config-assembler.ts",
+  },
+  {
+    envKey: "QUANTA_BUDGET_LEDGER_SESSION_USD",
+    kind: "float",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe: "Budget-ledger per-SESSION hard limit (USD). Inert unless QUANTA_BUDGET_LEDGER on.",
+    readSite: "host/runtime/agent-config-assembler.ts",
+  },
+  {
+    envKey: "QUANTA_BUDGET_LEDGER_DAILY_USD",
+    kind: "float",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Budget-ledger per-DAY (UTC) hard limit (USD) — spans turns/sessions. Inert unless QUANTA_BUDGET_LEDGER on.",
+    readSite: "host/runtime/agent-config-assembler.ts",
+  },
+  {
+    envKey: "QUANTA_BUDGET_LEDGER_PATH",
+    kind: "string",
+    default: undefined,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Budget-ledger cross-PROCESS persistence file (a campaign/daemon shares one rolling budget). Unset ⇒ in-memory per-session only.",
+    readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
     envKey: "QUANTA_WEB_SEARCH_DUCKDUCKGO",

@@ -13,6 +13,19 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "ast_grep tool gate (opt-in everywhere) — structural AST code search; requires ast-grep binary on PATH, read-only, 50-match cap. Gate SSOT = tool/surface/manifest.ts (GATED_TOOLS data split into gated-tools.ts).",
     readSite: "tool/surface/gated-tools.ts",
   },
+  {
+    // container_exec tool gate. Opt-in on cli/bench/web/ide/headless; DEFAULT-ON
+    // only on the `terminal` surface (built BASE-free by buildTerminalTools). Gate
+    // SSOT = tool/surface/manifest.ts (GATED_TOOLS in gated-tools.ts).
+    envKey: "QUANTA_CONTAINER_EXEC",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "container_exec tool gate — one-shot command execution over the container transport (the terminal surface's exec workhorse). Opt-in on cli/bench/web/ide/headless; default-ON on the terminal surface only.",
+    readSite: "tool/surface/gated-tools.ts",
+  },
   // durable cross-session trust grants (CLI comp-root; opt-in, NOT default-seeded)
   {
     envKey: "QUANTA_TRUST_SCOPE",
@@ -470,6 +483,21 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "§2.5 — enforce marketplace.json source allow/block policy gating (opt-in).",
     readSite: "connectors/marketplace-policy.ts",
+  },
+  {
+    // B5 (jul-03): presence-aware desktop-notification suppression. Read DIRECTLY
+    // from env at the CLI notify factory (a CLI-surface gate on the notify port,
+    // NOT a layered runtime-config value) — declared here so the completeness
+    // ratchet (ADR-0503) sees the read and it surfaces in --help / /knobs / /config.
+    // The raw env read at the factory is kept as-is (declaration-only home).
+    envKey: "QUANTA_NOTIFY_PRESENCE",
+    kind: "bool",
+    default: false,
+    group: "observability",
+    home: "runtime-config",
+    describe:
+      "CLI desktop-notify presence suppression (opt-in). When on (1/on/true/yes), a PRESENT/active user suppresses the notification (competitor 'suppress while present' semantics); off/unset ⇒ legacy always-notify (byte-identical).",
+    readSite: "apps/cli/repl/factories/notify-and-warning.ts",
   },
   {
     envKey: "QUANTA_RADAR",

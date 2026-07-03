@@ -17,9 +17,9 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-03"
   evidence:
-    cli: "runs in the interactive CLI — 9/9 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "runs in the interactive CLI — evidence file(s) reachable from src/apps/cli/index.ts import graph; PLUS the S3 (jul-03) reasoning-token split rides the usage gauge to the status-line/turn-indicator"
     web: "User value is the CLI status-line segmented bar and /context; web TokenCounter shows only cumulative total, the breakdown is CLI-only and /context is a B2 SlashPalette prefill stub that does not execute."
 purpose: |
   Extends context-usage-metrics (single total + one-color bar) with the per-category
@@ -35,6 +35,12 @@ purpose: |
   the single-bar formatContextUsage is UNCHANGED + remains the default status line.
   (3) /context slash command (was a Phase-1 placeholder) now renders the breakdown from
   the latest assembled prompt via a new ctx.contextUsage seam on SlashContext.
+  (4) S3 (jul-03) reasoning-token segment: the OpenAI-Responses wire
+  (src/llm/openai-responses-wire.ts) surfaces a `reasoningTokens` split on the usage
+  event; AgentEvent carries it (src/llm/types.ts), emit-helpers.ts forwards it
+  (`!== undefined`, keeping an explicit 0 and staying Anthropic byte-identical when
+  omitted), and the CLI usage gauge (status-line.ts / context-usage-snapshot.ts /
+  turn-indicator.ts) renders reasoning tokens as a distinct usage segment.
 evidence:
   code:
     - src/agent/context/usage-breakdown.ts
@@ -46,6 +52,9 @@ evidence:
     - src/apps/cli/repl/context-usage-snapshot.ts
     - src/apps/cli/repl/slash-surface.ts
     - src/apps/cli/repl/surface-compose.ts
+    - src/agent/loop/emit-helpers.ts
+    - src/llm/openai-responses-wire.ts
+    - src/llm/types.ts
   adrs: []
   tests:
     unit:

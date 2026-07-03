@@ -13,6 +13,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
+import { join } from "node:path"
 import { createObjectiveStore } from "@/agent/objective"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import { createIntrospectTools, createSubagent6Tools, TaskRegistry } from "@/subagent"
@@ -30,6 +31,35 @@ import {
 import { objectiveTools } from "@/tool/objective"
 import { createTmuxAdapter } from "@/tool/pty"
 import { subagentMailboxTools } from "@/tool/subagent-mailbox"
+import { loadFeatures } from "../../tools/feature-catalog/schema"
+
+// Load the REAL feature catalog once (top-level await, mirrors the pattern in
+// feature-catalog-surface-integration.test.ts). Used by the manifest→catalog
+// completeness gate below.
+const CATALOG_DIR = join(import.meta.dir, "..", "..", "tools/feature-catalog/features")
+const CATALOG_FEATURES = await loadFeatures(CATALOG_DIR)
+// Full serialized text of every feature — captures config_refs.{env,runtime,cli,
+// prefs}, knobs[].name, evidence.code, purpose / notes / surface_integration
+// evidence prose. A gate env is "catalogued" iff its EXACT token appears in ANY
+// feature's serialized form (the honest "is this gate documented anywhere?"
+// question — not tied to one field, so a legitimate cross-reference counts).
+const CATALOG_HAYSTACKS = CATALOG_FEATURES.map((f) => JSON.stringify(f))
+// WORD-BOUNDARY match, NOT substring: several gate envs are prefixes of siblings
+// (QUANTA_SUBAGENT ⊂ QUANTA_SUBAGENT_6TOOLS; QUANTA_LSP ⊂ QUANTA_LSP_TOOLS). A
+// naive `.includes(env)` would count `QUANTA_SUBAGENT` as catalogued merely
+// because a longer sibling is mentioned — a false pass. Require the token NOT be
+// followed by a further env-name char (`[A-Z0-9_]`) so only the exact gate env
+// (or a longer env's OWN full mention) satisfies it.
+const cataloguedCache = new Map<string, boolean>()
+const isCataloguedGateEnv = (envToken: string): boolean => {
+  const cached = cataloguedCache.get(envToken)
+  if (cached !== undefined) return cached
+  // Escape is unnecessary — QUANTA_* tokens are [A-Z0-9_] only.
+  const re = new RegExp(`${envToken}(?![A-Z0-9_])`)
+  const found = CATALOG_HAYSTACKS.some((h) => re.test(h))
+  cataloguedCache.set(envToken, found)
+  return found
+}
 
 const names = (tools: readonly Tool[]): string[] => tools.map((t) => t.name).sort()
 const groupNames = (rep: string): string[] => {
@@ -260,5 +290,114 @@ describe("tool-surface manifest — worktree group is CLI-honest (R4-5 finding #
       if (s === "cli") continue
       expect(e.default[s]).toBeUndefined()
     }
+  })
+})
+
+describe("tool-surface manifest — manifest→CATALOG completeness gate (root-cause, jul-03)", () => {
+  // ROOT-CAUSE GATE. The knob-registry completeness ratchet forces every gate
+  // env to be DECLARED in a knob registry (discoverability). This is its FEATURE
+  // -CATALOG counterpart: every gate env on a real GATED_TOOLS row must also be
+  // CATALOGUED — mentioned by some feature yaml (config_refs / evidence / knobs /
+  // prose). Together they close the drift that let jul-03 land tools + gates
+  // (browser_network, projects_kb, threads_handoff, mcp_read_resource_dir, the
+  // B5 presence gate, …) that were WIRED in src but INVISIBLE in the catalog.
+  //
+  // A NEW landed-but-uncatalogued gate goes RED here automatically → catalog it
+  // (add its env to a feature yaml) or, if it is a known backlog stub not yet
+  // written up, park it in KNOWN_UNCATALOGUED_GATES with a reason. That list may
+  // only ever SHRINK (a decreasing-ceiling burn-down) — a NEW entry is a
+  // governance regression, exactly like the knob ratchet's EXCEPTIONS.
+
+  /** Every `gate.env` on a real GATED_TOOLS row (env-flag / config-slot /
+   *  resource kinds carry an optional `env`). */
+  const gateEnvs = (): string[] => {
+    const out = new Set<string>()
+    for (const e of GATED_TOOLS) {
+      const g = e.gate as { env?: string }
+      if (typeof g.env === "string" && g.env.length > 0) out.add(g.env)
+    }
+    return [...out].sort()
+  }
+
+  // PRE-EXISTING uncatalogued gate envs (jul-03 baseline high-water mark). These
+  // are real gates whose FEATURE write-up is a known backlog item — NOT part of
+  // the jul-03 absorbed-feature drift this gate was built to close. Each must
+  // carry a reason. BURN-DOWN ONLY: remove an entry when its feature yaml lands;
+  // never add one (a NEW uncatalogued gate is the regression this gate catches).
+  const KNOWN_UNCATALOGUED_GATES: ReadonlyMap<string, string> = new Map<string, string>([
+    ["QUANTA_CONTAINER_EXEC", "terminal container_exec gate — declared in the knob-inventory SSOT; a dedicated terminal-surface feature yaml is a backlog item"],
+    ["QUANTA_COVERAGE_TOOL", "coverage_check tool gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_DEBUG_TOOLS", "debug tool group gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_ENABLE_STRUCTURED_PATCH", "apply_patch_structured gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_OBJECTIVE_TOOLS", "objective tool group gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_SHADOW", "shadow-workspace checkpoint/rewind tool gate (shadowOdb) — pre-existing, no feature yaml yet (distinct from the catalogued QUANTA_SHADOW_VERIFY knob)"],
+    ["QUANTA_SUBAGENT_6TOOLS", "subagent 6-tool router gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_SUBAGENT_BG", "subagent background-run gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_SUBAGENT_MAILBOX", "subagent mailbox gate — pre-existing, no feature yaml yet"],
+    ["QUANTA_TB_WRITE_TOOL", "terminal container_write_file gate (B2 TB lever) — pre-existing, no feature yaml yet"],
+    ["QUANTA_TEST_RUNNER", "test_runner tool gate — pre-existing, no feature yaml yet"],
+  ])
+
+  test("every GATED_TOOLS gate.env is catalogued in some feature yaml (or a known backlog stub)", () => {
+    const uncatalogued = gateEnvs().filter(
+      (env) => !isCataloguedGateEnv(env) && !KNOWN_UNCATALOGUED_GATES.has(env),
+    )
+    if (uncatalogued.length > 0) {
+      throw new Error(
+        `${uncatalogued.length} gated-tool gate env(s) are WIRED in src but CATALOGUED in NO ` +
+          `feature yaml — a landed-but-uncatalogued tool/gate (the jul-03 drift class). ` +
+          `Add each to a tools/feature-catalog/features/*.yaml (config_refs.env / evidence / ` +
+          `knobs), or park it in KNOWN_UNCATALOGUED_GATES with a reason:\n` +
+          uncatalogued.map((e) => `  ${e}`).join("\n"),
+      )
+    }
+    expect(uncatalogued).toEqual([])
+  })
+
+  test("KNOWN_UNCATALOGUED_GATES entries each carry a reason (no bare parks)", () => {
+    for (const [env, reason] of KNOWN_UNCATALOGUED_GATES) {
+      expect(reason.length, `park for ${env} needs a reason`).toBeGreaterThan(0)
+    }
+  })
+
+  test("the parked list contains no gate that is ALREADY catalogued (stale-park hygiene)", () => {
+    // If a parked env later gets a feature yaml, remove it from the park — else
+    // the park masks nothing and rots. This keeps the burn-down honest.
+    const staleParks = [...KNOWN_UNCATALOGUED_GATES.keys()].filter((e) => isCataloguedGateEnv(e))
+    expect(staleParks).toEqual([])
+  })
+
+  // RED-ON-INJECTION: prove the gate actually FIRES for an uncatalogued gate and
+  // does NOT vacuously pass. The jul-03 features MUST be catalogued now (they were
+  // the drift); a synthetic never-catalogued token MUST read as uncatalogued.
+  test("gate catches drift (red-on-injection) and confirms the jul-03 features are catalogued", () => {
+    // (a) the newly-catalogued jul-03 absorbed-feature gates read as CATALOGUED —
+    //     this is exactly the drift the gate was written to have caught.
+    for (const env of [
+      "QUANTA_BROWSER_NETWORK",
+      "QUANTA_PROJECTS_KB",
+      "QUANTA_AUTOMATION", // threads_handoff shares this gate
+      "QUANTA_MCP_RESOURCES", // mcp_read_resource_dir + list_resource_templates
+      "QUANTA_ARTIFACT_STORE",
+      "QUANTA_ASK_USER",
+      "QUANTA_CONTROL_REQUEST",
+    ]) {
+      expect(isCataloguedGateEnv(env), `${env} should be catalogued after the jul-03 fixes`).toBe(
+        true,
+      )
+    }
+    // (b) a token that no yaml mentions reads as UNCATALOGUED — proves the check
+    //     is not a tautological `true` (mutation: if isCataloguedGateEnv always
+    //     returned true this fails).
+    expect(isCataloguedGateEnv("QUANTA_NEVER_CATALOGUED_SENTINEL_XYZ")).toBe(false)
+  })
+
+  test("catalogued-check is WORD-BOUNDARY, not substring (no prefix-sibling false pass)", () => {
+    // QUANTA_SHADOW is uncatalogued even though QUANTA_SHADOW_VERIFY IS catalogued
+    // (shadow-verify.yaml) — a naive `.includes("QUANTA_SHADOW")` would falsely
+    // pass. This pins the boundary so a prefix env can never be masked by a longer
+    // sibling's mention (the exact hole a substring match would leave open).
+    expect(isCataloguedGateEnv("QUANTA_SHADOW_VERIFY")).toBe(true)
+    expect(isCataloguedGateEnv("QUANTA_SHADOW")).toBe(false)
   })
 })
