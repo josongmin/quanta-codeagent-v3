@@ -33,6 +33,11 @@ export interface TbInstance {
   passed: boolean
   /** finished_at − started_at from the task result.json, ms. 0 if unknown. */
   durationMs: number
+  /** D1 (RFC jul-3): an INFRA fault, NOT a capability miss — a harbor task-level
+   *  timeout/crash or an agent that died before producing a report. Folding these into
+   *  `passed:false` deflates the score (a real-miss denominator should exclude them,
+   *  mirroring jun-20 real_attempt). Absent ⇒ a genuine graded outcome. */
+  error?: { readonly kind: "agent-timeout" | "agent-crash" }
 }
 
 /** Split a harbor task dir name `<task>__<hash>` → `<task>`. The hash suffix is a
@@ -41,6 +46,23 @@ export const taskNameFromDir = (dir: string): string => {
   const base = basename(dir)
   const i = base.lastIndexOf("__")
   return i > 0 ? base.slice(0, i) : base
+}
+
+/** D1 (RFC jul-3): classify an INFRA fault from a harbor task `result.json`, or undefined for a
+ *  genuine graded outcome. Keyed on the AUTHORITATIVE `exception_info.exception_type` harbor records:
+ *  `AgentTimeoutError` ⇒ task-level timeout; any other exception (CancelledError/crash) ⇒ agent-crash.
+ *  (Empirically `metadata-absent ⊂ exception`, so `exception_info` alone is sufficient — a
+ *  metadata-absence heuristic would false-flag a minimal-but-genuine result.json.) These are excluded
+ *  from the capability-miss denominator (not a real miss). PURE. */
+export const errorFromResult = (result: unknown): TbInstance["error"] | undefined => {
+  if (typeof result !== "object" || result === null) return undefined
+  const exc = (result as Record<string, unknown>).exception_info
+  const excType =
+    typeof exc === "object" && exc !== null
+      ? (exc as Record<string, unknown>).exception_type
+      : undefined
+  if (typeof excType !== "string" || excType.length === 0) return undefined
+  return { kind: excType === "AgentTimeoutError" ? "agent-timeout" : "agent-crash" }
 }
 
 /** Parse `finished_at`/`started_at` ISO strings → elapsed ms (0 if either absent). */
@@ -57,8 +79,18 @@ export interface TbReport {
   model: string | undefined
   datasetFamily: "terminal-bench"
   source: string
+  /** P1-C (RFC jul-3): the A/B arm this run belongs to, stamped EXPLICITLY at emit
+   *  (`--arm`) so the dashboard never has to guess it from a preset substring (which
+   *  silently sorted an oc1/owned-only run into `baseline` and inverted the control). */
+  arm?: "baseline" | "levers"
   knobs: { preset: string; resolved: Record<string, never>; inactive: never[] }
-  perInstance: Array<{ id: string; passed: boolean; turns: number; durationMs: number }>
+  perInstance: Array<{
+    id: string
+    passed: boolean
+    turns: number
+    durationMs: number
+    error?: { readonly kind: "agent-timeout" | "agent-crash" }
+  }>
 }
 
 /** Build a report.json shaped EXACTLY like a real bench report (perInstance +
@@ -67,19 +99,12 @@ export interface TbReport {
  *  any-pass=solved semantic and campaign-log-to-report's dedup). */
 export const buildTbReport = (
   instances: readonly TbInstance[],
-  opts: { preset: string; model: string | undefined; timestamp: string },
+  opts: { preset: string; model: string | undefined; timestamp: string; arm?: "baseline" | "levers" },
 ): TbReport => {
   const best = new Map<string, TbInstance>()
   for (const inst of instances) {
     const cur = best.get(inst.id)
-    // PASS beats FAIL; among equal pass-state, the shorter run wins.
-    if (
-      cur === undefined ||
-      (inst.passed && !cur.passed) ||
-      (inst.passed === cur.passed && inst.durationMs > 0 && inst.durationMs < cur.durationMs)
-    ) {
-      best.set(inst.id, inst)
-    }
+    if (cur === undefined || preferInstance(inst, cur)) best.set(inst.id, inst)
   }
   const rows = [...best.values()].sort((a, b) => a.id.localeCompare(b.id))
   return {
@@ -87,14 +112,31 @@ export const buildTbReport = (
     model: opts.model,
     datasetFamily: "terminal-bench",
     source: "terminal-bench-harbor",
+    ...(opts.arm !== undefined ? { arm: opts.arm } : {}),
     knobs: { preset: opts.preset, resolved: {}, inactive: [] },
     perInstance: rows.map((r) => ({
       id: r.id,
       passed: r.passed,
       turns: 0, // harbor reward tree carries no turn count; trajectory-only.
       durationMs: r.durationMs,
+      ...(r.error !== undefined ? { error: r.error } : {}),
     })),
   }
+}
+
+/** Dedup preference (P1-F, RFC jul-3): a PASS always beats a non-pass. Among two of the
+ *  SAME pass-state, prefer the SHORTER run ONLY when both PASSED (a faster clean solve is
+ *  the better representative). Among two FAILs, prefer the LONGER run — a fast fail is
+ *  usually an infra crash (25s auth-death), and a 20-min genuine attempt is the more
+ *  informative representative to RCA. `error`-free is preferred over `error` at equal state. */
+const preferInstance = (inst: TbInstance, cur: TbInstance): boolean => {
+  if (inst.passed !== cur.passed) return inst.passed
+  if (cur.error !== undefined && inst.error === undefined) return true
+  if (inst.error !== undefined && cur.error === undefined) return false
+  if (inst.durationMs <= 0 || cur.durationMs <= 0) return false
+  return inst.passed
+    ? inst.durationMs < cur.durationMs // both passed: shorter wins
+    : inst.durationMs > cur.durationMs // both failed: the longer (real) attempt wins
 }
 
 /** Read a harbor result tree (`<jobTs>/<task>__<hash>/verifier/reward.txt` +
@@ -122,13 +164,21 @@ export const scanHarborTree = (
       const reward = fs.readFile(rewardPath)
       if (reward === null) continue // not (yet) graded — skip
       let durationMs = 0
+      let error: TbInstance["error"] | undefined
       const resultRaw = fs.readFile(join(td, "result.json"))
       if (resultRaw !== null) {
         try {
-          durationMs = durationMsFromResult(JSON.parse(resultRaw))
+          const parsed = JSON.parse(resultRaw)
+          durationMs = durationMsFromResult(parsed)
+          error = errorFromResult(parsed)
         } catch {}
       }
-      out.push({ id: taskNameFromDir(taskDir), passed: reward.trim() === "1", durationMs })
+      out.push({
+        id: taskNameFromDir(taskDir),
+        passed: reward.trim() === "1",
+        durationMs,
+        ...(error !== undefined ? { error } : {}),
+      })
     }
   }
   return out
@@ -178,7 +228,18 @@ const main = (): void => {
     )
     process.exit(2)
   }
-  const model = argOf("--model") ?? "gpt-5.5"
+  // P3-A: do NOT fabricate a model — an absent --model stays undefined (the report must not
+  // LIE about which model produced the rewards; record-winning-config). Downstream renders it
+  // as "unknown model", never a made-up id.
+  const model = argOf("--model")
+  // P1-C: explicit A/B arm; unset ⇒ undefined (the dashboard falls back to preset substring only
+  // for OLD reports that predate this flag).
+  const armRaw = argOf("--arm")
+  const arm = armRaw === "baseline" || armRaw === "levers" ? armRaw : undefined
+  if (armRaw !== undefined && arm === undefined) {
+    out(`invalid --arm "${armRaw}" (expected baseline|levers)`)
+    process.exit(2)
+  }
   const tag = argOf("--tag") ?? "tb"
   const outDir =
     argOf("--out") ??
@@ -195,6 +256,7 @@ const main = (): void => {
     preset,
     model,
     timestamp: new Date().toISOString(),
+    ...(arm !== undefined ? { arm } : {}),
   })
   const passed = report.perInstance.filter((p) => p.passed)
   const dest = join(outDir, `report-terminal-bench-${tag}.report.json`)

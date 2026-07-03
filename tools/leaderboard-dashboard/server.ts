@@ -226,6 +226,8 @@ interface Run {
    *  pro/live runs partition into their own campaigns instead of being averaged
    *  into one bogus resolved-rate. */
   datasetFamily: string
+  /** P1-C — explicit TB A/B arm (`baseline`/`levers`) from report.arm; absent on old reports. */
+  arm?: string
   mtime: number
   resolved: number
   // Denominator EXCLUDING re-runnable measurement-holes (FLAG-B). A campaign
@@ -460,6 +462,8 @@ function buildRunFromFile(f: string, mtime: number): Run | null {
     model: asString(report.model) ?? "?",
     preset: presetLabel(f, asRecord(report.knobs)),
     datasetFamily: asString(report.datasetFamily) ?? "verified",
+    // P1-C (RFC jul-3): explicit A/B arm stamped by tb-report-emit; absent on old reports.
+    ...(asString(report.arm) !== undefined ? { arm: asString(report.arm) } : {}),
     mtime,
     resolved,
     total: perInstance.length - unmeasured,
@@ -1600,9 +1604,16 @@ function tbOurResults() {
   const runs = (DATA.runs || []).filter(r => (r.datasetFamily || "verified") === "terminal-bench");
   const base = {}, lev = {};
   for (const r of runs) {
-    const isLev = (r.preset || "").toLowerCase().indexOf("levers") >= 0;
+    // P1-C: route by the EXPLICIT report.arm; fall back to the preset substring only for OLD
+    // reports that predate the flag (an oc1/owned-only run's preset lacks "levers" and would
+    // otherwise poison the baseline control).
+    const isLev = r.arm ? r.arm === "levers" : (r.preset || "").toLowerCase().indexOf("levers") >= 0;
     const sink = isLev ? lev : base;
     for (const pi of (r.perInstance || [])) {
+      // D1: an infra fault (agent-timeout/crash) is NOT a graded miss — exclude it ENTIRELY so it
+      // never inflates the miss denominator (score deflation). A task with only errored trials
+      // shows as unmeasured (re-run), not a capability miss.
+      if (pi.error) continue;
       if (sink[pi.id] === undefined || pi.passed) sink[pi.id] = pi.passed;
     }
   }

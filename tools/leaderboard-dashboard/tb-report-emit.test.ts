@@ -2,10 +2,63 @@ import { describe, expect, test } from "bun:test"
 import {
   buildTbReport,
   durationMsFromResult,
+  errorFromResult,
   scanHarborTree,
   type TbInstance,
   taskNameFromDir,
 } from "./tb-report-emit"
+
+describe("errorFromResult (D1) — infra fault classification", () => {
+  test("AgentTimeoutError ⇒ agent-timeout", () => {
+    expect(errorFromResult({ exception_info: { exception_type: "AgentTimeoutError" } })).toEqual({
+      kind: "agent-timeout",
+    })
+  })
+  test("other exception ⇒ agent-crash", () => {
+    expect(errorFromResult({ exception_info: { exception_type: "CancelledError" } })).toEqual({
+      kind: "agent-crash",
+    })
+  })
+  test("genuine graded outcome (no exception) ⇒ undefined — even a minimal result.json", () => {
+    expect(errorFromResult({ agent_result: { cost_usd: 0 } })).toBeUndefined()
+    expect(errorFromResult({ started_at: "x", finished_at: "y" })).toBeUndefined()
+  })
+})
+
+describe("buildTbReport dedup preference (P1-F)", () => {
+  test("both FAIL: the LONGER (real) attempt wins over a fast crash", () => {
+    const r = buildTbReport(
+      [
+        { id: "t", passed: false, durationMs: 25_000, error: { kind: "agent-crash" } },
+        { id: "t", passed: false, durationMs: 1_200_000 },
+      ],
+      { preset: "p", model: "m", timestamp: "T" },
+    )
+    expect(r.perInstance).toHaveLength(1)
+    expect(r.perInstance[0]?.durationMs).toBe(1_200_000) // real attempt, not the 25s crash
+    expect(r.perInstance[0]?.error).toBeUndefined() // error-free preferred at equal state
+  })
+  test("both PASS: the SHORTER clean solve wins", () => {
+    const r = buildTbReport(
+      [
+        { id: "t", passed: true, durationMs: 200_000 },
+        { id: "t", passed: true, durationMs: 40_000 },
+      ],
+      { preset: "p", model: "m", timestamp: "T" },
+    )
+    expect(r.perInstance[0]?.durationMs).toBe(40_000)
+  })
+})
+
+describe("buildTbReport arm stamp (P1-C) + honest model (P3-A)", () => {
+  test("arm passthrough when provided; absent ⇒ no arm field", () => {
+    expect(buildTbReport([{ id: "a", passed: true, durationMs: 1 }], { preset: "p", model: "m", timestamp: "T", arm: "baseline" }).arm).toBe("baseline")
+    expect("arm" in buildTbReport([{ id: "a", passed: true, durationMs: 1 }], { preset: "p", model: "m", timestamp: "T" })).toBe(false)
+  })
+  test("model:undefined is preserved (never fabricated)", () => {
+    expect(buildTbReport([{ id: "a", passed: true, durationMs: 1 }], { preset: "p", model: undefined, timestamp: "T" }).model).toBeUndefined()
+  })
+})
 
 describe("taskNameFromDir — strip harbor `<task>__<hash>` suffix", () => {
   test("splits on the LAST __ (task names may contain hyphens/digits)", () => {
