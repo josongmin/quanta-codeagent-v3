@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useMemo, useState } from "react"
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cx } from "../lib/classnames"
 import type { UiMessage } from "../types/protocol"
 
@@ -124,11 +124,21 @@ export const MessageBubble = memo(MessageBubbleInner, areMessageBubblePropsEqual
 
 const CopyButton = ({ text }: { readonly text: string }): JSX.Element => {
   const [copied, setCopied] = useState(false)
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Clear the "copied" reset timer on unmount so a bubble that unmounts within
+  // 1.2s of a copy doesn't leave a dangling setState-on-unmounted closure.
+  useEffect(
+    () => () => {
+      if (resetTimer.current !== null) clearTimeout(resetTimer.current)
+    },
+    [],
+  )
   const onCopy = useCallback(() => {
     void navigator.clipboard?.writeText(text).then(
       () => {
         setCopied(true)
-        setTimeout(() => {
+        if (resetTimer.current !== null) clearTimeout(resetTimer.current)
+        resetTimer.current = setTimeout(() => {
           setCopied(false)
         }, 1200)
       },

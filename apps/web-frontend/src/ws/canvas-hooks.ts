@@ -144,15 +144,20 @@ type ArtifactAction = { type: "message"; msg: ArtifactReadyMessage } | { type: "
 
 const EMPTY_ARTIFACTS: ReadonlyMap<string, ArtifactReadyMessage> = new Map()
 
+/** FIFO backstop, parity with TOOL_DIFFS_CAP/TOOL_PROGRESS_CAP — a cap so high it
+ *  never evicts in a normal session, only bounds a pathological one. */
+export const ARTIFACTS_CAP = 256
+
 /** Reducer exported for unit test (no DOM render needed). Latest-wins per id so a
- *  re-registered artifact updates in place. */
+ *  re-registered artifact updates in place; FIFO-capped so the Map can't grow
+ *  unbounded across a long session. */
 export const artifactsReducer = (
   state: ReadonlyMap<string, ArtifactReadyMessage>,
   action: ArtifactAction,
 ): ReadonlyMap<string, ArtifactReadyMessage> => {
   if (action.type === "reset") return EMPTY_ARTIFACTS
   const next = new Map(state)
-  next.set(action.msg.artifactId, action.msg)
+  setWithFifoCap(next, action.msg.artifactId, action.msg, ARTIFACTS_CAP)
   return next
 }
 
