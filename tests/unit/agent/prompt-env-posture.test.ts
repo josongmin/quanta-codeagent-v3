@@ -18,7 +18,11 @@ describe("buildSystemPrompt — envPosture (RFC jul-2)", () => {
     const frozen = buildSystemPrompt()
     expect(frozen).toContain("[R-ENV]")
     expect(frozen).toContain("[R-STOP-ENV]")
-    expect(frozen).toContain("Do NOT attempt to install dependencies")
+    // A1 (RFC jul-3) narrowed R-ENV's wording (repo-own ModuleNotFoundError→PYTHONPATH carve-out)
+    // but the third-party install PROHIBITION is intact — assert on the durable ban, not the old
+    // exact phrase.
+    expect(frozen).toContain("Do NOT install third-party dependencies")
+    expect(frozen).toMatch(/`pip`.*`npm`.*`apt/s) // the concrete install commands stay banned
   })
 
   test("owned prompt DROPS R-ENV / R-STOP-ENV and ADDS R-ENV-OWNED / R-INSTALL-THRASH", () => {
