@@ -171,6 +171,41 @@ describe("HELLGATE network — CDP event → metadata mapping (leak guard)", () 
     expect(e.method).toBe("")
     expect(e.url).toBe("")
   })
+
+  test("HELL-NET-04c: an oversized server mimeType is capped at the source", () => {
+    // `mimeType` is the response Content-Type — SERVER-controlled and UNBOUNDED
+    // by CDP. A hostile/broken server can return a megabyte Content-Type. It is
+    // retained on the entry, so it MUST be length-capped at projection like every
+    // other page-controlled field, or it defeats the buffer's byte bound.
+    const res = buildNetworkEntry("Network.responseReceived", {
+      response: { url: "https://x/", status: 200, mimeType: "m".repeat(100_000) },
+    })
+    expect(res.mime).toBeDefined()
+    // ★ mutation: dropping the cap in buildNetworkEntry leaves a 100k mime → red.
+    expect((res.mime ?? "").length).toBeLessThanOrEqual(256)
+  })
+})
+
+describe("HELLGATE network — byte-cap accounts for EVERY retained field", () => {
+  test("HELL-NET-02d: a giant mime is counted by the byte cap (no silent growth)", () => {
+    // The byte cap exists so page/server content can NEVER grow the buffer without
+    // bound. `mime` is retained, so it MUST be counted — else a burst of responses
+    // with long mimeTypes blows past maxBytes uncounted (the exact leak the cap
+    // guards). Feed entries whose ONLY heavy field is mime and assert eviction.
+    // Sized so the NON-mime footprint of all 20 entries (≈ url+fixed ≈ 26 each ⇒
+    // ≈520) fits UNDER the cap — only the retained `mime` bytes can trigger
+    // eviction. This isolates the mime accounting: the test can ONLY go red when
+    // `mime` is missing from entryBytes.
+    const buf = createNetworkBuffer({ maxEntries: 1000, maxBytes: 600 })
+    for (let i = 0; i < 20; i += 1) {
+      buf.push(entry({ method: "", url: `u${i}`, mime: "z".repeat(100) }))
+    }
+    const { entries } = buf.drain(false)
+    // With mime counted: 20 × (~100 mime + 26) ≈ 2520 ≫ 600 ⇒ heavy eviction.
+    // ★ mutation: omitting `mime` from entryBytes leaves accounting at ≈520 (≤600)
+    //   so NOTHING evicts and all 20 survive → red.
+    expect(entries.length).toBeLessThan(20)
+  })
 })
 
 describe("HELLGATE network — tool gates (over headless stub)", () => {

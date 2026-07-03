@@ -34,11 +34,23 @@ export interface NetworkBufferOpts {
   readonly maxBytes?: number
 }
 
+/** Cap the retained `mime` (server Content-Type) at the source. A real mimeType
+ *  is short (`application/json; charset=utf-8`); the value is server-controlled
+ *  and unbounded by CDP, so — like url/method — it must not enter the buffer at
+ *  arbitrary length. Applied in {@link buildNetworkEntry} so the cap holds for
+ *  EVERY producer path, and counted by {@link entryBytes} below. */
+const MIME_CAP = 256
+
 /** Approximate the retained-bytes footprint of ONE entry from its string fields
- *  (method + url) plus a small fixed allowance for the numeric fields. Bodies /
- *  headers are never present, so this can never be dominated by page content. */
+ *  (method + url + mime) plus a small fixed allowance for the numeric fields.
+ *  Bodies / headers are never present; every retained string field IS counted
+ *  here so the byte cap can never be defeated by page/server content (a long
+ *  server mimeType is bounded both by MIME_CAP at the source and by this cap). */
 const entryBytes = (e: NetworkEntry): number =>
-  Buffer.byteLength(e.method, "utf8") + Buffer.byteLength(e.url, "utf8") + 24
+  Buffer.byteLength(e.method, "utf8") +
+  Buffer.byteLength(e.url, "utf8") +
+  (e.mime !== undefined ? Buffer.byteLength(e.mime, "utf8") : 0) +
+  24
 
 export const createNetworkBuffer = (opts: NetworkBufferOpts = {}): NetworkBuffer => {
   const maxEntries = opts.maxEntries ?? 200
@@ -106,7 +118,7 @@ export const buildNetworkEntry = (method: string, params: unknown): NetworkEntry
       return {
         ...out,
         ...(status !== undefined ? { status } : {}),
-        ...(typeof mime === "string" ? { mime } : {}),
+        ...(typeof mime === "string" ? { mime: mime.slice(0, MIME_CAP) } : {}),
       }
     }
     case "Network.loadingFinished": {
