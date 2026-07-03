@@ -80,47 +80,52 @@ describe("cassette trajectory (RFC 07) — default-on recording", () => {
   })
 })
 
-describe("decideGateFollowup (OC1, RFC 07) — trigger truth table", () => {
+describe("decideGateFollowup (S4, RFC jul-3) — RUN-only trigger truth table", () => {
   const D = (o: Partial<Parameters<typeof decideGateFollowup>[0]>) =>
-    decideGateFollowup({ compared: false, ranClean: true, outputContractOn: false, budgetLeft: true, ...o })
+    decideGateFollowup({ exercised: true, ranClean: true, outputContractOn: false, budgetLeft: true, ...o })
 
-  test("OC1 OFF = verify-gate v2 byte-identical: fire compare nudge iff no L1 compare", () => {
-    expect(D({ compared: false })).toEqual({ fire: true, nudge: "compare" })
-    expect(D({ compared: true })).toEqual({ fire: false, nudge: "none" }) // compared ⇒ pass, no nudge
+  test("S4 core: fire the RUN nudge iff the deliverable was NEVER exercised", () => {
+    // extract-elf/sam fake-green: wrote the deliverable, declared done, ran it 0 times.
+    expect(D({ exercised: false })).toEqual({ fire: true, nudge: "run" })
+    // exercised ⇒ it ran; S4 no longer forces a "compare" (that regressed path-tracing). No fire.
+    expect(D({ exercised: true })).toEqual({ fire: false, nudge: "none" })
   })
 
-  test("R3 HARDENING: OC1 ON + pass path (compared, ranClean) STILL fires the contract nudge", () => {
-    // polyglot class: it compiled+ran clean (ranClean) and compared partial output (compared) → v2 would
-    // finalize verified-pass and NEVER catch the stray `cmain`. OC1 fires the contract self-check anyway.
-    expect(D({ compared: true, ranClean: true, outputContractOn: true })).toEqual({
-      fire: true,
-      nudge: "contract",
+  test("S4 REGRESSION-GUARD: exercised-but-not-compared must NOT fire (kills path-tracing rework)", () => {
+    // path-tracing exercised its tracer; our narrow L1 misses the image compare. The old !compared
+    // nudge forced a rework that broke the refined image.c (2/3→1/3). S4 stays silent on this cell.
+    expect(D({ exercised: true, ranClean: true, outputContractOn: true })).toEqual({
+      fire: false,
+      nudge: "none",
     })
-    // Proof it is the OC1 upgrade, not the base: the SAME inputs with OC1 OFF do NOT fire.
-    expect(D({ compared: true, ranClean: true, outputContractOn: false })).toEqual({
+    expect(D({ exercised: true, ranClean: true, outputContractOn: false })).toEqual({
       fire: false,
       nudge: "none",
     })
   })
 
-  test("P1-A F,T,T: OC1 ON + ran clean but NEVER compared ⇒ fire the COMPARE nudge (still needs L1)", () => {
-    // compared=false, ranClean=true, OC1-on: the clean run satisfies the contract's run-part, but with
-    // no L1 comparison it is still unverifiable — the compare nudge (not contract) is the right ask.
-    expect(D({ compared: false, ranClean: true, outputContractOn: true })).toEqual({
+  test("OC1 ON + crash/never-clean (sam-cell-seg exit 2) fires the RUN nudge even if 'exercised'", () => {
+    // It attempted to run but crashed to a dirty exit — the contract's run-part is unmet → re-run.
+    expect(D({ exercised: true, ranClean: false, outputContractOn: true })).toEqual({
       fire: true,
-      nudge: "compare",
+      nudge: "run",
+    })
+    // Same crash with OC1 OFF: ranClean is ignored, so an exercised run does NOT fire.
+    expect(D({ exercised: true, ranClean: false, outputContractOn: false })).toEqual({
+      fire: false,
+      nudge: "none",
     })
   })
 
-  test("OC1 ON + crash/never-clean (sam-cell-seg exit 2) fires the contract nudge", () => {
-    expect(D({ compared: false, ranClean: false, outputContractOn: true })).toEqual({
+  test("never-exercised dominates regardless of OC1/ranClean", () => {
+    expect(D({ exercised: false, ranClean: true, outputContractOn: true })).toEqual({
       fire: true,
-      nudge: "contract",
+      nudge: "run",
     })
   })
 
-  test("budget exhausted ⇒ NEVER fires (no over-persist past the cap), even under OC1", () => {
-    expect(D({ compared: true, ranClean: false, outputContractOn: true, budgetLeft: false })).toEqual({
+  test("budget exhausted ⇒ NEVER fires (no over-persist past the cap)", () => {
+    expect(D({ exercised: false, ranClean: false, outputContractOn: true, budgetLeft: false })).toEqual({
       fire: false,
       nudge: "none",
     })
@@ -669,11 +674,12 @@ describe("verify-before-finalize gate (lever #2)", () => {
     endIn()
   })
 
-  test("v2 RED-for-v1: knob ON + a run that RAN but NEVER COMPARED ⇒ fires the follow-up (no false verified-pass)", async () => {
+  test("S4 REGRESSION-GUARD: a run that RAN but NEVER compared ⇒ NO nudge (kills rework), still not verified-pass", async () => {
     const { stdin, stdout, endIn } = makeStdio()
-    // v1 rubber-stamped a bare L0 run (`./solver`) as `verified-pass`. Under v2, running without
-    // COMPARING to a reference is L0-without-L1 ⇒ the gate MUST fire the compare follow-up. The
-    // model then only re-runs (still no diff) ⇒ honest `unverifiable`, NEVER a false green.
+    // path-tracing class: `./solver` was EXERCISED. The old v2 nudge fired here ("go compare") and
+    // reworked the already-working deliverable (2/3→1/3). Under S4 the nudge STAYS SILENT on an
+    // exercised run — but the STAMP is independent: with no L1 compare it is still `unverifiable`,
+    // never a false `verified-pass`. So: no nag, no rework, and no rubber-stamp either.
     const llm = new FakeLlm(ptyTypeThenFinalScripts("./solver input.txt", "Output looks correct. Verified green."))
     const result = await runTerminalBrain({
       instruction: "run the solver",
@@ -692,8 +698,9 @@ describe("verify-before-finalize gate (lever #2)", () => {
           m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
       ),
     )
-    expect(sawFollowUp).toBe(true)
-    // The critical v2 invariant: a ran-but-unchecked run is NOT verified-pass (rubber-stamp dead).
+    // S4 core regression guard: an EXERCISED run is never nagged (this is what fixes path-tracing).
+    expect(sawFollowUp).toBe(false)
+    // …yet the stamp still refuses to rubber-stamp an uncompared run as green.
     expect(result.report.verification?.state).not.toBe("verified-pass")
     expect(result.report.verification?.state).toBe("unverifiable")
     endIn()
@@ -726,11 +733,12 @@ describe("verify-before-finalize gate (lever #2)", () => {
     endIn()
   })
 
-  test("v2 R1 no-leak: knob ON + a diff AGAINST A TEST-PATH golden ⇒ refused (fires follow-up, no verified-pass)", async () => {
+  test("S4 no-leak: a diff-against-TEST-PATH golden ⇒ leak refused at the STAMP (unverifiable), never verified-pass", async () => {
     const { stdin, stdout, endIn } = makeStdio()
-    // query-optimize's golden lives in /tests/ — a diff against it is peeking at the hidden oracle.
-    // The inspector REFUSES it (not L1), so the gate fires the compare follow-up and, with no fair
-    // comparison forthcoming, finalizes `unverifiable` — the gate can never TEACH peeking.
+    // query-optimize's golden lives in /tests/. `diff` IS an acceptance-runner (it ran + observed) so
+    // S4 treats the run as EXERCISED → no nudge. But under S4 the leak refusal lives entirely in the
+    // STAMP: comparedToReference rejects the /tests/ golden as an unfair reference (not L1) → the
+    // verdict is `unverifiable`, NEVER a false `verified-pass`. The gate can still never TEACH peeking.
     const llm = new FakeLlm(
       ptyTypeThenFinalScripts("diff out.sql /app/tests/golden.sql", "Matches the golden. Verified."),
     )
@@ -744,16 +752,9 @@ describe("verify-before-finalize gate (lever #2)", () => {
       writeReport: () => undefined,
       env: { [TB_VERIFY_GATE_ENV]: "1" },
     })
-    const sawFollowUp = llm.seen.some((s) =>
-      s.messages.some(
-        (m) =>
-          m.role === "user" &&
-          m.content.some((b) => b.type === "text" && b.text.includes(VERIFY_GATE_FOLLOWUP)),
-      ),
-    )
-    expect(sawFollowUp).toBe(true)
+    // The critical no-leak invariant: peeking at the /tests/ golden is NOT a fair compare → not green.
     expect(result.report.verification?.state).not.toBe("verified-pass")
-    // The no-leak guard is also pinned at the source: the follow-up text names no hidden-oracle terms.
+    // And the RUN nudge, wherever it fires, names no hidden-oracle terms (pinned at the source).
     for (const w of ["test", "verifier", "grader", "hidden", "answer key"]) {
       expect(VERIFY_GATE_FOLLOWUP.toLowerCase()).not.toContain(w)
     }

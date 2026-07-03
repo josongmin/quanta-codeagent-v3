@@ -60,9 +60,9 @@ const TERMINAL_BRAIN_SESSION_ID = "terminal-brain-session"
 export const TB_VERIFY_GATE_ENV = "QUANTA_TB_VERIFY_GATE"
 
 /** OC1 (RFC 07) — output-contract sub-lever. When ON (and the verify-gate is ON), the single bounded
- *  follow-up ALSO fires when the deliverable never ran END-TO-END to a CLEAN exit (not just when no L1
- *  comparison happened), and uses the {@link OUTPUT_CONTRACT_FOLLOWUP} nudge. Default-OFF ⇒ the gate is
- *  byte-identical to verify-gate v2. Separate knob so its effect is measured in isolation (A/B). */
+ *  RUN nudge ({@link VERIFY_GATE_FOLLOWUP}) ALSO fires when an exercised deliverable ran to a DIRTY
+ *  exit (crashed), not only when it was never exercised at all (catches sam-cell-seg exit 2). Default-OFF
+ *  ⇒ the gate only fires on never-exercised. Separate knob so its effect is measured in isolation (A/B). */
 export const TB_OUTPUT_CONTRACT_ENV = "QUANTA_TB_OUTPUT_CONTRACT"
 
 /** Cassette knob (RFC 07). Trajectory recording is ON by DEFAULT — set `QUANTA_TB_TRAJECTORY=0`
@@ -113,41 +113,23 @@ export const TERMINAL_SURFACE_PROFILE: SurfaceProfile = {
   operatorGuide: TERMINAL_OPERATOR_GUIDE,
 }
 
-/** The single bounded follow-up nudge (v2, RFC jul-2 §03 "Follow-up prompt" — VERBATIM). Fired AT
- *  MOST ONCE, only when the run RAN but never COMPARED its output to a reference (L0-without-L1). It
- *  is no-leak by construction: it directs the model to use ONLY task-provided materials and contains
- *  none of {test, verifier, grader, hidden, answer key} — the gate can never teach peeking. */
+/** The single bounded follow-up nudge (S4, RFC jul-3). Fired AT MOST ONCE, only when the run NEVER
+ *  ran the produced deliverable end-to-end (`!exercised`). It is RUN-ONLY: it asks the model to run
+ *  and OBSERVE its own deliverable — it does NOT tell it to "diff against a reference" (the old blunt
+ *  compare push reworked already-refined solutions and was gamed by a shallow one-value compare;
+ *  substantive verification is the S1 self-test's job, not this nudge). No-leak by construction:
+ *  contains none of {test, verifier, grader, hidden, answer key}. */
 export const VERIFY_GATE_FOLLOWUP =
-  "Before finalizing: your deliverable ran, but you have not COMPARED its output against a reference. " +
-  "Using ONLY materials the task itself provides — an original/input artifact, a baseline command whose " +
-  "output is the correct answer, or a deterministic expected value stated in the task — run your " +
-  "deliverable and DIFF its output against that reference, then report the concrete comparison result " +
-  "(matches / differs-here / no-reference-available). Rely only on those task-provided materials; do " +
-  "not seek out any concealed evaluation harness or reference key. " +
-  "IMPORTANT: this is a CHECK, not a rework — if the comparison matches (or no reference exists), do " +
-  "NOT modify any files; finalize as-is. Only fix something if the comparison shows a CONCRETE mismatch."
+  "Before finalizing: you have NOT run your produced deliverable end-to-end. Run it EXACTLY as the " +
+  "task says it will be invoked, and OBSERVE that it completes and produces the outputs the task asks " +
+  "for. This is a CHECK — run and observe your own deliverable; do not consult any concealed " +
+  "evaluation materials, and do not rework a solution that already runs and produces its outputs."
 
-/** OC1 (RFC 07) output-contract follow-up — fired (in place of {@link VERIFY_GATE_FOLLOWUP}) when the
- *  deliverable never ran END-TO-END to a clean exit. Directs the model to satisfy the task's OWN output
- *  contract: invoke the deliverable exactly as the task states, confirm success, confirm the required
- *  outputs exist and NO stray build artifacts remain. No-leak: names only the task's own spec, never a
- *  test/verifier/answer key. (Targets the polyglot stray-file / rstan missing-file / sam-cell-seg
- *  crash-at-invocation class — RFC 07 Type 1.) */
-export const OUTPUT_CONTRACT_FOLLOWUP =
-  "Before finalizing: verify your deliverable against the TASK'S OWN output contract. " +
-  "(1) Run it EXACTLY as the task describes it will be invoked and confirm it completes successfully " +
-  "(exits without error). " +
-  "(2) Confirm the working directory contains EXACTLY what the task asks for — every required output " +
-  "file is present AND no stray artifacts remain (leftover build/compile outputs like a compiled binary, " +
-  "temp files, scratch copies). " +
-  "(3) Using ONLY task-provided materials (an input/original artifact, a baseline command whose output " +
-  "is correct, or a value the task states), DIFF your output against that reference and report the result " +
-  "(matches / differs-here / no-reference-available). " +
-  "If the run errors, the file set does not match the task's stated deliverable, or the comparison " +
-  "differs, fix it now. Use ONLY the task's own description; do not consult any concealed evaluation " +
-  "harness, verifier, or answer key. " +
-  "IMPORTANT: this is a CHECK, not a rework — if everything already satisfies the contract, do NOT " +
-  "modify any files; finalize as-is. Only change something on a CONCRETE observed failure."
+// NOTE (S4, RFC jul-3): the old OUTPUT_CONTRACT_FOLLOWUP was RETIRED. It forced a "DIFF your output
+// against that reference" step — the exact compare-forcing language that regressed path-tracing
+// (reworked a working deliverable) and was gamed by polyglot (shallow fib(0) self-compare). Under S4
+// BOTH trigger cases (never-exercised AND OC1 dirty-exit) fire the single RUN-only {@link
+// VERIFY_GATE_FOLLOWUP}. Substantive comparison moves to S1's spec-derived self-test loop, not a nudge.
 
 /** Report JSON the hands side reads into harbor's `AgentContext` (spec B3). Trajectory optional. */
 export interface TerminalBrainReport {
@@ -464,22 +446,24 @@ const finalAssistantText = (messages: readonly Message[]): string => {
  *  a surfaced mismatch (diff→fix→re-diff), not just report it. Ships as a SEPARATE A/B arm with a
  *  hard-ceiling turn-budget watchdog — NOT here (K=0 surface-only first; the recovery loop
  *  re-introduces R2's over-persist and must be measured, never enabled by default). */
-/** PURE follow-up decision (extracted so the OC1 trigger is wiring-provable without the loop).
- *  - OC1 OFF: v2 — fire the COMPARE nudge iff no L1 comparison happened (byte-identical to verify-gate v2).
- *  - OC1 ON: fire the CONTRACT nudge whenever on the pass path (`compared` ⇒ about to stamp verified-pass;
- *    catches the polyglot clean-run-with-stray-artifact class) OR the deliverable never ran to a clean exit
- *    (`!ranClean`; catches the sam-cell-seg crash / never-run class). The contract nudge is a superset of the
- *    compare nudge, so it also serves the no-compare case. Never fires past the turn budget (no over-persist). */
+/** PURE follow-up decision (S4, RFC jul-3). Fires the RUN nudge ONLY on the unambiguous cases where the
+ *  deliverable did not run to a clean end: `!exercised` (never ran it at all — extract-elf/sam fake-green)
+ *  OR `outputContractOn && !ranClean` (ran but crashed — sam exit 2). It DELIBERATELY no longer fires on
+ *  `!compared`: the box A/B + cassette RCA showed that blunt "go compare" nudge REGRESSES iterative tasks
+ *  (path-tracing EXERCISED its tracer but our narrow L1 misses the image compare → false-positive rework
+ *  that broke the refined image.c, 2/3→1/3) and is GAMED (polyglot self-compared fib(0) only). Substantive
+ *  verification moves to S1's spec-derived self-test loop; this nudge only ensures the deliverable RAN.
+ *  Never fires past the turn budget (no over-persist). */
 export const decideGateFollowup = (args: {
-  compared: boolean
+  exercised: boolean
   ranClean: boolean
   outputContractOn: boolean
   budgetLeft: boolean
-}): { fire: boolean; nudge: "compare" | "contract" | "none" } => {
-  const missingCompare = !args.compared
-  const contractCheck = args.outputContractOn && (args.compared || !args.ranClean)
-  if (!args.budgetLeft || !(missingCompare || contractCheck)) return { fire: false, nudge: "none" }
-  return { fire: true, nudge: contractCheck ? "contract" : "compare" }
+}): { fire: boolean; nudge: "run" | "none" } => {
+  const notExercised = !args.exercised // extract-elf / sam: never ran the produced deliverable
+  const crashed = args.outputContractOn && !args.ranClean // OC1: ran but no clean exit (sam exit 2)
+  if (!args.budgetLeft || !(notExercised || crashed)) return { fire: false, nudge: "none" }
+  return { fire: true, nudge: "run" }
 }
 
 const runVerifyBeforeFinalizeGate = async (args: {
@@ -489,8 +473,8 @@ const runVerifyBeforeFinalizeGate = async (args: {
   maxTurns: number
   outcomeTurns: number
   messages: readonly Message[]
-  /** OC1 (RFC 07): when true, the follow-up ALSO fires on an unmet output contract, using the
-   *  {@link OUTPUT_CONTRACT_FOLLOWUP} nudge. Default false ⇒ verify-gate v2 byte-identical. */
+  /** OC1 (RFC 07): when true, the RUN nudge ALSO fires on an exercised-but-dirty-exit run (crash).
+   *  Default false ⇒ the nudge fires only on a never-exercised deliverable. */
   outputContractOn: boolean
 }): Promise<{
   outcomeTurns: number
@@ -500,14 +484,14 @@ const runVerifyBeforeFinalizeGate = async (args: {
   let outcomeTurns = args.outcomeTurns
   let messages = args.messages
   let followUpFired = false
-  const preCompare = comparedToReference(args.stream.events)
+  // S4 (RFC jul-3): the nudge fires on !EXERCISED (never ran the deliverable), NOT !compared.
+  const preExercise = inspectExerciseEvidence(args.stream.events)
   // OC1: the output contract is unmet when the deliverable never ran end-to-end to a clean exit.
-  // Only consulted when the sub-lever is ON (else the trigger + nudge are byte-identical to v2).
   const preContract = args.outputContractOn
     ? outputContractVerdict(args.stream.events)
     : { ranClean: true }
   const decision = decideGateFollowup({
-    compared: preCompare.compared,
+    exercised: preExercise.exercised,
     ranClean: preContract.ranClean,
     outputContractOn: args.outputContractOn,
     budgetLeft: outcomeTurns < args.maxTurns,
@@ -516,7 +500,8 @@ const runVerifyBeforeFinalizeGate = async (args: {
     const followUp = await runSessionTurn({
       session: args.session,
       resolveApproval: async () => "approve",
-      text: decision.nudge === "contract" ? OUTPUT_CONTRACT_FOLLOWUP : VERIFY_GATE_FOLLOWUP,
+      // RUN-only nudge (S4): run+observe the deliverable — no "compare to reference" (rework/gaming).
+      text: VERIFY_GATE_FOLLOWUP,
       turnSignal: args.turnSignal,
       env: {},
     })
