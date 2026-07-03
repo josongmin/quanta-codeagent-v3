@@ -163,7 +163,27 @@ const tryReadRoutes = (
   }
   // `GET /threads/:id/events?since=N` returns the SessionEvent log for that
   // thread so a reloaded client can rebuild its transcript without losing what
-  // the previous tab saw. Disabled (404) when persistence is off.
+  // the previous tab saw. B2 — this is ALSO the cross-surface thread RESUME
+  // seam: a `?thread=<id>` deeplink asks the web surface to OPEN an
+  // externally-addressed thread, and this thread-ADDRESSED route serves THAT
+  // thread's persisted transcript for ANY id (not only the live session id).
+  //
+  // HONEST BOUNDARY (single-shared-session daemon): the daemon runs ONE live
+  // `RuntimeSession` whose id is server-minted; the LIVE session cannot be
+  // switched to an arbitrary thread (every WS client joins the SAME live
+  // transcript). So a resume of a DIFFERENT thread is READ-ONLY HISTORY — new
+  // turns still advance the live session. We report which case applies in
+  // `boundary` so the client can be honest with the user: `live-attach` when the
+  // requested id IS the live session (history + new turns coincide), else
+  // `read-only-history`. An unknown / malformed id is a CLEAN empty log (200,
+  // `events:[]`) — never a crash or an auth-bypassing error.
+  //
+  // OWNERSHIP / AUTH SCOPE: this is a SINGLE-TENANT daemon (one shared session,
+  // one bearer token). Any client that presents the daemon's bearer token may
+  // read any persisted thread on THIS daemon — the token IS the ownership
+  // boundary. There is no per-thread ACL because there is no multi-tenant
+  // identity model here; a future multi-user daemon would gate `threadId`
+  // against the caller's identity at this exact seam.
   {
     const eventsMatch = url.pathname.match(/^\/threads\/([^/]+)\/events$/)
     if (eventsMatch !== null && req.method === "GET") {
@@ -176,8 +196,11 @@ const tryReadRoutes = (
       const sinceRaw = url.searchParams.get("since")
       const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10)
       const sinceSeq = Number.isFinite(since) && since >= 0 ? since : 0
+      const boundary =
+        threadId === sharedSession.sessionId ? "live-attach" : "read-only-history"
       return jsonResponse(200, {
         threadId,
+        boundary,
         events: threadStore.loadEvents(threadId, sinceSeq),
       })
     }

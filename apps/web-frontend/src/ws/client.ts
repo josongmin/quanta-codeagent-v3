@@ -72,6 +72,23 @@ export interface ConnectOptions {
   readonly url: string
   readonly auth?: AuthCredential
   readonly surfaceSubscription?: SurfaceSubscription
+  /**
+   * B2 — cross-surface thread handoff RESUME intent. When a deeplink
+   * (`?thread=<id>` / `quanta://threads/{id}`) asks the web surface to OPEN a
+   * specific thread, the requested id rides here so the connection carries the
+   * resume intent as a first-class field (rather than only the server-minted
+   * `learnedSessionId`).
+   *
+   * BOUNDARY (single-shared-session daemon): the LIVE session id is
+   * server-minted and cannot be switched to an arbitrary thread — every WS
+   * client joins the SAME live transcript. So this id drives a READ-ONLY
+   * HISTORY hydration of the requested thread via the daemon's thread-addressed
+   * `GET /threads/:id/events` route (see `../lib/thread-resume`), NOT a live
+   * re-attach. When it equals the live session id the resume is effectively
+   * live-attach. Absent ⇒ the connect path is byte-identical to the legacy
+   * server-minted-only flow.
+   */
+  readonly resumeThreadId?: string
 }
 
 export type EventHandler<TType extends SessionEventType = SessionEventType> = (
@@ -313,6 +330,17 @@ export class SessionClient {
   /** Last server-minted session id, or `null` until the handshake settles. */
   get sessionId(): string | null {
     return this.#sessionId
+  }
+
+  /**
+   * B2 — the requested RESUME thread id carried on the current connect, or
+   * `null` when none was requested (legacy server-minted-only flow). Read by the
+   * resume consumer to drive read-only history hydration of THAT thread rather
+   * than only the live `sessionId`. Never mutated by the handshake — it reflects
+   * the caller's `ConnectOptions.resumeThreadId` verbatim.
+   */
+  get resumeThreadId(): string | null {
+    return this.#currentConnect?.resumeThreadId ?? null
   }
 
   /**

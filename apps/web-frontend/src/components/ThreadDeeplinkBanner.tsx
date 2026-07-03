@@ -6,14 +6,16 @@
  * `window.postMessage`) and, when present, surfaces a VISIBLE banner naming the
  * requested thread.
  *
- * HONEST LIMITATION (B2 remaining piece): the web `SessionClient` session id is
- * SERVER-MINTED (a discovery-sentinel handshake; the daemon assigns the id) and
- * `ConnectOptions` has no field to request an arbitrary thread — so the web
- * cannot yet RESUME an externally-addressed thread. This banner therefore does
- * NOT fake a resume: it captures the intent, tells the user which thread was
- * requested, and exposes an `onOpen` hook the resume path can wire once the
- * daemon/client gain a "connect with requested threadId" handshake. The intent
- * is real and observable; the resume is the documented open item.
+ * RESUME (B2, wired): the web `SessionClient` session id is SERVER-MINTED (a
+ * discovery-sentinel handshake; the daemon runs ONE shared live session), so the
+ * LIVE session cannot be switched to an arbitrary thread. The resume is therefore
+ * a READ-ONLY HISTORY hydration: clicking "Open" fires `onOpen(threadId)`, which
+ * the App drives through the daemon's thread-addressed `GET /threads/:id/events`
+ * route (see `../lib/thread-resume` + the App resume effect) to replay THAT
+ * thread's persisted transcript. New turns still advance the live session; the
+ * App surfaces the honest boundary. When `onOpen` is ABSENT this banner is
+ * informational only (captures the intent, no resume) — the honest fallback for a
+ * host that has not wired the resume path.
  *
  * The route CORE is the pure `../lib/thread-deeplink` resolver (unit-tested);
  * this component is the thin DOM affordance around it.

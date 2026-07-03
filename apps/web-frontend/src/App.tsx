@@ -27,6 +27,10 @@ import type { KnobsEndpoint } from "./components/slash-knobs"
 import { buildLlmConfigSlashCommands, httpUrlFromWsUrl } from "./components/slash-llm-config"
 import { buildReadoutSlashCommands, READOUT_SLUGS } from "./components/slash-readout"
 import { ThreadDeeplinkBanner } from "./components/ThreadDeeplinkBanner"
+import {
+  hydrateThreadResume,
+  type ThreadResumeBoundary,
+} from "./lib/thread-resume"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
@@ -226,6 +230,37 @@ export const computeHasObservabilityData = (
   hasAgentState ||
   hasCanvasExtras
 
+/**
+ * B2 — the resume banner's UI state machine. Extracted (exported) so the
+ * "resuming… → resumed(boundary) / failed" copy — including the HONEST
+ * read-only-history vs live-attach distinction — is testable without a React
+ * renderer (the test env is `node`, no DOM). `idle` yields `null` (no chrome).
+ */
+export type ResumeUiState =
+  | { phase: "idle" }
+  | { phase: "resuming"; threadId: string }
+  | { phase: "resumed"; threadId: string; boundary: ThreadResumeBoundary; count: number }
+  | { phase: "failed"; threadId: string }
+
+export const formatResumeStatus = (state: ResumeUiState): string | null => {
+  switch (state.phase) {
+    case "idle":
+      return null
+    case "resuming":
+      return `Resuming thread ${state.threadId}…`
+    case "resumed": {
+      const plural = state.count === 1 ? "" : "s"
+      const boundaryNote =
+        state.boundary === "read-only-history"
+          ? " (read-only history — new messages continue the live session)"
+          : " (live)"
+      return `Resumed ${state.count} event${plural} from thread ${state.threadId}${boundaryNote}`
+    }
+    case "failed":
+      return `Could not resume thread ${state.threadId}.`
+  }
+}
+
 const buildSlashContextSnapshot = (args: {
   readonly modelSlug: string | null
   readonly connection: ConnectionState
@@ -352,6 +387,64 @@ export const App = (): JSX.Element => {
       ctrl.abort()
     }
   }, [learnedSessionId, resolvedConnection, client])
+
+  // B2 — cross-surface thread handoff RESUME. When the deeplink banner's "Open"
+  // is clicked (or a `?thread=`/`quanta://threads/{id}` is present on load — see
+  // ThreadDeeplinkBanner), `resumeThreadId` names a thread to OPEN. We drive the
+  // daemon's thread-addressed `GET /threads/:id/events` hydration against THAT
+  // id (not only the server-minted `learnedSessionId`) and replay its persisted
+  // events into the transcript. HONEST BOUNDARY: the daemon runs one shared
+  // live session (server-minted id), so this is a READ-ONLY HISTORY hydration —
+  // new turns still advance the live session. When the requested id equals the
+  // live id it is an effective live-attach. `resumeState` surfaces the
+  // "resuming…" → "resumed" transition + the boundary to the UI.
+  const [resumeThreadId, setResumeThreadId] = useState<string | null>(null)
+  const [resumeState, setResumeState] = useState<ResumeUiState>({ phase: "idle" })
+  const resumedThreadIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (resumeThreadId === null || resolvedConnection === null) return
+    // Hydrate each requested thread at most once (a re-render must not re-fetch).
+    if (resumedThreadIdRef.current === resumeThreadId) return
+    resumedThreadIdRef.current = resumeThreadId
+    const httpBase = httpUrlFromWsUrl(resolvedConnection.url)
+    const ctrl = new AbortController()
+    setResumeState({ phase: "resuming", threadId: resumeThreadId })
+    void hydrateThreadResume({
+      requestedThreadId: resumeThreadId,
+      liveSessionId: learnedSessionId,
+      httpBase,
+      ...(resolvedConnection.token !== undefined ? { token: resolvedConnection.token } : {}),
+      fetchImpl: fetch,
+      signal: ctrl.signal,
+    }).then((outcome) => {
+      if (ctrl.signal.aborted) return
+      if (!outcome.ok) {
+        if (outcome.reason === "aborted") return
+        console.warn("quanta: thread resume failed", outcome.reason)
+        setResumeState({ phase: "failed", threadId: resumeThreadId })
+        return
+      }
+      // Replay through the SAME fanout path as live frames; the reducer dedups
+      // by eventId so any overlap with the live-session hydration is a no-op.
+      client.replayEvents(outcome.result.events)
+      setResumeState({
+        phase: "resumed",
+        threadId: resumeThreadId,
+        boundary: outcome.result.boundary,
+        count: outcome.result.events.length,
+      })
+    }).catch((error: unknown) => {
+      // hydrateThreadResume never rejects (all failure paths are typed), but the
+      // `.then` body itself (replay/setState) could throw — never leave that as
+      // an unhandled rejection or a stuck "resuming…" banner.
+      if (ctrl.signal.aborted) return
+      console.warn("quanta: thread resume errored", error)
+      setResumeState({ phase: "failed", threadId: resumeThreadId })
+    })
+    return () => {
+      ctrl.abort()
+    }
+  }, [resumeThreadId, resolvedConnection, learnedSessionId, client])
 
   // Wire connect on mount / disconnect on unmount.
   // We also re-resolve on `quanta:config-ready` because Tauri may inject
@@ -758,13 +851,23 @@ export const App = (): JSX.Element => {
         onCancel={sendCancel}
         onSetPermission={onSetPermission}
       />
-      {/* B2 — thread deeplink affordance. Reads `?thread=`/`#thread=` (or a
-          Tauri-forwarded `quanta://threads/{id}` postMessage) on load and shows
-          which thread was requested. No `onOpen` yet: web thread-resume is not
-          wired (the SessionClient id is server-minted; ConnectOptions carries no
-          requested-thread field), so the banner is informational — it does NOT
-          fake a resume. */}
-      <ThreadDeeplinkBanner />
+      {/* B2 — thread deeplink affordance + RESUME. Reads `?thread=`/`#thread=`
+          (or a Tauri-forwarded `quanta://threads/{id}` postMessage) on load and
+          shows which thread was requested. Clicking "Open" wires `onOpen` →
+          `setResumeThreadId`, which drives a READ-ONLY HISTORY hydration of that
+          thread via the daemon's `/threads/:id/events` route (the live session id
+          is server-minted; new turns advance the live shared session — see the
+          resume effect above). `resumeState` surfaces the honest boundary. */}
+      <ThreadDeeplinkBanner onOpen={setResumeThreadId} />
+      {formatResumeStatus(resumeState) !== null ? (
+        <div
+          className="flex items-center gap-2 border-b border-line-subtle bg-surface-raised px-4 py-1.5 text-xs text-ink-muted"
+          role="status"
+          data-testid="thread-resume-status"
+        >
+          <span>{formatResumeStatus(resumeState)}</span>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-row">
         <ChatPanel
           messages={messages}
