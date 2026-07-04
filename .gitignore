@@ -10,6 +10,9 @@ dist/
 *.tsbuildinfo
 **/*.js.map
 
+# stray root `out` file (accidental redirect target, e.g. `cmd > out`)
+/out
+
 # TypeScript/Bun side-by-side emit (.ts is source of truth)
 src/**/*.js
 !src/ui/auth-ui.js
