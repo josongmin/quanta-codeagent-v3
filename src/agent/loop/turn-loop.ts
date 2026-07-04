@@ -155,6 +155,7 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
       turn,
       result,
       pendingPlanExitRef: ctx.pendingPlanExitRef,
+      pendingPlanEntryRef: ctx.pendingPlanEntryRef,
       hookPromptPending: ctx.hookPromptPending,
     })
     if (resolution.kind === "park") {

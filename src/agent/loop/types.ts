@@ -50,6 +50,12 @@ export type PendingPlanExit = {
   readonly outcome: PlanExitOutcome
 }
 
+/** Recorded when the model calls `enter_plan_mode`; consumed at the next turn
+ *  boundary by `applyPendingPlanEntry` to flip collaboration mode to `plan`. */
+export type PendingPlanEntry = {
+  readonly reason: string
+}
+
 export type TurnLoopResolution =
   | { readonly kind: "continue" }
   | { readonly kind: "park"; readonly turns: number }
@@ -81,6 +87,7 @@ export interface RunAgentContext {
   readonly dedupGate: unknown
   readonly hookPromptPending: HookPromptInject[]
   readonly pendingPlanExitRef: { current: PendingPlanExit | null }
+  readonly pendingPlanEntryRef: { current: PendingPlanEntry | null }
   readonly shellSnapshotSession: ShellSnapshotSession | undefined
   readonly turnDiffSession: TurnDiffSession | undefined
   readonly gitDirectiveCollector: ReturnType<typeof buildGitDirectiveEmit> | undefined

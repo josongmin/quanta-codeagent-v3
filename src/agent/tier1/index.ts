@@ -34,6 +34,7 @@ export {
 export { buildComposeAuthoringBlock } from "./compose-authoring"
 export { buildDelegateBlock } from "./delegate"
 export { buildForkSessionBlock } from "./fork-session"
+export { buildEnterPlanBlock } from "./enter-plan"
 export { buildObjectiveBlock } from "./objective"
 export { buildPlanExitBlock } from "./plan-exit"
 export { buildPlanMutationBlock } from "./plan-mutation"

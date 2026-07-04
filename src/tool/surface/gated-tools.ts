@@ -444,6 +444,15 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "Agent-requested plan-mode exit. Wired when config.planExitPort is set.",
   },
   {
+    name: "enter_plan_mode",
+    origin: "@/agent/tier1/enter-plan (buildEnterPlanBlock)",
+    gate: { kind: "config-slot", slot: "planExitPort" },
+    default: { cli: "opt-in" },
+    risk: "meta",
+    adr: "0088",
+    note: "Agent-requested plan-mode ENTRY (inverse of request_plan_exit). Wired when config.planExitPort is set (pairs with the exit tool).",
+  },
+  {
     name: "update_working_state",
     origin: "@/agent/tier1/working-state (buildWorkingStateBlock)",
     gate: { kind: "config-slot", slot: "workingState" },

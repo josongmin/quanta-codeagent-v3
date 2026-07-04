@@ -64,6 +64,7 @@ import {
   buildClassifierBlock,
   buildComposeAuthoringBlock,
   buildDelegateBlock,
+  buildEnterPlanBlock,
   buildForkSessionBlock,
   buildObjectiveBlock,
   buildPlanExitBlock,
@@ -262,6 +263,12 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   // --- Plan-exit tool (ADR-0086) -----------------------------------------
   const planExitTool = buildPlanExitBlock(config)
   if (planExitTool !== undefined) extraTools.push(planExitTool)
+
+  // --- Plan-ENTRY tool (model-driven plan-mode entry; inverse of exit) ----
+  // Gated on the same planExitPort slot so enter/exit ship as a pair (never
+  // strand the agent in the read-only fence with no wired way out).
+  const enterPlanTool = buildEnterPlanBlock(config)
+  if (enterPlanTool !== undefined) extraTools.push(enterPlanTool)
 
   // --- Structured plan tools (ADR-0093 draft) ----------------------------
   const planMutationTools = buildPlanMutationBlock(config)

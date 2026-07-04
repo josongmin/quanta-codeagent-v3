@@ -41,6 +41,7 @@ const baseArgs = (over: { cfg: AgentConfig; wm: WorkingMemory<Message>; result: 
   turn: 3,
   result: over.result,
   pendingPlanExitRef: { current: null },
+  pendingPlanEntryRef: { current: null },
   hookPromptPending: [],
 })
 

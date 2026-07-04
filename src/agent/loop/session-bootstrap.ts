@@ -47,6 +47,7 @@ import { buildSkillScopeView } from "./skill-scope-view"
 import { sleep } from "./sleep"
 import type {
   FinishAgentSession,
+  PendingPlanEntry,
   PendingPlanExit,
   RunAgentContext,
   RunAgentTurnStateSeed,
@@ -116,6 +117,15 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   cfg.onPlanExitOutcome = (event) => {
     pendingPlanExitRef.current = event
     onPlanExitOutcome?.(event)
+  }
+  // Plan-ENTRY mirror: the dispatch seam calls cfg.onPlanEnterRequest when the
+  // model fires `enter_plan_mode`; record it so the turn boundary flips into
+  // plan mode (applyPendingPlanEntry). Chains any host-supplied observer.
+  const pendingPlanEntryRef: { current: PendingPlanEntry | null } = { current: null }
+  const onPlanEnterRequest = cfg.onPlanEnterRequest
+  cfg.onPlanEnterRequest = (event) => {
+    pendingPlanEntryRef.current = event
+    onPlanEnterRequest?.(event)
   }
 
   const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
@@ -283,6 +293,7 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     dedupGate,
     hookPromptPending,
     pendingPlanExitRef,
+    pendingPlanEntryRef,
     shellSnapshotSession,
     turnDiffSession,
     gitDirectiveCollector,

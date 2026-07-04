@@ -44,6 +44,7 @@ const baseArgs = (overrides?: {
   const stream = overrides?.stream ?? new RecordingStream()
   const wm = createWorkingMemory<Message>()
   const pendingPlanExitRef: { current: null } = { current: null }
+  const pendingPlanEntryRef: { current: null } = { current: null }
   const hookPromptPending: never[] = []
   const cfg: AgentConfig = {
     llm: { stream: async function* () {} },
@@ -66,6 +67,7 @@ const baseArgs = (overrides?: {
     turn: overrides?.turn ?? 3,
     result: overrides?.result ?? ({ kind: "completed" } as TurnResult),
     pendingPlanExitRef,
+    pendingPlanEntryRef,
     hookPromptPending,
   }
 }

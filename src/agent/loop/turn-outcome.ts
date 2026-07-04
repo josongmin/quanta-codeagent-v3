@@ -13,6 +13,7 @@ import {
 } from "../stop-category"
 import { appendPendingToolResults } from "../turn-closeout"
 import type { AgentConfig } from "../types"
+import { applyPendingPlanEntry } from "./plan-enter-wire"
 import { applyPendingPlanExit } from "./plan-exit-wire"
 import type { RunAgentContext, TurnLoopResolution, TurnResult } from "./types"
 
@@ -25,6 +26,7 @@ export const resolveTurnLoopOutcome = async (args: {
   readonly turn: number
   readonly result: TurnResult
   readonly pendingPlanExitRef: { current: import("./types").PendingPlanExit | null }
+  readonly pendingPlanEntryRef: { current: import("./types").PendingPlanEntry | null }
   readonly hookPromptPending: import("../hooks").HookPromptInject[]
 }): Promise<TurnLoopResolution> => {
   if (args.result.kind === "aborted") {
@@ -92,6 +94,10 @@ export const resolveTurnLoopOutcome = async (args: {
   if (args.pendingPlanExitRef.current !== null) {
     applyPendingPlanExit(args.cfg, args.pendingPlanExitRef.current, args.hookPromptPending)
     args.pendingPlanExitRef.current = null
+  }
+  if (args.pendingPlanEntryRef.current !== null) {
+    applyPendingPlanEntry(args.cfg, args.pendingPlanEntryRef.current, args.hookPromptPending)
+    args.pendingPlanEntryRef.current = null
   }
   return { kind: "continue" }
 }

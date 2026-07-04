@@ -193,6 +193,14 @@ export interface WireSlotsCoreConfig {
    */
   onPlanExitOutcome?: (event: { readonly plan: string; readonly outcome: PlanExitOutcome }) => void
   /**
+   * Within-run plan-ENTRY callback — the inverse of {@link onPlanExitOutcome}.
+   * When the `enter_plan_mode` tool fires, dispatch calls this with the model's
+   * reason so the loop can flip collaboration mode to `plan` at the NEXT
+   * agent-turn boundary (see `applyPendingPlanEntry`). Absent ⇒ the tool relays
+   * its ack text but no flip runs (byte-identical off).
+   */
+  onPlanEnterRequest?: (event: { readonly reason: string }) => void
+  /**
    * Plan-queue helper (ADR-0128). Pure in-memory queue of follow-up user
    * inputs captured WHILE a turn is in progress, replayed at turn
    * boundary. Codex's unique `queued-follow-ups` pattern. Helper-only —

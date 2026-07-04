@@ -427,6 +427,12 @@ export interface PlanExitToolOutcome {
 /** Requester the `request_plan_exit` tool invokes. */
 export type PlanExitRequester = (plan: string) => Promise<PlanExitToolOutcome>
 
+/** Requester the `enter_plan_mode` tool invokes. Relays the model's reason for
+ *  switching into plan mode; the loop applies the flip at the next turn
+ *  boundary. Fire-and-forget (no operator round-trip): entry only RESTRICTS the
+ *  agent to read-only, so unlike {@link PlanExitRequester} it returns nothing. */
+export type PlanEntryRequester = (reason: string) => void
+
 /** ADR-0095 (draft) — CLOSED 2-arm outcome the `request_user_input` tool relays
  *  from `ToolContext.requestUserInput` to the model. `answer` carries the
  *  operator's reply text (the tool surfaces it as `ToolResult.output`);

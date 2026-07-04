@@ -335,6 +335,11 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // boundary. This MUST remain callable in plan mode; otherwise the plan
   // posture has no live way to leave the read-only fence.
   request_plan_exit: null,
+  // Plan-ENTRY seam (inverse of request_plan_exit). Read-only by tool contract:
+  // it only relays a reason; the loop flips collaboration mode at the next turn
+  // boundary. Callable in BOTH modes — you call it FROM default to enter, and a
+  // second call while already in plan mode is an explicit no-op.
+  enter_plan_mode: null,
   // Sub-agent spawn — the child runs unrestricted tools; the spawn itself
   // is mutating because the child's mutations are reachable via this call.
   // Same rationale as `bash_mutating` ("cannot introspect the side effect").
@@ -589,6 +594,8 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   "task_stop",
   // Plan-review exit seam — planExitPort.
   "request_plan_exit",
+  // Plan-ENTRY seam (inverse of exit) — gated on the same planExitPort slot.
+  "enter_plan_mode",
   // Sub-agent spawn (ADR-0130) — subagent runner.
   "agent",
   // Skill loader + tool-search — loader-gated.

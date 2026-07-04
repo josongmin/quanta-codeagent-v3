@@ -52,6 +52,17 @@ const buildRequestPlanExit = (
     : undefined
 }
 
+/** Build the plan-ENTRY requester — the inverse of {@link buildRequestPlanExit}.
+ *  Gated on the SAME `planExitPort` slot (entry ships only when a clean exit is
+ *  also wired). Fire-and-forget: it just relays the reason to
+ *  `config.onPlanEnterRequest`; the loop flips mode at the next turn boundary. */
+const buildEnterPlanMode = (config: AgentConfig): ToolContext["enterPlanMode"] =>
+  config.planExitPort !== undefined
+    ? (reason: string) => {
+        config.onPlanEnterRequest?.({ reason })
+      }
+    : undefined
+
 /** ADR-0416 sibling-identity fix — project the STABLE mailbox labels onto the
  *  ToolContext partial. Each label is omitted when its `AgentConfig` slot is
  *  absent (root session / legacy caller) so the subagent-mailbox tools fall
@@ -79,6 +90,7 @@ export const buildToolContext = (args: {
 }): ToolContext => {
   const { config, workingState, collabMode, toolCallId, interrupt } = args
   const requestPlanExit = buildRequestPlanExit(config, collabMode)
+  const enterPlanMode = buildEnterPlanMode(config)
   const reviewerAgent = materializeReviewerAgent(config)
   return {
     cwd: config.cwd,
@@ -99,6 +111,7 @@ export const buildToolContext = (args: {
     ...mailboxLabels(config),
     ...(workingState !== undefined ? { workingState } : {}),
     ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
+    ...(enterPlanMode !== undefined ? { enterPlanMode } : {}),
     ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),
     ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
     ...(config.planStore !== undefined
