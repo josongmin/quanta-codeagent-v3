@@ -8,6 +8,101 @@ import type { RecoveryReason } from "../recovery"
 import type { AgentConfig } from "../types"
 import type { TurnWorkMetricsCollector } from "../work-metrics-collector"
 
+// Re-exported from the dispatch SSOT so the loop's consumers (turn-loop,
+// stream-consume) keep a stable `./emit-helpers` import while the predicate has
+// a single definition shared with the sync/streaming dispatch paths.
+export { isSessionApprovalRequiredError } from "../dispatch-helpers"
+
+/** The priced context one usage event is fanned out to every downstream sink
+ *  with. `eventCostUsd` is priced ONCE here (pricing SSOT) and shared so no sink
+ *  re-prices; `null` ⇒ unpriced model (cost tick skipped). */
+type UsageSinkCtx = {
+  readonly config: AgentConfig
+  readonly ev: Extract<StreamEvent, { type: "usage" }>
+  readonly recorder: AgentRecorder | undefined
+  readonly collector: TurnWorkMetricsCollector | undefined
+  readonly taskSpend: { tokens: number } | undefined
+  readonly eventCostUsd: number | null
+}
+
+/** One usage-event consumer. Adding a downstream (a new meter, ledger, gauge)
+ *  is appending a sink HERE — never surgery on the {@link emitUsage} hot body
+ *  (OCP). Each sink is individually a no-op when its optional collaborator is
+ *  unwired, so ordering is observable-independent; the array order mirrors the
+ *  historical inline order for byte-identity. */
+type UsageSink = (c: UsageSinkCtx) => void
+
+const USAGE_SINKS: readonly UsageSink[] = [
+  // Surface stream event — the `/context` gauge & usage readouts.
+  ({ config, ev }) =>
+    config.stream.emit({
+      type: "usage",
+      inputTokens: ev.inputTokens,
+      outputTokens: ev.outputTokens,
+      model: ev.model,
+      ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+      ...(ev.cacheCreationTokens !== undefined
+        ? { cacheCreationTokens: ev.cacheCreationTokens }
+        : {}),
+      // S3 (jul-03) — forward the OpenAI-Responses reasoning-token split so
+      // surface sinks can render it. `!== undefined` (not truthiness) keeps an
+      // explicit `0` split; omission stays omitted (Anthropic byte-identical).
+      ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
+    }),
+  // Run recorder token tally.
+  ({ recorder, ev }) => recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens),
+  // Autonomous-safety cost cap (L0): tick tokens AND the pre-priced USD into the
+  // per-run meter (the same single seam). Unpriced model ⇒ skip the cost tick so
+  // the cap stays a no-op rather than billing $0 falsely. `maxCostUsd` is only
+  // set on autonomous modes (batch/daemon/ci-bot); interactive accrues but never
+  // gates (human-paced, by design).
+  ({ config, ev, eventCostUsd }) => {
+    config.budgetMeter?.tick("input_tokens", ev.inputTokens)
+    config.budgetMeter?.tick("output_tokens", ev.outputTokens)
+    if (eventCostUsd !== null) config.budgetMeter?.tick("cost_usd", eventCostUsd)
+  },
+  // L4 cross-run cost ledger (default-OFF: no `budgetLedger` ⇒ no-op). Maps the
+  // provider's cache-CREATION tokens onto the ledger's cache-write bucket (which
+  // the ledger bills and `costUsd` does not); same SSOT rate card so meter and
+  // ledger never disagree. Hard breach surfaced at the turn epilogue.
+  ({ config, ev }) =>
+    config.budgetLedger?.record({
+      model: ev.model,
+      inputTokens: ev.inputTokens,
+      outputTokens: ev.outputTokens,
+      ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+      ...(ev.cacheCreationTokens !== undefined ? { cacheWriteTokens: ev.cacheCreationTokens } : {}),
+      sessionId: config.sessionId ?? "",
+      at: Date.now(),
+    }),
+  // Turn work-metrics collector.
+  ({ collector, ev }) =>
+    collector?.recordUsage({
+      tokensInput: ev.inputTokens,
+      tokensOutput: ev.outputTokens,
+      ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
+    }),
+  // Per-task spend accumulator (guards against NaN / negative token counts).
+  ({ taskSpend, ev }) => {
+    if (taskSpend === undefined) return
+    const inTok = Number.isFinite(ev.inputTokens) && ev.inputTokens > 0 ? ev.inputTokens : 0
+    const outTok = Number.isFinite(ev.outputTokens) && ev.outputTokens > 0 ? ev.outputTokens : 0
+    taskSpend.tokens += inTok + outTok
+  },
+  // Prompt-cache hit/write observer.
+  ({ config, ev }) =>
+    config.promptCacheObserver?.record({
+      model: ev.model,
+      sessionId: config.sessionId ?? "",
+      turnIndex: 0,
+      atMs: Date.now(),
+      inputTokens: ev.inputTokens,
+      cacheCreationTokens: ev.cacheCreationTokens ?? 0,
+      cacheReadTokens: ev.cacheReadTokens ?? 0,
+      outputTokens: ev.outputTokens,
+    }),
+]
+
 export const emitUsage = (
   config: AgentConfig,
   ev: Extract<StreamEvent, { type: "usage" }>,
@@ -15,70 +110,16 @@ export const emitUsage = (
   collector: TurnWorkMetricsCollector | undefined,
   taskSpend: { tokens: number } | undefined,
 ): void => {
-  config.stream.emit({
-    type: "usage",
-    inputTokens: ev.inputTokens,
-    outputTokens: ev.outputTokens,
-    model: ev.model,
-    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
-    ...(ev.cacheCreationTokens !== undefined
-      ? { cacheCreationTokens: ev.cacheCreationTokens }
-      : {}),
-    // S3 (jul-03) — forward the OpenAI-Responses reasoning-token split onto the
-    // AgentEvent so surface sinks (the `/context` gauge tap) can render it.
-    // `!== undefined` (not truthiness) keeps an explicit `0` split; omission
-    // stays omitted (Anthropic byte-identical, no synthetic value).
-    ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
-  })
-  recorder?.tokensUsed(ev.inputTokens, ev.outputTokens, ev.cacheReadTokens)
-  config.budgetMeter?.tick("input_tokens", ev.inputTokens)
-  config.budgetMeter?.tick("output_tokens", ev.outputTokens)
-  // Autonomous-safety cost cap (L0): price THIS event via the pricing SSOT
-  // using the per-event model id (the only place `ev.model` is available) and
-  // accumulate USD into the meter — the same single seam that ticks tokens. An
-  // unpriced model yields `null` (cost is best-effort evidence, never
-  // authoritative — `@/observability` pricing doctrine) ⇒ skip the tick so the
-  // cost cap stays a no-op rather than billing $0 falsely. `maxCostUsd` is only
-  // set on autonomous modes (batch/daemon/ci-bot); interactive has no dial so
-  // this accrues but never gates (human-paced, by design).
-  const eventCostUsd = costUsd(ev.model, ev.inputTokens, ev.outputTokens, ev.cacheReadTokens ?? 0)
-  if (eventCostUsd !== null) config.budgetMeter?.tick("cost_usd", eventCostUsd)
-  // L4 cross-run cost ledger (default-OFF: no `budgetLedger` slot ⇒ no-op,
-  // byte-identical). Records this event into the persistent session/daily
-  // ledger from the SAME single seam, mapping the provider's cache-CREATION
-  // tokens onto the ledger's cache-write bucket (which the ledger bills and
-  // `costUsd` does not). The ledger prices from the same SSOT rate card, so the
-  // meter (per-run) and ledger (cross-run) never disagree. A hard breach is
-  // surfaced to the loop via `ledger.hardBreach()` at the turn epilogue.
-  config.budgetLedger?.record({
-    model: ev.model,
-    inputTokens: ev.inputTokens,
-    outputTokens: ev.outputTokens,
-    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
-    ...(ev.cacheCreationTokens !== undefined ? { cacheWriteTokens: ev.cacheCreationTokens } : {}),
-    sessionId: config.sessionId ?? "",
-    at: Date.now(),
-  })
-  collector?.recordUsage({
-    tokensInput: ev.inputTokens,
-    tokensOutput: ev.outputTokens,
-    ...(ev.cacheReadTokens !== undefined ? { cacheReadTokens: ev.cacheReadTokens } : {}),
-  })
-  if (taskSpend !== undefined) {
-    const inTok = Number.isFinite(ev.inputTokens) && ev.inputTokens > 0 ? ev.inputTokens : 0
-    const outTok = Number.isFinite(ev.outputTokens) && ev.outputTokens > 0 ? ev.outputTokens : 0
-    taskSpend.tokens += inTok + outTok
+  const ctx: UsageSinkCtx = {
+    config,
+    ev,
+    recorder,
+    collector,
+    taskSpend,
+    // Priced once via the pricing SSOT (the only place `ev.model` is available).
+    eventCostUsd: costUsd(ev.model, ev.inputTokens, ev.outputTokens, ev.cacheReadTokens ?? 0),
   }
-  config.promptCacheObserver?.record({
-    model: ev.model,
-    sessionId: config.sessionId ?? "",
-    turnIndex: 0,
-    atMs: Date.now(),
-    inputTokens: ev.inputTokens,
-    cacheCreationTokens: ev.cacheCreationTokens ?? 0,
-    cacheReadTokens: ev.cacheReadTokens ?? 0,
-    outputTokens: ev.outputTokens,
-  })
+  for (const sink of USAGE_SINKS) sink(ctx)
 }
 
 export const emitRecovery = (
@@ -122,18 +163,6 @@ export const objectiveBudgetExhausted = (config: AgentConfig, threadId: string):
     logger.warn(`loop.objectiveBudgetExhausted: ${errMessage(e)}`)
     return false
   }
-}
-
-export const isSessionApprovalRequiredError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null || !("approval" in error)) return false
-  const approval = (error as { approval?: unknown }).approval
-  return (
-    typeof approval === "object" &&
-    approval !== null &&
-    "approvalId" in approval &&
-    "reason" in approval &&
-    "requestedAt" in approval
-  )
 }
 
 export const finalizeTurnPolicy = (args: {

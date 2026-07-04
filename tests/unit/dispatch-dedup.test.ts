@@ -399,18 +399,23 @@ describe("DedupGate — synthetic result block (mirrors deny-style helper)", () 
 })
 
 describe("DedupGate — anti-regression: dispatch.ts must call the gate before tool execution", () => {
-  test("dispatch.ts contains a consultDedupGate / dedup-gate pre-flight short-circuit", () => {
-    // Regex over the ACTUAL dispatch.ts source. If a future refactor removes
-    // the call, this test fails — protecting the structural invariant T3 ships.
+  test("dispatch.ts consults the dedup gate (via PRE_FLIGHT_CONSULTS) before the admissibility gate", () => {
+    // Regex over the ACTUAL dispatch.ts source. If a future refactor removes the
+    // dedup consult from the pre-flight table OR moves the table iteration AFTER
+    // the admissibility gate, this fails — protecting the structural invariant T3
+    // ships (dedup pre-flights before any permission/HITL/hook work).
     const dispatchPath = path.resolve(__dirname, "../../src/agent/dispatch.ts")
     const src = fs.readFileSync(dispatchPath, "utf8")
-    // Must import the preflight helper that owns the gate (or its synthetic helper).
+    // Must import the preflight helper that owns the gate.
     expect(/consultDedupGate[\s\S]*from\s+["']\.\/dispatch\/preflight-consults["']/.test(src)).toBe(true)
-    // Must consult the gate BEFORE the admissibility gate (line position check).
-    const dedupIdx = src.search(/consultDedupGate\s*\(/)
+    // consultDedupGate must be a member of the ordered PRE_FLIGHT_CONSULTS table.
+    const table = src.match(/PRE_FLIGHT_CONSULTS[\s\S]*?=\s*\[([\s\S]*?)\]/)
+    expect(table?.[1]).toContain("consultDedupGate")
+    // That table must be iterated BEFORE the admissibility gate (line position).
+    const loopIdx = src.search(/for\s*\(const\s+consult\s+of\s+PRE_FLIGHT_CONSULTS\)/)
     const admitIdx = src.search(/runAdmissibilityGate\s*\(/)
-    expect(dedupIdx).toBeGreaterThan(0)
+    expect(loopIdx).toBeGreaterThan(0)
     expect(admitIdx).toBeGreaterThan(0)
-    expect(dedupIdx).toBeLessThan(admitIdx)
+    expect(loopIdx).toBeLessThan(admitIdx)
   })
 })

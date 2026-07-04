@@ -36,7 +36,7 @@ import {
   type PermissionInspection,
   type PermissionMode,
 } from "@/permission"
-import { defaultTools, type Tool } from "@/tool"
+import { buildDefaultTools, type Tool } from "@/tool"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -252,7 +252,10 @@ export const runPermissionRender = async (
   args: readonly string[],
   ctx: SlashContext,
 ): Promise<number> => {
-  const tools = defaultTools
+  // Composition-root contract (default-tool-ports.ts): build the tool set via the
+  // factory rather than importing the eager `defaultTools` singleton. No ports ⇒
+  // the base set, byte-identical to the former singleton for this display path.
+  const tools = buildDefaultTools()
   const mode = DEFAULT_MODE
 
   if (args.length === 0) {

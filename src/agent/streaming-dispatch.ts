@@ -1,5 +1,6 @@
 import { assembleFromEvents, type Message, type StreamEvent } from "@/llm"
 import { errMessage } from "@/shared"
+import { isSessionApprovalRequiredError } from "./dispatch-helpers"
 
 /**
  * Streaming tool-execution engine (streaming latency optimization).
@@ -206,18 +207,6 @@ interface Slot {
 }
 
 const isAborted = (signal: AbortSignal | undefined): boolean => signal?.aborted ?? false
-
-const isSessionApprovalRequiredError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null || !("approval" in error)) return false
-  const approval = (error as { approval?: unknown }).approval
-  return (
-    typeof approval === "object" &&
-    approval !== null &&
-    "approvalId" in approval &&
-    "reason" in approval &&
-    "requestedAt" in approval
-  )
-}
 
 /** Mutable accumulation state for one (possibly tombstone-reset) turn. Held in
  *  one object so the per-event handler can reset it in place on `stream_reset`

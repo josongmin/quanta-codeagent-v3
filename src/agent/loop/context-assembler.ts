@@ -174,6 +174,30 @@ export const resetEffortClassifier = (classifier: AgentConfig["effortClassifier"
   }
 }
 
+/** Prepend `prefix` (+ a blank line) to the FIRST text block of the LAST user
+ *  message, skipping a text block that already opens with `<system-reminder>`
+ *  (so an injected banner never stacks onto another one). Mutates `messages`
+ *  in place — the last user turn's text is where turn-scoped context/banners
+ *  ride. No-op when there is no eligible user text block. Shared by
+ *  {@link injectIdeContext} and {@link injectRedactionBanner}, which differ
+ *  ONLY in the prefix string. */
+const prependToLastUserText = (
+  messages: ReturnType<typeof buildTurnContext>["messages"],
+  prefix: string,
+): void => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m?.role !== "user") continue
+    const idx = m.content.findIndex((b) => b.type === "text")
+    const tb = idx >= 0 ? m.content[idx] : undefined
+    if (tb?.type !== "text" || tb.text.startsWith("<system-reminder>")) continue
+    const newContent = [...m.content]
+    newContent[idx] = { ...tb, text: `${prefix}\n\n${tb.text}` }
+    messages[i] = { ...m, content: newContent }
+    break
+  }
+}
+
 export const injectIdeContext = async (
   config: AgentConfig,
   ctx: ReturnType<typeof buildTurnContext>,
@@ -191,18 +215,7 @@ export const injectIdeContext = async (
     return ctx
   }
   if (block === "") return ctx
-  const messages = ctx.messages
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m?.role !== "user") continue
-    const idx = m.content.findIndex((b) => b.type === "text")
-    const tb = idx >= 0 ? m.content[idx] : undefined
-    if (tb?.type !== "text" || tb.text.startsWith("<system-reminder>")) continue
-    const newContent = [...m.content]
-    newContent[idx] = { ...tb, text: `${block}\n\n${tb.text}` }
-    messages[i] = { ...m, content: newContent }
-    break
-  }
+  prependToLastUserText(ctx.messages, block)
   return ctx
 }
 
@@ -213,18 +226,7 @@ export const injectRedactionBanner = (
   if (config.redaction?.disabled !== true) return ctx
   const ack = config.redaction.acknowledgedRisk ?? ""
   const banner = `<system-reminder>\nSecret redaction DISABLED for this session — tool output and model context may contain raw secrets. Acknowledged risk: ${ack}\n</system-reminder>`
-  const messages = ctx.messages
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m?.role !== "user") continue
-    const idx = m.content.findIndex((b) => b.type === "text")
-    const tb = idx >= 0 ? m.content[idx] : undefined
-    if (tb?.type !== "text" || tb.text.startsWith("<system-reminder>")) continue
-    const newContent = [...m.content]
-    newContent[idx] = { ...tb, text: `${banner}\n\n${tb.text}` }
-    messages[i] = { ...m, content: newContent }
-    break
-  }
+  prependToLastUserText(ctx.messages, banner)
   return ctx
 }
 
@@ -236,33 +238,59 @@ export const resolveTaskBudgetForTurn = (
     ? { tokens: config.taskBudget.tokens, spent: taskSpend?.tokens ?? 0 }
     : undefined
 
+/** Inputs for {@link prepareTurnContext}. A single readonly object (was 14
+ *  positionals) so a mis-ordered arg of a compatible type can no longer compile
+ *  silently — matching the `prepareTurnIteration`/`finishAgentSession` arg-object
+ *  convention the rest of the loop already uses. */
+export interface PrepareTurnContextArgs {
+  readonly config: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly recorder: AgentRecorder | undefined
+  readonly breaker: CompactionBreaker | undefined
+  readonly activeSkills:
+    | { name: string; description: string; rawDependencies?: unknown }[]
+    | undefined
+  readonly workingState: WorkingStateSession | undefined
+  readonly archive: ConversationSummaryArchive | undefined
+  readonly turn: number
+  readonly citations: MemoryCitation[]
+  readonly hookPromptInjects: readonly HookPromptInject[] | undefined
+  readonly taskSpend: { tokens: number } | undefined
+  readonly bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined
+  /** D5 (jun-7) — the per-session token-baseline BOX. `current` (set by the prior
+   *  turn's exact usage) anchors this turn's compaction trigger; `undefined` ⇒
+   *  chars/4 estimate (legacy, byte-identical). After compaction settles we record
+   *  `sendCount` = the wm length of the prompt about to be sent, so the usage
+   *  capture can pair it with the provider's authoritative input count. */
+  readonly tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined
+  /** D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
+   *  swap resolved in `runTurn`), so the compaction window threshold tracks the
+   *  active model, not base `config.llm`. Omit ⇒ the base model id. */
+  readonly activeModel?: string
+}
+
 export const prepareTurnContext = async (
-  config: AgentConfig,
-  wm: WorkingMemory<Message>,
-  recorder: AgentRecorder | undefined,
-  breaker: CompactionBreaker | undefined,
-  activeSkills: { name: string; description: string; rawDependencies?: unknown }[] | undefined,
-  workingState: WorkingStateSession | undefined,
-  archive: ConversationSummaryArchive | undefined,
-  turn: number,
-  citations: MemoryCitation[],
-  hookPromptInjects: readonly HookPromptInject[] | undefined,
-  taskSpend: { tokens: number } | undefined,
-  bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
-  // D5 (jun-7) — the per-session token-baseline BOX. `current` (set by the prior
-  // turn's exact usage) anchors this turn's compaction trigger; `undefined` ⇒
-  // chars/4 estimate (legacy, byte-identical). After compaction settles we
-  // record `sendCount` = the wm length of the prompt about to be sent, so the
-  // usage capture can pair it with the provider's authoritative input count.
-  tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined,
-  // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
-  // swap resolved in `runTurn`), so the compaction window threshold tracks the
-  // active model, not base `config.llm`. Defaults to the base model id.
-  activeModel: string = configuredModel(config.llm),
+  args: PrepareTurnContextArgs,
 ): Promise<{
   readonly ctx: ReturnType<typeof buildTurnContext>
   readonly breakerVerdict: BreakerVerdict
 }> => {
+  const {
+    config,
+    wm,
+    recorder,
+    breaker,
+    activeSkills,
+    workingState,
+    archive,
+    turn,
+    citations,
+    hookPromptInjects,
+    taskSpend,
+    bgController,
+    tokenBaselineBox,
+  } = args
+  const activeModel = args.activeModel ?? configuredModel(config.llm)
   const memoryContext = await resolveMemoryContext(config, wm, recorder, citations)
   // D5 (jun-7) — capture the pre-compaction length. If `maybeCompact` SHRINKS the
   // transcript (proactive summarize / microcompact replaces the prefix), any
@@ -275,18 +303,18 @@ export const prepareTurnContext = async (
   // it against the new prefix. (This turn's `maybeCompact` already consumed the
   // still-valid `.current` above — the clear only affects subsequent turns.)
   const lenBeforeCompact = wm.snapshot().length
-  const breakerVerdict = await maybeCompact(
+  const breakerVerdict = await maybeCompact({
     config,
-    staticSystemFor(config),
+    system: staticSystemFor(config),
     wm,
     breaker,
     archive,
     turn,
     bgController,
-    resetEffortClassifier,
+    resetClassifier: resetEffortClassifier,
     tokenBaselineBox,
     activeModel,
-  )
+  })
   if (tokenBaselineBox !== undefined) {
     const baseline = TokenBaselineBox.wrap(tokenBaselineBox)
     // Invalidate a baseline whose measured prefix was just replaced by a

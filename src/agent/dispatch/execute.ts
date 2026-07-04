@@ -174,99 +174,54 @@ const applyRedaction = (
   return { output: postSecret, hits }
 }
 
-/** Drive the registry through the relocatable effect boundary (ADR-0093 M1).
- *  The {@link LocalEffectChannel} owns the no-throw + duration contract that
- *  used to live in the inline try/catch below — it normalizes executor
- *  exceptions into `{ok:false, output:<msg>}` envelopes and measures
- *  `durationMs` channel-internal, so the orchestration plane here only has
- *  redaction + DispatchResult shaping to do. Adopting a SandboxEffectChannel /
- *  RemoteEffectChannel later swaps the channel constructor here ONLY — the
- *  surrounding redaction / failure / evidence flatten is substrate-agnostic.
- *
- *  Byte-identical to the prior inline try/catch: the channel's catch wording
- *  mirrors the QuantaError/toError(e).message path, and `durationMs` is still
- *  measured around `registry.run` (channel-entry → executor-return/throw). */
-export const execute = async (
+/** Post-execute output decoration chain (ADR-0471/0287/0472/H1). Redact
+ *  secrets/PII → wrap EXTERNAL output in the untrusted envelope (so the model
+ *  treats mcp/web/file/plugin/bash output as DATA, provenance derived from the
+ *  call site) → prepend a `<deferred/>` handle → append the introduced-lint delta
+ *  → run the edit command-repair loop (ONLY on a SUCCESSFUL edit — a failed edit
+ *  changed nothing, so repairing it would clobber a phantom). Returns the final
+ *  model-facing `output` plus the redaction `hits` (merged by
+ *  {@link shapeDispatchResult}). Byte-identical to the former inline sequence. */
+const decorateToolOutput = async (
+  result: ToolResult,
   call: ToolUseBlock,
   config: AgentConfig,
-  ctx: ToolContext,
-  onProgress?: (message: string) => void,
-): Promise<DispatchResult> => {
-  const localChannel = new LocalEffectChannel({
-    execute: (c, c2, op) => config.registry.run(c.name, c.input, c2, op),
-  })
-  // ADR-0121 wire: when `config.shadowCheckpoint` is configured AND
-  // `config.shadowOdb` is wired (and mode !== "off"), wrap with the auto-
-  // checkpoint policy. Otherwise this returns `localChannel` UNCHANGED → the
-  // entire dispatch path is byte-identical for any caller that did not opt
-  // into ADR-0121. `resolveTool` delegates to the registry's `get` so the
-  // policy's destructiveness oracle classifies the call via the same registry
-  // the executor consults.
-  const channel = wireCheckpointedEffectChannel(localChannel, config, (name) =>
-    config.registry.get(name),
-  )
-  // ADR-0472 — open the lint-delta bracket BEFORE the edit so the pre-snapshot
-  // reflects the file's diagnostics prior to the mutation. `null` ⇒ feature off /
-  // non-edit / no provider (byte-identical).
-  const lintBracket = await openLintBracket(call, config)
-  const { result, durationMs } = await channel.execute({ call, ctx }, onProgress)
-  // The channel collapses BOTH "tool returned ok:false" and "executor threw"
-  // into the same `{ok:false, output:<msg>}` envelope shape — the throw path
-  // simply lacks `failure` and `evidence`. Handling them uniformly here keeps
-  // the DispatchResult shape byte-identical to the prior try-success branch:
-  // `evidenceOf({})` is empty and the typed-failure spread is conditional, so
-  // a normalized-throw result yields exactly the same fields as the old catch.
+  lintBracket: Awaited<ReturnType<typeof openLintBracket>>,
+): Promise<{ output: string; hits: readonly RedactionHit[] }> => {
   const { output: redacted, hits } = applyRedaction(result.output, call, config)
-  // ADR-0471 — untrusted-source envelope. Redact FIRST (above), then wrap the
-  // already-redacted text so the model treats EXTERNAL output (mcp / web_fetch /
-  // file content / plugin / bash) as DATA, not instructions. Provenance is
-  // DERIVED from the CALL SITE (registry origin + tool name) via `deriveProvenance`
-  // — never name-guessing. Default-OFF: `enabled:false` ⇒ `wrapToolResult` returns
-  // the input unchanged ⇒ byte-identical. Trusted/internal output is never wrapped.
   const enveloped = wrapToolResult(
     redacted,
     deriveProvenance(call.name, config.registry.originOf(call.name)),
     { enabled: runtimeConfig().untrustedEnvelope },
   )
-  // ADR-0287 — async-tool deferred-handle wire. When the tool's terminal
-  // result carries a `deferred` marker (set by `defineToolAsync`), prepend
-  // a stable `<deferred handle="..."/>` envelope so the LLM can branch on
-  // the format. Absent ⇒ byte-identical (default-OFF). The deferred marker stays
-  // OUTSIDE the untrusted envelope (it is a harness control token, not data).
+  // The deferred marker stays OUTSIDE the untrusted envelope (harness control
+  // token, not data). Absent ⇒ byte-identical (default-OFF).
   const outputBase =
     result.deferred !== undefined
       ? `<deferred handle="${result.deferred.id}"/>\n${enveloped}`
       : enveloped
-  // ADR-0472 — append the INTRODUCED-lint delta (post − pre) so the model sees
-  // exactly what THIS edit broke. No bracket ⇒ outputBase unchanged.
   let output = lintBracket !== null ? await lintBracket.finish(outputBase) : outputBase
-  // ADR-0472 / H1 — LoopOnCommand: run the configured test/build/lint command
-  // after a SUCCESSFUL path-bearing edit and auto-repair until green. Returns
-  // `output` unchanged when unconfigured / non-edit (byte-identical default-OFF).
-  // GATED on `result.ok`: a FAILED edit (old_string not found, jail-denied, …)
-  // changed nothing, so running the command + letting the fast model rewrite the
-  // file would be repairing a phantom edit (and could clobber the file over an
-  // unrelated command failure). The lint loop is self-gating here (empty delta on
-  // a no-op edit), but the command loop is NOT — so the guard lives at the seam.
   if (result.ok) output = await runEditCommandRepair(call, config, output)
-  // ADR-0062 rule #3 — record the nextAction hint in the session tracker so
-  // a subsequent call to the same (tool, path) can be checked. DEFAULT-OFF:
-  // absent enforcer ⇒ optional-chain is a no-op, byte-identical.
-  config.capEnforcer?.record(call.name, call.input, result.nextAction)
-  // ADR-0126 wire: ask the composer whether this tool result needs the
-  // structured `contentBlocks` form (only when `result.images` is non-empty).
-  // The composer returns the legacy STRING when no images are attached, in
-  // which case we omit `contentBlocks` and the tool_result block is
-  // byte-identical to the pre-feature path. The `output` text inside the
-  // composed array is the POST-REDACTION string, so secret-redaction keeps
-  // firing on every code path (image bytes are opaque base64 attachments
-  // the tool's own policy gates upstream).
+  return { output, hits }
+}
+
+/** Assemble the final {@link DispatchResult}: compose the (possibly image-
+ *  structured, ADR-0126) content blocks, route a model-visible failure string
+ *  through the SAME redaction chokepoint as `output` (defense-in-depth #12), and
+ *  flatten evidence + typed failure (Cursor failure model) + nextAction (ADR-0062)
+ *  with `exactOptionalPropertyTypes`-safe conditional spreads. Byte-identical to
+ *  the former inline assembly. */
+const shapeDispatchResult = (a: {
+  readonly result: ToolResult
+  readonly output: string
+  readonly durationMs: number
+  readonly call: ToolUseBlock
+  readonly config: AgentConfig
+  readonly hits: readonly RedactionHit[]
+}): DispatchResult => {
+  const { result, output, durationMs, call, config, hits } = a
   const composed = composeToolResultContent({ ...result, output })
   const contentBlocks = typeof composed === "string" ? undefined : composed
-  // Defense-in-depth (#12) — route `failure.modelVisibleError` through the SAME
-  // redaction chokepoint as `output` so a future surfacing of the field can never
-  // leak a secret. Byte-identical when absent / no secret (applyRedaction returns
-  // its input unchanged); redaction hits merge into `redactionHits`.
   const failureRedaction =
     result.failure?.mode === "error" && result.failure.modelVisibleError !== undefined
       ? applyRedaction(result.failure.modelVisibleError, call, config)
@@ -282,15 +237,44 @@ export const execute = async (
     preview: output,
     durationMs,
     ...evidenceOf(result),
-    // absorb #2 (Cursor failure model): surface the tool's typed failure
-    // reason verbatim when it classified one. Omitted when absent so
-    // `exactOptionalPropertyTypes` never sees `undefined` and callers that
-    // do not read `failure` stay byte-identical.
     ...(finalFailure !== undefined ? { failure: finalFailure } : {}),
     ...(allHits.length > 0 ? { redactionHits: allHits } : {}),
-    // ADR-0062 rule #3 — forward the nextAction hint onto the DispatchResult
-    // so consumers (stream emitters, recorders) can observe it. Omitted when
-    // absent (exactOptionalPropertyTypes).
     ...(result.nextAction !== undefined ? { nextAction: result.nextAction } : {}),
   }
+}
+
+/** Drive the registry through the relocatable effect boundary (ADR-0093 M1).
+ *  The {@link LocalEffectChannel} owns the no-throw + duration contract that
+ *  used to live in the inline try/catch — it normalizes executor exceptions into
+ *  `{ok:false, output:<msg>}` envelopes and measures `durationMs` channel-
+ *  internal, so the orchestration plane here only wires the channel, then
+ *  delegates to {@link decorateToolOutput} + {@link shapeDispatchResult}.
+ *  Adopting a SandboxEffectChannel / RemoteEffectChannel later swaps the channel
+ *  constructor here ONLY — the decoration/shaping is substrate-agnostic. */
+export const execute = async (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  ctx: ToolContext,
+  onProgress?: (message: string) => void,
+): Promise<DispatchResult> => {
+  const localChannel = new LocalEffectChannel({
+    execute: (c, c2, op) => config.registry.run(c.name, c.input, c2, op),
+  })
+  // ADR-0121 wire: wrap with the auto-checkpoint policy when configured; else
+  // returns `localChannel` UNCHANGED (byte-identical for non-opt-in callers).
+  // `resolveTool` delegates to the registry's `get` so the policy's
+  // destructiveness oracle classifies via the same registry the executor uses.
+  const channel = wireCheckpointedEffectChannel(localChannel, config, (name) =>
+    config.registry.get(name),
+  )
+  // ADR-0472 — open the lint-delta bracket BEFORE the edit so the pre-snapshot
+  // reflects the file's diagnostics prior to the mutation.
+  const lintBracket = await openLintBracket(call, config)
+  const { result, durationMs } = await channel.execute({ call, ctx }, onProgress)
+  const { output, hits } = await decorateToolOutput(result, call, config, lintBracket)
+  // ADR-0062 rule #3 — record the nextAction hint in the session tracker so a
+  // subsequent call to the same (tool, path) can be checked. DEFAULT-OFF: absent
+  // enforcer ⇒ optional-chain is a no-op, byte-identical.
+  config.capEnforcer?.record(call.name, call.input, result.nextAction)
+  return shapeDispatchResult({ result, output, durationMs, call, config, hits })
 }

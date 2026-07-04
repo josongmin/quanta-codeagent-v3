@@ -21,6 +21,24 @@ import type { DispatchResult } from "./dispatch-types"
  *  to the model that no further attempt will help — only a human can resume. */
 export const HANDOFF_SUFFIX = ". Agent cannot proceed without explicit human takeover."
 
+/** True when a thrown error is the session-approval-required control signal
+ *  (an object carrying an `{approval:{approvalId, reason, requestedAt}}` shape).
+ *  This decides which errors RE-THROW past the dispatch no-throw contract, so
+ *  it is duplicated-prone and security-relevant — kept here as the single
+ *  source shared by the sync (`dispatch.ts`) and streaming (`streaming-dispatch.ts`)
+ *  paths, which must never diverge. */
+export const isSessionApprovalRequiredError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null || !("approval" in error)) return false
+  const approval = (error as { approval?: unknown }).approval
+  return (
+    typeof approval === "object" &&
+    approval !== null &&
+    "approvalId" in approval &&
+    "reason" in approval &&
+    "requestedAt" in approval
+  )
+}
+
 /** Build a tool_result block. `isError:true` becomes `is_error:true` on the
  *  block; we omit the field on success so the wire shape stays minimal.
  *

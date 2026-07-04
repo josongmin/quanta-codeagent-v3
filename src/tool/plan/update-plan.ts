@@ -3,7 +3,7 @@
  * isProject, phase reorder). Does NOT touch todos; use update_todos for that.
  */
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { PlanToolContext, Tool, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type UpdatePlanInput, updatePlanSchema } from "./schemas"
 
@@ -16,7 +16,7 @@ export const updatePlanTool = (): Tool<UpdatePlanInput> => ({
   inputSchema: updatePlanSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => true,
-  async *execute(input: UpdatePlanInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: UpdatePlanInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
     const mutator = ctx.planMutator
     if (mutator === undefined) {
       yield {

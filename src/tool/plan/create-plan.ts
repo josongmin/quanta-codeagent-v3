@@ -2,11 +2,11 @@
  * `create_plan` tool (ADR-0095 draft).
  *
  * Creates a new structured plan with todos + optional phases. Routes through
- * the duck-typed {@link ToolContext.planMutator} seam. Registered only when
+ * the duck-typed {@link PlanToolContext.planMutator} seam. Registered only when
  * `ctx.planMutator` is wired (default-OFF byte-identical otherwise).
  */
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { PlanToolContext, Tool, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type CreatePlanInput, createPlanSchema } from "./schemas"
 
@@ -18,7 +18,7 @@ export const createPlanTool = (): Tool<CreatePlanInput> => ({
   inputSchema: createPlanSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => true,
-  async *execute(input: CreatePlanInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: CreatePlanInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
     const mutator = ctx.planMutator
     if (mutator === undefined) {
       yield {

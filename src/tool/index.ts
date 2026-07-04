@@ -209,6 +209,7 @@ export {
   xlsxWriteInputSchema,
   xlsxWriteTool,
 } from "./document/authoring"
+export { enterPlanModeTool } from "./enter-plan-mode"
 // Keystone — Evidence Packet Builder public surface (the cross-slice
 // enrichment bridge in @/agent consumes StaticEvidence/RuntimeEvidence).
 export {
@@ -633,6 +634,7 @@ export type {
   HITLTier,
   NextAction,
   PlanDeltaKind,
+  PlanEntryRequester,
   PlanExitRequester,
   PlanExitToolDecision,
   PlanExitToolOutcome,
@@ -701,6 +703,106 @@ export {
 } from "./worktree"
 export { resolveBashCwd, resolveEditBase } from "./worktree/cwd-override"
 
+/** A port-gated tool-group builder: returns the tool(s) to register for the
+ *  given ports, or `[]` when its port is absent. Adding a conditionally-
+ *  registered tool is ONE entry in {@link CONDITIONAL_REGISTRATIONS} — never a new
+ *  `if (ports.x)` arm (OCP). The array ORDER is the registration order
+ *  (byte-identical to the historical if-ladder), and each builder self-guards on
+ *  its own port (the ternary narrows the port type, so no `!` assertion is
+ *  needed and an absent port is a no-op `[]`). */
+type ConditionalRegistration = (ports: DefaultToolPorts) => Tool[]
+
+const CONDITIONAL_REGISTRATIONS: readonly ConditionalRegistration[] = [
+  // ADR-0280 — automation_update (+ B2 cross-surface threads_handoff, sharing the
+  // engine gate; both pure leaf tools). Absent engine ⇒ never registered.
+  (p) =>
+    p.automationEngine !== undefined
+      ? [automationUpdateTool(p.automationEngine) as Tool, threadsHandoffTool() as Tool]
+      : [],
+  // ADR-0464 — apply_patch_structured (per-file-isolated apply, FsJail from ctx.cwd).
+  (p) => (p.structuredPatch === true ? [makeApplyPatchStructuredTool() as Tool] : []),
+  // ADR-0165 — coverage_check (read-only V8-coverage reporter, self-contained).
+  (p) => (p.coverageCheck === true ? [coverageCheckTool as Tool] : []),
+  // H14a — image_gen bound to the host provider port (mutating; versioned-sibling
+  // FS-jail write). C1: best-effort artifact registration when that registry is wired.
+  (p) =>
+    p.imageGen !== undefined
+      ? [
+          imageGenTool({
+            port: p.imageGen,
+            ...(p.artifactRegistry !== undefined ? { artifactRegistry: p.artifactRegistry } : {}),
+          }) as Tool,
+        ]
+      : [],
+  // H14b — Office authoring xlsx/docx/pptx (mutating; pure-TS OOXML serialize +
+  // FS-jail write). C1: same artifact-registry best-effort registration.
+  (p) => {
+    if (p.officeAuthoring !== true) return []
+    const opts = p.artifactRegistry !== undefined ? { artifactRegistry: p.artifactRegistry } : {}
+    return [
+      makeXlsxWriteTool(opts) as Tool,
+      makeDocxWriteTool(opts) as Tool,
+      makePptxWriteTool(opts) as Tool,
+    ]
+  },
+  // C1 — artifact (Canvas) list/get/destroy bound to the host session registry.
+  (p) => (p.artifactRegistry !== undefined ? [...artifactTools(p.artifactRegistry)] : []),
+  // ADR-0494 — ask_user structured elicitation bound to the host prompter (read-only).
+  (p) => (p.askUser !== undefined ? [askUserTool(p.askUser) as Tool] : []),
+  // ADR-0504 (GAP 11) — reflect mid-turn self-correction (LLM-backed, quota-enforced).
+  (p) => (p.reflect !== undefined ? [reflectTool(p.reflect) as Tool] : []),
+  // ADR-0509 (GAP 6) — fetch_rules agent-requested-rules retrieval.
+  (p) => (p.fetchRules !== undefined ? [fetchRulesTool(p.fetchRules) as Tool] : []),
+  // file_history_rewind — per-file snapshot list/restore (mutating on restore; jailed).
+  (p) =>
+    p.fileHistory !== undefined
+      ? [makeFileHistoryRewindTool(p.fileHistory, p.fs ?? defaultFileSystemPort) as Tool]
+      : [],
+  // W6 — notebook_edit cell editor bound to the SAME jailed FS port (atomic write-back).
+  (p) =>
+    p.notebookEdit === true ? [makeNotebookEditTool(p.fs ?? defaultFileSystemPort) as Tool] : [],
+  // W5 (DAP) — debug_inspect (high-risk: runs the program under a debug adapter).
+  (p) => (p.debugTools === true ? [makeDebugInspectTool() as Tool] : []),
+  // Epic-2 — run_tests structured test-runner (high-risk: runs project test code).
+  (p) =>
+    p.testRunner === true ? [makeRunTestsTool({ fs: p.fs ?? defaultFileSystemPort }) as Tool] : [],
+  // Keystone — collect_evidence Evidence Packet Builder (high-risk: runs the suite).
+  (p) =>
+    p.evidence !== undefined
+      ? [makeCollectEvidenceTool({ fs: p.fs ?? defaultFileSystemPort, ...p.evidence }) as Tool]
+      : [],
+  // CLUSTER D #5 — permission_propose_pattern bound to the host no-widen recording port.
+  (p) =>
+    p.permissionPatternPropose !== undefined
+      ? [...permissionProposeTools(p.permissionPatternPropose)]
+      : [],
+  // N2 — MCP connector discovery (mcp_connector_list / _install).
+  (p) => (p.mcpConnectors !== undefined ? [...mcpConnectorTools(p.mcpConnectors)] : []),
+  // N3 — MCP resource/prompt tools (mcp-origin ⇒ H2 envelope at dispatch).
+  (p) => (p.mcpResources !== undefined ? [...mcpResourcesTools(p.mcpResources)] : []),
+  // C2 — communicate_update read-only progress report (reads sink from ctx.progressSink).
+  (p) => (p.progressUpdate === true ? [createCommunicateUpdateTool() as Tool] : []),
+  // N6 — the 6 pty_* tools bound to the host PTY/tmux backend (exec-risk).
+  (p) => (p.ptySession !== undefined ? [...ptyTools(p.ptySession)] : []),
+  // code-mode — code_cell gated tool (reads dispatch port from ctx.codeCellDispatch).
+  (p) => (p.codeMode === true ? [codeCellTool() as Tool] : []),
+  // G1 — appshot_verify bound to the host verify-loop port + clock (mutating).
+  (p) =>
+    p.appshot !== undefined
+      ? [
+          appshotVerifyTool({
+            port: p.appshot.port,
+            now: p.appshot.now,
+            ...(p.appshot.artifactSink !== undefined
+              ? { artifactSink: p.appshot.artifactSink }
+              : {}),
+          }) as Tool,
+        ]
+      : [],
+  // A3 — projects_kb bound to the host session KB store (metadata-only, never enters context).
+  (p) => (p.projectsKb !== undefined ? [projectsKbTool(p.projectsKb) as Tool] : []),
+]
+
 /**
  * Build the built-in tool set: Phase 1 six + Phase 2 localize / test_runner +
  * the Phase-3 `diagnostics` tool — with INJECTABLE ports (DIP) so the
@@ -711,186 +813,10 @@ export { resolveBashCwd, resolveEditBase } from "./worktree/cwd-override"
  */
 export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
   const base: Tool[] = buildBaseDefaultTools(ports)
-  // ADR-0280 — conditional registration of automation_update. Absent
-  // engine ⇒ default set is byte-identical (the model never sees the
-  // tool). Present ⇒ closure-over-engine tool is appended.
-  if (ports.automationEngine !== undefined) {
-    base.push(automationUpdateTool(ports.automationEngine) as Tool)
-    // B2 — cross-surface handoff shares the automation-engine gate (no second
-    // flag). Pure leaf tool; absent engine ⇒ never registered (byte-identical).
-    base.push(threadsHandoffTool() as Tool)
-  }
-  // ADR-0464 — conditional registration of apply_patch_structured. Absent/false
-  // ⇒ default set is byte-identical. Present ⇒ per-file-isolated apply tool is
-  // appended (builds the FsJail port from ctx.cwd per call, like apply_patch).
-  if (ports.structuredPatch === true) {
-    base.push(makeApplyPatchStructuredTool() as Tool)
-  }
-  // ADR-0165 — conditional registration of coverage_check. Absent/false ⇒
-  // default set is byte-identical. Present ⇒ read-only V8-coverage reporter
-  // is appended (self-contained: builds its own coverage source per call).
-  if (ports.coverageCheck === true) {
-    base.push(coverageCheckTool as Tool)
-  }
-  // H14a — conditional registration of image_gen. Absent port ⇒ default set is
-  // byte-identical (the model never sees the tool). Present ⇒ a tool bound to
-  // the host's key-resolved provider port is appended (mutating; writes a
-  // versioned-sibling artifact through the FS jail).
-  if (ports.imageGen !== undefined) {
-    // C1 — when the artifact registry is ALSO wired, the generated image is
-    // best-effort registered (default-OFF ⇒ port absent ⇒ byte-identical).
-    base.push(
-      imageGenTool({
-        port: ports.imageGen,
-        ...(ports.artifactRegistry !== undefined
-          ? { artifactRegistry: ports.artifactRegistry }
-          : {}),
-      }) as Tool,
-    )
-  }
-  // H14b — conditional registration of the Office authoring tools. Absent/false
-  // ⇒ default set is byte-identical. Present ⇒ `xlsx_write` + `docx_write` are
-  // appended (mutating; pure-TS OOXML serialize + FS-jail write, versioned
-  // sibling on an existing target).
-  if (ports.officeAuthoring === true) {
-    // C1 — when the artifact registry is ALSO wired, each authored file is
-    // best-effort registered (default-OFF ⇒ port absent ⇒ byte-identical: the
-    // `make*WriteTool()` factory with no registry === the historical const tool).
-    const authoringOpts =
-      ports.artifactRegistry !== undefined ? { artifactRegistry: ports.artifactRegistry } : {}
-    base.push(makeXlsxWriteTool(authoringOpts) as Tool)
-    base.push(makeDocxWriteTool(authoringOpts) as Tool)
-    // H14 PPTX follow-up — same gate: generate real .pptx (PresentationML).
-    base.push(makePptxWriteTool(authoringOpts) as Tool)
-  }
-  // C1 — conditional registration of the artifact (Canvas) read/manage tools.
-  // Absent registry ⇒ default set is byte-identical (the model never sees them).
-  // Present ⇒ `artifact_list` / `artifact_get` / `artifact_destroy` bound to the
-  // host's session registry are appended.
-  if (ports.artifactRegistry !== undefined) {
-    base.push(...artifactTools(ports.artifactRegistry))
-  }
-  // ADR-0494 — conditional registration of `ask_user` (generalized structured
-  // elicitation: free-text / yes-no / number / single- or multi-select). Absent
-  // port ⇒ default set is byte-identical (the model never sees the tool).
-  // Present ⇒ the tool bound to the host prompter is appended (read-only; the
-  // host returns a typed `headless-denied` when no human is reachable).
-  if (ports.askUser !== undefined) {
-    base.push(askUserTool(ports.askUser) as Tool)
-  }
-  // ADR-0504 (gap GAP 11) — conditional `reflect` registration. Absent port ⇒
-  // tool NOT registered (byte-identical). Present ⇒ the mid-turn self-correction
-  // tool bound to the host's LLM-backed reflect port (per-session quota enforced).
-  if (ports.reflect !== undefined) {
-    base.push(reflectTool(ports.reflect) as Tool)
-  }
-  // ADR-0509 (gap GAP 6) — conditional `fetch_rules` registration. Absent port ⇒
-  // tool NOT registered (byte-identical). Present ⇒ the agent-requested-rules
-  // retrieval tool bound to the host's requestable-rules index + matcher.
-  if (ports.fetchRules !== undefined) {
-    base.push(fetchRulesTool(ports.fetchRules) as Tool)
-  }
-  // file_history_rewind — conditional registration of the per-file snapshot
-  // list/restore tool. Absent store ⇒ default set is byte-identical (the model
-  // never sees the tool). Present ⇒ the tool bound to the host's session history
-  // store + the same jailed FS port write/edit use is appended (mutating on
-  // restore; jailed; bounded ring inside the store).
-  if (ports.fileHistory !== undefined) {
-    base.push(
-      makeFileHistoryRewindTool(ports.fileHistory, ports.fs ?? defaultFileSystemPort) as Tool,
-    )
-  }
-  // W6 (NotebookEdit P17) — conditional `notebook_edit` registration. Absent ⇒
-  // tool NOT registered (byte-identical). Present ⇒ the cell editor bound to the
-  // SAME jailed FS port `edit`/`write` use (pure core, atomic write-back).
-  if (ports.notebookEdit === true) {
-    base.push(makeNotebookEditTool(ports.fs ?? defaultFileSystemPort) as Tool)
-  }
-  // W5 (DAP) — conditional `debug_inspect` registration. Absent ⇒ NOT registered
-  // (byte-identical). Present ⇒ the DAP debugger bound to the real spawn port
-  // (high-risk: executes the program under a debug adapter, always-confirm tier).
-  if (ports.debugTools === true) {
-    base.push(makeDebugInspectTool() as Tool)
-  }
-  // Epic-2 — conditional `run_tests` registration. Absent ⇒ NOT registered
-  // (byte-identical). Present ⇒ the structured test-runner bound to the real
-  // FS jail + spawn port (high-risk: runs the project's test code, always-confirm).
-  if (ports.testRunner === true) {
-    base.push(makeRunTestsTool({ fs: ports.fs ?? defaultFileSystemPort }) as Tool)
-  }
-  // Keystone — conditional `collect_evidence` registration. Absent ⇒ NOT
-  // registered (byte-identical). Present ⇒ the Evidence Packet Builder bound to
-  // the real FS jail (+ host-injected LSP/DAP enrichment ports). High-risk
-  // (runs the suite), always-confirm.
-  if (ports.evidence !== undefined) {
-    base.push(
-      makeCollectEvidenceTool({ fs: ports.fs ?? defaultFileSystemPort, ...ports.evidence }) as Tool,
-    )
-  }
-  // CLUSTER D #5 — conditional registration of permission_propose_pattern. Absent
-  // port ⇒ default set is byte-identical (the model never sees the tool). Present
-  // ⇒ the self-propose tool bound to the host's no-widen recording port is
-  // appended (mutating; records into the session pattern store via the port).
-  if (ports.permissionPatternPropose !== undefined) {
-    base.push(...permissionProposeTools(ports.permissionPatternPropose))
-  }
-  // N2 — conditional registration of the MCP connector discovery tools. Absent
-  // port ⇒ default set byte-identical. Present ⇒ `mcp_connector_list` /
-  // `mcp_connector_install` bound to the host's catalog+installer are appended.
-  if (ports.mcpConnectors !== undefined) {
-    base.push(...mcpConnectorTools(ports.mcpConnectors))
-  }
-  // N3 — conditional registration of the MCP resource/prompt tools. Absent port
-  // ⇒ default set byte-identical. Present ⇒ `mcp_list_resources` /
-  // `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` bound to the
-  // host's `ResourcesHandle` are appended (mcp-origin ⇒ H2 envelope at dispatch).
-  if (ports.mcpResources !== undefined) {
-    base.push(...mcpResourcesTools(ports.mcpResources))
-  }
-  // C2 — conditional registration of communicate_update. Absent/false ⇒ default
-  // set is byte-identical (the model never sees the tool). Present ⇒ the
-  // read-only structured progress-report tool is appended (it reads its sink
-  // from ctx.progressSink; absent sink degrades to a no-op + ok:true).
-  if (ports.progressUpdate === true) {
-    base.push(createCommunicateUpdateTool() as Tool)
-  }
-  // N6 — conditional registration of the 6 pty_* tools. Absent port ⇒ default
-  // set byte-identical. Present ⇒ attach/list/write/read/resize/kill bound to
-  // the host's PTY/tmux backend are appended (exec-risk; foreign-tmux gated).
-  if (ports.ptySession !== undefined) {
-    base.push(...ptyTools(ports.ptySession))
-  }
-  // code-mode (RFC jun-6-code-mode) — conditional registration of code_cell.
-  // Absent/false ⇒ default set byte-identical (the model never sees the tool;
-  // the QuickJS-WASM module is never instantiated). Present ⇒ the gated cell tool
-  // is appended (it reads its dispatch port from ctx.codeCellDispatch, surfaced
-  // from AgentConfig.codeCellDispatchFactory; an unwired port ⇒ typed not_wired).
-  if (ports.codeMode === true) {
-    base.push(codeCellTool() as Tool)
-  }
-  // G1 (RFC jun-6) — conditional registration of appshot_verify. Absent slot ⇒
-  // default set byte-identical (the model never sees the tool). Present ⇒ a tool
-  // bound to the host's verify-loop port + injected clock (+ optional artifact
-  // sink) is appended (mutating; scaffolds files + drives a browser session).
-  if (ports.appshot !== undefined) {
-    base.push(
-      appshotVerifyTool({
-        port: ports.appshot.port,
-        now: ports.appshot.now,
-        ...(ports.appshot.artifactSink !== undefined
-          ? { artifactSink: ports.appshot.artifactSink }
-          : {}),
-      }) as Tool,
-    )
-  }
-  // A3 (Projects knowledge-base) — conditional registration of projects_kb.
-  // Absent slot ⇒ default set byte-identical (the model never sees the tool).
-  // Present ⇒ a tool bound to the host's session KB store (+ optional
-  // KB-namespace SearchPipeline) is appended. The "never enters context"
-  // invariant lives in the tool: project_write returns ONLY metadata.
-  if (ports.projectsKb !== undefined) {
-    base.push(projectsKbTool(ports.projectsKb) as Tool)
-  }
+  // Data-driven port-gated registration (byte-identical to the historical
+  // if-ladder: same order, same guards). Absent ports ⇒ the model never sees
+  // the tool. Adding a tool = one CONDITIONAL_REGISTRATIONS entry.
+  for (const register of CONDITIONAL_REGISTRATIONS) base.push(...register(ports))
   return base
 }
 

@@ -2,12 +2,12 @@
  * `update_todos` tool (ADR-0095 draft).
  *
  * Patches one or more todos (status / content / deps / phase / assignee /
- * verifyHint) via the {@link ToolContext.planMutator} seam. `merge:true`
+ * verifyHint) via the {@link PlanToolContext.planMutator} seam. `merge:true`
  * preserves unspecified fields; `merge:false` clears optional ones (null
  * sentinel always clears regardless).
  */
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { PlanToolContext, Tool, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type UpdateTodosInput, updateTodosSchema } from "./schemas"
 
@@ -20,7 +20,7 @@ export const updateTodosTool = (): Tool<UpdateTodosInput> => ({
   inputSchema: updateTodosSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => true,
-  async *execute(input: UpdateTodosInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: UpdateTodosInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
     const mutator = ctx.planMutator
     if (mutator === undefined) {
       yield {

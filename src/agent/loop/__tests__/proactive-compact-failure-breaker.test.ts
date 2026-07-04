@@ -80,17 +80,17 @@ describe("maybeCompact — proactive throw feeds the thrash breaker (FIX M9)", (
       const wm = createWorkingMemory(seedMessages())
       // Each call: breaker.check() at the top is still below the cap (i < cap),
       // the summarize throws, the catch records a no-progress strike.
-      const verdict = await maybeCompact(
+      const verdict = await maybeCompact({
         config,
-        "sys",
+        system: "sys",
         wm,
         breaker,
-        undefined,
-        i,
-        undefined,
-        noopReset,
-        undefined,
-      )
+        archive: undefined,
+        turn: i,
+        bgController: undefined,
+        resetClassifier: noopReset,
+        tokenBaselineBox: undefined,
+      })
       // Proactive path never fail-closes: each call returns {abort:false}.
       expect(verdict.abort).toBe(false)
     }
@@ -112,17 +112,17 @@ describe("maybeCompact — proactive throw feeds the thrash breaker (FIX M9)", (
     const config = makeConfig(events)
     const wm = createWorkingMemory(seedMessages())
 
-    const verdict = await maybeCompact(
+    const verdict = await maybeCompact({
       config,
-      "sys",
+      system: "sys",
       wm,
       breaker,
-      undefined,
-      0,
-      undefined,
-      noopReset,
-      undefined,
-    )
+      archive: undefined,
+      turn: 0,
+      bgController: undefined,
+      resetClassifier: noopReset,
+      tokenBaselineBox: undefined,
+    })
 
     expect(verdict.abort).toBe(false)
     // Exactly one strike — the load-bearing assertion. RED-on-injection: revert

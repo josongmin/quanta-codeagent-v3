@@ -37,6 +37,7 @@
 
 import type { ToolResultBlock } from "@/llm"
 import { runtimeConfig } from "@/shared"
+import { mutatingTargetPaths } from "./mutating-tools"
 
 /** Tunable caps. Defaults: general 8-turn/3-cap, env 4-turn/3-cap (single
  *  bucket), edit 8-turn/5-cap (per file). */
@@ -208,18 +209,15 @@ const shellCommandOf = (
   return typeof cmd === "string" ? cmd : undefined
 }
 
-/** Edit-family tools whose target file is bucketed for thrash detection.
- *  `edit`/`multi_edit` carry `path`; `scripted_replace` carries `file`. */
-const EDIT_TOOLS = new Set(["edit", "multi_edit", "scripted_replace"])
-
-/** Extract the normalized target file path for an edit-family tool, or
- *  `undefined` for non-edit tools / malformed inputs (treat as general). */
+/** Extract the normalized target file path for a mutating-edit tool call, or
+ *  `undefined` for non-edit tools / malformed inputs (treat as general). Derives
+ *  from the {@link mutatingTargetPaths} SSOT so this thrash bucket cannot drift
+ *  from the rest of the mutating-tool set (previously it carried a phantom
+ *  `multi_edit` and OMITTED `apply_patch*`, so patch spins on one file escaped
+ *  the per-file brake). Multi-file patches bucket on their FIRST target file. */
 const editFileOf = (name: string, args: unknown): string | undefined => {
-  if (!EDIT_TOOLS.has(name)) return undefined
-  if (typeof args !== "object" || args === null) return undefined
-  const rec = args as { path?: unknown; file?: unknown }
-  const p = typeof rec.path === "string" ? rec.path : rec.file
-  return typeof p === "string" ? p.trim() : undefined
+  const target = mutatingTargetPaths(name, args)[0]
+  return typeof target === "string" ? target.trim() : undefined
 }
 
 /** Bucket regime + key for a candidate dispatch. The KEY (not just the

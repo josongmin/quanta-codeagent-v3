@@ -5,6 +5,7 @@ import { DedupGate } from "../dispatch-dedup"
 import { deny } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import { decideLocalizePhase, MUTATING_TOOL_NAMES } from "../localize-phase-guard"
+import { mutatingTargetPaths } from "../mutating-tools"
 import type { AgentConfig } from "../types"
 
 /**
@@ -98,34 +99,6 @@ export const consultLocalizePhase = (
   // tool_result.
   const reason = decision.text ?? "Localize-phase: edit blocked during Phase 1."
   return deny(call.id, reason, "localize-phase-blocked")
-}
-
-/** V4A file-marker scan — collect every path an `apply_patch` / `apply_patch_
- *  structured` patch text touches (`*** Add|Update|Delete File:`, `*** Move
- *  to:`). Pure string scan; tolerant of malformed input (returns what it finds). */
-const v4aTargetPaths = (patch: string): string[] => {
-  const out: string[] = []
-  const re = /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm
-  for (const m of patch.matchAll(re)) {
-    const p = (m[1] ?? m[2] ?? "").trim()
-    if (p) out.push(p)
-  }
-  return out
-}
-
-/** Target file path(s) a mutating tool call would write, by tool shape:
- *  `edit`/`write` → `input.path`; `scripted_replace` → `input.file`;
- *  `apply_patch`(_structured) → every file marker in `input.patch`. Defensive
- *  against `input:unknown`: a non-matching shape yields `[]` (no false block). */
-const mutatingTargetPaths = (name: string, input: unknown): string[] => {
-  if (typeof input !== "object" || input === null) return []
-  const o = input as Record<string, unknown>
-  if (name === "edit" || name === "write") return typeof o.path === "string" ? [o.path] : []
-  if (name === "scripted_replace") return typeof o.file === "string" ? [o.file] : []
-  if (name === "apply_patch" || name === "apply_patch_structured") {
-    return typeof o.patch === "string" ? v4aTargetPaths(o.patch) : []
-  }
-  return []
 }
 
 /** The steer surfaced when a bench run tries to mutate a TEST file. Frames the

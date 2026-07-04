@@ -2,11 +2,11 @@
  * `current_plan` tool (ADR-0095 draft).
  *
  * Read-only snapshot of the current structured plan state. Surfaces the
- * existing `ToolContext.planMutator.current()` path to the model so CAS
+ * existing `PlanToolContext.planMutator.current()` path to the model so CAS
  * retries can fetch the latest `expected_version` without mutating.
  */
 import { errMessage } from "@/shared"
-import type { PlanReadonlyView, Tool, ToolContext, ToolEvent } from "../types"
+import type { PlanReadonlyView, PlanToolContext, Tool, ToolEvent } from "../types"
 import { type CurrentPlanInput, currentPlanSchema } from "./schemas"
 
 const renderPlanView = (plan: PlanReadonlyView): string =>
@@ -27,7 +27,7 @@ export const currentPlanTool = (): Tool<CurrentPlanInput> => ({
   inputSchema: currentPlanSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(_input: CurrentPlanInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(_input: CurrentPlanInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
     const mutator = ctx.planMutator
     if (mutator === undefined) {
       yield {

@@ -23,7 +23,7 @@ import {
   denyReason,
 } from "./dispatch/preflight-consults"
 import { buildToolContext, maybeBuildInterruptRouter } from "./dispatch/tool-context"
-import { deny } from "./dispatch-helpers"
+import { deny, isSessionApprovalRequiredError } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
 import { resolveCollaborationMode } from "./mode"
@@ -32,18 +32,6 @@ import { reproDoubtStep } from "./repro-doubt-guard"
 import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
-
-const isSessionApprovalRequiredError = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null || !("approval" in error)) return false
-  const approval = (error as { approval?: unknown }).approval
-  return (
-    typeof approval === "object" &&
-    approval !== null &&
-    "approvalId" in approval &&
-    "reason" in approval &&
-    "requestedAt" in approval
-  )
-}
 
 /**
  * Run one tool call end to end: gates → execute → normalize errors.
@@ -284,8 +272,84 @@ const executeWithStuckTracking = async (
   }
 }
 
-/** Span-free dispatch body (extracted so the outer wrap keeps a single
- *  control flow). Identical logic to the pre-span path. */
+/** ADR-0036 L4 — plan-collaboration-mode dispatch block. A MUTATING tool (not
+ *  `isReadOnly`) in `plan` posture routes through the fail-closed seam guard
+ *  (`MUTATING_TOOL_TABLE` lookup; fails-closed via UnknownToolError on any tool
+ *  missing from the table — the "no silent mutating bypass" invariant). A
+ *  read-only tool is unconditionally allowed (the registry `isReadOnly()` is the
+ *  runtime SSOT). Returns a deny when blocked, else null. Byte-identical for the
+ *  `default` collaboration mode (returns null immediately). */
+const consultPlanModeSeam = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  collab: ReturnType<typeof resolveCollaborationMode>,
+): DispatchResult | null => {
+  if (collab !== "plan" || config.registry.isReadOnly(call.name)) return null
+  const seamDecision = checkDispatchAllowed({ collaborationMode: collab }, { name: call.name })
+  if (seamDecision.ok) return null
+  return deny(
+    call.id,
+    seamDecision.reason.message,
+    "mode-blocked",
+    // C6: same conceptual deny as the admissibility-gate `denyIfModeBlocked`
+    // (`layer:"mode"`/`pillar:"approval"`), fired earlier on the collaboration
+    // path. Categorical safeReason (the typed error `message` already surfaces
+    // mode+tool on `content`, never input).
+    denyReason({
+      layer: "mode",
+      pillar: "approval",
+      safeReason: "tool blocked in plan collaboration mode",
+    }),
+  )
+}
+
+/** The uniform pre-flight consults, in canonical order (dedup → localize-phase →
+ *  test-scope → dispatch-guard). Each is default-OFF (returns null unless its
+ *  feature is wired), consulted BEFORE the admissibility gate so a rejected call
+ *  never burns permission/HITL/hook work. Adding a pre-flight = one array entry,
+ *  not a new inline `if (short) return short` (OCP). */
+const PRE_FLIGHT_CONSULTS: readonly ((
+  call: ToolUseBlock,
+  config: AgentConfig,
+) => DispatchResult | null)[] = [
+  consultDedupGate,
+  consultLocalizePhase,
+  consultTestScope,
+  consultDispatchGuard,
+]
+
+/** §20.4 (ticket-12) — subagent FS ownership ENFORCEMENT. After the admissibility
+ *  gate, before execute: a child carrying an enforced owned/forbidden policy is
+ *  HARD-blocked from writing outside its owned set / inside its forbidden set
+ *  (every write-effect incl. bash `sed -i`/redirect via the shared extractor,
+ *  re-canonicalized symlink-safe). Default-OFF: no policy / `enforced !== true` ⇒
+ *  returns null (byte-identical). */
+const consultOwnership = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  shellCommand: string | null,
+  isReadOnly: boolean,
+): DispatchResult | null => {
+  if (config.ownershipPolicy?.enforced !== true) return null
+  const own = checkWriteEffects(
+    extractWriteEffects(call.name, call.input, shellCommand, config.cwd, isReadOnly),
+    config.ownershipPolicy,
+  )
+  if (own.allowed) return null
+  return deny(
+    call.id,
+    `subagent ownership boundary: ${own.reason === "forbidden" ? "forbidden path" : "path not in owned set"} — ${own.path}`,
+    "ownership-policy-denied",
+    denyReason({ layer: "stack", safeReason: "subagent ownership boundary violated" }),
+  )
+}
+
+/** Span-free dispatch body (extracted so the outer wrap keeps a single control
+ *  flow). Reads as a linear spine: unknown-tool guard → plan-mode seam → uniform
+ *  pre-flight consults → action build → admissibility gate → ownership consult →
+ *  build ctx → execute (stuck-tracked) → cap/repro-doubt/post-hook chain. Each
+ *  gate is a pure `(call, config) => DispatchResult | null` consult; identical
+ *  logic to the pre-extraction path. */
 const dispatchToolInner = async (
   call: ToolUseBlock,
   config: AgentConfig,
@@ -300,82 +364,18 @@ const dispatchToolInner = async (
     return deny(call.id, `Unknown tool: ${call.name}`, "unknown tool")
   }
 
-  // ADR-0036 L4 wire (plan-mode-dispatch-block): consult the dispatch-seam
-  // guard BEFORE the dedup gate / admissibility gate. The seam is a single
-  // table lookup (`MUTATING_TOOL_TABLE`) and a `default` collaboration mode
-  // short-circuits to `{ ok: true }` in one branch, so this is byte-identical
-  // for every caller that hasn't opted in (the default of
-  // `resolveCollaborationMode` is `"default"`).
-  //
-  // Read-only fast path: a tool that DECLARES `isReadOnly() === true` is
-  // unconditionally allowed in plan posture regardless of table membership.
-  // The registry's per-tool `isReadOnly()` is the runtime SSOT for the
-  // mutating-vs-read-only invariant — every built-in tool implements it; a
-  // host that ships a custom read-only tool without remembering to add it to
-  // the table should still be allowed (the table is fail-closed FOR
-  // MUTATING tools, not for safe ones). For mutating / unknown calls we
-  // route through the seam guard which fails-closed via UnknownToolError on
-  // any tool missing from MUTATING_TOOL_TABLE — that's where the "no silent
-  // mutating bypass" invariant lives. SOTA (Codex): the block is dispatch-
-  // time + stateless (no per-turn unwinding); a `default` ⇒ `plan`
-  // transition only affects calls AFTER the transition.
+  // Plan-mode seam consulted BEFORE the dedup/admissibility gates (dispatch-time,
+  // stateless — a `default`⇒`plan` transition only affects later calls).
   const collab = resolveCollaborationMode(config)
-  if (collab === "plan" && !registry.isReadOnly(call.name)) {
-    const seamDecision = checkDispatchAllowed({ collaborationMode: collab }, { name: call.name })
-    if (!seamDecision.ok) {
-      return deny(
-        call.id,
-        seamDecision.reason.message,
-        "mode-blocked",
-        // C6: the dispatch-seam plan-mode block is the same conceptual deny as
-        // the admissibility-gate `denyIfModeBlocked` (`layer:"mode"` /
-        // `pillar:"approval"`), just fired earlier on the collaboration-mode
-        // path. Categorical safeReason (mode literal + tool name only — the
-        // typed error `message` already surfaces them on `content`, never input).
-        denyReason({
-          layer: "mode",
-          pillar: "approval",
-          safeReason: "tool blocked in plan collaboration mode",
-        }),
-      )
-    }
+  const planShort = consultPlanModeSeam(call, config, collab)
+  if (planShort) return planShort
+
+  // Uniform pre-flights (dedup, localize-phase, test-scope, dispatch-guard) —
+  // consulted in order, first non-null short-circuits before any gate work.
+  for (const consult of PRE_FLIGHT_CONSULTS) {
+    const short = consult(call, config)
+    if (short) return short
   }
-
-  // T3 — pre-flight dedup gate (SOTA++ structural brake on Type F Verify-Loop
-  // Stuck on Env). Consulted BEFORE the admissibility gate so a thrashing
-  // call never burns permission/HITL/hook work. Default-OFF: when
-  // `config.dedupGate` is absent (or `config.run?.turn` is unavailable so we
-  // have no turn source) this is a one-`undefined`-check no-op and dispatch
-  // is byte-identical. The block synthesizes a non-error tool_result mirroring
-  // `dispatch-helpers.ts#resultBlock(id, content, false)` — no new event type,
-  // the loop's tool_result pipeline handles it like any other observation.
-  const dedupShort = consultDedupGate(call, config)
-  if (dedupShort) return dedupShort
-
-  // Localize-phase pre-flight (Agentless absorption — Tier 0). Mirrors the
-  // dedup-gate placement: consulted BEFORE the admissibility gate so a
-  // Phase-1 mutating-tool attempt never burns permission/HITL/hook work.
-  // Default-OFF: when `config.localizePhase` / `localizePhaseState` is unset
-  // or `phase1Turns` is invalid, the gate returns `null` (single property
-  // check + early return → byte-identical dispatch).
-  const localizeShort = consultLocalizePhase(call, config)
-  if (localizeShort) return localizeShort
-
-  // Bench test-scope pre-flight (RCA django-13417): deny a mutating tool that
-  // targets a test path so the model cannot edit tests, chase its own modified
-  // tests, and regress an already-correct minimal fix. Default-OFF
-  // (`config.protectTestPaths` absent ⇒ early-return null → byte-identical).
-  const testScopeShort = consultTestScope(call, config)
-  if (testScopeShort) return testScopeShort
-
-  // ADR-0229 — pre-flight dispatch guard. Composes git-write-protect /
-  // branch-only / host-allowlist detectors behind one closed port. Default-OFF
-  // (single optional-chain `undefined` check when `config.dispatchGuard`
-  // absent → byte-identical to the pre-ADR path). Placed alongside the other
-  // pre-flights so an early static rejection never burns permission/HITL/hook
-  // work.
-  const guardShort = consultDispatchGuard(call, config)
-  if (guardShort) return guardShort
 
   // S16: populate `shellCommand` from the registry so the permission policy
   // applies HARD_DENY uniformly to ANY tool that exposes a shell-command
@@ -403,26 +403,8 @@ const dispatchToolInner = async (
     },
   })
   if (gated) return gated
-  // §20.4 (ticket-12) — subagent FS ownership ENFORCEMENT. After the
-  // admissibility gate, before execute: a child carrying an enforced
-  // owned/forbidden policy is HARD-blocked from writing outside its owned set /
-  // inside its forbidden set (every write-effect of the call — incl. bash
-  // `sed -i`/redirect via the shared extractor — re-canonicalized symlink-safe).
-  // Default-OFF: no policy / `enforced !== true` ⇒ skipped (byte-identical).
-  if (config.ownershipPolicy?.enforced === true) {
-    const own = checkWriteEffects(
-      extractWriteEffects(call.name, call.input, shellCommand, config.cwd, action.isReadOnly),
-      config.ownershipPolicy,
-    )
-    if (!own.allowed) {
-      return deny(
-        call.id,
-        `subagent ownership boundary: ${own.reason === "forbidden" ? "forbidden path" : "path not in owned set"} — ${own.path}`,
-        "ownership-policy-denied",
-        denyReason({ layer: "stack", safeReason: "subagent ownership boundary violated" }),
-      )
-    }
-  }
+  const ownershipShort = consultOwnership(call, config, shellCommand, action.isReadOnly)
+  if (ownershipShort) return ownershipShort
   // SECURITY: the rewrite is applied AFTER the permission / HARD_DENY gates ran
   // on the original input. A hook is operator-authored local code at the trust
   // level of the permission config itself, so this is intentional (the model
@@ -478,7 +460,12 @@ const dispatchToolInner = async (
   const cappedOut = capReminder !== undefined ? prependCapReminder(out, capReminder) : out
   // repro-doubt: advance the stuck counter + (once per streak) prepend the
   // doubt steer. Default-OFF byte-identical when the knob is unset.
-  const finalOut = applyReproDoubtSteer(cappedOut, config, effectiveCall.name, shellCommand ?? undefined)
+  const finalOut = applyReproDoubtSteer(
+    cappedOut,
+    config,
+    effectiveCall.name,
+    shellCommand ?? undefined,
+  )
   if (config.hooks) {
     await emitPostToolUseHooks(config, effectiveCall, finalOut)
   }
@@ -579,5 +566,6 @@ export type DispatchPort = typeof dispatchTool
  * else the default `dispatchTool`. The ONE place the default binding lives, so every call site is a
  * single `resolveDispatchPort(config)(...)` and the substitution is unit-testable (H1).
  */
-export const resolveDispatchPort = (config: { readonly dispatchPort?: DispatchPort }): DispatchPort =>
-  config.dispatchPort ?? dispatchTool
+export const resolveDispatchPort = (config: {
+  readonly dispatchPort?: DispatchPort
+}): DispatchPort => config.dispatchPort ?? dispatchTool

@@ -217,7 +217,17 @@ describe("maybeCompact + real bg controller (FIX H1) — live-suffix install", (
     // maybeCompact). Nothing is over threshold enough to synchronously compact
     // in a way that matters here; we only need the pass to START.
     const config = makeConfig()
-    await maybeCompact(config, "sys", wm, undefined, undefined, 0, controller, noopReset, undefined)
+    await maybeCompact({
+      config,
+      system: "sys",
+      wm,
+      breaker: undefined,
+      archive: undefined,
+      turn: 0,
+      bgController: controller,
+      resetClassifier: noopReset,
+      tokenBaselineBox: undefined,
+    })
     expect(controller?.hasPendingPass()).toBe(true)
 
     // Turn N+1: the loop APPENDS two more messages to the LIVE wm after the pass
@@ -235,7 +245,17 @@ describe("maybeCompact + real bg controller (FIX H1) — live-suffix install", (
     now += 10
 
     // Reconcile installs. The recomputed install must retain m4/m5.
-    await maybeCompact(config, "sys", wm, undefined, undefined, 1, controller, noopReset, undefined)
+    await maybeCompact({
+      config,
+      system: "sys",
+      wm,
+      breaker: undefined,
+      archive: undefined,
+      turn: 1,
+      bgController: controller,
+      resetClassifier: noopReset,
+      tokenBaselineBox: undefined,
+    })
 
     const installed = wm.snapshot()
     // The two appended messages are the LAST two of the installed transcript —

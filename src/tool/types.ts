@@ -160,6 +160,14 @@ export interface ToolContext {
    *  the concrete requester from `AgentConfig.planExitPort` (wrapping
    *  `runPlanExitFlow`). Absent ⇒ the tool is not registered. */
   requestPlanExit?: PlanExitRequester
+  /** OPTIONAL plan-ENTRY requester — the inverse of {@link requestPlanExit}.
+   *  The `enter_plan_mode` tool calls this with the model's reason for switching
+   *  into plan mode; the loop flips collaboration mode at the next turn boundary.
+   *  Fire-and-forget (entry only restricts the agent, so no operator round-trip).
+   *  Duck-typed so `@/tool` never imports `@/agent`: the dispatch seam wires it
+   *  from `AgentConfig.onPlanEnterRequest`, gated on the same `planExitPort` slot
+   *  as the exit tool. Absent ⇒ the tool is not registered. */
+  enterPlanMode?: PlanEntryRequester
   /** ADR-0095 (draft) — OPTIONAL operator-input requester. The
    *  `request_user_input` tool calls this to ask the operator a question and
    *  block on a typed {@link UserInputOutcome}: either `answer` (carrying the
@@ -468,6 +476,65 @@ export interface ToolContext {
   worktreeSlot?: WorktreeSlotHandle
 }
 
+/**
+ * ROLE-SEGMENTED CONTEXT VIEWS (ISP). {@link ToolContext} is the flat SSOT seam
+ * registry above (43 optional seams, one hand-documented paragraph each). But a
+ * tool consumes only a small, role-cohesive slice of it — `bash` never touches
+ * `planMutator`, the plan tools never touch `shellSnapshot`. These `Pick`-derived
+ * views let a tool DECLARE the narrow slice it actually depends on
+ * (`execute(input, ctx: EditToolContext)`) instead of the whole 43-field bag, so
+ * the dependency surface a reader must reason about shrinks to the role.
+ *
+ * Derived via `Pick<ToolContext, …>` (NOT re-declared) so they CANNOT drift: a
+ * renamed/removed seam is a compile error at the view, and every view is a
+ * structural subtype of `ToolContext` (a tool typed against a view still receives
+ * the full runtime context — the builder is unchanged). Add a seam to a role by
+ * adding its key to the relevant `Pick` list here.
+ */
+export type CoreToolContext = Pick<
+  ToolContext,
+  "cwd" | "signal" | "depth" | "turnId" | "toolCallId"
+>
+
+/** Shell-class tools (`bash` + any future sibling): the exec-time seams. */
+export type ShellToolContext = CoreToolContext &
+  Pick<
+    ToolContext,
+    | "onShellEvent"
+    | "requestBackgroundConsent"
+    | "shellSnapshot"
+    | "proxyEnv"
+    | "localEnv"
+    | "criticalSection"
+    | "activeWorktree"
+    | "vcsEventSink"
+  >
+
+/** File-mutating tools (`write`/`edit`/`apply_patch`/`scripted_replace`/notebook). */
+export type EditToolContext = CoreToolContext &
+  Pick<
+    ToolContext,
+    | "gitWriteGuard"
+    | "readFileState"
+    | "fastApplyFallback"
+    | "fastApplyMerge"
+    | "autoEscalateFuzzy"
+    | "globWriteGuard"
+    | "writeBudget"
+    | "fileHistory"
+    | "toolDiff"
+    | "activeWorktree"
+    | "criticalSection"
+  >
+
+/** Plan-collaboration tools (create/update/remove todos, plan-enter/exit). */
+export type PlanToolContext = CoreToolContext &
+  Pick<ToolContext, "planMutator" | "requestPlanExit" | "enterPlanMode">
+
+/** Subagent / mailbox / reviewer tools (identity + child-loop seams). */
+export type SubagentToolContext = CoreToolContext &
+  Pick<ToolContext, "agentLabel" | "parentAgentLabel" | "workingState" | "reviewerAgent">
+
 import type {
   ActiveWorktree,
   BlockerSurface,
@@ -478,6 +545,7 @@ import type {
   FileHistorySink,
   GitWriteGuard,
   GitWriteProtectReason,
+  PlanEntryRequester,
   PlanExitRequester,
   PlanMutator,
   ProgressSink,
@@ -512,6 +580,7 @@ export type {
   GitWriteGuard,
   GitWriteProtectReason,
   PlanDeltaKind,
+  PlanEntryRequester,
   PlanExitRequester,
   PlanExitToolDecision,
   PlanExitToolOutcome,

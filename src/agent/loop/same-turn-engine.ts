@@ -36,8 +36,8 @@ export const runTurn = async (
     // the ACTIVE model, not the base `config.llm`. Resolved here, before
     // compaction; `streamConsume` re-resolves the full `turnLlm` for the stream.
     const activeModel = await resolveActiveModelId(turnConfig, session.skillGate?.activeOverride())
-    const { ctx, breakerVerdict } = await prepareTurnContext(
-      turnConfig,
+    const { ctx, breakerVerdict } = await prepareTurnContext({
+      config: turnConfig,
       wm,
       recorder,
       breaker,
@@ -46,12 +46,12 @@ export const runTurn = async (
       archive,
       turn,
       citations,
-      turnInjects,
-      state.taskSpend,
-      bgCompaction,
-      state.tokenBaseline,
+      hookPromptInjects: turnInjects,
+      taskSpend: state.taskSpend,
+      bgController: bgCompaction,
+      tokenBaselineBox: state.tokenBaseline,
       activeModel,
-    )
+    })
     if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
     const result = await streamConsume(turnSession, state, ctx)
     if ("aborted" in result) return classifyTurnAbort(gate, config.signal)

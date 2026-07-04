@@ -261,76 +261,15 @@ export const rebuildBgInstallAgainstLive = (
   return [synthetic, ...liveSuffix]
 }
 
-export const maybeCompact = async (
+/** The objective `setNextActions` callback threaded into `compactIfNeeded`, or
+ *  undefined when no objective store is wired. Skips a budget-exhausted thread
+ *  and swallows store errors (advisory only). Extracted from the former inline
+ *  `maybeCompact` closure. */
+const buildObjectiveSetNextActions = (
   config: AgentConfig,
-  system: SystemPromptInput,
-  wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number },
-  breaker: CompactionBreaker | undefined,
-  archive: ConversationSummaryArchive | undefined,
-  turn: number,
-  bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined,
-  resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void,
-  // D5 (jun-7) — the per-session token-baseline BOX. `.current` (the prior turn's
-  // exact measurement) anchors the trigger; `undefined` ⇒ chars/4 (legacy). We
-  // take the BOX (not the value) so a tier-1 MICROCOMPACT — which replaces
-  // tool_result CONTENT while keeping the message COUNT — can INVALIDATE the
-  // baseline: the length-based `markBaselineStaleIfShrunk` (context-assembler)
-  // structurally cannot see a content-only shrink, so the stale prefix-measured
-  // baseline would otherwise force a premature tier-2 compaction.
-  tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined,
-  // D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
-  // swap), so the window-derived threshold tracks the active model, not base
-  // `config.llm`. Defaults to the base model id.
-  activeModel: string = configuredModel(config.llm),
-): Promise<BreakerVerdict> => {
-  if (!config.compaction) return { abort: false }
-  const verdict = breaker?.check() ?? { abort: false }
-  if (verdict.abort) {
-    emitRecovery(config, "compact", "breaker-disabled")
-    return verdict
-  }
-  const onPreCompact = config.onPreCompact
-  let snapshot = [...wm.snapshot()]
-  // FULL-snapshot read: O(1) `tokenTotal()` is byte-identical to
-  // `estimateTokens(snapshot)` when the counter is wired (knob ON); falls back
-  // to the full re-scan when OFF (`tokenTotal` absent).
-  let before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
-  // ── tier-1 microcompaction (RFC jun-6-microcompaction, knob-gated) ──
-  // Runs BEFORE the bg-controller reconcile + the tier-2 summarization, so both
-  // see the already-shrunk transcript (no stale-prefix double accounting). The
-  // pre-pass installs via `wm.replace` ⇒ the delta counter reseeds, so the
-  // re-read `before` below stays byte-identical to `estimateTokens(snapshot)`.
-  if (maybeMicrocompact(config, wm, snapshot, Date.now())) {
-    snapshot = [...wm.snapshot()]
-    before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
-    // D5 — microcompact replaced the prefix's tool_result CONTENT (count-stable),
-    // so the baseline measured against that fat prefix is now stale. Invalidate
-    // it; the tier-2 decision below + the next turn re-anchor on chars/4 until a
-    // fresh exact usage lands. (The length-based invalidation cannot catch this.)
-    if (tokenBaselineBox !== undefined)
-      TokenBaselineBox.wrap(tokenBaselineBox).invalidateOnContentChange()
-  }
-  // D4 (jun-7 naive-impl hardening) — the bg-controller ceiling must match the
-  // synchronous proactive path's model-derived threshold, so pass the same model.
-  const bgLimitTokens = resolveCompactionLimitTokens(
-    config.compaction?.thresholdTokens,
-    resolveWindowModel(config.llm, activeModel),
-  )
-  const borrowed =
-    bgController !== undefined
-      ? await bgController.reconcileAtTurnBoundary({
-          usedTokens: before,
-          limitTokens: bgLimitTokens,
-        })
-      : undefined
-  const turnId = config.run?.turn !== undefined ? `t${config.run.turn}` : `t${turn}`
-  const fromTurnId = archive?.summaries.at(-1)?.toTurnId ?? "t0"
-  let result: Awaited<ReturnType<typeof compactIfNeeded>>
-  const isFirstCompaction = archive !== undefined && archive.summaries.length === 0
-  const preCompactHook = buildPreCompactHook(config.hooks)
-  const postCompactEmit = buildPostCompactEmit(config.hooks, config.sessionId ?? "")
-  const objectiveSetNextActions = config.objective
-    ? (tid: string, actions: readonly string[]): void => {
+): ((tid: string, actions: readonly string[]) => void) | undefined =>
+  config.objective
+    ? (tid, actions): void => {
         try {
           if (objectiveBudgetExhausted(config, tid)) return
           config.objective?.setNextActions(tid, actions)
@@ -339,91 +278,135 @@ export const maybeCompact = async (
         }
       }
     : undefined
-  // H1 (jul-2) — recompute a bg-compaction install against the LIVE wm (`snapshot`
-  // is `[...wm.snapshot()]` at reconcile time, already reflecting turn N+1's
-  // appends). Installing `borrowed.summary` verbatim would `wm.replace(...)` those
-  // appends away. `undefined` ⇒ stale/orphan-unsafe ⇒ fall through to the
-  // synchronous path (leave live history untouched). NB: `bgController` is only
-  // wired when QUANTA_BG_COMPACTION==="1"; OFF ⇒ `borrowed` is undefined ⇒ this is
-  // never entered ⇒ byte-identical.
-  const bgInstall =
-    borrowed?.kind === "install"
-      ? rebuildBgInstallAgainstLive(borrowed.summary, borrowed.summarizedPrefixLen, snapshot)
+
+/** Assemble the {@link compactIfNeeded} options for a tier-2 proactive run: the
+ *  ~10 conditional (default-OFF) fields — model-derived threshold, authoritative
+ *  baseline trigger (D4/D5), thresholds, hooks, objective callback, preflight —
+ *  held in ONE place so {@link runProactiveTier2} stays a thin invoke + throw
+ *  handler. Every spread is `!== undefined` gated so the OFF path is byte-identical. */
+const buildCompactIfNeededOptions = (a: {
+  readonly config: AgentConfig
+  readonly compaction: NonNullable<AgentConfig["compaction"]>
+  readonly system: SystemPromptInput
+  readonly snapshot: Message[]
+  readonly isFirstCompaction: boolean
+  readonly activeModel: string
+  readonly tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined
+  readonly turnId: string
+}): Parameters<typeof compactIfNeeded>[0] => {
+  const { config, compaction, system, snapshot, isFirstCompaction, activeModel } = a
+  const { tokenBaselineBox, turnId } = a
+  const onPreCompact = config.onPreCompact
+  const preCompactHook = buildPreCompactHook(config.hooks)
+  const postCompactEmit = buildPostCompactEmit(config.hooks, config.sessionId ?? "")
+  const objectiveSetNextActions = buildObjectiveSetNextActions(config)
+  const baseline =
+    tokenBaselineBox !== undefined
+      ? TokenBaselineBox.wrap(tokenBaselineBox).currentBaseline()
       : undefined
-  if (borrowed?.kind === "install" && bgInstall === undefined)
-    emitRecovery(config, "compact", "bg-install-stale")
-  try {
-    if (bgInstall !== undefined) {
-      result = {
-        compacted: true,
-        messages: bgInstall,
-        summaryTokens: estimateTokens(bgInstall.slice(0, 1)),
-      }
-    } else {
-      result = await compactIfNeeded({
-        messages: snapshot,
-        llm: config.compaction.summarizerLlm ?? config.llm,
-        system,
-        isFirstCompaction,
-        // D4 — model-derived threshold (known model ⇒ window−reserve−margin;
-        // unknown ⇒ 120k legacy). D5 — authoritative-baseline trigger when the
-        // loop captured an `exact` usage (absent ⇒ chars/4 over the whole
-        // transcript, byte-identical legacy). GAP 3 (ADR-0505): the window
-        // resolves to the 1M key when context-1m is active (compactIfNeeded uses
-        // `model` ONLY for the threshold, never for records).
-        model: resolveWindowModel(config.llm, activeModel),
-        ...(tokenBaselineBox !== undefined &&
-        TokenBaselineBox.wrap(tokenBaselineBox).currentBaseline() !== undefined
-          ? // biome-ignore lint/style/noNonNullAssertion: guarded by the check above
-            { tokenBaseline: TokenBaselineBox.wrap(tokenBaselineBox).currentBaseline()! }
-          : {}),
-        ...(config.compaction.thresholdTokens !== undefined
-          ? { thresholdTokens: config.compaction.thresholdTokens }
-          : {}),
-        ...(config.compaction.keepRecentTurns !== undefined
-          ? { keepRecentTurns: config.compaction.keepRecentTurns }
-          : {}),
-        ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
-        ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
-        ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
-          ? { recoveryReason: "token_budget_exceeded" as const }
-          : {}),
-        ...(config.sessionId !== undefined && config.sessionId.length > 0
-          ? { threadId: config.sessionId }
-          : {}),
-        ...(onPreCompact !== undefined
-          ? {
-              preflight: async (q: {
-                currentTokens: number
-                threshold: number
-                proposedKeep: number
-                proposedSummaryTokens: number
-              }): Promise<"approve" | "defer_one_turn" | "force_now"> =>
-                onPreCompact({ turnId, ...q }),
-            }
-          : {}),
-        ...(preCompactHook !== undefined ? { preCompactHook } : {}),
-      })
+  return {
+    messages: snapshot,
+    llm: compaction.summarizerLlm ?? config.llm,
+    system,
+    isFirstCompaction,
+    // D4 — model-derived threshold (known model ⇒ window−reserve−margin; unknown
+    // ⇒ 120k legacy). GAP 3 (ADR-0505): the window resolves to the 1M key when
+    // context-1m is active (compactIfNeeded uses `model` ONLY for the threshold).
+    model: resolveWindowModel(config.llm, activeModel),
+    // D5 — authoritative-baseline trigger when the loop captured an `exact` usage
+    // (absent ⇒ chars/4 over the transcript, byte-identical legacy).
+    ...(baseline !== undefined ? { tokenBaseline: baseline } : {}),
+    ...(compaction.thresholdTokens !== undefined
+      ? { thresholdTokens: compaction.thresholdTokens }
+      : {}),
+    ...(compaction.keepRecentTurns !== undefined
+      ? { keepRecentTurns: compaction.keepRecentTurns }
+      : {}),
+    ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
+    ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
+    ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
+      ? { recoveryReason: "token_budget_exceeded" as const }
+      : {}),
+    ...(config.sessionId !== undefined && config.sessionId.length > 0
+      ? { threadId: config.sessionId }
+      : {}),
+    ...(onPreCompact !== undefined
+      ? {
+          preflight: async (q: {
+            currentTokens: number
+            threshold: number
+            proposedKeep: number
+            proposedSummaryTokens: number
+          }): Promise<"approve" | "defer_one_turn" | "force_now"> => onPreCompact({ turnId, ...q }),
+        }
+      : {}),
+    ...(preCompactHook !== undefined ? { preCompactHook } : {}),
+  }
+}
+
+/** Run the tier-2 proactive summarization: reuse a reconciled bg-install verbatim
+ *  when present, else assemble the {@link compactIfNeeded} options
+ *  ({@link buildCompactIfNeededOptions}) and invoke it. On a summarizer THROW,
+ *  records a no-progress strike (M9), emits the failure recovery, and returns
+ *  `null` (the caller returns `{abort:false}` — proactive is pre-sampling so the
+ *  reactive PTL path is the fail-closed backstop). */
+const runProactiveTier2 = async (a: {
+  readonly config: AgentConfig
+  readonly compaction: NonNullable<AgentConfig["compaction"]>
+  readonly system: SystemPromptInput
+  readonly snapshot: Message[]
+  readonly before: number
+  readonly isFirstCompaction: boolean
+  readonly activeModel: string
+  readonly tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined
+  readonly turnId: string
+  readonly bgInstall: Message[] | undefined
+  readonly breaker: CompactionBreaker | undefined
+}): Promise<Awaited<ReturnType<typeof compactIfNeeded>> | null> => {
+  const { config, before, bgInstall, breaker } = a
+  if (bgInstall !== undefined) {
+    return {
+      compacted: true,
+      messages: bgInstall,
+      summaryTokens: estimateTokens(bgInstall.slice(0, 1)),
     }
+  }
+  try {
+    return await compactIfNeeded(buildCompactIfNeededOptions(a))
   } catch (e) {
-    const message = errMessage(e)
     config.stream.emit({
       type: "error",
-      message: `proactive compaction failed: ${message}`,
+      message: `proactive compaction failed: ${errMessage(e)}`,
     })
     // M9 (jul-2) — a proactive compaction that THREW freed nothing, so it must
-    // accrue a no-progress strike (identical to the `no_boundary` branch below).
-    // Otherwise a summarizer that keeps throwing over threshold spins forever and
-    // the futility breaker never trips in the exact mode it exists for. We do NOT
-    // fail-close here: proactive runs pre-sampling and the reactive PTL path is
-    // the correct fail-closed backstop (there is no hardWindow concept here), so
-    // we keep `return {abort:false}` — the strike surfaces at the NEXT
-    // `maybeCompact` via `breaker.check()`. Emit a `proactive-failed` recovery
-    // detail so the trajectory distinguishes a throw from a successful compact.
+    // accrue a no-progress strike (identical to the `no_boundary` branch). A
+    // summarizer that keeps throwing over threshold would otherwise spin forever
+    // and the futility breaker never trip in the exact mode it exists for. The
+    // strike surfaces at the NEXT `maybeCompact` via `breaker.check()`.
     breaker?.recordProactive(before, before)
     emitRecovery(config, "compact", "proactive-failed")
-    return { abort: false }
+    return null
   }
+}
+
+/** Commit a successful tier-2 result to the live wm: emit the compaction event,
+ *  replace the transcript, reset the effort classifier, and append the summary to
+ *  the archive. A `no_boundary` (nothing removable) result records a no-progress
+ *  strike instead. Byte-identical to the former inline block. */
+const applyProactiveResult = (a: {
+  readonly config: AgentConfig
+  readonly wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number }
+  readonly breaker: CompactionBreaker | undefined
+  readonly archive: ConversationSummaryArchive | undefined
+  readonly result: Awaited<ReturnType<typeof compactIfNeeded>>
+  readonly snapshot: Message[]
+  readonly before: number
+  readonly resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void
+  readonly fromTurnId: string
+  readonly turnId: string
+}): void => {
+  const { config, wm, breaker, archive, result, snapshot, before } = a
+  const { resetClassifier, fromTurnId, turnId } = a
   if (result.compacted) {
     emitRecovery(config, "compact", "proactive")
     const after = estimateTokens(result.messages)
@@ -454,6 +437,126 @@ export const maybeCompact = async (
   } else if (result.reason === "no_boundary") {
     breaker?.recordProactive(before, before)
   }
+}
+
+/** Inputs for {@link maybeCompact}. A single readonly object (was 10 positionals)
+ *  so a mis-ordered arg of a compatible type can no longer compile silently. */
+export interface MaybeCompactArgs {
+  readonly config: AgentConfig
+  readonly system: SystemPromptInput
+  readonly wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number }
+  readonly breaker: CompactionBreaker | undefined
+  readonly archive: ConversationSummaryArchive | undefined
+  readonly turn: number
+  readonly bgController: BackgroundSummarizationController<BgSummaryPayload> | undefined
+  readonly resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void
+  /** D5 (jun-7) — the per-session token-baseline BOX. `.current` (the prior turn's
+   *  exact measurement) anchors the trigger; `undefined` ⇒ chars/4 (legacy). We
+   *  take the BOX (not the value) so a tier-1 MICROCOMPACT — which replaces
+   *  tool_result CONTENT while keeping the message COUNT — can INVALIDATE the
+   *  baseline: the length-based invalidation (context-assembler) structurally
+   *  cannot see a content-only shrink, so the stale prefix-measured baseline would
+   *  otherwise force a premature tier-2 compaction. */
+  readonly tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined
+  /** D4 (jun-7) — the model that will ACTUALLY process this turn (sticky/skill
+   *  swap), so the window-derived threshold tracks the active model, not base
+   *  `config.llm`. Omit ⇒ the base model id. */
+  readonly activeModel?: string
+}
+
+/** Proactive (pre-sampling) compaction coordinator: breaker guard → tier-1
+ *  microcompact pre-pass → bg-controller reconcile → tier-2 summarization
+ *  ({@link runProactiveTier2}) → commit ({@link applyProactiveResult}) → arm the
+ *  next bg run. Returns a `{abort}` verdict; never throws (tier-2 throws are
+ *  absorbed as a strike). */
+/** Tier-1 microcompaction pre-pass (RFC jun-6-microcompaction, knob-gated). Runs
+ *  BEFORE the bg reconcile + tier-2 so both see the already-shrunk transcript (no
+ *  stale-prefix double accounting). Returns the post-pass snapshot + token count
+ *  (O(1) `tokenTotal()` when the counter is wired, else a full re-scan). When a
+ *  microcompact FIRED it re-reads the live wm and (D5) invalidates a now-stale
+ *  content-measured baseline — the length-based invalidation cannot see a
+ *  content-only shrink. No fire ⇒ the initial snapshot/before, byte-identical. */
+const runMicrocompactPrepass = (
+  config: AgentConfig,
+  wm: import("@/memory").WorkingMemory<Message> & { tokenTotal?(): number },
+  tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined,
+): { snapshot: Message[]; before: number } => {
+  const snapshot = [...wm.snapshot()]
+  const before = wm.tokenTotal?.() ?? estimateTokens(snapshot)
+  if (!maybeMicrocompact(config, wm, snapshot, Date.now())) return { snapshot, before }
+  const fresh = [...wm.snapshot()]
+  if (tokenBaselineBox !== undefined)
+    TokenBaselineBox.wrap(tokenBaselineBox).invalidateOnContentChange()
+  return { snapshot: fresh, before: wm.tokenTotal?.() ?? estimateTokens(fresh) }
+}
+
+export const maybeCompact = async (args: MaybeCompactArgs): Promise<BreakerVerdict> => {
+  const { config, system, wm, breaker, archive, turn, bgController, resetClassifier } = args
+  const { tokenBaselineBox } = args
+  const activeModel = args.activeModel ?? configuredModel(config.llm)
+  const compaction = config.compaction
+  if (!compaction) return { abort: false }
+  const verdict = breaker?.check() ?? { abort: false }
+  if (verdict.abort) {
+    emitRecovery(config, "compact", "breaker-disabled")
+    return verdict
+  }
+  // Tier-1 microcompaction pre-pass (BEFORE bg-reconcile + tier-2 so both see the
+  // already-shrunk transcript). Yields the post-pass snapshot + token count.
+  const { snapshot, before } = runMicrocompactPrepass(config, wm, tokenBaselineBox)
+  // D4 (jun-7 naive-impl hardening) — the bg-controller ceiling must match the
+  // synchronous proactive path's model-derived threshold, so pass the same model.
+  const bgLimitTokens = resolveCompactionLimitTokens(
+    compaction.thresholdTokens,
+    resolveWindowModel(config.llm, activeModel),
+  )
+  const borrowed =
+    bgController !== undefined
+      ? await bgController.reconcileAtTurnBoundary({
+          usedTokens: before,
+          limitTokens: bgLimitTokens,
+        })
+      : undefined
+  const turnId = config.run?.turn !== undefined ? `t${config.run.turn}` : `t${turn}`
+  const fromTurnId = archive?.summaries.at(-1)?.toTurnId ?? "t0"
+  const isFirstCompaction = archive !== undefined && archive.summaries.length === 0
+  // H1 (jul-2) — recompute a bg-compaction install against the LIVE wm (`snapshot`
+  // already reflects turn N+1's appends). Installing `borrowed.summary` verbatim
+  // would `wm.replace(...)` those appends away. `undefined` ⇒ stale/orphan-unsafe
+  // ⇒ fall through to the synchronous path. NB: `bgController` is only wired when
+  // QUANTA_BG_COMPACTION==="1"; OFF ⇒ `borrowed` undefined ⇒ never entered.
+  const bgInstall =
+    borrowed?.kind === "install"
+      ? rebuildBgInstallAgainstLive(borrowed.summary, borrowed.summarizedPrefixLen, snapshot)
+      : undefined
+  if (borrowed?.kind === "install" && bgInstall === undefined)
+    emitRecovery(config, "compact", "bg-install-stale")
+  const result = await runProactiveTier2({
+    config,
+    compaction,
+    system,
+    snapshot,
+    before,
+    isFirstCompaction,
+    activeModel,
+    tokenBaselineBox,
+    turnId,
+    bgInstall,
+    breaker,
+  })
+  if (result === null) return { abort: false }
+  applyProactiveResult({
+    config,
+    wm,
+    breaker,
+    archive,
+    result,
+    snapshot,
+    before,
+    resetClassifier,
+    fromTurnId,
+    turnId,
+  })
   bgController?.maybeStart({
     // FULL-snapshot read of the (possibly just-compacted) live wm. The decorator
     // reseeds on `replace`, so `tokenTotal()` reflects the post-compaction set

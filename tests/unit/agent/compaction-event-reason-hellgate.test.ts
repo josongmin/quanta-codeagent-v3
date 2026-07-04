@@ -126,7 +126,17 @@ describe("C2(1) — tier-1 microcompaction emits reason:'cadence'", () => {
     // Unique sessionId so the module-level cadence Map does not suppress the fire.
     const cfg = captureCfg(events, { sessionId: `s-${Math.random()}` })
     const wm = fakeWm(bloatedHistory())
-    await maybeCompact(cfg, "sys", wm as never, undefined, undefined, 1, undefined, () => {}, undefined)
+    await maybeCompact({
+      config: cfg,
+      system: "sys",
+      wm: wm as never,
+      breaker: undefined,
+      archive: undefined,
+      turn: 1,
+      bgController: undefined,
+      resetClassifier: () => {},
+      tokenBaselineBox: undefined,
+    })
     const micro = events.find((e) => e.trigger === "pre_sampling" && e.messagesRemoved === 0)
     expect(micro).toBeDefined()
     // TEETH: pre-fix this was "context_limit" — indistinguishable from tier-2.

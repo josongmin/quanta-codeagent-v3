@@ -4,7 +4,7 @@
  * `dependency_unknown` (no partial removal).
  */
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import type { PlanToolContext, Tool, ToolEvent } from "../types"
 import { planErrorMessage, planFailure } from "./error-mapping"
 import { type RemoveTodosInput, removeTodosSchema } from "./schemas"
 
@@ -16,7 +16,7 @@ export const removeTodosTool = (): Tool<RemoveTodosInput> => ({
   inputSchema: removeTodosSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => true,
-  async *execute(input: RemoveTodosInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: RemoveTodosInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
     const mutator = ctx.planMutator
     if (mutator === undefined) {
       yield {

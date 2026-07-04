@@ -25,3 +25,41 @@ export const MUTATING_FS_EDIT_TOOLS: ReadonlySet<string> = new Set([
   "apply_patch",
   "apply_patch_structured",
 ])
+
+/** V4A file-marker scan — every path an `apply_patch`/`apply_patch_structured`
+ *  patch text touches (`*** Add|Update|Delete File:`, `*** Move to:`). Pure
+ *  string scan; tolerant of malformed input (returns what it finds). */
+export const v4aTargetPaths = (patch: string): string[] => {
+  const out: string[] = []
+  const re = /^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm
+  for (const m of patch.matchAll(re)) {
+    const p = (m[1] ?? m[2] ?? "").trim()
+    if (p) out.push(p)
+  }
+  return out
+}
+
+/** The target file path(s) a mutating call would write, keyed off the SSOT
+ *  {@link MUTATING_FS_EDIT_TOOLS} so every consumer (test-scope pre-flight,
+ *  thrash-dedup bucketing) agrees on "which file does this call touch" — the
+ *  drift this module exists to kill (a new edit tool covered by one consumer
+ *  but not the other):
+ *   - `edit`/`write`            → `input.path`
+ *   - `scripted_replace`        → `input.file`
+ *   - `apply_patch`(_structured) → every file marker in `input.patch` (multi-file)
+ *  Defensive against `input:unknown`: a non-mutating or malformed shape yields
+ *  `[]` (never a false target). NOTE: this is the "full mutating-set" extractor;
+ *  the edit-repair lint bracket ({@link ../dispatch/edit-repair}) deliberately
+ *  uses a NARROWER single-file `edit`/`write` probe because a multi-file patch's
+ *  lint delta cannot be attributed to one file — a different concern, not drift. */
+export const mutatingTargetPaths = (name: string, input: unknown): string[] => {
+  if (!MUTATING_FS_EDIT_TOOLS.has(name)) return []
+  if (typeof input !== "object" || input === null) return []
+  const o = input as Record<string, unknown>
+  if (name === "scripted_replace") return typeof o.file === "string" ? [o.file] : []
+  if (name === "apply_patch" || name === "apply_patch_structured") {
+    return typeof o.patch === "string" ? v4aTargetPaths(o.patch) : []
+  }
+  // edit | write — guard above guarantees one of these remains
+  return typeof o.path === "string" ? [o.path] : []
+}
