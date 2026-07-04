@@ -22,6 +22,7 @@
  *                a read-only and a mutating fixture (no orphan profile)
  */
 import { describe, expect, test } from "bun:test"
+import { parseAgentArgs } from "@/../src/apps/agent/cli-args"
 import {
   ALL_TOOL_PROFILE_NAMES,
   composeToolProfileWithBaseline,
@@ -178,5 +179,15 @@ describe("tool-profile preset hellgate (ADR-0213)", () => {
       expect(["allow", "confirm", "deny"]).toContain(ro.kind)
       expect(["allow", "confirm", "deny"]).toContain(mut.kind)
     }
+  })
+
+  test("HELL-TP-15 — CLI parser token set stays in parity with ALL_TOOL_PROFILE_NAMES", () => {
+    for (const name of ALL_TOOL_PROFILE_NAMES) {
+      const parsed = parseAgentArgs(["--mode", "interactive", "--tool-profile", name])
+      expect(parsed.toolProfile).toBe(name)
+    }
+    expect(() =>
+      parseAgentArgs(["--mode", "interactive", "--tool-profile", "definitely-not-a-profile"]),
+    ).toThrow()
   })
 })

@@ -332,6 +332,11 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     expect(result.provider).toBe(runtime.provider)
     expect(result.model).toBe(runtime.model)
     expect(result.cwd).toBe(runtime.cwd)
+    expect(result.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "interactive",
+      verifyStrategy: "none",
+    })
     expect(typeof result.shutdownMcp).toBe("function")
     expect(result.abort).toBeInstanceOf(AbortController)
     expect(typeof result.materializeReviewerAgent).toBe("function")

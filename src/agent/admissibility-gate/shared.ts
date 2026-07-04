@@ -26,18 +26,24 @@ import {
   type LayeredRule,
   type LearningSource,
   type PendingPermission,
+  type PermissionDenyDecision,
   type PermissionStore,
   type ReviewContext,
   type ReviewerPort,
   type ReviewerTier,
   type StructuredDenyReason,
   type StructuredDenyReasonInput,
-  structuredDenyReason,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
 import { errMessage, runtimeConfig, writeStderr } from "@/shared"
 import { safeEmitDecision } from "@/stream"
 import { buildDenySteerMessage, type ConfirmDecision } from "../confirm-decision"
+import {
+  denyReason,
+  hardDenyStructuredReason,
+  hookDenyReason,
+  reviewerApprovalDenyReason,
+} from "../deny-reason-wire"
 import { deny, HANDOFF_SUFFIX } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import type { HandoffRequiredEvent, HitlTier } from "../hitl-tier"
@@ -67,6 +73,16 @@ export interface AdmissibilityAction {
    * `null` / absent ⇒ the tool does not represent a shell command (no gate).
    */
   shellCommand?: string | null
+  /**
+   * Gate-local cached HARD_DENY prose derived from the authoritative
+   * `shellCommand` above. This lets gate helpers share one resolved deny fact
+   * without each helper re-running the denylist matcher. The permission slice
+   * may also reuse this cache when it matches the same authoritative command,
+   * so one dispatch-time fact can flow through both layers.
+   *
+   * `null` / absent ⇒ no HARD_DENY hit.
+   */
+  hardDenyProse?: string | null
   /**
    * ADR-0061 (absorb #2) — patterns the action declares it would be satisfied
    * by, e.g. `["bash:git status", "read:src/**"]`. When `config.
@@ -188,7 +204,7 @@ export interface AdmissibilityWaveAOptions {
    * every other allow path); on denial the worker stays blocked.
    *
    * SECURITY (load-bearing): this is consulted ONLY on the SOFT mode-policy deny
-   * arm, and ONLY after re-verifying `hardDenyReason(action) === null` — a
+   * arm, and ONLY after re-verifying `resolvedHardDenyProse(action) === null` — a
    * HARD_DENY / denylisted command is structurally never escalatable (it returns
    * at step 2 `earlyHardDeny` / inside the HITL branch BEFORE mode-policy, and
    * the re-check catches the policy-internal HARD_DENY that surfaces here when no
@@ -278,26 +294,6 @@ export const emitGateDecision = (
   safeEmitDecision(config.decisionEmitter, event)
 }
 
-/**
- * C6 (RFC jun-6-deny-reason-surfacing) — build the {@link StructuredDenyReason}
- * for a deny SITE, gated on `surfaceDenyReason` (`QUANTA_DENY_REASON`).
- *
- * Returns `undefined` (zero allocation) when the knob is OFF, so `deny(...,
- * denyReason(...))` is byte-identical to the legacy `deny(...)` on the default
- * path. The dispatch-helper `deny()` ALSO re-checks the knob (defence in depth),
- * so even a `denyReason` that leaked through here cannot surface OFF.
- *
- * SECURITY (no-leak, load-bearing): `input.safeReason` MUST be the SAME pre-
- * sanitized one-liner the call site already hands to `emitGateDecision({reason})`
- * / the recorder — NEVER a fresh string composed from `action.input`, a command,
- * or a regex source. For the HARD_DENY layer the caller passes the CATEGORICAL
- * `hardDenySafeReason()`, NOT the command-echoing model-facing prose. This helper
- * cannot widen the surface — it only forwards the caller's already-safe `layer`/
- * `pillar`/`stackSource`/`safeReason` into the value record.
- */
-export const denyReason = (input: StructuredDenyReasonInput): StructuredDenyReason | undefined =>
-  runtimeConfig().surfaceDenyReason ? structuredDenyReason(input) : undefined
-
 /** Map a `ReviewerTier` to the short preview tag suffix the dispatch seam
  *  surfaces (`reviewer_user` / `reviewer_auto` / `reviewer_guardian`). */
 export const reviewerTag = (reviewer: ReviewerTier): string =>
@@ -340,21 +336,32 @@ export const withResolvedShellCommand = (
 ): AdmissibilityAction => {
   const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
   if (shellCommand === null) {
-    // Strip any caller-supplied shellCommand so a fabricated value can never
-    // out-vote the registry's authoritative null (a non-shell tool stays
-    // ungated; HARD_DENY only fires on a registry-confirmed command).
-    if (action.shellCommand === undefined) return action
-    const { shellCommand: _dropped, ...rest } = action
+    // Strip any caller-supplied shellCommand / hardDenyProse so fabricated or
+    // stale facts can never out-vote the registry's authoritative null (a
+    // non-shell tool stays ungated; HARD_DENY only fires on a registry-
+    // confirmed command).
+    if (action.shellCommand === undefined && action.hardDenyProse === undefined) return action
+    const { shellCommand: _droppedShell, hardDenyProse: _droppedHardDeny, ...rest } = action
     return rest
   }
-  return { ...action, shellCommand }
+  const resolved = { ...action, shellCommand }
+  return { ...resolved, hardDenyProse: hardDenyReason(resolved) }
 }
+
+export const resolvedHardDenyProse = (action: AdmissibilityAction): string | null =>
+  action.hardDenyProse ?? hardDenyReason(action)
+
+export const resolvedShellCommand = (
+  config: AdmissibilityGateConfig,
+  action: AdmissibilityAction,
+): string | null =>
+  action.shellCommand ?? config.registry.extractShellCommand(action.tool, action.input)
 
 export const reviewActionKeyOf = (
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
 ): string => {
-  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const shellCommand = resolvedShellCommand(config, action)
   return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
 }
 
@@ -417,7 +424,7 @@ export const runPreToolUseHook = async (
       // C6: categorical layer. safeReason stays categorical (the operator hook's
       // free-form `result.deny.deny` is surfaced on `content` only, never on the
       // structured field — keeps the typed envelope leak-free by construction).
-      denyReason({ layer: "hook", safeReason: "pre_tool_use hook denied" }),
+      hookDenyReason("pre_tool_use hook denied"),
     )
   }
   // A rewrite only matters when the call is admitted. `emit` includes the
@@ -589,7 +596,7 @@ export const buildHandoffDeny = (
     "handoff",
     // C6: the HITL `hand-off-required` tier — no mode can authorize, a human
     // reviewer must take over. Categorical safeReason (no annotation prose).
-    denyReason({ layer: "reviewer", pillar: "approval", safeReason: "tier: hand-off-required" }),
+    reviewerApprovalDenyReason("tier: hand-off-required"),
   )
 }
 
@@ -610,7 +617,7 @@ export const hardDenyHandoff = (
   // safeReason below uses `hardDenySafeReason()` (categorical) so the command is
   // NEVER persisted on the typed envelope. (Renamed from `denyReason` to avoid
   // shadowing the C6 `denyReason(...)` builder.)
-  const hardDenyProse = hardDenyReason(action)
+  const hardDenyProse = resolvedHardDenyProse(action)
   if (hardDenyProse === null) return null
   const handoffMessage = `Action requires human handoff: ${hardDenyProse}${HANDOFF_SUFFIX}`
   emitHandoffEvent(config, call, handoffMessage, `hard-deny:${hardDenyProse}`, now)
@@ -619,32 +626,39 @@ export const hardDenyHandoff = (
     handoffMessage,
     "handoff",
     // C6 no-leak: categorical `hardDenySafeReason()`, NOT `hardDenyProse`.
-    denyReason({ layer: "hard-deny", safeReason: hardDenySafeReason() }),
+    hardDenyStructuredReason(),
   )
 }
 
 /**
- * C6 — build the {@link StructuredDenyReasonInput} for a mode-policy / stack
- * `deny` whose `decision.reason` MAY echo the command (the HARD_DENY arm sets
- * `"Blocked dangerous command: <cmd>"`).
+ * C6 — build the {@link StructuredDenyReasonInput} for a policy-stack `deny`.
+ * The typed decision is the SSOT:
+ *   - `decision.hardDeny` decides the categorical `hard-deny` layer.
+ *   - `decision.stackSource` decides the stack axis surfaced on the structured
+ *     envelope.
+ *   - the gate-local `brokerDenied` flag only upgrades the SOFT layer from
+ *     `stack` to `broker` after a leader escalation refusal.
  *
- * SECURITY (no-leak): a HARD_DENY hit switches to the CATEGORICAL
+ * SECURITY (no-leak): a hard deny switches to the categorical
  * `hardDenySafeReason()` + `layer:"hard-deny"` so the command never reaches the
- * structured field; only the SOFT deny reuses `decision.reason` (which stitches
- * `action.tool` at most — never tool input) under the supplied SOFT `layer`.
+ * structured field; only the soft deny reuses `decision.reason` (which
+ * stitches `action.tool` at most — never tool input). The sandbox pillar is
+ * inferred centrally for the per-thread / per-host stack sources so call sites
+ * do not re-encode that mapping.
  */
 export const policyDenyStructured = (
-  action: AdmissibilityAction,
-  softLayer: DenyLayer,
-  softReason: string,
-  softPillar?: DenyPillar,
+  decision: PermissionDenyDecision,
+  opts: { brokerDenied?: boolean } = {},
 ): StructuredDenyReasonInput =>
-  hardDenyReason(action) !== null
+  decision.hardDeny
     ? { layer: "hard-deny", safeReason: hardDenySafeReason() }
     : {
-        layer: softLayer,
-        safeReason: softReason,
-        ...(softPillar !== undefined ? { pillar: softPillar } : {}),
+        layer: opts.brokerDenied ? "broker" : "stack",
+        safeReason: decision.reason,
+        stackSource: decision.stackSource,
+        ...(decision.stackSource === "per-thread" || decision.stackSource === "per-host"
+          ? ({ pillar: "sandbox" satisfies DenyPillar } as const)
+          : {}),
       }
 
 /**
@@ -687,7 +701,7 @@ export const cascadeOnApprove = (
   if (opts.onPatternCascade === undefined) return
   // Compute the classifier surface from the same actionKey the trust-scope
   // wire-up uses, so the suggested pattern matches the persisted-grant shape.
-  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const shellCommand = resolvedShellCommand(config, action)
   const actionKey = shellCommand !== null ? `${action.tool}|${shellCommand}` : null
   const classified = classifyCommand({
     toolName: action.tool,

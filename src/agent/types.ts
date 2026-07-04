@@ -10,6 +10,7 @@ import type {
 import type { RunContext } from "@/shared"
 import type { DecisionEmitter, StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
+import type { PromptSurfaceProfileSnapshot } from "@/shared"
 import type { CloseoutCriticConfig } from "./closeout-critic"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
@@ -155,6 +156,9 @@ export interface AgentConfig
   /** Conversation seed (typically one user message). */
   messages: Message[]
   system: string
+  /** Declared prompt axes for this session/surface. Observation-only:
+   *  forwarded into turn snapshots; absent ⇒ no surface-profile snapshot. */
+  promptSurfaceProfile?: PromptSurfaceProfileSnapshot
   cwd: string
   maxTurns: number
   signal: AbortSignal
@@ -280,6 +284,12 @@ export interface AgentConfig
    * host context may live here. Absent ⇒ prompt stays byte-identical.
    */
   sessionCtx?: string
+  /**
+   * Distilled `memory_summary.md` body loaded once per session start. It shares
+   * the cached `session_ctx` section with `sessionCtx`, but stays a distinct
+   * field so the prompt owner preserves the wrapper/cap/ordering semantics.
+   */
+  memorySummaryMd?: string
   /**
    * File-scoped rules (Cursor `.cursor/rules/*.mdc` parity — glob-matched +
    * always-applied kinds). Loaded by the caller (e.g. `loadGlobRules(cwd)`),

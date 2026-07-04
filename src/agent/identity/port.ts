@@ -35,6 +35,13 @@ export const IDENTITY_MODES: ReadonlyArray<IdentityMode> = [
   "onboarding",
 ] as const
 
+/** Type guard for the closed {@link IdentityMode} enum. Use at env/CLI/RPC
+ *  parse boundaries so surfaces do not duplicate the accepted-token table. */
+export const isIdentityMode = (value: unknown): value is IdentityMode => {
+  if (typeof value !== "string") return false
+  return (IDENTITY_MODES as readonly string[]).includes(value)
+}
+
 /** Identity provider port (ADR-0198). Single method: yield the identity
  *  lines for a mode. The return type is `readonly string[]` so callers
  *  cannot mutate the provider's table. Unknown mode values resolve to a

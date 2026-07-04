@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { evaluate } from "@/permission"
+import { evaluate, evaluateAuto } from "@/permission"
 
 describe("permission.evaluate", () => {
   test("read-only is always allowed", () => {
@@ -13,12 +13,59 @@ describe("permission.evaluate", () => {
       { mode: "bypass" },
     )
     expect(d.kind).toBe("deny")
+    if (d.kind === "deny") {
+      expect(d.hardDeny).toBe(true)
+      expect(d.stackSource).toBe("hard-deny")
+    }
   })
 
   test("mutation asks in default mode, allows in acceptEdits", () => {
     const action = { tool: "write", input: { path: "a" }, isReadOnly: false }
     expect(evaluate(action, { mode: "default" }).kind).toBe("ask")
     expect(evaluate(action, { mode: "acceptEdits" }).kind).toBe("allow")
+  })
+
+  test("soft policy denies carry hardDeny=false", async () => {
+    const d = await evaluateAuto(
+      { tool: "write", input: { path: "a" }, isReadOnly: false },
+      { mode: "auto" },
+      {
+        evaluate: async () => ({ verdict: "deny", reason: "classifier blocked", fallback: false }),
+      } as unknown as Parameters<typeof evaluateAuto>[2],
+    )
+    expect(d.kind).toBe("deny")
+    if (d.kind === "deny") {
+      expect(d.hardDeny).toBe(false)
+      expect(d.stackSource).toBe("global-default")
+    }
+  })
+
+  test("matching hardDenyProse cache is honored, mismatched cache is ignored", () => {
+    expect(
+      evaluate(
+        {
+          tool: "shell",
+          input: {},
+          isReadOnly: false,
+          shellCommand: "rm -rf /",
+          hardDenyProse: "Blocked dangerous command: rm -rf /",
+        },
+        { mode: "bypass" },
+      ).kind,
+    ).toBe("deny")
+
+    expect(
+      evaluate(
+        {
+          tool: "shell",
+          input: {},
+          isReadOnly: false,
+          shellCommand: "git status",
+          hardDenyProse: "Blocked dangerous command: rm -rf /",
+        },
+        { mode: "bypass" },
+      ).kind,
+    ).not.toBe("deny")
   })
 })
 

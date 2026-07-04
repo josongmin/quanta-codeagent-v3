@@ -212,12 +212,13 @@ export interface WireSlotsCoreConfig {
    */
   planQueue?: { store: PlanQueueStore }
   /**
-   * Structured plan-mode store (ADR-0095 draft). When wired, the dispatch
-   * seam adapts this into a `PlanMutator` on every ToolContext and
-   * `buildSessionFeatures` registers the 4 plan-mutation tools
-   * (create_plan / update_todos / update_plan / remove_todos). Absent ⇒ tools
-   * NOT registered; plan posture (ADR-0036) still works without structured
-   * mutation (byte-identical legacy). Persistence via {@link planSnapshotStore}.
+   * Structured plan store (ADR-0095 draft). When wired, the dispatch seam
+   * adapts this into a `PlanMutator` on every ToolContext and
+   * `buildSessionFeatures` registers the 5 structured plan tools
+   * (`current_plan` / `create_plan` / `update_todos` / `update_plan` /
+   * `remove_todos`). Absent ⇒ those tools are NOT registered; collaboration
+   * plan posture (ADR-0036) still works without structured plan state
+   * (byte-identical legacy). Persistence via {@link planSnapshotStore}.
    */
   planStore?: PlanStore
   /**
@@ -375,19 +376,19 @@ export interface WireSlotsCoreConfig {
   roleModelResolver?: RoleModelResolver
   /**
    * Self-inspection / self-mutation seam consumed by the `session_config`
-   * tool. Read + write over the agent's own SDK posture (effort tier, identity
-   * mode, tool profile, model, provider). The dispatch seam wires this
-   * directly into `ToolContext.sessionConfig`. Absent ⇒ the tool returns a
-   * typed `not_wired` failure to the model (the tool is still registered so
-   * the LLM can give the operator a coherent reply either way; default-OFF
-   * is byte-identical to pre-ADR behavior since no session previously called
-   * the tool).
+   * tool. Read + write over the agent's own SDK posture (effort tier,
+   * permission mode, identity mode, tool profile, model, provider). The
+   * dispatch seam wires this directly into `ToolContext.sessionConfig`.
+   * Absent ⇒ the tool returns a typed `not_wired` failure to the model (the
+   * tool is still registered so the LLM can give the operator a coherent
+   * reply either way; default-OFF is byte-identical to pre-ADR behavior since
+   * no session previously called the tool).
    *
    * The composition root (`apps/cli/host/bootstrap-session.ts`) builds the
-   * concrete seam from the existing `effortStore` + `identityModeState` +
-   * `toolProfileState` plus the resolved provider/model from runtime config.
-   * Sliced (no `@/agent` ↔ `@/tool` cycle) via the canonical declaration in
-   * `@/tool/types`.
+   * concrete seam from the existing `effortStore` + `permissionModeState` +
+   * `identityModeState` + `toolProfileState` plus the resolved provider/model
+   * from runtime config. Sliced (no `@/agent` ↔ `@/tool` cycle) via the
+   * canonical declaration in `@/tool/types`.
    */
   sessionConfigPort?: import("@/tool").SessionConfigSeam
   /** ADR-0474 — OPTIONAL stale-read-guard state, threaded into every tool's

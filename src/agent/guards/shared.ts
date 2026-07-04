@@ -9,13 +9,13 @@
 
 import type { Message } from "@/llm"
 import type { AssembledMessage, RecoveryAction } from "../recovery"
+import { makeSyntheticUserMessage } from "../synthetic-user"
 
 /** A short out-of-band user message used to steer the model on a same-turn
  *  retry (output-limit / malformed-tool / empty). Kept terse on purpose.
  *  Verbatim move from `loop.ts:719-722` — byte-identical shape. */
 export const metaUser = (text: string): Message => ({
-  role: "user",
-  content: [{ type: "text", text }],
+  ...makeSyntheticUserMessage("same-turn-recovery", [{ type: "text", text }]),
 })
 
 /** True when this decided action is a finish attempt: an exhaustion-completed

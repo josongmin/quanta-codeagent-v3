@@ -30,6 +30,7 @@
 import { createActivityStore } from "@/activity"
 import { composeSystemPromptForSurface, type SurfaceProfile } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
+import { promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
 import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import { bootstrapSession } from "@/host/bootstrap"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
@@ -854,6 +855,11 @@ export const runTerminalBrain = async (
       boot,
       stream,
       onConfirm: async () => false,
+      overlay: {
+        promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", {
+          envPosture: envOwnedApplied ? "owned" : "frozen",
+        }),
+      },
       execution: {
         history: boot.history,
         cwd: boot.cwd,

@@ -1,10 +1,10 @@
-import { buildSystemPrompt, wireOptionalAgentPorts } from "@/agent"
+import { wireOptionalAgentPorts } from "@/agent"
 import type { CommandHookBinding } from "@/agent/command-hooks"
 import { defaultDelegationRunner } from "@/agent/delegation-runner"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import type { ForkSessionPort } from "@/agent/fork-session"
 import { defaultCheckpointBaseWire } from "@/agent/fork-session-wire"
-import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
+import { defaultIdentityProvider, identityForToken } from "@/agent/identity"
 import {
   fsBackedStickyModelStore,
   inMemoryStickyModelStore,
@@ -19,8 +19,10 @@ import {
   wrapSubagentRunner,
 } from "@/agent/subagent-typed"
 import {
+  buildSystemPromptForRunMode,
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
+  promptSurfaceProfileForRunMode,
   type SystemPromptVariantRegistry,
 } from "@/agent/system-prompt"
 import {
@@ -107,7 +109,7 @@ export class ProviderKeyMissingError extends Error {
 const resolveIdentityFromEnv = (env: NodeJS.ProcessEnv): readonly string[] | undefined => {
   if (!gateOn(env, "QUANTA_IDENTITY")) return undefined
   const raw = env.QUANTA_IDENTITY_MODE ?? "default"
-  return defaultIdentityProvider().identityFor(raw as IdentityMode)
+  return identityForToken(raw)
 }
 
 /** Resolve the retrieval-stack opt-in flag from the composition-root env view.
@@ -319,8 +321,8 @@ const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | un
  *       host can publish it on `AgentConfig.identityModeVariant`.
  *    2. `QUANTA_IDENTITY=1` env (legacy) ⇒ inject identity lines via
  *       `buildSystemPrompt({ identity })` (NO mode-variant registry slot).
- *    3. neither ⇒ empty system prompt; mode-preset's
- *       `req.base.system ?? buildSystemPrompt(cwd)` fallback runs.
+ *    3. neither ⇒ the run-mode prompt pack still renders a non-empty base
+ *       prompt (no empty-string sentinel).
  *
  *  Pure of process.env aside from the legacy fallback.
  *
@@ -333,10 +335,17 @@ const buildRetrievalStackFromEnv = (env: NodeJS.ProcessEnv): RetrievalStack | un
 export const resolveIdentitySystemPrompt = (
   cliIdentityMode: IdentityModeToken | undefined,
   env: NodeJS.ProcessEnv,
+  opts: {
+    readonly runMode?: AssembleRequest["mode"]
+    readonly cwd?: string
+  } = {},
 ): {
   readonly system: string
   readonly identityModeVariant?: { readonly registry: SystemPromptVariantRegistry }
+  readonly promptSurfaceProfile: import("@/shared").PromptSurfaceProfileSnapshot
 } => {
+  const runMode = opts.runMode ?? "interactive"
+  const cwd = opts.cwd ?? process.cwd()
   if (cliIdentityMode !== undefined) {
     // B1 (jul-03) — `onboarding` is an identity-only virtual mode: it lives in
     // `IdentityMode` (superset) but is NOT a `ModeVariantKey`, so it cannot ride
@@ -350,15 +359,34 @@ export const resolveIdentitySystemPrompt = (
     // now reachable BOTH at launch AND mid-session.
     if (cliIdentityMode === "onboarding") {
       const identity = defaultIdentityProvider().identityFor("onboarding")
-      return { system: buildSystemPrompt(process.cwd(), { identity }) }
+      return {
+        system: buildSystemPromptForRunMode({ runMode, cwd, identity }),
+        promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+      }
     }
     const registry = defaultModeVariantRegistry()
-    const system = buildSystemPromptForMode({ mode: cliIdentityMode, registry })
-    return { system, identityModeVariant: { registry } }
+    const system = buildSystemPromptForMode({
+      mode: cliIdentityMode,
+      registry,
+      promptPack: runMode,
+    })
+    return {
+      system,
+      identityModeVariant: { registry },
+      promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+    }
   }
   const identity = resolveIdentityFromEnv(env)
-  if (identity !== undefined) return { system: buildSystemPrompt(process.cwd(), { identity }) }
-  return { system: "" }
+  if (identity !== undefined) {
+    return {
+      system: buildSystemPromptForRunMode({ runMode, cwd, identity }),
+      promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+    }
+  }
+  return {
+    system: buildSystemPromptForRunMode({ runMode, cwd }),
+    promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+  }
 }
 
 /** ADR-0236 / jun-11 (#4) — wire the sticky-model store slot. The default is now
@@ -568,6 +596,10 @@ export const buildBaseFromArgs = (
    *  path against a fake tmux at the leaf. */
   seams?: CompositionSeams,
 ): AssembleRequest["base"] => {
+  // Surface cwd SSOT for this base assembly. Most callers rely on the ambient
+  // process cwd; advanced hosts/tests may thread an explicit cwd onto the
+  // partial so prompt/search/artifact wires all agree on the same workspace.
+  const cwd = p.cwd ?? process.cwd()
   // QUANTA_PROVIDER drives the factory pick; an explicit `--provider` flag must
   // still win, so seed it into the env view the factory reads.
   const env =
@@ -606,7 +638,7 @@ export const buildBaseFromArgs = (
   // explicit `QUANTA_PIPELINE=none` is the kill-switch. The returned tool is
   // registered into the base registry below, and the helper-only pipeline slot
   // is spread into AgentConfig for any future pipeline consumers.
-  const searchWire = buildSearchPipelineFromEnv(env, process.cwd())
+  const searchWire = buildSearchPipelineFromEnv(env, cwd)
   // L5 M-11 — thread THIS process's wire teardown (delta-scan interval +
   // indexer) up to `runMain`'s `finally` via the disposer collector, instead
   // of relying on the module singleton. Idempotent; no-op when no wire built.
@@ -615,10 +647,16 @@ export const buildBaseFromArgs = (
   }
   // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
   // via the mode-variant registry; else fall back to the ADR-0198
-  // `QUANTA_IDENTITY=1` env (precedence #2); else empty-string sentinel
-  // ⇒ each mode-preset's `req.base.system ?? buildSystemPrompt(cwd)`
-  // fallback runs unchanged (byte-identical).
-  const { system, identityModeVariant } = resolveIdentitySystemPrompt(p.identityMode, env)
+  // `QUANTA_IDENTITY=1` env (precedence #2); else the run-mode prompt pack
+  // still renders a non-empty base prompt (no empty-string sentinel).
+  const { system, identityModeVariant, promptSurfaceProfile } = resolveIdentitySystemPrompt(
+    p.identityMode,
+    env,
+    {
+      runMode: p.mode,
+      cwd,
+    },
+  )
   // ADR-0236 — composition-root mega-wire slots. All default-OFF: each helper
   // returns `undefined` when the operator did NOT opt in; spread conditionally
   // so `exactOptionalPropertyTypes` does NOT see a literal `undefined`.
@@ -694,7 +732,7 @@ export const buildBaseFromArgs = (
   // serve `quanta-artifact://<id>` bytes read-only. Absent ⇒ no preview channel.
   const artifactPreviewResolver =
     artifactRegistry !== undefined
-      ? createArtifactPreviewResolver({ registry: artifactRegistry, jailRoot: process.cwd() })
+      ? createArtifactPreviewResolver({ registry: artifactRegistry, jailRoot: cwd })
       : undefined
   // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
   // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
@@ -719,13 +757,14 @@ export const buildBaseFromArgs = (
       artifactRegistry,
     }),
     stream,
+    promptSurfaceProfile,
     // GAP2 — when a named permission profile is selected the live permission
     // mode is DERIVED from its approval pillar; absent ⇒ the historical
     // `acceptEdits` default (byte-identical).
     permission: { mode: profilePermissionMode ?? "acceptEdits" },
     messages: [],
     system,
-    cwd: process.cwd(),
+    cwd,
     maxTurns: p.dials?.maxTurns ?? 30,
     // T01 (audit L5 H-2): use the composition-root's REAL cancellation signal
     // when injected (SIGINT-wired in `runMain`). The `?? new AbortController()`
@@ -823,6 +862,9 @@ export const buildBaseFromArgs = (
  */
 export interface AssembleRequestPartial {
   mode: AssembleRequest["mode"]
+  /** Optional workspace root override for hosts/tests that assemble a base for
+   *  a non-ambient cwd. Absent ⇒ `buildBaseFromArgs` uses `process.cwd()`. */
+  cwd?: string
   dials: AssembleRequest["dials"]
   exhaustion?: AssembleRequest["exhaustion"]
   model?: string

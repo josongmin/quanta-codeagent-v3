@@ -1,3 +1,4 @@
+import type { IdentityMode } from "@/agent/identity"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { FocusChainPort } from "@/agent/focus-chain"
 import type { GranularRegistry, ThreeWayRestorePort } from "@/agent/per-tool-checkpoint"
@@ -32,7 +33,10 @@ import type { WhySlashState } from "../why-cmd"
 import { buildComposerEditAdapter, type ComposerHandle } from "./ctx-adapters/composer-edit-adapter"
 import { buildFocusChainAdapter } from "./ctx-adapters/focus-chain-adapter"
 import { buildForkSessionAdapter } from "./ctx-adapters/fork-session-adapter"
-import { buildIdentityModeAdapter } from "./ctx-adapters/identity-mode-adapter"
+import {
+  buildIdentityModeAdapter,
+  ONBOARDING_IDENTITY_KEY,
+} from "./ctx-adapters/identity-mode-adapter"
 import { buildPerToolCheckpointAdapter } from "./ctx-adapters/per-tool-checkpoint-adapter"
 import { buildPlanEditAdapter } from "./ctx-adapters/plan-edit-adapter"
 import { buildStickyModelAdapter } from "./ctx-adapters/sticky-model-adapter"
@@ -393,7 +397,7 @@ const maybeIdentity = (
   const im = args.identityModeState
   const legacy = args.identityModeVariant
   if (im === undefined && legacy === undefined) return undefined
-  let active = legacy?.defaultMode ?? "default"
+  let active: IdentityMode = legacy?.defaultMode ?? "default"
   return buildIdentityModeAdapter({
     registry: im?.registry ??
       legacy?.registry ?? { variantFor: () => ({ mode: "default", identity: [] }) },
@@ -412,7 +416,13 @@ const maybeIdentity = (
     // prompt reflects the change. Only offered when a rebuild seam is wired
     // (byte-identical to the pre-B1 ship when absent).
     ...(args.onIdentityModeChange !== undefined
-      ? { onOnboarding: () => args.onIdentityModeChange?.() }
+      ? {
+          onOnboarding: () => {
+            if (im !== undefined) im.set(ONBOARDING_IDENTITY_KEY)
+            else active = ONBOARDING_IDENTITY_KEY
+            args.onIdentityModeChange?.()
+          },
+        }
       : {}),
   })
 }

@@ -1,6 +1,9 @@
-import type { assembleFromEvents } from "@/llm"
+import { isRefusalStopReason, type assembleFromEvents } from "@/llm"
+import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "./refusal-fallback"
 import { classifyLLMError } from "./retry"
 import type { StopAction, StopReasonPolicy } from "./stop-reason"
+import type { TurnState } from "./turn-context"
+import type { AgentConfig } from "./types"
 
 /** Bounded per-turn recovery budgets. These cap SAME-TURN retries so a
  *  pathological provider can never spin the loop forever; once exhausted the
@@ -108,6 +111,18 @@ export type RecoveryAction =
   | { do: "refusal_fallback"; text: string; message: AssembledMessage }
   | { do: "error"; reason: string }
 
+/**
+ * T08 — refusal-fallback decision inputs threaded into {@link resolveTurnAction}.
+ * Kept as a tiny plain struct (no `AgentConfig` / `TurnState`) so the decision
+ * stays a PURE, unit-testable function. `budgetOk` is a thunk so the (possibly
+ * `taskBudget`-derived) check is evaluated only on a refusal-class stop.
+ */
+export interface RefusalFallbackInput {
+  readonly enabled: boolean
+  readonly prompt: string
+  readonly budgetOk: () => boolean
+}
+
 /** Loop-control fix (jun-25): append {@link OUTPUT_TRUNCATED_MARKER} to the
  *  message's surfaced text in place, so a `max_tokens`-truncated turn sealed
  *  after the continuation budget reads as CUT, not cleanly finished. Mutates the
@@ -164,6 +179,35 @@ export const neutralizedRefusalTurn = (): AssembledMessage => ({
   role: "assistant",
   content: [{ type: "text", text: REFUSAL_NEUTRALIZED_MARKER }],
 })
+
+/** Build the refusal-fallback input from config + live turn state, or
+ *  `undefined` when the feature is OFF (so {@link resolveTurnAction} is
+ *  byte-identical). Pure aside from reading the (already-accumulated) spend. */
+export const buildRefusalFallbackInput = (
+  config: AgentConfig,
+  state: TurnState,
+): RefusalFallbackInput | undefined => {
+  const cfg = config.refusalFallback
+  if (cfg === undefined || cfg.enabled !== true) return undefined
+  return {
+    enabled: true,
+    prompt: cfg.prompt ?? DEFAULT_REFUSAL_FALLBACK_PROMPT,
+    budgetOk: () => refusalForkBudgetOk(config, state),
+  }
+}
+
+/** A refusal fork roughly DOUBLES the turn's token cost (re-prompt + re-stream).
+ *  Gate it on the SOFT task budget: when a finite, positive `taskBudget` is set
+ *  and the cumulative spend has already reached it, decline the fork (terminal).
+ *  No `taskBudget` (or non-positive) ⇒ no ceiling to exceed ⇒ allowed. The
+ *  boundary is the budget itself — NOT an arbitrary fraction
+ *  ([[no-heuristics-only-validated]]). */
+const refusalForkBudgetOk = (config: AgentConfig, state: TurnState): boolean => {
+  const tb = config.taskBudget
+  if (tb === undefined || !Number.isFinite(tb.tokens) || tb.tokens <= 0) return true
+  const spent = state.taskSpend?.tokens ?? tb.spent ?? 0
+  return spent < tb.tokens
+}
 
 /** Pure policy for a thrown stream error: classify it, consult the SAME-TURN
  *  budget, and decide. Mutates `rec` (consumes a retry slot) only when it
@@ -304,4 +348,48 @@ export const decideFromStopPolicy = (
     case "hitl":
       return { do: "error", reason: `[stop-hitl] ${action.reason}` }
   }
+}
+
+export const resolveTurnAction = (
+  policy: StopReasonPolicy | undefined,
+  result: { error: unknown; message: string } | { stopReason: string; message: AssembledMessage },
+  rec: RecoveryState,
+  refusal?: RefusalFallbackInput,
+): RecoveryAction => {
+  if ("error" in result) return decideOnStreamError(result.error, result.message, rec)
+  const stop = result.stopReason
+  // T08 — refusal-fallback recovery. Provider-blind: the `isRefusalStopReason`
+  // seam folds Anthropic `refusal` and OpenAI `content_filtered` onto one check,
+  // so this branch is identical for both vendors. Checked BEFORE the legacy
+  // mapping so a recovered/exhausted refusal never runs `decideOnAssembled`'s
+  // mutating empty/nudge accounting (which would corrupt same-turn budgets).
+  //
+  // GUARD — only recover a CLEAN, text-only refusal. A refusal-class stop that
+  // ALSO carried a `tool_use` block already (partially) dispatched those calls
+  // in `streamingTurn`: `content_filtered` does NOT take the in-stream
+  // short-circuit (only `refusal` does, streaming-dispatch.ts), so its deferred
+  // MUTATING tools run. Neutralizing such a turn would discard executed-tool
+  // results AND risk a re-execution on the re-prompt (double side effect). So a
+  // tool-carrying refusal falls through to the legacy mapping (terminal for
+  // `refusal`; pre-existing tool-proceed for `content_filtered`) — byte-identical
+  // to the OFF path for that case.
+  if (
+    refusal?.enabled === true &&
+    isRefusalStopReason(stop) &&
+    !result.message.content.some((b) => b.type === "tool_use")
+  ) {
+    if (rec.refusalFallbacks < RECOVERY_CAPS.refusalFallbacks && refusal.budgetOk()) {
+      rec.refusalFallbacks += 1
+      return { do: "refusal_fallback", text: refusal.prompt, message: result.message }
+    }
+    // One-shot spent OR a fork would exceed budget ⇒ TERMINAL refusal. Surfaced
+    // as `refusal` (not a generic error) for BOTH providers so a re-refusal —
+    // including `content_filtered`, which the legacy mapping would let slip
+    // through as `proceed` when no stop-policy is wired — never silently
+    // completes and reads consistently to the host.
+    return { do: "refusal", rationale: extractRefusalRationale(result.message) }
+  }
+  // OFF / non-refusal / tool-carrying refusal ⇒ legacy mapping verbatim
+  // (byte-identical default).
+  return decideFromStopPolicy(policy, stop) ?? decideOnAssembled(stop, result.message, rec)
 }

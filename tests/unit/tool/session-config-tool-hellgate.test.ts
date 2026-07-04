@@ -21,6 +21,8 @@
  *      a single call.
  *   7. No-op set_effort: set to the SAME tier → ok:true, body contains
  *      "(unchanged)", store value unchanged.
+ *   8. Permission mode is INSPECTABLE but NOT self-mutable through this tool
+ *      (schema rejects authority-bearing posture mutation verbs).
  *
  * Hellgate criteria (from definition-of-done.ts):
  *   - Exercises the REAL composition path (ToolRegistry + dispatchTool), not just
@@ -197,6 +199,7 @@ describe("hellgate — real composition path (bootstrap-session equivalent)", ()
     const seam: SessionConfigSeam = {
       readEffort: () => effortStore.get(),
       writeEffort: (next) => effortStore.set(next),
+      readPermissionMode: () => "acceptEdits",
       readIdentityMode: () => "code_agent",
       readToolProfile: () => "write",
       readModel: () => "test-model-id",
@@ -207,6 +210,7 @@ describe("hellgate — real composition path (bootstrap-session equivalent)", ()
     const content = extractContent(result)
     expect(content).toContain("high")
     expect(content).toContain("16,384")
+    expect(content).toContain("acceptEdits")
     expect(content).toContain("code_agent")
     expect(content).toContain("test-model-id")
     expect(content).toContain("test-provider")
@@ -256,6 +260,21 @@ describe("hellgate — no-op set_effort", () => {
     expect(content).toContain("unchanged")
     // Store must still report "high" — no phantom mutation.
     expect(effortStore.get()).toBe("high")
+  })
+})
+
+describe("hellgate — authority boundary", () => {
+  test("schema rejects permission/identity/tool-profile self-mutation verbs", async () => {
+    for (const input of [
+      { op: "set_permission", mode: "bypass" },
+      { op: "set_identity_mode", mode: "review" },
+      { op: "set_tool_profile", profile: "write" },
+    ] as const) {
+      const result = await dispatchTool(call(input), makeConfig(undefined), perm)
+      expect(result.block).toBeDefined()
+      const content = extractContent(result)
+      expect(content).toMatch(/invalid input|invalid discriminator|schema|parse/i)
+    }
   })
 })
 

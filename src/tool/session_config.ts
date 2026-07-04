@@ -2,16 +2,25 @@
  * `session_config` tool — read (and selectively mutate) the agent's own SDK
  * posture. Closes the visibility gap surfaced by users asking "thinking 모드
  * 몇으로 되어있노?" — the agent could not previously answer because nothing in
- * its tool set exposed `sessionEffort` / identity-mode / tool-profile / model.
+ * its tool set exposed `sessionEffort` / permission-mode / identity-mode /
+ * tool-profile / model.
  *
  * Operations:
- *   - `get`         → snapshot of effort tier (+ token budget), identity mode,
- *                     tool profile, model id, provider. Read-only.
+ *   - `get`         → snapshot of effort tier (+ token budget), permission
+ *                     mode, identity mode, tool profile, model id, provider.
+ *                     Read-only.
  *   - `set_effort`  → mutate the session effort tier ("low"/"medium"/"high"/
  *                     "max"/"default"). Mirrors what `/effort` already lets a
  *                     human operator do; persists across turns via the same
  *                     EffortStore (the seam carries `writeEffort`, not the
  *                     store itself, so the tool stays slice-fenced).
+ *
+ * Authority boundary:
+ *   - ONLY effort is writable here. Permission mode / identity mode / tool
+ *     profile are authority-bearing operator surfaces (`session.permission.set`,
+ *     `/identity`, `/profile`, etc.). Letting the model mutate them through its
+ *     own tool call path would create a self-escalation seam, so this tool
+ *     exposes those fields READ-ONLY on purpose.
  *
  * Wiring:
  *   - The tool is registered unconditionally in `buildDefaultTools` and
@@ -22,8 +31,8 @@
  *   - Dispatch (`buildToolContext` in `@/agent/dispatch.ts`) maps
  *     `AgentConfig.sessionConfigPort` → `ToolContext.sessionConfig`. The
  *     composition root (CLI bootstrap-session) builds the port from the
- *     pre-existing `effortStore` + `identityModeState` + `toolProfileState` +
- *     runtime model/provider.
+ *     pre-existing `effortStore` + `permissionModeState` +
+ *     `identityModeState` + `toolProfileState` + runtime model/provider.
  *
  * Slice posture (RFC §3.1):
  *   - Imports `zod` and the local `./types`. NO `@/agent`, `@/permission`,
@@ -68,7 +77,10 @@ export const sessionConfigInputSchema = z.discriminatedUnion("op", [
     .object({
       op: z.literal("get"),
     })
-    .describe("Return the current SDK posture (effort, mode, profile, model, provider)."),
+    .describe(
+      "Return the current SDK posture (effort, permission mode, identity mode, " +
+        "tool profile, model, provider).",
+    ),
   z
     .object({
       op: z.literal("set_effort"),
@@ -138,6 +150,10 @@ const renderSnapshot = (seam: SessionConfigSeam): string => {
   const effort = seam.readEffort()
   const rows: Row[] = []
   rows.push({ label: "effort", value: `${effort}  ·  ${fmtBudget(effort)}` })
+  const permission = seam.readPermissionMode?.()
+  if (permission !== undefined && permission !== "") {
+    rows.push({ label: "permission mode", value: permission })
+  }
   const mode = seam.readIdentityMode?.()
   if (mode !== undefined && mode !== "") rows.push({ label: "identity mode", value: mode })
   const profile = seam.readToolProfile?.()
@@ -199,11 +215,13 @@ const unwiredResult = (op: SessionConfigInput["op"]): ToolResult => ({
 export const sessionConfigTool: Tool<SessionConfigInput> = {
   name: "session_config",
   description:
-    "Read the agent's own SDK posture (effort tier, identity mode, tool profile, " +
-    "model, provider) or change the effort tier. `op:get` returns a plain-text " +
-    "snapshot; `op:set_effort` mutates the session effort (mirrors the operator " +
-    "`/effort` slash command). Use this when asked 'what mode am I in?' or when a " +
-    "task is stuck and a higher effort would help.",
+    "Read the agent's own SDK posture (effort tier, permission mode, identity " +
+    "mode, tool profile, model, provider) or change the effort tier. `op:get` " +
+    "returns a plain-text snapshot; `op:set_effort` mutates the session effort " +
+    "(mirrors the operator `/effort` slash command). Permission/identity/tool-" +
+    "profile posture stays read-only here so the model cannot self-escalate " +
+    "authority. Use this when asked 'what mode am I in?' or when a task is " +
+    "stuck and a higher effort would help.",
   inputSchema: sessionConfigInputSchema,
   // The tool is structurally mutating because of `set_effort`. Plan-mode
   // dispatch will block it unless the registry classifies the per-call op,

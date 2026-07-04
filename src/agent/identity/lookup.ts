@@ -14,6 +14,7 @@ import { DEFAULT_IDENTITIES, UNKNOWN_MODE_IDENTITY } from "./default-identities"
 import {
   assertValidIdentityLines,
   IDENTITY_MODES,
+  isIdentityMode,
   type IdentityMode,
   type IdentityProvider,
 } from "./port"
@@ -54,3 +55,12 @@ export const defaultIdentityProvider = (
     },
   }
 }
+
+/** Resolve an arbitrary user/env token onto identity lines without widening
+ *  the public provider port. Known tokens route through the provider; unknown
+ *  tokens return the typed fallback identity lines (same semantics as the
+ *  provider's defensive unknown-mode branch, but without an external cast). */
+export const identityForToken = (
+  token: string,
+  provider: IdentityProvider = defaultIdentityProvider(),
+): readonly string[] => (isIdentityMode(token) ? provider.identityFor(token) : [...UNKNOWN_MODE_IDENTITY])

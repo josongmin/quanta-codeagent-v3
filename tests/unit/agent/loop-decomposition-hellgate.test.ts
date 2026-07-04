@@ -34,9 +34,17 @@ describe("loop decomposition hellgate", () => {
     expect(read("src/agent/loop/skill-gate.ts")).toContain("export const buildSkillGate")
     expect(read("src/agent/loop/stream-consume.ts")).toContain("export const streamConsume")
     expect(read("src/agent/loop/compaction-wire.ts")).toContain("export const maybeCompact")
+    expect(read("src/agent/loop/closeout-critic-wire.ts")).toContain(
+      "export const maybeRunCloseoutCritic",
+    )
     expect(read("src/agent/loop/context-assembler.ts")).toContain("export const prepareTurnContext")
     expect(read("src/agent/loop/recovery-executor.ts")).toContain(
       "export const applyNonSuccessRecoveryAction",
+    )
+    expect(read("src/agent/recovery.ts")).toContain("export const buildRefusalFallbackInput")
+    expect(read("src/agent/recovery.ts")).toContain("export const resolveTurnAction")
+    expect(read("src/agent/loop/recovery-executor.ts")).not.toContain(
+      "export const resolveTurnAction",
     )
     expect(read("src/agent/loop/same-turn-engine.ts")).toContain("export const runTurn")
     expect(read("src/agent/loop/session-hooks.ts")).toContain(

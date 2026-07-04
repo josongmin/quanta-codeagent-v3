@@ -206,6 +206,37 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
     expect(planResolved.identityModeVariant).toBeDefined()
   })
 
+  test("HELL-PO-5b: resolver never returns the empty-system sentinel and composes the run-mode pack", async () => {
+    const { resolveIdentitySystemPrompt } = await import("@/host/runtime/agent-arg-builder")
+    const { buildSystemPromptForMode, buildSystemPromptForRunMode } = await import(
+      "@/agent/system-prompt"
+    )
+
+    const defaultHeadless = resolveIdentitySystemPrompt(undefined, {}, { runMode: "headless" })
+    expect(defaultHeadless.system).toBe(
+      buildSystemPromptForRunMode({ runMode: "headless", cwd: process.cwd() }),
+    )
+    expect(defaultHeadless.system.length).toBeGreaterThan(0)
+    expect(defaultHeadless.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "headless",
+      verifyStrategy: "none",
+    })
+
+    const planCiBot = resolveIdentitySystemPrompt("plan", {}, { runMode: "ci-bot" })
+    expect(planCiBot.system).toBe(
+      buildSystemPromptForMode({
+        mode: "plan",
+        promptPack: "ci-bot",
+      }),
+    )
+    expect(planCiBot.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "ci-bot",
+      verifyStrategy: "none",
+    })
+  })
+
   test("HELL-PO-6: VALID_IDENTITY_MODES ↔ IDENTITY_MODES bidirectional parity through the real parser (no drift)", async () => {
     // Parity guard for the CLI token set vs the identity SSOT. If a mode is added
     // to one side only, this drifts. Assert BOTH directions through the real

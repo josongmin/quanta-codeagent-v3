@@ -3,7 +3,7 @@ import { errMessage, logger } from "@/shared"
 import { maybeProposeRadarCard } from "../radar-producer-hook"
 import { freshRecovery } from "../recovery"
 import { buildWorkMetricsResources, turnSpanAttrs } from "../session-resources"
-import { interruptedCategory } from "../stop-category"
+import { completedCategory, interruptedCategory } from "../stop-category"
 import { flushTurnObservability } from "../turn-closeout"
 import type { TurnState } from "../turn-context"
 import type { AgentOutcome } from "../types"
@@ -121,7 +121,7 @@ export const executeTurnWithObservability = async (args: {
   return { result }
 }
 
-export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome | undefined> => {
+export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutcome> => {
   for (let turn = 1; turn <= ctx.cfg.maxTurns; turn++) {
     const turnReady = await prepareTurnIteration({
       cfg: ctx.cfg,
@@ -165,7 +165,11 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
       return ctx.finish(f.reason, f.turns, f.stopCategory)
     }
     if (resolution.kind === "finish") {
-      if (await shouldParkOnGate(ctx, resolution)) continue
+      if (await shouldParkOnGate(ctx, resolution)) {
+        // A wake on the LAST allowed turn must not overwrite a clean terminal
+        // completion with the outer-loop `max_turns` fallback.
+        if (turn < ctx.cfg.maxTurns) continue
+      }
       return ctx.finish(
         resolution.reason,
         resolution.turns,
@@ -181,5 +185,5 @@ export const runAgentTurnLoop = async (ctx: RunAgentContext): Promise<AgentOutco
       if (stop !== undefined) return ctx.finish(stop.reason, stop.turns, stop.stopCategory)
     }
   }
-  return undefined
+  return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
 }

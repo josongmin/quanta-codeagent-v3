@@ -87,6 +87,11 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
     expect(cfgSeen?.modePolicy?.mode).toBe("interactive")
     expect(cfgSeen?.modePolicy?.permission.kind).toBe("reviewer-backed")
     expect(cfgSeen?.budgetMeter).toBeDefined()
+    expect(cfgSeen?.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "interactive",
+      verifyStrategy: "none",
+    })
   })
 
   test("maps reason=error to exitCode=1", async () => {

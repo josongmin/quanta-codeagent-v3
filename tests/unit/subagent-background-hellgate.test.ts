@@ -244,6 +244,27 @@ describe("BackgroundSubagentScheduler — A. core", () => {
 // ─────────────────────────────────────────────────────────────
 
 describe("BackgroundSubagentScheduler — B. runner integration", () => {
+  test("HELL-10b: spec fields map losslessly into the runner request", () => {
+    const { runner, captured } = controlledRunner()
+    const sched = defaultBackgroundSubagentScheduler({ runner })
+    sched.fork({
+      task: "review PR #42",
+      modelOverride: "gpt-5",
+      maxTurns: 7,
+      workspace: "/tmp/alt-workspace",
+      metadata: { origin: "ci", priority: "high" },
+    })
+
+    expect(captured.req).toMatchObject({
+      prompt: "review PR #42",
+      depth: 0,
+      model: "gpt-5",
+      workspace: "/tmp/alt-workspace",
+      metadata: { origin: "ci", priority: "high" },
+      budget: { maxTurns: 7 },
+    })
+  })
+
   test("HELL-11: runner resolves ok=true → completed + outputDetail set", async () => {
     const { runner, resolve } = controlledRunner()
     const sched = defaultBackgroundSubagentScheduler({ runner })

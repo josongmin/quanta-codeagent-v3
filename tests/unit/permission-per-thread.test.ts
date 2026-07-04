@@ -185,6 +185,7 @@ describe("evaluateStack — precedence ordering", () => {
     setHostMode("h1", "full-access", store)
     const d = evaluateStack(mutatingAction, { mode: "bypass" }, stackCtx, { store })
     expect(d.kind).toBe("deny")
+    if (d.kind === "deny") expect(d.stackSource).toBe("per-thread")
   })
 
   test("per-thread full-access ALLOWS even when host is read-only", () => {
@@ -198,6 +199,7 @@ describe("evaluateStack — precedence ordering", () => {
     setHostMode("h1", "read-only", store)
     const d = evaluateStack(mutatingAction, { mode: "bypass" }, stackCtx, { store })
     expect(d.kind).toBe("deny")
+    if (d.kind === "deny") expect(d.stackSource).toBe("per-host")
   })
 
   test("per-host full-access ALLOWS when no per-thread record exists", () => {

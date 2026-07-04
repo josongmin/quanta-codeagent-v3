@@ -23,8 +23,8 @@ export const updatePlanTool = (): Tool<UpdatePlanInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: "update_plan unavailable: plan-mode is not active.",
-          failure: { mode: "error", modelVisibleError: "plan-mode is not active" },
+          output: "update_plan unavailable: no structured plan store is wired in this session.",
+          failure: { mode: "error", modelVisibleError: "structured plan store is not wired" },
         },
       }
       return

@@ -5,7 +5,7 @@ import {
   type PersonaKind,
   resolvePersona,
 } from "@/agent"
-import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
+import { identityForToken } from "@/agent/identity"
 import type { CredentialSource, LLMPort } from "@/llm"
 import { anyLspServerOnPath } from "@/lsp"
 import { Metrics, type StructuredLogger } from "@/observability"
@@ -142,7 +142,7 @@ export const pickPersona = (): PersonaKind => resolvePersona(process.env)
 export const pickIdentity = (): readonly string[] | undefined => {
   if (!readCliKnob("QUANTA_IDENTITY", "bool")) return undefined
   const raw = process.env.QUANTA_IDENTITY_MODE ?? "default"
-  return defaultIdentityProvider().identityFor(raw as IdentityMode)
+  return identityForToken(raw)
 }
 
 /** Build the main LLM adapter via the surface-agnostic core, with H7 / ADR-0139

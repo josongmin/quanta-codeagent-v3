@@ -11,6 +11,11 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
+import {
+  policyDenyStructured,
+  resolvedHardDenyProse,
+  withResolvedShellCommand,
+} from "@/agent/admissibility-gate/shared"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
 import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
@@ -76,6 +81,76 @@ const actionOf = (tool: Tool, input: unknown = {}): AdmissibilityAction => ({
   tool: tool.name,
   input,
   isReadOnly: tool.isReadOnly(),
+})
+
+describe("admissibility action fact enrichment", () => {
+  test("withResolvedShellCommand caches hardDenyProse for shell tools and strips stale facts for non-shell tools", () => {
+    const bash = makeTool("bash", { readOnly: false, schema: z.object({ command: z.string() }) })
+    ;(
+      bash as Tool & { extractShellCommand: (input: unknown) => string | null }
+    ).extractShellCommand = (input) => (input as { command: string }).command
+    const dangerous = withResolvedShellCommand(
+      cfg({ registry: new ToolRegistry([bash]) }),
+      actionOf(bash, { command: "rm -rf /" }),
+    )
+    expect(dangerous.shellCommand).toBe("rm -rf /")
+    expect(dangerous.hardDenyProse).toBe("Blocked dangerous command: rm -rf /")
+    expect(resolvedHardDenyProse(dangerous)).toBe("Blocked dangerous command: rm -rf /")
+
+    const read = makeTool("read", { readOnly: true, schema: z.object({ path: z.string() }) })
+    const stripped = withResolvedShellCommand(cfg({ registry: new ToolRegistry([read]) }), {
+      tool: "read",
+      input: { path: "x" },
+      isReadOnly: true,
+      shellCommand: "fake",
+      hardDenyProse: "fake",
+    })
+    expect("shellCommand" in stripped).toBe(false)
+    expect("hardDenyProse" in stripped).toBe(false)
+    expect(resolvedHardDenyProse(stripped)).toBeNull()
+  })
+})
+
+describe("policyDenyStructured authority mapping", () => {
+  test("hard deny maps to layer=hard-deny without stackSource", () => {
+    const reason = policyDenyStructured({
+      kind: "deny",
+      reason: "Blocked dangerous command: rm -rf /",
+      hardDeny: true,
+      stackSource: "hard-deny",
+    })
+    expect(reason.layer).toBe("hard-deny")
+    expect(reason.safeReason).toBe("blocked dangerous command (pattern hit)")
+    expect("stackSource" in reason).toBe(false)
+    expect("pillar" in reason).toBe(false)
+  })
+
+  test("per-thread soft deny maps to layer=stack + pillar=sandbox", () => {
+    const reason = policyDenyStructured({
+      kind: "deny",
+      reason: "Per-thread policy (read-only) refuses write on /repo",
+      hardDeny: false,
+      stackSource: "per-thread",
+    })
+    expect(reason.layer).toBe("stack")
+    expect(reason.stackSource).toBe("per-thread")
+    expect(reason.pillar).toBe("sandbox")
+  })
+
+  test("broker-denied global-default soft deny maps to layer=broker", () => {
+    const reason = policyDenyStructured(
+      {
+        kind: "deny",
+        reason: "classifier blocked",
+        hardDeny: false,
+        stackSource: "global-default",
+      },
+      { brokerDenied: true },
+    )
+    expect(reason.layer).toBe("broker")
+    expect(reason.stackSource).toBe("global-default")
+    expect("pillar" in reason).toBe(false)
+  })
 })
 
 const originalPermissionState = process.env.QUANTA_PERMISSION_STATE
@@ -760,9 +835,16 @@ describe("runAdmissibilityGate: real sensitive tools are universal-floor gated [
       permission: { mode: "bypass" },
     } as Partial<AgentConfig>)
     const action: AdmissibilityAction = { tool: "git_push", input: {}, isReadOnly: false }
-    const res = await runAdmissibilityGate(call("git_push", {}), c, { mode: "bypass" }, action, undefined, {
-      reviewerPort,
-    })
+    const res = await runAdmissibilityGate(
+      call("git_push", {}),
+      c,
+      { mode: "bypass" },
+      action,
+      undefined,
+      {
+        reviewerPort,
+      },
+    )
     // THE user-facing behavior: even under bypass + no HITL opt-in, the modal is
     // shown exactly once, and a decline blocks the push.
     expect(modalShown).toBe(1)

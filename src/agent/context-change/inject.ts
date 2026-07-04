@@ -32,6 +32,7 @@
  */
 
 import type { Message } from "@/llm"
+import { makeSyntheticUserMessage } from "../synthetic-user"
 import { embedUntrusted } from "../untrusted"
 import type { ContextEvent } from "./types"
 
@@ -156,10 +157,9 @@ const buildOne = (event: ContextEvent): Message => {
     }
   }
 
-  return {
-    role: "user",
-    content: [{ type: "text", text: embedUntrusted(tag, body) }],
-  }
+  return makeSyntheticUserMessage("context-change", [
+    { type: "text", text: embedUntrusted(tag, body) },
+  ])
 }
 
 /** Build a persistent-injection message list from a typed-event stream.

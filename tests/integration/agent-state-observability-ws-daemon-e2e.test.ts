@@ -341,7 +341,14 @@ describe("W4 — observability + agent-state through the REAL daemon WS", () => 
     // Push three representative agent-state observations through the REAL source.
     // (Mirrors what `wireAgentStateTap` hands the sink when the loop emits.)
     source.sink.capture({ type: "plan_created", plan: { id: "p", name: "P", version: 1, todos: [] } })
-    source.sink.capture({ type: "mode_changed", from: "default", to: "plan" })
+    source.sink.capture({
+      type: "mode_changed",
+      from: "default",
+      to: "plan",
+      fromAgentMode: "editor",
+      toAgentMode: "plan",
+      reason: "plan_enter_requested",
+    })
     source.sink.capture({ type: "tool_progress", id: "call-9", name: "shell", message: "go" })
 
     const plan = await client.waitAgentState((m) => m.kind === "plan.created")
@@ -350,6 +357,11 @@ describe("W4 — observability + agent-state through the REAL daemon WS", () => 
     expect(plan.kind).toBe("plan.created")
     expect(mode.kind).toBe("mode.changed")
     expect(prog.kind).toBe("tool.progress")
+    if (mode.kind === "mode.changed") {
+      expect(mode.fromAgentMode).toBe("editor")
+      expect(mode.toAgentMode).toBe("plan")
+      expect(mode.reason).toBe("plan_enter_requested")
+    }
     // The mapper RENAME survives the real wire (id → toolCallId, name → toolName).
     if (prog.kind === "tool.progress") {
       expect(prog.toolCallId).toBe("call-9")

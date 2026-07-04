@@ -6,7 +6,7 @@ import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
 import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { EditToolContext, Tool, ToolEvent, ToolResult } from "../types"
 
 /** ADR-0474 — stale-read-guard check for the write tool. Returns a failure
  *  `ToolResult` when the (existing) target was READ this session and externally
@@ -15,7 +15,7 @@ import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
  *  Extracted to keep `execute` under the cognitive-complexity cap. */
 const staleWriteGuard = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   path: string,
   existed: boolean,
 ): Promise<ToolResult | null> => {
@@ -47,7 +47,7 @@ const staleWriteGuard = async (
  *  biome cognitive-complexity cap. */
 const commitWrite = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   path: string,
   content: string,
 ): Promise<void> => {
@@ -67,7 +67,7 @@ const commitWrite = async (
  *  ADR-0091 git-write-protection THEN jun-6 exfil-rail (b) glob-in-write. Both
  *  default-OFF (unwired guard / flag absent ⇒ `null` ⇒ byte-identical). Extracted
  *  so `execute` stays under the biome cognitive-complexity cap. */
-const writeStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
+const writeStaticDeny = (path: string, ctx: EditToolContext): ToolEvent | null =>
   gitWriteGuardDeny(path, ctx) ?? globWriteGuardEvent(path, ctx)
 
 /** Pre-commit denies for `write` (AFTER existence check, BEFORE commit): ADR-0474
@@ -76,7 +76,7 @@ const writeStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
  *  biome cognitive-complexity cap. */
 const writePreCommitDeny = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   path: string,
   existed: boolean,
 ): Promise<ToolResult | null> =>
@@ -124,7 +124,7 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
     // `QUANTA_TOOL_INTERRUPT_BLOCK` knob is on (see ToolInterruptPolicy).
     interruptBehavior: (): "block" => "block",
 
-    async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: Input, ctx: EditToolContext): AsyncIterable<ToolEvent> {
       // Static pre-fs denies (git-write-protection + jun-6 glob-in-write guard).
       const staticDeny = writeStaticDeny(input.path, ctx)
       if (staticDeny) {

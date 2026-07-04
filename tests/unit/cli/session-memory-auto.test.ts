@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync } from "node:fs"
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -134,6 +134,22 @@ describe("session-memory-auto", () => {
     })
     expect(out).toBeDefined()
     expect(out?.memoryConsolidator.enabled).toBe(true)
+    out?.dispose()
+  })
+
+  test("buildSessionMemoryAutoWires loads memory_summary.md as a separate field", async () => {
+    mkdirSync(join(tempHome, ".quanta", "memory"), { recursive: true })
+    writeFileSync(join(tempHome, ".quanta", "memory", "memory_summary.md"), "- durable hint\n")
+
+    const llm = { stream: async function* () {} } as never
+    const out = await buildSessionMemoryAutoWires({
+      env: {},
+      llm,
+      sessionId: "sess-memory-summary",
+      homeDir: tempHome,
+    })
+
+    expect(out?.memorySummaryMd).toBe("- durable hint\n")
     out?.dispose()
   })
 

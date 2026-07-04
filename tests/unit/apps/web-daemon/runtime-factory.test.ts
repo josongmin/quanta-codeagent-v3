@@ -80,4 +80,9 @@ describe("web-daemon runtime factory", () => {
     const src = readFileSync(join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"), "utf8")
     expect(src).toMatch(/hitl:\s*\{\s*enabled:\s*true\s*\}/)
   })
+
+  test("the production runtime base publishes the interactive prompt surface profile", () => {
+    const src = readFileSync(join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"), "utf8")
+    expect(src).toMatch(/promptSurfaceProfile:\s*promptSurfaceProfileForRunMode\("interactive"\)/)
+  })
 })

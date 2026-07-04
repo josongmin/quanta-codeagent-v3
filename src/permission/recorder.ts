@@ -91,6 +91,17 @@ export type PermissionStackSource =
   | "per-host"
   | "global-default"
 
+/** Deny-capable subset of {@link PermissionStackSource}. Allow-only axes are
+ *  excluded so a typed deny can never claim an impossible source. */
+export const PERMISSION_DENY_SOURCES = [
+  "hard-deny",
+  "per-thread",
+  "per-host",
+  "global-default",
+] as const satisfies ReadonlyArray<PermissionStackSource>
+
+export type PermissionDenySource = (typeof PERMISSION_DENY_SOURCES)[number]
+
 /** Coarse decision-layer label — which subsystem owned the final verdict.
  *  Matches the canonical `quanta.permission.decided_by` enum. */
 export type PermissionDecidedBy = "reviewer" | "stack" | "hitl" | "hook"

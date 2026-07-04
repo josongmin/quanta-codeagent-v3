@@ -52,12 +52,13 @@ export interface SubagentBlock {
   cleanup: () => Promise<void>
   /** B2/B3 — the 6-tool (`spawn_agent`/`wait_agent`/…) dispatch deps the host
    *  config asked for, surfaced for whatever assembles a `Subagent6Deps`. The
-   *  trio tools above are wired directly in this builder; the 6-tool router
-   *  has no live assembly site in the loop today, so the two 6-tool-only knobs
-   *  (`waitTimeoutPolicy` for `wait_agent`, `maxConcurrent` for `spawn_agent`)
-   *  are EXPOSED here rather than dropped. Both omitted when the corresponding
-   *  config field is absent ⇒ the consumer sees `{}` and the 6-tool defaults
-   *  (30s policy / unlimited concurrency) apply — byte-identical to today. */
+   *  trio tools above are wired directly in this builder; `waitTimeoutPolicy`
+   *  already clamps trio `task_output(block:true)` and `maxConcurrent` now
+   *  caps trio background `agent` launches too. The 6-tool router still needs
+   *  the same knobs exposed here for any external `Subagent6Deps` assembler.
+   *  Both omitted when the corresponding config field is absent ⇒ the consumer
+   *  sees `{}` and the 6-tool defaults (30s policy / unlimited concurrency)
+   *  apply — byte-identical to today. */
   subagent6Deps: {
     waitTimeoutPolicy?: WaitTimeoutPolicy
     maxConcurrent?: number
@@ -122,6 +123,9 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
   const agentTool = createAgentTool({
     runner,
     ...(config.subagent.maxDepth !== undefined ? { maxDepth: config.subagent.maxDepth } : {}),
+    ...(config.subagent.maxConcurrent !== undefined
+      ? { maxConcurrent: config.subagent.maxConcurrent }
+      : {}),
     ...(config.subagent.taskRegistry !== undefined
       ? { registry: config.subagent.taskRegistry }
       : {}),

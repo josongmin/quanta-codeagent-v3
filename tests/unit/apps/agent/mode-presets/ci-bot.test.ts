@@ -16,6 +16,7 @@ import { describe, expect, test } from "bun:test"
 import type { AssembleRequest } from "@/../src/apps/agent/assemble"
 import { buildCiBotWiring, runMode } from "@/../src/apps/agent/mode-presets/ci-bot"
 import type { AgentConfig, AgentOutcome } from "@/agent"
+import { buildSystemPromptForRunMode } from "@/agent/system-prompt"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
@@ -214,6 +215,11 @@ describe("ci-bot.runMode — gh + runAgent flow", () => {
     }
     await runMode(baseReq({ seams }))
     const firstMsg = cfgSeen?.messages[0]
+    expect(cfgSeen?.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "ci-bot",
+      verifyStrategy: "none",
+    })
     expect(firstMsg?.role).toBe("user")
     const txt =
       firstMsg && Array.isArray(firstMsg.content)
@@ -222,6 +228,7 @@ describe("ci-bot.runMode — gh + runAgent flow", () => {
             .map((p) => (p as { text: string }).text)
             .join("")
         : ""
+    expect(cfgSeen?.system).toBe(buildSystemPromptForRunMode({ runMode: "ci-bot", cwd: "/tmp" }))
     expect(txt).toContain("PR-JSON-PAYLOAD")
     expect(txt).toContain("owner/repo#42")
   })

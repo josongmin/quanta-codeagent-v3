@@ -101,6 +101,11 @@ describe("GAP3 onPromptAssembled — loop firing", () => {
         llm,
         messages: [userText("hello")],
         system: "test-system-prompt",
+        promptSurfaceProfile: {
+          envPosture: "frozen",
+          promptPack: "headless",
+          verifyStrategy: "none",
+        },
         onPromptAssembled: (s) => snapshots.push(s),
       }),
     )
@@ -115,6 +120,16 @@ describe("GAP3 onPromptAssembled — loop firing", () => {
     expect(sysText).toContain("test-system-prompt")
     // the snapshot carries the layout + presence flags the REPL reconstructs from.
     expect(snap?.layout === "single_block" || snap?.layout === "four_section").toBe(true)
+    expect(snap?.surfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "headless",
+      verifyStrategy: "none",
+    })
+    expect(snap?.activeLevers).toEqual({
+      budgetMeter: false,
+      budgetLedger: false,
+      subagentTurnGate: false,
+    })
   })
 
   test("[A2] absent sink ⇒ never called (byte-identical regression anchor)", async () => {
@@ -188,7 +203,14 @@ describe("GAP3 onPromptAssembled — RuntimeFacadeComposeOptions flow", () => {
     const snapshots: Snapshot[] = []
     const llm = new ScriptedLLM([textScript("done")])
     const { runtimeContext } = await createRuntimeFromAgentConfigBase({
-      base: baseFor(root, llm),
+      base: {
+        ...baseFor(root, llm),
+        promptSurfaceProfile: {
+          envPosture: "frozen",
+          promptPack: "interactive",
+          verifyStrategy: "none",
+        },
+      },
       history: [],
       state: undefined,
       idMeta: undefined,
@@ -212,6 +234,11 @@ describe("GAP3 onPromptAssembled — RuntimeFacadeComposeOptions flow", () => {
       const snap = snapshots[0]
       expect(Array.isArray(snap?.system)).toBe(true)
       expect((snap?.system.length ?? 0) > 0).toBe(true)
+      expect(snap?.surfaceProfile).toEqual({
+        envPosture: "frozen",
+        promptPack: "interactive",
+        verifyStrategy: "none",
+      })
     } finally {
       await session.close()
       await runtime.close()

@@ -23,11 +23,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { AgentArgsError, parseAgentArgs } from "@/../src/apps/agent/cli-args"
 import { buildBaseFromArgs, PERMISSION_PROFILE_SESSION_THREAD } from "@/../src/apps/agent/index"
-import { NAMED_PROFILES, type TwoLayerManager } from "@/permission"
+import { NAMED_PROFILE_NAMES, NAMED_PROFILES, type TwoLayerManager } from "@/permission"
 
 describe("Track A2 wire — CLI parser", () => {
   test("HELL-A2W-01 accepts each named profile", () => {
-    for (const name of ["default", "restricted", "trusted"] as const) {
+    for (const name of NAMED_PROFILE_NAMES) {
       const args = parseAgentArgs(["--mode", "interactive", "--permission-profile", name])
       expect(args.permissionProfile).toBe(name)
     }

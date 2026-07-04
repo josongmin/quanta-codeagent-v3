@@ -98,48 +98,45 @@ export const maybeStartLspPrewarm = (cfg: AgentConfig): void => {
 }
 
 export const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
-  const features = await buildSessionFeatures(config)
-  if (config.onWorkingStateReady !== undefined) {
-    try {
-      const ws = features.workingState
-      config.onWorkingStateReady(() => ws?.snapshot())
-    } catch (e) {
-      config.stream.emit({
-        type: "error",
-        message: `onWorkingStateReady observer threw: ${errMessage(e)}`,
-      })
-    }
-  }
-  const baseCfg = buildEffectiveConfig(config, features.extraTools)
-  const cfg: AgentConfig = baseCfg === config ? { ...baseCfg } : baseCfg
-  const pendingPlanExitRef: { current: PendingPlanExit | null } = { current: null }
-  const onPlanExitOutcome = cfg.onPlanExitOutcome
-  cfg.onPlanExitOutcome = (event) => {
-    pendingPlanExitRef.current = event
-    onPlanExitOutcome?.(event)
-  }
-  // Plan-ENTRY mirror: the dispatch seam calls cfg.onPlanEnterRequest when the
-  // model fires `enter_plan_mode`; record it so the turn boundary flips into
-  // plan mode (applyPendingPlanEntry). Chains any host-supplied observer.
-  const pendingPlanEntryRef: { current: PendingPlanEntry | null } = { current: null }
-  const onPlanEnterRequest = cfg.onPlanEnterRequest
-  cfg.onPlanEnterRequest = (event) => {
-    pendingPlanEntryRef.current = event
-    onPlanEnterRequest?.(event)
-  }
-
-  const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
-  // The wm is the SINGLE mutation chokepoint. When `deltaTokenCount` is ON we
-  // wrap it with a delta-counter-maintaining decorator so the compaction
-  // threshold gates can read `tokenTotal()` in O(1) instead of re-scanning the
-  // whole transcript (RFC jun-6-delta-token-accounting). Default-OFF the wm is
-  // the RAW result — no decorator, no `tokenTotal` — and every read site falls
-  // back to `estimateTokens`, byte-identical.
+  const cfg: AgentConfig = { ...config }
+  // Finalize the session-owned LLM BEFORE feature construction so any
+  // stateful feature that captures `config.llm` (classifier, branch-search,
+  // etc.) sees the same decorated port the main turn path uses.
   const rawWm: WorkingMemory<Message> = createWorkingMemory<Message>(buildSeedMessages(cfg))
   const wm: WorkingMemory<Message> = runtimeConfig().deltaTokenCount
     ? decorateWithDeltaCounter(rawWm)
     : rawWm
   cfg.llm = maybeWrapImageSanitizationRetry(cfg, wm)
+  const features = await buildSessionFeatures(cfg)
+  if (cfg.onWorkingStateReady !== undefined) {
+    try {
+      const ws = features.workingState
+      cfg.onWorkingStateReady(() => ws?.snapshot())
+    } catch (e) {
+      cfg.stream.emit({
+        type: "error",
+        message: `onWorkingStateReady observer threw: ${errMessage(e)}`,
+      })
+    }
+  }
+  buildEffectiveConfig(cfg, features.extraTools)
+  const pendingPlanExitRef: { current: PendingPlanExit[] } = { current: [] }
+  const onPlanExitOutcome = cfg.onPlanExitOutcome
+  cfg.onPlanExitOutcome = (event) => {
+    pendingPlanExitRef.current.push(event)
+    onPlanExitOutcome?.(event)
+  }
+  // Plan-ENTRY mirror: the dispatch seam calls cfg.onPlanEnterRequest when the
+  // model fires `enter_plan_mode`; record it so the turn boundary flips into
+  // plan mode (applyPendingPlanEntry). Chains any host-supplied observer.
+  const pendingPlanEntryRef: { current: PendingPlanEntry[] } = { current: [] }
+  const onPlanEnterRequest = cfg.onPlanEnterRequest
+  cfg.onPlanEnterRequest = (event) => {
+    pendingPlanEntryRef.current.push(event)
+    onPlanEnterRequest?.(event)
+  }
+
+  const skillGate = buildSkillGate(features.skillAllowlists, features.skillOverrides)
   const recorder = cfg.metrics ? new AgentRecorder(cfg.metrics) : undefined
   const ttfm = await maybeRunSessionPrewarm(cfg, recorder)
   // RFC jun-17 — fire-and-forget background LSP workspace warm (default-OFF).

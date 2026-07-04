@@ -47,6 +47,7 @@ import {
 } from "../../../src/apps/cli/repl/slash-surface"
 import { runSlashCommand } from "../../../src/apps/cli/slash-commands"
 import { createTextInbox } from "../../../src/apps/cli/text-inbox"
+import { createIdentityModeSessionState } from "../../../src/runner/assemble"
 
 /* ------------------------------------------------------------------ */
 /* Fakes                                                                */
@@ -215,6 +216,26 @@ describe("HELL-MEGA — ADR-0291 REPL slash-surface ctx mega-wire", () => {
     expect(typeof u).toBe("object")
     expect((u as { kind: string }).kind).toBe("unknown")
     expect(ctx.identity?.list().length).toBeGreaterThan(0)
+  })
+
+  test("HELL-MEGA-07b: identityModeState onboarding updates shared state + fires rebuild", () => {
+    const identityModeState = createIdentityModeSessionState({
+      registry: defaultModeVariantRegistry(),
+      defaultMode: "default",
+    })
+    let rebuilds = 0
+    const ctx = buildReplSlashCtx({
+      ...minimalArgs(),
+      identityModeState,
+      onIdentityModeChange: () => {
+        rebuilds += 1
+      },
+    })
+    expect(ctx.identity).toBeDefined()
+    expect(ctx.identity?.set("onboarding")).toBe("ok")
+    expect(identityModeState.get()).toBe("onboarding")
+    expect(ctx.identity?.get()).toBe("onboarding")
+    expect(rebuilds).toBe(1)
   })
 
   test("HELL-MEGA-08: focusChainTracker present → ctx.focusChain {snapshot,reset,skip}", () => {

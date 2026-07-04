@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test"
 import { BudgetMeter } from "@/agent/budget"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "@/agent/loop/turn-outcome"
+import { createInMemoryPlanStore } from "@/agent/plan/state"
 import type { RunAgentContext, TurnResult } from "@/agent/loop/types"
 import type { AgentConfig } from "@/agent/types"
 import type { Message } from "@/llm"
@@ -43,8 +44,8 @@ const baseArgs = (overrides?: {
 }) => {
   const stream = overrides?.stream ?? new RecordingStream()
   const wm = createWorkingMemory<Message>()
-  const pendingPlanExitRef: { current: null } = { current: null }
-  const pendingPlanEntryRef: { current: null } = { current: null }
+  const pendingPlanExitRef: { current: never[] } = { current: [] }
+  const pendingPlanEntryRef: { current: never[] } = { current: [] }
   const hookPromptPending: never[] = []
   const cfg: AgentConfig = {
     llm: { stream: async function* () {} },
@@ -162,6 +163,149 @@ describe("resolveTurnLoopOutcome", () => {
       reason: "budget_exhausted",
     })
     expect(args.wm.snapshot()).toHaveLength(1)
+  })
+
+  test("approved exit is applied before a budget finish seals the turn", async () => {
+    const stream = new RecordingStream()
+    const args = baseArgs({
+      stream,
+      budgetExhausted: true,
+      result: {
+        kind: "tools",
+        message: assistantText("ok"),
+        resultBlocks: [{ type: "tool_result", tool_use_id: "pe1", content: "approved" }],
+      },
+    })
+    args.cfg.planMode = true
+    args.cfg.mode = "plan"
+    args.pendingPlanExitRef.current = [
+      { plan: "1. ship it", outcome: { decision: "approved" } },
+    ] as typeof args.pendingPlanExitRef.current
+
+    const resolution = await resolveTurnLoopOutcome(args)
+
+    expect(resolution).toMatchObject({ kind: "finish", reason: "budget_exhausted" })
+    expect(args.cfg.mode).toBe("default")
+    expect(stream.events).toContainEqual({
+      type: "mode_changed",
+      from: "plan",
+      to: "default",
+      fromAgentMode: "plan",
+      toAgentMode: "default",
+      reason: "plan_exit_approved",
+    })
+  })
+
+  test("same-turn exit dominates contradictory plan-entry requests", async () => {
+    const stream = new RecordingStream()
+    const args = baseArgs({
+      stream,
+      result: {
+        kind: "tools",
+        message: assistantText("ok"),
+        resultBlocks: [{ type: "tool_result", tool_use_id: "mix1", content: "x" }],
+      },
+    })
+    args.cfg.planMode = true
+    args.cfg.mode = "plan"
+    args.pendingPlanExitRef.current = [
+      { plan: "1. ship it", outcome: { decision: "approved" } },
+    ] as typeof args.pendingPlanExitRef.current
+    args.pendingPlanEntryRef.current = [{ reason: "go back to planning" }] as typeof args.pendingPlanEntryRef.current
+
+    const resolution = await resolveTurnLoopOutcome(args)
+
+    expect(resolution).toEqual({ kind: "continue" })
+    expect(args.cfg.mode).toBe("default")
+    expect(stream.events.filter((e) => e.type === "mode_changed")).toEqual([
+      {
+        type: "mode_changed",
+        from: "plan",
+        to: "default",
+        fromAgentMode: "plan",
+        toAgentMode: "default",
+        reason: "plan_exit_approved",
+      },
+    ])
+  })
+
+  test("when multiple same-turn exits are queued, the final exit outcome is authoritative", async () => {
+    const stream = new RecordingStream()
+    const args = baseArgs({
+      stream,
+      result: {
+        kind: "tools",
+        message: assistantText("ok"),
+        resultBlocks: [{ type: "tool_result", tool_use_id: "mix2", content: "x" }],
+      },
+    })
+    const planStore = createInMemoryPlanStore({ now: () => 1 })
+    expect(
+      planStore.create({
+        name: "Queued plan",
+        overview: "should survive the final approval",
+        todos: [{ content: "ship it" }],
+      }).ok,
+    ).toBe(true)
+    args.cfg.planMode = true
+    args.cfg.mode = "plan"
+    args.cfg.planStore = planStore
+    args.pendingPlanExitRef.current = [
+      { plan: "1. reject first", outcome: { decision: "rejected" } },
+      { plan: "1. approve last", outcome: { decision: "approved" } },
+    ] as typeof args.pendingPlanExitRef.current
+
+    const resolution = await resolveTurnLoopOutcome(args)
+
+    expect(resolution).toEqual({ kind: "continue" })
+    expect(args.cfg.mode).toBe("default")
+    expect(planStore.current()).toBeNull()
+    expect(stream.events.filter((e) => e.type === "mode_changed")).toEqual([
+      {
+        type: "mode_changed",
+        from: "plan",
+        to: "default",
+        fromAgentMode: "plan",
+        toAgentMode: "default",
+        reason: "plan_exit_approved",
+      },
+    ])
+  })
+
+  test("interrupted turns discard queued plan lifecycle so stale mode flips do not bleed into the next turn", async () => {
+    const args = baseArgs({
+      result: {
+        kind: "interrupted",
+      },
+    })
+    args.pendingPlanExitRef.current = [
+      { plan: "1. stale exit", outcome: { decision: "approved" } },
+    ] as typeof args.pendingPlanExitRef.current
+    args.pendingPlanEntryRef.current = [{ reason: "stale entry" }] as typeof args.pendingPlanEntryRef.current
+
+    const resolution = await resolveTurnLoopOutcome(args)
+
+    expect(resolution).toEqual({ kind: "park", turns: 2 })
+    expect(args.pendingPlanExitRef.current).toEqual([])
+    expect(args.pendingPlanEntryRef.current).toEqual([])
+  })
+
+  test("aborted turns discard queued plan lifecycle so stale callbacks cannot reapply later", async () => {
+    const args = baseArgs({
+      result: {
+        kind: "aborted",
+      },
+    })
+    args.pendingPlanExitRef.current = [
+      { plan: "1. stale exit", outcome: { decision: "approved" } },
+    ] as typeof args.pendingPlanExitRef.current
+    args.pendingPlanEntryRef.current = [{ reason: "stale entry" }] as typeof args.pendingPlanEntryRef.current
+
+    const resolution = await resolveTurnLoopOutcome(args)
+
+    expect(resolution).toMatchObject({ kind: "finish", reason: "aborted", turns: 2 })
+    expect(args.pendingPlanExitRef.current).toEqual([])
+    expect(args.pendingPlanEntryRef.current).toEqual([])
   })
 })
 

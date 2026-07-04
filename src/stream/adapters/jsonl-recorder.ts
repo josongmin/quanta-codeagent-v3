@@ -691,13 +691,16 @@ const planUserInputResolvedData = (
 })
 
 /** Plan-mode cluster (P3): collaboration-mode transition. `reason` is emitted
- *  only when present. */
+ *  only when present. The finer `fromAgentMode` / `toAgentMode` posture fields
+ *  ride through unchanged when the emitter supplied them. */
 const modeChangedData = (
   e: Extract<AgentEvent, { type: "mode_changed" }>,
 ): Record<string, unknown> => ({
   reason: "mode_changed",
   from: e.from,
   to: e.to,
+  ...(e.fromAgentMode !== undefined ? { fromAgentMode: e.fromAgentMode } : {}),
+  ...(e.toAgentMode !== undefined ? { toAgentMode: e.toAgentMode } : {}),
   ...(e.reason !== undefined ? { transitionReason: e.reason } : {}),
 })
 

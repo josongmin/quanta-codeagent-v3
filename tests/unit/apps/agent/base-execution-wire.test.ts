@@ -73,4 +73,14 @@ describe("apps/agent base execution wire", () => {
     expect(base.fastApplyFallback).toBeUndefined()
     expect(base.effortClassifier).toBeUndefined()
   })
+
+  test("partial cwd is the composition-root SSOT for the assembled base", () => {
+    const base = buildBaseFromArgs({
+      mode: "interactive",
+      dials: {},
+      cwd: "/tmp/quanta-custom-cwd",
+    })
+
+    expect(base.cwd).toBe("/tmp/quanta-custom-cwd")
+  })
 })

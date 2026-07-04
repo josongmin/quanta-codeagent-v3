@@ -65,6 +65,8 @@ export interface ModeChangedMessage {
   readonly kind: "mode.changed"
   readonly from: "default" | "plan"
   readonly to: "default" | "plan"
+  readonly fromAgentMode?: string
+  readonly toAgentMode?: string
   readonly reason?: string
   readonly emittedAt: number
 }

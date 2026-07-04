@@ -5,7 +5,7 @@ import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
 import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
-import type { Tool, ToolContext, ToolEvent, ToolFailure } from "../types"
+import type { EditToolContext, Tool, ToolEvent, ToolFailure } from "../types"
 import { resolveEditBase } from "../worktree/cwd-override"
 import { applyExactEdit } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
@@ -246,7 +246,7 @@ const verifyEditScopedMerge = (
  *  or whose merge fails verification ⇒ `null` ⇒ caller falls through to the
  *  byte-identical typed mismatch. Absent port ⇒ never called (byte-identical). */
 const tryFastApplyMergeRung = async (
-  ctx: ToolContext,
+  ctx: EditToolContext,
   source: string,
   input: Input,
   lineRanges: readonly LineRange[] | undefined,
@@ -322,7 +322,7 @@ const resolveLineRanges = (
 const planEdit = async (
   fs: FileSystemPort,
   input: Input,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   // ticket-11 — the resolved {path,base} the worktree edit-fence produced. The
   // FS read/commit use `target.path`/`target.base`; the model-facing messages
   // keep `input.path` (the raw path the model typed). Absent worktree ⇒
@@ -425,7 +425,7 @@ const planEdit = async (
  *  Extracted to keep `execute` flat. */
 const commitEdit = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   // ticket-11 — resolved write target: `path` is the worktree-resolved path,
   // `base` is the SESSION jail root (absolute paths stay session-jailed; the
   // worktree never re-jails). Absent worktree ⇒ `{ input.path, ctx.cwd }`.
@@ -448,7 +448,7 @@ const commitEdit = async (
  *  ADR-0091 git-write-protection THEN jun-6 exfil-rail (b) glob-in-write. Both
  *  default-OFF (`null` ⇒ byte-identical). Extracted so `execute` stays under the
  *  biome cognitive-complexity cap. */
-const editStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
+const editStaticDeny = (path: string, ctx: EditToolContext): ToolEvent | null =>
   gitWriteGuardDeny(path, ctx) ?? globWriteGuardEvent(path, ctx)
 
 /** Pre-commit denies for `edit` (AFTER planning, BEFORE commit): ADR-0474
@@ -457,7 +457,7 @@ const editStaticDeny = (path: string, ctx: ToolContext): ToolEvent | null =>
  *  biome cognitive-complexity cap. */
 const editPreCommitDeny = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   // ticket-11 — resolved target (worktree-aware path + session jail base).
   target: { readonly path: string; readonly base: string },
 ): Promise<ToolEvent | null> => {
@@ -511,7 +511,7 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
   // `QUANTA_TOOL_INTERRUPT_BLOCK` knob is on (see ToolInterruptPolicy).
   interruptBehavior: (): "block" => "block",
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: EditToolContext): AsyncIterable<ToolEvent> {
     // Static pre-read denies (git-write-protection + jun-6 glob-in-write guard).
     const staticDeny = editStaticDeny(input.path, ctx)
     if (staticDeny) {

@@ -3,7 +3,8 @@
  */
 
 import type { HookPromptInject } from "../hooks"
-import { resolveCollaborationMode } from "../mode"
+import { applyCollaborationModeTransition } from "../mode"
+import { renderPlanAsMarkdown } from "../plan/render-text"
 import { planToStreamMirror } from "../plan/stream-mirror"
 import { applyPlanExitOutcome } from "../plan-exit-lifecycle"
 import type { AgentConfig } from "../types"
@@ -29,25 +30,32 @@ export const applyPendingPlanExit = (
 ): void => {
   if (pending === null) return
   if (pending.outcome.decision === "approved") {
-    const from = resolveCollaborationMode(cfg)
-    cfg.planMode = false
-    cfg.mode = "default"
-    cfg.collaborationMode = "default"
-    hookPromptPending.push(approvedPlanReminder(pending.plan))
+    const transition = applyCollaborationModeTransition(cfg, "default")
+    let approvedPlanText = pending.plan
     if (cfg.planStore !== undefined) {
       const lifecycle = applyPlanExitOutcome(pending.outcome, cfg.planStore)
       if (lifecycle.kind === "freeze" && lifecycle.snapshot !== null) {
+        approvedPlanText = renderPlanAsMarkdown(lifecycle.snapshot.plan)
         cfg.stream.emit({
           type: "plan_snapshot",
           plan: planToStreamMirror(lifecycle.snapshot.plan),
         })
       }
+      // Freeze-on-approval is modeled as "emit the by-value approved snapshot,
+      // then drop the mutable live store". Leaving the store alive would let
+      // later turns mutate a plan the prompt just framed as read-only, and the
+      // focus-chain bridge would keep re-injecting stale planning todos during
+      // execution turns.
+      cfg.planStore.clear()
     }
-    if (from !== "default") {
+    hookPromptPending.push(approvedPlanReminder(approvedPlanText))
+    if (transition.changed) {
       cfg.stream.emit({
         type: "mode_changed",
-        from,
-        to: "default",
+        from: transition.from,
+        to: transition.to,
+        fromAgentMode: transition.fromAgentMode,
+        toAgentMode: transition.toAgentMode,
         reason: "plan_exit_approved",
       })
     }

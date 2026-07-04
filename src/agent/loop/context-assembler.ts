@@ -2,6 +2,7 @@ import type { Message } from "@/llm"
 import { resolveModelWindow } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { errMessage, runtimeConfig } from "@/shared"
+import type { PromptActiveLeversSnapshot } from "@/shared"
 import type { TaskBudget } from "../budget"
 import type { BgSummaryPayload } from "../compaction"
 import { TokenBaselineBox } from "../compaction"
@@ -19,6 +20,7 @@ import {
 import { recallContext } from "../memory"
 import type { AgentRecorder } from "../metrics"
 import { buildTurnContext } from "../prompt"
+import { isSyntheticUserMessage } from "../synthetic-user"
 import type { AgentConfig, MemoryCitation } from "../types"
 import type { WorkingStateSession } from "../working-state"
 import { maybeCompact, resolveContextEventsForTurn, staticSystemFor } from "./compaction-wire"
@@ -38,7 +40,7 @@ export const deriveRecallQuery = (wm: WorkingMemory<Message>): string | undefine
   const snap = wm.snapshot()
   for (let i = snap.length - 1; i >= 0; i--) {
     const m = snap[i]
-    if (m === undefined || m.role !== "user") continue
+    if (m === undefined || m.role !== "user" || isSyntheticUserMessage(m)) continue
     const t = m.content
       .filter((b) => b.type === "text")
       .map((b) => (b.type === "text" ? b.text : ""))
@@ -94,6 +96,12 @@ export const resolveMemoryContext = async (
   }
 }
 
+const resolvePromptActiveLevers = (config: AgentConfig): PromptActiveLeversSnapshot => ({
+  budgetMeter: config.budgetMeter !== undefined,
+  budgetLedger: config.budgetLedger !== undefined,
+  subagentTurnGate: config.subagentTurnGate !== undefined,
+})
+
 export const resolveMentionInjectionMessages = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -122,7 +130,7 @@ export const latestUserTextFromWm = (wm: WorkingMemory<Message>): string | undef
   const snap = wm.snapshot()
   for (let i = snap.length - 1; i >= 0; i--) {
     const msg = snap[i]
-    if (msg === undefined || msg.role !== "user") continue
+    if (msg === undefined || msg.role !== "user" || isSyntheticUserMessage(msg)) continue
     for (const block of msg.content) {
       if (block.type === "text") return block.text
     }
@@ -140,7 +148,7 @@ export const openingTurnUserText = (wm: WorkingMemory<Message>): string | undefi
   let firstUserText: string | undefined
   let userCount = 0
   for (const msg of snap) {
-    if (msg === undefined || msg.role !== "user") continue
+    if (msg === undefined || msg.role !== "user" || isSyntheticUserMessage(msg)) continue
     userCount++
     if (userCount > 1) return undefined // not the opening turn
     for (const block of msg.content) {
@@ -187,7 +195,7 @@ const prependToLastUserText = (
 ): void => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
-    if (m?.role !== "user") continue
+    if (m?.role !== "user" || isSyntheticUserMessage(m)) continue
     const idx = m.content.findIndex((b) => b.type === "text")
     const tb = idx >= 0 ? m.content[idx] : undefined
     if (tb?.type !== "text" || tb.text.startsWith("<system-reminder>")) continue
@@ -347,7 +355,12 @@ export const prepareTurnContext = async (
     planMode: config.planMode ?? false,
     ...(languageHint !== undefined ? { languageHint } : {}),
     system: config.system,
+    ...(config.promptSurfaceProfile !== undefined
+      ? { promptSurfaceProfile: config.promptSurfaceProfile }
+      : {}),
+    activeLevers: resolvePromptActiveLevers(config),
     ...(config.sessionCtx !== undefined ? { sessionCtx: config.sessionCtx } : {}),
+    ...(config.memorySummaryMd !== undefined ? { memorySummaryMd: config.memorySummaryMd } : {}),
     ...(config.mode !== undefined ? { mode: config.mode } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
     ...(config.repoRules !== undefined ? { repoRules: config.repoRules } : {}),
@@ -404,6 +417,8 @@ export const emitPromptAssembled = (
       repoRulesPresent: policy.repoRulesPresent,
       sessionCtxPresent: policy.sessionCtxPresent,
       userAppendPresent: policy.userAppendPresent,
+      ...(policy.surfaceProfile !== undefined ? { surfaceProfile: policy.surfaceProfile } : {}),
+      ...(policy.activeLevers !== undefined ? { activeLevers: policy.activeLevers } : {}),
       // D4 (jun-7) — the model's real context window (or 0 for an un-tabled
       // model, the surface's "unknown" sentinel), so the usage gauge is
       // window-relative instead of always reporting 0.

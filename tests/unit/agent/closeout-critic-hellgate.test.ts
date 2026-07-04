@@ -91,12 +91,14 @@ describe("closeout-critic hellgate — (a) knob OFF byte-identical", () => {
     // await entirely. We pin the structural guarantee: the gate function
     // returns `Promise<void> | undefined`, returns `undefined` on the OFF
     // branch, and the call sites only await when the return is defined.
-    const src = read("src/agent/loop/recovery-executor.ts")
-    expect(src).toMatch(/maybeRunCloseoutCritic[\s\S]*?:\s*Promise<void>\s*\|\s*undefined/)
+    const helperSrc = read("src/agent/loop/closeout-critic-wire.ts")
+    expect(helperSrc).toMatch(/maybeRunCloseoutCritic[\s\S]*?:\s*Promise<void>\s*\|\s*undefined/)
     // OFF gate returns BEFORE building the request / awaiting.
-    expect(src).toMatch(/enabled !== true \|\| cfg\.critic === undefined\) return undefined/)
+    expect(helperSrc).toMatch(/enabled !== true \|\| cfg\.critic === undefined\) return undefined/)
     // Both seal sites guard the await behind a definedness check.
-    const guardedAwaits = src.match(/if \(criticDone !== undefined\) await criticDone/g) ?? []
+    const executorSrc = read("src/agent/loop/recovery-executor.ts")
+    const guardedAwaits =
+      executorSrc.match(/if \(criticDone !== undefined\) await criticDone/g) ?? []
     expect(guardedAwaits.length).toBe(2)
   })
 
@@ -214,7 +216,7 @@ describe("closeout-critic hellgate — source fence", () => {
   })
 
   test("seam emits via the EXISTING recovery/closeout event (no new event type)", () => {
-    const src = read("src/agent/loop/recovery-executor.ts")
+    const src = read("src/agent/loop/closeout-critic-wire.ts")
     expect(src).toContain('emitRecovery(config, "closeout", observation.detail)')
   })
 })

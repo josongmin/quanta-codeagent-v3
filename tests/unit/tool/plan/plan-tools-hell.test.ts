@@ -108,6 +108,8 @@ describe("current_plan", () => {
     if (last?.type !== "result") throw new Error()
     expect(last.result.ok).toBe(false)
     expect(last.result.failure?.mode).toBe("error")
+    expect(last.result.output).toContain("no structured plan store is wired")
+    expect(last.result.failure?.modelVisibleError).toBe("structured plan store is not wired")
   })
 
   test("mutator throws ⇒ caught", async () => {
@@ -154,6 +156,8 @@ describe("create_plan", () => {
     if (last?.type !== "result") throw new Error()
     expect(last.result.ok).toBe(false)
     expect(last.result.failure?.mode).toBe("error")
+    expect(last.result.output).toContain("no structured plan store is wired")
+    expect(last.result.failure?.modelVisibleError).toBe("structured plan store is not wired")
   })
   test("mutator throws ⇒ caught", async () => {
     const evs = await runTool(

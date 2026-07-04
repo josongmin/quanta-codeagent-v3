@@ -3,7 +3,8 @@
  *
  * Creates a new structured plan with todos + optional phases. Routes through
  * the duck-typed {@link PlanToolContext.planMutator} seam. Registered only when
- * `ctx.planMutator` is wired (default-OFF byte-identical otherwise).
+ * a structured plan store is wired into `ctx.planMutator` (default-OFF
+ * byte-identical otherwise).
  */
 import { errMessage } from "@/shared"
 import type { PlanToolContext, Tool, ToolEvent } from "../types"
@@ -25,8 +26,8 @@ export const createPlanTool = (): Tool<CreatePlanInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: "create_plan unavailable: plan-mode is not active in this session.",
-          failure: { mode: "error", modelVisibleError: "plan-mode is not active" },
+          output: "create_plan unavailable: no structured plan store is wired in this session.",
+          failure: { mode: "error", modelVisibleError: "structured plan store is not wired" },
         },
       }
       return

@@ -15,6 +15,7 @@ import { describe, expect, test } from "bun:test"
 import type { AssembleRequest } from "@/../src/apps/agent/assemble"
 import { runMode } from "@/../src/apps/agent/mode-presets/headless"
 import type { AgentConfig, AgentOutcome } from "@/agent"
+import { buildSystemPromptForRunMode } from "@/agent/system-prompt"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
@@ -78,6 +79,12 @@ describe("headless.runMode — single-user-message config", () => {
     expect(cfgSeen?.modePolicy?.mode).toBe("headless")
     expect(cfgSeen?.modePolicy?.permission.kind).toBe("auto")
     expect(cfgSeen?.messages.length).toBe(1)
+    expect(cfgSeen?.system).toBe(buildSystemPromptForRunMode({ runMode: "headless", cwd: "/tmp" }))
+    expect(cfgSeen?.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "headless",
+      verifyStrategy: "none",
+    })
     const first = cfgSeen?.messages[0]
     expect(first?.role).toBe("user")
     if (first && Array.isArray(first.content)) {

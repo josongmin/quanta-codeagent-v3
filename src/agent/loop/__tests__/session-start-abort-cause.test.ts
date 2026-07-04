@@ -26,6 +26,7 @@ import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import { HookBus } from "@/agent/hooks"
+import { createInMemoryPlanStore } from "@/agent/plan/state"
 import { STOP_REASON_CODE } from "@/agent/stop-category"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -102,5 +103,33 @@ describe("session-START abort cause attribution (HELLGATE)", () => {
     // A genuine user interrupt stays USER-attributed.
     expect(outcome.stopCategory?.reasonCode).toBe(STOP_REASON_CODE.USER_INTERRUPT)
     expect(outcome.stopCategory?.reasonCode).not.toBe(STOP_REASON_CODE.SYSTEM_ABORT)
+  })
+
+  test("interrupt submission op aborts before plan snapshot restore side effects", async () => {
+    const llm = new CompletingLLM()
+    const stream = new CollectStream()
+    const planStore = createInMemoryPlanStore({ now: () => 1 })
+
+    const outcome = await runAgent({
+      ...baseConfig(llm, stream),
+      planStore,
+      planSnapshotStore: {
+        load: async () => ({
+          version: 3,
+          name: "restored",
+          overview: "should never restore on interrupt",
+          isProject: false,
+          phases: [],
+          todos: [{ id: "t1", content: "blocked", done: false, order: 0 }],
+          updatedAt: 1,
+        }),
+        save: async () => {},
+      },
+      submission: { id: "i-2", op: { kind: "interrupt" } },
+    })
+
+    expect(outcome.reason).toBe("aborted")
+    expect(planStore.current()).toBeNull()
+    expect(stream.events.find((e) => e.type === "plan_snapshot")).toBeUndefined()
   })
 })

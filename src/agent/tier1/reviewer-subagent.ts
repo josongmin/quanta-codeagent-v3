@@ -3,11 +3,11 @@ import {
   type ActionAssessment,
   type ApprovalDecision,
   type ReviewerPort,
-  structuredDenyReason,
   type ToolActionKeyed,
 } from "@/permission"
 import type { StreamPort } from "@/stream"
 import type { ReviewerRunner } from "@/tool/types"
+import { reviewerApprovalStructuredReason } from "../deny-reason-wire"
 import { createSubagentRunner } from "../subagent-runner"
 import type { AgentConfig } from "../types"
 
@@ -250,7 +250,7 @@ const assessorPrompt = (action: ToolActionKeyed, reviewKind: string | undefined)
 const fallbackAssessment = (safeReason: string, rationale: string): ActionAssessment => ({
   kind: "deny",
   rationale,
-  denyReason: structuredDenyReason({ layer: "reviewer", pillar: "approval", safeReason }),
+  denyReason: reviewerApprovalStructuredReason(safeReason),
 })
 
 const decodeAssessment = (finalText: string, tool: string): ActionAssessment => {
@@ -290,11 +290,7 @@ const decodeAssessment = (finalText: string, tool: string): ActionAssessment => 
         kind: "deny_and_steer",
         rationale: reply.rationale,
         steer: reply.steer,
-        denyReason: structuredDenyReason({
-          layer: "reviewer",
-          pillar: "approval",
-          safeReason: "reviewer denied the action",
-        }),
+        denyReason: reviewerApprovalStructuredReason("reviewer denied the action"),
       }
     case "escalate":
       return { kind: "escalate", rationale: reply.rationale, escalation: { axis: reply.axis } }

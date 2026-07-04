@@ -155,12 +155,17 @@ export {
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
 export type {
+  PromptActiveLeversSnapshot,
   AgentPromptMode,
   PromptBaseSystem,
   PromptHookContextMode,
   PromptPolicySnapshot,
+  PromptSurfaceEnvPosture,
+  PromptSurfacePack,
+  PromptSurfaceProfileSnapshot,
   PromptSummaryPrefix,
   PromptSystemLayout,
+  PromptSurfaceVerifyStrategy,
   TurnPolicySnapshot,
   TurnPolicyToolChoiceKind,
 } from "./turn-policy-types"

@@ -1,12 +1,29 @@
 import type { HITLTier } from "@/shared"
 import type { ClassifierPort } from "./classifier"
 import type { StructuredDenyReason } from "./deny-reason"
+import type { PermissionDenySource } from "./recorder"
 import type { ReviewDecision, ReviewKind } from "./review-kind"
 
 export type PermissionDecision =
   | { kind: "allow" }
-  | { kind: "deny"; reason: string }
+  | PermissionDenyDecision
   | { kind: "ask"; reason: string }
+
+export type PermissionSoftDenySource = Exclude<PermissionDenySource, "hard-deny">
+
+export type PermissionDenyDecision =
+  | {
+      kind: "deny"
+      reason: string
+      hardDeny: true
+      stackSource: "hard-deny"
+    }
+  | {
+      kind: "deny"
+      reason: string
+      hardDeny: false
+      stackSource: PermissionSoftDenySource
+    }
 
 export interface ToolAction {
   tool: string
@@ -24,6 +41,12 @@ export interface ToolAction {
    *  fails the gate-coverage unit test (in tests/unit) rather than silently
    *  bypassing the denylist. */
   shellCommand?: string | null
+  /** Optional cached HARD_DENY prose for the authoritative `shellCommand`
+   *  above. The admissibility gate may precompute this once and thread it into
+   *  the permission slice so `hardDenyReason()` can reuse the resolved fact
+   *  without re-running the denylist matcher. Absent or mismatched cache ⇒ the
+   *  permission slice recomputes from `shellCommand` exactly as before. */
+  hardDenyProse?: string | null
   /** ADR-0512 — present ONLY when this confirm is a skill-scope ESCALATION (the
    *  tool is outside the active skill's `allowed-tools`), not a normal action
    *  confirm. A surface renders a distinct "outside skill scope" card from it

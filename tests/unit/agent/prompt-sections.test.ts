@@ -180,6 +180,16 @@ describe("buildTurnContext — auto-wire 4-section preset", () => {
     expect(system.some((b) => b.text === "APPEND")).toBe(true)
   })
 
+  test("(e'') memorySummaryMd alone still triggers the sectioned session_ctx path", () => {
+    const { system, promptPolicy } = buildTurnContext(
+      baseInput({ system: "BASE", memorySummaryMd: "- durable prior knowledge" }),
+    )
+    expect(system.length).toBeGreaterThanOrEqual(2)
+    expect(system[0]?.text).toBe("BASE")
+    expect(system.some((b) => b.text.includes("Distilled prior knowledge"))).toBe(true)
+    expect(promptPolicy.sessionCtxPresent).toBe(true)
+  })
+
   test("legacy: no repoRules / no userAppend ⇒ single SystemBlock (byte-identical)", () => {
     const { system } = buildTurnContext(baseInput())
     expect(system).toHaveLength(1)

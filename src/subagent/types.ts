@@ -41,6 +41,11 @@ export interface SubagentRequest {
   toolFilter?: string[]
   /** "worktree" ⇒ run the child in an isolated git worktree. */
   isolation?: "none" | "worktree"
+  /** Explicit child working directory override. The agent-side runner uses this
+   *  as the child's base cwd, and when `isolation:"worktree"` is requested it
+   *  is also the repo path the throwaway worktree is forked from. Absent ⇒ the
+   *  child inherits `parent.cwd` (byte-identical). */
+  workspace?: string
   /** Recursion depth of this child (parent depth + 1). Root is 0. */
   depth: number
   /** RFC-04 §11 / ADR-0437 follow-up — the registry TASK ID this child is
@@ -60,6 +65,10 @@ export interface SubagentRequest {
    *  `runAgent`. Absent ⇒ only the parent loop's signal cancels the child
    *  (legacy / foreground call path). */
   signal?: AbortSignal
+  /** Opaque caller-controlled metadata preserved across higher-level control
+   *  planes (background persistence / resume / scheduler → runner). The core
+   *  subagent slice does not interpret these pairs. */
+  metadata?: Readonly<Record<string, string>>
   /** GAP7-2 — per-dispatch tools the child gets IN ADDITION to its filtered
    *  registry (appended after `toolFilter` so the allowlist never drops them).
    *  Used by the batch row-dispatch to bind a fresh `report_agent_job_result`

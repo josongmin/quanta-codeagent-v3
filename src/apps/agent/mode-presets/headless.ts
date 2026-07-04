@@ -23,7 +23,7 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { buildSystemPrompt, wireOptionalAgentPorts } from "@/agent"
+import { wireOptionalAgentPorts } from "@/agent"
 import type { Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { logger } from "@/shared"
@@ -36,6 +36,7 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
+import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 import { StreamJsonSink } from "./stream-json-sink"
 
 /** P26 — does this run want a STRUCTURED stdout contract (json / stream-json)?
@@ -55,6 +56,7 @@ const buildHeadlessBase = (
   structuredSink: StreamJsonSink | undefined,
 ): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const cwd = req.base.cwd ?? process.cwd()
+  const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   // P26 — when a structured stdout contract is selected the agent loop must
   // emit INTO the StreamJsonSink (which encodes each AgentEvent → versioned
   // SessionEvent NDJSON / JSON-array on stdout). It WINS over `req.base.stream`
@@ -76,7 +78,8 @@ const buildHeadlessBase = (
       stream,
       permission,
       messages,
-      system: req.base.system ?? buildSystemPrompt(cwd),
+      system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
+      ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 20,
       // T01 (audit L5 H-2): inherit the composition-root's REAL signal. The

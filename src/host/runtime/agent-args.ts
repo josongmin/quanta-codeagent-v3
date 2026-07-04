@@ -23,6 +23,17 @@
  */
 
 import type { BudgetDials, BudgetExhaustionPolicy, RunMode } from "@/agent"
+import {
+  ALL_TOOL_PROFILE_NAMES,
+  isToolProfileName,
+  type ToolProfileName,
+} from "@/agent/tool-profile"
+import { IDENTITY_MODES, isIdentityMode } from "@/agent/identity"
+import {
+  isNamedProfileName,
+  NAMED_PROFILE_NAMES,
+  type NamedProfileName,
+} from "@/permission"
 
 // Alias for readability — `RunMode` from `@/agent` is the run-mode slice's
 // closed `interactive|headless|batch|ci-bot` union. (The barrel also exports
@@ -122,7 +133,7 @@ export interface AgentArgs {
  *  union). */
 export type OutputFormatToken = "text" | "json" | "stream-json"
 /** ADR-0236 — closed set of tool-profile names accepted on `--tool-profile`. */
-export type ToolProfileToken = "write" | "ask" | "minimal" | "code-only"
+export type ToolProfileToken = ToolProfileName
 /** ADR-0236 — closed set of identity modes accepted on `--identity-mode`.
  *  Mirrors `IdentityMode` (ADR-0198) — the `ModeVariantKey` set (ADR-0211)
  *  PLUS the identity-only virtual mode `onboarding` (B1, jul-03). `onboarding`
@@ -143,7 +154,7 @@ export type IdentityModeToken =
  *  `--permission-profile`. Mirror of the resolvable subset of the
  *  named-profile registry (`default | restricted | trusted`); `custom` is
  *  intentionally excluded (it denotes a caller-supplied struct, never a name). */
-export type PermissionProfileToken = "default" | "restricted" | "trusted"
+export type PermissionProfileToken = NamedProfileName
 
 /** Parser-level error. `index.ts` catches this and emits usage + exit 64. */
 export class AgentArgsError extends Error {
@@ -176,33 +187,10 @@ const VALID_OUTPUT_FORMATS = [
   "stream-json",
 ] as const satisfies readonly OutputFormatToken[]
 
-/** ADR-0236 — closed set for `--tool-profile`. */
-const VALID_TOOL_PROFILES = [
-  "write",
-  "ask",
-  "minimal",
-  "code-only",
-] as const satisfies readonly ToolProfileToken[]
-
 /** ADR-0236 — closed set for `--identity-mode`. B1 (jul-03) adds `onboarding`
  *  so the identity-only virtual mode already present in `DEFAULT_IDENTITIES` /
  *  `IDENTITY_MODES` is finally reachable from the CLI token surface. */
-const VALID_IDENTITY_MODES = [
-  "default",
-  "plan",
-  "review",
-  "audit",
-  "architect",
-  "editor",
-  "onboarding",
-] as const satisfies readonly IdentityModeToken[]
-
-/** Track A2 — closed set for `--permission-profile`. */
-const VALID_PERMISSION_PROFILES = [
-  "default",
-  "restricted",
-  "trusted",
-] as const satisfies readonly PermissionProfileToken[]
+const VALID_IDENTITY_MODES: readonly IdentityModeToken[] = IDENTITY_MODES
 
 /**
  * Static mapping from CLI dial flag → `BudgetDials` field. All dials are
@@ -252,15 +240,15 @@ const isValidOutputFormat = (s: string): s is OutputFormatToken =>
 
 /** ADR-0236 type guard for `--tool-profile`. */
 const isValidToolProfile = (s: string): s is ToolProfileToken =>
-  (VALID_TOOL_PROFILES as readonly string[]).includes(s)
+  isToolProfileName(s)
 
 /** ADR-0236 type guard for `--identity-mode`. */
 const isValidIdentityMode = (s: string): s is IdentityModeToken =>
-  (VALID_IDENTITY_MODES as readonly string[]).includes(s)
+  isIdentityMode(s)
 
 /** Track A2 type guard for `--permission-profile`. */
 const isValidPermissionProfile = (s: string): s is PermissionProfileToken =>
-  (VALID_PERMISSION_PROFILES as readonly string[]).includes(s)
+  isNamedProfileName(s)
 
 /** Read `argv[i+1]` and assert it exists + is NOT another flag. */
 const takeValue = (argv: readonly string[], i: number, flag: string): string => {
@@ -489,7 +477,7 @@ const FLAG_HANDLERS: Record<string, FlagSpec> = {
     apply: (acc, v) => {
       if (!isValidToolProfile(v)) {
         throw new AgentArgsError(
-          `--tool-profile must be one of ${VALID_TOOL_PROFILES.join("|")}, got '${v}'`,
+          `--tool-profile must be one of ${ALL_TOOL_PROFILE_NAMES.join("|")}, got '${v}'`,
         )
       }
       acc.toolProfile = v
@@ -542,7 +530,7 @@ const FLAG_HANDLERS: Record<string, FlagSpec> = {
     apply: (acc, v) => {
       if (!isValidPermissionProfile(v)) {
         throw new AgentArgsError(
-          `--permission-profile must be one of ${VALID_PERMISSION_PROFILES.join("|")}, got '${v}'`,
+          `--permission-profile must be one of ${NAMED_PROFILE_NAMES.join("|")}, got '${v}'`,
         )
       }
       acc.permissionProfile = v
@@ -847,14 +835,14 @@ BUDGET DIALS (operator-requested ceilings; clamped to per-mode caps)
 ${dialLines}
 
 COMPOSITION-ROOT MEGA-WIRE (ADR-0236 — all default-OFF; absent ⇒ slot omitted)
-  --tool-profile <p>      One of ${VALID_TOOL_PROFILES.join("|")} (ADR-0213)
+  --tool-profile <p>      One of ${ALL_TOOL_PROFILE_NAMES.join("|")} (ADR-0213)
   --sticky-model          Wire fs-backed sticky-model store (ADR-0212)
   --identity-mode <m>     One of ${VALID_IDENTITY_MODES.join("|")} (ADR-0211)
   --focus-chain-every <N> Re-inject todos every N turns (>0, ADR-0219)
   --no-auto-background    Force auto-background OFF (ADR-0223)
   --playbook-trigger      Opt in to inline-trigger watcher (ADR-0293; or
                           set QUANTA_PLAYBOOK_TRIGGER=on)
-  --permission-profile <p> One of ${VALID_PERMISSION_PROFILES.join("|")} (Track A2;
+  --permission-profile <p> One of ${NAMED_PROFILE_NAMES.join("|")} (Track A2;
                           or set QUANTA_PERMISSION_PROFILE; unknown ⇒ fail-closed)
 
 NOTES

@@ -19,6 +19,8 @@
 import type { PersonaKind } from "../persona"
 import { buildSystemPrompt, type EnvironmentPosture } from "../prompt"
 import type { AgentMode as PromptPackMode } from "../prompt-rules"
+import type { AgentMode as RunMode } from "../run-mode/types"
+import type { PromptSurfaceProfileSnapshot } from "@/shared"
 import { DEFAULT_MODE_VARIANTS, UNKNOWN_MODE_VARIANT } from "./mode-variants"
 import {
   assertValidVariantLines,
@@ -107,4 +109,37 @@ export const buildSystemPromptForMode = (opts: BuildSystemPromptForModeOpts): st
   if (opts.promptPack !== undefined) promptOpts.promptPack = opts.promptPack
   if (opts.envPosture !== undefined) promptOpts.envPosture = opts.envPosture
   return buildSystemPrompt(undefined, promptOpts)
+}
+
+export interface BuildSystemPromptForRunModeOpts {
+  readonly runMode: RunMode
+  readonly cwd?: string
+  readonly persona?: PersonaKind
+  readonly identity?: readonly string[]
+  readonly envPosture?: EnvironmentPosture
+}
+
+export const promptSurfaceProfileForRunMode = (
+  runMode: RunMode,
+  opts: {
+    readonly envPosture?: PromptSurfaceProfileSnapshot["envPosture"]
+    readonly verifyStrategy?: PromptSurfaceProfileSnapshot["verifyStrategy"]
+  } = {},
+): PromptSurfaceProfileSnapshot => ({
+  envPosture: opts.envPosture ?? "frozen",
+  promptPack: runMode,
+  verifyStrategy: opts.verifyStrategy ?? "none",
+})
+
+export const buildSystemPromptForRunMode = (opts: BuildSystemPromptForRunModeOpts): string => {
+  const promptOpts: {
+    persona?: PersonaKind
+    promptPack: PromptPackMode
+    identity?: readonly string[]
+    envPosture?: EnvironmentPosture
+  } = { promptPack: opts.runMode }
+  if (opts.persona !== undefined) promptOpts.persona = opts.persona
+  if (opts.identity !== undefined) promptOpts.identity = opts.identity
+  if (opts.envPosture !== undefined) promptOpts.envPosture = opts.envPosture
+  return buildSystemPrompt(opts.cwd, promptOpts)
 }

@@ -294,16 +294,20 @@ export const isTerminal = (s: SubagentStatus): boolean => s !== "running" && s !
  *  `SubagentSpec` is what the LLM-facing tool surfaces; `SubagentRequest` is
  *  the slice's port type. Background scheduler always passes `depth: 0` —
  *  the host bridge upstream of `runner` is responsible for any depth+1
- *  bookkeeping if it forks the agent loop. */
+ *  bookkeeping if it forks the agent loop. `modelOverride` maps onto the
+ *  runner's existing `model` override, while `workspace` / `metadata` are
+ *  preserved on the request so resume/background control planes stay lossless. */
 export const specToRequest = (spec: SubagentSpec, signal: AbortSignal): SubagentRequest => {
-  const req: SubagentRequest = { prompt: spec.task, depth: 0, signal }
-  const withTurns =
-    spec.maxTurns !== undefined ? { ...req, budget: { maxTurns: spec.maxTurns } } : req
-  // `modelOverride` / `workspace` / `metadata` are NOT part of SubagentRequest
-  // today — they are caller-side hints the bridge surfaces if/when the
-  // underlying runner grows model-swap support. We keep them in the spec for
-  // observability via `list()` without forcing the slice to grow new fields.
-  return withTurns
+  const req: SubagentRequest = {
+    prompt: spec.task,
+    depth: 0,
+    signal,
+    ...(spec.modelOverride !== undefined ? { model: spec.modelOverride } : {}),
+    ...(spec.maxTurns !== undefined ? { budget: { maxTurns: spec.maxTurns } } : {}),
+    ...(spec.workspace !== undefined ? { workspace: spec.workspace } : {}),
+    ...(spec.metadata !== undefined ? { metadata: spec.metadata } : {}),
+  }
+  return req
 }
 
 /** Internal: on-the-wire shape of one persisted handle (ADR-0153). The

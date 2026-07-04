@@ -295,6 +295,27 @@ describe("ADR-0309 Wire 2 — granular registry instantiation + threading", () =
     expect(out.ok).toBe(true)
     expect(cfg.granularRegistry).toBe(registry)
   })
+
+  test("HELL-R2-12b — promptSurfaceProfile threads through assembleConfig unchanged", () => {
+    const promptSurfaceProfile = {
+      surfaceId: "cli",
+      style: "interactive",
+      toolsVisibility: "full",
+    } as const
+    const cfg = assembleConfig(
+      [] as Message[],
+      fakeSessionDeps({
+        promptSurfaceProfile,
+      }),
+    )
+    expect(cfg.promptSurfaceProfile).toEqual(promptSurfaceProfile)
+  })
+
+  test("HELL-R2-12c — assembleConfig without promptSurfaceProfile omits the slot", () => {
+    const cfg = assembleConfig([] as Message[], fakeSessionDeps())
+    expect(cfg.promptSurfaceProfile).toBeUndefined()
+    expect(Object.hasOwn(cfg, "promptSurfaceProfile")).toBe(false)
+  })
 })
 
 /* ------------------------------------------------------------------ */

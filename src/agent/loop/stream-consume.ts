@@ -228,10 +228,11 @@ type StreamTurnErrorOutcome =
  *  to keep `streamConsume` under the god-FUNCTION cap — behavior identical. */
 const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErrorOutcome => {
   if (isSessionApprovalRequiredError(e)) return { status: "aborted", rethrow: true }
+  const abortReason = abortReasonOf(e)
   if (
     config.signal.aborted ||
     (e instanceof LLMError && e.kind === "aborted") ||
-    abortReasonOf(e) !== null
+    abortReason === "abort"
   )
     return { status: "aborted", result: { aborted: true } }
   const message = e instanceof LLMError ? e.message : errMessage(e)

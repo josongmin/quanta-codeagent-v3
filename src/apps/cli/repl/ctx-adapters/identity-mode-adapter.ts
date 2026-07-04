@@ -10,6 +10,7 @@
  * sources after the shared state flips.
  */
 
+import type { IdentityMode } from "@/agent/identity"
 import {
   MODE_VARIANT_KEYS,
   type ModeVariantKey,
@@ -34,7 +35,7 @@ export interface IdentityModeAdapter {
 
 export interface IdentityModeAdapterArgs {
   readonly registry: SystemPromptVariantRegistry
-  readonly getActive?: () => ModeVariantKey
+  readonly getActive?: () => IdentityMode
   readonly setActive?: (mode: ModeVariantKey) => void
   readonly defaultMode?: ModeVariantKey
   /** ADR-0302 — fired exactly once AFTER a successful `set(mode)` swap.
@@ -57,7 +58,7 @@ const isModeVariantKey = (s: string): s is ModeVariantKey =>
 
 /** Build the adapter over the AgentConfig.identityModeVariant block. */
 export const buildIdentityModeAdapter = (args: IdentityModeAdapterArgs): IdentityModeAdapter => {
-  let active: ModeVariantKey | typeof ONBOARDING_IDENTITY_KEY = args.defaultMode ?? "default"
+  let active: IdentityMode = args.defaultMode ?? "default"
   const onChange = args.onChange
   const onOnboarding = args.onOnboarding
   // B1 — the reachable target list: the mode-variant keys PLUS the onboarding

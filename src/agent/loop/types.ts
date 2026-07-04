@@ -86,8 +86,8 @@ export interface RunAgentContext {
   readonly localizePhaseState: import("../localize-phase-guard").LocalizePhaseState | undefined
   readonly dedupGate: unknown
   readonly hookPromptPending: HookPromptInject[]
-  readonly pendingPlanExitRef: { current: PendingPlanExit | null }
-  readonly pendingPlanEntryRef: { current: PendingPlanEntry | null }
+  readonly pendingPlanExitRef: { current: PendingPlanExit[] }
+  readonly pendingPlanEntryRef: { current: PendingPlanEntry[] }
   readonly shellSnapshotSession: ShellSnapshotSession | undefined
   readonly turnDiffSession: TurnDiffSession | undefined
   readonly gitDirectiveCollector: ReturnType<typeof buildGitDirectiveEmit> | undefined

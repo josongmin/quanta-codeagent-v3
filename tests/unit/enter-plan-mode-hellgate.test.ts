@@ -27,9 +27,9 @@ import { buildEnterPlanBlock } from "@/agent/tier1/enter-plan"
 import type { ToolUseBlock } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent } from "@/stream"
-import { enterPlanModeTool } from "@/tool/enter-plan-mode"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
+import { enterPlanModeTool } from "@/tool/enter-plan-mode"
 
 const dummyPort = async () => ({ decision: "approved" as const })
 
@@ -101,7 +101,12 @@ describe("applyPendingPlanEntry — the deferred next-turn flip", () => {
     expect(cfg.collaborationMode).toBe("plan")
     const modeChanges = events.filter((e) => e.type === "mode_changed")
     expect(modeChanges).toHaveLength(1)
-    expect(modeChanges[0]).toMatchObject({ from: "default", to: "plan" })
+    expect(modeChanges[0]).toMatchObject({
+      from: "default",
+      to: "plan",
+      fromAgentMode: "default",
+      toAgentMode: "plan",
+    })
     expect(hooks).toHaveLength(1)
     expect(hooks[0]?.injectAfterSystem).toContain("big change")
   })
@@ -131,7 +136,14 @@ describe("applyPendingPlanEntry — the deferred next-turn flip", () => {
     const cfg = { stream, mode: "editor" } as unknown as AgentConfig
     applyPendingPlanEntry(cfg, { reason: "stop and plan" }, [] as never)
     expect(cfg.mode).toBe("plan")
-    expect(events.filter((e) => e.type === "mode_changed")).toHaveLength(1)
+    const mc = events.filter((e) => e.type === "mode_changed")
+    expect(mc).toHaveLength(1)
+    // Collaboration axis: editor projects to `default` (2-value vocabulary).
+    expect(mc[0]).toMatchObject({ from: "default", to: "plan" })
+    // AgentMode axis (jul-04 observability widening): the REAL prior posture is
+    // surfaced — a host now distinguishes editor→plan from default→plan. RED before
+    // the widening (fromAgentMode was absent, so from:"default" hid the editor origin).
+    expect(mc[0]).toMatchObject({ fromAgentMode: "editor", toAgentMode: "plan" })
   })
 
   test("null pending is a no-op", () => {

@@ -17,6 +17,7 @@
  */
 
 import {
+  type AgentConfig,
   type BudgetDials,
   BudgetMeter,
   buildSystemPrompt,
@@ -25,11 +26,17 @@ import {
   parseBoolKnob,
   parseEffort,
 } from "@/agent"
+import {
+  defaultIdentityProvider,
+  IDENTITY_MODES,
+  isIdentityMode,
+  type IdentityMode,
+} from "@/agent/identity"
 import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
-  MODE_VARIANT_KEYS,
+  promptSurfaceProfileForRunMode,
   type ModeVariantKey,
 } from "@/agent/system-prompt"
 import {
@@ -129,8 +136,8 @@ const resolveToolProfileState = (env: NodeJS.ProcessEnv): ToolProfileSessionStat
 const resolveIdentityModeState = (env: NodeJS.ProcessEnv): IdentityModeSessionState => {
   const raw = env.QUANTA_IDENTITY_MODE
   const mode = raw ?? DEFAULT_IDENTITY_MODE
-  if (!(MODE_VARIANT_KEYS as readonly string[]).includes(mode)) {
-    logger.warn(`QUANTA_IDENTITY_MODE='${mode}' unknown; valid: ${MODE_VARIANT_KEYS.join(", ")}`)
+  if (!isIdentityMode(mode)) {
+    logger.warn(`QUANTA_IDENTITY_MODE='${mode}' unknown; valid: ${IDENTITY_MODES.join(", ")}`)
     return createIdentityModeSessionState({
       registry: defaultModeVariantRegistry(),
       defaultMode: DEFAULT_IDENTITY_MODE,
@@ -138,7 +145,8 @@ const resolveIdentityModeState = (env: NodeJS.ProcessEnv): IdentityModeSessionSt
   }
   return createIdentityModeSessionState({
     registry: defaultModeVariantRegistry(),
-    defaultMode: mode as ModeVariantKey,
+    defaultMode: DEFAULT_IDENTITY_MODE,
+    initialMode: mode,
   })
 }
 
@@ -185,26 +193,30 @@ const buildSessionStatePorts = (args: {
   const toolProfileState = resolveToolProfileState(args.env)
   const identityModeState = resolveIdentityModeState(args.env)
   const focusChain = resolveFocusChain(args.env)
+  const buildPromptFromIdentityMode = (): string => {
+    const mode = identityModeState.get()
+    if (mode === "onboarding") {
+      return buildSystemPrompt(args.cwd, {
+        persona: args.persona,
+        identity: defaultIdentityProvider().identityFor(mode),
+      })
+    }
+    return buildSystemPromptForMode({
+      mode,
+      registry: identityModeState.registry,
+      persona: args.persona,
+    })
+  }
   const systemSource = createSystemSource(
     args.identity === undefined && gateOn(args.env, "QUANTA_IDENTITY")
-      ? buildSystemPromptForMode({
-          mode: identityModeState.get(),
-          registry: identityModeState.registry,
-          persona: args.persona,
-        })
+      ? buildPromptFromIdentityMode()
       : buildSystemPrompt(args.cwd, {
           persona: args.persona,
           ...(args.identity !== undefined ? { identity: args.identity } : {}),
         }),
   )
   const refreshSystemPrompt = (): void => {
-    systemSource.set(
-      buildSystemPromptForMode({
-        mode: identityModeState.get(),
-        registry: identityModeState.registry,
-        persona: args.persona,
-      }),
-    )
+    systemSource.set(buildPromptFromIdentityMode())
   }
   return {
     toolProfileState,
@@ -221,6 +233,7 @@ const buildPromptState = (
   cwd: string,
 ): {
   readonly system: string
+  readonly promptSurfaceProfile: AgentConfig["promptSurfaceProfile"]
   readonly systemSource: ReturnType<typeof createSystemSource>
   readonly refreshSystemPrompt: () => void
   readonly toolProfileState: ToolProfileSessionState
@@ -238,6 +251,7 @@ const buildPromptState = (
     })
   return {
     system: systemSource.get(),
+    promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive"),
     systemSource,
     refreshSystemPrompt,
     toolProfileState,
@@ -676,6 +690,7 @@ const assembleBootstrapResult = async (
 
     const {
       system,
+      promptSurfaceProfile,
       systemSource,
       refreshSystemPrompt,
       toolProfileState,
@@ -689,15 +704,18 @@ const assembleBootstrapResult = async (
     const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
     // `session_config` tool seam — built ONCE at bootstrap from the same
     // mutable cells the rest of the surface uses (effortStore +
-    // identityModeState + toolProfileState), so a `set_effort` via the tool
-    // and an operator `/effort` slash mutate the SAME store. The seam is
-    // duck-typed (structural mirror of `SessionConfigSeam` declared in
-    // `@/tool/types`) so this file stays slice-fenced.
+    // permissionModeState + identityModeState + toolProfileState), so a
+    // `set_effort` via the tool and an operator `/effort` slash mutate the
+    // SAME store while the authority-bearing posture cells remain visible
+    // read-only. The seam is duck-typed (structural mirror of
+    // `SessionConfigSeam` declared in `@/tool/types`) so this file stays
+    // slice-fenced.
     const sessionConfigPort: SessionBootstrapResult["sessionConfigPort"] = {
       readEffort: () => effortStore.get(),
       writeEffort: (next) => {
         effortStore.set(next)
       },
+      readPermissionMode: () => permissionModeState.get(),
       readIdentityMode: () => identityModeState.get(),
       readToolProfile: () => toolProfileState.get(),
       readModel: () => runtime.model,
@@ -750,6 +768,7 @@ const assembleBootstrapResult = async (
       abort,
       argPrompt: runtime.argPrompt,
       system,
+      promptSurfaceProfile,
       systemSource,
       refreshSystemPrompt,
       toolProfileState,

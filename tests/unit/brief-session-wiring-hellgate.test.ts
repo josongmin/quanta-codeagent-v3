@@ -115,6 +115,7 @@ describe("#17 — config.sessionBrief reaches the provider prompt (A: assembler 
 describe("#17 — set_brief control-op routes through the loop handler (B: control-op wiring)", () => {
   const setBrief = (on: boolean): Submission => ({ id: "s1", op: { kind: "set_brief", on } })
   const setMode = (): Submission => ({ id: "s2", op: { kind: "set_mode", mode: "plan" } })
+  const setModeDefault = (): Submission => ({ id: "s3", op: { kind: "set_mode", mode: "default" } })
 
   const cfgWith = (submission: Submission, store: ReturnType<typeof createBriefStore>) =>
     ({ submission, briefStore: store, stream: new NoopStream() }) as unknown as AgentConfig
@@ -131,6 +132,54 @@ describe("#17 — set_brief control-op routes through the loop handler (B: contr
     const store = createBriefStore(false)
     handleSubmissionControlOp(cfgWith(setMode(), store), undefined)
     expect(store.get()).toBe(false)
+  })
+
+  test("set_mode(plan) mutates the authoritative runtime mode, not just the event", () => {
+    const cfg = {
+      submission: setMode(),
+      stream: new NoopStream(),
+      mode: "editor",
+      planMode: false,
+      collaborationMode: "default",
+    } as unknown as AgentConfig
+
+    handleSubmissionControlOp(cfg, undefined)
+
+    expect(cfg.mode).toBe("plan")
+    expect(cfg.planMode).toBe(true)
+    expect(cfg.collaborationMode).toBe("plan")
+    const stream = cfg.stream as NoopStream
+    expect(stream.events).toContainEqual({
+      type: "mode_changed",
+      from: "default",
+      to: "plan",
+      fromAgentMode: "editor",
+      toAgentMode: "plan",
+    })
+  })
+
+  test("set_mode(default) exits plan posture authoritatively", () => {
+    const cfg = {
+      submission: setModeDefault(),
+      stream: new NoopStream(),
+      mode: "plan",
+      planMode: true,
+      collaborationMode: "plan",
+    } as unknown as AgentConfig
+
+    handleSubmissionControlOp(cfg, undefined)
+
+    expect(cfg.mode).toBe("default")
+    expect(cfg.planMode).toBe(false)
+    expect(cfg.collaborationMode).toBe("default")
+    const stream = cfg.stream as NoopStream
+    expect(stream.events).toContainEqual({
+      type: "mode_changed",
+      from: "plan",
+      to: "default",
+      fromAgentMode: "plan",
+      toAgentMode: "default",
+    })
   })
 
   test("registry-absent — set_brief with no store is observed-and-ignored (no throw)", () => {

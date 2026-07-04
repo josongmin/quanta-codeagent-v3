@@ -22,7 +22,9 @@ import type { AgentConfig } from "@/agent"
 import { runAgent, STOP_REASON_CODE } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { AbortError } from "@/shared/abortable"
 import type { AgentEvent, StreamPort } from "@/stream"
+import { SubagentTurnGate } from "@/subagent"
 import { defaultTools, ToolRegistry } from "@/tool"
 
 class FakeLLM implements LLMPort {
@@ -47,6 +49,13 @@ class RecordingStream implements StreamPort {
   readonly events: AgentEvent[] = []
   emit(event: AgentEvent): void {
     this.events.push(event)
+  }
+}
+
+class ThrowingLLM implements LLMPort {
+  constructor(private readonly error: unknown) {}
+  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+    throw this.error
   }
 }
 
@@ -212,5 +221,36 @@ describe("Spec B3 — StopCategory attaches to AgentOutcome", () => {
     expect(outcome.reason).toBe("aborted")
     expect(outcome.stopCategory?.kind).toBe("interrupted")
     expect(outcome.stopCategory?.reasonCode).toBe(STOP_REASON_CODE.USER_INTERRUPT)
+  })
+
+  test("timeout during stream consume is classified as error, not user abort", async () => {
+    const llm = new ThrowingLLM(new AbortError("timeout"))
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const outcome = await runAgent({
+      ...baseConfig(llm, registry, stream, { mode: "acceptEdits" }, new AbortController().signal),
+      messages: [userMsg("go")],
+    })
+    expect(outcome.reason).toBe("error")
+    expect(outcome.stopCategory?.kind).toBe("failed")
+    expect(outcome.stopCategory?.reasonCode).not.toBe(STOP_REASON_CODE.USER_INTERRUPT)
+  })
+
+  test("last-turn completed authority is preserved even when a wake is pending", async () => {
+    const llm = new FakeLLM([completedScript()])
+    const stream = new RecordingStream()
+    const registry = new ToolRegistry(defaultTools)
+    const gate = new SubagentTurnGate()
+    gate.wake("followup")
+
+    const outcome = await runAgent({
+      ...baseConfig(llm, registry, stream, { mode: "acceptEdits" }, new AbortController().signal),
+      messages: [userMsg("go")],
+      maxTurns: 1,
+      subagentTurnGate: gate,
+    })
+
+    expect(outcome.reason).toBe("completed")
+    expect(outcome.stopCategory?.reasonCode).toBe(STOP_REASON_CODE.COMPLETED_NORMAL)
   })
 })

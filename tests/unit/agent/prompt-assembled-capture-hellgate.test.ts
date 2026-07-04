@@ -113,6 +113,11 @@ describe("Track D loop capture — default-OFF byte-identical", () => {
     expect(snap.model).toBe("test-model")
     // A single-`system`-string config takes the single_block layout.
     expect(snap.layout).toBe("single_block")
+    expect(snap.activeLevers).toEqual({
+      budgetMeter: false,
+      budgetLedger: false,
+      subagentTurnGate: false,
+    })
   })
 
   test("captured snapshot's sections sum to the breakdown total (loop's own estimator)", async () => {

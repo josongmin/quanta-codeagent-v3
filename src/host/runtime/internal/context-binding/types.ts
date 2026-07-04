@@ -114,6 +114,7 @@ export interface RuntimeContextSnapshot {
   readonly subagentBackground?: AgentConfig["subagentBackground"]
   readonly autoBackground?: AgentConfig["autoBackground"]
   readonly sessionCtx?: AgentConfig["sessionCtx"]
+  readonly memorySummaryMd?: AgentConfig["memorySummaryMd"]
   readonly stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
   readonly memoryConsolidator?: AgentConfig["memoryConsolidator"]
   readonly granularRegistry?: AgentConfig["granularRegistry"]
@@ -175,6 +176,7 @@ export type RuntimeContextPatch = Partial<
     | "subagentBackground"
     | "autoBackground"
     | "sessionCtx"
+    | "memorySummaryMd"
     | "stage1OutputsStore"
     | "memoryConsolidator"
     | "granularRegistry"
@@ -239,6 +241,7 @@ export interface RuntimeMemoryAutoComposeArgs {
 }
 
 export type RuntimeBootstrapOverlay = {
+  readonly promptSurfaceProfile?: AgentConfig["promptSurfaceProfile"]
   readonly approvalProtocol?: RuntimeApprovalProtocolConfig
   readonly admissibility?: AgentConfig["admissibility"]
   readonly admissibilityBuilder?: (

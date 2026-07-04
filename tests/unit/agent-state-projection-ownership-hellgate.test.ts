@@ -31,7 +31,14 @@ const FIXTURES: { [K in (typeof AGENT_STATE_OBSERVATION_EVENT_TYPES)[number]]: A
     decision: "answer",
     text: "yes",
   },
-  mode_changed: { type: "mode_changed", from: "default", to: "plan" },
+  mode_changed: {
+    type: "mode_changed",
+    from: "default",
+    to: "plan",
+    fromAgentMode: "editor",
+    toAgentMode: "plan",
+    reason: "plan_enter_requested",
+  },
   tool_progress: { type: "tool_progress", id: "tool-1", name: "edit", message: "running" },
   context_compacted: {
     type: "context_compacted",
@@ -64,6 +71,20 @@ describe("agent-state projection ownership hellgate", () => {
           : agentStateObservationToMessage(observation, { emittedAt: 123 })
       expect(viaObservation?.kind).toBe(AGENT_STATE_MESSAGE_KIND_BY_EVENT_TYPE[type])
       expect(viaObservation?.emittedAt).toBe(123)
+      if (type === "mode_changed") {
+        expect(direct).toMatchObject({
+          kind: "mode.changed",
+          fromAgentMode: "editor",
+          toAgentMode: "plan",
+          reason: "plan_enter_requested",
+        })
+        expect(viaObservation).toMatchObject({
+          kind: "mode.changed",
+          fromAgentMode: "editor",
+          toAgentMode: "plan",
+          reason: "plan_enter_requested",
+        })
+      }
     }
   })
 

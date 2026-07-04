@@ -8,6 +8,7 @@ import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
 import { captureInterruptedTurn } from "../interrupted-turn"
 import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
+import { makeSyntheticUserMessage } from "../synthetic-user"
 import { makeTurnHeader } from "../turn-kind"
 import type { AgentConfig } from "../types"
 import { injectWorkflowKeywordNudge } from "../workflow-keyword"
@@ -164,10 +165,7 @@ export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Mess
     cfg.focusChain.tracker.tickTurn()
     const injection = cfg.focusChain.tracker.getInjection()
     if (injection !== null && injection.trim().length > 0) {
-      wm.append({
-        role: "user",
-        content: [{ type: "text", text: injection }],
-      })
+      wm.append(makeSyntheticUserMessage("focus-chain", [{ type: "text", text: injection }]))
     }
   } catch (e) {
     cfg.stream.emit({

@@ -3,7 +3,7 @@ import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { gitWriteGuardDeny } from "./git-write-guard-result"
 import { guardWrite } from "./stale-read-guard"
-import type { Tool, ToolContext, ToolEvent, ToolFailure, ToolResult } from "./types"
+import type { EditToolContext, Tool, ToolEvent, ToolFailure, ToolResult } from "./types"
 import { resolveEditBase } from "./worktree/cwd-override"
 
 /**
@@ -279,7 +279,7 @@ const replaceFailureResult = (r: ApplyOutcome): ToolResult => {
  *  rejection on the NO-THROW path, never a throw out of the iterator. */
 const staleReplaceGuard = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   // ticket-11 — resolved write target (worktree-aware path + session jail base).
   target: { readonly path: string; readonly base: string },
 ): Promise<ToolResult | null> => {
@@ -307,7 +307,7 @@ const staleReplaceGuard = async (
  *  undefined when the seam is unwired ⇒ no behaviour change. */
 const commitReplace = async (
   fs: FileSystemPort,
-  ctx: ToolContext,
+  ctx: EditToolContext,
   target: { readonly path: string; readonly base: string },
   next: string,
 ): Promise<void> => {
@@ -348,7 +348,7 @@ export const makeScriptedReplaceTool = (
   // unless the host wired the seam AND `QUANTA_TOOL_INTERRUPT_BLOCK` is on.
   interruptBehavior: (): "block" => "block",
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: EditToolContext): AsyncIterable<ToolEvent> {
     // ADR-0091 git-write-protection: a scripted_replace targeting
     // `.git/{hooks,config,config.worktree,info/attributes}` or `.vscode/**` is a
     // code-execution / policy-escape vector exactly as for `write`/`edit`.

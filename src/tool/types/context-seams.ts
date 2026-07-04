@@ -256,6 +256,7 @@ export interface FastApplyMergeSeam {
 export interface SessionConfigSeam {
   readonly readEffort: () => "default" | "max" | "high" | "medium" | "low"
   readonly writeEffort: (next: "default" | "max" | "high" | "medium" | "low") => void
+  readonly readPermissionMode?: () => string
   readonly readIdentityMode?: () => string
   readonly readToolProfile?: () => string
   readonly readModel?: () => string

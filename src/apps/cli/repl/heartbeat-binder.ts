@@ -35,7 +35,7 @@
  * no clock — it is a pure routing + clamp over injected cells).
  */
 
-import type { PermissionMode } from "@/permission"
+import { isPermissionMode, type PermissionMode } from "@/permission"
 import type { PermissionModeSessionState } from "@/runner/assemble/session-state"
 import type { HeartbeatPolicySnapshot } from "@/scheduler"
 
@@ -93,15 +93,6 @@ const PERMISSION_MODE_SAFETY: Readonly<Record<PermissionMode, number>> = Object.
   bypass: 0,
 })
 
-/** The closed `PermissionMode` vocabulary the inherited `approvalPolicy` string
- *  is validated against. Any value OUTSIDE this set is forged/corrupt. */
-const KNOWN_PERMISSION_MODES: ReadonlySet<string> = new Set<PermissionMode>([
-  "default",
-  "acceptEdits",
-  "auto",
-  "bypass",
-])
-
 /** The MOST-restrictive mode — the fail-closed floor for an unknown/forged
  *  `approvalPolicy`. NEVER pick a more-permissive default. */
 const MOST_RESTRICTIVE_MODE: PermissionMode = "default"
@@ -113,9 +104,7 @@ const MOST_RESTRICTIVE_MODE: PermissionMode = "default"
  * permissive. Pure + total.
  */
 export const mapInheritedApprovalToMode = (approvalPolicy: string): PermissionMode =>
-  KNOWN_PERMISSION_MODES.has(approvalPolicy)
-    ? (approvalPolicy as PermissionMode)
-    : MOST_RESTRICTIVE_MODE
+  isPermissionMode(approvalPolicy) ? approvalPolicy : MOST_RESTRICTIVE_MODE
 
 /**
  * The "never escalate" meet — return the SAFER (more-restrictive) of two modes.

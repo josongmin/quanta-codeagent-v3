@@ -129,6 +129,16 @@ describe("buildTurnContext dynamic context message", () => {
         },
         sessionCtx: "session-static",
         userAppend: "user-static",
+        promptSurfaceProfile: {
+          envPosture: "frozen",
+          promptPack: "batch",
+          verifyStrategy: "reproduce-first",
+        },
+        activeLevers: {
+          budgetMeter: true,
+          budgetLedger: false,
+          subagentTurnGate: true,
+        },
         globRules: [
           {
             sourcePath: "/repo/.cursor/rules/react.mdc",
@@ -160,6 +170,16 @@ describe("buildTurnContext dynamic context message", () => {
       mentionInjectionCount: 1,
       hookContext: "both",
       summaryPrefix: "conversation_summary",
+      surfaceProfile: {
+        envPosture: "frozen",
+        promptPack: "batch",
+        verifyStrategy: "reproduce-first",
+      },
+      activeLevers: {
+        budgetMeter: true,
+        budgetLedger: false,
+        subagentTurnGate: true,
+      },
     })
   })
 })
@@ -242,7 +262,7 @@ describe("buildTurnContext working state (Phase 6 — Codex memory L3)", () => {
     expect(text).not.toContain("## Working state")
   })
 
-  test("workingState block sits between repoRules and memory hints", () => {
+  test("repoRules stay in the static system while workingState still precedes memory hints", () => {
     const out = buildTurnContext(
       base({
         repoRules: rules,
@@ -256,11 +276,11 @@ describe("buildTurnContext working state (Phase 6 — Codex memory L3)", () => {
       }),
     )
     const text = reminderText(out.messages[out.messages.length - 1] as Message)
-    const repoIdx = text.indexOf("## Repo-local rules")
     const wsIdx = text.indexOf("## Working state")
     const memIdx = text.indexOf("memory-hint-marker")
-    expect(repoIdx).toBeGreaterThanOrEqual(0)
-    expect(wsIdx).toBeGreaterThan(repoIdx)
+    expect(out.system.some((block) => block.text.includes("## Repo-local rules"))).toBe(true)
+    expect(text).not.toContain("## Repo-local rules")
+    expect(wsIdx).toBeGreaterThanOrEqual(0)
     expect(memIdx).toBeGreaterThan(wsIdx)
   })
 
@@ -309,27 +329,26 @@ describe("buildTurnContext repo-local rules (Phase 0)", () => {
     loadedAt: 0,
   }
 
-  test("repoRules block appears with the entrypoint citation", () => {
+  test("repoRules block appears in the static project_md section with the entrypoint citation", () => {
     const out = buildTurnContext(base({ repoRules: rules }))
-    const text = reminderText(out.messages[out.messages.length - 1] as Message)
-    expect(text).toContain("## Repo-local rules (from AGENTS.md)")
-    expect(text).toContain("no heuristics; fail-closed; front-door build only")
+    const projectMd = out.system.find((block) => block.text.includes("## Repo-local rules"))
+    expect(projectMd?.text).toContain("## Repo-local rules (from AGENTS.md)")
+    expect(projectMd?.text).toContain("no heuristics; fail-closed; front-door build only")
   })
 
-  test("repoRules block precedes memory hints (repo authority > routing hint)", () => {
+  test("repoRules are not duplicated into the dynamic reminder when sectioned", () => {
     const out = buildTurnContext(base({ repoRules: rules, memoryContext: "memory-hint-marker" }))
     const text = reminderText(out.messages[out.messages.length - 1] as Message)
-    const repoIdx = text.indexOf("## Repo-local rules")
-    const memIdx = text.indexOf("memory-hint-marker")
-    expect(repoIdx).toBeGreaterThanOrEqual(0)
-    expect(memIdx).toBeGreaterThanOrEqual(0)
-    expect(repoIdx).toBeLessThan(memIdx)
+    expect(text).not.toContain("## Repo-local rules")
+    expect(text).toContain("memory-hint-marker")
+    expect(out.system.some((block) => block.text.includes("## Repo-local rules"))).toBe(true)
   })
 
   test("absent repoRules ⇒ no block (byte-identical for repos without rule files)", () => {
     const out = buildTurnContext(base())
     const text = reminderText(out.messages[out.messages.length - 1] as Message)
     expect(text).not.toContain("Repo-local rules")
+    expect(out.system.some((block) => block.text.includes("Repo-local rules"))).toBe(false)
   })
 
   test("repoRules activates 4-section preset — base prefix block stays byte-stable", () => {

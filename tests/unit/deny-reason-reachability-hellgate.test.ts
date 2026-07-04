@@ -33,9 +33,19 @@ import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { HookBus } from "@/agent"
-import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
+import {
+  type AdmissibilityAction,
+  type GateEscalationBroker,
+  runAdmissibilityGate,
+} from "@/agent/admissibility-gate"
 import type { ToolUseBlock } from "@/llm"
-import { __resetDefaultPermissionStore, type HITLTier, type PermissionContext } from "@/permission"
+import {
+  __resetDefaultPermissionStore,
+  getDefaultPermissionStore,
+  setThreadPermission,
+  type HITLTier,
+  type PermissionContext,
+} from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import type { Tool, ToolEvent, ToolFailure } from "@/tool"
 import { ToolRegistry } from "@/tool"
@@ -217,6 +227,67 @@ describe("hellgate — C6 reachability: knob-ON surfaces structured denyReason",
     expect(f?.denyReason?.layer).toBe("tool-profile")
     // No leak of the resolver's own categorical message beyond what it authored.
     expect(f?.denyReason?.safeReason).toBe("profile forbids write")
+  })
+
+  test("permission-stack per-thread deny carries stackSource=per-thread", async () => {
+    setKnob(true)
+    const tool = makeTool("write", { readOnly: false })
+    const store = getDefaultPermissionStore()
+    setThreadPermission(
+      "thread-stack-deny",
+      {
+        approvalPolicy: "never",
+        approvalsReviewer: "agent",
+        sandboxPolicy: { type: "read-only" },
+      },
+      store,
+    )
+    const c = cfg({
+      registry: new ToolRegistry([tool]),
+      permission: { mode: "bypass" },
+      permissionStack: { enabled: true, hostId: "host-stack-deny" },
+      sessionId: "thread-stack-deny",
+    })
+    const res = await runAdmissibilityGate(
+      call("write"),
+      c,
+      { mode: "bypass" },
+      actionOf(tool),
+      undefined,
+      { permissionStore: store },
+    )
+    expect(res?.preview).toBe("denied")
+    const f = permFailure(res?.failure)
+    expect(f?.denyReason?.layer).toBe("stack")
+    expect(f?.denyReason?.stackSource).toBe("per-thread")
+    expect(f?.denyReason?.pillar).toBe("sandbox")
+  })
+
+  test("broker-denied soft policy deny carries layer=broker + stackSource=global-default", async () => {
+    setKnob(true)
+    const tool = makeTool("write", { readOnly: false })
+    const broker: GateEscalationBroker = {
+      escalate: async () => ({ approved: false, reason: "leader said no" }),
+    }
+    const c = cfg({
+      registry: new ToolRegistry([tool]),
+      permission: { mode: "auto" },
+    })
+    const res = await runAdmissibilityGate(
+      call("write"),
+      c,
+      { mode: "auto" },
+      actionOf(tool),
+      {
+        evaluate: async () => ({ verdict: "deny", reason: "classifier blocked", fallback: false }),
+      } as never,
+      { coordinationBroker: broker },
+    )
+    expect(res?.preview).toBe("denied")
+    const f = permFailure(res?.failure)
+    expect(f?.denyReason?.layer).toBe("broker")
+    expect(f?.denyReason?.stackSource).toBe("global-default")
+    expect("pillar" in (f?.denyReason ?? {})).toBe(false)
   })
 })
 

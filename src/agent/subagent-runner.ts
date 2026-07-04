@@ -71,10 +71,9 @@
  * When none are set the seed is byte-identical to `req.prompt`.
  */
 
-import type { LLMPort, Message } from "@/llm"
-import type { Role } from "@/llm/role-model-override"
+import type { Message } from "@/llm"
 import { isGitRepo, withWorktree } from "@/runtime"
-import { QuantaError, runtimeConfig } from "@/shared"
+import { runtimeConfig } from "@/shared"
 import {
   type AgentMetaRegistry,
   assignNickname,
@@ -85,113 +84,17 @@ import { type Tool, ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { isAllowed as isConfirmAllowed, normalizeConfirm } from "./confirm-decision"
 import { buildLeaderHitlBroker, type LeaderEscalationDecider } from "./coordination-broker-wire"
-import { type EffortLevel, parseEffort } from "./effort"
 import { runAgent } from "./loop"
 import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
+import { UnknownSubagentModelError, resolveChildEffort, resolveChildLlm } from "./subagent-runner-overrides"
 import type { AgentConfig, AgentOutcome } from "./types"
 
+export { UnknownSubagentModelError } from "./subagent-runner-overrides"
+
 const DEFAULT_MAX_DEPTH = 3
-
-/**
- * ADR-0451 — raised when a child subagent requested a model id (explicitly via
- * `req.model`, or indirectly because its `req.role` resolved to a non-parent
- * model) that has NO matching entry in the parent's `modelCandidates`. This is
- * the FAIL-CLOSED guard: rather than silently running the child on the wrong
- * model (the parent's), the spawn aborts so the parent learns its delegation
- * intent could not be honored. A {@link QuantaError} subclass so the host's
- * typed-error union holds. The `createSubagentRunner` catch turns this into a
- * non-ok {@link SubagentResult} (recoverable tool_result), never a crash.
- */
-export class UnknownSubagentModelError extends QuantaError {
-  constructor(modelId: string, source: "model" | "role") {
-    super(
-      "unknown_subagent_model",
-      source === "model"
-        ? `requested subagent model "${modelId}" is not an enabled candidate (modelCandidates); ` +
-            `cannot honor the model override (fail-closed, no silent fallback)`
-        : `role resolved to model "${modelId}" which is not an enabled candidate (modelCandidates); ` +
-            `cannot honor the role override (fail-closed, no silent fallback)`,
-    )
-  }
-}
-
-/**
- * ADR-0451 — resolve the child's effective LLM port from the model/role
- * override on the request. Precedence (highest first):
- *
- *   1. explicit `req.model`  — swap to the candidate with that id
- *   2. `req.role`            — `roleModelResolver.resolve(role, parentModel)`,
- *                              then swap to the candidate with the resolved id
- *                              (a role that falls through to the parent model ⇒
- *                              no swap)
- *   3. neither               — `parent.llm` verbatim (byte-identical default)
- *
- * The swap REUSES the exact id→port mechanism the loop's skill-model-swap uses
- * (`resolveSkillTurnOverride` in `loop.ts`: `config.modelCandidates.find(c =>
- * c.id === id).port`). The ONLY behavioural difference from the skill path is
- * fail-closed: the skill path leaves `config.llm` untouched on an unknown id
- * (advisory degrade), whereas a subagent override THROWS
- * {@link UnknownSubagentModelError} — a misrouted delegation must not run on the
- * wrong model. A role that resolves back to the parent's own model id is NOT an
- * override (no candidate lookup, no throw): the child stays on `parent.llm`.
- *
- * Pure: no clock, no IO. `parent.modelCandidates` absent ⇒ any explicit model /
- * role-resolved-non-parent model fails closed (no registry to swap through).
- */
-const resolveChildLlm = (parent: AgentConfig, req: SubagentRequest): LLMPort => {
-  const parentModel = parent.llm.model
-  // Explicit model id wins over role.
-  if (req.model !== undefined && req.model.length > 0) {
-    return swapToCandidate(parent, req.model, "model")
-  }
-  // Role-resolved model. The resolver's port contract takes an arbitrary string
-  // and falls through to `defaultModel` for unknown roles (no throw). We pass
-  // the parent's model id as the default so a role with no override resolves to
-  // it ⇒ no swap.
-  if (req.role !== undefined && req.role.length > 0 && parent.roleModelResolver !== undefined) {
-    // The resolver's port documents that it accepts an arbitrary string at a
-    // type-erased boundary (JSON-RPC / tool input) and falls through for unknown
-    // roles; the `as Role` cast reflects that contract (no runtime narrowing).
-    const resolved = parent.roleModelResolver.resolve(req.role as Role, parentModel ?? "")
-    // Resolved to the parent's own model (or default fell through to "") ⇒ not
-    // an override; keep parent.llm (byte-identical, no candidate lookup).
-    if (resolved.length === 0 || resolved === parentModel) return parent.llm
-    return swapToCandidate(parent, resolved, "role")
-  }
-  return parent.llm
-}
-
-/** Swap to the `modelCandidates` entry whose id matches `modelId`, or fail
- *  closed via {@link UnknownSubagentModelError}. This is the SAME lookup shape
- *  as `loop.ts`'s skill-model-swap (`modelCandidates.find(c => c.id === id)`),
- *  but raises instead of degrading silently. */
-const swapToCandidate = (
-  parent: AgentConfig,
-  modelId: string,
-  source: "model" | "role",
-): LLMPort => {
-  const match = parent.modelCandidates?.find((c) => c.id === modelId)
-  if (match === undefined) throw new UnknownSubagentModelError(modelId, source)
-  return match.port
-}
-
-/** ADR-0451 — derive the child's `sessionEffort` thunk from `req.effort`. Reuses
- *  the loop's per-turn effort seam (`AgentConfig.sessionEffort`): the child loop
- *  reads it each turn and `resolveSkillTurnOverride` maps the named tier to a
- *  thinking budget via `effortToTokenBudget`. Only a RECOGNISED named tier votes
- *  (`parseEffort` returns `undefined` for anything else) — an unparseable string
- *  defers to the parent's effort, mirroring `resolveEffort`'s numeric-advisory
- *  rule. Returns `undefined` (no thunk wired ⇒ child inherits the parent's
- *  effort source, byte-identical) when no recognised tier is present. */
-const resolveChildEffort = (req: SubagentRequest): (() => EffortLevel | undefined) | undefined => {
-  if (req.effort === undefined) return undefined
-  const level = parseEffort(req.effort)
-  if (level === undefined) return undefined
-  return () => level
-}
 
 /** Internal seam: tests inject a fake `runAgent` / git probes so the runner is
  *  unit-testable without a real LLM or a real git repo. Defaults are the real
@@ -543,6 +446,62 @@ const maybeUnregisterChildTeam = (parent: AgentConfig, childLabel: string): void
   }
 }
 
+interface SharedChildIdentityState {
+  readonly nextOrdinalByParent: Map<string, number>
+  nextSpawnSeq: number
+}
+
+const sharedChildIdentityStates = new WeakMap<object, SharedChildIdentityState>()
+
+const childIdentityAnchor = (parent: AgentConfig): object | undefined => {
+  const candidate =
+    parent.subagentTurnWake ??
+    parent.teamRegistry ??
+    parent.subagentMailbox ??
+    parent.subagentAgentMeta ??
+    parent.subagent?.taskRegistry
+  return typeof candidate === "object" && candidate !== null ? candidate : undefined
+}
+
+const childIdentityState = (parent: AgentConfig): SharedChildIdentityState | undefined => {
+  const anchor = childIdentityAnchor(parent)
+  if (anchor === undefined) return undefined
+  const existing = sharedChildIdentityStates.get(anchor)
+  if (existing !== undefined) return existing
+  const created: SharedChildIdentityState = { nextOrdinalByParent: new Map(), nextSpawnSeq: 0 }
+  sharedChildIdentityStates.set(anchor, created)
+  return created
+}
+
+const allocateChildMailboxIds = (
+  parentLabel: string,
+  shared: SharedChildIdentityState | undefined,
+  local: { childOrdinal: number; spawnSeq: number },
+): { agentId: string; parentId: string; spawnSeq: number } => {
+  if (shared !== undefined) {
+    const ordinal = shared.nextOrdinalByParent.get(parentLabel) ?? 0
+    shared.nextOrdinalByParent.set(parentLabel, ordinal + 1)
+    const spawnSeq = shared.nextSpawnSeq
+    shared.nextSpawnSeq += 1
+    return { agentId: `${parentLabel}/${ordinal}`, parentId: parentLabel, spawnSeq }
+  }
+  const ordinal = local.childOrdinal
+  local.childOrdinal += 1
+  const spawnSeq = local.spawnSeq
+  local.spawnSeq += 1
+  return { agentId: `${parentLabel}/${ordinal}`, parentId: parentLabel, spawnSeq }
+}
+
+const buildSubagentRunId = (
+  depth: number,
+  mailboxAgentId: string,
+  spawnSeq: number,
+  now: () => number,
+): string => {
+  const safeMailboxId = mailboxAgentId.replace(/[^A-Za-z0-9_-]/g, "_")
+  return `sub-d${depth}-${safeMailboxId}-${now().toString(36)}-${spawnSeq.toString(36)}`
+}
+
 /** §20.3 — record a DISPLAY nickname for a freshly-spawned child in the host's
  *  `AgentMetaRegistry` side-table (the `list_agents` label source, keyed by the
  *  registry TASK id `rec.id`). The child's STABLE id stays the ordinal mailbox
@@ -751,9 +710,10 @@ const buildChildConfig = (
  *  - DEPTH GUARD: `req.depth > maxDepth ⇒` resolve a non-ok result (never
  *    throw) — this is the authoritative recursion bound.
  *  - builds a child config (see {@link buildChildConfig} / override table);
- *  - `isolation:"worktree"` + parent cwd is a git repo ⇒ run inside a
- *    throwaway worktree (`withWorktree`) with the child cwd = worktree path;
- *    not a git repo ⇒ silently fall back to no isolation (never fail);
+ *  - `isolation:"worktree"` + the effective child cwd is a git repo ⇒ run
+ *    inside a throwaway worktree (`withWorktree`) with the child cwd =
+ *    worktree path; not a git repo ⇒ silently fall back to no isolation
+ *    (never fail);
  *  - maps the {@link AgentOutcome} onto a {@link SubagentResult}.
  */
 export const createSubagentRunner = (
@@ -769,31 +729,35 @@ export const createSubagentRunner = (
   // registries are rewritten with scoped names per the injected strategy.
   const toolNamespace = opts.toolNamespace
 
-  // ADR-0416 sibling-identity fix — this runner's parent mailbox label and a
-  // DETERMINISTIC per-runner ordinal. Each spawn mints `parentLabel/seq`
-  // (`root/0`, `root/1`, …) so siblings forked at the same depth get DISTINCT
-  // stable ids. Replay-friendly: the counter (not a clock / uuid) is the only
-  // source of per-sibling uniqueness, so a recorded session re-mints identical
-  // labels. The root session has no `mailboxAgentId` ⇒ its children are
-  // `root/0`, `root/1`; a depth-2 child of `root/0` is `root/0/0`, etc.
+  // ADR-0416 sibling-identity fix — this runner's parent mailbox label and the
+  // session-shared child-identity allocator (when a shared mailbox/team/wake/
+  // agent-meta substrate exists). Multiple runner instances that share one
+  // control plane therefore mint from ONE ordinal sequence instead of each
+  // restarting at `root/0`. Without a shared substrate we fall back to the
+  // historical per-runner counter (byte-identical legacy path).
   const parentMailboxLabel = parent.mailboxAgentId ?? "root"
-  let childOrdinal = 0
+  const sharedIdentity = childIdentityState(parent)
+  const localIdentity = { childOrdinal: 0, spawnSeq: 0 }
 
   return async (req: SubagentRequest): Promise<SubagentResult> => {
     if (req.depth > maxDepth) {
       return { ok: false, finalText: "max subagent depth exceeded", turns: 0 }
     }
 
-    const wantsWorktree = req.isolation === "worktree"
-    const isolate = wantsWorktree && (await gitProbe(parent.cwd))
+    const requestedCwd = req.workspace ?? parent.cwd
+    const mailboxIds = allocateChildMailboxIds(parentMailboxLabel, sharedIdentity, localIdentity)
+    const subagentId = buildSubagentRunId(req.depth, mailboxIds.agentId, mailboxIds.spawnSeq, now)
 
-    // Deterministic stable mailbox id for this child (`parentLabel/seq`). The
-    // ordinal increments AFTER capture so the first child of root is `root/0`.
-    const mailboxIds = {
-      agentId: `${parentMailboxLabel}/${childOrdinal}`,
-      parentId: parentMailboxLabel,
+    const wantsWorktree = req.isolation === "worktree"
+    const isolate = wantsWorktree && (await gitProbe(requestedCwd))
+
+    // ADR-0133 — fire `subagent_start` on the PARENT's hook bus BEFORE the
+    // child config is built or the worktree is opened. A hook returning
+    // `abort` cancels the spawn entirely. See `emitSubagentStartHook`.
+    const startAbort = await emitSubagentStartHook(parent, { subagentId, req })
+    if (startAbort !== null) {
+      return { ok: false, finalText: startAbort, turns: 0 }
     }
-    childOrdinal += 1
 
     // RFC jun-6 (DELTA #2) — register the spawned child into the PARENT's team
     // (if the parent belongs to one) so siblings share a team bus + the
@@ -813,18 +777,6 @@ export const createSubagentRunner = (
       req.agentType,
     )
 
-    // id is sanitized by withWorktree's safeId; depth+prompt make it
-    // human-traceable while staying within the worktree-name charset.
-    const subagentId = `sub-d${req.depth}-${now().toString(36)}`
-
-    // ADR-0133 — fire `subagent_start` on the PARENT's hook bus BEFORE the
-    // child config is built or the worktree is opened. A hook returning
-    // `abort` cancels the spawn entirely. See `emitSubagentStartHook`.
-    const startAbort = await emitSubagentStartHook(parent, { subagentId, req })
-    if (startAbort !== null) {
-      return { ok: false, finalText: startAbort, turns: 0 }
-    }
-
     // ADR-0437 follow-up — mint a per-child turn gate + register a waker into
     // the host's shared `TurnWakeRegistry` under the SAME registry task id
     // `followup_task` targets, so `wake(taskId)` finds a live receiver. Absent
@@ -838,7 +790,7 @@ export const createSubagentRunner = (
       const childResult: SubagentResult = isolate
         ? toResult(
             (
-              await wt(subagentId, parent.cwd, async (worktreePath) => {
+              await wt(subagentId, requestedCwd, async (worktreePath) => {
                 const child = buildChildConfig(
                   parent,
                   req,
@@ -853,7 +805,7 @@ export const createSubagentRunner = (
           )
         : toResult(
             await run(
-              buildChildConfig(parent, req, parent.cwd, mailboxIds, toolNamespace, turnGate),
+              buildChildConfig(parent, req, requestedCwd, mailboxIds, toolNamespace, turnGate),
             ),
           )
 

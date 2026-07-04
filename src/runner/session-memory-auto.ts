@@ -27,6 +27,7 @@ import {
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
 import { ChildProcessGitPort } from "@/memory/consolidate/git"
 import { resolveMemoryDirPaths } from "@/memory/consolidate/paths"
+import { loadMemorySummary } from "@/memory/consolidate/reader"
 import { LlmPhase2Port } from "@/memory/consolidate/phase2-llm"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
 import {
@@ -211,6 +212,7 @@ export interface SessionStartMemoryResult {
 
 export interface SessionMemoryAutoWires {
   readonly sessionCtx?: string
+  readonly memorySummaryMd?: string
   readonly stage1OutputsStore: Stage1OutputsStore
   readonly memoryConsolidator: NonNullable<AgentConfig["memoryConsolidator"]>
   /** Release the per-session resources this wire bundle owns — namely the
@@ -399,6 +401,7 @@ export const buildSessionMemoryAutoWires = async (
     now,
     logWarn,
   })
+  const memorySummaryMd = await loadMemorySummary(paths, nodeFsPort)
 
   // U7-10: own the close of the WAL-mode SQLite handle opened above. The
   // handle is created HERE (not by Stage1Store), so the honest owner of its
@@ -428,6 +431,7 @@ export const buildSessionMemoryAutoWires = async (
 
   return {
     ...(start.sessionCtx !== undefined ? { sessionCtx: start.sessionCtx } : {}),
+    ...(memorySummaryMd !== undefined ? { memorySummaryMd } : {}),
     stage1OutputsStore,
     memoryConsolidator: {
       enabled: true,

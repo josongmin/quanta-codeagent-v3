@@ -115,6 +115,24 @@ describe("createAgentTool — depth limit", () => {
 })
 
 describe("createAgentTool — background + Task* tools", () => {
+  test("background honors maxConcurrent and rejects the over-cap launch", async () => {
+    const runner: SubagentRunner = () => new Promise<SubagentResult>(() => {})
+    const reg = new TaskRegistry()
+    const agent = createAgentTool({ runner, registry: reg, maxConcurrent: 1 })
+
+    const first = await run(agent, { prompt: "first", background: true }, ctxAt(0))
+    if (first.type !== "result") throw new Error("expected result")
+    expect(first.result.ok).toBe(true)
+    expect(reg.pendingIds()).toHaveLength(1)
+
+    const second = await run(agent, { prompt: "second", background: true }, ctxAt(0))
+    if (second.type !== "result") throw new Error("expected result")
+    expect(second.result.ok).toBe(false)
+    expect(second.result.output).toContain("cap reached")
+    expect(second.result.output).toContain("1 concurrent")
+    expect(reg.pendingIds()).toHaveLength(1)
+  })
+
   test("background returns a task id immediately, TaskOutput yields the result", async () => {
     let release!: (r: SubagentResult) => void
     const gate = new Promise<SubagentResult>((res) => {

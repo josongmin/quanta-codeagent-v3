@@ -1,3 +1,4 @@
+import type { IdentityMode } from "@/agent/identity"
 import type { ModeVariantKey, SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { PermissionMode } from "@/permission"
@@ -18,8 +19,12 @@ export interface IdentityModeSessionState {
   readonly registry: SystemPromptVariantRegistry
   readonly defaultMode?: ModeVariantKey
   readonly perTurnReminderEnabled?: boolean
-  get(): ModeVariantKey
-  set(next: ModeVariantKey): void
+  get(): IdentityMode
+  /** Project the current identity posture onto the prompt-variant registry's
+   *  closed key space. `onboarding` is identity-only, so it falls back to the
+   *  session's default prompt mode instead of widening `identityModeVariant`. */
+  getPromptMode(): ModeVariantKey
+  set(next: IdentityMode): void
 }
 
 /**
@@ -80,17 +85,20 @@ export const createPermissionModeSessionState = (args: {
 export const createIdentityModeSessionState = (args: {
   readonly registry: SystemPromptVariantRegistry
   readonly defaultMode: ModeVariantKey
+  readonly initialMode?: IdentityMode
   readonly perTurnReminderEnabled?: boolean
 }): IdentityModeSessionState => {
-  let current = args.defaultMode
+  let current: IdentityMode = args.initialMode ?? args.defaultMode
   return {
     registry: args.registry,
     defaultMode: args.defaultMode,
     ...(args.perTurnReminderEnabled !== undefined
       ? { perTurnReminderEnabled: args.perTurnReminderEnabled }
       : {}),
-    get: (): ModeVariantKey => current,
-    set: (next: ModeVariantKey): void => {
+    get: (): IdentityMode => current,
+    getPromptMode: (): ModeVariantKey =>
+      current === "onboarding" ? args.defaultMode : current,
+    set: (next: IdentityMode): void => {
       current = next
     },
   }

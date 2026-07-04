@@ -54,6 +54,7 @@ describe("session_config — dispatch integration", () => {
     const seam: SessionConfigSeam = {
       readEffort: () => effortStore.get(),
       writeEffort: (next) => effortStore.set(next),
+      readPermissionMode: () => "acceptEdits",
       readIdentityMode: () => "code_agent",
       readToolProfile: () => "write",
       readModel: () => "gpt-5-mini",
@@ -70,6 +71,7 @@ describe("session_config — dispatch integration", () => {
       expect(content).toContain("session_config")
       expect(content).toContain("high")
       expect(content).toContain("16,384")
+      expect(content).toContain("acceptEdits")
       expect(content).toContain("code_agent")
       expect(content).toContain("gpt-5-mini")
       expect(content).toContain("chatgpt-oauth")

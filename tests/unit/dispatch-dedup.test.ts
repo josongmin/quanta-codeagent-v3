@@ -294,6 +294,59 @@ describe("DedupGate — edit regime (per-file thrash brake)", () => {
     expect(v[4]?.blocked).toBe(true)
     if (v[4]?.blocked) expect(v[4].regime).toBe("edit")
   })
+
+  // ── SSOT-adoption behavior (commit 44d90e0e2) ──
+  // `mutatingTargetPaths` (the shared SSOT) added `write` + `apply_patch(_structured)`
+  // to the per-file edit bucket. BEFORE, `write` fell to the GENERAL regime keyed on
+  // path+content, so N same-file writes with DIFFERENT content never accrued; and
+  // `apply_patch*` (omitted from the old inline `EDIT_TOOLS`) escaped the per-file
+  // brake entirely. These pin the intended drift-repair (RED if editFileOf reverts
+  // to the old `{edit, multi_edit, scripted_replace}` set).
+  test("write: 5 same-file writes with DIFFERENT content brake at #5 (SSOT edit-bucket)", () => {
+    const g = new DedupGate()
+    const file = "/app/config.py"
+    const v = recordSeries(g, [
+      { name: "write", args: { path: file, content: "v1" }, turn: 1 },
+      { name: "write", args: { path: file, content: "v2" }, turn: 2 },
+      { name: "write", args: { path: file, content: "v3" }, turn: 3 },
+      { name: "write", args: { path: file, content: "v4" }, turn: 4 },
+      { name: "write", args: { path: file, content: "v5" }, turn: 5 },
+    ])
+    // Old behavior: general regime, distinct content ⇒ 5 distinct keys ⇒ none block.
+    expect(v.slice(0, 4).every((x) => !x.blocked)).toBe(true)
+    expect(v[4]?.blocked).toBe(true)
+    if (v[4]?.blocked) expect(v[4].regime).toBe("edit")
+  })
+
+  test("write to DIFFERENT files does NOT share a bucket (per-file, not per-tool)", () => {
+    const g = new DedupGate()
+    const v = recordSeries(g, [
+      { name: "write", args: { path: "/a.py", content: "x" }, turn: 1 },
+      { name: "write", args: { path: "/b.py", content: "x" }, turn: 2 },
+      { name: "write", args: { path: "/c.py", content: "x" }, turn: 3 },
+      { name: "write", args: { path: "/d.py", content: "x" }, turn: 4 },
+      { name: "write", args: { path: "/e.py", content: "x" }, turn: 5 },
+    ])
+    expect(v.every((x) => !x.blocked)).toBe(true)
+  })
+
+  test("apply_patch(_structured): 5 patches on the same FIRST file brake at #5", () => {
+    const g = new DedupGate()
+    // V4A marker `*** Update File: <path>` is what mutatingTargetPaths scans; the
+    // patch BODY differs each turn but the target file (bucket key) is constant.
+    const patch = (n: number) =>
+      `*** Begin Patch\n*** Update File: pkg/core.py\n@@\n-old${n}\n+new${n}\n*** End Patch`
+    const v = recordSeries(g, [
+      { name: "apply_patch", args: { patch: patch(1) }, turn: 1 },
+      { name: "apply_patch_structured", args: { patch: patch(2) }, turn: 2 },
+      { name: "apply_patch", args: { patch: patch(3) }, turn: 3 },
+      { name: "apply_patch_structured", args: { patch: patch(4) }, turn: 4 },
+      { name: "apply_patch", args: { patch: patch(5) }, turn: 5 },
+    ])
+    expect(v.slice(0, 4).every((x) => !x.blocked)).toBe(true)
+    expect(v[4]?.blocked).toBe(true)
+    if (v[4]?.blocked) expect(v[4].regime).toBe("edit")
+  })
 })
 
 describe("DedupGate — per-session isolation", () => {
@@ -407,7 +460,9 @@ describe("DedupGate — anti-regression: dispatch.ts must call the gate before t
     const dispatchPath = path.resolve(__dirname, "../../src/agent/dispatch.ts")
     const src = fs.readFileSync(dispatchPath, "utf8")
     // Must import the preflight helper that owns the gate.
-    expect(/consultDedupGate[\s\S]*from\s+["']\.\/dispatch\/preflight-consults["']/.test(src)).toBe(true)
+    expect(/consultDedupGate[\s\S]*from\s+["']\.\/dispatch\/preflight-consults["']/.test(src)).toBe(
+      true,
+    )
     // consultDedupGate must be a member of the ordered PRE_FLIGHT_CONSULTS table.
     const table = src.match(/PRE_FLIGHT_CONSULTS[\s\S]*?=\s*\[([\s\S]*?)\]/)
     expect(table?.[1]).toContain("consultDedupGate")

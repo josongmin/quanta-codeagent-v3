@@ -38,6 +38,7 @@ import { logger, runtimeConfig } from "@/shared"
 import type { StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import { type AssembleRequest, assembleAgentConfig, type RunOutcome } from "../assemble"
+import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 
 /** A minimal AgentConfig.base built ONLY to satisfy `assembleAgentConfig`'s
  *  matrix validation. The real per-instance config is constructed inside the
@@ -58,6 +59,7 @@ const BENCH_EVAL_MODULE = "@/apps/bench/eval"
 const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const llm: LLMPort = req.base.llm
   const stream: StreamPort = req.base.stream
+  const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   // batch must use `auto` permission per the matrix (`narrow#assertBatch`).
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
   // DIP factory call; batch's real registry is built per-instance by the bench
@@ -74,7 +76,8 @@ const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budge
     stream,
     permission,
     messages: req.base.messages ?? [],
-    system: req.base.system ?? "",
+    system: resolveModePresetSystemPrompt(req.mode, req.base.system, req.base.cwd ?? process.cwd()),
+    ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
     cwd: req.base.cwd ?? process.cwd(),
     maxTurns: req.base.maxTurns ?? 60,
     // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired

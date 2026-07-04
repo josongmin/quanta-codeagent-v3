@@ -1,10 +1,23 @@
 /**
  * `@/sdk/profiles` — capability profile → run mode (Phase 4, first cut).
  *
- * All three profiles currently map to the `batch` mode: multi-turn
- * (`termination: verdict`), auto/acceptEdits, per-instance sandbox — the only
- * stock preset that fits a repo-analysis MAIN LOOP (`headless` is single-turn;
+ * All three profiles currently map to the `batch` mode's POLICY levers: multi-turn
+ * (`termination: verdict`), auto/acceptEdits, per-instance sandbox — the only stock
+ * preset whose policy fits a repo-analysis MAIN LOOP (`headless` is single-turn;
  * see MODE_PRESETS in `@/agent/run-mode`).
+ *
+ * PROMPT ≠ POLICY (3-axis independence). The `batch` ModePolicy declares
+ * `promptPack: {kind:"benchmark"}`, but — exactly like EVERY app mode-preset
+ * (`apps/agent/mode-presets/{interactive,daemon,headless,ci-bot}.ts`, all of which
+ * do `system: req.base.system ?? buildSystemPrompt(cwd)`) — the SDK builds the
+ * system prompt via `buildSystemPrompt(cwd)` with the DEFAULT interactive prompt
+ * pack (`embed.ts`). The mode's `promptPack` lever is a task-pack axis consumed by
+ * the bench harness path, NOT re-applied to the loop's system prompt here; that
+ * axis is deliberately orthogonal to the env-posture prompt (jul-04 3-axis prompt
+ * refactor). So the SDK agent runs the interactive-assistant prompt under batch
+ * POLICY by design. A consumer who wants a task-focused prompt passes their own
+ * `opts.system` (embed.ts honors it verbatim). Do NOT special-case the SDK to
+ * thread `promptPack` — that would make it the lone preset diverging from the rest.
  *
  * Phase 4 refines this into custom lever overrides (read-only = mutating-tool
  * block + net denied; analysis = net OPEN; full = memory/subagent/MCP slots)

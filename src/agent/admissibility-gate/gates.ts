@@ -21,8 +21,6 @@ import {
   evaluateStack,
   extractWriteEffects,
   getDefaultPermissionStore,
-  hardDenyReason,
-  hardDenySafeReason,
   isSimpleCommand,
   type PermissionContext,
   type PermissionDecision,
@@ -38,6 +36,15 @@ import {
   isAllowed as isConfirmAllowed,
   normalizeConfirm,
 } from "../confirm-decision"
+import {
+  denyReason,
+  hardDenyStructuredReason,
+  hookDenyReason,
+  modeApprovalDenyReason,
+  stackApprovalDenyReason,
+  stackDenyReason,
+  toolProfileDenyReason,
+} from "../deny-reason-wire"
 import { deny, HANDOFF_SUFFIX } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import { type HookPermissionDecision, routePermissionHookVerdict } from "../hooks"
@@ -49,13 +56,14 @@ import {
   type AdmissibilityWaveAOptions,
   cascadeOnApprove,
   denyFromConfirm,
-  denyReason,
   emitGateDecision,
   type GateEscalationBroker,
   hardDenyHandoff,
   isSessionApprovalRequiredError,
   type LayeredRule,
   policyDenyStructured,
+  resolvedHardDenyProse,
+  resolvedShellCommand,
   resolveHitlTier,
   runPreToolUseHook,
 } from "./shared"
@@ -83,7 +91,7 @@ const runToolProfileGate = async (
       `Permission denied: tool profile "${activeName}" could not resolve ${action.tool} (${errMessage(e)})`,
       "tool-profile-error",
       // C6: categorical — the resolver error `errMessage(e)` stays on `content`.
-      denyReason({ layer: "tool-profile", safeReason: "tool profile failed to resolve" }),
+      toolProfileDenyReason("tool profile failed to resolve"),
     )
   }
   if (policy.kind === "allow") return "fallthrough"
@@ -94,7 +102,7 @@ const runToolProfileGate = async (
       "tool-profile-denied",
       // `policy.reason` is the profile resolver's own categorical message (no
       // model input); reused verbatim as the structured safeReason.
-      denyReason({ layer: "tool-profile", safeReason: policy.reason }),
+      toolProfileDenyReason(policy.reason),
     )
   }
   // policy.kind === "confirm".
@@ -131,7 +139,7 @@ const denyIfModeBlocked = (
     `${effectiveMode}-blocked`,
     // C6: `modeBlockReason` is categorical (mode literal + tool NAME only — never
     // tool input), so it is reused verbatim as the structured safeReason.
-    denyReason({ layer: "mode", pillar: "approval", safeReason: reason }),
+    modeApprovalDenyReason(reason),
   )
 }
 
@@ -313,20 +321,15 @@ const runPermissionStack = (
       toolCallId: call.id,
       tool: action.tool,
     })
-    // C6: for a SOFT per-thread/per-host stack deny `decision.reason` is the
-    // SAME pre-sanitized one-liner handed to `emitGateDecision` above (sandbox
-    // type + workdir — never tool input), reused verbatim with `layer:"stack"`
-    // / `pillar:"sandbox"`. `stackSource` is OMITTED: the returned
-    // `PermissionDecision` does not carry the firing axis. SECURITY (no-leak):
-    // `evaluateStack`'s HARD_DENY arm (precedence level 1) ALSO surfaces here as
-    // a `deny` whose `decision.reason` echoes the command — `policyDenyStructured`
-    // switches it to the categorical `hard-deny` form so the command never
-    // reaches the structured field (the prose `content` may still echo it).
+    // C6: the typed deny carries the stack source, and `policyDenyStructured`
+    // centralizes the `per-thread|per-host -> pillar:"sandbox"` mapping. A hard
+    // deny is also explicit on `decision.hardDeny`, so this site no longer
+    // re-encodes either mapping.
     return deny(
       call.id,
       `Permission denied: ${decision.reason}`,
       "denied",
-      denyReason(policyDenyStructured(action, "stack", decision.reason, "sandbox")),
+      denyReason(policyDenyStructured(decision)),
     )
   }
   // `ask` ⇒ no opinion from the stack; fall through to the legacy mode policy
@@ -354,7 +357,7 @@ const trustScopeGrants = (
   action: AdmissibilityAction,
 ): boolean => {
   if (!config.trustScope) return false
-  const shellCommand = config.registry.extractShellCommand(action.tool, action.input)
+  const shellCommand = resolvedShellCommand(config, action)
   // #20 (durable prefix safety) — a token-prefix trust-scope grant (`commandPattern`)
   // matches by FIRST TOKEN, so a chained command (`echo x && cat /etc/passwd`)
   // whose first token rides the grant would smuggle the rest past the prompt.
@@ -395,11 +398,7 @@ const resolveAskBranch = async (
         `Confirmation handler failed: ${message}`,
         "error",
         // C6: categorical — the host error `message` stays on `content`.
-        denyReason({
-          layer: "stack",
-          pillar: "approval",
-          safeReason: "confirmation handler failed",
-        }),
+        stackApprovalDenyReason("confirmation handler failed"),
       )
     }
   }
@@ -414,7 +413,7 @@ const resolveAskBranch = async (
       config,
       // C6: `reason` is the policy's own categorical ask message (action.tool at
       // most — never tool input), reused verbatim.
-      denyReason({ layer: "stack", pillar: "approval", safeReason: reason }),
+      stackApprovalDenyReason(reason),
     )
   }
   // ADR-0061 L4 cascade — user approved via the mode-policy ask path.
@@ -591,11 +590,11 @@ const runModePolicy = async (
   })
   if (decision.kind === "deny") {
     // Capability B — leader-mediated escalation of a SOFT policy denial. SECURITY:
-    // re-verify the action is NOT a HARD_DENY before escalating (the policy-
-    // internal HARD_DENY surfaces here as a `deny` when no allow-capable bypass
-    // ran step-2 `earlyHardDeny`). A denylisted command is NEVER escalatable.
+    // a typed hard deny is NEVER escalatable. The permission slice sets
+    // `decision.hardDeny=true` on its own HARD_DENY boundary, so this gate no
+    // longer re-derives the fact from `action`.
     let brokerDenied = false
-    if (opts.coordinationBroker !== undefined && hardDenyReason(action) === null) {
+    if (opts.coordinationBroker !== undefined && !decision.hardDeny) {
       const verdict = await runBrokerEscalation(opts.coordinationBroker, action, decision.reason)
       brokerDenied = verdict === "denied"
       if (verdict === "approved") {
@@ -616,13 +615,13 @@ const runModePolicy = async (
     // When the HITL gate is enabled the HARD_DENY branch is already handled
     // upstream; any remaining policy denial keeps the legacy "Permission
     // denied" wording (e.g. classifier "deny" verdict in auto mode). C6: the
-    // structured reason is `hard-deny` on a HARD_DENY hit (no command leak), or
-    // the SOFT `broker`/`stack` layer otherwise — see {@link policyDenyStructured}.
+    // structured reason is `hard-deny` on a hard deny (no command leak), or the
+    // soft `broker`/`stack` layer otherwise — see {@link policyDenyStructured}.
     return deny(
       call.id,
       `Permission denied: ${decision.reason}`,
       "denied",
-      denyReason(policyDenyStructured(action, brokerDenied ? "broker" : "stack", decision.reason)),
+      denyReason(policyDenyStructured(decision, { brokerDenied })),
     )
   }
   if (decision.kind === "ask") {
@@ -666,13 +665,9 @@ const earlyHardDeny = (
     // `allow` can never route around the denylist (the §4.4 floor, layer (a)).
     (runtimeConfig().permissionHook && config.hooks !== undefined)
   if (!bypassActive) return null
-  const hardDenyCommand = config.registry.extractShellCommand(action.tool, action.input)
-  const hardDeny = hardDenyReason({
-    tool: action.tool,
-    input: action.input,
-    isReadOnly: action.isReadOnly,
-    shellCommand: hardDenyCommand,
-  })
+  // Reuse the gate-entry action fact (`withResolvedShellCommand`) instead of
+  // re-deriving shellCommand from the registry a second time here.
+  const hardDeny = resolvedHardDenyProse(action)
   if (hardDeny === null) return null
   return deny(
     call.id,
@@ -680,7 +675,7 @@ const earlyHardDeny = (
     "handoff",
     // C6 no-leak: categorical `hardDenySafeReason()`, NOT `hardDeny` (which
     // echoes the matched command on the model-facing `content`).
-    denyReason({ layer: "hard-deny", safeReason: hardDenySafeReason() }),
+    hardDenyStructuredReason(),
   )
 }
 
@@ -726,7 +721,7 @@ const runPermissionRequestHook = async (
   // The HARD_DENY fact for the §4.4 floor — re-derive from the registry so the
   // helper can refuse an `allow`-on-HARD_DENY even if (impossibly) earlyHardDeny
   // did not pull it ahead.
-  const hardDeny = hardDenyReason(action)
+  const hardDeny = resolvedHardDenyProse(action)
   const routing = routePermissionHookVerdict(decision, hardDeny !== null, hardDeny ?? undefined)
   switch (routing.arm) {
     case "fallthrough":
@@ -749,7 +744,7 @@ const runPermissionRequestHook = async (
         `Permission denied: ${routing.reason}`,
         "hook-denied",
         // C6: categorical — the router `routing.reason` stays on `content`.
-        denyReason({ layer: "hook", safeReason: "permission_request hook denied" }),
+        hookDenyReason("permission_request hook denied"),
       )
     case "ask":
       return resolveAskBranch(call, config, action, `permission_request hook (${call.name})`, opts)
@@ -778,7 +773,7 @@ const runRulesDsl = async (
   opts: AdmissibilityWaveAOptions,
 ): Promise<DispatchResult | null | "fallthrough"> => {
   if (!opts.rulesStore) return "fallthrough"
-  const ruleKey = config.registry.extractShellCommand(action.tool, action.input) ?? action.tool
+  const ruleKey = resolvedShellCommand(config, action) ?? action.tool
   const m = opts.rulesStore.match(ruleKey)
   if (m.kind === "matched") {
     // Build the ruleId from prefix + layer + source line — categorical,
@@ -811,10 +806,7 @@ const runRulesDsl = async (
         // C6 no-leak: the categorical rule-prefix+layer form (the SAME shape
         // emitted to the recorder above) — NOT `ruleKey`, which for a shell tool
         // is the command itself. The prose `content` keeps `ruleKey`.
-        denyReason({
-          layer: "stack",
-          safeReason: `matched deny rule '${m.rule.prefix}' (${m.rule.layer})`,
-        }),
+        stackDenyReason(`matched deny rule '${m.rule.prefix}' (${m.rule.layer})`),
       )
     }
     // m.rule.action === "ask" — escalate (rule_ask deny if no port wired).
@@ -832,10 +824,7 @@ const runRulesDsl = async (
         `Rule 'ask ${m.rule.prefix}' matched '${ruleKey}' but no ReviewerPort is wired.`,
         "rule_ask",
         // C6 no-leak: categorical rule prefix+layer only — NOT `ruleKey`.
-        denyReason({
-          layer: "stack",
-          safeReason: `matched ask rule '${m.rule.prefix}' (${m.rule.layer}), no port wired`,
-        }),
+        stackDenyReason(`matched ask rule '${m.rule.prefix}' (${m.rule.layer}), no port wired`),
       )
     }
     return reviewAndDecide(call, config, action, opts, "rule")
@@ -854,7 +843,7 @@ const runRulesDsl = async (
       `no rule matched '${ruleKey}' (noMatchPolicy='deny').`,
       "rule_no_match_deny",
       // C6 no-leak: categorical (the SAME recorder reason above) — NOT `ruleKey`.
-      denyReason({ layer: "stack", safeReason: "no rule matched (noMatchPolicy='deny')" }),
+      stackDenyReason("no rule matched (noMatchPolicy='deny')"),
     )
   }
   // "fallthrough" (or absent) ⇒ continue to the legacy gates below. No emit

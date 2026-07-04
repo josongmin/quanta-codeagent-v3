@@ -1,6 +1,7 @@
 import type { ToolUseBlock } from "@/llm"
-import { type StructuredDenyReason, structuredDenyReason } from "@/permission"
-import { isTestFilePath, runtimeConfig } from "@/shared"
+import { isTestFilePath } from "@/shared"
+import type { GuardDecision } from "../dispatch-guard"
+import { guardStructuredReason } from "../deny-reason-wire"
 import { DedupGate } from "../dispatch-dedup"
 import { deny } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
@@ -8,25 +9,10 @@ import { decideLocalizePhase, MUTATING_TOOL_NAMES } from "../localize-phase-guar
 import { mutatingTargetPaths } from "../mutating-tools"
 import type { AgentConfig } from "../types"
 
-/**
- * C6 (RFC jun-6-deny-reason-surfacing) — knob-gated structured-deny builder for
- * the dispatch-seam denies that fire BEFORE `runAdmissibilityGate` (the
- * `plan` collaboration-mode mutating block). Mirrors the admissibility-gate's
- * local `denyReason(...)`: returns `undefined` (zero allocation) when
- * `surfaceDenyReason` (`QUANTA_DENY_REASON`) is OFF, so `deny(...,
- * denyReason(...))` is BYTE-IDENTICAL to the legacy `deny(...)` on the default
- * path. The dispatch-helper `deny()` ALSO re-checks the knob (defence in depth).
- *
- * SECURITY (no-leak): callers pass a CATEGORICAL `safeReason` (mode literal +
- * tool name at most — never tool input), the same surface the recorder already
- * sees; the prefix is derived from `layer`/`pillar` enums only.
- */
-export const denyReason = (input: {
-  layer: import("@/permission").DenyLayer
-  pillar?: import("@/permission").DenyPillar
-  safeReason: string
-}): StructuredDenyReason | undefined =>
-  runtimeConfig().surfaceDenyReason ? structuredDenyReason(input) : undefined
+const guardContent = (decision: Exclude<GuardDecision, { kind: "allow" }>): string =>
+  decision.kind === "ask"
+    ? `Dispatch guard requested confirmation: ${decision.reason}`
+    : `${decision.hardDeny ? "Action blocked by dispatch guard (hard): " : "Action blocked by dispatch guard: "}${decision.reason}`
 
 /** T3 — pre-flight dedup gate consult. Returns a synthetic non-error
  *  tool_result {@link DispatchResult} to short-circuit a thrashing call, or
@@ -165,34 +151,11 @@ export const consultDispatchGuard = (
     // SECURITY (no-leak): `decision.reason` echoes the path/command/host on the
     // model-facing `content` (agent-authored — acceptable), but the STRUCTURED
     // `safeReason` is a CATEGORICAL one-liner that carries NO input.
-    return deny(
-      call.id,
-      `Dispatch guard requested confirmation: ${decision.reason}`,
-      "guard-ask",
-      denyReason({ layer: "stack", safeReason: "dispatch guard requested confirmation" }),
-    )
+    return deny(call.id, guardContent(decision), "guard-ask", guardStructuredReason(decision))
   }
-  // `kind === "deny"`. `hardDeny:true` carries the security-boundary
-  // signal forward via the deny content prefix — downstream loop classifiers
-  // (and the existing `handoff` preview-tag consumers) keep working unchanged
-  // because we use a NEW tag (`"guard-deny"`) that opts in to the new behavior
-  // without colliding with the existing 16+ preview-tag vocabulary.
-  const prefix = decision.hardDeny
-    ? "Action blocked by dispatch guard (hard): "
-    : "Action blocked by dispatch guard: "
   // C6: structured reason for the seam-level guard deny (see the `ask` arm). The
   // `hardDeny` flag selects a CATEGORICAL safeReason wording (security boundary
   // vs recoverable posture) — NEVER `decision.reason`, which echoes the matched
   // path/command/host. `layer:"stack"`, pillar OMITTED.
-  return deny(
-    call.id,
-    `${prefix}${decision.reason}`,
-    "guard-deny",
-    denyReason({
-      layer: "stack",
-      safeReason: decision.hardDeny
-        ? "dispatch guard blocked (security boundary)"
-        : "dispatch guard blocked (recoverable posture)",
-    }),
-  )
+  return deny(call.id, guardContent(decision), "guard-deny", guardStructuredReason(decision))
 }

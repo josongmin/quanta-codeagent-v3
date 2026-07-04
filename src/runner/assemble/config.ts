@@ -94,6 +94,8 @@ export interface SessionDeps {
   /** Static session-context block injected into the cached system sections.
    *  Used for cross-session memory summaries and other host-owned context. */
   sessionCtx?: AgentConfig["sessionCtx"]
+  /** Distilled `memory_summary.md` body loaded once per session start. */
+  memorySummaryMd?: AgentConfig["memorySummaryMd"]
   /** ADR-0218 / ADR-0283 typed delegation surface. Helper-only today; hosts
    *  may publish it to slash/tools. Absent ⇒ omitted entirely. */
   delegation?: AgentConfig["delegation"]
@@ -143,6 +145,9 @@ export interface SessionDeps {
    *  loop share ONE state object; `assembleConfig` projects it into
    *  `AgentConfig.identityModeVariant.activeMode`. */
   identityModeState?: IdentityModeSessionState
+  /** Prompt-surface profile projected onto the assembled config so non-
+   *  bootstrap callers keep the same prompt-section routing as bootstrap. */
+  promptSurfaceProfile?: AgentConfig["promptSurfaceProfile"]
   /** Authoritative focus-chain tracker slot shared by the slash surface and
    *  the loop. Absent ⇒ field omitted from `AgentConfig`. */
   focusChain?: AgentConfig["focusChain"]
@@ -186,11 +191,12 @@ export interface SessionDeps {
    *  AgentConfig entirely (byte-identical default-OFF). */
   granularRegistry?: GranularRegistryPort
   /** `session_config` tool seam — read + write over the agent's own SDK
-   *  posture (effort tier, identity mode, tool profile, model, provider).
-   *  Built by the composition root from the pre-existing `effortStore` +
-   *  `identityModeState` + `toolProfileState`. Absent ⇒ omitted from
-   *  AgentConfig (byte-identical default-OFF: the tool itself is registered
-   *  unconditionally and yields a typed `not_wired` failure when called). */
+   *  posture (effort tier, permission mode, identity mode, tool profile,
+   *  model, provider). Built by the composition root from the pre-existing
+   *  `effortStore` + `permissionModeState` + `identityModeState` +
+   *  `toolProfileState`. Absent ⇒ omitted from AgentConfig (byte-identical
+   *  default-OFF: the tool itself is registered unconditionally and yields a
+   *  typed `not_wired` failure when called). */
   sessionConfigPort?: AgentConfig["sessionConfigPort"]
 }
 
@@ -247,6 +253,9 @@ const buildMemoryAndModeSpreads = (
 
 const buildPromptVariantSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.focusChain !== undefined ? { focusChain: d.focusChain } : {}),
+  ...(d.promptSurfaceProfile !== undefined
+    ? { promptSurfaceProfile: d.promptSurfaceProfile }
+    : {}),
   ...(() => {
     const state = d.toolProfileState
     return state !== undefined
@@ -268,7 +277,7 @@ const buildPromptVariantSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
             ...(state.perTurnReminderEnabled !== undefined
               ? { perTurnReminderEnabled: state.perTurnReminderEnabled }
               : {}),
-            activeMode: () => state.get() ?? state.defaultMode ?? "default",
+            activeMode: () => state.getPromptMode() ?? state.defaultMode ?? "default",
           },
         }
       : {}
@@ -316,6 +325,7 @@ const buildCapabilityAndObservabilitySpreads = (d: SessionDeps): Partial<AgentCo
 const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.memoryConsolidator !== undefined ? { memoryConsolidator: d.memoryConsolidator } : {}),
   ...(d.sessionCtx !== undefined ? { sessionCtx: d.sessionCtx } : {}),
+  ...(d.memorySummaryMd !== undefined ? { memorySummaryMd: d.memorySummaryMd } : {}),
   ...(d.delegation !== undefined ? { delegation: d.delegation } : {}),
   ...(d.subagentBackground !== undefined ? { subagentBackground: d.subagentBackground } : {}),
   ...(d.autoBackground !== undefined ? { autoBackground: d.autoBackground } : {}),

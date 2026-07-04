@@ -34,8 +34,8 @@ export const currentPlanTool = (): Tool<CurrentPlanInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: "current_plan unavailable: plan-mode is not active in this session.",
-          failure: { mode: "error", modelVisibleError: "plan-mode is not active" },
+          output: "current_plan unavailable: no structured plan store is wired in this session.",
+          failure: { mode: "error", modelVisibleError: "structured plan store is not wired" },
         },
       }
       return

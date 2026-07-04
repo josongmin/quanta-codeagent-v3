@@ -295,12 +295,22 @@ export const finalDecisionFor = (
   if (inspection.hardDenyMatched) {
     const first = inspection.hardDenyRules[0]
     const name = first?.name ?? "(unknown rule)"
-    return { kind: "deny", reason: `HARD_DENY rule '${name}' matches the supplied command` }
+    return {
+      kind: "deny",
+      reason: `HARD_DENY rule '${name}' matches the supplied command`,
+      hardDeny: true,
+      stackSource: "hard-deny",
+    }
   }
   const verdict = inspection.modePolicy[mode]
   if (verdict === "allow") return { kind: "allow" }
   if (verdict === "deny")
-    return { kind: "deny", reason: `Mode '${mode}' refuses ${inspection.tool}` }
+    return {
+      kind: "deny",
+      reason: `Mode '${mode}' refuses ${inspection.tool}`,
+      hardDeny: false,
+      stackSource: "global-default",
+    }
   return { kind: "ask", reason: `Mode '${mode}' requires confirmation for ${inspection.tool}` }
 }
 

@@ -175,6 +175,10 @@ export interface AgentToolOptions {
   maxDepth?: number
   /** Shared registry so the Task* tools observe the same background tasks. */
   registry?: TaskRegistry
+  /** Optional per-session cap on concurrently RUNNING background launches that
+   *  share this registry. Applies ONLY to `background:true`; foreground
+   *  `agent` calls remain unchanged. Absent ⇒ unlimited (byte-identical). */
+  maxConcurrent?: number
   /** GAP8a fork_turns — compose the child prompt with an inherited (redacted)
    *  parent-transcript preamble for the requested fork spec. Injected by the
    *  composition root (`@/agent` tier1, which owns the transcript + redactor) so
@@ -198,6 +202,8 @@ export interface AgentToolOptions {
   knownAgentTypes?: () => readonly string[]
 }
 
+type ToolDenyOr<T> = { kind: "deny"; event: ToolEvent } | { kind: "ok"; value: T }
+
 /** Read the caller's recursion depth off the ToolContext if the host set it.
  *  `ToolContext.depth?: number` is part of the public type; the `>= 0`
  *  typeof guard is a defensive backstop against hosts that leave the field
@@ -219,6 +225,10 @@ const summarize = (r: SubagentResult): string => {
  *  form their own lineage that labeled children cannot read. */
 export const ROOT_LINEAGE = "\x00root" as const
 const lineageOf = (ctx: ToolContext): string => ctx.agentLabel ?? ROOT_LINEAGE
+
+/** Count currently-running background tasks in the shared registry. Only
+ *  RUNNING entries consume the trio's background admission cap. */
+const countRunning = (registry: TaskRegistry): number => registry.pendingIds().length
 
 /**
  * T04 — `continue_from` ownership/lineage gate (the registry/API boundary).
@@ -387,6 +397,118 @@ const deny = (message: string): ToolEvent => ({
   result: { ok: false, output: message },
 })
 
+const normalizeTypedAgentInput = (
+  input: AgentInput,
+  opts: Pick<AgentToolOptions, "enforceTypedAgentKind" | "knownAgentTypes">,
+): ToolDenyOr<AgentInput> => {
+  const typedKind = validateAgentType(input.agent_type, {
+    ...(opts.enforceTypedAgentKind === true ? { enforce: true } : {}),
+    ...(opts.knownAgentTypes !== undefined ? { knownCustom: opts.knownAgentTypes() } : {}),
+  })
+  if (!typedKind.ok) return { kind: "deny", event: deny(`Subagent denied: ${typedKind.reason}`) }
+  if (typedKind.value === input.agent_type) return { kind: "ok", value: input }
+  if (typedKind.value === undefined) {
+    const { agent_type: _drop, ...rest } = input
+    return { kind: "ok", value: rest as AgentInput }
+  }
+  return { kind: "ok", value: { ...input, agent_type: typedKind.value } }
+}
+
+const applyForkPromptIfNeeded = (
+  input: AgentInput,
+  forkPrompt: AgentToolOptions["forkPrompt"],
+): AgentInput =>
+  forkPrompt !== undefined
+    ? { ...input, prompt: forkPrompt(input.prompt, input.fork_turns ?? "none") }
+    : input
+
+const checkBackgroundConcurrencyCap = (
+  input: AgentInput,
+  registry: TaskRegistry,
+  maxConcurrent: number | undefined,
+): ToolEvent | null => {
+  if (input.background !== true || maxConcurrent === undefined) return null
+  if (countRunning(registry) < maxConcurrent) return null
+  return deny(`Subagent denied: ${maxConcurrent} concurrent subagents already running (cap reached).`)
+}
+
+interface PreparedAgentExecution {
+  readonly childDepth: number
+  readonly requesterLineage: string
+  readonly input: AgentInput
+  readonly req: SubagentRequest
+  readonly taskId: string
+}
+
+const prepareAgentExecution = (
+  input: AgentInput,
+  ctx: ToolContext,
+  registry: TaskRegistry,
+  continueFromOwners: ReadonlyMap<string, string>,
+  maxDepth: number,
+  opts: AgentToolOptions,
+): ToolDenyOr<PreparedAgentExecution> => {
+  const childDepth = ctxDepth(ctx) + 1
+  const requesterLineage = lineageOf(ctx)
+  if (childDepth > maxDepth) {
+    return {
+      kind: "deny",
+      event: deny(`Subagent denied: recursion depth ${childDepth} exceeds maxDepth ${maxDepth}.`),
+    }
+  }
+  const normalized = normalizeTypedAgentInput(input, opts)
+  if (normalized.kind === "deny") return normalized
+  const normalizedInput = normalized.value
+  const pre = preflight(normalizedInput, registry, continueFromOwners, requesterLineage)
+  if (pre.kind === "deny") return pre
+  const capDeny = checkBackgroundConcurrencyCap(normalizedInput, registry, opts.maxConcurrent)
+  if (capDeny !== null) return { kind: "deny", event: capDeny }
+  const { taskId, checkpointPath } = resolveTaskInfo(normalizedInput, ctx, registry)
+  const forkedInput = applyForkPromptIfNeeded(normalizedInput, opts.forkPrompt)
+  const req = buildRequest(forkedInput, childDepth, pre.priorAttempt, checkpointPath)
+  return {
+    kind: "ok",
+    value: { childDepth, requesterLineage, input: normalizedInput, req, taskId },
+  }
+}
+
+const runForegroundSubagent = async function* (
+  runner: SubagentRunner,
+  req: SubagentRequest,
+  childDepth: number,
+): AsyncIterable<ToolEvent> {
+  yield { type: "progress", message: `Delegating to subagent (depth ${childDepth})…` }
+  try {
+    const r = await runner(req)
+    yield { type: "result", result: { ok: r.ok, output: summarize(r) } }
+  } catch (e: unknown) {
+    yield deny(`Subagent error: ${errMessage(e)}`)
+  }
+}
+
+const executeAgentTool = async function* (
+  input: AgentInput,
+  ctx: ToolContext,
+  opts: AgentToolOptions,
+  registry: TaskRegistry,
+  continueFromOwners: Map<string, string>,
+  maxDepth: number,
+): AsyncIterable<ToolEvent> {
+  const prepared = prepareAgentExecution(input, ctx, registry, continueFromOwners, maxDepth, opts)
+  if (prepared.kind === "deny") {
+    yield prepared.event
+    return
+  }
+  const exec = prepared.value
+  if (exec.input.background === true) {
+    yield launchBackground(opts, registry, exec.input, exec.req, exec.taskId, (id) =>
+      continueFromOwners.set(id, exec.requesterLineage),
+    )
+    return
+  }
+  yield* runForegroundSubagent(opts.runner, exec.req, exec.childDepth)
+}
+
 /** Mint the task id used to (a) name the checkpoint file pre-launch and
  *  (b) key the background registration. Foreground uses a synthetic
  *  `fg_<uuid>` id (no registry entry; deterministic-per-request); background
@@ -550,78 +672,7 @@ export const createAgentTool = (
     registry,
 
     async *execute(input: AgentInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-      const childDepth = ctxDepth(ctx) + 1
-      const requesterLineage = lineageOf(ctx)
-
-      if (childDepth > maxDepth) {
-        yield deny(`Subagent denied: recursion depth ${childDepth} exceeds maxDepth ${maxDepth}.`)
-        return
-      }
-
-      // §4.4 — TYPED agent kind boundary validation. DEFAULT-OFF: when
-      // `enforceTypedAgentKind` is falsy the validator carries `agent_type`
-      // untouched (byte-identical). Under enforcement a well-known kind is
-      // canonicalised, a registered custom name passes, and an unknown type is
-      // REJECTED (recoverable deny — never throws). The canonicalised value (if
-      // any) replaces `input.agent_type` so the request + registry record carry
-      // the normalised spelling.
-      const typedKind = validateAgentType(input.agent_type, {
-        ...(opts.enforceTypedAgentKind === true ? { enforce: true } : {}),
-        ...(opts.knownAgentTypes !== undefined ? { knownCustom: opts.knownAgentTypes() } : {}),
-      })
-      if (!typedKind.ok) {
-        yield deny(`Subagent denied: ${typedKind.reason}`)
-        return
-      }
-      // Apply the (possibly canonicalised) value back onto the input the request
-      // + registry record are built from. Under default-OFF `typedKind.value` is
-      // the original raw value, so this is a no-op rebind (byte-identical).
-      const input1: AgentInput =
-        typedKind.value === input.agent_type
-          ? input
-          : typedKind.value === undefined
-            ? (() => {
-                const { agent_type: _drop, ...rest } = input
-                return rest as AgentInput
-              })()
-            : { ...input, agent_type: typedKind.value }
-
-      // continue_from OWNERSHIP gate + checkpoint/worktree incompatibility.
-      // Either resolves to a deny (returned here) or to the priorAttempt text
-      // the runner's seed-augmentation step (parallel agent F) merges. A
-      // foreign-lineage continue_from is denied before any finalText is read.
-      const pre = preflight(input1, registry, continueFromOwners, requesterLineage)
-      if (pre.kind === "deny") {
-        yield pre.event
-        return
-      }
-
-      // Mint the task id ONCE so the SAME id keys (a) the background registry
-      // entry AND (b) the checkpoint file path the child writes to.
-      const { taskId, checkpointPath } = resolveTaskInfo(input1, ctx, registry)
-      // GAP8a fork_turns: compose an inherited parent-context preamble onto the
-      // prompt when the composition root wired `forkPrompt`. Absent dep or
-      // `fork_turns:"none"` ⇒ prompt unchanged (byte-identical cold start).
-      const forkedInput: AgentInput =
-        opts.forkPrompt !== undefined
-          ? { ...input1, prompt: opts.forkPrompt(input1.prompt, input1.fork_turns ?? "none") }
-          : input1
-      const req = buildRequest(forkedInput, childDepth, pre.priorAttempt, checkpointPath)
-
-      if (input1.background === true) {
-        yield launchBackground(opts, registry, input1, req, taskId, (id) =>
-          continueFromOwners.set(id, requesterLineage),
-        )
-        return
-      }
-
-      yield { type: "progress", message: `Delegating to subagent (depth ${childDepth})…` }
-      try {
-        const r = await opts.runner(req)
-        yield { type: "result", result: { ok: r.ok, output: summarize(r) } }
-      } catch (e: unknown) {
-        yield deny(`Subagent error: ${errMessage(e)}`)
-      }
+      yield* executeAgentTool(input, ctx, opts, registry, continueFromOwners, maxDepth)
     },
   }
 

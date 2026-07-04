@@ -17,6 +17,38 @@ import { applyPendingPlanEntry } from "./plan-enter-wire"
 import { applyPendingPlanExit } from "./plan-exit-wire"
 import type { RunAgentContext, TurnLoopResolution, TurnResult } from "./types"
 
+const applyQueuedPlanLifecycle = (args: {
+  readonly cfg: AgentConfig
+  readonly pendingPlanExitRef: { current: import("./types").PendingPlanExit[] }
+  readonly pendingPlanEntryRef: { current: import("./types").PendingPlanEntry[] }
+  readonly hookPromptPending: import("../hooks").HookPromptInject[]
+}): void => {
+  const exitCount = args.pendingPlanExitRef.current.length
+  const exit = exitCount === 0 ? null : args.pendingPlanExitRef.current[exitCount - 1] ?? null
+  // Multiple lifecycle tools can land in one assistant turn. The NEXT-turn
+  // authority must follow the FINAL operator-visible request/result pair from
+  // that turn, not the first queued callback. Exit outcomes still dominate any
+  // same-turn entry requests because a turn that asked to leave plan mode must
+  // not silently re-enter on a contradictory later entry tool.
+  const entryCount = args.pendingPlanEntryRef.current.length
+  const entry =
+    exit === null
+      ? (entryCount === 0 ? null : args.pendingPlanEntryRef.current[entryCount - 1] ?? null)
+      : null
+  args.pendingPlanExitRef.current = []
+  args.pendingPlanEntryRef.current = []
+  if (exit !== null) applyPendingPlanExit(args.cfg, exit, args.hookPromptPending)
+  if (entry !== null) applyPendingPlanEntry(args.cfg, entry, args.hookPromptPending)
+}
+
+const clearQueuedPlanLifecycle = (args: {
+  readonly pendingPlanExitRef: { current: import("./types").PendingPlanExit[] }
+  readonly pendingPlanEntryRef: { current: import("./types").PendingPlanEntry[] }
+}): void => {
+  args.pendingPlanExitRef.current = []
+  args.pendingPlanEntryRef.current = []
+}
+
 export const resolveTurnLoopOutcome = async (args: {
   readonly cfg: AgentConfig
   readonly stream: AgentConfig["stream"]
@@ -25,11 +57,12 @@ export const resolveTurnLoopOutcome = async (args: {
   readonly recorder: import("../metrics").AgentRecorder | undefined
   readonly turn: number
   readonly result: TurnResult
-  readonly pendingPlanExitRef: { current: import("./types").PendingPlanExit | null }
-  readonly pendingPlanEntryRef: { current: import("./types").PendingPlanEntry | null }
+  readonly pendingPlanExitRef: { current: import("./types").PendingPlanExit[] }
+  readonly pendingPlanEntryRef: { current: import("./types").PendingPlanEntry[] }
   readonly hookPromptPending: import("../hooks").HookPromptInject[]
 }): Promise<TurnLoopResolution> => {
   if (args.result.kind === "aborted") {
+    clearQueuedPlanLifecycle(args)
     return {
       kind: "finish",
       reason: "aborted",
@@ -38,9 +71,11 @@ export const resolveTurnLoopOutcome = async (args: {
     }
   }
   if (args.result.kind === "interrupted") {
+    clearQueuedPlanLifecycle(args)
     return { kind: "park", turns: args.turn - 1 }
   }
   if (args.result.kind === "error") {
+    clearQueuedPlanLifecycle(args)
     args.stream.emit({ type: "error", message: args.result.reason })
     return {
       kind: "finish",
@@ -50,6 +85,7 @@ export const resolveTurnLoopOutcome = async (args: {
     }
   }
   if (args.result.kind === "refusal") {
+    clearQueuedPlanLifecycle(args)
     args.recorder?.turn()
     return {
       kind: "finish",
@@ -61,6 +97,7 @@ export const resolveTurnLoopOutcome = async (args: {
   }
   args.recorder?.turn()
   if (args.result.kind === "completed") {
+    clearQueuedPlanLifecycle(args)
     // A cleanly-completed FINAL turn is terminal on its OWN merit — the natural
     // outcome WINS even if this turn also crossed the post-turn budget meter
     // (mirrors the L4 ledger placement in turn-loop.ts, which is deliberately
@@ -73,6 +110,7 @@ export const resolveTurnLoopOutcome = async (args: {
       stopCategory: completedCategory("normal"),
     }
   }
+  applyQueuedPlanLifecycle(args)
   // Meter-exhaustion is terminal only when the turn is about to CONTINUE
   // (kind === "tools"): the loop would otherwise append tool_results and loop
   // again, so a crossed budget stops it here. Preserve appendPendingToolResults
@@ -91,14 +129,6 @@ export const resolveTurnLoopOutcome = async (args: {
   }
   args.breaker?.noteProgress()
   args.wm.append({ role: "user", content: args.result.resultBlocks })
-  if (args.pendingPlanExitRef.current !== null) {
-    applyPendingPlanExit(args.cfg, args.pendingPlanExitRef.current, args.hookPromptPending)
-    args.pendingPlanExitRef.current = null
-  }
-  if (args.pendingPlanEntryRef.current !== null) {
-    applyPendingPlanEntry(args.cfg, args.pendingPlanEntryRef.current, args.hookPromptPending)
-    args.pendingPlanEntryRef.current = null
-  }
   return { kind: "continue" }
 }
 

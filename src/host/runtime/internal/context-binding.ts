@@ -1,9 +1,11 @@
 import type { AgentConfig } from "@/agent"
+import { isIdentityMode } from "@/agent/identity"
 import type {
   SessionHost,
   SessionHostSideConversationArgs,
   SessionHostSideConversationResult,
 } from "@/kernel/session"
+import { isToolProfileName } from "@/agent/tool-profile"
 import { isPermissionMode } from "@/permission"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import { createSingleSessionRuntimeHost } from "../builder"
@@ -287,11 +289,13 @@ const createRuntimeSessionHost = (args: {
       })
     },
     setIdentityMode: async (mode) => {
-      args.options.boot?.identityModeState?.set(mode as never)
+      if (!isIdentityMode(mode)) return
+      args.options.boot?.identityModeState?.set(mode)
       args.options.boot?.refreshSystemPrompt?.()
     },
     setToolProfile: async (profile) => {
-      args.options.boot?.toolProfileState?.set(profile as never)
+      if (!isToolProfileName(profile)) return
+      args.options.boot?.toolProfileState?.set(profile)
     },
     setPermissionMode: async (mode) => {
       // Fail-closed: only a KNOWN PermissionMode reaches the gate. An unknown

@@ -97,7 +97,7 @@ const toIdentityModeConfig = (state: IdentityModeSessionState | undefined): Part
           ...(state.perTurnReminderEnabled !== undefined
             ? { perTurnReminderEnabled: state.perTurnReminderEnabled }
             : {}),
-          activeMode: () => state.get() ?? state.defaultMode ?? "default",
+          activeMode: () => state.getPromptMode() ?? state.defaultMode ?? "default",
         },
       }
 
@@ -246,6 +246,10 @@ const buildBootstrapBaseShape = (
     permission: args.boot.permission,
     messages: [...args.boot.history],
     system: args.boot.system,
+    ...whenDefined(
+      "promptSurfaceProfile",
+      args.overlay?.promptSurfaceProfile ?? args.boot.promptSurfaceProfile,
+    ),
     ...whenDefined("systemSource", args.boot.systemSource),
     cwd: args.boot.cwd,
     maxTurns: args.boot.maxTurns,
@@ -359,6 +363,7 @@ export const extendBaseWithMemoryAuto = async (
   return {
     ...args.base,
     ...(auto.sessionCtx !== undefined ? { sessionCtx: auto.sessionCtx } : {}),
+    ...(auto.memorySummaryMd !== undefined ? { memorySummaryMd: auto.memorySummaryMd } : {}),
     stage1OutputsStore: auto.stage1OutputsStore,
     memoryConsolidator: auto.memoryConsolidator,
     // U7-10: carry the WAL-handle teardown onto the base so the session host's
@@ -405,6 +410,7 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("subagentBackground", base.subagentBackground),
   ...whenDefined("autoBackground", base.autoBackground),
   ...whenDefined("sessionCtx", base.sessionCtx),
+  ...whenDefined("memorySummaryMd", base.memorySummaryMd),
   ...whenDefined("stage1OutputsStore", base.stage1OutputsStore),
   ...whenDefined("memoryConsolidator", base.memoryConsolidator),
   ...whenDefined("granularRegistry", base.granularRegistry),

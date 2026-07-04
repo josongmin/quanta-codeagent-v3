@@ -3,7 +3,7 @@ import { withEgressProxy } from "@/runtime/network-proxy"
 import { attachLspDiagnosticsHookIfEnabled } from "../lsp-bridge"
 import { runMemoryConsolidatorHook } from "../memory-consolidator-hook"
 import { sessionSpanAttrs } from "../session-resources"
-import { completedCategory, interruptedCategory } from "../stop-category"
+import { interruptedCategory } from "../stop-category"
 import type { AgentConfig, AgentOutcome } from "../types"
 import { createRunAgentContext } from "./session-bootstrap"
 import { runSessionStartSequence } from "./session-lifecycle"
@@ -82,11 +82,7 @@ export const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> 
       const cause = startOutcome.cause === "hook_deny" ? "system" : "user"
       return ctx.finish("aborted", 0, interruptedCategory(cause))
     }
-    const finished = await runAgentTurnLoop(ctx)
-    if (finished !== undefined) {
-      return finished
-    }
-    return ctx.finish("max_turns", ctx.cfg.maxTurns, completedCategory("max_turns"))
+    return await runAgentTurnLoop(ctx)
   } finally {
     await diagnosticsHook?.dispose()
     // D12 — run the resource-DISPOSE teardown on BOTH the normal-completion AND

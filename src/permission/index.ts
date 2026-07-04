@@ -93,6 +93,14 @@ export {
   gitWriteProtectReason,
   isGitWriteProtected,
 } from "./git-write-guard"
+export {
+  isNamedProfileName,
+  NAMED_PROFILE_NAMES,
+  NAMED_PROFILES,
+  resolvePermissionProfileField,
+  resolveProfileByName,
+} from "./named-profiles"
+export type { NamedProfileName } from "./named-profiles"
 export type {
   AxisOutcome,
   AxisStep,
@@ -117,14 +125,6 @@ export type {
   ResolutionSource,
 } from "./inspector"
 export { getPermissionInspector } from "./inspector"
-export type { NamedProfileName } from "./named-profiles"
-export {
-  isNamedProfileName,
-  NAMED_PROFILE_NAMES,
-  NAMED_PROFILES,
-  resolvePermissionProfileField,
-  resolveProfileByName,
-} from "./named-profiles"
 export {
   ALL_OUTCOMES,
   ALL_REVIEWERS,
@@ -289,6 +289,7 @@ export {
   getPermissionRecorder,
   type PermissionDecidedBy,
   type PermissionDecisionRecord,
+  type PermissionDenySource,
   type PermissionOutcomeLabel,
   type PermissionRecorder,
   type PermissionRiskLevel,
@@ -372,8 +373,10 @@ export type {
   DenialMemory,
   HITLTier,
   PermissionContext,
+  PermissionDenyDecision,
   PermissionDecision,
   PermissionMode,
+  PermissionSoftDenySource,
   ReviewContext,
   ReviewerPort,
   ReviewerTier,

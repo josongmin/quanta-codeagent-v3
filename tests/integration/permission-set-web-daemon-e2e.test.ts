@@ -133,6 +133,7 @@ describe("session.permission.set — web-daemon runtime e2e", () => {
     //    `modePolicy[mode]` undefined). The live proxy stays at the last valid
     //    value, so the gate is never poisoned by a malformed client. ──
     await session.permission.set("nonsense-mode")
+    expect((await session.snapshot()).state.permissionMode).toBe("bypass")
     expect(permission.mode).toBe("bypass")
   })
 })

@@ -16,6 +16,7 @@ import { execSync } from "node:child_process"
 import { join } from "node:path"
 import { createObjectiveStore } from "@/agent/objective"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
+import { buildEnterPlanBlock, buildPlanExitBlock } from "@/agent/tier1"
 import { createIntrospectTools, createSubagent6Tools, TaskRegistry } from "@/subagent"
 import {
   ALL_MANIFEST_TOOL_NAMES,
@@ -148,6 +149,27 @@ describe("tool-surface manifest — GATED factories match the manifest two-way",
     const tools = createIntrospectTools({ registry: new TaskRegistry(), enableIntrospect: true })
     for (const t of tools) expect(ALL_MANIFEST_TOOL_NAMES).toContain(t.name)
     expect(tools.map((t) => t.name)).toContain("list_agents")
+  })
+
+  // R1/R3 audit blind-spot: the plan-lifecycle pair is registered off the
+  // `planExitPort` AgentConfig slot (not a DefaultToolPort), so it bypassed the
+  // terminal + GATED-factory two-way checks above. Pin BOTH directions here:
+  // (a) the builder emits the manifest-catalogued name when the port is wired,
+  // (b) it registers NOTHING when the port is absent (default-OFF byte-identical).
+  const planExitPortStub = { requestExit: async () => ({ decision: "approved" as const }) }
+  test("buildEnterPlanBlock emits enter_plan_mode (catalogued) when planExitPort wired", () => {
+    const tool = buildEnterPlanBlock({ planExitPort: planExitPortStub } as never)
+    expect(tool?.name).toBe("enter_plan_mode")
+    expect(ALL_MANIFEST_TOOL_NAMES).toContain("enter_plan_mode")
+  })
+  test("buildPlanExitBlock emits request_plan_exit (catalogued) — the paired sibling", () => {
+    const tool = buildPlanExitBlock({ planExitPort: planExitPortStub } as never)
+    expect(tool?.name).toBe("request_plan_exit")
+    expect(ALL_MANIFEST_TOOL_NAMES).toContain("request_plan_exit")
+  })
+  test("plan-lifecycle pair registers NOTHING without planExitPort (default-OFF, ship as a pair)", () => {
+    expect(buildEnterPlanBlock({} as never)).toBeUndefined()
+    expect(buildPlanExitBlock({} as never)).toBeUndefined()
   })
 })
 
@@ -325,16 +347,28 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
   // carry a reason. BURN-DOWN ONLY: remove an entry when its feature yaml lands;
   // never add one (a NEW uncatalogued gate is the regression this gate catches).
   const KNOWN_UNCATALOGUED_GATES: ReadonlyMap<string, string> = new Map<string, string>([
-    ["QUANTA_CONTAINER_EXEC", "terminal container_exec gate — declared in the knob-inventory SSOT; a dedicated terminal-surface feature yaml is a backlog item"],
+    [
+      "QUANTA_CONTAINER_EXEC",
+      "terminal container_exec gate — declared in the knob-inventory SSOT; a dedicated terminal-surface feature yaml is a backlog item",
+    ],
     ["QUANTA_COVERAGE_TOOL", "coverage_check tool gate — pre-existing, no feature yaml yet"],
     ["QUANTA_DEBUG_TOOLS", "debug tool group gate — pre-existing, no feature yaml yet"],
-    ["QUANTA_ENABLE_STRUCTURED_PATCH", "apply_patch_structured gate — pre-existing, no feature yaml yet"],
+    [
+      "QUANTA_ENABLE_STRUCTURED_PATCH",
+      "apply_patch_structured gate — pre-existing, no feature yaml yet",
+    ],
     ["QUANTA_OBJECTIVE_TOOLS", "objective tool group gate — pre-existing, no feature yaml yet"],
-    ["QUANTA_SHADOW", "shadow-workspace checkpoint/rewind tool gate (shadowOdb) — pre-existing, no feature yaml yet (distinct from the catalogued QUANTA_SHADOW_VERIFY knob)"],
+    [
+      "QUANTA_SHADOW",
+      "shadow-workspace checkpoint/rewind tool gate (shadowOdb) — pre-existing, no feature yaml yet (distinct from the catalogued QUANTA_SHADOW_VERIFY knob)",
+    ],
     ["QUANTA_SUBAGENT_6TOOLS", "subagent 6-tool router gate — pre-existing, no feature yaml yet"],
     ["QUANTA_SUBAGENT_BG", "subagent background-run gate — pre-existing, no feature yaml yet"],
     ["QUANTA_SUBAGENT_MAILBOX", "subagent mailbox gate — pre-existing, no feature yaml yet"],
-    ["QUANTA_TB_WRITE_TOOL", "terminal container_write_file gate (B2 TB lever) — pre-existing, no feature yaml yet"],
+    [
+      "QUANTA_TB_WRITE_TOOL",
+      "terminal container_write_file gate (B2 TB lever) — pre-existing, no feature yaml yet",
+    ],
     ["QUANTA_TEST_RUNNER", "test_runner tool gate — pre-existing, no feature yaml yet"],
   ])
 

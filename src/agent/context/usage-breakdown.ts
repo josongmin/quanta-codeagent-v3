@@ -30,6 +30,10 @@
 import { estimateTokens } from "@/agent/compaction"
 import { type PromptSection, SECTION_CONTEXT_CATEGORY } from "@/agent/prompt-sections"
 import type { Message, SystemBlock } from "@/llm"
+import type {
+  PromptActiveLeversSnapshot,
+  PromptSurfaceProfileSnapshot,
+} from "@/shared/turn-policy-types"
 
 /**
  * Cursor-style context categories. The full closed enum is kept even though
@@ -213,6 +217,8 @@ export interface PromptAssembledSnapshot {
   readonly repoRulesPresent: boolean
   readonly sessionCtxPresent: boolean
   readonly userAppendPresent: boolean
+  readonly surfaceProfile?: PromptSurfaceProfileSnapshot
+  readonly activeLevers?: PromptActiveLeversSnapshot
   /** Active model's context window in tokens (0 ⇒ unknown). */
   readonly max: number
   readonly model?: string

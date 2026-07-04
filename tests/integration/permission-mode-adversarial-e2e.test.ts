@@ -236,6 +236,7 @@ describe("permission-mode switch — adversarial e2e", () => {
     expect(permission.mode).toBe("bypass")
     for (const bad of ["BYPASS", "bypass ", "", "yolo", "Default", "allow"]) {
       await session.permission.set(bad)
+      expect((await session.snapshot()).state.permissionMode).toBe("bypass")
       expect(permission.mode).toBe("bypass") // unchanged — fail closed
     }
     // …and a subsequent VALID switch still works (no wedged state).

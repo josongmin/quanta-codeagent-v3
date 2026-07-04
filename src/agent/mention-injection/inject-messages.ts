@@ -25,6 +25,7 @@
  */
 
 import type { Message } from "@/llm"
+import { makeSyntheticUserMessage } from "../synthetic-user"
 import { embedUntrusted } from "../untrusted"
 import type { InjectionFragment } from "./types"
 
@@ -44,10 +45,9 @@ const buildBody = (fragment: InjectionFragment): string => {
 /** Build one user-role `Message` from a single fragment. */
 const buildOne = (fragment: InjectionFragment): Message => {
   const body = buildBody(fragment)
-  return {
-    role: "user",
-    content: [{ type: "text", text: embedUntrusted("mention", body) }],
-  }
+  return makeSyntheticUserMessage("mention-injection", [
+    { type: "text", text: embedUntrusted("mention", body) },
+  ])
 }
 
 /**

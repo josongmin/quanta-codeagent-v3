@@ -6,6 +6,7 @@ import { writeStderr } from "@/shared/terminal-io"
 import type {
   KernelCommittedEvents,
   KernelDispatchContext,
+  SessionHostDescription,
   SessionHostTurnEvent,
   SessionHostTurnResult,
 } from "./ports"
@@ -125,6 +126,36 @@ const clearStreamingAssistantText = (transcript: KernelTranscriptState): KernelT
   const { streamingAssistantText: _streamingAssistantText, ...rest } = transcript
   return rest
 }
+
+const reconcileSessionPostureState = (
+  state: KernelSessionState,
+  host: Pick<SessionHostDescription, "permissionMode" | "identityMode" | "toolProfile">,
+): KernelSessionState => {
+  const {
+    permissionMode: _permissionMode,
+    identityMode: _identityMode,
+    toolProfile: _toolProfile,
+    ...rest
+  } = state
+  return {
+    ...rest,
+    permissionMode: host.permissionMode,
+    ...(host.identityMode !== undefined ? { identityMode: host.identityMode } : {}),
+    ...(host.toolProfile !== undefined ? { toolProfile: host.toolProfile } : {}),
+  }
+}
+
+const rewriteStateUpdatedEvent = (
+  event: SessionEvent,
+  state: KernelSessionState,
+): SessionEvent =>
+  event.type === "session.state.updated"
+    ? {
+        ...event,
+        revision: state.revision,
+        state: toSessionStateView(state),
+      }
+    : event
 
 export interface KernelDispatchResult {
   readonly state: KernelSessionState
@@ -627,10 +658,23 @@ export const dispatchSessionCommand = async (
       return await settlePreAbortedTurnRun({ state, command, ctx, emittedAt })
     }
     const reduced = reduceSessionCommand(state, command, emittedAt)
-    const immediateEvents = [...reduced.events]
-    const nextState: KernelSessionState = {
+    let immediateEvents = [...reduced.events]
+    let nextState: KernelSessionState = {
       ...reduced.state,
       seq: state.seq + immediateEvents.length,
+    }
+    if (command.type === "session.identity.set") {
+      await ctx.host.setIdentityMode?.(command.mode)
+      nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
+      immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
+    } else if (command.type === "session.tool_profile.set") {
+      await ctx.host.setToolProfile?.(command.profile)
+      nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
+      immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
+    } else if (command.type === "session.permission.set") {
+      await ctx.host.setPermissionMode?.(command.mode)
+      nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
+      immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
     }
     // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
     // event-log persistence so a turn.cancel dispatched during that window —
@@ -659,13 +703,10 @@ export const dispatchSessionCommand = async (
 
     switch (command.type) {
       case "session.identity.set":
-        await ctx.host.setIdentityMode?.(command.mode)
         return { state: nextState, events: immediateEvents }
       case "session.tool_profile.set":
-        await ctx.host.setToolProfile?.(command.profile)
         return { state: nextState, events: immediateEvents }
       case "session.permission.set":
-        await ctx.host.setPermissionMode?.(command.mode)
         return { state: nextState, events: immediateEvents }
       case "session.transcript.replace":
         return {

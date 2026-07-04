@@ -200,15 +200,16 @@ export interface ToolContext {
    *  with a typed `reviewer_not_attached` message; the loop is byte-
    *  identical for sessions that did not opt in. */
   reviewerAgent?: ReviewerRunner
-  /** ADR-0093 (draft) — OPTIONAL plan-state mutator. The 4 plan tools
-   *  (`create_plan` / `update_todos` / `update_plan` / `remove_todos`) route
-   *  every mutation through this duck-typed handle. Duck-typed so `@/tool`
+  /** ADR-0093 (draft) — OPTIONAL structured-plan mutator. The 5 structured
+   *  plan tools (`current_plan` / `create_plan` / `update_todos` /
+   *  `update_plan` / `remove_todos`) route through this duck-typed handle.
+   *  `current_plan` reads via `current()`; the 4 siblings mutate. Duck-typed so `@/tool`
    *  never imports `@/agent/plan` (slice isolation, RFC 3.1): the dispatch
    *  seam adapts `AgentConfig.planStore` into a {@link PlanMutator}.
    *  Structural mirror of canonical `PlanStore` — every error-code and
    *  delta-kind is a string literal matching the producer's
-   *  `PlanMutationError["kind"]` / `PlanDeltaKind`. Absent ⇒ the 4 plan
-   *  tools are NOT registered (default-OFF byte-identical for every
+   *  `PlanMutationError["kind"]` / `PlanDeltaKind`. Absent ⇒ the structured
+   *  plan tools are NOT registered (default-OFF byte-identical for every
    *  existing session). */
   planMutator?: PlanMutator
   /** ADR-0121 — OPTIONAL turn correlation id for the auto-checkpoint policy.
@@ -234,13 +235,13 @@ export interface ToolContext {
    *  here. */
   shellSnapshot?: ShellSnapshotRestoreSeam
   /** Self-inspection seam for the `session_config` tool. Read+write over the
-   *  agent's own SDK posture (effort tier, identity mode, tool profile, model,
-   *  provider). The dispatch seam wires this from `AgentConfig.sessionConfigPort`;
-   *  when absent, `session_config` returns a typed `not_wired` failure (the
-   *  tool itself is always registered in `buildDefaultTools` so the LLM can
-   *  surface a coherent answer either way). Duck-typed (structural mirror of
-   *  `SessionConfigSeam` in `./session_config`) so the `@/tool` slice never
-   *  imports `@/agent`. */
+   *  agent's own SDK posture (effort tier, permission mode, identity mode,
+   *  tool profile, model, provider). The dispatch seam wires this from
+   *  `AgentConfig.sessionConfigPort`; when absent, `session_config` returns a
+   *  typed `not_wired` failure (the tool itself is always registered in
+   *  `buildDefaultTools` so the LLM can surface a coherent answer either way).
+   *  Duck-typed (structural mirror of `SessionConfigSeam` in
+   *  `./session_config`) so the `@/tool` slice never imports `@/agent`. */
   sessionConfig?: SessionConfigSeam
   /** ADR-0474 — OPTIONAL stale-read-guard state. When present (host opted in via
    *  `staleReadGuardEnabled`), the `read` tool records the read-time mtime here
@@ -508,6 +509,11 @@ export type ShellToolContext = CoreToolContext &
     | "criticalSection"
     | "activeWorktree"
     | "vcsEventSink"
+    // `bash` also reads: `agentLabel` (bg-process mailbox identity) and
+    // `readFileState` (a `>`/`sed -i` redirect is a write, so it participates in
+    // the stale-read guard). Kept here so `bash` narrows to this view exactly.
+    | "agentLabel"
+    | "readFileState"
   >
 
 /** File-mutating tools (`write`/`edit`/`apply_patch`/`scripted_replace`/notebook). */

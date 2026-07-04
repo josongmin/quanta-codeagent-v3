@@ -79,15 +79,15 @@ const registryTools = (r: AgentConfig["registry"]): Tool[] =>
     .map((s) => r.get(s.name))
     .filter((t): t is Tool => t !== undefined)
 
-/** Fold extra tools (subagent/skill) into a fresh registry. With none
- *  (`extraTools` empty) returns the SAME config by identity, so the loop stays
- *  byte-for-byte identical to the pre-absorption path. */
+/** Fold extra tools (subagent/skill) into the caller-owned session config. With
+ *  none (`extraTools` empty) returns the SAME config by identity; otherwise the
+ *  registry slot is rewritten in place so any feature-built late-bound getters
+ *  (for example ToolSearch's catalog closure) observe the FINAL merged registry
+ *  instead of a stale pre-merge capture. */
 export const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentConfig =>
   extraTools.length > 0
-    ? {
-        ...config,
-        registry: new ToolRegistry([...registryTools(config.registry), ...extraTools]),
-      }
+    ? ((config.registry = new ToolRegistry([...registryTools(config.registry), ...extraTools])),
+      config)
     : config
 
 /** Verify-guard per-run resources (Tier 0 safety hardening). Built when EITHER

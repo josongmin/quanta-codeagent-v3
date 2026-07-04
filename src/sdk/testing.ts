@@ -23,10 +23,12 @@ const scriptFromCompletion = (c: FakeCompletion): StreamEvent[] => {
   ]
 }
 
-/** Pre-programmed `LLMPort`. Replays one script per assistant turn in order;
- *  turns beyond the list replay the LAST script (so tool-call → completion
- *  works: turn 1 issues the tool, turn 2 completes). `seen` exposes the
- *  `StreamInput`s for assertions. */
+/** Pre-programmed `LLMPort`. CONSUMES one script per assistant turn in order
+ *  (`shift`) — provide ONE completion per turn you expect (e.g. turn 1 = a
+ *  tool_use script, turn 2 = the final completion). When the list is EXHAUSTED it
+ *  does NOT replay the last script; it emits a terminal `end_turn` so the loop
+ *  stops deterministically (replaying a tool_use forever would run to `maxTurns`).
+ *  `seen` exposes the per-turn `StreamInput`s for assertions. */
 class FakeLlm implements LLMPort {
   readonly model = "sdk-fake"
   readonly provider = "fake"

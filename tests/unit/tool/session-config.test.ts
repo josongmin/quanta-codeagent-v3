@@ -2,7 +2,8 @@
  * Unit tests for the `session_config` self-inspection tool.
  *
  * Coverage:
- *   - `op:get` renders effort + optional fields (mode / profile / model / provider).
+ *   - `op:get` renders effort + optional fields (permission / mode / profile /
+ *     model / provider).
  *   - `op:get` skips absent optional readers gracefully.
  *   - `op:set_effort` mutates the seam and reports the prev → next transition.
  *   - `op:set_effort` no-op message when prev === next.
@@ -68,6 +69,7 @@ const makeSeam = (
 describe("session_config — op:get", () => {
   test("renders effort + token budget for a full seam", async () => {
     const { seam } = makeSeam("high", {
+      readPermissionMode: () => "bypass",
       readIdentityMode: () => "code_agent",
       readToolProfile: () => "write",
       readModel: () => "gpt-5-mini",
@@ -80,11 +82,12 @@ describe("session_config — op:get", () => {
     // Section header rule + title.
     expect(out).toMatch(/^── session_config ─+$/m)
     // Effort + budget line — uses thousands separator and explicit "thinking budget".
-    expect(out).toContain("effort         high  ·  thinking budget: 16,384 tokens")
-    expect(out).toContain("identity mode  code_agent")
-    expect(out).toContain("tool profile   write")
-    expect(out).toContain("model          gpt-5-mini")
-    expect(out).toContain("provider       chatgpt-oauth")
+    expect(out).toMatch(/effort\s+high  ·  thinking budget: 16,384 tokens/)
+    expect(out).toContain("permission mode  bypass")
+    expect(out).toMatch(/identity mode\s+code_agent/)
+    expect(out).toMatch(/tool profile\s+write/)
+    expect(out).toMatch(/model\s+gpt-5-mini/)
+    expect(out).toMatch(/provider\s+chatgpt-oauth/)
   })
 
   test("default tier shows 'provider default' (no numeric budget)", async () => {
@@ -115,6 +118,7 @@ describe("session_config — op:get", () => {
 
   test("empty-string optional fields are skipped (treated as absent)", async () => {
     const { seam } = makeSeam("medium", {
+      readPermissionMode: () => "",
       readIdentityMode: () => "",
       readToolProfile: () => "",
       readModel: () => "",
@@ -123,6 +127,7 @@ describe("session_config — op:get", () => {
     const result = await run({ op: "get" }, ctx({ sessionConfig: seam }))
     expect(result.ok).toBe(true)
     if (!result.ok) return
+    expect(result.output).not.toContain("permission mode")
     expect(result.output).not.toContain("identity mode")
     expect(result.output).not.toContain("tool profile")
   })
@@ -291,5 +296,17 @@ describe("session_config — invariants", () => {
   test("input schema rejects unknown op", () => {
     const parsed = sessionConfigTool.inputSchema.safeParse({ op: "delete_history" })
     expect(parsed.success).toBe(false)
+  })
+
+  test("input schema rejects authority-bearing self-mutation ops", () => {
+    expect(
+      sessionConfigTool.inputSchema.safeParse({ op: "set_permission", mode: "bypass" }).success,
+    ).toBe(false)
+    expect(
+      sessionConfigTool.inputSchema.safeParse({ op: "set_identity_mode", mode: "review" }).success,
+    ).toBe(false)
+    expect(
+      sessionConfigTool.inputSchema.safeParse({ op: "set_tool_profile", profile: "write" }).success,
+    ).toBe(false)
   })
 })

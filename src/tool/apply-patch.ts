@@ -50,7 +50,13 @@ import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
 import { guardWrite } from "./stale-read-guard"
-import type { FastApplyFallbackSeam, GitWriteGuard, Tool, ToolContext, ToolEvent } from "./types"
+import type {
+  EditToolContext,
+  FastApplyFallbackSeam,
+  GitWriteGuard,
+  Tool,
+  ToolEvent,
+} from "./types"
 
 /** Process-wide OTel-bound patch tracing port, injected into every `applyPatch`
  *  call from this tool. Stateless + Default-OFF (a zero-allocation no-op when no
@@ -425,7 +431,7 @@ function guardPatchTargets(patch: Patch, guard: GitWriteGuard | undefined): Tool
 async function guardStaleTargets(
   patch: Patch,
   port: FsJailFileSystemPort,
-  ctx: ToolContext | undefined,
+  ctx: EditToolContext | undefined,
 ): Promise<ToolEvent | null> {
   const state = ctx?.readFileState
   if (state === undefined) return null
@@ -490,7 +496,7 @@ async function guardedParseAndApply(
   patchText: string,
   port: FsJailFileSystemPort,
   guard: GitWriteGuard | undefined,
-  ctx?: ToolContext,
+  ctx?: EditToolContext,
 ): Promise<{ deny: ToolEvent } | { result: ApplyResult }> {
   // Auto-convert standard unified diff (--- a/file / +++ b/file format) to V4A.
   // Models frequently produce unified diff; without this, parsePatch throws on a
@@ -544,7 +550,7 @@ async function tryFastApplyFallback(
   fallback: FastApplyFallbackSeam,
   signal: AbortSignal,
   guard: GitWriteGuard | undefined,
-  ctx: ToolContext,
+  ctx: EditToolContext,
 ): Promise<{ result: ApplyResult; modelUsed?: string } | null> {
   const errorKind = classifyFastApplyError(originalError)
   // FsJailViolationError + any non-patch error are not re-emittable — a model
@@ -625,7 +631,7 @@ export const applyPatchTool: Tool<Input> = {
   // `block` degrades to `cancel`.
   interruptBehavior: (): "block" => "block",
 
-  async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: Input, ctx: EditToolContext): AsyncIterable<ToolEvent> {
     const port = new FsJailFileSystemPort({ jailRoot: ctx.cwd })
     // ADR-0091 git-write-protection: guard EVERY target path the patch would
     // create/overwrite/delete/move-to BEFORE any filesystem mutation. A V4A

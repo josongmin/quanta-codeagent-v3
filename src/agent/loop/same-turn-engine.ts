@@ -1,12 +1,8 @@
 import type { HookPromptInject } from "../hooks"
+import { buildRefusalFallbackInput, resolveTurnAction } from "../recovery"
 import type { TurnSession, TurnState } from "../turn-context"
 import { prepareTurnContext } from "./context-assembler"
-import {
-  applyAction,
-  buildRefusalFallbackInput,
-  EMPTY_TOOL_HISTORY,
-  resolveTurnAction,
-} from "./recovery-executor"
+import { applyAction, EMPTY_TOOL_HISTORY } from "./recovery-executor"
 import { resolveActiveModelId } from "./skill-gate"
 import { streamConsume } from "./stream-consume"
 import { buildTurnSessionView, classifyTurnAbort } from "./turn-gate"

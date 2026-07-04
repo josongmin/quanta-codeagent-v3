@@ -26,6 +26,7 @@ import {
 } from "@/agent/observability-wire"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
+import { promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import {
   type AssemblerEnv,
@@ -451,6 +452,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       permission,
       messages: [],
       system: buildSystemPrompt(cwd),
+      promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive"),
       cwd,
       maxTurns: 200,
       signal: abort.signal,

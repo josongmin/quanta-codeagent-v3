@@ -25,7 +25,6 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { buildSystemPrompt } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 import { DEFAULT_PROTECTED_BRANCHES, decideBranchOnly, type PermissionContext } from "@/permission"
 import { scrubEnv } from "@/runtime"
@@ -42,6 +41,7 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
+import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 
 /** Env names allowed into the `gh` subprocess. Mirrors the audited
  *  `DEFAULT_ENV_ALLOWLIST` (PATH/HOME/LANG/TZ/…) PLUS the gh-specific tokens
@@ -266,6 +266,7 @@ const buildCiBotBase = (
 ): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const cwd = req.ciBot?.cwd ?? req.base.cwd ?? process.cwd()
   const llm: LLMPort = req.base.llm
+  const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
   const messages: Message[] = [
@@ -306,7 +307,8 @@ const buildCiBotBase = (
     stream,
     permission,
     messages,
-    system: req.base.system ?? buildSystemPrompt(cwd),
+    system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
+    ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
     cwd,
     maxTurns: req.base.maxTurns ?? 30,
     // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired

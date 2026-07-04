@@ -263,10 +263,14 @@ describe("JsonlRecorder maps the 6 plan-mode variants to the recovery family", (
       type: "mode_changed",
       from: "plan",
       to: "default",
+      fromAgentMode: "plan",
+      toAgentMode: "default",
       reason: "developer toggled",
     })
     rec.close()
     const [line] = readLines(path)
+    expect(line?.data.fromAgentMode).toBe("plan")
+    expect(line?.data.toAgentMode).toBe("default")
     expect(line?.data.transitionReason).toBe("developer toggled")
   })
 

@@ -9,7 +9,8 @@
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
 import { createWorkingMemory } from "@/memory"
-import { deriveRecallQuery } from "../context-assembler"
+import { makeSyntheticUserMessage } from "../../synthetic-user"
+import { deriveRecallQuery, latestUserTextFromWm, openingTurnUserText } from "../context-assembler"
 
 const u = (text: string): Message => ({ role: "user", content: [{ type: "text", text }] })
 const a = (text: string): Message => ({ role: "assistant", content: [{ type: "text", text }] })
@@ -17,6 +18,8 @@ const toolResultUser = (id: string): Message => ({
   role: "user",
   content: [{ type: "tool_result", tool_use_id: id, content: "ok", is_error: false }],
 })
+const syntheticUser = (text: string): Message =>
+  makeSyntheticUserMessage("same-turn-recovery", [{ type: "text", text }])
 
 describe("deriveRecallQuery — skip carrier turns", () => {
   test("after a tools turn, query is the real prompt (NOT the empty tool_result carrier)", () => {
@@ -49,5 +52,27 @@ describe("deriveRecallQuery — skip carrier turns", () => {
   test("no user text anywhere ⇒ undefined (byte-identical to the prior empty-query path)", () => {
     const wm = createWorkingMemory([toolResultUser("c1"), a("orphan")])
     expect(deriveRecallQuery(wm)).toBeUndefined()
+  })
+
+  test("skips synthetic same-turn recovery messages", () => {
+    const wm = createWorkingMemory([u("real human prompt"), syntheticUser("retry with a tool")])
+    expect(deriveRecallQuery(wm)).toBe("real human prompt")
+    expect(latestUserTextFromWm(wm)).toBe("real human prompt")
+  })
+
+  test("skips synthetic focus-chain reinjection messages", () => {
+    const wm = createWorkingMemory([
+      u("fix the failing integration"),
+      makeSyntheticUserMessage("focus-chain", [
+        { type: "text", text: "## Focus Chain — Todos\n- [ ] stale reinject" },
+      ]),
+    ])
+    expect(deriveRecallQuery(wm)).toBe("fix the failing integration")
+    expect(latestUserTextFromWm(wm)).toBe("fix the failing integration")
+  })
+
+  test("opening turn text counts only human user prompts", () => {
+    const wm = createWorkingMemory([u("title this"), syntheticUser("retry")])
+    expect(openingTurnUserText(wm)).toBe("title this")
   })
 })

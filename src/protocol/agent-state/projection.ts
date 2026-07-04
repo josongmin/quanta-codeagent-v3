@@ -141,6 +141,8 @@ const AGENT_STATE_OBSERVATION_PROJECTORS = {
     type: "mode_changed",
     from: event.from,
     to: event.to,
+    ...(event.fromAgentMode !== undefined ? { fromAgentMode: event.fromAgentMode } : {}),
+    ...(event.toAgentMode !== undefined ? { toAgentMode: event.toAgentMode } : {}),
     ...(event.reason !== undefined ? { reason: event.reason } : {}),
   }),
   tool_progress: (event) => ({
@@ -211,6 +213,10 @@ const AGENT_STATE_MESSAGE_PROJECTORS = {
     kind: "mode.changed",
     from: observation.from,
     to: observation.to,
+    ...(observation.fromAgentMode !== undefined
+      ? { fromAgentMode: observation.fromAgentMode }
+      : {}),
+    ...(observation.toAgentMode !== undefined ? { toAgentMode: observation.toAgentMode } : {}),
     ...(observation.reason !== undefined ? { reason: observation.reason } : {}),
     emittedAt,
   }),

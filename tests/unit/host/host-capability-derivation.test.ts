@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import { createOnConfirmReviewerPort } from "@/agent"
+import { defaultModeVariantRegistry } from "@/agent/system-prompt"
+import { defaultToolProfileResolver } from "@/agent/tool-profile"
 import { createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import { deriveCapabilityManifest } from "@/host/runtime"
 import { createRuntimeContextBindingFromAgentConfigBase } from "@/host/runtime/internal/context-binding"
 import type { LLMPort, StreamEvent } from "@/llm"
+import { createIdentityModeSessionState, createToolProfileSessionState } from "@/runner/assemble"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime/base"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime/context"
 import { ToolRegistry } from "@/tool"
@@ -253,6 +256,164 @@ describe("host runtime capability derivation", () => {
     } finally {
       await session?.close().catch(() => undefined)
       await runtime.close().catch(() => undefined)
+    }
+  })
+
+  test("invalid identity mode is ignored and does not refresh the system prompt", async () => {
+    const identityModeState = createIdentityModeSessionState({
+      registry: defaultModeVariantRegistry(),
+      defaultMode: "default",
+    })
+    const refreshCalls = { count: 0 }
+    const host = await createRuntimeContextBindingFromAgentConfigBase({
+      base: makeBase(),
+    })
+      .createRuntimeHost({
+        boot: {
+          refreshSystemPrompt: () => {
+            refreshCalls.count += 1
+          },
+          identityModeState,
+        },
+        history: [],
+        state: undefined,
+        idMeta: undefined,
+        shutdown: async () => undefined,
+      })
+      .createSessionHost({})
+
+    try {
+      await host.setIdentityMode?.("bogus")
+      expect(identityModeState.get()).toBe("default")
+      expect(host.describe().identityMode).toBe("default")
+      expect(refreshCalls.count).toBe(0)
+    } finally {
+      await host.close()
+    }
+  })
+
+  test("valid identity mode updates authority state and refreshes exactly once", async () => {
+    const identityModeState = createIdentityModeSessionState({
+      registry: defaultModeVariantRegistry(),
+      defaultMode: "default",
+    })
+    const refreshCalls = { count: 0 }
+    const host = await createRuntimeContextBindingFromAgentConfigBase({
+      base: makeBase(),
+    })
+      .createRuntimeHost({
+        boot: {
+          refreshSystemPrompt: () => {
+            refreshCalls.count += 1
+          },
+          identityModeState,
+        },
+        history: [],
+        state: undefined,
+        idMeta: undefined,
+        shutdown: async () => undefined,
+      })
+      .createSessionHost({})
+
+    try {
+      await host.setIdentityMode?.("plan")
+      expect(identityModeState.get()).toBe("plan")
+      expect(host.describe().identityMode).toBe("plan")
+      expect(refreshCalls.count).toBe(1)
+    } finally {
+      await host.close()
+    }
+  })
+
+  test("onboarding identity mode updates authority state and refreshes exactly once", async () => {
+    const identityModeState = createIdentityModeSessionState({
+      registry: defaultModeVariantRegistry(),
+      defaultMode: "default",
+    })
+    const refreshCalls = { count: 0 }
+    const host = await createRuntimeContextBindingFromAgentConfigBase({
+      base: makeBase(),
+    })
+      .createRuntimeHost({
+        boot: {
+          refreshSystemPrompt: () => {
+            refreshCalls.count += 1
+          },
+          identityModeState,
+        },
+        history: [],
+        state: undefined,
+        idMeta: undefined,
+        shutdown: async () => undefined,
+      })
+      .createSessionHost({})
+
+    try {
+      await host.setIdentityMode?.("onboarding")
+      expect(identityModeState.get()).toBe("onboarding")
+      expect(identityModeState.getPromptMode()).toBe("default")
+      expect(host.describe().identityMode).toBe("onboarding")
+      expect(refreshCalls.count).toBe(1)
+    } finally {
+      await host.close()
+    }
+  })
+
+  test("invalid tool profile is ignored", async () => {
+    const toolProfileState = createToolProfileSessionState({
+      resolver: defaultToolProfileResolver(),
+      defaultName: "write",
+    })
+    const host = await createRuntimeContextBindingFromAgentConfigBase({
+      base: makeBase(),
+    })
+      .createRuntimeHost({
+        boot: {
+          refreshSystemPrompt: () => undefined,
+          toolProfileState,
+        },
+        history: [],
+        state: undefined,
+        idMeta: undefined,
+        shutdown: async () => undefined,
+      })
+      .createSessionHost({})
+
+    try {
+      await host.setToolProfile?.("bogus")
+      expect(toolProfileState.get()).toBe("write")
+      expect(host.describe().toolProfile).toBe("write")
+    } finally {
+      await host.close()
+    }
+  })
+
+  test("valid tool profile updates authority state", async () => {
+    const toolProfileState = createToolProfileSessionState({
+      resolver: defaultToolProfileResolver(),
+      defaultName: "write",
+    })
+    const host = await createRuntimeContextBindingFromAgentConfigBase({
+      base: makeBase(),
+    })
+      .createRuntimeHost({
+        boot: {
+          refreshSystemPrompt: () => undefined,
+          toolProfileState,
+        },
+        history: [],
+        state: undefined,
+        idMeta: undefined,
+        shutdown: async () => undefined,
+      })
+      .createSessionHost({})
+
+    try {
+      await host.setToolProfile?.("ask")
+      expect(toolProfileState.get()).toBe("ask")
+      expect(host.describe().toolProfile).toBe("ask")
+    } finally {
+      await host.close()
     }
   })
 })

@@ -19,6 +19,109 @@ const makeOutcome = (reason: AgentOutcome["reason"]) =>
   }) as AgentOutcome
 
 describe("@/kernel/session", () => {
+  test("session posture commands reconcile to the host-authoritative state on ignored invalid values", async () => {
+    const manifest = {
+      approvals: "none" as const,
+      tools: false,
+      memory: false,
+      artifacts: false,
+      subagents: false,
+      automation: false,
+      shellSnapshot: false,
+      transport: "inproc" as const,
+    }
+    let permissionMode = "default"
+    let identityMode = "default"
+    let toolProfile = "write"
+    const host = {
+      describe: () => ({
+        sessionId: "s-posture",
+        permissionMode,
+        capabilityManifest: manifest,
+        identityMode,
+        toolProfile,
+      }),
+      setIdentityMode: async (mode: string) => {
+        if (mode === "default" || mode === "plan" || mode === "review" || mode === "onboarding") {
+          identityMode = mode
+        }
+      },
+      setToolProfile: async (profile: string) => {
+        if (profile === "write" || profile === "ask" || profile === "chat" || profile === "read") {
+          toolProfile = profile
+        }
+      },
+      setPermissionMode: async (mode: string) => {
+        if (mode === "default" || mode === "acceptEdits" || mode === "auto" || mode === "bypass") {
+          permissionMode = mode
+        }
+      },
+      runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
+      close: async () => undefined,
+    }
+    let state = createKernelSessionState({
+      sessionId: "s-posture",
+      permissionMode,
+      capabilityManifest: manifest,
+      identityMode,
+      toolProfile,
+    })
+    const eventLog = new InMemorySessionEventLog()
+
+    const invalidIdentity = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "s-posture",
+        commandId: "c-id-bad",
+        issuedAt: "2026-05-26T00:00:00.000Z",
+        type: "session.identity.set",
+        mode: "bogus-mode",
+      },
+      { clock: systemClock, eventLog, host },
+    )
+    expect(invalidIdentity.state.identityMode).toBe("default")
+    expect(invalidIdentity.events.at(-1)).toMatchObject({
+      type: "session.state.updated",
+      state: { identityMode: "default" },
+    })
+    state = invalidIdentity.state
+
+    const invalidToolProfile = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "s-posture",
+        commandId: "c-tool-bad",
+        issuedAt: "2026-05-26T00:00:01.000Z",
+        type: "session.tool_profile.set",
+        profile: "bogus-profile",
+      },
+      { clock: systemClock, eventLog, host },
+    )
+    expect(invalidToolProfile.state.toolProfile).toBe("write")
+    expect(invalidToolProfile.events.at(-1)).toMatchObject({
+      type: "session.state.updated",
+      state: { toolProfile: "write" },
+    })
+    state = invalidToolProfile.state
+
+    const invalidPermission = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "s-posture",
+        commandId: "c-perm-bad",
+        issuedAt: "2026-05-26T00:00:02.000Z",
+        type: "session.permission.set",
+        mode: "bogus-permission",
+      },
+      { clock: systemClock, eventLog, host },
+    )
+    expect(invalidPermission.state.permissionMode).toBe("default")
+    expect(invalidPermission.events.at(-1)).toMatchObject({
+      type: "session.state.updated",
+      state: { permissionMode: "default" },
+    })
+  })
+
   test("runs a turn and updates transcript state", async () => {
     const manifest = {
       approvals: "operator" as const,

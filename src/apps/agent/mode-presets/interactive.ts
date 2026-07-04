@@ -7,7 +7,6 @@
 
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
-import { buildSystemPrompt } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { PermissionContext } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -20,6 +19,7 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { buildInteractiveTurnAssembler } from "../interactive-turn-assembler"
+import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 import { exitCodeForOutcome } from "../run"
 
 interface PromptSourceLike {
@@ -31,6 +31,7 @@ const buildInteractiveBase = (
   signal: AbortSignal,
 ): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const cwd = req.base.cwd ?? process.cwd()
+  const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   const surfaceStream = new StdoutStream()
   const stream: StreamPort = new TeeStream([req.base.stream, surfaceStream])
   const permission: PermissionContext = req.base.permission ?? { mode: "default" }
@@ -45,7 +46,8 @@ const buildInteractiveBase = (
     stream,
     permission,
     messages: req.base.messages ?? [],
-    system: req.base.system ?? buildSystemPrompt(cwd),
+    system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
+    ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
     cwd,
     maxTurns: req.base.maxTurns ?? 200,
     signal,

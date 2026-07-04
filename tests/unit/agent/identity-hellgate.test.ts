@@ -20,6 +20,8 @@ import {
   defaultIdentityProvider,
   IDENTITY_MODES,
   IdentityLineError,
+  identityForToken,
+  isIdentityMode,
   type IdentityMode,
   type IdentityProvider,
 } from "@/agent/identity"
@@ -158,5 +160,21 @@ describe("ADR-0198 identity mode-variant — HELLGATE", () => {
       expect(c).toEqual(a)
       expect(c).not.toContain("SENTINEL_MUTATE")
     }
+  })
+
+  test("HELL-ID-11: isIdentityMode mirrors the SSOT token table", () => {
+    for (const mode of IDENTITY_MODES) {
+      expect(isIdentityMode(mode)).toBe(true)
+    }
+    expect(isIdentityMode("onboarding-XYZ")).toBe(false)
+    expect(isIdentityMode(42)).toBe(false)
+  })
+
+  test("HELL-ID-12: identityForToken preserves unknown-mode fallback without external casts", () => {
+    const provider = defaultIdentityProvider()
+    expect(identityForToken("plan", provider)).toEqual(provider.identityFor("plan"))
+    const unknown = identityForToken("debug", provider)
+    expect(unknown.length).toBeGreaterThan(0)
+    expect(unknown[0]?.toLowerCase()).toContain("unknown-mode")
   })
 })

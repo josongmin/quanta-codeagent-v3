@@ -14,6 +14,7 @@ import {
   isAllowed as isConfirmAllowed,
   normalizeConfirm,
 } from "../confirm-decision"
+import { reviewerApprovalDenyReason, reviewerDenyReason } from "../deny-reason-wire"
 import { deny, HANDOFF_SUFFIX } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import type { AdmissibilityGateConfig } from "../types"
@@ -23,7 +24,6 @@ import {
   buildHandoffDeny,
   cascadeOnApprove,
   denyFromConfirm,
-  denyReason,
   hardDenyHandoff,
   inferReviewKind,
   isSessionApprovalRequiredError,
@@ -59,7 +59,7 @@ const denyIllegalReviewerVerb = (
     "reviewer_verb_illegal",
     // C6: categorical safeReason — the reviewer-authored verb/kind never enters
     // the structured field (the prose `content` above already surfaces them).
-    denyReason({ layer: "reviewer", safeReason: "reviewer returned illegal verb" }),
+    reviewerDenyReason("reviewer returned illegal verb"),
   )
 }
 
@@ -84,7 +84,7 @@ const denyReviewedAction = (
       baseContent,
       tag,
       config,
-      denyReason({ layer: "reviewer", safeReason: `reviewer outcome: ${decision.outcome}` }),
+      reviewerDenyReason(`reviewer outcome: ${decision.outcome}`),
     )
   }
   if (decision.outcome === "user_aborted") {
@@ -94,7 +94,7 @@ const denyReviewedAction = (
       tag,
       // C6: categorical only — `decision.rationale` (reviewer-authored) never
       // enters the structured field.
-      denyReason({ layer: "reviewer", safeReason: "reviewer outcome: user_aborted" }),
+      reviewerDenyReason("reviewer outcome: user_aborted"),
     )
   }
   if (decision.outcome === "guardian_denied") {
@@ -102,14 +102,14 @@ const denyReviewedAction = (
       call.id,
       `Guardian denied: ${decision.rationale}${originSuffix}`,
       tag,
-      denyReason({ layer: "reviewer", safeReason: "reviewer outcome: guardian_denied" }),
+      reviewerDenyReason("reviewer outcome: guardian_denied"),
     )
   }
   return deny(
     call.id,
     `User declined: ${decision.rationale}${originSuffix}`,
     tag,
-    denyReason({ layer: "reviewer", safeReason: "reviewer outcome: user_declined" }),
+    reviewerDenyReason("reviewer outcome: user_declined"),
   )
 }
 
@@ -176,7 +176,7 @@ export const reviewAndDecide = async (
       call.id,
       `Reviewer escalation requested for ${action.tool} but no ReviewerPort is wired.`,
       "rule_ask",
-      denyReason({ layer: "reviewer", safeReason: "reviewer escalation requested, no port wired" }),
+      reviewerDenyReason("reviewer escalation requested, no port wired"),
     )
   }
   // actionKey is `${tool}|${shellCommand}` when the tool exposes a command,
@@ -296,11 +296,7 @@ export const runAlwaysConfirmBranch = async (
       call.id,
       `Permission denied: ${call.name} requires explicit confirmation (always-confirm tier) but no confirm handler is wired.`,
       "denied",
-      denyReason({
-        layer: "reviewer",
-        pillar: "approval",
-        safeReason: "always-confirm tier, no confirm handler wired",
-      }),
+      reviewerApprovalDenyReason("always-confirm tier, no confirm handler wired"),
     )
   }
   let decision: ConfirmDecision
@@ -315,11 +311,7 @@ export const runAlwaysConfirmBranch = async (
       "error",
       // C6: categorical only — the host error `message` never enters the
       // structured field (the prose `content` above already surfaces it).
-      denyReason({
-        layer: "reviewer",
-        pillar: "approval",
-        safeReason: "always-confirm tier, confirmation handler failed",
-      }),
+      reviewerApprovalDenyReason("always-confirm tier, confirmation handler failed"),
     )
   }
   if (!isConfirmAllowed(decision)) {
@@ -329,11 +321,7 @@ export const runAlwaysConfirmBranch = async (
       `User declined: ${call.name} requires explicit confirmation (always-confirm tier).`,
       "declined",
       config,
-      denyReason({
-        layer: "reviewer",
-        pillar: "approval",
-        safeReason: "always-confirm tier, user declined",
-      }),
+      reviewerApprovalDenyReason("always-confirm tier, user declined"),
     )
   }
   // ADR-0061 L4 cascade — user approved, fold rememberPatterns into the store

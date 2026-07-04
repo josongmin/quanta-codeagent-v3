@@ -428,10 +428,20 @@ export type AgentEvent =
   // optional human/analytics hint (free-form string; never used for control
   // flow). Equal-mode transitions are still emitted so a host that wants to
   // log "developer message reaffirmed plan mode" sees the event.
+  //
+  // `fromAgentMode`/`toAgentMode` (jul-04 observability widening) carry the FINER
+  // AgentMode axis (`default`/`editor`/`plan`/`review`/`audit`/`architect`, the
+  // output of `resolveAgentMode` in `@/agent/mode.ts`) so a host distinguishes
+  // "entered plan from an editor subagent" from "entered plan from default" — a
+  // distinction the 2-value collaboration `from`/`to` erases (both project to
+  // `default`). Free-form string (like `reason`) to avoid an `@/agent` slice edge;
+  // absent when the emitter has no AgentMode context (e.g. legacy paths). */
   | {
       type: "mode_changed"
       from: "default" | "plan"
       to: "default" | "plan"
+      fromAgentMode?: string
+      toAgentMode?: string
       reason?: string
     }
   // ADR-0102 turn-diff cluster (Codex `turn/diff/updated` absorption). Emitted
@@ -503,7 +513,10 @@ export type AgentEvent =
       type: "knobs_applied"
       surface: SurfaceMirror
       knobs: Readonly<
-        Record<string, { value: unknown; unit: string | undefined; display: string; source: string }>
+        Record<
+          string,
+          { value: unknown; unit: string | undefined; display: string; source: string }
+        >
       >
       preset: string | null
       costMultiplier: number

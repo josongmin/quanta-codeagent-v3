@@ -31,6 +31,16 @@ const fakeCtx = () =>
       repoRulesPresent: false,
       sessionCtxPresent: false,
       userAppendPresent: false,
+      surfaceProfile: {
+        envPosture: "frozen",
+        promptPack: "headless",
+        verifyStrategy: "none",
+      },
+      activeLevers: {
+        budgetMeter: true,
+        budgetLedger: false,
+        subagentTurnGate: true,
+      },
     },
   }) as unknown as Parameters<typeof emitPromptAssembled>[1]
 
@@ -55,6 +65,16 @@ describe("emitPromptAssembled — window-relative max", () => {
     emitPromptAssembled(config, fakeCtx(), "claude-opus-4-8")
     expect(snap?.max).toBe(200_000) // claude-opus-4-8 contextWindow
     expect(snap?.model).toBe("claude-opus-4-8")
+    expect(snap?.surfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "headless",
+      verifyStrategy: "none",
+    })
+    expect(snap?.activeLevers).toEqual({
+      budgetMeter: true,
+      budgetLedger: false,
+      subagentTurnGate: true,
+    })
   })
 
   test("the SWAPPED activeModel (1M sonnet) drives max + model, not the base config.llm", () => {

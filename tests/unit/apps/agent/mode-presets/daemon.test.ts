@@ -16,6 +16,7 @@ import { describe, expect, test } from "bun:test"
 import type { AssembleRequest } from "@/../src/apps/agent/assemble"
 import { runMode } from "@/../src/apps/agent/mode-presets/daemon"
 import type { AgentConfig, AgentOutcome, BranchSearchConfig } from "@/agent"
+import { buildSystemPromptForRunMode } from "@/agent/system-prompt"
 import type { LLMPort, Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
@@ -68,6 +69,12 @@ describe("daemon.runMode — config assembly", () => {
     expect(cfgSeen?.modePolicy?.permission.kind).toBe("auto")
     expect(cfgSeen?.modePolicy?.gitWrite.kind).toBe("branch-only")
     expect(cfgSeen?.modePolicy?.output.kind).toBe("structured")
+    expect(cfgSeen?.system).toBe(buildSystemPromptForRunMode({ runMode: "daemon", cwd: "/tmp" }))
+    expect(cfgSeen?.promptSurfaceProfile).toEqual({
+      envPosture: "frozen",
+      promptPack: "daemon",
+      verifyStrategy: "none",
+    })
   })
 
   test("branch_search is default-ON: N=3, tsc+lint+lsp_diag, worktree", async () => {

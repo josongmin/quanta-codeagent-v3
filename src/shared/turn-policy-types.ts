@@ -20,6 +20,30 @@ export type PromptBaseSystem = "default" | "caller_provided"
 export type PromptHookContextMode = "none" | "before_user" | "after_system" | "both"
 export type PromptSummaryPrefix = "none" | "conversation_summary" | "continuation_summary"
 export type TurnPolicyToolChoiceKind = "auto" | "any" | "none" | "tool"
+export type PromptSurfacePack =
+  | "interactive"
+  | "ide"
+  | "headless"
+  | "daemon"
+  | "batch"
+  | "ci-bot"
+export type PromptSurfaceEnvPosture = "frozen" | "owned"
+export type PromptSurfaceVerifyStrategy = "none" | "reproduce-first" | "verify-after-edit"
+
+/** Declared prompt-shaping axes for this session/surface. Observation-only:
+ *  names only, never prompt text. */
+export interface PromptSurfaceProfileSnapshot {
+  readonly envPosture: PromptSurfaceEnvPosture
+  readonly promptPack: PromptSurfacePack
+  readonly verifyStrategy: PromptSurfaceVerifyStrategy
+}
+
+/** Presence-only runtime lever snapshot. */
+export interface PromptActiveLeversSnapshot {
+  readonly budgetMeter: boolean
+  readonly budgetLedger: boolean
+  readonly subagentTurnGate: boolean
+}
 
 /** Prompt-shaping metadata resolved BEFORE the provider request opens. This is
  *  redaction-safe observability only: names/counts/booleans, never prompt text. */
@@ -38,6 +62,8 @@ export interface PromptPolicySnapshot {
   readonly mentionInjectionCount: number
   readonly hookContext: PromptHookContextMode
   readonly summaryPrefix: PromptSummaryPrefix
+  readonly surfaceProfile?: PromptSurfaceProfileSnapshot
+  readonly activeLevers?: PromptActiveLeversSnapshot
 }
 
 /** Effective request policy = prompt-shaping metadata plus per-request control

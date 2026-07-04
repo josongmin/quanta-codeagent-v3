@@ -14,6 +14,7 @@ import {
 import type { buildSessionFeatures } from "../features"
 import { scanEnvelopeForRedactions } from "../loop-helpers"
 import { evictLspWorkspaces } from "../lsp-bridge"
+import { applyCollaborationModeTransition } from "../mode"
 import { persistSession } from "../memory"
 import { buildPersistDeps } from "../session-resources"
 import type { StopCategory } from "../stop-category"
@@ -304,13 +305,15 @@ export const runSessionStartSequence = async (args: {
     // Hook DENY = policy/system block on the prompt (NOT a user Ctrl+C).
     if (denied !== null) return { status: "aborted", cause: "hook_deny" }
   }
+  // `interrupt` submission op must fail-closed before snapshot restore mutates
+  // any durable session state.
+  if (handleSubmissionControlOp(args.cfg, args.taskRegistry) === "aborted") {
+    return { status: "aborted", cause: "interrupt" }
+  }
   observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
   await restoreFollowUpQueueSnapshot(args.cfg)
   await restorePlanSnapshot(args.cfg)
-  // `interrupt` submission op = the genuine user interrupt.
-  return handleSubmissionControlOp(args.cfg, args.taskRegistry) === "aborted"
-    ? { status: "aborted", cause: "interrupt" }
-    : { status: "continue" }
+  return { status: "continue" }
 }
 
 export const handleSubmissionControlOp = (
@@ -327,15 +330,15 @@ export const handleSubmissionControlOp = (
     emitSubagentCancel(cfg, cfg.submission.op.subagentId, outcome, "submission_op")
   }
   if (isSetModeOp(cfg.submission)) {
-    const from: "default" | "plan" =
-      cfg.mode === "plan" || cfg.planMode === true ? "plan" : "default"
-    const to = cfg.submission.op.mode
-    if (from !== to) {
+    const transition = applyCollaborationModeTransition(cfg, cfg.submission.op.mode)
+    if (transition.changed) {
       const reason = cfg.submission.op.reason
       cfg.stream.emit({
         type: "mode_changed",
-        from,
-        to,
+        from: transition.from,
+        to: transition.to,
+        fromAgentMode: transition.fromAgentMode,
+        toAgentMode: transition.toAgentMode,
         ...(reason !== undefined ? { reason } : {}),
       })
     }

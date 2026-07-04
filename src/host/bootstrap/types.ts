@@ -488,6 +488,7 @@ export interface SessionBootstrapResult {
   readonly abort: AbortController
   readonly argPrompt: string | undefined
   readonly system: string
+  readonly promptSurfaceProfile: AgentConfig["promptSurfaceProfile"]
   /** Mutable system-prompt holder. Surfaces that mount the `/identity-mode`
    *  slash use {@link refreshSystemPrompt} to rebuild the prompt after a
    *  mode swap; turn assemblers read the latest value via `systemSource.get()`.
@@ -507,10 +508,11 @@ export interface SessionBootstrapResult {
    *  the loop share the SAME tracker instance. */
   readonly focusChain: { readonly tracker: FocusChainPort; readonly reinjectEveryN: number }
   /** `session_config` tool seam — read + write over the agent's own SDK
-   *  posture (effort tier, identity mode, tool profile, model, provider).
-   *  Built once at bootstrap from `effortStore` + `identityModeState` +
-   *  `toolProfileState` + `runtime.model` + `runtime.provider`. The
-   *  downstream `context-binding.ts` wires it onto
+   *  posture (effort tier, permission mode, identity mode, tool profile,
+   *  model, provider). Built once at bootstrap from `effortStore` +
+   *  `permissionModeState` + `identityModeState` + `toolProfileState` +
+   *  `runtime.model` + `runtime.provider`. The downstream
+   *  `context-binding.ts` wires it onto
    *  `AgentConfig.sessionConfigPort`; the dispatch seam then exposes it on
    *  `ToolContext.sessionConfig` for the `session_config` default tool.
    *  Absent ⇒ the tool yields a typed `not_wired` failure to the model

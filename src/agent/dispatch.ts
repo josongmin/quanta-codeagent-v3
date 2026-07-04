@@ -14,13 +14,13 @@ import { QuantaError, toError } from "@/shared"
 import type { ToolContext, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
 import { emitCapReminderDecision } from "./decision-emit-phase3"
+import { modeApprovalDenyReason, stackDenyReason } from "./deny-reason-wire"
 import { execute } from "./dispatch/execute"
 import {
   consultDedupGate,
   consultDispatchGuard,
   consultLocalizePhase,
   consultTestScope,
-  denyReason,
 } from "./dispatch/preflight-consults"
 import { buildToolContext, maybeBuildInterruptRouter } from "./dispatch/tool-context"
 import { deny, isSessionApprovalRequiredError } from "./dispatch-helpers"
@@ -295,11 +295,7 @@ const consultPlanModeSeam = (
     // (`layer:"mode"`/`pillar:"approval"`), fired earlier on the collaboration
     // path. Categorical safeReason (the typed error `message` already surfaces
     // mode+tool on `content`, never input).
-    denyReason({
-      layer: "mode",
-      pillar: "approval",
-      safeReason: "tool blocked in plan collaboration mode",
-    }),
+    modeApprovalDenyReason("tool blocked in plan collaboration mode"),
   )
 }
 
@@ -340,7 +336,7 @@ const consultOwnership = (
     call.id,
     `subagent ownership boundary: ${own.reason === "forbidden" ? "forbidden path" : "path not in owned set"} — ${own.path}`,
     "ownership-policy-denied",
-    denyReason({ layer: "stack", safeReason: "subagent ownership boundary violated" }),
+    stackDenyReason("subagent ownership boundary violated"),
   )
 }
 

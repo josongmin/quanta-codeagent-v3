@@ -51,7 +51,7 @@
  */
 
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
-import { buildSystemPrompt, wireOptionalAgentPorts } from "@/agent"
+import { wireOptionalAgentPorts } from "@/agent"
 import type { PermissionContext } from "@/permission"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -62,6 +62,7 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
+import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 
 /** Per-branch verify budget for daemon: 90s — no human waiting, so allow a
  *  longer speculative branch than IDE for the diagnostic-rich verifier set. */
@@ -77,6 +78,7 @@ const DAEMON_BRANCH_SEARCH: BranchSearchConfig = {
 
 const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
   const cwd = req.base.cwd ?? process.cwd()
+  const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   // No human ⇒ auto/acceptEdits within the allowlist (network/gitWrite levers
   // enforce the boundary; permission just clears in-scope edits).
@@ -94,7 +96,8 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
       stream,
       permission,
       messages: req.base.messages ?? [],
-      system: req.base.system ?? buildSystemPrompt(cwd),
+      system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
+      ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 40,
       // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired

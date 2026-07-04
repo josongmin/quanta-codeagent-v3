@@ -18,7 +18,12 @@
  */
 
 import type { HookPromptInject } from "../hooks"
-import { isMutatingMode, resolveAgentMode, resolveCollaborationMode } from "../mode"
+import {
+  applyCollaborationModeTransition,
+  isMutatingMode,
+  resolveAgentMode,
+  resolveCollaborationMode,
+} from "../mode"
 import type { AgentConfig } from "../types"
 import type { PendingPlanEntry } from "./types"
 
@@ -42,15 +47,17 @@ export const applyPendingPlanEntry = (
   // (default/editor) has anything to fence off. This prevents both a duplicate
   // event and a silent review→plan downgrade.
   if (resolveCollaborationMode(cfg) === "plan") return
-  if (!isMutatingMode(resolveAgentMode(cfg.mode, cfg.planMode))) return
-  cfg.planMode = true
-  cfg.mode = "plan"
-  cfg.collaborationMode = "plan"
+  const fromAgentMode = resolveAgentMode(cfg.mode, cfg.planMode)
+  if (!isMutatingMode(fromAgentMode)) return
+  const transition = applyCollaborationModeTransition(cfg, "plan")
+  if (!transition.changed) return
   hookPromptPending.push(planModeReminder(pending.reason))
   cfg.stream.emit({
     type: "mode_changed",
-    from: "default",
-    to: "plan",
+    from: transition.from,
+    to: transition.to,
+    fromAgentMode: transition.fromAgentMode,
+    toAgentMode: transition.toAgentMode,
     reason: "plan_enter_requested",
   })
 }

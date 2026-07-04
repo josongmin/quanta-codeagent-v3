@@ -27,7 +27,14 @@ import {
   type PermissionStackSource,
 } from "./recorder"
 import type { ToolCapability } from "@/shared"
-import type { HITLTier, PermissionContext, PermissionDecision, ToolAction } from "./types"
+import type {
+  HITLTier,
+  PermissionContext,
+  PermissionDecision,
+  PermissionDenyDecision,
+  PermissionSoftDenySource,
+  ToolAction,
+} from "./types"
 
 /** Exposed for the rule-level unit test (positive + negative case enforcement,
  *  unique-name check). NOT intended for production callers — use
@@ -63,6 +70,9 @@ export const hardDenyReason = (action: ToolAction): string | null => {
   const cmd =
     typeof action.shellCommand === "string" ? action.shellCommand : legacyBashCommand(action)
   if (cmd === null || cmd.length === 0) return null
+  const cached = action.hardDenyProse
+  const expected = `Blocked dangerous command: ${cmd}`
+  if (typeof cached === "string" && cached === expected) return cached
   // R7 fix — match against the shell-normalized form so empty-quote
   // (`r""m`) / mid-token-backslash (`c\url`) command-name splitting cannot
   // slide a dangerous binary past the word-boundary anchors. See
@@ -74,10 +84,20 @@ export const hardDenyReason = (action: ToolAction): string | null => {
   return null
 }
 
-const hardDeny = (action: ToolAction): PermissionDecision | null => {
+const hardDeny = (action: ToolAction): PermissionDenyDecision | null => {
   const reason = hardDenyReason(action)
-  return reason ? { kind: "deny", reason } : null
+  return reason ? { kind: "deny", reason, hardDeny: true, stackSource: "hard-deny" } : null
 }
+
+const softDeny = (
+  reason: string,
+  stackSource: PermissionSoftDenySource,
+): PermissionDenyDecision => ({
+  kind: "deny",
+  reason,
+  hardDeny: false,
+  stackSource,
+})
 
 /* ------------------------------------------------------------------------- *
  * OTel emit (ADR-0032 vocabulary activation).
@@ -409,7 +429,7 @@ export const evaluateAuto = async (
     if (circumventionArmed(opts)) {
       for (const eff of effectsOf(opts)) opts.tracker.noteDenied(eff, action.tool, opts.turn)
     }
-    return emit({ kind: "deny", reason: decision.reason }, { stackSource: "global-default" })
+    return emit(softDeny(decision.reason, "global-default"), { stackSource: "global-default" })
   }
   return emit({ kind: "ask", reason: decision.reason }, { stackSource: "global-default" })
 }
@@ -517,10 +537,10 @@ export const evaluateStack = (
     const writable = threadAllowsMutation(threadPerm, stack.workdir)
     if (writable) return emit({ kind: "allow" }, { stackSource: "per-thread", ...axes })
     return emit(
-      {
-        kind: "deny",
-        reason: `Per-thread policy (${threadPerm.sandboxPolicy.type}) refuses ${action.tool} on ${stack.workdir}`,
-      },
+      softDeny(
+        `Per-thread policy (${threadPerm.sandboxPolicy.type}) refuses ${action.tool} on ${stack.workdir}`,
+        "per-thread",
+      ),
       { stackSource: "per-thread", ...axes },
     )
   }
@@ -536,10 +556,10 @@ export const evaluateStack = (
   const hostVerdict = hostMutationVerdict(hostMode)
   if (hostVerdict === "deny") {
     return emit(
-      {
-        kind: "deny",
-        reason: `Per-host mode (${hostMode}) refuses ${action.tool} on host ${stack.hostId}`,
-      },
+      softDeny(
+        `Per-host mode (${hostMode}) refuses ${action.tool} on host ${stack.hostId}`,
+        "per-host",
+      ),
       { stackSource: "per-host", ...axes },
     )
   }
@@ -549,10 +569,10 @@ export const evaluateStack = (
     // allow it. When the bespoke-policy resolver lands it replaces THIS
     // branch (resolve → allow/deny), never the fall-through below.
     return emit(
-      {
-        kind: "deny",
-        reason: `Per-host mode (custom) on host ${stack.hostId} requires a bespoke policy that has not been resolved — refusing ${action.tool} (fail-closed)`,
-      },
+      softDeny(
+        `Per-host mode (custom) on host ${stack.hostId} requires a bespoke policy that has not been resolved — refusing ${action.tool} (fail-closed)`,
+        "per-host",
+      ),
       { stackSource: "per-host", ...axes },
     )
   }

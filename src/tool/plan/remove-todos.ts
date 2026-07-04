@@ -23,8 +23,8 @@ export const removeTodosTool = (): Tool<RemoveTodosInput> => ({
         type: "result",
         result: {
           ok: false,
-          output: "remove_todos unavailable: plan-mode is not active.",
-          failure: { mode: "error", modelVisibleError: "plan-mode is not active" },
+          output: "remove_todos unavailable: no structured plan store is wired in this session.",
+          failure: { mode: "error", modelVisibleError: "structured plan store is not wired" },
         },
       }
       return

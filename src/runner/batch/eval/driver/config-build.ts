@@ -552,6 +552,10 @@ export const buildConfig = (
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
   const budgetMeter = deps.budgetMeterFactory?.() ?? benchBudgetMeterFromEnv(process.env)
+  const promptSurfaceProfile: AgentConfig["promptSurfaceProfile"] =
+    instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
+      ? { envPosture: "frozen", promptPack: "batch", verifyStrategy: "reproduce-first" as const }
+      : { envPosture: "frozen", promptPack: "batch", verifyStrategy: "none" as const }
   const baseConfig = {
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
     // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
@@ -582,6 +586,7 @@ export const buildConfig = (
         : SWE_SURFACE_PROFILE,
       { cwd: sandbox },
     ),
+    promptSurfaceProfile,
     cwd: sandbox,
     // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
     // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not

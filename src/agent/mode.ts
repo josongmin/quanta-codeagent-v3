@@ -784,6 +784,57 @@ export const resolveCollaborationMode = (config: {
   return resolveAgentMode(config.mode, config.planMode) === "plan" ? "plan" : "default"
 }
 
+/** Mutable config slice owned by the collaboration-mode transition seam. The
+ *  helper rewrites the authoritative runtime state (`mode` / `planMode` /
+ *  `collaborationMode`) in ONE place so prompt assembly, dispatch gating, and
+ *  stream observability never split authority again. */
+export interface CollaborationModeState {
+  collaborationMode?: CollaborationMode
+  mode?: AgentMode
+  planMode?: boolean
+}
+
+export interface CollaborationModeTransition {
+  readonly from: CollaborationMode
+  readonly to: CollaborationMode
+  readonly fromAgentMode: AgentMode
+  readonly toAgentMode: AgentMode
+  readonly changed: boolean
+}
+
+/** Apply a collaboration-mode transition to the authoritative runtime state.
+ *  Equal-mode requests are a pure observation (`changed:false`) and leave the
+ *  finer agent posture untouched (`editor` stays `editor` on `default` → `default`).
+ *  Actual transitions collapse onto the collaboration owner semantics:
+ *    - `plan`    ⇒ `mode="plan"`,   `planMode=true`,  `collaborationMode="plan"`
+ *    - `default` ⇒ `mode="default"`,`planMode=false`, `collaborationMode="default"` */
+export const applyCollaborationModeTransition = (
+  config: CollaborationModeState,
+  nextMode: CollaborationMode,
+): CollaborationModeTransition => {
+  const from = resolveCollaborationMode(config)
+  const fromAgentMode = resolveAgentMode(config.mode, config.planMode)
+  if (from === nextMode) {
+    return {
+      from,
+      to: nextMode,
+      fromAgentMode,
+      toAgentMode: fromAgentMode,
+      changed: false,
+    }
+  }
+  config.collaborationMode = nextMode
+  config.planMode = nextMode === "plan"
+  config.mode = nextMode === "plan" ? "plan" : "default"
+  return {
+    from,
+    to: nextMode,
+    fromAgentMode,
+    toAgentMode: resolveAgentMode(config.mode, config.planMode),
+    changed: true,
+  }
+}
+
 /** Strict regex for the `mode=…` directive that a developer message must
  *  carry to cause a collaboration-mode transition. Anchored — anything other
  *  than the bare directive (with optional surrounding whitespace) is treated

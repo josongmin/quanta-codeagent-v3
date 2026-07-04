@@ -2,8 +2,10 @@ import { basename } from "node:path"
 import type { Message, SystemBlock } from "@/llm"
 import {
   type AgentPromptMode,
+  type PromptActiveLeversSnapshot,
   type PromptHookContextMode,
   type PromptPolicySnapshot,
+  type PromptSurfaceProfileSnapshot,
   type PromptSummaryPrefix,
   runtimeConfig,
 } from "@/shared"
@@ -34,6 +36,7 @@ import {
   validateSectionsCacheBudget,
 } from "./prompt-sections"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
+import { makeSyntheticUserMessage } from "./synthetic-user"
 import { embedUntrusted, escapeBoundary } from "./untrusted"
 import { UNTRUSTED_ENVELOPE_RULE } from "./untrusted-envelope"
 import { renderWorkingStateBlock, type WorkingState } from "./working-state"
@@ -188,12 +191,22 @@ export interface TurnContextInput {
    *  mutated per turn, so it stays a byte-stable cache prefix. Absent ⇒ the
    *  built-in {@link buildSystemPrompt}. */
   system?: string
+  /** Declared surface prompt axes for this session. Observation-only:
+   *  forwarded into `promptPolicy` so turn telemetry can report the active
+   *  prompt profile without scraping prompt text. */
+  promptSurfaceProfile?: PromptSurfaceProfileSnapshot
+  /** Presence-only runtime lever snapshot for this turn/session. */
+  activeLevers?: PromptActiveLeversSnapshot
   /** Caller-supplied STATIC session context (e.g. tool inventory hash, surface
    *  flag, install id). Rides the 4-section preset as the `session_ctx`
    *  breakpoint when present (Claude Desktop 1.7196 pattern). Per-turn dynamic
    *  data (date, cwd, plan notice) does NOT belong here — that stays in the
    *  trailing `<system-reminder>` user message. */
   sessionCtx?: string
+  /** Distilled `memory_summary.md` body loaded once per session start. When
+   *  present it shares the cached `session_ctx` section with `sessionCtx`
+   *  under the untrusted-aggregate wrapper from `fourSectionPreset`. */
+  memorySummaryMd?: string
   /** User-supplied STATIC prefix (e.g. global `~/CLAUDE.md` body). When set,
    *  buildTurnContext activates the 4-section preset and pins `user_append`
    *  as a distinct cache breakpoint so changes here only invalidate the tail.
@@ -470,10 +483,11 @@ const appendHookContextMessage = (
 ): void => {
   const beforeUser = collectHookPromptSide(injects, "injectBeforeUser")
   if (beforeUser === undefined) return
-  messages.push({
-    role: "user",
-    content: [{ type: "text", text: embedUntrusted("hook-context", beforeUser) }],
-  })
+  messages.push(
+    makeSyntheticUserMessage("hook-context", [
+      { type: "text", text: embedUntrusted("hook-context", beforeUser) },
+    ]),
+  )
 }
 
 /** Build the per-turn dynamic context — date, cwd, mode notice, repo rules,
@@ -547,6 +561,7 @@ const buildDynamicContext = (
   input: TurnContextInput,
   effectiveMode: AgentMode,
   selectedGlobRules: readonly GlobRule[],
+  repoRulesInStaticSystem: boolean,
 ): string | undefined => {
   const parts: string[] = [todayDateLine(input.now), `Working directory: ${input.cwd}`]
   // SSOT mode precedence (ADR-0018): prompt + dispatch share resolveAgentMode
@@ -578,7 +593,9 @@ const buildDynamicContext = (
   // renderEnvBlock returns undefined and parts stay byte-identical.
   const envBlock = renderEnvBlock(input.env)
   if (envBlock) parts.push("", envBlock)
-  if (input.repoRules) parts.push("", renderRepoRulesBlock(input.repoRules))
+  if (input.repoRules && !repoRulesInStaticSystem) {
+    parts.push("", renderRepoRulesBlock(input.repoRules))
+  }
   // File-scoped rules (Cursor `.cursor/rules` parity) ride right after the
   // top-level repo contract — both are repo authority, but these are selected
   // per-turn by the files in play. Absent / no selection ⇒ no block.
@@ -651,11 +668,13 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
   // activates only when the caller supplies repo-local rules text OR a static
   // user-append; otherwise we stay byte-identical to the legacy single-block
   // shape so existing callers and their cached prefixes are untouched.
-  const projectMd = input.repoRules?.body
+  const projectMd =
+    input.repoRules !== undefined ? renderRepoRulesBlock(input.repoRules) : undefined
   const useSectioned =
     (projectMd !== undefined && projectMd.trim().length > 0) ||
     (input.userAppend !== undefined && input.userAppend.trim().length > 0) ||
-    (input.sessionCtx !== undefined && input.sessionCtx.trim().length > 0)
+    (input.sessionCtx !== undefined && input.sessionCtx.trim().length > 0) ||
+    (input.memorySummaryMd !== undefined && input.memorySummaryMd.trim().length > 0)
   const effectiveMode = resolveAgentMode(input.mode, input.planMode)
   const selectedGlobRules =
     input.globRules !== undefined && input.globRules.length > 0
@@ -667,6 +686,9 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
           base: staticBase,
           ...(projectMd !== undefined ? { projectMd } : {}),
           ...(input.sessionCtx !== undefined ? { sessionCtx: input.sessionCtx } : {}),
+          ...(input.memorySummaryMd !== undefined
+            ? { memorySummaryMd: input.memorySummaryMd }
+            : {}),
           ...(input.userAppend !== undefined ? { userAppend: input.userAppend } : {}),
         })
         // Fail-soft cache-budget check: the validator can only return ok:false
@@ -677,7 +699,12 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
         return buildSectionedSystemBlocks(sections)
       })()
     : [{ type: "text", text: staticBase, cache: true }]
-  const dynamic = buildDynamicContext(input, effectiveMode, selectedGlobRules)
+  const dynamic = buildDynamicContext(
+    input,
+    effectiveMode,
+    selectedGlobRules,
+    useSectioned && hasText(projectMd),
+  )
   const messages: Message[] = [...input.baseMessages]
   appendHookContextMessage(messages, input.hookPromptInjects)
   // ADR-0321 + ADR-0325 wire — persistent injection channels.
@@ -709,7 +736,7 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
       baseSystem: input.system !== undefined ? "caller_provided" : "default",
       systemLayout: useSectioned ? "four_section" : "single_block",
       repoRulesPresent: hasText(projectMd),
-      sessionCtxPresent: hasText(input.sessionCtx),
+      sessionCtxPresent: hasText(input.sessionCtx) || hasText(input.memorySummaryMd),
       userAppendPresent: hasText(input.userAppend),
       selectedGlobRuleNames: selectedGlobRules.map((rule) => basename(rule.sourcePath)),
       activeSkillNames: input.activeSkills?.map((skill) => skill.name) ?? [],
@@ -719,6 +746,10 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
       mentionInjectionCount: input.mentionInjectionMessages?.length ?? 0,
       hookContext: resolveHookContextMode(input.hookPromptInjects),
       summaryPrefix: resolveSummaryPrefix(input.baseMessages),
+      ...(input.promptSurfaceProfile !== undefined
+        ? { surfaceProfile: input.promptSurfaceProfile }
+        : {}),
+      ...(input.activeLevers !== undefined ? { activeLevers: input.activeLevers } : {}),
     },
   }
 }
