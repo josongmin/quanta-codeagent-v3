@@ -1,10 +1,9 @@
-import type { GuardDecision } from "@/agent/dispatch-guard"
 import {
   type DenyPillar,
   hardDenySafeReason,
   type StructuredDenyReason,
-  structuredDenyReason,
   type StructuredDenyReasonInput,
+  structuredDenyReason,
 } from "@/permission"
 import { runtimeConfig } from "@/shared"
 
@@ -21,9 +20,6 @@ const reviewerApprovalReasonInput = (safeReason: string): StructuredDenyReasonIn
   pillar: "approval",
   safeReason,
 })
-
-export const reviewerStructuredReason = (safeReason: string): StructuredDenyReason =>
-  structuredDenyReason(reviewerReasonInput(safeReason))
 
 export const reviewerApprovalStructuredReason = (safeReason: string): StructuredDenyReason =>
   structuredDenyReason(reviewerApprovalReasonInput(safeReason))
@@ -58,14 +54,3 @@ export const toolProfileDenyReason = (safeReason: string): StructuredDenyReason 
 
 export const hardDenyStructuredReason = (): StructuredDenyReason | undefined =>
   denyReason({ layer: "hard-deny", safeReason: hardDenySafeReason() })
-
-export const guardStructuredReason = (
-  decision: Exclude<GuardDecision, { kind: "allow" }>,
-): StructuredDenyReason | undefined =>
-  decision.kind === "ask"
-    ? stackDenyReason("dispatch guard requested confirmation")
-    : stackDenyReason(
-        decision.hardDeny
-          ? "dispatch guard blocked (security boundary)"
-          : "dispatch guard blocked (recoverable posture)",
-      )

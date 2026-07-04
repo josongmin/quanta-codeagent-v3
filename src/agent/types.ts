@@ -7,10 +7,9 @@ import type {
   ToolAction,
   TrustScopeRegistry,
 } from "@/permission"
-import type { RunContext } from "@/shared"
+import type { PromptSurfaceProfileSnapshot, RunContext } from "@/shared"
 import type { DecisionEmitter, StreamPort } from "@/stream"
 import type { ToolRegistry } from "@/tool"
-import type { PromptSurfaceProfileSnapshot } from "@/shared"
 import type { CloseoutCriticConfig } from "./closeout-critic"
 import type { ConfirmDecision } from "./confirm-decision"
 import type { DedupGate, DedupGateCaps } from "./dispatch-dedup"
@@ -715,6 +714,18 @@ export type AdmissibilityGateConfig = Pick<
 export type RecoveryConfig = Pick<
   AgentConfig,
   "llm" | "stream" | "signal" | "compaction" | "compactionBreaker" | "onPreCompact"
+>
+
+/** Narrow contract for the plan-mode lifecycle wires (`loop/plan-enter-wire.ts`,
+ *  `loop/plan-exit-wire.ts`). They read/mutate the collaboration posture
+ *  (`mode`/`planMode`/`collaborationMode` via `applyCollaborationModeTransition`),
+ *  emit `mode_changed` on `stream`, and clear the mutable `planStore` on approved
+ *  exit — nothing else on the 71-field `AgentConfig`. A full `AgentConfig` is
+ *  assignable here, so callers pass it verbatim; the wire signatures just declare
+ *  the slice they depend on (ISP, mirrors {@link RecoveryConfig}). */
+export type PlanLifecycleConfig = Pick<
+  AgentConfig,
+  "mode" | "planMode" | "collaborationMode" | "stream" | "planStore"
 >
 
 /** Narrow contract for the long-term memory subsystem (RFC §6.3; memory.ts /

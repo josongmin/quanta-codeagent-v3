@@ -7,7 +7,7 @@ import { applyCollaborationModeTransition } from "../mode"
 import { renderPlanAsMarkdown } from "../plan/render-text"
 import { planToStreamMirror } from "../plan/stream-mirror"
 import { applyPlanExitOutcome } from "../plan-exit-lifecycle"
-import type { AgentConfig } from "../types"
+import type { PlanLifecycleConfig } from "../types"
 import type { PendingPlanExit } from "./types"
 
 const approvedPlanReminder = (plan: string): HookPromptInject => ({
@@ -24,7 +24,7 @@ const requestedChangesReminder = (feedback: string): HookPromptInject => ({
 })
 
 export const applyPendingPlanExit = (
-  cfg: AgentConfig,
+  cfg: PlanLifecycleConfig,
   pending: PendingPlanExit | null,
   hookPromptPending: HookPromptInject[],
 ): void => {

@@ -24,7 +24,7 @@ import {
   resolveAgentMode,
   resolveCollaborationMode,
 } from "../mode"
-import type { AgentConfig } from "../types"
+import type { PlanLifecycleConfig } from "../types"
 import type { PendingPlanEntry } from "./types"
 
 const planModeReminder = (reason: string): HookPromptInject => ({
@@ -36,7 +36,7 @@ const planModeReminder = (reason: string): HookPromptInject => ({
 })
 
 export const applyPendingPlanEntry = (
-  cfg: AgentConfig,
+  cfg: PlanLifecycleConfig,
   pending: PendingPlanEntry | null,
   hookPromptPending: HookPromptInject[],
 ): void => {

@@ -23,8 +23,8 @@ import {
 import type {
   HITLTier,
   SandboxViolationReason,
+  ShellToolContext,
   Tool,
-  ToolContext,
   ToolEvent,
   ToolFailure,
   ToolResult,
@@ -163,7 +163,7 @@ const tierForProfile = (profile: OsSandboxProfile | undefined): HITLTier => {
  *  (`ctx.readFileState` absent) or the command is not a write-marker. NO-THROW:
  *  a file that vanished/became unreadable mid-run is skipped, never thrown. */
 const buildPostBashStaleReminder = async (
-  ctx: ToolContext,
+  ctx: ShellToolContext,
   command: string,
 ): Promise<string | null> => {
   const state = ctx.readFileState
@@ -445,7 +445,7 @@ const buildBackgroundPlaceholderResult = (
  *  registry. */
 const resolveBgDetach = (
   input: Input,
-  ctx: ToolContext,
+  ctx: ShellToolContext,
 ): {
   readonly bgSeam?: { readonly seam: BackgroundDetachSeam; readonly timeoutMs: number }
   readonly deadlineMs: number
@@ -558,7 +558,7 @@ const maybeEscalate = async (
  *  / not-a-block ⇒ returns the ORIGINAL result with no note (byte-identical). */
 const runShellWithEscalation = async (
   cmd: string,
-  ctx: ToolContext,
+  ctx: ShellToolContext,
   input: Input,
   perCallPort: ReturnType<ReturnType<typeof getBashPerCallSandboxFactory>> | undefined,
   // ticket-11 — the EFFECTIVE spawn cwd: the active worktree dir when a session
@@ -662,7 +662,7 @@ export const makeBashTool = (opts: MakeBashToolOpts = {}): Tool<Input> => {
  *  that want sandbox-driven tier semantics use `makeBashTool({...})`. */
 export const bashTool: Tool<Input> = makeBashTool()
 
-async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+async function* bashExecute(input: Input, ctx: ShellToolContext): AsyncIterable<ToolEvent> {
   const cmd = input.command
   // ADR-0295 — `mode` is optional on the wire; default to "write" here so
   // the rest of execute can switch on a CLOSED 2-arm enum.
@@ -778,7 +778,7 @@ async function* bashExecute(input: Input, ctx: ToolContext): AsyncIterable<ToolE
   // We pass the combined `body` (stdout+stderr) so the single regex sweep sees
   // both git's progress (stderr) and its `[branch sha]` / `Pull request #N`
   // (stdout) lines.
-  maybeEmitPassiveVcs(cmd, body, rr.exitCode, ctx as ToolContext & PassiveVcsHookCtx)
+  maybeEmitPassiveVcs(cmd, body, rr.exitCode, ctx as PassiveVcsHookCtx)
 
   // RFC jun-6 — when the command was a sandbox block, append the model-facing
   // escalation note (e.g. "blocked by sandbox; re-ran unsandboxed" / "escalation

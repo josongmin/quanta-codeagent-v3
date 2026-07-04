@@ -163,84 +163,53 @@ export interface SessionFeatures {
  * block into the accumulated `SessionFeatures` and skips the slot when the
  * builder returned `undefined`. None of the above ⇒ `{ extraTools: [] }`.
  */
+/** The contiguous run of DEFAULT-OFF, pure-tool tier-1 blocks (each returns just
+ *  `Tool[]` — no lifecycle side output). Held as a data table so adding one of
+ *  these is a single entry, NOT another `extraTools.push(...)` line (OCP, mirrors
+ *  `CONDITIONAL_REGISTRATIONS` in `@/tool`). ORDER IS LOAD-BEARING — it is the
+ *  tool-menu order presented to the model, so entries stay in their historical
+ *  sequence and this array runs at the SAME position the pushes did.
+ *
+ *  Only THIS contiguous pure-tool span lives here; the lifecycle builders
+ *  (`subagent`/`skill`/`workingState`/`browser`/`appshot`, which also emit
+ *  registries/dispose handles) and the small worktree..userInput tail that is
+ *  interleaved with them stay inline below — keeping them out avoids a
+ *  half-covered "two registration systems" tangle. */
+const SESSION_FEATURE_BLOCKS: readonly ((config: AgentConfig) => readonly Tool[])[] = [
+  // ADR-0083 — branch_search (Tool | undefined ⇒ normalized to a 0/1 array).
+  (c) => {
+    const t = buildBranchSearchBlock(c)
+    return t !== undefined ? [t] : []
+  },
+  buildShadowBlock, // ADR-0119 — shadow store tools
+  buildForkSessionBlock, // ADR-0201 — fork_session
+  buildShadowVerifyBlock, // ADR-0400 — shadow_verify
+  buildSubagentBgBlock, // ADR-0140 — background-subagent tools
+  buildSubagentBatchBlock, // RFC-02/ADR-0436 — spawn_batch
+  buildSubagentIntrospectBlock, // RFC-04/ADR-0437 — list_agents + followup_task
+  buildSubagentMailboxBlock, // ADR-0416 — subagent_send_message
+  buildTeamBlock, // RFC jun-6 — team_create / team_delete
+  buildDelegateBlock, // ADR-0393 — delegate
+  buildAdvisorBlock, // ADR-0257 — advisor consult
+  buildComposeAuthoringBlock, // ADR-0016 — git_compose_commit / _pr (read-only)
+  buildPrShipBlock, // ADR-0460 — gh_pr_open (write; separate from the sealed compose block)
+  buildObjectiveBlock, // ADR-0398 — objective_set / _update / _get
+  buildBudgetBlock, // ADR-0136 — budget_status
+  (c) => buildCheckSecretsBlock(c.secretCheckToolEnabled), // ADR-0412 — check_secrets (env-gated)
+  buildWebSearchBlock, // ADR-0127/0148 — web_search
+  buildPromptCacheBlock, // ADR-0182 — prompt_cache_status
+  buildSideAgentBlock, // N1 — background side-agent management tools
+]
+
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
   const extraTools: Tool[] = []
 
-  // --- Subagent block -----------------------------------------------------
+  // --- Subagent block (lifecycle: extraTools + taskRegistry + cleanup) ----
   const subagent = buildSubagentBlock(config)
   if (subagent !== undefined) extraTools.push(...subagent.extraTools)
 
-  // --- Branch search block (ADR-0083) -------------------------------------
-  const branchTool = buildBranchSearchBlock(config)
-  if (branchTool !== undefined) extraTools.push(branchTool)
-
-  // ADR-0119 — shadow store tools (default-OFF: empty array when shadowOdb absent)
-  extraTools.push(...buildShadowBlock(config))
-
-  // ADR-0201 — fork_session tool (default-OFF: empty array when fork absent)
-  extraTools.push(...buildForkSessionBlock(config))
-
-  // ADR-0400 — shadow_verify tool (default-OFF: empty when shadowVerify absent)
-  extraTools.push(...buildShadowVerifyBlock(config))
-
-  // ADR-0140 — background-subagent tools (default-OFF: empty when subagentBackground absent)
-  extraTools.push(...buildSubagentBgBlock(config))
-
-  // RFC-02 / ADR-0436 — spawn_batch fan-out tool
-  // (default-OFF: empty unless config.subagent.enableBatchSpawn === true)
-  extraTools.push(...buildSubagentBatchBlock(config))
-
-  // RFC-04 / ADR-0437 — list_agents + followup_task introspection tools
-  // (default-OFF: empty unless enableIntrospect/enableFollowup gates are set)
-  extraTools.push(...buildSubagentIntrospectBlock(config))
-
-  // ADR-0416 — subagent_send_message tool (default-OFF: empty when subagentMailbox absent)
-  extraTools.push(...buildSubagentMailboxBlock(config))
-
-  // RFC jun-6 (DELTA #2) — team_create / team_delete lifecycle tools (default-OFF:
-  // empty when teamRegistry absent; wired only when QUANTA_TEAM_PEER_MSG is on)
-  extraTools.push(...buildTeamBlock(config))
-
-  // ADR-0393 — synchronous delegate tool (default-OFF: empty when delegation absent)
-  extraTools.push(...buildDelegateBlock(config))
-
-  // ADR-0257 — advisor consult tool (default-OFF: empty when advisor slot absent)
-  extraTools.push(...buildAdvisorBlock(config))
-
-  // ADR-0016 (compose seam) — git_compose_commit / git_compose_pr authoring
-  // tools (default-OFF: empty array when composeAuthoring slot absent).
-  extraTools.push(...buildComposeAuthoringBlock(config))
-
-  // ADR-0460 (PR-ship seam) — gh_pr_open (author + `gh pr create` in one step).
-  // Reuses the SAME composeAuthoring.authorLLM slot but is a WRITE tool, so it
-  // rides a SEPARATE builder from the sealed read-only compose block (write
-  // safety is enforced by the permission layer + plan-mode dispatch gate).
-  extraTools.push(...buildPrShipBlock(config))
-
-  // ADR-0398 — objective_set / objective_update / objective_get tools
-  // (default-OFF: empty array when objective port absent)
-  extraTools.push(...buildObjectiveBlock(config))
-
-  // ADR-0136 — budget_status tool (default-OFF: empty array when budgetLedger absent)
-  extraTools.push(...buildBudgetBlock(config))
-
-  // ADR-0412 — check_secrets LLM tool (default-OFF: env-gated on
-  // QUANTA_SECRET_CHECK_TOOL=on; legacy callers byte-identical).
-  extraTools.push(...buildCheckSecretsBlock(config.secretCheckToolEnabled))
-
-  // ADR-0127 (Part 3) / ADR-0148 — web_search tool (default-OFF: empty when
-  // `webSearch.provider` absent; concrete provider is operator-owned).
-  extraTools.push(...buildWebSearchBlock(config))
-
-  // ADR-0182 — prompt_cache_status tool (default-OFF: empty when no
-  // `promptCacheObserver` is wired). The SAME observer instance is fed by the
-  // loop's `emitUsage`, so the tool snapshots real per-session cache buckets.
-  extraTools.push(...buildPromptCacheBlock(config))
-
-  // N1 — background side-agent management tools (default-OFF: empty when no
-  // `sideAgentDaemons` registry is wired). The tools manage the SAME resident
-  // daemon registry the host's supervise loop runs.
-  extraTools.push(...buildSideAgentBlock(config))
+  // --- Contiguous default-OFF pure-tool blocks (data-driven, order-preserved) --
+  for (const block of SESSION_FEATURE_BLOCKS) extraTools.push(...block(config))
 
   // --- Skill block (ADR-0011) ---------------------------------------------
   const skill = await buildSkillBlock(config)

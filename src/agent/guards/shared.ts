@@ -13,7 +13,11 @@ import { makeSyntheticUserMessage } from "../synthetic-user"
 
 /** A short out-of-band user message used to steer the model on a same-turn
  *  retry (output-limit / malformed-tool / empty). Kept terse on purpose.
- *  Verbatim move from `loop.ts:719-722` — byte-identical shape. */
+ *  Behaviorally the move from `loop.ts:719-722`, but NOT byte-identical: it now
+ *  routes through {@link makeSyntheticUserMessage}, which stamps a
+ *  `quanta:synthetic-user:` id so `isSyntheticUserMessage` can exclude it from
+ *  memory-recall / prompt anchoring. The id carries a `randomUUID` suffix — the
+ *  bench-resume canonicalizer masks it (`<SYN>`) so cassette hashes stay stable. */
 export const metaUser = (text: string): Message => ({
   ...makeSyntheticUserMessage("same-turn-recovery", [{ type: "text", text }]),
 })

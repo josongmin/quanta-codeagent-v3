@@ -1,4 +1,4 @@
-import { isRefusalStopReason, type assembleFromEvents } from "@/llm"
+import { type assembleFromEvents, isRefusalStopReason } from "@/llm"
 import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "./refusal-fallback"
 import { classifyLLMError } from "./retry"
 import type { StopAction, StopReasonPolicy } from "./stop-reason"
@@ -233,82 +233,94 @@ export const decideOnStreamError = (
 /** Pure policy for a successfully assembled turn: decide whether it is final,
  *  needs a SAME-TURN nudge+retry (output-limit / malformed / empty), or should
  *  proceed to tool dispatch. Mutates `rec` only when it elects a nudge/retry. */
+// ── Per-case recovery deciders (assembled turn) ──────────────────────────────
+// Each maps ONE terminal-shape to a {@link RecoveryAction}, or `null` to defer to
+// the next case. Extracted from the former inline `decideOnAssembled` switch so a
+// new recovery case is a discrete, unit-testable function + one orchestrator line
+// — NOT a deeper `if`-ladder. Order + the two fallthrough side effects
+// (max_tokens truncation marker, empty-streak reset) stay in the orchestrator
+// because they run on the NON-returning path, so byte-identical behavior is kept.
+
+/** ADR-0076 Gap-1: provider refusal / content-policy stop → typed `refusal`
+ *  (visible-text rationale). Terminal — same-turn budgets are NOT consumed. */
+const decideRefusal = (stopReason: string, message: AssembledMessage): RecoveryAction | null =>
+  stopReason === "refusal" ? { do: "refusal", rationale: extractRefusalRationale(message) } : null
+
+/** `max_tokens` truncation with continuation budget remaining → a "continue where
+ *  you left off" nudge (consumes one continuation slot). `null` when not
+ *  `max_tokens` OR the budget is spent (the orchestrator then marks + seals). */
+const decideMaxTokensNudge = (stopReason: string, rec: RecoveryState): RecoveryAction | null => {
+  if (stopReason !== "max_tokens" || rec.outputContinues >= MAX_OUTPUT_CONTINUES) return null
+  rec.outputContinues += 1
+  return {
+    do: "nudge",
+    keepMessage: true,
+    text: "Output limit hit — continue exactly where you left off, do not repeat.",
+    reason: "nudge",
+  }
+}
+
+/** `stop_reason:"tool_use"` but NO valid tool_use block assembled → a "re-issue the
+ *  tool call" nudge while the malformed budget lasts, else a DISTINCT non-success
+ *  `error` terminal (a fumbled tool call must not read as `completed`). */
+const decideMalformed = (
+  stopReason: string,
+  hasTools: boolean,
+  rec: RecoveryState,
+): RecoveryAction | null => {
+  if (stopReason !== "tool_use" || hasTools) return null
+  if (rec.malformedRetries < MAX_MALFORMED_RETRIES) {
+    rec.malformedRetries += 1
+    return {
+      do: "nudge",
+      keepMessage: true,
+      text:
+        "Your previous tool call was malformed/incomplete. Re-issue it as a " +
+        "single valid tool call.",
+      reason: "malformed",
+    }
+  }
+  return { do: "error", reason: MALFORMED_TOOL_USE_REASON }
+}
+
+/** A no-tool empty turn → an "empty response" nudge while the empty-streak budget
+ *  lasts, else a DISTINCT non-success `error` terminal (a produced-NOTHING stall
+ *  must not read as `completed`). Consumes/extends the streak counter. */
+const decideEmpty = (
+  message: AssembledMessage,
+  hasTools: boolean,
+  rec: RecoveryState,
+): RecoveryAction | null => {
+  if (hasTools || !isEmptyTurn(message)) return null
+  if (rec.consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES)
+    return { do: "error", reason: EMPTY_TURN_EXHAUSTED_REASON }
+  rec.consecutiveEmpties += 1
+  return {
+    do: "nudge",
+    keepMessage: true,
+    text: "You returned an empty response. Continue the task or give your final answer.",
+    reason: "empty",
+  }
+}
+
 export const decideOnAssembled = (
   stopReason: string,
   message: AssembledMessage,
   rec: RecoveryState,
 ): RecoveryAction => {
-  // ADR-0076 Gap-1 SOTA++: provider refusal / abnormal non-tool stop. The
-  // model stopped with an explicit refusal (Anthropic `refusal`, OpenAI
-  // content-policy stop). Surface as a typed `refusal` action with the
-  // visible-text rationale extracted from the assistant message — the loop
-  // routes this to a `refusal` StopReason + `AgentOutcome.refusal{rationale}`
-  // instead of collapsing into a generic `error`. Terminal: same-turn budgets
-  // are NOT consumed (no retry slot, no nudge — the refusal IS the turn).
-  // `pause_turn` (server-tool resume) is intentionally NOT handled: we ship
-  // no server-side tools, so it cannot be emitted.
-  if (stopReason === "refusal") {
-    return { do: "refusal", rationale: extractRefusalRationale(message) }
-  }
-  if (stopReason === "max_tokens") {
-    if (rec.outputContinues < MAX_OUTPUT_CONTINUES) {
-      rec.outputContinues += 1
-      return {
-        do: "nudge",
-        keepMessage: true,
-        text: "Output limit hit — continue exactly where you left off, do not repeat.",
-        reason: "nudge",
-      }
-    }
-    // Loop-control fix (jun-25): the continuation budget is spent and the turn
-    // is STILL `max_tokens`-truncated. The text that follows would otherwise
-    // be sealed as a clean `completed`, making a mid-sentence answer read as a
-    // finished one. Append a VISIBLE truncation marker to the surfaced text
-    // (idempotent — never doubled) so downstream + the user can tell the output
-    // was cut. We do NOT change the stop itself; the turn still seals via the
-    // text-completion path below.
-    markTruncatedOutput(message)
-  }
+  const refusal = decideRefusal(stopReason, message)
+  if (refusal) return refusal
+  const maxTokensNudge = decideMaxTokensNudge(stopReason, rec)
+  if (maxTokensNudge) return maxTokensNudge
+  // Reaching here on `max_tokens` means the continuation budget is SPENT: append a
+  // visible (idempotent) truncation marker so a mid-sentence answer doesn't seal as
+  // a clean `completed` — the turn still seals via the text-completion path below.
+  if (stopReason === "max_tokens") markTruncatedOutput(message)
   const hasTools = message.content.some((b) => b.type === "tool_use")
-  if (stopReason === "tool_use" && !hasTools) {
-    if (rec.malformedRetries < MAX_MALFORMED_RETRIES) {
-      rec.malformedRetries += 1
-      return {
-        do: "nudge",
-        keepMessage: true,
-        text:
-          "Your previous tool call was malformed/incomplete. Re-issue it as a " +
-          "single valid tool call.",
-        reason: "malformed",
-      }
-    }
-    // Loop-control fix (jun-25): the model INTENDED to act (`stop_reason
-    // ="tool_use"`) but never assembled a valid tool_use block, and the
-    // same-turn malformed-retry budget is spent. Sealing this as `completed`
-    // (success) misclassifies a fumbled tool call. Seal as a DISTINCT
-    // NON-SUCCESS `error`-class terminal — the outer resolver maps `error`
-    // → reason `"error"` and `classifyErrorReason` buckets the tagged reason,
-    // mirroring every other non-success terminal.
-    return { do: "error", reason: MALFORMED_TOOL_USE_REASON }
-  }
-  if (!hasTools && isEmptyTurn(message)) {
-    // Loop-control fix (jul-3): the same-turn empty-retry budget is spent and the
-    // model is STILL returning empty turns. Sealing this as `completed` (success)
-    // reads a produced-NOTHING stall as a clean finish. Seal as a DISTINCT
-    // NON-SUCCESS `error`-class terminal — the outer resolver maps `error` →
-    // reason `"error"`, `classifyErrorReason` buckets the tagged reason
-    // (MODEL_EMPTY_EXHAUSTED), and the error path still appends the assembled
-    // message (recovery-executor C5 invariant), mirroring the malformed seal.
-    if (rec.consecutiveEmpties >= MAX_CONSECUTIVE_EMPTIES)
-      return { do: "error", reason: EMPTY_TURN_EXHAUSTED_REASON }
-    rec.consecutiveEmpties += 1
-    return {
-      do: "nudge",
-      keepMessage: true,
-      text: "You returned an empty response. Continue the task or give your final answer.",
-      reason: "empty",
-    }
-  }
+  const malformed = decideMalformed(stopReason, hasTools, rec)
+  if (malformed) return malformed
+  const empty = decideEmpty(message, hasTools, rec)
+  if (empty) return empty
   rec.consecutiveEmpties = 0
   return { do: "proceed" }
 }

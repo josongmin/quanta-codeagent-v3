@@ -32,8 +32,8 @@
  * still applies on top of the masking.
  */
 
-import { defaultHashRequest } from "@/llm/replay"
 import type { MatchPolicy } from "@/llm/replay"
+import { defaultHashRequest } from "@/llm/replay"
 import type { Message, StreamInput, SystemBlock } from "@/llm/types"
 
 /**
@@ -91,8 +91,22 @@ export function canonicalizeForHash(text: string): string {
   return out
 }
 
+/** A synthetic-user message (same-turn recovery / mention-injection / focus-chain)
+ *  carries a `quanta:synthetic-user:<kind>:<randomUUID>` id stamped by the agent
+ *  loop (`@/agent/synthetic-user`). The `<kind>` is semantic (keep it), but the
+ *  trailing `randomUUID` is per-run volatile — masking it keeps the record/replay
+ *  hash stable when a recovery turn is in the transcript. Prefix inlined (not
+ *  imported) to keep this bench module free of an `@/agent` edge, mirroring the
+ *  inline `VOLATILE_MASKS` convention above. */
+const SYNTHETIC_USER_ID_PREFIX = "quanta:synthetic-user:"
+const canonicalizeMessageId = (id: string | undefined): string | undefined =>
+  typeof id === "string" && id.startsWith(SYNTHETIC_USER_ID_PREFIX)
+    ? id.replace(/:[0-9a-f-]{36}$/i, ":<SYN>")
+    : id
+
 /** Canonicalize the text of one message's content blocks, leaving every other
- *  field (roles, tool ids, schemas, non-text block kinds) byte-intact. */
+ *  field (roles, tool ids, schemas, non-text block kinds) byte-intact — EXCEPT a
+ *  volatile synthetic-user message id, whose random suffix is masked. */
 function canonicalizeMessage(m: Message): Message {
   const content = m.content.map((block) => {
     if (block.type === "text") return { ...block, text: canonicalizeForHash(block.text) }
@@ -104,13 +118,13 @@ function canonicalizeMessage(m: Message): Message {
     }
     return block
   })
-  return { ...m, content }
+  const mid = "id" in m ? (m as { id?: string }).id : undefined
+  const canonId = canonicalizeMessageId(mid)
+  return { ...m, content, ...(canonId !== undefined ? { id: canonId } : {}) }
 }
 
 /** Canonicalize the system prompt (string or block list). */
-function canonicalizeSystem(
-  system: StreamInput["system"],
-): StreamInput["system"] {
+function canonicalizeSystem(system: StreamInput["system"]): StreamInput["system"] {
   if (system === undefined) return undefined
   if (typeof system === "string") return canonicalizeForHash(system)
   return system.map((b: SystemBlock) => ({ ...b, text: canonicalizeForHash(b.text) }))

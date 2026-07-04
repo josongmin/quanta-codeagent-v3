@@ -1,8 +1,8 @@
 import type { ToolUseBlock } from "@/llm"
 import { isTestFilePath } from "@/shared"
-import type { GuardDecision } from "../dispatch-guard"
-import { guardStructuredReason } from "../deny-reason-wire"
+import { stackDenyReason } from "../deny-reason-wire"
 import { DedupGate } from "../dispatch-dedup"
+import type { GuardDecision } from "../dispatch-guard"
 import { deny } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import { decideLocalizePhase, MUTATING_TOOL_NAMES } from "../localize-phase-guard"
@@ -13,6 +13,18 @@ const guardContent = (decision: Exclude<GuardDecision, { kind: "allow" }>): stri
   decision.kind === "ask"
     ? `Dispatch guard requested confirmation: ${decision.reason}`
     : `${decision.hardDeny ? "Action blocked by dispatch guard (hard): " : "Action blocked by dispatch guard: "}${decision.reason}`
+
+/** The `dispatch-guard`-specific structured deny reason. Lives HERE (its sole
+ *  consumer) rather than in the domain-neutral `deny-reason-wire` leaf, so that
+ *  leaf never has to import the `GuardDecision` shape (keeps it a pure builder). */
+const guardStructuredReason = (decision: Exclude<GuardDecision, { kind: "allow" }>) =>
+  decision.kind === "ask"
+    ? stackDenyReason("dispatch guard requested confirmation")
+    : stackDenyReason(
+        decision.hardDeny
+          ? "dispatch guard blocked (security boundary)"
+          : "dispatch guard blocked (recoverable posture)",
+      )
 
 /** T3 — pre-flight dedup gate consult. Returns a synthetic non-error
  *  tool_result {@link DispatchResult} to short-circuit a thrashing call, or
