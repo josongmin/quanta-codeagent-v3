@@ -68,6 +68,48 @@ typed `LocalizationPass` (candidates{files,symbols,tests,callPaths} / excluded{r
 selectedPatchTargets{rationale}). Consumes P1 EvidenceCards; connects to semantica-codegraph. The engine
 narrows/links/finds-contradictions; the model still selects. Biggest of the converge phases; sequence last.
 
+## P6 — SWE hidden-grader pack (prompt mode-conflict resolution)
+
+**Problem (jul-5, measured — `docs/evidence/jul-5-prompt/`).** The real SWE-bench run prompt carries
+CONTRADICTORY orders in the same turn:
+- system body (`prompt-body.ts`): Operating-principles:37 *"fixing a defect → first reproduce the
+  failure"*; Completion-bar:386 *"finish only when … verified AND the relevant tests pass"*.
+- user injection (`runner/batch/eval/driver/prompt-directives.ts`): *"Do NOT run the test suite,
+  pytest, or tox … an unverified edit is fine — the grader decides"* + no-test-edit / smallest-diff /
+  no-destructive-git.
+
+Policy stack ranks system(L1) > user(L8), so the model is pulled toward "reproduce + verified-only
+completion" and either (a) runs the forbidden pytest or (b) can't satisfy "verified" and ends
+ambiguously. Confirmed against the captured prompt (`00-main-coding-agent-turn1.txt` L468–485 vs
+`11-render-swe-batch.txt` L37/L386).
+
+**Root cause.** The jul-4 3-axis refactor slot-ified only the VERIFY axis; the task/repro/completion
+rules stayed scattered across L1 body (hardcoded) + L8 user (injected), so they never align. This is
+the unfinished half of the 3-axis work, not a new defect.
+
+**Fix.**
+1. Promote the hidden-grader Hard-rules from the user injection (prompt-directives) UP into a task pack
+   (prompt-rules, L2 system) — the SWE profile's `rulePack` slot already exists.
+2. Make the body's repro-required + completion-bar rules MODE-GATED so the hidden-grader pack overrides
+   them (the pack wins) instead of contradicting.
+3. Rewrite the pack in Do-not / Do / Stop-when / Final-format command-order form (prose → operations
+   order — less wobble in an execution prompt).
+4. DEFAULT-OFF knob (e.g. `QUANTA_SWE_HIDDEN_GRADER`), byte-identical when off, A/B on the SWE smoke
+   (baseline exists: `psf__requests-5414`, verify-OFF, FAIL/unresolved, 12 turns, $0.56).
+
+**Pack shape (draft).** 5 blocks — Mode / Do not / Do / Stop when / Final format.
+- Do not: source-only (no test/doc/lockfile edits), no pytest/tox/dep-install, no destructive git, no
+  "verified/passing/done" claim unless a permitted check actually ran, no exploring past a coherent patch.
+- Do: read source before edit, confirm owner by strongest evidence (LSP *if available/reliable*, else
+  source reads + narrow grep — do NOT block a small patch just because LSP is down), infer exact
+  behavior (signature/message/return/edge), smallest isolated source change, match style.
+- Stop when: minimal source patch applied.
+- Final format: Changed / Behavior / Verification = "not run — hidden-grader forbids local tests".
+
+**Hellgate.** RED e2e (pack ON ⇒ conflicting body rules suppressed + Do/Do-not rendered; OFF ⇒
+byte-identical 5-target hash); no-leak (grader/hidden-test mentions stay in the forbid-clause, never a
+"read the hidden test" directive); knob-inventory register; SWE smoke A/B vs the recorded baseline.
+
 ## Guards (apply to all phases)
 
 - DEFAULT-OFF + byte-identical when off (5-target prompt hash for prompt-touching phases).
