@@ -12,8 +12,12 @@
  * the edge and feed this layer already-extracted candidates. DEFAULT-OFF: inert until wired.
  */
 
-/** What a candidate points at. */
-export type CandidateKind = "file" | "symbol" | "test" | "call_path"
+/** What a candidate points at. Derived from the runtime list so the type and the
+ *  validation Set never drift. */
+const CANDIDATE_KIND_LIST = ["file", "symbol", "test", "call_path"] as const
+export type CandidateKind = (typeof CANDIDATE_KIND_LIST)[number]
+/** Runtime membership check — guards the candidate-generation edge (external adapters). */
+export const CANDIDATE_KINDS: ReadonlySet<CandidateKind> = new Set(CANDIDATE_KIND_LIST)
 
 /** A localization candidate — a place the fix might live, with its supporting evidence. */
 export interface Candidate {
@@ -23,7 +27,10 @@ export interface Candidate {
   readonly ref: string
   /** 0..1 — relative belief, NOT a probability. The model still decides. */
   readonly confidence: number
-  /** Ids of {@link EvidenceCard}s that put this candidate on the board. */
+  /** Ids of `EvidenceCard`s (format `ev-XXXX`) that put this candidate on the board.
+   *  NOT validated cross-slice here — a pure layer has no ledger access — so the WIRING
+   *  must ensure each ref exists in the EvidenceLedger before use (audit R2, intentional
+   *  deferral; the same holds for evidenceRefs on Exclusion / PatchTarget). */
   readonly evidenceRefs: readonly string[]
 }
 

@@ -12,6 +12,22 @@ import type { EvidenceCardInput } from "./types"
 
 const CLAIM_MAX = 200
 
+/** Trim + bound the claim WITHOUT splitting a surrogate pair — a naive `slice(0,200)`
+ *  can cut a multibyte char (한글/emoji) in half and emit a broken UTF-16 unit that
+ *  corrupts tokenization downstream (adversarial-audit R1). Drops a dangling high
+ *  surrogate at the boundary. */
+const clampClaim = (s: string): string => {
+  const t = s.trim()
+  if (t.length <= CLAIM_MAX) return t
+  let cut = t.slice(0, CLAIM_MAX)
+  // Drop a dangling high surrogate (broken char), THEN any trailing combining marks
+  // (U+0300… etc.) that would otherwise attach to nothing and corrupt tokenization
+  // (adversarial-audit R2). `\p{M}` covers all Unicode mark categories.
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1)
+  while (cut.length > 0 && /\p{M}$/u.test(cut)) cut = cut.slice(0, -1)
+  return cut
+}
+
 /** Minimal shape the test-failure parser yields (file:line + a tier + the raw line).
  *  Deliberately NOT importing `FailureFrame` from `@/tool` — the wiring maps it to this. */
 export interface ParsedTestFrame {
@@ -29,11 +45,13 @@ export const ingestTestFrames = (
   turn: number,
 ): EvidenceCardInput[] =>
   frames
-    .filter((f) => f.tier !== "vendored")
+    // Drop vendored frames (localization noise) AND frames with an empty text/file —
+    // the ledger rejects empty claims, so filtering here keeps ingest total (no throw).
+    .filter((f) => f.tier !== "vendored" && f.text.trim().length > 0 && f.file.trim().length > 0)
     .map((f) => ({
       turn,
       source: "test_output" as const,
-      claim: f.text.trim().slice(0, CLAIM_MAX),
+      claim: clampClaim(f.text),
       confidence: "parsed" as const,
       location: {
         file: f.file,
@@ -52,7 +70,7 @@ export const ingestRawObservation = (
 ): EvidenceCardInput => ({
   turn,
   source,
-  claim: claim.trim().slice(0, CLAIM_MAX),
+  claim: clampClaim(claim),
   confidence: "raw",
   revealHandle,
 })

@@ -24,20 +24,30 @@
  */
 
 /** Where an evidence card came from. Each source has (or will have) an ingest adapter
- *  that turns raw tool output of that kind into cards. */
-export type EvidenceSource =
-  | "test_output"
-  | "lsp_diagnostic"
-  | "build_log"
-  | "grep"
-  | "code_graph"
-  | "git_diff"
-  | "runtime_trace"
+ *  that turns raw tool output of that kind into cards. Derived from the runtime list
+ *  below so the type and the validation Set never drift (single source of truth). */
+const EVIDENCE_SOURCE_LIST = [
+  "test_output",
+  "lsp_diagnostic",
+  "build_log",
+  "grep",
+  "code_graph",
+  "git_diff",
+  "runtime_trace",
+] as const
+export type EvidenceSource = (typeof EVIDENCE_SOURCE_LIST)[number]
+/** Runtime membership check for `EvidenceSource` — guards the ingest edge where an
+ *  external parser could cast an out-of-union string. */
+export const EVIDENCE_SOURCES: ReadonlySet<EvidenceSource> = new Set(EVIDENCE_SOURCE_LIST)
 
 /** How trustworthy the card's claim is. `raw` = surfaced verbatim, unparsed;
  *  `parsed` = structured by an adapter (file:line extracted); `verified` = confirmed
  *  by a subsequent observation (e.g. a reproduction rerun). */
-export type EvidenceConfidence = "raw" | "parsed" | "verified"
+const EVIDENCE_CONFIDENCE_LIST = ["raw", "parsed", "verified"] as const
+export type EvidenceConfidence = (typeof EVIDENCE_CONFIDENCE_LIST)[number]
+export const EVIDENCE_CONFIDENCES: ReadonlySet<EvidenceConfidence> = new Set(
+  EVIDENCE_CONFIDENCE_LIST,
+)
 
 /** Optional code location a card points at. All fields optional — a build-log card
  *  may have only a file, a grep card a file+line, a code-graph card a symbol. */
