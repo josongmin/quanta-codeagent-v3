@@ -135,8 +135,8 @@ describe("scoreStaticOwnerShadow — dedup + purity", () => {
     expect(Object.keys(s).sort()).toEqual(
       ["goldCount", "precision", "predictedCount", "recall", "truePositives"].sort(),
     )
-    expect((s as Record<string, unknown>).confidence).toBeUndefined()
-    expect((s as Record<string, unknown>).threshold).toBeUndefined() // no baked-in gate
+    expect((s as unknown as Record<string, unknown>).confidence).toBeUndefined()
+    expect((s as unknown as Record<string, unknown>).threshold).toBeUndefined() // no baked-in gate
   })
 })
 

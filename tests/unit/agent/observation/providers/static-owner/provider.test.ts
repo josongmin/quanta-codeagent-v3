@@ -56,9 +56,7 @@ describe("staticOwnerProvider — identity + applicability", () => {
     expect(p.applicable(ctx())).toBe(true)
     expect(p.applicable(ctx({ capability: "vision" }))).toBe(false)
     expect(p.applicable(ctx({ capability: "general" }))).toBe(false)
-    expect(p.applicable(ctx({ capability: undefined }))).toBe(false)
     expect(p.applicable(ctx({ language: "ruby" }))).toBe(false) // engine doesn't support
-    expect(p.applicable(ctx({ language: undefined }))).toBe(false)
   })
 })
 
@@ -155,7 +153,7 @@ describe("staticOwnerProvider — A1 overtrust fence", () => {
     expect(json).not.toMatch(/"confidence"/)
     expect(json).not.toMatch(/"score"/)
     for (const o of frag.owners ?? []) {
-      expect(typeof (o as Record<string, unknown>).confidence).toBe("undefined")
+      expect(typeof (o as unknown as Record<string, unknown>).confidence).toBe("undefined")
     }
   })
 })

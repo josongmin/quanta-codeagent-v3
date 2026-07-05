@@ -90,8 +90,8 @@ describe("static-owner engine seam — fake reference", () => {
       expect(f.basis.length).toBeGreaterThan(0)
       expect(EVIDENCE_STRENGTHS.has(f.strength)).toBe(true)
       // Structural: the fact type must not carry a numeric confidence field.
-      expect((f as Record<string, unknown>).confidence).toBeUndefined()
-      expect((f as Record<string, unknown>).score).toBeUndefined()
+      expect((f as unknown as Record<string, unknown>).confidence).toBeUndefined()
+      expect((f as unknown as Record<string, unknown>).score).toBeUndefined()
     }
   })
 
