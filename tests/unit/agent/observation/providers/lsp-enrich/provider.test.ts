@@ -51,7 +51,10 @@ const sym = (
 const fakeProvider = (files: Record<string, FakeFile>): LspNavProvider => ({
   unavailableReason: () => "fake: no server",
   open: async (filePath): Promise<LspNavSession | null> => {
-    const cfg = files[filePath]
+    // The provider now opens ABSOLUTE paths (join(cwd, file)); the fixtures are
+    // keyed by the repo-relative candidate. Strip the "/repo/" test cwd so lookups
+    // still resolve — this also proves the provider resolves rel→abs before open.
+    const cfg = files[filePath] ?? files[filePath.replace(/^\/repo\//, "")]
     if (cfg === undefined || cfg.symbols === null) return null
     const session: LspNavSession = {
       documentSymbol: async () => {

@@ -28,6 +28,7 @@
  *     production provider is the ONLY default (no env reads here).
  */
 
+import { isAbsolute, join } from "node:path"
 import { lspNavProvider } from "@/agent/lsp-bridge"
 import type { LspNavProvider, LspNavSession, NavHover, NavSymbolInfo, NavSymbolKind } from "@/tool"
 import type { ContractHint, EvidenceStrength, ObservationFragment, OwnerHint } from "../../fragment"
@@ -85,13 +86,17 @@ const symbolToOwner = (file: string, s: NavSymbolInfo): OwnerHint => {
  *  owners it could confirm and any parseable contract. */
 const harvestFile = async (
   file: string,
+  absFile: string,
   session: LspNavSession,
   remaining: number,
 ): Promise<{ owners: OwnerHint[]; contracts: ContractHint[] }> => {
   const owners: OwnerHint[] = []
   const contracts: ContractHint[] = []
   try {
-    const symbols = await session.documentSymbol(file).catch(() => null)
+    // Session ops use the ABSOLUTE path the server was opened on; the emitted
+    // owner.file stays REPO-RELATIVE (`file`) so it dedups with the agentless
+    // owners and renders as a repo path, not a sandbox-absolute one.
+    const symbols = await session.documentSymbol(absFile).catch(() => null)
     if (symbols === null) return { owners, contracts }
     // Promote only named symbols of an owner-worthy kind — a nameless symbol
     // would yield a data-free `evidence` ("lsp: function ") and an empty
@@ -103,7 +108,7 @@ const harvestFile = async (
       // Best-effort contract: hover at the symbol's selection position.
       if (contracts.length === 0) {
         const pos = s.selectionRange.start
-        const hover = await session.hover(file, pos).catch(() => null)
+        const hover = await session.hover(absFile, pos).catch(() => null)
         const sig = hover !== null ? signatureLine(hover) : null
         if (sig !== null) contracts.push({ signature: sig, adjacent: `${file}:${s.name}` })
       }
@@ -128,9 +133,12 @@ const harvestAll = async (
   const contracts: ContractHint[] = []
   for (const file of files) {
     if (owners.length >= budget.maxOwners || Date.now() >= deadline) break
-    const session = await provider.open(file, cwd).catch(() => null)
+    // The language server needs an ABSOLUTE path (candidate files arrive repo-relative);
+    // opening a relative path is the observed ENOENT that silently no-op'd the provider.
+    const absFile = isAbsolute(file) ? file : join(cwd, file)
+    const session = await provider.open(absFile, cwd).catch(() => null)
     if (session === null) continue
-    const got = await harvestFile(file, session, budget.maxOwners - owners.length)
+    const got = await harvestFile(file, absFile, session, budget.maxOwners - owners.length)
     owners.push(...got.owners)
     if (contracts.length === 0 && got.contracts.length > 0) contracts.push(...got.contracts)
   }
