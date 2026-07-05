@@ -89,14 +89,16 @@ const harvestFile = async (
   absFile: string,
   session: LspNavSession,
   remaining: number,
+  signal: AbortSignal,
 ): Promise<{ owners: OwnerHint[]; contracts: ContractHint[] }> => {
   const owners: OwnerHint[] = []
   const contracts: ContractHint[] = []
   try {
     // Session ops use the ABSOLUTE path the server was opened on; the emitted
     // owner.file stays REPO-RELATIVE (`file`) so it dedups with the agentless
-    // owners and renders as a repo path, not a sandbox-absolute one.
-    const symbols = await session.documentSymbol(absFile).catch(() => null)
+    // owners and renders as a repo path, not a sandbox-absolute one. `signal`
+    // keeps documentSymbol/hover under the same maxMillis bound as the open.
+    const symbols = await session.documentSymbol(absFile, signal).catch(() => null)
     if (symbols === null) return { owners, contracts }
     // Promote only named symbols of an owner-worthy kind — a nameless symbol
     // would yield a data-free `evidence` ("lsp: function ") and an empty
@@ -108,7 +110,7 @@ const harvestFile = async (
       // Best-effort contract: hover at the symbol's selection position.
       if (contracts.length === 0) {
         const pos = s.selectionRange.start
-        const hover = await session.hover(absFile, pos).catch(() => null)
+        const hover = await session.hover(absFile, pos, signal).catch(() => null)
         const sig = hover !== null ? signatureLine(hover) : null
         if (sig !== null) contracts.push({ signature: sig, adjacent: `${file}:${s.name}` })
       }
@@ -127,18 +129,21 @@ const harvestAll = async (
   cwd: string,
   provider: LspNavProvider,
   budget: ProviderBudget,
+  signal: AbortSignal,
 ): Promise<{ owners: OwnerHint[]; contracts: ContractHint[] }> => {
   const deadline = Date.now() + budget.maxMillis
   const owners: OwnerHint[] = []
   const contracts: ContractHint[] = []
   for (const file of files) {
-    if (owners.length >= budget.maxOwners || Date.now() >= deadline) break
+    if (signal.aborted || owners.length >= budget.maxOwners || Date.now() >= deadline) break
     // The language server needs an ABSOLUTE path (candidate files arrive repo-relative);
     // opening a relative path is the observed ENOENT that silently no-op'd the provider.
     const absFile = isAbsolute(file) ? file : join(cwd, file)
-    const session = await provider.open(absFile, cwd).catch(() => null)
+    // `signal` (fires at maxMillis) bounds the open itself — otherwise a not-ready
+    // server blocks up to the 90s ready-timeout regardless of the deadline check above.
+    const session = await provider.open(absFile, cwd, signal).catch(() => null)
     if (session === null) continue
-    const got = await harvestFile(file, absFile, session, budget.maxOwners - owners.length)
+    const got = await harvestFile(file, absFile, session, budget.maxOwners - owners.length, signal)
     owners.push(...got.owners)
     if (contracts.length === 0 && got.contracts.length > 0) contracts.push(...got.contracts)
   }
@@ -173,7 +178,21 @@ export const lspEnrichProvider = (
       if (!Number.isFinite(budget.maxOwners) || budget.maxOwners < 1) return null
       if (!Number.isFinite(budget.maxMillis) || budget.maxMillis <= 0) return null
 
-      const { owners, contracts } = await harvestAll(files, cwd, provider, budget)
+      // HARD time bound (self-audit fix): `open()` alone can block up to the LSP
+      // warm-pool ready-timeout (90s) when a server is slow/never-readies. The loop's
+      // deadline check does NOT bound the in-flight call, so without an abort signal a
+      // default-ON provider would add up to 90s×files to EVERY bench instance. Fire one
+      // controller at `maxMillis` and thread its signal into every LSP call — a slow
+      // server is abandoned within budget (⇒ null), never waited out.
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), budget.maxMillis)
+      let owners: OwnerHint[]
+      let contracts: ContractHint[]
+      try {
+        ;({ owners, contracts } = await harvestAll(files, cwd, provider, budget, controller.signal))
+      } finally {
+        clearTimeout(timer)
+      }
 
       // null-not-noise / graceful-degradation: nothing harvested ⇒ null (the
       // pipeline then falls back to agentless-only). An empty-owners fragment

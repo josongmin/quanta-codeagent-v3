@@ -369,3 +369,39 @@ describe("lspEnrichProvider — budget + never-throws", () => {
     expect(frag).toBeNull()
   })
 })
+
+describe("lspEnrichProvider — HARD time bound (self-audit: open must not block on ready-timeout)", () => {
+  it("a never-ready open is abandoned within maxMillis (not the 90s ready-timeout)", async () => {
+    // open() settles only when the abort signal fires — models the LSP warm-pool,
+    // where a not-ready pyright blocks open() up to 90s. Without threading the
+    // maxMillis abort signal, the provider would wait that out per file.
+    const hangingProvider: LspNavProvider = {
+      unavailableReason: () => "fake: hangs until aborted",
+      open: (_filePath: string, _cwd: string, signal?: AbortSignal) =>
+        new Promise<LspNavSession | null>((resolve) => {
+          if (signal?.aborted === true) resolve(null)
+          else signal?.addEventListener("abort", () => resolve(null))
+        }),
+    }
+    const p = lspEnrichProvider(["a.py", "b.py", "c.py"], "/repo", hangingProvider)
+    const start = Date.now()
+    const frag = await p.produce(ctx(), { maxMillis: 30, maxOwners: 8 })
+    // RED before the fix: open() ignored the signal ⇒ this hung to the 90s timeout.
+    expect(frag).toBeNull() // graceful null ⇒ falls back to agentless
+    expect(Date.now() - start).toBeLessThan(2_000)
+  })
+
+  it("passes an AbortSignal into open (the bound is wired, not incidental)", async () => {
+    let sawSignal = false
+    const spyProvider: LspNavProvider = {
+      unavailableReason: () => "fake",
+      open: (_filePath: string, _cwd: string, signal?: AbortSignal) => {
+        sawSignal = signal !== undefined
+        return Promise.resolve<LspNavSession | null>(null)
+      },
+    }
+    const p = lspEnrichProvider(["a.py"], "/repo", spyProvider)
+    await p.produce(ctx(), { maxMillis: 50, maxOwners: 8 })
+    expect(sawSignal).toBe(true)
+  })
+})
