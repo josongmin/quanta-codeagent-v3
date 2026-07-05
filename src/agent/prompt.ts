@@ -21,6 +21,7 @@ import {
   BODY_AFTER_PROMPT_PACK,
   BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
   BODY_REPRO_REQUIRED,
+  BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
   BRIEF_NOTICE,
   INTRO_LINES,
 } from "./prompt-body"
@@ -114,10 +115,14 @@ export const buildSystemPrompt = (
     // byte-identical to the pre-ADR base prompt; `friendly`/`pragmatic`
     // splice the persona body + a blank-line separator before Policy stack.
     ...personaLines(opts?.persona ?? "default"),
-    // grader-only (P6): suppress the body's reproduce-required rule — it contradicts the
-    // hidden-grader "no local tests / no repro" posture. Any other strategy ⇒ verbatim.
+    // grader-only (P6): suppress BOTH body rules that contradict the hidden-grader "no local
+    // tests / no repro" posture — the reproduce-required rule AND the "run the project's tests"
+    // verify discipline (audit R3). Any other strategy ⇒ verbatim (byte-identical).
     ...(opts?.verifyStrategy === "grader-only"
-      ? withoutLines(BODY_AFTER_PERSONA, BODY_REPRO_REQUIRED)
+      ? withoutLines(BODY_AFTER_PERSONA, [
+          ...BODY_REPRO_REQUIRED,
+          ...BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
+        ])
       : BODY_AFTER_PERSONA),
     // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
     // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).

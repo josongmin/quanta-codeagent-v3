@@ -141,9 +141,11 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     // baseline carries the two conflicting body rules …
     expect(off).toContain("first reproduce the failure with the smallest")
     expect(off).toContain("Completion bar: finish only when")
-    // … grader-only removes both and adds the single coherent grader rule
+    // … grader-only removes ALL conflicting body rules and adds the single coherent grader rule
     expect(on).not.toContain("first reproduce the failure with the smallest")
     expect(on).not.toContain("Completion bar: finish only when")
+    // R3 audit: the "run the project's tests" verify discipline also contradicts grader-only
+    expect(on).not.toContain("After changing code, verify it: run the project")
     expect(on).toContain("[R-GRADER-ONLY]")
     // opposite of reproduce-first — they never coexist
     expect(on).not.toContain("[R-REPRODUCE-FIRST]")

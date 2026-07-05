@@ -48,6 +48,20 @@ export const BODY_REPRO_REQUIRED: readonly string[] = [
   "  refactor, or a question, this does not apply — do not manufacture a repro.",
 ]
 
+/** The "verify after changing code" discipline. Its "run the project's tests" half
+ *  contradicts grader-only ("do NOT run local tests"), so grader-only suppresses this block
+ *  too (audit R3). The honesty half (never claim success on an unverified change) is covered
+ *  by GRADER_ONLY_RULE's "verification: not run" + no-overclaim clause, so nothing is lost.
+ *  Spliced back into OPERATING_PRINCIPLES below ⇒ default assembly byte-identical. */
+export const BODY_VERIFY_AFTER_EDIT_DISCIPLINE: readonly string[] = [
+  "- After changing code, verify it: run the project's tests, type checker, or",
+  "  the most specific relevant command via `bash`. Be precise about what you",
+  "  verified versus what you assumed — distinguish what you confirmed (ran a",
+  "  command, read a file) from what you believe but did not check. Never",
+  "  assert an assumption as a fact, and never claim success on an unverified",
+  "  change.",
+]
+
 export const BODY_AFTER_PERSONA_OPERATING_PRINCIPLES: readonly string[] = [
   "Operating principles:",
   "- Bias to action. You have the tools to investigate and act; do that instead",
@@ -61,12 +75,7 @@ export const BODY_AFTER_PERSONA_OPERATING_PRINCIPLES: readonly string[] = [
   "  refactor code you were not asked to touch.",
   "- Match the surrounding code: its style, naming, libraries, and patterns.",
   "  Check imports/manifests before assuming a dependency is available.",
-  "- After changing code, verify it: run the project's tests, type checker, or",
-  "  the most specific relevant command via `bash`. Be precise about what you",
-  "  verified versus what you assumed — distinguish what you confirmed (ran a",
-  "  command, read a file) from what you believe but did not check. Never",
-  "  assert an assumption as a fact, and never claim success on an unverified",
-  "  change.",
+  ...BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
   "- When a tool fails, read the error and diagnose the actual cause before",
   "  retrying. Do not repeat the same failing call or thrash blindly.",
   ...BODY_REPRO_REQUIRED,
