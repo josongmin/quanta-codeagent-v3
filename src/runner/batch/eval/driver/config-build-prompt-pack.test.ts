@@ -137,20 +137,59 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
   const sysFor = (i: Instance): string =>
     String(buildConfig(i, makeDeps(), process.cwd(), new AbortController().signal, nullStream).system)
 
-  test("ON + SWE ⇒ [R-GRADER-ONLY] present AND body repro/completion suppressed (conflict fix WIRING)", () => {
+  test("ON + SWE ⇒ [R-GRADER-ONLY] present AND every local-verification body rule suppressed (conflict fix WIRING)", () => {
     withGrader("1", () => {
       const sys = sysFor(makeSwebenchInstance(process.cwd()))
       expect(sys).toContain("[R-GRADER-ONLY]")
       expect(sys).not.toContain("first reproduce the failure with the smallest")
       expect(sys).not.toContain("Completion bar: finish only when")
+      // R4 self-audit: the Verification report block also presupposes a local run — suppressed too
+      expect(sys).not.toContain("Verification report (use when you ran or considered running verification)")
       expect(sys).not.toContain(REPRODUCE_FIRST_MARKER) // opposite posture never coexists
     })
   })
-  test("OFF ⇒ no grader rule; body repro/completion intact (byte-identical default)", () => {
+  test("OFF ⇒ no grader rule; body repro/completion/verification-report intact (byte-identical default)", () => {
     withGrader(undefined, () => {
       const sys = sysFor(makeSwebenchInstance(process.cwd()))
       expect(sys).not.toContain("[R-GRADER-ONLY]")
       expect(sys).toContain("Completion bar: finish only when")
+      expect(sys).toContain("Verification report (use when you ran or considered running verification)")
+    })
+  })
+
+  // R5 self-audit: coherence across BOTH prompt surfaces. grader-only is a system-side
+  // posture, but the USER directive carries its own verify posture via `inLoopExecMode`
+  // (default FULL ⇒ "run the tests, an unverified edit is the #1 cause of failure"). If
+  // the two diverge, grader-only ON re-creates the L1↔L8 conflict on the user surface.
+  // The fix: grader-only DRIVES the user directive to NOEXEC. These assertions pin that
+  // the two surfaces agree — and the mutually-exclusive posture strings make it non-vacuous.
+  const userMsgFor = (i: Instance): string =>
+    String(
+      (
+        buildConfig(i, makeDeps(), process.cwd(), new AbortController().signal, nullStream)
+          .messages[0]?.content[0] as { text?: string } | undefined
+      )?.text ?? "",
+    )
+  const FULL_VERIFY_DEMAND = "an unverified edit is the #1 cause of failure"
+  const NOEXEC_POSTURE = "Do NOT run the test suite, pytest, or tox yourself"
+  const NOEXEC_UNVERIFIED_OK = "an unverified edit is fine — the grader decides"
+
+  test("R5 coherence: grader-only ON ⇒ USER directive flips to NOEXEC (agrees with the system rule)", () => {
+    withGrader("1", () => {
+      const user = userMsgFor(makeSwebenchInstance(process.cwd()))
+      // the user surface now MATCHES grader-only: no local run, unverified is fine
+      expect(user).toContain(NOEXEC_POSTURE)
+      expect(user).toContain(NOEXEC_UNVERIFIED_OK)
+      // and the conflicting FULL "you MUST run the tests" demand is GONE from the user msg
+      expect(user).not.toContain(FULL_VERIFY_DEMAND)
+    })
+  })
+  test("R5 control: grader-only OFF ⇒ USER directive keeps the default FULL verify demand (non-vacuous + byte-identical)", () => {
+    withGrader(undefined, () => {
+      const user = userMsgFor(makeSwebenchInstance(process.cwd()))
+      // proves the flip above is load-bearing: default really does demand verification
+      expect(user).toContain(FULL_VERIFY_DEMAND)
+      expect(user).not.toContain(NOEXEC_UNVERIFIED_OK)
     })
   })
 })

@@ -227,10 +227,20 @@ const buildPromptText = (args: {
   readonly chaMultisiteSteer?: string
 }): string => {
   const leanPrompt = gateOn(process.env, "QUANTA_BENCH_LEAN_PROMPT")
+  // P6 coherence (self-audit R5): grader-only is the SYSTEM-side expression of the
+  // "hidden grader owns verification — no local test run" posture. The USER directive
+  // carries the same posture via `inLoopExecMode`, but the two knobs are independent:
+  // `inLoopExecMode` defaults to FULL ("verify by running the repo's tests"), which
+  // directly CONTRADICTS a grader-only system prompt ("Do NOT run pytest") and would
+  // re-create the exact L1↔L8 conflict P6 exists to remove — just on the user surface.
+  // So grader-only DRIVES the directive to NOEXEC (`"off"`), collapsing both surfaces to
+  // one coherent posture from a single decision. OFF ⇒ untouched ⇒ byte-identical.
+  const graderOnly =
+    args.instance.swebench !== undefined && gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER")
   const baseText = composeBaseText(
     buildBaseProblemText(args.instance, args.sandbox),
     Boolean(args.instance.swebench),
-    args.opt.inLoopExecMode,
+    graderOnly ? "off" : args.opt.inLoopExecMode,
     buildDirectiveSteers(args.instance, args.opt),
     leanPrompt,
   )

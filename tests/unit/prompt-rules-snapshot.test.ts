@@ -22,9 +22,13 @@ describe("system prompt — T5a env-mod / stop-when-blocked rules", () => {
   })
 
   test("R-ENV pins the install-prohibition phrasing", () => {
-    // The specific verb pattern bench parses against; rewording it loses the
-    // model-obedient match in tracked failure cases.
-    expect(prompt).toContain("Do NOT attempt to install dependencies")
+    // R-ENV is a model-obedient short-circuit (the model READS it) — nothing
+    // machine-parses this string (verified: no consumer of "install dependencies"
+    // outside the OWNED rule + SWE dataset text). The exact wording is pinned by
+    // the 3-axis byte-identical baseline; this asserts the load-bearing phrase
+    // survives. Synced jul-5 after the jul-3 strategy audit (ea787de4a) reworded
+    // "attempt to install dependencies" → "install third-party dependencies …".
+    expect(prompt).toContain("Do NOT install third-party dependencies")
     expect(lower).toContain("your patch is the deliverable")
   })
 

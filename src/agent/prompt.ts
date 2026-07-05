@@ -20,6 +20,7 @@ import {
   BODY_AFTER_PERSONA,
   BODY_AFTER_PROMPT_PACK,
   BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
+  BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
   BODY_REPRO_REQUIRED,
   BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
   BRIEF_NOTICE,
@@ -136,10 +137,15 @@ export const buildSystemPrompt = (
     // (3) VERIFY axis — how the surface confirms its own work (reproduce-first / verify-after-edit).
     //     Absent/undefined ⇒ NO lines, byte-identical. Each rides a default-OFF entry-point knob.
     ...renderVerifyStrategy(opts?.verifyStrategy),
-    // grader-only (P6): suppress the completion-bar (it demands "the relevant tests pass",
-    // which grader-only forbids running). Any other strategy ⇒ verbatim (byte-identical).
+    // grader-only (P6): suppress BOTH prompt-pack rules that presuppose local verification —
+    // the completion-bar ("the relevant tests pass") AND the Verification report block ("rail:
+    // pytest / verdict / exit code", audit R4). grader-only supplies its own honest Final format
+    // ("verification: not run — hidden-grader mode"). Any other strategy ⇒ verbatim (byte-identical).
     ...(opts?.verifyStrategy === "grader-only"
-      ? withoutLines(BODY_AFTER_PROMPT_PACK, BODY_AFTER_PROMPT_PACK_COMPLETION_BAR)
+      ? withoutLines(BODY_AFTER_PROMPT_PACK, [
+          ...BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
+          ...BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
+        ])
       : BODY_AFTER_PROMPT_PACK),
   ].join("\n")
 

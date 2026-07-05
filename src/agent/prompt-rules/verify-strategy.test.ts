@@ -135,19 +135,67 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     expect(text.toLowerCase()).toContain("tox")
     expect(text.toLowerCase()).toContain("verified / passing / green / done")
   })
-  test("buildSystemPrompt: grader-only SUPPRESSES body repro+completion, adds rule (conflict fix)", () => {
+  test("buildSystemPrompt: grader-only SUPPRESSES every local-verification body rule, adds rule (conflict fix)", () => {
     const off = buildSystemPrompt("/w", { promptPack: "batch" })
     const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })
-    // baseline carries the two conflicting body rules …
+    // baseline carries the conflicting body rules …
     expect(off).toContain("first reproduce the failure with the smallest")
     expect(off).toContain("Completion bar: finish only when")
+    expect(off).toContain("Verification report (use when you ran or considered running verification)")
     // … grader-only removes ALL conflicting body rules and adds the single coherent grader rule
     expect(on).not.toContain("first reproduce the failure with the smallest")
     expect(on).not.toContain("Completion bar: finish only when")
     // R3 audit: the "run the project's tests" verify discipline also contradicts grader-only
     expect(on).not.toContain("After changing code, verify it: run the project")
+    // R4 self-audit: the structured Verification report block (rail: pytest / verdict / exit)
+    // presupposes a local run grader-only forbids — it too must be suppressed. RED before the
+    // fix (only completion-bar was dropped, the report block survived and re-injected the conflict).
+    expect(on).not.toContain("Verification report (use when you ran or considered running verification)")
+    expect(on).not.toContain("rail:      <e.g. bun test, pytest, tsc --noEmit, manual repro>")
     expect(on).toContain("[R-GRADER-ONLY]")
+    // but grader-only supplies its OWN honest final-verification format (not a silent drop)
+    expect(on).toContain("verification: not run")
     // opposite of reproduce-first — they never coexist
     expect(on).not.toContain("[R-REPRODUCE-FIRST]")
+  })
+
+  // Self-audit render-scan, codified: EVERY line that DEMANDS the model run local
+  // verification (or claim green after running) must be absent from the grader-only
+  // prompt — except inside R-GRADER-ONLY's own "Do NOT" forbid clause. The reproduce-first
+  // control proves the scan is LIVE (non-vacuous): the same demands are present there.
+  const HARD_CONFLICT_DEMANDS: readonly RegExp[] = [
+    /reproduce the failure with the smallest/i,
+    /Completion bar: finish only when/i,
+    /Verification report \(use when you ran/i,
+    /rail:\s+<e\.g\. bun test/i,
+    /the relevant tests pass/i,
+    /After changing code, verify it: run the project/i,
+  ]
+  const hardConflictLines = (prompt: string): string[] => {
+    const lines = prompt.split("\n")
+    const gStart = lines.findIndex((l) => l.includes("[R-GRADER-ONLY]"))
+    let gEnd = gStart
+    if (gStart >= 0)
+      for (let i = gStart; i < lines.length && i < gStart + 25; i++)
+        if (lines[i]?.includes("Do not overclaim")) {
+          gEnd = i
+          break
+        }
+    const inGrader = (i: number): boolean => gStart >= 0 && i >= gStart && i <= gEnd
+    return lines.filter(
+      (l, i) => !inGrader(i) && HARD_CONFLICT_DEMANDS.some((rx) => rx.test(l)),
+    )
+  }
+  test("scenario: grader-only prompt has ZERO local-verification DEMANDS outside the grader rule", () => {
+    const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })
+    expect(hardConflictLines(on)).toEqual([])
+  })
+  test("scenario CONTROL: reproduce-first KEEPS those demands (proves the scan is non-vacuous)", () => {
+    // If this ever drops to 0, the scan above is measuring nothing — this control fails LOUD.
+    const control = buildSystemPrompt("/w", {
+      promptPack: "batch",
+      verifyStrategy: "reproduce-first",
+    })
+    expect(hardConflictLines(control).length).toBeGreaterThanOrEqual(5)
   })
 })

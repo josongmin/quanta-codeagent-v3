@@ -152,6 +152,13 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_BENCH_HOST_MONITOR", "bench-only: host-resource sampler kill-switch (apps/bench/run-main, jun-28 fork-storm OOM diagnostic), read at the bench composition root, not a shipped /config knob"],
   ["QUANTA_BENCH_MAX_COST_USD", "bench-only: per-run cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob"],
   ["QUANTA_BENCH_MAX_COST_PER_TURN_USD", "bench-only: per-turn cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob"],
+  // VERIFY-AXIS strategy toggles (jul-4 3-axis prompt refactor + jul-5 P6): the SWE
+  // verifyStrategy is picked in config-build.sweVerify via gateOn at the eval-driver
+  // composition root (raw env, NOT the typed runtime-config registry that their sibling
+  // QUANTA_BENCH_IN_LOOP_EXEC uses). Default-OFF, measure-first A/B levers — not shipped
+  // user /config knobs. Same class as the cost/health/host-monitor bench toggles above.
+  ["QUANTA_BENCH_REPRODUCE_FIRST", "bench-only: verify-axis reproduce-first strategy toggle (config-build.sweVerify), read via gateOn at the eval-driver composition root, default-OFF measure-first A/B — not a shipped /config knob"],
+  ["QUANTA_SWE_HIDDEN_GRADER", "bench-only: verify-axis grader-only strategy toggle + user-directive NOEXEC coherence (config-build.sweVerify + buildPromptText, P6 SWE hidden-grader pack), read via gateOn at the eval-driver composition root, default-OFF measure-first A/B — not a shipped /config knob"],
   ["QUANTA_SWEBENCH_DATASET_FAMILY", "bench-only: SWE-bench dataset family selector verified|pro|live (apps/bench/dataset-family), read at the bench composition root, not a shipped /config knob"],
   ["QUANTA_SWEBENCH_PIP_SPEC", "bench-only: SWE-bench remote box pip spec override (apps/bench/remote/box-session/ec2-lifecycle), read at the bench composition root, not a shipped /config knob"],
   ["QUANTA_SWEBENCH_PRO_HARNESS_DIR", "bench-only: SWE-bench-Pro ScaleAI grading harness dir (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob"],
