@@ -92,7 +92,7 @@ describe("ADR-0198 identity mode-variant — HELLGATE", () => {
     expect(idxIdentity).toBeLessThan(idxPersona)
     expect(idxPersona).toBeLessThan(idxPolicy)
     // Identity rides AFTER the INTRO opening lines.
-    const idxIntro = out.indexOf("You are Quanta, an autonomous coding agent")
+    const idxIntro = out.indexOf("You are Quanta, a principal software engineer")
     expect(idxIntro).toBeGreaterThan(-1)
     expect(idxIntro).toBeLessThan(idxIdentity)
   })

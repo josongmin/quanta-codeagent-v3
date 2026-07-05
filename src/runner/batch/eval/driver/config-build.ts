@@ -580,6 +580,12 @@ export const buildConfig = (
     : instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
       ? ("reproduce-first" as const)
       : ("none" as const)
+  // Render STYLE axis (jul-6, default-OFF `QUANTA_BENCH_PROMPT_SECTIONED`): promote the
+  // base prompt's section headers to Codex-style `##` markdown. Prompt-text-only; measure
+  // on SWE f2p before flipping any default. Absent ⇒ `flat` ⇒ byte-identical.
+  const promptStyle = gateOn(process.env, "QUANTA_BENCH_PROMPT_SECTIONED")
+    ? ("sectioned" as const)
+    : ("flat" as const)
   const promptSurfaceProfile: AgentConfig["promptSurfaceProfile"] = {
     envPosture: "frozen",
     promptPack: "batch",
@@ -613,7 +619,7 @@ export const buildConfig = (
       sweVerify === "none"
         ? SWE_SURFACE_PROFILE
         : { ...SWE_SURFACE_PROFILE, verifyStrategy: sweVerify },
-      { cwd: sandbox },
+      { cwd: sandbox, promptStyle },
     ),
     promptSurfaceProfile,
     cwd: sandbox,

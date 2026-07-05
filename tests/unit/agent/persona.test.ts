@@ -22,17 +22,18 @@ import {
 
 describe("ALL_PERSONAS + isPersonaKind", () => {
   test("ALL_PERSONAS contains exactly the closed enum", () => {
-    expect([...ALL_PERSONAS].sort()).toEqual(["default", "friendly", "pragmatic"])
+    expect([...ALL_PERSONAS].sort()).toEqual(["codex", "default", "friendly", "pragmatic"])
   })
 
-  test("ALL_PERSONAS iteration order is stable (default → friendly → pragmatic)", () => {
-    expect(ALL_PERSONAS).toEqual(["default", "friendly", "pragmatic"])
+  test("ALL_PERSONAS iteration order is stable (default → friendly → pragmatic → codex)", () => {
+    expect(ALL_PERSONAS).toEqual(["default", "friendly", "pragmatic", "codex"])
   })
 
   test("isPersonaKind narrows valid strings", () => {
     expect(isPersonaKind("default")).toBe(true)
     expect(isPersonaKind("friendly")).toBe(true)
     expect(isPersonaKind("pragmatic")).toBe(true)
+    expect(isPersonaKind("codex")).toBe(true)
   })
 
   test("isPersonaKind rejects unknown strings (case-sensitive)", () => {
@@ -75,16 +76,30 @@ describe("renderPersonaBlock", () => {
     expect(body).toContain("Clarity > Pragmatism > Rigor")
   })
 
+  test("codex body carries the Codex personality + preamble discipline", () => {
+    const body = renderPersonaBlock("codex")
+    expect(body.length).toBeGreaterThan(0)
+    expect(body).toContain("Persona: Codex-style teammate")
+    expect(body).toContain("concise, direct, and friendly")
+    expect(body).toContain("team morale")
+    // The signature Codex mechanic quanta lacked before this register.
+    expect(body).toContain("Preamble discipline")
+    expect(body).toContain("before a group of tool calls")
+  })
+
   test("non-default bodies END WITH a guardrail line (ADR-0068 §Rationale)", () => {
     expect(renderPersonaBlock("friendly")).toMatch(
       /Warmth never overrides the honesty rail below\.$/,
     )
     expect(renderPersonaBlock("pragmatic")).toMatch(/Clarity > Pragmatism > Rigor\.$/)
+    // codex re-binds warmth/momentum to the honesty rail, same as friendly.
+    expect(renderPersonaBlock("codex")).toMatch(/never announce work you did not do\.$/)
   })
 
   test("renderPersonaBlock output has NO trailing newline (caller controls join)", () => {
     expect(renderPersonaBlock("friendly").endsWith("\n")).toBe(false)
     expect(renderPersonaBlock("pragmatic").endsWith("\n")).toBe(false)
+    expect(renderPersonaBlock("codex").endsWith("\n")).toBe(false)
   })
 })
 
@@ -107,6 +122,13 @@ describe("personaLines spread helper", () => {
     expect(lines[1]).toBe("")
   })
 
+  test("codex ⇒ [body, ''] (same shape)", () => {
+    const lines = personaLines("codex")
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toContain("Codex-style teammate")
+    expect(lines[1]).toBe("")
+  })
+
   test("personaLines result is byte-stable across calls (same shape, same content)", () => {
     expect(personaLines("friendly")).toEqual(personaLines("friendly"))
     expect(personaLines("pragmatic")).toEqual(personaLines("pragmatic"))
@@ -123,6 +145,7 @@ describe("resolvePersona (env → PersonaKind)", () => {
     expect(resolvePersona({ QUANTA_PERSONA: "default" })).toBe("default")
     expect(resolvePersona({ QUANTA_PERSONA: "friendly" })).toBe("friendly")
     expect(resolvePersona({ QUANTA_PERSONA: "pragmatic" })).toBe("pragmatic")
+    expect(resolvePersona({ QUANTA_PERSONA: "codex" })).toBe("codex")
   })
 
   test("unknown value ⇒ PersonaInvalidError throw (no silent fallback)", () => {

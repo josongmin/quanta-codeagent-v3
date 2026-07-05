@@ -5,8 +5,8 @@ import {
   type PromptActiveLeversSnapshot,
   type PromptHookContextMode,
   type PromptPolicySnapshot,
-  type PromptSurfaceProfileSnapshot,
   type PromptSummaryPrefix,
+  type PromptSurfaceProfileSnapshot,
   runtimeConfig,
 } from "@/shared"
 import { renderTaskBudgetBlock, type TaskBudget } from "./budget/task-budget"
@@ -18,10 +18,14 @@ import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
 import {
   BODY_AFTER_PERSONA,
+  BODY_AFTER_PERSONA_DURABLE_STATE,
   BODY_AFTER_PROMPT_PACK,
   BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
   BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
+  BODY_AFTER_PROMPT_PACK_VISION_PRIORITY,
+  BODY_ANALYSIS_MULTISTEP,
   BODY_REPRO_REQUIRED,
+  BODY_VALIDATION_BUDGET,
   BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
   BRIEF_NOTICE,
   INTRO_LINES,
@@ -39,6 +43,7 @@ import {
   fourSectionPreset,
   validateSectionsCacheBudget,
 } from "./prompt-sections"
+import { applyPromptStyle, type PromptStyle } from "./prompt-style"
 import { type RepoRules, renderRepoRulesBlock } from "./repo-rules"
 import { makeSyntheticUserMessage } from "./synthetic-user"
 import { embedUntrusted, escapeBoundary } from "./untrusted"
@@ -66,13 +71,35 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  *  `os-sandbox` / any runtime enforcement — it only swaps the rendered rule list. */
 export type EnvironmentPosture = "frozen" | "owned"
 
-/** Drop a set of body lines — used when a verify strategy OVERRIDES a hardcoded body
- *  rule (grader-only suppresses the reproduce-required + completion-bar blocks that would
- *  otherwise contradict "do not run local tests"). Absent strategy never calls this, so the
- *  default assembly stays byte-identical. */
-const withoutLines = (arr: readonly string[], drop: readonly string[]): readonly string[] => {
-  const dropSet = new Set(drop)
-  return arr.filter((line) => !dropSet.has(line))
+/** Remove each `block` (a CONTIGUOUS line subsequence) from `arr` — used when a verify
+ *  strategy OVERRIDES hardcoded body blocks (grader-only suppresses the local-verification
+ *  rules that contradict "do not run local tests"). Unlike a line-set filter, this removes
+ *  each block AS A UNIT: a block's own trailing blank goes with it, but unrelated blank
+ *  separators elsewhere are preserved (the prior line-set `withoutLines` collapsed EVERY
+ *  blank whenever a dropped block contained one — jul-6 blank-collapse fix). Only the first
+ *  occurrence of each block is removed. Absent strategy never calls this ⇒ byte-identical. */
+const withoutBlocks = (
+  arr: readonly string[],
+  blocks: readonly (readonly string[])[],
+): readonly string[] => {
+  let out = [...arr]
+  for (const block of blocks) {
+    if (block.length === 0) continue
+    for (let i = 0; i + block.length <= out.length; i++) {
+      let match = true
+      for (let j = 0; j < block.length; j++) {
+        if (out[i + j] !== block[j]) {
+          match = false
+          break
+        }
+      }
+      if (match) {
+        out = [...out.slice(0, i), ...out.slice(i + block.length)]
+        break
+      }
+    }
+  }
+  return out
 }
 
 /** The static system prompt. No per-turn data — keep it byte-stable so the
@@ -103,51 +130,70 @@ export const buildSystemPrompt = (
      *  axis; each rides a default-OFF knob at its entry point (measure-first). TB's
      *  self-test is its own knob + machinery, not this slot. Prompt-text-only. */
     verifyStrategy?: VerifyStrategy
+    /** Render STYLE axis (jul-6, FOURTH slot) — `flat` (default / absent) renders
+     *  the byte-identical prose-label prompt; `sectioned` promotes the base prompt's
+     *  section headers to Codex-style `##` markdown. Prompt-text-only, applied as a
+     *  final pure pass over the assembled string (see {@link applyPromptStyle}); the
+     *  varying axes (persona / posture / pack / verify) all compose underneath it.
+     *  Rides its own default-OFF knob (measure-first before flipping any default). */
+    promptStyle?: PromptStyle
   },
 ): string =>
-  [
-    ...INTRO_LINES,
-    // ADR-0198 identity slot — rides BETWEEN the intro and persona so the
-    // model sees "who you are in this mode" before "how you talk". When the
-    // caller supplies no identity (or an empty array) we emit nothing and
-    // the rendered prompt is byte-identical to the pre-ADR base prompt.
-    ...identityLines(opts?.identity),
-    // ADR-0068 persona slot — `default` (or absent) ⇒ no extra lines,
-    // byte-identical to the pre-ADR base prompt; `friendly`/`pragmatic`
-    // splice the persona body + a blank-line separator before Policy stack.
-    ...personaLines(opts?.persona ?? "default"),
-    // grader-only (P6): suppress BOTH body rules that contradict the hidden-grader "no local
-    // tests / no repro" posture — the reproduce-required rule AND the "run the project's tests"
-    // verify discipline (audit R3). Any other strategy ⇒ verbatim (byte-identical).
-    ...(opts?.verifyStrategy === "grader-only"
-      ? withoutLines(BODY_AFTER_PERSONA, [
-          ...BODY_REPRO_REQUIRED,
-          ...BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
-        ])
-      : BODY_AFTER_PERSONA),
-    // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
-    // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).
-    // (1) POSTURE-BASE axis — honesty rails + env guardrails, selected by envPosture:
-    //     `owned` = install-permitted (OWNED_RULES); `frozen`/absent = SWE guardrails (CORE_RULES).
-    //     Byte-identical to the pre-change path: owned == OWNED, frozen == CORE.
-    ...renderPostureBase(opts?.envPosture ?? "frozen"),
-    // (2) TASK axis — mode-specific narrowing (batch/headless/ci-bot); interactive/ide/absent = none.
-    //     A frozen pack == CORE + task rules == the prior `renderPackByMode(pack)` byte-for-byte.
-    ...renderTaskRules(opts?.promptPack ?? "interactive"),
-    // (3) VERIFY axis — how the surface confirms its own work (reproduce-first / verify-after-edit).
-    //     Absent/undefined ⇒ NO lines, byte-identical. Each rides a default-OFF entry-point knob.
-    ...renderVerifyStrategy(opts?.verifyStrategy),
-    // grader-only (P6): suppress BOTH prompt-pack rules that presuppose local verification —
-    // the completion-bar ("the relevant tests pass") AND the Verification report block ("rail:
-    // pytest / verdict / exit code", audit R4). grader-only supplies its own honest Final format
-    // ("verification: not run — hidden-grader mode"). Any other strategy ⇒ verbatim (byte-identical).
-    ...(opts?.verifyStrategy === "grader-only"
-      ? withoutLines(BODY_AFTER_PROMPT_PACK, [
-          ...BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
-          ...BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
-        ])
-      : BODY_AFTER_PROMPT_PACK),
-  ].join("\n")
+  applyPromptStyle(
+    [
+      ...INTRO_LINES,
+      // ADR-0198 identity slot — rides BETWEEN the intro and persona so the
+      // model sees "who you are in this mode" before "how you talk". When the
+      // caller supplies no identity (or an empty array) we emit nothing and
+      // the rendered prompt is byte-identical to the pre-ADR base prompt.
+      ...identityLines(opts?.identity),
+      // ADR-0068 persona slot — `default` (or absent) ⇒ no extra lines,
+      // byte-identical to the pre-ADR base prompt; `friendly`/`pragmatic`
+      // splice the persona body + a blank-line separator before Policy stack.
+      ...personaLines(opts?.persona ?? "default"),
+      // grader-only (P6 + jul-6 residual-conflict audit): suppress every body block that
+      // contradicts the hidden-grader "no local tests / no repro / no doc writes" posture —
+      // reproduce-required + "run the project's tests" verify discipline (R3) + validation-budget
+      // ("run build/test before done") + the "expect 5–10 tool calls" analysis framing (induces
+      // over-exploration) + durable-state ("write artifacts to docs/", which grader-only forbids
+      // editing). Any other strategy ⇒ verbatim (byte-identical).
+      ...(opts?.verifyStrategy === "grader-only"
+        ? withoutBlocks(BODY_AFTER_PERSONA, [
+            BODY_REPRO_REQUIRED,
+            BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
+            BODY_VALIDATION_BUDGET,
+            BODY_ANALYSIS_MULTISTEP,
+            BODY_AFTER_PERSONA_DURABLE_STATE,
+          ])
+        : BODY_AFTER_PERSONA),
+      // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
+      // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).
+      // (1) POSTURE-BASE axis — honesty rails + env guardrails, selected by envPosture:
+      //     `owned` = install-permitted (OWNED_RULES); `frozen`/absent = SWE guardrails (CORE_RULES).
+      //     Byte-identical to the pre-change path: owned == OWNED, frozen == CORE.
+      ...renderPostureBase(opts?.envPosture ?? "frozen"),
+      // (2) TASK axis — mode-specific narrowing (batch/headless/ci-bot); interactive/ide/absent = none.
+      //     A frozen pack == CORE + task rules == the prior `renderPackByMode(pack)` byte-for-byte.
+      ...renderTaskRules(opts?.promptPack ?? "interactive"),
+      // (3) VERIFY axis — how the surface confirms its own work (reproduce-first / verify-after-edit).
+      //     Absent/undefined ⇒ NO lines, byte-identical. Each rides a default-OFF entry-point knob.
+      ...renderVerifyStrategy(opts?.verifyStrategy),
+      // grader-only (P6 + jul-6 audit): suppress the prompt-pack blocks that presuppose local
+      // verification — completion-bar ("the relevant tests pass") + Verification report ("rail:
+      // pytest / verdict / exit", R4) — AND Vision priority, which is pure noise for source-repair
+      // (SWE hidden-grader tasks never carry images). grader-only supplies its own honest Final
+      // format. `.slice(1)` on Vision drops the block minus its LEADING blank, so the separator
+      // before the next section survives. Any other strategy ⇒ verbatim (byte-identical).
+      ...(opts?.verifyStrategy === "grader-only"
+        ? withoutBlocks(BODY_AFTER_PROMPT_PACK, [
+            BODY_AFTER_PROMPT_PACK_VISION_PRIORITY.slice(1),
+            BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
+            BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
+          ])
+        : BODY_AFTER_PROMPT_PACK),
+    ].join("\n"),
+    opts?.promptStyle ?? "flat",
+  )
 
 /** Spread helper for the identity slot — returns the lines to splice
  *  BETWEEN the intro section and the persona slot. Absent / empty array ⇒

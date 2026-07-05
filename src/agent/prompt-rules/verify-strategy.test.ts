@@ -159,6 +159,37 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     expect(on).not.toContain("[R-REPRODUCE-FIRST]")
   })
 
+  test("buildSystemPrompt: grader-only ALSO suppresses the jul-6 residual conflicts", () => {
+    const off = buildSystemPrompt("/w", { promptPack: "batch" })
+    const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })
+    // baseline carries all four …
+    expect(off).toContain("Validation budget: build/test/type-check")
+    expect(off).toContain("5–10 tool calls before producing the final summary")
+    expect(off).toContain("Durable state belongs in workspace files")
+    expect(off).toContain("Vision priority")
+    // … grader-only drops all four (local-verify budget, over-exploration framing, docs-write
+    // artifact rule, and vision noise) — each contradicts or is dead weight under hidden-grader.
+    expect(on).not.toContain("Validation budget: build/test/type-check")
+    expect(on).not.toContain("5–10 tool calls before producing the final summary")
+    expect(on).not.toContain("Durable state belongs in workspace files")
+    expect(on).not.toContain("Vision priority")
+    // …and the surrounding sections + their blank separators survive (block-removal, not
+    // line-set: the prior withoutLines collapsed EVERY blank in the tail).
+    expect(on).toContain("Honesty rail")
+    expect(on).toContain("\nHonesty rail")
+    expect(on).toContain("Budget discipline (every call is expensive)")
+  })
+
+  test("grader-only block-removal does NOT collapse unrelated blank separators", () => {
+    const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })
+    // Regression guard for the jul-6 blank-collapse bug: the pack-tail sections must still be
+    // blank-separated (Honesty preceded by an empty line, not mashed onto the prior line).
+    const lines = on.split("\n")
+    const hi = lines.findIndex((l) => l.startsWith("Honesty rail"))
+    expect(hi).toBeGreaterThan(0)
+    expect(lines[hi - 1]).toBe("")
+  })
+
   // Self-audit render-scan, codified: EVERY line that DEMANDS the model run local
   // verification (or claim green after running) must be absent from the grader-only
   // prompt — except inside R-GRADER-ONLY's own "Do NOT" forbid clause. The reproduce-first

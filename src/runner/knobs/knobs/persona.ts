@@ -6,7 +6,7 @@
  * `bench` on purpose: measurement integrity — persona text changes the prefix
  * cache key + can shift trajectory length, so SWE-bench-style runs MUST stay
  * on the empty `default` body. CLI / agent-batch / agent-interactive callers
- * opt in via `QUANTA_PERSONA={default|friendly|pragmatic}`.
+ * opt in via `QUANTA_PERSONA={default|friendly|pragmatic|codex}`.
  *
  * `parse` is a STRICT equality check against the closed enum — anything else
  * (uppercase, prefixes, garbage) returns `undefined` so the caller falls
@@ -32,9 +32,9 @@ const SURFACES: readonly Surface[] = ["cli", "agent-batch", "agent-interactive"]
  *  so this knob does not import the runtime-only `resolvePersona` (the knob
  *  is the resolver — env reads happen at the framework's `resolveKnobs`
  *  layer, not here). */
-type PersonaKind = "default" | "friendly" | "pragmatic"
+type PersonaKind = "default" | "friendly" | "pragmatic" | "codex"
 
-const VALID = new Set<PersonaKind>(["default", "friendly", "pragmatic"])
+const VALID = new Set<PersonaKind>(["default", "friendly", "pragmatic", "codex"])
 
 const parsePersona = (raw: string | undefined): PersonaKind | undefined => {
   if (raw === undefined) return undefined
@@ -65,7 +65,7 @@ export const personaKnob: Knob<PersonaKind> = {
   surfaces: SURFACES,
   parse: parsePersona,
   apply: applyPersona,
-  describe: "System prompt persona (default | friendly | pragmatic)",
+  describe: "System prompt persona (default | friendly | pragmatic | codex)",
   source: "ADR-0068",
   hotToggleable: true,
 }

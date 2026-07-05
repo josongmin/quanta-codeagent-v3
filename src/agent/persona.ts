@@ -1,10 +1,16 @@
 /**
  * Persona slot — Codex `{{ personality }}` Handlebars absorption (ADR-0068).
  *
- * Three named tonal registers selectable at REPL startup via `QUANTA_PERSONA`:
+ * Four named tonal registers selectable at REPL startup via `QUANTA_PERSONA`:
  *   - `default`    — empty body, byte-identical to the pre-ADR base prompt
  *   - `friendly`   — collaborative partner register
  *   - `pragmatic`  — terse engineering register
+ *   - `codex`      — faithful port of Codex's default personality: concise /
+ *                    direct / friendly teammate + the preamble ("Responsiveness")
+ *                    discipline (announce grouped tool calls in one brief note).
+ *                    Interactive/CLI surfaces only — the persona knob EXCLUDES
+ *                    `bench` (preamble chatter has no value to a hidden grader
+ *                    and shifts the prefix-cache key / trajectory length).
  *
  * Per-session static by design (ADR-0068 §Rationale): resolved once, baked
  * into the cached base prompt section. Mid-session switching would force a
@@ -26,7 +32,7 @@
 /** Closed enum of persona kinds. Adding a new persona requires updating
  *  `ALL_PERSONAS`, `PERSONA_PROMPTS`, and `isPersonaKind` together — the
  *  type system makes a partial change a tsc error. */
-export type PersonaKind = "default" | "friendly" | "pragmatic"
+export type PersonaKind = "default" | "friendly" | "pragmatic" | "codex"
 
 /** Iteration order for the enum (deterministic; used by tests and any
  *  future `/persona` slash command). */
@@ -34,6 +40,7 @@ export const ALL_PERSONAS: ReadonlyArray<PersonaKind> = [
   "default",
   "friendly",
   "pragmatic",
+  "codex",
 ] as const
 
 /** Persona body text, indexed by kind. `default` is the empty string so
@@ -55,6 +62,27 @@ const PERSONA_PROMPTS: Record<PersonaKind, string> = {
     "Optimize for the user's actual outcome. No cheerleading, no padding, no",
     '"great question." State conclusions directly, name trade-offs, leave room',
     "for the user to push back. Clarity > Pragmatism > Rigor.",
+  ].join("\n"),
+  // Faithful port of Codex's default personality + `## Responsiveness /
+  // ### Preamble messages` mechanic (openai/codex `codex-rs/core`). Codex's
+  // signature is the brief pre-tool-call preamble; quanta had the tonal cue
+  // (concise/direct/friendly) via `friendly`/`pragmatic` but NOT the preamble
+  // discipline. This register carries both. Prompt-text-only — no new runtime.
+  codex: [
+    "Persona: Codex-style teammate — concise, direct, and friendly.",
+    "You and the user share the same workspace and collaborate toward their",
+    "goal; you optimize for team morale and being a supportive teammate as much",
+    "as for code quality. Communicate efficiently — keep the user clearly",
+    "informed about what you are doing, without unnecessary detail, and always",
+    "prioritize actionable guidance over commentary.",
+    "Preamble discipline (Responsiveness): before a group of tool calls, send",
+    "ONE brief preamble — 1-2 sentences, roughly 8-12 words — that says what you",
+    "are about to do and builds on what you already did. Logically group related",
+    "actions into a single note rather than one preamble per call; skip it",
+    "entirely for a single trivial read (e.g. reading one file). Keep the tone",
+    "light and curious, never verbose.",
+    "Warmth and momentum never override the honesty rail below: no success word",
+    "without its command + exit + output, and never announce work you did not do.",
   ].join("\n"),
 }
 
@@ -80,7 +108,7 @@ export const personaLines = (persona: PersonaKind): readonly string[] => {
 /** Type guard for the closed enum. Used by `resolvePersona` and any future
  *  RPC or slash-command parser. */
 export const isPersonaKind = (s: unknown): s is PersonaKind =>
-  s === "default" || s === "friendly" || s === "pragmatic"
+  s === "default" || s === "friendly" || s === "pragmatic" || s === "codex"
 
 /** Thrown by {@link resolvePersona} when `QUANTA_PERSONA` is set to a value
  *  outside the closed enum. No silent fallback (ADR-0067 §C). */

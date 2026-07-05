@@ -30,6 +30,7 @@
 import type { PersonaKind } from "./persona"
 import { buildSystemPrompt, type EnvironmentPosture } from "./prompt"
 import type { AgentMode as RulePackMode, VerifyStrategy } from "./prompt-rules"
+import type { PromptStyle } from "./prompt-style"
 
 /**
  * A declared surface profile — the L-surface layer. Every field is optional
@@ -107,6 +108,11 @@ export const SWE_SURFACE_PROFILE: SurfaceProfile = { envPosture: "frozen", ruleP
 export interface ComposeForSurfaceOpts {
   readonly cwd?: string
   readonly persona?: PersonaKind
+  /** Render STYLE (jul-6) — a per-launch choice (like persona), NOT a surface
+   *  *kind* property, so it rides here rather than on {@link SurfaceProfile}.
+   *  `"sectioned"` promotes the base prompt's headers to `##` markdown; absent /
+   *  `"flat"` ⇒ the key is never forwarded ⇒ byte-identical. */
+  readonly promptStyle?: PromptStyle
 }
 
 /**
@@ -136,8 +142,15 @@ export const composeSystemPromptForSurface = (
     promptPack?: RulePackMode
     envPosture?: EnvironmentPosture
     verifyStrategy?: VerifyStrategy
+    promptStyle?: PromptStyle
   } = {}
   if (opts.persona !== undefined) promptOpts.persona = opts.persona
+  // Render style (jul-6) — forward only a non-flat style; `"flat"` / absent must
+  // take the EXACT default path in `buildSystemPrompt` (no `promptStyle` key) so
+  // the flat output stays byte-identical to a caller that never learned this seam.
+  if (opts.promptStyle !== undefined && opts.promptStyle !== "flat") {
+    promptOpts.promptStyle = opts.promptStyle
+  }
   // Only forward a non-frozen posture — a `"frozen"` posture must take the
   // EXACT default code path in `buildSystemPrompt` (no `envPosture` key) so the
   // frozen output is byte-identical to a caller that never learned this seam.
