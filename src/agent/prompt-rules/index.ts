@@ -97,6 +97,7 @@ export { CORE_RULES, OWNED_RULES } from "./core"
 export { PR_AGENT_PACK } from "./pr-agent"
 export { TASK_RUNNER_PACK } from "./task-runner"
 export {
+  GRADER_ONLY_RULE,
   REPRODUCE_FIRST_RULE,
   renderVerifyStrategy,
   VERIFY_AFTER_EDIT_RULE,

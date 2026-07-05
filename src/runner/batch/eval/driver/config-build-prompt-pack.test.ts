@@ -120,3 +120,37 @@ describe("verify axis (jul-4) — QUANTA_BENCH_REPRODUCE_FIRST gates reproduce-f
     })
   })
 })
+
+describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + suppresses conflicts", () => {
+  const withGrader = <T>(value: string | undefined, fn: () => T): T => {
+    const k = "QUANTA_SWE_HIDDEN_GRADER"
+    const prev = process.env[k]
+    if (value === undefined) delete process.env[k]
+    else process.env[k] = value
+    try {
+      return fn()
+    } finally {
+      if (prev === undefined) delete process.env[k]
+      else process.env[k] = prev
+    }
+  }
+  const sysFor = (i: Instance): string =>
+    String(buildConfig(i, makeDeps(), process.cwd(), new AbortController().signal, nullStream).system)
+
+  test("ON + SWE ⇒ [R-GRADER-ONLY] present AND body repro/completion suppressed (conflict fix WIRING)", () => {
+    withGrader("1", () => {
+      const sys = sysFor(makeSwebenchInstance(process.cwd()))
+      expect(sys).toContain("[R-GRADER-ONLY]")
+      expect(sys).not.toContain("first reproduce the failure with the smallest")
+      expect(sys).not.toContain("Completion bar: finish only when")
+      expect(sys).not.toContain(REPRODUCE_FIRST_MARKER) // opposite posture never coexists
+    })
+  })
+  test("OFF ⇒ no grader rule; body repro/completion intact (byte-identical default)", () => {
+    withGrader(undefined, () => {
+      const sys = sysFor(makeSwebenchInstance(process.cwd()))
+      expect(sys).not.toContain("[R-GRADER-ONLY]")
+      expect(sys).toContain("Completion bar: finish only when")
+    })
+  })
+})

@@ -37,6 +37,17 @@ export const BODY_AFTER_PERSONA_POLICY_STACK: readonly string[] = [
   "",
 ]
 
+/** The reproduce-first defect rule — extracted so the `grader-only` verify strategy can
+ *  SUPPRESS it (SWE hidden-grader forbids local repro/pytest; keeping it would contradict
+ *  the grader-only directive). Spliced back into OPERATING_PRINCIPLES below so the default
+ *  assembly is byte-identical. */
+export const BODY_REPRO_REQUIRED: readonly string[] = [
+  "- When (and ONLY when) the task is fixing a defect or reproducing a bug:",
+  "  first reproduce the failure with the smallest failing case (a focused test",
+  "  or command), then use that same case to prove the fix. For a feature,",
+  "  refactor, or a question, this does not apply — do not manufacture a repro.",
+]
+
 export const BODY_AFTER_PERSONA_OPERATING_PRINCIPLES: readonly string[] = [
   "Operating principles:",
   "- Bias to action. You have the tools to investigate and act; do that instead",
@@ -58,10 +69,7 @@ export const BODY_AFTER_PERSONA_OPERATING_PRINCIPLES: readonly string[] = [
   "  change.",
   "- When a tool fails, read the error and diagnose the actual cause before",
   "  retrying. Do not repeat the same failing call or thrash blindly.",
-  "- When (and ONLY when) the task is fixing a defect or reproducing a bug:",
-  "  first reproduce the failure with the smallest failing case (a focused test",
-  "  or command), then use that same case to prove the fix. For a feature,",
-  "  refactor, or a question, this does not apply — do not manufacture a repro.",
+  ...BODY_REPRO_REQUIRED,
   "- Work the whole task. If it spans multiple files, carry the change through",
   "  every site; a partial edit that breaks the build is worse than none.",
   "- Default to writing no comments. Add one only when the WHY is non-obvious:",

@@ -24,8 +24,10 @@
 
 import type { PromptRule } from "./core"
 
-/** The verify-strategy axis value. Absent ⇒ no verify rule (byte-identical). */
-export type VerifyStrategy = "reproduce-first" | "verify-after-edit"
+/** The verify-strategy axis value. Absent ⇒ no verify rule (byte-identical).
+ *  `grader-only` is the OPPOSITE posture to `reproduce-first` (do NOT reproduce / run
+ *  local tests) — they are mutually exclusive by being one axis value. */
+export type VerifyStrategy = "reproduce-first" | "verify-after-edit" | "grader-only"
 
 /** SWE/bench: reproduce the reported failure BEFORE fixing, then rerun the same
  *  reproduction after. Grounds the fix in an observed before→after instead of a
@@ -54,6 +56,34 @@ export const VERIFY_AFTER_EDIT_RULE: PromptRule = {
   ],
 }
 
+/** SWE hidden-grader: local verification is DISABLED (the checkout lacks test deps; an
+ *  automated grader runs hidden tests against the final source diff). Command-order form
+ *  (Do-not / Do / Stop / Final) — an execution prompt wobbles less with prohibitions +
+ *  route than with prose. NO-LEAK: the grader is named ONLY inside a forbid clause; there
+ *  is never a "read the hidden test" directive. Active ⇒ `buildSystemPrompt` also
+ *  suppresses the body's reproduce-required + completion-bar rules (which would contradict
+ *  this). */
+export const GRADER_ONLY_RULE: PromptRule = {
+  id: "R-GRADER-ONLY",
+  lines: [
+    "- [R-GRADER-ONLY] SWE hidden-grader mode. An automated grader runs hidden tests",
+    "  against ONLY your final source diff; local verification is intentionally disabled.",
+    "  Do NOT: run the test suite / pytest / tox / any broad or dependency-install command",
+    "  (this checkout lacks test deps — they fail spuriously and only waste turns); create,",
+    "  edit, or delete tests, docs, lockfiles, or fixtures; use destructive git (checkout /",
+    "  reset / clean / stash / restore); claim \"verified / passing / green / done\" when no",
+    "  permitted check ran; seek any hidden, grader, or reference test.",
+    "  Do: read the source before editing; confirm the owning code path by the strongest",
+    "  available evidence (lsp_definition / references when reliable, else source reads +",
+    "  narrow grep — do not block a small patch just because LSP is unavailable); infer the",
+    "  EXACT required behavior (signature, message, return value, edge cases) from the public",
+    "  issue and match it precisely; make the smallest isolated source-only change.",
+    "  Stop when: the minimal source patch is applied.",
+    "  Final: state files changed, behavior changed, and \"verification: not run — hidden-",
+    "  grader mode forbids local tests; the grader runs them.\" Do not overclaim.",
+  ],
+}
+
 /** Flatten the selected verify strategy to the line array `buildSystemPrompt`
  *  splices as the third slot. Absent ⇒ `[]` (no lines, byte-identical). */
 export const renderVerifyStrategy = (strategy: VerifyStrategy | undefined): readonly string[] => {
@@ -64,5 +94,7 @@ export const renderVerifyStrategy = (strategy: VerifyStrategy | undefined): read
       return REPRODUCE_FIRST_RULE.lines
     case "verify-after-edit":
       return VERIFY_AFTER_EDIT_RULE.lines
+    case "grader-only":
+      return GRADER_ONLY_RULE.lines
   }
 }

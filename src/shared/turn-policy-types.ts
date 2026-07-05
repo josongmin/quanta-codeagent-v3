@@ -28,7 +28,11 @@ export type PromptSurfacePack =
   | "batch"
   | "ci-bot"
 export type PromptSurfaceEnvPosture = "frozen" | "owned"
-export type PromptSurfaceVerifyStrategy = "none" | "reproduce-first" | "verify-after-edit"
+export type PromptSurfaceVerifyStrategy =
+  | "none"
+  | "reproduce-first"
+  | "verify-after-edit"
+  | "grader-only"
 
 /** Declared prompt-shaping axes for this session/surface. Observation-only:
  *  names only, never prompt text. */

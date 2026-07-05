@@ -11,6 +11,7 @@ import { describe, expect, test } from "bun:test"
 import { buildSystemPrompt } from "../prompt"
 import { composeSystemPromptForSurface, SWE_SURFACE_PROFILE } from "../surface-profile"
 import {
+  GRADER_ONLY_RULE,
   REPRODUCE_FIRST_RULE,
   renderVerifyStrategy,
   VERIFY_AFTER_EDIT_RULE,
@@ -109,5 +110,42 @@ describe("no-leak — reproduce-first never points at hidden/grader/reference te
 const _exhaustive: Record<VerifyStrategy, readonly string[]> = {
   "reproduce-first": renderVerifyStrategy("reproduce-first"),
   "verify-after-edit": renderVerifyStrategy("verify-after-edit"),
+  "grader-only": renderVerifyStrategy("grader-only"),
 }
 void _exhaustive
+
+describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
+  const text = GRADER_ONLY_RULE.lines.join("\n")
+  test("renderVerifyStrategy('grader-only') == GRADER_ONLY_RULE.lines", () => {
+    expect(renderVerifyStrategy("grader-only")).toEqual(GRADER_ONLY_RULE.lines)
+  })
+  test("command form: has Do NOT / Do / Stop when / Final", () => {
+    expect(text).toContain("Do NOT:")
+    expect(text).toContain("Do:")
+    expect(text).toContain("Stop when:")
+    expect(text).toContain("Final:")
+  })
+  test("no-leak: forbids seeking hidden/grader/reference test; no read-the-hidden-test directive", () => {
+    expect(text.toLowerCase()).toContain("seek any hidden, grader, or reference test")
+    expect(text).not.toMatch(/\b(read|open|inspect|cat)\b[^.]*\bhidden\b/i)
+    expect(text).not.toMatch(/\banswer key\b/i)
+  })
+  test("forbids running pytest/tox + overclaiming", () => {
+    expect(text.toLowerCase()).toContain("pytest")
+    expect(text.toLowerCase()).toContain("tox")
+    expect(text.toLowerCase()).toContain("verified / passing / green / done")
+  })
+  test("buildSystemPrompt: grader-only SUPPRESSES body repro+completion, adds rule (conflict fix)", () => {
+    const off = buildSystemPrompt("/w", { promptPack: "batch" })
+    const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })
+    // baseline carries the two conflicting body rules …
+    expect(off).toContain("first reproduce the failure with the smallest")
+    expect(off).toContain("Completion bar: finish only when")
+    // … grader-only removes both and adds the single coherent grader rule
+    expect(on).not.toContain("first reproduce the failure with the smallest")
+    expect(on).not.toContain("Completion bar: finish only when")
+    expect(on).toContain("[R-GRADER-ONLY]")
+    // opposite of reproduce-first — they never coexist
+    expect(on).not.toContain("[R-REPRODUCE-FIRST]")
+  })
+})

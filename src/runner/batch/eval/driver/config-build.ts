@@ -552,10 +552,20 @@ export const buildConfig = (
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
   const budgetMeter = deps.budgetMeterFactory?.() ?? benchBudgetMeterFromEnv(process.env)
-  const promptSurfaceProfile: AgentConfig["promptSurfaceProfile"] =
-    instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
-      ? { envPosture: "frozen", promptPack: "batch", verifyStrategy: "reproduce-first" as const }
-      : { envPosture: "frozen", promptPack: "batch", verifyStrategy: "none" as const }
+  // SWE VERIFY axis (default-OFF knobs; ONE axis value, so mutually exclusive). Hidden-grader
+  // (`grader-only`, P6) takes precedence over reproduce-first when both are set — it is the
+  // stronger "do not run local tests" posture. Both OFF ⇒ "none" ⇒ byte-identical to today.
+  const sweVerify =
+    instance.swebench !== undefined && gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER")
+      ? ("grader-only" as const)
+      : instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
+        ? ("reproduce-first" as const)
+        : ("none" as const)
+  const promptSurfaceProfile: AgentConfig["promptSurfaceProfile"] = {
+    envPosture: "frozen",
+    promptPack: "batch",
+    verifyStrategy: sweVerify,
+  }
   const baseConfig = {
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
     // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
@@ -581,9 +591,9 @@ export const buildConfig = (
     // /contradicts this "write your own reproduction" rule. Hold reproTestK fixed (ideally 0)
     // when measuring this lever.
     system: composeSystemPromptForSurface(
-      instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
-        ? { ...SWE_SURFACE_PROFILE, verifyStrategy: "reproduce-first" }
-        : SWE_SURFACE_PROFILE,
+      sweVerify === "none"
+        ? SWE_SURFACE_PROFILE
+        : { ...SWE_SURFACE_PROFILE, verifyStrategy: sweVerify },
       { cwd: sandbox },
     ),
     promptSurfaceProfile,

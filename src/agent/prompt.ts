@@ -19,6 +19,8 @@ import { type PersonaKind, personaLines } from "./persona"
 import {
   BODY_AFTER_PERSONA,
   BODY_AFTER_PROMPT_PACK,
+  BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
+  BODY_REPRO_REQUIRED,
   BRIEF_NOTICE,
   INTRO_LINES,
 } from "./prompt-body"
@@ -62,6 +64,15 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  *  `os-sandbox` / any runtime enforcement — it only swaps the rendered rule list. */
 export type EnvironmentPosture = "frozen" | "owned"
 
+/** Drop a set of body lines — used when a verify strategy OVERRIDES a hardcoded body
+ *  rule (grader-only suppresses the reproduce-required + completion-bar blocks that would
+ *  otherwise contradict "do not run local tests"). Absent strategy never calls this, so the
+ *  default assembly stays byte-identical. */
+const withoutLines = (arr: readonly string[], drop: readonly string[]): readonly string[] => {
+  const dropSet = new Set(drop)
+  return arr.filter((line) => !dropSet.has(line))
+}
+
 /** The static system prompt. No per-turn data — keep it byte-stable so the
  *  provider cache prefix holds across the whole session. The legacy `cwd`
  *  parameter is accepted but ignored: cwd is now per-turn dynamic context
@@ -103,7 +114,11 @@ export const buildSystemPrompt = (
     // byte-identical to the pre-ADR base prompt; `friendly`/`pragmatic`
     // splice the persona body + a blank-line separator before Policy stack.
     ...personaLines(opts?.persona ?? "default"),
-    ...BODY_AFTER_PERSONA,
+    // grader-only (P6): suppress the body's reproduce-required rule — it contradicts the
+    // hidden-grader "no local tests / no repro" posture. Any other strategy ⇒ verbatim.
+    ...(opts?.verifyStrategy === "grader-only"
+      ? withoutLines(BODY_AFTER_PERSONA, BODY_REPRO_REQUIRED)
+      : BODY_AFTER_PERSONA),
     // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
     // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).
     // (1) POSTURE-BASE axis — honesty rails + env guardrails, selected by envPosture:
@@ -116,7 +131,11 @@ export const buildSystemPrompt = (
     // (3) VERIFY axis — how the surface confirms its own work (reproduce-first / verify-after-edit).
     //     Absent/undefined ⇒ NO lines, byte-identical. Each rides a default-OFF entry-point knob.
     ...renderVerifyStrategy(opts?.verifyStrategy),
-    ...BODY_AFTER_PROMPT_PACK,
+    // grader-only (P6): suppress the completion-bar (it demands "the relevant tests pass",
+    // which grader-only forbids running). Any other strategy ⇒ verbatim (byte-identical).
+    ...(opts?.verifyStrategy === "grader-only"
+      ? withoutLines(BODY_AFTER_PROMPT_PACK, BODY_AFTER_PROMPT_PACK_COMPLETION_BAR)
+      : BODY_AFTER_PROMPT_PACK),
   ].join("\n")
 
 /** Spread helper for the identity slot — returns the lines to splice
