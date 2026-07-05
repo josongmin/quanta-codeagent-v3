@@ -77,14 +77,21 @@ export type EnvironmentPosture = "frozen" | "owned"
  *  each block AS A UNIT: a block's own trailing blank goes with it, but unrelated blank
  *  separators elsewhere are preserved (the prior line-set `withoutLines` collapsed EVERY
  *  blank whenever a dropped block contained one — jul-6 blank-collapse fix). Only the first
- *  occurrence of each block is removed. Absent strategy never calls this ⇒ byte-identical. */
-const withoutBlocks = (
+ *  occurrence of each block is removed. Absent strategy never calls this ⇒ byte-identical.
+ *
+ *  FAIL-LOUD (jul-6 audit): every `block` is a compile-time constant spread into `arr` in this
+ *  same module, so a non-match is ALWAYS drift (a block was reworded or made non-contiguous by
+ *  a later edit), never a legitimate runtime state. Silently leaving it in would re-inject the
+ *  exact conflict grader-only exists to remove, with no error and no failing test. So a missing
+ *  block THROWS rather than taking a silent no-op default-OK path (폴백 금지). */
+export const withoutBlocks = (
   arr: readonly string[],
   blocks: readonly (readonly string[])[],
 ): readonly string[] => {
   let out = [...arr]
   for (const block of blocks) {
     if (block.length === 0) continue
+    let removed = false
     for (let i = 0; i + block.length <= out.length; i++) {
       let match = true
       for (let j = 0; j < block.length; j++) {
@@ -95,12 +102,38 @@ const withoutBlocks = (
       }
       if (match) {
         out = [...out.slice(0, i), ...out.slice(i + block.length)]
+        removed = true
         break
       }
+    }
+    if (!removed) {
+      throw new Error(
+        `withoutBlocks: suppression block not found in source array (drifted?): ${JSON.stringify(block[0])}`,
+      )
     }
   }
   return out
 }
+
+/** SSOT for "what grader-only SUPPRESSES" (jul-6 audit — the paired ADDITION is
+ *  `GRADER_ONLY_RULE` in prompt-rules/verify-strategy). These body blocks presuppose local
+ *  verification or doc writes that the hidden-grader posture forbids, so grader-only removes
+ *  them. Naming the sets here keeps the policy in ONE place (not scattered inline) and
+ *  `withoutBlocks` throws if any drifts out of the assembled body. */
+const GRADER_ONLY_SUPPRESSED_AFTER_PERSONA: readonly (readonly string[])[] = [
+  BODY_REPRO_REQUIRED, // "first reproduce the failure…" — grader-only forbids local repro
+  BODY_VERIFY_AFTER_EDIT_DISCIPLINE, // "run the project's tests…" (R3)
+  BODY_VALIDATION_BUDGET, // "build/test/type-check before done" — no local run under grader-only
+  BODY_ANALYSIS_MULTISTEP, // "expect 5–10 tool calls" — over-exploration framing for source-repair
+  BODY_AFTER_PERSONA_DURABLE_STATE, // "write artifacts to docs/" — grader-only forbids editing docs
+]
+/** grader-only suppression for the prompt-pack tail. Vision-priority is dropped MINUS its leading
+ *  blank (`.slice(1)`) so the separator before it survives (SWE hidden-grader tasks carry no images). */
+const GRADER_ONLY_SUPPRESSED_AFTER_PACK: readonly (readonly string[])[] = [
+  BODY_AFTER_PROMPT_PACK_VISION_PRIORITY.slice(1),
+  BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT, // "rail: pytest / verdict / exit" (R4)
+  BODY_AFTER_PROMPT_PACK_COMPLETION_BAR, // "the relevant tests pass"
+]
 
 /** The static system prompt. No per-turn data — keep it byte-stable so the
  *  provider cache prefix holds across the whole session. The legacy `cwd`
@@ -158,13 +191,7 @@ export const buildSystemPrompt = (
       // over-exploration) + durable-state ("write artifacts to docs/", which grader-only forbids
       // editing). Any other strategy ⇒ verbatim (byte-identical).
       ...(opts?.verifyStrategy === "grader-only"
-        ? withoutBlocks(BODY_AFTER_PERSONA, [
-            BODY_REPRO_REQUIRED,
-            BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
-            BODY_VALIDATION_BUDGET,
-            BODY_ANALYSIS_MULTISTEP,
-            BODY_AFTER_PERSONA_DURABLE_STATE,
-          ])
+        ? withoutBlocks(BODY_AFTER_PERSONA, GRADER_ONLY_SUPPRESSED_AFTER_PERSONA)
         : BODY_AFTER_PERSONA),
       // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
       // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).
@@ -185,11 +212,7 @@ export const buildSystemPrompt = (
       // format. `.slice(1)` on Vision drops the block minus its LEADING blank, so the separator
       // before the next section survives. Any other strategy ⇒ verbatim (byte-identical).
       ...(opts?.verifyStrategy === "grader-only"
-        ? withoutBlocks(BODY_AFTER_PROMPT_PACK, [
-            BODY_AFTER_PROMPT_PACK_VISION_PRIORITY.slice(1),
-            BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
-            BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
-          ])
+        ? withoutBlocks(BODY_AFTER_PROMPT_PACK, GRADER_ONLY_SUPPRESSED_AFTER_PACK)
         : BODY_AFTER_PROMPT_PACK),
     ].join("\n"),
     opts?.promptStyle ?? "flat",

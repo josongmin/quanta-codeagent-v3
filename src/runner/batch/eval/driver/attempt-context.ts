@@ -81,6 +81,7 @@ const prepareHintAndReproContext = async (
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
     llm,
     issueHintExpectedActual: posture.issueHintExpectedActual,
+    renderObservations: posture.renderObservations,
     ...(posture.localizeBudget !== undefined ? { localizeBudget: posture.localizeBudget } : {}),
     onCandidates: (files) => {
       localizeCandidates = files

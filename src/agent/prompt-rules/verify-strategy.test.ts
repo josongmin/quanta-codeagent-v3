@@ -8,7 +8,7 @@
  * forbids seeking any hidden / grader / reference test.
  */
 import { describe, expect, test } from "bun:test"
-import { buildSystemPrompt } from "../prompt"
+import { buildSystemPrompt, withoutBlocks } from "../prompt"
 import { composeSystemPromptForSurface, SWE_SURFACE_PROFILE } from "../surface-profile"
 import {
   GRADER_ONLY_RULE,
@@ -228,5 +228,30 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
       verifyStrategy: "reproduce-first",
     })
     expect(hardConflictLines(control).length).toBeGreaterThanOrEqual(5)
+  })
+})
+
+// jul-6 audit: withoutBlocks is the load-bearing grader-only suppression mechanism. Unit-test
+// it directly (the integration tests exercise it via buildSystemPrompt, but the FAIL-LOUD
+// contract — a drifted block must THROW, not silently leave the conflict in — needs its own pin).
+describe("withoutBlocks — contiguous block removal + fail-loud on drift", () => {
+  test("removes a matching contiguous block (first occurrence), preserving unrelated blanks", () => {
+    const arr = ["a", "", "b1", "b2", "", "c"]
+    expect(withoutBlocks(arr, [["b1", "b2"]])).toEqual(["a", "", "", "c"])
+  })
+  test("removes multiple blocks independently", () => {
+    expect(withoutBlocks(["a", "b", "c", "d"], [["b"], ["d"]])).toEqual(["a", "c"])
+  })
+  test("empty block is a no-op (never throws)", () => {
+    expect(withoutBlocks(["a", "b"], [[]])).toEqual(["a", "b"])
+  })
+  test("FAIL-LOUD: a block absent from the source array THROWS (drift guard, not a silent no-op)", () => {
+    // RED-on-injection: this is the exact regression the guard exists for — if a suppressed body
+    // block's text drifts so it no longer matches, grader-only would silently re-inject the
+    // conflict. The throw converts that into a loud build/test failure.
+    expect(() => withoutBlocks(["a", "b", "c"], [["not-present"]])).toThrow(/block not found/)
+  })
+  test("FAIL-LOUD fires even if EARLIER blocks matched (partial suppression is still a bug)", () => {
+    expect(() => withoutBlocks(["a", "b", "c"], [["b"], ["ghost"]])).toThrow(/block not found/)
   })
 })

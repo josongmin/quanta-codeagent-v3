@@ -249,6 +249,11 @@ export interface BenchPosture {
   readonly issueHint: boolean
   readonly issueHintMode: BenchIssueHintMode
   readonly issueHintExpectedActual: boolean
+  /** jul-6 S3 — render the issue-hint through the observation kernel
+   *  (`<quanta_observations>`: routing-hint framing + anti_signals + owners)
+   *  instead of the legacy `## Issue Hints`. Default-ON; `QUANTA_OBS_RENDER`
+   *  (0/off/false) disables ⇒ byte-identical legacy render. */
+  readonly renderObservations: boolean
   /** Agentless §3.3.1 reproduction-test K (undefined ⇒ no repro pre-compute). */
   readonly reproTestK: number | undefined
   /** jun-22 config-extraction: per-repro-script exec timeout (ms). undefined ⇒ 60s. */
@@ -636,6 +641,8 @@ export const benchPostureFromState = (
   const issueHintMode: BenchIssueHintMode = readKnobValue(state, "issue-hint", isIssueMode) ?? "off"
   const issueHintExpectedActual =
     readKnobValue(state, "issue-hint-expected-actual", isTrue) === true
+  // jul-6 S3 — observation-kernel render, default-ON (env `QUANTA_OBS_RENDER` disables).
+  const renderObservations = !gateDisabled(env, "QUANTA_OBS_RENDER")
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const reproExecTimeoutMs = readKnobValue(state, "repro-exec-timeout", isNumber)
   const localizeBudget = readKnobValue(state, "localize-budget", isLocalizeBudgetValue)
@@ -698,6 +705,7 @@ export const benchPostureFromState = (
     issueHint: issueHintMode !== "off",
     issueHintMode,
     issueHintExpectedActual,
+    renderObservations,
     reproTestK: repro !== undefined ? repro.samples : undefined,
     reproExecTimeoutMs,
     localizeBudget,

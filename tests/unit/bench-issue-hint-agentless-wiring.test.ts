@@ -146,10 +146,28 @@ describe("prepareIssueHint — async hint computation", () => {
         localize: fakeLocalize,
       },
     )
-    expect(hint).toContain("## Issue Hints (Agentless localization)")
+    // jul-6 S3: default-ON ⇒ observation-kernel render (`<quanta_observations>`,
+    // routing-hint framing + anti_signals). The owners/evidence still surface.
+    expect(hint).toContain("<quanta_observations>")
+    expect(hint).toContain("routing hints — verify against source")
     expect(hint).toContain("requests/models.py")
     expect(hint).toContain("IDNAError handling")
-    expect(hint).toContain("Use these as starting points but verify with your own tools.")
+    expect(hint).toContain("anti_signals")
+    // OFF (renderObservations:false) ⇒ byte-identical legacy Agentless markdown.
+    const legacy = await prepareIssueHint(
+      mkInstance("UnicodeError on http://.example.com"),
+      "/tmp/sb",
+      "agentless",
+      {
+        llm: new StubLLM(),
+        issueHintExpectedActual: false,
+        fileTree: async () => ["requests/models.py", "requests/adapters.py"],
+        localize: fakeLocalize,
+        renderObservations: false,
+      },
+    )
+    expect(legacy).toContain("## Issue Hints (Agentless localization)")
+    expect(legacy).toContain("Use these as starting points but verify with your own tools.")
   })
 
   test("mode=agentless + empty result → falls back to regex", async () => {
@@ -352,7 +370,9 @@ describe("3-path byte-identity proof", () => {
       fileTree: async () => ["requests/models.py"],
       localize: fakeLocalize,
     })
-    expect(hint).toContain("Agentless localization")
+    // jul-6 S3 default-ON: agentless path now renders the observation kernel —
+    // still DISTINCT from the regex path (which carries "Issue evidence (verbatim)").
+    expect(hint).toContain("<quanta_observations>")
     expect(hint).not.toContain("Issue evidence (verbatim)")
   })
 
