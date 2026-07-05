@@ -216,6 +216,16 @@ const resolveIssueHintText = (
 const joinPromptBlocks = (...blocks: readonly (string | undefined)[]): string =>
   blocks.filter((block): block is string => block !== undefined && block !== "").join("\n\n")
 
+/** SSOT for the grader-only verify posture (P6 / jul-6 audit). TRUE ⇒ the SYSTEM prompt renders
+ *  grader-only (verify demands suppressed) AND the USER directive is driven to NOEXEC — the two
+ *  surfaces MUST agree or the measured L1↔L8 conflict returns. Both consumers — `sweVerify`
+ *  (system) and `buildPromptText` (user) — read THIS single predicate, so they cannot diverge.
+ *  On when the hidden-grader knob is set OR in-loop execution is off (exec=off emits the NOEXEC
+ *  directive, so the system must match). Non-SWE ⇒ never. */
+const isGraderOnlyPosture = (instance: Instance, opt: BenchPosture): boolean =>
+  instance.swebench !== undefined &&
+  (gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER") || opt.inLoopExecMode === "off")
+
 const buildPromptText = (args: {
   readonly instance: Instance
   readonly sandbox: string
@@ -227,16 +237,15 @@ const buildPromptText = (args: {
   readonly chaMultisiteSteer?: string
 }): string => {
   const leanPrompt = gateOn(process.env, "QUANTA_BENCH_LEAN_PROMPT")
-  // P6 coherence (self-audit R5): grader-only is the SYSTEM-side expression of the
-  // "hidden grader owns verification — no local test run" posture. The USER directive
-  // carries the same posture via `inLoopExecMode`, but the two knobs are independent:
-  // `inLoopExecMode` defaults to FULL ("verify by running the repo's tests"), which
-  // directly CONTRADICTS a grader-only system prompt ("Do NOT run pytest") and would
-  // re-create the exact L1↔L8 conflict P6 exists to remove — just on the user surface.
-  // So grader-only DRIVES the directive to NOEXEC (`"off"`), collapsing both surfaces to
-  // one coherent posture from a single decision. OFF ⇒ untouched ⇒ byte-identical.
-  const graderOnly =
-    args.instance.swebench !== undefined && gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER")
+  // P6 coherence (self-audit R5 + jul-6 audit): grader-only is the SYSTEM-side expression of
+  // the "hidden grader owns verification — no local test run" posture. The USER directive
+  // carries the same posture via `inLoopExecMode` (default FULL = "verify by running the repo's
+  // tests"), which CONTRADICTS a grader-only system prompt and would re-create the exact L1↔L8
+  // conflict P6 exists to remove — just on the user surface. So grader-only DRIVES the directive
+  // to NOEXEC (`"off"`). The predicate is the SSOT `isGraderOnlyPosture` (identical to the one
+  // sweVerify uses for the SYSTEM), so the two surfaces CANNOT diverge. OFF ⇒ untouched ⇒
+  // byte-identical.
+  const graderOnly = isGraderOnlyPosture(args.instance, args.opt)
   const baseText = composeBaseText(
     buildBaseProblemText(args.instance, args.sandbox),
     Boolean(args.instance.swebench),
@@ -572,9 +581,7 @@ export const buildConfig = (
   // required for coherence. The explicit QUANTA_SWE_HIDDEN_GRADER knob still forces grader-only
   // under ANY exec mode (buildPromptText then drives the directive to NOEXEC, R5). exec=full ⇒
   // unchanged (body verify demands + FULL "run the tests" directive already agree) ⇒ byte-identical.
-  const graderOnly =
-    instance.swebench !== undefined &&
-    (gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER") || opt.inLoopExecMode === "off")
+  const graderOnly = isGraderOnlyPosture(instance, opt)
   const sweVerify = graderOnly
     ? ("grader-only" as const)
     : instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")

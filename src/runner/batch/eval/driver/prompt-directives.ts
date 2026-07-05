@@ -67,7 +67,14 @@ export const SIBLING_COMPLETION_STEER =
 const BASH_VERIFY_MODE_STEER =
   '- Tool mode: when calling bash for any test, reproducer, or verification command, set mode:"write". Reserve bash mode:"read" for passive inspection only (ls/rg/cat/git diff); read mode rejects verification runtimes instead of running them under a read-only sandbox.'
 
-const SWEBENCH_DIRECTIVE = [
+// ── Verbose SWEBENCH_DIRECTIVE family, factored (jul-6 audit) ──────────────────
+// The three verbose variants (FULL / REPRO_ONLY / NOEXEC) shared a 12-line HEAD +
+// INFER_EXACT + MIN_TAIL + V4A verbatim (19 lines triplicated); they differ ONLY in the
+// verify clause. Factor the shared blocks + assemble by spread (the LEAN family already
+// does this via SWEBENCH_DIRECTIVE_LEAN_HEAD). GOTCHA preserved: INFER_EXACT sits AFTER the
+// repro-first clause in FULL but immediately after HEAD in NOEXEC/REPRO — so it is spread
+// per-variant at its exact position, never a fixed shared tail. Output is byte-identical.
+const SWE_DIR_HEAD = [
   "",
   "",
   "You are fixing a real defect in this repository; an automated grader runs",
@@ -80,23 +87,57 @@ const SWEBENCH_DIRECTIVE = [
   "- NEVER run `git checkout`/`reset`/`clean`/`stash`/`restore`, re-clone, or",
   "  any command that discards your own edits. Your final git diff IS the",
   "  submission — do not let bash commands wipe it.",
-  "- Reproduce first: from the issue, construct the concrete failing scenario",
-  "  (the exact input/call the issue describes) and confirm it currently",
-  "  misbehaves before you edit.",
+]
+const SWE_DIR_INFER_EXACT = [
   "- Infer the EXACT required behavior (signatures, error messages, return",
   "  values, edge cases) from the issue and match it precisely — a fix that is",
   "  close but not exact still fails the hidden test.",
+]
+const SWE_DIR_MIN_TAIL = "- Keep the final diff minimal and isolated to the fix."
+const SWE_DIR_V4A = [
+  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
+  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
+  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+]
+// Per-variant verify clauses — the ONLY real difference between the three variants.
+const SWE_DIR_REPRO_FIRST = [
+  "- Reproduce first: from the issue, construct the concrete failing scenario",
+  "  (the exact input/call the issue describes) and confirm it currently",
+  "  misbehaves before you edit.",
+]
+const SWE_DIR_MANDATORY_RUN = [
   "- MANDATORY before you stop: after your final edit, run the repository's",
   "  existing test(s) most specific to the changed code AND your reproduction",
   "  of the issue. If anything fails, iterate. Do NOT stop right after an edit",
   "  without running tests — an unverified edit is the #1 cause of failure.",
-  BASH_VERIFY_MODE_STEER,
-  "- Keep the final diff minimal and isolated to the fix.",
-  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
-  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
-  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+]
+const SWE_DIR_PYTHONPATH = [
   "- If tests fail with ModuleNotFoundError, set PYTHONPATH=. before pytest to",
   "  ensure the repo root is on sys.path (e.g. PYTHONPATH=. python -m pytest ...).",
+]
+const SWE_DIR_NOEXEC_CLAUSE = [
+  "- The automated grader runs the repository's tests for you in a correct",
+  "  environment. Do NOT run the test suite, pytest, or tox yourself — this repo",
+  "  is checked out without its test dependencies, so test commands will fail",
+  "  spuriously and only waste turns. Make the smallest correct source change",
+  "  and stop; an unverified edit is fine — the grader decides.",
+]
+const SWE_DIR_REPRO_ONLY_CLAUSE = [
+  "- If useful, you MAY run a tiny issue reproducer or a focused script that",
+  "  demonstrates the bug directly. Do NOT run the repository test suite,",
+  "  pytest, tox, or broad regression sweeps yourself; the grader owns full",
+  "  verification in the correct environment.",
+]
+
+const SWEBENCH_DIRECTIVE = [
+  ...SWE_DIR_HEAD,
+  ...SWE_DIR_REPRO_FIRST,
+  ...SWE_DIR_INFER_EXACT,
+  ...SWE_DIR_MANDATORY_RUN,
+  BASH_VERIFY_MODE_STEER,
+  SWE_DIR_MIN_TAIL,
+  ...SWE_DIR_V4A,
+  ...SWE_DIR_PYTHONPATH,
 ].join("\n")
 
 /**
@@ -163,30 +204,11 @@ const SWEBENCH_DIRECTIVE_LEAN_NOEXEC = [
  * execution is not required to produce a correct patch.
  */
 const SWEBENCH_DIRECTIVE_NOEXEC = [
-  "",
-  "",
-  "You are fixing a real defect in this repository; an automated grader runs",
-  "hidden tests against ONLY your source changes. Hard rules:",
-  "- Change library/source code ONLY. NEVER create, edit, or delete any test",
-  "  file or anything under a tests/ or test/ dir — the grader supplies its own",
-  "  tests; your test edits are discarded and only waste turns.",
-  "- Make the SMALLEST correct change. Use `edit` for targeted hunks. Do NOT",
-  "  rewrite or reformat whole files; do NOT `write` over an existing file.",
-  "- NEVER run `git checkout`/`reset`/`clean`/`stash`/`restore`, re-clone, or",
-  "  any command that discards your own edits. Your final git diff IS the",
-  "  submission — do not let bash commands wipe it.",
-  "- Infer the EXACT required behavior (signatures, error messages, return",
-  "  values, edge cases) from the issue and match it precisely — a fix that is",
-  "  close but not exact still fails the hidden test.",
-  "- The automated grader runs the repository's tests for you in a correct",
-  "  environment. Do NOT run the test suite, pytest, or tox yourself — this repo",
-  "  is checked out without its test dependencies, so test commands will fail",
-  "  spuriously and only waste turns. Make the smallest correct source change",
-  "  and stop; an unverified edit is fine — the grader decides.",
-  "- Keep the final diff minimal and isolated to the fix.",
-  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
-  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
-  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+  ...SWE_DIR_HEAD,
+  ...SWE_DIR_INFER_EXACT,
+  ...SWE_DIR_NOEXEC_CLAUSE,
+  SWE_DIR_MIN_TAIL,
+  ...SWE_DIR_V4A,
 ].join("\n")
 
 /**
@@ -195,30 +217,12 @@ const SWEBENCH_DIRECTIVE_NOEXEC = [
  * a tiny direct reproducer when the issue can be demonstrated narrowly.
  */
 const SWEBENCH_DIRECTIVE_REPRO_ONLY = [
-  "",
-  "",
-  "You are fixing a real defect in this repository; an automated grader runs",
-  "hidden tests against ONLY your source changes. Hard rules:",
-  "- Change library/source code ONLY. NEVER create, edit, or delete any test",
-  "  file or anything under a tests/ or test/ dir — the grader supplies its own",
-  "  tests; your test edits are discarded and only waste turns.",
-  "- Make the SMALLEST correct change. Use `edit` for targeted hunks. Do NOT",
-  "  rewrite or reformat whole files; do NOT `write` over an existing file.",
-  "- NEVER run `git checkout`/`reset`/`clean`/`stash`/`restore`, re-clone, or",
-  "  any command that discards your own edits. Your final git diff IS the",
-  "  submission — do not let bash commands wipe it.",
-  "- Infer the EXACT required behavior (signatures, error messages, return",
-  "  values, edge cases) from the issue and match it precisely — a fix that is",
-  "  close but not exact still fails the hidden test.",
-  "- If useful, you MAY run a tiny issue reproducer or a focused script that",
-  "  demonstrates the bug directly. Do NOT run the repository test suite,",
-  "  pytest, tox, or broad regression sweeps yourself; the grader owns full",
-  "  verification in the correct environment.",
+  ...SWE_DIR_HEAD,
+  ...SWE_DIR_INFER_EXACT,
+  ...SWE_DIR_REPRO_ONLY_CLAUSE,
   BASH_VERIFY_MODE_STEER,
-  "- Keep the final diff minimal and isolated to the fix.",
-  "- When using apply_patch, produce V4A format: start with '*** Begin Patch',",
-  "  then per file '*** Update File: path/to/file.py', then lines prefixed '+' (add),",
-  "  '-' (remove), ' ' (context, one space then the line), then '*** End Patch'.",
+  SWE_DIR_MIN_TAIL,
+  ...SWE_DIR_V4A,
 ].join("\n")
 
 /** Pre-composed steer lines (already include their leading `\n-` separator, or
