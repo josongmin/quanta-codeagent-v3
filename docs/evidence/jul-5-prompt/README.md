@@ -16,6 +16,8 @@ quanta가 실제 LLM에 보내는 프롬프트를 코드 실행으로 뽑은 것
 | `12-render-tb-owned.txt` | 3축 렌더: TB `{envPosture:owned}` (R-ENV-OWNED, 설치 자유) | 23335B |
 | `13-render-swe-reproduce-first.txt` | 3축 렌더: SWE + `{verifyStrategy:reproduce-first}` (R-REPRODUCE-FIRST) | 24524B |
 | `14-render-cli-verify-after-edit.txt` | 3축 렌더: CLI + `{verifyStrategy:verify-after-edit}` (R-VERIFY-AFTER-EDIT) | 24172B |
+| `15-render-cli-codex-persona.txt` | persona 렌더: CLI + `{persona:codex}` (Codex personality + Preamble/Responsiveness 흡수, bench 제외) | 24833B |
+| `16-render-swe-sectioned.txt` | style 렌더: SWE batch + `{promptStyle:sectioned}` (flat 모놀리스 → Codex식 계층 16 `##` + 2 `###`; F1 고아룰 헤더신설·F2 하위섹션강등·F3 Trust rename; `QUANTA_BENCH_PROMPT_SECTIONED`, default-OFF byte-identical) | 24270B |
 
 ## 파이프라인 (실측)
 
