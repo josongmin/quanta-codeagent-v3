@@ -562,15 +562,24 @@ export const buildConfig = (
     ...(chaMultisiteSteer !== undefined ? { chaMultisiteSteer } : {}),
   })
   const budgetMeter = deps.budgetMeterFactory?.() ?? benchBudgetMeterFromEnv(process.env)
-  // SWE VERIFY axis (default-OFF knobs; ONE axis value, so mutually exclusive). Hidden-grader
-  // (`grader-only`, P6) takes precedence over reproduce-first when both are set — it is the
-  // stronger "do not run local tests" posture. Both OFF ⇒ "none" ⇒ byte-identical to today.
-  const sweVerify =
-    instance.swebench !== undefined && gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER")
-      ? ("grader-only" as const)
-      : instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
-        ? ("reproduce-first" as const)
-        : ("none" as const)
+  // SWE VERIFY axis — the system's verify posture, ONE mutually-exclusive value.
+  // P6 F1 (jul-6 final audit): exec-mode is the SSOT for verify posture. When in-loop
+  // execution is OFF the USER directive is NOEXEC ("do NOT run pytest — the grader owns
+  // verification"); the system MUST match, or it re-emits the measured L1↔L8 conflict
+  // (verify-demanding body vs "don't verify" directive). Shipped exec=off presets
+  // (agentless-v3-thin-strict, agentless-v5-thin-and-expanded, capability profiles) carried
+  // that EXACT conflict until now. So exec=off ⇒ grader-only automatically — no opt-in knob
+  // required for coherence. The explicit QUANTA_SWE_HIDDEN_GRADER knob still forces grader-only
+  // under ANY exec mode (buildPromptText then drives the directive to NOEXEC, R5). exec=full ⇒
+  // unchanged (body verify demands + FULL "run the tests" directive already agree) ⇒ byte-identical.
+  const graderOnly =
+    instance.swebench !== undefined &&
+    (gateOn(process.env, "QUANTA_SWE_HIDDEN_GRADER") || opt.inLoopExecMode === "off")
+  const sweVerify = graderOnly
+    ? ("grader-only" as const)
+    : instance.swebench !== undefined && gateOn(process.env, "QUANTA_BENCH_REPRODUCE_FIRST")
+      ? ("reproduce-first" as const)
+      : ("none" as const)
   const promptSurfaceProfile: AgentConfig["promptSurfaceProfile"] = {
     envPosture: "frozen",
     promptPack: "batch",

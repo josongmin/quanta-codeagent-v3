@@ -165,3 +165,35 @@ Ran the self-audit to CLEAN with TDD/scenario regression guards at each step. Fi
 Clean state: P6 prompt+config suite 115/0, byte-identical 5-target ✓, tsc src ✓, knob-orphans 0/0.
 Out-of-scope pre-existing reds left untouched (user in-flight): god-code `brain-mode.ts` /
 `web-daemon/runtime-factory.ts`, and `with-temperature` / `turn-outcome` test typecheck.
+
+## 7. Final audit (jul-6) — the conflict SHIPS; make coherence structural (F1)
+
+Adversarial audit of the real captured prompt (`docs/evidence/jul-5-prompt/00-…txt`) found the
+grader-only fix was **opt-in only**, so the measured conflict still SHIPPED in production:
+
+- **F1 (REAL, shipped bug, fixed).** `bench-in-loop-exec` and the verify posture were INDEPENDENT
+  knobs. Two shipped presets (`agentless-v3-thin-strict`, `agentless-v5-thin-and-expanded`) and a
+  capability profile set `bench-in-loop-exec: off`, which emits the **NOEXEC** user directive ("do
+  NOT run pytest — the grader owns verification"). But the SYSTEM still carried its verify demands
+  (Completion bar / Verification report / "run the project's tests" / reproduce-first) ⇒ the EXACT
+  captured L1↔L8 conflict shipped in those presets whenever `QUANTA_SWE_HIDDEN_GRADER` was not also
+  set by hand. Fix: **exec-mode is the SSOT for verify posture** — `config-build.sweVerify` now
+  derives `grader-only` from `opt.inLoopExecMode === "off"` (in addition to the explicit knob). So
+  exec=off ⇒ coherent grader-only system automatically, no opt-in required. exec=full ⇒ unchanged
+  (body verify demands + FULL "run the tests" directive already agree) ⇒ byte-identical. The
+  explicit knob still forces grader-only under any exec mode (R5 then drives the directive to NOEXEC).
+  Guard: `F1` wiring test (exec=off + NO knob ⇒ both surfaces coherent grader-only+NOEXEC; exec=full
+  control ⇒ no grader rule + verify demands intact, non-vacuous). End-to-end re-audit renders the real
+  exec=off config and asserts 0 verify-DEMAND lines on BOTH surfaces (control exec=full keeps 4 system
+  + 2 user demands, proving the scan is live).
+- **F2 (R-NO-EXPLORE-OVER-EDIT "…coherent edit and a verify step"), assessed BENIGN, not changed.**
+  Under grader-only "a verify step" reads oddly, BUT `R-GRADER-ONLY` renders AFTER the batch task rule
+  (task axis → verify axis) with an explicit "Stop when: the minimal source patch is applied" that
+  supersedes it; the live smoke stopped cleanly at 9 turns with no thrash. A byte-identical-safe fix
+  would require coupling the 3 independent axes or a mid-line splice for marginal gain — deferred.
+- **F3 (R-ENV "e.g. `PYTHONPATH=. pytest`" example), assessed BENIGN, not changed.** A scoped-env
+  SYNTAX example in the shared frozen env rule; grader-only's explicit "Do NOT … pytest" is the
+  specific rule and governs. Touching R-ENV breaks the frozen/batch byte-identical baseline.
+
+Final-audit clean state: prompt+config suite 117/0, byte-identical 5-target ✓, tsc src ✓,
+exec=off end-to-end coherence re-audit ✓ (0 conflict lines, non-vacuous control).

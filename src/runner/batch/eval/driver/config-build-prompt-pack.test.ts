@@ -192,4 +192,52 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
       expect(user).not.toContain(NOEXEC_UNVERIFIED_OK)
     })
   })
+
+  // F1 (jul-6 final audit): exec-mode is the SSOT for verify posture. Shipped presets
+  // (agentless-v3-thin-strict / v5-thin-and-expanded) + capability profiles set
+  // `bench-in-loop-exec: off`, which emits the NOEXEC user directive ("do NOT run pytest").
+  // Before F1 the SYSTEM still carried its verify demands ⇒ the EXACT captured L1↔L8 conflict
+  // shipped in those presets. F1: exec=off ⇒ grader-only automatically, NO opt-in knob.
+  const withExec = <T>(value: string | undefined, fn: () => T): T => {
+    const k = "QUANTA_BENCH_IN_LOOP_EXEC"
+    const prev = process.env[k]
+    if (value === undefined) delete process.env[k]
+    else process.env[k] = value
+    try {
+      return fn()
+    } finally {
+      if (prev === undefined) delete process.env[k]
+      else process.env[k] = prev
+    }
+  }
+
+  test("F1: exec=off (NO grader knob) ⇒ BOTH surfaces coherent grader-only (fixes the shipped-preset conflict)", () => {
+    // grader knob explicitly UNSET — coherence must come from exec-mode alone.
+    withGrader(undefined, () =>
+      withExec("off", () => {
+        const inst = makeSwebenchInstance(process.cwd())
+        const sys = sysFor(inst)
+        const user = userMsgFor(inst)
+        // SYSTEM auto-adopts grader-only and drops every local-verification demand …
+        expect(sys).toContain("[R-GRADER-ONLY]")
+        expect(sys).not.toContain("Completion bar: finish only when")
+        expect(sys).not.toContain("Verification report (use when you ran or considered running verification)")
+        // … and the USER directive is NOEXEC — the two agree, no conflict.
+        expect(user).toContain(NOEXEC_POSTURE)
+        expect(user).not.toContain(FULL_VERIFY_DEMAND)
+      }),
+    )
+  })
+  test("F1 control: exec=full (default, no knob) ⇒ NO grader rule; verify demands intact (byte-identical, non-vacuous)", () => {
+    withGrader(undefined, () =>
+      withExec("full", () => {
+        const inst = makeSwebenchInstance(process.cwd())
+        const sys = sysFor(inst)
+        // proves F1 is exec-gated, not blanket: full keeps the coherent verify posture
+        expect(sys).not.toContain("[R-GRADER-ONLY]")
+        expect(sys).toContain("Completion bar: finish only when")
+        expect(userMsgFor(inst)).toContain(FULL_VERIFY_DEMAND)
+      }),
+    )
+  })
 })
