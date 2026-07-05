@@ -17,6 +17,7 @@ import {
   composeIssueHint,
   extractIssueHint,
 } from "@/agent"
+import type { ObservationBundle } from "@/agent/observation/fragment"
 import { DEFAULT_SOURCE_AUTHORITY, gatherObservations } from "@/agent/observation/pipeline"
 import { lspEnrichProvider } from "@/agent/observation/providers/lsp-enrich/provider"
 import { agentlessProvider } from "@/agent/observation/render/agentless-provider"
@@ -24,7 +25,7 @@ import { renderObservations, renderObservationsLegacy } from "@/agent/observatio
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
 import type { LLMPort } from "@/llm"
 import type { LocalizeBudgetValue } from "@/runner/knobs/knobs/localize-budget"
-import { normalizePublicIssueText } from "@/shared"
+import { logger, normalizePublicIssueText } from "@/shared"
 import { localizeTool } from "@/tool/localize"
 import type { Instance, OwnerWideningTelemetry } from "../../types"
 import {
@@ -81,6 +82,11 @@ export interface PrepareIssueHintDeps {
    *  resolution over the candidate files) to the pipeline. Graceful no-op when no
    *  language server is available. Absent ⇒ ON (the posture default). */
   readonly lspPrefetch?: boolean
+  /** jul-6 S4 observe seam (optional, no-op by default) — the merged observation
+   *  bundle for this instance, handed over BEFORE it is rendered so the caller can
+   *  attribute providers / feed usage metrics. Pure observation; does not affect
+   *  the returned hint. */
+  readonly onObservationBundle?: (bundle: ObservationBundle) => void
   /** T-201 observer seam (optional, no-op by default). When the agentless
    *  localizer produces ranked candidate files, they are handed here BEFORE
    *  being collapsed into the hint string — so the caller can build a
@@ -413,6 +419,15 @@ export const prepareIssueHint = async (
     { cwd: sandbox, issueText: problemStatement, repoFiles: await readFileTree().catch(() => []) },
     { authority: DEFAULT_SOURCE_AUTHORITY },
   )
+  // observe-only telemetry (S4 seed): which providers actually contributed this
+  // instance — confirms LSP-enrich fired (`lsp-prefetch` in contributors) vs the
+  // agentless-only fallback, and how many owners survived the merge.
+  logger.info("observation: bundle", {
+    contributors: bundle.contributors,
+    owners: bundle.owners.length,
+    lspHarvested: bundle.contributors.includes("lsp-prefetch"),
+  })
+  deps.onObservationBundle?.(bundle)
   return deps.renderObservations === false
     ? renderObservationsLegacy(bundle)
     : renderObservations(bundle)
