@@ -82,6 +82,7 @@ const prepareHintAndReproContext = async (
     llm,
     issueHintExpectedActual: posture.issueHintExpectedActual,
     renderObservations: posture.renderObservations,
+    lspPrefetch: posture.lspPrefetch,
     ...(posture.localizeBudget !== undefined ? { localizeBudget: posture.localizeBudget } : {}),
     onCandidates: (files) => {
       localizeCandidates = files

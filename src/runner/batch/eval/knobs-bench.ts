@@ -254,6 +254,11 @@ export interface BenchPosture {
    *  instead of the legacy `## Issue Hints`. Default-ON; `QUANTA_OBS_RENDER`
    *  (0/off/false) disables ⇒ byte-identical legacy render. */
   readonly renderObservations: boolean
+  /** jul-6 S3 — add the LSP-enrich provider (documentSymbol/hover over the
+   *  agentless candidate files → symbol-refined owners + contracts) to the
+   *  observation pipeline. Default-ON; `QUANTA_OBS_LSP_PREFETCH` disables. Graceful
+   *  no-op when no language server is available (provider returns null). */
+  readonly lspPrefetch: boolean
   /** Agentless §3.3.1 reproduction-test K (undefined ⇒ no repro pre-compute). */
   readonly reproTestK: number | undefined
   /** jun-22 config-extraction: per-repro-script exec timeout (ms). undefined ⇒ 60s. */
@@ -643,6 +648,8 @@ export const benchPostureFromState = (
     readKnobValue(state, "issue-hint-expected-actual", isTrue) === true
   // jul-6 S3 — observation-kernel render, default-ON (env `QUANTA_OBS_RENDER` disables).
   const renderObservations = !gateDisabled(env, "QUANTA_OBS_RENDER")
+  // jul-6 S3 — LSP-enrich provider, default-ON (env `QUANTA_OBS_LSP_PREFETCH` disables).
+  const lspPrefetch = !gateDisabled(env, "QUANTA_OBS_LSP_PREFETCH")
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const reproExecTimeoutMs = readKnobValue(state, "repro-exec-timeout", isNumber)
   const localizeBudget = readKnobValue(state, "localize-budget", isLocalizeBudgetValue)
@@ -706,6 +713,7 @@ export const benchPostureFromState = (
     issueHintMode,
     issueHintExpectedActual,
     renderObservations,
+    lspPrefetch,
     reproTestK: repro !== undefined ? repro.samples : undefined,
     reproExecTimeoutMs,
     localizeBudget,

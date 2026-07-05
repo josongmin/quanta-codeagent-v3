@@ -18,6 +18,7 @@ import {
   extractIssueHint,
 } from "@/agent"
 import { DEFAULT_SOURCE_AUTHORITY, gatherObservations } from "@/agent/observation/pipeline"
+import { lspEnrichProvider } from "@/agent/observation/providers/lsp-enrich/provider"
 import { agentlessProvider } from "@/agent/observation/render/agentless-provider"
 import { renderObservations, renderObservationsLegacy } from "@/agent/observation/render/render"
 import { decideEscalation, type EscalationDecision } from "@/agent/repair-escalation"
@@ -76,6 +77,10 @@ export interface PrepareIssueHintDeps {
    *  kernel (`<quanta_observations>`). `false` ⇒ legacy `composeAgentlessHint`
    *  (byte-identical). Absent ⇒ ON (the posture default). */
   readonly renderObservations?: boolean
+  /** jul-6 S3 — when NOT false, add the LSP-enrich provider (symbol/contract
+   *  resolution over the candidate files) to the pipeline. Graceful no-op when no
+   *  language server is available. Absent ⇒ ON (the posture default). */
+  readonly lspPrefetch?: boolean
   /** T-201 observer seam (optional, no-op by default). When the agentless
    *  localizer produces ranked candidate files, they are handed here BEFORE
    *  being collapsed into the hint string — so the caller can build a
@@ -396,8 +401,15 @@ export const prepareIssueHint = async (
   // to `composeAgentlessHint(result)` (S3 proven). ON ⇒ the `<quanta_observations>`
   // render (routing-hint framing + anti_signals). agentlessProvider ignores ctx, so
   // the bundle — and thus the OFF byte-identity — is independent of the ctx passed.
+  // agentless (LLM localizer) seeds owners from the issue; LSP-enrich (default-ON,
+  // graceful no-op without a server) refines them to symbols + contracts. lsp-prefetch
+  // outranks agentless in DEFAULT_SOURCE_AUTHORITY, so a confirmed symbol owner wins.
+  const providers = [agentlessProvider(result)]
+  if (deps.lspPrefetch !== false) {
+    providers.push(lspEnrichProvider(result.files, sandbox))
+  }
   const bundle = await gatherObservations(
-    [agentlessProvider(result)],
+    providers,
     { cwd: sandbox, issueText: problemStatement, repoFiles: await readFileTree().catch(() => []) },
     { authority: DEFAULT_SOURCE_AUTHORITY },
   )
