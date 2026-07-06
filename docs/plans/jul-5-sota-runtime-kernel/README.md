@@ -68,7 +68,7 @@ typed `LocalizationPass` (candidates{files,symbols,tests,callPaths} / excluded{r
 selectedPatchTargets{rationale}). Consumes P1 EvidenceCards; connects to semantica-codegraph. The engine
 narrows/links/finds-contradictions; the model still selects. Biggest of the converge phases; sequence last.
 
-## P6 — SWE hidden-grader pack (prompt mode-conflict resolution)
+## P6 — SWE hidden-grader (`grader-only` verify strategy)
 
 **Problem (jul-5, measured — `docs/evidence/jul-5-prompt/`).** The real SWE-bench run prompt carries
 CONTRADICTORY orders in the same turn:
@@ -88,16 +88,16 @@ rules stayed scattered across L1 body (hardcoded) + L8 user (injected), so they 
 the unfinished half of the 3-axis work, not a new defect.
 
 **Fix.**
-1. Promote the hidden-grader Hard-rules from the user injection (prompt-directives) UP into a task pack
-   (prompt-rules, L2 system) — the SWE profile's `rulePack` slot already exists.
-2. Make the body's repro-required + completion-bar rules MODE-GATED so the hidden-grader pack overrides
-   them (the pack wins) instead of contradicting.
-3. Rewrite the pack in Do-not / Do / Stop-when / Final-format command-order form (prose → operations
-   order — less wobble in an execution prompt).
-4. DEFAULT-OFF knob (e.g. `QUANTA_SWE_HIDDEN_GRADER`), byte-identical when off, A/B on the SWE smoke
-   (baseline exists: `psf__requests-5414`, verify-OFF, FAIL/unresolved, 12 turns, $0.56).
+1. Absorb hidden-grader into the EXISTING verify axis as `verifyStrategy:"grader-only"` — not a new task
+   pack, not a second knob for the same posture.
+2. Extract the remaining repro-required body slice and suppress it plus the existing completion bar when
+   `grader-only` is active.
+3. Make the L1/L2 verify slot the SSOT; remove duplicated hidden-grader verify prose from the L8 bench
+   directive path, keeping only legitimate task-shape rules there.
+4. DEFAULT-OFF knob (`QUANTA_SWE_HIDDEN_GRADER`), byte-identical when off, then A/B on SWE with the same
+   picks/model/throttle and score conflict symptoms before resolved-rate.
 
-**Pack shape (draft).** 5 blocks — Mode / Do not / Do / Stop when / Final format.
+**Rule shape (draft).** 5 blocks — Mode / Do not / Do / Stop when / Final format.
 - Do not: source-only (no test/doc/lockfile edits), no pytest/tox/dep-install, no destructive git, no
   "verified/passing/done" claim unless a permitted check actually ran, no exploring past a coherent patch.
 - Do: read source before edit, confirm owner by strongest evidence (LSP *if available/reliable*, else
@@ -106,9 +106,10 @@ the unfinished half of the 3-axis work, not a new defect.
 - Stop when: minimal source patch applied.
 - Final format: Changed / Behavior / Verification = "not run — hidden-grader forbids local tests".
 
-**Hellgate.** RED e2e (pack ON ⇒ conflicting body rules suppressed + Do/Do-not rendered; OFF ⇒
-byte-identical 5-target hash); no-leak (grader/hidden-test mentions stay in the forbid-clause, never a
-"read the hidden test" directive); knob-inventory register; SWE smoke A/B vs the recorded baseline.
+**Hellgate.** RED e2e (`grader-only` ON ⇒ conflicting body rules suppressed + Do/Do-not rendered + user
+directive duplicate removed; OFF ⇒ byte-identical 5-target hash); no-leak (grader/hidden-test mentions
+stay in the forbid-clause, never a "read the hidden test" directive); snapshot honesty (`verifyStrategy`
+must report `"grader-only"` when active); knob-inventory register; SWE smoke A/B vs the recorded baseline.
 
 ## Guards (apply to all phases)
 
