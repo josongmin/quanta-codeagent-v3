@@ -70,16 +70,18 @@ import {
  *  repair phase. Runs the LSP-backed critic over each (file × symbol) the patch edits and
  *  records only the ones the callgraph could POSITIVELY refute (wrong-owner signal for the
  *  critic_saved_edit_rate A/B). The refuter is itself abs-path-safe + abort-bounded. */
-const maybeCriticRefute = async (args: {
+export const maybeCriticRefute = async (args: {
   readonly enabled: boolean
   readonly patch: string
   readonly cwd: string
   readonly issueText: string
   readonly signal: AbortSignal
+  /** Test seam — inject a critic; production builds the LSP-backed one from `cwd`. */
+  readonly critic?: OwnerCritic
 }): Promise<CriticRefuteSummary | undefined> => {
   if (!args.enabled || args.patch === "") return undefined
   try {
-    const critic = makeOwnerCritic(lspOwnerRefuter(args.cwd))
+    const critic = args.critic ?? makeOwnerCritic(lspOwnerRefuter(args.cwd))
     const files = filesFromPatch(args.patch)
     const symbols = diffTouchedSymbols(args.patch)
     const refuted: { file: string; symbol: string; reason: string }[] = []
