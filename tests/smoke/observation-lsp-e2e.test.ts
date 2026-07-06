@@ -100,6 +100,37 @@ describe.skipIf(!pyrightAvailable())("observation LSP injection — real pyright
     expect(bundle.owners.some((o) => o.symbol === UNIQUE_SYMBOL)).toBe(true)
   }, 60_000)
 
+  it("G4 CONCURRENCY: N concurrent enrich calls on distinct cwds all complete (no deadlock/crash)", async () => {
+    // default-ON lsp-prefetch fires per instance; a concurrent bench opens many cwds at
+    // once. lsp-prefetch shares the per-cwd warm-pool with the agent's own lsp_nav (no
+    // NEW servers), and the RSS watchdog caps memory — but the observable safety property
+    // is: concurrent enrich never deadlocks and always returns a bundle (harvest or null).
+    const dirs = Array.from({ length: 4 }, (_, i) => {
+      const d = mkdtempSync(join(tmpdir(), `obs-lsp-conc-${i}-`))
+      writeFileSync(join(d, REL_FILE), `def concurrent_marker_${i}(x):\n    return x\n`)
+      return d
+    })
+    try {
+      const bundles = await Promise.all(
+        dirs.map((d) =>
+          gatherObservations(
+            [lspEnrichProvider([REL_FILE], d)],
+            { ...CTX, cwd: d },
+            {
+              authority: DEFAULT_SOURCE_AUTHORITY,
+              budget: GENEROUS_BUDGET,
+            },
+          ),
+        ),
+      )
+      expect(bundles).toHaveLength(4)
+      // every concurrent call resolved to a well-formed bundle — no hang, no throw.
+      for (const b of bundles) expect(Array.isArray(b.owners)).toBe(true)
+    } finally {
+      for (const d of dirs) rmSync(d, { recursive: true, force: true })
+    }
+  }, 90_000)
+
   it("CONTROL: no language server ⇒ symbol absent, lsp-prefetch not a contributor", async () => {
     const provider = lspEnrichProvider([REL_FILE], dir, nullNavProvider)
     const bundle = await gatherObservations([provider], CTX, {
