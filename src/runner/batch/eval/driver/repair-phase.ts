@@ -10,6 +10,7 @@
 
 import { extractIssueHint } from "@/agent"
 import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
+import type { OwnerCritic } from "@/agent/observation/critic"
 import { lspOwnerRefuter } from "@/agent/observation/critic/lsp-refuter"
 import { makeOwnerCritic } from "@/agent/observation/critic/owner-critic"
 import type { IssueDeclaredExpected } from "@/agent/verification-plan"

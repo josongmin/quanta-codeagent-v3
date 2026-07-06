@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { AgentlessLocalizeResult } from "@/agent"
+import { type AgentlessLocalizeResult, composeAgentlessHint } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
   benchOptIns,
@@ -144,6 +144,7 @@ describe("prepareIssueHint — async hint computation", () => {
         issueHintExpectedActual: false,
         fileTree: async () => ["requests/models.py", "requests/adapters.py"],
         localize: fakeLocalize,
+        lspPrefetch: false, // unit test: render kernel ON, but no real language server
       },
     )
     // jul-6 S3: default-ON ⇒ observation-kernel render (`<quanta_observations>`,
@@ -346,6 +347,26 @@ describe("3-path byte-identity proof", () => {
       issueHintExpectedActual: false,
     })
     expect(hint).toBe("")
+  })
+
+  test("G3 hellgate: renderObservations=false ⇒ EXACTLY composeAgentlessHint (no LSP-owner leak)", async () => {
+    // The kernel-OFF path must reproduce the pre-feature agentless hint BYTE-FOR-BYTE,
+    // even though lspPrefetch defaults ON — LSP-enrich is gated on render being on, so
+    // it can never leak symbol-owners into the legacy render. RED before that gate fix.
+    const result: AgentlessLocalizeResult = {
+      files: ["requests/models.py", "requests/utils.py"],
+      rationales: ["prepare_url", "idna helper"],
+      rawResponse: "raw",
+    }
+    const hint = await prepareIssueHint(mkInstance(issue), "/tmp/sb", "agentless", {
+      llm: new StubLLM(),
+      issueHintExpectedActual: false,
+      fileTree: async () => result.files,
+      localize: async () => result,
+      renderObservations: false,
+      // lspPrefetch intentionally UNSET (defaults on) — must still be byte-identical.
+    })
+    expect(hint).toBe(composeAgentlessHint(result))
   })
 
   test("regex mode → composeIssueHint output (legacy parity)", async () => {

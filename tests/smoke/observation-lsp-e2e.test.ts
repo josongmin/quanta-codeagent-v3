@@ -86,6 +86,20 @@ describe.skipIf(!pyrightAvailable())("observation LSP injection — real pyright
     expect(rendered).toContain("<quanta_observations>")
   }, 60_000)
 
+  it("G1 PRODUCTION BUDGET: a warm server harvests within the 5s pipeline default (not just 45s)", async () => {
+    // Bench PREWARMS pyright before localize runs, so the production condition is a
+    // WARM server + the default pipeline budget (5s) — NOT a cold start. Warm it once…
+    await lspEnrichProvider([REL_FILE], dir).produce(CTX, { maxMillis: 45_000, maxOwners: 10 })
+    // …then run the exact production path: gatherObservations with NO explicit budget ⇒
+    // DEFAULT_BUDGET (5s). RED if a warm server can't harvest in the shipped budget ⇒
+    // default-ON lsp-prefetch would silently no-op per instance in real bench.
+    const bundle = await gatherObservations([lspEnrichProvider([REL_FILE], dir)], CTX, {
+      authority: DEFAULT_SOURCE_AUTHORITY,
+    })
+    expect(bundle.contributors).toContain("lsp-prefetch")
+    expect(bundle.owners.some((o) => o.symbol === UNIQUE_SYMBOL)).toBe(true)
+  }, 60_000)
+
   it("CONTROL: no language server ⇒ symbol absent, lsp-prefetch not a contributor", async () => {
     const provider = lspEnrichProvider([REL_FILE], dir, nullNavProvider)
     const bundle = await gatherObservations([provider], CTX, {

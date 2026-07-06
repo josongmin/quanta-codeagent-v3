@@ -411,7 +411,11 @@ export const prepareIssueHint = async (
   // graceful no-op without a server) refines them to symbols + contracts. lsp-prefetch
   // outranks agentless in DEFAULT_SOURCE_AUTHORITY, so a confirmed symbol owner wins.
   const providers = [agentlessProvider(result)]
-  if (deps.lspPrefetch !== false) {
+  // LSP-enrich only contributes when the kernel render is ON. With render OFF the
+  // hint MUST reproduce the legacy agentless `## Issue Hints` BYTE-IDENTICALLY —
+  // letting LSP symbol-owners leak into the legacy render would silently change the
+  // "off" output (jul-6 hellgate G3). So both knobs must be on for LSP to ride.
+  if (deps.renderObservations !== false && deps.lspPrefetch !== false) {
     providers.push(lspEnrichProvider(result.files, sandbox))
   }
   const bundle = await gatherObservations(
