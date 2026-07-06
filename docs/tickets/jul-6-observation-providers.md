@@ -42,7 +42,7 @@
 ### S3 — [P1b→P2] Observation port + Fragment 스키마 + renderer (구조 코어)
 - **What:** [design §1-4](../plans/jul-6-observation-providers/README.md). `ObservationProvider` port, `ObservationFragment`(숫자 confidence 없음, `EvidenceStrength` 순서형), `renderObservations`(top-k + `anti_signals` 상시 + routing-hint 헤더). `composeIssueHint` seam 승격.
 - **Where:** 신규 `src/agent/observation/{port.ts,fragment.ts,render.ts}`. 배선 = 기존 issue-hint 주입 seam 1지점.
-- **Knob:** `QUANTA_OBS_RENDER` default-OFF. **off일 때 `## Issue Hints`와 byte-identical**(호환 모드).
+- **Knob:** `QUANTA_OBS_RENDER` **default-ON** (jul-6 S3 — 의식적 flip, 유저 수용; `=0/off`로 비활성). **off일 때 `## Issue Hints`와 byte-identical**(호환 모드, 회귀테스트로 핀). ⚠️ **measure-first 예외**: 원 설계는 default-OFF였고, render + `QUANTA_OBS_LSP_PREFETCH`(LSP-enrich live 심볼/컨트랙트 주입)를 **heldout net-positive + overtrust(`hint_follow_without_verify_rate`) 무회귀 게이트 측정 없이** default-ON 출시함 — 효능 미측정. 아래 §Goal/North-star의 "default-OFF" 및 §P1b "shadow precision 통과 시에만 주입"은 이 flip으로 초과함(측정 후 재검토).
 - **Done:** renderer 순수(top-1 금지 테스트·anti_signals 상시 존재 테스트·strength 순서형·숫자 confidence 부재 가드) + agentless를 프로바이더로 이식해 off=byte-identical.
 - **Dup-check:** compose.ts 승격이지 신규 조립 아님.
 
