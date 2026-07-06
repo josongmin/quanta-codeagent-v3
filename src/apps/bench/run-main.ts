@@ -59,7 +59,7 @@ import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
 import { seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
-import { resolveBenchReasoningSummary } from "./reasoning-summary"
+import { resolveBenchReasoningSummary, resolveBenchReasoningSummaryDetail } from "./reasoning-summary"
 import {
   argFlag,
   argPositiveInt,
@@ -244,8 +244,10 @@ const resolveInstance = async (
  *  than aborting the batch. */
 type SwebenchTaskDeps = {
   llm: LLMPort
-  /** Fresh-port factory for fork-branch replay isolation (RFC jun-23 §4.1). */
-  freshLlm: () => LLMPort
+  /** Fresh-port factory for fork-branch replay isolation (RFC jun-23 §4.1).
+   *  Accepts an optional ctx so trajectory recordings are labeled with the
+   *  instance/run that produced them. */
+  freshLlm: (ctx?: { instanceId?: string; runId?: string }) => LLMPort
   /** G1 — verify-select model lanes (≥2 distinct-model ports) or undefined.
    *  Threaded onto the per-instance `RunInstanceDeps.llmLanes`. Undefined ⇒
    *  byte-identical single-port path. */
@@ -290,6 +292,11 @@ const runSwebenchTask = async (
   // visible via `tail -f ~/run.log` while the box is working.
   const startedAt = Date.now()
   logger.info(`▶ ${task.instanceId} — repo prep → patch-gen → grade …`)
+  // Bind instanceId + runId into freshLlm so every trajectory turn recorded
+  // for this task carries its instance/run label in metadata. The ctx is
+  // metadata-only — does not affect the cassette hash or replay semantics.
+  const instanceFreshLlm = (): LLMPort =>
+    deps.freshLlm({ instanceId: task.instanceId, ...(deps.obs?.runId !== undefined ? { runId: deps.obs.runId } : {}) })
   try {
     await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
     const instance = toInstance(task, dest)
@@ -321,7 +328,7 @@ const runSwebenchTask = async (
       },
       deps.cfg.n,
       deps.obs,
-      deps.freshLlm,
+      instanceFreshLlm,
     )
     const secs = Math.round((Date.now() - startedAt) / 1000)
     const mark = result.passed ? "PASS" : "FAIL"
@@ -391,8 +398,9 @@ const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
   /** Builds a fresh, independent llm port — used by the fork-branch fan-out for
-   *  per-branch replay isolation (RFC jun-23 §4.1). */
-  freshLlm: () => LLMPort,
+   *  per-branch replay isolation (RFC jun-23 §4.1). Accepts optional ctx so
+   *  recorded turns carry instance/run labels in metadata. */
+  freshLlm: (ctx?: { instanceId?: string; runId?: string }) => LLMPort,
   meta: { provider: string; model: string },
   cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
   // Pre-parsed by the single caller (`maybeRunDatasetMode`) so the dataset file
@@ -562,7 +570,12 @@ const finalizeObserve = async (
  *  a no-op exit gets `null` back and the caller bails. */
 const resolveLLM = (
   noun: string,
-): { provider: Provider; model: string; llm: LLMPort; freshLlm: () => LLMPort } | null => {
+): {
+  provider: Provider
+  model: string
+  llm: LLMPort
+  freshLlm: (ctx?: { instanceId?: string; runId?: string }) => LLMPort
+} | null => {
   const provider = pickProvider(process.env)
   // `--model` > `QUANTA_MODEL` > canonical DEFAULT_MODEL[provider] (the factory
   // fills the default when `model` is omitted). Provider pick, key lookup, and
@@ -574,7 +587,7 @@ const resolveLLM = (
     // `freshLlm` builds an INDEPENDENT replay port (fresh `used` set) per call —
     // the fork-branch fan-out needs this so each branch re-replays the full
     // prefix instead of sharing a consumed cassette (RFC jun-23 §4.1).
-    const freshLlm = (): LLMPort =>
+    const freshLlm = (_ctx?: { instanceId?: string; runId?: string }): LLMPort =>
       replayTrajectoryPort({
         path: trajectory.path,
         onMiss: trajectory.onMiss,
@@ -589,9 +602,10 @@ const resolveLLM = (
   // silently and tripping the LLM idle-timeout → silent-retry stall loop. An
   // explicit `QUANTA_REASONING_SUMMARY=0`/off still wins (operator override).
   const reasoningSummary = resolveBenchReasoningSummary(process.env)
+  const reasoningSummaryDetail = resolveBenchReasoningSummaryDetail(process.env)
   const llm = tryCreateLLM(
     provider,
-    { ...(modelArg !== undefined ? { model: modelArg } : {}), reasoningSummary },
+    { ...(modelArg !== undefined ? { model: modelArg } : {}), reasoningSummary, reasoningSummaryDetail },
     process.env,
   )
   if (!llm) {
@@ -612,7 +626,8 @@ const resolveLLM = (
   // Live LLM is stateless across calls, so off/live mode can share it; replay
   // mode re-wraps a fresh store each call (applyBenchTrajectoryMode → fresh
   // replayTrajectoryPort) so branches stay isolated.
-  const freshLlm = (): LLMPort => applyBenchTrajectoryMode(llm, trajectory, { provider, model })
+  const freshLlm = (ctx?: { instanceId?: string; runId?: string }): LLMPort =>
+    applyBenchTrajectoryMode(llm, trajectory, { provider, model }, ctx)
   return { provider, model, llm: freshLlm(), freshLlm }
 }
 
@@ -666,7 +681,7 @@ const maybeRunDatasetMode = async (
         ? llm
         : tryCreateLLM(
             provider,
-            { model: modelId, reasoningSummary: resolveBenchReasoningSummary(process.env) },
+            { model: modelId, reasoningSummary: resolveBenchReasoningSummary(process.env), reasoningSummaryDetail: resolveBenchReasoningSummaryDetail(process.env) },
             process.env,
           ),
   })

@@ -9,7 +9,6 @@ import { OpenAIResponsesAdapter } from "./adapters/openai-responses"
 import { resolveContext1M } from "./context-1m"
 import type { CredentialSource } from "./credential-helper"
 import type { LLMPort } from "./ports"
-import { jsonlReplayStore, replayLlmPort } from "./replay"
 import { type BedrockAdapterOptions, BedrockProviderAdapter } from "./providers/bedrock-adapter"
 import type {
   LlmProvider,
@@ -19,6 +18,7 @@ import type {
 } from "./providers/provider-port"
 import { resolveProvider } from "./providers/registry"
 import { type VertexAdapterOptions, VertexProviderAdapter } from "./providers/vertex-adapter"
+import { jsonlReplayStore, replayLlmPort } from "./replay"
 import type { CacheTtl } from "./types"
 
 /** Canonical provider identifier. Re-exports the `LLMProvider` union already
@@ -93,6 +93,10 @@ export interface CreateLLMOptions {
   /** Reasoning summary request (Responses surface). When omitted, derived from
    *  `QUANTA_REASONING_SUMMARY` (bool). True ⇒ `reasoning.summary:"auto"`. */
   reasoningSummary?: boolean
+  /** Reasoning summary detail level (Responses surface). When omitted, derived
+   *  from `QUANTA_REASONING_SUMMARY_DETAIL` (`auto|concise|detailed`). Unset /
+   *  invalid ⇒ `undefined` ⇒ wire uses `"auto"`. */
+  reasoningSummaryDetail?: "auto" | "concise" | "detailed"
   /** Reasoning output verbosity (Responses surface). When omitted, derived from
    *  `QUANTA_REASONING_VERBOSITY` (`low|medium|high`). Maps to `text.verbosity`. */
   reasoningVerbosity?: string
@@ -148,11 +152,13 @@ const ADAPTER_REGISTRY: Record<
     const serviceTier = resolveServiceTier(opts, env)
     const reasoningEffort = resolveReasoningEffort(opts, env)
     const reasoningVerbosity = resolveReasoningVerbosity(opts, env)
+    const reasoningSummaryDetail = resolveReasoningSummaryDetail(opts, env)
     return new OpenAIResponsesAdapter({
       ...shared,
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(resolveReasoningSummary(opts, env) ? { reasoningSummary: true } : {}),
+      ...(reasoningSummaryDetail !== undefined ? { reasoningSummaryDetail } : {}),
       ...(reasoningVerbosity !== undefined ? { reasoningVerbosity } : {}),
       ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
     })
@@ -200,6 +206,7 @@ const ADAPTER_REGISTRY: Record<
     const serviceTier = resolveServiceTier(_opts, env)
     const reasoningEffort = resolveReasoningEffort(_opts, env)
     const reasoningVerbosity = resolveReasoningVerbosity(_opts, env)
+    const reasoningSummaryDetail = resolveReasoningSummaryDetail(_opts, env)
     return new ChatGPTOAuthAdapter({
       model,
       env,
@@ -207,6 +214,7 @@ const ADAPTER_REGISTRY: Record<
       ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       ...(resolveReasoningSummary(_opts, env) ? { reasoningSummary: true } : {}),
+      ...(reasoningSummaryDetail !== undefined ? { reasoningSummaryDetail } : {}),
       ...(reasoningVerbosity !== undefined ? { reasoningVerbosity } : {}),
       ...(resolveReasoningCarryover(env) ? { reasoningCarryover: true } : {}),
       ...(_opts.maxTokens !== undefined ? { maxTokens: _opts.maxTokens } : {}),
@@ -262,6 +270,20 @@ export const resolveReasoningVerbosity = (
   opts: CreateLLMOptions,
   env: EnvLikeDecl,
 ): string | undefined => opts.reasoningVerbosity ?? env.QUANTA_REASONING_VERBOSITY
+
+/** Composition-root resolution of the reasoning summary detail level
+ *  (`QUANTA_REASONING_SUMMARY_DETAIL`, enum `auto|concise|detailed`). Explicit
+ *  option wins; otherwise the env var. Unset or out-of-set ⇒ `undefined` ⇒ wire
+ *  defaults to `"auto"`. Non-bench surfaces pass no explicit opt so they stay
+ *  byte-identical; bench composition root passes `"detailed"` as a CODE default. */
+export const resolveReasoningSummaryDetail = (
+  opts: CreateLLMOptions,
+  env: EnvLikeDecl,
+): "auto" | "concise" | "detailed" | undefined => {
+  const raw = opts.reasoningSummaryDetail ?? env.QUANTA_REASONING_SUMMARY_DETAIL
+  if (raw === "auto" || raw === "concise" || raw === "detailed") return raw
+  return undefined
+}
 
 /** H15 — composition-root resolution of o-series reasoning carry-over
  *  (`QUANTA_REASONING_CARRYOVER`). Default-OFF: unset ⇒ false ⇒ the Responses

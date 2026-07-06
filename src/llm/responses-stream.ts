@@ -93,6 +93,11 @@ export interface PrepareResponsesContinuationRequestArgs {
    *  carries the same `reasoning.summary` and the request fingerprint stays
    *  consistent. Default-OFF ⇒ byte-identical. Body-only knob. */
   readonly reasoningSummary?: boolean
+  /** Reasoning summary verbosity level (`QUANTA_REASONING_SUMMARY_DETAIL`,
+   *  `"auto" | "concise" | "detailed"`). Threaded into BOTH body builds so the
+   *  resume-tail body is consistent with the full body. Only consulted when
+   *  {@link reasoningSummary} is `true`. Omitted ⇒ `"auto"` (wire default). */
+  readonly reasoningSummaryDetail?: "auto" | "concise" | "detailed"
   /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`,
    *  `low|medium|high`). Threaded into BOTH body builds as `text.verbosity`.
    *  Omitted / out-of-set ⇒ no `text` field (byte-identical). Body-only knob. */
@@ -251,6 +256,9 @@ export const prepareResponsesContinuationRequest = (
     ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
     ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
     ...(args.reasoningSummary === true ? { reasoningSummary: true } : {}),
+    ...(args.reasoningSummaryDetail !== undefined
+      ? { reasoningSummaryDetail: args.reasoningSummaryDetail }
+      : {}),
     ...(args.reasoningVerbosity !== undefined
       ? { reasoningVerbosity: args.reasoningVerbosity }
       : {}),
@@ -362,6 +370,9 @@ export const prepareResponsesContinuationRequest = (
       ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
       ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
       ...(args.reasoningSummary === true ? { reasoningSummary: true } : {}),
+      ...(args.reasoningSummaryDetail !== undefined
+        ? { reasoningSummaryDetail: args.reasoningSummaryDetail }
+        : {}),
       ...(args.reasoningVerbosity !== undefined
         ? { reasoningVerbosity: args.reasoningVerbosity }
         : {}),

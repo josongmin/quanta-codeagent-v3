@@ -131,6 +131,12 @@ export interface BuildResponsesBodyOptions {
    *  EITHER an effort OR summary is requested, so summary works even with no
    *  effort knob. Default-OFF ⇒ no `summary` key (byte-identical). */
   readonly reasoningSummary?: boolean
+  /** Reasoning summary verbosity level (`QUANTA_REASONING_SUMMARY_DETAIL`,
+   *  `"auto" | "concise" | "detailed"`). Only consulted when
+   *  {@link reasoningSummary} is `true`. Omitted ⇒ `"auto"` (API default).
+   *  Pass `"detailed"` to request the most verbose CoT summary — maximises
+   *  trajectory readability for bench runs. */
+  readonly reasoningSummaryDetail?: "auto" | "concise" | "detailed"
   /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`,
    *  `"low" | "medium" | "high"`). The wire shape is `text: { verbosity }` — a
    *  TOP-LEVEL sibling of `reasoning`/`input`, NOT a flat `verbosity` key (which
@@ -352,6 +358,7 @@ export const buildResponsesBody = (
   const serviceTier = normalizeResponsesServiceTier(options.serviceTier)
   const reasoningEffort = normalizeResponsesReasoningEffort(options.reasoningEffort)
   const reasoningSummary = options.reasoningSummary === true
+  const reasoningSummaryDetail = options.reasoningSummaryDetail
   const verbosity = normalizeResponsesReasoningVerbosity(options.reasoningVerbosity)
   // The `reasoning` object co-locates effort + summary. It is emitted iff EITHER
   // is requested (summary is standalone — gating it on effort alone would drop
@@ -363,7 +370,7 @@ export const buildResponsesBody = (
     reasoningEffort !== undefined || reasoningSummary
       ? {
           ...(reasoningEffort !== undefined ? { effort: reasoningEffort } : {}),
-          ...(reasoningSummary ? { summary: "auto" as const } : {}),
+          ...(reasoningSummary ? { summary: reasoningSummaryDetail ?? "auto" } : {}),
         }
       : null
   const toolChoice = toResponsesToolChoice(

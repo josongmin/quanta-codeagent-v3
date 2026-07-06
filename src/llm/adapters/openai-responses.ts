@@ -28,6 +28,10 @@ interface OpenAIResponsesConfig extends AdapterStreamTimeoutConfig {
   /** Reasoning summary request (`QUANTA_REASONING_SUMMARY`) — env-derived at the
    *  composition root. When true ⇒ `reasoning.summary:"auto"` on the body. */
   reasoningSummary?: boolean
+  /** Reasoning summary detail level (`QUANTA_REASONING_SUMMARY_DETAIL`) —
+   *  env-derived at the composition root. `"detailed"` ⇒ max CoT visibility.
+   *  Omitted ⇒ `"auto"` (wire default). */
+  reasoningSummaryDetail?: "auto" | "concise" | "detailed"
   /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`) — env-derived at
    *  the composition root. Threaded onto the body as `text.verbosity`. */
   reasoningVerbosity?: string
@@ -56,6 +60,7 @@ export class OpenAIResponsesAdapter implements LLMPort {
   private readonly serviceTier: string | undefined
   private readonly reasoningEffort: string | undefined
   private readonly reasoningSummary: boolean
+  private readonly reasoningSummaryDetail: "auto" | "concise" | "detailed" | undefined
   private readonly reasoningVerbosity: string | undefined
   /** H15 — per-session carry-over: the flag + ONE store held for the adapter's
    *  lifetime so reasoning captured on turn N is available as turn N+1's input.
@@ -74,6 +79,7 @@ export class OpenAIResponsesAdapter implements LLMPort {
     this.serviceTier = config.serviceTier
     this.reasoningEffort = config.reasoningEffort
     this.reasoningSummary = config.reasoningSummary === true
+    this.reasoningSummaryDetail = config.reasoningSummaryDetail
     this.reasoningVerbosity = config.reasoningVerbosity
     this.reasoningCarryover = config.reasoningCarryover === true
     this.reasoningCarryoverStore = this.reasoningCarryover
@@ -106,6 +112,9 @@ export class OpenAIResponsesAdapter implements LLMPort {
         ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
         ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
         ...(this.reasoningSummary ? { reasoningSummary: true } : {}),
+        ...(this.reasoningSummaryDetail !== undefined
+          ? { reasoningSummaryDetail: this.reasoningSummaryDetail }
+          : {}),
         ...(this.reasoningVerbosity !== undefined
           ? { reasoningVerbosity: this.reasoningVerbosity }
           : {}),

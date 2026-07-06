@@ -35,6 +35,16 @@ export interface RecordingLlmOpts {
   readonly hashRequest?: (req: StreamInput) => string
   /** Override `Date.now` for deterministic `recordedAt` in tests. */
   readonly now?: () => number
+  /**
+   * Optional per-call context threaded in from the bench harness so each
+   * recorded turn carries instance/run/attempt labels. Metadata-only — does
+   * NOT affect the request hash (cassette key unchanged).
+   */
+  readonly callCtx?: {
+    readonly instanceId?: string
+    readonly runId?: string
+    readonly attempt?: number
+  }
 }
 
 export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
@@ -93,6 +103,11 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
             durationMs,
             ...(partial ? { partial: true } : {}),
             ...(partial && writeError !== null ? { error: writeError.message } : {}),
+            ...(opts.callCtx?.instanceId !== undefined
+              ? { instanceId: opts.callCtx.instanceId }
+              : {}),
+            ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
+            ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
           },
         }
         const finalRecord = opts.scrubber !== undefined ? opts.scrubber(baseRecord) : baseRecord

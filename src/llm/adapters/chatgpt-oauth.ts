@@ -98,6 +98,10 @@ export interface ChatGPTOAuthConfig extends AdapterStreamTimeoutConfig {
   /** Reasoning summary request (`QUANTA_REASONING_SUMMARY`) — env-derived at the
    *  composition root. True ⇒ `reasoning.summary:"auto"` on the body. */
   readonly reasoningSummary?: boolean
+  /** Reasoning summary detail level (`QUANTA_REASONING_SUMMARY_DETAIL`) —
+   *  env-derived at the composition root. `"detailed"` ⇒ max CoT visibility.
+   *  Omitted ⇒ `"auto"` (wire default). */
+  readonly reasoningSummaryDetail?: "auto" | "concise" | "detailed"
   /** Reasoning output verbosity (`QUANTA_REASONING_VERBOSITY`) — env-derived at
    *  the composition root. Threaded onto the body as `text.verbosity`. */
   readonly reasoningVerbosity?: string
@@ -179,6 +183,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
   private readonly serviceTier: string | undefined
   private readonly reasoningEffort: string | undefined
   private readonly reasoningSummary: boolean
+  private readonly reasoningSummaryDetail: "auto" | "concise" | "detailed" | undefined
   private readonly reasoningVerbosity: string | undefined
   /** H15 — per-session reasoning carry-over: flag + ONE store for the adapter's
    *  lifetime (off ⇒ undefined ⇒ byte-identical). */
@@ -202,6 +207,7 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     this.serviceTier = config.serviceTier
     this.reasoningEffort = config.reasoningEffort
     this.reasoningSummary = config.reasoningSummary === true
+    this.reasoningSummaryDetail = config.reasoningSummaryDetail
     this.reasoningVerbosity = config.reasoningVerbosity
     this.reasoningCarryover = config.reasoningCarryover === true
     this.reasoningCarryoverStore = this.reasoningCarryover
@@ -447,6 +453,9 @@ export class ChatGPTOAuthAdapter implements LLMPort {
         ...(this.serviceTier !== undefined ? { serviceTier: this.serviceTier } : {}),
         ...(this.reasoningEffort !== undefined ? { reasoningEffort: this.reasoningEffort } : {}),
         ...(this.reasoningSummary ? { reasoningSummary: true } : {}),
+        ...(this.reasoningSummaryDetail !== undefined
+          ? { reasoningSummaryDetail: this.reasoningSummaryDetail }
+          : {}),
         ...(this.reasoningVerbosity !== undefined
           ? { reasoningVerbosity: this.reasoningVerbosity }
           : {}),

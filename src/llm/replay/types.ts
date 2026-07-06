@@ -37,6 +37,13 @@ export interface RecordedInteraction {
     readonly partial?: boolean
     /** Error message if `partial === true`. */
     readonly error?: string
+    /** SWE-bench instance id (e.g. "psf__requests-5414"). Optional — absent on
+     *  old recordings that pre-date this field. */
+    readonly instanceId?: string
+    /** Bench run id (e.g. "run-1783358407538"). Optional — absent on old recordings. */
+    readonly runId?: string
+    /** 0-based attempt index within the instance. Optional — absent on old recordings. */
+    readonly attempt?: number
   }
 }
 

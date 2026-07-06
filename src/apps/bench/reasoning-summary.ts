@@ -25,3 +25,26 @@ import { readBool } from "@/shared"
  */
 export const resolveBenchReasoningSummary = (env: Record<string, string | undefined>): boolean =>
   readBool(env.QUANTA_REASONING_SUMMARY, /* defaultOn */ true)
+
+/**
+ * Bench default for reasoning summary detail level. DEFAULT: `"detailed"` for
+ * bench (maximises CoT visibility in trajectory). Operator can override with
+ * `QUANTA_REASONING_SUMMARY_DETAIL=auto|concise|detailed`.
+ *
+ * Why `"detailed"` for bench: the trajectory recorder captures the full
+ * reasoning summary so the operator can understand why the agent made each
+ * decision. `"detailed"` gives the most verbose CoT (vs `"auto"` which the
+ * API may abbreviate). An explicit env value always wins.
+ *
+ * NON-bench surfaces pass no explicit `opts.reasoningSummaryDetail`, so the
+ * factory's `resolveReasoningSummaryDetail` sees `undefined` from both opts and
+ * the (unset) env → returns `undefined` → wire defaults to `"auto"`
+ * (byte-identical). Only bench flips the CODE default to `"detailed"`.
+ */
+export const resolveBenchReasoningSummaryDetail = (
+  env: Record<string, string | undefined>,
+): "auto" | "concise" | "detailed" => {
+  const raw = env.QUANTA_REASONING_SUMMARY_DETAIL
+  if (raw === "auto" || raw === "concise" || raw === "detailed") return raw
+  return "detailed" // bench default: max detail for trajectory readability
+}

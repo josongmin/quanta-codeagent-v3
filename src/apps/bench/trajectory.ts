@@ -22,8 +22,8 @@
  */
 import { resolve } from "node:path"
 import type { LLMPort } from "@/llm"
-import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import type { MatchPolicy } from "@/llm/replay"
+import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import { isFalsyToken } from "@/shared"
 import { resumeHashRequest } from "./resume/canonicalize"
@@ -206,10 +206,15 @@ export const applyBenchTrajectoryMode = (
   llm: LLMPort,
   mode: BenchTrajectoryMode,
   identity: { provider: string; model: string },
+  ctx?: { instanceId?: string; runId?: string; attempt?: number },
 ): LLMPort => {
   if (mode.kind === "off") return llm
   if (mode.kind === "record")
-    return recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path: mode.path }) })
+    return recordingLlmPort({
+      inner: llm,
+      store: jsonlReplayStore({ path: mode.path }),
+      ...(ctx !== undefined ? { callCtx: ctx } : {}),
+    })
   return replayTrajectoryPort({
     path: mode.path,
     onMiss: mode.onMiss,
