@@ -259,6 +259,11 @@ export interface BenchPosture {
    *  observation pipeline. Default-ON; `QUANTA_OBS_LSP_PREFETCH` disables. Graceful
    *  no-op when no language server is available (provider returns null). */
   readonly lspPrefetch: boolean
+  /** jul-6 S1 — observe-only OwnerCritic: after a repair produces a patch, refute
+   *  the edited (file×symbol) owners via LSP callgraph (records a wrong-owner signal
+   *  for the critic_saved_edit_rate A/B). Default-OFF (repair-time LSP latency; a
+   *  measured lever, not the localization-time default-ON providers). `QUANTA_OBS_OWNER_CRITIC`. */
+  readonly ownerCritic: boolean
   /** Agentless §3.3.1 reproduction-test K (undefined ⇒ no repro pre-compute). */
   readonly reproTestK: number | undefined
   /** jun-22 config-extraction: per-repro-script exec timeout (ms). undefined ⇒ 60s. */
@@ -650,6 +655,8 @@ export const benchPostureFromState = (
   const renderObservations = !gateDisabled(env, "QUANTA_OBS_RENDER")
   // jul-6 S3 — LSP-enrich provider, default-ON (env `QUANTA_OBS_LSP_PREFETCH` disables).
   const lspPrefetch = !gateDisabled(env, "QUANTA_OBS_LSP_PREFETCH")
+  // jul-6 S1 — observe-only OwnerCritic, default-OFF (repair-time LSP, measure-first lever).
+  const ownerCritic = gateOn(env, "QUANTA_OBS_OWNER_CRITIC")
   const repro = readKnobValue(state, "repro-test", isReproValue)
   const reproExecTimeoutMs = readKnobValue(state, "repro-exec-timeout", isNumber)
   const localizeBudget = readKnobValue(state, "localize-budget", isLocalizeBudgetValue)
@@ -714,6 +721,7 @@ export const benchPostureFromState = (
     issueHintExpectedActual,
     renderObservations,
     lspPrefetch,
+    ownerCritic,
     reproTestK: repro !== undefined ? repro.samples : undefined,
     reproExecTimeoutMs,
     localizeBudget,

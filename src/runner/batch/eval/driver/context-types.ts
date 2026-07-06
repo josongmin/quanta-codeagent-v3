@@ -227,6 +227,22 @@ export interface Phase {
    *  label over the captured patch vs the ACTUAL reproducing test source. Telemetry
    *  only — reject-mode NOT wired. Absent ⇒ knob off ⇒ byte-identical. */
   reproViabilityReview?: ReproViabilityReview
+  /** jul-6 S1 (QUANTA_OBS_OWNER_CRITIC): observe-only OwnerCritic refute over the
+   *  edited (file×symbol) owners. Telemetry only — never diverts control flow.
+   *  Absent ⇒ knob off ⇒ byte-identical. */
+  criticRefutes?: CriticRefuteSummary
+}
+
+/** jul-6 S1 — observe-only summary of the OwnerCritic pass over a repair's patch.
+ *  `refuted` lists edits the LSP callgraph could POSITIVELY prove wrong-owner;
+ *  `checked` is how many (file×symbol) pairs were evaluated. */
+export interface CriticRefuteSummary {
+  readonly refuted: readonly {
+    readonly file: string
+    readonly symbol: string
+    readonly reason: string
+  }[]
+  readonly checked: number
 }
 
 export type RepairConfig = NonNullable<RunInstanceDeps["repair"]>

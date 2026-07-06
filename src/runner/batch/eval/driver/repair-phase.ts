@@ -10,12 +10,16 @@
 
 import { extractIssueHint } from "@/agent"
 import { evaluateSuccessPredicate, type PrimaryRailStep } from "@/agent/closure"
+import { lspOwnerRefuter } from "@/agent/observation/critic/lsp-refuter"
+import { makeOwnerCritic } from "@/agent/observation/critic/owner-critic"
 import type { IssueDeclaredExpected } from "@/agent/verification-plan"
+import { logger } from "@/shared"
 import type { Instance } from "../../types"
 import type { RerankTier } from "../acceptance-rerank"
 import { attributeAcceptanceTier } from "../acceptance-select"
 import type { ChaRepairTarget } from "../cha-multisite"
 import { resolveRepairEvaluatePredicate } from "../declared-expected-matcher"
+import { diffTouchedSymbols } from "../diff-touched-symbols"
 import { exec } from "../exec"
 import { coeditFamilyCoverageCandidate } from "../family-coverage-coedit"
 import {
@@ -37,14 +41,20 @@ import { buildRepairRoundSeedMessage } from "../repair/llm-evidence"
 import { validate as defaultValidate } from "../repair/validator"
 import { buildRepairRoundsConfig, makeRepairBreadthRunCandidates } from "../repair-breadth"
 import { emitSandbox, type Wiring } from "../report"
+import { maybeReviewReproViability } from "../repro-viability-wire"
 import { cleanupSandbox, forkSandbox } from "../sandbox"
 import type { Candidate } from "../selection-executor"
+import { filesFromPatch } from "../selection-paths"
 import { withGitSnapshot } from "../snapshot"
 import { runAgentOnce } from "./agent-phase"
-import { maybeReviewReproViability } from "../repro-viability-wire"
 import { deriveCandidateStructuralRepair } from "./candidate-family-ports"
 import { repairLocalizePhaseSuppressed } from "./config-build"
-import { type Phase, type RunInstanceDeps, readSandboxSource } from "./context-types"
+import {
+  type CriticRefuteSummary,
+  type Phase,
+  type RunInstanceDeps,
+  readSandboxSource,
+} from "./context-types"
 import { familyCoverageCoeditEnabled, resolveLaneLlm } from "./selection-phase"
 import {
   applySampleTemperature,
@@ -53,6 +63,46 @@ import {
   maybeReviewSubmission,
   resolveAcceptanceLlmRerank,
 } from "./selection-port-factories"
+
+/** jul-6 S1 — observe-only OwnerCritic pass over a repair's captured patch. Default-OFF
+ *  (`enabled=false` ⇒ undefined ⇒ the Phase is byte-identical). Fail-open: any error is
+ *  logged and swallowed to undefined — the critic is telemetry and MUST NEVER break the
+ *  repair phase. Runs the LSP-backed critic over each (file × symbol) the patch edits and
+ *  records only the ones the callgraph could POSITIVELY refute (wrong-owner signal for the
+ *  critic_saved_edit_rate A/B). The refuter is itself abs-path-safe + abort-bounded. */
+const maybeCriticRefute = async (args: {
+  readonly enabled: boolean
+  readonly patch: string
+  readonly cwd: string
+  readonly issueText: string
+  readonly signal: AbortSignal
+}): Promise<CriticRefuteSummary | undefined> => {
+  if (!args.enabled || args.patch === "") return undefined
+  try {
+    const critic = makeOwnerCritic(lspOwnerRefuter(args.cwd))
+    const files = filesFromPatch(args.patch)
+    const symbols = diffTouchedSymbols(args.patch)
+    const refuted: { file: string; symbol: string; reason: string }[] = []
+    let checked = 0
+    for (const file of files) {
+      for (const symbol of symbols) {
+        if (args.signal.aborted) return { refuted, checked }
+        checked++
+        const r = await critic.refute(
+          { file, symbol },
+          { cwd: args.cwd, issueText: args.issueText, repoFiles: [] },
+        )
+        if (r.verdict === "refuted") refuted.push({ file, symbol, reason: r.reason })
+      }
+    }
+    return { refuted, checked }
+  } catch (e) {
+    logger.warn("observation: owner-critic pass failed (observe-only, ignored)", {
+      error: e instanceof Error ? e.message : String(e),
+    })
+    return undefined
+  }
+}
 
 /**
  * Repair-path phase: ONE `withGitSnapshot` wraps ALL rounds (so the prior
@@ -490,6 +540,15 @@ export const runRepairPhase = async (
   // the orchestrator's last-round view. They agree by construction (single sandbox).
   const capturedPatch = patch !== "" ? patch : out.patch
   const submissionReview = maybeReviewSubmission(capturedPatch)
+  // jul-6 S1 — observe-only OwnerCritic (default-OFF ⇒ undefined ⇒ byte-identical;
+  // fail-open, never diverts control flow). Refutes wrong-owner edits via LSP callgraph.
+  const criticRefutes = await maybeCriticRefute({
+    enabled: repairPosture.ownerCritic,
+    patch: capturedPatch,
+    cwd: sandbox,
+    issueText: instance.problemStatement,
+    signal,
+  })
   // Spec step-5 observe-only fix-free viability label (default-OFF ⇒ undefined ⇒
   // byte-identical; fail-open, never diverts control flow). Reuses `reproSources`
   // (the ACTUAL reproduce_issue.py bodies already threaded into this phase).
@@ -514,6 +573,7 @@ export const runRepairPhase = async (
     ...(Object.keys(repairLlmEvidence).length > 0 ? { llmEvidence: repairLlmEvidence } : {}),
     ...(submissionReview !== undefined ? { submissionReview } : {}),
     ...(reproViabilityReview !== undefined ? { reproViabilityReview } : {}),
+    ...(criticRefutes !== undefined ? { criticRefutes } : {}),
     // Attribute the tier ONLY when the last selection's winner IS the submitted
     // patch (`out.patch` = orchestrator final `prevRun.patch`, same string lineage
     // as the adapter's `selected.patch`). A trailing non-selected fallback round
