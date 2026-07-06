@@ -11,6 +11,7 @@
 
 import { extractIssueHint, pytestReportPathFor } from "@/agent"
 import { type OwnerSibling, resolveOwnerSiblings } from "@/agent/closure"
+import { startBackgroundLspPrewarm } from "@/agent/lsp-bridge"
 import type { LLMPort } from "@/llm"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../../types"
 import { buildClosureSession, type ClosureSessionState } from "../closure-session"
@@ -253,6 +254,13 @@ export const prepareAttemptContext = async (
 ): Promise<PreparedAttemptContext> => {
   const state = stateOverride ?? resolveBenchKnobs({ envVars: process.env })
   const posture = postureOverride ?? benchPostureFromState(state, process.env)
+  // jul-6 — as soon as the repo (sandbox) is confirmed, fire-and-forget a pyright
+  // prewarm so it indexes DURING the (slow) strict-LSP-grounding + agentless-localize
+  // steps below — maximizing the chance a WARM server answers the localize-time
+  // lsp-prefetch harvest (the A/B telemetry showed a cold repo misses the 5s budget).
+  // NO-THROW + gated on the observation LSP path; the warm-pool persists, so a repair
+  // round's critic and the agent's own lsp_nav benefit too. `void`: never blocks prep.
+  if (posture.lspPrefetch) void startBackgroundLspPrewarm(sandbox, signal)
   // The gold patch's targets are the files the task actually concerns ⇒ the
   // language to require grounding for. Absent (non-swebench) ⇒ undefined, and the
   // gate falls back to the whole-repo probe (historical behavior).
