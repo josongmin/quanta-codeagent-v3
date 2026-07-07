@@ -289,12 +289,13 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
       "gh_check_status",
       "gh_issue_view",
     ],
-    origin: "@/tool gh* (gitTools)",
+    origin:
+      "@/tool/gh ghTools() — wired at ci-bot.ts buildCiBotWiring (QUANTA_CI_BOT_GH_WRITE for mutating subset) and @/tool/gh ghTools() for CLI opt-in via QUANTA_GIT_TOOLS",
     gate: { kind: "env-flag", env: "QUANTA_GIT_TOOLS" },
     default: { cli: "opt-in" },
     risk: "network",
     adr: "0103",
-    note: "GitHub PR/issue tools — opt-in alongside git tools.",
+    note: "GitHub PR/issue tools — opt-in via QUANTA_GIT_TOOLS (CLI) or via ci-bot wiring (QUANTA_CI_BOT_GH_WRITE unlocks mutating subset gh_pr_resolve_thread + gh_pr_edit_labels in ci-bot mode).",
   },
   {
     name: "lsp_diagnostics",

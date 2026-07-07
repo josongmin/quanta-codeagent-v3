@@ -508,21 +508,31 @@ export const buildBaseRegistry = (args: {
       // (QUANTA_DEFERRED_CAP) so a long session cannot grow the handle map
       // unbounded; the tool closes over THIS registry instance — the same one a
       // future `defineToolAsync` caller would register deferred work into.
-      ...buildAsyncDeferredTools(),
+      ...buildAsyncDeferredTools().tools,
     ]),
   )
 
 /** ADR-0287 — build the `poll_deferred` tool over a freshly-constructed
  *  {@link DefaultDeferredResultRegistry} when async-tools are enabled. Returns
- *  `[]` (no tool, no registry allocation) when `runtimeConfig().asyncTools` is
- *  false — the default-OFF byte-identical path. The cap is the closed env knob
- *  `QUANTA_DEFERRED_CAP` (resolved once by `runtimeConfig`); absent ⇒ the
- *  registry's own `DEFAULT_DEFERRED_CAP`. */
-const buildAsyncDeferredTools = (): Tool[] => {
+ *  `{ tools, asyncDeferredRegistry }`: `tools` contains the `poll_deferred` tool
+ *  (empty when OFF); `asyncDeferredRegistry` is the SHARED instance the tool was
+ *  built from (undefined when OFF). Hoisting the registry as a named field lets a
+ *  future `defineToolAsync` producer share the SAME instance (B5: prevents two
+ *  independent mints that would make poll_deferred miss producer handles).
+ *  Default-OFF byte-identical path: `tools === []`, `asyncDeferredRegistry === undefined`. */
+const buildAsyncDeferredTools = (): {
+  tools: Tool[]
+  asyncDeferredRegistry: DefaultDeferredResultRegistry | undefined
+} => {
   const cfg = runtimeConfig()
-  if (!cfg.asyncTools) return []
-  const registry = new DefaultDeferredResultRegistry(
+  if (!cfg.asyncTools) return { tools: [], asyncDeferredRegistry: undefined }
+  // B5 (shared-registry hoist): name the registry `asyncDeferredRegistry` so the
+  // call-site destructuring `const { tools, asyncDeferredRegistry } = buildAsyncDeferredTools()`
+  // exposes the SAME instance to any future `defineToolAsync` producer — preventing
+  // two independent `new DefaultDeferredResultRegistry()` mints that would make
+  // poll_deferred unable to find producer-registered handles.
+  const asyncDeferredRegistry = new DefaultDeferredResultRegistry(
     cfg.deferredCap !== undefined ? { cap: cfg.deferredCap } : {},
   )
-  return [pollDeferredTool(registry) as Tool]
+  return { tools: [pollDeferredTool(asyncDeferredRegistry) as Tool], asyncDeferredRegistry }
 }

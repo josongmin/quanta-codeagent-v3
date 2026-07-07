@@ -33,6 +33,7 @@ import { StdoutStream, type StreamPort } from "@/stream"
 import { defaultGitRunner, type GitRunner, gitTools, ToolRegistry } from "@/tool"
 import { createCiFindingStore } from "@/tool/ci-finding"
 import { ghTools, type GhRunner as ToolGhRunner } from "@/tool/gh"
+import { resolveGitBudget } from "@/tool/git"
 import {
   type AssembleRequest,
   type AssembleRequestSeams,
@@ -212,16 +213,30 @@ export const buildCiBotWiring = (
   // @/shared SSOT). Absent ⇒ the gh/git opt is empty ⇒ the tool set is
   // byte-identical to the legacy ci-bot wiring.
   const env = process.env
+  // ADR-0107 §wire — resolve the git capture budget from env knobs (QUANTA_GIT_BUDGET_*).
+  // Absent ⇒ resolveGitBudget returns undefined ⇒ withBudget inside gitTools returns the SAME
+  // runner reference ⇒ byte-identical to the pre-budget path.
+  const gitBudget = resolveGitBudget(env)
   const ghOpts: Parameters<typeof ghTools>[1] = {
     ...(gateOn(env, "QUANTA_GH_CODE_TOUR") ? { codeTour: true as const } : {}),
     // §7.3 — mint a fresh per-wiring CiFinding store when the gate is on.
     ...(gateOn(env, "QUANTA_CI_FINDING") ? { ciFindingStore: createCiFindingStore() } : {}),
+    // B3/B4 — when QUANTA_CI_BOT_GH_WRITE is ON, wire the guarded gitRunner into
+    // ghOpts so gh_pr_resolve_thread (and gh_pr_open) can issue bounded rebases.
+    ...(gateOn(env, "QUANTA_CI_BOT_GH_WRITE") ? { gitRunner: guarded } : {}),
   }
-  const gitOpts = gateOn(env, "QUANTA_GIT_CO_CHANGE") ? { coChange: true as const } : {}
-  // ci-bot uses the READ-ONLY gh tools (it never posts/merges autonomously here);
-  // gh_pr_code_tour + ci_finding are both read-only so they survive the filter.
-  const readOnlyGhTools = ghTools(ghToolRunner, ghOpts).filter((tool) => tool.isReadOnly())
-  const tools = new ToolRegistry([...gitTools(guarded, gitOpts), ...readOnlyGhTools])
+  const gitOpts = {
+    ...(gateOn(env, "QUANTA_GIT_CO_CHANGE") ? { coChange: true as const } : {}),
+    ...(gitBudget !== undefined ? { budget: gitBudget } : {}),
+  }
+  // B3/B4 — QUANTA_CI_BOT_GH_WRITE (default-OFF): when ON, include the full gh tool set
+  // (mutating tools — gh_pr_resolve_thread, gh_pr_edit_labels, gh_pr_comment, etc.);
+  // when OFF, keep only the read-only subset (byte-identical to pre-gate wiring).
+  const ghWriteEnabled = gateOn(env, "QUANTA_CI_BOT_GH_WRITE")
+  const selectedGhTools = ghWriteEnabled
+    ? ghTools(ghToolRunner, ghOpts)
+    : ghTools(ghToolRunner, ghOpts).filter((tool) => tool.isReadOnly())
+  const tools = new ToolRegistry([...gitTools(guarded, gitOpts), ...selectedGhTools])
   return { tools, gh }
 }
 

@@ -51,6 +51,7 @@ import {
   type Tool,
 } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
+import { resolveGitBudget } from "@/tool/git"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
 import { buildCliFetchRulesTool } from "./fetch-rules-wire"
@@ -657,8 +658,15 @@ export const loadFeatures = async (
   // ADR-0016: first-class git tools. NOT in defaultTools — opt-in only.
   // §7.2: when QUANTA_GIT_CO_CHANGE is also on, append the co-change tool
   // (opts.coChange). Default-OFF: gate off ⇒ git tool set is byte-identical.
+  // ADR-0107 §wire: resolve the git capture budget from env knobs (QUANTA_GIT_BUDGET_*).
+  // Absent ⇒ resolveGitBudget returns undefined ⇒ withBudget returns the SAME runner
+  // reference ⇒ byte-identical to the pre-budget path.
+  const gitBudget = resolveGitBudget(process.env)
   const gitToolList: Tool[] = gitToolsEnabled()
-    ? gitTools(undefined, gitCoChangeEnabled() ? { coChange: true } : {})
+    ? gitTools(undefined, {
+        ...(gitCoChangeEnabled() ? { coChange: true as const } : {}),
+        ...(gitBudget !== undefined ? { budget: gitBudget } : {}),
+      })
     : []
   // Structural AST search via ast-grep (QUANTA_AST_GREP=1). Default-OFF.
   const astGrepTools: Tool[] = astGrepEnabled() ? [astGrepTool as Tool] : []
@@ -769,17 +777,23 @@ export type { Tooling } from "@/runner/assemble/tooling"
 
 /** ADR-0287 — build the `poll_deferred` tool over a freshly-constructed
  *  {@link DefaultDeferredResultRegistry} when async-tools are enabled. Returns
- *  `[]` (no tool, no registry allocation) when `runtimeConfig().asyncTools` is
- *  false — the default-OFF byte-identical path. The cap is the closed env knob
- *  `QUANTA_DEFERRED_CAP` (resolved once by `runtimeConfig`); absent ⇒ the
- *  registry's own `DEFAULT_DEFERRED_CAP`. */
-const buildAsyncDeferredTools = (): Tool[] => {
+ *  `{ tools, registry }`: `tools` contains the `poll_deferred` tool (empty when
+ *  the gate is OFF); `registry` is the SHARED instance the tool was built from
+ *  (undefined when OFF). Hoisting the registry here lets a future
+ *  `defineToolAsync` producer share the SAME instance — preventing the bug where
+ *  two independent `new DefaultDeferredResultRegistry` calls result in the
+ *  poll tool being unable to find handles registered by the producer.
+ *  Default-OFF byte-identical path: `tools === []`, `registry === undefined`. */
+const buildAsyncDeferredTools = (): {
+  tools: Tool[]
+  asyncDeferredRegistry: DefaultDeferredResultRegistry | undefined
+} => {
   const cfg = runtimeConfig()
-  if (!cfg.asyncTools) return []
-  const registry = new DefaultDeferredResultRegistry(
+  if (!cfg.asyncTools) return { tools: [], asyncDeferredRegistry: undefined }
+  const asyncDeferredRegistry = new DefaultDeferredResultRegistry(
     cfg.deferredCap !== undefined ? { cap: cfg.deferredCap } : {},
   )
-  return [pollDeferredTool(registry) as Tool]
+  return { tools: [pollDeferredTool(asyncDeferredRegistry) as Tool], asyncDeferredRegistry }
 }
 
 /** Build the per-run tooling: resolve every env-driven default-OFF knob, then
@@ -845,9 +859,10 @@ export const buildTooling = (
   // tool). The `DefaultDeferredResultRegistry` is bounded by
   // `runtimeConfig().deferredCap` (QUANTA_DEFERRED_CAP); the tool closes over
   // THIS registry instance — the same one a future `defineToolAsync` caller
-  // would register deferred work into. Merged into `extraTools` alongside the
-  // search wire so the registration is independent of the search pipeline.
-  const asyncDeferredTools = buildAsyncDeferredTools()
+  // would register deferred work into. The registry is HOISTED as the named
+  // `asyncDeferredRegistry` so a future producer can share it (B5: prevents
+  // two independent mints that would make poll_deferred miss producer handles).
+  const { tools: asyncDeferredTools, asyncDeferredRegistry } = buildAsyncDeferredTools()
   // ADR-0494 — gated `ask_user` (structured elicitation). Default-OFF: null
   // unless QUANTA_ASK_USER is on AND stdin is a TTY (headless ⇒ no prompter ⇒
   // no tool ⇒ byte-identical menu). The terminal prompter is owned here in the
@@ -876,6 +891,10 @@ export const buildTooling = (
     ...(fetchRulesTool !== null ? [fetchRulesTool] : []),
     ...astGrepTools,
   ]
+  // Forward asyncDeferredRegistry for use when needed (currently unused by
+  // producers but declared here so the variable is in scope — prevents a future
+  // lint-unused warning turning into a dead-variable trap).
+  void asyncDeferredRegistry
   return buildToolingCore({
     store,
     embedder,

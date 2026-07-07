@@ -109,12 +109,17 @@ describe("T10 — async-tools poll_deferred wire is LIVE at BOTH composition roo
     expect(CLI_INTERNAL).toContain("deferredCap")
   })
 
-  it("HELL-AT-03: registration is GATED (default-OFF) — `if (!cfg.asyncTools) return []`", () => {
+  it("HELL-AT-03: registration is GATED (default-OFF) — early-return when asyncTools is false", () => {
     // The adversarial case: a refactor that registers poll_deferred
     // unconditionally would break the default-OFF byte-identical surface. Pin
     // the early-return guard at BOTH roots so the gate cannot silently vanish.
-    expect(AGENT_INDEX).toContain("if (!cfg.asyncTools) return []")
-    expect(CLI_INTERNAL).toContain("if (!cfg.asyncTools) return []")
+    // B5 update: buildAsyncDeferredTools now returns { tools, asyncDeferredRegistry }
+    // to expose the shared registry; the guard still short-circuits with empty tools.
+    expect(AGENT_INDEX).toContain("if (!cfg.asyncTools) return")
+    expect(CLI_INTERNAL).toContain("if (!cfg.asyncTools) return")
+    // Also pin: the hoisted registry variable name must be present (shared-instance proof).
+    expect(AGENT_INDEX).toContain("asyncDeferredRegistry")
+    expect(CLI_INTERNAL).toContain("asyncDeferredRegistry")
   })
 
   it("HELL-AT-04: LIVE — wired tool round-trips against a real registry", async () => {
