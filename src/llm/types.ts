@@ -422,4 +422,14 @@ export interface StreamInput {
    *  (e.g. OpenAI o-series / GPT-5 on the Responses API) drop it — see the
    *  per-adapter notes. */
   temperature?: number
+  /** Optional RECORDING lane label — a correlation id identifying WHICH parallel
+   *  lane (repair-breadth candidate, verify-select candidate, location fanout
+   *  seed) this call belongs to. When the bench runs N candidates concurrently
+   *  they all share ONE recording port, so without a lane label their turns
+   *  interleave INDISTINGUISHABLY on the one tape. The {@link laneLabeledPort}
+   *  decorator sets it per fork; the recorder strips it from the stored request
+   *  (so it is REPLAY-NEUTRAL — never hashed, never part of the matched key) and
+   *  stamps it into `metadata.lane`. Absent ⇒ byte-identical to the pre-feature
+   *  path (no key on the wire, no `lane` in metadata). */
+  recordingLane?: string
 }

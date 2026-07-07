@@ -11,7 +11,7 @@
 import { extractIssueHint } from "@/agent"
 import type { OwnerSibling } from "@/agent/closure"
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
-import type { LLMPort } from "@/llm"
+import { type LLMPort, laneLabeledPort } from "@/llm"
 import { gateOn } from "@/shared"
 import type { BenchReproTestTelemetry, Instance, ReproOracleCalibration } from "../../types"
 import type { ChaRepairTarget } from "../cha-multisite"
@@ -300,7 +300,12 @@ const generateSelectionCandidate = async (args: {
       args.stateOverride ?? resolveBenchKnobs({ envVars: process.env }),
       process.env,
     )
-  const laneLlm = resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index)
+  // Label this candidate's turns so N concurrent verify-select lanes stay
+  // distinguishable on the one shared recording tape (replay-neutral).
+  const laneLlm = laneLabeledPort(
+    resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index),
+    `verify-select#${args.index}`,
+  )
   try {
     const phase = await runAgentPhase(
       args.instance,

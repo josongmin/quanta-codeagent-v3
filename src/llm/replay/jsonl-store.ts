@@ -149,15 +149,31 @@ export function jsonlReplayStore(opts: JsonlReplayStoreOpts): ReplayStore {
     await mkdir(dirname(opts.path), { recursive: true })
   }
 
+  // Serialize appends: the bench runs N candidates CONCURRENTLY through one
+  // shared recording port, so multiple `append`s race here. O_APPEND keeps each
+  // line intact on disk, but concurrent appends COMPLETE OUT OF ORDER — verified:
+  // 50 concurrent appends land in a scrambled order (L0,L1,L44,L9,…). That breaks
+  // the append-ORDER contract that `truncateCassette` / `QUANTA_BENCH_REPLAY_LIMIT`
+  // rely on ("keep the first N recorded interactions" is only meaningful if order
+  // is deterministic). A tail-promise mutex runs each append to completion before
+  // the next begins, restoring call-order === disk-order under parallelism.
+  let appendTail: Promise<void> = Promise.resolve()
+
   return {
-    async append(record: RecordedInteraction): Promise<void> {
-      const list = await ensureLoaded()
-      await ensureDir()
-      await appendFile(opts.path, `${JSON.stringify(record)}\n`, "utf-8")
-      // Keep cache coherent so subsequent matches see the just-recorded entry
-      // exactly once. Loading AFTER append re-reads the just-written line from
-      // disk and then `push(record)` duplicates it in-memory.
-      list.push(record)
+    append(record: RecordedInteraction): Promise<void> {
+      const run = appendTail.then(async () => {
+        const list = await ensureLoaded()
+        await ensureDir()
+        await appendFile(opts.path, `${JSON.stringify(record)}\n`, "utf-8")
+        // Keep cache coherent so subsequent matches see the just-recorded entry
+        // exactly once. Loading AFTER append re-reads the just-written line from
+        // disk and then `push(record)` duplicates it in-memory.
+        list.push(record)
+      })
+      // Chain the next append after this one, but do NOT let a rejection poison
+      // the chain (swallow on the tail; the awaited `run` still surfaces it).
+      appendTail = run.catch(() => {})
+      return run
     },
     async match(
       request: StreamInput,

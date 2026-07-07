@@ -105,6 +105,7 @@ export {
   sampleTemperatureForCandidate,
   TEMPERATURE_SAMPLE,
 } from "./sample-temperature"
+export { laneLabeledPort } from "./with-recording-lane"
 export { withTemperature } from "./with-temperature"
 export {
   hasPrewarm,

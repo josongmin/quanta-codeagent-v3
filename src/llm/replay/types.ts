@@ -44,6 +44,12 @@ export interface RecordedInteraction {
     readonly runId?: string
     /** 0-based attempt index within the instance. Optional — absent on old recordings. */
     readonly attempt?: number
+    /** Parallel-lane correlation label (e.g. "repair-breadth#2", "verify-select#0")
+     *  identifying WHICH concurrent candidate produced this turn. Set from
+     *  `StreamInput.recordingLane` so N candidates sharing one recording port stay
+     *  distinguishable on the single tape. REPLAY-NEUTRAL: never part of the hash.
+     *  Absent on serial turns / old recordings. */
+    readonly lane?: string
     /**
      * Debug-mode enrichment (only populated when the recorder runs in `debug`
      * tier — `QUANTA_BENCH_RECORD_TRAJECTORY=debug`). A single OPAQUE, keyed slot

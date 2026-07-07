@@ -293,6 +293,7 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .tld-stale{background:#fbe2c8;color:#c07000}
 .tld-fail{background:#f6d8d8;color:#c03030}
 .anom-badge{font-size:12px;margin-left:2px;cursor:default}
+.lane-badge{font-size:9px;font-weight:700;color:#fff;padding:1px 7px;border-radius:9px;letter-spacing:.02em;font-family:var(--mono)}
 /* ── per-turn debug enrichment ── */
 .turn-dbg{margin-top:6px;border:1px solid #e0d4ea;border-radius:8px;background:#faf6fd;overflow:hidden}
 .turn-dbg-hd{display:flex;align-items:center;gap:7px;padding:6px 10px;cursor:pointer;user-select:none;font-size:11px}
@@ -668,6 +669,16 @@ const TC={bash:'#e0843a',run_bash:'#e0843a',shell:'#e0843a',read:'#5588ee',read_
 function tIcon(n){const k=(n??'').toLowerCase();if(TI[k])return TI[k];if(k.startsWith('lsp_'))return'◈';if(k.includes('submit'))return'📤';if(k.includes('test'))return'🧪';if(k.includes('git'))return'⎇';return'⚙'}
 function tColor(n){const k=(n??'').toLowerCase();if(TC[k])return TC[k];if(k.startsWith('lsp_'))return'#cc88ff';return'#5588cc'}
 
+// ──────────── LANE COLOR ────────────
+// Stable hue per lane label so the same parallel candidate is one color across
+// its (interleaved) turns. Deterministic hash → HSL.
+const LANE_HUES={}
+function laneColor(lane){
+  if(LANE_HUES[lane])return LANE_HUES[lane]
+  let h=0;for(let i=0;i<lane.length;i++)h=(h*31+lane.charCodeAt(i))>>>0
+  const c=`hsl(${h%360},58%,58%)`;LANE_HUES[lane]=c;return c
+}
+
 // ──────────── PHASE ────────────
 function detectPhase(turn,i){
   const ns=turn.output.tools.map(t=>(t.name??'').toLowerCase())
@@ -991,6 +1002,10 @@ function renderTurnGroup(turn,idx){
   const ts=fTime(turn.ts),dur=fMs(turn.meta?.durationMs),model=turn.meta?.model??''
   const tokIn=fN(turn.usage?.inputTokens??0),tokOut=fN(turn.usage?.outputTokens??0)
   const anomBadges=turn._anom?[...turn._anom].map(k=>`<span class="anom-badge" style="color:${ANOM[k].color}" title="${ANOM[k].label}">${ANOM[k].icon}</span>`).join(''):''
+  // parallel-lane label (repair-breadth#N / verify-select#N) — present only when
+  // this turn came from a concurrent candidate; color-coded so lanes are scannable.
+  const lane=turn.meta?.lane
+  const laneBadge=lane?`<span class="lane-badge" style="background:${laneColor(lane)}" title="parallel lane">⑂ ${esc(lane)}</span>`:''
 
   // ── USER SIDE: new user messages ──
   const userParts=buildUserParts(turn)
@@ -1014,6 +1029,7 @@ function renderTurnGroup(turn,idx){
           ${ts?`<span class="turn-ts">${ts}</span>`:''}
           ${dur?`<span class="turn-dur">${dur}</span>`:''}
           ${phase?`<span class="phase-badge ${phase}">${ph(phase)}</span>`:''}
+          ${laneBadge}
           ${anomBadges}
           <span class="full-prompt-btn${openTurnForPrompt===idx?' active':''}" data-turn="${idx}" onclick="openPromptPanel(${idx})" title="${T('fullPrompt')}">${T('promptBtn')}</span>
         </div>

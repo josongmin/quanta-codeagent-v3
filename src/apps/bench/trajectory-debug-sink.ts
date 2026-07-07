@@ -20,6 +20,16 @@
  * The sink is a process-scoped singleton because the contributing subsystems
  * (tool runtime, grader) do NOT share a call-stack with the LLM port that owns
  * the recording; a keyed buffer drained at turn-commit is the loose coupling.
+ *
+ * ⚠️ SERIAL-TURN ASSUMPTION (parallel limitation): the single shared buffer is
+ * drained per turn-commit. When the bench runs candidates CONCURRENTLY (repair-
+ * breadth / verify-select), two lanes' turns commit interleaved and their
+ * `contribute`d slices race into one buffer — a drain would misattribute. This
+ * is inert TODAY (the debug tier ships with NO live contributor — foundation
+ * only), so there is no correctness risk yet. The fix when a real contributor
+ * lands: key the buffer by lane via `AsyncLocalStorage` (bind the same
+ * `recordingLane` the recorder already stamps), so each fork's contributions
+ * stay isolated. Until then, debug enrichment is meaningful only on serial runs.
  */
 
 /** Falsy tokens that mean "off" for the debug gate (mirrors {@link isFalsyToken}). */

@@ -27,17 +27,11 @@
  * patch-gen) — which is why the knob is opt-in (default 1 ⇒ this is never called).
  */
 
-import type { LLMPort } from "@/llm"
-import { candidateFamilyCoverageMissing, type CandidateFamily } from "./candidate-families"
+import { type LLMPort, laneLabeledPort } from "@/llm"
+import { type CandidateFamily, candidateFamilyCoverageMissing } from "./candidate-families"
 import type { PerCandidateSeed } from "./location-set-fanout"
 import type { RepairValidateArgsInputs } from "./repair/index"
 import { buildRepairValidateArgs } from "./repair/index"
-import { filesFromPatch } from "./selection-paths"
-import type {
-  Candidate,
-  DerivedCandidateStructuralRepair,
-  FamilyCoverageRepairArgs,
-} from "./selection-types"
 import type {
   RepairCandidateOutcome,
   RepairConfig,
@@ -46,6 +40,12 @@ import type {
   ValidateArgs,
   ValidatorResult,
 } from "./repair/types"
+import { filesFromPatch } from "./selection-paths"
+import type {
+  Candidate,
+  DerivedCandidateStructuralRepair,
+  FamilyCoverageRepairArgs,
+} from "./selection-types"
 
 /**
  * Build the {@link RepairConfig} for a repair phase: `maxRounds` (when set),
@@ -240,7 +240,9 @@ const maybeWidenCandidateFamilyCoverage = async (
   }
   const candidate = breadthCandidateOf(run, index)
   if (candidate.files.length === 0) return { run }
-  const derived = await deps.deriveCandidateStructuralRepair(candidate, sandbox).catch(() => undefined)
+  const derived = await deps
+    .deriveCandidateStructuralRepair(candidate, sandbox)
+    .catch(() => undefined)
   const family = derived?.family
   if (family === undefined) return { run }
   const missingFiles = candidateFamilyCoverageMissing(family, candidate.files)
@@ -281,7 +283,9 @@ const runOneBreadthCandidate = async (
 ): Promise<RepairCandidateOutcome | undefined> => {
   const fork = await deps.sandboxPorts.forkSandbox(deps.instanceId, deps.mainSandbox)
   try {
-    const laneLlm = deps.resolveLaneLlm(index)
+    // Label this candidate's turns so the N concurrent lanes stay distinguishable
+    // on the one shared recording tape (replay-neutral; only tags metadata.lane).
+    const laneLlm = laneLabeledPort(deps.resolveLaneLlm(index), `repair-breadth#${index}`)
     const locationFocus = deps.perCandidateSeed?.focusOf?.(index)
     const generatedRun = await deps.runAgentOnFork(fork, seedMsg, laneLlm)
     const prepared = await maybeWidenCandidateFamilyCoverage(deps, generatedRun, index, fork)

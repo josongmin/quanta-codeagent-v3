@@ -79,6 +79,9 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
       onChunk: _onChunk,
       onCheckpoint: _onCheckpoint,
       responsesContinuation: _responsesContinuation,
+      // recordingLane is a correlation label, NOT request content: strip it from
+      // the stored request (kept replay-neutral) and stamp it into metadata.lane.
+      recordingLane: _recordingLane,
       ...rest
     } = input
     return rest
@@ -131,6 +134,8 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
               : {}),
             ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
             ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
+            // Per-call parallel-lane label (replay-neutral; see StreamInput.recordingLane).
+            ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
             ...(debug !== undefined ? { debug } : {}),
           },
         }
