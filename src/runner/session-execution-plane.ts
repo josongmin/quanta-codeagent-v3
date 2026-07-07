@@ -187,11 +187,10 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   // the freshly-constructed persistent scheduler.  default-OFF: absent or "0"
   // ⇒ byte-identical (no store reads, no forks).
   if (gateOn(args.envSource, "QUANTA_SUBAGENT_RESUME")) {
-    // `persistent` overrides poll/await with `HydratedSubagentResult` — structurally
-    // incompatible with `BackgroundSubagentScheduler` — but `resumeInterruptedHandles`
-    // only calls `scheduler.fork()` which IS fully compatible. Cast is safe.
+    // `persistent.fork` is structurally compatible with `BackgroundSubagentScheduler.fork`.
+    // ResumerOpts.scheduler is narrowed to `Pick<..., "fork">` so no cast needed.
     const resumeOutcomes = await resumeInterruptedHandles({
-      scheduler: persistent as unknown as BackgroundSubagentScheduler,
+      scheduler: persistent,
       store,
       policy: defaultResumePolicy(),
       workspace: args.cwd,

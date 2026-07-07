@@ -87,6 +87,7 @@ const handleFile = (workspaceDirPath: string, id: string): string => {
 /* ------------------------------------------------------------------ */
 
 const isPersistedStatus = (s: unknown): s is PersistedHandle["status"] =>
+  s === "queued" ||
   s === "running" ||
   s === "completed" ||
   s === "failed" ||

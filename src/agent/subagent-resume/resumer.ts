@@ -98,8 +98,10 @@ export interface ResumeOutcome {
 
 export interface ResumerOpts {
   /** Live ADR-0145 scheduler (in-memory OR hydrating wrapper from ADR-0158).
-   *  Used as the SOLE re-fork seam for `"resume"` decisions. */
-  readonly scheduler: BackgroundSubagentScheduler
+   *  Used as the SOLE re-fork seam for `"resume"` decisions. Only `fork()` is
+   *  called — callers with a hydrating wrapper (whose `poll` returns a
+   *  structurally wider `HydratedSubagentResult`) need not cast. */
+  readonly scheduler: Pick<BackgroundSubagentScheduler, "fork">
   /** Persistence port (ADR-0158). `list(workspace)` enumerates candidates;
    *  `save(handle)` flips the old handle to `"resumed"` / `"failed"`. */
   readonly store: PersistentSchedulerStore
@@ -230,7 +232,7 @@ const errMsg = (e: unknown): string => errMessage(e)
 const applyResume = async (
   handle: PersistedHandle,
   decision: ResumeDecision,
-  scheduler: BackgroundSubagentScheduler,
+  scheduler: Pick<BackgroundSubagentScheduler, "fork">,
   store: PersistentSchedulerStore,
   tNow: number,
   replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
@@ -342,7 +344,7 @@ const applyMarkFailed = async (
 const applyDecision = (
   handle: PersistedHandle,
   decision: ResumeDecision,
-  scheduler: BackgroundSubagentScheduler,
+  scheduler: Pick<BackgroundSubagentScheduler, "fork">,
   store: PersistentSchedulerStore,
   tNow: number,
   replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },

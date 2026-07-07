@@ -386,4 +386,30 @@ describe("E. 'resumed' status disk roundtrip", () => {
     expect(listed[0]?.status).toBe("resumed")
     expect(listed[0]?.outputSummary).toBe("resumed as bg-newid-123")
   })
+
+  test("HG-19: 'queued' handle roundtrips through save+list without silent loss", async () => {
+    // RED guard: if isPersistedStatus omits "queued", parseHandle returns
+    // undefined for any queued snapshot → store.list silently drops it →
+    // handles enqueued while the process runs vanish on next hydration.
+    // This test fires RED against the unfixed validator and GREEN once
+    // s === "queued" is added to isPersistedStatus.
+    const baseDir = await newTmp()
+    const store = defaultJsonlSchedulerStore({ baseDir })
+
+    const queued: PersistedHandle = {
+      id: "bg-queued-hg19",
+      spec: { task: "admission-queued task" },
+      status: "queued",
+      startedAt: Date.now() - 1_000,
+      turns: 0,
+      outputSummary: "(queued — not yet started)",
+      workspace: "/ws/queued-hg19",
+    }
+    await store.save(queued)
+
+    const listed = await store.list("/ws/queued-hg19")
+    expect(listed.length).toBe(1)
+    expect(listed[0]?.status).toBe("queued")
+    expect(listed[0]?.id).toBe("bg-queued-hg19")
+  })
 })

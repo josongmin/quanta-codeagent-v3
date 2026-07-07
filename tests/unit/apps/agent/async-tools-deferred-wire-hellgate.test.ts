@@ -109,21 +109,22 @@ describe("T10 — async-tools poll_deferred wire is LIVE at BOTH composition roo
     expect(AGENT_INDEX).toContain("deferredCap")
   })
 
-  it("HELL-AT-02b: cli buildTooling gates poll_deferred on runtimeConfig().asyncTools", () => {
-    expect(CLI_INTERNAL).toContain("asyncTools")
-    expect(CLI_INTERNAL).toContain("DefaultDeferredResultRegistry")
-    expect(CLI_INTERNAL).toContain("pollDeferredTool")
-    expect(CLI_INTERNAL).toContain("deferredCap")
+  it("HELL-AT-02b: cli buildTooling uses the shared buildAsyncDeferredTools from gated-tool-ports", () => {
+    // After ARCH-01 fix: internal.ts imports buildAsyncDeferredTools from gated-tool-ports
+    // rather than maintaining a private duplicate. The gate check, registry mint, and cap
+    // wiring now live in the SSOT (gated-tool-ports.ts / AGENT_INDEX), verified by HELL-AT-02.
+    expect(CLI_INTERNAL).toContain("buildAsyncDeferredTools")
+    expect(CLI_INTERNAL).toContain("gated-tool-ports")
+    // The call site in buildTooling must destructure the registry for future producers.
+    expect(CLI_INTERNAL).toContain("asyncDeferredRegistry")
   })
 
   it("HELL-AT-03: registration is GATED (default-OFF) — early-return when asyncTools is false", () => {
     // The adversarial case: a refactor that registers poll_deferred
     // unconditionally would break the default-OFF byte-identical surface. Pin
-    // the early-return guard at BOTH roots so the gate cannot silently vanish.
-    // B5 update: buildAsyncDeferredTools now returns { tools, asyncDeferredRegistry }
-    // to expose the shared registry; the guard still short-circuits with empty tools.
+    // the early-return guard in gated-tool-ports.ts (the SSOT). internal.ts
+    // no longer has its own gate check — it delegates to the imported function.
     expect(AGENT_INDEX).toContain("if (!cfg.asyncTools) return")
-    expect(CLI_INTERNAL).toContain("if (!cfg.asyncTools) return")
     // REAL WIRING PROOF: verify buildAsyncDeferredTools() returns { tools, asyncDeferredRegistry }
     // at runtime, NOT just a source-text string match.
     //
@@ -147,16 +148,16 @@ describe("T10 — async-tools poll_deferred wire is LIVE at BOTH composition roo
     }
   })
 
-  it("HELL-AT-03b: B5 registry call-site — buildBaseRegistry must NOT discard asyncDeferredRegistry via one-shot .tools accessor", () => {
-    // RED test for Bug 1: the call site `...buildAsyncDeferredTools().tools`
-    // silently discards asyncDeferredRegistry. The fix requires proper destructuring
-    // at the call site so the registry reference is preserved (matching internal.ts).
-    // A one-shot .tools accessor like `buildAsyncDeferredTools().tools` destroys the
-    // reference — pin that the buggy pattern is absent.
-    expect(AGENT_INDEX).not.toContain("buildAsyncDeferredTools().tools")
-    // After fix: the call site must destructure both tools and the registry.
-    // We verify the destructuring form used in internal.ts is also present here.
-    expect(AGENT_INDEX).toContain("asyncDeferredRegistry } = buildAsyncDeferredTools()")
+  it("HELL-AT-03b: B5 SSOT — cli/internal.ts must NOT have a private duplicate of buildAsyncDeferredTools", () => {
+    // RED guard: internal.ts previously had a private `const buildAsyncDeferredTools`
+    // that was structurally identical to the exported version in gated-tool-ports.ts.
+    // A private copy means the CLI REPL session mints its own registry independently
+    // of the version tested in HELL-AT-03, silently diverging from the SSOT.
+    // The fix: delete the private copy and import from gated-tool-ports.ts.
+    // This test pins that the private declaration can never be re-introduced.
+    expect(CLI_INTERNAL).not.toContain("const buildAsyncDeferredTools")
+    // The function must be imported (not locally declared).
+    expect(CLI_INTERNAL).toContain("buildAsyncDeferredTools")
   })
 
   it("HELL-AT-04: LIVE — wired tool round-trips against a real registry", async () => {

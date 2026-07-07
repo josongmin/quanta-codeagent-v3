@@ -461,7 +461,14 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  execution-plane calls `resumeInterruptedHandles` with the freshly-built
    *  persistent scheduler + `defaultResumePolicy`, sweeping every
    *  `"interrupted"` handle for the workspace: each one is re-forked and
-   *  the original handle is flipped to `"resumed"` in the store. */
+   *  the original handle is flipped to `"resumed"` in the store.
+   *
+   *  NOTE: `buildSharedExecutionPlaneRuntimeAugments` reads this flag via
+   *  `gateOn(args.envSource, "QUANTA_SUBAGENT_RESUME")` directly (not via this
+   *  field) because it accepts an injectable `envSource` for testability — tests
+   *  inject a fake env object, not `process.env`. This field exists for other
+   *  callers (CLI start-up, surfaces) that read from the frozen process.env
+   *  snapshot via `runtimeConfig()`. */
   readonly subagentResume: boolean
   /** ADR-0487 subagent background admission queue (`QUANTA_SUBAGENT_QUEUE`).
    *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ `defaultBackgroundSubagentScheduler`

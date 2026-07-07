@@ -50,7 +50,7 @@ import {
   pollDeferredTool,
   type Tool,
 } from "@/tool"
-import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
+import { buildAsyncDeferredTools } from "@/host/runtime/agent-arg-builder/gated-tool-ports"
 import { resolveGitBudget } from "@/tool/git"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
@@ -774,27 +774,6 @@ export const composeLLM = (
 //    env reads). Re-exported below so CLI-local types keep their historical
 //    surface without pulling runtime assembly helpers back in.
 export type { Tooling } from "@/runner/assemble/tooling"
-
-/** ADR-0287 — build the `poll_deferred` tool over a freshly-constructed
- *  {@link DefaultDeferredResultRegistry} when async-tools are enabled. Returns
- *  `{ tools, registry }`: `tools` contains the `poll_deferred` tool (empty when
- *  the gate is OFF); `registry` is the SHARED instance the tool was built from
- *  (undefined when OFF). Hoisting the registry here lets a future
- *  `defineToolAsync` producer share the SAME instance — preventing the bug where
- *  two independent `new DefaultDeferredResultRegistry` calls result in the
- *  poll tool being unable to find handles registered by the producer.
- *  Default-OFF byte-identical path: `tools === []`, `registry === undefined`. */
-const buildAsyncDeferredTools = (): {
-  tools: Tool[]
-  asyncDeferredRegistry: DefaultDeferredResultRegistry | undefined
-} => {
-  const cfg = runtimeConfig()
-  if (!cfg.asyncTools) return { tools: [], asyncDeferredRegistry: undefined }
-  const asyncDeferredRegistry = new DefaultDeferredResultRegistry(
-    cfg.deferredCap !== undefined ? { cap: cfg.deferredCap } : {},
-  )
-  return { tools: [pollDeferredTool(asyncDeferredRegistry) as Tool], asyncDeferredRegistry }
-}
 
 /** Build the per-run tooling: resolve every env-driven default-OFF knob, then
  *  delegate the actual registry + config aggregation to the surface-agnostic

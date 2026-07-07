@@ -1,3 +1,5 @@
+import { gateOn } from "@/shared"
+
 /**
  * `@/runner/diff-ops` — surface-agnostic line-level diff math.
  *
@@ -34,7 +36,7 @@ const parsePositiveInt = (raw: string | undefined, fallback: number): number => 
 export const resolveEnvCaps = (): { maxBytes: number; maxLines: number; diffHunks: boolean } => ({
   maxBytes: parsePositiveInt(process.env.QUANTA_DIFF_MAX_BYTES, DEFAULT_MAX_BYTES),
   maxLines: parsePositiveInt(process.env.QUANTA_DIFF_MAX_LINES, DEFAULT_MAX_LINES),
-  diffHunks: process.env.QUANTA_DIFF_HUNKS === "1",
+  diffHunks: gateOn(process.env, "QUANTA_DIFF_HUNKS"),
 })
 
 // ───────────────────────────────────────────────────────────────────────

@@ -508,17 +508,10 @@ export const buildBaseRegistry = (args: {
       // (QUANTA_DEFERRED_CAP) so a long session cannot grow the handle map
       // unbounded; the tool closes over THIS registry instance — the same one a
       // future `defineToolAsync` caller would register deferred work into.
-      // B5 FIX: destructure BOTH fields — discarding asyncDeferredRegistry via the
-      // one-shot `.tools` accessor would prevent any future producer from sharing
-      // the SAME registry instance (mirroring the pattern in cli/internal.ts).
-      ...(() => {
-        const { tools: asyncDeferredTools, asyncDeferredRegistry } = buildAsyncDeferredTools()
-        // Forward asyncDeferredRegistry for future producers (currently no producer
-        // at this composition layer, but keeping the reference prevents the "two
-        // independent mints" defect if a producer is added later).
-        void asyncDeferredRegistry
-        return asyncDeferredTools
-      })(),
+      // NOTE: buildBaseRegistry returns ToolRegistry (not { registry, ... }), so
+      // asyncDeferredRegistry cannot be returned from this composition root.
+      // To add a producer in this path, change the return type to expose the registry.
+      ...buildAsyncDeferredTools().tools,
     ]),
   )
 

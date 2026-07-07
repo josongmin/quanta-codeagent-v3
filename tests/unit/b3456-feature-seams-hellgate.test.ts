@@ -131,19 +131,40 @@ describe("B3+B4 — QUANTA_CI_BOT_GH_WRITE unlocks mutating gh tools in ci-bot",
   })
 })
 
+// ── B3/B4-MANIFEST: gated-tools manifest documents the secondary ci-bot gate ──
+
+describe("B3/B4-MANIFEST — gh tools manifest entry documents QUANTA_CI_BOT_GH_WRITE", () => {
+  it("ARCH-04: gated-tools.ts manifest 'gh' entry note or origin must name QUANTA_CI_BOT_GH_WRITE (drift guard)", () => {
+    const { readFileSync } = require("node:fs")
+    const { join } = require("node:path")
+    const src = readFileSync(
+      join(import.meta.dir, "../../src/tool/surface/gated-tools.ts"),
+      "utf8",
+    )
+    // The manifest type only supports one `gate` entry (QUANTA_GIT_TOOLS).
+    // The secondary ci-bot gate MUST be documented in `note` or `origin` so
+    // a reader inspecting the manifest learns about both activation paths.
+    // This test pins that documentation: if someone removes it while refactoring
+    // the manifest, the test turns red before B3/B4 silently regress.
+    const ghEntry = src.slice(src.indexOf('"gh_pr_view"'), src.indexOf("lsp_diagnostics"))
+    expect(ghEntry).toContain("QUANTA_CI_BOT_GH_WRITE")
+  })
+})
+
 // ── B5: shared deferred registry (no duplicate minting) ─────────────────────
 
 describe("B5 — buildAsyncDeferredTools exports the shared registry", () => {
-  it("B5-R1: source text of cli/internal.ts must export or expose the registry (shared-instance comment present)", () => {
+  it("B5-R1: cli/internal.ts must import buildAsyncDeferredTools from gated-tool-ports (SSOT, no private duplicate)", () => {
     const { readFileSync } = require("node:fs")
     const { join } = require("node:path")
     const src = readFileSync(join(import.meta.dir, "../../src/apps/cli/internal.ts"), "utf8")
-    // After the fix, buildAsyncDeferredTools returns { tools, registry } OR the
-    // registry is declared outside the function and referenced externally.
-    // At minimum the source must use a single registry variable shared between
-    // pollDeferredTool and any producer (not two separate `new DefaultDeferredResultRegistry`).
-    expect(src).toContain("DefaultDeferredResultRegistry")
-    // The function must return or expose the registry for sharing
+    // After ARCH-01 fix: private duplicate removed; internal.ts imports from the shared SSOT.
+    // A private `const buildAsyncDeferredTools` would mint an independent registry
+    // diverging from tests and the exported version.
+    expect(src).not.toContain("const buildAsyncDeferredTools")
+    expect(src).toContain("buildAsyncDeferredTools")
+    expect(src).toContain("gated-tool-ports")
+    // The call site must still destructure the registry for future producers.
     expect(src).toContain("asyncDeferredRegistry")
   })
 
