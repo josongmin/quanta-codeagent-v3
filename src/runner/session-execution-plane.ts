@@ -19,6 +19,7 @@ import {
   defaultJsonlSchedulerStore,
   persistentBackgroundSubagentScheduler,
 } from "@/agent/subagent-persistence-store"
+import { defaultResumePolicy, resumeInterruptedHandles } from "@/agent/subagent-resume"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import {
   AGENT_MODES,
@@ -171,15 +172,39 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
     ...(admissionQueue ? { admissionQueue: true } : {}),
     ...(admissionQueue && maxQueued !== undefined ? { maxQueued } : {}),
   })
+  const store = defaultJsonlSchedulerStore(
+    args.envSource.QUANTA_BG_STORE_DIR !== undefined
+      ? { baseDir: args.envSource.QUANTA_BG_STORE_DIR }
+      : undefined,
+  )
   const persistent = await persistentBackgroundSubagentScheduler({
     inner,
-    store: defaultJsonlSchedulerStore(
-      args.envSource.QUANTA_BG_STORE_DIR !== undefined
-        ? { baseDir: args.envSource.QUANTA_BG_STORE_DIR }
-        : undefined,
-    ),
+    store,
     workspace: args.cwd,
   })
+  // ADR-0159 work-resume wiring (GROUP B1): if QUANTA_SUBAGENT_RESUME is on,
+  // sweep interrupted handles from the previous process and re-fork them via
+  // the freshly-constructed persistent scheduler.  default-OFF: absent or "0"
+  // ⇒ byte-identical (no store reads, no forks).
+  if (gateOn(args.envSource, "QUANTA_SUBAGENT_RESUME")) {
+    // `persistent` overrides poll/await with `HydratedSubagentResult` — structurally
+    // incompatible with `BackgroundSubagentScheduler` — but `resumeInterruptedHandles`
+    // only calls `scheduler.fork()` which IS fully compatible. Cast is safe.
+    const resumeOutcomes = await resumeInterruptedHandles({
+      scheduler: persistent as unknown as BackgroundSubagentScheduler,
+      store,
+      policy: defaultResumePolicy(),
+      workspace: args.cwd,
+    })
+    // Evict the stale "interrupted" cache entries for every handle the sweep
+    // processed — whether it was resumed, marked-failed, or even skipped.
+    // The store.save(markResumed/markFailed) wrote a new status to disk but
+    // the hydrating scheduler's in-memory caches still hold the old snapshot.
+    // Evicting here ensures list()/poll() are consistent post-sweep.
+    for (const outcome of resumeOutcomes) {
+      persistent.evictInterrupted(outcome.id)
+    }
+  }
   const scheduler: BackgroundSubagentScheduler = {
     fork: (spec) => persistent.fork(spec),
     poll: (id) => {

@@ -87,7 +87,12 @@ const handleFile = (workspaceDirPath: string, id: string): string => {
 /* ------------------------------------------------------------------ */
 
 const isPersistedStatus = (s: unknown): s is PersistedHandle["status"] =>
-  s === "running" || s === "completed" || s === "failed" || s === "cancelled" || s === "interrupted"
+  s === "running" ||
+  s === "completed" ||
+  s === "failed" ||
+  s === "cancelled" ||
+  s === "interrupted" ||
+  s === "resumed"
 
 /** Reconstruct a {@link PersistedHandle} from a parsed JSON object, OMITTING
  *  absent optional fields (exactOptionalPropertyTypes). Returns `undefined`

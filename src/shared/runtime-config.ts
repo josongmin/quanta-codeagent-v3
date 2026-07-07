@@ -317,6 +317,13 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
     // H18/keyring — opt-in (`gateOn` vocab; #24). Default false ⇒ MCP OAuth uses the
     // plain 0600 file token store (byte-identical, no keyring wrap).
     mcpOAuthKeyring: gateOn(env, "QUANTA_MCP_OAUTH_KEYRING"),
+    // ADR-0159 Phase 2 work-resume (GROUP B1) — opt-in (gateOn vocab
+    // `1`/`on`/`true`/`yes`; #24). Default false ⇒ interrupted handles are
+    // left as-is in the store (normalizeBgStatus maps them to "failed" on
+    // poll/list but the store is untouched — byte-identical). When ON,
+    // `buildSharedExecutionPlaneRuntimeAugments` sweeps interrupted handles
+    // and re-forks them via the persistent scheduler before returning.
+    subagentResume: gateOn(env, "QUANTA_SUBAGENT_RESUME"),
     // ADR-0487 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default
     // false ⇒ scheduler built without
     // admissionQueue (throw-at-cap) and no 4th tool (byte-identical).

@@ -67,6 +67,12 @@ export interface PersistentBackgroundSubagentScheduler
     result: HydratedSubagentResult
     spec: SubagentSpec
   }>
+  /** Evict a single handle from the in-memory interrupted / hydrated caches.
+   *  Call this after an external actor (e.g. `resumeInterruptedHandles`) writes
+   *  a non-interrupted status for an id directly to the store — so that a
+   *  subsequent `list()` / `poll()` no longer surfaces the stale "interrupted"
+   *  snapshot. No-op when the id is unknown. */
+  evictInterrupted(id: SubagentHandleId): void
 }
 
 /** Default liveness probe — `process.kill(pid, 0)` succeeds if the process
@@ -376,6 +382,11 @@ export const persistentBackgroundSubagentScheduler = async (
 
     hydrateWithPrune(json, maxAgeMs): { restored: number; pruned: number } {
       return inner.hydrateWithPrune(json, maxAgeMs)
+    },
+
+    evictInterrupted(id: SubagentHandleId): void {
+      interruptedById.delete(id)
+      hydratedById.delete(id)
     },
   }
 }

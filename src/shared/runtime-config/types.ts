@@ -453,6 +453,16 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  the file store with `composeTokenStore(selectKeyring(...), fileStore)`
    *  (Keychain / libsecret, file-fallback + migration, NO-THROW). */
   readonly mcpOAuthKeyring: boolean
+  /** ADR-0159 Phase 2 work-resume (`QUANTA_SUBAGENT_RESUME`).
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒
+   *  `buildSharedExecutionPlaneRuntimeAugments` leaves interrupted handles
+   *  untouched in the store (normalizeBgStatus maps them to `"failed"` only
+   *  on poll/list — store is the ground truth, byte-identical). When ON, the
+   *  execution-plane calls `resumeInterruptedHandles` with the freshly-built
+   *  persistent scheduler + `defaultResumePolicy`, sweeping every
+   *  `"interrupted"` handle for the workspace: each one is re-forked and
+   *  the original handle is flipped to `"resumed"` in the store. */
+  readonly subagentResume: boolean
   /** ADR-0487 subagent background admission queue (`QUANTA_SUBAGENT_QUEUE`).
    *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ `defaultBackgroundSubagentScheduler`
    *  is constructed WITHOUT `admissionQueue`, so an over-cap spawn throws-at-cap

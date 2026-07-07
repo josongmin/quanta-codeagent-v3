@@ -396,6 +396,13 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Peer teammate messaging gate.",
   },
   {
+    envKey: "QUANTA_SUBAGENT_RESUME",
+    kind: "bool",
+    default: false,
+    group: "subagent",
+    describe: "Subagent interrupted-handle auto-resume sweep gate (ADR-0159 Phase 2).",
+  },
+  {
     envKey: "QUANTA_SUBAGENT_QUEUE",
     kind: "bool",
     default: false,

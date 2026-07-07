@@ -1,5 +1,5 @@
 /**
- * JSONL store hellgate — ADR-0158 Phase 1.
+ * JSONL store hellgate — ADR-0158 Phase 1 + ADR-0159 Phase 2.
  *
  * Seals the on-disk semantics of `defaultJsonlSchedulerStore`:
  *
@@ -7,8 +7,9 @@
  *   B. list (4)
  *   C. delete + prune (4)
  *   D. Crash safety (3)
+ *   E. "resumed" status disk roundtrip (1)  ← ADR-0159 guard
  *
- * Total = 16 cases. All on tmpdir under `os.tmpdir()` — no global state.
+ * Total = 17 cases. All on tmpdir under `os.tmpdir()` — no global state.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -314,5 +315,75 @@ describe("D. Crash safety", () => {
       // Restore so the temp cleanup can succeed.
       await chmod(wsDir, 0o755).catch(() => undefined)
     }
+  })
+})
+
+/* ====================================================================== */
+/* E. "resumed" status disk roundtrip (ADR-0159 Phase 2 guard)            */
+/* ====================================================================== */
+
+describe("E. 'resumed' status disk roundtrip", () => {
+  test("HG-17: save handle with status 'resumed' — load parses correctly, no PersistenceError", async () => {
+    const baseDir = await newTmp()
+    const store = defaultJsonlSchedulerStore({ baseDir })
+
+    // Write a handle that the resumer would produce via markResumed().
+    const h: PersistedHandle = {
+      id: "bg-resumed-e2e1",
+      spec: { task: "original task", metadata: { idempotent: "true" } },
+      status: "resumed",
+      startedAt: 1_000,
+      endedAt: 2_000,
+      turns: 3,
+      outputSummary: "resumed as bg-newhandle",
+      workspace: "/ws/resume-roundtrip",
+    }
+    // Must NOT throw (isPersistedStatus must include "resumed").
+    await store.save(h)
+
+    const got = await store.load(h.id)
+    expect(got).not.toBeNull()
+    if (got === null) throw new Error("unreachable")
+
+    expect(got.id).toBe("bg-resumed-e2e1")
+    expect(got.status).toBe("resumed")
+    expect(got.outputSummary).toBe("resumed as bg-newhandle")
+    expect(got.endedAt).toBe(2_000)
+    expect(got.turns).toBe(3)
+    // Optional fields preserved.
+    expect(got.workspace).toBe("/ws/resume-roundtrip")
+    expect(got.spec.metadata).toEqual({ idempotent: "true" })
+  })
+
+  test("HG-18: 'resumed' handle surfaces in list() with correct status", async () => {
+    const baseDir = await newTmp()
+    const store = defaultJsonlSchedulerStore({ baseDir })
+
+    // Save the original interrupted handle first.
+    const interrupted: PersistedHandle = {
+      id: "bg-resumed-list1",
+      spec: { task: "task for list test" },
+      status: "interrupted",
+      startedAt: 500,
+      endedAt: 1_000,
+      turns: 1,
+      outputSummary: "(interrupted)",
+      workspace: "/ws/resume-list",
+    }
+    await store.save(interrupted)
+
+    // Now overwrite with "resumed" (JSONL append — latest line wins).
+    const resumed: PersistedHandle = {
+      ...interrupted,
+      status: "resumed",
+      outputSummary: "resumed as bg-newid-123",
+      endedAt: 1_500,
+    }
+    await store.save(resumed)
+
+    const listed = await store.list("/ws/resume-list")
+    expect(listed.length).toBe(1)
+    expect(listed[0]?.status).toBe("resumed")
+    expect(listed[0]?.outputSummary).toBe("resumed as bg-newid-123")
   })
 })
