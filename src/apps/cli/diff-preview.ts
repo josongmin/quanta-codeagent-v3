@@ -81,6 +81,10 @@ export interface RenderActionDiffOptions {
   readonly maxLines?: number
   /** Injection seam for tests + non-fs sources. Defaults to `node:fs/promises#readFile`. */
   readonly readFile?: (path: string) => Promise<string>
+  /** When true, emit git-style `@@` hunk headers + line-number gutters.
+   *  Default false (legacy simple render). Controlled by env
+   *  `QUANTA_DIFF_HUNKS=1` when not passed explicitly. */
+  readonly diffHunks?: boolean
 }
 
 /** Try to render a unified-diff preview for a tool action. Returns
@@ -94,17 +98,18 @@ export const renderActionDiff = async (
   const env = resolveEnvCaps()
   const maxBytes = opts.maxBytes ?? env.maxBytes
   const maxLines = opts.maxLines ?? env.maxLines
+  const diffHunks = opts.diffHunks ?? env.diffHunks
   const reader = opts.readFile ?? defaultReadFile
   try {
     switch (action.tool) {
       case "write":
-        return await renderWrite(action.input, { maxBytes, maxLines, reader })
+        return await renderWrite(action.input, { maxBytes, maxLines, reader, diffHunks })
       case "edit":
         return renderEdit(action.input, { maxBytes })
       case "apply_patch":
         return renderApplyPatch(action.input, { maxLines })
       case "scripted_replace":
-        return await renderScriptedReplace(action.input, { maxBytes, maxLines, reader })
+        return await renderScriptedReplace(action.input, { maxBytes, maxLines, reader, diffHunks })
       default:
         return undefined
     }
@@ -123,6 +128,7 @@ interface FileCaps {
   maxBytes: number
   maxLines: number
   reader: (path: string) => Promise<string>
+  diffHunks: boolean
 }
 
 const renderWrite = async (input: unknown, caps: FileCaps): Promise<string | undefined> => {
@@ -138,7 +144,7 @@ const renderWrite = async (input: unknown, caps: FileCaps): Promise<string | und
   if (prev === BINARY_SENTINEL) {
     return `${header(path)}\n${dim("[existing file is binary or oversize; preview skipped]")}`
   }
-  const body = renderUnified(prev ?? "", content, caps.maxLines)
+  const body = renderUnified(prev ?? "", content, caps.maxLines, { hunks: caps.diffHunks })
   return `${header(path, prev === undefined ? "new file" : undefined)}\n${body}`
 }
 
@@ -214,7 +220,7 @@ const renderScriptedReplace = async (
   if (next === prev) {
     return `${header(path)}\n${dim("[no matches; file unchanged]")}`
   }
-  return `${header(path)}\n${renderUnified(prev, next, caps.maxLines)}`
+  return `${header(path)}\n${renderUnified(prev, next, caps.maxLines, { hunks: caps.diffHunks })}`
 }
 
 // ───────────────────────────────────────────────────────────────────────

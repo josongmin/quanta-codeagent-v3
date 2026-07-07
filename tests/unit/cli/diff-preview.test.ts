@@ -50,6 +50,7 @@ afterEach(() => {
   delete process.env.QUANTA_DIFF_PREVIEW
   delete process.env.QUANTA_DIFF_MAX_BYTES
   delete process.env.QUANTA_DIFF_MAX_LINES
+  delete process.env.QUANTA_DIFF_HUNKS
 })
 
 describe("renderActionDiff — write", () => {
@@ -419,7 +420,7 @@ describe("ENV knobs", () => {
   test("resolveEnvCaps reads QUANTA_DIFF_MAX_BYTES / _LINES at call time", () => {
     process.env.QUANTA_DIFF_MAX_BYTES = "1234"
     process.env.QUANTA_DIFF_MAX_LINES = "7"
-    expect(resolveEnvCaps()).toEqual({ maxBytes: 1234, maxLines: 7 })
+    expect(resolveEnvCaps()).toEqual({ maxBytes: 1234, maxLines: 7, diffHunks: false })
   })
 
   test("resolveEnvCaps falls back to defaults for invalid values", () => {
@@ -428,5 +429,71 @@ describe("ENV knobs", () => {
     const caps = resolveEnvCaps()
     expect(caps.maxBytes).toBeGreaterThan(0)
     expect(caps.maxLines).toBeGreaterThan(0)
+  })
+
+  test("resolveEnvCaps diffHunks OFF by default (byte-identical gate)", () => {
+    delete process.env.QUANTA_DIFF_HUNKS
+    expect(resolveEnvCaps().diffHunks).toBe(false)
+  })
+
+  test("resolveEnvCaps diffHunks ON when QUANTA_DIFF_HUNKS=1", () => {
+    process.env.QUANTA_DIFF_HUNKS = "1"
+    expect(resolveEnvCaps().diffHunks).toBe(true)
+  })
+})
+
+describe("QUANTA_DIFF_HUNKS=1 — @@ headers wired through renderActionDiff", () => {
+  beforeEach(() => {
+    process.env.QUANTA_DIFF_HUNKS = "1"
+  })
+
+  test("write action: multi-hunk diff emits @@ headers when QUANTA_DIFF_HUNKS=1", async () => {
+    // 20 lines, two changes far apart so we get two separate hunks.
+    const oldLines = Array.from({ length: 20 }, (_, i) => `line${i + 1}`)
+    const newLines = [...oldLines]
+    newLines[1] = "CHANGED_A" // change near top
+    newLines[17] = "CHANGED_B" // change near bottom
+    const before = oldLines.join("\n")
+    const after = newLines.join("\n")
+
+    const out = await renderActionDiff(
+      action("write", { path: "/x/f.ts", content: after }),
+      { readFile: async () => before },
+    )
+    const plain = stripAnsi(mustRender(out))
+    // Hunk headers must be present — this is the gate assertion.
+    expect(plain).toContain("@@")
+    const headers = plain.split("\n").filter((r) => r.startsWith("@@"))
+    expect(headers.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test("write action with QUANTA_DIFF_HUNKS=0 produces NO @@ headers (default OFF)", async () => {
+    process.env.QUANTA_DIFF_HUNKS = "0"
+    const before = "a\nb\nc"
+    const after = "a\nB\nc"
+
+    const out = await renderActionDiff(
+      action("write", { path: "/x/f.ts", content: after }),
+      { readFile: async () => before },
+    )
+    const plain = stripAnsi(mustRender(out))
+    expect(plain).not.toContain("@@")
+  })
+
+  test("scripted_replace action: emits @@ headers when QUANTA_DIFF_HUNKS=1", async () => {
+    const oldLines = Array.from({ length: 20 }, (_, i) => `line${i + 1}`)
+    const before = oldLines.join("\n")
+
+    const out = await renderActionDiff(
+      action("scripted_replace", {
+        file: "/x/f.ts",
+        pattern: "line2",
+        replacement: "CHANGED_A",
+        isRegex: false,
+      }),
+      { readFile: async () => before },
+    )
+    const plain = stripAnsi(mustRender(out))
+    expect(plain).toContain("@@")
   })
 })

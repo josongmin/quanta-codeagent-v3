@@ -31,9 +31,10 @@ const parsePositiveInt = (raw: string | undefined, fallback: number): number => 
 
 /** Resolve env-driven caps at call time so tests can mutate `process.env`
  *  without re-importing the module. */
-export const resolveEnvCaps = (): { maxBytes: number; maxLines: number } => ({
+export const resolveEnvCaps = (): { maxBytes: number; maxLines: number; diffHunks: boolean } => ({
   maxBytes: parsePositiveInt(process.env.QUANTA_DIFF_MAX_BYTES, DEFAULT_MAX_BYTES),
   maxLines: parsePositiveInt(process.env.QUANTA_DIFF_MAX_LINES, DEFAULT_MAX_LINES),
+  diffHunks: process.env.QUANTA_DIFF_HUNKS === "1",
 })
 
 // ───────────────────────────────────────────────────────────────────────
