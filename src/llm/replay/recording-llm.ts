@@ -45,6 +45,27 @@ export interface RecordingLlmOpts {
     readonly runId?: string
     readonly attempt?: number
   }
+  /**
+   * Optional DEBUG drain, called once per turn at commit. Returns the keyed
+   * debug slices accumulated for that turn (or `undefined` for none), attached
+   * as `metadata.debug`. Metadata-only — does NOT affect the request hash, so
+   * debug enrichment can never invalidate a cassette match. The bench harness
+   * wires the process-scoped debug sink here; generic callers leave it unset.
+   */
+  readonly debugDrain?: () => Record<string, unknown> | undefined
+}
+
+/** Best-effort debug drain: a throwing drainer must never sink a successful
+ *  turn, so failure collapses to `undefined` (no `debug` key). */
+function safeDrain(
+  drain: (() => Record<string, unknown> | undefined) | undefined,
+): Record<string, unknown> | undefined {
+  if (drain === undefined) return undefined
+  try {
+    return drain()
+  } catch {
+    return undefined
+  }
 }
 
 export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
@@ -93,6 +114,8 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
             .slice(0, 16)
         }
         const model = opts.inner.model ?? "unknown"
+        // Drain debug slices (metadata-only, replay-neutral).
+        const debug = safeDrain(opts.debugDrain)
         const baseRecord: RecordedInteraction = {
           id,
           request: stripEphemeralRequest(input),
@@ -108,6 +131,7 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
               : {}),
             ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
             ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
+            ...(debug !== undefined ? { debug } : {}),
           },
         }
         const finalRecord = opts.scrubber !== undefined ? opts.scrubber(baseRecord) : baseRecord

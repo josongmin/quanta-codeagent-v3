@@ -44,6 +44,15 @@ export interface RecordedInteraction {
     readonly runId?: string
     /** 0-based attempt index within the instance. Optional — absent on old recordings. */
     readonly attempt?: number
+    /**
+     * Debug-mode enrichment (only populated when the recorder runs in `debug`
+     * tier — `QUANTA_BENCH_RECORD_TRAJECTORY=debug`). A single OPAQUE, keyed slot
+     * that any subsystem contributes a slice to (tool-exec timings, edit shas,
+     * phase-gate rationale, …). REPLAY-NEUTRAL by contract: metadata never
+     * participates in the request hash, so debug data can never invalidate a
+     * cross-box cassette match. Absent on non-debug / old recordings.
+     */
+    readonly debug?: Readonly<Record<string, unknown>>
   }
 }
 

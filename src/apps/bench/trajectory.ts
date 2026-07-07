@@ -20,7 +20,8 @@
  * live model output. Operators who intentionally want "replay until the fork
  * point, then diverge live" opt into `record-and-passthrough`.
  */
-import { resolve } from "node:path"
+import { writeFile } from "node:fs/promises"
+import { dirname, resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import type { MatchPolicy } from "@/llm/replay"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
@@ -29,12 +30,18 @@ import { isFalsyToken } from "@/shared"
 import { resumeHashRequest } from "./resume/canonicalize"
 import { resolveResumeConfig, resumeActive } from "./resume/config"
 import { maybeTeeResumeRecording } from "./resume/recorder"
+import { debugSink, isTrajectoryDebugEnabled } from "./trajectory-debug-sink"
 
 const defaultBenchTrajectoryPath = (): string => `${process.cwd()}/bench-trajectory.jsonl`
 
 const trajectoryPathFromRaw = (raw: string | undefined): string | undefined => {
   if (raw === undefined || raw === "" || raw === "0") return undefined
-  return raw === "1" || raw.toLowerCase() === "on" ? defaultBenchTrajectoryPath() : raw
+  // `debug` is the enrichment-TIER token (see isTrajectoryDebugEnabled), NOT a
+  // path — resolve it to the default cassette like "1"/"on" so the tier and the
+  // path stay orthogonal (RECORD=debug records to the default file AND enriches,
+  // instead of writing to a stray file literally named "debug").
+  const low = raw.toLowerCase()
+  return raw === "1" || low === "on" || low === "debug" ? defaultBenchTrajectoryPath() : raw
 }
 
 /**
@@ -172,7 +179,11 @@ export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
   // (plain local-only jsonl recording) — byte-identical when resume is off.
   const teed = maybeTeeResumeRecording(llm, process.env, mode.path)
   if (teed !== llm) return teed
-  return recordingLlmPort({ inner: llm, store: jsonlReplayStore({ path: mode.path }) })
+  return recordingLlmPort({
+    inner: llm,
+    store: jsonlReplayStore({ path: mode.path }),
+    ...(isTrajectoryDebugEnabled() ? { debugDrain: () => debugSink.drain() } : {}),
+  })
 }
 
 /**
@@ -202,6 +213,52 @@ export const maybeReplayTrajectory = (llm: LLMPort): LLMPort => {
   })
 }
 
+const fmtTs = (d: Date): string => {
+  const p = (n: number, w = 2) => String(n).padStart(w, "0")
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+/**
+ * When instanceId is known, record to
+ * `<dir>/trajectories/<YYYYMMDD-HHmmss>-<instanceId>.jsonl` so each run of
+ * the same problem gets its own file (timestamp prefix prevents overwrite).
+ * Returns both the jsonl path and the companion meta path.
+ */
+const resolveRecordPaths = (
+  basePath: string,
+  instanceId: string | undefined,
+): { jsonl: string; meta: string | undefined } => {
+  if (!instanceId) return { jsonl: basePath, meta: undefined }
+  const safe = instanceId.replace(/[^A-Za-z0-9._-]/g, "_")
+  const ts = fmtTs(new Date())
+  const base = `${dirname(basePath)}/trajectories/${ts}-${safe}`
+  return { jsonl: `${base}.jsonl`, meta: `${base}.meta.json` }
+}
+
+/** Collect all QUANTA_* env vars + argv into a run meta snapshot. */
+const buildRunMeta = (
+  identity: { provider: string; model: string },
+  ctx: { instanceId?: string; runId?: string; attempt?: number } | undefined,
+): Record<string, unknown> => {
+  const quantaEnv: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("QUANTA_") && v !== undefined) quantaEnv[k] = v
+  }
+  return {
+    recordedAt: new Date().toISOString(),
+    instanceId: ctx?.instanceId,
+    runId: ctx?.runId,
+    attempt: ctx?.attempt,
+    provider: identity.provider,
+    model: identity.model,
+    argv: process.argv.slice(2),
+    env: quantaEnv,
+    // runContext enricher: flag the debug tier so the viewer can badge a
+    // cassette as debug-enriched and expect `metadata.debug` per turn.
+    debug: isTrajectoryDebugEnabled(),
+  }
+}
+
 export const applyBenchTrajectoryMode = (
   llm: LLMPort,
   mode: BenchTrajectoryMode,
@@ -209,12 +266,22 @@ export const applyBenchTrajectoryMode = (
   ctx?: { instanceId?: string; runId?: string; attempt?: number },
 ): LLMPort => {
   if (mode.kind === "off") return llm
-  if (mode.kind === "record")
+  if (mode.kind === "record") {
+    const { jsonl: path, meta: metaPath } = resolveRecordPaths(mode.path, ctx?.instanceId)
+    if (metaPath !== undefined) {
+      const meta = buildRunMeta(identity, ctx)
+      // Fire-and-forget: meta write failure must never crash the bench run.
+      writeFile(metaPath, JSON.stringify(meta, null, 2), "utf8").catch(() => {})
+    }
     return recordingLlmPort({
       inner: llm,
-      store: jsonlReplayStore({ path: mode.path }),
+      store: jsonlReplayStore({ path }),
       ...(ctx !== undefined ? { callCtx: ctx } : {}),
+      // DEBUG tier: drain per-turn debug slices contributed by other subsystems
+      // (metadata-only, replay-neutral). No-op unless the debug gate is on.
+      ...(isTrajectoryDebugEnabled() ? { debugDrain: () => debugSink.drain() } : {}),
     })
+  }
   return replayTrajectoryPort({
     path: mode.path,
     onMiss: mode.onMiss,

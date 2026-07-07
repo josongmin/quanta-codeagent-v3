@@ -203,15 +203,26 @@ const resolveInstance = async (
     return runForkBranches(instance, base, experiments, freshLlm ?? (() => base.llm), obs)
   }
   const only = experiments[0]
+  // When a freshLlm factory is provided (e.g. instance-bound trajectory port),
+  // swap base.llm so every runInstance call uses the bound port.
+  const boundBase: Omit<RunCfg, never> =
+    freshLlm !== undefined ? { ...base, llm: freshLlm() } : base
   const effBase: Omit<RunCfg, never> =
-    only !== undefined ? { ...base, turnContextMutator: only.mutator } : base
+    only !== undefined ? { ...boundBase, turnContextMutator: only.mutator } : boundBase
 
   if (n <= 1) return runInstance(instance, withObserve(effBase, attemptObs(obs, 0)))
 
   let attempt = 0
   const out = await sampleBestOfN<InstanceResult>({
     n,
-    makeAttempt: () => runInstance(instance, withObserve(effBase, attemptObs(obs, attempt++))),
+    makeAttempt: () =>
+      runInstance(
+        instance,
+        withObserve(
+          freshLlm !== undefined ? { ...effBase, llm: freshLlm() } : effBase,
+          attemptObs(obs, attempt++),
+        ),
+      ),
     score: (r) => (r.passed ? 1 : 0),
   })
 
