@@ -236,8 +236,8 @@ describe("bench python harness e2e — stub `python` binary on PATH", () => {
     expect(i("--clean")).toBeGreaterThan(-1)
     expect(argv[i("--clean") + 1]).toBe("False")
 
-    expect(i("--namespace")).toBeGreaterThan(-1)
-    expect(argv[i("--namespace") + 1]).toBe("none")
+    // --namespace omitted: swebench==2.1.6 does not accept --namespace
+    expect(i("--namespace")).toBe(-1)
 
     // --force_rebuild absent unless explicitly enabled (default off)
     expect(i("--force_rebuild")).toBe(-1)

@@ -82,8 +82,7 @@ describe("prepareImages", () => {
     expect(cap.argv).toContain("swebench.harness.prepare_images")
     expect(cap.argv).toContain("--dataset_name")
     expect(cap.argv).toContain("ds")
-    expect(cap.argv).toContain("--namespace")
-    expect(cap.argv).toContain("none")
+    expect(cap.argv).not.toContain("--namespace")
     expect(cap.argv).toContain("--max_workers")
     expect(cap.argv).toContain("4")
     // env/instance image tags MUST be "latest" to match run_evaluation's

@@ -57,7 +57,8 @@ export const harnessFlags = (c: HarnessConfig): string[] => [
   c.cacheLevel,
   "--clean",
   c.clean ? "True" : "False",
-  "--namespace",
-  c.namespace,
+  // swebench==2.1.6 does not expose --namespace; the harness resolves the
+  // image namespace internally. Passing --namespace causes an immediate crash
+  // ("unrecognized arguments") so we omit it unconditionally here.
   ...(c.forceRebuild ? ["--force_rebuild", "True"] : []),
 ]

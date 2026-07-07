@@ -146,8 +146,6 @@ describe("harnessFlags renders argv tokens", () => {
       "env",
       "--clean",
       "False",
-      "--namespace",
-      "none",
     ])
   })
 
@@ -200,8 +198,7 @@ describe("python-swebench buildArgv consumes HarnessConfig", () => {
     expect(argv).toContain("False")
     expect(argv).toContain("--max_workers")
     expect(argv).toContain("4")
-    expect(argv).toContain("--namespace")
-    expect(argv).toContain("none")
+    expect(argv).not.toContain("--namespace")
     expect(argv).not.toContain("--force_rebuild")
     expect(argv).toContain("--dataset_name")
     expect(argv).toContain("ds")
