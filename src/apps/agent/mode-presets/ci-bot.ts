@@ -63,10 +63,11 @@ const CI_ENV_ALLOWLIST_LOCAL: readonly string[] = [
   "SSL_CERT_DIR",
 ]
 
-/** Bundle of the ci-bot tool surface + a `gh` runner. The `tools` is a
- *  `ToolRegistry` containing the git tools plus READ-ONLY GitHub PR/CI
- *  inspection tools. Mutating `gh` tools stay host-owned (`postPrComment`)
- *  so ci-bot cannot silently broaden its remote-write surface. */
+/** Bundle of the ci-bot tool surface + a `gh` runner. By default the `tools`
+ *  registry contains the git tools plus READ-ONLY GitHub PR/CI inspection tools.
+ *  When `QUANTA_CI_BOT_GH_WRITE=1` the full gh tool set is included — mutating
+ *  tools `gh_pr_resolve_thread`, `gh_pr_edit_labels`, and any other non-read-only
+ *  gh tool are included in ci-bot mode when that gate is on. */
 export interface CiBotWiring {
   tools: ToolRegistry
   /** `gh <args>` runner that spawns under a scrubbed env (CI_ENV_ALLOWLIST). */

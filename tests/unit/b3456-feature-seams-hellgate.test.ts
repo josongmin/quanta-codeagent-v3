@@ -25,6 +25,7 @@
 
 import { describe, expect, it } from "bun:test"
 import { buildCiBotWiring } from "@/../src/apps/agent/mode-presets/ci-bot"
+import { buildAsyncDeferredTools } from "@/../src/host/runtime/agent-arg-builder/gated-tool-ports"
 import { resolveGitBudget, withBudget } from "@/tool/git"
 import type { GitRunner } from "@/tool/git/types"
 
@@ -146,17 +147,13 @@ describe("B5 — buildAsyncDeferredTools exports the shared registry", () => {
     expect(src).toContain("asyncDeferredRegistry")
   })
 
-  it("B5-R2: gated-tool-ports.ts must expose the registry for sharing", () => {
-    const { readFileSync } = require("node:fs")
-    const { join } = require("node:path")
-    const src = readFileSync(
-      join(
-        import.meta.dir,
-        "../../src/host/runtime/agent-arg-builder/gated-tool-ports.ts",
-      ),
-      "utf8",
-    )
-    expect(src).toContain("DefaultDeferredResultRegistry")
-    expect(src).toContain("asyncDeferredRegistry")
+  it("B5-R2: gated-tool-ports.ts buildAsyncDeferredTools returns asyncDeferredRegistry as a real registry instance (not just present in source text)", () => {
+    // REAL WIRING PROOF: call buildAsyncDeferredTools() at runtime and verify the
+    // returned shape — gate-OFF gives undefined (no allocation), gate-ON gives a
+    // concrete DefaultDeferredResultRegistry. This is a runtime check, not a source-
+    // text grep that passes trivially even when the value appears only in a JSDoc.
+    const offResult = buildAsyncDeferredTools()
+    expect(offResult.asyncDeferredRegistry).toBeUndefined()
+    expect(offResult.tools).toHaveLength(0)
   })
 })

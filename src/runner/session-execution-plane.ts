@@ -196,13 +196,19 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
       policy: defaultResumePolicy(),
       workspace: args.cwd,
     })
-    // Evict the stale "interrupted" cache entries for every handle the sweep
-    // processed — whether it was resumed, marked-failed, or even skipped.
-    // The store.save(markResumed/markFailed) wrote a new status to disk but
-    // the hydrating scheduler's in-memory caches still hold the old snapshot.
-    // Evicting here ensures list()/poll() are consistent post-sweep.
+    // Evict the stale "interrupted" cache entries only for handles where the
+    // sweep actually forked a new handle (action === "resume").
+    // For "skip" and "ask-user" the orchestrator took no action — the store
+    // was NOT written and the interrupted handle is still valid state that
+    // the user or system needs to inspect.  Evicting those entries would
+    // remove a live entry from list()/poll() without any corresponding store
+    // update, leaving the caller with an inconsistent view.
+    // For "mark-failed" the store was written (new "failed" snapshot), so the
+    // in-memory interrupted entry IS stale and should also be evicted.
     for (const outcome of resumeOutcomes) {
-      persistent.evictInterrupted(outcome.id)
+      if (outcome.decision.action === "resume" || outcome.decision.action === "mark-failed") {
+        persistent.evictInterrupted(outcome.id)
+      }
     }
   }
   const scheduler: BackgroundSubagentScheduler = {

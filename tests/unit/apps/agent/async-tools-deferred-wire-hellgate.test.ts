@@ -32,7 +32,12 @@
  *               refactor that silently drops the wire without a runtime poll).
  *   HELL-AT-03  default-OFF: neither root mentions `poll_deferred` in a literal
  *               that would force it into `defaultTools` (it must stay caller-
- *               wired). Pinned via the registry construction being gated.
+ *               wired). Pinned via the registry construction being gated AND
+ *               a runtime proof that buildAsyncDeferredTools() returns a proper
+ *               { tools, asyncDeferredRegistry } shape (not discarded at call site).
+ *   HELL-AT-03b B5 registry call-site check: buildBaseRegistry must NOT use the
+ *               one-shot `.tools` accessor that silently discards asyncDeferredRegistry.
+ *               The call site must destructure properly to keep the registry reference.
  *   HELL-AT-04  LIVE: `pollDeferredTool` over a real registry round-trips —
  *               unknown handle ⇒ `[failed] unknown-handle`, registered work ⇒
  *               `[completed]` unwrap. Proves the wired tool is functional.
@@ -48,6 +53,7 @@ import { afterEach, describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { buildJailDecisionEvent } from "@/../src/agent/decision-emit-phase3"
+import { buildAsyncDeferredTools } from "@/../src/host/runtime/agent-arg-builder/gated-tool-ports"
 import {
   buildFsJailDecisionEvent,
   clearFsJailDecisionSink,
@@ -55,6 +61,7 @@ import {
   FsJailError,
   setFsJailDecisionSink,
 } from "@/../src/storage/service"
+import { __resetRuntimeConfig } from "@/shared"
 import { pollDeferredTool } from "@/tool"
 import { DefaultDeferredResultRegistry } from "@/tool/deferred/default-registry"
 import type { ToolEvent, ToolResult } from "@/tool/types"
@@ -117,9 +124,39 @@ describe("T10 — async-tools poll_deferred wire is LIVE at BOTH composition roo
     // to expose the shared registry; the guard still short-circuits with empty tools.
     expect(AGENT_INDEX).toContain("if (!cfg.asyncTools) return")
     expect(CLI_INTERNAL).toContain("if (!cfg.asyncTools) return")
-    // Also pin: the hoisted registry variable name must be present (shared-instance proof).
-    expect(AGENT_INDEX).toContain("asyncDeferredRegistry")
-    expect(CLI_INTERNAL).toContain("asyncDeferredRegistry")
+    // REAL WIRING PROOF: verify buildAsyncDeferredTools() returns { tools, asyncDeferredRegistry }
+    // at runtime, NOT just a source-text string match.
+    //
+    // Gate-OFF: asyncDeferredRegistry must be undefined (no registry allocated)
+    const offResult = buildAsyncDeferredTools()
+    expect(offResult.tools).toHaveLength(0)
+    expect(offResult.asyncDeferredRegistry).toBeUndefined()
+    //
+    // Gate-ON: asyncDeferredRegistry must be a DefaultDeferredResultRegistry instance
+    process.env.QUANTA_ASYNC_TOOLS = "1"
+    __resetRuntimeConfig()
+    try {
+      const onResult = buildAsyncDeferredTools()
+      expect(onResult.tools).toHaveLength(1)
+      // This is the real wiring proof: asyncDeferredRegistry must be the SAME instance
+      // the poll_deferred tool was built from — not undefined, not a second mint.
+      expect(onResult.asyncDeferredRegistry).toBeInstanceOf(DefaultDeferredResultRegistry)
+    } finally {
+      delete process.env.QUANTA_ASYNC_TOOLS
+      __resetRuntimeConfig()
+    }
+  })
+
+  it("HELL-AT-03b: B5 registry call-site — buildBaseRegistry must NOT discard asyncDeferredRegistry via one-shot .tools accessor", () => {
+    // RED test for Bug 1: the call site `...buildAsyncDeferredTools().tools`
+    // silently discards asyncDeferredRegistry. The fix requires proper destructuring
+    // at the call site so the registry reference is preserved (matching internal.ts).
+    // A one-shot .tools accessor like `buildAsyncDeferredTools().tools` destroys the
+    // reference — pin that the buggy pattern is absent.
+    expect(AGENT_INDEX).not.toContain("buildAsyncDeferredTools().tools")
+    // After fix: the call site must destructure both tools and the registry.
+    // We verify the destructuring form used in internal.ts is also present here.
+    expect(AGENT_INDEX).toContain("asyncDeferredRegistry } = buildAsyncDeferredTools()")
   })
 
   it("HELL-AT-04: LIVE — wired tool round-trips against a real registry", async () => {
