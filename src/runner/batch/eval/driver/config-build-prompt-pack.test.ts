@@ -20,6 +20,7 @@ import type { StreamPort } from "@/stream"
 import type { Instance } from "../../types"
 import type { RunInstanceDeps } from "./context-types"
 import { buildConfig } from "./config-build"
+import { composeBaseText } from "./prompt-directives"
 
 const BATCH_RULE_MARKER = "[R-NO-EXPLORE-OVER-EDIT]"
 
@@ -239,5 +240,70 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
         expect(userMsgFor(inst)).toContain(FULL_VERIFY_DEMAND)
       }),
     )
+  })
+
+  // 100-point coherence INVARIANT (jul-6 adversarial round-2): codify the exhaustive truth table
+  // as a PERMANENT guard. For EVERY (hidden-grader knob × exec-mode) combo on a SWE instance, the
+  // SYSTEM (grader-only rule) and the USER directive (NOEXEC) MUST agree — that mutual-equivalence
+  // (system ⟺ user) is exactly what `isGraderOnlyPosture` (the single SSOT read by both surfaces)
+  // guarantees, and its absence was the original L1↔L8 conflict. If any future edit re-splits the
+  // derivation, one of these rows flips one surface without the other and fails LOUD.
+  const GRADER_COMBOS: ReadonlyArray<{
+    knob: string | undefined
+    exec: string
+    graderOnly: boolean
+  }> = [
+    { knob: undefined, exec: "full", graderOnly: false },
+    { knob: undefined, exec: "repro-only", graderOnly: false },
+    { knob: undefined, exec: "off", graderOnly: true }, // F1: exec=off ⇒ grader-only, no knob
+    { knob: "1", exec: "full", graderOnly: true }, // knob forces grader-only under any exec
+    { knob: "1", exec: "repro-only", graderOnly: true },
+    { knob: "1", exec: "off", graderOnly: true },
+  ]
+  for (const c of GRADER_COMBOS) {
+    test(`INVARIANT: knob=${c.knob ?? "off"} × exec=${c.exec} ⇒ system grader-only === user NOEXEC === ${c.graderOnly} (both surfaces agree)`, () => {
+      withGrader(c.knob, () =>
+        withExec(c.exec, () => {
+          const inst = makeSwebenchInstance(process.cwd())
+          const sysGrader = sysFor(inst).includes("[R-GRADER-ONLY]")
+          const userNoexec = userMsgFor(inst).includes(NOEXEC_POSTURE)
+          // both surfaces reflect the SAME resolved posture …
+          expect(sysGrader).toBe(c.graderOnly)
+          expect(userNoexec).toBe(c.graderOnly)
+          // … and the load-bearing invariant: they are mutually equivalent (never diverge).
+          expect(sysGrader).toBe(userNoexec)
+        }),
+      )
+    })
+  }
+})
+
+// Directive de-dup regression guard (jul-6 #3): the three verbose SWEBENCH_DIRECTIVE variants were
+// refactored to share ONE `SWE_DIR_HEAD`/`INFER_EXACT`/`MIN_TAIL`/`V4A` via spread. Pin that the
+// shared HEAD stays byte-identical across variants (an edit to one that diverges the others fails
+// LOUD) AND that each keeps its DISTINCT verify clause (guards against over-collapsing into one).
+describe("SWEBENCH_DIRECTIVE de-dup (jul-6 #3) — shared HEAD identical, verify clauses distinct", () => {
+  const EMPTY_STEERS = { lsp: "", findRefs: "", spec: "", simplicity: "", sibling: "" }
+  const directive = (exec: "full" | "repro-only" | "off"): string =>
+    composeBaseText("BASE_PROBLEM", true, exec, EMPTY_STEERS, false)
+  const HEAD_END = "do not let bash commands wipe it."
+  const sharedHead = (s: string): string => {
+    const start = s.indexOf("You are fixing a real defect")
+    const end = s.indexOf(HEAD_END) + HEAD_END.length
+    return s.slice(start, end)
+  }
+
+  test("the 12-line HEAD is byte-identical across full / repro-only / off (de-dup did not diverge them)", () => {
+    const full = sharedHead(directive("full"))
+    expect(full.length).toBeGreaterThan(100) // non-vacuous: HEAD is substantial
+    expect(sharedHead(directive("repro-only"))).toBe(full)
+    expect(sharedHead(directive("off"))).toBe(full)
+  })
+  test("each variant keeps its DISTINCT verify clause (not over-collapsed into one directive)", () => {
+    expect(directive("full")).toContain("MANDATORY before you stop")
+    expect(directive("off")).toContain("an unverified edit is fine — the grader decides")
+    expect(directive("repro-only")).toContain("you MAY run a tiny issue reproducer")
+    expect(directive("full")).not.toBe(directive("off"))
+    expect(directive("off")).not.toBe(directive("repro-only"))
   })
 })
