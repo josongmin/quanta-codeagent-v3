@@ -59,6 +59,10 @@ knobs:
     where: env
     default: identity
     purpose: env-driven provider selection (createRerankerFromEnv) — identity|headless|cohere|voyage; 미설정 또는 unknown 값은 identity (no silent vendor swap)
+  - name: QUANTA_PIPELINE
+    where: env
+    default: ''
+    purpose: pipeline-level opt-in for enabling reranker stage within runHybridQuery composition root; absent ⇒ reranker stage inactive (byte-identical pass-through)
   - name: COHERE_API_KEY
     where: env
     default: ''

@@ -1,5 +1,5 @@
 id: llm-adapter-mantle
-title: Anthropic Mantle LLM adapter (Phase 1 stub — internal enterprise endpoint)
+title: Anthropic Mantle LLM adapter (Phase-1 hold: external SDK unpublished — throws provider-missing-dependency)
 section: 8
 subsystem: LLM provider seam — cloud transport
 order: 5
@@ -15,6 +15,8 @@ depends_on: [llm-multicloud-provider-router]
 config_refs:
   env:
     - CLAUDE_CODE_USE_MANTLE
+    - QUANTA_LLM_TRANSPORT
+    - QUANTA_USE_MANTLE
 surface_integration:
   cli: full
   web: na
@@ -49,7 +51,15 @@ evidence:
       - tests/unit/mantle-adapter-real-stream-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_LLM_TRANSPORT
+    where: env
+    default: ''
+    purpose: selects active LLM transport/provider; set to "mantle" to route to MantleProviderAdapter — blocked until @anthropic-ai/mantle-sdk publishes (Phase-1 hold)
+  - name: QUANTA_USE_MANTLE
+    where: env
+    default: 'false'
+    purpose: explicit opt-in gate for Mantle adapter; ON ⇒ registry selects MantleProviderAdapter; throws provider-missing-dependency until external SDK ships (external SDK unpublished)
 deliberate_hold:
   scope: blocked-on-unpublished-sdk
   reason: |

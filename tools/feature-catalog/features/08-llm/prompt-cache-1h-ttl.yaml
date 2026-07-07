@@ -3,12 +3,12 @@ title: 1-hour prompt-cache TTL — Anthropic `cache_control: { ttl: "1h" }` (cos
 section: 8
 subsystem: LLM Anthropic Messages codec — prompt-cache retention
 order: 320
-maturity: L2
+maturity: L4
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless]
-configurable: planned
+configurable: integrated
 config_refs:
   env:
     - QUANTA_PROMPT_CACHE_TTL
@@ -64,21 +64,7 @@ evidence:
       - tests/unit/prompt-cache-1h-ttl-codec-hellgate.test.ts
     integration: []
     contract: []
-knobs:
-  - name: cacheTtl
-    where: src/llm/anthropic-messages-codec.ts (param) / AnthropicConfig.cacheTtl (adapter, reported)
-    default: "5m"
-    purpose: |
-      `"5m"`(default) ⇒ `ttlControl`이 `{ type: "ephemeral" }` (NO `ttl`) emit ⇒ byte-identical
-      wire payload. `"1h"` ⇒ `{ type: "ephemeral", ttl: "1h" }`. composition-root(`@/llm/factory`,
-      reported)가 `QUANTA_PROMPT_CACHE_TTL` env + per-model `CACHE_1H_ALLOWLIST`로 resolve해
-      adapter config로 thread — codec slice는 절대 `process.env`를 읽지 않음(runtimeConfig SSOT).
-  - name: QUANTA_PROMPT_CACHE_TTL
-    where: src/shared/runtime-config.ts (reported — shared file, not edited by this slice)
-    default: "5m"
-    purpose: |
-      env 노브("5m"|"1h", default "5m"). composition-root에서만 읽혀 model-allowlist gate를
-      통과한 뒤 `cacheTtl` adapter config로 내려간다. Unset/`"5m"` ⇒ byte-identical default-OFF.
+knobs: ["QUANTA_PROMPT_CACHE_TTL"]
 deliberate_hold: null
 notes: |
   RFC `docs/plans/jun-6-prompt-cache-1h-ttl.md` Phase 1. RFC §5.2는 `status: planned`라 했으나

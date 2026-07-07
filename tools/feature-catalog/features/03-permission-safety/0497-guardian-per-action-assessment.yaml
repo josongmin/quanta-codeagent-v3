@@ -3,8 +3,8 @@ title: Guardian per-action TYPED assessment — binary verdict → discriminated
 section: 3
 subsystem: 권한 게이트 — guardian 리뷰어를 veto에서 steering-wheel로 (Codex 0.135 per-action assessor 흡수)
 order: 497
-maturity: L2
-status: hold
+maturity: L3
+status: stable
 ui_surfaces: [n-a]
 monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
@@ -54,6 +54,7 @@ evidence:
     - src/agent/tier1/reviewer-subagent.ts
     - src/agent/reviewer-port.ts
     - src/shared/runtime-config.ts
+    - src/apps/cli/repl/runtime-context-compose.ts:573-588
   adrs: [497]
   tests:
     unit:
@@ -65,9 +66,7 @@ knobs:
   - name: QUANTA_GUARDIAN_ASSESSOR
     default: 'undefined'
     purpose: Strict opt-in (`=== "1"`). OFF ⇒ guardianAssess 미호출, collapseAssessment 미도달, guardian path 가 binary ApprovalDecision 과 byte-identical. loose-truthy 미무장(security boundary). ON + composition-root wiring + 메서드 present 일 때만 per-action typed assessment.
-deliberate_hold:
-  reason: 'Composition-root LIVE wiring (optional-ports.ts / index.ts / reviewer-policy.ts 에서 크놉-ON 시 createSubagentBackedGuardianAssess 선택)은 documented follow-up — seam(pure types + collapse + adapter + dispatch branch)은 fully tested + OFF 로 ship. allow_for_session-sticky + escalate-as-grant 은 각자 별도 gate 로 deferred. GuardianDeniedAction operator override 는 deny-memory mutation surface 필요 — follow-up.'
-  promotion_path: 'Composition-root 가 knob-ON 시 assessor adapter 를 guardianAssess 로 install 하면 L3; allow_with_edit 의 reviewer→executor input-mutation hop 이 land 하면(현재는 steered-deny 로 conservative collapse) edit 가 실행되어 full Codex parity → L4.'
+deliberate_hold: null
 notes: |
   collapse boundary 가 단 하나(`collapseAssessment`)인 게 설계 핵심: 새 타입이 legacy
   consumer 에 절대 안 닿음. assessor reply schema 는 zod discriminatedUnion 7-kind;
