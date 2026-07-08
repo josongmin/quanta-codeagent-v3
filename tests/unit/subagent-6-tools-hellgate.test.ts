@@ -599,6 +599,59 @@ describe("HELLGATE — handleWaitAgent", () => {
     // bounded WELL under the 5s timeout. We just verify it didn't hit timeout.
     expect(elapsed).toBeLessThan(2000)
   })
+
+  // jul-7 audit F-A [HIGH]: wait_agent disclosed a settled child's finalText by id with NO
+  // lineage gate — a sibling could read another lineage's work product (the same
+  // cross-lineage disclosure the continue_from gate closes for spawn). wait_agent must
+  // refuse a task stamped by a DIFFERENT lineage BEFORE any finalText read.
+  test("F-A: cross-lineage wait ⇒ ownership_denied, NO finalText disclosure", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "secret work" },
+      { runner: slowRunner(10, "SECRET-RESULT"), registry: reg, requesterLineage: "agent-A" },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    await reg.waitForSettle(spawn.agentId)
+    // A DIFFERENT lineage waits on A's child — must be denied without leaking the result.
+    const r = await handleWaitAgent(
+      { agentId: spawn.agentId },
+      { registry: reg, requesterLineage: "agent-B" },
+    )
+    expect(r.kind).toBe("error")
+    if (r.kind === "error") {
+      expect(r.cause).toBe("ownership_denied")
+      expect(r.message).not.toContain("SECRET-RESULT")
+    }
+  })
+
+  test("F-A control: OWNER lineage waits on its own child ⇒ finalText disclosed", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "my work" },
+      { runner: slowRunner(10, "MY-RESULT"), registry: reg, requesterLineage: "agent-A" },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    await reg.waitForSettle(spawn.agentId)
+    const r = await handleWaitAgent(
+      { agentId: spawn.agentId },
+      { registry: reg, requesterLineage: "agent-A" },
+    )
+    expect(r.kind).toBe("success")
+    if (r.kind === "success") expect(r.finalText).toBe("MY-RESULT")
+  })
+
+  test("F-A byte-identical: no lineage on either side ⇒ legacy disclosure (root≡root)", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "p" },
+      { runner: slowRunner(10, "LEGACY"), registry: reg },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    await reg.waitForSettle(spawn.agentId)
+    const r = await handleWaitAgent({ agentId: spawn.agentId }, { registry: reg })
+    expect(r.kind).toBe("success")
+    if (r.kind === "success") expect(r.finalText).toBe("LEGACY")
+  })
 })
 
 // ─── E. handleCloseAgent ───────────────────────────────────────────────────
@@ -937,6 +990,31 @@ describe("HELLGATE — dispatchSubagent6 router", () => {
     )
     expect(r.kind).toBe("success")
     if (r.kind === "success") expect(r.stdout).toContain("router-ok")
+  })
+
+  // F-A wiring-proof: the ROUTER must forward `deps.requesterLineage` into BOTH the spawn
+  // owner-stamp AND the wait gate — otherwise the lineage check is inert in production.
+  test("router forwards requesterLineage ⇒ cross-lineage wait denied end-to-end", async () => {
+    const reg = new TaskRegistry()
+    const spawnR = await dispatchSubagent6(
+      "spawn_agent",
+      { prompt: "owned by A" },
+      { registry: reg, runner: slowRunner(10, "A-SECRET"), requesterLineage: "agent-A" },
+    )
+    if (spawnR.kind !== "success") throw new Error("spawn failed")
+    const agentId = spawnR.agentId as string
+    await reg.waitForSettle(agentId)
+    // Sibling lineage B waits via the router — must be denied, no A-SECRET leak.
+    const waitR = await dispatchSubagent6(
+      "wait_agent",
+      { agentId },
+      { registry: reg, requesterLineage: "agent-B" },
+    )
+    expect(waitR.kind).toBe("error")
+    if (waitR.kind === "error") {
+      expect(waitR.cause).toBe("ownership_denied")
+      expect(waitR.message).not.toContain("A-SECRET")
+    }
   })
 })
 

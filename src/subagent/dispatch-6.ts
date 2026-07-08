@@ -181,6 +181,9 @@ const routeWaitAgent: Route = async (input, deps) => {
   return handleWaitAgent(input as Parameters<typeof handleWaitAgent>[0], {
     registry: deps.registry,
     ...(deps.waitTimeoutPolicy !== undefined ? { timeoutPolicy: deps.waitTimeoutPolicy } : {}),
+    // F-A (jul-7 audit) — forward the caller lineage so wait_agent applies the SAME
+    // cross-lineage disclosure gate that spawn's continue_from does. Absent ⇒ root.
+    ...(deps.requesterLineage !== undefined ? { requesterLineage: deps.requesterLineage } : {}),
   })
 }
 

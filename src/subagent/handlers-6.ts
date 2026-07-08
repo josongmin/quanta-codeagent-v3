@@ -724,6 +724,12 @@ interface WaitAgentDeps {
    *  (30s default, generous ceiling) so the legacy no-policy call path is
    *  byte-identical. */
   timeoutPolicy?: WaitTimeoutPolicy
+  /** F-A (jul-7 audit) — the REQUESTING agent's stable lineage label (`ctx.agentLabel`),
+   *  identical to the `continue_from` gate on spawn. A task stamped by a DIFFERENT lineage
+   *  is denied BEFORE any finalText read, so a sibling cannot read another lineage's work
+   *  product by id. Absent ⇒ root lineage (`ROOT_LINEAGE`); a task with NO recorded owner
+   *  (host-seeded / registered outside handleSpawnAgent) stays disclosable (byte-identical). */
+  requesterLineage?: string
 }
 
 /** Map a settled TaskRecord status string to the contract-narrowed union
@@ -771,6 +777,18 @@ export const handleWaitAgent = async (
   const rec = deps.registry.get(input.agentId)
   if (rec === undefined) {
     return errWait(`No agent found with id ${input.agentId}`, "id_unknown")
+  }
+  // F-A (jul-7 audit) — lineage gate, mirroring the `continue_from` ownership check. A task
+  // stamped by a DIFFERENT lineage is refused BEFORE any finalText disclosure, so a sibling
+  // cannot read another lineage's work product. A task with no recorded owner (host-seeded /
+  // registered outside handleSpawnAgent) stays disclosable — byte-identical legacy path.
+  const recordedOwner = ownersForRegistry(deps.registry).get(input.agentId)
+  const requesterLineage = deps.requesterLineage ?? ROOT_LINEAGE
+  if (recordedOwner !== undefined && recordedOwner !== requesterLineage) {
+    return errWait(
+      `Cannot wait on ${input.agentId}: it belongs to a different agent lineage (ownership denied).`,
+      "ownership_denied",
+    )
   }
   // B2 — clamp the caller-supplied timeout into the injected policy band.
   // Default policy ⇒ omitted yields 30s; any pre-B2 override passes through.
