@@ -57,6 +57,12 @@ export const exitCodeForOutcome = (outcome: AgentOutcome): number => {
       return 0
     case "budget_exhausted":
       return 2
+    // ALBB-18 — a turn PAUSED awaiting HITL approval that surfaced as a terminal
+    // outcome (e.g. headless with no operator to answer) is blocked-not-done, NOT
+    // user-cancelled. Same "stopped without completing" class as budget (2), and
+    // deliberately NOT the SIGINT-cancel code 130 (`aborted`).
+    case "awaiting_approval":
+      return 2
     case "aborted":
       return 130
     case "max_turns":

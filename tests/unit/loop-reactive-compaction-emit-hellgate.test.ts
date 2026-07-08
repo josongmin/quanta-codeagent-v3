@@ -338,4 +338,64 @@ describe("ADR-0331 — reactive compaction emit wire", () => {
       expect(e.reason).toBe("context_limit")
     }
   })
+
+  // ── ALBB-07 claim 1 — post-compact hook OBSERVABILITY ──────────────────
+  //
+  // The reactive `post_compact` hook (+ objective `setNextActions`) fired INLINE
+  // inside a bare `try { … } catch {}` — a throwing subscriber was swallowed with
+  // NO `logger.warn` and NO stream event (invisible to the agent-state stream).
+  // The fix routes through the shared `buildPostCompactEmit` SSOT and, on a throw
+  // from EITHER the hook OR `setNextActions`, surfaces a `recovery` event
+  // (reusing the existing `emitRecovery` seam) so the failed post-compact is
+  // observable — while still completing the loop (no-throw contract preserved).
+  //
+  // Mutation guard: reverting to the empty `catch {}` (no `emitRecovery`) removes
+  // the observable `recovery` event ⇒ this test goes RED.
+  test("(7) throwing post_compact hook ⇒ observable recovery event, loop still completes", async () => {
+    let hookThrows = 0
+    const stream = new RecordingStream()
+    const llm = new ScriptedLLM(oneReactiveScript())
+    // A HookBus-shaped fake whose `emit` THROWS on `post_compact`. (The real
+    // HookBus absorbs handler throws internally, so we inject at the bus seam to
+    // exercise the recovery-executor's own no-throw + observability contract.)
+    const throwingHooks = {
+      emit: async (event: { type: string }) => {
+        if (event.type === "post_compact") {
+          hookThrows += 1
+          throw new Error("post_compact subscriber boom")
+        }
+        return { deny: null }
+      },
+    } as unknown as NonNullable<AgentConfig["hooks"]>
+    const out = await withTimeout(
+      runAgent(
+        cfg({
+          llm,
+          stream,
+          messages: successHistory(),
+          maxTurns: 2,
+          sessionId: "thread-observability",
+          hooks: throwingHooks,
+        }),
+      ),
+      20_000,
+      "reactive-postcompact-throw",
+    )
+    expect(out.reason).toBe("completed")
+    expect(hookThrows).toBe(1) // the post_compact hook was reached exactly once
+    // The failed post-compact is OBSERVABLE on the stream: a `recovery` event
+    // referencing the post-compact failure (NOT the pre-compaction `compact`
+    // marker `emitRecovery(config, "compact")` with no detail).
+    const recoveries = stream.events.filter((e) => e.type === "recovery") as Array<{
+      type: "recovery"
+      reason: string
+      detail?: string
+    }>
+    const postCompactFail = recoveries.find(
+      (e) => e.detail !== undefined && /post.?compact/i.test(e.detail),
+    )
+    expect(postCompactFail).toBeDefined()
+    // No `error` AgentEvent escaped the swallow.
+    expect(stream.events.find((e) => e.type === "error")).toBeUndefined()
+  })
 })

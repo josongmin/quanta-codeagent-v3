@@ -114,7 +114,11 @@ export const escalationScopeFields = (
 }
 
 export const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentOutcome => ({
-  reason: "aborted",
+  // ALBB-18 — the turn is PAUSED awaiting a HITL approval decision (returned
+  // WITH an `approvalRequest`, matching scheduler status `"awaiting_approval"`),
+  // NOT terminally user-cancelled. `"awaiting_approval"` lets a consumer reading
+  // `outcome.reason` distinguish "paused, resume pending" from `"aborted"`.
+  reason: "awaiting_approval",
   turns: 0,
   messages: [...messages],
 })

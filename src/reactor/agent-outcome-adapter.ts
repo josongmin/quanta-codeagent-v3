@@ -24,6 +24,10 @@ export const lastTurnOutcomeFromAgentOutcome = (outcome: AgentOutcome): LastTurn
     case "max_turns":
     case "aborted":
     case "budget_exhausted":
+    // ALBB-18 — a turn paused for HITL approval is incomplete but resumable
+    // (NOT a failure). Classifies to the same coarse bucket as the other
+    // non-terminal-but-not-successful stops.
+    case "awaiting_approval":
       return "partial"
     case "error":
     case "refusal":

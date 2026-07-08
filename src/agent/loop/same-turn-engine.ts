@@ -61,6 +61,11 @@ export const runTurn = async (
       result,
       ctx.system,
       toolHistory ?? EMPTY_TOOL_HISTORY,
+      // claim 2 (ALBB-07) — thread the SAME `activeModel` resolved above (and
+      // already threaded into `prepareTurnContext`) into the recovery apply, so
+      // the reactive `dropOldestSalvage` window target tracks the ACTIVE model
+      // (skill/sticky swap), not the base `config.llm`. Previously dropped here.
+      activeModel,
     )
     if (step.done) return step.result
   }

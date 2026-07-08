@@ -1,4 +1,5 @@
 import type { SystemPromptInput } from "@/llm"
+import { errMessage, logger } from "@/shared"
 import {
   dropOldestSalvage,
   estimateTokens,
@@ -12,6 +13,7 @@ import {
   extractRefusalRationale,
   neutralizedRefusalTurn,
 } from "../recovery"
+import { buildPostCompactEmit } from "../loop-helpers"
 import { backoffDelayMs } from "../retry"
 import type { ToolHistoryEntry } from "../session-resources"
 import { stripOrphanToolUse } from "../turn-closeout"
@@ -35,6 +37,7 @@ export const applyNonSuccessRecoveryAction = async (
   action: RecoveryAction,
   result: StreamSuccess | { error: unknown; message: string },
   ctxSystem: SystemPromptInput,
+  activeModel: string,
 ): Promise<Step | null> => {
   const { config } = session
   const { wm, breaker } = state
@@ -119,7 +122,12 @@ export const applyNonSuccessRecoveryAction = async (
           // large-window model.
           targetTokens: resolveCompactionLimitTokens(
             config.compaction?.thresholdTokens,
-            resolveWindowModel(config.llm),
+            // claim 2 (ALBB-07) — thread the ALREADY-RESOLVED active turn model
+            // (skill/sticky swap) into the window resolve, mirroring the PROACTIVE
+            // SSOT (`compaction-wire.ts` `resolveWindowModel(config.llm,
+            // activeModel)`). A bare `resolveWindowModel(config.llm)` defaults to
+            // the BASE model → under-sheds when a smaller-window model is active.
+            resolveWindowModel(config.llm, activeModel),
           ),
         })
       : await reactiveCompact({ messages: snapshot, llm: summarizerLlm, system: ctxSystem })
@@ -154,30 +162,61 @@ export const applyNonSuccessRecoveryAction = async (
   if (state.tokenBaseline !== undefined)
     TokenBaselineBox.wrap(state.tokenBaseline).invalidateOnContentChange()
   resetEffortClassifier(config.effortClassifier)
-  try {
-    const provenance: import("../recovery-reason").RecoveryProvenance = {
-      reason: "ptl_reactive",
-      tokensBefore: before,
-      tokensAfter: after,
-      turnsDropped: Math.max(snapshot.length - compacted.messages.length, 0),
-      turnsKept: compacted.messages.length,
-      compactedAt: Date.now(),
+  const provenance: import("../recovery-reason").RecoveryProvenance = {
+    reason: "ptl_reactive",
+    tokensBefore: before,
+    tokensAfter: after,
+    turnsDropped: Math.max(snapshot.length - compacted.messages.length, 0),
+    turnsKept: compacted.messages.length,
+    compactedAt: Date.now(),
+  }
+  const threadId = config.sessionId ?? ""
+  // claim 1 (ALBB-07) — post-compact hook + advisory next-actions, OBSERVABLE.
+  //
+  // The `post_compact` HookBus emit routes through the SHARED
+  // `buildPostCompactEmit` SSOT (identical shape to the PROACTIVE path's
+  // `compaction-wire.ts` — no duplicated inline emit that can drift). Formerly
+  // this whole block sat inside a bare `try { … } catch {}` that swallowed a
+  // throwing subscriber (or a throwing `setNextActions`) with NO `logger.warn`
+  // and NO stream event — invisible to the agent-state stream. Now a throw from
+  // EITHER side is surfaced: a `logger.warn` AND a `recovery` event (reusing the
+  // existing `emitRecovery` seam — no new event vocabulary) so the failed
+  // post-compact is observable (north-star). The loop MUST still complete
+  // (no-throw contract preserved); on the happy path (no throw) this is
+  // byte-identical (a `post_compact` emit + the same advisory `setNextActions`).
+  const postCompactEmit = buildPostCompactEmit(config.hooks, threadId)
+  if (postCompactEmit !== undefined) {
+    try {
+      await postCompactEmit(provenance)
+    } catch (e) {
+      surfacePostCompactFailure(session, "post_compact hook", e)
     }
-    const threadId = config.sessionId ?? ""
-    await config.hooks?.emit({ type: "post_compact", threadId, provenance })
-    if (
-      config.objective !== undefined &&
-      threadId.length > 0 &&
-      !objectiveBudgetExhausted(config, threadId)
-    ) {
+  }
+  if (
+    config.objective !== undefined &&
+    threadId.length > 0 &&
+    !objectiveBudgetExhausted(config, threadId)
+  ) {
+    try {
       config.objective.setNextActions(threadId, [
         "Resuming after mid-turn compaction (PTL recovery)",
       ])
+    } catch (e) {
+      surfacePostCompactFailure(session, "post_compact setNextActions", e)
     }
-  } catch {
-    // No-throw.
   }
   return CONTINUE
+}
+
+/** claim 1 (ALBB-07) — make a swallowed reactive post-compact failure OBSERVABLE
+ *  without breaking the no-throw contract: a `logger.warn` (operator log) AND a
+ *  `recovery` stream event (agent-state surface; reuses {@link emitRecovery}, no
+ *  new event type). `stage` names which sub-step failed (hook vs setNextActions)
+ *  so the surfaced detail answers "why is the resume nudge missing". Never
+ *  rethrows. */
+const surfacePostCompactFailure = (session: TurnSession, stage: string, e: unknown): void => {
+  logger.warn(`loop.reactiveCompact.${stage}: ${errMessage(e)}`)
+  emitRecovery(session.config, "compact", `${stage} failed: ${errMessage(e)}`)
 }
 
 export const applyAction = async (
@@ -187,6 +226,7 @@ export const applyAction = async (
   result: StreamSuccess | { error: unknown; message: string },
   ctxSystem: SystemPromptInput,
   history: readonly ToolHistoryEntry[],
+  activeModel: string,
 ): Promise<Step> => {
   const { config, guards } = session
   const { wm, toolChoiceState } = state
@@ -196,6 +236,7 @@ export const applyAction = async (
     action,
     result,
     ctxSystem,
+    activeModel,
   )
   if (nonSuccessStep !== null) return nonSuccessStep
   const success = result as StreamSuccess

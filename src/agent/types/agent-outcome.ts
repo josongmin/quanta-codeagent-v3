@@ -36,6 +36,13 @@ export type StopReason =
                  `AgentOutcome.refusal.rationale` carries the visible-text
                  reason. Distinct from `error` so a host can render "model
                  refused" without inspecting the message stream. */
+  | "awaiting_approval" /* ALBB-18 — the turn is PAUSED awaiting a human-in-the-
+                 loop approval decision (returned by `approvalPlaceholderOutcome`
+                 alongside an `approvalRequest`; matches scheduler status
+                 `"awaiting_approval"`). NOT terminal / NOT user-cancelled —
+                 distinct from `aborted` so a consumer reading `outcome.reason`
+                 can tell "paused, resume pending" from "cancelled". Classified
+                 to `"partial"` (resumable, incomplete) by the reactor SSOT. */
 
 /**
  * memory_citation provenance surface (ADR-0082). A record is "cited" iff it

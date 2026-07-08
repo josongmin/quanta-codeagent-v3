@@ -1384,3 +1384,80 @@ describe("session-loop — in-turn keystroke SOURCE wiring (#8)", () => {
     ])
   })
 })
+
+// ALBB-18 (1) — the abort branch (`session-loop.ts`) must route through the
+// SSOT classifier so an aborted turn records `lastTurnOutcome === "partial"`
+// (NOT the hardcoded `"fail"` it used before). `lastTurnOutcome` is a private
+// loop var; we observe it through its ONLY consumer seam — the closure
+// `() => lastTurnOutcome` handed to `buildAutorunEligibility`. Mocking that
+// factory captures the live getter; forcing `runOneTurn` to report an aborted
+// turn drives the branch. Reverting the fix to `"fail"` turns this red.
+describe("session-loop — ALBB-18 abort branch routes through SSOT (partial, not fail)", () => {
+  let originalTurnRunner: Record<string, unknown> | undefined
+  let originalPermission: Record<string, unknown> | undefined
+  // Set by the captured `buildAutorunEligibility` getter argument.
+  let capturedOutcomeGetter: (() => string | undefined) | undefined
+
+  const turnRunnerUrl = new URL(
+    "../../../../src/apps/cli/repl/turn-runner.ts",
+    import.meta.url,
+  )
+
+  beforeAll(async () => {
+    const turnRunner = await import(turnRunnerUrl.href)
+    const permission = await import("@/permission")
+    originalTurnRunner = { ...turnRunner }
+    originalPermission = { ...permission }
+
+    await mock.module(turnRunnerUrl.href, () => ({
+      ...turnRunner,
+      // Force a single ABORTED turn: `turnAborted: true`, `result: undefined`.
+      // Fire `onAfterResult`? No — an aborted turn has no result, matching the
+      // real branch precondition (`out.result === undefined` too).
+      runOneTurn: async () => ({ result: undefined, turnAborted: true }),
+    }))
+    await mock.module("@/permission", () => ({
+      ...permission,
+      buildAutorunEligibility: (_env: unknown, getOutcome: () => string | undefined) => {
+        capturedOutcomeGetter = getOutcome
+        // Return undefined ⇒ "no opinion" ⇒ byte-identical to no resolver.
+        return undefined
+      },
+    }))
+  })
+
+  afterAll(async () => {
+    if (originalTurnRunner !== undefined) {
+      const snapshot = originalTurnRunner
+      await mock.module(turnRunnerUrl.href, () => snapshot)
+    }
+    if (originalPermission !== undefined) {
+      const snapshot = originalPermission
+      await mock.module("@/permission", () => snapshot)
+    }
+  })
+
+  beforeEach(() => {
+    capturedOutcomeGetter = undefined
+  })
+
+  test("aborted turn ⇒ lastTurnOutcome === 'partial' (SSOT), not 'fail'", async () => {
+    const { runSessionLoop } = await import("../../../../src/apps/cli/repl/session-loop")
+    const setup = await buildSetup(undefined)
+    const sinks = buildSinks()
+    // One interactive turn, then the prompt source ends.
+    promptQueue.push("do the work", null)
+    await runSessionLoop({
+      setup,
+      dispatchSlash: async () => false,
+      sinks,
+      registerExitTeardown: () => undefined,
+    })
+    // The eligibility getter was captured at loop start and closes over the
+    // mutable `lastTurnOutcome`; reading it post-loop reflects the aborted turn.
+    expect(capturedOutcomeGetter).toBeDefined()
+    expect(capturedOutcomeGetter?.()).toBe("partial")
+    // Guard against the pre-fix regression explicitly.
+    expect(capturedOutcomeGetter?.()).not.toBe("fail")
+  })
+})

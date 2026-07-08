@@ -48,17 +48,24 @@ export const createTurnStreamPort = (args: {
       emit(event: AgentEvent): void {
         const errorMessage = extractTurnErrorMessage(event)
         if (errorMessage !== undefined) lastErrorMessage = errorMessage
-        const sessionEvent = toSessionHostTurnEvent(event)
-        if (sessionEvent !== undefined) args.onEvent?.(sessionEvent)
-        // T01 — fan the item cores derived from THIS event onto the session wire.
-        // Emitted AFTER the 1:1 bridge event so e.g. a tool's `tool.invoked`
-        // precedes its `item.started` (stable causal order).
-        if (itemProjector !== undefined) {
-          for (const item of itemProjector.project(event)) {
-            args.onEvent?.({ type: "item.stream", item })
-          }
-        }
+        // Base emit FIRST + verbatim — every existing consumer is byte-identical
+        // (mirrors wireAgentStateTap in src/agent/optional-ports.ts).
         args.baseStream.emit(event)
+        try {
+          const sessionEvent = toSessionHostTurnEvent(event)
+          if (sessionEvent !== undefined) args.onEvent?.(sessionEvent)
+          // T01 — fan the item cores derived from THIS event onto the session wire.
+          // Emitted AFTER the 1:1 bridge event so e.g. a tool's `tool.invoked`
+          // precedes its `item.started` (stable causal order).
+          if (itemProjector !== undefined) {
+            for (const item of itemProjector.project(event)) {
+              args.onEvent?.({ type: "item.stream", item })
+            }
+          }
+        } catch {
+          // A throwing observer must never break the base emit (already done above)
+          // or crash the turn — session-bridge fan-out is observation-only, fail-silent.
+        }
       },
     },
     getLastErrorMessage: () => lastErrorMessage,

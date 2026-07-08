@@ -822,6 +822,17 @@ const wireSessionResourcesAndCodexR2 = (cfg: AgentConfig, env: AssemblerEnv): vo
   if (metricsEmitter !== undefined) {
     ;(cfg as { metricsEmitter?: MetricEmitterPort }).metricsEmitter = metricsEmitter
   }
+  // ALBB-19 #3 — LIVE skill-set side-channel. The `getSnapshot` closure below is
+  // captured ONCE at the composition root and reads `cfg.*`; the per-turn active
+  // skill set is computed downstream in `context-assembler.ts` and is NOT in this
+  // closure's scope. Publish a MUTABLE cursor (mirroring the `metricsEmitter`
+  // structural side-channel above) that the loop updates each turn BEFORE
+  // consuming `contextEventsForTurn()`; the closure reads `cursor.ids`. Absent
+  // update ⇒ stays `[]` ⇒ byte-identical to the frozen-empty legacy behaviour, so
+  // `skill_activation` degrades to unreachable (fail-closed) rather than emitting
+  // spurious events.
+  const skillCursor: { ids: readonly string[] } = { ids: [] }
+  ;(cfg as { activeSkillCursor?: { ids: readonly string[] } }).activeSkillCursor = skillCursor
   installCodexR2Wires(cfg, {
     ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
     systemPromptCache: wrappedCache,
@@ -837,7 +848,8 @@ const wireSessionResourcesAndCodexR2 = (cfg: AgentConfig, env: AssemblerEnv): vo
         repoRulesPaths:
           cfg.repoRules?.layers?.map((l) => l.sourcePath) ??
           (cfg.repoRules !== undefined ? [cfg.repoRules.sourcePath] : []),
-        activeSkills: [],
+        // ALBB-19 #3 — read the LIVE per-turn skill ids published by the loop.
+        activeSkills: skillCursor.ids,
       }),
   })
 }

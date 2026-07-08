@@ -17,6 +17,7 @@ export const AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES = [
   "tool_result",
   "usage",
   "skill_scope_decision",
+  "progress_update",
 ] as const satisfies readonly AgentEventType[]
 
 export const AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_TYPES = [
@@ -80,6 +81,18 @@ const AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGE = {
     decision: event.decision,
     isReadOnly: event.isReadOnly,
   }),
+  // ALBB-18 — mid-turn `communicate_update` progress. Render-only, so it reuses
+  // the EXISTING `assistant_text.delta` host event (NO new SessionHostTurnEvent
+  // type, NO scheduler cascade — the scheduler already maps that 1-to-1 onto the
+  // wire). The typed triple collapses to its live `currentStep` line; empty
+  // steps are dropped (mirrors the `assistant_text` empty-delta guard). Web/IDE
+  // consumers on the session protocol now receive progress that was previously
+  // CLI-stdout-only. Default-OFF at the source (`progress_update` is emitted only
+  // when `AgentConfig.progressSink` is wired) ⇒ byte-identical otherwise.
+  progress_update: (event) =>
+    event.currentStep.length > 0
+      ? { type: "assistant_text.delta", delta: event.currentStep }
+      : undefined,
 } satisfies SessionHostTurnEventBridgeRegistry
 
 export const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undefined => {

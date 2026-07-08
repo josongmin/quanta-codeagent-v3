@@ -829,7 +829,18 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         // session is SSOT — documented limitation, not a bug).
         if (out.backgrounded === true) continue
         process.stderr.write("\n")
-        if (out.turnAborted || out.result === undefined) {
+        // ALBB-18 (1) — label fidelity: an Esc-Esc / turn-abort is the SAME
+        // terminal reason (`"aborted"`) the happy path routes through the SSOT
+        // classifier, which maps it to `"partial"` — so route the abort branch
+        // through the SAME SSOT rather than hardcoding `"fail"` (which disagreed
+        // with the classifier for the identical reason). A genuine no-result /
+        // error with NO abort stays `"fail"`. No behavioral effect today (self-
+        // wake Guard 3 blocks both `"fail"` AND `"partial"`); this pins the label
+        // to the SSOT so a future Guard-3 loosening cannot make the mislabel
+        // silently load-bearing.
+        if (out.turnAborted) {
+          lastTurnOutcome = lastTurnOutcomeFromAgentOutcome({ reason: "aborted" } as AgentOutcome)
+        } else if (out.result === undefined) {
           lastTurnOutcome = "fail"
         }
         // RFC-09 (A) — turn-completion notify (interactive path).

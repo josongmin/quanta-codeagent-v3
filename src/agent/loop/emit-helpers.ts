@@ -199,7 +199,17 @@ export const objectiveBudgetExhausted = (config: AgentConfig, threadId: string):
     return config.objective.get(threadId)?.status === "budget_limited"
   } catch (e) {
     logger.warn(`loop.objectiveBudgetExhausted: ${errMessage(e)}`)
-    return false
+    // ALBB-07 claim 3 — DIRECTIONAL ADVISORY hardening ONLY. With enforce ON, a
+    // throwing objective store previously returned `false` (fail-OPEN) → the
+    // reactive compact branch proceeded to the "Resuming after mid-turn
+    // compaction" advisory nudge. Its blast radius is ONLY that advisory
+    // next-actions nudge — NOT the loop-continuation enforcement gate (that
+    // lives in `objective/continuation.ts` and is INDEPENDENTLY fail-closed on a
+    // throwing store: `readStatus` → null → `skip("no-goal")`; a throwing store
+    // cannot bypass real enforcement). Fail-CLOSED here (treat as exhausted ⇒
+    // skip the advisory nudge) is a defensive default, NOT an enforcement-bypass
+    // fix — no efficacy A/B required.
+    return true
   }
 }
 

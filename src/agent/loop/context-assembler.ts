@@ -52,6 +52,25 @@ export const deriveRecallQuery = (wm: WorkingMemory<Message>): string | undefine
   return undefined
 }
 
+/** ALBB-19 #3 — publish the LIVE per-turn skill ids to the composition-root
+ *  side-channel cursor that the `getSnapshot` closure
+ *  (`agent-config-assembler.ts`) reads. The cursor is a mutable
+ *  `{ ids: readonly string[] }` box mirroring the `metricsEmitter` structural
+ *  side-channel. We project skill OBJECTS → `skill.name` id STRINGS (the
+ *  snapshot's `readonly string[]` shape) before publishing.
+ *
+ *  Fail-closed: if no cursor was installed (bench / replay surfaces), this is a
+ *  no-op and the snapshot stays `activeSkills: []` (byte-identical). Structural-
+ *  only — does NOT touch the AgentConfig type surface. */
+const publishActiveSkillCursor = (
+  config: AgentConfig,
+  augmentedSkills: { name: string }[] | undefined,
+): void => {
+  const cursor = (config as { activeSkillCursor?: { ids: readonly string[] } }).activeSkillCursor
+  if (cursor === undefined) return
+  cursor.ids = augmentedSkills !== undefined ? augmentedSkills.map((s) => s.name) : []
+}
+
 export const resolveMemoryContext = async (
   config: AgentConfig,
   wm: WorkingMemory<Message>,
@@ -334,14 +353,25 @@ export const prepareTurnContext = async (
     baseline.recordSendCount(wm.snapshot().length)
   }
   const wsSnapshot = workingState?.snapshot()
-  const contextEvents = resolveContextEventsForTurn(config)
-  const mentionMessages = await resolveMentionInjectionMessages(config, wm)
+  // ALBB-19 #3 — resolve the LIVE per-turn skill set BEFORE consuming
+  // `resolveContextEventsForTurn` so the composition-root `getSnapshot` closure
+  // (which reads a mutable side-channel cursor published here) sees THIS turn's
+  // skills. Previously the closure hardcoded `activeSkills: []`, making
+  // `skill_activation` ContextEvents structurally unreachable. We compute the
+  // plugin activation + augmentation first, project to `skill.name` id strings
+  // (the snapshot's `readonly string[]` shape, NOT skill objects), publish to
+  // the cursor, THEN consume — publish-before-consume so activation surfaces the
+  // same turn (no one-turn lag). Absent cursor (bench/replay surfaces that never
+  // installed it) ⇒ no-op ⇒ byte-identical.
   const pluginActivation = await resolvePluginActivationForTurn(
     config,
     latestUserTextFromWm(wm),
     `t${turn}`,
   )
   const augmentedSkills = augmentActiveSkillsWithPlugin(activeSkills, pluginActivation)
+  publishActiveSkillCursor(config, augmentedSkills)
+  const contextEvents = resolveContextEventsForTurn(config)
+  const mentionMessages = await resolveMentionInjectionMessages(config, wm)
   await reconcileSkillMcpDepsForTurn(config, augmentedSkills)
   const taskBudgetForTurn = resolveTaskBudgetForTurn(config, taskSpend)
   // N1 — assistant language auto-detect (default-OFF `QUANTA_LANG_DETECT`). Reuse

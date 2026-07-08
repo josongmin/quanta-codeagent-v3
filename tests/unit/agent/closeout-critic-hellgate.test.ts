@@ -72,6 +72,8 @@ const drive = async (
     { message, stopReason: "end_turn", resultBlocks: message.content },
     { blocks: [] } as never,
     [],
+    // ALBB-07 claim 2 — resolved active turn model; unused on the completed path.
+    "unknown",
   )
   return { events, result }
 }

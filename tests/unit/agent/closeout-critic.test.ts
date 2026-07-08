@@ -67,6 +67,9 @@ const driveCompleted = async (
     { message, stopReason: "end_turn", resultBlocks: message.content },
     { blocks: [] } as never,
     opts.history ?? [],
+    // ALBB-07 claim 2 — `applyAction` now takes the resolved active turn model;
+    // the completed path here never reads it, so a sentinel keeps the call typed.
+    "unknown",
   )
   return { events: stream.events, result }
 }

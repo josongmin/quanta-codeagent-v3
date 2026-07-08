@@ -16,9 +16,28 @@ describe("session-host turn-event bridge inventory", () => {
     for (const type of AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES) {
       expect(canonical.has(type)).toBe(true)
     }
-    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBe(7)
+    // ALBB-18 (3) — `progress_update` bridged (was 7 → now 8).
+    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBe(8)
+    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.includes("progress_update")).toBe(
+      true,
+    )
     expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBeLessThan(
       AGENT_EVENT_TYPES.length,
+    )
+  })
+
+  test("ALBB-18 — progress_update reuses an EXISTING host event type (no new SessionHostTurnEventType)", () => {
+    // The bridge adds NO new SessionHostTurnEventType: progress_update reuses the
+    // render-only `assistant_text.delta` target, so the target set is unchanged.
+    const bridged = toSessionHostTurnEvent({
+      type: "progress_update",
+      currentStep: "resolving imports",
+    })
+    expect(bridged).not.toBeUndefined()
+    expect(bridged?.type).toBe("assistant_text.delta")
+    // The target-type inventory must NOT have grown a new arm for progress.
+    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_TYPES.includes("progress_update" as never)).toBe(
+      false,
     )
   })
 

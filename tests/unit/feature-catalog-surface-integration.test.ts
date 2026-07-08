@@ -115,17 +115,27 @@ describe("surface_integration — web reachability SSOT anchor", () => {
   // (feature skill-scope-v2-availability-permission web=full, App.tsx:247 →
   // EscalationCard), so it is added to the pinned set here — the ratchet still
   // asserts an EXACT set, so any FUTURE unaudited widening still fires red.
+  //
+  // RE-AUDITED 2026-07-09: ALBB-18 deliberately added `progress_update` so the
+  // web/IDE surface receives mid-turn `communicate_update` progress that was
+  // previously CLI-stdout-only. It reuses the EXISTING render-only
+  // `assistant_text.delta` host event (NO new SessionHostTurnEventType, NO
+  // scheduler cascade), so it adds a SOURCE tag here but does NOT widen the
+  // target inventory. Audited + documented (parity with Claude Code / Codex,
+  // which both surface tool-progress on their protocol); the ratchet still
+  // asserts an EXACT set so any FUTURE unaudited widening fires red.
   const KNOWN_BRIDGE_EVENTS = [
     "assistant_text",
     "llm_continuation",
     "llm_request",
+    "progress_update",
     "skill_scope_decision",
     "tool_call",
     "tool_result",
     "usage",
   ].sort()
 
-  test("SI-20: toSessionHostTurnEvent maps exactly the known 7 event tags", () => {
+  test("SI-20: toSessionHostTurnEvent maps exactly the known 8 event tags", () => {
     const bridged: string[] = [...AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES]
     expect(bridged.sort()).toEqual(KNOWN_BRIDGE_EVENTS)
   })
