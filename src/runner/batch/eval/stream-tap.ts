@@ -154,6 +154,15 @@ export class BenchStreamTap implements StreamPort {
      *  bash <cmd> / read …) under concurrency, instead of ~15min of silence
      *  between the ▶ start and ■ done lines. Absent ⇒ byte-identical (no emit). */
     private readonly onAction?: (name: string, detail: string) => void,
+    /** Optional per-tool-result observer. Called once per tool_result event with
+     *  the tool name, success flag, and timing/exit-code when available. Wired
+     *  by the bench debug-sink path to record per-turn toolExec slices. */
+    private readonly onToolResult?: (args: {
+      name: string
+      ok: boolean
+      durationMs?: number
+      exitCode?: number
+    }) => void,
   ) {}
 
   /** Concise human detail for an action line: edit→target file, bash→command
@@ -214,6 +223,12 @@ export class BenchStreamTap implements StreamPort {
   private handleToolResult(event: ToolResultEvent): void {
     this.trackAppliedEditResult(event)
     this.trackVerifyResult(event)
+    this.onToolResult?.({
+      name: event.name,
+      ok: event.ok,
+      ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+      ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
+    })
   }
 
   private trackAppliedEditResult(event: ToolResultEvent): void {

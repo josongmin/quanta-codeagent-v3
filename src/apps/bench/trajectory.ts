@@ -20,7 +20,7 @@
  * live model output. Operators who intentionally want "replay until the fork
  * point, then diverge live" opt into `record-and-passthrough`.
  */
-import { writeFile } from "node:fs/promises"
+import { readFile, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import type { MatchPolicy } from "@/llm/replay"
@@ -261,6 +261,11 @@ const buildRunMeta = (
   }
 }
 
+/** Process-scoped registry: instanceId → last-written meta file path.
+ *  Populated in `applyBenchTrajectoryMode` so post-run callers can patch the
+ *  meta with verdict/editTrace data without re-deriving the timestamped path. */
+const metaPathRegistry = new Map<string, string>()
+
 export const applyBenchTrajectoryMode = (
   llm: LLMPort,
   mode: BenchTrajectoryMode,
@@ -269,8 +274,13 @@ export const applyBenchTrajectoryMode = (
 ): LLMPort => {
   if (mode.kind === "off") return llm
   if (mode.kind === "record") {
-    const { jsonl: path, meta: metaPath } = resolveRecordPaths(mode.path, ctx?.instanceId, ctx?.attempt)
+    const { jsonl: path, meta: metaPath } = resolveRecordPaths(
+      mode.path,
+      ctx?.instanceId,
+      ctx?.attempt,
+    )
     if (metaPath !== undefined) {
+      if (ctx?.instanceId !== undefined) metaPathRegistry.set(ctx.instanceId, metaPath)
       const meta = buildRunMeta(identity, ctx)
       // Fire-and-forget: meta write failure must never crash the bench run.
       writeFile(metaPath, JSON.stringify(meta, null, 2), "utf8").catch(() => {})
@@ -292,6 +302,26 @@ export const applyBenchTrajectoryMode = (
     provider: identity.provider,
     model: identity.model,
   })
+}
+
+/**
+ * Patch the run meta.json for `instanceId` with extra post-run fields (e.g.
+ * verdict, editTrace). No-op when the instance has no registered meta path
+ * (debug gate off, no instanceId, or replay mode). Best-effort: write failures
+ * are silently swallowed so they never crash a bench run.
+ */
+export const patchRunMeta = async (
+  instanceId: string,
+  extra: Record<string, unknown>,
+): Promise<void> => {
+  const metaPath = metaPathRegistry.get(instanceId)
+  if (!metaPath) return
+  try {
+    const existing = JSON.parse(await readFile(metaPath, "utf8"))
+    await writeFile(metaPath, JSON.stringify({ ...existing, ...extra }, null, 2), "utf8")
+  } catch {
+    // best-effort
+  }
 }
 
 /**

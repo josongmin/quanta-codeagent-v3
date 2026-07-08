@@ -147,6 +147,8 @@ import { createTentativeRecorder } from "@/runner/batch/eval/tentative-patch"
 import { createRuntime, type RuntimeSession } from "@/sdk/runtime"
 import { errMessage, foldGroundingReceipts, gateDisabled, gateOn, logger } from "@/shared"
 import { v5AdaptiveEnabled } from "../preset"
+import { patchRunMeta } from "../trajectory"
+import { debugSink, isTrajectoryDebugEnabled } from "../trajectory-debug-sink"
 import type {
   BenchReproTestTelemetry,
   Instance,
@@ -406,6 +408,10 @@ const runAgentOnce = async (
     // per-turn agent actions — exactly the live LLM-process visibility that was
     // missing.
     (name, detail) => logger.info(`  · ${instance.id} ${name}${detail ? ` ${detail}` : ""}`),
+    // toolExec debug enricher: record per-tool-result timing + outcome into the
+    // debug-sink so the trajectory viewer can show a per-turn tool breakdown.
+    // No-op unless QUANTA_BENCH_RECORD_TRAJECTORY=debug.
+    isTrajectoryDebugEnabled() ? (args) => debugSink.append("toolExec", args) : undefined,
   )
   // Knob telemetry: emit ONE `knobs_applied` event per runAgent invocation —
   // the greppable per-run marker of which knobs/preset actually ran. The runner
@@ -1787,20 +1793,23 @@ const runAdaptiveAttempt = async (args: {
     sandbox,
   })
   if (terminal !== undefined) return { ...terminal, adaptiveRoute }
-  return {
-    ...(await verifyAndFinalizeResult({
-      instance,
-      phase: finalPhase,
-      deps,
-      sandbox,
-      signal,
-      reproTest,
-      wiring,
-      startedAt,
-      prepared: finalPrepared,
-    })),
-    adaptiveRoute,
+  const finalResult = await verifyAndFinalizeResult({
+    instance,
+    phase: finalPhase,
+    deps,
+    sandbox,
+    signal,
+    reproTest,
+    wiring,
+    startedAt,
+    prepared: finalPrepared,
+  })
+  if (isTrajectoryDebugEnabled()) {
+    void patchRunMeta(instance.id, {
+      verdict: { passed: finalResult.passed, patchBytes: finalResult.patch.length },
+    })
   }
+  return { ...finalResult, adaptiveRoute }
 }
 
 interface RunInstanceOnceState {
@@ -1970,19 +1979,23 @@ const runInstanceBody = async (args: {
   // Await inside the try so sandbox cleanup in `finally` cannot race the final
   // verifier. A bare `return promise` here would run `finally` immediately and
   // tear down the sandbox while verify is still spawning.
-  return attachAndPersistReproVoteOutcomes(
-    await verifyAndFinalizeResult({
-      instance: args.instance,
-      phase: args.state.phase,
-      deps: args.deps,
-      sandbox: args.sandbox,
-      signal: args.abort.signal,
-      reproTest: args.state.reproTest,
-      wiring: args.state.wiring,
-      startedAt: args.startedAt,
-      prepared: args.state.prepared,
-    }),
-  )
+  const onceResult = await verifyAndFinalizeResult({
+    instance: args.instance,
+    phase: args.state.phase,
+    deps: args.deps,
+    sandbox: args.sandbox,
+    signal: args.abort.signal,
+    reproTest: args.state.reproTest,
+    wiring: args.state.wiring,
+    startedAt: args.startedAt,
+    prepared: args.state.prepared,
+  })
+  if (isTrajectoryDebugEnabled()) {
+    void patchRunMeta(args.instance.id, {
+      verdict: { passed: onceResult.passed, patchBytes: onceResult.patch.length },
+    })
+  }
+  return attachAndPersistReproVoteOutcomes(onceResult)
 }
 
 const runInstanceOnce = async (
