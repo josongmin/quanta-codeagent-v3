@@ -308,6 +308,10 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .dbg-tool-tbl th{background:#f0eafc;color:#6044aa;padding:2px 6px;text-align:left;font-weight:700;border-bottom:1px solid #ddd0f0}
 .dbg-tool-tbl td{padding:2px 6px;border-bottom:1px solid #ede8f5;color:#3a3050}
 .dbg-tool-ok{color:#2e7d32;font-weight:700}.dbg-tool-fail{color:#c62828;font-weight:700}
+.tv-chip{display:inline-flex;align-items:center;gap:2px;font-size:10px;font-weight:700;border-radius:3px;padding:1px 5px;margin-left:3px;font-family:var(--mono)}
+.tv-edit{background:#e3f0ff;color:#1565c0}.tv-edit.tv-fail{background:#fdecea;color:#b71c1c}
+.tv-vok{background:#e8f5e9;color:#2e7d32}.tv-vfail{background:#fdecea;color:#b71c1c}
+.tv-chip sup{font-size:8px;margin-left:2px}
 .dbg-tool-file{color:#555;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .at-item{display:flex;gap:8px;padding:2px 4px;font-size:11px;font-family:var(--mono);border-bottom:1px solid #ede8f5;color:#3a3050}
 .at-item:last-child{border-bottom:none}
@@ -1011,6 +1015,35 @@ function renderDebugIndex(inst){
 }
 
 // ──────────── TURN GROUP ────────────
+function turnEditVerifyChips(turn){
+  // Prefer debug toolExec (accurate ok flags) over tool-scan heuristics.
+  const dbgExec=turn.meta?.debug?.toolExec
+  let editOk=0,editFail=0,verifyOk=0,verifyFail=0
+  if(Array.isArray(dbgExec)&&dbgExec.length){
+    for(const t of dbgExec){
+      const ok=t.ok!==false
+      if(t.file!=null){ok?editOk++:editFail++}
+      else if(t.name==='test_runner'||t.name==='bash'){ok?verifyOk++:verifyFail++}
+    }
+  }else{
+    // fallback: scan tool call/result pairs
+    for(const t of (turn.output?.tools??[])){
+      const n=(t.name??'').toLowerCase()
+      const r=String(t.result??'')
+      const isEdit=['edit','str_replace','str_replace_editor','write','write_file','apply_patch'].includes(n)
+      const isVerify=n==='test_runner'||(n==='bash'&&/pytest|unittest|jest|npm test|make test/.test(t.input?.command??''))
+      if(!isEdit&&!isVerify)continue
+      const ok=!/stale_precondition|^error\b|FAILED|FAIL\b/i.test(r)
+      if(isEdit){ok?editOk++:editFail++}
+      else{ok?verifyOk++:verifyFail++}
+    }
+  }
+  const chips=[]
+  if(editOk+editFail>0)chips.push(`<span class="tv-chip tv-edit${editFail>0?' tv-fail':''}" title="${editOk} ok / ${editFail} fail edit(s)">✏${editOk+editFail}${editFail>0?`<sup>✗${editFail}</sup>`:''}</span>`)
+  if(verifyOk+verifyFail>0)chips.push(`<span class="tv-chip ${verifyOk>0?'tv-vok':'tv-vfail'}" title="verify: ${verifyOk} pass / ${verifyFail} fail">${verifyOk>0?'✓':'✗'}</span>`)
+  return chips.join('')
+}
+
 function renderTurnGroup(turn,idx){
   const phase=detectPhase(turn,idx)
   const ts=fTime(turn.ts),dur=fMs(turn.meta?.durationMs),model=turn.meta?.model??''
@@ -1020,6 +1053,7 @@ function renderTurnGroup(turn,idx){
   // this turn came from a concurrent candidate; color-coded so lanes are scannable.
   const lane=turn.meta?.lane
   const laneBadge=lane?`<span class="lane-badge" style="background:${laneColor(lane)}" title="parallel lane">⑂ ${esc(lane)}</span>`:''
+  const evChips=turnEditVerifyChips(turn)
 
   // ── USER SIDE: new user messages ──
   const userParts=buildUserParts(turn)
@@ -1044,6 +1078,7 @@ function renderTurnGroup(turn,idx){
           ${dur?`<span class="turn-dur">${dur}</span>`:''}
           ${phase?`<span class="phase-badge ${phase}">${ph(phase)}</span>`:''}
           ${laneBadge}
+          ${evChips}
           ${anomBadges}
           <span class="full-prompt-btn${openTurnForPrompt===idx?' active':''}" data-turn="${idx}" onclick="openPromptPanel(${idx})" title="${T('fullPrompt')}">${T('promptBtn')}</span>
         </div>
