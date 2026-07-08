@@ -60,6 +60,11 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
     // non-spawned) ⇒ no guard (root is never a valid target anyway).
     ...(config.subagentTaskId !== undefined ? { ownAgentId: config.subagentTaskId } : {}),
     ...(config.mailboxAgentId !== undefined ? { callerLabel: config.mailboxAgentId } : {}),
+    // F-B (jul-7 audit) — scope list_agents to THIS agent's own lineage. The agent's
+    // own deterministic label (`mailboxAgentId`, ADR-0416) IS the lineage the spawn
+    // owners ledger stamps its children under, so a child enumerates only its own
+    // subtree + owner-less host-seeded tasks. Absent (root, no label) ⇒ unscoped.
+    ...(config.mailboxAgentId !== undefined ? { requesterLineage: config.mailboxAgentId } : {}),
     ...(wantList ? { enableIntrospect: true } : {}),
     ...(wantFollowup ? { enableFollowup: true } : {}),
   })

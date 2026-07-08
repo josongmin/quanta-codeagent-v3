@@ -14,6 +14,7 @@ import {
   createSubagent6Tools,
   handleFollowupTask,
   handleListAgents,
+  handleSpawnAgent,
   type MailboxSendPort,
   type SubagentRunner,
   TaskRegistry,
@@ -149,6 +150,62 @@ describe("list_agents — RFC-04 / ADR-0437", () => {
     const rec = reg.get(a)
     const out = handleListAgents({}, { registry: reg })
     if (out.kind === "success") expect(out.agents[0]?.startedAt).toBe(rec?.startedAt)
+  })
+})
+
+// jul-7 audit F-B [MED]: list_agents enumerated the SHARED registry with NO lineage filter.
+// Because enableIntrospect propagates to children (buildChildConfig spreads parent.subagent),
+// a child could list its SIBLINGS' ids + labels (label = agentType ?? prompt.slice(0,40) —
+// leaking a sibling's prompt prefix). Gate enumeration by the caller's lineage: a labeled
+// caller sees ONLY its own-lineage tasks (+ owner-less host-seeded), NOT cross-lineage ones.
+describe("list_agents — F-B lineage enumeration gate", () => {
+  const trivialRunner: SubagentRunner = async () => ({ ok: true, finalText: "x", turns: 1 })
+
+  const stampChild = async (reg: TaskRegistry, lineage: string, prompt: string): Promise<string> => {
+    const s = await handleSpawnAgent({ prompt }, { runner: trivialRunner, registry: reg, requesterLineage: lineage })
+    if (s.kind !== "success") throw new Error("spawn failed")
+    await reg.waitForSettle(s.agentId)
+    return s.agentId
+  }
+
+  test("labeled caller sees ONLY its own lineage's tasks (sibling ids+labels hidden)", async () => {
+    const reg = new TaskRegistry()
+    const aChild = await stampChild(reg, "agent-A", "A-child-SECRET-prompt")
+    const bChild = await stampChild(reg, "agent-B", "B-child-other-prompt")
+
+    const outA = handleListAgents(
+      { includeSettled: true },
+      { registry: reg, requesterLineage: "agent-A" },
+    )
+    expect(outA.kind).toBe("success")
+    if (outA.kind === "success") {
+      const ids = outA.agents.map((x) => x.id)
+      expect(ids).toContain(aChild)
+      expect(ids).not.toContain(bChild) // sibling row entirely hidden
+      // and no label leaks B's prompt prefix
+      expect(outA.agents.some((x) => x.label.includes("B-child"))).toBe(false)
+    }
+  })
+
+  test("byte-identical: NO requesterLineage ⇒ enumerate all (legacy path)", async () => {
+    const reg = new TaskRegistry()
+    const aChild = await stampChild(reg, "agent-A", "A-child")
+    const bChild = await stampChild(reg, "agent-B", "B-child")
+    const out = handleListAgents({ includeSettled: true }, { registry: reg })
+    expect(out.kind).toBe("success")
+    if (out.kind === "success") {
+      const ids = out.agents.map((x) => x.id)
+      expect(ids).toContain(aChild)
+      expect(ids).toContain(bChild)
+    }
+  })
+
+  test("owner-less host-seeded tasks stay visible to a labeled caller (legacy disclosure)", () => {
+    const reg = new TaskRegistry()
+    const hostSeeded = spawnRunning(reg, "host task") // registered directly, no owner stamp
+    const out = handleListAgents({}, { registry: reg, requesterLineage: "agent-A" })
+    expect(out.kind).toBe("success")
+    if (out.kind === "success") expect(out.agents.map((x) => x.id)).toContain(hostSeeded)
   })
 })
 

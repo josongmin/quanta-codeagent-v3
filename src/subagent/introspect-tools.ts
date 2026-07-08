@@ -25,6 +25,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolEvent } from "@/tool"
+import { ownersForRegistry } from "./agent-tool"
 import type { AgentMetaRegistry } from "./agent-meta"
 import type { TaskRecord, TaskRegistry } from "./registry"
 import type { TurnWakeRegistry } from "./turn-wake"
@@ -131,6 +132,25 @@ const prefixMatch = (prefix: string | undefined, a: ListedAgent): boolean => {
 export interface ListAgentsDeps {
   readonly registry: TaskRegistry
   readonly agentMeta?: AgentMetaRegistry
+  /** F-B (jul-7 audit) — the enumerating agent's stable lineage label (its own
+   *  `mailboxAgentId`). When set, the listing is SCOPED: only tasks stamped by
+   *  THIS lineage (via the spawn owners ledger) plus owner-less host-seeded tasks
+   *  are returned, so a child cannot enumerate a sibling's id/label. Absent ⇒ no
+   *  scoping (byte-identical legacy path; the top-level root has no label). */
+  readonly requesterLineage?: string
+}
+
+/** True when `a` is visible to `requesterLineage`: no lineage set ⇒ all visible;
+ *  else own-lineage tasks + owner-less host-seeded ones (mirrors the wait/continue_from
+ *  disclosure rule — an unstamped task stays legacy-visible). */
+const lineageVisible = (
+  owners: ReadonlyMap<string, string> | undefined,
+  requester: string | undefined,
+  id: string,
+): boolean => {
+  if (requester === undefined || owners === undefined) return true
+  const owner = owners.get(id)
+  return owner === undefined || owner === requester
 }
 
 /** Pure, synchronous, no-throw enumeration. */
@@ -140,8 +160,12 @@ export const handleListAgents = (
 ): ListAgentsOutput => {
   const wantSettled = input.includeSettled === true
   const limit = input.limit ?? 256
+  // F-B — resolve the owners ledger ONLY when a lineage scope is requested (so the
+  // unscoped legacy path never touches it ⇒ byte-identical).
+  const owners = deps.requesterLineage === undefined ? undefined : ownersForRegistry(deps.registry)
   const rows = deps.registry
     .list() // concurrency-safe snapshot copy
+    .filter((rec) => lineageVisible(owners, deps.requesterLineage, rec.id))
     .map((rec) => toListed(rec, deps.agentMeta))
     .filter((a) => (wantSettled ? true : a.status === "running"))
     .filter((a) => prefixMatch(input.prefix, a))
@@ -271,6 +295,9 @@ export interface IntrospectToolsDeps {
   readonly enableIntrospect?: boolean
   /** Gate: build `followup_task` only when true AND the substrate exists. */
   readonly enableFollowup?: boolean
+  /** F-B (jul-7 audit) — the enumerating agent's own lineage label, forwarded into
+   *  `list_agents` so enumeration is lineage-scoped. Absent ⇒ unscoped (byte-identical). */
+  readonly requesterLineage?: string
 }
 
 const listAgentsTool = (deps: IntrospectToolsDeps): Tool<ListAgentsInput> => ({
@@ -291,6 +318,7 @@ const listAgentsTool = (deps: IntrospectToolsDeps): Tool<ListAgentsInput> => ({
     const out = handleListAgents(parsed.data, {
       registry: deps.registry,
       ...(deps.agentMeta !== undefined ? { agentMeta: deps.agentMeta } : {}),
+      ...(deps.requesterLineage !== undefined ? { requesterLineage: deps.requesterLineage } : {}),
     })
     if (out.kind === "error") {
       yield errorEvent(out)
