@@ -15,12 +15,14 @@ import {
   createSubagent6Tools,
   handleFollowupTask,
   handleListAgents,
+  handleSpawnAgent,
   type MailboxSendPort,
   type SubagentRunner,
   TaskRegistry,
   TurnWakeRegistry,
   type WakeOutcome,
 } from "../../src/subagent"
+import { ownersForRegistry } from "../../src/subagent/agent-tool"
 import { logger } from "../../src/shared"
 import type { Tool, ToolEvent } from "../../src/tool"
 
@@ -217,6 +219,62 @@ describe("list_agents — RFC-04 / ADR-0437", () => {
   })
 })
 
+// jul-7 audit F-B [MED]: list_agents enumerated the SHARED registry with NO lineage filter.
+// Because enableIntrospect propagates to children (buildChildConfig spreads parent.subagent),
+// a child could list its SIBLINGS' ids + labels (label = agentType ?? prompt.slice(0,40) —
+// leaking a sibling's prompt prefix). Gate enumeration by the caller's lineage: a labeled
+// caller sees ONLY its own-lineage tasks (+ owner-less host-seeded), NOT cross-lineage ones.
+describe("list_agents — F-B lineage enumeration gate", () => {
+  const trivialRunner: SubagentRunner = async () => ({ ok: true, finalText: "x", turns: 1 })
+
+  const stampChild = async (reg: TaskRegistry, lineage: string, prompt: string): Promise<string> => {
+    const s = await handleSpawnAgent({ prompt }, { runner: trivialRunner, registry: reg, requesterLineage: lineage })
+    if (s.kind !== "success") throw new Error("spawn failed")
+    await reg.waitForSettle(s.agentId)
+    return s.agentId
+  }
+
+  test("labeled caller sees ONLY its own lineage's tasks (sibling ids+labels hidden)", async () => {
+    const reg = new TaskRegistry()
+    const aChild = await stampChild(reg, "agent-A", "A-child-SECRET-prompt")
+    const bChild = await stampChild(reg, "agent-B", "B-child-other-prompt")
+
+    const outA = handleListAgents(
+      { includeSettled: true },
+      { registry: reg, requesterLineage: "agent-A" },
+    )
+    expect(outA.kind).toBe("success")
+    if (outA.kind === "success") {
+      const ids = outA.agents.map((x) => x.id)
+      expect(ids).toContain(aChild)
+      expect(ids).not.toContain(bChild) // sibling row entirely hidden
+      // and no label leaks B's prompt prefix
+      expect(outA.agents.some((x) => x.label.includes("B-child"))).toBe(false)
+    }
+  })
+
+  test("byte-identical: NO requesterLineage ⇒ enumerate all (legacy path)", async () => {
+    const reg = new TaskRegistry()
+    const aChild = await stampChild(reg, "agent-A", "A-child")
+    const bChild = await stampChild(reg, "agent-B", "B-child")
+    const out = handleListAgents({ includeSettled: true }, { registry: reg })
+    expect(out.kind).toBe("success")
+    if (out.kind === "success") {
+      const ids = out.agents.map((x) => x.id)
+      expect(ids).toContain(aChild)
+      expect(ids).toContain(bChild)
+    }
+  })
+
+  test("owner-less host-seeded tasks stay visible to a labeled caller (legacy disclosure)", () => {
+    const reg = new TaskRegistry()
+    const hostSeeded = spawnRunning(reg, "host task") // registered directly, no owner stamp
+    const out = handleListAgents({}, { registry: reg, requesterLineage: "agent-A" })
+    expect(out.kind).toBe("success")
+    if (out.kind === "success") expect(out.agents.map((x) => x.id)).toContain(hostSeeded)
+  })
+})
+
 describe("followup_task — RFC-04 / ADR-0437", () => {
   const setup = (wakeReturn: WakeOutcome | "no-register" = "woke") => {
     const reg = new TaskRegistry()
@@ -329,6 +387,44 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
       deps(s, { resolveLabel: () => "child/0" }),
     )
     expect(s.mb.sent[0]?.to).toBe("child/0")
+  })
+
+  // jul-7 re-audit F-E [HIGH]: followup_task DELIVERS a message AND triggers/interrupts a
+  // turn on the target by id, with no lineage gate — a sibling could inject into (or
+  // interrupt:true ABORT) another lineage's running child. Gate it like wait/send/output.
+  test("F-E: cross-lineage followup_task ⇒ ownership_denied, NO send, NO wake", () => {
+    const s = setup("woke")
+    ownersForRegistry(s.reg).set(s.target, "agent-A") // target owned by lineage A
+    const out = handleFollowupTask(
+      { agentId: s.target, message: "INJECT", interrupt: true },
+      deps(s, { requesterLineage: "agent-B" }), // sibling B attacks
+    )
+    expect(out.kind).toBe("error")
+    if (out.kind === "error") expect(out.cause).toBe("denied")
+    expect(s.mb.sent).toHaveLength(0) // NOT delivered
+    expect(s.wakeCalls).toHaveLength(0) // NOT triggered/interrupted
+  })
+
+  test("F-E control: OWNER lineage followup_task ⇒ delivered + triggered", () => {
+    const s = setup("woke")
+    ownersForRegistry(s.reg).set(s.target, "agent-A")
+    const out = handleFollowupTask(
+      { agentId: s.target, message: "go" },
+      deps(s, { requesterLineage: "agent-A" }),
+    )
+    expect(out.kind).toBe("success")
+    expect(s.mb.sent).toHaveLength(1)
+    expect(s.wakeCalls).toEqual(["followup"])
+  })
+
+  test("F-E byte-identical: owner-less target ⇒ legacy delivery (no requesterLineage gate)", () => {
+    const s = setup("woke") // spawnRunning does NOT stamp an owner
+    const out = handleFollowupTask(
+      { agentId: s.target, message: "go" },
+      deps(s, { requesterLineage: "agent-B" }),
+    )
+    expect(out.kind).toBe("success") // owner-less ⇒ allowed regardless of lineage
+    expect(s.mb.sent).toHaveLength(1)
   })
 })
 
