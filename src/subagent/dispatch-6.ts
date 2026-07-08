@@ -181,10 +181,15 @@ const routeCloseAgent: Route = async (input, deps) => {
   if (deps.registry === undefined) {
     return metaError("close_agent requires a registry", "deps_missing")
   }
-  return handleCloseAgent(input as Parameters<typeof handleCloseAgent>[0], {
+  const closeInput = input as Parameters<typeof handleCloseAgent>[0]
+  // S17 (jul-7 audit): the LLM presents the per-call `owner_token` it received from
+  // spawn_agent. This dispatch NEVER sets `hostAuthority`, so a token-absent LLM close
+  // is DENIED in the handler (not silently escalated to host-authority forceStop).
+  const ownerToken = closeInput.owner_token ?? deps.ownerToken
+  return handleCloseAgent(closeInput, {
     registry: deps.registry,
     ...(deps.ptyTable !== undefined ? { ptyTable: deps.ptyTable } : {}),
-    ...(deps.ownerToken !== undefined ? { ownerToken: deps.ownerToken } : {}),
+    ...(ownerToken !== undefined ? { ownerToken } : {}),
   })
 }
 

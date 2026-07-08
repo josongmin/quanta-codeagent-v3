@@ -190,7 +190,13 @@ export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
       SpawnAgentInputSchema,
       false,
       true,
-      (s) => `spawned agentId: ${s.agentId}`,
+      // S17 (jul-7 audit): surface the owner_token to the OWNER so it can authorize a
+      // later close_agent. A sibling that only harvests the agentId (via list_agents)
+      // has no token ⇒ close_agent DENIES it. Host cleanup uses an out-of-band authority.
+      (s) =>
+        s.ownerToken !== undefined
+          ? `spawned agentId: ${s.agentId} (owner_token: ${s.ownerToken} — pass this to close_agent to cancel it)`
+          : `spawned agentId: ${s.agentId}`,
     ) as Tool,
 
     // wait_agent — blocks until a child settles; READ-ONLY (observes registry

@@ -624,7 +624,10 @@ describe("HELLGATE — handleCloseAgent", () => {
     await reg.waitForSettle(spawn.agentId)
   })
 
-  test("no ownerToken ⇒ host-authority forceStop path used (trusted internal caller)", async () => {
+  // S17 hardening (jul-7 audit): host cleanup must be an EXPLICIT authority flag, never
+  // implied by an absent token — otherwise an LLM close_agent (which also carries no token)
+  // silently gets host-authority cancel-by-id (the exact cross-sibling DoS S17 forbids).
+  test("host cleanup via EXPLICIT hostAuthority bypasses the token (session shutdown)", async () => {
     const reg = new TaskRegistry()
     const spawn = await handleSpawnAgent(
       { prompt: "p" },
@@ -632,7 +635,42 @@ describe("HELLGATE — handleCloseAgent", () => {
     )
     if (spawn.kind !== "success") throw new Error("spawn failed")
 
+    const r = await handleCloseAgent({ agentId: spawn.agentId }, { registry: reg, hostAuthority: true })
+    expect(r.kind).toBe("success")
+    expect(reg.get(spawn.agentId)?.status).toBe("stopped")
+  })
+
+  test("S17: LLM close_agent WITHOUT the owner_token is DENIED (cross-sibling DoS blocked)", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "victim" },
+      { runner: slowRunner(2000), registry: reg },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    // A sibling that harvested the id via list_agents but has NO token must NOT close it.
     const r = await handleCloseAgent({ agentId: spawn.agentId }, { registry: reg })
+    expect(r.kind).toBe("error")
+    if (r.kind === "error") expect(r.cause).toBe("denied")
+    expect(reg.get(spawn.agentId)?.status).toBe("running") // bypass blocked — still running
+    reg.forceStop(spawn.agentId)
+    await reg.waitForSettle(spawn.agentId)
+  })
+
+  test("S17: LLM close_agent WITH the spawn-returned owner_token succeeds", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "p" },
+      { runner: slowRunner(2000), registry: reg },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    // handleSpawnAgent MUST surface the token to the owner (the schema now includes it) —
+    // asserting its presence pins the S17 owner-can-close contract, not just the happy path.
+    expect(spawn.ownerToken).toBeTypeOf("string")
+    if (spawn.ownerToken === undefined) throw new Error("spawn did not return an owner_token")
+    const r = await handleCloseAgent(
+      { agentId: spawn.agentId },
+      { registry: reg, ownerToken: spawn.ownerToken },
+    )
     expect(r.kind).toBe("success")
     expect(reg.get(spawn.agentId)?.status).toBe("stopped")
   })

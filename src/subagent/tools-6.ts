@@ -206,6 +206,11 @@ export const SpawnAgentOutputSchema = z.discriminatedUnion("kind", [
     .object({
       kind: SuccessDiscriminator,
       agentId: z.string().min(1),
+      // S17 (jul-7 audit): surface the unforgeable capability token to the OWNER so it
+      // can authorize a later `close_agent`. Without this the model never receives a
+      // token ⇒ close_agent could only fall back to host-authority cancel-by-id (the
+      // cross-sibling DoS S17 forbids). Optional: a spawn that is never closed omits it.
+      ownerToken: z.string().min(1).optional(),
     })
     .strict(),
   ErrorShape,
@@ -245,6 +250,10 @@ export type WaitAgentOutput = z.infer<typeof WaitAgentOutputSchema>
 export const CloseAgentInputSchema = z
   .object({
     agentId: z.string().min(1),
+    // S17 (jul-7 audit): the owner presents the token it received from spawn_agent to
+    // authorize the close. Absent ⇒ DENIED for an LLM caller (only trusted host code,
+    // via an out-of-band hostAuthority flag, may close without it).
+    owner_token: z.string().min(1).optional(),
   })
   .strict()
 export type CloseAgentInput = z.infer<typeof CloseAgentInputSchema>

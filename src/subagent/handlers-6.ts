@@ -545,7 +545,10 @@ const countRunning = (registry: TaskRegistry): number => registry.pendingIds().l
 export const handleSpawnAgent = async (
   input: SpawnAgentInput,
   deps: SpawnAgentDeps,
-): Promise<SpawnAgentOutput & { ownerToken?: TaskOwnerToken }> => {
+  // ownerToken is now part of SpawnAgentOutput itself (surfaced to the owner for
+  // close_agent authorization, S17 jul-7 audit); the branded TaskOwnerToken widens
+  // to the schema's `string`, so no separate intersection is needed.
+): Promise<SpawnAgentOutput> => {
   const parentDepth = deps.parentDepth ?? 0
   const childDepth = parentDepth + 1
   // (d) Fail-CLOSED depth cap: when neither the per-call nor the dep-level
@@ -769,10 +772,16 @@ interface CloseAgentDeps {
   registry: TaskRegistry
   ptyTable?: PtyTable
   /** Owner-token authorisation matches `task_stop`'s capability surface. The
-   *  spawn_agent return value carries the token to the caller; without it
-   *  another sibling cannot DoS-close a peer. When omitted, close uses the
-   *  host-authority `forceStop` path (host code path only). */
+   *  spawn_agent return value carries the token to the caller; an LLM caller
+   *  MUST present it — token-absent is DENIED, NOT silently escalated to host
+   *  authority (S17 hardening, jul-7 audit). */
   ownerToken?: string
+  /** EXPLICIT host-authority cleanup (session-shutdown hook only). When `true`,
+   *  close uses `forceStop` and bypasses the token. Trusted host code ONLY — the
+   *  LLM tool wiring never sets it, so an absent token from an LLM is DENIED, not
+   *  a host bypass. Previously the bypass was IMPLIED by an absent `ownerToken`,
+   *  which the LLM path also satisfied ⇒ cross-sibling DoS; now it is explicit. */
+  hostAuthority?: boolean
 }
 
 /** Idempotent terminate. Returns `wasRunning:false` if the agent was already
@@ -789,12 +798,19 @@ export const handleCloseAgent = async (
     return { kind: "success", wasRunning: false }
   }
   let stopped: "stopped" | "denied" | "not-found"
-  if (deps.ownerToken !== undefined) {
+  if (deps.hostAuthority === true) {
+    // EXPLICIT host-authority cleanup (session shutdown) — bypasses the token.
+    // Set only by trusted host code, never by the LLM tool wiring.
+    stopped = deps.registry.forceStop(input.agentId) ? "stopped" : "not-found"
+  } else if (deps.ownerToken !== undefined) {
     stopped = deps.registry.stop(input.agentId, deps.ownerToken)
   } else {
-    // Host-authority path (no LLM-supplied token) — used when close_agent is
-    // routed from a trusted internal caller, e.g. a session shutdown hook.
-    stopped = deps.registry.forceStop(input.agentId) ? "stopped" : "not-found"
+    // S17: an LLM caller with NO token cannot close a peer — token-absent is
+    // unauthorized, NOT host authority. (spawn_agent returns the owner_token.)
+    return errClose(
+      `close_agent denied: owner_token required (spawn_agent returns it to the owner)`,
+      "denied",
+    )
   }
   if (stopped === "denied") {
     return errClose(`close_agent denied: owner_token does not match for ${input.agentId}`, "denied")
