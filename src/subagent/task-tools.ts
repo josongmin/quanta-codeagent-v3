@@ -1,5 +1,6 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { lineageOf, ownersForRegistry } from "./agent-tool"
 import type { TaskRecord, TaskRegistry } from "./registry"
 
 const outputSchema = z.object({
@@ -90,6 +91,24 @@ const notFound = (taskId: string): ToolEvent => ({
   result: { ok: false, output: `No task found with id: ${taskId}` },
 })
 
+/** jul-7 audit F-D — the trio twin of the `wait_agent`/`continue_from` lineage gate.
+ *  `task_output` renders `result.finalText` off the SAME owner-stamped registry, so
+ *  without this a sibling lineage that learns a foreign task id reads another lineage's
+ *  work product verbatim. Deny (recoverable, no finalText leak) when the task is stamped
+ *  by a different lineage. Owner-less task (host-seeded / unstamped) ⇒ legacy-visible,
+ *  byte-identical. Uses the IDENTICAL `lineageOf` derivation the owner stamp uses. */
+const ownershipDenied = (taskId: string): ToolEvent => ({
+  type: "result",
+  result: {
+    ok: false,
+    output: `Cannot read ${taskId}: it belongs to a different agent lineage (ownership denied).`,
+  },
+})
+const foreignLineage = (registry: TaskRegistry, taskId: string, ctx: ToolContext): boolean => {
+  const recordedOwner = ownersForRegistry(registry).get(taskId)
+  return recordedOwner !== undefined && recordedOwner !== lineageOf(ctx)
+}
+
 /** Race the registry's event-driven settle Promise against a timeout and the
  *  tool context's abort signal. We race instead of polling so the wait resolves
  *  the instant the task transitions to a terminal status (registry resolves
@@ -144,6 +163,12 @@ export const createTaskOutputTool = (
     let rec = registry.get(input.task_id)
     if (!rec) {
       yield notFound(input.task_id)
+      return
+    }
+    // F-D — refuse a cross-lineage read BEFORE any status/finalText disclosure (and
+    // before blocking on a foreign task's settle).
+    if (foreignLineage(registry, input.task_id, ctx)) {
+      yield ownershipDenied(input.task_id)
       return
     }
 

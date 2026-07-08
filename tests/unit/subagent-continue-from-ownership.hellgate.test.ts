@@ -17,7 +17,12 @@
  * NEVER surfaced.
  */
 import { describe, expect, test } from "bun:test"
-import { createAgentTool, type SubagentResult, type SubagentRunner } from "../../src/subagent"
+import {
+  createAgentTool,
+  createTaskOutputTool,
+  type SubagentResult,
+  type SubagentRunner,
+} from "../../src/subagent"
 import { ownersForRegistry, recordContinueFromOwner } from "../../src/subagent/agent-tool"
 import { TaskRegistry } from "../../src/subagent/registry"
 import type { Tool, ToolContext, ToolEvent } from "../../src/tool"
@@ -120,6 +125,79 @@ describe("T04 — continue_from ownership gate", () => {
     expect(ev.type).toBe("result")
     if (ev.type === "result") expect(ev.result.ok).toBe(true)
     expect(observedPrior).toBe("ROOT-OK")
+  })
+})
+
+// jul-7 completeness re-audit F-D [CRITICAL]: `task_output` is the trio twin of `wait_agent`
+// (F-A) — it renders `result.finalText` off the SAME owner-stamped registry, but did so by id
+// with NO lineage gate. A sibling that learns a foreign task id reads another lineage's work
+// product verbatim. Gate it with the IDENTICAL ownership rule continue_from/wait_agent use.
+describe("F-D — task_output cross-lineage read gate", () => {
+  const sharedReg = (): TaskRegistry => new TaskRegistry()
+
+  const launchOwned = async (
+    agent: Tool,
+    c: ToolContext,
+    _finalText: string,
+  ): Promise<string> => {
+    const id = await launchBg(agent, c)
+    await settle()
+    return id
+  }
+
+  test("FOREIGN lineage CANNOT task_output another lineage's finalText (recoverable deny)", async () => {
+    const reg = sharedReg()
+    const agent = createAgentTool({ runner: finishingRunner("OUTPUT-SECRET"), registry: reg })
+    const taskId = await launchOwned(agent, ctx("agentA"), "OUTPUT-SECRET")
+
+    const out = createTaskOutputTool(reg)
+    // Sibling lineage B reads A's completed task by id — must be denied, no secret leak.
+    const ev = await run(out, { task_id: taskId }, ctx("agentB"))
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.ok).toBe(false)
+      expect(ev.result.output).not.toContain("OUTPUT-SECRET")
+      expect(ev.result.output).toContain("ownership denied")
+    }
+  })
+
+  test("OWNER lineage CAN task_output its own task (finalText disclosed)", async () => {
+    const reg = sharedReg()
+    const agent = createAgentTool({ runner: finishingRunner("MY-OUTPUT"), registry: reg })
+    const taskId = await launchOwned(agent, ctx("agentA"), "MY-OUTPUT")
+
+    const out = createTaskOutputTool(reg)
+    const ev = await run(out, { task_id: taskId }, ctx("agentA"))
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.ok).toBe(true)
+      expect(ev.result.output).toContain("MY-OUTPUT")
+    }
+  })
+
+  test("labeled child CANNOT task_output a root-owned task", async () => {
+    const reg = sharedReg()
+    const agent = createAgentTool({ runner: finishingRunner("ROOT-OUTPUT"), registry: reg })
+    const taskId = await launchOwned(agent, ctx(undefined), "ROOT-OUTPUT") // root lineage
+
+    const out = createTaskOutputTool(reg)
+    const ev = await run(out, { task_id: taskId }, ctx("childX"))
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") {
+      expect(ev.result.ok).toBe(false)
+      expect(ev.result.output).not.toContain("ROOT-OUTPUT")
+    }
+  })
+
+  test("byte-identical: owner-less (host-seeded) task stays readable by any caller", async () => {
+    const reg = sharedReg()
+    const id = reg.newId()
+    reg.register({ id, description: "host task" })
+    reg.complete(id, { ok: true, finalText: "HOST-VISIBLE", turns: 1 })
+    const out = createTaskOutputTool(reg)
+    const ev = await run(out, { task_id: id }, ctx("agentA"))
+    expect(ev.type).toBe("result")
+    if (ev.type === "result") expect(ev.result.output).toContain("HOST-VISIBLE")
   })
 })
 

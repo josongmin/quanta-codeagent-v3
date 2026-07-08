@@ -224,7 +224,12 @@ const summarize = (r: SubagentResult): string => {
  *  agent. We collapse "no label" onto a single sentinel so root-owned tasks
  *  form their own lineage that labeled children cannot read. */
 export const ROOT_LINEAGE = "\x00root" as const
-const lineageOf = (ctx: ToolContext): string => ctx.agentLabel ?? ROOT_LINEAGE
+/** The calling agent's stable lineage label — the SSOT for BOTH stamping a spawned
+ *  task's owner AND gating a later by-id read/mutation of that task (wait/output/
+ *  send_input/list). `ctx.agentLabel` is system-minted (`config.mailboxAgentId`,
+ *  ADR-0416), never sourced from tool input; absent ⇒ the root sentinel. Exported so
+ *  the trio `task_output` gate uses the IDENTICAL derivation the owner stamp does. */
+export const lineageOf = (ctx: ToolContext): string => ctx.agentLabel ?? ROOT_LINEAGE
 
 /** Count currently-running background tasks in the shared registry. Only
  *  RUNNING entries consume the trio's background admission cap. */
