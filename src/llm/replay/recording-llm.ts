@@ -89,6 +89,12 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
 
   const port: LLMPort = {
     ...(opts.inner.model !== undefined ? { model: opts.inner.model } : {}),
+    // Forward contextWindowKey like every other decorator (with-temperature,
+    // with-recording-lane, …) — a recording wrap must not silently drop the
+    // 1m-context window key a downstream decorator may read.
+    ...(opts.inner.contextWindowKey !== undefined
+      ? { contextWindowKey: opts.inner.contextWindowKey }
+      : {}),
     ...(opts.inner.provider !== undefined ? { provider: opts.inner.provider } : {}),
     ...(opts.inner.surfaceId !== undefined ? { surfaceId: opts.inner.surfaceId } : {}),
     ...(opts.inner.transportId !== undefined ? { transportId: opts.inner.transportId } : {}),

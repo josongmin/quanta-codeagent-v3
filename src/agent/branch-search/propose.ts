@@ -13,7 +13,7 @@ import { errMessage } from "@/shared"
  * THEN releases (verifiers need the workspace alive).
  */
 
-import type { LLMPort } from "@/llm"
+import { type LLMPort, laneLabeledPort } from "@/llm"
 import type { BranchCandidate, BranchSeed, BranchTraceEvent, Isolator } from "./types"
 
 /** The per-candidate agent run, abstracted as a port so `propose` is unit-
@@ -92,7 +92,10 @@ const oneCandidate = async (
         seed,
         workspace: acquired.workspace,
         task: req.task,
-        baseLlm: req.baseLlm,
+        // Label this branch's turns so N concurrent candidates stay
+        // distinguishable on a shared recording tape (replay-neutral; no-op
+        // when no recorder is underneath).
+        baseLlm: laneLabeledPort(req.baseLlm, `branch-search#${i}`),
         signal: controller.signal,
       })
       .catch((e) => ({
