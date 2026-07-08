@@ -16,17 +16,32 @@
  * trajectory behavior is byte-identical (proven indirectly: only bench imports
  * this module's record path).
  */
+import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   type BenchTrajectoryMode,
   resolveBenchTrajectoryDefault,
   resolveBenchTrajectoryMode,
 } from "@/apps/bench/trajectory"
+import { benchHome } from "@/runner/batch/corpus/paths"
 
 const RECORD_KEY = "QUANTA_BENCH_RECORD_TRAJECTORY"
 const REPLAY_KEY = "QUANTA_BENCH_REPLAY_TRAJECTORY"
 const REPLAY_ON_MISS_KEY = "QUANTA_BENCH_REPLAY_ON_MISS"
-const DEFAULT_PATH = `${process.cwd()}/bench-trajectory.jsonl`
+
+// jul-9: the bench trajectory DEFAULT now lands under the persistent bench-home run
+// dir (`<benchHome>/runs/<runId>/trajectory.jsonl`) — the SAME runs/<runId>/ grouping
+// observe/predictions/report use — NOT the old `<cwd>/bench-trajectory.jsonl` that
+// clobbered across runs and littered the repo. runId is volatile (Date.now fallback when
+// QUANTA_RUN_ID is unset), so assert the STRUCTURE, not an exact string.
+const RUNS_ROOT = join(benchHome(), "runs")
+const expectUnifiedDefault = (path: string | undefined): void => {
+  expect(path).toBeDefined()
+  if (path === undefined) return
+  expect(path.startsWith(`${RUNS_ROOT}/`)).toBe(true) // under <benchHome>/runs/
+  expect(path.endsWith("/trajectory.jsonl")).toBe(true)
+  expect(path).not.toBe(`${process.cwd()}/bench-trajectory.jsonl`) // moved OUT of cwd
+}
 
 let saved: Record<string, string | undefined>
 
@@ -48,15 +63,16 @@ afterEach(() => {
 })
 
 describe("resolveBenchTrajectoryDefault — bench record default-ON, env-overridable", () => {
-  test("unset env ⇒ record to the default path (default-ON, opt-OUT not opt-in)", () => {
-    expect(resolveBenchTrajectoryDefault({})).toEqual({ path: DEFAULT_PATH, explicit: false })
+  test("unset env ⇒ record to the unified bench-home default (default-ON, opt-OUT not opt-in)", () => {
+    const r = resolveBenchTrajectoryDefault({})
+    expect(r.explicit).toBe(false)
+    expectUnifiedDefault(r.path)
   })
 
   test('empty string is NOT an opt-out ⇒ stays default-ON (not "explicit")', () => {
-    expect(resolveBenchTrajectoryDefault({ [RECORD_KEY]: "" })).toEqual({
-      path: DEFAULT_PATH,
-      explicit: false,
-    })
+    const r = resolveBenchTrajectoryDefault({ [RECORD_KEY]: "" })
+    expect(r.explicit).toBe(false)
+    expectUnifiedDefault(r.path)
   })
 
   test("explicit OFF (0/off/false/no) ⇒ no recording, explicit=true (operator opt-OUT)", () => {
@@ -68,15 +84,12 @@ describe("resolveBenchTrajectoryDefault — bench record default-ON, env-overrid
     }
   })
 
-  test("explicit truthy (1/on) ⇒ default path, explicit=true", () => {
-    expect(resolveBenchTrajectoryDefault({ [RECORD_KEY]: "1" })).toEqual({
-      path: DEFAULT_PATH,
-      explicit: true,
-    })
-    expect(resolveBenchTrajectoryDefault({ [RECORD_KEY]: "on" })).toEqual({
-      path: DEFAULT_PATH,
-      explicit: true,
-    })
+  test("explicit truthy (1/on) ⇒ unified default path, explicit=true", () => {
+    for (const on of ["1", "on"]) {
+      const r = resolveBenchTrajectoryDefault({ [RECORD_KEY]: on })
+      expect(r.explicit).toBe(true)
+      expectUnifiedDefault(r.path)
+    }
   })
 
   test("explicit custom path ⇒ that path, explicit=true", () => {
@@ -88,10 +101,10 @@ describe("resolveBenchTrajectoryDefault — bench record default-ON, env-overrid
 })
 
 describe("resolveBenchTrajectoryMode — default-ON record, replay precedence preserved", () => {
-  test("unset env ⇒ kind=record at the default path (DEFAULT-ON)", () => {
+  test("unset env ⇒ kind=record at the unified bench-home default (DEFAULT-ON)", () => {
     const mode = resolveBenchTrajectoryMode()
     expect(mode.kind).toBe("record")
-    expect((mode as Extract<BenchTrajectoryMode, { kind: "record" }>).path).toBe(DEFAULT_PATH)
+    expectUnifiedDefault((mode as Extract<BenchTrajectoryMode, { kind: "record" }>).path)
   })
 
   test("record=0 ⇒ kind=off (operator opt-OUT)", () => {

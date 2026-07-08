@@ -21,18 +21,30 @@
  * point, then diverge live" opt into `record-and-passthrough`.
  */
 import { readFile, writeFile } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import type { LLMPort } from "@/llm"
 import type { MatchPolicy } from "@/llm/replay"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
+import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"
 import { isFalsyToken } from "@/shared"
 import { resumeHashRequest } from "./resume/canonicalize"
 import { resolveResumeConfig, resumeActive } from "./resume/config"
 import { maybeTeeResumeRecording } from "./resume/recorder"
 import { debugSink, isTrajectoryDebugEnabled } from "./trajectory-debug-sink"
 
-const defaultBenchTrajectoryPath = (): string => `${process.cwd()}/bench-trajectory.jsonl`
+/**
+ * jul-9 — UNIFY the default trajectory sink under the persistent bench-home run dir
+ * (`<benchHome>/runs/<runId>/trajectory.jsonl`, i.e. `~/Library/quanta-codeagent-v3/bench/
+ * runs/<runId>/…` on macOS) — the SAME `runs/<runId>/` grouping observe/predictions/report
+ * already use, so a run's whole artifact set co-locates under one session dir instead of a
+ * single `<cwd>/bench-trajectory.jsonl` that clobbered across runs and littered the repo.
+ * `QUANTA_RUN_ID` pins the runId (co-locating with observe); unset ⇒ a `run-<ts>` dir, still
+ * under bench-home. PURE (no mkdir) — the jsonl store creates the parent on write. An
+ * explicit `QUANTA_BENCH_RECORD_TRAJECTORY=<path>` still wins verbatim (override unchanged).
+ */
+const defaultBenchTrajectoryPath = (): string =>
+  join(benchHome(), "runs", benchRunId(), "trajectory.jsonl")
 
 const trajectoryPathFromRaw = (raw: string | undefined): string | undefined => {
   if (raw === undefined || raw === "" || raw === "0") return undefined
@@ -53,7 +65,7 @@ const trajectoryPathFromRaw = (raw: string | undefined): string | undefined => {
  *
  * Resolution of `QUANTA_BENCH_RECORD_TRAJECTORY` → the record path (or
  * `undefined` = no recording):
- *   - unset / "" / "1" / "on" / unrecognized ⇒ default `<cwd>/bench-trajectory.jsonl`
+ *   - unset / "" / "1" / "on" / unrecognized ⇒ unified default `<benchHome>/runs/<runId>/trajectory.jsonl`
  *   - "0" / off / false / no                 ⇒ undefined (operator opt-OUT)
  *   - any other string                       ⇒ treated as the cassette path
  *
@@ -166,8 +178,8 @@ export const replayTrajectoryPort = (args: {
  * the ENTIRE run.
  *
  * Gate: `QUANTA_BENCH_RECORD_TRAJECTORY`. Absent / "" / "0" ⇒ NO wrap
- * (byte-identical). "1" | "on" ⇒ record to `<cwd>/bench-trajectory.jsonl`. Any
- * other value ⇒ treated as the cassette path.
+ * (byte-identical). "1" | "on" ⇒ record to the unified default
+ * `<benchHome>/runs/<runId>/trajectory.jsonl`. Any other value ⇒ the cassette path.
  */
 export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
   const mode = resolveBenchTrajectoryMode()

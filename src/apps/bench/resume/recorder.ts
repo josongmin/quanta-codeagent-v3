@@ -20,6 +20,7 @@
  * then refuses it). Reads (`match`/`load`/`reset`) go to the PRIMARY (local)
  * store only — the durable mirror is write-only on this path.
  */
+import { join } from "node:path"
 import type { LLMPort } from "@/llm"
 import {
   jsonlReplayStore,
@@ -29,6 +30,7 @@ import {
   type ReplayStore,
 } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
+import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"
 import type { ResumeReceipt } from "@/shared/remote-store"
 import { resumeHashRequest } from "./canonicalize"
 import { resolveResumeConfig, resumeActive } from "./config"
@@ -193,9 +195,11 @@ export const maybeTeeResumeRecording = (
   )
 
   // SAME local path the local-only recorder would use ⇒ local trajectory
-  // unchanged. Fall back to the bench default path when the caller omits it.
+  // unchanged. Fall back to the UNIFIED bench-home default (jul-9 — matches
+  // defaultBenchTrajectoryPath: <benchHome>/runs/<runId>/trajectory.jsonl, NOT cwd)
+  // when the caller omits it.
   const primary = jsonlReplayStore({
-    path: localTrajectoryPath ?? `${process.cwd()}/bench-trajectory.jsonl`,
+    path: localTrajectoryPath ?? join(benchHome(), "runs", benchRunId(), "trajectory.jsonl"),
   })
 
   const store = teeResumeReplayStore({

@@ -118,7 +118,7 @@ export const benchRecordTrajectorySchema: KnobSchema<string> = {
   kind: "string",
   default: "",
   describe:
-    "Bench: record the run's LLM trajectory to a replayable JSONL cassette (DEFAULT-OFF). Unset/''/'0' ⇒ no recording (byte-identical). '1'|'on' ⇒ <cwd>/bench-trajectory.jsonl; any other value ⇒ that path. Enables replaying a FAILED run deterministically up to any turn and DIVERGING there (bench-native 'fork from a point'; the CLI fork_session feature is REPL-scoped and cannot reach bench trajectories). full-remote propagates it to the box + fetches the cassette back to /tmp/full-remote-trajectory-<box>.jsonl.",
+    "Bench: record the run's LLM trajectory to a replayable JSONL cassette (DEFAULT-OFF). Unset/''/'0' ⇒ no recording (byte-identical). '1'|'on' ⇒ the unified bench-home default (<benchHome>/runs/<runId>/trajectory.jsonl — co-located with observe/predictions, NOT the repo cwd); any other value ⇒ that path. Enables replaying a FAILED run deterministically up to any turn and DIVERGING there (bench-native 'fork from a point'; the CLI fork_session feature is REPL-scoped and cannot reach bench trajectories). full-remote propagates it to the box + fetches the cassette back to /tmp/full-remote-trajectory-<box>.jsonl.",
   readSite: "apps/bench/trajectory.ts",
   surfaces: BENCH,
   parse: parseStringValue,
@@ -131,7 +131,7 @@ export const benchReplayTrajectorySchema: KnobSchema<string> = {
   kind: "string",
   default: "",
   describe:
-    "Bench: replay a recorded LLM trajectory cassette during local bench runs. Unset/''/'0' ⇒ off. '1'|'on' ⇒ <cwd>/bench-trajectory.jsonl; any other value ⇒ that path. Default miss behavior is fail-closed (`QUANTA_BENCH_REPLAY_ON_MISS=throw`); remote/pool surfaces reject this local-path seam until explicit cassette upload wiring exists.",
+    "Bench: replay a recorded LLM trajectory cassette during local bench runs. Unset/''/'0' ⇒ off. '1'|'on' ⇒ the unified bench-home default (<benchHome>/runs/<runId>/trajectory.jsonl, NOT the repo cwd); any other value ⇒ that path. Default miss behavior is fail-closed (`QUANTA_BENCH_REPLAY_ON_MISS=throw`); remote/pool surfaces reject this local-path seam until explicit cassette upload wiring exists.",
   readSite: "apps/bench/trajectory.ts",
   surfaces: BENCH,
   parse: parseStringValue,

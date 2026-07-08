@@ -22,8 +22,10 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
+import { join } from "node:path"
 import { maybeRecordTrajectory, resolveBenchTrajectoryMode } from "@/apps/bench/trajectory"
 import { debugSink, isTrajectoryDebugEnabled } from "@/apps/bench/trajectory-debug-sink"
+import { benchHome } from "@/runner/batch/corpus/paths"
 import { defaultHashRequest, jsonlReplayStore, recordingLlmPort } from "@/llm/replay"
 import type { RecordedInteraction } from "@/llm/replay/types"
 import type { StreamEvent, StreamInput } from "@/llm/types"
@@ -100,8 +102,12 @@ describe("1. isTrajectoryDebugEnabled gate", () => {
     process.env[RECORD_KEY] = "debug"
     const mode = resolveBenchTrajectoryMode()
     expect(mode.kind).toBe("record")
-    // must be the default file, NOT a stray file literally named "debug"
-    expect(mode.kind === "record" && mode.path).toBe(`${process.cwd()}/bench-trajectory.jsonl`)
+    // must be the UNIFIED default cassette (<benchHome>/runs/<runId>/trajectory.jsonl),
+    // NOT a stray file literally named "debug"
+    const path = mode.kind === "record" ? mode.path : undefined
+    expect(path?.startsWith(`${join(benchHome(), "runs")}/`)).toBe(true)
+    expect(path?.endsWith("/trajectory.jsonl")).toBe(true)
+    expect(path).not.toContain("debug")
     expect(isTrajectoryDebugEnabled()).toBe(true)
   })
   test("TRAJECTORY_DEBUG truthy ⇒ on; falsy ⇒ off", () => {
