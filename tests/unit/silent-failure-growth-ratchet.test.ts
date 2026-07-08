@@ -138,14 +138,35 @@ const SRC = join(__dirname, "..", "..", "src")
 // `runtime/shell.ts` `askConsent` `} catch { return false }` (FAIL-CLOSED safe
 // default — a thrown consent prompt DENIES background adoption). Ceiling 1101 →
 // 1103. (The shell.ts site also bumps CATCH_RETURN_EMPTY 109 → 110 below.)
-const BARE_CATCH_BASELINE = 1103
+// Re-measured 2026-07-07 (jul-6/7 observation-kernel S1-S4 + concurrent session-
+// resource / bench work): +51 bare catches, AUDITED all DELIBERATE no-throw, none
+// a new dangerous swallow. Sampled the top contributors: session-resource-registry
+// (disk/sqlite adapters, run-ledger, approval-state store) — best-effort persistence
+// / port-no-throw contracts that degrade to a documented safe default (null / false /
+// 0 / fallback-entry); codemode/runtime.ts — VM & handle teardown races
+// (`/* already torn down — nothing to release */`); tool/evidence/runtime.ts — probe
+// fallbacks; observation lsp-refuter/lsp-enrich — audit-blessed graceful-degradation
+// (their file header pins "NEVER throws … graceful skip", "Pure … no env reads", so
+// attribution would VIOLATE the design, not improve it). Every site returns a safe
+// default; none strand caller-needed work. Moving target while observation+bench work
+// is mid-commit; red-on-injection teeth still trip on the NEXT unjustified swallow.
+// Ceiling 1103 → 1154.
+const BARE_CATCH_BASELINE = 1154
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
 // committed probe brought the live src/ floor to 145. All are handled-null probes,
 // not swallowed work paths. Ceiling 143 → 145. (Moving target while bench work is
 // mid-commit; red-on-injection teeth still trip on the NEXT unjustified swallow.)
-const NULLISH_PROMISE_SWALLOW_BASELINE = 145
+// Re-measured 2026-07-07 (jul-6/7 observation kernel + lsp/bench work): +20, AUDITED
+// all handled-null PROBES, not swallowed work: observation lsp-refuter/lsp-enrich
+// (open/documentSymbol/hover/stop `.catch(() => null)` — audit-blessed graceful skip,
+// the provider header pins "NEVER throws … degrade to no-enrichment"); lsp/adapters/
+// base.ts + agent/lsp-bridge/nav.ts (LSP call probes → null when the server is
+// absent); runner/batch/eval/repo-regression-discovery-adapter.ts (regression-probe
+// misses); apps/cli/attach + apps/bench/remote/single-box-guard (best-effort). Each
+// null is consumed as "signal absent", never a stranded work path. Ceiling 145 → 165.
+const NULLISH_PROMISE_SWALLOW_BASELINE = 165
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on
@@ -157,7 +178,12 @@ const NULLISH_PROMISE_SWALLOW_BASELINE = 145
 // `runtime/shell.ts` `askConsent` `catch { return false }` — a FAIL-CLOSED safe
 // default (a thrown consent prompt DENIES background adoption), not a swallowed
 // work path. Ceiling 109 → 110.
-const CATCH_RETURN_EMPTY_BASELINE = 110
+// Re-measured 2026-07-07 (jul-6/7 session-resource / bench work): +1 fail-open,
+// AUDITED — a session-resource-registry disk-adapter probe returns `[]` on a
+// vanished/racing entry (best-effort hygiene, the port contract forbids throwing);
+// the caller treats `[]` as "nothing to reclaim", never as "genuinely complete".
+// Ceiling 110 → 111.
+const CATCH_RETURN_EMPTY_BASELINE = 111
 // Re-measured 2026-06-17 (RFC jun-17 LSP warm backend): +1 for
 // `startBackgroundLspPrewarm` in agent/lsp-bridge.ts — a fire-and-forget
 // session-start prewarm whose failure is a documented best-effort skip (the
@@ -173,7 +199,15 @@ const DEBUG_ONLY_CATCH_BASELINE = 9
 // Re-measured 2026-06-15: quanta-home SSOT + bench-preset merge adds 2 new
 // non-abortable sleeps; ceiling raised to 15.
 const NON_ABORTABLE_SLEEP_BASELINE = 16
-const STRINGIFY_TRUNCATING_WRITE_BASELINE = 9
+// Re-measured 2026-07-07 (jul-6/7 observation + bench diagnostics): +4 truncating
+// writes, AUDITED — all DIAGNOSTIC / bench-artifact dumps, NOT durable load-bearing
+// state: closure-diagnostics-io + patch-static-sanity + repro-artifacts-sink (bench
+// eval diagnostics) and apps/bench/trajectory + apps/terminal/brain-mode reports. A
+// crash mid-dump loses a re-runnable diagnostic, never corrupts persisted app state
+// (durable state — auth token-store, node-repl state — already writes temp+rename).
+// Standing rule for the NEXT one: route any LOAD-BEARING persisted JSON through
+// `writeFileAtomic` (@/storage, ADR-0398); diagnostics may stay direct. Ceiling 9 → 13.
+const STRINGIFY_TRUNCATING_WRITE_BASELINE = 13
 
 // Same canonical form as silent-catch-24h-ratchet: no binding, swallowed.
 // A bound `} catch (e) {` deliberately does NOT match.
