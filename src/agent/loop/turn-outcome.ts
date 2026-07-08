@@ -7,6 +7,7 @@ import type { WorkingMemory } from "@/memory"
 import { emitBudgetExhaustedDecision } from "../decision-emit-phase3"
 import { captureAbortedTurn } from "../interrupted-turn"
 import {
+  budgetCategory,
   classifyErrorReason,
   completedCategory,
   interruptedCategory,
@@ -130,7 +131,9 @@ export const resolveTurnLoopOutcome = async (args: {
       kind: "finish",
       reason: "budget_exhausted",
       turns: args.turn,
-      stopCategory: completedCategory("max_turns"),
+      // ALBB-17 claim 1: post-turn cost-meter exhaustion is a BUDGET stop, not a
+      // turn-count cap — label it distinctly so a surface renders a cost-cap hint.
+      stopCategory: budgetCategory("meter"),
     }
   }
   args.breaker?.noteProgress()

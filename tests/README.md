@@ -15,6 +15,17 @@ entry point — read it before adding tests.
 | eval | `src/apps/bench/` | n/a | non-deterministic (real LLM) | nightly / `eval` label, non-blocking | minutes–hours |
 | meta | `tests/meta/` | 1 | filesystem-only (hellgate) | every push/PR (bundled with `test:unit`) | sub-second |
 
+### `tests/integration/agent-loop-bugbash/` (ALBB-24 proof rail)
+
+Behavioral hellgates that pin the jul-9 agent-loop bug-bash (Wave A/B/C) fixes
+with red-on-injection proofs — a re-inline OR a silent behavior regression both
+fail loudly. This is the companion to the **structural** facade guard
+`tests/unit/agent/loop-decomposition-hellgate.test.ts` (which stays purely
+structural). Each `describe` embeds its ALBB id; see the namespace's own
+[`README.md`](./integration/agent-loop-bugbash/README.md) for the id → file
+index. Bug-bash CI slice:
+`bun test tests/integration/agent-loop-bugbash tests/unit/agent/albb-*`.
+
 ### Artifact-purge policy
 
 Only `.test.ts` sources are tracked. Any `.test.js` under `tests/` is a stale

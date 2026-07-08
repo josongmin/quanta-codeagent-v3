@@ -74,4 +74,45 @@ describe("stop-conditions registry (H3)", () => {
     expect(stop?.reason).toBe("budget_exhausted")
     expect(stop?.turns).toBe(5) // ledger uses `turn` (the turn DID run), not turn-1
   })
+
+  // ALBB-17 claim 1 — budget label fidelity. A budget/cost-cap terminal must carry
+  // a `budget`-bucket stopCategory (NOT `max_turns`), so a surface can distinguish a
+  // cost-cap kill from an exhausted-turns stop. RED-on-injection: reverting either
+  // firing site to `completedCategory("max_turns")` turns these red.
+  test("ledgerHardBreach firing ⇒ stopCategory kind=budget, code budget.ledger_breach (NOT max_turns)", () => {
+    const stop = ledgerHardBreachCondition(
+      fakeCtx({ budgetLedger: { hardBreach: () => ({ limit: 10, observed: 12 }) } }),
+      5,
+    )
+    expect(stop?.stopCategory.kind).toBe("budget")
+    expect(stop?.stopCategory.reasonCode).toBe("budget.ledger_breach")
+    expect(stop?.stopCategory.reasonCode.startsWith("budget.")).toBe(true)
+    // paired control: the misleading maxTurns hint must be gone
+    expect(stop?.stopCategory.hint).not.toBe("Reached the configured maxTurns limit.")
+    expect(stop?.stopCategory.kind).not.toBe("max_turns")
+  })
+
+  // ALBB-17 claim 1 — L2 cost pre-flight firing site. Uses a priced model
+  // (`gpt-5.4`) + a wm with content so `projectCostPreflight` computes a real
+  // input floor, and a meter whose `wouldExceedCost` reports exhausted. RED-on-
+  // injection: reverting :63 to `completedCategory("max_turns")` turns this red.
+  test("costPreflight firing ⇒ stopCategory kind=budget, code budget.cost_cap (NOT max_turns)", async () => {
+    const preflightCtx = {
+      cfg: {
+        llm: { model: "gpt-5.4" },
+        budgetMeter: {
+          wouldExceedCost: () => ({ exhausted: true, kind: "cost_usd", budget: 1, observed: 2 }),
+        },
+        decisionEmitter: undefined,
+      },
+      wm: { snapshot: () => [{ role: "user", content: [{ type: "text", text: "x".repeat(200) }] }] },
+      session: { skillGate: undefined },
+    } as unknown as RunAgentContext
+    const stop = await costPreflightCondition(preflightCtx, 4)
+    expect(stop?.reason).toBe("budget_exhausted")
+    expect(stop?.turns).toBe(3) // preflight uses `turn - 1` (no model output this turn)
+    expect(stop?.stopCategory.kind).toBe("budget")
+    expect(stop?.stopCategory.reasonCode).toBe("budget.cost_cap")
+    expect(stop?.stopCategory.kind).not.toBe("max_turns")
+  })
 })

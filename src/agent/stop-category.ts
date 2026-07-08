@@ -48,6 +48,11 @@ export type StopCategoryKind =
                  `stop_reason="refusal"`. Distinct from `failed` (the model
                  worked correctly — it chose to refuse) and from `completed`
                  (the task was NOT completed). */
+  | "budget" /* ALBB-17 claim 1 — run stopped by a cost/budget cap (L2 per-run
+                cost meter OR L4 cross-run ledger). Distinct from `max_turns`
+                (turn-count exhaustion) and `completed` (task done): the run was
+                killed for SPEND, so a surface renders a cost-cap hint, not a
+                "raise maxTurns" hint. Mirrors Cursor's `budget` stop bucket. */
 
 /**
  * Structured stop category.
@@ -59,8 +64,8 @@ export type StopCategoryKind =
  *       provider.auth, provider.bad_request, provider.unknown,
  *       compaction.thrash, user.interrupt, system.abort, shell.needs_approval,
  *       runtime.unknown_error, completed.normal, completed.max_turns,
- *       completed.empty_exhausted, completed.malformed_exhausted,
- *       model.empty_exhausted.
+ *       budget.cost_cap, budget.ledger_breach,
+ *       model.empty_exhausted, model.malformed_tool_use.
  *   - `hint` — optional surface-facing copy, never used for control flow.
  */
 export interface StopCategory {
@@ -104,10 +109,13 @@ export const STOP_REASON_CODE = {
   COMPLETED_NORMAL: "completed.normal",
   /** Loop hit `maxTurns` cap. */
   COMPLETED_MAX_TURNS: "completed.max_turns",
-  /** Same-turn empty-retry budget exhausted. */
-  COMPLETED_EMPTY_EXHAUSTED: "completed.empty_exhausted",
-  /** Same-turn malformed-tool retry budget exhausted. */
-  COMPLETED_MALFORMED_EXHAUSTED: "completed.malformed_exhausted",
+  /** ALBB-17 claim 1 — L2 per-run cost cap tripped: a cost pre-flight (a call
+   *  that must breach `maxCostUsd`) OR the post-turn cost meter. */
+  BUDGET_COST_CAP: "budget.cost_cap",
+  /** ALBB-17 claim 1 — L4 cross-run cost ledger hard breach (session/daily
+   *  ceiling crossed). Split from `BUDGET_COST_CAP` so analytics distinguishes
+   *  a per-run meter cap from a cross-run ledger cap. */
+  BUDGET_LEDGER_BREACH: "budget.ledger_breach",
   /** Model returned `stop_reason="refusal"` (Anthropic refusal / OpenAI
    *  content-policy stop). The visible-text rationale is surfaced on
    *  `AgentOutcome.refusal.rationale`. */
@@ -175,6 +183,29 @@ export const classifyErrorReason = (reason: string): StopCategory => {
       hint: "Model returned only empty responses; stopped after the retry budget.",
     }
   }
+  // ALBB-17 claim 3 — stop-reason-policy terminals. `decideFromStopPolicy`
+  // (recovery.ts) tags a routed `abort` action `[stop-abort] …` and a routed
+  // `hitl` action `[stop-hitl] …` (the two terminal arms the default policy can
+  // produce: content_filtered→abort, guardrail_intervened→hitl). Without these
+  // arms both fell through to `runtime.unknown_error` — mislabelled. Codes
+  // already exist (SYSTEM_ABORT / SHELL_NEEDS_APPROVAL); no new enum entries.
+  // INERT until `config.stopReasonPolicy` is wired (default-OFF), landed with the
+  // policy so the classification is correct the moment it is. Checked BEFORE the
+  // provider patterns (unambiguous fixed prefixes, same as the two arms above).
+  if (/^\[stop-abort\]/.test(reason)) {
+    return {
+      kind: "interrupted",
+      reasonCode: STOP_REASON_CODE.SYSTEM_ABORT,
+      hint: "Stop-reason policy aborted the run (e.g. provider content filter).",
+    }
+  }
+  if (/^\[stop-hitl\]/.test(reason)) {
+    return {
+      kind: "needs_user_approval",
+      reasonCode: STOP_REASON_CODE.SHELL_NEEDS_APPROVAL,
+      hint: "Stop-reason policy escalated to a human (guardrail intervened).",
+    }
+  }
   // Provider-classified failures. The loop stringifies the LLMError; the
   // adapter prefixes either `<provider> request failed:` or includes the
   // message of an `LLMError.kind`. We pattern-match the message text the
@@ -227,13 +258,17 @@ export const classifyErrorReason = (reason: string): StopCategory => {
   }
 }
 
-/** Stop category for the normal-completion path. `via` distinguishes the
- *  three completion sub-types the loop already discriminates internally
- *  (proceed-no-tools, malformed-exhausted, empty-exhausted) so a surface
- *  can render a hint that matches what actually happened. */
-export const completedCategory = (
-  via: "normal" | "max_turns" | "empty_exhausted" | "malformed_exhausted" = "normal",
-): StopCategory => {
+/** Stop category for the normal-completion path. `via` distinguishes the two
+ *  LIVE completion sub-types the loop discriminates (proceed-no-tools clean
+ *  completion vs. the maxTurns cap) so a surface can render a matching hint.
+ *
+ *  ALBB-17 claim 4: the `"empty_exhausted"` / `"malformed_exhausted"` arms were
+ *  removed — they had ZERO production callers (production routes empty/malformed
+ *  exhaustion through the live `model.empty_exhausted` / `model.malformed_tool_use`
+ *  codes via {@link classifyErrorReason}). Reintroducing an arm here without a
+ *  production caller fails typecheck at the call site (closed union) + the
+ *  taxonomy-collapse guard test. */
+export const completedCategory = (via: "normal" | "max_turns" = "normal"): StopCategory => {
   switch (via) {
     case "max_turns":
       return {
@@ -241,22 +276,32 @@ export const completedCategory = (
         reasonCode: STOP_REASON_CODE.COMPLETED_MAX_TURNS,
         hint: "Reached the configured maxTurns limit.",
       }
-    case "empty_exhausted":
-      return {
-        kind: "completed",
-        reasonCode: STOP_REASON_CODE.COMPLETED_EMPTY_EXHAUSTED,
-        hint: "Stopped after repeated empty model responses.",
-      }
-    case "malformed_exhausted":
-      return {
-        kind: "completed",
-        reasonCode: STOP_REASON_CODE.COMPLETED_MALFORMED_EXHAUSTED,
-        hint: "Stopped after repeated malformed tool calls.",
-      }
     default:
       return { kind: "completed", reasonCode: STOP_REASON_CODE.COMPLETED_NORMAL }
   }
 }
+
+/** Stop category for a budget/cost-cap stop (ALBB-17 claim 1). `source`
+ *  distinguishes the three live cost-cap sites so analytics can tell a per-run
+ *  meter cap from a cross-run ledger cap:
+ *    - `"preflight"` — L2 pre-model cost admission (`costPreflightCondition`).
+ *    - `"meter"`     — L2 post-turn cost meter exhaustion (`turn-outcome`).
+ *    - `"ledger"`    — L4 cross-run ledger hard breach (`ledgerHardBreachCondition`).
+ *  The meter/preflight sites share `budget.cost_cap` (same per-run meter, one
+ *  before vs. after the call); the ledger site gets its own `budget.ledger_breach`.
+ *  The hint is a cost-cap message — never the misleading "maxTurns" hint. */
+export const budgetCategory = (source: "preflight" | "meter" | "ledger"): StopCategory =>
+  source === "ledger"
+    ? {
+        kind: "budget",
+        reasonCode: STOP_REASON_CODE.BUDGET_LEDGER_BREACH,
+        hint: "Stopped: cross-run cost ledger budget exhausted.",
+      }
+    : {
+        kind: "budget",
+        reasonCode: STOP_REASON_CODE.BUDGET_COST_CAP,
+        hint: "Stopped: run cost budget exhausted.",
+      }
 
 /** Stop category for the aborted path. `cause:"user"` ⇄ `user.interrupt`,
  *  `cause:"system"` ⇄ `system.abort`. The default matches the most common

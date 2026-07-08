@@ -19,7 +19,7 @@
  */
 
 import { emitBudgetExhaustedDecision } from "../decision-emit-phase3"
-import { completedCategory, type StopCategory } from "../stop-category"
+import { budgetCategory, type StopCategory } from "../stop-category"
 import { resolveActiveModelId } from "./skill-gate"
 import { projectCostPreflight } from "./turn-iteration"
 import type { FinishAgentSession, RunAgentContext } from "./types"
@@ -60,7 +60,8 @@ export const costPreflightCondition: PreTurnStopCondition = async (ctx, turn) =>
   )
   if (costPreflight === undefined) return undefined
   emitBudgetExhaustedDecision(ctx.cfg.decisionEmitter, costPreflight, { turn })
-  return { reason: "budget_exhausted", turns: turn - 1, stopCategory: completedCategory("max_turns") }
+  // ALBB-17 claim 1: L2 pre-flight cost admission is a BUDGET stop, not a turn cap.
+  return { reason: "budget_exhausted", turns: turn - 1, stopCategory: budgetCategory("preflight") }
 }
 
 /**
@@ -82,7 +83,8 @@ export const ledgerHardBreachCondition: PostContinueStopCondition = (ctx, turn) 
     },
     { turn },
   )
-  return { reason: "budget_exhausted", turns: turn, stopCategory: completedCategory("max_turns") }
+  // ALBB-17 claim 1: L4 cross-run ledger breach is a BUDGET stop (distinct code).
+  return { reason: "budget_exhausted", turns: turn, stopCategory: budgetCategory("ledger") }
 }
 
 /** Ordered PRE-TURN conditions the loop iterates before the model call. Register a new one here. */

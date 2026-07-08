@@ -163,6 +163,15 @@ describe("resolveTurnLoopOutcome", () => {
       reason: "budget_exhausted",
     })
     expect(args.wm.snapshot()).toHaveLength(1)
+    // ALBB-17 claim 1 — post-turn meter exhaustion must carry a `budget`-bucket
+    // stopCategory (source=meter), NOT the misleading `max_turns` category. RED-on-
+    // injection: reverting turn-outcome.ts:133 to `completedCategory("max_turns")`
+    // turns this red.
+    const finish = resolution as Extract<typeof resolution, { kind: "finish" }>
+    expect(finish.stopCategory?.kind).toBe("budget")
+    expect(finish.stopCategory?.reasonCode).toBe("budget.cost_cap")
+    expect(finish.stopCategory?.kind).not.toBe("max_turns")
+    expect(finish.stopCategory?.hint).not.toBe("Reached the configured maxTurns limit.")
   })
 
   test("approved exit is applied before a budget finish seals the turn", async () => {
