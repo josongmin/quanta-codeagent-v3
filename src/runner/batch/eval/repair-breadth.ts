@@ -28,6 +28,7 @@
  */
 
 import { type LLMPort, laneLabeledPort } from "@/llm"
+import { laneContext } from "@/shared"
 import { type CandidateFamily, candidateFamilyCoverageMissing } from "./candidate-families"
 import { laneProgress, laneProgressPort } from "./lane-progress"
 import type { PerCandidateSeed } from "./location-set-fanout"
@@ -296,7 +297,12 @@ const runOneBreadthCandidate = async (
     // laneProgressPort adds LIVE per-turn/-tool progress emission (display-only).
     const laneLlm = laneProgressPort(laneLabeledPort(deps.resolveLaneLlm(index), lane), lane)
     const locationFocus = deps.perCandidateSeed?.focusOf?.(index)
-    const generatedRun = await deps.runAgentOnFork(fork, seedMsg, laneLlm)
+    // Establish the ambient lane for the whole agent run so the debug-sink's
+    // per-tool contributions (and the recorder's per-turn drain) attribute to
+    // THIS lane's bucket, not a sibling's.
+    const generatedRun = await laneContext.run(lane, () =>
+      deps.runAgentOnFork(fork, seedMsg, laneLlm),
+    )
     const prepared = await maybeWidenCandidateFamilyCoverage(deps, generatedRun, index, fork)
     const run = prepared.run
     lanePatchBytes = run.patch?.length ?? 0

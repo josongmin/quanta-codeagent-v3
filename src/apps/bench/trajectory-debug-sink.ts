@@ -21,16 +21,17 @@
  * (tool runtime, grader) do NOT share a call-stack with the LLM port that owns
  * the recording; a keyed buffer drained at turn-commit is the loose coupling.
  *
- * ⚠️ SERIAL-TURN ASSUMPTION (parallel limitation): the single shared buffer is
- * drained per turn-commit. When the bench runs candidates CONCURRENTLY (repair-
- * breadth / verify-select), two lanes' turns commit interleaved and their
- * `contribute`d slices race into one buffer — a drain would misattribute. This
- * is inert TODAY (the debug tier ships with NO live contributor — foundation
- * only), so there is no correctness risk yet. The fix when a real contributor
- * lands: key the buffer by lane via `AsyncLocalStorage` (bind the same
- * `recordingLane` the recorder already stamps), so each fork's contributions
- * stay isolated. Until then, debug enrichment is meaningful only on serial runs.
+ * PARALLEL-SAFE (per-lane buffers): the bench runs candidates CONCURRENTLY
+ * (repair-breadth / verify-select), each with a live per-tool contributor
+ * (`toolExec`). Their slices must NOT race into one buffer. The buffer is keyed
+ * by the ambient {@link currentLane} (set by the fork sites via
+ * `laneContext.run(lane, …)`): `contribute`/`append` write into the CURRENT
+ * lane's bucket, and the recorder's per-turn `drain` — running under the SAME
+ * lane context — reads and clears only that lane's bucket. Serial runs (no lane
+ * context) share one default bucket, byte-identical to the pre-parallel path.
  */
+
+import { currentLane } from "@/shared"
 
 /** Falsy tokens that mean "off" for the debug gate (mirrors {@link isFalsyToken}). */
 const isOffToken = (v: string | undefined): boolean =>
@@ -90,17 +91,29 @@ interface DebugSink {
 }
 
 const createDebugSink = (): DebugSink => {
-  let buffer: Record<string, unknown> = {}
+  // Per-lane buffers so concurrent candidates never cross-contaminate. Keyed by
+  // the ambient lane (currentLane()); serial runs use the "" default bucket.
+  const buffers = new Map<string, Record<string, unknown>>()
   const enrichers: DebugEnricher[] = []
   const enabled = () => isTrajectoryDebugEnabled()
+  const laneKey = (): string => currentLane() ?? ""
+  const bucketFor = (k: string): Record<string, unknown> => {
+    let b = buffers.get(k)
+    if (b === undefined) {
+      b = {}
+      buffers.set(k, b)
+    }
+    return b
+  }
 
   return {
     contribute(key, data) {
       if (!enabled()) return
-      buffer[key] = data
+      bucketFor(laneKey())[key] = data
     },
     append(key, item) {
       if (!enabled()) return
+      const buffer = bucketFor(laneKey())
       const cur = buffer[key]
       if (cur === undefined) {
         buffer[key] = [item]
@@ -119,8 +132,11 @@ const createDebugSink = (): DebugSink => {
     },
     drain() {
       if (!enabled()) return undefined
-      const out: Record<string, unknown> = { ...buffer }
-      buffer = {}
+      // Read + clear ONLY the current lane's bucket — the recorder's per-turn
+      // drain runs under the same lane context as that lane's contributions.
+      const k = laneKey()
+      const out: Record<string, unknown> = { ...(buffers.get(k) ?? {}) }
+      buffers.delete(k)
       for (const e of enrichers) {
         const v = e.sample()
         if (v !== undefined) out[e.key] = v
@@ -128,7 +144,7 @@ const createDebugSink = (): DebugSink => {
       return Object.keys(out).length > 0 ? out : undefined
     },
     reset() {
-      buffer = {}
+      buffers.clear()
       enrichers.length = 0
     },
   }

@@ -12,7 +12,7 @@ import { extractIssueHint } from "@/agent"
 import type { OwnerSibling } from "@/agent/closure"
 import { evictLspWorkspaces } from "@/agent/lsp-bridge"
 import { type LLMPort, laneLabeledPort } from "@/llm"
-import { gateOn } from "@/shared"
+import { gateOn, laneContext } from "@/shared"
 import type { BenchReproTestTelemetry, Instance, ReproOracleCalibration } from "../../types"
 import type { ChaRepairTarget } from "../cha-multisite"
 import type { ClosureSessionState } from "../closure-session"
@@ -313,19 +313,23 @@ const generateSelectionCandidate = async (args: {
     lane,
   )
   try {
-    const phase = await runAgentPhase(
-      args.instance,
-      args.deps,
-      candidateSandbox,
-      args.signal,
-      args.wiring,
-      args.precomputedHint,
-      args.reproHint,
-      args.mergeHint(args.seed),
-      args.postureOverride,
-      args.stateOverride,
-      args.chaMultisiteSteer,
-      laneLlm,
+    // Establish the ambient lane for the whole agent run so debug-sink per-tool
+    // contributions attribute to THIS lane's bucket under concurrency.
+    const phase = await laneContext.run(lane, () =>
+      runAgentPhase(
+        args.instance,
+        args.deps,
+        candidateSandbox,
+        args.signal,
+        args.wiring,
+        args.precomputedHint,
+        args.reproHint,
+        args.mergeHint(args.seed),
+        args.postureOverride,
+        args.stateOverride,
+        args.chaMultisiteSteer,
+        laneLlm,
+      ),
     )
     args.addTurns(phase.turns)
     lanePatchBytes = phase.patch?.length ?? 0

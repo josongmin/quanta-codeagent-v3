@@ -27,6 +27,7 @@ import { debugSink, isTrajectoryDebugEnabled } from "@/apps/bench/trajectory-deb
 import { defaultHashRequest, jsonlReplayStore, recordingLlmPort } from "@/llm/replay"
 import type { RecordedInteraction } from "@/llm/replay/types"
 import type { StreamEvent, StreamInput } from "@/llm/types"
+import { laneContext } from "@/shared"
 
 const RECORD_KEY = "QUANTA_BENCH_RECORD_TRAJECTORY"
 const DEBUG_KEY = "QUANTA_BENCH_TRAJECTORY_DEBUG"
@@ -166,6 +167,45 @@ describe("3. gate ON ⇒ accrues, samples, clears", () => {
   test("append throws if key already set to a non-array via contribute", () => {
     debugSink.contribute("k", "scalar")
     expect(() => debugSink.append("k", 1)).toThrow(/non-array/)
+  })
+})
+
+// ── 3b. PARALLEL-LANE isolation (per-lane buffers) ──────────────────────────
+// The live toolExec contributor + parallel candidates would cross-contaminate a
+// single shared buffer. Under laneContext, each lane's contributions and its
+// drain see only that lane's bucket. This is the fix the platform's contract
+// promised; without per-lane keying lane A's drain would steal lane B's slices.
+describe("3b. per-lane isolation under laneContext", () => {
+  beforeEach(() => {
+    process.env[RECORD_KEY] = "debug"
+  })
+  test("concurrent lanes buffer + drain independently (no cross-attribution)", async () => {
+    // Two lanes interleave appends within their OWN laneContext, then each drains.
+    const drainA = await laneContext.run("repair-breadth#0", async () => {
+      debugSink.append("toolExec", { name: "readA" })
+      // yield so the sibling lane interleaves before we drain
+      await Promise.resolve()
+      debugSink.append("toolExec", { name: "editA" })
+      return { drain: () => debugSink.drain() }
+    })
+    const drainB = await laneContext.run("repair-breadth#1", async () => {
+      debugSink.append("toolExec", { name: "readB" })
+      await Promise.resolve()
+      return { drain: () => debugSink.drain() }
+    })
+    // Each lane's drain, run under its own context, yields ONLY its own slices.
+    const a = await laneContext.run("repair-breadth#0", async () => drainA.drain())
+    const b = await laneContext.run("repair-breadth#1", async () => drainB.drain())
+    expect(a).toEqual({ toolExec: [{ name: "readA" }, { name: "editA" }] })
+    expect(b).toEqual({ toolExec: [{ name: "readB" }] })
+  })
+  test("serial (no lane context) uses one default bucket — byte-identical", () => {
+    debugSink.append("toolExec", { name: "s1" })
+    debugSink.contribute("verdict", { passed: true })
+    expect(debugSink.drain()).toEqual({
+      toolExec: [{ name: "s1" }],
+      verdict: { passed: true },
+    })
   })
 })
 

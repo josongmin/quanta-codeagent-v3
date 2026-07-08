@@ -41,6 +41,8 @@ export {
   ToolInputError,
   toError,
 } from "./errors"
+export type { ExecutionSurface } from "./execution-surface"
+export { EXECUTION_SURFACES } from "./execution-surface"
 export { isRecord } from "./is-record"
 export type {
   ItemStreamCompleted,
@@ -69,6 +71,7 @@ export {
   SESSION_FORBIDDEN_KNOBS,
   setKnobOverride,
 } from "./knob-overrides"
+export { currentLane, laneContext } from "./lane-context"
 export type {
   LlmContinuationObservation,
   LlmRequestObservation,
@@ -155,17 +158,17 @@ export {
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
 export type {
-  PromptActiveLeversSnapshot,
   AgentPromptMode,
+  PromptActiveLeversSnapshot,
   PromptBaseSystem,
   PromptHookContextMode,
   PromptPolicySnapshot,
+  PromptSummaryPrefix,
   PromptSurfaceEnvPosture,
   PromptSurfacePack,
   PromptSurfaceProfileSnapshot,
-  PromptSummaryPrefix,
-  PromptSystemLayout,
   PromptSurfaceVerifyStrategy,
+  PromptSystemLayout,
   TurnPolicySnapshot,
   TurnPolicyToolChoiceKind,
 } from "./turn-policy-types"
@@ -174,5 +177,3 @@ export type { HITLTier, Id, Result, ToolCapability } from "./types"
 export { ALL_HITL_TIERS, err, ok } from "./types"
 export { filesFromUnifiedDiff } from "./unified-diff-files"
 export { embedUntrusted, escapeBoundary } from "./untrusted"
-export { EXECUTION_SURFACES } from "./execution-surface"
-export type { ExecutionSurface } from "./execution-surface"
