@@ -502,7 +502,7 @@ const executeAgentTool = async function* (
   const exec = prepared.value
   if (exec.input.background === true) {
     yield launchBackground(opts, registry, exec.input, exec.req, exec.taskId, (id) =>
-      continueFromOwners.set(id, exec.requesterLineage),
+      recordContinueFromOwner(registry, id, exec.requesterLineage),
     )
     return
   }
@@ -605,6 +605,24 @@ export const ownersForRegistry = (registry: TaskRegistry): Map<string, string> =
     continueFromOwnersByRegistry.set(registry, ledger)
   }
   return ledger
+}
+
+/** Record a `continue_from` owner lineage, first PRUNING entries whose task the registry
+ *  has already evicted — their `finalText` is gone, so the entry could only ever resolve to
+ *  `missing` (the lineage gate never needs it again). This bounds the ledger to the
+ *  registry's retained set instead of growing unbounded per background launch (jul-7 audit).
+ *  A still-retained task (running OR settled-and-readable) is NEVER pruned, so the lineage
+ *  proof for a live `continue_from` is preserved. */
+export const recordContinueFromOwner = (
+  registry: TaskRegistry,
+  taskId: string,
+  lineage: string,
+): void => {
+  const ledger = ownersForRegistry(registry)
+  for (const key of ledger.keys()) {
+    if (registry.get(key) === undefined) ledger.delete(key)
+  }
+  ledger.set(taskId, lineage)
 }
 
 export const createAgentTool = (

@@ -399,6 +399,25 @@ describe("createSubagentRunner — worktree isolation", () => {
     expect(r.ok).toBe(true)
     expect(wtCalled).toBe(false)
     expect(at(seen, 0).cwd).toBe("/plain")
+    // UX honesty (jul-7 audit F5): the degradation is SURFACED, not silent — a caller
+    // relying on isolation must see that it did not happen (ran shared in the parent cwd).
+    expect(r.finalText).toContain('isolation:"worktree" requested but NOT achieved')
+    expect(r.finalText.toLowerCase()).toContain("no write isolation")
+  })
+
+  test("git repo + isolation ⇒ NO degradation notice (isolation achieved)", async () => {
+    const { run } = capturing()
+    const runner = createSubagentRunner(parentConfig({ cwd: "/repo" }), {
+      run,
+      isGitRepo: (async () => true) as typeof isGitRepo,
+      withWorktree: (async (_id, _root, fn) => ({
+        value: await fn("/repo/.claude/worktrees/agent-x"),
+        info: { worktreePath: "/repo/.claude/worktrees/agent-x", branch: "b", removed: true },
+      })) as typeof withWorktree,
+    })
+    const r = await runner(req({ isolation: "worktree" }))
+    // non-vacuous control: when isolation IS achieved, the notice must be ABSENT.
+    expect(r.finalText).not.toContain("NOT achieved")
   })
 
   test("isolation:none ⇒ child cwd is the parent cwd (req.cwd field removed)", async () => {

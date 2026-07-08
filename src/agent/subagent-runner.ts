@@ -787,7 +787,7 @@ export const createSubagentRunner = (
     const turnGate = wakerWiring?.gate
 
     try {
-      const childResult: SubagentResult = isolate
+      const rawChildResult: SubagentResult = isolate
         ? toResult(
             (
               await wt(subagentId, requestedCwd, async (worktreePath) => {
@@ -808,6 +808,18 @@ export const createSubagentRunner = (
               buildChildConfig(parent, req, requestedCwd, mailboxIds, toolNamespace, turnGate),
             ),
           )
+
+      // UX honesty (jul-7 audit F5): `isolation:"worktree"` was REQUESTED but could not be
+      // honored — the workspace is not a git repo — so the child ran in the SHARED parent
+      // working directory with NO write isolation. Surface it to the caller instead of the
+      // prior SILENT fallback: a caller relying on isolation must know it did not happen.
+      const childResult: SubagentResult =
+        wantsWorktree && !isolate
+          ? {
+              ...rawChildResult,
+              finalText: `⚠️ isolation:"worktree" requested but NOT achieved — this workspace is not a git repository, so the subagent ran in the SHARED parent working directory (no write isolation). Its file changes affect the parent tree.\n\n${rawChildResult.finalText}`,
+            }
+          : rawChildResult
 
       // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
       await emitSubagentStopHook(parent, { subagentId, result: childResult })

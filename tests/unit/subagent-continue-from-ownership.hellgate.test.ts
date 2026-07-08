@@ -18,6 +18,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { createAgentTool, type SubagentResult, type SubagentRunner } from "../../src/subagent"
+import { ownersForRegistry, recordContinueFromOwner } from "../../src/subagent/agent-tool"
+import { TaskRegistry } from "../../src/subagent/registry"
 import type { Tool, ToolContext, ToolEvent } from "../../src/tool"
 
 const ctx = (agentLabel?: string): ToolContext =>
@@ -118,5 +120,31 @@ describe("T04 — continue_from ownership gate", () => {
     expect(ev.type).toBe("result")
     if (ev.type === "result") expect(ev.result.ok).toBe(true)
     expect(observedPrior).toBe("ROOT-OK")
+  })
+})
+
+// jul-7 audit (B-F2 MED): the continue_from owner ledger grew unbounded — one entry per
+// background launch, never removed even after the registry LRU-evicted the task. Bound it.
+describe("continue_from owner ledger — bounded (jul-7 audit)", () => {
+  test("recordContinueFromOwner PRUNES registry-evicted entries, keeps the new one", () => {
+    const reg = new TaskRegistry()
+    // Seed a DEAD entry: a taskId the registry does not have (evicted / never registered)
+    // ⇒ registry.get(...) === undefined ⇒ it can only ever resolve to `missing`.
+    ownersForRegistry(reg).set("dead-task", "lineage-A")
+    expect(ownersForRegistry(reg).has("dead-task")).toBe(true)
+
+    recordContinueFromOwner(reg, "new-task", "lineage-B")
+
+    // the dead entry is pruned (no unbounded growth), the new one is recorded.
+    expect(ownersForRegistry(reg).has("dead-task")).toBe(false)
+    expect(ownersForRegistry(reg).get("new-task")).toBe("lineage-B")
+  })
+
+  test("many dead records ⇒ ledger stays bounded (does not grow with launches)", () => {
+    const reg = new TaskRegistry()
+    for (let i = 0; i < 50; i++) recordContinueFromOwner(reg, `task-${i}`, `lin-${i}`)
+    // Each write prunes prior dead entries (none were ever registered), so the ledger
+    // never accumulates 50 — it holds only the most-recently-recorded id.
+    expect(ownersForRegistry(reg).size).toBe(1)
   })
 })

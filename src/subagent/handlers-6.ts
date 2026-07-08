@@ -35,6 +35,7 @@ import {
   buildCheckpointPath,
   loadContinueFromForOwner,
   ownersForRegistry,
+  recordContinueFromOwner,
   ROOT_LINEAGE,
 } from "./agent-tool"
 import type { TaskOwnerToken, TaskRegistry } from "./registry"
@@ -615,7 +616,8 @@ export const handleSpawnAgent = async (
   })
   // T04 — stamp the launching lineage so a later `continue_from` of THIS task
   // from a foreign lineage is denied (mirrors the `agent` tool's recordOwner).
-  ownersForRegistry(deps.registry).set(taskId, lineage)
+  // recordContinueFromOwner prunes registry-evicted entries so the ledger stays bounded.
+  recordContinueFromOwner(deps.registry, taskId, lineage)
 
   // RFC-04 — record depth/label into the optional side-table so list_agents can
   // show richer rows. No-op when the host didn't wire one (byte-identical).
