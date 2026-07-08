@@ -749,6 +749,16 @@ export const createSubagentRunner = (
       return { ok: false, finalText: "max subagent depth exceeded", turns: 0 }
     }
 
+    // Isolation guarantee (jul-7 audit F4, verified): when `isolate` holds, the child's
+    // `cwd` is the throwaway worktree path (below), and BOTH write surfaces are jailed to
+    // that cwd — `edit`/`write`/`apply_patch` via `FsJailFileSystemPort({jailRoot: ctx.cwd})`
+    // (default, rejects out-of-worktree paths with FsJailViolationError) and `exec_command`'s
+    // model-supplied `cwd` via the `cwdJail{jailRoot: config.cwd}` port (rejects `..` climb-out,
+    // `subagent-shell-deny-jail-hellgate` HELLGATE-c). RESIDUAL (documented, not a regression):
+    // a `bash` command containing an ABSOLUTE path (`echo x > /outside`) is NOT confined —
+    // quanta has no OS-level exec sandbox (seatbelt/landlock), so that is a fundamental limit,
+    // not a fixable jail gap. So worktree isolation = real for the structured file tools + the
+    // exec cwd; treat raw shell absolute-path writes as still able to reach the parent tree.
     const requestedCwd = req.workspace ?? parent.cwd
     const mailboxIds = allocateChildMailboxIds(parentMailboxLabel, sharedIdentity, localIdentity)
     const subagentId = buildSubagentRunId(req.depth, mailboxIds.agentId, mailboxIds.spawnSeq, now)
