@@ -80,12 +80,23 @@ const messageToText = (m: Message): string => {
   return parts.join("\n")
 }
 
+/** F-C defense-in-depth (jul-7 audit): spawn_agent surfaces a child's capability token as
+ *  `owner_token: <uuid>` in a tool_result. That token authorizes close_agent, so when a
+ *  transcript is FORKED to another agent (`fork_turns:"all"`) or forwarded to the advisor
+ *  sub-LLM it must be scrubbed — a bare UUID is not a known-format secret, so the generic
+ *  {@link redactSecrets} pass misses it. The owner still sees its token in its OWN live
+ *  transcript; only the forwarded/forked copy is redacted. Task ids (`task_<uuid>`) are NOT
+ *  matched — only values immediately following the `owner_token:` label. */
+const OWNER_TOKEN_RE = /owner_token:\s*\S+/gi
+const scrubOwnerTokens = (s: string): string => s.replace(OWNER_TOKEN_RE, "owner_token: [redacted]")
+
 /**
  * Assemble a REDACTED transcript string from the message history. EVERY message's
  * text is run through the secret scrubber ({@link redactSecrets}) AND the PII
- * scrubber (`compositePiiScanner`) BEFORE concatenation, so a leaked API key /
- * AWS key / JWT / email in a prior tool result never reaches the advisor sub-LLM
- * (RFC jun-6 §5.3 — the REAL risk for B). Tail-window + char caps bound the size.
+ * scrubber (`compositePiiScanner`) AND the owner-token scrubber BEFORE concatenation,
+ * so a leaked API key / AWS key / JWT / email / capability token in a prior tool result
+ * never reaches the advisor sub-LLM or a forked child (RFC jun-6 §5.3 — the REAL risk for
+ * B). Tail-window + char caps bound the size.
  *
  * PURE given `messages` — no clock, no env, no I/O. Deterministic redaction.
  */
@@ -106,7 +117,10 @@ export const redactTranscript = (
     // Layer 1: known-format secrets (OpenAI sk-, AWS AKIA, JWT, PEM, …).
     const secretScrubbed = redactSecrets(raw, { origin: "tool_result" }).text
     // Layer 2: PII (email, phone, SSN, …).
-    const scrubbed = pii.redactText(secretScrubbed)
+    const piiScrubbed = pii.redactText(secretScrubbed)
+    // Layer 3: subagent capability tokens (F-C defense-in-depth) — a bare UUID the
+    // known-format secret pass does not recognize, but which authorizes close_agent.
+    const scrubbed = scrubOwnerTokens(piiScrubbed)
     lines.push(`${m.role}: ${scrubbed}`)
   }
   let body = lines.join("\n")

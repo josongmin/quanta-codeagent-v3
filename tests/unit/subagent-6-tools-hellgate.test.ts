@@ -903,6 +903,56 @@ describe("HELLGATE — handleSendInput", () => {
     reg.forceStop(spawn.agentId)
     await reg.waitForSettle(spawn.agentId)
   })
+
+  // jul-7 audit F-C: send_input injects a conversational message into a paused child's
+  // loop. Gate it by lineage (defense-in-depth, mirrors wait/close) so a sibling cannot
+  // inject into another lineage's child — the denial fires BEFORE delivery.
+  test("F-C: cross-lineage send_input ⇒ ownership_denied, message NOT delivered", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "p" },
+      { runner: slowRunner(2000), registry: reg, requesterLineage: "agent-A" },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    const ch = new InputChannelRegistry()
+    const received: string[] = []
+    ch.register(spawn.agentId, (m) => received.push(m))
+
+    // Sibling lineage B tries to inject — must be denied, channel untouched.
+    const r = await handleSendInput(
+      { agentId: spawn.agentId, message: "INJECTED" },
+      { registry: reg, inputChannel: ch, requesterLineage: "agent-B" },
+    )
+    expect(r.kind).toBe("error")
+    if (r.kind === "error") expect(r.cause).toBe("denied")
+    expect(received).toEqual([]) // NOT delivered
+    expect(ch.has(spawn.agentId)).toBe(true) // channel still registered (one-shot NOT consumed)
+
+    reg.forceStop(spawn.agentId)
+    await reg.waitForSettle(spawn.agentId)
+  })
+
+  test("F-C control: OWNER lineage send_input ⇒ delivered", async () => {
+    const reg = new TaskRegistry()
+    const spawn = await handleSpawnAgent(
+      { prompt: "p" },
+      { runner: slowRunner(2000), registry: reg, requesterLineage: "agent-A" },
+    )
+    if (spawn.kind !== "success") throw new Error("spawn failed")
+    const ch = new InputChannelRegistry()
+    const received: string[] = []
+    ch.register(spawn.agentId, (m) => received.push(m))
+
+    const r = await handleSendInput(
+      { agentId: spawn.agentId, message: "own-message" },
+      { registry: reg, inputChannel: ch, requesterLineage: "agent-A" },
+    )
+    expect(r.kind).toBe("success")
+    expect(received).toEqual(["own-message"])
+
+    reg.forceStop(spawn.agentId)
+    await reg.waitForSettle(spawn.agentId)
+  })
 })
 
 // ─── G. PtyTable snapshot / closeAll ────────────────────────────────────────

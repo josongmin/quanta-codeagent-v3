@@ -210,6 +210,8 @@ const routeSendInput: Route = async (input, deps) => {
   return handleSendInput(input as Parameters<typeof handleSendInput>[0], {
     registry: deps.registry,
     ...(deps.inputChannel !== undefined ? { inputChannel: deps.inputChannel } : {}),
+    // F-C (jul-7 audit) — forward the caller lineage so send_input gates cross-lineage injection.
+    ...(deps.requesterLineage !== undefined ? { requesterLineage: deps.requesterLineage } : {}),
   })
 }
 

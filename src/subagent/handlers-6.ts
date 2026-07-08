@@ -879,6 +879,11 @@ interface SendInputDeps {
    *  the entry (one-shot). Absence ⇒ structured error (the child is not in a
    *  state that accepts conversational input). */
   inputChannel?: InputChannelRegistry
+  /** F-C (jul-7 audit) — the requesting agent's lineage. send_input injects a
+   *  conversational message into a paused child's loop; gate it so a sibling
+   *  lineage cannot inject into another lineage's child (defense-in-depth,
+   *  mirrors wait/close). Absent ⇒ root; owner-less task ⇒ legacy (byte-identical). */
+  requesterLineage?: string
 }
 
 /** Per-agent one-shot input channel. The runner is responsible for
@@ -926,6 +931,16 @@ export const handleSendInput = async (
   const rec = deps.registry.get(input.agentId)
   if (rec === undefined) {
     return errSendInput(`No agent found with id ${input.agentId}`, "id_unknown")
+  }
+  // F-C (jul-7 audit) — lineage gate BEFORE delivery: a message injected into a foreign
+  // lineage's paused child is refused (mirrors wait/close). Owner-less task ⇒ legacy path.
+  const recordedOwner = ownersForRegistry(deps.registry).get(input.agentId)
+  const requesterLineage = deps.requesterLineage ?? ROOT_LINEAGE
+  if (recordedOwner !== undefined && recordedOwner !== requesterLineage) {
+    return errSendInput(
+      `Cannot send input to ${input.agentId}: it belongs to a different agent lineage (ownership denied).`,
+      "denied",
+    )
   }
   if (rec.status !== "running") {
     return errSendInput(

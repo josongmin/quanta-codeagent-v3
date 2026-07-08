@@ -90,6 +90,30 @@ describe("redactTranscript — secrets/PII scrubbed before forwarding", () => {
     const out = redactTranscript(huge, { maxChars: 1000 })
     expect(out).toContain("transcript truncated")
   })
+
+  // jul-7 audit F-C defense-in-depth: a spawn_agent tool_result surfaces the child's
+  // owner_token (a bare UUID authorizing close_agent). When this transcript is forked to a
+  // sibling (fork_turns:"all") or forwarded to the advisor sub-LLM, the token must NOT
+  // survive — the known-format secret pass does not recognize a UUID.
+  test("subagent owner_token is scrubbed (capability token, not a known-format secret)", () => {
+    const OWNER_TOKEN = "b1946ac9-2f0e-4dc0-9f1a-2f0e4dc09f1a"
+    const withToken: Message[] = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "t1",
+            content: `spawned agentId: task_abc (owner_token: ${OWNER_TOKEN} — pass this to close_agent to cancel it)`,
+          },
+        ],
+      },
+    ]
+    const out = redactTranscript(withToken)
+    expect(out).not.toContain(OWNER_TOKEN) // token gone
+    expect(out).toContain("owner_token: [redacted]") // label kept, value scrubbed
+    expect(out).toContain("task_abc") // the (non-secret) agent id survives
+  })
 })
 
 describe("advisorConsultFromLLM — forwardHistory wiring", () => {
