@@ -304,6 +304,10 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .turn-dbg-keys{font-family:var(--mono);font-size:10px;color:#a090b0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .turn-dbg-body{display:none;padding:8px 12px;font-size:11px;color:#4a4055;white-space:pre-wrap;font-family:var(--mono);border-top:1px solid #ece0f4}
 .turn-dbg.open .turn-dbg-body{display:block}
+.dbg-tool-tbl{width:100%;border-collapse:collapse;font-size:10px;font-family:var(--mono)}
+.dbg-tool-tbl th{background:#f0eafc;color:#6044aa;padding:2px 6px;text-align:left;font-weight:700;border-bottom:1px solid #ddd0f0}
+.dbg-tool-tbl td{padding:2px 6px;border-bottom:1px solid #ede8f5;color:#3a3050}
+.dbg-tool-ok{color:#2e7d32;font-weight:700}.dbg-tool-fail{color:#c62828;font-weight:700}
 .tg-flash{animation:tgflash 1.2s ease}
 @keyframes tgflash{0%,100%{background:transparent}30%{background:#fff2cc}}
 /* ── loc cards ── */
@@ -361,6 +365,7 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .rm-badge.run-id{font-family:var(--mono);color:#888}
 .rm-badge.rm-pass{background:#e8f5e9;border-color:#a5d6a7;color:#2e7d32;font-weight:600}
 .rm-badge.rm-fail{background:#fce8e8;border-color:#ef9a9a;color:#c62828;font-weight:600}
+.rm-badge.rm-debug{background:#fff3e0;border-color:#ffb74d;color:#e65100}
 .rm-argv{margin-bottom:6px}
 .rm-argv .rm-row{background:#f4f4fc;border-radius:4px;padding:4px 8px}
 .rm-group{border:1px solid #e8e8f2;border-radius:6px;overflow:hidden;margin-bottom:5px}
@@ -578,11 +583,13 @@ function extractInstId(records){
       const x=flatText(m).match(INST_PAT)
       if(x)return x[1]
     }
-    // search events (tool_use_delta / tool_use_end often have file paths with the id)
+    // search event path fields only (avoid stringify of entire tool output which
+    // can be megabytes; instance id appears in tool_use name/input.path fields)
     for(const e of r.events??[]){
-      const t=JSON.stringify(e)
-      const x=t.match(INST_PAT)
-      if(x)return x[1]
+      const candidates=[e.name,e.input?.path,e.input?.file_path,e.input?.command]
+      for(const s of candidates){
+        if(typeof s==='string'){const x=s.match(INST_PAT);if(x)return x[1]}
+      }
     }
   }
   return null
@@ -1053,13 +1060,28 @@ function renderTurnDebug(turn){
   if(!dbg||typeof dbg!=='object'||!Object.keys(dbg).length)return''
   const id=uid()
   const keys=Object.keys(dbg).join(', ')
+  // build body: toolExec → compact table; other keys → JSON
+  const bodyParts=[]
+  for(const [k,v] of Object.entries(dbg)){
+    if(k==='toolExec'&&Array.isArray(v)&&v.length){
+      const rows=v.map(t=>{
+        const ok=t.ok!==false
+        const ms=t.durationMs!=null?`${t.durationMs}ms`:''
+        const ex=t.exitCode!=null?`exit ${t.exitCode}`:''
+        return`<tr><td>${esc(t.name??'?')}</td><td class="${ok?'dbg-tool-ok':'dbg-tool-fail'}">${ok?'✓':'✗'}</td><td>${esc(ms)}</td><td>${esc(ex)}</td></tr>`
+      }).join('')
+      bodyParts.push(`<table class="dbg-tool-tbl"><tr><th>tool</th><th>ok</th><th>dur</th><th>exit</th></tr>${rows}</table>`)
+    }else{
+      bodyParts.push(`<div style="margin-bottom:4px"><span style="font-weight:700;color:#8055aa">${esc(k)}</span>: <span>${esc(JSON.stringify(v))}</span></div>`)
+    }
+  }
   return`<div class="turn-dbg" id="${id}">
     <div class="turn-dbg-hd" onclick="toggle('${id}')">
       <span class="turn-dbg-chev">▶</span>
       <span class="turn-dbg-label">🐞 debug</span>
       <span class="turn-dbg-keys">${esc(keys)}</span>
     </div>
-    <pre class="turn-dbg-body">${esc(JSON.stringify(dbg,null,2))}</pre>
+    <div class="turn-dbg-body">${bodyParts.join('')}</div>
   </div>`
 }
 
@@ -1275,9 +1297,11 @@ function renderRunMeta(meta){
       ? `<span class="rm-badge rm-pass">✅ passed · ${verdict.patchBytes??0}B</span>`
       : `<span class="rm-badge rm-fail">❌ failed · ${verdict.patchBytes??0}B</span>`
     : ''
+  const debugBadge=meta.debug?`<span class="rm-badge rm-debug" title="QUANTA_BENCH_RECORD_TRAJECTORY=debug">🐞 debug</span>`:''
   return`<div class="run-meta-block">
     <div class="rm-summary">
       ${verdictBadge}
+      ${debugBadge}
       <span class="rm-badge">🕐 ${esc(ts)}</span>
       <span class="rm-badge">🤖 ${esc(provider)}/${esc(model)}</span>
       <span class="rm-badge">📋 ${esc(preset)}</span>
