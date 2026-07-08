@@ -24,13 +24,16 @@
  *  at `send`. An agent NOT in any team is in no team — `sameTeam` against it is
  *  false, so an un-teamed agent neither sends nor receives team-scoped mail. */
 export interface TeamRegistryPort {
-  /** Mint a team with `members` (idempotent overwrite of an existing id). An
-   *  agent already in another team is RE-HOMED to `teamId` (last-writer-wins —
-   *  a single global membership map, so an agent belongs to exactly one team). */
-  create(teamId: string, members: readonly string[]): void
-  /** Reap the team; returns the member ids that were removed (empty for an
-   *  unknown id). The host disposes each member's runner. */
-  delete(teamId: string): readonly string[]
+  /** Mint a team with `members`. When `caller` is given (an LLM tool call, jul-7 audit
+   *  F2), it is AUTHORIZED: the caller may not join an already-existing team it is not
+   *  in, and may not re-home a member already in ANOTHER team — both would grant it that
+   *  team's cross-team send scope. `caller` undefined ⇒ trusted host path (re-homes freely,
+   *  byte-identical). An agent belongs to exactly one team (single global membership map). */
+  create(teamId: string, members: readonly string[], caller?: string): void
+  /** Reap the team; returns the member ids that were removed (empty for an unknown id, or
+   *  when `caller` is given and does NOT belong to `teamId` — jul-7 audit F3, no cross-team
+   *  reap). `caller` undefined ⇒ trusted host teardown. The host disposes each member's runner. */
+  delete(teamId: string, caller?: string): readonly string[]
   /** A spawned teammate joins (re-homes from any prior team). No-op for an
    *  empty agent id. Auto-creates the team if unknown. */
   addMember(teamId: string, agentId: string): void
@@ -85,17 +88,31 @@ export const createTeamRegistry = (): TeamRegistryPort => {
   }
 
   return {
-    create(teamId, members): void {
+    create(teamId, members, caller): void {
       if (!isUsableId(teamId)) return
-      // Ensure the team exists even with zero seeded members.
-      if (!agentsByTeam.has(teamId)) agentsByTeam.set(teamId, new Set<string>())
+      const existed = agentsByTeam.has(teamId)
+      // caller-auth (jul-7 audit F2): an LLM caller cannot HIJACK a team it is not in —
+      // joining an existing foreign team would grant it that team's cross-team send scope.
+      if (caller !== undefined && existed && teamByAgent.get(caller) !== teamId) return
+      if (!existed) agentsByTeam.set(teamId, new Set<string>())
       if (Array.isArray(members)) {
-        for (const m of members) join(teamId, m)
+        for (const m of members) {
+          // caller-auth: may seed only ITSELF or an UNTEAMED agent — never re-home a
+          // member already in ANOTHER team (that is the re-home hijack that bypasses the
+          // teamScopedMailbox cross-team deny). Host path (no caller) re-homes freely.
+          if (caller !== undefined && m !== caller && teamByAgent.has(m) && teamByAgent.get(m) !== teamId) {
+            continue
+          }
+          join(teamId, m)
+        }
       }
     },
 
-    delete(teamId): readonly string[] {
+    delete(teamId, caller): readonly string[] {
       if (!isUsableId(teamId)) return []
+      // caller-auth (jul-7 audit F3): an LLM caller may reap ONLY a team it belongs to —
+      // no cross-team DoS. Host teardown (no caller) reaps any team.
+      if (caller !== undefined && teamByAgent.get(caller) !== teamId) return []
       const set = agentsByTeam.get(teamId)
       if (set === undefined) return []
       const reaped = [...set]

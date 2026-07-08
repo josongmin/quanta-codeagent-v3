@@ -121,3 +121,56 @@ describe("subagent team membership — lifecycle leak (hellgate)", () => {
     expect(registry.teamOf("lead/0")).toBeUndefined()
   })
 })
+
+// jul-7 audit (F2/F3): team_create/team_delete were UNAUTHENTICATED — an agent could
+// re-home a teamed victim into its own team (then the cross-team send-deny "allows" the
+// attacker→victim message because sameTeam is now true), or reap a team it does not belong
+// to. The registry now authorizes an LLM `caller`; the host path (no caller) is unchanged.
+describe("team registry — caller authorization (jul-7 audit F2/F3)", () => {
+  test("F2: re-home hijack blocked — cannot drag a TEAMED victim into the caller's team", () => {
+    const reg = createTeamRegistry()
+    reg.create("victims", ["victimA"]) // host seeds victimA into its real team
+    expect(reg.teamOf("victimA")).toBe("victims")
+
+    // attacker (an LLM caller) tries to steal victimA into team "evil"
+    reg.create("evil", ["evil", "victimA"], "evil")
+
+    expect(reg.teamOf("victimA")).toBe("victims") // NOT re-homed — hijack blocked
+    expect(reg.sameTeam("evil", "victimA")).toBe(false) // send-deny still applies
+    expect(reg.teamOf("evil")).toBe("evil") // attacker only got ITSELF
+  })
+
+  test("F2: cannot JOIN an existing foreign team by name (would gain its send scope)", () => {
+    const reg = createTeamRegistry()
+    reg.create("secret", ["A"]) // existing team the attacker is not in
+    reg.create("secret", ["evil"], "evil") // attacker tries to join it
+    expect(reg.teamOf("evil")).toBeUndefined() // denied — did not join
+    expect(reg.sameTeam("evil", "A")).toBe(false)
+  })
+
+  test("F3: cross-team delete blocked — cannot reap a team the caller is not in", () => {
+    const reg = createTeamRegistry()
+    reg.create("t1", ["A"])
+    const reaped = reg.delete("t1", "evil") // attacker (not in t1) tries to reap it
+    expect(reaped).toEqual([]) // nothing reaped
+    expect(reg.teamOf("A")).toBe("t1") // team intact
+  })
+
+  test("legit: caller creates its OWN team with unteamed members, then deletes it", () => {
+    const reg = createTeamRegistry()
+    reg.create("tx", ["leader", "childA"], "leader") // both unteamed ⇒ both join
+    expect(reg.teamOf("leader")).toBe("tx")
+    expect(reg.teamOf("childA")).toBe("tx")
+    const reaped = reg.delete("tx", "leader") // leader belongs ⇒ allowed
+    expect([...reaped].sort()).toEqual(["childA", "leader"])
+    expect(reg.teamOf("leader")).toBeUndefined()
+  })
+
+  test("host path (no caller) re-homes freely — byte-identical (child registration)", () => {
+    const reg = createTeamRegistry()
+    reg.create("a", ["X"])
+    reg.create("b", ["X"]) // host re-homes X (no caller) — allowed
+    expect(reg.teamOf("X")).toBe("b")
+    expect(reg.delete("a")).toEqual([]) // a is now empty (X moved), host delete works
+  })
+})

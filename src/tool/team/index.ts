@@ -26,8 +26,8 @@ import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
 /** The slice of `TeamRegistryPort` these tools need (duck-typed). */
 export interface TeamRegistryWriter {
-  create(teamId: string, members: readonly string[]): void
-  delete(teamId: string): readonly string[]
+  create(teamId: string, members: readonly string[], caller?: string): void
+  delete(teamId: string, caller?: string): readonly string[]
   members(teamId: string): readonly string[]
 }
 
@@ -77,7 +77,9 @@ const buildTeamCreate = (registry: TeamRegistryWriter): Tool<TeamCreateInput> =>
       const me = callerId(ctx)
       const seeded = parsed.data.members ?? []
       const members = seeded.includes(me) ? seeded : [me, ...seeded]
-      registry.create(parsed.data.team_id, members)
+      // jul-7 audit (F2): pass the caller so the registry refuses a re-home hijack —
+      // the caller cannot join a foreign team or drag a teamed victim into its team.
+      registry.create(parsed.data.team_id, members, me)
       const roster = registry.members(parsed.data.team_id)
       yield {
         type: "result",
@@ -102,14 +104,16 @@ const buildTeamDelete = (registry: TeamRegistryWriter): Tool<TeamDeleteInput> =>
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: () => "pre-approval-ok",
-  async *execute(input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = teamDeleteSchema.safeParse(input)
     if (!parsed.success) {
       yield { type: "result", result: errResult(`invalid input: ${parsed.error.message}`) }
       return
     }
     try {
-      const reaped = registry.delete(parsed.data.team_id)
+      // jul-7 audit (F3): pass the caller so the registry reaps ONLY a team the caller
+      // belongs to — no cross-team DoS on a disjoint team's runners.
+      const reaped = registry.delete(parsed.data.team_id, callerId(ctx))
       yield {
         type: "result",
         result: {
