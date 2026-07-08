@@ -69,6 +69,13 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .inst-gh-link{font-size:10px;color:#b0b0c8;text-decoration:none;flex-shrink:0;opacity:0;transition:opacity .12s}
 .inst-item:hover .inst-gh-link,.inst-item.active .inst-gh-link{opacity:1}
 .inst-item.active .inst-gh-link{color:#8899dd}
+.sb-filter-bar{display:flex;gap:4px;padding:6px 8px 4px;border-bottom:1px solid #e8e8f0}
+.sb-flt{font-size:10px;padding:2px 7px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer;color:#888;font-weight:600}
+.sb-flt.active{background:#eeeef8;border-color:#8899dd;color:#4455aa}
+.sb-flt-pass{color:#2e7d32}.sb-flt-pass.active{background:#e8f5e9;border-color:#81c784;color:#2e7d32}
+.sb-flt-fail{color:#c62828}.sb-flt-fail.active{background:#fdecea;border-color:#ef9a9a;color:#c62828}
+.inst-verdict-dot{font-size:10px;flex-shrink:0}
+.vd-pass{color:#4caf50}.vd-fail{color:#f44336}.vd-none{color:#ccc}
 .inst-repo{font-size:10px;color:#c0c0d0;margin-top:1px;font-family:var(--mono)}
 .inst-item.active .inst-repo{color:#8888b0}
 .inst-stat{font-size:10px;color:#c0c0d0;margin-top:3px;display:flex;gap:6px;flex-wrap:wrap}
@@ -843,18 +850,40 @@ function loadMeta(text,label){
 }
 
 // ──────────── SIDEBAR ────────────
+let sidebarFilter='all' // 'all' | 'pass' | 'fail'
+function setSidebarFilter(f){sidebarFilter=f;renderSidebar()}
+
 function renderSidebar(){
   const list=document.getElementById('instance-list')
   if(!instances.length){list.innerHTML=`<div class="empty-msg">${T('noData')}</div>`;return}
-  list.innerHTML=instances.map((inst,i)=>{
-    const s=inst.stats,name=dispName(inst.id),repo=repoName(inst.id),model=s.models[0]??''
+  // filter
+  const filtered=instances.map((inst,i)=>({inst,i})).filter(({inst})=>{
+    const v=inst.runMeta?.verdict
+    if(sidebarFilter==='pass')return v!=null&&v.passed===true
+    if(sidebarFilter==='fail')return v!=null&&v.passed===false
+    return true
+  })
+  // filter bar (only shown when any verdict data exists)
+  const hasVerdicts=instances.some(inst=>inst.runMeta?.verdict!=null)
+  const passCount=instances.filter(inst=>inst.runMeta?.verdict?.passed===true).length
+  const failCount=instances.filter(inst=>inst.runMeta?.verdict?.passed===false).length
+  const filterBar=hasVerdicts?`<div class="sb-filter-bar">
+    <button class="sb-flt${sidebarFilter==='all'?' active':''}" onclick="setSidebarFilter('all')">all ${instances.length}</button>
+    <button class="sb-flt sb-flt-pass${sidebarFilter==='pass'?' active':''}" onclick="setSidebarFilter('pass')">✅ ${passCount}</button>
+    <button class="sb-flt sb-flt-fail${sidebarFilter==='fail'?' active':''}" onclick="setSidebarFilter('fail')">❌ ${failCount}</button>
+  </div>`:''
+  list.innerHTML=filterBar+filtered.map(({inst,i})=>{
+    const s=inst.stats,name=dispName(inst.id),repo=repoName(inst.id)
     const phases=s.phases??[]
     const dots=phases.map(ph=>`<div class="phase-dot ${ph.slice(0,3)}"></div>`).join('')
     const iurl=issueUrl(inst.id)
+    const v=inst.runMeta?.verdict
+    const vDot=v!=null?(v.passed?`<span class="inst-verdict-dot vd-pass" title="passed">●</span>`:`<span class="inst-verdict-dot vd-fail" title="failed">●</span>`):`<span class="inst-verdict-dot vd-none" title="no verdict">○</span>`
     return`<div class="inst-item${i===selInst?' active':''}" onclick="selectInstance(${i})">
       <div class="inst-seq">${i+1}</div>
       <div class="inst-info">
         <div class="inst-name-row">
+          ${vDot}
           <span class="inst-name" title="${esc(inst.id)}">${esc(name)}</span>
           ${iurl?`<a class="inst-gh-link" href="${iurl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${T('issueTitle')}">↗</a>`:''}
         </div>
