@@ -1,1 +1,0 @@
-{"instance_id":"pylint-dev__pylint-8898","patch":"diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+gold change A\ndiff --git a/pylint/checkers/utils.py b/pylint/checkers/utils.py\n+gold change B","test_patch":"diff --git a/tests/test_format.py b/tests/test_format.py\n+def test_thing(): assert True","FAIL_TO_PASS":"[\"tests/test_format.py::test_thing\"]"}
