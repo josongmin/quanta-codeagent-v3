@@ -244,7 +244,9 @@ export const decideOnStreamError = (
 /** ADR-0076 Gap-1: provider refusal / content-policy stop → typed `refusal`
  *  (visible-text rationale). Terminal — same-turn budgets are NOT consumed. */
 const decideRefusal = (stopReason: string, message: AssembledMessage): RecoveryAction | null =>
-  stopReason === "refusal" ? { do: "refusal", rationale: extractRefusalRationale(message) } : null
+  isRefusalStopReason(stopReason)
+    ? { do: "refusal", rationale: extractRefusalRationale(message) }
+    : null
 
 /** `max_tokens` truncation with continuation budget remaining → a "continue where
  *  you left off" nudge (consumes one continuation slot). `null` when not
@@ -377,14 +379,16 @@ export const resolveTurnAction = (
   // mutating empty/nudge accounting (which would corrupt same-turn budgets).
   //
   // GUARD — only recover a CLEAN, text-only refusal. A refusal-class stop that
-  // ALSO carried a `tool_use` block already (partially) dispatched those calls
-  // in `streamingTurn`: `content_filtered` does NOT take the in-stream
-  // short-circuit (only `refusal` does, streaming-dispatch.ts), so its deferred
-  // MUTATING tools run. Neutralizing such a turn would discard executed-tool
-  // results AND risk a re-execution on the re-prompt (double side effect). So a
-  // tool-carrying refusal falls through to the legacy mapping (terminal for
-  // `refusal`; pre-existing tool-proceed for `content_filtered`) — byte-identical
-  // to the OFF path for that case.
+  // ALSO carried a `tool_use` block: `streamingTurn` short-circuits Phase-3
+  // deferred (barrier-blocked, MUTATING) dispatch for BOTH `refusal` AND
+  // `content_filtered` (ALBB-03 — both route through `isRefusalStopReason`), so
+  // no deferred mutating tool runs on a refusal-class turn. But an overlap-safe
+  // (read-only, concurrency-safe) call may have pre-started in Phase 1 and
+  // cannot be un-started; neutralizing such a turn would discard those
+  // executed-tool results AND risk a re-execution on the re-prompt (double
+  // side effect). So a tool-carrying refusal falls through to the legacy
+  // mapping, which is now TERMINAL for both `refusal` and `content_filtered`
+  // (`decideRefusal` folds them via `isRefusalStopReason`) — no silent proceed.
   if (
     refusal?.enabled === true &&
     isRefusalStopReason(stop) &&
@@ -396,9 +400,9 @@ export const resolveTurnAction = (
     }
     // One-shot spent OR a fork would exceed budget ⇒ TERMINAL refusal. Surfaced
     // as `refusal` (not a generic error) for BOTH providers so a re-refusal —
-    // including `content_filtered`, which the legacy mapping would let slip
-    // through as `proceed` when no stop-policy is wired — never silently
-    // completes and reads consistently to the host.
+    // including `content_filtered` (the legacy `decideOnAssembled` mapping is
+    // now ALSO terminal for it via `decideRefusal`/`isRefusalStopReason`, ALBB-03)
+    // — never silently completes and reads consistently to the host.
     return { do: "refusal", rationale: extractRefusalRationale(result.message) }
   }
   // OFF / non-refusal / tool-carrying refusal ⇒ legacy mapping verbatim

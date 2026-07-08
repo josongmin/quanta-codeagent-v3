@@ -33,8 +33,11 @@
  */
 import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
+import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import type { MentionResolverPort } from "@/agent/mention-injection"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
+import type { TypedHistoryEventStore } from "@/memory/typed-event"
 import type { AgentEvent } from "@/stream"
 import { cfg, ev, RecordingStream, ScriptedLLM, text, withTimeout } from "./_harness"
 
@@ -191,6 +194,79 @@ describe("Observability — successful proactive compaction emits recovery event
       expect(rec.reason).toBe("compact")
       expect(rec.detail).toBe("proactive")
     }
+  }, 15_000)
+})
+
+/** A typed-history store double whose `append` never throws — kept so the
+ *  install helper wires the context-events slot (it requires both `getSnapshot`
+ *  AND `store`). The store's own behaviour is irrelevant here: we drive the
+ *  failure through a throwing `getSnapshot`, which is the closure-entry input. */
+const noopTypedStore = (): TypedHistoryEventStore =>
+  ({ append: () => undefined }) as unknown as TypedHistoryEventStore
+
+describe("Observability — INSTALLED codex-r2 context-events closure throw surfaces as error event (ALBB-09 site 2)", () => {
+  test("throwing getSnapshot → `error` AgentEvent on stream (not only logger.warn), turn continues", async () => {
+    const llm = new ScriptedLLM([ev(text("done"))])
+    const stream = new RecordingStream()
+    const config = cfg({ llm, stream })
+    // Install the REAL codex-r2 context-events producer closure with a
+    // getSnapshot that ALWAYS throws (the closure calls it FIRST thing every
+    // turn, before the cursor-seed short-circuit, so a throw hits the
+    // closure-entry catch on the very first invocation). The catch must RE-THROW
+    // to the outer `resolveContextEventsForTurn` wrapper so its
+    // `stream.emit({type:"error"})` fires — pre-fix the closure swallowed +
+    // returned [] and NO error event ever reached the stream.
+    installCodexR2Wires(config, {
+      getSnapshot: () => {
+        throw new Error("snapshot-boom")
+      },
+      store: noopTypedStore(),
+    })
+    expect(config.contextEventsForTurn).toBeDefined()
+
+    const outcome = await withTimeout(runAgent(config), 10_000, "ctx-events-throw")
+    expect(outcome.reason).toBe("completed")
+    const err = findErrorEvent(stream.events, "context-events provider failed")
+    expect(err).toBeDefined()
+    if (err && err.type === "error") {
+      expect(err.message).toContain("snapshot-boom")
+    }
+  }, 15_000)
+})
+
+describe("Observability — INSTALLED codex-r2 mention-injector closure throw surfaces as error event (ALBB-09 site 2)", () => {
+  test("throwing mention resolver (closure-entry) → `error` AgentEvent on stream, turn continues", async () => {
+    const llm = new ScriptedLLM([ev(text("done"))])
+    const stream = new RecordingStream()
+    // The user text references an `@file` mention so `parseMentions` yields a
+    // mention; `pickResolver` (called OUTSIDE the per-mention safeCall) reads
+    // `resolver.resolveFile` via a throwing getter → the throw escapes
+    // `buildInjectionFragments` into the injector CLOSURE-ENTRY catch, which
+    // must RE-THROW to `resolveMentionInjectionMessages` so its error emit fires.
+    const config = cfg({
+      llm,
+      stream,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "please read @src/x.ts now" }] },
+      ] as Message[],
+    })
+    const hostileResolver = {
+      get resolveFile(): never {
+        throw new Error("resolver-boom")
+      },
+    } as unknown as MentionResolverPort
+    installCodexR2Wires(config, { mentionResolver: hostileResolver })
+    expect(config.mentionInjector).toBeDefined()
+
+    const outcome = await withTimeout(runAgent(config), 10_000, "mention-throw")
+    expect(outcome.reason).toBe("completed")
+    // The closure-entry catch RE-THROWS to `resolveMentionInjectionMessages`,
+    // which emits the `mention injection failed` error event. (We assert only the
+    // outer-wrapper label, not the inner cause string — a global `parseMentions`
+    // mock leaking from another test file can change WHICH inner call throws, but
+    // the re-throw ⇒ error-event invariant holds either way.)
+    const err = findErrorEvent(stream.events, "mention injection failed")
+    expect(err).toBeDefined()
   }, 15_000)
 })
 

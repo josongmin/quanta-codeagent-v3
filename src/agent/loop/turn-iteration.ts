@@ -5,7 +5,7 @@ import { errMessage } from "@/shared"
 import type { BudgetExhaustion } from "../budget"
 import { estimateTokens } from "../compaction"
 import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
-import { captureInterruptedTurn } from "../interrupted-turn"
+import { captureAbortedTurn } from "../interrupted-turn"
 import { buildIdentityReminderText } from "../loop-helpers"
 import { resolveAgentMode } from "../mode"
 import { stampTurn } from "../session-resources"
@@ -49,6 +49,14 @@ export const setActiveTurnHeader = (cfg: AgentConfig, sessionId: string): void =
   }
 }
 
+/** ALBB-06 — the outcome of the queued-input drain. `aborted_captured` means the
+ *  drain already CAPTURED the interrupted turn (the `/cancel` finish_aborted
+ *  path), so the caller must NOT re-capture (which would clobber the
+ *  conversation_cancel reason with signal_abort — a double-capture). A bare
+ *  `aborted` (a future signal-driven drain exit that does NOT self-capture) tells
+ *  the caller to capture with the `signal_abort` reason. */
+export type SyncQueuedOutcome = "continue" | "aborted" | "aborted_captured"
+
 export const syncQueuedTurnInputs = async (args: {
   readonly cfg: AgentConfig
   readonly wm: WorkingMemory<Message>
@@ -58,7 +66,7 @@ export const syncQueuedTurnInputs = async (args: {
   // `/summarize-now` verb (`compactNowOnDemand` below) can invalidate it after it
   // shrinks the prefix. `undefined` ⇒ no box wired ⇒ byte-identical.
   readonly tokenBaseline: import("../compaction").TokenBaselineBoxState | undefined
-}): Promise<"continue" | "aborted"> => {
+}): Promise<SyncQueuedOutcome> => {
   const followUpResult = pollFollowUpQueue(args.cfg, args.sessionId)
   if (followUpResult !== null) args.wm.append(followUpResult)
   // Peer teammate messaging (RFC jun-6, DELTA #1) — auto-deliver this agent's
@@ -80,10 +88,14 @@ export const syncQueuedTurnInputs = async (args: {
     // §11.5 — capture the partial turn into the session buffer so a later
     // `resume` can restore it. Default-OFF: no buffer wired ⇒ no capture
     // (byte-identical). The buffer's presence is the resumable-interrupt signal.
-    args.cfg.interruptedTurnBuffer?.capture(
-      captureInterruptedTurn(args.wm.snapshot(), actionOutcome.reason, Date.now()),
-    )
-    return "aborted"
+    // ALBB-06: refactored onto the shared `captureAbortedTurn` helper — the
+    // reason stays `actionOutcome.reason` (conversation_cancel), so this path is
+    // byte-identical to the pre-ALBB-06 direct call (paired control).
+    captureAbortedTurn(args.cfg, args.wm, actionOutcome.reason)
+    // ALBB-06: signal the relay that THIS abort already captured (with the
+    // conversation_cancel reason) so `prepareTurnIteration` does NOT re-capture
+    // and clobber it with a signal_abort reason (no double-capture on /cancel).
+    return "aborted_captured"
   }
   if (actionOutcome.kind === "injection") {
     args.wm.append(actionOutcome.message)
@@ -224,13 +236,28 @@ export const prepareTurnIteration = async (args: {
   // `/summarize-now` can invalidate it. `undefined` ⇒ byte-identical.
   readonly tokenBaseline: import("../compaction").TokenBaselineBoxState | undefined
 }): Promise<"continue" | "aborted"> => {
-  if (args.cfg.signal.aborted) return "aborted"
+  if (args.cfg.signal.aborted) {
+    // ALBB-06 (path a) — the turn-boundary signal abort (Ctrl+C / Esc-Esc hit a
+    // plain `AbortController.abort()`). Capture BEFORE the silent early return so
+    // `/resume` can restore the partial work. Distinct reason for telemetry.
+    // Default-OFF: no buffer wired ⇒ no-op (byte-identical).
+    captureAbortedTurn(args.cfg, args.wm, "signal_abort")
+    return "aborted"
+  }
   if (args.localizePhaseState !== undefined) args.localizePhaseState.turn = args.turn - 1
   args.cfg.budgetMeter?.tick("turn")
   await applySteerBarrierMessages(args.cfg, args.wm)
   setActiveTurnHeader(args.cfg, args.sessionId)
   const queuedInputs = await syncQueuedTurnInputs(args)
-  if (queuedInputs === "aborted") return "aborted"
+  if (queuedInputs !== "continue") {
+    // ALBB-06 (path b) — the queued-inputs relay. `aborted_captured` already
+    // captured inside the drain (conversation_cancel); a bare `aborted` is a
+    // signal-driven drain exit that did NOT self-capture, so we capture here with
+    // the distinct signal_abort reason. Guarding on the discriminant prevents a
+    // double-capture on the /cancel path. Default-OFF: no buffer ⇒ no-op.
+    if (queuedInputs === "aborted") captureAbortedTurn(args.cfg, args.wm, "signal_abort")
+    return "aborted"
+  }
   injectFocusChainMessage(args.cfg, args.wm)
   // ADR-0239 §C / ALBB-14 — per-turn identity reminder splice (default-OFF
   // byte-identical; mode-conditional auto-ON for architect/editor). Previously

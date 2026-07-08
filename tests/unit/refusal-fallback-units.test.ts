@@ -195,8 +195,11 @@ describe("resolveTurnAction — T08 refusal-fallback", () => {
   })
 
   // ADVERSARIAL-AUDIT GUARD: a refusal-class stop that ALSO carried tool_use must
-  // NOT be neutralized (the tools already dispatched in streamingTurn; content_filtered
-  // does not take the in-stream short-circuit). It falls through to the legacy map.
+  // NOT be neutralized (a Phase-1 overlap-safe call may have pre-started in
+  // streamingTurn; re-prompting could double-execute it). It falls through to
+  // the legacy map — which is now TERMINAL for BOTH refusal-class reasons
+  // (ALBB-03: `decideRefusal` folds `refusal` + `content_filtered` via
+  // `isRefusalStopReason`), so neither silently proceeds.
   test("ON refusal WITH tool_use ⇒ NOT neutralized; legacy terminal refusal", () => {
     const rec = freshRecovery()
     const a = resolveTurnAction(
@@ -209,7 +212,7 @@ describe("resolveTurnAction — T08 refusal-fallback", () => {
     expect(rec.refusalFallbacks).toBe(0)
   })
 
-  test("ON content_filtered WITH tool_use ⇒ NOT neutralized; legacy proceed (no double-exec)", () => {
+  test("ALBB-03: ON content_filtered WITH tool_use ⇒ NOT neutralized; legacy TERMINAL refusal (no silent proceed)", () => {
     const rec = freshRecovery()
     const a = resolveTurnAction(
       undefined,
@@ -217,7 +220,9 @@ describe("resolveTurnAction — T08 refusal-fallback", () => {
       rec,
       okInput(),
     )
-    expect(a.do).toBe("proceed") // legacy path runs the dispatched tools
+    // Pre-ALBB-03 this silently returned `proceed` (the legacy path ran the
+    // dispatched tools). It is now terminal-refusal like its `refusal` sibling.
+    expect(a.do).toBe("refusal")
     expect(rec.refusalFallbacks).toBe(0)
   })
 

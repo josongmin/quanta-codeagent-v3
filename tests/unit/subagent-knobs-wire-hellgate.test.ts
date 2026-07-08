@@ -133,11 +133,13 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
     const wake = wired.subagentTurnWake
     if (wake === undefined) throw new Error("turnWake not wired")
 
-    // The introspect builder shares config.subagent.taskRegistry with the
-    // trio/6-tool spawn path; wire one so the registered followup_task tool and
-    // the (simulated) runner observe the SAME registry instance.
-    const registry = new TaskRegistry()
-    ;(wired as AgentConfig).subagent = { ...wired.subagent, taskRegistry: registry }
+    // ALBB-12 claim 1: `wireSubagentToolGates` now MINTS the shared
+    // `taskRegistry` into `config.subagent` (belt-and-suspenders), so the
+    // introspect builder and the (simulated) runner observe the SAME instance
+    // BY CONSTRUCTION — no manual patch. Injection: drop that mint and this
+    // followup goes `no_waker` (empty split registry) ⇒ the wire is unproven.
+    const registry = wired.subagent?.taskRegistry
+    if (registry === undefined) throw new Error("wire did not mint a shared taskRegistry")
 
     const childId = registry.newId()
     registry.register({ id: childId, description: "child task" })

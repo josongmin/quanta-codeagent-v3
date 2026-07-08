@@ -68,10 +68,13 @@ describe("interrupt → capture → resume (E2E)", () => {
       tokenBaseline: undefined,
     })
 
-    expect(outcome).toBe("aborted")
+    // ALBB-06: the /cancel drain self-captures and signals `aborted_captured`.
+    expect(outcome).toBe("aborted_captured")
     expect(buffer.has()).toBe(true)
     expect(buffer.peek()?.userText).toBe("refactor the parser")
     expect(buffer.peek()?.partialAssistantText).toBe("extracted tokenizer")
+    // PAIRED-CONTROL: the /cancel reason stays the surface-supplied reason
+    // (byte-identical) — NOT clobbered to signal_abort by a double-capture.
     expect(buffer.peek()?.reason).toBe("user barge-in")
   })
 
@@ -124,7 +127,10 @@ describe("interrupt → capture → resume (E2E)", () => {
       taskRegistry: undefined,
       tokenBaseline: undefined,
     })
-    expect(outcome).toBe("aborted") // aborts exactly as before — just no capture
+    // ALBB-06: the /cancel drain now returns the `aborted_captured` discriminant
+    // (it ran the capture site — a no-op here since no buffer is wired). The
+    // caller still maps it to a plain "aborted" turn outcome (byte-identical).
+    expect(outcome).toBe("aborted_captured")
   })
 
   test("resume with an EMPTY buffer is a clean no-op (continue, nothing injected)", async () => {
@@ -158,7 +164,7 @@ describe("interrupt → capture → resume (E2E)", () => {
         taskRegistry: undefined,
         tokenBaseline: undefined,
       }),
-    ).toBe("aborted")
+    ).toBe("aborted_captured")
 
     // 2) resume → re-inject the captured task
     surface.pushResume()

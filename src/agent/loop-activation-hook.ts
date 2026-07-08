@@ -276,6 +276,14 @@ export const resolvePluginActivationForTurn = async (
     const mod = await import("@/agent/mention-injection")
     mentions = mod.parseMentions(latestUserText)
   } catch {
+    // ADR-0360 — a parse/import failure used to run BEFORE the `activation.calls`
+    // counter below, so it was counted in NEITHER `calls` NOR `errors` (invisible,
+    // indistinguishable from "no mentions"). Bump BOTH via the metric side-channel
+    // (NOT a stream — `ActivationHookConfigLike` has no stream field): `calls` so
+    // `error_rate = errors/calls` stays computable for parse failures too, and
+    // `errors` to mirror the activator-throw catch. Still degrades clean (EMPTY).
+    safeEmit(config.metricsEmitter, (e) => e.counter("codex_r2.activation.calls", 1))
+    safeEmit(config.metricsEmitter, (e) => e.counter("codex_r2.activation.errors", 1))
     return EMPTY
   }
   if (mentions.length === 0) return EMPTY

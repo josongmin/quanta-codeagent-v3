@@ -628,8 +628,12 @@ export const emitCompactionEvent = (config: AgentConfig, event: CompactionEventV
   if (config.compactionEventEmit === undefined) return
   try {
     config.compactionEventEmit(event)
-  } catch {
-    // Pure observability.
+  } catch (e) {
+    // Pure observability — the turn is unaffected either way (NO-THROW). Parity
+    // with the proactive-emit sibling (`compaction.postCompactEmit`) and the
+    // install-side `codex-r2-wire.compactionEventEmit`: a failed compaction-event
+    // sink now leaves an attributable warn instead of vanishing silently.
+    logger.warn(`compaction-wire.emitCompactionEvent: ${errMessage(e)}`)
   }
 }
 

@@ -1,4 +1,4 @@
-import { assembleFromEvents, type Message, type StreamEvent } from "@/llm"
+import { assembleFromEvents, isRefusalStopReason, type Message, type StreamEvent } from "@/llm"
 import { errMessage } from "@/shared"
 import { isSessionApprovalRequiredError } from "./dispatch-helpers"
 
@@ -613,17 +613,19 @@ export const streamingTurn = async (args: StreamingTurnArgs): Promise<StreamingT
     return { kind: "aborted" }
   }
 
-  // ADR-0076 Gap-5 — refusal in-stream short-circuit. When the provider stops
-  // with `stop_reason: "refusal"`, ANY tool calls that were queued mid-stream
-  // are part of the refused intent and MUST NOT execute. We skip Phase 3
-  // (deferred dispatch — barrier-blocked unsafe calls that haven't started
-  // yet). Phase 2 already settled the concurrency-safe overlap calls that
-  // pre-started — we cannot un-start those (their `dispatch(call)` was fired
-  // at `scheduleResolvedCall`) so we collect their results in Phase 4.
-  // The loop's `decideOnAssembled` will declare the turn terminal (error)
-  // regardless, and `runStep` does NOT `wm.append` on error — so orphan
+  // ADR-0076 Gap-5 / ALBB-03 — refusal-class in-stream short-circuit. When the
+  // provider stops with a refusal-CLASS reason (Anthropic `refusal` OR OpenAI
+  // `content_filtered`, folded by the provider-blind `isRefusalStopReason`
+  // seam), ANY tool calls that were queued mid-stream are part of the refused /
+  // content-filtered intent and MUST NOT execute. We skip Phase 3 (deferred
+  // dispatch — barrier-blocked unsafe calls that haven't started yet). Phase 2
+  // already settled the concurrency-safe overlap calls that pre-started — we
+  // cannot un-start those (their `dispatch(call)` was fired at
+  // `scheduleResolvedCall`) so we collect their results in Phase 4.
+  // The loop's `decideOnAssembled` will declare the turn terminal (refusal)
+  // regardless, and `runStep` does NOT `wm.append` on that terminal — so orphan
   // tool_use blocks in `message.content` never carry to the next turn.
-  if (stopReason !== "refusal") {
+  if (!isRefusalStopReason(stopReason)) {
     if (!(await drainDeferredSlots(state.slots, dispatch, onToolStart, signal))) {
       abandonInFlight(state)
       return { kind: "aborted" }

@@ -8,7 +8,7 @@
  * directly, NOT the `@/apps/agent/assemble` shim that binds `process.env`.
  */
 
-import { buildSystemPrompt, runAgent } from "@/agent"
+import { buildSystemPrompt, runAgent, wireOptionalAgentPorts } from "@/agent"
 import { assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import { type LLMPort, type Message, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -160,7 +160,14 @@ export const createAnalysisAgent = (opts: AnalysisAgentOptions): AnalysisAgent =
             signal: c.signal,
             ...(readOnly ? {} : { hitl: { autoApprove: true } }),
           }
-          const cfg = assembleAgentConfig({ mode, base }, env)
+          // ALBB-12 claim 2 — run the FINAL composition transform every other
+          // surface runs (CLI/daemon/ide/headless/bench), using embed's own env
+          // view (slice-boundary invariant). Gives SDK consumers parity: the
+          // env-gated refusal-fallback / subagent tool-gates / closeout critic /
+          // fast-apply / stream taps become LIVE when their gates are set.
+          // MEASURE-FIRST / default-OFF: no `QUANTA_*` gate ⇒ every gate stays off
+          // ⇒ cfg is returned UNCHANGED ⇒ embed is byte-identical to before.
+          const cfg = wireOptionalAgentPorts(assembleAgentConfig({ mode, base }, env), env)
           return runAgent(cfg)
         },
         hooks,

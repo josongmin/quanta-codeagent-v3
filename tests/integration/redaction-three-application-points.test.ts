@@ -23,9 +23,23 @@ import { runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { classifyCommandShape } from "@/security"
+import { __resetTerminalIo, setTerminalIo } from "@/shared/terminal-io"
 import { defaultTools, ToolRegistry } from "@/tool"
 import type { Tool } from "@/tool/types"
 import { baseConfig, FakeLLM, RecordingStream, text, toolUse } from "./_harness"
+
+/** Capture every stderr write the logger emits (`[warn] <msg>\n`) into an
+ *  in-memory list so a `logger.warn(...)` label can be asserted. */
+const captureStderr = (): { lines: string[]; restore: () => void } => {
+  const lines: string[] = []
+  setTerminalIo({
+    stdout: () => undefined,
+    stderr: (chunk: string) => {
+      for (const piece of chunk.split("\n")) if (piece.length > 0) lines.push(piece)
+    },
+  })
+  return { lines, restore: () => __resetTerminalIo() }
+}
 
 const FAKE_SECRET = "AKIAIOSFODNN7EXAMPLE"
 
@@ -151,6 +165,52 @@ describe("ADR-0078 — three application points", () => {
       (r) => r.origin === "tool_result" && r.kind === "source_class_secret",
     )
     expect(rollup?.count ?? 0).toBeGreaterThan(0)
+  })
+
+  test("ALBB-09 site 5: a THROWING classifySource is fail-safe (dispatch unbroken) AND surfaces a logger.warn(dispatch.classifySource)", async () => {
+    // A tool whose `classifySource` throws. The dispatch catch must (a) stay
+    // fail-safe — treat as no source class, complete the turn — AND (b) no
+    // longer swallow SILENTLY: it emits a `dispatch.classifySource` warn so the
+    // tool-side classifier bug is visible. Pre-fix the catch was bare `} catch {}`
+    // ⇒ no warn line ⇒ this assertion RED.
+    const cap = captureStderr()
+    try {
+      const throwingClassifierTool: Tool<{ command: string }> = {
+        name: "bash",
+        description: "test bash stub w/ throwing classifier",
+        inputSchema: z.object({ command: z.string() }),
+        isReadOnly: () => true,
+        isConcurrencySafe: () => true,
+        extractShellCommand: (input) => input.command,
+        classifySource: () => {
+          throw new Error("classifier-boom")
+        },
+        async *execute() {
+          yield { type: "result", result: { ok: true, output: "plain output, no secret" } }
+        },
+      }
+      const llm = new FakeLLM([toolUse("c1", "bash", { command: "echo hi" }), text("done")])
+      const stream = new RecordingStream()
+      const outcome = await runAgent(
+        baseConfig({
+          llm,
+          registry: new ToolRegistry([throwingClassifierTool]),
+          stream,
+          cwd: dir,
+          permission: { mode: "acceptEdits" } as PermissionContext,
+          system: "test",
+        }),
+      )
+      // Fail-safe: the throwing classifier did NOT break dispatch.
+      expect(outcome.reason).toBe("completed")
+      const toolResults = stream.events.filter((e) => e.type === "tool_result")
+      expect(toolResults.length).toBeGreaterThan(0)
+      // Observability: the swallowed classifier throw is now visible.
+      expect(cap.lines.some((l) => l.includes("dispatch.classifySource"))).toBe(true)
+      expect(cap.lines.some((l) => l.includes("classifier-boom"))).toBe(true)
+    } finally {
+      cap.restore()
+    }
   })
 
   test("point 3: memory_distill input is redacted before the distill LLM call", async () => {

@@ -199,17 +199,22 @@ describe("ADR-0076 — exact-match: false-positive variants stay un-branched", (
 
 // ─── 5. ADR-0076 NI-2: deliberately-dead branches MUST stay un-branched ────
 
-describe("ADR-0076 NI-2 — `pause_turn` / `content_filtered` / `guardrail_intervened` stay un-branched", () => {
+describe("ADR-0076 NI-2 — `pause_turn` / `guardrail_intervened` stay un-branched; `content_filtered` is TERMINAL", () => {
   test("`pause_turn` ⇒ proceed (server-tool resume; we ship no server tools)", () => {
     const rec = freshRecovery()
     const a = decideOnAssembled("pause_turn", textMsg("ack"), rec)
     expect(a.do).toBe("proceed")
   })
 
-  test("`content_filtered` ⇒ proceed (no Bedrock guardrail integration)", () => {
+  test("ALBB-03: `content_filtered` ⇒ refusal (terminal safety refusal — folds via isRefusalStopReason)", () => {
+    // Provider content-filter/safety stop is a TERMINAL refusal (Claude Code /
+    // Codex parity). `decideRefusal` now routes through `isRefusalStopReason`,
+    // which folds `refusal` + `content_filtered`, so a text-only content-filter
+    // turn maps to `{ do: "refusal" }` — NOT the silent `proceed` that sealed
+    // `completed` pre-fix. Reverting the `decideRefusal` seam swap re-reds this.
     const rec = freshRecovery()
     const a = decideOnAssembled("content_filtered", textMsg("ack"), rec)
-    expect(a.do).toBe("proceed")
+    expect(a.do).toBe("refusal")
   })
 
   test("`guardrail_intervened` ⇒ proceed (NI-2 — adding a branch is cargo)", () => {
@@ -218,13 +223,15 @@ describe("ADR-0076 NI-2 — `pause_turn` / `content_filtered` / `guardrail_inter
     expect(a.do).toBe("proceed")
   })
 
-  test("ADDING any of these to a branch later would break this test — that's the point", () => {
-    // Defense-in-depth: the three literals are checked together so a future
-    // hand-roll of a dead branch (cargo-culted from an absorption ADR that
-    // does not actually wire the integration) lights up here, not in prod.
+  test("paired control: content_filtered TERMINAL but pause_turn / guardrail_intervened stay proceed (narrow swap)", () => {
+    // Defense-in-depth: the deliberately-un-branched literals are checked
+    // together so a future hand-roll of a dead branch (cargo-culted from an
+    // absorption ADR that does not actually wire the integration) lights up
+    // here, not in prod. content_filtered is now terminal; the other two are NOT
+    // — proving the seam swap is narrow (only the refusal-class fold changed).
     const rec = freshRecovery()
     expect(decideOnAssembled("pause_turn", textMsg("x"), rec).do).toBe("proceed")
-    expect(decideOnAssembled("content_filtered", textMsg("x"), rec).do).toBe("proceed")
+    expect(decideOnAssembled("content_filtered", textMsg("x"), rec).do).toBe("refusal")
     expect(decideOnAssembled("guardrail_intervened", textMsg("x"), rec).do).toBe("proceed")
   })
 })

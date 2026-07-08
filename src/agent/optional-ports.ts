@@ -18,7 +18,7 @@ import {
   itemLifecycleEnabled,
   type StreamPort,
 } from "@/stream"
-import { AgentMetaRegistry, TurnWakeRegistry } from "@/subagent"
+import { AgentMetaRegistry, TaskRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
 import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
@@ -608,6 +608,17 @@ const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: Optiona
   if (wantBatch && subagent.enableBatchSpawn !== true) subagent.enableBatchSpawn = true
   if (wantIntrospect && subagent.enableIntrospect !== true) subagent.enableIntrospect = true
   if (wantFollowup && subagent.enableFollowup !== true) subagent.enableFollowup = true
+
+  // ALBB-12 claim 1 (belt-and-suspenders) — env-gated surfaces (daemon/ide/
+  // headless/bench/eval/SDK) reach the introspect builder via THIS wire, NOT the
+  // CLI-pill features seam, so mint the SHARED `TaskRegistry` here too — otherwise
+  // `list_agents`/`followup_task` fail-close to [] (no registry) by construction.
+  // The `buildSubagentBlock` agent/6-tool path ADOPTS a pre-set
+  // `config.subagent.taskRegistry` (subagent.ts), so both spawn into and observe
+  // THIS instance. Caller-override-precedence: never overwrite a host-provided one.
+  if ((wantIntrospect || wantFollowup) && subagent.taskRegistry === undefined) {
+    subagent.taskRegistry = new TaskRegistry()
+  }
   next = { ...next, subagent } as T
 
   // Introspect dep — richer `list_agents` rows (depth/label). Optional even

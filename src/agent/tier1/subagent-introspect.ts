@@ -23,9 +23,14 @@
  * inline (structurally identical `send`).
  */
 
-import { createIntrospectTools, type MailboxSendPort, TaskRegistry } from "@/subagent"
+import { logger } from "@/shared"
+import { createIntrospectTools, type MailboxSendPort } from "@/subagent"
 import type { Tool } from "@/tool"
 import type { AgentConfig } from "../types"
+
+// ALBB-12 claim 1 — once-per-process guard so a genuinely-split surface warns
+// exactly once (never spams across sessions), mirroring `wireCloseoutCritic`.
+let warnedIntrospectNoRegistry = false
 
 export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
   const sub = config.subagent
@@ -34,9 +39,26 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
   const wantFollowup = sub.enableFollowup === true
   if (!wantList && !wantFollowup) return []
 
-  // Share the trio/6-tool registry when the surface wired one; else a fresh
-  // (empty) registry — honest degradation (list returns []), never a throw.
-  const registry = sub.taskRegistry ?? new TaskRegistry()
+  // FAIL-CLOSED (ALBB-12 claim 1): the introspect tools MUST observe the SAME
+  // `TaskRegistry` the agent/6-tool spawn path fills. The features seam writes
+  // R1 back onto `config.subagent.taskRegistry`, and `wireSubagentToolGates`
+  // mints one for env-gated surfaces — so `taskRegistry` is present by
+  // construction whenever a surface reaches this builder correctly. If it is
+  // STILL absent the surface is genuinely mis-wired: fabricating a fresh empty
+  // registry here would register `list_agents`/`followup_task` over a table that
+  // NEVER sees the real tasks (silent wrong output). Instead fail OPEN visibly —
+  // build NO tool + surface the split ONCE — mirroring `wireCloseoutCritic`'s
+  // no-reviewer posture (optional-ports.ts).
+  const registry = sub.taskRegistry
+  if (registry === undefined) {
+    if (!warnedIntrospectNoRegistry) {
+      warnedIntrospectNoRegistry = true
+      logger.warn(
+        "subagent introspect gate is on but no shared taskRegistry is wired — list_agents/followup_task will NOT be registered (they would observe an empty registry). Wire config.subagent.taskRegistry (the features seam / wireSubagentToolGates do this automatically).",
+      )
+    }
+    return []
+  }
 
   // The real MailboxPort has a `send` whose shape matches MailboxSendPort
   // exactly; adopt it directly (structural).
@@ -60,10 +82,11 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
     // non-spawned) ⇒ no guard (root is never a valid target anyway).
     ...(config.subagentTaskId !== undefined ? { ownAgentId: config.subagentTaskId } : {}),
     ...(config.mailboxAgentId !== undefined ? { callerLabel: config.mailboxAgentId } : {}),
-    // F-B (jul-7 audit) — scope list_agents to THIS agent's own lineage. The agent's
-    // own deterministic label (`mailboxAgentId`, ADR-0416) IS the lineage the spawn
-    // owners ledger stamps its children under, so a child enumerates only its own
-    // subtree + owner-less host-seeded tasks. Absent (root, no label) ⇒ unscoped.
+    // F-B/F-E (jul-7 audit) — scope list_agents enumeration + gate followup_task by THIS
+    // agent's own lineage. The agent's deterministic label (`mailboxAgentId`, ADR-0416) IS
+    // the lineage the spawn owners ledger stamps its children under, so a child sees/nudges
+    // only its own subtree + owner-less host-seeded tasks. Absent (root, no label) ⇒
+    // unscoped list (top authority) + tree-scoped followup via ROOT_LINEAGE fallback.
     ...(config.mailboxAgentId !== undefined ? { requesterLineage: config.mailboxAgentId } : {}),
     ...(wantList ? { enableIntrospect: true } : {}),
     ...(wantFollowup ? { enableFollowup: true } : {}),

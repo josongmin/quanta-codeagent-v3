@@ -216,6 +216,45 @@ describe("ADR-0076 Gap-5 — refusal short-circuits Phase 3 deferred dispatch", 
     expect(dispatchCalls).toEqual(["t1"])
   })
 
+  test("ALBB-03: content_filtered (unsafe) tool_use_end ⇒ deferred MUTATING dispatch NEVER fires", async () => {
+    // The default-path defect: an OpenAI `content_filter` stop maps to
+    // `content_filtered` on the wire. Pre-fix `streaming-dispatch.ts` gated the
+    // Phase-3 deferred (barrier-blocked, MUTATING) drain on the EXACT literal
+    // `stopReason !== "refusal"`, so `content_filtered` fell through and DRAINED
+    // the deferred `bash` — a real side effect on a safety-refused turn. Routing
+    // the gate through `isRefusalStopReason` (folds content_filtered) makes it
+    // short-circuit exactly like `refusal`. Reverting the seam swap re-reds this.
+    const { dispatchCalls, isConcurrencySafe, dispatch } = makeHarness([]) // bash = unsafe
+    const events: StreamEvent[] = [
+      ...toolUse("t1", "bash", { command: "echo malicious" }),
+      { type: "text_delta", delta: "Blocked by content filter." },
+      { type: "message_stop", stop_reason: "content_filtered" },
+    ]
+    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch })
+    expect(res.kind).toBe("assembled")
+    if (res.kind !== "assembled") return
+    expect(res.stopReason).toBe("content_filtered")
+    // The critical invariant — the deferred MUTATING tool was NEVER dispatched.
+    expect(dispatchCalls).toEqual([])
+    expect(res.resultBlocks).toEqual([])
+  })
+
+  test("ALBB-03 control: content_filtered guard is reason-SCOPED — a tool_use stop STILL drains", async () => {
+    // NI-3 mirror: proves the content_filtered short-circuit did NOT become a
+    // blanket skip. A non-refusal-class stop (`tool_use`) with a deferred unsafe
+    // slot MUST still drain Phase 3 — the guard folds ONLY refusal-class reasons.
+    const { dispatchCalls, isConcurrencySafe, dispatch } = makeHarness([])
+    const events: StreamEvent[] = [
+      ...toolUse("t1", "bash", { command: "ls" }),
+      { type: "message_stop", stop_reason: "tool_use" },
+    ]
+    const res = await streamingTurn({ events: gen(events), isConcurrencySafe, dispatch })
+    expect(res.kind).toBe("assembled")
+    if (res.kind !== "assembled") return
+    expect(dispatchCalls).toEqual(["t1"])
+    expect(res.resultBlocks).toHaveLength(1)
+  })
+
   test("T02 M1: concurrency-safe but MUTATING tool is NOT early-started ⇒ refusal does not execute it", async () => {
     // The exact L1 M1 hole: `session_config`/`automation_update` are
     // `isConcurrencySafe:true` but `isReadOnly:false`. Pre-fix they early-start

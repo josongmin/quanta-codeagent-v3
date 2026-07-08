@@ -1,7 +1,7 @@
 import type { ToolUseBlock } from "@/llm"
 import { type RedactionHit, redactSecrets, type SensitivityClass } from "@/security"
 import { compositePiiScanner } from "@/security/pii-redaction"
-import { runtimeConfig, sliceTailWholeChars } from "@/shared"
+import { errMessage, logger, runtimeConfig, sliceTailWholeChars } from "@/shared"
 import { deriveProvenance, type ToolContext, type ToolResult } from "@/tool"
 import { composeToolResultContent } from "@/tool/image/compose"
 import { wireCheckpointedEffectChannel } from "../checkpoint-wiring"
@@ -79,6 +79,11 @@ const evidenceOf = (
  * Never throws — a tool that throws inside `classifySource` is caught and
  * treated as `null` (Layer-2 only) so a tool-side bug cannot break dispatch.
  */
+/** ALBB-09 site 5 — tools whose `classifySource` has already thrown once, so
+ *  the observability warn fires ONCE per tool (a buggy classifier called every
+ *  dispatch would otherwise spam the log). Never affects dispatch behavior. */
+const classifierWarned = new Set<string>()
+
 const deriveSourceClass = (
   call: ToolUseBlock,
   config: AgentConfig,
@@ -88,8 +93,16 @@ const deriveSourceClass = (
   let cls: SensitivityClass | null
   try {
     cls = tool.classifySource(call.input)
-  } catch {
-    // Tool-side bug must not break dispatch — treat as no source class.
+  } catch (e) {
+    // Tool-side bug must not break dispatch — treat as no source class (fail-safe,
+    // behavior UNCHANGED). But no longer swallow SILENTLY: surface the classifier
+    // throw ONCE per tool so a redaction/sensitivity-classification drop is
+    // visible instead of vanishing. This is pure observability — the `return null`
+    // fail-safe below is preserved.
+    if (!classifierWarned.has(call.name)) {
+      classifierWarned.add(call.name)
+      logger.warn(`dispatch.classifySource: tool "${call.name}" threw: ${errMessage(e)}`)
+    }
     return null
   }
   if (cls === null) return null

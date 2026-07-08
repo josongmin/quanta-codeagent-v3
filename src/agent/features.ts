@@ -208,6 +208,17 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   const subagent = buildSubagentBlock(config)
   if (subagent !== undefined) extraTools.push(...subagent.extraTools)
 
+  // ALBB-12 claim 1 — SHARE the block's registry (R1) BY CONSTRUCTION. The
+  // introspect builder (`buildSubagentIntrospectBlock`, run from the
+  // SESSION_FEATURE_BLOCKS loop below over this SAME `config`) reads
+  // `config.subagent.taskRegistry`; write R1 back onto the shared `config.subagent`
+  // object so `list_agents`/`followup_task` observe the SAME tasks the agent/6-tool
+  // spawn path minted — no host wiring required. Byte-identical when subagent is
+  // unconfigured (subagent undefined) or already pre-seeded (same instance).
+  if (subagent?.taskRegistry !== undefined && config.subagent !== undefined) {
+    config.subagent.taskRegistry = subagent.taskRegistry
+  }
+
   // --- Contiguous default-OFF pure-tool blocks (data-driven, order-preserved) --
   for (const block of SESSION_FEATURE_BLOCKS) extraTools.push(...block(config))
 

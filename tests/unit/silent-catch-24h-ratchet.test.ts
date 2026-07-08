@@ -54,8 +54,14 @@ const PINNED_LABELS: ReadonlyArray<{ file: string; labels: readonly string[] }> 
     labels: ["compaction.postCompactEmit", "compaction.objectiveSetNextActions"],
   },
   {
+    // ALBB-09 (jul-9) — the LOOP surface (shim + `src/agent/loop/` slice). The
+    // `emitCompactionEvent` bare `} catch {}` in `compaction-wire.ts` was
+    // migrated to a bound `} catch (e) { logger.warn(\`compaction-wire.
+    // emitCompactionEvent: ...\`) }` (parity with `compaction.postCompactEmit`
+    // and the install-side `codex-r2-wire.compactionEventEmit`). Pinned here so a
+    // regression back to the silent swallow drops the label ⇒ RED.
     file: "src/agent/loop.ts",
-    labels: ["loop.objectiveSetNextActions"],
+    labels: ["loop.objectiveSetNextActions", "compaction-wire.emitCompactionEvent"],
   },
   {
     file: "src/agent/observability-wire/wire.ts",
@@ -82,6 +88,16 @@ const BARE_CATCH_BASELINE: Readonly<Record<string, number>> = {
   // `} catch (e) { config.stream.emit({type:"error", ...}) }` so a throwing
   // context-events / @mention provider is observable instead of silently
   // indistinguishable from "nothing to inject". Ratchet tightened 6 → 4.
+  //
+  // jul-9 (ALBB-09): Wave A added ONE new loop-surface bare-catch
+  // (`compaction-wire.defaultResetEffortClassifier`, advisory reset — its own
+  // ticket's owned site) which transiently lifted the count to 5. THIS ticket
+  // migrates the `emitCompactionEvent` bare `} catch {}` to a bound
+  // `logger.warn(\`compaction-wire.emitCompactionEvent: ...\`)`, bringing the
+  // count back DOWN to the pinned floor of 4. Net: the floor is unchanged (a
+  // one-in / one-out swap) but the `emitCompactionEvent` swallow is removed —
+  // reverting THIS fix re-lifts the count to 5 ⇒ ratchet RED, and drops the
+  // pinned `compaction-wire.emitCompactionEvent` label ⇒ label test RED.
   "src/agent/loop.ts": 4,
   "src/agent/observability-wire/wire.ts": 1,
 }

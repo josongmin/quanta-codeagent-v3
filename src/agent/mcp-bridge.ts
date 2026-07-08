@@ -731,6 +731,15 @@ export interface LoadMcpToolsOpts {
    *  Absent / proxy OFF ⇒ no keys injected (byte-identical). The HTTP-SSE carrier
    *  is unaffected. */
   proxyEnv?: ProxyEnvInput
+  /** ALBB-09 (jul-9) — optional load-failure sink. Invoked in BOTH catch sites
+   *  (single-client + supervised) when a CONFIGURED server's `start()` /
+   *  `listTools()` throws, alongside the existing `logger.warn`. A composition
+   *  root bridges it to `session.stream.emit({type:"error", ...})` so a server
+   *  that FAILS to start becomes an observable non-fatal event on the surface —
+   *  today its tools silently vanish, indistinguishable from an un-configured
+   *  server. Absent ⇒ byte-identical (warn-only, as today). The sink itself must
+   *  not throw; it is invoked best-effort inside the existing catch. */
+  onServerLoadError?: (info: { server: string; error: unknown }) => void
 }
 
 /** §19.1 — the bind opts for ONE server: combine the global knob flag with this
@@ -755,10 +764,27 @@ const bindOptsFor = (
  *  not the policy — re-applies the SAME `{ negotiator, samplingHandler,
  *  rootsProvider }` to every (re)connected client. The bridge passes the deps
  *  straight through (pure pass-through). */
+/** ALBB-09 — best-effort invoke of the optional load-error sink. Wrapped so a
+ *  hostile sink can never escape the caller's catch (the load must still degrade
+ *  clean to `null`). Absent sink ⇒ no-op (byte-identical). */
+const reportServerLoadError = (
+  onServerLoadError: ((info: { server: string; error: unknown }) => void) | undefined,
+  server: string,
+  error: unknown,
+): void => {
+  if (onServerLoadError === undefined) return
+  try {
+    onServerLoadError({ server, error })
+  } catch (e) {
+    logger.warn(`mcp: onServerLoadError sink threw for "${server}": ${errMessage(e)}`)
+  }
+}
+
 const loadSupervised = async (
   config: McpServerConfig,
   deps: SupervisorDeps,
   annotationsHonored: boolean | undefined,
+  onServerLoadError: ((info: { server: string; error: unknown }) => void) | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const sup = await McpReconnectSupervisor.create(config, deps)
   const bindOpts = bindOptsFor(config, annotationsHonored)
@@ -783,6 +809,7 @@ const loadSupervised = async (
     return { tools, client: sup, ...(resources !== undefined ? { resources } : {}) }
   } catch (e) {
     logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
+    reportServerLoadError(onServerLoadError, config.name, e)
     await sup.stop().catch(() => undefined)
     return null
   }
@@ -798,6 +825,7 @@ const loadSingle = async (
   oauthProvider: McpOAuthProviderPort | undefined,
   annotationsHonored: boolean | undefined,
   proxyEnv: ProxyEnvInput | undefined,
+  onServerLoadError: ((info: { server: string; error: unknown }) => void) | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
@@ -831,6 +859,7 @@ const loadSingle = async (
     return { tools, client, resources: client }
   } catch (e) {
     logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
+    reportServerLoadError(onServerLoadError, config.name, e)
     await client.stop().catch(() => undefined)
     return null
   }
@@ -898,7 +927,12 @@ export const loadMcpTools = async (
   for (const config of servers) {
     const loaded =
       supervisorDepsFor !== undefined
-        ? await loadSupervised(config, supervisorDepsFor(config), opts?.annotationsHonored)
+        ? await loadSupervised(
+            config,
+            supervisorDepsFor(config),
+            opts?.annotationsHonored,
+            opts?.onServerLoadError,
+          )
         : await loadSingle(
             config,
             elicitationPrompterFor,
@@ -907,6 +941,7 @@ export const loadMcpTools = async (
             opts?.oauthProvider,
             opts?.annotationsHonored,
             opts?.proxyEnv,
+            opts?.onServerLoadError,
           )
     if (loaded === null) continue
     tools.push(...loaded.tools)

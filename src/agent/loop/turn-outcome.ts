@@ -5,6 +5,7 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { emitBudgetExhaustedDecision } from "../decision-emit-phase3"
+import { captureAbortedTurn } from "../interrupted-turn"
 import {
   classifyErrorReason,
   completedCategory,
@@ -62,6 +63,11 @@ export const resolveTurnLoopOutcome = async (args: {
   readonly hookPromptPending: import("../hooks").HookPromptInject[]
 }): Promise<TurnLoopResolution> => {
   if (args.result.kind === "aborted") {
+    // ALBB-06 (path c) — a mid-turn `TurnResult.kind==="aborted"` (the branch a
+    // keystroke cancel lands on when the REPL wires no SubagentTurnGate). Capture
+    // the partial turn BEFORE finishing so `/resume` can restore it. Distinct
+    // reason for telemetry. Default-OFF: no buffer wired ⇒ no-op (byte-identical).
+    captureAbortedTurn(args.cfg, args.wm, "turn_result_abort")
     clearQueuedPlanLifecycle(args)
     return {
       kind: "finish",

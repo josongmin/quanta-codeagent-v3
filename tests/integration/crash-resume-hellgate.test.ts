@@ -5,7 +5,7 @@ import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
 import { pollConversationAction } from "@/agent/loop/control-poll"
-import { syncQueuedTurnInputs } from "@/agent/loop/turn-iteration"
+import { prepareTurnIteration, syncQueuedTurnInputs } from "@/agent/loop/turn-iteration"
 import { createConversationActionSurface } from "@/apps/cli/repl/conversation-action-surface"
 import type { Message } from "@/llm"
 import {
@@ -146,7 +146,7 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
       taskRegistry: undefined,
       tokenBaseline: undefined,
     })
-    expect(outcome).toBe("aborted")
+    expect(outcome).toBe("aborted_captured") // ALBB-06: /cancel drain self-captures
     expect(liveBuffer.has()).toBe(true)
 
     /* ---- 2. host PERSISTS the in-memory capture to the store -------------- */
@@ -259,5 +259,61 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
     const detections = await detectInterruptedSessions(list, { env: process.env })
     expect(detections.map((d) => d.sessionId)).toEqual(["late", "early"])
     expect(buildCrashResumeOffer(detections[0]!).summary).toContain("second task")
+  })
+
+  test("ALBB-06: a SIGNAL-abort (Ctrl+C) capture propagates to SessionMeta.interruptedTurn", async () => {
+    // The NEW trigger — a plain AbortController.abort() on the threaded signal —
+    // must flow all the way to the persisted snapshot, not just the /cancel verb.
+    // RED-ON-INJECTION: mutating the path (a) capture site (prepareTurnIteration
+    // signal.aborted early-return) to a no-op empties the buffer ⇒ the persisted
+    // reason below is never "signal_abort" ⇒ this assertion goes red.
+    const SESSION_ID = "sig-abort-1"
+    await seedSession(SESSION_ID)
+
+    const ac = new AbortController()
+    ac.abort()
+    const buffer = createInterruptedTurnBuffer()
+    const cfg = {
+      stream: noopStream,
+      signal: ac.signal,
+      interruptedTurnBuffer: buffer,
+    } as unknown as AgentConfig
+    const wm = fakeWm([
+      msg("user", "refactor the exporter"),
+      msg("assistant", "wrote the header stub"),
+    ])
+
+    const outcome = await prepareTurnIteration({
+      cfg,
+      wm: wm as never,
+      sessionId: SESSION_ID,
+      taskRegistry: undefined,
+      turn: 2,
+      localizePhaseState: undefined,
+      dedupGate: undefined,
+      shellSnapshotSession: undefined,
+      hookPromptPending: [],
+      tokenBaseline: undefined,
+    })
+    expect(outcome).toBe("aborted")
+    expect(buffer.has()).toBe(true)
+    expect(buffer.peek()?.reason).toBe("signal_abort")
+
+    // Persist the in-memory capture, then fresh-read it back off disk.
+    const captured = buffer.peek()!
+    await markSessionInterrupted(
+      SESSION_ID,
+      {
+        userText: captured.userText,
+        partialAssistantText: captured.partialAssistantText,
+        reason: captured.reason,
+        interruptedAt: captured.interruptedAt,
+      },
+      { env: process.env },
+    )
+    const snap = await loadSessionById(SESSION_ID)
+    expect(snap?.meta.interruptedTurn?.reason).toBe("signal_abort")
+    expect(snap?.meta.interruptedTurn?.userText).toBe("refactor the exporter")
+    expect(snap?.meta.interruptedTurn?.partialAssistantText).toBe("wrote the header stub")
   })
 })

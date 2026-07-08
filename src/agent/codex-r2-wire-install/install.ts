@@ -120,9 +120,14 @@ const buildContextEventsProducer = (
       if (store !== undefined && events.length > 0) appendAllSafe(store, events)
       return events
     } catch (e) {
-      // closure-entry NO-THROW — log + swallow.
+      // Keep the process-log warn for local attribution, then RE-THROW so the
+      // ONLY wired caller — `resolveContextEventsForTurn` (compaction-wire) —
+      // surfaces the failure as a NON-FATAL `stream.emit({type:"error"})` on the
+      // session stream (it already does; the inner swallow used to preempt it).
+      // The outer wrapper still degrades clean (returns `[]`), so the turn is
+      // byte-identical on the SUCCESS path and gains ONE error event on throw.
       logger.warn(`codex-r2-wire.contextEventsForTurn: ${errMessage(e)}`)
-      return []
+      throw e
     }
   }
 }
@@ -158,9 +163,17 @@ const buildMentionInjector = (
       }
       return buildMentionInjectionMessages(fragments)
     } catch (e) {
-      // closure-entry NO-THROW — log + swallow.
+      // Keep the process-log warn, then RE-THROW so the ONLY wired caller —
+      // `resolveMentionInjectionMessages` (context-assembler) — surfaces the
+      // failure as a NON-FATAL `stream.emit({type:"error"})` on the session
+      // stream (it already does; the inner swallow used to preempt it). The
+      // outer wrapper still degrades clean (returns `[]`), so a degraded `@file`
+      // expansion becomes ONE visible error event instead of silently vanishing.
+      // (Per-mention `@file` failures are unchanged — they flow through the
+      // `onError` sink inside `buildInjectionFragments`; this catch is the
+      // CLOSURE-ENTRY boundary, which had no stream reach.)
       logger.warn(`codex-r2-wire.mentionInjector: ${errMessage(e)}`)
-      return []
+      throw e
     }
   }
 }

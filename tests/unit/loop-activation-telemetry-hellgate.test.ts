@@ -23,7 +23,13 @@
  *   H. zero mentions           ⇒ no emit (short-circuit before counter)
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+// Namespace import of the SAME barrel the hook dynamic-imports (`await
+// import("@/agent/mention-injection")` resolves to this exact module record), so
+// a `spyOn(namespace, "parseMentions")` is visible to the hook AND is
+// `mockRestore()`-able — unlike `mock.module`, which is process-global and NOT
+// undone by restore (would leak the throwing stub into later cases / files).
+import * as mentionInjection from "@/agent/mention-injection"
 import {
   type ActivationHookConfigLike,
   resolvePluginActivationForTurn,
@@ -116,6 +122,37 @@ describe("ADR-0360 — activation hook telemetry", () => {
     // Success-only counters NOT emitted on error path.
     expect(countOf(log, "codex_r2.activation.sum_latency_ms")).toBe(0)
     expect(countOf(log, "codex_r2.activation.resolved_skills_count")).toBe(0)
+  })
+
+  test("D2. parseMentions throws ⇒ errors += 1 AND calls += 1 (parse-catch, previously UNCOVERED)", async () => {
+    // ALBB-09 site 3: the `parseMentions` catch runs BEFORE the up-front
+    // `activation.calls` counter, so a parse/import failure was counted in
+    // NEITHER `calls` NOR `errors` — indistinguishable from "no mentions". Inject
+    // a throwing `parseMentions` via a RESTORABLE namespace spy (the hook
+    // dynamic-imports this exact barrel record) and assert the catch now bumps
+    // BOTH counters (ADR-0360 side-channel, NOT a stream). `mockRestore()` in the
+    // finally undoes it hermetically — no cross-test / cross-file leak.
+    const spy = spyOn(mentionInjection, "parseMentions").mockImplementation(() => {
+      throw new Error("parse-boom")
+    })
+    try {
+      const { emitter, log } = mkEmitter()
+      const cfg: ActivationHookConfigLike = {
+        activatePlugins: async () => stubActivation([]),
+        metricsEmitter: emitter,
+      }
+      const out = await resolvePluginActivationForTurn(cfg, "@plugin trigger parse", "tD2")
+      // Still degrades clean (EMPTY) — the turn is unaffected.
+      expect(out.resolvedSkills).toEqual([])
+      // Both counters bump so error_rate = errors/calls stays computable for
+      // parse failures too.
+      expect(sumOf(log, "codex_r2.activation.errors")).toBe(1)
+      expect(sumOf(log, "codex_r2.activation.calls")).toBe(1)
+      // The activator never ran (parse threw first) ⇒ no success-only counters.
+      expect(countOf(log, "codex_r2.activation.resolved_skills_count")).toBe(0)
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   test("E. emitter.counter throws ⇒ swallowed (NO-THROW invariant)", async () => {

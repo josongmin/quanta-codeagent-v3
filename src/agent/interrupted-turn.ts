@@ -1,8 +1,12 @@
 /**
  * §11.5 — interrupted-turn capture + restore (Claude's `INTERRUPTED_TURN`
- * pattern). When `interrupt` mode (or `/cancel`) aborts a turn mid-flight, the
- * partial work is CAPTURED into a session-scoped buffer so a later `resume` can
- * restore it — the agent picks up the interrupted task instead of losing it.
+ * pattern). When ANY abort exit fires mid-flight — the conversation-action
+ * `/cancel` verb OR a plain `AbortController.abort()` on the threaded signal
+ * (the Ctrl+C / Esc-Esc keystroke cancel the REPL actually hits), at every one
+ * of the loop's abort exits — the partial work is CAPTURED into a session-scoped
+ * buffer so a later `resume` can restore it — the agent picks up the interrupted
+ * task instead of losing it. (ALBB-06 broadened this from the single `/cancel`
+ * site to all abort exits via the shared {@link captureAbortedTurn} helper.)
  *
  * The buffer's PRESENCE is the session-level "interrupted" signal (a single
  * slot, last-interrupt-wins). This deliberately sidesteps `steering.ts`'s
@@ -16,6 +20,14 @@
 
 import type { Message } from "@/llm"
 
+/** A single in-flight tool_use summary — ids/names ONLY. ALBB-06 deliberately
+ *  drops `input` (the tool args): a resume note only needs to tell the model
+ *  WHICH call was in flight, and args can carry secrets / bloat the payload. */
+export interface InFlightToolRef {
+  readonly id: string
+  readonly name: string
+}
+
 /** One captured interrupted turn. */
 export interface InterruptedTurn {
   /** The user prompt that started the interrupted turn (last user message). */
@@ -26,6 +38,12 @@ export interface InterruptedTurn {
   readonly reason: string
   /** Injected wall-clock ms at interrupt time. */
   readonly interruptedAt: number
+  /** ALBB-06 (Claude Code / Codex baseline) — the tool_use blocks that were
+   *  in flight on the last assistant message when the turn was interrupted, so
+   *  `resume` can RE-ANCHOR a mid-tool-call turn instead of silently dropping or
+   *  double-issuing it. Ids/names ONLY — never the args (no secret leak, no
+   *  bloat). Absent/empty ⇒ no tool was in flight (byte-identical text path). */
+  readonly inFlightTools?: readonly InFlightToolRef[]
 }
 
 /** Concatenate the `text` of a message's text blocks (ignores tool/image/etc.). */
@@ -34,6 +52,22 @@ const textOf = (m: Message): string =>
     .filter((b): b is { type: "text"; text: string } => b.type === "text")
     .map((b) => b.text)
     .join("")
+
+/** Extract the in-flight `tool_use` refs (id + name ONLY — no `input`/args) from
+ *  the LAST assistant message in the turn. Empty when the turn ended on text or
+ *  a non-assistant message. Pure; NEVER reads the tool args (secret-safe). */
+const extractInFlightTools = (messages: ReadonlyArray<Message>): InFlightToolRef[] => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m === undefined || m.role !== "assistant") continue
+    const tools: InFlightToolRef[] = []
+    for (const b of m.content) {
+      if (b.type === "tool_use") tools.push({ id: b.id, name: b.name })
+    }
+    return tools
+  }
+  return []
+}
 
 /**
  * Capture the interrupted turn from the working-memory message list. The
@@ -72,7 +106,16 @@ export const captureInterruptedTurn = (
       if (t.length > 0) partial.push(t)
     }
   }
-  return { userText, partialAssistantText: partial.join("\n"), reason, interruptedAt: now }
+  const inFlightTools = extractInFlightTools(messages)
+  return {
+    userText,
+    partialAssistantText: partial.join("\n"),
+    reason,
+    interruptedAt: now,
+    // Spread-by-presence: omit the field entirely when no tool was in flight so
+    // a text-only interrupted turn is byte-identical to the pre-ALBB-06 shape.
+    ...(inFlightTools.length > 0 ? { inFlightTools } : {}),
+  }
 }
 
 /** Session-scoped single-slot buffer holding the most-recent interrupted turn.
@@ -109,13 +152,48 @@ export const createInterruptedTurnBuffer = (): InterruptedTurnBuffer => {
   }
 }
 
+/** Render the "you had a tool call in flight" re-anchor note, or "" when none.
+ *  Ids/names ONLY (from {@link InterruptedTurn.inFlightTools}) — no args. */
+const inFlightToolNote = (turn: InterruptedTurn): string => {
+  const tools = turn.inFlightTools
+  if (tools === undefined || tools.length === 0) return ""
+  const list = tools.map((t) => `${t.name} (id ${t.id})`).join(", ")
+  return (
+    `\n\nYou had started a tool call that did not complete: ${list}. ` +
+    "Check whether its effect already landed; complete or re-issue it as needed " +
+    "rather than silently dropping it."
+  )
+}
+
 /** Build the user-facing message that re-injects an interrupted turn so the
  *  agent RESUMES it (frames it as a continuation, not a fresh task; appends the
- *  partial progress when there is any). Pure. */
+ *  partial progress when there is any, plus an in-flight tool re-anchor note when
+ *  a tool call was cut off). Pure. */
 export const buildResumeMessage = (turn: InterruptedTurn): string => {
   const head =
     `Resume the previously interrupted task (it was interrupted: ${turn.reason}). ` +
     `The task was:\n${turn.userText}`
-  if (turn.partialAssistantText.trim().length === 0) return head
-  return `${head}\n\nYour partial progress before the interruption:\n${turn.partialAssistantText}`
+  const withPartial =
+    turn.partialAssistantText.trim().length === 0
+      ? head
+      : `${head}\n\nYour partial progress before the interruption:\n${turn.partialAssistantText}`
+  return `${withPartial}${inFlightToolNote(turn)}`
+}
+
+/** ALBB-06 — the SINGLE shared abort-capture path. Mirrors the historical
+ *  `turn-iteration.ts:81` call shape EXACTLY (`cfg.interruptedTurnBuffer?.capture(
+ *  captureInterruptedTurn(wm.snapshot(), reason, Date.now()))`) so `/cancel` and
+ *  the two signal-driven abort exits share ONE code path — no logic drift.
+ *
+ *  Default-OFF byte-identical: no `interruptedTurnBuffer` wired ⇒ `?.capture` is
+ *  a no-op (no allocation beyond the snapshot the caller already has). NEVER
+ *  throws (capture is pure; the buffer's `capture` is a plain slot write). The
+ *  `cfg`/`wm` are STRUCTURAL (not `AgentConfig`/`WorkingMemory`) so this leaf
+ *  module stays decoupled from `@/agent` types and the `@/memory` slice. */
+export const captureAbortedTurn = (
+  cfg: { readonly interruptedTurnBuffer?: InterruptedTurnBuffer },
+  wm: { snapshot(): ReadonlyArray<Message> },
+  reason: string,
+): void => {
+  cfg.interruptedTurnBuffer?.capture(captureInterruptedTurn(wm.snapshot(), reason, Date.now()))
 }

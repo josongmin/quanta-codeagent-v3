@@ -28,7 +28,13 @@ export interface RunHooks {
   onDone?(o: AgentOutcome): void
 }
 
-export interface AgentRun extends AsyncIterable<AgentEvent>, PromiseLike<AgentOutcome> {}
+export interface AgentRun extends AsyncIterable<AgentEvent>, PromiseLike<AgentOutcome> {
+  /** ALBB-12 claim 3 — count of events the bounded buffer DROPPED (drop-oldest
+   *  overflow). `> 0` ⇒ an iterate-only consumer whose buffer overflowed saw a
+   *  LOSSY stream (partial history). Sync `hooks`/`onEvent` never drop; size the
+   *  buffer to the run or consume via hooks for lossless streaming. */
+  readonly droppedEvents: number
+}
 
 export const DEFAULT_EVENT_BUFFER = 1024
 
@@ -152,6 +158,11 @@ export const makeAgentRun = (
 
   return {
     [Symbol.asyncIterator]: () => channel[Symbol.asyncIterator](),
+    // ALBB-12 claim 3 — delegate to the live channel counter (a getter so a
+    // consumer reading it AFTER the run settles sees the final drop count).
+    get droppedEvents() {
+      return channel.droppedEvents
+    },
     // biome-ignore lint/suspicious/noThenProperty: AgentRun is intentionally a PromiseLike thenable so `await run()` resolves the outcome (Phase 3.2 dual iterable/promise shape).
     then: (onF, onR) => outcomePromise.then(onF, onR),
   }
