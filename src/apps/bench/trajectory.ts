@@ -227,11 +227,13 @@ const fmtTs = (d: Date): string => {
 const resolveRecordPaths = (
   basePath: string,
   instanceId: string | undefined,
+  attempt?: number,
 ): { jsonl: string; meta: string | undefined } => {
   if (!instanceId) return { jsonl: basePath, meta: undefined }
   const safe = instanceId.replace(/[^A-Za-z0-9._-]/g, "_")
   const ts = fmtTs(new Date())
-  const base = `${dirname(basePath)}/trajectories/${ts}-${safe}`
+  const sfx = attempt !== undefined ? `-a${attempt}` : ""
+  const base = `${dirname(basePath)}/trajectories/${ts}-${safe}${sfx}`
   return { jsonl: `${base}.jsonl`, meta: `${base}.meta.json` }
 }
 
@@ -267,7 +269,7 @@ export const applyBenchTrajectoryMode = (
 ): LLMPort => {
   if (mode.kind === "off") return llm
   if (mode.kind === "record") {
-    const { jsonl: path, meta: metaPath } = resolveRecordPaths(mode.path, ctx?.instanceId)
+    const { jsonl: path, meta: metaPath } = resolveRecordPaths(mode.path, ctx?.instanceId, ctx?.attempt)
     if (metaPath !== undefined) {
       const meta = buildRunMeta(identity, ctx)
       // Fire-and-forget: meta write failure must never crash the bench run.

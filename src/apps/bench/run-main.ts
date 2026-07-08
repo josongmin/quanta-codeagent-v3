@@ -197,7 +197,7 @@ const resolveInstance = async (
   base: Omit<RunCfg, never>,
   n: number,
   obs?: ObserveCtx,
-  freshLlm?: () => LLMPort,
+  freshLlm?: (attempt?: number) => LLMPort,
 ): Promise<InstanceResult> => {
   // Fork-experiment seam (DEFAULT-OFF: QUANTA_FORK_EXPERIMENT unset ⇒ [] ⇒
   // byte-identical). ≥2 names ⇒ branch fan-out; exactly 1 ⇒ single run with that
@@ -208,25 +208,30 @@ const resolveInstance = async (
   }
   const only = experiments[0]
   // When a freshLlm factory is provided (e.g. instance-bound trajectory port),
-  // swap base.llm so every runInstance call uses the bound port.
-  const boundBase: Omit<RunCfg, never> =
-    freshLlm !== undefined ? { ...base, llm: freshLlm() } : base
+  // swap base.llm so every runInstance call uses the bound port. For n=1,
+  // no attempt suffix (attempt=undefined). For n>1, each makeAttempt passes
+  // its own 0-based index so trajectory files get a -aN suffix.
   const effBase: Omit<RunCfg, never> =
-    only !== undefined ? { ...boundBase, turnContextMutator: only.mutator } : boundBase
+    only !== undefined ? { ...base, turnContextMutator: only.mutator } : base
 
-  if (n <= 1) return runInstance(instance, withObserve(effBase, attemptObs(obs, 0)))
+  if (n <= 1) {
+    const cfg = freshLlm !== undefined ? { ...effBase, llm: freshLlm() } : effBase
+    return runInstance(instance, withObserve(cfg, attemptObs(obs, 0)))
+  }
 
   let attempt = 0
   const out = await sampleBestOfN<InstanceResult>({
     n,
-    makeAttempt: () =>
-      runInstance(
+    makeAttempt: () => {
+      const a = attempt++
+      return runInstance(
         instance,
         withObserve(
-          freshLlm !== undefined ? { ...effBase, llm: freshLlm() } : effBase,
-          attemptObs(obs, attempt++),
+          freshLlm !== undefined ? { ...effBase, llm: freshLlm(a) } : effBase,
+          attemptObs(obs, a),
         ),
-      ),
+      )
+    },
     score: (r) => (r.passed ? 1 : 0),
   })
 
@@ -310,9 +315,10 @@ const runSwebenchTask = async (
   // Bind instanceId + runId into freshLlm so every trajectory turn recorded
   // for this task carries its instance/run label in metadata. The ctx is
   // metadata-only — does not affect the cassette hash or replay semantics.
-  const instanceFreshLlm = (): LLMPort =>
+  const instanceFreshLlm = (attempt?: number): LLMPort =>
     deps.freshLlm({
       instanceId: task.instanceId,
+      ...(attempt !== undefined ? { attempt } : {}),
       ...(deps.obs?.runId !== undefined ? { runId: deps.obs.runId } : {}),
     })
   try {
@@ -906,7 +912,7 @@ const runCustomCorpusMode = async (
   }
   const { results } = await runBatch({
     instances,
-    runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs, resolved.freshLlm),
+    runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs, () => resolved.freshLlm()),
     concurrency: resolveConcurrency(),
   })
   // D-fix: write `--predictions` / `--report` from BOTH bench modes.

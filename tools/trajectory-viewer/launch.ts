@@ -34,6 +34,19 @@ if (arg) {
   }
   trajectoryPath = p
 } else {
+  // No arg: prefer trajectories/ dir (per-session files) over the global flat file
+  const trajSubdir = join(dir, "../../trajectories")
+  if (existsSync(trajSubdir) && require("fs").statSync(trajSubdir).isDirectory()) {
+    const files = readdirSync(trajSubdir).filter(f => f.endsWith(".jsonl")).sort()
+    if (files.length > 0) {
+      const merged = files.map(f => readFileSync(join(trajSubdir, f), "utf8")).join("\n")
+      const metas = collectMetas(trajSubdir)
+      writeDataJs(join(dir, "data.js"), merged, metas)
+      console.log(`Loaded ${files.length} session(s) from trajectories/`)
+      open(dir)
+      process.exit(0)
+    }
+  }
   trajectoryPath = join(dir, "../../bench-trajectory.jsonl")
 }
 
