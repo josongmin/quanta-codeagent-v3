@@ -127,5 +127,19 @@ export const runConvergeProtocol = async <V extends ConvergeVerdict, C>(
     carry = step.carry
     rounds += 1
   }
-  return { converged: proto.judge().green, rounds, turnsConsumed, carry, reason }
+  // ALBB-21 — derive BOTH `converged` and `reason` from the ONE terminal judge.
+  // A RED→green repair on the LAST allowed round exits via the `while` bound
+  // (`rounds < maxRounds` false) BEFORE the in-loop `verdict.green` break can
+  // fire, so the loop-body `reason` is stale ("rounds-exhausted") even though
+  // the final judge is green. Reading both from `finalGreen` makes it impossible
+  // to telemetry a converged run as "out of budget"; the not-green paths keep
+  // the loop's honest `watchdog`/`no-signal`/`rounds-exhausted` reason.
+  const finalGreen = proto.judge().green
+  return {
+    converged: finalGreen,
+    rounds,
+    turnsConsumed,
+    carry,
+    reason: finalGreen ? "green" : reason,
+  }
 }

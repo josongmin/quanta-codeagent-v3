@@ -157,6 +157,7 @@ export const AGENT_EVENT_TYPES = [
   "knobs_applied",
   "progress_update",
   "ratelimit_snapshot",
+  "budget_breach",
   "done",
 ] as const
 
@@ -564,6 +565,25 @@ export type AgentEvent =
       tokensRemaining?: number
       tokensResetMs?: number
       observedAt: number
+    }
+  // ALBB-21 — advisory soft/hard budget-cap crossing (Claude Code / Codex cost-
+  // warning UX). Emitted by the L4 ledger sink in `emitUsage` when a configured
+  // `BudgetPolicy` limit is crossed (one event per crossed `BudgetBreach`). This
+  // is a NON-FATAL ADVISORY: it NEVER stops the run — the HARD *stop* still fires
+  // via `ledgerHardBreachCondition` at the turn epilogue; this event is pure
+  // observability (a rendered-but-non-mutating notice, the SAME class as
+  // `ratelimit_snapshot` / `output_progress`: the recorder SKIPS it, the stdout
+  // adapter renders a one-line banner). `severity` is the soft/hard axis and
+  // `scope` is the sessionId (`session-*`) or day key (`daily-*`); `observed` +
+  // `limit` are the USD cumulative-at-crossing and the configured cap, derived
+  // VERBATIM from the typed `BudgetBreach` — no invented threshold. Default-OFF:
+  // no `budgetLedger` ⇒ no breach ⇒ no emit, byte-identical (NullStream swallows).
+  | {
+      type: "budget_breach"
+      severity: "soft" | "hard"
+      scope: string
+      observed: number
+      limit: number
     }
   | { type: "done"; reason: string; turns: number }
 

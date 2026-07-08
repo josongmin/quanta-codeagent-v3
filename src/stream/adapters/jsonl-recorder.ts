@@ -117,6 +117,12 @@ export class JsonlRecorder implements StreamPort {
     // its actions, not the streamed reasoning summary. Kept out of
     // `RecordedEventType` below so KIND_MAP / dataOf never see it.
     if (event.type === "assistant_thinking") return
+    // ALBB-21 — `budget_breach` is a transient, NON-accounting advisory (a
+    // soft/hard cost-cap crossing banner), the SAME class as `ratelimit_snapshot`
+    // / `output_progress`: it carries no durable trajectory value (the cost totals
+    // ARE recorded via the `usage`/`llm_usage` line), so the recorder SKIPS it —
+    // kept out of `RecordedEventType` below so KIND_MAP / dataOf never see it.
+    if (event.type === "budget_breach") return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -295,6 +301,10 @@ type RecordedEventType = Exclude<
   // jun-11 (#11) — streamed reasoning (DIM render-only); the answer is recorded
   // via `assistant_text`, so the reasoning summary carries no separate payload.
   | "assistant_thinking"
+  // ALBB-21 — `budget_breach` is a transient advisory (soft/hard cost-cap
+  // crossing banner); the cost totals ARE recorded via `usage`/`llm_usage`, so
+  // this notice carries no separate durable payload (skipped in `emit` above).
+  | "budget_breach"
 >
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 

@@ -56,7 +56,15 @@ import type { Tool, ToolContext } from "@/tool"
 import type { EffectChannel, ToolRequest, ToolResultEnvelope } from "./effect-channel"
 
 /** Closed enum of trigger modes; expanding is an audit-time concern (a new
- *  arm becomes a compile error at every exhaustive switch). */
+ *  arm becomes a compile error at every exhaustive switch).
+ *
+ *  ALBB-21 — the `"per-turn"` arm was DELETED (measure-first wire-or-delete):
+ *  `shouldAnchorAfterTurn`'s live branch had ZERO production callers (no
+ *  turn-epilogue site ever invoked it), so selecting it produced NO anchors —
+ *  a wired-but-dead live path. Rather than ship it blind we removed the arm.
+ *  The `shouldAnchorAfterTurn` METHOD survives (the granular wrapper still
+ *  delegates it for the remaining grains) but now no configured mode selects a
+ *  turn-epilogue anchor, so it is always `false`. */
 export type CheckpointTriggerMode =
   /** No auto-anchor (default). Byte-identical with pre-ADR-0121 behaviour —
    *  every predicate short-circuits to `false` WITHOUT touching the port. */
@@ -69,10 +77,6 @@ export type CheckpointTriggerMode =
    *  Finest grain, highest snapshot pressure; suitable for short turns where
    *  every tool boundary is a meaningful recovery point. */
   | "per-mutating"
-  /** Anchor ONCE at the end of every turn, dedup per (workspace, turn) —
-   *  Codex pattern. Coarsest grain; combines well with verify-loop driven
-   *  workflows where the per-turn boundary IS the recovery boundary. */
-  | "per-turn"
 
 /** Pluggable predicate: given a tool + its call, is this destructive enough
  *  to anchor before? PURE: no I/O, no allocation beyond the boolean result.
@@ -189,15 +193,17 @@ export const defaultCheckpointPolicy = (cfg: CheckpointPolicyConfig): Checkpoint
         if (typeof turnId !== "string" || turnId.length === 0) return true
         return !anchored.has(keyOf({ workspace: ctx.cwd, turnId }))
       }
-      // mode === "per-turn" never anchors BEFORE a tool call — it only
-      // anchors AFTER a turn completes.
+      // Neither pre-anchoring mode matched a destructive call ⇒ no anchor.
       return false
     },
 
-    async shouldAnchorAfterTurn(turnId, workspace) {
-      if (cfg.mode !== "per-turn") return false
-      if (typeof turnId !== "string" || turnId.length === 0) return false
-      return !anchored.has(keyOf({ workspace, turnId }))
+    // ALBB-21 — turn-epilogue anchoring was DELETED (the `"per-turn"` trigger
+    // mode is gone; it had zero production callers). No configured mode selects
+    // a turn-epilogue anchor, so this always returns false. The method is kept
+    // (the granular wrapper still delegates it for the remaining grains — its
+    // tool-grain override contract is what the surviving delegation tests pin).
+    async shouldAnchorAfterTurn(_turnId, _workspace) {
+      return false
     },
 
     recordAnchored(key) {

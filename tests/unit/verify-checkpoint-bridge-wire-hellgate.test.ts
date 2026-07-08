@@ -12,15 +12,19 @@
  * with a spied `markVerified`).
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { buildGuardChain, createVerifyGuard, type TurnGuardContext } from "@/agent/guards"
 import type { AssembledMessage, RecoveryAction } from "@/agent/recovery"
 import { createToolChoiceTurnState } from "@/agent/tool-choice"
 import type { AgentConfig } from "@/agent/types"
-import type { VerifyCheckpointBridge } from "@/agent/verify-checkpoint-bridge"
+import {
+  defaultVerifyCheckpointBridge,
+  type VerifyCheckpointBridge,
+} from "@/agent/verify-checkpoint-bridge"
 import { createVerifyGuardState } from "@/agent/verify-guard"
 import type { Message } from "@/llm"
 import { createWorkingMemory } from "@/memory"
+import { logger } from "@/shared"
 import type { ShadowOdb } from "@/storage/shadow-odb"
 
 const textMessage = (text: string): AssembledMessage => ({
@@ -163,6 +167,43 @@ describe("verify-checkpoint-bridge wiring — hellgate", () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(markVerifiedCalls).toEqual(["/abs/workspace/B"])
+  })
+
+  test("(3b) ALBB-21: markVerified throw ⇒ still no throw AND one logger.debug breadcrumb", async () => {
+    // The empty catch used to swallow SILENTLY: a `markVerified` failure left
+    // the verified anchor un-advanced with no greppable trace of WHY. The fix
+    // keeps the no-throw contract but logs ONE `logger.debug` line inside the
+    // catch. Direct bridge test (the catch lives in `defaultVerifyCheckpointBridge`)
+    // so the microtask timing is deterministic and the spy is unambiguous.
+    const { odb, markVerifiedCalls } = makeOdbSpy({ throwOnMark: true })
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {})
+    try {
+      const bridge = defaultVerifyCheckpointBridge(odb)
+      let threw: unknown = null
+      // The bridge itself is no-throw even on a rejecting markVerified.
+      await bridge.onVerifySuccess("/abs/workspace/B2").catch((e) => {
+        threw = e
+      })
+      expect(threw).toBeNull()
+      expect(markVerifiedCalls).toEqual(["/abs/workspace/B2"])
+      expect(debugSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      debugSpy.mockRestore()
+    }
+  })
+
+  test("(3c) ALBB-21: markVerified SUCCEEDS ⇒ NO logger.debug breadcrumb (only the failure logs)", async () => {
+    // Red-on-injection guard: a blanket `logger.debug` on every call (not just
+    // the catch) would make the breadcrumb meaningless. The happy path must be
+    // silent.
+    const { odb } = makeOdbSpy() // markVerified resolves
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {})
+    try {
+      await defaultVerifyCheckpointBridge(odb).onVerifySuccess("/abs/workspace/B3")
+      expect(debugSpy).toHaveBeenCalledTimes(0)
+    } finally {
+      debugSpy.mockRestore()
+    }
   })
 
   test("(4) verify FAILS ⇒ bridge.onVerifySuccess NOT called (only pass triggers)", async () => {

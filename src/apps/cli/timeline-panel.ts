@@ -146,6 +146,9 @@ export const TIMELINE_FALLBACK_AGENT_EVENT_TYPES = [
   "knobs_applied",
   "progress_update",
   "ratelimit_snapshot",
+  // ALBB-21 — advisory budget-cap crossing; rendered via the generic fallback
+  // row (`<type>`), the same posture as `ratelimit_snapshot` (non-mutating notice).
+  "budget_breach",
 ] as const satisfies readonly AgentEventType[]
 
 /** Minimum number of scroll-region rows we MUST leave for stream output.

@@ -2,10 +2,10 @@
  * ADR-0203 — `GranularCheckpointPolicy` default implementation.
  *
  * Composes the ADR-0121 `CheckpointPolicy` with a new GRANULARITY axis (turn
- * | tool | skill) and an in-memory tag→SHA registry. The 4-arm trigger mode
- * (`off` / `pre-destructive` / `per-mutating` / `per-turn`) remains the
- * sole owner of WHEN to anchor; granularity owns WHAT TAG to assign + WHERE
- * to record the SHA.
+ * | tool | skill) and an in-memory tag→SHA registry. The trigger mode
+ * (`off` / `pre-destructive` / `per-mutating` — ALBB-21 removed the dead
+ * `per-turn` arm) remains the sole owner of WHEN to anchor; granularity owns
+ * WHAT TAG to assign + WHERE to record the SHA.
  *
  * # Default-OFF parity
  *

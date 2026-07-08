@@ -87,7 +87,7 @@ const makeCtx = (over: Partial<ToolContext> = {}): ToolContext => ({
   ...over,
 })
 
-const buildBasePolicy = (mode: "off" | "per-mutating" | "per-turn" | "pre-destructive") =>
+const buildBasePolicy = (mode: "off" | "per-mutating" | "pre-destructive") =>
   defaultCheckpointPolicy({
     mode,
     odb: makeFakeOdb({
@@ -149,7 +149,10 @@ describe('GranularCheckpointPolicy granularity="tool" (HELL-B4..B6)', () => {
   })
 
   test("HELL-B6: shouldAnchorAfterTurn returns false for tool-grain (turn-after is not its concern)", async () => {
-    const base = buildBasePolicy("per-turn")
+    // ALBB-21 — the `per-turn` MODE was deleted; the tool-grain override short-
+    // circuits to false BEFORE delegating regardless of base mode, so this
+    // delegation-contract pin is base-mode-independent now.
+    const base = buildBasePolicy("pre-destructive")
     const policy = defaultGranularCheckpointPolicy({ base, granularity: "tool" })
     expect(await policy.shouldAnchorAfterTurn("t1", "/ws")).toBe(false)
   })

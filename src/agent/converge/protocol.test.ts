@@ -48,6 +48,23 @@ describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
     expect(gens).toHaveLength(1)
   })
 
+  // ALBB-21 — the maxRounds=1 RED→green case. The maxRounds=4 test above has
+  // SLACK: the in-loop `verdict.green` break fires on the RE-ENTERED round so
+  // `reason` gets set to "green" by the loop body. With maxRounds=1 the single
+  // round judges RED → repairs to green → `rounds=1`, and the `while` guard
+  // `1 < 1` EXITS via the bound BEFORE the green break can run. The terminal
+  // judge is green ⇒ `converged: true`, but a bug that leaves `reason` at the
+  // loop body's last value telemetries a CONVERGED run as "rounds-exhausted".
+  // reason/converged MUST both derive from the ONE final judge.
+  test("maxRounds=1: red → 1 gen → green ⇒ converged AND reason=green (no rounds-exhausted mask)", async () => {
+    const { proto, gens } = fake([RED, GREEN])
+    const o = await runConvergeProtocol(proto, { maxRounds: 1, maxTurns: 100 }, { turnsConsumed: 0, carry: "init" })
+    expect(o.converged).toBe(true)
+    expect(o.reason).toBe("green")
+    expect(o.rounds).toBe(1)
+    expect(gens).toHaveLength(1)
+  })
+
   test("non-actionable verdict ⇒ no-signal, 0 rounds, carry untouched", async () => {
     const { proto, gens } = fake([INERT])
     const o = await runConvergeProtocol(proto, { maxRounds: 4, maxTurns: 100 }, { turnsConsumed: 3, carry: "init" })

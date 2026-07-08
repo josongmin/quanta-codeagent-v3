@@ -17,6 +17,7 @@
  *  caller can therefore wire the bridge unconditionally and have it
  *  become a real anchor only once `AgentConfig.shadowOdb` is set. */
 
+import { errMessage, logger } from "@/shared"
 import type { ShadowOdb } from "@/storage/shadow-odb"
 
 /** Callable bridge: when verify-guard passes (callers wire this on
@@ -37,13 +38,23 @@ export const defaultVerifyCheckpointBridge = (
     if (odb === undefined) return
     try {
       await odb.markVerified(workspace)
-    } catch {
+    } catch (e) {
       // NO-THROW: observability instrumentation must never break the
       // verify path. A failing markVerified (e.g. uninitialized because
       // the caller hasn't registerHead'd yet, or spawn-failed on a
       // missing git binary) is logically a "no anchor available" —
       // future rewindToVerified calls will surface no-verified-anchor
       // through the typed-error channel, which is the correct UX.
+      //
+      // ALBB-21 — keep the no-throw contract but leave ONE greppable
+      // breadcrumb so a swallowed anchor-advance failure is diagnosable
+      // (previously the catch was empty: a silently un-advanced verified
+      // anchor with no trace of WHY). `debug` level keeps it out of the
+      // default operator stream while remaining discoverable.
+      logger.debug("verify-checkpoint-bridge: markVerified failed (anchor not advanced)", {
+        workspace,
+        error: errMessage(e),
+      })
     }
   },
 })

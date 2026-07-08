@@ -2,6 +2,7 @@ import type { StreamEvent, ToolChoice } from "@/llm"
 import { costUsd } from "@/observability"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
 import { errMessage, logger, runtimeConfig } from "@/shared"
+import type { BudgetBreach } from "../budget-ledger"
 import type { CancelSubagentOutcome, ResponseQueuedReason } from "../control-op-handler"
 import type { AgentRecorder } from "../metrics"
 import type { RecoveryReason } from "../recovery"
@@ -23,6 +24,15 @@ type UsageSinkCtx = {
   readonly collector: TurnWorkMetricsCollector | undefined
   readonly taskSpend: { tokens: number } | undefined
   readonly eventCostUsd: number | null
+  /** ALBB-21 — a single-slot handoff between the L4 record sink (producer) and
+   *  the budget-breach advisory sink (consumer). The record sink writes the
+   *  ledger's returned breach list here; the later advisory sink reads it and
+   *  emits one `budget_breach` AgentEvent per breach. The object reference is
+   *  `readonly` but its slot is mutable — the only stateful handoff between two
+   *  sinks (they run in array order, producer strictly before consumer). Empty
+   *  by default: no ledger / no breach ⇒ stays `[]` ⇒ the advisory sink is a
+   *  no-op (default-OFF byte-identical). */
+  readonly breachSlot: { breaches: ReadonlyArray<BudgetBreach> }
 }
 
 /** One usage-event consumer. Adding a downstream (a new meter, ledger, gauge)
@@ -64,9 +74,13 @@ const USAGE_SINKS: readonly UsageSink[] = [
   // L4 cross-run cost ledger (default-OFF: no `budgetLedger` ⇒ no-op). Maps the
   // provider's cache-CREATION tokens onto the ledger's cache-write bucket (which
   // the ledger bills and `costUsd` does not); same SSOT rate card so meter and
-  // ledger never disagree. Hard breach surfaced at the turn epilogue.
-  ({ config, ev }) =>
-    config.budgetLedger?.record({
+  // ledger never disagree. Hard breach *stops* the run at the turn epilogue via
+  // `ledgerHardBreachCondition`; the returned breach list is captured here so the
+  // ADVISORY sink below can surface EVERY crossed cap (soft AND hard) as a
+  // `budget_breach` event without re-recording. Return dropped ⇒ no advisory
+  // (the wired-but-inert trap this fix closes).
+  ({ config, ev, breachSlot }) => {
+    const result = config.budgetLedger?.record({
       model: ev.model,
       inputTokens: ev.inputTokens,
       outputTokens: ev.outputTokens,
@@ -74,7 +88,9 @@ const USAGE_SINKS: readonly UsageSink[] = [
       ...(ev.cacheCreationTokens !== undefined ? { cacheWriteTokens: ev.cacheCreationTokens } : {}),
       sessionId: config.sessionId ?? "",
       at: Date.now(),
-    }),
+    })
+    if (result !== undefined) breachSlot.breaches = result.breaches
+  },
   // Turn work-metrics collector.
   ({ collector, ev }) =>
     collector?.recordUsage({
@@ -101,6 +117,25 @@ const USAGE_SINKS: readonly UsageSink[] = [
       cacheReadTokens: ev.cacheReadTokens ?? 0,
       outputTokens: ev.outputTokens,
     }),
+  // ALBB-21 advisory: surface each crossed budget cap as ONE non-fatal
+  // `budget_breach` AgentEvent. Consumes the `RecordResult.breaches` the L4
+  // record sink captured above (deterministic order, 0..4 entries). SOFT
+  // never stops the run (HARD *stop* is `ledgerHardBreachCondition`'s job);
+  // this is pure observability, mirroring the Claude Code / Codex cost-warning
+  // banner. `severity`/`scope`/`observed`/`limit` are derived VERBATIM from the
+  // typed `BudgetBreach` (no invented threshold). Empty ⇒ no emit (default-OFF
+  // byte-identical: no ledger or no crossing leaves the slot `[]`).
+  ({ config, breachSlot }) => {
+    for (const breach of breachSlot.breaches) {
+      config.stream.emit({
+        type: "budget_breach",
+        severity: breach.kind.endsWith("-hard") ? "hard" : "soft",
+        scope: breach.scope,
+        observed: breach.observed,
+        limit: breach.limit,
+      })
+    }
+  },
 ]
 
 export const emitUsage = (
@@ -118,6 +153,9 @@ export const emitUsage = (
     taskSpend,
     // Priced once via the pricing SSOT (the only place `ev.model` is available).
     eventCostUsd: costUsd(ev.model, ev.inputTokens, ev.outputTokens, ev.cacheReadTokens ?? 0),
+    // ALBB-21 — fresh per-event breach handoff slot (record sink writes, advisory
+    // sink reads). Starts empty so the advisory sink is a no-op when no cap crosses.
+    breachSlot: { breaches: [] },
   }
   for (const sink of USAGE_SINKS) sink(ctx)
 }

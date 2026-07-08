@@ -23,7 +23,8 @@ import { AGENT_EVENT_TYPES } from "@/stream"
  */
 describe("surface-protocol inventory hellgate", () => {
   test("current canonical inventories stay at the reviewed counts", () => {
-    expect(AGENT_EVENT_TYPES.length).toBe(36)
+    // ALBB-21 — +1 advisory `budget_breach` (soft/hard cost-cap crossing).
+    expect(AGENT_EVENT_TYPES.length).toBe(37)
     // T01 — +3 additive session.v1 item events (item.started/delta/completed).
     // ALBB-04 — +1 dedicated cancel terminal (turn.aborted).
     expect(SESSION_EVENT_TYPES.length).toBe(19)

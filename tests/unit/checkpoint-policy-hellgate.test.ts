@@ -292,29 +292,34 @@ describe('CheckpointPolicy mode="per-mutating" (HELL-D11..D13)', () => {
 })
 
 /* ================================================================== */
-/* E. mode="per-turn"                                                  */
+/* E. shouldAnchorAfterTurn — the deleted `per-turn` live path (ALBB-21) */
 /* ================================================================== */
 
-describe('CheckpointPolicy mode="per-turn" (HELL-E14..E16)', () => {
-  test("HELL-E14: shouldAnchorAfterTurn returns true once per turn", async () => {
-    const policy = buildPolicy("per-turn", makeFakeOdb({}))
-    expect(await policy.shouldAnchorAfterTurn("t1", "/ws")).toBe(true)
+// ALBB-21 — the `"per-turn"` trigger MODE was DELETED (it had zero production
+// callers: no turn-epilogue site ever invoked `shouldAnchorAfterTurn`, so
+// selecting it produced NO anchors — a wired-but-dead live path). The method
+// SURVIVES on the port (the granular wrapper delegates it for the remaining
+// grains) but no configured mode selects a turn-epilogue anchor, so it now
+// ALWAYS returns false. These tests PIN that dead-path removal: reintroducing a
+// mode that makes `shouldAnchorAfterTurn` return true turns them RED.
+describe("CheckpointPolicy shouldAnchorAfterTurn — dead per-turn path removed (HELL-E14..E16)", () => {
+  test("HELL-E14: shouldAnchorAfterTurn returns false for every remaining mode", async () => {
+    for (const mode of ["off", "pre-destructive", "per-mutating"] as const) {
+      const policy = buildPolicy(mode, makeFakeOdb({}))
+      expect(await policy.shouldAnchorAfterTurn("t1", "/ws")).toBe(false)
+    }
   })
 
-  test("HELL-E15: called TWICE for same (workspace, turnId) ⇒ first true, second false (dedup)", async () => {
-    const policy = buildPolicy("per-turn", makeFakeOdb({}))
-    const first = await policy.shouldAnchorAfterTurn("t1", "/ws")
-    expect(first).toBe(true)
+  test("HELL-E15: recordAnchored does not flip shouldAnchorAfterTurn to true (no live turn-epilogue anchor)", async () => {
+    const policy = buildPolicy("pre-destructive", makeFakeOdb({}))
     policy.recordAnchored({ workspace: "/ws", turnId: "t1" })
-    const second = await policy.shouldAnchorAfterTurn("t1", "/ws")
-    expect(second).toBe(false)
+    expect(await policy.shouldAnchorAfterTurn("t1", "/ws")).toBe(false)
+    expect(await policy.shouldAnchorAfterTurn("t2", "/ws")).toBe(false)
   })
 
-  test("HELL-E16: different turnId ⇒ NOT deduped", async () => {
-    const policy = buildPolicy("per-turn", makeFakeOdb({}))
-    expect(await policy.shouldAnchorAfterTurn("t1", "/ws")).toBe(true)
-    policy.recordAnchored({ workspace: "/ws", turnId: "t1" })
-    expect(await policy.shouldAnchorAfterTurn("t2", "/ws")).toBe(true)
+  test("HELL-E16: empty turnId ⇒ still false (no dedup window, still no anchor)", async () => {
+    const policy = buildPolicy("per-mutating", makeFakeOdb({}))
+    expect(await policy.shouldAnchorAfterTurn("", "/ws")).toBe(false)
   })
 })
 
@@ -384,13 +389,13 @@ describe("withAutoCheckpoint wrap (HELL-F17..F20)", () => {
     expect(innerCalls.length).toBe(1)
   })
 
-  test("HELL-F20: ctx.turnId absent ⇒ per-turn mode skips anchoring (no dedup possible → safer)", async () => {
+  test("HELL-F20: shouldAnchorAfterTurn is inert for any remaining mode (deleted per-turn path)", async () => {
+    // ALBB-21 — with the `per-turn` mode removed, the turn-epilogue predicate is
+    // always false regardless of turnId. Empty turnId (the loop receiving an
+    // absent turnId source) is still false — no anchor spam, no live path.
     let afterCalls = 0
     const odb = makeFakeOdb({})
-    const policy = buildPolicy("per-turn", odb)
-    // The per-turn path's predicate is shouldAnchorAfterTurn(turnId, workspace);
-    // calling it with an empty string mimics the loop receiving an absent
-    // turnId source — the policy MUST return false rather than spamming.
+    const policy = buildPolicy("pre-destructive", odb)
     const decision = await policy.shouldAnchorAfterTurn("", "/ws")
     if (decision) afterCalls += 1
     expect(decision).toBe(false)

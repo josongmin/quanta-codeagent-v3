@@ -225,6 +225,13 @@ export class StdoutStream implements StreamPort {
           `${DIM}— usage in ${formatTokenCount(event.inputTokens)}, out ${formatTokenCount(event.outputTokens)} (${event.model}) —${RESET}\n`,
         )
         break
+      case "budget_breach":
+        // ALBB-21 — advisory cost-cap crossing banner (Claude Code / Codex UX).
+        // RENDER-ONLY and NON-MUTATING: printing it never stops the turn (the
+        // HARD *stop* is `ledgerHardBreachCondition`'s job); this is a passive
+        // notice, the same class as the `usage`/`ratelimit_snapshot` readouts.
+        this.write(renderBudgetBreach(event))
+        break
       case "done":
         this.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
         break
@@ -325,6 +332,13 @@ const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>):
  *  running — this is not a finish trigger. */
 const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
   `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
+
+/** ALBB-21 — advisory budget-cap crossing banner (Claude Code / Codex cost-
+ *  warning UX). One dim line: severity + scope + observed-vs-limit USD. NON-
+ *  FATAL by contract — this render never stops the turn (the HARD *stop* is
+ *  `ledgerHardBreachCondition`'s job at the turn epilogue). */
+const renderBudgetBreach = (event: Extract<AgentEvent, { type: "budget_breach" }>): string =>
+  `${DIM}⚠ budget ${event.severity} cap crossed (${event.scope}): $${event.observed.toFixed(2)} > $${event.limit.toFixed(2)}${RESET}\n`
 
 /** ADR-0512 P3 — the interactive escalation APPROVAL card. YELLOW (an ask, not
  *  a red error). Shows which tool + its risk (read-only vs mutating) + WHY it is
