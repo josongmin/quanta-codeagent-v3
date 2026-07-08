@@ -354,6 +354,18 @@ export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
 }
 
 /**
+ * ALBB-04 — dedicated CANCEL terminal wire type (mirrors upstream
+ * `TurnAbortedEvent` in `src/protocol/session/events.ts`). A cooperatively-
+ * cancelled turn is neither a success (`turn.completed`) nor an error
+ * (`turn.failed`); both cancel entry points settle through THIS single terminal
+ * type so a cancel is never conflated with success or failure. `message`
+ * carries the abort reason (mirrors {@link TurnFailedEvent.message}).
+ */
+export interface TurnAbortedEvent extends SessionEventEnvelope<"turn.aborted"> {
+  readonly message: string
+}
+
+/**
  * ADR-0512 — skill-scope decision SUMMARY (mirrors upstream
  * `SkillScopeDecisionEvent`). The agent loop emits this for EVERY scope outcome,
  * including the ones the interactive escalation card never sees: a hard
@@ -419,6 +431,7 @@ export type SessionEvent =
   | TurnLlmRequestEvent
   | TurnLlmContinuationEvent
   | TurnFailedEvent
+  | TurnAbortedEvent
   | ToolInvokedEvent
   | ToolCompletedEvent
   | SkillScopeDecisionEvent

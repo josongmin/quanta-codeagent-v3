@@ -143,10 +143,30 @@ describe("lane-manager hellgate (ADR-0285)", () => {
   })
 
   // -------------------------------------------------------------------------
-  test("HELL-LM-04 timeout ⇒ straggler surfaces Err(timeout)", async () => {
+  // NON-VACUOUS: also observes the DELEGATE's injected `spec.signal` — the
+  // timeout arm must force-cancel the underlying delegate (CASCADE contract),
+  // not merely resolve a timeout result while the child agent keeps burning
+  // tokens. Mutation: dropping `laneCtrl.abort()` from the awaitAll timeout arm
+  // in default-manager.ts must turn `delegateAborted` false → RED.
+  test("HELL-LM-04 timeout ⇒ straggler surfaces Err(timeout) AND delegate aborted", async () => {
+    let sawSignal = false
+    let delegateAborted = false
     const slow: DelegationRunnerPort = {
-      delegate: () =>
+      delegate: (spec) =>
         new Promise((resolve) => {
+          const sig = spec.signal
+          if (sig !== undefined) {
+            sawSignal = true
+            if (sig.aborted) delegateAborted = true
+            else
+              sig.addEventListener(
+                "abort",
+                () => {
+                  delegateAborted = true
+                },
+                { once: true },
+              )
+          }
           // Resolve far in the future — the timeout fires first.
           const t = setTimeout(() => {
             resolve(
@@ -168,6 +188,12 @@ describe("lane-manager hellgate (ADR-0285)", () => {
     const r0 = at(out, 0)
     expect(r0.ok).toBe(false)
     if (!r0.ok) expect(r0.error.kind).toBe("timeout")
+    // The delegate got a real signal…
+    expect(sawSignal).toBe(true)
+    // …and the timeout FORCE-CANCELLED it (no delegate leak past the timeout).
+    // Flush a microtask so the abort listener fires after resolve().
+    await new Promise((r) => setTimeout(r, 5))
+    expect(delegateAborted).toBe(true)
   })
 
   // -------------------------------------------------------------------------

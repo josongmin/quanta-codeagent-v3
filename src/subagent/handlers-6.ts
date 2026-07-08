@@ -504,6 +504,13 @@ interface SpawnAgentDeps {
   /** Caller's own current recursion depth, used to compute the child's depth
    *  (parent + 1). Defaults to 0 (root). */
   parentDepth?: number
+  /** ALBB-16 #2 — fork_turns preamble composer. When present, the child's seed
+   *  prompt is composed with the inherited (redacted) parent-transcript preamble
+   *  for the requested `input.fork_turns` spec — the SAME shared closure the trio
+   *  `agent` tool uses, so the two preambles are byte-identical. Absent ⇒ the raw
+   *  prompt is used (byte-identical legacy spawn path). Injected at the
+   *  composition root (`tier1/subagent.ts`); this slice stays `@/agent`-free. */
+  forkPrompt?: (prompt: string, spec: "none" | "all" | number) => string
   /** RFC-04 / ADR-0437 — OPT-IN side-table the spawn path records `{depth,
    *  label}` into so `list_agents` can show richer rows WITHOUT mutating the
    *  frozen `TaskRecord` contract. Absent ⇒ no write (byte-identical spawn
@@ -644,8 +651,17 @@ export const handleSpawnAgent = async (
       ? buildCheckpointPath(deps.cwd, taskId)
       : undefined
 
+  // ALBB-16 #2 — compose the fork_turns inherited-context preamble onto the
+  // child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
+  // The spec is read defensively (`fork_turns` is not on the frozen 6-tool schema
+  // yet, so it may be absent post-parse ⇒ "none" ⇒ the composer is identity).
+  // No `deps.forkPrompt` ⇒ raw prompt (byte-identical legacy path).
+  const forkSpec = (input as { fork_turns?: "none" | "all" | number }).fork_turns ?? "none"
+  const forkedPrompt =
+    deps.forkPrompt !== undefined ? deps.forkPrompt(input.prompt, forkSpec) : input.prompt
+
   const req: SubagentRequest = {
-    prompt: input.prompt,
+    prompt: forkedPrompt,
     depth: childDepth,
     signal: abort.signal,
     // ADR-0437 follow-up — thread the registry task id so the runner can

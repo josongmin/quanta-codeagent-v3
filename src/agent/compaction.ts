@@ -247,6 +247,30 @@ export type CompactResult =
     }
   | { compacted: true; messages: Message[]; summaryTokens: number }
 
+/**
+ * ALBB-08 (SSOT) — the set of non-progress PROACTIVE outcomes that MUST accrue a
+ * breaker strike, because the transcript stayed over-threshold so re-firing the
+ * proactive path without a strike spins the loop unbounded:
+ *   - `no_boundary`  — one indivisible giant turn; nothing summarizable.
+ *   - `empty_summary`— the summarizer refused/returned `""`; the prefix is NOT
+ *                      replaced (an empty summary would DESTROY history), so the
+ *                      transcript is unshrunk exactly as in `no_boundary`.
+ * DELIBERATELY excluded:
+ *   - `deferred`       — the host explicitly chose to WAIT one turn (a HITL/hook
+ *                        skip, documented at the `CompactResult` reason above); it
+ *                        is not a failure to make progress.
+ *   - `under_threshold`— benign (we were under budget; no compaction was due).
+ * Mirrors CC `tengu_auto_compact_circuit_breaker`: a no-headroom proactive
+ * compaction is a `consecutiveFailure` REGARDLESS of why it froze nothing. The
+ * wire (`applyProactiveResult`) tests membership here instead of matching a single
+ * literal reason, so adding a new non-progress reason to `CompactResult` is a
+ * one-line, reviewable edit in ONE place (no silent drift).
+ */
+export const UNPRODUCTIVE_PROACTIVE_REASONS: ReadonlySet<string> = new Set([
+  "no_boundary",
+  "empty_summary",
+])
+
 /** Stream one summary turn with an explicit system prompt and return its
  *  joined text. Shared by proactive ({@link summarize}) and reactive paths. */
 const summarizeWith = async (llm: LLMPort, system: string, prefix: Message[]): Promise<string> => {

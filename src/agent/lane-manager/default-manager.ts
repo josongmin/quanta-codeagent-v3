@@ -103,7 +103,18 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
     else parentSignal.addEventListener("abort", () => managerCtrl.abort(), { once: true })
   }
 
-  const runLane = async (handle: LaneHandle, label: string | undefined): Promise<LaneResult> => {
+  // Per-lane controllers, keyed by handle. Minted at spawn time so `awaitAll`
+  // can FORCE-CANCEL a lane's delegate on timeout (the CASCADE contract) — the
+  // controller is otherwise closure-local to `runLane` and unreachable from
+  // `awaitAll`, which is exactly the delegate-leak the ADR-0285 timeout arm had.
+  // A WeakMap keeps the public `LaneHandle` type clean (no cancel field leaks).
+  const laneCtrls = new WeakMap<LaneHandle, AbortController>()
+
+  const runLane = async (
+    handle: LaneHandle,
+    laneCtrl: AbortController,
+    label: string | undefined,
+  ): Promise<LaneResult> => {
     const startedAt = now()
 
     const acquired = await acquireSlot()
@@ -150,16 +161,10 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
         return r
       }
 
-      // Build a per-lane child controller chained off the manager controller.
-      // We do NOT inject `managerCtrl.signal` directly so the lane's own
-      // signal field stays per-lane (each lane gets a distinct AbortSignal).
-      // NOTE: `managerCtrl.signal.aborted` is read FRESH here — TS narrowed it
-      // to false above based on the earlier guard, but the value mutates
-      // asynchronously when the parent signal fires. The Boolean() unwrap
-      // defeats the stale narrowing.
-      const laneCtrl = new AbortController()
-      if (managerCtrl.signal.aborted) laneCtrl.abort()
-      else managerCtrl.signal.addEventListener("abort", () => laneCtrl.abort(), { once: true })
+      // The per-lane controller (`laneCtrl`) was minted at spawn time and is
+      // already chained off the manager controller (parent cascade) AND stored
+      // in `laneCtrls` so `awaitAll` can abort it on timeout. We only need to
+      // pass its signal through to the delegate here.
 
       // Merge the spec.delegate.signal with the lane controller — the
       // delegation runner already handles signal-aborted, so we only need
@@ -233,9 +238,18 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
         spec,
         promise,
       }
+      // Mint the per-lane controller HERE (spawn time) so both `runLane` and
+      // `awaitAll` share it. Chain it off the manager controller so the parent
+      // cascade still aborts it; `awaitAll`'s timeout arm aborts it directly to
+      // force-cancel the delegate. `managerCtrl.signal.aborted` is read FRESH —
+      // it mutates asynchronously when the parent signal fires.
+      const laneCtrl = new AbortController()
+      if (managerCtrl.signal.aborted) laneCtrl.abort()
+      else managerCtrl.signal.addEventListener("abort", () => laneCtrl.abort(), { once: true })
+      laneCtrls.set(handle, laneCtrl)
       // Kick the lane (fire-and-forget). The internal promise resolves with
       // a LaneResult (success or typed failure) — runLane NEVER throws.
-      runLane(handle, spec.label).then(
+      runLane(handle, laneCtrl, spec.label).then(
         (result) => resolvePromise(result),
         (err) => {
           // Defense-in-depth — runLane already wraps everything, but if a
@@ -270,6 +284,11 @@ export const defaultLaneManager = (opts?: DefaultLaneManagerOpts): LaneManager =
             h.promise,
             new Promise<LaneResult>((resolve) => {
               const timer = setTimeout(() => {
+                // FORCE-CANCEL the lane's delegate before surfacing timeout —
+                // otherwise the child agent keeps running (burning tokens/CPU)
+                // past the deadline. This is the ADR-0285 CASCADE contract for
+                // the timeout path (previously the delegate leaked).
+                laneCtrls.get(h)?.abort()
                 const r: LaneResult = {
                   id: h.id,
                   ok: false,

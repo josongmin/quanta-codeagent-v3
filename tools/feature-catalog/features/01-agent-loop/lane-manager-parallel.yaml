@@ -3,7 +3,7 @@ title: Parallel lane-manager — N child-agent lanes with allSettled aggregation
 section: 1
 subsystem: Loop 동시성 — N개 child agent 레인 병렬 집계 (Default-OFF seam)
 order: 454
-maturity: L3
+maturity: L1
 status: new
 ui_surfaces: [none]
 monitoring: none
@@ -38,5 +38,5 @@ evidence:
 knobs: ["QUANTA_LANE_MAX_CONCURRENCY"]
 deliberate_hold:
   reason: 'Built-not-wired by design (Default-OFF). The agent loop never constructs a manager; the opt-in seam is a LaneManager injected through AgentConfig by a surface. QUANTA_LANE_MAX_CONCURRENCY is documented in types.ts as the cap override but has NO reader in src/ yet — it activates only once a surface wires the factory.'
-  promotion_path: 'Land a host call site (apps / future /lanes slash) that injects defaultLaneManager into AgentConfig + a reader for QUANTA_LANE_MAX_CONCURRENCY; then promote to L4.'
-notes: 'ADR-0285. Hellgate seals 15 invariants (HELL-LM-01..15): parallel success, partial-fail isolation, all-fail typed Err, awaitAll timeout straggler, parent-abort cascade, 100-lane cap (peak ≤ cap), spawn-fail sibling survival, input-order ordering, 4-arm error exhaustiveness, import side-effect freedom, deterministic awaitAll, zombie-lane no-mutation, 1000-lane no-leak. LaneError = CLOSED 4-arm union (spawn-failed|timeout|aborted|concurrency-exceeded) with a two-way drift guard.'
+  promotion_path: 'Land a host call site (apps / future /lanes slash) that injects defaultLaneManager into AgentConfig + a reader for QUANTA_LANE_MAX_CONCURRENCY; then promote to L3 (wired-with-tests) and, after an efficacy A/B on the SWE/TB rail, L4.'
+notes: 'ADR-0285. MATURITY = L1 (scaffold / built-not-wired): the slice is a hermetic concurrency primitive with a hellgate, but has ZERO production importers (no host constructs `defaultLaneManager`), so it makes no L3 (declared-wired) claim — the ALBB-15 reachability floor (`fc reachability --strict`, ≥L3) would flag it otherwise. ALBB-15 also fixed a real correctness bug: `awaitAll`''s timeout arm now FORCE-CANCELS the lane''s delegate via `laneCtrls.get(h).abort()` (previously it resolved a timeout LaneResult but left the child agent running — a delegate leak); HELL-LM-04 was strengthened to observe the delegate''s injected `spec.signal` abort (non-vacuous, mutation-checked). Hellgate seals 15 invariants (HELL-LM-01..15): parallel success, partial-fail isolation, all-fail typed Err, awaitAll timeout straggler + delegate force-cancel, parent-abort cascade, 100-lane cap (peak ≤ cap), spawn-fail sibling survival, input-order ordering, 4-arm error exhaustiveness, import side-effect freedom, deterministic awaitAll, zombie-lane no-mutation, 1000-lane no-leak. LaneError = CLOSED 4-arm union (spawn-failed|timeout|aborted|concurrency-exceeded) with a two-way drift guard. Promote to L3/L4 only after a host wires the manager through AgentConfig + a reader for QUANTA_LANE_MAX_CONCURRENCY (then A/B on the SWE/TB rail).'

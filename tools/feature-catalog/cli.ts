@@ -1066,36 +1066,52 @@ async function cmdTestAudit(argv: string[]): Promise<void> {
 // --- Entrypoint ------------------------------------------------------------
 
 // --- reachability ----------------------------------------------------------
+
+/** One reachability overclaim: a `maturity >= floor` feature whose declared
+ *  `evidence.code` src files are ALL dead (unreachable OR — with `--symbols` —
+ *  dead-API) via the real import graph. */
+export interface ReachOffender {
+  readonly id: string
+  readonly maturity: string
+  readonly first: string
+  readonly kind: string
+}
+
+/** Numeric rank for `L1..L5` so the reachability floor can be `>= L3` (not an
+ *  L4/L5 literal match). Unknown labels rank 0 (never gated). */
+export const maturityRank = (m: string): number => {
+  const n = Number.parseInt(m.replace(/^L/, ""), 10)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Default overclaim floor. A slice claiming `maturity >= L3` (declared-wired
+ *  with tests) whose src files are all dead is an overclaim — the manual
+ *  "don't overclaim maturity" policy, enforced. L1/L2 are scaffold/principle
+ *  tiers and legitimately need no production importer. */
+export const REACHABILITY_FLOOR: string = "L3"
+
 /**
- * Code-grounded overclaim detector: flags L4+ features whose `evidence.code`
- * src files are NOT reachable from ANY production entrypoint
- * (`src/apps/<surface>/index.ts`), via the real import/re-export graph
- * (`./reachability`). This is the ground truth the self-declared `judge` axes
- * cannot give — no `.js`-mirror / barrel / basename-collision noise. A
- * maturity ≥ L4 (operational) claim on an UNREACHABLE feature is an overclaim.
+ * PURE overclaim computer: given loaded features + the real import-graph reach
+ * result (+ optional symbol-level result), return every feature at
+ * `maturity >= floor` whose declared `evidence.code` src files are ALL dead.
  *
- * `--strict` exits 1 when any are found (CI gate). Features whose evidence.code
- * is tools/- or tests-only are skipped (not app-reachable by design).
- *
- * `--symbols` adds the finer symbol-level pass: a feature whose every src file
- * is EITHER unreachable OR "dead-API" (module loads via a barrel re-export but
- * no own export is ever named-imported AND it self-registers nothing at load) —
- * the blind spot module reachability cannot see (e.g. a helper re-exported from
- * a barrel but never called by any tool). Stricter signal; still spot-verify
- * before downgrading.
+ * Keyword-FREE: the "dead" verdict comes ONLY from the import/re-export graph
+ * (`reach.reached`) and, when supplied, the symbol-level dead-API set — never a
+ * string/keyword match on the feature. Exported for the injection hellgate
+ * (a synthetic L3 feature with an unreachable src file must be flagged; raising
+ * the floor back to L4 must make it disappear → RED-on-injection).
  */
-async function cmdReachability(argv: string[]): Promise<void> {
-  const strict = argv.includes("--strict")
-  const symbols = argv.includes("--symbols")
-  const [reach, sym, features] = await Promise.all([
-    computeReachability(),
-    symbols ? computeSymbolReachability() : Promise.resolve(null),
-    loadFeaturesStrict(FEATURES_DIR),
-  ])
+export function computeReachabilityOffenders(
+  features: readonly LoadedFeature[],
+  reach: { readonly reached: ReadonlySet<string> },
+  sym: { readonly deadApi: ReadonlySet<string> } | null,
+  floor: string = REACHABILITY_FLOOR,
+): ReachOffender[] {
+  const floorRank = maturityRank(floor)
   const isDead = (c: string): boolean => !reach.reached.has(c) || (sym?.deadApi.has(c) ?? false)
-  const offenders: Array<{ id: string; maturity: string; first: string; kind: string }> = []
+  const offenders: ReachOffender[] = []
   for (const { feature } of features) {
-    if (feature.maturity !== "L4" && feature.maturity !== "L5") continue
+    if (maturityRank(feature.maturity) < floorRank) continue
     const src = feature.evidence.code.filter((c) => c.startsWith("src/") && c.endsWith(".ts"))
     if (src.length === 0) continue // tools/tests-only feature — not app-reachable by design
     if (src.every(isDead)) {
@@ -1104,16 +1120,92 @@ async function cmdReachability(argv: string[]): Promise<void> {
     }
   }
   offenders.sort((a, b) => a.id.localeCompare(b.id))
+  return offenders
+}
+
+/**
+ * Code-grounded overclaim detector: flags features at `maturity >= L3` whose
+ * `evidence.code` src files are NOT reachable from ANY production entrypoint
+ * (`src/apps/<surface>/index.ts`), via the real import/re-export graph
+ * (`./reachability`). This is the ground truth the self-declared `judge` axes
+ * cannot give — no `.js`-mirror / barrel / basename-collision noise. A
+ * maturity ≥ L3 (declared-wired, has tests) claim on an UNREACHABLE feature is
+ * an overclaim: L3 asserts "wired with tests", so zero production importers is
+ * a lie. L1 (scaffold) / L2 (principle) legitimately need no importer and are
+ * exempt.
+ *
+ * `--strict` exits 1 when any are found (CI gate — the hard-gate that turns the
+ * manual policy into an enforced floor). Features whose evidence.code is tools/-
+ * or tests-only are skipped (not app-reachable by design).
+ *
+ * `--symbols` adds the finer symbol-level pass: a feature whose every src file
+ * is EITHER unreachable OR "dead-API" (module loads via a barrel re-export but
+ * no own export is ever named-imported AND it self-registers nothing at load) —
+ * the blind spot module reachability cannot see (e.g. a helper re-exported from
+ * a barrel but never called by any tool). Stricter signal; still spot-verify
+ * before downgrading.
+ */
+/** Read the L3-reachability grandfather list from baseline.json — the set of
+ *  PRE-EXISTING ≥L3 orphans captured when the floor dropped from L4 to L3
+ *  (ALBB-15). New offenders NOT in this list fail `--strict`; grandfathered ones
+ *  warn (ratchet can tighten). Mirrors the `fc lint` / `dod-ratchet` idiom:
+ *  fail-closed on REGRESSION, monotonic shrink for the backlog. Defensive read
+ *  (missing file/field ⇒ empty set ⇒ every offender is net-new). */
+async function loadL3ReachabilityGrandfathered(): Promise<Set<string>> {
+  try {
+    const raw = JSON.parse(await readFile(BASELINE, "utf8")) as {
+      fc?: { l3_reachability_grandfathered?: unknown }
+    }
+    const list = raw.fc?.l3_reachability_grandfathered
+    if (!Array.isArray(list)) return new Set()
+    return new Set(list.filter((x): x is string => typeof x === "string"))
+  } catch {
+    return new Set()
+  }
+}
+
+async function cmdReachability(argv: string[]): Promise<void> {
+  const strict = argv.includes("--strict")
+  const symbols = argv.includes("--symbols")
+  const [reach, sym, features, grandfathered] = await Promise.all([
+    computeReachability(),
+    symbols ? computeSymbolReachability() : Promise.resolve(null),
+    loadFeaturesStrict(FEATURES_DIR),
+    loadL3ReachabilityGrandfathered(),
+  ])
+  const offenders = computeReachabilityOffenders(features, reach, sym)
   const mode = symbols
     ? "unreachable OR dead-API (symbol-level)"
     : "UNREACHABLE from any entrypoint"
+  const netNew = offenders.filter((o) => !grandfathered.has(o.id))
+  const known = offenders.filter((o) => grandfathered.has(o.id))
   console.log(
     `reachability: ${reach.reached.size}/${reach.allFiles.size} src files reached; ` +
-      `${offenders.length} L4+ feature(s) ${mode} (overclaim):`,
+      `${offenders.length} feature(s) ≥${REACHABILITY_FLOOR} ${mode} (overclaim) ` +
+      `— ${netNew.length} net-new, ${known.length} grandfathered:`,
   )
-  for (const o of offenders) console.log(`  ${o.id} [${o.maturity}] (${o.kind}) ${o.first}`)
-  if (offenders.length === 0) console.log("  (none — every L4+ feature is code-reachable)")
-  if (strict && offenders.length > 0) process.exit(1)
+  for (const o of netNew) console.log(`  NEW  ${o.id} [${o.maturity}] (${o.kind}) ${o.first}`)
+  for (const o of known) console.log(`  (gf) ${o.id} [${o.maturity}] (${o.kind}) ${o.first}`)
+  if (offenders.length === 0)
+    console.log(`  (none — every ≥${REACHABILITY_FLOOR} feature is code-reachable)`)
+  // Ratchet-tighten hint: a grandfathered id that is NO LONGER an offender
+  // (someone wired or demoted it) should be pruned from baseline.json.
+  const offenderIds = new Set(offenders.map((o) => o.id))
+  const resolved = [...grandfathered].filter((id) => !offenderIds.has(id)).sort()
+  if (resolved.length > 0) {
+    console.log(
+      `\n  ratchet can tighten — ${resolved.length} grandfathered id(s) no longer offend ` +
+        `(prune from baseline.json fc.l3_reachability_grandfathered): ${resolved.join(", ")}`,
+    )
+  }
+  // Fail-closed ONLY on net-new ≥L3 overclaims (the class can never regress);
+  // the grandfathered backlog shrinks monotonically via the tighten hint.
+  if (strict && netNew.length > 0) {
+    console.error(
+      `reachability: ${netNew.length} NEW ≥${REACHABILITY_FLOOR} overclaim(s) — strict`,
+    )
+    process.exit(1)
+  }
 }
 
 // `bun fc surface [--gap web|cli|any] [--audited] [--id <substr>] [--json]`

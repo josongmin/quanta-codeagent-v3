@@ -29,7 +29,12 @@ import type {
   SubagentSpec,
   SubagentStatus,
 } from "../subagent-background"
-import type { PersistedHandle, PersistedSubagentStatus, PersistentSchedulerStore } from "./types"
+import {
+  type PersistedHandle,
+  type PersistedSubagentStatus,
+  PersistenceError,
+  type PersistentSchedulerStore,
+} from "./types"
 
 export interface HydratingSchedulerOpts {
   /** The in-memory ADR-0130 scheduler we wrap. The wrapper does NOT mutate
@@ -47,6 +52,33 @@ export interface HydratingSchedulerOpts {
   /** Test seam: host PID to embed into persisted handles. Default
    *  `process.pid`. */
   readonly hostPid?: () => number
+  /** OPTIONAL out-of-band observability sink (DI observer). The store's
+   *  `save` throws a typed {@link PersistenceError} `"io-failed"` on real disk
+   *  failure — a signal the caller is meant to branch on. This scheduler
+   *  swallows that signal at every write-catch site to keep the hot path quiet
+   *  and non-wedging; when a sink is injected, it ALSO hands the (already
+   *  swallowed) error out-of-band so the host can alert on lost crash/resume
+   *  snapshots.
+   *
+   *  Contract:
+   *   - Invoked AFTER the swallow — NEVER rethrown into the live loop, NEVER
+   *     makes `fork()` async.
+   *   - `critical: true` marks a discoverable-handle loss (fork-immediate,
+   *     terminal completion/cancel, `forceBackground` promotion) — the host may
+   *     want to alert loudly. `critical: false` marks a routine miss (hydration
+   *     write-through / intermediate transition) that self-heals on the next
+   *     save.
+   *   - Absent ⇒ byte-identical to the current swallow (default-OFF).
+   *   - A throwing host callback is defensively guarded here so it cannot
+   *     re-wedge the write chain. */
+  readonly onPersistError?: (
+    err: PersistenceError,
+    ctx: {
+      readonly id: SubagentHandleId
+      readonly phase: "hydrate-writethrough" | "save-on-event"
+      readonly critical: boolean
+    },
+  ) => void
 }
 
 export type HydratedSubagentStatus = SubagentStatus | PersistedSubagentStatus
@@ -159,6 +191,36 @@ export const persistentBackgroundSubagentScheduler = async (
   const isProcessAlive = opts.isProcessAlive ?? defaultIsProcessAlive
   const now = opts.now ?? Date.now
   const hostPidFn = opts.hostPid ?? ((): number => process.pid)
+  const onPersistError = opts.onPersistError
+
+  /** Surface an already-SWALLOWED save failure out-of-band. Normalizes the
+   *  caught value to a {@link PersistenceError} (the store contract only
+   *  promises that type; a stray throwable is wrapped rather than filtered into
+   *  a second silent swallow) and hands it to the injected sink. Absent sink ⇒
+   *  no-op (default-OFF, byte-identical). The sink call is defensively
+   *  try-guarded so a throwing host callback cannot re-wedge the write chain or
+   *  escape into the live loop. */
+  const emitPersistError = (
+    caught: unknown,
+    id: SubagentHandleId,
+    phase: "hydrate-writethrough" | "save-on-event",
+    critical: boolean,
+  ): void => {
+    if (onPersistError === undefined) return
+    const err =
+      caught instanceof PersistenceError
+        ? caught
+        : new PersistenceError(
+            "io-failed",
+            `save ${id}: ${caught instanceof Error ? caught.message : String(caught)}`,
+          )
+    try {
+      onPersistError(err, { id, phase, critical })
+    } catch {
+      // Defensive: a throwing host sink must NOT re-wedge the chain nor escape
+      // into the live loop. The observability call is best-effort by design.
+    }
+  }
 
   /** Cache of HYDRATED-INTERRUPTED handles. These are NOT in `inner` (it has
    *  no entry for them — the original process died). The wrapper synthesizes
@@ -184,8 +246,11 @@ export const persistentBackgroundSubagentScheduler = async (
         // miss; the next save-on-event will retry.
         try {
           await store.save(fixed)
-        } catch {
-          // intentional swallow — hydration must remain best-effort
+        } catch (e) {
+          // intentional swallow — hydration must remain best-effort. Surface
+          // the (typed) failure out-of-band so the host can alert; a dropped
+          // write here self-heals on the next save, so it is NON-critical.
+          emitPersistError(e, fixed.id, "hydrate-writethrough", false)
         }
         continue
       }
@@ -217,7 +282,7 @@ export const persistentBackgroundSubagentScheduler = async (
    *  error so the next save still runs. */
   const lastWriteById = new Map<SubagentHandleId, Promise<void>>()
 
-  const saveLiveHandle = (id: SubagentHandleId): Promise<void> => {
+  const saveLiveHandle = (id: SubagentHandleId, critical: boolean): Promise<void> => {
     // Capture the snapshot NOW so ordering is decided by enqueue order, not by
     // when the serialized chain happens to drain.
     const liveList = inner.list()
@@ -233,12 +298,14 @@ export const persistentBackgroundSubagentScheduler = async (
     const next = prev.then(async () => {
       try {
         await store.save(handle)
-      } catch {
+      } catch (e) {
         // intentional swallow on save-on-event — losing one snapshot must not
         // crash the live loop NOR wedge later writes on this id. The next
         // transition (or shutdown snapshot) will retry, AND the contract on
         // `PersistenceError("io-failed")` is the SURFACE owner's call to
-        // log/alert. Phase 1 keeps the hot path quiet.
+        // log/alert. Phase 1 keeps the hot path quiet — but ALSO surfaces the
+        // typed signal out-of-band via the injected sink (absent ⇒ no-op).
+        emitPersistError(e, id, "save-on-event", critical)
       }
       // Once persisted to disk, also remove from the wrapper's hydrated cache
       // so list() doesn't show the stale snapshot beside the fresh inner view.
@@ -254,12 +321,14 @@ export const persistentBackgroundSubagentScheduler = async (
   const watchToCompletion = (id: SubagentHandleId): void => {
     void inner.await(id).then(
       async () => {
-        await saveLiveHandle(id)
+        // Terminal snapshot — a lost terminal write leaves a discoverable-handle
+        // gap (re-hydrates as "running"), so this is CRITICAL.
+        await saveLiveHandle(id, true)
       },
       async () => {
         // inner.await never rejects (see subagent-background contract);
         // defense in depth.
-        await saveLiveHandle(id)
+        await saveLiveHandle(id, true)
       },
     )
   }
@@ -271,8 +340,9 @@ export const persistentBackgroundSubagentScheduler = async (
       // success).
       const id = inner.fork(spec)
       // Immediately save the running snapshot so a crash before completion
-      // still leaves a discoverable handle.
-      void saveLiveHandle(id)
+      // still leaves a discoverable handle. Losing THIS is the worst case (no
+      // discoverable handle at all) ⇒ CRITICAL.
+      void saveLiveHandle(id, true)
       watchToCompletion(id)
       return id
     },
@@ -301,7 +371,8 @@ export const persistentBackgroundSubagentScheduler = async (
       const live = inner.poll(id)
       if (live !== null) {
         const ok = inner.cancel(id)
-        if (ok) void saveLiveHandle(id)
+        // Terminal cancel snapshot — discoverable-handle transition ⇒ CRITICAL.
+        if (ok) void saveLiveHandle(id, true)
         return ok
       }
       // Hydrated-interrupted / hydrated-terminal handles have no live
@@ -316,7 +387,9 @@ export const persistentBackgroundSubagentScheduler = async (
       // handle (mirrors `cancel`'s save-on-success). No-throw passthrough.
       const outcome = inner.forceBackground(id, forceOpts)
       if (outcome === "promoted_now" || outcome === "moved_to_front") {
-        void saveLiveHandle(id)
+        // Promotion is a discoverable-handle transition (queued → running) ⇒
+        // CRITICAL.
+        void saveLiveHandle(id, true)
       }
       return outcome
     },

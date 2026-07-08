@@ -14,6 +14,8 @@ import { buildSessionFeatures } from "../features"
 import type { TurnDiffSession } from "../git-observability"
 import { buildGuardChain } from "../guards"
 import {
+  type AutomationEngineTickerHandle,
+  type AutomationTickerDeps,
   attachCapEnforcer,
   attachDedupGate,
   attachLocalizePhase,
@@ -21,6 +23,7 @@ import {
   buildGitDirectiveEmit,
   buildSeedMessages,
   buildTurnDiffSession,
+  startAutomationEngineTicker,
   wireHookPromptPending,
 } from "../loop-helpers"
 import { startBackgroundLspPrewarm } from "../lsp-bridge"
@@ -96,6 +99,28 @@ export const maybeStartLspPrewarm = (cfg: AgentConfig): void => {
   if (cfg.lspPrewarm?.enabled !== true) return
   void startBackgroundLspPrewarm(cfg.cwd, cfg.lspPrewarm.warmSignal)
 }
+
+/**
+ * ADR-0240 §B / ALBB-14 — arm the automation-engine background ticker as part
+ * of the SHARED session lifecycle so ALL surfaces that assemble an
+ * `AgentConfig` (web-daemon / headless, not just the CLI REPL) get scheduled-
+ * fire delivery. Previously `startAutomationEngineTicker` had exactly one non-
+ * test call site (the CLI), so a non-CLI surface with `QUANTA_AUTOMATION=on`
+ * scheduled fires but never ticked them.
+ *
+ * Delegates to `startAutomationEngineTicker`, which already returns `undefined`
+ * when the wire is incomplete (slot absent / no handler / non-positive
+ * interval) — so this is byte-identical when `automationEngine` is absent
+ * (the default). The returned handle's `stop()` is registered by
+ * `createRunAgentContext` on the guaranteed `disposeResources` teardown (runs
+ * on BOTH the clean-finish and throw paths), mirroring the CLI's close-stack
+ * registration. `deps` is a test-injection seam for `setInterval`/`clearInterval`.
+ */
+export const maybeStartAutomationTicker = (
+  cfg: AgentConfig,
+  deps?: AutomationTickerDeps,
+): AutomationEngineTickerHandle | undefined =>
+  deps !== undefined ? startAutomationEngineTicker(cfg, deps) : startAutomationEngineTicker(cfg)
 
 export const createRunAgentContext = async (config: AgentConfig): Promise<RunAgentContext> => {
   const cfg: AgentConfig = { ...config }
@@ -249,6 +274,13 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     ...(cfg.compaction !== undefined ? { tokenBaseline: {} } : {}),
   }
 
+  // ADR-0240 §B / ALBB-14 — arm the automation-engine ticker for EVERY surface
+  // (not just the CLI). Default-OFF byte-identical: `undefined` when the
+  // `automationEngine` slot / handler / interval are absent (the common case).
+  // Its `stop()` rides `disposeResources` below — guaranteed on clean finish AND
+  // throw (idempotent).
+  const automationTicker = maybeStartAutomationTicker(cfg)
+
   // D12 — ONE dispose guard shared by the normal finish chain and the throw-path
   // `finally` in `runAgentInner`, so the resource-dispose pass runs at most once.
   const disposeGuard: SessionDisposeGuard = { disposed: false }
@@ -276,8 +308,13 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   // guard above, so a clean finish that already disposed makes this a no-op (and
   // vice-versa). Persist-side snapshots are deliberately NOT run here: a throw
   // mid-turn has no clean turn-derived state to persist.
-  const disposeResources = async (): Promise<void> =>
+  const disposeResources = async (): Promise<void> => {
+    // ALBB-14 — stop the automation ticker on teardown (idempotent). Runs BEFORE
+    // the resource dispose so the background `setInterval` stops burning before
+    // the resident daemons are reaped. `stop()` is a no-throw idempotent guard.
+    automationTicker?.stop()
     await disposeSessionResources({ cfg, features, guard: disposeGuard })
+  }
 
   return {
     features,

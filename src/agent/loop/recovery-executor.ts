@@ -123,6 +123,14 @@ export const applyNonSuccessRecoveryAction = async (
           ),
         })
       : await reactiveCompact({ messages: snapshot, llm: summarizerLlm, system: ctxSystem })
+  // ALBB-08 Claim 3 (INTENTIONAL skip, measure-first) — a reactive empty/refused
+  // summary (`!compacted.ok`) returns BEFORE `recordReactive` below, so it accrues
+  // NO reactive strike. Unlike the PROACTIVE path (which loops pre-sampling and so
+  // MUST strike — ALBB-08 Fix 1), the reactive path terminates HERE in a hard
+  // `kind:"error"`: the turn ends, there is no spin to break. Adding a strike would
+  // be an arbitrary threshold with no repro of a reactive-refusal loop to justify
+  // it; if one ever surfaces, move a `recordReactive(before, before)` ahead of this
+  // return. The reactive breaker cap already backstops repeated reactive failures.
   if (!compacted.ok) return { done: true, result: { kind: "error", reason: compacted.reason } }
   const after = estimateTokens(compacted.messages)
   breaker?.recordReactive(before, after)

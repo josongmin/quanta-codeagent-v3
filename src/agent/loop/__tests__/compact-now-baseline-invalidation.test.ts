@@ -115,3 +115,73 @@ describe("compactNowOnDemand — token-baseline invalidation (FIX 4)", () => {
     expect(box.current).toBeDefined() // untouched — nothing shrank
   })
 })
+
+/**
+ * ALBB-08 Fix 2 — `/summarize-now` (compactNowOnDemand) MUST reset the effort
+ * classifier after it sheds context (parity with the proactive path at
+ * compaction-wire `applyProactiveResult` and the reactive path in
+ * recovery-executor). A user who escalated effort then runs `/summarize-now` to shed
+ * context must NOT keep the stale escalated effort state the summarized context
+ * justified. The reset is threaded as a DI param (symmetric, spyable seam).
+ *
+ * RED-on-injection: drop the `resetClassifier(config.effortClassifier)` call after
+ * the `wm.replace` in `compactNowOnDemand` → the spy assertion (called exactly once)
+ * goes RED.
+ */
+describe("compactNowOnDemand — effort-classifier reset (ALBB-08 Fix 2)", () => {
+  /** A sentinel classifier so we can assert the reset was called with THIS exact
+   *  `config.effortClassifier` object (not just "some classifier"). */
+  const makeClassifier = (): AgentConfig["effortClassifier"] =>
+    ({ reset() {}, onUserPrompt() {}, currentRecommendation: () => undefined }) as never
+
+  const makeConfigWithClassifier = (
+    classifier: AgentConfig["effortClassifier"],
+  ): AgentConfig =>
+    ({
+      system: "sys",
+      llm: summarizerLlm,
+      stream: { emit() {} },
+      compaction: { summarizerLlm, keepRecentTurns: 1, thresholdTokens: 1 },
+      effortClassifier: classifier,
+    }) as unknown as AgentConfig
+
+  test("a shrinking /summarize-now resets the effort classifier exactly once with config.effortClassifier", async () => {
+    const wm = createWorkingMemory(seedMessages())
+    const lenBefore = wm.snapshot().length
+    const classifier = makeClassifier()
+    const cfg = makeConfigWithClassifier(classifier)
+
+    const seen: Array<AgentConfig["effortClassifier"]> = []
+    const resetSpy = (c: AgentConfig["effortClassifier"]): void => {
+      seen.push(c)
+    }
+
+    const compacted = await compactNowOnDemand(cfg, wm, undefined, undefined, resetSpy)
+
+    expect(compacted).toBe(true)
+    expect(wm.snapshot().length).toBeLessThan(lenBefore) // genuinely shed context
+    // Load-bearing: reset fired ONCE, with THIS config's classifier.
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toBe(classifier)
+  })
+
+  test("control: a NON-shrinking /summarize-now (no boundary) does NOT reset the classifier", async () => {
+    // A single indivisible turn ⇒ no boundary ⇒ compactNowOnDemand returns early
+    // (before wm.replace), so the classifier reset must NOT fire (mirrors the
+    // baseline-box control above — the reset is shed-gated, not fire-on-attempt).
+    const wm = createWorkingMemory<Message>([
+      { role: "user", content: [{ type: "text", text: `only ${"x".repeat(500)}` }] },
+    ])
+    const cfg = makeConfigWithClassifier(makeClassifier())
+
+    let resetCalls = 0
+    const resetSpy = (): void => {
+      resetCalls++
+    }
+
+    const compacted = await compactNowOnDemand(cfg, wm, undefined, undefined, resetSpy)
+
+    expect(compacted).toBe(false) // nothing shrank
+    expect(resetCalls).toBe(0) // reset stayed shed-gated
+  })
+})

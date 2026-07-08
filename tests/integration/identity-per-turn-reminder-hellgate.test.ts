@@ -20,8 +20,10 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { buildIdentityReminderText, shouldSpliceIdentityReminder } from "@/agent/loop-helpers"
+import { prepareTurnIteration } from "@/agent/loop/turn-iteration"
 import type { AgentMode } from "@/agent/prompt"
 import { defaultModeVariantRegistry, type SystemPromptVariantRegistry } from "@/agent/system-prompt"
+import { createWorkingMemory } from "@/memory"
 
 const cfgWith = (block: NonNullable<AgentConfig["identityModeVariant"]> | undefined): AgentConfig =>
   ({
@@ -180,5 +182,144 @@ describe("ADR-0239 §C — identity per-turn reminder splice", () => {
     }
     expect(() => buildIdentityReminderText(cfgWith(block), "architect")).not.toThrow()
     expect(buildIdentityReminderText(cfgWith(block), "architect")).toBeUndefined()
+  })
+})
+
+/* ─────────────────────────────────────────────────────────────────────── */
+/* §D — LOOP WIRE: prepareTurnIteration splices the reminder into the       */
+/* ASSEMBLED working memory (ALBB-14). These promote the §C unit-calls to   */
+/* the real loop path: today the helpers exist but have ZERO call sites in  */
+/* prepareTurnIteration, so every §D case is RED until injectIdentityReminder*/
+/* is wired.                                                                 */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+type ErrorEvent = { type: string; message?: string }
+
+/** Build a minimal loop-shaped AgentConfig: only the fields prepareTurnIteration
+ *  touches (all optional slots absent ⇒ default-OFF), plus the identity slot +
+ *  a mode + a capturing stream. */
+const loopCfg = (args: {
+  identityModeVariant?: NonNullable<AgentConfig["identityModeVariant"]>
+  mode?: AgentMode
+}): { cfg: AgentConfig; events: ErrorEvent[] } => {
+  const events: ErrorEvent[] = []
+  const cfg = {
+    signal: new AbortController().signal,
+    maxTurns: Number.POSITIVE_INFINITY, // unbounded ⇒ turn-budget injector is a no-op
+    stream: { emit: (e: ErrorEvent) => events.push(e) },
+    ...(args.mode !== undefined ? { mode: args.mode } : {}),
+    ...(args.identityModeVariant !== undefined
+      ? { identityModeVariant: args.identityModeVariant }
+      : {}),
+  } as unknown as AgentConfig
+  return { cfg, events }
+}
+
+const runTurn = async (cfg: AgentConfig, wm: ReturnType<typeof createWorkingMemory>) =>
+  await prepareTurnIteration({
+    cfg,
+    wm: wm as never,
+    sessionId: "s1",
+    taskRegistry: undefined,
+    turn: 1,
+    localizePhaseState: undefined,
+    dedupGate: undefined,
+    shellSnapshotSession: undefined,
+    hookPromptPending: [],
+    tokenBaseline: undefined,
+  })
+
+const reminderPresent = (wm: ReturnType<typeof createWorkingMemory>): boolean =>
+  (wm.snapshot() as ReadonlyArray<{ content: ReadonlyArray<{ type: string; text?: string }> }>).some(
+    (m) =>
+      m.content.some((b) => b.type === "text" && (b.text ?? "").includes("<system-reminder>")),
+  )
+
+describe("ALBB-14 §D — identity reminder is spliced into assembled working memory", () => {
+  // ── §D1 ── architect + default knob ⇒ reminder PRESENT in wm ────────────
+  test("D1: architect turn splices the <system-reminder> identity line into wm", async () => {
+    const { cfg } = loopCfg({
+      identityModeVariant: { registry: defaultModeVariantRegistry() },
+      mode: "architect",
+    })
+    const wm = createWorkingMemory([])
+    const outcome = await runTurn(cfg, wm)
+    expect(outcome).toBe("continue")
+    expect(reminderPresent(wm)).toBe(true)
+  })
+
+  // ── §D2 ── editor + explicit true ⇒ reminder PRESENT ────────────────────
+  test("D2: editor turn with perTurnReminderEnabled=true splices the reminder", async () => {
+    const { cfg } = loopCfg({
+      identityModeVariant: {
+        registry: defaultModeVariantRegistry(),
+        perTurnReminderEnabled: true,
+      },
+      mode: "editor",
+    })
+    const wm = createWorkingMemory([])
+    await runTurn(cfg, wm)
+    expect(reminderPresent(wm)).toBe(true)
+  })
+
+  // ── §D3 ── default mode + default knob ⇒ ABSENT (byte-identical) ────────
+  test("D3: default mode with default knob does NOT splice (auto-OFF)", async () => {
+    const { cfg } = loopCfg({
+      identityModeVariant: { registry: defaultModeVariantRegistry() },
+      mode: "default",
+    })
+    const wm = createWorkingMemory([])
+    await runTurn(cfg, wm)
+    expect(reminderPresent(wm)).toBe(false)
+  })
+
+  // ── §D4 ── explicit false ⇒ ABSENT for architect ───────────────────────
+  test("D4: perTurnReminderEnabled=false suppresses the splice even for architect", async () => {
+    const { cfg } = loopCfg({
+      identityModeVariant: {
+        registry: defaultModeVariantRegistry(),
+        perTurnReminderEnabled: false,
+      },
+      mode: "architect",
+    })
+    const wm = createWorkingMemory([])
+    await runTurn(cfg, wm)
+    expect(reminderPresent(wm)).toBe(false)
+  })
+
+  // ── §D5 ── absent slot ⇒ byte-identical (no message appended at all) ────
+  test("D5: absent identityModeVariant slot ⇒ wm unchanged (default-OFF byte-identical)", async () => {
+    const { cfg } = loopCfg({ mode: "architect" })
+    const wm = createWorkingMemory([])
+    const before = wm.snapshot().length
+    await runTurn(cfg, wm)
+    expect(reminderPresent(wm)).toBe(false)
+    // No synthetic message appended (turn-budget is a no-op for unbounded maxTurns).
+    expect(wm.snapshot().length).toBe(before)
+  })
+
+  // ── §D6 ── registry-throw observability: warn/metric, NOT silent vanish ─
+  test("D6: a throwing registry surfaces an observable warn (not a silent undefined)", async () => {
+    const throwingRegistry: SystemPromptVariantRegistry = {
+      variantFor() {
+        throw new Error("registry bug")
+      },
+    }
+    const { cfg, events } = loopCfg({
+      identityModeVariant: {
+        registry: throwingRegistry,
+        perTurnReminderEnabled: true,
+      },
+      mode: "architect",
+    })
+    const wm = createWorkingMemory([])
+    await runTurn(cfg, wm)
+    // No reminder spliced (registry threw), but the failure MUST be observable.
+    expect(reminderPresent(wm)).toBe(false)
+    expect(
+      events.some(
+        (e) => e.type === "error" && (e.message ?? "").toLowerCase().includes("identity"),
+      ),
+    ).toBe(true)
   })
 })

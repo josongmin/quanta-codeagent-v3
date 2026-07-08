@@ -6,6 +6,8 @@ import type { BudgetExhaustion } from "../budget"
 import { estimateTokens } from "../compaction"
 import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
 import { captureInterruptedTurn } from "../interrupted-turn"
+import { buildIdentityReminderText } from "../loop-helpers"
+import { resolveAgentMode } from "../mode"
 import { stampTurn } from "../session-resources"
 import type { ShellSnapshotSession } from "../shell-snapshot-session"
 import { makeSyntheticUserMessage } from "../synthetic-user"
@@ -175,6 +177,39 @@ export const injectFocusChainMessage = (cfg: AgentConfig, wm: WorkingMemory<Mess
   }
 }
 
+/** Per-session dedup for the identity registry-throw warn — mirror the
+ *  `focus-chain inject failed` one-shot cadence so a persistently-broken
+ *  registry warns ONCE per session (a `cfg` instance) rather than every turn. */
+const identityRegistryThrowWarned = new WeakSet<AgentConfig>()
+
+/** ADR-0239 §C / ALBB-14 — the FOURTH per-turn injector, sibling of
+ *  {@link injectFocusChainMessage} / {@link injectWorkflowKeywordNudge} /
+ *  {@link injectTurnBudgetReminder}. When the identity slot opts in
+ *  (`perTurnReminderEnabled` true, or mode-conditional auto-ON for
+ *  architect/editor), splice the active mode-variant's identity lines into the
+ *  turn's working memory as a trailing `<system-reminder>` user message — the
+ *  Codex `ARCHITECT_NOTICE` / `EDITOR_NOTICE` per-turn nudge cadence the ADR
+ *  cites.
+ *
+ *  Default-OFF byte-identical: no `identityModeVariant` slot ⇒
+ *  `buildIdentityReminderText` returns `undefined` at the first guard ⇒ nothing
+ *  is appended, no allocation. The registry-throw path is now OBSERVABLE (was a
+ *  silent swallow): a throwing `variantFor` emits a one-shot session-deduped
+ *  error event instead of vanishing. */
+export const injectIdentityReminder = (cfg: AgentConfig, wm: WorkingMemory<Message>): void => {
+  const mode = resolveAgentMode(cfg.mode, cfg.planMode)
+  const text = buildIdentityReminderText(cfg, mode, (e) => {
+    if (identityRegistryThrowWarned.has(cfg)) return
+    identityRegistryThrowWarned.add(cfg)
+    cfg.stream.emit({
+      type: "error",
+      message: `identity per-turn reminder inject failed: ${errMessage(e)}`,
+    })
+  })
+  if (text === undefined) return
+  wm.append(makeSyntheticUserMessage("focus-chain", [{ type: "text", text }]))
+}
+
 export const prepareTurnIteration = async (args: {
   readonly cfg: AgentConfig
   readonly wm: WorkingMemory<Message>
@@ -197,6 +232,11 @@ export const prepareTurnIteration = async (args: {
   const queuedInputs = await syncQueuedTurnInputs(args)
   if (queuedInputs === "aborted") return "aborted"
   injectFocusChainMessage(args.cfg, args.wm)
+  // ADR-0239 §C / ALBB-14 — per-turn identity reminder splice (default-OFF
+  // byte-identical; mode-conditional auto-ON for architect/editor). Previously
+  // a DEAD WIRE: the helpers existed but no loop call site, so
+  // `perTurnReminderEnabled` was inert. Sibling of the injectors around it.
+  injectIdentityReminder(args.cfg, args.wm)
   // CC "ultracode" parity — a hard keyword in the user's prompt nudges this turn
   // toward `run_workflow` (only when the tool is registered; gate untouched).
   injectWorkflowKeywordNudge(args.cfg, args.wm)

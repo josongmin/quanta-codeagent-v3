@@ -87,6 +87,42 @@ export const setKernelObserverErrorSink = (
   return previous
 }
 
+/**
+ * ALBB-04 — stream-append-error sink, SYMMETRIC with {@link observerErrorSink}.
+ * An `eventLog.append` failure while persisting a per-turn STREAM event is a
+ * persistence-only fault: it must NOT (a) poison the chained-promise stream so
+ * later stream events are silently dropped, nor (b) reclassify a
+ * host-successful turn as `turn.failed`. Instead the error is routed HERE
+ * (diagnostic, no-throw) and the chain CONTINUES so a later event still attempts
+ * its append — exactly how `notifyCommitted` already isolates observer throws.
+ * The only new observable is the monotonic `streamAppendFailures` counter
+ * (measure-first — diagnostic, never a gate).
+ */
+let streamAppendErrorSink: (error: unknown) => void = (error) => {
+  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  writeStderr(
+    `[kernel.session] stream eventLog.append rejected (diagnostic, not a turn failure): ${detail}\n`,
+  )
+}
+
+/** Override the stream-append-error sink (e.g. to route into structured
+ *  telemetry). Returns the previous sink so callers can restore it. */
+export const setKernelStreamAppendErrorSink = (
+  sink: (error: unknown) => void,
+): ((error: unknown) => void) => {
+  const previous = streamAppendErrorSink
+  streamAppendErrorSink = sink
+  return previous
+}
+
+/** Monotonic count of stream `eventLog.append` rejections isolated by the
+ *  per-event try/catch in `runTurn` (ALBB-04). Diagnostic-only, process-global;
+ *  exposed for measurement, NOT consulted by any control-flow gate. */
+let streamAppendFailures = 0
+
+/** Read the current process-global stream-append failure count (ALBB-04). */
+export const getKernelStreamAppendFailures = (): number => streamAppendFailures
+
 const notifyCommitted = async (
   ctx: KernelDispatchContext,
   args: KernelCommittedEvents,
@@ -307,17 +343,47 @@ const onTurnCompleted = async (args: {
   }
 }
 
-/** T03 — a turn whose host work threw because its controller was aborted is a
- *  CANCELLATION, not a failure. We classify it via the shared `isAbort`
- *  primitive (never by string-matching the message) and settle status `idle`
- *  with `lastOutcomeReason: "aborted"` so a cancelled runaway turn is not
- *  mislabelled `turn.failed`. We still emit a `turn.failed` wire event (the
- *  protocol has no dedicated cancelled-turn event in this slice's touch set) but
- *  with an explicit "aborted" message so the classification is unambiguous. */
+/**
+ * ALBB-04 — terminal-classification SSOT. ONE predicate consulted by BOTH the
+ * success arm (host RETURNED an outcome) and the catch arm (host THREW) so a
+ * cancellation resolves to the SAME settlement regardless of throw-vs-return.
+ * Patching a single branch would leave the two paths free to drift again; this
+ * function is the single source of truth for "which terminal is this?".
+ *
+ *   - `"aborted"`   — cooperative cancel: the host RETURNED
+ *                     `outcome.reason === "aborted"`, OR it THREW and the throw
+ *                     is an abort (`isAbort`) / the turn controller is aborted.
+ *   - `"error"`     — the host RETURNED `outcome.reason === "error"`.
+ *   - `"completed"` — everything else (a normal successful return). The catch
+ *                     arm never reaches this arm — a non-abort throw is a
+ *                     `"failed"` classification handled by the caller directly.
+ */
+const classifyTerminal = (args: {
+  readonly outcome?: { readonly reason: string }
+  readonly error?: unknown
+  readonly aborted: boolean
+}): "aborted" | "error" | "completed" => {
+  if (args.error !== undefined) {
+    return isAbort(args.error) || args.aborted ? "aborted" : "completed"
+  }
+  if (args.outcome?.reason === "aborted" || args.aborted) return "aborted"
+  if (args.outcome?.reason === "error") return "error"
+  return "completed"
+}
+
+/** T03 / ALBB-04 — a turn whose host work was cancelled (the host either THREW
+ *  because its controller was aborted, or cooperatively RETURNED
+ *  `outcome.reason === "aborted"`) is a CANCELLATION, not a success and not a
+ *  failure. Both entry points converge HERE via {@link classifyTerminal}. We
+ *  settle status `idle` with `lastOutcomeReason: "aborted"` and emit the
+ *  DEDICATED `turn.aborted` terminal wire event (ALBB-04) — distinct from both
+ *  `turn.completed` and `turn.failed` — so no downstream consumer conflates a
+ *  cancel with success or error. `error` carries the throw reason for the
+ *  throw path; `message` falls back to a stable "turn aborted" label. */
 const onTurnAborted = async (args: {
   readonly state: KernelSessionState
   readonly command: TurnRunCommand
-  readonly error: unknown
+  readonly error?: unknown
   readonly ctx: KernelDispatchContext
   readonly events: readonly SessionEvent[]
 }): Promise<KernelDispatchResult> => {
@@ -337,7 +403,7 @@ const onTurnAborted = async (args: {
       revision: nextState.revision,
       emittedAt: args.ctx.clock.now().toISOString(),
       causedByCommandId: args.command.commandId,
-      type: "turn.failed",
+      type: "turn.aborted",
       message: args.error instanceof Error ? args.error.message : "turn aborted",
     },
     {
@@ -510,27 +576,61 @@ const runTurn = async (args: {
       signal: composed.signal,
       onEvent: (event) => {
         pendingStream = pendingStream.then(async () => {
-          const streamed = await emitTurnStreamEvent({
-            state: streamState,
-            command: args.command,
-            ctx: args.ctx,
-            event,
-          })
-          streamState = streamed.state
-          streamedEvents.push(streamed.emitted)
+          // ALBB-04 — per-event isolation. An `eventLog.append` rejection for
+          // THIS stream event is routed to the no-throw diagnostic sink and the
+          // chain CONTINUES, so (a) a later stream event still attempts its
+          // append (no silent drop of subsequent events) and (b) the rejection
+          // never propagates to `await pendingStream` where it would flip a
+          // host-successful turn into `turn.failed`. Symmetric with
+          // `notifyCommitted`'s observer-throw isolation.
+          try {
+            const streamed = await emitTurnStreamEvent({
+              state: streamState,
+              command: args.command,
+              ctx: args.ctx,
+              event,
+            })
+            streamState = streamed.state
+            streamedEvents.push(streamed.emitted)
+          } catch (error) {
+            streamAppendFailures += 1
+            streamAppendErrorSink(error)
+          }
         })
       },
     })
     await pendingStream
-    return result.approvalRequest !== undefined
-      ? await onApprovalRequested({
+    if (result.approvalRequest !== undefined) {
+      return await onApprovalRequested({
+        state: streamState,
+        command: args.command,
+        result,
+        ctx: args.ctx,
+        events: [...args.events, ...streamedEvents],
+      })
+    }
+    // ALBB-04 single-classifier. The success arm (host RETURNED an outcome)
+    // consults the SAME `classifyTerminal` SSOT the catch arm uses, so a
+    // cooperative cancel (`outcome.reason === "aborted"`) settles through
+    // `onTurnAborted` — the dedicated `turn.aborted` terminal — EXACTLY like a
+    // mid-flight abort that threw. Previously only `"error"` was special-cased
+    // and `"aborted"` fell to `onTurnCompleted`, surfacing an identical cancel
+    // as `turn.completed` on the return path and `turn.failed` on the throw path.
+    const terminal = classifyTerminal({
+      outcome: result.outcome,
+      aborted: turnController.signal.aborted,
+    })
+    return terminal === "aborted"
+      ? await onTurnAborted({
           state: streamState,
           command: args.command,
-          result,
+          ...(turnController.signal.reason !== undefined
+            ? { error: turnController.signal.reason }
+            : {}),
           ctx: args.ctx,
           events: [...args.events, ...streamedEvents],
         })
-      : result.outcome.reason === "error"
+      : terminal === "error"
         ? await onTurnErrored({
             state: streamState,
             command: args.command,
@@ -547,9 +647,10 @@ const runTurn = async (args: {
           })
   } catch (error) {
     await pendingStream
-    // A turn torn down by a cancel/abort is classified as aborted, not failed,
-    // via the shared abort primitive — never by message string-matching.
-    return isAbort(error) || turnController.signal.aborted
+    // ALBB-04 single-classifier. The catch arm (host THREW) consults the SAME
+    // `classifyTerminal` SSOT: an abort throw settles as `onTurnAborted`
+    // (dedicated `turn.aborted`), any other throw as `onTurnFailed`.
+    return classifyTerminal({ error, aborted: turnController.signal.aborted }) === "aborted"
       ? await onTurnAborted({
           state: streamState,
           command: args.command,
@@ -642,6 +743,10 @@ export const dispatchSessionCommand = async (
     const live = activeTurnControllers.get(state.sessionId)
     if (live !== undefined) {
       live.abort()
+      // ALBB-04 (P2 doc): the empty `events: []` echo is DELIBERATE — the live
+      // turn is the authoritative owner of the terminal transition and emits it
+      // itself (settling `aborted` via `onTurnAborted` ⇒ the dedicated
+      // `turn.aborted` event). A terminal echo here would double-emit.
       return { state, events: [] }
     }
   }

@@ -172,6 +172,17 @@ export interface WireSlotsComposeConfig {
    * (RFC §1.2). `handler` MAY be sync or async; throws are absorbed by
    * `tickScheduler` and surface as `kind: "errored"` outcomes via the
    * optional `onTick` observer.
+   *
+   * ALBB-14 — the ticker is now armed by the SHARED session lifecycle
+   * (`maybeStartAutomationTicker` in session-bootstrap), so EVERY surface that
+   * assembles an `AgentConfig` (web-daemon / headless, not just the CLI REPL)
+   * delivers scheduled fires. A surface arming the ticker MUST supply a REAL
+   * `handler` (an `AgentLoopPort.enqueueUserMessage` for its live loop). The
+   * base composition-root handler (`agent-arg-builder.ts#resolveAutomation`) is
+   * a FAIL-LOUD stub: it warns AND increments the
+   * `automation.fires_dropped_no_handler` metric counter on each invocation, so
+   * a surface that arms the ticker without overriding the handler surfaces the
+   * delivery gap in metrics instead of silently dropping fires.
    */
   automationEngine?: {
     readonly engine: import("@/scheduler/automation-engine").AutomationEnginePort

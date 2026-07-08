@@ -25,7 +25,8 @@ describe("surface-protocol inventory hellgate", () => {
   test("current canonical inventories stay at the reviewed counts", () => {
     expect(AGENT_EVENT_TYPES.length).toBe(36)
     // T01 — +3 additive session.v1 item events (item.started/delta/completed).
-    expect(SESSION_EVENT_TYPES.length).toBe(18)
+    // ALBB-04 — +1 dedicated cancel terminal (turn.aborted).
+    expect(SESSION_EVENT_TYPES.length).toBe(19)
     expect(AGENT_STATE_TYPES.size).toBe(9)
     expect(SURFACE_READ_MODEL_IDS.length).toBe(4)
     expect(SURFACE_READ_MODEL_STATUSES).toEqual(["subscribed", "supported", "unsupported"])

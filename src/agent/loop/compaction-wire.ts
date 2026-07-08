@@ -10,6 +10,7 @@ import {
   TokenBaselineBox,
   toolResultRefs,
   toolUseIds,
+  UNPRODUCTIVE_PROACTIVE_REASONS,
 } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
@@ -125,6 +126,22 @@ const maybeMicrocompact = (
   return true
 }
 
+/** ALBB-08 Fix 2 — the DEFAULT effort-classifier reset threaded into
+ *  {@link compactNowOnDemand}. Mirrors `context-assembler.resetEffortClassifier`
+ *  (advisory `classifier.reset()`, swallow errors) but defined LOCALLY so the wire
+ *  takes NO import from context-assembler — that module already imports THIS one
+ *  (`maybeCompact`), and pulling `resetEffortClassifier` back would close an
+ *  import cycle. Tests inject a spy in its place (the symmetric DI seam); live code
+ *  gets the real reset without the out-of-lane caller having to pass it. */
+const defaultResetEffortClassifier = (classifier: AgentConfig["effortClassifier"]): void => {
+  if (classifier === undefined) return
+  try {
+    classifier.reset()
+  } catch {
+    // Advisory only.
+  }
+}
+
 /** §11.5 — ON-DEMAND summarize (the `/summarize-now` mid-turn verb). A lean
  *  force-compaction over the live working memory: unlike {@link maybeCompact}
  *  (auto-window, microcompact + bg-controller machinery), this skips all the
@@ -146,6 +163,14 @@ export const compactNowOnDemand = async (
   // `undefined` ⇒ no box wired ⇒ byte-identical to the pre-fix behaviour.
   tokenBaselineBox: import("../compaction").TokenBaselineBoxState | undefined = undefined,
   activeModel: string = configuredModel(config.llm),
+  // ALBB-08 Fix 2 — the effort-classifier reset, threaded as a DI param exactly as
+  // the proactive (`applyProactiveResult`/`maybeCompact`) and reactive
+  // (`recovery-executor`) paths take it. `/summarize-now` sheds context, so escalated
+  // effort state that the shed context justified must be cleared too (symmetry). A
+  // param (not a hard import in the body) keeps the seam testable — a spy stands in
+  // for it; the default performs the REAL reset so the live wire is correct without
+  // the (out-of-lane) caller having to pass it.
+  resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void = defaultResetEffortClassifier,
 ): Promise<boolean> => {
   if (!config.compaction) return false
   const result = await compactIfNeeded({
@@ -185,6 +210,13 @@ export const compactNowOnDemand = async (
   // CRITICAL (§4.6): install via `wm.replace` so the delta-token counter reseeds
   // (a direct `wm.messages[i]` write would bypass it and drift `tokenTotal()`).
   wm.replace([...result.messages])
+  // ALBB-08 Fix 2 — parity with the proactive (`applyProactiveResult` ~L424) and
+  // reactive (`recovery-executor` ~L148) paths: a summarize that shed context must
+  // also reset the effort classifier, so escalated effort does not persist across a
+  // manual `/summarize-now`. Ordered AFTER the WM replace (the context that justified
+  // the escalation is now gone). Only reached on a real compaction (`result.compacted`
+  // returned early above), matching the other sites which reset only on a real replace.
+  resetClassifier(config.effortClassifier)
   // D5 (jul-2) — the on-demand summarize just replaced the prefix. If it SHRANK
   // the transcript, the token baseline measured against the old prefix is stale;
   // invalidate it via the owner method (the same `invalidateOnShrink` seam the
@@ -434,7 +466,14 @@ const applyProactiveResult = (a: {
       appendSummary(archive, entry)
       config.stream.emit({ type: "context_compacted", ...entry })
     }
-  } else if (result.reason === "no_boundary") {
+  } else if (UNPRODUCTIVE_PROACTIVE_REASONS.has(result.reason)) {
+    // ALBB-08 — a non-progress proactive outcome (`no_boundary` OR `empty_summary`)
+    // freed nothing; the transcript stays over-threshold so the proactive path
+    // re-fires next turn. Accrue a zero-progress strike (CC consecutiveFailure)
+    // so a summarizer stuck refusing/returning "" trips the futility breaker
+    // instead of spinning unbounded. `deferred`/`under_threshold` are excluded by
+    // the SSOT set (host-chosen wait / benign). The strike surfaces at the NEXT
+    // `maybeCompact` via `breaker.check()`.
     breaker?.recordProactive(before, before)
   }
 }

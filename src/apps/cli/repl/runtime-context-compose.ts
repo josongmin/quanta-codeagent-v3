@@ -530,7 +530,9 @@ const buildBootstrapContextArgs = (args: {
   }
 }
 
-const buildAdmissibility = (args: {
+// ALBB-11 — exported so the comp-root HITL wiring hellgate can drive the REAL
+// producer (not a hand-passed Set) and assert the `allowlistEscalated` mint.
+export const buildAdmissibility = (args: {
   readonly boot: SessionBootstrapResult
   readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
   readonly sandboxProfile: ReviewerSandboxProfile
@@ -596,9 +598,19 @@ const buildAdmissibility = (args: {
   const circumventionTracker = runtimeConfig().circumventDetect
     ? new CircumventionTracker()
     : undefined
+  // ALBB-11 (ADR-0070 / Round-4) — mint ONE run-scoped dedup Set per session
+  // bootstrap. Every `?.`/`!== undefined` guard on `opts.allowlistEscalated` in
+  // hitl.ts (single-shot dedup, concurrent coalesce, post-approve record) is
+  // inert until the LIVE producer mints this Set — tests hand-passed one, so the
+  // coalesce hellgate stayed green while production ran the legacy re-prompt-
+  // every-time path. The coalesce WeakMap (`pendingReviewsByRun`, hitl.ts:144)
+  // is keyed by THIS handle, so a fresh Set per session gives naturally-isolated
+  // dedup state that GC's with the session — NO explicit clear/recycle needed.
+  const allowlistEscalated = new Set<string>()
   return {
     ...(permissionStore !== undefined ? { permissionStore } : {}),
     reviewerPort,
+    allowlistEscalated,
     defaultReviewer: selectDefaultReviewer({
       threadPermission,
       permissionMode: boot.mode,

@@ -58,6 +58,12 @@ export interface Subagent6Deps {
   /** Forwarded to spawn_agent depth checks. */
   maxDepth?: number
   parentDepth?: number
+  /** ALBB-16 #2 — fork_turns preamble composer, forwarded to spawn_agent so a
+   *  `spawn_agent(fork_turns:…)` inherits the SAME (redacted, live-WM) parent
+   *  context the trio `agent` tool does. Injected by the composition root
+   *  (`tier1/subagent.ts`) as the identical closure the trio uses ⇒ byte-
+   *  identical preambles. Absent ⇒ raw prompt (byte-identical legacy). */
+  forkPrompt?: (prompt: string, spec: "none" | "all" | number) => string
   /** B3 — forwarded to spawn_agent's per-session concurrent-subagent cap.
    *  Absent ⇒ unlimited (opt-in, byte-identical default). */
   maxConcurrent?: number
@@ -160,6 +166,7 @@ const routeSpawnAgent: Route = async (input, deps) => {
     registry: deps.registry,
     ...(deps.maxDepth !== undefined ? { maxDepth: deps.maxDepth } : {}),
     ...(deps.parentDepth !== undefined ? { parentDepth: deps.parentDepth } : {}),
+    ...(deps.forkPrompt !== undefined ? { forkPrompt: deps.forkPrompt } : {}),
     ...(deps.maxConcurrent !== undefined ? { maxConcurrent: deps.maxConcurrent } : {}),
     ...(deps.agentMeta !== undefined ? { agentMeta: deps.agentMeta } : {}),
     ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),

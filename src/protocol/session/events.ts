@@ -83,6 +83,20 @@ export interface TurnFailedEvent extends SessionEventEnvelope<"turn.failed"> {
   readonly message: string
 }
 
+/**
+ * ALBB-04 — dedicated CANCEL terminal wire type (Codex / Claude-Code session
+ * protocol norm). A cooperatively-cancelled turn is neither a success
+ * (`turn.completed`) nor an error (`turn.failed`); overloading either loses the
+ * distinction for any downstream consumer that filters on `event.type`. Both
+ * cancel entry points — the host RETURNING `outcome.reason === "aborted"` and
+ * the host THROWING an abort — settle through THIS single terminal type, so a
+ * cancel is never conflated with success or failure. `message` carries the
+ * abort reason for diagnostics (mirrors {@link TurnFailedEvent.message}).
+ */
+export interface TurnAbortedEvent extends SessionEventEnvelope<"turn.aborted"> {
+  readonly message: string
+}
+
 /** Tool invocation life-cycle. Emitted by the agent loop whenever a tool
  *  call is dispatched. Closed enum on `outcome` so the UI can render
  *  stable status pills without a per-tool branch. */
@@ -194,6 +208,7 @@ export type SessionEvent =
   | SkillScopeDecisionEvent
   | ToolCompletedEvent
   | ToolInvokedEvent
+  | TurnAbortedEvent
   | TurnCompletedEvent
   | TurnLlmContinuationEvent
   | TurnLlmRequestEvent
@@ -214,6 +229,7 @@ export const SESSION_EVENT_TYPES = [
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "turn.aborted",
   "turn.completed",
   "turn.llm.continuation",
   "turn.llm.request",

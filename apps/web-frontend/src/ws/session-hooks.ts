@@ -363,6 +363,7 @@ export const TRANSCRIPT_MUTATING_SESSION_EVENT_TYPES = [
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "turn.aborted",
   "turn.completed",
   "turn.failed",
   "turn.output.delta",
@@ -483,6 +484,34 @@ const TRANSCRIPT_EVENT_HANDLERS = {
         id: event.eventId,
         role: "error",
         text: event.message,
+        timestamp: event.emittedAt,
+      },
+    )
+  },
+  // ALBB-04 — dedicated CANCEL terminal. Finalizes the turn the SAME way
+  // `turn.failed` does (preserve any partial streamed text, clear the pending /
+  // fallback completion slots), but renders as a neutral `system` note rather
+  // than an `error` row — a cooperative cancel is neither success nor failure.
+  "turn.aborted": (state, event) => {
+    const withPartial =
+      state.streamingAssistant !== null && state.streamingAssistant.text.length > 0
+        ? finalizeStreamingAssistant({
+            state,
+            streaming: state.streamingAssistant,
+            text: state.streamingAssistant.text,
+          })
+        : state
+    return appendTranscriptMessage(
+      {
+        ...withPartial,
+        streamingAssistant: null,
+        pendingCompletion: null,
+        fallbackCompletion: null,
+      },
+      {
+        id: event.eventId,
+        role: "system",
+        text: `turn aborted: ${event.message}`,
         timestamp: event.emittedAt,
       },
     )

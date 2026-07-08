@@ -422,6 +422,177 @@ describe("T03 controller-registration window — R2 H1: turn.cancel lands BEFORE
   })
 })
 
+describe("ALBB-04 single-classifier — return-aborted and throw-abort settle to ONE cancel terminal type", () => {
+  // The dedicated cancel terminal wire type. Both a host that RETURNS
+  // `outcome.reason === "aborted"` and a host that THROWS an abort must settle
+  // through it — distinct from BOTH `turn.completed` (success) and `turn.failed`
+  // (error). Pinning the exact string here is the SSOT for the test's intent.
+  const CANCEL_TERMINAL_TYPE = "turn.aborted"
+
+  test("(a) return-aborted host emits the cancel terminal type, NOT turn.completed", async () => {
+    const { state, eventLog } = await seedRunningState("cx-ra")
+    const host: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-ra",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      // Cooperative cancel: the host RETURNS aborted WITHOUT throwing.
+      runTurn: async () => ({
+        outcome: { reason: "aborted", turns: 1, messages: messagesOf("ping") } as AgentOutcome,
+        messages: messagesOf("ping"),
+      }),
+      close: async () => undefined,
+    }
+    const result = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-ra",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog, host },
+    )
+    const types = result.events.map((e) => e.type)
+    // The buggy pre-fix code routes return-aborted to `onTurnCompleted` and emits
+    // `turn.completed` — this assertion is RED until the success arm is fixed.
+    expect(types).toContain(CANCEL_TERMINAL_TYPE)
+    expect(types).not.toContain("turn.completed")
+    expect(types).not.toContain("turn.failed")
+    expect(result.state.status).toBe("idle")
+    expect(result.state.lastOutcomeReason).toBe("aborted")
+  })
+
+  test("(a') throw-abort host emits the SAME cancel terminal type (single-classifier convergence)", async () => {
+    const { state, eventLog } = await seedRunningState("cx-ta")
+    let resolveTurn: (() => void) | undefined
+    const turnGate = new Promise<void>((r) => {
+      resolveTurn = r
+    })
+    const host: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-ta",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      // Mid-flight cancel via THROW: park, get aborted by turn.cancel, then throw
+      // the abort reason (mirrors a real host tearing down on signal abort).
+      runTurn: async ({ signal }) => {
+        await turnGate
+        const reason = signal?.reason ?? new DOMException("aborted", "AbortError")
+        throw reason
+      },
+      close: async () => undefined,
+    }
+    const turnPromise = dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-ta",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog, host },
+    )
+    await new Promise<void>((r) => setTimeout(r, 5))
+    await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-ta",
+        commandId: "cancel",
+        issuedAt: clock.now().toISOString(),
+        type: "turn.cancel",
+      },
+      { clock, eventLog, host },
+    )
+    resolveTurn?.()
+    const result = await turnPromise
+    const types = result.events.map((e) => e.type)
+    // Both cancel entry points converge on the SAME dedicated terminal type.
+    expect(types).toContain(CANCEL_TERMINAL_TYPE)
+    expect(types).not.toContain("turn.completed")
+    expect(types).not.toContain("turn.failed")
+    expect(result.state.status).toBe("idle")
+    expect(result.state.lastOutcomeReason).toBe("aborted")
+  })
+})
+
+describe("ALBB-04 append-failure isolation — persistence failure must not drop events or flip outcome", () => {
+  test("(b) an eventLog.append rejection mid-stream keeps status idle, keeps turn.completed, and later appends are still attempted", async () => {
+    const { state } = await seedRunningState("cx-append")
+    // Fresh log so we count appends deterministically from the turn.run onward.
+    const inner = new InMemorySessionEventLog()
+    // Reject the SECOND append (mid-stream) — the first stream event's append —
+    // then let every later append (the second stream event + terminal events)
+    // proceed. We count total append attempts to prove the chain was not poisoned.
+    let appendCalls = 0
+    let rejectedIndex = -1
+    // The rejecting index is the 2nd append after turn.run's immediate events.
+    // turn.run emits immediate events (turn.started + state.updated) via appendEvents,
+    // then each stream event appends one-by-one. We reject the append at the point
+    // where the FIRST stream event is persisted, and require the SECOND stream
+    // event's append to STILL be attempted afterward.
+    const REJECT_ON = 3 // immediate(2 appends: started+updated) then 1st stream = 3rd call
+    const failingLog = {
+      async append(event: Parameters<InMemorySessionEventLog["append"]>[0]): Promise<void> {
+        appendCalls += 1
+        if (appendCalls === REJECT_ON) {
+          rejectedIndex = appendCalls
+          throw new Error("event log append exploded (persistence-only failure)")
+        }
+        inner.append(event)
+      },
+      list: () => inner.list(),
+    }
+    const host: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-append",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      // Emit TWO stream events, then RETURN completed (host-successful work).
+      runTurn: async ({ onEvent }) => {
+        onEvent?.({ type: "assistant_text.delta", delta: "po" })
+        onEvent?.({ type: "assistant_text.delta", delta: "ng" })
+        const messages: readonly Message[] = [
+          { role: "user", content: [{ type: "text", text: "ping" }] },
+          { role: "assistant", content: [{ type: "text", text: "pong" }] },
+        ]
+        return {
+          outcome: { reason: "completed", turns: 1, messages } as AgentOutcome,
+          messages,
+        }
+      },
+      close: async () => undefined,
+    }
+    const result = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-append",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog: failingLog, host },
+    )
+    // (i) A persistence-only failure is diagnostic — the host-successful turn is
+    // NOT reclassified to failed. Terminal remains turn.completed, status idle.
+    const types = result.events.map((e) => e.type)
+    expect(result.state.status).toBe("idle")
+    expect(types).toContain("turn.completed")
+    expect(types).not.toContain("turn.failed")
+    // (ii) The chain was NOT poisoned: the append that rejected fired, AND a LATER
+    // append (the 2nd stream event / terminal events) was still ATTEMPTED — i.e.
+    // total append attempts advanced well past the rejecting index.
+    expect(rejectedIndex).toBe(REJECT_ON)
+    expect(appendCalls).toBeGreaterThan(REJECT_ON)
+  })
+})
+
 describe("T03 onCommitted isolation — M-5: observer failure must not redefine turn outcome", () => {
   test("a throwing onCommitted does NOT flip a completed turn into turn.failed", async () => {
     const { state, eventLog } = await seedRunningState("cx-6")

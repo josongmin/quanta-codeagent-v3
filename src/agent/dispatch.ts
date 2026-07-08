@@ -394,6 +394,15 @@ const dispatchToolInner = async (
   let rewritten: { value: unknown } | undefined
   const gated = await runAdmissibilityGate(call, config, permission, action, autoClassifier, {
     ...(config.admissibility ?? {}),
+    // ALBB-11 (ADR-0407) — the approval-state-machine is a cross-cutting
+    // observability port wired onto TOP-LEVEL `config` (observability-wire.ts),
+    // NOT the `admissibility` sub-bundle. Thread it into the gate opts at this
+    // single seam so reviewer escalations attribute `request`/`settle` to the
+    // Objective / Run Ledger. Presence-gated ⇒ absent (default-OFF /
+    // `QUANTA_OBSERVABILITY` off) is byte-identical legacy.
+    ...(config.approvalStateMachine !== undefined
+      ? { approvalStateMachine: config.approvalStateMachine }
+      : {}),
     onInputMutation: (next) => {
       rewritten = { value: next }
     },

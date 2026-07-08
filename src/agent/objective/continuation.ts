@@ -31,7 +31,16 @@
  * Default-OFF (RFC §1.2): `enabled: false` ⇒ {@link evaluateContinuation}
  * returns `disabled` and {@link runIdleContinuation} never touches a port or
  * the resume sink — byte-identical to today's informational objective (no
- * continuation ever launches). The composition root wires `enabled` from the
+ * continuation ever launches).
+ *
+ * ⚠️ NOT YET WIRED (ALBB-15 honesty note): this whole module is CURRENTLY DEAD
+ * — `evaluateContinuation` / `runIdleContinuation` / {@link ContinuationSemaphore}
+ * are only barrel re-exported from `@/agent/objective` with ZERO production
+ * callers, and the `QUANTA_GOAL_ENFORCE` → `goalContinuationEnforce` knob has
+ * ZERO readers. The LIVE budget-suppression path is `objectiveBudgetExhausted`
+ * in `@/agent/loop/emit-helpers` (reads the DERIVED `budget_limited` status),
+ * NOT this continuation machine. To activate: bind the probes/resume at the
+ * idle-monitor / reactor seam and gate `ContinuationDeps.enabled` from the
  * `QUANTA_GOAL_ENFORCE` knob.
  *
  * SLICE FENCE: imports ONLY `./types` (the closed `ObjectivePort` +

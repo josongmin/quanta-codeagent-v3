@@ -25,6 +25,7 @@ export const ATTACH_RENDERED_SESSION_EVENT_TYPES = [
   "turn.output.delta",
   "turn.completed",
   "turn.failed",
+  "turn.aborted",
   "tool.invoked",
   "tool.completed",
   "item.started",
@@ -52,6 +53,7 @@ const ATTACH_SESSION_EVENT_RENDERERS: AttachRendererRegistry = {
     event.delta,
   "turn.completed": (event) => `\n[turn ${event.outcomeReason}]\n`,
   "turn.failed": (event) => `\n[turn failed] ${event.message}\n`,
+  "turn.aborted": (event) => `\n[turn aborted] ${event.message}\n`,
   "tool.invoked": (event) => {
     const args = event.argsPreview !== undefined ? ` ${event.argsPreview}` : ""
     return `\n  ⚙ ${event.toolName}${args}\n`

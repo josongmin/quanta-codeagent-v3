@@ -85,11 +85,21 @@ const workflowTools = (
   enabled: boolean,
   runner: ReturnType<typeof createSubagentRunner>,
   activityStore: import("@/activity").ActivityStore | undefined,
+  parentDepth: number,
 ): Tool[] =>
   enabled
     ? [
         createRunWorkflowTool({
-          agentRun: subagentRunnerToAgentRunPort(runner, { depth: 1 }),
+          // ALBB-16 #3 — thread the ACCUMULATED recursion depth (parent + 1),
+          // matching the CSV (`buildInMemoryBatchRunPort(runner, config.depth ?? 0)`)
+          // and 6-tool (`parentDepth: config.depth`) siblings below. A constant
+          // `{ depth: 1 }` reset the bound: a deep child minting its own
+          // `run_workflow` would restart at depth 1 and BYPASS the runner's
+          // `req.depth > maxDepth` deny. `(config.depth ?? 0) + 1` makes a nested
+          // workflow spawn from a parent at `maxDepth` land at `maxDepth + 1` ⇒
+          // DENIED. At the root (`config.depth` undefined) this is `1` —
+          // byte-identical to the old constant for the top-level case.
+          agentRun: subagentRunnerToAgentRunPort(runner, { depth: parentDepth + 1 }),
           // jun-15 P0-b — thread the session Activity Spine store so live runs
           // feed `/activity`. Absent ⇒ omitted ⇒ byte-identical (no recording).
           ...(activityStore !== undefined ? { activityStore } : {}),
@@ -97,9 +107,23 @@ const workflowTools = (
       ]
     : []
 
+/** Optional wiring the composition root injects alongside `config`. */
+export interface SubagentBlockDeps {
+  /** ALBB-16 #1 — LIVE working-memory source for `fork_turns`, mirroring the
+   *  advisor's `transcriptSource` (advisor.ts:140). The loop owns its live
+   *  message buffer and injects this getter; `forkPrompt` resolves it LAZILY at
+   *  spawn time so a child spawned mid-session inherits the turns accrued AFTER
+   *  block build — not just the frozen `config.messages` seed. ABSENT ⇒ falls
+   *  back to `config.messages ?? []` (byte-identical to the seed-sourced path). */
+  readonly transcriptSource?: () => readonly import("@/llm").Message[]
+}
+
 /** Build the subagent block from `config.subagent`. Returns `undefined` when
  *  the block is absent so the composer can skip it. */
-export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefined => {
+export const buildSubagentBlock = (
+  config: AgentConfig,
+  deps: SubagentBlockDeps = {},
+): SubagentBlock | undefined => {
   if (!config.subagent) return undefined
 
   // B1 — `toolNamespace` (when present) is threaded into the runner so forked
@@ -111,6 +135,25 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
       ? { toolNamespace: config.subagent.toolNamespace }
       : {}),
   })
+
+  // GAP8a / ALBB-16 #1+#2 — the ONE shared `forkPrompt` source. Both the trio
+  // `agent` tool and the 6-tool `spawn_agent` path close over THIS single
+  // closure, so their inherited-context preambles are byte-identical by
+  // construction (no divergent second implementation). The transcript is read
+  // LAZILY at spawn time from the live working-memory thunk when the composition
+  // root wired one (`deps.transcriptSource`), else fails CLOSED to the frozen
+  // session seed (`config.messages ?? []`) — byte-identical to the legacy path.
+  // `redactTranscript` (advisor) scrubs secrets + PII; `fork_turns:"none"`
+  // (default) ⇒ identity (byte-identical cold start).
+  const forkPrompt = (prompt: string, spec: "none" | "all" | number): string =>
+    composeForkedPrompt(
+      prompt,
+      buildForkTurnsPreamble(
+        deps.transcriptSource?.() ?? config.messages ?? [],
+        spec,
+        redactTranscript,
+      ),
+    )
 
   // `createAgentTool` mints a fresh TaskRegistry when none is passed and
   // re-exposes whichever instance it used as `.registry`. We let it create
@@ -129,17 +172,9 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
     ...(config.subagent.taskRegistry !== undefined
       ? { registry: config.subagent.taskRegistry }
       : {}),
-    // GAP8a fork_turns — compose an inherited (redacted) parent-transcript
-    // preamble onto the child prompt for the requested fork spec. Sources
-    // `config.messages` (the session SEED transcript — same convention as the
-    // advisor's transcriptSource; the loop's live working-memory is a separate
-    // buffer). `redactTranscript` (advisor) scrubs secrets + PII.
-    // `fork_turns:"none"` (default) ⇒ identity (byte-identical cold start).
-    forkPrompt: (prompt, spec) =>
-      composeForkedPrompt(
-        prompt,
-        buildForkTurnsPreamble(config.messages ?? [], spec, redactTranscript),
-      ),
+    // GAP8a fork_turns — the SHARED `forkPrompt` (see above); live-WM sourced,
+    // fail-closed to the seed. The 6-tool path is wired to the SAME closure.
+    forkPrompt,
     // §4.4 — TYPED agent kind boundary validation. Gate read at the composition
     // root (ADR-0144: `@/agent` reads `runtimeConfig()`, never `process.env`).
     // Default-OFF (gate absent) ⇒ `enforceTypedAgentKind` omitted ⇒ the legacy
@@ -181,6 +216,7 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
       config.subagent.enableWorkflow === true,
       runner,
       config.subagent.activityStore,
+      config.depth ?? 0,
     ),
     // GAP7-4 — `spawn_agents_on_csv` over the SAME runner (one child per CSV row,
     // ephemeral in-memory store). Default-OFF (QUANTA_SPAWN_AGENTS_CSV).
@@ -208,6 +244,11 @@ export const buildSubagentBlock = (config: AgentConfig): SubagentBlock | undefin
       // accumulates across forks (mirrors `subagent-batch.ts` parentDepth).
       // Absent ⇒ defaults to 0 (root) in the handler — byte-identical.
       ...(config.depth !== undefined ? { parentDepth: config.depth } : {}),
+      // ALBB-16 #2 — thread the SAME shared `forkPrompt` the trio uses so a
+      // `spawn_agent(fork_turns:…)` inherits the identical (redacted, live-WM)
+      // preamble by construction. Absent on the deps ⇒ raw prompt (the handler's
+      // legacy byte-identical path).
+      forkPrompt,
       ...(config.subagent.maxConcurrent !== undefined
         ? { maxConcurrent: config.subagent.maxConcurrent }
         : {}),

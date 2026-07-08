@@ -34,6 +34,7 @@ import type { AgentArgs, IdentityModeToken, ToolProfileToken } from "@/host/runt
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
 import { type LLMPort, pickProvider, tryCreateLLM } from "@/llm"
 import { type CapabilityNegotiator, defaultNegotiator, fullNegotiator } from "@/mcp"
+import { metrics } from "@/observability"
 import { buildAutorunEligibility } from "@/permission"
 import {
   buildRetrievalStackCore,
@@ -512,6 +513,12 @@ const resolveForkSession = (
   }
 }
 
+/** ALBB-14 — fail-loud drop counter (posture b). Incremented each time the
+ *  composition-root STUB automation handler is invoked (a fire landed on the
+ *  base handler that no mode-preset overrode). Surfaces the web-daemon /
+ *  headless delivery gap in metrics instead of it being a silent drop. */
+export const AUTOMATION_FIRES_DROPPED_COUNTER = "automation.fires_dropped_no_handler"
+
 /** ADR-0279 — composition-root automation slot. Returns `null` when
  *  `QUANTA_AUTOMATION !== "on"` (slot OMITTED; byte-identical legacy).
  *  When the env gate is on, constructs an `AutomationEngineSlot` over an
@@ -537,8 +544,14 @@ const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null 
           // Stub — the unified-agent base does not own an agent loop;
           // mode-preset hosts (e.g. the REPL) override this slot before
           // assembly. Fires that land here are recorded by the engine
-          // (run + inbox rows) but do NOT reach a live loop. The warn
-          // makes the gap observable.
+          // (run + inbox rows) but do NOT reach a live loop.
+          //
+          // ALBB-14 (posture b) — the drop is now MEASURED, not just warned:
+          // increment an explicit counter so a non-CLI surface that armed the
+          // ticker without overriding the handler surfaces the delivery gap in
+          // metrics (`automation.fires_dropped_no_handler`), in addition to the
+          // warn line below.
+          metrics.counter(AUTOMATION_FIRES_DROPPED_COUNTER).inc()
           logger.warn(
             "automation handler invoked with stub agent loop — fire ignored. " +
               "A mode-preset must override `automationEngine.handler` with a " +
@@ -549,6 +562,13 @@ const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null 
     },
   )
 }
+
+/** ALBB-14 test seam — expose the private `resolveAutomation` so the
+ *  fail-loud-stub contract (posture b) can be exercised directly. Not part of
+ *  the public host API. */
+export const __resolveAutomationForTest = (
+  env: NodeJS.ProcessEnv,
+): AutomationEngineSlot | null => resolveAutomation(env)
 
 const attachExecutionPlaneSlots = (
   base: AssembleRequest["base"],

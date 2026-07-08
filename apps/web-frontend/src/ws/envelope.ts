@@ -46,6 +46,7 @@ const EVENT_TYPES: readonly SessionEventType[] = [
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "turn.aborted",
   "turn.completed",
   "turn.llm.continuation",
   "turn.llm.request",

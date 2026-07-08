@@ -568,10 +568,20 @@ export const shouldSpliceIdentityReminder = (cfg: AgentConfig, mode: AgentMode):
  *  `undefined` when the splice should not fire (knob off / slot absent /
  *  empty identity / registry throw). The text is wrapped in
  *  `<system-reminder>...</system-reminder>` markers; body is the variant's
- *  `identity` lines joined by `\n`. Pure given the registry. */
+ *  `identity` lines joined by `\n`. Pure given the registry.
+ *
+ *  ALBB-14 — the registry-throw branch USED to swallow silently (bare
+ *  `catch { return undefined }`), so a knob-ON splice whose `variantFor` threw
+ *  vanished with no trace (the knob-on-but-inert failure class). The optional
+ *  `onRegistryThrow` observer makes that path observable WITHOUT changing the
+ *  return contract: when `shouldSpliceIdentityReminder` said "yes" but the
+ *  registry throws, the observer fires with the error. Absent observer ⇒
+ *  byte-identical to the prior swallow (still returns `undefined`, never
+ *  throws) — the §C unit tests that call this with 2 args are unaffected. */
 export const buildIdentityReminderText = (
   cfg: AgentConfig,
   mode: AgentMode,
+  onRegistryThrow?: (e: unknown) => void,
 ): string | undefined => {
   if (!shouldSpliceIdentityReminder(cfg, mode)) return undefined
   const slot = cfg.identityModeVariant
@@ -581,7 +591,11 @@ export const buildIdentityReminderText = (
     const activeMode = slot.activeMode?.() ?? mode
     const variant = slot.registry.variantFor(activeMode)
     identity = variant.identity
-  } catch {
+  } catch (e) {
+    // Observable-drop: the splice was requested (knob true / mode auto-ON) but
+    // the registry blew up. Surface it so an opted-in operator sees WHY the
+    // reminder disappeared instead of a silent no-op. Never rethrows.
+    onRegistryThrow?.(e)
     return undefined
   }
   if (identity === undefined || identity.length === 0) return undefined

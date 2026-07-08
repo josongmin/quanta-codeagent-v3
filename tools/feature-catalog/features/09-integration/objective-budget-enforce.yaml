@@ -117,15 +117,26 @@ notes: |
   e2e drives the REAL runAgent loop via the canonical reactive-compaction
   scripted-LLM harness. Sibling-shaped to objective-tools (ADR-0402).
 
-  `src/agent/objective/continuation.ts` is the PURE idle goal-continuation
-  machine (Codex `core/src/goals.rs` parity) the budget gate hooks into:
-  `evaluateContinuation` is a total no-I/O decision over a snapshot that
-  launches only when every guard in a fixed order passes (one of the
-  closed-set `ContinuationSkipReason`s — including `goal-not-active` /
-  `goal-changed`, which is how the derived `budget_limited` status suppresses a
-  resume); `ContinuationSemaphore` is the single-permit, idempotent-release
-  guard so ≤1 continuation is ever in flight; `runIdleContinuation` is the
-  thin NO-THROW orchestrator over injected ports (objective/clock/idle-turn-
-  queue-mailbox-plan-ephemeral probes + a `resume` sink) that re-reads goal
-  status at launch. Default-OFF: `enabled:false` ⇒ `disabled` skip, no port
-  read, no resume.
+  ACTUAL suppression path (ALBB-15 correction): the LIVE budget gate is
+  `objectiveBudgetExhausted(config, threadId)` in
+  `src/agent/loop/emit-helpers.ts` — it reads the `QUANTA_OBJECTIVE_BUDGET_ENFORCE`
+  knob then the DERIVED `budget_limited` status off the store, and the loop
+  short-circuits the idle-continuation re-issue at the two existing
+  compaction/PTL-recovery sites. That path does NOT touch the continuation
+  machine.
+
+  `src/agent/objective/continuation.ts` (`evaluateContinuation` /
+  `runIdleContinuation` / `ContinuationSemaphore`) is the PURE idle
+  goal-continuation machine (Codex `core/src/goals.rs` parity) — but it is
+  CURRENTLY DEAD: barrel re-exported from `src/agent/objective/index.ts` with
+  ZERO production callers, and the `QUANTA_GOAL_ENFORCE` → `goalContinuationEnforce`
+  knob (`runtime-config.ts:212`) has ZERO readers. It is retained as a
+  hellgated primitive for a FUTURE idle-monitor / reactor wiring, NOT part of
+  the live budget gate. (It is symbol-level dead-API, not module-unreachable,
+  so `fc reachability --strict --symbols` sees it; the feature stays L3 because
+  its OTHER evidence.code files — store/loop/runtime-config/tool — are live.)
+  Promotion for the continuation half: bind `runIdleContinuation` off the
+  idle-monitor/reactor seam, make `goalContinuationEnforce` gate
+  `ContinuationDeps.enabled`, add a loop-turn-boundary `recordUsage({turns:1})`
+  so the turns budget is real (today `turnsUsed` only increments via the
+  model-invoked `objective_update {kind:"recordUsage"}` tool path), then A/B.
