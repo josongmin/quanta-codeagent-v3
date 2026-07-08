@@ -29,6 +29,7 @@
 
 import { type LLMPort, laneLabeledPort } from "@/llm"
 import { type CandidateFamily, candidateFamilyCoverageMissing } from "./candidate-families"
+import { laneProgress, laneProgressPort } from "./lane-progress"
 import type { PerCandidateSeed } from "./location-set-fanout"
 import type { RepairValidateArgsInputs } from "./repair/index"
 import { buildRepairValidateArgs } from "./repair/index"
@@ -281,21 +282,28 @@ const runOneBreadthCandidate = async (
   seedMsg: string | undefined,
   index: number,
 ): Promise<RepairCandidateOutcome | undefined> => {
+  const lane = `repair-breadth#${index}`
+  laneProgress.emit({ kind: "start", lane })
+  let laneOk = false
+  let lanePatchBytes = 0
   const fork = await deps.sandboxPorts.forkSandbox(deps.instanceId, deps.mainSandbox)
   try {
     // Label this candidate's turns so the N concurrent lanes stay distinguishable
     // on the one shared recording tape (replay-neutral; only tags metadata.lane).
-    const laneLlm = laneLabeledPort(deps.resolveLaneLlm(index), `repair-breadth#${index}`)
+    // laneProgressPort adds LIVE per-turn/-tool progress emission (display-only).
+    const laneLlm = laneProgressPort(laneLabeledPort(deps.resolveLaneLlm(index), lane), lane)
     const locationFocus = deps.perCandidateSeed?.focusOf?.(index)
     const generatedRun = await deps.runAgentOnFork(fork, seedMsg, laneLlm)
     const prepared = await maybeWidenCandidateFamilyCoverage(deps, generatedRun, index, fork)
     const run = prepared.run
+    lanePatchBytes = run.patch?.length ?? 0
     // Validate the fork through the SAME repair-gate policy as the single path,
     // with `sandbox` pointed at THIS fork (so primary-rail / agent-cmd / repro all
     // execute against the candidate's own tree).
     const validator = await deps.validate(
       buildRepairValidateArgs({ ...deps.validateInputs, sandbox: fork }, run),
     )
+    laneOk = validator.ok === true
     // `adopt` re-materializes THIS candidate onto the MAIN sandbox so the loop
     // continues from it. Captured by value (the fork's cumulative diff); the fork
     // is disposable once captured.
@@ -314,6 +322,7 @@ const runOneBreadthCandidate = async (
       adopt,
     }
   } finally {
+    laneProgress.emit({ kind: "done", lane, ok: laneOk, patchBytes: lanePatchBytes })
     // The fork is never the continuation point — the winner is re-applied to main
     // by `adopt`, losers are discarded — so every fork is cleaned up here.
     await deps.sandboxPorts.cleanupSandbox(fork)

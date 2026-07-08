@@ -17,7 +17,11 @@ import {
   type RepairBreadthDeps,
 } from "@/runner/batch/eval/repair-breadth"
 
-const fakeLane = (tag: string): LLMPort => ({ tag }) as unknown as LLMPort
+// `model` doubles as the lane's identity tag: the driver now WRAPS each lane
+// port (laneLabeledPort for recording + laneProgressPort for live progress),
+// so the exact object no longer reaches runAgentOnFork — but the wrappers
+// delegate `model` verbatim, so routing is still checkable via `.model`.
+const fakeLane = (tag: string): LLMPort => ({ tag, model: tag }) as unknown as LLMPort
 
 interface Recorder {
   forks: string[]
@@ -117,12 +121,14 @@ describe("repair-breadth fan-out — forks B sandboxes, runs+validates each", ()
     expect(outcomes).toHaveLength(3)
     // 3 distinct forks. Guard-revert: a non-forking impl would create 0/1.
     expect(rec.forks).toHaveLength(3)
-    // Each agent run got its lane port (i mod laneCount). Guard-revert: dropping
-    // the lane arg would push `undefined` here.
+    // Each agent run got a port DERIVED from its lane (i mod laneCount) — the
+    // driver wraps it for recording + progress, so we check the delegated
+    // `.model` tag rather than object identity. Guard-revert: dropping the lane
+    // arg would push `undefined` here (and `.model` would be undefined).
     const lanesByFork = new Map(rec.agentCalls.map((c) => [c.fork, c.lane]))
-    expect(lanesByFork.get("/fork#0")).toBe(lanes[0])
-    expect(lanesByFork.get("/fork#1")).toBe(lanes[1])
-    expect(lanesByFork.get("/fork#2")).toBe(lanes[2])
+    expect(lanesByFork.get("/fork#0")?.model).toBe(lanes[0]?.model)
+    expect(lanesByFork.get("/fork#1")?.model).toBe(lanes[1]?.model)
+    expect(lanesByFork.get("/fork#2")?.model).toBe(lanes[2]?.model)
     // The seed propagated to every candidate.
     expect(rec.agentCalls.every((c) => c.seed === "seed-x")).toBe(true)
     // Validation ran against EACH FORK's own sandbox (not the main one). This is

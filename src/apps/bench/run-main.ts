@@ -54,12 +54,16 @@ import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-bran
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
 import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
 import { startHostResourceSampler } from "./host-resource-sampler"
+import { startLaneProgressRenderer } from "./lane-progress-renderer"
 import { resolveModelLanes } from "./model-lanes"
 import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
 import { seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
-import { resolveBenchReasoningSummary, resolveBenchReasoningSummaryDetail } from "./reasoning-summary"
+import {
+  resolveBenchReasoningSummary,
+  resolveBenchReasoningSummaryDetail,
+} from "./reasoning-summary"
 import {
   argFlag,
   argPositiveInt,
@@ -307,7 +311,10 @@ const runSwebenchTask = async (
   // for this task carries its instance/run label in metadata. The ctx is
   // metadata-only — does not affect the cassette hash or replay semantics.
   const instanceFreshLlm = (): LLMPort =>
-    deps.freshLlm({ instanceId: task.instanceId, ...(deps.obs?.runId !== undefined ? { runId: deps.obs.runId } : {}) })
+    deps.freshLlm({
+      instanceId: task.instanceId,
+      ...(deps.obs?.runId !== undefined ? { runId: deps.obs.runId } : {}),
+    })
   try {
     await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
     const instance = toInstance(task, dest)
@@ -486,25 +493,32 @@ const runDatasetMode = async (
   // map (health-abort is a serial-path optimisation).
   let runHealth: RunHealthSummary | undefined
   let results: InstanceResult[]
-  if (concurrency > 1) {
-    results = await mapWithConcurrency(selected, concurrency, (task) =>
-      runSwebenchTask(task, taskDeps),
-    )
-  } else {
-    const out = await runBatchWithHealth({
-      instances: selected,
-      env: process.env,
-      runInstance: (task) => runSwebenchTask(task, taskDeps),
-      idOf: (task) => task.instanceId,
-    })
-    results = out.results
-    runHealth = {
-      aborted: out.runHealth.aborted,
-      verdict: out.runHealth.verdict,
-      reason: out.runHealth.reason,
-      attempted: out.runHealth.attempted,
-      total: out.runHealth.total,
+  // Live view of parallel candidate lanes (repair-breadth / verify-select) —
+  // TTY panel or non-TTY prefixed logs. Inert when disabled or nothing emits.
+  const stopLaneProgress = startLaneProgressRenderer()
+  try {
+    if (concurrency > 1) {
+      results = await mapWithConcurrency(selected, concurrency, (task) =>
+        runSwebenchTask(task, taskDeps),
+      )
+    } else {
+      const out = await runBatchWithHealth({
+        instances: selected,
+        env: process.env,
+        runInstance: (task) => runSwebenchTask(task, taskDeps),
+        idOf: (task) => task.instanceId,
+      })
+      results = out.results
+      runHealth = {
+        aborted: out.runHealth.aborted,
+        verdict: out.runHealth.verdict,
+        reason: out.runHealth.reason,
+        attempted: out.runHealth.attempted,
+        total: out.runHealth.total,
+      }
     }
+  } finally {
+    stopLaneProgress()
   }
 
   const reportPath = argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json")
@@ -616,7 +630,11 @@ const resolveLLM = (
   const reasoningSummaryDetail = resolveBenchReasoningSummaryDetail(process.env)
   const llm = tryCreateLLM(
     provider,
-    { ...(modelArg !== undefined ? { model: modelArg } : {}), reasoningSummary, reasoningSummaryDetail },
+    {
+      ...(modelArg !== undefined ? { model: modelArg } : {}),
+      reasoningSummary,
+      reasoningSummaryDetail,
+    },
     process.env,
   )
   if (!llm) {
@@ -692,7 +710,11 @@ const maybeRunDatasetMode = async (
         ? llm
         : tryCreateLLM(
             provider,
-            { model: modelId, reasoningSummary: resolveBenchReasoningSummary(process.env), reasoningSummaryDetail: resolveBenchReasoningSummaryDetail(process.env) },
+            {
+              model: modelId,
+              reasoningSummary: resolveBenchReasoningSummary(process.env),
+              reasoningSummaryDetail: resolveBenchReasoningSummaryDetail(process.env),
+            },
             process.env,
           ),
   })

@@ -23,6 +23,7 @@ import {
   benchPostureFromState,
   resolveBenchKnobs,
 } from "../knobs-bench"
+import { laneProgress, laneProgressPort } from "../lane-progress"
 import {
   type LlmEvidenceArtifacts,
   type LlmEvidencePacket,
@@ -302,9 +303,14 @@ const generateSelectionCandidate = async (args: {
     )
   // Label this candidate's turns so N concurrent verify-select lanes stay
   // distinguishable on the one shared recording tape (replay-neutral).
-  const laneLlm = laneLabeledPort(
-    resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index),
-    `verify-select#${args.index}`,
+  // laneProgressPort adds LIVE per-turn/-tool progress emission (display-only).
+  const lane = `verify-select#${args.index}`
+  laneProgress.emit({ kind: "start", lane })
+  let laneOk = false
+  let lanePatchBytes = 0
+  const laneLlm = laneProgressPort(
+    laneLabeledPort(resolveLaneLlm(args.deps, lanePosture.modelLaneDiversity, args.index), lane),
+    lane,
   )
   try {
     const phase = await runAgentPhase(
@@ -322,6 +328,7 @@ const generateSelectionCandidate = async (args: {
       laneLlm,
     )
     args.addTurns(phase.turns)
+    lanePatchBytes = phase.patch?.length ?? 0
     const generationError = selectionGenerationErrorOf({
       stopReason: phase.stopReason,
       patch: phase.patch,
@@ -331,6 +338,7 @@ const generateSelectionCandidate = async (args: {
       args.generationErrors.set(args.index, generationError)
       throw new Error(generationError)
     }
+    laneOk = true
     return {
       id: `cand-${args.index}`,
       patch: phase.patch,
@@ -346,6 +354,7 @@ const generateSelectionCandidate = async (args: {
         : {}),
     }
   } finally {
+    laneProgress.emit({ kind: "done", lane, ok: laneOk, patchBytes: lanePatchBytes })
     if (isolated) await cleanupSelectionCandidateSandbox(candidateSandbox)
   }
 }
