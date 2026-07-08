@@ -83,12 +83,21 @@ const registryTools = (r: AgentConfig["registry"]): Tool[] =>
  *  none (`extraTools` empty) returns the SAME config by identity; otherwise the
  *  registry slot is rewritten in place so any feature-built late-bound getters
  *  (for example ToolSearch's catalog closure) observe the FINAL merged registry
- *  instead of a stale pre-merge capture. */
-export const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentConfig =>
-  extraTools.length > 0
-    ? ((config.registry = new ToolRegistry([...registryTools(config.registry), ...extraTools])),
-      config)
-    : config
+ *  instead of a stale pre-merge capture.
+ *
+ *  jul-7 audit (F1): feature tools are added AFTER the inherited registry was
+ *  filtered by the subagent's `tool_filter`, so without a second gate a restricted
+ *  child would re-acquire spawn_agent/team_* it was denied. When `config.toolAllowlist`
+ *  is set (a filtered subagent), INTERSECT the feature tools with it. Absent ⇒ no
+ *  filter ⇒ byte-identical (root/interactive sessions keep every feature). */
+export const buildEffectiveConfig = (config: AgentConfig, extraTools: Tool[]): AgentConfig => {
+  const allowed = config.toolAllowlist
+  const effectiveExtra =
+    allowed === undefined ? extraTools : extraTools.filter((t) => allowed.includes(t.name))
+  if (effectiveExtra.length === 0) return config
+  config.registry = new ToolRegistry([...registryTools(config.registry), ...effectiveExtra])
+  return config
+}
 
 /** Verify-guard per-run resources (Tier 0 safety hardening). Built when EITHER
  *  `config.verifyGuard` OR `config.closeoutGuard?.enabled === true` is set:

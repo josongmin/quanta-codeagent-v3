@@ -607,6 +607,11 @@ const buildChildConfig = (
   const child: AgentConfig = {
     llm: childLlm,
     registry: childRegistry,
+    // jul-7 audit (F1): carry the child's tool allowlist so `buildEffectiveConfig`
+    // intersects the feature tools (spawn_agent / team_*) with it too — a restricted
+    // child must not re-acquire, via the feature layer, tools its registry filter denied.
+    // Same value fed to `filterRegistry` above ⇒ consistent. Absent ⇒ no feature filter.
+    ...(req.toolFilter !== undefined ? { toolAllowlist: req.toolFilter } : {}),
     stream: parent.stream,
     permission: parent.permission,
     messages: seed,

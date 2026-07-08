@@ -103,6 +103,13 @@ export interface AgentConfig
     WireSlotsComposeConfig {
   llm: LLMPort
   registry: ToolRegistry
+  /** Session tool-name ALLOWLIST (jul-7 audit F1). When set, feature tools that
+   *  `buildSessionFeatures` materializes (spawn_agent / team_* / working-state / …)
+   *  are intersected with this list in `buildEffectiveConfig` — so a restricted
+   *  subagent (`tool_filter` / `task_kind:"read"`) cannot acquire spawn/team tools
+   *  that its inherited-registry filter already denied. Absent ⇒ NO feature-tool
+   *  filtering (byte-identical: a root/interactive session keeps every feature). */
+  toolAllowlist?: readonly string[]
   stream: StreamPort
   /**
    * ADR-0267 (Phase 2 of ADR-0239) — narrow side-channel for gate-decision

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { runAgent } from "../../src/agent/loop"
+import { buildEffectiveConfig } from "../../src/agent/session-resources"
 import { createSubagentRunner } from "../../src/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "../../src/agent/types"
 import type { Message } from "../../src/llm"
@@ -432,5 +433,41 @@ describe("createSubagentRunner — worktree isolation", () => {
     // Missing isolation ⇒ same path (no isolation), parent.cwd inherited.
     await runner(req())
     expect(at(seen, 1).cwd).toBe("/repo")
+  })
+})
+
+// jul-7 audit (F1): feature tools (spawn_agent / team_*) are added by buildSessionFeatures
+// AFTER the inherited registry was filtered by the child's tool_filter — so without a second
+// gate a restricted child re-acquires them. buildEffectiveConfig now intersects feature tools
+// with `config.toolAllowlist` (the child's filter). Absent allowlist ⇒ byte-identical.
+describe("buildEffectiveConfig — feature-tool allowlist gate (jul-7 audit F1)", () => {
+  const cfg = (over: Partial<AgentConfig>): AgentConfig =>
+    ({ ...parentConfig(), registry: new ToolRegistry([fakeTool("read")]), ...over }) as AgentConfig
+
+  test("restricted child: feature tools NOT in toolAllowlist are DROPPED (spawn/team leak blocked)", () => {
+    const out = buildEffectiveConfig(cfg({ toolAllowlist: ["read", "grep"] }), [
+      fakeTool("spawn_agent"),
+      fakeTool("team_create"),
+      fakeTool("grep"),
+    ])
+    expect(out.registry.has("read")).toBe(true) // inherited
+    expect(out.registry.has("grep")).toBe(true) // feature, allowlisted ⇒ kept
+    expect(out.registry.has("spawn_agent")).toBe(false) // feature, NOT allowlisted ⇒ blocked
+    expect(out.registry.has("team_create")).toBe(false)
+  })
+
+  test("unrestricted (no toolAllowlist): ALL feature tools kept (non-vacuous byte-identical control)", () => {
+    const out = buildEffectiveConfig(cfg({}), [fakeTool("spawn_agent"), fakeTool("grep")])
+    expect(out.registry.has("spawn_agent")).toBe(true) // no allowlist ⇒ feature kept
+    expect(out.registry.has("grep")).toBe(true)
+  })
+
+  test("allowlisted feature tool survives (a child that explicitly permits `agent` can spawn)", () => {
+    const out = buildEffectiveConfig(cfg({ toolAllowlist: ["read", "spawn_agent"] }), [
+      fakeTool("spawn_agent"),
+      fakeTool("team_create"),
+    ])
+    expect(out.registry.has("spawn_agent")).toBe(true) // explicitly allowed ⇒ kept
+    expect(out.registry.has("team_create")).toBe(false) // not allowed ⇒ blocked
   })
 })
