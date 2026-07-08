@@ -512,6 +512,7 @@ const runAgentPhase = async (
   let editCount: number | undefined
   let sourceAppliedEditCount: number | undefined
   let turnsToFirstEdit: number | undefined
+  let capturedActionTrace: readonly string[] | undefined
   // P0 — tentative-patch retention (Sonar absorption). When ON, snapshot the
   // sandbox diff each time the agent's OWN verification passes; on a bad ending
   // (max_turns / aborted — `stopReason !== "completed"`) emit the last
@@ -552,6 +553,9 @@ const runAgentPhase = async (
         // Per-action progress → run.log (live "what the agent did" under
         // concurrency). One concise line per tool call.
         (name, detail) => logger.info(`  · ${instance.id} ${name}${detail ? ` ${detail}` : ""}`),
+        // toolExec debug enricher: per-tool-result timing + file path (edit tools).
+        // No-op unless QUANTA_BENCH_RECORD_TRAJECTORY=debug.
+        isTrajectoryDebugEnabled() ? (args) => debugSink.append("toolExec", args) : undefined,
       )
       // Knob telemetry: emit once per phase entry (matches the contract on
       // `emitKnobsApplied`). The single-pass path bypasses `runAgentOnce`, so
@@ -583,6 +587,9 @@ const runAgentPhase = async (
       editCount = tap.editCount
       sourceAppliedEditCount = tap.sourceAppliedEditCount
       turnsToFirstEdit = tap.turnsToFirstEdit
+      if (isTrajectoryDebugEnabled() && tap.actionTrace.length > 0) {
+        capturedActionTrace = tap.actionTrace.slice()
+      }
     },
     instance.swebench?.repo,
   )
@@ -590,6 +597,9 @@ const runAgentPhase = async (
   // agent declared done cleanly; any other reason is the "ran out mid-validate"
   // case the retention targets.
   await snapChain
+  if (capturedActionTrace !== undefined) {
+    void patchRunMeta(instance.id, { actionTrace: capturedActionTrace })
+  }
   const patch = tentativeOn
     ? recorder.selectEmitted(rawPatch, stopReason === "completed")
     : rawPatch

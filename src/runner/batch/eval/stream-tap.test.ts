@@ -88,4 +88,31 @@ describe("BenchStreamTap — onToolResult", () => {
     expect((calls[0] as { name: string }).name).toBe("test_runner")
     expect((calls[1] as { name: string }).name).toBe("bash")
   })
+
+  test("edit tool result includes file path; non-edit result does not", () => {
+    const calls: unknown[] = []
+    const tap = new BenchStreamTap(nullStream, undefined, undefined, undefined, (args) =>
+      calls.push(args),
+    )
+    // edit tool → should carry file
+    tap.emit(toolCall("e1", "edit", { file_path: "src/foo.py" }))
+    tap.emit(toolResult("e1", "edit", true))
+    // bash (non-edit) → no file
+    tap.emit(toolCall("b1", "bash", { command: "pytest" }))
+    tap.emit(toolResult("b1", "bash", true))
+    expect(calls).toHaveLength(2)
+    expect((calls[0] as Record<string, unknown>).file).toBe("src/foo.py")
+    expect(calls[1] as Record<string, unknown>).not.toHaveProperty("file")
+  })
+
+  test("failed edit result still includes file path", () => {
+    const calls: unknown[] = []
+    const tap = new BenchStreamTap(nullStream, undefined, undefined, undefined, (args) =>
+      calls.push(args),
+    )
+    tap.emit(toolCall("e1", "edit", { file_path: "src/bar.py" }))
+    tap.emit(toolResult("e1", "edit", false))
+    expect((calls[0] as Record<string, unknown>).file).toBe("src/bar.py")
+    expect((calls[0] as Record<string, unknown>).ok).toBe(false)
+  })
 })

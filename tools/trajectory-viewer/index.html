@@ -308,6 +308,11 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .dbg-tool-tbl th{background:#f0eafc;color:#6044aa;padding:2px 6px;text-align:left;font-weight:700;border-bottom:1px solid #ddd0f0}
 .dbg-tool-tbl td{padding:2px 6px;border-bottom:1px solid #ede8f5;color:#3a3050}
 .dbg-tool-ok{color:#2e7d32;font-weight:700}.dbg-tool-fail{color:#c62828;font-weight:700}
+.dbg-tool-file{color:#555;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.at-item{display:flex;gap:8px;padding:2px 4px;font-size:11px;font-family:var(--mono);border-bottom:1px solid #ede8f5;color:#3a3050}
+.at-item:last-child{border-bottom:none}
+.at-idx{color:#aaa;min-width:22px;text-align:right;flex-shrink:0}
+.at-action{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tg-flash{animation:tgflash 1.2s ease}
 @keyframes tgflash{0%,100%{background:transparent}30%{background:#fff2cc}}
 /* ── loc cards ── */
@@ -1064,13 +1069,16 @@ function renderTurnDebug(turn){
   const bodyParts=[]
   for(const [k,v] of Object.entries(dbg)){
     if(k==='toolExec'&&Array.isArray(v)&&v.length){
+      const hasFile=v.some(t=>t.file!=null)
       const rows=v.map(t=>{
         const ok=t.ok!==false
         const ms=t.durationMs!=null?`${t.durationMs}ms`:''
         const ex=t.exitCode!=null?`exit ${t.exitCode}`:''
-        return`<tr><td>${esc(t.name??'?')}</td><td class="${ok?'dbg-tool-ok':'dbg-tool-fail'}">${ok?'✓':'✗'}</td><td>${esc(ms)}</td><td>${esc(ex)}</td></tr>`
+        const fileCell=hasFile?`<td class="dbg-tool-file">${esc(t.file??'')}</td>`:''
+        return`<tr><td>${esc(t.name??'?')}</td><td class="${ok?'dbg-tool-ok':'dbg-tool-fail'}">${ok?'✓':'✗'}</td><td>${esc(ms)}</td><td>${esc(ex)}</td>${fileCell}</tr>`
       }).join('')
-      bodyParts.push(`<table class="dbg-tool-tbl"><tr><th>tool</th><th>ok</th><th>dur</th><th>exit</th></tr>${rows}</table>`)
+      const fileHdr=hasFile?'<th>file</th>':''
+      bodyParts.push(`<table class="dbg-tool-tbl"><tr><th>tool</th><th>ok</th><th>dur</th><th>exit</th>${fileHdr}</tr>${rows}</table>`)
     }else{
       bodyParts.push(`<div style="margin-bottom:4px"><span style="font-weight:700;color:#8055aa">${esc(k)}</span>: <span>${esc(JSON.stringify(v))}</span></div>`)
     }
@@ -1316,6 +1324,16 @@ function renderRunMeta(meta){
       <div class="rm-group-hd" onclick="toggle('${envId}')"><span class="rm-group-chev">▶</span>${T('otherEnv')} <span class="rm-cnt">${Object.keys(otherEnv).length}</span></div>
       <div class="rm-group-body" id="${envId}">${otherRows}</div>
     </div>`:''}
+    ${renderActionTrace(meta.actionTrace,uid())}
+  </div>`
+}
+
+function renderActionTrace(trace,id){
+  if(!Array.isArray(trace)||!trace.length)return''
+  const items=trace.map((a,i)=>`<div class="at-item"><span class="at-idx">${i+1}</span><span class="at-action">${esc(a)}</span></div>`).join('')
+  return`<div class="rm-group">
+    <div class="rm-group-hd" onclick="toggle('${id}')"><span class="rm-group-chev">▶</span>actionTrace <span class="rm-cnt">${trace.length}</span></div>
+    <div class="rm-group-body" id="${id}">${items}</div>
   </div>`
 }
 

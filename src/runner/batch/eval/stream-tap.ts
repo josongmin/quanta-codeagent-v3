@@ -135,7 +135,8 @@ export class BenchStreamTap implements StreamPort {
    *  authoritative for what actually ran. This prevents denied or non-verify
    *  bash calls from poisoning the validator re-exec target. */
   private readonly pendingVerifyCmd = new Set<string>()
-  private readonly pendingEdits = new Set<string>()
+  /** id → raw file path, so tool_result can report the target alongside ok/fail. */
+  private readonly pendingEdits = new Map<string, string>()
   private readonly pendingSourceEdits = new Set<string>()
   private verifySeq = 0
   /**
@@ -155,11 +156,13 @@ export class BenchStreamTap implements StreamPort {
      *  between the ▶ start and ■ done lines. Absent ⇒ byte-identical (no emit). */
     private readonly onAction?: (name: string, detail: string) => void,
     /** Optional per-tool-result observer. Called once per tool_result event with
-     *  the tool name, success flag, and timing/exit-code when available. Wired
-     *  by the bench debug-sink path to record per-turn toolExec slices. */
+     *  the tool name, success flag, timing/exit-code when available, and for
+     *  file-mutating tools the target `file` path. Wired by the bench debug-sink
+     *  path to record per-turn toolExec slices. */
     private readonly onToolResult?: (args: {
       name: string
       ok: boolean
+      file?: string
       durationMs?: number
       exitCode?: number
     }) => void,
@@ -213,7 +216,7 @@ export class BenchStreamTap implements StreamPort {
     this.editCount += 1
     const isSource = isSourceEditPath(editPath)
     if (isSource) this.sourceEditCount += 1
-    this.pendingEdits.add(event.id)
+    this.pendingEdits.set(event.id, editPath)
     if (isSource) this.pendingSourceEdits.add(event.id)
     if (this.firstEditFile !== undefined) return
     this.firstEditFile = editPath
@@ -221,22 +224,24 @@ export class BenchStreamTap implements StreamPort {
   }
 
   private handleToolResult(event: ToolResultEvent): void {
+    const file = this.pendingEdits.get(event.id)
     this.trackAppliedEditResult(event)
     this.trackVerifyResult(event)
     this.onToolResult?.({
       name: event.name,
       ok: event.ok,
+      ...(file !== undefined ? { file } : {}),
       ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
       ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
     })
   }
 
   private trackAppliedEditResult(event: ToolResultEvent): void {
-    const pendingEdit = this.pendingEdits.delete(event.id)
-    const pendingSourceEdit = this.pendingSourceEdits.delete(event.id)
-    if (!pendingEdit || !event.ok) return
+    const hadEdit = this.pendingEdits.delete(event.id)
+    const hadSourceEdit = this.pendingSourceEdits.delete(event.id)
+    if (!hadEdit || !event.ok) return
     this.appliedEditCount += 1
-    if (pendingSourceEdit) this.sourceAppliedEditCount += 1
+    if (hadSourceEdit) this.sourceAppliedEditCount += 1
   }
 
   private trackVerifyResult(event: ToolResultEvent): void {
