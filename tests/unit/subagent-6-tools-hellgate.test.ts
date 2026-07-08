@@ -428,6 +428,43 @@ describe("HELLGATE — handleSpawnAgent", () => {
     expect(captured?.budget).toEqual({ maxTurns: 7, maxTokens: 1000 })
   })
 
+  // jul-7 audit Fix-C completeness: the 6-tool spawn must derive a tool_filter from task_kind
+  // (parity with the trio `agent` tool) — otherwise a `task_kind:"read"` child left toolFilter
+  // undefined ⇒ inherited the FULL parent registry + spawn_agent/team_* feature tools.
+  test("Fix-C: task_kind:'read' + no tool_filter DERIVES a read allowlist (no spawn/team leak)", async () => {
+    const reg = new TaskRegistry()
+    let captured: SubagentRequest | undefined
+    const capturingRunner: SubagentRunner = async (req) => {
+      captured = req
+      return { ok: true, finalText: "done", turns: 1 }
+    }
+    const r = await handleSpawnAgent(
+      { prompt: "read the code", task_kind: "read" },
+      { runner: capturingRunner, registry: reg },
+    )
+    expect(r.kind).toBe("success")
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(captured?.toolFilter).toBeDefined() // derived, not undefined ⇒ feature filter applies
+    expect(captured?.toolFilter?.length ?? 0).toBeGreaterThan(0)
+    expect(captured?.toolFilter).not.toContain("spawn_agent")
+    expect(captured?.toolFilter).not.toContain("team_create")
+  })
+
+  test("Fix-C: explicit tool_filter WINS over task_kind derivation", async () => {
+    const reg = new TaskRegistry()
+    let captured: SubagentRequest | undefined
+    const capturingRunner: SubagentRunner = async (req) => {
+      captured = req
+      return { ok: true, finalText: "d", turns: 1 }
+    }
+    await handleSpawnAgent(
+      { prompt: "p", task_kind: "read", tool_filter: ["read", "spawn_agent"] },
+      { runner: capturingRunner, registry: reg },
+    )
+    await new Promise<void>((res) => setTimeout(res, 5))
+    expect(captured?.toolFilter).toEqual(["read", "spawn_agent"])
+  })
+
   test("unset parity fields ⇒ absent from the request (byte-identical default)", async () => {
     const reg = new TaskRegistry()
     let captured: SubagentRequest | undefined

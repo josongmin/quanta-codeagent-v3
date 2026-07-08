@@ -33,6 +33,7 @@ import { errMessage } from "@/shared"
 // is gated identically by the other (single SSOT for the security invariant).
 import {
   buildCheckpointPath,
+  deriveToolFilter,
   loadContinueFromForOwner,
   ownersForRegistry,
   recordContinueFromOwner,
@@ -660,6 +661,14 @@ export const handleSpawnAgent = async (
   const forkedPrompt =
     deps.forkPrompt !== undefined ? deps.forkPrompt(input.prompt, forkSpec) : input.prompt
 
+  // jul-7 audit (Fix-C completeness): derive the tool allowlist from `task_kind` when no
+  // explicit `tool_filter` is given — PARITY with the trio `agent` tool. Without this a
+  // `task_kind:"read"` 6-tool spawn left `toolFilter` undefined ⇒ the child inherited the FULL
+  // parent registry + every feature tool (spawn_agent/team_*). Explicit `tool_filter` wins;
+  // both absent ⇒ undefined ⇒ unrestricted (byte-identical).
+  const effectiveToolFilter =
+    input.tool_filter ?? (input.task_kind !== undefined ? deriveToolFilter(input.task_kind) : undefined)
+
   const req: SubagentRequest = {
     prompt: forkedPrompt,
     depth: childDepth,
@@ -668,7 +677,7 @@ export const handleSpawnAgent = async (
     // register a per-child turn waker under the SAME id `followup_task` uses.
     taskId,
     ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
-    ...(input.tool_filter !== undefined ? { toolFilter: input.tool_filter } : {}),
+    ...(effectiveToolFilter !== undefined ? { toolFilter: effectiveToolFilter } : {}),
     // Parity passthroughs — the runner already honors each (buildChildConfig /
     // buildSeedPrompt). Conditional-spread so an unset field is byte-identical.
     ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),

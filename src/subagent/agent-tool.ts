@@ -142,7 +142,7 @@ type AgentInput = z.infer<typeof agentSchema>
  *  when the caller passed `task_kind` and omitted `tools`. Names mirror the
  *  actual tool registry in `src/tool/` (including caller-wired delegated
  *  facades such as `search_codebase`; `lsp_nav` exposes three sub-tools). */
-const deriveToolFilter = (kind: TaskKind): string[] => {
+export const deriveToolFilter = (kind: TaskKind): string[] => {
   const readOnly = [
     "read",
     "search_codebase",
