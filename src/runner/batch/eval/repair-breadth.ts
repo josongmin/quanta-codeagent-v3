@@ -283,10 +283,13 @@ const runOneBreadthCandidate = async (
   index: number,
 ): Promise<RepairCandidateOutcome | undefined> => {
   const lane = `repair-breadth#${index}`
-  laneProgress.emit({ kind: "start", lane })
   let laneOk = false
   let lanePatchBytes = 0
+  // Fork BEFORE emitting `start` so a fork-creation failure never leaves an
+  // orphaned lane (start with no matching `done`) — `done` lives in the finally
+  // below, which only runs once we're inside the try.
   const fork = await deps.sandboxPorts.forkSandbox(deps.instanceId, deps.mainSandbox)
+  laneProgress.emit({ kind: "start", lane })
   try {
     // Label this candidate's turns so the N concurrent lanes stay distinguishable
     // on the one shared recording tape (replay-neutral; only tags metadata.lane).

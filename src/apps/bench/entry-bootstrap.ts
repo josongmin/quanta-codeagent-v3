@@ -20,6 +20,11 @@ export const routeBenchTerminalIo = (): void => {
     stderr: (chunk) => {
       void process.stderr.write(chunk)
     },
+    // Surface the real TTY-ness so TTY-aware consumers (the lane-progress panel)
+    // can activate. Omitting these (undefined) forced every consumer onto the
+    // non-TTY path — the other four entry points all set them.
+    stdoutIsTTY: process.stdout.isTTY,
+    stderrIsTTY: process.stderr.isTTY,
   })
 }
 
