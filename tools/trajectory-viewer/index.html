@@ -359,6 +359,8 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
   border-radius:12px;font-size:10px;background:#eeeef8;border:1px solid #d8d8ee;color:#5555a0;
 }
 .rm-badge.run-id{font-family:var(--mono);color:#888}
+.rm-badge.rm-pass{background:#e8f5e9;border-color:#a5d6a7;color:#2e7d32;font-weight:600}
+.rm-badge.rm-fail{background:#fce8e8;border-color:#ef9a9a;color:#c62828;font-weight:600}
 .rm-argv{margin-bottom:6px}
 .rm-argv .rm-row{background:#f4f4fc;border-radius:4px;padding:4px 8px}
 .rm-group{border:1px solid #e8e8f2;border-radius:6px;overflow:hidden;margin-bottom:5px}
@@ -1267,8 +1269,15 @@ function renderRunMeta(meta){
   const argvRow=argv?`<div class="rm-row"><span class="rm-key">${T('argv')}</span><span class="rm-val rm-mono">${esc(argv)}</span></div>`:''
 
   const knobId=uid(),envId=uid()
+  const verdict=meta.verdict
+  const verdictBadge=verdict!=null
+    ? verdict.passed
+      ? `<span class="rm-badge rm-pass">✅ passed · ${verdict.patchBytes??0}B</span>`
+      : `<span class="rm-badge rm-fail">❌ failed · ${verdict.patchBytes??0}B</span>`
+    : ''
   return`<div class="run-meta-block">
     <div class="rm-summary">
+      ${verdictBadge}
       <span class="rm-badge">🕐 ${esc(ts)}</span>
       <span class="rm-badge">🤖 ${esc(provider)}/${esc(model)}</span>
       <span class="rm-badge">📋 ${esc(preset)}</span>

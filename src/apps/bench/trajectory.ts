@@ -306,14 +306,15 @@ export const applyBenchTrajectoryMode = (
 
 /**
  * Patch the run meta.json for `instanceId` with extra post-run fields (e.g.
- * verdict, editTrace). No-op when the instance has no registered meta path
- * (debug gate off, no instanceId, or replay mode). Best-effort: write failures
- * are silently swallowed so they never crash a bench run.
+ * verdict). No-op when debug gate is off, no meta path is registered, or on
+ * any I/O failure. Best-effort: write failures are silently swallowed so they
+ * never crash a bench run.
  */
 export const patchRunMeta = async (
   instanceId: string,
   extra: Record<string, unknown>,
 ): Promise<void> => {
+  if (!isTrajectoryDebugEnabled()) return
   const metaPath = metaPathRegistry.get(instanceId)
   if (!metaPath) return
   try {
@@ -322,6 +323,11 @@ export const patchRunMeta = async (
   } catch {
     // best-effort
   }
+}
+
+/** Test seam: clear the meta-path registry between test cases. */
+export const resetMetaPathRegistry = (): void => {
+  metaPathRegistry.clear()
 }
 
 /**
