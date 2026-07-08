@@ -32,7 +32,7 @@
  * No `@/agent/loop`, no `@/llm`, no `@/tool`. Pure structural code.
  */
 
-import { errMessage } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { StreamingBoomerang, StreamingBoomerangSpec } from "./port"
 import {
   type BoomerangChunk,
@@ -149,6 +149,25 @@ const validateSpecBuiltin = (spec: StreamingBoomerangSpec): string | null => {
   return null
 }
 
+/** ALBB-20 #4 — the terminal error-push used to be swallowed by a bare
+ *  `.catch(() => {})`: a LATE push rejection (the channel already
+ *  closed/cancelled and its internal push promise rejected) was fully silent,
+ *  so a runner-error that could not even be delivered vanished. Surface it once
+ *  via `logger.warn`. Exported so the red-on-injection test can drive a
+ *  rejecting terminal push directly (the happy path never rejects, so this is
+ *  otherwise unreachable from the public spawn() API). `channel.close()` in the
+ *  caller's `finally` is unaffected — that was never the gap. */
+export const pushTerminalObservable = async (
+  channel: Pick<ClosableChannel, "pushTerminal">,
+  chunk: BoomerangChunk,
+): Promise<void> => {
+  try {
+    await channel.pushTerminal(chunk)
+  } catch (e) {
+    logger.warn(`default-streamer: terminal push failed (dropped): ${errMessage(e)}`)
+  }
+}
+
 /** Drive the producer body in the background; centralize error capture
  *  + final close. Returns a settle promise the wrapper awaits in the
  *  cleanup path. */
@@ -170,13 +189,13 @@ const driveProducer = (channel: ClosableChannel, producer: ChunkProducer): Promi
       await producer(handle)
     } catch (err) {
       const message = errMessage(err)
-      await channel
-        .pushTerminal({
-          kind: "error",
-          errorKind: "runner-error",
-          errorMessage: message,
-        })
-        .catch(() => {})
+      // ALBB-20 #4 — was `.catch(() => {})` (silent). Route through the
+      // observable helper so a late-push rejection is surfaced once.
+      await pushTerminalObservable(channel, {
+        kind: "error",
+        errorKind: "runner-error",
+        errorMessage: message,
+      })
     } finally {
       channel.close()
     }

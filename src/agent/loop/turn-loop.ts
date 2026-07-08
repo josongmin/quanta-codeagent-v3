@@ -102,7 +102,15 @@ export const executeTurnWithObservability = async (args: {
         resultKind: flushKind,
       })
     } catch (flushErr) {
+      // ALBB-20 #9 — the flush failure was warn-only (operator log), so a UI
+      // watching the stream sink never learned turn telemetry was dropped. Add a
+      // non-fatal stream emit alongside the warn so the drop is observable on the
+      // agent-state surface too (north-star). Never rethrows (finally block).
       logger.warn(`loop.flushTurnObservability: ${errMessage(flushErr)}`)
+      args.ctx.cfg.stream.emit({
+        type: "error",
+        message: `turn observability flush failed: ${errMessage(flushErr)}`,
+      })
     }
     // ADR-0231 (wire phase) — radar proposal-queue producer hook. Absent
     // block (`cfg.radar === undefined`) ⇒ the guard above left

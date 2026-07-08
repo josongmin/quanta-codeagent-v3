@@ -29,7 +29,21 @@ export const applySteerBarrierMessages = async (
 ): Promise<void> => {
   if (!cfg.steerBarrier) return
   const beforeLen = cfg.messages.length
-  await cfg.steerBarrier()
+  // ALBB-20 #2 — a throwing steer barrier USED to escape uncaught and crash the
+  // whole turn (`await cfg.steerBarrier()` bare). Mirror the sibling
+  // `injectFocusChainMessage` emit-on-throw shape: surface the failure as a
+  // non-fatal stream `error` and continue the turn (the barrier's injected
+  // messages, if any, are drained on the happy path only). Parity, not a new
+  // heuristic.
+  try {
+    await cfg.steerBarrier()
+  } catch (e) {
+    cfg.stream.emit({
+      type: "error",
+      message: `steer barrier failed: ${errMessage(e)}`,
+    })
+    return
+  }
   for (let i = beforeLen; i < cfg.messages.length; i++) {
     const injected = cfg.messages[i]
     if (injected) wm.append(injected)

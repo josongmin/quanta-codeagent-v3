@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { compactIfNeeded, estimateTokens, findBoundary } from "@/agent"
+import { dropOldestSalvage, reactiveCompact } from "@/agent/compaction"
 import type { LLMPort, Message, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
 
 /** FakeLLM that records its StreamInput and yields a fixed summary text. */
@@ -173,5 +174,85 @@ describe("compactIfNeeded", () => {
     // Summarizer received the original system prompt context.
     expect(llm.lastSystem).toBeDefined()
     expect(res.summaryTokens).toBeGreaterThan(0)
+  })
+})
+
+/** ALBB-20 #13 — records the StreamInput.signal so the test can assert the
+ *  caller's cancellation signal is threaded into the summarizer llm.stream(). */
+class SignalRecordingLLM implements LLMPort {
+  seenSignal: AbortSignal | undefined
+  signalPresent = false
+  // biome-ignore lint/suspicious/useAwait: async generator contract
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.signalPresent = "signal" in input
+    this.seenSignal = input.signal
+    if (input.signal?.aborted === true) throw new Error("aborted-during-summary")
+    yield { type: "text_delta", delta: "<summary>ok</summary>" }
+    yield { type: "message_stop", stop_reason: "end_turn" }
+  }
+}
+
+const bigTranscript = (): Message[] => [
+  userText("a".repeat(2000)),
+  assistantToolUse("t1", "old1"),
+  toolResult("t1", "b".repeat(2000)),
+  assistantText("old2"),
+  userText("recent ask"),
+  assistantText("recent answer"),
+]
+
+describe("reactiveCompact #13 interruptible summarizer", () => {
+  test("threads the caller signal into llm.stream()", async () => {
+    const llm = new SignalRecordingLLM()
+    const ctrl = new AbortController()
+    await reactiveCompact({
+      messages: bigTranscript(),
+      llm,
+      system: "sys",
+      keepRecentTurns: 1,
+      signal: ctrl.signal,
+    })
+    expect(llm.signalPresent).toBe(true)
+    expect(llm.seenSignal).toBe(ctrl.signal)
+  })
+
+  test("absent signal ⇒ byte-identical (no signal field forwarded)", async () => {
+    const llm = new SignalRecordingLLM()
+    await reactiveCompact({ messages: bigTranscript(), llm, system: "sys", keepRecentTurns: 1 })
+    expect(llm.signalPresent).toBe(false)
+    expect(llm.seenSignal).toBeUndefined()
+  })
+
+  test("an already-aborted signal reaches the summarizer stream (interruptible)", async () => {
+    const llm = new SignalRecordingLLM()
+    const ctrl = new AbortController()
+    ctrl.abort()
+    // With the signal threaded, the (adapter-mimicking) stream observes the
+    // aborted signal and throws — the summarizer is interruptible rather than
+    // running to completion ignoring the abort. Before the fix the signal never
+    // reached the stream, so it would summarize to completion.
+    await expect(
+      reactiveCompact({
+        messages: bigTranscript(),
+        llm,
+        system: "sys",
+        keepRecentTurns: 1,
+        signal: ctrl.signal,
+      }),
+    ).rejects.toThrow("aborted-during-summary")
+    expect(llm.seenSignal).toBe(ctrl.signal)
+  })
+
+  test("dropOldestSalvage forwards the signal into its single reactive summarizer call", async () => {
+    const llm = new SignalRecordingLLM()
+    const ctrl = new AbortController()
+    await dropOldestSalvage({
+      messages: bigTranscript(),
+      llm,
+      system: "sys",
+      keepRecentTurns: 1,
+      signal: ctrl.signal,
+    })
+    expect(llm.seenSignal).toBe(ctrl.signal)
   })
 })

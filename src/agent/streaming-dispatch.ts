@@ -1,5 +1,5 @@
 import { assembleFromEvents, isRefusalStopReason, type Message, type StreamEvent } from "@/llm"
-import { errMessage } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import { isSessionApprovalRequiredError } from "./dispatch-helpers"
 
 /**
@@ -181,9 +181,15 @@ const fireToolInput = (
     if (kind === "start" && ev.type === "tool_use_start") seam.start(ev.id, ev.name)
     else if (kind === "delta" && ev.type === "tool_use_delta") seam.delta(ev.id, ev.delta)
     else if (kind === "available" && ev.type === "tool_use_end") seam.available(ev.id, ev.input)
-  } catch {
-    // Intentional: a consumer error must not poison the stream-processing
-    // invariants (rawEvents accumulation, scheduling order, etc.).
+  } catch (e) {
+    // ALBB-20 #8 — a faulty third-party tool-input callback was DOUBLE-swallowed
+    // (once by the per-callback bare `catch {}` in `tool-input-streaming.ts`,
+    // once by this outer seam) → invisible at BOTH layers. Keep the defensive
+    // swallow (a consumer error must NOT poison the stream-processing invariants:
+    // rawEvents accumulation, scheduling order), but surface it OBSERVABLE exactly
+    // once here at the outer seam via `logger.warn`. Inner catches stay silent so
+    // this is the single point of visibility.
+    logger.warn(`streaming-dispatch.fireToolInput(${kind}): callback threw: ${errMessage(e)}`)
   }
 }
 

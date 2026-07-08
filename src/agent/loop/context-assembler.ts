@@ -257,6 +257,28 @@ export const injectRedactionBanner = (
   return ctx
 }
 
+/** ALBB-20 #12 — apply the optional `turnContextMutator` with the SAME
+ *  emit-on-throw parity as {@link injectIdeContext}. On throw, surface a
+ *  non-fatal stream `error` and return the UN-mutated `turnInput` (fail-safe:
+ *  the turn proceeds on the base context rather than crashing assembly).
+ *  Absent mutator ⇒ `turnInput` returned untouched (byte-identical). */
+export const applyTurnContextMutator = (
+  config: AgentConfig,
+  turn: number,
+  turnInput: import("../prompt").TurnContextInput,
+): import("../prompt").TurnContextInput => {
+  if (config.turnContextMutator === undefined) return turnInput
+  try {
+    return config.turnContextMutator(turn, turnInput)
+  } catch (e) {
+    config.stream.emit({
+      type: "error",
+      message: `turn-context mutator failed: ${errMessage(e)}`,
+    })
+    return turnInput
+  }
+}
+
 export const resolveTaskBudgetForTurn = (
   config: AgentConfig,
   taskSpend: { tokens: number } | undefined,
@@ -421,11 +443,11 @@ export const prepareTurnContext = async (
   }
   // Trajectory fork-experiment seam (AgentConfig.turnContextMutator). DEFAULT-OFF:
   // absent ⇒ `turnInput` reaches buildTurnContext untouched ⇒ byte-identical.
-  const ctx = buildTurnContext(
-    config.turnContextMutator !== undefined
-      ? config.turnContextMutator(turn, turnInput)
-      : turnInput,
-  )
+  // ALBB-20 #12 — the mutator USED to be called UNCAUGHT; a throwing mutator
+  // crashed context assembly. Mirror the sibling `injectIdeContext` (same file)
+  // emit-on-throw shape: surface the failure as a non-fatal stream `error` and
+  // fall back to the UN-mutated `turnInput` so the turn proceeds. Parity only.
+  const ctx = buildTurnContext(applyTurnContextMutator(config, turn, turnInput))
   const finalCtx = injectRedactionBanner(config, await injectIdeContext(config, ctx))
   emitPromptAssembled(config, finalCtx, activeModel)
   return { ctx: finalCtx, breakerVerdict }

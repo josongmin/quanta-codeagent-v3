@@ -30,9 +30,14 @@ import type { ToolInputStreamSeam } from "./streaming-dispatch"
  *    pairing is never evicted out from under a live call; only stale
  *    tombstoned entries are reclaimed.
  *  - The seam contract guarantees the caller wraps invocation in try/catch
- *    (see `streaming-dispatch#fireToolInput`); we still defensively swallow
- *    callback errors here so a faulty third-party tool cannot surface as a
- *    thrown error at all.
+ *    (see `streaming-dispatch#fireToolInput`). ALBB-20 #8: the per-callback
+ *    errors are NO LONGER swallowed HERE — that DOUBLE-swallow (inner + outer)
+ *    made a faulty callback invisible at both layers. We now let a callback
+ *    throw propagate to the OUTER `fireToolInput` seam, which swallows it (so
+ *    the stream-processing invariants are still never poisoned) AND emits a
+ *    single `logger.warn` so the fault is observable exactly once. The
+ *    id→name bookkeeping is still updated BEFORE the throwing callback runs, so
+ *    the leak-guard/dedup state stays consistent regardless of a throw.
  */
 /** Bound on outstanding (id → name) entries. A turn never has more than a
  *  handful of tool calls in flight at once; this cap is far above that, so it
@@ -55,22 +60,16 @@ export const buildToolInputSeam = (registry: ToolRegistry): ToolInputStreamSeam 
       idToName.set(id, name)
       const tool = registry.get(name)
       if (tool?.onInputStart === undefined) return
-      try {
-        tool.onInputStart()
-      } catch {
-        // Defensive: callback errors must not break the stream.
-      }
+      // ALBB-20 #8 — do NOT swallow here; let the OUTER `fireToolInput` seam
+      // surface it once (logger.warn) then swallow. Bookkeeping above already ran.
+      tool.onInputStart()
     },
     delta(id, delta) {
       const name = idToName.get(id)
       if (name === undefined) return
       const tool = registry.get(name)
       if (tool?.onInputDelta === undefined) return
-      try {
-        tool.onInputDelta(delta)
-      } catch {
-        // Defensive: see start().
-      }
+      tool.onInputDelta(delta) // ALBB-20 #8: propagate to outer seam (see start()).
     },
     available(id, input) {
       const name = idToName.get(id)
@@ -78,11 +77,7 @@ export const buildToolInputSeam = (registry: ToolRegistry): ToolInputStreamSeam 
       if (name === undefined) return
       const tool = registry.get(name)
       if (tool?.onInputAvailable === undefined) return
-      try {
-        tool.onInputAvailable(input)
-      } catch {
-        // Defensive: see start().
-      }
+      tool.onInputAvailable(input) // ALBB-20 #8: propagate to outer seam (see start()).
     },
   }
 }

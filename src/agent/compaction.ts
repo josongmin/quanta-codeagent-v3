@@ -272,8 +272,17 @@ export const UNPRODUCTIVE_PROACTIVE_REASONS: ReadonlySet<string> = new Set([
 ])
 
 /** Stream one summary turn with an explicit system prompt and return its
- *  joined text. Shared by proactive ({@link summarize}) and reactive paths. */
-const summarizeWith = async (llm: LLMPort, system: string, prefix: Message[]): Promise<string> => {
+ *  joined text. Shared by proactive ({@link summarize}) and reactive paths.
+ *  ALBB-20 #13 — threads the caller's cancellation `signal` into the LLM stream
+ *  so the summarizer call is interruptible on Ctrl+C / deadline (the provider
+ *  adapter aborts the in-flight HTTP request). Absent `signal` ⇒ byte-identical
+ *  to the pre-fix wire (`LLMStreamRequest.signal` is optional). */
+const summarizeWith = async (
+  llm: LLMPort,
+  system: string,
+  prefix: Message[],
+  signal?: AbortSignal,
+): Promise<string> => {
   const events = []
   for await (const ev of llm.stream({
     messages: [
@@ -284,6 +293,7 @@ const summarizeWith = async (llm: LLMPort, system: string, prefix: Message[]): P
     ],
     system,
     tools: [],
+    ...(signal !== undefined ? { signal } : {}),
   })) {
     events.push(ev)
   }
@@ -349,6 +359,10 @@ export interface ReactiveCompactInput {
   system: SystemPromptInput
   /** Recent turns to keep verbatim. Defaults to {@link REACTIVE_KEEP_TURNS}. */
   keepRecentTurns?: number
+  /** ALBB-20 #13 — caller cancellation signal threaded into the summarizer
+   *  `llm.stream` so the reactive-compaction LLM call is interruptible on
+   *  Ctrl+C / deadline. Absent ⇒ byte-identical (no signal forwarded). */
+  signal?: AbortSignal
 }
 
 export type ReactiveCompactResult =
@@ -376,7 +390,7 @@ export const reactiveCompact = async (
   }
   const prefix = input.messages.slice(0, boundary)
   const suffix = input.messages.slice(boundary)
-  const summary = await summarizeWith(input.llm, CONTINUATION_SYSTEM, prefix)
+  const summary = await summarizeWith(input.llm, CONTINUATION_SYSTEM, prefix, input.signal)
   if (summary.trim() === "") {
     return { ok: false, reason: "continuation summary came back empty" }
   }
@@ -497,6 +511,10 @@ export interface DropOldestSalvageInput {
   keepFloor?: number
   /** Max drop rounds. Defaults to {@link MAX_DROP_OLDEST_ROUNDS}. */
   maxRounds?: number
+  /** ALBB-20 #13 — caller cancellation signal, forwarded into the SINGLE
+   *  reactive summarizer call the salvage makes (the hard-drop fallback is pure
+   *  slicing, no LLM). Absent ⇒ byte-identical. */
+  signal?: AbortSignal
   /** Token budget the salvaged transcript must fit under, when the hard
    *  drop-oldest fallback engages. When omitted, the fallback drops to the
    *  floor (drop everything droppable). The recovery executor passes the same
@@ -556,6 +574,7 @@ export const dropOldestSalvage = async (
     llm: input.llm,
     system: input.system,
     keepRecentTurns,
+    ...(input.signal !== undefined ? { signal: input.signal } : {}),
   })
   if (reactive.ok) {
     return {

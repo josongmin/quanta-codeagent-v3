@@ -129,8 +129,18 @@ export const applyNonSuccessRecoveryAction = async (
             // the BASE model → under-sheds when a smaller-window model is active.
             resolveWindowModel(config.llm, activeModel),
           ),
+          // ALBB-20 #13 — thread the turn's cancellation signal into the summarizer
+          // LLM stream so a reactive compaction is interruptible on Ctrl+C/deadline.
+          // Absent ⇒ byte-identical (signal-presence gated).
+          ...(config.signal !== undefined ? { signal: config.signal } : {}),
         })
-      : await reactiveCompact({ messages: snapshot, llm: summarizerLlm, system: ctxSystem })
+      : await reactiveCompact({
+          messages: snapshot,
+          llm: summarizerLlm,
+          system: ctxSystem,
+          // ALBB-20 #13 — interruptible reactive summarizer (see above).
+          ...(config.signal !== undefined ? { signal: config.signal } : {}),
+        })
   // ALBB-08 Claim 3 (INTENTIONAL skip, measure-first) — a reactive empty/refused
   // summary (`!compacted.ok`) returns BEFORE `recordReactive` below, so it accrues
   // NO reactive strike. Unlike the PROACTIVE path (which loops pre-sampling and so

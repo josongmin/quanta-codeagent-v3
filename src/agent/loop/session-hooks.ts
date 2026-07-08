@@ -1,5 +1,6 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
+import { isSyntheticUserMessage } from "../synthetic-user"
 import type { AgentConfig } from "../types"
 
 export const emitUserPromptSubmitHook = async (
@@ -31,7 +32,13 @@ export const emitUserPromptSubmitHook = async (
 export const findTrailingUserMessageIndex = (wm: WorkingMemory<Message>): number => {
   for (let i = wm.messages.length - 1; i >= 0; i--) {
     const message = wm.messages[i]
-    if (message?.role === "user") return i
+    // ALBB-20 #10 — SKIP synthetic user messages (focus-chain / turn-budget /
+    // identity reminders appended at the tail via `makeSyntheticUserMessage`).
+    // Without this filter a trailing synthetic reminder was misread as the
+    // operator's real prompt and fed to the `user_prompt_submit` hook. Reuse the
+    // EXISTING `isSyntheticUserMessage` predicate (SSOT) — the same skip the
+    // recall-query / context-injection walks already apply.
+    if (message?.role === "user" && !isSyntheticUserMessage(message)) return i
   }
   return -1
 }

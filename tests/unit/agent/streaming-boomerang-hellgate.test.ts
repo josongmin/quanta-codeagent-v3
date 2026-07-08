@@ -21,7 +21,7 @@
  *   HELL-SB-15 — no zombie promise after iterator done
  */
 
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   BOOMERANG_CHUNK_KINDS,
   BOOMERANG_ERROR_KINDS,
@@ -33,8 +33,10 @@ import {
   type StreamingBoomerang,
   StreamingBoomerangError,
 } from "@/agent/streaming-boomerang"
+import { pushTerminalObservable } from "@/agent/streaming-boomerang/default-streamer"
 import type { DelegationPort } from "@/agent/subagent-typed"
 import { defaultDelegationRouter } from "@/agent/subagent-typed"
+import { logger } from "@/shared"
 
 // Wallclock perf assertions flake on loaded CI; gate behind opt-in flag.
 // Behavioral assertions always run.
@@ -502,6 +504,38 @@ test("HELL-SB-15 — no zombie promise after iterator done", async () => {
   // the for-await completes, the producer's `finally` MUST have fired.
   expect(producerFinallyFired).toBe(true)
   // Additional sanity: no unhandled rejection. (bun:test would flag.)
+})
+
+// ─── ALBB-20 #4 — terminal push-fail is OBSERVABLE ──────────────────────────
+
+describe("ALBB-20 #4 terminal push-fail observability", () => {
+  test("a rejecting terminal push is surfaced via logger.warn (not swallowed silently)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    const rejecting = {
+      pushTerminal: async () => {
+        throw new Error("late push boom")
+      },
+    }
+    // Must NOT reject (the swallow is preserved) — the runner error can't be
+    // re-lost as an unhandled rejection.
+    await pushTerminalObservable(rejecting, {
+      kind: "error",
+      errorKind: "runner-error",
+      errorMessage: "orig",
+    })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0]?.[0])).toContain("terminal push failed")
+    expect(String(warn.mock.calls[0]?.[0])).toContain("late push boom")
+    warn.mockRestore()
+  })
+
+  test("a resolving terminal push warns nothing (byte-identical happy path)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    const ok = { pushTerminal: async () => {} }
+    await pushTerminalObservable(ok, { kind: "result", value: {} })
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })
 
 describe("structural exports", () => {

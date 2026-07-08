@@ -49,6 +49,16 @@ export const runTurn = async (
       activeModel,
     })
     if (breakerVerdict.abort) return { kind: "error", reason: breakerVerdict.reason }
+    // ALBB-20 #14 — `prepareTurnContext` awaits provider work (ideContext
+    // snapshot, effort classifier, compaction summarizer). An abort that lands
+    // DURING prep was only checked at the top of the loop (`:26`), so it would
+    // otherwise surface only AFTER a full stream turn ran. Re-check here, before
+    // entering `streamConsume`, so a mid-prep abort short-circuits immediately
+    // via the SAME `classifyTurnAbort` path as the pre-prep check.
+    if (config.signal.aborted || gate?.wasInterrupted() === true) {
+      bgCompaction?.cancelIfPending()
+      return classifyTurnAbort(gate, config.signal)
+    }
     const result = await streamConsume(turnSession, state, ctx)
     if ("aborted" in result) return classifyTurnAbort(gate, config.signal)
     // T08 — refusal-fallback recovery input (undefined ⇒ OFF, byte-identical).

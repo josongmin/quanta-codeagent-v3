@@ -1,6 +1,15 @@
-import { describe, expect, test } from "bun:test"
-import { type DispatchOutcome, type StreamingCall, streamingTurn } from "@/agent/streaming-dispatch"
+import { describe, expect, spyOn, test } from "bun:test"
+import {
+  type DispatchOutcome,
+  type StreamingCall,
+  streamingTurn,
+  type ToolInputStreamSeam,
+} from "@/agent/streaming-dispatch"
+import { buildToolInputSeam } from "@/agent/tool-input-streaming"
 import { assembleFromEvents, type StreamEvent } from "@/llm"
+import { logger } from "@/shared"
+import { defineTool, ToolRegistry } from "@/tool"
+import { z } from "zod"
 
 /** Async generator over a fixed event list. `onEmit` fires AFTER each event is
  *  yielded so a test can record interleaving (e.g. assert a dispatch started
@@ -264,5 +273,79 @@ describe("streamingTurn", () => {
       onToolStart: (c) => starts.push(c.id),
     })
     expect(starts.sort()).toEqual(["r1", "w1"])
+  })
+})
+
+// ALBB-20 #8 — a faulty tool-input callback was DOUBLE-swallowed (inner
+// per-callback catch + outer fireToolInput catch) ⇒ invisible at BOTH layers.
+// The fix keeps the defensive swallow (stream never poisoned) but surfaces ONE
+// logger.warn at the OUTER seam. Red-on-injection: delete the warn ⇒ this fails.
+describe("streamingTurn #8 tool-input callback observability", () => {
+  test("a throwing onToolInput seam is surfaced ONCE via logger.warn but does not poison the stream", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    const throwingSeam: ToolInputStreamSeam = {
+      start() {
+        throw new Error("faulty callback boom")
+      },
+      delta() {},
+      available() {},
+    }
+    const events: StreamEvent[] = [
+      { type: "tool_use_start", id: "t1", name: "read" },
+      { type: "tool_use_end", id: "t1", input: {} },
+      { type: "message_stop", stop_reason: "tool_use" },
+    ]
+    const res = await streamingTurn({
+      events: gen(events),
+      isConcurrencySafe: () => false, // defer so no dispatch needed
+      dispatch: async (c) => block(c.id, "ok"),
+      onToolInput: throwingSeam,
+    })
+    // Stream processing survived (assembled, not crashed).
+    expect(res.kind).toBe("assembled")
+    // Observable exactly once, at the outer seam.
+    const startWarns = warn.mock.calls.filter((c) =>
+      String(c[0]).includes("fireToolInput(start)"),
+    )
+    expect(startWarns.length).toBe(1)
+    expect(String(startWarns[0]?.[0])).toContain("faulty callback boom")
+    warn.mockRestore()
+  })
+
+  // Second layer: drive the REAL registry-bound seam (tool-input-streaming.ts)
+  // so the inner-vs-outer double-swallow is exercised end-to-end. If the inner
+  // per-callback swallow is re-added, the outer warn never fires ⇒ red.
+  test("a throwing registry-tool onInputStart propagates to the OUTER seam warn (no inner swallow)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {})
+    const faultyTool = defineTool({
+      name: "faulty",
+      description: "d",
+      inputSchema: z.object({}).passthrough(),
+      isReadOnly: () => false,
+      isConcurrencySafe: () => false,
+      // biome-ignore lint/suspicious/useAwait: async generator contract
+      execute: async function* () {},
+      onInputStart: () => {
+        throw new Error("inner-layer boom")
+      },
+    })
+    const registry = new ToolRegistry([faultyTool])
+    const seam = buildToolInputSeam(registry)
+    const events: StreamEvent[] = [
+      { type: "tool_use_start", id: "f1", name: "faulty" },
+      { type: "tool_use_end", id: "f1", input: {} },
+      { type: "message_stop", stop_reason: "tool_use" },
+    ]
+    const res = await streamingTurn({
+      events: gen(events),
+      isConcurrencySafe: () => false,
+      dispatch: async (c) => block(c.id, "ok"),
+      onToolInput: seam,
+    })
+    expect(res.kind).toBe("assembled")
+    const startWarns = warn.mock.calls.filter((c) => String(c[0]).includes("fireToolInput(start)"))
+    expect(startWarns.length).toBe(1)
+    expect(String(startWarns[0]?.[0])).toContain("inner-layer boom")
+    warn.mockRestore()
   })
 })

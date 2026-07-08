@@ -23,6 +23,13 @@ const requestedChangesReminder = (feedback: string): HookPromptInject => ({
     "\n\nRevise the plan, keep plan mode active, and request exit again only after updating the plan.",
 })
 
+const rejectedPlanReminder = (): HookPromptInject => ({
+  injectAfterSystem:
+    "The proposed plan was rejected and has been discarded. Plan mode is now " +
+    "exited. Do not treat the abandoned plan as active context; ask the " +
+    "operator for direction or propose a fresh approach before acting.",
+})
+
 export const applyPendingPlanExit = (
   cfg: PlanLifecycleConfig,
   pending: PendingPlanExit | null,
@@ -62,6 +69,24 @@ export const applyPendingPlanExit = (
     return
   }
   if (pending.outcome.decision === "rejected") {
+    // ALBB-20 #1 — a rejected plan exits plan mode just like `approved`, but the
+    // prior code `clear()`ed + returned with ZERO stream emit and ZERO operator
+    // reminder (silent). Mirror the approved branch: surface the exit via
+    // `mode_changed` and push an operator reminder BEFORE dropping the store, so
+    // the discard is observable (north-star agent-state visibility) and the
+    // model is told the abandoned plan is no longer active context.
+    const transition = applyCollaborationModeTransition(cfg, "default")
+    hookPromptPending.push(rejectedPlanReminder())
+    if (transition.changed) {
+      cfg.stream.emit({
+        type: "mode_changed",
+        from: transition.from,
+        to: transition.to,
+        fromAgentMode: transition.fromAgentMode,
+        toAgentMode: transition.toAgentMode,
+        reason: "plan_exit_rejected",
+      })
+    }
     cfg.planStore?.clear()
     return
   }

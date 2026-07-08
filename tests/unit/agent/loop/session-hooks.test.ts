@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { HookBus } from "@/agent/hooks"
-import { emitUserPromptSubmitHook, summarizeUserPrompt } from "@/agent/loop/session-hooks"
+import {
+  emitUserPromptSubmitHook,
+  findTrailingUserMessageIndex,
+  summarizeUserPrompt,
+} from "@/agent/loop/session-hooks"
+import { makeSyntheticUserMessage } from "@/agent/synthetic-user"
 import type { AgentConfig } from "@/agent/types"
 import type { Message } from "@/llm"
 import { createWorkingMemory } from "@/memory"
@@ -61,6 +66,35 @@ describe("session-hooks", () => {
         { type: "text", text: "tail" },
       ],
     })
+  })
+
+  // ALBB-20 #10 — a trailing SYNTHETIC user message (focus-chain / turn-budget /
+  // identity reminder) must NOT be mistaken for the operator's real prompt.
+  test("findTrailingUserMessageIndex SKIPS a trailing synthetic user message", () => {
+    const wm = createWorkingMemory<Message>([
+      { role: "user", content: [{ type: "text", text: "REAL operator prompt" }] },
+      { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      makeSyntheticUserMessage("focus-chain", [{ type: "text", text: "reminder tail" }]),
+    ])
+    const idx = findTrailingUserMessageIndex(wm)
+    // Must resolve to the REAL prompt at index 0, NOT the synthetic at index 2.
+    expect(idx).toBe(0)
+    expect(wm.messages[idx]?.content[0]).toEqual({ type: "text", text: "REAL operator prompt" })
+  })
+
+  test("emitUserPromptSubmitHook feeds the REAL prompt (not a trailing synthetic) to the hook", async () => {
+    const wm = createWorkingMemory<Message>([
+      { role: "user", content: [{ type: "text", text: "do the thing" }] },
+      makeSyntheticUserMessage("focus-chain", [{ type: "text", text: "1 turn remains" }]),
+    ])
+    const hooks = new HookBus()
+    const seen: string[] = []
+    hooks.on("user_prompt_submit", (e) => {
+      seen.push(e.prompt)
+      return {}
+    })
+    await emitUserPromptSubmitHook(baseConfig(hooks), wm, "s1")
+    expect(seen).toEqual(["do the thing"])
   })
 
   test("emitUserPromptSubmitHook returns deny reason without mutating prompt", async () => {

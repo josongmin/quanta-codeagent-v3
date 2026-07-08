@@ -7,7 +7,7 @@ import {
   snapshotToNotice,
 } from "@/llm/ratelimit-snapshot"
 import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from "@/observability"
-import { abortReasonOf, errMessage, LLMError } from "@/shared"
+import { abortReasonOf, errMessage, LLMError, logger } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
@@ -55,6 +55,72 @@ export const captureTokenBaseline = (
   TokenBaselineBox.wrap(box).capture(ev, sentEstimate)
 }
 
+/**
+ * ALBB-20 #6 — resolve the (optionally timeout-wrapped) source. The prior
+ * inline AND-gate silently fell through to the UN-wrapped `src` when EXACTLY
+ * ONE of `streamWatchdog` / `streamTimeoutPolicy` was set — a misconfigured
+ * timeout that never fires and is invisible. Fail-LOUD: warn once on the
+ * half-wire (both surfaces — operator log AND agent-state stream) so a
+ * half-configured timeout can never silently no-op. Both-set ⇒ wrap; neither ⇒
+ * pass-through (byte-identical). */
+export const resolveGuardedStream = (
+  config: AgentConfig,
+  src: AsyncIterable<StreamEvent>,
+): AsyncIterable<StreamEvent> => {
+  const hasWatchdog = config.streamWatchdog !== undefined
+  const hasPolicy = config.streamTimeoutPolicy !== undefined
+  if (hasWatchdog && hasPolicy) {
+    // biome-ignore lint/style/noNonNullAssertion: both-set proven above
+    return config.streamWatchdog!.wrap(src, config.streamTimeoutPolicy!, config.signal)
+  }
+  if (hasWatchdog !== hasPolicy) {
+    const missing = hasWatchdog ? "streamTimeoutPolicy" : "streamWatchdog"
+    const msg =
+      `stream timeout HALF-WIRED: ${hasWatchdog ? "streamWatchdog" : "streamTimeoutPolicy"} ` +
+      `set but ${missing} absent — the timeout will NOT fire (falling through to ` +
+      "an un-guarded stream). Wire BOTH or NEITHER."
+    logger.warn(`loop.streamConsume: ${msg}`)
+    config.stream.emit({ type: "error", message: msg })
+  }
+  return src
+}
+
+/**
+ * ALBB-20 #5 — detect the watchdog's GRACEFUL degrade-termination at the CALLER
+ * (the watchdog slice is plane-clean by design and cannot emit). When the
+ * policy action is `"degrade"`, an idle/total timeout ends the wrapped stream
+ * with NO event — indistinguishable from a natural end at the loop boundary. We
+ * re-derive the EXACT condition the watchdog used (same policy thresholds +
+ * clock): if the stream ended with the last-event gap ≥ `idleMs`, or total
+ * elapsed ≥ `totalMs`, AND at least one event was seen (a truly empty stream is
+ * a different failure), the termination was a degrade. Emit a non-fatal notice
+ * so the silent degrade is observable. Returns undefined when no degrade is
+ * inferable (byte-identical: no emit). */
+export const inferDegradeNotice = (
+  config: AgentConfig,
+  sawEvent: boolean,
+  lastEventAt: number,
+  startedAt: number,
+  now: number,
+): string | undefined => {
+  const policy = config.streamTimeoutPolicy
+  if (
+    config.streamWatchdog === undefined ||
+    policy === undefined ||
+    policy.action !== "degrade" ||
+    !sawEvent
+  ) {
+    return undefined
+  }
+  if (policy.idleMs !== undefined && now - lastEventAt >= policy.idleMs) {
+    return `stream idle-degraded after ${policy.idleMs}ms of silence — the model turn was truncated (non-fatal; policy action=degrade)`
+  }
+  if (policy.totalMs !== undefined && now - startedAt >= policy.totalMs) {
+    return `stream total-degraded after ${policy.totalMs}ms wall-clock — the model turn was truncated (non-fatal; policy action=degrade)`
+  }
+  return undefined
+}
+
 async function* teeUsage(
   config: AgentConfig,
   src: AsyncIterable<StreamEvent>,
@@ -71,11 +137,13 @@ async function* teeUsage(
   // token attrs (the event otherwise only reaches the recorder/collector).
   onUsage?: (ev: Extract<StreamEvent, { type: "usage" }>) => void,
 ): AsyncIterable<StreamEvent> {
-  const guarded =
-    config.streamWatchdog !== undefined && config.streamTimeoutPolicy !== undefined
-      ? config.streamWatchdog.wrap(src, config.streamTimeoutPolicy, config.signal)
-      : src
+  const guarded = resolveGuardedStream(config, src)
+  const startedAt = Date.now()
+  let lastEventAt = startedAt
+  let sawEvent = false
   for await (const ev of guarded) {
+    sawEvent = true
+    lastEventAt = Date.now()
     if (ev.type === "usage") {
       emitUsage(config, ev, recorder, collector, taskSpend)
       captureTokenBaseline(tokenBaselineBox, ev, sentEstimate)
@@ -91,6 +159,8 @@ async function* teeUsage(
     }
     yield ev
   }
+  const degradeNotice = inferDegradeNotice(config, sawEvent, lastEventAt, startedAt, Date.now())
+  if (degradeNotice !== undefined) config.stream.emit({ type: "error", message: degradeNotice })
 }
 
 /** F3 proactive rate-limit backoff: emit the reached-window notice in BOTH modes
