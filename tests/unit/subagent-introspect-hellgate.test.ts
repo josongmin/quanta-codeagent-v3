@@ -8,6 +8,7 @@
 import { describe, expect, test } from "bun:test"
 import { buildSubagentIntrospectBlock } from "../../src/agent/tier1/subagent-introspect"
 import type { AgentConfig } from "../../src/agent/types"
+import { ownersForRegistry } from "../../src/subagent/agent-tool"
 import {
   AgentMetaRegistry,
   createIntrospectTools,
@@ -321,6 +322,44 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
       deps(s, { resolveLabel: () => "child/0" }),
     )
     expect(s.mb.sent[0]?.to).toBe("child/0")
+  })
+
+  // jul-7 re-audit F-E [HIGH]: followup_task DELIVERS a message AND triggers/interrupts a
+  // turn on the target by id, with no lineage gate — a sibling could inject into (or
+  // interrupt:true ABORT) another lineage's running child. Gate it like wait/send/output.
+  test("F-E: cross-lineage followup_task ⇒ ownership_denied, NO send, NO wake", () => {
+    const s = setup("woke")
+    ownersForRegistry(s.reg).set(s.target, "agent-A") // target owned by lineage A
+    const out = handleFollowupTask(
+      { agentId: s.target, message: "INJECT", interrupt: true },
+      deps(s, { requesterLineage: "agent-B" }), // sibling B attacks
+    )
+    expect(out.kind).toBe("error")
+    if (out.kind === "error") expect(out.cause).toBe("denied")
+    expect(s.mb.sent).toHaveLength(0) // NOT delivered
+    expect(s.wakeCalls).toHaveLength(0) // NOT triggered/interrupted
+  })
+
+  test("F-E control: OWNER lineage followup_task ⇒ delivered + triggered", () => {
+    const s = setup("woke")
+    ownersForRegistry(s.reg).set(s.target, "agent-A")
+    const out = handleFollowupTask(
+      { agentId: s.target, message: "go" },
+      deps(s, { requesterLineage: "agent-A" }),
+    )
+    expect(out.kind).toBe("success")
+    expect(s.mb.sent).toHaveLength(1)
+    expect(s.wakeCalls).toEqual(["followup"])
+  })
+
+  test("F-E byte-identical: owner-less target ⇒ legacy delivery (no requesterLineage gate)", () => {
+    const s = setup("woke") // spawnRunning does NOT stamp an owner
+    const out = handleFollowupTask(
+      { agentId: s.target, message: "go" },
+      deps(s, { requesterLineage: "agent-B" }),
+    )
+    expect(out.kind).toBe("success") // owner-less ⇒ allowed regardless of lineage
+    expect(s.mb.sent).toHaveLength(1)
   })
 })
 

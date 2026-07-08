@@ -25,7 +25,7 @@
 
 import { z } from "zod"
 import type { Tool, ToolEvent } from "@/tool"
-import { ownersForRegistry } from "./agent-tool"
+import { ownersForRegistry, ROOT_LINEAGE } from "./agent-tool"
 import type { AgentMetaRegistry } from "./agent-meta"
 import type { TaskRecord, TaskRegistry } from "./registry"
 import type { TurnWakeRegistry } from "./turn-wake"
@@ -217,6 +217,11 @@ export interface FollowupTaskDeps {
    *  `cause:"self_target"` (a child must not re-trigger its own loop). Absent ⇒
    *  no self-target guard (host did not inject own id). */
   readonly ownAgentId?: string
+  /** F-E (jul-7 audit) — the requesting agent's lineage. followup_task DELIVERS a
+   *  message AND triggers/interrupts a turn on the target by id; gate it so a sibling
+   *  lineage cannot inject into (or `interrupt:true` abort) another lineage's child.
+   *  Absent ⇒ root; owner-less target ⇒ legacy (byte-identical). */
+  readonly requesterLineage?: string
 }
 
 /** Pure, synchronous, no-throw deliver-and-trigger. */
@@ -234,6 +239,16 @@ export const handleFollowupTask = (
     return err(
       `No agent found with id ${input.agentId} (target must be a non-root child)`,
       "id_unknown",
+    )
+  }
+  // F-E — lineage gate BEFORE any delivery/trigger: a message injected into (or an
+  // `interrupt:true` abort of) a foreign lineage's child is refused (mirrors wait/send/
+  // output, tree-scoped via `?? ROOT_LINEAGE`). Owner-less target ⇒ legacy (byte-identical).
+  const recordedOwner = ownersForRegistry(deps.registry).get(input.agentId)
+  if (recordedOwner !== undefined && recordedOwner !== (deps.requesterLineage ?? ROOT_LINEAGE)) {
+    return err(
+      `Cannot followup_task ${input.agentId}: it belongs to a different agent lineage (ownership denied).`,
+      "denied",
     )
   }
   if (rec.status !== "running") {
@@ -353,6 +368,7 @@ const followupTaskTool = (
       callerLabel: deps.callerLabel ?? "parent",
       ...(deps.resolveLabel !== undefined ? { resolveLabel: deps.resolveLabel } : {}),
       ...(deps.ownAgentId !== undefined ? { ownAgentId: deps.ownAgentId } : {}),
+      ...(deps.requesterLineage !== undefined ? { requesterLineage: deps.requesterLineage } : {}),
     })
     if (out.kind === "error") {
       yield errorEvent(out)
