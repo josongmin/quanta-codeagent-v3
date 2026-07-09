@@ -10,10 +10,10 @@ monitoring: none
 modes: [batch]
 configurable: integrated
 owners: ["@songmin"]
-labels: [surface:bench, observability-primitive, default-off]
+labels: [surface:bench, observability-primitive]
 depends_on: [bench-eval-driver, bench-trajectory-record]
 config_refs:
-  env: []
+  env: [QUANTA_BENCH_LANE_PROGRESS]
 surface_integration:
   cli: full
   web: na
@@ -50,12 +50,14 @@ evidence:
       - tests/unit/lane-progress-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
+knobs: [QUANTA_BENCH_LANE_PROGRESS]
 deliberate_hold: null
 notes: |
   Bench-scoped observability primitive. L3 = wired-with-tests: the renderer is wired
   into the bench TTY entry (bench-entry-tty-wiring) and the progress bus is emitted at
   the repair-breadth / verify-select fork sites, with a lane-progress hellgate. The
-  emit-is-no-op-when-unsubscribed contract keeps every non-interactive host
-  byte-identical (default-OFF). Recording-lane labels feed the sibling
-  bench-trajectory-record cassette so parallel candidate turns stay attributable.
+  renderer is ON by default in a bench TTY (QUANTA_BENCH_LANE_PROGRESS=0/off disables
+  it, falling back to plain log lines); for non-interactive / library hosts the
+  emit-is-no-op-when-unsubscribed contract keeps the fork sites byte-identical.
+  Recording-lane labels feed the sibling bench-trajectory-record cassette so parallel
+  candidate turns stay attributable.

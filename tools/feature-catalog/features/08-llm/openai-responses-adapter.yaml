@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [n-a]
 configurable: integrated
 config_refs:
-  env: []
+  env: [QUANTA_REASONING_SUMMARY_DETAIL]
   runtime:
     - serviceTier
     - reasoningEffort
@@ -69,6 +69,8 @@ evidence:
 knobs:
   - name: serviceTier
     where: src/llm/adapters/openai-responses.ts (config.serviceTier, env-derived at root)
+  - name: QUANTA_REASONING_SUMMARY_DETAIL
+    where: src/llm/responses-stream.ts + src/llm/openai-responses-wire.ts (reasoning-summary verbosity level for the OpenAI responses stream)
     default: 'undefined'
     purpose: |
       OpenAI `service_tier` request field. Conditionally spread — undefined ⇒ key
