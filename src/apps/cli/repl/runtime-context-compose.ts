@@ -514,6 +514,12 @@ const buildBootstrapContextArgs = (args: {
       // the slot's surface confirm INLINE (no turn abort / re-run). Non-CLI
       // surfaces never set this and keep the deferred approvalRequest protocol.
       approvalProtocol: { confirmSlot, interactive: true },
+      // D-1 (jul-10, UUX-1-03) — CLI/web HITL parity: with a live operator on a
+      // TTY, always-confirm tools ASK even under bypass/acceptEdits (the web
+      // daemon has seeded this since jun-10; the CLI's missing seed was the
+      // split). Non-TTY (piped/headless CLI) keeps the legacy fallthrough —
+      // a prompt nobody can answer would hang the pipeline.
+      ...(process.stdin.isTTY === true ? { hitl: { enabled: true } } : {}),
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       planExitPort,
       userInputPort,

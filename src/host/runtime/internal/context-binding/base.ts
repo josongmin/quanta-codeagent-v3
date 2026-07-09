@@ -290,6 +290,11 @@ const buildBootstrapBaseShape = (
     ...whenDefined("planStore", args.boot.planStore),
     ...whenDefined("decisionEmitter", args.overlay?.decisionEmitter),
     ...whenDefined("admissibility", args.overlay?.admissibility),
+    // D-1 (jul-10, UUX-1-03) — lift the surface's HITL posture onto the base so
+    // always-confirm tools ask on every surface with a live operator (web seeds
+    // its own base directly; the CLI rides this overlay, TTY-gated). Absent ⇒
+    // omitted (legacy fallthrough, byte-identical).
+    ...whenDefined("hitl", args.overlay?.hitl),
     ...whenDefined("shellSnapshot", args.overlay?.shellSnapshot),
     ...whenDefined("networkProxy", args.overlay?.networkProxy),
     // #20 — lift the persistent trust-scope registry onto the base so the

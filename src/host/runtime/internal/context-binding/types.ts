@@ -243,6 +243,12 @@ export interface RuntimeMemoryAutoComposeArgs {
 export type RuntimeBootstrapOverlay = {
   readonly promptSurfaceProfile?: AgentConfig["promptSurfaceProfile"]
   readonly approvalProtocol?: RuntimeApprovalProtocolConfig
+  /** D-1 (jul-10, UUX-1-03) — the HITL 4-tier gate posture. The web daemon
+   *  seeds `{enabled:true}` on its own base; the CLI seeds it through THIS
+   *  overlay (TTY-gated) so always-confirm tools ask on every surface with a
+   *  live operator — the CLI/web policy split is gone. Absent ⇒ slot omitted
+   *  (legacy fallthrough, byte-identical for headless surfaces). */
+  readonly hitl?: AgentConfig["hitl"]
   readonly admissibility?: AgentConfig["admissibility"]
   readonly admissibilityBuilder?: (
     helpers: RuntimeBootstrapHelpers,
