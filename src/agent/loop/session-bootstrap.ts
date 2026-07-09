@@ -236,6 +236,9 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     ...(ttfm !== undefined ? { ttfm } : {}),
     ...(bgCompaction !== undefined ? { bgCompaction } : {}),
     ...(rateLimitProactive !== undefined ? { rateLimitProactive } : {}),
+    // UUX-5-05 — thread the task registry so the MID-turn conversation-action
+    // drain (same-turn-engine) serves `cancel_subagent` with boundary parity.
+    ...(features.taskRegistry !== undefined ? { taskRegistry: features.taskRegistry } : {}),
     guards: guardChain,
     hookPromptPending,
   }

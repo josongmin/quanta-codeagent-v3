@@ -26,7 +26,7 @@ const applyQueuedPlanLifecycle = (args: {
   readonly hookPromptPending: import("../hooks").HookPromptInject[]
 }): void => {
   const exitCount = args.pendingPlanExitRef.current.length
-  const exit = exitCount === 0 ? null : args.pendingPlanExitRef.current[exitCount - 1] ?? null
+  const exit = exitCount === 0 ? null : (args.pendingPlanExitRef.current[exitCount - 1] ?? null)
   // Multiple lifecycle tools can land in one assistant turn. The NEXT-turn
   // authority must follow the FINAL operator-visible request/result pair from
   // that turn, not the first queued callback. Exit outcomes still dominate any
@@ -35,7 +35,9 @@ const applyQueuedPlanLifecycle = (args: {
   const entryCount = args.pendingPlanEntryRef.current.length
   const entry =
     exit === null
-      ? (entryCount === 0 ? null : args.pendingPlanEntryRef.current[entryCount - 1] ?? null)
+      ? entryCount === 0
+        ? null
+        : (args.pendingPlanEntryRef.current[entryCount - 1] ?? null)
       : null
   args.pendingPlanExitRef.current = []
   args.pendingPlanEntryRef.current = []
@@ -68,7 +70,11 @@ export const resolveTurnLoopOutcome = async (args: {
     // keystroke cancel lands on when the REPL wires no SubagentTurnGate). Capture
     // the partial turn BEFORE finishing so `/resume` can restore it. Distinct
     // reason for telemetry. Default-OFF: no buffer wired ⇒ no-op (byte-identical).
-    captureAbortedTurn(args.cfg, args.wm, "turn_result_abort")
+    // UUX-5-05 — SKIP when the producer already captured with a precise reason
+    // (`captured:true`, the mid-turn `/cancel` drain): the buffer is single-slot
+    // last-wins, so re-capturing here would clobber conversation_cancel with the
+    // generic turn_result_abort (the ALBB-06 double-capture class).
+    if (args.result.captured !== true) captureAbortedTurn(args.cfg, args.wm, "turn_result_abort")
     clearQueuedPlanLifecycle(args)
     return {
       kind: "finish",

@@ -43,6 +43,10 @@ import type { AgentEvent, StreamPort } from "@/stream"
 import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE, type Tool, ToolRegistry } from "@/tool"
 import type { JsonLineDuplex } from "@/tool/container-exec"
 import type { PtySessionPort } from "@/tool/pty"
+// UUX-2-21 — ONE named approval policy for BOTH seams (gate-confirm denies /
+// deferred approves, intentionally — see the const's doc for the verified WHY).
+// The hellgate pins that THIS module spells no inline approval lambda of its own.
+import { BENCH_APPROVAL_POSTURE } from "./brain-approval-posture"
 import { terminalSurfaceOverDuplex } from "./index"
 import {
   comparedToReference,
@@ -565,7 +569,8 @@ const runOracleRepairLoop = async (args: {
       runFollowUpTurn: async (text) => {
         const followUp = await runSessionTurn({
           session: args.session,
-          resolveApproval: async () => "approve",
+          // UUX-2-21 — one policy const for both approval seams; see BENCH_APPROVAL_POSTURE.
+          resolveApproval: BENCH_APPROVAL_POSTURE.resolveApproval,
           text,
           turnSignal: args.turnSignal,
           env: {},
@@ -605,9 +610,10 @@ const driveMainTurnThenGates = async (args: {
 }> => {
   const turnResult = await runSessionTurn({
     session: args.session,
-    // No human operator on the box — auto-approve so a tool that requests approval does not
-    // deadlock the run (same posture as headless).
-    resolveApproval: async () => "approve",
+    // UUX-2-21 — no human operator on the box: deadlock-insurance auto-approve on the
+    // (structurally dead) deferred seam, headless parity. Policy + why the GATE seam
+    // simultaneously denies: see BENCH_APPROVAL_POSTURE.
+    resolveApproval: BENCH_APPROVAL_POSTURE.resolveApproval,
     text: args.turnText,
     turnSignal: args.turnSignal,
     env: {},
@@ -684,7 +690,8 @@ const runVerifyBeforeFinalizeGate = async (args: {
   if (decision.fire) {
     const followUp = await runSessionTurn({
       session: args.session,
-      resolveApproval: async () => "approve",
+      // UUX-2-21 — one policy const for both approval seams; see BENCH_APPROVAL_POSTURE.
+      resolveApproval: BENCH_APPROVAL_POSTURE.resolveApproval,
       // RUN-only nudge (S4): run+observe the deliverable — no "compare to reference" (rework/gaming).
       text: VERIFY_GATE_FOLLOWUP,
       turnSignal: args.turnSignal,
@@ -854,7 +861,10 @@ export const runTerminalBrain = async (
     const { runtime: facade } = await createRuntimeFromBootstrap({
       boot,
       stream,
-      onConfirm: async () => false,
+      // UUX-2-21 — the LIVE gate-confirm seam DENIES (fail-closed; no operator on the
+      // box, and no approvalProtocol is wired below so THIS verb is the one that fires).
+      // Why the deferred seam simultaneously approves: see BENCH_APPROVAL_POSTURE.
+      onConfirm: BENCH_APPROVAL_POSTURE.onConfirm,
       overlay: {
         promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", {
           envPosture: envOwnedApplied ? "owned" : "frozen",

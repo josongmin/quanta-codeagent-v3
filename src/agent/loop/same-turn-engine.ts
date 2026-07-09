@@ -6,6 +6,7 @@ import { applyAction, EMPTY_TOOL_HISTORY } from "./recovery-executor"
 import { resolveActiveModelId } from "./skill-gate"
 import { streamConsume } from "./stream-consume"
 import { buildTurnSessionView, classifyTurnAbort } from "./turn-gate"
+import { drainConversationActionsMidTurn } from "./turn-iteration"
 import type { TurnResult } from "./types"
 
 export const runTurn = async (
@@ -22,11 +23,53 @@ export const runTurn = async (
       ? [...hookPromptPending]
       : undefined
   if (hookPromptPending !== undefined) hookPromptPending.length = 0
+  let streamRound = 0
   for (;;) {
     if (config.signal.aborted || gate?.wasInterrupted() === true) {
       bgCompaction?.cancelIfPending()
       return classifyTurnAbort(gate, config.signal)
     }
+    // UUX-5-05 — MID-turn conversation-action drain, at the top of the
+    // SAME-turn re-stream loop. Drain coverage map:
+    //   - BETWEEN tool rounds: already covered — each `{kind:"tools"}` round
+    //     returns to the outer loop, whose `prepareTurnIteration` →
+    //     `syncQueuedTurnInputs` drains before the next round.
+    //   - WITHIN this same-turn loop (nudge / retry / PTL / guard-blocked
+    //     re-streams): previously UN-drained — a turn stuck in the empty/
+    //     malformed nudge cycle could run many LLM streams while a queued
+    //     `/cancel` or `/summarize-now` waited for the turn to seal. This
+    //     drain closes that window. Iteration 0 is skipped: the boundary
+    //     drain ran just before `runTurn`, so nothing can have queued yet.
+    //   - WITHIN one stream round (a multi-tool_use batch dispatching inside
+    //     `streamConsume`): deliberately NOT drained — the assistant message
+    //     is still being assembled and is not yet in `wm`, so an on-demand
+    //     compaction's `wm.replace` there could orphan the in-flight
+    //     tool_use ids. This seam (post-append, pre-stream) is the same
+    //     structurally-safe point the proactive compaction already uses
+    //     (`prepareTurnContext` → `maybeCompact` runs right below).
+    // Default-OFF byte-identical: `conversationActionPort` is only wired when
+    // QUANTA_CONVERSATION_ACTIONS is on; absent ⇒ one property read, no-op.
+    if (streamRound > 0) {
+      const drained = await drainConversationActionsMidTurn({
+        cfg: turnConfig,
+        wm,
+        taskRegistry: session.taskRegistry,
+        tokenBaseline: state.tokenBaseline,
+      })
+      if (drained === "aborted_captured") {
+        // A `/cancel` landed mid-loop: the drain already captured the partial
+        // turn (conversation_cancel) + emitted `interrupted`. Unwind exactly
+        // like the pre-round abort check above. NOT routed through
+        // `classifyTurnAbort` — neither the lifetime signal nor the subagent
+        // gate fired; this is a cooperative conversation-action abort.
+        // `captured:true` tells `resolveTurnLoopOutcome`'s aborted arm NOT to
+        // re-capture with the generic `turn_result_abort` reason (which would
+        // clobber the precise conversation_cancel capture — ALBB-06 class).
+        bgCompaction?.cancelIfPending()
+        return { kind: "aborted", captured: true }
+      }
+    }
+    streamRound += 1
     // D4 (jun-7) — resolve the model that will ACTUALLY process this turn
     // (sticky-model / skill override), so compaction's window threshold tracks
     // the ACTIVE model, not the base `config.llm`. Resolved here, before

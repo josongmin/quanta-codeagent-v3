@@ -124,6 +124,80 @@ export const syncQueuedTurnInputs = async (args: {
   return "continue"
 }
 
+/** UUX-5-05 — outcome of the MID-TURN conversation-action drain. `continue`
+ *  keeps the tool loop running; `aborted_captured` means a `/cancel` landed and
+ *  the drain already captured the partial turn (conversation_cancel reason), so
+ *  the tool loop must unwind WITHOUT re-capturing (mirrors the boundary drain's
+ *  `aborted_captured` contract in {@link syncQueuedTurnInputs}). */
+export type MidTurnDrainOutcome = "continue" | "aborted_captured"
+
+/**
+ * UUX-5-05 — drain queued conversation-actions INSIDE the same-turn loop.
+ *
+ * Root cause: {@link pollConversationAction} had ONE caller —
+ * {@link syncQueuedTurnInputs}, which runs only at the turn boundary
+ * (`prepareTurnIteration`). Tool ROUNDS pass that boundary (each
+ * `{kind:"tools"}` round returns to the outer loop), so BETWEEN rounds was
+ * already drained — but the SAME-turn re-stream loop in `runTurn` (empty/
+ * malformed/output-limit nudges, transient retries, PTL recovery, guard-blocked
+ * rounds) was NOT: a turn stuck cycling there could run many LLM streams while
+ * a queued `/cancel` or `/summarize-now` waited for the turn to seal. This
+ * helper is the second drain point, called by `runTurn` at the top of each
+ * same-turn iteration after the first.
+ *
+ * Verb safety at this seam (all verbs drained — none is boundary-only):
+ *  - `summarize` → {@link compactNowOnDemand} is structurally safe here: the
+ *    proactive tier-2 compaction ALREADY runs at this exact seam every
+ *    iteration (`prepareTurnContext` → `maybeCompact` → `compactIfNeeded`),
+ *    using the same orphan-aware `findBoundary` + `wm.replace` install. The
+ *    on-demand pass is the same machinery with `force:true`. Same
+ *    token-baseline invalidation as the boundary drain (D5). (Draining WITHIN
+ *    one stream round — mid-dispatch — would NOT be safe: the assistant
+ *    message under assembly is not yet in `wm`, so a `wm.replace` could
+ *    orphan the in-flight tool_use ids. That window stays un-drained.)
+ *  - `cancel` → capture the partial turn (resume parity with the boundary
+ *    path, SAME `captureAbortedTurn` + conversation_cancel reason) and signal
+ *    the caller to unwind. `emitInterrupted` already fired inside the poll.
+ *  - `injection` (weave / re-routed user_message) → append to wm; at the
+ *    top-of-iteration the transcript is closed (the previous round's message +
+ *    any nudge already appended), so a trailing user message is exactly the
+ *    shape the boundary injectors (focus-chain / budget reminder) produce.
+ *  - `cancel_subagent` / `resume` / `continue` / `none` → handled inside the
+ *    poll itself; nothing to do here.
+ *
+ * DEFAULT-OFF byte-identity: the whole conversation-actions surface is gated
+ * on QUANTA_CONVERSATION_ACTIONS — the CLI only wires
+ * `cfg.conversationActionPort` when the gate is on (surface-compose). Port
+ * absent ⇒ this helper returns after ONE property read (no poll, no wm/stream
+ * touch) — pinned by the §4 Proxy witness in the hellgate.
+ */
+export const drainConversationActionsMidTurn = async (args: {
+  readonly cfg: AgentConfig
+  readonly wm: WorkingMemory<Message>
+  readonly taskRegistry: { forceStop(id: string): boolean } | undefined
+  readonly tokenBaseline: import("../compaction").TokenBaselineBoxState | undefined
+}): Promise<MidTurnDrainOutcome> => {
+  // Gate check FIRST (not delegated to the poll) so the OFF path provably reads
+  // nothing else off the config (§4 witness) — strict byte-identity when the
+  // QUANTA_CONVERSATION_ACTIONS gate left the port unwired.
+  if (args.cfg.conversationActionPort === undefined) return "continue"
+  const actionOutcome = await pollConversationAction(args.cfg, args.taskRegistry)
+  if (actionOutcome.kind === "finish_aborted") {
+    // Same capture the boundary drain performs (§11.5 resume): the partial turn
+    // lands in the session buffer with the conversation_cancel reason.
+    captureAbortedTurn(args.cfg, args.wm, actionOutcome.reason)
+    return "aborted_captured"
+  }
+  if (actionOutcome.kind === "injection") {
+    args.wm.append(actionOutcome.message)
+    observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
+  }
+  if (actionOutcome.kind === "summarize") {
+    await compactNowOnDemand(args.cfg, args.wm, args.tokenBaseline)
+  }
+  return "continue"
+}
+
 /** Loop-control fix (jun-25): how many trailing turns (inclusive of the last)
  *  carry the budget-tail reminder. K≈3 gives the model a short runway to land
  *  the plane without spamming every turn. Frozen — a test asserting the tail

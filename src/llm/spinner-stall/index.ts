@@ -20,6 +20,13 @@ export {
   type SpinnerStallEvent,
   type SpinnerStallSink,
 } from "./event-emitter"
+// UUX-1-15 — detector → operator-notice bus bridge (latched warn per stall
+// episode; recovery clears the latch + surfaces one info). The composition
+// root that constructs a detector wires the notice path with ONE call.
+export {
+  createOperatorNoticeStallSink,
+  wireStallDetectorToOperatorNotices,
+} from "./operator-notice-wire"
 export type {
   CheckAllArgs,
   SpinnerStallDetectorPort,

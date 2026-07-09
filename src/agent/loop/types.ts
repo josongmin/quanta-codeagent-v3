@@ -28,7 +28,14 @@ import type { AgentConfig, AgentOutcome, StopReason } from "../types"
 export type TurnResult =
   | { kind: "tools"; message: AssembledMessage; resultBlocks: AssembledMessage["content"] }
   | { kind: "completed"; message?: AssembledMessage }
-  | { kind: "aborted" }
+  /** UUX-5-05 — `captured:true` marks an abort whose partial turn was ALREADY
+   *  captured (with a precise reason, e.g. the mid-turn `/cancel`'s
+   *  conversation_cancel) by the producer. `resolveTurnLoopOutcome`'s aborted
+   *  arm must then NOT re-capture with the generic `turn_result_abort` reason
+   *  (single-slot last-wins buffer — a second capture clobbers; the ALBB-06
+   *  double-capture class at the mid-loop seam). Omitted ⇒ the arm captures as
+   *  before (byte-identical for every pre-existing producer). */
+  | { kind: "aborted"; captured?: true }
   | { kind: "interrupted" }
   | { kind: "error"; reason: string }
   | { kind: "refusal"; rationale: string; message: AssembledMessage }

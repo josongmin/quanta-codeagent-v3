@@ -146,6 +146,14 @@ export interface TurnSession {
     import("./compaction").BgSummaryPayload
   >
   readonly guards: readonly TurnGuard[]
+  /** UUX-5-05 — the subagent task registry, threaded so the MID-turn
+   *  conversation-action drain (`drainConversationActionsMidTurn` inside
+   *  `runTurn`) can execute a queued `cancel_subagent` with the SAME semantics
+   *  as the boundary drain (`prepareTurnIteration` receives it separately via
+   *  `RunAgentContext.features`). Structural type (no `@/subagent` value
+   *  import — cycle safety). Absent ⇒ a mid-turn `cancel_subagent` degrades to
+   *  the poll's own not_found handling, byte-identical to the pre-wire shape. */
+  readonly taskRegistry?: { forceStop(id: string): boolean }
   /** ADR-0133 — session-scoped pending list of hook-emitted promptHook
    *  responses. Pushed by the subagent runner (via
    *  `cfg.subagentPendingPrompt`) and by the per-turn `turn_start` hook
