@@ -121,7 +121,13 @@ export const isRatelimitSnapshotMsg = (m: AgentStateMessage): m is RatelimitSnap
 /* Reducer — pure, latest-wins per kind                                */
 /* ------------------------------------------------------------------ */
 
-type AgentStateAction = { type: "message"; msg: AgentStateMessage } | { type: "reset" }
+type AgentStateAction =
+  | { type: "message"; msg: AgentStateMessage }
+  | { type: "reset" }
+  /** UUX-5-15 — completion cleanup: the session channel's `tool.completed`
+   *  event (which carries the `toolCallId`) removes the finished tool's
+   *  progress line instead of letting it linger until FIFO eviction. */
+  | { type: "tool.completed"; toolCallId: string }
 
 /**
  * P3 (memory backstop): FIFO cap on the number of DISTINCT `toolCallId`s the
@@ -149,6 +155,17 @@ const setWithFifoCap = <V>(next: Map<string, V>, key: string, value: V, cap: num
   }
 }
 
+/** Completion cleanup (UUX-5-15). Unknown id ⇒ identity no-op (no churn). */
+const removeToolProgress = (
+  state: FullAgentStateView,
+  toolCallId: string,
+): FullAgentStateView => {
+  if (!state.toolProgress.has(toolCallId)) return state
+  const toolProgress = new Map(state.toolProgress)
+  toolProgress.delete(toolCallId)
+  return { ...state, toolProgress }
+}
+
 /**
  * Fold one agent-state message onto the view. Pure (exported so the state
  * semantics are unit-tested in the node test env, no DOM render). Latest-wins
@@ -159,6 +176,9 @@ export const agentStateReducer = (
   action: AgentStateAction,
 ): FullAgentStateView => {
   if (action.type === "reset") return EMPTY_FULL_AGENT_STATE
+  if (action.type === "tool.completed") {
+    return removeToolProgress(state, action.toolCallId)
+  }
   const { msg } = action
 
   if (isModeChangedMsg(msg)) {
@@ -203,17 +223,35 @@ export const agentStateReducer = (
 /* Hook                                                                */
 /* ------------------------------------------------------------------ */
 
+/** Completion-event source for the tool-progress cleanup (UUX-5-15). The
+ *  production caller filters the SESSION channel's `tool.completed` events
+ *  (which carry `toolCallId`) out of `client.onAny`; tests pass a stub. */
+export interface ToolCompletionSource {
+  subscribe(handler: (toolCallId: string) => void): () => void
+}
+
 /**
  * Subscribe to the agent-state channel and fold every frame into one live
  * {@link FullAgentStateView}. With `source === null` (the gate is OFF / no
  * client) the hook never subscribes and returns {@link EMPTY_FULL_AGENT_STATE}
  * — the panel renders nothing (default-OFF, chat UI unchanged).
+ *
+ * `completions` (optional) wires the session channel's `tool.completed`
+ * events into the reducer's cleanup action so a finished tool's progress
+ * line clears immediately instead of waiting for FIFO eviction.
  */
-export const useAgentState = (source: AgentStateSource | null): FullAgentStateView => {
+export const useAgentState = (
+  source: AgentStateSource | null,
+  completions: ToolCompletionSource | null = null,
+): FullAgentStateView => {
   const [state, dispatch] = useReducer(agentStateReducer, EMPTY_FULL_AGENT_STATE)
   useEffect(() => {
     if (source === null) return
     return source.subscribe((msg) => dispatch({ type: "message", msg }))
   }, [source])
+  useEffect(() => {
+    if (completions === null) return
+    return completions.subscribe((toolCallId) => dispatch({ type: "tool.completed", toolCallId }))
+  }, [completions])
   return state
 }

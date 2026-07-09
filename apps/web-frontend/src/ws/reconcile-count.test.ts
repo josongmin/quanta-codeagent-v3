@@ -64,14 +64,17 @@ const deltaEvent = (delta: string, seq: number): SessionEvent =>
 
 interface ViewportProps {
   readonly messages: readonly UiMessage[]
+  readonly connectionPhase: "connected"
 }
 
-// The transcript list is memo'd ONLY on the `messages` reference — the live
-// streaming text lives outside it (in the `streamingAssistant` slot, rendered
-// as a sibling tail), so neither `streamingMessageId` nor `sessionStatus` needs
+// The transcript list is memo'd on the `messages` reference (plus the rarely-
+// changing connection phase for the empty-state copy) — the live streaming
+// text lives outside it (in the `streamingAssistant` slot, rendered as a
+// sibling tail), so neither `streamingMessageId` nor `sessionStatus` needs
 // to invalidate the finalized list.
 const viewportPropsOf = (state: TranscriptState): ViewportProps => ({
   messages: state.messages,
+  connectionPhase: "connected",
 })
 
 describe("streaming reconcile-count (perf proof)", () => {

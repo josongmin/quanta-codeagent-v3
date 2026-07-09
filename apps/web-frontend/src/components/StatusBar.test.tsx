@@ -13,6 +13,13 @@ describe("StatusBar — Stop (turn.cancel) affordance", () => {
     expect(markup).toContain("정지")
   })
 
+  it("UUX-3-18: shows 정지 during awaiting_approval too (a blocked turn must be abortable)", () => {
+    const markup = renderToStaticMarkup(
+      <StatusBar connection={connected} sessionStatus="awaiting_approval" onCancel={() => {}} />,
+    )
+    expect(markup).toContain("정지")
+  })
+
   it("HIDES 정지 when the session is not running (idle)", () => {
     const markup = renderToStaticMarkup(
       <StatusBar connection={connected} sessionStatus="idle" onCancel={() => {}} />,

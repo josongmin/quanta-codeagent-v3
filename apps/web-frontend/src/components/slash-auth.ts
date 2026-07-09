@@ -35,9 +35,8 @@ type TauriInvoke = (command: string, args?: Record<string, unknown>) => Promise<
 
 const readTauriInvoke = (): TauriInvoke | undefined => {
   if (typeof window === "undefined") return undefined
-  const candidate = (
-    window as unknown as { __TAURI_INTERNALS__?: { invoke?: TauriInvoke } }
-  ).__TAURI_INTERNALS__?.invoke
+  const candidate = (window as unknown as { __TAURI_INTERNALS__?: { invoke?: TauriInvoke } })
+    .__TAURI_INTERNALS__?.invoke
   return typeof candidate === "function" ? candidate : undefined
 }
 
@@ -55,10 +54,7 @@ const readTauriInvoke = (): TauriInvoke | undefined => {
  *      BEFORE the fetch, then hand the returned window here to set
  *      `location.href`. Returns `true` if the navigation was issued.
  */
-const openExternalAuthUrl = async (
-  url: string,
-  preOpened: Window | null,
-): Promise<boolean> => {
+const openExternalAuthUrl = async (url: string, preOpened: Window | null): Promise<boolean> => {
   const invoke = readTauriInvoke()
   if (invoke !== undefined) {
     try {
@@ -83,24 +79,20 @@ const openExternalAuthUrl = async (
   return w !== null
 }
 
-export const buildAuthSlashCommands = (
-  ep: AuthEndpoint,
-): readonly SlashCommand[] => [
+export const buildAuthSlashCommands = (ep: AuthEndpoint): readonly SlashCommand[] => [
   {
     slug: "login",
     aliases: ["signin"],
     description: "Open ChatGPT OAuth login (uses the daemon's loopback callback)",
+    kind: "local",
     action: async () => {
       // Pre-open a blank tab WHILE we still have user-gesture context.
       // Popping it after the `await fetch` below would lose that context
       // and trip every browser's popup-blocker (the actual root cause of
       // the silent "browser opened — but nothing happened" bug). For
       // Tauri we'll just close this scratch tab and route through Rust.
-      const isTauri =
-        typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-      const preOpened = isTauri
-        ? null
-        : window.open("about:blank", "_blank", "noopener,noreferrer")
+      const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+      const preOpened = isTauri ? null : window.open("about:blank", "_blank", "noopener,noreferrer")
       try {
         const res = await fetch(`${baseUrl(ep)}/auth/login`, {
           method: "POST",
@@ -123,10 +115,7 @@ export const buildAuthSlashCommands = (
         }
         const opened = await openExternalAuthUrl(json.authorizeUrl, preOpened)
         if (opened) {
-          ep.onResult?.(
-            "browser opened — finish the ChatGPT login flow, then come back",
-            "ok",
-          )
+          ep.onResult?.("browser opened — finish the ChatGPT login flow, then come back", "ok")
         } else {
           // Popup blocked AND no Tauri command — surface the URL so the
           // user can paste it manually instead of staring at a silent UI.
@@ -147,6 +136,7 @@ export const buildAuthSlashCommands = (
     slug: "logout",
     aliases: ["signout"],
     description: "Forget the on-disk ChatGPT token (next call will need /login)",
+    kind: "local",
     action: async () => {
       try {
         const res = await fetch(`${baseUrl(ep)}/auth/logout`, {
@@ -170,6 +160,7 @@ export const buildAuthSlashCommands = (
     slug: "whoami",
     aliases: ["status"],
     description: "Show current ChatGPT login state (plan / account / expiry)",
+    kind: "local",
     action: async () => {
       try {
         const res = await fetch(`${baseUrl(ep)}/auth/status`, {
@@ -186,13 +177,11 @@ export const buildAuthSlashCommands = (
           ep.onResult?.("not logged in — run /login", "ok")
           return ""
         }
-        const account = json.account_id !== null && json.account_id !== undefined
-          ? json.account_id.slice(0, 12) + "…"
-          : "?"
-        ep.onResult?.(
-          `logged in — plan=${json.plan_type ?? "?"} account=${account}`,
-          "ok",
-        )
+        const account =
+          json.account_id !== null && json.account_id !== undefined
+            ? json.account_id.slice(0, 12) + "…"
+            : "?"
+        ep.onResult?.(`logged in — plan=${json.plan_type ?? "?"} account=${account}`, "ok")
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
         ep.onResult?.(`status network error: ${msg}`, "err")

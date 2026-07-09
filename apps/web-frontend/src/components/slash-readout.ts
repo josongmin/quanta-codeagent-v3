@@ -31,19 +31,26 @@ export interface ReadoutEndpoint {
  *  serve live data today; the rest hit the same route and currently return the
  *  daemon's graceful "not wired in this surface yet" line (honest — and turns
  *  into live data the moment the host accessor lands, no frontend change). */
-const READOUT_COMMANDS: readonly { slug: string; aliases?: readonly string[]; description: string }[] =
-  [
-    { slug: "state", description: "Session state — status / mode / model / why-stopped (live)" },
-    { slug: "capabilities", aliases: ["caps"], description: "Capability grid for this surface (live)" },
-    { slug: "agents", description: "Subagent fleet roster" },
-    { slug: "plan", description: "Current plan body" },
-    { slug: "branches", description: "Speculative branch-search results" },
-    { slug: "skills", description: "Available skills" },
-    { slug: "mcp", description: "MCP server status" },
-    { slug: "memory", description: "Memory inspector" },
-    { slug: "why", description: "Why the last tool ran" },
-    { slug: "cost", description: "Cost / token breakdown" },
-  ]
+const READOUT_COMMANDS: readonly {
+  slug: string
+  aliases?: readonly string[]
+  description: string
+}[] = [
+  { slug: "state", description: "Session state — status / mode / model / why-stopped (live)" },
+  {
+    slug: "capabilities",
+    aliases: ["caps"],
+    description: "Capability grid for this surface (live)",
+  },
+  { slug: "agents", description: "Subagent fleet roster" },
+  { slug: "plan", description: "Current plan body" },
+  { slug: "branches", description: "Speculative branch-search results" },
+  { slug: "skills", description: "Available skills" },
+  { slug: "mcp", description: "MCP server status" },
+  { slug: "memory", description: "Memory inspector" },
+  { slug: "why", description: "Why the last tool ran" },
+  { slug: "cost", description: "Cost / token breakdown" },
+]
 
 const fetchReadout = async (ep: ReadoutEndpoint, name: string): Promise<void> => {
   try {
@@ -68,6 +75,7 @@ export const buildReadoutSlashCommands = (ep: ReadoutEndpoint): readonly SlashCo
     slug: c.slug,
     ...(c.aliases !== undefined ? { aliases: c.aliases } : {}),
     description: c.description,
+    kind: "readout",
     action: async () => {
       await fetchReadout(ep, c.slug)
       return ""

@@ -14,11 +14,17 @@ export interface StatusBarProps {
   readonly onRestartDaemon?: () => Promise<void>
   /**
    * If provided, a "정지" (Stop) button is rendered while a turn is in flight
-   * (`sessionStatus === "running"`). Clicking it sends a `turn.cancel` command
-   * so the web user can abort a running turn — the kernel handles the abort.
+   * (`running`) OR blocked on an approval (`awaiting_approval` — UUX-3-18: a
+   * blocked turn must be abortable too; it is the same `turn.cancel` command
+   * and the kernel handles the abort either way).
    */
   readonly onCancel?: () => void
 }
+
+/** Exported predicate so the Stop-visibility contract is pinned in one place
+ *  (UUX-3-18): any in-flight-or-blocked turn is stoppable. */
+export const isStoppableStatus = (status: SessionStatus | null): boolean =>
+  status === "running" || status === "awaiting_approval"
 
 const DOT_BY_KIND: Record<ConnectionState["kind"], string> = {
   connected: "bg-ok",
@@ -60,7 +66,7 @@ export const StatusBar = ({
           {sessionStatus}
         </div>
       ) : null}
-      {onCancel !== undefined && sessionStatus === "running" ? (
+      {onCancel !== undefined && isStoppableStatus(sessionStatus) ? (
         <button
           type="button"
           onClick={onCancel}
@@ -99,9 +105,7 @@ const renderConnection = (state: ConnectionState): string => {
     case "connected":
       return "connected"
     case "connecting":
-      return state.attempt > 0
-        ? `connecting · attempt ${state.attempt}`
-        : "connecting"
+      return state.attempt > 0 ? `connecting · attempt ${state.attempt}` : "connecting"
     case "disconnected": {
       const seconds = Math.round(state.retryInMs / 1000)
       return `disconnected · retry in ${seconds}s (attempt ${state.attempt})`

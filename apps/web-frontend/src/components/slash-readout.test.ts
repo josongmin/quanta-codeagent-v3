@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { SlashCommand } from "./SlashPalette"
 import { buildReadoutSlashCommands, READOUT_SLUGS } from "./slash-readout"
+
+/** All readout entries are kind "readout" (they carry an action) — narrow. */
+const runAction = async (cmd: SlashCommand | undefined): Promise<void> => {
+  expect(cmd?.kind).toBe("readout")
+  if (cmd !== undefined && (cmd.kind === "readout" || cmd.kind === "local")) {
+    await cmd.action("")
+  }
+}
 
 const realFetch = globalThis.fetch
 const stubFetch = (impl: typeof fetch) => {
@@ -19,7 +28,12 @@ describe("buildReadoutSlashCommands", () => {
         calls.push({ url, init })
         return {
           status: 200,
-          json: async () => ({ name: "state", output: "session state\n  status        idle", wired: true, isError: false }),
+          json: async () => ({
+            name: "state",
+            output: "session state\n  status        idle",
+            wired: true,
+            isError: false,
+          }),
         } as unknown as Response
       }) as unknown as typeof fetch,
     )
@@ -30,7 +44,7 @@ describe("buildReadoutSlashCommands", () => {
     })
     const state = cmds.find((c) => c.slug === "state")
     expect(state).toBeDefined()
-    await state?.action("")
+    await runAction(state)
     expect(calls[0]?.url).toBe("http://127.0.0.1:4096/readout/state")
     expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe("Bearer tok")
     expect(appended[0]).toContain("session state")
@@ -41,11 +55,19 @@ describe("buildReadoutSlashCommands", () => {
     stubFetch(
       vi.fn(async () => ({
         status: 200,
-        json: async () => ({ name: "agents", output: "/agents: not wired in this web surface yet", wired: false, isError: false }),
+        json: async () => ({
+          name: "agents",
+          output: "/agents: not wired in this web surface yet",
+          wired: false,
+          isError: false,
+        }),
       })) as unknown as typeof fetch,
     )
-    const cmds = buildReadoutSlashCommands({ httpUrl: "http://h", appendSystem: (t) => appended.push(t) })
-    await cmds.find((c) => c.slug === "agents")?.action("")
+    const cmds = buildReadoutSlashCommands({
+      httpUrl: "http://h",
+      appendSystem: (t) => appended.push(t),
+    })
+    await runAction(cmds.find((c) => c.slug === "agents"))
     expect(appended[0]).toContain("not wired")
   })
 
@@ -62,7 +84,7 @@ describe("buildReadoutSlashCommands", () => {
       appendSystem: (t) => appended.push(t),
       onError: (m) => errs.push(m),
     })
-    await cmds.find((c) => c.slug === "why")?.action("")
+    await runAction(cmds.find((c) => c.slug === "why"))
     expect(appended).toHaveLength(0)
     expect(errs[0]).toContain("why")
     expect(errs[0]).toContain("ECONNREFUSED")
@@ -73,11 +95,14 @@ describe("buildReadoutSlashCommands", () => {
     stubFetch(
       vi.fn(async (_url: string, init?: RequestInit) => {
         calls.push({ init })
-        return { status: 200, json: async () => ({ output: "capabilities\n  tools yes" }) } as unknown as Response
+        return {
+          status: 200,
+          json: async () => ({ output: "capabilities\n  tools yes" }),
+        } as unknown as Response
       }) as unknown as typeof fetch,
     )
     const cmds = buildReadoutSlashCommands({ httpUrl: "http://h", appendSystem: () => {} })
-    await cmds.find((c) => c.slug === "capabilities")?.action("")
+    await runAction(cmds.find((c) => c.slug === "capabilities"))
     expect(calls[0]?.init?.headers).toEqual({})
   })
 

@@ -33,9 +33,6 @@ import { ItemStreamSection } from "./ItemStreamSection"
 
 export interface ObservabilityPaneProps {
   readonly state: ObservabilityState
-  /** Optional retry callback — when present, each Run row in the "Completed"
-   *  column shows a "Retry" button. Wiring left to the host. */
-  readonly onRetryRun?: (id: string) => void
   /** ADR-0448 (RFC-10): the latest `context.usage` frame from RFC-06's canvas
    *  data port (`useContextUsage`). When present + non-null, the rich
    *  `UsageBreakdownPanel` (UsageBar + Swatch legend + per-category drilldown)
@@ -68,7 +65,7 @@ const LABEL = "text-[11px] font-semibold uppercase tracking-wide text-ink-tertia
 /* ------------------------------------------------------------------ */
 
 export const ObservabilityPane = memo(
-  ({ state, onRetryRun, usage, diffs, artifacts, itemStream }: ObservabilityPaneProps): JSX.Element => {
+  ({ state, usage, diffs, artifacts, itemStream }: ObservabilityPaneProps): JSX.Element => {
     const { running, waiting, completed } = splitRunsByStatus(state.runs)
     return (
       <aside
@@ -84,12 +81,7 @@ export const ObservabilityPane = memo(
         <ApprovalsList approvals={state.approvals} />
         <RunColumn title="Running" runs={running} tone="emerald" />
         <RunColumn title="Waiting" runs={waiting} tone="amber" />
-        <RunColumn
-          title="Completed"
-          runs={completed}
-          tone="neutral"
-          {...(onRetryRun !== undefined ? { onRetryRun } : {})}
-        />
+        <RunColumn title="Completed" runs={completed} tone="neutral" />
       </aside>
     )
   },
@@ -187,6 +179,20 @@ const ObjectiveStatusBadge = ({ status }: { status: Objective["status"] }): JSX.
 /* Approvals                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * UUX-2-08 — honest approvals: the observability channel's approval rows are
+ * READ-ONLY mirrors; the actionable surface is the live `EscalationCard` flow
+ * next to the composer (`data-testid="pending-approvals"`). Rendering the raw
+ * rows here looked actionable but wasn't, so this section is a COUNT + a link
+ * that scrolls to the real card — no fake affordance.
+ */
+export const scrollToPendingApprovals = (): void => {
+  if (typeof document === "undefined") return
+  document
+    .querySelector('[data-testid="pending-approvals"]')
+    ?.scrollIntoView({ behavior: "smooth", block: "center" })
+}
+
 const ApprovalsList = memo(
   ({ approvals }: { approvals: readonly ApprovalRequest[] }): JSX.Element => {
     if (approvals.length === 0) {
@@ -205,22 +211,17 @@ const ApprovalsList = memo(
         <h3 className="text-[11px] font-semibold uppercase tracking-wide text-warn">
           Pending approvals ({approvals.length})
         </h3>
-        <ul className="mt-2 space-y-2">
-          {approvals.map((a) => (
-            <li key={a.id} className="rounded-lg border border-warn/20 bg-warn/5 p-2">
-              <div className="text-xs font-medium text-ink">{a.reason}</div>
-              <div className="mt-1 text-[11px] text-ink-secondary">
-                <span className="text-ink-tertiary">action:</span>{" "}
-                <code className="rounded bg-surface-input px-1 py-0.5 font-mono">
-                  {a.proposedAction}
-                </code>
-              </div>
-              <div className="mt-0.5 text-[11px] text-ink-secondary">
-                <span className="text-ink-tertiary">resume:</span> {a.resumeStep}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <p className="mt-1 text-xs text-ink-secondary">
+          The agent is waiting on {approvals.length === 1 ? "a decision" : "decisions"} — respond in
+          the approval card by the composer.
+        </p>
+        <button
+          type="button"
+          onClick={scrollToPendingApprovals}
+          className="mt-2 rounded-lg border border-warn/40 px-2 py-0.5 text-[11px] text-ink-secondary transition hover:bg-warn/10 hover:text-ink"
+        >
+          Go to approval card
+        </button>
       </section>
     )
   },
@@ -234,7 +235,6 @@ interface RunColumnProps {
   readonly title: "Running" | "Waiting" | "Completed"
   readonly runs: readonly RunEntry[]
   readonly tone: "emerald" | "amber" | "neutral"
-  readonly onRetryRun?: (id: string) => void
 }
 
 const TONE_TO_DOT: Record<RunColumnProps["tone"], string> = {
@@ -244,7 +244,7 @@ const TONE_TO_DOT: Record<RunColumnProps["tone"], string> = {
 }
 
 const RunColumn = memo(
-  ({ title, runs, tone, onRetryRun }: RunColumnProps): JSX.Element => (
+  ({ title, runs, tone }: RunColumnProps): JSX.Element => (
     <section className={CARD} data-testid={`observability-runs-${title.toLowerCase()}`}>
       <header className="flex items-center gap-2">
         <span className={`h-2 w-2 rounded-full ${TONE_TO_DOT[tone]}`} />
@@ -257,7 +257,7 @@ const RunColumn = memo(
       ) : (
         <ul className="mt-2 space-y-1.5">
           {runs.map((r) => (
-            <RunRow key={r.id} run={r} {...(onRetryRun !== undefined ? { onRetryRun } : {})} />
+            <RunRow key={r.id} run={r} />
           ))}
         </ul>
       )}
@@ -267,10 +267,12 @@ const RunColumn = memo(
 
 interface RunRowProps {
   readonly run: RunEntry
-  readonly onRetryRun?: (id: string) => void
 }
 
-const RunRow = memo(({ run, onRetryRun }: RunRowProps): JSX.Element => {
+// D-8 (UUX-2-09): the per-run "Retry" button was removed — App never passed
+// `onRetryRun`, so it was a permanently dead affordance. Reintroduce only
+// when a real run-control endpoint exists.
+const RunRow = memo(({ run }: RunRowProps): JSX.Element => {
   const [open, setOpen] = useState(false)
   const toggle = (): void => setOpen((prev) => !prev)
   return (
@@ -320,16 +322,6 @@ const RunRow = memo(({ run, onRetryRun }: RunRowProps): JSX.Element => {
                 ))}
               </ul>
             </div>
-          ) : null}
-          {onRetryRun !== undefined &&
-          (run.status === "failed" || run.status === "stopped" || run.status === "completed") ? (
-            <button
-              type="button"
-              onClick={() => onRetryRun(run.id)}
-              className="mt-2 rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-black/[0.05] hover:text-ink"
-            >
-              Retry
-            </button>
           ) : null}
         </div>
       ) : null}

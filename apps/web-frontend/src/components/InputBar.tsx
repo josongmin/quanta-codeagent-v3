@@ -1,11 +1,11 @@
 import {
-  memo,
-  useCallback,
-  useRef,
   type ChangeEvent,
   type ClipboardEvent,
   type KeyboardEvent,
+  memo,
   type RefObject,
+  useCallback,
+  useRef,
 } from "react"
 import type { PendingImageAttachment } from "../composer/image-attachment"
 import { cx } from "../lib/classnames"
@@ -13,15 +13,16 @@ import { cx } from "../lib/classnames"
 export interface InputBarProps {
   readonly value: string
   readonly disabled: boolean
+  /** Placeholder shown while disabled. Defaults to "Connecting…" — the host
+   *  overrides it when the connection has FAILED (saying "Connecting…"
+   *  forever was the UUX-3-06 lie). */
+  readonly disabledPlaceholder?: string
   readonly inputRef: RefObject<HTMLTextAreaElement>
   readonly onChange: (next: string) => void
   readonly onSubmit: (text: string) => void
   readonly pendingImages: readonly PendingImageAttachment[]
   readonly attachmentError: string | null
-  readonly onAttachImageFile: (
-    file: File,
-    source: "picker" | "paste",
-  ) => Promise<void> | void
+  readonly onAttachImageFile: (file: File, source: "picker" | "paste") => Promise<void> | void
   readonly onRemovePendingImage: (index: number) => void
   readonly onClearAllPendingImages: () => void
 }
@@ -43,6 +44,7 @@ interface PendingAttachmentsProps {
 export const InputBar = ({
   value,
   disabled,
+  disabledPlaceholder,
   inputRef,
   onChange,
   onSubmit,
@@ -120,8 +122,7 @@ export const InputBar = ({
     [onAttachImageFile],
   )
 
-  const canSend =
-    !disabled && (value.trim().length > 0 || pendingImages.length > 0)
+  const canSend = !disabled && (value.trim().length > 0 || pendingImages.length > 0)
 
   return (
     <div className="border-t border-line-subtle bg-surface px-4 py-3">
@@ -147,7 +148,7 @@ export const InputBar = ({
         <textarea
           ref={inputRef}
           className="block max-h-[12rem] min-h-[52px] w-full resize-none bg-transparent text-chat text-ink outline-none placeholder:text-ink-faint"
-          placeholder={disabled ? "Connecting…" : "Ask quanta anything…"}
+          placeholder={disabled ? (disabledPlaceholder ?? "Connecting…") : "Ask quanta anything…"}
           value={value}
           onChange={(ev) => onChange(ev.target.value)}
           onKeyDown={onKeyDown}

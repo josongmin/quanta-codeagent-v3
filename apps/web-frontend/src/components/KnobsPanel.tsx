@@ -18,7 +18,15 @@
  * section headers.
  */
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react"
+import {
+  memo,
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { cx } from "../lib/classnames"
 import {
   displayKnobValue,
@@ -47,6 +55,29 @@ type LoadState =
   | { readonly kind: "ready"; readonly data: KnobsResponse }
 
 const NOT_CONNECTED_MSG = "Not connected to the daemon yet."
+
+/* ------------------------------------------------------------------ */
+/* Focus trap (UUX-5-26) — aria-modal without a trap lies to AT        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pure wrap computation for the modal's Tab cycle. `activeIndex === -1`
+ * means focus is outside the dialog (or on a non-focusable node): Tab enters
+ * at the first focusable, Shift+Tab at the last. Empty list ⇒ -1 (caller
+ * keeps focus put). Exported for the node-env unit test.
+ */
+export const nextFocusTrapIndex = (
+  activeIndex: number,
+  count: number,
+  shiftKey: boolean,
+): number => {
+  if (count <= 0) return -1
+  if (activeIndex < 0 || activeIndex >= count) return shiftKey ? count - 1 : 0
+  return shiftKey ? (activeIndex - 1 + count) % count : (activeIndex + 1) % count
+}
+
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element => {
   const [query, setQuery] = useState("")
@@ -105,6 +136,32 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
     }
   }, [onClose])
 
+  // Focus trap (UUX-5-26): `aria-modal="true"` promises assistive tech that
+  // focus stays inside the dialog — enforce it. On mount, move focus into the
+  // dialog; on unmount, restore it to the opener. Tab / Shift+Tab cycle
+  // through the dialog's live focusable list via the pure wrap helper.
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const opener = document.activeElement as HTMLElement | null
+    const dialog = dialogRef.current
+    const first = dialog?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+    ;(first ?? dialog)?.focus()
+    return () => {
+      opener?.focus()
+    }
+  }, [])
+  const onTrapKeyDown = useCallback((ev: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (ev.key !== "Tab") return
+    const dialog = dialogRef.current
+    if (dialog === null) return
+    const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    const activeIndex = focusables.indexOf(document.activeElement as HTMLElement)
+    const nextIndex = nextFocusTrapIndex(activeIndex, focusables.length, ev.shiftKey)
+    ev.preventDefault()
+    if (nextIndex >= 0) focusables[nextIndex]?.focus()
+  }, [])
+
   const toggleKnob = useCallback(
     async (knob: KnobEntry, next: boolean): Promise<void> => {
       if (endpoint === null) return
@@ -146,11 +203,14 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Settings — runtime knobs"
       data-testid="knobs-panel"
+      tabIndex={-1}
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 sm:p-8"
+      onKeyDown={onTrapKeyDown}
       onClick={(ev) => {
         // Backdrop click closes; clicks inside the card don't bubble here.
         if (ev.target === ev.currentTarget) onClose()
@@ -228,13 +288,13 @@ export const KnobsPanel = ({ endpoint, onClose }: KnobsPanelProps): JSX.Element 
                     {group.knobs.map((knob) => {
                       const rowError = rowErrors[knob.envKey]
                       return (
-                      <KnobRow
-                        key={knob.envKey}
-                        knob={knob}
-                        pending={pendingKeys.has(knob.envKey)}
-                        {...(rowError !== undefined ? { error: rowError } : {})}
-                        onToggle={toggleKnob}
-                      />
+                        <KnobRow
+                          key={knob.envKey}
+                          knob={knob}
+                          pending={pendingKeys.has(knob.envKey)}
+                          {...(rowError !== undefined ? { error: rowError } : {})}
+                          onToggle={toggleKnob}
+                        />
                       )
                     })}
                   </ul>
@@ -288,8 +348,7 @@ const KnobRow = memo(({ knob, pending, error, onToggle }: KnobRowProps): JSX.Ele
           ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
             <span className="text-ink-tertiary">
-              value:{" "}
-              <span className="font-mono text-ink-secondary">{displayKnobValue(knob)}</span>
+              value: <span className="font-mono text-ink-secondary">{displayKnobValue(knob)}</span>
             </span>
             <span
               className={cx(

@@ -1,39 +1,71 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { cx } from "../lib/classnames"
 import type { ContextUsageMessage } from "../types/protocol"
 import { renderContextGauge } from "./slash-context-gauge"
 
 /**
- * One entry in the slash-command catalogue. Client-side only for v1 — the
- * server-side `/<cmd>` slash protocol is out of scope; these commands are
- * affordances over local state (clear transcript, focus input, etc.) and
- * over the daemon's well-known facets (image attach, status snapshot).
+ * One entry in the slash-command catalogue — a TYPED contract (WS-F move 1).
  *
- * Adding a server-side command later means swapping `action` for a
- * `serverCommand` discriminant — the palette itself stays the same.
+ * Every entry declares an explicit `kind` and the host routes an accept BY
+ * KIND (see `slash-routing.ts`), so "the action ran but its result was
+ * silently discarded" is unrepresentable:
+ *
+ *   - `local`   — runs `action(rest)` and the host APPLIES the returned draft
+ *                 (a client-side effect, an HTTP shim, or a usage-correction
+ *                 prefill like `/effort ` on bad args).
+ *   - `readout` — same execution shape as `local`, but the action's effect is
+ *                 specifically a `GET /readout/:name` fetch whose body lands
+ *                 in the transcript (see `slash-readout.ts`).
+ *   - `server-slash` — no local action; the host SENDS `/<slug> <rest>` to the
+ *                 session as a turn (the daemon/LLM sees the slash line) and
+ *                 the turn echo renders it in the transcript. No entry uses
+ *                 this today (the web daemon has no slash router yet); the
+ *                 kind exists so the ack/protocol wave can adopt it without
+ *                 reshaping the palette.
+ *   - `unwired` — surfaced for discoverability only. Accept KEEPS the draft
+ *                 and shows the inline `hint` — never a silent clear.
  */
-export interface SlashCommand {
+export type SlashCommandKind = "local" | "server-slash" | "readout" | "unwired"
+
+interface SlashCommandBase {
   /** Canonical slug — `/<slug>`. Lowercase, hyphenated. */
   readonly slug: string
   /** One-line description shown in the palette row. */
   readonly description: string
   /** Optional alias matched as a prefix in addition to `slug`. */
   readonly aliases?: readonly string[]
-  /**
-   * Invoked when the user accepts this row (Tab / Enter). Receives the
-   * current draft minus the leading `/<query>` so handlers can splice in a
-   * replacement; return value is the next draft (empty string clears).
-   */
-  readonly action: (rest: string) => string | Promise<string>
 }
+
+export type SlashCommand =
+  | (SlashCommandBase & {
+      readonly kind: "local" | "readout"
+      /**
+       * Invoked on accept with the draft minus the leading `/<slug> `. The
+       * return value is the NEXT DRAFT (empty string clears) — the host is
+       * contractually required to apply it (enforced by the palette
+       * invariant test).
+       */
+      readonly action: (rest: string) => string | Promise<string>
+    })
+  | (SlashCommandBase & { readonly kind: "server-slash" })
+  | (SlashCommandBase & {
+      readonly kind: "unwired"
+      /** Inline explanation shown on accept (the draft is kept). */
+      readonly hint: string
+    })
 
 export interface SlashPaletteProps {
   /** Current draft input. Used to detect the leading `/` and filter rows. */
   readonly draft: string
   /** Closed catalogue. The host page assembles this so wiring stays local. */
   readonly commands: readonly SlashCommand[]
-  /** Called when a command is accepted — return value replaces the draft. */
-  readonly onAccept: (nextDraft: string) => void
+  /**
+   * Called when a row is accepted (Tab / Enter / click). The HOST routes the
+   * command by `kind` through `executeSlashCommand` (slash-routing.ts) — the
+   * palette itself never runs actions, so there is exactly one execution
+   * choke point shared with the composer's submit path.
+   */
+  readonly onAcceptCommand: (cmd: SlashCommand, rest: string) => void
   /** Called on Escape — host clears its `open` gate. */
   readonly onDismiss: () => void
 }
@@ -60,28 +92,73 @@ const matchesQuery = (cmd: SlashCommand, query: string): boolean => {
   return cmd.aliases.some((a) => a.toLowerCase().startsWith(query))
 }
 
+/* ------------------------------------------------------------------ */
+/* Pure key routing (UUX-5-26)                                         */
+/* ------------------------------------------------------------------ */
+
+export type PaletteKeyAction =
+  | { readonly type: "move"; readonly nextIndex: number }
+  | { readonly type: "accept" }
+  | { readonly type: "dismiss" }
+  | { readonly type: "none" }
+
+/** Minimal keyboard-event view so the routing is testable without a DOM. */
+export interface PaletteKeyEventLike {
+  readonly key: string
+  /** True while an IME composition is in flight (Korean/Japanese/Chinese). */
+  readonly isComposing?: boolean
+  /** Legacy IME signal (Safari/WKWebView emit keyCode 229 mid-composition). */
+  readonly keyCode?: number
+}
+
+/**
+ * Route one palette keystroke. IME guard first: an Enter that merely
+ * finalizes a composition (`isComposing` / key "Process" / keyCode 229) must
+ * NOT accept a row — pre-fix, composing Korean and hitting Enter fired the
+ * active command.
+ */
+export const resolvePaletteKey = (
+  ev: PaletteKeyEventLike,
+  activeIdx: number,
+  count: number,
+): PaletteKeyAction => {
+  if (count === 0) return { type: "none" }
+  if (ev.isComposing === true || ev.key === "Process" || ev.keyCode === 229) {
+    return { type: "none" }
+  }
+  switch (ev.key) {
+    case "ArrowDown":
+      return { type: "move", nextIndex: (activeIdx + 1) % count }
+    case "ArrowUp":
+      return { type: "move", nextIndex: (activeIdx - 1 + count) % count }
+    case "Tab":
+    case "Enter":
+      return { type: "accept" }
+    case "Escape":
+      return { type: "dismiss" }
+    default:
+      return { type: "none" }
+  }
+}
+
 /**
  * Headless-ish palette: render a floating list above the input bar when the
- * draft begins with `/`. The host page wires `onAccept` to its `setDraft`.
- *
- * Keyboard nav: ↑/↓ to move, Tab/Enter to accept, Escape to dismiss. The
- * host textarea's `onKeyDown` should forward those keys via
- * `handleKeyboardEvent` so the palette captures them BEFORE submission.
+ * draft begins with `/`. Keyboard nav: ↑/↓ to move, Tab/Enter to accept,
+ * Escape to dismiss — captured on `window` keydown so the textarea keeps
+ * focus. Handled keys stop propagation so the composer's own Enter handler
+ * cannot double-execute the accepted command.
  */
 export const SlashPalette = ({
   draft,
   commands,
-  onAccept,
+  onAcceptCommand,
   onDismiss,
 }: SlashPaletteProps): JSX.Element | null => {
   const [activeIdx, setActiveIdx] = useState(0)
   const open = isSlashMode(draft)
   const { slug, rest } = useMemo(() => splitDraft(draft), [draft])
 
-  const filtered = useMemo(
-    () => commands.filter((c) => matchesQuery(c, slug)),
-    [commands, slug],
-  )
+  const filtered = useMemo(() => commands.filter((c) => matchesQuery(c, slug)), [commands, slug])
 
   useEffect(() => {
     // Clamp the active index whenever the filter list shrinks.
@@ -90,9 +167,8 @@ export const SlashPalette = ({
 
   if (!open || filtered.length === 0) return null
 
-  const accept = async (cmd: SlashCommand): Promise<void> => {
-    const next = await cmd.action(rest)
-    onAccept(next)
+  const accept = (cmd: SlashCommand): void => {
+    onAcceptCommand(cmd, rest)
   }
 
   return (
@@ -109,7 +185,7 @@ export const SlashPalette = ({
           aria-selected={idx === activeIdx}
           onMouseEnter={() => setActiveIdx(idx)}
           onClick={() => {
-            void accept(cmd)
+            accept(cmd)
           }}
           className={cx(
             "flex w-full items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-black/[0.05]",
@@ -117,9 +193,12 @@ export const SlashPalette = ({
           )}
         >
           <span className="font-mono text-sm font-medium text-ink">/{cmd.slug}</span>
-          <span className="truncate text-xs text-ink-tertiary">
-            {cmd.description}
-          </span>
+          <span className="truncate text-xs text-ink-tertiary">{cmd.description}</span>
+          {cmd.kind === "unwired" ? (
+            <span className="ml-auto shrink-0 rounded bg-black/[0.05] px-1 py-0.5 text-[9px] uppercase tracking-wide text-ink-faint">
+              cli only
+            </span>
+          ) : null}
         </button>
       ))}
       <div className="px-2.5 py-1 text-[11px] text-ink-faint">
@@ -136,8 +215,8 @@ export const SlashPalette = ({
   )
 }
 
-/** Hidden hook that the host's textarea calls via ref to forward key events
- *  into the palette without giving up textarea focus. */
+/** Hidden hook that binds a window-level keydown listener (capture phase) so
+ *  ↑/↓/Tab/Enter/Esc reach the palette without the textarea losing focus. */
 const PaletteRef = ({
   activeIdx,
   setActiveIdx,
@@ -148,44 +227,35 @@ const PaletteRef = ({
   activeIdx: number
   setActiveIdx: (next: number) => void
   filtered: readonly SlashCommand[]
-  accept: (cmd: SlashCommand) => Promise<void>
+  accept: (cmd: SlashCommand) => void
   onDismiss: () => void
 }): null => {
-  // Pure side-effect: bind a single keyup listener for the lifetime of the
-  // palette so ↑/↓/Tab/Enter/Esc work without intercepting normal typing.
-  const handlerRef = useRef<((ev: KeyboardEvent) => void) | null>(null)
+  const handlerRef = useRef<((ev: globalThis.KeyboardEvent) => void) | null>(null)
   handlerRef.current = (ev) => {
-    if (filtered.length === 0) return
-    switch (ev.key) {
-      case "ArrowDown":
-        ev.preventDefault()
-        setActiveIdx((activeIdx + 1) % filtered.length)
+    const action = resolvePaletteKey(ev, activeIdx, filtered.length)
+    if (action.type === "none") return
+    // Handled: suppress the default AND stop propagation so the composer's
+    // Enter handler never sees the same keystroke (a palette accept + a
+    // composer submit both resolving the slash used to DOUBLE-EXECUTE it).
+    ev.preventDefault()
+    ev.stopPropagation()
+    switch (action.type) {
+      case "move":
+        setActiveIdx(action.nextIndex)
         return
-      case "ArrowUp":
-        ev.preventDefault()
-        setActiveIdx((activeIdx - 1 + filtered.length) % filtered.length)
-        return
-      case "Tab":
-      case "Enter": {
+      case "accept": {
         const cmd = filtered[activeIdx]
-        if (cmd === undefined) return
-        ev.preventDefault()
-        void accept(cmd)
+        if (cmd !== undefined) accept(cmd)
         return
       }
-      case "Escape":
-        ev.preventDefault()
+      case "dismiss":
         onDismiss()
-        return
-      default:
         return
     }
   }
   useEffect(() => {
     const listener = (ev: globalThis.KeyboardEvent): void => {
-      const h = handlerRef.current
-      if (h === null) return
-      h(ev as unknown as KeyboardEvent)
+      handlerRef.current?.(ev)
     }
     window.addEventListener("keydown", listener, true)
     return () => {
@@ -197,15 +267,18 @@ const PaletteRef = ({
 
 /**
  * Default catalogue — mirrors the CLI `BUILTINS` registry (ADR-0306) so
- * muscle memory carries over. Three classes:
+ * muscle memory carries over. Kind classification (WS-F):
  *
- *   1. **client-only** (clear/help) — handled entirely in the React app.
- *   2. **prefill** — palette inserts `/<cmd> ` into the draft and the user
- *      presses Enter; the daemon forwards the raw text to its slash router
- *      (server-side router lives outside this slice — when absent the LLM
- *      sees the raw text, which is the same fallback the CLI uses today).
- *   3. **deferred** — surfaced for discoverability; action is a no-op until
- *      the corresponding daemon/server hook lands.
+ *   - `local`   — resolved entirely client-side (transcript readouts over UI
+ *                 state, clear, focus, knobs panel).
+ *   - `unwired` — CLI builtins the web daemon has no route for yet. Rendered
+ *                 for discoverability; accept keeps the draft + explains.
+ *                 (The old behaviour prefilled `/<cmd> ` and the submit path
+ *                 silently discarded it — UUX-2-01.)
+ *
+ * When the daemon connection resolves, `assembleSlashCommands`
+ * (slash-catalog.ts) REPLACES the unwired stubs whose slugs have live
+ * HTTP-backed implementations (readouts / llm-config / auth).
  */
 /** Snapshot of UI state the slash commands need to render their replies.
  *  Each field is a pure value (no callbacks) so the catalogue stays
@@ -233,6 +306,11 @@ export interface SlashCommandContext {
   readonly contextUsage: ContextUsageMessage | null
 }
 
+/** The inline explanation an `unwired` entry shows on accept. Exported so the
+ *  invariant test can assert hints stay non-empty and slug-specific. */
+export const unwiredHint = (slug: string): string =>
+  `/${slug} isn't wired on the web surface yet — nothing was sent and your draft was kept. Run /${slug} from the quanta CLI.`
+
 export const buildDefaultSlashCommands = (deps: {
   clearTranscript: () => void
   focusImageAttachment: () => void
@@ -247,11 +325,14 @@ export const buildDefaultSlashCommands = (deps: {
    *  panel's open state + the daemon endpoint. */
   openKnobsPanel: () => void
 }): readonly SlashCommand[] => {
-  // Helper that returns the draft prefilled with `/<cmd> ` so the user can
-  // type args + hit Enter. The daemon receives `input.append` with that
-  // text and routes (server-side or LLM).
-  const prefill = (slug: string) => (rest: string): string =>
-    rest.length > 0 ? `/${slug} ${rest}` : `/${slug} `
+  // CLI builtin with no web route yet: honest `unwired` entry — accept keeps
+  // the draft and explains instead of the old silent prefill-discard.
+  const unwired = (slug: string, description: string): SlashCommand => ({
+    slug,
+    description,
+    kind: "unwired",
+    hint: unwiredHint(slug),
+  })
 
   // Client-resolved command: append a system message and clear the draft.
   const clientSystem =
@@ -296,6 +377,7 @@ export const buildDefaultSlashCommands = (deps: {
       slug: "clear",
       aliases: ["c", "reset"],
       description: "Clear the visible transcript (local only — session memory intact)",
+      kind: "local",
       action: () => {
         deps.clearTranscript()
         return ""
@@ -305,6 +387,7 @@ export const buildDefaultSlashCommands = (deps: {
       slug: "image",
       aliases: ["img", "i"],
       description: "Attach an image to the next turn (paste or use Image button)",
+      kind: "local",
       action: () => {
         deps.focusImageAttachment()
         return ""
@@ -315,6 +398,7 @@ export const buildDefaultSlashCommands = (deps: {
       slug: "help",
       aliases: ["h", "?"],
       description: "List all slash commands + keyboard shortcuts",
+      kind: "local",
       action: (_rest) => {
         deps.appendClientMessage("system", helpLines())
         return ""
@@ -324,6 +408,7 @@ export const buildDefaultSlashCommands = (deps: {
       slug: "status",
       aliases: ["s"],
       description: "Session / connection / model status",
+      kind: "local",
       action: clientSystem((c) => {
         const parts = [
           `connection: ${c.connection.kind}${c.connection.detail !== undefined ? ` (${c.connection.detail})` : ""}`,
@@ -339,6 +424,7 @@ export const buildDefaultSlashCommands = (deps: {
       slug: "usage",
       aliases: ["u"],
       description: "Cumulative token + cost usage this session",
+      kind: "local",
       action: clientSystem((c) => {
         const u = c.tokenUsage
         if (u.turns === 0) {
@@ -357,6 +443,7 @@ export const buildDefaultSlashCommands = (deps: {
     {
       slug: "cost",
       description: "Cost breakdown (alias of /usage with $-focus)",
+      kind: "local",
       action: clientSystem((c) => {
         const u = c.tokenUsage
         if (u.costMicroUsd === 0) {
@@ -374,21 +461,21 @@ export const buildDefaultSlashCommands = (deps: {
     {
       slug: "identity",
       description: "Show current identity mode",
+      kind: "local",
       action: clientSystem(
-        (c) =>
-          `Identity mode: ${c.identityMode ?? "(default — set QUANTA_IDENTITY=1 to enable)"}`,
+        (c) => `Identity mode: ${c.identityMode ?? "(default — set QUANTA_IDENTITY=1 to enable)"}`,
       ),
     },
     {
       slug: "profile",
       description: "Show current tool profile",
-      action: clientSystem(
-        (c) => `Tool profile: ${c.toolProfile ?? "(default)"}`,
-      ),
+      kind: "local",
+      action: clientSystem((c) => `Tool profile: ${c.toolProfile ?? "(default)"}`),
     },
     {
       slug: "context",
       description: "Show live segmented context-window usage (with reasoning split)",
+      kind: "local",
       action: clientSystem((c) => {
         // S3 — live segmented gauge when the canvas `context.usage` frame is
         // present; falls back to the transcript-count stub when the channel is
@@ -401,52 +488,54 @@ export const buildDefaultSlashCommands = (deps: {
     {
       slug: "session",
       description: "Show session id + permission mode",
-      action: clientSystem(
-        (c) =>
-          [
-            `session id:      ${c.sessionId ?? "(not learned)"}`,
-            `permission mode: ${c.permissionMode ?? "(unknown)"}`,
-            `identity mode:   ${c.identityMode ?? "(default)"}`,
-            `tool profile:    ${c.toolProfile ?? "(default)"}`,
-          ].join("\n"),
+      kind: "local",
+      action: clientSystem((c) =>
+        [
+          `session id:      ${c.sessionId ?? "(not learned)"}`,
+          `permission mode: ${c.permissionMode ?? "(unknown)"}`,
+          `identity mode:   ${c.identityMode ?? "(default)"}`,
+          `tool profile:    ${c.toolProfile ?? "(default)"}`,
+        ].join("\n"),
       ),
     },
-    // Server-routed (mirrors CLI BUILTINS) ──────────────────────────
-    { slug: "effort",        description: "Show / set reasoning effort tier",          action: prefill("effort") },
-    { slug: "plan",          description: "Show / edit the current plan",              action: prefill("plan") },
-    { slug: "state",         description: "Inspect agent + session state",             action: prefill("state") },
-    { slug: "working-state", description: "Working-state panel (active files / tools)", action: prefill("working-state") },
-    { slug: "branches",      description: "List speculative branch-search results",    action: prefill("branches") },
-    { slug: "focus-chain",   description: "Show / configure focus-chain todo reinject", action: prefill("focus-chain") },
-    { slug: "skills",        description: "List available skills",                     action: prefill("skills") },
-    { slug: "reload-skills", description: "Reload skills from disk",                   action: prefill("reload-skills") },
-    { slug: "snooze",        description: "Snooze background tasks",                   action: prefill("snooze") },
-    { slug: "resume",        description: "Resume snoozed background tasks",           action: prefill("resume") },
-    { slug: "wait",          description: "Wait for background tasks to settle",       action: prefill("wait") },
-    { slug: "navigate",      description: "Navigate session / transcript",             action: prefill("navigate") },
-    { slug: "color",         description: "Set terminal color scheme",                 action: prefill("color") },
-    { slug: "debug",         description: "Toggle debug instrumentation",              action: prefill("debug") },
-    { slug: "memory",        description: "Memory inspector (env-gated)",              action: prefill("memory") },
-    { slug: "mcp",           description: "MCP server status / config",                action: prefill("mcp") },
-    { slug: "rewind",        description: "Rewind conversation (env-gated)",           action: prefill("rewind") },
-    { slug: "rewind-tool",   description: "Rewind a single tool call",                 action: prefill("rewind-tool") },
-    { slug: "rewind-conv",   description: "Rewind to a previous conversation point",   action: prefill("rewind-conv") },
-    { slug: "fork",          description: "Fork conversation (env-gated)",             action: prefill("fork") },
+    // CLI builtins with no web route yet (honest `unwired`) ─────────
+    unwired("effort", "Show / set reasoning effort tier"),
+    unwired("plan", "Show / edit the current plan"),
+    unwired("state", "Inspect agent + session state"),
+    unwired("working-state", "Working-state panel (active files / tools)"),
+    unwired("branches", "List speculative branch-search results"),
+    unwired("focus-chain", "Show / configure focus-chain todo reinject"),
+    unwired("skills", "List available skills"),
+    unwired("reload-skills", "Reload skills from disk"),
+    unwired("snooze", "Snooze background tasks"),
+    unwired("resume", "Resume snoozed background tasks"),
+    unwired("wait", "Wait for background tasks to settle"),
+    unwired("navigate", "Navigate session / transcript"),
+    unwired("color", "Set terminal color scheme"),
+    unwired("debug", "Toggle debug instrumentation"),
+    unwired("memory", "Memory inspector (env-gated)"),
+    unwired("mcp", "MCP server status / config"),
+    unwired("rewind", "Rewind conversation (env-gated)"),
+    unwired("rewind-tool", "Rewind a single tool call"),
+    unwired("rewind-conv", "Rewind to a previous conversation point"),
+    unwired("fork", "Fork conversation (env-gated)"),
     {
       slug: "knobs",
       aliases: ["settings", "config"],
       description: "Open the Settings panel — inspect / tune runtime knobs",
+      kind: "local",
       action: () => {
         deps.openKnobsPanel()
         return ""
       },
     },
-    { slug: "permission",    description: "Permission store explainer",                action: prefill("permission") },
+    unwired("permission", "Permission store explainer"),
     {
       slug: "capabilities",
       aliases: ["caps"],
       description: "Show capability layer — gates + per-surface exposure",
-      action: prefill("capabilities"),
+      kind: "unwired",
+      hint: unwiredHint("capabilities"),
     },
   ]
   allCommands.push(...commands)

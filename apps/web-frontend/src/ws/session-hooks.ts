@@ -109,10 +109,25 @@ export const initialTranscript: TranscriptState = {
   tokenUsage: ZERO_USAGE,
 }
 
-const appendTranscriptMessage = (state: TranscriptState, message: UiMessage): TranscriptState => ({
-  ...state,
-  messages: [...state.messages, message],
-})
+/**
+ * UUX-5-25 — window cap on the visible transcript. BACKSTOP, not a tuned
+ * value (mirrors EVENT_DEDUP_CAP / TOOL_PROGRESS_CAP): far above any
+ * realistic visible window, it only bounds memory + reconcile cost for a
+ * marathon session whose tool/system lines would otherwise grow `messages[]`
+ * forever. Eviction is oldest-first; the newest cap-many rows are retained.
+ */
+export const MESSAGES_WINDOW_CAP = 1000
+
+const appendTranscriptMessage = (state: TranscriptState, message: UiMessage): TranscriptState => {
+  const appended = [...state.messages, message]
+  return {
+    ...state,
+    messages:
+      appended.length > MESSAGES_WINDOW_CAP
+        ? appended.slice(appended.length - MESSAGES_WINDOW_CAP)
+        : appended,
+  }
+}
 
 const assistantSignatureFromState = (state: SessionStateView): string | null => {
   if (typeof state.lastAssistantText !== "string" || state.lastAssistantText.length === 0) {

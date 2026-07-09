@@ -1,5 +1,6 @@
 import { memo, type RefObject, useEffect, useRef, useState } from "react"
 import type { PendingImageAttachment } from "../composer/image-attachment"
+import { emptyStateCopyFor, type UiConnectionPhase } from "../lib/connection-state"
 import type { PendingApprovalView, SessionStatus, UiMessage } from "../types/protocol"
 import { EscalationCard, type EscalationDecision } from "./EscalationCard"
 import { InputBar } from "./InputBar"
@@ -33,6 +34,14 @@ export interface ChatPanelProps {
   /** Slash command catalogue. Provide via App.tsx; ChatPanel only forwards
    *  the array into the floating `SlashPalette` above InputBar. */
   readonly slashCommands?: readonly SlashCommand[]
+  /** Routes an accepted palette entry through the host's single slash
+   *  execution choke point (`executeSlashCommand`). Required for the palette
+   *  to render — the palette never runs actions itself (WS-F move 1). */
+  readonly onSlashAccept?: (cmd: SlashCommand, rest: string) => void
+  /** ConnectionState-machine phase (WS-F move 2). Drives the empty-state
+   *  copy (UUX-5-24) so "Start a conversation" never shows while the daemon
+   *  is unreachable. Default `"connected"` keeps legacy callers unchanged. */
+  readonly connectionPhase?: UiConnectionPhase
   /** ADR-0512 P3 — live pending approvals. A skill-scope escalation (carrying
    *  `scopeContext`) renders the rich yellow `EscalationCard` above the input;
    *  a plain approval renders the approve/deny affordance. Empty ⇒ no card. */
@@ -44,6 +53,7 @@ export interface ChatPanelProps {
 
 interface TranscriptViewportProps {
   readonly messages: readonly UiMessage[]
+  readonly connectionPhase: UiConnectionPhase
 }
 
 export const ChatPanel = ({
@@ -62,8 +72,10 @@ export const ChatPanel = ({
   onClearAllPendingImages,
   sessionStatus,
   slashCommands,
+  onSlashAccept,
   pendingApprovals,
   onApprovalDecision,
+  connectionPhase,
 }: ChatPanelProps): JSX.Element => {
   const [paletteDismissed, setPaletteDismissed] = useState(false)
   useEffect(() => {
@@ -114,7 +126,7 @@ export const ChatPanel = ({
         className="scroll-fade-bottom flex-1 overflow-y-auto px-4 py-4"
         aria-live="polite"
       >
-        <TranscriptViewport messages={messages} />
+        <TranscriptViewport messages={messages} connectionPhase={connectionPhase ?? "connected"} />
         {isStreaming ? (
           <StreamingTail
             text={liveText}
@@ -137,13 +149,18 @@ export const ChatPanel = ({
           ))}
         </div>
       ) : null}
-      {slashCommands !== undefined && slashCommands.length > 0 && !paletteDismissed ? (
+      {slashCommands !== undefined &&
+      slashCommands.length > 0 &&
+      onSlashAccept !== undefined &&
+      !paletteDismissed ? (
         <div className="px-4">
           <SlashPalette
             draft={draft}
             commands={slashCommands}
-            onAccept={(next) => {
-              onDraftChange(next)
+            onAcceptCommand={(cmd, rest) => {
+              // The HOST routes by kind (executeSlashCommand) — the palette
+              // only reports the accepted entry. Dismiss + refocus here.
+              onSlashAccept(cmd, rest)
               setPaletteDismissed(true)
               inputRef.current?.focus()
             }}
@@ -156,6 +173,9 @@ export const ChatPanel = ({
       <InputBar
         value={draft}
         disabled={disabled}
+        disabledPlaceholder={
+          connectionPhase === "failed" ? "Not connected — use Retry above" : "Connecting…"
+        }
         inputRef={inputRef}
         onChange={onDraftChange}
         onSubmit={onSubmit}
@@ -179,7 +199,7 @@ export const ChatPanel = ({
 export const areTranscriptViewportPropsEqual = (
   prev: TranscriptViewportProps,
   next: TranscriptViewportProps,
-): boolean => prev.messages === next.messages
+): boolean => prev.messages === next.messages && prev.connectionPhase === next.connectionPhase
 
 /**
  * The FINALIZED transcript list — memo'd on the `messages` reference. Because the
@@ -191,37 +211,51 @@ export const areTranscriptViewportPropsEqual = (
  * Every message here is finalized, so the list keys ONLY on the `messages`
  * reference — no streaming id / session status can invalidate it mid-stream.
  */
-const TranscriptViewport = memo(({ messages }: TranscriptViewportProps): JSX.Element => {
-  if (messages.length === 0) return <EmptyState />
-  return (
-    <ul className="flex flex-col gap-3">
-      {messages.map((msg) => (
-        <li key={msg.id}>
-          <MessageBubble message={msg} />
-        </li>
-      ))}
-    </ul>
-  )
-}, areTranscriptViewportPropsEqual)
-
-const EmptyState = (): JSX.Element => (
-  <div className="flex h-full items-center justify-center px-4">
-    <div className="max-w-md text-center text-ink-secondary">
-      <p className="text-sm font-medium text-ink">Start a conversation</p>
-      <p className="mt-2 text-sm text-ink-secondary">
-        Ask quanta to explain code, plan a change, or run a task.
-      </p>
-      <p className="mt-3 text-xs text-ink-tertiary">
-        Type a prompt below and press{" "}
-        <kbd className="rounded border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
-          Enter
-        </kbd>{" "}
-        to start a turn ·{" "}
-        <kbd className="rounded border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
-          /
-        </kbd>{" "}
-        for commands.
-      </p>
-    </div>
-  </div>
+const TranscriptViewport = memo(
+  ({ messages, connectionPhase }: TranscriptViewportProps): JSX.Element => {
+    if (messages.length === 0) return <EmptyState connectionPhase={connectionPhase} />
+    return (
+      <ul className="flex flex-col gap-3">
+        {messages.map((msg) => (
+          <li key={msg.id}>
+            <MessageBubble message={msg} />
+          </li>
+        ))}
+      </ul>
+    )
+  },
+  areTranscriptViewportPropsEqual,
 )
+
+/** UUX-5-24 — the empty-state copy derives from the ConnectionState machine:
+ *  an unreachable daemon says "connecting"/"not connected", never a cheerful
+ *  "Start a conversation" over a dead composer. */
+const EmptyState = ({
+  connectionPhase,
+}: {
+  readonly connectionPhase: UiConnectionPhase
+}): JSX.Element => {
+  const copy = emptyStateCopyFor(connectionPhase)
+  const showKeyboardHint = connectionPhase === "connected" || connectionPhase === "degraded"
+  return (
+    <div className="flex h-full items-center justify-center px-4">
+      <div className="max-w-md text-center text-ink-secondary">
+        <p className="text-sm font-medium text-ink">{copy.title}</p>
+        <p className="mt-2 text-sm text-ink-secondary">{copy.body}</p>
+        {showKeyboardHint ? (
+          <p className="mt-3 text-xs text-ink-tertiary">
+            Type a prompt below and press{" "}
+            <kbd className="rounded border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
+              Enter
+            </kbd>{" "}
+            to start a turn ·{" "}
+            <kbd className="rounded border border-line-subtle bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] text-ink-secondary">
+              /
+            </kbd>{" "}
+            for commands.
+          </p>
+        ) : null}
+      </div>
+    </div>
+  )
+}

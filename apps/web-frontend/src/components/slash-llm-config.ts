@@ -64,13 +64,12 @@ const postConfig = async (
  *   /effort <level>  → reasoning_effort = low|medium|high
  *   /model <slug>    → model override
  */
-export const buildLlmConfigSlashCommands = (
-  ep: LlmConfigEndpoint,
-): readonly SlashCommand[] => [
+export const buildLlmConfigSlashCommands = (ep: LlmConfigEndpoint): readonly SlashCommand[] => [
   {
     slug: "fast",
     aliases: ["speed", "priority"],
     description: "Fast mode — service_tier=priority (1.5× speed, more usage)",
+    kind: "local",
     action: async () => {
       await postConfig(ep, { QUANTA_FAST: "1", QUANTA_SERVICE_TIER: null })
       return ""
@@ -80,6 +79,7 @@ export const buildLlmConfigSlashCommands = (
     slug: "standard",
     aliases: ["normal"],
     description: "Standard mode — clear fast/service_tier overrides",
+    kind: "local",
     action: async () => {
       await postConfig(ep, { QUANTA_FAST: null, QUANTA_SERVICE_TIER: null })
       return ""
@@ -88,6 +88,7 @@ export const buildLlmConfigSlashCommands = (
   {
     slug: "flex",
     description: "Flex tier — slower + cheaper queue",
+    kind: "local",
     action: async () => {
       await postConfig(ep, { QUANTA_FAST: null, QUANTA_SERVICE_TIER: "flex" })
       return ""
@@ -96,6 +97,7 @@ export const buildLlmConfigSlashCommands = (
   {
     slug: "effort",
     description: "Set reasoning effort — usage: /effort low|medium|high",
+    kind: "local",
     action: async (rest) => {
       const level = rest.trim().toLowerCase()
       if (level !== "low" && level !== "medium" && level !== "high") {
@@ -109,6 +111,7 @@ export const buildLlmConfigSlashCommands = (
   {
     slug: "model",
     description: "Override model slug — usage: /model gpt-5 | gpt-4o | o1 | ...",
+    kind: "local",
     action: async (rest) => {
       const slug = rest.trim()
       if (slug.length === 0) {
