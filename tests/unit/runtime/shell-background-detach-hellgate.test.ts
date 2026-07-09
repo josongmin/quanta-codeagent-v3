@@ -193,7 +193,7 @@ describe.if(POSIX)("runShell({ background }) — onShellEvent observer contract 
     expect(terminals).toEqual(["exit"])
   })
 
-  test("DETACH still emits a terminal (aborted/timeout) — observer is never left open", async () => {
+  test("DETACH still emits a terminal (detached) — observer is never left open", async () => {
     const { seam, calls } = recordingSeam()
     const events: Array<{ kind: string; reason?: string }> = []
     const r = await runShell("printf 'pre\\n'; sleep 5", {
@@ -205,16 +205,19 @@ describe.if(POSIX)("runShell({ background }) — onShellEvent observer contract 
     const kinds = events.map((e) => e.kind)
     expect(kinds[0]).toBe("start")
     expect(kinds).toContain("stdout") // pre-detach chunk forwarded
-    // Exactly one terminal, and it is aborted{timeout} (the deadline elapsed;
-    // the registry owns the child from here). No leaked-open observer stream.
-    const terminals = events.filter((e) => e.kind === "exit" || e.kind === "aborted")
+    // Exactly one terminal, and it is `detached{auto}` (WS-H / UUX-6-05: the
+    // deadline elapsed and the registry owns the LIVE child from here — an
+    // intentional handoff, not an abort). No leaked-open observer stream.
+    const terminals = events.filter(
+      (e) => e.kind === "exit" || e.kind === "aborted" || e.kind === "detached",
+    )
     expect(terminals.length).toBe(1)
-    expect(terminals[0]?.kind).toBe("aborted")
-    expect(terminals[0]?.reason).toBe("timeout")
+    expect(terminals[0]?.kind).toBe("detached")
+    expect(terminals[0]?.reason).toBe("auto")
     // ORDERING contract: start ≺ all stdout chunks ≺ the single terminal (the
     // terminal must be LAST, not emitted before the pre-detach output).
     const lastStdout = kinds.lastIndexOf("stdout")
-    const terminalIdx = kinds.findIndex((k) => k === "exit" || k === "aborted")
+    const terminalIdx = kinds.findIndex((k) => k === "exit" || k === "aborted" || k === "detached")
     expect(terminalIdx).toBeGreaterThan(lastStdout)
     expect(terminalIdx).toBe(kinds.length - 1) // nothing after the terminal
     calls[0]?.kill()

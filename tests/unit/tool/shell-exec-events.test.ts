@@ -52,6 +52,7 @@ describe("shell exec events — basic command", () => {
           break
         case "exit":
         case "aborted":
+        case "detached":
           terminalCount++
           // terminal MUST be last
           expect(i).toBe(events.length - 1)

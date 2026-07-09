@@ -38,15 +38,16 @@ import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
 import { maybeCreatePromptSuggestionWire } from "./prompt-suggestion-wire"
 import { normalizeCliPromptInput } from "./prompt-types"
 import {
-  backgroundTurnLabel,
   buildPromptPipelineNotifyDeps,
   drainTurnImages,
   ESC_WINDOW_MS,
+  handleMovedToBackground,
   makeInTurnCaptureWrapper,
   notifyTurnComplete,
   registerNotifyDispose,
   registerSearchPipelineDispose,
   shouldWireBackground,
+  warnLiveBackgroundTurns,
 } from "./session-loop/turn-helpers"
 import type { SessionSetupResult } from "./session-setup"
 import { type SessionState, updateSessionState } from "./session-state"
@@ -802,34 +803,19 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                 conversationActions: deps.conversationActions,
               })
                 ? {
-                    onMovedToBackground: (handle) => {
-                      // Wall-clock start of the backgrounded run, so completion
-                      // reports the REAL elapsed time (not a fabricated 0).
-                      const bgStart = Date.now()
-                      const taskId = backgroundPortal?.detach({
-                        label: backgroundTurnLabel(prompt.text),
-                        promise: handle.body,
-                        abort: handle.turnAbort,
-                      })
-                      if (taskId !== undefined) {
-                        // SOTA++ UX: on-detach hint + a prompt-re-entry breadcrumb.
-                        process.stderr.write(
-                          `\x1b[2m⏭ moved to background — /background to manage\x1b[0m\n`,
-                        )
-                        process.stderr.write(
-                          `\x1b[2m↳ 1 turn running in background (task ${taskId})\x1b[0m\n`,
-                        )
-                        // REUSE the existing notify port for completion. No-throw:
-                        // both `then`/`catch` paths fire a single onTurnComplete.
-                        const fireDone = (ok: boolean): void =>
-                          notify?.onTurnComplete({
-                            durationMs: Math.max(0, Date.now() - bgStart),
-                            ok,
-                            cwdBasename: `${notifyCwdBasename ?? ""} · background task ${taskId} done`,
-                          })
-                        handle.body.then(() => fireDone(true)).catch(() => fireDone(false))
-                      }
-                    },
+                    // Detach side-effects (portal register + WS-H capture tee +
+                    // breadcrumbs + notify reuse) live in the free helper so the
+                    // branch stays out of this function's god-fn budget.
+                    onMovedToBackground: (handle) =>
+                      handleMovedToBackground({
+                        portal: backgroundPortal,
+                        capture: setup.backgroundStreamCapture,
+                        promptText: prompt.text,
+                        notify,
+                        notifyCwdBasename,
+                        write: (s) => process.stderr.write(s),
+                        handle,
+                      }),
                   }
                 : {}),
             },
@@ -907,6 +893,10 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       process.stderr.write(`\x1b[2mResume: quanta --resume ${idMeta.id}\x1b[0m\n`)
     }
   } finally {
+    // WS-H / UUX-3-12 — REPL-exit honesty: if backgrounded turns are still
+    // running, say so (one warning line, id + label) instead of silently
+    // abandoning them. No-throw; silent when the portal is absent/idle.
+    warnLiveBackgroundTurns(backgroundPortal, (s) => process.stderr.write(s))
     // L5 H-7 — single teardown authority. LIFO drain stops background
     // producers (reactor bridge, automation ticker) and the playbook watcher
     // BEFORE closing the session + runtimeFacade, matching the prior manual

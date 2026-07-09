@@ -42,7 +42,11 @@ import type { SessionIoState } from "../session-cmd"
 import { createBrowserNetHolder } from "../slash/browser-net-cmd"
 import type { SlashContext } from "../slash-commands"
 import { createTextInbox, type TextInbox } from "../text-inbox"
-import { type BackgroundTurnPortal, createBackgroundTurnPortal } from "./background-turn-portal"
+import {
+  type BackgroundTurnPortal,
+  BG_TURN_ENV_GATE,
+  createBackgroundTurnPortal,
+} from "./background-turn-portal"
 import type { ContextUsageHolder } from "./context-usage-snapshot"
 import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
 import {
@@ -418,7 +422,7 @@ export const composeSurfaceWires = (
   // (manage detached turns). Absent ⇒ `undefined` ⇒ neither the loop's Ctrl+B
   // sink nor the `/background` slot is wired (default-OFF byte-identical). Zero
   // I/O at construction (pure registry).
-  const backgroundPortal = gateOn(envSource, "QUANTA_BG_TURN")
+  const backgroundPortal = gateOn(envSource, BG_TURN_ENV_GATE)
     ? createBackgroundTurnPortal()
     : undefined
   // ADR-0231 — radar proposal queue. Env-gated `QUANTA_RADAR`: builds ONE store

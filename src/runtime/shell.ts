@@ -104,9 +104,11 @@ const foldSandboxStatus = (
  *    1. exactly one `start` event with pid/command/cwd/startedAt,
  *    2. zero or more `stdout` / `stderr` chunks interleaved arbitrarily
  *       (each carries the per-stream byte `offset` of the chunk's first byte),
- *    3. exactly one terminal event — either `exit` (code/signal/exitedAt) or
- *       `aborted` (reason: user_abort | timeout, abortedAt) — emitted AFTER
- *       both pipes have drained.
+ *    3. exactly one terminal event — `exit` (code/signal/exitedAt), `aborted`
+ *       (reason: user_abort | timeout, abortedAt — a REAL kill), or `detached`
+ *       (WS-H: an intentional background handoff; the child is ALIVE in the
+ *       registry). `exit`/`aborted` are emitted AFTER both pipes have drained;
+ *       `detached` ends the foreground observation only.
  *  Concatenating all `stdout` chunks reproduces the bytes of `result.stdout`
  *  (and the same for stderr) — the streamed path runs through the SAME
  *  accumulator as the legacy buffered path, so a session that supplies an
@@ -260,6 +262,7 @@ export const runShell = async (
       signal: options.signal,
       adopt: background.adopt,
       confirm: background.confirm,
+      consentWaitMs: background.consentWaitMs,
       observer,
     })
   }
@@ -451,6 +454,8 @@ const runWithBackgroundDetach = async (
     readonly adopt: NonNullable<ShellOptions["background"]>["adopt"]
     // ADR-0296 PROMPT mode — optional consent gate (see BackgroundDetachSeam).
     readonly confirm: NonNullable<ShellOptions["background"]>["confirm"]
+    // WS-H / UUX-6-20 — injectable consent wait (absent ⇒ CONSENT_WAIT_MS).
+    readonly consentWaitMs: number | undefined
     // PR-5 observer parity: when wired, emit per-chunk stdout/stderr events
     // PRE-detach + exactly-one terminal event on every exit path, so the
     // observer contract (start ≺ chunks ≺ one terminal) holds in background
@@ -499,15 +504,17 @@ const runWithBackgroundDetach = async (
     const cancelled = (): boolean => settled || state.detached || userAborted
     const onDeadline = async (): Promise<void> => {
       if (cancelled()) return
-      if (cfg.confirm !== undefined) {
-        const approved = await askConsent(cfg.confirm, cfg.command, cfg.timeoutMs)
-        // The command may have completed / been aborted while the user decided.
-        if (cancelled()) return
-        if (!approved) {
-          declinedTimeout = true
-          kill() // legacy timeout: the completion path settles with timedOut:true
-          return
-        }
+      // WS-H / UUX-6-05 — the detach terminal is HONEST about how it happened:
+      // explicit consent vs the D-5 timeout default vs plain auto-background.
+      const consentWaitMs = cfg.consentWaitMs ?? CONSENT_WAIT_MS
+      const detachReason = await resolveDeadlineDetachReason(cfg, consentWaitMs)
+      // The command may have completed / been aborted while the user decided
+      // (the `auto` arm awaits nothing, so this re-check is a no-op there).
+      if (cancelled()) return
+      if (detachReason === "declined") {
+        declinedTimeout = true
+        kill() // legacy timeout: the completion path settles with timedOut:true
+        return
       }
       await detachInto(state, cfg, {
         kill,
@@ -516,6 +523,8 @@ const runWithBackgroundDetach = async (
         drainsDone,
         onAbort,
         observer: cfg.observer,
+        detachReason,
+        consentWaitMs,
       })
         .then(settle)
         // Defense-in-depth: `adopt` is structurally no-throw, but if a future
@@ -559,25 +568,50 @@ const runWithBackgroundDetach = async (
 /** ADR-0296 PROMPT mode — bounded wait for operator consent. The host's
  *  `confirm` must NEVER be able to hang `runShell` (an operator who walks away
  *  would otherwise pin the turn open forever). So we race it against a timer:
- *  on timeout we resolve to `true` (DETACH — the non-destructive default: the
- *  command already outran its deadline; backgrounding keeps the work alive and
- *  recoverable via `bash_await`/`bash_kill`, whereas killing would throw it
- *  away). A throwing prompt is a conservative DECLINE (`false` ⇒ kill). */
+ *  on timeout we resolve `"timed_out"` (⇒ DETACH — the non-destructive D-5
+ *  default: the command already outran its deadline; backgrounding keeps the
+ *  work alive and recoverable via `bash_await`/`bash_kill`, whereas killing
+ *  would throw it away). WS-H / UUX-6-20: the timeout default is kept but now
+ *  DISTINGUISHED from an explicit approval so the `detached` terminal event
+ *  can announce it. A throwing prompt is a conservative DECLINE (⇒ kill). */
 const CONSENT_WAIT_MS = 60_000
+type ConsentOutcome = "approved" | "declined" | "timed_out"
+
+/** WS-H — fold the deadline consent gate into a single decision: `declined` ⇒
+ *  kill (legacy timeout), else the HONEST reason the `detached` terminal event
+ *  carries (`auto` when no consent gate is wired). Free helper so `onDeadline`
+ *  stays under the cognitive-complexity budget. */
+const resolveDeadlineDetachReason = async (
+  cfg: {
+    readonly command: string
+    readonly timeoutMs: number
+    readonly confirm: NonNullable<ShellOptions["background"]>["confirm"]
+  },
+  consentWaitMs: number,
+): Promise<"consent" | "consent_timeout" | "auto" | "declined"> => {
+  if (cfg.confirm === undefined) return "auto"
+  const consent = await askConsent(cfg.confirm, cfg.command, cfg.timeoutMs, consentWaitMs)
+  if (consent === "declined") return "declined"
+  return consent === "timed_out" ? "consent_timeout" : "consent"
+}
 const askConsent = async (
   confirm: NonNullable<NonNullable<ShellOptions["background"]>["confirm"]>,
   command: string,
   elapsedMs: number,
-): Promise<boolean> => {
+  waitMs: number,
+): Promise<ConsentOutcome> => {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const decided = confirm({ command, elapsedMs }).catch(() => false)
-    const timedOut = new Promise<boolean>((res) => {
-      timer = setTimeout(() => res(true), CONSENT_WAIT_MS)
+    const decided: Promise<ConsentOutcome> = confirm({ command, elapsedMs }).then(
+      (ok) => (ok ? "approved" : "declined"),
+      () => "declined",
+    )
+    const timedOut = new Promise<ConsentOutcome>((res) => {
+      timer = setTimeout(() => res("timed_out"), waitMs)
     })
     return await Promise.race([decided, timedOut])
   } catch {
-    return false
+    return "declined"
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
@@ -664,6 +698,9 @@ const detachInto = async (
     readonly drainsDone: Promise<void>
     readonly onAbort: () => void
     readonly observer: ((event: RunShellEvent) => void) | undefined
+    // WS-H / UUX-6-05 — how this detach came to be (honest terminal event).
+    readonly detachReason: "consent" | "consent_timeout" | "auto"
+    readonly consentWaitMs: number
   },
 ): Promise<ShellResult> => {
   const outBuf = createBoundedBuffer(DETACH_TAIL_BUDGET_BYTES)
@@ -678,10 +715,17 @@ const detachInto = async (
   const headErr = errBuf.value()
   state.detached = true
   cfg.signal?.removeEventListener("abort", child.onAbort)
-  // Observer terminal: the foreground stream ended because the deadline elapsed
-  // (`timeout`) — the registry owns the child from here. Exactly one terminal
-  // for this observer (the completion path is short-circuited by `detached`).
-  child.observer?.({ kind: "aborted", reason: "timeout", abortedAt: Date.now() })
+  // Observer terminal: WS-H / UUX-6-05 — an INTENTIONAL detach is `detached`
+  // (the child is alive in the registry), never the `aborted (timeout)` lie the
+  // painter used to render. Exactly one terminal for this observer (the
+  // completion path is short-circuited by `detached`). The consent-timeout
+  // default (D-5) carries its wait so the surface can announce "no answer in Ns".
+  child.observer?.({
+    kind: "detached",
+    reason: child.detachReason,
+    detachedAt: Date.now(),
+    ...(child.detachReason === "consent_timeout" ? { consentWaitMs: child.consentWaitMs } : {}),
+  })
   const { id } = await cfg.adopt({
     command: cfg.command,
     cwd: cfg.cwd,

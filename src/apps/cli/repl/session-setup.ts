@@ -12,7 +12,7 @@ import type { PermissionMode, PermissionStore } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
-import { runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
@@ -31,6 +31,8 @@ import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
 import type { TurnSummaryCollector } from "../turn-summary"
+import { type BackgroundStreamCapture, buildBackgroundCaptureTee } from "./background-capture-tee"
+import { BG_TURN_ENV_GATE } from "./background-turn-portal"
 import { type CliFeatureConfig, readCliFeatureConfig } from "./cli-feature-config"
 import { type ContextUsageHolder, createContextUsageHolder } from "./context-usage-snapshot"
 import { maybeRunEnvProbeWire } from "./env-probe-wire"
@@ -184,6 +186,11 @@ export interface SessionSetupResult {
    *  land on a clean screen. Absent ⇒ no tee allocated (byte-identical
    *  default-OFF). */
   readonly timelinePanel: TimelinePanel | undefined
+  /** WS-H / UUX-3-01 — present iff `QUANTA_BG_TURN` (the portal gate). The
+   *  session loop `install`s a sink here at Ctrl+B detach time so the live
+   *  turn's stream is teed into the portal entry's bounded buffer until the
+   *  body settles. Absent ⇒ no tee allocated (byte-identical default-OFF). */
+  readonly backgroundStreamCapture: BackgroundStreamCapture | undefined
   readonly approvalPrompt: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
   readonly midTurnApprovalChannel: import("./mid-turn-approval-channel").MidTurnApprovalChannel
   readonly runtimeContext: RuntimeContext
@@ -282,10 +289,22 @@ export const setupSession = async (
   // instance. `observeUsage` retains only a real reasoning split (absent ⇒
   // no-op), so the tee stays byte-identical for providers with no split.
   const contextUsageHolder = createContextUsageHolder()
+  // WS-H / UUX-3-01 — background-turn output capture tee. Interposed in the
+  // same chain as the debug/timeline tees so a Ctrl+B-detached turn's stream
+  // can be teed into its portal entry (`entry.appendOutput`) between detach
+  // and settle (the loop installs/removes the sink; see
+  // `wireBackgroundOutputCapture`). Gate OFF (`QUANTA_BG_TURN` unset — the
+  // SAME gate that builds the portal in surface-compose, via the shared
+  // BG_TURN_ENV_GATE const) ⇒ literal `timelineStream` + no handle ⇒
+  // byte-identical.
+  const { stream: bgCaptureStream, capture: backgroundStreamCapture } = buildBackgroundCaptureTee(
+    gateOn(runtime.env, BG_TURN_ENV_GATE),
+    timelineStream,
+  )
   const { indicator: turnIndicator, turnStream } = deps.buildTurnIndicatorAndStream(
     featureCfg,
     statusBar,
-    timelineStream,
+    bgCaptureStream,
     { observeUsage: contextUsageHolder.observeUsage },
   )
 
@@ -415,6 +434,7 @@ export const setupSession = async (
     turnSummary,
     debugHandle,
     timelinePanel,
+    backgroundStreamCapture,
     approvalPrompt,
     midTurnApprovalChannel,
     runtimeContext,

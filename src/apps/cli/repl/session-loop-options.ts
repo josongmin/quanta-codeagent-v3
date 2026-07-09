@@ -96,6 +96,11 @@ export const buildSessionLoopOptions = async (deps: {
       ? { conversationActions: wires.conversationActions }
       : {}),
     inboundMode: wires.inboundMode,
+    // WS-H / UUX-3-01 — the background-turn portal (present iff QUANTA_BG_TURN).
+    // Previously composed in surface-compose but NEVER forwarded here, which
+    // left Ctrl+B detach unreachable in the real CLI (dead wire) while the
+    // loop-level hellgates stayed green. Spread by-presence (default-OFF omits).
+    ...(wires.backgroundPortal !== undefined ? { backgroundPortal: wires.backgroundPortal } : {}),
     runtimeFacadeCompose: wires.runtimeFacadeCompose,
     // ADR-0293 — seam attached by the loop once externalPromptQueue is born.
     playbookSeam: wires.playbookSeam,

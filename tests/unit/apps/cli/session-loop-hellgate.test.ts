@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { AgentOutcome } from "../../../../src/agent"
-import { createMidTurnApprovalChannel } from "../../../../src/apps/cli/repl/mid-turn-approval-channel"
 import type { IdleMonitor } from "../../../../src/apps/cli/idle-monitor"
 import type { LifecyclePills } from "../../../../src/apps/cli/lifecycle-pills"
 import type { RejectCounter } from "../../../../src/apps/cli/reject-counter"
+import { createMidTurnApprovalChannel } from "../../../../src/apps/cli/repl/mid-turn-approval-channel"
 import type {
   RunSessionLoopDeps,
   SessionLoopSinks,
@@ -326,6 +326,13 @@ const buildSetup = async (
     skillsConfig: undefined as never,
     memoryStore: undefined,
     memoryEmbedder: undefined,
+    // Pre-existing contract drift (fixed alongside WS-H): these four keys are
+    // REQUIRED on SessionSetupResult; the loop never reads them, so inert
+    // stubs keep the fixture honest with the type.
+    projectsKbStore: undefined,
+    mcpResourceCapture: undefined,
+    contextUsageHolder: undefined as never,
+    permissionStore: undefined,
     // L5 M-11 — per-session search-wire teardown. The fixture leaves it
     // `undefined` (no wire built) by default; the dispose hellgates below
     // inject their own via the `searchPipelineDispose` deps slot.
@@ -343,6 +350,8 @@ const buildSetup = async (
     turnSummary: stubSummary(),
     debugHandle: undefined,
     timelinePanel: undefined,
+    // WS-H / UUX-3-01 — capture tee absent by default (gate off) in the fixture.
+    backgroundStreamCapture: undefined,
     approvalPrompt: async () => "approve" as const,
     midTurnApprovalChannel: createMidTurnApprovalChannel(),
     runtimeContext,
@@ -767,6 +776,7 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
       registerReplaceMessages: true,
       registerSideConversationStart: true,
       registerPlanQueueSendNow: true,
+      registerAutomationSlash: true,
       runtimeFacadeCompose: true,
       playbookSeam: true,
       playbookCliFlag: true,
@@ -1399,10 +1409,7 @@ describe("session-loop — ALBB-18 abort branch routes through SSOT (partial, no
   // Set by the captured `buildAutorunEligibility` getter argument.
   let capturedOutcomeGetter: (() => string | undefined) | undefined
 
-  const turnRunnerUrl = new URL(
-    "../../../../src/apps/cli/repl/turn-runner.ts",
-    import.meta.url,
-  )
+  const turnRunnerUrl = new URL("../../../../src/apps/cli/repl/turn-runner.ts", import.meta.url)
 
   beforeAll(async () => {
     const turnRunner = await import(turnRunnerUrl.href)

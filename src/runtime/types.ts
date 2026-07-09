@@ -42,6 +42,12 @@ export interface BackgroundDetachSeam {
     readonly command: string
     readonly elapsedMs: number
   }) => Promise<boolean>
+  /** WS-H / UUX-6-20 — how long to wait for `confirm` before DEFAULTING to
+   *  detach (D-5). Absent ⇒ the producer's named default (`CONSENT_WAIT_MS`,
+   *  60 s). Injectable so hosts/tests can shorten the wait; the chosen value
+   *  is echoed on the `detached(consent_timeout)` event so the surface can
+   *  announce "no answer in Ns" honestly. */
+  readonly consentWaitMs?: number
 }
 
 export interface ShellOptions {
@@ -163,4 +169,13 @@ export type RunShellEvent =
       readonly kind: "aborted"
       readonly reason: "user_abort" | "timeout"
       readonly abortedAt: number
+    }
+  | {
+      readonly kind: "detached"
+      /** Mirror of the canonical doc (`@/shared/shell-exec-types`): consent =
+       *  operator approved; consent_timeout = D-5 default after no answer in
+       *  `consentWaitMs`; auto = plain background mode (no consent gate). */
+      readonly reason: "consent" | "consent_timeout" | "auto"
+      readonly detachedAt: number
+      readonly consentWaitMs?: number
     }

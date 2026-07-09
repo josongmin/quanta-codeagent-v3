@@ -30,6 +30,21 @@ import { randomBytes } from "node:crypto"
  *  (no inlined magic number). The window stores HEAD + TAIL halves of this. */
 export const BG_BUFFER_MAX_BYTES = 50 * 1024 * 1024
 
+/** WS-H / UUX-3-12 — LRU cap on SETTLED entries retained for post-hoc
+ *  `/background reattach`. Settle must NOT mean instant deletion (the buffer
+ *  exists precisely so a finished turn can be inspected), but the registry
+ *  must not grow unboundedly either: when a settle pushes the settled
+ *  population over this cap, the OLDEST-settled entry is evicted. RUNNING
+ *  entries are never evicted (they own a live body promise). */
+export const BG_SETTLED_ENTRIES_MAX = 20
+
+/** The single env gate for the whole background-turn surface (portal +
+ *  `/background` slash + the session-setup capture tee). Exported so the TWO
+ *  composition roots (surface-compose, session-setup) read the SAME name —
+ *  a drifting literal would silently split the feature (portal without
+ *  capture = the exact dead-wire class UUX-3-01 was). */
+export const BG_TURN_ENV_GATE = "QUANTA_BG_TURN"
+
 /** Terminal lifecycle of a backgrounded turn. */
 export type BackgroundTurnState = "running" | "done" | "failed" | "cancelled"
 
@@ -46,6 +61,9 @@ export interface BackgroundTurnEntry<R = unknown> {
   readonly abort: AbortController
   result?: R
   error?: unknown
+  /** Wall-clock of the body's settlement (set by the portal's observer the
+   *  moment the state leaves 'running'). Drives the LRU prune order. */
+  settledAt?: number
   /** Append a streamed-output chunk into the bounded HEAD+TAIL window. */
   appendOutput(chunk: string): void
   /** Render the bounded window (HEAD + elision marker + TAIL). */
@@ -196,14 +214,35 @@ export const makeBoundedBuffer = (
  * keeps running, owned now by the portal, and a rejection NEVER escapes as an
  * unhandled rejection.
  */
-export const createBackgroundTurnPortal = (): BackgroundTurnPortal => {
+export const createBackgroundTurnPortal = (
+  opts: {
+    /** Per-entry output-buffer byte cap. Default: {@link BG_BUFFER_MAX_BYTES}.
+     *  Injectable so tests exercise the backpressure window without 50 MiB. */
+    readonly bufferMaxBytes?: number
+    /** Settled-entry LRU cap. Default: {@link BG_SETTLED_ENTRIES_MAX}. */
+    readonly settledEntriesMax?: number
+  } = {},
+): BackgroundTurnPortal => {
   const entries = new Map<string, BackgroundTurnEntry>()
+  const bufferMaxBytes = opts.bufferMaxBytes ?? BG_BUFFER_MAX_BYTES
+  const settledEntriesMax = opts.settledEntriesMax ?? BG_SETTLED_ENTRIES_MAX
   let seq = 0
+
+  /** UUX-3-12 — evict the oldest-SETTLED entries beyond the cap. Running
+   *  entries never count and are never evicted. Called on every settle. */
+  const pruneSettled = (): void => {
+    const settled = [...entries.values()].filter((e) => e.state !== "running")
+    if (settled.length <= settledEntriesMax) return
+    settled.sort((a, b) => (a.settledAt ?? 0) - (b.settledAt ?? 0))
+    for (const evict of settled.slice(0, settled.length - settledEntriesMax)) {
+      entries.delete(evict.taskId)
+    }
+  }
 
   const detach = <R>(args: DetachArgs<R>): string => {
     seq += 1
     const taskId = makeTaskId(seq)
-    const buffer = makeBoundedBuffer()
+    const buffer = makeBoundedBuffer(bufferMaxBytes)
     const entry: BackgroundTurnEntry<R> = {
       taskId,
       label: args.label,
@@ -221,12 +260,16 @@ export const createBackgroundTurnPortal = (): BackgroundTurnPortal => {
       .then((r) => {
         entry.state = "done"
         entry.result = r
+        entry.settledAt = Date.now()
+        pruneSettled()
       })
       .catch((e: unknown) => {
         // An AbortError means the user backgrounded then cancelled (the body
         // unwound via its signal) — distinct from a genuine failure.
         entry.state = e instanceof Error && e.name === "AbortError" ? "cancelled" : "failed"
         entry.error = e
+        entry.settledAt = Date.now()
+        pruneSettled()
       })
     return taskId
   }

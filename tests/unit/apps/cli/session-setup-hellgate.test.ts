@@ -156,6 +156,13 @@ type DepProbe = {
   indicatorUsageObserver:
     | { readonly observeUsage: (usage: { readonly reasoningTokens?: number }) => void }
     | undefined
+  /** WS-H / UUX-3-01 — the stream session-setup hands the indicator factory
+   *  (i.e. the OUTPUT of the background-capture tee stage). Captured so the
+   *  wiring test can emit through the REAL chain and observe the capture. */
+  indicatorInputStream: import("@/stream").StreamPort | undefined
+  /** The stream the timeline stub returned — at gate-OFF the capture stage
+   *  must pass this LITERAL reference through (no wrapper allocated). */
+  timelineReturnedStream: import("@/stream").StreamPort | undefined
   buildDebugTracerAndStreamCalls: number
   buildTimelinePanelAndStreamCalls: number
   buildWorkMetricsSinkCalls: number
@@ -175,6 +182,8 @@ const makeStubDeps = (
     buildTurnSummaryAndStreamCalls: 0,
     buildTurnIndicatorAndStreamCalls: 0,
     indicatorUsageObserver: undefined,
+    indicatorInputStream: undefined,
+    timelineReturnedStream: undefined,
     buildDebugTracerAndStreamCalls: 0,
     buildTimelinePanelAndStreamCalls: 0,
     buildWorkMetricsSinkCalls: 0,
@@ -239,6 +248,9 @@ const makeStubDeps = (
       // S3 — capture the observer so a test can pin that setup threads the
       // reasoning-gauge holder's `observeUsage` here (was previously unwired).
       probe.indicatorUsageObserver = usageObserver
+      // WS-H — capture the tee-stage OUTPUT so the wiring test can emit
+      // through the real chain.
+      probe.indicatorInputStream = stream
       return { indicator: stubIndicator as never, turnStream: stream }
     },
     buildDebugTracerAndStream: (_featureCfg, stream) => {
@@ -247,6 +259,9 @@ const makeStubDeps = (
     },
     buildTimelinePanelAndStream: (_featureCfg, stream) => {
       probe.buildTimelinePanelAndStreamCalls += 1
+      // WS-H — remember the returned ref so the gate-OFF identity test can
+      // assert the capture stage passed it through UNWRAPPED.
+      probe.timelineReturnedStream = stream
       return { stream, panel: undefined }
     },
     buildWorkMetricsSink: () => {
@@ -538,6 +553,47 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     })
     probe.indicatorUsageObserver?.observeUsage({ reasoningTokens: 8080 })
     expect(result.contextUsageHolder.view()?.reasoningTokens).toBe(8080)
+  })
+
+  test("WS-H / UUX-3-01: QUANTA_BG_TURN=1 ⇒ backgroundStreamCapture is LIVE on the real chain", async () => {
+    const prev = process.env.QUANTA_BG_TURN
+    process.env.QUANTA_BG_TURN = "1"
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps, probe } = makeStubDeps()
+      const result = await setupSession(deps)
+      expect(result.backgroundStreamCapture).toBeDefined()
+      // WIRING PROOF: install a sink on the RESULT handle, emit through the
+      // stream session-setup actually composed (the tee-stage output the
+      // indicator factory received) — the sink must see the projected text.
+      const got: string[] = []
+      const remove = result.backgroundStreamCapture?.install((c) => got.push(c))
+      probe.indicatorInputStream?.emit({ type: "assistant_text", delta: "wired-through" })
+      expect(got.join("")).toBe("wired-through")
+      remove?.()
+      probe.indicatorInputStream?.emit({ type: "assistant_text", delta: "post-remove" })
+      expect(got.join("")).toBe("wired-through")
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_BG_TURN
+      else process.env.QUANTA_BG_TURN = prev
+    }
+  })
+
+  test("WS-H: gate OFF ⇒ no capture handle AND the LITERAL stream is passed through (byte-identical)", async () => {
+    const prev = process.env.QUANTA_BG_TURN
+    delete process.env.QUANTA_BG_TURN
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps, probe } = makeStubDeps()
+      const result = await setupSession(deps)
+      expect(result.backgroundStreamCapture).toBeUndefined()
+      // No wrapper allocated: the indicator factory received the SAME object
+      // the timeline stage returned.
+      expect(probe.indicatorInputStream).toBe(probe.timelineReturnedStream as never)
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_BG_TURN
+      else process.env.QUANTA_BG_TURN = prev
+    }
   })
 
   test("wires reviewer + plan-exit + user-input host ports into the runtime bridge", async () => {

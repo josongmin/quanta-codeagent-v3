@@ -245,6 +245,13 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
     } as never,
     debugHandle: undefined,
     timelinePanel: undefined,
+    // WS-H / UUX-3-01 — capture tee absent (gate off) in the fixture.
+    backgroundStreamCapture: undefined,
+    // Pre-existing contract drift (fixed alongside WS-H): required keys the
+    // approval flow never reads — inert stubs keep the fixture type-honest.
+    projectsKbStore: undefined,
+    mcpResourceCapture: undefined,
+    permissionStore: undefined,
     approvalPrompt: async () => {
       counters.approvalPrompt += 1
       const next = queue.shift()

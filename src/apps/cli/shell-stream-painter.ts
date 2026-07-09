@@ -90,6 +90,28 @@ export const buildShellStreamPainter = (
       case "aborted":
         write(dim(`${labelTag}[shell] aborted (${event.reason})\n`))
         return
+      case "detached": {
+        // WS-H / UUX-6-05 — an INTENTIONAL background handoff is NOT an abort:
+        // paint it honestly. Terminal-event parity with `exit`: flush any
+        // pending partial multibyte tails first (the decoders end here — the
+        // registry owns the post-detach stream).
+        const tailOut = decStdout.decode()
+        const tailErr = decStderr.decode()
+        if (tailOut.length > 0) write(tailOut)
+        if (tailErr.length > 0) write(redDim(tailErr))
+        if (event.reason === "consent_timeout") {
+          // UUX-6-20 (D-5) — the 60s default stays but is ANNOUNCED explicitly.
+          const waited =
+            event.consentWaitMs !== undefined
+              ? ` in ${Math.round(event.consentWaitMs / 1000)}s`
+              : ""
+          write(dim(`${labelTag}[shell] no answer${waited} — defaulted to background\n`))
+          write(dim(`${labelTag}[shell] moved to background (consent timeout)\n`))
+          return
+        }
+        write(dim(`${labelTag}[shell] moved to background\n`))
+        return
+      }
       default: {
         // Exhaustive switch — a new ShellExecEvent variant becomes a compile
         // error at the `never` assignment per ADR-0081. We do NOT `return` the

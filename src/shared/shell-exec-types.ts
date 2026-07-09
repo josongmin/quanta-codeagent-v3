@@ -16,8 +16,12 @@
  *     to its pipes. `offset` is the BYTE offset within that single stream's
  *     total output before this chunk (i.e. the chunk covers
  *     `[offset, offset + chunk.byteLength)` of the per-stream buffer).
- *  3. EITHER `exit` OR `aborted` as the terminal event, AFTER the underlying
- *     stdout/stderr streams' `end`. Exactly one of the two is emitted per run.
+ *  3. EXACTLY ONE terminal event: `exit` (clean completion), `aborted` (a REAL
+ *     kill — user abort, timeout kill, or declined-consent kill), or `detached`
+ *     (WS-H / UUX-6-05 — the deadline moved the still-running child into the
+ *     background registry; the command is ALIVE, not aborted). `exit`/`aborted`
+ *     follow the underlying streams' `end`; `detached` ends the FOREGROUND
+ *     observation only (the registry owns the stream from there).
  *
  * Chunks are `Uint8Array` — no premature text decoding. The consumer chooses
  * encoding. Concatenating every `stdout` chunk yields the same bytes as the
@@ -59,6 +63,20 @@ export type ShellExecEvent =
       readonly kind: "aborted"
       readonly reason: "user_abort" | "timeout"
       readonly abortedAt: number
+    }
+  | {
+      readonly kind: "detached"
+      /** Why the foreground stream ended in a detach (ADR-0296 / WS-H):
+       *  `consent` — the operator explicitly approved backgrounding at the
+       *  deadline; `consent_timeout` — the consent prompt got NO answer within
+       *  `consentWaitMs` and DEFAULTED to background (D-5: default kept, but
+       *  announced); `auto` — plain background mode (no consent gate). */
+      readonly reason: "consent" | "consent_timeout" | "auto"
+      readonly detachedAt: number
+      /** How long the consent prompt waited before defaulting. Present iff
+       *  reason === "consent_timeout" (lets the surface say "no answer in Ns"
+       *  without hardcoding the producer's wait). */
+      readonly consentWaitMs?: number
     }
 
 export type ShellExecObserver = (event: ShellExecEvent) => void

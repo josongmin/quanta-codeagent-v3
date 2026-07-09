@@ -45,6 +45,11 @@ export const buildShellOtelObserver = (metrics: Metrics): ShellExecObserver => {
       case "aborted":
         metrics.counter(`shell.exec.aborts.${event.reason}`).inc()
         return
+      case "detached":
+        // WS-H / UUX-6-05 — intentional background handoff, counted apart from
+        // aborts (previously conflated into `shell.exec.aborts.timeout`).
+        metrics.counter(`shell.exec.detached.${event.reason}`).inc()
+        return
       default: {
         // Exhaustive: a new ShellExecEvent variant breaks this at compile
         // time and forces a counter decision (ADR-0081 invariant). We do NOT

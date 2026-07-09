@@ -298,6 +298,97 @@ export const shouldWireBackground = (args: {
   return true
 }
 
+/** WS-H / UUX-3-01 — tee the live turn's stream output into the detached
+ *  entry's bounded buffer until the body settles. This is the seam that makes
+ *  `entry.appendOutput` (and therefore `/background reattach` +
+ *  `bufferedBytes`) actually functional: the loop calls it right after
+ *  `portal.detach(...)` with the SAME body promise. The remover fires on BOTH
+ *  settle paths (the arguments-form `then` handles rejection without minting
+ *  an extra unhandled-rejection chain). Absent entry/capture ⇒ safe no-op
+ *  (default-OFF byte-identical). */
+export const wireBackgroundOutputCapture = (args: {
+  readonly entry:
+    | Pick<import("../background-turn-portal").BackgroundTurnEntry, "appendOutput">
+    | undefined
+  readonly capture: import("../background-capture-tee").BackgroundStreamCapture | undefined
+  readonly settled: Promise<unknown>
+}): void => {
+  const { entry, capture } = args
+  if (entry === undefined || capture === undefined) return
+  const remove = capture.install((chunk) => entry.appendOutput(chunk))
+  args.settled.then(
+    () => remove(),
+    () => remove(),
+  )
+}
+
+/** Ticket 18 (V1) + WS-H — the FULL Ctrl+B detach side-effect, extracted as a
+ *  free function so it stays out of `runInteractiveBranch`'s god-fn budget:
+ *  register the LIVE body with the portal, tee the stream into the entry's
+ *  bounded buffer until settle (UUX-3-01), paint the on-detach breadcrumbs,
+ *  and reuse the notify port for background completion. `taskId === undefined`
+ *  (portal absent — guard raced) ⇒ no side effects. */
+export const handleMovedToBackground = <R>(args: {
+  readonly portal: import("../background-turn-portal").BackgroundTurnPortal | undefined
+  readonly capture: import("../background-capture-tee").BackgroundStreamCapture | undefined
+  readonly promptText: string
+  readonly notify: import("../../notify").NotificationPort | undefined
+  readonly notifyCwdBasename: string | undefined
+  readonly write: (s: string) => void
+  readonly handle: { readonly body: Promise<R>; readonly turnAbort: AbortController }
+}): void => {
+  // Wall-clock start of the backgrounded run, so completion reports the REAL
+  // elapsed time (not a fabricated 0).
+  const bgStart = Date.now()
+  const taskId = args.portal?.detach({
+    label: backgroundTurnLabel(args.promptText),
+    promise: args.handle.body,
+    abort: args.handle.turnAbort,
+  })
+  if (taskId === undefined) return
+  // WS-H / UUX-3-01 — tee the live turn stream into the entry's bounded buffer
+  // until the body settles, so `/background reattach` replays real output.
+  wireBackgroundOutputCapture({
+    entry: args.portal?.get(taskId),
+    capture: args.capture,
+    settled: args.handle.body,
+  })
+  // SOTA++ UX: on-detach hint + a prompt-re-entry breadcrumb.
+  args.write("\x1b[2m⏭ moved to background — /background to manage\x1b[0m\n")
+  args.write(`\x1b[2m↳ 1 turn running in background (task ${taskId})\x1b[0m\n`)
+  // REUSE the existing notify port for completion. No-throw: both `then`/
+  // `catch` paths fire a single onTurnComplete.
+  const fireDone = (ok: boolean): void =>
+    args.notify?.onTurnComplete({
+      durationMs: Math.max(0, Date.now() - bgStart),
+      ok,
+      cwdBasename: `${args.notifyCwdBasename ?? ""} · background task ${taskId} done`,
+    })
+  args.handle.body.then(() => fireDone(true)).catch(() => fireDone(false))
+}
+
+/** WS-H / UUX-3-12 — REPL-exit honesty: enumerate STILL-RUNNING background
+ *  turns and print one warning line listing them (id + label), so exiting
+ *  never silently abandons live work. Silent when the portal is absent
+ *  (default-OFF) or nothing is running. NO-THROW — this runs on the teardown
+ *  path and must never mask the real shutdown. */
+export const warnLiveBackgroundTurns = (
+  portal: Pick<import("../background-turn-portal").BackgroundTurnPortal, "list"> | undefined,
+  write: (s: string) => void,
+): void => {
+  if (portal === undefined) return
+  try {
+    const live = portal.list().filter((e) => e.state === "running")
+    if (live.length === 0) return
+    const listing = live.map((e) => `${e.taskId} (${e.label})`).join(", ")
+    write(
+      `\x1b[33m⚠ ${live.length} background turn(s) still running — exiting abandons: ${listing}\x1b[0m\n`,
+    )
+  } catch {
+    // Teardown must never throw over a status line.
+  }
+}
+
 /** Ticket 18 (V1) — derive a short, single-line portal label from the prompt
  *  head. Collapses whitespace + truncates so the `/background list` table stays
  *  scannable (the full prompt is never the label). NO-THROW on empty input. */
