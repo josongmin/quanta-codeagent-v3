@@ -43,6 +43,18 @@ Every verified finding belongs to exactly one workstream (WS). If a fix idea doe
 
 ## WS-B — Stdin arbiter (single owner)
 
+> **jul-10 execution note (re-derived scope):** the full `StdinArbiter` module was
+> NOT built — on re-reading the live topology, the mid-turn approval channel
+> already IS the arbiter for asks, and the remaining bug surface decomposed into
+> owner-seam fixes that landed instead: (1) the in-turn reader owns "a captured
+> line is text" (escape/chord sequences filtered, cross-chunk); (2) the
+> elicitation/ask_user prompter rides the session channel via a registry slot
+> (no second mid-turn readline); (3) attach has one stdin owner (the read-loop
+> iterator; approvals claim lines via the channel; pre-handshake asks wait for
+> readiness instead of dropping). The lease-API arbiter remains a future option
+> if a NEW stdin consumer class appears; do not add ad-hoc readline mid-turn —
+> route through `currentMidTurnApprovalChannel()`.
+
 **Root cause.** 5 production `readline.createInterface` sites (mcp-elicitation-prompter, attach-cmd, repl, runtime-context-compose, session-picker) + the Esc-Esc FSM + in-turn reader all attach independently to `process.stdin`. Every mid-turn prompt bug (blind typing, Esc leaking into buffers, attach races) is this one fact.
 
 **Structural moves:**
