@@ -36,6 +36,11 @@ const EXEMPT_PATTERNS: readonly RegExp[] = [
   /^scripts\//,
   /^docs\//,
   /^tools\/feature-catalog\//,
+  // Dev-analysis tooling run via `bun tools/…` (not shipped product features) —
+  // same category as scripts/. The trajectory timeline + viewer render recorded
+  // bench cassettes for debugging; they are not user-facing surfaces.
+  /^tools\/trajectory-timeline\.ts$/,
+  /^tools\/trajectory-viewer\//,
 ]
 
 /** True ⇒ this src file is exempt from the "must be in fc" rule. */

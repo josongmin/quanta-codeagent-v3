@@ -25,15 +25,20 @@ surface_integration:
 purpose: |
   Default-OFF `maybeRecordTrajectory` wraps the bench LLM port when
   `QUANTA_BENCH_RECORD_TRAJECTORY` is set, writing a replayable JSONL cassette
-  for fork-from-point debugging of failed remote runs.
+  for fork-from-point debugging of failed remote runs. The `=debug` tier adds a
+  sidecar DEBUG sink (`trajectory-debug-sink.ts`): subsystems across the run (tool
+  executor, edit tool, phase-gate, grader) contribute keyed debug slices that ride
+  alongside each recorded turn as `RecordedInteraction.metadata.debug`.
 evidence:
   code:
     - src/apps/bench/index.ts
+    - src/apps/bench/trajectory-debug-sink.ts
     - src/config/knob-inventory.ts
   adrs: [536]
   tests:
     unit:
       - tests/unit/bench-trajectory-record-hellgate.test.ts
+      - tests/unit/trajectory-debug-sink-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
