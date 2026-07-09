@@ -14,16 +14,27 @@
  *  subsequent shell prompt (after quanta exits) starts clean.
  */
 
+import {
+  acquireRegion as acquireSharedRegion,
+  DEC_RESTORE_CURSOR,
+  DEC_SAVE_CURSOR,
+  onTerminalResize,
+  type RegionHandle,
+  type ResizeSubscribe,
+  type ScrollRegionManager,
+} from "./terminal-chrome"
+
 const ESC = "\x1b["
-// DECSC / DECRC (`ESC 7` / `ESC 8`) — the DEC private cursor save/restore.
-// Preferred over SCO (`ESC[s` / `ESC[u`) because xterm/iTerm2/Terminal.app/
-// tmux/VSCode/screen all implement DEC fully; SCO restore is unreliable on
-// VSCode-integrated and some legacy emulators, which causes the next stdout
-// write to land at the status-row position instead of returning to the
-// streamed content — showing as " · 29.6k in · 33 out" suffixes leaking
-// onto every content line.
-const SAVE_CURSOR = "\x1b7"
-const RESTORE_CURSOR = "\x1b8"
+// DECSC / DECRC (`ESC 7` / `ESC 8`) — the DEC private cursor save/restore,
+// imported from the WS-C terminal-chrome kernel (the SSOT; SCO `ESC[s` is
+// grep-gate banned there). Preferred over SCO because xterm/iTerm2/
+// Terminal.app/tmux/VSCode/screen all implement DEC fully; SCO restore is
+// unreliable on VSCode-integrated and some legacy emulators, which causes
+// the next stdout write to land at the status-row position instead of
+// returning to the streamed content — showing as " · 29.6k in · 33 out"
+// suffixes leaking onto every content line.
+const SAVE_CURSOR = DEC_SAVE_CURSOR
+const RESTORE_CURSOR = DEC_RESTORE_CURSOR
 const ERASE_LINE = `${ESC}2K`
 const FG_DIM = `${ESC}2m`
 const FG_RESET = `${ESC}22;39m`
@@ -87,7 +98,18 @@ export interface StatusBar {
 
 export const installStatusBar = (
   initialText: string,
-  options: { readonly env?: NodeJS.ProcessEnv; readonly stderrIsTTY?: boolean } = {},
+  options: {
+    readonly env?: NodeJS.ProcessEnv
+    readonly stderrIsTTY?: boolean
+    /** WS-C — resize-subscription seam. Default: the singleton SIGWINCH
+     *  registry ({@link onTerminalResize}); tests inject a fake. On resize
+     *  the bar re-pins its DECSTBM region and repaints the live text. */
+    readonly resize?: ResizeSubscribe
+    /** WS-C — scroll-region manager seam. Default: the shared singleton so
+     *  the bar, the timeline panel and the input lane never fight over the
+     *  terminal-global DECSTBM state. */
+    readonly regionManager?: ScrollRegionManager
+  } = {},
 ): StatusBar => {
   const env = options.env ?? process.env
   const stderrIsTTY = options.stderrIsTTY ?? process.stderr.isTTY
@@ -101,16 +123,41 @@ export const installStatusBar = (
   let currentText = initialText
   let transientTimer: ReturnType<typeof setTimeout> | null = null
   let installed = false
+  let region: RegionHandle | null = null
 
-  const setupScrollRegion = (): void => {
+  const stderrWrite = (chunk: string): void => {
+    process.stderr.write(chunk)
+  }
+
+  const regionBytes = (): string => {
     const rows = termRows()
     // DECSTBM: set scroll region to lines [1, rows-1]. The last row
     // (rows) is now outside the scroll region — stdout writes never
-    // touch it, so the status bar persists across LLM streams.
-    process.stderr.write(`${ESC}1;${rows - 1}r`)
-    // Park the cursor inside the scroll region so the first stdout
-    // write doesn't accidentally land on the status row.
-    process.stderr.write(`${ESC}${rows - 1};1H`)
+    // touch it, so the status bar persists across LLM streams. Followed by
+    // a cursor park inside the scroll region so the first stdout write
+    // doesn't accidentally land on the status row. Thunk — re-reads the
+    // geometry so a resize refresh/resume re-pins against current rows.
+    return `${ESC}1;${rows - 1}r${ESC}${rows - 1};1H`
+  }
+
+  const releaseBytes = (): string => {
+    const rows = termRows()
+    // Reset scroll region to full screen, clear the status row, leave
+    // cursor on the first column of the (former) status row so the
+    // shell prompt that follows quanta exit starts on a clean line.
+    return `${ESC}r` + `${ESC}${rows};1H` + ERASE_LINE + `${ESC}${rows};1H`
+  }
+
+  const setupScrollRegion = (): void => {
+    // WS-C — the DECSTBM pin goes through the scroll-region manager
+    // (exactly one active owner; the mid-turn input lane suspends us and
+    // our region is re-established when it exits).
+    const acquire = options.regionManager?.acquireRegion ?? acquireSharedRegion
+    region = acquire("status-bar", {
+      establish: regionBytes,
+      release: releaseBytes,
+      write: stderrWrite,
+    })
     installed = true
   }
 
@@ -146,6 +193,16 @@ export const installStatusBar = (
   setupScrollRegion()
   paintRow(initialText)
 
+  // WS-C (UUX-5-03) — track terminal resizes: re-pin the DECSTBM region for
+  // the new row count and repaint whatever text is live (default or
+  // transient) at the new bottom row / width. Unsubscribed on teardown.
+  const subscribeResize = options.resize ?? onTerminalResize
+  const unsubscribeResize = subscribeResize((): void => {
+    if (!installed) return
+    region?.refresh()
+    paintRow(currentText)
+  })
+
   return {
     setDefault: (text: string): void => {
       defaultText = text
@@ -164,13 +221,15 @@ export const installStatusBar = (
       paintRow(defaultText)
     },
     teardown: (): void => {
+      // Always drop the resize subscription (idempotent) so a REPL restart
+      // cannot accumulate SIGWINCH listeners.
+      unsubscribeResize()
       if (!installed) return
       cancelTransient()
-      const rows = termRows()
-      // Reset scroll region to full screen, clear the status row, leave
-      // cursor on the first column of the (former) status row so the
-      // shell prompt that follows quanta exit starts on a clean line.
-      process.stderr.write(`${ESC}r` + `${ESC}${rows};1H` + ERASE_LINE + `${ESC}${rows};1H`)
+      // Release the DECSTBM region via the manager — writes the same
+      // reset + clear-row bytes as before when we are the active owner.
+      region?.release()
+      region = null
       installed = false
       void currentText
     },

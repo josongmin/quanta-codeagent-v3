@@ -25,20 +25,29 @@
  *   - **Pure DI** for tests. `geometry`, `write`, `now`, `color` are injectable.
  *   - **Cursor preservation.** Every panel repaint is wrapped in DECSC/DECRC
  *     (cursor save/restore) so an in-flight stream paint that lands in the
- *     same write tick is not jumped to the panel row.
+ *     same write tick is not jumped to the panel row. WS-C: DEC-only — the
+ *     SCO pair (`ESC[s`/`ESC[u`) is banned (unreliable restore on VSCode-
+ *     integrated terminals corrupted the layout, UUX-5-02).
  *   - **Slice isolation.** Only depends on `@/stream` for the `AgentEvent`
- *     shape — no `@/agent`, no `@/llm`, no `./status-bar` import (the panel
- *     and the bar are siblings; coupling them at the type level would block
- *     the byte-identical default-OFF goal).
+ *     shape and the sibling `./terminal-chrome` kernel (pure leaf) — no
+ *     `@/agent`, no `@/llm`, no `./status-bar` import (the panel and the bar
+ *     are siblings; coupling them at the type level would block the
+ *     byte-identical default-OFF goal).
  */
 
 import type { AgentEvent, AgentEventType } from "@/stream"
+import {
+  acquireRegion as acquireSharedRegion,
+  onTerminalResize,
+  type RegionHandle,
+  type ResizeSubscribe,
+  type ScrollRegionManager,
+  withDecCursor,
+} from "./terminal-chrome"
 
 // --- ANSI control sequences ---------------------------------------------
 
 const ESC = "\x1b["
-const SAVE_CURSOR = `${ESC}s`
-const RESTORE_CURSOR = `${ESC}u`
 const ERASE_LINE = `${ESC}2K`
 const FG_DIM = `${ESC}2m`
 const FG_RESET = `${ESC}22;39m`
@@ -77,6 +86,15 @@ export interface TimelineOptions {
   /** Wall-clock seam (used for the per-row timestamp prefix). Default
    *  `Date.now`. */
   readonly now?: () => number
+  /** WS-C — resize-subscription seam. Default {@link onTerminalResize} (the
+   *  singleton SIGWINCH registry); tests inject a fake. The panel subscribes
+   *  its own `onResize` on install and unsubscribes on teardown. */
+  readonly resize?: ResizeSubscribe
+  /** WS-C — scroll-region manager seam. Default: the shared module
+   *  singleton (`terminal-chrome.acquireRegion`) so the panel, the status
+   *  bar and the input lane never fight over the terminal-global DECSTBM
+   *  state. Tests inject an isolated manager. */
+  readonly regionManager?: ScrollRegionManager
 }
 
 export interface TimelinePanel {
@@ -244,6 +262,52 @@ const defaultWrite = (chunk: string): void => {
   process.stderr.write(chunk)
 }
 
+const truncate = (text: string, maxCols: number): string => {
+  if (text.length <= maxCols) return text
+  return text.slice(0, maxCols)
+}
+
+/** Render one full panel repaint frame (pure): per-row cursor-jump +
+ *  erase-line + formatted body, DEC-wrapped so the cursor cannot escape into
+ *  the panel band. Width budget per row: full cols minus 2 (1 leading space
+ *  + 1 trailing margin) so we never trigger DECAWM auto-wrap on the
+ *  bottom-most panel row (which sits 1 line above the status row). */
+const renderPanelFrame = (args: {
+  readonly rows: number
+  readonly cols: number
+  readonly height: number
+  readonly buffer: readonly AgentEvent[]
+  readonly timestamps: readonly number[]
+  readonly color: boolean
+}): string => {
+  const { rows, cols, height, buffer, timestamps, color } = args
+  const panelTop = rows - height
+  const maxCols = Math.max(0, cols - 2)
+  let body = ""
+  for (let i = 0; i < height; i++) {
+    const row = panelTop + i
+    body += `${ESC}${row};1H${ERASE_LINE}`
+    const event = buffer[i]
+    const ts = timestamps[i]
+    if (event !== undefined && ts !== undefined) {
+      const line = truncate(formatEventLine(event, ts), maxCols)
+      body += color ? `${FG_DIM} ${line}${FG_RESET}` : ` ${line}`
+    }
+  }
+  return withDecCursor(body)
+}
+
+/** Render the panel-band erase frame (pure): erase-line on every panel row,
+ *  DEC-wrapped. Used on teardown + shrink-below-floor. */
+const renderEraseFrame = (rows: number, height: number): string => {
+  const panelTop = rows - height
+  let body = ""
+  for (let i = 0; i < height; i++) {
+    body += `${ESC}${panelTop + i};1H${ERASE_LINE}`
+  }
+  return withDecCursor(body)
+}
+
 /** Construct a timeline panel. See {@link TimelineOptions}. */
 export const createTimelinePanel = (opts: TimelineOptions): TimelinePanel => {
   const geometry = opts.geometry ?? defaultGeometry
@@ -270,62 +334,72 @@ export const createTimelinePanel = (opts: TimelineOptions): TimelinePanel => {
     }
   }
 
-  const pinScrollRegion = (rows: number): void => {
+  const regionBytes = (): string => {
     // Scroll region runs from row 1 to (rows - height - 1). That leaves
     // `height` rows for the panel (rows-height .. rows-1) and one row
     // (rows) for the status bar — unchanged from the pre-timeline layout.
+    // Thunk (re-reads geometry) so a manager refresh/resume after a resize
+    // pins against the CURRENT rows. Includes the cursor park inside the
+    // scroll region so the next stream write cannot land on a panel row.
+    const { rows } = geometry()
     const bottom = rows - height - 1
-    safeWrite(decstbm(1, bottom))
-    // Park the cursor inside the scroll region so the next stdout write
-    // does not accidentally land on a panel row.
-    safeWrite(`${ESC}${bottom};1H`)
-  }
-
-  const truncate = (text: string, maxCols: number): string => {
-    if (text.length <= maxCols) return text
-    return text.slice(0, maxCols)
+    return `${decstbm(1, bottom)}${ESC}${bottom};1H`
   }
 
   const repaint = (): void => {
     const { rows, cols } = geometry()
-    const panelTop = rows - height
-    // Width budget for each row: full cols, but reserve 2 cols (1 leading
-    // space + 1 trailing margin) so we never trigger DECAWM auto-wrap on
-    // the bottom-most panel row (which sits 1 line above the status row).
-    const maxCols = Math.max(0, cols - 2)
-    let chunk = SAVE_CURSOR
-    for (let i = 0; i < height; i++) {
-      const row = panelTop + i
-      chunk += `${ESC}${row};1H${ERASE_LINE}`
-      const event = buffer[i]
-      const ts = timestamps[i]
-      if (event !== undefined && ts !== undefined) {
-        const raw = formatEventLine(event, ts)
-        const line = truncate(raw, maxCols)
-        if (color) {
-          chunk += `${FG_DIM} ${line}${FG_RESET}`
-        } else {
-          chunk += ` ${line}`
-        }
-      }
-    }
-    chunk += RESTORE_CURSOR
-    safeWrite(chunk)
+    safeWrite(renderPanelFrame({ rows, cols, height, buffer, timestamps, color }))
   }
 
   const eraseRows = (rows: number): void => {
-    const panelTop = rows - height
-    let chunk = SAVE_CURSOR
-    for (let i = 0; i < height; i++) {
-      chunk += `${ESC}${panelTop + i};1H${ERASE_LINE}`
-    }
-    chunk += RESTORE_CURSOR
-    safeWrite(chunk)
+    safeWrite(renderEraseFrame(rows, height))
   }
 
   // --- Install ---------------------------------------------------------
-  pinScrollRegion(initial.rows)
+  // WS-C — the DECSTBM pin goes through the scroll-region manager so the
+  // panel, the status bar and the input lane never fight over the
+  // terminal-global region (single active owner; suspend/resume).
+  const acquire = opts.regionManager?.acquireRegion ?? acquireSharedRegion
+  let region: RegionHandle | null = acquire("timeline-panel", {
+    establish: regionBytes,
+    release: () => decstbmReset,
+    write: safeWrite,
+  })
   installed = true
+
+  const handleResize = (): void => {
+    if (!installed) return
+    const next = geometry()
+    const reclamped = clampHeight(opts.height, next.rows)
+    if (reclamped === 0) {
+      // Terminal shrank below the floor — tear down rather than render a
+      // broken panel. A subsequent grow-back is not auto-recovered: the
+      // caller can wire a manual re-init if needed.
+      const rows = next.rows
+      eraseRows(rows)
+      region?.release()
+      region = null
+      installed = false
+      return
+    }
+    // Re-allocate the ring buffer if the height changed.
+    if (reclamped !== height) {
+      height = reclamped
+      // Truncate the existing buffer to the new height (drop the oldest).
+      while (buffer.length > height) {
+        buffer.shift()
+        timestamps.shift()
+      }
+    }
+    region?.refresh()
+    repaint()
+  }
+
+  // WS-C (UUX-5-03) — subscribe the panel's resize handler on the singleton
+  // SIGWINCH registry (previously `onResize` existed but nothing ever
+  // called it). Unsubscribed on teardown so a REPL restart cannot leak.
+  const subscribeResize = opts.resize ?? onTerminalResize
+  const unsubscribeResize = subscribeResize(handleResize)
 
   return {
     emit: (event: AgentEvent): void => {
@@ -339,43 +413,20 @@ export const createTimelinePanel = (opts: TimelineOptions): TimelinePanel => {
       }
       repaint()
     },
-    onResize: (): void => {
-      if (!installed) return
-      const next = geometry()
-      const reclamped = clampHeight(opts.height, next.rows)
-      if (reclamped === 0) {
-        // Terminal shrank below the floor — tear down rather than render a
-        // broken panel. A subsequent grow-back is not auto-recovered: the
-        // caller can wire a manual re-init if needed.
-        const rows = next.rows
-        eraseRows(rows)
-        safeWrite(decstbmReset)
-        installed = false
-        return
-      }
-      // Re-allocate the ring buffer if the height changed.
-      if (reclamped !== height) {
-        height = reclamped
-        // Truncate the existing buffer to the new height (drop the oldest).
-        while (buffer.length > height) {
-          buffer.shift()
-          timestamps.shift()
-        }
-      }
-      pinScrollRegion(next.rows)
-      repaint()
-    },
+    onResize: handleResize,
     teardown: (): void => {
+      // Always drop the resize subscription — even after a shrink-to-floor
+      // auto-teardown left `installed === false` (leak guard). Idempotent.
+      unsubscribeResize()
       if (!installed) return
       const { rows } = geometry()
       eraseRows(rows)
-      // Reset DECSTBM back to the full screen. The status bar's own
-      // teardown (`installStatusBar.teardown`) writes the SAME reset; the
-      // sequence is idempotent on every common terminal (xterm, iTerm,
-      // VTE, conhost). When the status bar tears down AFTER us it will
-      // simply re-issue the reset and clear its own row — net effect is
-      // a clean screen either way.
-      safeWrite(decstbmReset)
+      // Release the DECSTBM region via the manager (writes the same
+      // full-screen reset as before; when another owner — e.g. the status
+      // bar — is suspended underneath, its region is re-established so the
+      // screen stays consistent either way).
+      region?.release()
+      region = null
       installed = false
       // Drop refs so a stuck closure can't pin the event log.
       buffer = []

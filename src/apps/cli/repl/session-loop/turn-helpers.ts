@@ -1,5 +1,12 @@
 import type { InboundMode } from "@/agent/inbound-mode"
 import { sliceWholeChars } from "@/shared"
+import {
+  acquireRegion as acquireSharedRegion,
+  onTerminalResize,
+  type RegionHandle,
+  type ResizeSubscribe,
+  type ScrollRegionManager,
+} from "../../terminal-chrome"
 import type { ConversationActionSurface } from "../conversation-action-surface"
 import type { ExternalPromptQueue } from "../external-prompt-queue"
 import {
@@ -18,42 +25,108 @@ import { type SessionState, updateSessionState } from "../session-state"
  *  number (no-heuristic rule). */
 const INBOUND_MAX_BYTES = 64 * 1024
 
+/** Minimal stream view the lane renderer needs (`process.stdout` satisfies
+ *  it; tests fake it). WS-C: kept structural so the resize/region behavior is
+ *  unit-testable without a TTY. */
+export interface LaneOutStream {
+  readonly rows?: number | undefined
+  readonly columns?: number | undefined
+  readonly write: (chunk: string) => unknown
+}
+
+/** WS-C — terminal-chrome seams for {@link makeLaneRenderer}. Defaults to the
+ *  shared kernel singletons (production); tests inject isolated fakes. */
+export interface LaneChromeSeams {
+  readonly regionManager?: ScrollRegionManager
+  readonly resize?: ResizeSubscribe
+}
+
 /** §08b / audit R3 — the bottom mid-turn input-lane renderer. Entered LAZILY on
  *  the FIRST keystroke (a turn with no mid-turn typing never reserves the scroll
- *  region ⇒ byte-identical viewport), capturing the terminal height ONCE so the
- *  per-keystroke render + the teardown all target the SAME row even across a
- *  mid-turn resize. Extracted to a module factory to keep `runSessionLoop` under
- *  the cognitive-complexity cap. The caller writes `render` into the in-turn
- *  reader's `onPartial` and calls `teardown()` in the turn's `finally`. */
-const makeLaneRenderer = (
-  out: NodeJS.WriteStream,
+ *  region ⇒ byte-identical viewport). Extracted to a module factory to keep
+ *  `runSessionLoop` under the cognitive-complexity cap. The caller writes
+ *  `render` into the in-turn reader's `onPartial` and calls `teardown()` in the
+ *  turn's `finally`.
+ *
+ *  WS-C (UUX-5-04): the DECSTBM reserve goes through the terminal-chrome
+ *  scroll-region manager — entering the lane SUSPENDS the status bar's region
+ *  and exiting RESUMES it (previously `exitLaneMode` wrote a full DECSTBM
+ *  reset on stdout, leaving the status row unpinned until reinstall).
+ *  WS-C (UUX-3-09): the lane row is no longer frozen at the first keystroke —
+ *  a resize subscription recomputes the row, refreshes the region and
+ *  repaints the live buffer on the NEW bottom row. */
+export const makeLaneRenderer = (
+  out: LaneOutStream,
+  chrome: LaneChromeSeams = {},
 ): {
   render: (buffer: string) => void
   teardown: () => void
 } => {
   let laneRows: number | null = null
+  let lastBuffer = ""
+  let region: RegionHandle | null = null
+  let unsubscribeResize: (() => void) | null = null
+
+  const safeWrite = (chunk: string): void => {
+    if (chunk.length === 0) return
+    try {
+      out.write(chunk)
+    } catch {
+      /* stdout torn down — chrome is never a control path */
+    }
+  }
+
+  const paint = (): void => {
+    if (laneRows === null) return
+    const cols = out.columns
+    safeWrite(
+      lastBuffer.length > 0
+        ? renderInputLane(lastBuffer, { rows: laneRows, ...(cols !== undefined ? { cols } : {}) })
+        : clearInputLane({ rows: laneRows }),
+    )
+  }
+
+  const handleResize = (): void => {
+    if (laneRows === null) return
+    const next = out.rows ?? 24
+    if (next === laneRows) return
+    const prev = laneRows
+    // Terminal grew: the OLD bottom row is now inside the scroll region —
+    // erase the stale lane there before repainting on the new bottom row.
+    if (next > prev) safeWrite(clearInputLane({ rows: prev }))
+    laneRows = next
+    region?.refresh() // re-pins DECSTBM [1, rows-1] for the new geometry
+    paint()
+  }
+
   return {
     render(buffer: string): void {
       if (buffer.length === 0 && laneRows === null) return // nothing typed yet
+      lastBuffer = buffer
       if (laneRows === null) {
         laneRows = out.rows ?? 24 // first keystroke: reserve the bottom row.
-        out.write(enterLaneMode(laneRows))
+        const acquire = chrome.regionManager?.acquireRegion ?? acquireSharedRegion
+        region = acquire("input-lane", {
+          establish: () => enterLaneMode(laneRows ?? out.rows ?? 24),
+          release: () => exitLaneMode(laneRows ?? out.rows ?? 24),
+          write: safeWrite,
+        })
+        const subscribe = chrome.resize ?? onTerminalResize
+        unsubscribeResize = subscribe(handleResize)
       }
-      const cols = out.columns
-      out.write(
-        buffer.length > 0
-          ? renderInputLane(buffer, { rows: laneRows, ...(cols !== undefined ? { cols } : {}) })
-          : clearInputLane({ rows: laneRows }),
-      )
+      paint()
     },
     teardown(): void {
       if (laneRows === null) return
-      try {
-        out.write(exitLaneMode(laneRows))
-      } catch {
-        /* stdout torn down — nothing to restore */
-      }
+      unsubscribeResize?.()
+      unsubscribeResize = null
+      // Release via the manager: writes `exitLaneMode` (reset + erase lane
+      // row) and RESUMES the suspended chrome owner (status bar / timeline)
+      // so their region pin survives the mid-turn lane.
+      region?.release()
+      region = null
       laneRows = null
+      lastBuffer = ""
     },
   }
 }

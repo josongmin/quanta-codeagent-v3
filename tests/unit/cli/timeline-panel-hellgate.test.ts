@@ -43,7 +43,10 @@ import type { AgentEvent } from "../../../src/stream"
  *  source (biome `noControlCharactersInRegex`). */
 const ESC_CHAR = String.fromCharCode(27)
 const CSI_RE = new RegExp(`${ESC_CHAR}\\[[0-9;?]*[A-Za-z]`, "g")
-const stripCsi = (s: string): string => s.replace(CSI_RE, "")
+// Also strip DECSC/DECRC (`ESC 7`/`ESC 8`) — WS-C moved the panel's cursor
+// save/restore from SCO (a CSI form) to the DEC pair the status bar uses.
+const DEC_RE = new RegExp(`${ESC_CHAR}[78]`, "g")
+const stripCsi = (s: string): string => s.replace(CSI_RE, "").replace(DEC_RE, "")
 
 const makeFakeSink = (): { write: (s: string) => void; writes: string[] } => {
   const writes: string[] = []
@@ -147,11 +150,13 @@ describe("timeline-panel hellgate", () => {
     })
     sink.writes.length = 0 // ignore install frames; we want emit
     panel.emit(turnEvent(1))
-    // Find the emit paint frame — it starts with SAVE_CURSOR `\x1b[s`.
-    const paint = sink.writes.find((w) => w.startsWith("\x1b[s"))
+    // Find the emit paint frame — it starts with DECSC `\x1b7` (WS-C: DEC
+    // only; the SCO pair `\x1b[s`/`\x1b[u` is grep-gate banned because its
+    // restore is unreliable on VSCode-integrated terminals — UUX-5-02).
+    const paint = sink.writes.find((w) => w.startsWith("\x1b7"))
     expect(paint).toBeDefined()
-    // And ends with RESTORE_CURSOR `\x1b[u`.
-    expect((paint ?? "").endsWith("\x1b[u")).toBe(true)
+    // And ends with DECRC `\x1b8`.
+    expect((paint ?? "").endsWith("\x1b8")).toBe(true)
     panel.teardown()
   })
 

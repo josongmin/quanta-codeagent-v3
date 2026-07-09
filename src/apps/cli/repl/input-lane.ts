@@ -18,8 +18,12 @@
  *   ESC 8        restore cursor   (DECRC — streamed output resumes where it was)
  */
 
-const SAVE = "\x1b7"
-const RESTORE = "\x1b8"
+import { DEC_RESTORE_CURSOR, DEC_SAVE_CURSOR } from "../terminal-chrome"
+
+// WS-C — cursor save/restore comes from the terminal-chrome kernel (the DEC
+// SSOT; SCO `ESC[s`/`ESC[u` is grep-gate banned under src/apps/cli).
+const SAVE = DEC_SAVE_CURSOR
+const RESTORE = DEC_RESTORE_CURSOR
 const ERASE_LINE = "\x1b[2K"
 const cursorTo = (row: number, col: number): string => `\x1b[${row};${col}H`
 
