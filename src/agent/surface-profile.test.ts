@@ -18,7 +18,26 @@ import {
   composeSystemPromptForSurface,
   FROZEN_SURFACE_PROFILE,
   type SurfaceProfile,
+  SWE_SURFACE_PROFILE,
 } from "./surface-profile"
+
+// jul-9 audit Finding 3a: grader-only (verify axis) emits "do NOT install / do NOT run
+// tests", which CONTRADICTS an install-permitting env posture (owned / default). The type
+// system permits the pairing, but production never composes it: grader-only is swebench-gated
+// (config-build.isGraderOnlyPosture requires `instance.swebench`), and the SWE surface is
+// FROZEN. Pin that invariant so a future change that flips the SWE surface to an
+// install-permitting posture — re-opening the contradiction — red-fires here.
+describe("SurfaceProfile — grader-only never rides an install-permitting posture (Finding 3a)", () => {
+  test("the SWE surface (the only grader-only carrier) is FROZEN, not owned/default", () => {
+    expect(SWE_SURFACE_PROFILE.envPosture).toBe("frozen")
+    expect(FROZEN_SURFACE_PROFILE.envPosture).toBe("frozen")
+    // frozen posture emits the install-PROHIBITION, so grader-only's "don't install" agrees.
+    const swe = composeSystemPromptForSurface(SWE_SURFACE_PROFILE)
+    expect(swe).toContain("[R-ENV]") // frozen install-prohibition present
+    expect(swe).not.toContain("[R-ENV-LOCAL]") // NOT the install-permitting default posture
+    expect(swe).not.toContain("[R-ENV-OWNED]") // NOT the install-permitting owned posture
+  })
+})
 
 describe("SurfaceProfile — surface-agnostic prompt composition", () => {
   test("FROZEN default composes BYTE-IDENTICALLY to today's buildSystemPrompt() (DEFAULT-OFF invariant)", () => {
