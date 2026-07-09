@@ -51,10 +51,17 @@ export interface EscalationRequest {
 }
 
 /** The leader's verdict on an escalation. A deny carries a reason so the worker
- *  can surface WHY it stays blocked (no silent failure). */
+ *  can surface WHY it stays blocked (no silent failure).
+ *
+ *  WS-A (jul-10, UUX-1-07) — the RICH fields survive the boundary:
+ *   - deny may carry the leader's corrective `steer` (deny_and_steer semantics —
+ *     the worker's gate surfaces it as `DispatchResult.steerInjection` so the
+ *     worker model learns WHAT to do instead, not just "denied");
+ *   - allow may carry the leader's standing-grant `scope` (a session-scoped
+ *     allow is cached decider-side so the same tool+scope never re-prompts). */
 export type EscalationDecision =
-  | { readonly approved: true }
-  | { readonly approved: false; readonly reason: string }
+  | { readonly approved: true; readonly scope?: "once" | "session" | "session_prefix" }
+  | { readonly approved: false; readonly reason: string; readonly steer?: string }
 
 /** The structural shape of a mailbox message this slice consumes. A local
  *  mirror of `@/agent/subagent-mailbox#MailboxMessage` so the fence holds (no
@@ -163,9 +170,22 @@ export const applyDecisionResponse = (
     if (isNonEmptyString(leaderId) && msg.from !== leaderId) return undefined
     const obj = parseJsonObject(msg.body)
     if (obj === undefined) return undefined
-    if (obj.approved === true) return { approved: true }
+    if (obj.approved === true) {
+      // WS-A — validate the scope against the closed vocabulary; a forged /
+      // garbage literal is DROPPED (the grant never widens beyond the enum).
+      const scope = obj.scope
+      return scope === "once" || scope === "session" || scope === "session_prefix"
+        ? { approved: true, scope }
+        : { approved: true }
+    }
     if (obj.approved === false) {
-      return { approved: false, reason: isString(obj.reason) ? obj.reason : "" }
+      const reason = isString(obj.reason) ? obj.reason : ""
+      // WS-A — a steer must be a non-empty string; anything else is dropped
+      // (validation, not passthrough — a worker never sees a forged object).
+      const steer = obj.steer
+      return isNonEmptyString(steer)
+        ? { approved: false, reason, steer }
+        : { approved: false, reason }
     }
     return undefined
   } catch (e) {

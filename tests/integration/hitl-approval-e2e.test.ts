@@ -392,13 +392,15 @@ describe("HITL e2e — deferred CLI fallback prompt carries the 'always' verb en
 // ── channel fail-safety (the session loop's teardown contract) ────────────
 
 describe("HITL e2e — channel teardown can never hang an approval", () => {
-  test("turn ends while a prompt is open → clear() resolves '' → deny (no hang, no allow)", async () => {
+  test("turn ends while a prompt is open → typed release → deny (no hang, no allow)", async () => {
     const h = makeHarness({ interactive: true })
     try {
       const gateRun = h.ctrl.runWithProtocol(() => h.gate(call("edit_file"), actionOf("edit_file")))
       // Let the prompt arm, then simulate the session loop's turn teardown.
+      // WS-A (jul-10) — clear takes a typed cause; the prompt maps the release
+      // to a fail-closed deny WITH attribution (never a fake empty line).
       await new Promise((r) => setTimeout(r, 10))
-      h.channel.clear()
+      h.channel.clear("turn_teardown")
       const result = await gateRun
       expect(result).not.toBeNull() // deny DispatchResult — fail closed
       expect(h.denies()).toBe(1)

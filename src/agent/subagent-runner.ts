@@ -82,14 +82,21 @@ import {
 } from "@/subagent"
 import { type Tool, ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
-import { isAllowed as isConfirmAllowed, normalizeConfirm } from "./confirm-decision"
-import { buildLeaderHitlBroker, type LeaderEscalationDecider } from "./coordination-broker-wire"
+import {
+  buildLeaderDecide,
+  buildLeaderHitlBroker,
+  type LeaderEscalationDecider,
+} from "./coordination-broker-wire"
 import { runAgent } from "./loop"
 import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
-import { UnknownSubagentModelError, resolveChildEffort, resolveChildLlm } from "./subagent-runner-overrides"
+import {
+  resolveChildEffort,
+  resolveChildLlm,
+  UnknownSubagentModelError,
+} from "./subagent-runner-overrides"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
@@ -383,16 +390,11 @@ const maybeWireCoordinationBroker = (
   const leaderId = mailboxIds.parentId
   if (workerId.length === 0 || leaderId.length === 0) return {}
 
-  const leaderDecide: LeaderEscalationDecider = async (req) => {
-    const verdict = normalizeConfirm(
-      await onConfirm({
-        tool: req.tool,
-        input: { scope: req.scope, reason: req.reason },
-        isReadOnly: false,
-      }),
-    )
-    return isConfirmAllowed(verdict) ? { approved: true } : { approved: false, reason: req.reason }
-  }
+  // WS-A (jul-10, UUX-1-07) — the SSOT mapping (coordination-broker-wire's
+  // `buildLeaderDecide`) replaces the prior inline collapse to `{approved}`:
+  // the leader's deny_and_steer STEER and allow SCOPE now survive the boundary,
+  // and a session-scoped allow is cached so the same ask never re-prompts.
+  const leaderDecide: LeaderEscalationDecider = buildLeaderDecide(onConfirm)
 
   let esc = 0
   const broker = buildLeaderHitlBroker({

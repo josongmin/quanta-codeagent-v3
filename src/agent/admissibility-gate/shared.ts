@@ -245,7 +245,17 @@ export interface GateEscalationBroker {
     readonly tool: string
     readonly scope: string
     readonly reason: string
-  }): Promise<{ readonly approved: boolean; readonly reason?: string }>
+  }): Promise<{
+    readonly approved: boolean
+    readonly reason?: string
+    /** WS-A (jul-10, UUX-1-07) — the leader's corrective steer on a deny.
+     *  Surfaced by the gate's broker-deny arm via `denyFromConfirm` as
+     *  `DispatchResult.steerInjection` (the existing REJECT_AND_TELL seam). */
+    readonly steer?: string
+    /** The leader's standing-grant scope on an allow (decider-side cache hint;
+     *  the gate itself treats any `approved:true` identically). */
+    readonly scope?: "once" | "session" | "session_prefix"
+  }>
 }
 
 // Re-exported for `./gates` (snapshotToLayeredRules consumes LayeredRule).

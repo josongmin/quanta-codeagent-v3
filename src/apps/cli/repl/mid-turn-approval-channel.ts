@@ -16,9 +16,29 @@
  * fight. Between turns (no in-turn reader) the prompt falls back to its own
  * readline — `active` stays false there.
  *
+ * WS-A (jul-10, UUX-1-22/UUX-3-11) — TYPED release. The old `clear()` resolved
+ * a pending waiter with the bare string `""`, indistinguishable from the
+ * operator pressing Enter on an empty line: turn cancel / Ctrl+B backgrounding /
+ * teardown all silently became "operator denied". A release is now a
+ * DISCRIMINATED value carrying its cause, so the prompt can attribute the
+ * outcome honestly (fail-closed deny + a visible notice, never a silent one).
+ *
  * Pure + closed-port: this module holds NO stdin; the session loop feeds it lines
  * and the approval prompt awaits them. Fully unit-testable.
  */
+
+/** Why a pending waiter was released without operator input. */
+export type MidTurnReleaseCause =
+  /** The turn ended (completed / canceled / backgrounded) with the ask unanswered. */
+  | "turn_teardown"
+  /** A second `awaitLine` superseded a stale waiter (one-ask-at-a-time wiring bug). */
+  | "superseded"
+
+/** What `awaitLine` resolves to: a REAL operator line (possibly empty — an empty
+ *  Enter is still input) vs a typed RELEASE (never disguised as input). */
+export type MidTurnLineResult =
+  | { readonly kind: "line"; readonly line: string }
+  | { readonly kind: "released"; readonly cause: MidTurnReleaseCause }
 
 export interface MidTurnApprovalChannel {
   /** True while an in-turn reader owns stdin (set by the session loop around each
@@ -26,30 +46,34 @@ export interface MidTurnApprovalChannel {
    *  (true) vs open its own readline (false). */
   active: boolean
   /** Approval prompt: render done by the caller; await the operator's next line.
-   *  Resolves with the routed line, or "" if the turn ends first (⇒ caller treats
-   *  a non-"y" as deny — fail-closed, never a silent allow). */
-  awaitLine(): Promise<string>
+   *  Resolves `{kind:"line"}` with the routed input, or `{kind:"released"}` when
+   *  the turn ends first — the caller maps a release to a fail-closed deny AND
+   *  surfaces the cause (never a silent deny). */
+  awaitLine(): Promise<MidTurnLineResult>
   /** Session loop `onLine`: deliver a captured line to a waiting approval. Returns
    *  true iff it was consumed (so the caller skips the normal follow-up routing). */
   tryResolve(line: string): boolean
-  /** Session loop turn teardown: release any waiter with "" (⇒ deny) so a turn
-   *  that ends with an unanswered approval can never hang. */
-  clear(): void
+  /** Session loop turn teardown: release any waiter with the given cause so a
+   *  turn that ends with an unanswered approval can never hang — and the prompt
+   *  can attribute WHY it was released (typed, never a fake empty line). */
+  clear(cause: MidTurnReleaseCause): void
 }
 
 export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
-  let pending: ((line: string) => void) | undefined
+  let pending: ((result: MidTurnLineResult) => void) | undefined
+  const release = (cause: MidTurnReleaseCause): void => {
+    if (pending === undefined) return
+    const resolve = pending
+    pending = undefined
+    resolve({ kind: "released", cause })
+  }
   return {
     active: false,
-    awaitLine(): Promise<string> {
+    awaitLine(): Promise<MidTurnLineResult> {
       // A prior unfinished waiter would be a wiring bug (one approval at a time);
-      // release it as a deny before replacing, so it can't leak.
-      if (pending !== undefined) {
-        const stale = pending
-        pending = undefined
-        stale("")
-      }
-      return new Promise<string>((resolve) => {
+      // release it TYPED before replacing, so it can't leak or fake a deny.
+      release("superseded")
+      return new Promise<MidTurnLineResult>((resolve) => {
         pending = resolve
       })
     },
@@ -57,15 +81,11 @@ export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
       if (pending === undefined) return false
       const resolve = pending
       pending = undefined
-      resolve(line)
+      resolve({ kind: "line", line })
       return true
     },
-    clear(): void {
-      if (pending !== undefined) {
-        const resolve = pending
-        pending = undefined
-        resolve("")
-      }
+    clear(cause: MidTurnReleaseCause): void {
+      release(cause)
     },
   }
 }

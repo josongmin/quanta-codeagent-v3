@@ -21,6 +21,7 @@
 import type { AgentOutcome } from "@/agent"
 import type { ImageBlock, Message } from "@/llm"
 import type { RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
+import { type ApprovalDecisionResult, normalizeApprovalDecision } from "./approval-decision"
 import { attachCrashResumePartial, withCrashResumeMarker } from "./crash-resume-wire"
 
 /** The SDK turn payload (the non-undefined `turn` of a dispatch result). */
@@ -28,21 +29,10 @@ type SessionTurnPayload = NonNullable<SessionDispatchResult["turn"]>
 /** The pending-approval view carried on a turn payload when the gate asks. */
 type PendingApproval = NonNullable<SessionTurnPayload["approvalRequest"]>
 
-/** ADR-0512 P3 — the operator's decision. A bare `"approve"`/`"deny"` is the
- *  legacy 2-verb form (still accepted, byte-identical). A skill-scope escalation
- *  surface may instead return the RICH form so the once/session SCOPE and the
- *  corrective STEER reach the host: `{decision:"approve", scope:"once"}` ⇒
- *  allow_once (dispatch WITHOUT widening); `{decision:"deny", steer}` ⇒
- *  deny_and_steer (a recoverable decline carrying the steer). */
-export type ApprovalDecisionResult =
-  | "approve"
-  | "deny"
-  // #20 — `session_prefix` joins the approve scopes: the deferred surface (web
-  // card / CLI fallback) can also mint the standing "always allow `<program> …`
-  // this session" prefix grant (the controller derives a safe prefix key, see
-  // `@/permission/session-grant-prefix`).
-  | { readonly decision: "approve"; readonly scope?: "once" | "session" | "session_prefix" }
-  | { readonly decision: "deny"; readonly steer?: string }
+// WS-A (jul-10) — the wire union + its SSOT normalizer live in
+// `./approval-decision`; re-exported here so existing `@/runner/orchestrate`
+// consumers keep their import path (byte-identical type).
+export type { ApprovalDecisionResult } from "./approval-decision"
 
 /** Host-injected approval resolver — mirrors the CLI's `setup.approvalPrompt`.
  *  Receives the pending approval and returns the operator decision. The surface
@@ -108,12 +98,9 @@ const resolvePendingApproval = async (
   turnSignal: AbortSignal,
 ): Promise<void> => {
   const raw = await resolveApproval(approval)
-  const norm: {
-    decision: "approve" | "deny"
-    // #20 — `session_prefix` joins the once/session scopes the host lease carries.
-    scope?: "once" | "session" | "session_prefix"
-    steer?: string
-  } = typeof raw === "string" ? { decision: raw } : raw
+  // WS-A (jul-10) — the SSOT normalizer replaces the prior inline mapping so
+  // every consumer of the wire union reads it identically (UUX-1-02 class).
+  const norm = normalizeApprovalDecision(raw)
   // ADR-0512 P3 — forward the escalation's once/session scope + corrective steer
   // so the host lease carries the operator's rich decision. Empty ⇒ `undefined`
   // meta, byte-identical to the legacy 2-verb respond.

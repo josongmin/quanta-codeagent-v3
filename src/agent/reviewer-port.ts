@@ -108,9 +108,21 @@ export const createOnConfirmReviewerPort = (opts: OnConfirmReviewerPortOptions):
       const target = reviewTarget(action, ctx)
       const riskLevel = riskLevelFor(action)
       if (decision.decision === "allow") {
+        // WS-A (jul-10, UUX-2-20) — the operator's allow SCOPE maps onto the
+        // existing ApprovalOutcome vocabulary instead of collapsing to the
+        // configured default: "[a]lways session" answers stick
+        // (`user_approved_for_session`), and an EXPLICIT "once" is never
+        // widened by a session-default config. Scopeless allows (incl. the
+        // legacy boolean form) keep the configured default — byte-identical.
+        const outcome =
+          decision.scope === "session" || decision.scope === "session_prefix"
+            ? "user_approved_for_session"
+            : decision.scope === "once"
+              ? "user_approved"
+              : approveOutcome
         return {
           reviewer: "user",
-          outcome: approveOutcome,
+          outcome,
           riskLevel,
           rationale: `approved ${target}`,
           decidedAt: ctx.decidedAt,

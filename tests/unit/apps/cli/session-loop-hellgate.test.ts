@@ -1286,7 +1286,8 @@ describe("session-loop — in-turn keystroke SOURCE wiring (#8)", () => {
       planQueueStore: planQueue,
       inTurnStdin: stdin,
     })
-    expect(await answer).toBe("y") // routed to the approval
+    // WS-A (jul-10) — the channel resolves a TYPED line result now.
+    expect(await answer).toEqual({ kind: "line", line: "y" }) // routed to the approval
     expect(planQueue.peek(setup.sessionId as string)).toHaveLength(0) // NOT queued
   })
 

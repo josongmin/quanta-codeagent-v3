@@ -20,6 +20,12 @@
  *     concrete files directly.
  */
 
+export type { ApprovalDecisionResult, NormalizedApprovalDecision } from "./approval-decision"
+export {
+  ApprovalDecisionResultError,
+  isApprovedDecision,
+  normalizeApprovalDecision,
+} from "./approval-decision"
 export type { CrashResumeMarkerArgs } from "./crash-resume-wire"
 export {
   attachCrashResumePartial,
@@ -33,7 +39,6 @@ export { persistTurn } from "./persist-turn"
 export type { ResolveResumeInput, ResumeResolution } from "./resume-fsm"
 export { defaultUntitled, isPathLikeToken, resolveResume } from "./resume-fsm"
 export type {
-  ApprovalDecisionResult,
   ApprovalResolver,
   RunSessionTurnArgs,
   SessionTurnResult,

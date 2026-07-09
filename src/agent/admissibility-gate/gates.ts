@@ -432,17 +432,26 @@ const runBrokerEscalation = async (
   broker: GateEscalationBroker,
   action: AdmissibilityAction,
   reason: string,
-): Promise<"approved" | "denied"> => {
+): Promise<
+  { readonly verdict: "approved" } | { readonly verdict: "denied"; readonly steer?: string }
+> => {
   try {
-    const verdict = await broker.escalate({
+    const decision = await broker.escalate({
       tool: action.tool,
       scope: action.shellCommand ?? action.tool,
       reason,
     })
-    return verdict.approved ? "approved" : "denied"
+    if (decision.approved) return { verdict: "approved" }
+    // WS-A (jul-10, UUX-1-07) — thread the leader's corrective steer (when a
+    // non-empty string) so the deny arm can surface it via `denyFromConfirm`.
+    const steer =
+      typeof decision.steer === "string" && decision.steer.trim().length > 0
+        ? decision.steer
+        : undefined
+    return steer === undefined ? { verdict: "denied" } : { verdict: "denied", steer }
   } catch (e) {
     writeStderr(`[quanta] team-broker: escalate threw (fail-closed deny): ${errMessage(e)}\n`)
-    return "denied"
+    return { verdict: "denied" }
   }
 }
 
@@ -594,10 +603,11 @@ const runModePolicy = async (
     // `decision.hardDeny=true` on its own HARD_DENY boundary, so this gate no
     // longer re-derives the fact from `action`.
     let brokerDenied = false
+    let brokerSteer: string | undefined
     if (opts.coordinationBroker !== undefined && !decision.hardDeny) {
-      const verdict = await runBrokerEscalation(opts.coordinationBroker, action, decision.reason)
-      brokerDenied = verdict === "denied"
-      if (verdict === "approved") {
+      const escalation = await runBrokerEscalation(opts.coordinationBroker, action, decision.reason)
+      brokerDenied = escalation.verdict === "denied"
+      if (escalation.verdict === "approved") {
         // Corrective emit: the policy denied but the leader overrode → ADMIT.
         // Two events (deny then broker-allow) tell the true story to a tracer.
         emitGateDecision(config, {
@@ -611,6 +621,21 @@ const runModePolicy = async (
         // repo-local hook can still veto last — parity with every allow path).
         return null
       }
+      brokerSteer = escalation.steer
+    }
+    // WS-A (jul-10, UUX-1-07) — a leader deny that carries a corrective steer
+    // routes through the EXISTING deny_and_steer mechanism (`denyFromConfirm` ⇒
+    // `DispatchResult.steerInjection`), so the worker model learns what to do
+    // instead. A plain broker deny stays byte-identical below.
+    if (brokerSteer !== undefined) {
+      return denyFromConfirm(
+        call,
+        { decision: "deny_and_steer", steer: brokerSteer },
+        `Permission denied: ${decision.reason}`,
+        "denied",
+        config,
+        denyReason(policyDenyStructured(decision, { brokerDenied })),
+      )
     }
     // When the HITL gate is enabled the HARD_DENY branch is already handled
     // upstream; any remaining policy denial keeps the legacy "Permission

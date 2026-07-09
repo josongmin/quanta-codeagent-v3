@@ -6,12 +6,17 @@
 import { describe, expect, test } from "bun:test"
 import { createMidTurnApprovalChannel } from "@/apps/cli/repl/mid-turn-approval-channel"
 
+// WS-A (jul-10) — the channel resolves a TYPED result: `{kind:"line"}` for real
+// operator input vs `{kind:"released", cause}` for a channel release (the old
+// bare-"" release masqueraded as an operator empty line — UUX-1-22). The richer
+// release pins live in
+// `src/apps/cli/repl/__tests__/mid-turn-approval-channel-release.hellgate.test.ts`.
 describe("mid-turn approval channel", () => {
   test("a captured line resolves a waiting approval (routed, not queued)", async () => {
     const ch = createMidTurnApprovalChannel()
     const answer = ch.awaitLine()
     expect(ch.tryResolve("y")).toBe(true) // consumed by the approval
-    expect(await answer).toBe("y")
+    expect(await answer).toEqual({ kind: "line", line: "y" })
   })
 
   test("tryResolve returns false when no approval is pending (line falls through to follow-up routing)", () => {
@@ -19,21 +24,21 @@ describe("mid-turn approval channel", () => {
     expect(ch.tryResolve("some follow-up")).toBe(false)
   })
 
-  test("clear() releases a waiter with '' so a turn ending mid-approval denies (fail-closed)", async () => {
+  test("clear(turn_teardown) releases a waiter TYPED so a turn ending mid-approval denies (fail-closed)", async () => {
     const ch = createMidTurnApprovalChannel()
     const answer = ch.awaitLine()
-    ch.clear()
-    expect(await answer).toBe("") // "" ≠ "y" ⇒ the prompt treats it as deny
+    ch.clear("turn_teardown")
+    expect(await answer).toEqual({ kind: "released", cause: "turn_teardown" })
     expect(ch.tryResolve("late")).toBe(false) // already cleared
   })
 
-  test("only ONE waiter at a time — a new awaitLine denies the stale one", async () => {
+  test("only ONE waiter at a time — a new awaitLine releases the stale one", async () => {
     const ch = createMidTurnApprovalChannel()
     const first = ch.awaitLine()
     const second = ch.awaitLine()
-    expect(await first).toBe("") // stale waiter released as deny
+    expect(await first).toEqual({ kind: "released", cause: "superseded" })
     expect(ch.tryResolve("y")).toBe(true)
-    expect(await second).toBe("y")
+    expect(await second).toEqual({ kind: "line", line: "y" })
   })
 
   test("active defaults false (between turns ⇒ prompt uses its own readline)", () => {

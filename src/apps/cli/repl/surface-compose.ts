@@ -19,6 +19,7 @@ import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import type { Message, StreamInput } from "@/llm"
 import type { RadarStore } from "@/radar"
 import { parseEnvFlag } from "@/runner/assemble"
+import { isApprovedDecision } from "@/runner/orchestrate"
 import type {
   RuntimeFacadeComposeOptions,
   RuntimeSideConversationArgs,
@@ -384,7 +385,11 @@ export const composeSurfaceWires = (
             reason: `Compact ~${approxK}k tokens of history into a summary? (context ${Math.round(query.currentTokens / 1000)}k/threshold ${Math.round(query.threshold / 1000)}k)`,
             requestedAt: new Date().toISOString(),
           })
-          return decision === "approve" ? "approve" : "defer_one_turn"
+          // WS-A (jul-10, UUX-1-02) — the SSOT projection: a RICH approve
+          // (`{decision:"approve", scope:"session"}`, the operator's "[a]lways"
+          // answer) is an approve. The prior strict string equality against the
+          // bare "approve" literal misread it as a deferral.
+          return isApprovedDecision(decision) ? "approve" : "defer_one_turn"
         }
       : undefined
   // ADR-0071 — mid-turn typed control surface (/cancel + /summarize-now). Env-

@@ -9,6 +9,7 @@ import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { PermissionContext } from "@/permission"
+import { type ApprovalResolver, driveSessionTurn } from "@/runner/orchestrate"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
@@ -19,12 +20,43 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { buildInteractiveTurnAssembler } from "../interactive-turn-assembler"
-import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 import { exitCodeForOutcome } from "../run"
+import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 
 interface PromptSourceLike {
   next(signal?: AbortSignal): Promise<string | null>
 }
+
+/** The minimal line-question surface the approval resolver needs (the live
+ *  `readline` interface satisfies it; tests inject a scripted fake). */
+export interface ApprovalQuestionIO {
+  question(prompt: string, opts?: { signal?: AbortSignal }): Promise<string>
+}
+
+/**
+ * WS-A (jul-10, UUX-1-04) — the interactive preset's operator approval
+ * resolver. The prior loop ran bare `session.turn.run` with NO approval
+ * resolution: a tool that requested approval left the session parked at
+ * `awaiting_approval` forever (an interactive surface that could never answer).
+ *
+ * Reuses the ONE readline the prompt loop already owns (never a second stdin
+ * consumer) and speaks the standard 3-verb CLI dialect: [y]es / [a]lways
+ * session / [N]o (fail-closed default deny — mirrors the REPL's deferred
+ * prompt in `runtime-context-compose.ts`).
+ */
+export const buildInteractiveApprovalResolver =
+  (io: ApprovalQuestionIO, signal: AbortSignal): ApprovalResolver =>
+  async (approval) => {
+    process.stderr.write(`Approval required: ${approval.reason}\n`)
+    const ans = (
+      await io.question("Approve pending action? [y]es / [a]lways session / [N]o ", { signal })
+    )
+      .trim()
+      .toLowerCase()
+    if (ans === "y" || ans === "yes") return "approve"
+    if (ans === "a" || ans === "always") return { decision: "approve", scope: "session" }
+    return "deny"
+  }
 
 const buildInteractiveBase = (
   req: AssembleRequest,
@@ -107,6 +139,11 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
       }
     },
   }
+  // WS-A (jul-10, UUX-1-04) — approvals are resolvable: the turn runs through
+  // the SSOT driver (`driveSessionTurn`), which drains the approval loop via
+  // the operator resolver above. The prior bare `session.turn.run` parked the
+  // session at `awaiting_approval` with no way to answer.
+  const resolveApproval = buildInteractiveApprovalResolver(reader, signal)
   try {
     process.on("SIGINT", onSigint)
     // Loop on the COMPOSED signal so an upstream composition-root abort ends the
@@ -115,8 +152,24 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
       const next = await promptSource.next(signal)
       if (next === null || signal.aborted) break
       if (next === "") continue
-      await session.input.append(next, undefined, { signal })
-      await session.turn.run(undefined, { signal })
+      try {
+        await driveSessionTurn({
+          session,
+          resolveApproval,
+          text: next,
+          turnSignal: signal,
+          env: process.env,
+        })
+      } catch (error) {
+        // A NORMAL approval deny aborts THE TURN (driver contract), not the
+        // whole interactive session — report and keep prompting. Anything else
+        // (incl. an upstream abort) propagates as before.
+        if (!signal.aborted && error instanceof Error && /approval denied/.test(error.message)) {
+          process.stderr.write(`${error.message} — turn aborted, session continues.\n`)
+          continue
+        }
+        throw error
+      }
     }
   } finally {
     process.off("SIGINT", onSigint)

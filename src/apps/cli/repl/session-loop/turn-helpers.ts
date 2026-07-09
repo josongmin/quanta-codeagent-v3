@@ -116,7 +116,10 @@ export const makeInTurnCaptureWrapper = (args: {
       return await run()
     } finally {
       args.midTurnApprovalChannel.active = false
-      args.midTurnApprovalChannel.clear() // release any unanswered approval ⇒ deny
+      // WS-A (jul-10, UUX-1-22) — TYPED release: an unanswered approval at turn
+      // teardown resolves as `released(turn_teardown)`, which the prompt maps to
+      // a fail-closed deny WITH attribution (never a silent fake empty line).
+      args.midTurnApprovalChannel.clear("turn_teardown")
       reader.dispose()
       lane?.teardown() // R3 — only if entered; uses rows captured at enter.
     }
