@@ -37,6 +37,7 @@ import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
   promptSurfaceProfileForRunMode,
+  resolveCliDefaultEnvPosture,
   type ModeVariantKey,
 } from "@/agent/system-prompt"
 import {
@@ -193,18 +194,24 @@ const buildSessionStatePorts = (args: {
   const toolProfileState = resolveToolProfileState(args.env)
   const identityModeState = resolveIdentityModeState(args.env)
   const focusChain = resolveFocusChain(args.env)
+  // jul-9 QUANTA_ENV_DEFAULT knob (default-OFF ⇒ "frozen", byte-identical). This is THE
+  // interactive-CLL prompt seam (`quanta` REPL), distinct from the agent-arg-builder path —
+  // it MUST honor the knob too or a developer who sets it still gets the frozen (SWE) posture.
+  const envPosture = resolveCliDefaultEnvPosture(args.env)
   const buildPromptFromIdentityMode = (): string => {
     const mode = identityModeState.get()
     if (mode === "onboarding") {
       return buildSystemPrompt(args.cwd, {
         persona: args.persona,
         identity: defaultIdentityProvider().identityFor(mode),
+        envPosture,
       })
     }
     return buildSystemPromptForMode({
       mode,
       registry: identityModeState.registry,
       persona: args.persona,
+      envPosture,
     })
   }
   const systemSource = createSystemSource(
@@ -212,6 +219,7 @@ const buildSessionStatePorts = (args: {
       ? buildPromptFromIdentityMode()
       : buildSystemPrompt(args.cwd, {
           persona: args.persona,
+          envPosture,
           ...(args.identity !== undefined ? { identity: args.identity } : {}),
         }),
   )
