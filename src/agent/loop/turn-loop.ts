@@ -14,6 +14,7 @@ import {
   DEFAULT_PRE_TURN_STOP_CONDITIONS,
 } from "./stop-conditions"
 import { prepareTurnIteration } from "./turn-iteration"
+import { classifyTurnAbort } from "./turn-gate"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "./turn-outcome"
 import type { RunAgentContext, TurnResult } from "./types"
 
@@ -110,8 +111,16 @@ export const executeTurnWithObservability = async (args: {
     // keeps its HITL hand-off semantics, unchanged).
     if (!isSessionApprovalRequiredError(e) && isGenuineTurnAbort(e, args.ctx.cfg.signal)) {
       turnSpanStatus = "aborted"
-      flushKind = "aborted"
-      result = { kind: "aborted" }
+      // Route through the SSOT (`classifyTurnAbort`) instead of hand-rolling
+      // `{kind:"aborted"}`: a gate INTERRUPT (subagent `wake("interrupt")` — the
+      // per-turn controller fired but the LIFETIME signal did NOT) must settle
+      // `{kind:"interrupted"}` → park → resume (ADR-0437 collapse-then-resume),
+      // whereas a genuine lifetime cancel settles `{kind:"aborted"}` → finish.
+      // Uses the LIFETIME signal + the same gate `runTurn`/`same-turn-engine`
+      // classify against, so a thrown abort matches those cooperative returns.
+      const gate = args.ctx.session.config.subagentTurnGate
+      result = classifyTurnAbort(gate, args.ctx.session.config.signal)
+      flushKind = result.kind
       return { result }
     }
     // An approval-required PAUSE (SessionApprovalRequiredError) is an intentional

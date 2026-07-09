@@ -52,13 +52,23 @@ import type { RunAgentContext } from "../types"
  *  (models a Ctrl+C/deadline landing during the in-flight reactive summarizer);
  *  `mode:"error"` throws a plain Error and leaves the signal LIVE (the paired
  *  non-abort control). */
-const summarizerLlm = (controller: AbortController, mode: "abort" | "error"): LLMPort => ({
+const summarizerLlm = (
+  controller: AbortController,
+  mode: "abort" | "error" | "interrupt",
+): LLMPort => ({
   model: "reactive-summarizer",
   stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     async function* gen(): AsyncIterable<StreamEvent> {
       if (mode === "abort") {
         controller.abort()
         throw new AbortError("abort")
+      }
+      if (mode === "interrupt") {
+        // A subagent gate INTERRUPT fired the per-turn controller (which the
+        // armed stream signal is derived from) WITHOUT aborting the LIFETIME
+        // signal — so the summarizer throws an AbortError while `controller`
+        // (the lifetime signal) stays live.
+        throw new AbortError("interrupt")
       }
       throw new Error("transient-summarizer-boom")
       // biome-ignore lint/correctness/noUnreachable: generator shape only.
@@ -79,13 +89,18 @@ const seedMessages = () =>
 
 /** A minimal real `TurnSession` whose reactive compaction runs the given
  *  summarizer. Only the fields the `{do:"compact"}` path reads are populated. */
-const makeSession = (controller: AbortController, mode: "abort" | "error"): TurnSession =>
+const makeSession = (
+  controller: AbortController,
+  mode: "abort" | "error" | "interrupt",
+  gate?: unknown,
+): TurnSession =>
   ({
     config: {
       llm: summarizerLlm(controller, mode),
       compaction: { summarizerLlm: summarizerLlm(controller, mode), keepRecentTurns: 2 },
       signal: controller.signal,
       stream: { emit: () => {} },
+      ...(gate !== undefined ? { subagentTurnGate: gate } : {}),
     } as unknown as AgentConfig,
     specs: [] as unknown as TurnSession["specs"],
     guards: [],
@@ -198,5 +213,48 @@ describe("ALBB-20 #13 — abort during in-flight reactive summarizer settles abo
     }
     expect(threw).toBe(true)
     expect(controller.signal.aborted).toBe(false)
+  })
+
+  test("§4 INTERRUPT sub-case: gate interrupt (lifetime signal NOT aborted) settles INTERRUPTED → park, not aborted/finish", async () => {
+    const controller = new AbortController() // lifetime signal — stays LIVE
+    // A subagent gate whose per-turn controller fired this turn (wake("interrupt")),
+    // without the lifetime signal being aborted — the ADR-0437 interrupt case.
+    const gate = { wasInterrupted: () => true }
+    const session = makeSession(controller, "interrupt", gate)
+    const state = makeState()
+    const ctx = {
+      cfg: session.config,
+      session,
+      turnStateSeed: {},
+    } as unknown as RunAgentContext
+
+    mock.module("../same-turn-engine", () => ({
+      runTurn: () => reactiveCompactThatAborts(session, state),
+    }))
+    const { executeTurnWithObservability: exec } = await import("../turn-loop")
+
+    const { result } = await exec({ ctx, turn: 1 })
+    // The catch must route through the SSOT `classifyTurnAbort(gate, lifetime)`:
+    // gate.wasInterrupted() && !lifetime.aborted ⇒ INTERRUPTED (not aborted).
+    // MUTATION pin: reverting the fix to a hand-rolled `{kind:"aborted"}` makes
+    // this RED (it would settle aborted → finish, terminating the child run and
+    // defeating the collapse-then-resume interrupt contract).
+    expect(result.kind).toBe("interrupted")
+    expect(controller.signal.aborted).toBe(false)
+
+    // Interrupted settles to PARK (resume into a fresh turn), NOT finish/aborted.
+    const resolution = await resolveTurnLoopOutcome({
+      cfg: session.config,
+      stream: session.config.stream,
+      wm: state.wm,
+      breaker: undefined,
+      recorder: undefined,
+      turn: 1,
+      result,
+      pendingPlanExitRef: { current: [] },
+      pendingPlanEntryRef: { current: [] },
+      hookPromptPending: [],
+    })
+    expect(resolution.kind).toBe("park")
   })
 })
