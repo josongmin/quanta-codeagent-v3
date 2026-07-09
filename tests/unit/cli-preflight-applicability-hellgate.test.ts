@@ -205,7 +205,7 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
   // opening a real readline on stdin (which would hang the test). Answers "N".
   const fakeChannel = {
     active: true,
-    awaitLine: async () => "N",
+    awaitLine: async () => ({ kind: "line", line: "N" }) as const,
     tryResolve: () => false,
     clear: () => {},
   }
@@ -256,7 +256,7 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
     rejectCounter: { recordAccept: () => {}, recordDeny: () => {} } as never,
     channel: {
       active: true,
-      awaitLine: async () => answer,
+      awaitLine: async () => ({ kind: "line", line: answer }) as const,
       tryResolve: () => false,
       clear: () => {},
     } as never,
@@ -303,7 +303,7 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
     rejectCounter: { recordAccept: () => {}, recordDeny: () => {} } as never,
     channel: {
       active: true,
-      awaitLine: async () => answer,
+      awaitLine: async () => ({ kind: "line", line: answer }) as const,
       tryResolve: () => false,
       clear: () => {},
     } as never,
