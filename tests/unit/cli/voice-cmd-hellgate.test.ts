@@ -8,7 +8,8 @@
  *  HELL-VCMD-01: recorder undefined ⇒ "voice backend missing" exit 1
  *  HELL-VCMD-02: backend resolved-null ⇒ status prints install hint
  *  HELL-VCMD-03: happy-path → enqueue voice_transcript with metadata
- *  HELL-VCMD-04: transcriber unwired ⇒ prints byte count, no enqueue
+ *  HELL-VCMD-04: transcriber unwired ⇒ refuses BEFORE capture, exit 1
+ *                (D-9 / UUX-6-27 — never capture-then-exit-0)
  *  HELL-VCMD-05: plan-queue unwired ⇒ prints transcript to stdout
  *  HELL-VCMD-06: Esc cancel ⇒ kill + drain + exit 0, no transcribe
  *  HELL-VCMD-07: transcriber returns auth-failed ⇒ stderr + exit 1
@@ -146,21 +147,34 @@ describe("voice-cmd hellgate (ADR-0208)", () => {
     expect(io.out.join("")).toContain("queued")
   })
 
-  test("HELL-VCMD-04: transcriber unwired ⇒ prints byte count, no enqueue", async () => {
+  test("HELL-VCMD-04: transcriber unwired ⇒ refuses BEFORE capture, exit 1 + hint (no enqueue)", async () => {
     const io = collectOut()
     const q = fakeQueueSink()
+    let started = false
+    const base = fakeRecorder({ startBytes: new Uint8Array(42) })
+    const trackingRecorder: AudioRecorderPort = {
+      ...base,
+      start: async (opts) => {
+        started = true
+        return base.start(opts)
+      },
+    }
     const ctx: VoiceCmdCtx = {
       out: io.outFn,
       err: io.errFn,
-      recorder: fakeRecorder({ startBytes: new Uint8Array(42) }),
+      recorder: trackingRecorder,
       planQueue: q.sink,
       fixedDurationMs: 1,
       sleep: async () => {},
     }
     const code = await runVoiceCmd("/voice", ctx)
-    expect(code).toBe(0)
-    expect(io.out.join("")).toContain("42 bytes")
-    expect(io.out.join("")).toContain("transcriber not wired")
+    // D-9 (UUX-6-27): audio that could only be discarded must NEVER be
+    // recorded — the old "captured N bytes (transcriber not wired)" exit 0
+    // was a false success.
+    expect(code).toBe(1)
+    expect(started).toBe(false)
+    expect(io.err.join("")).toContain("transcriber not wired")
+    expect(io.err.join("")).toContain("hint:")
     expect(q.calls.length).toBe(0)
   })
 

@@ -507,8 +507,10 @@ export const buildDefaultSlashCommands = (deps: {
     unwired("focus-chain", "Show / configure focus-chain todo reinject"),
     unwired("skills", "List available skills"),
     unwired("reload-skills", "Reload skills from disk"),
-    unwired("snooze", "Snooze background tasks"),
-    unwired("resume", "Resume snoozed background tasks"),
+    // UUX-4-19 — copy mirrors the CLI registry's describe strings verbatim:
+    // /snooze is a NEW-TURN gate (idle-monitor), not a background-task snooze.
+    unwired("snooze", "Suspend new turns for a duration (default 5m). e.g. /snooze 10m"),
+    unwired("resume", "Cancel an active snooze and resume new turns"),
     unwired("wait", "Wait for background tasks to settle"),
     unwired("navigate", "Navigate session / transcript"),
     unwired("color", "Set terminal color scheme"),

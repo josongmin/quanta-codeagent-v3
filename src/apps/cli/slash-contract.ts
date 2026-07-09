@@ -4,6 +4,7 @@ import type { DebugCmdState } from "./debug-cmd"
 import type { IdleMonitor } from "./idle-monitor"
 import type { RetryWithSessionState } from "./retry-with"
 import type { SideCmdSlashState } from "./side-cmd"
+import type { VoiceSlashDeps } from "./voice-cmd"
 import type { VoiceLiveCtx } from "./voice-live-cmd"
 
 export interface SlashContext {
@@ -195,6 +196,14 @@ export interface SlashContext {
    *  `/voice-live` declines cleanly (the realtime slice is never touched and
    *  the REPL is byte-identical). Absent slot ⇒ "not wired in this surface". */
   readonly voiceLive?: (() => Promise<VoiceLiveCtx | undefined>) | undefined
+  /** D-9 (UUX-2-05 + UUX-1-10) — `/voice` push-to-talk wire (ADR-0208). The
+   *  surface populates this when it composes a recorder backend (+ transcriber
+   *  + optional plan-queue sink); the slash threads its own out/err on top.
+   *  Absent OR missing the transcriber ⇒ `/voice` degrades HONESTLY: exit 1 +
+   *  `hint:` line, and it never records audio it could only discard
+   *  (UUX-6-27). No surface wires this yet — the registry entry exists so the
+   *  advertised ADR-0208 surface is reachable-or-honest, not silently absent. */
+  readonly voice?: VoiceSlashDeps | undefined
   /** ADR-0071 mid-turn typed control surface. `/cancel` + `/summarize-now`
    *  push typed actions the loop drains per-turn. Absent ⇒ those commands
    *  print "not wired in this surface". */

@@ -1,5 +1,5 @@
 import { memo, type RefObject, useEffect, useRef, useState } from "react"
-import type { PendingImageAttachment } from "../composer/image-attachment"
+import type { FileAttachmentSource, PendingImageAttachment } from "../composer/image-attachment"
 import { emptyStateCopyFor, type UiConnectionPhase } from "../lib/connection-state"
 import type { PendingApprovalView, SessionStatus, UiMessage } from "../types/protocol"
 import { EscalationCard, type EscalationDecision } from "./EscalationCard"
@@ -25,7 +25,7 @@ export interface ChatPanelProps {
   readonly onSubmit: (text: string) => void
   readonly pendingImages: readonly PendingImageAttachment[]
   readonly attachmentError: string | null
-  readonly onAttachImageFile: (file: File, source: "picker" | "paste") => Promise<void> | void
+  readonly onAttachImageFile: (file: File, source: FileAttachmentSource) => Promise<void> | void
   readonly onRemovePendingImage: (index: number) => void
   readonly onClearAllPendingImages: () => void
   /** Optional: pass `sessionState.status` so the thinking indicator can

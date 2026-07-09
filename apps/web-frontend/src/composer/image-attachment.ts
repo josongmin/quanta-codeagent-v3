@@ -44,7 +44,75 @@ export interface PendingImageAttachment {
   readonly previewAlt: string
 }
 
-export type AttachmentSource = "picker" | "paste" | "hotkey"
+export type AttachmentSource = "picker" | "paste" | "drop" | "hotkey"
+
+/** The file-carrying `AttachmentSource`s (everything but the hotkey PNG). */
+export type FileAttachmentSource = "picker" | "paste" | "drop"
+
+/* ------------------------------------------------------------------ */
+/* Shared DataTransfer sniffing (paste + drop — UUX-4-24)              */
+/* ------------------------------------------------------------------ */
+
+/** Structural `DataTransferItem` view so the sniffing is testable without a
+ *  DOM (node test env). The real `DataTransferItem` satisfies it. */
+export interface DataTransferItemLike {
+  readonly kind: string
+  readonly type: string
+  getAsFile(): File | null
+}
+
+/** Structural `DataTransfer` view. Real `ClipboardEvent.clipboardData` and
+ *  `DragEvent.dataTransfer` both satisfy it. */
+export interface DataTransferLike {
+  readonly items?: ArrayLike<DataTransferItemLike> | null
+  readonly files?: ArrayLike<File> | null
+}
+
+/**
+ * Extract the first image `File` from a DataTransfer — the ONE sniffing used
+ * by BOTH the paste and the drop handlers (UUX-4-24). Three tiers because
+ * WebKit/WKWebView is inconsistent about where a system-screenshot PNG lands:
+ * `items` with `kind:"file"`, `files` only, or an image-typed item of another
+ * kind. Non-image payloads (text drags, html) yield `null`.
+ */
+export const extractImageFileFromTransfer = (
+  data: DataTransferLike | null | undefined,
+): File | null => {
+  if (data === null || data === undefined) return null
+  const items = Array.from(data.items ?? [])
+  const fromFileItem =
+    items.find((i) => i.kind === "file" && i.type.startsWith("image/"))?.getAsFile() ?? null
+  if (fromFileItem !== null) return fromFileItem
+  const files = Array.from(data.files ?? [])
+  const fromFiles = files.find((f) => f.type.startsWith("image/")) ?? null
+  if (fromFiles !== null) return fromFiles
+  return items.find((i) => i.type.startsWith("image/"))?.getAsFile() ?? null
+}
+
+/** How the composer should handle a drop payload. */
+export type ComposerDropResolution =
+  /** An image file — attach it (the paste-identical path). */
+  | { readonly kind: "attach"; readonly file: File }
+  /** A non-image FILE drop. The event must still be CLAIMED (preventDefault):
+   *  the browser default for an unhandled file drop NAVIGATES the page away
+   *  (killing the SPA). The file is routed through the same `normalizeFile`
+   *  validator so the user sees the honest "unsupported image type" error
+   *  instead of a silent tab loss. */
+  | { readonly kind: "reject-file"; readonly file: File }
+  /** No files at all (plain text / selection drag) — leave the browser
+   *  default alone so text drops into the textarea keep working. */
+  | { readonly kind: "ignore" }
+
+/** Pure drop-routing decision for the composer (UUX-4-24). */
+export const resolveComposerDrop = (
+  data: DataTransferLike | null | undefined,
+): ComposerDropResolution => {
+  const image = extractImageFileFromTransfer(data)
+  if (image !== null) return { kind: "attach", file: image }
+  const firstFile = Array.from(data?.files ?? [])[0]
+  if (firstFile !== undefined) return { kind: "reject-file", file: firstFile }
+  return { kind: "ignore" }
+}
 
 export type NormalizeResult =
   | { readonly ok: true; readonly attachment: PendingImageAttachment }
@@ -72,7 +140,7 @@ const maybeDownscale = async (
 
 export const normalizeFile = async (
   file: File,
-  source: "picker" | "paste",
+  source: FileAttachmentSource,
   downscaleDeps?: ImageDownscaleDeps,
 ): Promise<NormalizeResult> => {
   const type = file.type.toLowerCase()
@@ -101,8 +169,7 @@ export const normalizeFile = async (
         data: payload.data,
         mediaType: payload.mediaType,
         byteSize: payload.byteSize,
-        title:
-          fileName.length > 0 ? fileName : source === "paste" ? "Pasted image" : "Selected image",
+        title: fileName.length > 0 ? fileName : fallbackTitle(source),
         subtitle: `${describeImageSource(source)} · ${formatKilobytes(payload.byteSize)} KB · attached to next turn`,
         previewAlt: fileName.length > 0 ? fileName : "Image attachment preview",
       },
@@ -180,8 +247,15 @@ export const toImageBlocks = (
   }))
 }
 
-const describeImageSource = (source: "picker" | "paste"): string =>
-  source === "paste" ? "pasted from clipboard" : "selected from disk"
+const describeImageSource = (source: FileAttachmentSource): string =>
+  source === "paste"
+    ? "pasted from clipboard"
+    : source === "drop"
+      ? "dropped file"
+      : "selected from disk"
+
+const fallbackTitle = (source: FileAttachmentSource): string =>
+  source === "paste" ? "Pasted image" : source === "drop" ? "Dropped image" : "Selected image"
 
 const normalizedFileName = (file: File): string => {
   const raw = (file as File & { name?: unknown }).name

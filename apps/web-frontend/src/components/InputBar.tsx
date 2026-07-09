@@ -1,13 +1,19 @@
 import {
   type ChangeEvent,
   type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   memo,
   type RefObject,
   useCallback,
   useRef,
 } from "react"
-import type { PendingImageAttachment } from "../composer/image-attachment"
+import {
+  extractImageFileFromTransfer,
+  type FileAttachmentSource,
+  type PendingImageAttachment,
+  resolveComposerDrop,
+} from "../composer/image-attachment"
 import { cx } from "../lib/classnames"
 
 export interface InputBarProps {
@@ -22,7 +28,7 @@ export interface InputBarProps {
   readonly onSubmit: (text: string) => void
   readonly pendingImages: readonly PendingImageAttachment[]
   readonly attachmentError: string | null
-  readonly onAttachImageFile: (file: File, source: "picker" | "paste") => Promise<void> | void
+  readonly onAttachImageFile: (file: File, source: FileAttachmentSource) => Promise<void> | void
   readonly onRemovePendingImage: (index: number) => void
   readonly onClearAllPendingImages: () => void
 }
@@ -90,26 +96,44 @@ export const InputBar = ({
 
   const onPaste = useCallback(
     (ev: ClipboardEvent<HTMLTextAreaElement>) => {
-      const data = ev.clipboardData
-      if (data === null || data === undefined) return
       // macOS 시스템 스크린샷(Cmd+Shift+Ctrl+4)을 paste할 때 WebKit/WKWebView
       // 가 PNG를 `items`에 `kind: "file"`로 줄 때도, `kind: "string"`으로 줄
-      // 때도, `files`에만 줄 때도 있어 3단으로 본다.
-      const items = Array.from(data.items ?? [])
-      let file: File | null =
-        items.find((i) => i.kind === "file" && i.type.startsWith("image/"))?.getAsFile() ?? null
-      if (file === null) {
-        const files = Array.from(data.files ?? [])
-        file = files.find((f) => f.type.startsWith("image/")) ?? null
-      }
-      if (file === null) {
-        file = items.find((i) => i.type.startsWith("image/"))?.getAsFile() ?? null
-      }
+      // 때도, `files`에만 줄 때도 있어 3단으로 본다 — 공유 sniffing helper
+      // (`extractImageFileFromTransfer`, drop 경로와 동일)로 수렴 (UUX-4-24).
+      const file = extractImageFileFromTransfer(ev.clipboardData)
       if (file === null) return
       ev.preventDefault()
       void onAttachImageFile(file, "paste")
     },
     [onAttachImageFile],
+  )
+
+  // UUX-4-24 — image drag-drop rides the SAME attachment path as paste:
+  // shared DataTransfer sniffing → `onAttachImageFile` → `attachFile` →
+  // `normalizeFile` (uniform MIME/size caps). Any FILE drop is claimed
+  // (preventDefault — the browser default would NAVIGATE away from the SPA);
+  // a non-image file rides the same validator so the user sees the honest
+  // "unsupported image type" error. Text drags keep the browser default.
+  const onDrop = useCallback(
+    (ev: DragEvent<HTMLDivElement>) => {
+      if (disabled) return
+      const resolution = resolveComposerDrop(ev.dataTransfer)
+      if (resolution.kind === "ignore") return
+      ev.preventDefault()
+      void onAttachImageFile(resolution.file, "drop")
+    },
+    [disabled, onAttachImageFile],
+  )
+  const onDragOver = useCallback(
+    (ev: DragEvent<HTMLDivElement>) => {
+      // Required to make the element a drop target; only claim drags that
+      // carry files so plain text selection drags keep default behaviour.
+      if (disabled) return
+      if (Array.from(ev.dataTransfer?.types ?? []).includes("Files")) {
+        ev.preventDefault()
+      }
+    },
+    [disabled],
   )
 
   const onFileChange = useCallback(
@@ -125,7 +149,12 @@ export const InputBar = ({
   const canSend = !disabled && (value.trim().length > 0 || pendingImages.length > 0)
 
   return (
-    <div className="border-t border-line-subtle bg-surface px-4 py-3">
+    // biome-ignore lint/a11y/noStaticElementInteractions: drag-drop target only (UUX-4-24) — dropping a file is inherently pointer-driven; keyboard users reach the same attachment path via the Attach button / paste.
+    <div
+      className="border-t border-line-subtle bg-surface px-4 py-3"
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+    >
       <PendingAttachmentsPanel
         pendingImages={pendingImages}
         attachmentError={attachmentError}
@@ -200,7 +229,7 @@ export const InputBar = ({
         </div>
       </div>
       <div className="mt-1.5 px-1 text-[11px] text-ink-tertiary">
-        <span>Enter to send · Shift+Enter newline · paste a screenshot to attach</span>
+        <span>Enter to send · Shift+Enter newline · paste or drop an image to attach</span>
       </div>
     </div>
   )

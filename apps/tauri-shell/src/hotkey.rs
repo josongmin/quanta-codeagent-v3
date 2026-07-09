@@ -2,7 +2,12 @@
 //! webview zoom.
 //!
 //! Accelerators are registered together at boot. All fire on Press only
-//! (Release would double-trigger).
+//! (Release would double-trigger). ALL of them are gated on the Quanta
+//! window being focused (`main_window_focused`, UUX-6-08 / UUX-3-15):
+//! a global accelerator fires system-wide, but capture/send/zoom are
+//! per-window features — pre-guard, `Cmd+Ctrl+Shift+]` while typing in
+//! another app silently submitted the draft, and `[` silently captured
+//! the screen with zero visible feedback.
 //!
 //!  `Cmd+Ctrl+Shift+[` (`CmdOrCtrl+Shift+Ctrl+BracketLeft`)
 //!     Capture the monitor that currently contains the mouse cursor as a
@@ -99,6 +104,31 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     app.manage(ZoomLevel::default());
 }
 
+/// UUX-6-08 / UUX-3-15 — the ONE focus guard for the globally-registered
+/// hotkeys. A global accelerator fires regardless of which app is in front,
+/// but capture/send/zoom are Quanta-window features: firing them while
+/// another app is focused silently screenshots / submits the draft with zero
+/// visible feedback. Returns `true` when the press should be handled.
+///
+/// Policy (extracted verbatim from the zoom guard, now shared by all three):
+///   - no main window ⇒ deny (nothing to act on / act into),
+///   - `is_focused` == false ⇒ deny (don't fight the frontmost app),
+///   - `is_focused` errored ⇒ ALLOW + debug-log (fail-open, matching the
+///     zoom guard's pre-existing behaviour — a broken focus query must not
+///     brick the hotkeys).
+fn main_window_focused<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    match window.is_focused() {
+        Ok(focused) => focused,
+        Err(err) => {
+            log::debug!(target: "quanta::hotkey", "is_focused query failed, handling anyway: {err}");
+            true
+        }
+    }
+}
+
 /// Register both accelerators. Idempotent.
 pub async fn enable<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     let flag = app.state::<HotkeyEnabled>().inner().clone();
@@ -110,6 +140,11 @@ pub async fn enable<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     app.global_shortcut()
         .on_shortcut(CAPTURE_ACCELERATOR, move |_app, _shortcut, event| {
             if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            // UUX-6-08 — same focus guard as zoom: ignore the global press
+            // while Quanta is not the focused app (no invisible screenshots).
+            if !main_window_focused(&app_for_capture) {
                 return;
             }
             let app_handler = app_for_capture.clone();
@@ -128,6 +163,11 @@ pub async fn enable<R: Runtime>(app: &AppHandle<R>) -> AppResult<()> {
     app.global_shortcut()
         .on_shortcut(SEND_ACCELERATOR, move |_app, _shortcut, event| {
             if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            // UUX-3-15 — same focus guard: never submit the draft while the
+            // user is looking at (and typing in) another app.
+            if !main_window_focused(&app_for_send) {
                 return;
             }
             if let Err(err) = emit_send_event(&app_for_send) {
@@ -182,18 +222,15 @@ fn register_zoom<R: Runtime>(
 }
 
 fn apply_zoom<R: Runtime>(app: &AppHandle<R>, action: ZoomAction) -> AppResult<()> {
+    // Only act on a focused Quanta window — these accelerators are
+    // registered globally, but they're a per-window zoom feature. Shared
+    // guard (UUX-6-08): the same rule now gates capture + send too.
+    if !main_window_focused(app) {
+        return Ok(());
+    }
     let Some(window) = app.get_webview_window("main") else {
         return Ok(());
     };
-    // Only act on a focused Quanta window — these accelerators are
-    // registered globally, but they're a per-window zoom feature.
-    match window.is_focused() {
-        Ok(true) => {}
-        Ok(false) => return Ok(()),
-        Err(err) => {
-            log::debug!(target: "quanta::hotkey", "is_focused query failed, applying anyway: {err}");
-        }
-    }
 
     let state = app.state::<ZoomLevel>();
     let mut current = state

@@ -21,6 +21,7 @@ import type { KnobsEndpoint } from "./components/slash-knobs"
 import { httpUrlFromWsUrl } from "./components/slash-llm-config"
 import { executeSlashCommand, type SlashAcceptOutcome } from "./components/slash-routing"
 import { ThreadDeeplinkBanner } from "./components/ThreadDeeplinkBanner"
+import { ThreadPicker } from "./components/ThreadPicker"
 import { TokenCounter } from "./components/TokenCounter"
 import { isHotkeyImagePayload, type PendingImageAttachment } from "./composer/image-attachment"
 import { useImageAttachment } from "./composer/use-image-attachment"
@@ -34,6 +35,7 @@ import {
 } from "./lib/connection-state"
 import { hydrateThreadResume, type ThreadResumeBoundary } from "./lib/thread-resume"
 import { hydrateTranscript } from "./lib/transcript-hydrate"
+import { installTurnCompleteNotifyBrowser } from "./lib/turn-complete-notify"
 import type {
   AgentStateMessage,
   ConnectionState,
@@ -542,6 +544,15 @@ export const App = (): JSX.Element => {
     }
   }, [client, bootstrapEpoch])
 
+  // UUX-3-05 — OS notification on turn completion while the user is away.
+  // The presence decision is the EXISTING `computeWebPresence` (presence-probe,
+  // previously zero call sites): hidden/backgrounded tab OR idle past the
+  // activity window ⇒ fire a browser Notification on `turn.completed`.
+  // Permission-gated; degrades silently when denied / unavailable.
+  useEffect(() => {
+    return installTurnCompleteNotifyBrowser((handler) => client.onAny(handler))
+  }, [client])
+
   // Hotkey toast → append to draft + focus (legacy OCR text path).
   useEffect(() => {
     const handler = (ev: MessageEvent<unknown>) => {
@@ -606,7 +617,10 @@ export const App = (): JSX.Element => {
   }, [])
 
   const attachImageFile = useCallback(
-    async (file: File, source: "picker" | "paste"): Promise<void> => {
+    async (
+      file: File,
+      source: import("./composer/image-attachment").FileAttachmentSource,
+    ): Promise<void> => {
       await attachment.attachFile(file, source)
       inputRef.current?.focus()
     },
@@ -967,6 +981,16 @@ export const App = (): JSX.Element => {
           is server-minted; new turns advance the live shared session — see the
           resume effect above). `resumeState` surfaces the honest boundary. */}
       <ThreadDeeplinkBanner onOpen={setResumeThreadId} />
+      {/* UUX-4-06 (D-10) — thread list over the daemon's GET /threads route.
+          Collapsed toggle; expanding fetches the persisted thread list and each
+          row's Open routes through the SAME resume path as the deeplink banner
+          (`setResumeThreadId` → read-only history hydration above). The live
+          shared-session row is badged so the boundary stays honest. */}
+      <ThreadPicker
+        endpoint={knobsEndpoint}
+        onOpen={setResumeThreadId}
+        liveSessionId={learnedSessionId}
+      />
       {/* WS-F move 2 — connection banner (mirrors the resume-status banner
           chrome): `degraded` explains a partial failure (e.g. history hydrate
           — UUX-5-07); `failed` explains the capped bootstrap give-up

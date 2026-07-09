@@ -110,6 +110,9 @@ describe("BUILTINS table", () => {
       "/queue",
       "/web",
       "/voice-live",
+      // D-9 (UUX-2-05) — `/voice` registered with an honest transcriber-
+      // presence degrade (see voice-slash-registry-hellgate.test.ts).
+      "/voice",
       "/paste",
       "/edit-plan",
       "/edit-message",
@@ -125,6 +128,17 @@ describe("BUILTINS table", () => {
       "/inspect",
       "/replay",
       "/session",
+      // jul-03 CLI-surfacing batch (registry-surface.ts tail slots) — this
+      // mirror list had rotted behind the registry (pre-existing red repaired
+      // while registering /voice; each cmd prints "not wired" + exit 0 when
+      // its ctx slot is absent).
+      "/kb",
+      "/mcp-resources",
+      "/browser-net",
+      "/cron",
+      "/schedule",
+      "/inbox",
+      "/onboard",
       // ── session layer (./slash/registry-session.ts) ─────────────────
       "/retry-with",
       "/side",

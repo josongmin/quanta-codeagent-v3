@@ -15,6 +15,7 @@
 import { useCallback, useState } from "react"
 import type { ImageBlock } from "../types/protocol"
 import {
+  type FileAttachmentSource,
   type HotkeyImagePayload,
   MAX_PENDING_IMAGES,
   normalizeFile,
@@ -26,7 +27,7 @@ import {
 export interface ImageAttachmentState {
   readonly pendingImages: readonly PendingImageAttachment[]
   readonly attachmentError: string | null
-  readonly attachFile: (file: File, source: "picker" | "paste") => Promise<void>
+  readonly attachFile: (file: File, source: FileAttachmentSource) => Promise<void>
   readonly attachFromHotkey: (payload: HotkeyImagePayload) => Promise<void>
   readonly removeAt: (index: number) => void
   readonly clear: () => void
@@ -39,22 +40,25 @@ export const useImageAttachment = (): ImageAttachmentState => {
   const [pendingImages, setPendingImages] = useState<readonly PendingImageAttachment[]>([])
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
 
-  const attachFile = useCallback(async (file: File, source: "picker" | "paste"): Promise<void> => {
-    const result = await normalizeFile(file, source)
-    if (!result.ok) {
-      setAttachmentError(result.error)
-      return
-    }
-    let rejected = false
-    setPendingImages((prev) => {
-      if (prev.length >= MAX_PENDING_IMAGES) {
-        rejected = true
-        return prev
+  const attachFile = useCallback(
+    async (file: File, source: FileAttachmentSource): Promise<void> => {
+      const result = await normalizeFile(file, source)
+      if (!result.ok) {
+        setAttachmentError(result.error)
+        return
       }
-      return [...prev, result.attachment]
-    })
-    setAttachmentError(rejected ? tooManyError() : null)
-  }, [])
+      let rejected = false
+      setPendingImages((prev) => {
+        if (prev.length >= MAX_PENDING_IMAGES) {
+          rejected = true
+          return prev
+        }
+        return [...prev, result.attachment]
+      })
+      setAttachmentError(rejected ? tooManyError() : null)
+    },
+    [],
+  )
 
   const attachFromHotkey = useCallback(async (payload: HotkeyImagePayload): Promise<void> => {
     const result = await normalizeHotkeyPng(payload)

@@ -56,6 +56,7 @@ import type { SlashCommand, SlashContext } from "../slash-contract"
 import { snapshotCmd } from "../snapshot-cmd"
 import { statusCmd } from "../status-cmd"
 import { formatSegmentedUsage } from "../status-line"
+import { runVoiceCmd } from "../voice-cmd"
 import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
 import { renderSkillScopePanel, renderWorkingStatePanel } from "../working-state-panel"
@@ -668,6 +669,30 @@ const voiceLiveCmd: SlashCommand = {
   },
 }
 
+/** `/voice` (ADR-0208, registered under plan D-9 / UUX-2-05 + UUX-1-10) —
+ *  push-to-talk record → transcribe → plan-queue follow-up. The handler
+ *  shipped with ZERO registry entries (only `/voice-live` was reachable);
+ *  D-9's decision is register-with-degrade, not delete.
+ *
+ *  Register-or-degrade honesty (pinned by voice-slash-registry-hellgate):
+ *    - `ctx.voice` absent (no surface composes the recorder today) ⇒ the
+ *      handler's own presence gates fire: exit 1 + `hint:` line;
+ *    - recorder wired but NO transcriber ⇒ refused BEFORE any audio is
+ *      captured (exit 1 + hint) — never capture-then-exit-0 (UUX-6-27);
+ *    - `/voice cancel` stays a working no-op that says what it actually does;
+ *    - `/voice status` reports the wire state either way. */
+const voiceCmd: SlashCommand = {
+  name: "/voice",
+  describe: "Record speech → queue the transcript as a follow-up (needs a wired transcriber)",
+  category: "other",
+  async run(_args, ctx) {
+    // Reconstruct the full line so the cmd's own subcommand parser sees the
+    // verb (`status` / `cancel`) — same pattern as `/voice-live` above.
+    const line = ["/voice", ..._args].join(" ")
+    return runVoiceCmd(line, { out: ctx.out, err: ctx.err, ...(ctx.voice ?? {}) })
+  },
+}
+
 /** `/help` — unified menu (slash inventory + keybinds + ENV knobs). The
  *  rendered list is whatever `SURFACE_SLASH_COMMANDS` is concatenated with at
  *  composition time — the assembly in `slash-commands.ts` passes the live
@@ -911,6 +936,9 @@ export const buildSurfaceSlashCommands = (
   queueCmd,
   webCmd,
   voiceLiveCmd,
+  // D-9 — `/voice` register-or-degrade (honest transcriber-presence gate in
+  // the handler; never capture-then-exit-0).
+  voiceCmd,
   pasteCmd,
   editPlanCmd,
   editMessageCmd,
