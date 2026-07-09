@@ -78,10 +78,14 @@ export const buildConfigMigrationNotice = async (cwd: string): Promise<string | 
     if (!result.ran || result.throttled) return undefined
     const summary = summarize(result.converted)
     if (summary === "") return undefined
+    // UUX-4-15 (jul-10 W4) — the old copy claimed "one-click migration"; the
+    // real config import needs the SECOND opt-in env (QUANTA_MIGRATE_CONFIG_
+    // IMPORT=1) on a restart. Say the actual steps.
     return (
       `[quanta] found importable Claude/Cursor config: ${summary}. ` +
       `Run \`quanta session import claude_code\` to import sessions; ` +
-      `config above is available for one-click migration (this notice won't repeat).\n`
+      `to import the config above, restart with QUANTA_MIGRATE_CONFIG_IMPORT=1 ` +
+      `(this notice won't repeat).\n`
     )
   } catch {
     // A migration notice must never derail startup.
