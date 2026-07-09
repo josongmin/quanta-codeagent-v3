@@ -60,7 +60,6 @@ evidence:
   code:
     - src/runner/assemble/retrieval.ts
     - src/runner/assemble/retrieval-memory-bridge.ts
-    - src/runner/assemble/retrieval-localize-bridge.ts
     - src/runner/assemble/config.ts
     - src/runner/assemble/index.ts
     - src/apps/agent/index.ts

@@ -44,7 +44,7 @@ evidence:
   tests:
     unit:
       - tests/unit/agent/metrics-tokens.test.ts
-      - tests/unit/cli/status-line.test.ts
+      - tests/unit/cli/status-line-driver-hellgate.test.ts
       - tests/unit/observability/vocabulary.test.ts
     integration: [tests/integration/agent-metrics-e2e.test.ts]
     contract: []

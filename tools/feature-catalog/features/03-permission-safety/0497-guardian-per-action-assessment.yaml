@@ -54,7 +54,7 @@ evidence:
     - src/agent/tier1/reviewer-subagent.ts
     - src/agent/reviewer-port.ts
     - src/shared/runtime-config.ts
-    - src/apps/cli/repl/runtime-context-compose.ts:573-588
+    - src/apps/cli/repl/runtime-context-compose.ts
   adrs: [497]
   tests:
     unit:
