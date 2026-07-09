@@ -46,6 +46,33 @@ describe("HELLGATE WS-B — elicitation rides the mid-turn channel", () => {
     ch.active = false
   })
 
+  test("audit W3-C1: abort MID-AWAIT releases the waiter — the next line is NOT claimed by the dead ask", async () => {
+    const ch = createMidTurnApprovalChannel()
+    registerMidTurnApprovalChannel(ch)
+    ch.active = true
+    const ctrl = new AbortController()
+    const read = readViaMidTurnChannelOrReadline(ctrl.signal)
+    ctrl.abort() // MCP-side cancel while awaiting
+    expect(await read).toBeNull()
+    // The operator's next line must flow to normal routing, not the dead ask.
+    expect(ch.tryResolve("my real follow-up")).toBe(false)
+    ch.active = false
+  })
+
+  test("audit W3-C1: a superseding waiter is NOT clobbered by the aborted one's stale signal", async () => {
+    const ch = createMidTurnApprovalChannel()
+    registerMidTurnApprovalChannel(ch)
+    ch.active = true
+    const ctrl = new AbortController()
+    const first = readViaMidTurnChannelOrReadline(ctrl.signal)
+    const second = ch.awaitLine() // supersedes (releases first as superseded→null)
+    expect(await first).toBeNull()
+    ctrl.abort() // stale abort — must not touch the second waiter
+    ch.tryResolve("for-second")
+    expect(await second).toEqual({ kind: "line", line: "for-second" })
+    ch.active = false
+  })
+
   test("already-aborted signal short-circuits to null without consuming the channel", async () => {
     const ch = createMidTurnApprovalChannel()
     registerMidTurnApprovalChannel(ch)

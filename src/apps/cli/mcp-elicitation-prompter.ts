@@ -130,7 +130,10 @@ export const readViaMidTurnChannelOrReadline = async (
   const channel = currentMidTurnApprovalChannel()
   if (channel?.active === true) {
     if (signal.aborted) return null
-    const result = await channel.awaitLine()
+    // Audit W3-C1 — thread the consumer's signal so an MCP-side cancel
+    // RELEASES this waiter (consumer_aborted): a dead ask can never claim the
+    // operator's next typed line.
+    const result = await channel.awaitLine(signal)
     return result.kind === "line" ? result.line : null
   }
   return readLine("", signal)

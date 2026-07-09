@@ -519,6 +519,14 @@ const buildBootstrapContextArgs = (args: {
       // daemon has seeded this since jun-10; the CLI's missing seed was the
       // split). Non-TTY (piped/headless CLI) keeps the legacy fallthrough —
       // a prompt nobody can answer would hang the pipeline.
+      // KNOWN WIDTH (audit W3-D1): on this sandbox-less default composition,
+      // bash's tier is always-confirm for EVERY command (needs-sandbox
+      // conflation, see src/permission/pdp.ts), so bash now prompts under
+      // acceptEdits/bypass too — same posture the web has carried since
+      // jun-10. Burden mitigations: [a]lways-session grants + the
+      // allowlistEscalated per-actionKey dedup. If this proves too noisy in
+      // practice, the structural fix is splitting the needs-sandbox tier from
+      // confirm:"sensitive" at the PDP, NOT reverting the seed.
       ...(process.stdin.isTTY === true ? { hitl: { enabled: true } } : {}),
       ...(summarizerLlm !== undefined ? { summarizerLlm } : {}),
       planExitPort,

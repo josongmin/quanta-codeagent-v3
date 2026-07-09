@@ -40,6 +40,8 @@
  * ⇒ stdin stays detached during the turn, byte-identical to today.
  */
 
+import { StringDecoder } from "node:string_decoder"
+
 /** Narrow stdin shape the in-turn reader uses. Mirrors `raw-line-reader`'s
  *  `ReaderStdin` so the SAME fake drives both readers' tests. Production passes
  *  `process.stdin`; tests pass a fake that emits `data` chunks directly. NOT a
@@ -101,7 +103,7 @@ const DEFAULT_MAX_LINE_BYTES = 64 * 1024
  *  that contract, so escape SEQUENCES are swallowed whole, across chunk
  *  boundaries: CSI (`\x1b[` params… final byte 0x40–0x7e), SS3 (`\x1bO` + one
  *  byte), and lone-Esc/Alt-chords (`\x1b` + one byte). */
-type EscSwallowState = "none" | "esc" | "csi" | "ss3"
+type EscSwallowState = "none" | "esc" | "csi" | "ss3" | "str" | "str-esc"
 
 /**
  * Start a concurrent line reader on the injected stdin for the lifetime of ONE
@@ -117,6 +119,7 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
       : DEFAULT_MAX_LINE_BYTES
 
   const isTty = stdin.isTTY === true
+  const utf8 = new StringDecoder("utf8")
   // Save the prior raw flag so dispose restores EXACTLY what we found. On a
   // non-TTY the flag is meaningless and `setRawMode` is absent — never touched.
   const priorRaw = isTty ? (stdin.isRaw ?? false) : false
@@ -199,7 +202,9 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
 
   const onData = (chunk: Buffer | string): void => {
     if (disposed) return
-    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8")
+    // Audit W3-B2 — a multibyte char split across chunk boundaries must decode
+    // whole; per-chunk toString() emitted U+FFFD halves.
+    const text = typeof chunk === "string" ? chunk : utf8.write(chunk)
     // Walk the chunk char-by-char so a CTRL-C byte (0x03) is intercepted as an
     // interrupt and CR/LF terminate the current line. We never consume the SIGINT
     // signal — on a TTY Node raises SIGINT from the kernel line discipline; raw
@@ -219,6 +224,18 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
         acc.terminate()
         continue
       }
+      if (acc.esc === "str") {
+        // OSC/DCS/PM/APC string payload — swallowed until BEL (OSC) or ST
+        // (\x1b\\). Audit W3-B1: pasted terminal output carrying OSC-8
+        // hyperlinks / title writes must never leak payload as text.
+        if (code === 0x07) acc.esc = "none"
+        else if (code === ESC) acc.esc = "str-esc"
+        continue
+      }
+      if (acc.esc === "str-esc") {
+        acc.esc = text[i] === "\\" ? "none" : code === ESC ? "str-esc" : "str"
+        continue
+      }
       if (acc.esc === "csi") {
         if (code >= 0x40 && code <= 0x7e) acc.esc = "none" // final byte ends CSI
         continue
@@ -234,7 +251,15 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
           acc.esc = "none"
           continue
         }
-        acc.esc = text[i] === "[" ? "csi" : text[i] === "O" ? "ss3" : "none"
+        const introducer = text[i]
+        acc.esc =
+          introducer === "["
+            ? "csi"
+            : introducer === "O"
+              ? "ss3"
+              : introducer === "]" || introducer === "P" || introducer === "^" || introducer === "_"
+                ? "str"
+                : "none"
         continue // the byte after Esc is part of the chord (Alt+x etc.), never text
       }
       if (code === ESC) {

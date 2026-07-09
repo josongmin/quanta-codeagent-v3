@@ -33,6 +33,10 @@ export type MidTurnReleaseCause =
   | "turn_teardown"
   /** A second `awaitLine` superseded a stale waiter (one-ask-at-a-time wiring bug). */
   | "superseded"
+  /** Audit W3-C1 — the CONSUMER's own AbortSignal fired mid-await (e.g. an
+   *  MCP-side elicitation cancel). The channel releases THAT waiter so the
+   *  operator's next line is never claimed by a dead ask. */
+  | "consumer_aborted"
 
 /** What `awaitLine` resolves to: a REAL operator line (possibly empty — an empty
  *  Enter is still input) vs a typed RELEASE (never disguised as input). */
@@ -48,8 +52,10 @@ export interface MidTurnApprovalChannel {
   /** Approval prompt: render done by the caller; await the operator's next line.
    *  Resolves `{kind:"line"}` with the routed input, or `{kind:"released"}` when
    *  the turn ends first — the caller maps a release to a fail-closed deny AND
-   *  surfaces the cause (never a silent deny). */
-  awaitLine(): Promise<MidTurnLineResult>
+   *  surfaces the cause (never a silent deny). An optional `signal` releases
+   *  THIS waiter (`consumer_aborted`) when the consumer cancels mid-await, so a
+   *  dead ask can never claim the operator's next line (audit W3-C1). */
+  awaitLine(signal?: AbortSignal): Promise<MidTurnLineResult>
   /** Session loop `onLine`: deliver a captured line to a waiting approval. Returns
    *  true iff it was consumed (so the caller skips the normal follow-up routing). */
   tryResolve(line: string): boolean
@@ -88,12 +94,28 @@ export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
   }
   return {
     active: false,
-    awaitLine(): Promise<MidTurnLineResult> {
+    awaitLine(signal?: AbortSignal): Promise<MidTurnLineResult> {
       // A prior unfinished waiter would be a wiring bug (one approval at a time);
       // release it TYPED before replacing, so it can't leak or fake a deny.
       release("superseded")
+      if (signal?.aborted === true) {
+        return Promise.resolve({ kind: "released", cause: "consumer_aborted" })
+      }
       return new Promise<MidTurnLineResult>((resolve) => {
-        pending = resolve
+        const entry = (result: MidTurnLineResult): void => {
+          signal?.removeEventListener("abort", onAbort)
+          resolve(result)
+        }
+        const onAbort = (): void => {
+          // Release only OUR waiter — a superseding consumer's waiter is a
+          // different closure, so a stale abort can never clobber it.
+          if (pending === entry) {
+            pending = undefined
+            entry({ kind: "released", cause: "consumer_aborted" })
+          }
+        }
+        signal?.addEventListener("abort", onAbort, { once: true })
+        pending = entry
       })
     },
     tryResolve(line: string): boolean {

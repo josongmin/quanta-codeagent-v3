@@ -257,6 +257,14 @@ export const setupSession = async (
 ): Promise<SessionSetupResult> => {
   const runtime = readSessionRuntimeConfig()
   const featureCfg = readCliFeatureConfig(runtime.env, runtime.stdoutIsTTY, process.stderr.isTTY)
+  // WS-G operator-notice sink — installed BEFORE bootstrapSession (audit W3-A1:
+  // MCP servers load inside bootstrap, so a startup load-error notice emitted
+  // into a not-yet-installed bus was silently dropped; only the pill ✗
+  // survived). Same composition-root pattern as the fs-jail decision sink.
+  // Emitters anywhere (`@/shared#emitOperatorNotice`) route degrade signals
+  // here; without this install every emit is a no-op (headless/bench surfaces
+  // stay byte-identical). Uninstalled in `shutdownMcp` below.
+  const uninstallOperatorNoticeSink = installCliOperatorNoticeSink()
   const boot = await bootstrapSession(deps, runtime, featureCfg)
 
   process.on("SIGINT", () => {
@@ -345,13 +353,6 @@ export const setupSession = async (
   if (decisionEmitter !== undefined) {
     setFsJailDecisionSink(decisionEmitter)
   }
-
-  // WS-G (jul-10 uiux) — install the OperatorNotice stderr sink ONCE per REPL
-  // session (same composition-root pattern as the fs-jail decision sink above).
-  // Emitters anywhere (`@/shared#emitOperatorNotice`) route degrade signals
-  // here; without this install every emit is a no-op (headless/bench surfaces
-  // stay byte-identical). Uninstalled in `shutdownMcp` below.
-  const uninstallOperatorNoticeSink = installCliOperatorNoticeSink()
 
   const pills = deps.installPills({
     statusBar,

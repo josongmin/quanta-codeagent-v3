@@ -18,7 +18,10 @@
 import { describe, expect, test } from "bun:test"
 import { type InTurnReaderStdin, startInTurnLineReader } from "@/apps/cli/repl/in-turn-reader"
 
-const makeFake = (): InTurnReaderStdin & { emit: (s: string) => void } => {
+const makeFake = (): InTurnReaderStdin & {
+  emit: (s: string) => void
+  emitBuf: (b: Buffer) => void
+} => {
   const listeners: Array<(chunk: Buffer | string) => void> = []
   return {
     isTTY: false,
@@ -31,6 +34,9 @@ const makeFake = (): InTurnReaderStdin & { emit: (s: string) => void } => {
     pause: () => undefined,
     emit: (s: string) => {
       for (const l of [...listeners]) l(s)
+    },
+    emitBuf: (b: Buffer) => {
+      for (const l of [...listeners]) l(b)
     },
   }
 }
@@ -70,6 +76,38 @@ describe("HELLGATE WS-B — escape/chord bytes never enter a captured line", () 
   test("C0 chord bytes (^A/^E/^K…) are dropped; TAB is kept as text", () => {
     expect(capture(["\x01hello\x0b\n"])).toEqual(["hello"])
     expect(capture(["a\tb\n"])).toEqual(["a\tb"])
+  })
+
+  // Audit W3-B1 — OSC/DCS/PM/APC are string-payload sequences terminated by
+  // ST (\x1b\\) or BEL (OSC): pasted terminal output carrying OSC-8 hyperlinks
+  // or title writes must not leak payload into the captured line.
+  test("OSC payload (BEL-terminated) is swallowed whole", () => {
+    expect(capture(["\x1b]0;my title\x07hello\n"])).toEqual(["hello"])
+  })
+
+  test("OSC payload (ST-terminated) is swallowed whole", () => {
+    expect(capture(["\x1b]11;rgb:1e1e/2a2a/3b3b\x1b\\hi\n"])).toEqual(["hi"])
+  })
+
+  test("DCS payload is swallowed whole (ST-terminated)", () => {
+    expect(capture(["\x1bP1$r0m\x1b\\ok\n"])).toEqual(["ok"])
+  })
+
+  test("OSC split across chunks is still swallowed", () => {
+    expect(capture(["a\x1b]8;;https://x", ".dev\x07b\n"])).toEqual(["ab"])
+  })
+
+  // Audit W3-B2 — multibyte text split across chunk boundaries must decode
+  // whole (StringDecoder), never as U+FFFD halves.
+  test("multibyte char split across chunks survives intact", () => {
+    const bytes = Buffer.from("한글ok\n", "utf8")
+    const lines: string[] = []
+    const stdin = makeFake()
+    const handle = startInTurnLineReader({ stdin, onLine: (l) => void lines.push(l) })
+    stdin.emitBuf(bytes.subarray(0, 2)) // mid-char split
+    stdin.emitBuf(bytes.subarray(2))
+    handle.dispose()
+    expect(lines).toEqual(["한글ok"])
   })
 
   test("paired control: plain text, backspace edit and ^C drop still behave", () => {
