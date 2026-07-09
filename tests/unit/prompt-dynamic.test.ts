@@ -370,3 +370,40 @@ describe("buildTurnContext repo-local rules (Phase 0)", () => {
     expect(withRules[1]?.cache).toBe(true)
   })
 })
+
+// jul-9 audit S1: ARCHITECT/EDITOR mode notices are production-reachable (editor is a
+// MUTATING mode whose "minimal surgical diffs" contract lives ONLY in the notice string)
+// but had ZERO content/wiring guards — the e2e matrix covered only plan/review/audit
+// (BLOCKING_MODES). Pin that both notices route through `modeNotice` into the trailing
+// reminder with their distinctive contract, and don't cross-leak.
+describe("buildTurnContext — architect/editor mode notice injection (S1)", () => {
+  const tailReminder = (over: Partial<TurnContextInput>): string => {
+    const { messages } = buildTurnContext(base(over))
+    const tail = messages[messages.length - 1]
+    return tail ? reminderText(tail) : ""
+  }
+
+  test("architect mode injects its READ-ONLY design-first notice", () => {
+    const r = tailReminder({ mode: "architect" })
+    expect(r).toContain("<system-reminder>")
+    expect(r).toContain("ARCHITECT MODE is active")
+    expect(r).toContain("Do NOT modify anything") // read-only posture
+    expect(r).not.toContain("EDITOR MODE is active") // no cross-leak
+  })
+
+  test("editor mode injects its MINIMAL-SURGICAL-diffs notice (mutating posture)", () => {
+    const r = tailReminder({ mode: "editor" })
+    expect(r).toContain("<system-reminder>")
+    expect(r).toContain("EDITOR MODE is active")
+    expect(r).toContain("MINIMAL, SURGICAL diffs only") // the mutating-mode contract
+    expect(r).toContain("Always read before editing")
+    // editor is MUTATING — it must NOT carry a "do not modify" line (would contradict posture)
+    expect(r).not.toContain("Do NOT modify anything")
+  })
+
+  test("default mode carries NO architect/editor notice (byte-identical legacy)", () => {
+    const r = tailReminder({})
+    expect(r).not.toContain("ARCHITECT MODE is active")
+    expect(r).not.toContain("EDITOR MODE is active")
+  })
+})

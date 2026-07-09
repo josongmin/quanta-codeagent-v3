@@ -119,13 +119,22 @@ describe("buildSystemPrompt", () => {
 
     test("9-layer policy stack (L1–L9) with explicit override rule", () => {
       expect(lower).toContain("policy stack")
-      // Layer markers present
+      // jul-9 audit S4: pin ALL nine layer markers — the prior guard pinned only
+      // L1/L5/L6/L9, so L2/L3/L4/L7/L8 (the middle of the authority ladder) could be
+      // silently deleted with no failing test. This is a security-ordering invariant.
       expect(lower).toContain("l1 system")
+      expect(lower).toContain("l2 developer/runtime")
+      expect(lower).toContain("l3 app/environment")
+      expect(lower).toContain("l4 permission/hitl")
       expect(lower).toContain("l5 mode")
       expect(lower).toContain("l6 repo-local")
+      expect(lower).toContain("l7 skill / task")
+      expect(lower).toContain("l8 user request")
       expect(lower).toContain("l9 working state")
-      // The non-bypass rule: user can't override higher layers
-      expect(lower).toContain("cannot override")
+      // The non-bypass rule: a user request can't override the higher (L1–L5) layers,
+      // AND the closing "within the bounds set above" clause that scopes it.
+      expect(lower).toContain("cannot override l1–l5")
+      expect(lower).toContain("within the bounds set above")
     })
 
     test("claim ladder (FACT / INFERENCE / UNKNOWN) with ordering", () => {

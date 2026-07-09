@@ -54,6 +54,16 @@ const reminderText = (messages: Message[]): string => {
   return block?.type === "text" ? block.text : ""
 }
 
+/** Flatten the TRUSTED system envelope (`string | SystemBlock[]`) to text. jul-9:
+ *  ADR-0003/ebfcf168d moved repo-rules (and other AUTHORITY blocks) OUT of the per-turn
+ *  user reminder and INTO the cached system block — which precedes ALL messages — so
+ *  trust-ladder assertions inspect this, not `reminderText`. */
+const systemText = (system: FakeLLM["seenSystem"][number]): string => {
+  if (system === undefined) return ""
+  if (typeof system === "string") return system
+  return system.map((b) => b.text).join("\n")
+}
+
 const baseConfig = (overrides: Partial<AgentConfig> = {}): AgentConfig =>
   harnessBaseConfig({
     llm: overrides.llm ?? new FakeLLM([text("ok")]),
@@ -143,12 +153,16 @@ describe("Phase 8 — all Phases ON compose cleanly", () => {
     const out = await runAgent(config)
     expect(out.reason).toBe("completed")
 
-    // Mode notice + repo-rules block appear in the FIRST outgoing reminder.
+    // Mode notice rides the per-turn reminder (interaction-shape); repo-rules rides the
+    // TRUSTED, cached system block (authority) — jul-9 they no longer share the reminder.
     const reminder = reminderText(llm.seenMessages[0] ?? [])
+    const sys = systemText(llm.seenSystem[0])
     expect(reminder).toContain("REVIEW MODE is active")
     expect(reminder).toContain("findings-first")
-    expect(reminder).toContain("## Repo-local rules (from AGENTS.md)")
-    expect(reminder).toContain("no heuristics; fail-closed")
+    expect(sys).toContain("## Repo-local rules (from AGENTS.md)")
+    expect(sys).toContain("no heuristics; fail-closed")
+    // authority is NOT duplicated into the untrusted per-turn reminder.
+    expect(reminder).not.toContain("## Repo-local rules (from AGENTS.md)")
 
     // closeout-guard ACTUALLY fired: a single `closeout` recovery event was
     // emitted and the forced meta-user message carries the 4-rule reminder
@@ -165,11 +179,12 @@ describe("Phase 8 — all Phases ON compose cleanly", () => {
     expect(forced).toBeDefined()
   })
 
-  test("reminder block ORDER matches the trust ladder", async () => {
-    // Trust ladder: mode notice → repo-rules → active skills → working state
-    //  → memory hints. We exercise mode + repo-rules + working state in this
-    // test (skills require a SKILL.md directory; memory requires a store —
-    // both are covered in their own per-Phase tests).
+  test("trust ladder: repo-rules (authority) rides the system block ABOVE the reminder", async () => {
+    // jul-9 (ebfcf168d dedup): the trust ladder is now ENFORCED STRUCTURALLY, not by
+    // in-reminder ordering. Repo-rules (AUTHORITY) rides the trusted, cached system block —
+    // which precedes ALL messages (incl. any untrusted input) — while the mode notice
+    // (interaction-shape) rides the per-turn reminder. So authority sits structurally ABOVE
+    // the mode notice, strictly stronger than the old same-reminder mode→repo ordering.
     const llm = new FakeLLM()
     const config = baseConfig({
       llm,
@@ -180,14 +195,15 @@ describe("Phase 8 — all Phases ON compose cleanly", () => {
     })
     await runAgent(config)
 
+    const sys = systemText(llm.seenSystem[0])
     const reminder = reminderText(llm.seenMessages[0] ?? [])
-    const auditIdx = reminder.indexOf("AUDIT MODE is active")
-    const repoIdx = reminder.indexOf("## Repo-local rules")
-    expect(auditIdx).toBeGreaterThan(-1)
-    expect(repoIdx).toBeGreaterThan(-1)
-    // mode notice precedes repo-rules (mode is interaction-shape; repo-rules
-    // is authority — both above the routing-hint tier).
-    expect(auditIdx).toBeLessThan(repoIdx)
+    // AUTHORITY → trusted system block (above everything).
+    expect(sys).toContain("## Repo-local rules")
+    // INTERACTION-SHAPE → per-turn reminder, NOT the system block.
+    expect(reminder).toContain("AUDIT MODE is active")
+    expect(sys).not.toContain("AUDIT MODE is active")
+    // repo-rules is NOT duplicated back into the untrusted reminder.
+    expect(reminder).not.toContain("## Repo-local rules")
   })
 
   test("legacy planMode:true and mode:'plan' produce the SAME mode notice", async () => {

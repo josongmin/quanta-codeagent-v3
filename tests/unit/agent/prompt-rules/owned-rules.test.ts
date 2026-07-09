@@ -73,4 +73,36 @@ describe("OWNED_RULES — env posture rule list", () => {
       expect(count).toBe(1)
     }
   })
+
+  // jul-9 audit S2/S3: the prior guards were all `.toContain` — R-ENV-DONE and the owned
+  // R-NO-SHIM body were never pinned, and the two-axis parity anchor is self-referential
+  // (recomputes from OWNED_RULES), so a rule could be silently dropped/reordered with zero
+  // failing test. Pin the EXACT roster + order as the owned-axis content anchor.
+  test("EXACT owned roster + order (catches silent add/drop/reorder — the owned-axis anchor)", () => {
+    expect(OWNED_IDS).toEqual([
+      "R-SEARCH-FIRST",
+      "R-READ-FAILURE",
+      "R-NO-THRASH",
+      "R-FAILURE-MODE",
+      "R-NO-SHIM",
+      "R-ENV-OWNED",
+      "R-INSTALL-THRASH",
+      "R-ENV-DONE",
+    ])
+  })
+
+  test("R-ENV-DONE (completion-stop rail) present with its stop-when-clean contract", () => {
+    expect(OWNED_IDS).toContain("R-ENV-DONE")
+    const joined = renderOwnedRules().join("\n")
+    expect(joined).toContain("[R-ENV-DONE]")
+    // distinctive contract: env-config is a MEANS; STOP once the verifying command exits clean.
+    expect(joined).toContain("Configuring the environment is a MEANS")
+    expect(joined).toContain("exits clean")
+  })
+
+  test("owned R-NO-SHIM body keeps its install-the-real-dep tail (owned variant, not frozen)", () => {
+    const joined = renderOwnedRules().join("\n")
+    // the owned variant swaps the frozen stop-tail for "install/configure the real dependency"
+    expect(joined).toContain("install/configure the real")
+  })
 })

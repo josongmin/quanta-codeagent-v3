@@ -41,6 +41,11 @@ export class ScriptedLLM implements LLMPort {
   get seenMessages(): Message[][] {
     return this.inputs.map((i) => i.messages)
   }
+  /** Per-call `input.system` envelope — parity with FakeLLM.seenSystem so trust-ladder
+   *  assertions (repo-rules et al. now ride the cached system block) work on both harnesses. */
+  get seenSystem(): (StreamInput["system"] | undefined)[] {
+    return this.inputs.map((i) => i.system)
+  }
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     this.inputs.push(input)
     this.calls += 1
@@ -60,6 +65,10 @@ export class ScriptedLLM implements LLMPort {
  */
 export class FakeLLM implements LLMPort {
   readonly seenMessages: Message[][] = []
+  /** Per-call `input.system` envelope. jul-9: repo-rules (and other authority blocks)
+   *  ride the TRUSTED, cached system block — which precedes ALL messages — not the
+   *  per-turn user reminder, so trust-ladder assertions must inspect this too. */
+  readonly seenSystem: (StreamInput["system"] | undefined)[] = []
   calls = 0
   private readonly scripts: StreamEvent[][]
   private last: StreamEvent[] = []
@@ -70,6 +79,7 @@ export class FakeLLM implements LLMPort {
   }
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     this.seenMessages.push(input.messages)
+    this.seenSystem.push(input.system)
     const next = this.scripts.shift()
     if (next) this.last = next
     const script = next ?? this.last

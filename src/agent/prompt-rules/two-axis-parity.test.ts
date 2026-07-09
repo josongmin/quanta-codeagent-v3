@@ -90,4 +90,27 @@ describe("3-axis COMPOSER order — posture BEFORE task BEFORE verify in the rea
     expect(iPosture).toBeLessThan(iTask) // posture slot precedes task slot
     expect(iTask).toBeLessThan(iVerify) // task slot precedes verify slot
   })
+
+  // jul-9 audit (Finding 4): the helper-order test above pins the THREE axes relative to each
+  // OTHER, but not the axis block relative to the surrounding BODY. The authority ladder is
+  // load-bearing (core.ts: "R-ENV/R-STOP-ENV are the most load-bearing — keep them first";
+  // the policy stack declares L1–L9 override authority), so the body↔axis boundary order is a
+  // security invariant. Pin it: policy-stack body precedes the axis block; the after-pack body
+  // (vision/honesty/reporting rails) follows it. RED-on-injection: move the posture spread above
+  // BODY_AFTER_PERSONA in prompt.ts and this fails.
+  test("body↔axis boundary: policy-stack precedes the axes; after-pack body follows them", () => {
+    const prompt = buildSystemPrompt("/w", {
+      envPosture: "owned",
+      promptPack: "batch",
+      verifyStrategy: "reproduce-first",
+    })
+    const iPolicyStack = prompt.indexOf("Policy stack (highest to lowest priority")
+    const iPosture = prompt.indexOf(renderPostureBase("owned").join("\n"))
+    const iVerify = prompt.indexOf(renderVerifyStrategy("reproduce-first").join("\n"))
+    const iAfterPack = prompt.indexOf("Vision priority (ADR-0319):")
+    expect(iPolicyStack).toBeGreaterThanOrEqual(0)
+    expect(iAfterPack).toBeGreaterThanOrEqual(0)
+    expect(iPolicyStack).toBeLessThan(iPosture) // authority ladder ABOVE the axes
+    expect(iVerify).toBeLessThan(iAfterPack) // after-pack rails BELOW the axes
+  })
 })
