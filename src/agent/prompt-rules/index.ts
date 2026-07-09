@@ -17,7 +17,7 @@
  */
 
 import { BATCH_RULES } from "./benchmark"
-import { CORE_RULES, OWNED_RULES, type PromptRule } from "./core"
+import { CORE_RULES, DEFAULT_BASE, OWNED_RULES, type PromptRule } from "./core"
 import { PR_RULES } from "./pr-agent"
 import { HEADLESS_RULES } from "./task-runner"
 
@@ -51,10 +51,16 @@ import type { AgentMode } from "../run-mode/types"
 // legacy combination (a frozen pack == CORE + task; owned == OWNED + no task).
 
 /** POSTURE-BASE rules (env axis). `frozen` = CORE_RULES (SWE guardrails, today's default);
- *  `owned` = OWNED_RULES (container-owned, install-permitted). Flattened to the line array
+ *  `owned` = OWNED_RULES (container-owned, "install freely + a working env is the graded
+ *  deliverable"); `default` = DEFAULT_BASE (general local-dev machine, install-permitted but
+ *  NOT graded — the jul-9 `QUANTA_ENV_DEFAULT` CLI knob). Flattened to the line array
  *  `buildSystemPrompt` splices. */
-export const renderPostureBase = (posture: "frozen" | "owned"): readonly string[] =>
-  (posture === "owned" ? OWNED_RULES : CORE_RULES).flatMap((r) => r.lines)
+export const renderPostureBase = (
+  posture: "frozen" | "owned" | "default",
+): readonly string[] =>
+  (posture === "owned" ? OWNED_RULES : posture === "default" ? DEFAULT_BASE : CORE_RULES).flatMap(
+    (r) => r.lines,
+  )
 
 /** TASK-only rules (task axis) — env-independent mode narrowing. interactive/ide carry none;
  *  headless/daemon → R-SINGLE-COHERENT; batch → R-NO-EXPLORE-OVER-EDIT; ci-bot → PR rules. */
@@ -93,7 +99,7 @@ export const renderOwnedRules = (): readonly string[] => renderPostureBase("owne
 
 export { ASSISTANT_PACK } from "./assistant"
 export { BENCHMARK_PACK } from "./benchmark"
-export { CORE_RULES, OWNED_RULES } from "./core"
+export { CORE_RULES, DEFAULT_BASE, OWNED_RULES } from "./core"
 export { PR_AGENT_PACK } from "./pr-agent"
 export { TASK_RUNNER_PACK } from "./task-runner"
 export {

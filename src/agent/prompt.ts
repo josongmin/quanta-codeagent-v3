@@ -72,9 +72,13 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  *  RULE TEXT the model is told, and NOTHING ELSE. `"frozen"` (DEFAULT) = today's
  *  SWE-bench guardrails verbatim (do-not-install / stop-when-env-blocked). `"owned"`
  *  = the surface owns its container, so install/configure/build freely (the
- *  Terminal brain). PROMPT-TEXT-ONLY: this NEVER touches `SandboxPolicy` /
- *  `os-sandbox` / any runtime enforcement — it only swaps the rendered rule list. */
-export type EnvironmentPosture = "frozen" | "owned"
+ *  Terminal brain). `"default"` = a general local-dev machine: install-permitted but
+ *  NOT graded (the user's OWN repo — the jul-9 `QUANTA_ENV_DEFAULT` CLI knob selects it
+ *  so an interactive user is not told "don't install / stop when env-blocked", which are
+ *  SWE-bench assumptions false for a developer at their own machine). PROMPT-TEXT-ONLY:
+ *  this NEVER touches `SandboxPolicy` / `os-sandbox` / any runtime enforcement — it only
+ *  swaps the rendered rule list. */
+export type EnvironmentPosture = "frozen" | "owned" | "default"
 
 /** Remove each `block` (a CONTIGUOUS line subsequence) from `arr` — used when a verify
  *  strategy OVERRIDES hardcoded body blocks (grader-only suppresses the local-verification

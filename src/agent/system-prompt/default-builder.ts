@@ -20,7 +20,7 @@ import type { PersonaKind } from "../persona"
 import { buildSystemPrompt, type EnvironmentPosture } from "../prompt"
 import type { AgentMode as PromptPackMode } from "../prompt-rules"
 import type { AgentMode as RunMode } from "../run-mode/types"
-import type { PromptSurfaceProfileSnapshot } from "@/shared"
+import { isTruthyToken, type PromptSurfaceProfileSnapshot } from "@/shared"
 import { DEFAULT_MODE_VARIANTS, UNKNOWN_MODE_VARIANT } from "./mode-variants"
 import {
   assertValidVariantLines,
@@ -118,6 +118,19 @@ export interface BuildSystemPromptForRunModeOpts {
   readonly identity?: readonly string[]
   readonly envPosture?: EnvironmentPosture
 }
+
+/**
+ * jul-9 `QUANTA_ENV_DEFAULT` CLI knob (default-OFF, byte-identical when unset/falsy).
+ * ON (truthy token) ⇒ the general CLI's default env posture becomes `"default"` — a general
+ * LOCAL-DEV machine where installing is permitted — instead of `"frozen"` (SWE-bench
+ * "don't install / stop-when-env-blocked", which is the wrong posture for a developer at
+ * their OWN repo). PURE: reads only the injected `env` (no `process.env`, no clock). An
+ * EXPLICIT `envPosture` from a caller still wins; this only sets the otherwise-unset default.
+ * Efficacy is measure-first (opt-in) — OFF stays byte-identical so there is zero regression.
+ */
+export const resolveCliDefaultEnvPosture = (
+  env: Record<string, string | undefined>,
+): EnvironmentPosture => (isTruthyToken(env.QUANTA_ENV_DEFAULT) ? "default" : "frozen")
 
 export const promptSurfaceProfileForRunMode = (
   runMode: RunMode,

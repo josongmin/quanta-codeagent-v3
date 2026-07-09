@@ -200,3 +200,32 @@ export const OWNED_RULES: readonly PromptRule[] = [
   R_INSTALL_THRASH,
   R_ENV_DONE,
 ]
+
+/** Install-permitted env rule for the `default` posture (jul-9): a general LOCAL-DEV
+ *  machine, NOT a graded sandbox. Distinct from `owned` (which frames a working env as
+ *  the graded deliverable + "clean exit is the proof") — here install is simply allowed
+ *  because it is the USER'S OWN repo; there is no grading, no "stop when env-blocked". */
+const R_ENV_LOCAL: PromptRule = {
+  id: "R-ENV-LOCAL",
+  lines: [
+    "- [R-ENV-LOCAL] This is the user's OWN machine, not a graded sandbox. You MAY",
+    "  install or configure the dependencies the task needs — prefer the project's",
+    "  declared dependencies + lockfile and its own package manager (npm / pip / uv /",
+    "  cargo, whichever the repo uses). Keep it tidy: prefer a project-local install",
+    "  over a global/system-wide change, and do not leave the environment dirtier than",
+    "  the task requires.",
+  ],
+}
+
+/** The `default` posture rule list (jul-9 `QUANTA_ENV_DEFAULT` CLI knob): the shared
+ *  honesty rails + the owned R-NO-SHIM variant (install the real dep, no stop-tail) +
+ *  the install-permitted {@link R_ENV_LOCAL}. It OMITS the frozen R-ENV / R-STOP-ENV
+ *  install-prohibition (SWE-bench assumptions) and does NOT carry owned's grading framing. */
+export const DEFAULT_BASE: readonly PromptRule[] = [
+  coreRule("R-SEARCH-FIRST"),
+  coreRule("R-READ-FAILURE"),
+  coreRule("R-NO-THRASH"),
+  coreRule("R-FAILURE-MODE"),
+  R_NO_SHIM_OWNED,
+  R_ENV_LOCAL,
+]

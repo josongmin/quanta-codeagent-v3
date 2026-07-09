@@ -1,6 +1,20 @@
 import type { KnobInventoryEntry } from "./types"
 
 export const EXTRA: readonly KnobInventoryEntry[] = [
+  // jul-9 — general-CLI default env posture. OFF (default) ⇒ "frozen" (SWE-bench
+  // don't-install / stop-when-env-blocked, byte-identical to today). ON ⇒ "default"
+  // (install-permitted local-dev posture) so an interactive user at their OWN repo is not
+  // told installing is forbidden. Read directly from env at the CLI comp-root resolver.
+  {
+    envKey: "QUANTA_ENV_DEFAULT",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "General-CLI default env posture. OFF ⇒ 'frozen' (SWE-bench don't-install/stop-when-env-blocked, byte-identical). ON ⇒ 'default' (install-permitted local-dev posture; the user's own machine, not a graded sandbox). Prompt-text-only; NEVER touches SandboxPolicy.",
+    readSite: "agent/system-prompt/default-builder.ts",
+  },
   // tool gates (env-flag) — gate string lives in the tool-surface manifest SSOT;
   // declared here so the orphan ratchet sees the read (ADR-0503 P1).
   {

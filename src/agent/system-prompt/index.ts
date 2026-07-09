@@ -6,6 +6,7 @@ export {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
   promptSurfaceProfileForRunMode,
+  resolveCliDefaultEnvPosture,
 } from "./default-builder"
 export { DEFAULT_MODE_VARIANTS, UNKNOWN_MODE_VARIANT } from "./mode-variants"
 export {

@@ -27,7 +27,7 @@ export type PromptSurfacePack =
   | "daemon"
   | "batch"
   | "ci-bot"
-export type PromptSurfaceEnvPosture = "frozen" | "owned"
+export type PromptSurfaceEnvPosture = "frozen" | "owned" | "default"
 export type PromptSurfaceVerifyStrategy =
   | "none"
   | "reproduce-first"

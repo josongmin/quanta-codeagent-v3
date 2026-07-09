@@ -23,6 +23,7 @@ import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
   promptSurfaceProfileForRunMode,
+  resolveCliDefaultEnvPosture,
   type SystemPromptVariantRegistry,
 } from "@/agent/system-prompt"
 import {
@@ -347,6 +348,10 @@ export const resolveIdentitySystemPrompt = (
 } => {
   const runMode = opts.runMode ?? "interactive"
   const cwd = opts.cwd ?? process.cwd()
+  // jul-9 QUANTA_ENV_DEFAULT knob (default-OFF): OFF ⇒ "frozen" (byte-identical to today);
+  // ON ⇒ "default" (install-permitted local-dev posture for the general CLI). Threaded into
+  // every CLI prompt-build + surface-profile path below so the posture is consistent.
+  const envPosture = resolveCliDefaultEnvPosture(env)
   if (cliIdentityMode !== undefined) {
     // B1 (jul-03) — `onboarding` is an identity-only virtual mode: it lives in
     // `IdentityMode` (superset) but is NOT a `ModeVariantKey`, so it cannot ride
@@ -361,8 +366,8 @@ export const resolveIdentitySystemPrompt = (
     if (cliIdentityMode === "onboarding") {
       const identity = defaultIdentityProvider().identityFor("onboarding")
       return {
-        system: buildSystemPromptForRunMode({ runMode, cwd, identity }),
-        promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+        system: buildSystemPromptForRunMode({ runMode, cwd, identity, envPosture }),
+        promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode, { envPosture }),
       }
     }
     const registry = defaultModeVariantRegistry()
@@ -370,23 +375,24 @@ export const resolveIdentitySystemPrompt = (
       mode: cliIdentityMode,
       registry,
       promptPack: runMode,
+      envPosture,
     })
     return {
       system,
       identityModeVariant: { registry },
-      promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+      promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode, { envPosture }),
     }
   }
   const identity = resolveIdentityFromEnv(env)
   if (identity !== undefined) {
     return {
-      system: buildSystemPromptForRunMode({ runMode, cwd, identity }),
-      promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+      system: buildSystemPromptForRunMode({ runMode, cwd, identity, envPosture }),
+      promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode, { envPosture }),
     }
   }
   return {
-    system: buildSystemPromptForRunMode({ runMode, cwd }),
-    promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode),
+    system: buildSystemPromptForRunMode({ runMode, cwd, envPosture }),
+    promptSurfaceProfile: promptSurfaceProfileForRunMode(runMode, { envPosture }),
   }
 }
 

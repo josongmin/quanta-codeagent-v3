@@ -313,3 +313,33 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
     expect(gate.allow("some_unrelated_network_tool")).toBe(false)
   })
 })
+
+// jul-9 — QUANTA_ENV_DEFAULT knob wiring (Finding 1). Proves the CLI comp-root
+// (resolveIdentitySystemPrompt) actually THREADS the knob into both the rendered prompt
+// AND the surface-profile snapshot — RED-on-injection if the envPosture arg is dropped from
+// any of the four build paths. Default-OFF stays byte-identical (frozen).
+describe("QUANTA_ENV_DEFAULT — CLI env-posture knob wiring", () => {
+  test("OFF (unset) ⇒ frozen: prompt carries [R-ENV], profile envPosture='frozen'", async () => {
+    const { resolveIdentitySystemPrompt } = await import("@/host/runtime/agent-arg-builder")
+    const r = resolveIdentitySystemPrompt(undefined, {}, {})
+    expect(r.system).toContain("[R-ENV]")
+    expect(r.system).not.toContain("[R-ENV-LOCAL]")
+    expect(r.promptSurfaceProfile.envPosture).toBe("frozen")
+  })
+
+  test("ON (=1) ⇒ default: prompt carries [R-ENV-LOCAL], no [R-ENV]/[R-STOP-ENV], profile='default'", async () => {
+    const { resolveIdentitySystemPrompt } = await import("@/host/runtime/agent-arg-builder")
+    const r = resolveIdentitySystemPrompt(undefined, { QUANTA_ENV_DEFAULT: "1" }, {})
+    expect(r.system).toContain("[R-ENV-LOCAL]")
+    expect(r.system).not.toContain("[R-ENV]")
+    expect(r.system).not.toContain("[R-STOP-ENV]")
+    expect(r.promptSurfaceProfile.envPosture).toBe("default")
+  })
+
+  test("ON also threads through the identity-mode (plan) build path", async () => {
+    const { resolveIdentitySystemPrompt } = await import("@/host/runtime/agent-arg-builder")
+    const r = resolveIdentitySystemPrompt("plan", { QUANTA_ENV_DEFAULT: "on" }, {})
+    expect(r.system).toContain("[R-ENV-LOCAL]")
+    expect(r.promptSurfaceProfile.envPosture).toBe("default")
+  })
+})
