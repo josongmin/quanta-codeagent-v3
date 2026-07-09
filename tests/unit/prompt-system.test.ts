@@ -177,17 +177,22 @@ describe("buildSystemPrompt", () => {
       expect(lower).toContain("weak signal")
     })
 
-    test("reporting shape table includes the 8 task kinds", () => {
+    test("reporting shape table includes the 4 core code task kinds (jul-10 trim)", () => {
+      // jul-10 prompt trim: the enumerated shape was cut to the 4 code-agent-core
+      // kinds (a coding agent rarely needs the stable-knowledge / time-sensitive /
+      // visual / delegation shapes — the model infers those). The four core kinds
+      // remain pinned so a deletion still fails the build.
       const p = buildSystemPrompt()
       expect(p).toContain("Reporting shape by task kind")
-      expect(p.toLowerCase()).toContain("stable knowledge")
-      expect(p.toLowerCase()).toContain("time-sensitive research")
       expect(p.toLowerCase()).toContain("local code inspection")
       expect(p.toLowerCase()).toContain("code modification")
       expect(p.toLowerCase()).toContain("review")
       expect(p.toLowerCase()).toContain("audit")
-      expect(p.toLowerCase()).toContain("visual / browser")
-      expect(p.toLowerCase()).toContain("delegation")
+      // The dropped kinds are intentionally GONE.
+      expect(p.toLowerCase()).not.toContain("stable knowledge")
+      expect(p.toLowerCase()).not.toContain("time-sensitive research")
+      expect(p.toLowerCase()).not.toContain("visual / browser")
+      expect(p.toLowerCase()).not.toContain("delegation")
     })
 
     test("audit kind names the four truth surfaces (type/owner/wire/test)", () => {
@@ -365,7 +370,11 @@ describe("buildSystemPrompt — ADR-0062 tool-failure & exploration ladder", () 
     expect(p).toContain("ORIENT")
     expect(p).toContain("NARROW")
     expect(p).toContain("CONFIRM")
-    expect(p).toContain("5–10 tool calls")
+    // jul-10 trim: the over-prescriptive "expect 5–10 tool calls" clause was
+    // dropped (the ORIENT→NARROW→CONFIRM ladder + "reporting after only ORIENT is
+    // incomplete" carry the rule). Pin the survivor + the removal.
+    expect(p).toContain("Reporting after only ORIENT is incomplete")
+    expect(p).not.toContain("5–10 tool calls")
   })
 
   test("rule 4: never delegate the narrowing back to the user", () => {

@@ -164,13 +164,15 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })
     // baseline carries all four …
     expect(off).toContain("Validation budget: build/test/type-check")
-    expect(off).toContain("5–10 tool calls before producing the final summary")
+    // jul-10 trim: the "expect 5–10 tool calls" clause was dropped; the analysis-multistep
+    // block (still a grader-only suppression unit) is now anchored by its surviving tail.
+    expect(off).toContain("Reporting after only ORIENT is incomplete by construction")
     expect(off).toContain("Durable state belongs in workspace files")
     expect(off).toContain("Vision priority")
     // … grader-only drops all four (local-verify budget, over-exploration framing, docs-write
     // artifact rule, and vision noise) — each contradicts or is dead weight under hidden-grader.
     expect(on).not.toContain("Validation budget: build/test/type-check")
-    expect(on).not.toContain("5–10 tool calls before producing the final summary")
+    expect(on).not.toContain("Reporting after only ORIENT is incomplete by construction")
     expect(on).not.toContain("Durable state belongs in workspace files")
     expect(on).not.toContain("Vision priority")
     // …and the surrounding sections + their blank separators survive (block-removal, not

@@ -103,23 +103,24 @@ describe("ADR-0410 — write describe carries a when-not-to-use clause", () => {
   })
 })
 
-describe("ADR-0410 — prompt-body carries two anchor examples", () => {
+describe("ADR-0410 — prompt-body carries one anchor example", () => {
   const p = buildSystemPrompt()
 
-  test("contains exactly two <example> blocks", () => {
+  test("contains exactly one <example> block (jul-10 trim)", () => {
     // Few-shot count is load-bearing: too few = weak anchor, too many =
-    // cache-prefix bloat. Two is the Codex SHELL.md / Claude Code Bash.ts
-    // empirical sweet spot (their description carries 2 examples each).
+    // cache-prefix bloat. jul-10 trim: the positive read/grep case is already
+    // stated by the routing table, so we keep ONLY the higher-value avoidance
+    // anchor (do-NOT-route-file-ops-through-the-shell). The positive read/grep
+    // route survives inline inside the avoidance example's "Right:" clause.
     const openCount = p.split("<example>").length - 1
     const closeCount = p.split("</example>").length - 1
-    expect(openCount).toBe(2)
-    expect(closeCount).toBe(2)
+    expect(openCount).toBe(1)
+    expect(closeCount).toBe(1)
   })
 
-  test("positive example demonstrates reasoning → tool choice (read/grep beats bash)", () => {
-    // Pattern: "User wants X → reason → action with the right tool".
+  test("the example still anchors read/grep as the non-shell file-op route", () => {
     expect(p.toLowerCase()).toContain("example")
-    // The positive example MUST anchor a non-shell file-op as the chosen tool.
+    // The avoidance example's resolution names read/grep as the right tool.
     expect(p).toMatch(/(read|grep)\b/)
   })
 

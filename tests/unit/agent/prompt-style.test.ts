@@ -87,12 +87,19 @@ describe("sectioned render", () => {
     }
   })
 
-  test("F3 rename: the two 'Trust …' headers are disambiguated, collision gone", () => {
+  test("F3 rename: the 'Trust and inputs' header is disambiguated, no 'Trust …' collision", () => {
+    // jul-10 trim: the Evidence-discipline + Trust-ladder merge folded the former
+    // "Trust ladder" SECTION header into an in-section body sub-label under the new
+    // "## Evidence & trust" header, so it is no longer a promoted peer header. The
+    // sole remaining rename is the untrusted-input section; the merged header carries
+    // the source-of-truth-precedence framing, so no "## Trust …" collision survives.
     const sec = sectioned()
-    expect(sec).toContain("## Source-of-truth ladder (when sources disagree, the higher wins)")
+    expect(sec).toContain("## Evidence & trust (claim ladder + source-of-truth precedence)")
     expect(sec).toContain("## Untrusted inputs & injection defense")
     expect(sec).not.toContain("## Trust ladder")
     expect(sec).not.toContain("## Trust and inputs")
+    // the folded sub-label survives verbatim as a plain (un-promoted) body line
+    expect(sec).toContain("Trust ladder (when sources disagree, the higher wins):")
   })
 
   test("F1 inject: orphan task-rule block gets a header, placed before [R-ENV]", () => {

@@ -46,8 +46,7 @@ export const SECTION_HEADER_LINES: readonly string[] = [
   "Internal vocabulary (NEVER expose to users — ADR-0067; Codex L26/L217):",
   "Production code conduct (your own discipline — user-mandated invariants):",
   "Git posture (default fail-closed — Codex §18.2/§18.4/§18.5 absorption):",
-  "Evidence discipline (claim ladder):",
-  "Trust ladder (when sources disagree, the higher wins):",
+  "Evidence & trust (claim ladder + source-of-truth precedence):",
   "Budget discipline (every call is expensive):",
   "Tool failures & exploration (ADR-0062 — Codex SKILL.md L220/L254/L353):",
   "Tool routing (the truth condition picks the tool, not the keyword):",
@@ -76,20 +75,16 @@ export const SUBSECTION_HEADER_LINES: readonly string[] = [
 const SUBSECTION_SET: ReadonlySet<string> = new Set(SUBSECTION_HEADER_LINES)
 
 /**
- * Exact-match heading RENAME overrides (jul-6 audit F3) — Codex-style clean names
- * that also disambiguate the two "Trust …" headers, which read as a confusing
- * near-duplicate once promoted to peer markdown headers:
- *   - "Trust ladder …"    → source-of-truth precedence (which SOURCE wins)
- *   - "Trust and inputs …" → untrusted-input / prompt-injection handling
+ * Exact-match heading RENAME overrides (jul-6 audit F3) — a Codex-style clean
+ * name for the untrusted-input section (jul-10: the Evidence & trust merge folded
+ * the former "Trust ladder" header into a body sub-label, so only "Trust and
+ * inputs" remains to disambiguate — it is the untrusted-input / prompt-injection
+ * section, distinct from the Evidence & trust source-of-truth ladder above).
  * A header not listed here falls back to the default `##`/`###` + colon-strip. The
  * value is the FULL rendered line (level prefix included). SECTIONED-ONLY — the
  * flat prompt keeps the original wording byte-identical.
  */
 const HEADER_RENDER_OVERRIDE: ReadonlyMap<string, string> = new Map([
-  [
-    "Trust ladder (when sources disagree, the higher wins):",
-    "## Source-of-truth ladder (when sources disagree, the higher wins)",
-  ],
   ["Trust and inputs:", "## Untrusted inputs & injection defense"],
 ])
 
