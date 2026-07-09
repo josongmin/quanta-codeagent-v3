@@ -17,6 +17,8 @@ import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
 import {
+  ARCHITECT_NOTICE,
+  AUDIT_NOTICE,
   BODY_AFTER_PERSONA,
   BODY_AFTER_PERSONA_DURABLE_STATE,
   BODY_AFTER_PROMPT_PACK,
@@ -28,7 +30,10 @@ import {
   BODY_VALIDATION_BUDGET,
   BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
   BRIEF_NOTICE,
+  EDITOR_NOTICE,
   INTRO_LINES,
+  PLAN_NOTICE,
+  REVIEW_NOTICE,
 } from "./prompt-body"
 import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
@@ -422,49 +427,6 @@ export interface TurnContext {
   messages: Message[]
   promptPolicy: PromptPolicySnapshot
 }
-
-const PLAN_NOTICE = [
-  "PLAN MODE is active. Do NOT modify anything. Use only read-only tools",
-  "(read, search_codebase, grep, glob, localize) to investigate, then produce a concrete,",
-  "step-by-step implementation plan as your final answer: which files, what",
-  "changes, in what order. Stop calling tools once you can write the plan.",
-].join("\n")
-
-const REVIEW_NOTICE = [
-  "REVIEW MODE is active. Do NOT modify anything. Investigate with read-only",
-  "tools, then deliver findings-first: each finding as { file:line, severity,",
-  "what, why, impact }. Order by severity; cut generic praise. No fix patches",
-  "unless the user explicitly asks for them.",
-].join("\n")
-
-const AUDIT_NOTICE = [
-  "AUDIT MODE is active. Do NOT modify anything. Extract the intended contract,",
-  "then check the four truth surfaces — type, owner, wire, test — and report",
-  "mismatches: authority leaks, dual truth, fail-open paths, stale compat.",
-  "Cite file:line evidence per mismatch. No fixes unless asked.",
-].join("\n")
-
-// ADR-0211 — architect is a READ-ONLY posture (mode.ts fail-closed default
-// blocks mutating tools). The notice emphasizes deep reasoning + design-first
-// posture; the model proposes structure, not diffs.
-const ARCHITECT_NOTICE = [
-  "ARCHITECT MODE is active. Do NOT modify anything. Reason deeply about the",
-  "design BEFORE proposing changes: state the problem, enumerate constraints,",
-  "lay out the design space, pick the smallest sufficient design. Output as a",
-  "design doc; defer edits to a follow-up turn after explicit approval.",
-].join("\n")
-
-// ADR-0211 — editor is a MUTATING posture, but the contract is "minimal,
-// surgical diffs only". The notice nudges `edit` over `write`, single-file
-// touches, and explicit pre-read; mutation is PERMITTED (mode.ts MUTATING_MODES
-// includes "editor"). No "do not modify" line — that would contradict the
-// posture and confuse the model.
-const EDITOR_NOTICE = [
-  "EDITOR MODE is active. Make MINIMAL, SURGICAL diffs only. Prefer `edit`",
-  "over `write`. Touch the fewest files needed. Always read before editing.",
-  "No drive-by reformatting, no opportunistic refactors, no scope creep —",
-  "ship the smallest correct change that resolves the user's request.",
-].join("\n")
 
 const modeNotice = (mode: AgentMode): string | undefined => {
   if (mode === "plan") return PLAN_NOTICE
