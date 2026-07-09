@@ -201,6 +201,11 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     /rail:\s+<e\.g\. bun test/i,
     /the relevant tests pass/i,
     /After changing code, verify it: run the project/i,
+    // jul-10 audit — the REPORTING_SHAPE "Code modification" line used to forward-
+    // reference "Include the verification report below", which grader-only STRIPS
+    // (dangling pointer to a suppressed template). Pin the class: no surviving block
+    // may point at the verification-report template under grader-only.
+    /Include the verification report/i,
   ]
   const hardConflictLines = (prompt: string): string[] => {
     const lines = prompt.split("\n")

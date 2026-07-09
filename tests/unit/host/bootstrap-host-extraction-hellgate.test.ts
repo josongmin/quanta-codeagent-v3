@@ -347,6 +347,24 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     expect(result.createSubagentBackedGuardianReview).toBe(deps.createSubagentBackedGuardianReview)
   })
 
+  test("7b. promptSurfaceProfile TELEMETRY matches the rendered posture (QUANTA_ENV_DEFAULT, PAIRED)", async () => {
+    // jul-10 audit — the interactive REPL used to publish an envPosture-BLIND
+    // surface profile (always "frozen"), so with QUANTA_ENV_DEFAULT=1 the prompt
+    // TEXT rendered "default" while the telemetry mis-reported "frozen". The profile
+    // must agree with the rendered posture. Red-on-injection: reverting the fix
+    // (promptSurfaceProfileForRunMode("interactive") with no envPosture) makes the
+    // ON arm report "frozen" ⇒ this assertion fails.
+    const on = await bootstrapSession(
+      makeFakeDeps(),
+      makeRuntime({ env: { QUANTA_ENV_DEFAULT: "1" } }),
+      {},
+    )
+    expect(on.promptSurfaceProfile?.envPosture).toBe("default")
+    // OFF control: unset ⇒ "frozen" (default-OFF byte-identical posture).
+    const off = await bootstrapSession(makeFakeDeps(), makeRuntime({ env: {} }), {})
+    expect(off.promptSurfaceProfile?.envPosture).toBe("frozen")
+  })
+
   test("#17 (C3) — QUANTA_BRIEF seeds the bootstrap briefStore (env → store, PAIRED)", async () => {
     // ON arm: the brief posture knob is truthy ⇒ the bootstrap brief store is
     // seeded ON (the loop later reads it via AgentConfig.sessionBrief). This is

@@ -250,6 +250,12 @@ const buildPromptState = (
 } => {
   const persona = deps.pickPersona()
   const identity = deps.pickIdentity()
+  // Mirror the SAME envPosture seam `buildSessionStatePorts` uses for the rendered
+  // system prompt (resolveCliDefaultEnvPosture over the same runtime.env), so the
+  // surface-profile TELEMETRY agrees with the prompt TEXT. Previously this dropped
+  // to the "frozen" default, mis-reporting posture whenever QUANTA_ENV_DEFAULT=1
+  // rendered a "default" prompt (the jul-04 envPosture-drop foot-gun class).
+  const envPosture = resolveCliDefaultEnvPosture(runtime.env)
   const { toolProfileState, identityModeState, focusChain, systemSource, refreshSystemPrompt } =
     buildSessionStatePorts({
       cwd,
@@ -259,7 +265,7 @@ const buildPromptState = (
     })
   return {
     system: systemSource.get(),
-    promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive"),
+    promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", { envPosture }),
     systemSource,
     refreshSystemPrompt,
     toolProfileState,

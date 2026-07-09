@@ -19,6 +19,8 @@
 import type { PersonaKind } from "../persona"
 import { buildSystemPrompt, type EnvironmentPosture } from "../prompt"
 import type { AgentMode as PromptPackMode } from "../prompt-rules"
+import type { VerifyStrategy } from "../prompt-rules/verify-strategy"
+import type { PromptStyle } from "../prompt-style"
 import type { AgentMode as RunMode } from "../run-mode/types"
 import { isTruthyToken, type PromptSurfaceProfileSnapshot } from "@/shared"
 import { DEFAULT_MODE_VARIANTS, UNKNOWN_MODE_VARIANT } from "./mode-variants"
@@ -84,6 +86,12 @@ export interface BuildSystemPromptForModeOpts {
    *  task-posture `ModeVariantKey`). Forwarded verbatim to `buildSystemPrompt`.
    *  Absent / `"frozen"` ⇒ byte-identical to today. Prompt-text-only. */
   readonly envPosture?: EnvironmentPosture
+  /** jul-4 verify-strategy axis + jul-6 render-style axis — forwarded verbatim to
+   *  `buildSystemPrompt` so a surface routed through this builder can render them
+   *  too (they were previously DROPPED here — a knob-looks-wired-but-inert
+   *  foot-gun). Absent ⇒ no verify rule / flat style, byte-identical. */
+  readonly verifyStrategy?: VerifyStrategy
+  readonly promptStyle?: PromptStyle
 }
 
 /** Build a mode-aware system prompt. Resolves the variant for `mode` via the
@@ -104,10 +112,14 @@ export const buildSystemPromptForMode = (opts: BuildSystemPromptForModeOpts): st
     promptPack?: PromptPackMode
     identity?: readonly string[]
     envPosture?: EnvironmentPosture
+    verifyStrategy?: VerifyStrategy
+    promptStyle?: PromptStyle
   } = { identity: variant.identity }
   if (opts.persona !== undefined) promptOpts.persona = opts.persona
   if (opts.promptPack !== undefined) promptOpts.promptPack = opts.promptPack
   if (opts.envPosture !== undefined) promptOpts.envPosture = opts.envPosture
+  if (opts.verifyStrategy !== undefined) promptOpts.verifyStrategy = opts.verifyStrategy
+  if (opts.promptStyle !== undefined) promptOpts.promptStyle = opts.promptStyle
   return buildSystemPrompt(undefined, promptOpts)
 }
 
@@ -117,6 +129,10 @@ export interface BuildSystemPromptForRunModeOpts {
   readonly persona?: PersonaKind
   readonly identity?: readonly string[]
   readonly envPosture?: EnvironmentPosture
+  /** jul-4 verify-strategy + jul-6 render-style axes — forwarded to
+   *  `buildSystemPrompt` (previously dropped on this seam). Absent ⇒ byte-identical. */
+  readonly verifyStrategy?: VerifyStrategy
+  readonly promptStyle?: PromptStyle
 }
 
 /**
@@ -150,9 +166,13 @@ export const buildSystemPromptForRunMode = (opts: BuildSystemPromptForRunModeOpt
     promptPack: PromptPackMode
     identity?: readonly string[]
     envPosture?: EnvironmentPosture
+    verifyStrategy?: VerifyStrategy
+    promptStyle?: PromptStyle
   } = { promptPack: opts.runMode }
   if (opts.persona !== undefined) promptOpts.persona = opts.persona
   if (opts.identity !== undefined) promptOpts.identity = opts.identity
   if (opts.envPosture !== undefined) promptOpts.envPosture = opts.envPosture
+  if (opts.verifyStrategy !== undefined) promptOpts.verifyStrategy = opts.verifyStrategy
+  if (opts.promptStyle !== undefined) promptOpts.promptStyle = opts.promptStyle
   return buildSystemPrompt(opts.cwd, promptOpts)
 }
