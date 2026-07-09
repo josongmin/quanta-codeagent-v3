@@ -260,12 +260,21 @@ const captureLostEditsError = (editCount: number | undefined, sandbox: string): 
   `capture_lost_edits: ${editCount ?? 0} edit(s) made but 0-byte source diff on a clean worktree ` +
   `(fork-worktree desync, sandbox=${sandbox})`
 
-const lastTerminalTurnEventOf = (
+export const lastTerminalTurnEventOf = (
   events: readonly SessionEvent[],
-): Extract<SessionEvent, { type: "turn.completed" | "turn.failed" }> | undefined => {
+): Extract<SessionEvent, { type: "turn.completed" | "turn.failed" | "turn.aborted" }> | undefined => {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
-    if (event?.type === "turn.completed" || event?.type === "turn.failed") return event
+    // ALBB-04 added a dedicated `turn.aborted` terminal wire event; a cooperative
+    // RETURN-abort (deadline/budget abort that surfaced a partial patch) now
+    // settles it here. Match it too — otherwise the terminal-event lookup below
+    // fails and throws, DISCARDING the honest partial patch (#10097 fallback).
+    if (
+      event?.type === "turn.completed" ||
+      event?.type === "turn.failed" ||
+      event?.type === "turn.aborted"
+    )
+      return event
   }
   return undefined
 }
@@ -311,7 +320,8 @@ const runAgentViaSdk = async (
       // `withGitSnapshot` still captures the sandbox diff as the candidate patch,
       // and the result is an honest `aborted` (not a misleading hard error).
       const turns = eventCapture.events.filter(
-        (e) => e.type === "turn.completed" || e.type === "turn.failed",
+        (e) =>
+          e.type === "turn.completed" || e.type === "turn.failed" || e.type === "turn.aborted",
       ).length
       return { reason: "aborted", turns, messages: [] }
     }
