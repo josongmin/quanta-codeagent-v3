@@ -55,6 +55,12 @@ const applyPersona = (
   // personaLines() returns [] so the rebuilt string is byte-identical to a
   // no-persona build — sanity-checked under the `persona=default ⇒ no-op`
   // case in tests.
+  // jul-9 FOOT-GUN NOTE (audit): this rebuild drops `envPosture`, so it would revert a
+  // QUANTA_ENV_DEFAULT="default" session back to "frozen". Currently DEAD — `personaKnob` is
+  // not in `wireInteractiveKnobs` and no `/persona` slash command exists, so `apply` never
+  // fires on a live surface. If a mid-session persona swap is ever wired, route it through the
+  // bootstrap `refreshSystemPrompt` seam (which threads envPosture) OR carry envPosture on
+  // AgentConfig and re-read it here — do NOT rebuild raw like this.
   return { ...cfg, system: buildSystemPrompt(cfg.cwd, { persona: value }) }
 }
 
