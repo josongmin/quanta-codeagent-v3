@@ -13,7 +13,7 @@ owners: ["@songmin"]
 labels: [surface:bench, default-off]
 depends_on: [bench-eval-driver, bench-full-remote-ami]
 config_refs:
-  env: [QUANTA_BENCH_RECORD_TRAJECTORY]
+  env: [QUANTA_BENCH_RECORD_TRAJECTORY, QUANTA_BENCH_TRAJECTORY_DEBUG]
 surface_integration:
   cli: missing
   web: na
