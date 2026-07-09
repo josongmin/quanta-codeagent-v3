@@ -7,7 +7,7 @@
  * the surface contract without standing up the runner/runtime.
  *
  *  - argv parsing (positional, --inherit, --tools, --help, unknown flag).
- *  - default-OFF wiring: no `ctx.side` ⇒ "not wired" + exit 0.
+ *  - default-OFF wiring: no `ctx.side` ⇒ "not wired" + exit 2 (D-6).
  *  - help branch.
  *  - empty-prompt rejection.
  *  - successful side-chat path ⇒ answer + footer rendered to stdout.
@@ -124,10 +124,10 @@ describe("parseSideCmdArgs", () => {
 })
 
 describe("/side slash command", () => {
-  test("not wired ⇒ prints 'not wired' and exits 0", async () => {
+  test("not wired ⇒ prints 'not wired' and exits 2 (D-6, UUX-1-23)", async () => {
     const { ctx, stdout } = makeCtx()
     const rc = await sideCmd.run(["hello"], ctx)
-    expect(rc).toBe(0)
+    expect(rc).toBe(2)
     expect(stdout.join("")).toContain("not wired")
   })
 

@@ -13,13 +13,14 @@
  * `/kb` shows the byte-budget counters + the doc count, never doc contents.
  *
  * DEFAULT-OFF: the `projectsKb` ctx slot is threaded ONLY when `QUANTA_PROJECTS_KB`
- * is on AND the store is reachable; absent ⇒ `/kb` prints "not wired" + exit 0
- * (parity with the other presence-gated surface commands).
+ * is on AND the store is reachable; absent ⇒ `/kb` prints the D-6 not-wired
+ * posture (hint names QUANTA_PROJECTS_KB) + exit 2 (UUX-2-22).
  *
  * Slice-clean: this module imports NO `@/tool` VALUE — it consumes a duck-typed
  * `KbSlashState` the surface builds over the live `ProjectsKbStore`.
  */
 
+import { notWired } from "../not-wired"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 
 /** The `knowledge{}` byte-budget accounting snapshot — structural mirror of
@@ -67,8 +68,7 @@ export const kbCmd: SlashCommand = {
   category: "other",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.projectsKb === undefined) {
-      ctx.out("/kb: not wired in this surface (set QUANTA_PROJECTS_KB=1)\n")
-      return 0
+      return notWired(ctx.out, { feature: "/kb", gate: "QUANTA_PROJECTS_KB" })
     }
     if (args.length > 0) {
       ctx.err("/kb: takes no arguments\n")

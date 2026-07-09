@@ -78,9 +78,9 @@ describe("runtime side starter source fences", () => {
 })
 
 describe("runtime side starter behavior", () => {
-  test("absence or unwired state keeps the historical exit-0 contract", async () => {
+  test("absence or unwired state renders the D-6 posture (exit 2, UUX-1-23)", async () => {
     const base = makeCtx()
-    expect(await sideCmd.run(["q"], base.ctx)).toBe(0)
+    expect(await sideCmd.run(["q"], base.ctx)).toBe(2)
     expect(base.cap.out.join("")).toContain("not wired")
 
     const unwired = makeCtx({
@@ -90,7 +90,7 @@ describe("runtime side starter behavior", () => {
         signal: new AbortController().signal,
       },
     })
-    expect(await sideCmd.run(["q"], unwired.ctx)).toBe(0)
+    expect(await sideCmd.run(["q"], unwired.ctx)).toBe(2)
     expect(unwired.cap.out.join("")).toContain("not wired")
   })
 

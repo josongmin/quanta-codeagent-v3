@@ -21,10 +21,12 @@
  *   - `/side --help`                   → print usage + the default allowlist.
  *
  * Default-OFF: without an injected {@link SideCmdSlashState} on
- * {@link SlashContext.side}, the command prints "side chat not wired in this
- * surface" and exits 0 (byte-identical to NOT registering the command). The
- * surface (REPL / one-shot session) is responsible for wiring a runtime-owned
- * side-conversation starter + an abort signal.
+ * {@link SlashContext.side}, the command prints the D-6 not-wired posture and
+ * exits 2 (UUX-1-23 — exit 0 was a fake success). The surface (REPL /
+ * one-shot session) is responsible for wiring a runtime-owned
+ * side-conversation starter + an abort signal. The starter may ALSO resolve
+ * the typed `"not-wired"` marker (the composer's honest replacement for the
+ * old hard-throw when the live wire raced the probe) — same posture, exit 2.
  *
  * Slice contract: lives in `src/apps/cli/**`. The command body NEVER reads
  * `process.env` — the surface composer maps `QUANTA_SIDE_*` env onto the
@@ -35,6 +37,7 @@
 
 import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import { errMessage } from "@/shared"
+import { notWired } from "./not-wired"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 type SideChatContextInheritance = NonNullable<RuntimeSideConversationArgs["inherit"]>
@@ -42,6 +45,11 @@ type SideCmdStartArgs = Pick<
   RuntimeSideConversationArgs,
   "question" | "inherit" | "tools" | "maxTurns" | "signal"
 >
+
+/** UUX-1-23 — the typed no-throw marker a starter resolves when the runtime
+ *  side-conversation wire is (or became) absent. Consumers render the D-6
+ *  not-wired posture; nothing throws. */
+export type SideStartUnwired = "not-wired"
 
 const SIDE_CMD_MAX_TURNS_CAP = 5
 const SIDE_CMD_DEFAULT_MAX_TURNS = 3
@@ -72,7 +80,7 @@ const SIDE_CMD_DEFAULT_READ_ONLY: readonly string[] = Object.freeze([
 /**
  * Session-time state required by `/side`. Injected by the surface
  * (`apps/cli/repl.ts` or a future session loop) onto its
- * {@link SlashContext.side} field. Absent ⇒ "/side: not wired" + exit 0.
+ * {@link SlashContext.side} field. Absent ⇒ D-6 not-wired posture + exit 2.
  *
  *  - `start` — runtime-owned starter. The surface owns the live runtime
  *    session and injects a closure that snapshots history at call time before
@@ -90,7 +98,9 @@ const SIDE_CMD_DEFAULT_READ_ONLY: readonly string[] = Object.freeze([
  *    per-call (every invocation re-reads the surface's current signal).
  */
 export interface SideCmdSlashState {
-  readonly start: (args: SideCmdStartArgs) => Promise<RuntimeSideConversationResult>
+  readonly start: (
+    args: SideCmdStartArgs,
+  ) => Promise<RuntimeSideConversationResult | SideStartUnwired>
   readonly isWired: () => boolean
   readonly defaultTools?: readonly string[]
   readonly defaultMaxTurns?: number
@@ -249,8 +259,12 @@ export const sideCmd: SlashCommand = {
 
     const state = ctx.side
     if (state === undefined || state.isWired() !== true) {
-      ctx.out("/side: not wired in this surface\n")
-      return 0
+      // D-6 (UUX-1-23): no env gate exists for the side wire — hint what IS
+      // required instead of inventing one.
+      return notWired(ctx.out, {
+        feature: "/side",
+        hint: "requires a runtime session host with side-conversation support",
+      })
     }
 
     renderHeader(ctx, parsed.prompt)
@@ -262,6 +276,15 @@ export const sideCmd: SlashCommand = {
         ...(parsed.tools !== undefined ? { tools: parsed.tools } : {}),
         ...(state.defaultMaxTurns !== undefined ? { maxTurns: state.defaultMaxTurns } : {}),
       })
+      if (result === "not-wired") {
+        // The live wire raced the probe (UUX-1-23) — the composer used to
+        // hard-throw here; now it resolves the typed marker and we render
+        // the same honest posture.
+        return notWired(ctx.out, {
+          feature: "/side",
+          hint: "requires a runtime session host with side-conversation support",
+        })
+      }
       if (result.answerText.length > 0) {
         ctx.out(`${result.answerText}\n`)
       } else {

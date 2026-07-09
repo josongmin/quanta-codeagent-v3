@@ -311,10 +311,10 @@ describe("/branches: branchSearch port wire", () => {
 // ─── /side ──────────────────────────────────────────────────────────────
 
 describe("/side: side-chat port wire", () => {
-  test("ABSENT side ⇒ '/side: not wired' + exit 0 (after question parsed)", async () => {
+  test("ABSENT side ⇒ '/side: not wired' + exit 2 (D-6, UUX-1-23; after question parsed)", async () => {
     const cap: CapturedCtx = { out: "", err: "" }
     const code = await runSlashCommand("/side what is X?", makeBase(cap))
-    expect(code).toBe(0)
+    expect(code).toBe(2)
     expect(cap.out).toContain("not wired")
   })
 
@@ -406,20 +406,22 @@ describe("/side: side-chat port wire", () => {
 // ─── Cross-port invariants ──────────────────────────────────────────────
 
 describe("All 6 ports: ABSENT-field invariant (the byte-identical default-OFF axis)", () => {
-  // Each row: command, expected "not wired" / parity sentinel substring.
-  const cases: ReadonlyArray<{ cmd: string; sentinel: string }> = [
-    { cmd: "/cost", sentinel: "not wired" },
-    { cmd: "/plan", sentinel: "plan-store not wired" },
-    { cmd: "/state", sentinel: "not wired" },
-    { cmd: "/history", sentinel: "not wired" },
-    { cmd: "/branches", sentinel: "not wired" },
-    { cmd: "/side hello", sentinel: "not wired" },
+  // Each row: command, expected "not wired" / parity sentinel substring +
+  // exit code (Wave-4 D-6: /side adopted the not-wired exit-2 posture,
+  // UUX-1-23; the others keep exit 0 until their sites adopt).
+  const cases: ReadonlyArray<{ cmd: string; sentinel: string; code: number }> = [
+    { cmd: "/cost", sentinel: "not wired", code: 0 },
+    { cmd: "/plan", sentinel: "plan-store not wired", code: 0 },
+    { cmd: "/state", sentinel: "not wired", code: 0 },
+    { cmd: "/history", sentinel: "not wired", code: 0 },
+    { cmd: "/branches", sentinel: "not wired", code: 0 },
+    { cmd: "/side hello", sentinel: "not wired", code: 2 },
   ]
   for (const c of cases) {
-    test(`${c.cmd} with no ctx field ⇒ '${c.sentinel}'`, async () => {
+    test(`${c.cmd} with no ctx field ⇒ '${c.sentinel}' (exit ${c.code})`, async () => {
       const cap: CapturedCtx = { out: "", err: "" }
       const code = await runSlashCommand(c.cmd, makeBase(cap))
-      expect(code).toBe(0)
+      expect(code).toBe(c.code)
       expect(cap.out).toContain(c.sentinel)
     })
   }

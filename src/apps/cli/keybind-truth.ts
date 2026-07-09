@@ -73,6 +73,16 @@ export const KB_EOF: KeybindTruth = {
   scope: "line-edit",
 }
 
+/** Shift+Tab — cycle the permission mode. Installed by the raw-line-reader
+ *  `onKey` branch behind the CLI-seeded QUANTA_MODE_CYCLE gate. Exported as a
+ *  named entry (Wave-4, UUX-2-23) so the WELCOME BANNER advertises the SAME
+ *  chord object `/help` renders — never a third hand-written mirror. */
+export const KB_MODE_CYCLE: KeybindTruth = {
+  chord: "Shift+Tab",
+  describe: "Cycle permission mode (QUANTA_MODE_CYCLE gate)",
+  scope: "line-edit",
+}
+
 /** The prompt-time (raw-line-reader `onKey`) bindings that actually have a
  *  handler branch. Gated entries name their gate — all CLI-seeded default-ON
  *  (see `cli-feature-gates.ts`). */
@@ -105,11 +115,7 @@ export const READER_KEYBINDS: readonly KeybindTruth[] = [
   { chord: "Ctrl+K", describe: "Kill to line end", scope: "line-edit" },
   { chord: "Alt+B / Alt+F", describe: "Word left / right", scope: "line-edit" },
   { chord: "Esc", describe: "Close the completion menu", scope: "line-edit" },
-  {
-    chord: "Shift+Tab",
-    describe: "Cycle permission mode (QUANTA_MODE_CYCLE gate)",
-    scope: "line-edit",
-  },
+  KB_MODE_CYCLE,
   {
     chord: "Ctrl+X Ctrl+E",
     describe: "Edit draft in $EDITOR (QUANTA_EXTERNAL_EDITOR gate)",

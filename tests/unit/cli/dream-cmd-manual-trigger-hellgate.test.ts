@@ -261,10 +261,11 @@ describe("H16 — /dream MANUAL trigger (REPL composer ctx injection)", () => {
     expect(auto.kind).toBe("below_threshold")
   })
 
-  test("not-wired surface (no ctx.dream) ⇒ inert 'not wired' (default-OFF byte-identical)", async () => {
+  test("not-wired surface (no ctx.dream) ⇒ inert 'not wired' + exit 2 (D-6, UUX-5-09)", async () => {
     const { cap, ctx } = mkCtx() // no dream slot — the pre-wire production state
     const code = await dreamCmd.run([], ctx)
-    expect(code).toBe(0)
+    expect(code).toBe(2)
     expect(cap.out).toContain("not wired")
+    expect(cap.out).toContain("hint: set QUANTA_AUTO_DREAM=1")
   })
 })

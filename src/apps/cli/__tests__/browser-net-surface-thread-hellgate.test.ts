@@ -204,11 +204,12 @@ describe("S1 /browser-net LIVE — net holder threaded into the browser toolset"
   })
 
   // ── Adversarial round 4 — holder ABSENT (surface gate off) ⇒ "not wired" ─────
-  test("holder ABSENT on the ctx ⇒ /browser-net prints 'not wired' + exit 0", async () => {
+  test("holder ABSENT on the ctx ⇒ /browser-net prints 'not wired' + exit 2 (D-6)", async () => {
     const { ctx, out } = slashCtxOverHolder(undefined)
     const code = await browserNetCmd.run([], ctx)
-    expect(code).toBe(0)
+    expect(code).toBe(2) // D-6 (UUX-2-22): not-wired is exit 2 + gate hint
     expect(out().toLowerCase()).toContain("not wired")
+    expect(out()).toContain("hint: set QUANTA_BROWSER_NETWORK=1")
   })
 
   // ── Adversarial round 5 — the network gate is OFF ⇒ tool absent (byte-ident) ─

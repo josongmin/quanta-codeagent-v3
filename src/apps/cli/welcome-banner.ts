@@ -24,7 +24,7 @@
 
 import { cyan, dim, gray, green, magenta, renderBox, yellow } from "@/ui/ui-helpers"
 import pkg from "../../../package.json" with { type: "json" }
-import { KB_CANCEL_TURN, KB_QUIT } from "./keybind-truth"
+import { KB_CANCEL_TURN, KB_MODE_CYCLE, KB_QUIT } from "./keybind-truth"
 import { slashRef } from "./slash-ref"
 
 /** Displayed version — package.json is the single source of truth. */
@@ -45,6 +45,26 @@ export interface WelcomeBannerInfo {
   readonly resumedMessages?: number | undefined
   readonly mcpServers?: number | undefined
   readonly mcpTools?: number | undefined
+  /** UUX-2-23 — Shift+Tab permission-mode cycling is live (QUANTA_MODE_CYCLE,
+   *  CLI-seeded default-ON). The HOST computes this from env (the banner is a
+   *  pure renderer); omitted/false ⇒ the affordance is NOT advertised. */
+  readonly modeCycle?: boolean | undefined
+  /** UUX-2-23 — @-mention autocomplete is live (QUANTA_AT_AUTOCOMPLETE,
+   *  CLI-seeded default-ON). Same host-computed contract. */
+  readonly atMention?: boolean | undefined
+  /** UUX-5-18 — the untrusted-source envelope defense is ON
+   *  (QUANTA_UNTRUSTED_ENVELOPE). Renders ONE trust-posture line; never
+   *  advertised when off (a defense you don't have must not be claimed). */
+  readonly untrustedEnvelope?: boolean | undefined
+}
+
+/** Host-computed gate states for the affordance/trust lines (UUX-2-23/5-18).
+ *  Computed at the ONE caller (repl host) from env — keeps this module free
+ *  of process/env reads (see the module-header constraints). */
+export interface WelcomeGateView {
+  readonly modeCycle: boolean
+  readonly atMention: boolean
+  readonly untrustedEnvelope: boolean
 }
 
 /** The narrow view of `SessionSetupResult` the banner needs — structural, so
@@ -66,6 +86,7 @@ export interface WelcomeSetupView {
 export const buildWelcomeInfo = (
   setup: WelcomeSetupView,
   home: string | undefined,
+  gates?: WelcomeGateView,
 ): WelcomeBannerInfo => {
   let effort: string | undefined
   try {
@@ -84,6 +105,13 @@ export const buildWelcomeInfo = (
     resumedMessages: setup.history.length,
     mcpServers: setup.mcpClients.length,
     mcpTools: setup.mcpTools.length,
+    ...(gates !== undefined
+      ? {
+          modeCycle: gates.modeCycle,
+          atMention: gates.atMention,
+          untrustedEnvelope: gates.untrustedEnvelope,
+        }
+      : {}),
   }
 }
 
@@ -95,6 +123,23 @@ const shortenCwd = (cwd: string, home: string | undefined): string => {
 
 /** Two-column row: a dim fixed-width label + the value. */
 const row = (label: string, value: string): string => `${dim(label.padEnd(9))}${value}`
+
+/** UUX-2-23/5-18 — the affordance (`keys`) + trust-posture rows. Rendered
+ *  ONLY when the host reports the gate ON (honesty both ways: an explicit
+ *  opt-out drops the line; a defense that is off is never claimed). Chord
+ *  copy derives from the keybind-truth SSOT (KB_MODE_CYCLE — the SAME object
+ *  `/help` renders), never a third hand-written mirror. */
+const affordanceRows = (info: WelcomeBannerInfo): string[] => {
+  const rows: string[] = []
+  const tips: string[] = []
+  if (info.modeCycle === true) tips.push(`${KB_MODE_CYCLE.chord} cycle permission mode`)
+  if (info.atMention === true) tips.push("@ to mention files/symbols")
+  if (tips.length > 0) rows.push(row("keys", tips.join(dim(" · "))))
+  if (info.untrustedEnvelope === true) {
+    rows.push(row("trust", "external tool output fenced in <untrusted-source>"))
+  }
+  return rows
+}
 
 export const renderWelcomeBanner = (info: WelcomeBannerInfo): string => {
   const version = info.version ?? QUANTA_VERSION
@@ -124,6 +169,8 @@ export const renderWelcomeBanner = (info: WelcomeBannerInfo): string => {
       info.mcpTools !== undefined && info.mcpTools > 0 ? dim(` · ${info.mcpTools} tools`) : ""
     lines.push(row("mcp", `${info.mcpServers} servers${tools}`))
   }
+
+  lines.push(...affordanceRows(info))
 
   lines.push("")
 

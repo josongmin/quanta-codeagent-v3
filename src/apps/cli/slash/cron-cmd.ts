@@ -9,13 +9,19 @@
  * `/cron` lists + creates schedules against the live engine; `/inbox` reads the
  * notification inbox. Both are DEFAULT-OFF: the `automation` ctx slot is threaded
  * ONLY when `QUANTA_AUTOMATION` is on AND the engine is reachable; absent ⇒ the
- * commands print "not wired" + exit 0.
+ * commands print the D-6 not-wired posture (hint names QUANTA_AUTOMATION) and
+ * exit 2 (UUX-2-22 — exit 0 was a fake success).
+ *
+ * `create` syntax (UUX-4-16): `/cron create <RRULE> <title…> [-- <prompt…>]`.
+ * Without the `--` separator the prompt DEFAULTS to the title — kept for
+ * back-compat, but the output SAYS so instead of silently duplicating.
  *
  * Slice-clean: this module imports NO `@/scheduler` VALUE — the surface adapter
  * (which DOES own the RRULE parse + nextRun compute) exposes a duck-typed
  * {@link AutomationSlashState}. The command only formats.
  */
 
+import { notWired } from "../not-wired"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 
 /** A scheduled automation row (structural mirror of `EngineAutomation`). */
@@ -76,19 +82,67 @@ export const renderInbox = (rows: readonly CronInboxRow[]): string => {
   return [`Inbox — ${rows.length} item(s), ${unread} unread:`, ...lines].join("\n")
 }
 
+const CRON_CREATE_USAGE =
+  "/cron: usage = /cron create <RRULE> <title> [-- <prompt>] (e.g. /cron create FREQ=DAILY nightly build -- run the full suite)\n"
+
+/** Parsed `create` tail: title words before the `--` separator, prompt words
+ *  after it. No separator ⇒ `prompt` is undefined (title-as-prompt default). */
+const splitTitlePrompt = (
+  rest: readonly string[],
+): { title: string; prompt: string | undefined; sawSeparator: boolean } => {
+  const sep = rest.indexOf("--")
+  if (sep < 0) return { title: rest.join(" ").trim(), prompt: undefined, sawSeparator: false }
+  return {
+    title: rest.slice(0, sep).join(" ").trim(),
+    prompt: rest
+      .slice(sep + 1)
+      .join(" ")
+      .trim(),
+    sawSeparator: true,
+  }
+}
+
+const runCronCreate = async (args: readonly string[], ctx: SlashContext): Promise<number> => {
+  const automation = ctx.automation
+  if (automation === undefined)
+    return notWired(ctx.out, { feature: "/cron", gate: "QUANTA_AUTOMATION" })
+  const rule = args[1]
+  const { title, prompt, sawSeparator } = splitTitlePrompt(args.slice(2))
+  // An explicit `--` with nothing after it is a shape error, never a silent
+  // fall-back to the title (UUX-4-16).
+  if (rule === undefined || title === "" || (sawSeparator && prompt === "")) {
+    ctx.err(CRON_CREATE_USAGE)
+    return 1
+  }
+  const effectivePrompt = prompt !== undefined && prompt !== "" ? prompt : title
+  const res = await automation.create(title, rule, effectivePrompt)
+  if (!res.ok) {
+    ctx.err(`/cron: create failed — ${res.message}\n`)
+    return 1
+  }
+  ctx.out(`/cron: created [${res.row.id}] ${res.row.title} (${res.row.rule})\n`)
+  // UUX-4-16 — title-as-prompt is kept as the default, but SAID.
+  if (prompt === undefined) {
+    ctx.out(
+      "note: prompt defaults to the title — use /cron create <RRULE> <title> -- <prompt> to set a separate prompt\n",
+    )
+  }
+  return 0
+}
+
 /** `/cron` (alias `/schedule`) — list + create scheduled automations. Subcommands:
  *    - `list` (default) — render every schedule.
- *    - `create <RRULE> <title...>` — create a schedule (prompt = title).
- *  Absent slot ⇒ "not wired" + exit 0 (default-OFF byte-identical). */
+ *    - `create <RRULE> <title…> [-- <prompt…>]` — create a schedule; without
+ *      `--` the prompt defaults to the title (and the output says so).
+ *  Absent slot ⇒ D-6 not-wired posture + exit 2 (hint: QUANTA_AUTOMATION). */
 export const cronCmd: SlashCommand = {
   name: "/cron",
   describe:
-    "List/create scheduled automations (/cron, /cron create <RRULE> <title>). Opt-in: QUANTA_AUTOMATION=on",
+    "List/create scheduled automations (/cron, /cron create <RRULE> <title> [-- <prompt>]). Opt-in: QUANTA_AUTOMATION=on",
   category: "other",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.automation === undefined) {
-      ctx.out("/cron: not wired in this surface (set QUANTA_AUTOMATION=on)\n")
-      return 0
+      return notWired(ctx.out, { feature: "/cron", gate: "QUANTA_AUTOMATION" })
     }
     const sub = args[0] ?? "list"
     const now = ctx.now?.() ?? Date.now()
@@ -97,24 +151,10 @@ export const cronCmd: SlashCommand = {
       ctx.out(`${renderCronList(rows, now)}\n`)
       return 0
     }
-    if (sub === "create") {
-      const rule = args[1]
-      const title = args.slice(2).join(" ").trim()
-      if (rule === undefined || title === "") {
-        ctx.err(
-          "/cron: usage = /cron create <RRULE> <title> (e.g. /cron create FREQ=DAILY nightly build)\n",
-        )
-        return 1
-      }
-      const res = await ctx.automation.create(title, rule, title)
-      if (!res.ok) {
-        ctx.err(`/cron: create failed — ${res.message}\n`)
-        return 1
-      }
-      ctx.out(`/cron: created [${res.row.id}] ${res.row.title} (${res.row.rule})\n`)
-      return 0
-    }
-    ctx.err(`/cron: unknown subcommand '${sub}' (try list | create <RRULE> <title>)\n`)
+    if (sub === "create") return runCronCreate(args, ctx)
+    ctx.err(
+      `/cron: unknown subcommand '${sub}' (try list | create <RRULE> <title> [-- <prompt>])\n`,
+    )
     return 1
   },
 }
@@ -129,15 +169,14 @@ export const scheduleCmd: SlashCommand = {
 }
 
 /** `/inbox` — read the automation notification inbox (the banner references this
- *  command; now it exists). Absent slot ⇒ "not wired" + exit 0. */
+ *  command; now it exists). Absent slot ⇒ D-6 not-wired posture + exit 2. */
 export const inboxCmd: SlashCommand = {
   name: "/inbox",
   describe: "Read the automation notification inbox",
   category: "other",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.automation === undefined) {
-      ctx.out("/inbox: not wired in this surface (set QUANTA_AUTOMATION=on)\n")
-      return 0
+      return notWired(ctx.out, { feature: "/inbox", gate: "QUANTA_AUTOMATION" })
     }
     if (args.length > 0) {
       ctx.err("/inbox: takes no arguments\n")

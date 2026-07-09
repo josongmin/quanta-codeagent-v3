@@ -25,10 +25,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { backgroundCmd } from "../background-cmd"
-import {
-  BG_BUFFER_MAX_BYTES,
-  createBackgroundTurnPortal,
-} from "../repl/background-turn-portal"
+import { BG_BUFFER_MAX_BYTES, createBackgroundTurnPortal } from "../repl/background-turn-portal"
 import type { SlashContext } from "../slash-contract"
 
 /** Collect a slash command's stdout/stderr for assertions. */
@@ -226,15 +223,20 @@ describe("background-turn-portal — read-only view()", () => {
 })
 
 describe("/background command — surface", () => {
-  test("absent ctx.background ⇒ 'not wired' + exit 0 (default-OFF)", async () => {
+  test("absent ctx.background ⇒ 'not wired' + exit 2 with the gate hint (D-6, UUX-2-22)", async () => {
     const r = await runBg(["list"], undefined)
-    expect(r.code).toBe(0)
+    expect(r.code).toBe(2)
     expect(r.out).toContain("not wired")
+    expect(r.out).toContain("hint: set QUANTA_BG_TURN=1")
   })
 
   test("list ⇒ shows the detached task id + label (running pill)", async () => {
     const portal = createBackgroundTurnPortal()
-    portal.detach({ label: "fix the bug", promise: new Promise(() => {}), abort: new AbortController() })
+    portal.detach({
+      label: "fix the bug",
+      promise: new Promise(() => {}),
+      abort: new AbortController(),
+    })
     const r = await runBg(["list"], portal.view())
     expect(r.code).toBe(0)
     expect(r.out).toContain("fix the bug")

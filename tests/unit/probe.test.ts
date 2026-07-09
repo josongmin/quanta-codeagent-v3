@@ -371,7 +371,10 @@ describe("probe CLI — end-to-end over a synthetic run dir", () => {
   test("--failed surfaces a hedged hypothesis WITH raw evidence, no verdict wording", async () => {
     const { dir } = setupRun()
     const { code, out } = await capture([dir, "--failed"])
-    expect(code).toBe(0)
+    // UUX-5-22 (Wave-4): this fixture has NO summary.json — probe must say so
+    // and exit 2 instead of silently treating "unknown" as "all failed".
+    expect(code).toBe(2)
+    expect(out.toLowerCase()).toContain("no run summary recorded")
     expect(out).toMatch(/NON-authoritative|hypothes/i)
     expect(out).toContain("likely=")
     expect(out).toContain("confidence")

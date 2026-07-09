@@ -727,10 +727,13 @@ export const composeSurfaceWires = (
     // producer hook share ONE queue. Absent ⇒ slot omitted ⇒ "not wired".
     ...(radarStore !== undefined ? { radar: radarStore } : {}),
     getHistory: () => state.history,
+    // UUX-1-23 (D-6) — NEVER hard-throw on an unwired side chat: resolve the
+    // typed "not-wired" marker so the consumer (`/side`) renders the honest
+    // not-wired posture (message + hint + exit 2) instead of crashing the
+    // dispatch path. `/side` already probes `isSideConversationWired()` first;
+    // this covers the probe↔call race without an exception.
     startSideConversation: async (args) => {
-      if (sideConversationStart === undefined) {
-        throw new Error("side chat not wired in this surface")
-      }
+      if (sideConversationStart === undefined) return "not-wired"
       return await sideConversationStart(args)
     },
     isSideConversationWired: () => sideConversationStart !== undefined,

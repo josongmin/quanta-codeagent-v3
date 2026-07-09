@@ -10,12 +10,12 @@ import { defaultResponsesContinuationStore } from "@/llm"
 import { buildShellOtelObserver } from "@/observability"
 import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
-import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
+import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
+import { gateOn } from "@/shared"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor, DEFAULT_IDLE_MS } from "./idle-monitor"
-import { computePresence } from "./notify"
 import { loadImageBlock } from "./image-loader"
 import { createImageQueue, type ImageQueue } from "./image-queue"
 import {
@@ -30,6 +30,7 @@ import {
   pickPersona,
   resolveResume,
 } from "./internal"
+import { computePresence } from "./notify"
 import { createRejectCounter } from "./reject-counter"
 import type { CliFeatureConfig } from "./repl/cli-feature-config"
 import {
@@ -46,11 +47,10 @@ import {
   deriveMcpPillServers,
 } from "./repl/factories"
 import { buildMcpSurfaceInfo } from "./repl/mcp-surface-wire"
-import { maybePickSession } from "./repl/session-picker"
 import { runSessionLoop } from "./repl/session-loop"
 import { buildSessionLoopOptions } from "./repl/session-loop-options"
+import { maybePickSession } from "./repl/session-picker"
 import { setupSession } from "./repl/session-setup"
-import { buildWelcomeInfo, renderWelcomeBanner } from "./welcome-banner"
 import { buildSkillsCallback, installPills } from "./repl/skills-surface"
 import {
   composeSurfaceSlashCtx,
@@ -64,6 +64,7 @@ import { switchToSessionCwd } from "./session-io"
 import { resolveCliSessionListEnv } from "./session-list-env"
 import { buildShellStreamPainter } from "./shell-stream-painter"
 import { runSlashCommand, slashCompleter } from "./slash-commands"
+import { buildWelcomeInfo, renderWelcomeBanner } from "./welcome-banner"
 
 /**
  * CLI REPL + main-orchestration body. CLI-06 (ADR-0307) slimmed this host
@@ -297,8 +298,18 @@ export const runRepl = async (): Promise<void> => {
     // (`argPrompt`), piped and eval launches never see it (byte-identical).
     // stderr, like every other surface chrome — stdout stays the agent stream.
     if (setup.argPrompt === undefined && setup.stderrIsTTY === true) {
+      // UUX-2-23/5-18 — the banner is a PURE renderer; the host computes the
+      // gate states here (same env truthiness the composers use). Both
+      // affordance gates are CLI-seeded default-ON (cli-feature-gates.ts), so
+      // an operator only loses the line by explicitly opting out.
       process.stderr.write(
-        `${renderWelcomeBanner(buildWelcomeInfo(setup, setup.homeDir.length > 0 ? setup.homeDir : undefined))}\n`,
+        `${renderWelcomeBanner(
+          buildWelcomeInfo(setup, setup.homeDir.length > 0 ? setup.homeDir : undefined, {
+            modeCycle: gateOn(process.env, "QUANTA_MODE_CYCLE"),
+            atMention: gateOn(process.env, "QUANTA_AT_AUTOCOMPLETE"),
+            untrustedEnvelope: gateOn(process.env, "QUANTA_UNTRUSTED_ENVELOPE"),
+          }),
+        )}\n`,
       )
     }
     // H13 — gated external-config migration notice (default-OFF behind

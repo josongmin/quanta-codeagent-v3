@@ -37,24 +37,34 @@ const buildCtx = (
 // ── registration: every new command is in the assembled BUILTINS ─────────────
 
 describe("jul-03 CLI-surfacing — registration + not-wired defaults", () => {
-  const names = [
-    "/kb",
-    "/mcp-resources",
-    "/browser-net",
-    "/cron",
-    "/schedule",
-    "/inbox",
-    "/onboard",
+  // Wave-4 (D-6, UUX-2-22/4-27): a not-wired command exits 2 (never 0 — that
+  // claimed success) and, when a KNOWN env gate wires the slot, prints a
+  // machine-greppable `hint: set <GATE>=1` line.
+  const cases: ReadonlyArray<{ name: string; gate?: string }> = [
+    { name: "/kb", gate: "QUANTA_PROJECTS_KB" },
+    { name: "/mcp-resources" },
+    { name: "/browser-net", gate: "QUANTA_BROWSER_NETWORK" },
+    { name: "/cron", gate: "QUANTA_AUTOMATION" },
+    { name: "/schedule", gate: "QUANTA_AUTOMATION" },
+    { name: "/inbox", gate: "QUANTA_AUTOMATION" },
+    { name: "/onboard" },
   ]
-  for (const name of names) {
-    test(`${name} is registered AND prints a clean not-wired line + exit 0 when its slot is absent`, async () => {
+  for (const c of cases) {
+    test(`${c.name} is registered AND prints the not-wired posture (exit 2${c.gate !== undefined ? ` + ${c.gate} hint` : ""}) when its slot is absent`, async () => {
       const { ctx, out } = buildCtx()
-      const code = await runSlashCommand(name, ctx)
+      const code = await runSlashCommand(c.name, ctx)
       // Registered ⇒ NOT the dispatcher's unknown-command path.
       expect(out().toLowerCase()).not.toContain("unknown")
-      // Default-OFF: exit 0, a "not wired" style message, and NOTHING crashes.
-      expect(code).toBe(0)
+      // Default-OFF: a "not wired" style message and NOTHING crashes.
       expect(out().toLowerCase()).toContain("not wired")
+      if (c.gate !== undefined) {
+        expect(code).toBe(2)
+        expect(out()).toContain(`hint: set ${c.gate}=1`)
+      } else if (c.name === "/onboard") {
+        expect(code).toBe(2) // D-6 adopted (UUX-4-27), no env gate to hint
+      } else {
+        expect(code).toBe(0) // not yet adopted (no KNOWN gate; protocol-pending)
+      }
     })
   }
 })
@@ -332,9 +342,9 @@ describe("B1 /onboard — onboarding identity reachability", () => {
     expect(err().toLowerCase()).toContain("not available")
   })
 
-  test("/onboard prints not-wired when there is no identity wire at all", async () => {
+  test("/onboard prints not-wired + exit 2 when there is no identity wire at all (D-6, UUX-4-27)", async () => {
     const { ctx, out } = buildCtx()
-    expect(await runSlashCommand("/onboard", ctx)).toBe(0)
+    expect(await runSlashCommand("/onboard", ctx)).toBe(2)
     expect(out()).toContain("not wired")
   })
 })

@@ -87,11 +87,12 @@ const mkCtx = (
 }
 
 describe("/dream slash command", () => {
-  test("not wired ⇒ prints not-wired and exits 0", async () => {
+  test("not wired ⇒ prints not-wired + QUANTA_AUTO_DREAM hint and exits 2 (D-6, UUX-5-09)", async () => {
     const { cap, ctx } = mkCtx() // no dream state
     const code = await dreamCmd.run([], ctx)
-    expect(code).toBe(0)
+    expect(code).toBe(2)
     expect(cap.out).toContain("not wired")
+    expect(cap.out).toContain("hint: set QUANTA_AUTO_DREAM=1")
   })
 
   test("manual /dream fires the trigger and reports completed", async () => {
@@ -109,14 +110,15 @@ describe("/dream slash command", () => {
     expect(cap.out).toContain("team/cross-session.md")
   })
 
-  test("/dream when feature OFF prints OFF and does not fire", async () => {
+  test("/dream when feature OFF prints OFF + hint, exits 2, and does not fire (D-6)", async () => {
     const calls = { n: 0 }
     const trigger = mkTrigger({ calls }) // no policy → OFF
     const { cap, ctx } = mkCtx(trigger)
     const code = await dreamCmd.run([], ctx)
-    expect(code).toBe(0)
+    expect(code).toBe(2) // nothing happened — exit 0 was the UUX-5-09 lie
     expect(calls.n).toBe(0)
     expect(cap.out).toContain("OFF")
+    expect(cap.out).toContain("hint: set QUANTA_AUTO_DREAM=1")
   })
 
   test("/dream reports no_op when nothing to consolidate", async () => {

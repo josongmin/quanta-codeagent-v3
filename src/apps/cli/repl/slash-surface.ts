@@ -247,10 +247,12 @@ export interface BuildReplSlashCtxArgs {
   getHistory: () => readonly Message[]
   /** Runtime-owned side-conversation starter. Surface-compose injects a live
    *  getter-backed closure so `/side` sees the current runtime session method
-   *  instead of a stale or pre-session binding. */
+   *  instead of a stale or pre-session binding. Resolves the typed
+   *  `"not-wired"` marker when the wire is absent (UUX-1-23 — the old
+   *  hard-throw is gone; consumers render the D-6 posture). */
   startSideConversation: (
     args: RuntimeSideConversationArgs,
-  ) => Promise<RuntimeSideConversationResult>
+  ) => Promise<RuntimeSideConversationResult | import("../side-cmd").SideStartUnwired>
   /** Live runtime-side availability probe. */
   isSideConversationWired: () => boolean
   abortSignal: AbortSignal

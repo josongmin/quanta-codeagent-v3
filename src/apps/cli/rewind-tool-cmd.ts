@@ -15,8 +15,11 @@
  *                                            leg(s) and print the typed
  *                                            outcome.
  *
- * Default-OFF: `ctx.perToolCheckpoint` absent ⇒ "not wired in this
- * surface" and exit 0 (parity with `/snapshot`, `/side`, `/skills`).
+ * Default-OFF: `ctx.perToolCheckpoint` absent ⇒ D-6 not-wired posture +
+ * exit 2, with a hint naming WHICH of the two gates is missing — the slot
+ * is built only when BOTH `QUANTA_PER_TOOL_CHECKPOINT` AND `QUANTA_SHADOW`
+ * are on (UUX-6-17: the old single "not wired" line hid the dual-flag
+ * requirement entirely).
  *
  * Slice contract: lives under `src/apps/cli` (slash UX is the top of the
  * slice DAG). Body reads ONLY `@/agent/per-tool-checkpoint` types — never
@@ -31,8 +34,9 @@ import type {
   RestoreOptions,
   ThreeWayRestorePort,
 } from "@/agent/per-tool-checkpoint"
-import { errMessage } from "@/shared"
+import { errMessage, parseEnvFlag } from "@/shared"
 import { applyLiveHistorySwap } from "./live-history-swap"
+import { notWired } from "./not-wired"
 import type { SlashCommand } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -71,6 +75,19 @@ declare module "./slash-commands" {
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+/** The composition root (`surface-compose.ts`) builds the `/rewind-tool` slot
+ *  only when BOTH gates are on (the files leg rewinds against the shadow ODB).
+ *  This mirror of that dual condition exists ONLY to render an honest
+ *  not-wired hint (UUX-6-17) — it grants nothing. Same truthiness predicate
+ *  as the composer (`parseEnvFlag(raw, false)`). */
+const PER_TOOL_CHECKPOINT_GATES = ["QUANTA_PER_TOOL_CHECKPOINT", "QUANTA_SHADOW"] as const
+
+/** Which of the two wiring gates are NOT set in `env`. Exported for the
+ *  hellgate; the command calls it with `process.env`. */
+export const missingPerToolCheckpointGates = (
+  env: Readonly<Record<string, string | undefined>>,
+): readonly string[] => PER_TOOL_CHECKPOINT_GATES.filter((g) => !parseEnvFlag(env[g], false))
 
 const SHORT_SHA_LEN = 12
 
@@ -222,8 +239,13 @@ export const rewindToolCmd: SlashCommand = {
   async run(args, ctx) {
     const state = ctx.perToolCheckpoint
     if (state === undefined) {
-      ctx.out("/rewind-tool: not wired in this surface\n")
-      return 0
+      // D-6 (UUX-6-17): say WHICH of the two gates is missing. Both set but
+      // still unwired (non-REPL surface) ⇒ name both requirements.
+      const missing = missingPerToolCheckpointGates(process.env)
+      return notWired(ctx.out, {
+        feature: "/rewind-tool",
+        gate: missing.length > 0 ? missing : PER_TOOL_CHECKPOINT_GATES,
+      })
     }
     const parsed = parseArgs(args)
     if (typeof parsed === "string") {

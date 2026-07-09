@@ -17,11 +17,12 @@
  *     `"0"` removes `/dream` from BUILTINS at load time — same effect as never
  *     registering it.
  *   - Without an injected {@link DreamSlashState} on
- *     {@link SlashContext.dream}, the command prints "auto-dream not wired in
- *     this surface" and exits 0 (byte-identical to NOT registering).
+ *     {@link SlashContext.dream}, the command prints the D-6 not-wired posture
+ *     (message + `hint: set QUANTA_AUTO_DREAM=1`) and exits 2 (UUX-5-09 —
+ *     exit 0 was a fake success).
  *   - When the surface IS wired but `QUANTA_AUTO_DREAM` is OFF, the trigger
- *     reports `enabled=false`; a manual `/dream` then returns `below_threshold`
- *     (nothing happens) and `/dream status` shows the feature is off.
+ *     reports `enabled=false`; a manual `/dream` prints the same hint and
+ *     exits 2 (nothing happened); `/dream status` shows the feature is off.
  *
  * Slice contract: lives in `src/apps/cli/**` — allowed to import `@/memory`
  * (the CLI surface carve-out). The body NEVER imports `@/llm` — the
@@ -30,6 +31,7 @@
  */
 
 import type { CrossSessionDreamTrigger } from "@/memory"
+import { NOT_WIRED_EXIT, notWired } from "./not-wired"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -38,7 +40,7 @@ import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /** Surface-time state injected by the REPL / session composer so `/dream`
  *  can trigger + inspect the cross-session dream. Absent ⇒ command prints
- *  "not wired" and exits 0, symmetric with `/memory` and `/side`. */
+ *  the D-6 not-wired posture and exits 2 (see `./not-wired.ts`). */
 export interface DreamSlashState {
   /** The live cross-session dream trigger (default-OFF when no policy). */
   readonly trigger: CrossSessionDreamTrigger
@@ -95,8 +97,10 @@ const runStatus = (ctx: SlashContext, state: DreamSlashState): number => {
 const runDreamNow = async (ctx: SlashContext, state: DreamSlashState): Promise<number> => {
   const t = state.trigger
   if (!t.enabled) {
-    ctx.out("/dream: auto-dream is OFF (set QUANTA_AUTO_DREAM=1 to enable)\n")
-    return 0
+    // D-6 (UUX-5-09): nothing will happen — exit 2, never a fake success.
+    ctx.out("/dream: auto-dream is OFF\n")
+    ctx.out("hint: set QUANTA_AUTO_DREAM=1 to enable\n")
+    return NOT_WIRED_EXIT
   }
   ctx.out("/dream: consolidating cross-session memory...\n")
   const outcome = await t.dream()
@@ -113,7 +117,8 @@ const runDreamNow = async (ctx: SlashContext, state: DreamSlashState): Promise<n
     case "below_threshold":
       // Reachable only if the feature flipped off between the guard and here.
       ctx.out("/dream: auto-dream is OFF\n")
-      return 0
+      ctx.out("hint: set QUANTA_AUTO_DREAM=1 to enable\n")
+      return NOT_WIRED_EXIT
     case "error":
       ctx.err(`/dream: failed — ${outcome.error.message}\n`)
       return 1
@@ -134,8 +139,9 @@ export const dreamCmd: SlashCommand = {
   category: "session",
   async run(args, ctx) {
     if (ctx.dream === undefined) {
-      ctx.out("/dream: auto-dream not wired in this surface\n")
-      return 0
+      // D-6 (UUX-5-09): the slot exists only when the composition root built
+      // the trigger, which is gated on QUANTA_AUTO_DREAM — name it.
+      return notWired(ctx.out, { feature: "/dream", gate: "QUANTA_AUTO_DREAM" })
     }
     const sub = args[0]
     const state = ctx.dream

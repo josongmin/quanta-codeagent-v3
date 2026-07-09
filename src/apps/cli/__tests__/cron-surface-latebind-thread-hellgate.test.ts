@@ -145,11 +145,13 @@ describe("B2 /cron LATE-BIND — the loop installs the slot after the engine min
   test("BEFORE install ⇒ /cron 'not wired'; AFTER install ⇒ live (red-on-injection)", async () => {
     const bind = makeLateBind()
 
-    // BEFORE the loop installs the adapter (engine not yet minted at compose time).
+    // BEFORE the loop installs the adapter (engine not yet minted at compose
+    // time) ⇒ D-6 not-wired posture (exit 2 + gate hint, UUX-2-22).
     {
       const { ctx, out } = cronCtx(bind.get())
-      expect(await runSlashCommand("/cron", ctx)).toBe(0)
+      expect(await runSlashCommand("/cron", ctx)).toBe(2)
       expect(out().toLowerCase()).toContain("not wired")
+      expect(out()).toContain("hint: set QUANTA_AUTOMATION=1")
     }
 
     // The loop mints the engine + installs the adapter (the late-bind setter).
@@ -175,7 +177,7 @@ describe("B2 /cron LATE-BIND — the loop installs the slot after the engine min
     bind.set(createCronSlashAdapter({ engine }))
     bind.set(undefined) // e.g. engine torn down
     const { ctx, out } = cronCtx(bind.get())
-    expect(await runSlashCommand("/cron", ctx)).toBe(0)
+    expect(await runSlashCommand("/cron", ctx)).toBe(2) // D-6 posture (UUX-2-22)
     expect(out().toLowerCase()).toContain("not wired")
   })
 })

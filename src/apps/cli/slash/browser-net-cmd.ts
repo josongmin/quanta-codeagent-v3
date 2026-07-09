@@ -16,6 +16,7 @@
  * Slice-clean: imports NO `@/tool/browser` VALUE — a duck-typed row mirror.
  */
 
+import { notWired } from "../not-wired"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 
 /** One network row — structural mirror of the browser tool's network entry
@@ -89,15 +90,14 @@ export const renderBrowserNet = (s: BrowserNetSnapshot): string => {
 }
 
 /** `/browser-net` — print the last browser network-capture + locator summary.
- *  Absent slot ⇒ "not wired" + exit 0 (default-OFF byte-identical). */
+ *  Absent slot ⇒ D-6 not-wired posture + exit 2 (hint: QUANTA_BROWSER_NETWORK). */
 export const browserNetCmd: SlashCommand = {
   name: "/browser-net",
   describe: "Show the last browser network-capture + locator summary (browser_network)",
   category: "other",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.browserNet === undefined) {
-      ctx.out("/browser-net: not wired in this surface\n")
-      return 0
+      return notWired(ctx.out, { feature: "/browser-net", gate: "QUANTA_BROWSER_NETWORK" })
     }
     if (args.length > 0) {
       ctx.err("/browser-net: takes no arguments\n")

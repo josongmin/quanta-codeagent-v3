@@ -10,10 +10,11 @@
  * `set("onboarding")`. The identity adapter routes the onboarding virtual mode
  * through its dedicated `onOnboarding` hook (it is NOT a `ModeVariantKey`, so it
  * cannot ride the mode-variant registry — see `identity-mode-adapter.ts`). Absent
- * identity wire OR an adapter without the onboarding hook ⇒ `/onboard` prints a
- * clean "not wired" / rejects — default-OFF byte-identical.
+ * identity wire ⇒ D-6 not-wired posture + exit 2 (UUX-4-27 — exit 0 claimed
+ * success while nothing happened); adapter without the onboarding hook ⇒ rejects.
  */
 
+import { notWired } from "../not-wired"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 
 /** `/onboard` — switch the session into the onboarding identity mode. */
@@ -23,8 +24,12 @@ export const onboardCmd: SlashCommand = {
   category: "config",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.identity === undefined) {
-      ctx.out("/onboard: not wired in this surface\n")
-      return 0
+      // No env gate exists for the identity wire — say what IS required
+      // instead of inventing one (D-6, UUX-4-27).
+      return notWired(ctx.out, {
+        feature: "/onboard",
+        hint: "requires the identity-mode wire (interactive REPL surface)",
+      })
     }
     if (args.length > 0) {
       ctx.err("/onboard: takes no arguments\n")

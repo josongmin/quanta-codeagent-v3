@@ -12,14 +12,15 @@
  *                  notes "still streaming; transcript not yet merged".
  *   - `cancel`   ⇒ fire the entry's AbortController (the background body unwinds).
  *
- * Absent slot (`ctx.background === undefined`) ⇒ "not wired" + exit 0
- * (default-OFF byte-identical, parity with every other presence-gated panel).
+ * Absent slot (`ctx.background === undefined`) ⇒ D-6 not-wired posture +
+ * exit 2 with the QUANTA_BG_TURN hint (UUX-2-22).
  *
  * PURE render: the clock is injected via `ctx.now` so the elapsed column is
  * deterministic under test; no `@/agent` import, no `process.*` reads.
  */
 
 import { cyan, dim, gray, green, red, yellow } from "@/ui/ui-helpers"
+import { notWired } from "./not-wired"
 import type {
   BackgroundPortalView,
   BackgroundTurnRow,
@@ -132,12 +133,12 @@ const renderCancel = (
 
 export const backgroundCmd: SlashCommand = {
   name: "/background",
-  describe: "Manage turns moved to the background (Ctrl+B). Usage: /background [list|reattach <id>|cancel <id>]",
+  describe:
+    "Manage turns moved to the background (Ctrl+B). Usage: /background [list|reattach <id>|cancel <id>]",
   category: "session",
   async run(args: readonly string[], ctx: SlashContext): Promise<number> {
     if (ctx.background === undefined) {
-      ctx.out("/background: not wired in this surface\n")
-      return 0
+      return notWired(ctx.out, { feature: "/background", gate: "QUANTA_BG_TURN" })
     }
     const view = ctx.background
     const sub = args[0] ?? "list"

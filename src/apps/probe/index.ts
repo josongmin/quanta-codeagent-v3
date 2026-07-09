@@ -4,8 +4,10 @@
  *
  * READ-ONLY, NON-authoritative inspector (RFC §1.2 / §3 원칙8). Never writes
  * or deletes anything; never crashes on malformed input (degrades with a clear
- * message). Exit 0 on success; exit 1 ONLY on a usage error (bad/missing path
- * or no argument). `main(argv)` is exported so tests invoke it directly.
+ * message). Exit codes: 0 on success; 1 ONLY on a usage error (bad/missing
+ * path or no argument); 2 when `--failed` is asked of a run-dir with NO
+ * summary recorded (UUX-5-22 — "unknown" must never be reported as "all
+ * failed"). `main(argv)` is exported so tests invoke it directly.
  */
 import type { TrajectoryEvent } from "@/shared"
 import { errMessage, logger, setTerminalIo } from "@/shared"
@@ -71,7 +73,10 @@ const selectInstances = (run: ParsedRun, only?: string): Array<[string, AttemptT
 
 const isFailed = (summary: RunSummaryLike | undefined, id: string): boolean => {
   const hit = summary?.instances?.find((i) => i.id === id)
-  if (hit === undefined) return true // no summary ⇒ inspect all (can't prove pass)
+  // No summary row ⇒ inspect (can't prove pass). NOTE: `main` pairs the
+  // run-level missing-summary case with an explicit note + exit 2 (UUX-5-22)
+  // so this degrade is never silently reported as "all failed".
+  if (hit === undefined) return true
   return hit.passed !== true || hit.verdict === "degraded"
 }
 
@@ -121,6 +126,23 @@ const renderTriage = (run: ParsedRun, args: Args): void => {
     emit(`    hint: ${t.triage_hint}`)
     for (const e of t.evidence) emit(`    evidence: ${e}`)
   }
+}
+
+/** `--failed` over a run dir. UUX-5-22 — a MISSING summary is "unknown", not
+ *  "everything failed": `isFailed()` degrades to inspect-all (the tool stays
+ *  an inspector), but the caller is told and the exit code (2) never claims
+ *  an answer. With a summary the historical contract is unchanged (exit 0,
+ *  only summary-failed instances triaged). */
+const renderFailedView = (run: ParsedRun, args: Args): number => {
+  if (run.summary === undefined) {
+    emit(
+      "note: no run summary recorded for this run dir — cannot distinguish failed from passed (run in progress, crashed, or wrong dir?); triaging ALL instances",
+    )
+    renderTriage(run, args)
+    return 2
+  }
+  renderTriage(run, args)
+  return 0
 }
 
 /** Project W-D summary into a certainty-free shape (drop `verdict` etc.). */
@@ -225,10 +247,7 @@ export const main = async (argv: string[]): Promise<number> => {
     renderFunnelView(run, args)
     return 0
   }
-  if (args.failed) {
-    renderTriage(run, args)
-    return 0
-  }
+  if (args.failed) return renderFailedView(run, args)
   renderOverview(run, args)
   return 0
 }

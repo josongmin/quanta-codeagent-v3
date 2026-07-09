@@ -308,11 +308,12 @@ describe("jul-04 /kb surface-adapter wiring — buildReplSlashCtx populates the 
     expect(out).toContain("1 doc")
   })
 
-  test("store ABSENT (thread broken) ⇒ /kb prints 'not wired' through buildReplSlashCtx (red-on-injection)", async () => {
+  test("store ABSENT (thread broken) ⇒ /kb prints 'not wired' + exit 2 through buildReplSlashCtx (red-on-injection)", async () => {
     const { code, out } = await runKbThroughSlashCtx(undefined)
-    expect(code).toBe(0)
+    expect(code).toBe(2) // D-6 (UUX-2-22): not-wired is exit 2 + gate hint
     // Breaking the surface thread MUST degrade to the honest not-wired line — never
     // a silent empty panel or a crash.
     expect(out.toLowerCase()).toContain("not wired")
+    expect(out).toContain("hint: set QUANTA_PROJECTS_KB=1")
   })
 })
