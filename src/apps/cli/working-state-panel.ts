@@ -8,10 +8,12 @@
  * the USER has no window into it. This module is that window:
  *
  *   - {@link renderWorkingStatePanel} — full bordered box (`/state` body).
- *   - {@link formatWorkingStateTransient} — one-line status-bar overlay
- *     ("state: 2 blockers, 3 next steps").
- *   - {@link formatWorkingStateSummaryRow} — single line a turn-summary
- *     caller can splice into its existing rows.
+ *
+ * (UUX-5-12: two sibling formatters — a one-line status-bar transient and a
+ * turn-summary row — were DELETED 2026-07-10. They shipped with this panel but
+ * no status-bar/turn-summary caller was ever wired (only their unit tests
+ * imported them), i.e. dead public API. Re-derive from the panel line builder
+ * if a surface actually adopts them.)
  *
  * Slice discipline:
  *   - Lives in `src/apps/cli`. Imports `@/agent` for the `WorkingState` type
@@ -47,9 +49,6 @@ const MAX_DEFERRED = 6
  *  pathological `what`/`reason` string blowing horizontal width. Truncated via
  *  a 1-char ellipsis (`…`) so visible width is exactly `MAX_LINE_LEN`. */
 const MAX_LINE_LEN = 96
-/** Cap on the transient status-bar text (terminal status-bar paints in a
- *  single row, no wrap). Defensive against huge counts (`9999`). */
-const MAX_TRANSIENT_LEN = 80
 
 const truncate = (s: string, max = MAX_LINE_LEN): string =>
   s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`
@@ -186,53 +185,6 @@ export const renderWorkingStatePanel = (snap: WorkingStateSnapshot | undefined):
   })
 }
 
-/** Compact one-line transient for a status-bar overlay. Empty ⇒ `""` so
- *  the caller can skip painting without a branch. Caps the printed length
- *  so a wide terminal doesn't get a runaway row from `9999×` counters. */
-export const formatWorkingStateTransient = (snap: WorkingStateSnapshot | undefined): string => {
-  if (snap === undefined || isEmpty(snap)) return ""
-  const parts: string[] = []
-  if (snap.blockers.length > 0) {
-    parts.push(`${snap.blockers.length} blocker${snap.blockers.length === 1 ? "" : "s"}`)
-  }
-  if (snap.nextStepQueue.length > 0) {
-    parts.push(
-      `${snap.nextStepQueue.length} next step${snap.nextStepQueue.length === 1 ? "" : "s"}`,
-    )
-  }
-  if (snap.ownerShortlist.length > 0) {
-    parts.push(`${snap.ownerShortlist.length} owner${snap.ownerShortlist.length === 1 ? "" : "s"}`)
-  }
-  if (snap.deferredValidation.length > 0) {
-    parts.push(
-      `${snap.deferredValidation.length} deferred validation${
-        snap.deferredValidation.length === 1 ? "" : "s"
-      }`,
-    )
-  }
-  if (parts.length === 0) {
-    // hypothesis-only snapshot — surface the posture so the bar shows
-    // SOMETHING when state is non-empty but has no countable fields.
-    return truncate(`[state updated: ${inferPosture(snap)}]`, MAX_TRANSIENT_LEN)
-  }
-  return truncate(`[state updated: ${parts.join(", ")}]`, MAX_TRANSIENT_LEN)
-}
-
-/** Single-row format suitable for splicing into a turn-summary box. Empty
- *  snapshot ⇒ `""` (the caller drops the row). Uses the same posture +
- *  count tokens as the transient so the two surfaces never disagree. */
-export const formatWorkingStateSummaryRow = (snap: WorkingStateSnapshot | undefined): string => {
-  if (snap === undefined || isEmpty(snap)) return ""
-  const posture = inferPosture(snap)
-  const parts: string[] = [postureColor(posture)(posture)]
-  if (snap.blockers.length > 0) parts.push(red(`${snap.blockers.length}×blocker`))
-  if (snap.nextStepQueue.length > 0) parts.push(`${snap.nextStepQueue.length}×next`)
-  if (snap.deferredValidation.length > 0) {
-    parts.push(yellow(`${snap.deferredValidation.length}×deferred`))
-  }
-  return `${cyan("◈ state:")} ${parts.join(" · ")}`
-}
-
 /** Cap the number of tool names painted in the skill-scope panel so a wide
  *  allowlist (or a huge hidden set) does not blow the terminal. The trailing
  *  `… +N more` marker preserves the total signal. */
@@ -286,5 +238,4 @@ export const __internal = Object.freeze({
   isEmpty,
   truncate,
   MAX_LINE_LEN,
-  MAX_TRANSIENT_LEN,
 })

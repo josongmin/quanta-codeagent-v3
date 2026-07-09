@@ -4,12 +4,18 @@
  * PURE logic: parsing operator input into hunk ids and turning an executor
  * result into the ConfirmDecision the gate consumes.
  */
-import { describe, expect, it } from "bun:test"
+import { afterEach, describe, expect, it } from "bun:test"
 import {
   parseHunkSelection,
+  parseHunkSelectionDetailed,
   renderHunkChoices,
   shapePartialDecision,
 } from "../../../src/apps/cli/repl/hunk-select"
+import {
+  __resetOperatorNoticeSinkForTest,
+  installOperatorNoticeSink,
+  type OperatorNotice,
+} from "../../../src/shared"
 import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
 
 const IDS = ["h1", "h2", "h3"]
@@ -48,6 +54,53 @@ describe("parseHunkSelection", () => {
   })
   it("dedupes and preserves diff order regardless of input order", () => {
     expect(parseHunkSelection("3,1,3,1", IDS)).toEqual(["h1", "h3"])
+  })
+})
+
+/**
+ * UUX-6-15 HELLGATE — the picker must not SILENTLY drop invalid tokens. The
+ * pure detailed parse reports which tokens contributed nothing; the
+ * back-compat `parseHunkSelection` wrapper (called from the LOCKED
+ * runtime-context-compose picker) surfaces them as an "ignored: …" operator
+ * notice. Selection semantics stay byte-identical (paired asserts below).
+ */
+describe("UUX-6-15 — parseHunkSelectionDetailed reports rejected tokens", () => {
+  afterEach(() => {
+    __resetOperatorNoticeSinkForTest()
+  })
+
+  it("non-numeric / out-of-range / zero tokens land in `ignored` (selection unchanged)", () => {
+    const { selected, ignored } = parseHunkSelectionDetailed("1,99,foo,0,-2", IDS)
+    expect(selected).toEqual(["h1"]) // identical to parseHunkSelection
+    expect(ignored).toEqual(["99", "foo", "0", "-2"])
+  })
+
+  it("a fully-out-of-range or reversed range token is ignored; a partially-useful one is not", () => {
+    expect(parseHunkSelectionDetailed("3-1", IDS).ignored).toEqual(["3-1"])
+    expect(parseHunkSelectionDetailed("7-9", IDS).ignored).toEqual(["7-9"])
+    // "1-999999999" still selects every id ⇒ it contributed ⇒ NOT reported.
+    const huge = parseHunkSelectionDetailed("1-999999999", IDS)
+    expect(huge.selected).toEqual(IDS)
+    expect(huge.ignored).toEqual([])
+  })
+
+  it("valid-only input and the all/none fast paths report nothing", () => {
+    expect(parseHunkSelectionDetailed("1,3", IDS).ignored).toEqual([])
+    expect(parseHunkSelectionDetailed("all", IDS).ignored).toEqual([])
+    expect(parseHunkSelectionDetailed("none", IDS).ignored).toEqual([])
+    expect(parseHunkSelectionDetailed("", IDS).ignored).toEqual([])
+  })
+
+  it("parseHunkSelection (locked-caller seam) emits ONE 'ignored: …' notice for dropped tokens", () => {
+    const seen: OperatorNotice[] = []
+    installOperatorNoticeSink((n) => seen.push(n))
+    expect(parseHunkSelection("1,99,foo", IDS)).toEqual(["h1"])
+    expect(seen.length).toBe(1)
+    const notice = seen[0] as OperatorNotice
+    expect(notice.message).toContain("ignored: 99, foo")
+    // Paired control — a fully-valid selection emits nothing.
+    expect(parseHunkSelection("1,2", IDS)).toEqual(["h1", "h2"])
+    expect(seen.length).toBe(1)
   })
 })
 

@@ -173,18 +173,15 @@ const renderTurnsList = (
   ctx.out(`${HRULE}\n`)
 }
 
-/** Group invokes by tool name into a queue we can `.shift()` in arrival order. */
-const buildTsQueue = (events: readonly HistoryToolEvent[] | undefined): Map<string, string[]> => {
-  const tsQueue = new Map<string, string[]>()
-  if (events === undefined) return tsQueue
-  for (const ev of events) {
-    if (ev.kind !== "invoke") continue
-    const arr = tsQueue.get(ev.tool) ?? []
-    arr.push(ev.ts)
-    tsQueue.set(ev.tool, arr)
-  }
-  return tsQueue
-}
+/** Flatten the envelope's `invoke` events in GLOBAL arrival order (UUX-6-24).
+ *  The message-derived tool list and the invoke stream enumerate the same
+ *  calls chronologically, so row i of the flat tool list pairs with invoke i.
+ *  (The previous per-NAME FIFO desynced under `--last` truncation: queues were
+ *  never advanced past the hidden rows, so a duplicated tool's visible call
+ *  rendered an EARLIER call's clock.) */
+const buildInvokeSequence = (
+  events: readonly HistoryToolEvent[] | undefined,
+): readonly HistoryToolEvent[] => (events ?? []).filter((ev) => ev.kind === "invoke")
 
 /** Decide the glyph + trailing label for one tool row. Retry fires when an
  *  OK tool follows a FAIL of the same name back-to-back (best-effort: no arg
@@ -208,8 +205,9 @@ const renderToolsList = (
   cap: number,
 ): void => {
   // Build the canonical tool sequence from the message array. Envelope events
-  // (when present) supply the wall-clock timestamp via a tool_use_id ⇄ event
-  // lookup — but the LIST itself is anchored to messages so a turn-in-flight
+  // (when present) supply the wall-clock timestamp, paired by GLOBAL call
+  // order (invoke i ⇄ tool row i; `HistoryToolEvent` carries no tool_use_id)
+  // — but the LIST itself is anchored to messages so a turn-in-flight
   // (no event yet) still renders.
   const flat: DerivedTool[] = []
   for (const t of turns) flat.push(...t.tools)
@@ -218,12 +216,16 @@ const renderToolsList = (
     ctx.out("(no tool calls yet)\n")
     return
   }
-  const tsQueue = buildTsQueue(events)
+  const invokes = buildInvokeSequence(events)
+  const sliceStart = flat.length - slice.length
   ctx.out(`─ Recent tool calls ${HRULE}\n\n`)
   let prev: DerivedTool | undefined
-  for (const t of slice) {
-    const tsArr = tsQueue.get(t.name)
-    const ts = tsArr !== undefined && tsArr.length > 0 ? tsArr.shift() : undefined
+  for (const [j, t] of slice.entries()) {
+    // Pair by global call order; the name guard degrades a misaligned stream
+    // (e.g. an in-flight call whose invoke event is not flushed yet) to the
+    // honest `--:--:--` instead of a wrong-but-plausible clock.
+    const candidate = invokes[sliceStart + j]
+    const ts = candidate !== undefined && candidate.tool === t.name ? candidate.ts : undefined
     const clock = ts !== undefined ? formatClock(ts) : "--:--:--"
     const { glyph, tail } = formatToolRow(t, prev)
     ctx.out(`  ${glyph} ${clock}  ${t.name.padEnd(8)}${tail}\n`)

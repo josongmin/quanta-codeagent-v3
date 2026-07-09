@@ -321,6 +321,63 @@ describe("/history tools", () => {
     expect(c.out).toContain("(retry, ✓)")
   })
 
+  test("UUX-6-24 — duplicate tool + cap: the visible row gets ITS OWN invoke ts, not the first-by-name", async () => {
+    // Two Bash calls; `--last 1` shows only the SECOND. The old per-NAME FIFO
+    // queue was never advanced past cap-truncated rows, so the visible second
+    // call rendered the FIRST call's wall clock (:01 instead of :02). Seconds
+    // survive any timezone conversion (offsets are minute-granular), so the
+    // assertion pins the seconds digits.
+    const events: HistoryToolEvent[] = [
+      { ts: "2026-05-24T14:23:01Z", tool: "Bash", kind: "invoke" },
+      { ts: "2026-05-24T14:23:01Z", tool: "Bash", kind: "result", ok: true },
+      { ts: "2026-05-24T14:23:02Z", tool: "Bash", kind: "invoke" },
+      { ts: "2026-05-24T14:23:02Z", tool: "Bash", kind: "result", ok: true },
+    ]
+    const msgs: Message[] = [
+      userMsg("go"),
+      assistantTool("a", "Bash"),
+      toolResult("a", false),
+      assistantTool("b", "Bash"),
+      toolResult("b", false),
+    ]
+    const history: HistorySessionState = {
+      messages: () => msgs,
+      events: async () => events,
+    }
+    const c = buildCtx(history)
+    await runSlashCommand("/history --last 1 tools", c.ctx)
+    expect(c.out).toMatch(/\d\d:\d\d:02/)
+    expect(c.out).not.toMatch(/\d\d:\d\d:01/)
+  })
+
+  test("UUX-6-24 — interleaved duplicates without cap keep per-call clocks aligned", async () => {
+    const events: HistoryToolEvent[] = [
+      { ts: "2026-05-24T14:23:01Z", tool: "Bash", kind: "invoke" },
+      { ts: "2026-05-24T14:23:02Z", tool: "Read", kind: "invoke" },
+      { ts: "2026-05-24T14:23:03Z", tool: "Bash", kind: "invoke" },
+    ]
+    const msgs: Message[] = [
+      userMsg("go"),
+      assistantTool("a", "Bash"),
+      toolResult("a", false),
+      assistantTool("b", "Read"),
+      toolResult("b", false),
+      assistantTool("c", "Bash"),
+      toolResult("c", false),
+    ]
+    const history: HistorySessionState = {
+      messages: () => msgs,
+      events: async () => events,
+    }
+    const c = buildCtx(history)
+    await runSlashCommand("/history tools", c.ctx)
+    const rows = c.out.split("\n").filter((l) => /(Bash|Read)/.test(l))
+    expect(rows.length).toBe(3)
+    expect(rows[0]).toMatch(/\d\d:\d\d:01.*Bash/)
+    expect(rows[1]).toMatch(/\d\d:\d\d:02.*Read/)
+    expect(rows[2]).toMatch(/\d\d:\d\d:03.*Bash/)
+  })
+
   test("envelope events supply HH:MM:SS wall-clock", async () => {
     const events: HistoryToolEvent[] = [
       { ts: "2026-05-24T14:23:01Z", tool: "Read", kind: "invoke" },

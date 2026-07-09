@@ -70,8 +70,12 @@ export interface SessionLoopSinks {
   /** Fold the per-turn token delta into the cost panel + render the
    *  turn-summary panel + reset the summary collector. */
   readonly renderAndResetSummary: (outcome: { messages: readonly Message[] }) => void
-  /** Snapshot the lifecycle pills (subagent / follow-up / mcp) + flush. */
-  readonly flushLifecyclePills: () => void
+  /** Snapshot the lifecycle pills (subagent / follow-up / mcp) + flush.
+   *  UUX-6-23: the loop passes its live `externalPromptQueue.size()` so the
+   *  follow-up pill counts mid-turn-queued prompts too (the queue is born
+   *  inside the loop, AFTER the sinks are composed — hence the argument
+   *  rather than a captured dep). Optional for legacy/one-off callers. */
+  readonly flushLifecyclePills: (live?: { readonly externalQueued: number }) => void
   /** Render a NON-abort turn-level error inline + on the status bar. */
   readonly renderTurnError: (err: unknown) => void
 }
@@ -625,7 +629,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
               // so the per-turn render is byte-identical across both paths.
               sinks.renderTurnDashboard()
               sinks.renderAndResetSummary(result)
-              sinks.flushLifecyclePills()
+              sinks.flushLifecyclePills({ externalQueued: externalPromptQueue.size() })
               if (result.outcomeReason !== undefined) {
                 lastTurnOutcome = lastTurnOutcomeFromAgentOutcome({
                   reason: result.outcomeReason,
@@ -824,7 +828,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
                 surfaceState = updateSessionState(surfaceState, { history: result.messages })
                 sinks.renderTurnDashboard()
                 sinks.renderAndResetSummary(result)
-                sinks.flushLifecyclePills()
+                sinks.flushLifecyclePills({ externalQueued: externalPromptQueue.size() })
                 if (result.outcomeReason !== undefined) {
                   lastTurnOutcome = lastTurnOutcomeFromAgentOutcome({
                     reason: result.outcomeReason,

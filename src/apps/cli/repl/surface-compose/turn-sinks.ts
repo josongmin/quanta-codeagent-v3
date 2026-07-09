@@ -73,14 +73,27 @@ const foldCostPanelIfWired = (
   foldCostPanelDelta(panel, metrics.snapshot(), prev)
 }
 
-const snapshotAndFlushLifecyclePills = (setup: SessionSetupResult): void => {
+const snapshotAndFlushLifecyclePills = (
+  setup: SessionSetupResult,
+  live?: { readonly externalQueued: number },
+): void => {
   if (setup.lifecycleTaskRegistry !== undefined) {
     const running = setup.lifecycleTaskRegistry.pendingIds().length
     const total = setup.lifecycleTaskRegistry.list().length
     setup.lifecyclePills.update({ subagent: { running, total } })
   }
-  if (setup.lifecycleFollowUpQueue !== undefined) {
-    setup.lifecyclePills.update({ followUp: { queued: setup.lifecycleFollowUpQueue.size() } })
+  // UUX-6-23 — the pill must count BOTH pending-prompt sources: the agent-level
+  // follow-up queue (ADR-0037, drained by control-poll) AND the session loop's
+  // externalPromptQueue (where mid-turn captured lines wait for the next-turn
+  // drain). The loop threads its live count via `live`; reading only the
+  // lifecycle queue desynced the pill from a prompt queued mid-turn. Neither
+  // source wired ⇒ no patch (legacy byte-identical); `queued: 0` renders
+  // nothing, so patching the sum is safe once either source exists.
+  if (setup.lifecycleFollowUpQueue !== undefined || live !== undefined) {
+    const lifecycleQueued = setup.lifecycleFollowUpQueue?.size() ?? 0
+    setup.lifecyclePills.update({
+      followUp: { queued: lifecycleQueued + (live?.externalQueued ?? 0) },
+    })
   }
   // WS-G (UUX-6-22) — the MCP pill used to be BOOT-ONCE (set exactly once by
   // bootstrap); re-derive it per flush from the live tools + the health
@@ -123,8 +136,8 @@ export const composeTurnSinks = (
       if (summary !== "") process.stderr.write(summary)
       turnSummary.reset()
     },
-    flushLifecyclePills: (): void => {
-      snapshotAndFlushLifecyclePills(setup)
+    flushLifecyclePills: (live): void => {
+      snapshotAndFlushLifecyclePills(setup, live)
     },
     renderTurnError: (error): void => renderTurnError(error, statusBar),
   }

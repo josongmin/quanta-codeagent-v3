@@ -23,9 +23,13 @@
  *     each other on `outcome`; identical-but-duplicate records are deduped.
  */
 
+import { emitOperatorNotice } from "@/shared"
 import { runtimeConfig } from "@/shared/runtime-config"
 import { collapseAssessment } from "./assessment-collapse"
-import { emitAutoApprovalReview } from "./auto-approval-review-observer"
+import {
+  emitAutoApprovalReview,
+  hasAutoApprovalReviewObserver,
+} from "./auto-approval-review-observer"
 import { buildDecision, isAdmissible, isAllowed } from "./outcome"
 import { emitPermissionDecision, type PermissionOutcomeLabel } from "./recorder"
 import type {
@@ -321,6 +325,23 @@ export const reviewAction = async (
       allowed: isAllowed(validated.outcome),
       sessionId: ctx.sessionId,
       turnId: ctx.turnId,
+    })
+  }
+  // UUX-1-21 — a guardian AUTO-approve (no human prompt) must never be
+  // invisible. The typed observer above renders it when a surface registered
+  // one (the CLI does so only under the approval-ladder opt-in) — but
+  // `selectDefaultReviewer` can route to the guardian in the DEFAULT posture
+  // too (per-thread `on-request` authority / legacy workspace-write fallback),
+  // where NO observer exists. Fall back to the operator-notice bus in exactly
+  // that case: observer registered ⇒ skip (no double-render); no sink
+  // installed ⇒ emit is a no-op (headless/bench byte-identical). Denials are
+  // intentionally excluded — they already surface via the gate's deny path.
+  if (validated.outcome === "guardian_approved" && !hasAutoApprovalReviewObserver()) {
+    emitOperatorNotice({
+      severity: "info",
+      source: "guardian",
+      message: `guardian approved: ${action.tool}`,
+      hint: "auto-approved without a prompt",
     })
   }
   return validated

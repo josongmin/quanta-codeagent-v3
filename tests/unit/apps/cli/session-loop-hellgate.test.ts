@@ -120,20 +120,26 @@ const buildSinks = (): SessionLoopSinks & {
   events: string[]
   errs: unknown[]
   summaryArgs: Array<{ messages: readonly Message[] }>
+  pillArgs: Array<{ readonly externalQueued: number } | undefined>
 } => {
   const events: string[] = []
   const errs: unknown[] = []
   const summaryArgs: Array<{ messages: readonly Message[] }> = []
+  const pillArgs: Array<{ readonly externalQueued: number } | undefined> = []
   return {
     events,
     errs,
     summaryArgs,
+    pillArgs,
     renderTurnDashboard: () => events.push("dashboard"),
     renderAndResetSummary: (o) => {
       events.push("summary")
       summaryArgs.push(o)
     },
-    flushLifecyclePills: () => events.push("pills"),
+    flushLifecyclePills: (live) => {
+      events.push("pills")
+      pillArgs.push(live)
+    },
     renderTurnError: (err) => {
       events.push("error")
       errs.push(err)
@@ -836,6 +842,10 @@ describe("session-loop — one-shot branch (argPrompt set)", () => {
       sinks,
     })
     expect(sinks.events).toEqual(["dashboard", "summary", "pills"])
+    // UUX-6-23 — the loop threads its LIVE externalPromptQueue count into the
+    // flush so the follow-up pill can count mid-turn-queued prompts (nothing
+    // queued in this scenario ⇒ 0, but the wire itself must be present).
+    expect(sinks.pillArgs).toEqual([{ externalQueued: 0 }])
   })
 
   test("renderAndResetSummary receives the runOnce outcome (messages threaded through)", async () => {
@@ -996,6 +1006,8 @@ describe("session-loop — interactive branch (no argPrompt)", () => {
       registerExitTeardown: () => undefined,
     })
     expect(sinks.events).toContain("pills")
+    // UUX-6-23 — the interactive flush carries the live external-queue count too.
+    expect(sinks.pillArgs).toEqual([{ externalQueued: 0 }])
   })
 
   test("renderTurnError fires when the runtime-backed turn throws", async () => {

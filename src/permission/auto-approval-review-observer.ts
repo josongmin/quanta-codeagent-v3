@@ -63,6 +63,12 @@ export const __resetAutoApprovalReviewObserver = (): void => {
   observer = null
 }
 
+/** UUX-1-21 — is a surface observer registered? The reviewer uses this to
+ *  fall back to the operator-notice bus for a guardian auto-approve in the
+ *  DEFAULT posture (no observer ⇒ the tool_progress rendering never fires,
+ *  so the approval would otherwise be invisible). */
+export const hasAutoApprovalReviewObserver = (): boolean => observer !== null
+
 /** Emit one event through the registered observer. No-op when none is set;
  *  swallows observer throws (a UI/telemetry fault must not abort a decision). */
 export const emitAutoApprovalReview = (event: AutoApprovalReviewEvent): void => {

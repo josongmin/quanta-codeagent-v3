@@ -3,8 +3,7 @@
  * WorkingState surfacing).
  *
  * Coverage axes:
- *   - empty snapshot          → renderer shows "(empty)" pill, transient
- *                                + summary row are "".
+ *   - empty snapshot          → renderer shows "(empty)" pill.
  *   - partial snapshot        → only filled fields appear; absent ones
  *                                contribute no rows.
  *   - full snapshot           → every field section is painted; row order
@@ -23,8 +22,6 @@
  *                                of the model's plan scratchpad, never a live
  *                                turn-lifecycle status this pure renderer
  *                                cannot verify.
- *   - transient cap           → very long transient capped at
- *                                `MAX_TRANSIENT_LEN`.
  *   - slash registration      → BUILTINS includes `/state` + `/working-state`.
  *   - slash command run path  → not-wired branch, success branch, args
  *                                rejection branch.
@@ -37,12 +34,10 @@
 import { describe, expect, test } from "bun:test"
 import type { WorkingState } from "../../../src/agent"
 import { BUILTINS, runSlashCommand, type SlashContext } from "../../../src/apps/cli/slash-commands"
-import {
-  __internal,
-  formatWorkingStateSummaryRow,
-  formatWorkingStateTransient,
-  renderWorkingStatePanel,
-} from "../../../src/apps/cli/working-state-panel"
+// UUX-5-12 (2026-07-10): `formatWorkingStateTransient` / `formatWorkingStateSummaryRow`
+// were deleted from the panel module — they had NO production consumer (only
+// these tests imported them). Their describes were removed with them.
+import { __internal, renderWorkingStatePanel } from "../../../src/apps/cli/working-state-panel"
 import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
 
 const emptySnap = (): WorkingState => ({
@@ -240,76 +235,6 @@ describe("renderWorkingStatePanel", () => {
     expect(out).not.toMatch(/(^|\n)\s*Posture:/)
     // And the word "idle" (a live-lifecycle term) must never surface.
     expect(out).not.toContain("idle")
-  })
-})
-
-describe("formatWorkingStateTransient", () => {
-  test("empty snapshot ⇒ empty string (caller no-ops)", () => {
-    expect(formatWorkingStateTransient(emptySnap())).toBe("")
-    expect(formatWorkingStateTransient(undefined)).toBe("")
-  })
-
-  test("full snapshot ⇒ '[state updated: …]' with plural-correct counters", () => {
-    setColorPolicy("off")
-    const snap: WorkingState = {
-      ownerShortlist: [
-        { file: "a.ts", reason: "x" },
-        { file: "b.ts", reason: "y" },
-      ],
-      blockers: [{ what: "b1", surface: "runtime" }],
-      nextStepQueue: [{ what: "n1" }, { what: "n2" }, { what: "n3" }],
-      deferredValidation: [],
-    }
-    const out = stripAnsi(formatWorkingStateTransient(snap))
-    expect(out).toBe("[state updated: 1 blocker, 3 next steps, 2 owners]")
-  })
-
-  test("hypothesis-only snapshot ⇒ falls back to posture", () => {
-    setColorPolicy("off")
-    const snap: WorkingState = { ...emptySnap(), hypothesis: "framing" }
-    const out = stripAnsi(formatWorkingStateTransient(snap))
-    expect(out).toBe("[state updated: investigating]")
-  })
-
-  test("very long transient ⇒ capped at MAX_TRANSIENT_LEN", () => {
-    setColorPolicy("off")
-    const snap: WorkingState = {
-      ownerShortlist: Array.from({ length: 999 }, (_, i) => ({
-        file: `f${i}.ts`,
-        reason: `r${i}`,
-      })),
-      blockers: Array.from({ length: 999 }, () => ({
-        what: "x",
-        surface: "runtime" as const,
-      })),
-      nextStepQueue: Array.from({ length: 999 }, () => ({ what: "x" })),
-      deferredValidation: Array.from({ length: 999 }, () => ({ rail: "p", reason: "r" })),
-    }
-    const out = stripAnsi(formatWorkingStateTransient(snap))
-    expect(out.length).toBeLessThanOrEqual(__internal.MAX_TRANSIENT_LEN)
-  })
-})
-
-describe("formatWorkingStateSummaryRow", () => {
-  test("empty ⇒ ''", () => {
-    expect(formatWorkingStateSummaryRow(emptySnap())).toBe("")
-    expect(formatWorkingStateSummaryRow(undefined)).toBe("")
-  })
-
-  test("full ⇒ posture + counted tokens (stable order)", () => {
-    setColorPolicy("off")
-    const snap: WorkingState = {
-      ownerShortlist: [],
-      blockers: [{ what: "b", surface: "runtime" }],
-      nextStepQueue: [{ what: "n1" }, { what: "n2" }],
-      deferredValidation: [{ rail: "pytest", reason: "later" }],
-    }
-    const out = stripAnsi(formatWorkingStateSummaryRow(snap))
-    expect(out).toContain("◈ state:")
-    expect(out).toContain("blocked")
-    expect(out).toContain("1×blocker")
-    expect(out).toContain("2×next")
-    expect(out).toContain("1×deferred")
   })
 })
 
