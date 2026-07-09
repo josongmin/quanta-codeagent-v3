@@ -26,7 +26,7 @@ import {
 } from "@/agent/observability-wire"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
-import { promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
+import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/agent/system-prompt"
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import {
   type AssemblerEnv,
@@ -441,6 +441,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
         ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]
         : []
+    const webEnvPosture = resolveCliDefaultEnvPosture(env)
     const base: RuntimeAgentConfigBase = {
       llm,
       // A2 — the default tools with the SHARED artifact registry threaded in so
@@ -451,8 +452,12 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       stream: new StdoutStream(),
       permission,
       messages: [],
-      system: buildSystemPrompt(cwd),
-      promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive"),
+      // jul-9 — the web/Tauri surface is the user's OWN machine too, so honor
+      // QUANTA_ENV_DEFAULT (default-OFF ⇒ "frozen" ⇒ byte-identical).
+      system: buildSystemPrompt(cwd, { envPosture: webEnvPosture }),
+      promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", {
+        envPosture: webEnvPosture,
+      }),
       cwd,
       maxTurns: 200,
       signal: abort.signal,
