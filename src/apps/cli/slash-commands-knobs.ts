@@ -5,11 +5,12 @@
  * Subcommands:
  *   - `/knobs show`            (default) compact box of currently active knobs
  *   - `/knobs list`            full inventory (all 12 registered) + active marks
- *   - `/knobs set <id>=<val>`  session-level override (mutates the bootstrap's
- *                              sessionOverrides bag — re-resolved on next read)
+ *   - `/knobs set <id>=<val>`  session-level override (writes the ONE shared
+ *                              `@/shared/knob-overrides` store — re-resolved on
+ *                              next read; live for hot-toggleable knobs)
  *   - `/knobs reset <id>`      remove a session override
  *   - `/knobs preset <name>`   apply a named preset bundle as session overrides
- *   - `/knobs save`            persist sessionOverrides → `~/.quanta/knobs.json`
+ *   - `/knobs save`            persist session overrides → `~/.quanta/knobs.json`
  *   - `/knobs help [id]`       family summary OR per-knob long help
  *
  * Wire contract: the caller passes a {@link KnobsSurfaceWire} captured by
@@ -40,7 +41,7 @@ import {
   resolveKnobs,
   saveKnobConfigMerged,
 } from "@/runner/knobs"
-import { errMessage, quantaHomeDir } from "@/shared"
+import { errMessage, getKnobOverride, knobOverrides, quantaHomeDir } from "@/shared"
 import { setCliKnobOverride } from "./cli-knobs-accessor"
 import {
   buildKnobCatalog,
@@ -200,7 +201,9 @@ const catalogLine = (k: UnifiedKnob, raw: string | undefined, isDefault: boolean
  *  the 3-registry split otherwise hides. */
 const renderAll = (ctx: SlashContext): number => {
   const catalog = buildKnobCatalog()
-  const values = resolveCatalogValues(catalog, process.env)
+  // Session overrides come from the ONE shared store (`@/shared/knob-overrides`)
+  // so a `/knobs set` is visible here immediately (WS-D UUX-6-04).
+  const values = resolveCatalogValues(catalog, process.env, knobOverrides())
   const grouped = catalogByGroup(catalog)
   ctx.out(`All ${catalog.size} knobs ('*' = overridden; [home] = non-CLI):\n`)
   for (const [group, knobs] of grouped) {
@@ -223,7 +226,7 @@ const renderFind = (query: string, ctx: SlashContext): number => {
     return 1
   }
   const catalog = buildKnobCatalog()
-  const values = resolveCatalogValues(catalog, process.env)
+  const values = resolveCatalogValues(catalog, process.env, knobOverrides())
   const hits = searchCatalog(catalog, query)
   if (hits.length === 0) {
     ctx.out(`No knob matches "${query}".\n`)
@@ -399,14 +402,19 @@ const doPreset = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashCon
   }
   const applied: string[] = []
   const skipped: string[] = []
+  const warnings: string[] = []
   for (const [id, raw] of Object.entries(preset)) {
     if (allKnobs().get(id) === undefined) {
       skipped.push(id)
       continue
     }
     try {
-      wire.setOverride(id, raw)
+      // UUX-4-21: the hot-toggle warning computed here used to be dropped on
+      // the floor — a preset full of boot-frozen knobs printed "applied N"
+      // as if everything were live. Surface every warning.
+      const warning = wire.setOverride(id, raw)
       applied.push(`${id}=${raw}`)
+      if (warning !== undefined) warnings.push(`${id}: ${warning}`)
     } catch {
       skipped.push(`${id} (parse failed for "${raw}")`)
     }
@@ -417,6 +425,9 @@ const doPreset = (args: readonly string[], wire: KnobsSurfaceWire, ctx: SlashCon
   }
   if (applied.length > 0) {
     ctx.out(`/knobs preset: applied ${applied.length} knob(s): ${applied.join(", ")}\n`)
+  }
+  for (const w of warnings) {
+    ctx.out(`  warning: ${w}\n`)
   }
   if (skipped.length > 0) {
     ctx.out(`/knobs preset: skipped: ${skipped.join(", ")}\n`)
@@ -488,24 +499,59 @@ const doHelp = (args: readonly string[], ctx: SlashContext): number => {
 
 /* ─── BUILTINS registration — default wire ──────────────────────────── */
 
-/** Default wire used by the BUILTINS-registered `/knobs` command. Backed by
- *  a module-level session-overrides bag so successive `/knobs set`/`/knobs
- *  reset`/`/knobs save` invocations in the SAME process see consistent
- *  state. Surfaces that need their own scoped wire (a multi-session host,
- *  for instance) should call {@link buildKnobsSlash} directly with a fresh
- *  wire and bypass this default registration.
+/** Default wire used by the BUILTINS-registered `/knobs` command.
  *
- *  This mirrors the `loginCmd = buildLoginCmd()` pattern: a default-deps
- *  static instance suitable for the standard single-session REPL. */
-const DEFAULT_OVERRIDES: Record<string, string> = {}
-
+ *  WS-D (jul-10, UUX-6-04) — ONE override store. The wire holds NO state of
+ *  its own: every method is a pure projection over the process-level
+ *  `@/shared/knob-overrides` store (the declared SSOT that `runtimeConfig()`
+ *  and `readCliKnob()` already consult). The previous module-level
+ *  `DEFAULT_OVERRIDES` bag was a THIRD knob store: `set` on a catalog knob
+ *  wrote the shared store while `show`/`save` read the bag — `/knobs save`
+ *  persisted a store the user never changed, and runner-knob sets were
+ *  invisible to every live reader. Two projections replace it:
+ *
+ *    - {@link runnerSessionOverrides} — the shared store viewed through the
+ *      runner registry's `id` keys (what `resolveKnobs`' session layer and
+ *      the persisted config-file layer expect).
+ *    - {@link persistableOverrides} — the FULL shared-store snapshot for
+ *      `/knobs save`: runner knobs land under their `id` (config-file layer
+ *      round-trip), everything else under its raw `envKey`.
+ *
+ *  Surfaces that need their own scoped wire (a multi-session host, for
+ *  instance) should call {@link buildKnobsSlash} directly with a fresh wire
+ *  and bypass this default registration. */
 const defaultConfigPath = (): string => join(quantaHomeDir(), "knobs.json")
+
+/** Shared-store snapshot projected onto runner-knob ids (session layer of
+ *  `resolveKnobs`). Runner knobs are addressed by `id` in that layer; the
+ *  shared store keys by `envKey` — this is the (stateless) translation. */
+const runnerSessionOverrides = (): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [id, knob] of allKnobs()) {
+    const raw = getKnobOverride(knob.envKey)
+    if (raw !== undefined) out[id] = raw
+  }
+  return out
+}
+
+/** Full persistable snapshot of the ONE store: runner overrides under their
+ *  registry `id` (so the config-file layer reads them back), non-runner
+ *  (catalog/envKey-addressed) overrides under their `envKey` verbatim. */
+const persistableOverrides = (): Record<string, string> => {
+  const runner = runnerSessionOverrides()
+  const runnerEnvKeys = new Set([...allKnobs().values()].map((k) => k.envKey))
+  const out: Record<string, string> = {}
+  for (const [envKey, raw] of Object.entries(knobOverrides())) {
+    if (!runnerEnvKeys.has(envKey)) out[envKey] = raw
+  }
+  return { ...out, ...runner }
+}
 
 const defaultResolve = (): KnobValueMap =>
   resolveKnobs({
     surface: "cli",
     knobs: knobsForSurface("cli"),
-    sessionOverrides: DEFAULT_OVERRIDES,
+    sessionOverrides: runnerSessionOverrides(),
     envVars: process.env,
   })
 
@@ -513,25 +559,36 @@ const defaultWire: KnobsSurfaceWire = {
   resolution: defaultResolve,
   setOverride: (id, raw) => {
     const knob = allKnobs().get(id)
-    DEFAULT_OVERRIDES[id] = raw
+    // Route through the SAME chokepoint the catalog path uses so the
+    // security-boundary carve-out holds for runner knobs too. A refusal is
+    // fail-closed: no store write, surfaced as stderr + exit 1 by `doSet`.
+    const envKey = knob?.envKey ?? id
+    if (!setCliKnobOverride(envKey, raw)) {
+      throw new Error(
+        `${id} is a security-boundary knob — set it via env / managed config only, not a session override`,
+      )
+    }
     // Surface a non-fatal warning when the knob is read once at boot and
     // cannot take effect mid-session — the override is still saved for the
-    // next process via `/knobs save`.
-    if (knob !== undefined && knob.hotToggleable === false) {
+    // next process via `/knobs save`. `hotToggleable` DEFAULTS to false
+    // (types.ts), so only an explicit `true` suppresses the warning — an
+    // undeclared knob must not be advertised as live (UUX-4-21 honesty).
+    if (knob !== undefined && knob.hotToggleable !== true) {
       return `knob '${id}' is not hot-toggleable — saved for next session`
     }
     return undefined
   },
   resetOverride: (id) => {
-    delete DEFAULT_OVERRIDES[id]
+    const knob = allKnobs().get(id)
+    setCliKnobOverride(knob?.envKey ?? id, undefined)
   },
-  sessionOverrides: () => DEFAULT_OVERRIDES,
+  sessionOverrides: persistableOverrides,
   save: async () => {
     // Merge-on-save (jun-10 silent-failure audit #18): a wholesale
     // `writeKnobConfig(bag)` from this process's (possibly empty) bag wiped
     // every other session's saved knobs while still printing "saved N
     // override(s)". Fresh-read the persisted user_defaults + overlay instead.
-    await saveKnobConfigMerged({ ...DEFAULT_OVERRIDES }, defaultConfigPath())
+    await saveKnobConfigMerged(persistableOverrides(), defaultConfigPath())
   },
   get configPath() {
     return defaultConfigPath()

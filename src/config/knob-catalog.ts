@@ -223,9 +223,13 @@ export const displaySafeValue = (
 
 /**
  * Resolve the live RAW value + source for every catalog knob, given the env bag
- * + session overrides (`/config set`). Precedence env > session > default. Pure
- * (no process.env reach — the surface injects the bag). Raw strings only; typed
- * parsing stays at each knob's read site (declaration-only model).
+ * + session overrides (`/knobs set`). Precedence session > env > default —
+ * matching the ACTUAL read chain (`readCliKnob` / `runtimeConfig` resolve the
+ * shared session override first), so what this displays is what a reader gets
+ * (WS-D jul-10: display copy derives from the effective store, it never lies
+ * about precedence). Pure (no process.env reach — the surface injects the
+ * bag). Raw strings only; typed parsing stays at each knob's read site
+ * (declaration-only model).
  */
 export const resolveCatalogValues = (
   catalog: ReadonlyMap<string, UnifiedKnob>,
@@ -236,10 +240,10 @@ export const resolveCatalogValues = (
   for (const k of catalog.values()) {
     const envV = env[k.envKey]
     const sesV = session[k.envKey]
-    if (envV !== undefined)
-      out.set(k.envKey, { envKey: k.envKey, raw: envV, source: "env", isDefault: false })
-    else if (sesV !== undefined)
+    if (sesV !== undefined)
       out.set(k.envKey, { envKey: k.envKey, raw: sesV, source: "session", isDefault: false })
+    else if (envV !== undefined)
+      out.set(k.envKey, { envKey: k.envKey, raw: envV, source: "env", isDefault: false })
     else {
       const d = k.default
       out.set(k.envKey, {

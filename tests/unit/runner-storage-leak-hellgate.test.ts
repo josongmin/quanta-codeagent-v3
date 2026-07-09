@@ -60,6 +60,9 @@ const makeRecordingOdb = (opts: {
     markVerified: ni("markVerified") as ShadowOdb["markVerified"],
     rewindToVerified: ni("rewindToVerified") as ShadowOdb["rewindToVerified"],
     listSnapshots: ni("listSnapshots") as ShadowOdb["listSnapshots"],
+    rewindToRef: ni("rewindToRef") as ShadowOdb["rewindToRef"],
+    restorePartialFromRef: ni("restorePartialFromRef") as ShadowOdb["restorePartialFromRef"],
+    diffSinceRef: ni("diffSinceRef") as ShadowOdb["diffSinceRef"],
     registerHead: async () => {
       state.registerHeadCalls += 1
       if (opts.registerHeadThrows === true) throw new Error("registerHead is sad")
@@ -215,6 +218,9 @@ describe("U7-11: shadow-odb cleanup wired into auto-checkpoint", () => {
       markVerified: ni("markVerified") as ShadowOdb["markVerified"],
       rewindToVerified: ni("rewindToVerified") as ShadowOdb["rewindToVerified"],
       listSnapshots: ni("listSnapshots") as ShadowOdb["listSnapshots"],
+      rewindToRef: ni("rewindToRef") as ShadowOdb["rewindToRef"],
+      restorePartialFromRef: ni("restorePartialFromRef") as ShadowOdb["restorePartialFromRef"],
+      diffSinceRef: ni("diffSinceRef") as ShadowOdb["diffSinceRef"],
       registerHead: async () => "a".repeat(40),
       cleanup: () =>
         new Promise<number>((res) => {

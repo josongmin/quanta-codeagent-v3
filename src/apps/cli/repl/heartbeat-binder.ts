@@ -164,8 +164,9 @@ export const createHeartbeatBinder = (deps: CreateHeartbeatBinderDeps): Heartbea
     }
 
     // Enqueue onto the live thread (which IS the target). NO-THROW out of
-    // `resume`: a push fault becomes `enqueue-failed`, surfaced by the runtime
-    // as `scheduler.error` on the ALREADY-advanced anchor (no re-fire).
+    // `resume`: a push fault becomes `enqueue-failed`, forwarded to the
+    // runtime as a typed non-delivery so it emits `scheduler.error` and
+    // retries the occurrence (bounded) instead of counting it as fired.
     try {
       deps.pushPrompt(req.prompt)
     } catch {
@@ -178,10 +179,17 @@ export const createHeartbeatBinder = (deps: CreateHeartbeatBinderDeps): Heartbea
 /**
  * Adapt a `HeartbeatThreadBinder` into the branching `AgentLoopPort`-shaped
  * `enqueueUserMessage` handler. The CRON path (`opts?.targetThreadId ===
- * undefined`) is BYTE-IDENTICAL to today: a bare `pushPrompt(message)`. Only a
- * heartbeat fire (target present) routes through the binder. The handler is
- * NO-THROW: a binder `resume` that rejects/throws resolves the handler (the
- * scheduler runtime records the throw as `scheduler.error`).
+ * undefined`) is BYTE-IDENTICAL to today: a bare `pushPrompt(message)`.
+ * Only a heartbeat fire (target present) routes through the binder.
+ *
+ * WS-D effect receipt (jul-10, UUX-4-01): the binder verdict is HONORED, not
+ * swallowed. `{ok:false}` — a PROVABLE non-delivery (no push happened) — is
+ * forwarded to the scheduler runtime as a typed `EnqueueRejected` resolution,
+ * so the runtime emits `scheduler.error` (never `scheduler.fired`) and keeps
+ * the occurrence for a bounded retry. Resolving `undefined` remains the
+ * delivery receipt. A binder that THROWS/rejects (contract violation — the
+ * port is no-throw) propagates as an unknown/hard failure so the runtime
+ * takes the M7 hard-fail path (advanced anchor + status error).
  */
 export const heartbeatEnqueueHandler =
   (deps: {
@@ -196,18 +204,22 @@ export const heartbeatEnqueueHandler =
       targetThreadId?: string
       inheritedPolicy?: HeartbeatPolicySnapshot
     },
-  ): Promise<void> => {
+    // biome-ignore lint/suspicious/noConfusingVoidType: mirrors the scheduler AgentLoopPort contract — `void` keeps the CRON leg's bare `return` (delivery receipt) assignable; see @/scheduler types.ts.
+  ): Promise<void | { readonly delivered: false; readonly reason: string }> => {
     // CRON path — no target thread. Byte-identical to the historical handler.
     if (opts?.targetThreadId === undefined) {
       deps.pushPrompt(message)
       return
     }
     // HEARTBEAT path — resume the target thread under its inherited posture.
-    await deps.binder.resume({
+    const result = await deps.binder.resume({
       targetThreadId: opts.targetThreadId,
       prompt: message,
       ...(opts.inheritedPolicy !== undefined ? { inheritedPolicy: opts.inheritedPolicy } : {}),
       ...(opts.modelOverride !== undefined ? { modelOverride: opts.modelOverride } : {}),
       ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
     })
+    if (!result.ok) {
+      return { delivered: false, reason: result.reason }
+    }
   }

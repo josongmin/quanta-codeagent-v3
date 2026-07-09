@@ -38,6 +38,15 @@ const fakeOdb = (overrides?: Partial<ShadowOdb>): FakeOdb => {
     // Plain default; the wrapper below is the sole call-recorder (avoids
     // double-counting when a test supplies its own `listSnapshots`).
     listSnapshots: async () => [],
+    rewindToRef: async () => {
+      throw new Error("unexpected rewindToRef call")
+    },
+    restorePartialFromRef: async () => {
+      throw new Error("unexpected restorePartialFromRef call")
+    },
+    diffSinceRef: async () => {
+      throw new Error("unexpected diffSinceRef call")
+    },
     cleanup: async () => 0,
   }
   const merged: ShadowOdb = { ...base, ...(overrides ?? {}) }

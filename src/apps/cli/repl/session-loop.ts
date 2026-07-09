@@ -718,7 +718,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
               await injectSimulatedTurn({
                 trigger,
                 agentLoop: {
-                  enqueueUserMessage: enqueueWithHeartbeat,
+                  // Reactor port returns Promise<void>; the handler's WS-D
+                  // non-delivery verdict is a heartbeat-path shape (needs a
+                  // targetThreadId, which the reactor never passes) — void it.
+                  enqueueUserMessage: async (message, opts) => {
+                    await enqueueWithHeartbeat(message, opts)
+                  },
                 },
                 envPort: { get: (name) => process.env[name] },
                 clockPort: { now: () => Date.now() },

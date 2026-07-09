@@ -215,6 +215,21 @@ export interface ModelAvailabilityPort {
 }
 
 /**
+ * WS-D (jul-10, UUX-4-01) — a typed NON-DELIVERY verdict an `AgentLoopPort`
+ * impl may RESOLVE with when it can prove the message was NOT accepted into
+ * any queue (e.g. the CLI heartbeat binder's `thread-not-found`). Distinct
+ * from a THROW (unknown/hard failure): a resolved rejection is a definite
+ * no-side-effect outcome, so the runtime may safely retry the occurrence.
+ * Resolving `void`/`undefined` remains the delivery receipt.
+ */
+export interface EnqueueRejected {
+  readonly delivered: false
+  /** Closed-vocabulary-ish reason string (host-owned; e.g. `thread-not-found`,
+   *  `posture-rejected`, `enqueue-failed`). Surfaced in `scheduler.error`. */
+  readonly reason: string
+}
+
+/**
  * Agent-loop port — voice-match `@/reactor` `AgentLoopPort`. The scheduler
  * calls this exactly the same way reactor's `manual_resume` does. The
  * composition root binds both to the same downstream queue.
@@ -222,6 +237,14 @@ export interface ModelAvailabilityPort {
  * `enqueueUserMessage` MUST be idempotent in shape (dispatch-dedup
  * collapses identical content); returns once the message is ACCEPTED into
  * the queue (NOT once the loop processed it).
+ *
+ * EFFECT-RECEIPT CONTRACT (WS-D jul-10): resolving `void` IS the acceptance
+ * receipt — the runtime emits `scheduler.fired` only then. An impl that can
+ * prove non-delivery resolves an {@link EnqueueRejected} instead (the runtime
+ * emits `scheduler.error`, keeps the occurrence, and retries bounded). An
+ * impl that doesn't know (partial side effects possible) THROWS — the runtime
+ * then keeps the advanced anchor (at-most-once) and marks the automation
+ * `error` (the M7 hard-fail path).
  */
 export interface AgentLoopPort {
   enqueueUserMessage(
@@ -235,7 +258,8 @@ export interface AgentLoopPort {
       targetThreadId?: string
       inheritedPolicy?: HeartbeatPolicySnapshot
     },
-  ): Promise<void>
+    // biome-ignore lint/suspicious/noConfusingVoidType: `void` (not `undefined`) keeps every existing `async (…) => { push(…) }` impl assignable — Promise<void> is not assignable to Promise<undefined | EnqueueRejected>, so the undefined-union would break all delivery-receipt impls.
+  ): Promise<void | EnqueueRejected>
 }
 
 /**
@@ -269,10 +293,14 @@ export class AutomationStoreError extends Error {
 // ============================================================================
 
 /**
- * Audit event emitted by the runtime. Two arms:
- *   - `"scheduler.fired"` — an automation triggered the agent loop.
- *   - `"scheduler.error"` — an automation transitioned to `"error"` (all
- *     models unavailable).
+ * Audit event emitted by the runtime. Three arms:
+ *   - `"scheduler.fired"` — an automation's prompt was ACCEPTED by the agent
+ *     loop (emitted only on a delivery receipt — never on a rejected enqueue).
+ *   - `"scheduler.error"` — a fire attempt failed: all models unavailable, an
+ *     enqueue threw, or the enqueue resolved {@link EnqueueRejected}
+ *     (soft-fail). `willRetry: true` marks a soft-fail whose occurrence was
+ *     retained for a bounded retry on the next tick (the automation stays
+ *     `active`); absent/false means the automation transitioned to `"error"`.
  *   - `"scheduler.skipped"` — an automation was due but skipped (paused /
  *     deleted / store load failed).
  *
@@ -292,6 +320,10 @@ export type SchedulerEvent =
       readonly type: "scheduler.error"
       readonly automationId: string
       readonly errorMessage: string
+      /** WS-D soft-fail marker — `true` when the occurrence was NOT consumed
+       *  and the runtime will retry it next tick (bounded). Omitted on the
+       *  terminal paths (status → `error`). */
+      readonly willRetry?: boolean
       readonly at: number
     }
   | {

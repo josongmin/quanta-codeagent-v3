@@ -53,6 +53,9 @@ const makeFakeOdb = (over: Partial<ShadowOdb>): ShadowOdb => {
     rewindToVerified:
       over.rewindToVerified ?? (ni("rewindToVerified") as ShadowOdb["rewindToVerified"]),
     listSnapshots: over.listSnapshots ?? (ni("listSnapshots") as ShadowOdb["listSnapshots"]),
+    rewindToRef: ni("rewindToRef") as ShadowOdb["rewindToRef"],
+    restorePartialFromRef: ni("restorePartialFromRef") as ShadowOdb["restorePartialFromRef"],
+    diffSinceRef: ni("diffSinceRef") as ShadowOdb["diffSinceRef"],
     cleanup: over.cleanup ?? (ni("cleanup") as ShadowOdb["cleanup"]),
   }
 }

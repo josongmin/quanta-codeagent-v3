@@ -92,7 +92,7 @@ describe("knob-catalog merge/search/resolve (ADR-0503 P3)", () => {
     )
   })
 
-  test("resolve: env > session > default with source tracking", () => {
+  test("resolve: session > env > default with source tracking (matches the readCliKnob chain)", () => {
     const cat = mergeKnobCatalog(SRC)
     const vals = resolveCatalogValues(cat, { QUANTA_PILLS: "0" }, { QUANTA_OTEL_FLUSH_MS: "9000" })
     expect(vals.get("QUANTA_PILLS")).toMatchObject({ raw: "0", source: "env", isDefault: false })
@@ -101,6 +101,14 @@ describe("knob-catalog merge/search/resolve (ADR-0503 P3)", () => {
       raw: "x",
       source: "default",
       isDefault: true,
+    })
+    // Overlap pin: a live `/knobs set` beats a boot-time env var — the display
+    // must agree with what `readCliKnob` actually resolves (session first).
+    const both = resolveCatalogValues(cat, { QUANTA_PILLS: "0" }, { QUANTA_PILLS: "1" })
+    expect(both.get("QUANTA_PILLS")).toMatchObject({
+      raw: "1",
+      source: "session",
+      isDefault: false,
     })
   })
 

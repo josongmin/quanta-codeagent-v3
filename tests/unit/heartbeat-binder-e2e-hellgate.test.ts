@@ -8,8 +8,10 @@
  *     the prompt lands on thread S's queue, the permission cell holds P's mapped
  *     mode, `scheduler.fired` is emitted, the anchor advanced + persisted.
  *   - sessionId = T (≠ S) → the binder returns `thread-not-found`, surfaced as
- *     `scheduler.error`; the prompt is NOT enqueued; the anchor STILL advanced
- *     (persist-before-dispatch ⇒ no re-fire loop).
+ *     `scheduler.error` (NEVER `scheduler.fired` — WS-D jul-10 effect receipt);
+ *     the prompt is NOT enqueued; the anchor is ROLLED BACK (reserve→confirm
+ *     compensation) so the occurrence retries next tick, bounded by
+ *     `MAX_ENQUEUE_SOFT_ATTEMPTS` (see heartbeat-softfail-receipt-hellgate).
  *   - a plain `cron` automation → byte-identical to today (direct push, binder
  *     not consulted, posture cell untouched).
  *
@@ -145,7 +147,7 @@ describe("scheduler → runtime → CLI binder (e2e)", () => {
     expect(h.storeContent[0]?.lastFiredAt).toBe(utc(2026, 5, 3))
   })
 
-  test("foreign thread (sessionId T ≠ S) → thread-not-found ⇒ scheduler.error, NOT enqueued, anchor STILL advanced", async () => {
+  test("foreign thread (sessionId T ≠ S) → thread-not-found ⇒ scheduler.error, NOT enqueued, NO fired, anchor retained for retry", async () => {
     const h = buildHarness([heartbeatAutomation(SESSION, postureSnapshot("default"))])
     const cell = makeCell("default")
     // This REPL is driving thread T, not S.
@@ -171,12 +173,15 @@ describe("scheduler → runtime → CLI binder (e2e)", () => {
 
     await rt.tickOnce()
 
-    // thread-not-found ⇒ the binder resolves ok:false WITHOUT throwing, so the
-    // runtime does NOT see an enqueue throw. The prompt never mis-routes onto T.
+    // thread-not-found ⇒ the binder resolves ok:false WITHOUT throwing; the
+    // handler forwards it as a typed non-delivery. The prompt never mis-routes
+    // onto T, no false `scheduler.fired` is emitted, and the occurrence is
+    // retained (anchor compensated back) for a bounded retry.
     expect(h.pushed).toEqual([])
-    // anchor still advanced (persist-before-dispatch) ⇒ no re-fire loop.
-    expect(h.storeContent[0]?.fireCount).toBe(1)
-    expect(h.storeContent[0]?.lastFiredAt).toBe(utc(2026, 5, 3))
+    expect(h.events.map((e) => e.type)).not.toContain("scheduler.fired")
+    expect(h.events.map((e) => e.type)).toContain("scheduler.error")
+    expect(h.storeContent[0]?.fireCount).toBe(0)
+    expect(h.storeContent[0]?.lastFiredAt).toBeUndefined()
   })
 
   test("cron automation (no kind) → byte-identical direct push, binder uncalled, cell untouched", async () => {

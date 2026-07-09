@@ -9,10 +9,12 @@ export { defaultShadowOdb } from "./default"
 export { workspaceHash } from "./hash"
 export type {
   RewindOptions,
+  RewindToRefOptions,
   ShadowInitResult,
   ShadowOdb,
   ShadowOdbConfig,
   ShadowOdbErrorCode,
+  SnapshotDiff,
   SnapshotMetadata,
 } from "./types"
 export {

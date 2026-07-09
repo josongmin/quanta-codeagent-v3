@@ -38,22 +38,27 @@ import { evictLru } from "./cleanup"
 import {
   type OdbDeps,
   opDiffSinceLast,
+  opDiffSinceRef,
   opDiffWorkspaceSinceLast,
   opInit,
   opListSnapshots,
   opMarkVerified,
   opRegisterHead,
   opRestorePartial,
+  opRestorePartialFromRef,
   opRewindToLast,
+  opRewindToRef,
   opRewindToVerified,
   type WorkspaceState,
 } from "./default/ops"
 import { resolveBaseDir } from "./default-helpers"
 import type {
   RewindOptions,
+  RewindToRefOptions,
   ShadowInitResult,
   ShadowOdb,
   ShadowOdbConfig,
+  SnapshotDiff,
   SnapshotMetadata,
 } from "./types"
 
@@ -96,6 +101,23 @@ export const defaultShadowOdb = (cfg: ShadowOdbConfig = {}): ShadowOdb => {
 
     listSnapshots: (workspaceRoot: string): Promise<readonly SnapshotMetadata[]> =>
       opListSnapshots(deps, workspaceRoot),
+
+    rewindToRef: (
+      workspaceRoot: string,
+      ordinal: number,
+      opts?: RewindToRefOptions,
+    ): Promise<SnapshotMetadata> => opRewindToRef(deps, workspaceRoot, ordinal, opts),
+
+    restorePartialFromRef: (
+      workspaceRoot: string,
+      ordinal: number,
+      paths: ReadonlyArray<string>,
+      opts?: RewindToRefOptions,
+    ): Promise<SnapshotMetadata> =>
+      opRestorePartialFromRef(deps, workspaceRoot, ordinal, paths, opts),
+
+    diffSinceRef: (workspaceRoot: string, ordinal: number): Promise<SnapshotDiff> =>
+      opDiffSinceRef(deps, workspaceRoot, ordinal),
 
     async cleanup(maxBytes: number): Promise<number> {
       const baseDir = resolveBaseDir(cfg)

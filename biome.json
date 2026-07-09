@@ -1193,6 +1193,7 @@
         "!tests/integration/integrations/github/end-to-end-real-adapter-r3.test.ts",
         "!tests/unit/heartbeat-binder-resume-hellgate.test.ts",
         "!tests/unit/heartbeat-binder-e2e-hellgate.test.ts",
+        "!tests/unit/heartbeat-softfail-receipt-hellgate.test.ts",
         "!tests/unit/mid-turn-capture-wire-hellgate.test.ts",
         "!tests/unit/doctor-selfcheck-hellgate.test.ts",
         "!tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts",

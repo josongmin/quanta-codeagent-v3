@@ -103,6 +103,50 @@ export interface ShadowOdb {
    *  no refs exist (init never called, or store deleted). */
   listSnapshots(workspaceRoot: string): Promise<readonly SnapshotMetadata[]>
 
+  /** WS-D (jul-10, UUX-6-01) — ORDINAL-addressed full-tree restore. `ordinal`
+   *  is the 1-based position in the CURRENT `listSnapshots` ordering (newest
+   *  first) — exactly the numbering the `/snapshot` listing shows. The
+   *  ordinal→ref resolution happens INSIDE the per-workspace lock (re-listed
+   *  atomically with the restore), so a snapshot registered between the
+   *  caller's listing and this call cannot silently retarget the rewind; pass
+   *  `opts.expectSha` (the sha the caller displayed) to make that TOCTOU
+   *  window fail-closed with a typed `snapshot-moved` error.
+   *
+   *  Semantics are otherwise identical to `rewindToLast` (same safety-net
+   *  pre-rewind ref, MERGE_HEAD guard, untracked policy, lock). The restore
+   *  targets the resolved snapshot's COMMIT SHA (never a caller-supplied ref
+   *  name — the HELL-14 ref-injection defense is preserved).
+   *
+   *  Returns the {@link SnapshotMetadata} actually restored — the caller's
+   *  effect receipt (success copy derives from this, never from the input).
+   *
+   *  Throws: `ordinal-out-of-range` (no such listing entry), `snapshot-moved`
+   *  (expectSha mismatch), `uninitialized`-family errors as siblings do. */
+  rewindToRef(
+    workspaceRoot: string,
+    ordinal: number,
+    opts?: RewindToRefOptions,
+  ): Promise<SnapshotMetadata>
+
+  /** WS-D (jul-10, UUX-6-01) — ORDINAL-addressed path-scoped restore. Same
+   *  ordinal semantics + `expectSha` guard as {@link rewindToRef}; same path
+   *  safety + safety-net + lock as {@link restorePartial}. `paths` must be
+   *  non-empty (a zero-path partial restore has no effect to receipt — typed
+   *  `rewind-failed`). Returns the snapshot actually restored from. */
+  restorePartialFromRef(
+    workspaceRoot: string,
+    ordinal: number,
+    paths: ReadonlyArray<string>,
+    opts?: RewindToRefOptions,
+  ): Promise<SnapshotMetadata>
+
+  /** WS-D (jul-10, UUX-6-18) — unified diff between snapshot `#ordinal`
+   *  (1-based, newest-first — same numbering as `listSnapshots`) and the
+   *  current working tree. Read-only. Returns the resolved snapshot alongside
+   *  the diff so the caller can label the preview with the sha it actually
+   *  diffed against. Throws `ordinal-out-of-range` for a bad ordinal. */
+  diffSinceRef(workspaceRoot: string, ordinal: number): Promise<SnapshotDiff>
+
   /** Best-effort LRU eviction across all per-workspace shadow dirs.
    *
    *  Walks `<baseDir>/snapshots/*`, sums `du`-style sizes, and removes
@@ -209,6 +253,14 @@ export type ShadowOdbErrorCode =
   | "nested-shadow"
   | "merge-in-progress"
   | "rewind-failed"
+  /** WS-D ordinal addressing — the requested 1-based ordinal has no entry in
+   *  the current `listSnapshots` ordering. Fail-closed: nothing was mutated. */
+  | "ordinal-out-of-range"
+  /** WS-D ordinal addressing — the snapshot at the requested ordinal no longer
+   *  carries the sha the caller displayed/confirmed (`expectSha` mismatch —
+   *  the list changed between listing and confirm). Fail-closed: nothing was
+   *  mutated; the caller should re-list and re-confirm. */
+  | "snapshot-moved"
   /** `markVerified` never called for this workspace — `rewindToVerified`
    *  has no anchor to restore to. The verified ref must be explicitly
    *  established by the caller (e.g. through the
@@ -249,6 +301,25 @@ export interface RewindOptions {
    *  Default `false` — a half-finished merge is almost always something the
    *  user wants to resolve, not blow away. */
   readonly allowDirtyMerge?: boolean
+}
+
+/** Options for the WS-D ordinal-addressed ops ({@link ShadowOdb.rewindToRef} /
+ *  {@link ShadowOdb.restorePartialFromRef}). Extends {@link RewindOptions}
+ *  with the confirm-flow TOCTOU guard. */
+export interface RewindToRefOptions extends RewindOptions {
+  /** When present, the resolved snapshot's sha MUST equal this value or the
+   *  op throws `snapshot-moved` BEFORE any mutation. Callers that showed the
+   *  user "#N = <sha>" pass that sha so a list shift between display and
+   *  confirm can never silently retarget the restore. */
+  readonly expectSha?: string
+}
+
+/** Result of {@link ShadowOdb.diffSinceRef} — the resolved snapshot (the
+ *  caller's labeling receipt) + the unified diff against the working tree. */
+export interface SnapshotDiff {
+  readonly snap: SnapshotMetadata
+  /** Unified diff; empty string when the worktree matches the snapshot. */
+  readonly diff: string
 }
 
 /** One snapshot ref's metadata. Sorted newest-first by `listSnapshots`. */

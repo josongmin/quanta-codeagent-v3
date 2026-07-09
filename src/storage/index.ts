@@ -24,10 +24,12 @@ export {
 } from "./service"
 export type {
   RewindOptions,
+  RewindToRefOptions,
   ShadowInitResult,
   ShadowOdb,
   ShadowOdbConfig,
   ShadowOdbErrorCode,
+  SnapshotDiff,
   SnapshotMetadata,
 } from "./shadow-odb"
 // Shadow git ODB (ADR-0108) — closed-port snapshot store separate from

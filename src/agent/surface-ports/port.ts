@@ -66,7 +66,12 @@ export interface PlanEditPort {
   getPlan(): Promise<string> | string
   /** Push the edited body back. Implementation may parse it back to structured
    *  todos or simply enqueue it as an `external_editor` follow-up the next turn
-   *  reads (the surface chooses). */
+   *  reads (the surface chooses).
+   *
+   *  EFFECT-RECEIPT CONTRACT (WS-D jul-10): resolving is the caller's success
+   *  receipt — `/edit-plan` prints "updated (N chars)" iff this resolves. An
+   *  implementation that cannot persist the edit MUST throw/reject (fail
+   *  closed); silently resolving over a dropped body is a false success. */
   setPlan(body: string): Promise<void> | void
 }
 

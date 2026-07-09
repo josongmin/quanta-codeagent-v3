@@ -18,8 +18,10 @@
 
 import type {
   RewindOptions,
+  RewindToRefOptions,
   ShadowInitResult,
   ShadowOdb,
+  SnapshotDiff,
   SnapshotMetadata,
 } from "@/storage/shadow-odb"
 import type { MetricsRegistry } from "./port"
@@ -119,6 +121,35 @@ export const instrumentShadowOdb = (
 
     async listSnapshots(workspaceRoot: string): Promise<readonly SnapshotMetadata[]> {
       return odb.listSnapshots(workspaceRoot)
+    },
+
+    async rewindToRef(
+      workspaceRoot: string,
+      ordinal: number,
+      refOpts?: RewindToRefOptions,
+    ): Promise<SnapshotMetadata> {
+      safe(metrics, () => metrics.increment(`${prefix}.rewind.total`, 1, { target: "ordinal" }))
+      const t0 = now()
+      try {
+        return await odb.rewindToRef(workspaceRoot, ordinal, refOpts)
+      } finally {
+        observeDuration(`${prefix}.rewind.duration_ms`, t0, { target: "ordinal" })
+      }
+    },
+
+    async restorePartialFromRef(
+      workspaceRoot: string,
+      ordinal: number,
+      paths: ReadonlyArray<string>,
+      refOpts?: RewindToRefOptions,
+    ): Promise<SnapshotMetadata> {
+      safe(metrics, () => metrics.increment(`${prefix}.restore_partial.total`))
+      return odb.restorePartialFromRef(workspaceRoot, ordinal, paths, refOpts)
+    },
+
+    async diffSinceRef(workspaceRoot: string, ordinal: number): Promise<SnapshotDiff> {
+      safe(metrics, () => metrics.increment(`${prefix}.diff.total`, 1, { kind: "since-ref" }))
+      return odb.diffSinceRef(workspaceRoot, ordinal)
     },
 
     async cleanup(maxBytes: number): Promise<number> {

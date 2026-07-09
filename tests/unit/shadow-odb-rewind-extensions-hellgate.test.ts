@@ -346,6 +346,15 @@ const fakeOdb = (overrides?: Partial<ShadowOdb>): ShadowOdb => ({
   markVerified: async () => {},
   rewindToVerified: async () => {},
   listSnapshots: async () => [],
+  rewindToRef: async () => {
+    throw new Error("unexpected rewindToRef call")
+  },
+  restorePartialFromRef: async () => {
+    throw new Error("unexpected restorePartialFromRef call")
+  },
+  diffSinceRef: async () => {
+    throw new Error("unexpected diffSinceRef call")
+  },
   cleanup: async () => 0,
   ...(overrides ?? {}),
 })

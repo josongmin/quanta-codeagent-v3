@@ -90,6 +90,9 @@ const makeFakeOdb = (over: { registerHead?: ShadowOdb["registerHead"] } = {}): S
     markVerified: ni("markVerified") as ShadowOdb["markVerified"],
     rewindToVerified: ni("rewindToVerified") as ShadowOdb["rewindToVerified"],
     listSnapshots: ni("listSnapshots") as ShadowOdb["listSnapshots"],
+    rewindToRef: ni("rewindToRef") as ShadowOdb["rewindToRef"],
+    restorePartialFromRef: ni("restorePartialFromRef") as ShadowOdb["restorePartialFromRef"],
+    diffSinceRef: ni("diffSinceRef") as ShadowOdb["diffSinceRef"],
     cleanup: ni("cleanup") as ShadowOdb["cleanup"],
   }
 }

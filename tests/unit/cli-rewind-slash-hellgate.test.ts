@@ -8,16 +8,21 @@
  * shadow-store UX was registered as `/snapshot`. This battery seals BOTH
  * the surface contract AND the naming decision (case 0).
  *
- * Cases lifted from the task spec:
+ * Cases lifted from the task spec (updated for WS-D jul-10 ordinal ops —
+ * `/snapshot <N>` now addresses snapshot #N through `rewindToRef` /
+ * `restorePartialFromRef` / `diffSinceRef` instead of silently running the
+ * last/verified-anchor ops; see snapshot-cmd-ordinal-hellgate for the
+ * real-ODB effect proofs):
  *   1. no shadowOdb → "not configured" + exit 0.
  *   2. empty store → "(no snapshots)".
  *   3. N snapshots → numbered list (sha + ts + ref).
- *   4. /snapshot 1 --yes → rewindToLast invoked.
- *   5. /snapshot 1 src/foo.ts --yes → restorePartial invoked with that path.
- *   6. /snapshot diff 1 → diff preview (delegates to diffSinceLast).
- *   6b. /snapshot diff 2 → documented deferral (port lacks diffSinceRef).
+ *   4. /snapshot 1 --yes → rewindToRef(ordinal 1, expectSha pinned).
+ *   5. /snapshot 1 src/foo.ts --yes → restorePartialFromRef with that path.
+ *   6. /snapshot diff 1 → diff preview (delegates to diffSinceRef).
+ *   6b. /snapshot diff 2 → REAL arbitrary-ordinal diff (v1 deferral removed).
  *   7. /snapshot 999 → graceful out-of-range error.
- *   8. /snapshot --target=verified 1 --yes → rewindToVerified.
+ *   8. /snapshot --target=verified <N> → coherence gate: #N must BE the
+ *      verified ref (mismatch fails closed; match rewinds via rewindToRef).
  *   plus: argv hellgate (bad ordinal, bad target, too many args, --yes gate).
  */
 
@@ -31,7 +36,8 @@ import {
   snapshotCmd,
 } from "../../src/apps/cli/snapshot-cmd"
 import {
-  type RewindOptions,
+  type RewindToRefOptions,
+  SHADOW_LAST_VERIFIED_REF,
   type ShadowInitResult,
   type ShadowOdb,
   ShadowOdbError,
@@ -43,23 +49,33 @@ import {
 /* ------------------------------------------------------------------ */
 
 interface CallLog {
-  rewindToLast: { cwd: string; opts: RewindOptions | undefined }[]
-  rewindToVerified: { cwd: string; opts: RewindOptions | undefined }[]
-  restorePartial: { cwd: string; paths: readonly string[]; opts: RewindOptions | undefined }[]
-  diffSinceLast: { cwd: string }[]
+  rewindToRef: { cwd: string; ordinal: number; opts: RewindToRefOptions | undefined }[]
+  restorePartialFromRef: {
+    cwd: string
+    ordinal: number
+    paths: readonly string[]
+    opts: RewindToRefOptions | undefined
+  }[]
+  diffSinceRef: { cwd: string; ordinal: number }[]
   listSnapshots: { cwd: string }[]
 }
 
 const emptyLog = (): CallLog => ({
-  rewindToLast: [],
-  rewindToVerified: [],
-  restorePartial: [],
-  diffSinceLast: [],
+  rewindToRef: [],
+  restorePartialFromRef: [],
+  diffSinceRef: [],
   listSnapshots: [],
 })
 
+const notCalled = (name: string) => async (): Promise<never> => {
+  throw new Error(`unexpected ShadowOdb.${name} call`)
+}
+
 /** Build a `ShadowOdb` fake that records every call. `snaps` controls the
- *  list response; `diff` controls the diffSinceLast response. */
+ *  list response; `diff` controls the diffSinceRef response. The legacy
+ *  whole-tree ops (`rewindToLast` / `rewindToVerified` / `restorePartial` /
+ *  `diffSinceLast`) THROW on invocation — the ordinal surface must never
+ *  route through them (that was the UUX-6-01 wrong-target bug). */
 const buildOdb = (opts: {
   snaps?: readonly SnapshotMetadata[]
   diff?: string
@@ -72,29 +88,38 @@ const buildOdb = (opts: {
     workspaceHash: "0".repeat(16),
   }),
   registerHead: async () => "0".repeat(40),
-  diffSinceLast: async (cwd) => {
-    opts.log.diffSinceLast.push({ cwd })
-    return opts.diff ?? ""
-  },
+  diffSinceLast: notCalled("diffSinceLast"),
   diffWorkspaceSinceLast: async () => "",
-  rewindToLast: async (cwd, o) => {
-    if (opts.rewindThrows !== undefined) throw opts.rewindThrows
-    opts.log.rewindToLast.push({ cwd, opts: o })
-  },
+  rewindToLast: notCalled("rewindToLast"),
   listSnapshots: async (cwd) => {
     opts.log.listSnapshots.push({ cwd })
     if (opts.listThrows !== undefined) throw opts.listThrows
     return opts.snaps ?? []
   },
   cleanup: async () => 0,
-  restorePartial: async (cwd, paths, o) => {
-    opts.log.restorePartial.push({ cwd, paths, opts: o })
-  },
+  restorePartial: notCalled("restorePartial"),
   markVerified: async () => {
     /* no-op */
   },
-  rewindToVerified: async (cwd, o) => {
-    opts.log.rewindToVerified.push({ cwd, opts: o })
+  rewindToVerified: notCalled("rewindToVerified"),
+  rewindToRef: async (cwd, ordinal, o) => {
+    if (opts.rewindThrows !== undefined) throw opts.rewindThrows
+    opts.log.rewindToRef.push({ cwd, ordinal, opts: o })
+    const snap = (opts.snaps ?? [])[ordinal - 1]
+    if (snap === undefined) throw new ShadowOdbError("ordinal-out-of-range", "no such ordinal")
+    return snap
+  },
+  restorePartialFromRef: async (cwd, ordinal, paths, o) => {
+    opts.log.restorePartialFromRef.push({ cwd, ordinal, paths, opts: o })
+    const snap = (opts.snaps ?? [])[ordinal - 1]
+    if (snap === undefined) throw new ShadowOdbError("ordinal-out-of-range", "no such ordinal")
+    return snap
+  },
+  diffSinceRef: async (cwd, ordinal) => {
+    opts.log.diffSinceRef.push({ cwd, ordinal })
+    const snap = (opts.snaps ?? [])[ordinal - 1]
+    if (snap === undefined) throw new ShadowOdbError("ordinal-out-of-range", "no such ordinal")
+    return { snap, diff: opts.diff ?? "" }
   },
 })
 
@@ -213,18 +238,21 @@ describe("/snapshot <N>", () => {
     expect(await runSlashCommand("/snapshot 1", c.ctx)).toBe(0)
     expect(c.out).toContain("[rewind:")
     expect(c.out).toContain("re-run with --yes")
-    expect(log.rewindToLast.length).toBe(0)
-    expect(log.rewindToVerified.length).toBe(0)
+    expect(log.rewindToRef.length).toBe(0)
   })
 
-  test("case 4: /snapshot 1 --yes ⇒ rewindToLast invoked", async () => {
+  test("case 4: /snapshot 2 --yes ⇒ rewindToRef with ordinal 2 + expectSha pinned to the listed sha", async () => {
     const log = emptyLog()
-    const c = buildCtx(buildOdb({ snaps: [mkSnap(1), mkSnap(2)], log }))
-    expect(await runSlashCommand("/snapshot 1 --yes", c.ctx)).toBe(0)
-    expect(log.rewindToLast.length).toBe(1)
-    expect(log.rewindToLast[0]?.cwd).toBe("/tmp/fake-cwd")
-    expect(log.rewindToVerified.length).toBe(0)
-    expect(c.out).toContain("rewound to #1")
+    const snaps = [mkSnap(1), mkSnap(2)]
+    const c = buildCtx(buildOdb({ snaps, log }))
+    expect(await runSlashCommand("/snapshot 2 --yes", c.ctx)).toBe(0)
+    expect(log.rewindToRef.length).toBe(1)
+    expect(log.rewindToRef[0]?.cwd).toBe("/tmp/fake-cwd")
+    expect(log.rewindToRef[0]?.ordinal).toBe(2)
+    // Confirm-flow TOCTOU pin: the sha the user was shown travels with the op.
+    expect(log.rewindToRef[0]?.opts?.expectSha).toBe(snaps[1]?.sha)
+    expect(c.out).toContain("rewound to #2")
+    expect(c.out).toContain(snaps[1]?.ref ?? "MISSING")
   })
 
   test("case 7: /snapshot 999 ⇒ graceful out-of-range error", async () => {
@@ -234,15 +262,27 @@ describe("/snapshot <N>", () => {
     expect(code).toBe(1)
     expect(c.err).toContain("out of range")
     expect(c.err).toContain("have 1 snapshot")
-    expect(log.rewindToLast.length).toBe(0)
+    expect(log.rewindToRef.length).toBe(0)
   })
 
-  test("case 8: /snapshot --target=verified 1 --yes ⇒ rewindToVerified", async () => {
+  test("case 8a: --target=verified where #N is NOT the verified ref ⇒ fail-closed exit 1, no rewind", async () => {
     const log = emptyLog()
     const c = buildCtx(buildOdb({ snaps: [mkSnap(1)], log }))
-    expect(await runSlashCommand("/snapshot --target=verified 1 --yes", c.ctx)).toBe(0)
-    expect(log.rewindToVerified.length).toBe(1)
-    expect(log.rewindToLast.length).toBe(0)
+    const code = await runSlashCommand("/snapshot --target=verified 1 --yes", c.ctx)
+    expect(code).toBe(1)
+    expect(c.err).toContain("not the verified anchor")
+    expect(log.rewindToRef.length).toBe(0)
+  })
+
+  test("case 8b: --target=verified where #N IS the verified ref ⇒ rewindToRef on that ordinal", async () => {
+    const log = emptyLog()
+    const verified: SnapshotMetadata = { ...mkSnap(9), ref: SHADOW_LAST_VERIFIED_REF }
+    const c = buildCtx(buildOdb({ snaps: [mkSnap(1), verified], log }))
+    expect(await runSlashCommand("/snapshot --target=verified 2 --yes", c.ctx)).toBe(0)
+    expect(log.rewindToRef.length).toBe(1)
+    expect(log.rewindToRef[0]?.ordinal).toBe(2)
+    expect(log.rewindToRef[0]?.opts?.expectSha).toBe(verified.sha)
+    expect(c.out).toContain(SHADOW_LAST_VERIFIED_REF)
   })
 
   test("typed ShadowOdbError surfaces with <code>: <message>", async () => {
@@ -265,12 +305,15 @@ describe("/snapshot <N>", () => {
 /* ------------------------------------------------------------------ */
 
 describe("/snapshot <N> <file>", () => {
-  test("case 5: /snapshot 1 src/foo.ts --yes ⇒ restorePartial with that path", async () => {
+  test("case 5: /snapshot 1 src/foo.ts --yes ⇒ restorePartialFromRef with that path + expectSha", async () => {
     const log = emptyLog()
-    const c = buildCtx(buildOdb({ snaps: [mkSnap(1)], log }))
+    const snaps = [mkSnap(1)]
+    const c = buildCtx(buildOdb({ snaps, log }))
     expect(await runSlashCommand("/snapshot 1 src/foo.ts --yes", c.ctx)).toBe(0)
-    expect(log.restorePartial.length).toBe(1)
-    expect(log.restorePartial[0]?.paths).toEqual(["src/foo.ts"])
+    expect(log.restorePartialFromRef.length).toBe(1)
+    expect(log.restorePartialFromRef[0]?.ordinal).toBe(1)
+    expect(log.restorePartialFromRef[0]?.paths).toEqual(["src/foo.ts"])
+    expect(log.restorePartialFromRef[0]?.opts?.expectSha).toBe(snaps[0]?.sha)
     expect(c.out).toContain("restored src/foo.ts from #1")
   })
 
@@ -280,7 +323,7 @@ describe("/snapshot <N> <file>", () => {
     expect(await runSlashCommand("/snapshot 1 src/foo.ts", c.ctx)).toBe(0)
     expect(c.out).toContain("[restore-partial:")
     expect(c.out).toContain("file: src/foo.ts")
-    expect(log.restorePartial.length).toBe(0)
+    expect(log.restorePartialFromRef.length).toBe(0)
   })
 
   test("--target=verified partial restore ⇒ no-verified-anchor (v1 restriction)", async () => {
@@ -289,7 +332,7 @@ describe("/snapshot <N> <file>", () => {
     const code = await runSlashCommand("/snapshot --target=verified 1 src/foo.ts --yes", c.ctx)
     expect(code).toBe(1)
     expect(c.err).toContain("no-verified-anchor")
-    expect(log.restorePartial.length).toBe(0)
+    expect(log.restorePartialFromRef.length).toBe(0)
   })
 })
 
@@ -298,7 +341,7 @@ describe("/snapshot <N> <file>", () => {
 /* ------------------------------------------------------------------ */
 
 describe("/snapshot diff <N>", () => {
-  test("case 6: /snapshot diff 1 ⇒ diff preview from diffSinceLast", async () => {
+  test("case 6: /snapshot diff 1 ⇒ diff preview from diffSinceRef, header pins the receipt", async () => {
     const log = emptyLog()
     const c = buildCtx(
       buildOdb({ snaps: [mkSnap(1)], diff: "--- a/x\n+++ b/x\n@@\n-old\n+new\n", log }),
@@ -306,7 +349,8 @@ describe("/snapshot diff <N>", () => {
     expect(await runSlashCommand("/snapshot diff 1", c.ctx)).toBe(0)
     expect(c.out).toContain("--- a/x")
     expect(c.out).toContain("+new")
-    expect(log.diffSinceLast.length).toBe(1)
+    expect(c.out).toContain("diff vs #1")
+    expect(log.diffSinceRef).toEqual([{ cwd: "/tmp/fake-cwd", ordinal: 1 }])
   })
 
   test("case 6: diff 1 with no changes ⇒ friendly clean-tree message", async () => {
@@ -316,13 +360,14 @@ describe("/snapshot diff <N>", () => {
     expect(c.out).toContain("no changes")
   })
 
-  test("case 6b: diff <N> for N>1 ⇒ documented deferral (port lacks diffSinceRef)", async () => {
+  test("case 6b: diff <N> for N>1 ⇒ REAL ordinal diff (the v1 'only #1' shrug is gone)", async () => {
     const log = emptyLog()
-    const c = buildCtx(buildOdb({ snaps: [mkSnap(1), mkSnap(2)], log }))
+    const c = buildCtx(buildOdb({ snaps: [mkSnap(1), mkSnap(2)], diff: "+n2\n", log }))
     expect(await runSlashCommand("/snapshot diff 2", c.ctx)).toBe(0)
-    expect(c.out).toContain("only #1")
-    expect(c.out).toContain("follow-up")
-    expect(log.diffSinceLast.length).toBe(0)
+    expect(c.out).not.toContain("only #1")
+    expect(c.out).toContain("diff vs #2")
+    expect(c.out).toContain("+n2")
+    expect(log.diffSinceRef).toEqual([{ cwd: "/tmp/fake-cwd", ordinal: 2 }])
   })
 })
 

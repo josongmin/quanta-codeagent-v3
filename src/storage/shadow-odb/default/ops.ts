@@ -26,12 +26,14 @@ import {
 import { workspaceHash } from "../hash"
 import {
   type RewindOptions,
+  type RewindToRefOptions,
   SHADOW_LAST_REF,
   SHADOW_LAST_VERIFIED_REF,
   SHADOW_PRE_REWIND_REF_PREFIX,
   type ShadowInitResult,
   type ShadowOdbConfig,
   ShadowOdbError,
+  type SnapshotDiff,
   type SnapshotMetadata,
 } from "../types"
 
@@ -578,24 +580,22 @@ export const opRewindToVerified = async (
   })
 }
 
-export const opListSnapshots = async (
+/** Enumerate + parse the `refs/quanta/snapshots/` refs newest-first. Shared
+ *  by `opListSnapshots` and the WS-D ordinal-addressed ops (which call it
+ *  INSIDE the per-workspace lock so ordinal resolution is atomic with the
+ *  restore they perform). */
+const listRefsInner = async (
   deps: OdbDeps,
-  workspaceRoot: string,
+  st: WorkspaceState,
+  canonical: string,
 ): Promise<readonly SnapshotMetadata[]> => {
-  const { runner } = deps
-  const canonical = await validateWorkspaceRoot(workspaceRoot)
-  const st = resolveState(deps, canonical)
-  // Ensure shadow init exists so for-each-ref doesn't ENOENT on the
-  // git dir. ensureInit is idempotent and serialized — same chain as
-  // registerHead so a concurrent rewind can't yank the store mid-scan.
-  await serialize(st, () => initInner(deps, st, canonical))
   const args = [
     "for-each-ref",
     "--format=%(refname)|%(objectname)|%(committerdate:unix)",
     "refs/quanta/snapshots/",
     "--sort=-committerdate",
   ]
-  const r = await runShadow(runner, st.gitDir, canonical, args)
+  const r = await runShadow(deps.runner, st.gitDir, canonical, args)
   if (r.exitCode !== 0) {
     throw new ShadowOdbError("git-failed", `for-each-ref exited ${r.exitCode}: ${r.stderr.trim()}`)
   }
@@ -618,4 +618,142 @@ export const opListSnapshots = async (
     out.push({ ref, sha, timestampSec: ts })
   }
   return out
+}
+
+export const opListSnapshots = async (
+  deps: OdbDeps,
+  workspaceRoot: string,
+): Promise<readonly SnapshotMetadata[]> => {
+  const canonical = await validateWorkspaceRoot(workspaceRoot)
+  const st = resolveState(deps, canonical)
+  // Ensure shadow init exists so for-each-ref doesn't ENOENT on the
+  // git dir. ensureInit is idempotent and serialized — same chain as
+  // registerHead so a concurrent rewind can't yank the store mid-scan.
+  await serialize(st, () => initInner(deps, st, canonical))
+  return listRefsInner(deps, st, canonical)
+}
+
+/* ------------------------------------------------------------------ */
+/* WS-D (jul-10) — ordinal-addressed ops                                */
+/* ------------------------------------------------------------------ */
+
+/** Resolve `ordinal` (1-based, newest-first) against a fresh in-lock ref
+ *  listing and enforce the optional `expectSha` confirm-flow guard. Throws
+ *  typed errors BEFORE any mutation; the returned metadata is the caller's
+ *  effect receipt. */
+const resolveOrdinalInner = async (
+  deps: OdbDeps,
+  st: WorkspaceState,
+  canonical: string,
+  ordinal: number,
+  expectSha: string | undefined,
+): Promise<SnapshotMetadata> => {
+  if (!Number.isInteger(ordinal) || ordinal < 1) {
+    throw new ShadowOdbError("ordinal-out-of-range", `invalid snapshot ordinal: ${ordinal}`)
+  }
+  const refs = await listRefsInner(deps, st, canonical)
+  const snap = refs[ordinal - 1]
+  if (snap === undefined) {
+    throw new ShadowOdbError(
+      "ordinal-out-of-range",
+      `snapshot #${ordinal} out of range (have ${refs.length} snapshot${refs.length === 1 ? "" : "s"})`,
+    )
+  }
+  if (expectSha !== undefined && snap.sha !== expectSha) {
+    throw new ShadowOdbError(
+      "snapshot-moved",
+      `snapshot #${ordinal} is now ${snap.sha.slice(0, 12)} (expected ${expectSha.slice(0, 12)}) — the list changed; re-list and confirm again`,
+    )
+  }
+  return snap
+}
+
+export const opRewindToRef = async (
+  deps: OdbDeps,
+  workspaceRoot: string,
+  ordinal: number,
+  opts?: RewindToRefOptions,
+): Promise<SnapshotMetadata> => {
+  // Same order as opRewindToLast: validate → init → resolve target (the
+  // uninitialized/out-of-range checks fire BEFORE the safety net so a bad
+  // ordinal never accumulates pre-rewind refs) → MERGE_HEAD guard → safety
+  // net → restore. The restore targets the resolved COMMIT SHA — a caller
+  // can never smuggle a ref name through this path (HELL-14 preserved).
+  const canonical = await validateWorkspaceRoot(workspaceRoot)
+  const st = resolveState(deps, canonical)
+  return await serialize(st, async () => {
+    await initInner(deps, st, canonical)
+    const snap = await resolveOrdinalInner(deps, st, canonical, ordinal, opts?.expectSha)
+    await assertNoMergeInProgress(canonical, opts, "rewindToRef")
+    // Safety net FIRST (captures the pre-restore worktree) — note it mints a
+    // NEW pre-rewind ref, which is why `snap` was resolved before this point.
+    await captureSafetyNet(deps, st, canonical, "pre-rewind-ref")
+    await restoreFullTree(deps, st, canonical, snap.sha, opts)
+    return snap
+  })
+}
+
+export const opRestorePartialFromRef = async (
+  deps: OdbDeps,
+  workspaceRoot: string,
+  ordinal: number,
+  paths: ReadonlyArray<string>,
+  opts?: RewindToRefOptions,
+): Promise<SnapshotMetadata> => {
+  const { runner } = deps
+  const canonical = await validateWorkspaceRoot(workspaceRoot)
+  assertRepoRelativePaths(paths)
+  if (paths.length === 0) {
+    // Unlike restorePartial's silent no-op, the ordinal variant RETURNS an
+    // effect receipt — an empty path set has no effect to receipt, so it is
+    // a typed refusal (fail-closed) rather than a fabricated success.
+    throw new ShadowOdbError("rewind-failed", "restorePartialFromRef requires at least one path")
+  }
+  const st = resolveState(deps, canonical)
+  return await serialize(st, async () => {
+    await initInner(deps, st, canonical)
+    const snap = await resolveOrdinalInner(deps, st, canonical, ordinal, opts?.expectSha)
+    await assertNoMergeInProgress(canonical, opts, "restorePartialFromRef")
+    await captureSafetyNet(deps, st, canonical, "pre-rewind-partial")
+    // Path-scoped checkout from the resolved snapshot's COMMIT SHA.
+    const co = await runShadow(runner, st.gitDir, canonical, ["checkout", snap.sha, "--", ...paths])
+    if (co.exitCode !== 0) {
+      throw new ShadowOdbError(
+        "rewind-failed",
+        `checkout ${snap.sha.slice(0, 12)} -- <paths> failed: ${co.stderr.trim() || co.stdout.trim()}`,
+      )
+    }
+    return snap
+  })
+}
+
+export const opDiffSinceRef = async (
+  deps: OdbDeps,
+  workspaceRoot: string,
+  ordinal: number,
+): Promise<SnapshotDiff> => {
+  const { runner } = deps
+  const canonical = await validateWorkspaceRoot(workspaceRoot)
+  const st = resolveState(deps, canonical)
+  // Read-only, but the list+diff pair runs inside the lock so the ordinal
+  // cannot be re-pointed by a concurrent registerHead mid-call.
+  return await serialize(st, async () => {
+    await initInner(deps, st, canonical)
+    const snap = await resolveOrdinalInner(deps, st, canonical, ordinal, undefined)
+    const r = await runShadow(runner, st.gitDir, canonical, [
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      snap.sha,
+    ])
+    // git diff <commit> exit codes: 0 = ran (diff or no diff); anything else
+    // (128 etc.) is fatal — same posture as opDiffSinceLast.
+    if (r.exitCode !== 0) {
+      throw new ShadowOdbError(
+        "git-failed",
+        `shadow git diff exited ${r.exitCode}: ${r.stderr.trim()}`,
+      )
+    }
+    return { snap, diff: r.stdout }
+  })
 }

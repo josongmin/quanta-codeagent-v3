@@ -30,6 +30,7 @@ import type {
   AutomationStorePort,
   AutorunEligibilityResolverPort,
   ClockPort,
+  EnqueueRejected,
   EnvPort,
   ModelAvailabilityPort,
   SchedulerSinkPort,
@@ -42,6 +43,20 @@ export const DEFAULT_TICK_INTERVAL_MS = 60_000
 /** Env flag — when set to `"1"`, `start()` is allowed to spin the timer.
  *  When absent / any other value, `start()` is a NO-OP (default-OFF). */
 export const SCHEDULER_ENV_FLAG = "QUANTA_SCHEDULER" as const
+
+/**
+ * WS-D (jul-10, UUX-4-01/D-4) — max delivery ATTEMPTS per occurrence when the
+ * enqueue resolves a typed {@link EnqueueRejected} soft-fail (definite
+ * non-delivery, e.g. the CLI binder's `thread-not-found`). Attempts below the
+ * cap roll the persisted fire anchor BACK (reserve→confirm compensation) so
+ * the occurrence stays due and retries on the next tick; the final attempt
+ * gives up terminally: `status:"error"` persisted ON the advanced anchor
+ * (same terminal shape as the M7 hard-throw path — an operator resume never
+ * re-arms this occurrence). Counted in process memory per automation id —
+ * a restart re-attempts (the anchor on disk is still due), which is safe
+ * because a soft-fail provably delivered nothing.
+ */
+export const MAX_ENQUEUE_SOFT_ATTEMPTS = 3
 
 export interface SchedulerRuntimeOpts {
   readonly store: AutomationStorePort
@@ -85,6 +100,12 @@ export const createSchedulerRuntime = (opts: SchedulerRuntimeOpts): SchedulerRun
     ((handle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>))
   let timerHandle: unknown
 
+  // WS-D soft-fail retry ledger — per automation id, the number of enqueue
+  // attempts that resolved `EnqueueRejected` for the CURRENT occurrence.
+  // Cleared on delivery / on the terminal error transition. Process-memory
+  // only (see MAX_ENQUEUE_SOFT_ATTEMPTS for why that is safe).
+  const softAttempts = new Map<string, number>()
+
   const tickOnce = async (): Promise<void> => {
     const now = opts.clock.now()
     let automations: ReadonlyArray<Automation>
@@ -105,7 +126,7 @@ export const createSchedulerRuntime = (opts: SchedulerRuntimeOpts): SchedulerRun
       return
     }
     for (const automation of automations) {
-      await processAutomation(automation, now, opts)
+      await processAutomation(automation, now, opts, softAttempts)
     }
   }
 
@@ -130,11 +151,15 @@ export const createSchedulerRuntime = (opts: SchedulerRuntimeOpts): SchedulerRun
 // Per-automation tick body
 // ============================================================================
 
-const processAutomation = async (
+/** Steps 1–2b of the tick body — status gate, RRULE due check, optional
+ *  autorun-eligibility gate. Returns `false` (after emitting the appropriate
+ *  skip event) when the automation must NOT fire this tick. Extracted
+ *  verbatim from `processAutomation` (behavior-preserving). */
+const passesFireGates = (
   automation: Automation,
   now: number,
   opts: SchedulerRuntimeOpts,
-): Promise<void> => {
+): boolean => {
   // 1. Status gate — only `active` fires. `paused` / `deleted` / `error`
   //    surface via skipped events so the host can render the right thing.
   if (automation.status !== "active") {
@@ -144,7 +169,7 @@ const processAutomation = async (
       reason: skipReasonFromStatus(automation.status),
       at: now,
     })
-    return
+    return false
   }
 
   // 2. Compute next-fire from the anchor point. `lastFiredAt ?? createdAt`
@@ -155,7 +180,7 @@ const processAutomation = async (
   const nextFire = computeNextFire(automation.rule, anchor, automation.fireCount)
   if (nextFire === "never" || nextFire > now) {
     // Not due — silent skip (no event; the sink would be too chatty per minute).
-    return
+    return false
   }
 
   // 2b. ADR-0453 — per-thread autorun-eligibility gate (OPTIONAL, default-OFF).
@@ -174,52 +199,36 @@ const processAutomation = async (
       eligibilityReason: verdict.reason,
       at: now,
     })
-    return
+    return false
   }
+  return true
+}
+
+const processAutomation = async (
+  automation: Automation,
+  now: number,
+  opts: SchedulerRuntimeOpts,
+  softAttempts: Map<string, number>,
+): Promise<void> => {
+  // 1–2b. Status / due / eligibility gates (skip events emitted inside).
+  if (!passesFireGates(automation, now, opts)) return
 
   // 3. Resolve model — fallback chain or `all-unavailable` → mark error.
-  let chosen: ChooseModelResult
-  try {
-    chosen = await chooseModel({
-      preference: automation.modelPreference,
-      fallbacks: automation.modelFallbacks,
-      availability: opts.availability,
-    })
-  } catch {
-    // chooseModel's contract is non-throwing (it swallows port throws). This
-    // catch is defense-in-depth.
-    const msg = "model probe threw unexpectedly"
-    const persisted = await persistError(automation, msg, opts)
-    opts.sink?.emit({
-      type: "scheduler.error",
-      automationId: automation.id,
-      errorMessage: msg,
-      at: now,
-    })
-    emitIfPersistFailed(persisted, automation.id, now, opts)
-    return
-  }
+  const chosen = await resolveFireModel(automation, now, opts)
+  if (chosen === null) return
 
-  if (chosen.reason === "all-unavailable") {
-    const msg = "all models unavailable"
-    const persisted = await persistError(automation, msg, opts)
-    opts.sink?.emit({
-      type: "scheduler.error",
-      automationId: automation.id,
-      errorMessage: msg,
-      at: now,
-    })
-    emitIfPersistFailed(persisted, automation.id, now, opts)
-    return
-  }
-
-  // 4. PERSIST-BEFORE-DISPATCH (T10 M7). The fire anchor (fireCount + 1,
+  // 4. PERSIST-BEFORE-DISPATCH (T10 M7) — the RESERVE half of the WS-D
+  //    reserve→confirm protocol. The fire anchor (fireCount + 1,
   //    lastFiredAt = now) is committed to the store BEFORE the prompt is
   //    enqueued. A crash in the dispatch→return window therefore leaves the
   //    advanced anchor on disk, so the reloaded automation is no longer due
   //    and the mutating prompt is NOT re-dispatched. (Previously the order was
   //    dispatch-then-save: a crash between the two re-fired the prompt every
   //    tick — at-least-once on a mutating agent prompt with no idempotency.)
+  //    CONFIRM = a delivery receipt from the enqueue (step 5): the reserved
+  //    anchor simply stays. A typed soft-fail (provable non-delivery) instead
+  //    COMPENSATES: the original anchor is persisted back so the occurrence
+  //    retries next tick (bounded — see MAX_ENQUEUE_SOFT_ATTEMPTS).
   const fired = recordFire(automation, now)
   try {
     await opts.store.save(opts.workspace, fired)
@@ -249,8 +258,10 @@ const processAutomation = async (
             : {}),
         }
       : {}
+  // biome-ignore lint/suspicious/noConfusingVoidType: matches AgentLoopPort.enqueueUserMessage's return union (see types.ts for why the port keeps `void`).
+  let outcome: void | EnqueueRejected
   try {
-    await opts.agentLoop.enqueueUserMessage(automation.prompt, {
+    outcome = await opts.agentLoop.enqueueUserMessage(automation.prompt, {
       modelOverride: chosen.chosen,
       ...heartbeat,
     })
@@ -276,7 +287,19 @@ const processAutomation = async (
     return
   }
 
-  // 6. Emit the fire event.
+  // 5b. WS-D (UUX-4-01) — HONOR a typed soft-fail receipt. The enqueue
+  //     RESOLVED with `delivered:false` (provable non-delivery, e.g. binder
+  //     `thread-not-found`): the prompt reached NO queue, so emitting
+  //     `scheduler.fired` here would be a false success and the occurrence
+  //     would be silently lost. Instead: no fired event, an observable
+  //     `scheduler.error`, and a bounded retry via anchor compensation.
+  if (outcome !== undefined && outcome.delivered === false) {
+    await handleSoftFail(automation, fired, outcome, now, opts, softAttempts)
+    return
+  }
+
+  // 6. CONFIRM + emit the fire event (delivery receipt observed).
+  softAttempts.delete(automation.id)
   opts.sink?.emit({
     type: "scheduler.fired",
     automationId: automation.id,
@@ -285,6 +308,115 @@ const processAutomation = async (
     ...(chosen.fallbackIndex !== undefined ? { fallbackIndex: chosen.fallbackIndex } : {}),
     at: now,
   })
+}
+
+/**
+ * Step 3 body — resolve the fire model through the fallback chain. Returns
+ * `null` after persisting + emitting the error when no model is usable
+ * (probe threw / all-unavailable); the caller aborts the fire. Extracted
+ * verbatim from `processAutomation` (behavior-preserving).
+ */
+const resolveFireModel = async (
+  automation: Automation,
+  now: number,
+  opts: SchedulerRuntimeOpts,
+): Promise<ChooseModelResult | null> => {
+  let chosen: ChooseModelResult
+  try {
+    chosen = await chooseModel({
+      preference: automation.modelPreference,
+      fallbacks: automation.modelFallbacks,
+      availability: opts.availability,
+    })
+  } catch {
+    // chooseModel's contract is non-throwing (it swallows port throws). This
+    // catch is defense-in-depth.
+    await emitFireModelError(automation, "model probe threw unexpectedly", now, opts)
+    return null
+  }
+  if (chosen.reason === "all-unavailable") {
+    await emitFireModelError(automation, "all models unavailable", now, opts)
+    return null
+  }
+  return chosen
+}
+
+/** Shared error tail of {@link resolveFireModel}: persist the `error`
+ *  transition + emit `scheduler.error` (+ the persist-failure skip). */
+const emitFireModelError = async (
+  automation: Automation,
+  msg: string,
+  now: number,
+  opts: SchedulerRuntimeOpts,
+): Promise<void> => {
+  const persisted = await persistError(automation, msg, opts)
+  opts.sink?.emit({
+    type: "scheduler.error",
+    automationId: automation.id,
+    errorMessage: msg,
+    at: now,
+  })
+  emitIfPersistFailed(persisted, automation.id, now, opts)
+}
+
+/**
+ * WS-D soft-fail arm (see step 5b). Attempts below
+ * {@link MAX_ENQUEUE_SOFT_ATTEMPTS}: persist the ORIGINAL (pre-fire) record
+ * back — the reserve compensation — so the occurrence stays due and retries
+ * next tick; emit `scheduler.error` with `willRetry:true`. The final attempt
+ * is terminal: `markError` ON THE ADVANCED anchor (`fired`), identical to the
+ * M7 hard-throw shape, so an operator resume never re-arms this occurrence.
+ *
+ * Crash windows (at-most-once preserved because a soft-fail delivered
+ * NOTHING): a crash before the compensation lands leaves the advanced anchor
+ * on disk — the occurrence is dropped, never double-fired. A compensation
+ * save failure is surfaced as `store-save-failed` (observable drop).
+ */
+const handleSoftFail = async (
+  automation: Automation,
+  fired: Automation,
+  outcome: EnqueueRejected,
+  now: number,
+  opts: SchedulerRuntimeOpts,
+  softAttempts: Map<string, number>,
+): Promise<void> => {
+  const attempt = (softAttempts.get(automation.id) ?? 0) + 1
+  if (attempt >= MAX_ENQUEUE_SOFT_ATTEMPTS) {
+    // Terminal: give up on the advanced anchor (occurrence consumed).
+    softAttempts.delete(automation.id)
+    const msg = `enqueue rejected: ${outcome.reason} (gave up after ${attempt} attempts)`
+    const persisted = await persistError(fired, msg, opts)
+    opts.sink?.emit({
+      type: "scheduler.error",
+      automationId: automation.id,
+      errorMessage: msg,
+      at: now,
+    })
+    emitIfPersistFailed(persisted, automation.id, now, opts)
+    return
+  }
+  softAttempts.set(automation.id, attempt)
+  // Compensate the reserve: restore the pre-fire anchor so the next tick
+  // re-evaluates this SAME occurrence (nothing was delivered — safe).
+  let rolledBack = true
+  try {
+    await opts.store.save(opts.workspace, automation)
+  } catch {
+    rolledBack = false
+    // The occurrence is DROPPED (reserved anchor stays on disk) — clear the
+    // counter so a LATER occurrence starts with a full retry budget.
+    softAttempts.delete(automation.id)
+  }
+  opts.sink?.emit({
+    type: "scheduler.error",
+    automationId: automation.id,
+    errorMessage: `enqueue rejected: ${outcome.reason} (attempt ${attempt}/${MAX_ENQUEUE_SOFT_ATTEMPTS}, retrying next tick)`,
+    willRetry: rolledBack,
+    at: now,
+  })
+  // A failed compensation leaves the ADVANCED anchor on disk: the occurrence
+  // is dropped (at-most-once kept) — surface that, never swallow it.
+  emitIfPersistFailed(rolledBack, automation.id, now, opts)
 }
 
 /**

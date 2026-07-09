@@ -10,22 +10,26 @@
  *   - `/snapshot`                       → list snapshots (numbered, sha + ISO ts).
  *                                         Newest-first per `listSnapshots`.
  *   - `/snapshot <N>`                   → rewind to snapshot #N (1-based ordinal
- *                                         in the listing). Routes through the
- *                                         `shadow_rewind` tool body which is
- *                                         HITL `always-confirm` — the surface
- *                                         shows a confirmation line; re-run
- *                                         with `--yes` to commit (mirrors the
- *                                         existing `/rewind` confirm protocol).
- *   - `/snapshot <N> <file>`            → restore ONLY <file> from snapshot #N.
- *                                         Maps to `shadow_restore_partial`.
- *                                         Same `--yes` confirm gate.
+ *                                         in the listing) via the ordinal-
+ *                                         addressed `ShadowOdb.rewindToRef`
+ *                                         (WS-D jul-10). The confirm line pins
+ *                                         the sha; the port re-verifies it
+ *                                         (`expectSha`) so the success line
+ *                                         always describes the snapshot that
+ *                                         ACTUALLY landed. Re-run with `--yes`
+ *                                         to commit (mirrors `/rewind`).
+ *   - `/snapshot <N> <file>`            → restore ONLY <file> from snapshot #N
+ *                                         (`restorePartialFromRef`). Same
+ *                                         `--yes` confirm gate.
  *   - `/snapshot diff <N>`              → preview: unified diff between the
- *                                         current worktree and snapshot #N.
- *                                         Read-only.
- *   - `/snapshot --target=verified <N>` → use `rewindToVerified` instead of
- *                                         `rewindToLast`. The verified anchor
- *                                         must exist (set by `markVerified`)
- *                                         else surfaces `no-verified-anchor`.
+ *                                         current worktree and snapshot #N
+ *                                         (`diffSinceRef`). Read-only.
+ *   - `/snapshot --target=verified <N>` → assert #N IS the verified anchor and
+ *                                         rewind to it; a mismatch between the
+ *                                         ordinal and the verified ref fails
+ *                                         closed (exit 1) instead of silently
+ *                                         rewinding to a different snapshot
+ *                                         than the copy claims.
  *
  * Naming note (subtle decision — see Report):
  *
@@ -58,7 +62,7 @@
  */
 
 import type { ShadowOdb, SnapshotMetadata } from "@/storage/shadow-odb"
-import { ShadowOdbError } from "@/storage/shadow-odb"
+import { SHADOW_LAST_VERIFIED_REF, ShadowOdbError } from "@/storage/shadow-odb"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -276,6 +280,40 @@ const runList = async (ctx: SlashContext, odb: ShadowOdb): Promise<number> => {
   return 0
 }
 
+/** WS-D fail-closed capability guard: an injected port object that predates
+ *  the ordinal extension must never be silently downgraded to a wrong-target
+ *  rewind. Structural (runtime) check — TS enforces this for first-party
+ *  wiring, this guard covers duck-typed test/embedder ports. */
+const supportsOrdinalOps = (odb: ShadowOdb): boolean =>
+  typeof odb.rewindToRef === "function" &&
+  typeof odb.restorePartialFromRef === "function" &&
+  typeof odb.diffSinceRef === "function"
+
+const ORDINAL_UNSUPPORTED_MSG =
+  "/snapshot: this shadow store port does not support ordinal addressing — refusing to guess a target (nothing was changed)\n"
+
+/** `--target=verified` + ordinal must agree: the addressed listing entry has
+ *  to BE the verified anchor, otherwise the two designators point at
+ *  different snapshots and any success copy would lie about one of them. */
+const verifiedMismatch = (
+  ctx: SlashContext,
+  snaps: readonly SnapshotMetadata[],
+  pick: SnapshotMetadata,
+  ordinal: number,
+): boolean => {
+  if (pick.ref === SHADOW_LAST_VERIFIED_REF) return false
+  const verIdx = snaps.findIndex((s) => s.ref === SHADOW_LAST_VERIFIED_REF)
+  const hint =
+    verIdx >= 0
+      ? `the verified anchor is #${verIdx + 1} (${shortSha(snaps[verIdx]?.sha ?? "")})`
+      : "no verified anchor exists (markVerified never ran)"
+  ctx.err(
+    `/snapshot: #${ordinal} (${pick.ref}) is not the verified anchor — ${hint}. ` +
+      `Re-run with that ordinal, or drop --target=verified.\n`,
+  )
+  return true
+}
+
 const runRewind = async (
   ctx: SlashContext,
   odb: ShadowOdb,
@@ -283,6 +321,10 @@ const runRewind = async (
   target: SnapshotTarget,
   yes: boolean,
 ): Promise<number> => {
+  if (!supportsOrdinalOps(odb)) {
+    ctx.err(ORDINAL_UNSUPPORTED_MSG)
+    return 1
+  }
   const listed = await runOdb(() => odb.listSnapshots(ctx.cwd))
   if (!listed.ok) {
     ctx.err(`/snapshot: ${listed.err}\n`)
@@ -293,18 +335,27 @@ const runRewind = async (
     ctx.err(`/snapshot: ${pick.err}\n`)
     return 1
   }
+  // Verified-target × ordinal coherence (fail-closed on disagreement).
+  if (target === "verified" && verifiedMismatch(ctx, listed.value, pick.snap, ordinal)) {
+    return 1
+  }
   if (!yes) {
     ctx.out(renderConfirm("rewind", pick.snap, ordinal, target, " — DESTRUCTIVE"))
     return 0
   }
-  const op = await runOdb(() =>
-    target === "verified" ? odb.rewindToVerified(ctx.cwd) : odb.rewindToLast(ctx.cwd),
-  )
+  // Ordinal-addressed restore through the port. `expectSha` pins the sha we
+  // just showed/validated: if the list shifted since (new snapshot, ref
+  // advanced), the port fails closed with `snapshot-moved` — the success
+  // line below can only ever describe the snapshot that actually landed.
+  const op = await runOdb(() => odb.rewindToRef(ctx.cwd, ordinal, { expectSha: pick.snap.sha }))
   if (!op.ok) {
     ctx.err(`/snapshot: ${op.err}\n`)
     return 1
   }
-  ctx.out(`rewound to #${ordinal} (${shortSha(pick.snap.sha)}). Pre-rewind ref saved.\n`)
+  const receipt = op.value
+  ctx.out(
+    `rewound to #${ordinal} (${shortSha(receipt.sha)} ${receipt.ref}). Pre-rewind ref saved.\n`,
+  )
   return 0
 }
 
@@ -324,6 +375,10 @@ const runRestorePartial = async (
     )
     return 1
   }
+  if (!supportsOrdinalOps(odb)) {
+    ctx.err(ORDINAL_UNSUPPORTED_MSG)
+    return 1
+  }
   const listed = await runOdb(() => odb.listSnapshots(ctx.cwd))
   if (!listed.ok) {
     ctx.err(`/snapshot: ${listed.err}\n`)
@@ -338,49 +393,40 @@ const runRestorePartial = async (
     ctx.out(renderConfirm("restore-partial", pick.snap, ordinal, target, ` — file: ${path}`))
     return 0
   }
-  const op = await runOdb(() => odb.restorePartial(ctx.cwd, [path]))
+  // Ordinal-addressed path restore (expectSha pins the confirmed sha — see
+  // runRewind). The returned receipt is what the success line describes.
+  const op = await runOdb(() =>
+    odb.restorePartialFromRef(ctx.cwd, ordinal, [path], { expectSha: pick.snap.sha }),
+  )
   if (!op.ok) {
     ctx.err(`/snapshot: ${op.err}\n`)
     return 1
   }
-  ctx.out(`restored ${path} from #${ordinal} (${shortSha(pick.snap.sha)}).\n`)
+  ctx.out(`restored ${path} from #${ordinal} (${shortSha(op.value.sha)} ${op.value.ref}).\n`)
   return 0
 }
 
 const runDiff = async (ctx: SlashContext, odb: ShadowOdb, ordinal: number): Promise<number> => {
-  const listed = await runOdb(() => odb.listSnapshots(ctx.cwd))
-  if (!listed.ok) {
-    ctx.err(`/snapshot: ${listed.err}\n`)
+  if (!supportsOrdinalOps(odb)) {
+    ctx.err(ORDINAL_UNSUPPORTED_MSG)
     return 1
   }
-  const pick = pickByOrdinal(listed.value, ordinal)
-  if (!pick.ok) {
-    ctx.err(`/snapshot: ${pick.err}\n`)
-    return 1
-  }
-  // The closed `ShadowOdb` port exposes `diffSinceLast` (last-registered ref
-  // only). Arbitrary-ref diff against snapshot #N is a follow-up: the port
-  // doesn't expose `diffSinceRef(ref)` so the CLI cannot honestly synthesize
-  // it without reaching past the port. Surface a clear deferral so the user
-  // knows the difference between "not implemented" and "broken".
-  if (ordinal !== 1) {
-    ctx.out(
-      `/snapshot diff <N>: only #1 (last-registered) is supported in v1.\n` +
-        `  follow-up will expose ShadowOdb.diffSinceRef(ref) for arbitrary N.\n` +
-        `  selected: #${ordinal} ${shortSha(pick.snap.sha)} @ ${fmtTs(pick.snap.timestampSec)}\n`,
-    )
-    return 0
-  }
-  const r = await runOdb(() => odb.diffSinceLast(ctx.cwd))
+  // Ordinal-addressed preview through the port (WS-D UUX-6-18 — the v1
+  // "only #1" shrug exited 0 without any effect; arbitrary N is real now).
+  // The port resolves the ordinal inside its lock and returns the snapshot it
+  // ACTUALLY diffed against — the header derives from that receipt.
+  const r = await runOdb(() => odb.diffSinceRef(ctx.cwd, ordinal))
   if (!r.ok) {
     ctx.err(`/snapshot: ${r.err}\n`)
     return 1
   }
-  if (r.value === "") {
-    ctx.out(`(no changes since #1 — worktree matches snapshot)\n`)
+  const { snap, diff } = r.value
+  ctx.out(`diff vs #${ordinal} (${shortSha(snap.sha)} ${snap.ref} @ ${fmtTs(snap.timestampSec)})\n`)
+  if (diff === "") {
+    ctx.out(`(no changes — worktree matches snapshot #${ordinal})\n`)
     return 0
   }
-  ctx.out(r.value.endsWith("\n") ? r.value : `${r.value}\n`)
+  ctx.out(diff.endsWith("\n") ? diff : `${diff}\n`)
   return 0
 }
 
