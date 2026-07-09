@@ -88,8 +88,20 @@ const CR = 0x0d
 const LF = 0x0a
 const CTRL_C = 0x03
 const BACKSPACE = 0x08 // ^H
+const TAB = 0x09 // text, not a chord — preserved in captured lines
+const ESC = 0x1b
 const DELETE = 0x7f // DEL (most terminals send this for Backspace)
 const DEFAULT_MAX_LINE_BYTES = 64 * 1024
+
+/** WS-B (jul-10, UUX-3-04) — escape-sequence swallow state. While a turn
+ *  streams, the Esc-Esc cancel FSM and this reader BOTH see every byte; the
+ *  FSM consumes the chord semantically but the raw bytes used to accumulate
+ *  into the captured line (`"fix it\x1b\x1b"` follow-ups, `\x1b[A` arrow-key
+ *  garbage). A captured line is TEXT the operator typed — the reader owns
+ *  that contract, so escape SEQUENCES are swallowed whole, across chunk
+ *  boundaries: CSI (`\x1b[` params… final byte 0x40–0x7e), SS3 (`\x1bO` + one
+ *  byte), and lone-Esc/Alt-chords (`\x1b` + one byte). */
+type EscSwallowState = "none" | "esc" | "csi" | "ss3"
 
 /**
  * Start a concurrent line reader on the injected stdin for the lifetime of ONE
@@ -139,10 +151,12 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
     partial: "",
     bytes: 0,
     overflowed: false,
+    esc: "none" as EscSwallowState,
     reset(): void {
       this.partial = ""
       this.bytes = 0
       this.overflowed = false
+      this.esc = "none"
     },
     /** Handle a CR/LF: emit the accumulated line (unless overflowed / empty),
      *  then reset. CRLF yields one real line + one empty line; the empty one is
@@ -193,10 +207,47 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
     // (installTurnCancel / outerAbort) runs. Everything else accumulates.
     for (let i = 0; i < text.length; i += 1) {
       const code = text.charCodeAt(i)
-      if (code === CTRL_C) acc.reset()
-      else if (code === CR || code === LF) acc.terminate()
-      else if (code === BACKSPACE || code === DELETE) acc.backspace()
-      else acc.push(text[i] ?? "")
+      // WS-B (UUX-3-04) — terminators/interrupt WIN over an in-flight escape
+      // swallow (never eat a newline), everything else inside a sequence is
+      // consumed until its final byte. State persists across chunks.
+      if (code === CTRL_C) {
+        acc.reset()
+        continue
+      }
+      if (code === CR || code === LF) {
+        acc.esc = "none"
+        acc.terminate()
+        continue
+      }
+      if (acc.esc === "csi") {
+        if (code >= 0x40 && code <= 0x7e) acc.esc = "none" // final byte ends CSI
+        continue
+      }
+      if (acc.esc === "ss3") {
+        acc.esc = "none" // SS3 carries exactly one byte after \x1bO
+        continue
+      }
+      if (acc.esc === "esc") {
+        // \x1b\x1b — the Esc-Esc chord is COMPLETE (cancel FSM pairs them);
+        // the next byte is ordinary text again.
+        if (code === ESC) {
+          acc.esc = "none"
+          continue
+        }
+        acc.esc = text[i] === "[" ? "csi" : text[i] === "O" ? "ss3" : "none"
+        continue // the byte after Esc is part of the chord (Alt+x etc.), never text
+      }
+      if (code === ESC) {
+        acc.esc = "esc"
+        continue
+      }
+      if (code === BACKSPACE || code === DELETE) {
+        acc.backspace()
+        continue
+      }
+      // Remaining C0 bytes are chords (^A/^E/^K…), not text — TAB excepted.
+      if (code < 0x20 && code !== TAB) continue
+      acc.push(text[i] ?? "")
     }
     // §08b — surface the live buffer for the bottom input-lane redraw (or `""`
     // after a terminator/CTRL-C ⇒ clear the lane). No-throw: a faulting render

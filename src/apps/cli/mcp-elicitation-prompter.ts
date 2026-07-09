@@ -38,6 +38,7 @@ import {
   type EnumOption,
   enumOptionLabel,
 } from "@/mcp"
+import { currentMidTurnApprovalChannel } from "./repl/mid-turn-approval-channel"
 
 /** AskUserQuestion parity (jul-03 A1) — the synthetic free-text escape option
  *  the framework auto-adds so the user is never boxed into the model's
@@ -112,13 +113,37 @@ const readLine = async (prompt: string, signal: AbortSignal): Promise<string | n
   }
 }
 
+/**
+ * WS-B (jul-10, UUX-1-05) — the elicitation/ask_user read routes through the
+ * SESSION's mid-turn approval channel when an in-turn reader owns stdin,
+ * exactly like the REPL's own `askLine`. The old behavior (always open a
+ * fresh readline) FOUGHT the in-turn reader mid-turn: two consumers on one
+ * raw-mode stdin, the question never received a usable line, and the ask
+ * fail-closed. A typed channel RELEASE (turn ended with the ask unanswered)
+ * maps to `null` — the same cancellation `withRetry` already handles.
+ *
+ * Exported for the hellgate; production reaches it via the prompter io.
+ */
+export const readViaMidTurnChannelOrReadline = async (
+  signal: AbortSignal,
+): Promise<string | null> => {
+  const channel = currentMidTurnApprovalChannel()
+  if (channel?.active === true) {
+    if (signal.aborted) return null
+    const result = await channel.awaitLine()
+    return result.kind === "line" ? result.line : null
+  }
+  return readLine("", signal)
+}
+
 /** The interactive {@link CliPrompterIO}: writes go to stderr (so stdout stays
- *  a clean data channel), reads come from stdin via {@link readLine}. */
+ *  a clean data channel), reads come from the mid-turn channel when a turn's
+ *  reader owns stdin, else a fresh readline (between turns). */
 const interactiveCliPrompterIo = (): CliPrompterIO => ({
   write: (s: string): void => {
     process.stderr.write(s)
   },
-  read: (signal: AbortSignal): Promise<string | null> => readLine("", signal),
+  read: (signal: AbortSignal): Promise<string | null> => readViaMidTurnChannelOrReadline(signal),
 })
 
 /**

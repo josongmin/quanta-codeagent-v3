@@ -17,7 +17,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { attachToDaemon, type AttachSocket, type AttachSocketCtor } from "@/apps/cli/attach"
+import { type AttachSocket, type AttachSocketCtor, attachToDaemon } from "@/apps/cli/attach"
 import {
   encodeSessionTransportMessage,
   type SessionTransportMessage,
@@ -187,7 +187,10 @@ describe("attachToDaemon — daemon-initiated close (finding #1)", () => {
       }
     })()
     const rendered: string[] = []
-    const { socket, session } = await attachReady("daemon-1", { stdin, write: (c) => rendered.push(c) })
+    const { socket, session } = await attachReady("daemon-1", {
+      stdin,
+      write: (c) => rendered.push(c),
+    })
 
     // Daemon drops the socket.
     socket.fireClose()
@@ -195,7 +198,9 @@ describe("attachToDaemon — daemon-initiated close (finding #1)", () => {
     // `done` MUST resolve (no hang). If the bug is present this rejects via the race.
     await Promise.race([
       session.done,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("done() hung after close")), 500)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("done() hung after close")), 500),
+      ),
     ])
 
     // A clean "disconnected" banner is printed.
@@ -218,7 +223,9 @@ describe("attachToDaemon — daemon-initiated close (finding #1)", () => {
     socket.fireError()
     await Promise.race([
       session.done,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("done() hung after error")), 500)),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("done() hung after error")), 500),
+      ),
     ])
   })
 })
@@ -391,6 +398,139 @@ describe("attachToDaemon — token-in-URL encoding (finding #6)", () => {
     })
     expect(capturedUrl).toBe("ws://127.0.0.1:0/")
     expect(capturedUrl).not.toContain("token=")
+    await session.close()
+  })
+})
+
+// ── WS-B (jul-10 uiux structural) — one stdin owner for attach ────────────────
+
+describe("HELLGATE WS-B — attach approval rides the read loop (UUX-3-02/3-03)", () => {
+  const approvalEvent = (approvalId: string, seq = 5): SessionTransportMessage =>
+    eventMsg({
+      eventId: `e-${approvalId}`,
+      seq,
+      revision: 1,
+      emittedAt: "t",
+      type: "approval.requested",
+      approval: { approvalId, reason: "run git push", requestedAt: "t" },
+    })
+
+  const lastApprovalRespond = (socket: FakeSocket) => {
+    for (let i = socket.sent.length - 1; i >= 0; i--) {
+      const m = socket.sent[i]
+      if (m?.kind === "command" && m.command.type === "approval.respond") return m.command
+    }
+    return undefined
+  }
+
+  const pushableStdin = (): { stdin: AsyncIterable<string>; push: (l: string) => void } => {
+    const q: string[] = []
+    let notify: (() => void) | undefined
+    const stdin = (async function* () {
+      for (;;) {
+        const next = q.shift()
+        if (next !== undefined) {
+          yield next
+          continue
+        }
+        await new Promise<void>((resolve) => {
+          notify = resolve
+        })
+      }
+    })()
+    return {
+      stdin,
+      push: (l: string) => {
+        q.push(l)
+        notify?.()
+      },
+    }
+  }
+
+  test("UUX-3-02: a pending approval CLAIMS the next stdin line — it answers the prompt, never becomes session input", async () => {
+    // Mirror attach-cmd's production wiring: channel-backed prompt + claim seam.
+    const { createMidTurnApprovalChannel } = await import(
+      "@/apps/cli/repl/mid-turn-approval-channel"
+    )
+    const channel = createMidTurnApprovalChannel()
+    channel.active = true
+    const lines = pushableStdin()
+    const socket = makeFakeSocket()
+    const ctor = function (this: unknown, _url: string) {
+      return socket
+    } as unknown as AttachSocketCtor
+    const session = await attachToDaemon({
+      url: "ws://127.0.0.1:0/",
+      stdin: lines.stdin,
+      write: () => undefined,
+      promptApproval: async (reason) => {
+        void reason
+        const r = await channel.awaitLine()
+        return r.kind === "line" ? r.line : "n"
+      },
+      claimApprovalLine: (line) => channel.tryResolve(line),
+      webSocketCtor: ctor,
+    })
+    socket.fireOpen()
+    socket.deliver(snapshotMsg("claim-1"))
+    await flush()
+
+    socket.deliver(approvalEvent("ap-claim"))
+    await flush() // prompt is now awaiting the channel
+    lines.push("y")
+    await flush()
+
+    const respond = lastApprovalRespond(socket)
+    expect(respond).toBeDefined()
+    if (respond?.type !== "approval.respond") throw new Error("narrow")
+    expect(respond.decision).toBe("approve")
+    expect(respond.approvalId).toBe("ap-claim")
+    // The "y" line must NOT have been sent as session input.
+    const inputs = socket.sent.filter(
+      (m) => m.kind === "command" && m.command.type === "input.append",
+    )
+    expect(inputs).toEqual([])
+    // A line typed AFTER the approval settled routes as normal session input.
+    lines.push("hello agent")
+    await flush()
+    const later = socket.sent.filter(
+      (m) => m.kind === "command" && m.command.type === "input.append",
+    )
+    expect(later.length).toBe(1)
+    await session.close()
+  })
+
+  test("UUX-3-03: a PRE-HANDSHAKE approval is not dropped — it waits for readiness and then prompts", async () => {
+    const socket = makeFakeSocket()
+    const ctor = function (this: unknown, _url: string) {
+      return socket
+    } as unknown as AttachSocketCtor
+    const park = parkedStdin()
+    let prompted = 0
+    const session = await attachToDaemon({
+      url: "ws://127.0.0.1:0/",
+      stdin: park.stdin,
+      write: () => undefined,
+      promptApproval: async () => {
+        prompted += 1
+        return "y"
+      },
+      webSocketCtor: ctor,
+    })
+    socket.fireOpen()
+    // Approval arrives BEFORE the snapshot settles the handshake — the old
+    // code silently returned (sid undefined) and the ask vanished.
+    socket.deliver(approvalEvent("ap-early", 1))
+    await flush()
+    expect(prompted).toBe(0) // still waiting for readiness — not dropped, not asked yet
+    socket.deliver(snapshotMsg("early-1"))
+    await flush()
+    expect(prompted).toBe(1)
+    const respond = lastApprovalRespond(socket)
+    expect(respond).toBeDefined()
+    if (respond?.type !== "approval.respond") throw new Error("narrow")
+    expect(respond.approvalId).toBe("ap-early")
+    expect(respond.sessionId).toBe("early-1") // the CANONICAL id, resolved after the wait
     await session.close()
   })
 })

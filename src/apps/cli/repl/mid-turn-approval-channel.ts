@@ -59,6 +59,25 @@ export interface MidTurnApprovalChannel {
   clear(cause: MidTurnReleaseCause): void
 }
 
+/** WS-B (jul-10, UUX-1-05) — the process-wide CURRENT channel slot. The CLI
+ *  session composition registers its per-session channel here so surfaces
+ *  composed at a DIFFERENT layer (the MCP elicitation prompter / ask_user io,
+ *  built at LLM-wiring time before the session channel exists) can route their
+ *  mid-turn reads through the SAME single line source instead of opening a
+ *  second readline that fights the in-turn reader. One live REPL session per
+ *  process — a re-register (REPL restart) simply replaces the slot. */
+let currentChannel: MidTurnApprovalChannel | undefined
+
+export const registerMidTurnApprovalChannel = (channel: MidTurnApprovalChannel): void => {
+  currentChannel = channel
+}
+
+/** The registered channel, or undefined outside a composed session. Callers
+ *  MUST consult `.active` before awaiting (inactive ⇒ use their own readline —
+ *  between turns stdin has no in-turn owner). */
+export const currentMidTurnApprovalChannel = (): MidTurnApprovalChannel | undefined =>
+  currentChannel
+
 export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
   let pending: ((result: MidTurnLineResult) => void) | undefined
   const release = (cause: MidTurnReleaseCause): void => {

@@ -14,6 +14,10 @@
 
 import * as readline from "node:readline/promises"
 import { attachToDaemon } from "./attach"
+import {
+  createMidTurnApprovalChannel,
+  type MidTurnApprovalChannel,
+} from "./repl/mid-turn-approval-channel"
 
 const DEFAULT_ATTACH_URL = "ws://127.0.0.1:4096/"
 
@@ -64,7 +68,6 @@ export const parseAttachArgs = (argv: readonly string[], env: NodeJS.ProcessEnv)
     }
     if (!tok.startsWith("-") && url === undefined) {
       url = tok
-      continue
     }
   }
   const resolvedToken = token ?? env.QUANTA_WEB_AUTH_TOKEN
@@ -85,15 +88,20 @@ const createStdinLines = (): { lines: AsyncIterable<string>; close: () => void }
   }
 }
 
-/** One-shot interactive y/N prompt on stderr (keeps stdout a clean stream). */
-const promptApprovalInteractive = async (reason: string): Promise<string> => {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-  try {
-    return await rl.question(`Approve "${reason}"? [y/N] `)
-  } catch {
-    return "n"
-  } finally {
-    rl.close()
+/** WS-B (jul-10, UUX-3-02) — the approval prompt no longer opens a SECOND
+ *  readline on the stdin the read-loop iterator already owns (the two raced:
+ *  the operator's "y" could be consumed by the loop and sent to the session
+ *  as input). ONE stdin owner: the prompt renders on stderr and awaits the
+ *  next line ROUTED from the read loop via the channel (`claimApprovalLine`
+ *  in attach-client consults it before treating a line as session input).
+ *  A typed channel release maps to "n" (fail-closed deny). */
+const buildChannelApprovalPrompt = (
+  channel: MidTurnApprovalChannel,
+): ((reason: string) => Promise<string>) => {
+  return async (reason: string): Promise<string> => {
+    process.stderr.write(`Approve "${reason}"? [y/N] `)
+    const result = await channel.awaitLine()
+    return result.kind === "line" ? result.line : "n"
   }
 }
 
@@ -121,6 +129,9 @@ export const runAttachCmd = async (
 
   const attach = deps.attach ?? attachToDaemon
   const stdin = createStdinLines()
+  // WS-B (UUX-3-02) — one stdin owner: approval answers ride the read loop.
+  const approvalChannel = createMidTurnApprovalChannel()
+  approvalChannel.active = true // the iterator owns stdin for the whole attach
 
   process.stderr.write(`attaching to ${args.url} …\n`)
   const session = await attach({
@@ -128,7 +139,8 @@ export const runAttachCmd = async (
     ...(args.token !== undefined ? { token: args.token } : {}),
     stdin: stdin.lines,
     write: (chunk) => void process.stdout.write(chunk),
-    promptApproval: promptApprovalInteractive,
+    promptApproval: buildChannelApprovalPrompt(approvalChannel),
+    claimApprovalLine: (line) => approvalChannel.tryResolve(line),
   })
 
   // Ctrl-C ⇒ best-effort turn.cancel + close (attachToDaemon.close handles it),

@@ -69,6 +69,13 @@ export interface AttachToDaemonOptions {
   readonly write: (chunk: string) => void
   /** Approval prompt — returns the operator's raw answer (`"y"`/`"n"`/…). */
   readonly promptApproval: (reason: string) => Promise<string>
+  /** WS-B (jul-10, UUX-3-02) — the pending-approval line claim. The attach
+   *  surface has ONE stdin owner (the `stdin` iterator feeding the read loop);
+   *  while an approval prompt is awaiting its answer, the NEXT line belongs to
+   *  it — the read loop consults this BEFORE turning the line into session
+   *  commands. Absent ⇒ legacy behavior (the prompt owns its own read — only
+   *  safe when `promptApproval` does not touch the same stdin). */
+  readonly claimApprovalLine?: (line: string) => boolean
   /** Override the WebSocket ctor (defaults to global `WebSocket`). */
   readonly webSocketCtor?: AttachSocketCtor
   /** Fresh unique command id — defaults to `crypto.randomUUID`. */
@@ -154,9 +161,21 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     if (event.type === "approval.requested") {
       const approvalId = event.approval.approvalId
       const reason = event.approval.reason
-      const sid = handshake.sessionId
-      if (sid === undefined) return
       approvalChain = approvalChain.then(async () => {
+        // WS-B (jul-10, UUX-3-03) — a PRE-HANDSHAKE approval is no longer
+        // silently dropped: the serialized chain WAITS for the handshake
+        // (bounded, same 10s the read loop uses) and resolves the canonical
+        // session id then. Only when the handshake never completes do we fail
+        // CLOSED with a VISIBLE banner (we structurally cannot respond without
+        // a session id — the daemon's own lease keeps the ask fail-closed).
+        const ready = await waitForReady()
+        const sid = handshake.sessionId
+        if (!ready || sid === undefined) {
+          opts.write(
+            `\n[approval "${reason}" arrived before the handshake completed — cannot respond; it stays unanswered/denied on the daemon side]\n`,
+          )
+          return
+        }
         // A throwing/garbage prompter fail-safes to a literal "n" so the
         // approval is DENIED, never approved and never left hanging. (#5)
         const answer = await opts.promptApproval(reason).catch(() => "n")
@@ -270,6 +289,11 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     try {
       for await (const line of opts.stdin) {
         if (closed || sendBroken) break
+        // WS-B (UUX-3-02) — a pending approval claims the next line as its
+        // answer BEFORE the line becomes session input (previously a second
+        // readline raced this loop for the same stdin and the "y" could be
+        // swallowed as a prompt line).
+        if (opts.claimApprovalLine?.(line) === true) continue
         const ready = await waitForReady()
         if (!ready) break
         const sid = handshake.sessionId

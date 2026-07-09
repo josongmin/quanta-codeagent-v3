@@ -52,6 +52,7 @@ import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./h
 import {
   createMidTurnApprovalChannel,
   type MidTurnApprovalChannel,
+  registerMidTurnApprovalChannel,
 } from "./mid-turn-approval-channel"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
 
@@ -646,6 +647,10 @@ export const composeCliRuntimeContext = async (
   // answer through the in-turn keystroke reader (no stdin fight). The session
   // loop flips `.active` + routes captured lines into it around each turn.
   const midTurnApprovalChannel = createMidTurnApprovalChannel()
+  // WS-B (jul-10, UUX-1-05) — publish the channel so surfaces composed at a
+  // different layer (MCP elicitation / ask_user prompter io) route their
+  // mid-turn reads through the SAME line source instead of a second readline.
+  registerMidTurnApprovalChannel(midTurnApprovalChannel)
   // #20 (durable prefix grants) — wire the PERSISTENT trust-scope registry ONLY
   // when `QUANTA_TRUST_SCOPE` is on (opt-in; NOT seeded default-ON like the other
   // CLI gates — durable cross-session grants are a deliberate operator choice).
