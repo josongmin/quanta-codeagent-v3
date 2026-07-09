@@ -110,6 +110,11 @@ export const makeLaneRenderer = (
           establish: () => enterLaneMode(laneRows ?? out.rows ?? 24),
           release: () => exitLaneMode(laneRows ?? out.rows ?? 24),
           write: safeWrite,
+          // Audit-R1 — the lane renders the operator's input on the physical
+          // bottom row; declaring it gates the status bar's paints (transient
+          // "Press Esc again…", expiry reverts, resize repaints) for the
+          // lane's lifetime and repaints the bar on exit.
+          occupiesBottomRow: true,
         })
         const subscribe = chrome.resize ?? onTerminalResize
         unsubscribeResize = subscribe(handleResize)

@@ -347,6 +347,11 @@ export const createTimelinePanel = (opts: TimelineOptions): TimelinePanel => {
   }
 
   const repaint = (): void => {
+    // Audit-R1 verdict: NO paint gate here. The panel band ends one row ABOVE
+    // the status row (`panelTop = rows - height` … `rows - 1`), and the
+    // mid-turn input lane renders on the bottom row — no overlap. Suspension
+    // by the lane only moves DECSTBM ownership; the band rows stay ours to
+    // paint, so the timeline keeps updating live during mid-turn typing.
     const { rows, cols } = geometry()
     safeWrite(renderPanelFrame({ rows, cols, height, buffer, timestamps, color }))
   }

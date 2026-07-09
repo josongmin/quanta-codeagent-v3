@@ -68,6 +68,19 @@ export interface RegionOwnerSpec {
   /** The owner's stream sink (status bar/timeline → stderr, lane → stdout).
    *  Failures are swallowed — a broken sink must not corrupt manager state. */
   readonly write: (chunk: string) => void
+  /** Audit-R1 (suspended-paint) — declares that this owner PAINTS THE
+   *  PHYSICAL BOTTOM ROW (`rows`). Region suspension alone is NOT a paint
+   *  conflict (the timeline band sits above the status row; both can paint
+   *  while the other owns DECSTBM) — the only interactive collision is two
+   *  owners sharing the bottom row (status bar ↔ mid-turn input lane). An
+   *  owner that paints there gates its content paints on
+   *  {@link RegionHandle.isBottomRowOccluded}. */
+  readonly occupiesBottomRow?: boolean
+  /** Audit-R1 — called (throw-isolated) when the bottom row stops being
+   *  occluded for this owner (the occluding owner above it released). The
+   *  owner repaints the state it tracked while occluded. Never called on
+   *  initial acquire — solo-owner byte sequences stay identical. */
+  readonly onBottomRowFreed?: () => void
 }
 
 export interface RegionHandle {
@@ -81,6 +94,11 @@ export interface RegionHandle {
   readonly release: () => void
   /** True while this owner's region is the one on the terminal. */
   readonly isActive: () => boolean
+  /** Audit-R1 — true while an owner ABOVE this one in the stack declared
+   *  {@link RegionOwnerSpec.occupiesBottomRow}. Bottom-row painters gate
+   *  their content paints on this (NOT on `isActive` — suspension by a
+   *  non-bottom-row owner like the timeline band is not a paint conflict). */
+  readonly isBottomRowOccluded: () => boolean
 }
 
 export interface ScrollRegionManager {
@@ -115,6 +133,31 @@ export const createScrollRegionManager = (): ScrollRegionManager => {
 
   const top = (): RegionEntry | undefined => stack[stack.length - 1]
 
+  /** Audit-R1 — is `entry`'s bottom row occluded by a LATER stack entry that
+   *  declared `occupiesBottomRow`? */
+  const bottomRowOccludedFor = (entry: RegionEntry): boolean => {
+    const idx = stack.lastIndexOf(entry)
+    if (idx === -1) return false
+    for (let i = idx + 1; i < stack.length; i++) {
+      if (stack[i]?.spec.occupiesBottomRow === true) return true
+    }
+    return false
+  }
+
+  /** Audit-R1 — after an occupying entry left the stack, notify every
+   *  remaining bottom-row owner that is no longer occluded (throw-isolated). */
+  const notifyBottomRowFreed = (): void => {
+    for (const e of [...stack]) {
+      if (e.spec.onBottomRowFreed === undefined) continue
+      if (bottomRowOccludedFor(e)) continue
+      try {
+        e.spec.onBottomRowFreed()
+      } catch {
+        // Intentional — chrome, never a control path.
+      }
+    }
+  }
+
   const acquireRegion = (owner: string, spec: RegionOwnerSpec): RegionHandle => {
     const entry: RegionEntry = { owner, spec, released: false }
     // Suspending the previous top is byte-free: the new establish overwrites
@@ -124,19 +167,26 @@ export const createScrollRegionManager = (): ScrollRegionManager => {
     const isActive = (): boolean => !entry.released && top() === entry
     return {
       isActive,
+      isBottomRowOccluded: (): boolean => !entry.released && bottomRowOccludedFor(entry),
       refresh: (): void => {
         if (isActive()) safeWrite(entry, spec.establish())
       },
       release: (): void => {
         if (entry.released) return
         const wasActive = isActive()
+        const occupiedBottomRow = spec.occupiesBottomRow === true
         entry.released = true
         const idx = stack.lastIndexOf(entry)
         if (idx !== -1) stack.splice(idx, 1)
-        if (!wasActive) return // suspended — its region was never on screen
-        safeWrite(entry, spec.release())
-        const resumed = top()
-        if (resumed !== undefined) safeWrite(resumed, resumed.spec.establish())
+        if (wasActive) {
+          safeWrite(entry, spec.release())
+          const resumed = top()
+          if (resumed !== undefined) safeWrite(resumed, resumed.spec.establish())
+        }
+        // Audit-R1 — even a SUSPENDED occupier leaving can free the bottom
+        // row for owners below it; notify unconditionally when the released
+        // entry occupied it.
+        if (occupiedBottomRow) notifyBottomRowFreed()
       },
     }
   }

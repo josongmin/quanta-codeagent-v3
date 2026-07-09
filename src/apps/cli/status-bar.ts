@@ -157,11 +157,26 @@ export const installStatusBar = (
       establish: regionBytes,
       release: releaseBytes,
       write: stderrWrite,
+      // Audit-R1 (suspended-paint) — the bar paints the physical bottom row;
+      // while a LATER bottom-row owner (the mid-turn input lane) is stacked
+      // above, content paints are gated, and this hook repaints the tracked
+      // text the moment the row is free again.
+      occupiesBottomRow: true,
+      onBottomRowFreed: (): void => paintRow(currentText),
     })
     installed = true
   }
 
   const paintRow = (text: string): void => {
+    // Audit-R1 (suspended-paint, UUX-5-04 second half) — while a bottom-row
+    // OCCLUDER (the mid-turn input lane) is stacked above us, OUR row is the
+    // operator's input row. Track the text (so the freed hook paints the live
+    // state) but write NOTHING: a transient ("Press Esc again…"), its expiry
+    // revert, or a resize repaint must never overwrite in-flight typing.
+    // NOTE: suspension by a NON-bottom-row owner (timeline band) is NOT a
+    // conflict — the bar keeps painting (the row is outside every region).
+    currentText = text
+    if (region !== null && region.isBottomRowOccluded()) return
     const rows = termRows()
     const cols = termCols()
     // Reserve 1 col for the leading space inside the painted band, so the
@@ -180,7 +195,6 @@ export const installStatusBar = (
         `${FG_DIM} ${display}${pad}${FG_RESET}` +
         RESTORE_CURSOR,
     )
-    currentText = text
   }
 
   const cancelTransient = (): void => {
