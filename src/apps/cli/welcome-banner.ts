@@ -14,12 +14,18 @@
  *  - NEVER throws: a banner must not be able to take down startup. The only
  *    live read (`effortStore.get()`) is guarded; everything else is data.
  *  - Version SSOT = package.json (bundled into the compiled binary by bun).
- *  - Slice isolation: imports `@/ui/ui-helpers` only (same rule as
- *    `turn-summary.ts`).
+ *  - Slice isolation: imports `@/ui/ui-helpers` plus the two zero-dep copy
+ *    SSOT leaves (`keybind-truth`, `slash-ref`) — same spirit as the
+ *    `turn-summary.ts` rule (no agent/LLM/process imports). The footer
+ *    keybinds derive from `keybind-truth.ts` (WS-E jul-10, UUX-2-02) so this
+ *    banner and `/help` can never disagree about what Ctrl+C does; pinned by
+ *    `help-keybind-truth.hellgate`.
  */
 
-import pkg from "../../../package.json" with { type: "json" }
 import { cyan, dim, gray, green, magenta, renderBox, yellow } from "@/ui/ui-helpers"
+import pkg from "../../../package.json" with { type: "json" }
+import { KB_CANCEL_TURN, KB_QUIT } from "./keybind-truth"
+import { slashRef } from "./slash-ref"
 
 /** Displayed version — package.json is the single source of truth. */
 export const QUANTA_VERSION: string = pkg.version
@@ -123,7 +129,7 @@ export const renderWelcomeBanner = (info: WelcomeBannerInfo): string => {
 
   return renderBox(lines, {
     title: `${magenta("✻")} quanta ${gray(`v${version}`)}`,
-    footer: "/help commands · Esc Esc cancel turn · Ctrl+C quit",
+    footer: `${slashRef("help")} commands · ${KB_CANCEL_TURN.chord} cancel turn · ${KB_QUIT.chord} quit`,
     borderStyle: dim,
   })
 }

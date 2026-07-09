@@ -1,5 +1,21 @@
 import { emitKeypressEvents } from "node:readline"
+import { KB_BACKGROUND, KB_CANCEL_TURN, KB_QUIT, type KeybindTruth } from "../keybind-truth"
 import type { StatusBar } from "../status-bar"
+
+/** WS-E (jul-10, UUX-2-02) — the chord→action copy for the chords THIS
+ *  installer binds, re-exported from the keybind-truth SSOT so the copy sits
+ *  ADJACENT to the FSM it describes. The FSM behavior below is pinned by
+ *  `turn-cancel-install-hellgate` (Ctrl+C ⇒ onAbort/quit, Esc-Esc ⇒ onCancel,
+ *  Ctrl+B ⇒ onBackground); the help/welcome renders are pinned to these
+ *  entries by `help-keybind-truth.hellgate` — an inversion regression
+ *  (UUX-2-02 shipped `/help` with Ctrl+C and Esc-Esc SWAPPED) goes RED. */
+export const TURN_CANCEL_KEYBINDS: Readonly<
+  Record<"cancelTurn" | "quit" | "background", KeybindTruth>
+> = {
+  cancelTurn: KB_CANCEL_TURN,
+  quit: KB_QUIT,
+  background: KB_BACKGROUND,
+} as const
 
 /** Two cancellation gestures the per-turn raw-mode keypress listener honors.
  *  Codified so the FSM is one named type per state rather than inline

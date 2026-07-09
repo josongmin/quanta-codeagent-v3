@@ -14,7 +14,7 @@
  * Why NOT reuse the existing pre-compact hooks (`preCompactHook` /
  * `onPreCompact`): those fire AFTER the threshold is crossed and compaction has
  * already been decided — too late for B, whose entire purpose is to warn BEFORE
- * compaction so the user can choose (`/compact` now, `/rewind`, or continue).
+ * compaction so the user can choose (`/summarize-now`, `/rewind`, or continue).
  * So B computes a forward-looking ratio at prompt time from the retained count
  * and leaves both hooks untouched (orthogonal).
  *
@@ -22,6 +22,7 @@
  * (plain numbers), no `@/agent` import. The holder already did the conversion.
  */
 
+import { slashRef } from "./slash-ref"
 import type { SegmentedUsageView } from "./status-line"
 
 /** The numbers B reads — all from the SAME source the agent loop uses. */
@@ -66,8 +67,11 @@ export const toWarningView = (
  *   - at/over the compaction ratio ⇒ compaction-first message ("곧 자동 요약").
  *   - else at/over the window ratio ⇒ window-fullness message.
  *
- * Both branches advise `/compact` (manual summarize now) AND `esc esc(/rewind)`
- * — the Claude "Press esc twice" affordance mapped to quanta's `/rewind`.
+ * Both branches advise `/summarize-now` (manual mid-turn summarization — the
+ * command that actually EXISTS; UUX-5-01 shipped a `/compact` ghost here) AND
+ * `esc esc(/rewind)` — the Claude "Press esc twice" affordance mapped to
+ * quanta's `/rewind`. Command names render via `slashRef` so a ghost
+ * reference is structurally RED (slash-ref hellgate).
  */
 export const renderContextWarning = (
   v: ContextWarningView | undefined,
@@ -83,5 +87,5 @@ export const renderContextWarning = (
   const head = compactWarn
     ? `context ${compactPct}% of compaction limit — 곧 자동 요약됩니다`
     : `context ${winPct}% — 윈도우가 차고 있습니다`
-  return `⚠ ${head} · /compact 로 지금 요약 또는 esc esc(/rewind)로 메시지 줄이기`
+  return `⚠ ${head} · ${slashRef("summarize-now")} 로 지금 요약 또는 esc esc(${slashRef("rewind")})로 메시지 줄이기`
 }

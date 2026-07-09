@@ -1,12 +1,13 @@
 import { SessionBootstrapError } from "@/host/bootstrap"
+import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { seedEnvVarsForSurface } from "@/tool"
+import { CLI_FEATURE_GATE_NAMES } from "./cli-feature-gates"
 import { loadEnvFiles } from "./dotenv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
-import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
 import { renderVersion } from "./version-cmd"
@@ -29,111 +30,19 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 // default-OFF by construction (their `=== "1"` gates + hellgate tests are
 // unchanged, so off=byte-identical holds for every non-CLI embedding); the CLI
 // host simply OPTS IN by default by seeding each gate to "1" when the operator
-// has not set it. An explicit `QUANTA_ENABLE_X=0` (any value ≠ "1") still wins,
-// so the off escape hatch is intact. Set AFTER dotenv load so a `.env*` value or
-// a real shell export is never clobbered. NOTE: prompt-suggestion costs one
-// extra (tools-denied, single-shot) LLM call per turn — disable with
-// `QUANTA_ENABLE_PROMPT_SUGGESTION=0` if that latency/spend is unwanted.
-// CLI surface FEATURE gates — these are CLI surface behaviors, NOT LLM tools
-// (env-probe/prompt-suggestion), so they are NOT in the tool-surface manifest
-// and stay listed explicitly here.
-const CLI_FEATURE_GATES = [
-  "QUANTA_ENABLE_ENV_PROBE",
-  // ADR-0474 — stale-read-guard: block write/edit of a file externally modified
-  // since the agent read it ("re-read first"). Protective correctness guard.
-  "QUANTA_STALE_READ_GUARD",
-  // ADR-0471 (H2) — untrusted-source envelope: wrap external tool output
-  // (web_fetch/mcp/plugin/bash/file-content) in a `<untrusted-source name="...">`
-  // envelope + teach the model (one standing system rule) to read it as DATA,
-  // never instructions, and FLAG suspected prompt-injection. Structural
-  // prompt-injection defense — low cost, high ROI, so the CLI opts in by default.
-  // Default-OFF at the runtime-config layer keeps non-CLI surfaces (web-daemon/
-  // headless) byte-identical; `QUANTA_UNTRUSTED_ENVELOPE=0` still wins here (we
-  // only seed when unset).
-  "QUANTA_UNTRUSTED_ENVELOPE",
-  // H9 — read `file_unchanged` dedup: a re-read of the SAME (path, offset, limit)
-  // whose mtime is unchanged returns a compact `file_unchanged` sentinel instead
-  // of re-sending the full content (large token savings in iterative loops). Pure
-  // token/correctness win, so the CLI opts in by default. Default-OFF at the
-  // runtime-config layer keeps non-CLI surfaces byte-identical; `QUANTA_READ_DEDUP=0`
-  // (any value ≠ "1") still wins here (we only seed when unset).
-  "QUANTA_READ_DEDUP",
-  // Multi-agent coordination behavior knobs (RFC jun-4/jun-6, ADR-0479/0480/0482)
-  // — the agent↔agent "tiki-taka" protocol. These are BEHAVIOR modifiers on the
-  // already-wired host seams, NOT LLM tools (so they are not in the tool-surface
-  // manifest): TEAM_DAG makes spawn_batch honor `dependencies` (ordered fan-out),
-  // TEAM_BROKER lets a soft-denied worker escalate to the leader's HITL authority
-  // (worker can NEVER self-grant — see coordination-broker-wire.ts), TEAM_IDLE
-  // gives the leader a fan-in barrier over resident side-agent daemons. CLI opts
-  // in by default; the SLICES stay default-OFF at the runtime-config layer, so
-  // non-CLI embeddings are byte-identical and `QUANTA_TEAM_*=0` still wins.
-  "QUANTA_TEAM_DAG",
-  "QUANTA_TEAM_BROKER",
-  "QUANTA_TEAM_IDLE",
-  // followup_task (ADR-0041/0437) — the agent↔agent ACTIVE-call tool: deliver a
-  // message to an existing child AND trigger/interrupt its turn (vs the passive
-  // subagent_send_message mailbox the child must poll). Wired via optional-ports
-  // `wireOptionalAgentPorts`; now that its gate routes through the canonical
-  // `gateOn` SSOT it accepts the standard "1" like every other gate, so it rides
-  // the normal seed loop below (the old strict-"on" special case is gone).
-  "QUANTA_SUBAGENT_FOLLOWUP",
-  // jun-11 CLI-UX default-ON (R3-hardened worklist #1/#2/#3/#9) — features that
-  // were fully built AND wired but shipped DEFAULT-OFF behind gates the CLI host
-  // never seeded, so the out-of-box REPL never surfaced them. These are CLI
-  // surface BEHAVIORS (not LLM tools) ⇒ they live here, not the tool-surface
-  // manifest. Each has a real src/ consumer (pinned by cli-feature-gates-drift-
-  // hellgate) and reads "1" via the canonical `gateOn` SSOT; the slice default
-  // stays OFF so non-CLI surfaces (web-daemon/headless) are byte-identical, and
-  // `QUANTA_X=0` still wins (we only seed when unset).
-  //   @-file/@-symbol mention autocomplete dropdown  (consumer: at-autocomplete/env.ts)
-  "QUANTA_AT_AUTOCOMPLETE",
-  //   ctrl+x ctrl+e → compose the draft in $EDITOR   (consumer: repl/surface-compose.ts)
-  "QUANTA_EXTERNAL_EDITOR",
-  //   ~/.quanta/keybindings.json action remap (no-throw merge, consumer: repl/surface-compose.ts)
-  "QUANTA_KEYBINDINGS",
-  //   rate-limit-reached transient status notice (consumer: ratelimit-notice.ts) — else silent
-  "QUANTA_RATELIMIT_NOTICE",
-  //   shift+tab permission-mode cycle (consumer: mode-cycle.ts). The operator
-  //   EXPLICITLY opted into the full 4-rung cycle INCLUDING the no-confirm
-  //   `bypass` rung (default → acceptEdits → plan → bypass) — a deliberate,
-  //   accepted trade-off; the red BYPASS pill is the only guard, and bypass
-  //   also stays reachable via `--mode` / `QUANTA_PERMISSION`.
-  "QUANTA_MODE_CYCLE",
-  //   #5/#6 — type-while-the-agent-runs: mid-turn keystroke CAPTURE + the
-  //   VISIBLE bottom input lane (`» ` prompt). Paired (capture alone = blind
-  //   typing). Codex/Claude Code both ship this default-ON; quanta had the whole
-  //   reader/queue/lane built but DARK. e2e-validated happy path (a follow-up
-  //   typed during a sustained turn is captured + echoed in the lane while the
-  //   turn streams). consumers read via runtimeConfig().midTurnCapture /
-  //   .midTurnVisible in session-loop.ts; the in-turn reader only owns stdin
-  //   DURING a turn, so between-turn editing is unchanged. `QUANTA_MIDTURN_*=0`
-  //   still wins (kill switch if a hot-path edge bites).
-  "QUANTA_MIDTURN_CAPTURE",
-  "QUANTA_MIDTURN_VISIBLE",
-  // #19 — approval-time applicability pre-flight: warn (in the confirm prompt,
-  // after the diff) when a mutating edit/apply_patch would NOT cleanly apply
-  // (stale anchor / unlocatable hunk / missing target). Reuses the SAME matchers
-  // the tools run; the preview NEVER mutates. CLI surface behavior (not an LLM
-  // tool) so it lives here, not the manifest. consumer: repl/runtime-context-
-  // compose.ts via preflight.ts#preflightCheckEnabled. Slice default-OFF keeps
-  // non-CLI surfaces byte-identical; QUANTA_PREFLIGHT_CHECK=0 still wins.
-  "QUANTA_PREFLIGHT_CHECK",
-  // #10 jun-11 — bracketed-paste mode. Correctness fix: a multi-line clipboard
-  // paste used to SUBMIT at its first embedded newline (the terminal sends a
-  // pasted line break as a `\r` keypress, which the reader treated as Enter).
-  // With this on, the reader enables DECSET 2004 and accumulates the whole paste
-  // (markers consumed, newlines preserved) into one buffer that submits only on a
-  // genuine Enter. CLI surface BEHAVIOR (not an LLM tool). consumer:
-  // repl/surface-compose.ts (gateOn → ReadLineOptions.bracketedPaste). The slice
-  // default stays OFF so non-CLI surfaces (web-daemon/headless) are byte-identical,
-  // and `QUANTA_BRACKETED_PASTE=0` still wins (we only seed when unset).
-  "QUANTA_BRACKETED_PASTE",
-]
-// The LLM TOOL gates the CLI opts in by default are DERIVED from the tool-
-// surface SSOT (`seedEnvVarsForSurface`) — the single source of truth. Adding a
-// CLI-default-ON tool to the manifest auto-seeds its gate here; no parallel list
-// to drift. `QUANTA_X=0` (any non-truthy token) still wins (we only seed when unset).
-for (const gate of [...CLI_FEATURE_GATES, ...seedEnvVarsForSurface("cli")]) {
+// has not set it. An explicit `QUANTA_X=0` (any value ≠ "1") still wins, so the
+// off escape hatch is intact. Set AFTER dotenv load so a `.env*` value or a
+// real shell export is never clobbered.
+//
+// WS-E jul-10 (UUX-1-09): the gate LIST (with per-gate descriptions + the full
+// per-gate history commentary) moved to `./cli-feature-gates.ts` — a pure data
+// leaf this side-effecting entrypoint could never be, so `/help` derives its
+// env rows from the SAME list the seed loop consumes (parity pinned by
+// `help-env-seeded-gates-parity.hellgate`). The LLM TOOL gates the CLI opts in
+// by default are DERIVED from the tool-surface SSOT (`seedEnvVarsForSurface`)
+// — adding a CLI-default-ON tool to the manifest auto-seeds its gate here; no
+// parallel list to drift.
+for (const gate of [...CLI_FEATURE_GATE_NAMES, ...seedEnvVarsForSurface("cli")]) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }
 

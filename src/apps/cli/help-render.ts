@@ -10,15 +10,22 @@
  *     drives section headers. Absent ⇒ "other" bucket. Within each group
  *     entries are sorted alphabetically so a freshly-appended BUILTINS row
  *     lands in a stable spot.
- *   - **Keybinds are STATIC**: hand-curated literals — surface-level
- *     conventions, not registry entries, so editing them requires this PR.
- *   - **ENV knobs are DERIVED from `runtimeConfig()` SSOT**: one row per
- *     field in `RuntimeConfig` so adding an env var auto-shows here. The
- *     env-name string lives in `runtime-config.ts#loadFromEnv` (the parser)
- *     — we mirror it 1:1 in `ENV_TABLE` below and the test pins the
- *     coverage (≥ 5 SSOT-routed knobs surfaced). Capped to the SSOT
- *     vocabulary (~30); the long tail of surface-level `QUANTA_*` toggles
- *     lives in `docs/`.
+ *   - **Keybinds are DERIVED from `keybind-truth.ts`** (WS-E jul-10,
+ *     UUX-2-02/1-09): one row per KEYBIND_TRUTH entry — the SSOT the welcome
+ *     banner footer also renders from. The hand-written table this replaced
+ *     shipped Ctrl+C/Esc-Esc INVERTED and covered 5 of 21+ real bindings;
+ *     `help-keybind-truth.hellgate` pins render ⟷ SSOT parity.
+ *   - **ENV knobs are DERIVED from `runtimeConfig()` SSOT ∪ CLI-seeded
+ *     gates**: one row per field in `RuntimeConfig` so adding an env var
+ *     auto-shows here. The env-name string lives in
+ *     `runtime-config.ts#loadFromEnv` (the parser) — we mirror it 1:1 in
+ *     `ENV_TABLE` below and the test pins the coverage (≥ 5 SSOT-routed
+ *     knobs surfaced). Capped to the SSOT vocabulary (~30); the long tail of
+ *     surface-level `QUANTA_*` toggles lives in `docs/`. PLUS (WS-E jul-10,
+ *     UUX-1-09/6-26) one derived row per `CLI_FEATURE_GATES` seed the CLI
+ *     turns default-ON — `help-env-seeded-gates-parity.hellgate` pins every
+ *     seeded gate surfaces exactly once (rows for gates already curated in
+ *     `ENV_TABLE` are NOT duplicated).
  *   - **Color policy via `wrap` helpers in `@/ui/ui-helpers`**: `setColorPolicy
  *     ("off")` ⇒ plain ASCII byte-identical to a non-TTY render. Tests rely on
  *     this for the OFF-vs-ON pair.
@@ -36,8 +43,11 @@
 
 import { byteCompare } from "@/shared/byte-compare"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
+import { CLI_FEATURE_GATES } from "./cli-feature-gates"
+import { KEYBIND_TRUTH, type KeybindTruth } from "./keybind-truth"
 import type { UnifiedKnob } from "./knob-catalog-wire"
 import type { SlashCommand, SlashContext } from "./slash-commands"
+import { slashRef } from "./slash-ref"
 
 /** Virtual REPL commands (short-circuited by `composePromptPipeline` BEFORE the
  *  BUILTINS dispatch — not `SlashCommand` entries, but a user pressing
@@ -54,19 +64,18 @@ const VIRTUAL_COMMANDS: readonly { readonly name: string; readonly describe: str
   },
 ] as const
 
-/** Static keybind table — these are conventions of the raw-line-reader, not
- *  registry entries. Update here when raw-line-reader.ts changes its
- *  bindings. */
-const KEYBINDS: readonly { readonly key: string; readonly describe: string }[] = [
-  { key: "Tab", describe: "Complete slash command" },
-  { key: "↑ / ↓", describe: "History (when wired) / completion nav" },
-  { key: "Ctrl+C", describe: "Abort current turn (Esc-Esc 2× = exit)" },
-  { key: "Ctrl+D", describe: "EOF (exit on empty line)" },
-  {
-    key: "Ctrl+X Ctrl+E",
-    describe: "Edit draft in $EDITOR (when QUANTA_EXTERNAL_EDITOR=1)",
-  },
-] as const
+/** Keybind rows derive from the `keybind-truth.ts` SSOT (WS-E jul-10) — a
+ *  chord renders here iff it has an installed handler (FSM chord or reader
+ *  `onKey` branch). `during-turn` entries carry an explicit scope suffix so
+ *  the operator knows Esc-Esc/Ctrl+B are live while a turn streams, not at
+ *  the prompt. */
+const keybindRow = (kb: KeybindTruth): { readonly key: string; readonly describe: string } => ({
+  key: kb.chord,
+  describe: kb.scope === "during-turn" ? `${kb.describe} (during turn)` : kb.describe,
+})
+
+const KEYBINDS: readonly { readonly key: string; readonly describe: string }[] =
+  KEYBIND_TRUTH.map(keybindRow)
 
 /** SSOT-routed env-var table: one row per field in `RuntimeConfig`. The
  *  `defaultLabel` column reflects the parsed default (what `runtimeConfig()`
@@ -221,9 +230,25 @@ export const ENV_TABLE: readonly EnvRow[] = [
   {
     key: "QUANTA_UNTRUSTED_ENVELOPE",
     defaultLabel: "off",
-    describe: "ADR-0471 untrusted-source envelope gate ('1' to enable)",
+    describe: "ADR-0471 untrusted-source envelope gate ('1' to enable; CLI seeds it ON)",
   },
 ] as const
+
+/** WS-E jul-10 (UUX-1-09/6-26) — derived env rows for the CLI-seeded
+ *  default-ON feature gates (`cli-feature-gates.ts`). Gates that already have
+ *  a curated `ENV_TABLE` row (they are ALSO RuntimeConfig fields, e.g.
+ *  QUANTA_UNTRUSTED_ENVELOPE) are skipped so every gate renders exactly once
+ *  — pinned by `help-env-seeded-gates-parity.hellgate`. `defaultLabel` is
+ *  "on (CLI)": the slice default stays OFF; the CLI host seeds "1" when the
+ *  var is unset (an explicit `=0` still wins). */
+export const seededGateEnvRows = (): readonly EnvRow[] => {
+  const curated = new Set(ENV_TABLE.map((r) => r.key))
+  return CLI_FEATURE_GATES.filter((g) => !curated.has(g.gate)).map((g) => ({
+    key: g.gate,
+    defaultLabel: "on (CLI)",
+    describe: g.describe,
+  }))
+}
 
 /** A single drift finding from {@link auditEnvTableDrift}.
  *   - `missing`       — an `ENV_TABLE` key no longer exists in the catalog
@@ -392,7 +417,7 @@ export const renderHelp = (builtins: readonly SlashCommand[]): string => {
     lines.push(renderRow(v.name, v.describe, NAME_W))
   }
   lines.push("")
-  lines.push(dim("── keybinds (raw-line-reader) ──"))
+  lines.push(dim("── keybinds ──"))
   for (const k of KEYBINDS) {
     lines.push(renderRow(k.key, k.describe, KEY_W))
   }
@@ -402,7 +427,16 @@ export const renderHelp = (builtins: readonly SlashCommand[]): string => {
     lines.push(renderEnvRow(e))
   }
   lines.push("")
-  lines.push(dim("(/knobs all → full 240+ knob catalog, grouped · /knobs find <q> → search.)"))
+  lines.push(dim("── CLI feature gates (seeded default-ON when unset; set =0 to disable) ──"))
+  for (const e of seededGateEnvRows()) {
+    lines.push(renderEnvRow(e))
+  }
+  lines.push("")
+  lines.push(
+    dim(
+      `(${slashRef("knobs")} all → full 240+ knob catalog, grouped · ${slashRef("knobs")} find <q> → search.)`,
+    ),
+  )
   return renderBox(lines, {
     title: "quanta — slash commands",
     titleStyle: bold,

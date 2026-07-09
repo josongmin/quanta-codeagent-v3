@@ -10,6 +10,7 @@ import {
 } from "@/agent/context/usage-breakdown"
 import { type ContextWarningView, renderContextWarning, toWarningView } from "../context-warning"
 import { createContextUsageHolder } from "../repl/context-usage-snapshot"
+import { slashRef } from "../slash-ref"
 
 const view = (usedTokens: number, max: number, compactThreshold: number): ContextWarningView => ({
   usedTokens,
@@ -29,8 +30,13 @@ describe("RFC-09 B — renderContextWarning thresholds", () => {
   test("compaction 91% ⇒ compaction-first message + rewind affordance", () => {
     const s = renderContextWarning(view(110_000, 200_000, 120_000))
     expect(s).toContain("곧 자동 요약됩니다")
-    expect(s).toContain("/compact")
-    expect(s).toContain("esc esc(/rewind)")
+    // UUX-5-01 — this pin used to assert the `/compact` GHOST (a command that
+    // never existed; the real one is `/summarize-now`). The copy now renders
+    // via slashRef, and the slash-ref hellgate proves the name resolves in
+    // the live registry — so this pin can never re-freeze a ghost.
+    expect(s).toContain(slashRef("summarize-now"))
+    expect(s).not.toContain("/compact")
+    expect(s).toContain(`esc esc(${slashRef("rewind")})`)
   })
 
   test("below both ratios ⇒ empty string (no noise)", () => {

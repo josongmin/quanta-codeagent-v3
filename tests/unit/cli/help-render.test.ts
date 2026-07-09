@@ -67,9 +67,11 @@ describe("renderHelp — slash inventory (dynamic from BUILTINS)", () => {
 })
 
 describe("renderHelp — keybinds + ENV knobs sections", () => {
-  test("keybinds section present with raw-line-reader bindings", () => {
+  test("keybinds section present with production bindings", () => {
     const out = stripAnsi(renderHelp(BUILTINS))
-    expect(out).toContain("keybinds (raw-line-reader)")
+    // WS-E jul-10: keybinds derive from keybind-truth.ts (FSM chords + reader
+    // binds), no longer a hand-written raw-line-reader-only table.
+    expect(out).toContain("keybinds")
     expect(out).toContain("Tab")
     expect(out).toContain("Ctrl+C")
     expect(out).toContain("Ctrl+D")

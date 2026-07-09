@@ -659,6 +659,21 @@ export const readLine = (opts: ReadLineOptions, testIO?: ReadLineTestIO): Promis
         return
       }
 
+      // UUX-2-03 / D-2 (jul-10) — Ctrl+D = EOF on an EMPTY line, mirroring the
+      // Ctrl+C quit signal (settleReject(AbortError) → prompt-pipeline maps it
+      // to `null` → the REPL loop exits). Non-empty buffer ⇒ consumed no-op
+      // (readline parity: ignore when the line has text — never submits, never
+      // quits). Guards: a heredoc continuation row is NOT an empty line (an
+      // EOF mid-body would tear the whole REPL down), and this branch sits
+      // BELOW the keybinding remap so an operator rebind of ctrl+d wins
+      // (the remap rewrites `k` before we see it) and BELOW search mode
+      // (whose block consumes every unhandled key). Copy SSOT: KB_EOF in
+      // `keybind-truth.ts` — `/help` renders exactly this behavior.
+      if (k.ctrl === true && k.name === "d") {
+        if (state.buf.length === 0 && !state.heredocOpen) settleReject(new AbortError())
+        return
+      }
+
       // RFC-12 — `@`-dropdown key routing (priority below search/Ctrl+R, above
       // the slash/history nav). Only entered when the dropdown is active, which
       // requires `opts.atProvider` (default-OFF ⇒ this whole block is skipped).

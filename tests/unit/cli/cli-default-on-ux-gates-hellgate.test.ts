@@ -13,20 +13,17 @@
  * real src/ consumer) → together: these features are now default-ON AND wired.
  *
  * RED before the index.ts edit (gates absent from the list); GREEN after.
- * Source-text scan of index.ts (no import — it has top-level seed side effects).
+ * WS-E jul-10: the gate list moved out of side-effecting index.ts into the
+ * pure data leaf `cli-feature-gates.ts` (so `/help` can derive from it) — this
+ * gate now imports the list directly instead of source-regex-scanning; the
+ * seed loop's consumption of that module is pinned by
+ * `help-env-seeded-gates-parity.hellgate`.
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { CLI_FEATURE_GATE_NAMES } from "@/apps/cli/cli-feature-gates"
 import { gateOn } from "@/shared"
 
-const INDEX_SRC = "src/apps/cli/index.ts"
-
-const cliFeatureGates = (): readonly string[] => {
-  const text = readFileSync(INDEX_SRC, "utf8")
-  const block = text.match(/const CLI_FEATURE_GATES\s*=\s*\[([\s\S]*?)\]/)
-  if (block === null) throw new Error("CLI_FEATURE_GATES array not found in index.ts")
-  return [...(block[1] as string).matchAll(/"(QUANTA_[A-Z0-9_]+)"/g)].map((m) => m[1] as string)
-}
+const cliFeatureGates = (): readonly string[] => CLI_FEATURE_GATE_NAMES
 
 // The jun-11 default-ON additions — each R3-verdict SOLID / high-confidence /
 // enable-chain YES, with a real consumer pinned by the drift hellgate:
@@ -74,7 +71,7 @@ describe("jun-11 CLI default-ON UX feature gates", () => {
     })
   }
 
-  test("the index.ts seed value \"1\" activates the canonical gate SSOT", () => {
+  test('the index.ts seed value "1" activates the canonical gate SSOT', () => {
     // Mirror the seed loop (index.ts: unset → "1"), then assert gateOn honors it.
     for (const gate of DEFAULT_ON) {
       expect(gateOn({ [gate]: "1" }, gate)).toBe(true)

@@ -57,7 +57,7 @@ evidence:
       - tests/unit/permission/trust-scope-durable-prefix-grant-hellgate.test.ts
       - tests/unit/permission/prefix-grant-harddeny-backstop-hellgate.test.ts
       - tests/unit/permission/trust-scope-prefix-gate-guard-hellgate.test.ts
-      - tests/unit/cli-default-on-ux-gates-hellgate.test.ts
+      - tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
     integration:
       - tests/e2e-pty/cli-approval-preflight-prefix-e2e.test.ts
     contract: []
