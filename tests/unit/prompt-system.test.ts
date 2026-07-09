@@ -280,43 +280,40 @@ describe("buildSystemPrompt artifact-as-memory paragraph (Phase 6)", () => {
   })
 })
 
-// Codex `may-20-codex-signal.md §10` anti-signals absorption. These are the
-// seven weak signals the agent must NOT treat as proof; they ride between the
-// existing "Trust ladder" section and the artifact paragraph. Each guard pins
-// one anti-signal by exact-name match; deletion / rename fails the build.
-describe("buildSystemPrompt anti-signals section (Codex §10 absorption)", () => {
+// Codex `may-20-codex-signal.md §10` anti-signals absorption. jul-10 trim: the
+// standalone "Anti-signals" section (7 verbose bullets) was CONSOLIDATED into a
+// single compact weak-signals bullet inside the Trust ladder (it expanded the
+// same thread). The guard now pins that the weak-signal CONCEPTS survive, folded
+// into Trust ladder — deletion still fails the build; verbose re-expansion is not
+// required.
+describe("buildSystemPrompt weak-signals (Codex §10 absorption, folded into Trust ladder)", () => {
   const p = buildSystemPrompt()
 
-  test("section header is present verbatim", () => {
-    expect(p).toContain("Anti-signals (treat as ROUTING HINTS, never proof):")
+  test("weak-signal concepts appear (folded, no standalone section)", () => {
+    expect(p).toContain("grep MISS") // absence from grep ≠ dead
+    expect(p).toContain("nice file or symbol") // naming ≠ ownership
+    expect(p).toContain("passing shape/snapshot") // snapshot ≠ semantics
+    expect(p).toContain("quick-fix") // available fix ≠ correct
+    expect(p).toContain("ONE green command") // wrong rail can pass
+    expect(p).toContain("screenshot pass can hide") // visual ≠ correct
+    // The standalone header is intentionally GONE (consolidated).
+    expect(p).not.toContain("Anti-signals (treat as ROUTING HINTS")
   })
 
-  test("all seven anti-signal names appear", () => {
-    expect(p).toContain("Absence from grep")
-    expect(p).toContain("Nice file name")
-    expect(p).toContain("Passing shape snapshot")
-    expect(p).toContain("A quick fix exists")
-    expect(p).toContain("One green command")
-    expect(p).toContain("Old handoff note")
-    expect(p).toContain("Visual looks okay")
-  })
-
-  test("section sits between Trust ladder and Durable state paragraph", () => {
+  test("weak-signals ride inside Trust ladder, before Durable state", () => {
     const trustIdx = p.indexOf("Trust ladder (when sources disagree")
-    const antiIdx = p.indexOf("Anti-signals (treat as ROUTING HINTS, never proof):")
+    const weakIdx = p.indexOf("These are ROUTING HINTS, never proof")
     const durableIdx = p.indexOf("Durable state belongs in workspace files")
     expect(trustIdx).toBeGreaterThanOrEqual(0)
-    expect(antiIdx).toBeGreaterThan(trustIdx)
-    expect(durableIdx).toBeGreaterThan(antiIdx)
+    expect(weakIdx).toBeGreaterThan(trustIdx)
+    expect(durableIdx).toBeGreaterThan(weakIdx)
   })
 
-  test("section sits AFTER the existing grep-presence-only bullet", () => {
-    // Anti-signals expands on the same trust-ladder thread; the existing
-    // "grep hit is presence evidence only" bullet must still precede.
+  test("weak-signals sit AFTER the existing grep-presence-only bullet", () => {
     const grepIdx = p.indexOf("A grep hit is presence evidence only")
-    const antiIdx = p.indexOf("Anti-signals (treat as ROUTING HINTS, never proof):")
+    const weakIdx = p.indexOf("These are ROUTING HINTS, never proof")
     expect(grepIdx).toBeGreaterThanOrEqual(0)
-    expect(antiIdx).toBeGreaterThan(grepIdx)
+    expect(weakIdx).toBeGreaterThan(grepIdx)
   })
 
   test("buildSystemPrompt remains byte-stable across 100 calls (cache-prefix invariant)", () => {
@@ -330,13 +327,13 @@ describe("buildSystemPrompt anti-signals section (Codex §10 absorption)", () =>
   })
 
   test("cache marker invariant — buildTurnContext system[0] still has cache:true", () => {
-    // Sanity: adding the anti-signals section did not change the SystemBlock
-    // shape that signals the provider cache breakpoint.
+    // Sanity: the weak-signals fold did not change the SystemBlock shape that
+    // signals the provider cache breakpoint.
     const { system } = buildTurnContext(base())
     expect(system).toHaveLength(1)
     expect(system[0]?.type).toBe("text")
     expect(system[0]?.cache).toBe(true)
-    expect(system[0]?.text).toContain("Anti-signals (treat as ROUTING HINTS, never proof):")
+    expect(system[0]?.text).toContain("These are ROUTING HINTS, never proof")
   })
 })
 

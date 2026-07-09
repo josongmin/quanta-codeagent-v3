@@ -160,9 +160,9 @@ describe("ADR-0410 — unchanged portions remain byte-stable", () => {
     expect(p).toContain("L9 working state")
   })
 
-  test("Anti-signals seven names still present", () => {
-    expect(p).toContain("Absence from grep")
-    expect(p).toContain("Visual looks okay")
+  test("weak-signals still present (jul-10: folded into Trust ladder)", () => {
+    expect(p).toContain("grep MISS")
+    expect(p).toContain("screenshot pass can hide")
   })
 
   test("Honesty rail still present after the examples", () => {

@@ -107,7 +107,7 @@ describe("3-axis COMPOSER order — posture BEFORE task BEFORE verify in the rea
     const iPolicyStack = prompt.indexOf("Policy stack (highest to lowest priority")
     const iPosture = prompt.indexOf(renderPostureBase("owned").join("\n"))
     const iVerify = prompt.indexOf(renderVerifyStrategy("reproduce-first").join("\n"))
-    const iAfterPack = prompt.indexOf("Vision priority (ADR-0319):")
+    const iAfterPack = prompt.indexOf("Vision priority: when the user attaches")
     expect(iPolicyStack).toBeGreaterThanOrEqual(0)
     expect(iAfterPack).toBeGreaterThanOrEqual(0)
     expect(iPolicyStack).toBeLessThan(iPosture) // authority ladder ABOVE the axes
