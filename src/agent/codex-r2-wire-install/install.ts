@@ -92,12 +92,22 @@ const appendAllSafe = (store: TypedHistoryEventStore, events: readonly ContextEv
  *  caller returns the same reference. Events are ALSO appended to
  *  `store` (when present) so a downstream consumer can replay typed
  *  history. NO-THROW envelope at the closure-entry boundary so a
- *  buggy `getSnapshot` cannot crash the turn. */
+ *  buggy `getSnapshot` cannot crash the turn (ADR-0332 §J).
+ *
+ *  Observability (ALBB-09 intent): a throwing `getSnapshot`/detector must not
+ *  vanish silently. Rather than RE-THROW (which escapes the closure and
+ *  violates §J for the direct/SEED path), the closure surfaces the failure
+ *  ONCE through the injected `onError` sink — the same seam
+ *  `resolveContextEventsForTurn` would use — then degrades to `[]`. Because
+ *  the closure no longer throws, the outer wrapper's catch never fires, so the
+ *  error is emitted EXACTLY once. `undefined` sink ⇒ log-only (byte-identical
+ *  to the pre-ALBB-09 swallow). */
 const buildContextEventsProducer = (
   getSnapshot: () => import("@/agent/context-change").TurnStateSnapshot,
   store: TypedHistoryEventStore | undefined,
   sessionId: string | undefined,
   now: () => number,
+  onError: ((message: string) => void) | undefined,
 ): (() => readonly ContextEvent[]) => {
   let prev: import("@/agent/context-change").TurnStateSnapshot | undefined
   let turnSeq = 0
@@ -120,14 +130,23 @@ const buildContextEventsProducer = (
       if (store !== undefined && events.length > 0) appendAllSafe(store, events)
       return events
     } catch (e) {
-      // Keep the process-log warn for local attribution, then RE-THROW so the
-      // ONLY wired caller — `resolveContextEventsForTurn` (compaction-wire) —
-      // surfaces the failure as a NON-FATAL `stream.emit({type:"error"})` on the
-      // session stream (it already does; the inner swallow used to preempt it).
-      // The outer wrapper still degrades clean (returns `[]`), so the turn is
-      // byte-identical on the SUCCESS path and gains ONE error event on throw.
+      // NO-THROW envelope (ADR-0332 §J): a throwing `getSnapshot`/detector must
+      // NOT escape the closure — the SEED path also runs inside this try, and a
+      // direct caller (or the SEED first turn) has no outer wrapper to catch it.
+      // Keep the process-log warn for local attribution, surface the failure
+      // ONCE via the injected `onError` seam (same `stream.emit({type:"error"})`
+      // the outer wrapper would use — and since we now degrade to `[]` instead
+      // of re-throwing, the wrapper's catch never fires ⇒ EXACTLY-once), then
+      // return `[]`. SUCCESS path is untouched (no emit) ⇒ byte-identical.
       logger.warn(`codex-r2-wire.contextEventsForTurn: ${errMessage(e)}`)
-      throw e
+      // Defensive: a throwing sink (e.g. a poison-pill / stream-less cfg) must
+      // NOT re-break the NO-THROW envelope — surfacing is best-effort.
+      try {
+        onError?.(`context-events provider failed: ${errMessage(e)}`)
+      } catch (sinkErr) {
+        logger.warn(`codex-r2-wire.contextEventsForTurn.sink: ${errMessage(sinkErr)}`)
+      }
+      return []
     }
   }
 }
@@ -233,7 +252,19 @@ const fillContextEvents = (cfg: AgentConfig, deps: CodexR2WireDeps, now: () => n
   if (cfg.contextEventsForTurn !== undefined) return
   if (deps.getSnapshot === undefined || deps.store === undefined) return
   try {
-    const producer = buildContextEventsProducer(deps.getSnapshot, deps.store, deps.sessionId, now)
+    // Surface a throwing `getSnapshot`/detector as a non-fatal stream error so a
+    // degraded context-events turn is OBSERVABLE (mirror of `fillMentionInjector`
+    // + `resolveContextEventsForTurn`), while the closure stays NO-THROW (§J).
+    const onError = (message: string): void => {
+      cfg.stream.emit({ type: "error", message })
+    }
+    const producer = buildContextEventsProducer(
+      deps.getSnapshot,
+      deps.store,
+      deps.sessionId,
+      now,
+      onError,
+    )
     safeSet(cfg, "contextEventsForTurn", producer)
   } catch {
     // Producer factory throw ⇒ slot stays unwired.

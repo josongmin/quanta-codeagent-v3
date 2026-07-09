@@ -357,12 +357,66 @@ export const resolvedShellCommand = (
 ): string | null =>
   action.shellCommand ?? config.registry.extractShellCommand(action.tool, action.input)
 
+/**
+ * Canonical, key-order-independent JSON serialization of a tool input. Used to
+ * derive a STABLE discriminator for the non-shell escalation key (see
+ * {@link reviewActionKeyOf}). Object keys are sorted at every depth so two
+ * structurally-identical inputs whose keys were emitted in a different order
+ * collapse to the SAME string (they are the same action ⇒ coalesce), while any
+ * value/target difference yields a DIFFERENT string (a distinct action ⇒
+ * re-prompt). Arrays keep positional order (order is semantic there). Cycles /
+ * non-serializable values fall back to a fail-closed sentinel so a pathological
+ * input can never collapse two DIFFERENT actions onto one key — it just forces
+ * a fresh prompt.
+ */
+const canonicalInputKey = (input: unknown): string => {
+  const seen = new WeakSet<object>()
+  const norm = (v: unknown): unknown => {
+    if (v === null || typeof v !== "object") return v
+    if (seen.has(v as object)) return "[cycle]"
+    seen.add(v as object)
+    if (Array.isArray(v)) return v.map(norm)
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+      out[k] = norm((v as Record<string, unknown>)[k])
+    }
+    return out
+  }
+  try {
+    return JSON.stringify(norm(input)) ?? "undefined"
+  } catch {
+    // Non-serializable (e.g. BigInt) ⇒ fail closed: a sentinel derived from a
+    // best-effort string tag. Never returns a constant that could merge two
+    // distinct inputs — worst case is over-prompting, never under-prompting.
+    return `[nonserializable:${String(input)}]`
+  }
+}
+
+/**
+ * The escalation/dedup key for a reviewer round.
+ *
+ *   - SHELL tools: `${tool}|${shellCommand}` — the command is the action
+ *     identity (unchanged; do NOT weaken this path).
+ *   - NON-SHELL mutating tools (edit/write/apply_patch — no extractable shell
+ *     command): `${tool}|#${canonicalInputKey(input)}`. Pre-fix this collapsed
+ *     to the BARE tool name, so after approving one `write {path:A}` the
+ *     run-scoped `allowlistEscalated` Set held `write` and the NEXT
+ *     `write {path:B}` (a DIFFERENT action) hit `has('write')` and SKIPPED the
+ *     reviewer — a HITL over-approval bypass. Keying on the canonical input
+ *     identity makes two different targets produce DIFFERENT keys (each
+ *     re-prompts) while two identical actions still coalesce (one prompt).
+ *
+ * The `#` marker keeps the non-shell namespace disjoint from the shell one so a
+ * canonical-input string can never alias a `${tool}|<command>` shell key.
+ */
 export const reviewActionKeyOf = (
   config: AdmissibilityGateConfig,
   action: AdmissibilityAction,
 ): string => {
   const shellCommand = resolvedShellCommand(config, action)
-  return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
+  return shellCommand !== null
+    ? `${action.tool}|${shellCommand}`
+    : `${action.tool}|#${canonicalInputKey(action.input)}`
 }
 
 /** Resolve the effective HITL tier for a known-registered tool. The unknown-

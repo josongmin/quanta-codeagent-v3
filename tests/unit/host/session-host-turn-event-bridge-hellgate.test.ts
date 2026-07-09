@@ -16,26 +16,35 @@ describe("session-host turn-event bridge inventory", () => {
     for (const type of AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES) {
       expect(canonical.has(type)).toBe(true)
     }
-    // ALBB-18 (3) — `progress_update` bridged (was 7 → now 8).
-    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBe(8)
+    // ALBB-18 P3 fix — `progress_update` mis-bridge REMOVED (back to 7). It was
+    // spliced into the prose `assistant_text.delta` channel; progress is rendered
+    // to CLI stdout separately, so the bridge no longer carries it.
+    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBe(7)
     expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.includes("progress_update")).toBe(
-      true,
+      false,
     )
     expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBeLessThan(
       AGENT_EVENT_TYPES.length,
     )
   })
 
-  test("ALBB-18 — progress_update reuses an EXISTING host event type (no new SessionHostTurnEventType)", () => {
-    // The bridge adds NO new SessionHostTurnEventType: progress_update reuses the
-    // render-only `assistant_text.delta` target, so the target set is unchanged.
+  test("ALBB-18 P3 fix — progress_update is NOT bridged into the prose assistant_text.delta channel", () => {
+    // ALBB-18 mis-bridged mid-turn progress onto `assistant_text.delta`, which the
+    // kernel projection APPENDS to `streamingAssistantText` and re-emits as a prose
+    // `turn.output.delta`. That splices a progress line ("resolving imports") INTO
+    // the model's streaming reply — display corruption on the primary text channel.
+    // progress_update is already rendered to CLI stdout separately, so it must NOT
+    // be bridged to the session host at all: the bridge drops it (returns undefined).
     const bridged = toSessionHostTurnEvent({
       type: "progress_update",
       currentStep: "resolving imports",
     })
-    expect(bridged).not.toBeUndefined()
-    expect(bridged?.type).toBe("assistant_text.delta")
-    // The target-type inventory must NOT have grown a new arm for progress.
+    expect(bridged).toBeUndefined()
+    // progress_update is not in the bridged AgentEvent inventory anymore.
+    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.includes("progress_update")).toBe(
+      false,
+    )
+    // And no host target arm was ever added for progress.
     expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_TYPES.includes("progress_update" as never)).toBe(
       false,
     )

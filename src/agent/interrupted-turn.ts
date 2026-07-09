@@ -55,14 +55,34 @@ const textOf = (m: Message): string =>
 
 /** Extract the in-flight `tool_use` refs (id + name ONLY — no `input`/args) from
  *  the LAST assistant message in the turn. Empty when the turn ended on text or
- *  a non-assistant message. Pure; NEVER reads the tool args (secret-safe). */
+ *  a non-assistant message.
+ *
+ *  ALBB-06 P2 fix — a `tool_use` is in flight ONLY if NO later `tool_result`
+ *  answers it (correlated by `tool_use_id`). On a turn-boundary signal_abort
+ *  (Ctrl+C between turns) the prior turn's tools already COMPLETED and the loop
+ *  appended a `{role:"user", content:[tool_result…]}` carrier — so those blocks
+ *  are done, NOT in flight. Reporting them would tell the model to re-issue a
+ *  landed side-effecting call. A completed tool is excluded; the genuine
+ *  mid-tool-call case (tool_use with no result) is byte-identical to before.
+ *
+ *  Pure; NEVER reads the tool args (secret-safe). */
 const extractInFlightTools = (messages: ReadonlyArray<Message>): InFlightToolRef[] => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
     if (m === undefined || m.role !== "assistant") continue
+    // Collect every tool_use_id that a subsequent tool_result answers. Scan only
+    // messages AFTER this assistant turn — a result can only close a prior call.
+    const answered = new Set<string>()
+    for (let j = i + 1; j < messages.length; j++) {
+      const later = messages[j]
+      if (later === undefined) continue
+      for (const b of later.content) {
+        if (b.type === "tool_result") answered.add(b.tool_use_id)
+      }
+    }
     const tools: InFlightToolRef[] = []
     for (const b of m.content) {
-      if (b.type === "tool_use") tools.push({ id: b.id, name: b.name })
+      if (b.type === "tool_use" && !answered.has(b.id)) tools.push({ id: b.id, name: b.name })
     }
     return tools
   }

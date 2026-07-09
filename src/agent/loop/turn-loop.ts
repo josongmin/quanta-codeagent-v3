@@ -1,5 +1,5 @@
 import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
-import { errMessage, logger } from "@/shared"
+import { errMessage, isAbortError, LLMError, logger } from "@/shared"
 import { maybeProposeRadarCard } from "../radar-producer-hook"
 import { freshRecovery } from "../recovery"
 import { buildWorkMetricsResources, turnSpanAttrs } from "../session-resources"
@@ -32,6 +32,22 @@ export const classifyTurnThrow = (
   isSessionApprovalRequiredError(e)
     ? { turnSpanStatus: "aborted", flushKind: "aborted" }
     : { turnSpanStatus: "error", flushKind: "error" }
+
+/** ALBB-20 #13 REGRESSION FIX — is `e` a GENUINE cooperative abort (user Ctrl+C
+ *  / deadline) that landed while a turn-body LLM stream was in-flight? Since
+ *  ALBB-20 #13 threaded `config.signal` into the REACTIVE (PTL) summarizer, an
+ *  abort during that in-flight summarizer throws an `AbortError` out of
+ *  `summarizeWith` → `applyNonSuccessRecoveryAction` (unguarded) → `runTurn`.
+ *  That throw is NOT a hard failure — it must settle the run as an aborted turn,
+ *  not reject it. Detection mirrors `streamConsume.classifyStreamTurnError` (the
+ *  SSOT for the same decision on the primary stream): our/native/DOM `AbortError`
+ *  or `TimeoutError` (`isAbortError`), an `LLMError{kind:"aborted"}` (adapters
+ *  mint this), OR the lifetime `signal` is already aborted (a cancel that surfaced
+ *  as some other error while the signal was down). Pure — no throw, no IO. */
+export const isGenuineTurnAbort = (e: unknown, signal: AbortSignal | undefined): boolean =>
+  isAbortError(e) ||
+  (e instanceof LLMError && e.kind === "aborted") ||
+  signal?.aborted === true
 
 /** The finish tuple for the park/gate SETTLE path (a parked turn whose gate
  *  wait resolved to "settle", or a park with no gate to keep waiting on). This
@@ -80,11 +96,29 @@ export const executeTurnWithObservability = async (args: {
           ? "error"
           : "ok"
   } catch (e) {
+    // ALBB-20 #13 REGRESSION FIX — a GENUINE cooperative abort (user Ctrl+C /
+    // deadline) that landed while a turn-body LLM stream was in-flight (most
+    // notably the REACTIVE summarizer, made interruptible by ALBB-20 #13) throws
+    // an `AbortError` out of `runTurn` instead of returning a cooperative
+    // `{kind:"aborted"}`. Convert it here into that SAME clean aborted TurnResult
+    // (identical to the `runTurn` line-26/58 pre-stream abort return) so the
+    // normal aborted settlement runs (`resolveTurnLoopOutcome` → reason:"aborted",
+    // interruptedCategory("user")) instead of the throw REJECTING the run promise
+    // and being mis-recorded as a hard turn 'error'. Approval-required PAUSES are
+    // NOT aborts — they are handled by `classifyTurnThrow` + rethrow BELOW
+    // (checked first so an approval error that coincides with an aborted signal
+    // keeps its HITL hand-off semantics, unchanged).
+    if (!isSessionApprovalRequiredError(e) && isGenuineTurnAbort(e, args.ctx.cfg.signal)) {
+      turnSpanStatus = "aborted"
+      flushKind = "aborted"
+      result = { kind: "aborted" }
+      return { result }
+    }
     // An approval-required PAUSE (SessionApprovalRequiredError) is an intentional
     // HITL hand-off, not a hard error — label the span + work-metrics as
     // "aborted" (which `emitWorkMetrics` deliberately suppresses) instead of
-    // "error", so the pause is not recorded as a run failure. Any OTHER throw
-    // stays "error". Control flow is unchanged (the error is always rethrown).
+    // "error", so the pause is not recorded as a run failure. Any OTHER (non-abort)
+    // throw stays "error" and is rethrown (classified 'error' downstream).
     const classification = classifyTurnThrow(e)
     turnSpanStatus = classification.turnSpanStatus
     flushKind = classification.flushKind

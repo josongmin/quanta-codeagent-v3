@@ -366,7 +366,14 @@ const classifyTerminal = (args: {
   if (args.error !== undefined) {
     return isAbort(args.error) || args.aborted ? "aborted" : "completed"
   }
-  if (args.outcome?.reason === "aborted" || args.aborted) return "aborted"
+  // ALBB-04 P2 (narrowed): on the SUCCESS arm (host RETURNED an outcome) a turn
+  // is a cancel ONLY when the host itself reported `outcome.reason === "aborted"`.
+  // Previously a NORMAL completion that merely RACED with `signal.aborted` (e.g.
+  // an external abort landing after the host already produced its result) was
+  // misclassified `"aborted"`, routing a successful turn's messages through the
+  // cancel terminal. The throw arm above still honors `aborted` because a raced
+  // abort there means the host work did NOT complete.
+  if (args.outcome?.reason === "aborted") return "aborted"
   if (args.outcome?.reason === "error") return "error"
   return "completed"
 }
@@ -384,16 +391,42 @@ const onTurnAborted = async (args: {
   readonly state: KernelSessionState
   readonly command: TurnRunCommand
   readonly error?: unknown
+  /** ALBB-04 P2 — present ONLY on the cooperative RETURN-abort path (host
+   *  RETURNED `outcome.reason === "aborted"` WITH accumulated messages, e.g. a
+   *  budget/deadline abort that still surfaces output). When present its
+   *  `messages` MUST be committed into kernel state (mirroring
+   *  `onTurnCompleted`) — otherwise the accumulated transcript is silently
+   *  discarded back to the pre-turn set. Absent on the throw-abort and
+   *  pre-host-start paths (no messages exist to lose). */
+  readonly result?: SessionHostTurnResult
   readonly ctx: KernelDispatchContext
   readonly events: readonly SessionEvent[]
 }): Promise<KernelDispatchResult> => {
+  // ALBB-04 P2 — SETTLE the accumulated state exactly like `onTurnCompleted`
+  // when the host cooperatively RETURNED messages: commit `result.messages`,
+  // clear the turn-seeding draft, re-summarize the transcript from the surfaced
+  // messages, and carry any token usage. When there is NO result (throw-abort /
+  // pre-host-start) the pre-turn state is preserved verbatim — there are no
+  // messages to lose. We STILL emit the dedicated `turn.aborted` terminal in
+  // both cases (do not revert ALBB-04's wire-shape fix).
+  const settled = args.result
   const nextState: KernelSessionState = {
     ...args.state,
     revision: args.state.revision + 1,
     seq: args.state.seq + 2,
     status: "idle",
     pendingApproval: null,
-    transcript: clearStreamingAssistantText(args.state.transcript),
+    ...(settled !== undefined
+      ? {
+          messages: [...settled.messages],
+          draftInput: "",
+          draftImages: [],
+          transcript: clearStreamingAssistantText(summarizeTranscript(settled.messages)),
+          ...(settled.tokenUsage !== undefined ? { lastTokenUsage: settled.tokenUsage } : {}),
+        }
+      : {
+          transcript: clearStreamingAssistantText(args.state.transcript),
+        }),
     lastOutcomeReason: "aborted",
   }
   const abortedEvents: SessionEvent[] = [
@@ -417,7 +450,13 @@ const onTurnAborted = async (args: {
     },
   ]
   await appendEvents(args.ctx.eventLog, abortedEvents)
-  return { state: nextState, events: [...args.events, ...abortedEvents] }
+  return {
+    state: nextState,
+    events: [...args.events, ...abortedEvents],
+    ...(settled !== undefined
+      ? { turnResult: settled, transcriptMessages: [...settled.messages] }
+      : {}),
+  }
 }
 
 const onTurnFailed = async (args: {
@@ -624,6 +663,10 @@ const runTurn = async (args: {
       ? await onTurnAborted({
           state: streamState,
           command: args.command,
+          // ALBB-04 P2 — the cooperative RETURN-abort path: hand the host result
+          // through so its accumulated `messages` are COMMITTED (and the draft
+          // cleared), not silently discarded back to the pre-turn message set.
+          result,
           ...(turnController.signal.reason !== undefined
             ? { error: turnController.signal.reason }
             : {}),

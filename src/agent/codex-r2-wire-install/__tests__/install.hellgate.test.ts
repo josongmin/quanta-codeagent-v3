@@ -32,6 +32,17 @@ const makeBareCfg = (): AgentConfig => {
   return {} as unknown as AgentConfig
 }
 
+/** cfg fixture that captures `stream.emit` events so we can assert the
+ *  ALBB-09 observability contract (a throwing producer surfaces ONE
+ *  non-fatal `error` event) at the CLOSURE boundary. */
+const makeStreamCapturingCfg = (): { cfg: AgentConfig; events: Array<{ type: string; message?: string }> } => {
+  const events: Array<{ type: string; message?: string }> = []
+  const cfg = {
+    stream: { emit: (ev: { type: string; message?: string }) => events.push(ev) },
+  } as unknown as AgentConfig
+  return { cfg, events }
+}
+
 const makeSnapshot = (
   over: Partial<import("@/agent/context-change").TurnStateSnapshot> = {},
 ): import("@/agent/context-change").TurnStateSnapshot => ({
@@ -245,6 +256,43 @@ describe("ADR-0332 §J — NO-THROW", () => {
     // Producer call also no-throw → empty array.
     const out = cfg.contextEventsForTurn?.() ?? null
     expect(out).toEqual([])
+  })
+
+  test("getSnapshot throws ⇒ producer surfaces EXACTLY-ONE non-fatal error event (ALBB-09 observability)", () => {
+    // ALBB-09 intent: a throwing producer must NOT vanish silently. The fix
+    // keeps the closure NO-THROW (§J above) yet still surfaces the failure once
+    // through the injected `onError` seam (`stream.emit({type:"error"})`).
+    const { cfg, events } = makeStreamCapturingCfg()
+    const store = createInMemoryTypedHistoryEventStore()
+    installCodexR2Wires(cfg, {
+      sessionId: "s1",
+      getSnapshot: () => {
+        throw new Error("boom")
+      },
+      store,
+    })
+    // Call the raw closure directly (SEED first-turn path) — must not throw.
+    let out: readonly unknown[] | null = null
+    expect(() => {
+      out = cfg.contextEventsForTurn?.() ?? null
+    }).not.toThrow()
+    expect(out).toEqual([])
+    // EXACTLY one error event, and it names the failure (not silently swallowed).
+    const errs = events.filter((e) => e.type === "error")
+    expect(errs.length).toBe(1)
+    expect(errs[0]?.message).toContain("boom")
+  })
+
+  test("SUCCESS path emits NO error event (byte-identical; emit only on throw)", () => {
+    // Paired control: a healthy producer must NOT emit anything on the stream.
+    const { cfg, events } = makeStreamCapturingCfg()
+    const store = createInMemoryTypedHistoryEventStore()
+    let snap = makeSnapshot({ cwd: "/a" })
+    installCodexR2Wires(cfg, { sessionId: "s1", getSnapshot: () => snap, store })
+    cfg.contextEventsForTurn?.() // seed
+    snap = makeSnapshot({ cwd: "/b" })
+    cfg.contextEventsForTurn?.() // diff
+    expect(events.filter((e) => e.type === "error").length).toBe(0)
   })
 
   test("frozen cfg ⇒ install completes without throwing", () => {

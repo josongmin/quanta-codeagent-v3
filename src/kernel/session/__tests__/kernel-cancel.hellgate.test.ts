@@ -520,6 +520,133 @@ describe("ALBB-04 single-classifier — return-aborted and throw-abort settle to
   })
 })
 
+describe("ALBB-04 P2 regression — return-aborted must SETTLE accumulated state (messages + draft)", () => {
+  // A cooperative RETURN-abort (host RETURNS `outcome.reason === "aborted"` WITH
+  // accumulated messages — e.g. a budget/deadline abort that still surfaces
+  // output, NOT a throw) must commit those messages into kernel state and clear
+  // the turn-seeding draft, EXACTLY like `onTurnCompleted` does — while STILL
+  // emitting the distinct `turn.aborted` terminal. The pre-fix `onTurnAborted`
+  // merely spread the PRE-turn `args.state`, silently DISCARDING `result.messages`
+  // and leaving the stale `draftInput`/`draftImages` lingering.
+  test("(c) return-aborted commits result.messages, clears draftInput, and still emits turn.aborted", async () => {
+    const { state, eventLog } = await seedRunningState("cx-settle")
+    // The NEW assistant message the aborted turn surfaced — it must land in state.
+    const surfacedMessages: readonly Message[] = [
+      { role: "user", content: [{ type: "text", text: "ping" }] },
+      { role: "assistant", content: [{ type: "text", text: "partial-before-abort" }] },
+    ]
+    const host: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-settle",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      // Cooperative deadline/budget abort: RETURNS aborted WITH accumulated output.
+      runTurn: async () => ({
+        outcome: {
+          reason: "aborted",
+          turns: 1,
+          messages: surfacedMessages,
+        } as AgentOutcome,
+        messages: surfacedMessages,
+      }),
+      close: async () => undefined,
+    }
+    // Sanity: the running state carries a non-empty draft (the turn-seeding input)
+    // that a correct settlement must CLEAR — otherwise the draft-clear assertion
+    // would be vacuously satisfiable.
+    expect(state.draftInput).toBe("ping")
+
+    const result = await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-settle",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog, host },
+    )
+
+    // (i) The accumulated assistant message is COMMITTED into kernel state — NOT
+    // silently discarded back to the pre-turn message set.
+    const hasSurfacedAssistant = result.state.messages.some(
+      (m) => m.role === "assistant" && JSON.stringify(m.content).includes("partial-before-abort"),
+    )
+    expect(hasSurfacedAssistant).toBe(true)
+    // (ii) The turn-seeding draft is CLEARED (no stale draft lingering).
+    expect(result.state.draftInput).toBe("")
+    expect(result.state.draftImages).toEqual([])
+    // (iii) The distinct cancel terminal is STILL emitted (ALBB-04 wire-shape kept).
+    const types = result.events.map((e) => e.type)
+    expect(types).toContain("turn.aborted")
+    expect(types).not.toContain("turn.completed")
+    expect(types).not.toContain("turn.failed")
+    expect(result.state.status).toBe("idle")
+    expect(result.state.lastOutcomeReason).toBe("aborted")
+    // (iv) The transcript reflects the surfaced messages (not the pre-turn one).
+    expect(result.transcriptMessages).toBeDefined()
+    expect(result.transcriptMessages?.some((m) => m.role === "assistant")).toBe(true)
+  })
+
+  test("(c') throw-abort path (no messages) stays correct — no message loss, distinct terminal", async () => {
+    // The throw-abort path carries NO result.messages, so there is nothing to
+    // lose. It must remain a clean `turn.aborted` that PRESERVES the pre-turn
+    // messages (here the seeded single user msg) without inventing any.
+    const { state, eventLog } = await seedRunningState("cx-throw-abort")
+    let resolveTurn: (() => void) | undefined
+    const turnGate = new Promise<void>((r) => {
+      resolveTurn = r
+    })
+    const preTurnMessageCount = state.messages.length
+    const host: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-throw-abort",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      runTurn: async ({ signal }) => {
+        await turnGate
+        throw signal?.reason ?? new DOMException("aborted", "AbortError")
+      },
+      close: async () => undefined,
+    }
+    const turnPromise = dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-throw-abort",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog, host },
+    )
+    await new Promise<void>((r) => setTimeout(r, 5))
+    await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-throw-abort",
+        commandId: "cancel",
+        issuedAt: clock.now().toISOString(),
+        type: "turn.cancel",
+      },
+      { clock, eventLog, host },
+    )
+    resolveTurn?.()
+    const result = await turnPromise
+    const types = result.events.map((e) => e.type)
+    expect(types).toContain("turn.aborted")
+    expect(types).not.toContain("turn.failed")
+    // No messages were surfaced by the throw path — the pre-turn messages are
+    // preserved verbatim (no loss, no invention).
+    expect(result.state.messages.length).toBe(preTurnMessageCount)
+    expect(result.state.status).toBe("idle")
+    expect(result.state.lastOutcomeReason).toBe("aborted")
+  })
+})
+
 describe("ALBB-04 append-failure isolation — persistence failure must not drop events or flip outcome", () => {
   test("(b) an eventLog.append rejection mid-stream keeps status idle, keeps turn.completed, and later appends are still attempted", async () => {
     const { state } = await seedRunningState("cx-append")
