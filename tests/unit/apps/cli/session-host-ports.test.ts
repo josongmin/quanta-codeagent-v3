@@ -103,3 +103,34 @@ describe("CLI session host ports", () => {
     ])
   })
 })
+
+// ── UUX-2-19 (jul-10 W4) — plan-exit loop is cancellable + bounded ───────────
+
+describe("plan-exit prompt: cancel + unusable-input bound (UUX-2-19)", () => {
+  const plan = { title: "t", body: "b" } as never
+
+  const portWith = (answers: string[]) => {
+    let i = 0
+    return createCliPlanExitPort({ ask: async () => answers[i++] ?? "" })
+  }
+
+  test("/cancel at the choice prompt fail-closes to REJECTED (no infinite loop)", async () => {
+    const exit = await portWith(["/cancel"]).request(plan)
+    expect(exit.decision).toBe("rejected")
+  })
+
+  test("/cancel at the feedback prompt also fail-closes to REJECTED", async () => {
+    const exit = await portWith(["c", "/cancel"]).request(plan)
+    expect(exit.decision).toBe("rejected")
+  })
+
+  test("a dead input source (endless empty answers) terminates as REJECTED", async () => {
+    const exit = await createCliPlanExitPort({ ask: async () => "" }).request(plan)
+    expect(exit.decision).toBe("rejected")
+  })
+
+  test("paired control: valid answers still work after garbage", async () => {
+    const exit = await portWith(["nope", "a"]).request(plan)
+    expect(exit.decision).toBe("approved")
+  })
+})

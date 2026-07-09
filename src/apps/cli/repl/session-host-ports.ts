@@ -11,6 +11,10 @@ export interface CliUserInputPortOptions extends CliPromptPortOptions {
 }
 
 const CANCEL_TOKEN = "/cancel"
+/** UUX-2-19 — consecutive unusable answers (garbage / empty from a released
+ *  channel) before the plan-exit prompt fail-closes to REJECTED. Bounded so a
+ *  dead input source can never spin the prompt forever. */
+const PLAN_EXIT_MAX_UNUSABLE = 5
 const BACK_TOKEN = "/back"
 const MULTILINE_DONE_TOKEN = "."
 
@@ -180,18 +184,35 @@ export const createCliPlanExitPort = (
   opts: CliPromptPortOptions,
 ): NonNullable<AgentConfig["planExitPort"]> => ({
   request: async (plan) => {
+    // UUX-2-19 (jul-10 W4) — the prompt loop is BOUNDED and cancellable:
+    // /cancel (or repeated unusable input — e.g. a released mid-turn channel
+    // feeding "") fail-closes to REJECTED instead of re-prompting forever.
+    let unusable = 0
     while (true) {
-      const choice = normalizePlanExitChoice(await opts.ask(renderPlanExitPrompt(plan)))
+      const raw = await opts.ask(renderPlanExitPrompt(plan))
+      if (isCancel(raw)) return buildPlanExit({ decision: "rejected" })
+      const choice = normalizePlanExitChoice(raw)
       if (choice === "approved" || choice === "rejected") {
         return buildPlanExit({ decision: choice })
       }
       if (choice === "changes_requested") {
         while (true) {
           const feedback = await opts.ask(renderPlanExitFeedbackPrompt())
+          if (isCancel(feedback)) return buildPlanExit({ decision: "rejected" })
           if (feedback.trim().toLowerCase() === BACK_TOKEN) break
-          if (feedback.trim().length === 0) continue
+          if (feedback.trim().length === 0) {
+            unusable += 1
+            if (unusable >= PLAN_EXIT_MAX_UNUSABLE) {
+              return buildPlanExit({ decision: "rejected" })
+            }
+            continue
+          }
           return buildPlanExit({ decision: "changes_requested", feedback })
         }
+      }
+      if (choice === null) {
+        unusable += 1
+        if (unusable >= PLAN_EXIT_MAX_UNUSABLE) return buildPlanExit({ decision: "rejected" })
       }
     }
   },
