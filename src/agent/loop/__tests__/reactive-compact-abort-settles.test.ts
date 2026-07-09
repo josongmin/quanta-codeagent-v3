@@ -32,7 +32,7 @@
  *       fix must NOT swallow real errors.
  */
 
-import { describe, expect, mock, test } from "bun:test"
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"
 import { AbortError } from "@/shared"
@@ -44,6 +44,7 @@ import { interruptedCategory } from "../../stop-category"
 import type { TurnSession, TurnState } from "../../turn-context"
 import type { AgentConfig } from "../../types"
 import { resolveTurnLoopOutcome } from "../turn-outcome"
+import * as sameTurnEngine from "../same-turn-engine"
 import { executeTurnWithObservability } from "../turn-loop"
 import type { RunAgentContext } from "../types"
 
@@ -133,6 +134,12 @@ const reactiveCompactThatAborts = (session: TurnSession, state: TurnState): Prom
   )
 
 describe("ALBB-20 #13 — abort during in-flight reactive summarizer settles aborted", () => {
+  // mock.module leaks process-globally in bun; restore the spied runTurn after
+  // each test so it never bleeds into sibling suites (e.g. same-turn-engine.test).
+  afterEach(() => {
+    mock.restore()
+  })
+
   test("§1 abort in reactive compaction ⇒ run settles reason:aborted (NOT reject)", async () => {
     const controller = new AbortController()
     const session = makeSession(controller, "abort")
@@ -150,15 +157,17 @@ describe("ALBB-20 #13 — abort during in-flight reactive summarizer settles abo
 
     // Patch `runTurn` so `executeTurnWithObservability` sees the genuine abort
     // throw exactly as the real engine would surface it out of `applyAction`.
-    mock.module("../same-turn-engine", () => ({
-      runTurn: () => reactiveCompactThatAborts(session, state),
-    }))
-    // Re-import AFTER the module mock so the loop binds the patched runTurn.
-    const { executeTurnWithObservability: exec } = await import("../turn-loop")
+    // Spy (NOT mock.module — which leaks process-globally in bun and would
+    // corrupt sibling suites like same-turn-engine.test): replace the real
+    // `runTurn` on the module namespace so the loop sees the genuine abort throw
+    // out of the REAL reactive `applyAction`. Restored by afterEach.
+    spyOn(sameTurnEngine, "runTurn").mockImplementation(() =>
+      reactiveCompactThatAborts(session, state),
+    )
 
     // Before the fix this REJECTS with the AbortError (the P1 hole). After the
     // fix it resolves a `{kind:"aborted"}` TurnResult.
-    const { result } = await exec({ ctx, turn: 1 })
+    const { result } = await executeTurnWithObservability({ ctx, turn: 1 })
     expect(result.kind).toBe("aborted")
 
     // The REAL settlement maps that aborted TurnResult to reason:"aborted"
@@ -197,17 +206,16 @@ describe("ALBB-20 #13 — abort during in-flight reactive summarizer settles abo
       turnStateSeed: {},
     } as unknown as RunAgentContext
 
-    mock.module("../same-turn-engine", () => ({
-      runTurn: () => reactiveCompactThatAborts(session, state),
-    }))
-    const { executeTurnWithObservability: exec } = await import("../turn-loop")
+    spyOn(sameTurnEngine, "runTurn").mockImplementation(() =>
+      reactiveCompactThatAborts(session, state),
+    )
 
     // Signal is NOT aborted; the throw is a plain Error ⇒ the fix must NOT
     // swallow it. It must still surface as a hard turn error (rethrown), so the
     // run is recorded as a failure, not a clean abort.
     let threw = false
     try {
-      await exec({ ctx, turn: 1 })
+      await executeTurnWithObservability({ ctx, turn: 1 })
     } catch {
       threw = true
     }
@@ -228,12 +236,11 @@ describe("ALBB-20 #13 — abort during in-flight reactive summarizer settles abo
       turnStateSeed: {},
     } as unknown as RunAgentContext
 
-    mock.module("../same-turn-engine", () => ({
-      runTurn: () => reactiveCompactThatAborts(session, state),
-    }))
-    const { executeTurnWithObservability: exec } = await import("../turn-loop")
+    spyOn(sameTurnEngine, "runTurn").mockImplementation(() =>
+      reactiveCompactThatAborts(session, state),
+    )
 
-    const { result } = await exec({ ctx, turn: 1 })
+    const { result } = await executeTurnWithObservability({ ctx, turn: 1 })
     // The catch must route through the SSOT `classifyTurnAbort(gate, lifetime)`:
     // gate.wasInterrupted() && !lifetime.aborted ⇒ INTERRUPTED (not aborted).
     // MUTATION pin: reverting the fix to a hand-rolled `{kind:"aborted"}` makes
