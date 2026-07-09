@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
+import { createInterruptedTurnBuffer, type InterruptedTurn } from "@/agent/interrupted-turn"
 import { pollConversationAction } from "@/agent/loop/control-poll"
-import { syncQueuedTurnInputs } from "@/agent/loop/turn-iteration"
+import { prepareTurnIteration, syncQueuedTurnInputs } from "@/agent/loop/turn-iteration"
 import { createConversationActionSurface } from "@/apps/cli/repl/conversation-action-surface"
 import type { Message } from "@/llm"
 
@@ -76,6 +76,71 @@ describe("interrupt → capture → resume (E2E)", () => {
     // PAIRED-CONTROL: the /cancel reason stays the surface-supplied reason
     // (byte-identical) — NOT clobbered to signal_abort by a double-capture.
     expect(buffer.peek()?.reason).toBe("user barge-in")
+  })
+
+  // NON-VACUOUS no-double-capture: the assertion above (reason stays the surface
+  // reason) is vacuous for the double-capture GUARD because it drives
+  // `syncQueuedTurnInputs` DIRECTLY — never reaching the relay at
+  // turn-iteration.ts:272 where the guard (`queuedInputs === "aborted"`) lives.
+  // This case drives the REAL `prepareTurnIteration` (the loop step that CALLS
+  // `syncQueuedTurnInputs` then the guarded relay) on a /cancel surface and
+  // counts capture() calls. The /cancel drain self-captures (surface reason) and
+  // returns `aborted_captured`; the guard MUST suppress the relay's signal_abort
+  // re-capture ⇒ EXACTLY ONE capture with the surface reason.
+  //
+  // MUTATION GUARD: dropping the `queuedInputs === "aborted"` condition at
+  // turn-iteration.ts:272 (so the relay ALWAYS re-captures) makes this RED —
+  // captureCount goes 2 and the held reason is clobbered to "signal_abort".
+  test("/cancel through prepareTurnIteration captures EXACTLY ONCE (no double-capture)", async () => {
+    const surface = createConversationActionSurface()
+    surface.activeTurnRef.current = {
+      currentTurn: { turnId: "t1", kind: "main", startedAt: 1, threadId: "x" },
+      isInterrupted: false,
+    }
+    // A counting wrapper over the real buffer — observes HOW MANY captures fire.
+    const inner = createInterruptedTurnBuffer()
+    let captureCount = 0
+    const countingBuffer = {
+      capture: (t: InterruptedTurn) => {
+        captureCount += 1
+        inner.capture(t)
+      },
+      peek: () => inner.peek(),
+      take: () => inner.take(),
+      has: () => inner.has(),
+      clear: () => inner.clear(),
+    }
+    // Fresh (NON-aborted) signal so prepareTurnIteration does NOT early-return at
+    // the signal.aborted check (turn-iteration.ts:253) — it must reach the relay.
+    const cfg = {
+      stream: noopStream,
+      signal: new AbortController().signal,
+      conversationActionPort: surface.port,
+      activeTurnRef: surface.activeTurnRef,
+      interruptedTurnBuffer: countingBuffer,
+    } as unknown as AgentConfig
+    const wm = fakeWm([msg("user", "refactor the parser"), msg("assistant", "extracted tokenizer")])
+
+    surface.pushCancel("user barge-in")
+    const outcome = await prepareTurnIteration({
+      cfg,
+      wm: wm as never,
+      sessionId: "s1",
+      taskRegistry: undefined,
+      turn: 3,
+      localizePhaseState: undefined,
+      dedupGate: undefined,
+      shellSnapshotSession: undefined,
+      hookPromptPending: [],
+      tokenBaseline: undefined,
+    })
+
+    expect(outcome).toBe("aborted")
+    // EXACTLY ONE capture — the /cancel self-capture; the relay guard suppressed
+    // the second (signal_abort) capture.
+    expect(captureCount).toBe(1)
+    // And the held reason is the surface reason, NOT clobbered to signal_abort.
+    expect(inner.peek()?.reason).toBe("user barge-in")
   })
 
   test("a later resume RE-INJECTS the captured turn (and consumes the buffer)", async () => {

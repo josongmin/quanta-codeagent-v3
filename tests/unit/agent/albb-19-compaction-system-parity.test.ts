@@ -27,13 +27,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { prepareTurnContext } from "@/agent/loop/context-assembler"
 import {
   getGlobalSessionResourceRegistry,
   resetGlobalSessionResourceRegistry,
 } from "@/agent/session-resource-registry/global"
 import type { AgentConfig } from "@/agent/types"
 import { type AssembleRequest, assembleAgentConfig } from "@/apps/agent/assemble"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import { createWorkingMemory } from "@/memory/working"
 import type { MetricsRegistry } from "@/observability/metrics/port"
 
 const inertLLM: LLMPort & { readonly model: string } = {
@@ -150,6 +152,80 @@ describe("ALBB-19 #3 — skill_activation reachable via live snapshot cursor", (
     } else {
       throw new Error("expected skill_activation event")
     }
+  })
+})
+
+// ─── #3 REAL-WIRE pin ─────────────────────────────────────────────────────
+// The `describe` above hand-sets `holder.activeSkillCursor.ids`, which does NOT
+// exercise the publish WIRE (`publishActiveSkillCursor` at
+// context-assembler.ts:394). Reverting that line keeps that gate GREEN (vacuous
+// for the WIRE). This case drives the REAL `prepareTurnContext` with a live
+// `activeSkills` set and asserts the cursor is populated BY THE WIRE — so
+// DELETING context-assembler.ts:394 makes it RED (the closure reads a still-`[]`
+// cursor ⇒ no `skill_activation`).
+describe("ALBB-19 #3 — publish WIRE populates the cursor (prepareTurnContext)", () => {
+  test("prepareTurnContext with a live activeSkills set ⇒ contextEventsForTurn emits skill_activation", async () => {
+    const req: AssembleRequest = { mode: "interactive", base: baseFor() }
+    const cfg = assembleAgentConfig(req)
+    expect(typeof cfg.contextEventsForTurn).toBe("function")
+    // The assembler must have installed the mutable cursor the closure reads.
+    const holder = cfg as unknown as { activeSkillCursor?: { ids: readonly string[] } }
+    expect(holder.activeSkillCursor).toBeDefined()
+    // Pre-condition: cursor starts empty — nothing has published yet.
+    expect(holder.activeSkillCursor?.ids ?? []).toHaveLength(0)
+
+    const wm = createWorkingMemory<Message>([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+    ])
+
+    // `prepareTurnContext` is the SOLE consumer of the diff-based producer
+    // (`resolveContextEventsForTurn` at context-assembler.ts:395); the resulting
+    // events are folded into the returned ctx's `promptPolicy.contextChangeCount`.
+    // So we observe the WIRE'S effect via the RETURNED ctx — NOT by re-calling
+    // the producer (which would see the already-advanced baseline).
+
+    // Turn 1: NO active skills ⇒ the wire publishes `[]` ⇒ no skill_activation ⇒
+    // the returned ctx carries zero context-change events (baseline seeds to []).
+    const r1 = await prepareTurnContext({
+      config: cfg,
+      wm,
+      recorder: undefined,
+      breaker: undefined,
+      activeSkills: undefined,
+      workingState: undefined,
+      archive: undefined,
+      turn: 1,
+      citations: [],
+      hookPromptInjects: undefined,
+      taskSpend: undefined,
+      bgController: undefined,
+      tokenBaselineBox: undefined,
+    })
+    expect(r1.ctx.promptPolicy.contextChangeCount).toBe(0)
+
+    // Turn 2: a LIVE skill activates. The ONLY way the diff-producer sees "beta"
+    // is the `publishActiveSkillCursor` wire (context-assembler.ts:394) writing
+    // it to the cursor the closure reads. Deleting line 394 ⇒ cursor stays [] ⇒
+    // no skill_activation ⇒ contextChangeCount stays 0 ⇒ this assertion RED.
+    const r2 = await prepareTurnContext({
+      config: cfg,
+      wm,
+      recorder: undefined,
+      breaker: undefined,
+      activeSkills: [{ name: "beta", description: "beta skill" }],
+      workingState: undefined,
+      archive: undefined,
+      turn: 2,
+      citations: [],
+      hookPromptInjects: undefined,
+      taskSpend: undefined,
+      bgController: undefined,
+      tokenBaselineBox: undefined,
+    })
+    // The wire wrote the live id to the cursor.
+    expect(holder.activeSkillCursor?.ids ?? []).toContain("beta")
+    // And the diff surfaced as a context-change event in the assembled ctx.
+    expect(r2.ctx.promptPolicy.contextChangeCount).toBe(1)
   })
 })
 

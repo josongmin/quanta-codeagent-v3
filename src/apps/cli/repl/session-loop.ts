@@ -217,6 +217,22 @@ export interface RunSessionLoopDeps {
   readonly backgroundPortal?: import("./background-turn-portal").BackgroundTurnPortal
 }
 
+/** ALBB-14 double-arm fix — project the REPL's live automation slot onto the
+ *  per-turn `runAgent` CONFIG path with the `handler` DROPPED. The REPL owns a
+ *  persistent session-scoped ticker (the single owner); the config-path slot
+ *  needs only `engine` (for the `automation_update` tool). Dropping `handler`
+ *  makes the shared-lifecycle bootstrap ticker short-circuit
+ *  (`startAutomationEngineTicker` returns `undefined` when `handler` is absent)
+ *  so it never arms a SECOND `setInterval` on the same engine during a turn.
+ *  `undefined` in ⇒ `undefined` out (no slot ⇒ no compose entry). */
+export const stripAutomationTickerHandler = (
+  slot: NonNullable<AgentConfig["automationEngine"]> | undefined,
+): NonNullable<AgentConfig["automationEngine"]> | undefined => {
+  if (slot === undefined) return undefined
+  const { handler: _replOwnedHandler, ...engineOnly } = slot
+  return engineOnly
+}
+
 /** Run the per-session orchestration: ONE-shot when `setup.argPrompt`
  *  is set, INTERACTIVE otherwise. Both paths funnel each turn through
  *  {@link runOneTurn} so the per-turn wrapper (turn-abort install +
@@ -350,11 +366,25 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   }
   const activeIdentityModeState = runtimeContext.identityModeState()
   const activeToolProfileState = runtimeContext.toolProfileState()
+  // ALBB-14 double-arm fix — the REPL owns a persistent per-session automation
+  // ticker (armed below over `liveAutomationSlot`, alive across BOTH active
+  // turns AND idle prompt windows). The per-turn `runAgent` config would ALSO
+  // arm the shared-lifecycle ticker (`maybeStartAutomationTicker` in
+  // session-bootstrap) on the SAME engine — a second `setInterval` running
+  // DURING every turn (double-tick; atomic `engine.claim` prevents a
+  // double-FIRE, but the redundant timer/claim churn is pure waste). The
+  // config-path slot carries only what the `automation_update` tool needs
+  // (`engine`); `stripAutomationTickerHandler` drops the `handler` so the
+  // bootstrap ticker short-circuits (`startAutomationEngineTicker` returns
+  // `undefined` when `handler` is absent), leaving the REPL ticker the SINGLE
+  // owner. Non-CLI surfaces (web-daemon / headless) keep their `handler` and
+  // are still armed by the shared lifecycle — the ALBB-14 goal is preserved.
+  const composeAutomationEngine = stripAutomationTickerHandler(liveAutomationSlot)
   const runtimeCompose =
-    liveAutomationSlot !== undefined
+    composeAutomationEngine !== undefined
       ? {
           ...(runtimeFacadeCompose ?? {}),
-          automationEngine: liveAutomationSlot,
+          automationEngine: composeAutomationEngine,
         }
       : runtimeFacadeCompose
 

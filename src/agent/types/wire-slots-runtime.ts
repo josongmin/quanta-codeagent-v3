@@ -74,7 +74,7 @@ export interface WireSlotsRuntimeConfig {
    * `wireCheckpointedEffectChannel` wraps the dispatch `EffectChannel` with
    * `withAutoCheckpoint` so a configurable policy auto-anchors via
    * `ShadowOdb.registerHead` BEFORE / AFTER tool calls (Cline / Hermes /
-   * Codex / Cursor patterns surfaced as a closed 4-arm enum).
+   * Codex / Cursor patterns surfaced as a closed 3-arm enum).
    *
    * Default-OFF: absent ⇒ the wrap helper returns the inner channel
    * unchanged (byte-identical for every legacy caller). Separate from
@@ -82,9 +82,10 @@ export interface WireSlotsRuntimeConfig {
    * caller may set `shadowOdb` for `branch_search` / `shadow_rewind` /
    * `shadow_snapshots` consumers without auto-checkpointing every tool call.
    *
-   * `mode` selects the policy (`"off"` | `"pre-destructive"` | `"per-mutating"`
-   *  | `"per-turn"`); `oracle` overrides the default destructiveness oracle
-   *  (which trusts `Tool.isReadOnly()`).
+   * `mode` selects the policy (`"off"` | `"pre-destructive"` | `"per-mutating"`;
+   *  the `"per-turn"` arm was removed in ALBB-21 as an unwired dead path);
+   *  `oracle` overrides the default destructiveness oracle (which trusts
+   *  `Tool.isReadOnly()`).
    */
   shadowCheckpoint?: {
     mode: CheckpointTriggerMode

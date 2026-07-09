@@ -25,7 +25,7 @@ import {
   type StopCategory,
 } from "@/agent/stop-category"
 import { DEFAULT_STOP_REASON_ROUTING } from "@/agent/stop-reason/default-policy"
-import type { StopAction } from "@/agent/stop-reason/types"
+import { ALL_STOP_ACTION_KINDS, type StopAction } from "@/agent/stop-reason/types"
 
 describe("classifyErrorReason — matrix coverage", () => {
   test.each<[string, StopCategory["kind"], string]>([
@@ -165,24 +165,53 @@ describe("classifyErrorReason — stop-policy tag arms (ALBB-17 claim 3)", () =>
 // have a NON-`runtime.unknown_error` arm for each tag. A newly-added tagged
 // StopAction whose prefix lacks a mapping ⇒ RED here (not a silent mislabel).
 describe("StopAction ↔ classifyErrorReason exhaustive cross-check (fail-closed)", () => {
+  // The ONLY two StopAction kinds that legitimately do NOT reach
+  // classifyErrorReason:
+  //   - "continue" — routing fall-through to the legacy decideOnAssembled map
+  //     (the policy did not classify the stop as terminal).
+  //   - "surface"  — terminal but UNTAGGED (legacy-shaped `error` outcome, no
+  //     `[stop-*]` prefix), so no classifyErrorReason arm is expected.
+  // EVERY OTHER (terminal, tagged) StopAction kind MUST have a fixed tag prefix
+  // AND a NON-`runtime.unknown_error` classifyErrorReason arm.
+  const NON_CLASSIFIED_KINDS = new Set<StopAction["kind"]>(["continue", "surface"])
+
   // The tag prefix decideFromStopPolicy stamps per terminal-with-tag StopAction
-  // kind (mirrors recovery.ts:360-363). `surface` is untagged (legacy-shaped, no
-  // prefix) and `continue` falls through — neither reaches classifyErrorReason.
+  // kind (mirrors recovery.ts + stop-category.ts:195/202).
   const TAG_PREFIX: Partial<Record<StopAction["kind"], string>> = {
     abort: "[stop-abort]",
     hitl: "[stop-hitl]",
   }
-  const routedActionKinds = new Set(
-    Object.values(DEFAULT_STOP_REASON_ROUTING).map((a) => a.kind),
-  )
-  for (const kind of routedActionKinds) {
-    const prefix = TAG_PREFIX[kind]
-    if (prefix === undefined) continue // surface/continue: no tag, not classified here
-    test(`routed StopAction "${kind}" tag ${prefix} classifies to a specific (non-unknown) code`, () => {
+
+  // EXHAUSTIVE PARTITION (the fix): iterate the CANONICAL union tuple, not just
+  // the kinds already present in the routing map. Every StopAction kind is EITHER
+  // non-classified (continue/surface) OR must carry a tag prefix. A newly-added
+  // TERMINAL stop kind (added to the union + routing) that is neither in
+  // NON_CLASSIFIED_KINDS nor TAG_PREFIX ⇒ RED here (no silent skip). The prior
+  // guard iterated the routing map and `continue`d on any kind missing from
+  // TAG_PREFIX, so such a kind slipped through green — this closes that hole.
+  test("every StopAction kind is either non-classified (continue/surface) or tagged", () => {
+    for (const kind of ALL_STOP_ACTION_KINDS) {
+      const partitioned = NON_CLASSIFIED_KINDS.has(kind) || TAG_PREFIX[kind] !== undefined
+      expect(partitioned).toBe(true)
+    }
+  })
+
+  // Every TERMINAL routing (a routed action whose kind is NOT continue/surface)
+  // must (a) carry a tag prefix and (b) classify to a specific non-unknown code.
+  const routedActionKinds = new Set(Object.values(DEFAULT_STOP_REASON_ROUTING).map((a) => a.kind))
+  const terminalRoutedKinds = [...routedActionKinds].filter((k) => !NON_CLASSIFIED_KINDS.has(k))
+  for (const kind of terminalRoutedKinds) {
+    test(`terminal routed StopAction "${kind}" carries a tag that classifies to a non-unknown code`, () => {
+      const prefix = TAG_PREFIX[kind]
+      // A terminal routed kind with NO tag prefix is itself the fail-closed
+      // violation (an un-taggable terminal cannot be classified).
+      expect(prefix).toBeDefined()
+      if (prefix === undefined) return
       const cat = classifyErrorReason(`${prefix} some reason text`)
       expect(cat.reasonCode).not.toBe(STOP_REASON_CODE.RUNTIME_UNKNOWN_ERROR)
     })
   }
+
   // Guard the guard: at least the two default-policy terminal tags must be exercised
   // (so an empty routing map can't make this vacuously pass).
   test("covers both default-policy terminal tags (abort + hitl)", () => {

@@ -16,9 +16,11 @@
  *
  * # Posture (the same hard invariants as the rest of the shadow-odb slice)
  *
- *  1. **Closed enum.** `CheckpointTriggerMode` is a 4-arm string union;
- *     expanding it is an audit-time decision (ADR amendment + every
- *     exhaustive switch becomes a compile error).
+ *  1. **Closed enum.** `CheckpointTriggerMode` is a 3-arm string union
+ *     (`off` | `pre-destructive` | `per-mutating`); the `per-turn` arm was
+ *     deleted by ALBB-21 (wire-or-delete). Expanding it is an audit-time
+ *     decision (ADR amendment + every exhaustive switch becomes a compile
+ *     error).
  *  2. **No-throw.** Both predicates AND the wrap never throw. An anchor I/O
  *     failure collapses to a swallowed observability concern — the underlying
  *     tool call ALWAYS runs even when `odb.registerHead` rejects. This is the
@@ -47,7 +49,7 @@
  *    `DestructivenessOracle`. Argument analysis is the oracle's job.
  *  - It is NOT a verify-based checkpoint (mark-and-anchor on verify success).
  *    That mode is reserved for ADR-0122 follow-up — explicit non-goal here so
- *    the 4-arm enum stays grep-stable.
+ *    the 3-arm enum stays grep-stable.
  */
 
 import type { ToolUseBlock } from "@/llm"
