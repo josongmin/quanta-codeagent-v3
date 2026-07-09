@@ -144,6 +144,43 @@ const stateDbCheck: CheckFn = async (probes) => {
   return { id: "state-db", status: "ok", detail: "sessions + index readable" }
 }
 
+/** UUX-4-05 — aggregate session-store health. `state-db` only proves the
+ *  index read returns; THIS check surfaces the store the read silently
+ *  degrades over (per-file corrupt/unreadable classification from
+ *  `checkSessionStoreHealth`, injected as the `storeHealth` probe).
+ *  Verdict mapping: `corrupt` (nothing loads) ⇒ fail; `degraded` (some
+ *  files lost) ⇒ warn; `healthy`/`empty` ⇒ ok. The remedy carries the
+ *  store module's own operator recovery guidance verbatim — actionable,
+ *  not generic. */
+const storeHealthCheck: CheckFn = async (probes) => {
+  const s = await probes.storeHealth()
+  const bad = s.corrupt + s.unreadable
+  if (s.verdict === "corrupt") {
+    return {
+      id: "store-health",
+      status: "fail",
+      detail: `session store aggregately corrupt: ${bad}/${s.total} files failed to load`,
+      remedy: s.guidance ?? "back up the store directory, then move the corrupt files aside",
+    }
+  }
+  if (s.verdict === "degraded") {
+    return {
+      id: "store-health",
+      status: "warn",
+      detail: `session store degraded: ${bad}/${s.total} files failed to load (${s.ok} still load)`,
+      remedy: s.guidance ?? "back up the store directory, then move the corrupt files aside",
+    }
+  }
+  if (s.verdict === "empty") {
+    return { id: "store-health", status: "ok", detail: "no session files yet" }
+  }
+  return {
+    id: "store-health",
+    status: "ok",
+    detail: `${s.ok} session file${s.ok === 1 ? "" : "s"} readable`,
+  }
+}
+
 /** Frozen, ordered registry. Order is part of the contract (stable report).
  *  Each entry binds its `id` to the fn so the throw-before-result attribution
  *  can never drift from the fn's own self-reported id (no parallel id array). */
@@ -153,6 +190,7 @@ export const DOCTOR_CHECKS: readonly Check[] = Object.freeze([
   { id: "mcp", run: mcpCheck },
   { id: "config", run: configCheck },
   { id: "state-db", run: stateDbCheck },
+  { id: "store-health", run: storeHealthCheck },
 ])
 
 const failResult = (id: string, err: unknown): CheckResult => ({

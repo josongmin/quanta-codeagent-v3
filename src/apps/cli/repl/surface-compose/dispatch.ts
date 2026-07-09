@@ -97,6 +97,10 @@ export const buildSurfaceDispatch = (args: {
    *  per invocation. Returns `undefined` until installed ⇒ `/cron` prints "not
    *  wired" (default-OFF byte-identical). */
   readonly automation?: () => SlashContext["automation"]
+  /** UUX-4-04 — `/permission` live permission-store view (the SAME singleton
+   *  the admissibility gate consults) + the live thread id. Absent ⇒ slot
+   *  omitted ⇒ the inspector renders its stateless (store-free) view. */
+  readonly permissionInspect?: import("../../permission-explain").PermissionInspectSlashState
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -175,6 +179,10 @@ export const buildSurfaceDispatch = (args: {
         const automation = args.automation?.()
         return automation !== undefined ? { automation } : {}
       })(),
+      // UUX-4-04 — `/permission` live store view. Absent ⇒ stateless render.
+      ...(args.permissionInspect !== undefined
+        ? { permissionInspect: args.permissionInspect }
+        : {}),
     }
     await runSlashCommand(input, ctx)
     return true

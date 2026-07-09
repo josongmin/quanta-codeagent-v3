@@ -32,6 +32,7 @@ const healthyProbes = (over: Partial<DoctorProbes> = {}): DoctorProbes => ({
   mcp: async () => [{ name: "fs", connected: true, toolCount: 3 }],
   config: () => ({ loaded: true, warnings: [] }),
   stateDb: async () => ({ sessionsReadable: true, indexValid: true, memoryReadable: true }),
+  storeHealth: async () => ({ verdict: "healthy", total: 2, ok: 2, corrupt: 0, unreadable: 0 }),
   ...over,
 })
 
@@ -56,12 +57,19 @@ const makeCtx = (): { ctx: SlashContext; out: string[]; err: string[] } => {
 }
 
 describe("doctor self-check — registry", () => {
-  test("1. all-OK ⇒ exit 0, five ok results", async () => {
+  test("1. all-OK ⇒ exit 0, six ok results", async () => {
     const results = await runDoctor(healthyProbes())
-    expect(results).toHaveLength(5)
+    expect(results).toHaveLength(6)
     expect(results.every((r) => r.status === "ok")).toBe(true)
     expect(doctorExitCode(results)).toBe(0)
-    expect(results.map((r) => r.id)).toEqual(["auth", "terminal", "mcp", "config", "state-db"])
+    expect(results.map((r) => r.id)).toEqual([
+      "auth",
+      "terminal",
+      "mcp",
+      "config",
+      "state-db",
+      "store-health",
+    ])
   })
 
   test("2. one fail (mcp) ⇒ exit non-zero + remedy + others still ran", async () => {
@@ -70,14 +78,14 @@ describe("doctor self-check — registry", () => {
         mcp: async () => [{ name: "broken", connected: false, error: "ECONNREFUSED" }],
       }),
     )
-    expect(results).toHaveLength(5)
+    expect(results).toHaveLength(6)
     const mcp = results.find((r) => r.id === "mcp") as CheckResult
     expect(mcp.status).toBe("fail")
     expect(mcp.detail).toContain("broken")
     expect(mcp.detail).toContain("ECONNREFUSED")
     expect(mcp.remedy).toContain(".mcp.json")
     expect(doctorExitCode(results)).not.toBe(0)
-    // isolation: the other four still produced results
+    // isolation: the other five still produced results
     expect(results.filter((r) => r.id !== "mcp").every((r) => r.status === "ok")).toBe(true)
   })
 
@@ -89,11 +97,11 @@ describe("doctor self-check — registry", () => {
         },
       }),
     )
-    expect(results).toHaveLength(5)
+    expect(results).toHaveLength(6)
     const auth = results.find((r) => r.id === "auth") as CheckResult
     expect(auth.status).toBe("fail")
     expect(auth.detail).toContain("auth resolver blew up")
-    // the remaining four checks completed normally
+    // the remaining five checks completed normally
     expect(results.filter((r) => r.id !== "auth").every((r) => r.status === "ok")).toBe(true)
     expect(doctorExitCode(results)).toBe(1)
   })
@@ -196,10 +204,10 @@ describe("doctor self-check — registry", () => {
 })
 
 describe("doctor self-check — render", () => {
-  test("1. all-OK report shows five ✓ glyphs", async () => {
+  test("1. all-OK report shows six ✓ glyphs", async () => {
     const report = renderDoctorReport(await runDoctor(healthyProbes()))
     const plain = stripAnsi(report)
-    expect((plain.match(/✓/g) ?? []).length).toBe(5)
+    expect((plain.match(/✓/g) ?? []).length).toBe(6)
     expect(plain).toContain("quanta doctor")
     expect(plain).toContain("all healthy")
   })
@@ -219,7 +227,7 @@ describe("doctor self-check — render", () => {
     expect(plain).toContain(".mcp.json")
   })
 
-  test("6. --json shape — parseable, all 5 ids, no ANSI", async () => {
+  test("6. --json shape — parseable, all 6 ids, no ANSI", async () => {
     const json = renderDoctorJson(await runDoctor(healthyProbes()))
     // no ANSI escapes
     // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting absence of ANSI
@@ -234,8 +242,9 @@ describe("doctor self-check — render", () => {
       "mcp",
       "config",
       "state-db",
+      "store-health",
     ])
-    expect(parsed.summary.ok).toBe(5)
+    expect(parsed.summary.ok).toBe(6)
   })
 })
 
@@ -276,7 +285,7 @@ describe("doctor self-check — /doctor command", () => {
     const printed = out.join("")
     expect(printed).not.toContain("quanta doctor")
     const parsed = JSON.parse(printed) as { checks: Array<{ id: string }> }
-    expect(parsed.checks).toHaveLength(5)
+    expect(parsed.checks).toHaveLength(6)
   })
 
   test("metadata — name/describe/category", () => {
@@ -284,6 +293,122 @@ describe("doctor self-check — /doctor command", () => {
     expect(cmd.name).toBe("/doctor")
     expect(cmd.category).toBe("other")
     expect(cmd.describe.length).toBeGreaterThan(0)
+  })
+})
+
+describe("doctor self-check — session-store health probe (UUX-4-05)", () => {
+  test("S1. RED-CORE: registry carries a 'store-health' check", () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain("store-health")
+  })
+
+  test("S2. RED-CORE: aggregately-corrupt store ⇒ fail with actionable guidance", async () => {
+    const results = await runDoctor(
+      healthyProbes({
+        storeHealth: async () => ({
+          verdict: "corrupt",
+          total: 4,
+          ok: 0,
+          corrupt: 3,
+          unreadable: 1,
+          guidance: "Back up the whole directory before any deletion.",
+        }),
+      }),
+    )
+    const sh = results.find((r) => r.id === "store-health") as CheckResult
+    expect(sh).toBeDefined()
+    expect(sh.status).toBe("fail")
+    expect(sh.detail).toContain("4")
+    expect(sh.remedy).toContain("Back up")
+    expect(doctorExitCode(results)).toBe(1)
+  })
+
+  test("S3. degraded store ⇒ warn (exit 0) with guidance", async () => {
+    const results = await runDoctor(
+      healthyProbes({
+        storeHealth: async () => ({
+          verdict: "degraded",
+          total: 5,
+          ok: 4,
+          corrupt: 1,
+          unreadable: 0,
+          guidance: "Move the unreadable files aside; the readable sessions keep working.",
+        }),
+      }),
+    )
+    const sh = results.find((r) => r.id === "store-health") as CheckResult
+    expect(sh.status).toBe("warn")
+    expect(sh.remedy).toContain("Move the unreadable files aside")
+    expect(doctorExitCode(results)).toBe(0)
+  })
+
+  test("S4. healthy / empty store ⇒ ok", async () => {
+    const healthy = await runDoctor(
+      healthyProbes({
+        storeHealth: async () => ({
+          verdict: "healthy",
+          total: 3,
+          ok: 3,
+          corrupt: 0,
+          unreadable: 0,
+        }),
+      }),
+    )
+    expect((healthy.find((r) => r.id === "store-health") as CheckResult).status).toBe("ok")
+    const empty = await runDoctor(
+      healthyProbes({
+        storeHealth: async () => ({ verdict: "empty", total: 0, ok: 0, corrupt: 0, unreadable: 0 }),
+      }),
+    )
+    expect((empty.find((r) => r.id === "store-health") as CheckResult).status).toBe("ok")
+  })
+
+  test("S5. adversarial: a THROWING storeHealth probe is isolated — doctor never dies", async () => {
+    const results = await runDoctor(
+      healthyProbes({
+        storeHealth: async () => {
+          throw new Error("store scan exploded")
+        },
+      }),
+    )
+    const sh = results.find((r) => r.id === "store-health") as CheckResult
+    expect(sh.status).toBe("fail")
+    expect(sh.detail).toContain("store scan exploded")
+    // every OTHER check still ran ok
+    expect(results.filter((r) => r.id !== "store-health").every((r) => r.status === "ok")).toBe(
+      true,
+    )
+  })
+
+  test("S6. real wiring: defaultDoctorProbes scans the REAL temp store (fresh readback)", async () => {
+    const { mkdtempSync, rmSync, mkdirSync, writeFileSync } = await import("node:fs")
+    const { tmpdir } = await import("node:os")
+    const { join } = await import("node:path")
+    const { __resetRuntimeConfig } = await import("@/shared")
+    const { defaultDoctorProbes } = await import("@/apps/cli/doctor/default-probes")
+    const dir = mkdtempSync(join(tmpdir(), "doctor-store-health-"))
+    const prev = process.env.QUANTA_SESSIONS_DIR
+    try {
+      process.env.QUANTA_SESSIONS_DIR = dir
+      __resetRuntimeConfig()
+      mkdirSync(dir, { recursive: true })
+      // one valid session + one corrupt file — a REAL degraded store.
+      writeFileSync(
+        join(dir, "good.json"),
+        JSON.stringify({ version: 1, meta: { id: "good" }, reason: "ok", turns: 1, messages: [] }),
+      )
+      writeFileSync(join(dir, "bad.json"), "{ this is not json")
+      const probes = defaultDoctorProbes(makeCtx().ctx)
+      const report = await probes.storeHealth()
+      expect(report.verdict).toBe("degraded")
+      expect(report.corrupt).toBe(1)
+      expect(report.ok).toBe(1)
+      expect(report.guidance).toContain("Back up")
+    } finally {
+      if (prev === undefined) delete process.env.QUANTA_SESSIONS_DIR
+      else process.env.QUANTA_SESSIONS_DIR = prev
+      __resetRuntimeConfig()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

@@ -19,7 +19,6 @@ import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import type { Message, StreamInput } from "@/llm"
 import type { RadarStore } from "@/radar"
 import { parseEnvFlag } from "@/runner/assemble"
-import { isApprovedDecision } from "@/runner/orchestrate"
 import type {
   RuntimeFacadeComposeOptions,
   RuntimeSideConversationArgs,
@@ -36,6 +35,7 @@ import {
   type ModeCycleStore,
   modeCycleEnabled,
 } from "../mode-cycle"
+import type { PermissionInspectSlashState } from "../permission-explain"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
 import type { SessionIoState } from "../session-cmd"
 import { createBrowserNetHolder } from "../slash/browser-net-cmd"
@@ -385,11 +385,7 @@ export const composeSurfaceWires = (
             reason: `Compact ~${approxK}k tokens of history into a summary? (context ${Math.round(query.currentTokens / 1000)}k/threshold ${Math.round(query.threshold / 1000)}k)`,
             requestedAt: new Date().toISOString(),
           })
-          // WS-A (jul-10, UUX-1-02) — the SSOT projection: a RICH approve
-          // (`{decision:"approve", scope:"session"}`, the operator's "[a]lways"
-          // answer) is an approve. The prior strict string equality against the
-          // bare "approve" literal misread it as a deferral.
-          return isApprovedDecision(decision) ? "approve" : "defer_one_turn"
+          return decision === "approve" ? "approve" : "defer_one_turn"
         }
       : undefined
   // ADR-0071 — mid-turn typed control surface (/cancel + /summarize-now). Env-
@@ -535,13 +531,24 @@ export const composeSurfaceWires = (
   // returns `null` and downstream stop/detach calls are no-ops.
   const playbookSeam = createPlaybookTriggerSurfaceSeam()
 
-  // ADR-0292 — `/rewind-conv <tag>` swap hook. The loop registers the swap
-  // function once it has the surface-state binding; until then a stub keeps
-  // the projection no-throw (the slash command never crashes if the loop
-  // hasn't installed yet — it just degrades to "restored N messages" without
-  // a visible history swap).
+  // ADR-0292 + UUX-4-02/6-03 — the ONE live-history swap hook. The loop
+  // registers the swap function once it has the surface-state binding; until
+  // then a stub keeps the projection no-throw (a slash command never crashes
+  // if the loop hasn't installed yet — it just degrades to its disk-only /
+  // print-only behavior without a visible history swap).
   let replaceMessages: (msgs: ReadonlyArray<Message>) => Promise<void> = async () => {
     /* installed by the loop once it owns surfaceState */
+  }
+  // No-throw adapter around the loop-installed closure — the SINGLE seam
+  // `/rewind-conv`, `/rewind` and `/rewind-tool` (task leg) all swap through
+  // (`applyLiveHistorySwap` in live-history-swap.ts consumes it). A failing
+  // swap surfaces via logger.warn, never as a surface crash.
+  const liveHistorySwap = async (msgs: ReadonlyArray<Message>): Promise<void> => {
+    try {
+      await replaceMessages(msgs)
+    } catch (e) {
+      logger.warn(`live-history swap threw: ${errMessage(e)}`)
+    }
   }
   let sideConversationStart:
     | ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>)
@@ -662,7 +669,12 @@ export const composeSurfaceWires = (
     // (QUANTA_BROWSER_NETWORK off) ⇒ `/browser-net` "not wired" (byte-identical).
     ...(browserNetHolder !== undefined ? { browserNet: () => browserNetHolder.get() } : {}),
     imageQueue: state.imageQueue,
-    rewindState: state.rewindState,
+    // UUX-4-02 — hand `/rewind` the ONE live-history swap seam so a confirmed
+    // rewind updates the live REPL history, not just the on-disk transcript.
+    rewindState:
+      state.rewindState !== undefined
+        ? { ...state.rewindState, replaceMessages: liveHistorySwap }
+        : undefined,
     mcpSurface: setup.mcpSurface,
     costPanel: setup.costPanel,
     planStore: setup.planStore,
@@ -732,7 +744,13 @@ export const composeSurfaceWires = (
     // + 3-way restore port, sharing the SAME granular policy instance threaded
     // into the dispatch producer (shadowCheckpoint.granularPolicy above).
     ...(perToolCkpt !== undefined
-      ? { perToolRegistry: perToolCkpt.registry, perToolRestorePort: perToolCkpt.restore }
+      ? {
+          perToolRegistry: perToolCkpt.registry,
+          perToolRestorePort: perToolCkpt.restore,
+          // UUX-6-03 — `/rewind-tool`'s task leg swaps the restored
+          // conversation into the live history through the same ONE seam.
+          perToolReplaceMessages: liveHistorySwap,
+        }
       : {}),
     ...(setup.runtimeContext.toolProfileState() !== undefined
       ? { toolProfileState: setup.runtimeContext.toolProfileState() }
@@ -775,16 +793,9 @@ export const composeSurfaceWires = (
     convCheckpointWire !== null
       ? {
           wire: convCheckpointWire,
-          // No-throw guard around the loop-installed swap closure. The loop
-          // calls `setReplaceMessages` once it owns the surface-state
-          // binding; before that, `replaceMessages` is a no-op stub.
-          replaceMessages: async (msgs: ReadonlyArray<Message>): Promise<void> => {
-            try {
-              await replaceMessages(msgs)
-            } catch (e) {
-              logger.warn(`convCheckpoint.replaceMessages threw: ${errMessage(e)}`)
-            }
-          },
+          // The ONE no-throw live-history swap adapter (see liveHistorySwap
+          // above) — shared with `/rewind` + `/rewind-tool`.
+          replaceMessages: liveHistorySwap,
         }
       : undefined
 
@@ -792,6 +803,21 @@ export const composeSurfaceWires = (
   // `undefined` ⇒ the slot is omitted from the dispatched SlashContext and the
   // slash prints "not wired" (default-OFF byte-identical).
   const voiceLive = buildVoiceLiveSlot(envSource)
+
+  // UUX-4-04 — `/permission` live store view. INJECTED from session setup
+  // (`setup.permissionStore` — the EXACT loaded instance the admissibility
+  // gate consults), never the singleton accessor (service-locator rule). A
+  // failed load ⇒ `undefined` ⇒ slot omitted ⇒ the inspector renders its
+  // stateless view — honest, since the gate has no store then either.
+  const permissionInspect: PermissionInspectSlashState | undefined =
+    setup.permissionStore !== undefined
+      ? {
+          store: setup.permissionStore,
+          ...(typeof setup.sessionId === "string" && setup.sessionId.length > 0
+            ? { threadId: setup.sessionId }
+            : {}),
+        }
+      : undefined
 
   // `/memory` — wire the SAME store the loop reads (built once in tooling,
   // forwarded through setup.memoryStore). Absent store (`QUANTA_MEMORY=off`)
@@ -869,6 +895,11 @@ export const composeSurfaceWires = (
     // dispatch (the loop installs it via `setAutomationSlash` once the engine is
     // minted). Absent until installed ⇒ `/cron` prints "not wired".
     automation: () => automationSlash,
+    // UUX-4-04 — `/permission` live store view (the SAME singleton the
+    // admissibility gate loads in composeCliRuntimeContext) + the live
+    // session id for per-thread grant lookups. Absent (store unavailable) ⇒
+    // slot omitted ⇒ the stateless render (mode still live via ctx.mode).
+    ...(permissionInspect !== undefined ? { permissionInspect } : {}),
   })
 
   return {

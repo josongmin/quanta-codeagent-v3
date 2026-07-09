@@ -31,6 +31,8 @@ import type {
   RestoreOptions,
   ThreeWayRestorePort,
 } from "@/agent/per-tool-checkpoint"
+import { errMessage } from "@/shared"
+import { applyLiveHistorySwap } from "./live-history-swap"
 import type { SlashCommand } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -51,6 +53,12 @@ export interface PerToolCheckpointSlashState {
    *  capture. Returning an empty array is fine — the outcome carries
    *  whatever the caller surfaces. */
   readonly currentMessages?: () => ReadonlyArray<import("@/llm").Message>
+  /** UUX-6-03 — live-history swap hook (the ONE seam, see
+   *  `./live-history-swap.ts`). When present AND the executed mode includes
+   *  the task leg (`task`/`both`) AND the outcome carries `messagesAfter`,
+   *  the restored conversation is pushed into the live REPL history instead
+   *  of only being PRINTED. Absent ⇒ prior print-only behavior. */
+  readonly replaceMessages?: (msgs: ReadonlyArray<import("@/llm").Message>) => Promise<void>
 }
 
 declare module "./slash-commands" {
@@ -255,6 +263,21 @@ export const rewindToolCmd: SlashCommand = {
     }
 
     const outcome = await runRestore(state, tag, parsed.mode, parsed.allowDirtyMerge)
+    // UUX-6-03 — the task leg's restored conversation must reach the live
+    // REPL history, not just the printed outcome. Swap through the ONE seam
+    // BEFORE printing (effect receipt: success copy only after the effect).
+    // Files-only mode NEVER swaps; a failed outcome never swaps; an outcome
+    // without `messagesAfter` degrades to the prior print-only behavior.
+    if (outcome.ok && (parsed.mode === "task" || parsed.mode === "both")) {
+      try {
+        await applyLiveHistorySwap(state, outcome.messagesAfter)
+      } catch (e) {
+        ctx.err(
+          `/rewind-tool: restore succeeded, but the live history swap failed: ${errMessage(e)} — restart the session to reload the restored conversation\n`,
+        )
+        return 1
+      }
+    }
     ctx.out(`${renderOutcome(outcome)}\n`)
     return outcome.ok ? 0 : 1
   },

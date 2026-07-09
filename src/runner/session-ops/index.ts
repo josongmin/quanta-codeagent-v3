@@ -227,6 +227,29 @@ const pickLastN = (
   return { lastN: env?.defaultMaxN ?? 10 }
 }
 
+/** UUX-4-10 — per-session turn counts for the rich list view. `list-tui`
+ *  renders the `N turns` column (and `--sort size` orders by it) whenever
+ *  `turnsById` is supplied, but the dispatcher historically never passed it
+ *  — the column silently vanished on every real invocation. Reads each
+ *  snapshot's persisted `turns` counter (the same field `fork`/`rewind`
+ *  round-trip). Best-effort: a session whose file cannot be loaded simply
+ *  has no entry (the renderer omits the column for that row). Rich-format
+ *  only — the caller gates the (one JSON load per session) cost. */
+const computeTurnsById = async (
+  sessions: readonly { readonly id: string }[],
+): Promise<ReadonlyMap<string, number>> => {
+  const out = new Map<string, number>()
+  for (const s of sessions) {
+    try {
+      const saved = await loadSessionById(s.id)
+      if (saved !== undefined) out.set(s.id, saved.turns)
+    } catch {
+      // unreadable snapshot — leave the column blank for this row.
+    }
+  }
+  return out
+}
+
 const cmdLs = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
   const unknown = checkUnknownArgs(
     args,
@@ -282,8 +305,12 @@ const cmdLs = async (args: string[], deps: SessionCommandDeps): Promise<number> 
   }
 
   // ── Build entries + render ────────────────────────────────────────────
+  // UUX-4-10 — rich format loads the per-session turn counts so the `N
+  // turns` column and `--sort size` actually work; plain format skips the
+  // extra loads (it never displays turns) and stays byte-identical.
   const entries = await buildSessionListEntries(sessions, {
     withTokenEstimates: format === "rich",
+    ...(format === "rich" ? { turnsById: await computeTurnsById(sessions) } : {}),
   })
   const filtered = applyListPipeline(entries, opts)
   if (filtered.length === 0) {

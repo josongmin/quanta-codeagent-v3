@@ -26,7 +26,9 @@
 import { resolveHitlAnnotation } from "@/agent"
 import {
   type AxisStep,
+  type DenialRecord,
   type HITLTier,
+  type HostAgentMode,
   type InspectToolMeta,
   inferToolTier,
   inspectPermission,
@@ -35,10 +37,45 @@ import {
   PERMISSION_AXES,
   type PermissionInspection,
   type PermissionMode,
+  type ThreadPermission,
 } from "@/permission"
 import { buildDefaultTools, type Tool } from "@/tool"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
+import { postureByKey } from "./mode-cycle"
 import type { SlashCommand, SlashContext } from "./slash-commands"
+
+/* ------------------------------------------------------------------ */
+/* SlashContext extension — live store view (UUX-4-04)                 */
+/* ------------------------------------------------------------------ */
+
+/** READ-ONLY structural view over the persistent `PermissionStore` — only
+ *  the four snapshot readers this inspector consumes (ISP: surfaces / tests
+ *  never have to fabricate the full store API). The real `PermissionStore`
+ *  satisfies this shape as-is. */
+export interface PermissionStoreView {
+  getThread(threadId: string): ThreadPermission | undefined
+  listThreads(): ReadonlyMap<string, ThreadPermission>
+  listHosts(): ReadonlyMap<string, HostAgentMode>
+  listThreadDenials(threadId: string): readonly DenialRecord[]
+}
+
+/** UUX-4-04 wiring slot: the SAME store instance the admissibility gate
+ *  consults, plus the live thread id, so `/permission` reports the grants
+ *  that actually gate this session instead of pretending none exist. */
+export interface PermissionInspectSlashState {
+  readonly store: PermissionStoreView
+  /** Live session/thread id — keys the per-thread grant + denial lookups. */
+  readonly threadId?: string | undefined
+}
+
+declare module "./slash-commands" {
+  interface SlashContext {
+    /** UUX-4-04 — live permission-store view for `/permission`. Absent ⇒
+     *  the store section is omitted (surface without a store; prior
+     *  stateless render preserved). */
+    readonly permissionInspect?: PermissionInspectSlashState | undefined
+  }
+}
 
 /** Tier display order (strict → permissive) for `/permission list`. */
 const TIER_ORDER: readonly HITLTier[] = [
@@ -156,7 +193,53 @@ const renderMatrix = (m: ModePolicyMatrix): string => {
 const renderPipelineStep = (step: AxisStep, idx: number): string =>
   `  ${dim(`${idx + 1}.`)} ${cyan(padVisible(step.axis, 18))} ${padVisible(step.outcome, 6)} ${step.reason}`
 
-const renderInspection = (inspection: PermissionInspection, mode: PermissionMode): string => {
+/** UUX-4-04 — render the LIVE persistent-store grants (per-thread grant /
+ *  host modes / post-denial overrides) so the inspector reflects what the
+ *  gate will actually consult. NO-THROW: any store read failure collapses
+ *  to a visible degrade line instead of crashing the slash. Pure given the
+ *  view. */
+const renderStoreGrants = (state: PermissionInspectSlashState): string[] => {
+  const lines: string[] = ["", dim("── Store grants (live) ──")]
+  try {
+    const threadId = state.threadId
+    const grant = threadId !== undefined ? state.store.getThread(threadId) : undefined
+    const threads = state.store.listThreads()
+    const hosts = state.store.listHosts()
+    const denials = threadId !== undefined ? state.store.listThreadDenials(threadId) : []
+    if (grant !== undefined) {
+      lines.push(
+        `  ${cyan(padVisible("this thread", 14))} approvals=${grant.approvalPolicy} · reviewer=${grant.approvalsReviewer} · sandbox=${grant.sandboxPolicy.type}`,
+      )
+    }
+    for (const [hostId, hostMode] of hosts) {
+      lines.push(`  ${cyan(padVisible(`host ${hostId}`, 14))} → ${hostMode}`)
+    }
+    const otherThreads = threads.size - (grant !== undefined ? 1 : 0)
+    if (otherThreads > 0) {
+      lines.push(`  ${dim(`+ ${otherThreads} other thread grant${otherThreads === 1 ? "" : "s"}`)}`)
+    }
+    if (denials.length > 0) {
+      // Honest label: a DenialRecord may be anywhere in the denied →
+      // risk-seen → user-override lifecycle; only fully-overridden records
+      // actually relax the gate.
+      lines.push(
+        `  ${cyan(padVisible("post-denial", 14))} ${denials.length} record${denials.length === 1 ? "" : "s"} for this thread (denied → risk-seen → override lifecycle)`,
+      )
+    }
+    if (grant === undefined && hosts.size === 0 && otherThreads <= 0 && denials.length === 0) {
+      lines.push(`  ${dim("(no persistent grants recorded)")}`)
+    }
+  } catch {
+    lines.push(`  ${dim("(store unreadable — grants not shown)")}`)
+  }
+  return lines
+}
+
+const renderInspection = (
+  inspection: PermissionInspection,
+  mode: PermissionMode,
+  storeState?: PermissionInspectSlashState,
+): string => {
   const lines: string[] = []
   const tierLabel = inspection.hitlTier ?? "(unmapped)"
   lines.push(`${dim("Tier:")}      ${bold(tierLabel)}`)
@@ -193,6 +276,12 @@ const renderInspection = (inspection: PermissionInspection, mode: PermissionMode
     if (!seen.has(ax)) {
       lines.push(renderPipelineStep({ axis: ax, outcome: "n/a", reason: "(missing)" }, -1))
     }
+  }
+
+  // UUX-4-04 — live store grants. Only when the surface wired a store view;
+  // absent slot ⇒ section omitted (prior stateless render preserved).
+  if (storeState !== undefined) {
+    lines.push(...renderStoreGrants(storeState))
   }
 
   return renderBox(lines, {
@@ -244,9 +333,27 @@ const buildToolMeta = (name: string, tools: readonly Tool[]): InspectToolMeta =>
   }
 }
 
-/** Default mode for the inspector when the surface doesn't pin one.
- *  `default` matches the CLI's documented startup posture. */
+/** Fallback mode when the surface exposes no live wire — `default` matches
+ *  the CLI's documented startup posture (old ctx shapes keep their prior
+ *  render byte-identically). */
 const DEFAULT_MODE: PermissionMode = "default"
+
+/** UUX-4-04 — resolve the LIVE permission mode from the `SlashContext.mode`
+ *  wire (the same `ModeCycleStore` shift+tab / `/mode` mutate). The wire
+ *  yields a mode-cycle RUNG key ("plan" is an agent-posture rung), so it is
+ *  projected through the mode-cycle SSOT onto its `PermissionMode`
+ *  ("plan" ⇒ "default"). Defensive: an absent slot (old ctx shapes) or a
+ *  throwing getter degrades to {@link DEFAULT_MODE} — the inspector must
+ *  never crash the REPL over a broken wire. */
+const resolveLiveMode = (ctx: SlashContext): PermissionMode => {
+  try {
+    const key = ctx.mode?.get()
+    if (typeof key !== "string" || key.length === 0) return DEFAULT_MODE
+    return postureByKey(key).permissionMode
+  } catch {
+    return DEFAULT_MODE
+  }
+}
 
 export const runPermissionRender = async (
   args: readonly string[],
@@ -256,7 +363,7 @@ export const runPermissionRender = async (
   // factory rather than importing the eager `defaultTools` singleton. No ports ⇒
   // the base set, byte-identical to the former singleton for this display path.
   const tools = buildDefaultTools()
-  const mode = DEFAULT_MODE
+  const mode = resolveLiveMode(ctx)
 
   if (args.length === 0) {
     ctx.out(`${renderSummary(mode, tools)}\n`)
@@ -274,7 +381,7 @@ export const runPermissionRender = async (
     const toolName = rest[0] as string
     const meta = buildToolMeta(toolName, tools)
     const inspection = inspectPermission(toolName, { mode }, meta)
-    ctx.out(`${renderInspection(inspection, mode)}\n`)
+    ctx.out(`${renderInspection(inspection, mode, ctx.permissionInspect)}\n`)
     return 0
   }
 

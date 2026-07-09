@@ -187,6 +187,12 @@ export interface SessionSetupResult {
   readonly approvalPrompt: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
   readonly midTurnApprovalChannel: import("./mid-turn-approval-channel").MidTurnApprovalChannel
   readonly runtimeContext: RuntimeContext
+  /** UUX-4-04 — the loaded `PermissionStore` (the EXACT instance the
+   *  admissibility gate consults), forwarded so the surface composer can
+   *  wire the `/permission` inspector's live store view. `undefined` when
+   *  the load failed ⇒ the slot is omitted and the inspector renders its
+   *  stateless view (the gate has no store either — no lie). */
+  readonly permissionStore: PermissionStore | undefined
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
@@ -283,8 +289,8 @@ export const setupSession = async (
     { observeUsage: contextUsageHolder.observeUsage },
   )
 
-  const { approvalPrompt, midTurnApprovalChannel, runtimeContext } = await composeCliRuntimeContext(
-    {
+  const { approvalPrompt, midTurnApprovalChannel, runtimeContext, permissionStore } =
+    await composeCliRuntimeContext({
       boot,
       turnStream,
       loadPermissionStore: deps.loadPermissionStore,
@@ -292,8 +298,7 @@ export const setupSession = async (
       ...(options.convStore !== undefined ? { convStore: options.convStore } : {}),
       ...(options.responsesStore !== undefined ? { responsesStore: options.responsesStore } : {}),
       envSource: runtime.env,
-    },
-  )
+    })
   // ADR-0269 Phase 3 closure — install the process-level fs-jail decision
   // sink. fs-jail (storage/service.ts) can't import @/stream (slice-fence),
   // so it carries a module-level sink slot the composition root fills with
@@ -413,6 +418,7 @@ export const setupSession = async (
     approvalPrompt,
     midTurnApprovalChannel,
     runtimeContext,
+    permissionStore,
     costPanel: boot.costPanel as CostPanel | undefined,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,

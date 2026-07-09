@@ -19,7 +19,7 @@
 
 import { isExpired, readResolvedToken, resolveChatgptTokenCandidates } from "@/auth/chatgpt-oauth"
 import { pickProvider } from "@/llm"
-import { listSessions } from "@/session"
+import { checkSessionStoreHealth, listSessions } from "@/session"
 import { errMessage, runtimeConfig } from "@/shared"
 import type { SlashContext } from "../slash-contract"
 import type { DoctorProbes } from "./types"
@@ -113,5 +113,10 @@ export const defaultDoctorProbes = (ctx: SlashContext): DoctorProbes => {
         return { sessionsReadable: false, indexValid: false, error: errMessage(e) }
       }
     },
+    // UUX-4-05 — the AGGREGATE store scan. `checkSessionStoreHealth` never
+    // throws (fs errors are folded into the report) and is read-only, so
+    // this probe is a straight pass-through; the check maps its verdict to
+    // warn/fail with the report's own recovery guidance.
+    storeHealth: async () => await checkSessionStoreHealth(),
   }
 }

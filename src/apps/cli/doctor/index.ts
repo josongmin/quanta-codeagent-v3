@@ -25,6 +25,7 @@ export type {
   DoctorProbes,
   McpServerProbe,
   StateDbProbeResult,
+  StoreHealthProbeResult,
   TerminalProbeResult,
 } from "./types"
 export { MIN_TERMINAL_COLUMNS } from "./types"

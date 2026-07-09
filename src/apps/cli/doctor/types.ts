@@ -11,7 +11,8 @@
 export type CheckStatus = "ok" | "warn" | "fail"
 
 export interface CheckResult {
-  /** Stable check id: `"auth" | "terminal" | "mcp" | "config" | "state-db"`. */
+  /** Stable check id:
+   *  `"auth" | "terminal" | "mcp" | "config" | "state-db" | "store-health"`. */
   readonly id: string
   readonly status: CheckStatus
   /** What was found, human-readable (e.g. `no OPENAI_API_KEY`). */
@@ -69,6 +70,20 @@ export interface StateDbProbeResult {
   readonly error?: string
 }
 
+/** UUX-4-05 — aggregate session-store health view. Structural mirror of
+ *  `@/session`'s `StoreHealthReport` (the leaf never imports `@/session`;
+ *  the surface probe returns the real report, which is assignable to this
+ *  view). `guidance` carries the operator recovery steps the store module
+ *  composes for non-healthy verdicts. */
+export interface StoreHealthProbeResult {
+  readonly verdict: "empty" | "healthy" | "degraded" | "corrupt"
+  readonly total: number
+  readonly ok: number
+  readonly corrupt: number
+  readonly unreadable: number
+  readonly guidance?: string
+}
+
 /**
  * Injected, duck-typed subsystem accessors. Each is a thin reader the surface
  * builds over §3.2 of the RFC; a probe that throws is caught by its check and
@@ -82,6 +97,11 @@ export interface DoctorProbes {
   readonly mcp: () => Promise<readonly McpServerProbe[]>
   readonly config: () => ConfigProbeResult
   readonly stateDb: () => Promise<StateDbProbeResult>
+  /** UUX-4-05 — aggregate store scan (`checkSessionStoreHealth`). The
+   *  `stateDb` probe only proves `listSessions()` returns; this one detects
+   *  the "every file refuses to load" / partially-corrupt store the index
+   *  read silently masks as an empty list. */
+  readonly storeHealth: () => Promise<StoreHealthProbeResult>
 }
 
 /** Minimum sane terminal width — below this, box rendering wraps badly.

@@ -32,6 +32,9 @@ export interface PerToolCheckpointAdapterArgs {
   readonly registry: GranularRegistry
   readonly restore?: ThreeWayRestorePort
   readonly currentMessages?: () => ReadonlyArray<Message>
+  /** UUX-6-03 — the ONE live-history swap seam (`applyLiveHistorySwap`
+   *  consumer). Passed through 1:1 to the slash slot. */
+  readonly replaceMessages?: (msgs: ReadonlyArray<Message>) => Promise<void>
 }
 
 export interface PerToolCheckpointAdapter extends PerToolCheckpointSlashState {}
@@ -66,9 +69,14 @@ export const buildPerToolCheckpointAdapter = (
   args: PerToolCheckpointAdapterArgs,
 ): PerToolCheckpointAdapter => {
   const restore = args.restore ?? stubRestorePort()
-  return args.currentMessages !== undefined
-    ? { registry: args.registry, restore, currentMessages: args.currentMessages }
-    : { registry: args.registry, restore }
+  return {
+    registry: args.registry,
+    restore,
+    ...(args.currentMessages !== undefined ? { currentMessages: args.currentMessages } : {}),
+    // UUX-6-03 — live-history swap hook (presence-spread: absent ⇒ the slash
+    // keeps its prior print-only task-leg behavior).
+    ...(args.replaceMessages !== undefined ? { replaceMessages: args.replaceMessages } : {}),
+  }
 }
 
 /* ------------------------------------------------------------------ */

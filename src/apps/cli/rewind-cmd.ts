@@ -36,6 +36,7 @@
  * — git operations route through an injected port, not direct shell-out.
  */
 
+import type { Message } from "@/llm"
 import {
   forkSessionAtMessage,
   loadSessionById,
@@ -44,6 +45,7 @@ import {
   type SavedSession,
 } from "@/session"
 import { errMessage } from "@/shared"
+import { applyLiveHistorySwap, BOLD_RED, confirmYesHint, RESET } from "./live-history-swap"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
@@ -60,6 +62,13 @@ export interface RewindSlashState {
   readonly git?: RewindGitPort
   /** Override env access (test seam). Defaults to `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>>
+  /** UUX-4-02 — live-history swap hook (the ONE seam, see
+   *  `./live-history-swap.ts`). When present, a confirmed `/rewind` pushes
+   *  the truncated transcript into the live REPL history (kernel transcript
+   *  + surface history binding) so the next turn does NOT still see the
+   *  dropped messages. Absent (non-REPL surface / legacy shape) ⇒ the
+   *  command's prior disk-only behavior is byte-identical. */
+  readonly replaceMessages?: (msgs: ReadonlyArray<Message>) => Promise<void>
 }
 
 declare module "./slash-commands" {
@@ -100,9 +109,6 @@ const isGitRestoreEnabled = (envSource?: Readonly<Record<string, string | undefi
 /* ------------------------------------------------------------------ */
 
 const SHORT_ID_LEN = 8
-const ESC = ""
-const BOLD_RED = `${ESC}[1;31m`
-const RESET = `${ESC}[0m`
 
 const shortId = (id: string): string => (id.length <= SHORT_ID_LEN ? id : id.slice(0, SHORT_ID_LEN))
 
@@ -366,6 +372,43 @@ const pickTargetId = (
   return parsed.idPrefix as string
 }
 
+/** UUX-4-02 — fresh readback (NOT the pre-rewind slice: the live surface
+ *  must get EXACTLY what is now on disk) + live-history swap through the
+ *  ONE seam. Returns `null` on success (including "no hook wired" — the
+ *  legacy disk-only surfaces) or the error message when the swap failed. */
+const swapLiveHistoryAfterRewind = async (state: RewindSlashState): Promise<string | null> => {
+  const after = await loadSessionById(state.sessionId)
+  try {
+    await applyLiveHistorySwap(state, after?.messages)
+    return null
+  } catch (e) {
+    return errMessage(e)
+  }
+}
+
+/** Tail of a CONFIRMED `/rewind`: swap the live history (fail loud on a
+ *  half-applied effect), then — only after the swap — print the success
+ *  receipt. Extracted from `run()` for the cognitive-complexity budget. */
+const finishConfirmedRewind = async (
+  ctx: SlashContext,
+  state: RewindSlashState,
+  result: Awaited<ReturnType<typeof rewindSession>>,
+): Promise<number> => {
+  const swapErr = await swapLiveHistoryAfterRewind(state)
+  if (swapErr !== null) {
+    ctx.err(
+      `/rewind: transcript rewound on disk, but the live history swap failed: ${swapErr} — restart the session to reload the truncated transcript\n`,
+    )
+    return 1
+  }
+  const turnsWord = result.removedTurns === 1 ? "turn" : "turns"
+  const msgsWord = result.removedMessages === 1 ? "message" : "messages"
+  ctx.out(
+    `rewound to ${shortId(result.rewindToMessageId)}: dropped ${result.removedTurns} ${turnsWord} / ${result.removedMessages} ${msgsWord} — ${result.fileStateNote}\n`,
+  )
+  return 0
+}
+
 /* ------------------------------------------------------------------ */
 /* /rewind                                                             */
 /* ------------------------------------------------------------------ */
@@ -423,7 +466,7 @@ const rewindCmdImpl: SlashCommand = {
       ctx.out(
         `${renderConfirmLine(target.fullId, target.dropTurns, target.dropMsgs, parsed.restoreFiles, saved.meta.gitSha)}\n`,
       )
-      ctx.out("  re-run with --yes to confirm.\n")
+      ctx.out(confirmYesHint())
       return 0
     }
 
@@ -440,12 +483,9 @@ const rewindCmdImpl: SlashCommand = {
       ...(gitAuth.port !== undefined ? { git: gitAuth.port } : {}),
     }
     const result = await rewindSession(rewindOpts)
-    const turnsWord = result.removedTurns === 1 ? "turn" : "turns"
-    const msgsWord = result.removedMessages === 1 ? "message" : "messages"
-    ctx.out(
-      `rewound to ${shortId(result.rewindToMessageId)}: dropped ${result.removedTurns} ${turnsWord} / ${result.removedMessages} ${msgsWord} — ${result.fileStateNote}\n`,
-    )
-    return 0
+    // UUX-4-02 — swap the live history through the ONE seam BEFORE printing
+    // the success receipt (see finishConfirmedRewind).
+    return await finishConfirmedRewind(ctx, state, result)
   },
   complete(_args, _partial, _ctx) {
     return [

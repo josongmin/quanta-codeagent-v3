@@ -1,6 +1,6 @@
-import type { IdentityMode } from "@/agent/identity"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import type { FocusChainPort } from "@/agent/focus-chain"
+import type { IdentityMode } from "@/agent/identity"
 import type { GranularRegistry, ThreeWayRestorePort } from "@/agent/per-tool-checkpoint"
 import type { PlanStore } from "@/agent/plan/state"
 import type { StickyModelStore } from "@/agent/sticky-model"
@@ -300,6 +300,10 @@ export interface BuildReplSlashCtxArgs {
    *  tag prefixes against the registry. */
   perToolRegistry?: GranularRegistry | undefined
   perToolRestorePort?: ThreeWayRestorePort | undefined
+  /** UUX-6-03 — the ONE live-history swap seam for `/rewind-tool`'s task
+   *  leg (same closure `/rewind-conv` + `/rewind` swap through). Absent ⇒
+   *  the command keeps its prior print-only behavior. */
+  perToolReplaceMessages?: ((msgs: ReadonlyArray<Message>) => Promise<void>) | undefined
   /** ADR-0291 — `/profile`: authoritative session-owned tool-profile state. */
   toolProfileState?: ToolProfileSessionState | undefined
   /** Back-compat alias for older tests/callers; prefer `toolProfileState`. */
@@ -370,6 +374,9 @@ const maybePerToolCheckpoint = (
   return buildPerToolCheckpointAdapter({
     registry: args.perToolRegistry,
     ...(args.perToolRestorePort !== undefined ? { restore: args.perToolRestorePort } : {}),
+    ...(args.perToolReplaceMessages !== undefined
+      ? { replaceMessages: args.perToolReplaceMessages }
+      : {}),
   })
 }
 

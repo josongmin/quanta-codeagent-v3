@@ -12,10 +12,15 @@
  * Three forms:
  *   - `/rewind-conv`             → list tags (newest-first)
  *   - `/rewind-conv --list`      → same as no-args (explicit flag)
- *   - `/rewind-conv <tag>`       → restore that snapshot; awaits
- *                                  `ctx.convCheckpoint.replaceMessages(...)`
- *                                  so the surface swaps its live history
- *                                  binding.
+ *   - `/rewind-conv <tag>`       → destructive-confirm preview + exit 1
+ *                                  (UUX-6-09 — replacing the live
+ *                                  conversation is destructive; parity with
+ *                                  the `/rewind` + `/rewind-tool` confirm
+ *                                  pattern).
+ *   - `/rewind-conv <tag> --yes` → restore that snapshot; awaits the ONE
+ *                                  live-history-swap seam
+ *                                  (`applyLiveHistorySwap`) so the surface
+ *                                  swaps its live history binding.
  *
  * Default-OFF posture (RFC §1.2): when `ctx.convCheckpoint` is absent
  * (no host wire was installed), the command prints "not wired in this
@@ -30,6 +35,7 @@
  */
 
 import type { Message } from "@/llm"
+import { applyLiveHistorySwap, BOLD_RED, confirmYesHint, RESET } from "./live-history-swap"
 import type { ConvCheckpointWire } from "./repl/conv-checkpoint-wire"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
@@ -94,23 +100,50 @@ export const renderTagList = (
 
 export type RewindConvArgs =
   | { readonly kind: "list" }
-  | { readonly kind: "restore"; readonly tag: string }
+  | { readonly kind: "restore"; readonly tag: string; readonly yes: boolean }
   | { readonly kind: "err"; readonly message: string }
 
-export const parseRewindConvArgs = (args: readonly string[]): RewindConvArgs => {
-  if (args.length === 0) return { kind: "list" }
-  if (args.length > 1) {
-    return {
-      kind: "err",
-      message:
-        "takes at most one argument (use /rewind-conv, /rewind-conv --list, or /rewind-conv <tag>)",
-    }
+/** Mutable accumulator for {@link parseRewindConvArgs} — the per-token
+ *  branch lives in {@link consumeConvArg} to keep the parser under biome's
+ *  cognitive-complexity ceiling (same shape as rewind-tool's `consumeArg`). */
+interface ConvArgAcc {
+  tag?: string
+  list: boolean
+  yes: boolean
+}
+
+/** Consume one token into `acc`; returns an error message on rejection or
+ *  `null` on success. `--yes`/`-y` is the UUX-6-09 destructive-confirm
+ *  bypass (parity with /rewind). */
+const consumeConvArg = (acc: ConvArgAcc, a: string): string | null => {
+  if (a === "--list") {
+    acc.list = true
+    return null
   }
-  const head = args[0] as string
-  if (head === "--list") return { kind: "list" }
-  if (head.startsWith("--")) return { kind: "err", message: `unknown flag: ${head}` }
-  if (head.length === 0) return { kind: "err", message: "empty tag argument" }
-  return { kind: "restore", tag: head }
+  if (a === "--yes" || a === "-y") {
+    acc.yes = true
+    return null
+  }
+  if (a.startsWith("--")) return `unknown flag: ${a}`
+  if (a.length === 0) return "empty tag argument"
+  if (acc.tag !== undefined) {
+    return "takes at most one tag (use /rewind-conv, /rewind-conv --list, or /rewind-conv <tag> [--yes])"
+  }
+  acc.tag = a
+  return null
+}
+
+export const parseRewindConvArgs = (args: readonly string[]): RewindConvArgs => {
+  const acc: ConvArgAcc = { list: false, yes: false }
+  for (const a of args) {
+    const err = consumeConvArg(acc, a)
+    if (err !== null) return { kind: "err", message: err }
+  }
+  if (acc.list && acc.tag !== undefined) {
+    return { kind: "err", message: "--list takes no tag argument" }
+  }
+  if (acc.tag === undefined) return { kind: "list" }
+  return { kind: "restore", tag: acc.tag, yes: acc.yes }
 }
 
 /* ------------------------------------------------------------------ */
@@ -138,22 +171,42 @@ export const rewindConvCmd: SlashCommand = {
       ctx.out(renderTagList(entries))
       return 0
     }
-    // restore
+    // restore — `wire.restore(tag)` is a READ (the snapshot lookup); the
+    // mutation is the live-history swap below, so the preview path can
+    // resolve the tag without touching anything.
     const restored = slot.wire.restore(parsed.tag)
     if (restored === null) {
       ctx.err(`/rewind-conv: no such tag: ${parsed.tag}\n`)
       return 1
     }
-    await slot.replaceMessages(restored)
+    // UUX-6-09 — destructive-confirm gate (same pattern /rewind renders: a
+    // bold-red destructive verb + the shared `--yes` re-run hint). Replacing
+    // the live conversation drops whatever the operator has NOT checkpointed,
+    // so without --yes this REFUSES (exit 1) and changes nothing.
+    if (!parsed.yes) {
+      const taken = slot.wire.listTags().find((e) => e.tag === parsed.tag)
+      const when = taken !== undefined ? `, taken ${fmtTs(taken.takenAt)}` : ""
+      ctx.out(
+        `[rewind-conv '${parsed.tag}' — will ${BOLD_RED}replace${RESET} the live conversation with this snapshot (${restored.length} message${restored.length === 1 ? "" : "s"}${when})]\n`,
+      )
+      ctx.out(confirmYesHint())
+      return 1
+    }
+    // ONE live-history-swap seam (UUX-4-02 family) — same helper `/rewind`
+    // and `/rewind-tool` route through. Rejections propagate (the dispatcher
+    // surfaces them as command failures), preserving the pre-refactor
+    // behavior byte-identically for the confirmed path.
+    await applyLiveHistorySwap(slot, restored)
     ctx.out(
       `restored '${parsed.tag}' (${restored.length} message${restored.length === 1 ? "" : "s"}).\n`,
     )
     return 0
   },
   complete(args, _partial, ctx) {
-    // Only complete the first positional. `--list` is the only known
-    // flag; tag completion uses live `listTags()` when wired.
-    if (args.length >= 1) return []
+    // After the tag positional, offer the confirm bypass (UUX-6-09).
+    if (args.length >= 1) {
+      return [{ value: "--yes", kind: "argument", description: "skip confirm prompt" }]
+    }
     const hints: { readonly value: string; readonly kind: "argument" }[] = [
       { value: "--list", kind: "argument" as const },
     ]

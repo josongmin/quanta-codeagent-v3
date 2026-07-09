@@ -63,17 +63,7 @@ import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-po
 const askLine = async (channel: MidTurnApprovalChannel, prompt: string): Promise<string> => {
   if (channel.active) {
     process.stderr.write(prompt)
-    const result = await channel.awaitLine()
-    if (result.kind === "line") return result.line
-    // WS-A (jul-10, UUX-1-22) — a RELEASED prompt (turn canceled/backgrounded/
-    // ended with the ask unanswered) maps to the same fail-closed "" the callers
-    // already treat as deny, but NEVER silently: the operator sees WHY the
-    // prompt vanished, and the outcome is attributed to the release — not to a
-    // decision they never made.
-    process.stderr.write(
-      `\n[quanta] prompt released unanswered (${result.cause === "turn_teardown" ? "turn ended" : "superseded by a newer prompt"}) — treated as deny/fail-closed.\n`,
-    )
-    return ""
+    return await channel.awaitLine()
   }
   const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
   try {
@@ -428,6 +418,11 @@ export interface CliRuntimeContextBindings {
    *  prompt reads the operator's answer without a second stdin reader. */
   readonly midTurnApprovalChannel: MidTurnApprovalChannel
   readonly runtimeContext: RuntimeContext
+  /** UUX-4-04 — the loaded `PermissionStore` (the EXACT instance threaded
+   *  into the admissibility gate), surfaced so the `/permission` inspector
+   *  can report the grants that actually gate this session. `undefined`
+   *  when the load failed (the gate then has no store either). */
+  readonly permissionStore: PermissionStore | undefined
 }
 
 type RuntimeContextAdmissibility = ReturnType<RuntimeContext["admissibility"]>
@@ -769,6 +764,9 @@ export const composeCliRuntimeContext = async (
     }),
     midTurnApprovalChannel,
     runtimeContext,
+    // UUX-4-04 — surfaced for the `/permission` inspector (same instance the
+    // admissibility gate received above).
+    permissionStore,
   }
 }
 

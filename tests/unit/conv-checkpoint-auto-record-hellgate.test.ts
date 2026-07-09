@@ -283,7 +283,10 @@ describe("/rewind-conv — slash hellgate", () => {
         captured.push(m2)
       },
     })
-    const rc = await rewindConvCmd.run(["T1"], ctx)
+    // UUX-6-09 — restore is destructive: it now requires the --yes confirm
+    // (a bare `/rewind-conv T1` previews + refuses; see
+    // tests/unit/cli/rewind-live-swap-hellgate.test.ts).
+    const rc = await rewindConvCmd.run(["T1", "--yes"], ctx)
     expect(rc).toBe(0)
     expect(err.join("")).toBe("")
     expect(captured.length).toBe(1)
@@ -314,6 +317,6 @@ describe("/rewind-conv — slash hellgate", () => {
     const { ctx, err } = buildCtx({ wire })
     const rc = await rewindConvCmd.run(["tag-1", "tag-2"], ctx)
     expect(rc).toBe(1)
-    expect(err.join("")).toContain("takes at most one argument")
+    expect(err.join("")).toContain("takes at most one tag")
   })
 })
