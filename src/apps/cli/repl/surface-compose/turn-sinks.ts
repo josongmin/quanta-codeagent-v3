@@ -2,8 +2,10 @@ import type { Message } from "@/llm"
 import { buildCostDashboard, GEN_AI_ATTRS, renderDashboardText } from "@/observability"
 import { errMessage } from "@/shared"
 import type { ImageQueue } from "../../image-queue"
+import { overlayServerHealth } from "../../mcp-health"
 import type { RewindSlashState } from "../../rewind-cmd"
 import type { StatusBar } from "../../status-bar"
+import { deriveMcpPillServers } from "../factories/lifecycle"
 import type { SessionLoopSinks } from "../session-loop"
 import type { SessionSetupResult } from "../session-setup"
 
@@ -79,6 +81,19 @@ const snapshotAndFlushLifecyclePills = (setup: SessionSetupResult): void => {
   }
   if (setup.lifecycleFollowUpQueue !== undefined) {
     setup.lifecyclePills.update({ followUp: { queued: setup.lifecycleFollowUpQueue.size() } })
+  }
+  // WS-G (UUX-6-22) — the MCP pill used to be BOOT-ONCE (set exactly once by
+  // bootstrap); re-derive it per flush from the live tools + the health
+  // registry so a server that died mid-session shows ✗ (and a load-failed
+  // server appears at all). Skipped when nothing would render (threshold
+  // parity with the boot behavior — no empty patch churn).
+  const downServers = setup.mcpHealth?.downServers()
+  const mcpServers = overlayServerHealth(
+    deriveMcpPillServers(setup.mcpTools),
+    downServers ?? new Map(),
+  )
+  if (mcpServers.length > 0) {
+    setup.lifecyclePills.update({ mcp: { servers: mcpServers } })
   }
   setup.lifecyclePills.flush()
 }

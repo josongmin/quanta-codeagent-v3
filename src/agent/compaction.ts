@@ -1,6 +1,6 @@
 import type { ContentBlock, LLMPort, Message, SystemPromptInput } from "@/llm"
 import { assembleFromEvents } from "@/llm"
-import { errMessage, logger, type Result } from "@/shared"
+import { emitOperatorNotice, errMessage, logger, type Result } from "@/shared"
 import {
   BackgroundSummarizationController,
   type BgCompactionConfig,
@@ -669,6 +669,15 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
       isFirstCompaction: input.isFirstCompaction === true,
     })
     if (abortReason !== null) {
+      // WS-G (UUX-5-16) — a hook-driven defer was invisible: the transcript
+      // stays over threshold with no fold and no operator signal. INFO notice
+      // (no-op when no sink is installed — bench/headless byte-identical).
+      emitOperatorNotice({
+        severity: "info",
+        source: "compaction",
+        message: `compaction deferred by pre_compact hook: ${abortReason}`,
+        hint: "history was not folded this turn; it will re-check next turn",
+      })
       return { compacted: false, messages: input.messages, reason: "deferred" }
     }
   }
@@ -686,6 +695,14 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
       proposedSummaryTokens: estimateTokens(prefix),
     })
     if (decision === "defer_one_turn") {
+      // WS-G (UUX-5-16) — same defer visibility for the HITL/preflight path
+      // (the operator answered "not now", but never saw the consequence).
+      emitOperatorNotice({
+        severity: "info",
+        source: "compaction",
+        message: "compaction deferred — history was not folded this turn",
+        hint: "it will re-check next turn while over threshold",
+      })
       return { compacted: false, messages: input.messages, reason: "deferred" }
     }
     // `approve` and `force_now` both fall through to the summarizer — the

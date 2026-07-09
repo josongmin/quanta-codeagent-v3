@@ -23,10 +23,16 @@ import type { IdleMonitor } from "../idle-monitor"
 import type { Tooling } from "../internal"
 import type { LifecyclePills } from "../lifecycle-pills"
 import type { McpSurfaceInfo } from "../mcp-cmd"
+import { installCliOperatorNoticeSink } from "../operator-notice"
 import type { RejectCounter } from "../reject-counter"
 import { installStatusBar, type StatusBar } from "../status-bar"
-import type { SessionStatusView } from "../status-command-runner"
-import { createStatusLineDriver, type StatusLineDriver } from "../status-line-driver"
+import {
+  buildSessionStatusView,
+  createLiveModelSource,
+  createStatusLineDriver,
+  type LiveModelSource,
+  type StatusLineDriver,
+} from "../status-line-driver"
 import type { createStatusPills } from "../status-pills"
 import type { TimelinePanel } from "../timeline-panel"
 import type { TurnIndicator } from "../turn-indicator"
@@ -153,6 +159,14 @@ export interface SessionSetupResult {
    *  surface wires `/mcp-resources` over the EXACT ring the tools write into (one
    *  holder, both consumers). Absent ⇒ `/mcp-resources` prints "not wired". */
   readonly mcpResourceCapture: import("@/tool").McpResourceCaptureHolder | undefined
+  /** WS-G (UUX-6-22) — live MCP server-health registry (down overlay for the
+   *  lifecycle pill, written by the load exit/error callbacks). Narrowed from
+   *  `boot.features` like `mcpResourceCapture`. Absent ⇒ no MCP configured. */
+  readonly mcpHealth: import("../mcp-health").McpHealthHolder | undefined
+  /** WS-G (UUX-1-17) — repointable model source the statusline view reads per
+   *  tick. surface-compose re-points it at the `/model` adapter's `current()`
+   *  once that adapter exists, so a mid-session model switch paints live. */
+  readonly liveModelSource: LiveModelSource
   /** L5 M-11 — per-session search-wire teardown (delta-scan interval + indexer)
    *  forwarded from `boot.tooling`. The host threads this into
    *  `runSessionLoop({ searchPipelineDispose })` so session close releases THIS
@@ -332,6 +346,13 @@ export const setupSession = async (
     setFsJailDecisionSink(decisionEmitter)
   }
 
+  // WS-G (jul-10 uiux) — install the OperatorNotice stderr sink ONCE per REPL
+  // session (same composition-root pattern as the fs-jail decision sink above).
+  // Emitters anywhere (`@/shared#emitOperatorNotice`) route degrade signals
+  // here; without this install every emit is a no-op (headless/bench surfaces
+  // stay byte-identical). Uninstalled in `shutdownMcp` below.
+  const uninstallOperatorNoticeSink = installCliOperatorNoticeSink()
+
   const pills = deps.installPills({
     statusBar,
     cwd: boot.cwd,
@@ -353,20 +374,21 @@ export const setupSession = async (
   // (NOT a direct `setDefault`, which would clobber the pill composer).
   const statusLineCfg = runtimeConfig().statusLineConfig
   let statusLineDriver: StatusLineDriver | undefined
+  // WS-G (UUX-1-17) — the model is read through a REPOINTABLE source so a
+  // mid-session `/model` change shows up on the next tick. Created here
+  // (anchored at the boot model), re-pointed by surface-compose once the
+  // `/model` adapter exists. Minted unconditionally (cheap) so the wiring in
+  // surface-compose never has to branch on the statusline gate.
+  const liveModelSource = createLiveModelSource(boot.model)
   if (statusLineCfg !== undefined) {
     const costPanel = boot.costPanel as CostPanel | undefined
-    const statusView = (): SessionStatusView => {
-      const cost = costPanel?.snapshot()
-      return {
-        ...(boot.sessionId !== undefined ? { sessionId: boot.sessionId } : {}),
-        cwd: boot.cwd,
-        currentDir: boot.cwd,
-        modelId: boot.model,
-        modelDisplayName: boot.model,
-        effortLevel: boot.effortStore.get(),
-        ...(cost?.totalCostUsd != null ? { totalCostUsd: cost.totalCostUsd } : {}),
-      }
-    }
+    const statusView = buildSessionStatusView({
+      ...(boot.sessionId !== undefined ? { sessionId: boot.sessionId } : {}),
+      cwd: boot.cwd,
+      model: liveModelSource,
+      effort: () => boot.effortStore.get(),
+      cost: () => costPanel?.snapshot(),
+    })
     statusLineDriver = createStatusLineDriver({
       cfg: statusLineCfg,
       view: statusView,
@@ -419,6 +441,11 @@ export const setupSession = async (
     // `mcpClients` narrow below). Absent ⇒ `/mcp-resources` "not wired".
     mcpResourceCapture: (boot.features as unknown as import("../internal/mcp").Features)
       .mcpResourceCapture,
+    // WS-G (UUX-6-22) — same narrow for the MCP health registry (the pill's
+    // down overlay). Absent ⇒ no MCP configured ⇒ pill behavior unchanged.
+    mcpHealth: (boot.features as unknown as import("../internal/mcp").Features).mcpHealth,
+    // WS-G (UUX-1-17) — the statusline's repointable model source.
+    liveModelSource,
     searchPipelineDispose: boot.tooling.searchPipelineDispose,
     lifecyclePills: boot.lifecyclePills as unknown as LifecyclePills,
     lifecycleTaskRegistry: boot.lifecycleTaskRegistry,
@@ -454,6 +481,9 @@ export const setupSession = async (
       // teardown so a sibling/re-entered session never inherits this
       // run's emitter (the slot is process-global by slice-fence design).
       clearFsJailDecisionSink()
+      // WS-G — release the operator-notice sink with the same lifecycle (the
+      // slot is process-global; a re-entered setup must not inherit it).
+      uninstallOperatorNoticeSink()
       // #15 — stop the status-line poll on session end (idempotent; undefined
       // when the feature is gated off).
       statusLineDriver?.stop()

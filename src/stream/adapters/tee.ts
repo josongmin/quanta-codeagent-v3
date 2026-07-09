@@ -15,6 +15,14 @@ export interface TeeStreamOpts {
   /** eval/strict mode: a failing port rethrows so the caller can mark the
    *  instance verdict `degraded`. Default `false` (product/session). */
   strict?: boolean
+  /** WS-G (UUX-1-18) — one-shot degrade signal. Fired ONCE per TeeStream
+   *  lifetime, on the FIRST swallowed port failure (LATCHED — never per-write
+   *  spam, and NOT re-fired for new reasons/ports). The composition root wires
+   *  this to the operator-notice bus so a silently-degraded UX/recorder leg is
+   *  no longer invisible. NO-THROW: a throwing callback is swallowed so the
+   *  fan-out path stays crash-free. Never fired in `strict` mode (the throw
+   *  itself is the signal there). Absent ⇒ byte-identical legacy behavior. */
+  onFirstDegrade?: (record: DegradedRecord) => void
 }
 
 /**
@@ -27,12 +35,16 @@ export interface TeeStreamOpts {
 export class TeeStream implements StreamPort {
   private readonly strict: boolean
   private readonly failures = new Map<string, DegradedRecord>()
+  private readonly onFirstDegrade: ((record: DegradedRecord) => void) | undefined
+  /** WS-G latch — true once the one-shot degrade signal fired. */
+  private degradeSignaled = false
 
   constructor(
     private readonly ports: readonly StreamPort[],
     opts: TeeStreamOpts = {},
   ) {
     this.strict = opts.strict ?? false
+    this.onFirstDegrade = opts.onFirstDegrade
   }
 
   emit(event: AgentEvent): void {
@@ -58,7 +70,20 @@ export class TeeStream implements StreamPort {
       existing.count += 1
       return
     }
-    this.failures.set(key, { component: "TeeStream", reason, count: 1 })
+    const record: DegradedRecord = { component: "TeeStream", reason, count: 1 }
+    this.failures.set(key, record)
+    // WS-G (UUX-1-18) — one-shot degrade signal, latched per INSTANCE (not per
+    // key: varying error strings must not turn into per-write spam). The
+    // callback gets a copy so it can never mutate the tracked record.
+    if (!this.degradeSignaled && this.onFirstDegrade !== undefined) {
+      this.degradeSignaled = true
+      try {
+        this.onFirstDegrade({ ...record })
+      } catch {
+        // The degrade signal is observation-only; it must never poison the
+        // fan-out (the remaining ports still receive this event).
+      }
+    }
   }
 
   /** Snapshot of degraded ports (one record per port+reason). */

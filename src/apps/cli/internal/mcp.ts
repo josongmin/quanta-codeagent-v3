@@ -48,7 +48,7 @@ import {
 import type { Metrics, StructuredLogger } from "@/observability"
 import { parseEnvFlag } from "@/runner/assemble"
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
-import { errMessage, logger, quantaHomeDir, runtimeConfig } from "@/shared"
+import { emitOperatorNotice, errMessage, logger, quantaHomeDir, runtimeConfig } from "@/shared"
 import { MCPRootSchema, PLUGIN_MCP_FILE } from "@/skill/plugin-manifest"
 import {
   type McpResourceCaptureHolder,
@@ -56,6 +56,7 @@ import {
   type ResourcesHandle,
   type Tool,
 } from "@/tool"
+import type { McpHealthHolder } from "../mcp-health"
 
 /**
  * ADR-0024 split — the CLI's MCP plumbing (auto-restart supervisor deps, the
@@ -500,6 +501,12 @@ export interface Features {
    *  the surface narrows `boot.features` back to this CLI shape at the setup seam
    *  to read the holder (mirrors the `mcpClients` narrow). */
   mcpResourceCapture?: McpResourceCaptureHolder
+  /** WS-G (UUX-6-22) — the live MCP server-health registry the load callbacks
+   *  (`onServerExit` / `onServerLoadError`) write into. The surface narrows it
+   *  back at the setup seam (mirrors `mcpResourceCapture`) so the lifecycle
+   *  pill re-derives per flush with the down overlay. Absent ⇒ no MCP servers
+   *  configured (pill boot behavior byte-identical). */
+  mcpHealth?: McpHealthHolder
 }
 
 /** B1 (jun-04) — the stable elicitation-lease context id the inbound-sampling
@@ -626,8 +633,38 @@ export const buildMcpLoadOpts = (
     readonly inboundWiring: ReturnType<typeof resolveMcpInboundWiring>
     readonly oauthProvider: McpOAuthProviderPort | undefined
     readonly opts: LoadFeaturesOpts
+    /** WS-G (UUX-6-22) — live server-health registry the lifecycle pill reads
+     *  per flush. When present, load failures + mid-session deaths mark the
+     *  server down AND emit an operator notice. Absent ⇒ neither callback is
+     *  wired (byte-identical load). */
+    readonly mcpHealth?: McpHealthHolder
   },
 ): Parameters<typeof loadMcpTools>[2] => ({
+  // WS-G (UUX-6-22) — route the ALBB-09 load-error sink + the new exit sink
+  // into the health registry and the operator-notice bus (error severity: the
+  // server's tools WILL fail from here on).
+  ...(args.mcpHealth !== undefined
+    ? {
+        onServerLoadError: ({ server, error }: { server: string; error: unknown }): void => {
+          args.mcpHealth?.markDown(server, errMessage(error))
+          emitOperatorNotice({
+            severity: "error",
+            source: "mcp",
+            message: `server "${server}" failed to load: ${errMessage(error)}`,
+            hint: "its tools are unavailable; see /mcp",
+          })
+        },
+        onServerExit: ({ server, reason }: { server: string; reason?: string }): void => {
+          args.mcpHealth?.markDown(server, reason)
+          emitOperatorNotice({
+            severity: "error",
+            source: "mcp",
+            message: `server "${server}" exited${reason !== undefined ? ` (${reason})` : ""}`,
+            hint: "its tools will fail from now on; see /mcp",
+          })
+        },
+      }
+    : {}),
   // B1 + H19 — the SAME unified `{ negotiator, handler?, rootsProvider? }` bundle
   // feeds BOTH paths. On the supervised path it is BAKED into the restart factory
   // (so a reconnected client re-advertises); on the single-client path it is the

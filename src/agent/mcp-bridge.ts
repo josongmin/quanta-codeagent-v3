@@ -740,6 +740,37 @@ export interface LoadMcpToolsOpts {
    *  server. Absent ⇒ byte-identical (warn-only, as today). The sink itself must
    *  not throw; it is invoked best-effort inside the existing catch. */
   onServerLoadError?: (info: { server: string; error: unknown }) => void
+  /** WS-G (UUX-6-22, jul-10) — optional mid-session death sink. SINGLE-CLIENT
+   *  path only: each loaded `McpClient`'s `onExit` is bridged here with the
+   *  RAW config server name (pill ✗ + operator notice). The SUPERVISED path is
+   *  intentionally NOT subscribed — the supervisor owns crash→restart (its
+   *  give-up state is `degraded`). Best-effort/no-throw; absent ⇒ byte-identical. */
+  onServerExit?: (info: { server: string; reason?: string }) => void
+}
+
+/** WS-G — duck-subscribe a loaded client's transport-exit to `onServerExit`.
+ *  Probed structurally (`McpStoppable` hides the concrete client): the
+ *  single-client `McpClient` has `onExit`, the supervisor does not (by
+ *  design). NO-THROW end to end. */
+const subscribeServerExit = (
+  client: McpStoppable,
+  server: string,
+  onServerExit: ((info: { server: string; reason?: string }) => void) | undefined,
+): void => {
+  if (onServerExit === undefined) return
+  const c = client as { onExit?: (h: (reason?: string) => void) => () => void }
+  if (typeof c.onExit !== "function") return
+  try {
+    c.onExit((reason) => {
+      try {
+        onServerExit({ server, ...(reason !== undefined ? { reason } : {}) })
+      } catch (e) {
+        logger.warn(`mcp: onServerExit sink threw for "${server}": ${errMessage(e)}`)
+      }
+    })
+  } catch (e) {
+    logger.warn(`mcp: onExit subscribe failed for "${server}": ${errMessage(e)}`)
+  }
 }
 
 /** §19.1 — the bind opts for ONE server: combine the global knob flag with this
@@ -946,6 +977,9 @@ export const loadMcpTools = async (
     if (loaded === null) continue
     tools.push(...loaded.tools)
     clients.push(loaded.client)
+    // WS-G (UUX-6-22) — bridge a mid-session server death to the surface sink
+    // (single-client path only; the supervisor owns restarts — see the opt doc).
+    subscribeServerExit(loaded.client, config.name, opts?.onServerExit)
     if (loaded.resources !== undefined) resourcesClients.push(loaded.resources)
   }
   // F1 — DISAMBIGUATE bridged-name collisions before the tools reach the

@@ -52,6 +52,7 @@ import {
   type MemoryTier,
   type PersistentStorePort,
 } from "@/memory"
+import { emitOperatorNotice, errMessage } from "@/shared"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /* ------------------------------------------------------------------ */
@@ -281,8 +282,17 @@ const runSearch = async (
       if (vec !== undefined) {
         ;(q as { embedding?: number[] }).embedding = vec
       }
-    } catch {
-      // lexical fallback — recall() ranks on text/tags/freshness only
+    } catch (e) {
+      // lexical fallback — recall() ranks on text/tags/freshness only.
+      // WS-G (UUX-5-10): the fallback stays (never fail the slash on an
+      // offline/quota embedder) but it is no longer SILENT — the operator
+      // sees that ranking quality degraded.
+      emitOperatorNotice({
+        severity: "warn",
+        source: "/memory",
+        message: "semantic search unavailable — using lexical fallback",
+        hint: errMessage(e),
+      })
     }
   }
   const hits = await state.store.recall(q)

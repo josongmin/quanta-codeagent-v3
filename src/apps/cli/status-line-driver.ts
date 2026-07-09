@@ -22,6 +22,7 @@
  * constructs a driver when the config exists — byte-identical when OFF.
  */
 
+import type { EffortLevel } from "@/agent"
 import {
   buildStatusPayload,
   resolveRefreshIntervalMs,
@@ -31,6 +32,47 @@ import {
   type StatusSpawner,
 } from "./status-command-runner"
 import type { StatusPills } from "./status-pills"
+
+/** WS-G (UUX-1-17) — a REPOINTABLE model source. The composition root creates
+ *  it anchored at the boot model, then (once the `/model` adapter exists in
+ *  surface-compose) re-points `source` at `adapter.current()` so every
+ *  statusline tick paints the model the NEXT turn will actually run — the
+ *  boot-frozen `modelId` bug. */
+export interface LiveModelSource {
+  source: () => string
+}
+
+export const createLiveModelSource = (bootModel: string): LiveModelSource => ({
+  source: () => bootModel,
+})
+
+/** Build the per-tick {@link SessionStatusView} thunk. Every field is read
+ *  LIVE through its thunk on each call (the driver already re-invokes the
+ *  view per tick) — nothing is captured by value except `cwd`/`sessionId`,
+ *  which cannot change mid-session. Extracted from `session-setup.ts` so the
+ *  live-read contract is unit-testable. */
+export const buildSessionStatusView = (args: {
+  readonly sessionId?: string
+  readonly cwd: string
+  readonly model: LiveModelSource
+  readonly effort: () => EffortLevel | undefined
+  readonly cost: () => { totalCostUsd?: number | null } | undefined
+}): (() => SessionStatusView) => {
+  return (): SessionStatusView => {
+    const modelId = args.model.source()
+    const effort = args.effort()
+    const cost = args.cost()
+    return {
+      ...(args.sessionId !== undefined ? { sessionId: args.sessionId } : {}),
+      cwd: args.cwd,
+      currentDir: args.cwd,
+      modelId,
+      modelDisplayName: modelId,
+      ...(effort !== undefined ? { effortLevel: effort } : {}),
+      ...(cost?.totalCostUsd != null ? { totalCostUsd: cost.totalCostUsd } : {}),
+    }
+  }
+}
 
 export interface StatusLineDriver {
   /** Run the command once and route its first line into the pills segment.

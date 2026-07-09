@@ -10,27 +10,48 @@ import { createStatusPills, type SandboxMode } from "../status-pills"
  *  `/reload-skills` consume. Returns the freshly-discovered set as
  *  `{name, description, paths?}` rows — mirrors what `buildSessionFeatures`
  *  feeds the model, so the user-visible list and the model-visible inventory
- *  cannot drift. Surface-only: no LLM call, just disk scan + bundled merge. */
+ *  cannot drift. Surface-only: no LLM call, just disk scan + bundled merge.
+ *
+ *  WS-G (UUX-2-13) — when the composition root passes the status `pills`
+ *  sink, EVERY invocation also pushes the fresh inventory into the skills
+ *  pill, so `/reload-skills` (and `/skills`) refresh the chrome instead of
+ *  leaving the boot snapshot frozen. Absent ⇒ display-only (byte-identical
+ *  for surfaces without pills). */
 export const buildSkillsCallback = (
   skillsConfig: AgentConfig["skills"] | undefined,
+  pills?: { update: (patch: { activeSkills?: Array<{ name: string }> }) => void },
 ): (() => Promise<SkillRow[]>) | undefined => {
   if (skillsConfig === undefined) return undefined
   return async (): Promise<SkillRow[]> => {
     const userSkills = skillsConfig.dir !== undefined ? await discoverSkills(skillsConfig.dir) : []
     const systemSkills = await discoverSystemSkills()
-    const byName = new Map<string, SkillRow>()
-    for (const skill of userSkills) {
-      const row: SkillRow = { name: skill.name, description: skill.description }
-      if (skill.paths !== undefined) (row as { paths?: readonly string[] }).paths = skill.paths
-      byName.set(skill.name, row)
+    const rows = mergeSkillRows(userSkills, systemSkills)
+    // WS-G (UUX-2-13) — best-effort pill refresh; a pill failure must never
+    // break the slash.
+    if (pills !== undefined) {
+      try {
+        pills.update({ activeSkills: rows.map((row) => ({ name: row.name })) })
+      } catch {
+        // chrome-only
+      }
     }
-    for (const skill of systemSkills) {
-      const row: SkillRow = { name: skill.name, description: skill.description }
-      if (skill.paths !== undefined) (row as { paths?: readonly string[] }).paths = skill.paths
-      byName.set(skill.name, row)
-    }
-    return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    return rows
   }
+}
+
+/** Merge user + system skills into sorted display rows (system wins on a name
+ *  collision — same override order `buildSkillBlock` uses). */
+const mergeSkillRows = (
+  userSkills: ReadonlyArray<{ name: string; description: string; paths?: readonly string[] }>,
+  systemSkills: ReadonlyArray<{ name: string; description: string; paths?: readonly string[] }>,
+): SkillRow[] => {
+  const byName = new Map<string, SkillRow>()
+  for (const skill of [...userSkills, ...systemSkills]) {
+    const row: SkillRow = { name: skill.name, description: skill.description }
+    if (skill.paths !== undefined) (row as { paths?: readonly string[] }).paths = skill.paths
+    byName.set(skill.name, row)
+  }
+  return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 }
 
 /** Build and wire the status chrome (workspace / mode+effort / skills /

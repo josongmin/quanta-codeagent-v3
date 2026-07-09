@@ -1,3 +1,4 @@
+import { emitOperatorNotice, errMessage } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { TurnIndicator } from "../../turn-indicator"
 
@@ -40,38 +41,65 @@ export interface IndicatorUsageObserver {
  *  Every other event is ignored — the indicator is purely a UX surface, not
  *  a trajectory recorder. Errors in the indicator are swallowed in place so
  *  a faulty render can never poison the recorder path. */
+/** The sliced-taxonomy forward (see the module doc above). Extracted from the
+ *  emit closure so the WS-G latch wrapper stays under the complexity cap. */
+const forwardIndicatorEvent = (
+  ind: TurnIndicator,
+  usageObserver: IndicatorUsageObserver | undefined,
+  event: Parameters<StreamPort["emit"]>[0],
+): void => {
+  if (event.type === "assistant_text" || event.type === "tool_call") {
+    ind.markFirstChunk()
+    return
+  }
+  if (event.type === "output_progress") {
+    ind.updateUsage({ outputTokens: event.outputTokens, exact: event.exact })
+    return
+  }
+  if (event.type === "usage") {
+    ind.updateUsage({
+      inputTokens: event.inputTokens,
+      outputTokens: event.outputTokens,
+    })
+    // S3 — feed the reasoning-token split into the `/context` gauge holder.
+    // Conditional-spread so an ABSENT split (Anthropic / no-reasoning
+    // provider) forwards `{}` (exactOptionalPropertyTypes: we never assign
+    // an explicit `undefined`), while an explicit `0` rides through
+    // verbatim — the holder's own `!== undefined` guard then decides
+    // retention. No synthetic value is ever fabricated here.
+    usageObserver?.observeUsage(
+      event.reasoningTokens !== undefined ? { reasoningTokens: event.reasoningTokens } : {},
+    )
+  }
+}
+
 export const buildIndicatorPort = (
   ind: TurnIndicator,
   usageObserver?: IndicatorUsageObserver,
-): StreamPort => ({
-  emit: (event): void => {
-    try {
-      if (event.type === "assistant_text" || event.type === "tool_call") {
-        ind.markFirstChunk()
-        return
+): StreamPort => {
+  // WS-G (UUX-1-18) — the swallow below is a DOUBLE-swallow: TeeStream never
+  // sees the failure (by design, so it is not tracked as a degraded recorder
+  // leg), which used to mean ZERO operator signal for a broken indicator.
+  // Latch one warn notice per port lifetime on the first internal failure.
+  let degradeNotified = false
+  return {
+    emit: (event): void => {
+      try {
+        forwardIndicatorEvent(ind, usageObserver, event)
+      } catch (e) {
+        // Intentional: an indicator failure must not surface as an emit error
+        // (TeeStream would otherwise track it as a degraded record). WS-G — but
+        // it must not be INVISIBLE either: one latched operator notice.
+        if (!degradeNotified) {
+          degradeNotified = true
+          emitOperatorNotice({
+            severity: "warn",
+            source: "turn-indicator",
+            message: `turn indicator degraded: ${errMessage(e)}`,
+            hint: "spinner/token readout may be stale for the rest of the session",
+          })
+        }
       }
-      if (event.type === "output_progress") {
-        ind.updateUsage({ outputTokens: event.outputTokens, exact: event.exact })
-        return
-      }
-      if (event.type === "usage") {
-        ind.updateUsage({
-          inputTokens: event.inputTokens,
-          outputTokens: event.outputTokens,
-        })
-        // S3 — feed the reasoning-token split into the `/context` gauge holder.
-        // Conditional-spread so an ABSENT split (Anthropic / no-reasoning
-        // provider) forwards `{}` (exactOptionalPropertyTypes: we never assign
-        // an explicit `undefined`), while an explicit `0` rides through
-        // verbatim — the holder's own `!== undefined` guard then decides
-        // retention. No synthetic value is ever fabricated here.
-        usageObserver?.observeUsage(
-          event.reasoningTokens !== undefined ? { reasoningTokens: event.reasoningTokens } : {},
-        )
-      }
-    } catch {
-      // Intentional: an indicator failure must not surface as an emit error
-      // (TeeStream would otherwise track it as a degraded record).
-    }
-  },
-})
+    },
+  }
+}

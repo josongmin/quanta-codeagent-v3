@@ -663,8 +663,27 @@ export const composeSurfaceWires = (
       ? () => setup.mcpResourceCapture?.snapshot() ?? []
       : undefined
 
+  // Ticket 14 (§11.6) — the `/model` adapter wire, captured in a const so the
+  // WS-G (UUX-1-17) statusline hookup below can reach the adapter.
+  const modelWire = buildModelAdapterWire({
+    stickyStore: setup.runtimeContext.stickyModelStore(),
+    bootModel: setup.model,
+    planMode: setup.planMode,
+    candidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
+  })
+  // WS-G (UUX-1-17) — re-point the statusline's model source at the adapter's
+  // live `current()` (per-mode sync shadow) so a mid-session `/model` set
+  // paints on the next tick instead of the boot-frozen id.
+  const modelAdapterForStatus = modelWire.modelAdapter
+  if (modelAdapterForStatus !== undefined) {
+    setup.liveModelSource.source = () => modelAdapterForStatus.current()
+  }
+
   const slashCtx = buildReplSlashCtx({
-    skillsCb: buildSkillsCallback(setup.skillsConfig),
+    // WS-G (UUX-2-13) — thread the status pills sink so `/skills` and
+    // `/reload-skills` refresh the skills pill with the freshly-discovered
+    // inventory (previously the pill kept the boot snapshot forever).
+    skillsCb: buildSkillsCallback(setup.skillsConfig, setup.pills),
     idleMonitor: setup.idleMonitor,
     // A3 (jul-04) `/kb` — read-only accounting over the SAME store the tool writes
     // into. Omitted when the gate is off (byte-identical).
@@ -894,12 +913,7 @@ export const composeSurfaceWires = (
     // the boot model + retry candidates as the selectable id set. The mode-implicit
     // SET binding lives in `buildModelAdapterWire` (regression-pinned there).
     // Absent store ⇒ adapter omitted ⇒ `/model` prints "not wired".
-    ...buildModelAdapterWire({
-      stickyStore: setup.runtimeContext.stickyModelStore(),
-      bootModel: setup.model,
-      planMode: setup.planMode,
-      candidateIds: [...new Set([setup.model, ...retryCandidates.map((c) => c.id)])],
-    }),
+    ...modelWire,
     // B2 (jul-04) `/cron` — read the LATE-BOUND automation slash slot LIVE per
     // dispatch (the loop installs it via `setAutomationSlash` once the engine is
     // minted). Absent until installed ⇒ `/cron` prints "not wired".

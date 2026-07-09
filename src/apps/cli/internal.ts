@@ -6,6 +6,7 @@ import {
   resolvePersona,
 } from "@/agent"
 import { identityForToken } from "@/agent/identity"
+import { buildAsyncDeferredTools } from "@/host/runtime/agent-arg-builder/gated-tool-ports"
 import type { CredentialSource, LLMPort } from "@/llm"
 import { anyLspServerOnPath } from "@/lsp"
 import { Metrics, type StructuredLogger } from "@/observability"
@@ -50,7 +51,6 @@ import {
   pollDeferredTool,
   type Tool,
 } from "@/tool"
-import { buildAsyncDeferredTools } from "@/host/runtime/agent-arg-builder/gated-tool-ports"
 import { resolveGitBudget } from "@/tool/git"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
@@ -81,6 +81,7 @@ import {
 } from "./internal/mcp"
 import { createMarkdownPainter } from "./markdown-painter"
 import { buildCliElicitationPrompterFactory } from "./mcp-elicitation-prompter"
+import { createMcpHealthHolder } from "./mcp-health"
 import { isIndicatorEnabled } from "./turn-indicator"
 
 /**
@@ -618,7 +619,18 @@ export const loadFeatures = async (
   // store here. Test seams (`opts.mcpOAuthDeps`) inject a fake auth server /
   // browser flow / store dir; production omits them.
   const oauthProvider = resolveMcpOAuthProvider(mcpConfigs, opts.mcpOAuthDeps)
-  const mcpLoadOpts = buildMcpLoadOpts(slog, { autoRestart, inboundWiring, oauthProvider, opts })
+  // WS-G (UUX-6-22) — mint the live server-health registry ONLY when MCP is
+  // configured; the load callbacks (exit / load-error) write into it and the
+  // lifecycle pill re-reads it per flush (surface-mints→down-thread, mirrors
+  // mcpResourceCapture). No servers ⇒ undefined ⇒ callbacks not wired.
+  const mcpHealth = mcpConfigs.length > 0 ? createMcpHealthHolder() : undefined
+  const mcpLoadOpts = buildMcpLoadOpts(slog, {
+    autoRestart,
+    inboundWiring,
+    oauthProvider,
+    opts,
+    ...(mcpHealth !== undefined ? { mcpHealth } : {}),
+  })
   const {
     tools: mcpBridgedTools,
     clients: mcpClients,
@@ -696,6 +708,9 @@ export const loadFeatures = async (
     // B4 (jul-04) — forward the SAME capture holder the mcp resource tools write
     // into (undefined when the gate/handle absent ⇒ `/mcp-resources` "not wired").
     ...(mcpResourceCapture !== undefined ? { mcpResourceCapture } : {}),
+    // WS-G (UUX-6-22) — forward the SAME health registry the load callbacks
+    // write into so the lifecycle pill overlays live server status per flush.
+    ...(mcpHealth !== undefined ? { mcpHealth } : {}),
   }
 }
 

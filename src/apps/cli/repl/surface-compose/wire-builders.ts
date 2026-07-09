@@ -9,7 +9,7 @@ import {
   type SessionEnvelopeRecord,
   saveSessionById,
 } from "@/session"
-import { errMessage, gateOn, logger } from "@/shared"
+import { emitOperatorNotice, errMessage, gateOn, logger } from "@/shared"
 import type { SessionIoState } from "../../session-cmd"
 import type { SlashContext } from "../../slash-commands"
 import { buildModelAdapter } from "../ctx-adapters/model-adapter"
@@ -133,9 +133,12 @@ export const renderRetryEvent = (ev: StreamEvent): void => {
  *  lazy-imported so `@/session` is not pulled into the boot path for users
  *  who never type `/replay`. The composer un-wraps the {@link iterateSessionFile}
  *  `Result` shape into a bare `AsyncIterable<SessionEnvelopeRecord>` — decode
- *  errors are silently skipped (the projector inside `/inspect` surfaces
- *  warnings; `/replay` is a one-line-per-event view that simply omits the bad
- *  row). The resolver returns `undefined` when the path doesn't exist so the
+ *  errors are skipped (the projector inside `/inspect` surfaces detailed
+ *  warnings; `/replay` is a one-line-per-event view that omits the bad row)
+ *  but WS-G (UUX-1-27) no longer SILENTLY: the skips are counted and one warn
+ *  notice with the total lands on the operator-notice bus when the iteration
+ *  finishes, so a truncated/older-version file never replays as if complete.
+ *  The resolver returns `undefined` when the path doesn't exist so the
  *  command renders "session <id> not found" + exit 1. */
 export const buildReplaySlashState = (): ReplaySlashState => ({
   resolveSession: async (id: string): Promise<string | undefined> => {
@@ -147,8 +150,18 @@ export const buildReplaySlashState = (): ReplaySlashState => ({
   iterate: (path: string): AsyncIterable<SessionEnvelopeRecord> => {
     const inner = async function* (): AsyncIterable<SessionEnvelopeRecord> {
       const { iterateSessionFile } = await import("@/session")
+      let skipped = 0
       for await (const r of iterateSessionFile(path)) {
         if (r.ok) yield r.value
+        else skipped++
+      }
+      if (skipped > 0) {
+        emitOperatorNotice({
+          severity: "warn",
+          source: "/replay",
+          message: `skipped ${skipped} malformed session record${skipped === 1 ? "" : "s"}`,
+          hint: "the file may be truncated or from an older version; /inspect shows details",
+        })
       }
     }
     return inner()

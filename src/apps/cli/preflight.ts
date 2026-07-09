@@ -41,7 +41,7 @@ import {
   parsePatch,
 } from "@/patch"
 import type { ToolAction } from "@/permission"
-import { errMessage, gateOn } from "@/shared"
+import { emitOperatorNotice, errMessage, gateOn } from "@/shared"
 // The SAME matchers the `edit` tool runs — reused so a preview verdict can never
 // drift from the real apply. `@/tool/edit` is a library slice; `apps/cli` (the
 // entrypoint) is allowed to import it (the slice fence only blocks the reverse).
@@ -89,10 +89,36 @@ export const preflightApplyWarning = async (
       default:
         return undefined
     }
-  } catch {
-    // Best-effort: an unexpected internal failure must not surface mid-prompt.
+  } catch (e) {
+    // Best-effort: an unexpected internal failure must not surface mid-prompt
+    // (the collapse to `undefined` stays). WS-G (UUX-6-16) — but it must not
+    // be INVISIBLE: one latched warn per session so the operator knows the
+    // pre-flight preview is degraded, not silently vouching.
+    notePreflightInternalFailure(e)
     return undefined
   }
+}
+
+/** WS-G (UUX-6-16) — latched (once per session) internal-failure notice.
+ *  Latching lives at module level because the pre-flight is stateless and
+ *  invoked per approval prompt; a broken preview would otherwise warn on
+ *  every confirm. */
+let preflightFailureNotified = false
+
+const notePreflightInternalFailure = (e: unknown): void => {
+  if (preflightFailureNotified) return
+  preflightFailureNotified = true
+  emitOperatorNotice({
+    severity: "warn",
+    source: "preflight",
+    message: `approval pre-flight check failed internally: ${errMessage(e)}`,
+    hint: "previews are degraded this session; tools may still apply/fail normally",
+  })
+}
+
+/** Test hygiene — clear the once-per-session latch. */
+export const __resetPreflightFailureNoticeForTest = (): void => {
+  preflightFailureNotified = false
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -222,6 +248,9 @@ const preflightApplyPatch = async (
     ) {
       return `${WARN} apply_patch — will not cleanly apply: ${errMessage(e)}`
     }
+    // WS-G (UUX-6-16) — an unexpected internal error is a preview bug, not an
+    // apply verdict; the verdict stays silent but the degrade is latched once.
+    notePreflightInternalFailure(e)
     return undefined
   }
 }

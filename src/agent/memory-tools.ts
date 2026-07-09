@@ -7,7 +7,7 @@ import {
   type MemoryQuery,
   type PersistentStorePort,
 } from "@/memory"
-import { errMessage } from "@/shared"
+import { emitOperatorNotice, errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 /**
@@ -297,12 +297,27 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
   const mode: ThreadMemoryMode = deps.threadMode ?? "enabled"
   const recallDisabled = mode === "disabled"
   const writesDisabled = mode === "disabled" || mode === "read-only"
+  // WS-G (UUX-5-11) — a blocked write's typed `ok:false` surfaces to the MODEL
+  // only; the OPERATOR saw nothing (onArm goes to slog.debug). Emit one
+  // LATCHED warn per memoryTools instance on the first block — a model
+  // retry-looping on a blocked write must not spam the terminal.
+  let blockNotified = false
+  const noteBlocked = (reason: string): void => {
+    if (blockNotified) return
+    blockNotified = true
+    emitOperatorNotice({
+      severity: "warn",
+      source: "memory",
+      message: reason,
+      hint: "memory writes are being refused this session",
+    })
+  }
   /** Returns a typed-block reason iff a write must be refused, else undefined.
    *  jul-03 B3: evaluates TWO independent arms — the LOCAL cost fraction and the
    *  REAL provider rate-limit window — emitting arm-state telemetry for each so
    *  the guard is demonstrably LIVE (not a latent inert config). The provider
    *  arm fails OPEN when its tap returns `undefined` (no snapshot yet). */
-  const writeBlockReason = (verb: string): string | undefined => {
+  const writeBlockReasonInner = (verb: string): string | undefined => {
     if (writesDisabled) return `${verb} blocked: memory mode is '${mode}' for this thread.`
     const guard = deps.writeGuard
     if (!guard) return undefined
@@ -335,6 +350,13 @@ export const memoryTools = (deps: MemoryToolsDeps): Tool[] => {
       return `${verb} skipped: ${provider.toFixed(0)}% provider rate-limit remaining < ${threshold}% threshold.`
     }
     return undefined
+  }
+  /** WS-G (UUX-5-11) — same verdict, plus the latched operator notice on the
+   *  FIRST block (every block path funnels through here). */
+  const writeBlockReason = (verb: string): string | undefined => {
+    const reason = writeBlockReasonInner(verb)
+    if (reason !== undefined) noteBlocked(reason)
+    return reason
   }
   const memorySearch: Tool<SearchInput> = {
     name: "memory_search",

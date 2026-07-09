@@ -106,6 +106,12 @@ export {
 } from "./lsp-grounding-receipt"
 export type { NoThrowErrorSink } from "./no-throw-dispatch"
 export { dispatchNoThrow, dispatchNoThrowWith, notifyAllNoThrow } from "./no-throw-dispatch"
+export type { OperatorNotice, OperatorNoticeSink } from "./operator-notice"
+export {
+  __resetOperatorNoticeSinkForTest,
+  emitOperatorNotice,
+  installOperatorNoticeSink,
+} from "./operator-notice"
 export { omitUndef } from "./optional"
 export { normalizePublicIssueText, stripHtmlComments } from "./public-issue-text"
 export { quantaHomeDir, quantaHomeDirFrom, quantaHomePath } from "./quanta-home"

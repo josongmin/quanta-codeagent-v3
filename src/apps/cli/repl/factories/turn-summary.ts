@@ -3,6 +3,7 @@ import {
   defaultMetricsRegistry,
   type MetricsRegistry,
 } from "@/observability/metrics/index"
+import { emitOperatorNotice } from "@/shared"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { createTurnSummary, type TurnSummaryCollector } from "../../turn-summary"
@@ -69,6 +70,18 @@ export const buildTurnSummaryAndStream = (
     // no-tee path).
     return { collector, stream: appendDecisionCounterSink(stream, decisionMetrics) }
   }
-  const teed = new TeeStream([stream, collector.asStreamPort()])
+  // WS-G (UUX-1-18) — this is the INNERMOST tee wrapping the recorder leg on
+  // the default-ON TTY path, so a silently-swallowed recorder/collector
+  // failure latches its one operator notice here.
+  const teed = new TeeStream([stream, collector.asStreamPort()], {
+    onFirstDegrade: (record) => {
+      emitOperatorNotice({
+        severity: "warn",
+        source: "stream",
+        message: `a turn-stream sink degraded: ${record.reason}`,
+        hint: "some events may be missing from the recorder or UX chrome",
+      })
+    },
+  })
   return { collector, stream: appendDecisionCounterSink(teed, decisionMetrics) }
 }

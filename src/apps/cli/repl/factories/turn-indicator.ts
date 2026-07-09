@@ -1,3 +1,4 @@
+import { emitOperatorNotice } from "@/shared"
 import type { StreamPort } from "@/stream"
 import { TeeStream } from "@/stream"
 import { buildRatelimitNoticePort } from "../../ratelimit-notice"
@@ -51,5 +52,20 @@ export const buildTurnIndicatorAndStream = (
   }
 
   if (extraPorts.length === 0) return { indicator, turnStream: stream }
-  return { indicator, turnStream: new TeeStream([stream, ...extraPorts]) }
+  // WS-G (UUX-1-18) — a silently-swallowed port failure (recorder leg OR a UX
+  // port) now produces ONE latched operator notice instead of an invisible
+  // `degraded()` record nobody reads on this surface.
+  return {
+    indicator,
+    turnStream: new TeeStream([stream, ...extraPorts], {
+      onFirstDegrade: (record) => {
+        emitOperatorNotice({
+          severity: "warn",
+          source: "stream",
+          message: `a turn-stream sink degraded: ${record.reason}`,
+          hint: "some events may be missing from the recorder or UX chrome",
+        })
+      },
+    }),
+  }
 }

@@ -23,6 +23,7 @@
  * directly — all timing + spawning lives behind the injected exec port.
  */
 
+import { emitOperatorNotice } from "@/shared"
 import { matchTool } from "../tool-matchers"
 import { mapClaudeEvent } from "./gate"
 import type {
@@ -90,7 +91,10 @@ const selectApproved = async (
       out.push(b)
       continue
     }
-    if (review === undefined) continue
+    if (review === undefined) {
+      noteHeldHook(b)
+      continue
+    }
     let approved = false
     try {
       approved = await review.isApproved(b)
@@ -98,8 +102,34 @@ const selectApproved = async (
       approved = false
     }
     if (approved) out.push(b)
+    else noteHeldHook(b)
   }
   return out
+}
+
+/** WS-G (UUX-4-20) — a HELD (review-gated, unapproved) binding used to be
+ *  silently skipped: correct fail-closed security, but the operator never
+ *  learned their configured hook did not fire. One LATCHED warn per binding
+ *  (keyed by event+command — a hook firing on every tool call must not spam).
+ *  Module-level latch: the runner is stateless by design and the notice is
+ *  session-chrome, not a security decision. */
+const notifiedHeldHooks = new Set<string>()
+
+const noteHeldHook = (binding: CommandHookBinding): void => {
+  const key = `${binding.event}:${binding.command}`
+  if (notifiedHeldHooks.has(key)) return
+  notifiedHeldHooks.add(key)
+  emitOperatorNotice({
+    severity: "warn",
+    source: "command-hooks",
+    message: `hook held (needs review, not approved): ${binding.command}`,
+    hint: "it will not run until approved via /hooks",
+  })
+}
+
+/** Test hygiene — clear the held-hook notice latch between tests. */
+export const __resetHeldHookNoticesForTest = (): void => {
+  notifiedHeldHooks.clear()
 }
 
 /** True iff this binding applies to this event. Non-tool events ignore the
