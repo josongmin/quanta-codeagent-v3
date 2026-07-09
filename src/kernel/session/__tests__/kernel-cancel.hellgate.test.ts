@@ -590,6 +590,88 @@ describe("ALBB-04 P2 regression — return-aborted must SETTLE accumulated state
     expect(result.transcriptMessages?.some((m) => m.role === "assistant")).toBe(true)
   })
 
+  test("(d) RACED completed+aborted — a host RETURNING completed while the signal fired mid-turn routes to turn.completed (NOT the cancel terminal), committing its messages", async () => {
+    // classifyTerminal was narrowed to key ONLY on `outcome.reason === "aborted"`
+    // (dropping the `|| args.aborted` disjunction). This pins that narrowing: a
+    // turn whose signal aborts mid-flight but whose host still RETURNS
+    // `reason:"completed"` (a normal completion racing a late abort) must settle
+    // as a COMPLETION — commit its messages, emit turn.completed — NOT be
+    // re-routed to the cancel terminal (which would DISCARD the messages).
+    // RED-on-injection: restoring `|| args.aborted` re-routes this to
+    // onTurnAborted ⇒ `turn.completed` absent + surfaced message lost.
+    const { state, eventLog } = await seedRunningState("cx-raced")
+    const surfacedMessages: readonly Message[] = [
+      { role: "user", content: [{ type: "text", text: "ping" }] },
+      { role: "assistant", content: [{ type: "text", text: "completed-despite-race" }] },
+    ]
+    let resolveTurn: (() => void) | undefined
+    const turnGate = new Promise<void>((r) => {
+      resolveTurn = r
+    })
+    let observedSignal: AbortSignal | undefined
+    const host: SessionHost = {
+      describe: () => ({
+        sessionId: "cx-raced",
+        permissionMode: "default",
+        capabilityManifest: manifest,
+      }),
+      runTurn: async ({ signal }) => {
+        observedSignal = signal
+        await turnGate // park so a concurrent cancel aborts the signal mid-flight
+        // The agent loop already produced a COMPLETED result before the abort
+        // landed — the host surfaces it verbatim (reason stays "completed").
+        return {
+          outcome: {
+            reason: "completed",
+            turns: 1,
+            messages: surfacedMessages,
+          } as AgentOutcome,
+          messages: surfacedMessages,
+        }
+      },
+      close: async () => undefined,
+    }
+
+    const turnPromise = dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-raced",
+        commandId: "run",
+        issuedAt: clock.now().toISOString(),
+        expectedRevision: state.revision,
+        type: "turn.run",
+      },
+      { clock, eventLog, host },
+    )
+    await new Promise<void>((r) => setTimeout(r, 5))
+    expect(observedSignal?.aborted).toBe(false)
+    // Abort the in-flight signal mid-turn (the "race").
+    await dispatchSessionCommand(
+      state,
+      {
+        sessionId: "cx-raced",
+        commandId: "cancel",
+        issuedAt: clock.now().toISOString(),
+        type: "turn.cancel",
+      },
+      { clock, eventLog, host },
+    )
+    expect(observedSignal?.aborted).toBe(true)
+    resolveTurn?.()
+    const result = await turnPromise
+
+    // Narrowed classifier: reason "completed" wins over the raced abort.
+    const types = result.events.map((e) => e.type)
+    expect(types).toContain("turn.completed")
+    expect(types).not.toContain("turn.aborted")
+    expect(result.state.lastOutcomeReason).toBe("completed")
+    // The completed turn's messages are COMMITTED (not discarded by a cancel route).
+    const hasSurfaced = result.state.messages.some(
+      (m) => m.role === "assistant" && JSON.stringify(m.content).includes("completed-despite-race"),
+    )
+    expect(hasSurfaced).toBe(true)
+  })
+
   test("(c') throw-abort path (no messages) stays correct — no message loss, distinct terminal", async () => {
     // The throw-abort path carries NO result.messages, so there is nothing to
     // lose. It must remain a clean `turn.aborted` that PRESERVES the pre-turn
