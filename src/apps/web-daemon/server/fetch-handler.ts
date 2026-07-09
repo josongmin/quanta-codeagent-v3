@@ -16,7 +16,12 @@
 import type { Server } from "bun"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { handleAuthLoginStart, handleAuthLogout, handleAuthStatus } from "../auth-routes"
+import {
+  handleAuthLoginAttemptStatus,
+  handleAuthLoginStart,
+  handleAuthLogout,
+  handleAuthStatus,
+} from "../auth-routes"
 import {
   buildWebKnobCatalog,
   catalogByGroup,
@@ -274,6 +279,11 @@ const tryMutationRoutes = (url: URL, req: Request, requireAuth: RequireAuth): Ro
     const denied = requireAuth(url, req)
     if (denied !== null) return denied
     if (url.pathname === "/auth/login" && req.method === "POST") return handleAuthLoginStart()
+    // UUX-4-13 — login-attempt completion readback for the frontend's bounded
+    // poll (login success/failure used to be logger-only).
+    if (url.pathname === "/auth/login/status" && req.method === "GET") {
+      return handleAuthLoginAttemptStatus(url)
+    }
     if (url.pathname === "/auth/logout" && req.method === "POST") return handleAuthLogout()
     if (url.pathname === "/auth/status" && req.method === "GET") return handleAuthStatus()
     return jsonResponse(404, { error: "unknown_auth_route", path: url.pathname })

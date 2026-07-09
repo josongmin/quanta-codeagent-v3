@@ -7,12 +7,19 @@ import { createWebAskUserPort } from "./web-ask-user-port"
  *  scripted outcome — lets us assert the DOWN-map (prompt/choices) and the
  *  UP-map (answer → typed value) in one place, no WS/daemon needed. */
 const fakeRequester = (outcome: UserInputOutcome) => {
-  const seen: { promptId: string; prompt: string; choices?: readonly string[]; multiline?: boolean }[] = []
+  const seen: {
+    promptId: string
+    prompt: string
+    choices?: readonly string[]
+    multiline?: boolean
+    choiceDetails?: readonly { label: string; description?: string }[]
+  }[] = []
   const requester = async (req: {
     promptId: string
     prompt: string
     choices?: readonly string[]
     multiline?: boolean
+    choiceDetails?: readonly { label: string; description?: string }[]
   }): Promise<UserInputOutcome> => {
     seen.push(req)
     return outcome
@@ -33,10 +40,49 @@ describe("createWebAskUserPort — structured ask_user over the request_user_inp
       options: ["merge", { label: "rebase", description: "replay commits", preview: "git rebase" }],
     }
     const res = await port.ask(req)
-    // DOWN: structured chip flattened to its label in choices.
-    expect(seen[0]).toEqual({ promptId: "id-1", prompt: "How to integrate?", choices: ["merge", "rebase"] })
+    // DOWN (UUX-2-17): `choices` stays the label-only pickable list (label-only
+    // clients keep working) AND the rich structure rides alongside in
+    // `choiceDetails` so the UI can render description subtext.
+    expect(seen[0]).toEqual({
+      promptId: "id-1",
+      prompt: "How to integrate?",
+      choices: ["merge", "rebase"],
+      choiceDetails: [{ label: "merge" }, { label: "rebase", description: "replay commits" }],
+    })
     // UP: chosen label is the value.
     expect(res).toEqual({ ok: true, value: "rebase" })
+  })
+
+  // UUX-2-17 (jul-10 W4) — thread option structure through instead of
+  // flattening to label-only chips; stay byte-identical when there is no
+  // structure to thread.
+  describe("choiceDetails threading (UUX-2-17)", () => {
+    it("label-only options ⇒ NO choiceDetails field at all (wire byte-identical)", async () => {
+      const { requester, seen } = fakeRequester(answer("merge"))
+      const port = createWebAskUserPort(requester, () => "id-2")
+      await port.ask({ kind: "select", prompt: "p", options: ["merge", "rebase"] })
+      expect(seen[0]).toEqual({ promptId: "id-2", prompt: "p", choices: ["merge", "rebase"] })
+      expect(Object.hasOwn(seen[0] ?? {}, "choiceDetails")).toBe(false)
+    })
+
+    it("object options WITHOUT descriptions ⇒ still no choiceDetails (nothing to show)", async () => {
+      const { requester, seen } = fakeRequester(answer("merge"))
+      const port = createWebAskUserPort(requester, () => "id-3")
+      await port.ask({ kind: "select", prompt: "p", options: [{ label: "merge" }, "rebase"] })
+      expect(Object.hasOwn(seen[0] ?? {}, "choiceDetails")).toBe(false)
+    })
+
+    it("multiselect threads choiceDetails too (labels stay the pickable values)", async () => {
+      const { requester, seen } = fakeRequester(answer("a"))
+      const port = createWebAskUserPort(requester, () => "id-4")
+      await port.ask({
+        kind: "multiselect",
+        prompt: "pick",
+        options: [{ label: "a", description: "first" }, "b"],
+      })
+      expect(seen[0]?.choices).toEqual(["a", "b"])
+      expect(seen[0]?.choiceDetails).toEqual([{ label: "a", description: "first" }, { label: "b" }])
+    })
   })
 
   it("select: an OFF-MENU answer is invalid-input (fixed choice)", async () => {

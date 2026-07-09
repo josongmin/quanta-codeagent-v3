@@ -376,7 +376,11 @@ export const buildDefaultSlashCommands = (deps: {
     {
       slug: "clear",
       aliases: ["c", "reset"],
-      description: "Clear the visible transcript (local only — session memory intact)",
+      // UUX-2-10 — say EXACTLY what `clearTranscript` (resetTranscript) does:
+      // it resets THIS tab's transcript reducer only. The agent's context and
+      // the persisted event log are untouched, so a reload re-hydrates the
+      // full history (App.tsx `hydrateTranscript`).
+      description: "Clear this tab's transcript view (agent context kept; reload restores it)",
       kind: "local",
       action: () => {
         deps.clearTranscript()
@@ -500,7 +504,8 @@ export const buildDefaultSlashCommands = (deps: {
     },
     // CLI builtins with no web route yet (honest `unwired`) ─────────
     unwired("effort", "Show / set reasoning effort tier"),
-    unwired("plan", "Show / edit the current plan"),
+    // UUX-5-14 — /plan is SHOW-only on every surface; no "edit" overpromise.
+    unwired("plan", "Show the current plan"),
     unwired("state", "Inspect agent + session state"),
     unwired("working-state", "Working-state panel (active files / tools)"),
     unwired("branches", "List speculative branch-search results"),

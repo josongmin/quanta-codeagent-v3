@@ -7,10 +7,10 @@
  * structured {@link AskUserRequest} DOWN to that shape and maps the returned
  * free-text / chosen-label answer BACK to the typed {@link AskUserResult}.
  *
- * TRADE-OFF (documented, not hidden): rich chip `description`/`preview` flatten to
- * the option LABEL (the pickable value). A follow-up can add a rich structured
- * agent-state frame + card renderer; THIS makes `ask_user` work on web today over
- * the channel that already exists.
+ * UUX-2-17 (jul-10 W4): `choices` stays the label-only pickable-value list
+ * (label-only clients keep working), and option structure now rides ALONGSIDE
+ * as optional `choiceDetails` (label + description) so the browser chips can
+ * render description subtext. Remaining documented drop: `preview`.
  *
  * DEPENDENCY: needs a live `UserInputRequester` (the daemon's web user-input port,
  * gated on `QUANTA_WEB_AGENT_STATE`). When absent the composition root wires no
@@ -21,11 +21,27 @@
  * — never a throw (a hostile answer must not strand the agent).
  */
 
-import type { UserInputRequester } from "@/tool"
+import type { PlanInputChoiceDetail } from "@/protocol/agent-state"
 import type { AskUserOption, AskUserPort, AskUserRequest, AskUserResult } from "@/tool/ask-user"
+import type { WebUserInputRequester } from "./web-user-input-port"
 
 /** The pickable value of an option — the bare string, or the chip's `label`. */
 const optionLabel = (o: AskUserOption): string => (typeof o === "string" ? o : o.label)
+
+/** UUX-2-17 — per-option rich detail (label + description subtext). Returns
+ *  `undefined` when NO option carries a description, so the request (and the
+ *  wire frame downstream) stays byte-identical for label-only option sets.
+ *  (`preview` remains a documented drop — the chips render label+description.) */
+const optionDetails = (
+  options: readonly AskUserOption[],
+): readonly PlanInputChoiceDetail[] | undefined => {
+  const details = options.map((o) =>
+    typeof o === "string"
+      ? { label: o }
+      : { label: o.label, ...(o.description !== undefined ? { description: o.description } : {}) },
+  )
+  return details.some((d) => d.description !== undefined) ? details : undefined
+}
 
 /** Parse a free-text boolean answer; `null` when it is neither truthy nor falsy. */
 const parseBoolean = (text: string): boolean | null => {
@@ -41,7 +57,7 @@ const parseBoolean = (text: string): boolean | null => {
  * generated `promptId` (default: a UUID).
  */
 export const createWebAskUserPort = (
-  requester: UserInputRequester,
+  requester: WebUserInputRequester,
   idFactory: () => string = () => crypto.randomUUID(),
 ): AskUserPort => ({
   async ask(req: AskUserRequest): Promise<AskUserResult> {
@@ -53,6 +69,10 @@ export const createWebAskUserPort = (
       req.kind === "select" || req.kind === "multiselect"
         ? req.options.map(optionLabel)
         : undefined
+    // UUX-2-17 — the rich structure rides ALONGSIDE the label-only `choices`
+    // (which stays the pickable-value contract for label-only clients).
+    const details =
+      req.kind === "select" || req.kind === "multiselect" ? optionDetails(req.options) : undefined
     // Multiselect degrades to a comma-separated free-text over the single-answer
     // channel — the instruction makes that explicit to the user.
     const prompt = req.kind === "multiselect" ? `${req.prompt} (comma-separated)` : req.prompt
@@ -60,6 +80,7 @@ export const createWebAskUserPort = (
       promptId: idFactory(),
       prompt,
       ...(labels !== undefined ? { choices: labels } : {}),
+      ...(details !== undefined ? { choiceDetails: details } : {}),
       ...(req.kind === "string" ? { multiline: true } : {}),
     })
     if (outcome.decision === "cancelled") return { ok: false, reason: "cancelled" }

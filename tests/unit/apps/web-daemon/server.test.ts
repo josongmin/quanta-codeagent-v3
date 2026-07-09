@@ -366,6 +366,25 @@ describe("web daemon end-to-end", () => {
     expect(body3.sessions).toBe(0)
   })
 
+  // UUX-4-13 (jul-10 W4) — route-registration wiring proof: the login-attempt
+  // status route must dispatch to `handleAuthLoginAttemptStatus`, not fall
+  // through to the `unknown_auth_route` 404. (400 missing_attempt / 404
+  // unknown_attempt are the handler's OWN responses — an unregistered route
+  // would answer 404 `unknown_auth_route` for both.)
+  test("GET /auth/login/status is wired: 400 without ?attempt, 404 unknown_attempt with one", async () => {
+    const { factory } = createStubRuntimeFactory()
+    const handle = await main({ port: 0, bind: "127.0.0.1", runtimeFactory: factory })
+    handles.push(handle)
+
+    const missing = await fetch(`http://127.0.0.1:${handle.port}/auth/login/status`)
+    expect(missing.status).toBe(400)
+    expect(((await missing.json()) as { error?: string }).error).toBe("missing_attempt")
+
+    const unknown = await fetch(`http://127.0.0.1:${handle.port}/auth/login/status?attempt=ghost`)
+    expect(unknown.status).toBe(404)
+    expect(((await unknown.json()) as { error?: string }).error).toBe("unknown_attempt")
+  })
+
   test("/threads + /threads/:id/events expose persisted threads for transcript hydration", async () => {
     // Isolate the SQLite file to a tmp dir so the test doesn't read/write the
     // user's real `~/.quanta/web-daemon/threads.db`.

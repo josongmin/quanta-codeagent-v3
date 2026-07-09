@@ -76,11 +76,39 @@ describe("breakdownToUsageBarProps", () => {
     expect(props.segments[1]?.value).toBe(0)
   })
 
-  it("max<=0 (unknown window) ⇒ fills against total + label degrades to '?' (no false 0% Full)", () => {
-    const props = breakdownToUsageBarProps(msg({ total: 3000, max: 0 }))
-    expect(props.total).toBe(3000)
-    expect(props.topLeftLabel).toBe("? Full")
-    expect(props.topLeftLabel).not.toBe("0% Full")
-    expect(props.topRightLabel).toBe("3.0k / ? Tokens")
+  // UUX-4-25 (jul-10 W4) — the old shape filled the bar against `total`, so an
+  // UNKNOWN window rendered a visually FULL bar + "? Full": a false "context
+  // exhausted" alarm. Unknown max ⇒ INDETERMINATE: no fill at all (empty
+  // track), honest "window unknown" labels. (Same posture as the `/context`
+  // text gauge: `asciiBar(0)` + "(window unknown)" in slash-context-gauge.ts.)
+  describe("max<=0 (unknown window) ⇒ indeterminate bar, honest label (UUX-4-25)", () => {
+    it("renders NO fill: zero segments against a positive track total", () => {
+      const props = breakdownToUsageBarProps(msg({ total: 3000, max: 0 }))
+      const filled = props.segments.reduce((a, s) => a + s.value, 0)
+      expect(filled).toBe(0)
+      // The track itself must still render (UsageBar remainder needs total>0).
+      expect(props.total).toBeGreaterThan(0)
+    })
+
+    it("labels are honest: 'Window unknown' + used tokens, never '? Full' / a '?' max", () => {
+      const props = breakdownToUsageBarProps(msg({ total: 3000, max: 0 }))
+      expect(props.topLeftLabel).toBe("Window unknown")
+      expect(props.topRightLabel).toBe("3.0k Tokens used")
+      expect(props.topLeftLabel).not.toContain("Full")
+    })
+
+    it("negative max is the same unknown-window arm as 0", () => {
+      const props = breakdownToUsageBarProps(msg({ total: 3000, max: -1 }))
+      const filled = props.segments.reduce((a, s) => a + s.value, 0)
+      expect(filled).toBe(0)
+      expect(props.topLeftLabel).toBe("Window unknown")
+    })
+
+    it("a KNOWN window is untouched by the unknown-window arm (paired control)", () => {
+      const props = breakdownToUsageBarProps(msg({ total: 6400, max: 10000 }))
+      expect(props.segments.length).toBe(2)
+      expect(props.topLeftLabel).toBe("64% Full")
+      expect(props.topRightLabel).toBe("6.4k / 10.0k Tokens")
+    })
   })
 })

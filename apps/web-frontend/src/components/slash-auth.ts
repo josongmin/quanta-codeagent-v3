@@ -22,6 +22,117 @@ export interface AuthEndpoint {
   readonly token?: string
   /** Optional toast hook so the host page can surface success / errors. */
   readonly onResult?: (msg: string, kind: "ok" | "err") => void
+  /** UUX-4-13 — tuning/test seam for the login-completion poll. Production
+   *  callers omit it (2s interval, 120s bound). */
+  readonly loginPollOptions?: LoginPollOptions
+}
+
+/* ------------------------------------------------------------------ */
+/* UUX-4-13 — bounded login-completion poll                            */
+/* ------------------------------------------------------------------ */
+
+/** Terminal outcome of one bounded login-completion poll. */
+export type LoginPollOutcome =
+  | { readonly kind: "ok"; readonly planType: string | null }
+  | { readonly kind: "failed"; readonly error: string }
+  /** The bound elapsed while the daemon still reported `pending`. */
+  | { readonly kind: "timeout" }
+  /** The daemon does not know the attempt (restarted / evicted / pre-UUX-4-13
+   *  daemon route) — completion is unknowable, stop polling. */
+  | { readonly kind: "unsupported" }
+
+export interface LoginPollOptions {
+  /** Delay between polls. Default 2000ms. */
+  readonly intervalMs?: number
+  /** Hard bound on total polling time. Default 120000ms. */
+  readonly timeoutMs?: number
+  readonly fetchImpl?: typeof fetch
+  readonly sleep?: (ms: number) => Promise<void>
+}
+
+const LOGIN_POLL_INTERVAL_MS = 2_000
+const LOGIN_POLL_TIMEOUT_MS = 120_000
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/** Interpret one `/auth/login/status` response: a TERMINAL outcome, or `null`
+ *  (pending / transient non-OK / unrecognised body ⇒ keep polling). */
+const interpretLoginStatus = async (res: Response): Promise<LoginPollOutcome | null> => {
+  if (res.status === 404) return { kind: "unsupported" }
+  if (!res.ok) return null
+  const json = (await res.json()) as { state?: string; planType?: string | null; error?: string }
+  if (json.state === "ok") return { kind: "ok", planType: json.planType ?? null }
+  if (json.state === "failed") return { kind: "failed", error: json.error ?? "unknown error" }
+  return null
+}
+
+/**
+ * Poll `GET /auth/login/status?attempt=<id>` until the attempt leaves
+ * `pending`, the daemon disowns it (404 ⇒ `unsupported`), or `timeoutMs`
+ * elapses. BOUNDED by construction: the loop accumulates `intervalMs` per
+ * iteration and stops at the deadline — a perpetual `pending` (user never
+ * finishes the browser flow) ends as `timeout`, never an eternal loop.
+ * Transient network errors are tolerated until the bound.
+ */
+export const pollLoginCompletion = async (
+  ep: AuthEndpoint,
+  attemptId: string,
+  opts: LoginPollOptions = {},
+): Promise<LoginPollOutcome> => {
+  const intervalMs = Math.max(1, opts.intervalMs ?? LOGIN_POLL_INTERVAL_MS)
+  const timeoutMs = opts.timeoutMs ?? LOGIN_POLL_TIMEOUT_MS
+  const fetchImpl = opts.fetchImpl ?? fetch
+  const sleep = opts.sleep ?? defaultSleep
+  const statusUrl = `${baseUrl(ep)}/auth/login/status?attempt=${encodeURIComponent(attemptId)}`
+  for (let elapsed = 0; elapsed < timeoutMs; elapsed += intervalMs) {
+    try {
+      const res = await fetchImpl(statusUrl, { method: "GET", headers: authHeaders(ep) })
+      const terminal = await interpretLoginStatus(res)
+      if (terminal !== null) return terminal
+    } catch {
+      // Transient network error — keep polling until the bound.
+    }
+    await sleep(intervalMs)
+  }
+  return { kind: "timeout" }
+}
+
+/**
+ * Map a poll outcome onto the transcript (`onResult`). Split from the poll so
+ * the copy is unit-pinned; `timeoutMs` feeds the honest "after Ns" wording.
+ */
+export const reportLoginCompletion = (
+  outcome: LoginPollOutcome,
+  onResult: (msg: string, kind: "ok" | "err") => void,
+  timeoutMs: number,
+): void => {
+  switch (outcome.kind) {
+    case "ok":
+      onResult(`login complete — plan=${outcome.planType ?? "?"}`, "ok")
+      return
+    case "failed":
+      onResult(`login failed: ${outcome.error}`, "err")
+      return
+    case "timeout":
+      onResult(
+        `login not confirmed after ${Math.round(timeoutMs / 1000)}s — run /whoami to check`,
+        "err",
+      )
+      return
+    case "unsupported":
+      onResult("login status unknown (daemon restarted?) — run /whoami to check", "err")
+      return
+  }
+}
+
+/** Fire-and-forget completion watch for one login attempt (UUX-4-13). The
+ *  slash action returns immediately (the composer must not block for 2min);
+ *  the terminal outcome lands in the transcript when it arrives. */
+const watchLoginCompletion = (ep: AuthEndpoint, attemptId: string): void => {
+  const timeoutMs = ep.loginPollOptions?.timeoutMs ?? LOGIN_POLL_TIMEOUT_MS
+  void pollLoginCompletion(ep, attemptId, ep.loginPollOptions ?? {}).then((outcome) => {
+    reportLoginCompletion(outcome, (msg, kind) => ep.onResult?.(msg, kind), timeoutMs)
+  })
 }
 
 const authHeaders = (ep: AuthEndpoint): Record<string, string> => ({
@@ -74,7 +185,8 @@ const openExternalAuthUrl = async (url: string, preOpened: Window | null): Promi
   // Last-ditch: try a synchronous-ish window.open. In a normal browser
   // this will be popup-blocked because we're past an `await`; in Tauri
   // it's a silent no-op. Caller should surface the URL so the user can
-  // copy it manually.
+  // copy it manually. (Guarded for the node test env — no `window` there.)
+  if (typeof window === "undefined") return false
   const w = window.open(url, "_blank", "noopener,noreferrer")
   return w !== null
 }
@@ -92,7 +204,10 @@ export const buildAuthSlashCommands = (ep: AuthEndpoint): readonly SlashCommand[
       // the silent "browser opened — but nothing happened" bug). For
       // Tauri we'll just close this scratch tab and route through Rust.
       const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-      const preOpened = isTauri ? null : window.open("about:blank", "_blank", "noopener,noreferrer")
+      const preOpened =
+        isTauri || typeof window === "undefined"
+          ? null
+          : window.open("about:blank", "_blank", "noopener,noreferrer")
       try {
         const res = await fetch(`${baseUrl(ep)}/auth/login`, {
           method: "POST",
@@ -101,6 +216,7 @@ export const buildAuthSlashCommands = (ep: AuthEndpoint): readonly SlashCommand[
         })
         const json = (await res.json()) as {
           authorizeUrl?: string
+          attemptId?: string
           error?: string
           hint?: string
         }
@@ -123,6 +239,13 @@ export const buildAuthSlashCommands = (ep: AuthEndpoint): readonly SlashCommand[
             `browser open blocked — paste this URL manually: ${json.authorizeUrl}`,
             "err",
           )
+        }
+        // UUX-4-13 — the daemon now hands back an attemptId: watch it
+        // (bounded) and report the completion into the transcript. Even a
+        // blocked popup keeps the watch — the user can paste the URL and
+        // still finish. Old daemons (no attemptId) keep the old silence.
+        if (typeof json.attemptId === "string" && json.attemptId.length > 0) {
+          watchLoginCompletion(ep, json.attemptId)
         }
       } catch (error) {
         preOpened?.close()

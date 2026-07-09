@@ -14,7 +14,7 @@
  * affordance: the surface is byte-identical to every pre-ADR-0512 approval.
  */
 
-import { memo, useState } from "react"
+import { memo, useRef, useState } from "react"
 import type { ApprovalScopeContext } from "../types/protocol"
 
 /** The minimal approval shape the card consumes — a subset of
@@ -75,17 +75,55 @@ const escalationDecisionFor = (
   return { decision: "deny", option }
 }
 
+/** UUX-2-18 — the inline validation shown when "Deny + steer" is clicked with
+ *  an empty steer box. Plain "Deny" stays the no-text escape hatch. */
+const STEER_REQUIRED_MESSAGE = "steer text required (or choose Deny)"
+
+/** UUX-2-18 — what ONE escalation-button click resolves to. The old shape let
+ *  an empty-steer `deny_and_steer` silently degrade to a plain deny; here that
+ *  case is a distinct `steer-required` arm the UI must surface (keep the user
+ *  in the steer input), so the silent degrade is unrepresentable. */
+export type EscalationClickResult =
+  | { readonly kind: "dispatch"; readonly decision: EscalationDecision }
+  | { readonly kind: "steer-required"; readonly message: string }
+
+/** Pure click-resolution (exposed for the node-env unit contract). */
+const resolveEscalationClick = (
+  approvalId: string,
+  option: EscalationOption,
+  steer?: string,
+): EscalationClickResult => {
+  if (option === "deny_and_steer" && (steer === undefined || steer.trim().length === 0)) {
+    return { kind: "steer-required", message: STEER_REQUIRED_MESSAGE }
+  }
+  return { kind: "dispatch", decision: { approvalId, ...escalationDecisionFor(option, steer) } }
+}
+
 /** Pure click-builder so the verb→`approval.respond` wiring is testable in a
- *  node env without a DOM. */
+ *  node env without a DOM. `onSteerRequired` is the UUX-2-18 arm: invoked (and
+ *  `onDecision` NOT invoked) when `deny_and_steer` arrives with no steer text. */
 const buildDecisionHandler =
-  (approvalId: string, onDecision: (d: EscalationDecision) => void) =>
+  (
+    approvalId: string,
+    onDecision: (d: EscalationDecision) => void,
+    onSteerRequired?: (message: string) => void,
+  ) =>
   (option: EscalationOption, steer?: string): void => {
-    onDecision({ approvalId, ...escalationDecisionFor(option, steer) })
+    const result = resolveEscalationClick(approvalId, option, steer)
+    if (result.kind === "steer-required") {
+      onSteerRequired?.(result.message)
+      return
+    }
+    onDecision(result.decision)
   }
 
 export interface EscalationCardProps {
   readonly approval: EscalationApproval
   readonly onDecision: (decision: EscalationDecision) => void
+  /** SSR test seam (mirrors ThreadPicker's `initialSnapshot`): static markup
+   *  cannot fire click handlers, so tests pin the steer-required rendering by
+   *  seeding the error state. Production callers omit it. */
+  readonly initialSteerError?: string
 }
 
 const RiskBadge = ({ risk }: { risk: ApprovalScopeContext["risk"] }): JSX.Element => {
@@ -135,13 +173,33 @@ const PlainApproval = memo(
   ),
 )
 
-const EscalationCardImpl = ({ approval, onDecision }: EscalationCardProps): JSX.Element => {
+const EscalationCardImpl = ({
+  approval,
+  onDecision,
+  initialSteerError,
+}: EscalationCardProps): JSX.Element => {
   const [steer, setSteer] = useState("")
+  // UUX-2-18 — inline steer validation. Set when "Deny + steer" is clicked
+  // with an empty box (the click does NOT dispatch); cleared on typing.
+  const [steerError, setSteerError] = useState<string | null>(initialSteerError ?? null)
+  const steerRef = useRef<HTMLTextAreaElement | null>(null)
   const scope = approval.scopeContext
   if (scope === undefined) {
     return <PlainApproval approval={approval} onDecision={onDecision} />
   }
-  const handle = buildDecisionHandler(approval.approvalId, onDecision)
+  const handle = buildDecisionHandler(
+    approval.approvalId,
+    (decision) => {
+      setSteerError(null)
+      onDecision(decision)
+    },
+    (message) => {
+      // Keep the user IN the steer flow: show the inline requirement and put
+      // the caret back in the box instead of silently sending a plain deny.
+      setSteerError(message)
+      steerRef.current?.focus()
+    },
+  )
   return (
     <section
       className="rounded-xl border border-warn/40 bg-warn/5 p-3"
@@ -177,15 +235,34 @@ const EscalationCardImpl = ({ approval, onDecision }: EscalationCardProps): JSX.
       </dl>
       {/* ADR-0512 P3 — the steer box: filled before a `deny_and_steer` so the
           corrective message reaches the model (the "Deny + steer" button reads
-          it). Empty ⇒ the button is a plain deny. */}
+          it). UUX-2-18: empty + "Deny + steer" ⇒ inline validation, NOT a
+          silent plain deny (plain "Deny" is the no-text path). */}
       <textarea
+        ref={steerRef}
         value={steer}
-        onChange={(e) => setSteer(e.target.value)}
+        onChange={(e) => {
+          setSteer(e.target.value)
+          setSteerError(null)
+        }}
         placeholder="(선택) 대신 무엇을 하라고 안내할지 — Deny + steer 용"
         rows={2}
         aria-label="steer message"
+        aria-invalid={steerError !== null ? true : undefined}
+        {...(steerError !== null
+          ? // approval-scoped id — several approval cards can be on screen.
+            { "aria-describedby": `escalation-steer-error-${approval.approvalId}` }
+          : {})}
         className="mt-2.5 w-full resize-none rounded-lg border border-line bg-surface-input px-2 py-1.5 text-[11px] text-ink placeholder:text-ink-faint focus-visible:border-accent/50 focus-visible:outline-none"
       />
+      {steerError !== null ? (
+        <p
+          id={`escalation-steer-error-${approval.approvalId}`}
+          role="alert"
+          className="mt-1 text-[11px] font-medium text-warn"
+        >
+          {steerError}
+        </p>
+      ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
         {ESCALATION_BUTTONS.map((btn) => (
           <button
@@ -206,10 +283,12 @@ const EscalationCardImpl = ({ approval, onDecision }: EscalationCardProps): JSX.
   )
 }
 
-/** Memoized export. Test seams (`escalationDecisionFor` / `buildDecisionHandler`)
- *  are hung off the function object so the pure verb→decision contract is
+/** Memoized export. Test seams (`escalationDecisionFor` / `buildDecisionHandler`
+ *  / `resolveEscalationClick`) are hung off the function object so the pure
+ *  verb→decision contract (incl. the UUX-2-18 steer-required arm) is
  *  exercisable in a node test without a DOM renderer. */
 export const EscalationCard = Object.assign(memo(EscalationCardImpl), {
   escalationDecisionFor,
   buildDecisionHandler,
+  resolveEscalationClick,
 })

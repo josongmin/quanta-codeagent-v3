@@ -53,12 +53,29 @@ const clampTokens = (v: number): number => (Number.isFinite(v) && v > 0 ? v : 0)
  * Convert a `ContextUsageMessage` → RFC-06 `UsageBarProps`, assigning each
  * segment its category hue. Labels reproduce the CLI `formatSegmentedUsage`
  * head-line meaning verbatim (`64% Full`, `76.8k / 120k Tokens`) via the
- * RFC-06 helpers. `max <= 0` (unknown window) ⇒ the bar fills against `total`
- * and the left label degrades to `?` (no false `0% Full`, per RFC-10 §6).
+ * RFC-06 helpers.
+ *
+ * `max <= 0` (unknown window) ⇒ INDETERMINATE (UUX-4-25): the bar means "how
+ * full is the window" and that ratio is unknowable, so it renders NO fill (an
+ * empty track — the pre-fix shape filled against `total`, i.e. a 100%-full
+ * bar + "? Full": a false context-exhausted alarm). Labels degrade honestly
+ * to "Window unknown" + the used-token count — the same posture as the
+ * `/context` text gauge (`asciiBar(0)` + "(window unknown)"). The per-category
+ * legend beneath the bar still shows the breakdown (it keys off
+ * `usage.segments`, not these bar props).
  */
 export const breakdownToUsageBarProps = (msg: ContextUsageMessage): UsageBarProps => {
   const windowKnown = msg.max > 0
-  const windowSize = windowKnown ? msg.max : msg.total
+  if (!windowKnown) {
+    return {
+      // No fill at all; total=1 keeps the UsageBar remainder painting the
+      // empty track (total<=0 would render a zero-width nothing).
+      segments: [],
+      total: 1,
+      topLeftLabel: "Window unknown",
+      topRightLabel: `${formatTokens(msg.total)} Tokens used`,
+    }
+  }
   const segments: UsageBarSegment[] = msg.segments.map((s, idx) => ({
     id: s.id,
     value: clampTokens(s.tokens),
@@ -66,8 +83,8 @@ export const breakdownToUsageBarProps = (msg: ContextUsageMessage): UsageBarProp
   }))
   return {
     segments,
-    total: windowSize,
-    topLeftLabel: windowKnown ? `${usagePercent(msg.total, msg.max)}% Full` : "? Full",
-    topRightLabel: `${formatTokens(msg.total)} / ${windowKnown ? formatTokens(msg.max) : "?"} Tokens`,
+    total: msg.max,
+    topLeftLabel: `${usagePercent(msg.total, msg.max)}% Full`,
+    topRightLabel: `${formatTokens(msg.total)} / ${formatTokens(msg.max)} Tokens`,
   }
 }

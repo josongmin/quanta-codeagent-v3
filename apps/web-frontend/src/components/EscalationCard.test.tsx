@@ -189,4 +189,83 @@ describe("EscalationCard", () => {
     expect(escalationDecisionFor("deny_and_steer", "   ").steer).toBeUndefined() // whitespace dropped
     expect(escalationDecisionFor("deny_and_steer", undefined).steer).toBeUndefined()
   })
+
+  // UUX-2-18 (jul-10 W4) — clicking "Deny + steer" with an EMPTY steer box must
+  // NOT silently degrade to a plain deny. The click keeps the user in the steer
+  // input with an inline "steer text required (or choose Deny)" message; only a
+  // non-empty steer dispatches. Plain "Deny" stays the no-text escape hatch.
+  describe("UUX-2-18 — empty deny_and_steer keeps the user in the steer input", () => {
+    type ClickResult =
+      | {
+          kind: "dispatch"
+          decision: {
+            approvalId: string
+            decision: "approve" | "deny"
+            option: string
+            steer?: string
+          }
+        }
+      | { kind: "steer-required"; message: string }
+    const seam = EscalationCard as unknown as {
+      resolveEscalationClick: (approvalId: string, option: string, steer?: string) => ClickResult
+    }
+
+    it("empty steer → steer-required, NEVER a dispatch (the silent-degrade is unrepresentable)", () => {
+      const r = seam.resolveEscalationClick("appr-1", "deny_and_steer", "")
+      expect(r.kind).toBe("steer-required")
+      expect(r).toMatchObject({ message: "steer text required (or choose Deny)" })
+    })
+
+    it("whitespace-only steer is empty too", () => {
+      expect(seam.resolveEscalationClick("appr-1", "deny_and_steer", "   \n\t ").kind).toBe(
+        "steer-required",
+      )
+      expect(seam.resolveEscalationClick("appr-1", "deny_and_steer", undefined).kind).toBe(
+        "steer-required",
+      )
+    })
+
+    it("non-empty steer dispatches deny_and_steer with the trimmed steer", () => {
+      const r = seam.resolveEscalationClick("appr-1", "deny_and_steer", "  use grep instead  ")
+      expect(r).toEqual({
+        kind: "dispatch",
+        decision: {
+          approvalId: "appr-1",
+          decision: "deny",
+          option: "deny_and_steer",
+          steer: "use grep instead",
+        },
+      })
+    })
+
+    it("plain Deny (and the approves) dispatch regardless of the empty steer box (paired control)", () => {
+      expect(seam.resolveEscalationClick("appr-1", "deny", "").kind).toBe("dispatch")
+      expect(seam.resolveEscalationClick("appr-1", "allow_once", "").kind).toBe("dispatch")
+      expect(seam.resolveEscalationClick("appr-1", "allow_session", "").kind).toBe("dispatch")
+    })
+
+    it("the inline validation renders next to the steer input (SSR seam), textarea kept", () => {
+      const markup = renderToStaticMarkup(
+        <EscalationCard
+          approval={richApproval}
+          onDecision={() => undefined}
+          initialSteerError="steer text required (or choose Deny)"
+        />,
+      )
+      expect(markup).toContain("steer text required (or choose Deny)")
+      // The user stays in the steer flow: the textarea is still there and is
+      // marked invalid for assistive tech.
+      expect(markup).toContain("textarea")
+      expect(markup).toContain('aria-invalid="true"')
+      expect(markup).toContain('role="alert"')
+    })
+
+    it("no error state ⇒ no alert chrome (default render unchanged)", () => {
+      const markup = renderToStaticMarkup(
+        <EscalationCard approval={richApproval} onDecision={() => undefined} />,
+      )
+      expect(markup).not.toContain("steer text required")
+      expect(markup).not.toContain('role="alert"')
+    })
+  })
 })

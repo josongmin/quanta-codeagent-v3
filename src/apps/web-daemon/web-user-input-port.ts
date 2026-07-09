@@ -38,8 +38,21 @@
  * never imports `@/agent/loop`; the composition root is the only bridge.
  */
 
-import type { AgentStateObservation } from "@/protocol/agent-state"
+import type { AgentStateObservation, PlanInputChoiceDetail } from "@/protocol/agent-state"
 import type { UserInputOutcome, UserInputRequester } from "@/tool"
+
+/**
+ * UUX-2-17 — the daemon-local request shape: the `@/tool` requester contract
+ * plus an OPTIONAL `choiceDetails` a rich caller (the web ask_user port) can
+ * attach so option descriptions reach the browser chips. A function accepting
+ * this WIDER request stays assignable to {@link UserInputRequester} (the extra
+ * field is optional), so the `AgentConfig.userInputPort` wiring is unchanged.
+ */
+export type WebUserInputRequest = Parameters<UserInputRequester>[0] & {
+  readonly choiceDetails?: readonly PlanInputChoiceDetail[]
+}
+
+export type WebUserInputRequester = (req: WebUserInputRequest) => Promise<UserInputOutcome>
 
 /**
  * The handle the composition root wires: `port` goes onto
@@ -49,8 +62,10 @@ import type { UserInputOutcome, UserInputRequester } from "@/tool"
  */
 export interface WebUserInputPortHandle {
   /** The requester the `request_user_input` tool invokes. Emits a
-   *  `plan_user_input_requested` observation + parks a pending resolver. */
-  readonly port: UserInputRequester
+   *  `plan_user_input_requested` observation + parks a pending resolver.
+   *  Accepts the widened {@link WebUserInputRequest} (UUX-2-17) — still
+   *  assignable wherever a plain {@link UserInputRequester} is expected. */
+  readonly port: WebUserInputRequester
   /** Resolve a pending request by `promptId`. Returns `false` (no-op) when the
    *  id is unknown OR already resolved (double-resolve guard). */
   resolve(promptId: string, outcome: UserInputOutcome): boolean
@@ -100,7 +115,7 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
         }
       : { type: "plan_user_input_resolved", promptId, decision: "cancelled" }
 
-  const port: UserInputRequester = (req) => {
+  const port: WebUserInputRequester = (req) => {
     // Surface the prompt to the browser FIRST so a connected panel renders the
     // answer affordance before we park the resolver.
     safeCapture({
@@ -108,6 +123,9 @@ export const createWebUserInputPort = (deps: WebUserInputPortDeps): WebUserInput
       promptId: req.promptId,
       prompt: req.prompt,
       ...(req.choices !== undefined ? { choices: req.choices } : {}),
+      // UUX-2-17 — thread the rich chip detail through; absent ⇒ observation
+      // byte-identical to the pre-fix shape.
+      ...(req.choiceDetails !== undefined ? { choiceDetails: req.choiceDetails } : {}),
     })
     return new Promise<UserInputOutcome>((res) => {
       pending.set(req.promptId, (o) => {

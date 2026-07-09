@@ -16,6 +16,7 @@ export type {
   ItemStartedMessage,
   ModeChangedMessage,
   PlanCreatedMessage,
+  PlanInputChoiceDetail,
   PlanInputRequestedMessage,
   PlanInputResolvedMessage,
   PlanSnapshotMessage,
@@ -42,6 +43,7 @@ export type {
   AgentStateTodo,
   AgentStateTodoStatus,
   ItemStreamObservation,
+  PlanUserInputRequestedObservation,
 } from "./projection"
 export {
   AGENT_STATE_MESSAGE_KIND_BY_EVENT_TYPE,

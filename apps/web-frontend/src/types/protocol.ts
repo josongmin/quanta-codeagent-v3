@@ -790,12 +790,22 @@ export interface PlanUpdatedMessage {
   readonly emittedAt: number
 }
 
+/** UUX-2-17 — optional per-choice rich detail riding alongside the label-only
+ *  `choices` (mirrors upstream `PlanInputChoiceDetail`). `label` matches the
+ *  corresponding `choices` entry; `description` renders as chip subtext. */
+export interface PlanInputChoiceDetail {
+  readonly label: string
+  readonly description?: string
+}
+
 /** `plan_user_input_requested` — the plan flow paused to ask the user. */
 export interface PlanInputRequestedMessage {
   readonly kind: "plan.input.requested"
   readonly promptId: string
   readonly prompt: string
   readonly choices?: readonly string[]
+  /** UUX-2-17 — optional; absent for label-only prompts. */
+  readonly choiceDetails?: readonly PlanInputChoiceDetail[]
   readonly emittedAt: number
 }
 

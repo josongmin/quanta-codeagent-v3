@@ -258,6 +258,13 @@ const RatelimitChip = memo(
 /* Plan input prompt (plan.input.requested) — PASSIVE notice           */
 /* ------------------------------------------------------------------ */
 
+/** UUX-2-17 — the description subtext for one choice label, from the wire's
+ *  optional `choiceDetails` (matched by label). `undefined` for label-only
+ *  prompts and for details without a description ⇒ chip renders label-only,
+ *  byte-identical to the pre-fix markup. */
+const choiceDescription = (prompt: PlanInputRequestedMessage, label: string): string | undefined =>
+  prompt.choiceDetails?.find((d) => d.label === label)?.description
+
 /** A "agent is waiting on you" card for a paused plan flow.
  *
  *  PASSIVE (no `onAnswer`): surfaces the prompt + any offered choices so a
@@ -289,11 +296,22 @@ const PlanPromptCard = memo(
           // PASSIVE: offered choices surface as a read-only list (byte-identical).
           prompt.choices !== undefined && prompt.choices.length > 0 ? (
             <ul className="mt-2 list-inside list-disc space-y-0.5 marker:text-ink-faint">
-              {prompt.choices.map((c) => (
-                <li key={c} className="text-xs text-ink-secondary">
-                  {c}
-                </li>
-              ))}
+              {prompt.choices.map((c) => {
+                const description = choiceDescription(prompt, c)
+                return (
+                  <li key={c} className="text-xs text-ink-secondary">
+                    {c}
+                    {description !== undefined ? (
+                      <span
+                        data-testid="agent-state-plan-choice-description"
+                        className="ml-1.5 text-[11px] text-ink-tertiary"
+                      >
+                        — {description}
+                      </span>
+                    ) : null}
+                  </li>
+                )
+              })}
             </ul>
           ) : null
         ) : (
@@ -325,17 +343,30 @@ const PlanPromptAnswerForm = ({
     <div className="mt-2 flex flex-col gap-2" data-testid="agent-state-plan-answer">
       {prompt.choices !== undefined && prompt.choices.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
-          {prompt.choices.map((c) => (
-            <button
-              key={c}
-              type="button"
-              data-testid="agent-state-plan-choice"
-              onClick={() => onAnswer(prompt.promptId, { decision: "answer", text: c })}
-              className="rounded-full bg-surface-input px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-surface"
-            >
-              {c}
-            </button>
-          ))}
+          {prompt.choices.map((c) => {
+            const description = choiceDescription(prompt, c)
+            return (
+              <button
+                key={c}
+                type="button"
+                data-testid="agent-state-plan-choice"
+                onClick={() => onAnswer(prompt.promptId, { decision: "answer", text: c })}
+                className="rounded-full bg-surface-input px-2 py-0.5 text-left text-[11px] text-ink-secondary hover:bg-surface"
+              >
+                {c}
+                {description !== undefined ? (
+                  // UUX-2-17 — description subtext INSIDE the chip (the label
+                  // stays the answered value; the subtext is context only).
+                  <span
+                    data-testid="agent-state-plan-choice-description"
+                    className="block text-[10px] font-normal text-ink-tertiary"
+                  >
+                    {description}
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
         </div>
       ) : null}
       <textarea

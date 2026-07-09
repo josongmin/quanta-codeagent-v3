@@ -51,12 +51,21 @@ describe("UsageBreakdownPanel", () => {
     expect(html).not.toContain("undefined")
   })
 
-  it("max=0 (unknown window) ⇒ left label degrades to '?' (no false 0% Full)", () => {
+  // UUX-4-25 (jul-10 W4): unknown window ⇒ INDETERMINATE bar (no fill, no
+  // "? Full" full-bar alarm), honest labels, and the per-category legend
+  // still renders (it keys off usage.segments, not the bar props).
+  it("max=0 (unknown window) ⇒ indeterminate bar + honest labels, legend intact", () => {
     const html = renderToStaticMarkup(
       <UsageBreakdownPanel usage={usage({ total: 5000, max: 0 })} />,
     )
-    expect(html).toContain("? Full")
-    expect(html).not.toContain("0% Full")
+    expect(html).toContain("Window unknown")
+    expect(html).toContain("5.0k Tokens used")
+    expect(html).not.toContain("Full")
+    // No colored fill spans — only the remainder track paints (100% unused).
+    expect(html).toContain("unused: 1")
+    // Legend rows still show the per-category breakdown.
+    expect(html).toContain("System")
+    expect(html).toContain("Tools")
   })
 
   it("empty segments ⇒ header + bar only, no legend rows (non-throwing)", () => {

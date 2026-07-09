@@ -156,4 +156,47 @@ describe("AgentStatePanel", () => {
     expect(markup).toContain("red")
     expect(markup).toContain("blue")
   })
+
+  // UUX-2-17 (jul-10 W4) — ask_user option structure reaches the chips: when the
+  // wire carries `choiceDetails`, each chip renders its description as subtext
+  // (interactive AND passive). Label-only prompts render exactly as before.
+  describe("choice description subtext (UUX-2-17)", () => {
+    const richPrompt: PlanInputRequestedMessage = {
+      kind: "plan.input.requested",
+      promptId: "p1",
+      prompt: "How to integrate?",
+      choices: ["merge", "rebase"],
+      choiceDetails: [{ label: "merge" }, { label: "rebase", description: "replay commits" }],
+      emittedAt: 0,
+    }
+
+    it("interactive chips render the description under the label", () => {
+      const markup = renderToStaticMarkup(
+        <AgentStatePanel state={view({ planPrompt: richPrompt })} onAnswer={() => {}} />,
+      )
+      expect(markup).toContain("rebase")
+      expect(markup).toContain("replay commits")
+      expect(markup).toContain('data-testid="agent-state-plan-choice-description"')
+      // Still exactly one chip per choice — the subtext lives INSIDE the chip.
+      expect(markup.split('data-testid="agent-state-plan-choice"').length - 1).toBe(2)
+    })
+
+    it("passive list renders the description too (read-only surface stays honest)", () => {
+      const markup = renderToStaticMarkup(
+        <AgentStatePanel state={view({ planPrompt: richPrompt })} />,
+      )
+      expect(markup).toContain("replay commits")
+      expect(markup).toContain('data-testid="agent-state-plan-choice-description"')
+    })
+
+    it("label-only prompts render no description chrome (byte-identical baseline)", () => {
+      const markup = renderToStaticMarkup(
+        <AgentStatePanel
+          state={view({ planPrompt: planPrompt("Pick one", ["red", "blue"]) })}
+          onAnswer={() => {}}
+        />,
+      )
+      expect(markup).not.toContain('data-testid="agent-state-plan-choice-description"')
+    })
+  })
 })

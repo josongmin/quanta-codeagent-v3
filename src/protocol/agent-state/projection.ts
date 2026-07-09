@@ -29,6 +29,7 @@ import type {
   ItemStartedMessage,
   ModeChangedMessage,
   PlanCreatedMessage,
+  PlanInputChoiceDetail,
   PlanInputRequestedMessage,
   PlanInputResolvedMessage,
   PlanSnapshotMessage,
@@ -80,8 +81,22 @@ export interface ItemStreamObservation {
   readonly item: ItemStreamCore
 }
 
+/** UUX-2-17 — the `plan_user_input_requested` observation arm, widened with
+ *  the OPTIONAL `choiceDetails` a rich producer (the web ask_user port) can
+ *  attach. The AgentEvent-derived producer path never sets it (the event has
+ *  no such field), so every pre-existing producer stays assignable unchanged. */
+export type PlanUserInputRequestedObservation = Extract<
+  AgentStateEventObservation,
+  { type: "plan_user_input_requested" }
+> & {
+  readonly choiceDetails?: readonly PlanInputChoiceDetail[]
+}
+
 /** Every observation the agent-state channel carries. */
-export type AgentStateObservation = AgentStateEventObservation | ItemStreamObservation
+export type AgentStateObservation =
+  | Exclude<AgentStateEventObservation, { type: "plan_user_input_requested" }>
+  | PlanUserInputRequestedObservation
+  | ItemStreamObservation
 
 export interface AgentStateSink {
   capture(event: AgentStateObservation): void
@@ -200,6 +215,10 @@ const AGENT_STATE_MESSAGE_PROJECTORS = {
     promptId: observation.promptId,
     prompt: observation.prompt,
     ...(observation.choices !== undefined ? { choices: observation.choices } : {}),
+    // UUX-2-17 — optional rich chip detail; absent ⇒ wire byte-identical.
+    ...(observation.choiceDetails !== undefined
+      ? { choiceDetails: observation.choiceDetails }
+      : {}),
     emittedAt,
   }),
   plan_user_input_resolved: (observation, emittedAt) => ({
