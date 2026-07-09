@@ -240,6 +240,8 @@ const RULES: readonly Rule[] = [
         "Agent mode-preset composition root — passes process.env into the shared knob wiring; same posture as apps/agent/assemble.ts.",
       "apps/agent/mode-presets/headless.ts":
         "Agent mode-preset composition root — same posture as daemon.ts.",
+      "apps/agent/mode-presets/interactive.ts":
+        "Agent mode-preset composition root — threads launch-time process.env into driveSessionTurn's crash-resume gate (WS-A UUX-1-04, same env-threading the CLI session-loop does); same posture as daemon.ts.",
       "apps/agent/mode-presets/ide.ts":
         "Agent mode-preset composition root — same posture as daemon.ts.",
       "apps/cli/at-autocomplete/env.ts":
