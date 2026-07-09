@@ -8,6 +8,7 @@
  */
 
 export type {
+  AttachApprovalAnswer,
   AttachedSession,
   AttachSocket,
   AttachSocketCtor,

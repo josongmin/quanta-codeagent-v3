@@ -65,3 +65,38 @@ describe("HELLGATE WS-A — mid-turn channel typed release", () => {
     expect(ch.tryResolve("stray")).toBe(false)
   })
 })
+
+// ── C2 (jul-10 W4) — multi-consumer honesty: WHICH ask superseded which ──────
+
+describe("HELLGATE C2 — labeled supersede is diagnosable (no queue, still fail-closed)", () => {
+  test("a LABELED superseding awaitLine names itself on the stale waiter's release", async () => {
+    const ch = createMidTurnApprovalChannel()
+    const stale = ch.awaitLine(undefined, "approval")
+    const fresh = ch.awaitLine(undefined, "elicitation")
+    expect(await stale).toEqual({
+      kind: "released",
+      cause: "superseded",
+      supersededBy: "elicitation",
+    })
+    ch.tryResolve("ok")
+    expect(await fresh).toEqual({ kind: "line", line: "ok" })
+  })
+
+  test("SHAPE STABILITY: an UNLABELED supersede keeps the exact legacy shape (no supersededBy key)", async () => {
+    const ch = createMidTurnApprovalChannel()
+    const stale = ch.awaitLine()
+    void ch.awaitLine()
+    const released = await stale
+    expect(released).toEqual({ kind: "released", cause: "superseded" })
+    expect(Object.hasOwn(released, "supersededBy")).toBe(false)
+  })
+
+  test("clear() releases carry NO supersededBy (only a supersede names a superseder)", async () => {
+    const ch = createMidTurnApprovalChannel()
+    const p = ch.awaitLine(undefined, "approval")
+    ch.clear("turn_teardown")
+    const released = await p
+    expect(released).toEqual({ kind: "released", cause: "turn_teardown" })
+    expect(Object.hasOwn(released, "supersededBy")).toBe(false)
+  })
+})

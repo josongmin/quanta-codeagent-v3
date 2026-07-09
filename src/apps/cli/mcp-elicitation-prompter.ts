@@ -132,9 +132,17 @@ export const readViaMidTurnChannelOrReadline = async (
     if (signal.aborted) return null
     // Audit W3-C1 — thread the consumer's signal so an MCP-side cancel
     // RELEASES this waiter (consumer_aborted): a dead ask can never claim the
-    // operator's next typed line.
-    const result = await channel.awaitLine(signal)
-    return result.kind === "line" ? result.line : null
+    // operator's next typed line. C2 (jul-10 W4) — label the ask so a
+    // one-waiter collision (approval vs elicitation) is diagnosable, and print
+    // WHICH ask superseded this one before mapping to cancellation.
+    const result = await channel.awaitLine(signal, "elicitation")
+    if (result.kind === "line") return result.line
+    if (result.cause === "superseded") {
+      process.stderr.write(
+        `\n[quanta] elicitation prompt released unanswered (superseded by ${result.supersededBy ?? "a newer"} prompt) — treated as canceled.\n`,
+      )
+    }
+    return null
   }
   return readLine("", signal)
 }

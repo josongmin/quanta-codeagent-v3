@@ -30,7 +30,7 @@ import {
   type SessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
 } from "@/ipc/session"
-import type { SessionCommand, SessionEvent } from "@/protocol/session"
+import type { ApprovalRespondCommand, SessionCommand, SessionEvent } from "@/protocol/session"
 import { buildApprovalRespondCommand, buildLineCommands } from "./commands"
 import {
   type AttachHandshake,
@@ -58,6 +58,20 @@ export type AttachSocketCtor = new (
   protocols?: string | readonly string[],
 ) => AttachSocket
 
+/** UUX-1-19 (jul-10 W4) — the attach prompter's RICH decision, mirroring what
+ *  the wire (`ApprovalRespondCommand`) actually carries: the kernel scheduler
+ *  forwards `scope` + `steer` verbatim to `host.resolveApproval`, so the
+ *  attach surface can offer [a]lways-session and deny+s[t]eer as first-class
+ *  verbs instead of collapsing everything onto y/N. A plain string answer is
+ *  the LEGACY shape (y/yes ⇒ approve, else deny) and stays accepted. */
+export interface AttachApprovalAnswer {
+  readonly decision: "approve" | "deny"
+  /** Only meaningful on `approve` (the wire's standing-grant scopes). */
+  readonly scope?: "once" | "session" | "session_prefix"
+  /** Only meaningful on `deny` (the wire's corrective steer). */
+  readonly steer?: string
+}
+
 export interface AttachToDaemonOptions {
   /** WS URL of the daemon session endpoint, e.g. `ws://127.0.0.1:4096/`. */
   readonly url: string
@@ -67,8 +81,10 @@ export interface AttachToDaemonOptions {
   readonly stdin: AsyncIterable<string>
   /** Terminal sink — defaults to `process.stdout.write`. */
   readonly write: (chunk: string) => void
-  /** Approval prompt — returns the operator's raw answer (`"y"`/`"n"`/…). */
-  readonly promptApproval: (reason: string) => Promise<string>
+  /** Approval prompt — resolves either the operator's raw answer string
+   *  (LEGACY: `"y"`/`"n"`/…) or the rich {@link AttachApprovalAnswer} carrying
+   *  the wire's scope/steer (UUX-1-19). */
+  readonly promptApproval: (reason: string) => Promise<string | AttachApprovalAnswer>
   /** WS-B (jul-10, UUX-3-02) — the pending-approval line claim. The attach
    *  surface has ONE stdin owner (the `stdin` iterator feeding the read loop);
    *  while an approval prompt is awaiting its answer, the NEXT line belongs to
@@ -97,6 +113,37 @@ const withAuthQuery = (url: string, token: string | undefined): string => {
   if (token === undefined || token.length === 0) return url
   const sep = url.includes("?") ? "&" : "?"
   return `${url}${sep}token=${encodeURIComponent(token)}`
+}
+
+/** UUX-1-19 — map the prompter's answer onto the wire. A STRING answer keeps
+ *  the legacy y/N mapping (`buildApprovalRespondCommand`, byte-identical); a
+ *  rich {@link AttachApprovalAnswer} carries `scope`/`steer` verbatim — the
+ *  kernel scheduler forwards both to `host.resolveApproval`. A steer is only
+ *  attached to a DENY and never as an empty string (the normalizer SSOT's
+ *  no-phantom-steer rule, mirrored at the wire boundary). */
+const buildRespondForAnswer = (args: {
+  readonly sessionId: string
+  readonly approvalId: string
+  readonly answer: string | AttachApprovalAnswer
+  readonly commandId: string
+  readonly issuedAt: string
+}): ApprovalRespondCommand => {
+  const { sessionId, approvalId, answer, commandId, issuedAt } = args
+  if (typeof answer === "string") {
+    return buildApprovalRespondCommand({ sessionId, approvalId, answer, commandId, issuedAt })
+  }
+  return {
+    sessionId,
+    commandId,
+    issuedAt,
+    type: "approval.respond",
+    approvalId,
+    decision: answer.decision,
+    ...(answer.decision === "approve" && answer.scope !== undefined ? { scope: answer.scope } : {}),
+    ...(answer.decision === "deny" && answer.steer !== undefined && answer.steer.trim().length > 0
+      ? { steer: answer.steer }
+      : {}),
+  }
 }
 
 const resolveCtor = (override: AttachSocketCtor | undefined): AttachSocketCtor => {
@@ -179,7 +226,9 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
         // A throwing/garbage prompter fail-safes to a literal "n" so the
         // approval is DENIED, never approved and never left hanging. (#5)
         const answer = await opts.promptApproval(reason).catch(() => "n")
-        const respond = buildApprovalRespondCommand({
+        // UUX-1-19 — string answers keep the legacy y/N mapping; a rich answer
+        // rides the wire's scope/steer (see {@link buildRespondForAnswer}).
+        const respond = buildRespondForAnswer({
           sessionId: sid,
           approvalId,
           answer,

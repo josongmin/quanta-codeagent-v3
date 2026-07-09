@@ -39,10 +39,22 @@ export type MidTurnReleaseCause =
   | "consumer_aborted"
 
 /** What `awaitLine` resolves to: a REAL operator line (possibly empty — an empty
- *  Enter is still input) vs a typed RELEASE (never disguised as input). */
+ *  Enter is still input) vs a typed RELEASE (never disguised as input).
+ *
+ *  C2 (jul-10 W4) — the channel is shared by approval prompts AND elicitation
+ *  (registry slot), so a `superseded` release additionally names the LABEL of
+ *  the ask that superseded this waiter (when the superseder declared one). The
+ *  collision stays fail-closed — this only makes it diagnosable at the consumer
+ *  ("approval prompt superseded by elicitation ask", not a mystery deny). */
 export type MidTurnLineResult =
   | { readonly kind: "line"; readonly line: string }
-  | { readonly kind: "released"; readonly cause: MidTurnReleaseCause }
+  | {
+      readonly kind: "released"
+      readonly cause: MidTurnReleaseCause
+      /** Only on `cause: "superseded"`, and only when the superseding
+       *  `awaitLine` passed a label. NEVER set on teardown/abort releases. */
+      readonly supersededBy?: string
+    }
 
 export interface MidTurnApprovalChannel {
   /** True while an in-turn reader owns stdin (set by the session loop around each
@@ -54,8 +66,11 @@ export interface MidTurnApprovalChannel {
    *  the turn ends first — the caller maps a release to a fail-closed deny AND
    *  surfaces the cause (never a silent deny). An optional `signal` releases
    *  THIS waiter (`consumer_aborted`) when the consumer cancels mid-await, so a
-   *  dead ask can never claim the operator's next line (audit W3-C1). */
-  awaitLine(signal?: AbortSignal): Promise<MidTurnLineResult>
+   *  dead ask can never claim the operator's next line (audit W3-C1).
+   *  C2 (jul-10 W4) — an optional `label` names THIS ask (e.g. "approval",
+   *  "elicitation"); when it supersedes a stale waiter, that waiter's release
+   *  carries `supersededBy: label` so the collision is diagnosable. */
+  awaitLine(signal?: AbortSignal, label?: string): Promise<MidTurnLineResult>
   /** Session loop `onLine`: deliver a captured line to a waiting approval. Returns
    *  true iff it was consumed (so the caller skips the normal follow-up routing). */
   tryResolve(line: string): boolean
@@ -86,18 +101,21 @@ export const currentMidTurnApprovalChannel = (): MidTurnApprovalChannel | undefi
 
 export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
   let pending: ((result: MidTurnLineResult) => void) | undefined
-  const release = (cause: MidTurnReleaseCause): void => {
+  const release = (cause: MidTurnReleaseCause, supersededBy?: string): void => {
     if (pending === undefined) return
     const resolve = pending
     pending = undefined
-    resolve({ kind: "released", cause })
+    // C2 — only a supersede names its superseder; the key is OMITTED otherwise
+    // so teardown/abort release shapes stay byte-identical to the WS-A landing.
+    resolve({ kind: "released", cause, ...(supersededBy !== undefined ? { supersededBy } : {}) })
   }
   return {
     active: false,
-    awaitLine(signal?: AbortSignal): Promise<MidTurnLineResult> {
+    awaitLine(signal?: AbortSignal, label?: string): Promise<MidTurnLineResult> {
       // A prior unfinished waiter would be a wiring bug (one approval at a time);
-      // release it TYPED before replacing, so it can't leak or fake a deny.
-      release("superseded")
+      // release it TYPED before replacing, so it can't leak or fake a deny —
+      // and NAME the superseding ask (C2) so the collision is diagnosable.
+      release("superseded", label)
       if (signal?.aborted === true) {
         return Promise.resolve({ kind: "released", cause: "consumer_aborted" })
       }

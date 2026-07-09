@@ -61,18 +61,29 @@ import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-po
 // fail-closes to deny ("입력창이 안 떠서"). When `channel.active`, route through
 // the in-turn reader's captured line instead of a conflicting readline. Between
 // turns (`active` false) keep the ad-hoc readline (byte-identical legacy).
-const askLine = async (channel: MidTurnApprovalChannel, prompt: string): Promise<string> => {
+const askLine = async (
+  channel: MidTurnApprovalChannel,
+  prompt: string,
+  label = "prompt",
+): Promise<string> => {
   if (channel.active) {
     process.stderr.write(prompt)
-    const result = await channel.awaitLine()
+    const result = await channel.awaitLine(undefined, label)
     if (result.kind === "line") return result.line
     // WS-A (jul-10, UUX-1-22) — a RELEASED prompt (turn canceled/backgrounded/
     // ended with the ask unanswered) maps to the same fail-closed "" the callers
     // already treat as deny, but NEVER silently: the operator sees WHY the
     // prompt vanished, and the outcome is attributed to the release — not to a
-    // decision they never made.
+    // decision they never made. C2 (jul-10 W4) — a SUPERSEDED release names
+    // which ask won the channel, so the one-waiter collision is diagnosable.
+    const why =
+      result.cause === "turn_teardown"
+        ? "turn ended"
+        : result.cause === "superseded"
+          ? `superseded by ${result.supersededBy ?? "a newer"} prompt`
+          : "canceled by its consumer"
     process.stderr.write(
-      `\n[quanta] prompt released unanswered (${result.cause === "turn_teardown" ? "turn ended" : "superseded by a newer prompt"}) — treated as deny/fail-closed.\n`,
+      `\n[quanta] ${label} prompt released unanswered (${why}) — treated as deny/fail-closed.\n`,
     )
     return ""
   }
@@ -111,6 +122,7 @@ const buildBackgroundConsentPort =
       await askLine(
         channel,
         `Command still running after ${secs}s: ${shown}\nMove to background? [y]es / [N]o (kill) `,
+        "background-consent",
       )
     )
       .trim()
@@ -147,6 +159,22 @@ interface EscalationScopeView {
   readonly justification?: string | undefined
 }
 
+/** UUX-2-18 (CLI half) — the ONE deny-steer text reader. An EMPTY steer answer
+ *  re-prompts ONCE ("steer text required (or N to deny)") instead of silently
+ *  degrading to a plain deny — the operator chose the steer verb; a phantom ""
+ *  must never eat their intent. Still-empty / "N" ⇒ `undefined` (plain deny —
+ *  the normalizer SSOT would strip a "" steer anyway; this is the UX half).
+ *  Shared by the escalation arm AND the normal verb prompt (no fork copy). */
+const askSteerText = async (deps: CliHitlDeps): Promise<string | undefined> => {
+  const first = (await askLine(deps.channel, "Steer (what to do instead): ", "approval")).trim()
+  if (first.length > 0) return first
+  const second = (
+    await askLine(deps.channel, "steer text required (or N to deny): ", "approval")
+  ).trim()
+  if (second.length === 0 || second.toLowerCase() === "n") return undefined
+  return second
+}
+
 const promptEscalationVerbs = async (
   deps: CliHitlDeps,
   scope: EscalationScopeView,
@@ -160,6 +188,7 @@ const promptEscalationVerbs = async (
     await askLine(
       deps.channel,
       "Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ",
+      "approval",
     )
   )
     .trim()
@@ -174,12 +203,89 @@ const promptEscalationVerbs = async (
     return { decision: "allow", scope: "session" }
   }
   if (ans === "t") {
-    const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
+    const steer = await askSteerText(deps)
     deps.rejectCounter.recordDeny()
-    return steer.length > 0 ? { decision: "deny_and_steer", steer } : { decision: "deny" }
+    return steer !== undefined ? { decision: "deny_and_steer", steer } : { decision: "deny" }
   }
   deps.rejectCounter.recordDeny()
   return { decision: "deny" }
+}
+
+/** UUX-1-06 (A-r2) — the ONE shared NORMAL-approval verb prompt (PromptSpec-
+ *  lite). Both the inline confirm ({@link buildCliOnConfirm}) and the deferred
+ *  fallback ({@link buildCliApprovalPrompt}) render + answer-map through THIS
+ *  helper, so the verb set can never fork between the two routes again.
+ *  Verbs that structurally need the full `ToolAction` are DECLARED as
+ *  capability flags (absent ⇒ not offered), never copy-forked:
+ *   - `hunk`        — [h]unk-select needs the action's previewable diff;
+ *   - `prefixLabel` — [p]/[P] prefix grants need the action's shellCommand. */
+interface NormalVerbCaps {
+  /** Prompt subject: the tool name (inline) or "pending action" (deferred). */
+  readonly subject: string
+  /** [h]unk-select capability (inline-only — needs the ToolAction). */
+  readonly hunk?: { readonly diff: ActionDiff; readonly ids: string[] }
+  /** [p] prefix-grant capability (inline-only — needs `shellCommand`). */
+  readonly prefixLabel?: string | null
+  /** [P] durable prefix capability (needs a wired trust-scope registry). */
+  readonly durable?: boolean
+}
+
+type NormalVerbAnswer =
+  | { readonly kind: "allow"; readonly scope?: "session" }
+  | { readonly kind: "allow_prefix"; readonly durable: boolean }
+  | { readonly kind: "hunk_select" }
+  | { readonly kind: "deny"; readonly steer?: string }
+
+const renderNormalVerbPrompt = (caps: NormalVerbCaps): string => {
+  const prefixLabel = caps.prefixLabel ?? null
+  const durable = caps.durable === true && prefixLabel !== null
+  // T05 — append the [h]unk-select verb when a per-hunk option exists.
+  const hunkVerb = caps.hunk !== undefined ? " / [h]unk-select" : ""
+  return durable
+    ? `Allow ${caps.subject}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
+    : prefixLabel !== null
+      ? `Allow ${caps.subject}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
+      : `Allow ${caps.subject}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `
+}
+
+const promptNormalApprovalVerbs = async (
+  deps: CliHitlDeps,
+  caps: NormalVerbCaps,
+): Promise<NormalVerbAnswer> => {
+  const prefixLabel = caps.prefixLabel ?? null
+  const durable = caps.durable === true && prefixLabel !== null
+  // Capture the RAW answer too: the prefix verbs are case-SENSITIVE ([p] this
+  // session vs [P] all sessions) and the lowercased `ans` cannot tell them
+  // apart — so the durable check reads `raw` and runs BEFORE the `ans` "p"
+  // check (a typed "P" lowercases to "p", so durable must win first).
+  const raw = (await askLine(deps.channel, renderNormalVerbPrompt(caps), "approval")).trim()
+  const ans = raw.toLowerCase()
+  deps.idleMonitor.markActive()
+  // T05 — [h] drives the per-hunk picker (only offered when the cap is set).
+  if (caps.hunk !== undefined && ans === "h") return { kind: "hunk_select" }
+  if (ans === "y" || ans === "yes") {
+    deps.rejectCounter.recordAccept()
+    return { kind: "allow" }
+  }
+  if (ans === "a" || ans === "always") {
+    deps.rejectCounter.recordAccept()
+    return { kind: "allow", scope: "session" }
+  }
+  if (durable && raw === "P") {
+    deps.rejectCounter.recordAccept()
+    return { kind: "allow_prefix", durable: true }
+  }
+  if (prefixLabel !== null && ans === "p") {
+    deps.rejectCounter.recordAccept()
+    return { kind: "allow_prefix", durable: false }
+  }
+  if (ans === "t") {
+    const steer = await askSteerText(deps)
+    deps.rejectCounter.recordDeny()
+    return steer !== undefined ? { kind: "deny", steer } : { kind: "deny" }
+  }
+  deps.rejectCounter.recordDeny()
+  return { kind: "deny" }
 }
 
 /** T05 — when `QUANTA_HUNK_APPROVAL` is ON, compute the previewed mutation's
@@ -310,59 +416,40 @@ const buildCliOnConfirm =
     // #20 durable — the [P] verb is offered ONLY when a prefix is safe AND a
     // persistent trust-scope registry is wired (gate `QUANTA_TRUST_SCOPE` on).
     const durable = prefixLabel !== null && deps.trustScope !== undefined
-    // Capture the RAW answer too: the prefix verbs are case-SENSITIVE ([p] this
-    // session vs [P] all sessions) and the lowercased `ans` cannot tell them
-    // apart — so the durable check below reads `raw` and runs BEFORE the `ans`
-    // "p" check (a typed "P" lowercases to "p", so durable must win first).
-    // T05 — append the [h]unk-select verb when a per-hunk option exists.
-    const hunkVerb = hunkOption !== undefined ? " / [h]unk-select" : ""
-    const raw = (
-      await askLine(
-        deps.channel,
-        durable
-          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
-          : prefixLabel !== null
-            ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
-            : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `,
-      )
-    ).trim()
-    const ans = raw.toLowerCase()
-    deps.idleMonitor.markActive()
-    // T05 — [h] drives the per-hunk picker (only offered when hunkOption is set).
-    if (hunkOption !== undefined && ans === "h") {
-      return runHunkSelect(deps, hunkOption.diff, hunkOption.ids)
+    // UUX-1-06 — render + answer-map through the SHARED verb helper (the
+    // deferred prompt consumes the same one); only the DECISION SHAPING below
+    // is inline-specific (ConfirmDecision vs the wire union).
+    const answer = await promptNormalApprovalVerbs(deps, {
+      subject: action.tool,
+      ...(hunkOption !== undefined ? { hunk: hunkOption } : {}),
+      prefixLabel,
+      durable,
+    })
+    switch (answer.kind) {
+      case "hunk_select":
+        // Structurally gated: the helper only returns this when the cap was set.
+        return hunkOption !== undefined
+          ? runHunkSelect(deps, hunkOption.diff, hunkOption.ids)
+          : false
+      case "allow":
+        return answer.scope === "session" ? { decision: "allow", scope: "session" } : true
+      case "allow_prefix":
+        // #20 durable — [P] mints a DURABLE program-token grant into the
+        // persistent registry (survives across sessions) AND allows this
+        // session (session_prefix).
+        if (answer.durable && deps.trustScope !== undefined && prefixLabel !== null) {
+          deps.trustScope.registry.grant(deps.trustScope.projectKey, {
+            tool: action.tool,
+            scope: "project",
+            commandPattern: prefixLabel,
+          })
+        }
+        return { decision: "allow", scope: "session_prefix" }
+      case "deny":
+        return answer.steer !== undefined
+          ? { decision: "deny_and_steer", steer: answer.steer }
+          : false
     }
-    if (ans === "y" || ans === "yes") {
-      deps.rejectCounter.recordAccept()
-      return true
-    }
-    if (ans === "a" || ans === "always") {
-      deps.rejectCounter.recordAccept()
-      return { decision: "allow", scope: "session" }
-    }
-    // #20 durable — [P] (capital, exact) mints a DURABLE program-token grant into
-    // the persistent registry (survives across sessions) AND allows this session
-    // (session_prefix). Checked BEFORE the lowercase [p] so a typed "P" is durable.
-    if (durable && raw === "P" && deps.trustScope !== undefined && prefixLabel !== null) {
-      deps.trustScope.registry.grant(deps.trustScope.projectKey, {
-        tool: action.tool,
-        scope: "project",
-        commandPattern: prefixLabel,
-      })
-      deps.rejectCounter.recordAccept()
-      return { decision: "allow", scope: "session_prefix" }
-    }
-    if (prefixLabel !== null && ans === "p") {
-      deps.rejectCounter.recordAccept()
-      return { decision: "allow", scope: "session_prefix" }
-    }
-    if (ans === "t") {
-      const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
-      deps.rejectCounter.recordDeny()
-      return steer.length > 0 ? { decision: "deny_and_steer", steer } : false
-    }
-    deps.rejectCounter.recordDeny()
-    return false
   }
 
 const buildCliApprovalPrompt =
@@ -391,25 +478,27 @@ const buildCliApprovalPrompt =
       return { decision: "deny" }
     }
     process.stderr.write(`Approval required: ${approval.reason}\n`)
-    // jun-10 — "[a]lways session" on the DEFERRED prompt too: resolves
-    // approve+scope:"session" so the runtime controller mints the standing
-    // grant (one abort+re-run round-trip per key per session, not per ask).
-    const ans = (
-      await askLine(deps.channel, "Approve pending action? [y]es / [a]lways session / [N]o ")
-    )
-      .trim()
-      .toLowerCase()
-    deps.idleMonitor.markActive()
-    if (ans === "y" || ans === "yes") {
-      deps.rejectCounter.recordAccept()
-      return "approve"
+    // UUX-1-06 (A-r2) — the deferred NORMAL arm offers the SAME verbs the
+    // inline confirm offers, via the SAME helper: [y]/[a]lways-session/[N]/
+    // deny+s[t]eer. It only has a `PendingApprovalView` (no ToolAction), so the
+    // ToolAction-bound capabilities ([p]/[P] prefix, [h]unk, diff preview) are
+    // structurally ABSENT — declared by omitting the caps, never copy-forked.
+    // A deny+steer maps onto the wire union; the session-turn-driver threads
+    // the steer to `session.approval.respond` ⇒ the host lease carries it.
+    const answer = await promptNormalApprovalVerbs(deps, { subject: "pending action" })
+    switch (answer.kind) {
+      case "allow":
+        // jun-10 — "[a]lways session" resolves approve+scope:"session" so the
+        // runtime controller mints the standing grant (one abort+re-run
+        // round-trip per key per session, not per ask).
+        return answer.scope === "session" ? { decision: "approve", scope: "session" } : "approve"
+      case "deny":
+        return answer.steer !== undefined ? { decision: "deny", steer: answer.steer } : "deny"
+      default:
+        // allow_prefix / hunk_select are unreachable without their caps —
+        // fail CLOSED if the helper ever regresses.
+        return "deny"
     }
-    if (ans === "a" || ans === "always") {
-      deps.rejectCounter.recordAccept()
-      return { decision: "approve", scope: "session" }
-    }
-    deps.rejectCounter.recordDeny()
-    return "deny"
   }
 
 export interface ComposeCliRuntimeContextArgs {
@@ -723,9 +812,11 @@ export const composeCliRuntimeContext = async (
     })
   }
   const permissionStore = await loadPermissionStore()
-  const planExitPort = createCliPlanExitPort({ ask: (p) => askLine(midTurnApprovalChannel, p) })
+  const planExitPort = createCliPlanExitPort({
+    ask: (p) => askLine(midTurnApprovalChannel, p, "plan-exit"),
+  })
   const userInputPort = createCliUserInputPort({
-    ask: (p) => askLine(midTurnApprovalChannel, p),
+    ask: (p) => askLine(midTurnApprovalChannel, p, "user-input"),
     stream: turnStream,
   })
   // ADR-0296 PROMPT mode — see {@link buildBackgroundConsentPort}. Bound to the
