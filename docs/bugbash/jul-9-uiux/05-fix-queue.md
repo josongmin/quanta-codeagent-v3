@@ -35,7 +35,7 @@ Every item below was re-verified against HEAD on 2026-07-10 (see [04-corrections
 | 9 | UUX-5-01 | Context warning: `/summarize-now` not `/compact` (+ update hellgate pin) | context-warning.ts:86 literal "/compact"; no such command |
 | 10 | UUX-6-05 | Shell intentional bg detach: distinct label, not `aborted (timeout)` | shell.ts:684 → shell-stream-painter.ts:91 |
 | 11 | UUX-1-08, UUX-1-09, UUX-6-26 | Keybind/ENV advertising = reality (help shows 5 of 21 binds; ENV_TABLE omits QUANTA_READ_DEDUP / QUANTA_EXTERNAL_EDITOR / QUANTA_KEYBINDINGS) | keybindings/defaults.ts:56 "ADVERTISING ONLY" |
-| 12 | UUX-6-07 | READ_DEDUP: document in /help; consider content-hash or interactive default-OFF | index.ts:60 seeded ON; mtime-only trust |
+| 12 | UUX-6-07 | ~~READ_DEDUP~~ DONE jul-10: /help row (W-E) + content-hash truth (S3) | was mtime-only trust |
 
 ## Wave C — terminal / mid-turn / attach
 
