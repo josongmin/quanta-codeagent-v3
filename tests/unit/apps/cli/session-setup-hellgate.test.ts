@@ -579,6 +579,89 @@ describe("session-setup — runtime behavior (boot with stubbed surface)", () =>
     }
   })
 
+  test("spinner-stall: QUANTA_SPINNER_STALL unset ⇒ result.llm is the LITERAL boot llm (byte-identical) and no 1s stall poll exists", async () => {
+    const prev = process.env.QUANTA_SPINNER_STALL
+    delete process.env.QUANTA_SPINNER_STALL
+    const origSetInterval = globalThis.setInterval
+    const stallPollHandles: unknown[] = []
+    // biome-ignore lint/suspicious/noExplicitAny: timer spy needs the loose overload set
+    globalThis.setInterval = ((fn: any, ms?: any, ...rest: any[]) => {
+      const handle = origSetInterval(fn, ms, ...rest)
+      if (ms === 1_000) stallPollHandles.push(handle)
+      return handle
+    }) as typeof setInterval
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps } = makeStubDeps()
+      let builtLlm: unknown
+      const captureDeps: SetupSessionDeps = {
+        ...deps,
+        buildLlm: (...args) => {
+          const llm = deps.buildLlm(...args)
+          builtLlm = llm
+          return llm
+        },
+      }
+      const result = await setupSession(captureDeps)
+      // Identity pin: gate OFF ⇒ the un-wrapped boot llm reference flows out.
+      expect(builtLlm).toBeDefined()
+      expect(result.llm).toBe(builtLlm as never)
+      expect(stallPollHandles).toHaveLength(0)
+    } finally {
+      globalThis.setInterval = origSetInterval
+      if (prev === undefined) delete process.env.QUANTA_SPINNER_STALL
+      else process.env.QUANTA_SPINNER_STALL = prev
+    }
+  })
+
+  test("spinner-stall: QUANTA_SPINNER_STALL=1 ⇒ llm is WRAPPED (stall-tracked) and shutdownMcp cancels the stall poll (no leaked interval)", async () => {
+    const prev = process.env.QUANTA_SPINNER_STALL
+    process.env.QUANTA_SPINNER_STALL = "1"
+    const origSetInterval = globalThis.setInterval
+    const origClearInterval = globalThis.clearInterval
+    const stallPollHandles: unknown[] = []
+    const cleared: unknown[] = []
+    // biome-ignore lint/suspicious/noExplicitAny: timer spy needs the loose overload set
+    globalThis.setInterval = ((fn: any, ms?: any, ...rest: any[]) => {
+      const handle = origSetInterval(fn, ms, ...rest)
+      if (ms === 1_000) stallPollHandles.push(handle)
+      return handle
+    }) as typeof setInterval
+    // biome-ignore lint/suspicious/noExplicitAny: timer spy needs the loose overload set
+    globalThis.clearInterval = ((handle: any) => {
+      cleared.push(handle)
+      return origClearInterval(handle)
+    }) as typeof clearInterval
+    try {
+      const { setupSession } = await import("../../../../src/apps/cli/repl/session-setup")
+      const { deps } = makeStubDeps()
+      let builtLlm: unknown
+      const captureDeps: SetupSessionDeps = {
+        ...deps,
+        buildLlm: (...args) => {
+          const llm = deps.buildLlm(...args)
+          builtLlm = llm
+          return llm
+        },
+      }
+      const result = await setupSession(captureDeps)
+      // Wired: the session llm is the stall-tracking decorator, not the inner.
+      expect(builtLlm).toBeDefined()
+      expect(result.llm).not.toBe(builtLlm as never)
+      expect(typeof result.llm.stream).toBe("function")
+      // Exactly one 1s stall-poll interval was scheduled…
+      expect(stallPollHandles).toHaveLength(1)
+      // …and session close tears it down (no leaked interval).
+      await result.shutdownMcp()
+      expect(cleared).toContain(stallPollHandles[0])
+    } finally {
+      globalThis.setInterval = origSetInterval
+      globalThis.clearInterval = origClearInterval
+      if (prev === undefined) delete process.env.QUANTA_SPINNER_STALL
+      else process.env.QUANTA_SPINNER_STALL = prev
+    }
+  })
+
   test("WS-H: gate OFF ⇒ no capture handle AND the LITERAL stream is passed through (byte-identical)", async () => {
     const prev = process.env.QUANTA_BG_TURN
     delete process.env.QUANTA_BG_TURN

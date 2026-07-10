@@ -5,10 +5,10 @@ subsystem: CLI chrome — scriptable status line (operator-authored command)
 order: 26
 maturity: L3
 status: new
-ui_surfaces: []
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
-configurable: static
+configurable: integrated
 config_refs:
   env: [QUANTA_STATUS_LINE, QUANTA_STATUS_LINE_CONFIG]
   runtime: [statusLineConfig]
@@ -17,12 +17,12 @@ labels: [surface:cli, absorbed:claude-code, ticket-15, seam]
 depends_on:
   - 0297-cli-runtime-feature-config
 surface_integration:
-  cli: na
+  cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-10"
   evidence:
-    cli: "validated SEAM — runtime-config homes/parses the `statusLineConfig` knob (parseStatusLineConfig in src/shared/runtime-config.ts), but `runStatusCommand`/`buildStatusPayload` are NOT imported by any live (non-test) src file; grep of src/** (excluding __tests__) shows zero render-root consumer, so the runner is unit-proven but not yet composed at the REPL status tick"
+    cli: "LIVE at the composition root (UUX-1-25 drift fix) — `setupSession` (src/apps/cli/repl/session-setup.ts:404, the #15 block) builds `createStatusLineDriver({cfg: runtimeConfig().statusLineConfig, view: buildSessionStatusView(...), pills, width})`, fires the initial `tick()` and `start()`s the refresh poll; the driver tick calls `buildStatusPayload`/`runStatusCommand` (src/apps/cli/status-line-driver.ts:107-108) and routes the rendered first line into the pills row as the far-right segment; `shutdownMcp` stops the poll on session end. Double-gated default-OFF (`statusLineConfig` is undefined unless QUANTA_STATUS_LINE is on AND QUANTA_STATUS_LINE_CONFIG parses) ⇒ no driver, byte-identical"
     web: "terminal-specific scriptable status line (ANSI/OSC-aware first-line render on the CLI prompt); no browser equivalent"
 purpose: |
   Mirrors Claude Code's scriptable `statusLine { type:"command", command,
@@ -81,26 +81,6 @@ knobs:
   - name: QUANTA_STATUS_LINE_CONFIG
     where: src/shared/runtime-config-knobs.ts
     purpose: JSON `statusLine{}` config (command/padding/refreshInterval/hideVimModeIndicator); ignored unless the master gate is on and it parses to an object with a usable command
-deliberate_hold:
-  reason: |
-    Validated SEAM, not yet composed at the render root. The runtime-config
-    knob (`statusLineConfig`) is homed and parsed (`parseStatusLineConfig` in
-    src/shared/runtime-config.ts) and the runner is fully unit-proven
-    (R-1..R-10 / B-1..B-4 / F-1 hellgate, including a real-subprocess stdin
-    round-trip), but `runStatusCommand` / `buildStatusPayload` have NO live
-    (non-test) src consumer — a grep of src/** excluding __tests__ shows zero
-    import outside runtime-config's comments. So the line is validated but not
-    yet rendered on the REPL status tick. ui_surfaces is therefore empty (no
-    live surface) and surface_integration cli/web = na — claiming "full" would
-    be a false-parity overclaim.
-  promotion_path: |
-    Pure wiring step in the surface-composition root: build a
-    `SessionStatusView` from the live session host, call `runStatusCommand` on
-    the status tick gated by `runtimeConfig.statusLineConfig`, and render its
-    `text` in place of / alongside the fixed `formatContextUsage` line. A
-    sibling composition-root (CF) lane may land this; on wiring, flip
-    ui_surfaces → [cli], configurable → integrated, surface_integration.cli →
-    full with the render-root file:line, and clear this hold.
 notes: |
   Distinct from `cli-status-bar` (DECSTBM scroll-region pinned bottom row,
   FIXED renderer) and `cli-status-pills` (top session chrome row): this is the

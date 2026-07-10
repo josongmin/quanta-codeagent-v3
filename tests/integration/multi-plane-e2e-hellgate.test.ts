@@ -34,6 +34,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { z } from "zod"
 import { defaultBudgetLedger } from "@/agent/budget-ledger"
 import { defaultCheckpointPolicy } from "@/agent/checkpoint-policy"
 import { wireCheckpointedEffectChannel } from "@/agent/checkpoint-wiring"
@@ -45,11 +46,12 @@ import { defaultPlanQueueStore } from "@/agent/plan-queue"
 import { defaultBackgroundSubagentScheduler } from "@/agent/subagent-background"
 import type { AgentConfig } from "@/agent/types"
 import { defaultVerifyCheckpointBridge } from "@/agent/verify-checkpoint-bridge"
-import type { LLMPort, Message, ToolUseBlock } from "@/llm"
+import type { LLMPort, Message, StreamEvent, ToolUseBlock } from "@/llm"
 import { FoundryProviderAdapter } from "@/llm/providers/foundry-adapter"
 import { ProviderError } from "@/llm/providers/provider-port"
 import { passthroughMcpSandbox } from "@/mcp/skybridge/passthrough"
 import { resolveMcpSandbox } from "@/mcp/skybridge/registry"
+import { Metrics } from "@/observability"
 import {
   consoleMetricsSink,
   defaultMetricsRegistry,
@@ -68,6 +70,7 @@ import type { PermissionContext } from "@/permission"
 import { defaultOsSandbox } from "@/runtime/os-sandbox"
 import { compileBubblewrapArgs } from "@/runtime/os-sandbox/bubblewrap"
 import type { ShadowOdb } from "@/storage/shadow-odb"
+import type { StreamPort } from "@/stream"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { ToolRegistry } from "@/tool"
 import { csvReadTool, ndjsonReadTool, pdfReadTool, yamlReadTool } from "@/tool/document"
@@ -79,31 +82,33 @@ import { webFetchTool } from "@/tool/web"
 /* Helpers + minimal-config harness (mirrors the precedent test)              */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+// Typed fakes (audit R3 LOW-4): the REAL interfaces, no blanket casts. The
+// prior `as never` fake yielded a `stopReason` field the wire union spells
+// `stop_reason` — exactly the shape drift a compile-checked fake catches.
 const minimalLlm: LLMPort = {
-  stream: async function* () {
-    yield { type: "message_stop", stopReason: "end_turn" } as never
+  stream: async function* (): AsyncIterable<StreamEvent> {
+    yield { type: "message_stop", stop_reason: "end_turn" }
   },
-} as unknown as LLMPort
+}
 
-const minimalPerm: PermissionContext = {
-  mode: "default",
-  trustedTools: new Set(),
-  hardDenyTools: new Set(),
-} as unknown as PermissionContext
+// `PermissionContext` requires only `mode`; the old fake's phantom
+// `trustedTools`/`hardDenyTools` fields never existed on the interface.
+const minimalPerm: PermissionContext = { mode: "default" }
 
-const makeMinimalConfig = (overrides: Partial<AgentConfig> = {}): AgentConfig =>
-  ({
-    llm: minimalLlm,
-    registry: new ToolRegistry([]),
-    stream: { emit: () => {} } as never,
-    permission: minimalPerm,
-    messages: [],
-    system: "",
-    cwd: "/tmp",
-    maxTurns: 1,
-    signal: new AbortController().signal,
-    ...overrides,
-  }) as AgentConfig
+const minimalStream: StreamPort = { emit: () => {} }
+
+const makeMinimalConfig = (overrides: Partial<AgentConfig> = {}): AgentConfig => ({
+  llm: minimalLlm,
+  registry: new ToolRegistry([]),
+  stream: minimalStream,
+  permission: minimalPerm,
+  messages: [],
+  system: "",
+  cwd: "/tmp",
+  maxTurns: 1,
+  signal: new AbortController().signal,
+  ...overrides,
+})
 
 const makeUniqueDir = async (prefix: string): Promise<string> => {
   const dir = path.join(
@@ -143,7 +148,7 @@ const makeFakeOdb = (
 const makeMutatingTool = (name: string, output: string): Tool => ({
   name,
   description: `${name} mutating fake`,
-  inputSchema: { parse: (x: unknown) => x } as never,
+  inputSchema: z.unknown(),
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   execute: async function* (): AsyncIterable<ToolEvent> {
@@ -154,7 +159,7 @@ const makeMutatingTool = (name: string, output: string): Tool => ({
 const makeReadOnlyTool = (name: string, output: string): Tool => ({
   name,
   description: `${name} readonly fake`,
-  inputSchema: { parse: (x: unknown) => x } as never,
+  inputSchema: z.unknown(),
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
   execute: async function* (): AsyncIterable<ToolEvent> {
@@ -169,11 +174,11 @@ const fakeToolUse = (name: string, input: unknown = {}): ToolUseBlock => ({
   input,
 })
 
-const fakeToolCtx = (cwd = "/repo", signal?: AbortSignal): ToolContext =>
-  ({
-    cwd,
-    signal: signal ?? new AbortController().signal,
-  }) as ToolContext
+// `ToolContext` requires exactly `cwd` + `signal` — typed, no cast.
+const fakeToolCtx = (cwd = "/repo", signal?: AbortSignal): ToolContext => ({
+  cwd,
+  signal: signal ?? new AbortController().signal,
+})
 
 const PNG_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -198,17 +203,23 @@ const PDF_BYTES = new TextEncoder().encode(
 describe("Plane 1 — Orchestration", () => {
   test("P1-1: branchSearch + subagentBackground + planQueue all wired → extraTools includes ALL", async () => {
     const scheduler = defaultBackgroundSubagentScheduler({
-      runner: async () => ({ ok: true, output: "child", turns: 1, finalText: "child" }) as never,
+      // Typed `SubagentRunner` result — the old `as never` fake carried a
+      // phantom `output` field `SubagentResult` never declared.
+      runner: async () => ({ ok: true, turns: 1, finalText: "child" }),
     })
-    // branchSearch needs only a `BranchSearchConfig` shape — the tier-1 builder
-    // is responsible for guarding on the absence of the LLM/verifier wires.
-    // The minimal shape `{enabled:true}` is enough to register the
-    // `branch_search` tool via `buildBranchSearchTool`.
+    // A REAL minimal `BranchSearchConfig` — presence of the slot is what
+    // registers the `branch_search` tool; the tier-1 builder guards the
+    // absence of the LLM/verifier wires.
     const planQueueStore = defaultPlanQueueStore()
     const features = await buildSessionFeatures(
       makeMinimalConfig({
         subagentBackground: { scheduler },
-        branchSearch: { enabled: true } as never,
+        branchSearch: {
+          defaultN: 1,
+          defaultVerifierKinds: [],
+          timeoutPerBranchMs: 1_000,
+          isolation: "tmpdir",
+        },
         planQueue: { store: planQueueStore },
       }),
     )
@@ -245,10 +256,11 @@ describe("Plane 1 — Orchestration", () => {
     const mutating = makeMutatingTool("mutate", "wrote-data")
     const wrapped = wireCheckpointedEffectChannel(
       fakeInner,
-      {
+      // A FULL typed config (was a 2-field partial `as AgentConfig`).
+      makeMinimalConfig({
         shadowOdb: odb,
         shadowCheckpoint: { mode: "pre-destructive" },
-      } as AgentConfig,
+      }),
       (name) => (name === "mutate" ? mutating : undefined),
     )
     const env = await wrapped.execute({
@@ -341,10 +353,7 @@ describe("Plane 2 — Effect", () => {
     try {
       await writeFile(path.join(dir, "x.png"), PNG_BYTES)
       let last: ToolResult | undefined
-      for await (const ev of readImageTool.execute(
-        { path: "x.png" } as never,
-        { cwd: dir, signal: new AbortController().signal } as never,
-      )) {
+      for await (const ev of readImageTool.execute({ path: "x.png" }, fakeToolCtx(dir))) {
         if (ev.type === "result") last = ev.result
       }
       expect(last?.ok).toBe(true)
@@ -366,10 +375,7 @@ describe("Plane 2 — Effect", () => {
     try {
       await writeFile(path.join(dir, "x.pdf"), PDF_BYTES)
       let last: ToolResult | undefined
-      for await (const ev of pdfReadTool.execute(
-        { path: "x.pdf" } as never,
-        { cwd: dir, signal: new AbortController().signal } as never,
-      )) {
+      for await (const ev of pdfReadTool.execute({ path: "x.pdf" }, fakeToolCtx(dir))) {
         if (ev.type === "result") last = ev.result
       }
       expect(last?.ok).toBe(true)
@@ -395,10 +401,7 @@ describe("Plane 2 — Effect", () => {
     }) as unknown as typeof fetch
     const tool = webFetchTool({ fetcher: fakeFetcher })
     let last: ToolResult | undefined
-    for await (const ev of tool.execute(
-      { url: "https://example.com/page" } as never,
-      { cwd: "/tmp", signal: new AbortController().signal } as never,
-    )) {
+    for await (const ev of tool.execute({ url: "https://example.com/page" }, fakeToolCtx("/tmp"))) {
       if (ev.type === "result") last = ev.result
     }
     expect(last?.ok).toBe(true)
@@ -411,10 +414,7 @@ describe("Plane 2 — Effect", () => {
     try {
       await writeFile(path.join(dir, "data.csv"), "a,b,c\n1,2,3\n4,5,6\n")
       let last: ToolResult | undefined
-      for await (const ev of csvReadTool.execute(
-        { path: "data.csv" } as never,
-        { cwd: dir, signal: new AbortController().signal } as never,
-      )) {
+      for await (const ev of csvReadTool.execute({ path: "data.csv" }, fakeToolCtx(dir))) {
         if (ev.type === "result") last = ev.result
       }
       expect(last?.ok).toBe(true)
@@ -428,10 +428,7 @@ describe("Plane 2 — Effect", () => {
     try {
       await writeFile(path.join(dir, "data.yaml"), "name: alice\nage: 30\n")
       let last: ToolResult | undefined
-      for await (const ev of yamlReadTool.execute(
-        { path: "data.yaml" } as never,
-        { cwd: dir, signal: new AbortController().signal } as never,
-      )) {
+      for await (const ev of yamlReadTool.execute({ path: "data.yaml" }, fakeToolCtx(dir))) {
         if (ev.type === "result") last = ev.result
       }
       expect(last?.ok).toBe(true)
@@ -445,10 +442,7 @@ describe("Plane 2 — Effect", () => {
     try {
       await writeFile(path.join(dir, "log.ndjson"), `{"a":1}\n{"a":2}\n{"a":3}\n`)
       let last: ToolResult | undefined
-      for await (const ev of ndjsonReadTool.execute(
-        { path: "log.ndjson" } as never,
-        { cwd: dir, signal: new AbortController().signal } as never,
-      )) {
+      for await (const ev of ndjsonReadTool.execute({ path: "log.ndjson" }, fakeToolCtx(dir))) {
         if (ev.type === "result") last = ev.result
       }
       expect(last?.ok).toBe(true)
@@ -616,6 +610,9 @@ describe("Plane 4 — Control / Security", () => {
       void new FoundryProviderAdapter({
         providerId: "foundry",
         model: "claude-sonnet-4-6",
+        // TARGETED cast (intentional): an auth bundle MISSING its required
+        // key/token IS the misconfiguration under test — the type system
+        // correctly refuses it, so the invalid shape must be forced through.
         auth: { mode: "Azure AI Foundry" } as never,
       })
     } catch (e) {
@@ -716,7 +713,9 @@ describe("Cross-plane composition", () => {
   test("X-28: full pipeline — image+web+shadowOdb+checkpointPolicy+metrics+budgetLedger compose without crashes", async () => {
     const odb = makeFakeOdb({ registerHead: async () => "head-sha" })
     const ledger = defaultBudgetLedger()
-    const metrics = defaultMetricsRegistry()
+    // The REAL loop `Metrics` (the old fake passed a `MetricsRegistry`
+    // — a DIFFERENT port — behind `as never`; the slot type is `Metrics`).
+    const metrics = new Metrics()
     const baseRegistry = new ToolRegistry([readImageTool as Tool, webFetchTool() as Tool])
     const features = await buildSessionFeatures(
       makeMinimalConfig({
@@ -724,7 +723,7 @@ describe("Cross-plane composition", () => {
         shadowOdb: odb,
         shadowCheckpoint: { mode: "pre-destructive" },
         budgetLedger: ledger,
-        metrics: metrics as never,
+        metrics,
       }),
     )
     const names = features.extraTools.map((t) => t.name)
@@ -742,7 +741,8 @@ describe("Cross-plane composition", () => {
 
   test("X-29: pipeline + subagentBackground.scheduler → schedule survives composition", async () => {
     const scheduler = defaultBackgroundSubagentScheduler({
-      runner: async () => ({ ok: true, output: "done", turns: 1, finalText: "done" }) as never,
+      // Typed `SubagentRunner` result (phantom `output` field dropped).
+      runner: async () => ({ ok: true, turns: 1, finalText: "done" }),
     })
     const features = await buildSessionFeatures(
       makeMinimalConfig({

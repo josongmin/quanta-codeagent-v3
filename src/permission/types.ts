@@ -54,6 +54,15 @@ export interface ToolAction {
    *  it sees a plain confirm. Absent ⇒ byte-identical for every pre-ADR-0512
    *  caller (the field is never set on the legacy always-confirm path). */
   scopeContext?: { activeSkill: string; reason: string; justification?: string }
+  /** UUX-6-12 — present ONLY when this confirm is a TEAM-BROKER escalation
+   *  (`QUANTA_TEAM_BROKER`): a WORKER subagent's soft-denied tool escalated to
+   *  the leader's HITL authority. Names WHICH worker is asking (its stable
+   *  mailbox id) plus the requested scope/justification, so the surface can
+   *  render an informed prompt instead of a bare `Allow <tool>?`. Stamped by
+   *  `@/agent/coordination-broker-wire#buildLeaderDecide`; a surface that
+   *  ignores it sees a plain confirm. Absent ⇒ byte-identical for every
+   *  non-broker caller (never set outside the escalation path). */
+  teamEscalation?: { workerId: string; scope: string; reason: string }
 }
 
 /**

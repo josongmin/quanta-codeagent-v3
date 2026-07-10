@@ -394,7 +394,8 @@ const maybeWireCoordinationBroker = (
   // `buildLeaderDecide`) replaces the prior inline collapse to `{approved}`:
   // the leader's deny_and_steer STEER and allow SCOPE now survive the boundary,
   // and a session-scoped allow is cached so the same ask never re-prompts.
-  const leaderDecide: LeaderEscalationDecider = buildLeaderDecide(onConfirm)
+  // UUX-6-12 — thread the worker's id so the leader's prompt names WHO asks.
+  const leaderDecide: LeaderEscalationDecider = buildLeaderDecide(onConfirm, { workerId })
 
   let esc = 0
   const broker = buildLeaderHitlBroker({

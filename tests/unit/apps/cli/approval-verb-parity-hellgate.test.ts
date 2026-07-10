@@ -18,53 +18,47 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { MidTurnLineResult } from "@/apps/cli/repl/mid-turn-approval-channel"
+import type {
+  MidTurnApprovalChannel,
+  MidTurnLineResult,
+} from "@/apps/cli/repl/mid-turn-approval-channel"
 import { __testing } from "@/apps/cli/repl/runtime-context-compose"
 import type { ToolAction } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
 import { normalizeApprovalDecision } from "@/runner/orchestrate"
+import {
+  type FakeCliHitlDeps,
+  makeFakeCliHitlDeps,
+  makeFakeRejectCounter,
+  makeScriptedChannel,
+} from "./_cli-fakes"
 
-// ── fixtures ──────────────────────────────────────────────────────────────────
+// ── fixtures (typed builders — audit R3 LOW-4: no blanket `as never`) ─────────
 
-/** A scripted channel: each awaitLine consumes the next entry (a raw line or a
- *  typed release). Captures the labels consumers pass (C2). */
-const scriptedChannel = (script: readonly (string | MidTurnLineResult)[]) => {
-  const queue = [...script]
-  const labels: (string | undefined)[] = []
-  return {
-    labels,
-    channel: {
-      active: true,
-      awaitLine: async (_signal?: AbortSignal, label?: string): Promise<MidTurnLineResult> => {
-        labels.push(label)
-        const next = queue.shift()
-        if (next === undefined) throw new Error("channel script exhausted — prompt over-asked")
-        return typeof next === "string" ? { kind: "line", line: next } : next
-      },
-      tryResolve: () => false,
-      clear: () => {},
-    },
-  }
-}
-
-const makeDeps = (script: readonly (string | MidTurnLineResult)[]) => {
+const makeDeps = (
+  script: readonly (string | MidTurnLineResult)[],
+): {
+  counters: { accepts: number; denies: number }
+  labels: (string | undefined)[]
+  deps: FakeCliHitlDeps
+} => {
   const counters = { accepts: 0, denies: 0 }
-  const { channel, labels } = scriptedChannel(script)
+  const { channel, labels } = makeScriptedChannel(script)
   return {
     counters,
     labels,
-    deps: {
-      idleMonitor: { markActive: () => {} } as never,
-      rejectCounter: {
+    deps: makeFakeCliHitlDeps({
+      rejectCounter: makeFakeRejectCounter({
         recordAccept: () => {
           counters.accepts += 1
         },
         recordDeny: () => {
           counters.denies += 1
+          return counters.denies
         },
-      } as never,
-      channel: channel as never,
-    },
+      }),
+      channel,
+    }),
   }
 }
 
@@ -112,7 +106,7 @@ afterEach(() => {
 describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", () => {
   test("RED pin: deferred 't' + steer text ⇒ the steer SURVIVES as {decision:'deny', steer}", async () => {
     const { deps } = makeDeps(["t", "edit the fixture copy instead"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     const raw = await captureStderr(async () => {
       const result = await prompt(approval)
       expect(normalizeApprovalDecision(result)).toEqual({
@@ -125,7 +119,7 @@ describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", 
 
   test("deferred prompt OFFERS the deny+steer verb (verb parity with the inline confirm)", async () => {
     const { deps } = makeDeps(["y"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     const out = await captureStderr(() => prompt(approval))
     expect(out).toContain("deny+s[t]eer")
     expect(out).toContain("[a]lways session")
@@ -133,7 +127,7 @@ describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", 
 
   test("capability flags: the deferred arm (no ToolAction) offers NO [p]/[P] prefix and NO hunk verb", async () => {
     const { deps } = makeDeps(["y"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     const out = await captureStderr(() => prompt(approval))
     expect(out).not.toContain("[p]")
     expect(out).not.toContain("hunk")
@@ -142,7 +136,7 @@ describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", 
 
   test("PAIRED control: 'a' still maps to approve+session (pre-existing verb intact)", async () => {
     const { deps, counters } = makeDeps(["a"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     await captureStderr(async () => {
       expect(normalizeApprovalDecision(await prompt(approval))).toEqual({
         decision: "approve",
@@ -155,14 +149,14 @@ describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", 
   test("PAIRED control: 'y' approves; empty answer fail-closes to a plain deny", async () => {
     {
       const { deps } = makeDeps(["y"])
-      const prompt = __testing.buildCliApprovalPrompt(deps as never)
+      const prompt = __testing.buildCliApprovalPrompt(deps)
       await captureStderr(async () => {
         expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "approve" })
       })
     }
     {
       const { deps, counters } = makeDeps([""])
-      const prompt = __testing.buildCliApprovalPrompt(deps as never)
+      const prompt = __testing.buildCliApprovalPrompt(deps)
       await captureStderr(async () => {
         expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "deny" })
       })
@@ -174,11 +168,11 @@ describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", 
     const verbTail = "[y]es / [a]lways session / [N]o / deny+s[t]eer: "
     const inline = makeDeps(["y"])
     const inlineOut = await captureStderr(() =>
-      __testing.buildCliOnConfirm(inline.deps as never)(plainAction),
+      __testing.buildCliOnConfirm(inline.deps)(plainAction),
     )
     const deferred = makeDeps(["y"])
     const deferredOut = await captureStderr(() =>
-      __testing.buildCliApprovalPrompt(deferred.deps as never)(approval),
+      __testing.buildCliApprovalPrompt(deferred.deps)(approval),
     )
     expect(inlineOut).toContain(verbTail)
     expect(deferredOut).toContain(verbTail)
@@ -192,7 +186,7 @@ describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", 
 describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent degrade)", () => {
   test("deferred: 't' → empty → re-prompt → steer text ⇒ steer survives", async () => {
     const { deps } = makeDeps(["t", "", "run the linter first"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     const out = await captureStderr(async () => {
       expect(normalizeApprovalDecision(await prompt(approval))).toEqual({
         decision: "deny",
@@ -204,7 +198,7 @@ describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent d
 
   test("deferred: 't' → empty → empty again ⇒ plain deny (no phantom steer)", async () => {
     const { deps } = makeDeps(["t", "", ""])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     await captureStderr(async () => {
       expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "deny" })
     })
@@ -212,7 +206,7 @@ describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent d
 
   test("deferred: 't' → empty → 'N' ⇒ plain deny (the offered escape hatch)", async () => {
     const { deps } = makeDeps(["t", "", "N"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     await captureStderr(async () => {
       expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "deny" })
     })
@@ -220,7 +214,7 @@ describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent d
 
   test("inline confirm: 't' → empty → re-prompt → steer ⇒ deny_and_steer (not a silent plain deny)", async () => {
     const { deps, counters } = makeDeps(["t", "", "prefer rg over grep"])
-    const onConfirm = __testing.buildCliOnConfirm(deps as never)
+    const onConfirm = __testing.buildCliOnConfirm(deps)
     const out = await captureStderr(async () => {
       expect(await onConfirm(plainAction)).toEqual({
         decision: "deny_and_steer",
@@ -233,13 +227,14 @@ describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent d
 
   test("inline ESCALATION arm re-asks too (the shared steer reader, no fork)", async () => {
     const { deps } = makeDeps(["t", "", "use the scoped variant"])
-    const onConfirm = __testing.buildCliOnConfirm(deps as never)
+    const onConfirm = __testing.buildCliOnConfirm(deps)
+    // `scopeContext` is a DECLARED optional `ToolAction` field — typed, no cast.
     const escalation: ToolAction = {
       tool: "bash",
       input: {},
       isReadOnly: false,
       scopeContext: { activeSkill: "deploy", reason: "out of scope" },
-    } as never
+    }
     await captureStderr(async () => {
       expect(await onConfirm(escalation)).toEqual({
         decision: "deny_and_steer",
@@ -256,18 +251,19 @@ describe("HELLGATE C2 — a superseded ask names its superseder (diagnosable, st
     const { deps } = makeDeps([
       { kind: "released", cause: "superseded", supersededBy: "elicitation" },
     ])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
-    let decision: unknown
+    const prompt = __testing.buildCliApprovalPrompt(deps)
+    let decision: Awaited<ReturnType<typeof prompt>> | undefined
     const out = await captureStderr(async () => {
       decision = await prompt(approval)
     })
-    expect(normalizeApprovalDecision(decision as never)).toEqual({ decision: "deny" })
+    if (decision === undefined) throw new Error("prompt never resolved a decision")
+    expect(normalizeApprovalDecision(decision)).toEqual({ decision: "deny" })
     expect(out).toContain("superseded by elicitation")
   })
 
   test("the approval prompts LABEL their asks 'approval' on the channel", async () => {
     const { deps, labels } = makeDeps(["y"])
-    const prompt = __testing.buildCliApprovalPrompt(deps as never)
+    const prompt = __testing.buildCliApprovalPrompt(deps)
     await captureStderr(() => prompt(approval))
     expect(labels).toEqual(["approval"])
   })
@@ -279,16 +275,16 @@ describe("HELLGATE C2 — a superseded ask names its superseder (diagnosable, st
     )
     const labels: (string | undefined)[] = []
     const real = createMidTurnApprovalChannel()
-    const spy = {
+    const spy: MidTurnApprovalChannel = {
       active: true,
       awaitLine: (signal?: AbortSignal, label?: string) => {
         labels.push(label)
         return real.awaitLine(signal, label)
       },
-      tryResolve: (line: string) => real.tryResolve(line),
-      clear: (cause: never) => real.clear(cause),
+      tryResolve: (line) => real.tryResolve(line),
+      clear: (cause) => real.clear(cause),
     }
-    registerMidTurnApprovalChannel(spy as never)
+    registerMidTurnApprovalChannel(spy)
     const read = readViaMidTurnChannelOrReadline(new AbortController().signal)
     real.tryResolve("blue")
     expect(await read).toBe("blue")

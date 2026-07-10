@@ -33,7 +33,10 @@ purpose: |
   Event consumer — `AgentEvent` 스트림에서 `tool_call`/`tool_result`/
   `recovery`/`context_compacted`/`usage`를 누적; turn-end시 박스 렌더.
   redaction은 카운트만 노출 (실제 redact된 값 미노출 — secret leak 방지).
-  Default-OFF 시 출력 byte-identical (기존 로프 surface 0변경).
+  DEFAULT = TTY-AUTO (UUX-1-25 drift fix — `isTurnSummaryEnabled`,
+  src/apps/cli/turn-summary.ts:120): unset ⇒ ON iff stdout is a TTY
+  (interactive default-ON), non-TTY/pipe ⇒ OFF; `QUANTA_TURN_SUMMARY=0` 명시
+  OFF, `=1` 강제 ON. OFF일 때 출력 byte-identical (기존 loop surface 0변경).
 evidence:
   code:
     - src/apps/cli/turn-summary.ts
@@ -46,11 +49,11 @@ evidence:
     contract: []
 knobs:
   - name: QUANTA_TURN_SUMMARY
-    default: 'undefined'
-    purpose: '(no description)'
+    default: 'TTY-auto (unset ⇒ ON iff stdout TTY)'
+    purpose: 'turn-end summary box gate — `=0/false/off/no` force-OFF, `=1/true/on/yes` force-ON, unset ⇒ TTY auto-detect (isTurnSummaryEnabled)'
   - name: QUANTA_TURN_SUMMARY_VERBOSE
-    default: 'undefined'
-    purpose: '(no description)'
+    default: 'off'
+    purpose: 'verbose row set for the summary box (`=1` opt-in; isTurnSummaryVerbose)'
 deliberate_hold:
   reason: |
     의도적 미노출: redacted 값 본문, memory recall score, turn timing 세부

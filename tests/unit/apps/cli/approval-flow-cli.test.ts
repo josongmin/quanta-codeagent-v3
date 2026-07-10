@@ -2,25 +2,24 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { AgentOutcome } from "@/agent"
-import { createContextUsageHolder } from "@/apps/cli/repl/context-usage-snapshot"
-import { createMidTurnApprovalChannel } from "@/apps/cli/repl/mid-turn-approval-channel"
 import { runSessionLoop, type SessionLoopSinks } from "@/apps/cli/repl/session-loop"
 import type { SessionSetupResult } from "@/apps/cli/repl/session-setup"
 import type { Message } from "@/llm"
+import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
+import { makeFakeRuntimeContext, makeFakeSessionSetup } from "./_cli-fakes"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
 
-const makeOutcome = (): AgentOutcome =>
-  ({
-    reason: "completed",
-    turns: 1,
-    messages: [
-      { role: "user", content: [{ type: "text", text: "needs approval" }] },
-      { role: "assistant", content: [{ type: "text", text: "approved and completed" }] },
-    ],
-  }) as AgentOutcome
+const makeOutcome = (): AgentOutcome => ({
+  reason: "completed",
+  turns: 1,
+  messages: [
+    { role: "user", content: [{ type: "text", text: "needs approval" }] },
+    { role: "assistant", content: [{ type: "text", text: "approved and completed" }] },
+  ],
+})
 
 const buildSinks = (): SessionLoopSinks & {
   readonly events: string[]
@@ -41,12 +40,7 @@ const buildSinks = (): SessionLoopSinks & {
   }
 }
 
-type StubApprovalDecision =
-  | "approve"
-  | "deny"
-  | { decision: "approve" | "deny"; scope?: "once" | "session"; steer?: string }
-
-const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
+const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
   const counters = {
     approvalPrompt: 0,
     approvalRespond: 0,
@@ -65,7 +59,9 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
   }> = []
   const queue = [...approvalDecisions]
   const outcome = makeOutcome()
-  const runtimeContext: RuntimeContext = {
+  // Typed fake (audit R3 LOW-4): inert defaults from the builder; ONLY the
+  // scripted facade is overridden here.
+  const runtimeContext: RuntimeContext = makeFakeRuntimeContext({
     createRuntimeFacade: async () => ({
       createSession: async () => ({
         sessionId: "approval-flow-cli",
@@ -170,91 +166,15 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
         counters.runtimeClose += 1
       },
     }),
-    materializeReviewerAgent: () => undefined,
-    registry: () => ({ has: () => false, all: () => [] }) as never,
-    permissionMode: () => "default",
-    permissionModeState: () => undefined,
-    automationEngine: () => undefined,
-    toolProfileState: () => undefined,
-    identityModeState: () => undefined,
-    focusChain: () => undefined,
-    stickyModelStore: () => undefined,
-    decisionEmitter: () => undefined,
-    admissibility: () => undefined,
-    planExitPort: () => undefined,
-    userInputPort: () => undefined,
-    dreamTrigger: () => undefined,
-  }
+  })
 
-  const setup: SessionSetupResult = {
-    provider: "openai" as never,
-    model: "test-model",
-    mode: "default" as never,
+  // Typed builder (audit R3 LOW-4): every default is a compile-checked fake;
+  // only the slots THIS flow exercises are overridden. A future REQUIRED
+  // `SessionSetupResult` field breaks the builder's compile, not this suite's
+  // runtime.
+  const setup: SessionSetupResult = makeFakeSessionSetup({
     cwd: "/tmp/test-cwd",
-    slog: { info: () => undefined, warn: () => undefined, error: () => undefined } as never,
-    idleMonitor: { markActive: () => undefined } as never,
-    rejectCounter: { recordAccept: () => undefined, recordDeny: () => 0 } as never,
-    effortStore: {
-      get: () => "default" as const,
-      set: () => undefined,
-      snapshot: () => "default" as const,
-    },
-    // #17 (Agent-B, additive) — required brief store fake (mirrors effortStore).
-    briefStore: { get: () => false, set: () => undefined, snapshot: () => false },
-    llm: { generate: async () => ({ content: [] }) } as never,
-    planMode: false,
-    metrics: undefined as never,
-    state: undefined as never,
-    mcpClients: [],
-    mcpTools: [],
-    mcpSurface: undefined,
-    memoryStore: undefined,
-    memoryEmbedder: undefined,
-    searchPipelineDispose: undefined,
-    skillsConfig: undefined as never,
-    lifecyclePills: {
-      update: () => undefined,
-      render: () => "",
-      flush: () => undefined,
-    } as never,
-    lifecycleTaskRegistry: undefined,
-    lifecycleActivityStore: undefined as never,
-    lifecycleFollowUpQueue: undefined,
     sessionId: "approval-flow-cli",
-    history: [],
-    pendingImages: [],
-    idMeta: undefined,
-    statusBar: {
-      setDefault: () => undefined,
-      transient: () => undefined,
-      clearTransient: () => undefined,
-      teardown: () => undefined,
-    } as never,
-    turnIndicator: {
-      start: () => undefined,
-      stop: () => undefined,
-      updateUsage: () => undefined,
-      markFirstChunk: () => undefined,
-    } as never,
-    contextUsageHolder: createContextUsageHolder(),
-    turnSummary: {
-      onEvent: () => undefined,
-      render: () => "",
-      reset: () => undefined,
-      asStreamPort: () => ({ emit: () => undefined }),
-    } as never,
-    debugHandle: undefined,
-    timelinePanel: undefined,
-    // WS-H / UUX-3-01 — capture tee absent (gate off) in the fixture.
-    backgroundStreamCapture: undefined,
-    // Pre-existing contract drift (fixed alongside WS-H): required keys the
-    // approval flow never reads — inert stubs keep the fixture type-honest.
-    projectsKbStore: undefined,
-    mcpResourceCapture: undefined,
-    // WS-G widened fields (audit R1 — fakes must track SessionSetupResult).
-    mcpHealth: undefined,
-    liveModelSource: { source: () => "test-model" },
-    permissionStore: undefined,
     approvalPrompt: async () => {
       counters.approvalPrompt += 1
       const next = queue.shift()
@@ -262,35 +182,8 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
       return next
     },
     runtimeContext,
-    costPanel: undefined,
-    branchProgress: undefined,
-    planStore: undefined,
-    abort: new AbortController(),
-    pills: { dispose: () => undefined, update: () => undefined } as never,
     argPrompt: "needs approval",
-    stderrIsTTY: false,
-    homeDir: "/tmp",
-    midTurnApprovalChannel: createMidTurnApprovalChannel(),
-    systemSource: { get: () => "SYS", set: () => undefined },
-    refreshSystemPrompt: () => undefined,
-    shutdownMcp: async () => undefined,
-    playbookCliFlag: undefined,
-    featureCfg: {
-      pills: { enabled: false, hideTasks: false, hideFollowUp: false, hideMcp: false },
-      subagentForPills: false,
-      costPanel: { enabled: false },
-      branchProgress: { enabled: false },
-      planStore: { enabled: false },
-      workMetricsSinkEnabled: false,
-      turnSummary: { enabled: false, verbose: false },
-      turnIndicator: { enabled: false, intervalMs: 80 },
-      debugTracer: { enabled: false, categories: undefined, stderrIsTTY: false },
-      imageQueue: { enabled: true, maxSize: 5 },
-      history: { enabled: true, maxLines: 1000, filePath: undefined },
-      multiline: { enabled: true },
-      rewindGit: { enabled: false },
-    } as never,
-  }
+  })
 
   return { counters, setup, respondCalls }
 }

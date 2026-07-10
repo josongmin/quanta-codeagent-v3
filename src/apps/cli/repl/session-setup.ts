@@ -45,6 +45,7 @@ import { maybeRunEnvProbeWire } from "./env-probe-wire"
 import type { IndicatorUsageObserver } from "./factories/indicator-stream-port"
 import { composeCliRuntimeContext } from "./runtime-context-compose"
 import { readSessionRuntimeConfig } from "./session-runtime-config"
+import { buildSpinnerStallLiveWire, SPINNER_STALL_ENV_GATE } from "./spinner-stall-live-wire"
 /** Track D — DebugTracerHandle. Surface owns the live state + the
  *  swap-in/out side effect (mutable proxy port in the stream tee).
  *  The slash adapter consumes ONLY {@link DebugCmdState} I/O — it never
@@ -267,6 +268,16 @@ export const setupSession = async (
   const uninstallOperatorNoticeSink = installCliOperatorNoticeSink()
   const boot = await bootstrapSession(deps, runtime, featureCfg)
 
+  // Spinner-stall live wire (ADR-0227 → operator-notice, follow-up from
+  // e81010371). NEW default-OFF gate `QUANTA_SPINNER_STALL`: when on, the
+  // session LLM is decorated so every stream call is stall-tracked and one
+  // 1s poll timer surfaces stall/recover edges as latched operator notices.
+  // Gate OFF ⇒ `undefined` ⇒ the LITERAL `boot.llm` is forwarded and no
+  // timer exists (byte-identical; pinned by session-setup-hellgate). The
+  // timer is cancelled in `shutdownMcp` below (no leaked interval).
+  const spinnerStallWire = buildSpinnerStallLiveWire(gateOn(runtime.env, SPINNER_STALL_ENV_GATE))
+  const sessionLlm = spinnerStallWire === undefined ? boot.llm : spinnerStallWire.wrapLlm(boot.llm)
+
   process.on("SIGINT", () => {
     process.stderr.write("\n(interrupt — finishing current step)\n")
     boot.abort.abort()
@@ -422,7 +433,7 @@ export const setupSession = async (
     effortStore: boot.effortStore,
     // #17 (Agent-B, additive) — forward the bootstrap brief-mode store.
     briefStore: boot.briefStore,
-    llm: boot.llm,
+    llm: sessionLlm,
     planMode: boot.features.planMode,
     metrics: boot.features.metrics,
     state: boot.features.state,
@@ -488,6 +499,9 @@ export const setupSession = async (
       // #15 — stop the status-line poll on session end (idempotent; undefined
       // when the feature is gated off).
       statusLineDriver?.stop()
+      // Spinner-stall live wire — cancel the 1s stall-poll interval
+      // (idempotent; undefined when QUANTA_SPINNER_STALL is off).
+      spinnerStallWire?.teardown()
       await boot.shutdownMcp()
     },
     // ADR-0301 — forward the CLI flag echo so `runRepl` can hand it to

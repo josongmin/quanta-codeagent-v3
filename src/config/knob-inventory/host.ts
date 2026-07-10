@@ -20,6 +20,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/repl/surface-compose.ts",
   },
   {
+    envKey: "QUANTA_SPINNER_STALL",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Live spinner-stall notice — latched operator warn when the model stream goes silent mid-turn, info on recovery (ADR-0227; opt-in, NOT CLI-seeded).",
+    readSite: "apps/cli/repl/spinner-stall-live-wire.ts",
+  },
+  {
     envKey: "QUANTA_WORKTREE_TOOL",
     kind: "bool",
     default: false,

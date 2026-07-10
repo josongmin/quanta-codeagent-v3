@@ -408,6 +408,18 @@ const buildCliOnConfirm =
       // re-attach it so the shared prompt renders the same header both routes.
       return promptEscalationVerbs(deps, { ...scope, tool: action.tool })
     }
+    // UUX-6-12 — a TEAM-BROKER escalation (a worker subagent's soft-denied tool
+    // routed to this leader's authority) must NAME who is asking + what for; a
+    // bare `Allow <tool>?` would have the operator widen a worker's permission
+    // blind. Context header only — the verb set below stays the shared SSOT.
+    // Absent (every non-broker confirm) ⇒ byte-identical prompt.
+    const team = action.teamEscalation
+    if (team !== undefined) {
+      process.stderr.write(
+        `Subagent '${team.workerId}' asks to run '${action.tool}' — scope: ${team.scope}\n` +
+          `  reason: ${team.reason}\n`,
+      )
+    }
     // T05 — offer the [h]unk-select verb ONLY when QUANTA_HUNK_APPROVAL is ON
     // AND this mutation decomposes into ≥2 previewable hunks. Absent ⇒ the
     // prompt is byte-identical to the pre-T05 flow (no [h] offered).
