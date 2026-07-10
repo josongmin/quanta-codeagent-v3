@@ -95,6 +95,41 @@ describe("@/sdk/runtime", () => {
     const result = await session.transcript.replace(messages)
     expect(result.transcript?.messages).toEqual(messages)
     expect((await session.snapshot()).state.messageCount).toBe(messages.length)
+    // P1 Phase 0 (jul-11) — the symmetric READ getter returns the live
+    // Message[] losslessly (no 256-char preview truncation the SessionEvent
+    // archive suffers), so a surface can persist a lossless transcript for a
+    // later live swap. Empty before any replace/turn; reflects the replace.
+    expect(session.transcript.messages()).toEqual(messages)
+    await session.close()
+    await runtime.close()
+  })
+
+  test("transcript.messages() reads the live transcript losslessly (P1 Phase 0)", async () => {
+    const runtime = await createRuntime({
+      host: createSingleSessionRuntimeHost(() => ({
+        describe: () => ({
+          sessionId: "sdk-read",
+          permissionMode: "default",
+          capabilityManifest: {
+            approvals: "none",
+            tools: false,
+            memory: false,
+            artifacts: false,
+            subagents: false,
+            automation: false,
+            shellSnapshot: false,
+            transport: "inproc",
+          },
+        }),
+        runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
+        close: async () => undefined,
+      })),
+    })
+    const session = await runtime.createSession({ cwd: "/tmp", permissionMode: "default" })
+    expect(session.transcript.messages()).toEqual([]) // empty before any turn
+    const messages = makeOutcome("completed").messages
+    await session.transcript.replace(messages)
+    expect(session.transcript.messages()).toEqual(messages)
     await session.close()
     await runtime.close()
   })

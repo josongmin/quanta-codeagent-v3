@@ -1,117 +1,106 @@
-# P1 — Web daemon multi-session (thread-addressed live sessions)
+# P1 — Web daemon: make ANY thread live (swap model)
 
-**Status:** planned (code-boundary confirmed jul-11). The last remaining item from
-the jul-9 UI/UX bugbash verified backlog. NOT a "nut" — a genuine 2-slice
-architecture change, proven below.
+**Status:** plan re-derived jul-11 after an adversarial audit killed the first
+draft (below). The LAST jul-9 bugbash backlog item.
 
-## Problem
+## What the audit killed (first draft was 짜친/over-engineered)
 
-Today the web daemon is **multi-client, single-session**: `server.ts:182` mints
-ONE `sharedSession = runtime.createSession(config.sessionConfig)`; every WS
-client attaches to that same live transcript (`session-registry.ts` tracks
-per-WS *transport* pairs, but `entry.session` is shared — closing a WS never
-closes the session). A deeplink `?thread=<id>` to a DIFFERENT thread therefore
-renders **read-only history** (`lib/thread-resume.ts`, honest `boundary:
-"read-only-history"`), because the live session cannot be switched to an
-arbitrary thread. When the requested id *equals* the live session id it is
-already effective live-attach (App renders "(live)" + the WS-connected composer
-is active) — so the FLOOR is done; only "make ANY thread live" is open.
+The original 4-phase plan (add `RuntimeSessionConfig.history` → daemon N-session
+factory → WS routing → frontend) was WRONG on two counts, both code-verified:
 
-## Why it is architecture, not a nut (code-confirmed jul-11)
+1. **Phase A's premise was false.** `session.transcript.replace`
+   (`sdk/runtime/session.ts:91`, kernel `reducer.ts:162`) ALREADY seeds a live
+   session's transcript. The CLI's `/fork` + `--resume` already do "make ANY
+   thread live" this way (`session-loop.ts:511,534`; `session-switch.ts:73`
+   `performSessionSwitch` = load thread messages → `transcript.replace` → in-place
+   persist-id repoint). No new `RuntimeSessionConfig.history` field is needed.
+2. **N-concurrent-session hosting is unnecessary AND buggy.** One human operator
+   opening a thread in the web UI needs ONE live session that swaps, not N. And
+   the daemon's config-level ports are explicitly SHARED across connections
+   (`ws-handlers.ts:280` userInputPorts, controlRequestPorts, followerCoControl,
+   observability/canvas/agentState) — replicating N sessions with one shared
+   input/control port is a cross-talk bug the 4-phase plan never accounted for.
+   The swap model keeps ONE session ⇒ those ports stay correctly singleton.
 
-1. **`RuntimeSessionConfig` carries no seed** (`src/host/runtime/types.ts:4`):
-   `{ cwd?, model?, permissionMode?, identityMode?, toolProfile? }` — no
-   `history` / `messages`. `createSession` (`src/sdk/runtime/runtime.ts:9`) makes
-   an EMPTY session; `createSessionHost(config)` has no hydrate path. So the SDK
-   literally cannot spawn a session seeded from a persisted transcript today.
-2. **The daemon's per-session wiring assumes ONE session**: three collaborators
-   bind to `sharedSession` inline (`server.ts:190` setupThreadPersistence,
-   `:205` setupFollowerApproval, `:216` attachCostAggregator). Multi-session
-   needs each replicated per hosted session.
+## The one keystone the audit itself under-weighted
 
-Both must change; A gates B (no daemon hydrate without SDK seed). That is the
-"session-registry architecture" the earlier notes referenced — now pinned to
-exact lines.
+The swap needs a **lossless `Message[]` source** for `transcript.replace`, and
+the daemon does not have one:
 
-## Plan (4 phases, each an independent tsc-green commit; A → B → C → D)
+- `session-registry.ts:42` keys by WS object, `entry.session` is shared — no
+  per-thread session (confirmed: no phase pre-built).
+- The daemon persists **`SessionEvent[]`** to sqlite (`server/persistence.ts`,
+  `persistence-sqlite.ts`), NOT `Message[]`.
+- Those events are a **UI archive, lossy**: `turn.started.prompt` and
+  `turn.completed.assistantText` are whole, but `tool.invoked.argsPreview` /
+  `tool.completed.resultPreview` are **~256-char truncated** ("full args live in
+  the artifact / session log" — `events.ts:108-131`). Reconstructing `Message[]`
+  from events would feed the resumed model a transcript with truncated tool
+  calls — a DISHONEST resume.
+- No `SessionEvent[] → Message[]` reconstructor exists; the kernel reducer does
+  NOT replay events into `state.messages` (it takes `command.messages` directly,
+  `reducer.ts:166`); the frontend renders events for display only.
 
-### Phase A — SDK/host: seed a session from prior history
-- Add `history?: readonly Message[]` to `RuntimeSessionConfig`
-  (`src/host/runtime/types.ts`). Absent ⇒ empty session (byte-identical).
-- Thread it through `createSessionHost` → the session-host factory so the new
-  session's initial working-memory/transcript is that history. Reuse the
-  existing Codex-R2 history-block / "re-assemble REUSES prior typed-history"
-  logic in `agent-config-assembler.ts` (~772, ~934) rather than a new path.
-- SDK `createSession` returns the seeded session; capability manifest unchanged.
-- **Hellgate:** `createSession({ history: [...] })` → the session's first
-  `turn.run` sees that history (a follow-up references a prior user message);
-  `history` absent ⇒ empty (paired control).
-- Risk: touches the shared session-creation pipeline (every surface). Keep the
-  field optional + default-absent so CLI/headless/bench are byte-identical;
-  pin that with a paired control.
+**Conclusion:** the honest swap needs the daemon to persist a lossless
+`Message[]` transcript, exactly like the CLI's `@/session` SavedSession store
+(`loadSessionById` → `SavedSession.messages`), which the CLI's own
+`performSessionSwitch` consumes. events-reconstruction is rejected (lossy).
 
-### Phase B — daemon: session factory + threadId-keyed registry
-- Replace the single `sharedSession` mint with
-  `getOrCreateSession(threadId?): Promise<RegisteredSession>` in `server.ts`.
-  `threadId` absent ⇒ the default session (current behavior, byte-identical).
-- Move the three per-session collaborators (persist/follower/cost) INTO the
-  factory so each hosted session gets its own; `session-registry` keys by
-  `threadId` (or a synthetic default key) instead of the WS object, and
-  `closeAll()` closes each hosted runtime session exactly once.
-- **Hellgate:** two distinct threadIds ⇒ two distinct sessions in the registry;
-  same threadId twice ⇒ one session (get, not create); default (no id) unchanged.
+## Plan of record — swap model, lossless
 
-### Phase C — daemon: WS routing + hydrate-on-first-attach
-- WS upgrade reads `?thread=<id>`; `getOrCreateSession(id)` — on a cache miss,
-  `threadStore.loadEvents(id)` → `Message[]` → `createSession({ history })`
-  (Phase A). Unknown id ⇒ a fresh empty session under that id (honest, not a
-  crash).
-- Generalize the `fetch-handler.ts:182` single-shared-session boundary: any
-  hosted thread is now `live-attach`; only never-persisted ids stay read-only.
-- **Hellgate:** attach to a non-live thread ⇒ a live session hydrated from its
-  persisted events (composer active, `turn.run` reachable) — RED today.
+### Phase 0 — a lossless `Message[]` READ seam (sub-keystone, verified jul-11)
+The session facade's `transcript` is **write-only** (`replace`, `session.ts:91`);
+`box.state.messages` is internal (only `side.start` reads it, `:103`). There is
+NO public messages getter — so the daemon cannot even READ the live transcript
+to persist it. RESOLVED (jul-11): option (a) — capture
+`SessionDispatchResult.turn.messages` at the daemon — is REJECTED: `ws-handlers`
+is a transport bridge (it `subscribe`s to event sources and relays frames), so
+the daemon SERVER never receives the `turn.run` return value; it crosses the
+transport to the client. So use option (b): add a `session.transcript.messages`
+READ getter (`sdk/runtime/session.ts:91` + `types.ts:110`) returning
+`[...box.state.messages]` — the clean symmetric read to the existing write-only
+`replace`. The daemon reads it when it observes `turn.completed`.
+- **Hellgate:** `session.transcript.messages` returns the exact live `Message[]`
+  (tool calls intact, no 256-char preview truncation); byte-identical read.
 
-### Phase D — frontend: live join instead of read-only replay
-- `lib/thread-resume.ts` + `App.tsx`: when opening a thread, (re)connect the WS
-  with the thread param → join the live session; drop the read-only replay for
-  hydrated threads. Keep read-only only for genuinely absent ids.
-- **Hellgate:** picking a thread yields an INTERACTIVE session (composer
-  enabled) — the pin `lib/thread-resume` currently fails.
+### Phase 1 — daemon persists a lossless transcript (the real keystone)
+- Persist that `Message[]` to the `@/session` SavedSession store (the CLI's
+  store) via `saveSessionById(meta, {reason, turns, messages})`, keyed by the
+  daemon's session/thread id, driven off the turn seam Phase 0 taps. Keep the
+  sqlite `SessionEvent[]` UI archive as-is (it serves read-only history + the
+  transcript UI). Gate-symmetric with `QUANTA_WEB_DB`.
+- **Hellgate:** a completed daemon turn writes a SavedSession whose
+  `loadSessionById(id).messages` round-trips the live transcript (no tool-call
+  truncation). Gate OFF ⇒ byte-identical.
 
-## Sequencing / safety
-- A is the keystone (B/C need the seed). Each phase lands green; the OFF/default
-  path (no threadId, no history) stays byte-identical so CLI + existing web
-  single-session behavior never regress — pin that paired control in every
-  phase.
-- Adversarial axes per phase: two tabs on one hosted thread (fan-out — the
-  transport already broadcasts, verify), attach to a closing session, garbage
-  threadId (clean empty, never 500), snapshot-first join (CLI handshake
-  parity), cost/follower isolation between sessions (no cross-talk).
+### Phase 2 — swap-on-attach
+- WS upgrade / `fetch-handler.ts:206` reads `?thread=<id>`. On attach:
+  `loadSessionById(id)` → `sharedSession.transcript.replace(saved.messages)`
+  (reuse the existing `transcript_replace_unavailable` mid-turn guard) → repoint
+  the append id so future persist writes under the swapped thread (the same
+  in-place `SessionMeta` repoint `performSessionSwitch` does — the daemon's
+  `setupThreadPersistence` currently hard-binds `sharedSession.sessionId`
+  (`persistence.ts:24`); make its append id follow a mutable active-thread cell).
+- Unknown / never-persisted id ⇒ clean empty (no crash), stays read-only.
+- **Hellgate:** attach with a persisted thread id ⇒ live session hydrated from
+  that thread's SavedSession, composer active; parent thread on disk untouched.
 
-## Alternative considered — runtime-per-thread (avoids Phase A)
+### Phase 3 — frontend live-join
+- `lib/thread-resume.ts` + `App.tsx`: opening a persisted thread joins the live
+  (now-swapped) session instead of read-only replay; flip `boundary`
+  (`fetch-handler.ts:210`) to `live-attach` for any hydrated thread; keep
+  read-only only for absent ids.
+- **Hellgate:** picking a persisted thread yields an INTERACTIVE session.
 
-`createRuntimeFromAgentConfigBase({ history, … })` ALREADY accepts a `history`
-seed at *runtime* construction (`runtime-factory.ts` passes
-`history: [...base.messages]`). So a daemon could host one RUNTIME per thread
-(each built with that thread's persisted messages) instead of extending
-`RuntimeSessionConfig` with a per-session seed. Rejected as the primary path:
-a runtime re-runs the WHOLE composition (MCP load, tool registry, observability
-wiring) per thread — heavy and duplicative. The session-per-thread path (Phase
-A seed, runtime shared) is lighter and is the plan of record. Keep runtime-
-per-thread as the fallback if Phase A's kernel-transcript seeding proves too
-invasive.
+## Semantics (honest)
+One human, one live session that swaps — like the CLI's `/fork`. All tabs share
+the one session, so a swap is daemon-wide (opening thread B moves everyone to B).
+That is the correct model for a single-operator daemon and sidesteps the
+shared-port cross-talk N-session would hit. True N-concurrent live threads is a
+multi-TENANT feature (per-thread ACL at `fetch-handler.ts:194`) — out of scope.
 
-## Scope reality (jul-11)
-
-Phase A is the keystone AND the deepest cut: `RuntimeSessionConfig.history`
-must thread `createSessionHost(config)` → the surface factory → the
-`@/kernel/session` `SessionHost` initial transcript. That is the shared
-session-creation pipeline every surface (CLI/headless/bench/web) rides, so it
-needs a paired-control byte-identity pin for the default-absent path before any
-daemon work. This is a dedicated-session change; do NOT half-land it (a broken
-seed path breaks every session). Start here next session.
-
-## Out of scope (documented)
-- Multi-TENANT auth (per-thread ACL): `fetch-handler.ts:194` — the bearer token
-  IS the ownership boundary on a single-tenant daemon; a future multi-user
-  daemon gates `threadId` against caller identity at that seam. Not this work.
+## Riskiest step
+Phase 2's persist-id repoint without clobbering the parent thread — but
+`performSessionSwitch`'s in-place `SessionMeta` repoint already solves exactly
+this; port its pattern (the CLI file is apps/cli-sliced, so re-implement the
+tiny in-place mutation daemon-side, don't import it).

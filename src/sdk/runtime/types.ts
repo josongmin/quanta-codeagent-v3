@@ -113,6 +113,11 @@ export interface RuntimeSession {
       meta?: Partial<Omit<SessionTranscriptReplaceCommand, "sessionId" | "type" | "messages">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
+    /** P1 Phase 0 (jul-11) — the symmetric LOSSLESS read of the live transcript.
+     *  The SessionEvent archive truncates tool args/results to ~256 chars; this
+     *  returns the full `Message[]` a surface needs to persist for a later live
+     *  thread swap. Synchronous snapshot of the current working set. */
+    messages(): readonly Message[]
   }
   readonly side: {
     start(

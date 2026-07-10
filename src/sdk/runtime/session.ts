@@ -91,6 +91,8 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     transcript: {
       replace: async (messages, meta, options) =>
         dispatch(engine, buildTranscriptReplace(commandDeps, messages, meta), options),
+      // P1 Phase 0 — lossless read symmetric to `replace` (see types.ts).
+      messages: () => [...box.state.messages],
     },
     side: {
       start: async (sideArgs, _options) => {
