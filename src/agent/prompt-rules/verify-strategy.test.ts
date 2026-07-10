@@ -8,7 +8,7 @@
  * forbids seeking any hidden / grader / reference test.
  */
 import { describe, expect, test } from "bun:test"
-import { buildSystemPrompt, withoutBlocks } from "../prompt"
+import { buildSystemPrompt } from "../prompt"
 import { composeSystemPromptForSurface, SWE_SURFACE_PROFILE } from "../surface-profile"
 import {
   GRADER_ONLY_RULE,
@@ -238,27 +238,13 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
   })
 })
 
-// jul-6 audit: withoutBlocks is the load-bearing grader-only suppression mechanism. Unit-test
-// it directly (the integration tests exercise it via buildSystemPrompt, but the FAIL-LOUD
-// contract — a drifted block must THROW, not silently leave the conflict in — needs its own pin).
-describe("withoutBlocks — contiguous block removal + fail-loud on drift", () => {
-  test("removes a matching contiguous block (first occurrence), preserving unrelated blanks", () => {
-    const arr = ["a", "", "b1", "b2", "", "c"]
-    expect(withoutBlocks(arr, [["b1", "b2"]])).toEqual(["a", "", "", "c"])
-  })
-  test("removes multiple blocks independently", () => {
-    expect(withoutBlocks(["a", "b", "c", "d"], [["b"], ["d"]])).toEqual(["a", "c"])
-  })
-  test("empty block is a no-op (never throws)", () => {
-    expect(withoutBlocks(["a", "b"], [[]])).toEqual(["a", "b"])
-  })
-  test("FAIL-LOUD: a block absent from the source array THROWS (drift guard, not a silent no-op)", () => {
-    // RED-on-injection: this is the exact regression the guard exists for — if a suppressed body
-    // block's text drifts so it no longer matches, grader-only would silently re-inject the
-    // conflict. The throw converts that into a loud build/test failure.
-    expect(() => withoutBlocks(["a", "b", "c"], [["not-present"]])).toThrow(/block not found/)
-  })
-  test("FAIL-LOUD fires even if EARLIER blocks matched (partial suppression is still a bug)", () => {
-    expect(() => withoutBlocks(["a", "b", "c"], [["b"], ["ghost"]])).toThrow(/block not found/)
-  })
-})
+// ADR-0538 Phase 2: the load-bearing grader-only suppression mechanism is no
+// longer `withoutBlocks` string surgery — it is the body atoms' declarative
+// `when.verifyStrategy:{not:["grader-only"]}` matchers (SSOT in
+// `prompt-graph/atoms-body.ts`, verified by `prompt-graph-verify-hellgate` +
+// the graph coverage/conflict checks). The behavioral contract (grader-only
+// removes the local-verification body blocks and adds the coherent grader rule)
+// is pinned by the `buildSystemPrompt` integration tests above; the fail-loud
+// drift guard is now the atom `splitAround` throw + the verifier's coverage
+// check, so this unit describe (which tested the deleted `withoutBlocks`) is
+// retired.

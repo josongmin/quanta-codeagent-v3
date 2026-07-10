@@ -180,6 +180,14 @@ describe("buildTurnContext dynamic context message", () => {
         budgetLedger: false,
         subagentTurnGate: true,
       },
+      // ADR-0538 Phase 2 — additive fired-notice-atom manifest. This turn is
+      // `mode:"review"`, so the review mode-notice atom fires on the per-turn
+      // `message.system_reminder` channel; the manifest reports its variantId
+      // (redaction-safe — names only, never prompt text). A `default`/non-brief
+      // turn fires NO notice atom, so both keys are ABSENT (snapshot byte-
+      // identical to the pre-ADR-0538 shape).
+      firedAtomIds: ["NOTICE-REVIEW"],
+      byChannel: { "message.system_reminder": ["NOTICE-REVIEW"] },
     })
   })
 })

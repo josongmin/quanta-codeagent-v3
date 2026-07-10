@@ -21,10 +21,20 @@
 import type { EnvironmentPosture } from "../prompt"
 import type { AgentMode as PromptPackMode, VerifyStrategy } from "../prompt-rules"
 
-/** The task-posture mode axis (`default|plan|review|audit`) — distinct from
- *  `PromptPackMode` (the runtime surface). Kept as a string union here so the
- *  matcher does not couple the prompt-graph slice to the mode slice's internals. */
-export type AgentMode = "default" | "plan" | "review" | "audit"
+/** The task-posture mode axis — the full 6-mode set (`default|plan|review|
+ *  audit|architect|editor`, mirroring `@/shared`'s `AgentPromptMode`, which is
+ *  what `buildTurnContext` resolves). Distinct from `PromptPackMode` (the
+ *  runtime surface). Kept as a string union here so the matcher does not couple
+ *  the prompt-graph slice to the mode slice's internals. ADR-0538 Phase 2 needs
+ *  `architect`/`editor` as first-class facets (the read-only completion-bar
+ *  split + the architect/editor mode notices). */
+export type AgentMode =
+  | "default"
+  | "plan"
+  | "review"
+  | "audit"
+  | "architect"
+  | "editor"
 
 /** Authority layer (ADR-0538 §Primitive). Higher layer = higher precedence when
  *  two atoms speak to the same concern; recorded on every atom for placement +
@@ -179,6 +189,11 @@ export interface GraphViolation {
     | "supersede-unsound"
     | "coverage"
     | "hidden-assumption"
+    // ADR-0538 Phase 2 checks (ADR §Build-time verifier 4,5,6,8):
+    | "cached-section-budget"
+    | "static-dynamic-separation"
+    | "authority-placement"
+    | "manifest-completeness"
   readonly message: string
   /** The offending variantId(s). */
   readonly variantIds: readonly string[]

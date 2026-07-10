@@ -12,7 +12,7 @@
 
 import type { EnvironmentPosture } from "../prompt"
 import type { VerifyStrategy } from "../prompt-rules"
-import type { PromptContext } from "./types"
+import type { AgentMode, PromptContext } from "./types"
 
 const POSTURES: readonly EnvironmentPosture[] = ["frozen", "owned", "default"]
 /** `undefined` is a REAL reachable state (no verify strategy selected). */
@@ -50,6 +50,38 @@ export const reachableToolUseContexts = (): readonly PromptContext[] => {
   for (const envPosture of POSTURES) {
     for (const verifyStrategy of VERIFY_STRATEGIES) {
       out.push({ ...BASE, envPosture, verifyStrategy })
+    }
+  }
+  return out
+}
+
+/** The full 6-mode set — the body atoms (completion-bar split) and the notice
+ *  atoms read `mode`, so the body-graph verifier must cross it. */
+const MODES: readonly AgentMode[] = [
+  "default",
+  "plan",
+  "review",
+  "audit",
+  "architect",
+  "editor",
+]
+
+/**
+ * The reachable ctx set for the Phase 2 BODY + NOTICE slice = envPosture ×
+ * verifyStrategy × mode (3 × 4 × 6 = 72 points). The body atoms condition on
+ * `verifyStrategy` (grader-only suppression) and `mode` (completion-bar split);
+ * the notice atoms condition on `mode` and `brief`. `brief` is crossed as a
+ * final ×2 so the brief-notice atom's coverage is decidable (144 points).
+ */
+export const reachableBodyContexts = (): readonly PromptContext[] => {
+  const out: PromptContext[] = []
+  for (const envPosture of POSTURES) {
+    for (const verifyStrategy of VERIFY_STRATEGIES) {
+      for (const mode of MODES) {
+        for (const brief of [false, true]) {
+          out.push({ ...BASE, envPosture, verifyStrategy, mode, brief })
+        }
+      }
     }
   }
   return out

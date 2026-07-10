@@ -16,25 +16,19 @@ import { type GlobRule, renderGlobRulesBlock, selectGlobRules } from "./glob-rul
 import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
+import { INTRO_LINES } from "./prompt-body"
 import {
-  ARCHITECT_NOTICE,
-  AUDIT_NOTICE,
-  BODY_AFTER_PERSONA,
-  BODY_AFTER_PERSONA_DURABLE_STATE,
-  BODY_AFTER_PROMPT_PACK,
-  BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
-  BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
-  BODY_AFTER_PROMPT_PACK_VISION_PRIORITY,
-  BODY_ANALYSIS_MULTISTEP,
-  BODY_REPRO_REQUIRED,
-  BODY_VALIDATION_BUDGET,
-  BODY_VERIFY_AFTER_EDIT_DISCIPLINE,
-  BRIEF_NOTICE,
-  EDITOR_NOTICE,
-  INTRO_LINES,
-  PLAN_NOTICE,
-  REVIEW_NOTICE,
-} from "./prompt-body"
+  type AgentMode as GraphMode,
+  BODY_AFTER_PERSONA_ATOMS,
+  BODY_AFTER_PROMPT_PACK_ATOMS,
+  BRIEF_NOTICE_ATOM_EXPORT,
+  MODE_NOTICE_ATOMS,
+  NOTICE_ATOMS as NOTICE_ATOMS_ALL,
+  type PromptContext,
+  renderAtoms,
+  renderNoticeAtom,
+  selectAtoms,
+} from "./prompt-graph"
 import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
   type AgentMode as PromptPackMode,
@@ -80,69 +74,39 @@ import { renderWorkingStateBlock, type WorkingState } from "./working-state"
  *  swaps the rendered rule list. */
 export type EnvironmentPosture = "frozen" | "owned" | "default"
 
-/** Remove each `block` (a CONTIGUOUS line subsequence) from `arr` — used when a verify
- *  strategy OVERRIDES hardcoded body blocks (grader-only suppresses the local-verification
- *  rules that contradict "do not run local tests"). Unlike a line-set filter, this removes
- *  each block AS A UNIT: a block's own trailing blank goes with it, but unrelated blank
- *  separators elsewhere are preserved (the prior line-set `withoutLines` collapsed EVERY
- *  blank whenever a dropped block contained one — jul-6 blank-collapse fix). Only the first
- *  occurrence of each block is removed. Absent strategy never calls this ⇒ byte-identical.
- *
- *  FAIL-LOUD (jul-6 audit): every `block` is a compile-time constant spread into `arr` in this
- *  same module, so a non-match is ALWAYS drift (a block was reworded or made non-contiguous by
- *  a later edit), never a legitimate runtime state. Silently leaving it in would re-inject the
- *  exact conflict grader-only exists to remove, with no error and no failing test. So a missing
- *  block THROWS rather than taking a silent no-op default-OK path (폴백 금지). */
-export const withoutBlocks = (
-  arr: readonly string[],
-  blocks: readonly (readonly string[])[],
-): readonly string[] => {
-  let out = [...arr]
-  for (const block of blocks) {
-    if (block.length === 0) continue
-    let removed = false
-    for (let i = 0; i + block.length <= out.length; i++) {
-      let match = true
-      for (let j = 0; j < block.length; j++) {
-        if (out[i + j] !== block[j]) {
-          match = false
-          break
-        }
-      }
-      if (match) {
-        out = [...out.slice(0, i), ...out.slice(i + block.length)]
-        removed = true
-        break
-      }
-    }
-    if (!removed) {
-      throw new Error(
-        `withoutBlocks: suppression block not found in source array (drifted?): ${JSON.stringify(block[0])}`,
-      )
-    }
-  }
-  return out
-}
-
-/** SSOT for "what grader-only SUPPRESSES" (jul-6 audit — the paired ADDITION is
- *  `GRADER_ONLY_RULE` in prompt-rules/verify-strategy). These body blocks presuppose local
- *  verification or doc writes that the hidden-grader posture forbids, so grader-only removes
- *  them. Naming the sets here keeps the policy in ONE place (not scattered inline) and
- *  `withoutBlocks` throws if any drifts out of the assembled body. */
-const GRADER_ONLY_SUPPRESSED_AFTER_PERSONA: readonly (readonly string[])[] = [
-  BODY_REPRO_REQUIRED, // "first reproduce the failure…" — grader-only forbids local repro
-  BODY_VERIFY_AFTER_EDIT_DISCIPLINE, // "run the project's tests…" (R3)
-  BODY_VALIDATION_BUDGET, // "build/test/type-check before done" — no local run under grader-only
-  BODY_ANALYSIS_MULTISTEP, // "expect 5–10 tool calls" — over-exploration framing for source-repair
-  BODY_AFTER_PERSONA_DURABLE_STATE, // "write artifacts to docs/" — grader-only forbids editing docs
-]
-/** grader-only suppression for the prompt-pack tail. Vision-priority is dropped MINUS its leading
- *  blank (`.slice(1)`) so the separator before it survives (SWE hidden-grader tasks carry no images). */
-const GRADER_ONLY_SUPPRESSED_AFTER_PACK: readonly (readonly string[])[] = [
-  BODY_AFTER_PROMPT_PACK_VISION_PRIORITY.slice(1),
-  BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT, // "rail: pytest / verdict / exit" (R4)
-  BODY_AFTER_PROMPT_PACK_COMPLETION_BAR, // "the relevant tests pass"
-]
+/**
+ * ADR-0538 Phase 2 — build the FULL `PromptContext` for the static-body atom
+ * render from `buildSystemPrompt`'s axis opts. The body atoms condition on
+ * `verifyStrategy` (grader-only suppression) and `mode` (the completion-bar
+ * read-only-vs-code-change split); every other facet is fixed at its
+ * static-prefix representative (no static-body atom reads it — presence facets
+ * are per-turn and live on the DYNAMIC channels). This replaces the deleted
+ * `withoutBlocks` + `GRADER_ONLY_SUPPRESSED_*` string surgery: applicability is
+ * now the atoms' declarative `when` matchers.
+ */
+const bodyRenderCtx = (opts?: {
+  envPosture?: EnvironmentPosture
+  promptPack?: PromptPackMode
+  verifyStrategy?: VerifyStrategy
+  mode?: GraphMode
+}): PromptContext => ({
+  envPosture: opts?.envPosture ?? "frozen",
+  promptPack: opts?.promptPack ?? "interactive",
+  verifyStrategy: opts?.verifyStrategy,
+  mode: opts?.mode ?? "default",
+  hasRepoRules: false,
+  hasGlobRules: false,
+  hasSessionCtx: false,
+  hasMemorySummary: false,
+  hasWorkingState: false,
+  hasActiveSkills: false,
+  hasContextEvents: false,
+  hasMentionInjection: false,
+  hasHookInjects: false,
+  hasImages: false,
+  brief: false,
+  untrustedEnvelope: false,
+})
 
 /** The static system prompt. No per-turn data — keep it byte-stable so the
  *  provider cache prefix holds across the whole session. The legacy `cwd`
@@ -179,9 +143,19 @@ export const buildSystemPrompt = (
      *  varying axes (persona / posture / pack / verify) all compose underneath it.
      *  Rides its own default-OFF knob (measure-first before flipping any default). */
     promptStyle?: PromptStyle
+    /** ADR-0538 §KEY-TRANSFORM 2 — task mode for the completion-bar split. Absent
+     *  / `"default"` ⇒ the CODE-CHANGE completion bar (byte-identical to the
+     *  pre-migration single block). A read-only mode (plan/review/audit/architect)
+     *  ⇒ the read-only completion-bar variant (the deliverable is the
+     *  plan/findings/design). `editor` mutates ⇒ code-change variant. This is the
+     *  ONLY intentional new output the Phase-2 migration introduces. */
+    mode?: GraphMode
   },
-): string =>
-  applyPromptStyle(
+): string => {
+  // The FULL context the static-body atoms select over (the graph is
+  // authoritative for the body). Axes only — presence facets are per-turn.
+  const bodyCtx = bodyRenderCtx(opts)
+  return applyPromptStyle(
     [
       ...INTRO_LINES,
       // ADR-0198 identity slot — rides BETWEEN the intro and persona so the
@@ -193,15 +167,14 @@ export const buildSystemPrompt = (
       // byte-identical to the pre-ADR base prompt; `friendly`/`pragmatic`
       // splice the persona body + a blank-line separator before Policy stack.
       ...personaLines(opts?.persona ?? "default"),
-      // grader-only (P6 + jul-6 residual-conflict audit): suppress every body block that
-      // contradicts the hidden-grader "no local tests / no repro / no doc writes" posture —
-      // reproduce-required + "run the project's tests" verify discipline (R3) + validation-budget
-      // ("run build/test before done") + the "expect 5–10 tool calls" analysis framing (induces
-      // over-exploration) + durable-state ("write artifacts to docs/", which grader-only forbids
-      // editing). Any other strategy ⇒ verbatim (byte-identical).
-      ...(opts?.verifyStrategy === "grader-only"
-        ? withoutBlocks(BODY_AFTER_PERSONA, GRADER_ONLY_SUPPRESSED_AFTER_PERSONA)
-        : BODY_AFTER_PERSONA),
+      // ADR-0538 Phase 2 — the AFTER-PERSONA body (policy stack → tool routing) is
+      // now DERIVED from the instruction graph (the graph is AUTHORITATIVE — no
+      // parallel copy). grader-only suppression that was `withoutBlocks` string
+      // surgery is now the atoms' `when.verifyStrategy:{not:["grader-only"]}`
+      // matchers; `renderAtoms` selects + orders them. Byte-identical for every
+      // posture/pack/verify combination (the sub-block atoms carry the exact prior
+      // literal text at the exact prior order).
+      ...renderAtoms(BODY_AFTER_PERSONA_ATOMS, bodyCtx),
       // 2-AXIS rendering (jul-4): env posture and task pack are INDEPENDENT slots (the prior
       // XOR — owned XOR pack — is gone; an owned surface can now also carry a task pack).
       // (1) POSTURE-BASE axis — honesty rails + env guardrails, selected by envPosture:
@@ -214,18 +187,18 @@ export const buildSystemPrompt = (
       // (3) VERIFY axis — how the surface confirms its own work (reproduce-first / verify-after-edit).
       //     Absent/undefined ⇒ NO lines, byte-identical. Each rides a default-OFF entry-point knob.
       ...renderVerifyStrategy(opts?.verifyStrategy),
-      // grader-only (P6 + jul-6 audit): suppress the prompt-pack blocks that presuppose local
-      // verification — completion-bar ("the relevant tests pass") + Verification report ("rail:
-      // pytest / verdict / exit", R4) — AND Vision priority, which is pure noise for source-repair
-      // (SWE hidden-grader tasks never carry images). grader-only supplies its own honest Final
-      // format. `.slice(1)` on Vision drops the block minus its LEADING blank, so the separator
-      // before the next section survives. Any other strategy ⇒ verbatim (byte-identical).
-      ...(opts?.verifyStrategy === "grader-only"
-        ? withoutBlocks(BODY_AFTER_PROMPT_PACK, GRADER_ONLY_SUPPRESSED_AFTER_PACK)
-        : BODY_AFTER_PROMPT_PACK),
+      // ADR-0538 Phase 2 — the AFTER-PACK body (vision → completion bar) is DERIVED
+      // from the graph too. grader-only suppression (vision body / verification
+      // report / whole completion bar) is the atoms' `when.verifyStrategy` matchers;
+      // the completion bar is split into a code-change variant (`when.mode:{not:
+      // [plan,review,audit,architect]}`) and a read-only variant — exactly one fires
+      // per ctx. Byte-identical for the code-change path; the read-only variant is
+      // the single intentional new output (only under plan/review/audit/architect).
+      ...renderAtoms(BODY_AFTER_PROMPT_PACK_ATOMS, bodyCtx),
     ].join("\n"),
     opts?.promptStyle ?? "flat",
   )
+}
 
 /** Spread helper for the identity slot — returns the lines to splice
  *  BETWEEN the intro section and the persona slot. Absent / empty array ⇒
@@ -432,13 +405,58 @@ export interface TurnContext {
   promptPolicy: PromptPolicySnapshot
 }
 
+/** ADR-0538 Phase 2 — a minimal `PromptContext` carrying only the `mode` +
+ *  `brief` facets the notice atoms select over (all other facets fixed at their
+ *  representative). The notice atoms ride the per-turn `message.system_reminder`
+ *  channel, so this is the DYNAMIC-side selection surface. */
+const noticeCtx = (mode: GraphMode, brief: boolean): PromptContext => ({
+  envPosture: "frozen",
+  promptPack: "interactive",
+  verifyStrategy: undefined,
+  mode,
+  hasRepoRules: false,
+  hasGlobRules: false,
+  hasSessionCtx: false,
+  hasMemorySummary: false,
+  hasWorkingState: false,
+  hasActiveSkills: false,
+  hasContextEvents: false,
+  hasMentionInjection: false,
+  hasHookInjects: false,
+  hasImages: false,
+  brief,
+  untrustedEnvelope: false,
+})
+
+/** The per-mode session notice (ADR-0211) — DERIVED from the instruction graph
+ *  (`MODE_NOTICE_ATOMS`), not a parallel `mode → const` switch. Exactly one
+ *  notice atom's `when.mode` admits a given mode (or none for `default`);
+ *  `renderNoticeAtom` re-joins its lines into the newline-joined wire string the
+ *  reminder splices. Byte-identical to the prior `modeNotice(mode)` lookup. */
 const modeNotice = (mode: AgentMode): string | undefined => {
-  if (mode === "plan") return PLAN_NOTICE
-  if (mode === "review") return REVIEW_NOTICE
-  if (mode === "audit") return AUDIT_NOTICE
-  if (mode === "architect") return ARCHITECT_NOTICE
-  if (mode === "editor") return EDITOR_NOTICE
-  return undefined
+  const [selected] = selectAtoms(MODE_NOTICE_ATOMS, noticeCtx(mode, false))
+  return selected !== undefined ? renderNoticeAtom(selected) : undefined
+}
+
+/** ADR-0538 Phase 2 — the fired-notice-atom manifest for this turn's DYNAMIC
+ *  reminder channel. Selects the mode notice + brief notice atoms that fired
+ *  and returns their `firedAtomIds` + `byChannel` grouping for `promptPolicy`.
+ *  Returns `undefined` when NONE fired (default mode + `brief:false`) so the
+ *  snapshot stays byte-identical to the pre-ADR-0538 shape — the wiring is
+ *  strictly ADDITIVE. */
+const firedNoticeManifest = (
+  mode: GraphMode,
+  brief: boolean,
+):
+  | {
+      firedAtomIds: readonly string[]
+      byChannel: Partial<Record<"message.system_reminder", readonly string[]>>
+    }
+  | undefined => {
+  const fired = selectAtoms(NOTICE_ATOMS_ALL, noticeCtx(mode, brief))
+  if (fired.length === 0) return undefined
+  const ids = fired.map((a) => a.variantId)
+  return { firedAtomIds: ids, byChannel: { "message.system_reminder": ids } }
 }
 
 /** Render the active-skills catalogue + trigger-rule block (Codex
@@ -639,7 +657,7 @@ const buildDynamicContext = (
   // dynamic tail is byte-identical to the pre-feature output (primary invariant).
   // It tightens prose verbosity ONLY; the static correctness rails
   // (BODY_AFTER_PROMPT_PACK) are untouched and authoritative above it.
-  if (input.brief === true) parts.push("", BRIEF_NOTICE)
+  if (input.brief === true) parts.push("", renderNoticeAtom(BRIEF_NOTICE_ATOM_EXPORT))
   // §5 prompt-directive bundle (jun-06) — seven DEFAULT-OFF behavioral directives
   // ride the per-turn DYNAMIC slot AFTER the brief notice (same family of prose
   // shapers) and BEFORE repo-rules. Extracted to a helper so buildDynamicContext's
@@ -815,6 +833,9 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
         ? { surfaceProfile: input.promptSurfaceProfile }
         : {}),
       ...(input.activeLevers !== undefined ? { activeLevers: input.activeLevers } : {}),
+      // ADR-0538 Phase 2 — fired notice-atom manifest (additive; absent when no
+      // notice atom fired ⇒ byte-identical snapshot for a default/non-brief turn).
+      ...(firedNoticeManifest(effectiveMode, input.brief === true) ?? {}),
     },
   }
 }

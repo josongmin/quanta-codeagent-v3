@@ -28,6 +28,18 @@ export type PromptSurfacePack =
   | "batch"
   | "ci-bot"
 export type PromptSurfaceEnvPosture = "frozen" | "owned" | "default"
+/** ADR-0538 — the 8 instruction-graph channels, redeclared here (names only) so
+ *  the redaction-safe `PromptPolicySnapshot` can group fired atoms by channel
+ *  without importing the `@/agent` prompt-graph slice into `@/shared`. */
+export type PromptPolicyChannel =
+  | "system.base"
+  | "system.project_md"
+  | "system.session_ctx"
+  | "system.user_append"
+  | "message.hook_context"
+  | "message.context_update"
+  | "message.mention_injection"
+  | "message.system_reminder"
 export type PromptSurfaceVerifyStrategy =
   | "none"
   | "reproduce-first"
@@ -68,6 +80,15 @@ export interface PromptPolicySnapshot {
   readonly summaryPrefix: PromptSummaryPrefix
   readonly surfaceProfile?: PromptSurfaceProfileSnapshot
   readonly activeLevers?: PromptActiveLeversSnapshot
+  /** ADR-0538 Phase 2 — the fired instruction-atom manifest for this turn's
+   *  DYNAMIC notice channel (`message.system_reminder`): the mode/brief notice
+   *  atom variantIds that fired, and the same list grouped by channel. Additive
+   *  observability — present ONLY when ≥1 notice atom fired (a `default` mode
+   *  turn with `brief:false` fires none, so both are absent and the snapshot is
+   *  byte-identical to the pre-ADR-0538 shape). Lets turn telemetry report which
+   *  prompt atoms shaped the turn without scraping prompt text. */
+  readonly firedAtomIds?: readonly string[]
+  readonly byChannel?: Readonly<Partial<Record<PromptPolicyChannel, readonly string[]>>>
 }
 
 /** Effective request policy = prompt-shaping metadata plus per-request control
