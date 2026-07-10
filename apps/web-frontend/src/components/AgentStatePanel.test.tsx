@@ -35,7 +35,9 @@ describe("AgentStatePanel", () => {
   it("renders the mode badge from the current collaboration mode", () => {
     const markup = renderToStaticMarkup(<AgentStatePanel state={view({ mode: "plan" })} />)
     expect(markup).toContain('data-testid="agent-state-mode"')
-    expect(markup).toContain("plan")
+    // P3 (jul-10, UUX-5-27) — the agent-mode chip says "plan mode", never a
+    // bare "plan" (which collides with the plan STORE the PlanPanel renders).
+    expect(markup).toContain("plan mode")
     // The plan-mode badge uses the info tone, not the neutral default tone.
     expect(markup).toContain("text-info")
   })

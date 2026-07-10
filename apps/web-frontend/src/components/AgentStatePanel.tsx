@@ -133,7 +133,7 @@ export const AgentStatePanel = memo(
       >
         <header className="flex items-center justify-between">
           <span className={LABEL}>Agent state</span>
-          {mode !== null ? <ModeBadge mode={mode} /> : null}
+          {mode !== null ? <AgentModeChip mode={mode} /> : null}
         </header>
         <PlanPromptCard prompt={planPrompt} {...(onAnswer !== undefined ? { onAnswer } : {})} />
         <ToolProgressList progress={toolProgress} />
@@ -148,14 +148,18 @@ export const AgentStatePanel = memo(
 /* Mode badge (mode.changed)                                           */
 /* ------------------------------------------------------------------ */
 
-const ModeBadge = ({ mode }: { mode: AgentMode }): JSX.Element => {
+// P3 (jul-10, UUX-5-27) — renamed from a colliding local `ModeBadge` (a
+// DIFFERENT component of that name renders the permission/identity pills) and
+// the chip says "plan mode", never a bare "plan" (which collides with the
+// plan STORE the PlanPanel renders).
+const AgentModeChip = ({ mode }: { mode: AgentMode }): JSX.Element => {
   const tone = mode === "plan" ? "bg-info/15 text-info" : "bg-black/[0.05] text-ink-secondary"
   return (
     <span
       data-testid="agent-state-mode"
       className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}
     >
-      {mode}
+      {mode === "plan" ? "plan mode" : mode}
     </span>
   )
 }

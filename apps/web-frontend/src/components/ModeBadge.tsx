@@ -37,7 +37,12 @@ export const ModeBadge = ({ state, onSetPermission }: ModeBadgeProps): JSX.Eleme
           {...(onSetPermission !== undefined ? { onChange: onSetPermission } : {})}
         />
       ) : null}
-      {hasIdentity ? <Pill label="mode" value={state.identityMode ?? ""} tone="neutral" /> : null}
+      {/* P3 (jul-10, UUX-5-27) — one vocabulary: this pill is the IDENTITY mode
+          (/identity on the CLI); a second bare "mode" next to the permission
+          lever read as a duplicate. */}
+      {hasIdentity ? (
+        <Pill label="identity" value={state.identityMode ?? ""} tone="neutral" />
+      ) : null}
       {hasProfile ? <Pill label="tools" value={state.toolProfile ?? ""} tone="neutral" /> : null}
     </div>
   )
@@ -56,7 +61,11 @@ const Pill = ({
   label,
   value,
   tone,
-}: { label: string; value: string; tone: PillTone }): JSX.Element => (
+}: {
+  label: string
+  value: string
+  tone: PillTone
+}): JSX.Element => (
   <div className={cx("rounded-full border px-2 py-0.5 text-xs", TONE_BORDER[tone])}>
     <span className="text-ink-tertiary">{label}:</span>
     <span className="ml-1 font-mono">{value}</span>
@@ -81,7 +90,9 @@ const PermissionLever = ({
     ? PERMISSION_MODE_OPTIONS
     : [value, ...PERMISSION_MODE_OPTIONS]
   return (
-    <label className={cx("flex items-center rounded-full border px-2 py-0.5 text-xs", TONE_BORDER[tone])}>
+    <label
+      className={cx("flex items-center rounded-full border px-2 py-0.5 text-xs", TONE_BORDER[tone])}
+    >
       <span className="text-ink-tertiary">perm:</span>
       <select
         value={value}

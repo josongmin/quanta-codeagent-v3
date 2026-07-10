@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { ModeBadge, PERMISSION_MODE_OPTIONS } from "./ModeBadge"
 import type { SessionStateView } from "../types/protocol"
+import { ModeBadge, PERMISSION_MODE_OPTIONS } from "./ModeBadge"
 
 const baseState: SessionStateView = {
   status: "idle",
@@ -24,7 +24,7 @@ describe("ModeBadge", () => {
     expect(markup.match(/<select/g) ?? []).toHaveLength(1) // ONLY permission is a lever
     expect(markup).toContain('disabled=""') // read-only without a setter
     expect(markup).toContain("set permission mode")
-    expect(markup).toContain("mode:") // identity pill (read-only)
+    expect(markup).toContain("identity:") // identity pill (read-only, P3 naming)
     expect(markup).toContain("tools:") // tool-profile pill (read-only)
   })
 
@@ -36,7 +36,10 @@ describe("ModeBadge", () => {
 
   it("a daemon-reported permission mode outside the mirror is still shown", () => {
     const markup = renderToStaticMarkup(
-      <ModeBadge state={{ ...baseState, permissionMode: "experimental-x" }} onSetPermission={() => {}} />,
+      <ModeBadge
+        state={{ ...baseState, permissionMode: "experimental-x" }}
+        onSetPermission={() => {}}
+      />,
     )
     expect(markup).toContain(">experimental-x</option>")
   })
@@ -55,5 +58,23 @@ describe("ModeBadge", () => {
     const line = src.split("\n").find((l) => l.includes("export type PermissionMode")) ?? ""
     const backend = [...line.matchAll(/"([^"]+)"/g)].map((m) => m[1] as string)
     expect([...PERMISSION_MODE_OPTIONS]).toEqual(backend)
+  })
+})
+
+// P3 (jul-10, UUX-5-27) — one vocabulary: the identity pill must say
+// "identity", never a second bare "mode" next to the permission lever.
+describe("naming parity (UUX-5-27)", () => {
+  it("labels the identity pill 'identity' (not a second 'mode')", () => {
+    const markup = renderToStaticMarkup(
+      <ModeBadge
+        state={
+          { permissionMode: "default", identityMode: "focused", toolProfile: undefined } as never
+        }
+      />,
+    )
+    expect(markup).toContain("identity")
+    // The only 'mode' words allowed are inside aria/permission copy — the
+    // identity pill's LABEL must not be bare 'mode'.
+    expect(markup).not.toContain(">mode<")
   })
 })
