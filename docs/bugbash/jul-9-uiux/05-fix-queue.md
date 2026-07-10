@@ -2,6 +2,17 @@
 
 Every item below was re-verified against HEAD on 2026-07-10 (see [04-corrections.md](./04-corrections.md) for what was removed). One invariant per PR when possible. Prefer fail-closed or honest messaging over silent success.
 
+> **STATUS (jul-10 night, final):** Waves A–F of this queue + the verified P2
+> backlog are **LANDED** (~35 commits on main, hellgate RED-first + 12 audit
+> rounds; see docs/plans/jul-10-uiux-structural-fixes.md and the memory ledger).
+> Remaining OPEN, with reasons: UUX-1-11/12/14 readout+bridge (protocol
+> decisions), UUX-4-18 web parity gaps (feature work), UUX-4-14 /mcp mutation
+> (feature), UUX-5-27 naming (churn), UUX-3-10/3-13 stream-interleave chrome +
+> UUX-1-20 stream policy (deep chrome, deferred by WS-C), UUX-4-07 /fork attach
+> (session-switch semantics), UUX-6-13 /side progress UI. UUX-3-07 re-analyzed
+> BENIGN post-WS-B: capture OFF ⇒ no in-turn stdin owner ⇒ the ad-hoc readline
+> has no one to fight.
+>
 > **Execution plan:** do NOT fix these ID-by-ID. The structural plan [docs/plans/jul-10-uiux-structural-fixes.md](../../plans/jul-10-uiux-structural-fixes.md) groups every item under 8 root-cause workstreams (kernels first, then adoptions) — work from there; this file remains the item-level checklist.
 
 ## Wave A — false success / wrong target (ship-blocking UX)
