@@ -134,3 +134,29 @@ describe("plan-exit prompt: cancel + unusable-input bound (UUX-2-19)", () => {
     expect(exit.decision).toBe("approved")
   })
 })
+
+describe("user-input prompts: dead-source bounds (audit R3 sibling class)", () => {
+  test("choice prompt with endless garbage fail-closes to cancelled", async () => {
+    const { createCliUserInputPort } = await import(
+      "../../../../src/apps/cli/repl/session-host-ports"
+    )
+    const port = createCliUserInputPort({
+      ask: async () => "not-a-choice",
+      stream: { emit: () => undefined } as never,
+    })
+    const outcome = await port({ promptId: "p1", prompt: "pick", choices: ["a", "b"] })
+    expect(outcome.decision).toBe("cancelled")
+  })
+
+  test("multiline prompt with a dead empty source settles instead of accumulating forever", async () => {
+    const { createCliUserInputPort } = await import(
+      "../../../../src/apps/cli/repl/session-host-ports"
+    )
+    const port = createCliUserInputPort({
+      ask: async () => "",
+      stream: { emit: () => undefined } as never,
+    })
+    const outcome = await port({ promptId: "p2", prompt: "describe", multiline: true })
+    expect(outcome.decision).toBe("cancelled") // nothing typed ⇒ cancelled, bounded
+  })
+})

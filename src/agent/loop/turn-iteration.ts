@@ -1,7 +1,7 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
 import { costUsd } from "@/observability"
-import { errMessage } from "@/shared"
+import { emitOperatorNotice, errMessage } from "@/shared"
 import type { BudgetExhaustion } from "../budget"
 import { estimateTokens } from "../compaction"
 import { syncFocusChainFromPlan } from "../focus-chain/plan-bridge"
@@ -15,6 +15,28 @@ import { makeTurnHeader } from "../turn-kind"
 import type { AgentConfig } from "../types"
 import { injectWorkflowKeywordNudge } from "../workflow-keyword"
 import { compactNowOnDemand } from "./compaction-wire"
+
+/** Audit follow-up (jul-10) — `/summarize-now` must be FAIL-SOFT: a throwing
+ *  summarizer (provider error, malformed history) aborts only the compaction,
+ *  never the run that hosted the slash command. The failure is surfaced on the
+ *  operator-notice bus (no-op when no sink installed — headless/bench). */
+const compactNowFailSoft = async (
+  cfg: Parameters<typeof compactNowOnDemand>[0],
+  wm: Parameters<typeof compactNowOnDemand>[1],
+  tokenBaseline: Parameters<typeof compactNowOnDemand>[2],
+): Promise<void> => {
+  try {
+    await compactNowOnDemand(cfg, wm, tokenBaseline)
+  } catch (e) {
+    emitOperatorNotice({
+      severity: "warn",
+      source: "summarize-now",
+      message: "on-demand compaction failed — history unchanged",
+      hint: errMessage(e),
+    })
+  }
+}
+
 import { latestUserTextFromWm, observeEffortClassifierPrompt } from "./context-assembler"
 import {
   pollControlRequests,
@@ -119,7 +141,7 @@ export const syncQueuedTurnInputs = async (args: {
     // §11.5 — the `/summarize-now` verb: run an on-demand force-compaction over
     // working memory. No-op when `config.compaction` is absent (degrades clean).
     // Pass the token-baseline box so the shrunk prefix invalidates it (D5).
-    await compactNowOnDemand(args.cfg, args.wm, args.tokenBaseline)
+    await compactNowFailSoft(args.cfg, args.wm, args.tokenBaseline)
   }
   return "continue"
 }
@@ -193,7 +215,7 @@ export const drainConversationActionsMidTurn = async (args: {
     observeEffortClassifierPrompt(args.cfg.effortClassifier, latestUserTextFromWm(args.wm))
   }
   if (actionOutcome.kind === "summarize") {
-    await compactNowOnDemand(args.cfg, args.wm, args.tokenBaseline)
+    await compactNowFailSoft(args.cfg, args.wm, args.tokenBaseline)
   }
   return "continue"
 }

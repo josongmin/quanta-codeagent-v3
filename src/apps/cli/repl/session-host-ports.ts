@@ -15,6 +15,9 @@ const CANCEL_TOKEN = "/cancel"
  *  channel) before the plan-exit prompt fail-closes to REJECTED. Bounded so a
  *  dead input source can never spin the prompt forever. */
 const PLAN_EXIT_MAX_UNUSABLE = 5
+/** Audit R3 — consecutive blank multiline replies before the prompt settles
+ *  (dead-source guard; real pasted text never has this many in a row). */
+const MULTILINE_MAX_CONSECUTIVE_EMPTY = 50
 const BACK_TOKEN = "/back"
 const MULTILINE_DONE_TOKEN = "."
 
@@ -140,11 +143,17 @@ const promptChoiceInput = async (
     choices: readonly string[]
   },
 ): Promise<UserInputOutcome> => {
+  // Audit R3 sibling-class fix — bounded like the plan-exit prompt: a dead
+  // input source (released channel feeding "") or endless garbage must never
+  // spin the ask forever; fail-closed to cancelled.
+  let unusable = 0
   while (true) {
     const raw = await ask(renderUserInputPrompt(req))
     if (isCancel(raw)) return { decision: "cancelled" }
     const choice = choiceFromReply(raw, req.choices)
     if (choice !== null) return { decision: "answer", text: choice }
+    unusable += 1
+    if (unusable >= PLAN_EXIT_MAX_UNUSABLE) return { decision: "cancelled" }
   }
 }
 
@@ -168,12 +177,22 @@ const promptMultilineInput = async (
   },
 ): Promise<UserInputOutcome> => {
   const lines: string[] = []
+  // Audit R3 sibling-class fix — a dead source feeding endless "" must not
+  // accumulate unbounded blank lines: cap CONSECUTIVE empties generously
+  // (legit multiline text has blank lines, never dozens in a row) and settle
+  // with whatever was typed (fail-soft; empty ⇒ cancelled downstream).
+  let consecutiveEmpty = 0
   let prompt = renderUserInputPrompt({ prompt: req.prompt, multiline: true })
   while (true) {
     const raw = await ask(prompt)
     if (lines.length === 0 && isCancel(raw)) return { decision: "cancelled" }
     if (raw.trim() === MULTILINE_DONE_TOKEN) {
       return { decision: "answer", text: lines.join("\n") }
+    }
+    consecutiveEmpty = raw.trim().length === 0 ? consecutiveEmpty + 1 : 0
+    if (consecutiveEmpty >= MULTILINE_MAX_CONSECUTIVE_EMPTY) {
+      const text = lines.join("\n").trim()
+      return text.length === 0 ? { decision: "cancelled" } : { decision: "answer", text }
     }
     lines.push(raw)
     prompt = "> "
