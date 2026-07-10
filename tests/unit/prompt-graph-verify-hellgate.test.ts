@@ -120,6 +120,11 @@ describe("prompt-graph — byte-equivalence with the render path", () => {
     hasImages: false,
     brief: false,
     untrustedEnvelope: false,
+    hasLanguageHint: false,
+    hasEnvBlock: false,
+    hasRepoRulesDynamic: false,
+    hasTaskBudget: false,
+    hasDirectives: false,
   })
 
   test("renderPostureBase == graph render for every posture", () => {

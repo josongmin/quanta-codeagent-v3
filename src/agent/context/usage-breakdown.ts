@@ -32,6 +32,7 @@ import { type PromptSection, SECTION_CONTEXT_CATEGORY } from "@/agent/prompt-sec
 import type { Message, SystemBlock } from "@/llm"
 import type {
   PromptActiveLeversSnapshot,
+  PromptPolicyChannel,
   PromptSurfaceProfileSnapshot,
 } from "@/shared/turn-policy-types"
 
@@ -222,6 +223,14 @@ export interface PromptAssembledSnapshot {
   /** Active model's context window in tokens (0 ⇒ unknown). */
   readonly max: number
   readonly model?: string
+  /** ADR-0538 Phase 3 — the compiled fired-atom manifest for this turn, forwarded
+   *  from `promptPolicy` (additive observability). `firedAtomIds` is the flat
+   *  fired-variant list; `byChannel` groups them by the 8 prompt channels. Absent
+   *  when the loop wires no manifest (byte-identical to the pre-ADR-0538 snapshot).
+   *  Lets the `/context` surface show which prompt atoms shaped a turn without
+   *  scraping prompt text. */
+  readonly firedAtomIds?: readonly string[]
+  readonly byChannel?: Readonly<Partial<Record<PromptPolicyChannel, readonly string[]>>>
 }
 
 /** Reconstruct the per-section `name`s the breakdown needs from a captured

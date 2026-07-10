@@ -50,6 +50,11 @@ const posCtx = (envPosture: PromptContext["envPosture"]): PromptContext => ({
   hasImages: false,
   brief: false,
   untrustedEnvelope: false,
+  hasLanguageHint: false,
+  hasEnvBlock: false,
+  hasRepoRulesDynamic: false,
+  hasTaskBudget: false,
+  hasDirectives: false,
 })
 
 /**

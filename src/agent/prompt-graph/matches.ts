@@ -18,10 +18,7 @@ import type { AtomMatcher, FacetPredicate, PromptContext } from "./types"
  *  (only `verifyStrategy` can be absent) is treated as a distinct member: a
  *  positive list never contains it (so it does not match), a `{not}` list that
  *  omits it DOES match (absence is not in the excluded set). */
-const facetHolds = <T extends string>(
-  pred: FacetPredicate<T>,
-  value: T | undefined,
-): boolean => {
+const facetHolds = <T extends string>(pred: FacetPredicate<T>, value: T | undefined): boolean => {
   if (Array.isArray(pred)) {
     return value !== undefined && pred.includes(value)
   }
@@ -63,6 +60,11 @@ export const matches = (when: AtomMatcher | undefined, ctx: PromptContext): bool
     "hasImages",
     "brief",
     "untrustedEnvelope",
+    "hasLanguageHint",
+    "hasEnvBlock",
+    "hasRepoRulesDynamic",
+    "hasTaskBudget",
+    "hasDirectives",
   ] as const satisfies ReadonlyArray<keyof AtomMatcher & keyof PromptContext>
 
   for (const key of presenceKeys) {

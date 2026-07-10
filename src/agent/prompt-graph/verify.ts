@@ -58,6 +58,11 @@ const PER_TURN_FACETS: readonly (keyof AtomMatcher)[] = [
   "hasHookInjects",
   "hasImages",
   "untrustedEnvelope",
+  "hasLanguageHint",
+  "hasEnvBlock",
+  "hasRepoRulesDynamic",
+  "hasTaskBudget",
+  "hasDirectives",
 ]
 
 /** Authority layers that may NOT occupy `system.base` (ADR §6 authority
@@ -113,11 +118,7 @@ const ASSUMPTION_TABLE: readonly AssumptionRule[] = [
     // The hidden-grader premise is verify-strategy-scoped. Keywords are the
     // SPECIFIC hidden-grader phrasings — a bare "graded" is deliberately NOT
     // here (it collides with the env "not a graded sandbox" negation above).
-    keywords: [
-      "hidden-grader",
-      "hidden grader",
-      "an automated grader runs hidden tests",
-    ],
+    keywords: ["hidden-grader", "hidden grader", "an automated grader runs hidden tests"],
     requiredFacets: ["verifyStrategy"],
   },
   {
@@ -145,13 +146,36 @@ const anyFacetDeclared = (a: InstructionAtom, facets: readonly AssumptionFacet[]
   facets.some((f) => a.when?.[f] !== undefined)
 
 /**
+ * A minimal manifest view for the snapshot-parity check (ADR §Build-time
+ * verifier 9). The compiler's `CompiledPromptArtifact.manifest` structurally
+ * satisfies this; we type it narrowly here so the verifier stays decoupled from
+ * the full artifact type (and pure).
+ */
+export interface ManifestParityView {
+  readonly firedVariantIds: readonly string[]
+  readonly byChannel: Readonly<Record<PromptChannel, readonly string[]>>
+  readonly policy: {
+    readonly firedAtomIds?: readonly string[]
+    readonly byChannel?: Readonly<Partial<Record<string, readonly string[]>>>
+  }
+}
+
+/**
  * Verify the migrated atom graph over `reachableContexts`. Returns every
  * violation found (empty array ⇒ sound). Does NOT throw — callers (the hellgate)
  * assert on the returned array so the failure surface is the structured list.
+ *
+ * When `manifest` is supplied, the SNAPSHOT-PARITY check (ADR §9) additionally
+ * verifies the manifest can reconstruct the observability snapshot: every
+ * variantId in `byChannel` traces to a declared atom (manifest completeness over
+ * the RENDERED spans, not just the atom set), and the policy's
+ * `firedAtomIds` (the DYNAMIC notice channel it reports) is exactly the reminder
+ * channel's notice atoms.
  */
 export const verifyRuleGraph = (
   atoms: readonly InstructionAtom[],
   reachableContexts: readonly PromptContext[],
+  manifest?: ManifestParityView,
 ): readonly GraphViolation[] => {
   const violations: GraphViolation[] = []
   const byVariant = new Map<string, InstructionAtom>()
@@ -284,6 +308,9 @@ export const verifyRuleGraph = (
     seenVariantIds.add(a.variantId)
   }
 
+  // ── (8b/Phase-3) Dynamic-content placement — extracted helper. ──
+  violations.push(...checkDynamicContentPlacement(atoms))
+
   // ── (4) Cached-section budget — per-ctx, the number of DISTINCT system.*
   //        channels the fired atoms occupy must be ≤ 4 (the ADR-0326 / Anthropic
   //        cap). Verified over every reachable ctx. ──
@@ -302,5 +329,94 @@ export const verifyRuleGraph = (
     }
   }
 
+  // ── (9) Snapshot parity — ONLY when a manifest is supplied (extracted). ──
+  if (manifest !== undefined) {
+    violations.push(...checkSnapshotParity(atoms, manifest))
+  }
+
   return violations
+}
+
+/**
+ * ADR-0538 Phase 3 — (8b) dynamic-content placement check (extracted from
+ * {@link verifyRuleGraph} for complexity). A DYNAMIC-content atom (one carrying a
+ * `contentKey`) MUST ride `message.system_reminder` AND carry EMPTY `lines` (its
+ * wire text is per-turn DATA, not a static literal); a `system.*`-channel atom
+ * may NOT carry a contentKey (a cached section can never hold per-turn data).
+ */
+const checkDynamicContentPlacement = (
+  atoms: readonly InstructionAtom[],
+): readonly GraphViolation[] => {
+  const out: GraphViolation[] = []
+  for (const a of atoms) {
+    if (a.contentKey !== undefined && a.channel !== "message.system_reminder") {
+      out.push({
+        kind: "dynamic-content-placement",
+        message: `atom ${a.variantId} carries a contentKey but rides ${a.channel} (dynamic content may only ride message.system_reminder)`,
+        variantIds: [a.variantId],
+      })
+    }
+    if (a.contentKey !== undefined && a.lines.length > 0) {
+      out.push({
+        kind: "dynamic-content-placement",
+        message: `atom ${a.variantId} carries a contentKey AND non-empty lines (a dynamic atom's text is per-turn DATA, lines must be empty)`,
+        variantIds: [a.variantId],
+      })
+    }
+    if (isSystemChannel(a.channel) && a.contentKey !== undefined) {
+      out.push({
+        kind: "dynamic-content-placement",
+        message: `atom ${a.variantId} places per-turn contentKey ${a.contentKey} on cached channel ${a.channel} (a dynamic atom must not land in a system.* section)`,
+        variantIds: [a.variantId],
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * ADR-0538 Phase 3 — (9) snapshot-parity check (extracted). The manifest must
+ * reconstruct the observability snapshot: (a) every variantId in ANY channel
+ * traces to a declared atom; (b) `firedVariantIds` equals the union of all
+ * `byChannel` lists; (c) the policy's `firedAtomIds` are all in the reminder
+ * channel (the pre-Phase-3 notice snapshot the loop emits — parity, not drift).
+ */
+const parity = (message: string, id: string): GraphViolation => ({
+  kind: "snapshot-parity",
+  message,
+  variantIds: [id],
+})
+
+const checkSnapshotParity = (
+  atoms: readonly InstructionAtom[],
+  manifest: ManifestParityView,
+): readonly GraphViolation[] => {
+  const out: GraphViolation[] = []
+  const declared = new Set(atoms.map((a) => a.variantId))
+  const unionOfChannels = new Set<string>()
+  // (a) every byChannel span traces to a declared atom.
+  for (const [ch, ids] of Object.entries(manifest.byChannel)) {
+    for (const id of ids) {
+      unionOfChannels.add(id)
+      if (!declared.has(id)) {
+        out.push(parity(`manifest byChannel[${ch}] lists ${id} which is not a declared atom`, id))
+      }
+    }
+  }
+  // (b) firedVariantIds == the channel union (both directions).
+  const flat = new Set(manifest.firedVariantIds)
+  for (const id of unionOfChannels) {
+    if (!flat.has(id)) out.push(parity(`manifest lists ${id} in a channel but not firedVariantIds`, id))
+  }
+  for (const id of flat) {
+    if (!unionOfChannels.has(id))
+      out.push(parity(`manifest firedVariantIds carries ${id} which appears in no channel`, id))
+  }
+  // (c) policy.firedAtomIds ⊆ the reminder channel (the notice snapshot parity).
+  const reminder = new Set(manifest.byChannel["message.system_reminder"] ?? [])
+  for (const id of manifest.policy.firedAtomIds ?? []) {
+    if (!reminder.has(id))
+      out.push(parity(`policy.firedAtomIds reports ${id} not in the reminder channel (drift)`, id))
+  }
+  return out
 }

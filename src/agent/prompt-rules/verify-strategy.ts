@@ -51,6 +51,11 @@ const verifyCtx = (verifyStrategy: VerifyStrategy): PromptContext => ({
   hasImages: false,
   brief: false,
   untrustedEnvelope: false,
+  hasLanguageHint: false,
+  hasEnvBlock: false,
+  hasRepoRulesDynamic: false,
+  hasTaskBudget: false,
+  hasDirectives: false,
 })
 
 /** Rule constant kept for back-compat callers/tests — its `.lines` are the

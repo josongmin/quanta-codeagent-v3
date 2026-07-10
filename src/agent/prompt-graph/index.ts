@@ -8,19 +8,21 @@
  * `reachableToolUseContexts` / `reachableBodyContexts`.
  */
 
+export { ALL_ATOMS } from "./all-atoms"
 export { POSTURE_ATOMS, TOOL_USE_ATOMS, VERIFY_ATOMS } from "./atoms"
 export {
   BODY_AFTER_PERSONA_ATOMS,
   BODY_AFTER_PROMPT_PACK_ATOMS,
   BODY_ATOMS,
 } from "./atoms-body"
+export { DYNAMIC_ATOMS, type DynamicContentKey } from "./atoms-dynamic"
 export {
   BRIEF_NOTICE_ATOM_EXPORT,
   MODE_NOTICE_ATOMS,
   NOTICE_ATOMS,
   renderNoticeAtom,
 } from "./atoms-notices"
-export { reachableBodyContexts, reachableToolUseContexts } from "./contexts"
+export { reachableAllContexts, reachableBodyContexts, reachableToolUseContexts } from "./contexts"
 export { matches } from "./matches"
 export { renderAtoms, selectAtoms } from "./render"
 export type {
@@ -35,4 +37,4 @@ export type {
   PromptChannel,
   PromptContext,
 } from "./types"
-export { verifyRuleGraph } from "./verify"
+export { type ManifestParityView, verifyRuleGraph } from "./verify"

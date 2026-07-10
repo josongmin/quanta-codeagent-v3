@@ -17,19 +17,25 @@ import { assertValidIdentityLines } from "./identity"
 import { resolveAgentMode } from "./mode"
 import { type PersonaKind, personaLines } from "./persona"
 import { INTRO_LINES } from "./prompt-body"
+import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
-  type AgentMode as GraphMode,
   BODY_AFTER_PERSONA_ATOMS,
   BODY_AFTER_PROMPT_PACK_ATOMS,
+  BODY_ATOMS,
   BRIEF_NOTICE_ATOM_EXPORT,
+  type CompiledPromptArtifact,
+  DYNAMIC_ATOMS,
+  type AgentMode as GraphMode,
   MODE_NOTICE_ATOMS,
   NOTICE_ATOMS as NOTICE_ATOMS_ALL,
+  POSTURE_ATOMS,
+  type PromptChannel,
   type PromptContext,
   renderAtoms,
   renderNoticeAtom,
   selectAtoms,
+  VERIFY_ATOMS,
 } from "./prompt-graph"
-import { type DirectiveConfig, selectActiveDirectives } from "./prompt-directives"
 import {
   type AgentMode as PromptPackMode,
   renderPostureBase,
@@ -40,6 +46,7 @@ import {
 import {
   buildSectionedSystemBlocks,
   fourSectionPreset,
+  type PromptSection,
   validateSectionsCacheBudget,
 } from "./prompt-sections"
 import { applyPromptStyle, type PromptStyle } from "./prompt-style"
@@ -106,6 +113,11 @@ const bodyRenderCtx = (opts?: {
   hasImages: false,
   brief: false,
   untrustedEnvelope: false,
+  hasLanguageHint: false,
+  hasEnvBlock: false,
+  hasRepoRulesDynamic: false,
+  hasTaskBudget: false,
+  hasDirectives: false,
 })
 
 /** The static system prompt. No per-turn data — keep it byte-stable so the
@@ -426,6 +438,11 @@ const noticeCtx = (mode: GraphMode, brief: boolean): PromptContext => ({
   hasImages: false,
   brief,
   untrustedEnvelope: false,
+  hasLanguageHint: false,
+  hasEnvBlock: false,
+  hasRepoRulesDynamic: false,
+  hasTaskBudget: false,
+  hasDirectives: false,
 })
 
 /** The per-mode session notice (ADR-0211) — DERIVED from the instruction graph
@@ -457,6 +474,100 @@ const firedNoticeManifest = (
   if (fired.length === 0) return undefined
   const ids = fired.map((a) => a.variantId)
   return { firedAtomIds: ids, byChannel: { "message.system_reminder": ids } }
+}
+
+/**
+ * ADR-0538 Phase 3 — derive the per-turn DYNAMIC `PromptContext` facets the
+ * reminder-channel atoms select over. Only the facets the dynamic atoms read are
+ * set true; the rest stay at their representative default. PURE.
+ */
+const dynamicReminderCtx = (
+  input: TurnContextInput,
+  effectiveMode: AgentMode,
+  selectedGlobRules: readonly GlobRule[],
+  repoRulesInStaticSystem: boolean,
+): PromptContext => ({
+  ...noticeCtx(effectiveMode, input.brief === true),
+  hasLanguageHint: input.languageHint !== undefined && input.languageHint.length > 0,
+  hasEnvBlock: renderEnvBlock(input.env) !== undefined,
+  // repo-rules ride the reminder ONLY when NOT hoisted to the cached prefix.
+  hasRepoRulesDynamic: input.repoRules !== undefined && !repoRulesInStaticSystem,
+  hasGlobRules: selectedGlobRules.length > 0,
+  hasActiveSkills: input.activeSkills !== undefined && input.activeSkills.length > 0,
+  hasWorkingState: input.workingState !== undefined,
+  hasMemorySummary: (input.memoryContext?.trim().length ?? 0) > 0,
+  hasHookInjects: collectHookPromptSide(input.hookPromptInjects, "injectAfterSystem") !== undefined,
+  hasTaskBudget: renderTaskBudgetBlock(input.taskBudget) !== undefined,
+  hasDirectives:
+    selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig()).length > 0,
+})
+
+/** ADR-0538 Phase 3 — the FULL fired-atom manifest across all 8 channels. Every
+ *  channel is present (empty array ⇒ nothing fired there). `firedVariantIds` is
+ *  the union of all channel lists; `policy` is the compiled snapshot (snapshot
+ *  parity). PURE — derived from the same selection the assembly used. */
+const buildCompileManifest = (
+  input: TurnContextInput,
+  effectiveMode: AgentMode,
+  selectedGlobRules: readonly GlobRule[],
+  meta: {
+    useSectioned: boolean
+    hasProjectMd: boolean
+    hasSessionCtx: boolean
+    hasUserAppend: boolean
+    repoRulesInStaticSystem: boolean
+    policy: PromptPolicySnapshot
+  },
+): CompiledPromptArtifact["manifest"] => {
+  // system.base — the static body (posture ∪ verify ∪ body atoms) selected over
+  // the DEFAULT static bodyCtx (buildSystemPrompt is called without axis opts on
+  // the default path, so the cached prefix is mode/verify-independent).
+  const baseCtx = bodyRenderCtx()
+  const systemBaseIds = [
+    ...selectAtoms(POSTURE_ATOMS, baseCtx),
+    ...selectAtoms(VERIFY_ATOMS, baseCtx),
+    ...selectAtoms(BODY_ATOMS, baseCtx),
+  ].map((a) => a.variantId)
+
+  // message.system_reminder — notice atoms (mode/brief) ∪ dynamic-content atoms.
+  const reminderCtx = dynamicReminderCtx(
+    input,
+    effectiveMode,
+    selectedGlobRules,
+    meta.repoRulesInStaticSystem,
+  )
+  const reminderIds = [
+    ...selectAtoms(NOTICE_ATOMS_ALL, reminderCtx),
+    ...selectAtoms(DYNAMIC_ATOMS, reminderCtx),
+  ].map((a) => a.variantId)
+
+  const byChannel: Record<PromptChannel, readonly string[]> = {
+    "system.base": systemBaseIds,
+    // The cached optional sections are presence-marked (their CONTENT is caller
+    // data, not atoms) — a stable synthetic id per present section so the
+    // manifest reports which cached breakpoints are live without atomizing data.
+    "system.project_md": meta.useSectioned && meta.hasProjectMd ? ["SECTION-project_md"] : [],
+    "system.session_ctx": meta.useSectioned && meta.hasSessionCtx ? ["SECTION-session_ctx"] : [],
+    "system.user_append": meta.useSectioned && meta.hasUserAppend ? ["SECTION-user_append"] : [],
+    "message.hook_context":
+      collectHookPromptSide(input.hookPromptInjects, "injectBeforeUser") !== undefined
+        ? ["MSG-hook_context"]
+        : [],
+    "message.context_update":
+      (input.contextChangeEvents?.length ?? 0) > 0 ? ["MSG-context_update"] : [],
+    "message.mention_injection":
+      (input.mentionInjectionMessages?.length ?? 0) > 0 ? ["MSG-mention_injection"] : [],
+    "message.system_reminder": reminderIds,
+  }
+
+  const firedVariantIds = Object.values(byChannel).flat()
+  return {
+    firedAtomIds: firedVariantIds,
+    firedVariantIds,
+    suppressed: [],
+    byChannel,
+    policy: meta.policy,
+  }
 }
 
 /** Render the active-skills catalogue + trigger-rule block (Codex
@@ -740,17 +851,38 @@ const resolveSummaryPrefix = (messages: readonly Message[]): PromptSummaryPrefix
 const resolveStaticBase = (basePrompt: string, untrustedEnvelope: boolean | undefined): string =>
   untrustedEnvelope === true ? `${basePrompt}\n${UNTRUSTED_ENVELOPE_RULE}` : basePrompt
 
-export const buildTurnContext = (input: TurnContextInput): TurnContext => {
-  // ADR-0326 wire — cache the default `buildSystemPrompt()` result per
-  // session-key. `input.system` (caller-provided) bypasses the cache so a
-  // caller that already memoizes its own static prefix isn't shadowed.
+/**
+ * ADR-0538 Phase 3 — the SINGLE assembly path.
+ *
+ * `compile(input)` is the one place the prompt is assembled from the atom graph
+ * + the leaf renderers. It emits a {@link CompiledPromptArtifact}:
+ *
+ *   - `systemSections` — the ≤4 cached `system.*` sections (base / project_md /
+ *     session_ctx / user_append), ORDER = cache prefix, ADR-0326 4-breakpoint
+ *     budget preserved. Feed `buildSectionedSystemBlocks` to recover the wire
+ *     `SystemBlock[]`.
+ *   - `injectedMessages` — `baseMessages` + `message.hook_context` +
+ *     `message.context_update` + `message.mention_injection`, in the EXACT
+ *     current chronology (ADR-0321/0325).
+ *   - `trailingReminder` — the RAW `message.system_reminder` block BEFORE
+ *     `embedUntrusted` (the caller wraps it once). Absent ⇒ no reminder message.
+ *   - `manifest` — the fired-atom manifest across all 8 channels + the policy
+ *     snapshot (snapshot parity).
+ *
+ * `buildTurnContext` is a THIN FACADE over this (below). Byte-equivalence to the
+ * prior direct assembly is the HARD CONSTRAINT: the section list, the message
+ * order, and the reminder text are produced by the SAME leaf renderers in the
+ * SAME order as before — `compile` only RE-SHAPES them into the artifact.
+ */
+/** ADR-0538 Phase 3 — resolve the base statics + the sectioning decision the
+ *  compiler branches on. Extracted so {@link compile} stays under the cognitive-
+ *  complexity cap. PURE (renderers only). */
+const resolveCompileStatics = (
+  input: TurnContextInput,
+): { staticBase: string; projectMd: string | undefined; useSectioned: boolean } => {
   const basePrompt =
     input.system ?? resolveCachedSystemPrompt(input.systemPromptCache, input.systemPromptCacheKey)
   const staticBase = resolveStaticBase(basePrompt, input.untrustedEnvelope)
-  // 4-section preset (Claude Desktop 1.7196 `systemPromptSectionCache` mirror)
-  // activates only when the caller supplies repo-local rules text OR a static
-  // user-append; otherwise we stay byte-identical to the legacy single-block
-  // shape so existing callers and their cached prefixes are untouched.
   const projectMd =
     input.repoRules !== undefined ? renderRepoRulesBlock(input.repoRules) : undefined
   const useSectioned =
@@ -758,86 +890,132 @@ export const buildTurnContext = (input: TurnContextInput): TurnContext => {
     (input.userAppend !== undefined && input.userAppend.trim().length > 0) ||
     (input.sessionCtx !== undefined && input.sessionCtx.trim().length > 0) ||
     (input.memorySummaryMd !== undefined && input.memorySummaryMd.trim().length > 0)
+  return { staticBase, projectMd, useSectioned }
+}
+
+/** ADR-0538 Phase 3 — build the ≤4 cached `system.*` sections (ORDER = cache
+ *  prefix, ADR-0326 budget preserved). Byte-identical to the prior inline
+ *  branch. Extracted for complexity. */
+const buildSystemSections = (
+  input: TurnContextInput,
+  staticBase: string,
+  projectMd: string | undefined,
+  useSectioned: boolean,
+): PromptSection[] => {
+  if (!useSectioned) return [{ name: "base", text: staticBase, cache: true }]
+  const sections = fourSectionPreset({
+    base: staticBase,
+    ...(projectMd !== undefined ? { projectMd } : {}),
+    ...(input.sessionCtx !== undefined ? { sessionCtx: input.sessionCtx } : {}),
+    ...(input.memorySummaryMd !== undefined ? { memorySummaryMd: input.memorySummaryMd } : {}),
+    ...(input.userAppend !== undefined ? { userAppend: input.userAppend } : {}),
+  })
+  // Fail-soft cache-budget check (unchanged): the preset cannot exceed 4 by
+  // construction; kept so future growth surfaces in dev, not at the API.
+  validateSectionsCacheBudget(sections)
+  return sections
+}
+
+/** ADR-0538 Phase 3 — assemble the `PromptPolicySnapshot` (observability). Byte-
+ *  identical to the prior inline object; the ADR-0538-Phase-2 fired-notice
+ *  manifest spreads in additively. Extracted for complexity. */
+const buildPromptPolicy = (
+  input: TurnContextInput,
+  effectiveMode: AgentMode,
+  selectedGlobRules: readonly GlobRule[],
+  projectMd: string | undefined,
+  useSectioned: boolean,
+): PromptPolicySnapshot => ({
+  mode: effectiveMode,
+  baseSystem: input.system !== undefined ? "caller_provided" : "default",
+  systemLayout: useSectioned ? "four_section" : "single_block",
+  repoRulesPresent: hasText(projectMd),
+  sessionCtxPresent: hasText(input.sessionCtx) || hasText(input.memorySummaryMd),
+  userAppendPresent: hasText(input.userAppend),
+  selectedGlobRuleNames: selectedGlobRules.map((rule) => basename(rule.sourcePath)),
+  activeSkillNames: input.activeSkills?.map((skill) => skill.name) ?? [],
+  workingStatePresent: input.workingState !== undefined,
+  memoryContextPresent: hasText(input.memoryContext),
+  contextChangeCount: input.contextChangeEvents?.length ?? 0,
+  mentionInjectionCount: input.mentionInjectionMessages?.length ?? 0,
+  hookContext: resolveHookContextMode(input.hookPromptInjects),
+  summaryPrefix: resolveSummaryPrefix(input.baseMessages),
+  ...(input.promptSurfaceProfile !== undefined
+    ? { surfaceProfile: input.promptSurfaceProfile }
+    : {}),
+  ...(input.activeLevers !== undefined ? { activeLevers: input.activeLevers } : {}),
+  // ADR-0538 Phase 2 — fired notice-atom manifest (additive; absent when no
+  // notice atom fired ⇒ byte-identical snapshot for a default/non-brief turn).
+  ...(firedNoticeManifest(effectiveMode, input.brief === true) ?? {}),
+})
+
+export const compile = (input: TurnContextInput): CompiledPromptArtifact => {
+  const { staticBase, projectMd, useSectioned } = resolveCompileStatics(input)
   const effectiveMode = resolveAgentMode(input.mode, input.planMode)
   const selectedGlobRules =
     input.globRules !== undefined && input.globRules.length > 0
       ? selectGlobRules(input.globRules, input.changedPaths ?? [])
       : []
-  const system: SystemBlock[] = useSectioned
-    ? (() => {
-        const sections = fourSectionPreset({
-          base: staticBase,
-          ...(projectMd !== undefined ? { projectMd } : {}),
-          ...(input.sessionCtx !== undefined ? { sessionCtx: input.sessionCtx } : {}),
-          ...(input.memorySummaryMd !== undefined
-            ? { memorySummaryMd: input.memorySummaryMd }
-            : {}),
-          ...(input.userAppend !== undefined ? { userAppend: input.userAppend } : {}),
-        })
-        // Fail-soft cache-budget check: the validator can only return ok:false
-        // here if the preset itself ever exceeds 4 sections, which it cannot by
-        // construction. Kept as a guard so future preset growth surfaces in
-        // dev rather than at the provider's 400-on-too-many-breakpoints.
-        validateSectionsCacheBudget(sections)
-        return buildSectionedSystemBlocks(sections)
-      })()
-    : [{ type: "text", text: staticBase, cache: true }]
-  const dynamic = buildDynamicContext(
+
+  // ── system.* channels — the cached prefix sections (ORDER = cache prefix). ──
+  const systemSections = buildSystemSections(input, staticBase, projectMd, useSectioned)
+
+  // ── message.system_reminder channel — the RAW dynamic block (pre-embed). ──
+  const repoRulesInStaticSystem = useSectioned && hasText(projectMd)
+  const trailingReminder = buildDynamicContext(
     input,
     effectiveMode,
     selectedGlobRules,
-    useSectioned && hasText(projectMd),
+    repoRulesInStaticSystem,
   )
-  const messages: Message[] = [...input.baseMessages]
-  appendHookContextMessage(messages, input.hookPromptInjects)
-  // ADR-0321 + ADR-0325 wire — persistent injection channels.
-  // Both are inserted AFTER the base history (+ any hook-context) and BEFORE
-  // the trailing `<system-reminder>` so the model reads them as chronological
-  // pre-turn signals. Same-slot ordering: context-change first (it represents
-  // state transitions that happened BEFORE the turn started), then mention
-  // injections (user-driven invocations FOR this turn).
-  appendContextChangeMessages(messages, input.contextChangeEvents)
-  appendMentionInjectionMessages(messages, input.mentionInjectionMessages)
-  if (dynamic !== undefined) {
+
+  // ── message.hook_context / context_update / mention_injection — EXACT
+  //    current chronology (ADR-0321/0325), assembled onto `injectedMessages`. ──
+  const injectedMessages: Message[] = [...input.baseMessages]
+  appendHookContextMessage(injectedMessages, input.hookPromptInjects)
+  appendContextChangeMessages(injectedMessages, input.contextChangeEvents)
+  appendMentionInjectionMessages(injectedMessages, input.mentionInjectionMessages)
+
+  const policy = buildPromptPolicy(input, effectiveMode, selectedGlobRules, projectMd, useSectioned)
+  const manifest = buildCompileManifest(input, effectiveMode, selectedGlobRules, {
+    useSectioned,
+    hasProjectMd: hasText(projectMd),
+    hasSessionCtx: hasText(input.sessionCtx) || hasText(input.memorySummaryMd),
+    hasUserAppend: hasText(input.userAppend),
+    repoRulesInStaticSystem,
+    policy,
+  })
+
+  return {
+    systemSections,
+    injectedMessages,
+    ...(trailingReminder !== undefined ? { trailingReminder } : {}),
+    manifest,
+  }
+}
+
+/** ADR-0538 Phase 3 — thin facade over {@link compile}. Callers stay byte-
+ *  identical: this re-derives the wire `SystemBlock[]` + `messages` from the
+ *  artifact (the SAME `buildSectionedSystemBlocks` + single `embedUntrusted`
+ *  the direct assembly used) and forwards the compiled `promptPolicy`. */
+export const buildTurnContext = (input: TurnContextInput): TurnContext => {
+  const artifact = compile(input)
+  const system = buildSectionedSystemBlocks([...artifact.systemSections])
+  const messages: Message[] = [...artifact.injectedMessages]
+  if (artifact.trailingReminder !== undefined) {
     // Route the assembled dynamic block through the canonical untrusted-embed
     // helper: it defangs inner `<system-reminder>` boundaries BEFORE wrapping so
     // a value supplied by repoRules / memory / skills cannot terminate the outer
     // block and forge a system-attributed instruction. Byte-identical to the
-    // prior inline `<system-reminder>\n${escapeReminderBoundary(dynamic)}\n
-    // </system-reminder>` form — the wrapper and escape are unchanged, only the
-    // path is now the single enforced one.
+    // prior inline path — one wrap, one escape.
     messages.push({
       role: "user",
-      content: [{ type: "text", text: embedUntrusted("system-reminder", dynamic) }],
+      content: [
+        { type: "text", text: embedUntrusted("system-reminder", artifact.trailingReminder) },
+      ],
     })
   }
-  return {
-    system,
-    messages,
-    promptPolicy: {
-      mode: effectiveMode,
-      baseSystem: input.system !== undefined ? "caller_provided" : "default",
-      systemLayout: useSectioned ? "four_section" : "single_block",
-      repoRulesPresent: hasText(projectMd),
-      sessionCtxPresent: hasText(input.sessionCtx) || hasText(input.memorySummaryMd),
-      userAppendPresent: hasText(input.userAppend),
-      selectedGlobRuleNames: selectedGlobRules.map((rule) => basename(rule.sourcePath)),
-      activeSkillNames: input.activeSkills?.map((skill) => skill.name) ?? [],
-      workingStatePresent: input.workingState !== undefined,
-      memoryContextPresent: hasText(input.memoryContext),
-      contextChangeCount: input.contextChangeEvents?.length ?? 0,
-      mentionInjectionCount: input.mentionInjectionMessages?.length ?? 0,
-      hookContext: resolveHookContextMode(input.hookPromptInjects),
-      summaryPrefix: resolveSummaryPrefix(input.baseMessages),
-      ...(input.promptSurfaceProfile !== undefined
-        ? { surfaceProfile: input.promptSurfaceProfile }
-        : {}),
-      ...(input.activeLevers !== undefined ? { activeLevers: input.activeLevers } : {}),
-      // ADR-0538 Phase 2 — fired notice-atom manifest (additive; absent when no
-      // notice atom fired ⇒ byte-identical snapshot for a default/non-brief turn).
-      ...(firedNoticeManifest(effectiveMode, input.brief === true) ?? {}),
-    },
-  }
+  return { system, messages, promptPolicy: artifact.manifest.policy }
 }
 
 // ─── ADR-0327 wire helpers ───────────────────────────────────────────────────

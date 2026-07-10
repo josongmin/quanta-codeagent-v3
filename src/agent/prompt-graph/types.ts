@@ -28,13 +28,7 @@ import type { AgentMode as PromptPackMode, VerifyStrategy } from "../prompt-rule
  *  the prompt-graph slice to the mode slice's internals. ADR-0538 Phase 2 needs
  *  `architect`/`editor` as first-class facets (the read-only completion-bar
  *  split + the architect/editor mode notices). */
-export type AgentMode =
-  | "default"
-  | "plan"
-  | "review"
-  | "audit"
-  | "architect"
-  | "editor"
+export type AgentMode = "default" | "plan" | "review" | "audit" | "architect" | "editor"
 
 /** Authority layer (ADR-0538 §Primitive). Higher layer = higher precedence when
  *  two atoms speak to the same concern; recorded on every atom for placement +
@@ -100,6 +94,18 @@ export interface AtomMatcher {
   hasImages?: boolean
   brief?: boolean
   untrustedEnvelope?: boolean
+  // ADR-0538 Phase 3 — presence facets for the DYNAMIC reminder atoms.
+  hasLanguageHint?: boolean
+  hasEnvBlock?: boolean
+  /** Repo rules present AND NOT hoisted to the cached `project_md` section (so
+   *  they ride the DYNAMIC reminder). Distinct from `hasRepoRules` (which is
+   *  presence-anywhere) — the dynamic repo-rules atom fires only on this. */
+  hasRepoRulesDynamic?: boolean
+  hasTaskBudget?: boolean
+  /** ≥1 §5 prompt-directive is active (resolved from runtimeConfig knobs). The
+   *  dynamic directives atom fires only when the selection is non-empty, so the
+   *  manifest never reports it for a default-OFF (zero-byte) turn. */
+  hasDirectives?: boolean
 }
 
 /**
@@ -119,8 +125,22 @@ export interface InstructionAtom {
   /** Group + intra-channel order label (audit-friendly). */
   readonly section: string
   readonly order: number
-  /** Rendered content — NO ADR/Codex citations (those live in `provenance`). */
+  /** Rendered content — NO ADR/Codex citations (those live in `provenance`).
+   *  For a STATIC atom this is the literal wire text. For a DYNAMIC-content atom
+   *  (one that carries a `contentKey`) `lines` is EMPTY — its wire text is
+   *  per-turn DATA resolved by the compiler via {@link contentKey}. */
   readonly lines: readonly string[]
+  /**
+   * ADR-0538 Phase 3 — DYNAMIC-content marker. When present, the atom's rendered
+   * text is NOT `lines` (which stays empty) but per-turn DATA the compiler
+   * resolves via a PURE lookup keyed by this string over the `PromptContext`'s
+   * per-turn content fields (`contentByKey`). This preserves the purity contract:
+   * `when` stays the declarative matcher (applicability), `contentKey` is a
+   * STABLE label (not a render closure — no clock/IO/closure capture on the
+   * atom). Only atoms on the `message.system_reminder` channel may carry one
+   * (the verifier enforces this). Absent ⇒ a STATIC atom (`lines` is authoritative).
+   */
+  readonly contentKey?: string
   /** Absent ⇒ always applies. */
   readonly when?: AtomMatcher
   /** variantIds this one overrides (owned R-* over frozen R-*). */
@@ -157,28 +177,53 @@ export interface PromptContext {
   readonly hasImages: boolean
   readonly brief: boolean
   readonly untrustedEnvelope: boolean
+  // ADR-0538 Phase 3 — per-turn DYNAMIC reminder facets.
+  readonly hasLanguageHint: boolean
+  readonly hasEnvBlock: boolean
+  readonly hasRepoRulesDynamic: boolean
+  readonly hasTaskBudget: boolean
+  readonly hasDirectives: boolean
 }
 
-/** A rendered section for a `system.*` channel (feeds `fourSectionPreset`). */
+/** A rendered, cache-labelled system section (structurally the `PromptSection`
+ *  shape from `@/agent/prompt-sections`, declared here so the pure slice stays
+ *  decoupled). `buildSectionedSystemBlocks` consumes these directly to recover
+ *  the `SystemBlock[]` prefix — the artifact re-assembles byte-identically. */
 export interface CompiledPromptSection {
-  readonly channel: PromptChannel
-  readonly lines: readonly string[]
+  readonly name: string
+  readonly text: string
+  readonly cache: boolean
 }
 
 /**
- * The compiled artifact contract (ADR §Compiler). Phase 1 exercises only the
- * `systemSections` + `manifest` for the migrated tool-use-rule slice; the
- * message channels are declared so the Phase 2 body/dynamic migration lands
- * into a stable shape.
+ * The compiled artifact contract (ADR §Compiler) — the FULL Phase-3 shape.
+ *
+ *   - `systemSections` — the ≤4 cached `system.*` sections (ADR-0326). Feed
+ *     `buildSectionedSystemBlocks` to recover the `SystemBlock[]` prefix.
+ *   - `injectedMessages` — the chronological message list: `baseMessages` +
+ *     `message.hook_context` + `message.context_update` +
+ *     `message.mention_injection`, in the EXACT current order (ADR-0321/0325).
+ *   - `trailingReminder` — the RAW `message.system_reminder` block text BEFORE
+ *     `embedUntrusted` (so the caller wraps it exactly once; absent ⇒ no
+ *     reminder message, byte-identical to the pre-reminder path).
+ *   - `manifest` — the fired-atom manifest across all 8 channels + the policy
+ *     snapshot the compiler produced (snapshot parity).
  */
 export interface CompiledPromptArtifact {
   readonly systemSections: readonly CompiledPromptSection[]
+  readonly injectedMessages: readonly import("@/llm").Message[]
+  readonly trailingReminder?: string
   readonly manifest: {
     readonly firedAtomIds: readonly string[]
     readonly firedVariantIds: readonly string[]
     /** supersede audit trail: `loser` variantId suppressed by `winner`. */
     readonly suppressed: ReadonlyArray<{ readonly loser: string; readonly winner: string }>
-    readonly byChannel: Partial<Readonly<Record<PromptChannel, readonly string[]>>>
+    /** ALL 8 channels present (empty array ⇒ no atom fired on that channel). */
+    readonly byChannel: Readonly<Record<PromptChannel, readonly string[]>>
+    /** ADR-0538 Phase 3 — the `PromptPolicySnapshot` the compiler assembled, so
+     *  the manifest can RECONSTRUCT the observability snapshot (snapshot parity).
+     *  Typed structurally to avoid a `@/shared` value import into the pure slice. */
+    readonly policy: import("@/shared").PromptPolicySnapshot
   }
 }
 
@@ -194,6 +239,9 @@ export interface GraphViolation {
     | "static-dynamic-separation"
     | "authority-placement"
     | "manifest-completeness"
+    // ADR-0538 Phase 3 checks (ADR §Build-time verifier 8 extended, 9):
+    | "dynamic-content-placement"
+    | "snapshot-parity"
   readonly message: string
   /** The offending variantId(s). */
   readonly variantIds: readonly string[]

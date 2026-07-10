@@ -39,6 +39,11 @@ const BASE: Omit<PromptContext, "envPosture" | "verifyStrategy"> = {
   hasImages: false,
   brief: false,
   untrustedEnvelope: false,
+  hasLanguageHint: false,
+  hasEnvBlock: false,
+  hasRepoRulesDynamic: false,
+  hasTaskBudget: false,
+  hasDirectives: false,
 }
 
 /**
@@ -57,14 +62,7 @@ export const reachableToolUseContexts = (): readonly PromptContext[] => {
 
 /** The full 6-mode set — the body atoms (completion-bar split) and the notice
  *  atoms read `mode`, so the body-graph verifier must cross it. */
-const MODES: readonly AgentMode[] = [
-  "default",
-  "plan",
-  "review",
-  "audit",
-  "architect",
-  "editor",
-]
+const MODES: readonly AgentMode[] = ["default", "plan", "review", "audit", "architect", "editor"]
 
 /**
  * The reachable ctx set for the Phase 2 BODY + NOTICE slice = envPosture ×
@@ -83,6 +81,40 @@ export const reachableBodyContexts = (): readonly PromptContext[] => {
         }
       }
     }
+  }
+  return out
+}
+
+/** The per-turn presence facets the DYNAMIC reminder atoms condition on. Each is
+ *  toggled INDEPENDENTLY (a single ctx per facet ON) on top of the body cross —
+ *  the dynamic atoms are mutually independent (no conflict / supersede between
+ *  them), so a per-facet ON ctx is sufficient to prove coverage without a full
+ *  2^N cross. */
+const DYNAMIC_PRESENCE_FACETS: readonly (keyof PromptContext)[] = [
+  "hasLanguageHint",
+  "hasEnvBlock",
+  "hasRepoRulesDynamic",
+  "hasGlobRules",
+  "hasActiveSkills",
+  "hasWorkingState",
+  "hasMemorySummary",
+  "hasHookInjects",
+  "hasTaskBudget",
+  "hasImages",
+  "hasDirectives",
+]
+
+/**
+ * The FULL reachable ctx surface for the WHOLE atom graph (body ∪ notices ∪
+ * dynamic). = the body cross (envPosture×verify×mode×brief = 144) PLUS one ctx
+ * per dynamic presence facet turned ON (so every dynamic atom fires in ≥1 ctx
+ * for the coverage check). `verifyRuleGraph(ALL_ATOMS, reachableAllContexts())`
+ * must be 0 violations.
+ */
+export const reachableAllContexts = (): readonly PromptContext[] => {
+  const out: PromptContext[] = [...reachableBodyContexts()]
+  for (const facet of DYNAMIC_PRESENCE_FACETS) {
+    out.push({ ...BASE, envPosture: "frozen", verifyStrategy: undefined, [facet]: true })
   }
   return out
 }

@@ -478,6 +478,10 @@ export const emitPromptAssembled = (
       // active; `model` stays the real active id for reporting.
       max: resolveModelWindow(resolveWindowModel(config.llm, activeModel))?.contextWindow ?? 0,
       model: activeModel,
+      // ADR-0538 Phase 3 — forward the fired-atom manifest (additive; absent when
+      // no atom manifest was emitted, byte-identical to the pre-ADR-0538 snapshot).
+      ...(policy.firedAtomIds !== undefined ? { firedAtomIds: policy.firedAtomIds } : {}),
+      ...(policy.byChannel !== undefined ? { byChannel: policy.byChannel } : {}),
     })
   } catch (e) {
     config.stream.emit({
