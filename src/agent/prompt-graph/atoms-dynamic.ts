@@ -10,25 +10,19 @@
  * observability is a fired-atom manifest — WITHOUT smuggling a render closure
  * onto the atom.
  *
- * WHAT THESE ATOMS ARE (and are NOT — honest scope):
- *   - They are the DECLARATIVE APPLICABILITY + OBSERVABILITY manifest of the
- *     per-turn reminder: each atom's `when` says WHEN its block rides, and its
- *     `contentKey` NAMES which block it is, so the compiler can report a
- *     fired-atom manifest for the reminder channel (`byChannel`).
- *   - They do NOT yet PRODUCE the reminder wire text. That text is assembled by
- *     the leaf renderers in {@link buildDynamicContext} (date/cwd/env/repo/…).
- *     There is no `contentByKey` RESOLVER wiring these atoms to the wire — the
- *     graph is authoritative for the reminder's APPLICABILITY + manifest, not (yet)
- *     for its bytes. Making the graph author the reminder text too (a pure
- *     `contentByKey(input, now)` the assembler folds over the selected atoms, so
- *     `buildDynamicContext` DERIVES from the atoms) is the natural next step —
- *     deferred because it must stay byte-identical over the whole reminder.
- *   - Because there are TWO expressions of "is this block present" — each atom's
- *     `when` here, and the matching `if (...)` in `buildDynamicContext` — they
- *     MUST agree. That correspondence is the drift risk; a drift-guard hellgate
- *     pins `manifest reminder atom fired ⟺ its block text present in the wire`
- *     (`compile-artifact-hellgate.test.ts`), so the shadow cannot silently
- *     diverge.
+ * WHAT THESE ATOMS ARE — the graph IS authoritative for the reminder:
+ *   - Each atom's `when` says WHEN its block rides; its `contentKey` NAMES which
+ *     block it is. The compiler's `contentByKey` RESOLVER (in `prompt.ts`) maps
+ *     the key to per-turn wire text via the leaf renderers, and
+ *     `resolveReminderBlocks` folds over the ONE ordered atom selection to produce
+ *     BOTH the wire (`buildDynamicContext`) AND the fired-atom manifest.
+ *   - Because the wire and the manifest derive from that SAME selection, they
+ *     CANNOT drift: an atom is "fired" IFF it produced wire text. There is no
+ *     longer a parallel hand-rolled sequence to disagree with (the earlier
+ *     observability-shadow, closed by the `contentByKey` migration). A drift-guard
+ *     hellgate (`compile-artifact-hellgate.test.ts`, case-set == DYNAMIC_ATOMS)
+ *     additionally pins `manifest atom fired ⟺ its block text in the wire` so a
+ *     new key without a resolver case fails loudly.
  *
  * PURITY CONTRACT (ADR-0538 §KEY-TRANSFORM — dynamic atoms):
  *   - `when` stays the DECLARATIVE {@link AtomMatcher} (e.g. `hasRepoRules`,
@@ -58,10 +52,10 @@ const REMINDER = "message.system_reminder" as const
 const SECTION = "dynamic.reminder"
 
 /** The stable content-key set for the dynamic reminder segments — each names ONE
- *  block of the per-turn reminder. The block's TEXT is produced by the leaf
- *  renderer in `buildDynamicContext` (there is no `contentByKey` resolver yet —
- *  see the file header); the key is the manifest/observability label. Exported so
- *  the compiler + the verifier reference ONE closed set (drift guard). */
+ *  block of the per-turn reminder. The compiler's `contentByKey` resolver
+ *  (`prompt.ts`) maps the key to the block's per-turn wire text via the leaf
+ *  renderers. Exported so the compiler + the verifier reference ONE closed set
+ *  (drift guard: the resolver switch + `resolveReminderBlocks` cover this set). */
 export type DynamicContentKey =
   | "date"
   | "cwd"
@@ -89,7 +83,7 @@ const dyn = (
   channel: REMINDER,
   section: SECTION,
   order,
-  lines: [], // per-turn DATA — the leaf renderer produces the text; `contentKey` is the observability label.
+  lines: [], // per-turn DATA — the compiler's `contentByKey` resolver produces the text from this key.
   contentKey: key,
   ...(when !== undefined ? { when } : {}),
   ...(provenance !== undefined ? { provenance } : {}),
@@ -149,11 +143,11 @@ const A_TASK_BUDGET = dyn("task-budget", 200, { hasTaskBudget: true }, "L2_runti
 
 /**
  * The dynamic-content atom set (ordered). Every atom rides
- * `message.system_reminder` with a `contentKey` LABEL; the per-turn text for each
- * is produced by the leaf renderer in `buildDynamicContext` (there is no
- * `contentByKey` resolver yet — see the file header), in this same order
- * (interleaved with the notice atoms). Applicability is the declarative `when`
- * matcher; the manifest reports which of these fired.
+ * `message.system_reminder` with a `contentKey`; the compiler's `contentByKey`
+ * resolver produces each block's per-turn text (via the leaf renderers) and
+ * `resolveReminderBlocks` folds over this ordered selection — interleaved with the
+ * notice atoms — to assemble BOTH the wire and the manifest. Applicability is the
+ * declarative `when` matcher.
  */
 export const DYNAMIC_ATOMS: readonly InstructionAtom[] = [
   A_DATE,

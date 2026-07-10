@@ -133,13 +133,14 @@ export interface InstructionAtom {
   /**
    * ADR-0538 Phase 3 — DYNAMIC-content marker. When present, the atom carries NO
    * wire text (`lines` stays empty): it is the declarative APPLICABILITY (`when`)
-   * + a STABLE observability LABEL for one per-turn reminder block. The block's
-   * TEXT is produced by the leaf renderer in `buildDynamicContext` — there is NO
-   * `contentByKey` resolver wiring the key to the wire today (a forward seam; see
-   * `atoms-dynamic.ts`). The purity contract holds either way: `when` is the
-   * declarative matcher, `contentKey` is a stable string (no clock/IO/closure
-   * capture on the atom). Only atoms on the `message.system_reminder` channel may
-   * carry one (the verifier enforces this). Absent ⇒ STATIC (`lines` authoritative).
+   * + a STABLE key for one per-turn reminder block. The compiler's `contentByKey`
+   * resolver (`prompt.ts`) maps the key to the block's per-turn wire text via the
+   * leaf renderers; `resolveReminderBlocks` folds over the selected atoms to
+   * assemble the reminder AND its manifest from the SAME selection (so they cannot
+   * drift). The purity contract holds: `when` is the declarative matcher,
+   * `contentKey` is a stable string (no clock/IO/closure capture on the atom).
+   * Only atoms on the `message.system_reminder` channel may carry one (the verifier
+   * enforces this). Absent ⇒ STATIC (`lines` authoritative).
    */
   readonly contentKey?: string
   /** Absent ⇒ always applies. */
