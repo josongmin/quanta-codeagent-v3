@@ -19,6 +19,7 @@ import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
 import type { SupportedReadModels } from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
+import { loadSessionById } from "@/session"
 import { errMessage, logger } from "@/shared"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
@@ -32,6 +33,7 @@ import type {
   ObservabilityPorts,
   UserInputPorts,
 } from "./server/sinks"
+import { hydrateThreadIntoLiveSession } from "./server/thread-hydrate"
 import { attachTranscriptPersistence } from "./server/transcript-persist"
 import type { WSData } from "./server/ws-data"
 import { buildWebSocketHandlers } from "./server/ws-handlers"
@@ -224,6 +226,21 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     cwd: config.sessionConfig.cwd ?? process.cwd(),
   })
   let transcriptPersistUnsub: (() => void) | null = transcriptPersist.unsub
+  // P1 Phase 2 — swap-on-attach closure: load the opened thread's lossless
+  // SavedSession, replace the live transcript, repoint persistence. Only when
+  // persistence is on (there is a thread store to have saved anything).
+  const onAttachThread =
+    threadStore !== null
+      ? async (threadId: string): Promise<void> => {
+          await hydrateThreadIntoLiveSession(threadId, {
+            loadThread: async (id) => await loadSessionById(id),
+            replaceTranscript: async (messages) => {
+              await sharedSession.transcript.replace(messages)
+            },
+            setActiveThreadId: (id) => transcriptPersist.setActiveThreadId(id),
+          })
+        }
+      : undefined
   const readoutSources: WebReadoutSources = {
     ...(facadeReadoutSources ?? {}),
     cost: costAggregator.totals,
@@ -244,6 +261,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       sharedSession,
       readoutSources,
       getServer: () => server,
+      ...(threadStore !== null ? { activeThreadId: () => transcriptPersist.activeThreadId() } : {}),
       // A2 — the read-only preview resolver for `GET /artifact/:id`. Absent ⇒
       // the route 404s (byte-identical). `void` marks the intentional unused when
       // exactOptionalPropertyTypes strips it below.
@@ -251,7 +269,13 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         ? { artifactPreviewResolver: config.artifactPreviewResolver }
         : {}),
     }),
-    websocket: buildWebSocketHandlers({ config, registry, sharedSession, followerApproval }),
+    websocket: buildWebSocketHandlers({
+      config,
+      registry,
+      sharedSession,
+      followerApproval,
+      ...(onAttachThread !== undefined ? { onAttachThread } : {}),
+    }),
   })
 
   // Bun.serve binds synchronously when a port is requested — `port` is the

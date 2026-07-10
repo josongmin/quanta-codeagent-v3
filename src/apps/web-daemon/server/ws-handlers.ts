@@ -160,6 +160,10 @@ export interface WsHandlerDeps {
   readonly registry: SessionRegistry
   readonly sharedSession: RuntimeSession
   readonly followerApproval: FollowerApprovalCoordinator | undefined
+  /** P1 Phase 2 (jul-11) — swap the live session onto the opened thread. Absent
+   *  ⇒ no swap (byte-identical). Injected by `startWebDaemon` (loadSessionById +
+   *  sharedSession.transcript.replace + the transcript-persistence repoint). */
+  readonly onAttachThread?: (threadId: string) => Promise<void>
 }
 
 interface WsHandlers {
@@ -169,7 +173,7 @@ interface WsHandlers {
 }
 
 export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
-  const { config, registry, sharedSession, followerApproval } = deps
+  const { config, registry, sharedSession, followerApproval, onAttachThread } = deps
 
   return {
     async open(ws: ServerWebSocket<WSData>) {
@@ -184,6 +188,18 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
       applySurfaceSubscription(ws, config, undefined)
       try {
         await buildRegisteredSession(registry, ws, adapter, sharedSession)
+        // P1 Phase 2 — swap the live session onto the opened thread (hydrate
+        // from its lossless SavedSession). No thread / no handler ⇒ join the
+        // current live session unchanged. Never fatal: a swap failure logs but
+        // the connection still serves the live session.
+        if (ws.data.threadId !== undefined && onAttachThread !== undefined) {
+          await onAttachThread(ws.data.threadId).catch((error) =>
+            logger.warn("web-daemon: thread swap on attach failed", {
+              threadId: ws.data.threadId,
+              error: errMessage(error),
+            }),
+          )
+        }
       } catch (error) {
         logger.error("web-daemon: failed to create runtime session", {
           error: errMessage(error),

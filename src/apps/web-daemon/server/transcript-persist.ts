@@ -34,6 +34,10 @@ export interface TranscriptPersistOptions {
 export interface TranscriptPersistence {
   /** Repoint future writes at `threadId` (Phase 2 swap). */
   setActiveThreadId(threadId: string): void
+  /** The thread the live session currently represents (Phase 2 swap target,
+   *  or the session id before any swap) — the REST /events boundary reads it
+   *  to report `live-attach` vs `read-only-history` honestly. */
+  activeThreadId(): string
   /** Await the in-flight write (tests). */
   flush(): Promise<void>
   unsub(): void
@@ -88,6 +92,7 @@ export const attachTranscriptPersistence = (
     setActiveThreadId: (threadId) => {
       activeThreadId = threadId
     },
+    activeThreadId: () => activeThreadId,
     flush: () => inFlight,
     unsub,
   }

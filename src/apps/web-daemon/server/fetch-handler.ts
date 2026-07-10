@@ -54,6 +54,11 @@ export interface FetchHandlerDeps {
   readonly readoutSources?: WebReadoutSources
   /** Lazy accessor — the `Bun.serve` handle is assigned after this is built. */
   readonly getServer: () => Server<WSData>
+  /** P1 Phase 2 (jul-11) — the thread the live session currently represents
+   *  (swap target, or the session id before any swap). The `/events` boundary
+   *  reads it so a hydrated (swapped-onto) thread reports `live-attach`, not
+   *  read-only. Absent ⇒ falls back to the session id (pre-swap behavior). */
+  readonly activeThreadId?: () => string
 }
 
 type RouteResult = Response | Promise<Response> | undefined
@@ -117,6 +122,7 @@ const tryReadRoutes = (
   requireAuth: RequireAuth,
 ): RouteResult => {
   const { threadStore, sharedSession } = deps
+  const liveThreadId = (): string => deps.activeThreadId?.() ?? sharedSession.sessionId
   // Thread persistence read-side. `GET /threads` lists every persisted
   // thread (most-recent first). Disabled (404) when persistence is off.
   if (url.pathname === "/threads" && req.method === "GET") {
@@ -207,7 +213,7 @@ const tryReadRoutes = (
       const sinceRaw = url.searchParams.get("since")
       const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10)
       const sinceSeq = Number.isFinite(since) && since >= 0 ? since : 0
-      const boundary = threadId === sharedSession.sessionId ? "live-attach" : "read-only-history"
+      const boundary = threadId === liveThreadId() ? "live-attach" : "read-only-history"
       return jsonResponse(200, {
         threadId,
         boundary,
@@ -306,12 +312,16 @@ const makeTryUpgrade = (config: WebDaemonServerConfig) => {
         return authReject()
       }
     }
+    // P1 Phase 2 — carry the opened thread id into the connection so `open()`
+    // can swap the live session onto it (hydrate). Absent ⇒ no swap.
+    const threadId = new URL(req.url).searchParams.get("thread") ?? undefined
     const upgraded = server.upgrade(req, {
       data: {
         adapter: undefined,
         observability: undefined,
         canvas: undefined,
         agentState: undefined,
+        threadId,
       },
     })
     if (!upgraded) return new Response("upgrade failed", { status: 400 })
