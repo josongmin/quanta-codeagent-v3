@@ -291,6 +291,37 @@ describe("SessionClient", () => {
     expect(h.fakes[0]?.url).toBe("ws://localhost/test?x=1&token=t")
   })
 
+  // ★ HELLGATE — P1 Phase 3a (swap-arm): a `resumeThreadId` on connect must ride
+  // the WS URL as `?thread=<id>` so the daemon's swap-on-attach fires (the thread
+  // becomes the ONE live session), NOT a read-only REST replay. Without this the
+  // daemon never sees the thread at upgrade and every socket stays on the
+  // server-minted live id.
+  it("appends ?thread when a resumeThreadId is provided (arms the daemon swap)", () => {
+    const h = buildHarness()
+    h.client.connect({
+      url: "ws://localhost/test",
+      resumeThreadId: "thread-abc",
+    })
+    expect(h.fakes[0]?.url).toBe("ws://localhost/test?thread=thread-abc")
+  })
+
+  it("URL-encodes the thread id and composes with ?token", () => {
+    const h = buildHarness()
+    h.client.connect({
+      url: "ws://localhost/test",
+      resumeThreadId: "a/b c",
+      auth: { token: "t" },
+    })
+    // thread first, then token — both present, both encoded
+    expect(h.fakes[0]?.url).toBe("ws://localhost/test?thread=a%2Fb%20c&token=t")
+  })
+
+  it("PAIRED CONTROL — absent resumeThreadId ⇒ URL byte-identical to legacy", () => {
+    const h = buildHarness()
+    h.client.connect({ url: "ws://localhost/test" })
+    expect(h.fakes[0]?.url).toBe("ws://localhost/test")
+  })
+
   it("schedules a reconnect via the injected timer after an unexpected close", () => {
     const h = buildHarness()
     h.client.connect({ url: "ws://localhost/x" })

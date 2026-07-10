@@ -79,14 +79,14 @@ export interface ConnectOptions {
    * resume intent as a first-class field (rather than only the server-minted
    * `learnedSessionId`).
    *
-   * BOUNDARY (single-shared-session daemon): the LIVE session id is
-   * server-minted and cannot be switched to an arbitrary thread — every WS
-   * client joins the SAME live transcript. So this id drives a READ-ONLY
-   * HISTORY hydration of the requested thread via the daemon's thread-addressed
-   * `GET /threads/:id/events` route (see `../lib/thread-resume`), NOT a live
-   * re-attach. When it equals the live session id the resume is effectively
-   * live-attach. Absent ⇒ the connect path is byte-identical to the legacy
-   * server-minted-only flow.
+   * SWAP MODEL (P1, single-shared-session daemon): this id rides the WS URL as
+   * `?thread=<id>` (see `#withThreadQuery` → daemon `fetch-handler.ts` `?thread`
+   * read). On upgrade the daemon SWAPS the one live session onto that thread
+   * (`transcript.replace` from its lossless SavedSession) — a real live-attach,
+   * NOT a read-only replay. Because the daemon hosts ONE session shared across
+   * all sockets, the swap is daemon-wide (opening thread B moves every client to
+   * B) — the correct single-operator model. Absent ⇒ the connect path is
+   * byte-identical to the legacy server-minted-only flow.
    */
   readonly resumeThreadId?: string
 }
@@ -503,8 +503,14 @@ export class SessionClient {
 
   #openSocket(): void {
     if (this.#currentConnect === null) return
-    const { url, auth } = this.#currentConnect
-    const finalUrl = this.#withAuthQuery(url, auth?.token)
+    const { url, auth, resumeThreadId } = this.#currentConnect
+    // P1 Phase 3a — a resume intent rides the WS URL as `?thread=<id>` so the
+    // daemon's swap-on-attach fires (see `fetch-handler.ts` `?thread` read):
+    // the requested thread becomes the ONE live session. Absent ⇒ byte-identical.
+    const finalUrl = this.#withAuthQuery(
+      this.#withThreadQuery(url, resumeThreadId),
+      auth?.token,
+    )
     this.#setState({ kind: "connecting", attempt: this.#attempt })
 
     let ws: WebSocketLike
@@ -891,6 +897,14 @@ export class SessionClient {
     if (token === undefined || token.length === 0) return url
     const sep = url.includes("?") ? "&" : "?"
     return `${url}${sep}token=${encodeURIComponent(token)}`
+  }
+
+  /** P1 Phase 3a — symmetric to `#withAuthQuery`: rides the resume-thread id on
+   *  the WS URL as `?thread=<id>` so the daemon swaps the live session onto it. */
+  #withThreadQuery(url: string, threadId: string | undefined): string {
+    if (threadId === undefined || threadId.length === 0) return url
+    const sep = url.includes("?") ? "&" : "?"
+    return `${url}${sep}thread=${encodeURIComponent(threadId)}`
   }
 
   /**
