@@ -9,7 +9,7 @@
  * as a long-running session over the WS transport instead of stdin.
  */
 
-import type { AgentConfig } from "@/agent"
+import type { AgentConfig, McpStoppable } from "@/agent"
 import { buildSystemPrompt, HookBus } from "@/agent"
 import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
 import { isControlRequestEnabled } from "@/agent/control-request"
@@ -31,14 +31,26 @@ import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/a
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import {
+  buildMcpLoadOpts,
+  loadMcpToolsOrEmpty,
+  mcpAutoRestartEnabled,
+  readMcpConfig,
+  resolveMcpInboundWiring,
+  resolveMcpLaunchPolicy,
+  resolveMcpOAuthProvider,
+} from "@/host/mcp-composition"
+import { createMcpHealthHolder, sanitizeServerKey } from "@/host/mcp-health"
+import {
   type ArtifactPreviewResolver,
   type AssemblerEnv,
   buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler,
   createArtifactPreviewResolver,
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
+import type { LLMPort } from "@/llm"
 import { pickProvider, tryCreateLLM } from "@/llm"
 import type { PersistentStorePort } from "@/memory"
+import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
 import {
   buildMemoryForSession,
@@ -68,7 +80,12 @@ import {
   createCanvasToolDiffSource,
 } from "./canvas-tool-diff-source"
 import { type CanvasUsageSourceHandle, createCanvasUsageSource } from "./canvas-usage-source"
-import type { AgentFleetReadoutRow, MemoryReadoutEntry, WebReadoutSources } from "./readout"
+import type {
+  AgentFleetReadoutRow,
+  McpServerRow,
+  MemoryReadoutEntry,
+  WebReadoutSources,
+} from "./readout"
 import { createWebAskUserPort } from "./web-ask-user-port"
 import {
   createWebControlRequestPort,
@@ -440,6 +457,67 @@ const buildReadoutSources = (args: {
  * here is threaded into the AgentConfig AND read by {@link buildReadoutSources},
  * so a readout can never disagree with the tools.
  */
+/**
+ * P4 (jul-11, UUX-4-14) — compose MCP for the web daemon from the SAME
+ * surface-shared assembly the CLI uses (`@/host/mcp-composition`, promoted out
+ * of apps/cli). Headless: no elicitation prompter (an inbound elicitation is
+ * auto-declined, byte-identical to a piped CLI). NEVER throws — a broken MCP
+ * config must not crash daemon boot; on any fault the daemon serves with no MCP
+ * tools and an empty health view.
+ *
+ * Returns the bridged tools (merged into the daemon registry), the client
+ * handles (stopped on shutdown), and a LIVE `/mcp` readout accessor: up/down is
+ * re-read from the health holder on every call (so a mid-session server death
+ * shows ✗), tool counts are load-time.
+ */
+const loadDaemonMcp = async (
+  env: Record<string, string | undefined>,
+  llm: LLMPort,
+): Promise<{
+  readonly tools: readonly Tool[]
+  readonly clients: readonly McpStoppable[]
+  readonly mcpAccessor: (() => readonly McpServerRow[]) | undefined
+}> => {
+  try {
+    const slog = new StructuredLogger()
+    const configs = await readMcpConfig(slog, env, await resolveMcpLaunchPolicy(slog))
+    if (configs.length === 0) return { tools: [], clients: [], mcpAccessor: undefined }
+    const mcpHealth = createMcpHealthHolder()
+    const loadOpts = buildMcpLoadOpts(slog, {
+      autoRestart: mcpAutoRestartEnabled(),
+      inboundWiring: resolveMcpInboundWiring(llm, undefined),
+      oauthProvider: resolveMcpOAuthProvider(configs),
+      opts: {},
+      mcpHealth,
+    })
+    const { tools, clients } = await loadMcpToolsOrEmpty(configs, undefined, loadOpts)
+    // Load-time tool count per RAW config server name (bridged names are
+    // `mcp__<sanitized>__<tool>` — join by the sanitized key).
+    const countBySanitized = new Map<string, number>()
+    for (const t of tools) {
+      const m = t.name.match(/^mcp__(.+?)__/)
+      if (m?.[1] !== undefined) {
+        countBySanitized.set(m[1], (countBySanitized.get(m[1]) ?? 0) + 1)
+      }
+    }
+    const names = configs.map((c) => c.name)
+    const mcpAccessor = (): readonly McpServerRow[] => {
+      const down = mcpHealth.downServers()
+      return names.map((name) => {
+        const key = sanitizeServerKey(name)
+        if (down.has(key)) {
+          const reason = down.get(key)
+          return reason !== undefined ? { name, status: "down", reason } : { name, status: "down" }
+        }
+        return { name, status: "up", toolCount: countBySanitized.get(key) ?? 0 }
+      })
+    }
+    return { tools, clients, mcpAccessor }
+  } catch {
+    return { tools: [], clients: [], mcpAccessor: undefined }
+  }
+}
+
 const mintSessionCollaborators = (
   env: Record<string, string | undefined>,
 ): {
@@ -631,6 +709,11 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       env,
       permission,
     )
+    // P4 (jul-11, UUX-4-14) — compose MCP from the surface-shared assembly
+    // (@/host/mcp-composition). No .mcp.json ⇒ empty (byte-identical). Bridged
+    // tools join the registry; clients stop on shutdown; the /mcp readout goes
+    // live. NEVER throws (a broken config never crashes daemon boot).
+    const { tools: mcpTools, clients: mcpClients, mcpAccessor } = await loadDaemonMcp(env, llm)
     const webEnvPosture = resolveCliDefaultEnvPosture(env)
     const base: RuntimeAgentConfigBase = {
       llm,
@@ -638,7 +721,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // the gated `artifact_*` tools register into the SAME instance the turn-drain
       // reads (single instance, no split-brain; reachable producer). See
       // {@link buildDaemonToolRegistry}. A1 — plus the web `ask_user` tool (gated).
-      registry: buildDaemonToolRegistry(artifactRegistry, askUserTools),
+      registry: buildDaemonToolRegistry(artifactRegistry, [...askUserTools, ...mcpTools]),
       stream: new StdoutStream(),
       permission,
       messages: [],
@@ -706,7 +789,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       history: [...base.messages],
       state: undefined,
       idMeta: undefined,
-      shutdown: async () => undefined,
+      shutdown: async () => {
+        // P4 — release MCP client handles (child processes / sockets) on close.
+        for (const c of mcpClients) await c.stop?.()
+      },
     })
     // ADR-0415 — expose the wire ports on the facade so the daemon's emitter
     // reads live state. Gate OFF ⇒ getters read undefined ⇒ emitter silent.
@@ -739,6 +825,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
         skills,
         memoryStore,
         usageHolder,
+        ...(mcpAccessor !== undefined ? { mcp: mcpAccessor } : {}),
       }),
     })
     return facade

@@ -92,6 +92,14 @@ export interface CostReadoutTotals {
  * readout to an honest "here is what is missing" line; a present accessor is
  * awaited inside a try/catch so a host-side throw can never 500 the daemon.
  */
+/** P4 — one MCP server's live row for the `/mcp` readout. */
+export interface McpServerRow {
+  readonly name: string
+  readonly status: "up" | "down"
+  readonly toolCount?: number
+  readonly reason?: string
+}
+
 export interface WebReadoutSources {
   /** Subagent fleet rows (live TaskRegistry projection). */
   readonly agents?: () => readonly AgentFleetReadoutRow[]
@@ -110,6 +118,9 @@ export interface WebReadoutSources {
    *  renders its verdict + counts + recovery guidance. Absent ⇒ honest
    *  missing-source line. */
   readonly doctor?: () => Promise<StoreHealthReport>
+  /** P4 (jul-11, UUX-4-14) — live MCP server list + health, now that the daemon
+   *  composes MCP from @/host/mcp-composition. Absent ⇒ honest missing line. */
+  readonly mcp?: () => readonly McpServerRow[]
   /** Injectable clock for deterministic age rendering under test. */
   readonly now?: () => number
 }
@@ -125,15 +136,12 @@ export const SOURCE_BACKED_READOUTS = [
   "cost",
   "context",
   "doctor",
+  "mcp",
 ] as const
 
 /** Readouts this surface deliberately does NOT serve, with the honest reason
  *  (UUX-1-11: the copy must name WHAT is missing, not just "not wired"). */
 const SKIPPED_READOUT_COPY: Readonly<Record<string, string>> = {
-  mcp:
-    "/mcp: no MCP bridge on the web surface — MCP servers are launched by the " +
-    "CLI composition root; this daemon composes no MCP clients, so there is no " +
-    "server health to report",
   why:
     "/why: needs the recorded session JSONL plus a one-shot LLM meta-query " +
     "(the CLI why-command); this read-only readout channel records no session " +
@@ -165,6 +173,9 @@ const MISSING_SOURCE_COPY: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[numbe
   doctor:
     "/doctor: session-store health probe not composed " +
     "(the doctor accessor was not threaded on this daemon)",
+  mcp:
+    "/mcp: no MCP servers configured for this daemon " +
+    "(no .mcp.json entries, or the mcp accessor was not threaded)",
 }
 
 const yesno = (b: boolean): string => (b ? "yes" : "no")
@@ -380,6 +391,23 @@ const renderDoctor = (report: StoreHealthReport): string => {
   return report.guidance !== undefined ? `${head}\n${root}\n${report.guidance}` : `${head}\n${root}`
 }
 
+/** P4 (jul-11) — render live MCP server rows: name + up/down + tool count /
+ *  down reason. Empty ⇒ an honest "no servers connected" line. */
+const renderMcp = (rows: readonly McpServerRow[]): string => {
+  if (rows.length === 0) return "mcp: no servers connected"
+  return rows
+    .map((r) => {
+      const suffix =
+        r.status === "up"
+          ? ` (${r.toolCount ?? 0} tool${r.toolCount === 1 ? "" : "s"})`
+          : r.reason !== undefined
+            ? ` — ${r.reason}`
+            : ""
+      return `${r.status === "up" ? "✓ up" : "✗ down"} ${r.name}${suffix}`
+    })
+    .join("\n")
+}
+
 export const resolveReadout = async (
   name: string,
   snapshot: SessionSnapshotLite,
@@ -409,6 +437,9 @@ export const resolveReadout = async (
       case "doctor":
         if (sources.doctor === undefined) break
         return served(n, renderDoctor(await sources.doctor()))
+      case "mcp":
+        if (sources.mcp === undefined) break
+        return served(n, renderMcp(sources.mcp()))
       default:
         break
     }

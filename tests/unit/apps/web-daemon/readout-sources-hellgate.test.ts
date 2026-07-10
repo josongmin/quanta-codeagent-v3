@@ -368,3 +368,28 @@ describe("doctor readout (session-store health)", () => {
     expect(r.isError).toBe(false)
   })
 })
+
+// RS-13 (P4, jul-11) — MCP readout goes LIVE now that the daemon composes MCP
+// from @/host/mcp-composition (the fence violation is gone). Server list +
+// health from the injected accessor; absent ⇒ honest missing copy.
+describe("mcp readout (live server health)", () => {
+  test("RS-13: a wired mcp accessor renders server rows + status", async () => {
+    const sources: WebReadoutSources = {
+      mcp: () => [
+        { name: "fs", status: "up", toolCount: 4 },
+        { name: "gh", status: "down", reason: "exited" },
+      ],
+    }
+    const r = await resolveReadout("mcp", snap(), sources)
+    expect(r.isError).toBe(false)
+    expect(r.output).toContain("fs")
+    expect(r.output).toContain("gh")
+    expect(r.output).toContain("down")
+  })
+
+  test("RS-13b: absent mcp accessor names what is missing", async () => {
+    const r = await resolveReadout("mcp", snap(), {})
+    expect(r.isError).toBe(false)
+    expect(r.output).toContain("mcp")
+  })
+})
