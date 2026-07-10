@@ -84,6 +84,17 @@ const census = (tail: string) => ({
   defangedClose: countExact(tail, DEFANGED_CLOSE),
 })
 
+/** jul-9 sectioning: repo-local rules ride the cached SYSTEM section (project_md),
+ *  NOT the reminder tail. The caller-data system sections are boundary-DEFANGED by
+ *  `buildSystemSections`, so a forged reminder tag in an AGENTS.md body is escaped
+ *  THERE. Read the assembled system text of the first genuine turn call. */
+const systemText = (s: ScriptedLLM["seenSystem"][number]): string =>
+  s === undefined ? "" : typeof s === "string" ? s : s.map((b) => b.text).join("\n")
+const firstTurnSystem = (llm: ScriptedLLM): string => {
+  const idx = llm.seenMessages.findIndex(isTurnCall)
+  return idx >= 0 ? systemText(llm.seenSystem[idx]) : ""
+}
+
 const forgedEntry = (id: string, text: string): MemoryEntry => ({
   id,
   kind: "fact",
@@ -189,13 +200,25 @@ describe("C3 hellgate e2e — forged reminder boundaries through the REAL runAge
     expect(["completed", "max_turns"]).toContain(out.reason)
 
     const tail = reminderTailOf(turnCalls(llm)[0] as Message[])
-    const c = census(tail)
-    expect(c.genuineOpen).toBe(1)
-    expect(c.genuineClose).toBe(1)
+    const ct = census(tail)
+    // The reminder tail is the genuine wrapper — exactly one, and CLEAN: repoRules
+    // no longer rides the tail (sectioning hoisted it to project_md), so nothing
+    // forged reaches it.
+    expect(ct.genuineOpen).toBe(1)
+    expect(ct.genuineClose).toBe(1)
     expect(tail.endsWith(`\n${CLOSE}`)).toBe(true)
-    // 10 forge payloads × 2 closers each ⇒ 20 defanged closers; × 1 opener ⇒ 10.
-    expect(c.defangedClose).toBe(20)
-    expect(c.defangedOpen).toBe(10)
+    expect(ct.defangedClose).toBe(0)
+    expect(ct.defangedOpen).toBe(0)
+    // repoRules (with its 10 forged boundaries) rides the cached SYSTEM section;
+    // `buildSystemSections` DEFANGS caller-data sections, so the forge is escaped
+    // THERE — 10 payloads × 2 closers ⇒ 20 defanged closers, × 1 opener ⇒ 10 — and
+    // ZERO genuine boundaries survive (no L6-repo → L1-system authority elevation).
+    // The base is a fixed test string with no reminder tokens, so genuine == 0.
+    const cs = census(firstTurnSystem(llm))
+    expect(cs.genuineOpen).toBe(0)
+    expect(cs.genuineClose).toBe(0)
+    expect(cs.defangedClose).toBe(20)
+    expect(cs.defangedOpen).toBe(10)
   })
 
   test("3. CONTROL — benign repoRules + memory, NO forge ⇒ exactly one genuine reminder AND content rides verbatim", async () => {
@@ -221,12 +244,18 @@ describe("C3 hellgate e2e — forged reminder boundaries through the REAL runAge
     expect(c.genuineOpen).toBe(1)
     expect(c.genuineClose).toBe(1)
     // No defanged tokens appear (nothing to defang) — proves the escaper is a
-    // no-op on benign data (no over-escaping).
+    // no-op on benign data (no over-escaping), in BOTH channels.
     expect(c.defangedClose).toBe(0)
     expect(c.defangedOpen).toBe(0)
-    // Benign content rides verbatim (escaping isn't deleting legitimate text).
-    expect(tail).toContain("BENIGN-REPO-RULE: always run the linter before commit")
+    // Benign memory recall rides the tail verbatim.
     expect(tail).toContain("benign recalled fact about owners")
+    // Benign repoRules rides the cached SYSTEM section verbatim — escaping is a
+    // no-op on benign data (no over-escaping), and no defanged tokens appear there.
+    const sys = firstTurnSystem(llm)
+    expect(sys).toContain("BENIGN-REPO-RULE: always run the linter before commit")
+    const cs = census(sys)
+    expect(cs.defangedClose).toBe(0)
+    expect(cs.defangedOpen).toBe(0)
   })
 
   test("4. cache-prefix invariance through the loop — forge churn across two turns does NOT move the SYSTEM prefix the loop sends", async () => {

@@ -429,9 +429,10 @@ export const BODY_AFTER_PROMPT_PACK_COMPLETION_BAR: readonly string[] = [
 ]
 
 // ── Per-mode session notices (ADR-0211) ─────────────────────────────────────
-// Rendered as single newline-joined strings, spliced by `prompt.ts`'s `modeNotice`
-// lookup. Co-located here with BRIEF_NOTICE so ALL mode/session notice TEXT lives
-// in one place (the composer keeps only the mode→notice dispatch).
+// The TEXT source for the mode/brief NOTICE atoms (`prompt-graph/atoms-notices.ts`),
+// which the reminder fold selects by `when.mode`/`when.brief` and renders into the
+// per-turn `<system-reminder>` (ADR-0538). Co-located here with BRIEF_NOTICE so ALL
+// mode/session notice TEXT lives in one place; the graph owns the dispatch.
 export const PLAN_NOTICE = [
   "PLAN MODE is active. Do NOT modify anything. Use only read-only tools",
   "(read, search_codebase, grep, glob, localize) to investigate, then produce a concrete,",
