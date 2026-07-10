@@ -32,6 +32,7 @@ import type {
   ObservabilityPorts,
   UserInputPorts,
 } from "./server/sinks"
+import { attachTranscriptPersistence } from "./server/transcript-persist"
 import type { WSData } from "./server/ws-data"
 import { buildWebSocketHandlers } from "./server/ws-handlers"
 import { createSessionRegistry } from "./session-registry"
@@ -215,6 +216,14 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   const facadeReadoutSources = (runtime as { readoutSources?: WebReadoutSources }).readoutSources
   const costAggregator = attachCostAggregator(sharedSession)
   let costAggregatorUnsub: (() => void) | null = costAggregator.unsub
+  // P1 Phase 1 — persist the LOSSLESS Message[] transcript to the @/session
+  // store (for a later live thread swap), gate-symmetric with the sqlite
+  // archive (`threadStore !== null` ⇔ QUANTA_WEB_DB on). Off ⇒ no writes.
+  const transcriptPersist = attachTranscriptPersistence(sharedSession, {
+    enabled: threadStore !== null,
+    cwd: config.sessionConfig.cwd ?? process.cwd(),
+  })
+  let transcriptPersistUnsub: (() => void) | null = transcriptPersist.unsub
   const readoutSources: WebReadoutSources = {
     ...(facadeReadoutSources ?? {}),
     cost: costAggregator.totals,
@@ -295,6 +304,10 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         followerSweepTimer = null
       }
       // UUX-1-11 — stop the cost fold so it never fires against a closed session.
+      if (transcriptPersistUnsub !== null) {
+        transcriptPersistUnsub()
+        transcriptPersistUnsub = null
+      }
       if (costAggregatorUnsub !== null) {
         costAggregatorUnsub()
         costAggregatorUnsub = null
