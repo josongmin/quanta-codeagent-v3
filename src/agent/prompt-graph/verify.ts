@@ -1,28 +1,44 @@
 /**
- * ADR-0538 Phase 1 — `verifyRuleGraph()`, the build-time graph verifier (the
- * SOTA++ core), restricted to the checks that apply to the migrated tool-use
- * slice. Runs over the full reachable `PromptContext` surface and returns
- * STRUCTURED violations (empty ⇒ the graph is sound).
+ * ADR-0538 — `verifyRuleGraph()`, the build-time graph verifier (the SOTA++
+ * core). Runs over the full reachable `PromptContext` surface and returns
+ * STRUCTURED violations (empty ⇒ the graph is sound). Each check names, where
+ * relevant, the test that proves it FIRES on injection (red-on-injection) so
+ * none is a silent tautology.
  *
- * Checks implemented here (ADR §Build-time verifier 1,2,3,7):
- *   1. CONFLICT-FREEDOM   — no two `conflictsWith` variants co-render in the
- *                           SAME channel for any reachable ctx.
- *   2. SUPERSEDE-SOUNDNESS — a superseded variant and its superseder never
- *                            co-render (the supersede must actually suppress).
- *   3. COVERAGE           — every variant fires in ≥1 reachable ctx (dead-rule
- *                           / inert-variant detection).
+ * Checks (ADR §Build-time verifier):
+ *   1. CONFLICT-FREEDOM — no two `conflictsWith` variants co-render in the SAME
+ *      channel for any reachable ctx. This carries the mutual-exclusivity load
+ *      for the env-posture + verify-strategy variants (declared with
+ *      `conflictsWith`, disjoint `when` matchers make co-render impossible, this
+ *      check WITNESSES it). [red-on-injection: overlap two conflicting atoms]
+ *   2. SUPERSEDE-SOUNDNESS — an applicable superseder must actually suppress its
+ *      loser (selectAtoms tripwire). DORMANT: no variant uses `supersedes` today
+ *      (exclusivity is via disjoint matchers + `conflictsWith`, stronger); kept
+ *      for a future overlapping-matcher edge.
+ *   2b. SUPERSEDE/CONFLICT/REQUIRES EDGE INTEGRITY — no dangling target (a typo'd
+ *      edge silently does nothing). [red-on-injection: edge to a phantom variant]
+ *   3. COVERAGE — every variant fires in ≥1 reachable ctx (dead/inert-rule).
+ *   4. CACHED-SECTION BUDGET — ≤4 live `system.*` cache sections in the manifest
+ *      (checked on the ARTIFACT, where the caller-data sections are visible — the
+ *      atom graph alone can never witness this; see the note in the body).
+ *   5. STATIC/DYNAMIC SEPARATION — a per-turn-natured atom may not ride a cached
+ *      `system.*` channel. 6. AUTHORITY PLACEMENT — repo/skill/user/working-state
+ *      authority may not ride `system.base`.
  *   7. NO-HIDDEN-ASSUMPTION LINT — an atom whose text asserts a context premise
- *                            (install / do-not-install / graded / frozen env /
- *                            read-only) MUST declare the matching matcher facet.
- *
- * The remaining ADR checks (cached-section budget, static/dynamic separation,
- * authority placement, manifest/snapshot parity) apply to channels/atoms not
- * yet migrated and land with the Phase 2 body migration.
+ *      (install / do-not-install / graded / frozen env / read-only) MUST declare
+ *      the matching matcher facet. BEST-EFFORT (keyword table — see note there;
+ *      false-negatives possible, so it is a lint, not a proof). This is the
+ *      static guard against the jul-10 contradiction class.
+ *      [red-on-injection: a premise atom with no facet]
+ *   8. MANIFEST COMPLETENESS — every variantId non-empty + unique.
+ *   8b. DYNAMIC-CONTENT PLACEMENT — a `contentKey` atom must ride the reminder
+ *      channel with empty `lines`. 9. SNAPSHOT PARITY — the compile manifest
+ *      reconstructs the observability snapshot (checks run when a manifest is
+ *      supplied).
  *
  * PURE: no IO/clock/env.
  */
 
-import { matches } from "./matches"
 import { selectAtoms } from "./render"
 import type {
   AtomMatcher,
@@ -86,6 +102,14 @@ const NON_BASE_AUTHORITIES: readonly AuthorityLayer[] = [
  * value, because the correct value differs per premise (frozen for a
  * do-not-install rule, non-frozen for an install rule) — presence is the
  * invariant that prevents an unconditioned premise leaking everywhere.
+ *
+ * SCOPE (honest): this is a BEST-EFFORT lint, not a proof. It is keyword-matched,
+ * so a premise phrased OUTSIDE the table escapes (a false-negative). It is a
+ * tripwire for the KNOWN contradiction phrasings (the jul-10 audit's classes) and
+ * a forcing-function for new premise atoms to scope themselves; it does not
+ * certify the absence of ALL hidden premises. Keep the keyword set current as new
+ * premise wording lands. The structural (non-lint) guarantee that contradictory
+ * variants never co-render is check (1) conflict-freedom over `conflictsWith`.
  */
 type AssumptionFacet = "envPosture" | "verifyStrategy" | "mode"
 
@@ -229,9 +253,17 @@ export const verifyRuleGraph = (
     }
 
     // ── (2) Supersede soundness — a superseded variant must NOT co-render with
-    //        an applicable superseder. We recompute the pre-suppression
-    //        applicable set: if BOTH the superseder and its declared loser would
-    //        apply yet the loser survived selection, the supersede is unsound. ──
+    //        an APPLICABLE superseder (if both a superseder and its declared loser
+    //        match this ctx yet the loser survived selection, selectAtoms failed to
+    //        suppress). This is a TRIPWIRE for the `supersedes` primitive +
+    //        selectAtoms suppression; it fires only when a superseder and loser
+    //        actually CO-APPLY. The current variant set uses none (mutually-
+    //        exclusive variants are selected by disjoint `when` matchers + declared
+    //        with `conflictsWith`, which the check (1) proves — stronger than
+    //        supersede, since co-render is then structurally impossible rather than
+    //        suppression-dependent). Kept live so a FUTURE overlapping-matcher
+    //        supersede edge is verified; integrity of the edges themselves (no
+    //        dangling target) is checked statically below. ──
     const applicable = atoms.filter(
       (a) => selectAtoms([a], ctx).length > 0, // single-atom applicability = matches(when,ctx)
     )
@@ -249,6 +281,9 @@ export const verifyRuleGraph = (
       }
     }
   }
+
+  // ── (2b) Supersede/conflict/requires EDGE INTEGRITY — extracted helper. ──
+  violations.push(...checkEdgeIntegrity(atoms, byVariant))
 
   // ── (3) Coverage — every declared variant fires in ≥1 reachable ctx. ──
   for (const a of atoms) {
@@ -311,27 +346,28 @@ export const verifyRuleGraph = (
   // ── (8b/Phase-3) Dynamic-content placement — extracted helper. ──
   violations.push(...checkDynamicContentPlacement(atoms))
 
-  // ── (4) Cached-section budget — per-ctx, the number of DISTINCT system.*
-  //        channels the fired atoms occupy must be ≤ 4 (the ADR-0326 / Anthropic
-  //        cap). Verified over every reachable ctx. ──
-  for (const ctx of reachableContexts) {
-    const fired = atoms.filter((a) => matches(a.when, ctx))
-    const cachedChannels = new Set(
-      fired.filter((a) => isSystemChannel(a.channel)).map((a) => a.channel),
-    )
-    if (cachedChannels.size > 4) {
-      violations.push({
-        kind: "cached-section-budget",
-        message: `${cachedChannels.size} distinct system.* channels fire in one ctx (>4 exceeds the ADR-0326 cache-section budget): ${[...cachedChannels].join(", ")}`,
-        variantIds: fired.filter((a) => isSystemChannel(a.channel)).map((a) => a.variantId),
-        ctx,
-      })
-    }
-  }
+  // ── (4) Cached-section budget — see `checkSnapshotParity`. ──
+  //
+  // The budget (≤4 Anthropic cache breakpoints, ADR-0326) is a property of the
+  // RENDERED sections, NOT of the atom graph: every migrated atom rides
+  // `system.base` (the tool-use rails + body) — the other three cached sections
+  // (`project_md` / `session_ctx` / `user_append`) hold CALLER DATA that is
+  // deliberately NOT atomized (ADR-0538 §Cache key). So a per-ctx count over
+  // ATOM channels can only ever see `{system.base}` (size ≤ 1) — it is
+  // structurally incapable of exceeding 4 and would be a tautology here. The
+  // real budget is checked where the real sections live: (a) the 4-member
+  // `system.*` channel enum caps it by construction, (b) `validateSectionsCache
+  // Budget` guards the assembled sections in `compile`, and (c) the manifest-
+  // level check below (`checkSnapshotParity`) counts the DISTINCT non-empty
+  // `system.*` channels the compiled artifact reports — the only place the
+  // caller-data sections are visible to the verifier — so a future 5th cached
+  // section surfaces as a `cached-section-budget` violation.
 
-  // ── (9) Snapshot parity — ONLY when a manifest is supplied (extracted). ──
+  // ── (9) Snapshot parity + (4) cached-section budget — ONLY when a manifest is
+  //        supplied (both extracted; the budget is a manifest-level property). ──
   if (manifest !== undefined) {
     violations.push(...checkSnapshotParity(atoms, manifest))
+    violations.push(...checkCachedSectionBudget(manifest))
   }
 
   return violations
@@ -375,11 +411,33 @@ const checkDynamicContentPlacement = (
 }
 
 /**
- * ADR-0538 Phase 3 — (9) snapshot-parity check (extracted). The manifest must
- * reconstruct the observability snapshot: (a) every variantId in ANY channel
- * traces to a declared atom; (b) `firedVariantIds` equals the union of all
- * `byChannel` lists; (c) the policy's `firedAtomIds` are all in the reminder
- * channel (the pre-Phase-3 notice snapshot the loop emits — parity, not drift).
+ * The two channels that carry REAL atoms. The other six are CALLER-DATA channels
+ * (`project_md` / `session_ctx` / `user_append` hold user text; `hook_context` /
+ * `context_update` / `mention_injection` hold user messages) — that data is
+ * deliberately NOT atomized (ADR-0538 §Cache key), so the manifest marks their
+ * PRESENCE with a synthetic placeholder id (`SECTION-*` / `MSG-*`), not an atom.
+ * Atom-traceability (parity check a) is enforced only where atoms actually live.
+ */
+const ATOM_BEARING_CHANNELS: ReadonlySet<string> = new Set([
+  "system.base",
+  "message.system_reminder",
+])
+
+/** The `system.*` cache-section channels — the manifest may report at most FOUR
+ *  of these non-empty (the ADR-0326 / Anthropic 4-breakpoint budget). */
+const isSystemChannelName = (ch: string): boolean => ch.startsWith("system.")
+
+/**
+ * ADR-0538 Phase 3 — (9) snapshot-parity over the COMPILED MANIFEST (extracted).
+ * The manifest must reconstruct the observability snapshot: (a) every variantId
+ * on an ATOM-bearing channel traces to a declared atom (the caller-data channels
+ * carry `SECTION-*`/`MSG-*` presence markers by design and are exempt);
+ * (b) `firedVariantIds` equals the union of all `byChannel` lists; (c) the
+ * policy's `firedAtomIds` are all in the reminder channel (the pre-Phase-3 notice
+ * snapshot the loop emits — parity, not drift). The (4) cached-section budget is
+ * a sibling manifest check ({@link checkCachedSectionBudget}).
+ * (Historical note: the ARTIFACT is where the caller-data sections are visible —
+ * the atom graph alone can never witness this, see the note in verifyRuleGraph).
  */
 const parity = (message: string, id: string): GraphViolation => ({
   kind: "snapshot-parity",
@@ -394,11 +452,11 @@ const checkSnapshotParity = (
   const out: GraphViolation[] = []
   const declared = new Set(atoms.map((a) => a.variantId))
   const unionOfChannels = new Set<string>()
-  // (a) every byChannel span traces to a declared atom.
+  // (a) every ATOM-bearing-channel span traces to a declared atom.
   for (const [ch, ids] of Object.entries(manifest.byChannel)) {
     for (const id of ids) {
       unionOfChannels.add(id)
-      if (!declared.has(id)) {
+      if (ATOM_BEARING_CHANNELS.has(ch) && !declared.has(id)) {
         out.push(parity(`manifest byChannel[${ch}] lists ${id} which is not a declared atom`, id))
       }
     }
@@ -406,7 +464,8 @@ const checkSnapshotParity = (
   // (b) firedVariantIds == the channel union (both directions).
   const flat = new Set(manifest.firedVariantIds)
   for (const id of unionOfChannels) {
-    if (!flat.has(id)) out.push(parity(`manifest lists ${id} in a channel but not firedVariantIds`, id))
+    if (!flat.has(id))
+      out.push(parity(`manifest lists ${id} in a channel but not firedVariantIds`, id))
   }
   for (const id of flat) {
     if (!unionOfChannels.has(id))
@@ -417,6 +476,60 @@ const checkSnapshotParity = (
   for (const id of manifest.policy.firedAtomIds ?? []) {
     if (!reminder.has(id))
       out.push(parity(`policy.firedAtomIds reports ${id} not in the reminder channel (drift)`, id))
+  }
+  return out
+}
+
+/**
+ * ADR-0538 — (4) cached-section budget over the COMPILED MANIFEST. At most FOUR
+ * distinct `system.*` channels may be non-empty (the ADR-0326 / Anthropic
+ * 4-breakpoint cap). Checked on the artifact — where the caller-data cache
+ * sections become visible — because every atom rides `system.base`, so a per-ctx
+ * count over the atom graph could only ever see `{system.base}` and would be a
+ * tautology (see the note in {@link verifyRuleGraph}).
+ */
+const checkCachedSectionBudget = (manifest: ManifestParityView): readonly GraphViolation[] => {
+  const live = Object.entries(manifest.byChannel)
+    .filter(([ch, ids]) => isSystemChannelName(ch) && ids.length > 0)
+    .map(([ch]) => ch)
+  if (live.length <= 4) return []
+  return [
+    {
+      kind: "cached-section-budget",
+      message: `${live.length} distinct system.* cache sections are live (>4 exceeds the ADR-0326 breakpoint budget): ${live.join(", ")}`,
+      variantIds: live,
+    },
+  ]
+}
+
+/**
+ * ADR-0538 — (2b) supersede/conflict/requires EDGE INTEGRITY (STATIC per-atom).
+ * Every `supersedes` / `conflictsWith` / `requires` target must reference a
+ * DECLARED variant; a dangling target (typo/rename) silently does nothing and is
+ * a bug. This is the red-on-injection half of the supersede-family check (the
+ * co-render soundness half is dormant — no variant uses `supersedes` today).
+ */
+const checkEdgeIntegrity = (
+  atoms: readonly InstructionAtom[],
+  byVariant: ReadonlyMap<string, InstructionAtom>,
+): readonly GraphViolation[] => {
+  const out: GraphViolation[] = []
+  for (const a of atoms) {
+    for (const [rel, targets] of [
+      ["supersedes", a.supersedes],
+      ["conflictsWith", a.conflictsWith],
+      ["requires", a.requires],
+    ] as const) {
+      for (const target of targets ?? []) {
+        if (!byVariant.has(target)) {
+          out.push({
+            kind: "supersede-unsound",
+            message: `atom ${a.variantId} declares ${rel} ${target} which is not a declared variant (dangling edge — does nothing)`,
+            variantIds: [a.variantId, target],
+          })
+        }
+      }
+    }
   }
   return out
 }

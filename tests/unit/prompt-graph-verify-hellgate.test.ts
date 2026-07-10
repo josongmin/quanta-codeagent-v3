@@ -136,7 +136,9 @@ describe("prompt-graph — byte-equivalence with the render path", () => {
   test("renderVerifyStrategy == graph render for every strategy (and undefined ⇒ [])", () => {
     expect(renderVerifyStrategy(undefined)).toEqual([])
     for (const s of ["reproduce-first", "verify-after-edit", "grader-only"] as const) {
-      expect(renderVerifyStrategy(s)).toEqual(renderAtoms(VERIFY_ATOMS, { ...posture("frozen"), verifyStrategy: s }))
+      expect(renderVerifyStrategy(s)).toEqual(
+        renderAtoms(VERIFY_ATOMS, { ...posture("frozen"), verifyStrategy: s }),
+      )
     }
   })
 
@@ -211,7 +213,9 @@ describe("prompt-graph Phase 2 — BODY + NOTICE slice is sound", () => {
   })
 
   test("every BODY / NOTICE variant fires in ≥1 reachable ctx (no dead rule)", () => {
-    const cov = verifyRuleGraph(BODY_AND_NOTICE, BODY_REACHABLE).filter((v) => v.kind === "coverage")
+    const cov = verifyRuleGraph(BODY_AND_NOTICE, BODY_REACHABLE).filter(
+      (v) => v.kind === "coverage",
+    )
     expect(cov).toEqual([])
   })
 
@@ -273,18 +277,72 @@ describe("prompt-graph Phase 2 — RED on the four new checks", () => {
     expect(man.length).toBeGreaterThan(0)
   })
 
-  test("(4) cached-section-budget: >4 distinct system.* channels in one ctx ⇒ violation", () => {
-    // The 8-channel model has only 4 system.* channels; forge a FIFTH cached
-    // channel by mislabeling — the budget check counts distinct system.* channels
-    // among fired atoms. Inject 4 always-on system.* atoms on the four real cached
-    // channels PLUS re-use — the real body already uses system.base, so add the
-    // other three cached channels to push the distinct count to 4, then a
-    // synthetic 5th cannot exist (only 4 exist). Instead assert the REAL graph is
-    // within budget (≤4) and that a hand-built 5-distinct set is impossible — the
-    // check's job is to catch a future atom mislabeled onto a 5th cached channel.
-    const budget = verifyRuleGraph(BODY_AND_NOTICE, BODY_REACHABLE).filter(
+  test("(4) cached-section-budget: within budget passes; a 5th live system.* section ⇒ violation", () => {
+    // The budget (≤4 Anthropic cache breakpoints) is a property of the RENDERED
+    // sections, not the atom graph (every atom rides system.base). The check
+    // therefore runs on the MANIFEST — where the caller-data cache sections
+    // (project_md/session_ctx/user_append) become visible — as defense-in-depth
+    // against a future 5th cached section / mislabel. A per-CTX atom count could
+    // only ever see {system.base} (≤1) and would be a tautology (the old check).
+    const clean = {
+      byChannel: {
+        "system.base": [],
+        "system.project_md": ["SECTION-project_md"],
+        "system.session_ctx": ["SECTION-session_ctx"],
+        "system.user_append": ["SECTION-user_append"],
+        "message.hook_context": [],
+        "message.context_update": [],
+        "message.mention_injection": [],
+        "message.system_reminder": [],
+      } as Record<string, readonly string[]>,
+      policy: { firedAtomIds: [] as string[] },
+    }
+    // 3 live system.* sections → within budget → no violation.
+    const ok = verifyRuleGraph(BODY_AND_NOTICE, [], {
+      ...clean,
+      firedVariantIds: ["SECTION-project_md", "SECTION-session_ctx", "SECTION-user_append"],
+    } as unknown as Parameters<typeof verifyRuleGraph>[2]).filter(
       (x) => x.kind === "cached-section-budget",
     )
-    expect(budget).toEqual([]) // real graph is within the 4-section budget
+    expect(ok).toEqual([])
+    // Forge a FIFTH live system.* section → over budget → RED.
+    const poisoned = verifyRuleGraph(BODY_AND_NOTICE, [], {
+      firedVariantIds: [
+        "SECTION-project_md",
+        "SECTION-session_ctx",
+        "SECTION-user_append",
+        "SECTION-a",
+        "SECTION-b",
+      ],
+      byChannel: {
+        ...clean.byChannel,
+        "system.phantom_a": ["SECTION-a"],
+        "system.phantom_b": ["SECTION-b"],
+      },
+      policy: { firedAtomIds: [] as string[] },
+    } as unknown as Parameters<typeof verifyRuleGraph>[2]).filter(
+      (x) => x.kind === "cached-section-budget",
+    )
+    expect(poisoned.length).toBeGreaterThan(0)
+  })
+
+  test("(2b) edge integrity: a conflictsWith target that does not exist ⇒ violation", () => {
+    // A dangling supersede/conflict/requires edge silently does nothing (a typo or
+    // rename) — the integrity check makes it fail loudly. This is the red-on-
+    // injection proof that the supersede-family check is NOT a tautology.
+    const dangling: InstructionAtom = {
+      atomId: "X-DANGLE",
+      variantId: "X-DANGLE#leak",
+      authority: "L1_system",
+      channel: "system.base",
+      section: "body.after_persona",
+      order: 996,
+      conflictsWith: ["NO-SUCH-VARIANT"],
+      lines: ["- an atom whose conflictsWith target does not exist"],
+    }
+    const v = verifyRuleGraph([...BODY_AND_NOTICE, dangling], BODY_REACHABLE)
+    const integ = v.filter((x) => x.kind === "supersede-unsound")
+    expect(integ.length).toBeGreaterThan(0)
+    expect(integ.some((x) => x.variantIds.includes("NO-SUCH-VARIANT"))).toBe(true)
   })
 })

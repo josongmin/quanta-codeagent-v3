@@ -159,8 +159,13 @@ export const buildSystemPrompt = (
      *  / `"default"` ⇒ the CODE-CHANGE completion bar (byte-identical to the
      *  pre-migration single block). A read-only mode (plan/review/audit/architect)
      *  ⇒ the read-only completion-bar variant (the deliverable is the
-     *  plan/findings/design). `editor` mutates ⇒ code-change variant. This is the
-     *  ONLY intentional new output the Phase-2 migration introduces. */
+     *  plan/findings/design). `editor` mutates ⇒ code-change variant.
+     *  ⚠️ FORWARD SEAM: no composition-root caller threads `mode` here today, and
+     *  the session cache path calls `buildSystemPrompt()` bare — so the cached
+     *  static prefix is mode-INDEPENDENT and the read-only variant does NOT ship
+     *  yet (the split is byte-identical in practice). See the completion-bar note
+     *  in `prompt-graph/atoms-body.ts` for the wiring options (mode-aware cache
+     *  key vs. moving it onto the dynamic reminder channel). */
     mode?: GraphMode
   },
 ): string => {
@@ -523,11 +528,11 @@ const buildCompileManifest = (
   // the DEFAULT static bodyCtx (buildSystemPrompt is called without axis opts on
   // the default path, so the cached prefix is mode/verify-independent).
   const baseCtx = bodyRenderCtx()
-  const systemBaseIds = [
+  const systemBaseAtoms = [
     ...selectAtoms(POSTURE_ATOMS, baseCtx),
     ...selectAtoms(VERIFY_ATOMS, baseCtx),
     ...selectAtoms(BODY_ATOMS, baseCtx),
-  ].map((a) => a.variantId)
+  ]
 
   // message.system_reminder — notice atoms (mode/brief) ∪ dynamic-content atoms.
   const reminderCtx = dynamicReminderCtx(
@@ -536,13 +541,13 @@ const buildCompileManifest = (
     selectedGlobRules,
     meta.repoRulesInStaticSystem,
   )
-  const reminderIds = [
+  const reminderAtoms = [
     ...selectAtoms(NOTICE_ATOMS_ALL, reminderCtx),
     ...selectAtoms(DYNAMIC_ATOMS, reminderCtx),
-  ].map((a) => a.variantId)
+  ]
 
   const byChannel: Record<PromptChannel, readonly string[]> = {
-    "system.base": systemBaseIds,
+    "system.base": systemBaseAtoms.map((a) => a.variantId),
     // The cached optional sections are presence-marked (their CONTENT is caller
     // data, not atoms) — a stable synthetic id per present section so the
     // manifest reports which cached breakpoints are live without atomizing data.
@@ -557,13 +562,25 @@ const buildCompileManifest = (
       (input.contextChangeEvents?.length ?? 0) > 0 ? ["MSG-context_update"] : [],
     "message.mention_injection":
       (input.mentionInjectionMessages?.length ?? 0) > 0 ? ["MSG-mention_injection"] : [],
-    "message.system_reminder": reminderIds,
+    "message.system_reminder": reminderAtoms.map((a) => a.variantId),
   }
 
   const firedVariantIds = Object.values(byChannel).flat()
+  // firedAtomIds = the SEMANTIC atom ids of the REAL atoms that fired
+  // (system.base ∪ reminder). Distinct from firedVariantIds: a semantic atom
+  // (`atomId`) can render as several variants (`variantId`) — e.g. R-ENV#owned /
+  // R-ENV#frozen, BODY-COMPLETION-BAR#code-change / #read-only. The synthetic
+  // caller-data markers (SECTION-*/MSG-*) are NOT atoms and carry no atomId, so
+  // they appear only in firedVariantIds/byChannel, never here (ADR-0538 §Compiler).
+  const firedAtomIds = [...systemBaseAtoms, ...reminderAtoms].map((a) => a.atomId)
   return {
-    firedAtomIds: firedVariantIds,
+    firedAtomIds,
     firedVariantIds,
+    // The cached static prefix is built over the DEFAULT (frozen) bodyCtx, where
+    // no owned/read-only variant fires — so no supersede fires at this ctx and the
+    // audit trail is empty. (Posture/mode variants supersede only under their own
+    // ctx, which the WHOLE-GRAPH verifier crosses; the per-turn manifest reflects
+    // the cached prefix that actually ships.)
     suppressed: [],
     byChannel,
     policy: meta.policy,

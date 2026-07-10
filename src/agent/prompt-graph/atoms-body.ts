@@ -32,6 +32,7 @@ import {
   BODY_AFTER_PERSONA_PRODUCTION_CODE_CONDUCT,
   BODY_AFTER_PERSONA_TOOL_FAILURES_AND_EXPLORATION,
   BODY_AFTER_PERSONA_TOOL_ROUTING,
+  BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
   BODY_AFTER_PROMPT_PACK_EXPLORATORY_QUESTIONS,
   BODY_AFTER_PROMPT_PACK_HONESTY_RAIL,
   BODY_AFTER_PROMPT_PACK_REPORTING_SHAPE,
@@ -420,11 +421,26 @@ const A_VERIFICATION_REPORT: InstructionAtom = {
 //     /architect) AND NOT grader-only (grader suppressed the whole bar before).
 //     Keeps the env-blocked escape hatch. BYTE-IDENTICAL to the prior block for
 //     the default/editor code-change path.
-//   - read-only (order 360): fires under plan/review/audit/architect. This is
-//     the ONE intentional new output — a completion bar whose deliverable is the
-//     plan/findings/design, not a code change.
+//   - read-only (order 360): fires under plan/review/audit/architect — a
+//     completion bar whose deliverable is the plan/findings/design, not a code
+//     change.
 // They `conflictsWith` each other (never co-render) and their `when.mode`
 // facets are disjoint, so exactly one fires per ctx.
+//
+// ⚠️ FORWARD SEAM (not yet wired to the wire): the read-only variant renders
+// only when `buildSystemPrompt` is called with a read-only `mode` — but (a) NO
+// composition-root caller threads `mode` into `buildSystemPrompt` today (only
+// `envPosture`/`verifyStrategy` are threaded, see `surface-profile.ts` /
+// `default-builder.ts`), and (b) the session cache path calls
+// `buildSystemPrompt()` bare, so the cached static prefix is mode-INDEPENDENT
+// and always renders the code-change variant. So this split is BYTE-IDENTICAL
+// today (the read-only variant never ships) and the atom exists as the SEAM +
+// the verifier's mode-crossed coverage/conflict proof. Wiring it needs EITHER a
+// mode-aware static cache key (cost: ×mode cardinality + mid-session mode
+// changes churn the prefix) OR — cleaner — moving the read-only bar onto the
+// DYNAMIC reminder channel where the mode NOTICE already rides. Deferred
+// (measure-first): the mode notice already tells a read-only turn its
+// deliverable is the plan/findings, so the marginal value is unmeasured.
 const A_COMPLETION_CODE_CHANGE: InstructionAtom = {
   atomId: "BODY-COMPLETION-BAR",
   variantId: "BODY-COMPLETION-BAR#code-change",
@@ -434,18 +450,10 @@ const A_COMPLETION_CODE_CHANGE: InstructionAtom = {
   order: 360,
   when: { mode: { not: [...READ_ONLY_MODES] }, verifyStrategy: { not: ["grader-only"] } },
   conflictsWith: ["BODY-COMPLETION-BAR#read-only"],
-  lines: [
-    "Completion bar: finish only when the deliverable is genuinely done. For a code",
-    "change: the minimal correct change is in place AND you have EITHER verified it",
-    "(builds/type-checks, the relevant tests pass) OR — when verification is blocked",
-    "by an environment you CANNOT modify (a frozen/locked sandbox; NOT a mere missing",
-    "dependency you are allowed to install) — stated plainly what you could not",
-    "verify and why (per the Verification report's `performed: no, skipped because`).",
-    "In a read-only mode (plan/review/audit/architect) the deliverable is the",
-    "plan/findings/design, not a code change. Do not imply success you did not",
-    "verify. Then stop calling tools and give a brief summary of what you produced",
-    "and how it was verified (or why it could not be).",
-  ],
+  // SSOT: the code-change bar IS the pre-migration completion-bar text verbatim —
+  // source it from the one const (`prompt-body.ts`) rather than re-typing it, so
+  // there is a single place the wire text lives (byte-identical by construction).
+  lines: BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
 }
 const A_COMPLETION_READ_ONLY: InstructionAtom = {
   atomId: "BODY-COMPLETION-BAR",

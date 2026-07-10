@@ -91,15 +91,16 @@ Do NOT key the whole compiled prompt on a full-ctx fingerprint (blows cardinalit
 
 Runs over the full reachable `PromptContext` surface (real facets, not a 5-axis reduction — P2 review). It is ADDED alongside the existing exact-phrase / placement / duplicate-count / cache-prefix hellgates, which it does NOT replace (Open-Q resolved: ADD, not replace).
 
-1. **Conflict-freedom** — no two `conflictsWith` variants co-render in the SAME channel, for any reachable ctx. (The manual audit → a test.)
-2. **Supersede soundness** — a superseded variant and its superseder never co-render.
+1. **Conflict-freedom** — no two `conflictsWith` variants co-render in the SAME channel, for any reachable ctx. This carries the mutual-exclusivity load for the env-posture + verify-strategy variants: they are CONTRADICTORY, selected by disjoint `when` matchers, and DECLARE their exclusivity with `conflictsWith` so this check witnesses it across every reachable ctx. Red-on-injection: overlap two conflicting atoms.
+2. **Supersede soundness + edge integrity** — an applicable superseder must actually suppress its loser (a selectAtoms tripwire), and no `supersedes`/`conflictsWith`/`requires` edge may dangle (target a non-existent variant). Note: the `supersedes` primitive is DORMANT — the shipped variants use disjoint matchers + `conflictsWith` (stronger: co-render is structurally impossible, not suppression-dependent — see the reconciliation note). The integrity half is red-on-injection (edge to a phantom variant).
 3. **Coverage** — every variant fires in ≥1 reachable ctx (dead/inert-rule detection).
-4. **Cached-section budget** — `system.*` cached section count ≤ 4 (Anthropic cap) for every ctx.
+4. **Cached-section budget** — ≤ 4 live `system.*` cache sections. Checked on the compiled MANIFEST, not the atom graph: every atom rides `system.base`, so the three caller-data sections (`project_md`/`session_ctx`/`user_append`) are only visible on the artifact. (A per-ctx count over atom channels can only ever see `{system.base}` and would be a tautology.) Red-on-injection: a manifest with a 5th live `system.*` section.
 5. **Static/dynamic separation** — a per-turn-natured atom (matcher references memory/repo/skills/context-events/etc.) may NOT land in a `system.*` channel.
 6. **Authority placement** — L6_repo / L7_skill / L8_user / L9_working_state atoms may NOT occupy `system.base`.
-7. **No-hidden-assumption lint** — an atom whose text asserts a context premise (env-blocked, read-only deliverable, hidden-grader, vision-priority, graded-harness) MUST declare the matching matcher facet, else FAIL. This is what statically prevents the jul-10 contradiction class.
+7. **No-hidden-assumption lint** — an atom whose text asserts a context premise (env-blocked, read-only deliverable, hidden-grader, vision-priority, graded-harness) MUST declare the matching matcher facet, else FAIL. BEST-EFFORT (keyword-matched: a premise phrased outside the table is a false-negative — it is a tripwire for the known contradiction phrasings, not a proof). The STRUCTURAL guarantee that contradictory variants never co-render is check (1). Red-on-injection: a premise atom with no facet.
 8. **Manifest completeness** — every rendered text span is traceable to a variantId.
-9. **Snapshot parity** — the manifest can reconstruct the current `promptPolicy` / `PromptAssembledSnapshot`.
+8b. **Dynamic-content placement** — a `contentKey` atom must ride `message.system_reminder` with empty `lines`.
+9. **Snapshot parity** — the manifest can reconstruct the current `promptPolicy` / `PromptAssembledSnapshot`. Only `system.base` + `message.system_reminder` are atom-bearing; the caller-data channels carry synthetic `SECTION-*`/`MSG-*` presence markers (their content is NOT atomized) and are exempt from atom-traceability.
 
 ## Open questions — resolved
 
@@ -110,7 +111,7 @@ Runs over the full reachable `PromptContext` surface (real facets, not a 5-axis 
 ## Migration (narrow, staged; breaking OK internally)
 
 1. New `src/agent/prompt-graph/`: `AtomMatcher`, `InstructionAtom`, `CompiledPromptArtifact`, pure `matches()`, `compile()`, `verifyRuleGraph()`.
-2. Promote `prompt-rules/core.ts` + `verify-strategy.ts` to atoms first: frozen/owned/default become `supersedes` edges (not separate lists); grader-only suppression becomes `when.verifyStrategy: {not:["grader-only"]}` (delete `withoutBlocks`). Encode the jul-10 contradictions as `conflictsWith` edges — the verifier confirms they no longer co-render.
+2. Promote `prompt-rules/core.ts` + `verify-strategy.ts` to atoms first: frozen/owned/default become distinct variants selected by DISJOINT `when.envPosture` matchers + a `conflictsWith` edge declaring their mutual exclusivity (NOT `supersedes` — see the reconciliation note; contradictory postures should be structurally non-co-rendering, not suppression-dependent). grader-only suppression becomes `when.verifyStrategy: {not:["grader-only"]}` (delete `withoutBlocks`). Encode the jul-10 contradictions as `conflictsWith` edges — the verifier confirms they no longer co-render.
 3. Then atomize the body in order: completion-bar (split into code/env-blocked/read-only variants with matchers), verification-report, honesty, trust/inputs, reporting-shape, mode notices, brief, untrusted-envelope.
 4. `buildSystemPrompt` / `buildTurnContext` stay as FACADES over `compile()` (callers unchanged).
 5. Add optional `firedAtomIds` / `byChannel` to `promptPolicy` + `PromptAssembledSnapshot` (observability).
@@ -123,3 +124,13 @@ Runs over the full reachable `PromptContext` surface (real facets, not a 5-axis 
 - One SSOT for all prompt content with a fired-atom manifest (observability the current path lacks).
 - ADR-0326 cache model, channel separation, and snapshot observability are PRESERVED as the compiler's output contract.
 - Cost: a real migration of the highest-leverage artifact. Mitigated by the facade + keeping all existing hellgates + per-ctx snapshot review (not byte-identical golden).
+
+## Post-migration audit reconciliation (jul-11)
+
+A hell-audit of the landed Phase 1–3 corrected these deviations between the ADR's letter and the implementation (each is now honest in code + verifier, none breaks the byte-identical wire):
+
+- **`supersedes` → `conflictsWith` for the env/verify variants.** The ADR proposed frozen/owned/default as `supersedes` edges. The implementation (correctly) selects them with DISJOINT `when` matchers, which made every `supersedes` edge INERT (the loser never co-applies, so nothing is suppressed) and the supersede-soundness check vacuous. Resolved by declaring the mutual exclusivity with `conflictsWith` (the accurate primitive for CONTRADICTORY variants) so the real conflict-freedom check proves it, and hardening the supersede check with dangling-edge integrity. The `supersedes` primitive stays available but DORMANT.
+- **`contentByKey` is a FORWARD SEAM, not implemented.** The dynamic reminder atoms (`atoms-dynamic.ts`) carry a `contentKey` and the ADR said "the compiler resolves it via a pure lookup (`contentByKey`)". No such resolver exists: the reminder TEXT is still produced by `buildDynamicContext` (leaf renderers); the atoms are the reminder's declarative APPLICABILITY + a fired-atom manifest, not (yet) its bytes. A drift-guard hellgate pins `manifest DYN atom fired ⟺ its block present in the wire` so the two presence expressions cannot diverge. Making `buildDynamicContext` DERIVE from a pure `contentByKey` fold is the natural next step (deferred — must stay byte-identical over the whole reminder).
+- **Read-only completion bar is a FORWARD SEAM.** The `BODY-COMPLETION-BAR#read-only` variant renders only when `buildSystemPrompt` gets a read-only `mode`, but no composition-root caller threads `mode` and the session cache builds the prefix bare — so the cached static prefix is mode-INDEPENDENT and the read-only variant does NOT ship today (the split is byte-identical). Wiring needs a mode-aware cache key OR moving the bar onto the dynamic reminder channel (where the mode notice already rides). Deferred (measure-first).
+- **Verifier honesty.** The cached-section-budget check was inert over atom channels (all atoms ride `system.base`); it now runs on the compiled manifest where the caller-data sections are visible. Snapshot-parity now exempts the synthetic `SECTION-*`/`MSG-*` caller-data markers (only `system.base` + `message.system_reminder` are atom-bearing). The no-hidden-assumption lint is documented as BEST-EFFORT (keyword-matched); the structural contradiction guarantee is conflict-freedom. Every non-static check names a red-on-injection test.
+- **Single completion-bar SSOT + dead-export removal.** The `#code-change` bar sources its text from the one `BODY_AFTER_PROMPT_PACK_COMPLETION_BAR` const (no inline duplicate); the dead `BODY_AFTER_PROMPT_PACK` flat aggregate (no live importer once the atoms render the body) was deleted.

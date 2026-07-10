@@ -3,15 +3,18 @@
  *
  * Mechanical extraction from `prompt.ts`: every entry here is a top-level
  * literal string OR `""` blank-line marker — there is no logic, no closure
- * capture, no clock, no IO. `buildSystemPrompt()` composes:
+ * capture, no clock, no IO. `buildSystemPrompt()` composes (ADR-0538 Phase 2 —
+ * the after-persona / after-pack bodies are now rendered from the instruction
+ * GRAPH, `prompt-graph/atoms-body.ts`, which sources its wire text from the
+ * `BODY_AFTER_PERSONA_*` / `BODY_AFTER_PROMPT_PACK_*` sub-block consts below):
  *
- *   INTRO_LINES + personaLines(...) + BODY_AFTER_PERSONA +
- *   {promptPack|toolUseRules}() + BODY_AFTER_PROMPT_PACK
+ *   INTRO_LINES + personaLines(...) + renderAtoms(BODY_AFTER_PERSONA_ATOMS) +
+ *   {posture|pack|verify}() + renderAtoms(BODY_AFTER_PROMPT_PACK_ATOMS)
  *
- * Splitting these out cuts `prompt.ts` line count by ~300 LOC while
- * preserving byte-identical observable output (the `.join("\n")` shape is
- * unchanged). Each array is `readonly string[]` so callers cannot mutate the
- * cached prefix.
+ * Each sub-block const is `readonly string[]` (callers cannot mutate the cached
+ * prefix) and has exactly one consumer: the atom that carries it as `lines`.
+ * (The former `BODY_AFTER_PROMPT_PACK` aggregate is GONE — a flat concatenation
+ * parallel to the atoms would be a second, drift-prone SSOT.)
  */
 
 /** Opening agent identity block (before the persona splice). */
@@ -100,7 +103,7 @@ export const BODY_AFTER_PERSONA_OPERATING_PRINCIPLES: readonly string[] = [
 export const BODY_AFTER_PERSONA_INTERNAL_VOCABULARY: readonly string[] = [
   "Internal vocabulary (NEVER expose to users — ADR-0067; Codex L26/L217):",
   "- Internal implementation tokens NEVER appear in user-facing chat — e.g.",
-  '  turn_id, tool_call_id, dispatch_seam, HARD_DENY, runHitlGate, byte-identical,',
+  "  turn_id, tool_call_id, dispatch_seam, HARD_DENY, runHitlGate, byte-identical,",
   '  "ADR-####", "Wave [A-D]", "Slice [1-5]", tier (the reviewer-tier enum).',
   '  Paraphrase in plain English/Korean ("the safety gate" not "runHitlGate").',
   "",
@@ -320,7 +323,7 @@ export const BODY_AFTER_PROMPT_PACK_VISION_PRIORITY: readonly string[] = [
   "Vision priority: when the user attaches image(s) this turn, reading and",
   "answering about the image is a FIRST-CLASS request — do it, don't skip to",
   "code-tool routes unless asked. You have native vision; describe what's",
-  "visible and answer from the image. Never reply \"no image present\" when an",
+  'visible and answer from the image. Never reply "no image present" when an',
   "attachment IS in the message; if it's unreadable, say what fails (encoding/",
   "size/clarity).",
   "",
@@ -405,6 +408,13 @@ export const BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT: readonly string[] = [
   "",
 ]
 
+// SSOT for the code-change completion-bar wire text. Sourced directly by the
+// `BODY-COMPLETION-BAR#code-change` atom (`prompt-graph/atoms-body.ts`) — the
+// graph is authoritative for the body (ADR-0538 Phase 2), so this const has ONE
+// consumer: that atom's `lines`. (The pre-migration `BODY_AFTER_PROMPT_PACK`
+// aggregate that used to concatenate the after-pack sub-blocks is GONE — the
+// atoms render the after-pack body now; keeping a parallel flat copy would be a
+// second, drift-prone SSOT.)
 export const BODY_AFTER_PROMPT_PACK_COMPLETION_BAR: readonly string[] = [
   "Completion bar: finish only when the deliverable is genuinely done. For a code",
   "change: the minimal correct change is in place AND you have EITHER verified it",
@@ -416,16 +426,6 @@ export const BODY_AFTER_PROMPT_PACK_COMPLETION_BAR: readonly string[] = [
   "plan/findings/design, not a code change. Do not imply success you did not",
   "verify. Then stop calling tools and give a brief summary of what you produced",
   "and how it was verified (or why it could not be).",
-]
-
-export const BODY_AFTER_PROMPT_PACK: readonly string[] = [
-  ...BODY_AFTER_PROMPT_PACK_VISION_PRIORITY,
-  ...BODY_AFTER_PROMPT_PACK_HONESTY_RAIL,
-  ...BODY_AFTER_PROMPT_PACK_TRUST_AND_INPUTS,
-  ...BODY_AFTER_PROMPT_PACK_EXPLORATORY_QUESTIONS,
-  ...BODY_AFTER_PROMPT_PACK_REPORTING_SHAPE,
-  ...BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT,
-  ...BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
 ]
 
 // ── Per-mode session notices (ADR-0211) ─────────────────────────────────────

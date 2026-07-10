@@ -309,13 +309,35 @@ describe("ADR-0538 Phase 3 — red-on-injection for the new verifier checks", ()
     expect(v.some((x) => x.kind === "snapshot-parity")).toBe(true)
   })
 
-  test("(snapshot-parity) the REAL compile manifest passes the parity check", async () => {
+  test("(snapshot-parity) the REAL compile manifest passes parity — INCLUDING a RICH ctx whose caller-data channels carry synthetic SECTION-*/MSG-* markers", async () => {
     const { verifyRuleGraph, ALL_ATOMS, reachableAllContexts } = await import(
       "@/agent/prompt-graph"
     )
+    // Rich: populate EVERY caller-data channel so byChannel carries the synthetic
+    // SECTION-* (project_md/session_ctx/user_append) + MSG-* (hook/context/mention)
+    // presence markers. Parity check (a) must EXEMPT those non-atom markers (only
+    // system.base + message.system_reminder are atom-bearing); a naive check
+    // false-positives here. (P3 regression: the prior test used a ctx where those
+    // channels were all EMPTY, so the markers were never exercised and the check's
+    // synthetic-id handling was never actually verified.)
     const artifact = compile(
-      base({ mode: "plan", brief: true, memoryContext: "m", env: { platform: "p" } }),
+      base({
+        mode: "plan",
+        brief: true,
+        repoRules,
+        sessionCtx: "sc",
+        userAppend: "ua",
+        memoryContext: "m",
+        env: { platform: "p" },
+        hookPromptInjects: [{ injectBeforeUser: "PRE", injectAfterSystem: "POST" }],
+        contextChangeEvents: [{ kind: "mode_change", prev: "a", next: "b", at: 1 }],
+        mentionInjectionMessages: [{ role: "user", content: [{ type: "text", text: "<m/>" }] }],
+      }),
     )
+    // Sanity: the synthetic markers ARE present (else the test proves nothing).
+    const flat = Object.values(artifact.manifest.byChannel).flat()
+    expect(flat).toContain("SECTION-project_md")
+    expect(flat).toContain("MSG-hook_context")
     const v = verifyRuleGraph(ALL_ATOMS, reachableAllContexts(), artifact.manifest)
     expect(v.map((x) => x.message)).toEqual([])
   })
@@ -385,5 +407,57 @@ describe("ADR-0538 Phase 3 — channel chronology + static/dynamic separation he
     expect(mentionIdx).toBeGreaterThan(ctxIdx)
     // reminder is NOT in injectedMessages — it is the separate trailingReminder.
     expect(artifact.trailingReminder).toBeDefined()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-0538 Phase 3 — DYNAMIC-atom DRIFT GUARD. The dynamic reminder atoms
+// (DYNAMIC_ATOMS) are the OBSERVABILITY manifest of the per-turn reminder; the
+// reminder TEXT is produced by `buildDynamicContext` (the leaf renderers). Those
+// are TWO expressions of "is this block present" — the atom's `when` facet vs the
+// `if (...)` in buildDynamicContext — and they MUST agree. This pins the
+// correspondence: a manifest DYN-<key> atom fired  ⟺  its block's text is present
+// in the wire reminder. If a future edit changes ONE predicate but not the other,
+// this goes RED (that is the structural fix for the "parallel shadow" drift risk).
+// ─────────────────────────────────────────────────────────────────────────
+describe("ADR-0538 Phase 3 — dynamic-atom manifest ⟺ wire reminder (drift guard)", () => {
+  const firedDyn = (a: ReturnType<typeof compile>): Set<string> =>
+    new Set(
+      (a.manifest.byChannel["message.system_reminder"] ?? []).filter((v) => v.startsWith("DYN-")),
+    )
+
+  test("each DYN reminder atom fires IFF its block text is in trailingReminder", () => {
+    // Witnesses I control verbatim in the wire: memory / langhint are pushed
+    // as-is; the env block renders the platform string. repo-rules / active-skills
+    // are ABSENT here (no input) — so neither the atom NOR the block may appear.
+    const input = base({
+      memoryContext: "## Memory\nDRIFT_MEM_WITNESS",
+      languageHint: "DRIFT_LANG_WITNESS",
+      env: { platform: "DRIFT_ENV_WITNESS" },
+    })
+    const artifact = compile(input)
+    const reminder = artifact.trailingReminder ?? ""
+    const dyn = firedDyn(artifact)
+    const cases: ReadonlyArray<readonly [string, string, boolean]> = [
+      ["DYN-memory-context", "DRIFT_MEM_WITNESS", true],
+      ["DYN-language-hint", "DRIFT_LANG_WITNESS", true],
+      ["DYN-env-block", "DRIFT_ENV_WITNESS", true],
+      ["DYN-repo-rules", "", false],
+      ["DYN-active-skills", "", false],
+    ]
+    for (const [id, witness, present] of cases) {
+      // manifest and wire must AGREE on presence.
+      expect(dyn.has(id)).toBe(present)
+      if (present) expect(reminder).toContain(witness)
+    }
+  })
+
+  test("the always-on DYN atoms (date/cwd) fire AND appear in the wire", () => {
+    const artifact = compile(base({ cwd: "/drift/cwd/witness" }))
+    const reminder = artifact.trailingReminder ?? ""
+    const dyn = firedDyn(artifact)
+    expect(dyn.has("DYN-date")).toBe(true)
+    expect(dyn.has("DYN-cwd")).toBe(true)
+    expect(reminder).toContain("/drift/cwd/witness")
   })
 })

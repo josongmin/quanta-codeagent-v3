@@ -10,18 +10,34 @@
  * observability is a fired-atom manifest — WITHOUT smuggling a render closure
  * onto the atom.
  *
+ * WHAT THESE ATOMS ARE (and are NOT — honest scope):
+ *   - They are the DECLARATIVE APPLICABILITY + OBSERVABILITY manifest of the
+ *     per-turn reminder: each atom's `when` says WHEN its block rides, and its
+ *     `contentKey` NAMES which block it is, so the compiler can report a
+ *     fired-atom manifest for the reminder channel (`byChannel`).
+ *   - They do NOT yet PRODUCE the reminder wire text. That text is assembled by
+ *     the leaf renderers in {@link buildDynamicContext} (date/cwd/env/repo/…).
+ *     There is no `contentByKey` RESOLVER wiring these atoms to the wire — the
+ *     graph is authoritative for the reminder's APPLICABILITY + manifest, not (yet)
+ *     for its bytes. Making the graph author the reminder text too (a pure
+ *     `contentByKey(input, now)` the assembler folds over the selected atoms, so
+ *     `buildDynamicContext` DERIVES from the atoms) is the natural next step —
+ *     deferred because it must stay byte-identical over the whole reminder.
+ *   - Because there are TWO expressions of "is this block present" — each atom's
+ *     `when` here, and the matching `if (...)` in `buildDynamicContext` — they
+ *     MUST agree. That correspondence is the drift risk; a drift-guard hellgate
+ *     pins `manifest reminder atom fired ⟺ its block text present in the wire`
+ *     (`compile-artifact-hellgate.test.ts`), so the shadow cannot silently
+ *     diverge.
+ *
  * PURITY CONTRACT (ADR-0538 §KEY-TRANSFORM — dynamic atoms):
  *   - `when` stays the DECLARATIVE {@link AtomMatcher} (e.g. `hasRepoRules`,
  *     `hasMemorySummary`, `hasLanguageHint`/`hasImages`) — applicability is
  *     inspectable + exhaustively verifiable, never a `(ctx)=>boolean`.
- *   - the per-turn TEXT is NOT on the atom. The atom carries a STABLE
- *     {@link InstructionAtom.contentKey}; the compiler resolves it via a PURE
- *     lookup (`contentByKey`) from the `TurnContextInput`'s per-turn fields. No
- *     clock / IO / closure capture lives on the atom (the date's clock injection
- *     stays in the compiler's pure `now` lookup, exactly as `buildDynamicContext`
- *     had it).
- *   - `lines` is EMPTY for a dynamic atom (its wire text is the resolved content,
- *     not a static literal).
+ *   - the atom carries a STABLE {@link InstructionAtom.contentKey} LABEL and NO
+ *     text: no clock / IO / closure capture lives on the atom.
+ *   - `lines` is EMPTY for a dynamic atom (its wire text is per-turn DATA the
+ *     leaf renderer produces, not a static literal).
  *
  * CHANNEL: `message.system_reminder` (per-turn) — the verifier's static/dynamic
  * separation check would (correctly) reject any of these on a cached `system.*`

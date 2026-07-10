@@ -40,9 +40,15 @@ const VERIFY = "tooluse.verify"
  *   - `R-ENV` (frozen): do NOT install; env limitation ⇒ declare unavailable + stop.
  *   - `R-ENV-OWNED` (owned): you own the box — install/configure freely.
  *   - `R-ENV-LOCAL` (default): user's own machine — install permitted, not graded.
- * The owned/default variants SUPERSEDE the frozen variant (same atomId), so the
- * frozen-vs-owned-vs-default split is `when.envPosture` + a supersede edge, NOT
- * three separate lists.
+ * The three are mutually-exclusive CONTRADICTORY postures selected by DISJOINT
+ * `when.envPosture` matchers (frozen vs owned vs default) — exactly one renders.
+ * `conflictsWith` edges DECLARE that exclusivity so the conflict-freedom verifier
+ * proves it across every reachable ctx (disjoint matchers make co-render
+ * impossible; the edge is what makes the verifier witness it). This replaces the
+ * three separate hand-maintained rule lists — NOT a `supersedes` edge: supersede
+ * (let both apply, winner suppresses loser) would rely on selectAtoms suppression
+ * and leave frozen APPLICABLE under owned; disjoint matchers + a conflict edge are
+ * stronger (co-render is structurally impossible AND build-time verified).
  */
 const R_ENV_FROZEN: InstructionAtom = {
   atomId: "R-ENV",
@@ -154,11 +160,12 @@ const R_FAILURE_MODE: InstructionAtom = {
 }
 
 // ── R-NO-SHIM: TWO variants (frozen stop-tail vs owned install-the-dep tail).
-//    Same atomId; the owned variant SUPERSEDES the frozen one and fires in
-//    owned+default. The frozen roster orders …R-NO-SHIM, R-FAILURE-MODE
-//    (shim order 60 < 70); the owned/default roster orders …R-FAILURE-MODE,
-//    R-NO-SHIM (shim order 75 > 70). Only one shim variant fires per posture,
-//    so the two distinct order values reproduce BOTH prior rosters exactly. ──
+//    Same atomId, CONTRADICTORY, selected by disjoint `when.envPosture` (frozen
+//    vs owned/default) with a `conflictsWith` edge declaring the exclusivity. The
+//    frozen roster orders …R-NO-SHIM, R-FAILURE-MODE (shim order 60 < 70); the
+//    owned/default roster orders …R-FAILURE-MODE, R-NO-SHIM (shim order 75 > 70).
+//    Only one shim variant fires per posture, so the two distinct order values
+//    reproduce BOTH prior rosters exactly. ──
 const R_NO_SHIM_FROZEN: InstructionAtom = {
   atomId: "R-NO-SHIM",
   variantId: "R-NO-SHIM#frozen",
@@ -189,7 +196,12 @@ const R_NO_SHIM_OWNED: InstructionAtom = {
   // frozen roster where the shim (60) precedes R-FAILURE-MODE (70).
   order: 75,
   when: { envPosture: ["owned", "default"] },
-  supersedes: ["R-NO-SHIM#frozen"],
+  // The frozen shim rule ("declare env unavailable + stop") and this owned one
+  // ("install the real dep") are CONTRADICTORY — they must never co-render. The
+  // `when.envPosture` sets are disjoint (frozen vs owned/default), so they never
+  // do; this edge DECLARES that exclusivity so the conflict-freedom verifier
+  // PROVES it across every reachable ctx (a future matcher-widening would fire).
+  conflictsWith: ["R-NO-SHIM#frozen"],
   lines: [
     "- [R-NO-SHIM] Do NOT create stub/mock/shim files (e.g. a fake `toml.py`,",
     "  `pytest.py`, or an empty package) to bypass a missing dependency or to",
@@ -208,7 +220,10 @@ const R_ENV_OWNED: InstructionAtom = {
   section: POSTURE,
   order: 80,
   when: { envPosture: ["owned"] },
-  supersedes: ["R-ENV#frozen"],
+  // Contradicts BOTH the frozen ("do NOT install") and the default variant —
+  // exactly one env posture renders. Disjoint `when.envPosture` guarantees it;
+  // the edge makes the conflict-freedom verifier PROVE it (see R-NO-SHIM note).
+  conflictsWith: ["R-ENV#frozen", "R-ENV#default"],
   lines: [
     "- [R-ENV-OWNED] You own this environment. Install dependencies, configure",
     "  services, and build tooling as needed (pip/apt/npm/cargo/…). A working",
@@ -261,7 +276,8 @@ const R_ENV_LOCAL: InstructionAtom = {
   section: POSTURE,
   order: 80,
   when: { envPosture: ["default"] },
-  supersedes: ["R-ENV#frozen"],
+  // Contradicts the frozen variant (owned↔default pair is declared on R-ENV#owned).
+  conflictsWith: ["R-ENV#frozen"],
   lines: [
     "- [R-ENV-LOCAL] This is the user's OWN machine, not a graded sandbox. You MAY",
     "  install or configure the dependencies the task needs — prefer the project's",
@@ -334,7 +350,7 @@ const R_GRADER_ONLY: InstructionAtom = {
     "  Do NOT: run the test suite / pytest / tox / any broad or dependency-install command",
     "  (this checkout lacks test deps — they fail spuriously and only waste turns); create,",
     "  edit, or delete tests, docs, lockfiles, or fixtures; use destructive git (checkout /",
-    "  reset / clean / stash / restore); claim \"verified / passing / green / done\" when no",
+    '  reset / clean / stash / restore); claim "verified / passing / green / done" when no',
     "  permitted check ran; seek any hidden, grader, or reference test.",
     "  Do: read the source before editing; confirm the owning code path by the strongest",
     "  available evidence (lsp_definition / references when reliable, else source reads +",
@@ -342,8 +358,8 @@ const R_GRADER_ONLY: InstructionAtom = {
     "  EXACT required behavior (signature, message, return value, edge cases) from the public",
     "  issue and match it precisely; make the smallest isolated source-only change.",
     "  Stop when: the minimal source patch is applied.",
-    "  Final: state files changed, behavior changed, and \"verification: not run — hidden-",
-    "  grader mode forbids local tests; the grader runs them.\" Do not overclaim.",
+    '  Final: state files changed, behavior changed, and "verification: not run — hidden-',
+    '  grader mode forbids local tests; the grader runs them." Do not overclaim.',
   ],
   provenance: ["P6 grader-only exec-mode SSOT", "jul-6 residual-conflict audit"],
 }
