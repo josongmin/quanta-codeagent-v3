@@ -20,11 +20,7 @@ import {
   splitDraft,
 } from "./SlashPalette"
 import { buildAuthSlashCommands } from "./slash-auth"
-import {
-  buildLlmConfigSlashCommands,
-  buildRetryWithSlashCommand,
-  type RetryWithDeps,
-} from "./slash-llm-config"
+import { buildLlmConfigSlashCommands, type RetryWithDeps } from "./slash-llm-config"
 import { buildReadoutSlashCommands } from "./slash-readout"
 
 export interface SlashCatalogDeps {
@@ -58,13 +54,17 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
     onResult: (msg: string, kind: "ok" | "err"): void => {
       deps.appendClientMessage(kind === "err" ? "error" : "system", msg)
     },
-  }
-  const llmCommands = [
-    ...buildLlmConfigSlashCommands(sharedEndpoint),
+    // P2 (UUX-4-18) — /retry-with (baked into the llm-config set) reads the live
+    // transcript + resends via these; absent (offline/tests) ⇒ the entry reports
+    // "no prior turn". ONE retry-with design (endpoint-carried), no parallel path.
     ...(deps.retryWith !== undefined
-      ? [buildRetryWithSlashCommand(sharedEndpoint, deps.retryWith)]
-      : []),
-  ]
+      ? {
+          getMessages: deps.retryWith.getMessages,
+          resend: deps.retryWith.sendUserTurn,
+        }
+      : {}),
+  }
+  const llmCommands = buildLlmConfigSlashCommands(sharedEndpoint)
   const authCommands = buildAuthSlashCommands(sharedEndpoint)
   const readoutCommands = buildReadoutSlashCommands({
     httpUrl,

@@ -26,6 +26,13 @@ export interface LlmConfigEndpoint {
   readonly token?: string
   /** Optional toast hook so the host page can surface success / errors. */
   readonly onResult?: (msg: string, kind: "ok" | "err") => void
+  /** P2 (UUX-4-18) — live transcript accessor for `/retry-with` (last user
+   *  message). Threaded on by the catalogue when the App wires it; absent ⇒
+   *  the entry reports "no prior turn". */
+  readonly getMessages?: () => readonly UiMessage[]
+  /** P2 (UUX-4-18) — resend a turn (the App's `sendTurn`), used by
+   *  `/retry-with` after applying the model override. Absent ⇒ no resend. */
+  readonly resend?: (text: string) => void
 }
 
 const postConfig = async (
@@ -124,6 +131,33 @@ export const buildLlmConfigSlashCommands = (ep: LlmConfigEndpoint): readonly Sla
       return ""
     },
   },
+  {
+    // P2 (jul-11, UUX-4-18) — /retry-with <slug>: the CLI re-runs the last turn
+    // with a different model. The web protocol carries NO per-turn model
+    // (TurnRunCommand is an empty envelope), so the HONEST parity is a two-step:
+    // apply the model override THEN resend the last user message. The live
+    // transcript + send path arrive endpoint-carried (getMessages/resend);
+    // absent ⇒ "no prior turn". ONE retry-with impl, no parallel builder.
+    slug: "retry-with",
+    description: "Re-run the last turn with a different model — usage: /retry-with <slug>",
+    kind: "local",
+    action: async (rest) => {
+      const plan = planRetryWith(rest ?? "", ep.getMessages?.() ?? [])
+      if (!plan.ok) {
+        ep.onResult?.(
+          plan.reason === "no_slug"
+            ? "usage: /retry-with <slug>  (e.g. /retry-with gpt-5)"
+            : "/retry-with: no prior user message to resend",
+          "err",
+        )
+        return plan.reason === "no_slug" ? "/retry-with " : ""
+      }
+      await postConfig(ep, { QUANTA_MODEL: plan.slug })
+      ep.resend?.(plan.resendText)
+      ep.onResult?.(`retrying last message under ${plan.slug} (model override + resend)`, "ok")
+      return ""
+    },
+  },
 ]
 
 /** Derive an HTTP base URL from a WebSocket URL (same host + port). */
@@ -140,38 +174,11 @@ export const httpUrlFromWsUrl = (wsUrl: string): string => {
 /** P2 (jul-11, UUX-4-18) — /retry-with deps: the palette entry needs the live
  *  transcript (last user message) and the composer's send path. Thin getters
  *  so the catalogue memo does not re-assemble per message. */
+/** P2 (UUX-4-18) — the App-side deps the catalogue threads onto the shared
+ *  endpoint so the (endpoint-carried) `/retry-with` reads the live transcript +
+ *  resends. Kept as the wiring contract; there is ONE retry-with impl (baked
+ *  into {@link buildLlmConfigSlashCommands}), no parallel builder. */
 export interface RetryWithDeps {
   readonly getMessages: () => readonly UiMessage[]
   readonly sendUserTurn: (text: string) => void
 }
-
-/**
- * `/retry-with <slug>` — CLI parity, HONEST two-step: the web protocol carries
- * no per-turn model (TurnRunCommand is an empty envelope), so this switches
- * the session model override (the exact `/model` seam) and RESENDS the last
- * user message as a fresh turn. Copy says both steps out loud.
- */
-export const buildRetryWithSlashCommand = (
-  ep: LlmConfigEndpoint,
-  deps: RetryWithDeps,
-): SlashCommand => ({
-  slug: "retry-with",
-  description: "Switch model and resend the last user message — usage: /retry-with <slug>",
-  kind: "local",
-  action: async (rest) => {
-    const plan = planRetryWith(rest, deps.getMessages())
-    if (!plan.ok) {
-      ep.onResult?.(
-        plan.reason === "no_slug"
-          ? "usage: /retry-with <slug>  (e.g. /retry-with gpt-5)"
-          : "/retry-with: no prior user message to resend",
-        "err",
-      )
-      return plan.reason === "no_slug" ? "/retry-with " : ""
-    }
-    await postConfig(ep, { QUANTA_MODEL: plan.slug })
-    deps.sendUserTurn(plan.resendText)
-    ep.onResult?.(`retrying last message under ${plan.slug} (model override + resend)`, "ok")
-    return ""
-  },
-})
