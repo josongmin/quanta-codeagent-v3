@@ -85,12 +85,35 @@ READ getter (`sdk/runtime/session.ts:91` + `types.ts:110`) returning
 - **Hellgate:** attach with a persisted thread id ⇒ live session hydrated from
   that thread's SavedSession, composer active; parent thread on disk untouched.
 
-### Phase 3 — frontend live-join
-- `lib/thread-resume.ts` + `App.tsx`: opening a persisted thread joins the live
-  (now-swapped) session instead of read-only replay; flip `boundary`
-  (`fetch-handler.ts:210`) to `live-attach` for any hydrated thread; keep
-  read-only only for absent ids.
-- **Hellgate:** picking a persisted thread yields an INTERACTIVE session.
+### Phase 3 — frontend live-join — LANDED (jul-11)
+- **3a (client seam, `ws/client.ts`):** `#withThreadQuery` (symmetric to
+  `#withAuthQuery`) rides `ConnectOptions.resumeThreadId` onto the WS URL as
+  `?thread=<id>`, so the daemon's Phase-2 swap-on-attach fires. Absent ⇒
+  byte-identical connect. Corrected the stale `resumeThreadId` doc.
+- **3b (`App.tsx` resume effect):** opening a persisted thread now RE-DIALS the
+  WS with `resumeThreadId` (`buildResumeConnectOptions`, a pure tested seam) so
+  the daemon swaps its one live session onto the thread — model continuity (the
+  NEXT turn continues the thread's kernel transcript) + a real live-attach
+  boundary. The existing REST hydration still RENDERS the thread, because
+  `transcript.replace` emits only a `session.state.updated` summary, NOT the
+  per-message events the UI draws (verified `reducer.ts:162-194`).
+- Boundary flows from the server-computed REST outcome, so pre-Phase-1 threads
+  (no SavedSession ⇒ swap can't hydrate) honestly stay `read-only-history`.
+- **Hellgate:** `buildResumeConnectOptions` carries the thread id + rides auth
+  only with a token (paired byte-identity control); client seam pins
+  `?thread` append + encode + compose-with-`?token`.
+
+### Scoped follow-up (NOT this backlog item — the multi-tenant piece)
+The daemon's client-facing `SessionEvent[]` archive
+(`persistence-sqlite.ts` + the bridge's `attachSessionTransport` replay) is NOT
+repointed on swap. So the re-dial's reconnect snapshot still replays the
+*original* live session's turn/tool events; when the daemon had prior in-process
+activity, those can surface alongside the swapped thread's REST-rendered
+transcript. A fully-clean cross-session RENDER needs a daemon-side archive
+repoint-on-swap — which is the true N-concurrent / multi-tenant surface the plan
+scoped out (§Semantics). What the swap model delivers here is the load-bearing
+capability: any persisted thread can BECOME the one live session (model
+continuity) with an honest boundary.
 
 ## Semantics (honest)
 One human, one live session that swaps — like the CLI's `/fork`. All tabs share
