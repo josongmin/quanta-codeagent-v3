@@ -271,7 +271,12 @@ describe("ADR-0397 probeTurnEnv — live probe helper", () => {
 })
 
 describe("ADR-0397 env block + repoRules ordering", () => {
-  test("env block sits ABOVE repo-rules (env is the most-static authority)", () => {
+  test("env rides the reminder tail; repo-local rules ride the cached project_md system section (ADR-0326)", () => {
+    // Since the sectioning change, repo-local rules (TRUSTED instructions) are
+    // hoisted to the cached `project_md` system section, NOT the untrusted tail —
+    // so env (host-static per-turn context) and repo no longer share the tail. The
+    // authority ordering is PRESERVED across channels: the cached system prefix
+    // outranks the reminder tail. (Was: "env above repo" when both rode the tail.)
     const repoRules = {
       sourcePath: "/repo/AGENTS.md",
       entrypoint: "AGENTS.md" as const,
@@ -279,10 +284,11 @@ describe("ADR-0397 env block + repoRules ordering", () => {
       loadedAt: 0,
     }
     const env: TurnEnvContext = { platform: "darwin arm64 24.6.0" }
-    const text = tailText(base({ env, repoRules }))
-    const envIdx = text.indexOf("## Environment")
-    const repoIdx = text.indexOf("## Repo-local rules")
-    expect(envIdx).toBeGreaterThanOrEqual(0)
-    expect(repoIdx).toBeGreaterThan(envIdx)
+    const { system, messages } = buildTurnContext(base({ env, repoRules }))
+    const tail = reminderText(messages[messages.length - 1] as Message)
+    expect(tail).toContain("## Environment")
+    expect(tail).not.toContain("## Repo-local rules")
+    const systemText = system.map((b) => b.text).join("\n")
+    expect(systemText).toContain("## Repo-local rules")
   })
 })

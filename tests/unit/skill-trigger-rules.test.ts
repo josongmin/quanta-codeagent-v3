@@ -107,8 +107,13 @@ describe("buildTurnContext activeSkills block (Phase 7)", () => {
     expect(skillsIdx).toBeLessThan(memIdx)
   })
 
-  test("repo-local rules precede the skills block (repo authority > skill)", () => {
-    const text = tail(
+  test("skills ride the tail; repo-local rules ride the cached project_md system section (repo authority > skill)", () => {
+    // Since the sectioning change, repo-local rules (TRUSTED instructions) are
+    // hoisted to the cached project_md system section, NOT the untrusted tail;
+    // skills ride the tail. Authority is PRESERVED across channels — the cached
+    // system prefix (repo) outranks the reminder tail (skills). (Was: repo above
+    // skills when both rode the tail.)
+    const { system, messages } = buildTurnContext(
       base({
         repoRules: {
           sourcePath: "/repo/AGENTS.md",
@@ -119,11 +124,11 @@ describe("buildTurnContext activeSkills block (Phase 7)", () => {
         activeSkills: [{ name: "review", description: "Review a pull request" }],
       }),
     )
-    const repoIdx = text.indexOf("## Repo-local rules")
-    const skillsIdx = text.indexOf("## Active skills")
-    expect(repoIdx).toBeGreaterThanOrEqual(0)
-    expect(skillsIdx).toBeGreaterThanOrEqual(0)
-    expect(repoIdx).toBeLessThan(skillsIdx)
+    const text = reminderText(messages[messages.length - 1] as Message)
+    expect(text).toContain("## Active skills")
+    expect(text).not.toContain("## Repo-local rules")
+    const systemText = system.map((b) => b.text).join("\n")
+    expect(systemText).toContain("## Repo-local rules")
   })
 
   test("activeSkills do NOT shift the cached system prefix", () => {

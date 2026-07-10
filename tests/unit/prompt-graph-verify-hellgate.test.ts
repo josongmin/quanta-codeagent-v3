@@ -345,4 +345,43 @@ describe("prompt-graph Phase 2 — RED on the four new checks", () => {
     expect(integ.length).toBeGreaterThan(0)
     expect(integ.some((x) => x.variantIds.includes("NO-SUCH-VARIANT"))).toBe(true)
   })
+
+  test("(3) coverage: an atom gated on an UNREACHABLE facet ⇒ coverage violation", () => {
+    // The body ctx surface holds every presence facet FALSE, so an atom gated on a
+    // per-turn presence facet never fires there → it is a dead/inert rule. Proves
+    // the coverage check is red-on-injection (not just green on the real set).
+    const dead: InstructionAtom = {
+      atomId: "X-DEAD",
+      variantId: "X-DEAD#inert",
+      authority: "L1_system",
+      channel: "message.system_reminder",
+      section: "dynamic.reminder",
+      order: 995,
+      when: { hasMemorySummary: true }, // never true in reachableBodyContexts
+      lines: [],
+      contentKey: "x-dead",
+    }
+    const cov = verifyRuleGraph([...BODY_AND_NOTICE, dead], BODY_REACHABLE).filter(
+      (x) => x.kind === "coverage",
+    )
+    expect(cov.some((x) => x.variantIds.includes("X-DEAD#inert"))).toBe(true)
+  })
+
+  test("(8) manifest-completeness: an EMPTY variantId ⇒ violation", () => {
+    // Every rendered span must trace to a non-empty variantId; a blank id would make
+    // the fired-atom manifest ambiguous. Red-on-injection for the empty-id branch.
+    const blank: InstructionAtom = {
+      atomId: "X-BLANK",
+      variantId: "",
+      authority: "L1_system",
+      channel: "system.base",
+      section: "body.after_persona",
+      order: 994,
+      lines: ["- an atom with a blank variantId"],
+    }
+    const man = verifyRuleGraph([...BODY_AND_NOTICE, blank], BODY_REACHABLE).filter(
+      (x) => x.kind === "manifest-completeness",
+    )
+    expect(man.length).toBeGreaterThan(0)
+  })
 })
