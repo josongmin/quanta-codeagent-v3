@@ -71,15 +71,18 @@ mid-turn" hint `rewind-cmd.ts:585` already prints but can't act on.
 - **Hellgate:** attach-existing, attach-mid-turn-refused, attach-missing-id, and
   the `/rewind`-after-attach cascade.
 
-### WS-4 — /side live progress (UUX-6-13), small
-`side-cmd.ts` shows header + final footer only. Surface live milestones during
-the run WITHOUT inventing a signal: subscribe to the side loop's already-forwarded
-stream (the parent `args.base.stream` at `side-conversation.ts:153`) and print
-tool-invoked / tool-completed milestones. Reuse the ADR-0130 subagent-progress
-shape (`subagent-runner.ts:618` threads `stream` to the child the same way).
-- **Hellgate (tightened per audit):** a /side run whose fake loop emits
-  `tool.invoked`+`tool.completed` prints ≥1 milestone line BEFORE the footer;
-  gate/absent ⇒ byte-identical header→footer path.
+### WS-4 — /side live progress (UUX-6-13) — ALREADY SERVED (closed on code proof)
+Investigating for the RED test disproved the premise (same class as WS-5). The
+side loop emits to `createUsageTallyStream(args.base.stream, …)`
+(`side-conversation.ts:113-124,153`), which forwards EVERY event to the parent's
+`base.stream` — the SAME `StreamPort` the main REPL renderer consumes. The render
+path does NOT filter on the `side:` session id (grep clean). So side tool events
+already paint LIVE during `/side` via the shared renderer; `side-cmd.ts` frames
+them with a header before + footer after. Adding a second progress channel in
+`side-cmd` would DUPLICATE the parent renderer — the forbidden work. CLOSED.
+- Optional future polish (NOT built — niche, measure-first): LABEL the shared
+  stream's side-origin events distinctly (renderer branches on the `side:` id).
+  That's a rendering nicety, not the "no progress" gap the draft assumed.
 
 ## Execution order (hellgate, main-inline, NO parallel landing)
 WS-1 (keystone) → WS-2 (depends on WS-1) → WS-4 (independent).
