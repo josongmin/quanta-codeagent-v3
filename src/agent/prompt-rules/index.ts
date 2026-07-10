@@ -16,6 +16,7 @@
  * `AgentMode`. No `@/llm`, no `@/tool`, no `@/apps` — rules are pure text data.
  */
 
+import { POSTURE_ATOMS, type PromptContext, renderAtoms } from "../prompt-graph"
 import { BATCH_RULES } from "./benchmark"
 import { CORE_RULES, DEFAULT_BASE, OWNED_RULES, type PromptRule } from "./core"
 import { PR_RULES } from "./pr-agent"
@@ -50,17 +51,34 @@ import type { AgentMode } from "../run-mode/types"
 // pack. Composing them independently removes the XOR while staying byte-identical for every
 // legacy combination (a frozen pack == CORE + task; owned == OWNED + no task).
 
-/** POSTURE-BASE rules (env axis). `frozen` = CORE_RULES (SWE guardrails, today's default);
- *  `owned` = OWNED_RULES (container-owned, "install freely + a working env is the graded
- *  deliverable"); `default` = DEFAULT_BASE (general local-dev machine, install-permitted but
- *  NOT graded — the jul-9 `QUANTA_ENV_DEFAULT` CLI knob). Flattened to the line array
- *  `buildSystemPrompt` splices. */
+/** Base ctx skeleton for the posture-base projection — only `envPosture` varies;
+ *  no posture atom conditions on the other axes (ADR-0538 §Migration). */
+const postureCtx = (envPosture: PromptContext["envPosture"]): PromptContext => ({
+  envPosture,
+  promptPack: "interactive",
+  verifyStrategy: undefined,
+  mode: "default",
+  hasRepoRules: false,
+  hasGlobRules: false,
+  hasSessionCtx: false,
+  hasMemorySummary: false,
+  hasWorkingState: false,
+  hasActiveSkills: false,
+  hasContextEvents: false,
+  hasMentionInjection: false,
+  hasHookInjects: false,
+  hasImages: false,
+  brief: false,
+  untrustedEnvelope: false,
+})
+
+/** POSTURE-BASE rules (env axis) — DERIVED from the ADR-0538 atom graph, NOT from
+ *  list membership + `withoutBlocks`. `renderAtoms` selects the applicable posture
+ *  atoms via `matches()` (matcher + supersede resolution + ordering) and flattens
+ *  their lines. Byte-identical to the prior CORE/OWNED/DEFAULT projections. */
 export const renderPostureBase = (
   posture: "frozen" | "owned" | "default",
-): readonly string[] =>
-  (posture === "owned" ? OWNED_RULES : posture === "default" ? DEFAULT_BASE : CORE_RULES).flatMap(
-    (r) => r.lines,
-  )
+): readonly string[] => renderAtoms(POSTURE_ATOMS, postureCtx(posture))
 
 /** TASK-only rules (task axis) — env-independent mode narrowing. interactive/ide carry none;
  *  headless/daemon → R-SINGLE-COHERENT; batch → R-NO-EXPLORE-OVER-EDIT; ci-bot → PR rules. */

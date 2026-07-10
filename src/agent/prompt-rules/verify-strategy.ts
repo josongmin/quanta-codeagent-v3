@@ -22,6 +22,7 @@
  * grader test. These are pure text-data rules (no `@/llm`, no `@/tool`).
  */
 
+import { type PromptContext, renderAtoms, VERIFY_ATOMS } from "../prompt-graph"
 import type { PromptRule } from "./core"
 
 /** The verify-strategy axis value. Absent ⇒ no verify rule (byte-identical).
@@ -29,72 +30,52 @@ import type { PromptRule } from "./core"
  *  local tests) — they are mutually exclusive by being one axis value. */
 export type VerifyStrategy = "reproduce-first" | "verify-after-edit" | "grader-only"
 
+/** The verify-strategy PromptRule projection — DERIVED from the ADR-0538 atom
+ *  graph (SSOT). `VERIFY_ATOMS` holds the atoms; a strategy selects exactly the
+ *  atom whose `when.verifyStrategy` admits it. `atomLines` looks up the atom's
+ *  rendered lines by the strategy's ctx (there is exactly one per strategy). */
+const verifyCtx = (verifyStrategy: VerifyStrategy): PromptContext => ({
+  envPosture: "frozen",
+  promptPack: "interactive",
+  verifyStrategy,
+  mode: "default",
+  hasRepoRules: false,
+  hasGlobRules: false,
+  hasSessionCtx: false,
+  hasMemorySummary: false,
+  hasWorkingState: false,
+  hasActiveSkills: false,
+  hasContextEvents: false,
+  hasMentionInjection: false,
+  hasHookInjects: false,
+  hasImages: false,
+  brief: false,
+  untrustedEnvelope: false,
+})
+
+/** Rule constant kept for back-compat callers/tests — its `.lines` are the
+ *  atom's rendered lines (single SSOT). `id` is the atom's `atomId` (the tag). */
+const ruleFor = (strategy: VerifyStrategy, id: string): PromptRule => ({
+  id,
+  lines: renderAtoms(VERIFY_ATOMS, verifyCtx(strategy)),
+})
+
 /** SWE/bench: reproduce the reported failure BEFORE fixing, then rerun the same
- *  reproduction after. Grounds the fix in an observed before→after instead of a
- *  guess. Works from the public issue text only (no-leak). */
-export const REPRODUCE_FIRST_RULE: PromptRule = {
-  id: "R-REPRODUCE-FIRST",
-  lines: [
-    "- [R-REPRODUCE-FIRST] Reproduce before you fix. From the issue / task",
-    "  description, write the minimal script or command that triggers the reported",
-    "  failure and confirm it fails for the stated reason. Make your fix, then RERUN",
-    "  that same reproduction and confirm it now passes. Ground the change in an",
-    "  observed before→after, not a guess about what the code does. Use only the",
-    "  public issue text — do NOT seek any hidden, grader, or reference test.",
-  ],
-}
+ *  reproduction after (no-leak — public issue text only). */
+export const REPRODUCE_FIRST_RULE: PromptRule = ruleFor("reproduce-first", "R-REPRODUCE-FIRST")
 
-/** General/CLI: run the narrowest check that exercises the change, after each edit,
- *  and read the result before moving on. The universal verify-your-work habit. */
-export const VERIFY_AFTER_EDIT_RULE: PromptRule = {
-  id: "R-VERIFY-AFTER-EDIT",
-  lines: [
-    "- [R-VERIFY-AFTER-EDIT] Verify each change before reporting it done. Run the",
-    "  narrowest check that exercises what you changed — the affected file's tests, a",
-    "  type-check, or the exact command the user runs — and READ the result. Do not",
-    "  claim a change works until you have observed it behave.",
-  ],
-}
+/** General/CLI: run the narrowest check that exercises the change, after each edit. */
+export const VERIFY_AFTER_EDIT_RULE: PromptRule = ruleFor("verify-after-edit", "R-VERIFY-AFTER-EDIT")
 
-/** SWE hidden-grader: local verification is DISABLED (the checkout lacks test deps; an
- *  automated grader runs hidden tests against the final source diff). Command-order form
- *  (Do-not / Do / Stop / Final) — an execution prompt wobbles less with prohibitions +
- *  route than with prose. NO-LEAK: the grader is named ONLY inside a forbid clause; there
- *  is never a "read the hidden test" directive. Active ⇒ `buildSystemPrompt` also
- *  suppresses the body's reproduce-required + completion-bar rules (which would contradict
- *  this). */
-export const GRADER_ONLY_RULE: PromptRule = {
-  id: "R-GRADER-ONLY",
-  lines: [
-    "- [R-GRADER-ONLY] SWE hidden-grader mode. An automated grader runs hidden tests",
-    "  against ONLY your final source diff; local verification is intentionally disabled.",
-    "  Do NOT: run the test suite / pytest / tox / any broad or dependency-install command",
-    "  (this checkout lacks test deps — they fail spuriously and only waste turns); create,",
-    "  edit, or delete tests, docs, lockfiles, or fixtures; use destructive git (checkout /",
-    "  reset / clean / stash / restore); claim \"verified / passing / green / done\" when no",
-    "  permitted check ran; seek any hidden, grader, or reference test.",
-    "  Do: read the source before editing; confirm the owning code path by the strongest",
-    "  available evidence (lsp_definition / references when reliable, else source reads +",
-    "  narrow grep — do not block a small patch just because LSP is unavailable); infer the",
-    "  EXACT required behavior (signature, message, return value, edge cases) from the public",
-    "  issue and match it precisely; make the smallest isolated source-only change.",
-    "  Stop when: the minimal source patch is applied.",
-    "  Final: state files changed, behavior changed, and \"verification: not run — hidden-",
-    "  grader mode forbids local tests; the grader runs them.\" Do not overclaim.",
-  ],
-}
+/** SWE hidden-grader: local verification is DISABLED. NO-LEAK: the grader is named
+ *  only inside a forbid clause. Active ⇒ `buildSystemPrompt` also suppresses the
+ *  body's reproduce-required + completion-bar blocks (Phase 2 body migration). */
+export const GRADER_ONLY_RULE: PromptRule = ruleFor("grader-only", "R-GRADER-ONLY")
 
 /** Flatten the selected verify strategy to the line array `buildSystemPrompt`
- *  splices as the third slot. Absent ⇒ `[]` (no lines, byte-identical). */
+ *  splices as the third slot — DERIVED from the atom graph via `matches()`, NOT
+ *  a list switch. Absent ⇒ `[]` (no atom fires, byte-identical). */
 export const renderVerifyStrategy = (strategy: VerifyStrategy | undefined): readonly string[] => {
-  switch (strategy) {
-    case undefined:
-      return []
-    case "reproduce-first":
-      return REPRODUCE_FIRST_RULE.lines
-    case "verify-after-edit":
-      return VERIFY_AFTER_EDIT_RULE.lines
-    case "grader-only":
-      return GRADER_ONLY_RULE.lines
-  }
+  if (strategy === undefined) return []
+  return renderAtoms(VERIFY_ATOMS, verifyCtx(strategy))
 }
