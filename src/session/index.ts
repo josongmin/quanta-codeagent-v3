@@ -92,6 +92,10 @@ export {
 // ADR-0157: FS adapter (Bun.file/Bun.write).
 export { exportSessionToFile, importSessionFromFile } from "./import-export-fs"
 export { listSessions, removeFromIndex, upsertMeta } from "./index-store"
+// WS-1 (jul-11) — unified session-attach SSOT (CLI /fork switch + web open-thread
+// swap both compose it; one crown-ordered guard, surfaces inject effects).
+export type { AttachOutcome, AttachSessionDeps } from "./attach-session"
+export { attachSessionToLive } from "./attach-session"
 export {
   archivedFilePath,
   archivedFilePathAsync,

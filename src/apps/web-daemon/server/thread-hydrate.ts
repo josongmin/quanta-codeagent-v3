@@ -21,12 +21,12 @@
  */
 
 import type { Message } from "@/llm"
-import { errMessage } from "@/shared"
+import { attachSessionToLive, type SessionMeta } from "@/session"
 
 export interface ThreadHydrateDeps {
   readonly loadThread: (
     id: string,
-  ) => Promise<{ readonly messages: readonly Message[] } | undefined>
+  ) => Promise<{ readonly meta: SessionMeta; readonly messages: readonly Message[] } | undefined>
   readonly replaceTranscript: (messages: readonly Message[]) => Promise<void>
   readonly setActiveThreadId: (id: string) => void
 }
@@ -36,23 +36,32 @@ export type ThreadHydrateOutcome =
   | { readonly kind: "unknown-thread"; readonly threadId: string }
   | { readonly kind: "refused-mid-turn"; readonly threadId: string }
 
+/**
+ * Web adapter over the unified `attachSessionToLive` (WS-1). The crown ordering
+ * + mid-turn guard live in the core; this maps the daemon's void-returning
+ * `transcript.replace` + id-only persist cell onto it, and re-expresses the
+ * outcome in thread-vocabulary for the ws layer.
+ */
 export const hydrateThreadIntoLiveSession = async (
   threadId: string,
   deps: ThreadHydrateDeps,
 ): Promise<ThreadHydrateOutcome> => {
-  const saved = await deps.loadThread(threadId)
-  if (saved === undefined) return { kind: "unknown-thread", threadId }
-  try {
-    await deps.replaceTranscript(saved.messages)
-  } catch (error) {
-    // The kernel refuses a transcript replace WHILE a turn runs — that is a
-    // clean "try again after the turn", not a failure. Repoint nothing.
-    if (/transcript_replace_unavailable/.test(errMessage(error))) {
+  const outcome = await attachSessionToLive(threadId, {
+    loadSession: deps.loadThread,
+    replaceTranscript: async (messages) => {
+      await deps.replaceTranscript(messages)
+      return messages
+    },
+    // The daemon repoints by thread id only (the activeThreadId cell); the
+    // core's `meta` is unused here (no per-connection SessionMeta identity).
+    setPersistTarget: ({ id }) => deps.setActiveThreadId(id),
+  })
+  switch (outcome.kind) {
+    case "attached":
+      return { kind: "hydrated", threadId, count: outcome.messageCount }
+    case "unknown-session":
+      return { kind: "unknown-thread", threadId }
+    case "refused-mid-turn":
       return { kind: "refused-mid-turn", threadId }
-    }
-    throw error
   }
-  // Replace succeeded ⇒ future persist writes belong to the opened thread.
-  deps.setActiveThreadId(threadId)
-  return { kind: "hydrated", threadId, count: saved.messages.length }
 }

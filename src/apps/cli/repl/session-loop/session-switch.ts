@@ -25,7 +25,7 @@
  */
 
 import type { Message } from "@/llm"
-import type { SessionMeta } from "@/session"
+import { attachSessionToLive, type SessionMeta } from "@/session"
 
 /** Receipt the switch hands back to `/fork` so the printed copy states
  *  EXACTLY what the next persist will do (effect-receipt discipline). */
@@ -69,30 +69,46 @@ export const repointSessionMeta = (target: SessionMeta, next: SessionMeta): void
   Object.assign(t, n)
 }
 
-/** See module doc. Throws on any failure BEFORE mutating anything live. */
+/**
+ * CLI adapter over the unified `attachSessionToLive` (WS-1). The crown ordering
+ * (load → guarded swap → commit → repoint) + the mid-turn guard live in the
+ * core; this injects the REPL's surface commit (`onReplaced`) and the
+ * facade-aliased in-place persist repoint (`setPersistTarget`), then maps the
+ * core outcome onto the printed effect-receipt. Preserves the legacy throw
+ * contract: unknown ⇒ "session not found on disk", mid-turn ⇒
+ * "transcript_replace_unavailable" (both propagate to `/fork` for honest copy).
+ */
 export const performSessionSwitch = async (
   deps: SessionSwitchDeps,
   newSessionId: string,
 ): Promise<SessionSwitchReceipt> => {
-  const saved = await deps.loadSession(newSessionId)
-  if (saved === undefined) {
-    throw new Error(`session not found on disk: ${newSessionId}`)
-  }
-  // Kernel swap FIRST — its mid-turn guard (transcript_replace_unavailable)
-  // is the refusal seam; a throw here leaves surface state + idMeta untouched.
-  const nextHistory = await deps.replaceTranscript(saved.messages)
-  deps.commit({ sessionId: newSessionId, history: nextHistory })
-  if (deps.idMeta !== undefined) {
-    repointSessionMeta(deps.idMeta, saved.meta)
-    return {
-      sessionId: newSessionId,
-      persistTarget: "fork-id",
-      persistNote: `future turns persist under the fork (${newSessionId}); the parent transcript on disk is untouched`,
-    }
-  }
-  return {
-    sessionId: newSessionId,
-    persistTarget: "unchanged",
-    persistNote: `live history swapped; this surface has no id-mode persistence — run \`quanta --resume ${newSessionId}\` to continue the fork durably`,
+  const outcome = await attachSessionToLive(newSessionId, {
+    loadSession: deps.loadSession,
+    replaceTranscript: deps.replaceTranscript,
+    onReplaced: ({ sessionId, history }) => deps.commit({ sessionId, history }),
+    // In-place mirror onto the facade-aliased SessionMeta (the aliasing is the
+    // persist-repoint mechanism); no-op when this surface has no id-mode meta.
+    setPersistTarget: ({ meta }) => {
+      if (deps.idMeta !== undefined) repointSessionMeta(deps.idMeta, meta)
+    },
+  })
+  switch (outcome.kind) {
+    case "unknown-session":
+      throw new Error(`session not found on disk: ${newSessionId}`)
+    case "refused-mid-turn":
+      throw new Error("transcript_replace_unavailable")
+    case "attached":
+      if (deps.idMeta !== undefined) {
+        return {
+          sessionId: newSessionId,
+          persistTarget: "fork-id",
+          persistNote: `future turns persist under the fork (${newSessionId}); the parent transcript on disk is untouched`,
+        }
+      }
+      return {
+        sessionId: newSessionId,
+        persistTarget: "unchanged",
+        persistNote: `live history swapped; this surface has no id-mode persistence — run \`quanta --resume ${newSessionId}\` to continue the fork durably`,
+      }
   }
 }

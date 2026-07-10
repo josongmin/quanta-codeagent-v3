@@ -11,15 +11,24 @@
 import { describe, expect, test } from "bun:test"
 import { hydrateThreadIntoLiveSession } from "@/apps/web-daemon/server/thread-hydrate"
 import type { Message } from "@/llm"
+import type { SessionMeta } from "@/session"
 
 const msgs: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }] } as never]
+const meta = (id: string): SessionMeta => ({
+  id,
+  title: id,
+  cwd: "/repo",
+  createdAt: 0,
+  lastTouched: 0,
+  archived: false,
+})
 
 describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
   test("persisted thread: replaces transcript + repoints the persist id", async () => {
     const replaced: (readonly Message[])[] = []
     let active: string | null = null
     const out = await hydrateThreadIntoLiveSession("t-abc", {
-      loadThread: async (id) => (id === "t-abc" ? { messages: msgs } : undefined),
+      loadThread: async (id) => (id === "t-abc" ? { meta: meta("t-abc"), messages: msgs } : undefined),
       replaceTranscript: async (m) => void replaced.push(m),
       setActiveThreadId: (id) => (active = id),
     })
@@ -44,7 +53,7 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
   test("mid-turn: transcript_replace_unavailable ⇒ REFUSED, live state untouched", async () => {
     let active: string | null = null
     const out = await hydrateThreadIntoLiveSession("t-mid", {
-      loadThread: async () => ({ messages: msgs }),
+      loadThread: async () => ({ meta: meta("t"), messages: msgs }),
       replaceTranscript: async () => {
         throw new Error("transcript_replace_unavailable")
       },
@@ -57,7 +66,7 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
   test("a non-guard error propagates (never silently swallowed)", async () => {
     await expect(
       hydrateThreadIntoLiveSession("t-x", {
-        loadThread: async () => ({ messages: msgs }),
+        loadThread: async () => ({ meta: meta("t"), messages: msgs }),
         replaceTranscript: async () => {
           throw new Error("disk exploded")
         },
