@@ -1,47 +1,18 @@
 /**
- * WS-G item 11 (UUX-6-22) — live MCP server-health registry for the lifecycle
- * pill.
+ * WS-G item 11 (UUX-6-22) — CLI lifecycle-pill overlay over the surface-neutral
+ * MCP health registry.
  *
- * The MCP pill used to be BOOT-ONCE (bootstrap derived `[mcp: ✓ …]` from the
- * bridged tools exactly once), so a server dying mid-session stayed ✓ forever.
- * This holder is the tiny mutable seam between the two ends:
- *
- *   - WRITERS: the `loadMcpTools` callbacks the CLI wires in
- *     `internal/mcp.ts#buildMcpLoadOpts` — `onServerExit` (mid-session death,
- *     single-client path) and `onServerLoadError` (never came up).
- *   - READER: `repl/surface-compose/turn-sinks.ts#flushLifecyclePills`
- *     re-derives the pill per flush and overlays this registry via
- *     {@link overlayServerHealth}.
- *
- * Names: pill rows are keyed by the SANITIZED server slot of the bridged tool
- * name (`mcp__<sanitized>__<tool>`, see `agent/mcp-bridge.ts#mcpToolName`),
- * while the callbacks report the RAW config name — {@link sanitizeServerKey}
- * is the same lockstep sanitizer `repl/mcp-surface-wire.ts` uses so the two
- * sides join. Chrome-only: this never gates a tool call.
+ * The holder itself (`McpHealthHolder` / `createMcpHealthHolder` /
+ * `sanitizeServerKey`) was promoted to `@/host/mcp-health` (P4, jul-11) so the
+ * web daemon shares it; this module re-exports it for the CLI's existing import
+ * sites AND keeps the pill-render overlay (`overlayServerHealth`), which is
+ * terminal-only (`McpPillServer`-coupled) and therefore stays on the CLI surface.
  */
 
+import { createMcpHealthHolder, type McpHealthHolder, sanitizeServerKey } from "@/host/mcp-health"
 import type { McpPillServer } from "./lifecycle-pills"
 
-/** Sanitize a config server name the same way `mcpToolName` does (kept in
- *  lockstep with `repl/mcp-surface-wire.ts#sanitizeServerKey`). */
-const sanitizeServerKey = (name: string): string => name.replace(/[^A-Za-z0-9_]+/g, "_")
-
-export interface McpHealthHolder {
-  /** Record `server` (RAW config name) as down. Last reason wins. */
-  markDown(server: string, reason?: string): void
-  /** Sanitized-name → reason map of every server marked down this session. */
-  downServers(): ReadonlyMap<string, string | undefined>
-}
-
-export const createMcpHealthHolder = (): McpHealthHolder => {
-  const down = new Map<string, string | undefined>()
-  return {
-    markDown: (server, reason) => {
-      down.set(sanitizeServerKey(server), reason)
-    },
-    downServers: () => down,
-  }
-}
+export { createMcpHealthHolder, type McpHealthHolder, sanitizeServerKey }
 
 /** Overlay the down-registry onto a freshly-derived pill server list:
  *  a derived row whose (sanitized) name is in the registry flips to `down`;

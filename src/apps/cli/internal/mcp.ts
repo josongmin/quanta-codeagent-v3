@@ -22,6 +22,7 @@ import {
   TrustStore,
 } from "@/config"
 import type { FetchPort, TokenRecord, TokenStorePort } from "@/connectors"
+import type { McpHealthHolder } from "@/host/mcp-health"
 import {
   buildMcpOAuthWiring,
   buildRootsWiring,
@@ -56,7 +57,6 @@ import {
   type ResourcesHandle,
   type Tool,
 } from "@/tool"
-import type { McpHealthHolder } from "../mcp-health"
 
 /**
  * ADR-0024 split — the CLI's MCP plumbing (auto-restart supervisor deps, the
