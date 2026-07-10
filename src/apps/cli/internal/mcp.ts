@@ -355,6 +355,17 @@ export const readMcpConfig = async (
       slog.warn("mcp.governance.dropped", { server: d.name, reason: d.reason })
     return [...kept]
   }
+  // UUX-4-14 — `/mcp disable <server>` writes `disabled: true` into THIS file
+  // (write-through SSOT); the loader honors it here for BOTH formats. Skips
+  // are slog'd (observable governance — never a silent disappearance).
+  const dropDisabled = <T>(
+    entries: readonly (readonly [string, T])[],
+  ): readonly (readonly [string, T])[] =>
+    entries.filter(([name, spec]) => {
+      const off = (spec as { disabled?: unknown }).disabled === true
+      if (off) slog.info("mcp.config.disabled", { server: name })
+      return !off
+    })
   const path = resolveMcpConfigPath(envSource)
   if (!path) return []
   try {
@@ -363,13 +374,17 @@ export const readMcpConfig = async (
     const pluginStyle = MCPRootSchema.safeParse(parsed)
     if (pluginStyle.success) {
       return applyPolicy(
-        Object.entries(pluginStyle.data.mcpServers).map(([name, spec]) =>
+        dropDisabled(Object.entries(pluginStyle.data.mcpServers)).map(([name, spec]) =>
           pluginSpecToServerConfig(name, spec),
         ),
       )
     }
     const legacy = parsed as { servers?: McpServerConfig[] }
-    if (Array.isArray(legacy.servers)) return applyPolicy(legacy.servers)
+    if (Array.isArray(legacy.servers)) {
+      return applyPolicy(
+        dropDisabled(legacy.servers.map((s) => [s.name, s] as const)).map(([, s]) => s),
+      )
+    }
     slog.warn("mcp.config.error", {
       path,
       error: "expected {servers:[...]} or {mcpServers:{...}}",

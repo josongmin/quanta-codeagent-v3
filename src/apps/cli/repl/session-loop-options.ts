@@ -75,6 +75,11 @@ export const buildSessionLoopOptions = async (deps: {
     // ADR-0292 — turn-end record + restore swap (null ⇒ loop short-circuits).
     convCheckpointWire: wires.convCheckpointWire,
     registerReplaceMessages: wires.setReplaceMessages,
+    // UUX-4-07 — `/fork` switch install slot (absent when no id-mode rewind
+    // state was built ⇒ the loop never installs ⇒ mint-and-stay behavior).
+    ...(wires.setSwitchSession !== undefined
+      ? { registerSessionSwitch: wires.setSwitchSession }
+      : {}),
     registerSideConversationStart: wires.setSideConversationStart,
     registerPlanQueueSendNow: wires.setPlanQueueSendNow,
     // B2 (jul-04) — the loop installs the live `/cron` automation slash slot via

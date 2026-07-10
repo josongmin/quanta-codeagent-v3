@@ -46,6 +46,7 @@ import {
 } from "@/session"
 import { errMessage } from "@/shared"
 import { applyLiveHistorySwap, BOLD_RED, confirmYesHint, RESET } from "./live-history-swap"
+import type { SessionSwitchReceipt } from "./repl/session-loop/session-switch"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 /* ------------------------------------------------------------------ */
 /* SlashContext extension                                              */
@@ -69,6 +70,16 @@ export interface RewindSlashState {
    *  dropped messages. Absent (non-REPL surface / legacy shape) ⇒ the
    *  command's prior disk-only behavior is byte-identical. */
   readonly replaceMessages?: (msgs: ReadonlyArray<Message>) => Promise<void>
+  /** UUX-4-07 — live session-switch hook (see `./repl/session-switch-wire.ts`).
+   *  When present, a successful `/fork` SWITCHES the operator onto the fork:
+   *  the loop swaps the kernel transcript to the fork's messages (the
+   *  reducer's `transcript_replace_unavailable` guard refuses mid-turn) and
+   *  repoints the id-mode persist identity so future turns persist under the
+   *  fork id. Rejections PROPAGATE — `/fork` prints the honest disk-vs-live
+   *  split and exits 1 instead of claiming a switch that did not happen.
+   *  Absent (non-REPL / legacy surface) ⇒ `/fork` keeps its prior
+   *  mint-and-stay behavior byte-identical. */
+  readonly switchSession?: (sessionId: string) => Promise<SessionSwitchReceipt>
 }
 
 declare module "./slash-commands" {
@@ -537,20 +548,40 @@ const forkCmdImpl: SlashCommand = {
       return 0
     }
 
+    let result: Awaited<ReturnType<typeof forkSessionAtMessage>>
     try {
       const forkOpts: Parameters<typeof forkSessionAtMessage>[0] = {
         fromSessionId: state.sessionId,
         atMessageId: parsed.idPrefix,
         ...(parsed.title !== undefined ? { newTitle: parsed.title } : {}),
       }
-      const result = await forkSessionAtMessage(forkOpts)
+      result = await forkSessionAtMessage(forkOpts)
+    } catch (e) {
+      // Disk-fork failure ⇒ nothing live was touched (the switch below never
+      // runs) — the honest failure is the whole story.
+      ctx.err(`/fork: ${errMessage(e)}\n`)
+      return 1
+    }
+    // UUX-4-07 — switch the LIVE session onto the fork when the surface wired
+    // the seam. Effect-receipt discipline: the "now editing" copy prints ONLY
+    // after the switch resolved. Absent seam ⇒ prior copy byte-identical.
+    if (state.switchSession === undefined) {
       ctx.out(
         `forked at ${shortId(result.forkedAtMessageId)} → new session ${result.newSessionId} (${result.messageCount} messages)\n`,
       )
       return 0
+    }
+    try {
+      const receipt = await state.switchSession(result.newSessionId)
+      ctx.out(
+        `forked at ${shortId(result.forkedAtMessageId)} → new session ${result.newSessionId} (${result.messageCount} messages)\n`,
+      )
+      ctx.out(`now editing fork ${result.newSessionId} — ${receipt.persistNote}\n`)
+      return 0
     } catch (e) {
-      const msg = errMessage(e)
-      ctx.err(`/fork: ${msg}\n`)
+      ctx.err(
+        `/fork: fork ${result.newSessionId} was created on disk, but switching the live session failed: ${errMessage(e)} — live history unchanged; run \`quanta --resume ${result.newSessionId}\` to pick up the fork\n`,
+      )
       return 1
     }
   },

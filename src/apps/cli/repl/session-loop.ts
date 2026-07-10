@@ -17,6 +17,7 @@ import type {
   RuntimeSideConversationArgs,
   RuntimeSideConversationResult,
 } from "@/sdk/runtime"
+import { loadSessionById } from "@/session"
 import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { readCliKnob } from "../cli-knobs-accessor"
@@ -37,6 +38,7 @@ import {
 import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
 import { maybeCreatePromptSuggestionWire } from "./prompt-suggestion-wire"
 import { normalizeCliPromptInput } from "./prompt-types"
+import { performSessionSwitch, type SessionSwitchReceipt } from "./session-loop/session-switch"
 import {
   buildPromptPipelineNotifyDeps,
   drainTurnImages,
@@ -134,6 +136,14 @@ export interface RunSessionLoopDeps {
    *  interactive driver starts. Absent ⇒ `/rewind-conv` restore still
    *  succeeds against the store but the surface transcript stays stale. */
   readonly registerReplaceMessages?: (fn: (msgs: ReadonlyArray<Message>) => Promise<void>) => void
+  /** UUX-4-07 — `/fork` switch install slot (mirrors registerReplaceMessages).
+   *  The loop installs `performSessionSwitch` bound to its live kernel session,
+   *  its surface-state binding, and the facade-aliased `SessionMeta` (see
+   *  `./session-loop/session-switch.ts` for the persist-repoint mechanism).
+   *  Absent ⇒ `/fork` keeps mint-and-stay behavior (byte-identical). */
+  readonly registerSessionSwitch?: (
+    fn: (sessionId: string) => Promise<SessionSwitchReceipt>,
+  ) => void
   /** Runtime-owned `/side` starter slot. The loop installs the live session
    *  method once the runtime session exists; slash surfaces read it lazily at
    *  invocation time so they never capture a stale or pre-session closure. */
@@ -254,6 +264,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     registerExitTeardown,
     convCheckpointWire,
     registerReplaceMessages,
+    registerSessionSwitch,
     registerSideConversationStart,
     registerPlanQueueSendNow,
     registerAutomationSlash,
@@ -505,6 +516,38 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
   }
   installHistoryReplaceWire()
 
+  // UUX-4-07 — install the `/fork` switch closure. THROWS propagate to `/fork`
+  // (fail-loud): the kernel reducer's `transcript_replace_unavailable` guard
+  // refuses a mid-turn switch, and any earlier failure leaves surface state +
+  // the persist identity untouched (ordering pinned in session-switch tests).
+  // `idMeta` is the SAME object reference the facade persists through
+  // (`createRuntimeFacade` above) — `performSessionSwitch` repoints it in
+  // place so the NEXT persist writes under the fork id, never clobbering the
+  // parent transcript with the fork's truncated history.
+  const installSessionSwitchWire = (): void => {
+    if (registerSessionSwitch === undefined) return
+    registerSessionSwitch(
+      async (newSessionId: string): Promise<SessionSwitchReceipt> =>
+        await performSessionSwitch(
+          {
+            loadSession: loadSessionById,
+            replaceTranscript: async (msgs) => {
+              const result = await session.transcript.replace(msgs, undefined, {
+                signal: abort.signal,
+              })
+              return result.transcript?.messages ?? [...msgs]
+            },
+            idMeta,
+            commit: ({ sessionId, history }) => {
+              surfaceState = updateSessionState(surfaceState, { sessionId, history })
+            },
+          },
+          newSessionId,
+        ),
+    )
+  }
+  installSessionSwitchWire()
+
   // ADR-0292 — turn-end record helper. No-op when the wire is null/absent so
   // the legacy code path is byte-identical (RFC §1.2). Defensive try/catch so
   // a misbehaving store NEVER bubbles into the loop.
@@ -588,8 +631,12 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       // off THIS env, never an ambient literal below the surface.
       env: process.env,
       // ADR-0528 — crash-resume marker for the durable (id-mode) session;
-      // gate-gated + no-op when the session id is absent/ephemeral.
-      ...(setup.sessionId !== undefined ? { sessionId: setup.sessionId } : {}),
+      // gate-gated + no-op when the session id is absent/ephemeral. Read from
+      // the LIVE surface state (not the boot snapshot) so a `/fork` switch
+      // (UUX-4-07) moves the marker onto the fork; byte-identical otherwise
+      // (surfaceState.sessionId is seeded from setup.sessionId and only ever
+      // reassigned by the switch closure).
+      ...(surfaceState.sessionId !== undefined ? { sessionId: surfaceState.sessionId } : {}),
       // host concern — absent cycle ⇒ no hook ⇒ byte-identical.
       ...(modeCycle !== undefined
         ? {

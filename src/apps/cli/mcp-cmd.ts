@@ -6,6 +6,10 @@
  *   - `/mcp tools`         → every bridged tool across all servers
  *   - `/mcp tools <name>`  → tools belonging to one server only
  *   - `/mcp config`        → current MCP config file path + raw contents
+ *   - `/mcp enable <s>`    → clear `disabled` on `<s>` IN THE CONFIG FILE
+ *   - `/mcp disable <s>`   → set `disabled: true` on `<s>` in the config file
+ *   - `/mcp reload [s]`    → honest exit-2: no live MCP reload seam exists;
+ *                            config changes take effect next session
  *
  * Slice discipline: this file lives in `src/apps/cli` and is allowed to
  * import `@/ui/ui-helpers` for rendering. It does NOT import `@/mcp` directly
@@ -14,10 +18,14 @@
  * (no live client / spawn required) and lets future surfaces (Tauri/Web)
  * supply the same shape without dragging an MCP transport into their slice.
  *
- * Read-only: this command never starts/stops a server, never edits the
- * config file, never calls a tool. It is purely an introspector — the
- * lifecycle pills audit found no live health probe and we deliberately do
- * not add one here.
+ * Lifecycle (UUX-4-14): `enable`/`disable` WRITE THROUGH to the config file
+ * the loader reads — pure read-modify-write (unknown fields preserved,
+ * atomic tmp+rename, concurrent-edit mtime guard), never an in-memory
+ * mutation that could diverge from the file. There is NO safe live-reload
+ * seam in this surface (the bridged tools are baked into the runtime
+ * registry at boot and `McpStoppable` handles are unnamed), so `reload` —
+ * and the enable/disable receipts — say honestly that changes take effect
+ * next session. The command never calls a tool.
  *
  * Render contract: every styled token goes through `@/ui/ui-helpers` so
  * `setColorPolicy("off")` (or NO_COLOR) yields plain ASCII byte-identical
@@ -30,9 +38,11 @@
  */
 
 import { existsSync } from "node:fs"
-import { readFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import { errMessage } from "@/shared"
 import { bold, cyan, dim, green, red, renderBox, yellow } from "@/ui/ui-helpers"
+import { applyMcpServerToggle, type McpToggleAction, writeMcpConfigAtomic } from "./mcp-config-rmw"
+import { NOT_WIRED_EXIT, notWired } from "./not-wired"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 /* ------------------------------------------------------------------ */
 /* Surface contract                                                    */
@@ -421,12 +431,119 @@ const runMcpLogin = async (ctx: SlashContext, rest: readonly string[]): Promise<
   return 0
 }
 
+/* ------------------------------------------------------------------ */
+/* /mcp enable|disable <server>  (UUX-4-14 — write-through)             */
+/* ------------------------------------------------------------------ */
+
+/** One line of honest posture shared by every write receipt: the loader reads
+ *  the config ONCE at boot, so a write can only take effect next session. */
+const NEXT_SESSION_NOTE =
+  "takes effect next session (MCP config is loaded once at boot; no live reload in this surface)"
+
+/** Resolve the config path or print the not-wired posture (exit 2). */
+const requireConfigPath = (ctx: SlashContext, feature: string): string | number => {
+  const configPath = ctx.mcp?.configPath
+  if (configPath === undefined) {
+    return notWired(ctx.out, {
+      feature,
+      hint: "point QUANTA_MCP_CONFIG (or QUANTA_BROWSER_MCP_CONFIG) at your MCP config file",
+    })
+  }
+  return configPath
+}
+
+/** Render the honest refusal line for a failed toggle. Extracted from
+ *  {@link runMcpToggle} for the cognitive-complexity budget. Pure. */
+const renderToggleFailure = (
+  failure: Exclude<ReturnType<typeof applyMcpServerToggle>, { ok: true }>,
+  info: { action: McpToggleAction; server: string; configPath: string },
+): string => {
+  if (failure.reason === "parse") {
+    return `/mcp ${info.action}: ${info.configPath} is not valid JSON (comments/JSONC?) — refusing to rewrite it: ${failure.detail ?? ""}\n`
+  }
+  if (failure.reason === "unknown-server") {
+    const known = (failure.known ?? []).join(", ")
+    return `/mcp ${info.action}: unknown server '${info.server}'${known.length > 0 ? ` (config declares: ${known})` : ""}\n`
+  }
+  return `/mcp ${info.action}: unrecognized config shape in ${info.configPath} (expected {servers:[...]} or {mcpServers:{...}}) — file left untouched\n`
+}
+
+/** `enable <s>` / `disable <s>` — read-modify-write the loader's config file.
+ *  The FILE is the SSOT: unknown server names are checked against the file
+ *  (not the boot snapshot — a disabled server is absent from the snapshot by
+ *  design), and NO in-memory state is touched. */
+const runMcpToggle = async (
+  ctx: SlashContext,
+  action: McpToggleAction,
+  rest: readonly string[],
+): Promise<number> => {
+  if (rest.length !== 1) {
+    ctx.err(`/mcp ${action}: usage: /mcp ${action} <server>\n`)
+    return 1
+  }
+  const server = rest[0] as string
+  const configPath = requireConfigPath(ctx, `/mcp ${action}`)
+  if (typeof configPath === "number") return configPath
+  let raw: string
+  let readAtMs: number
+  try {
+    const st = await stat(configPath)
+    readAtMs = st.mtimeMs
+    raw = await readFile(configPath, "utf8")
+  } catch (e) {
+    ctx.err(`/mcp ${action}: cannot read ${configPath}: ${errMessage(e)}\n`)
+    return 1
+  }
+  const toggled = applyMcpServerToggle(raw, server, action)
+  if (!toggled.ok) {
+    ctx.err(renderToggleFailure(toggled, { action, server, configPath }))
+    return 1
+  }
+  if (!toggled.changed) {
+    ctx.out(`/mcp ${action}: '${server}' is already ${action}d — file untouched\n`)
+    return 0
+  }
+  const written = await writeMcpConfigAtomic(configPath, toggled.next, readAtMs)
+  if (!written.ok) {
+    ctx.err(`/mcp ${action}: not written: ${written.detail ?? written.reason}\n`)
+    return 1
+  }
+  ctx.out(`${green("✓")} '${server}' ${action}d in ${configPath} — ${NEXT_SESSION_NOTE}\n`)
+  ctx.out(
+    `${dim("note: read-modify-write — a concurrent edit landing between read and write wins last.")}\n`,
+  )
+  return 0
+}
+
+/* ------------------------------------------------------------------ */
+/* /mcp reload [server]  (UUX-4-14 — honest half)                       */
+/* ------------------------------------------------------------------ */
+
+/** No safe live-reload seam exists: the bridged tools are baked into the
+ *  runtime registry at facade creation and the `McpStoppable` handles carry
+ *  no server identity — tearing one down and re-bridging its tools into the
+ *  LIVE session is not reachable from this surface. Honest exit-2 instead of
+ *  a fake success (the config half — enable/disable — did ship). */
+const runMcpReload = (ctx: SlashContext, rest: readonly string[]): number => {
+  if (rest.length > 1) {
+    ctx.err("/mcp reload: usage: /mcp reload [server]\n")
+    return 1
+  }
+  const target = rest.length === 1 ? ` for '${rest[0]}'` : ""
+  ctx.out(`/mcp reload: live reload${target} is not available in this surface\n`)
+  ctx.out(`hint: the config on disk is already authoritative — it ${NEXT_SESSION_NOTE}\n`)
+  ctx.out(`hint: restart (or \`quanta --resume <session-id>\`) to apply it\n`)
+  return NOT_WIRED_EXIT
+}
+
 export const runMcpRender = async (args: readonly string[], ctx: SlashContext): Promise<number> => {
   if (args.length === 0) return runMcpList(ctx)
   const sub = args[0] as string
   const rest = args.slice(1)
   if (sub === "tools") return runMcpTools(ctx, rest)
   if (sub === "login") return runMcpLogin(ctx, rest)
+  if (sub === "enable" || sub === "disable") return runMcpToggle(ctx, sub, rest)
+  if (sub === "reload") return runMcpReload(ctx, rest)
   if (sub === "config") {
     if (rest.length > 0) {
       ctx.err("/mcp config: takes no arguments\n")
@@ -434,14 +551,16 @@ export const runMcpRender = async (args: readonly string[], ctx: SlashContext): 
     }
     return runMcpConfig(ctx)
   }
-  ctx.err(`/mcp: unknown sub-command '${sub}' (valid: tools | login | config)\n`)
+  ctx.err(
+    `/mcp: unknown sub-command '${sub}' (valid: tools | login | config | enable | disable | reload)\n`,
+  )
   return 1
 }
 
 export const mcpCmd: SlashCommand = {
   name: "/mcp",
   describe:
-    "Inspect/auth MCP servers: /mcp | /mcp tools [server] | /mcp login <server> | /mcp config",
+    "Inspect/auth/manage MCP servers: /mcp | /mcp tools [server] | /mcp login <server> | /mcp config | /mcp enable|disable <server> | /mcp reload",
   category: "config",
   run: runMcpRender,
 }

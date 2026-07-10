@@ -76,4 +76,52 @@ describe("internal MCP config bridge", () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  // UUX-4-14 — `/mcp disable` writes `disabled: true` into the SAME file this
+  // loader reads; the loader must honor it (SSOT write-through) in BOTH formats.
+  test("readMcpConfig drops `disabled: true` servers (plugin format) and keeps the rest", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "q-mcp-disabled-"))
+    const file = join(dir, ".mcp.json")
+    try {
+      await writeFile(
+        file,
+        JSON.stringify({
+          mcpServers: {
+            off: { command: "node", args: ["off.js"], disabled: true },
+            on: { command: "node", args: ["on.js"] },
+          },
+        }),
+        "utf8",
+      )
+      const configs = await readMcpConfig(new StructuredLogger(), {
+        QUANTA_MCP_CONFIG: file,
+      })
+      expect(configs.map((c) => c.name)).toEqual(["on"])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("readMcpConfig drops `disabled: true` servers (legacy format); disabled absent ⇒ kept", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "q-mcp-disabled-legacy-"))
+    const file = join(dir, "quanta-mcp.json")
+    try {
+      await writeFile(
+        file,
+        JSON.stringify({
+          servers: [
+            { name: "off", command: ["bun", "off.ts"], disabled: true },
+            { name: "on", command: ["bun", "on.ts"] },
+          ],
+        }),
+        "utf8",
+      )
+      const configs = await readMcpConfig(new StructuredLogger(), {
+        QUANTA_MCP_CONFIG: file,
+      })
+      expect(configs.map((c) => c.name)).toEqual(["on"])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })

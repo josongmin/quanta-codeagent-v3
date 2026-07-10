@@ -56,6 +56,12 @@ export const MCPServerSpecSchema = z
     // the H18 bearer was never resolved (server 401). Honored only for an http
     // (`url`) server; harmless on stdio (no auth carrier).
     oauth: z.boolean().optional(),
+    // UUX-4-14 — `/mcp disable <server>` write-through marker. OPTIONAL and
+    // additive: absent ⇒ byte-identical parse. `true` ⇒ the loader skips the
+    // server (its config is preserved; only the launch is suppressed). Without
+    // this key the strict schema would HARD-REJECT a `.mcp.json` touched by
+    // `/mcp disable`, silently dropping EVERY server in the file.
+    disabled: z.boolean().optional(),
   })
   .strict()
   .refine(

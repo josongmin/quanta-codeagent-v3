@@ -783,6 +783,7 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
       registerExitTeardown: true,
       convCheckpointWire: true,
       registerReplaceMessages: true,
+      registerSessionSwitch: true,
       registerSideConversationStart: true,
       registerPlanQueueSendNow: true,
       registerAutomationSlash: true,

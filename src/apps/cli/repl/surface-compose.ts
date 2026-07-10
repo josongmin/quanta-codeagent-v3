@@ -62,6 +62,11 @@ import {
   type PlaybookTriggerSurfaceSeam,
 } from "./playbook-trigger-surface-seam"
 import type { SessionSetupResult } from "./session-setup"
+import {
+  createSessionSwitchWire,
+  overlayRewindState,
+  type SessionSwitchWire,
+} from "./session-switch-wire"
 import { buildSkillsCallback } from "./skills-surface"
 import { buildReplSlashCtx, type ReplSlashCtx } from "./slash-surface"
 import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./surface-compose/dispatch"
@@ -159,6 +164,10 @@ export interface ReplSurfaceWires {
    *  loop via a setter so the closure captures the loop-internal `let`
    *  history reference rather than the snapshot at compose time. */
   readonly setReplaceMessages: (fn: (msgs: ReadonlyArray<Message>) => Promise<void>) => void
+  /** UUX-4-07 — install the loop's `/fork` switch closure (mirrors
+   *  `setReplaceMessages`). Absent when the surface has no id-mode rewind
+   *  state (one-shot / legacy) ⇒ `/fork` keeps mint-and-stay behavior. */
+  readonly setSwitchSession?: SessionSwitchWire["setSwitchSession"]
   /** Runtime-owned `/side` starter slot. Installed by the loop once the live
    *  runtime session exists; until then `/side` keeps its historical
    *  "not wired" surface behavior. */
@@ -565,6 +574,12 @@ export const composeSurfaceWires = (
   const setReplaceMessages = (fn: (msgs: ReadonlyArray<Message>) => Promise<void>): void => {
     replaceMessages = fn
   }
+  // UUX-4-07 — `/fork` session-switch wire (late-install, fail-loud; see
+  // ./session-switch-wire.ts). Minted iff an id-mode rewind state exists.
+  const sessionSwitchWire =
+    state.rewindState !== undefined
+      ? createSessionSwitchWire(state.rewindState.sessionId)
+      : undefined
   const setSideConversationStart = (
     fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
   ): void => {
@@ -697,11 +712,12 @@ export const composeSurfaceWires = (
     // (QUANTA_BROWSER_NETWORK off) ⇒ `/browser-net` "not wired" (byte-identical).
     ...(browserNetHolder !== undefined ? { browserNet: () => browserNetHolder.get() } : {}),
     imageQueue: state.imageQueue,
-    // UUX-4-02 — hand `/rewind` the ONE live-history swap seam so a confirmed
-    // rewind updates the live REPL history, not just the on-disk transcript.
+    // UUX-4-02 + UUX-4-07 — hand `/rewind`/`/fork` the ONE live-history swap
+    // seam PLUS the session-switch seam + live `sessionId` getter (post-switch
+    // commands must address the fork — see overlayRewindState).
     rewindState:
-      state.rewindState !== undefined
-        ? { ...state.rewindState, replaceMessages: liveHistorySwap }
+      state.rewindState !== undefined && sessionSwitchWire !== undefined
+        ? overlayRewindState(state.rewindState, liveHistorySwap, sessionSwitchWire)
         : undefined,
     mcpSurface: setup.mcpSurface,
     costPanel: setup.costPanel,
@@ -940,6 +956,10 @@ export const composeSurfaceWires = (
     textInbox,
     runtimeFacadeCompose,
     setReplaceMessages,
+    // UUX-4-07 — present iff the session-switch wire was minted (id-mode).
+    ...(sessionSwitchWire !== undefined
+      ? { setSwitchSession: sessionSwitchWire.setSwitchSession }
+      : {}),
     setSideConversationStart,
     planQueueStore,
     setPlanQueueSendNow,
