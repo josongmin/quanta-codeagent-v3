@@ -34,3 +34,26 @@ describe("StatusBar — Stop (turn.cancel) affordance", () => {
     expect(markup).not.toContain("정지")
   })
 })
+
+describe("context warning (P2, UUX-4-18)", () => {
+  it("renders the warning chip at/above the CLI ratio", () => {
+    const markup = renderToStaticMarkup(
+      <StatusBar
+        connection={{ kind: "connected" }}
+        sessionStatus="idle"
+        contextUsage={{ total: 85, max: 100 }}
+      />,
+    )
+    expect(markup).toContain('data-testid="context-warning"')
+    expect(markup).toContain("85%")
+  })
+
+  it("renders NOTHING below the ratio or at unknown max", () => {
+    for (const usage of [{ total: 10, max: 100 }, { total: 999, max: 0 }, null]) {
+      const markup = renderToStaticMarkup(
+        <StatusBar connection={{ kind: "connected" }} sessionStatus="idle" contextUsage={usage} />,
+      )
+      expect(markup).not.toContain("context-warning")
+    }
+  })
+})

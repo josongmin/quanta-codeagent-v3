@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { cx } from "../lib/classnames"
+import { contextWarningLabel } from "../lib/context-warning"
 import type { ConnectionState, SessionStatus } from "../types/protocol"
 
 export interface StatusBarProps {
@@ -19,6 +20,10 @@ export interface StatusBarProps {
    * and the kernel handles the abort either way).
    */
   readonly onCancel?: () => void
+  /** P2 (jul-10, UUX-4-18) — latest context usage so the bar can warn near the
+   *  window ceiling (CLI parity; threshold lock-stepped in lib/context-warning).
+   *  Absent/unknown-max ⇒ no warning rendered. */
+  readonly contextUsage?: { readonly total: number; readonly max: number } | null
 }
 
 /** Exported predicate so the Stop-visibility contract is pinned in one place
@@ -38,7 +43,9 @@ export const StatusBar = ({
   sessionStatus,
   onRestartDaemon,
   onCancel,
+  contextUsage,
 }: StatusBarProps): JSX.Element => {
+  const contextWarning = contextWarningLabel(contextUsage ?? null)
   const [restarting, setRestarting] = useState(false)
   const showRestart =
     onRestartDaemon !== undefined &&
@@ -64,6 +71,14 @@ export const StatusBar = ({
       {sessionStatus !== null ? (
         <div className="rounded-full border border-line px-2 py-0.5 font-mono text-[11px] uppercase tracking-wider text-ink-tertiary">
           {sessionStatus}
+        </div>
+      ) : null}
+      {contextWarning !== null ? (
+        <div
+          data-testid="context-warning"
+          className="rounded-full border border-warn/40 px-2 py-0.5 text-[11px] text-warn"
+        >
+          {contextWarning}
         </div>
       ) : null}
       {onCancel !== undefined && isStoppableStatus(sessionStatus) ? (

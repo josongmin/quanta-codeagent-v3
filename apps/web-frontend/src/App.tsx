@@ -117,6 +117,8 @@ interface SessionChromeProps {
   readonly canRestartDaemon: boolean
   readonly onCancel?: () => void
   readonly onSetPermission?: (mode: string) => void
+  /** P2 (UUX-4-18) — latest context.usage frame for the StatusBar warning chip. */
+  readonly contextUsage: { readonly total: number; readonly max: number } | null
 }
 
 const getEnv = (key: "VITE_QUANTA_WS_URL" | "VITE_QUANTA_AUTH_TOKEN"): string | undefined => {
@@ -972,6 +974,7 @@ export const App = (): JSX.Element => {
         canRestartDaemon={canRestartDaemon}
         onCancel={sendCancel}
         onSetPermission={onSetPermission}
+        contextUsage={contextUsage}
       />
       {/* B2 — thread deeplink affordance + RESUME. Reads `?thread=`/`#thread=`
           (or a Tauri-forwarded `quanta://threads/{id}` postMessage) on load and
@@ -1095,6 +1098,7 @@ const SessionChrome = memo(
     canRestartDaemon,
     onCancel,
     onSetPermission,
+    contextUsage,
   }: SessionChromeProps): JSX.Element => {
     return (
       <>
@@ -1123,6 +1127,7 @@ const SessionChrome = memo(
             <StatusBar
               connection={connection}
               sessionStatus={sessionState?.status ?? null}
+              contextUsage={contextUsage}
               {...(canRestartDaemon ? { onRestartDaemon: restartDaemonViaTauri } : {})}
               {...(onCancel !== undefined ? { onCancel } : {})}
             />
