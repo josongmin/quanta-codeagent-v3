@@ -10,8 +10,10 @@ import { FakeLLM, baseConfig as harnessBaseConfig, NullStream } from "./_harness
 /**
  * ADR-0098 (AGENTS.md tree scoping + deeper-wins) — end-to-end wiring check.
  *
- * Verifies the §18.1 verbatim contract surfaces all the way into the per-turn
- * reminder block that the model actually sees:
+ * Verifies the §18.1 verbatim contract surfaces all the way into the TRUSTED,
+ * cached system section (`project_md`) the model actually sees — repo-local rules
+ * ride the cached authority block, NOT the untrusted per-turn reminder (jul-9
+ * sectioning; the layered RENDERING is unchanged, only the channel moved):
  *   1. A 3-level monorepo (root + packages + packages/foo) has all THREE
  *      AGENTS.md bodies rendered into the prompt.
  *   2. Render order is root → cwd so deeper-wins via LLM positional bias.
@@ -33,6 +35,16 @@ const reminderText = (messages: Message[]): string => {
   if (!tail || tail.role !== "user") return ""
   const block = tail.content[0]
   return block?.type === "text" ? block.text : ""
+}
+
+/** jul-9 sectioning: repo-local rules (incl. the ADR-0098 layered tree) ride the
+ *  TRUSTED, cached SYSTEM section (`project_md`), not the untrusted per-turn
+ *  reminder. Read the assembled system envelope FakeLLM saw. Mirrors the
+ *  `systemText` helper in sota-codex-full.test.ts. */
+const systemText = (system: FakeLLM["seenSystem"][number]): string => {
+  if (system === undefined) return ""
+  if (typeof system === "string") return system
+  return system.map((b) => b.text).join("\n")
 }
 
 const baseConfig = (overrides: Partial<AgentConfig> = {}): AgentConfig =>
@@ -62,7 +74,7 @@ describe("ADR-0098 AGENTS.md tree scoping — end-to-end prompt wiring", () => {
     rmSync(base, { recursive: true, force: true })
   })
 
-  test("3-level monorepo: all three AGENTS.md bodies appear in the per-turn reminder, shallow → deep", async () => {
+  test("3-level monorepo: all three AGENTS.md bodies appear in the cached system section, shallow → deep", async () => {
     await writeFile(join(base, "AGENTS.md"), "ROOT_RULE_root", "utf8")
     await mkdir(join(base, "packages"))
     await writeFile(join(base, "packages/AGENTS.md"), "PKG_RULE_packages", "utf8")
@@ -78,28 +90,33 @@ describe("ADR-0098 AGENTS.md tree scoping — end-to-end prompt wiring", () => {
     const out = await runAgent(baseConfig({ llm, cwd, repoRules: rules }))
     expect(out.reason).toBe("completed")
 
+    // Repo-local rules (incl. the ADR-0098 layered tree) ride the TRUSTED, cached
+    // system section (project_md), NOT the untrusted per-turn reminder (jul-9
+    // sectioning). The layered RENDERING is unchanged — only the channel moved.
+    const sys = systemText(llm.seenSystem[0])
     const reminder = reminderText(llm.seenMessages[0] ?? [])
+    expect(reminder).not.toContain("ROOT_RULE_root") // authority is NOT in the tail
 
     // All three bodies appear, shallow → deep (deeper-wins via positional bias).
-    const rootIdx = reminder.indexOf("ROOT_RULE_root")
-    const pkgsIdx = reminder.indexOf("PKG_RULE_packages")
-    const fooIdx = reminder.indexOf("FOO_RULE_foo")
+    const rootIdx = sys.indexOf("ROOT_RULE_root")
+    const pkgsIdx = sys.indexOf("PKG_RULE_packages")
+    const fooIdx = sys.indexOf("FOO_RULE_foo")
     expect(rootIdx).toBeGreaterThan(-1)
     expect(pkgsIdx).toBeGreaterThan(rootIdx)
     expect(fooIdx).toBeGreaterThan(pkgsIdx)
 
     // Per-layer attribution subheaders so the model can cite the source file
     // and a human auditor can trace any rule back to its origin.
-    expect(reminder).toContain("### From ../../AGENTS.md")
-    expect(reminder).toContain("### From ../AGENTS.md")
-    expect(reminder).toContain("### From ./AGENTS.md")
+    expect(sys).toContain("### From ../../AGENTS.md")
+    expect(sys).toContain("### From ../AGENTS.md")
+    expect(sys).toContain("### From ./AGENTS.md")
 
     // The §18.1 verbatim deeper-wins notice rides in the header — models that
     // don't read positional priority still see the rule explicitly.
-    expect(reminder).toContain("rules from deeper directories override shallower ones")
+    expect(sys).toContain("rules from deeper directories override shallower ones")
   })
 
-  test("mixed entrypoints (root AGENTS.md + sub CLAUDE.md) both ride into the reminder with the deeper-wins notice", async () => {
+  test("mixed entrypoints (root AGENTS.md + sub CLAUDE.md) both ride into the system section with the deeper-wins notice", async () => {
     await writeFile(join(base, "AGENTS.md"), "ROOT_AGENTS_BODY", "utf8")
     await mkdir(join(base, "sub"))
     await writeFile(join(base, "sub/CLAUDE.md"), "SUB_CLAUDE_BODY", "utf8")
@@ -114,15 +131,15 @@ describe("ADR-0098 AGENTS.md tree scoping — end-to-end prompt wiring", () => {
     const llm = new FakeLLM()
     await runAgent(baseConfig({ llm, cwd, repoRules: rules }))
 
-    const reminder = reminderText(llm.seenMessages[0] ?? [])
-    expect(reminder).toContain("ROOT_AGENTS_BODY")
-    expect(reminder).toContain("SUB_CLAUDE_BODY")
+    const sys = systemText(llm.seenSystem[0])
+    expect(sys).toContain("ROOT_AGENTS_BODY")
+    expect(sys).toContain("SUB_CLAUDE_BODY")
     // Root body precedes sub body (deeper-wins via positional bias).
-    expect(reminder.indexOf("ROOT_AGENTS_BODY")).toBeLessThan(reminder.indexOf("SUB_CLAUDE_BODY"))
+    expect(sys.indexOf("ROOT_AGENTS_BODY")).toBeLessThan(sys.indexOf("SUB_CLAUDE_BODY"))
     // The deeper-wins notice is present because >1 layer was loaded.
-    expect(reminder).toContain("rules from deeper directories override shallower ones")
+    expect(sys).toContain("rules from deeper directories override shallower ones")
     // The header still cites the deepest entrypoint as repo authority.
-    expect(reminder).toContain("(from CLAUDE.md;")
+    expect(sys).toContain("(from CLAUDE.md;")
   })
 
   test("single-layer (root only) preserves the legacy header — byte-identical for repos without monorepo scoping", async () => {
@@ -134,14 +151,14 @@ describe("ADR-0098 AGENTS.md tree scoping — end-to-end prompt wiring", () => {
     const llm = new FakeLLM()
     await runAgent(baseConfig({ llm, cwd: base, repoRules: rules }))
 
-    const reminder = reminderText(llm.seenMessages[0] ?? [])
-    expect(reminder).toContain("SINGLE_LAYER_BODY")
+    const sys = systemText(llm.seenSystem[0])
+    expect(sys).toContain("SINGLE_LAYER_BODY")
     // Legacy header is EXACTLY `(from AGENTS.md)` — no deeper-wins suffix when
     // there's only one layer. Asserted via the trailing close-paren followed by
     // a newline so a future suffix addition would have to flip this case too.
-    expect(reminder).toContain("## Repo-local rules (from AGENTS.md)\n")
-    expect(reminder).not.toContain("rules from deeper directories override shallower ones")
+    expect(sys).toContain("## Repo-local rules (from AGENTS.md)\n")
+    expect(sys).not.toContain("rules from deeper directories override shallower ones")
     // No `### From ./...` subheader either — single layer renders the raw body.
-    expect(reminder).not.toContain("### From ")
+    expect(sys).not.toContain("### From ")
   })
 })
