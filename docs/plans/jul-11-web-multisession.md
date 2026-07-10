@@ -115,6 +115,24 @@ scoped out (§Semantics). What the swap model delivers here is the load-bearing
 capability: any persisted thread can BECOME the one live session (model
 continuity) with an honest boundary.
 
+Second follow-up (boundary crispness): the REST `/events` boundary races the WS
+swap and usually lands first, so the banner may briefly under-report
+`live-attach` → `read-only-history`. This is honest-conservative (we trust the
+server value ⇒ never a FALSE live claim), but a crisp post-swap boundary wants
+the daemon to signal the swap OUTCOME (hydrated vs unknown-thread, from
+`hydrateThreadIntoLiveSession`) over the WS. Building a swap-ack frame for a soft
+banner would be over-engineering now; noted for when the multi-tenant surface
+lands.
+
+## Regression pins (self-audit, jul-11)
+The two seams both isolated-unit suites left vacuous, now pinned (red-on-injection
+witnessed on the repoint):
+- `transcript-persist-hellgate`: setActiveThreadId REPOINTS future writes + the
+  parent thread stays intact (the plan's §Riskiest step, previously untested E2E).
+- `App.resume-status` `armThreadSwapRedial`: the re-dial WIRE (disconnect BEFORE
+  connect, carrying `?thread`) — a dropped re-dial now fails, not silently reverts
+  to read-only replay.
+
 ## Semantics (honest)
 One human, one live session that swaps — like the CLI's `/fork`. All tabs share
 the one session, so a swap is daemon-wide (opening thread B moves everyone to B).
