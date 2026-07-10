@@ -32,7 +32,12 @@ import {
 } from "../prompt-body"
 import type { InstructionAtom } from "./types"
 
-const NOTICE = "notice.mode"
+// SAME section as the dynamic-content atoms (`atoms-dynamic.ts`): the reminder is
+// assembled by ONE `selectAtoms([...NOTICE_ATOMS, ...DYNAMIC_ATOMS])` call, and
+// `selectAtoms` sorts by (section, order) — so notices must share the dynamic
+// section for their `order` (104/106, between cwd=102 and directives=110) to
+// interleave correctly instead of section-grouping to the end.
+const NOTICE = "dynamic.reminder"
 const REMINDER = "message.system_reminder" as const
 
 /** The mode-notice consts are newline-joined strings (the wire shape
@@ -46,7 +51,7 @@ const PLAN_NOTICE_ATOM: InstructionAtom = {
   authority: "L5_mode",
   channel: REMINDER,
   section: NOTICE,
-  order: 10,
+  order: 104,
   when: { mode: ["plan"] },
   lines: toLines(PLAN_NOTICE),
   provenance: ["ADR-0211 mode notices"],
@@ -57,7 +62,7 @@ const REVIEW_NOTICE_ATOM: InstructionAtom = {
   authority: "L5_mode",
   channel: REMINDER,
   section: NOTICE,
-  order: 10,
+  order: 104,
   when: { mode: ["review"] },
   lines: toLines(REVIEW_NOTICE),
   provenance: ["ADR-0211 mode notices"],
@@ -68,7 +73,7 @@ const AUDIT_NOTICE_ATOM: InstructionAtom = {
   authority: "L5_mode",
   channel: REMINDER,
   section: NOTICE,
-  order: 10,
+  order: 104,
   when: { mode: ["audit"] },
   lines: toLines(AUDIT_NOTICE),
   provenance: ["ADR-0211 mode notices"],
@@ -82,7 +87,7 @@ const ARCHITECT_NOTICE_ATOM: InstructionAtom = {
   authority: "L5_mode",
   channel: REMINDER,
   section: NOTICE,
-  order: 10,
+  order: 104,
   when: { mode: ["architect"] },
   lines: toLines(ARCHITECT_NOTICE),
   provenance: ["ADR-0211 architect read-only posture"],
@@ -93,7 +98,7 @@ const EDITOR_NOTICE_ATOM: InstructionAtom = {
   authority: "L5_mode",
   channel: REMINDER,
   section: NOTICE,
-  order: 10,
+  order: 104,
   when: { mode: ["editor"] },
   lines: toLines(EDITOR_NOTICE),
   provenance: ["ADR-0211 editor minimal-diff posture"],
@@ -104,7 +109,7 @@ const BRIEF_NOTICE_ATOM: InstructionAtom = {
   authority: "L5_mode",
   channel: REMINDER,
   section: NOTICE,
-  order: 20,
+  order: 106,
   when: { brief: true },
   lines: toLines(BRIEF_NOTICE),
   provenance: ["jun-4-brief-mode RFC §4.2/§8 R1"],

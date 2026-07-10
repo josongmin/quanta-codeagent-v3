@@ -95,12 +95,14 @@ const dyn = (
   ...(provenance !== undefined ? { provenance } : {}),
 })
 
-// ── Ordered to mirror `buildDynamicContext`'s `parts[]` assembly. The mode /
-//    brief NOTICE atoms (atoms-notices.ts) ride the SAME channel at their own
-//    orders (10/20); the compiler assembles date → cwd → notices → brief →
-//    directives → langhint → env → repo → glob → skills → working-state →
-//    memory → hook-tail → task-budget. Orders here are AFTER the notice orders
-//    (10/20) so the manifest sequence is coherent. ──
+// ── Ordered to mirror the reminder assembly. The mode / brief NOTICE atoms
+//    (atoms-notices.ts) ride the SAME channel AND section ("dynamic.reminder") at
+//    orders 104/106, so ONE `selectAtoms([...NOTICE, ...DYNAMIC])` sort produces:
+//    date(100) → cwd(102) → mode-notice(104) → brief(106) → directives(110) →
+//    langhint(120) → env(130) → repo(140) → glob(150) → skills(160) →
+//    working-state(170) → memory(180) → hook-tail(190) → task-budget(200). The
+//    compiler resolves each block from this ONE selection (wire + manifest), so
+//    they cannot drift. ──
 
 /** Always-on: today's date line (clock injected by the compiler's pure `now`). */
 const A_DATE = dyn("date", 100, undefined, "L2_runtime", ["ADR-0078 determinism-safe date"])

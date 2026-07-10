@@ -22,11 +22,11 @@ import {
   BODY_AFTER_PERSONA_ATOMS,
   BODY_AFTER_PROMPT_PACK_ATOMS,
   BODY_ATOMS,
-  BRIEF_NOTICE_ATOM_EXPORT,
   type CompiledPromptArtifact,
   DYNAMIC_ATOMS,
+  type DynamicContentKey,
   type AgentMode as GraphMode,
-  MODE_NOTICE_ATOMS,
+  type InstructionAtom,
   NOTICE_ATOMS as NOTICE_ATOMS_ALL,
   POSTURE_ATOMS,
   type PromptChannel,
@@ -450,16 +450,6 @@ const noticeCtx = (mode: GraphMode, brief: boolean): PromptContext => ({
   hasDirectives: false,
 })
 
-/** The per-mode session notice (ADR-0211) — DERIVED from the instruction graph
- *  (`MODE_NOTICE_ATOMS`), not a parallel `mode → const` switch. Exactly one
- *  notice atom's `when.mode` admits a given mode (or none for `default`);
- *  `renderNoticeAtom` re-joins its lines into the newline-joined wire string the
- *  reminder splices. Byte-identical to the prior `modeNotice(mode)` lookup. */
-const modeNotice = (mode: AgentMode): string | undefined => {
-  const [selected] = selectAtoms(MODE_NOTICE_ATOMS, noticeCtx(mode, false))
-  return selected !== undefined ? renderNoticeAtom(selected) : undefined
-}
-
 /** ADR-0538 Phase 2 — the fired-notice-atom manifest for this turn's DYNAMIC
  *  reminder channel. Selects the mode notice + brief notice atoms that fired
  *  and returns their `firedAtomIds` + `byChannel` grouping for `promptPolicy`.
@@ -534,17 +524,16 @@ const buildCompileManifest = (
     ...selectAtoms(BODY_ATOMS, baseCtx),
   ]
 
-  // message.system_reminder — notice atoms (mode/brief) ∪ dynamic-content atoms.
-  const reminderCtx = dynamicReminderCtx(
+  // message.system_reminder — the SAME resolved selection the WIRE assembles from
+  // ({@link resolveReminderBlocks}), so the manifest reports EXACTLY the atoms that
+  // produced reminder text (no facet-vs-render shadow: an atom is fired IFF its
+  // block shipped). This is what makes the graph authoritative for the reminder.
+  const reminderAtoms = resolveReminderBlocks(
     input,
     effectiveMode,
     selectedGlobRules,
     meta.repoRulesInStaticSystem,
-  )
-  const reminderAtoms = [
-    ...selectAtoms(NOTICE_ATOMS_ALL, reminderCtx),
-    ...selectAtoms(DYNAMIC_ATOMS, reminderCtx),
-  ]
+  ).map((b) => b.atom)
 
   const byChannel: Record<PromptChannel, readonly string[]> = {
     "system.base": systemBaseAtoms.map((a) => a.variantId),
@@ -667,22 +656,6 @@ const collectHookPromptSide = (
   return parts.length > 0 ? parts.join("\n") : undefined
 }
 
-/** ADR-0133 — append `## Hook context` + the `injectAfterSystem` text at
- *  the TAIL of the dynamic context parts array. Extracted from
- *  {@link buildDynamicContext} to keep its complexity below the biome cap.
- *  No-op when no inject carries an after-system side. The label exposes
- *  the source so an audit can see "a hook returned this since the last
- *  turn". The text uses a simple H2 (not a nested system-reminder) to
- *  avoid double-wrap inside the outer reminder. */
-const appendHookContextDynamicTail = (
-  parts: string[],
-  injects: readonly import("./hooks").HookPromptInject[] | undefined,
-): void => {
-  const afterSystem = collectHookPromptSide(injects, "injectAfterSystem")
-  if (afterSystem === undefined) return
-  parts.push("", "## Hook context", afterSystem)
-}
-
 /** ADR-0133 — push the `<hook-context>` user-side message when a hook
  *  returned `injectBeforeUser`. Wrapped via `embedUntrusted` so an inner
  *  `</hook-context>` is defanged. Extracted from {@link buildTurnContext}
@@ -735,93 +708,122 @@ const resolveDirectiveConfig = (): DirectiveConfig => {
   }
 }
 
-/** §5 — push the active prompt-directive block onto the dynamic `parts`. The
- *  selection slice comes from `input.directiveConfig` (caller/test override) or,
- *  when omitted, the frozen `runtimeConfig()` knobs. No-op (zero bytes pushed)
- *  when no knob is on, preserving byte-identical default-OFF. Extracted from
- *  {@link buildDynamicContext} so its cognitive complexity does not grow. */
-const appendActiveDirectives = (parts: string[], input: TurnContextInput): void => {
-  const directives = selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig())
-  if (directives.length > 0) parts.push("", directives)
-}
-
-/** Append the per-turn selection blocks (glob-rules / active-skills / working-state)
- *  in their fixed order. Each renders to a block that may be empty ⇒ skipped.
- *  Extracted from buildDynamicContext to stay under the cognitive-complexity cap;
- *  byte-identical to the inline sequence it replaced. */
-const appendSelectionBlocks = (
-  parts: string[],
+/**
+ * ADR-0538 §KEY-TRANSFORM (dynamic atoms) — the `contentByKey` RESOLVER. Maps a
+ * dynamic reminder atom's stable `contentKey` to its per-turn wire text via the
+ * leaf renderers (a PURE function of the input + the injected clock). Returns
+ * `undefined` when the block is empty/absent so the assembler skips it. This is
+ * what makes the instruction graph AUTHORITATIVE for the reminder: the wire text
+ * is now DERIVED from the atom selection, not a parallel hand-rolled sequence.
+ */
+const contentByKey = (
+  key: DynamicContentKey,
   input: TurnContextInput,
   selectedGlobRules: readonly GlobRule[],
-): void => {
-  if (selectedGlobRules.length > 0) {
-    const block = renderGlobRulesBlock([...selectedGlobRules])
-    if (block) parts.push("", block)
-  }
-  if (input.activeSkills && input.activeSkills.length > 0) {
-    const block = renderActiveSkillsBlock(input.activeSkills)
-    if (block) parts.push("", block)
-  }
-  if (input.workingState) {
-    const block = renderWorkingStateBlock(input.workingState)
-    if (block) parts.push("", block)
+): string | undefined => {
+  switch (key) {
+    case "date":
+      return todayDateLine(input.now)
+    case "cwd":
+      return `Working directory: ${input.cwd}`
+    case "directives": {
+      const directives = selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig())
+      return directives.length > 0 ? directives : undefined
+    }
+    case "language-hint":
+      return input.languageHint !== undefined && input.languageHint.length > 0
+        ? input.languageHint
+        : undefined
+    case "env-block":
+      return renderEnvBlock(input.env)
+    case "repo-rules":
+      return input.repoRules !== undefined ? renderRepoRulesBlock(input.repoRules) : undefined
+    case "glob-rules":
+      return selectedGlobRules.length > 0 ? renderGlobRulesBlock([...selectedGlobRules]) : undefined
+    case "active-skills":
+      return input.activeSkills !== undefined && input.activeSkills.length > 0
+        ? renderActiveSkillsBlock(input.activeSkills)
+        : undefined
+    case "working-state":
+      return input.workingState !== undefined
+        ? renderWorkingStateBlock(input.workingState)
+        : undefined
+    case "memory-context": {
+      const memory = input.memoryContext?.trim()
+      return memory !== undefined && memory.length > 0 ? memory : undefined
+    }
+    case "hook-context-tail": {
+      const afterSystem = collectHookPromptSide(input.hookPromptInjects, "injectAfterSystem")
+      return afterSystem !== undefined ? `## Hook context\n${afterSystem}` : undefined
+    }
+    case "task-budget":
+      return renderTaskBudgetBlock(input.taskBudget)
+    default:
+      // `key` is a DynamicContentKey; every member is handled above. The drift-
+      // guard hellgate (case-set == DYNAMIC_ATOMS) fails if a new key is added
+      // without a case here.
+      return undefined
   }
 }
 
+/**
+ * ADR-0538 §KEY-TRANSFORM — resolve the ORDERED reminder blocks (atom + text) the
+ * per-turn reminder is assembled from. This is the SINGLE selection both the WIRE
+ * ({@link buildDynamicContext}) and the fired-atom MANIFEST ({@link buildCompileManifest})
+ * derive from, so they CANNOT drift. A notice atom renders its `lines`; a dynamic
+ * atom resolves its `contentKey`. An atom whose block is empty/absent is dropped
+ * (an atom is "fired" IFF it produced wire text), so the manifest reports exactly
+ * what shipped. Order = the atoms' `order` (date/cwd < notices < the rest), which
+ * reproduces the prior `buildDynamicContext` sequence exactly.
+ */
+const resolveReminderBlocks = (
+  input: TurnContextInput,
+  effectiveMode: AgentMode,
+  selectedGlobRules: readonly GlobRule[],
+  repoRulesInStaticSystem: boolean,
+): ReadonlyArray<{ atom: InstructionAtom; text: string }> => {
+  const ctx = dynamicReminderCtx(input, effectiveMode, selectedGlobRules, repoRulesInStaticSystem)
+  const out: { atom: InstructionAtom; text: string }[] = []
+  for (const atom of selectAtoms([...NOTICE_ATOMS_ALL, ...DYNAMIC_ATOMS], ctx)) {
+    const text =
+      atom.contentKey !== undefined
+        ? contentByKey(atom.contentKey as DynamicContentKey, input, selectedGlobRules)
+        : renderNoticeAtom(atom)
+    if (text !== undefined && text.length > 0) out.push({ atom, text })
+  }
+  return out
+}
+
+/**
+ * Build the per-turn dynamic context — DERIVED from the reminder atom graph
+ * ({@link resolveReminderBlocks}), NOT a hand-rolled sequence. date + cwd are
+ * always the first two blocks (lowest `order`, always-on) and join with a single
+ * newline; every subsequent block is separated by a blank line — exactly the
+ * prior `parts[]` assembly (`[date, cwd]` then `push("", block)` per subsequent
+ * block), now produced from one atom selection so the wire and the fired-atom
+ * manifest cannot drift. The ORDER (mode notice → brief → directives → langhint →
+ * env → repo → glob → skills → working-state → memory → hook-tail → task-budget)
+ * is the atoms' `order`, reproducing the prior sequence byte-for-byte.
+ */
 const buildDynamicContext = (
   input: TurnContextInput,
   effectiveMode: AgentMode,
   selectedGlobRules: readonly GlobRule[],
   repoRulesInStaticSystem: boolean,
 ): string | undefined => {
-  const parts: string[] = [todayDateLine(input.now), `Working directory: ${input.cwd}`]
-  // SSOT mode precedence (ADR-0018): prompt + dispatch share resolveAgentMode
-  // so the per-turn notice and the dispatch admissibility gate never disagree.
-  const notice = modeNotice(effectiveMode)
-  if (notice) parts.push("", notice)
-  // C3 (jun-4-brief-mode RFC) — brief-mode directive rides the per-turn DYNAMIC
-  // slot AFTER the mode notice (a mode notice may itself constrain output, so it
-  // reads first) and BEFORE repo-rules. Absent / false ⇒ nothing pushed, the
-  // dynamic tail is byte-identical to the pre-feature output (primary invariant).
-  // It tightens prose verbosity ONLY; the static correctness rails
-  // (BODY_AFTER_PROMPT_PACK) are untouched and authoritative above it.
-  if (input.brief === true) parts.push("", renderNoticeAtom(BRIEF_NOTICE_ATOM_EXPORT))
-  // §5 prompt-directive bundle (jun-06) — seven DEFAULT-OFF behavioral directives
-  // ride the per-turn DYNAMIC slot AFTER the brief notice (same family of prose
-  // shapers) and BEFORE repo-rules. Extracted to a helper so buildDynamicContext's
-  // cognitive complexity is unchanged. ALL knobs unset ⇒ nothing pushed ⇒ the
-  // dynamic tail is byte-identical to the pre-bundle output (headline invariant).
-  appendActiveDirectives(parts, input)
-  // N1 — assistant-language notice rides the DYNAMIC slot with the other prose
-  // shapers (brief / directives). Absent (gate OFF or English/ambiguous) ⇒
-  // nothing pushed ⇒ byte-identical. Pre-computed by the context-assembler so
-  // this module stays free of detection logic.
-  if (input.languageHint !== undefined && input.languageHint.length > 0)
-    parts.push("", input.languageHint)
-  // ADR-0397 env block — sits ABOVE repo-rules because env/build context is
-  // host-static authority (the platform/shell/pkg-mgr don't change mid-turn
-  // and the git snapshot is taken at turn boundary). Absent / empty env ⇒
-  // renderEnvBlock returns undefined and parts stay byte-identical.
-  const envBlock = renderEnvBlock(input.env)
-  if (envBlock) parts.push("", envBlock)
-  if (input.repoRules && !repoRulesInStaticSystem) {
-    parts.push("", renderRepoRulesBlock(input.repoRules))
-  }
-  // File-scoped rules (Cursor `.cursor/rules` parity) ride right after the
-  // top-level repo contract — both are repo authority, but these are selected
-  // per-turn by the files in play. Absent / no selection ⇒ no block.
-  appendSelectionBlocks(parts, input, selectedGlobRules)
-  // Memory recall body already carries the trust-ladder H2 header inside
-  // `formatBlock` (src/agent/memory.ts) — append as-is, no double-label.
-  const memory = input.memoryContext?.trim()
-  if (memory) parts.push("", memory)
-  appendHookContextDynamicTail(parts, input.hookPromptInjects)
-  // jun-02 — soft task-budget guidance rides at the TAIL (read last by the
-  // model, like hook context) so the self-moderation hint is the freshest
-  // signal. Orthogonal to the hard breaker; absent / non-positive ⇒ no block
-  // (byte-identical default-OFF).
-  const taskBudgetLine = renderTaskBudgetBlock(input.taskBudget)
-  if (taskBudgetLine !== undefined) parts.push("", taskBudgetLine)
+  const blocks = resolveReminderBlocks(
+    input,
+    effectiveMode,
+    selectedGlobRules,
+    repoRulesInStaticSystem,
+  )
+  if (blocks.length === 0) return undefined // date/cwd always render, so unreachable
+  const parts: string[] = []
+  blocks.forEach(({ text }, i) => {
+    if (i < 2)
+      parts.push(text) // date, cwd — single-newline joined, no leading blank
+    else parts.push("", text) // every subsequent block gets a leading blank line
+  })
   return parts.join("\n")
 }
 
