@@ -8,7 +8,7 @@
  *   bun tools/trajectory-viewer/launch.ts trajectories/20260708-… # specific session
  *   bun tools/trajectory-viewer/launch.ts trajectories/            # whole session dir
  */
-import { writeFileSync, readFileSync, existsSync, readdirSync } from "fs"
+import { writeFileSync, readFileSync, existsSync, readdirSync, statSync } from "fs"
 import { execSync } from "child_process"
 import { join, resolve, dirname, basename } from "path"
 
@@ -20,14 +20,14 @@ let trajectoryPath: string
 if (arg) {
   const p = resolve(arg)
   // if arg is a directory, load all .jsonl files in it as one merged stream
-  if (existsSync(p) && require("fs").statSync(p).isDirectory()) {
+  if (existsSync(p) && statSync(p).isDirectory()) {
     // Each .jsonl file = ONE session (one bench-instance run). Do NOT merge —
-    // preserve file boundaries so the viewer shows one session per file.
-    const files = readdirSync(p)
-      .filter(f => f.endsWith(".jsonl") && !f.startsWith("preds"))
-      .sort()
+    // preserve file boundaries so the viewer shows one session per file. Scan
+    // RECURSIVELY: full-remote fetch extracts per-box cassettes into
+    // `trajectories/<box>/<ts>-<instanceId>.jsonl` subdirs.
+    const files = walkJsonl(p)
     if (!files.length) { console.error(`No .jsonl files in ${p}`); process.exit(1) }
-    const sessions = files.map(f => ({ name: f, text: readFileSync(join(p, f), "utf8") }))
+    const sessions = files.map(rel => ({ name: rel, text: readFileSync(join(p, rel), "utf8") }))
     const dataPath = join(dir, "data.js")
     const metas = collectMetas(p)
     writeDataJs(dataPath, sessions, metas)
@@ -39,12 +39,10 @@ if (arg) {
 } else {
   // No arg: prefer trajectories/ dir (per-session files) over the global flat file
   const trajSubdir = join(dir, "../../trajectories")
-  if (existsSync(trajSubdir) && require("fs").statSync(trajSubdir).isDirectory()) {
-    const files = readdirSync(trajSubdir)
-      .filter(f => f.endsWith(".jsonl") && !f.startsWith("preds"))
-      .sort()
+  if (existsSync(trajSubdir) && statSync(trajSubdir).isDirectory()) {
+    const files = walkJsonl(trajSubdir)
     if (files.length > 0) {
-      const sessions = files.map(f => ({ name: f, text: readFileSync(join(trajSubdir, f), "utf8") }))
+      const sessions = files.map(rel => ({ name: rel, text: readFileSync(join(trajSubdir, rel), "utf8") }))
       const metas = collectMetas(trajSubdir)
       writeDataJs(join(dir, "data.js"), sessions, metas)
       console.log(`Loaded ${files.length} session(s) from trajectories/`)
@@ -85,12 +83,32 @@ open(dir)
 console.log("Opened trajectory viewer.")
 
 // ── helpers ──
+/** Recursively collect `.jsonl` cassette paths (relative to `root`, excluding
+ *  `preds*`), sorted. Recursion is what reaches the per-box `trajectories/<box>/`
+ *  subdirs the full-remote fetch extracts into. */
+function walkJsonl(root: string, sub = ""): string[] {
+  const out: string[] = []
+  for (const name of readdirSync(join(root, sub)).sort()) {
+    const rel = sub ? join(sub, name) : name
+    const st = statSync(join(root, rel))
+    if (st.isDirectory()) out.push(...walkJsonl(root, rel))
+    else if (name.endsWith(".jsonl") && !name.startsWith("preds")) out.push(rel)
+  }
+  return out
+}
+
+/** Recursively load every `.meta.json` sidecar under `dir` (matches walkJsonl). */
 function collectMetas(dir: string): object[] {
   if (!existsSync(dir)) return []
-  return readdirSync(dir)
-    .filter(f => f.endsWith(".meta.json"))
-    .map(f => { try { return JSON.parse(readFileSync(join(dir, f), "utf8")) } catch { return null } })
-    .filter(Boolean)
+  const out: object[] = []
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name)
+    if (statSync(p).isDirectory()) out.push(...collectMetas(p))
+    else if (name.endsWith(".meta.json")) {
+      try { out.push(JSON.parse(readFileSync(p, "utf8"))) } catch { /* skip */ }
+    }
+  }
+  return out
 }
 
 // Bake one session PER FILE. `sessions` is [{name, text}] — the viewer builds
