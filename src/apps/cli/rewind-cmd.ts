@@ -515,6 +515,53 @@ const rewindCmdImpl: SlashCommand = {
 /* /fork                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * WS-2 (UUX-4-07) — `/fork attach <session-id>`: make an EXISTING saved session
+ * the live one, in-session (no disk-fork, no exit/restart — the difference from
+ * `quanta --resume <id>`). Reuses the surface's `switchSession` seam
+ * (performSessionSwitch → the unified `attachSessionToLive`), so the crown
+ * guard (unknown ⇒ "not found", mid-turn ⇒ refused) is inherited. Effect-receipt
+ * discipline: the "now editing" line prints ONLY after the switch resolves.
+ */
+const runForkAttach = async (
+  rest: readonly string[],
+  state: RewindSlashState,
+  ctx: SlashContext,
+): Promise<number> => {
+  const targetId = rest[0]
+  if (typeof targetId !== "string" || targetId.length === 0) {
+    ctx.err("/fork attach: usage: /fork attach <session-id>\n")
+    return 1
+  }
+  if (rest.length > 1) {
+    ctx.err(`/fork attach: unexpected extra argument: ${rest[1]}\n`)
+    return 1
+  }
+  if (state.switchSession === undefined) {
+    ctx.err(
+      "/fork attach: this surface cannot switch the live session — run `quanta --resume <id>` instead\n",
+    )
+    return 1
+  }
+  try {
+    const receipt = await state.switchSession(targetId)
+    ctx.out(`now editing ${receipt.sessionId} — ${receipt.persistNote}\n`)
+    return 0
+  } catch (e) {
+    const msg = errMessage(e)
+    // Honest copy: a running turn refuses the swap (retry after it), vs a
+    // genuinely-absent id. Live state is unchanged either way.
+    if (/transcript_replace_unavailable/.test(msg)) {
+      ctx.err(
+        `/fork attach: a turn is running — the live session is unchanged; try \`/fork attach ${targetId}\` again after it finishes\n`,
+      )
+    } else {
+      ctx.err(`/fork attach: could not attach to ${targetId}: ${msg} — live session unchanged\n`)
+    }
+    return 1
+  }
+}
+
 const forkCmdImpl: SlashCommand = {
   name: "/fork",
   describe: "Fork session at a message-id into a new session (Claude pattern)",
@@ -530,6 +577,15 @@ const forkCmdImpl: SlashCommand = {
       ctx.err("/fork: disabled by QUANTA_REWIND=0\n")
       return 1
     }
+    // WS-2 (UUX-4-07) — `/fork attach <id>`: switch the LIVE session onto an
+    // EXISTING saved session with NO disk-fork. The in-session recovery verb for
+    // the "fork on disk but live switch refused mid-turn" case above, and a
+    // general re-attach. Goes through the SAME `switchSession` seam (→
+    // performSessionSwitch → attachSessionToLive), so unknown-id / mid-turn
+    // refusal come back fail-loud for free.
+    if (args[0] === "attach") {
+      return await runForkAttach(args.slice(1), state, ctx)
+    }
     const parsed = parseForkArgs(args)
     if (typeof parsed === "string") {
       ctx.err(`/fork: ${parsed}\n`)
@@ -544,7 +600,7 @@ const forkCmdImpl: SlashCommand = {
 
     if (parsed.idPrefix === undefined) {
       renderRecentMessages(ctx, saved, "fork points")
-      ctx.out("usage: /fork <id-prefix> [--title TITLE]\n")
+      ctx.out("usage: /fork <id-prefix> [--title TITLE]  |  /fork attach <session-id>\n")
       return 0
     }
 
@@ -586,7 +642,10 @@ const forkCmdImpl: SlashCommand = {
     }
   },
   complete(_args, _partial, _ctx) {
-    return [{ value: "--title", kind: "argument", description: "title for the new session" }]
+    return [
+      { value: "attach", kind: "argument", description: "attach to an existing session (no fork)" },
+      { value: "--title", kind: "argument", description: "title for the new session" },
+    ]
   },
 }
 

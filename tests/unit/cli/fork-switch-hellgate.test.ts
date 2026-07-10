@@ -203,3 +203,77 @@ describe("/fork switch (UUX-4-07)", () => {
     expect(rec.calls.length).toBe(0)
   })
 })
+
+/* ------------------------------------------------------------------ */
+/* WS-2 (UUX-4-07) — `/fork attach <id>`: switch to an EXISTING session   */
+/* WITHOUT a disk-fork (in-session recovery / re-attach).                 */
+/* ------------------------------------------------------------------ */
+
+describe("/fork attach <id> (WS-2)", () => {
+  test("attaches to an existing session via switchSession — NO disk-fork created", async () => {
+    await seed("s-parent")
+    await seed("s-target")
+    const cap = buildCtx()
+    const rec = buildSwitchRecorder(cap)
+    const state: RewindSlashState = {
+      sessionId: "s-parent",
+      env: { QUANTA_REWIND: "1" },
+      switchSession: rec.switchSession,
+    }
+    const code = await forkCmd().run(["attach", "s-target"], { ...cap.ctx, rewindSession: state })
+    expect(code).toBe(0)
+    // switched to the requested EXISTING id (not a freshly-minted fork id)
+    expect(rec.calls.length).toBe(1)
+    expect(rec.calls[0]?.id).toBe("s-target")
+    // effect-receipt copy prints only AFTER the switch resolves
+    expect(rec.calls[0]?.outAtCall ?? "").not.toContain("now editing")
+    expect(cap.out()).toContain("now editing s-target")
+    // NO new fork session was minted (attach ≠ fork): only the two seeds exist
+    const target = await loadSessionById("s-target")
+    expect(target?.messages.length).toBe(4)
+  })
+
+  test("mid-turn refusal ⇒ exit 1, honest copy, no success leaked", async () => {
+    await seed("s-parent2")
+    const cap = buildCtx()
+    const rec = buildSwitchRecorder(cap, new Error("transcript_replace_unavailable"))
+    const state: RewindSlashState = {
+      sessionId: "s-parent2",
+      env: { QUANTA_REWIND: "1" },
+      switchSession: rec.switchSession,
+    }
+    const code = await forkCmd().run(["attach", "s-target"], { ...cap.ctx, rewindSession: state })
+    expect(code).toBe(1)
+    expect(rec.calls.length).toBe(1)
+    expect(cap.out()).not.toContain("now editing")
+    expect(cap.err()).toContain("s-target")
+  })
+
+  test("missing id ⇒ usage error, switchSession NEVER called", async () => {
+    await seed("s-parent3")
+    const cap = buildCtx()
+    const rec = buildSwitchRecorder(cap)
+    const state: RewindSlashState = {
+      sessionId: "s-parent3",
+      env: { QUANTA_REWIND: "1" },
+      switchSession: rec.switchSession,
+    }
+    const code = await forkCmd().run(["attach"], { ...cap.ctx, rewindSession: state })
+    expect(code).toBe(1)
+    expect(rec.calls.length).toBe(0)
+    expect(cap.err()).toContain("usage")
+  })
+
+  test("seam absent ⇒ honest 'cannot switch' error, exit 1", async () => {
+    await seed("s-parent4")
+    const cap = buildCtx()
+    const state: RewindSlashState = {
+      sessionId: "s-parent4",
+      env: { QUANTA_REWIND: "1" },
+      // no switchSession seam
+    }
+    const code = await forkCmd().run(["attach", "s-target"], { ...cap.ctx, rewindSession: state })
+    expect(code).toBe(1)
+    expect(cap.err()).toContain("attach")
+  })
+})
