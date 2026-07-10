@@ -570,19 +570,21 @@ export interface AgentConfig
   /** HITL 4-tier gate (Codex hitl-audit.md absorption). Absent ⇒ legacy
    *  single-tier behavior (byte-identical). When enabled, every dispatch
    *  computes the effective tier and routes through tier-specific gates:
-   *  hand-off-required terminates, always-confirm always calls onConfirm
-   *  (cannot be skipped by acceptEdits/bypass), pre-approval-ok defers to the
-   *  existing mode policy, and none allows.
+   *  hand-off-required terminates, always-confirm calls onConfirm (not
+   *  skippable by acceptEdits; under BYPASS the `needs-sandbox`-REASON tier —
+   *  bash w/o a sandbox profile, unclassified mutating tools — falls through
+   *  to mode policy instead, jul-10 D-1 follow-through; sensitive/declared/
+   *  registry reasons still confirm), pre-approval-ok defers to the existing
+   *  mode policy, and none allows.
    *
    *  `enabled` turns on the richer reviewer escalation. INDEPENDENTLY, the
    *  `hand-off-required` tier is a UNIVERSAL security floor — it denies on every
    *  surface regardless of `enabled` (jun-10 keystone).
    *
-   *  `autoApprove` is RESERVED for ticket P2-T3 (always-confirm secure-by-default):
-   *  the autonomous opt-out that lets a headless / bench / CI surface auto-run
-   *  always-confirm tools unattended. Inert until T3 universalizes the
-   *  always-confirm floor (blocked today by the bash-without-sandbox conflation —
-   *  see always-confirm-secure-by-default-e2e, skipped). */
+   *  `autoApprove` (P2-T3 always-confirm secure-by-default, LIVE — see
+   *  always-confirm-secure-by-default-e2e): the autonomous opt-out that lets a
+   *  headless / bench / CI surface auto-run universal-floor always-confirm
+   *  tools unattended. */
   hitl?: { enabled?: boolean; autoApprove?: boolean }
   /**
    * ADR-0047 UI integration seam. When the admissibility-gate emits a

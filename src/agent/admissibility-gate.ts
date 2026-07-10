@@ -13,8 +13,11 @@
  *   2. plan/review/audit mode block — mutating tools refused in non-default modes
  *   3. HITL tier         — when `config.hitl?.enabled === true`:
  *                          hand-off-required ⇒ deny (no mode can authorize),
- *                          always-confirm    ⇒ ask via onConfirm (cannot be
- *                                              skipped by acceptEdits/bypass),
+ *                          always-confirm    ⇒ ask via onConfirm (not skippable
+ *                                              by acceptEdits; under bypass a
+ *                                              `needs-sandbox`-REASON tier falls
+ *                                              through to mode policy instead —
+ *                                              jul-10 D-1 follow-through),
  *                          none              ⇒ allow (skip mode policy),
  *                          pre-approval-ok   ⇒ fall through to mode policy.
  *   4. permission policy — HARD_DENY (security boundary) inside, then mode-
@@ -164,7 +167,7 @@ export const runAdmissibilityGate = async (
   //    HITL branch phrases the deny as a hand-off-required terminator, while
   //    the policy branch keeps the legacy "Permission denied" wording for
   //    classifier denials in auto mode.
-  const hitlResult = await runHitlReviewGate(call, config, action, opts)
+  const hitlResult = await runHitlReviewGate(call, config, permission, action, opts)
   if (hitlResult !== "fallthrough") return hitlResult
 
   // 3. Permission stack consultation (ADR-0046, opt-in via

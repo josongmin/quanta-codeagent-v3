@@ -22,7 +22,7 @@ import {
   hardDenyReason,
   hardDenySafeReason,
   inferReviewKind,
-  inferToolTier,
+  inferToolTierDetailed,
   type LayeredRule,
   type LearningSource,
   type PendingPermission,
@@ -35,7 +35,7 @@ import {
   type StructuredDenyReasonInput,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
-import { errMessage, runtimeConfig, writeStderr } from "@/shared"
+import { errMessage, type HITLTierReason, runtimeConfig, writeStderr } from "@/shared"
 import { safeEmitDecision } from "@/stream"
 import { buildDenySteerMessage, type ConfirmDecision } from "../confirm-decision"
 import {
@@ -435,19 +435,26 @@ export const reviewActionKeyOf = (
  *  with a stale registry. ADR-0047: composes the per-tool classifier with
  *  the agent-side annotation registry (built-in + operator overrides). The
  *  registry can ESCALATE the tier (one-way ratchet) but never relax
- *  `hand-off-required`. */
+ *  `hand-off-required`.
+ *
+ *  jul-10 (D-1 follow-through): the `reason` the tier resolved is now a
+ *  first-class output (see `HITLTierReason` in `@/shared`). When the registry
+ *  moved the needle above the baseline, the reason is `"registry"` — an
+ *  operator escalation is never mistaken for the needs-sandbox class, so it
+ *  can never ride the bypass fallthrough in `runHitlReviewGate`. */
 export const resolveHitlTier = (
   config: AdmissibilityGateConfig,
   call: ToolUseBlock,
   action: AdmissibilityAction,
-): { tier: HitlTier; matched: HitlAnnotation | undefined } => {
+): { tier: HitlTier; matched: HitlAnnotation | undefined; reason: HITLTierReason } => {
   const tool = config.registry.get(call.name)
-  const baseline: HITLTier = tool
-    ? inferToolTier(tool, call.input)
+  const base: { tier: HITLTier; reason: HITLTierReason } = tool
+    ? inferToolTierDetailed(tool, call.input)
     : action.isReadOnly
-      ? "none"
-      : "pre-approval-ok"
-  return resolveHitlAnnotation(call.name, call.input, baseline)
+      ? { tier: "none", reason: "inferred" }
+      : { tier: "pre-approval-ok", reason: "inferred" }
+  const resolved = resolveHitlAnnotation(call.name, call.input, base.tier)
+  return { ...resolved, reason: resolved.tier === base.tier ? base.reason : "registry" }
 }
 
 /** Emit pre_tool_use hook, returning a hook-denied result or null to proceed.

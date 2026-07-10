@@ -54,3 +54,21 @@ export type HITLTier = (typeof ALL_HITL_TIERS)[number]
 export interface ToolCapability {
   readonly confirm?: "sensitive" | "needs-sandbox"
 }
+
+/**
+ * WHY a tool resolved to its HITL tier (jul-10, D-1 follow-through) — the
+ * first-class output of tier resolution that un-conflates the two reasons a
+ * tool is `always-confirm` (see `@/permission/pdp.ts`):
+ *   - `"sensitive"`     — capability opts into the UNIVERSAL floor (git push):
+ *                         asks under every mode, even bypass.
+ *   - `"needs-sandbox"` — bash w/o a sandbox profile OR the fail-closed
+ *                         mutating catch-all (no `hitlTier`, no capability —
+ *                         e.g. an MCP tool): asks under default/acceptEdits,
+ *                         but BYPASS falls through to mode policy.
+ *   - `"declared"`      — the tool's own explicit `hitlTier()` value
+ *                         (deliberate audit ceremony; not relaxed by bypass).
+ *   - `"registry"`      — the annotation registry ESCALATED the baseline tier
+ *                         (operator asked for the gate; not relaxed by bypass).
+ *   - `"inferred"`      — the read-only ⇒ "none" fallback (reason inert).
+ */
+export type HITLTierReason = "sensitive" | "needs-sandbox" | "declared" | "registry" | "inferred"

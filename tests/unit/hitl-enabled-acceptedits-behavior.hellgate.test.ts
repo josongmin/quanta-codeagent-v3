@@ -7,10 +7,15 @@
  * The D-1 delta: with `hitl:{enabled:true}` (web since jun-10, CLI TTY now),
  * an always-confirm-tier tool consults onConfirm EVEN under acceptEdits —
  * previously the CLI fell through to mode policy, which auto-allowed it
- * (UUX-1-03's split). KNOWN WIDTH (documented, audit W3-D1): on a sandbox-less
- * surface bash's tier is always-confirm for EVERY command, so bash prompts
- * under acceptEdits/bypass too; the [a]lways-session verb + allowlistEscalated
- * dedup are the burden mitigations.
+ * (UUX-1-03's split). On a sandbox-less surface bash's tier is always-confirm
+ * for EVERY command, so bash prompts under acceptEdits too; the [a]lways-
+ * session verb + allowlistEscalated dedup are the burden mitigations.
+ * jul-10 UPDATE (D-1 follow-through, tier-reason split): under BYPASS a
+ * `needs-sandbox`-reason tool now falls through to mode policy (bypass truly
+ * bypasses) — see `hitl-tier-reason-split.hellgate.test.ts` for the 12-cell
+ * matrix. The acceptEdits cells pinned HERE are UNCHANGED by that split: the
+ * tool below declares hitlTier "always-confirm" with NO capability (reason
+ * "declared"), and even a needs-sandbox tool still asks under acceptEdits.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"

@@ -184,6 +184,7 @@ const runHandoffFloorGate = async (
 const runHitlReviewGate = async (
   call: ToolUseBlock,
   config: AdmissibilityGateConfig,
+  permission: PermissionContext,
   action: AdmissibilityAction,
   opts: AdmissibilityWaveAOptions,
 ): Promise<DispatchResult | null | "fallthrough"> => {
@@ -198,7 +199,7 @@ const runHitlReviewGate = async (
   // `needs-sandbox` (bash without a profile) DEFERS to mode / sandbox, so every
   // shell call is not gated. hand-off-required is its own (harder) universal
   // floor — caught upstream by `runHandoffFloorGate`; kept here belt-and-suspenders.
-  const { tier } = resolveHitlTier(config, call, action)
+  const { tier, reason } = resolveHitlTier(config, call, action)
   const capability = config.registry.get(call.name)?.capability?.(call.input)
   const universalFloor =
     tier === "hand-off-required" || decideFloor({ tier, capability }) === "universal-floor"
@@ -208,6 +209,27 @@ const runHitlReviewGate = async (
     return "fallthrough"
   }
   if (config.hitl?.enabled !== true && !universalFloor) return "fallthrough"
+  // jul-10 (D-1 follow-through) — BYPASS TRULY BYPASSES the needs-sandbox tier.
+  // With `hitl.enabled`, an always-confirm tool whose REASON is "needs-sandbox"
+  // (bash without a sandbox profile; the unclassified-mutating catch-all, e.g.
+  // an MCP tool with no `hitlTier`) still asks under default/acceptEdits, but
+  // under an explicit `bypass` release it defers to mode policy — which allows.
+  // NEVER for "sensitive" (universal floor, excluded above), NEVER for
+  // "declared"/"registry" (an explicit tool declaration or operator escalation
+  // keeps its confirm under bypass). A HARD_DENY hit (pure registry-derived
+  // fact, no emit) NEVER rides the fallthrough: it stays on `runHitlGate`'s
+  // handoff path so the deny wording, the `onHandoff` UI event, and the OTel
+  // handoff tag are byte-identical to today (mode policy would also hard-deny,
+  // but through the wrong seam).
+  if (
+    tier === "always-confirm" &&
+    !universalFloor &&
+    reason === "needs-sandbox" &&
+    permission.mode === "bypass" &&
+    resolvedHardDenyProse(action) === null
+  ) {
+    return "fallthrough"
+  }
   if (opts.reviewerPort !== undefined && tier === "always-confirm") {
     return await reviewAndDecide(call, config, action, opts, "hitl")
   }

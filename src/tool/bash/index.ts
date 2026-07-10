@@ -627,6 +627,15 @@ export interface MakeBashToolOpts {
 
 export const makeBashTool = (opts: MakeBashToolOpts = {}): Tool<Input> => {
   const tier = tierForProfile(opts.sandboxProfile)
+  // PDP capability (jun-10 P2-T3, activated jul-10 D-1 follow-through): with NO
+  // sandbox profile the always-confirm tier exists because the command risk is
+  // UNKNOWN (needs a sandbox), NOT because shell is inherently sensitive. The
+  // capability declares that reason so the gate can split the two: asks under
+  // default/acceptEdits when HITL is on, but an explicit `bypass` release
+  // defers to mode policy (HARD_DENY still wins there). `workspace-write-net`'s
+  // always-confirm is deliberate net-egress audit ceremony — NOT declared
+  // needs-sandbox, so it keeps its confirm under bypass.
+  const sandboxless = opts.sandboxProfile === undefined || opts.sandboxProfile === "off"
   return {
     name: "bash",
     description:
@@ -647,6 +656,7 @@ export const makeBashTool = (opts: MakeBashToolOpts = {}): Tool<Input> => {
     isConcurrencySafe: () => false,
     // ADR-0297 — closed-enum profile lookup; NO command inspection.
     hitlTier: () => tier,
+    ...(sandboxless ? { capability: () => ({ confirm: "needs-sandbox" as const }) } : {}),
     // S16: expose the raw shell command so the permission policy applies the
     // HARD_DENY denylist UNIFORMLY to any tool that accepts a shell command.
     extractShellCommand: (input: Input): string => input.command ?? "",

@@ -20,6 +20,14 @@
  * tool opts INTO the universal floor by declaring `capability.confirm:
  * "sensitive"`. Anything else (needs-sandbox, unspecified, the `inferToolTier`
  * catch-all) DEFERS — byte-identical to today's mode-policy / opt-in behavior.
+ *
+ * jul-10 (D-1 follow-through): the split is now ALSO a first-class output of
+ * tier resolution — `inferToolTierDetailed` returns `{ tier, reason }` (see
+ * `HITLTierReason` in `@/shared`), and the gate's `hitl.enabled` branch uses it
+ * so a `needs-sandbox`-reason always-confirm tool defers to mode policy under
+ * an explicit `bypass` release (mode policy still HARD_DENYs first). This
+ * decider's own vocabulary is unchanged: it answers ONLY the universal-floor
+ * question.
  */
 import type { HITLTier, ToolCapability } from "@/shared"
 

@@ -219,6 +219,7 @@ export {
   inferNetworkPolicy,
   inferSandboxPolicy,
   inferToolTier,
+  inferToolTierDetailed,
 } from "./policy"
 export type {
   ConfigLayer,

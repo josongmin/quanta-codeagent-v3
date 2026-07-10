@@ -26,7 +26,7 @@ import {
   type PermissionRiskLevel,
   type PermissionStackSource,
 } from "./recorder"
-import type { ToolCapability } from "@/shared"
+import type { HITLTierReason, ToolCapability } from "@/shared"
 import type {
   HITLTier,
   PermissionContext,
@@ -218,23 +218,46 @@ interface HITLToolDuck {
   capability?(input: unknown): ToolCapability | undefined
 }
 
-/** Infer the effective HITL tier for a call. The tool's own `hitlTier(input)`
- *  wins; otherwise read-only ⇒ "none", mutating ⇒ "always-confirm" (FAIL-
- *  CLOSED — see module comment). The dispatch seam composes this with the
+/** Infer the effective HITL tier for a call, WITH the reason it resolved that
+ *  way (jul-10, D-1 follow-through — the PDP split's first-class output; see
+ *  `pdp.ts`). The tool's own `hitlTier(input)` wins ("declared"); otherwise
+ *  read-only ⇒ "none" ("inferred"), mutating ⇒ "always-confirm" (FAIL-CLOSED
+ *  — see module comment) with reason "needs-sandbox": the unclassified-
+ *  mutating catch-all (e.g. an MCP tool with no `hitlTier`) is gated because
+ *  nothing vouches for it, NOT because it is inherently sensitive — so under
+ *  an explicit `bypass` release the gate defers to mode policy (which still
+ *  hard-denies the denylist). The dispatch seam composes this with the
  *  HARD_DENY check (which overrides to "hand-off-required") to obtain the
  *  final routing tier. */
-export const inferToolTier = (tool: HITLToolDuck, input: unknown): HITLTier => {
+export const inferToolTierDetailed = (
+  tool: HITLToolDuck,
+  input: unknown,
+): { tier: HITLTier; reason: HITLTierReason } => {
   const explicit = tool.hitlTier?.(input)
   // The hardest tier is never downgraded by a capability.
-  if (explicit === "hand-off-required") return explicit
+  if (explicit === "hand-off-required") return { tier: explicit, reason: "declared" }
   // capability is the SSOT for the confirm axis (P2-T3): a declared confirm
   // reason (sensitive / needs-sandbox) implies the always-confirm tier, so a
   // tool declares ONE thing — not a redundant hitlTier — and a read-only-looking
   // tool that is actually sensitive can't silently infer "none" (no floor).
-  if (tool.capability?.(input)?.confirm) return "always-confirm"
-  if (explicit) return explicit
-  return tool.isReadOnly() ? "none" : "always-confirm"
+  const confirm = tool.capability?.(input)?.confirm
+  if (confirm === "sensitive") return { tier: "always-confirm", reason: "sensitive" }
+  if (confirm === "needs-sandbox") return { tier: "always-confirm", reason: "needs-sandbox" }
+  // FAIL-CLOSED: an UNRECOGNIZED (untyped JS / MCP-bridge) truthy confirm value
+  // keeps the legacy escalation to always-confirm — as reason "declared", so it
+  // NEVER rides the needs-sandbox bypass fallthrough (parity with the previous
+  // `if (confirm) return "always-confirm"` behavior under every mode).
+  if (confirm) return { tier: "always-confirm", reason: "declared" }
+  if (explicit) return { tier: explicit, reason: "declared" }
+  return tool.isReadOnly()
+    ? { tier: "none", reason: "inferred" }
+    : { tier: "always-confirm", reason: "needs-sandbox" }
 }
+
+/** Tier-only view of {@link inferToolTierDetailed} (the legacy SSOT surface —
+ *  every existing caller keeps its exact behavior). */
+export const inferToolTier = (tool: HITLToolDuck, input: unknown): HITLTier =>
+  inferToolTierDetailed(tool, input).tier
 
 /** Phase 1 policy: read-only always allowed; destructive shell hard-denied;
  *  everything else allowed in `bypass`/`acceptEdits`, asked in `default`.
