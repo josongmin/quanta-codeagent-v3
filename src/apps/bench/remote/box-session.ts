@@ -33,6 +33,7 @@
  * surface so every importer stays byte-compatible.
  */
 
+import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mirrorReportToSsot } from "@/runner/batch/report"
@@ -389,6 +390,16 @@ const closureDiagnosticsPathFor = (paths: ChunkPaths): string =>
   paths.report.replace(/\.json$/, ".closure-diagnostics.json")
 
 /**
+ * Per-INSTANCE trajectory directory on the box. The recorder splits each run's
+ * localize/repro/repair phases into `<dir>/trajectories/<ts>-<instanceId>.jsonl`
+ * (+ `.meta.json` sidecar) — one FILE per instance (SWE-agent shape) — where
+ * `<dir>` is the parent of the configured `QUANTA_BENCH_RECORD_TRAJECTORY`
+ * cassette path. So the fetchable directory is `dirname(paths.trajectory)/trajectories`.
+ */
+const trajectoriesDirFor = (paths: ChunkPaths): string =>
+  `${paths.trajectory.replace(/\/[^/]*$/, "")}/trajectories`
+
+/**
  * Fail closed on stale box-side artifacts. Single full-remote runs still use the
  * historical fixed `~/preds.jsonl` / `~/report.json` / `~/run.log` paths; if a
  * previous box image or prior failed run left those behind, blindly fetching
@@ -409,8 +420,11 @@ const scrubChunkArtifacts = async (args: {
     closureDiagnosticsPathFor(args.paths),
     ...(args.recordTrajectory ? [args.paths.trajectory] : []),
   ]
+  // Also scrub the per-instance trajectory DIR so a prior run's cassettes can't
+  // be mis-fetched as this run's (same fail-closed contract as the flat files).
+  const trajDir = args.recordTrajectory ? trajectoriesDirFor(args.paths) : undefined
   const cleared = await args.ssh(
-    `rm -f ${targets.join(" ")}; rm -rf ${args.paths.observeDir}; mkdir -p ${args.paths.observeDir}`,
+    `rm -f ${targets.join(" ")}; ${trajDir ? `rm -rf ${trajDir}; ` : ""}rm -rf ${args.paths.observeDir}; mkdir -p ${args.paths.observeDir}`,
   )
   if (cleared.code !== 0) {
     throw new Error(
@@ -527,6 +541,50 @@ const fetchOptionalCommandArtifact = async (args: {
   }
 }
 
+/**
+ * Fetch the box's PER-INSTANCE trajectory cassettes (one FILE per instance run,
+ * SWE-agent shape) + their `.meta.json` sidecars, and extract them into a
+ * per-box subdir under the local full-remote artifact dir:
+ *   `<artifactDir>/trajectories/<suffix>/<ts>-<instanceId>.jsonl`
+ *
+ * One `tar | base64` round-trip (mirrors the observe archive), then a local
+ * `base64 -d | tar -x`. Best-effort: any failure (no dir, empty run, no local
+ * tar) logs nothing fatal and leaves the run untouched. The per-box subdir keeps
+ * two boxes that re-ran the same instance from colliding, and the viewer's
+ * folder scan turns each extracted file into one session.
+ */
+const fetchTrajectoryFiles = async (args: {
+  ssh: BoxSession["ssh"]
+  paths: ChunkPaths
+  artifactSuffix: string
+  log: (msg: string) => void
+}): Promise<void> => {
+  const trajDir = trajectoriesDirFor(args.paths)
+  const b64Path = join(fullRemoteArtifactDir(), `trajectories-${args.artifactSuffix}.tar.b64`)
+  const saved = await fetchOptionalCommandArtifact({
+    ssh: args.ssh,
+    // Only the .jsonl cassettes + .meta.json sidecars; skip if the dir is absent
+    // or empty so `fetchOptionalCommandArtifact` treats it as "nothing to fetch".
+    command: `if [ -d ${trajDir} ] && [ -n "$(ls -A ${trajDir} 2>/dev/null)" ]; then tar -C ${trajDir} -cf - . | base64 -w0; fi`,
+    localPath: b64Path,
+    log: args.log,
+    label: "[full-remote] trajectory cassettes archived",
+  })
+  if (saved === undefined) return
+  // Extract locally into a per-box subdir. Best-effort: never let a missing
+  // local `tar`/`base64` or a corrupt archive crash the post-run fetch.
+  try {
+    const dest = join(fullRemoteArtifactDir(), "trajectories", args.artifactSuffix)
+    mkdirSync(dest, { recursive: true })
+    execFileSync("bash", ["-c", `base64 -d < ${shq(b64Path)} | tar -x -C ${shq(dest)}`], {
+      stdio: "ignore",
+    })
+    args.log(`[full-remote] trajectory cassettes extracted: ${dest}`)
+  } catch {
+    // leave the .tar.b64 in place as the fallback artifact
+  }
+}
+
 const fetchChunkArtifacts = async (args: {
   ssh: BoxSession["ssh"]
   paths: ChunkPaths
@@ -570,12 +628,11 @@ const fetchChunkArtifacts = async (args: {
     label: "[full-remote] closure diagnostics saved",
   })
   if (args.recordTrajectory) {
-    await fetchOptionalArtifact({
+    await fetchTrajectoryFiles({
       ssh: args.ssh,
-      remotePath: args.paths.trajectory,
-      localPath: join(fullRemoteArtifactDir(), `trajectory-${args.artifactSuffix}.jsonl`),
+      paths: args.paths,
+      artifactSuffix: args.artifactSuffix,
       log: args.log,
-      label: "[full-remote] trajectory cassette saved",
     })
   }
   const reportPath = saveLocalArtifact(

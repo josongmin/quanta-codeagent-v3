@@ -336,7 +336,15 @@ const runSwebenchTask = async (
     const result = await resolveInstance(
       instance,
       {
-        llm: deps.llm,
+        // Bind the instance's PRIMARY port to `instanceFreshLlm()` (not the
+        // shared `deps.llm`) so EVERY phase of this run — localize / repro /
+        // repair — records into ONE per-instance cassette
+        // (`trajectories/<ts>-<instanceId>.jsonl` + `.meta.json`) with its
+        // instanceId stamped in each record's metadata. This makes one FILE =
+        // one SESSION (SWE-agent-style), instead of every instance appending to
+        // a single shared blob the viewer then has to heuristically re-split.
+        // Off/replay modes ignore the ctx ⇒ byte-identical to `deps.llm` there.
+        llm: instanceFreshLlm(),
         maxTurns: deps.cfg.maxTurns,
         timeoutMs: deps.cfg.timeoutMs,
         ...(reproArtifactSink !== undefined ? { reproArtifactSink } : {}),
