@@ -52,6 +52,8 @@ const READOUT_COMMANDS: readonly {
   { slug: "memory", description: "Durable memory store, read-only (live)" },
   { slug: "why", description: "Why the last tool ran (needs the CLI's LLM meta-query)" },
   { slug: "cost", description: "Cumulative session cost / token fold (live)" },
+  { slug: "context", description: "Context-window usage breakdown (live)" },
+  { slug: "doctor", description: "Session-store health check (live)" },
 ]
 
 const fetchReadout = async (ep: ReadoutEndpoint, name: string): Promise<void> => {

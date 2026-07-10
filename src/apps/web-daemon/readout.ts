@@ -32,9 +32,10 @@
  * composed on the web surface).
  */
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
-import { errMessage } from "@/shared"
 import type { Plan, TodoItem } from "@/agent/plan/types"
 import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
+import type { StoreHealthReport } from "@/session"
+import { errMessage } from "@/shared"
 
 export interface ReadoutResult {
   /** Normalized command name (alias-resolved, e.g. `caps` → `capabilities`). */
@@ -104,6 +105,11 @@ export interface WebReadoutSources {
   readonly cost?: () => CostReadoutTotals
   /** Latest segmented context-usage breakdown (undefined before turn 1). */
   readonly context?: () => ContextUsageBreakdown | undefined
+  /** P4/P2 (jul-11, UUX-4-18) — session-store health probe (the CLI's
+   *  `checkSessionStoreHealth`, dependency-free async). The `/doctor` readout
+   *  renders its verdict + counts + recovery guidance. Absent ⇒ honest
+   *  missing-source line. */
+  readonly doctor?: () => Promise<StoreHealthReport>
   /** Injectable clock for deterministic age rendering under test. */
   readonly now?: () => number
 }
@@ -118,6 +124,7 @@ export const SOURCE_BACKED_READOUTS = [
   "memory",
   "cost",
   "context",
+  "doctor",
 ] as const
 
 /** Readouts this surface deliberately does NOT serve, with the honest reason
@@ -155,6 +162,9 @@ const MISSING_SOURCE_COPY: Readonly<Record<(typeof SOURCE_BACKED_READOUTS)[numbe
   context:
     "/context: context-usage holder not composed " +
     "(the onPromptAssembled seam was not threaded on this daemon)",
+  doctor:
+    "/doctor: session-store health probe not composed " +
+    "(the doctor accessor was not threaded on this daemon)",
 }
 
 const yesno = (b: boolean): string => (b ? "yes" : "no")
@@ -362,6 +372,14 @@ const sourceFailed = (name: string, error: unknown): ReadoutResult => ({
  * (sync or async) degrades to a graceful `wired:false` payload carrying the
  * error message, so the HTTP route can never 500 on a readout.
  */
+/** P4/P2 (jul-11) — render a session-store health report as a readout body:
+ *  verdict headline + counts + recovery guidance when non-healthy. */
+const renderDoctor = (report: StoreHealthReport): string => {
+  const head = `session store: ${report.verdict} (${report.ok}/${report.total} ok, ${report.corrupt} corrupt, ${report.unreadable} unreadable)`
+  const root = `root: ${report.root}`
+  return report.guidance !== undefined ? `${head}\n${root}\n${report.guidance}` : `${head}\n${root}`
+}
+
 export const resolveReadout = async (
   name: string,
   snapshot: SessionSnapshotLite,
@@ -388,6 +406,9 @@ export const resolveReadout = async (
       case "context":
         if (sources.context === undefined) break
         return served(n, renderContext(sources.context()))
+      case "doctor":
+        if (sources.doctor === undefined) break
+        return served(n, renderDoctor(await sources.doctor()))
       default:
         break
     }

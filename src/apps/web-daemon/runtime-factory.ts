@@ -51,6 +51,7 @@ import {
   type RuntimeAgentConfigBase,
   type RuntimeFacade,
 } from "@/sdk/runtime"
+import { checkSessionStoreHealth } from "@/session"
 import { gateOn } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { StdoutStream } from "@/stream"
@@ -424,6 +425,10 @@ const buildReadoutSources = (args: {
       ? { memory: async () => (await memoryStore.all()).map(toMemoryReadoutEntry) }
       : {}),
     context: () => usageHolder.latest(),
+    // P4/P2 (jul-11, UUX-4-18) — session-store health is a dependency-free
+    // async probe (no SlashContext needed), so the `/doctor` readout is ALWAYS
+    // available on this daemon (CLI parity for the store-health check).
+    doctor: () => checkSessionStoreHealth(),
   }
 }
 

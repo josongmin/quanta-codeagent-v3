@@ -329,3 +329,42 @@ describe("resolveReadout — adversarial totality", () => {
     expect(caps.output).toContain("websocket")
   })
 })
+
+// RS-12 (P4/P2, jul-11) — doctor readout: session-store health served LIVE from
+// the injected accessor; absent ⇒ honest missing copy; a throw ⇒ graceful.
+describe("doctor readout (session-store health)", () => {
+  test("RS-12: a wired doctor accessor renders the verdict + counts", async () => {
+    const sources: WebReadoutSources = {
+      doctor: async () => ({
+        root: "/tmp/x",
+        verdict: "degraded",
+        total: 3,
+        ok: 2,
+        corrupt: 1,
+        unreadable: 0,
+        files: [],
+        guidance: "run `quanta doctor` to inspect",
+      }),
+    }
+    const r = await resolveReadout("doctor", snap(), sources)
+    expect(r.isError).toBe(false)
+    expect(r.output).toContain("degraded")
+    expect(r.output).toContain("run `quanta doctor`")
+  })
+
+  test("RS-12b: absent doctor accessor names what is missing", async () => {
+    const r = await resolveReadout("doctor", snap(), {})
+    expect(r.isError).toBe(false)
+    expect(r.output).toContain("doctor")
+    expect(r.output).not.toMatch(/^doctor: not wired$/)
+  })
+
+  test("RS-12c: a throwing doctor accessor degrades gracefully (never 500)", async () => {
+    const r = await resolveReadout("doctor", snap(), {
+      doctor: async () => {
+        throw new Error("fs blew up")
+      },
+    })
+    expect(r.isError).toBe(false)
+  })
+})
