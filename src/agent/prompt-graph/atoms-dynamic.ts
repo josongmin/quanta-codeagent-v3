@@ -89,7 +89,7 @@ const dyn = (
   channel: REMINDER,
   section: SECTION,
   order,
-  lines: [], // per-turn DATA — resolved by the compiler via `contentKey`.
+  lines: [], // per-turn DATA — the leaf renderer produces the text; `contentKey` is the observability label.
   contentKey: key,
   ...(when !== undefined ? { when } : {}),
   ...(provenance !== undefined ? { provenance } : {}),
@@ -147,9 +147,11 @@ const A_TASK_BUDGET = dyn("task-budget", 200, { hasTaskBudget: true }, "L2_runti
 
 /**
  * The dynamic-content atom set (ordered). Every atom rides
- * `message.system_reminder` with a `contentKey`; the compiler resolves each key
- * to per-turn text via a pure lookup and assembles them in order (interleaved
- * with the notice atoms). Applicability is the declarative `when` matcher.
+ * `message.system_reminder` with a `contentKey` LABEL; the per-turn text for each
+ * is produced by the leaf renderer in `buildDynamicContext` (there is no
+ * `contentByKey` resolver yet — see the file header), in this same order
+ * (interleaved with the notice atoms). Applicability is the declarative `when`
+ * matcher; the manifest reports which of these fired.
  */
 export const DYNAMIC_ATOMS: readonly InstructionAtom[] = [
   A_DATE,

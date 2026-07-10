@@ -158,20 +158,38 @@ describe("ADR-0538 Phase 3 — compile() shape + manifest", () => {
 
   test("firedAtomIds are SEMANTIC atomIds (not variantIds, not synthetic markers)", () => {
     // Ratchet for the P4 fix: firedAtomIds must be the atomId projection of the
-    // real fired atoms — a regression to the old `firedAtomIds = firedVariantIds`
+    // real fired atoms. A regression to the old `firedAtomIds = firedVariantIds`
     // (which collapsed atomId/variantId AND leaked the synthetic SECTION-*/MSG-*
-    // caller-data markers) must go RED here. Use an owned+plan ctx so a variant
-    // atom (R-ENV#owned → atomId R-ENV) actually fires on system.base.
-    const artifact = compile(base({ mode: "plan" }))
+    // caller-data markers) MUST go RED here. This needs a RICH ctx that actually
+    // POPULATES the caller-data channels — otherwise the synthetic-marker
+    // assertion is vacuous (no markers exist to leak) and passes under the bug.
+    const artifact = compile(
+      base({
+        repoRules,
+        sessionCtx: "sc",
+        userAppend: "ua",
+        hookPromptInjects: [{ injectBeforeUser: "PRE" }],
+        contextChangeEvents: [{ kind: "mode_change", prev: "a", next: "b", at: 1 }],
+        mentionInjectionMessages: [{ role: "user", content: [{ type: "text", text: "<m/>" }] }],
+      }),
+    )
     const atomIds = artifact.manifest.firedAtomIds
     const variantIds = artifact.manifest.firedVariantIds
-    // A body atom fired: its bare atomId is present, not a variant/synthetic id.
-    expect(atomIds).toContain("BODY-POLICY-STACK")
-    // NO synthetic caller-data marker leaks into the semantic atom set.
+    // The env atom fires on system.base as its FROZEN variant (default bodyCtx):
+    // firedAtomIds carries the bare atomId "R-ENV", NOT the variantId "R-ENV#frozen".
+    // Under the bug (firedAtomIds = firedVariantIds) it would carry "R-ENV#frozen"
+    // and NOT "R-ENV" — so BOTH of these go RED.
+    expect(atomIds).toContain("R-ENV")
+    expect(atomIds).not.toContain("R-ENV#frozen")
+    // firedVariantIds, by contrast, IS the wire-instance set: it HAS the variant id
+    // AND the synthetic caller-data markers (proving the ctx is rich + the two
+    // projections are genuinely distinct).
+    expect(variantIds).toContain("R-ENV#frozen")
+    expect(variantIds).toContain("SECTION-project_md")
+    expect(variantIds).toContain("MSG-hook_context")
+    // NO synthetic caller-data marker leaks into the SEMANTIC atom set. Non-vacuous
+    // now (the markers DO exist in firedVariantIds), so under the bug this goes RED.
     expect(atomIds.some((id) => id.startsWith("SECTION-") || id.startsWith("MSG-"))).toBe(false)
-    // firedVariantIds, by contrast, IS the full wire-instance set (may carry the
-    // synthetic markers) — the two projections are genuinely distinct.
-    expect(variantIds.length).toBeGreaterThanOrEqual(atomIds.length)
   })
 
   test("manifest.byChannel covers ALL 8 channels (present or empty)", () => {
