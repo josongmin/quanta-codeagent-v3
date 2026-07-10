@@ -119,6 +119,21 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
     gate: "QUANTA_BRACKETED_PASTE",
     describe: "Bracketed-paste mode: a multi-line paste submits only on a real Enter",
   },
+  // SOTA++ (jul-10, decision #3) — mid-turn control is table stakes (Claude
+  // Code Esc-interrupt / Codex mid-turn input): /cancel + /summarize-now +
+  // the mid-loop drain all ride this surface; byte-identity of the OFF path
+  // was proven before seeding (paired control + Proxy witness + smoke 15/15).
+  {
+    gate: "QUANTA_CONVERSATION_ACTIONS",
+    describe: "Mid-turn typed control surface (/cancel, /summarize-now) + same-turn drain",
+  },
+  // SOTA++ (jul-10, decision #4) — stall visibility is the observability
+  // north star ("why is it stuck"); latched per episode, recovery clears.
+  // Thresholds tune via telemetry; flip off here if false positives appear.
+  {
+    gate: "QUANTA_SPINNER_STALL",
+    describe: "LLM stream stall detector → operator notice (per-episode latch)",
+  },
 ] as const
 
 /** The seed-loop projection (what `index.ts` iterates). */
