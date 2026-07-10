@@ -106,46 +106,18 @@ const DEFAULT_MAX_LINE_BYTES = 64 * 1024
 type EscSwallowState = "none" | "esc" | "csi" | "ss3" | "str" | "str-esc"
 
 /**
- * Start a concurrent line reader on the injected stdin for the lifetime of ONE
- * turn. Returns a handle whose `dispose()` detaches the listener and restores
- * the prior raw-mode + paused state. See the module header for the lifecycle /
- * raw-mode / ctrl-c / no-contention invariants.
+ * The escape-filtering partial-line accumulator (god-fn split, audit W4-R2).
+ * Owns the WS-B contract in one place: CR/LF terminate, ^C drops the partial,
+ * BS/DEL edit (surrogate-aware), escape SEQUENCES (CSI/SS3/OSC/DCS/PM/APC,
+ * lone-Esc/Alt-chords) are swallowed whole across chunk boundaries, other C0
+ * chords drop (TAB excepted), and an over-cap partial overflows silently.
+ * Module-scope factory so `startInTurnLineReader` stays under the fn-line cap.
  */
-export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineReaderHandle => {
-  const { stdin, onLine } = deps
-  const maxLineBytes =
-    deps.maxLineBytes !== undefined && deps.maxLineBytes > 0
-      ? deps.maxLineBytes
-      : DEFAULT_MAX_LINE_BYTES
-
-  const isTty = stdin.isTTY === true
-  const utf8 = new StringDecoder("utf8")
-  // Save the prior raw flag so dispose restores EXACTLY what we found. On a
-  // non-TTY the flag is meaningless and `setRawMode` is absent — never touched.
-  const priorRaw = isTty ? (stdin.isRaw ?? false) : false
-  // Save the prior flowing/paused state so dispose restores it. Between turns the
-  // stream is `pause()`d by the turn-boundary reader's cleanup; during the turn we
-  // resume it to receive keystrokes, then restore the prior state on dispose so the
-  // next turn-boundary reader sees the stream exactly as it left it.
-  const priorPaused = stdin.isPaused?.() ?? true
-
-  let disposed = false
-
-  // Deliver one completed line to the capture sink. No-throw + non-awaiting: a
-  // faulting / rejecting sink must never break the in-flight turn that produced
-  // the keystroke (the sacred invariant).
-  const emitLine = (line: string): void => {
-    try {
-      const r = onLine(line)
-      if (r !== undefined && typeof (r as Promise<void>).catch === "function") {
-        void (r as Promise<void>).catch(() => undefined)
-      }
-    } catch {
-      /* capture sink threw — swallow; the in-flight turn is sacred */
-    }
-  }
-
-  // Partial-line accumulator. Buffers a STRING (utf8-decoded per chunk); a CR/LF
+const createEscapeFilteringAccumulator = (
+  maxLineBytes: number,
+  emitLine: (line: string) => void,
+): { feed: (text: string) => void; partial: () => string } => {
+  // Buffers a STRING (utf8-decoded per chunk); a CR/LF
   // terminates a line, a CTRL-C drops the partial (interrupt), and a line that
   // grows past `maxLineBytes` is marked `overflowed` so its REST (to the next
   // terminator) is discarded — a runaway / newline-less paste must never be
@@ -200,11 +172,7 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
     },
   }
 
-  const onData = (chunk: Buffer | string): void => {
-    if (disposed) return
-    // Audit W3-B2 — a multibyte char split across chunk boundaries must decode
-    // whole; per-chunk toString() emitted U+FFFD halves.
-    const text = typeof chunk === "string" ? chunk : utf8.write(chunk)
+  const feed = (text: string): void => {
     // Walk the chunk char-by-char so a CTRL-C byte (0x03) is intercepted as an
     // interrupt and CR/LF terminate the current line. We never consume the SIGINT
     // signal — on a TTY Node raises SIGINT from the kernel line discipline; raw
@@ -274,13 +242,69 @@ export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineRea
       if (code < 0x20 && code !== TAB) continue
       acc.push(text[i] ?? "")
     }
+  }
+
+  return { feed, partial: () => acc.partial }
+}
+
+/**
+ * Start a concurrent line reader on the injected stdin for the lifetime of ONE
+ * turn. Returns a handle whose `dispose()` detaches the listener and restores
+ * the prior raw-mode + paused state. See the module header for the lifecycle /
+ * raw-mode / ctrl-c / no-contention invariants.
+ */
+export const startInTurnLineReader = (deps: InTurnLineReaderDeps): InTurnLineReaderHandle => {
+  const { stdin, onLine } = deps
+  const maxLineBytes =
+    deps.maxLineBytes !== undefined && deps.maxLineBytes > 0
+      ? deps.maxLineBytes
+      : DEFAULT_MAX_LINE_BYTES
+
+  const isTty = stdin.isTTY === true
+  const utf8 = new StringDecoder("utf8")
+  // Save the prior raw flag so dispose restores EXACTLY what we found. On a
+  // non-TTY the flag is meaningless and `setRawMode` is absent — never touched.
+  const priorRaw = isTty ? (stdin.isRaw ?? false) : false
+  // Save the prior flowing/paused state so dispose restores it. Between turns the
+  // stream is `pause()`d by the turn-boundary reader's cleanup; during the turn we
+  // resume it to receive keystrokes, then restore the prior state on dispose so the
+  // next turn-boundary reader sees the stream exactly as it left it.
+  const priorPaused = stdin.isPaused?.() ?? true
+
+  let disposed = false
+
+  // Deliver one completed line to the capture sink. No-throw + non-awaiting: a
+  // faulting / rejecting sink must never break the in-flight turn that produced
+  // the keystroke (the sacred invariant).
+  const emitLine = (line: string): void => {
+    try {
+      const r = onLine(line)
+      if (r !== undefined && typeof (r as Promise<void>).catch === "function") {
+        void (r as Promise<void>).catch(() => undefined)
+      }
+    } catch {
+      /* capture sink threw — swallow; the in-flight turn is sacred */
+    }
+  }
+
+  const acc = createEscapeFilteringAccumulator(maxLineBytes, emitLine)
+
+  const onData = (chunk: Buffer | string): void => {
+    if (disposed) return
+    // Audit W3-B2 — a multibyte char split across chunk boundaries must decode
+    // whole; per-chunk toString() emitted U+FFFD halves.
+    const text = typeof chunk === "string" ? chunk : utf8.write(chunk)
+    // The escape-filtering walk lives in the module-scope accumulator (WS-B
+    // contract; see createEscapeFilteringAccumulator). We never consume the
+    // SIGINT signal — raw mode only changes WHO sees the 0x03.
+    acc.feed(text)
     // §08b — surface the live buffer for the bottom input-lane redraw (or `""`
     // after a terminator/CTRL-C ⇒ clear the lane). No-throw: a faulting render
     // sink must never break the in-flight turn. Audit R1 #3 — skip empty chunks
     // (0 bytes processed ⇒ nothing changed ⇒ no spurious lane redraw/flicker).
     if (deps.onPartial !== undefined && text.length > 0) {
       try {
-        deps.onPartial(acc.partial)
+        deps.onPartial(acc.partial())
       } catch {
         /* render sink threw — swallow; the in-flight turn is sacred */
       }
