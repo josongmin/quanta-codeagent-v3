@@ -44,7 +44,7 @@ import type {
 } from "./types/protocol"
 import { type AgentStateSource, useAgentState } from "./ws/agent-state-hooks"
 import { type CanvasSource, useArtifacts, useContextUsage, useToolDiffs } from "./ws/canvas-hooks"
-import { SessionClient } from "./ws/client"
+import { type ConnectOptions, SessionClient } from "./ws/client"
 import { useItemStream } from "./ws/item-stream-hooks"
 import {
   type ObservabilitySource,
@@ -264,6 +264,24 @@ export const formatResumeStatus = (state: ResumeUiState): string | null => {
   }
 }
 
+/**
+ * P1 Phase 3b — the ConnectOptions for OPENING a persisted thread. Re-dialing
+ * the WS with `resumeThreadId` set makes the daemon SWAP its one live session
+ * onto that thread (`?thread=` → swap-on-attach): the kernel transcript becomes
+ * the thread's, so the NEXT turn continues it (model continuity) and the
+ * boundary is a real live-attach — NOT a read-only replay. Mirrors the
+ * mount-connect arg shape: `auth` only rides when a token is present, so the
+ * no-token path stays byte-identical to the legacy connect.
+ */
+export const buildResumeConnectOptions = (
+  connection: { readonly url: string; readonly token?: string },
+  resumeThreadId: string,
+): ConnectOptions => ({
+  url: connection.url,
+  resumeThreadId,
+  ...(connection.token !== undefined ? { auth: { token: connection.token } } : {}),
+})
+
 const buildSlashContextSnapshot = (args: {
   readonly modelSlug: string | null
   readonly connection: ConnectionState
@@ -442,6 +460,15 @@ export const App = (): JSX.Element => {
     const httpBase = httpUrlFromWsUrl(resolvedConnection.url)
     const ctrl = new AbortController()
     setResumeState({ phase: "resuming", threadId: resumeThreadId })
+    // P1 Phase 3b — ARM THE DAEMON SWAP: re-dial the WS carrying
+    // `resumeThreadId` so the daemon swaps its one live session onto this thread
+    // (`?thread=` → swap-on-attach). This gives model continuity — the NEXT turn
+    // continues the opened thread's kernel transcript — and flips the boundary to
+    // a real live-attach. The REST hydration below still RENDERS the thread's
+    // persisted transcript, because `transcript.replace` emits only a
+    // `session.state.updated` summary, not the per-message events the UI draws.
+    client.disconnect()
+    client.connect(buildResumeConnectOptions(resolvedConnection, resumeThreadId))
     void hydrateThreadResume({
       requestedThreadId: resumeThreadId,
       liveSessionId: learnedSessionId,

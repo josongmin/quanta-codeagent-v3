@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatResumeStatus, type ResumeUiState } from "./App"
+import { buildResumeConnectOptions, formatResumeStatus, type ResumeUiState } from "./App"
 
 /**
  * B2 — resume banner state-machine copy. Pins the HONEST boundary distinction
@@ -48,5 +48,30 @@ describe("formatResumeStatus (B2 resume banner copy)", () => {
     expect(formatResumeStatus({ phase: "failed", threadId: "ghost" })).toBe(
       "Could not resume thread ghost.",
     )
+  })
+})
+
+/**
+ * ★ HELLGATE — P1 Phase 3b (frontend live-join): opening a persisted thread
+ * re-dials the WS with `resumeThreadId` set so the daemon SWAPS its one live
+ * session onto that thread (live-attach), not a read-only replay. This pins the
+ * ConnectOptions the App feeds `client.connect` on a thread-open.
+ */
+describe("buildResumeConnectOptions (P1 Phase 3b swap re-dial)", () => {
+  it("carries resumeThreadId so the daemon swap fires", () => {
+    const opts = buildResumeConnectOptions({ url: "ws://h/s" }, "thread-7")
+    expect(opts.resumeThreadId).toBe("thread-7")
+    expect(opts.url).toBe("ws://h/s")
+  })
+
+  it("rides the auth token when present (mirrors mount-connect shape)", () => {
+    const opts = buildResumeConnectOptions({ url: "ws://h/s", token: "tk" }, "thread-7")
+    expect(opts.auth).toEqual({ token: "tk" })
+    expect(opts.resumeThreadId).toBe("thread-7")
+  })
+
+  it("PAIRED CONTROL — no token ⇒ NO auth key (byte-identical to legacy no-token connect)", () => {
+    const opts = buildResumeConnectOptions({ url: "ws://h/s" }, "thread-7")
+    expect("auth" in opts).toBe(false)
   })
 })
