@@ -922,12 +922,25 @@ const buildSystemSections = (
   useSectioned: boolean,
 ): PromptSection[] => {
   if (!useSectioned) return [{ name: "base", text: staticBase, cache: true }]
+  // SECURITY: the CALLER-DATA sections (repo AGENTS.md, session ctx, memory
+  // aggregate, user global CLAUDE.md) are repo-/user-controllable and ride the
+  // TRUSTED system prefix. Defang the `<system-reminder>` boundary in each so a
+  // forged tag in e.g. an AGENTS.md body cannot masquerade as a genuine harness
+  // reminder (an L6-repo → L1-system authority elevation). This is the same
+  // defense the per-turn reminder gets via `embedUntrusted`; when repo-rules were
+  // hoisted from the reminder into the cached `project_md` section they lost it,
+  // so it is restored here. `base` is Quanta's OWN prompt — NOT escaped. Benign
+  // content (no genuine boundary token) is byte-identical (escapeBoundary's benign
+  // invariant), so the cache prefix for real repos is unchanged.
+  const defang = (s: string): string => escapeBoundary("system-reminder", s)
   const sections = fourSectionPreset({
     base: staticBase,
-    ...(projectMd !== undefined ? { projectMd } : {}),
-    ...(input.sessionCtx !== undefined ? { sessionCtx: input.sessionCtx } : {}),
-    ...(input.memorySummaryMd !== undefined ? { memorySummaryMd: input.memorySummaryMd } : {}),
-    ...(input.userAppend !== undefined ? { userAppend: input.userAppend } : {}),
+    ...(projectMd !== undefined ? { projectMd: defang(projectMd) } : {}),
+    ...(input.sessionCtx !== undefined ? { sessionCtx: defang(input.sessionCtx) } : {}),
+    ...(input.memorySummaryMd !== undefined
+      ? { memorySummaryMd: defang(input.memorySummaryMd) }
+      : {}),
+    ...(input.userAppend !== undefined ? { userAppend: defang(input.userAppend) } : {}),
   })
   // Fail-soft cache-budget check (unchanged): the preset cannot exceed 4 by
   // construction; kept so future growth surfaces in dev, not at the API.
