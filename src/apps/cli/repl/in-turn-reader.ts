@@ -205,11 +205,15 @@ const createEscapeFilteringAccumulator = (
         continue
       }
       if (acc.esc === "csi") {
-        if (code >= 0x40 && code <= 0x7e) acc.esc = "none" // final byte ends CSI
+        // Audit R3 — a fresh ESC inside CSI RESTARTS the parser (terminals
+        // treat it as sequence abort + new introducer); staying in CSI let
+        // `\x1b[\x1b]0;EVIL\x07` leak its OSC payload as text.
+        if (code === ESC) acc.esc = "esc"
+        else if (code >= 0x40 && code <= 0x7e) acc.esc = "none" // final byte ends CSI
         continue
       }
       if (acc.esc === "ss3") {
-        acc.esc = "none" // SS3 carries exactly one byte after \x1bO
+        acc.esc = code === ESC ? "esc" : "none" // SS3 carries exactly one byte after \x1bO
         continue
       }
       if (acc.esc === "esc") {

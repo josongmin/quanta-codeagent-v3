@@ -93,6 +93,11 @@ describe("HELLGATE WS-B — escape/chord bytes never enter a captured line", () 
     expect(capture(["\x1bP1$r0m\x1b\\ok\n"])).toEqual(["ok"])
   })
 
+  test("audit R3: ESC inside CSI restarts the parser — nested OSC payload never leaks", () => {
+    expect(capture(["\x1b[\x1b]0;EVIL\x07after\n"])).toEqual(["after"])
+    expect(capture(["\x1bO\x1b]0;EVIL\x07after\n"])).toEqual(["after"])
+  })
+
   test("OSC split across chunks is still swallowed", () => {
     expect(capture(["a\x1b]8;;https://x", ".dev\x07b\n"])).toEqual(["ab"])
   })

@@ -235,7 +235,16 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
           commandId: newCommandId(),
           issuedAt: issuedAt(),
         })
-        await sendCommand(respond).catch(() => undefined)
+        // Audit R3 MED-2 — a respond send failure must be LOUD and terminal
+        // (parity with the line-input path): latch sendBroken, banner, and
+        // never fire the follow-up turn.run against a dead socket.
+        try {
+          await sendCommand(respond)
+        } catch {
+          sendBroken = true
+          opts.write("\n[disconnected from daemon (approval response not delivered)]\n")
+          return
+        }
         // ADR-0512 P3 — the kernel does NOT auto-continue a resolved approval: a
         // fresh `turn.run` is what claims the grant and re-dispatches the
         // approved tool. So on APPROVE, re-run the suspended turn (a bare

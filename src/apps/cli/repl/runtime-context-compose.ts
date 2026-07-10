@@ -166,8 +166,16 @@ interface EscalationScopeView {
  *  the normalizer SSOT would strip a "" steer anyway; this is the UX half).
  *  Shared by the escalation arm AND the normal verb prompt (no fork copy). */
 const askSteerText = async (deps: CliHitlDeps): Promise<string | undefined> => {
+  // Audit R3 MED-1 — a channel RELEASE mid-steer (turn tore down between the
+  // verb answer and the steer text) must NOT re-prompt: the re-ask would land
+  // on `active=false` and open an ad-hoc readline on the REAL stdin — an
+  // orphan reader that hangs the approval and steals the next between-turns
+  // line. Detect the release by the active-flag flip around the ask and
+  // fail-closed to a plain deny (askLine already printed the release notice).
+  const wasActive = deps.channel.active
   const first = (await askLine(deps.channel, "Steer (what to do instead): ", "approval")).trim()
   if (first.length > 0) return first
+  if (wasActive && !deps.channel.active) return undefined // released ⇒ plain deny
   const second = (
     await askLine(deps.channel, "steer text required (or N to deny): ", "approval")
   ).trim()

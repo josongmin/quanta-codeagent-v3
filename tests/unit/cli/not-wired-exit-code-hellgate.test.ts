@@ -239,7 +239,7 @@ describe("UUX-1-23 — /side not-wired posture (no throw)", () => {
     expect(src).not.toContain('throw new Error("side chat not wired')
     // The closure RETURNS the typed marker (a comment mentioning the marker
     // would not satisfy this pin).
-    expect(src).toContain('return "not-wired"')
+    expect(src).toMatch(/^[^/]*return "not-wired"/m)
   })
 })
 
