@@ -67,21 +67,18 @@ const askLine = async (
   label = "prompt",
 ): Promise<string> => {
   if (channel.active) {
-    process.stderr.write(prompt)
-    const result = await channel.awaitLine(undefined, label)
+    // C2 (jul-10 audit) — the channel is a FIFO ask queue: render the prompt
+    // in `onActive` (fired when THIS ask becomes head — synchronously for the
+    // single-ask case, byte-identical to the old render-then-await), so a
+    // concurrent ask never prints its prompt over an unanswered one.
+    const result = await channel.awaitLine(undefined, label, () => process.stderr.write(prompt))
     if (result.kind === "line") return result.line
     // WS-A (jul-10, UUX-1-22) — a RELEASED prompt (turn canceled/backgrounded/
     // ended with the ask unanswered) maps to the same fail-closed "" the callers
     // already treat as deny, but NEVER silently: the operator sees WHY the
     // prompt vanished, and the outcome is attributed to the release — not to a
-    // decision they never made. C2 (jul-10 W4) — a SUPERSEDED release names
-    // which ask won the channel, so the one-waiter collision is diagnosable.
-    const why =
-      result.cause === "turn_teardown"
-        ? "turn ended"
-        : result.cause === "superseded"
-          ? `superseded by ${result.supersededBy ?? "a newer"} prompt`
-          : "canceled by its consumer"
+    // decision they never made.
+    const why = result.cause === "turn_teardown" ? "turn ended" : "canceled by its consumer"
     process.stderr.write(
       `\n[quanta] ${label} prompt released unanswered (${why}) — treated as deny/fail-closed.\n`,
     )
@@ -186,16 +183,19 @@ const askSteerText = async (deps: CliHitlDeps): Promise<string | undefined> => {
 const promptEscalationVerbs = async (
   deps: CliHitlDeps,
   scope: EscalationScopeView,
+  // C2 (jul-10 audit) — site context (diff preview / preflight warning) rides
+  // the SAME activation-rendered prompt so a queued escalation never prints
+  // its context over an unanswered earlier ask. "" ⇒ byte-identical.
+  contextHeader = "",
 ): Promise<ConfirmDecision> => {
-  process.stderr.write(
+  const header =
     `Skill '${scope.activeSkill}' scope — tool '${scope.tool}' is out of scope.\n` +
-      `  reason: ${scope.reason}\n` +
-      (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : ""),
-  )
+    `  reason: ${scope.reason}\n` +
+    (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : "")
   const ans = (
     await askLine(
       deps.channel,
-      "Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ",
+      `${contextHeader}${header}Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] `,
       "approval",
     )
   )
@@ -230,6 +230,11 @@ const promptEscalationVerbs = async (
 interface NormalVerbCaps {
   /** Prompt subject: the tool name (inline) or "pending action" (deferred). */
   readonly subject: string
+  /** C2 (jul-10 audit) — site context printed ABOVE the verb line (approval
+   *  header / diff preview / preflight warning / team-escalation header),
+   *  bundled INTO the ask's prompt so it renders at head activation with it —
+   *  a queued ask's context can never interleave over an unanswered prompt. */
+  readonly contextHeader?: string
   /** [h]unk-select capability (inline-only — needs the ToolAction). */
   readonly hunk?: { readonly diff: ActionDiff; readonly ids: string[] }
   /** [p] prefix-grant capability (inline-only — needs `shellCommand`). */
@@ -245,15 +250,16 @@ type NormalVerbAnswer =
   | { readonly kind: "deny"; readonly steer?: string }
 
 const renderNormalVerbPrompt = (caps: NormalVerbCaps): string => {
+  const context = caps.contextHeader ?? ""
   const prefixLabel = caps.prefixLabel ?? null
   const durable = caps.durable === true && prefixLabel !== null
   // T05 — append the [h]unk-select verb when a per-hunk option exists.
   const hunkVerb = caps.hunk !== undefined ? " / [h]unk-select" : ""
   return durable
-    ? `Allow ${caps.subject}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
+    ? `${context}Allow ${caps.subject}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
     : prefixLabel !== null
-      ? `Allow ${caps.subject}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
-      : `Allow ${caps.subject}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `
+      ? `${context}Allow ${caps.subject}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
+      : `${context}Allow ${caps.subject}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `
 }
 
 const promptNormalApprovalVerbs = async (
@@ -338,10 +344,12 @@ const runHunkSelect = async (
   diff: ActionDiff,
   ids: string[],
 ): Promise<boolean | ConfirmDecision> => {
-  process.stderr.write(`${renderHunkChoices(diff.before, diff.after)}\n`)
+  // C2 — the hunk listing is this ask's own prompt copy: bundled so it renders
+  // at head activation (a queued ask between the verb answer and this picker
+  // would otherwise have the listing printed over ITS unanswered prompt).
   const raw = await askLine(
     deps.channel,
-    `Accept which hunks? [1-${ids.length}] (e.g. "1,3" / "all" / "none"): `,
+    `${renderHunkChoices(diff.before, diff.after)}\nAccept which hunks? [1-${ids.length}] (e.g. "1,3" / "all" / "none"): `,
   )
   deps.idleMonitor.markActive()
   const selected = parseHunkSelection(raw, ids)
@@ -387,26 +395,35 @@ const runHunkSelect = async (
  *                         injects as the next user message (Cursor
  *                         REJECT_AND_TELL; the gate already supports it)
  *  An escalation (`scopeContext`) routes to the dedicated o/s/D/t verb set. */
+/** C2 (jul-10 audit) — the confirm's pre-ask site context (diff preview +
+ *  preflight apply warning), ACCUMULATED instead of written: it renders as
+ *  part of the ask's prompt at channel-head activation, so a confirm queued
+ *  behind an unanswered ask never prints its context over that prompt.
+ *  Content and order are byte-identical to the old direct writes.
+ *  #19 — the warning follows the diff so the operator approves with eyes
+ *  open. Both default-gated; OFF ⇒ "" ⇒ byte-identical prompt. */
+const buildConfirmContext = async (deps: CliHitlDeps, action: ToolAction): Promise<string> => {
+  let context = ""
+  if (diffPreviewEnabled()) {
+    const preview = await renderActionDiff(action)
+    if (preview !== undefined) context += `${preview}\n`
+  }
+  if (preflightCheckEnabled()) {
+    const warning = await preflightApplyWarning(action, { cwd: deps.cwd ?? process.cwd() })
+    if (warning !== undefined) context += `${warning}\n`
+  }
+  return context
+}
+
 const buildCliOnConfirm =
   (deps: CliHitlDeps) =>
   async (action: ToolAction): Promise<boolean | ConfirmDecision> => {
-    if (diffPreviewEnabled()) {
-      const preview = await renderActionDiff(action)
-      if (preview !== undefined) process.stderr.write(`${preview}\n`)
-    }
-    // #19 — after the diff, warn if the mutating action would NOT cleanly apply
-    // (stale edit anchor / unlocatable patch hunk / missing target) so the
-    // operator approves with eyes open. Default-ON via QUANTA_PREFLIGHT_CHECK;
-    // OFF ⇒ byte-identical to the pre-#19 prompt. Best-effort (never throws).
-    if (preflightCheckEnabled()) {
-      const warning = await preflightApplyWarning(action, { cwd: deps.cwd ?? process.cwd() })
-      if (warning !== undefined) process.stderr.write(`${warning}\n`)
-    }
+    let context = await buildConfirmContext(deps, action)
     const scope = action.scopeContext
     if (scope !== undefined) {
       // ToolAction's scopeContext omits the tool name (it lives on the action) —
       // re-attach it so the shared prompt renders the same header both routes.
-      return promptEscalationVerbs(deps, { ...scope, tool: action.tool })
+      return promptEscalationVerbs(deps, { ...scope, tool: action.tool }, context)
     }
     // UUX-6-12 — a TEAM-BROKER escalation (a worker subagent's soft-denied tool
     // routed to this leader's authority) must NAME who is asking + what for; a
@@ -415,10 +432,9 @@ const buildCliOnConfirm =
     // Absent (every non-broker confirm) ⇒ byte-identical prompt.
     const team = action.teamEscalation
     if (team !== undefined) {
-      process.stderr.write(
+      context +=
         `Subagent '${team.workerId}' asks to run '${action.tool}' — scope: ${team.scope}\n` +
-          `  reason: ${team.reason}\n`,
-      )
+        `  reason: ${team.reason}\n`
     }
     // T05 — offer the [h]unk-select verb ONLY when QUANTA_HUNK_APPROVAL is ON
     // AND this mutation decomposes into ≥2 previewable hunks. Absent ⇒ the
@@ -441,6 +457,7 @@ const buildCliOnConfirm =
     // is inline-specific (ConfirmDecision vs the wire union).
     const answer = await promptNormalApprovalVerbs(deps, {
       subject: action.tool,
+      ...(context.length > 0 ? { contextHeader: context } : {}),
       ...(hunkOption !== undefined ? { hunk: hunkOption } : {}),
       prefixLabel,
       durable,
@@ -497,7 +514,6 @@ const buildCliApprovalPrompt =
       }
       return { decision: "deny" }
     }
-    process.stderr.write(`Approval required: ${approval.reason}\n`)
     // UUX-1-06 (A-r2) — the deferred NORMAL arm offers the SAME verbs the
     // inline confirm offers, via the SAME helper: [y]/[a]lways-session/[N]/
     // deny+s[t]eer. It only has a `PendingApprovalView` (no ToolAction), so the
@@ -505,7 +521,12 @@ const buildCliApprovalPrompt =
     // structurally ABSENT — declared by omitting the caps, never copy-forked.
     // A deny+steer maps onto the wire union; the session-turn-driver threads
     // the steer to `session.approval.respond` ⇒ the host lease carries it.
-    const answer = await promptNormalApprovalVerbs(deps, { subject: "pending action" })
+    // C2 — the "Approval required" header is this ask's own prompt copy:
+    // bundled so it renders at head activation, never over an unanswered ask.
+    const answer = await promptNormalApprovalVerbs(deps, {
+      subject: "pending action",
+      contextHeader: `Approval required: ${approval.reason}\n`,
+    })
     switch (answer.kind) {
       case "allow":
         // jun-10 — "[a]lways session" resolves approve+scope:"session" so the

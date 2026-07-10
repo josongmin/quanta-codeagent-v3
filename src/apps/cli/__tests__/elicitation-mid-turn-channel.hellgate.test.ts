@@ -19,7 +19,10 @@
  *      the channel-active tests resolving WITHOUT stdin).
  */
 import { describe, expect, test } from "bun:test"
-import { readViaMidTurnChannelOrReadline } from "@/apps/cli/mcp-elicitation-prompter"
+import {
+  buildCliElicitationPrompterFactory,
+  readViaMidTurnChannelOrReadline,
+} from "@/apps/cli/mcp-elicitation-prompter"
 import {
   createMidTurnApprovalChannel,
   registerMidTurnApprovalChannel,
@@ -59,17 +62,34 @@ describe("HELLGATE WS-B — elicitation rides the mid-turn channel", () => {
     ch.active = false
   })
 
-  test("audit W3-C1: a superseding waiter is NOT clobbered by the aborted one's stale signal", async () => {
+  test("audit W3-C1: a QUEUED waiter is NOT clobbered by the aborted head's stale signal", async () => {
     const ch = createMidTurnApprovalChannel()
     registerMidTurnApprovalChannel(ch)
     ch.active = true
     const ctrl = new AbortController()
     const first = readViaMidTurnChannelOrReadline(ctrl.signal)
-    const second = ch.awaitLine() // supersedes (releases first as superseded→null)
+    const second = ch.awaitLine() // C2: queues BEHIND the elicitation (no supersede)
+    ctrl.abort() // consumer cancel releases ONLY the elicitation waiter
     expect(await first).toBeNull()
-    ctrl.abort() // stale abort — must not touch the second waiter
     ch.tryResolve("for-second")
     expect(await second).toEqual({ kind: "line", line: "for-second" })
+    ch.active = false
+  })
+
+  test("C2 (jul-10 audit): concurrent approval + elicitation asks are SERIALIZED — both answered, none lost", async () => {
+    const ch = createMidTurnApprovalChannel()
+    registerMidTurnApprovalChannel(ch)
+    ch.active = true
+    // An approval ask is pending FIRST; an elicitation arrives while it waits.
+    const approval = ch.awaitLine(undefined, "approval")
+    const elicitation = readViaMidTurnChannelOrReadline(new AbortController().signal)
+    // The old one-waiter channel released the approval as a fail-closed deny
+    // here — the operator LOST an ask. Queue: first routed line → approval.
+    expect(ch.tryResolve("y")).toBe(true)
+    expect(await approval).toEqual({ kind: "line", line: "y" })
+    // Second routed line → elicitation. Order preserved, nothing destroyed.
+    expect(ch.tryResolve("blue")).toBe(true)
+    expect(await elicitation).toBe("blue")
     ch.active = false
   })
 
@@ -83,5 +103,37 @@ describe("HELLGATE WS-B — elicitation rides the mid-turn channel", () => {
     // The channel has NO dangling waiter: a later line is not consumed.
     expect(ch.tryResolve("stray")).toBe(false)
     ch.active = false
+  })
+
+  test("C2 render ordering: the PRODUCTION prompter io HOLDS a queued elicitation's prompt text until it becomes head", async () => {
+    const ch = createMidTurnApprovalChannel()
+    registerMidTurnApprovalChannel(ch)
+    ch.active = true
+    const orig = process.stderr.write.bind(process.stderr)
+    let out = ""
+    process.stderr.write = ((chunk: unknown) => {
+      out += String(chunk)
+      return true
+    }) as typeof process.stderr.write
+    try {
+      // The DEFAULT interactive io (no test io injected) — this pins the real
+      // write-buffer wiring, not just the readVia seam.
+      const factory = buildCliElicitationPrompterFactory({ interactive: true })
+      if (factory === undefined) throw new Error("factory must exist when interactive")
+      const prompter = factory("srv-1")
+      const approval = ch.awaitLine(undefined, "approval") // approval holds the head
+      const asked = prompter.promptString({ prompt: "Favorite color" })
+      await new Promise((r) => setTimeout(r, 1))
+      // Queued behind the approval ⇒ the question is NOT on screen yet.
+      expect(out).not.toContain("Favorite color")
+      expect(ch.tryResolve("y")).toBe(true) // approval answered ⇒ elicitation head
+      expect(await approval).toEqual({ kind: "line", line: "y" })
+      expect(out).toContain("Favorite color") // rendered at promotion
+      expect(ch.tryResolve("blue")).toBe(true)
+      expect(await asked).toEqual({ ok: true, value: "blue" })
+    } finally {
+      process.stderr.write = orig
+      ch.active = false
+    }
   })
 })

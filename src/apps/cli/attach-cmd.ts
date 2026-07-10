@@ -103,34 +103,61 @@ const createStdinLines = (opts?: {
  *  The gate orders line ARRIVALS (readline `line` tap) against the prompt
  *  RENDER: only a line typed after the prompt appeared may answer it; earlier
  *  lines flow to the session. A line pulled without an arrival record (no tap
- *  wired — bare test harnesses) is treated as fresh (legacy behavior). */
+ *  wired — bare test harnesses) is treated as fresh (legacy behavior).
+ *
+ *  C2 re-verification (jul-10 audit) — anchors are INTERACTION-scoped now that
+ *  the channel is a FIFO ask queue and approval interactions can OVERLAP (B's
+ *  verb prompt renders — head promotion — before A's finally runs). A single
+ *  shared anchor broke both ways: A's `markPromptAnswered` clobbered B's fresh
+ *  anchor (B's answer then leaked to the session), and B's render overwrote
+ *  A's sticky steer anchor (a pasted "t\n<steer>" burst lost its claim). Each
+ *  interaction keeps its own FIRST-render anchor; renders fire at head
+ *  activation in queue order, so the LAST `markPromptRendered` is always the
+ *  current head's — `claim` checks arrivals against exactly that anchor. */
 export interface ApprovalLineGate {
   /** Called at readline `line` arrival (operator pressed Enter). */
   noteLineArrival(): void
-  /** Called when an approval prompt is rendered. The steer sub-prompts of one
-   *  approval do NOT re-mark (a pasted "t\n<steer>" burst stays claimed). */
-  markPromptRendered(): void
+  /** Mint an id grouping all sub-prompts of ONE approval interaction. */
+  newInteraction(): number
+  /** Called when an ask's prompt renders (channel head activation). The steer
+   *  sub-prompts of one interaction keep its FIRST anchor (a pasted
+   *  "t\n<steer>" burst stays claimed). */
+  markPromptRendered(interaction: number): void
   /** Called when the approval interaction fully settles. */
-  markPromptAnswered(): void
+  markPromptAnswered(interaction: number): void
   /** Read-loop seam: claim `line` for the pending approval, or let it flow. */
   claim(line: string): boolean
 }
 
 export const createApprovalLineGate = (channel: MidTurnApprovalChannel): ApprovalLineGate => {
   let seq = 0
-  let renderSeq: number | undefined
+  let nextInteraction = 0
+  /** interaction id → its FIRST prompt-render arrival-seq (sticky). */
+  const anchors = new Map<number, number>()
+  /** The anchor of the CURRENT channel head (the last-rendered ask). */
+  let headAnchor: number | undefined
   const arrivals: number[] = []
   return {
     noteLineArrival() {
       seq += 1
       arrivals.push(seq)
     },
-    markPromptRendered() {
-      // First render of THIS approval wins; steer sub-prompts keep the anchor.
-      if (renderSeq === undefined) renderSeq = seq
+    newInteraction() {
+      nextInteraction += 1
+      return nextInteraction
     },
-    markPromptAnswered() {
-      renderSeq = undefined
+    markPromptRendered(interaction: number) {
+      const anchor = anchors.get(interaction) ?? seq
+      anchors.set(interaction, anchor)
+      // Renders fire in head order (channel activation), so this ask IS the
+      // head — its (sticky) anchor becomes the claim reference.
+      headAnchor = anchor
+    },
+    markPromptAnswered(interaction: number) {
+      anchors.delete(interaction)
+      // Another interaction's ask may already be head (promoted + rendered
+      // before this finally ran) — only a fully-quiet gate drops the anchor.
+      if (anchors.size === 0) headAnchor = undefined
     },
     claim(line: string): boolean {
       // Pop THIS line's arrival record even when not claiming — FIFO stays in
@@ -141,8 +168,8 @@ export const createApprovalLineGate = (channel: MidTurnApprovalChannel): Approva
         seq += 1
         arrival = seq
       }
-      if (renderSeq === undefined) return false // no prompt visible
-      if (arrival <= renderSeq) return false // typed BEFORE the prompt ⇒ session input
+      if (headAnchor === undefined) return false // no prompt visible
+      if (arrival <= headAnchor) return false // typed BEFORE the prompt ⇒ session input
       return channel.tryResolve(line)
     },
   }
@@ -182,16 +209,23 @@ export const buildChannelApprovalPrompt = (
   channel: MidTurnApprovalChannel,
   gate: ApprovalLineGate,
 ): ((reason: string) => Promise<AttachApprovalAnswer>) => {
-  /** Render one sub-prompt and await its routed line; `undefined` = released. */
-  const ask: AskLine = async (prompt) => {
-    process.stderr.write(prompt)
-    gate.markPromptRendered()
-    const result = await channel.awaitLine(undefined, "approval")
-    if (result.kind === "line") return result.line
-    process.stderr.write("\n[quanta] approval prompt released unanswered — treated as deny.\n")
-    return undefined
-  }
   return async (reason: string): Promise<AttachApprovalAnswer> => {
+    const interaction = gate.newInteraction()
+    /** Render one sub-prompt and await its routed line; `undefined` = released.
+     *  C2 (jul-10 audit) — the channel is a FIFO ask queue: render + gate-mark
+     *  in `onActive` (fired when THIS ask becomes head; synchronously for the
+     *  single-ask case) so a queued approval never prints over an unanswered
+     *  one, and the claim gate only anchors against a prompt the operator can
+     *  actually SEE (head + rendered). */
+    const ask: AskLine = async (prompt) => {
+      const result = await channel.awaitLine(undefined, "approval", () => {
+        process.stderr.write(prompt)
+        gate.markPromptRendered(interaction)
+      })
+      if (result.kind === "line") return result.line
+      process.stderr.write("\n[quanta] approval prompt released unanswered — treated as deny.\n")
+      return undefined
+    }
     try {
       const first = await ask(
         `Approve "${reason}"? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
@@ -205,7 +239,7 @@ export const buildChannelApprovalPrompt = (
       if (ans === "t") return await askDenySteer(ask)
       return { decision: "deny" }
     } finally {
-      gate.markPromptAnswered()
+      gate.markPromptAnswered(interaction)
     }
   }
 }

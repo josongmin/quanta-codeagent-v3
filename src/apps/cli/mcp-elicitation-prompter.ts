@@ -119,43 +119,67 @@ const readLine = async (prompt: string, signal: AbortSignal): Promise<string | n
  * exactly like the REPL's own `askLine`. The old behavior (always open a
  * fresh readline) FOUGHT the in-turn reader mid-turn: two consumers on one
  * raw-mode stdin, the question never received a usable line, and the ask
- * fail-closed. A typed channel RELEASE (turn ended with the ask unanswered)
- * maps to `null` — the same cancellation `withRetry` already handles.
+ * fail-closed. A typed channel RELEASE (turn ended with the ask unanswered /
+ * MCP-side cancel) maps to `null` — the same cancellation `withRetry` already
+ * handles.
+ *
+ * C2 (jul-10 audit) — the channel is a FIFO ask queue: `renderPrompt` is the
+ * ask's deferred render (the prompt text `cliPrompter` wrote before reading),
+ * fired by the channel when THIS read becomes the queue head, so an
+ * elicitation queued behind a pending approval never prints its question over
+ * the unanswered approval prompt. Head-at-enqueue fires synchronously —
+ * byte-identical single-ask render timing.
  *
  * Exported for the hellgate; production reaches it via the prompter io.
  */
 export const readViaMidTurnChannelOrReadline = async (
   signal: AbortSignal,
+  renderPrompt?: () => void,
 ): Promise<string | null> => {
   const channel = currentMidTurnApprovalChannel()
   if (channel?.active === true) {
     if (signal.aborted) return null
     // Audit W3-C1 — thread the consumer's signal so an MCP-side cancel
     // RELEASES this waiter (consumer_aborted): a dead ask can never claim the
-    // operator's next typed line. C2 (jul-10 W4) — label the ask so a
-    // one-waiter collision (approval vs elicitation) is diagnosable, and print
-    // WHICH ask superseded this one before mapping to cancellation.
-    const result = await channel.awaitLine(signal, "elicitation")
-    if (result.kind === "line") return result.line
-    if (result.cause === "superseded") {
-      process.stderr.write(
-        `\n[quanta] elicitation prompt released unanswered (superseded by ${result.supersededBy ?? "a newer"} prompt) — treated as canceled.\n`,
-      )
-    }
-    return null
+    // operator's next typed line.
+    const result = await channel.awaitLine(signal, "elicitation", renderPrompt)
+    return result.kind === "line" ? result.line : null
   }
+  // Between turns (own readline): no queue exists — render immediately.
+  renderPrompt?.()
   return readLine("", signal)
 }
 
 /** The interactive {@link CliPrompterIO}: writes go to stderr (so stdout stays
  *  a clean data channel), reads come from the mid-turn channel when a turn's
- *  reader owns stdin, else a fresh readline (between turns). */
-const interactiveCliPrompterIo = (): CliPrompterIO => ({
-  write: (s: string): void => {
-    process.stderr.write(s)
-  },
-  read: (signal: AbortSignal): Promise<string | null> => readViaMidTurnChannelOrReadline(signal),
-})
+ *  reader owns stdin, else a fresh readline (between turns).
+ *
+ *  C2 (jul-10 audit) — while the mid-turn channel owns the line source, prompt
+ *  text written before a read is HELD and flushed when that read becomes the
+ *  channel HEAD (`cliPrompter` always writes the question immediately before
+ *  reading, so each read adopts exactly its own prompt). Channel inactive ⇒
+ *  writes pass straight through (legacy readline path, byte-identical). */
+const interactiveCliPrompterIo = (): CliPrompterIO => {
+  let pendingRender = ""
+  return {
+    write: (s: string): void => {
+      if (currentMidTurnApprovalChannel()?.active === true) {
+        pendingRender += s
+        return
+      }
+      process.stderr.write(s)
+    },
+    read: (signal: AbortSignal): Promise<string | null> => {
+      // Adopt the prompt text buffered for THIS ask; an ask released before it
+      // ever became head simply never renders (its prompt was never answerable).
+      const prompt = pendingRender
+      pendingRender = ""
+      return readViaMidTurnChannelOrReadline(signal, () => {
+        if (prompt.length > 0) process.stderr.write(prompt)
+      })
+    },
+  }
+}
 
 /**
  * Build the per-server elicitation prompter factory for the CLI surface, or

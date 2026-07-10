@@ -388,6 +388,34 @@ describe("HELLGATE C3 — a line typed BEFORE the approval prompt rendered is NO
     expect(gate.claim("next user turn")).toBe(false)
   })
 
+  test("C2 re-verification: OVERLAPPING approvals — second renders at promotion, its answer claimed (no anchor clobber)", async () => {
+    const channel = createMidTurnApprovalChannel()
+    channel.active = true
+    const gate = createApprovalLineGate(channel)
+    const prompt = buildChannelApprovalPrompt(channel, gate)
+    let a: unknown
+    let b: unknown
+    const out = await captureStderr(async () => {
+      const runA = prompt("first ask")
+      const runB = prompt("second ask") // C2: queues behind A (no supersede)
+      await new Promise((r) => setTimeout(r, 1))
+      gate.noteLineArrival()
+      expect(gate.claim("y")).toBe(true) // answers A; B promotes + renders
+      a = await runA // A's finally (markPromptAnswered) runs — must NOT clobber B's anchor
+      gate.noteLineArrival()
+      expect(gate.claim("a")).toBe(true) // typed after B's render ⇒ claimed for B
+      b = await runB
+    })
+    expect(a).toEqual({ decision: "approve" })
+    expect(b).toEqual({ decision: "approve", scope: "session" })
+    // Render ordering: B's prompt appears strictly AFTER A's (head activation),
+    // never interleaved while A was unanswered.
+    const aIdx = out.indexOf('Approve "first ask"?')
+    const bIdx = out.indexOf('Approve "second ask"?')
+    expect(aIdx).toBeGreaterThanOrEqual(0)
+    expect(bIdx).toBeGreaterThan(aIdx)
+  })
+
   test("a PASTED 't\\n<steer>' burst is fully claimed by the prompt (steer prompt does not reset the gate)", async () => {
     const channel = createMidTurnApprovalChannel()
     channel.active = true

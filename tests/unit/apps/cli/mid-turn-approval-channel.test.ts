@@ -32,13 +32,14 @@ describe("mid-turn approval channel", () => {
     expect(ch.tryResolve("late")).toBe(false) // already cleared
   })
 
-  test("only ONE waiter at a time — a new awaitLine releases the stale one", async () => {
+  test("C2 (jul-10 audit): concurrent asks QUEUE — routed lines answer them FIFO, none lost", async () => {
     const ch = createMidTurnApprovalChannel()
     const first = ch.awaitLine()
     const second = ch.awaitLine()
-    expect(await first).toEqual({ kind: "released", cause: "superseded" })
     expect(ch.tryResolve("y")).toBe(true)
-    expect(await second).toEqual({ kind: "line", line: "y" })
+    expect(await first).toEqual({ kind: "line", line: "y" })
+    expect(ch.tryResolve("blue")).toBe(true)
+    expect(await second).toEqual({ kind: "line", line: "blue" })
   })
 
   test("active defaults false (between turns ⇒ prompt uses its own readline)", () => {

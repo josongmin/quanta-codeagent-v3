@@ -13,8 +13,10 @@
  *   ("steer text required (or N to deny)") instead of silently degrading to a
  *   plain deny.
  *
- *   C2 — a SUPERSEDED channel release is diagnosable: the consumer notice names
- *   WHICH ask superseded which (label threaded through `awaitLine`).
+ *   C2 (jul-10 audit) — concurrent asks are SERIALIZED on the channel's FIFO
+ *   queue and each ask renders its prompt in `onActive` (at head activation):
+ *   a second prompt never prints over an unanswered first one, and neither ask
+ *   is lost. Labels stay threaded through `awaitLine` for diagnostics.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -244,21 +246,42 @@ describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent d
   })
 })
 
-// ── C2 — superseded release diagnosability at the consumer ───────────────────
+// ── C2 — concurrent asks serialize; prompts render at head activation ────────
 
-describe("HELLGATE C2 — a superseded ask names its superseder (diagnosable, still fail-closed)", () => {
-  test("deferred prompt: a superseded release prints WHICH ask superseded it, maps to deny", async () => {
-    const { deps } = makeDeps([
-      { kind: "released", cause: "superseded", supersededBy: "elicitation" },
-    ])
+describe("HELLGATE C2 — concurrent approval asks queue: ordered renders, ordered answers, none lost", () => {
+  test("two DEFERRED prompts on ONE real channel: the second's verbs render only after the first is answered; both resolve in order", async () => {
+    const { createMidTurnApprovalChannel } = await import(
+      "@/apps/cli/repl/mid-turn-approval-channel"
+    )
+    const channel = createMidTurnApprovalChannel()
+    channel.active = true
+    const deps = makeFakeCliHitlDeps({ channel })
     const prompt = __testing.buildCliApprovalPrompt(deps)
-    let decision: Awaited<ReturnType<typeof prompt>> | undefined
+    const first = { ...approval, approvalId: "ap-first", reason: "first ask" }
+    const second = { ...approval, approvalId: "ap-second", reason: "second ask" }
+    let d1: unknown
+    let d2: unknown
     const out = await captureStderr(async () => {
-      decision = await prompt(approval)
+      const run1 = prompt(first)
+      const run2 = prompt(second)
+      expect(channel.tryResolve("y")).toBe(true) // answers the FIRST (head) ask
+      d1 = await run1
+      expect(channel.tryResolve("t")).toBe(true) // second ask's verb answer
+      await new Promise((r) => setTimeout(r, 1)) // let the steer sub-ask arm
+      expect(channel.tryResolve("use the fixture")).toBe(true) // its steer text
+      d2 = await run2
     })
-    if (decision === undefined) throw new Error("prompt never resolved a decision")
-    expect(normalizeApprovalDecision(decision)).toEqual({ decision: "deny" })
-    expect(out).toContain("superseded by elicitation")
+    expect(normalizeApprovalDecision(d1 as never)).toEqual({ decision: "approve" })
+    expect(normalizeApprovalDecision(d2 as never)).toEqual({
+      decision: "deny",
+      steer: "use the fixture",
+    })
+    // Render ORDER pin: the second ask's header appears in stderr strictly
+    // AFTER the first ask's full verb prompt (it rendered at promotion).
+    const firstVerbs = out.indexOf("Allow pending action?")
+    const secondHeader = out.indexOf("Approval required: second ask")
+    expect(firstVerbs).toBeGreaterThanOrEqual(0)
+    expect(secondHeader).toBeGreaterThan(firstVerbs)
   })
 
   test("the approval prompts LABEL their asks 'approval' on the channel", async () => {
@@ -277,9 +300,9 @@ describe("HELLGATE C2 — a superseded ask names its superseder (diagnosable, st
     const real = createMidTurnApprovalChannel()
     const spy: MidTurnApprovalChannel = {
       active: true,
-      awaitLine: (signal?: AbortSignal, label?: string) => {
+      awaitLine: (signal?: AbortSignal, label?: string, onActive?: () => void) => {
         labels.push(label)
-        return real.awaitLine(signal, label)
+        return real.awaitLine(signal, label, onActive)
       },
       tryResolve: (line) => real.tryResolve(line),
       clear: (cause) => real.clear(cause),

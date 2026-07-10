@@ -67,7 +67,11 @@ export const makeFakeRejectCounter = (overrides: Partial<RejectCounter> = {}): R
 })
 
 /** A scripted mid-turn channel: each `awaitLine` consumes the next entry (a
- *  raw line or a typed release). Captures the labels consumers pass (C2). */
+ *  raw line or a typed release). Captures the labels consumers pass (C2).
+ *  Each ask is instantly head (script = instant answers), so its `onActive`
+ *  render hook fires synchronously — consumers render THROUGH the hook since
+ *  the C2 queue landing, so a fake that skipped it would suppress every
+ *  prompt the suites assert on. */
 export const makeScriptedChannel = (
   script: readonly (string | MidTurnLineResult)[],
 ): { channel: MidTurnApprovalChannel; labels: (string | undefined)[] } => {
@@ -77,8 +81,13 @@ export const makeScriptedChannel = (
     labels,
     channel: {
       active: true,
-      awaitLine: async (_signal?: AbortSignal, label?: string): Promise<MidTurnLineResult> => {
+      awaitLine: async (
+        _signal?: AbortSignal,
+        label?: string,
+        onActive?: () => void,
+      ): Promise<MidTurnLineResult> => {
         labels.push(label)
+        onActive?.() // instantly head — render now
         const next = queue.shift()
         if (next === undefined) throw new Error("channel script exhausted — prompt over-asked")
         return typeof next === "string" ? { kind: "line", line: next } : next

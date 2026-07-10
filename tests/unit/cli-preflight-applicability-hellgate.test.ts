@@ -203,9 +203,14 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
 
   // A fake in-turn channel: active so the confirm reads a routed line instead of
   // opening a real readline on stdin (which would hang the test). Answers "N".
+  // C2 queue: the ask is instantly head — fire `onActive` (the render hook) so
+  // the prompt text the assertions read actually reaches stderr.
   const fakeChannel = {
     active: true,
-    awaitLine: async () => ({ kind: "line", line: "N" }) as const,
+    awaitLine: async (_s?: AbortSignal, _l?: string, onActive?: () => void) => {
+      onActive?.()
+      return { kind: "line", line: "N" } as const
+    },
     tryResolve: () => false,
     clear: () => {},
   }
@@ -256,7 +261,10 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
     rejectCounter: { recordAccept: () => {}, recordDeny: () => {} } as never,
     channel: {
       active: true,
-      awaitLine: async () => ({ kind: "line", line: answer }) as const,
+      awaitLine: async (_s?: AbortSignal, _l?: string, onActive?: () => void) => {
+        onActive?.() // C2 queue: instantly head — render the prompt
+        return { kind: "line", line: answer } as const
+      },
       tryResolve: () => false,
       clear: () => {},
     } as never,
@@ -303,7 +311,10 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
     rejectCounter: { recordAccept: () => {}, recordDeny: () => {} } as never,
     channel: {
       active: true,
-      awaitLine: async () => ({ kind: "line", line: answer }) as const,
+      awaitLine: async (_s?: AbortSignal, _l?: string, onActive?: () => void) => {
+        onActive?.() // C2 queue: instantly head — render the prompt
+        return { kind: "line", line: answer } as const
+      },
       tryResolve: () => false,
       clear: () => {},
     } as never,
