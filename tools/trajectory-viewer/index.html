@@ -153,6 +153,21 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .sys-block.open .sys-block-body{display:block}
 /* ─────────────────── TURN GROUP ─────────────────── */
 .turn-group{margin-top:20px}
+/* ── phase band (localize / repro / repair group header) ── */
+.phase-band{
+  position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;
+  margin:26px 0 4px;padding:6px 12px;border-radius:7px;
+  font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.08em;
+  background:#eef0fb;border:1px solid #dfe2f4;color:#5560a8;
+  box-shadow:0 1px 3px rgba(0,0,0,.05);
+}
+.phase-band:first-child{margin-top:4px}
+.phase-band .pb-icon{font-size:12px}
+.phase-band .pb-count{margin-left:auto;font-weight:400;opacity:.6;text-transform:none;letter-spacing:0}
+.phase-band.ph-localize{background:#eaf3ff;border-color:#cfe2fb;color:#3f74b8}
+.phase-band.ph-repro{background:#eafaf1;border-color:#c9ecd6;color:#2f8f5b}
+.phase-band.ph-repair{background:#fff3e8;border-color:#f4ddc4;color:#b0743a}
+.phase-band.ph-verify{background:#f3eefb;border-color:#e2d3f4;color:#8552b0}
 /* ── user bubble ── */
 .user-bubble-wrap{display:flex;justify-content:flex-end;margin-bottom:6px}
 .user-bubble{
@@ -355,21 +370,25 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
   font-size:12px;transition:all .12s;flex-shrink:0;
 }
 #pp-close:hover{color:#5566cc;border-color:#8899dd;background:#eeeeff}
-#pp-scroll{flex:1;overflow-y:auto;background:#fafafe}
-.pm-msg{border-bottom:1px solid #eeeef8}
-.pm-msg:last-child{border-bottom:none}
-.pm-role{
-  padding:4px 12px;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
-  position:sticky;top:0;z-index:1;
+#pp-scroll{flex:1;overflow-y:auto;background:#fafafe;position:relative}
+/* sticky section overlay — the ONE breadcrumb that tracks where you are */
+#pp-overlay{
+  position:sticky;top:0;z-index:5;padding:5px 12px;
+  font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:#5560a8;background:rgba(240,240,252,.94);backdrop-filter:blur(3px);
+  border-bottom:1px solid #e0e0f0;box-shadow:0 1px 3px rgba(0,0,0,.06);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;
 }
-.pm-role.user{background:#f0f0fc;color:#7070b0;border-bottom:1px solid #e0e0f0}
-.pm-role.assistant{background:#f0f6ff;color:#6080b0;border-bottom:1px solid #d8e8f8}
-.pm-role-idx{font-weight:400;opacity:.5;margin-left:4px}
-.pm-body{padding:8px 12px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;overflow-x:auto;line-height:1.6;color:#6070a0;background:#fafafe}
-.pm-body.sys{color:#8090b0}
-.pm-block-tr{color:#3a7a3a}
-.pm-block-tu{color:#3355aa}
-.pm-block-sys{color:#c0c0d8;font-style:italic}
+#pp-overlay .pp-ov-sub{color:#9090b8;font-weight:400}
+#pp-overlay .pp-ov-sub::before{content:'  ›  ';opacity:.6}
+/* the raw prompt — one continuous, verbatim block, no card chrome */
+.pm-raw{
+  padding:8px 12px 40px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;
+  overflow-x:auto;line-height:1.6;color:#5a6aa0;word-break:break-word;
+}
+.pm-anchor{display:inline;width:0;height:0;font-size:0}
+/* our own `##`-style delimiter headings, kept verbatim but highlighted */
+.pm-h{color:#4455aa;font-weight:700}
 /* ─────────────────── RUN META ─────────────────── */
 #run-meta-section{border-top:1px solid var(--border);padding:8px 20px 10px;background:#fafafe}
 .run-meta-block{}
@@ -451,7 +470,7 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
           <span id="pp-turn-label"></span>
           <div id="pp-close" onclick="closePromptPanel()" title=""></div>
         </div>
-        <div id="pp-scroll"></div>
+        <div id="pp-scroll"><div id="pp-overlay"></div></div>
       </div>
     </div>
   </main>
@@ -501,6 +520,7 @@ const LANGS={
     issueTitle:'GitHub 이슈 열기',
     sessionN:(n)=>`세션-${n}`,
     sessionCount:(n)=>`${n}개 세션`,
+    multiSession:'세션',
   },
   en:{
     title:'⚡ Trajectory',
@@ -543,6 +563,7 @@ const LANGS={
     issueTitle:'Open GitHub issue',
     sessionN:(n)=>`session-${n}`,
     sessionCount:(n)=>`${n} sessions`,
+    multiSession:'sessions',
   }
 }
 let lang='ko'
@@ -569,6 +590,9 @@ function initUI(){
   document.getElementById('ls-en').style.fontWeight=lang==='en'?'700':'400'
   document.getElementById('ls-ko').style.color=lang==='ko'?'#5555aa':'#b0b0c8'
   document.getElementById('ls-en').style.color=lang==='en'?'#5555aa':'#b0b0c8'
+  // sticky prompt-section overlay follows the scroll (attach once)
+  const pps=document.getElementById('pp-scroll')
+  if(pps&&!pps.dataset.ovBound){pps.dataset.ovBound='1';pps.addEventListener('scroll',updatePromptOverlay,{passive:true})}
 }
 
 function setLang(l){
@@ -617,22 +641,6 @@ function flatText(msg){
   return''
 }
 
-// ──────────── SEGMENT ────────────
-function segmentInstances(records){
-  const byId=new Map()
-  for(const r of records){
-    const id=r.metadata?.instanceId
-    if(id){if(!byId.has(id))byId.set(id,[]);byId.get(id).push(r)}
-  }
-  if(byId.size>0)return[...byId.entries()].map(([id,recs])=>({id,records:recs}))
-  const groups=[];let cur=null
-  for(const r of records){
-    if(!cur||(r.request?.messages?.length??0)<=1){cur={id:null,records:[]};groups.push(cur)}
-    cur.records.push(r)
-  }
-  groups.forEach((g,i)=>{g.id=extractInstId(g.records)??`session-${i+1}`})
-  return groups
-}
 
 // ──────────── RECONSTRUCT TURNS ────────────
 function reconstructTurns(records){
@@ -821,20 +829,101 @@ function issueUrl(id){
   return`https://github.com/${owner}/${repo}/issues/${num}`
 }
 
-// ──────────── LOAD ────────────
-function loadTrajectory(text,label){
-  const records=parseJSONL(text)
-  instances=segmentInstances(records).map(inst=>{
-    const turns=reconstructTurns(inst.records)
-    // attach any already-loaded meta that matches this instanceId
-    const meta=metaByInstance.get(inst.id)
-    return{...inst,turns,stats:computeStats(turns),fileMap:buildFileMap(turns),
-      anomalies:detectAnomalies(turns),fileTimeline:buildFileTimeline(turns),runMeta:meta??null}
+// ──────────── PHASE (thread-level) ────────────
+// A bench INSTANCE run = ONE session (= ONE file). Inside it the pipeline runs
+// distinct conversation threads — localize / repro / repair — which we surface
+// as TURN GROUPS, not separate sessions. Label each turn's phase from the
+// authoritative record metadata (`lane`/`phase`, future files) or fall back to a
+// fingerprint of the conversation's first message (existing files, pre-wiring).
+const PHASE_META={
+  localize:{label:'LOCALIZE',icon:'🎯'},
+  repro:{label:'REPRO',icon:'🧪'},
+  repair:{label:'REPAIR',icon:'🔧'},
+  verify:{label:'VERIFY',icon:'✔'},
+  agent:{label:'AGENT',icon:'🤖'},
+}
+function msgText0(msgs){
+  const m=msgs&&msgs[0]
+  if(!m)return''
+  const c=m.content
+  if(typeof c==='string')return c
+  if(Array.isArray(c))return c.map(b=>typeof b==='string'?b:(b.text??'')).join(' ')
+  return''
+}
+// Phase from the AUTHORITATIVE record metadata (`lane`/`phase`, future files) or
+// a fingerprint of the conversation's first message (legacy files, pre-wiring).
+function phaseFromText(t){
+  t=(t||'').replace(/^\s+/,'').slice(0,400)
+  if(/self-contained pytest test that reproduces|Write a[^.]*pytest test/i.test(t))return'repro'
+  // localize = the raw issue description, a SINGLE-hash "# Issue <title>" call.
+  // Must precede the repair check: repair prompts are DOUBLE-hash ("## Issue
+  // Hints", "## Issue evidence"), which would otherwise steal the localize turn
+  // and fake an instance boundary mid-run.
+  if(/^#\s+Issue\b/i.test(t))return'localize'
+  if(/Issue Hints|Agentless localization|Top-\d+ files most likely|^#{2,}\s/i.test(t))return'repair'
+  return'agent'
+}
+// Normalize an authoritative record lane (`metadata.lane`, e.g. "repair#0",
+// "verify-select#2", "repro") down to its BASE pipeline phase, so parallel
+// candidate lanes collapse into one phase group instead of N.
+function normalizeLane(lane){
+  const b=String(lane).toLowerCase().split('#')[0].trim()
+  if(b.startsWith('localize')||b.startsWith('loc'))return'localize'
+  if(b.startsWith('repro'))return'repro'
+  if(b.startsWith('repair')||b.startsWith('edit')||b.startsWith('agent'))return'repair'
+  if(b.startsWith('verify')||b.startsWith('select')||b.startsWith('regress'))return'verify'
+  return b.split('-')[0]
+}
+function recordPhase(r){const lane=r.metadata?.lane??r.metadata?.phase;return lane?normalizeLane(lane):phaseFromText(msgText0(r.request?.messages))}
+function turnPhase(turn){const lane=turn.meta?.lane??turn.meta?.phase;return lane?normalizeLane(lane):phaseFromText(msgText0(turn.allMsgs))}
+function annotatePhases(turns){for(const t of turns)t.phase=turnPhase(t);return turns}
+
+// Split a file's records at TRUE instance boundaries. A bench instance run is a
+// `localize → repro → repair` cycle; a new instance begins at each fresh
+// `localize` turn (i.e. a localize NOT preceded by a localize). Future
+// per-instance files have ONE cycle ⇒ ONE segment; legacy box-blobs that packed
+// N instances split into N. This is SEMANTIC (pipeline restart), NOT the fragile
+// message-length heuristic that used to fake-split repro candidates into sessions.
+function splitByInstance(records){
+  if(!records.length)return[]
+  const ph=records.map(recordPhase)
+  const segs=[];let cur=null
+  records.forEach((r,i)=>{
+    const boundary=cur===null||(ph[i]==='localize'&&ph[i-1]!=='localize')
+    if(boundary){cur=[];segs.push(cur)}
+    cur.push(r)
   })
-  document.getElementById('load-status').textContent=`${label} · ${T('sessionCount',instances.length)}`
+  return segs
+}
+
+// ──────────── LOAD ────────────
+function buildInstance(id,records,meta){
+  const turns=annotatePhases(reconstructTurns(records))
+  return{id,records,turns,stats:computeStats(turns),fileMap:buildFileMap(turns),
+    anomalies:detectAnomalies(turns),fileTimeline:buildFileTimeline(turns),
+    runMeta:meta??metaByInstance.get(id)??null}
+}
+function fileNameToId(name){
+  return String(name||'session').replace(/\.jsonl$/i,'').replace(/^\d{8}-\d{6}-/,'').replace(/^trajectory-/,'')
+}
+// sessions: [{name, text, meta?}] — one entry per FILE. Each file is split into
+// its constituent instance runs (usually 1; legacy blobs → N).
+function loadSessions(sessions,label){
+  instances=[]
+  for(const s of sessions){
+    const records=parseJSONL(s.text)
+    const segs=splitByInstance(records)
+    segs.forEach((seg,k)=>{
+      const id=s.meta?.instanceId||extractInstId(seg)||
+        (segs.length>1?`${fileNameToId(s.name)}#${k+1}`:fileNameToId(s.name))
+      instances.push(buildInstance(id,seg,s.meta))
+    })
+  }
+  document.getElementById('load-status').textContent=`${label??T('multiSession')??''} · ${T('sessionCount',instances.length)}`
   renderSidebar()
   if(instances.length>0)selectInstance(0)
 }
+function loadTrajectory(text,label){loadSessions([{name:label,text}],label)}
 
 function loadMeta(text,label){
   let meta
@@ -975,7 +1064,21 @@ function renderChat(){
     scroll.appendChild(el.firstElementChild)
   }
 
+  // Group turns by pipeline phase (localize / repro / repair …). A band header
+  // is emitted whenever the phase changes, so the distinct threads inside ONE
+  // session read as labeled groups instead of a flat wall of turns.
+  let curPhase=null
   inst.turns.forEach((turn,i)=>{
+    if(turn.phase!==curPhase){
+      curPhase=turn.phase
+      const pm=PHASE_META[curPhase]??{label:String(curPhase).toUpperCase(),icon:'•'}
+      // contiguous run length for THIS band (not total phase occurrences)
+      let n=0;for(let j=i;j<inst.turns.length&&inst.turns[j].phase===curPhase;j++)n++
+      const band=document.createElement('div')
+      band.className=`phase-band ph-${esc(curPhase)}`
+      band.innerHTML=`<span class="pb-icon">${pm.icon}</span><span class="pb-label">${esc(pm.label)}</span><span class="pb-count">${n} ${T('turns')}</span>`
+      scroll.appendChild(band)
+    }
     const el=document.createElement('div')
     el.className='turn-group'
     el.id=`tg-${i}`
@@ -1411,17 +1514,20 @@ function openPromptPanel(turnIdx){
   const panel=document.getElementById('prompt-panel')
   panel.classList.remove('hidden')
   document.getElementById('pp-turn-label').textContent=`${T('turn')} ${turnIdx+1}`
-  // render system prompt + all messages
-  const parts=[]
-  // system
+  // Build ONE continuous, verbatim prompt stream. Structure is not chopped into
+  // cards — it's marked by inline anchors and surfaced via the sticky overlay.
+  const chunks=[]
+  const pushSeg=(label,idx,raw)=>{
+    // ONLY a zero-size anchor drives the sticky overlay — no visible split in
+    // the body. The raw prompt reads as one continuous stream.
+    if(chunks.length)chunks.push('\n\n')
+    chunks.push(`<span class="pm-anchor" data-label="${esc(label)}" data-idx="${esc(String(idx))}"></span>`)
+    chunks.push(renderRawBody(raw))
+  }
   if(turn.system){
     const t=typeof turn.system==='string'?turn.system:Array.isArray(turn.system)?turn.system.map(b=>b.text??b.content??'').join('\n\n'):''
-    parts.push(`<div class="pm-msg">
-      <div class="pm-role user">SYSTEM<span class="pm-role-idx">[sys]</span></div>
-      <div class="pm-body sys">${esc(t)}</div>
-    </div>`)
+    pushSeg('SYSTEM','sys',t)
   }
-  // messages
   for(let i=0;i<(turn.allMsgs?.length??0);i++){
     const msg=turn.allMsgs[i]
     const role=msg.role??'user'
@@ -1432,40 +1538,70 @@ function openPromptPanel(turnIdx){
     if(role==='assistant')label='Agent action'
     else if(kinds.has('tool_result'))label='Tool result'
     else label='Harness prompt'
-    const body=renderPmBody(msg)
-    if(!body)continue
-    parts.push(`<div class="pm-msg">
-      <div class="pm-role ${role}">${label}<span class="pm-role-idx">[${i}]</span></div>
-      <div class="pm-body">${body}</div>
-    </div>`)
+    const raw=msgToRaw(msg)
+    if(!raw)continue
+    pushSeg(label,i,raw)
   }
-  document.getElementById('pp-scroll').innerHTML=parts.join('')
+  const scroll=document.getElementById('pp-scroll')
+  // keep the overlay node, replace only the raw body
+  scroll.querySelector('.pm-raw')?.remove()
+  const rawEl=document.createElement('div')
+  rawEl.className='pm-raw'
+  rawEl.innerHTML=chunks.join('')
+  scroll.appendChild(rawEl)
+  scroll.scrollTop=0
+  updatePromptOverlay()
 }
 
-function renderPmBody(msg){
+// message → verbatim text, nothing hidden or truncated (this IS the raw prompt)
+function msgToRaw(msg){
   const c=msg.content
-  if(typeof c==='string'){
-    if(c.includes('<system-reminder>')||c.includes('<system_reminder>'))return`<span class="pm-block-sys">${T('sysHidden')}</span>`
-    return esc(c)
-  }
+  if(typeof c==='string')return c
   if(Array.isArray(c)){
     return c.map(b=>{
-      if(b.type==='text'){
-        const t=b.text??''
-        if(t.includes('<system-reminder>')||t.includes('<system_reminder>'))return`<span class="pm-block-sys">${T('sysHidden')}</span>`
-        return esc(t)
-      }
+      if(b.type==='text')return b.text??''
       if(b.type==='tool_result'){
         const content=typeof b.content==='string'?b.content:Array.isArray(b.content)?b.content.map(x=>x.text??'').join(''):''
-        return`<span class="pm-block-tr">↩ [${esc(b.tool_use_id?.slice(-6)??'?')}] ${esc(content.slice(0,300))}${content.length>300?'\n…':''}</span>`
+        return`↩ tool_result [${b.tool_use_id?.slice(-6)??'?'}]\n${content}`
       }
-      if(b.type==='tool_use'){
-        return`<span class="pm-block-tu">⚙ ${esc(b.name??'?')} ${esc(JSON.stringify(b.input??{}).slice(0,200))}</span>`
-      }
-      return esc(JSON.stringify(b).slice(0,100))
-    }).join('\n')
+      if(b.type==='tool_use')return`⚙ ${b.name??'?'} ${JSON.stringify(b.input??{})}`
+      return JSON.stringify(b)
+    }).join('\n\n')
   }
-  return esc(String(c??''))
+  return String(c??'')
+}
+
+// escape + inject anchors on our own `##`-style delimiter headings so the
+// overlay can nest a sub-section under the current message segment
+function renderRawBody(text){
+  return String(text??'').split('\n').map(line=>{
+    const m=line.match(/^(#{1,6})\s+(.+?)\s*$/)
+    if(m){
+      const title=m[2].trim()
+      return`<span class="pm-anchor pm-anchor-h" data-label="${esc(title)}"></span><span class="pm-h">${esc(line)}</span>`
+    }
+    return esc(line)
+  }).join('\n')
+}
+
+// track scroll → update the single sticky breadcrumb (segment › ##-heading)
+function updatePromptOverlay(){
+  const scroll=document.getElementById('pp-scroll')
+  const overlay=document.getElementById('pp-overlay')
+  if(!scroll||!overlay)return
+  const anchors=scroll.querySelectorAll('.pm-anchor')
+  if(!anchors.length){overlay.textContent='';return}
+  const line=scroll.getBoundingClientRect().top+(overlay.offsetHeight||0)+2
+  let seg=null,sub=null
+  anchors.forEach(a=>{
+    if(a.getBoundingClientRect().top>line)return
+    if(a.classList.contains('pm-anchor-h')){sub=a.dataset.label}
+    else{seg={label:a.dataset.label,idx:a.dataset.idx};sub=null}
+  })
+  if(!seg){overlay.textContent='';return}
+  let html=`${esc(seg.label)} [${esc(seg.idx)}]`
+  if(sub)html+=`<span class="pp-ov-sub">${esc(sub)}</span>`
+  overlay.innerHTML=html
 }
 
 function closePromptPanel(){
@@ -1524,7 +1660,13 @@ initUI()
       const metas=Array.isArray(window.__META__)?window.__META__:[window.__META__]
       metas.forEach(m=>{if(m?.instanceId)metaByInstance.set(m.instanceId,m)})
     }
-    if(window.__TRAJ__)loadTrajectory(window.__TRAJ__,'bench-trajectory.jsonl')
+    // Preferred shape: one session PER FILE (launch.ts bakes __SESSIONS__).
+    if(Array.isArray(window.__SESSIONS__)&&window.__SESSIONS__.length){
+      loadSessions(window.__SESSIONS__)
+    }else if(window.__TRAJ__){
+      // legacy single-blob fallback = one session
+      loadTrajectory(window.__TRAJ__,'bench-trajectory.jsonl')
+    }
   }
   document.head.appendChild(s)
 })()

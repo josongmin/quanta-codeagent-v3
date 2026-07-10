@@ -21,14 +21,17 @@ if (arg) {
   const p = resolve(arg)
   // if arg is a directory, load all .jsonl files in it as one merged stream
   if (existsSync(p) && require("fs").statSync(p).isDirectory()) {
-    const files = readdirSync(p).filter(f => f.endsWith(".jsonl")).sort()
+    // Each .jsonl file = ONE session (one bench-instance run). Do NOT merge —
+    // preserve file boundaries so the viewer shows one session per file.
+    const files = readdirSync(p)
+      .filter(f => f.endsWith(".jsonl") && !f.startsWith("preds"))
+      .sort()
     if (!files.length) { console.error(`No .jsonl files in ${p}`); process.exit(1) }
-    // merge all jsonl files (append order = chronological via ts prefix)
-    const merged = files.map(f => readFileSync(join(p, f), "utf8")).join("\n")
+    const sessions = files.map(f => ({ name: f, text: readFileSync(join(p, f), "utf8") }))
     const dataPath = join(dir, "data.js")
     const metas = collectMetas(p)
-    writeDataJs(dataPath, merged, metas)
-    console.log(`Loaded ${files.length} sessions from ${p}`)
+    writeDataJs(dataPath, sessions, metas)
+    console.log(`Loaded ${files.length} session(s) from ${p}`)
     open(dir)
     process.exit(0)
   }
@@ -37,11 +40,13 @@ if (arg) {
   // No arg: prefer trajectories/ dir (per-session files) over the global flat file
   const trajSubdir = join(dir, "../../trajectories")
   if (existsSync(trajSubdir) && require("fs").statSync(trajSubdir).isDirectory()) {
-    const files = readdirSync(trajSubdir).filter(f => f.endsWith(".jsonl")).sort()
+    const files = readdirSync(trajSubdir)
+      .filter(f => f.endsWith(".jsonl") && !f.startsWith("preds"))
+      .sort()
     if (files.length > 0) {
-      const merged = files.map(f => readFileSync(join(trajSubdir, f), "utf8")).join("\n")
+      const sessions = files.map(f => ({ name: f, text: readFileSync(join(trajSubdir, f), "utf8") }))
       const metas = collectMetas(trajSubdir)
-      writeDataJs(join(dir, "data.js"), merged, metas)
+      writeDataJs(join(dir, "data.js"), sessions, metas)
       console.log(`Loaded ${files.length} session(s) from trajectories/`)
       open(dir)
       process.exit(0)
@@ -74,7 +79,8 @@ const metas = (() => {
 })()
 
 const dataPath = join(dir, "data.js")
-writeDataJs(dataPath, raw, metas)
+// single file = single session
+writeDataJs(dataPath, [{ name: basename(trajectoryPath), text: raw }], metas)
 open(dir)
 console.log("Opened trajectory viewer.")
 
@@ -87,8 +93,10 @@ function collectMetas(dir: string): object[] {
     .filter(Boolean)
 }
 
-function writeDataJs(dataPath: string, traj: string, metas: object[]) {
-  const parts = [`window.__TRAJ__ = ${JSON.stringify(traj)};`]
+// Bake one session PER FILE. `sessions` is [{name, text}] — the viewer builds
+// one session entry per element (no heuristic re-segmentation).
+function writeDataJs(dataPath: string, sessions: { name: string; text: string }[], metas: object[]) {
+  const parts = [`window.__SESSIONS__ = ${JSON.stringify(sessions)};`]
   if (metas.length) parts.push(`window.__META__ = ${JSON.stringify(metas)};`)
   writeFileSync(dataPath, parts.join("\n"))
 }

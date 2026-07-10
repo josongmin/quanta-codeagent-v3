@@ -12,7 +12,7 @@
 import { extractIssueHint, pytestReportPathFor } from "@/agent"
 import { type OwnerSibling, resolveOwnerSiblings } from "@/agent/closure"
 import { startBackgroundLspPrewarm } from "@/agent/lsp-bridge"
-import type { LLMPort } from "@/llm"
+import { laneLabeledPort, type LLMPort } from "@/llm"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../../types"
 import { buildClosureSession, type ClosureSessionState } from "../closure-session"
 import { validateGoldPatch } from "../gold-sanity"
@@ -80,7 +80,9 @@ const prepareHintAndReproContext = async (
 ): Promise<HintReproContext> => {
   let localizeCandidates: readonly string[] = []
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
-    llm,
+    // Phase lane → recorded as metadata.lane, so the localize turns group under
+    // one authoritative "localize" band in the viewer (replay-neutral label).
+    llm: laneLabeledPort(llm, "localize"),
     issueHintExpectedActual: posture.issueHintExpectedActual,
     renderObservations: posture.renderObservations,
     lspPrefetch: posture.lspPrefetch,
