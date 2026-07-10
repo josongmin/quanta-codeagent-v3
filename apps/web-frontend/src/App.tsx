@@ -333,6 +333,10 @@ export const App = (): JSX.Element => {
     return off
   }, [client])
   const sendTurn = useSendTurn(client, learnedSessionId)
+  // P2 (jul-11) — /retry-with reads the transcript at INVOKE time via a ref so
+  // the slash-catalogue memo does not re-assemble on every message.
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   // ADR-0512 P3 — live pending approvals (the escalation-card backing state).
   // The daemon enriches a skill-scope escalation's `approval.requested` event
@@ -829,6 +833,10 @@ export const App = (): JSX.Element => {
         appendClientMessage,
         getContext: getSlashContext,
         openKnobsPanel,
+        retryWith: {
+          getMessages: () => messagesRef.current,
+          sendUserTurn: (text: string) => sendTurn(text, []),
+        },
         endpoint:
           resolvedConnection === null
             ? null
@@ -846,6 +854,7 @@ export const App = (): JSX.Element => {
       appendClientMessage,
       getSlashContext,
       openKnobsPanel,
+      sendTurn,
     ],
   )
 

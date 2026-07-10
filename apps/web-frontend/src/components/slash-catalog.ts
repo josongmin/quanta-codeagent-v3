@@ -20,7 +20,11 @@ import {
   splitDraft,
 } from "./SlashPalette"
 import { buildAuthSlashCommands } from "./slash-auth"
-import { buildLlmConfigSlashCommands } from "./slash-llm-config"
+import {
+  buildLlmConfigSlashCommands,
+  buildRetryWithSlashCommand,
+  type RetryWithDeps,
+} from "./slash-llm-config"
 import { buildReadoutSlashCommands } from "./slash-readout"
 
 export interface SlashCatalogDeps {
@@ -32,6 +36,9 @@ export interface SlashCatalogDeps {
   /** Resolved daemon HTTP endpoint, or `null` before the first daemon-info
    *  round-trip (offline catalogue). */
   readonly endpoint: { readonly httpUrl: string; readonly token?: string } | null
+  /** P2 (jul-11) — /retry-with needs the live transcript + send path. Optional:
+   *  absent (tests/offline hosts) ⇒ the entry is simply not offered. */
+  readonly retryWith?: RetryWithDeps
 }
 
 export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCommand[] => {
@@ -52,7 +59,12 @@ export const assembleSlashCommands = (deps: SlashCatalogDeps): readonly SlashCom
       deps.appendClientMessage(kind === "err" ? "error" : "system", msg)
     },
   }
-  const llmCommands = buildLlmConfigSlashCommands(sharedEndpoint)
+  const llmCommands = [
+    ...buildLlmConfigSlashCommands(sharedEndpoint),
+    ...(deps.retryWith !== undefined
+      ? [buildRetryWithSlashCommand(sharedEndpoint, deps.retryWith)]
+      : []),
+  ]
   const authCommands = buildAuthSlashCommands(sharedEndpoint)
   const readoutCommands = buildReadoutSlashCommands({
     httpUrl,

@@ -15,6 +15,8 @@
  * proper `SessionCommand` once we add a `config.set` envelope upstream.
  */
 
+import { planRetryWith } from "../lib/retry-with"
+import type { UiMessage } from "../types/protocol"
 import type { SlashCommand } from "./SlashPalette"
 
 export interface LlmConfigEndpoint {
@@ -134,3 +136,42 @@ export const httpUrlFromWsUrl = (wsUrl: string): string => {
     return wsUrl.replace(/^wss?:/, "http:")
   }
 }
+
+/** P2 (jul-11, UUX-4-18) — /retry-with deps: the palette entry needs the live
+ *  transcript (last user message) and the composer's send path. Thin getters
+ *  so the catalogue memo does not re-assemble per message. */
+export interface RetryWithDeps {
+  readonly getMessages: () => readonly UiMessage[]
+  readonly sendUserTurn: (text: string) => void
+}
+
+/**
+ * `/retry-with <slug>` — CLI parity, HONEST two-step: the web protocol carries
+ * no per-turn model (TurnRunCommand is an empty envelope), so this switches
+ * the session model override (the exact `/model` seam) and RESENDS the last
+ * user message as a fresh turn. Copy says both steps out loud.
+ */
+export const buildRetryWithSlashCommand = (
+  ep: LlmConfigEndpoint,
+  deps: RetryWithDeps,
+): SlashCommand => ({
+  slug: "retry-with",
+  description: "Switch model and resend the last user message — usage: /retry-with <slug>",
+  kind: "local",
+  action: async (rest) => {
+    const plan = planRetryWith(rest, deps.getMessages())
+    if (!plan.ok) {
+      ep.onResult?.(
+        plan.reason === "no_slug"
+          ? "usage: /retry-with <slug>  (e.g. /retry-with gpt-5)"
+          : "/retry-with: no prior user message to resend",
+        "err",
+      )
+      return plan.reason === "no_slug" ? "/retry-with " : ""
+    }
+    await postConfig(ep, { QUANTA_MODEL: plan.slug })
+    deps.sendUserTurn(plan.resendText)
+    ep.onResult?.(`retrying last message under ${plan.slug} (model override + resend)`, "ok")
+    return ""
+  },
+})
