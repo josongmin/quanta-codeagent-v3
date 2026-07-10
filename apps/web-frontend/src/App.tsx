@@ -282,6 +282,24 @@ export const buildResumeConnectOptions = (
   ...(connection.token !== undefined ? { auth: { token: connection.token } } : {}),
 })
 
+/**
+ * P1 Phase 3b — ARM the daemon swap by re-dialing the WS carrying the thread.
+ * Extracted from the resume effect so the wire — disconnect THEN connect with a
+ * `?thread=` ConnectOptions — is directly testable (a fake client records the
+ * call order), not buried in a React effect where a dropped re-dial would be
+ * invisible to the suite. The disconnect-before-connect order matters: the
+ * daemon only reads `?thread` at WS UPGRADE, so the swap requires a fresh
+ * socket, not a mutation of the current one.
+ */
+export const armThreadSwapRedial = (
+  client: Pick<SessionClient, "disconnect" | "connect">,
+  connection: { readonly url: string; readonly token?: string },
+  resumeThreadId: string,
+): void => {
+  client.disconnect()
+  client.connect(buildResumeConnectOptions(connection, resumeThreadId))
+}
+
 const buildSlashContextSnapshot = (args: {
   readonly modelSlug: string | null
   readonly connection: ConnectionState
@@ -467,8 +485,15 @@ export const App = (): JSX.Element => {
     // a real live-attach. The REST hydration below still RENDERS the thread's
     // persisted transcript, because `transcript.replace` emits only a
     // `session.state.updated` summary, not the per-message events the UI draws.
-    client.disconnect()
-    client.connect(buildResumeConnectOptions(resolvedConnection, resumeThreadId))
+    //
+    // BOUNDARY RACE (honest-conservative): the REST /events call fires
+    // concurrently with the WS re-dial+swap and usually lands first, so the
+    // daemon's authoritative `boundary` may briefly report `read-only-history`
+    // even though the swap is arming. We trust the SERVER value (thread-resume
+    // prefers it), so we may under-report live→read-only but NEVER falsely claim
+    // live — the safe direction. A crisp post-swap boundary needs the daemon to
+    // signal the swap OUTCOME over the WS (scoped follow-up, see the plan).
+    armThreadSwapRedial(client, resolvedConnection, resumeThreadId)
     void hydrateThreadResume({
       requestedThreadId: resumeThreadId,
       liveSessionId: learnedSessionId,

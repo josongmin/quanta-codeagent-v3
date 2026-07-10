@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest"
-import { buildResumeConnectOptions, formatResumeStatus, type ResumeUiState } from "./App"
+import { describe, expect, it, vi } from "vitest"
+import {
+  armThreadSwapRedial,
+  buildResumeConnectOptions,
+  formatResumeStatus,
+  type ResumeUiState,
+} from "./App"
 
 /**
  * B2 — resume banner state-machine copy. Pins the HONEST boundary distinction
@@ -73,5 +78,42 @@ describe("buildResumeConnectOptions (P1 Phase 3b swap re-dial)", () => {
   it("PAIRED CONTROL — no token ⇒ NO auth key (byte-identical to legacy no-token connect)", () => {
     const opts = buildResumeConnectOptions({ url: "ws://h/s" }, "thread-7")
     expect("auth" in opts).toBe(false)
+  })
+})
+
+/**
+ * ★ HELLGATE — P1 Phase 3b WIRING PROOF: the resume path must actually RE-DIAL
+ * (disconnect → connect with `?thread`), not just compute options. Without this
+ * a mutation that dropped the re-dial (reverting to a read-only replay) would be
+ * invisible — buildResumeConnectOptions alone has no side effect. The daemon
+ * reads `?thread` only at WS UPGRADE, so the order (disconnect BEFORE connect)
+ * is load-bearing: the swap needs a fresh socket.
+ */
+describe("armThreadSwapRedial (P1 Phase 3b wiring)", () => {
+  it("re-dials with the thread: disconnect BEFORE connect, carrying resumeThreadId", () => {
+    const order: string[] = []
+    const client = {
+      disconnect: vi.fn(() => void order.push("disconnect")),
+      connect: vi.fn(() => void order.push("connect")),
+    }
+    armThreadSwapRedial(client, { url: "ws://h/s", token: "tk" }, "thread-42")
+
+    expect(order).toEqual(["disconnect", "connect"])
+    expect(client.disconnect).toHaveBeenCalledTimes(1)
+    expect(client.connect).toHaveBeenCalledTimes(1)
+    expect(client.connect).toHaveBeenCalledWith({
+      url: "ws://h/s",
+      resumeThreadId: "thread-42",
+      auth: { token: "tk" },
+    })
+  })
+
+  it("no-token path re-dials without an auth key (byte-identical legacy connect shape)", () => {
+    const client = { disconnect: vi.fn(), connect: vi.fn() }
+    armThreadSwapRedial(client, { url: "ws://h/s" }, "thread-42")
+    expect(client.connect).toHaveBeenCalledWith({
+      url: "ws://h/s",
+      resumeThreadId: "thread-42",
+    })
   })
 })

@@ -31,8 +31,13 @@ const msgs: Message[] = [
 ]
 
 /** A fake RuntimeSession exposing just what the persistence wire needs: an
- *  event subscribe + the Phase-0 lossless transcript read. */
-const fakeSession = (id: string): RuntimeSession & { emit: (e: SessionEvent) => void } => {
+ *  event subscribe + the Phase-0 lossless transcript read. `transcriptRef` lets
+ *  a swap test flip what `transcript.messages()` returns (mimicking a
+ *  `transcript.replace` on the live session). */
+const fakeSession = (
+  id: string,
+  transcriptRef: { messages: Message[] } = { messages: msgs },
+): RuntimeSession & { emit: (e: SessionEvent) => void } => {
   const subs: ((e: SessionEvent) => void)[] = []
   return {
     sessionId: id,
@@ -40,7 +45,7 @@ const fakeSession = (id: string): RuntimeSession & { emit: (e: SessionEvent) => 
       subs.push(cb)
       return () => undefined
     },
-    transcript: { messages: () => msgs, replace: async () => ({}) as never },
+    transcript: { messages: () => transcriptRef.messages, replace: async () => ({}) as never },
     emit: (e: SessionEvent) => {
       for (const s of subs) s(e)
     },
@@ -88,6 +93,48 @@ describe("HELLGATE P1 Phase 1 — daemon lossless transcript persistence", () =>
     session.emit(turnCompleted())
     await wire.flush()
     expect(await loadSessionById("web-2", provider(root ?? ""))).toBeUndefined()
+    wire.unsub()
+  })
+
+  // ★ THE RISKIEST SEAM (plan §Riskiest step): the Phase-2 swap repoints the
+  // append id via setActiveThreadId. This pins that a repoint actually MOVES
+  // future writes to the new thread AND leaves the parent thread on disk intact
+  // — a no-op setActiveThreadId (or a save that ignored the cell) would silently
+  // corrupt history under the original id. Both isolated-unit tests miss this.
+  test("setActiveThreadId REPOINTS future writes; the parent thread stays intact", async () => {
+    const parentMsgs: Message[] = [
+      { role: "user", content: [{ type: "text", text: "parent turn" }] } as never,
+    ]
+    const swappedMsgs: Message[] = [
+      { role: "user", content: [{ type: "text", text: "swapped-in thread body" }] } as never,
+    ]
+    const ref = { messages: parentMsgs }
+    const session = fakeSession("parent-1", ref)
+    const wire = attachTranscriptPersistence(session, {
+      enabled: true,
+      rootProvider: provider(root ?? ""),
+      cwd: "/repo",
+    })
+
+    // Turn under the ORIGINAL (parent) id.
+    session.emit(turnCompleted())
+    await wire.flush()
+
+    // Phase-2 swap: replace live transcript + repoint the append id.
+    ref.messages = swappedMsgs
+    wire.setActiveThreadId("thread-B")
+    expect(wire.activeThreadId()).toBe("thread-B")
+
+    // Next completed turn must land under thread-B, NOT parent-1.
+    session.emit(turnCompleted())
+    await wire.flush()
+
+    const swapped = await loadSessionById("thread-B", provider(root ?? ""))
+    expect(swapped?.messages).toEqual(swappedMsgs)
+
+    // The parent thread on disk is UNTOUCHED by the swapped turn (no clobber).
+    const parent = await loadSessionById("parent-1", provider(root ?? ""))
+    expect(parent?.messages).toEqual(parentMsgs)
     wire.unsub()
   })
 
