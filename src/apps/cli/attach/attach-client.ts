@@ -353,7 +353,14 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
         // swallowed as a prompt line).
         if (opts.claimApprovalLine?.(line) === true) continue
         const ready = await waitForReady()
-        if (!ready) break
+        if (!ready) {
+          // UUX-3-14 — a handshake that never settles must not eat the typed
+          // line and exit SILENTLY: say why the input went nowhere.
+          if (!closed) {
+            opts.write("\n[handshake with the daemon never completed — input not sent; detaching]\n")
+          }
+          break
+        }
         const sid = handshake.sessionId
         if (sid === undefined) continue
         const cmds = buildLineCommands({
