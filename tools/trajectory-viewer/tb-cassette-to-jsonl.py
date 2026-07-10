@@ -21,6 +21,38 @@ PROMPTS = {}
 if os.path.exists("/tmp/tb-prompts.json"):
     PROMPTS = json.load(open("/tmp/tb-prompts.json"))
 
+def _blocks(content):
+    """Normalize a Message.content (string | block[]) to a block list."""
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    return content or []
+
+def emit_debug_dump(inst, task, dbg, reward):
+    """Emit viewer records from a report.debug full-history dump (the REAL
+    session transcript, no reconstruction): one record per assistant message,
+    request.messages = everything before it, events = its own blocks."""
+    system = dbg.get("system")
+    msgs = []
+    for m in dbg.get("messages", []):
+        if m.get("role") != "assistant":
+            msgs.append(m)
+            continue
+        events = []
+        for b in _blocks(m.get("content")):
+            t = b.get("type")
+            if t == "text":
+                events.append({"type": "text_delta", "content": b.get("text", "")})
+            elif t == "thinking":
+                events.append({"type": "thinking_delta", "content": b.get("thinking", "")})
+            elif t == "tool_use":
+                events.append({"type": "tool_use_start", "id": b.get("id"), "name": b.get("name")})
+                events.append({"type": "tool_use_end", "id": b.get("id"), "input": b.get("input")})
+        print(json.dumps({
+            "metadata": {"instanceId": inst, "task": task, "reward": reward, "debugDump": True},
+            "request": {"system": system, "messages": list(msgs)},
+            "events": events}, ensure_ascii=False))
+        msgs.append(m)
+
 def emit(run_dir):
     run_name = os.path.basename(os.path.normpath(run_dir))
     for f in sorted(glob.glob(os.path.join(run_dir, "**", "result.json"), recursive=True)):
@@ -37,6 +69,12 @@ def emit(run_dir):
             reward = open(rw).read().strip()
         inst = f"{run_name}/{task}"
         md = (j.get("agent_result") or {}).get("metadata") or {}
+        # Debug-tier runs (QUANTA_BENCH_RECORD_TRAJECTORY=debug) carry the REAL full
+        # history on report.debug — emit that verbatim and skip reconstruction.
+        dbg = md.get("debug")
+        if dbg and dbg.get("messages"):
+            emit_debug_dump(inst, task, dbg, reward=None if reward is None else reward)
+            continue
         instruction = md.get("instruction") or j.get("task_id", {}).get("path", task)
         guide = PROMPTS.get("operatorGuide", "")
         turn_text = f"{guide}\n\n# Task\n{instruction}" if guide else instruction

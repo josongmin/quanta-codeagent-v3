@@ -324,6 +324,54 @@ describe("terminal brain-mode (B3) — drives the loop over the brain↔hands du
     endIn()
   })
 
+  describe("debug-tier full-history dump (QUANTA_BENCH_RECORD_TRAJECTORY=debug) — report.debug", () => {
+    const runWithEnv = async (env: Record<string, string>) => {
+      const { stdin, stdout, endIn } = makeStdio()
+      const reports: Array<{ obj: unknown }> = []
+      await runTerminalBrain({
+        instruction: "dump the history",
+        reportOut: "/tmp/brain-report-debug.json",
+        stdin,
+        stdout,
+        llm: new FakeLlm(execThenDoneScripts("echo hi")),
+        env,
+        writeReport: (_path, obj) => {
+          reports.push({ obj })
+        },
+      })
+      endIn()
+      const obj = reports[0]?.obj
+      if (obj === undefined) throw new Error("the brain must write exactly one report")
+      return obj as {
+        debug?: { system: string; messages: readonly { role: string }[] }
+        trajectory?: readonly unknown[]
+      }
+    }
+
+    test("gate OFF ⇒ NO debug field (byte-identical report; other truthy tokens do not leak it)", async () => {
+      expect("debug" in (await runWithEnv({}))).toBe(false)
+      expect("debug" in (await runWithEnv({ QUANTA_BENCH_RECORD_TRAJECTORY: "1" }))).toBe(false)
+    })
+
+    test("gate ON ⇒ the SESSION'S OWN history rides the report: live post-composition system + full transcript (cassette untouched)", async () => {
+      const report = await runWithEnv({
+        QUANTA_BENCH_RECORD_TRAJECTORY: "debug",
+        [TB_SELF_TEST_ENV]: "1",
+      })
+      if (!report.debug) throw new Error("debug tier must ship the full-history dump")
+      // LIVE capture, not a static render: the S1 append happened BEFORE the capture, so the
+      // dumped system must carry the discipline block a reconstruction would have to guess at.
+      expect(report.debug.system).toContain(SELF_TEST_DISCIPLINE)
+      // Full transcript: the instruction turn AND the model's own turns are all present.
+      expect(report.debug.messages.length).toBeGreaterThanOrEqual(2)
+      const flat = JSON.stringify(report.debug.messages)
+      expect(flat).toContain("dump the history")
+      expect(flat).toContain("echo hi")
+      // The compact cassette contract is UNTOUCHED by the debug tier (both ride the report).
+      expect(Array.isArray(report.trajectory)).toBe(true)
+    })
+  })
+
   test("the operator guide + the terminal tool surface actually reach the model", async () => {
     const { stdin, stdout, endIn } = makeStdio()
     const llm = new FakeLlm(execThenDoneScripts("echo hi"))
@@ -1140,7 +1188,7 @@ describe("runOracleRepairLoop e2e (Phase C) — drives the self-test to green", 
       stdout,
       llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
       writeReport: (_p, obj) => {
-        report = obj as Record<string, unknown>
+        report = obj as unknown as Record<string, unknown>
       },
       env: { [TB_ORACLE_LOOP_ENV]: "1" },
     })
@@ -1166,7 +1214,7 @@ describe("runOracleRepairLoop e2e (Phase C) — drives the self-test to green", 
       stdout,
       llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
       writeReport: (_p, obj) => {
-        report = obj as Record<string, unknown>
+        report = obj as unknown as Record<string, unknown>
       },
       // knob unset ⇒ loop off
     })
@@ -1187,7 +1235,7 @@ describe("runOracleRepairLoop e2e (Phase C) — drives the self-test to green", 
       stdout,
       llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
       writeReport: (_p, obj) => {
-        report = obj as Record<string, unknown>
+        report = obj as unknown as Record<string, unknown>
       },
       env: { [TB_ORACLE_LOOP_ENV]: "1" },
     })
@@ -1210,7 +1258,7 @@ describe("runOracleRepairLoop e2e (Phase C) — drives the self-test to green", 
       stdout,
       llm: new FakeLlm(oracleLoopScripts("python test_fib.py")),
       writeReport: (_p, obj) => {
-        report = obj as Record<string, unknown>
+        report = obj as unknown as Record<string, unknown>
       },
       env: { [TB_ORACLE_LOOP_ENV]: "2" }, // maxRounds = 2
     })

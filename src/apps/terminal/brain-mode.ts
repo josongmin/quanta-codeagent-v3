@@ -129,6 +129,14 @@ export const resolveTrajectoryOn = (env: Record<string, string | undefined>): bo
 const TRAJECTORY_MAX_STEPS = 200
 const TRAJECTORY_PREVIEW_MAX = 240
 
+/** Debug-tier gate for the full-fidelity `report.debug` dump. Deliberately the SAME env var (and
+ *  the same `debug` token) as the bench debug-sink (`apps/bench/trajectory-debug-sink.ts`
+ *  `isTrajectoryDebugEnabled`) — one debug knob across surfaces, no drift; NOT imported from there
+ *  because the terminal slice must not depend on the bench app. Off (any other value / unset) ⇒
+ *  the report is byte-identical. */
+export const resolveDebugDumpOn = (env: Record<string, string | undefined>): boolean =>
+  (env.QUANTA_BENCH_RECORD_TRAJECTORY ?? "").trim().toLowerCase() === "debug"
+
 /** Lever #1 knob (RFC `jul-2-terminal-bench-levers/01`): the environment posture.
  *  DEFAULT-OFF ⇒ byte-identical today (the brain's system prompt keeps the frozen
  *  SWE-bench env guardrails — R-ENV / R-STOP-ENV). When ON, the brain rebuilds its
@@ -222,6 +230,17 @@ export interface TerminalBrainReport {
    *  suppressed only by `QUANTA_TB_TRAJECTORY=0`. Bounded (event cap + preview truncation) so it never
    *  bloats the report. No-leak: it records only the model's own actions, never a hidden test. */
   readonly trajectory?: readonly TrajectoryStep[]
+  /** DEBUG-tier full-fidelity dump (jul-10): the session ALREADY holds the exact history — the live
+   *  `systemSource` text and the full `messages` transcript — so the debug tier ships them verbatim
+   *  instead of forcing viewers to reconstruct prompts from the compact cassette. PRESENT ONLY under
+   *  `QUANTA_BENCH_RECORD_TRAJECTORY=debug` (the SAME debug-tier gate as the bench debug-sink — one
+   *  knob, no drift); absent ⇒ byte-identical report. Rides `metadata` on the harbor side, so the
+   *  compact `trajectory` cassette and its consumers are untouched. No-leak: system prompt + the
+   *  model's own conversation only, never the hidden verifier. */
+  readonly debug?: {
+    readonly system: string
+    readonly messages: readonly Message[]
+  }
 }
 
 /** One compact trajectory step (a tool call + its observed result, OR an assistant text turn). */
@@ -733,6 +752,8 @@ const finalizeTerminalBrain = (
     verification: VerificationStamp | undefined
     oracleLoop: { rounds: number; converged: boolean } | undefined
     envOwnedApplied: boolean
+    /** Captured live systemSource text — present ONLY under the debug tier (gate off ⇒ undefined). */
+    systemText: string | undefined
     runError: unknown
   },
 ): TerminalBrainResult => {
@@ -759,6 +780,11 @@ const finalizeTerminalBrain = (
     // `QUANTA_TB_TRAJECTORY=0` opts out (then the field is absent ⇒ byte-identical to pre-cassette).
     ...(resolveTrajectoryOn(opts.env ?? {})
       ? { trajectory: compactTrajectory(stream.events) }
+      : {}),
+    // Debug tier (`QUANTA_BENCH_RECORD_TRAJECTORY=debug`): ship the session's OWN full history —
+    // exact system text + the complete messages transcript — absent otherwise (byte-identical).
+    ...(state.systemText !== undefined
+      ? { debug: { system: state.systemText, messages: state.messages } }
       : {}),
   }
   opts.writeReport(opts.reportOut, report)
@@ -822,6 +848,7 @@ export const runTerminalBrain = async (
   let verification: VerificationStamp | undefined
   let oracleLoop: { rounds: number; converged: boolean } | undefined
   let envOwnedApplied = false
+  let systemText: string | undefined
   let runError: unknown
   try {
     const boot = await bootstrapSession(deps, runtime, {})
@@ -858,6 +885,12 @@ export const runTerminalBrain = async (
     if (selfTestOn) {
       boot.systemSource.set(`${boot.systemSource.get()}\n\n${SELF_TEST_DISCIPLINE}`)
     }
+    // Debug-tier dump (report.debug): capture the LIVE system text AFTER every composition step
+    // (posture swap + S1 append) — the session already holds the exact history, so the debug tier
+    // ships it verbatim rather than making viewers reconstruct it. Gate off ⇒ undefined ⇒ the report
+    // field is absent (byte-identical). No mid-run system swap exists on this surface, so a single
+    // post-composition capture IS the per-turn truth.
+    if (resolveDebugDumpOn(opts.env ?? {})) systemText = boot.systemSource.get()
     const { runtime: facade } = await createRuntimeFromBootstrap({
       boot,
       stream,
@@ -927,6 +960,7 @@ export const runTerminalBrain = async (
     verification,
     oracleLoop,
     envOwnedApplied,
+    systemText,
     runError,
   })
 }
