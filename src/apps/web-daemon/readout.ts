@@ -32,6 +32,7 @@
  * composed on the web surface).
  */
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
+import { errMessage } from "@/shared"
 import type { Plan, TodoItem } from "@/agent/plan/types"
 import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
 
@@ -350,7 +351,7 @@ const served = (name: string, output: string): ReadoutResult => ({
 
 const sourceFailed = (name: string, error: unknown): ReadoutResult => ({
   name,
-  output: `/${name}: readout source failed: ${error instanceof Error ? error.message : String(error)}`,
+  output: `/${name}: readout source failed: ${errMessage(error)}`,
   isError: false, // graceful — the route answers 200, never 500
   wired: false,
 })

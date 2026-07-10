@@ -24,6 +24,7 @@
  */
 
 import { rename, stat, unlink, writeFile } from "node:fs/promises"
+import { errMessage } from "@/shared"
 
 export type McpToggleAction = "enable" | "disable"
 
@@ -77,7 +78,7 @@ export const applyMcpServerToggle = (
   try {
     parsed = JSON.parse(raw)
   } catch (e) {
-    return { ok: false, reason: "parse", detail: e instanceof Error ? e.message : String(e) }
+    return { ok: false, reason: "parse", detail: errMessage(e) }
   }
   if (!isRecord(parsed)) return { ok: false, reason: "shape" }
 
@@ -137,7 +138,7 @@ export const writeMcpConfigAtomic = async (
       }
     }
   } catch (e) {
-    return { ok: false, reason: "io", detail: e instanceof Error ? e.message : String(e) }
+    return { ok: false, reason: "io", detail: errMessage(e) }
   }
   const tmp = `${path}.tmp-${process.pid}`
   try {
@@ -147,6 +148,6 @@ export const writeMcpConfigAtomic = async (
   } catch (e) {
     // Best-effort tmp cleanup — never mask the primary failure.
     await unlink(tmp).catch(() => {})
-    return { ok: false, reason: "io", detail: e instanceof Error ? e.message : String(e) }
+    return { ok: false, reason: "io", detail: errMessage(e) }
   }
 }
