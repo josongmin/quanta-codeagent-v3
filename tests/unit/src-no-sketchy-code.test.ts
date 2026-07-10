@@ -333,7 +333,7 @@ const RULES: readonly Rule[] = [
       "apps/cli/webhook-server-setup.ts":
         "Webhook-server CLI composition root (`quanta webhook`) — reads QUANTA_GITHUB_WEBHOOK strict gate + secret config + port/session-id at launch; same DI posture as apps/cli/mcp-server-setup.ts.",
       "host/runtime/internal/context-binding/base.ts":
-        "God-module split of host/runtime/internal/context-binding.ts (already allowlisted) — the call-time `env = process.env` DI fallback in wireRuntimePorts + the `wireInteractiveKnobs(..., process.env, \"cli\")` composition-root knob wiring relocated verbatim; downstream modules receive the bound env. Same composition-root posture as context-binding.ts.",
+        'God-module split of host/runtime/internal/context-binding.ts (already allowlisted) — the call-time `env = process.env` DI fallback in wireRuntimePorts + the `wireInteractiveKnobs(..., process.env, "cli")` composition-root knob wiring relocated verbatim; downstream modules receive the bound env. Same composition-root posture as context-binding.ts.',
       "apps/bench/trajectory.ts":
         "Extracted verbatim from apps/bench/index.ts (already allowlisted) — the bench LLM trajectory record/replay cluster resolves QUANTA_BENCH_(RECORD|REPLAY)_TRAJECTORY / _LIMIT / _ON_MISS gates at resolve time, default-OFF and byte-identical when unset. Same bench-bootstrap posture as apps/bench/index.ts.",
       "apps/bench/remote/full.ts":
@@ -344,8 +344,8 @@ const RULES: readonly Rule[] = [
         "Injection-first: `opts.env ?? process.env` DI fallback feeding resolveOAuthConfig; tests inject explicit env. Same DI-fallback posture as apps/cli/login-cmd.ts.",
       "apps/bench/remote/token-budget.ts":
         "Bench token-budget composition — reads QUANTA_BENCH_PATCH_GEN_BUDGET / SWEEP_PATCH_GEN_BUDGET + QUANTA_BENCH_TOKEN_BUDGET_DIR at boot (raw extracted then parsed via NaN-safe asPositiveInt on a separate line). Same bench-bootstrap posture as apps/bench/index.ts.",
-      "apps/cli/internal/mcp.ts":
-        "God-module split of apps/cli/internal.ts — CLI reverse-MCP wiring composition root: QUANTA_MCP_AUTORESTART gate + resolveQuantaHome(process.env) + pickMcpNegotiator(process.env) + `envSource = process.env` DI fallbacks; the assembled MCP ports downstream stay env-free. Same posture as apps/cli/internal.ts and apps/cli/mcp-server-setup.ts.",
+      "host/mcp-composition.ts":
+        "P4 (jul-11) surface-shared MCP composition (moved from apps/cli/internal/mcp.ts — now @/host so the web daemon shares it): surface composition root reading QUANTA_MCP_AUTORESTART gate + resolveQuantaHome(process.env) + pickMcpNegotiator(process.env) + `envSource = process.env` DI fallbacks at launch; the assembled MCP ports downstream stay env-free. Re-exported by apps/cli/internal/mcp.ts.",
       "apps/cli/internal/argv.ts":
         "God-module split of apps/cli/internal.ts (ADR-0024) — pure process.argv/process.env CLI flag accessors (QUANTA_STATE_PATH / QUANTA_RESUME / QUANTA_OBSERVE_DIR / QUANTA_LSP_TOOLS / QUANTA_AST_GREP), re-exported from ../internal so importers keep resolving from ./internal. Same CLI-bootstrap posture as apps/cli/internal.ts.",
       "apps/cli/internal/shell-snapshot.ts":
