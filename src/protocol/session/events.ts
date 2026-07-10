@@ -180,6 +180,51 @@ export interface ItemCompletedEvent extends SessionEventEnvelope<"item.completed
   readonly text?: string
 }
 
+/**
+ * UUX-1-12 (jul-10) — HIGH-VALUE observability events, ADDITIVE to session.v1.
+ *
+ * Four AgentEvent types the web bridge previously DROPPED now cross as their
+ * own NON-PROSE wire types (the ALBB-18 lesson: never splice status text into
+ * the `turn.output.delta` prose channel). All four are pure observation — no
+ * transcript/state mutation beyond the seq/revision bump — and old clients
+ * ignore them gracefully (the frontend decode gate is a membership check; an
+ * unknown tag decodes to null and is dropped).
+ */
+
+/** Keyed mid-tool progress notice (free-text, clamped host-side; joins the
+ *  `tool.invoked` row via `toolCallId`). */
+export interface ToolProgressEvent extends SessionEventEnvelope<"tool.progress"> {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly message: string
+}
+
+/** Loop recovery trace (backoff / compact / nudge / empty / malformed). */
+export interface TurnRecoveryEvent extends SessionEventEnvelope<"turn.recovery"> {
+  readonly reason: string
+  readonly detail?: string
+}
+
+/** ADR-0075 proactive-compaction marker — the conversation window was folded;
+ *  `summary` is clamped host-side (the full archive entry lives in the
+ *  session recorder, not on the wire). */
+export interface ContextCompactedEvent extends SessionEventEnvelope<"context.compacted"> {
+  readonly fromTurnId: string
+  readonly toTurnId: string
+  readonly summary: string
+  readonly ts: number
+  readonly tokens: number
+}
+
+/** ALBB-21 advisory budget-cap crossing (soft/hard). NON-FATAL — the hard stop
+ *  fires via the loop's own epilogue; this is the rendered notice. */
+export interface BudgetBreachEvent extends SessionEventEnvelope<"budget.breach"> {
+  readonly severity: "soft" | "hard"
+  readonly scope: string
+  readonly observed: number
+  readonly limit: number
+}
+
 export interface ApprovalRequestedEvent extends SessionEventEnvelope<"approval.requested"> {
   readonly approval: PendingApprovalView
 }
@@ -199,6 +244,8 @@ export type SessionEvent =
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | ArtifactReadyEvent
+  | BudgetBreachEvent
+  | ContextCompactedEvent
   | ItemCompletedEvent
   | ItemDeltaEvent
   | ItemStartedEvent
@@ -208,18 +255,22 @@ export type SessionEvent =
   | SkillScopeDecisionEvent
   | ToolCompletedEvent
   | ToolInvokedEvent
+  | ToolProgressEvent
   | TurnAbortedEvent
   | TurnCompletedEvent
   | TurnLlmContinuationEvent
   | TurnLlmRequestEvent
   | TurnOutputDeltaEvent
   | TurnFailedEvent
+  | TurnRecoveryEvent
   | TurnStartedEvent
 
 export const SESSION_EVENT_TYPES = [
   "approval.requested",
   "approval.resolved",
   "artifact.ready",
+  "budget.breach",
+  "context.compacted",
   "item.completed",
   "item.delta",
   "item.started",
@@ -229,12 +280,14 @@ export const SESSION_EVENT_TYPES = [
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "tool.progress",
   "turn.aborted",
   "turn.completed",
   "turn.llm.continuation",
   "turn.llm.request",
   "turn.output.delta",
   "turn.failed",
+  "turn.recovery",
   "turn.started",
 ] as const
 

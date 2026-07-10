@@ -37,6 +37,8 @@ const EVENT_TYPES: readonly SessionEventType[] = [
   "approval.requested",
   "approval.resolved",
   "artifact.ready",
+  "budget.breach",
+  "context.compacted",
   "item.completed",
   "item.delta",
   "item.started",
@@ -46,12 +48,14 @@ const EVENT_TYPES: readonly SessionEventType[] = [
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "tool.progress",
   "turn.aborted",
   "turn.completed",
   "turn.llm.continuation",
   "turn.llm.request",
   "turn.output.delta",
   "turn.failed",
+  "turn.recovery",
   "turn.started",
 ]
 

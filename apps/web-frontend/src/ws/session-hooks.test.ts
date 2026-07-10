@@ -445,4 +445,70 @@ describe("session-hooks transcript projection", () => {
       },
     ])
   })
+
+  // UUX-1-12 — the four additive observability events render as system rows
+  // (budget hard breach paints as an error row); none touch the streaming slot.
+  it("renders the additive observability events as transcript rows", () => {
+    const base = { seq: 9, revision: 3, emittedAt: "2026-07-10T00:00:00.000Z" }
+    let state = initialTranscript
+    state = applySessionEventToTranscript(state, {
+      ...base,
+      eventId: "tp-1",
+      type: "tool.progress",
+      toolCallId: "c1",
+      toolName: "bash",
+      message: "installing deps",
+    })
+    state = applySessionEventToTranscript(state, {
+      ...base,
+      eventId: "rec-1",
+      type: "turn.recovery",
+      reason: "compact",
+      detail: "window full",
+    })
+    state = applySessionEventToTranscript(state, {
+      ...base,
+      eventId: "cc-1",
+      type: "context.compacted",
+      fromTurnId: "t1",
+      toTurnId: "t9",
+      summary: "explored the repo",
+      ts: 1,
+      tokens: 4200,
+    })
+    state = applySessionEventToTranscript(state, {
+      ...base,
+      eventId: "bb-1",
+      type: "budget.breach",
+      severity: "hard",
+      scope: "session-x",
+      observed: 5.5,
+      limit: 5,
+    })
+
+    expect(state.messages.map((m) => ({ role: m.role, text: m.text }))).toEqual([
+      { role: "system", text: "⋯ bash: installing deps" },
+      { role: "system", text: "↻ recovery (compact): window full" },
+      { role: "system", text: "🗜 context compacted (4200 tokens summarized): explored the repo" },
+      { role: "error", text: "💰 budget hard cap crossed (session-x): $5.5000 of $5.0000" },
+    ])
+    // Pure observation: the streaming assistant slot is untouched.
+    expect(state.streamingAssistant).toBeNull()
+  })
+
+  it("soft budget breach stays a gray system row (not an error)", () => {
+    const state = applySessionEventToTranscript(initialTranscript, {
+      eventId: "bb-2",
+      seq: 1,
+      revision: 1,
+      emittedAt: "2026-07-10T00:00:01.000Z",
+      type: "budget.breach",
+      severity: "soft",
+      scope: "daily-2026-07-10",
+      observed: 1.25,
+      limit: 1,
+    })
+    expect(state.messages[0]?.role).toBe("system")
+    expect(state.messages[0]?.text).toContain("soft")
+  })
 })

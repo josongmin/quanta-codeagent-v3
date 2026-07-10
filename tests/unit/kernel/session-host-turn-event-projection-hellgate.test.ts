@@ -34,6 +34,10 @@ describe("session-host turn-event projection inventory", () => {
       expect(canonical.has(type)).toBe(true)
     }
     expect([...SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES].sort()).toEqual([
+      // UUX-1-12 (jul-10) — +4 additive observability targets (budget.breach /
+      // context.compacted / tool.progress / turn.recovery).
+      "budget.breach",
+      "context.compacted",
       "item.completed",
       "item.delta",
       "item.started",
@@ -41,9 +45,11 @@ describe("session-host turn-event projection inventory", () => {
       "skill.scope.decision",
       "tool.completed",
       "tool.invoked",
+      "tool.progress",
       "turn.llm.continuation",
       "turn.llm.request",
       "turn.output.delta",
+      "turn.recovery",
     ])
   })
 })
@@ -169,6 +175,44 @@ describe("session-host turn-event projection behavior", () => {
         event: {
           type: "item.stream",
           item: { phase: "completed", itemId: "it-1", itemType: "reasoning", text: "hi" },
+        },
+      }),
+      // UUX-1-12 — the additive observability quartet.
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:11.000Z",
+        event: { type: "tool.progress", toolCallId: "tool-1", toolName: "bash", message: "run" },
+      }),
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:12.000Z",
+        event: { type: "recovery", reason: "backoff" },
+      }),
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:13.000Z",
+        event: {
+          type: "context.compacted",
+          fromTurnId: "t1",
+          toTurnId: "t2",
+          summary: "folded",
+          ts: 1,
+          tokens: 9,
+        },
+      }),
+      projectSessionHostTurnEvent({
+        state: initialState,
+        commandId: "c1",
+        emittedAt: "2026-06-12T00:00:14.000Z",
+        event: {
+          type: "budget.breach",
+          severity: "soft",
+          scope: "session-x",
+          observed: 2,
+          limit: 1,
         },
       }),
     ]

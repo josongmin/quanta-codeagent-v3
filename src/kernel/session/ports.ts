@@ -73,10 +73,14 @@ export const SESSION_HOST_TURN_EVENT_TYPES = [
   "llm.request",
   "llm.continuation",
   "tool.invoked",
+  "tool.progress",
   "tool.completed",
   "usage",
   "skill.scope.decision",
   "item.stream",
+  "recovery",
+  "context.compacted",
+  "budget.breach",
 ] as const
 
 export type SessionHostTurnEventType = (typeof SESSION_HOST_TURN_EVENT_TYPES)[number]
@@ -145,6 +149,37 @@ export type SessionHostTurnEvent =
   // `item.phase`. Carried ONLY when `QUANTA_ITEM_STREAM` is on (absent ⇒ never
   // produced, byte-identical). Pure observation: no token / state mutation.
   | { readonly type: "item.stream"; readonly item: ItemStreamCore }
+  // UUX-1-12 (jul-10) — HIGH-VALUE observability events, additive. Each is a
+  // DEDICATED NON-PROSE variant (the ALBB-18 lesson: mid-turn status must never
+  // ride `assistant_text.delta`, which the projection appends to the streaming
+  // transcript). Pure observation: no token / transcript mutation.
+  //
+  // Keyed mid-tool progress notice (free-text, clamped at the bridge).
+  | {
+      readonly type: "tool.progress"
+      readonly toolCallId: string
+      readonly toolName: string
+      readonly message: string
+    }
+  // Loop recovery trace (backoff / compact / nudge / empty / malformed).
+  | { readonly type: "recovery"; readonly reason: string; readonly detail?: string }
+  // ADR-0075 proactive-compaction marker (summary clamped at the bridge).
+  | {
+      readonly type: "context.compacted"
+      readonly fromTurnId: string
+      readonly toTurnId: string
+      readonly summary: string
+      readonly ts: number
+      readonly tokens: number
+    }
+  // ALBB-21 advisory budget-cap crossing (soft/hard, never a stop by itself).
+  | {
+      readonly type: "budget.breach"
+      readonly severity: "soft" | "hard"
+      readonly scope: string
+      readonly observed: number
+      readonly limit: number
+    }
 
 export type SessionHostSideConversationInheritance = "none" | "system" | "last-turn"
 

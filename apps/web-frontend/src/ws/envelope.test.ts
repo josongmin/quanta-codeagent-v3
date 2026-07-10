@@ -205,6 +205,27 @@ describe("decodeEventFrame", () => {
     expect(decodeEventFrame(raw)).toBeNull()
   })
 
+  // UUX-1-12 — the additive observability tags pass the decode gate. (An OLD
+  // frontend without them in EVENT_TYPES hits the unknown-tag null path below —
+  // the graceful-ignore contract for new event types.)
+  it("decodes the additive observability event tags", () => {
+    for (const payload of [
+      { type: "tool.progress", toolCallId: "c1", toolName: "bash", message: "run" },
+      { type: "turn.recovery", reason: "backoff" },
+      { type: "context.compacted", fromTurnId: "a", toTurnId: "b", summary: "s", ts: 1, tokens: 2 },
+      { type: "budget.breach", severity: "soft", scope: "session-x", observed: 2, limit: 1 },
+    ]) {
+      const raw = JSON.stringify({
+        version: SESSION_PROTOCOL_VERSION,
+        kind: "event",
+        payload: { eventId: "e", seq: 0, revision: 0, emittedAt: "x", ...payload },
+      })
+      const decoded = decodeEventFrame(raw)
+      expect(decoded).not.toBeNull()
+      expect(decoded?.type).toBe(payload.type as NonNullable<typeof decoded>["type"])
+    }
+  })
+
   it("returns null when the payload type tag is unknown", () => {
     const raw = JSON.stringify({
       version: SESSION_PROTOCOL_VERSION,

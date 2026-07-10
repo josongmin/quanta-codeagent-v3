@@ -16,9 +16,11 @@
 
 import type { Server } from "bun"
 import type { FollowerCoControlDispatcher } from "@/agent/thread-follower"
-import type { SupportedReadModels } from "@/protocol/session"
-import { errMessage, logger } from "@/shared"
 import type { ArtifactPreviewResolver } from "@/host/runtime"
+import type { SupportedReadModels } from "@/protocol/session"
+import type { RuntimeSession } from "@/sdk/runtime"
+import { errMessage, logger } from "@/shared"
+import type { CostReadoutTotals, WebReadoutSources } from "./readout"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
 import { setupFollowerApproval } from "./server/follower-approval"
@@ -131,6 +133,47 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
   readonly followerCoControl?: FollowerCoControlDispatcher
 }
 
+/**
+ * UUX-1-11 — server-side cumulative usage fold for the `/cost` readout. The
+ * daemon-native usage truth is the `turn.completed` SessionEvent (tokenUsage +
+ * modelSlug), so the aggregator subscribes the shared session and folds every
+ * completed turn — the same numbers any attached client's usage footer sums.
+ * Read-only + additive: a session without usage-reporting turns yields honest
+ * zeros ("no completed turns yet"), never a fabricated estimate.
+ */
+const attachCostAggregator = (
+  session: RuntimeSession,
+): { totals: () => CostReadoutTotals; unsub: () => void } => {
+  let turns = 0
+  let promptTokens = 0
+  let completionTokens = 0
+  let totalTokens = 0
+  let costMicroUsd = 0
+  let modelSlug: string | undefined
+  const unsub = session.subscribe((event) => {
+    if (event.type !== "turn.completed") return
+    turns += 1
+    if (event.tokenUsage !== undefined) {
+      promptTokens += event.tokenUsage.promptTokens ?? 0
+      completionTokens += event.tokenUsage.completionTokens ?? 0
+      totalTokens += event.tokenUsage.totalTokens ?? 0
+      costMicroUsd += event.tokenUsage.costMicroUsd ?? 0
+    }
+    if (event.modelSlug !== undefined && event.modelSlug.length > 0) modelSlug = event.modelSlug
+  })
+  return {
+    totals: () => ({
+      turns,
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      costMicroUsd,
+      ...(modelSlug !== undefined ? { modelSlug } : {}),
+    }),
+    unsub,
+  }
+}
+
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
@@ -163,6 +206,20 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   let followerApprovalUnsub = followerApprovalUnsub0
   let followerSweepTimer = followerSweepTimer0
 
+  // UUX-1-11 — readout sources for `GET /readout/:name`. The production
+  // runtime-factory exposes a `readoutSources` getter (agents / plan / skills /
+  // memory / context over the SAME live session collaborators); duck-read it so
+  // a test stub facade simply degrades every readout to the honest
+  // missing-source line. `/cost` is folded HERE from the shared session's
+  // `turn.completed` events — a daemon-owned source, present for any facade.
+  const facadeReadoutSources = (runtime as { readoutSources?: WebReadoutSources }).readoutSources
+  const costAggregator = attachCostAggregator(sharedSession)
+  let costAggregatorUnsub: (() => void) | null = costAggregator.unsub
+  const readoutSources: WebReadoutSources = {
+    ...(facadeReadoutSources ?? {}),
+    cost: costAggregator.totals,
+  }
+
   // `fetch` reads `server.port` (the `/network` route) but `server` is the
   // `Bun.serve` result assigned HERE — `getServer` resolves it lazily at request
   // time (after binding completes), so the closure may reference it before this
@@ -176,6 +233,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       startedAt,
       threadStore,
       sharedSession,
+      readoutSources,
       getServer: () => server,
       // A2 — the read-only preview resolver for `GET /artifact/:id`. Absent ⇒
       // the route 404s (byte-identical). `void` marks the intentional unused when
@@ -235,6 +293,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
       if (followerSweepTimer !== null) {
         clearInterval(followerSweepTimer)
         followerSweepTimer = null
+      }
+      // UUX-1-11 — stop the cost fold so it never fires against a closed session.
+      if (costAggregatorUnsub !== null) {
+        costAggregatorUnsub()
+        costAggregatorUnsub = null
       }
       threadStore?.close()
       await runtime.close().catch((error: unknown) => {

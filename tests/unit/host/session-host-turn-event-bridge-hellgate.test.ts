@@ -16,13 +16,19 @@ describe("session-host turn-event bridge inventory", () => {
     for (const type of AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES) {
       expect(canonical.has(type)).toBe(true)
     }
-    // ALBB-18 P3 fix — `progress_update` mis-bridge REMOVED (back to 7). It was
-    // spliced into the prose `assistant_text.delta` channel; progress is rendered
-    // to CLI stdout separately, so the bridge no longer carries it.
-    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBe(7)
-    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.includes("progress_update")).toBe(
-      false,
-    )
+    // ALBB-18 P3 fix — `progress_update` mis-bridge REMOVED. It was spliced into
+    // the prose `assistant_text.delta` channel; progress is rendered to CLI
+    // stdout separately, so the bridge does not carry it.
+    // UUX-1-12 (jul-10) — +4 audited additive observability events, each on a
+    // DEDICATED non-prose host type: tool_progress / recovery /
+    // context_compacted / budget_breach (7 → 11). Pinned by the sibling
+    // session-host-turn-event-bridge-observability hellgate.
+    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBe(11)
+    expect(
+      (AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES as readonly string[]).includes(
+        "progress_update",
+      ),
+    ).toBe(false)
     expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length).toBeLessThan(
       AGENT_EVENT_TYPES.length,
     )
@@ -41,9 +47,11 @@ describe("session-host turn-event bridge inventory", () => {
     })
     expect(bridged).toBeUndefined()
     // progress_update is not in the bridged AgentEvent inventory anymore.
-    expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.includes("progress_update")).toBe(
-      false,
-    )
+    expect(
+      (AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES as readonly string[]).includes(
+        "progress_update",
+      ),
+    ).toBe(false)
     // And no host target arm was ever added for progress.
     expect(AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_TYPES.includes("progress_update" as never)).toBe(
       false,
@@ -82,6 +90,12 @@ describe("session-host turn-event bridge behavior", () => {
       }),
       toSessionHostTurnEvent({ type: "tool_call", id: "c1", name: "bash", input: { cmd: "pwd" } }),
       toSessionHostTurnEvent({
+        type: "tool_progress",
+        id: "c1",
+        name: "bash",
+        message: "compiling",
+      }),
+      toSessionHostTurnEvent({
         type: "tool_result",
         id: "c1",
         name: "bash",
@@ -97,6 +111,23 @@ describe("session-host turn-event bridge behavior", () => {
         reason: "outside allowlist",
         isReadOnly: false,
         decision: "blocked",
+      }),
+      // UUX-1-12 — the additive observability quartet.
+      toSessionHostTurnEvent({ type: "recovery", reason: "backoff" }),
+      toSessionHostTurnEvent({
+        type: "context_compacted",
+        fromTurnId: "t1",
+        toTurnId: "t2",
+        summary: "s",
+        ts: 1,
+        tokens: 2,
+      }),
+      toSessionHostTurnEvent({
+        type: "budget_breach",
+        severity: "soft",
+        scope: "session-x",
+        observed: 1,
+        limit: 1,
       }),
     ]
       .map((event) => event?.type)

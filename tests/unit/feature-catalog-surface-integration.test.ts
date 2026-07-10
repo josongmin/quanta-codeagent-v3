@@ -124,17 +124,29 @@ describe("surface_integration — web reachability SSOT anchor", () => {
   // progress is already rendered to CLI stdout independently, the bridge entry
   // was REMOVED (back to 7). A proper progress channel is future work. The
   // ratchet asserts an EXACT set so any FUTURE unaudited widening fires red.
+  // RE-AUDITED 2026-07-10 (UUX-1-12): the bridge is widened by FOUR audited
+  // observability events — `tool_progress` / `recovery` / `context_compacted` /
+  // `budget_breach` — each mapped onto a DEDICATED non-prose host event type
+  // (tool.progress / recovery / context.compacted / budget.breach), so the
+  // ALBB-18 prose-splice class is structurally impossible for them. The web
+  // transcript renders all four as system rows (session-hooks.ts); the widening
+  // is pinned by tests/unit/host/session-host-turn-event-bridge-observability-
+  // hellgate.test.ts. `progress_update` remains EXCLUDED (see above).
   const KNOWN_BRIDGE_EVENTS = [
     "assistant_text",
+    "budget_breach",
+    "context_compacted",
     "llm_continuation",
     "llm_request",
+    "recovery",
     "skill_scope_decision",
     "tool_call",
+    "tool_progress",
     "tool_result",
     "usage",
   ].sort()
 
-  test("SI-20: toSessionHostTurnEvent maps exactly the known 7 event tags", () => {
+  test("SI-20: toSessionHostTurnEvent maps exactly the known 11 event tags", () => {
     const bridged: string[] = [...AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES]
     expect(bridged.sort()).toEqual(KNOWN_BRIDGE_EVENTS)
   })

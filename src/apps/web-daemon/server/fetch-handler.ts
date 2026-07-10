@@ -29,7 +29,7 @@ import {
   webSafeKnobValue,
 } from "../knob-catalog-wire"
 import type { ThreadStore } from "../persistence-sqlite"
-import { renderReadout } from "../readout"
+import { resolveReadout, type WebReadoutSources } from "../readout"
 import type { WebDaemonServerConfig } from "../server"
 import type { SessionRegistry } from "../session-registry"
 import type { WebDaemonHealth } from "../types"
@@ -48,6 +48,10 @@ export interface FetchHandlerDeps {
    *  `GET /artifact/:id`. Absent (gate `QUANTA_ARTIFACT_STORE` off) ⇒ the route
    *  404s (byte-identical). */
   readonly artifactPreviewResolver?: ArtifactPreviewResolver
+  /** UUX-1-11 — read-only accessor bundle for the source-backed readouts
+   *  (`/agents`, `/plan`, `/skills`, `/memory`, `/cost`, `/context`). Absent ⇒
+   *  every source-backed readout degrades to its honest missing-source line. */
+  readonly readoutSources?: WebReadoutSources
   /** Lazy accessor — the `Bun.serve` handle is assigned after this is built. */
   readonly getServer: () => Server<WSData>
 }
@@ -148,22 +152,24 @@ const tryReadRoutes = (
     }))
     return jsonResponse(200, { total: catalog.size, groups: grouped })
   }
-  // Phase 1 (jun-9-cli-web-parity ticket 05) — OUT-OF-BAND read-only readouts.
+  // OUT-OF-BAND read-only readouts (jun-9 ticket 05 + UUX-1-11 sources).
   // `GET /readout/:name` reads the live session snapshot (lease-free — no WS
-  // single-writer contention, so it works WHILE the agent is mid-turn,
-  // exactly when you want to look) and returns the rendered text. Unknown name
-  // ⇒ 404 (typo); recognized-but-pending host accessor ⇒ 200 with a graceful
-  // "not wired" body.
+  // single-writer contention, so it works WHILE the agent is mid-turn, exactly
+  // when you want to look) plus the composition root's read-accessors, and
+  // returns the rendered text. Unknown name ⇒ 404 (typo); recognized name whose
+  // source is absent ⇒ 200 with a graceful body NAMING the missing piece; a
+  // THROWING source ⇒ 200 graceful error payload (`resolveReadout` is total —
+  // this route can never 500 on a readout).
   {
     const readoutMatch = url.pathname.match(/^\/readout\/([a-z-]+)$/)
     if (readoutMatch !== null && req.method === "GET") {
       const denied = requireAuth(url, req)
       if (denied !== null) return denied
       const name = readoutMatch[1] as string
-      return sharedSession.snapshot().then((snap) => {
-        const result = renderReadout(name, snap)
-        return jsonResponse(result.isError ? 404 : 200, result)
-      })
+      return sharedSession
+        .snapshot()
+        .then((snap) => resolveReadout(name, snap, deps.readoutSources ?? {}))
+        .then((result) => jsonResponse(result.isError ? 404 : 200, result))
     }
   }
   // `GET /threads/:id/events?since=N` returns the SessionEvent log for that
@@ -201,8 +207,7 @@ const tryReadRoutes = (
       const sinceRaw = url.searchParams.get("since")
       const since = sinceRaw === null ? 0 : Number.parseInt(sinceRaw, 10)
       const sinceSeq = Number.isFinite(since) && since >= 0 ? since : 0
-      const boundary =
-        threadId === sharedSession.sessionId ? "live-attach" : "read-only-history"
+      const boundary = threadId === sharedSession.sessionId ? "live-attach" : "read-only-history"
       return jsonResponse(200, {
         threadId,
         boundary,

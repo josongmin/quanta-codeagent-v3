@@ -8,10 +8,14 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_SOURCE_TYPES = [
   "llm.request",
   "llm.continuation",
   "tool.invoked",
+  "tool.progress",
   "tool.completed",
   "usage",
   "skill.scope.decision",
   "item.stream",
+  "recovery",
+  "context.compacted",
+  "budget.breach",
 ] as const satisfies readonly SessionHostTurnEventType[]
 
 export const SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES = [
@@ -19,12 +23,16 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES = [
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "tool.progress",
   "turn.llm.continuation",
   "turn.llm.request",
   "turn.output.delta",
+  "turn.recovery",
   "item.started",
   "item.delta",
   "item.completed",
+  "context.compacted",
+  "budget.breach",
 ] as const satisfies readonly SessionEventType[]
 
 interface ProjectionContext {
@@ -242,6 +250,64 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY = {
       },
     }
   },
+  // UUX-1-12 — the four additive observability events. All are PURE observation
+  // arms: bump seq/revision (monotonic, like `tool.invoked`) and NEVER patch the
+  // transcript — the ALBB-18 corruption vector was exactly a status payload
+  // reaching `streamingAssistantText` via the prose arm.
+  "tool.progress": (args) => {
+    const nextState = bumpSessionState(args.state, {})
+    return {
+      state: nextState,
+      emitted: {
+        ...createEventBase(args, nextState),
+        type: "tool.progress",
+        toolCallId: args.event.toolCallId,
+        toolName: args.event.toolName,
+        message: args.event.message,
+      },
+    }
+  },
+  recovery: (args) => {
+    const nextState = bumpSessionState(args.state, {})
+    return {
+      state: nextState,
+      emitted: {
+        ...createEventBase(args, nextState),
+        type: "turn.recovery",
+        reason: args.event.reason,
+        ...(args.event.detail !== undefined ? { detail: args.event.detail } : {}),
+      },
+    }
+  },
+  "context.compacted": (args) => {
+    const nextState = bumpSessionState(args.state, {})
+    return {
+      state: nextState,
+      emitted: {
+        ...createEventBase(args, nextState),
+        type: "context.compacted",
+        fromTurnId: args.event.fromTurnId,
+        toTurnId: args.event.toTurnId,
+        summary: args.event.summary,
+        ts: args.event.ts,
+        tokens: args.event.tokens,
+      },
+    }
+  },
+  "budget.breach": (args) => {
+    const nextState = bumpSessionState(args.state, {})
+    return {
+      state: nextState,
+      emitted: {
+        ...createEventBase(args, nextState),
+        type: "budget.breach",
+        severity: args.event.severity,
+        scope: args.event.scope,
+        observed: args.event.observed,
+        limit: args.event.limit,
+      },
+    }
+  },
 } satisfies SessionHostTurnEventProjectionRegistry
 
 export const projectSessionHostTurnEvent = (
@@ -295,5 +361,25 @@ export const projectSessionHostTurnEvent = (
         ...context,
         event,
       } satisfies ProjectionArgs<"item.stream">)
+    case "tool.progress":
+      return SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY["tool.progress"]({
+        ...context,
+        event,
+      } satisfies ProjectionArgs<"tool.progress">)
+    case "recovery":
+      return SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY.recovery({
+        ...context,
+        event,
+      } satisfies ProjectionArgs<"recovery">)
+    case "context.compacted":
+      return SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY["context.compacted"]({
+        ...context,
+        event,
+      } satisfies ProjectionArgs<"context.compacted">)
+    case "budget.breach":
+      return SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY["budget.breach"]({
+        ...context,
+        event,
+      } satisfies ProjectionArgs<"budget.breach">)
   }
 }

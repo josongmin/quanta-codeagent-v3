@@ -24,29 +24,39 @@ import {
   type ObservabilityWireHandle,
   wireObservability,
 } from "@/agent/observability-wire"
+import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/agent/system-prompt"
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
+import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import {
+  type ArtifactPreviewResolver,
   type AssemblerEnv,
   buildInteractiveTurnAssembler as buildSharedInteractiveTurnAssembler,
+  createArtifactPreviewResolver,
   type InteractiveTurnAssemblerRequest,
 } from "@/host/runtime"
 import { pickProvider, tryCreateLLM } from "@/llm"
+import type { PersistentStorePort } from "@/memory"
 import type { PermissionContext } from "@/permission"
-import { buildSkillsConfigCore, buildSubagentConfigCore, parseEnvFlag } from "@/runner/assemble"
+import {
+  buildMemoryForSession,
+  buildSkillsConfigCore,
+  buildSubagentConfigCore,
+  parseEnvFlag,
+} from "@/runner/assemble"
 import {
   createRuntimeFromAgentConfigBase,
   type RuntimeAgentConfigBase,
   type RuntimeFacade,
 } from "@/sdk/runtime"
 import { gateOn } from "@/shared"
+import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { StdoutStream } from "@/stream"
+import { TaskRegistry } from "@/subagent"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
-import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
-import { type ArtifactPreviewResolver, createArtifactPreviewResolver } from "@/host/runtime"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
 import {
   type CanvasArtifactSourceHandle,
@@ -57,11 +67,12 @@ import {
   createCanvasToolDiffSource,
 } from "./canvas-tool-diff-source"
 import { type CanvasUsageSourceHandle, createCanvasUsageSource } from "./canvas-usage-source"
+import type { AgentFleetReadoutRow, MemoryReadoutEntry, WebReadoutSources } from "./readout"
+import { createWebAskUserPort } from "./web-ask-user-port"
 import {
   createWebControlRequestPort,
   type WebControlRequestPortHandle,
 } from "./web-control-request-port"
-import { createWebAskUserPort } from "./web-ask-user-port"
 import { createWebUserInputPort, type WebUserInputPortHandle } from "./web-user-input-port"
 
 /**
@@ -149,6 +160,17 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * is not wired either, byte-identical). Approvals ride `approval.respond`.
    */
   readonly followerCoControl?: FollowerCoControlDispatcher
+  /**
+   * UUX-1-11 — narrow READ-ONLY accessor bundle for `GET /readout/:name`.
+   * Threads the SAME live sources the session runs on (subagent TaskRegistry /
+   * plan store / skills discovery / durable memory store / context-usage
+   * holder) so `/agents`, `/plan`, `/skills`, `/memory`, `/context` serve real
+   * data instead of the "not wired" stub. `/cost` is folded server-side from
+   * `turn.completed` events (see `startWebDaemon`) — not here. Test factories
+   * that do not expose this simply degrade every readout to the honest
+   * missing-source line (never an error).
+   */
+  readonly readoutSources?: WebReadoutSources
 }
 
 /**
@@ -319,6 +341,236 @@ export const resolveArtifactSlots = (
   return { canvasArtifact, artifactRegistry, artifactPreviewResolver }
 }
 
+/** UUX-1-11 — project a subagent `TaskRecord` onto the narrow readout row
+ *  (structural copy; the readout renderer never imports `@/subagent`). */
+const toAgentFleetReadoutRow = (rec: {
+  id: string
+  description: string
+  agentType?: string
+  status: "running" | "completed" | "failed" | "stopped"
+  startedAt: number
+  endedAt?: number
+  error?: string
+}): AgentFleetReadoutRow => ({
+  id: rec.id,
+  description: rec.description,
+  ...(rec.agentType !== undefined ? { agentType: rec.agentType } : {}),
+  status: rec.status,
+  startedAt: rec.startedAt,
+  ...(rec.endedAt !== undefined ? { endedAt: rec.endedAt } : {}),
+  ...(rec.error !== undefined ? { error: rec.error } : {}),
+})
+
+/** UUX-1-11 — project a durable `MemoryEntry` onto the narrow readout view
+ *  (id/tier/text/importance only — tags & embeddings stay host-side). */
+const toMemoryReadoutEntry = (entry: {
+  id: string
+  tier?: string
+  text: string
+  importance?: number
+  createdAt: number
+}): MemoryReadoutEntry => ({
+  id: entry.id,
+  ...(entry.tier !== undefined ? { tier: entry.tier } : {}),
+  text: entry.text,
+  ...(entry.importance !== undefined ? { importance: entry.importance } : {}),
+  createdAt: entry.createdAt,
+})
+
+/**
+ * UUX-1-11 — assemble the read-only {@link WebReadoutSources} bundle from the
+ * live session collaborators this factory just minted. Every accessor is a
+ * thin projection over the SAME instance the loop runs on (no split-brain):
+ *  - `agents`  → the TaskRegistry threaded into `subagent.taskRegistry`
+ *  - `plan`    → the PlanStore on `base.planStore` (the 5 plan tools write it)
+ *  - `skills`  → the same `discoverSkills`/`discoverSystemSkills` scan the CLI
+ *                `/skills` slash performs (system wins name collisions)
+ *  - `memory`  → the durable store `buildMemoryForSession(env)` resolves (the
+ *                store the CLI writes; READ-ONLY here — this surface composes
+ *                no memory config, so web turns do not write memories yet)
+ *  - `context` → the always-on prompt-usage holder (`onPromptAssembled` sink)
+ * `/cost` is deliberately absent: it is folded server-side in `startWebDaemon`
+ * from `turn.completed` events (the daemon-native usage truth).
+ */
+const buildReadoutSources = (args: {
+  readonly taskRegistry: TaskRegistry | undefined
+  readonly planStore: PlanStore | undefined
+  readonly skills: { dir?: string } | undefined
+  readonly memoryStore: PersistentStorePort | undefined
+  readonly usageHolder: CanvasUsageSourceHandle
+}): WebReadoutSources => {
+  const { taskRegistry, planStore, skills, memoryStore, usageHolder } = args
+  return {
+    ...(taskRegistry !== undefined
+      ? { agents: () => taskRegistry.list().map(toAgentFleetReadoutRow) }
+      : {}),
+    ...(planStore !== undefined ? { plan: () => planStore.current() } : {}),
+    ...(skills !== undefined
+      ? {
+          skills: async (): Promise<readonly { name: string; description: string }[]> => {
+            const user = skills.dir !== undefined ? await discoverSkills(skills.dir) : []
+            const system = await discoverSystemSkills()
+            // System wins a name collision — same override order buildSkillBlock
+            // uses, so the readout can never disagree with the model-visible set.
+            const byName = new Map<string, { name: string; description: string }>()
+            for (const s of [...user, ...system]) {
+              byName.set(s.name, { name: s.name, description: s.description })
+            }
+            return [...byName.values()]
+          },
+        }
+      : {}),
+    ...(memoryStore !== undefined
+      ? { memory: async () => (await memoryStore.all()).map(toMemoryReadoutEntry) }
+      : {}),
+    context: () => usageHolder.latest(),
+  }
+}
+
+/**
+ * UUX-1-11 — mint the session collaborators that back both the LOOP (subagent
+ * trio / plan tools / prompt-usage sink) and the READ-ONLY readout accessors.
+ * Extracted from the factory closure (keeps it under the god-FN cap; mirrors
+ * {@link resolveArtifactSlots}). Single-instance discipline: every collaborator
+ * here is threaded into the AgentConfig AND read by {@link buildReadoutSources},
+ * so a readout can never disagree with the tools.
+ */
+const mintSessionCollaborators = (
+  env: Record<string, string | undefined>,
+): {
+  readonly subagentEnabled: boolean
+  readonly taskRegistry: TaskRegistry | undefined
+  readonly subagent: ReturnType<typeof buildSubagentConfigCore>
+  readonly skills: ReturnType<typeof buildSkillsConfigCore>
+  readonly planStore: PlanStore | undefined
+  readonly memoryStore: PersistentStorePort | undefined
+  readonly usageHolder: CanvasUsageSourceHandle
+  readonly canvasUsage: CanvasUsageSourceHandle | undefined
+} => {
+  // Default-ON (env-disablable) capability blocks — same truth table as the
+  // CLI (`internal.ts`), so the web/tauri surface gets subagent fan-out + the
+  // skill catalogue/auto-trigger by default. `QUANTA_SUBAGENT=0` /
+  // `QUANTA_SKILLS=0` opt out; `QUANTA_SKILLS_DIR` adds a user skill dir.
+  const subagentEnabled = parseEnvFlag(env.QUANTA_SUBAGENT, true)
+  // UUX-1-11 — surface-owned TaskRegistry so the `/agents` readout observes
+  // the SAME fleet instance the subagent tool trio registers into (the CLI
+  // does the identical thread via its lifecycle bundle). Absent when the
+  // subagent capability is disabled ⇒ the readout degrades honestly.
+  const taskRegistry = subagentEnabled ? new TaskRegistry() : undefined
+  // §25.1 — wire `run_workflow` on the web/tauri surface too (CLI parity with
+  // apps/cli/internal.ts buildSubagentConfig). DEFAULT-OFF byte-identical:
+  // QUANTA_WORKFLOW unset ⇒ `enableWorkflow` absent ⇒ the tool is NOT
+  // registered (legacy web behavior). It rides the SAME tier-1 subagent
+  // runner, so it requires subagent enabled AND QUANTA_WORKFLOW=1.
+  const subagent = buildSubagentConfigCore({
+    enabled: subagentEnabled,
+    ...(taskRegistry !== undefined ? { taskRegistry } : {}),
+    ...(subagentEnabled && parseEnvFlag(env.QUANTA_WORKFLOW, false)
+      ? { enableWorkflow: true }
+      : {}),
+  })
+  const skillsDir = env.QUANTA_SKILLS_DIR
+  const skills = buildSkillsConfigCore({
+    ...(skillsDir !== undefined ? { dir: skillsDir } : {}),
+    enabled: parseEnvFlag(env.QUANTA_SKILLS, true),
+  })
+  // UUX-1-11 — session plan store (CLI parity: QUANTA_PLAN_STORE default-ON,
+  // opt-out). When present the loop registers the 5 structured plan tools and
+  // the `/plan` readout renders the live `store.current()`.
+  const planStore = parseEnvFlag(env.QUANTA_PLAN_STORE, true)
+    ? createInMemoryPlanStore({ now: () => Date.now() })
+    : undefined
+  // UUX-1-11 — the durable memory store (ADR-0413 canonical factory; the
+  // SAME sqlite file the CLI reads/writes). READ-ONLY on this surface: the
+  // store backs the `/memory` readout only — `base.memory` is NOT set, so web
+  // turns neither recall nor write memories (that activation is a separate,
+  // deliberate decision). `QUANTA_MEMORY=off` ⇒ undefined ⇒ honest degrade.
+  const memoryStore = buildMemoryForSession(env).store
+  // UUX-1-11 — the prompt-usage holder is ALWAYS minted now: the `/context`
+  // readout reads `latest()` on demand (pure observation; the sink runs the
+  // same estimator the CLI `/context` uses). ADR-0440 canvas exposure stays
+  // gated: `QUANTA_WEB_CANVAS` off ⇒ no facade port ⇒ the server attaches no
+  // canvas sink and forwards no `context.usage` frames (same SINGLE holder
+  // instance when on — no split-brain between the canvas panel and the readout).
+  const usageHolder = createCanvasUsageSource()
+  const canvasUsage = gateOn(env, "QUANTA_WEB_CANVAS") ? usageHolder : undefined
+  return {
+    subagentEnabled,
+    taskRegistry,
+    subagent,
+    skills,
+    planStore,
+    memoryStore,
+    usageHolder,
+    canvasUsage,
+  }
+}
+
+/**
+ * ADR-0211/web — a LIVE getter/setter proxy over a mutable cell (the exact
+ * shape `bootstrap-session.ts` builds). The per-turn permission gate reads
+ * `permission.mode` fresh each turn, so `host.setPermissionMode` (→
+ * `session.permission.set`) is honored mid-session WITHOUT rebuilding the
+ * session. A fixed scalar (the old `{ mode: "default" }`) made web mode
+ * switching a lying control; this makes it real. Extracted from the factory
+ * closure to keep it under the god-FN cap.
+ */
+const mintLivePermissionCell = (): PermissionContext => {
+  let permMode: PermissionContext["mode"] = "default"
+  return {
+    get mode() {
+      return permMode
+    },
+    set mode(next) {
+      permMode = next
+    },
+  }
+}
+
+/**
+ * The OUT-OF-BAND INBOUND port cluster (extracted from the factory closure to
+ * keep it under the god-FN cap; each mint keeps its original gate + docs):
+ *  - `agentState` (QUANTA_WEB_AGENT_STATE) — the outbound stream tap; gate OFF
+ *    ⇒ undefined ⇒ the tap is never installed + no facade port (byte-identical).
+ *  - `userInput` — minted ONLY when the agent-state source exists (same gate):
+ *    a request/resolve frame rides the same channel, and you can only answer a
+ *    prompt you can see. Absent ⇒ `request_user_input` not registered.
+ *  - `follower` (T02, QUANTA_THIN_CLIENT_DISPATCH) — co-control slot; absent ⇒
+ *    no conversation-action port wired.
+ *  - `controlRequest` (ADR-0496 A1, QUANTA_CONTROL_REQUEST) — binds the
+ *    load-bearing `set_permission_mode` effect to THIS session's live
+ *    `permission` cell. Gate OFF ⇒ no slot (the loop never polls; a stray
+ *    `controlRequest` frame falls through as unknown).
+ *  - `askUserTools` (A1 jul-03, QUANTA_ASK_USER) — the structured `ask_user`
+ *    elicitation tool ADAPTED onto the web user-input round-trip (needs
+ *    `userInput` for a channel). Either gate OFF ⇒ empty ⇒ not registered.
+ */
+const mintInboundPorts = (
+  env: Record<string, string | undefined>,
+  permission: PermissionContext,
+): {
+  readonly agentState: AgentStateSourceHandle | undefined
+  readonly userInput: WebUserInputPortHandle | undefined
+  readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
+  readonly controlRequest: WebControlRequestPortHandle | undefined
+  readonly askUserTools: Tool[]
+} => {
+  const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE") ? createAgentStateSource() : undefined
+  const userInput =
+    agentState !== undefined
+      ? createWebUserInputPort({ capture: (ev) => agentState.sink.capture(ev) })
+      : undefined
+  const follower = buildFollowerCoControlSlot(env)
+  const controlRequest = isControlRequestEnabled(env)
+    ? createWebControlRequestPort({ permission })
+    : undefined
+  const askUserTools: Tool[] =
+    gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
+      ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]
+      : []
+  return { agentState, userInput, follower, controlRequest, askUserTools }
+}
+
 /**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
  * resolved ONCE at boot (env-driven provider pick); each invocation of the
@@ -341,52 +593,18 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
   return async (): Promise<ObservableRuntimeFacade> => {
     const cwd = process.cwd()
     const abort = new AbortController()
-    // ADR-0211/web — a LIVE getter/setter proxy over a mutable cell (the exact
-    // shape `bootstrap-session.ts` builds). The per-turn permission gate reads
-    // `permission.mode` fresh each turn, so `host.setPermissionMode` (→
-    // `session.permission.set`) is honored mid-session WITHOUT rebuilding the
-    // session. A fixed scalar (the old `{ mode: "default" }`) made web mode
-    // switching a lying control; this makes it real.
-    let permMode: PermissionContext["mode"] = "default"
-    const permission: PermissionContext = {
-      get mode() {
-        return permMode
-      },
-      set mode(next) {
-        permMode = next
-      },
-    }
-    // Default-ON (env-disablable) capability blocks — same truth table as the
-    // CLI (`internal.ts`), so the web/tauri surface gets subagent fan-out + the
-    // skill catalogue/auto-trigger by default. `QUANTA_SUBAGENT=0` /
-    // `QUANTA_SKILLS=0` opt out; `QUANTA_SKILLS_DIR` adds a user skill dir.
-    const subagentEnabled = parseEnvFlag(env.QUANTA_SUBAGENT, true)
-    // §25.1 — wire `run_workflow` on the web/tauri surface too (CLI parity with
-    // apps/cli/internal.ts buildSubagentConfig). DEFAULT-OFF byte-identical:
-    // QUANTA_WORKFLOW unset ⇒ `enableWorkflow` absent ⇒ the tool is NOT
-    // registered (legacy web behavior). It rides the SAME tier-1 subagent
-    // runner, so it requires subagent enabled AND QUANTA_WORKFLOW=1.
-    const subagent = buildSubagentConfigCore({
-      enabled: subagentEnabled,
-      ...(subagentEnabled && parseEnvFlag(env.QUANTA_WORKFLOW, false)
-        ? { enableWorkflow: true }
-        : {}),
-    })
-    const skillsDir = env.QUANTA_SKILLS_DIR
-    const skills = buildSkillsConfigCore({
-      ...(skillsDir !== undefined ? { dir: skillsDir } : {}),
-      enabled: parseEnvFlag(env.QUANTA_SKILLS, true),
-    })
+    // ADR-0211/web — live permission cell (see {@link mintLivePermissionCell}).
+    const permission = mintLivePermissionCell()
+    // UUX-1-11 — the loop/readout collaborator bundle (subagent registry, plan
+    // store, memory store, prompt-usage holder). See {@link mintSessionCollaborators}.
+    const { taskRegistry, subagent, skills, planStore, memoryStore, usageHolder, canvasUsage } =
+      mintSessionCollaborators(env)
     // ADR-0415 — per-session observability wire. Gate OFF ⇒ noop handle +
     // undefined bus ⇒ `observabilitySlots` returns `{}` (byte-identical legacy).
     // Threading the live bus + promoted ports onto the session config makes the
     // loop's dispatch emit onto the SAME bus attribution subscribed to, and the
     // approval-gate wire read ONE unified model.
     const observability = wireSessionObservability(env, cwd)
-    // ADR-0440 — canvas usage source. Gate OFF ⇒ undefined ⇒ no
-    // `onPromptAssembled` capture (byte-identical) + no facade port ⇒ the
-    // server attaches no canvas sink.
-    const canvasUsage = gateOn(env, "QUANTA_WEB_CANVAS") ? createCanvasUsageSource() : undefined
     // ADR-0440 wire-finish — tool-diff source. Gate OFF ⇒ undefined ⇒ no
     // `onToolDiff` wired (no tool captures, byte-identical) + no facade port ⇒
     // the server forwards no `tool.diff` frames.
@@ -401,46 +619,13 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       env,
       cwd,
     )
-    // QUANTA_WEB_AGENT_STATE — agent-state source. Gate OFF ⇒ undefined ⇒ no
-    // `onAgentState` wired ⇒ the stream tap is never installed (no capture,
-    // byte-identical) + no facade port ⇒ the server forwards no `agentState`
-    // frames.
-    const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE") ? createAgentStateSource() : undefined
-    // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (mirror of the
-    // agent-state OUTBOUND tap). Minted ONLY when the agent-state source exists
-    // (same gate): a request/resolve frame rides the same agent-state channel,
-    // and you can only answer a prompt you can see. Its `capture` feeds the
-    // agent-state sink so the request + the resolve are forwarded to the
-    // browser. Gate OFF ⇒ undefined ⇒ `userInputPort` absent ⇒ the
-    // `request_user_input` tool is NOT registered (byte-identical).
-    const userInput =
-      agentState !== undefined
-        ? createWebUserInputPort({ capture: (ev) => agentState.sink.capture(ev) })
-        : undefined
-    // T02 — thread-follower co-control slot for a web 2nd-client (gate
-    // QUANTA_THIN_CLIENT_DISPATCH). Absent ⇒ no conversation-action port wired.
-    const follower = buildFollowerCoControlSlot(env)
-    // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — the OUT-OF-BAND INBOUND control
-    // channel. Minted ONLY under the gate; binds the load-bearing
-    // `set_permission_mode` effect to THIS session's live `permission` cell (the
-    // per-turn gate reads `.mode` fresh ⇒ the change lands mid-session). Model /
-    // thinking / usage axes have no live daemon cell today (the applier surfaces
-    // them, honestly not faked). Gate OFF ⇒ undefined ⇒ no slot (byte-identical:
-    // the loop's `pollControlRequests` never polls, and a stray `controlRequest`
-    // frame falls through to the session bridge as an unknown frame).
-    const controlRequest = isControlRequestEnabled(env)
-      ? createWebControlRequestPort({ permission })
-      : undefined
-    // QUANTA_ASK_USER (A1 jul-03) — the structured `ask_user` elicitation tool on
-    // web, ADAPTED onto the web user-input round-trip (so it needs `userInput`,
-    // i.e. QUANTA_WEB_AGENT_STATE, to have a channel to prompt on). Either gate
-    // OFF ⇒ empty ⇒ `ask_user` is NOT registered (byte-identical). The rich chip
-    // description/preview flatten to the option label over the existing panel
-    // (a rich structured frame is a documented follow-up).
-    const askUserTools: Tool[] =
-      gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
-        ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]
-        : []
+    // OUT-OF-BAND INBOUND port cluster (agent-state tap + user-input mirror +
+    // T02 follower + ADR-0496 control-request + gated ask_user). Each keeps its
+    // original gate; see {@link mintInboundPorts}.
+    const { agentState, userInput, follower, controlRequest, askUserTools } = mintInboundPorts(
+      env,
+      permission,
+    )
     const webEnvPosture = resolveCliDefaultEnvPosture(env)
     const base: RuntimeAgentConfigBase = {
       llm,
@@ -467,7 +652,13 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       hitl: { enabled: true },
       ...(subagent !== undefined ? { subagent } : {}),
       ...(skills !== undefined ? { skills } : {}),
-      ...(canvasUsage !== undefined ? { onPromptAssembled: canvasUsage.sink } : {}),
+      // UUX-1-11 — the plan store rides `base.planStore` (the loop registers
+      // the plan tools when present; absent ⇒ omitted, tools not registered).
+      ...(planStore !== undefined ? { planStore } : {}),
+      // UUX-1-11 — the prompt-usage holder sink is always wired now: the
+      // `/context` readout needs `latest()` regardless of the canvas gate
+      // (pure observation; the canvas frames stay gated at the facade port).
+      onPromptAssembled: usageHolder.sink,
       ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
       // A2 — lift the SHARED registry onto the base ⇒ capability bit + the turn
       // runner's `artifact.ready` producer drain. `{}` when off (byte-identical).
@@ -533,6 +724,17 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       // enqueue target (byte-identical).
       ...(controlRequest !== undefined ? { controlRequest } : {}),
       ...(follower !== undefined ? { followerCoControl: follower.dispatcher } : {}),
+      // UUX-1-11 — read-only readout accessor bundle over the SAME live
+      // collaborators wired above (fleet registry / plan store / skills config /
+      // durable memory store / usage holder). The server threads it into the
+      // `GET /readout/:name` route.
+      readoutSources: buildReadoutSources({
+        taskRegistry,
+        planStore,
+        skills,
+        memoryStore,
+        usageHolder,
+      }),
     })
     return facade
   }

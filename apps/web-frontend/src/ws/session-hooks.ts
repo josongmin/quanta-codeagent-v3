@@ -372,16 +372,22 @@ type TranscriptEventHandlerRegistry = {
 
 export const TRANSCRIPT_MUTATING_SESSION_EVENT_TYPES = [
   "approval.requested",
+  // UUX-1-12 (jul-10) — the four additive observability events render as
+  // transcript system rows (minimal, following the tool.invoked convention).
+  "budget.breach",
+  "context.compacted",
   "session.closed",
   "session.created",
   "session.state.updated",
   "skill.scope.decision",
   "tool.completed",
   "tool.invoked",
+  "tool.progress",
   "turn.aborted",
   "turn.completed",
   "turn.failed",
   "turn.output.delta",
+  "turn.recovery",
   "turn.started",
 ] as const satisfies readonly SessionEventType[]
 
@@ -586,6 +592,44 @@ const TRANSCRIPT_EVENT_HANDLERS = {
       id: event.eventId,
       role: "system",
       text: renderSkillScopeDecision(event.tool, event.activeSkill, event.decision),
+      timestamp: event.emittedAt,
+    }),
+  // UUX-1-12 — additive observability rows (minimal system-row convention).
+  // Keyed mid-tool progress: joins the 🔧 tool.invoked row via the tool name.
+  "tool.progress": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text: `⋯ ${event.toolName}: ${event.message}`,
+      timestamp: event.emittedAt,
+    }),
+  // Loop recovery trace (backoff / compact / nudge …) — one gray line so a
+  // stalled-looking agent visibly says WHY it is retrying.
+  "turn.recovery": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text:
+        event.detail !== undefined && event.detail.length > 0
+          ? `↻ recovery (${event.reason}): ${event.detail}`
+          : `↻ recovery (${event.reason})`,
+      timestamp: event.emittedAt,
+    }),
+  // Proactive-compaction marker — the conversation window was folded.
+  "context.compacted": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: "system",
+      text: `🗜 context compacted (${event.tokens} tokens summarized): ${event.summary}`,
+      timestamp: event.emittedAt,
+    }),
+  // Advisory budget-cap crossing. A HARD crossing paints as an error row (the
+  // run may be stopped by the loop's epilogue); soft stays a gray notice.
+  "budget.breach": (state, event) =>
+    appendTranscriptMessage(state, {
+      id: event.eventId,
+      role: event.severity === "hard" ? "error" : "system",
+      text: `💰 budget ${event.severity} cap crossed (${event.scope}): $${event.observed.toFixed(4)} of $${event.limit.toFixed(4)}`,
       timestamp: event.emittedAt,
     }),
 } as const satisfies TranscriptEventHandlerRegistry

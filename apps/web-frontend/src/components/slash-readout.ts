@@ -27,10 +27,12 @@ export interface ReadoutEndpoint {
   readonly onError?: (msg: string) => void
 }
 
-/** The read-only readouts exposed in the web palette. `state` + `capabilities`
- *  serve live data today; the rest hit the same route and currently return the
- *  daemon's graceful "not wired in this surface yet" line (honest — and turns
- *  into live data the moment the host accessor lands, no frontend change). */
+/** The read-only readouts exposed in the web palette. UUX-1-11: `state`,
+ *  `capabilities`, `agents`, `plan`, `skills`, `memory`, `cost` serve LIVE
+ *  daemon data now (source-backed accessors on the composition root; `/cost`
+ *  is the daemon's own turn-usage fold). `branches` / `mcp` / `why` return the
+ *  daemon's honest line naming exactly what this surface lacks. (`/context`
+ *  stays the local palette command — it renders the live canvas gauge.) */
 const READOUT_COMMANDS: readonly {
   slug: string
   aliases?: readonly string[]
@@ -42,14 +44,14 @@ const READOUT_COMMANDS: readonly {
     aliases: ["caps"],
     description: "Capability grid for this surface (live)",
   },
-  { slug: "agents", description: "Subagent fleet roster" },
-  { slug: "plan", description: "Current plan body" },
-  { slug: "branches", description: "Speculative branch-search results" },
-  { slug: "skills", description: "Available skills" },
-  { slug: "mcp", description: "MCP server status" },
-  { slug: "memory", description: "Memory inspector" },
-  { slug: "why", description: "Why the last tool ran" },
-  { slug: "cost", description: "Cost / token breakdown" },
+  { slug: "agents", description: "Subagent fleet roster (live)" },
+  { slug: "plan", description: "Current plan body (live)" },
+  { slug: "branches", description: "Speculative branch-search results (not composed on web)" },
+  { slug: "skills", description: "Available skills (live disk discovery)" },
+  { slug: "mcp", description: "MCP server status (no MCP bridge on web)" },
+  { slug: "memory", description: "Durable memory store, read-only (live)" },
+  { slug: "why", description: "Why the last tool ran (needs the CLI's LLM meta-query)" },
+  { slug: "cost", description: "Cumulative session cost / token fold (live)" },
 ]
 
 const fetchReadout = async (ep: ReadoutEndpoint, name: string): Promise<void> => {

@@ -422,6 +422,39 @@ export interface ArtifactReadyEvent extends SessionEventEnvelope<"artifact.ready
 
 export interface SessionClosedEvent extends SessionEventEnvelope<"session.closed"> {}
 
+/**
+ * UUX-1-12 (jul-10) — additive observability events (mirror upstream
+ * `src/protocol/session/events.ts`). Keyed mid-tool progress, loop recovery
+ * traces, proactive-compaction markers, and advisory budget-cap crossings.
+ * All render as transcript system rows; an OLD frontend that predates them
+ * simply drops the unknown tag at the decode gate (membership check).
+ */
+export interface ToolProgressEvent extends SessionEventEnvelope<"tool.progress"> {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly message: string
+}
+
+export interface TurnRecoveryEvent extends SessionEventEnvelope<"turn.recovery"> {
+  readonly reason: string
+  readonly detail?: string
+}
+
+export interface ContextCompactedEvent extends SessionEventEnvelope<"context.compacted"> {
+  readonly fromTurnId: string
+  readonly toTurnId: string
+  readonly summary: string
+  readonly ts: number
+  readonly tokens: number
+}
+
+export interface BudgetBreachEvent extends SessionEventEnvelope<"budget.breach"> {
+  readonly severity: "soft" | "hard"
+  readonly scope: string
+  readonly observed: number
+  readonly limit: number
+}
+
 export type SessionEvent =
   | SessionCreatedEvent
   | SessionStateUpdatedEvent
@@ -432,7 +465,9 @@ export type SessionEvent =
   | TurnLlmContinuationEvent
   | TurnFailedEvent
   | TurnAbortedEvent
+  | TurnRecoveryEvent
   | ToolInvokedEvent
+  | ToolProgressEvent
   | ToolCompletedEvent
   | SkillScopeDecisionEvent
   | ItemStartedEvent
@@ -441,6 +476,8 @@ export type SessionEvent =
   | ApprovalRequestedEvent
   | ApprovalResolvedEvent
   | ArtifactReadyEvent
+  | ContextCompactedEvent
+  | BudgetBreachEvent
   | SessionClosedEvent
 
 export type SessionEventType = SessionEvent["type"]

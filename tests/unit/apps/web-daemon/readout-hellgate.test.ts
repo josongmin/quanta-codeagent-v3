@@ -13,8 +13,8 @@
  *   RO-07 TOTAL renderReadout never throws on a degenerate snapshot
  */
 import { describe, expect, test } from "bun:test"
-import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
 import { renderReadout, SERVED_READOUTS } from "@/apps/web-daemon/readout"
+import type { CapabilityManifest, SessionSnapshotLite, SessionStateView } from "@/protocol/session"
 
 const CAPS: CapabilityManifest = {
   approvals: "operator",
@@ -96,13 +96,27 @@ describe("renderReadout — served readouts", () => {
 })
 
 describe("renderReadout — graceful degrade & errors", () => {
-  test("RO-04: recognized-but-pending host-accessor readouts degrade gracefully", () => {
-    for (const name of ["agents", "plan", "branches", "skills", "mcp", "memory", "why", "cost", "context"]) {
+  test("RO-04: recognized readouts WITHOUT a composed source degrade gracefully with copy naming the gap", () => {
+    // UUX-1-11 — the pure renderer is the sources-absent projection: every
+    // recognized non-snapshot name stays graceful (wired:false, isError:false)
+    // and its copy NAMES the missing piece (see readout-sources-hellgate for
+    // the wired paths + exact copy pins).
+    for (const name of [
+      "agents",
+      "plan",
+      "branches",
+      "skills",
+      "mcp",
+      "memory",
+      "why",
+      "cost",
+      "context",
+    ]) {
       const r = renderReadout(name, snap())
-      expect(r.wired, `${name} pending`).toBe(false)
+      expect(r.wired, `${name} source absent`).toBe(false)
       expect(r.isError, `${name} not an error`).toBe(false) // graceful, NEVER a crash
-      expect(r.output.length, `${name} non-empty`).toBeGreaterThan(0)
-      expect(r.output).toContain("not wired")
+      expect(r.output.length, `${name} non-empty`).toBeGreaterThan(20) // real copy, not a stub token
+      expect(r.output, `${name} copy names itself`).toContain(name)
     }
   })
 

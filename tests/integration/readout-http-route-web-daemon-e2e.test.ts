@@ -36,20 +36,13 @@
  */
 
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
-import type {
-  ConnectedSessionTransport,
-  SessionTransport,
-} from "@/ipc/session"
-import type {
-  SessionEvent,
-  SessionSnapshotLite,
-} from "@/protocol/session"
-import type { SessionDispatchResult } from "@/sdk/runtime"
-import { supported } from "@/protocol/session"
-import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonServerConfig } from "@/apps/web-daemon/server"
-import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
+import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
+import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
+import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import { supported } from "@/protocol/session"
+import type { RuntimeFacade, RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
 
 const handles: WebDaemonHandle[] = []
 
@@ -103,14 +96,18 @@ const createControllableFactory = (): {
   turnRunning: () => Promise<void>
   /** Release the in-flight turn so it completes back to idle. */
   releaseTurn: () => void
+  /** UUX-1-11 — push a SessionEvent to every live subscriber (feeds the
+   *  server-side `/cost` fold exactly the way the real session would). */
+  emitEvent: (event: SessionEvent) => void
 } => {
   let session: RuntimeSession | undefined
   let resolveRunning: () => void = () => undefined
-  let runningPromise: Promise<void> = new Promise((r) => {
+  const runningPromise: Promise<void> = new Promise((r) => {
     resolveRunning = r
   })
   let releaseGate: () => void = () => undefined
   const gate = (): Promise<void> => new Promise<void>((r) => (releaseGate = r))
+  const listenersRef: { current: Set<(event: SessionEvent) => void> } = { current: new Set() }
 
   const factory = async (): Promise<RuntimeFacade> => ({
     createSession: async (): Promise<RuntimeSession> => {
@@ -131,7 +128,7 @@ const createControllableFactory = (): {
         pendingApproval: null,
         openArtifacts: [],
       }
-      const listeners = new Set<(event: SessionEvent) => void>()
+      const listeners = listenersRef.current
 
       const runTurn = async (): Promise<SessionDispatchResult> => {
         // Flip to "running" (this is what a held single-writer lease looks like
@@ -212,6 +209,9 @@ const createControllableFactory = (): {
     },
     turnRunning: () => runningPromise,
     releaseTurn: () => releaseGate(),
+    emitEvent: (event: SessionEvent) => {
+      for (const listener of listenersRef.current) listener(event)
+    },
   }
 }
 
@@ -336,19 +336,124 @@ describe("GET /readout/:name — real HTTP route (web daemon)", () => {
     expect(afterBody.output).toContain("idle")
   })
 
-  test("HR-04: recognized-but-PENDING accessor ⇒ HTTP 200 + wired:false graceful (NOT 404)", async () => {
+  test("HR-04: recognized name WITHOUT a composed source ⇒ HTTP 200 + wired:false copy naming the gap (NOT 404)", async () => {
     const { factory } = createControllableFactory()
     const handle = await boot({ factory, authToken: undefined })
 
-    for (const name of ["agents", "plan", "branches", "skills", "mcp", "memory", "why", "cost", "context"]) {
+    // UUX-1-11 — this stub facade exposes NO `readoutSources`, so every
+    // facade-backed readout degrades to the honest missing-source line. `/cost`
+    // is SERVER-owned (the daemon folds `turn.completed` usage itself) so it is
+    // wired even against a stub facade — asserted separately below.
+    for (const name of [
+      "agents",
+      "plan",
+      "branches",
+      "skills",
+      "mcp",
+      "memory",
+      "why",
+      "context",
+    ]) {
       const res = await fetch(`http://127.0.0.1:${handle.port}/readout/${name}`)
-      // Pending ≠ error: graceful 200, NOT 404 (mapping pending → 404 ⇒ RED).
-      expect(res.status, `${name} pending ⇒ 200`).toBe(200)
+      // Source-absent ≠ error: graceful 200, NOT 404 (mapping it → 404 ⇒ RED).
+      expect(res.status, `${name} source absent ⇒ 200`).toBe(200)
       const body = (await res.json()) as ReadoutBody
-      expect(body.wired, `${name} not wired here yet`).toBe(false)
+      expect(body.wired, `${name} not wired here`).toBe(false)
       expect(body.isError, `${name} graceful, not an error`).toBe(false)
-      expect(body.output).toContain("not wired")
+      expect(body.output, `${name} copy names itself`).toContain(name)
+      expect(body.output.length, `${name} real copy, not a stub token`).toBeGreaterThan(20)
     }
+
+    // `/cost` — server-owned fold: wired with honest zero totals (no turns yet).
+    const cost = await fetch(`http://127.0.0.1:${handle.port}/readout/cost`)
+    expect(cost.status).toBe(200)
+    const costBody = (await cost.json()) as ReadoutBody
+    expect(costBody.wired).toBe(true)
+    expect(costBody.isError).toBe(false)
+    expect(costBody.output).toContain("no completed turns yet")
+  })
+
+  test("HR-06 UUX-1-11: a facade with readout sources serves LIVE data; a THROWING source degrades to 200 (never 500)", async () => {
+    const { factory } = createControllableFactory()
+    // Wrap the stub factory so the returned facade ALSO exposes readoutSources —
+    // one healthy accessor (plan) and one that throws host-side (agents).
+    const sourcedFactory = async (): Promise<RuntimeFacade> => {
+      const facade = await factory()
+      Object.defineProperty(facade, "readoutSources", {
+        get: () => ({
+          plan: () => null,
+          agents: () => {
+            throw new Error("registry exploded mid-read")
+          },
+        }),
+        enumerable: true,
+      })
+      return facade
+    }
+    const handle = await boot({ factory: sourcedFactory, authToken: undefined })
+
+    // Healthy source ⇒ wired:true live body (the stub-era "not wired" line is dead).
+    const plan = await fetch(`http://127.0.0.1:${handle.port}/readout/plan`)
+    expect(plan.status).toBe(200)
+    const planBody = (await plan.json()) as ReadoutBody
+    expect(planBody.wired).toBe(true)
+    expect(planBody.isError).toBe(false)
+    expect(planBody.output).toContain("no plan yet")
+
+    // Throwing source ⇒ graceful 200 payload carrying the failure, NEVER a 500.
+    const agents = await fetch(`http://127.0.0.1:${handle.port}/readout/agents`)
+    expect(agents.status).toBe(200)
+    const agentsBody = (await agents.json()) as ReadoutBody
+    expect(agentsBody.wired).toBe(false)
+    expect(agentsBody.isError).toBe(false)
+    expect(agentsBody.output).toContain("registry exploded mid-read")
+  })
+
+  test("HR-07 UUX-1-11: the server-owned /cost fold accumulates turn.completed usage", async () => {
+    const ctl = createControllableFactory()
+    const handle = await boot({ factory: ctl.factory, authToken: undefined })
+
+    // Feed the shared session two completed turns the way the real kernel
+    // emits them (the daemon subscribed at boot — the fold sees these).
+    ctl.emitEvent({
+      type: "turn.completed",
+      eventId: "tc-1",
+      seq: 10,
+      revision: 2,
+      emittedAt: "2026-07-10T00:00:01.000Z",
+      outcomeReason: "completed",
+      tokenUsage: { promptTokens: 100, completionTokens: 40, totalTokens: 140, costMicroUsd: 700 },
+      modelSlug: "gpt-5",
+    })
+    ctl.emitEvent({
+      type: "turn.completed",
+      eventId: "tc-2",
+      seq: 11,
+      revision: 3,
+      emittedAt: "2026-07-10T00:00:02.000Z",
+      outcomeReason: "completed",
+      tokenUsage: { promptTokens: 50, completionTokens: 10, totalTokens: 60 },
+    })
+    // Non-usage events must NOT count as turns.
+    ctl.emitEvent({
+      type: "turn.output.delta",
+      eventId: "d-1",
+      seq: 12,
+      revision: 3,
+      emittedAt: "2026-07-10T00:00:03.000Z",
+      delta: "x",
+    })
+
+    const res = await fetch(`http://127.0.0.1:${handle.port}/readout/cost`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as ReadoutBody
+    expect(body.wired).toBe(true)
+    expect(body.output).toMatch(/turns\s+2/)
+    expect(body.output).toMatch(/prompt tokens\s+150/)
+    expect(body.output).toMatch(/completion tokens\s+50/)
+    expect(body.output).toMatch(/total tokens\s+200/)
+    expect(body.output).toContain("0.0007") // 700 µUSD
+    expect(body.output).toContain("gpt-5")
   })
 
   test("HR-05: UNKNOWN readout name ⇒ 404 (typo); a non-matching path ⇒ plain 404", async () => {

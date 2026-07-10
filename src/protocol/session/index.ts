@@ -35,6 +35,8 @@ export type {
   ApprovalRequestedEvent,
   ApprovalResolvedEvent,
   ArtifactReadyEvent,
+  BudgetBreachEvent,
+  ContextCompactedEvent,
   ItemCompletedEvent,
   ItemDeltaEvent,
   ItemStartedEvent,
@@ -47,11 +49,13 @@ export type {
   TokenUsage,
   ToolCompletedEvent,
   ToolInvokedEvent,
+  ToolProgressEvent,
   TurnCompletedEvent,
   TurnFailedEvent,
   TurnLlmContinuationEvent,
   TurnLlmRequestEvent,
   TurnOutputDeltaEvent,
+  TurnRecoveryEvent,
   TurnStartedEvent,
 } from "./events"
 export {

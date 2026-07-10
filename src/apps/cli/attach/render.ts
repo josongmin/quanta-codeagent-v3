@@ -43,6 +43,14 @@ export const ATTACH_IGNORED_SESSION_EVENT_TYPES = [
   "skill.scope.decision",
   "turn.llm.continuation",
   "turn.llm.request",
+  // UUX-1-12 (jul-10) — additive observability events. The attach surface
+  // already renders progress/recovery via its own turn channel (the local
+  // stream adapter), so these wire mirrors are explicitly ignored here for now;
+  // promoting any of them to a rendered line is a deliberate future decision.
+  "tool.progress",
+  "turn.recovery",
+  "context.compacted",
+  "budget.breach",
 ] as const satisfies readonly SessionEventType[]
 
 const ATTACH_SESSION_EVENT_RENDERERS: AttachRendererRegistry = {

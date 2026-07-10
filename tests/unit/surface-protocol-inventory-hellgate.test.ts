@@ -27,7 +27,10 @@ describe("surface-protocol inventory hellgate", () => {
     expect(AGENT_EVENT_TYPES.length).toBe(37)
     // T01 — +3 additive session.v1 item events (item.started/delta/completed).
     // ALBB-04 — +1 dedicated cancel terminal (turn.aborted).
-    expect(SESSION_EVENT_TYPES.length).toBe(19)
+    // UUX-1-12 (jul-10) — +4 additive observability events (tool.progress /
+    // turn.recovery / context.compacted / budget.breach); reviewed with the
+    // bridge expansion hellgate (session-host-turn-event-bridge-observability).
+    expect(SESSION_EVENT_TYPES.length).toBe(23)
     expect(AGENT_STATE_TYPES.size).toBe(9)
     expect(SURFACE_READ_MODEL_IDS.length).toBe(4)
     expect(SURFACE_READ_MODEL_STATUSES).toEqual(["subscribed", "supported", "unsupported"])
