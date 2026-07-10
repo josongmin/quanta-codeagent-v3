@@ -406,13 +406,16 @@ export const BODY_AFTER_PROMPT_PACK_VERIFICATION_REPORT: readonly string[] = [
 ]
 
 export const BODY_AFTER_PROMPT_PACK_COMPLETION_BAR: readonly string[] = [
-  "Completion bar: finish only when the minimal correct change is in place AND",
-  "you have EITHER verified it (builds/type-checks, the relevant tests pass) OR —",
-  "when verification is genuinely blocked (e.g. a frozen environment, a missing",
-  "third-party dependency) — stated plainly what you could not verify and why",
-  "(consistent with the Verification report's `performed: no, skipped because`).",
-  "Do not imply success you did not verify. Then stop calling tools and give a",
-  "brief summary of what changed and how it was verified (or why it could not be).",
+  "Completion bar: finish only when the deliverable is genuinely done. For a code",
+  "change: the minimal correct change is in place AND you have EITHER verified it",
+  "(builds/type-checks, the relevant tests pass) OR — when verification is blocked",
+  "by an environment you CANNOT modify (a frozen/locked sandbox; NOT a mere missing",
+  "dependency you are allowed to install) — stated plainly what you could not",
+  "verify and why (per the Verification report's `performed: no, skipped because`).",
+  "In a read-only mode (plan/review/audit/architect) the deliverable is the",
+  "plan/findings/design, not a code change. Do not imply success you did not",
+  "verify. Then stop calling tools and give a brief summary of what you produced",
+  "and how it was verified (or why it could not be).",
 ]
 
 export const BODY_AFTER_PROMPT_PACK: readonly string[] = [

@@ -1,10 +1,12 @@
 /**
  * Benchmark pack (batch mode).
  *
- * Batch / bench runs are graded by an external harness — exploration without
- * an edit yields no scoring delta. The extra rule pushes the loop to stop
- * once it has a coherent patch + a verify step, instead of burning turns on
- * further investigation that won't change the score.
+ * The extra rule pushes the loop to STOP once it has a coherent patch + a verify
+ * step, instead of burning turns on further investigation that won't change the
+ * outcome. Wording is posture-NEUTRAL on purpose: this pack composes with any env
+ * posture (a frozen graded sandbox OR the user's own non-graded machine), so it
+ * must not assert "graded by an external harness" — that premise contradicts the
+ * default/owned posture's "not a graded sandbox".
  */
 
 import { CORE_RULES, type PromptRule } from "./core"
@@ -14,10 +16,16 @@ import { CORE_RULES, type PromptRule } from "./core"
 export const BATCH_RULES: readonly PromptRule[] = [
   {
     id: "R-NO-EXPLORE-OVER-EDIT",
+    // NOTE: posture-NEUTRAL wording. This pack composes with any env posture
+    // (frozen graded sandbox OR the user's own non-graded machine), so the rule
+    // must NOT assert "graded by external harness / scoring delta" — that premise
+    // contradicts the `default`/`owned` posture's "not a graded sandbox". The
+    // behavioral push (land the edit, then verify; don't burn turns exploring) is
+    // valid regardless of whether an external grader exists.
     lines: [
-      "- [R-NO-EXPLORE-OVER-EDIT] Tests are graded by external harness. Stop",
-      "  exploring once you have a coherent edit and a verify step; further",
-      "  exploration without an edit yields no scoring delta.",
+      "- [R-NO-EXPLORE-OVER-EDIT] Stop exploring once you have a coherent edit and",
+      "  a verify step; further exploration without an edit does not improve the",
+      "  outcome — land the change, then verify.",
     ],
   },
 ]
