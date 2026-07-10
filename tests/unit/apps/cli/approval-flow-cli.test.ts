@@ -251,6 +251,9 @@ const stubSetup = (approvalDecisions: readonly StubApprovalDecision[]) => {
     // approval flow never reads — inert stubs keep the fixture type-honest.
     projectsKbStore: undefined,
     mcpResourceCapture: undefined,
+    // WS-G widened fields (audit R1 — fakes must track SessionSetupResult).
+    mcpHealth: undefined,
+    liveModelSource: { source: () => "test-model" },
     permissionStore: undefined,
     approvalPrompt: async () => {
       counters.approvalPrompt += 1

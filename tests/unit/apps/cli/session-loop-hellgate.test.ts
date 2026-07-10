@@ -337,6 +337,9 @@ const buildSetup = async (
     // stubs keep the fixture honest with the type.
     projectsKbStore: undefined,
     mcpResourceCapture: undefined,
+    // WS-G widened fields (audit R1 — fakes must track SessionSetupResult).
+    mcpHealth: undefined,
+    liveModelSource: { source: () => "test-model" },
     contextUsageHolder: undefined as never,
     permissionStore: undefined,
     // L5 M-11 — per-session search-wire teardown. The fixture leaves it
