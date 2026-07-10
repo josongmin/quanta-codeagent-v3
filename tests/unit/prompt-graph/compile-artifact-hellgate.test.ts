@@ -23,7 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "@/agent/prompt"
 import { buildTurnContext, compile } from "@/agent/prompt"
-import type { PromptChannel } from "@/agent/prompt-graph"
+import { DYNAMIC_ATOMS, type PromptChannel } from "@/agent/prompt-graph"
 import { buildSectionedSystemBlocks } from "@/agent/prompt-sections"
 import { embedUntrusted } from "@/agent/untrusted"
 import type { Message, SystemBlock } from "@/llm"
@@ -154,6 +154,24 @@ describe("ADR-0538 Phase 3 — compile() shape + manifest", () => {
     expect(artifact.manifest).toBeDefined()
     expect(Array.isArray(artifact.manifest.firedAtomIds)).toBe(true)
     expect(Array.isArray(artifact.manifest.firedVariantIds)).toBe(true)
+  })
+
+  test("firedAtomIds are SEMANTIC atomIds (not variantIds, not synthetic markers)", () => {
+    // Ratchet for the P4 fix: firedAtomIds must be the atomId projection of the
+    // real fired atoms — a regression to the old `firedAtomIds = firedVariantIds`
+    // (which collapsed atomId/variantId AND leaked the synthetic SECTION-*/MSG-*
+    // caller-data markers) must go RED here. Use an owned+plan ctx so a variant
+    // atom (R-ENV#owned → atomId R-ENV) actually fires on system.base.
+    const artifact = compile(base({ mode: "plan" }))
+    const atomIds = artifact.manifest.firedAtomIds
+    const variantIds = artifact.manifest.firedVariantIds
+    // A body atom fired: its bare atomId is present, not a variant/synthetic id.
+    expect(atomIds).toContain("BODY-POLICY-STACK")
+    // NO synthetic caller-data marker leaks into the semantic atom set.
+    expect(atomIds.some((id) => id.startsWith("SECTION-") || id.startsWith("MSG-"))).toBe(false)
+    // firedVariantIds, by contrast, IS the full wire-instance set (may carry the
+    // synthetic markers) — the two projections are genuinely distinct.
+    expect(variantIds.length).toBeGreaterThanOrEqual(atomIds.length)
   })
 
   test("manifest.byChannel covers ALL 8 channels (present or empty)", () => {
@@ -426,27 +444,53 @@ describe("ADR-0538 Phase 3 — dynamic-atom manifest ⟺ wire reminder (drift gu
       (a.manifest.byChannel["message.system_reminder"] ?? []).filter((v) => v.startsWith("DYN-")),
     )
 
-  test("each DYN reminder atom fires IFF its block text is in trailingReminder", () => {
-    // Witnesses I control verbatim in the wire: memory / langhint are pushed
-    // as-is; the env block renders the platform string. repo-rules / active-skills
-    // are ABSENT here (no input) — so neither the atom NOR the block may appear.
+  test("EVERY DynamicContentKey: DYN atom fires IFF its block text is in trailingReminder", () => {
+    // One input that turns ON every cleanly-triggerable dynamic block, leaving the
+    // rest OFF — so BOTH directions of the ⟺ are exercised for all 12 keys (a
+    // future edit to one predicate but not the other goes RED here). Witnesses are
+    // strings I control verbatim in the wire (or stable block prefixes).
     const input = base({
       memoryContext: "## Memory\nDRIFT_MEM_WITNESS",
       languageHint: "DRIFT_LANG_WITNESS",
       env: { platform: "DRIFT_ENV_WITNESS" },
+      taskBudget: { tokens: 424242 },
+      hookPromptInjects: [{ injectAfterSystem: "DRIFT_HOOKTAIL" }],
+      directiveConfig: {
+        directiveAutonomous: true,
+        directiveReadComplete: false,
+        directiveProgress: false,
+        directiveMemoryVerify: false,
+        directiveThinkFreq: false,
+        directiveAntiPlatitude: false,
+        directiveParallelTools: false,
+        directiveAdvisorRail: false,
+        codeModeOnly: false,
+      },
     })
     const artifact = compile(input)
     const reminder = artifact.trailingReminder ?? ""
     const dyn = firedDyn(artifact)
+    // [DYN id, wire witness, present?] — all 12 DynamicContentKey values.
     const cases: ReadonlyArray<readonly [string, string, boolean]> = [
+      ["DYN-date", "Today's date is", true],
+      ["DYN-cwd", "Working directory:", true],
       ["DYN-memory-context", "DRIFT_MEM_WITNESS", true],
       ["DYN-language-hint", "DRIFT_LANG_WITNESS", true],
       ["DYN-env-block", "DRIFT_ENV_WITNESS", true],
+      ["DYN-task-budget", "424242", true],
+      ["DYN-hook-context-tail", "DRIFT_HOOKTAIL", true],
+      ["DYN-directives", "AUTONOMOUS MODE", true],
       ["DYN-repo-rules", "", false],
+      ["DYN-glob-rules", "", false],
       ["DYN-active-skills", "", false],
+      ["DYN-working-state", "", false],
     ]
+    // Guard: the case list must cover the WHOLE closed key set — a new
+    // DynamicContentKey without a case here would let a shadow drift in unchecked.
+    expect(cases.length).toBe(DYNAMIC_ATOMS.length)
+    expect(new Set(cases.map((c) => c[0]))).toEqual(new Set(DYNAMIC_ATOMS.map((a) => a.variantId)))
     for (const [id, witness, present] of cases) {
-      // manifest and wire must AGREE on presence.
+      // manifest and wire must AGREE on presence (both directions).
       expect(dyn.has(id)).toBe(present)
       if (present) expect(reminder).toContain(witness)
     }

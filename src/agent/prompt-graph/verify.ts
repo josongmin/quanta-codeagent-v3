@@ -164,7 +164,12 @@ const ASSUMPTION_TABLE: readonly AssumptionRule[] = [
   },
 ]
 
-const textOf = (a: InstructionAtom): string => a.lines.join("\n").toLowerCase()
+// Join with SPACE and collapse whitespace (NOT "\n") so a premise phrase that
+// wraps across two `lines[]` entries — e.g. "declare the\n  environment
+// unavailable" — still matches the keyword table. Joining on "\n" made the lint's
+// coverage depend on cosmetic line-wrapping (the same premise class was guarded on
+// one atom and silently unguarded on another purely by where the wrap fell).
+const textOf = (a: InstructionAtom): string => a.lines.join(" ").replace(/\s+/g, " ").toLowerCase()
 
 const anyFacetDeclared = (a: InstructionAtom, facets: readonly AssumptionFacet[]): boolean =>
   facets.some((f) => a.when?.[f] !== undefined)

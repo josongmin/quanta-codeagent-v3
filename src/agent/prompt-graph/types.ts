@@ -128,17 +128,18 @@ export interface InstructionAtom {
   /** Rendered content — NO ADR/Codex citations (those live in `provenance`).
    *  For a STATIC atom this is the literal wire text. For a DYNAMIC-content atom
    *  (one that carries a `contentKey`) `lines` is EMPTY — its wire text is
-   *  per-turn DATA resolved by the compiler via {@link contentKey}. */
+   *  per-turn DATA produced by the leaf renderer, NOT carried on the atom. */
   readonly lines: readonly string[]
   /**
-   * ADR-0538 Phase 3 — DYNAMIC-content marker. When present, the atom's rendered
-   * text is NOT `lines` (which stays empty) but per-turn DATA the compiler
-   * resolves via a PURE lookup keyed by this string over the `PromptContext`'s
-   * per-turn content fields (`contentByKey`). This preserves the purity contract:
-   * `when` stays the declarative matcher (applicability), `contentKey` is a
-   * STABLE label (not a render closure — no clock/IO/closure capture on the
-   * atom). Only atoms on the `message.system_reminder` channel may carry one
-   * (the verifier enforces this). Absent ⇒ a STATIC atom (`lines` is authoritative).
+   * ADR-0538 Phase 3 — DYNAMIC-content marker. When present, the atom carries NO
+   * wire text (`lines` stays empty): it is the declarative APPLICABILITY (`when`)
+   * + a STABLE observability LABEL for one per-turn reminder block. The block's
+   * TEXT is produced by the leaf renderer in `buildDynamicContext` — there is NO
+   * `contentByKey` resolver wiring the key to the wire today (a forward seam; see
+   * `atoms-dynamic.ts`). The purity contract holds either way: `when` is the
+   * declarative matcher, `contentKey` is a stable string (no clock/IO/closure
+   * capture on the atom). Only atoms on the `message.system_reminder` channel may
+   * carry one (the verifier enforces this). Absent ⇒ STATIC (`lines` authoritative).
    */
   readonly contentKey?: string
   /** Absent ⇒ always applies. */

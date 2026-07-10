@@ -57,9 +57,11 @@ import type { InstructionAtom } from "./types"
 const REMINDER = "message.system_reminder" as const
 const SECTION = "dynamic.reminder"
 
-/** The stable content-key set for the dynamic reminder segments. The compiler's
- *  `contentByKey` resolver produces the per-turn text for each. Exported so the
- *  compiler + the verifier reference ONE closed set (drift guard). */
+/** The stable content-key set for the dynamic reminder segments — each names ONE
+ *  block of the per-turn reminder. The block's TEXT is produced by the leaf
+ *  renderer in `buildDynamicContext` (there is no `contentByKey` resolver yet —
+ *  see the file header); the key is the manifest/observability label. Exported so
+ *  the compiler + the verifier reference ONE closed set (drift guard). */
 export type DynamicContentKey =
   | "date"
   | "cwd"
