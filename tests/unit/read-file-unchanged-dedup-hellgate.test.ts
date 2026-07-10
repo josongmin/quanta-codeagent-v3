@@ -6,11 +6,16 @@ import { ReadFileState } from "@/tool/stale-read-guard"
 import type { ToolContext, ToolResult } from "@/tool/types"
 
 // H9 read `file_unchanged` dedup hellgate. Adversarial: a re-read of the SAME
-// (path, offset, limit) with an UNCHANGED mtime must return the compact
+// (path, offset, limit) with UNCHANGED content must return the compact
 // `file_unchanged` sentinel — NOT the full content; a re-read at a DIFFERENT
-// range, or after the mtime advanced, or the first read ever, must return FULL
+// range, or after the content changed, or the first read ever, must return FULL
 // content; the knob OFF must be byte-identical (full content always, no sentinel
 // ever); interleaved reads of different files must not cross-contaminate.
+// Content-truth (UUX-6-07): the dedup verdict compares a CONTENT HASH of the
+// just-read text — the mtime is NOT the signal (see
+// read-dedup-content-truth-hellgate.test.ts for the mtime-preserving mutation
+// battery); in this fixture every content change also moves the fake mtime,
+// matching real external writes.
 //
 // Deterministic substrate: an in-memory FileSystemPort with HAND-FED mtimes so
 // the test controls "the file changed" precisely (real mtimes have ms-floor
@@ -273,7 +278,7 @@ describe("read file_unchanged dedup (H9) — knob OFF (byte-identical)", () => {
     const ctx = ctxWith(state)
     await run(tool, { path: "/k.txt" }, ctx)
     // No range was recorded ⇒ even probing the dedup state directly misses.
-    expect(state.recordedRangeMtime("/k.txt", 1, 2000)).toBeUndefined()
+    expect(state.recordedRangeHash("/k.txt", 1, 2000)).toBeUndefined()
     // But the freshness baseline (ADR-0474) is STILL recorded — H9 OFF must not
     // regress the stale-read-guard's read-time mtime record.
     expect(state.recordedMtime("/k.txt")).toBe(1)
@@ -281,24 +286,24 @@ describe("read file_unchanged dedup (H9) — knob OFF (byte-identical)", () => {
 })
 
 describe("ReadFileState range-dedup unit (additive, orthogonal to freshness)", () => {
-  test("recordReadRange / recordedRangeMtime round-trip per exact range", () => {
+  test("recordReadRange / recordedRangeHash round-trip per exact range", () => {
     const s = new ReadFileState()
-    s.recordReadRange("/p", 1, 2000, 50)
-    expect(s.recordedRangeMtime("/p", 1, 2000)).toBe(50)
+    s.recordReadRange("/p", 1, 2000, "hash-50")
+    expect(s.recordedRangeHash("/p", 1, 2000)).toBe("hash-50")
     // Different range on the same path is a distinct key.
-    expect(s.recordedRangeMtime("/p", 3, 2000)).toBeUndefined()
-    expect(s.recordedRangeMtime("/p", 1, 100)).toBeUndefined()
+    expect(s.recordedRangeHash("/p", 3, 2000)).toBeUndefined()
+    expect(s.recordedRangeHash("/p", 1, 100)).toBeUndefined()
   })
 
   test("range-dedup does NOT leak into the freshness map (and vice-versa)", () => {
     const s = new ReadFileState()
-    s.recordReadRange("/q", 1, 2000, 77)
+    s.recordReadRange("/q", 1, 2000, "hash-77")
     // recordReadRange must NOT seed the freshness baseline used by guardWrite.
     expect(s.recordedMtime("/q")).toBeUndefined()
     expect(s.has("/q")).toBe(false)
     expect(s.checkFresh("/q", 999)).toEqual({ kind: "unread" })
     // Conversely, record (freshness) must NOT seed the range-dedup map.
     s.record("/r", 88)
-    expect(s.recordedRangeMtime("/r", 1, 2000)).toBeUndefined()
+    expect(s.recordedRangeHash("/r", 1, 2000)).toBeUndefined()
   })
 })

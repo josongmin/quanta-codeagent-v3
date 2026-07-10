@@ -184,12 +184,12 @@ describe("H9 read-dedup — trust model + byte-identity", () => {
     expect(second.output).toContain(f)
   })
 
-  test("TRUST MODEL: mtime UNCHANGED but content REWRITTEN in place ⇒ sentinel still served (documented limitation)", async () => {
-    // H9 trusts mtime as the freshness signal. If an external writer rewrites the
-    // bytes WITHOUT advancing mtime (same-second write + explicit utimes reset),
-    // the dedup short-circuits and serves the stale sentinel. This is the DESIGNED
-    // contract (mtime is the closed signal); this test PINS that behavior so a
-    // future change to a content-hash signal is a conscious, reviewed decision.
+  test("TRUST MODEL: mtime UNCHANGED but content REWRITTEN in place ⇒ FRESH content (content-truth, UUX-6-07)", async () => {
+    // H9's freshness signal is a CONTENT HASH of the just-read bytes (the old
+    // mtime-trust contract served a stale sentinel here — the conscious,
+    // reviewed flip this test used to demand). An external writer that rewrites
+    // the bytes WITHOUT advancing mtime (same-second write + explicit utimes
+    // reset) now yields the fresh content; the sentinel can never lie.
     process.env.QUANTA_READ_DEDUP = "1"
     __resetRuntimeConfig()
     const f = join(dir, "dedup-trust.txt")
@@ -208,8 +208,9 @@ describe("H9 read-dedup — trust model + byte-identity", () => {
     const sec = (recorded as number) / 1000
     utimesSync(f, sec, sec)
     const second = await drain(readTool, { path: f }, c)
-    // Sentinel served — proving the mtime-trust contract (NOT a regression).
-    expect(second.output).toContain("file_unchanged")
+    // Fresh content served — the content hash misses despite the identical mtime.
+    expect(second.output).not.toContain("file_unchanged")
+    expect(second.output).toContain("TAMPERED-DIFFERENT-CONTENT")
   })
 
   test("ON: mtime ADVANCED ⇒ full content re-rendered (no stale short-circuit)", async () => {

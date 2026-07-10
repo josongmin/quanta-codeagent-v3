@@ -107,13 +107,18 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
   readonly mcpOAuth: boolean
   /** H9 read `file_unchanged` dedup gate (`QUANTA_READ_DEDUP`). Opt-in
    *  (the `gateOn` truthy vocab (#24)). When ON, the `read` tool short-circuits a re-read of the SAME
-   *  (canonical path, offset, limit) whose on-disk mtime equals the recorded
-   *  read-time mtime for that range, returning a compact `file_unchanged`
+   *  (canonical path, offset, limit) whose CONTENT HASH equals the hash recorded
+   *  when that range was last read, returning a compact `file_unchanged`
    *  sentinel instead of re-sending the full content (large token savings in
-   *  iterative loops). Default false ⇒ the read tool ALWAYS renders full content
-   *  and allocates NO per-range dedup state (byte-identical to the pre-H9 path).
-   *  ORTHOGONAL to the stale-read-guard (ADR-0474, write-blocking freshness): H9
-   *  is the READ-SIDE dedup, keyed by RANGE, and never affects guardWrite. */
+   *  iterative loops). CONTENT-TRUTH (UUX-6-07): the file is read + hashed EVERY
+   *  time (the dedup saves tokens, not disk IO) and the verdict compares the
+   *  just-read bytes' hash — an mtime-preserving content rewrite can never serve
+   *  a stale verdict (pre-fix the signal was the mtime, which such a rewrite
+   *  defeats). Default false ⇒ the read tool ALWAYS renders full content,
+   *  computes NO hash, and allocates NO per-range dedup state (byte-identical to
+   *  the pre-H9 path). ORTHOGONAL to the stale-read-guard (ADR-0474,
+   *  write-blocking freshness — still mtime-based): H9 is the READ-SIDE dedup,
+   *  keyed by RANGE, and never affects guardWrite. */
   readonly readDedup: boolean
   /** H6 (jun-3-misc §3) passive git/gh VCS classification gate
    *  (`QUANTA_PASSIVE_VCS`). Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ the

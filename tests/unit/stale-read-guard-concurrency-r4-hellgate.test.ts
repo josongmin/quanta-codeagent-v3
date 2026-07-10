@@ -2,24 +2,26 @@
  * ROUND-4 concurrency hellgate — stale-read-guard state maps.
  *
  * `ReadFileState` is PURE in-memory: `record`, `recordReadRange`, `checkFresh`,
- * `recordedRangeMtime` contain NO awaits, so two of them can never interleave
+ * `recordedRangeHash` contain NO awaits, so two of them can never interleave
  * MID-METHOD on one JS thread. The only race is at the CALLER: two concurrent
- * `read`s each `await statFile()` (which can return DIFFERENT mtimes when a
- * write lands between), then each `record(...)` / `recordReadRange(...)`. The
+ * `read`s each `await` the read pipeline (which can hash DIFFERENT content when
+ * a write lands between), then each `record(...)` / `recordReadRange(...)`. The
  * map is last-writer-wins per key.
  *
  * The invariant we PROVE (clean-with-proof): a lost-update on the freshness /
  * dedup map can only cause a CONSERVATIVE outcome —
- *   (a) the dedup short-circuit NEVER fires on content that actually changed
- *       (the decision always re-compares the recorded mtime against the CURRENT
- *       on-disk mtime, so a stale recorded value yields a MISS, never a false
- *       hit), and
+ *   (a) the dedup short-circuit NEVER fires on content that differs from what
+ *       the model last saw for the range (content-truth, UUX-6-07: the decision
+ *       compares the hash of the JUST-READ content against the recorded hash,
+ *       so a stale recorded value yields a MISS, never a false hit — and a HIT
+ *       is truthful by construction: equal hashes ⇔ the model already holds
+ *       these exact bytes), and
  *   (b) `guardWrite` NEVER admits a write whose target advanced past ANY
  *       recorded read-baseline (a stale-low baseline only makes the gate MORE
  *       conservative, never less).
  *
- * We drive the exact caller interleaving with two recorders whose stats
- * resolved to different mtimes, in both completion orders.
+ * We drive the exact caller interleaving with two recorders whose reads
+ * resolved to different content hashes, in both completion orders.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -27,22 +29,24 @@ import { guardWrite, ReadFileState } from "@/tool/stale-read-guard"
 
 const PATH = "/repo/src/a.ts"
 
-/** The dedup decision the read tool makes: it re-stats and compares the CURRENT
- *  mtime against the recorded range mtime. A hit requires strict equality. */
-const dedupHit = (state: ReadFileState, offset: number, limit: number, currentMtime: number) => {
-  const recorded = state.recordedRangeMtime(PATH, offset, limit)
-  return recorded !== undefined && recorded === currentMtime
+/** The dedup decision the read tool makes: it re-reads + hashes the CURRENT
+ *  content and compares against the recorded range hash. A hit requires strict
+ *  equality. */
+const dedupHit = (state: ReadFileState, offset: number, limit: number, currentHash: string) => {
+  const recorded = state.recordedRangeHash(PATH, offset, limit)
+  return recorded !== undefined && recorded === currentHash
 }
 
-describe("ROUND-4 stale-read-guard — interleaved record vs differing mtimes", () => {
+describe("ROUND-4 stale-read-guard — interleaved record vs differing content", () => {
   test("lost-update on the range map never yields a FALSE dedup hit on changed content", async () => {
-    // readA stat → mtime 100; readB stat → mtime 200 (a write landed between).
-    // Drive BOTH completion orders; in each, the recorded value is one of the
-    // two observed mtimes. A subsequent read whose CURRENT mtime differs from
-    // the recorded value must MISS (render full), never short-circuit.
+    // readA hashed content "hA"; readB hashed content "hB" (a write landed
+    // between). Drive BOTH completion orders; in each, the recorded value is one
+    // of the two observed hashes. A subsequent read whose CURRENT content hash
+    // differs from the recorded value must MISS (render full), never
+    // short-circuit.
     for (const order of [
-      [100, 200],
-      [200, 100],
+      ["hA", "hB"],
+      ["hB", "hA"],
     ] as const) {
       const state = new ReadFileState()
       // simulate the two interleaved recorders (the later call wins the key)
@@ -50,17 +54,17 @@ describe("ROUND-4 stale-read-guard — interleaved record vs differing mtimes", 
       state.recordReadRange(PATH, 1, 2000, order[1])
       const winner = order[1] // last writer wins
 
-      // A future read at the TRUE current mtime 200: it must dedup-hit ONLY when
-      // the recorded value equals 200 — i.e. only when content is genuinely
-      // unchanged relative to what was recorded.
-      const wouldHitAt200 = dedupHit(state, 1, 2000, 200)
-      expect(wouldHitAt200).toBe(winner === 200)
+      // A future read whose TRUE current content hashes to "hB": it must
+      // dedup-hit ONLY when the recorded value equals "hB" — i.e. only when the
+      // model already holds exactly the current bytes.
+      const wouldHitAtB = dedupHit(state, 1, 2000, "hB")
+      expect(wouldHitAtB).toBe(winner === "hB")
 
-      // The critical safety property: there is NO current mtime at which the
-      // dedup fires while the content differs from the recorded snapshot. The
-      // hit predicate is `recorded === current`, so a hit ⇒ equal mtimes ⇒ same
-      // content. Prove it across a spread of current mtimes.
-      for (const cur of [50, 100, 150, 200, 250]) {
+      // The critical safety property: there is NO current content at which the
+      // dedup fires while the bytes differ from the recorded snapshot. The hit
+      // predicate is `recorded === current`, so a hit ⇒ equal hashes ⇒ same
+      // content. Prove it across a spread of current hashes.
+      for (const cur of ["h0", "hA", "h1", "hB", "h2"]) {
         if (dedupHit(state, 1, 2000, cur)) expect(cur).toBe(winner)
       }
     }
@@ -94,12 +98,12 @@ describe("ROUND-4 stale-read-guard — interleaved record vs differing mtimes", 
   test("different ranges never collide — interleaved records stay independent", async () => {
     const state = new ReadFileState()
     // Two reads of DIFFERENT windows of the same file, interleaved.
-    state.recordReadRange(PATH, 1, 100, 100)
-    state.recordReadRange(PATH, 101, 100, 200)
-    // Each range retains its own mtime — no cross-contamination from interleave.
-    expect(state.recordedRangeMtime(PATH, 1, 100)).toBe(100)
-    expect(state.recordedRangeMtime(PATH, 101, 100)).toBe(200)
+    state.recordReadRange(PATH, 1, 100, "h100")
+    state.recordReadRange(PATH, 101, 100, "h200")
+    // Each range retains its own hash — no cross-contamination from interleave.
+    expect(state.recordedRangeHash(PATH, 1, 100)).toBe("h100")
+    expect(state.recordedRangeHash(PATH, 101, 100)).toBe("h200")
     // A read of a THIRD, never-recorded window misses cleanly.
-    expect(state.recordedRangeMtime(PATH, 201, 100)).toBeUndefined()
+    expect(state.recordedRangeHash(PATH, 201, 100)).toBeUndefined()
   })
 })

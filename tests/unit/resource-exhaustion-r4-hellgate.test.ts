@@ -11,7 +11,7 @@
  *      handle past the cap is rejected `cap-exceeded`; re-reading a tracked
  *      handle is always allowed; detach/kill free a slot.
  *
- *   2. stale-read-guard H9 `rangeMtimes` Map — one entry per distinct
+ *   2. stale-read-guard H9 `rangeHashes` Map — one entry per distinct
  *      (path,offset,limit) range ever read. A loop reading 1M distinct windows
  *      grew it without bound. Now bounded at `DEFAULT_RANGE_DEDUP_CAP` with FIFO
  *      eviction (the map is a pure optimization, so dropping the oldest is safe).
@@ -130,64 +130,64 @@ describe("R4 — tmux lastCapture is BOUNDED (no unbounded growth)", () => {
   })
 })
 
-// ── stale-read-guard rangeMtimes FIFO bound ──────────────────────────────────
+// ── stale-read-guard rangeHashes FIFO bound ──────────────────────────────────
 
-describe("R4 — stale-read-guard rangeMtimes is BOUNDED (FIFO eviction)", () => {
+describe("R4 — stale-read-guard rangeHashes is BOUNDED (FIFO eviction)", () => {
   test("recording cap+1 distinct ranges evicts the OLDEST (FIFO), map stays at cap", () => {
     const cap = 3
     const state = new ReadFileState(cap)
     // Record cap distinct ranges (offset 0..cap-1).
     for (let off = 0; off < cap; off++) {
-      state.recordReadRange("/f", off, 100, 1000 + off)
+      state.recordReadRange("/f", off, 100, `hash-${1000 + off}`)
     }
     // All present.
     for (let off = 0; off < cap; off++) {
-      expect(state.recordedRangeMtime("/f", off, 100)).toBe(1000 + off)
+      expect(state.recordedRangeHash("/f", off, 100)).toBe(`hash-${1000 + off}`)
     }
     // One more DISTINCT range → the oldest (offset 0) is evicted.
-    state.recordReadRange("/f", cap, 100, 9999)
-    expect(state.recordedRangeMtime("/f", 0, 100)).toBeUndefined() // evicted
-    expect(state.recordedRangeMtime("/f", cap, 100)).toBe(9999) // newest retained
+    state.recordReadRange("/f", cap, 100, "hash-9999")
+    expect(state.recordedRangeHash("/f", 0, 100)).toBeUndefined() // evicted
+    expect(state.recordedRangeHash("/f", cap, 100)).toBe("hash-9999") // newest retained
     // Middle ranges survive.
     for (let off = 1; off < cap; off++) {
-      expect(state.recordedRangeMtime("/f", off, 100)).toBe(1000 + off)
+      expect(state.recordedRangeHash("/f", off, 100)).toBe(`hash-${1000 + off}`)
     }
   })
 
   test("re-recording an existing range REFRESHES + moves it to the FIFO tail (survives eviction)", () => {
     const cap = 2
     const state = new ReadFileState(cap)
-    state.recordReadRange("/f", 0, 10, 1) // oldest
-    state.recordReadRange("/f", 1, 10, 2)
+    state.recordReadRange("/f", 0, 10, "h1") // oldest
+    state.recordReadRange("/f", 1, 10, "h2")
     // Touch offset 0 again → it becomes the NEWEST (moves to tail).
-    state.recordReadRange("/f", 0, 10, 5)
+    state.recordReadRange("/f", 0, 10, "h5")
     // Now insert a 3rd distinct range → offset 1 (the now-oldest) is evicted.
-    state.recordReadRange("/f", 2, 10, 3)
-    expect(state.recordedRangeMtime("/f", 1, 10)).toBeUndefined() // evicted
-    expect(state.recordedRangeMtime("/f", 0, 10)).toBe(5) // refreshed + survived
-    expect(state.recordedRangeMtime("/f", 2, 10)).toBe(3)
+    state.recordReadRange("/f", 2, 10, "h3")
+    expect(state.recordedRangeHash("/f", 1, 10)).toBeUndefined() // evicted
+    expect(state.recordedRangeHash("/f", 0, 10)).toBe("h5") // refreshed + survived
+    expect(state.recordedRangeHash("/f", 2, 10)).toBe("h3")
   })
 
   test("VOLUME: 100k distinct ranges keep only the last `cap` (no unbounded growth)", () => {
     const cap = 16
     const state = new ReadFileState(cap)
     for (let i = 0; i < 100_000; i++) {
-      state.recordReadRange("/f", i, 50, i)
+      state.recordReadRange("/f", i, 50, `h${i}`)
     }
     // The first 100k-cap ranges are all gone; only the last `cap` survive.
-    expect(state.recordedRangeMtime("/f", 0, 50)).toBeUndefined()
-    expect(state.recordedRangeMtime("/f", 100_000 - cap - 1, 50)).toBeUndefined()
+    expect(state.recordedRangeHash("/f", 0, 50)).toBeUndefined()
+    expect(state.recordedRangeHash("/f", 100_000 - cap - 1, 50)).toBeUndefined()
     for (let i = 100_000 - cap; i < 100_000; i++) {
-      expect(state.recordedRangeMtime("/f", i, 50)).toBe(i)
+      expect(state.recordedRangeHash("/f", i, 50)).toBe(`h${i}`)
     }
   })
 
   test("a non-positive cap is clamped to 1 (still bounded, holds the latest range)", () => {
     const state = new ReadFileState(0)
-    state.recordReadRange("/f", 0, 10, 1)
-    state.recordReadRange("/f", 1, 10, 2)
-    expect(state.recordedRangeMtime("/f", 0, 10)).toBeUndefined() // evicted
-    expect(state.recordedRangeMtime("/f", 1, 10)).toBe(2) // latest survives
+    state.recordReadRange("/f", 0, 10, "h1")
+    state.recordReadRange("/f", 1, 10, "h2")
+    expect(state.recordedRangeHash("/f", 0, 10)).toBeUndefined() // evicted
+    expect(state.recordedRangeHash("/f", 1, 10)).toBe("h2") // latest survives
   })
 
   test("the freshness `mtimes` map is ORTHOGONAL — the range cap does not touch it", () => {
@@ -197,7 +197,7 @@ describe("R4 — stale-read-guard rangeMtimes is BOUNDED (FIFO eviction)", () =>
     state.record("/b", 200)
     // Recording many ranges (which evict each other under cap=1) leaves the
     // freshness map intact — both paths still carry a baseline.
-    for (let i = 0; i < 50; i++) state.recordReadRange("/a", i, 10, i)
+    for (let i = 0; i < 50; i++) state.recordReadRange("/a", i, 10, `h${i}`)
     expect(state.recordedMtime("/a")).toBe(100)
     expect(state.recordedMtime("/b")).toBe(200)
     expect(state.has("/a")).toBe(true)
@@ -209,10 +209,10 @@ describe("R4 — stale-read-guard rangeMtimes is BOUNDED (FIFO eviction)", () =>
     // Fill exactly to the default cap, then one more → the first is evicted,
     // proving the unparameterized default is finite (not unbounded).
     for (let i = 0; i < DEFAULT_RANGE_DEDUP_CAP; i++) {
-      state.recordReadRange("/f", i, 1, i)
+      state.recordReadRange("/f", i, 1, `h${i}`)
     }
-    expect(state.recordedRangeMtime("/f", 0, 1)).toBe(0)
-    state.recordReadRange("/f", DEFAULT_RANGE_DEDUP_CAP, 1, 1)
-    expect(state.recordedRangeMtime("/f", 0, 1)).toBeUndefined()
+    expect(state.recordedRangeHash("/f", 0, 1)).toBe("h0")
+    state.recordReadRange("/f", DEFAULT_RANGE_DEDUP_CAP, 1, "h1")
+    expect(state.recordedRangeHash("/f", 0, 1)).toBeUndefined()
   })
 })

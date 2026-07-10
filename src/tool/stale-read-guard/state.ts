@@ -66,12 +66,17 @@ export class ReadFileState {
   /**
    * H9 read-side dedup (additive, ORTHOGONAL to the freshness `mtimes` above).
    *
-   * Keyed by `(path, offset, limit)` RANGE → the mtime the file carried when
-   * that EXACT range was last read. The freshness map keys on path ALONE (a
-   * write to ANY part of a read file is a clobber); the dedup map must key on
-   * the RANGE so a re-read of a DIFFERENT window is NOT mistaken for an
-   * identical re-read. Kept SEPARATE so neither map's semantics leak into the
-   * other — `record`/`checkFresh`/`paths` are byte-identical to pre-H9.
+   * Keyed by `(path, offset, limit)` RANGE → a CONTENT HASH of the file's text
+   * as read when that EXACT range was last read (UUX-6-07 content-truth: the
+   * value used to be the read-time mtime, but an mtime-preserving content
+   * rewrite then served a stale `file_unchanged` verdict — the hash of the
+   * just-read bytes can never lie; the read tool reads the file EVERY time
+   * anyway, since the dedup saves TOKENS, not disk IO). The freshness map keys
+   * on path ALONE (a write to ANY part of a read file is a clobber); the dedup
+   * map must key on the RANGE so a re-read of a DIFFERENT window is NOT
+   * mistaken for an identical re-read. Kept SEPARATE so neither map's
+   * semantics leak into the other — `record`/`checkFresh`/`paths` are
+   * byte-identical to pre-H9.
    *
    * LAZILY allocated: stays `undefined` until the first `recordReadRange` call,
    * so a deployment that never opts into H9 (the read tool only calls these
@@ -81,9 +86,9 @@ export class ReadFileState {
    * {@link recordReadRange}) so a long run reading unboundedly many DISTINCT
    * ranges cannot grow this map without limit.
    */
-  private rangeMtimes: Map<string, number> | undefined
+  private rangeHashes: Map<string, string> | undefined
 
-  /** The cap on {@link rangeMtimes}. Injected (defaults to
+  /** The cap on {@link rangeHashes}. Injected (defaults to
    *  {@link DEFAULT_RANGE_DEDUP_CAP}) so tests can drive the eviction path with a
    *  tiny bound and the host can tune it — never a hardcoded inline magic value. */
   private readonly rangeDedupCap: number
@@ -113,18 +118,22 @@ export class ReadFileState {
     return `${path}\x00${offset}\x00${limit}`
   }
 
-  /** H9 — record (or overwrite) the mtime observed when the EXACT
-   *  `(path, offset, limit)` range was read. Allocates the dedup map on first
-   *  use (see {@link rangeMtimes}). NO-THROW. ORTHOGONAL to {@link record} —
-   *  callers that want write-blocking freshness still call `record` too. */
-  recordReadRange(path: string, offset: number, limit: number, mtimeMs: number): void {
-    this.rangeMtimes ??= new Map<string, number>()
-    const map = this.rangeMtimes
+  /** H9 — record (or overwrite) the CONTENT HASH of the text read for the
+   *  EXACT `(path, offset, limit)` range. The hash is an opaque string the
+   *  CALLER computes over the just-read content (this pure slice does no
+   *  hashing itself — the read tool owns the digest choice); equality of two
+   *  recorded hashes ⇔ the model already holds byte-identical content.
+   *  Allocates the dedup map on first use (see {@link rangeHashes}). NO-THROW.
+   *  ORTHOGONAL to {@link record} — callers that want write-blocking freshness
+   *  still call `record` too. */
+  recordReadRange(path: string, offset: number, limit: number, contentHash: string): void {
+    this.rangeHashes ??= new Map<string, string>()
+    const map = this.rangeHashes
     const key = ReadFileState.rangeKey(path, offset, limit)
     // Re-recording an existing key must REFRESH (not grow): delete-then-set so the
     // key also moves to the FIFO tail (most-recently-used survives eviction).
     map.delete(key)
-    map.set(key, mtimeMs)
+    map.set(key, contentHash)
     // FIFO eviction once past the cap — `Map` iterates in insertion order, so the
     // first key is the oldest. The dedup map is a pure optimization (an evicted
     // entry only forces a full re-render, never a wrong result), so dropping the
@@ -137,14 +146,16 @@ export class ReadFileState {
     }
   }
 
-  /** H9 — the recorded read-time mtime for the EXACT `(path, offset, limit)`
+  /** H9 — the recorded content hash for the EXACT `(path, offset, limit)`
    *  range, or `undefined` when that range was never read this run (or the
-   *  dedup map was never allocated). A return that === the current on-disk
-   *  mtime is the dedup short-circuit signal; ANY difference (advanced mtime,
-   *  different range, never read) yields a non-matching/`undefined` value and
-   *  the caller renders full content. NO-THROW. */
-  recordedRangeMtime(path: string, offset: number, limit: number): number | undefined {
-    return this.rangeMtimes?.get(ReadFileState.rangeKey(path, offset, limit))
+   *  dedup map was never allocated). A return that === the hash of the
+   *  JUST-READ content is the dedup short-circuit signal (the model already
+   *  holds these exact bytes); ANY difference (content changed — even with a
+   *  preserved mtime — different range, never read) yields a
+   *  non-matching/`undefined` value and the caller renders full content.
+   *  NO-THROW. */
+  recordedRangeHash(path: string, offset: number, limit: number): string | undefined {
+    return this.rangeHashes?.get(ReadFileState.rangeKey(path, offset, limit))
   }
 
   /** Has `path` been read (and thus has a freshness baseline) in this run? */

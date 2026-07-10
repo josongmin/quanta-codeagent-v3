@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { homedir } from "node:os"
 // Node's `util.TextDecoder` is typed to accept any string label; the Bun global
 // `TextDecoder`'s `Bun.Encoding` type omits `utf-16le`/`utf-16be` (a bun-types
@@ -382,7 +383,8 @@ const resolveReadOutcome = async (
  *  or `null` on a corrupt/non-nbformat notebook ⇒ we fall back to the raw text
  *  (still readable as JSON). NEVER throws. `offset`/`limit` then page the
  *  RENDERED text in `renderReadOk` exactly as for a raw file, and the H9
- *  dedup/mtime record (keyed by path+mtime, unchanged) is unaffected. */
+ *  dedup record (hashed over this RENDERED text, so an outputs-knob flip that
+ *  changes the render also changes the hash) is unaffected. */
 /** Per-cell-output char budget for the `.ipynb` render (NOT a whole-file cap).
  *  Basis: a notebook can carry MANY cells × outputs, so each individual stream /
  *  text-plain / traceback output is sub-budgeted to keep one pathological cell
@@ -408,7 +410,7 @@ const maybeRenderNotebook = (path: string, text: string): string => {
 }
 
 /** H9 — the compact `file_unchanged` sentinel rendered in place of full content
- *  when an identical-range re-read finds an unchanged mtime. It is UNAMBIGUOUS
+ *  when an identical-range re-read finds byte-identical content. It is UNAMBIGUOUS
  *  (names the path + the exact range + the reason) and ACTIONABLE: the model is
  *  told the content is byte-identical to its prior read and should re-use that,
  *  so it never needs the bytes re-sent. Deterministic (pure function of its
@@ -417,29 +419,59 @@ const renderFileUnchanged = (path: string, offset: number, limit: number): strin
   `file_unchanged: ${path} (offset ${offset}, limit ${limit}) — ` +
   "content identical to your prior read of this exact range; re-using it."
 
-/** H9 — try the read-side dedup short-circuit. Returns the `file_unchanged`
- *  ToolResult when (and ONLY when) the H9 knob is ON, the dedup state is wired,
- *  and the EXACT (path, offset, limit) range was already read this run with a
- *  mtime that still === the current on-disk mtime. Returns `null` (⇒ caller
- *  renders + records full content) on ANY difference: knob off, no state, never
- *  read, different range, or an advanced/regressed mtime. NO-THROW, pure aside
- *  from the injected state read. Keeps `execute` under the lint complexity gate. */
+/** H9 content-truth (UUX-6-07) — SHA-1 hex digest of the just-read text. The
+ *  dedup verdict is keyed on the CONTENT, not the mtime: pre-fix, an
+ *  mtime-preserving content rewrite (same-second write + `utimes` reset, build
+ *  tools that restore timestamps, symlink retargets to an equal-mtime file)
+ *  served the model a STALE `file_unchanged` verdict. The read pipeline reads
+ *  the WHOLE file before this point regardless (the dedup saves TOKENS sent to
+ *  the model, not disk IO), so hashing the bytes we already hold is the entire
+ *  extra cost — measured (bun, arm64): ~0.03 ms @ 1 KB, ~0.1 ms @ 100 KB,
+ *  ~30 ms at the 10 MB `MAX_READ_BYTES` ceiling (comparable to the read+decode
+ *  such a file already paid, and only when the knob is ON) (SHA-1 via
+ *  node:crypto, the repo's
+ *  established non-security digest dependency; collision resistance beyond
+ *  accidental is not required — this is a cache key, same trust class as git's
+ *  own SHA-1 object ids). DESIGN CHOICE (documented): always read + hash +
+ *  compare — no (path,size,mtime) fast-path to skip hashing; profiling shows
+ *  the hash is noise next to the read itself, and the triple-fast-path can be
+ *  layered on later without changing this contract. Hashing the FULL text
+ *  (not the rendered window) preserves the old mtime-era granularity exactly:
+ *  the mtime was a whole-file signal too, so hit/miss behavior only differs
+ *  where the mtime LIED. */
+const hashReadContent = (text: string): string =>
+  createHash("sha1").update(text, "utf8").digest("hex")
+
+/** H9 — the full read-side dedup step: hash the JUST-READ text, short-circuit
+ *  with the `file_unchanged` ToolResult when (and ONLY when) the H9 knob is ON,
+ *  the dedup state is wired, and the EXACT (path, offset, limit) range was
+ *  already read this run with the SAME content hash; otherwise (re)record the
+ *  hash and return `null` (⇒ caller renders full content). Any miss — knob off
+ *  (zero hashing, byte-identical), no state, never read, different range, or
+ *  changed content EVEN when the mtime was preserved (content-truth, UUX-6-07)
+ *  — yields `null`, never a stale short-circuit; a hash MATCH is truthful by
+ *  construction (the model already holds these exact bytes). NO-THROW. Keeps
+ *  `execute` under the lint complexity gate. */
 const tryReadDedup = (
   ctx: ToolContext,
   path: string,
   offset: number,
   limit: number,
-  currentMtimeMs: number,
+  text: string,
 ): ToolResult | null => {
   if (!runtimeConfig().readDedup) return null
   const state = ctx.readFileState
   if (state === undefined) return null
-  const recorded = state.recordedRangeMtime(path, offset, limit)
-  // Strict equality is the closed dedup signal: a mtime that ADVANCED (external
-  // write) OR regressed (restore/skew) is NOT identical, so we fall through to a
-  // full content re-read AND re-record below — never a stale short-circuit.
-  if (recorded === undefined || recorded !== currentMtimeMs) return null
-  return { ok: true, output: renderFileUnchanged(path, offset, limit) }
+  const contentHash = hashReadContent(text)
+  const recorded = state.recordedRangeHash(path, offset, limit)
+  // Strict hash equality is the closed dedup signal.
+  if (recorded === contentHash) {
+    return { ok: true, output: renderFileUnchanged(path, offset, limit) }
+  }
+  // Full content path — (re)record this range's content hash so the NEXT
+  // identical re-read of identical bytes short-circuits.
+  state.recordReadRange(path, offset, limit, contentHash)
+  return null
 }
 
 /** RFC jun-6 — try the outline render. Returns a `ToolResult` ONLY when the
@@ -562,30 +594,17 @@ export const makeReadTool = (
       // against an explicit one that resolves to the same window. Keyed by the
       // RESOLVED absolute path (`outcome.info.path`) — the SAME identity the
       // mtime record uses — so the dedup map and the freshness map agree on
-      // which file a re-read refers to.
+      // which file a re-read refers to. Content-truth (UUX-6-07): the verdict
+      // compares a hash of the JUST-READ text (the file is always read; the
+      // dedup saves tokens, not IO), computed ONCE here and only when the knob
+      // is on AND the state is wired — the gate-off path does zero hashing and
+      // stays byte-identical.
       const effOffset = input.offset ?? 1
       const effLimit = input.limit ?? DEFAULT_LIMIT
-      const deduped = tryReadDedup(
-        ctx,
-        outcome.info.path,
-        effOffset,
-        effLimit,
-        outcome.info.mtimeMs,
-      )
+      const deduped = tryReadDedup(ctx, outcome.info.path, effOffset, effLimit, outcome.text)
       if (deduped !== null) {
         yield { type: "result", result: deduped }
         return
-      }
-      // Full content path — (re)record this range's mtime so the NEXT identical
-      // re-read with an unchanged mtime short-circuits. No-op (no allocation)
-      // when the H9 knob is off OR the dedup state is absent.
-      if (runtimeConfig().readDedup) {
-        ctx.readFileState?.recordReadRange(
-          outcome.info.path,
-          effOffset,
-          effLimit,
-          outcome.info.mtimeMs,
-        )
       }
       // When `outline:true` was requested but could not be served, prepend the
       // explicit degrade note so the model knows why it got line-ranges.

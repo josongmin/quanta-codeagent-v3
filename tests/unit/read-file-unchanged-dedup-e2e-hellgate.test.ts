@@ -92,7 +92,7 @@ describe("read file_unchanged dedup (H9) — e2e real file + real tool", () => {
     expect(second.output).toBe("1\tconst off = true")
     expect(second.output).not.toContain(SENTINEL_MARK)
     // Dedup map untouched; freshness baseline (ADR-0474) still recorded.
-    expect(state.recordedRangeMtime(f, 1, 2000)).toBeUndefined()
+    expect(state.recordedRangeHash(f, 1, 2000)).toBeUndefined()
     expect(state.recordedMtime(f)).toBeGreaterThan(0)
   })
 
