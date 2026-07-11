@@ -197,6 +197,14 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .chat-row.me .more-btn{align-self:flex-end}
 .more-btn:hover{color:#5566cc;text-decoration:underline}
 /* Quanta's process view — its work, framed as reasoning not a chat bubble */
+/* pinned run summary — scaffold verdict hoisted to the top */
+.run-summary{margin:6px 0 10px;border:1px solid #dbe2ea;border-radius:11px;background:linear-gradient(180deg,#fbfcfe,#f4f7fb);padding:11px 14px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.rs-hd{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#7a8aa0;margin-bottom:8px}
+.rs-chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:6px}
+.rs-chip{font-size:11px;font-weight:600;color:#4a5a70;background:#fff;border:1px solid #dde3ea;border-radius:8px;padding:3px 9px}
+.rs-chip.rs-ok{background:#eefaf1;border-color:#bfe3c9;color:#2f8f5b}
+.rs-chip.rs-fail{background:#fdf1f1;border-color:#f0cccc;color:#c0504a}
+.rs-note{font-size:9.5px;color:#a8b0c0;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* scaffold action strip (Quanta's mechanical, non-LLM actions: verify/patch/…) */
 .scaffold-act{margin:10px 0 10px 40px;border:1px solid #dde3ea;border-radius:9px;background:#fbfcfe;overflow:hidden}
 .scaffold-act.act-ok{border-color:#bfe3c9;background:#f5fbf6}
@@ -578,6 +586,8 @@ const LANGS={
     agent:'에이전트',
     you:'나 · 과제',
     llm:'LLM',
+    runOutcome:'런 결과 · 스캐폴드 판단',
+    scaffoldEvents:'스캐폴드 이벤트',
     agentProc:'작업 과정 · 도구 · 코드위치',
     sysRole:'시스템 · LLM 역할 지정',
     showMore:'더보기',
@@ -628,6 +638,8 @@ const LANGS={
     you:'You · task',
     llm:'LLM',
     agentProc:'work · tools · code locations',
+    runOutcome:'Run outcome · scaffold verdict',
+    scaffoldEvents:'scaffold events',
     sysRole:'System · LLM role',
     showMore:'Show more',
     showLess:'Show less',
@@ -1184,6 +1196,12 @@ function renderChat(){
   // agent swaps a phase-specific system prompt — localize vs repro vs repair —
   // for every LLM call), not once at the top where the per-phase variation hid.
 
+  // RUN SUMMARY (audit finding G): pin the scaffold's key mechanical outcomes —
+  // the verify verdict, patch, sandbox, errors — at the TOP, so the run's result
+  // isn't buried at the bottom of a long ts-sorted timeline.
+  const sum=renderRunSummary(inst)
+  if(sum){const el=document.createElement('div');el.innerHTML=sum;if(el.firstElementChild)scroll.appendChild(el.firstElementChild)}
+
   // debug index: anomaly jump-list + file edit timeline
   const dbg=renderDebugIndex(inst)
   if(dbg){
@@ -1225,6 +1243,34 @@ function renderChat(){
     el.innerHTML=renderTurnGroup(turn,i)
     scroll.appendChild(el)
   }
+}
+
+// Pinned run summary — the scaffold's key mechanical outcomes, hoisted out of
+// the ts-sorted timeline so the run verdict is the FIRST thing you see.
+function renderRunSummary(inst){
+  const obs=inst.observe||[]
+  if(!obs.length)return''
+  const last=k=>{for(let i=obs.length-1;i>=0;i--)if(obs[i].kind===k)return obs[i].data||{};return null}
+  const verify=last('verify'),patch=last('patch_generated'),sandbox=last('sandbox')
+  const errs=obs.filter(e=>e.kind==='error').length
+  const verdictMeta=inst.runMeta?.verdict
+  const chips=[]
+  if(verify){
+    const ok=verify.passed===true
+    chips.push(`<span class="rs-chip ${ok?'rs-ok':'rs-fail'}">${ok?'✅ RESOLVED':'❌ FAILED'} · verify exit ${verify.exitCode}</span>`)
+  }else if(verdictMeta){
+    chips.push(`<span class="rs-chip ${verdictMeta.passed?'rs-ok':'rs-fail'}">${verdictMeta.passed?'✅ RESOLVED':'❌ FAILED'}</span>`)
+  }
+  if(patch)chips.push(`<span class="rs-chip">📦 patch ${patch.filesChanged??'?'}f/${patch.hunks??'?'}h</span>`)
+  if(sandbox)chips.push(`<span class="rs-chip">🧰 sandbox ${String(sandbox.baseCommit||'').slice(0,7)}</span>`)
+  if(errs)chips.push(`<span class="rs-chip rs-fail">⚠ ${errs} error${errs>1?'s':''}</span>`)
+  const kinds={};obs.forEach(e=>kinds[e.kind]=(kinds[e.kind]||0)+1)
+  if(!chips.length)return''
+  return`<div class="run-summary">
+    <div class="rs-hd">🛰 ${T('runOutcome')}</div>
+    <div class="rs-chips">${chips.join('')}</div>
+    <div class="rs-note">${obs.length} ${T('scaffoldEvents')} · ${esc(Object.entries(kinds).map(([k,n])=>`${k}×${n}`).join(' '))}</div>
+  </div>`
 }
 
 // Scaffold ACTION kinds surfaced in the timeline (the mechanical, non-LLM ones

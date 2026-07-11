@@ -2,10 +2,15 @@
  * Trajectory DEBUG sidecar sink (platform layer).
  *
  * When the bench trajectory recorder runs in the `debug` tier
- * (`QUANTA_BENCH_RECORD_TRAJECTORY=debug`), subsystems ACROSS the run — the tool
- * executor, the edit tool, the phase-gate, the grader — can contribute keyed
- * debug slices that ride ALONGSIDE the recorded LLM turn as
+ * (`QUANTA_BENCH_RECORD_TRAJECTORY=debug`), subsystems ACROSS the run can
+ * contribute keyed debug slices that ride ALONGSIDE the recorded LLM turn as
  * `RecordedInteraction.metadata.debug`.
+ *
+ * WIRED CONTRIBUTORS (reality, 2026-07): the ONLY live contributor is the tool
+ * executor (`"toolExec"`, driver.ts). The edit tool / phase-gate / grader are
+ * DESIGN TARGETS of this platform, NOT yet wired — an operator enabling the
+ * debug tier gets tool-exec slices only. (Intended enricher order per the jul-08
+ * platform note: verdict > editTrace > toolExec; verdict/editTrace remain TODO.)
  *
  * DESIGN CONTRACT
  * - REPLAY-NEUTRAL: everything here lands in `metadata` only. The cassette match

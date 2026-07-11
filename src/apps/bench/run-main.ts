@@ -122,7 +122,12 @@ export interface MainDeps {
 
 /**
  * Run-level observe handle (RFC §8). Resolved ONCE from `--observe-dir` /
- * `QUANTA_OBSERVE_DIR`; undefined ⇒ default-OFF, byte-identical behavior.
+ * `QUANTA_OBSERVE_DIR`.
+ *
+ * NOTE (audit 2026-07): observe is effectively DEFAULT-ON — `resolveObserve`
+ * always returns a handle (falls back to `<benchRunDir>/observe`), it never
+ * returns undefined. The old "undefined ⇒ default-OFF, byte-identical" contract
+ * no longer holds; the `| undefined` return type is kept only for the type seam.
  */
 interface ObserveCtx {
   dir: string
@@ -131,7 +136,7 @@ interface ObserveCtx {
 
 /** Resolve the observe root. Defaults to the PERSISTENT bench runs dir so
  *  trajectories survive across sessions (override with `--observe-dir` /
- *  `QUANTA_OBSERVE_DIR`). */
+ *  `QUANTA_OBSERVE_DIR`). Always returns a handle (observe is on by default). */
 const resolveObserve = (): ObserveCtx | undefined => {
   const runId = benchRunId()
   const flag = argValue("--observe-dir") ?? process.env.QUANTA_OBSERVE_DIR
