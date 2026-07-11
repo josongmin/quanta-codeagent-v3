@@ -175,6 +175,11 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
   padding:10px 14px;font-size:12.5px;color:#fff;line-height:1.65;white-space:pre-wrap;
   word-break:break-word;position:relative;box-shadow:0 1px 3px rgba(85,102,204,.25);
 }
+/* 나(User) = indigo (the charter). 에이전트(Agent) = slate-teal (prompt delivery). */
+.user-bubble.role-user{background:#5566cc;box-shadow:0 1px 3px rgba(85,102,204,.25)}
+.user-bubble.role-agent{background:#4d879c;box-shadow:0 1px 3px rgba(77,135,156,.22)}
+.bubble-role{display:flex;align-items:center;gap:5px;font-size:9px;font-weight:700;color:rgba(255,255,255,.72);letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px}
+.bubble-role .br-ava{font-size:12px}
 .bubble-meta{
   font-size:9px;color:rgba(255,255,255,.4);text-align:right;margin-top:6px;font-family:var(--mono);
   display:flex;justify-content:flex-end;gap:8px;
@@ -199,9 +204,15 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
   display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;margin-top:2px;
   box-shadow:0 2px 6px rgba(102,126,234,.3);
 }
+/* LLM avatar = model thumbnail (the model's initial, e.g. gpt-5.5 → "5.5") */
+.asst-avatar.llm{
+  background:linear-gradient(135deg,#20a39a,#177a86);font-size:10px;font-weight:700;
+  color:#fff;letter-spacing:-.02em;box-shadow:0 2px 6px rgba(23,122,134,.32);
+}
 .asst-col{flex:1;min-width:0}
 .asst-name-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
-.asst-name{font-size:11px;font-weight:700;color:#5566aa}
+.asst-name{font-size:11px;font-weight:700;color:#1f8a86}
+.asst-llm-tag{font-size:8px;font-weight:700;color:#9ab;letter-spacing:.09em;text-transform:uppercase;border:1px solid #cfe4e2;border-radius:8px;padding:1px 6px}
 .turn-ts{font-size:10px;color:#c0c0d0;font-family:var(--mono)}
 .turn-dur{font-size:10px;color:#c8c8d8;font-family:var(--mono)}
 .phase-badge{
@@ -494,9 +505,11 @@ const LANGS={
     tok:'토큰',
     more:'더보기',
     agent:'에이전트',
+    you:'나 · 과제',
+    llm:'LLM',
     promptBtn:'프롬프트 ↗',
     thinking:'◈ 사고 과정',
-    promptIn:'📨 프롬프트 · 하네스 지시',
+    promptIn:'📨 에이전트 · 프롬프트 전달',
     modelSays:'💬 모델 응답 · 판단',
     toolResultsHdr:'↩ 도구 결과 · 환경 응답',
     debugIndex:'🐞 디버그 인덱스',
@@ -537,9 +550,11 @@ const LANGS={
     tok:'tok',
     more:'more',
     agent:'Agent',
+    you:'You · task',
+    llm:'LLM',
     promptBtn:'prompt ↗',
     thinking:'◈ Thinking',
-    promptIn:'📨 Prompt · harness instruction',
+    promptIn:'📨 Agent · prompt to LLM',
     modelSays:'💬 Model response · reasoning',
     toolResultsHdr:'↩ Tool result · environment',
     debugIndex:'🐞 Debug index',
@@ -1195,8 +1210,8 @@ function renderTurnGroup(turn,idx){
   const laneBadge=lane?`<span class="lane-badge" style="background:${laneColor(lane)}" title="parallel lane">⑂ ${esc(lane)}</span>`:''
   const evChips=turnEditVerifyChips(turn)
 
-  // ── USER SIDE: new user messages ──
-  const userParts=buildUserParts(turn)
+  // ── INPUT SIDE: 나(User, 최초 과제) + 에이전트(harness가 LLM에 먹이는 프롬프트) ──
+  const userParts=buildUserParts(turn,idx===0)
   const userHtml=userParts.length
     ? userParts.map(p=>renderUserPart(p)).join('')
     : ''
@@ -1208,21 +1223,26 @@ function renderTurnGroup(turn,idx){
 
   const hasAsst=!!(turn.output.thinking||turn.output.tools.length||turn.output.text.trim())
 
+  // ── LLM SIDE: the model's response. Avatar = model thumbnail; latency + tokens
+  // are the model's cost/speed for this request.
+  const cacheRead=turn.usage?.cacheReadInputTokens??turn.usage?.cache_read_input_tokens
+  const modelInitial=esc((model||'?').replace(/^gpt-?/i,'').slice(0,3)||'AI')
   const asstHtml=hasAsst?`
     <div class="asst-bubble-wrap">
-      <div class="asst-avatar">🤖</div>
+      <div class="asst-avatar llm" title="${esc(model||'LLM')}">${modelInitial}</div>
       <div class="asst-col">
         <div class="asst-name-row">
-          <span class="asst-name">${T('agent')}</span>
+          <span class="asst-name">${esc(model||T('llm'))}</span>
+          <span class="asst-llm-tag">${T('llm')}</span>
           ${ts?`<span class="turn-ts">${ts}</span>`:''}
-          ${dur?`<span class="turn-dur">${dur}</span>`:''}
+          ${dur?`<span class="turn-dur">⏱ ${dur}</span>`:''}
           ${phase?`<span class="phase-badge ${phase}">${ph(phase)}</span>`:''}
           ${laneBadge}
           ${evChips}
           ${anomBadges}
           <span class="full-prompt-btn${openTurnForPrompt===idx?' active':''}" data-turn="${idx}" onclick="openPromptPanel(${idx})" title="${T('fullPrompt')}">${T('promptBtn')}</span>
         </div>
-        ${tokIn||tokOut?`<div class="tok-row"><span class="tok-chip">↑${tokIn} ${T('in')}</span><span class="tok-chip">↓${tokOut} ${T('out')}</span>${model?`<span class="tok-chip">${esc(model)}</span>`:''}</div>`:''}
+        ${tokIn||tokOut?`<div class="tok-row"><span class="tok-chip">↑${tokIn} ${T('in')}</span><span class="tok-chip">↓${tokOut} ${T('out')}</span>${cacheRead?`<span class="tok-chip">⚡${fN(cacheRead)} cache</span>`:''}</div>`:''}
         ${thinkHtml}
         ${toolsHtml}
         ${respHtml}
@@ -1268,8 +1288,11 @@ function renderTurnDebug(turn){
   </div>`
 }
 
-// ──────────── USER PARTS ────────────
-function buildUserParts(turn){
+// ──────────── INPUT PARTS (나 · 에이전트) ────────────
+// Everything the harness feeds the LLM is the AGENT's prompt-delivery, EXCEPT
+// the very first task message of the whole run — that's the human (나) handing
+// the agent the charter. isFirstTurn tags that one part as role:'user'.
+function buildUserParts(turn,isFirstTurn){
   const parts=[]
   const toolResults=[]
   for(const msg of turn.newMsgs){
@@ -1298,14 +1321,44 @@ function buildUserParts(turn){
     }
   }
   if(toolResults.length)parts.unshift({type:'tool_results',items:toolResults})
+  // The opening prompt is the AGENT's constructed localize instruction that
+  // EMBEDS the human's bug report (`# Issue …`). Split that one message so the
+  // issue reads as 나(User) and the surrounding tree/task as the 에이전트 that
+  // wrapped and delivered it. Everything else stays 에이전트 by default.
+  if(isFirstTurn){
+    const fi=parts.findIndex(p=>p.type==='text')
+    if(fi>=0){
+      const sp=splitCharter(parts[fi].text)
+      if(sp){
+        const repl=[]
+        if(sp.issue)repl.push({type:'text',role:'user',text:sp.issue})
+        if(sp.rest)repl.push({type:'text',role:'agent',text:sp.rest})
+        if(repl.length)parts.splice(fi,1,...repl)
+      }
+    }
+  }
   return parts
+}
+// Extract the human ISSUE block (`# Issue …` up to the next top-level `#` heading)
+// out of the agent's opening prompt. Returns {issue, rest} or null if absent.
+function splitCharter(text){
+  const m=String(text??'').match(/#\s+Issue\b[\s\S]*?(?=\n#\s+\S|$)/)
+  if(!m)return null
+  const issue=m[0].trim()
+  const rest=(text.slice(0,m.index)+text.slice(m.index+m[0].length)).trim()
+  return{issue,rest}
 }
 
 function renderUserPart(p){
   if(p.type==='text'){
+    const isUser=p.role==='user'
+    const cls=isUser?'role-user':'role-agent'
+    const label=isUser
+      ?`<span class="br-ava">🧑</span>${T('you')}`
+      :`<span class="br-ava">🛰</span>${T('promptIn')}`
     return`<div class="user-bubble-wrap">
-      <div class="user-bubble">
-        <div class="user-bubble-label">${T('promptIn')}</div>
+      <div class="user-bubble ${cls}">
+        <div class="bubble-role">${label}</div>
         ${esc(p.text)}
       </div>
     </div>`
