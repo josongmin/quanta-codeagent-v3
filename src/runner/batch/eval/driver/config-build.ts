@@ -17,7 +17,7 @@ import {
 } from "@/agent/localize-phase-guard"
 import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { buildVerifyGuard } from "@/agent/verify-guard"
-import type { LLMPort, Message } from "@/llm"
+import { laneLabeledPort, type LLMPort, type Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { gateDisabled, gateOn, normalizePublicIssueText } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
@@ -602,8 +602,10 @@ export const buildConfig = (
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
     // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
     // the model-lane-diversity knob is a REAL provider swap at the wire site —
-    // not a tag. Absent ⇒ deps.llm (byte-identical single-vendor path).
-    llm: laneLlm ?? deps.llm,
+    // not a tag. Absent ⇒ deps.llm labeled with the "repair" phase lane (recorded
+    // as metadata.lane; pure decorator, replay-neutral, behavior byte-identical),
+    // so the main agent's edit turns group under one authoritative "repair" band.
+    llm: laneLlm ?? laneLabeledPort(deps.llm, "repair"),
     registry,
     stream,
     permission,

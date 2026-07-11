@@ -907,18 +907,26 @@ function fileNameToId(name){
   return String(name||'session').replace(/\.jsonl$/i,'').replace(/^\d{8}-\d{6}-/,'').replace(/^trajectory-/,'')
 }
 // sessions: [{name, text, meta?}] — one entry per FILE. Each file is split into
-// its constituent instance runs (usually 1; legacy blobs → N).
+// its constituent instance runs (usually 1; legacy blobs → N), then segments are
+// grouped by instanceId ACROSS files so one instance = one session even when its
+// run spans several files (primary + repair-breadth candidate cassettes
+// `<ts>-<instanceId>-a<n>.jsonl`). Records concat in file (≈chronological) order;
+// phase bands keep each thread legible inside the merged session.
 function loadSessions(sessions,label){
-  instances=[]
+  const byId=new Map() // id → {records:[], meta}
   for(const s of sessions){
     const records=parseJSONL(s.text)
     const segs=splitByInstance(records)
     segs.forEach((seg,k)=>{
       const id=s.meta?.instanceId||extractInstId(seg)||
         (segs.length>1?`${fileNameToId(s.name)}#${k+1}`:fileNameToId(s.name))
-      instances.push(buildInstance(id,seg,s.meta))
+      if(!byId.has(id))byId.set(id,{records:[],meta:s.meta})
+      const e=byId.get(id)
+      e.records.push(...seg)
+      if(!e.meta&&s.meta)e.meta=s.meta
     })
   }
+  instances=[...byId.entries()].map(([id,e])=>buildInstance(id,e.records,e.meta))
   document.getElementById('load-status').textContent=`${label??T('multiSession')??''} · ${T('sessionCount',instances.length)}`
   renderSidebar()
   if(instances.length>0)selectInstance(0)

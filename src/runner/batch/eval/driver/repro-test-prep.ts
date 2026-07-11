@@ -23,7 +23,7 @@ import type { ReproGroundingInput } from "@/agent/repro-test/generate"
 import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
 import type { ReproTestCandidate } from "@/agent/repro-test/types"
 import { extractIssueReproSeed } from "@/agent/verification-plan"
-import type { LLMPort } from "@/llm"
+import { laneLabeledPort, type LLMPort } from "@/llm"
 import type { BenchReproTestTelemetry, Instance, ReproGroundingTelemetry } from "../../types"
 import { execArgv } from "../exec"
 import type { BenchPosture } from "../knobs-bench"
@@ -250,13 +250,17 @@ const generateReproCandidateTests = async (
     // and the base-red gate (selectReproTest / baseValidatedRed) validates below.
     const mwe = extractIssueReproSeed(instance.problemStatement)?.code
     const gen = deps.generate ?? generateReproTests
+    // Phase lane → recorded as metadata.lane so every repro-generation turn (incl.
+    // the paired-control pass) groups under one authoritative "repro" band in the
+    // viewer. Pure label decorator — replay-neutral, behavior byte-identical.
+    const reproLlm = laneLabeledPort(deps.llm, "repro")
     // jun-29: splice grounding ONLY when it carries content, so an empty (off /
     // no-retrieval) grounding is byte-identical to the un-grounded base.
     const hasGrounding =
       grounding.exemplarSkeletons !== undefined || grounding.issueSignatures !== undefined
     const base = {
       issue: instance.problemStatement,
-      llm: deps.llm,
+      llm: reproLlm,
       config,
       ...(mwe !== undefined ? { mwe } : {}),
       ...(hasGrounding ? { grounding } : {}),
@@ -271,7 +275,7 @@ const generateReproCandidateTests = async (
       deps.pairedControl === true
         ? await (deps.generateControl ?? generateControlTests)({
             issue: instance.problemStatement,
-            llm: deps.llm,
+            llm: reproLlm,
             config,
           })
         : []

@@ -34,7 +34,7 @@
  */
 
 import { execFileSync } from "node:child_process"
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { mirrorReportToSsot } from "@/runner/batch/report"
 import { foldGroundingReceipts } from "@/shared"
@@ -579,6 +579,9 @@ const fetchTrajectoryFiles = async (args: {
     execFileSync("bash", ["-c", `base64 -d < ${shq(b64Path)} | tar -x -C ${shq(dest)}`], {
       stdio: "ignore",
     })
+    // Extract succeeded ⇒ the per-instance .jsonl files are the artifact; drop the
+    // now-redundant archive. (On failure we keep it as the fallback.)
+    rmSync(b64Path, { force: true })
     args.log(`[full-remote] trajectory cassettes extracted: ${dest}`)
   } catch {
     // leave the .tar.b64 in place as the fallback artifact
