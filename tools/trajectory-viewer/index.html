@@ -188,6 +188,14 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 /* Quanta's process view — its work, framed as reasoning not a chat bubble */
 .agent-proc{border-left:2px solid #b8d4dc;background:#f6fafb;border-radius:0 8px 8px 0;padding:8px 10px 4px;margin-bottom:6px}
 .agent-proc-label{font-size:9px;font-weight:700;color:#5a8092;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+/* per-turn system prompt (agent → LLM role framing), collapsed */
+.sys-inline{border:1px dashed #d2dde2;border-radius:8px;background:#f8fbfc;margin-bottom:6px;overflow:hidden}
+.sys-inline-hd{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:10px;color:#6a8a98;font-family:var(--mono)}
+.sys-inline-hd:hover{background:#eef5f7}
+.sys-inline-chev{font-size:8px;color:#a8c0ca;transition:transform .12s}
+.sys-inline.open .sys-inline-chev{transform:rotate(90deg)}
+.sys-inline-body{display:none;padding:8px 12px;margin:0;white-space:pre-wrap;font-family:var(--mono);font-size:10.5px;line-height:1.6;color:#5a7280;border-top:1px dashed #d2dde2;background:#fbfdfe}
+.sys-inline.open .sys-inline-body{display:block}
 /* ── phase band (localize / repro / repair group header) ── */
 .phase-band{
   position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;
@@ -543,6 +551,7 @@ const LANGS={
     you:'나 · 과제',
     llm:'LLM',
     agentProc:'작업 과정 · 도구 · 코드위치',
+    sysRole:'시스템 · LLM 역할 지정',
     promptBtn:'프롬프트 ↗',
     thinking:'◈ 사고 과정',
     promptIn:'📨 에이전트 · 프롬프트 전달',
@@ -589,6 +598,7 @@ const LANGS={
     you:'You · task',
     llm:'LLM',
     agentProc:'work · tools · code locations',
+    sysRole:'System · LLM role',
     promptBtn:'prompt ↗',
     thinking:'◈ Thinking',
     promptIn:'📨 Agent · prompt to LLM',
@@ -1103,22 +1113,9 @@ function renderChat(){
   const scroll=document.getElementById('chat-scroll')
   scroll.innerHTML=''
 
-  // system prompt once
-  const sysText=inst.turns[0]?.system
-  if(sysText){
-    const t=typeof sysText==='string'?sysText:Array.isArray(sysText)?sysText.map(b=>b.text??b.content??'').join('\n\n'):''
-    const sid=uid()
-    const el=document.createElement('div')
-    el.innerHTML=`<div class="sys-block" id="${sid}">
-      <div class="sys-block-hd" onclick="toggle('${sid}')">
-        <span class="sys-block-label">${T('sysPrompt')}</span>
-        <span class="sys-preview">${esc(t.slice(0,100).replace(/\n/g,' '))}</span>
-        <span class="sys-chev">▶</span>
-      </div>
-      <pre class="sys-block-body">${esc(t)}</pre>
-    </div>`
-    scroll.appendChild(el.firstElementChild)
-  }
+  // NOTE: the system prompt is now shown PER-TURN inside each Quanta row (the
+  // agent swaps a phase-specific system prompt — localize vs repro vs repair —
+  // for every LLM call), not once at the top where the per-phase variation hid.
 
   // debug index: anomaly jump-list + file edit timeline
   const dbg=renderDebugIndex(inst)
@@ -1270,14 +1267,15 @@ function renderTurnGroup(turn,idx){
   //    sends to the LLM, left side, named
   const agentText=parts.filter(p=>p.role!=='user'&&(p.type==='text'||p.type==='obs'))
   const agentToolResults=parts.filter(p=>p.type==='tool_results')
+  const sysHtml=renderSysPrompt(turn)  // agent's phase-specific role framing to the LLM
   const processHtml=renderAgentProcess(turn,agentToolResults)
   const promptBodies=agentText.map(p=>renderPartBody(p,'quanta')).join('')
-  if(processHtml||promptBodies){
+  if(sysHtml||processHtml||promptBodies){
     rows.push(chatRow({
       side:'them',cls:'quanta',avatar:'🛰',name:'Quanta',
       tag:curPreset||ph(phase),time:ts,promptBtnIdx:idx,
       badges:`${phaseBadge}${laneBadge}${evChips}${anomBadges}`,
-      body:processHtml+promptBodies,
+      body:sysHtml+processHtml+promptBodies,
     }))
   }
 
@@ -1291,6 +1289,20 @@ function renderTurnGroup(turn,idx){
   }
 
   return rows.join('')+renderTurnDebug(turn)
+}
+
+// The agent's phase-specific SYSTEM prompt for this LLM call (localize/repro/
+// repair each get a distinct "You are a senior …" framing). Collapsed by default.
+function renderSysPrompt(turn){
+  const s=turn.system
+  const t=typeof s==='string'?s:Array.isArray(s)?s.map(b=>b.text??b.content??'').join('\n\n'):''
+  if(!t.trim())return''
+  const id=uid()
+  const preview=t.slice(0,64).replace(/\n/g,' ')
+  return`<div class="sys-inline open" id="${id}">
+    <div class="sys-inline-hd" onclick="toggle('${id}')"><span class="sys-inline-chev">▶</span>⚙ ${T('sysRole')} · ${esc(preview)}…</div>
+    <pre class="sys-inline-body">${esc(t)}</pre>
+  </div>`
 }
 
 // One group-chat row: avatar + name/time header + body. `me` rows mirror right.
@@ -1427,7 +1439,7 @@ function renderPartBody(p,bubbleCls){
   if(p.type==='obs'){
     const id=uid()
     const preview=p.text.replace(/<[^>]+>/g,'').slice(0,80).replace(/\n/g,' ')
-    return`<div class="obs-block" id="${id}">
+    return`<div class="obs-block open" id="${id}">
       <div class="obs-hd" onclick="toggle('${id}')"><span class="obs-chev">▶</span>${T('obsLabel')} · ${esc(preview)}…</div>
       <pre class="obs-body">${esc(p.text)}</pre>
     </div>`
@@ -1436,12 +1448,12 @@ function renderPartBody(p,bubbleCls){
     const rows=p.items.map((it)=>{
       const preview=(it.content||'(empty)').replace(/\n/g,' ').slice(0,80)
       const rid=uid()
-      return`<div class="tr-item" id="${rid}" onclick="toggleTr('${rid}')">
+      return`<div class="tr-item open" id="${rid}" onclick="toggleTr('${rid}')">
         <span class="tr-chev">▶</span>
         <span style="color:#2a5a2a;font-size:10px">↩</span>
         <span class="tr-preview">${esc(preview)}</span>
       </div>
-      <div class="tr-body">${esc(it.content||'(empty)')}</div>`
+      <div class="tr-body" style="display:block">${esc(it.content||'(empty)')}</div>`
     }).join('')
     return`<div class="tool-results-bubble" style="margin-left:0">
       <div class="tr-hdr-label">${T('toolResultsHdr')}</div>
@@ -1483,7 +1495,7 @@ function renderToolCall(tool){
       </div>`
     }else{
       const rid=uid()
-      resultHtml=`<div class="tc-result ${cls}" id="${rid}">
+      resultHtml=`<div class="tc-result open ${cls}" id="${rid}">
         <div class="tcr-hd" onclick="toggle('${rid}')">
           <span class="tcr-status">${isErr?'⚠':'↩'}</span>
           <span class="tcr-preview">${esc(r.slice(0,120).replace(/\n/g,' '))}…</span>
@@ -1494,7 +1506,7 @@ function renderToolCall(tool){
     }
   }
 
-  return`<div class="tool-call" id="${id}">
+  return`<div class="tool-call open" id="${id}">
     <div class="tc-hd" onclick="toggle('${id}')">
       <span class="tc-icon">${icon}</span>
       <span class="tc-name-txt" style="color:${color}">${esc(name)}</span>
@@ -1509,17 +1521,12 @@ function renderToolCall(tool){
 }
 
 // ──────────── RESPONSE ────────────
+// The LLM area shows gpt's RAW response verbatim — no agent-side parsing or
+// beautifying (the localize file-card view is the AGENT's interpretation of this
+// text, not the model's output).
 function renderResponse(text,idx){
   if(!text.trim())return''
-  const loc=idx===0?parseLocOutput(text):null
-  if(loc){
-    const cards=loc.map(c=>`<div class="loc-card"><div class="loc-file">📄 ${esc(c.file)}</div><div class="loc-why">${esc(c.reason)}</div></div>`).join('')
-    return`<div class="loc-cards"><div class="loc-hdr">${T('locHdr')} · ${loc.length} ${T('files')}</div>${cards}</div>`
-  }
-  return`<div class="resp-block">
-    <div class="resp-label">${T('modelSays')}</div>
-    <pre class="resp-text">${esc(text)}</pre>
-  </div>`
+  return`<div class="chat-bubble llm resp-raw">${esc(text)}</div>`
 }
 
 // ──────────── DIFF ────────────
