@@ -225,67 +225,15 @@ export const verifyRuleGraph = (
     }
   }
 
-  // ── Coverage bookkeeping: which variants ever fire. ──
-  const everFired = new Set<string>()
-
-  for (const ctx of reachableContexts) {
-    const fired = selectAtoms(atoms, ctx)
-    const firedVariants = fired.map((a) => a.variantId)
-    const firedSet = new Set(firedVariants)
-    for (const v of firedVariants) everFired.add(v)
-
-    // ── (1) Conflict-freedom — co-rendering conflict pair in the SAME channel. ──
-    // The edge may be declared on only ONE side, so we report from whichever
-    // firing atom carries it and de-dup by the UNORDERED pair key (a conflict is
-    // symmetric — report each co-rendering pair once per ctx).
-    const seenPairs = new Set<string>()
-    for (const a of fired) {
-      for (const foe of a.conflictsWith ?? []) {
-        if (!firedSet.has(foe)) continue
-        const foeAtom = byVariant.get(foe)
-        // conflict is scoped to the SAME channel per ADR §1.
-        if (foeAtom !== undefined && foeAtom.channel !== a.channel) continue
-        const key = [a.variantId, foe].sort().join(" ")
-        if (seenPairs.has(key)) continue
-        seenPairs.add(key)
-        violations.push({
-          kind: "conflict",
-          message: `conflicting variants co-render in ${a.channel}: ${a.variantId} ⟷ ${foe}`,
-          variantIds: [a.variantId, foe].sort() as [string, string],
-          ctx,
-        })
-      }
-    }
-
-    // ── (2) Supersede soundness — a superseded variant must NOT co-render with
-    //        an APPLICABLE superseder (if both a superseder and its declared loser
-    //        match this ctx yet the loser survived selection, selectAtoms failed to
-    //        suppress). This is a TRIPWIRE for the `supersedes` primitive +
-    //        selectAtoms suppression; it fires only when a superseder and loser
-    //        actually CO-APPLY. The current variant set uses none (mutually-
-    //        exclusive variants are selected by disjoint `when` matchers + declared
-    //        with `conflictsWith`, which the check (1) proves — stronger than
-    //        supersede, since co-render is then structurally impossible rather than
-    //        suppression-dependent). Kept live so a FUTURE overlapping-matcher
-    //        supersede edge is verified; integrity of the edges themselves (no
-    //        dangling target) is checked statically below. ──
-    const applicable = atoms.filter(
-      (a) => selectAtoms([a], ctx).length > 0, // single-atom applicability = matches(when,ctx)
-    )
-    const applicableVariants = new Set(applicable.map((a) => a.variantId))
-    for (const a of applicable) {
-      for (const loser of a.supersedes ?? []) {
-        if (applicableVariants.has(loser) && firedSet.has(loser)) {
-          violations.push({
-            kind: "supersede-unsound",
-            message: `superseded variant ${loser} co-renders with its superseder ${a.variantId}`,
-            variantIds: [a.variantId, loser],
-            ctx,
-          })
-        }
-      }
-    }
-  }
+  // (1) Conflict-freedom + (2) supersede-soundness over every reachable ctx,
+  // plus the coverage bookkeeping (3) consumes (which variants ever fire) --
+  // extracted to checkPerContext (this per-ctx sweep was the bulk of the fn).
+  const { violations: perContextViolations, everFired } = checkPerContext(
+    atoms,
+    reachableContexts,
+    byVariant,
+  )
+  violations.push(...perContextViolations)
 
   // ── (2b) Supersede/conflict/requires EDGE INTEGRITY — extracted helper. ──
   violations.push(...checkEdgeIntegrity(atoms, byVariant))
@@ -376,6 +324,112 @@ export const verifyRuleGraph = (
   }
 
   return violations
+}
+
+/**
+ * ADR-0538 — (1) conflict-freedom for ONE context: a conflict pair must not
+ * co-render in the SAME channel. The edge may be declared on only one side, so
+ * we report from whichever firing atom carries it, de-duped by UNORDERED pair
+ * key. Pure — extracted from {@link checkPerContext}.
+ */
+const checkConflictFreedom = (
+  fired: readonly InstructionAtom[],
+  firedSet: ReadonlySet<string>,
+  byVariant: ReadonlyMap<string, InstructionAtom>,
+  ctx: PromptContext,
+): GraphViolation[] => {
+  const violations: GraphViolation[] = []
+  // ── (1) Conflict-freedom — co-rendering conflict pair in the SAME channel. ──
+  // The edge may be declared on only ONE side, so we report from whichever
+  // firing atom carries it and de-dup by the UNORDERED pair key (a conflict is
+  // symmetric — report each co-rendering pair once per ctx).
+  const seenPairs = new Set<string>()
+  for (const a of fired) {
+    for (const foe of a.conflictsWith ?? []) {
+      if (!firedSet.has(foe)) continue
+      const foeAtom = byVariant.get(foe)
+      // conflict is scoped to the SAME channel per ADR §1.
+      if (foeAtom !== undefined && foeAtom.channel !== a.channel) continue
+      const key = [a.variantId, foe].sort().join(" ")
+      if (seenPairs.has(key)) continue
+      seenPairs.add(key)
+      violations.push({
+        kind: "conflict",
+        message: `conflicting variants co-render in ${a.channel}: ${a.variantId} ⟷ ${foe}`,
+        variantIds: [a.variantId, foe].sort() as [string, string],
+        ctx,
+      })
+    }
+  }
+  return violations
+}
+
+/**
+ * ADR-0538 — (2) supersede-soundness for ONE context: a superseded variant must
+ * not co-render with an APPLICABLE superseder. A TRIPWIRE for the `supersedes`
+ * primitive + selectAtoms suppression (fires only when a superseder and its
+ * declared loser actually co-apply). Pure — extracted from {@link checkPerContext}.
+ */
+const checkSupersedeSoundness = (
+  atoms: readonly InstructionAtom[],
+  ctx: PromptContext,
+  firedSet: ReadonlySet<string>,
+): GraphViolation[] => {
+  const violations: GraphViolation[] = []
+  // ── (2) Supersede soundness — a superseded variant must NOT co-render with
+  //        an APPLICABLE superseder (if both a superseder and its declared loser
+  //        match this ctx yet the loser survived selection, selectAtoms failed to
+  //        suppress). This is a TRIPWIRE for the `supersedes` primitive +
+  //        selectAtoms suppression; it fires only when a superseder and loser
+  //        actually CO-APPLY. The current variant set uses none (mutually-
+  //        exclusive variants are selected by disjoint `when` matchers + declared
+  //        with `conflictsWith`, which the check (1) proves — stronger than
+  //        supersede, since co-render is then structurally impossible rather than
+  //        suppression-dependent). Kept live so a FUTURE overlapping-matcher
+  //        supersede edge is verified; integrity of the edges themselves (no
+  //        dangling target) is checked statically below. ──
+  const applicable = atoms.filter(
+    (a) => selectAtoms([a], ctx).length > 0, // single-atom applicability = matches(when,ctx)
+  )
+  const applicableVariants = new Set(applicable.map((a) => a.variantId))
+  for (const a of applicable) {
+    for (const loser of a.supersedes ?? []) {
+      if (applicableVariants.has(loser) && firedSet.has(loser)) {
+        violations.push({
+          kind: "supersede-unsound",
+          message: `superseded variant ${loser} co-renders with its superseder ${a.variantId}`,
+          variantIds: [a.variantId, loser],
+          ctx,
+        })
+      }
+    }
+  }
+  return violations
+}
+
+/**
+ * ADR-0538 — per-context sweep: (1) conflict-freedom + (2) supersede-soundness
+ * over every reachable context, plus the coverage bookkeeping check (3) consumes
+ * (which variants ever fire). Pure — returns the violations found and the set of
+ * variantIds that fired in ≥1 ctx.
+ */
+const checkPerContext = (
+  atoms: readonly InstructionAtom[],
+  reachableContexts: readonly PromptContext[],
+  byVariant: ReadonlyMap<string, InstructionAtom>,
+): { violations: GraphViolation[]; everFired: Set<string> } => {
+  const violations: GraphViolation[] = []
+  const everFired = new Set<string>()
+
+  for (const ctx of reachableContexts) {
+    const fired = selectAtoms(atoms, ctx)
+    const firedSet = new Set(fired.map((a) => a.variantId))
+    for (const v of firedSet) everFired.add(v)
+    violations.push(...checkConflictFreedom(fired, firedSet, byVariant, ctx))
+    violations.push(...checkSupersedeSoundness(atoms, ctx, firedSet))
+  }
+
+  return { violations, everFired }
 }
 
 /**
