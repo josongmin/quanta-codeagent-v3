@@ -12,8 +12,9 @@
  *
  * The test drives the REAL `runAgent` loop into a reactive compaction with
  * `dropOldestSalvage` ON, and spies on `dropOldestSalvage`'s `targetTokens`
- * argument (via `mock.module`, preserving every other real export of the
- * compaction module).
+ * argument via the recovery-executor's `__setDropOldestSalvageForTest` seam (NOT
+ * `mock.module`, which leaks process-globally + binds at collection and would
+ * pollute sibling files using the real compaction).
  *
  *   - MAIN: sticky swap base `gpt-5` (400k window) → active `gpt-4o` (128k
  *     window). The observed `targetTokens` MUST equal the gpt-4o-derived limit,
@@ -21,50 +22,51 @@
  *   - CONTROL (proves the wire, not a constant): NO sticky swap ⇒ `targetTokens`
  *     equals the base gpt-5-derived limit.
  *
- * Mutation guard: reverting `recovery-executor.ts:122` to the bare
+ * Mutation guard: reverting recovery-executor's salvage target from
+ * `resolveWindowModel(config.llm, activeModel)` to the bare
  * `resolveWindowModel(config.llm)` (or dropping `activeModel` from the
  * `applyAction` call in `same-turn-engine.ts`) collapses the MAIN target back to
  * the base window ⇒ RED.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-
-// Capture every `targetTokens` the reactive salvage was called with. Populated
-// by the mocked `dropOldestSalvage` below; asserted after each run.
-const salvageTargets: (number | undefined)[] = []
-
-// Mock ONLY `dropOldestSalvage` on `@/agent/compaction` — spread the real module
-// so `estimateTokens`, `reactiveCompact`, `resolveCompactionLimitTokens`, and
-// `TokenBaselineBox` keep their real behavior (the loop + the test's own
-// expected-value computation depend on the REAL `resolveCompactionLimitTokens`).
-const realCompaction = await import("@/agent/compaction")
-mock.module("@/agent/compaction", () => ({
-  ...realCompaction,
-  dropOldestSalvage: async (input: { targetTokens?: number; messages: unknown[] }) => {
-    salvageTargets.push(input.targetTokens)
-    // Return a valid non-empty reactive-style success so the loop proceeds past
-    // the compaction and completes (mirrors the real `{ok:true}` shape).
-    return {
-      ok: true as const,
-      messages: (input.messages as import("@/llm").Message[]).slice(-3),
-      summaryTokens: 10,
-      droppedRounds: 0,
-      strategy: "reactive" as const,
-    }
-  },
-}))
-
-// Imports AFTER the mock is registered so `recovery-executor` binds the spy.
-const { runAgent } = await import("@/agent")
-const { resolveCompactionLimitTokens } = realCompaction
 import type { AgentConfig } from "@/agent"
+import { runAgent } from "@/agent"
+import { resolveCompactionLimitTokens } from "@/agent/compaction"
+import {
+  __resetDropOldestSalvageForTest,
+  __setDropOldestSalvageForTest,
+} from "@/agent/loop/recovery-executor"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"
 import { __resetRuntimeConfig, LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+
+// Capture every `targetTokens` the reactive salvage was called with, then return a
+// valid reactive-style success so the loop proceeds past compaction and completes
+// (mirrors the real `{ok:true}` shape). Injected through the recovery-executor test
+// SEAM rather than `mock.module("@/agent/compaction")`: bun's module mock leaks
+// PROCESS-GLOBALLY and binds at collection, silently polluting sibling files that
+// use the real compaction (drop-oldest-salvage-hellgate). The seam confines the spy
+// to this file (the executor reads it at call time; every other importer of the real
+// `dropOldestSalvage` is unaffected).
+const salvageTargets: (number | undefined)[] = []
+beforeEach(() => {
+  __setDropOldestSalvageForTest((async (input: { targetTokens?: number; messages: unknown[] }) => {
+    salvageTargets.push(input.targetTokens)
+    return {
+      ok: true as const,
+      messages: (input.messages as Message[]).slice(-3),
+      summaryTokens: 10,
+      droppedRounds: 0,
+      strategy: "reactive" as const,
+    }
+  }) as never)
+})
+afterEach(() => __resetDropOldestSalvageForTest())
 
 type Step = { kind: "throw"; error: unknown } | { kind: "events"; events: StreamEvent[] }
 

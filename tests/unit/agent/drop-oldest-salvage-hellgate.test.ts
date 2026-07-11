@@ -14,12 +14,7 @@
  *   4. round cap bounds the loop.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  dropOldestSalvage,
-  dropOldestTurn,
-  estimateTokens,
-  MAX_DROP_OLDEST_ROUNDS,
-} from "@/agent"
+import { dropOldestSalvage, dropOldestTurn, estimateTokens, MAX_DROP_OLDEST_ROUNDS } from "@/agent"
 import type { LLMPort, Message } from "@/llm"
 
 /** A summarizer that always returns a small non-empty summary, so reactive

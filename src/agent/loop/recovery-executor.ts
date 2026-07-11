@@ -8,12 +8,9 @@ import {
   TokenBaselineBox,
 } from "../compaction"
 import { metaUser, runGuardChain } from "../guards"
-import type { AssembledMessage, RecoveryAction, RecoveryState } from "../recovery"
-import {
-  extractRefusalRationale,
-  neutralizedRefusalTurn,
-} from "../recovery"
 import { buildPostCompactEmit } from "../loop-helpers"
+import type { RecoveryAction } from "../recovery"
+import { extractRefusalRationale, neutralizedRefusalTurn } from "../recovery"
 import { backoffDelayMs } from "../retry"
 import type { ToolHistoryEntry } from "../session-resources"
 import { stripOrphanToolUse } from "../turn-closeout"
@@ -28,6 +25,23 @@ import type { StreamSuccess, TurnResult } from "./types"
 type Step = { done: false } | { done: true; result: TurnResult }
 
 export const CONTINUE: Step = { done: false }
+
+// Test seam for the reactive DROP-OLDEST salvage. Production ALWAYS uses the real
+// `dropOldestSalvage`; a test that needs to observe the call (ALBB-07 spies on the
+// `targetTokens` this executor computes from the active-model window) injects a
+// spy HERE instead of `mock.module("@/agent/compaction")` — bun's module mock
+// leaks process-globally and binds at collection, silently polluting sibling test
+// files that use the real compaction (drop-oldest-salvage-hellgate). This seam
+// contains the spy to the one file that sets it.
+let salvageImpl = dropOldestSalvage
+/** @internal test-only — inject a `dropOldestSalvage` spy/stub. Pair with reset. */
+export const __setDropOldestSalvageForTest = (fn: typeof dropOldestSalvage): void => {
+  salvageImpl = fn
+}
+/** @internal test-only — restore the real `dropOldestSalvage`. */
+export const __resetDropOldestSalvageForTest = (): void => {
+  salvageImpl = dropOldestSalvage
+}
 
 export const EMPTY_TOOL_HISTORY: readonly ToolHistoryEntry[] = Object.freeze([])
 
@@ -108,7 +122,7 @@ export const applyNonSuccessRecoveryAction = async (
   // summaryTokens}` shape so the wire below is unchanged.
   const compacted =
     config.compaction?.dropOldestSalvage === true
-      ? await dropOldestSalvage({
+      ? await salvageImpl({
           messages: snapshot,
           llm: summarizerLlm,
           system: ctxSystem,

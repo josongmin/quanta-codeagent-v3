@@ -48,12 +48,23 @@ describe("kernel single-writer lease", () => {
       capabilityManifest: manifest,
     })
     const eventLog = new InMemorySessionEventLog()
+    // Faithful posture-SSOT host: `dispatchSessionCommand` applies a
+    // `session.identity.set` by calling `host.setIdentityMode(mode)` and then
+    // RECONCILING the kernel state from `host.describe()` (the host owns runtime
+    // posture; the reducer's optimistic value is overwritten by the reconcile).
+    // The mock must therefore track the mode through that roundtrip, or the
+    // reconcile strips identityMode back to undefined.
+    let hostIdentityMode: string | undefined
     const host = {
       describe: () => ({
         sessionId: "s1",
         permissionMode: "default",
+        ...(hostIdentityMode !== undefined ? { identityMode: hostIdentityMode } : {}),
         capabilityManifest: manifest,
       }),
+      setIdentityMode: async (mode: string) => {
+        hostIdentityMode = mode
+      },
       runTurn: async () => {
         markStarted()
         await turnGate

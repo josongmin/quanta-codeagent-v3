@@ -341,6 +341,51 @@ export const AGENTLESS_V7_ORACLE_MULTIFILE: PresetSpec = {
 }
 
 /**
+ * `agentless-v7-oracle-multifile-synthesis` — jun-30 SOTA++ synthesis-ONLY arm
+ * (RFC jun-30-python-pro-synthesis-measure-first).
+ *
+ * WHY: the multifile arm bundles BOTH the repair-CONVERGENCE levers (acceptance +
+ * breadth + location-fanout + cha-multisite) AND the env/admission/multi-lane
+ * levers (paired-control / adversarial-repro / model-lane-diversity). This arm is
+ * the multifile params MINUS those three, so a Pro A/B attributes any delta to
+ * SYNTHESIS convergence, not to env-parity or sample decorrelation. Pairs with the
+ * acceptance_tier_*_rate readout (a win only via tier-3 votes ⇒ the real next
+ * lever is the regression passing-set infra, not more breadth).
+ */
+export const AGENTLESS_V7_ORACLE_MULTIFILE_SYNTHESIS: PresetSpec = {
+  id: "agentless-v7-oracle-multifile-synthesis",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    "fault-evidence": "1",
+    "verification-plan": "1",
+    "primary-rail": "1",
+    "no-patch-breaker": "1",
+    "repair-escalation": "1",
+    "closure-repair": "5",
+    "repair-spec-gate": "1",
+    "repro-grounding": "1",
+    "repro-vote": "1",
+    "repair-strong-oracle": "1",
+    acceptance: "1",
+    "repair-breadth": "3",
+    "bench-location-fanout": "1",
+    "cha-multisite-steer": "1",
+    "cha-multisite-general": "1",
+  },
+  note: "jun-30 synthesis-only arm: v7-multifile MINUS paired-control/adversarial-repro/model-lane-diversity, isolating the repair-convergence levers for a clean Pro A/B.",
+}
+
+/**
  * `agentless-v3-thin-strict` — jun-20 strict arm: mini-first + hard patch-budget
  * admission + source-only sanitizer. Keeps the localization stack but turns host
  * in-loop execution OFF for round-0 thinness and blocks over-budget final patches
@@ -452,6 +497,7 @@ export const PRESET_SPECS: Readonly<Record<string, PresetSpec>> = Object.freeze(
   [AGENTLESS_V6_ORACLE.id]: AGENTLESS_V6_ORACLE,
   [AGENTLESS_V6_ORACLE_HARDENED.id]: AGENTLESS_V6_ORACLE_HARDENED,
   [AGENTLESS_V7_ORACLE_MULTIFILE.id]: AGENTLESS_V7_ORACLE_MULTIFILE,
+  [AGENTLESS_V7_ORACLE_MULTIFILE_SYNTHESIS.id]: AGENTLESS_V7_ORACLE_MULTIFILE_SYNTHESIS,
   [AGENTLESS_V3_THIN_STRICT.id]: AGENTLESS_V3_THIN_STRICT,
   [AGENTLESS_V5_THIN_AND_EXPANDED.id]: AGENTLESS_V5_THIN_AND_EXPANDED,
   [HINT_ONLY.id]: HINT_ONLY,
