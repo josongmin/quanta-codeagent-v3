@@ -54,7 +54,7 @@ export const applyNonSuccessRecoveryAction = async (
   activeModel: string,
 ): Promise<Step | null> => {
   const { config } = session
-  const { wm, breaker } = state
+  const { wm } = state
   if (action.do === "error") {
     // Loop-control fix (jun-25, FIX-2): when the `error` terminal was minted
     // from a SUCCESSFULLY-assembled turn (the malformed-tool-use seal — the
@@ -105,6 +105,26 @@ export const applyNonSuccessRecoveryAction = async (
     return CONTINUE
   }
   if (action.do !== "compact") return null
+  return applyCompactRecovery(session, state, ctxSystem, activeModel)
+}
+
+/**
+ * §PTL / §13.3 — the reactive-compaction recovery arm of {@link
+ * applyNonSuccessRecoveryAction} (extracted to keep that dispatcher under the
+ * god-function size gate). Runs the breaker check, the reactive squeeze (or the
+ * drop-oldest salvage when the knob is ON), replaces the transcript, invalidates
+ * the token baseline, then fires the observable post-compact hook + advisory.
+ * Returns the loop Step — CONTINUE, or a terminal error when the breaker aborts
+ * or the squeeze fails. Pure dispatch of what was the `compact` branch inline.
+ */
+const applyCompactRecovery = async (
+  session: TurnSession,
+  state: TurnState,
+  ctxSystem: SystemPromptInput,
+  activeModel: string,
+): Promise<Step> => {
+  const { config } = session
+  const { wm, breaker } = state
   emitRecovery(config, "compact")
   const verdict = breaker?.check()
   if (verdict?.abort) return { done: true, result: { kind: "error", reason: verdict.reason } }
