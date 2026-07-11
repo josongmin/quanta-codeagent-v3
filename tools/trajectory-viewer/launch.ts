@@ -30,8 +30,9 @@ if (arg) {
     const sessions = files.map(rel => ({ name: rel, text: readFileSync(join(p, rel), "utf8") }))
     const dataPath = join(dir, "data.js")
     const metas = collectMetas(p)
-    writeDataJs(dataPath, sessions, metas)
-    console.log(`Loaded ${files.length} session(s) from ${p}`)
+    const observe = collectObserve(p, files)
+    writeDataJs(dataPath, sessions, metas, observe)
+    console.log(`Loaded ${files.length} session(s) from ${p}${Object.keys(observe).length ? ` (+observe: ${Object.keys(observe).length} instance(s))` : ""}`)
     open(dir)
     process.exit(0)
   }
@@ -44,7 +45,7 @@ if (arg) {
     if (files.length > 0) {
       const sessions = files.map(rel => ({ name: rel, text: readFileSync(join(trajSubdir, rel), "utf8") }))
       const metas = collectMetas(trajSubdir)
-      writeDataJs(join(dir, "data.js"), sessions, metas)
+      writeDataJs(join(dir, "data.js"), sessions, metas, collectObserve(trajSubdir, files))
       console.log(`Loaded ${files.length} session(s) from trajectories/`)
       open(dir)
       process.exit(0)
@@ -111,12 +112,63 @@ function collectMetas(dir: string): object[] {
   return out
 }
 
-// Bake one session PER FILE. `sessions` is [{name, text}] — the viewer builds
-// one session entry per element (no heuristic re-segmentation).
-function writeDataJs(dataPath: string, sessions: { name: string; text: string }[], metas: object[]) {
+// Bake one session PER FILE + the scaffold ACTION stream (observe) keyed by
+// instanceId. The trajectory is the LLM cassette (req/resp); observe holds the
+// scaffold's own actions (sandbox / tree / repro-select / verify / patch /
+// recovery) that never enter the cassette. The viewer merges both by timestamp.
+function writeDataJs(
+  dataPath: string,
+  sessions: { name: string; text: string }[],
+  metas: object[],
+  observe: Record<string, unknown[]> = {},
+) {
   const parts = [`window.__SESSIONS__ = ${JSON.stringify(sessions)};`]
   if (metas.length) parts.push(`window.__META__ = ${JSON.stringify(metas)};`)
+  if (Object.keys(observe).length) parts.push(`window.__OBSERVE__ = ${JSON.stringify(observe)};`)
   writeFileSync(dataPath, parts.join("\n"))
+}
+
+/**
+ * Collect the scaffold ACTION stream from full-remote `observe-<box>.tar.b64`
+ * archives (looked up in `dir` and its parent — the trajectories/ dir sits under
+ * full-remote/ next to the observe tarballs). Extracts each, reads every
+ * `<instanceId>.<attempt>.jsonl`, and groups its events by instanceId. Best-
+ * effort: any missing tar / bad archive is skipped silently.
+ */
+function collectObserve(dir: string, files: string[]): Record<string, unknown[]> {
+  const out: Record<string, unknown[]> = {}
+  const seen = new Set<string>()
+  // Only pull observe for the box(es) actually loaded — a session file lives at
+  // `<boxSuffix>/<...>.jsonl`, next to `observe-<boxSuffix>.tar.b64`. Without this
+  // the whole full-remote/ history (hundreds of archives) would be bundled.
+  const wanted = new Set(files.map(f => f.split("/")[0]).filter(s => s.startsWith("i-")))
+  for (const base of [dir, resolve(dir, "..")]) {
+    if (!existsSync(base)) continue
+    for (const name of readdirSync(base)) {
+      if (!name.startsWith("observe-") || !name.endsWith(".tar.b64") || seen.has(name)) continue
+      const suffix = name.slice("observe-".length, -".tar.b64".length)
+      if (wanted.size && !wanted.has(suffix)) continue
+      seen.add(name)
+      try {
+        const tmp = join(dir, `.observe-tmp-${name.replace(/[^A-Za-z0-9]/g, "_")}`)
+        execSync(`rm -rf ${JSON.stringify(tmp)}; mkdir -p ${JSON.stringify(tmp)}; base64 -d < ${JSON.stringify(join(base, name))} | tar -x -C ${JSON.stringify(tmp)}`)
+        for (const rel of walkJsonl(tmp)) {
+          // `<instanceId>.<attempt>.jsonl` — instanceId is the part before the
+          // first dot; skip the repro candidate sidecars (they live in subdirs).
+          const file = rel.split("/").pop() ?? rel
+          if (rel.includes("/repro/")) continue
+          const id = file.replace(/\.\d+\.jsonl$/, "").replace(/\.jsonl$/, "")
+          const events = readFileSync(join(tmp, rel), "utf8")
+            .split("\n").filter(Boolean)
+            .map(l => { try { return JSON.parse(l) } catch { return null } })
+            .filter(Boolean)
+          if (events.length) (out[id] ??= []).push(...events)
+        }
+        execSync(`rm -rf ${JSON.stringify(join(dir, `.observe-tmp-${name.replace(/[^A-Za-z0-9]/g, "_")}`))}`)
+      } catch { /* skip bad archive */ }
+    }
+  }
+  return out
 }
 
 function open(viewerDir: string) {

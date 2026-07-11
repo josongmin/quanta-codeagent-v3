@@ -185,7 +185,35 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .chat-bubble.me{background:#5566cc;color:#fff;border-radius:14px 14px 3px 14px;box-shadow:0 1px 3px rgba(85,102,204,.25)}
 .chat-bubble.quanta{background:#eef4f6;border:1px solid #d5e4e8;color:#33586a;border-radius:3px 14px 14px 14px}
 .chat-bubble.llm{background:#fff;border:1px solid #e2e2ee;color:#2a2a3a;border-radius:3px 14px 14px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+/* clamp long prompts: show the top, fade, expand inline via 더보기 */
+.chat-bubble.clamp{max-height:210px;overflow:hidden;position:relative}
+.chat-bubble.clamp.expanded{max-height:none}
+.clamp-fade{position:absolute;left:0;right:0;bottom:0;height:44px;pointer-events:none}
+.chat-bubble.me .clamp-fade{background:linear-gradient(rgba(85,102,204,0),#5566cc)}
+.chat-bubble.quanta .clamp-fade{background:linear-gradient(rgba(238,244,246,0),#eef4f6)}
+.chat-bubble.llm .clamp-fade{background:linear-gradient(rgba(255,255,255,0),#fff)}
+.chat-bubble.clamp.expanded .clamp-fade{display:none}
+.more-btn{font-size:10px;font-weight:600;color:#7788bb;cursor:pointer;padding:3px 4px;margin-top:2px;user-select:none;align-self:flex-start}
+.chat-row.me .more-btn{align-self:flex-end}
+.more-btn:hover{color:#5566cc;text-decoration:underline}
 /* Quanta's process view — its work, framed as reasoning not a chat bubble */
+/* scaffold action strip (Quanta's mechanical, non-LLM actions: verify/patch/…) */
+.scaffold-act{margin:10px 0 10px 40px;border:1px solid #dde3ea;border-radius:9px;background:#fbfcfe;overflow:hidden}
+.scaffold-act.act-ok{border-color:#bfe3c9;background:#f5fbf6}
+.scaffold-act.act-fail{border-color:#f0cccc;background:#fdf6f6}
+.act-hd{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:11px;font-weight:600;color:#4a5a70;cursor:default}
+.scaffold-act .act-hd[onclick]{cursor:pointer}
+.act-icon{font-size:13px}
+.act-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.act-ok .act-name{color:#2f8f5b}
+.act-fail .act-name{color:#c0504a}
+.act-time{font-size:9px;color:#b8b8cc;font-family:var(--mono)}
+.act-chev{font-size:8px;color:#b0b8c8;transition:transform .12s}
+.scaffold-act.open .act-chev{transform:rotate(90deg)}
+.act-body{display:none;padding:0 12px 10px}
+.scaffold-act.open .act-body{display:block}
+.act-sub{font-size:10.5px;color:#6a7688;font-family:var(--mono);white-space:pre-wrap;margin-bottom:6px}
+.act-log{font-size:10px;color:#5a6678;background:#f3f5f8;border:1px solid #e2e6ee;border-radius:6px;padding:8px 10px;white-space:pre-wrap;overflow-x:auto;margin:0}
 .agent-proc{border-left:2px solid #b8d4dc;background:#f6fafb;border-radius:0 8px 8px 0;padding:8px 10px 4px;margin-bottom:6px}
 .agent-proc-label{font-size:9px;font-weight:700;color:#5a8092;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
 /* per-turn system prompt (agent → LLM role framing), collapsed */
@@ -552,6 +580,8 @@ const LANGS={
     llm:'LLM',
     agentProc:'작업 과정 · 도구 · 코드위치',
     sysRole:'시스템 · LLM 역할 지정',
+    showMore:'더보기',
+    showLess:'접기',
     promptBtn:'프롬프트 ↗',
     thinking:'◈ 사고 과정',
     promptIn:'📨 에이전트 · 프롬프트 전달',
@@ -599,6 +629,8 @@ const LANGS={
     llm:'LLM',
     agentProc:'work · tools · code locations',
     sysRole:'System · LLM role',
+    showMore:'Show more',
+    showLess:'Show less',
     promptBtn:'prompt ↗',
     thinking:'◈ Thinking',
     promptIn:'📨 Agent · prompt to LLM',
@@ -707,11 +739,18 @@ function flatText(msg){
 
 // ──────────── RECONSTRUCT TURNS ────────────
 function reconstructTurns(records){
-  const turns=[];let prev=0
+  const turns=[];let prev=0,prevFirst=null
   for(const rec of records){
     const msgs=rec.request?.messages??[]
+    // newMsgs = what's NEW vs the previous turn. Within one growing conversation
+    // that's msgs.slice(prev). But each pipeline phase (localize/repro/repair) is
+    // a FRESH thread whose request resets to a short message list — there
+    // `slice(prev)` would be empty and the prompt bubble would vanish. Detect a
+    // new thread by a change in the FIRST message and take the whole request.
+    const first=msgs.length?flatText(msgs[0]):''
+    const continues=prevFirst!==null&&first===prevFirst&&msgs.length>prev
     turns.push({
-      newMsgs:msgs.slice(prev),
+      newMsgs:continues?msgs.slice(prev):msgs,
       allMsgs:msgs,
       system:rec.request?.system??null,
       output:buildOutput(rec.events??[]),
@@ -719,7 +758,7 @@ function reconstructTurns(records){
       meta:rec.metadata??{},
       ts:rec.metadata?.recordedAt??null,
     })
-    prev=msgs.length
+    prev=msgs.length;prevFirst=first
   }
   pairResults(turns)
   return turns
@@ -962,7 +1001,10 @@ function splitByInstance(records){
 // ──────────── LOAD ────────────
 function buildInstance(id,records,meta){
   const turns=annotatePhases(reconstructTurns(records))
-  return{id,records,turns,stats:computeStats(turns),fileMap:buildFileMap(turns),
+  // scaffold ACTION stream (observe) for this instance — the non-LLM actions
+  // (sandbox / repro-select / verify / patch / recovery) the cassette never sees.
+  const observe=(typeof window!=='undefined'&&window.__OBSERVE__&&window.__OBSERVE__[id])||[]
+  return{id,records,turns,observe,stats:computeStats(turns),fileMap:buildFileMap(turns),
     anomalies:detectAnomalies(turns),fileTimeline:buildFileTimeline(turns),
     runMeta:meta??metaByInstance.get(id)??null}
 }
@@ -992,7 +1034,8 @@ function loadSessions(sessions,label){
   instances=[...byId.entries()].map(([id,e])=>buildInstance(id,e.records,e.meta))
   document.getElementById('load-status').textContent=`${label??T('multiSession')??''} · ${T('sessionCount',instances.length)}`
   renderSidebar()
-  if(instances.length>0)selectInstance(0)
+  // Honor a deep-link (#<instanceId>) when present; else default to the first.
+  if(instances.length>0&&!selectFromHash())selectInstance(0)
 }
 function loadTrajectory(text,label){loadSessions([{name:label,text}],label)}
 
@@ -1061,8 +1104,32 @@ function renderSidebar(){
 
 function selectInstance(i){
   selInst=i;openTurnForPrompt=-1
+  // Reflect the selection in the URL so the session is directly linkable by id.
+  const id=instances[i]?.id
+  if(id){const h='#'+encodeURIComponent(id);if(location.hash!==h){_suppressHash=true;location.hash=h}}
   renderSidebar();renderChat()
 }
+
+// ──────────── DEEP-LINK BY ID (#<instanceId>) ────────────
+let _suppressHash=false
+function instIndexById(raw){
+  if(!raw)return -1
+  const dec=(()=>{try{return decodeURIComponent(raw)}catch{return raw}})()
+  let idx=instances.findIndex(x=>x.id===dec)
+  if(idx<0)idx=instances.findIndex(x=>dispName(x.id)===dec) // tolerate the short display name
+  return idx
+}
+function selectFromHash(){
+  const raw=location.hash.replace(/^#/,'')
+  if(!raw)return false
+  const idx=instIndexById(raw)
+  if(idx>=0){selectInstance(idx);return true}
+  return false
+}
+window.addEventListener('hashchange',()=>{
+  if(_suppressHash){_suppressHash=false;return} // our own selectInstance write — ignore
+  selectFromHash()
+})
 
 // ──────────── CHAT ────────────
 function renderChat(){
@@ -1125,15 +1192,27 @@ function renderChat(){
     scroll.appendChild(el.firstElementChild)
   }
 
-  // Group turns by pipeline phase (localize / repro / repair …). A band header
-  // is emitted whenever the phase changes, so the distinct threads inside ONE
-  // session read as labeled groups instead of a flat wall of turns.
+  // UNIFIED TIMELINE: interleave LLM turns (cassette) with the scaffold's own
+  // ACTION events (observe) by timestamp — sandbox / verify / patch / error are
+  // things Quanta did mechanically WITHOUT the LLM, so they belong in the flow.
+  const items=[
+    ...inst.turns.map((turn,i)=>({ts:turn.ts||0,kind:'turn',turn,i})),
+    ...(inst.observe||[]).filter(e=>SCAFFOLD_SHOW[e.kind]).map(e=>({ts:e.ts||0,kind:'action',ev:e})),
+  ].sort((a,b)=>(a.ts-b.ts)||(a.kind==='turn'?-1:1))
+
   let curPhase=null
-  inst.turns.forEach((turn,i)=>{
+  for(const it of items){
+    if(it.kind==='action'){
+      const el=document.createElement('div')
+      el.innerHTML=renderScaffoldAction(it.ev)
+      if(el.firstElementChild)scroll.appendChild(el.firstElementChild)
+      continue
+    }
+    const {turn,i}=it
+    // phase band on phase change (localize / repro / repair …)
     if(turn.phase!==curPhase){
       curPhase=turn.phase
       const pm=PHASE_META[curPhase]??{label:String(curPhase).toUpperCase(),icon:'•'}
-      // contiguous run length for THIS band (not total phase occurrences)
       let n=0;for(let j=i;j<inst.turns.length&&inst.turns[j].phase===curPhase;j++)n++
       const band=document.createElement('div')
       band.className=`phase-band ph-${esc(curPhase)}`
@@ -1145,7 +1224,41 @@ function renderChat(){
     el.id=`tg-${i}`
     el.innerHTML=renderTurnGroup(turn,i)
     scroll.appendChild(el)
-  })
+  }
+}
+
+// Scaffold ACTION kinds surfaced in the timeline (the mechanical, non-LLM ones
+// the cassette can't show). LLM turns + tool_call/result already render as turns.
+const SCAFFOLD_SHOW={sandbox:1,repro_select:1,patch_generated:1,verify:1,error:1}
+function renderScaffoldAction(ev){
+  const d=ev.data||{}
+  const t=fTime(ev.ts)
+  let icon='🛠',cls='act',title=ev.kind,body=''
+  if(ev.kind==='verify'){
+    const ok=d.passed===true
+    icon=ok?'✅':'❌';cls=ok?'act-ok':'act-fail'
+    title=`검증 (verify) · exit ${d.exitCode} · ${ok?'passed':'FAILED'}`
+    const tail=d.logTail?String(d.logTail):''
+    body=`<div class="act-sub">${esc(String(d.command||''))}</div>`+(tail?`<pre class="act-log">${esc(tail.slice(0,1200))}</pre>`:'')
+  }else if(ev.kind==='patch_generated'){
+    icon='📦';title=`패치 생성 · ${d.filesChanged??'?'} files, ${d.hunks??'?'} hunks · ${d.applyStatus??''}`
+  }else if(ev.kind==='sandbox'){
+    icon='🧰';title=`샌드박스 준비 · base ${String(d.baseCommit||'').slice(0,8)}`
+  }else if(ev.kind==='repro_select'){
+    icon='🧪';title=`repro 후보 선택`;body=`<div class="act-sub">${esc(JSON.stringify(d).slice(0,200))}</div>`
+  }else if(ev.kind==='error'){
+    icon='⚠';cls='act-fail';title=`에러`;body=`<div class="act-sub">${esc(String(d.message||'').slice(0,300))}</div>`
+  }
+  const id=uid()
+  return`<div class="scaffold-act ${cls}${body?' open':''}" id="${id}">
+    <div class="act-hd"${body?` onclick="toggle('${id}')"`:''}>
+      <span class="act-icon">${icon}</span>
+      <span class="act-name">🛰 Quanta · ${esc(title)}</span>
+      ${t?`<span class="act-time">${t}</span>`:''}
+      ${body?`<span class="act-chev">▶</span>`:''}
+    </div>
+    ${body?`<div class="act-body">${body}</div>`:''}
+  </div>`
 }
 
 // ──────────── DEBUG INDEX ────────────
@@ -1273,7 +1386,7 @@ function renderTurnGroup(turn,idx){
   if(sysHtml||processHtml||promptBodies){
     rows.push(chatRow({
       side:'them',cls:'quanta',avatar:'🛰',name:'Quanta',
-      tag:curPreset||ph(phase),time:ts,promptBtnIdx:idx,
+      tag:curPreset||ph(phase),time:ts,
       badges:`${phaseBadge}${laneBadge}${evChips}${anomBadges}`,
       body:sysHtml+processHtml+promptBodies,
     }))
@@ -1434,7 +1547,16 @@ function splitCharter(text){
 // text → a chat bubble tinted for the actor; obs/tool_results → process items.
 function renderPartBody(p,bubbleCls){
   if(p.type==='text'){
-    return`<div class="chat-bubble ${bubbleCls||'quanta'}">${esc(p.text)}</div>`
+    const cls=bubbleCls||'quanta'
+    // Long prompts: show the TOP (clamped, faded) with a 더보기 below to expand
+    // inline — no jump to the side panel.
+    const long=p.text.length>360||(p.text.match(/\n/g)||[]).length>7
+    if(long){
+      const id=uid()
+      return`<div class="chat-bubble ${cls} clamp" id="${id}">${esc(p.text)}<span class="clamp-fade"></span></div>
+        <div class="more-btn" onclick="toggleClamp('${id}',this)">${T('showMore')} ▾</div>`
+    }
+    return`<div class="chat-bubble ${cls}">${esc(p.text)}</div>`
   }
   if(p.type==='obs'){
     const id=uid()
@@ -1738,6 +1860,11 @@ let _uid=0
 function uid(){return'e'+(++_uid)}
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function toggle(id){document.getElementById(id)?.classList.toggle('open')}
+function toggleClamp(id,btn){
+  const el=document.getElementById(id);if(!el)return
+  const ex=el.classList.toggle('expanded')
+  btn.textContent=(ex?T('showLess'):T('showMore'))+(ex?' ▴':' ▾')
+}
 function toggleTr(id){
   const el=document.getElementById(id);if(!el)return
   el.classList.toggle('open')
