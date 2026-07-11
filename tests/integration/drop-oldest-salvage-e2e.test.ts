@@ -1,9 +1,22 @@
-import { describe, expect, spyOn, test } from "bun:test"
-import * as compaction from "@/agent/compaction"
+import { describe, expect, test } from "bun:test"
 import { estimateTokens, runAgent } from "@/agent"
+import * as compaction from "@/agent/compaction"
+import {
+  __resetDropOldestSalvageForTest,
+  __setDropOldestSalvageForTest,
+} from "@/agent/loop/recovery-executor"
 import type { Message } from "@/llm"
 import { LLMError } from "@/shared"
-import { cfg, ev, RecordingStream, ScriptedLLM, type Step, text, thr, withTimeout } from "./_harness"
+import {
+  cfg,
+  ev,
+  RecordingStream,
+  ScriptedLLM,
+  type Step,
+  text,
+  thr,
+  withTimeout,
+} from "./_harness"
 
 /**
  * §13.3 (jun-08 long-tail) — DROP-OLDEST salvage driven through the REAL
@@ -115,16 +128,22 @@ describe("§13.3 — drop-oldest salvage through runAgent", () => {
     expect(withModel).not.toBe(floor)
 
     const captured: number[] = []
-    const spy = spyOn(compaction, "dropOldestSalvage").mockImplementation(async (input) => {
+    // Inject through the recovery-executor DI seam (NOT `spyOn(compaction,…)`):
+    // the executor binds `salvageImpl` at import time, so patching the module
+    // export is never seen at the call site. Same seam albb-07 uses.
+    __setDropOldestSalvageForTest((async (input: {
+      targetTokens?: number
+      messages: unknown[]
+    }) => {
       captured.push(input.targetTokens ?? -1)
       return {
-        ok: true,
-        messages: input.messages.slice(-1),
+        ok: true as const,
+        messages: (input.messages as Message[]).slice(-1),
         summaryTokens: 0,
         droppedRounds: 0,
-        strategy: "reactive",
+        strategy: "reactive" as const,
       }
-    })
+    }) as never)
     try {
       // PTL throw routes the turn to `compact` ⇒ the dropOldestSalvage seam fires
       // and records the target it was handed. The loop outcome is irrelevant —
@@ -153,7 +172,7 @@ describe("§13.3 — drop-oldest salvage through runAgent", () => {
       expect(captured.length).toBeGreaterThan(0)
       expect(captured[0]).toBe(withModel)
     } finally {
-      spy.mockRestore()
+      __resetDropOldestSalvageForTest()
     }
   })
 })
