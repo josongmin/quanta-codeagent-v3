@@ -152,7 +152,42 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .sys-block-body{display:none;padding:10px 14px;font-family:var(--mono);font-size:10.5px;color:#7080a0;white-space:pre-wrap;line-height:1.6;background:#f8f8fd}
 .sys-block.open .sys-block-body{display:block}
 /* ─────────────────── TURN GROUP ─────────────────── */
-.turn-group{margin-top:20px}
+.turn-group{margin-top:8px}
+/* ── group-chat timeline: 🧑 나(right) · 🛰 Quanta(left) · 🤖 LLM(left) ── */
+.chat-row{display:flex;gap:9px;margin:12px 0;align-items:flex-start}
+.chat-row.me{flex-direction:row-reverse}
+.chat-av{
+  width:30px;height:30px;border-radius:50%;flex-shrink:0;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;
+  box-shadow:0 2px 6px rgba(0,0,0,.15);
+}
+.chat-av.me{background:linear-gradient(135deg,#5566cc,#6a5acd)}
+.chat-av.quanta{background:linear-gradient(135deg,#4d879c,#37627a);font-size:13px}
+.chat-av.llm{background:linear-gradient(135deg,#20a39a,#177a86);font-size:10px;font-weight:700;letter-spacing:-.02em}
+.chat-col{min-width:0;max-width:82%;display:flex;flex-direction:column}
+.chat-row.me .chat-col{align-items:flex-end}
+.chat-hd{display:flex;align-items:center;gap:7px;margin-bottom:4px;flex-wrap:wrap}
+.chat-row.me .chat-hd{flex-direction:row-reverse}
+.chat-name{font-size:11px;font-weight:700}
+.chat-name.me{color:#5566cc}
+.chat-name.quanta{color:#37627a}
+.chat-name.llm{color:#1f8a86}
+.chat-tag{font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;border-radius:8px;padding:1px 7px}
+.chat-tag.quanta{background:#e9f2f5;color:#4d879c;border:1px solid #cfe1e7}
+.chat-tag.llm{background:#e6f6f4;color:#1f8a86;border:1px solid #c5e6e2}
+.chat-tag.me{background:#eceefb;color:#5566cc;border:1px solid #d5d9f5}
+.chat-time{font-size:9px;color:#c0c0d0;font-family:var(--mono)}
+.chat-tok,.chat-dur{font-size:9px;color:#b8b8cc;font-family:var(--mono)}
+.chat-bubble{
+  border-radius:14px;padding:9px 13px;font-size:12.5px;line-height:1.6;
+  white-space:pre-wrap;word-break:break-word;
+}
+.chat-bubble.me{background:#5566cc;color:#fff;border-radius:14px 14px 3px 14px;box-shadow:0 1px 3px rgba(85,102,204,.25)}
+.chat-bubble.quanta{background:#eef4f6;border:1px solid #d5e4e8;color:#33586a;border-radius:3px 14px 14px 14px}
+.chat-bubble.llm{background:#fff;border:1px solid #e2e2ee;color:#2a2a3a;border-radius:3px 14px 14px 14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+/* Quanta's process view — its work, framed as reasoning not a chat bubble */
+.agent-proc{border-left:2px solid #b8d4dc;background:#f6fafb;border-radius:0 8px 8px 0;padding:8px 10px 4px;margin-bottom:6px}
+.agent-proc-label{font-size:9px;font-weight:700;color:#5a8092;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
 /* ── phase band (localize / repro / repair group header) ── */
 .phase-band{
   position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;
@@ -507,6 +542,7 @@ const LANGS={
     agent:'에이전트',
     you:'나 · 과제',
     llm:'LLM',
+    agentProc:'작업 과정 · 도구 · 코드위치',
     promptBtn:'프롬프트 ↗',
     thinking:'◈ 사고 과정',
     promptIn:'📨 에이전트 · 프롬프트 전달',
@@ -517,7 +553,7 @@ const LANGS={
     editedFiles:'편집 파일',
     fileTimeline:'파일 편집 타임라인',
     sysPrompt:'⚙ 시스템 프롬프트',
-    locHdr:'🎯 로컬라이제이션',
+    locHdr:'💬 응답 · 후보 파일 순위',
     files:'파일',
     toolResults:'툴 결과',
     toolResult:'↩ 결과',
@@ -552,6 +588,7 @@ const LANGS={
     agent:'Agent',
     you:'You · task',
     llm:'LLM',
+    agentProc:'work · tools · code locations',
     promptBtn:'prompt ↗',
     thinking:'◈ Thinking',
     promptIn:'📨 Agent · prompt to LLM',
@@ -562,7 +599,7 @@ const LANGS={
     editedFiles:'edited files',
     fileTimeline:'File edit timeline',
     sysPrompt:'⚙ System Prompt',
-    locHdr:'🎯 Localization',
+    locHdr:'💬 Response · ranked candidate files',
     files:'files',
     toolResults:'Tool Results',
     toolResult:'↩ result',
@@ -619,6 +656,7 @@ function setLang(l){
 
 // ──────────── STATE ────────────
 let instances=[], selInst=-1, openTurnForPrompt=-1
+let curPreset='' // agent preset for the selected session (shown on Quanta rows)
 // instanceId → meta object loaded from .meta.json
 const metaByInstance=new Map()
 
@@ -1022,6 +1060,9 @@ function renderChat(){
   document.getElementById('workspace').style.display='flex'
   closePromptPanel()
   const inst=instances[selInst];if(!inst)return
+  // agent preset for Quanta rows — from the run meta sidecar when present
+  const rm=inst.runMeta
+  curPreset=rm?.env?.QUANTA_BENCH_PRESET??rm?.preset??((Array.isArray(rm?.argv)?rm.argv.join(' '):'').match(/--preset\s+(\S+)/)?.[1])??''
 
   // header
   const repo=repoName(inst.id),name=dispName(inst.id),iurl=issueUrl(inst.id)
@@ -1199,59 +1240,87 @@ function turnEditVerifyChips(turn){
   return chips.join('')
 }
 
+// GROUP-CHAT TIMELINE: each turn emits up to 3 actor rows in flow order —
+//   🧑 나(User, right)  →  🛰 Quanta(agent, left)  →  🤖 LLM(model, left)
+// The scaffold and the model are SEPARATE actors: Quanta shows its work
+// (thinking / tools / code locations) as a process view + the prompt it sends;
+// the LLM shows only its response.
 function renderTurnGroup(turn,idx){
   const phase=detectPhase(turn,idx)
   const ts=fTime(turn.ts),dur=fMs(turn.meta?.durationMs),model=turn.meta?.model??''
   const tokIn=fN(turn.usage?.inputTokens??0),tokOut=fN(turn.usage?.outputTokens??0)
-  const anomBadges=turn._anom?[...turn._anom].map(k=>`<span class="anom-badge" style="color:${ANOM[k].color}" title="${ANOM[k].label}">${ANOM[k].icon}</span>`).join(''):''
-  // parallel-lane label (repair-breadth#N / verify-select#N) — present only when
-  // this turn came from a concurrent candidate; color-coded so lanes are scannable.
-  const lane=turn.meta?.lane
-  const laneBadge=lane?`<span class="lane-badge" style="background:${laneColor(lane)}" title="parallel lane">⑂ ${esc(lane)}</span>`:''
-  const evChips=turnEditVerifyChips(turn)
-
-  // ── INPUT SIDE: 나(User, 최초 과제) + 에이전트(harness가 LLM에 먹이는 프롬프트) ──
-  const userParts=buildUserParts(turn,idx===0)
-  const userHtml=userParts.length
-    ? userParts.map(p=>renderUserPart(p)).join('')
-    : ''
-
-  // ── ASSISTANT SIDE ──
-  const thinkHtml=turn.output.thinking?renderThinking(turn.output.thinking):''
-  const toolsHtml=turn.output.tools.map(t=>renderToolCall(t)).join('')
-  const respHtml=renderResponse(turn.output.text,idx)
-
-  const hasAsst=!!(turn.output.thinking||turn.output.tools.length||turn.output.text.trim())
-
-  // ── LLM SIDE: the model's response. Avatar = model thumbnail; latency + tokens
-  // are the model's cost/speed for this request.
   const cacheRead=turn.usage?.cacheReadInputTokens??turn.usage?.cache_read_input_tokens
   const modelInitial=esc((model||'?').replace(/^gpt-?/i,'').slice(0,3)||'AI')
-  const asstHtml=hasAsst?`
-    <div class="asst-bubble-wrap">
-      <div class="asst-avatar llm" title="${esc(model||'LLM')}">${modelInitial}</div>
-      <div class="asst-col">
-        <div class="asst-name-row">
-          <span class="asst-name">${esc(model||T('llm'))}</span>
-          <span class="asst-llm-tag">${T('llm')}</span>
-          ${ts?`<span class="turn-ts">${ts}</span>`:''}
-          ${dur?`<span class="turn-dur">⏱ ${dur}</span>`:''}
-          ${phase?`<span class="phase-badge ${phase}">${ph(phase)}</span>`:''}
-          ${laneBadge}
-          ${evChips}
-          ${anomBadges}
-          <span class="full-prompt-btn${openTurnForPrompt===idx?' active':''}" data-turn="${idx}" onclick="openPromptPanel(${idx})" title="${T('fullPrompt')}">${T('promptBtn')}</span>
-        </div>
-        ${tokIn||tokOut?`<div class="tok-row"><span class="tok-chip">↑${tokIn} ${T('in')}</span><span class="tok-chip">↓${tokOut} ${T('out')}</span>${cacheRead?`<span class="tok-chip">⚡${fN(cacheRead)} cache</span>`:''}</div>`:''}
-        ${thinkHtml}
-        ${toolsHtml}
-        ${respHtml}
-        ${renderTurnDebug(turn)}
-      </div>
-    </div>`
-  : ''
+  const lane=turn.meta?.lane
+  const laneBadge=lane?`<span class="lane-badge" style="background:${laneColor(lane)}" title="parallel lane">⑂ ${esc(lane)}</span>`:''
+  const anomBadges=turn._anom?[...turn._anom].map(k=>`<span class="anom-badge" style="color:${ANOM[k].color}" title="${ANOM[k].label}">${ANOM[k].icon}</span>`).join(''):''
+  const evChips=turnEditVerifyChips(turn)
+  const phaseBadge=phase?`<span class="phase-badge ${phase}">${ph(phase)}</span>`:''
 
-  return userHtml+asstHtml
+  const parts=buildUserParts(turn,idx===0)
+  const rows=[]
+
+  // 1) 나(User) — the human's task, right side
+  for(const p of parts){
+    if(p.role!=='user')continue
+    rows.push(chatRow({side:'me',cls:'me',avatar:'🧑',name:T('you'),time:ts,body:renderPartBody(p,'me')}))
+  }
+
+  // 2) 에이전트 Quanta — process (thinking/tools/code locations) + the prompt it
+  //    sends to the LLM, left side, named
+  const agentText=parts.filter(p=>p.role!=='user'&&(p.type==='text'||p.type==='obs'))
+  const agentToolResults=parts.filter(p=>p.type==='tool_results')
+  const processHtml=renderAgentProcess(turn,agentToolResults)
+  const promptBodies=agentText.map(p=>renderPartBody(p,'quanta')).join('')
+  if(processHtml||promptBodies){
+    rows.push(chatRow({
+      side:'them',cls:'quanta',avatar:'🛰',name:'Quanta',
+      tag:curPreset||ph(phase),time:ts,promptBtnIdx:idx,
+      badges:`${phaseBadge}${laneBadge}${evChips}${anomBadges}`,
+      body:processHtml+promptBodies,
+    }))
+  }
+
+  // 3) LLM(model) — the response only, left side, model thumbnail + latency + tokens
+  if(turn.output.text.trim()){
+    const meta=`${tokIn||tokOut?`<span class="chat-tok">↑${tokIn} ↓${tokOut}${cacheRead?` ⚡${fN(cacheRead)}`:''}</span>`:''}${dur?`<span class="chat-dur">⏱ ${dur}</span>`:''}`
+    rows.push(chatRow({
+      side:'them',cls:'llm',avatar:modelInitial,name:model||T('llm'),tag:'LLM',time:ts,meta,
+      body:renderResponse(turn.output.text,idx),
+    }))
+  }
+
+  return rows.join('')+renderTurnDebug(turn)
+}
+
+// One group-chat row: avatar + name/time header + body. `me` rows mirror right.
+function chatRow(o){
+  const cls=o.cls||'them'
+  return`<div class="chat-row ${o.side}">
+    <div class="chat-av ${cls}">${o.avatar}</div>
+    <div class="chat-col">
+      <div class="chat-hd">
+        <span class="chat-name ${cls}">${esc(o.name)}</span>
+        ${o.tag?`<span class="chat-tag ${cls}">${esc(o.tag)}</span>`:''}
+        ${o.time?`<span class="chat-time">${o.time}</span>`:''}
+        ${o.meta||''}
+        ${o.badges||''}
+        ${o.promptBtnIdx!=null?`<span class="full-prompt-btn${openTurnForPrompt===o.promptBtnIdx?' active':''}" data-turn="${o.promptBtnIdx}" onclick="openPromptPanel(${o.promptBtnIdx})" title="${T('fullPrompt')}">${T('promptBtn')}</span>`:''}
+      </div>
+      ${o.body}
+    </div>
+  </div>`
+}
+
+// Quanta's work for this step, shown as a PROCESS view (not chat bubbles):
+// its reasoning, the tools it ran with results, and the code locations touched.
+function renderAgentProcess(turn,toolResults){
+  const bits=[]
+  if(turn.output.thinking)bits.push(renderThinking(turn.output.thinking))
+  for(const tr of toolResults)bits.push(renderPartBody(tr,'quanta'))
+  if(turn.output.tools.length)bits.push(...turn.output.tools.map(t=>renderToolCall(t)))
+  if(!bits.length)return''
+  return`<div class="agent-proc"><div class="agent-proc-label">🛠 ${T('agentProc')}</div>${bits.join('')}</div>`
 }
 
 // per-turn debug enrichment (only present on QUANTA_BENCH_RECORD_TRAJECTORY=debug runs)
@@ -1349,34 +1418,22 @@ function splitCharter(text){
   return{issue,rest}
 }
 
-function renderUserPart(p){
+// Body content of an input part (no actor wrapper — chatRow provides that).
+// text → a chat bubble tinted for the actor; obs/tool_results → process items.
+function renderPartBody(p,bubbleCls){
   if(p.type==='text'){
-    const isUser=p.role==='user'
-    const cls=isUser?'role-user':'role-agent'
-    const label=isUser
-      ?`<span class="br-ava">🧑</span>${T('you')}`
-      :`<span class="br-ava">🛰</span>${T('promptIn')}`
-    return`<div class="user-bubble-wrap">
-      <div class="user-bubble ${cls}">
-        <div class="bubble-role">${label}</div>
-        ${esc(p.text)}
-      </div>
-    </div>`
+    return`<div class="chat-bubble ${bubbleCls||'quanta'}">${esc(p.text)}</div>`
   }
   if(p.type==='obs'){
     const id=uid()
     const preview=p.text.replace(/<[^>]+>/g,'').slice(0,80).replace(/\n/g,' ')
-    return`<div class="user-bubble-wrap">
-      <div class="user-bubble" style="max-width:88%;padding:0;background:transparent;border:none">
-        <div class="obs-block" id="${id}">
-          <div class="obs-hd" onclick="toggle('${id}')"><span class="obs-chev">▶</span>${T('obsLabel')} · ${esc(preview)}…</div>
-          <pre class="obs-body">${esc(p.text)}</pre>
-        </div>
-      </div>
+    return`<div class="obs-block" id="${id}">
+      <div class="obs-hd" onclick="toggle('${id}')"><span class="obs-chev">▶</span>${T('obsLabel')} · ${esc(preview)}…</div>
+      <pre class="obs-body">${esc(p.text)}</pre>
     </div>`
   }
   if(p.type==='tool_results'){
-    const rows=p.items.map((it,i)=>{
+    const rows=p.items.map((it)=>{
       const preview=(it.content||'(empty)').replace(/\n/g,' ').slice(0,80)
       const rid=uid()
       return`<div class="tr-item" id="${rid}" onclick="toggleTr('${rid}')">
@@ -1386,11 +1443,9 @@ function renderUserPart(p){
       </div>
       <div class="tr-body">${esc(it.content||'(empty)')}</div>`
     }).join('')
-    return`<div class="user-bubble-wrap">
-      <div class="tool-results-bubble">
-        <div class="tr-hdr-label">${T('toolResultsHdr')}</div>
-        ${rows}
-      </div>
+    return`<div class="tool-results-bubble" style="margin-left:0">
+      <div class="tr-hdr-label">${T('toolResultsHdr')}</div>
+      ${rows}
     </div>`
   }
   return''
