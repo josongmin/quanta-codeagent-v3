@@ -54,6 +54,18 @@ const fakeLlm = {
   authMode: "api-key" as const,
 }
 
+/** A minimal streaming LLMPort so we can exercise the RECORD path end to end
+ *  (the recorder wraps `.stream`, drains the events, and appends a cassette
+ *  record). Yields one text delta + a stop so a real interaction is captured. */
+const streamingFakeLlm = {
+  ...fakeLlm,
+  // biome-ignore lint/correctness/useYield: async generator streaming fake
+  stream: async function* (): AsyncGenerator<{ type: string; delta?: string }> {
+    yield { type: "text_delta", delta: "ok" }
+    yield { type: "message_stop" }
+  },
+}
+
 afterEach(() => resetMetaPathRegistry())
 
 // ── tests ───────────────────────────────────────────────────────────────────
@@ -106,5 +118,46 @@ describe("patchRunMeta", () => {
       expect(meta.instanceId).toBe(instanceId)
       expect(meta.verdict).toMatchObject({ passed: true, patchBytes: 512 })
     })
+  })
+})
+
+// One FILE = one SESSION: the primary port carries the instanceId ctx (run-main
+// wires `instanceFreshLlm()`), so record mode must write the cassette to the
+// per-instance path `trajectories/<ts>-<instanceId>.jsonl` AND stamp
+// `metadata.instanceId` into every recorded interaction — the exact contract the
+// trajectory viewer relies on to group turns into one instance session.
+describe("applyBenchTrajectoryMode — per-instance cassette", () => {
+  test("record + instanceId ⇒ cassette in trajectories/ with instanceId stamped", async () => {
+    const dir = mkTmpDir()
+    const trajDir = join(dir, "trajectories")
+    await mkdir(trajDir, { recursive: true })
+    const basePath = join(dir, "bench.jsonl")
+    const instanceId = "astropy__astropy-13033"
+
+    const port = applyBenchTrajectoryMode(
+      streamingFakeLlm as unknown as Parameters<typeof applyBenchTrajectoryMode>[0],
+      { kind: "record", path: basePath },
+      { provider: "openai", model: "gpt-test" },
+      { instanceId },
+    )
+    // Drive one interaction so the recorder appends a cassette record.
+    for await (const _ of port.stream({
+      messages: [{ role: "user", content: "reproduce the issue" }],
+    } as unknown as Parameters<typeof port.stream>[0])) {
+      // drain
+    }
+    await new Promise((r) => setTimeout(r, 80))
+
+    const { readdirSync } = await import("node:fs")
+    const cassettes = readdirSync(trajDir).filter((f) => f.endsWith(".jsonl"))
+    // exactly one per-instance cassette, filename carries the (sanitized) id
+    expect(cassettes).toHaveLength(1)
+    const cassette = cassettes[0] ?? ""
+    expect(cassette).toContain("astropy__astropy-13033")
+    const lines = (await readFile(join(trajDir, cassette), "utf8")).split("\n").filter(Boolean)
+    expect(lines.length).toBeGreaterThan(0)
+    const rec = JSON.parse(lines[0] ?? "{}")
+    // the stamp the viewer keys sessions on
+    expect(rec.metadata.instanceId).toBe(instanceId)
   })
 })
