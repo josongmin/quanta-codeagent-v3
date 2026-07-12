@@ -29,6 +29,7 @@ import {
 } from "./otel-exporter"
 import { getSpanSink, type SpanName, type SpanSink, type SpanStatus, setSpanSink } from "./spans"
 import { getActiveTraceRef, type TraceRef } from "./tracing/active-context"
+import { hexId } from "./tracing/hex-id"
 import type { SpanAttributes, SpanKind, SpanStatusCode } from "./tracing/port"
 
 /** Loop span status → OTLP status code. `aborted` is a non-OK terminal state,
@@ -38,11 +39,6 @@ const STATUS_MAP: Readonly<Record<SpanStatus, SpanStatusCode>> = {
   error: "error",
   aborted: "error",
 }
-
-/** Random N bytes → lowercase hex. Default uses the platform CSPRNG; the
- *  hellgate injects a deterministic generator. */
-const toHex = (n: number, gen: (len: number) => Uint8Array): string =>
-  Array.from(gen(n), (b) => b.toString(16).padStart(2, "0")).join("")
 
 export interface ExporterSpanSinkOpts {
   /** Epoch-ms clock. Default `Date.now`. Test seam. */
@@ -117,9 +113,9 @@ export const createExporterSpanSink = (
       const parent: TraceRef | Frame | undefined =
         activeParent ?? (open.length > 0 ? open[open.length - 1] : undefined)
       // Root (no parent) ⇒ a NEW trace; child ⇒ inherit the parent's trace.
-      const traceId = parent?.traceId ?? fixedTraceId ?? toHex(16, gen)
+      const traceId = parent?.traceId ?? fixedTraceId ?? hexId(16, gen)
       const frame: Frame = {
-        spanId: toHex(8, gen),
+        spanId: hexId(8, gen),
         traceId,
         traceFlags: parent?.traceFlags ?? 1,
         ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),

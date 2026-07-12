@@ -27,6 +27,7 @@
  */
 
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { delegationSuppressEnabled, withDelegationPolicy } from "./delegation-policy"
 import { dispatchSubagent6, type Subagent6Deps } from "./dispatch-6"
 import { InputChannelRegistry, PtyTable } from "./handlers-6"
 import {
@@ -96,6 +97,24 @@ export interface Subagent6ToolSet {
    *  The host folds this into its session-cleanup hook. */
   cleanup: () => void
 }
+
+/** Base (fan-out-mechanics) description of the 6-tool `spawn_agent`, kept as a
+ *  module const so {@link spawnAgent6Description} can project the C5059-05
+ *  delegation policy from ONE place (identical atom to the trio `agent` tool). */
+const SPAWN_AGENT_6_BASE_DESCRIPTION =
+  "Spawn a CONCURRENT child subagent, returning its agentId immediately. This " +
+  "is the FAN-OUT / interactive primitive: launch several workers in parallel, " +
+  "STEER a paused one mid-run with send_input, and collect them with " +
+  "wait_agent / close_agent. For a SINGLE delegated task prefer the `agent` " +
+  "tool (its background:true gives the same async handle with simpler " +
+  "task_output polling); reach for spawn_agent when you need multiple " +
+  "concurrent children or mid-run control."
+
+/** Model-facing description of the 6-tool `spawn_agent`. C5059-05: prepends the
+ *  single-agent-first delegation policy when the opt-in knob is set (default-OFF
+ *  ⇒ byte-identical). Projects the SAME SSOT atom as the trio `agent` tool. */
+export const spawnAgent6Description = (): string =>
+  withDelegationPolicy(SPAWN_AGENT_6_BASE_DESCRIPTION, delegationSuppressEnabled())
 
 export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
   // Mint a PtyTable + InputChannelRegistry when the caller didn't supply one,
@@ -180,13 +199,7 @@ export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
     // state with siblings — fan-out is the whole point).
     make<unknown, SpawnAgentOutput & { kind: "success" }>(
       "spawn_agent",
-      "Spawn a CONCURRENT child subagent, returning its agentId immediately. This " +
-        "is the FAN-OUT / interactive primitive: launch several workers in parallel, " +
-        "STEER a paused one mid-run with send_input, and collect them with " +
-        "wait_agent / close_agent. For a SINGLE delegated task prefer the `agent` " +
-        "tool (its background:true gives the same async handle with simpler " +
-        "task_output polling); reach for spawn_agent when you need multiple " +
-        "concurrent children or mid-run control.",
+      spawnAgent6Description(),
       SpawnAgentInputSchema,
       false,
       true,

@@ -69,6 +69,25 @@ export interface RecordingLlmOpts {
   readonly getActiveTraceRef?: () =>
     | { traceId: string; spanId: string; parentSpanId?: string }
     | undefined
+  /**
+   * ADR-0539 rule 5 enforcement (jul-13, "no per-event legacy fallback in
+   * unified mode"). DI seam answering "was a live trace context EXPECTED for
+   * this recorded turn?" — the bench composition binds it to
+   * `() => getSpanSink() !== null` (a live sink means `withActiveSpanScope`
+   * wraps every recorded unit, so `getActiveTraceRef()` should ALWAYS return a
+   * ref). When this returns `true` AND `getActiveTraceRef()` yields `undefined`,
+   * that is a correlation DEFECT (context expected-but-missing): the recorder
+   * surfaces ONE `observability_degraded` signal — a durable, greppable
+   * `logger.warn` PLUS a replay-neutral `metadata.observabilityDegraded` marker
+   * on the committed turn (metadata is never hashed ⇒ the cassette key is
+   * unchanged). Latched per port instance (systemic ⇒ never spam).
+   *
+   * When ABSENT or returning `false`, no context is expected (OTel off /
+   * context-never-wired — the LEGITIMATE case): no marker, no warn ⇒
+   * BYTE-IDENTICAL to today. Mirrors the `getActiveTraceRef` DI so
+   * `@/llm/replay` never imports `@/observability` (slice boundary).
+   */
+  readonly traceContextExpected?: () => boolean
 }
 
 /** Build the trace-ref metadata spread from a captured active {@link TraceRef}.
@@ -97,6 +116,17 @@ function safeActiveRef(
     return provider()
   } catch {
     return undefined
+  }
+}
+
+/** Best-effort "trace context expected?" probe: a throwing predicate must never
+ *  fail a live turn, so failure collapses to `false` (no defect asserted). */
+function safeExpected(probe: (() => boolean) | undefined): boolean {
+  if (probe === undefined) return false
+  try {
+    return probe() === true
+  } catch {
+    return false
   }
 }
 
@@ -168,6 +198,11 @@ async function appendDegradedSentinel(params: DegradedSentinelParams): Promise<v
 export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
   const now = opts.now ?? Date.now
   const hashFn = opts.hashRequest ?? ((req: StreamInput) => defaultHashRequest(req, "exact"))
+  // ADR-0539 rule 5 latch: a SYSTEMIC missing trace context affects every turn,
+  // so warn ONCE per port instance (mirrors the recorder's `missingRefReported`
+  // / `capDone` guard). The replay-neutral metadata marker is still stamped on
+  // each defective turn for post-mortem, but the operator warn fires once.
+  let missingRefReported = false
 
   const stripEphemeralRequest = (input: StreamInput): StreamInput => {
     const {
@@ -203,6 +238,12 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
       // the async iterator's frame where the active context may have unwound)
       // and stamped into metadata so the cassette turn joins the trace tree.
       const traceRef = safeActiveRef(opts.getActiveTraceRef)
+      // ADR-0539 rule 5 (NOW ENFORCED): a trace context was EXPECTED (span sink
+      // live) but the active ref is undefined ⇒ correlation DEFECT. Stamp a
+      // replay-neutral marker on the committed turn and warn ONCE. When no
+      // context was expected (probe absent / false) this is `false` ⇒
+      // byte-identical off path.
+      const traceContextMissing = traceRef === undefined && safeExpected(opts.traceContextExpected)
       const captured: StreamEvent[] = []
       const inner = opts.inner.stream(input)
       // We delay `id` computation until after `now` is sampled so a custom
@@ -246,8 +287,33 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
             ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
             // C4: active OTel span identity (replay-neutral; joins the trace tree).
             ...traceMeta(traceRef),
+            // ADR-0539 rule 5: expected-but-missing trace context DEFECT marker
+            // (replay-neutral — metadata is never hashed, so the cassette key is
+            // unchanged). Absent on the off/never-expected path ⇒ byte-identical.
+            ...(traceContextMissing
+              ? {
+                  observabilityDegraded: {
+                    component: "recordingLlmPort",
+                    reason: "missing_trace_context",
+                  },
+                }
+              : {}),
             ...(debug !== undefined ? { debug } : {}),
           },
+        }
+        // ADR-0539 rule 5: warn ONCE per port (systemic ⇒ no per-turn spam) —
+        // the durable, greppable operator signal that OTel correlation is broken.
+        if (traceContextMissing && !missingRefReported) {
+          missingRefReported = true
+          logger.warn(
+            "recording-llm: trace context expected but missing (observability degraded)",
+            {
+              reason: "missing_trace_context",
+              instanceId: opts.callCtx?.instanceId,
+              runId: opts.callCtx?.runId,
+              attempt: opts.callCtx?.attempt,
+            },
+          )
         }
         const finalRecord = opts.scrubber !== undefined ? opts.scrubber(baseRecord) : baseRecord
         await opts.store.append(finalRecord)

@@ -74,6 +74,18 @@ export interface RecordedInteraction {
      * cross-box cassette match. Absent on non-debug / old recordings.
      */
     readonly debug?: Readonly<Record<string, unknown>>
+    /**
+     * ADR-0539 rule 5 (jul-13) — expected-but-missing trace-context DEFECT
+     * marker. Present ONLY when a live span sink was expected for this turn
+     * (`traceContextExpected() === true`) but the active OTel ref was undefined,
+     * i.e. a genuine correlation defect (NOT the legitimate off/unwired case).
+     * REPLAY-NEUTRAL: metadata is never part of the request hash, so this can
+     * never invalidate a cassette match. Absent on the byte-identical off path.
+     */
+    readonly observabilityDegraded?: Readonly<{
+      readonly component: string
+      readonly reason: string
+    }>
   }
 }
 

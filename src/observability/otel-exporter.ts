@@ -57,6 +57,7 @@
 
 import { errMessage } from "@/shared"
 import type { MetricSink } from "./metrics/port"
+import { hexId } from "./tracing/hex-id"
 import { noopTracer } from "./tracing/noop-tracer"
 import type {
   Span,
@@ -701,19 +702,6 @@ export const exporterMetricSink = (exporter: OtelExporter): MetricSink => ({
   },
 })
 
-/** Hex random for trace/span IDs. Mirrors `noop-tracer.randomHex` so the
- *  exporting tracer produces W3C-shaped IDs (32/16 hex). */
-const randomHex = (byteCount: number): string => {
-  const bytes = new Uint8Array(byteCount)
-  crypto.getRandomValues(bytes)
-  let out = ""
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i] ?? 0
-    out += (b < 0x10 ? "0" : "") + b.toString(16)
-  }
-  return out
-}
-
 interface ExportingTracerOpts {
   /** Clock. Default `Date.now`. */
   readonly now?: () => number
@@ -790,8 +778,8 @@ export const buildExportingTracer = (
       | undefined,
   ): Span => {
     const parentCtx = resolveParentCtx(spanOpts?.parent)
-    const traceId = parentCtx?.traceId ?? randomHex(16)
-    const spanId = randomHex(8)
+    const traceId = parentCtx?.traceId ?? hexId(16)
+    const spanId = hexId(8)
     const traceFlags = parentCtx?.traceFlags ?? 1 // sampled
     const context: SpanContext = { traceId, spanId, traceFlags }
     const startTimeEpochMs = spanOpts?.startTime ?? now()

@@ -28,6 +28,25 @@ export interface JsonlRecorderOpts {
    * byte-identical output to today. Full no-fallback is C7.
    */
   getActiveTraceRef?: () => { traceId: string; spanId: string; parentSpanId?: string } | undefined
+  /**
+   * ADR-0539 rule 5 enforcement (jul-13, "no per-event legacy fallback in
+   * unified mode"). DI seam that answers "was a live trace context EXPECTED for
+   * this emit?" — the composition root binds it to `() => getSpanSink() !== null`
+   * (a live span sink means `withActiveSpanScope` wraps every recorded unit, so
+   * EVERY event should see a `getActiveTraceRef()` ref). When this returns
+   * `true` AND `getActiveTraceRef()` yields `undefined`, that is a genuine
+   * correlation DEFECT (context expected-but-missing) — the recorder emits ONE
+   * `observability_degraded` line (`reason:"missing_trace_context"`) and, in
+   * `strict` mode, surfaces it on the rail; it does NOT silently synthesize the
+   * deterministic `t<turn>` id and move on.
+   *
+   * When ABSENT or returning `false`, no context is expected (OTel off /
+   * context-never-wired — the LEGITIMATE case): the deterministic `t<turn>`
+   * fallback stays and output is BYTE-IDENTICAL to today. Deliberately a plain
+   * inline callback (mirroring `getActiveTraceRef`) so `@/stream` never imports
+   * `@/observability` (slice boundary, guarded by stream-slice-boundary.test.ts).
+   */
+  traceContextExpected?: () => boolean
   /** Hard line cap; once exceeded only a final `line_cap` degraded line is
    *  written. Default 100000. */
   maxLines?: number
@@ -114,6 +133,7 @@ export class JsonlRecorder implements StreamPort {
   private readonly getActiveTraceRef:
     | (() => { traceId: string; spanId: string; parentSpanId?: string } | undefined)
     | undefined
+  private readonly traceContextExpected: (() => boolean) | undefined
   private readonly maxLines: number
   private readonly producer: Producer | undefined
   private readonly buf: string[] = []
@@ -123,6 +143,10 @@ export class JsonlRecorder implements StreamPort {
   private turnSpanId = "t#init"
   private closed = false
   private capDone = false
+  /** ADR-0539 rule 5: latched once the expected-but-missing trace-context
+   *  defect has been reported, so a SYSTEMIC missing context (affecting every
+   *  event) emits exactly ONE degraded line — mirrors `capDone`. */
+  private missingRefReported = false
   private dropped = 0
   private pendingHead = 0
   private pendingLineCount = 0
@@ -136,6 +160,7 @@ export class JsonlRecorder implements StreamPort {
     this.now = opts.now ?? (() => Date.now())
     this.monotonic = opts.monotonic
     this.getActiveTraceRef = opts.getActiveTraceRef
+    this.traceContextExpected = opts.traceContextExpected
     this.maxLines = opts.maxLines ?? DEFAULT_MAX_LINES
     this.producer = opts.producer
     mkdirSync(dirname(target), { recursive: true })
@@ -238,8 +263,18 @@ export class JsonlRecorder implements StreamPort {
     // ids (traceId/spanId/parentSpanId) ONTO the event — overriding the
     // deterministic `spanOf()` scheme. When no ref (callback absent OR returns
     // undefined), fall back to the deterministic ids so absent-callback output
-    // stays byte-identical to today. Full no-fallback is C7.
+    // stays byte-identical to today.
     const ref = this.getActiveTraceRef?.()
+    // ADR-0539 rule 5 (jul-13 — NOW ENFORCED): a missing ref while a trace
+    // context was EXPECTED (span sink live ⇒ every emit is wrapped in
+    // `withActiveSpanScope`) is a correlation DEFECT, not the legitimate
+    // off/unwired case. Report it exactly once (systemic ⇒ don't spam) and let
+    // strict surface it on the rail. The deterministic `t<turn>` fallback below
+    // still runs so the line is not lost — the DEFECT is the ADDED signal, and
+    // the off/never-expected path stays byte-identical (guard returns early).
+    // `kind !== "observability_degraded"` prevents self-recursion: the degraded
+    // line this reports is itself framed here.
+    if (ref === undefined && kind !== "observability_degraded") this.checkMissingTraceContext(kind)
     const ids = ref
       ? {
           traceId: ref.traceId,
@@ -279,18 +314,50 @@ export class JsonlRecorder implements StreamPort {
     }
   }
 
+  /**
+   * ADR-0539 rule 5 enforcement. Called from `frame()` when the active trace
+   * ref is `undefined`. If a trace context was EXPECTED (span sink live), the
+   * missing ref is a correlation DEFECT: emit ONE `observability_degraded` line
+   * (`reason:"missing_trace_context"`, latched via `missingRefReported`) and, in
+   * strict mode, THROW so the failure surfaces on the rail (routed through the
+   * SAME `record()`→`degrade()` catch as any other strict rail failure). When no
+   * context was expected (callback absent / returns false), this is a no-op ⇒
+   * the off/unwired path stays byte-identical.
+   */
+  private checkMissingTraceContext(offendingKind: TrajectoryKind): void {
+    if (this.traceContextExpected?.() !== true) return
+    if (!this.missingRefReported) {
+      this.missingRefReported = true
+      // Direct-append the degraded line (bypasses the buffered path so the
+      // signal lands even if the buffer is wedged) — the offending kind + seq
+      // give an operator the first defective event for triage.
+      this.tryDegradedLine("missing_trace_context", {
+        offendingKind,
+        offendingSeq: this.seq,
+      })
+    }
+    // Strict: surface every defect on the rail (not just the first) — the
+    // record()/frame() caller's catch turns this into the strict rethrow, the
+    // same contract a write/serialize failure takes.
+    if (this.strict) {
+      throw new Error(
+        `observability degraded: missing_trace_context (kind=${offendingKind}, seq=${this.seq})`,
+      )
+    }
+  }
+
   private degrade(err: Error, rethrow: boolean): void {
     this.dropped += 1
     if (rethrow) throw err
     this.tryDegradedLine(err.message)
   }
 
-  private tryDegradedLine(reason: string): void {
+  private tryDegradedLine(reason: string, extra?: Record<string, unknown>): void {
     try {
       const line = JSON.stringify(
         this.frame(
           "observability_degraded",
-          { component: "JsonlRecorder", reason, droppedEvents: this.dropped },
+          { component: "JsonlRecorder", reason, droppedEvents: this.dropped, ...extra },
           { spanId: this.turnSpanId },
         ),
       )

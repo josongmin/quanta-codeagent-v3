@@ -26,7 +26,7 @@ import type { LLMPort } from "@/llm"
 import type { MatchPolicy } from "@/llm/replay"
 import { jsonlReplayStore, type OnMissPolicy, recordingLlmPort, replayLlmPort } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
-import { getActiveTraceRef } from "@/observability"
+import { getActiveTraceRef, getSpanSink } from "@/observability"
 import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"
 import { isFalsyToken } from "@/shared"
 import { resumeHashRequest } from "./resume/canonicalize"
@@ -201,6 +201,10 @@ export const maybeRecordTrajectory = (llm: LLMPort): LLMPort => {
     // `@/llm/replay`, which is slice-forbidden); `@/apps/bench` may reach it.
     // Metadata-only ⇒ REPLAY-NEUTRAL; absent active span ⇒ byte-identical.
     getActiveTraceRef,
+    // ADR-0539 rule 5 (NOW ENFORCED): live span sink ⇒ every turn should carry a
+    // ref; a missing ref then is a correlation DEFECT (warn + replay-neutral
+    // metadata marker). No sink ⇒ false ⇒ byte-identical off path.
+    traceContextExpected: () => getSpanSink() !== null,
     ...(isTrajectoryDebugEnabled() ? { debugDrain: () => debugSink.drain() } : {}),
   })
 }
@@ -311,6 +315,10 @@ export const applyBenchTrajectoryMode = (
       // C4: active-span provider (same seam as callCtx) so each recorded turn
       // joins the trace tree on `{traceId,spanId}`. Metadata-only, replay-neutral.
       getActiveTraceRef,
+      // ADR-0539 rule 5 (NOW ENFORCED): live span sink ⇒ every turn should carry
+      // a ref; a missing ref then is a correlation DEFECT. No sink ⇒ false ⇒
+      // byte-identical off path.
+      traceContextExpected: () => getSpanSink() !== null,
       // DEBUG tier: drain per-turn debug slices contributed by other subsystems
       // (metadata-only, replay-neutral). No-op unless the debug gate is on.
       ...(isTrajectoryDebugEnabled() ? { debugDrain: () => debugSink.drain() } : {}),

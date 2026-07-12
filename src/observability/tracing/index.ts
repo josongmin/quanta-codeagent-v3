@@ -15,6 +15,7 @@
  */
 
 export { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "./active-context"
+export { hexId } from "./hex-id"
 // Default export is the no-op tracer — surfaces opt in to OTel explicitly.
 export { contextTracer, noopTracer, noopTracer as defaultTracer } from "./noop-tracer"
 export { mapKind, type OtelTracerOpts, otelTracer } from "./otel-tracer"

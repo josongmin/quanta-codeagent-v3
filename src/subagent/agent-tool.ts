@@ -2,6 +2,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { validateAgentType } from "./agent-type"
+import { delegationSuppressEnabled, withDelegationPolicy } from "./delegation-policy"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
 
@@ -630,6 +631,25 @@ export const recordContinueFromOwner = (
   ledger.set(taskId, lineage)
 }
 
+/** Base (fan-out-mechanics) description of the trio `agent` tool, kept as a
+ *  module const so {@link agentToolDescription} can project the C5059-05
+ *  delegation policy onto it from ONE place (no duplicated string). */
+const AGENT_TOOL_BASE_DESCRIPTION =
+  "Launch a subagent to autonomously handle ONE delegated task. " +
+  "Foreground returns the subagent's summary; set background:true to get a " +
+  "task id and poll with task_output / cancel with task_stop. " +
+  "Pass continue_from to warm-start from a prior task's findings; pass checkpoint:true " +
+  "(non-isolation only) to enable interim progress at .subagent-state/<task_id>.md. " +
+  "For running MANY children concurrently or steering a child mid-run use " +
+  "spawn_agent / wait_agent / send_input instead; for the SAME task over a list " +
+  "of inputs use spawn_batch."
+
+/** Model-facing description of the `agent` tool. C5059-05: prepends the
+ *  single-agent-first delegation policy when the opt-in knob is set (default-OFF
+ *  ⇒ byte-identical). Reads the knob at construction time. */
+export const agentToolDescription = (): string =>
+  withDelegationPolicy(AGENT_TOOL_BASE_DESCRIPTION, delegationSuppressEnabled())
+
 export const createAgentTool = (
   opts: AgentToolOptions,
 ): Tool<AgentInput> & { registry: TaskRegistry } => {
@@ -645,15 +665,7 @@ export const createAgentTool = (
 
   const tool: Tool<AgentInput> & { registry: TaskRegistry } = {
     name: "agent",
-    description:
-      "Launch a subagent to autonomously handle ONE delegated task. " +
-      "Foreground returns the subagent's summary; set background:true to get a " +
-      "task id and poll with task_output / cancel with task_stop. " +
-      "Pass continue_from to warm-start from a prior task's findings; pass checkpoint:true " +
-      "(non-isolation only) to enable interim progress at .subagent-state/<task_id>.md. " +
-      "For running MANY children concurrently or steering a child mid-run use " +
-      "spawn_agent / wait_agent / send_input instead; for the SAME task over a list " +
-      "of inputs use spawn_batch.",
+    description: agentToolDescription(),
     inputSchema: agentSchema,
     // S2 fix: the previous `() => true` was a LIE — `agent` spawns a child
     // run that owns its OWN unrestricted tool set (write/edit/bash/git/…).

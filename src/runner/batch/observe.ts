@@ -25,7 +25,7 @@
  */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { costUsd, getActiveTraceRef, Metrics, PRICING_VERSION } from "@/observability"
+import { costUsd, getActiveTraceRef, getSpanSink, Metrics, PRICING_VERSION } from "@/observability"
 import type {
   PatchData,
   RunContext,
@@ -175,6 +175,14 @@ export class BenchObserver {
       // undefined and the recorder falls back to its deterministic ids ⇒
       // byte-identical output.
       getActiveTraceRef,
+      // ADR-0539 rule 5 (NOW ENFORCED): a live span sink means
+      // `withActiveSpanScope` wraps every recorded unit, so EVERY emit should
+      // see a ref. A missing ref then is a correlation DEFECT (not the off
+      // path) ⇒ the recorder emits one `observability_degraded` line + fails the
+      // strict rail. When no sink (off / unwired) this returns false ⇒
+      // byte-identical. Bound to the SAME `@/observability` seam the DI mirror
+      // pattern exists for (`@/stream` may not import it).
+      traceContextExpected: () => getSpanSink() !== null,
     })
   }
 

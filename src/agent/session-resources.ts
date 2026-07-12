@@ -7,7 +7,12 @@ import {
   type Span,
   spanTraceRef,
 } from "@/observability"
-import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "@/observability/tracing"
+import {
+  getActiveTraceRef,
+  hexId,
+  runWithActiveTraceRef,
+  type TraceRef,
+} from "@/observability/tracing"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
@@ -295,21 +300,6 @@ export const turnSpanAttrs = (turnId: string): ReturnType<typeof attrs> =>
 // byte-identical (no async-context frame, no id allocation).
 // ───────────────────────────────────────────────────────────────────────────
 
-/** Crypto-strong lowercase hex of `byteCount` bytes (W3C id shape). Mirrors the
- *  tracing slice's `randomHex`. Used ONLY on the CONTEXT-only fallback (a sink
- *  that issues opaque tokens instead of a {@link TraceRef}); the EXPORT sink
- *  path never reaches it — it installs the exporter-issued id verbatim. */
-const bridgeHex = (byteCount: number): string => {
-  const bytes = new Uint8Array(byteCount)
-  crypto.getRandomValues(bytes)
-  let out = ""
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i] ?? 0
-    out += (b < 0x10 ? "0" : "") + b.toString(16)
-  }
-  return out
-}
-
 /** Run `body` inside the active-context span scope for the just-opened `span`.
  *  This is THE unification seam (jul-12 OTel-GenAI): the id installed as the
  *  active `TraceRef` is the SAME id the sink issued for `span` (surfaced on
@@ -357,8 +347,8 @@ export const withActiveSpanScope = <T>(
   // and inherit the enclosing active ref as parent (isolation preserved).
   const parent = isRoot ? undefined : getActiveTraceRef()
   const ref: TraceRef = {
-    traceId: parent?.traceId ?? bridgeHex(16),
-    spanId: bridgeHex(8),
+    traceId: parent?.traceId ?? hexId(16),
+    spanId: hexId(8),
     traceFlags: parent !== undefined ? parent.traceFlags : 1,
     ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
   }

@@ -23,35 +23,16 @@
 
 import { errMessage } from "@/shared"
 import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "./active-context"
+import { hexId } from "./hex-id"
 import type { Span, SpanAttributes, SpanContext, SpanKind, SpanStatusCode, Tracer } from "./port"
-
-// ────────────────────────────────────────────────────────────────────────────
-// Hex ID generation (W3C: 32-hex traceId / 16-hex spanId, both lowercase)
-// ────────────────────────────────────────────────────────────────────────────
-
-/** Fill `byteCount` bytes with crypto-strong randomness and hex-encode. Uses
- *  `crypto.getRandomValues` (WebCrypto, available globally on Bun + Node 20+).
- *  No fallback — if the global is missing, we'd rather crash here than emit
- *  predictable IDs (predictable trace IDs collide and silently merge unrelated
- *  traces on the collector). */
-const randomHex = (byteCount: number): string => {
-  const bytes = new Uint8Array(byteCount)
-  crypto.getRandomValues(bytes)
-  let out = ""
-  for (let i = 0; i < bytes.length; i++) {
-    const b = bytes[i] ?? 0
-    out += (b < 0x10 ? "0" : "") + b.toString(16)
-  }
-  return out
-}
 
 /** Build a fresh W3C-shaped no-op `SpanContext`. flags=0 (un-sampled) marks
  *  this as a non-recording span on any downstream collector — the IDs are
  *  syntactically valid but the consumer will drop them per the sampled-bit
  *  contract. */
 const newNoopContext = (): SpanContext => ({
-  traceId: randomHex(16), // 16 bytes → 32 hex
-  spanId: randomHex(8), //  8 bytes → 16 hex
+  traceId: hexId(16), // 16 bytes → 32 hex
+  spanId: hexId(8), //  8 bytes → 16 hex
   traceFlags: 0,
 })
 
@@ -77,7 +58,7 @@ const newNoopSpan = (parent?: SpanContext | Span): Span => {
       : {
           // Inherit traceId from parent → child belongs to the same trace.
           traceId: parentCtx.traceId,
-          spanId: randomHex(8),
+          spanId: hexId(8),
           // Inherit sampled bit from parent so a parent that decides "yes,
           // sample me" carries through. (No-op path will always be 0
           // anyway, but this rule matters when the noop tracer is fed a
