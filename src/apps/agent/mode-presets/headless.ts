@@ -36,8 +36,12 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
-import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
 import { StreamJsonSink } from "./stream-json-sink"
+import {
+  resolveModePresetPromptSurfaceProfile,
+  resolveModePresetRepoRules,
+  resolveModePresetSystemPrompt,
+} from "./system"
 
 /** P26 — does this run want a STRUCTURED stdout contract (json / stream-json)?
  *  `text` / absent ⇒ false ⇒ the legacy StdoutStream + final-text path runs
@@ -50,12 +54,15 @@ const wantsStructuredOutput = (req: AssembleRequest): boolean =>
  *  fields where present, fills the rest with safe headless defaults. The single
  *  user message is constructed from `req.headless.prompt` — this is the ONLY
  *  message in the conversation seed for a one-shot run. */
-const buildHeadlessBase = (
+const buildHeadlessBase = async (
   req: AssembleRequest,
   prompt: string,
   structuredSink: StreamJsonSink | undefined,
-): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
+): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.base.cwd ?? process.cwd()
+  // WS4 R3 — headless (`quanta -p`, one-shot on the user's cwd) is a human-driven
+  // real-repo surface, so it honors AGENTS.md/CLAUDE.md just like interactive.
+  const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   // P26 — when a structured stdout contract is selected the agent loop must
   // emit INTO the StreamJsonSink (which encodes each AgentEvent → versioned
@@ -80,6 +87,7 @@ const buildHeadlessBase = (
       messages,
       system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
       ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
+      ...(repoRules !== undefined ? { repoRules } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 20,
       // T01 (audit L5 H-2): inherit the composition-root's REAL signal. The
@@ -123,7 +131,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
       })
     : undefined
 
-  const base = buildHeadlessBase(req, prompt, structuredSink)
+  const base = await buildHeadlessBase(req, prompt, structuredSink)
   const cfg = assembleAgentConfig({ ...req, base })
 
   const runner = resolveRunAgent(req.seams)

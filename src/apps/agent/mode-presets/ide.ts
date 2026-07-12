@@ -62,7 +62,11 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
-import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
+import {
+  resolveModePresetPromptSurfaceProfile,
+  resolveModePresetRepoRules,
+  resolveModePresetSystemPrompt,
+} from "./system"
 
 /** Per-branch verify budget for IDE: 60s — interactive surface, a human is
  *  waiting, so cap each speculative branch tighter than the autonomous daemon. */
@@ -76,9 +80,13 @@ const IDE_BRANCH_SEARCH: BranchSearchConfig = {
   isolation: "worktree",
 }
 
-const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
+const buildIdeBase = async (
+  req: AssembleRequest,
+): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.base.cwd ?? process.cwd()
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
+  // WS4 R3 — the IDE drives a real repo on the user's cwd → honor AGENTS.md.
+  const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   // The IDE host normally injects a structured StreamPort; StdoutStream is a
   // safe fallback for a headless smoke of the ide assembly.
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
@@ -100,6 +108,7 @@ const buildIdeBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "b
       messages: req.base.messages ?? [],
       system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
       ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
+      ...(repoRules !== undefined ? { repoRules } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 200,
       // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
@@ -116,7 +125,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.mode !== "ide") {
     throw new Error(`ide.runMode: req.mode must be "ide", got "${req.mode}"`)
   }
-  const base = buildIdeBase(req)
+  const base = await buildIdeBase(req)
   const cfg = assembleAgentConfig({ ...req, base })
   const runner = resolveRunAgent(req.seams)
   const outcome = await runner(cfg)

@@ -8,7 +8,6 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
-import { loadRepoRules } from "@/agent/repo-rules"
 import type { PermissionContext } from "@/permission"
 import { type ApprovalResolver, driveSessionTurn } from "@/runner/orchestrate"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -22,7 +21,11 @@ import {
 } from "../assemble"
 import { buildInteractiveTurnAssembler } from "../interactive-turn-assembler"
 import { exitCodeForOutcome } from "../run"
-import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
+import {
+  resolveModePresetPromptSurfaceProfile,
+  resolveModePresetRepoRules,
+  resolveModePresetSystemPrompt,
+} from "./system"
 
 interface PromptSourceLike {
   next(signal?: AbortSignal): Promise<string | null>
@@ -77,11 +80,10 @@ const buildInteractiveBase = async (
   // CLAUDE.md). The whole downstream render already exists (context-assembler →
   // prompt.ts renderRepoRulesBlock → four-section project_md); only this seam was
   // missing, so a repo's rules reached bench prompts but never the interactive
-  // model. A caller override on `req.base.repoRules` wins; else load from cwd.
-  // Fail-open: a broken/absent rule file must never break the session start.
-  // Bench sandboxes / agent forks intentionally do NOT go through this preset, so
-  // their byte-identical rule-less posture (AgentConfig.repoRules doc) is unchanged.
-  const repoRules = req.base.repoRules ?? (await loadRepoRules(cwd).catch(() => undefined))
+  // model. Policy (caller-override wins · batch stays rule-less · fail-open) is
+  // centralized in `resolveModePresetRepoRules` so every human/automation preset
+  // resolves rules identically (hell-audit R3 — was interactive-only).
+  const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   return {
     ...req.base,
     llm: req.base.llm,

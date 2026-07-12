@@ -42,7 +42,11 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
-import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
+import {
+  resolveModePresetPromptSurfaceProfile,
+  resolveModePresetRepoRules,
+  resolveModePresetSystemPrompt,
+} from "./system"
 
 /** Env names allowed into the `gh` subprocess. Mirrors the audited
  *  `DEFAULT_ENV_ALLOWLIST` (PATH/HOME/LANG/TZ/…) PLUS the gh-specific tokens
@@ -275,13 +279,15 @@ const fencePayload = (raw: string): string =>
 /** Build the AgentConfig.base for a ci-bot run. Restricted permission, no
  *  reviewer-backed onConfirm (the matrix forbids it), and message[0] is the
  *  fetched PR context. */
-const buildCiBotBase = (
+const buildCiBotBase = async (
   req: AssembleRequest,
   wiring: CiBotWiring,
   prContext: string,
-): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
+): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.ciBot?.cwd ?? req.base.cwd ?? process.cwd()
   const llm: LLMPort = req.base.llm
+  // WS4 R3 — ci-bot reviews a real PR checkout → honor the repo's AGENTS.md.
+  const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   const permission: PermissionContext = req.base.permission ?? { mode: "acceptEdits" }
@@ -325,6 +331,7 @@ const buildCiBotBase = (
     messages,
     system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
     ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
+    ...(repoRules !== undefined ? { repoRules } : {}),
     cwd,
     maxTurns: req.base.maxTurns ?? 30,
     // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
@@ -367,7 +374,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   const cwd = req.ciBot?.cwd ?? req.base.cwd ?? process.cwd()
   const wiring = buildCiBotWiring(cwd, req.seams)
   const prContext = await fetchPrContext(pr, wiring.gh)
-  const base = buildCiBotBase(req, wiring, prContext)
+  const base = await buildCiBotBase(req, wiring, prContext)
   const cfg = assembleAgentConfig({ ...req, base })
 
   const runner = resolveRunAgent(req.seams)

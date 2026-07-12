@@ -18,15 +18,17 @@
  *   §2  CONTROL — a cwd with NO repo-rule file leaves repoRules undefined
  *       (byte-identical preservation for rule-less repos / the absent case the
  *       AgentConfig.repoRules doc guarantees).
- *   §3  PROPAGATION + DEFANG — the loaded rules reach the assembled system
- *       prompt (buildTurnContext, the real caller path) AND a forged
- *       `</system-reminder>` inside the rules body is defanged (`<\/…>`), never
- *       emitted as a genuine boundary the model would obey.
+ *   §3  CALLER-OVERRIDE — a host-supplied `base.repoRules` wins over the cwd
+ *       scan (the `req.base.repoRules ??` left branch). (hell-audit remediation)
+ *
+ * PROPAGATION to the live LLM system prompt + the forged-boundary DEFANG through
+ * the real wire live in the sibling `interactive-repo-rules-e2e-hellgate` (§1/§4)
+ * — that runs the real loop, so it is the honest home for those (the old unit §3
+ * manually re-fed buildTurnContext, which only re-tested prompt.ts in isolation).
  *
  * Boundary discipline: loadRepoRules' own walk-up/symlink-reject semantics stay
  * covered by `repo-rules.test.ts` / `repo-rules-tree-hellgate.test.ts`; the
- * escape helper by `prompt-escape-hellgate.test.ts`. This file only asserts the
- * NEW wiring + that it lands in the render it claims to.
+ * escape helper by `prompt-escape-hellgate.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"

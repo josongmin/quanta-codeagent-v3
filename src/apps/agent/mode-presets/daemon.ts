@@ -62,7 +62,11 @@ import {
   resolveRunAgent,
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
-import { resolveModePresetPromptSurfaceProfile, resolveModePresetSystemPrompt } from "./system"
+import {
+  resolveModePresetPromptSurfaceProfile,
+  resolveModePresetRepoRules,
+  resolveModePresetSystemPrompt,
+} from "./system"
 
 /** Per-branch verify budget for daemon: 90s — no human waiting, so allow a
  *  longer speculative branch than IDE for the diagnostic-rich verifier set. */
@@ -76,9 +80,13 @@ const DAEMON_BRANCH_SEARCH: BranchSearchConfig = {
   isolation: "worktree",
 }
 
-const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
+const buildDaemonBase = async (
+  req: AssembleRequest,
+): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.base.cwd ?? process.cwd()
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
+  // WS4 R3 — the daemon runs on a real per-instance repo → honor AGENTS.md.
+  const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   // No human ⇒ auto/acceptEdits within the allowlist (network/gitWrite levers
   // enforce the boundary; permission just clears in-scope edits).
@@ -98,6 +106,7 @@ const buildDaemonBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" |
       messages: req.base.messages ?? [],
       system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
       ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
+      ...(repoRules !== undefined ? { repoRules } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 40,
       // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired
@@ -113,7 +122,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.mode !== "daemon") {
     throw new Error(`daemon.runMode: req.mode must be "daemon", got "${req.mode}"`)
   }
-  const base = buildDaemonBase(req)
+  const base = await buildDaemonBase(req)
   const cfg = assembleAgentConfig({ ...req, base })
   const runner = resolveRunAgent(req.seams)
   const outcome = await runner(cfg)

@@ -17,8 +17,9 @@
  * Resource hygiene:
  *   - Hard cap on concurrent PTYs (`MAX_PTY`); a `spawn` over the cap returns
  *     a structured error instead of OOM-spawning unbounded children.
- *   - On `close_agent` we forceStop the runner AND, if a pty handle is owned
- *     by the same id, kill it too — no orphan processes.
+ *   - `close_agent` forceStops the runner (spawn_agent children are NOT ptys, so
+ *     it owns no pty teardown); live pty children are reaped by
+ *     `PtyTable.closeAll` at session shutdown, which tree-kills (WS1 P1).
  *
  * Slice isolation: this module imports ONLY zod, the contract module, and
  * `./registry` (`TaskRegistry`/`TaskOwnerToken`) + `./types` (`SubagentRunner`).
@@ -898,8 +899,7 @@ export const handleCloseAgent = async (
     // Race: it settled between our read and our stop — idempotent path.
     return { kind: "success", wasRunning: false }
   }
-  // Drop any pty owned by the same id (defensive — spawn_agent doesn't own
-  // ptys today, but close_agent is the centralised teardown hook).
+  // No pty teardown here: spawn_agent children are not ptys (see module doc).
   return { kind: "success", wasRunning: true }
 }
 
