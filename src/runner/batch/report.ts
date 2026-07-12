@@ -23,6 +23,8 @@
  */
 import { createHash } from "node:crypto"
 import { quantaHomePath, runtimeConfig } from "@/shared"
+import { ObservationError } from "./eval/report"
+import type { BenchObserver, LocalizeData } from "./observe"
 import {
   aggregate,
   classify,
@@ -55,6 +57,26 @@ import type {
   SelectionProofSummary,
   SelectionTelemetry,
 } from "./types"
+
+/**
+ * F1 — emit the Agentless Stage-1 file-tree build + localize outcome. Mirrors
+ * `emitSandbox`/`emitVerify` (eval/report.ts): no observer ⇒ no-op (behaviour-
+ * neutral), and a strict recorder failure becomes an {@link ObservationError}
+ * so the driver maps it to `verdict:"degraded"`. Captures the truncation window
+ * + candidate breadth so post-mortem localization RCA is no longer blind to a
+ * dropped-gold-file mislocalization.
+ */
+export const emitLocalize = (
+  observer: BenchObserver | undefined,
+  data: LocalizeData,
+): void => {
+  if (observer === undefined) return
+  try {
+    observer.localize(data)
+  } catch (e) {
+    throw new ObservationError(e)
+  }
+}
 
 export interface BenchReportMeta {
   model: string

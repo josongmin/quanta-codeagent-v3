@@ -24,6 +24,47 @@ const DEFAULT_MAX_LINES = 100_000
 const FLUSH_BATCH = 16
 const EMPTY_CTX: RunContext = { runId: "unknown" }
 
+/**
+ * Crash-resilience registry (F2). On a hard box death (OOM / exit137 / SIGKILL
+ * / spot-reclaim SIGTERM) the `finally` that calls `close()` never runs, so the
+ * last ≤`FLUSH_BATCH-1` buffered events — the turns that explain the crash —
+ * would be lost. Spot reclaim in particular sends SIGTERM with a ~2min warning,
+ * so a best-effort flush on that signal saves the tail. We hold live recorders
+ * in a module-scoped set and flush them all when the signal fires.
+ *
+ * SIGKILL/exit137 can't be trapped in-process; the turn-boundary flush in
+ * `emit` (below) is what protects the tail there — each completed turn is on
+ * disk before the next one starts.
+ */
+const liveRecorders = new Set<JsonlRecorder>()
+let signalHandlerInstalled = false
+
+/** Register the SIGTERM/SIGINT best-effort flush ONCE. Never throws — a broken
+ *  flush on one recorder must not stop the others or the process teardown. */
+function ensureSignalFlush(): void {
+  if (signalHandlerInstalled) return
+  signalHandlerInstalled = true
+  const flushAll = (): void => {
+    for (const rec of liveRecorders) {
+      try {
+        rec.flush()
+      } catch {
+        // Best-effort: a torn-down volume must not abort the teardown path or
+        // block the remaining recorders. The tail we could save, we saved.
+      }
+    }
+  }
+  // Do not consume the signal (no re-emit / process.exit): we only piggy-back a
+  // flush; the runtime's default disposition (and any user handler) still runs.
+  try {
+    process.on("SIGTERM", flushAll)
+    process.on("SIGINT", flushAll)
+  } catch {
+    // Some sandboxes forbid signal registration — degrade to turn-boundary
+    // flush only rather than crash the recorder at construction time.
+  }
+}
+
 interface PendingChunk {
   readonly body: string
   readonly lineCount: number
@@ -80,6 +121,12 @@ export class JsonlRecorder implements StreamPort {
     this.maxLines = opts.maxLines ?? DEFAULT_MAX_LINES
     this.producer = opts.producer
     mkdirSync(dirname(target), { recursive: true })
+    // F2: enroll in the crash-flush registry so a spot-reclaim SIGTERM can save
+    // this recorder's buffered tail. Idempotent handler install (registered once
+    // process-wide). Removed in `close()` so a normally-closed recorder isn't
+    // re-flushed (a no-op on an empty buffer, but keeps the set from leaking).
+    ensureSignalFlush()
+    liveRecorders.add(this)
   }
 
   emit(event: AgentEvent): void {
@@ -128,6 +175,26 @@ export class JsonlRecorder implements StreamPort {
       return
     }
     this.record(kindOf(event), dataOf(event), spanOf(event, this.turnSpanId))
+    // F2 turn-boundary flush: force the buffer to disk at the events that mark
+    // a completed unit of work — a new turn opening (`turn_start`), the session
+    // ending (`done`→session_end), or a failure (`error`). This guarantees each
+    // finished turn is durable BEFORE the next one starts, so a hard crash
+    // (OOM/exit137/SIGKILL — untrappable, so the signal handler can't help)
+    // still leaves the explanatory tail on disk. Behavior-neutral vs the
+    // batched path: same bytes, same order, just flushed earlier. Cheap — one
+    // flush per turn, not per delta. Best-effort: a flush failure here is already
+    // handled the same way as any other (degraded snapshot via close()/next flush).
+    if (event.type === "turn_start" || event.type === "done" || event.type === "error") {
+      try {
+        this.flush()
+      } catch (e) {
+        // Route a boundary-flush failure through the SAME degrade path the
+        // batched `flushMaybe` failure takes (via `record`): count the drop and,
+        // in strict mode, rethrow — so this extra flush never changes the
+        // non-strict/strict contract, only WHEN the write happens.
+        this.degrade(toError(e), this.strict)
+      }
+    }
   }
 
   private record(
@@ -262,6 +329,12 @@ export class JsonlRecorder implements StreamPort {
    *  of a run can't crash the agent (mirrors the non-strict emit contract). */
   close(): void {
     if (this.closed) return
+    // F2: leave the crash-flush registry — a cleanly-closed recorder must not be
+    // re-flushed by a later SIGTERM (harmless on an empty buffer, but keeps the
+    // set from growing unbounded across many runs in one process). Done before
+    // the flush so an in-flight signal handler racing close() can't double-flush
+    // the same drained buffer.
+    liveRecorders.delete(this)
     // L6 M6(a): flush BEFORE flipping `closed`. A flush failure must leave the
     // recorder re-closable so a later close() retries the pending buffer; if we
     // set the flag first, a transient disk error permanently traps the data.

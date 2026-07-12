@@ -2,7 +2,7 @@ import pkg from "../../package.json" with { type: "json" }
 import type { RunContext } from "./run-context"
 
 /**
- * Trajectory schema v1 — the schema registry key (RFC-0002 §5.2).
+ * Trajectory schema v1 — the schema registry key (RFC-0002 §5.2 (governance: ADR-0539)).
  *
  * Lives in `@/shared` because `@/stream` must import it and slice isolation
  * forbids `@/stream → @/observability` (RFC §6). The append-only JSONL
@@ -22,7 +22,7 @@ export const TRAJECTORY_SCHEMA = "quanta.trajectory.v1" as const
  */
 export const REDACTION_POLICY = "secrets.v1" as const
 
-/** Exhaustive event taxonomy (RFC-0002 §5.2). */
+/** Exhaustive event taxonomy (RFC-0002 §5.2 (governance: ADR-0539)). */
 export type TrajectoryKind =
   | "session_start"
   | "session_end"
@@ -34,6 +34,7 @@ export type TrajectoryKind =
   | "tool_progress"
   | "tool_result"
   | "recovery"
+  | "localize"
   | "patch_generated"
   | "patch_applied"
   | "patch_rejected"
@@ -53,6 +54,7 @@ const TRAJECTORY_KINDS: ReadonlySet<string> = new Set<TrajectoryKind>([
   "tool_progress",
   "tool_result",
   "recovery",
+  "localize",
   "patch_generated",
   "patch_applied",
   "patch_rejected",
@@ -76,7 +78,7 @@ export interface Redaction {
 }
 
 /**
- * One trajectory line (RFC-0002 §5.2). Append-only, one event per JSONL line.
+ * One trajectory line (RFC-0002 §5.2 (governance: ADR-0539)). Append-only, one event per JSONL line.
  * `seq` is process-monotonic so ordering survives wall-clock skew; `ts` is
  * display-only. `data` is the kind-specific payload (already scrubbed).
  */
@@ -126,6 +128,16 @@ export interface PatchData {
   applyStatus: string
 }
 
+/** `kind:"localize"` payload — the scaffold's Stage-1 file-tree build + localize
+ *  outcome. Traces the pre-LLM tree enumeration + truncation so a mislocalization
+ *  caused by the gold file falling past the tree cap is diagnosable post-mortem. */
+export interface LocalizeData {
+  treeFileCount: number
+  truncated: boolean
+  truncatedChars?: number
+  rankedCandidateCount: number
+}
+
 /** `kind:"sandbox"` payload — one snapshot at instance start. */
 export interface SandboxData {
   repoCommit: string
@@ -159,7 +171,7 @@ const REDACTED = "***REDACTED***"
 /**
  * Object keys whose value is always a secret regardless of content.
  *
- * Two complementary patterns (RFC-0002 §3 원칙6 — "비밀 누출 0, 게이트"):
+ * Two complementary patterns (RFC-0002 §3 원칙6 (ADR-0539) — "비밀 누출 0, 게이트"):
  *
  *  1. {@link SECRET_KEY_SUFFIX_RE} — separator-anchored *suffixes*
  *     (`*_KEY` / `*_TOKEN` / `*_SECRET` / …). Catches `OPENAI_API_KEY`,

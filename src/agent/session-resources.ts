@@ -238,11 +238,27 @@ export const stampTurn = (run: RunContext | undefined, turn: number): RunContext
  *  side-conversation absorption — see vocabulary.ts comments).
  *  `quanta.thread.kind` is `"main"` here; subagent/side-conv spans set their
  *  own kind. */
-export const sessionSpanAttrs = (sessionId: string): ReturnType<typeof attrs> =>
+export const sessionSpanAttrs = (
+  sessionId: string,
+  /** F3 — OPTIONAL bench trajectory identity, folded onto the `session_loop`
+   *  span so an OTLP span is JOINABLE to its trajectory line. `instanceId`
+   *  stamps `quanta.instance.id`; together with the `quanta.run.id` RESOURCE
+   *  attr the exporter already carries, `{runId, instanceId}` is the join key
+   *  (`<runId>/<instanceId>.<attempt>.jsonl`). `attempt` stamps `quanta.attempt`
+   *  when the driver knows the Best-of-N/retry index. Absent (every non-bench
+   *  entry point passes nothing) ⇒ neither key is touched ⇒ byte-identical. */
+  spanIdentity?: { readonly instanceId?: string; readonly attempt?: number },
+): ReturnType<typeof attrs> =>
   attrs({
     [QUANTA_ATTRS.conversation.id]: sessionId,
     [QUANTA_ATTRS.thread.id]: sessionId,
     [QUANTA_ATTRS.thread.kind]: "main",
+    ...(spanIdentity?.instanceId !== undefined && spanIdentity.instanceId !== ""
+      ? { [QUANTA_ATTRS.instance.id]: spanIdentity.instanceId }
+      : {}),
+    ...(spanIdentity?.attempt !== undefined
+      ? { [QUANTA_ATTRS.instance.attempt]: spanIdentity.attempt }
+      : {}),
   })
 
 /** Codex 10-step span tree — turn ring (`session_task.turn`). Opens once per

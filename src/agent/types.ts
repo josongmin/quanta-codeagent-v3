@@ -189,6 +189,18 @@ export interface AgentConfig
   /** Stable id for the current session, used to tag persisted memory. */
   sessionId?: string
   /**
+   * F3 — OPTIONAL bench trajectory identity, stamped onto the top-level
+   * `session_loop` OTEL span (see `sessionSpanAttrs`) so an OTLP span is
+   * JOINABLE to its trajectory line. The bench driver sets `instanceId` (the
+   * SWE-instance id) — together with the `quanta.run.id` resource attr the OTEL
+   * exporter already carries, `{runId, instanceId}` is the join key that links
+   * a span to `<runId>/<instanceId>.<attempt>.jsonl`. `attempt` is the
+   * Best-of-N/retry index when the driver knows it. Absent (every non-bench
+   * entry point) ⇒ span attrs untouched ⇒ byte-identical, and zero-overhead
+   * when the OTEL sink is OFF (the span itself is a no-op sentinel).
+   */
+  spanIdentity?: { readonly instanceId?: string; readonly attempt?: number }
+  /**
    * Embedding provider for semantic recall + dedup (long-term memory, RFC §6.3).
    * Absent ⇒ recall/consolidation degrade to lexical+tag+freshness only; the
    * loop is otherwise unchanged. Wired by the app layer (OpenAI adapter).

@@ -26,7 +26,13 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { costUsd, Metrics, PRICING_VERSION } from "@/observability"
-import type { PatchData, RunContext, SandboxData, VerifyData } from "@/shared"
+import type {
+  PatchData,
+  RunContext,
+  SandboxData,
+  TrajectoryKind,
+  VerifyData,
+} from "@/shared"
 import { makeEvent, redactValue } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder } from "@/stream"
@@ -70,6 +76,35 @@ export class UsageTap implements StreamPort {
       ...(this.cacheCreationTokens > 0 ? { cacheCreationTokens: this.cacheCreationTokens } : {}),
     }
   }
+}
+
+/**
+ * `kind:"localize"` payload (F1) — the Agentless Stage-1 file-tree build +
+ * localize outcome. This is a CONSEQUENTIAL scaffold action that was previously
+ * un-traced: the repo file-tree that feeds the localize prompt is truncated
+ * (`renderFileTree` maxFiles/maxTreeChars) and any gold file past the window is
+ * silently dropped ⇒ guaranteed mislocalization with ZERO evidence. This event
+ * lets post-mortem localization RCA see (a) tree file count, (b) whether
+ * truncation fired, (c) how many candidates were ranked.
+ *
+ * NOTE (schema): the shared {@link TrajectoryKind} union + its runtime validator
+ * (`isTrajectoryEvent` in `@/shared/trajectory`) do NOT yet list `"localize"`.
+ * That file is outside this change's ownership; until its union is widened, the
+ * probe's strict validator will not recognize these lines as canonical
+ * trajectory events. The append below stamps the kind through {@link makeEvent}
+ * so the JSONL is otherwise well-formed. See the change report.
+ */
+export interface LocalizeData {
+  /** Total files enumerated by the fileTree() enumerator BEFORE truncation. */
+  treeFileCount: number
+  /** Whether `renderFileTree`'s caps dropped any entry (file-count or char). */
+  truncated: boolean
+  /** How many chars the rendered tree consumed (only when a char/count cap
+   *  fired) — lets RCA see how tight the budget was. */
+  truncatedChars?: number
+  /** How many candidate files the localizer surfaced (ranked). 0 ⇒ localize
+   *  gave up / fell back to regex. */
+  rankedCandidateCount: number
 }
 
 /** Per-attempt observation handle the runner threads into a single instance. */
@@ -127,10 +162,13 @@ export class BenchObserver {
   /** Append a bench-produced trajectory line. Strict: rethrows on failure so
    *  the caller can mark the instance degraded. */
   private append(
-    kind: "sandbox" | "patch_generated" | "verify",
+    kind: "sandbox" | "patch_generated" | "verify" | "localize",
     data: Record<string, unknown>,
   ): void {
-    const event = makeEvent(this.seq++, kind, this.ctx, data, { ts: this.now() })
+    // "localize" (F1) is not yet in the shared TrajectoryKind union; makeEvent's
+    // param is typed against that union, so cast the widened local kind. The
+    // event is otherwise fully well-formed (schema/producer/redaction stamped).
+    const event = makeEvent(this.seq++, kind as TrajectoryKind, this.ctx, data, { ts: this.now() })
     appendFileSync(this.file, `${JSON.stringify(event)}\n`)
   }
 
@@ -144,6 +182,12 @@ export class BenchObserver {
 
   verify(data: VerifyData): void {
     this.append("verify", { ...data })
+  }
+
+  /** F1 — emit the Agentless file-tree build + localize outcome so post-mortem
+   *  localization RCA is no longer blind to truncation / candidate breadth. */
+  localize(data: LocalizeData): void {
+    this.append("localize", { ...data })
   }
 
   /** Flush the agent-stream recorder. Best-effort; never throws. */

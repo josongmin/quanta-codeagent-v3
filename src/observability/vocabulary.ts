@@ -267,6 +267,27 @@ export const QUANTA_ATTRS = {
      *  the OTLP *resource*, so it applies to every span of the run. */
     id: "quanta.run.id",
   },
+  /** Bench SWE-instance identity, stamped on the top-level `session_loop` span
+   *  (F3). Together with the `quanta.run.id` resource attr these form the JOIN
+   *  KEY that lets the trace-viewer link an OTLP span back to its bench
+   *  trajectory line (`<runId>/<instanceId>.<attempt>.jsonl` — see
+   *  `runner/batch/observe.ts` `RunContext`). Without it a trajectory turn keyed
+   *  by runId/instanceId could NOT be joined to its OTEL span: the trajectory's
+   *  synthetic `llm:tN` spanId is a different namespace from the OTLP random
+   *  spanId (false friends). Per-SPAN (not resource): one bench PROCESS streams
+   *  many instances, so instanceId varies per session and cannot ride the
+   *  process-wide resource the way runId does. Absent (non-bench sessions) ⇒ key
+   *  omitted ⇒ byte-identical. */
+  instance: {
+    id: "quanta.instance.id",
+    /** Best-of-N / retry attempt index for THIS instance (the `.<attempt>`
+     *  segment of the trajectory filename). Completes the full trajectory key
+     *  `{runId, instanceId, attempt}`. Omitted when the driver did not thread an
+     *  attempt index (single-pass / attempt unknown at span-open) ⇒ join still
+     *  works on `runId+instanceId` (attempt is only a same-instance
+     *  discriminator). */
+    attempt: "quanta.attempt",
+  },
 } as const
 
 // ---------------------------------------------------------------------------

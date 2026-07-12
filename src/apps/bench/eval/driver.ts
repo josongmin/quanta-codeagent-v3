@@ -1748,6 +1748,7 @@ const runAdaptiveAttempt = async (args: {
         posture,
         state,
         widening.owners,
+        wiring.observer, // F1: localize trace on the adaptive re-prepare too
       )
       const nextPhase = await runAppMainPhase({
         instance,
@@ -1928,6 +1929,11 @@ const runInstanceBody = async (args: {
     args.sandbox,
     args.deps,
     args.abort.signal,
+    undefined,
+    undefined,
+    undefined,
+    // F1: light up the localize file-tree/truncation trace (no-op if unbound).
+    args.state.wiring.observer,
   )
   const preparedContext = args.state.prepared
   if (preparedContext.reproTest !== undefined) args.state.reproTest = preparedContext.reproTest

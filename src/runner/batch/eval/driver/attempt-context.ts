@@ -31,6 +31,8 @@ import {
   benchRunsRepairPhase,
   benchShouldRunRepairPhase,
 } from "../repair-phase-policy"
+import type { BenchObserver } from "../../observe"
+import { emitLocalize } from "../../report"
 import type { Wiring } from "../report"
 import type { ReproArtifactSink } from "../repro-artifacts-sink"
 import { filesFromPatch } from "../selection-executor"
@@ -77,6 +79,11 @@ const prepareHintAndReproContext = async (
   llm: LLMPort,
   posture: BenchPosture,
   reproArtifactSink?: ReproArtifactSink,
+  /** F1 — the SHARED per-attempt observer (from `Wiring`). When present, the
+   *  file-tree build + localize outcome is emitted as a `localize` trace so
+   *  post-mortem localization RCA can see truncation / candidate breadth. Absent
+   *  ⇒ no-op (behaviour-neutral), same gate as `emitSandbox`. */
+  observer?: BenchObserver,
 ): Promise<HintReproContext> => {
   let localizeCandidates: readonly string[] = []
   const precomputedHint = await prepareIssueHint(instance, sandbox, posture.issueHintMode, {
@@ -90,6 +97,10 @@ const prepareHintAndReproContext = async (
     onCandidates: (files) => {
       localizeCandidates = files
     },
+    // F1 — emit the truncation + candidate-breadth trace through the SHARED
+    // observer (no-op when unbound). Kept behind the observer gate so a
+    // non-observing run stays byte-identical.
+    onLocalize: (data) => emitLocalize(observer, data),
   })
   const chaMultisite = await resolveChaMultisiteContext({
     instance,
@@ -253,6 +264,12 @@ export const prepareAttemptContext = async (
    *  knob off). Never hard `requiredFiles` — only T1 static-edge validation can
    *  promote a site to a coverage requirement. */
   forwardLocalizeOwners?: readonly string[],
+  /** F1 — the SHARED per-attempt observer (from `Wiring`) so the localize step
+   *  can emit its file-tree build + outcome trace. Trailing-optional so the
+   *  composition caller stays source-compatible; ABSENT ⇒ no `localize` trace is
+   *  emitted (byte-identical to the pre-F1 path). The caller in the batch driver
+   *  passes `wiring.observer` to light this up. */
+  observer?: BenchObserver,
 ): Promise<PreparedAttemptContext> => {
   const state = stateOverride ?? resolveBenchKnobs({ envVars: process.env })
   const posture = postureOverride ?? benchPostureFromState(state, process.env)
@@ -274,6 +291,7 @@ export const prepareAttemptContext = async (
     deps.llm,
     posture,
     deps.reproArtifactSink,
+    observer,
   )
   // T3 — forward-localize consumers enter as low-score ADDITIONAL owner candidates
   // (they widen the set; ranking still prefers backward-localized owners). score 0

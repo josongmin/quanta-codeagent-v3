@@ -12,6 +12,7 @@
  */
 
 import { createHash } from "node:crypto"
+import { errMessage, logger } from "@/shared"
 import type { LLMPort } from "../ports"
 import type { StreamEvent, StreamInput } from "../types"
 import { defaultHashRequest } from "./jsonl-store"
@@ -152,11 +153,65 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
       async function commitBestEffort(partial: boolean): Promise<void> {
         try {
           await commit(partial)
-        } catch {
-          // Recording is a sidecar after a successful live turn. Never let a
-          // cassette/scrubber failure flip the already-successful stream into
-          // a surfaced LLM failure.
+        } catch (commitErr) {
+          // F7: recording is a sidecar after a successful live turn, so we must
+          // NEVER flip the already-successful stream into a surfaced LLM failure
+          // (that's the caller contract — unlike the partial:true path which
+          // rethrows). But swallowing the error SILENTLY turned a lost turn into
+          // an invisible hole: a scrubber or store.append that threw on a
+          // SUCCEEDED stream left no record and no signal. So we (1) warn — a
+          // durable, greppable operator signal — and (2) attempt a minimal
+          // degraded record so the lost turn is at least VISIBLE on the tape.
+          logger.warn("recording-llm: commit failed on a successful turn (turn NOT recorded)", {
+            error: errMessage(commitErr),
+            instanceId: opts.callCtx?.instanceId,
+            runId: opts.callCtx?.runId,
+            attempt: opts.callCtx?.attempt,
+            capturedEvents: captured.length,
+          })
+          await appendDegradedSentinel(commitErr).catch(() => {
+            // The sentinel is itself best-effort: if store.append is what broke,
+            // this degraded append will break too. The `logger.warn` above is the
+            // guaranteed non-silent signal; the sentinel is a bonus when the
+            // failure was in the scrubber (append still works).
+          })
         }
+      }
+
+      /** F7 sentinel: a minimal degraded record so a swallowed commit failure on
+       *  a successful turn leaves a VISIBLE hole-marker on the tape instead of
+       *  nothing. Deliberately BYPASSES `opts.scrubber` (the scrubber is a likely
+       *  culprit) — it carries no captured events, only the failing turn's key +
+       *  a `partial:true`/`error` marker, so no unscrubbed content can leak. */
+      async function appendDegradedSentinel(cause: unknown): Promise<void> {
+        let id: string
+        try {
+          id = hashFn(input)
+        } catch {
+          id = createHash("sha256")
+            .update(`degraded:${startedAt}:${captured.length}`)
+            .digest("hex")
+            .slice(0, 16)
+        }
+        const sentinel: RecordedInteraction = {
+          id,
+          request: stripEphemeralRequest(input),
+          events: [],
+          metadata: {
+            recordedAt: startedAt,
+            model: opts.inner.model ?? "unknown",
+            durationMs: now() - startedAt,
+            partial: true,
+            error: `commit-failed: ${errMessage(cause)}`,
+            ...(opts.callCtx?.instanceId !== undefined
+              ? { instanceId: opts.callCtx.instanceId }
+              : {}),
+            ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
+            ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
+            ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
+          },
+        }
+        await opts.store.append(sentinel)
       }
 
       async function* iterate(): AsyncIterable<StreamEvent> {

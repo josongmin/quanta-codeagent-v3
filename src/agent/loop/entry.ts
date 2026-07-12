@@ -11,7 +11,18 @@ import { runAgentTurnLoop } from "./turn-loop"
 
 export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   const sessionId = config.sessionId ?? "default"
-  const sessionSpan: Span = startSpan(SPAN_NAMES.sessionLoop, sessionSpanAttrs(sessionId))
+  // F3 — fold the bench trajectory identity (instanceId/attempt) onto the
+  // top-level span so the OTLP span is joinable to its `<runId>/<instanceId>.
+  // <attempt>.jsonl` trajectory line. `spanIdentity` is absent for every
+  // non-bench entry point ⇒ byte-identical; and when the OTEL sink is OFF the
+  // span is a no-op sentinel so this attr build costs nothing.
+  const sessionSpan: Span = startSpan(
+    SPAN_NAMES.sessionLoop,
+    sessionSpanAttrs(
+      sessionId,
+      config.spanIdentity !== undefined ? config.spanIdentity : undefined,
+    ),
+  )
   let spanStatus: "ok" | "error" | "aborted" = "ok"
   try {
     const outcome = await runAgentInnerWithEgressProxy(config)

@@ -63,6 +63,19 @@ export interface AgentlessLocalizeResult {
   /** Raw LLM response (or empty string on stream failure). Exposed for
    *  debugging only — callers MUST NOT inject this into agent prompts. */
   readonly rawResponse: string
+  /** F1 (observe-only) — file-tree build telemetry so the caller can emit a
+   *  `localize` trace WITHOUT re-running (and risking drift from) the
+   *  truncation logic in `renderFileTree`. Absent on the early-return failure
+   *  paths that never built a tree (empty statement / bad opts / fileTree
+   *  threw / empty tree). Pure data; never fed into any prompt. */
+  readonly tree?: {
+    /** Total paths the enumerator returned BEFORE any cap. */
+    readonly fileCount: number
+    /** Whether a maxFiles / maxTreeChars cap dropped any entry. */
+    readonly truncated: boolean
+    /** Chars the rendered tree consumed (present only when truncated). */
+    readonly truncatedChars?: number
+  }
 }
 
 const DEFAULT_MAX_FILES = 3000
@@ -193,23 +206,32 @@ const renderFileTree = (
   paths: readonly string[],
   maxFiles: number,
   maxTreeChars: number,
-): { text: string; set: Set<string> } => {
+): { text: string; set: Set<string>; truncated: boolean; chars: number } => {
   const set = new Set<string>()
   const buf: string[] = []
   let chars = 0
+  // F1 observe-only: the file-count cap and the char cap are BOTH truncation
+  // (a gold file past either window is silently dropped).
+  let truncated = false
   const cap = Math.max(0, Math.min(paths.length, maxFiles))
+  if (paths.length > cap) truncated = true
   for (let i = 0; i < cap; i++) {
     const p = paths[i]
     if (typeof p !== "string" || p.length === 0) continue
     if (FORBIDDEN_PATHS.has(p)) continue
     // +1 for the newline.
     const next = chars + p.length + 1
-    if (next > maxTreeChars) break
+    if (next > maxTreeChars) {
+      // Char cap fired before we exhausted the file-count window ⇒ the rest of
+      // the (valid) paths were dropped.
+      truncated = true
+      break
+    }
     set.add(p)
     buf.push(p)
     chars = next
   }
-  return { text: buf.join("\n"), set }
+  return { text: buf.join("\n"), set, truncated, chars }
 }
 
 /**
@@ -294,14 +316,26 @@ export const agentlessLocalize = async (
     return emptyResult
   }
   if (!Array.isArray(paths) || paths.length === 0) return emptyResult
-  const { text: fileTreeText, set: fileTreeSet } = renderFileTree(paths, maxFiles, maxTreeChars)
-  if (fileTreeSet.size === 0) return emptyResult
+  const {
+    text: fileTreeText,
+    set: fileTreeSet,
+    truncated,
+    chars,
+  } = renderFileTree(paths, maxFiles, maxTreeChars)
+  // F1 observe-only telemetry — carried on EVERY return path from here down so
+  // the caller can emit the `localize` trace without re-deriving truncation.
+  const tree: AgentlessLocalizeResult["tree"] = {
+    fileCount: paths.length,
+    truncated,
+    ...(truncated ? { truncatedChars: chars } : {}),
+  }
+  if (fileTreeSet.size === 0) return { ...emptyResult, tree }
 
   const userText = buildAgentlessPrompt(problemStatement, fileTreeText, topK)
   const stream = await runLocalizeStream(deps.llm, userText)
-  if ("error" in stream) return { ...emptyResult, rawResponse: stream.error }
+  if ("error" in stream) return { ...emptyResult, rawResponse: stream.error, tree }
   const rawResponse = stream.rawResponse
-  if (rawResponse.length === 0) return { ...emptyResult, rawResponse }
+  if (rawResponse.length === 0) return { ...emptyResult, rawResponse, tree }
 
   const { files, rationales } = parseAgentlessResponse(rawResponse, fileTreeSet)
   // Trim to topK — the LLM occasionally over-produces.
@@ -310,6 +344,7 @@ export const agentlessLocalize = async (
     files: files.slice(0, cap),
     rationales: rationales.slice(0, cap),
     rawResponse,
+    tree,
   }
 }
 

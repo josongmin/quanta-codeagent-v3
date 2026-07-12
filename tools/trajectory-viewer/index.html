@@ -1275,7 +1275,7 @@ function renderRunSummary(inst){
 
 // Scaffold ACTION kinds surfaced in the timeline (the mechanical, non-LLM ones
 // the cassette can't show). LLM turns + tool_call/result already render as turns.
-const SCAFFOLD_SHOW={sandbox:1,repro_select:1,patch_generated:1,verify:1,error:1}
+const SCAFFOLD_SHOW={sandbox:1,localize:1,repro_select:1,patch_generated:1,verify:1,error:1}
 function renderScaffoldAction(ev){
   const d=ev.data||{}
   const t=fTime(ev.ts)
@@ -1290,6 +1290,8 @@ function renderScaffoldAction(ev){
     icon='📦';title=`패치 생성 · ${d.filesChanged??'?'} files, ${d.hunks??'?'} hunks · ${d.applyStatus??''}`
   }else if(ev.kind==='sandbox'){
     icon='🧰';title=`샌드박스 준비 · base ${String(d.baseCommit||'').slice(0,8)}`
+  }else if(ev.kind==='localize'){
+    icon='🌳';title=`파일트리 구성 · ${d.treeFileCount??'?'} files${d.truncated?` · ⚠트렁케이트(${d.truncatedChars??'?'}자)`:''} → 후보 ${d.rankedCandidateCount??'?'}개`
   }else if(ev.kind==='repro_select'){
     icon='🧪';title=`repro 후보 선택`;body=`<div class="act-sub">${esc(JSON.stringify(d).slice(0,200))}</div>`
   }else if(ev.kind==='error'){

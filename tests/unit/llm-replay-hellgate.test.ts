@@ -222,8 +222,14 @@ describe("B. recordingLlmPort", () => {
       { type: "message_stop", stop_reason: "end_turn" },
     ]
     const port = recordingLlmPort({ inner: stubInner(events), store: failingStore })
+    // Caller contract (the point of this test): a sidecar append failure on a
+    // SUCCESSFUL stream is NEVER surfaced — the caller still gets the live events.
     expect(await drain(port.stream(req("hi")))).toEqual(events)
-    expect(appendCalls).toBe(1)
+    // F7: the failure is no longer swallowed SILENTLY. After the first append
+    // throws, the recorder attempts a minimal degraded sentinel (a visible
+    // hole-marker) — a second append — which also throws here and is likewise
+    // swallowed. So 2 attempts, but still no error surfaced to the caller.
+    expect(appendCalls).toBe(2)
   })
 
   test("10. append failure does not mask the original stream error", async () => {

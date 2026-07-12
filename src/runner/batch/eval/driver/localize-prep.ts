@@ -94,6 +94,19 @@ export interface PrepareIssueHintDeps {
    *  Pure observation: does not affect the returned hint. Fires only in
    *  agentless mode with a non-empty result. */
   readonly onCandidates?: (files: readonly string[]) => void
+  /** F1 observe seam (optional, no-op by default). Fires ONCE in agentless mode
+   *  after the file-tree is built + candidates resolved, carrying the file-tree
+   *  build + localize outcome (tree file count, whether truncation fired, ranked
+   *  candidate count). Lets the driver emit a `localize` trace so post-mortem
+   *  localization RCA is no longer blind to a truncation-dropped gold file. Pure
+   *  observation: does not affect the returned hint. NOT fired in `off`/`regex`
+   *  mode (no agentless tree was built). */
+  readonly onLocalize?: (data: {
+    readonly treeFileCount: number
+    readonly truncated: boolean
+    readonly truncatedChars?: number
+    readonly rankedCandidateCount: number
+  }) => void
 }
 
 const DEFAULT_PREPARE_TIMEOUT_MS = 30_000
@@ -393,6 +406,20 @@ export const prepareIssueHint = async (
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }
+  // F1 — emit the file-tree build + localize outcome BEFORE the empty-files
+  // fallback branches, so the trace fires even when localize gave up (the case
+  // most likely to be a truncation-dropped gold file). `result.tree` is absent
+  // only on the timeout path (the injected timeout result has no tree); when
+  // absent we still report the ranked count with a zeroed tree so the trace is
+  // never silently omitted.
+  deps.onLocalize?.({
+    treeFileCount: result.tree?.fileCount ?? 0,
+    truncated: result.tree?.truncated ?? false,
+    ...(result.tree?.truncatedChars !== undefined
+      ? { truncatedChars: result.tree.truncatedChars }
+      : {}),
+    rankedCandidateCount: result.files.length,
+  })
   if (result.files.length === 0) {
     // Localize gave up — fall back to regex so the bench still gets SOME
     // hint when an issue body contains explicit paths.

@@ -500,6 +500,55 @@ describe("JsonlRecorder — failure handling", () => {
     expect(degraded[0]?.data.reason).toBe("line_cap")
   })
 
+  test("F2: turn boundary flushes the buffer to disk BEFORE close() (crash-safe tail)", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    // A completed turn: turn_start opens it, some work, then the NEXT turn_start
+    // marks the boundary. The buffer count is well under FLUSH_BATCH (16), so the
+    // ONLY thing that puts turn 1 on disk (without close()) is the boundary flush.
+    rec.emit({ type: "turn_start", turn: 1 })
+    rec.emit({ type: "assistant_text", delta: "a" })
+    rec.emit({ type: "tool_call", id: "t1", name: "bash", input: {} })
+    rec.emit({ type: "tool_result", id: "t1", name: "bash", ok: true, preview: "ok" })
+    // Simulate a hard crash: DO NOT call close(). The next turn opening flushes
+    // the finished turn 1 to disk.
+    rec.emit({ type: "turn_start", turn: 2 })
+
+    // Without any close(), turn 1's 4 lines + the turn 2 opener are already on
+    // disk — the tail that would otherwise be lost on OOM/exit137 survives.
+    const lines = readLines(path)
+    expect(lines.map((l) => l.kind)).toEqual([
+      "turn_start",
+      "assistant_text",
+      "tool_call",
+      "tool_result",
+      "turn_start",
+    ])
+  })
+
+  test("F2: an error event flushes the buffer to disk without close()", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
+    rec.emit({ type: "turn_start", turn: 1 })
+    rec.emit({ type: "assistant_text", delta: "working" })
+    rec.emit({ type: "error", message: "kaboom" })
+    // No close(): the error boundary already flushed the crash-explaining tail.
+    const lines = readLines(path)
+    expect(lines.map((l) => l.kind)).toEqual(["turn_start", "assistant_text", "error"])
+    expect(lines.at(-1)?.data.message).toBe("kaboom")
+  })
+
+  test("F2 strict: a boundary-flush failure rethrows (same contract as batched flush)", () => {
+    const path = join(dir, "i1.0.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, strict: true, ...fixedClocks() })
+    ;(rec as unknown as { flush(): void }).flush = () => {
+      throw new Error("disk full")
+    }
+    // The turn_start boundary flush must surface the failure in strict mode,
+    // exactly like the batched flushMaybe path does via record()→degrade().
+    expect(() => rec.emit({ type: "turn_start", turn: 1 })).toThrow("disk full")
+  })
+
   test("close() is idempotent and flushes", () => {
     const path = join(dir, "i1.0.jsonl")
     const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
@@ -512,9 +561,12 @@ describe("JsonlRecorder — failure handling", () => {
   test("flush() failure preserves the buffer for retry (no silent drop)", () => {
     const path = join(dir, "i1.0.jsonl")
     // Batch < FLUSH_BATCH so nothing flushes on emit; the events sit buffered.
+    // Use non-boundary events (assistant_text deltas) only: turn_start / done /
+    // error now trigger a turn-boundary flush (F2), which would drain the buffer
+    // and defeat the point of this preserve-on-failure test.
     const rec = new JsonlRecorder(path, { ctx: CTX, ...fixedClocks() })
-    rec.emit({ type: "turn_start", turn: 1 })
     rec.emit({ type: "assistant_text", delta: "x" })
+    rec.emit({ type: "assistant_text", delta: "y" })
 
     // First flush throws (disk full); buffer must NOT be cleared.
     let fail = true

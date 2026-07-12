@@ -599,6 +599,17 @@ export const buildConfig = (
     verifyStrategy: sweVerify,
   }
   const baseConfig = {
+    // F3 — OTEL join key. The trajectory line for this instance is written to
+    // `<runId>/<instance.id>.<attempt>.jsonl` (BenchObserver keys on `instance.id`,
+    // NOT the upstream `swebench.instanceId`), so we stamp `instance.id` here.
+    // With the `quanta.run.id` resource attr the exporter already carries,
+    // `{runId, instanceId}` becomes the key that joins the top-level `session_loop`
+    // span back to its trajectory. `attempt` is NOT threaded to this driver seam
+    // (it lives in the batch-level retry/Best-of-N loop above the per-attempt
+    // buildConfig call — see observe.ts `RunContext`), so it is left unset here;
+    // the join still works on `runId+instanceId` (attempt is only a same-instance
+    // discriminator). Absent OTEL sink ⇒ span is a no-op sentinel ⇒ zero cost.
+    spanIdentity: { instanceId: instance.id },
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
     // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
     // the model-lane-diversity knob is a REAL provider swap at the wire site —
