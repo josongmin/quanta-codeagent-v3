@@ -61,9 +61,11 @@ const isAlive = (pid: number): boolean => {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** Wait until `path` exists (the child has recorded its pid), or throw. */
+/** Wait until `path` exists (the child has recorded its pid), or throw. Generous
+ *  ceiling (~3s) so a cold bash start on a slow/loaded box can't flake the test
+ *  before the pid file is written. */
 const waitForFile = async (path: string): Promise<void> => {
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 150; i++) {
     if (existsSync(path)) return
     await sleep(20)
   }

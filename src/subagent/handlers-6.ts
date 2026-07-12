@@ -28,9 +28,8 @@ import type { Subprocess } from "bun"
 import { errMessage } from "@/shared"
 import { legacyKillHandle, type MakeProcKill, type ProcKillHandle } from "./exec-kill"
 
-// Re-export so `dispatch-6` and the exec hellgates keep importing the kill
-// contract from the handler module (WS1 split it into `exec-kill.ts` to hold the
-// module under the god-MODULE ratchet; the public surface is unchanged).
+// Re-export the kill contract (split into `exec-kill.ts` for the god-MODULE
+// ratchet) so `dispatch-6` + the exec hellgates keep their import path.
 export type { MakeProcKill, ProcKillHandle } from "./exec-kill"
 
 // Reuse the foreground `agent` tool's PROVEN continue_from lineage gate +
@@ -163,6 +162,10 @@ interface PtySlot {
   /** Resolved when the child exits naturally. We hold this so `close_agent`
    *  can await final exit after issuing kill. */
   exited: Promise<number>
+  /** WS1 P1 — the tree killer built at spawn, so `closeAll` reaps a retained
+   *  pty's backgrounded grandchildren instead of orphaning them (parity with the
+   *  timeout/abort teardown). */
+  killHandle: ProcKillHandle
 }
 
 /** Internal pty registry. Module-scoped (one process worth of state) — the
@@ -205,7 +208,9 @@ export class PtyTable {
   closeAll(): void {
     for (const [, s] of this.slots) {
       try {
-        s.proc.kill()
+        // WS1 P1 — tree-kill a retained pty's descendants (parity with
+        // timeout/abort); legacyKillHandle keeps single-pid when uninjected.
+        s.killHandle.kill()
       } catch {
         // already dead — ignore
       }
@@ -379,10 +384,9 @@ export const handleExecCommand = async (
     return errExec(`Failed to spawn command: ${msg}`, "spawn_error")
   }
 
-  // WS1 — route timeout/abort kills through the injected escalating tree-killer
-  // so a `bash -lc` that forked a grandchild (backgrounded job, a build tool)
-  // has the WHOLE tree reaped, not just the shell pid. Absent ⇒ legacy
-  // single-pid `proc.kill()` (byte-identical). Both are no-op-safe after exit.
+  // WS1 — route timeout/abort (and, once retained, closeAll) kills through the
+  // injected escalating tree-killer so a `bash -lc` that forked a grandchild has
+  // the WHOLE tree reaped. Absent ⇒ legacy single-pid kill (byte-identical).
   const killHandle: ProcKillHandle = deps.makeKill?.(proc) ?? legacyKillHandle(proc)
 
   let timedOut = false
@@ -417,6 +421,7 @@ export const handleExecCommand = async (
           startedAt: Date.now(),
           command: input.command,
           exited: proc.exited as Promise<number>,
+          killHandle, // WS1 P1 — closeAll tree-kills this retained child's descendants
         })
         void (proc.exited as Promise<number>).finally(() => {
           table.delete(proc.pid)

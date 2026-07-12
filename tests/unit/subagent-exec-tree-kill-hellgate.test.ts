@@ -30,6 +30,7 @@
 import { describe, expect, test } from "bun:test"
 import { escalatingKill, type ProcessTreeKiller, type TreeSignal } from "@/runtime"
 import { dispatchSubagent6 } from "../../src/subagent/dispatch-6"
+import { legacyKillHandle } from "../../src/subagent/exec-kill"
 import { handleExecCommand, type MakeProcKill } from "../../src/subagent/handlers-6"
 
 interface SpyKiller extends ProcessTreeKiller {
@@ -104,5 +105,59 @@ describe("WS1 §2 — the dispatcher forwards makeKill to the exec handler", () 
     expect(out.kind).toBe("error")
     expect(spy.calls.length).toBeGreaterThanOrEqual(1)
     expect(spy.calls[0]?.signal).toBe("SIGTERM")
+  })
+})
+
+// hell-audit remediation §3 — the DEFAULT fallback (`?? legacyKillHandle(proc)`,
+// used when no makeKill is injected) had no direct witness. Pin its contract
+// deterministically so a mutation to a no-op kill / a throwing disarm is caught.
+describe("WS1 §3 — legacyKillHandle (the makeKill-absent fallback) contract", () => {
+  const fakeProc = (onKill: () => void): Parameters<typeof legacyKillHandle>[0] =>
+    ({ pid: 123, kill: onKill, exited: Promise.resolve(0) }) as unknown as Parameters<
+      typeof legacyKillHandle
+    >[0]
+
+  test("kill() delivers a single-pid proc.kill(); disarm() is a safe no-op", () => {
+    let kills = 0
+    const h = legacyKillHandle(fakeProc(() => (kills += 1)))
+    h.kill()
+    expect(kills).toBe(1)
+    h.disarm() // must NOT throw and must NOT kill
+    expect(kills).toBe(1)
+  })
+
+  test("kill() swallows a throwing proc.kill (already-dead / recycled pid)", () => {
+    const h = legacyKillHandle(
+      fakeProc(() => {
+        throw new Error("ESRCH")
+      }),
+    )
+    expect(() => h.kill()).not.toThrow()
+  })
+})
+
+// hell-audit remediation §4 — the exec `finally` calls `killHandle.disarm()` so a
+// pending SIGKILL grace timer never leaks past the call. No test observed the
+// call. Wrap escalatingKill's handle to count disarm() on the NORMAL-completion
+// path (no timeout/abort). Red-on-injection: drop the finally disarm ⇒ 0 calls.
+describe("WS1 §4 — normal completion disarms the kill handle", () => {
+  test("a fast-exiting command calls killHandle.disarm() (grace-timer cleanup)", async () => {
+    let disarms = 0
+    const makeKill: MakeProcKill = (proc) => {
+      const inner = escalatingKill(proc, makeSpyKiller())
+      return {
+        kill: inner.kill,
+        disarm: () => {
+          disarms += 1
+          inner.disarm()
+        },
+      }
+    }
+    const r = await handleExecCommand(
+      { command: "true", cwd: process.cwd(), timeoutMs: 5_000 },
+      { makeKill },
+    )
+    expect(r.kind).toBe("success")
+    expect(disarms).toBeGreaterThanOrEqual(1)
   })
 })

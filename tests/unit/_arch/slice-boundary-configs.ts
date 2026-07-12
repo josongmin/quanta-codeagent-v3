@@ -182,6 +182,11 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/permission",
       "@/lsp",
       "@/stream",
+      // @/subagent may only reach @/tool + @/shared (biome.json enforces the same).
+      // The escalatingKill/defaultPpidWalkKiller wiring is INJECTED from the
+      // composition root precisely because this import is forbidden — keep the two
+      // SSOTs (biome + this arch test) in lockstep so the fence can't silently drift.
+      "@/runtime",
     ],
     envAllowFiles: ["handlers-6.ts"],
     requireSliceBarrel: true,
