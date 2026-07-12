@@ -63,6 +63,7 @@ import {
   trace as otelTrace,
 } from "@opentelemetry/api"
 import { errMessage } from "@/shared"
+import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "./active-context"
 import { noopTracer } from "./noop-tracer"
 import type { Span, SpanAttributes, SpanContext, SpanKind, SpanStatusCode, Tracer } from "./port"
 // ────────────────────────────────────────────────────────────────────────────
@@ -221,6 +222,14 @@ const wrapOtelSpan = (otelSpan: OtelSpan): Span => {
  *                              non-recording Span, then `trace.setSpan`. This
  *                              is the W3C-extract path: the parent came from
  *                              another process. */
+/** Extract the span id from a `parent` opt (our `Span` carries `.context`; a
+ *  raw `SpanContext` carries `.spanId` directly). Returns undefined when no
+ *  parent is supplied — the caller then falls back to the active ref. */
+const spanIdOf = (parent: SpanContext | Span | undefined): string | undefined => {
+  if (parent === undefined) return undefined
+  return "context" in parent ? parent.context.spanId : parent.spanId
+}
+
 const contextWithParent = (parent: SpanContext | Span): OtelContextType | undefined => {
   try {
     const active = otelContext.active()
@@ -316,10 +325,16 @@ export const otelTracer = (opts?: OtelTracerOpts): Tracer => {
   const tracer: Tracer = {
     startSpan(name, opts2) {
       const api = getTracer()
-      if (api === undefined) return noopTracer.startSpan(name, opts2)
+      // Implicit parent: when the caller gives no explicit `parent`, inherit
+      // the ACTIVE span of the current async chain (installed by an enclosing
+      // `withSpan`). This is what makes a nested span link to its structural
+      // parent without the caller threading the Span by hand.
+      const parent = opts2?.parent ?? getActiveTraceRef()
+      const collapseOpts =
+        parent === undefined ? opts2 : ({ ...opts2, parent } as typeof opts2)
+      if (api === undefined) return noopTracer.startSpan(name, collapseOpts)
       const spanOpts = buildSpanOpts(opts2)
       try {
-        const parent = opts2?.parent
         if (parent === undefined) {
           return wrapOtelSpan(api.startSpan(name, spanOpts))
         }
@@ -333,26 +348,42 @@ export const otelTracer = (opts?: OtelTracerOpts): Tracer => {
         return wrapOtelSpan(api.startSpan(name, spanOpts, ctx))
       } catch {
         // Tracer / startSpan threw — collapse to no-op.
-        return noopTracer.startSpan(name, opts2)
+        return noopTracer.startSpan(name, collapseOpts)
       }
     },
     async withSpan(name, fn, opts2) {
+      // Capture the enclosing parent BEFORE `startSpan` (which also reads the
+      // active ref). The explicit `parent` opt wins; otherwise the active span
+      // of this async chain is the parent.
+      const parentSpanId = spanIdOf(opts2?.parent) ?? getActiveTraceRef()?.spanId
       const span = this.startSpan(name, opts2)
-      try {
-        const out = await fn(span)
-        span.setStatus("ok")
-        return out
-      } catch (e) {
-        if (e instanceof Error) {
-          span.recordException(e)
-          span.setStatus("error", e.message)
-        } else {
-          span.setStatus("error", errMessage(e))
-        }
-        throw e
-      } finally {
-        span.end()
+      // INSTALL this span as the active context so nested async callers (and
+      // their `startSpan`/`withSpan`) discover it as their parent. The ref
+      // carried here reflects the started span's real context (a valid W3C
+      // context even on the no-op collapse path).
+      const ref: TraceRef = {
+        traceId: span.context.traceId,
+        spanId: span.context.spanId,
+        traceFlags: span.context.traceFlags,
+        ...(parentSpanId !== undefined ? { parentSpanId } : {}),
       }
+      return runWithActiveTraceRef(ref, async () => {
+        try {
+          const out = await fn(span)
+          span.setStatus("ok")
+          return out
+        } catch (e) {
+          if (e instanceof Error) {
+            span.recordException(e)
+            span.setStatus("error", e.message)
+          } else {
+            span.setStatus("error", errMessage(e))
+          }
+          throw e
+        } finally {
+          span.end()
+        }
+      })
     },
   }
   return tracer

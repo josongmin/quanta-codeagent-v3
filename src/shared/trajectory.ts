@@ -89,6 +89,10 @@ export interface TrajectoryEvent {
   ts: number
   monotonicNs?: number
   ctx: RunContext
+  /** W3C trace id (32 lowercase hex) of the OTel trace this event occurs under.
+   *  ADR-0539 correlation authority: `spanId` alone is not a globally sufficient
+   *  join key — `traceId` scopes the span. Absent in legacy/context-off mode. */
+  traceId?: string
   spanId?: string
   parentSpanId?: string
   producer: Producer
@@ -286,6 +290,7 @@ export interface MakeEventOpts {
   ts?: number
   /** Monotonic clock reading (ns) for latency math. */
   monotonicNs?: number
+  traceId?: string
   spanId?: string
   parentSpanId?: string
   pricingVersion?: string
@@ -299,8 +304,12 @@ const PRODUCER: Producer = { name: "quanta", version: pkg.version }
 
 const buildOptional = (
   opts: MakeEventOpts,
-): Pick<TrajectoryEvent, "monotonicNs" | "spanId" | "parentSpanId" | "pricingVersion"> => ({
+): Pick<
+  TrajectoryEvent,
+  "monotonicNs" | "traceId" | "spanId" | "parentSpanId" | "pricingVersion"
+> => ({
   ...(opts.monotonicNs !== undefined ? { monotonicNs: opts.monotonicNs } : {}),
+  ...(opts.traceId !== undefined ? { traceId: opts.traceId } : {}),
   ...(opts.spanId !== undefined ? { spanId: opts.spanId } : {}),
   ...(opts.parentSpanId !== undefined ? { parentSpanId: opts.parentSpanId } : {}),
   ...(opts.pricingVersion !== undefined ? { pricingVersion: opts.pricingVersion } : {}),

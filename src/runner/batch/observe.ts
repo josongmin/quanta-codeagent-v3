@@ -152,10 +152,21 @@ export class BenchObserver {
     this.ctx = { runId: obs.runId, instanceId, attempt }
     this.file = join(obs.dir, obs.runId, `${instanceId}.${attempt}.jsonl`)
     mkdirSync(dirname(this.file), { recursive: true })
+    // F4: give the recorder a monotonic clock so agent-stream events carry
+    // `monotonicNs` for latency math. `process.hrtime.bigint()` is ns-resolution
+    // and monotonic, but absolute ns overflows JS `Number` (Number.MAX_SAFE ≈
+    // 104 days of ns). We anchor a run-local origin at construction and return a
+    // BOUNDED delta in MICROSECONDS as a JS-safe number — a run would have to
+    // exceed ~285 years to overflow, and the value stays sub-ms precise for
+    // per-span deltas. Absolute wall-clock stays on `now` (ts); this is a
+    // relative latency clock only.
+    const monotonicOrigin = process.hrtime.bigint()
+    const monotonicUs = (): number => Number((process.hrtime.bigint() - monotonicOrigin) / 1_000n)
     this.recorder = new JsonlRecorder(this.file, {
       ctx: this.ctx,
       strict: true,
       now: this.now,
+      monotonic: monotonicUs,
     })
   }
 

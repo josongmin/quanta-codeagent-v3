@@ -76,6 +76,31 @@ no trace; the agent-stream tail lost on box crash.
 - DEBUG-sink promised contributors (grader/edit/phase-gate) remain unwired; only
   `toolExec` is live.
 
+## Amendment (2026-07-13) — OTel GenAI unified tracing (P0)
+
+Plan: `docs/plans/jul-12-otel-genai-unified-tracing.md` (+ parallel-execution companion).
+
+1. **SSOT split (supersedes the "OBSERVE is SSOT" wording above).** OBSERVE
+   remains the typed, redacted EVIDENCE ssot; the replay cassette remains the
+   unredacted REPLAY ssot (secret artifact); **OTel span context becomes the
+   IDENTITY + CAUSALITY ssot.** These are three authorities, not one.
+2. **Correlation authority = `TraceRef {traceId, spanId, parentSpanId?}`** — reuse
+   `src/observability/tracing/port.ts` `SpanContext` + optional `parentSpanId`.
+   Full cross-layer tuple: `{traceId, spanId, runId, instanceId, attempt,
+   conversationId}`. `TrajectoryEvent.traceId?` (added 2026-07-13) carries it;
+   `spanId` alone is NOT a sufficient join key.
+3. **Trace scope = one trace per instance ATTEMPT.** Best-of-N/retry attempts get
+   distinct trace ids and share `{runId, instanceId}` with distinct `attempt`.
+4. **Runtime modes** `off | context | export` — only `off` is byte-identical /
+   zero-alloc. `context` allocates ids + async context (NOT "zero cost").
+5. **No per-event legacy fallback in unified mode.** A missing active context is a
+   correlation DEFECT → one `observability_degraded` record + failed strict rail,
+   never a synthesized `t<turn>` id.
+6. **GenAI semconv snapshot is PINNED** (Development, not Stable) — the plan's
+   commit SHA is the normative contract; `main` is not.
+7. **Cassette stays unredacted** (request-hash/replay depends on exact content) —
+   outside the content-capture policy, inside the operator boundary. Unchanged.
+
 ## Rule for new observability features
 
 Add to the SSOT (OBSERVE) as a typed `kind`, stamp the correlation tuple, and —

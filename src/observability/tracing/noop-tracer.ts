@@ -22,6 +22,7 @@
  */
 
 import { errMessage } from "@/shared"
+import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "./active-context"
 import type { Span, SpanAttributes, SpanContext, SpanKind, SpanStatusCode, Tracer } from "./port"
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -105,31 +106,22 @@ const newNoopSpan = (parent?: SpanContext | Span): Span => {
 // Public no-op Tracer
 // ────────────────────────────────────────────────────────────────────────────
 
-/** Default tracer used when nothing is wired. Drop-in replaceable with
- *  `otelTracer(...)`; same interface, same call sites. */
-export const noopTracer: Tracer = {
-  startSpan(
-    _name: string,
-    opts?: {
-      readonly kind?: SpanKind
-      readonly parent?: SpanContext | Span
-      readonly attributes?: SpanAttributes
-      readonly startTime?: number
-    },
-  ): Span {
-    return newNoopSpan(opts?.parent)
-  },
-  async withSpan<T>(
-    name: string,
-    fn: (span: Span) => Promise<T>,
-    opts?: {
-      readonly kind?: SpanKind
-      readonly parent?: SpanContext | Span
-      readonly attributes?: SpanAttributes
-      readonly startTime?: number
-    },
-  ): Promise<T> {
-    const span = this.startSpan(name, opts)
+const spanIdOf = (parent: SpanContext | Span | undefined): string | undefined => {
+  if (parent === undefined) return undefined
+  return "context" in parent ? parent.context.spanId : parent.spanId
+}
+
+/** Shared span-scope body used by both the CONTEXT-mode and OFF-mode tracers.
+ *  `installContext` decides whether the started span becomes the active ref for
+ *  the async subtree (context mode) or not (off mode). Both mint valid IDs and
+ *  never touch an exporter. */
+const runNoopWithSpan = async <T>(
+  installContext: boolean,
+  fn: (span: Span) => Promise<T>,
+  span: Span,
+  parentSpanId: string | undefined,
+): Promise<T> => {
+  const body = async (): Promise<T> => {
     try {
       const out = await fn(span)
       span.setStatus("ok")
@@ -145,5 +137,61 @@ export const noopTracer: Tracer = {
     } finally {
       span.end()
     }
-  },
+  }
+  if (!installContext) return body()
+  const ref: TraceRef = {
+    traceId: span.context.traceId,
+    spanId: span.context.spanId,
+    traceFlags: span.context.traceFlags,
+    ...(parentSpanId !== undefined ? { parentSpanId } : {}),
+  }
+  return runWithActiveTraceRef(ref, body)
 }
+
+/** CONTEXT-mode / OFF-mode tracer factory. `context` mode installs the started
+ *  span into `AsyncLocalStorage` so nested async callers see it as their parent
+ *  (valid IDs, NO export). `off` mode is byte-identical to "no tracing wired":
+ *  it mints IDs but installs NOTHING, so `getActiveTraceRef()` stays undefined
+ *  and no async-context frame is pushed. */
+const makeNoExportTracer = (installContext: boolean): Tracer => ({
+  startSpan(
+    _name: string,
+    opts?: {
+      readonly kind?: SpanKind
+      readonly parent?: SpanContext | Span
+      readonly attributes?: SpanAttributes
+      readonly startTime?: number
+    },
+  ): Span {
+    // Implicit parent from the active ref (context mode only — off mode never
+    // installs a ref, so this is always undefined there).
+    const active = installContext ? getActiveTraceRef() : undefined
+    return newNoopSpan(opts?.parent ?? active)
+  },
+  async withSpan<T>(
+    name: string,
+    fn: (span: Span) => Promise<T>,
+    opts?: {
+      readonly kind?: SpanKind
+      readonly parent?: SpanContext | Span
+      readonly attributes?: SpanAttributes
+      readonly startTime?: number
+    },
+  ): Promise<T> {
+    const parentSpanId =
+      spanIdOf(opts?.parent) ?? (installContext ? getActiveTraceRef()?.spanId : undefined)
+    const span = this.startSpan(name, opts)
+    return runNoopWithSpan(installContext, fn, span, parentSpanId)
+  },
+})
+
+/** CONTEXT mode: mints valid W3C IDs AND publishes the active span into
+ *  async-local context — WITHOUT export. Use when you want in-process
+ *  parent/child causality (nested spans, `getActiveTraceRef`) but no OTLP
+ *  egress. */
+export const contextTracer: Tracer = makeNoExportTracer(true)
+
+/** Default tracer used when nothing is wired (OFF mode). Drop-in replaceable
+ *  with `otelTracer(...)` or `contextTracer`; same interface, same call sites.
+ *  Installs NO async context — byte-identical to "no tracing". */
+export const noopTracer: Tracer = makeNoExportTracer(false)

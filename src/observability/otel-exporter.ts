@@ -73,6 +73,23 @@ import { QUANTA_ATTRS } from "./vocabulary"
 // wire format we emit.
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Attribute value the wire serializer accepts. Widens the port's scalar-only
+ *  `SpanAttributes` to also carry the homogeneous arrays the `attrs.ts` builder
+ *  already validates (`vocabulary.ts` `AttrValue`) — e.g.
+ *  `gen_ai.response.finish_reasons` as a `string[]`. Scalars stay identical, so
+ *  every existing producer of `SpanAttributes` remains assignable. */
+export type SpanExportAttributes = Readonly<
+  Record<
+    string,
+    | string
+    | number
+    | boolean
+    | ReadonlyArray<string>
+    | ReadonlyArray<number>
+    | ReadonlyArray<boolean>
+  >
+>
+
 /** One finished span ready for export. All timestamps are EPOCH MILLIS — the
  *  exporter converts to nanos at serialize time. */
 export interface ExportSpan {
@@ -92,7 +109,7 @@ export interface ExportSpan {
   readonly statusMessage?: string
   readonly startTimeEpochMs: number
   readonly endTimeEpochMs: number
-  readonly attributes?: SpanAttributes
+  readonly attributes?: SpanExportAttributes
 }
 
 /** One metric observation ready for export. Counter / histogram / gauge map to
@@ -258,23 +275,40 @@ const otlpStatusCode = (code: SpanStatusCode | undefined): number => {
   }
 }
 
+/** One scalar attribute value the exporter can tag. */
+type OtlpScalar = string | number | boolean
+/** Attribute value the exporter accepts: scalar OR a homogeneous array. The
+ *  `attrs.ts` builder already validates homogeneity (`vocabulary.ts` AttrValue),
+ *  so by the time a value reaches here an array is guaranteed single-typed. */
+type OtlpAttrValue = OtlpScalar | ReadonlyArray<OtlpScalar>
+
+/** Tag a single scalar as an OTLP `AnyValue`. number → doubleValue (collectors
+ *  handle the cast). */
+const otlpScalarValue = (v: OtlpScalar): Record<string, unknown> => {
+  if (typeof v === "string") return { stringValue: v }
+  if (typeof v === "number") return { doubleValue: v }
+  return { boolValue: v }
+}
+
 /** Convert a typed attribute map → OTLP KeyValue list. OTLP attribute values
- *  are tagged unions (`stringValue` / `intValue` / `doubleValue` / `boolValue`).
- *  We pick the tag by JS typeof — number → doubleValue (collectors handle the
- *  cast). */
+ *  are tagged unions (`stringValue` / `intValue` / `doubleValue` / `boolValue`
+ *  / `arrayValue`). Homogeneous arrays (e.g. `gen_ai.response.finish_reasons`)
+ *  serialize to `arrayValue.values` — each element re-tagged — rather than being
+ *  silently dropped. */
 const otlpAttributes = (
-  attrs: Readonly<Record<string, string | number | boolean>> | undefined,
+  attrs: Readonly<Record<string, OtlpAttrValue>> | undefined,
 ): Array<Record<string, unknown>> => {
   if (attrs === undefined) return []
   const out: Array<Record<string, unknown>> = []
   for (const k of Object.keys(attrs)) {
     const v = attrs[k]
-    if (typeof v === "string") {
-      out.push({ key: k, value: { stringValue: v } })
-    } else if (typeof v === "number") {
-      out.push({ key: k, value: { doubleValue: v } })
-    } else if (typeof v === "boolean") {
-      out.push({ key: k, value: { boolValue: v } })
+    if (Array.isArray(v)) {
+      out.push({
+        key: k,
+        value: { arrayValue: { values: v.map((e) => otlpScalarValue(e)) } },
+      })
+    } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+      out.push({ key: k, value: otlpScalarValue(v) })
     }
   }
   return out

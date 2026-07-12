@@ -20,6 +20,29 @@ This does **not** make OTLP the evidence source of truth:
 
 The target is not a file merge. It is a shared identity contract across files.
 
+## SOTA claim boundary
+
+This plan is **SOTA-aligned**, not yet **SOTA-proven**. The stronger claim is
+allowed only when all of these evidence gates are current on the same revision:
+
+1. async interleaving proof shows correct parentage for concurrent instance,
+   subagent, LLM, and tool spans;
+2. raw OTLP proof shows the pinned GenAI names, kinds, keys, value types,
+   `schemaUrl`, units, and W3C propagation;
+3. live ingest receipts exist for Braintrust, Langfuse, and Phoenix, including
+   one agent span, one LLM span, one tool span, token usage, and redacted
+   content behavior;
+4. `off`/`context`/`export` overhead and cardinality budgets are measured and
+   pass explicit numeric thresholds;
+5. collector outage, queue saturation, process shutdown, and remote-box
+   propagation rails pass without changing the agent result;
+6. content consent, retention, deletion, and cassette-secret boundaries are
+   implemented and tested.
+
+Until then, release notes and feature catalog entries must use
+`SOTA-aligned tracing architecture`, not `SOTA`, `SOTA+++`, or
+`vendor-compatible` without qualification.
+
 ## Standards basis and stability boundary
 
 The implementation must pin the exact GenAI convention snapshot it targets.
@@ -221,6 +244,11 @@ Actions:
 - Choose one canonical tracing port. Recommended migration: make the live
   `spans.ts` helpers delegate to the typed `Tracer` runtime, retain `SpanSink`
   only as a compatibility adapter, then delete it after the migration window.
+- Prefer the official Node/Bun async context path
+  (`@opentelemetry/context-async-hooks` `AsyncLocalStorageContextManager`) when
+  its Bun behavior passes the interleaving and leak rails. A custom
+  `AsyncLocalStorage` runtime is allowed only with an ADR-recorded incompatibility
+  and equivalent propagation tests.
 - Add async-context activation around the full async lifetime of instance,
   agent, turn, LLM stream consumption, and tool dispatch. A helper named
   `withSpan` must actually make the span active for nested async work.
@@ -262,8 +290,16 @@ Actions:
 - Add operation/provider/agent/conversation/tool attrs and canonical span names.
 - Replace deprecated/misnamed keys. Extend attribute and OTLP serialization for
   required homogeneous arrays, including finish reasons.
+- Emit the pinned semantic-convention schema URL/revision on the OTLP scope or
+  resource boundary and assert it from serialized bytes. If the pinned GenAI
+  repository still has no official schema URL, emit a Quanta compatibility
+  revision outside `gen_ai.*` and record the limitation; do not fabricate an
+  OpenTelemetry schema URL.
 - Convert the existing first-chunk timing from milliseconds to seconds only
   after a boundary test proves it matches the convention.
+- Define head-sampling inputs and cardinality budgets. Dynamic model/tool names
+  remain bounded operational dimensions; instance, conversation, request,
+  trace, and call IDs must not become metric labels.
 - Preserve legacy aliases only for the ADR-defined compatibility window.
 
 Acceptance:
@@ -334,6 +370,10 @@ Actions:
   arbitrary internal `Message` objects under canonical keys.
 - Apply one redaction policy before export, then enforce size/count limits.
 - Define separate gates for message content and tool arguments/results.
+- Define artifact retention and deletion policy per class: redacted OBSERVE,
+  exported trace content, and unredacted secret cassette. Retention defaults
+  must be finite for captured trace content and independently configurable from
+  cassette retention.
 - Prefer span attributes only when the exporter supports the required shape.
   Otherwise use schema-compliant events or external content storage references;
   do not stringify under a misleading canonical contract.
@@ -347,7 +387,7 @@ Acceptance:
 - Oversized payloads are deterministically truncated with explicit metadata.
 - Capture settings do not alter replay matching.
 
-### Phase 5 — viewer projection
+### Phase 5 — viewer and backend interoperability
 
 Primary files:
 
@@ -364,6 +404,17 @@ Actions:
   degraded correlation states.
 - Never require raw cassette content to render a normal trace. Loading a secret
   cassette is a separate operator action.
+- Keep the core emitter vendor-neutral. Implement vendor projection only at the
+  exporter/collector boundary when a backend needs OpenInference, Braintrust,
+  or Langfuse-specific fields.
+- Add a portable evaluation projection: the instance root carries input,
+  expected-output reference, verdict/score reference, and dataset identity via
+  bounded Quanta attributes or linked evidence. Vendor-specific `eval`/`task`/
+  `score` span types are derived adapters, not core span semantics.
+- Maintain sanitized OTLP fixtures for Braintrust, Langfuse, and Phoenix. The
+  release proof additionally performs a live ingest smoke and stores a receipt
+  containing backend/version, run ID, trace ID, observed span types, timestamp,
+  and capture policy. Secrets and raw prompts are forbidden in receipts.
 
 Acceptance:
 
@@ -372,6 +423,9 @@ Acceptance:
 - Parallel spans render as siblings, not by arrival order.
 - A missing artifact produces a visible partial-data state, not an empty green
   view.
+- All three backend fixtures preserve the same trace tree and correlation tuple.
+- Live receipts prove that each backend renders agent/LLM/tool spans and token
+  usage; any required vendor projection is explicit and tested.
 
 ### Phase 6 — cutover and deletion
 
@@ -403,12 +457,18 @@ bun test tests/integration/bench-observability.test.ts
 New mandatory rails:
 
 - async interleaving: two roots, overlapping turns/tools, exact parent tree;
+- official async-context manager vs Bun compatibility and leak rail;
 - context-only mode: valid IDs with zero exporter calls;
 - unified tuple: OTLP + OBSERVE + cassette equality in one box fixture;
 - run-ID authority: explicit and auto-issued paths use the same run ID;
 - Best-of-N: same instance, distinct attempts and trace IDs;
-- semconv fixture: names, kinds, canonical keys, arrays, units, error type;
+- semconv fixture: names, kinds, canonical keys, arrays, units, error type,
+  schema revision, and W3C propagation;
 - content negative rail: capture off and redaction before buffering;
+- retention/deletion rail for redacted evidence, trace content, and cassette;
+- cardinality rail rejects IDs and unbounded values on metrics;
+- sanitized Braintrust/Langfuse/Phoenix ingest fixtures;
+- release-only live ingest receipts for all three backends;
 - legacy-read/new-write compatibility and final legacy-write ratchet.
 
 Closeout gates:
@@ -439,6 +499,12 @@ on/off.
   measurement before defaulting bench to this mode.
 - `export`: bound exporter queue size, dropped spans, flush latency, shutdown
   drain time, and collector outage behavior.
+- `sampling`: document head-sampling inputs, tail-sampling location, and the
+  behavior of unsampled-but-context-valid traces. Sampling must not remove local
+  OBSERVE/cassette correlation.
+- `cardinality`: measure unique values per exported/metric attribute and fail the
+  rail if request, trace, conversation, instance, or tool-call IDs become metric
+  labels.
 - Correlation defects are counted and surfaced. A collector outage may degrade
   export without changing agent outcome; context corruption must fail the trace
   proof rail.
@@ -449,8 +515,10 @@ Rollout order:
 2. opt-in single-instance box run;
 3. opt-in parallel/Best-of-N run;
 4. exporter outage and process-shutdown tests;
-5. bench default `context` only after budgets pass;
-6. delete legacy writes after the compatibility window.
+5. live Braintrust/Langfuse/Phoenix ingest smoke with redacted fixtures;
+6. bench default `context` only after budgets pass;
+7. mark the feature `SOTA-proven` only while all proof receipts are current;
+8. delete legacy writes after the compatibility window.
 
 Rollback is one mode change to `off`; readers remain dual-format during the
 window. Rollback must not require rewriting existing artifacts.
@@ -470,11 +538,20 @@ window. Rollback must not require rewriting existing artifacts.
 
 - [ ] ADR-0539 amendment accepted with pinned semconv revision.
 - [ ] One canonical async-safe tracing runtime; no LIFO parent authority.
+- [ ] Official async-hooks context manager passes Bun concurrency/leak rails, or
+      an ADR documents the equivalent custom runtime.
 - [ ] One run-ID authority and full instance/attempt threading.
-- [ ] GenAI names, kinds, keys, value types, and units verified from OTLP bytes.
+- [ ] GenAI names, kinds, keys, value types, units, and schema revision verified
+      from OTLP bytes.
 - [ ] OBSERVE and cassette carry valid `traceId`/`spanId` in unified mode.
 - [ ] No per-event deterministic fallback in unified mode.
 - [ ] Content capture is explicit, schema-valid, redacted, and bounded.
+- [ ] Retention/deletion policies pass for all three artifact classes.
+- [ ] Sampling and cardinality budgets pass without breaking local correlation.
 - [ ] Parallel, Best-of-N, replay-hash, outage, and shutdown rails pass.
 - [ ] Viewer exposes partial/degraded state and correct sibling relationships.
+- [ ] Braintrust, Langfuse, and Phoenix fixtures pass; current live ingest
+      receipts prove agent/LLM/tool/token rendering.
+- [ ] Eval/score evidence is available through a bounded portable projection.
 - [ ] Legacy write path and deprecated keys removed after compatibility window.
+- [ ] Only after every item above: feature status may be `SOTA-proven`.

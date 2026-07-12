@@ -14,6 +14,20 @@ export interface JsonlRecorderOpts {
   now?: () => number
   /** Monotonic clock ns for latency math (inject for determinism). */
   monotonic?: () => number
+  /**
+   * DI seam for the active OTel trace context (C3/C7). Returns the ids of the
+   * span currently open in the loop (established by C1's context layer), or
+   * `undefined` when no context is active. Deliberately a PLAIN structural type
+   * — `@/stream` may NOT import `@/observability` (slice boundary, guarded by
+   * tests/unit/stream-slice-boundary.test.ts), so the ref shape is mirrored here.
+   *
+   * Compat window (C3): when this returns a ref, its ids OVERRIDE the
+   * deterministic `spanOf()` scheme on the emitted event; when it returns
+   * `undefined` (or the callback is absent), the recorder falls back to the
+   * deterministic `t<turn>` / `llm:t<turn>` / `tool:<id>` ids. Absent callback ⇒
+   * byte-identical output to today. Full no-fallback is C7.
+   */
+  getActiveTraceRef?: () => { traceId: string; spanId: string; parentSpanId?: string } | undefined
   /** Hard line cap; once exceeded only a final `line_cap` degraded line is
    *  written. Default 100000. */
   maxLines?: number
@@ -97,6 +111,9 @@ export class JsonlRecorder implements StreamPort {
   private readonly strict: boolean
   private readonly now: () => number
   private readonly monotonic: (() => number) | undefined
+  private readonly getActiveTraceRef:
+    | (() => { traceId: string; spanId: string; parentSpanId?: string } | undefined)
+    | undefined
   private readonly maxLines: number
   private readonly producer: Producer | undefined
   private readonly buf: string[] = []
@@ -118,6 +135,7 @@ export class JsonlRecorder implements StreamPort {
     this.strict = opts.strict ?? false
     this.now = opts.now ?? (() => Date.now())
     this.monotonic = opts.monotonic
+    this.getActiveTraceRef = opts.getActiveTraceRef
     this.maxLines = opts.maxLines ?? DEFAULT_MAX_LINES
     this.producer = opts.producer
     mkdirSync(dirname(target), { recursive: true })
@@ -216,11 +234,26 @@ export class JsonlRecorder implements StreamPort {
     data: Record<string, unknown>,
     span: { spanId?: string; parentSpanId?: string },
   ) {
+    // C3 compat window: if a live OTel trace context is available, stamp its
+    // ids (traceId/spanId/parentSpanId) ONTO the event — overriding the
+    // deterministic `spanOf()` scheme. When no ref (callback absent OR returns
+    // undefined), fall back to the deterministic ids so absent-callback output
+    // stays byte-identical to today. Full no-fallback is C7.
+    const ref = this.getActiveTraceRef?.()
+    const ids = ref
+      ? {
+          traceId: ref.traceId,
+          spanId: ref.spanId,
+          ...(ref.parentSpanId !== undefined ? { parentSpanId: ref.parentSpanId } : {}),
+        }
+      : {
+          ...(span.spanId !== undefined ? { spanId: span.spanId } : {}),
+          ...(span.parentSpanId !== undefined ? { parentSpanId: span.parentSpanId } : {}),
+        }
     return makeEvent(this.seq++, kind, this.ctx, data, {
       ts: this.now(),
       ...(this.monotonic ? { monotonicNs: this.monotonic() } : {}),
-      ...(span.spanId !== undefined ? { spanId: span.spanId } : {}),
-      ...(span.parentSpanId !== undefined ? { parentSpanId: span.parentSpanId } : {}),
+      ...ids,
       ...(this.producer ? { producer: this.producer } : {}),
     })
   }

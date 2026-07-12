@@ -286,7 +286,7 @@ export const QUANTA_ATTRS = {
      *  attempt index (single-pass / attempt unknown at span-open) ⇒ join still
      *  works on `runId+instanceId` (attempt is only a same-instance
      *  discriminator). */
-    attempt: "quanta.attempt",
+    attempt: "quanta.instance.attempt",
   },
 } as const
 
@@ -295,6 +295,28 @@ export const QUANTA_ATTRS = {
 // ---------------------------------------------------------------------------
 
 export const GEN_AI_ATTRS = {
+  /** OTel GenAI semconv `gen_ai.operation.name` — the logical operation the
+   *  span represents (`chat` / `execute_tool` / `invoke_agent` / …). Canonical
+   *  discriminator for the span tree. */
+  operation: {
+    name: "gen_ai.operation.name",
+  },
+  /** OTel GenAI semconv `gen_ai.provider.name` — the provider slug
+   *  (`openai` / `anthropic`). Canonical replacement for the legacy
+   *  `gen_ai.system` (kept below for the compat window). */
+  provider: {
+    name: "gen_ai.provider.name",
+  },
+  /** OTel GenAI semconv `gen_ai.conversation.id` — stable id correlating every
+   *  turn of one agent conversation into a single thread. */
+  conversation: {
+    id: "gen_ai.conversation.id",
+  },
+  /** OTel GenAI semconv `gen_ai.agent.name` — the logical agent identity that
+   *  owns the invoke_agent span (root / subagent name). */
+  agent: {
+    name: "gen_ai.agent.name",
+  },
   request: {
     model: "gen_ai.request.model",
     maxTokens: "gen_ai.request.max_tokens",
@@ -306,6 +328,18 @@ export const GEN_AI_ATTRS = {
    *  when a span sink is active (no cost on the default-OFF path). OTel GenAI
    *  semconv `gen_ai.prompt`. */
   prompt: "gen_ai.prompt",
+  /** OTel GenAI semconv `gen_ai.input.messages` — the structured input message
+   *  sequence sent to the provider (canonical successor to {@link prompt};
+   *  emitted as a serialized/homogeneous form by C2 call sites). */
+  input: {
+    messages: "gen_ai.input.messages",
+  },
+  /** OTel GenAI semconv `gen_ai.output.messages` — the structured output
+   *  message sequence returned by the provider (canonical successor to
+   *  {@link response.completion}). */
+  output: {
+    messages: "gen_ai.output.messages",
+  },
   response: {
     model: "gen_ai.response.model",
     finishReason: "gen_ai.response.finish_reasons",

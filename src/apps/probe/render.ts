@@ -24,11 +24,46 @@ const truncate = (s: string, n = 100): string =>
 
 // ── timeline ────────────────────────────────────────────────────────────
 
-/** Group every event by its turn span (`parentSpanId` or `spanId`). */
-const turnKey = (e: TrajectoryEvent): string => {
-  if (e.kind === "turn_start") return e.spanId ?? `t#${e.seq}`
-  if (e.parentSpanId?.startsWith("t") && !e.parentSpanId.startsWith("tool:")) return e.parentSpanId
-  return e.parentSpanId ?? e.spanId ?? "t#?"
+/**
+ * Group every event by its turn span. Scheme-robust: a `turn_start` ESTABLISHES
+ * a turn keyed by its own `spanId`; every later event is grouped by its
+ * `parentSpanId` when that matches a known turn spanId, else falls back to the
+ * most recently opened turn (`current`). This works for BOTH the deterministic
+ * `t<turn>` ids AND arbitrary hex OTel spanIds — the old
+ * `parentSpanId.startsWith("t")` prefix test silently mis-grouped every turn
+ * once real hex ids arrived (hex spanIds never start with `t`).
+ *
+ * `knownTurns` accumulates turn spanIds as we walk (events are seq-ordered, so a
+ * turn opens before its children). `current` tracks the last-opened turn so an
+ * event whose parent is a NON-turn span (e.g. a `tool:` span or a hex child
+ * span) still lands in the right turn instead of forming a spurious group.
+ */
+const makeTurnKeyer = (): ((e: TrajectoryEvent) => string) => {
+  const knownTurns = new Set<string>()
+  let current: string | undefined
+  return (e: TrajectoryEvent): string => {
+    if (e.kind === "turn_start") {
+      const key = e.spanId ?? `t#${e.seq}`
+      knownTurns.add(key)
+      current = key
+      return key
+    }
+    // Child whose parent IS a known turn span → group under that turn directly
+    // (handles out-of-order-parented children under any id scheme).
+    if (e.parentSpanId !== undefined && knownTurns.has(e.parentSpanId)) return e.parentSpanId
+    // Otherwise attach to the turn currently open (the seq-ordered walk keeps
+    // `current` pointing at the enclosing turn). Legacy compat: `t<turn>`
+    // prefix still identifies a turn parent even before its `turn_start` is
+    // seen (defensive — normally the turn opens first).
+    if (
+      e.parentSpanId?.startsWith("t") &&
+      !e.parentSpanId.startsWith("tool:") &&
+      !e.parentSpanId.startsWith("llm:")
+    ) {
+      return e.parentSpanId
+    }
+    return current ?? e.parentSpanId ?? e.spanId ?? "t#?"
+  }
 }
 
 const renderToolSpan = (events: TrajectoryEvent[]): string[] => {
@@ -86,6 +121,7 @@ export const renderTimeline = (events: TrajectoryEvent[]): string => {
   if (events.length === 0) return "(no events)"
   const turns = new Map<string, TrajectoryEvent[]>()
   const order: string[] = []
+  const turnKey = makeTurnKeyer()
   for (const e of events) {
     const k = turnKey(e)
     if (!turns.has(k)) {

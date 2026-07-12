@@ -609,3 +609,77 @@ describe("JsonlRecorder — failure handling", () => {
     expect(() => rec.close()).toThrow("volume gone")
   })
 })
+
+describe("JsonlRecorder — getActiveTraceRef DI seam (C3 compat window)", () => {
+  const emitOne = (
+    path: string,
+    opts: ConstructorParameters<typeof JsonlRecorder>[1],
+  ): TrajectoryEvent[] => {
+    const rec = new JsonlRecorder(path, opts)
+    rec.emit({ type: "turn_start", turn: 3 })
+    rec.emit({ type: "tool_call", id: "tu9", name: "bash", input: { cmd: "ls" } })
+    rec.emit({ type: "tool_result", id: "tu9", name: "bash", ok: true, preview: "out" })
+    rec.close()
+    return readLines(path)
+  }
+
+  test("absent callback ⇒ byte-identical to the deterministic scheme", () => {
+    const a = join(dir, "a.0.jsonl")
+    const b = join(dir, "b.0.jsonl")
+    const base = emitOne(a, { ctx: CTX, ...fixedClocks() })
+    // Passing an explicitly-undefined callback must not perturb anything.
+    const withUndef = emitOne(b, { ctx: CTX, ...fixedClocks(), getActiveTraceRef: () => undefined })
+    // Deterministic ids survive; no traceId ever stamped when no ref present.
+    const turn = base.find((e) => e.kind === "turn_start")
+    expect(turn?.spanId).toBe("t3")
+    expect(turn?.traceId).toBeUndefined()
+    const tool = base.find((e) => e.kind === "tool_call")
+    expect(tool?.spanId).toBe("tool:tu9")
+    expect(tool?.parentSpanId).toBe("t3")
+    // Byte-identical between "no callback" and "callback returns undefined".
+    expect(JSON.stringify(withUndef)).toBe(JSON.stringify(base))
+  })
+
+  test("live ref OVERRIDES deterministic ids and stamps traceId onto every event", () => {
+    const path = join(dir, "c.0.jsonl")
+    const ref = { traceId: "abc123def456", spanId: "0f1e2d3c4b5a6978", parentSpanId: "aabbccddeeff0011" }
+    const lines = emitOne(path, { ctx: CTX, ...fixedClocks(), getActiveTraceRef: () => ref })
+    // Every event carries the ref's hex ids — NOT the deterministic t3/tool:tu9.
+    for (const e of lines) {
+      expect(e.traceId).toBe(ref.traceId)
+      expect(e.spanId).toBe(ref.spanId)
+      expect(e.parentSpanId).toBe(ref.parentSpanId)
+    }
+    // Proof the deterministic scheme was actually overridden (not merely absent).
+    expect(lines.some((e) => e.spanId === "t3" || e.spanId === "tool:tu9")).toBe(false)
+  })
+
+  test("ref without parentSpanId omits the field (no undefined leak)", () => {
+    const path = join(dir, "d.0.jsonl")
+    const ref = { traceId: "t-only", spanId: "s-only" }
+    const lines = emitOne(path, { ctx: CTX, ...fixedClocks(), getActiveTraceRef: () => ref })
+    const turn = lines.find((e) => e.kind === "turn_start")
+    expect(turn?.traceId).toBe("t-only")
+    expect(turn?.spanId).toBe("s-only")
+    expect("parentSpanId" in (turn ?? {})).toBe(false)
+  })
+
+  test("ref is consulted per-event (a mid-stream context switch is reflected)", () => {
+    const path = join(dir, "e.0.jsonl")
+    let live: { traceId: string; spanId: string } | undefined
+    const rec = new JsonlRecorder(path, {
+      ctx: CTX,
+      ...fixedClocks(),
+      getActiveTraceRef: () => live,
+    })
+    rec.emit({ type: "turn_start", turn: 1 }) // no ref yet ⇒ deterministic
+    live = { traceId: "T", spanId: "S" }
+    rec.emit({ type: "assistant_text", delta: "hi" }) // ref now live ⇒ override
+    rec.close()
+    const lines = readLines(path)
+    expect(lines[0]?.spanId).toBe("t1") // deterministic fallback
+    expect(lines[0]?.traceId).toBeUndefined()
+    expect(lines[1]?.spanId).toBe("S") // ref override
+    expect(lines[1]?.traceId).toBe("T")
+  })
+})

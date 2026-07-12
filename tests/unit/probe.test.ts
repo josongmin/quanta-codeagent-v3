@@ -324,6 +324,37 @@ describe("render — hotspots ordered by duration; cost stamps pricingVersion", 
   test("renderTimeline degrades cleanly on no events", () => {
     expect(renderTimeline([])).toBe("(no events)")
   })
+
+  test("timeline groups turns robustly for BOTH t<turn> and hex OTel span ids", () => {
+    // Hex spanIds (real OTel) never start with 't' — the old prefix test would
+    // silently mis-group these. turn_start establishes the turn; children are
+    // grouped by parentSpanId matching the known turn span.
+    seq = 0
+    const T0 = "a1b2c3d4e5f60718"
+    const T1 = "0918f6e5d4c3b2a1"
+    const hex = [
+      ev("turn_start", { turn: 0 }, { spanId: T0 }),
+      ev("assistant_text", { delta: "first turn text" }, { parentSpanId: T0 }),
+      ev("tool_call", { name: "bash" }, { spanId: "f00dcafe", parentSpanId: T0 }),
+      ev(
+        "tool_result",
+        { name: "bash", ok: true, exitCode: 0, durationMs: 5, stdoutTail: "ok", stderrTail: "" },
+        { spanId: "f00dcafe", parentSpanId: T0 },
+      ),
+      ev("turn_start", { turn: 1 }, { spanId: T1 }),
+      ev("assistant_text", { delta: "second turn text" }, { parentSpanId: T1 }),
+      ev("session_end", { reason: "completed", turns: 2 }),
+    ]
+    const out = renderTimeline(hex)
+    // Two distinct turn headers rendered (labels from turn_start), not one blob.
+    expect(out).toContain("── turn 0 ──")
+    expect(out).toContain("── turn 1 ──")
+    // Each turn's text lands under its OWN turn, in order.
+    expect(out.indexOf("first turn text")).toBeLessThan(out.indexOf("── turn 1 ──"))
+    expect(out.indexOf("── turn 1 ──")).toBeLessThan(out.indexOf("second turn text"))
+    // The tool span (child of hex turn T0) rendered under turn 0.
+    expect(out.indexOf("tool bash")).toBeLessThan(out.indexOf("── turn 1 ──"))
+  })
 })
 
 describe("probe CLI — end-to-end over a synthetic run dir", () => {
