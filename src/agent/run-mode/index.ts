@@ -10,6 +10,7 @@
 export { clampDials } from "./clamp"
 export { assertModeMatrix, narrowMode } from "./narrow"
 export { BUDGET_PRESETS, MODE_PRESETS } from "./presets"
+export { MODE_REPO_RULES_POLICY, modeLoadsRepoRules } from "./repo-rules-policy"
 export {
   type AgentMode,
   ALL_AGENT_MODES,

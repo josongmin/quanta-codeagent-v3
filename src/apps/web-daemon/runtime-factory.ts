@@ -27,6 +27,7 @@ import {
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
 import { loadRepoRules } from "@/agent/repo-rules"
 import type { RunLedgerPort } from "@/agent/run-ledger"
+import { modeLoadsRepoRules } from "@/agent/run-mode"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/agent/system-prompt"
 import { FollowerCoControlDispatcher, isFollowerCoControlEnabled } from "@/agent/thread-follower"
@@ -706,12 +707,15 @@ const buildAgentConfigBase = async ({
   }
 }): Promise<RuntimeAgentConfigBase> => {
   const webEnvPosture = resolveCliDefaultEnvPosture(env)
-  // WS4 R7 — the web/Tauri surface runs on the user's OWN cwd (interactive-class
-  // trust), so it honors the repo's AGENTS.md/CLAUDE.md just like the CLI
-  // interactive preset. Loaded here (not via the mode-preset resolver: surface
-  // isolation forbids apps/web importing apps/agent — this MIRRORS the "load"
-  // policy in mode-presets/system.ts::MODE_REPO_RULES_POLICY). Fail-open.
-  const repoRules = await loadRepoRules(cwd).catch(() => undefined)
+  // WS4 R7/R8 — the web/Tauri surface runs on the user's OWN cwd
+  // (interactive-class trust), so it honors the repo's AGENTS.md/CLAUDE.md like
+  // the CLI interactive preset. The load decision is GATED on the SSOT policy
+  // `modeLoadsRepoRules` (in the surface-agnostic `@/agent/run-mode`, shared with
+  // the presets) so web can never drift from the security classification — if
+  // "interactive" ever became rule-less, this stops loading too. Fail-open.
+  const repoRules = modeLoadsRepoRules("interactive")
+    ? await loadRepoRules(cwd).catch(() => undefined)
+    : undefined
   const base: RuntimeAgentConfigBase = {
     llm,
     // A2 — the default tools with the SHARED artifact registry threaded in so

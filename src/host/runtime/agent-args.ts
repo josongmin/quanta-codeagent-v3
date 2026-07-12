@@ -23,17 +23,14 @@
  */
 
 import type { BudgetDials, BudgetExhaustionPolicy, RunMode } from "@/agent"
+import { ALL_AGENT_MODES } from "@/agent"
+import { IDENTITY_MODES, isIdentityMode } from "@/agent/identity"
 import {
   ALL_TOOL_PROFILE_NAMES,
   isToolProfileName,
   type ToolProfileName,
 } from "@/agent/tool-profile"
-import { IDENTITY_MODES, isIdentityMode } from "@/agent/identity"
-import {
-  isNamedProfileName,
-  NAMED_PROFILE_NAMES,
-  type NamedProfileName,
-} from "@/permission"
+import { isNamedProfileName, NAMED_PROFILE_NAMES, type NamedProfileName } from "@/permission"
 
 // Alias for readability — `RunMode` from `@/agent` is the run-mode slice's
 // closed `interactive|headless|batch|ci-bot` union. (The barrel also exports
@@ -170,7 +167,11 @@ export class AgentArgsError extends Error {
 // crash downstream.
 // ─────────────────────────────────────────────────────────────────────────
 
-const VALID_MODES = ["interactive", "headless", "batch", "ci-bot", "ide", "daemon"] as const
+// R8 — reuse the SSOT `ALL_AGENT_MODES` (which carries a BOTH-direction drift
+// guard: `satisfies` proves array⊆union AND an Assert proves union⊆array) instead
+// of a duplicate literal that lacked `satisfies` — a new AgentMode would compile
+// green here yet be silently rejected by the CLI parser.
+const VALID_MODES = ALL_AGENT_MODES
 const VALID_PROVIDERS = ["openai", "anthropic"] as const satisfies readonly ProviderToken[]
 const VALID_EXHAUSTION = [
   "ask-user",
@@ -239,16 +240,13 @@ const isValidOutputFormat = (s: string): s is OutputFormatToken =>
   (VALID_OUTPUT_FORMATS as readonly string[]).includes(s)
 
 /** ADR-0236 type guard for `--tool-profile`. */
-const isValidToolProfile = (s: string): s is ToolProfileToken =>
-  isToolProfileName(s)
+const isValidToolProfile = (s: string): s is ToolProfileToken => isToolProfileName(s)
 
 /** ADR-0236 type guard for `--identity-mode`. */
-const isValidIdentityMode = (s: string): s is IdentityModeToken =>
-  isIdentityMode(s)
+const isValidIdentityMode = (s: string): s is IdentityModeToken => isIdentityMode(s)
 
 /** Track A2 type guard for `--permission-profile`. */
-const isValidPermissionProfile = (s: string): s is PermissionProfileToken =>
-  isNamedProfileName(s)
+const isValidPermissionProfile = (s: string): s is PermissionProfileToken => isNamedProfileName(s)
 
 /** Read `argv[i+1]` and assert it exists + is NOT another flag. */
 const takeValue = (argv: readonly string[], i: number, flag: string): string => {

@@ -35,4 +35,12 @@ describe("WS4 R7 — web-daemon honors repo-local rules (trusted surface parity)
     // Conditional spread so the absent case stays byte-identical.
     expect(SRC).toMatch(/\.\.\.\(repoRules !== undefined \? \{ repoRules \} : \{\}\)/)
   })
+
+  // R8 — the load decision is GATED on the SSOT policy `modeLoadsRepoRules`
+  // (shared `@/agent/run-mode`), so web can never drift from the security
+  // classification. Remove the gate and this goes RED.
+  test("gates the load on the shared SSOT policy (modeLoadsRepoRules), not a hand-copy", () => {
+    expect(SRC).toMatch(/import\s*\{\s*modeLoadsRepoRules\s*\}\s*from\s*"@\/agent\/run-mode"/)
+    expect(SRC).toMatch(/modeLoadsRepoRules\("interactive"\)/)
+  })
 })

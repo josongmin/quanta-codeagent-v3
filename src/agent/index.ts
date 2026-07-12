@@ -303,13 +303,6 @@ export {
   maybeProposeRadarCard,
   type RadarProducerBlock,
 } from "./radar-producer-hook"
-export {
-  type ComposeForSurfaceOpts,
-  composeSystemPromptForSurface,
-  FROZEN_SURFACE_PROFILE,
-  type SurfaceProfile,
-  SWE_SURFACE_PROFILE,
-} from "./surface-profile"
 export { RECOVERY_CAPS } from "./recovery"
 export {
   loadRepoRules,
@@ -360,7 +353,9 @@ export {
   type LeverField,
   type MemoryLever,
   MODE_PRESETS,
+  MODE_REPO_RULES_POLICY,
   type ModePolicy,
+  modeLoadsRepoRules,
   type NetworkLever,
   narrowMode,
   type ObservationLever,
@@ -425,6 +420,13 @@ export {
   type SubmissionOp,
   submissionFromMessages,
 } from "./submission"
+export {
+  type ComposeForSurfaceOpts,
+  composeSystemPromptForSurface,
+  FROZEN_SURFACE_PROFILE,
+  type SurfaceProfile,
+  SWE_SURFACE_PROFILE,
+} from "./surface-profile"
 export {
   ADVISOR_TRANSCRIPT_MAX_CHARS,
   ADVISOR_TRANSCRIPT_MAX_MESSAGES,
