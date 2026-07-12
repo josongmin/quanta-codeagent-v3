@@ -19,8 +19,8 @@ import {
   wrapSubagentRunner,
 } from "@/agent/subagent-typed"
 import {
-  buildSystemPromptForRunMode,
   buildSystemPromptForMode,
+  buildSystemPromptForRunMode,
   defaultModeVariantRegistry,
   promptSurfaceProfileForRunMode,
   resolveCliDefaultEnvPosture,
@@ -45,7 +45,6 @@ import {
   wireInteractiveKnobs,
 } from "@/runner/assemble"
 import type { Surface } from "@/runner/knobs"
-import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import {
   type LocalEnvSelection,
   loadLocalEnvConfig,
@@ -53,7 +52,7 @@ import {
   selectEnvironment,
 } from "@/runtime"
 import { type AutomationEngineSlot, assembleAutomation } from "@/scheduler/runtime-wire"
-import { errMessage, gateDisabled, gateOn, logger } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 import {
@@ -67,6 +66,13 @@ import {
 } from "./agent-arg-builder/gated-tool-ports"
 import { resolveObservabilitySlots } from "./agent-arg-builder/observability-wire"
 import { resolvePermissionProfileWiring } from "./agent-arg-builder/permission-profile"
+import {
+  localEnvSlotOf,
+  namedAgentResolverSlotOf,
+  resolveLspPrewarmSlot,
+  resolveNetworkProxySlot,
+  resolvePrewarmSlot,
+} from "./agent-arg-builder-config-slots"
 import { createArtifactPreviewResolver } from "./artifact-preview-resolver"
 
 export { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
@@ -157,52 +163,6 @@ export const pickMcpNegotiator = (
       })
     : defaultNegotiator
 
-/** ADR-0428 jun-02 wire — resolve the socket-level egress proxy config from the
- *  composition-root env view and return a SPREAD-READY slot (`{}` when off) so
- *  the base literal carries no conditional branch for it (keeps
- *  `buildBaseFromArgs` under biome's cognitive-complexity cap). Absent / "0" /
- *  empty / zero-token ⇒ `{}` (default-OFF byte-identical). */
-const resolveNetworkProxySlot = (
-  env: NodeJS.ProcessEnv,
-): { networkProxy?: NonNullable<AssembleRequest["base"]["networkProxy"]> } => {
-  const networkProxy = resolveNetworkProxyFromEnv(env)
-  return networkProxy !== undefined ? { networkProxy } : {}
-}
-
-// ADR-0452 jun-02 wire — composition-root projection of `QUANTA_PREWARM` into
-// `AgentConfig.prewarm`. Extracted (mirrors `resolveNetworkProxySlot`) so the
-// branch lives here, NOT in `buildBaseFromArgs` (keeps that function under
-// biome's cognitive-complexity cap). Default-OFF (`parseEnvFlag(…, false)`):
-// absent ⇒ `undefined` ⇒ slot omitted ⇒ the loop reads no clock, runs no warm,
-// emits no TTFM key (byte-identical legacy). `now` is the REAL clock injected
-// ONLY here at the root (the slice body reads no timer); the stock LLM adapters
-// implement no `prewarm` hook, so warming is a documented no-op while the
-// `quanta.startup.*` TTFM observability is genuinely active.
-const resolvePrewarmSlot = (
-  env: NodeJS.ProcessEnv,
-): { prewarm?: NonNullable<AssembleRequest["base"]["prewarm"]> } =>
-  parseEnvFlag(env.QUANTA_PREWARM, /* defaultOn */ false)
-    ? { prewarm: { enabled: true, now: () => Date.now() } }
-    : {}
-
-// RFC jun-17 (code-intelligence warm backend) — project `QUANTA_LSP_PREWARM`
-// into `AgentConfig.lspPrewarm`. DEFAULT-ON, but GATED on the nav tools actually
-// being exposed (`QUANTA_LSP_TOOLS=full`, matching `resolveLspNavMode`, OR the
-// bench-only `QUANTA_BENCH_LSP`) — warming a server whose tools are not
-// registered is wasted work, so with nav OFF the slot is omitted (byte-identical
-// legacy). With nav ON the warm fires unless explicitly killed via
-// `QUANTA_LSP_PREWARM=0` (`gateDisabled` off-switch, also the bench A/B cold
-// arm). The session signal is not available at config-build time, so
-// `warmSignal` is left to the (bench-side) caller; the orchestrator
-// self-terminates via evict / idle-TTL.
-const resolveLspPrewarmSlot = (
-  env: NodeJS.ProcessEnv,
-): { lspPrewarm?: NonNullable<AssembleRequest["base"]["lspPrewarm"]> } => {
-  const navEnabled = env.QUANTA_LSP_TOOLS === "full" || gateOn(env, "QUANTA_BENCH_LSP")
-  if (!navEnabled || gateDisabled(env, "QUANTA_LSP_PREWARM")) return {}
-  return { lspPrewarm: { enabled: true } }
-}
-
 // ADR-0455 jun-02 wire — load `.quanta/environment.toml` (Codex `.codex/
 // environments` fallback) from `cwd` up to the repo root and resolve the
 // selected environment. Async (the loader does a directory walk + file read),
@@ -231,22 +191,6 @@ export const resolveLocalEnvSelection = async (
   }
   return selectEnvironment(loaded.result.config, env.QUANTA_LOCAL_ENV)
 }
-
-// Spread-ready projection of the partial's resolved local-env selection (`{}`
-// when absent ⇒ no branch in `buildBaseFromArgs`, keeps it under biome's
-// cognitive-complexity cap — same pattern as `resolvePrewarmSlot`).
-const localEnvSlotOf = (p: AssembleRequestPartial): { localEnv?: LocalEnvSelection } =>
-  p.localEnv !== undefined ? { localEnv: p.localEnv } : {}
-
-// Spread-ready projection of the partial's named-agent resolver (`{}` when absent
-// ⇒ no branch in `buildBaseFromArgs`, keeps it under biome's cognitive-complexity
-// cap — same pattern as `localEnvSlotOf`). Absent ⇒ `AgentConfig.namedAgentResolver`
-// stays unset ⇒ the subagent runner's resolve path is byte-identical (no named
-// agent ever matches).
-const namedAgentResolverSlotOf = (
-  p: AssembleRequestPartial,
-): { namedAgentResolver?: import("@/agent").NamedAgentResolver } =>
-  p.namedAgentResolver !== undefined ? { namedAgentResolver: p.namedAgentResolver } : {}
 
 /**
  * ADR-0281 + ADR-0282 + ADR-0413 — composition-root wire for the memory
@@ -572,9 +516,8 @@ const resolveAutomation = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null 
 /** ALBB-14 test seam — expose the private `resolveAutomation` so the
  *  fail-loud-stub contract (posture b) can be exercised directly. Not part of
  *  the public host API. */
-export const __resolveAutomationForTest = (
-  env: NodeJS.ProcessEnv,
-): AutomationEngineSlot | null => resolveAutomation(env)
+export const __resolveAutomationForTest = (env: NodeJS.ProcessEnv): AutomationEngineSlot | null =>
+  resolveAutomation(env)
 
 const attachExecutionPlaneSlots = (
   base: AssembleRequest["base"],

@@ -14,18 +14,16 @@
 // before any code path that calls resolveKnobs/knobsForSurface — without
 // this import the registry is empty and report/telemetry record nothing.
 import "@/runner/knobs/knobs"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import {
   loadSelectedInstances,
   mapWithConcurrency,
-  matchesInstanceFilter,
   runBatch,
   selectInstances,
-  writeArtifacts as writeBatchArtifacts,
 } from "@/runner/batch/core"
 import { writeClosureSidecar } from "@/runner/batch/eval/closure-diagnostics-io"
 import { makeReproArtifactFsSink } from "@/runner/batch/eval/repro-artifacts-fs"
@@ -41,22 +39,15 @@ import {
   type SwebenchTask,
   toInstance,
 } from "./corpus"
-import {
-  bridgeDatasetFamilyToEnv,
-  type DatasetFamily,
-  gradeEvaluatorForFamily,
-  parseTasksForFamily,
-  resolveDatasetFamily,
-} from "./dataset-family"
+import { bridgeDatasetFamilyToEnv, gradeEvaluatorForFamily } from "./dataset-family"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
-import { finalizeRun, runInstance } from "./eval"
+import { runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
-import { isPythonSwebenchAvailable, prepareImages, resolveHarnessConfig } from "./harness"
+import { isPythonSwebenchAvailable } from "./harness"
 import { startHostResourceSampler } from "./host-resource-sampler"
 import { startLaneProgressRenderer } from "./lane-progress-renderer"
 import { resolveModelLanes } from "./model-lanes"
-import type { AttemptObservation } from "./observe"
 import { resolvedTotals } from "./observe"
 import { seedBenchExecutionPreset } from "./preset"
 import { evaluateWithPythonSwebench } from "./python-swebench"
@@ -72,6 +63,17 @@ import {
   repairConfigFromArg,
   resolveConcurrency,
 } from "./run-args"
+import {
+  attemptObs,
+  datasetFamily,
+  filterSwebenchTasks,
+  finalizeObserve,
+  readSwebenchTasks,
+  resolveObserve,
+  runPrepareImages,
+  withObserve,
+  writeArtifacts,
+} from "./run-main-helpers"
 import { printHelp, printPresetList, printSummary } from "./run-report"
 import { patchVote, sampleBestOfN } from "./sampler"
 import {
@@ -82,10 +84,11 @@ import {
 import type { Instance, InstanceResult } from "./types"
 
 export { repairConfigFromArg } from "./run-args"
+export { writeArtifacts } from "./run-main-helpers"
 
 /** Per-run config common to single & Best-of-N. `pythonSwebench` is present
  *  only when `QUANTA_SWEBENCH_PYTHON=1` and the harness is importable. */
-type RunCfg = Parameters<typeof runInstance>[1]
+export type RunCfg = Parameters<typeof runInstance>[1]
 
 /** Injectable exit. Mirrors `apps/agent/index.ts` MainDeps so unit tests can
  *  observe early-exit codes without forking the process. Defaults to
@@ -129,30 +132,10 @@ export interface MainDeps {
  * returns undefined. The old "undefined ⇒ default-OFF, byte-identical" contract
  * no longer holds; the `| undefined` return type is kept only for the type seam.
  */
-interface ObserveCtx {
+export interface ObserveCtx {
   dir: string
   runId: string
 }
-
-/** Resolve the observe root. Defaults to the PERSISTENT bench runs dir so
- *  trajectories survive across sessions (override with `--observe-dir` /
- *  `QUANTA_OBSERVE_DIR`). Always returns a handle (observe is on by default). */
-const resolveObserve = (): ObserveCtx | undefined => {
-  const runId = benchRunId()
-  const flag = argValue("--observe-dir") ?? process.env.QUANTA_OBSERVE_DIR
-  const dir = flag ? resolve(process.cwd(), flag) : join(benchRunDir(runId), "observe")
-  return { dir, runId }
-}
-
-/** Per-attempt observe handle for one instance (one file per attempt). */
-const attemptObs = (
-  obs: ObserveCtx | undefined,
-  attempt: number,
-): AttemptObservation | undefined =>
-  obs === undefined ? undefined : { dir: obs.dir, runId: obs.runId, attempt }
-
-const withObserve = (base: RunCfg, o: AttemptObservation | undefined): RunCfg =>
-  o === undefined ? base : { ...base, observe: o }
 
 /** Run one instance n times via Best-of-N; pick passing run, then majority
  *  patch vote as a tiebreak among equally-scored runs. Each attempt gets its
@@ -389,48 +372,6 @@ const runSwebenchTask = async (
   }
 }
 
-/** `--prepare-images` worker: warm the Docker image pool for `instanceIds`
- *  via the official `prepare_images` harness, log the outcome, and return the
- *  process exit code (0 ok / 1 fail). The SOTA win: per-repo env image built
- *  once here, reused by every later instance of that repo. */
-const runPrepareImages = async (instanceIds: string[]): Promise<number> => {
-  const result = await prepareImages({
-    predictionsPath:
-      argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
-    runId: benchRunId(),
-    instanceIds,
-    datasetName: argValue("--dataset-name") ?? "princeton-nlp/SWE-bench_Verified",
-    config: resolveHarnessConfig(),
-  })
-  logger.info(
-    `bench: prepare-images ${result.ok ? "OK" : "FAIL"} (preexisting env images: ${result.preexistingEnvImages})`,
-  )
-  if (!result.ok) logger.info(`prepare log tail:\n${result.log}`)
-  return result.ok ? 0 : 1
-}
-
-/** Resolve the dataset family (verified|live|pro) from `--dataset-family` /
- *  QUANTA_SWEBENCH_DATASET_FAMILY. Default "verified" (byte-identical legacy). */
-const datasetFamily = (): DatasetFamily =>
-  resolveDatasetFamily(argValue("--dataset-family"), process.env)
-
-// REGRESSION FIX (jun-30): the god-MODULE split (11adab597) dropped the family-aware
-// parse — Pro rows MUST be normalized (lowercase fail_to_pass + extra fields) or they
-// degrade to the `testCmd:"true"` no-op. Verified/Live are the standard schema.
-const readSwebenchTasks = (datasetFile: string): SwebenchTask[] =>
-  parseTasksForFamily(readFileSync(datasetFile, "utf8"), datasetFamily())
-
-/** Apply the `--instance <substr>` filter to ALREADY-parsed tasks. Pure — no
- *  IO — so the dataset file is read + JSON-parsed exactly ONCE per run and the
- *  parsed corpus is threaded through (filter + empty-check + limit) instead of
- *  re-reading the same 500-row file three times. */
-const filterSwebenchTasks = (parsed: readonly SwebenchTask[]): SwebenchTask[] => {
-  const instanceFilter = argValue("--instance")
-  return instanceFilter !== undefined && instanceFilter !== ""
-    ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
-    : [...parsed]
-}
-
 const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
@@ -577,34 +518,6 @@ const runDatasetMode = async (
   }
   printSummary({ ...resolvedTotals(results), results })
   await finalizeObserve(obs, results)
-}
-
-/** D-fix: shared `--predictions` / `--report` writer for both bench modes.
- *  Pure-by-signature (paths + results + meta are explicit args, no argv reads)
- *  so the contract is unit-testable without spawning the CLI. */
-export const writeArtifacts = async (
-  predictionsFile: string,
-  reportFile: string,
-  results: InstanceResult[],
-  meta: { provider: string; model: string; n: number; runHealth?: RunHealthSummary },
-): Promise<void> => {
-  await writeBatchArtifacts(predictionsFile, reportFile, results, meta)
-  logger.info(`wrote ${predictionsFile} (${results.length} prediction(s)) and ${reportFile}`)
-}
-
-/** Run end (RFC §8): write `<observeDir>/<runId>/{metrics,summary}.json` and
- *  log passed/total plus the official-harness split. No-op when observe is OFF. */
-const finalizeObserve = async (
-  obs: ObserveCtx | undefined,
-  results: InstanceResult[],
-): Promise<void> => {
-  if (obs === undefined) return
-  const summary = await finalizeRun(obs, results)
-  logger.info(
-    `observe: ${join(obs.dir, obs.runId)} — passed ${summary.resolved}/${summary.total}` +
-      ` | official_harness ${summary.score.officialHarness}/${summary.total}` +
-      ` (${summary.degraded} degraded)`,
-  )
 }
 
 /** Resolve provider/model/LLM; exits 0 with guidance when the key is absent
@@ -925,7 +838,8 @@ const runCustomCorpusMode = async (
   }
   const { results } = await runBatch({
     instances,
-    runInstance: (instance) => resolveInstance(instance, base, cfg.n, obs, () => resolved.freshLlm()),
+    runInstance: (instance) =>
+      resolveInstance(instance, base, cfg.n, obs, () => resolved.freshLlm()),
     concurrency: resolveConcurrency(),
   })
   // D-fix: write `--predictions` / `--report` from BOTH bench modes.

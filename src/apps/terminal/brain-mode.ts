@@ -27,26 +27,27 @@
  * REPLICATED locally here so this slice never reaches across the fence.
  */
 
-import { createActivityStore } from "@/activity"
 import { composeSystemPromptForSurface, type SurfaceProfile } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
-import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/bootstrap"
 import { bootstrapSession } from "@/host/bootstrap"
-import type { ImageBlock, LLMPort, Message } from "@/llm"
+import type { LLMPort, Message } from "@/llm"
 import { defaultResponsesContinuationStore } from "@/llm/responses-continuation-store"
-import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
 import { runSessionTurn } from "@/runner/orchestrate/session-turn-driver"
 import { createRuntimeFromBootstrap } from "@/sdk/runtime"
 import { gateOn } from "@/shared/env-flag"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE, type Tool, ToolRegistry } from "@/tool"
-import type { JsonLineDuplex } from "@/tool/container-exec"
+import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE } from "@/tool"
 import type { PtySessionPort } from "@/tool/pty"
 // UUX-2-21 — ONE named approval policy for BOTH seams (gate-confirm denies /
 // deferred approves, intentionally — see the const's doc for the verified WHY).
 // The hellgate pins that THIS module spells no inline approval lambda of its own.
 import { BENCH_APPROVAL_POSTURE } from "./brain-approval-posture"
+import {
+  buildTerminalBootstrapDeps,
+  buildTerminalRuntime,
+  duplexOverStdio,
+} from "./brain-mode-session-scaffold"
 import { terminalSurfaceOverDuplex } from "./index"
 import {
   comparedToReference,
@@ -59,8 +60,6 @@ import {
   type SelfTestReceipt,
   type VerificationStamp,
 } from "./verify-gate"
-
-const TERMINAL_BRAIN_SESSION_ID = "terminal-brain-session"
 
 /** Lever #2 knob (RFC `jul-2-terminal-bench-levers/02`): the verify-before-finalize gate.
  *  DEFAULT-OFF ⇒ byte-identical today (no `verification` field, no extra turn). When ON, the brain
@@ -356,123 +355,6 @@ export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep
   flushText() // trailing reasoning after the last tool call (often the final "verified green" claim)
   return steps.length > TRAJECTORY_MAX_STEPS ? steps.slice(-TRAJECTORY_MAX_STEPS) : steps
 }
-
-/** Build a complete, offline {@link SessionBootstrapDeps} bundle wired to the injected LLM, capture
- *  stream, and the terminal tool registry. REPLICATES the headless `buildFakeBootstrapDeps` shape
- *  (cannot import `@/apps/headless` across the terminal fence) — the deps the agent loop needs that
- *  the brain surface does not own (memory store / subagents / reviewer / MCP / images) are leanest
- *  valid stubs. */
-const buildTerminalBootstrapDeps = (
-  llm: LLMPort,
-  stream: StreamPort,
-  tools: readonly Tool[],
-): SessionBootstrapDeps => {
-  const registry = new ToolRegistry([...tools])
-  return {
-    buildLifecycleBundle: () => ({
-      pills: { update: () => undefined },
-      taskRegistry: undefined,
-      followUpQueue: undefined,
-      activityStore: createActivityStore(),
-    }),
-    deriveMcpPillServers: () => [],
-    buildCostPanelOrUndefined: () => undefined,
-    buildBranchProgressOrUndefined: () => undefined,
-    buildPlanStoreOrUndefined: () => undefined,
-    buildWorkMetricsSink: () => undefined,
-    buildLlm: () => llm,
-    buildAutoTitlePort: () => undefined,
-    buildStreaming: () => ({ stream, run: undefined }),
-    buildTooling: () => ({
-      store: undefined,
-      embedder: undefined,
-      sessionId: TERMINAL_BRAIN_SESSION_ID,
-      registry,
-      memoryConfig: undefined,
-      subagentConfig: undefined,
-      skillsConfig: undefined,
-      compactionBreakerConfig: undefined,
-      verifyGuardConfig: undefined,
-    }),
-    loadFeatures: async () => ({
-      planMode: false,
-      metrics: undefined,
-      state: undefined,
-      resume: undefined,
-      mcpTools: [],
-      mcpClients: [],
-      mcpConfigs: [],
-      lspTools: [],
-      lspNavTools: [],
-      gitToolList: [],
-      astGrepTools: [],
-    }),
-    loadImageBlock: (): ImageBlock => ({ type: "image", data: "", mediaType: "image/png" }),
-    pickIdentity: () => undefined,
-    pickPersona: () => "default",
-    resolveResume: async (_: ResolveResumeInput): Promise<ResumeResolution> => ({
-      sessionId: TERMINAL_BRAIN_SESSION_ID,
-      history: [] as Message[],
-      idMeta: undefined,
-      inIdMode: false,
-      conflictError: undefined,
-      missingIdError: undefined,
-    }),
-    composeShellEvent: () => undefined,
-    switchToSessionCwd: (cwd) => cwd,
-    materializeReviewerAgent: () => undefined,
-    createSubagentBackedGuardianReview: () => (async () => ({})) as never,
-    createSubagentBackedGuardianAssess: () => (async () => ({})) as never,
-    buildMcpSurfaceInfo: () => undefined,
-    buildIdleGuards: () => ({
-      idleMonitor: { markActive: () => undefined },
-      rejectCounter: { recordAccept: () => undefined, recordDeny: () => undefined },
-    }),
-  }
-}
-
-/** Build the leanest valid {@link SessionRuntimeConfigShape} for an offline brain run. No
- *  `process.*` reads — the surface entry threads argv-derived values in. */
-const buildTerminalRuntime = (opts: RunTerminalBrainOpts): SessionRuntimeConfigShape => ({
-  // Config-label only — the ACTUAL provider is whatever the injected `llm` adapter is. The runtime
-  // shape constrains this to the `LLMProvider` enum, so we carry the headless precedent's `"openai"`
-  // placeholder; the brain never dispatches on it (the surface tools + injected LLM own behavior).
-  provider: "openai",
-  model: opts.model ?? "terminal-brain",
-  mode: "acceptEdits",
-  maxTurns: opts.maxTurns ?? 30,
-  cwd: opts.cwd ?? "/",
-  env: {},
-  homeDir: "/tmp",
-  stdinIsTTY: false,
-  stdoutIsTTY: false,
-  newSession: false,
-  title: undefined,
-  // INERT here: `idleMs` is only ever consulted by the interactive REPL path (repl.ts, gated on
-  // `idleSuppressOn`), which the brain NEVER runs — so this value has no effect. Kept as a required
-  // shape field with an explicit 0 (was a misleading `60_000` const whose comment claimed a live
-  // "no inbound frame" bound that nothing enforces — P0-B). The real per-command bound is the
-  // opt-in `timeoutMs` on the exec path; the task-level bound is harbor's AgentTimeout.
-  idleMs: 0,
-  snoozeDefaultMs: 300_000,
-  rejectLimit: 20,
-  idleSuppressOn: false,
-  observeDir: undefined,
-  pendingImagePaths: [],
-  mcpConfigPath: undefined,
-  argPrompt: undefined,
-  spinnerIntervalMs: "80",
-})
-
-/** A `JsonLineDuplex` over the brain's stdio: read inbound frames from `stdin`, write outbound
- *  frames to `stdout` (appending the line terminator). */
-const duplexOverStdio = (
-  stdin: AsyncIterable<string>,
-  stdout: { write(line: string): void },
-): JsonLineDuplex => ({
-  write: (line) => stdout.write(`${line}\n`),
-  lines: stdin,
-})
 
 /** Total input/output tokens from the captured `usage` AgentEvents (terminal usage owns billing —
  *  transient `output_progress` is intentionally skipped). */
@@ -811,6 +693,56 @@ export const resolveMaxTurnsFromEnv = (
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined
 }
 
+/** Compose the brain's SYSTEM prompt in place on `boot.systemSource` (Lever #1 env-posture swap, then
+ *  the S1 self-test-discipline append), and capture the live system text for the debug tier. Returns
+ *  the two report-facing facts (`envOwnedApplied`, `systemText`) the caller threads onward. Extracted
+ *  from `runTerminalBrain` to keep it under the god-FUNCTION cap; every branch is default-OFF ⇒ the
+ *  system prompt (and the return) is byte-identical to today when no knob is set. */
+const composeBrainSystemPrompt = (args: {
+  boot: Awaited<ReturnType<typeof bootstrapSession>>
+  env: Record<string, string | undefined>
+  selfTestOn: boolean
+}): { envOwnedApplied: boolean; systemText: string | undefined } => {
+  const { boot, env, selfTestOn } = args
+  let envOwnedApplied = false
+  let systemText: string | undefined
+  // ── Lever #1 via the SurfaceProfile seam (default-OFF ⇒ this block is skipped, byte-identical) ──
+  // The terminal entry point DECLARES its surface profile (`TERMINAL_SURFACE_PROFILE`,
+  // envPosture:"owned"); `QUANTA_TB_ENV_OWNED` GATES whether it is applied at launch. When ON we
+  // compose the SYSTEM prompt for that profile via the pure composer `composeSystemPromptForSurface`
+  // (no per-surface `if` in the prompt core) and publish it through `boot.systemSource` — the SAME
+  // mutable seam `refreshSystemPrompt` uses for identity swaps; the turn assembler reads
+  // `systemSource.get()` every turn. This swaps ONLY the rendered env-rule TEXT (drops R-ENV /
+  // R-STOP-ENV, adds R-ENV-OWNED / R-INSTALL-THRASH) — PROMPT-TEXT-ONLY: it sets NO SandboxMode /
+  // SandboxPolicy and does NOT touch host enforcement. Composition mirrors bootstrap's own frozen
+  // build for this surface exactly (persona "default", no identity), so the ONLY delta vs the frozen
+  // prompt is the env-rule list. The `operatorGuide` field of the profile is injected per-turn on
+  // the instruction (see `turnText`), kept off the cached system prefix on purpose.
+  if (gateOn(env, TB_ENV_OWNED_ENV)) {
+    boot.systemSource.set(
+      composeSystemPromptForSurface(TERMINAL_SURFACE_PROFILE, {
+        cwd: boot.cwd,
+        persona: "default",
+      }),
+    )
+    envOwnedApplied = true
+  }
+  // S1 self-test discipline → SYSTEM prompt (lost-in-the-middle alignment). Appended AFTER the
+  // env-posture swap so it rides whichever posture is active (frozen or owned). Read every turn via
+  // `systemSource.get()`, so unlike a first-user-turn block it stays in the strong-attention head of
+  // a long trajectory. Default-OFF ⇒ this block is skipped ⇒ system prompt byte-identical.
+  if (selfTestOn) {
+    boot.systemSource.set(`${boot.systemSource.get()}\n\n${SELF_TEST_DISCIPLINE}`)
+  }
+  // Debug-tier dump (report.debug): capture the LIVE system text AFTER every composition step
+  // (posture swap + S1 append) — the session already holds the exact history, so the debug tier
+  // ships it verbatim rather than making viewers reconstruct it. Gate off ⇒ undefined ⇒ the report
+  // field is absent (byte-identical). No mid-run system swap exists on this surface, so a single
+  // post-composition capture IS the per-turn truth.
+  if (resolveDebugDumpOn(env)) systemText = boot.systemSource.get()
+  return { envOwnedApplied, systemText }
+}
+
 export const runTerminalBrain = async (
   opts: RunTerminalBrainOpts,
 ): Promise<TerminalBrainResult> => {
@@ -857,40 +789,12 @@ export const runTerminalBrain = async (
       else opts.signal.addEventListener("abort", () => boot.abort.abort(), { once: true })
     }
 
-    // ── Lever #1 via the SurfaceProfile seam (default-OFF ⇒ this block is skipped, byte-identical) ──
-    // The terminal entry point DECLARES its surface profile (`TERMINAL_SURFACE_PROFILE`,
-    // envPosture:"owned"); `QUANTA_TB_ENV_OWNED` GATES whether it is applied at launch. When ON we
-    // compose the SYSTEM prompt for that profile via the pure composer `composeSystemPromptForSurface`
-    // (no per-surface `if` in the prompt core) and publish it through `boot.systemSource` — the SAME
-    // mutable seam `refreshSystemPrompt` uses for identity swaps; the turn assembler reads
-    // `systemSource.get()` every turn. This swaps ONLY the rendered env-rule TEXT (drops R-ENV /
-    // R-STOP-ENV, adds R-ENV-OWNED / R-INSTALL-THRASH) — PROMPT-TEXT-ONLY: it sets NO SandboxMode /
-    // SandboxPolicy and does NOT touch host enforcement. Composition mirrors bootstrap's own frozen
-    // build for this surface exactly (persona "default", no identity), so the ONLY delta vs the frozen
-    // prompt is the env-rule list. The `operatorGuide` field of the profile is injected per-turn on
-    // the instruction (see `turnText`), kept off the cached system prefix on purpose.
-    if (gateOn(opts.env ?? {}, TB_ENV_OWNED_ENV)) {
-      boot.systemSource.set(
-        composeSystemPromptForSurface(TERMINAL_SURFACE_PROFILE, {
-          cwd: boot.cwd,
-          persona: "default",
-        }),
-      )
-      envOwnedApplied = true
-    }
-    // S1 self-test discipline → SYSTEM prompt (lost-in-the-middle alignment). Appended AFTER the
-    // env-posture swap so it rides whichever posture is active (frozen or owned). Read every turn via
-    // `systemSource.get()`, so unlike a first-user-turn block it stays in the strong-attention head of
-    // a long trajectory. Default-OFF ⇒ this block is skipped ⇒ system prompt byte-identical.
-    if (selfTestOn) {
-      boot.systemSource.set(`${boot.systemSource.get()}\n\n${SELF_TEST_DISCIPLINE}`)
-    }
-    // Debug-tier dump (report.debug): capture the LIVE system text AFTER every composition step
-    // (posture swap + S1 append) — the session already holds the exact history, so the debug tier
-    // ships it verbatim rather than making viewers reconstruct it. Gate off ⇒ undefined ⇒ the report
-    // field is absent (byte-identical). No mid-run system swap exists on this surface, so a single
-    // post-composition capture IS the per-turn truth.
-    if (resolveDebugDumpOn(opts.env ?? {})) systemText = boot.systemSource.get()
+    // Compose the SYSTEM prompt (env-posture swap + S1 self-test append) and capture the debug-tier
+    // system text. Extracted to keep `runTerminalBrain` under the god-FUNCTION cap; the composition
+    // order + default-OFF byte-identical contract is unchanged (see the helper for the full WHY).
+    const composed = composeBrainSystemPrompt({ boot, env: opts.env ?? {}, selfTestOn })
+    envOwnedApplied = composed.envOwnedApplied
+    systemText = composed.systemText
     const { runtime: facade } = await createRuntimeFromBootstrap({
       boot,
       stream,
