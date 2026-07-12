@@ -25,7 +25,7 @@
  */
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { costUsd, Metrics, PRICING_VERSION } from "@/observability"
+import { costUsd, getActiveTraceRef, Metrics, PRICING_VERSION } from "@/observability"
 import type {
   PatchData,
   RunContext,
@@ -167,6 +167,14 @@ export class BenchObserver {
       strict: true,
       now: this.now,
       monotonic: monotonicUs,
+      // C3 (jul-12 OTel unification): stamp the ACTIVE OTel span identity onto
+      // each OBSERVE event so the trajectory joins the trace tree on
+      // `{traceId,spanId}`. DI so `@/stream` (the recorder's slice) never imports
+      // `@/observability` — `@/runner/batch` is allowed to. When no `withSpan`
+      // scope encloses the emit (off mode / no active root), this returns
+      // undefined and the recorder falls back to its deterministic ids ⇒
+      // byte-identical output.
+      getActiveTraceRef,
     })
   }
 

@@ -1,8 +1,8 @@
-import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability"
+import { attrs, endSpan, mergeAttrs, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import { withEgressProxy } from "@/runtime/network-proxy"
 import { attachLspDiagnosticsHookIfEnabled } from "../lsp-bridge"
 import { runMemoryConsolidatorHook } from "../memory-consolidator-hook"
-import { sessionSpanAttrs } from "../session-resources"
+import { sessionGenAiAttrs, sessionSpanAttrs, withActiveSpanScope } from "../session-resources"
 import { interruptedCategory } from "../stop-category"
 import type { AgentConfig, AgentOutcome } from "../types"
 import { createRunAgentContext } from "./session-bootstrap"
@@ -16,16 +16,27 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
   // <attempt>.jsonl` trajectory line. `spanIdentity` is absent for every
   // non-bench entry point ⇒ byte-identical; and when the OTEL sink is OFF the
   // span is a no-op sentinel so this attr build costs nothing.
+  // GenAI semconv (`invoke_agent`, kind=INTERNAL) folded onto the quanta.*
+  // session attrs — additive, never replacing the existing conversation/thread
+  // anchors. `gen_ai.operation.name`/`agent.name`/`conversation.id` let the OTLP
+  // span read as an agent-invocation root under the unified GenAI vocabulary.
   const sessionSpan: Span = startSpan(
     SPAN_NAMES.sessionLoop,
-    sessionSpanAttrs(
-      sessionId,
-      config.spanIdentity !== undefined ? config.spanIdentity : undefined,
+    mergeAttrs(
+      sessionSpanAttrs(
+        sessionId,
+        config.spanIdentity !== undefined ? config.spanIdentity : undefined,
+      ),
+      sessionGenAiAttrs(sessionId),
     ),
   )
   let spanStatus: "ok" | "error" | "aborted" = "ok"
   try {
-    const outcome = await runAgentInnerWithEgressProxy(config)
+    // Install the ROOT active-context ref for the whole session so every nested
+    // async span (turn / sampling / tool) + the OBSERVE recorder discover this
+    // session as their trace root. No-op (direct call) when no span sink is
+    // active — byte-identical default-OFF.
+    const outcome = await withActiveSpanScope(true, () => runAgentInnerWithEgressProxy(config))
     spanStatus =
       outcome.reason === "aborted" ? "aborted" : outcome.reason === "error" ? "error" : "ok"
     if (spanStatus === "ok") {

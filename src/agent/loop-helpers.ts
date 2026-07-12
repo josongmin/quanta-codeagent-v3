@@ -12,6 +12,7 @@ import {
   GEN_AI_ATTRS,
   getSpanSink,
   previewPayload,
+  providerOf,
   type Span,
   type SpanStatus,
   type TurnTiming,
@@ -391,13 +392,18 @@ export const samplingUsageFromEvent = (ev: {
   ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
 })
 
-/** gen_ai.* attributes for a `run_sampling_request` span: TTFT (existing) PLUS
- *  the response model, token usage, and finish reason when available. The
+/** gen_ai.* attributes for a `run_sampling_request` (`chat`, kind=CLIENT) span:
+ *  TTFT (existing) PLUS the GenAI operation discriminator, the requested model +
+ *  its provider, the response model, token usage, and the finish reason. The
  *  sampling span previously carried only TTFT — so a trace could not answer
- *  "which model / how many tokens / why did it stop" per LLM call. Empty-safe:
- *  omits any field whose source was absent (no usage event ⇒ early abort; no
- *  finish reason). All keys are canonical `GEN_AI_ATTRS` so `attrs()` accepts
- *  them. */
+ *  "which operation / which model+provider / how many tokens / why did it stop"
+ *  per LLM call. Empty-safe: omits any field whose source was absent (no usage
+ *  event ⇒ early abort; no finish reason). All keys are canonical `GEN_AI_ATTRS`
+ *  so `attrs()` accepts them.
+ *
+ *  `gen_ai.response.finish_reasons` is emitted as a homogeneous string ARRAY per
+ *  the OTel GenAI semconv (a turn may report several reasons; the exporter's
+ *  Wave-1 `arrayValue` support serializes it) — NOT a bare scalar. */
 export const buildSamplingSpanAttrs = (
   timing: TurnTiming,
   usage?: SamplingUsage,
@@ -408,8 +414,26 @@ export const buildSamplingSpanAttrs = (
    *  what came back. Omitted (undefined) on the default-OFF path. */
   promptPreview?: string,
   completionPreview?: string,
-): Record<string, string | number> => {
-  const out: Record<string, string | number> = { ...buildTtftAttrs(timing) }
+  /** The REQUESTED model + provider (from the turn's `LLMPort`), distinct from
+   *  the RESPONSE model in `usage`. `gen_ai.request.model` is the model we asked
+   *  for; `gen_ai.provider.name` is its provider slug (adapter-reported when
+   *  available, else derived from the model prefix). Both omitted when unknown. */
+  requestModel?: string,
+  provider?: string,
+): Record<string, string | number | readonly string[]> => {
+  const out: Record<string, string | number | readonly string[]> = {
+    // `chat` is the canonical GenAI operation for a provider sampling request.
+    [GEN_AI_ATTRS.operation.name]: "chat",
+    ...buildTtftAttrs(timing),
+  }
+  if (requestModel !== undefined && requestModel !== "") {
+    out[GEN_AI_ATTRS.request.model] = requestModel
+    // Provider: prefer the adapter-reported slug; else derive from the model
+    // name (providerOf covers the openai/anthropic split). A caller-supplied
+    // provider wins so a chatgpt-oauth surface isn't mis-derived.
+    out[GEN_AI_ATTRS.provider.name] =
+      provider !== undefined && provider !== "" ? provider : providerOf(requestModel)
+  }
   if (promptPreview !== undefined) out[GEN_AI_ATTRS.prompt] = promptPreview
   if (completionPreview !== undefined) out[GEN_AI_ATTRS.response.completion] = completionPreview
   if (usage !== undefined) {
@@ -425,7 +449,9 @@ export const buildSamplingSpanAttrs = (
     if (usage.cacheCreationTokens !== undefined)
       out[GEN_AI_ATTRS.usage.cacheCreationInputTokens] = fin(usage.cacheCreationTokens)
   }
-  if (finishReason !== undefined) out[GEN_AI_ATTRS.response.finishReason] = finishReason
+  // Emit finish_reasons as a homogeneous string ARRAY (semconv) — the exporter
+  // serializes it via OTLP `arrayValue`.
+  if (finishReason !== undefined) out[GEN_AI_ATTRS.response.finishReason] = [finishReason]
   return out
 }
 
@@ -443,6 +469,11 @@ export const closeSamplingSpan = (
   finishReason: string | undefined,
   messages: readonly Message[],
   responseMessage: unknown,
+  /** The turn's requested model + provider (from the `LLMPort`) for
+   *  `gen_ai.request.model` / `gen_ai.provider.name`. Omitted (undefined) for
+   *  test doubles that don't expose a model. */
+  requestModel?: string,
+  provider?: string,
 ): void => {
   const sinkActive = getSpanSink() !== null
   const promptPreview =
@@ -452,7 +483,17 @@ export const closeSamplingSpan = (
   endSpan(
     span,
     status,
-    attrs(buildSamplingSpanAttrs(timing, usage, finishReason, promptPreview, completionPreview)),
+    attrs(
+      buildSamplingSpanAttrs(
+        timing,
+        usage,
+        finishReason,
+        promptPreview,
+        completionPreview,
+        requestModel,
+        provider,
+      ),
+    ),
   )
 }
 

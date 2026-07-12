@@ -2,7 +2,7 @@ import { attrs, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observabilit
 import { errMessage, isAbortError, LLMError, logger } from "@/shared"
 import { maybeProposeRadarCard } from "../radar-producer-hook"
 import { freshRecovery } from "../recovery"
-import { buildWorkMetricsResources, turnSpanAttrs } from "../session-resources"
+import { buildWorkMetricsResources, turnSpanAttrs, withActiveSpanScope } from "../session-resources"
 import { completedCategory, interruptedCategory } from "../stop-category"
 import { flushTurnObservability } from "../turn-closeout"
 import type { TurnState } from "../turn-context"
@@ -13,8 +13,8 @@ import {
   DEFAULT_POST_CONTINUE_STOP_CONDITIONS,
   DEFAULT_PRE_TURN_STOP_CONDITIONS,
 } from "./stop-conditions"
-import { prepareTurnIteration } from "./turn-iteration"
 import { classifyTurnAbort } from "./turn-gate"
+import { prepareTurnIteration } from "./turn-iteration"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "./turn-outcome"
 import type { RunAgentContext, TurnResult } from "./types"
 
@@ -46,9 +46,7 @@ export const classifyTurnThrow = (
  *  mint this), OR the lifetime `signal` is already aborted (a cancel that surfaced
  *  as some other error while the signal was down). Pure — no throw, no IO. */
 export const isGenuineTurnAbort = (e: unknown, signal: AbortSignal | undefined): boolean =>
-  isAbortError(e) ||
-  (e instanceof LLMError && e.kind === "aborted") ||
-  signal?.aborted === true
+  isAbortError(e) || (e instanceof LLMError && e.kind === "aborted") || signal?.aborted === true
 
 /** The finish tuple for the park/gate SETTLE path (a parked turn whose gate
  *  wait resolved to "settle", or a park with no gate to keep waiting on). This
@@ -88,7 +86,11 @@ export const executeTurnWithObservability = async (args: {
       rec: freshRecovery(),
       collector: workCollector,
     }
-    result = await runTurn(args.turn, args.ctx.session, state)
+    // Activate the turn span in async context so the nested sampling +
+    // tool-call spans (opened deep inside `runTurn`) discover THIS turn as their
+    // structural parent — replacing the old flat-sink LIFO-stack parentage.
+    // No-op wrap when no sink is active (byte-identical default-OFF).
+    result = await withActiveSpanScope(false, () => runTurn(args.turn, args.ctx.session, state))
     flushKind = result.kind
     turnSpanStatus =
       result.kind === "aborted" || result.kind === "interrupted"

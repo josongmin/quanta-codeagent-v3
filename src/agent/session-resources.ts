@@ -1,12 +1,13 @@
-import { attrs, QUANTA_ATTRS } from "@/observability"
+import { attrs, GEN_AI_ATTRS, getSpanSink, QUANTA_ATTRS } from "@/observability"
+import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "@/observability/tracing"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
 import { type Tool, ToolRegistry } from "@/tool"
 import { type CloseoutGuardState, createCloseoutGuardState } from "./closeout-guard"
 import { createLocalizePhaseState, type LocalizePhaseState } from "./localize-phase-guard"
-import { createReproDoubtState, type ReproDoubtState } from "./repro-doubt-guard"
 import type { PersistDeps } from "./memory"
 import type { AgentRecorder } from "./metrics"
+import { createReproDoubtState, type ReproDoubtState } from "./repro-doubt-guard"
 import type { AgentConfig, RedactionRollup } from "./types"
 import { createVerifyGuardState, type VerifyGuardState } from "./verify-guard"
 import { TurnWorkMetricsCollector } from "./work-metrics-collector"
@@ -270,4 +271,81 @@ export const turnSpanAttrs = (turnId: string): ReturnType<typeof attrs> =>
   attrs({
     [QUANTA_ATTRS.turn.id]: turnId,
     [QUANTA_ATTRS.turn.kind]: "main",
+  })
+
+// ───────────────────────────────────────────────────────────────────────────
+// C2 (jul-12) — GenAI semconv + active async-context bridge
+//
+// The four legacy `session_loop`/`turn`/`run_sampling_request`/`handle_tool_call`
+// span sites emit through the flat `SpanSink` (spans.ts), which does NOT publish
+// an active span into async context. C1's typed-tracer `withSpan` (otel-tracer.ts)
+// DOES install a `TraceRef` (AsyncLocalStorage) so nested async work + the OBSERVE
+// recorder (jsonl-recorder DI reads `getActiveTraceRef()`) + the 3 legacy
+// `recordAttrs` orphan sites can discover their enclosing parent. To bridge the
+// two WITHOUT touching C1's spans.ts, C2 wraps each span BODY in an active
+// `TraceRef` scope minted here — gated on a live sink so the default-OFF loop is
+// byte-identical (no async-context frame, no id allocation).
+// ───────────────────────────────────────────────────────────────────────────
+
+/** Crypto-strong lowercase hex of `byteCount` bytes (W3C id shape). Mirrors the
+ *  tracing slice's `randomHex` so a bridge ref is indistinguishable in shape
+ *  from a real OTel span id — the OBSERVE recorder stamps it verbatim. */
+const bridgeHex = (byteCount: number): string => {
+  const bytes = new Uint8Array(byteCount)
+  crypto.getRandomValues(bytes)
+  let out = ""
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i] ?? 0
+    out += (b < 0x10 ? "0" : "") + b.toString(16)
+  }
+  return out
+}
+
+/** Run `body` inside a fresh active-context span scope that inherits the current
+ *  enclosing ref as its parent — the async-context glue the legacy `SpanSink`
+ *  path lacks. `isRoot` starts a NEW trace (session_loop); otherwise the trace id
+ *  is inherited so the whole session shares one trace and each child records its
+ *  `parentSpanId`.
+ *
+ *  DEFAULT-OFF byte-identity: when NO span sink is registered, this installs
+ *  nothing (no `runWithActiveTraceRef`, no id mint) and calls `body()` directly —
+ *  identical to the pre-C2 loop. The gate is `getSpanSink()` (the same sink the
+ *  legacy span helpers consult), so context activation is coupled 1:1 to the
+ *  spans actually being emitted. */
+export const withActiveSpanScope = <T>(isRoot: boolean, body: () => Promise<T>): Promise<T> => {
+  if (getSpanSink() === null) return body()
+  const parent = isRoot ? undefined : getActiveTraceRef()
+  const ref: TraceRef = {
+    traceId: parent?.traceId ?? bridgeHex(16),
+    spanId: bridgeHex(8),
+    traceFlags: parent !== undefined ? parent.traceFlags : 1,
+    ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
+  }
+  return runWithActiveTraceRef(ref, body)
+}
+
+/** GenAI semconv attrs for the session (`invoke_agent`) span. Additive to the
+ *  existing `quanta.*` session attrs (never replaces them). `gen_ai.agent.name`
+ *  is the fixed logical agent identity; `gen_ai.conversation.id` correlates every
+ *  turn of one conversation and is sourced from the sessionId when a real one was
+ *  supplied (the `"default"` fallback conversation is a non-identity, so it is
+ *  omitted rather than stamped as a shared bogus id). Pure. */
+export const sessionGenAiAttrs = (sessionId: string): ReturnType<typeof attrs> =>
+  attrs({
+    [GEN_AI_ATTRS.operation.name]: "invoke_agent",
+    [GEN_AI_ATTRS.agent.name]: "quanta-codeagent",
+    ...(sessionId !== "default" && sessionId !== ""
+      ? { [GEN_AI_ATTRS.conversation.id]: sessionId }
+      : {}),
+  })
+
+/** GenAI semconv attrs for the tool (`execute_tool`) span. Additive to the
+ *  `quanta.tool.*` attrs already stamped by the dispatch site. `gen_ai.tool.call.id`
+ *  is the canonical successor to `quanta.tool.call_id`; both are emitted for the
+ *  compat window. Pure. */
+export const toolGenAiAttrs = (name: string, callId: string): ReturnType<typeof attrs> =>
+  attrs({
+    [GEN_AI_ATTRS.operation.name]: "execute_tool",
+    [GEN_AI_ATTRS.tool.name]: name,
+    [GEN_AI_ATTRS.tool.callId]: callId,
   })

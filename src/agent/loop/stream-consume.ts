@@ -11,6 +11,7 @@ import { abortReasonOf, errMessage, LLMError, logger } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
+import { withActiveSpanScope } from "../session-resources"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
 import { streamingTurn } from "../streaming-dispatch"
 import { consumeTurnSignals, resolveToolChoice } from "../tool-choice"
@@ -374,37 +375,47 @@ export const streamConsume = async (
   })
   if (rateLimitProactive !== undefined)
     await applyProactiveRateLimitBackoff(config, rateLimitProactive)
+  // gen_ai.request.model / gen_ai.provider.name sources (adapter-reported;
+  // absent for lightweight test doubles ⇒ the sampling-span attrs omit them).
+  const requestModel = turnLlm.llm.model
+  const requestProvider = turnLlm.llm.provider
   try {
-    const outcome = await streamingTurn({
-      events: teeUsage(
-        config,
-        turnLlm.llm.stream({
-          messages,
-          system,
-          tools: visibleSpecs,
-          ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
-          ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
-          ...(config.sessionId !== undefined && config.sessionId.length > 0
-            ? { promptCacheKey: config.sessionId }
-            : {}),
-          signal: config.signal,
-          turnTimingCapture,
-          ...(onResponseHeaders !== undefined ? { onResponseHeaders } : {}),
-        }),
-        recorder,
-        collector,
-        taskSpend,
-        state.tokenBaseline,
-        estimateTokens(messages),
-        captureUsage,
-      ),
-      isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
-      isReadOnly: (name) => config.registry.isReadOnly(name),
-      isEarlyDispatchSafe: (name) => config.registry.isEarlyDispatchSafe(name),
-      onToolInput: buildToolInputSeam(config.registry),
-      ...callbacks,
-      signal: config.signal,
-    })
+    // Activate the `chat` (sampling) span in async context so anything opened
+    // during the provider stream — and the OBSERVE recorder's llm_request/usage
+    // events — attaches under THIS sampling span (parented to the turn). No-op
+    // wrap when no sink is active (byte-identical default-OFF).
+    const outcome = await withActiveSpanScope(false, () =>
+      streamingTurn({
+        events: teeUsage(
+          config,
+          turnLlm.llm.stream({
+            messages,
+            system,
+            tools: visibleSpecs,
+            ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
+            ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+            ...(config.sessionId !== undefined && config.sessionId.length > 0
+              ? { promptCacheKey: config.sessionId }
+              : {}),
+            signal: config.signal,
+            turnTimingCapture,
+            ...(onResponseHeaders !== undefined ? { onResponseHeaders } : {}),
+          }),
+          recorder,
+          collector,
+          taskSpend,
+          state.tokenBaseline,
+          estimateTokens(messages),
+          captureUsage,
+        ),
+        isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
+        isReadOnly: (name) => config.registry.isReadOnly(name),
+        isEarlyDispatchSafe: (name) => config.registry.isEarlyDispatchSafe(name),
+        onToolInput: buildToolInputSeam(config.registry),
+        ...callbacks,
+        signal: config.signal,
+      }),
+    )
     if (outcome.kind === "aborted") {
       samplingStatus = "aborted"
       return { aborted: true }
@@ -435,6 +446,8 @@ export const streamConsume = async (
       capturedFinish,
       messages,
       capturedMessage,
+      requestModel,
+      requestProvider,
     )
   }
 }

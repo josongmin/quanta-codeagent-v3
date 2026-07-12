@@ -141,7 +141,7 @@ function collectObserve(dir: string, files: string[]): Record<string, unknown[]>
   // Only pull observe for the box(es) actually loaded — a session file lives at
   // `<boxSuffix>/<...>.jsonl`, next to `observe-<boxSuffix>.tar.b64`. Without this
   // the whole full-remote/ history (hundreds of archives) would be bundled.
-  const wanted = new Set(files.map(f => f.split("/")[0]).filter(s => s.startsWith("i-")))
+  const wanted = new Set(files.map(f => f.split("/")[0] ?? "").filter(s => s.startsWith("i-")))
   for (const base of [dir, resolve(dir, "..")]) {
     if (!existsSync(base)) continue
     for (const name of readdirSync(base)) {

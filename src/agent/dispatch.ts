@@ -3,6 +3,7 @@ import {
   attrs,
   endSpan,
   getSpanSink,
+  mergeAttrs,
   previewPayload,
   QUANTA_ATTRS,
   SPAN_NAMES,
@@ -29,6 +30,7 @@ import type { DispatchResult } from "./dispatch-types"
 import { resolveCollaborationMode } from "./mode"
 import { checkWriteEffects } from "./ownership-policy"
 import { reproDoubtStep } from "./repro-doubt-guard"
+import { toolGenAiAttrs, withActiveSpanScope } from "./session-resources"
 import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
@@ -119,16 +121,18 @@ export const dispatchTool = async (
   // the pre-span path.
   const toolSpan: Span = startSpan(
     SPAN_NAMES.handleToolCall,
-    toolSpanAttrs(call.name, call.id, call.input),
+    mergeAttrs(toolSpanAttrs(call.name, call.id, call.input), toolGenAiAttrs(call.name, call.id)),
   )
   try {
-    const out = await dispatchToolInner(
-      call,
-      config,
-      permission,
-      onProgress,
-      autoClassifier,
-      workingState,
+    // Activate the `execute_tool` span in async context so the legacy
+    // `recordAttrs(handle_tool_call, …)` emit sites fired DURING dispatch — the
+    // HITL tier/handoff decisions (admissibility-gate) and the apply_patch op
+    // trace — nest under THIS tool span instead of orphaning as flat sink rows
+    // with no parent. Concurrent tool dispatches get INDEPENDENT refs (each is a
+    // sibling under the shared turn), so their nested emits never cross-link.
+    // No-op wrap when no sink is active (byte-identical default-OFF).
+    const out = await withActiveSpanScope(false, () =>
+      dispatchToolInner(call, config, permission, onProgress, autoClassifier, workingState),
     )
     // Map `ok` ⇒ "success", non-ok ⇒ "error". A "blocked" outcome would
     // need the admissibility-gate to signal it explicitly; today the gate

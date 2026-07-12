@@ -51,6 +51,21 @@ export interface RecordedInteraction {
      *  Absent on serial turns / old recordings. */
     readonly lane?: string
     /**
+     * Active OTel `chat` span identity captured at `stream()` START (jul-12 OTel
+     * unification, C4). Lets a cassette turn JOIN the OTLP/OBSERVE trace tree on
+     * `{traceId,spanId}` — the SAME correlation key the OBSERVE recorder stamps.
+     * REPLAY-NEUTRAL by contract: the request hash (`defaultHashRequest`) reads
+     * ONLY request fields (messages/system/tools/thinking/toolChoice/
+     * promptCacheKey/promptCacheRetention), never metadata, so trace ids can
+     * never invalidate a cross-box cassette match. Absent when no `withSpan`
+     * scope was active (off mode) / on old recordings. 16-hex lowercase ids. */
+    readonly traceId?: string
+    /** Active span id at capture (sibling of {@link traceId}). REPLAY-NEUTRAL. */
+    readonly spanId?: string
+    /** Parent span id of the active span, when it was a child (root ⇒ absent).
+     *  REPLAY-NEUTRAL. */
+    readonly parentSpanId?: string
+    /**
      * Debug-mode enrichment (only populated when the recorder runs in `debug`
      * tier — `QUANTA_BENCH_RECORD_TRAJECTORY=debug`). A single OPAQUE, keyed slot
      * that any subsystem contributes a slice to (tool-exec timings, edit shas,

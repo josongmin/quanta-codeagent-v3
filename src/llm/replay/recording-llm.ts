@@ -54,6 +54,50 @@ export interface RecordingLlmOpts {
    * wires the process-scoped debug sink here; generic callers leave it unset.
    */
   readonly debugDrain?: () => Record<string, unknown> | undefined
+  /**
+   * Optional DI provider for the ACTIVE OTel span identity (jul-12 OTel
+   * unification, C4). Called ONCE per `stream()` at START and its result is
+   * persisted into `metadata.{traceId,spanId,parentSpanId}` so a cassette turn
+   * joins the OTLP/OBSERVE trace tree on `{traceId,spanId}`. DI (not an
+   * `@/observability` import) because `@/llm/replay` may NOT reach across the
+   * slice boundary — the bench composition (`@/apps/bench`) supplies the real
+   * `getActiveTraceRef`, mirroring how `callCtx`/`debugDrain` are threaded.
+   * Metadata-only ⇒ REPLAY-NEUTRAL: the request hash never reads metadata, so
+   * this can NEVER change the cassette key. Returns `undefined` when no
+   * `withSpan` scope is active ⇒ no trace keys ⇒ byte-identical.
+   */
+  readonly getActiveTraceRef?: () =>
+    | { traceId: string; spanId: string; parentSpanId?: string }
+    | undefined
+}
+
+/** Build the trace-ref metadata spread from a captured active {@link TraceRef}.
+ *  Empty object when no span was active ⇒ no trace keys land ⇒ byte-identical
+ *  to the pre-trace record. Metadata-only, REPLAY-NEUTRAL (never hashed). */
+function traceMeta(
+  ref: { traceId: string; spanId: string; parentSpanId?: string } | undefined,
+): Record<string, string> {
+  if (ref === undefined) return {}
+  return {
+    traceId: ref.traceId,
+    spanId: ref.spanId,
+    ...(ref.parentSpanId !== undefined ? { parentSpanId: ref.parentSpanId } : {}),
+  }
+}
+
+/** Best-effort active-ref capture: a throwing provider must never fail a live
+ *  turn, so failure collapses to `undefined` (no trace keys). */
+function safeActiveRef(
+  provider:
+    | (() => { traceId: string; spanId: string; parentSpanId?: string } | undefined)
+    | undefined,
+): { traceId: string; spanId: string; parentSpanId?: string } | undefined {
+  if (provider === undefined) return undefined
+  try {
+    return provider()
+  } catch {
+    return undefined
+  }
 }
 
 /** Best-effort debug drain: a throwing drainer must never sink a successful
@@ -78,6 +122,10 @@ interface DegradedSentinelParams {
   readonly stripEphemeralRequest: (input: StreamInput) => StreamInput
   readonly opts: RecordingLlmOpts
   readonly now: () => number
+  /** Active OTel span identity captured at `stream()` START (C4). */
+  readonly traceRef:
+    | { traceId: string; spanId: string; parentSpanId?: string }
+    | undefined
 }
 
 /** F7 sentinel: a minimal degraded record so a swallowed commit failure on
@@ -86,7 +134,8 @@ interface DegradedSentinelParams {
  *  culprit) — it carries no captured events, only the failing turn's key +
  *  a `partial:true`/`error` marker, so no unscrubbed content can leak. */
 async function appendDegradedSentinel(params: DegradedSentinelParams): Promise<void> {
-  const { cause, hashFn, input, startedAt, captured, stripEphemeralRequest, opts, now } = params
+  const { cause, hashFn, input, startedAt, captured, stripEphemeralRequest, opts, now, traceRef } =
+    params
   let id: string
   try {
     id = hashFn(input)
@@ -110,6 +159,7 @@ async function appendDegradedSentinel(params: DegradedSentinelParams): Promise<v
       ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
       ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
       ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
+      ...traceMeta(traceRef),
     },
   }
   await opts.store.append(sentinel)
@@ -148,6 +198,11 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
     ...(opts.inner.authMode !== undefined ? { authMode: opts.inner.authMode } : {}),
     stream(input: StreamInput): AsyncIterable<StreamEvent> {
       const startedAt = now()
+      // C4: sample the ACTIVE OTel span identity HERE, at stream() START — the
+      // enclosing `chat` span. Captured once (not at commit, which runs later on
+      // the async iterator's frame where the active context may have unwound)
+      // and stamped into metadata so the cassette turn joins the trace tree.
+      const traceRef = safeActiveRef(opts.getActiveTraceRef)
       const captured: StreamEvent[] = []
       const inner = opts.inner.stream(input)
       // We delay `id` computation until after `now` is sampled so a custom
@@ -189,6 +244,8 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
             ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
             // Per-call parallel-lane label (replay-neutral; see StreamInput.recordingLane).
             ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
+            // C4: active OTel span identity (replay-neutral; joins the trace tree).
+            ...traceMeta(traceRef),
             ...(debug !== undefined ? { debug } : {}),
           },
         }
@@ -224,6 +281,7 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
             stripEphemeralRequest,
             opts,
             now,
+            traceRef,
           }).catch(() => {
             // The sentinel is itself best-effort: if store.append is what broke,
             // this degraded append will break too. The `logger.warn` above is the

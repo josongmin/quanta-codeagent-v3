@@ -64,6 +64,9 @@ interface CloseEvent {
   inputTokens?: unknown
   outputTokens?: unknown
   finishReason?: unknown
+  operationName?: unknown
+  requestModel?: unknown
+  providerName?: unknown
 }
 
 const recordingSink = (): {
@@ -97,6 +100,9 @@ const recordingSink = (): {
         inputTokens: a[GEN_AI_ATTRS.usage.inputTokens],
         outputTokens: a[GEN_AI_ATTRS.usage.outputTokens],
         finishReason: a[GEN_AI_ATTRS.response.finishReason],
+        operationName: a[GEN_AI_ATTRS.operation.name],
+        requestModel: a[GEN_AI_ATTRS.request.model],
+        providerName: a[GEN_AI_ATTRS.provider.name],
       })
     },
   }
@@ -235,11 +241,15 @@ describe("spans e2e — Codex 10-step tree (core 4)", () => {
     expect(sampling).toBeDefined()
     // gen_ai.* enrichment — previously the sampling span carried ONLY TTFT.
     // RED-ON-INJECTION: reverting stream-consume's capture (buildSamplingSpanAttrs
-    // → buildTtftAttrs) drops all four of these.
+    // → buildTtftAttrs) drops all of these.
     expect(sampling?.model).toBe("claude-test-4")
     expect(sampling?.inputTokens).toBe(1234)
     expect(sampling?.outputTokens).toBe(56)
-    expect(sampling?.finishReason).toBe("end_turn")
+    // C2 (jul-12): finish_reasons is a homogeneous string ARRAY per the OTel
+    // GenAI semconv (Wave-1 OTLP arrayValue support), NOT a bare scalar.
+    expect(sampling?.finishReason).toEqual(["end_turn"])
+    // C2: the sampling span is the GenAI `chat` operation.
+    expect(sampling?.operationName).toBe("chat")
   })
 
   test("default-OFF regression: no sink ⇒ zero recorded events (byte-identical)", async () => {
