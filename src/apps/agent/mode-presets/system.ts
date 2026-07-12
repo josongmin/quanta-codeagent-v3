@@ -21,13 +21,24 @@ export const resolveModePresetPromptSurfaceProfile = (
     : promptSurfaceProfileForRunMode(mode)
 
 /**
- * WS4 (jul-12 OmO absorption + hell-audit R3) — the ONE place that decides
+ * The modes that NEVER auto-load repo-local rules from the working tree:
+ *   - `batch`  — hermetic bench sandbox: rule-less + byte-identical.
+ *   - `ci-bot` — reviews an UNTRUSTED PR checkout. The PR author controls the
+ *     tree, INCLUDING its AGENTS.md/CLAUDE.md; auto-loading them would smuggle
+ *     attacker-authored text into the TRUSTED system-prompt `project_md` (rendered
+ *     as authoritative "Rules"), defeating ci-bot's `<pr_untrusted_data>` fence
+ *     (a malicious PR could self-approve). A trusted host may still inject vetted
+ *     rules explicitly via `override`.
+ */
+const RULE_LESS_MODES: ReadonlySet<RunMode> = new Set<RunMode>(["batch", "ci-bot"])
+
+/**
+ * WS4 (jul-12 OmO absorption + hell-audit R3/R4) — the ONE place that decides
  * whether a preset loads repo-local rules (AGENTS.md / CLAUDE.md), so the policy
- * cannot drift per-preset. A caller-supplied `override` always wins (a host that
- * already resolved rules, or wants to suppress them). Otherwise every
- * HUMAN/AUTOMATION-driven surface on a real repo loads them; only `batch` (the
- * hermetic bench sandbox) stays rule-less + byte-identical. Fail-open: a broken
- * or unreadable rule source must never crash session start.
+ * cannot drift per-preset. A caller-supplied `override` always wins (trusted host
+ * code). Otherwise every HUMAN/AUTOMATION surface on a TRUSTED real repo loads
+ * them; {@link RULE_LESS_MODES} stay rule-less. Fail-open: a broken/unreadable
+ * rule source must never crash session start.
  *
  * Mirrors {@link resolveModePresetSystemPrompt} / {@link
  * resolveModePresetPromptSurfaceProfile}: a mode-keyed resolver each preset's
@@ -39,6 +50,6 @@ export const resolveModePresetRepoRules = async (
   cwd: string,
 ): Promise<RepoRules | undefined> => {
   if (override !== undefined) return override
-  if (mode === "batch") return undefined
+  if (RULE_LESS_MODES.has(mode)) return undefined
   return loadRepoRules(cwd).catch(() => undefined)
 }

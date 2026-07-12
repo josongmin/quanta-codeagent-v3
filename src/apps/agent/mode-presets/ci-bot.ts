@@ -286,7 +286,11 @@ const buildCiBotBase = async (
 ): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.ciBot?.cwd ?? req.base.cwd ?? process.cwd()
   const llm: LLMPort = req.base.llm
-  // WS4 R3 — ci-bot reviews a real PR checkout → honor the repo's AGENTS.md.
+  // WS4 R4 (SECURITY) — ci-bot reviews an UNTRUSTED PR checkout, so the resolver
+  // deliberately does NOT auto-load the tree's AGENTS.md (a malicious PR must not
+  // inject trusted system-prompt instructions). This stays undefined unless a
+  // trusted host passes vetted rules via `req.base.repoRules`. Routed through the
+  // SSOT resolver so the exclusion lives in ONE audited place.
   const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()

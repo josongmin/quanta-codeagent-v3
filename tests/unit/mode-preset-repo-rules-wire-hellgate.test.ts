@@ -58,14 +58,22 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("WS4 R3 §1 — resolveModePresetRepoRules policy SSOT", () => {
+describe("WS4 R3/R4 §1 — resolveModePresetRepoRules policy SSOT", () => {
   test("batch stays rule-less even with an on-disk AGENTS.md", async () => {
     expect(await resolveModePresetRepoRules("batch", undefined, dir)).toBeUndefined()
   })
 
-  test("a non-batch mode loads the cwd rules", async () => {
-    const r = await resolveModePresetRepoRules("headless", undefined, dir)
-    expect(r?.body ?? "").toContain(SENTINEL)
+  test("SECURITY: ci-bot (untrusted PR tree) does NOT auto-load the cwd AGENTS.md", async () => {
+    // A malicious PR could ship an AGENTS.md; auto-loading it into the trusted
+    // system prompt would let it self-approve. The resolver must exclude ci-bot.
+    expect(await resolveModePresetRepoRules("ci-bot", undefined, dir)).toBeUndefined()
+  })
+
+  test("a rules-loading mode (interactive/headless/ide/daemon) loads the cwd rules", async () => {
+    for (const mode of ["interactive", "headless", "ide", "daemon"] as RunMode[]) {
+      const r = await resolveModePresetRepoRules(mode, undefined, dir)
+      expect(r?.body ?? "").toContain(SENTINEL)
+    }
   })
 
   test("a caller override wins for EVERY mode (even batch)", async () => {
