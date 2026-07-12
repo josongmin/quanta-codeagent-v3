@@ -197,6 +197,13 @@ export const SpawnAgentInputSchema = z
      *  Ignored together with `isolation:"worktree"` (parent cannot read inside a
      *  throwaway worktree). */
     checkpoint: z.boolean().optional(),
+    /** Codex `fork_turns` (C5059-04) — how much of the parent transcript the
+     *  child inherits: `"none"` (cold start, default) / `"all"` (full) /
+     *  positive-N (last N user turns). Composed by the shared `forkPrompt`
+     *  closure so the child preamble is BYTE-IDENTICAL to the trio `agent` tool.
+     *  Absent ⇒ `"none"` (byte-identical legacy spawn path). ≤0 / non-integer /
+     *  numeric-string are rejected at parse. */
+    fork_turns: z.union([z.enum(["none", "all"]), z.number().int().positive()]).optional(),
   })
   .strict()
 export type SpawnAgentInput = z.infer<typeof SpawnAgentInputSchema>

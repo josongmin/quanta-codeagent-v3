@@ -24,6 +24,7 @@ import type { Message } from "@/llm"
 import {
   createAgentTool,
   handleSpawnAgent,
+  SpawnAgentInputSchema,
   TaskRegistry,
   type SubagentRequest,
   type SubagentResult,
@@ -70,12 +71,11 @@ const sixToolChildPrompt = async (
     return { ok: true, finalText: "done", turns: 1 }
   }
   const registry = new TaskRegistry()
-  await handleSpawnAgent(
-    // fork_turns is not (yet) on the frozen 6-tool schema; the handler reads it
-    // defensively. Cast keeps the test at the composition boundary.
-    { prompt, fork_turns: spec } as never,
-    { runner, registry, forkPrompt } as never,
-  )
+  // C5059-04: route through the REAL strict schema parse (no `as never` on the
+  // input) so this exercises the model-visible path: schema.parse → handler. A
+  // pre-activation schema would throw on `fork_turns` here.
+  const parsed = SpawnAgentInputSchema.parse({ prompt, fork_turns: spec })
+  await handleSpawnAgent(parsed, { runner, registry, forkPrompt } as never)
   // Spawn is fire-and-forget; let the runner receive the request.
   await new Promise<void>((r) => setTimeout(r, 5))
   const last = seen.at(-1)

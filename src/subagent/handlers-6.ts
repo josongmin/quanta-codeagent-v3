@@ -590,12 +590,12 @@ const buildSubagentRequest = (
       ? buildCheckpointPath(deps.cwd, taskId)
       : undefined
 
-  // ALBB-16 #2 — compose the fork_turns inherited-context preamble onto the
-  // child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
-  // The spec is read defensively (`fork_turns` is not on the frozen 6-tool schema
-  // yet, so it may be absent post-parse ⇒ "none" ⇒ the composer is identity).
+  // ALBB-16 #2 + C5059-04 — compose the fork_turns inherited-context preamble onto
+  // the child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
+  // `fork_turns` is now a first-class field on `SpawnAgentInputSchema` (C5059-04), so it
+  // is read directly off the parsed input. Absent ⇒ "none" ⇒ the composer is identity.
   // No `deps.forkPrompt` ⇒ raw prompt (byte-identical legacy path).
-  const forkSpec = (input as { fork_turns?: "none" | "all" | number }).fork_turns ?? "none"
+  const forkSpec = input.fork_turns ?? "none"
   const forkedPrompt =
     deps.forkPrompt !== undefined ? deps.forkPrompt(input.prompt, forkSpec) : input.prompt
 

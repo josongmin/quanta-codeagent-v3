@@ -78,6 +78,8 @@ export {
 } from "./task-tools"
 export { createTeamRegistry, type TeamRegistryPort } from "./team/registry"
 export {
+  type SpawnAgentInput,
+  SpawnAgentInputSchema,
   SUBAGENT_6_TOOL_CONTRACTS,
   SUBAGENT_6_TOOL_NAMES,
   type Subagent6ToolName,
