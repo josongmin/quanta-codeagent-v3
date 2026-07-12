@@ -93,17 +93,26 @@ Plan: `docs/plans/jul-12-otel-genai-unified-tracing.md` (+ parallel-execution co
    distinct trace ids and share `{runId, instanceId}` with distinct `attempt`.
 4. **Runtime modes** `off | context | export` — only `off` is byte-identical /
    zero-alloc. `context` allocates ids + async context (NOT "zero cost").
-5. **No per-event legacy fallback in unified mode (DESIGN INTENT — NOT yet
-   enforced).** The end-state: a missing active context in `context`/`export`
-   mode is a correlation DEFECT → one `observability_degraded` record + failed
-   strict rail, never a synthesized `t<turn>` id. As-built the recorder STILL
-   synthesizes the deterministic `t<turn>`/`llm:t<turn>`/`tool:<id>` id on a
-   missing ref and emits no `observability_degraded` for it — because it carries
-   no runtime-mode flag to tell "context expected but missing" (a defect) from
-   "context never wired" (the legitimate byte-identical `off`/unwired case). See
-   the amendment-status note below; the recorder's own comment (`"Full no-fallback
-   is C7"`) is the honest status. Enforcing this needs the mode threaded into the
-   recorder — tracked as a residual, not shipped.
+5. **No per-event legacy fallback in unified mode (ENFORCED — jul-13).** A
+   missing active context WHILE a trace context is EXPECTED (a live span sink,
+   `getSpanSink() !== null` — so `withActiveSpanScope` wraps every recorded unit
+   and every emit should see a ref) is a correlation DEFECT → one
+   `observability_degraded` record (`reason:"missing_trace_context"`) + a failed
+   strict rail, NOT a silently-synthesized `t<turn>` id. The "context expected
+   but missing" (defect) vs "context never wired" (legitimate) distinction is
+   threaded via a `traceContextExpected?: () => boolean` DI callback (mirroring
+   the `getActiveTraceRef` DI so `@/stream`/`@/llm/replay` never import
+   `@/observability`), bound at the composition roots to
+   `() => getSpanSink() !== null`. The OBSERVE recorder
+   (`jsonl-recorder.ts:frame()` → `checkMissingTraceContext`) emits the
+   `observability_degraded` line ONCE per instance (`missingRefReported` latch,
+   like `capDone`) with the offending kind/seq, and rethrows on the strict rail;
+   the cassette recorder (`recording-llm.ts`) warns once + stamps a
+   replay-neutral `metadata.observabilityDegraded` marker. The deterministic
+   `t<turn>` id is STILL synthesized as the fallback VALUE (existing consumers
+   depend on it) — enforcement only ADDS the degraded signal. When no sink is
+   live (OFF / context-never-wired) `traceContextExpected` returns `false` ⇒ NO
+   degraded record, output BYTE-IDENTICAL to the pre-enforcement path.
 6. **GenAI semconv snapshot is PINNED** (Development, not Stable) — the plan's
    commit SHA is the normative contract; `main` is not.
 7. **Cassette stays unredacted** (request-hash/replay depends on exact content) —
@@ -143,11 +152,16 @@ The unification shipped in waves W0–W3 + a C7-core id-unification, all on `mai
 
 Everything is `off ⇒ byte-identical`. Remaining (optional): a production full-remote
 box run to re-prove the tuple over a real OTLP network hop with a live LLM (the
-unit acceptance already exercises a real exporter sink over `runAgent`). C7 legacy
-DELETION (deterministic `t<turn>` synthetic ids, SpanSink compat adapter) stays
-deferred behind the declared compat window — the recorder's `t<turn>` fallback
-fires on ANY missing active ref (OFF/unwired, AND — until rule 5 above is enforced
-— an orphan emit outside any `withActiveSpanScope`), not strictly when OFF.
+unit acceptance already exercises a real exporter sink over `runAgent`).
+
+- **Rule 5 enforcement (jul-13)** — expected-but-missing trace context in unified
+  mode now emits `observability_degraded` (`reason:"missing_trace_context"`) +
+  fails the strict rail, threaded via the `traceContextExpected` DI callback
+  (`() => getSpanSink() !== null`). See rule 5 above. The deterministic `t<turn>`
+  fallback VALUE is retained (existing consumers depend on it); enforcement only
+  ADDS the defect signal when a sink was live but no ref was installed. C7 legacy
+  DELETION (removing the `t<turn>` synthetic-id scheme + SpanSink compat adapter
+  entirely) stays deferred behind the declared compat window.
 
 ## Rule for new observability features
 
