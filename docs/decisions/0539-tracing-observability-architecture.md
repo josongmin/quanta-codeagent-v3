@@ -163,6 +163,18 @@ unit acceptance already exercises a real exporter sink over `runAgent`).
   ADDS the defect signal when a sink was live but no ref was installed. C7 legacy
   DELETION (removing the `t<turn>` synthetic-id scheme + SpanSink compat adapter
   entirely) stays deferred behind the declared compat window.
+  - Design choice + LATENT trigger (audited clean jul-13): the "expected" gate is
+    raw sink-liveness (`getSpanSink() !== null`), NOT "am I inside a span scope."
+    This is correct TODAY because every recorded bench emit is a descendant of
+    `withBenchInstanceRoot` (which wraps the ENTIRE `runInstance`) or `runAgent`'s
+    `withActiveSpanScope` — both install a real ref when the sink is live, so
+    `getActiveTraceRef()` is never undefined for a legitimate in-loop event, and
+    the strict throw (bound only on the bench OBSERVE recorder, `observe.ts`) is
+    unreachable except on a genuine defect. TRIGGER: if a future change adds a
+    bench-/run-LEVEL recorder or cassette emit OUTSIDE `withBenchInstanceRoot`
+    while `QUANTA_OTEL_ENDPOINT` is set, it would strict-throw. Hardening if that
+    day comes: gate on a "scope-was-entered" async-local flag, or whitelist the
+    enforced kinds to the in-loop set (turn_start/llm_request/tool_*/…).
 - **Hex-id consolidation (jul-13)** — the four duplicate W3C hex-id mint helpers
   (`toHex`/`randomHex`×2/`bridgeHex`) collapsed into one `@/observability/tracing`
   `hexId(byteCount, gen?)` (default crypto CSPRNG, test-seam `gen` override).
