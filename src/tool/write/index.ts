@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { globWriteGuardEvent, writeBudgetDeny } from "../_shared/exfil-rail-guards"
+import { freshHashNote, refreshStaleReadBaseline } from "../_shared/fresh-hash"
 import { defineTool } from "../factory"
 import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
@@ -167,12 +168,17 @@ export const makeWriteTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<
         // the model can later restore THIS exact state. No-op when the sink is
         // unwired (gate OFF ⇒ ctx.fileHistory absent ⇒ byte-identical).
         captureFileHistory(ctx, input.path, input.content)
+        // jul-13 edit-fresh-hash (shared with edit/scripted_replace): refresh the
+        // stale-read guard baseline to the just-written mtime AND advertise the
+        // post-write sha256 so the model can chain an edit to this file without a
+        // re-read. Both gated by ctx.editFreshHash ⇒ byte-identical when off.
+        await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd })
         const bytes = Buffer.byteLength(input.content, "utf8")
         yield {
           type: "result",
           result: {
             ok: true,
-            output: `${existed ? "Overwrote" : "Created"} ${input.path} (${bytes} bytes)`,
+            output: `${existed ? "Overwrote" : "Created"} ${input.path} (${bytes} bytes)${freshHashNote(ctx, input.content)}`,
           },
         }
       } catch (e) {

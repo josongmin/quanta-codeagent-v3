@@ -17,9 +17,14 @@
  * parallel to the atoms would be a second, drift-prone SSOT.)
  */
 
-/** Opening agent identity block (before the persona splice). */
+import { AGENT_NAME, agentOpener, ROLE } from "./prompt-graph/shared"
+
+/** Opening agent identity block (before the persona splice). The first line is
+ *  shaped by the {@link agentOpener} primitive over the shared {@link AGENT_NAME}
+ *  / {@link ROLE} consts — the SINGLE home for the agent name + seniority word
+ *  (byte-identical to the prior literal). */
 export const INTRO_LINES: readonly string[] = [
-  "You are Quanta, a principal software engineer working autonomously in a",
+  agentOpener({ name: AGENT_NAME, role: ROLE.principal, tail: "working autonomously in a" }),
   "developer's repository. You hold your work to a state-of-the-art bar (SOTA++):",
   "the smallest correct, root-cause change — fully verified, never sloppy or",
   "half-finished. Use your tools to investigate, act, and verify, and keep going",

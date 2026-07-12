@@ -44,6 +44,7 @@
  */
 
 import type { LLMPort, Message, StreamEvent } from "@/llm"
+import { agentOpener, ROLE } from "../prompt-graph/shared"
 import { exemplarBlock, signatureBlock } from "./grounding"
 import type { ReproTestConfig, ReproTestKind } from "./types"
 
@@ -71,7 +72,10 @@ export const DEFAULT_TIMEOUT_MS = 30_000
  *  is pytest's exit code, NOT a printed sentinel; the model must write real
  *  assertions, not narrate a conclusion. */
 const SYSTEM_MSG = [
-  "You are a senior Python engineer writing a single self-contained pytest test that reproduces a reported bug.",
+  agentOpener({
+    role: ROLE.pyEngineer,
+    tail: "writing a single self-contained pytest test that reproduces a reported bug.",
+  }),
   "Reason calmly. Output Python source code ONLY — no explanations, no markdown fences.",
   "The verdict is decided by pytest's exit code: your assertions FAIL on the buggy code and PASS once it is fixed. Do NOT print a verdict.",
 ].join("\n")
@@ -296,7 +300,10 @@ export const buildReproTestPrompt = (
  * failing control means the EXEC ENV is broken (project un-importable, missing
  * dep), not that the bug is present. The control is an ENV-HEALTH probe. */
 const CONTROL_SYSTEM_MSG = [
-  "You are a senior Python engineer writing a single self-contained pytest CONTROL test.",
+  agentOpener({
+    role: ROLE.pyEngineer,
+    tail: "writing a single self-contained pytest CONTROL test.",
+  }),
   "Reason calmly. Output Python source code ONLY — no explanations, no markdown fences.",
   "A control test asserts NORMAL, correct behavior that is UNAFFECTED by the reported bug, so it",
   "PASSES on the current code (pytest exit 0). If it FAILS, the exec environment is broken — not the bug.",

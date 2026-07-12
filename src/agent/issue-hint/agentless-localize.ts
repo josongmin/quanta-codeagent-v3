@@ -33,6 +33,7 @@
  */
 
 import type { LLMPort, Message, StreamEvent } from "@/llm"
+import { agentOpener, ROLE } from "../prompt-graph/shared"
 
 /** Dependency surface for `agentlessLocalize`. All I/O is injectable so the
  *  function is hermetic in tests. */
@@ -86,7 +87,7 @@ const DEFAULT_TOP_K = 5
  *  multi-turn exploration. We forbid path invention so a hallucinated path
  *  doesn't make it past the parser even if the post-filter were skipped. */
 const SYSTEM_MSG = [
-  "You are a senior software engineer doing precise file-level fault localization.",
+  agentOpener({ role: ROLE.senior, tail: "doing precise file-level fault localization." }),
   "Given an issue report and a list of files in a repository, identify which",
   "files are most likely to contain the bug.",
   "",

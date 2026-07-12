@@ -1,7 +1,7 @@
 id: edit-fresh-hash-on-success
-title: edit fresh-hash on success — self-inflicted-staleness root fix (jul-13)
+title: fresh-hash on success — self-inflicted-staleness root fix, edit/write/scripted_replace (jul-13)
 section: 2
-subsystem: 도구 시스템 — edit optimistic-lock chaining (0398 precondition 보완재)
+subsystem: 도구 시스템 — mutating-tool optimistic-lock chaining (0398 precondition 보완재)
 order: 399
 maturity: L3
 status: new
@@ -42,7 +42,10 @@ purpose: |
   tokens-per-successful-edit) is measure-first pending on a bench box.
 evidence:
   code:
+    - src/tool/_shared/fresh-hash.ts
     - src/tool/edit/index.ts
+    - src/tool/write/index.ts
+    - src/tool/scripted-replace.ts
     - src/tool/types.ts
     - src/shared/runtime-config.ts
     - src/shared/runtime-config/types-extra.ts
@@ -53,6 +56,11 @@ evidence:
     unit:
       - tests/unit/edit-fresh-hash-hellgate.test.ts
       - tests/unit/edit-fresh-hash-wire-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-strategies-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-chaos-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-owner-unit.test.ts
+      - tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -75,6 +83,24 @@ notes: |
   advertised == sha256(readFileSync) — EOL-normalizing the hash → RED). The mock
   ports are READ==WRITE identity, so the real-fs describe is what actually guards
   the disk round-trip.
+
+  CROSS-TOOL PARITY (jul-13): the feature is not edit-only. `edit`, `write`, and
+  `scripted_replace` share ONE implementation (`_shared/fresh-hash.ts`: freshHashNote
+  + refreshStaleReadBaseline) — every single-flat-file mutation advertises the
+  post-write sha256 AND refreshes the stale-read baseline, so the model chains a
+  next edit to that file without a re-read regardless of which tool wrote it
+  (write→edit and scripted_replace→edit cross-tool chains pinned). `apply_patch`
+  (multi-file) and `notebook_edit` (cell-JSON) do NOT fit the single-flat-file
+  fresh-hash contract and are deliberately out of scope.
+
+  DEFEAT-AND-CURE (found by adversarial hardening): the DEFAULT-ON mtime stale-read
+  guard (ADR-0474) would veto a fresh-hash CHAINED edit with `stale_read` because a
+  successful mutation advances the file's mtime while the guard baseline stayed at
+  the read-time value — silently defeating the "no re-read" promise in the default
+  config. Cured by refreshStaleReadBaseline (a successful mutation IS a fresh read
+  of its own output). An EXTERNAL modification still trips stale_read (TOCTOU
+  preserved — pinned). Suite: 7 files, ~54 tests, red-on-injection proven by
+  disabling the shared helper (6 mtime/cross-tool RED) and freshHashNote (3 emit RED).
 
   Remaining scope: efficacy A/B on a bench box (re-read-count drop /
   tokens-per-successful-edit net-negative). Root-fix nature (removes a forced

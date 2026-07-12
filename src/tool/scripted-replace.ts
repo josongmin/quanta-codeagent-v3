@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
+import { freshHashNote, refreshStaleReadBaseline } from "./_shared/fresh-hash"
 import { gitWriteGuardDeny } from "./git-write-guard-result"
 import { guardWrite } from "./stale-read-guard"
 import type { EditToolContext, Tool, ToolEvent, ToolFailure, ToolResult } from "./types"
@@ -398,11 +399,16 @@ export const makeScriptedReplaceTool = (
       // ADR-0398 ATOMIC commit — temp+fsync+rename via the port (crash-safe,
       // mode-preserving), inside the OPTIONAL critical section.
       await commitReplace(fs, ctx, target, r.next)
+      // jul-13 edit-fresh-hash (shared with edit/write): refresh the stale-read
+      // guard baseline to the just-written mtime AND advertise the post-write
+      // sha256 so the model can chain an edit to this file without a re-read.
+      // Both gated by ctx.editFreshHash ⇒ byte-identical when off.
+      await refreshStaleReadBaseline(fs, ctx, target)
       yield {
         type: "result",
         result: {
           ok: true,
-          output: `${input.file}: ${r.message} (replacements=${r.replacements})`,
+          output: `${input.file}: ${r.message} (replacements=${r.replacements})${freshHashNote(ctx, r.next)}`,
         },
       }
     } catch (e) {
