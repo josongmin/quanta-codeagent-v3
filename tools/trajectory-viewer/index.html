@@ -193,6 +193,9 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .chat-bubble.quanta .clamp-fade{background:linear-gradient(rgba(238,244,246,0),#eef4f6)}
 .chat-bubble.llm .clamp-fade{background:linear-gradient(rgba(255,255,255,0),#fff)}
 .chat-bubble.clamp.expanded .clamp-fade{display:none}
+.payload-hd{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5a8092;margin-bottom:4px;align-self:flex-end;font-family:var(--mono)}
+.msg-send-tag{font-size:9px;font-weight:700;letter-spacing:.05em;color:#8a93a8;margin-bottom:5px;align-self:flex-end}
+.chat-bubble.quanta.clamp{font-family:var(--mono);font-size:11px;line-height:1.55}
 .more-btn{font-size:10px;font-weight:600;color:#7788bb;cursor:pointer;padding:3px 4px;margin-top:2px;user-select:none;align-self:flex-start}
 .chat-row.me .more-btn{align-self:flex-end}
 .more-btn:hover{color:#5566cc;text-decoration:underline}
@@ -206,7 +209,7 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 .rs-chip.rs-fail{background:#fdf1f1;border-color:#f0cccc;color:#c0504a}
 .rs-note{font-size:9.5px;color:#a8b0c0;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* scaffold action strip (Quanta's mechanical, non-LLM actions: verify/patch/…) */
-.scaffold-act{margin:10px 0 10px 40px;border:1px solid #dde3ea;border-radius:9px;background:#fbfcfe;overflow:hidden}
+.scaffold-act{margin:10px 0 10px auto;max-width:88%;border:1px solid #dde3ea;border-radius:9px;background:#fbfcfe;overflow:hidden}
 .scaffold-act.act-ok{border-color:#bfe3c9;background:#f5fbf6}
 .scaffold-act.act-fail{border-color:#f0cccc;background:#fdf6f6}
 .act-hd{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:11px;font-weight:600;color:#4a5a70;cursor:default}
@@ -588,6 +591,8 @@ const LANGS={
     llm:'LLM',
     runOutcome:'런 결과 · 스캐폴드 판단',
     scaffoldEvents:'스캐폴드 이벤트',
+    rawPayload:'LLM 요청 페이로드 (raw · 호출 전)',
+    sentToLlm:'LLM에 메시지 전송',
     agentProc:'작업 과정 · 도구 · 코드위치',
     sysRole:'시스템 · LLM 역할 지정',
     showMore:'더보기',
@@ -640,6 +645,8 @@ const LANGS={
     agentProc:'work · tools · code locations',
     runOutcome:'Run outcome · scaffold verdict',
     scaffoldEvents:'scaffold events',
+    rawPayload:'LLM request payload (raw · pre-call)',
+    sentToLlm:'sent a message to the LLM',
     sysRole:'System · LLM role',
     showMore:'Show more',
     showLess:'Show less',
@@ -765,6 +772,7 @@ function reconstructTurns(records){
       newMsgs:continues?msgs.slice(prev):msgs,
       allMsgs:msgs,
       system:rec.request?.system??null,
+      tools:rec.request?.tools??null,
       output:buildOutput(rec.events??[]),
       usage:extractUsage(rec.events??[]),
       meta:rec.metadata??{},
@@ -1213,9 +1221,16 @@ function renderChat(){
   // UNIFIED TIMELINE: interleave LLM turns (cassette) with the scaffold's own
   // ACTION events (observe) by timestamp — sandbox / verify / patch / error are
   // things Quanta did mechanically WITHOUT the LLM, so they belong in the flow.
+  // The `localize` event records the tree-build that happens BEFORE the localize
+  // LLM call and feeds its payload. It's emitted post-call (candidate count is
+  // known only after), so instead of placing it by ts we inject it INSIDE the
+  // localize turn — between 나(task) and the Quanta payload (task → 🌳 build tree
+  // → send payload). Other scaffold events stay in the ts-sorted flow.
+  const localizeEv=(inst.observe||[]).find(e=>e.kind==='localize')
+  const firstLocalizeIdx=inst.turns.findIndex(t=>t.phase==='localize')
   const items=[
     ...inst.turns.map((turn,i)=>({ts:turn.ts||0,kind:'turn',turn,i})),
-    ...(inst.observe||[]).filter(e=>SCAFFOLD_SHOW[e.kind]).map(e=>({ts:e.ts||0,kind:'action',ev:e})),
+    ...(inst.observe||[]).filter(e=>SCAFFOLD_SHOW[e.kind]&&e.kind!=='localize').map(e=>({ts:e.ts||0,kind:'action',ev:e})),
   ].sort((a,b)=>(a.ts-b.ts)||(a.kind==='turn'?-1:1))
 
   let curPhase=null
@@ -1240,7 +1255,9 @@ function renderChat(){
     const el=document.createElement('div')
     el.className='turn-group'
     el.id=`tg-${i}`
-    el.innerHTML=renderTurnGroup(turn,i)
+    // inject the 🌳 tree-build action between 나 and the Quanta payload
+    const preQuanta=(i===firstLocalizeIdx&&localizeEv)?renderScaffoldAction(localizeEv):''
+    el.innerHTML=renderTurnGroup(turn,i,preQuanta)
     scroll.appendChild(el)
   }
 }
@@ -1403,7 +1420,7 @@ function turnEditVerifyChips(turn){
 // The scaffold and the model are SEPARATE actors: Quanta shows its work
 // (thinking / tools / code locations) as a process view + the prompt it sends;
 // the LLM shows only its response.
-function renderTurnGroup(turn,idx){
+function renderTurnGroup(turn,idx,preQuantaHtml){
   const phase=detectPhase(turn,idx)
   const ts=fTime(turn.ts),dur=fMs(turn.meta?.durationMs),model=turn.meta?.model??''
   const tokIn=fN(turn.usage?.inputTokens??0),tokOut=fN(turn.usage?.outputTokens??0)
@@ -1424,28 +1441,40 @@ function renderTurnGroup(turn,idx){
     rows.push(chatRow({side:'me',cls:'me',avatar:'🧑',name:T('you'),time:ts,body:renderPartBody(p,'me')}))
   }
 
-  // 2) 에이전트 Quanta — process (thinking/tools/code locations) + the prompt it
-  //    sends to the LLM, left side, named
-  const agentText=parts.filter(p=>p.role!=='user'&&(p.type==='text'||p.type==='obs'))
-  const agentToolResults=parts.filter(p=>p.type==='tool_results')
-  const sysHtml=renderSysPrompt(turn)  // agent's phase-specific role framing to the LLM
-  const processHtml=renderAgentProcess(turn,agentToolResults)
-  const promptBodies=agentText.map(p=>renderPartBody(p,'quanta')).join('')
-  if(sysHtml||processHtml||promptBodies){
+  // 1.5) scaffold prep that runs BETWEEN the task and the LLM call (🌳 tree build)
+  if(preQuantaHtml)rows.push(preQuantaHtml)
+
+  // 2) Quanta SENDS an LLM message — the raw request payload. Just a message
+  //    send: NO phase/intent tags (the phase lives on the band, not every
+  //    message; sending to the LLM is sending to the LLM regardless of intent).
+  const payloadHtml=renderRawPayload(turn)
+  if(payloadHtml){
     rows.push(chatRow({
-      side:'them',cls:'quanta',avatar:'🛰',name:'Quanta',
-      tag:curPreset||ph(phase),time:ts,
-      badges:`${phaseBadge}${laneBadge}${evChips}${anomBadges}`,
-      body:sysHtml+processHtml+promptBodies,
+      side:'me',cls:'quanta',avatar:'🛰',name:'Quanta',time:ts,
+      body:`<div class="msg-send-tag">📤 ${T('sentToLlm')}</div>`+payloadHtml,
     }))
   }
 
-  // 3) LLM(model) — the response only, left side, model thumbnail + latency + tokens
-  if(turn.output.text.trim()){
+  // 3) LLM(model) — its reasoning: thinking + any text. The tool it DECIDES to
+  //    use is EXECUTED by Quanta (below) as a distinct tool row.
+  const thinkHtml=turn.output.thinking?renderThinking(turn.output.thinking):''
+  const respHtml=turn.output.text.trim()?renderResponse(turn.output.text,idx):''
+  const llmBody=thinkHtml+respHtml
+  if(llmBody){
     const meta=`${tokIn||tokOut?`<span class="chat-tok">↑${tokIn} ↓${tokOut}${cacheRead?` ⚡${fN(cacheRead)}`:''}</span>`:''}${dur?`<span class="chat-dur">⏱ ${dur}</span>`:''}`
     rows.push(chatRow({
       side:'them',cls:'llm',avatar:modelInitial,name:model||T('llm'),tag:'LLM',time:ts,meta,
-      body:renderResponse(turn.output.text,idx),
+      body:llmBody,
+    }))
+  }
+
+  // 4) Quanta TOOLS — the actual tool(s) it ran this turn (read/bash/edit/…),
+  //    each a row labeled by the tool, with args + result. "실제 툴 사용" is
+  //    Quanta's, on the right.
+  for(const tool of turn.output.tools){
+    rows.push(chatRow({
+      side:'me',cls:'quanta',avatar:'🔧',name:'Quanta',tag:tool.name||'tool',time:ts,
+      body:renderToolCall(tool),
     }))
   }
 
@@ -1464,6 +1493,35 @@ function renderSysPrompt(turn){
     <div class="sys-inline-hd" onclick="toggle('${id}')"><span class="sys-inline-chev">▶</span>⚙ ${T('sysRole')} · ${esc(preview)}…</div>
     <pre class="sys-inline-body">${esc(t)}</pre>
   </div>`
+}
+
+// The RAW LLM request payload for this turn — system + full message array +
+// tools — exactly what gets POSTed to the model, verbatim. Clamped with 더보기
+// because the message history grows across a repair thread.
+function renderRawPayload(turn){
+  const seg=[]
+  const s=typeof turn.system==='string'?turn.system:Array.isArray(turn.system)?turn.system.map(b=>b.text??b.content??'').join('\n\n'):''
+  if(s.trim())seg.push('━━ system ━━\n'+s)
+  for(const m of (turn.allMsgs||[])){
+    const c=m.content
+    const txt=typeof c==='string'?c:Array.isArray(c)?c.map(b=>{
+      if(typeof b==='string')return b
+      if(b.type==='text')return b.text??''
+      if(b.type==='tool_use')return `⟦tool_use ${b.name??'?'} ${JSON.stringify(b.input??{})}⟧`
+      if(b.type==='tool_result'){const rc=b.content;const rt=typeof rc==='string'?rc:Array.isArray(rc)?rc.map(x=>x.text??'').join(''):'';return `⟦tool_result ${rt}⟧`}
+      return JSON.stringify(b)
+    }).join('\n'):''
+    seg.push(`━━ ${m.role??'user'} ━━\n${txt}`)
+  }
+  if(Array.isArray(turn.tools)&&turn.tools.length){
+    seg.push(`━━ tools (${turn.tools.length}) ━━\n`+turn.tools.map(t=>t.name??'?').join(', '))
+  }
+  const raw=seg.join('\n\n')
+  if(!raw.trim())return''
+  const id=uid()
+  return`<div class="payload-hd">📤 ${T('rawPayload')}</div>
+    <div class="chat-bubble quanta clamp" id="${id}">${esc(raw)}<span class="clamp-fade"></span></div>
+    <div class="more-btn" onclick="toggleClamp('${id}',this)">${T('showMore')} ▾</div>`
 }
 
 // One group-chat row: avatar + name/time header + body. `me` rows mirror right.
