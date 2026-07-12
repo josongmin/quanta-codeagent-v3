@@ -4,10 +4,10 @@ section: 8
 subsystem: 텔레메트리 — span 방출 seam + hot-path 4-step wrap
 order: 68
 maturity: L4
-status: stable
+status: refined
 ui_surfaces: [cli]
 monitoring: integrated
-telemetry_keys: ["quanta.conversation.id", "quanta.turn.id", "quanta.tool.call.status", "quanta.thread.id", "quanta.turn.kind"]
+telemetry_keys: ["quanta.conversation.id", "quanta.turn.id", "quanta.tool.call.status", "quanta.thread.id", "quanta.turn.kind", "gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.response.finish_reasons", "quanta.instance.id", "quanta.instance.attempt"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
@@ -30,18 +30,22 @@ evidence:
     - src/observability/index.ts
     - src/agent/loop.ts
     - src/agent/dispatch.ts
-  adrs: [74]
+    - src/observability/otel-span-export.ts
+    - src/agent/session-resources.ts
+  adrs: [74, 539]
   tests:
     unit:
       - tests/unit/observability/spans.test.ts
       - tests/unit/dispatch.test.ts
       - tests/unit/observability.test.ts
+      - tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
     integration:
       - tests/integration/spans-e2e.test.ts
+      - tests/integration/spans-genai-active-context.test.ts
     contract: []
 knobs:
   - name: setSpanSink
     default: 'undefined'
     purpose: '(sink|null) host(CLI/Tauri/Web)가 SpanSink 구현체를 wire; 미등록이 기본 (no-op)'
 deliberate_hold: null
-notes: 'OTel SDK / OTLP exporter 번들 미채택 — seam은 SpanSink interface만; 실제 OTLP/Honeycomb/JSONL 매핑은 host 구현 follow-up. full 10-11 deep tree (mcp/sub-submission/per-event)는 미채택 — core 4 stage만, 같은 seam 위에서 확장. first-class "blocked" tool status 채널 부재 — gate-deny는 현재 status="error"로 surface. ADR-0032 vocabulary 위에 얹음.'
+notes: 'ADR-0539 (jul-13) unification: the 4-stage span tree now carries gen_ai semconv attrs (operation.name invoke_agent/chat/execute_tool, provider.name, finish_reasons array) via `withActiveSpanScope` (session-resources.ts) and the exporter (`otel-span-export.ts`) issues the active TraceRef so OTLP ≡ OBSERVE ≡ cassette share one {traceId,spanId}; the chat span is kind=CLIENT. One trace per instance-attempt (quanta.instance.id/attempt stamped on the per-attempt root). full 10-11 deep tree (mcp/sub-submission/per-event)는 미채택 — core 4 stage만, 같은 seam 위에서 확장. first-class "blocked" tool status 채널 부재 — gate-deny는 현재 status="error"로 surface. ADR-0032 vocabulary 위에 얹음.'

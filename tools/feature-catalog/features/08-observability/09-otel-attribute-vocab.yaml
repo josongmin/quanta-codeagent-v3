@@ -4,10 +4,10 @@ section: 8
 subsystem: 텔레메트리 — 키 어휘 + 컴파일-타임 enforce
 order: 1
 maturity: L4
-status: stable
+status: refined
 ui_surfaces: [cli]
 monitoring: integrated
-telemetry_keys: ["quanta.memory.phase", "quanta.thread.id", "quanta.conversation.id", "quanta.conversation.session_id", "quanta.conversation.started_at"]
+telemetry_keys: ["quanta.memory.phase", "quanta.thread.id", "quanta.conversation.id", "quanta.conversation.session_id", "quanta.conversation.started_at", "gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.response.finish_reasons", "quanta.instance.id", "quanta.instance.attempt"]
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
@@ -28,7 +28,7 @@ evidence:
   code:
     - src/observability/vocabulary.ts
     - src/observability/attrs.ts
-  adrs: [32]
+  adrs: [32, 539]
   tests:
     unit:
       - tests/unit/observability/vocabulary.test.ts
@@ -37,4 +37,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'standalone vocab port — OTLP exporter / metrics 마이그 follow-up. 기존 `metrics.ts` / `logger.ts` 등 호출자 변환은 ADR-0032 §"Integration seam" 따라 별도 PR.'
+notes: 'standalone vocab port — OTLP exporter / metrics 마이그 follow-up. 기존 `metrics.ts` / `logger.ts` 등 호출자 변환은 ADR-0032 §"Integration seam" 따라 별도 PR. ADR-0539 (jul-13): the vocab gained the `quanta.instance.{id,attempt}` join keys + gen_ai response/tool semconv keys (finish_reasons, provider.name, operation.name) consumed by the unified-tracing span export — still declared here as the single AttrKey SSOT.'
