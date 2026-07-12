@@ -112,8 +112,10 @@ export const loadRepoRules = async (
 ): Promise<RepoRules | undefined> => {
   const now = opts.now ?? Date.now
   const resolvedCwd = resolve(cwd)
-  // Round-5 (M1) — the home boundary the walk-up must not cross. `resolve` so a
-  // relative/`~`-free comparison is exact against `dirname` output.
+  // Round-5 (M1) — the home boundary the walk-up must not climb ABOVE. A rule
+  // file above $HOME belongs to no single project and, on a shared box, could be
+  // another user's. (R6: compared case-insensitively so a macOS/APFS case-fold
+  // spelling of $HOME can't slip past an exact-string check.)
   const homeBoundary = resolve(opts.homeDir ?? homedir())
   const collected: RepoRulesLayer[] = []
   let dir = resolvedCwd
@@ -129,14 +131,9 @@ export const loadRepoRules = async (
     if (existsSync(join(dir, ".git"))) break
     const parent = dirname(dir)
     if (parent === dir) break // filesystem root
-    // Round-5 (M1) — stop AT the home boundary: a rule file at/above $HOME
-    // belongs to no single project and, on a shared box, could be another
-    // user's. `.git`-rooted repos are unaffected (they break above first).
-    if (parent === homeBoundary) break
-    // Round-5 (H1) — a symlinked ANCESTOR redirects the walk OUT of the lexical
-    // repo tree (the final-component `lstat` in `tryRead` can't see it). Reading
-    // its AGENTS.md would inject out-of-repo content as trusted policy, so stop.
-    if (await isSymlinkDir(parent)) break
+    // Round-5/6 (M1) — never climb above the home boundary. `.git`-rooted repos
+    // break above first, so this only bites `.git`-less loose dirs.
+    if (samePath(parent, homeBoundary)) break
     dir = parent
     depth += 1
   }
@@ -192,17 +189,13 @@ const computeRelativePath = (cwd: string, sourcePath: string): string => {
   return `./${normalized}`
 }
 
-/** Round-5 (H1) — is `dir` a symlink (as opposed to a real directory)? Used to
- *  halt the walk-up at a symlinked ancestor that would redirect it out of the
- *  lexical repo tree. Missing / unreadable ⇒ treat as non-symlink (the walk's
- *  other bounds — `.git`, home, MAX_DEPTH, fs-root — still apply). */
-const isSymlinkDir = async (dir: string): Promise<boolean> => {
-  try {
-    return (await lstat(dir)).isSymbolicLink()
-  } catch {
-    return false
-  }
-}
+/** Round-6 (M1/H1-B) — case-insensitive path equality for the home-boundary
+ *  stop. macOS/APFS + Windows are case-insensitive, so an exact-string compare
+ *  lets a case-fold spelling of $HOME (`/Users/x` vs `/USERS/X`) walk past the
+ *  boundary. Lower-casing both sides closes that; on a case-sensitive fs the only
+ *  effect is treating a case-variant of the SAME home path as equal, which is the
+ *  desired stop, not an over-reach into an unrelated dir. */
+const samePath = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase()
 
 const tryRead = async (path: string): Promise<string | undefined> => {
   try {

@@ -1,20 +1,16 @@
 /**
- * hell-audit Round-5 — loadRepoRules walk-up boundary hardening.
+ * hell-audit Round-5/6 — loadRepoRules walk-up boundary behavior.
  *
- * WS4 wired repo-local rules (AGENTS.md/CLAUDE.md) into the TRUSTED system prompt
- * for human-driven presets. That raised the trust bar on `loadRepoRules`'
- * cwd→root walk: any rule file it reads becomes authoritative "Rules". Two
- * walk-up escapes let content OUTSIDE the intended repo in:
+ * WS4 renders repo-local rules (AGENTS.md/CLAUDE.md) as TRUSTED system-prompt
+ * "Rules", so the cwd→root walk must (a) stop climbing above the user's home on
+ * a `.git`-less loose dir (shared-box hygiene) yet (b) NOT over-block a benign
+ * in-repo symlinked directory (Round-5's lexical symlink-stop regressed this and
+ * had bypasses of its own — see R6 audit; the real injection defense for
+ * untrusted surfaces is RULE_LESS_MODES, and symlinked rule FILES stay rejected
+ * by the loader's existing `lstat`).
  *
- *   §1 (H1) SYMLINKED ANCESTOR — `lstat` rejected a symlinked rule FILE, but a
- *      symlinked DIRECTORY in the walk-up path was traversed transparently, so
- *      `repo/sub/AGENTS.md` (where `sub` → an out-of-repo dir) was read as repo
- *      policy. Fix: stop the walk at a symlinked ancestor.
- *   §2 (M1) ABOVE-$HOME — with no `.git` anywhere, the walk climbed to fs-root,
- *      absorbing ancestor AGENTS.md ($HOME / shared parents) on multi-user boxes.
- *      Fix: stop the walk at the home boundary (never read at/above it).
- *
- * Red-on-injection: revert either guard ⇒ the out-of-boundary sentinel appears.
+ *   §1 (M-C) a benign in-repo symlinked dir does NOT hide the repo-root rules.
+ *   §2 (M1)  the walk stops AT the home boundary, case-insensitively (H1-B).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
@@ -31,43 +27,46 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-describe("Round-5 §1 (H1) — a symlinked ancestor directory is NOT traversed", () => {
-  test("rules behind a dir-symlink escaping the repo are never read", () => {
-    // repo/ (real, has .git + its own rules) ; repo/sub -> /outside (attacker).
+describe("Round-6 §1 (M-C) — a benign in-repo symlinked dir does not hide repo-root rules", () => {
+  test("walk-up through an in-repo dir-symlink still reaches the repo-root AGENTS.md", async () => {
+    // repo/ (has .git + root rules) ; repo/link -> repo/realdir (BOTH in-repo).
     const repo = join(root, "repo")
     mkdirSync(repo)
     writeFileSync(join(repo, ".git"), "")
-    writeFileSync(join(repo, "AGENTS.md"), "# repo\nREPO-OWN-RULES\n")
-    const outside = join(root, "outside")
-    mkdirSync(outside)
-    writeFileSync(join(outside, "AGENTS.md"), "# evil\nOUTSIDE-INJECTED-RULES\n")
-    mkdirSync(join(outside, "deep"))
-    symlinkSync(outside, join(repo, "sub"), "dir")
+    writeFileSync(join(repo, "AGENTS.md"), "# repo\nREPO-ROOT-RULES\n")
+    mkdirSync(join(repo, "realdir", "leaf"), { recursive: true })
+    symlinkSync(join(repo, "realdir"), join(repo, "link"), "dir")
 
-    // Run inside the symlinked subtree: repo/sub/deep == outside/deep.
-    const cwd = join(repo, "sub", "deep")
-    return loadRepoRules(cwd).then((rules) => {
-      const body = rules?.body ?? ""
-      expect(body).not.toContain("OUTSIDE-INJECTED-RULES")
-    })
+    // Working under a benign in-repo symlink must NOT sever the walk (Round-5's
+    // lexical symlink-stop broke exactly this).
+    const rules = await loadRepoRules(join(repo, "link", "leaf"), { homeDir: root })
+    expect(rules?.body ?? "").toContain("REPO-ROOT-RULES")
   })
 })
 
-describe("Round-5 §2 (M1) — the walk-up stops at the home boundary", () => {
-  test("a .git-less loose dir does NOT absorb an ancestor's (home) AGENTS.md", () => {
-    // No `.git` anywhere. `root` acts as the home boundary; an AGENTS.md sits AT
-    // the boundary and MUST NOT be pulled into a deeper cwd's rules.
+describe("Round-6 §2 (M1) — the walk-up stops at the home boundary (case-insensitive)", () => {
+  const setup = (): string => {
+    // No `.git` anywhere. An AGENTS.md sits AT the boundary and must NOT be
+    // pulled into a deeper cwd's rules; an in-project ancestor is fine.
     writeFileSync(join(root, "AGENTS.md"), "# home\nABOVE-HOME-INJECTED\n")
     const deep = join(root, "loose", "a", "b")
     mkdirSync(deep, { recursive: true })
     writeFileSync(join(root, "loose", "a", "AGENTS.md"), "# in-project\nPROJECT-RULES\n")
+    return deep
+  }
 
-    return loadRepoRules(deep, { homeDir: root }).then((rules) => {
-      const body = rules?.body ?? ""
-      // In-project ancestor is fine …
-      expect(body).toContain("PROJECT-RULES")
-      // … but the at/above-home file is NOT absorbed.
-      expect(body).not.toContain("ABOVE-HOME-INJECTED")
-    })
+  test("exact home boundary stops the walk", async () => {
+    const deep = setup()
+    const rules = await loadRepoRules(deep, { homeDir: root })
+    const body = rules?.body ?? ""
+    expect(body).toContain("PROJECT-RULES")
+    expect(body).not.toContain("ABOVE-HOME-INJECTED")
+  })
+
+  test("a case-fold spelling of the home boundary ALSO stops (macOS/APFS bypass)", async () => {
+    const deep = setup()
+    // Same dir, upper-cased spelling — an exact-string boundary check would miss.
+    const rules = await loadRepoRules(deep, { homeDir: root.toUpperCase() })
+    expect(rules?.body ?? "").not.toContain("ABOVE-HOME-INJECTED")
   })
 })
