@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
+import allowlist from "../../tools/god-code/allowlist.json"
 import {
   detectGodFunctions,
   detectGodModules,
@@ -8,7 +9,6 @@ import {
   GOD_MODULE_MAX_LINES,
   type SourceFile,
 } from "../../tools/god-code/detect"
-import allowlist from "../../tools/god-code/allowlist.json"
 
 // SE-metric ratchet: keep god-code from GROWING. A god-MODULE (file > 1000 lines)
 // or god-FUNCTION (body > 150 lines) that is NOT grandfathered in allowlist.json
@@ -38,7 +38,9 @@ const sourceFiles = (): readonly SourceFile[] =>
 describe("god-code ratchet (SE size metric)", () => {
   const files = sourceFiles()
   const currentModules = new Set(detectGodModules(files, GOD_MODULE_MAX_LINES).map((m) => m.file))
-  const currentFunctions = new Set(detectGodFunctions(files, GOD_FUNCTION_MAX_LINES).map((f) => f.key))
+  const currentFunctions = new Set(
+    detectGodFunctions(files, GOD_FUNCTION_MAX_LINES).map((f) => f.key),
+  )
   const allowModules = new Set(allowlist.modules)
   const allowFunctions = new Set(allowlist.functions)
 
@@ -65,5 +67,12 @@ describe("god-code ratchet (SE size metric)", () => {
   test("allowlist has NO STALE function (ratchet only goes DOWN — remove fixed entries)", () => {
     const stale = [...allowFunctions].filter((k) => !currentFunctions.has(k)).sort()
     expect(stale).toEqual([])
+  })
+
+  test("allowlist entries are UNIQUE (a duplicate grandfather would silently double-count / mask a swap)", () => {
+    const dupes = (arr: readonly string[]): string[] =>
+      [...new Set(arr.filter((v, i) => arr.indexOf(v) !== i))].sort()
+    expect(dupes(allowlist.functions)).toEqual([])
+    expect(dupes(allowlist.modules)).toEqual([])
   })
 })
