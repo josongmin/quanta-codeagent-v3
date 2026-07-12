@@ -162,7 +162,17 @@ export interface SpanSink {
    *  EVICT the now-scoped frame from that stack: a scoped span carries its
    *  parentage in its own async context, so it must not linger on the shared
    *  stack where a CONCURRENT session's root could cross-link to it. Legacy
-   *  sinks omit this (no-op). */
+   *  sinks (no stack) omit this (no-op).
+   *
+   *  ⚠️ WRAPPER CONTRACT: any decorator/composite that wraps a stack-keeping
+   *  sink (e.g. a passive-observer or fan-out wrapper) MUST forward `onScoped`
+   *  to the inner sink. Because this method is OPTIONAL, a wrapper that
+   *  implements `onStart`/`onEnd` but forgets `onScoped` still satisfies the
+   *  type — and silently reintroduces the concurrent-session trace-collapse the
+   *  eviction exists to prevent (two top-level `runAgent` sessions merge into
+   *  one trace). This contract is pinned executably by
+   *  `tests/integration/spans-direct-path-concurrent-scope.test.ts` (the
+   *  wrapper-forwarding case is RED when `onScoped` is dropped). */
   onScoped?: (token: unknown) => void
 }
 

@@ -130,14 +130,16 @@ export const createExporterSpanSink = (
       return frame
     },
     onScoped(token: unknown): void {
-      // The SESSION ROOT opens on the DIRECT path (no active ref yet — its scope
-      // is installed one call LATER), so it is pushed onto the shared stack
-      // above. The instant `withActiveSpanScope` installs it as the active ref,
-      // it BECOMES a scoped span and must leave the shared stack — otherwise a
-      // CONCURRENT session's root, opening while this root lingers, would adopt
-      // it as parent and collapse two independent traces into one. Evicting the
-      // frame here keeps scoped spans off the shared stack (its children already
-      // parent via the async-local ref, never the stack).
+      // A TOP-LEVEL session root (standalone `runAgent`) opens on the DIRECT path
+      // (no active ref yet — its scope is installed one call LATER), so it is
+      // pushed onto the shared stack above. The instant `withActiveSpanScope`
+      // installs it as the active ref, it BECOMES a scoped span and must leave
+      // the shared stack — otherwise a CONCURRENT session's root, opening while
+      // this root lingers, would adopt it as parent and collapse two independent
+      // traces into one. (Under bench the root is ALREADY scoped by
+      // `withBenchInstanceRoot`, so it was never pushed and this `splice` no-ops
+      // via idx=-1 — harmless.) Evicting keeps scoped spans off the shared stack;
+      // their children already parent via the async-local ref, never the stack.
       const idx = open.lastIndexOf(token as Frame)
       if (idx >= 0) open.splice(idx, 1) // evict ONLY this frame — never siblings
     },
