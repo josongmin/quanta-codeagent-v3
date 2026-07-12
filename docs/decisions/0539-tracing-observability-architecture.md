@@ -101,6 +101,33 @@ Plan: `docs/plans/jul-12-otel-genai-unified-tracing.md` (+ parallel-execution co
 7. **Cassette stays unredacted** (request-hash/replay depends on exact content) —
    outside the content-capture policy, inside the operator boundary. Unchanged.
 
+### Amendment status (landed 2026-07-13)
+
+The unification shipped in waves W0–W3 + a C7-core id-unification, all on `main`:
+
+- **W0/C1** — `active-context.ts` (`AsyncLocalStorage<TraceRef>`, `getActiveTraceRef`),
+  `TrajectoryEvent.traceId?`, OTLP `arrayValue`, +5 gen_ai keys.
+- **C2** — loop spans carry gen_ai semconv attrs (`invoke_agent`/`chat`/
+  `execute_tool`, `finish_reasons` array); orphan sites nest via caller context.
+- **C3/C4** — jsonl-recorder + cassette stamp the active `TraceRef`; replay-hash
+  invariant PROVEN (metadata never hashed).
+- **C5** — one run-id authority (`QUANTA_RUN_ID`≡`QUANTA_OTEL_RUN_ID`), attempt
+  threading, per-attempt `quanta.bench.instance` INTERNAL root (one trace/attempt).
+- **C6** — viewer projects the span tree by joining OBSERVE+cassette on
+  `{traceId,spanId,parentSpanId}`; 🌲/💬 toggle.
+- **C7-core (id unification)** — the EXPORTER's issued id IS the active-context
+  id: `SpanSink.onStart` returns a `TraceRef`, parentage derives from the
+  enclosing active ref (async-safe; LIFO stack only when `!isActiveContextRegime()`),
+  and `withActiveSpanScope` installs `span.ref` verbatim. **This CLOSES the audit's
+  "OTEL spans un-joinable to the trajectory" finding** — OTLP ≡ OBSERVE ≡ cassette
+  now share one `{traceId, spanId}`. Acceptance: `spans-otlp-active-context-unification.test.ts`.
+
+Everything is `off ⇒ byte-identical`. Remaining (optional): a production full-remote
+box run to re-prove the tuple over a real OTLP network hop with a live LLM (the
+unit acceptance already exercises a real exporter sink over `runAgent`). C7 legacy
+DELETION (deterministic `t<turn>` synthetic ids, SpanSink compat adapter) stays
+deferred behind the declared compat window — the fallback only fires when OFF.
+
 ## Rule for new observability features
 
 Add to the SSOT (OBSERVE) as a typed `kind`, stamp the correlation tuple, and —
