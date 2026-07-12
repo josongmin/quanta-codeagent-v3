@@ -1,0 +1,82 @@
+id: edit-fresh-hash-on-success
+title: edit fresh-hash on success — self-inflicted-staleness root fix (jul-13)
+section: 2
+subsystem: 도구 시스템 — edit optimistic-lock chaining (0398 precondition 보완재)
+order: 399
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "default-off", "measure-first"]
+depends_on: [edit-tool, atomic-write-and-hash-precondition]
+surface_integration:
+  cli: full
+  web: full
+  method: audited
+  verified: "2026-07-13"
+  evidence:
+    cli: "runs in the interactive CLI — the fresh-hash line rides the edit tool_result output; dispatch seam wires ctx.editFreshHash from runtimeConfig().editFreshHash (src/agent/dispatch/tool-context.ts). Appears only when QUANTA_EDIT_FRESH_HASH=1 (default-OFF ⇒ byte-identical)."
+    web: "Enhancement to the edit tool output; the edit tool_call/tool_result render as the generic tool card, so the appended `fresh sha256: <hex>` line surfaces in the result preview on the same surface as the 0398 stale_precondition failure it complements."
+purpose: |
+  MEASURED root fix (bench trajectory dedup, django__django-14315 ×2 runs): ~41%
+  of edits (7 distinct events / 17 edits, not_found=0) hit stale_precondition —
+  ALL from the model's OWN prior edit to the same file (e.g. postgresql/client.py
+  failed 4× with 4 different current-hashes). Cassette double-count trap: raw echo
+  171 → 7 real events after deduping on the unique (actual,expected) hash pair.
+  Root cause: the 0398 precondition (`expected_hash`) has no counterpart — a
+  SUCCESSFUL edit changes the file, so the model's read-time hash is instantly
+  stale for the next same-file edit, forcing a full re-read purely to re-hash.
+  Fix: when gated ON, a successful edit appends `fresh sha256: <hex>` = sha256 of
+  the POST-edit bytes (`planned.next`, already in memory ⇒ no extra read) so the
+  model chains the next edit's `expected_hash` WITHOUT a re-read. Round-trip
+  fidelity is load-bearing (the model re-hashes off DISK): commitEdit writes
+  `planned.next` verbatim (no EOL/encoding normalization) and the edit strategies
+  preserve per-line EOL, so sha256(planned.next) == sha256(readFile after commit)
+  — pinned on a REAL fs with CRLF + no-trailing-newline + multibyte content.
+  Gate QUANTA_EDIT_FRESH_HASH (strict `=== "1"`); unset ⇒ ctx.editFreshHash absent
+  ⇒ success output BYTE-IDENTICAL to legacy. Mirrors the QUANTA_EDIT_AUTO_FUZZY
+  8-site wiring (no reinvention). Efficacy A/B (re-read-count /
+  tokens-per-successful-edit) is measure-first pending on a bench box.
+evidence:
+  code:
+    - src/tool/edit/index.ts
+    - src/tool/types.ts
+    - src/shared/runtime-config.ts
+    - src/shared/runtime-config/types-extra.ts
+    - src/shared/runtime-config-knobs/knobs-a.ts
+    - src/agent/dispatch/tool-context.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/edit-fresh-hash-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-wire-hellgate.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_EDIT_FRESH_HASH
+    default: 'unset (OFF)'
+    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ ctx.editFreshHash absent ⇒ a successful edit yields the legacy `<path>: <message>` output BYTE-IDENTICAL (no hash line, no sha256 cost). ON ⇒ the success output appends one line the model reuses as the next same-file edit''s expected_hash, eliminating the re-read that the 0398 precondition otherwise forces after every edit.'
+deliberate_hold: null
+notes: |
+  jul-13. Complements 0398 (atomic-write-and-hash-precondition): 0398 added the
+  optimistic-lock (`expected_hash` ⇒ stale_precondition on mismatch), but without
+  a fresh hash on success the lock is self-defeating on sequential same-file edits
+  (measured ~41%). This closes that loop.
+
+  Hellgate (tests/unit/edit-fresh-hash-hellgate.test.ts, 6 tests, red-on-injection
+  proven by 3 injections): (1) OFF byte-identical; (2/3) ON advertises sha256 of
+  POST-edit bytes == actual on-disk bytes (hashing `before` → RED); (4) E2E
+  chained same-file edit with the advertised hash SUCCEEDS (no stale); (5) paired
+  control — reusing the pre-edit read-time hash DOES go stale (proves the bug the
+  fix cures); (6) REAL-fs round-trip fidelity (CRLF + no-trailing + multibyte,
+  advertised == sha256(readFileSync) — EOL-normalizing the hash → RED). The mock
+  ports are READ==WRITE identity, so the real-fs describe is what actually guards
+  the disk round-trip.
+
+  Remaining scope: efficacy A/B on a bench box (re-read-count drop /
+  tokens-per-successful-edit net-negative). Root-fix nature (removes a forced
+  re-read) makes a flat A/B unlikely, but it is measure-first-gated per the
+  no-heuristics rule — if flat, delete the gate.
