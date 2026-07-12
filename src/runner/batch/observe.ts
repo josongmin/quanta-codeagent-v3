@@ -183,7 +183,14 @@ export class BenchObserver {
   /** Append a bench-produced trajectory line. Strict: rethrows on failure so
    *  the caller can mark the instance degraded. */
   private append(
-    kind: "sandbox" | "patch_generated" | "verify" | "localize",
+    kind:
+      | "sandbox"
+      | "patch_generated"
+      | "patch_applied"
+      | "patch_rejected"
+      | "verify"
+      | "localize"
+      | "recovery",
     data: Record<string, unknown>,
   ): void {
     // "localize" (F1) is not yet in the shared TrajectoryKind union; makeEvent's
@@ -201,8 +208,37 @@ export class BenchObserver {
     this.append("patch_generated", { ...data })
   }
 
+  /** ADR-0539 R2 — the captured patch was applied to the grading tree (git
+   *  apply / candidate accepted). Mirrors `patchGenerated`'s {@link PatchData}
+   *  contract so `probe/triage.ts` reads the SAME `applyStatus`/`filesChanged`
+   *  fields off every patch-lifecycle kind. */
+  patchApplied(data: PatchData): void {
+    this.append("patch_applied", { ...data })
+  }
+
+  /** ADR-0539 R2 — the captured patch was REJECTED (apply failed, or no
+   *  submittable candidate: empty submission / hard-rejected winner). Same
+   *  {@link PatchData} shape triage's `patch_rejected` rule consumes. */
+  patchRejected(data: PatchData): void {
+    this.append("patch_rejected", { ...data })
+  }
+
   verify(data: VerifyData): void {
     this.append("verify", { ...data })
+  }
+
+  /** ADR-0539 R3 — per-round acceptance selection readout (operator telemetry).
+   *  Rides the existing `recovery` trajectory family (no new TrajectoryKind),
+   *  discriminated by `reason:"acceptance_select"` in `data` — mirroring how the
+   *  stream recorder rides `decision`/`knobs_applied` on `recovery`. No-leak:
+   *  tier/votes/counts only, NEVER the winning patch. */
+  acceptanceSelection(data: {
+    tier: string
+    votes: number
+    candidateCount: number
+    llmOverrode: boolean
+  }): void {
+    this.append("recovery", { reason: "acceptance_select", ...data })
   }
 
   /** F1 — emit the Agentless file-tree build + localize outcome so post-mortem

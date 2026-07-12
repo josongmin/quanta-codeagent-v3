@@ -23,12 +23,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
+import { contributeVerdictDebug } from "@/apps/bench/eval/driver"
 import { maybeRecordTrajectory, resolveBenchTrajectoryMode } from "@/apps/bench/trajectory"
 import { debugSink, isTrajectoryDebugEnabled } from "@/apps/bench/trajectory-debug-sink"
-import { benchHome } from "@/runner/batch/corpus/paths"
 import { defaultHashRequest, jsonlReplayStore, recordingLlmPort } from "@/llm/replay"
 import type { RecordedInteraction } from "@/llm/replay/types"
 import type { StreamEvent, StreamInput } from "@/llm/types"
+import { benchHome } from "@/runner/batch/corpus/paths"
 import { laneContext } from "@/shared"
 
 const RECORD_KEY = "QUANTA_BENCH_RECORD_TRAJECTORY"
@@ -324,5 +325,95 @@ describe("5. maybeRecordTrajectory wires the singleton (integration)", () => {
 
     const records = await jsonlReplayStore({ path }).load()
     expect(records[0]?.metadata).not.toHaveProperty("debug")
+  })
+})
+
+// ── 6. VERDICT enricher (jul-13, ADR-0539) ──────────────────────────────────
+// The driver's verify-finalize sites call `contributeVerdictDebug(result)` (the
+// SSOT both `runInstanceOnce` paths use) so the grade outcome rides
+// `metadata.debug.verdict` of the recorded turn — mirroring `toolExec`. These
+// tests pin the PRODUCER contract: deleting the `contribute("verdict", …)` inside
+// contributeVerdictDebug makes the "verdict rides the record" assertion RED. The
+// gate-off control + a CROWN neutrality assertion pin default-off + replay-safety.
+describe("6. verdict enricher (contributeVerdictDebug)", () => {
+  const RECORD_KEY = "QUANTA_BENCH_RECORD_TRAJECTORY"
+  const DEBUG_KEY = "QUANTA_BENCH_TRAJECTORY_DEBUG"
+  const path = `/tmp/tds-verdict-${process.pid}.jsonl`
+
+  afterEach(async () => {
+    await rm(path, { force: true })
+  })
+
+  test("ON ⇒ verdict payload rides metadata.debug.verdict on the recorded turn", async () => {
+    process.env[RECORD_KEY] = path
+    process.env[DEBUG_KEY] = "1"
+
+    // producer: the driver contributes at the verify-finalize site.
+    contributeVerdictDebug({ passed: true, patch: "aaa", verdict: "ok" })
+
+    const port = maybeRecordTrajectory(stubInner([{ type: "text_delta", delta: "hi" }]))
+    await runToEnd(port.stream(req("verdict-q")))
+
+    const records = await jsonlReplayStore({ path }).load()
+    expect(records).toHaveLength(1)
+    // patchBytes = "aaa".length = 3; observationVerdict carried when present.
+    expect((records[0]?.metadata.debug as Record<string, unknown> | undefined)?.verdict).toEqual({
+      passed: true,
+      patchBytes: 3,
+      observationVerdict: "ok",
+    })
+  })
+
+  test("optional fields omitted when absent (lean payload)", () => {
+    process.env[RECORD_KEY] = "debug"
+    contributeVerdictDebug({ passed: false, patch: "" })
+    expect(debugSink.drain()).toEqual({ verdict: { passed: false, patchBytes: 0 } })
+  })
+
+  test("carries the harness error summary when present", () => {
+    process.env[RECORD_KEY] = "debug"
+    contributeVerdictDebug({ passed: false, patch: "x", verdict: "grader_invalid", error: "boom" })
+    expect(debugSink.drain()).toEqual({
+      verdict: {
+        passed: false,
+        patchBytes: 1,
+        observationVerdict: "grader_invalid",
+        error: "boom",
+      },
+    })
+  })
+
+  test("control: DEBUG off ⇒ contributeVerdictDebug is inert, no verdict key", async () => {
+    process.env[RECORD_KEY] = path
+    delete process.env[DEBUG_KEY]
+
+    contributeVerdictDebug({ passed: true, patch: "aaa", verdict: "ok" })
+    const port = maybeRecordTrajectory(stubInner([{ type: "text_delta", delta: "hi" }]))
+    await runToEnd(port.stream(req("verdict-q")))
+
+    const records = await jsonlReplayStore({ path }).load()
+    expect(records[0]?.metadata).not.toHaveProperty("debug")
+  })
+
+  test("CROWN: verdict enrichment does NOT perturb the request id hash", async () => {
+    const request = req("verdict-neutral")
+    const expectedId = defaultHashRequest(request, "exact")
+
+    process.env[RECORD_KEY] = "debug"
+    const withVerdict = capturingStore("/tmp/tds-verdict-crown.jsonl")
+    contributeVerdictDebug({ passed: true, patch: "zz", verdict: "ok" })
+    await runToEnd(
+      recordingLlmPort({
+        inner: stubInner([{ type: "text_delta", delta: "x" }]),
+        store: withVerdict.port,
+        debugDrain: () => debugSink.drain(),
+      }).stream(request),
+    )
+
+    // request hash is keyed off `request` only — the verdict slice rides metadata.
+    expect(withVerdict.appended[0]?.id).toBe(expectedId)
+    expect(
+      (withVerdict.appended[0]?.metadata.debug as Record<string, unknown> | undefined)?.verdict,
+    ).toEqual({ passed: true, patchBytes: 2, observationVerdict: "ok" })
   })
 })

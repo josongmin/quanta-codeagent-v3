@@ -17,7 +17,7 @@ import { validateGoldPatch } from "../gold-sanity"
 import { buildSelectionExplanationPacket, type LlmEvidenceArtifacts } from "../llm-evidence-packet"
 import { noPatchExhaustedErrorOf } from "../no-patch-breaker-adapter"
 import { buildPhasePatchBudget } from "../patch-budget-admission"
-import { emitPatch, emitVerify, ObservationError, type Wiring } from "../report"
+import { emitPatch, emitPatchOutcome, emitVerify, ObservationError, type Wiring } from "../report"
 import { reproArtifactInstancePath } from "../repro-artifacts-fs"
 import { labelForReceipt, type ReceiptEvidence, researchKnobTouched } from "../score-label"
 import { relFromSandbox } from "../stream-tap"
@@ -198,6 +198,9 @@ const generationFailureResult = (args: {
       args.wiring.observer,
       args.phase.patch,
     )
+    // ADR-0539 R2: a generation-failure terminal never applies the patch to a
+    // grading tree (no verify), so the lifecycle outcome is REJECTED.
+    emitPatchOutcome(args.wiring.observer, extra.patchPath, args.phase.patch, false)
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
   }
@@ -239,6 +242,9 @@ const noPatchResult = (args: {
       args.wiring.observer,
       args.phase.patch,
     )
+    // ADR-0539 R2: the no-patch / no-submittable-winner terminal — nothing was
+    // applied to a grading tree, so the lifecycle outcome is REJECTED.
+    emitPatchOutcome(args.wiring.observer, extra.patchPath, args.phase.patch, false)
     const usage = args.wiring.usage?.total()
     if (usage) extra.usage = usage
   }
@@ -332,6 +338,15 @@ const attachObservedSuccessBasics = (args: {
     args.instance,
     args.wiring.observer,
     args.phase.patch,
+  )
+  // ADR-0539 R2: this is the ONE verify-and-finalize path — the patch reached
+  // the grading tree (harness / testCmd applied it). A non-empty patch ⇒
+  // APPLIED; an empty patch ⇒ REJECTED (fail-closed empty-prediction grade).
+  emitPatchOutcome(
+    args.wiring.observer,
+    args.extra.patchPath,
+    args.phase.patch,
+    args.phase.patch.trim() !== "",
   )
   emitVerify(args.wiring.observer, args.verified)
   const usage = args.wiring.usage?.total()

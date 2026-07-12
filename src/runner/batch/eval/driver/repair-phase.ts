@@ -427,6 +427,16 @@ const buildRepairPhaseInputs = (
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
     (t) => {
       acceptanceSelection.current = { tier: t.tier, winningPatch: t.winningPatch }
+      // ADR-0539 R3: also record the per-round pick on the OBSERVE trajectory
+      // (rides `recovery`, `reason:"acceptance_select"`). No-leak: tier/votes/
+      // counts only, never the winning patch. `QUANTA_BENCH_ACCEPTANCE` OFF ⇒ the
+      // selector is `undefined` ⇒ this closure never fires ⇒ byte-identical.
+      w.observer?.acceptanceSelection({
+        tier: t.tier,
+        votes: t.votes,
+        candidateCount: t.candidateCount,
+        llmOverrode: t.llmOverrode,
+      })
     },
   )
   return {

@@ -194,6 +194,34 @@ export interface RunInstanceDeps extends SharedRunInstanceDeps {
   readonly runtimeFactory?: typeof createRuntime
 }
 
+/**
+ * DEBUG enricher `verdict` (jul-08 platform, ADR-0539). Push the grade/verify
+ * outcome into the CURRENT lane's debug buffer so the recorder drains it onto
+ * `metadata.debug.verdict` of the recorded LLM turn — the exact loose-coupling
+ * shape `toolExec` uses (append/contribute → drain at turn-commit). The payload
+ * is the pass/fail bit, the patch size, and any observation verdict / harness
+ * error summary already decided at the call site.
+ *
+ * CONTRACT: metadata-only ⇒ REPLAY-NEUTRAL. The debug slice rides `metadata`,
+ * which is never hashed (the cassette key is `stripEphemeralRequest(input)`), so
+ * this can NEVER perturb the request hash / a cross-box replay hit. `contribute`
+ * is itself a no-op when the debug gate is off, so callers still guard with
+ * {@link isTrajectoryDebugEnabled} only to skip building the payload.
+ */
+export const contributeVerdictDebug = (result: {
+  readonly passed: boolean
+  readonly patch: string
+  readonly verdict?: InstanceResult["verdict"]
+  readonly error?: string
+}): void => {
+  debugSink.contribute("verdict", {
+    passed: result.passed,
+    patchBytes: result.patch.length,
+    ...(result.verdict !== undefined ? { observationVerdict: result.verdict } : {}),
+    ...(result.error !== undefined ? { error: result.error } : {}),
+  })
+}
+
 const capabilityManifestForConfig = (config: AgentConfig): CapabilityManifest => ({
   approvals: "none",
   tools: true,
@@ -262,7 +290,9 @@ const captureLostEditsError = (editCount: number | undefined, sandbox: string): 
 
 export const lastTerminalTurnEventOf = (
   events: readonly SessionEvent[],
-): Extract<SessionEvent, { type: "turn.completed" | "turn.failed" | "turn.aborted" }> | undefined => {
+):
+  | Extract<SessionEvent, { type: "turn.completed" | "turn.failed" | "turn.aborted" }>
+  | undefined => {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i]
     // ALBB-04 added a dedicated `turn.aborted` terminal wire event; a cooperative
@@ -320,8 +350,7 @@ const runAgentViaSdk = async (
       // `withGitSnapshot` still captures the sandbox diff as the candidate patch,
       // and the result is an honest `aborted` (not a misleading hard error).
       const turns = eventCapture.events.filter(
-        (e) =>
-          e.type === "turn.completed" || e.type === "turn.failed" || e.type === "turn.aborted",
+        (e) => e.type === "turn.completed" || e.type === "turn.failed" || e.type === "turn.aborted",
       ).length
       return { reason: "aborted", turns, messages: [] }
     }
@@ -765,6 +794,18 @@ const runRepairPhase = async (
     repairPosture.acceptance,
     ownerNearRegressionSet,
     resolveAcceptanceLlmRerank(instance, deps.llm, signal),
+    // ADR-0539 R3: record each per-round acceptance pick on the OBSERVE trajectory
+    // (rides `recovery`, `reason:"acceptance_select"`; no-leak — tier/votes/counts
+    // only, never the winning patch). `QUANTA_BENCH_ACCEPTANCE` OFF ⇒ the selector
+    // is `undefined` ⇒ this closure never fires ⇒ byte-identical.
+    (t) => {
+      w.observer?.acceptanceSelection({
+        tier: t.tier,
+        votes: t.votes,
+        candidateCount: t.candidateCount,
+        llmOverrode: t.llmOverrode,
+      })
+    },
   )
   // Repair-round orchestration inside a git snapshot via the SHARED
   // `runRepairRoundsInSnapshot` (runner core, reused here). The app's per-round
@@ -1829,6 +1870,12 @@ const runAdaptiveAttempt = async (args: {
     void patchRunMeta(instance.id, {
       verdict: { passed: finalResult.passed, patchBytes: finalResult.patch.length },
     })
+    // DEBUG enricher `verdict` (jul-08 platform, enricher order verdict > editTrace >
+    // toolExec): contribute the grade/verify outcome into the CURRENT lane's debug
+    // buffer so it rides `metadata.debug.verdict` alongside the recorded LLM turn —
+    // exactly like `toolExec`. Metadata-only ⇒ replay-neutral (never touches the
+    // request hash). No-op unless the debug gate is on.
+    contributeVerdictDebug(finalResult)
   }
   return { ...finalResult, adaptiveRoute }
 }
@@ -2020,6 +2067,9 @@ const runInstanceBody = async (args: {
     void patchRunMeta(args.instance.id, {
       verdict: { passed: onceResult.passed, patchBytes: onceResult.patch.length },
     })
+    // DEBUG enricher `verdict` (see contributeVerdictDebug): ride the grade outcome
+    // on `metadata.debug.verdict` of the recorded turn, mirroring `toolExec`.
+    contributeVerdictDebug(onceResult)
   }
   return attachAndPersistReproVoteOutcomes(onceResult)
 }

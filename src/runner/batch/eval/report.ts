@@ -115,6 +115,37 @@ export const emitPatch = (
   return diffPath
 }
 
+/**
+ * ADR-0539 R2 — emit the patch-LIFECYCLE outcome that mirrors `patch_generated`.
+ *
+ * `applied:true`  ⇒ `patch_applied`  (`applyStatus:"applied"`): the captured
+ *   non-empty patch was applied to the grading tree and graded.
+ * `applied:false` ⇒ `patch_rejected` (`applyStatus:"rejected"`): no submittable
+ *   patch reached the tree (empty submission / hard-rejected winner).
+ *
+ * `diffPath` is the path `emitPatch` already wrote (same file — no re-write);
+ * `filesChanged`/`hunks` are recomputed from the SAME redacted diff text so the
+ * payload matches the `patch_generated` line one-for-one. Strict: a recorder
+ * failure becomes an {@link ObservationError} (mapped to `verdict:"degraded"`).
+ */
+export const emitPatchOutcome = (
+  observer: BenchObserver | undefined,
+  diffPath: string,
+  patch: string,
+  applied: boolean,
+): void => {
+  if (observer === undefined) return
+  const safePatch = redactValue(patch) as string
+  const { filesChanged, hunks } = countDiff(safePatch)
+  const data = { diffPath, filesChanged, hunks, applyStatus: applied ? "applied" : "rejected" }
+  try {
+    if (applied) observer.patchApplied(data)
+    else observer.patchRejected(data)
+  } catch (e) {
+    throw new ObservationError(e)
+  }
+}
+
 export const emitVerify = (observer: BenchObserver | undefined, v: VerifyOutcome): void => {
   if (observer === undefined) return
   try {

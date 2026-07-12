@@ -18,7 +18,7 @@ no trace; the agent-stream tail lost on box crash.
 |---|---|---|---|---|
 | **TRAJECTORY cassette** | one `RecordedInteraction {id,request,events,metadata}` per LLM `stream()` call — for deterministic REPLAY / fork-from-failure | `RecordedInteraction` (own) | `src/llm/replay/recording-llm.ts`, `src/apps/bench/trajectory.ts` | ON |
 | **OBSERVE stream** | the normalized agent-event stream + the scaffold's own evidence (`sandbox / localize / patch_generated / verify / tool_* / recovery / error / session_* / turn_start / llm_*`) | `TrajectoryEvent` via `makeEvent` | `src/runner/batch/observe.ts` (+ `JsonlRecorder`), `src/shared/trajectory.ts` | ON |
-| **DEBUG-sink** | keyed slices enriched into `metadata.debug` (only `toolExec` wired) | free `Record` in cassette metadata | `src/apps/bench/trajectory-debug-sink.ts` | OFF (`RECORD=debug`) |
+| **DEBUG-sink** | keyed slices enriched into `metadata.debug` (`toolExec` + `verdict` wired; `editTrace` pending) | free `Record` in cassette metadata | `src/apps/bench/trajectory-debug-sink.ts` | OFF (`RECORD=debug`) |
 | **OTEL spans** | a 4-span tree (session/turn/sampling/tool) | OTLP span (own) | `src/observability/*`, `src/apps/bench/otel-trace-sink.ts` | OFF (`QUANTA_OTEL_ENDPOINT`) |
 
 ## Decision
@@ -59,23 +59,55 @@ no trace; the agent-stream tail lost on box crash.
   `logger.warn`s + writes a degraded sentinel instead of silently vanishing.
 - **Surfacing** — the viewer pins a RUN SUMMARY (verify verdict / patch / sandbox
   / errors) at the top, out of ts order.
-- **Honesty** — debug-sink docstring corrected (only `toolExec` wired); the stale
-  "observe default-OFF" comment fixed (observe is default-ON).
+- **Honesty** — debug-sink docstring corrected (`toolExec` + `verdict` wired,
+  `editTrace` pending); the stale "observe default-OFF" comment fixed (observe is
+  default-ON).
 
 ## Residual gaps (tracked, not yet fixed)
 
 - ~~`quanta.attempt` not threaded onto spans~~ — DONE (C5, jul-13): threaded as
   `quanta.instance.attempt` via `config-build spanIdentity` → `withBenchInstanceRoot`.
-- Dead trajectory kinds `patch_applied` / `patch_rejected` are declared but never
-  emitted — RESERVED for a future patch-apply tracer; keep or emit, don't leave
-  as silent no-ops without this note.
-- `onSelection` per-round acceptance observer is declared but bound nowhere —
-  wire at the driver or delete.
-- Phase-gate blocks (`consultLocalizePhase`) return a synthetic tool_result but
+- ~~Dead trajectory kinds `patch_applied` / `patch_rejected` are declared but never
+  emitted~~ — DONE (R2, jul-13): now emitted from the bench eval driver via
+  `emitPatchOutcome` (`eval/report.ts`) → `BenchObserver.patchApplied`/`patchRejected`,
+  carrying the declared `PatchData` (`{diffPath, filesChanged, hunks, applyStatus}`)
+  that `probe/triage.ts` consumes. Emitted at the AUTHORITATIVE result-assembly sites
+  (`result-assembly.ts`): `patch_applied` on the ONE verify-and-finalize path
+  (`attachObservedSuccessBasics`, non-empty patch reached the grading tree,
+  `applyStatus:"applied"`); `patch_rejected` on the terminal failure paths
+  (`generationFailureResult` / `noPatchResult`, plus the empty-patch fail-closed grade,
+  `applyStatus:"rejected"`). ONE line per terminal (not per breadth/acceptance
+  candidate). Byte-identical when observe is off (`wiring.observer` undefined ⇒ no-op).
+- ~~`onSelection` per-round acceptance observer is declared but bound nowhere~~ —
+  DONE (R3, jul-13): the `onSelection` closure (already capturing `acceptanceTier` for
+  the report) now ALSO records an OBSERVE `recovery` line (`reason:"acceptance_select"`,
+  `{tier, votes, candidateCount, llmOverrode}` — no-leak, never the winning patch) via
+  `BenchObserver.acceptanceSelection`, wired at BOTH drivers
+  (`runner/batch/eval/driver/repair-phase.ts` and `apps/bench/eval/driver.ts`). Gated
+  behind `QUANTA_BENCH_ACCEPTANCE`: OFF ⇒ the acceptance selector is `undefined` ⇒ the
+  closure never fires ⇒ byte-identical.
+- ~~Phase-gate blocks (`consultLocalizePhase`) return a synthetic tool_result but
   emit no `decision` event despite the kind being wired — should emit a
-  `decision {kind:"gate", ruleId, outcome:"deny"}`.
-- DEBUG-sink promised contributors (grader/edit/phase-gate) remain unwired; only
-  `toolExec` is live.
+  `decision {kind:"gate", ruleId, outcome:"deny"}`.~~ — DONE (jul-13): emits a
+  `decision` OBSERVE event on `config.stream` at the deny point
+  (`src/agent/dispatch/preflight-consults.ts:128`), so the CAUSE rides the SAME
+  trajectory stream as the tool_result EFFECT (jsonl-recorder maps `decision →
+  recovery` kind, `reason:"decision"` + `kind`/`outcome`/`ruleId`/`toolCallId` in
+  `data`; joinable to the effect by `toolCallId`). CORRECTION: the DecisionEvent
+  `kind` enum has no `"gate"` arm (`permission|rule|hook|cap|jail|budget`); the
+  phase-gate is a pure policy RULE, so `kind:"rule"` is the honest match and the
+  only kind for which `ruleId` is meaningful. `ruleId:"localize-phase-blocked"`
+  reuses the deny reason code. Per-deny (no dedupe — each blocked retry is real
+  signal). Byte-identical when the guard is OFF (unreachable branch; no alloc).
+  Acceptance: `tests/unit/localize-phase-decision-observe-emit.test.ts`
+  (red-on-injection: removing the emit fails the 3 active-guard cases, leaves the
+  3 guard-OFF/pass-through silence cases green).
+- DEBUG-sink `verdict` enricher now WIRED (jul-13): the driver's verify-finalize
+  sites `contribute("verdict", {passed, patchBytes, observationVerdict?, error?})`
+  so the grade outcome rides `metadata.debug.verdict` alongside the recorded turn,
+  mirroring `toolExec` (metadata-only ⇒ replay-neutral, no-op off the debug gate).
+  The `editTrace` (per-edit tool trace) contributor remains the last unwired
+  DESIGN TARGET on this platform.
 
 ## Amendment (2026-07-13) — OTel GenAI unified tracing (P0)
 

@@ -1,5 +1,6 @@
 import type { ToolUseBlock } from "@/llm"
 import { isTestFilePath } from "@/shared"
+import type { DecisionEvent } from "@/stream"
 import { stackDenyReason } from "../deny-reason-wire"
 import { DedupGate } from "../dispatch-dedup"
 import type { GuardDecision } from "../dispatch-guard"
@@ -91,6 +92,40 @@ export const consultLocalizePhase = (
     cfg: config.localizePhase,
   })
   if (!decision.block) return null
+  // ADR-0539 residual (observability) — emit a `decision` OBSERVE event at the
+  // DENY point. Before this, a phase-gate block produced a synthetic tool_result
+  // (the effect, visible in OBSERVE) with NO recorded CAUSE, so a run's stream
+  // showed a mutating tool "silently" blocked. This decision line is the cause:
+  // it rides `config.stream` so it lands in the trajectory jsonl (jsonl-recorder
+  // maps `decision → recovery` kind, `reason:"decision"` + `kind`/`outcome`/
+  // `ruleId` in `data`) — the SAME stream the tool_result effect rides, so
+  // cause + effect are joinable by `toolCallId`.
+  //
+  //   · kind:"rule"  — the phase-gate is a pure policy RULE (no LLM/permission/
+  //     hook/cap/jail/budget). The DecisionEvent `kind` enum has no "gate" arm;
+  //     "rule" is the honest match and is the ONLY kind for which `ruleId` is
+  //     "meaningful" per the type contract (types.ts §decision).
+  //   · ruleId — the phase-gate rule identity, reusing the SAME deny reason code
+  //     the `deny(...)` below stamps ("localize-phase-blocked") so the cause line
+  //     and the effect's deny reason carry one id.
+  //
+  // Emitted ONLY on an actual deny while the guard is ACTIVE (this branch is
+  // unreachable when the guard is OFF — `decideLocalizePhase` returned
+  // `{block:false}` and we returned above with no allocation ⇒ byte-identical).
+  // Per-deny (no dedupe): each blocked mutating call in Phase 1 IS the real
+  // signal (the model retried an edit that stayed blocked), so one line per deny
+  // is the faithful record — matching the sibling per-call cap/budget emits.
+  const event: DecisionEvent = {
+    type: "decision",
+    turn: config.run?.turn ?? 0,
+    kind: "rule",
+    outcome: "deny",
+    reason: "localize-phase: edit blocked during Phase 1",
+    toolCallId: call.id,
+    ruleId: "localize-phase-blocked",
+    metadata: { tool: call.name },
+  }
+  config.stream.emit(event)
   // `text` is always present on a block decision (the policy always builds it),
   // but guard with a fallback so a future refactor that returns `{block:true}`
   // without a `text` produces a typed deny instead of an undefined-stringifying
