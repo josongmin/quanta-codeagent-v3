@@ -136,28 +136,43 @@ describe("WS1 §3 — legacyKillHandle (the makeKill-absent fallback) contract",
   })
 })
 
-// hell-audit remediation §4 — the exec `finally` calls `killHandle.disarm()` so a
-// pending SIGKILL grace timer never leaks past the call. No test observed the
-// call. Wrap escalatingKill's handle to count disarm() on the NORMAL-completion
-// path (no timeout/abort). Red-on-injection: drop the finally disarm ⇒ 0 calls.
-describe("WS1 §4 — normal completion disarms the kill handle", () => {
-  test("a fast-exiting command calls killHandle.disarm() (grace-timer cleanup)", async () => {
-    let disarms = 0
-    const makeKill: MakeProcKill = (proc) => {
-      const inner = escalatingKill(proc, makeSpyKiller())
-      return {
-        kill: inner.kill,
-        disarm: () => {
-          disarms += 1
-          inner.disarm()
-        },
-      }
+// hell-audit remediation §4 — the exec `finally` calls `killHandle.disarm()` on
+// EVERY exit path so a pending SIGKILL grace timer never leaks past the call.
+// The leak-prevention case that actually matters is the TIMEOUT path (there a
+// kill() armed a real grace timer); the completion path is the byte-identical
+// no-op case. Both are pinned. Red-on-injection: drop the finally disarm ⇒ RED.
+const countingMakeKill = (onDisarm: () => void): MakeProcKill => {
+  return (proc) => {
+    const inner = escalatingKill(proc, makeSpyKiller())
+    return {
+      kill: inner.kill,
+      disarm: () => {
+        onDisarm()
+        inner.disarm()
+      },
     }
+  }
+}
+
+describe("WS1 §4 — the exec finally disarms the kill handle on every exit path", () => {
+  test("fast completion (no timer armed) still routes through finally disarm", async () => {
+    let disarms = 0
     const r = await handleExecCommand(
       { command: "true", cwd: process.cwd(), timeoutMs: 5_000 },
-      { makeKill },
+      { makeKill: countingMakeKill(() => (disarms += 1)) },
     )
     expect(r.kind).toBe("success")
+    expect(disarms).toBeGreaterThanOrEqual(1)
+  })
+
+  test("TIMEOUT path (grace timer WAS armed) disarms it — the leak-prevention case", async () => {
+    let disarms = 0
+    const r = await handleExecCommand(
+      { command: "sleep 5", cwd: process.cwd(), timeoutMs: 75 },
+      { makeKill: countingMakeKill(() => (disarms += 1)) },
+    )
+    expect(r.kind).toBe("error")
+    if (r.kind === "error") expect(r.cause).toBe("timeout")
     expect(disarms).toBeGreaterThanOrEqual(1)
   })
 })
