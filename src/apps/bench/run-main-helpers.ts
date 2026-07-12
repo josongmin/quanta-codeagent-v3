@@ -14,8 +14,17 @@
  */
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { getSpanSink, QUANTA_ATTRS, QUANTA_SPAN_NAMES } from "@/observability"
-import { contextTracer, type SpanAttributes } from "@/observability/tracing"
+import { withActiveSpanScope } from "@/agent/session-resources"
+import {
+  attrs,
+  endSpan,
+  getSpanSink,
+  QUANTA_ATTRS,
+  QUANTA_SPAN_NAMES,
+  type Span,
+  type SpanName,
+  startSpan,
+} from "@/observability"
 import { matchesInstanceFilter, writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { logger } from "@/shared"
@@ -62,39 +71,63 @@ export const withObserve = (base: RunCfg, o: AttemptObservation | undefined): Ru
  * `<runId>/<instanceId>.<attempt>.jsonl` trajectory file, so the root, the loop
  * span, and the trajectory all carry one join key.
  *
- * Trace-per-attempt: `contextTracer.withSpan` mints a FRESH trace id per call, so
- * two Best-of-N attempts of one instance get DISTINCT trace ids (never merged).
- * It installs the started span as the active `TraceRef` for the whole async
- * subtree — the seam the C3 OBSERVE recorder + C4 cassette read via
- * `getActiveTraceRef()` to bind this attempt's records to its root.
+ * Trace-per-attempt: the root is opened through the EXPORT sink
+ * (`startSpan`/`endSpan`), which mints a FRESH trace id per call (no enclosing
+ * active ref at the bench top level), so two Best-of-N attempts of one instance
+ * get DISTINCT trace ids (never merged). `withActiveSpanScope(true, …)` then
+ * installs the EXPORTER-ISSUED id as the active `TraceRef` for the whole async
+ * subtree — the seam `runAgent`'s `session_loop` (+ the C3 OBSERVE recorder /
+ * C4 cassette) read via `getActiveTraceRef()`, so `session_loop.parentSpanId`
+ * points at a root span that is ACTUALLY exported (no dangling parent), and the
+ * `quanta.instance.{id,attempt}` attrs on this root reach the collector.
+ *
+ * EXPORT-path (not `contextTracer`): the earlier seam opened the root through
+ * the NO-EXPORT `contextTracer`, which installed a valid active ref but POSTed
+ * no span — so `session_loop` parented under a non-existent root and the
+ * instance attrs never left the process. Routing through `startSpan` (the flat
+ * export sink) both EXPORTS the root and, via `withActiveSpanScope`, installs
+ * the exporter's issued id — one exportable trace per attempt, filterable by
+ * `quanta.instance.id`. Kind is INTERNAL (agent-orchestration, not an LLM call)
+ * — the exporter defaults an unset kind to INTERNAL, matching the C5 intent.
  *
  * Default-OFF byte-identical: GATED on a live span sink (`getSpanSink()`). With
  * NO sink (the shipped default, and the whole OFF path) this installs NO span,
- * NO async-context frame, and NO id allocation — it calls `run()` directly, so
- * the bench loop is byte-identical to the pre-C5 path. `contextTracer` is the
- * NO-EXPORT active-context tracer (valid ids, zero exporter egress); when a real
- * OTel provider IS registered the surface can swap it for `otelTracer` without
- * changing this seam.
+ * NO async-context frame, and NO id allocation — `startSpan` returns the no-op
+ * sentinel and `withActiveSpanScope` calls `run()` directly, so the bench loop
+ * is byte-identical to the pre-C5 path.
  */
-export const withBenchInstanceRoot = <T>(
+export const withBenchInstanceRoot = async <T>(
   identity: { readonly instanceId: string; readonly attempt?: number },
   run: () => Promise<T>,
 ): Promise<T> => {
   if (getSpanSink() === null) return run()
   // Canonical vocabulary keys (NOT raw string literals — the vocabulary-orphan
-  // scan enforces this). Built as a plain SpanAttributes record (all values
-  // string|number) rather than via `attrs()` because the tracing port's
-  // `SpanAttributes` excludes the array/undefined arms of the wider `Attrs`.
-  const attributes: SpanAttributes = {
+  // scan enforces this). These now ride the EXPORTED root span (via `attrs()`),
+  // so they actually reach the OTLP collector — the previous `contextTracer`
+  // attrs never exported.
+  const rootAttrs = attrs({
     [QUANTA_ATTRS.instance.id]: identity.instanceId,
     ...(identity.attempt !== undefined
       ? { [QUANTA_ATTRS.instance.attempt]: identity.attempt }
       : {}),
-  }
-  return contextTracer.withSpan(QUANTA_SPAN_NAMES.benchInstance, () => run(), {
-    kind: "internal",
-    attributes,
   })
+  // `startSpan` narrows `name` to the loop's 4-literal `SpanName` union; the
+  // bench-instance name lives in `QUANTA_SPAN_NAMES` (its own vocabulary axis)
+  // and is written verbatim into the exported span's `string` name — cast only
+  // bridges the compile-time union, no runtime effect.
+  const span: Span = startSpan(QUANTA_SPAN_NAMES.benchInstance as SpanName, rootAttrs)
+  let status: "ok" | "error" = "ok"
+  try {
+    // `isRoot = true` ⇒ fresh trace (no parent), and the EXPORTER-issued id is
+    // installed as the active ref so every child (`session_loop`, `chat`,
+    // `execute_tool`) inherits it and parents under a span that IS exported.
+    return await withActiveSpanScope(true, span, run)
+  } catch (e) {
+    status = "error"
+    throw e
+  } finally {
+    endSpan(span, status, attrs({}))
+  }
 }
 
 /** `--prepare-images` worker: warm the Docker image pool for `instanceIds`

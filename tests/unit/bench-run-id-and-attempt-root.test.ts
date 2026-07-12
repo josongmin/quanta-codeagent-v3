@@ -26,16 +26,18 @@ import { bootBenchOtelExport, resolveBenchRunId } from "@/apps/bench/otel"
 import { withBenchInstanceRoot } from "@/apps/bench/run-main-helpers"
 import type { LLMPort } from "@/llm"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
+import type { ExportSpan, OtelExporter } from "@/observability/otel-exporter"
+import { createExporterSpanSink } from "@/observability/otel-span-export"
 import {
   __resetSpanSink,
   endSpan,
   getSpanSink,
   SPAN_NAMES,
-  type SpanSink,
   setSpanSink,
   startSpan,
 } from "@/observability/spans"
 import { getActiveTraceRef } from "@/observability/tracing"
+import { QUANTA_ATTRS, QUANTA_SPAN_NAMES } from "@/observability/vocabulary"
 import { buildConfig } from "@/runner/batch/eval/driver/config-build"
 import type { RunInstanceDeps } from "@/runner/batch/eval/driver/context-types"
 import type { Instance } from "@/runner/batch/types"
@@ -200,45 +202,111 @@ describe("C5 attempt threading — spanIdentity carries the 0-based observe atte
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// (2b) per-attempt root — distinct trace ids + distinct attempt attrs, gated.
+// (2b) per-attempt root — the bench root must be EXPORTED (not just an active
+//      ref): one exportable trace per attempt, carrying the instance identity,
+//      and every child parents under a span that ACTUALLY exists on the wire.
+//
+//      This replaces the old `noopLiveSink` (onStart → {}) probe, which only
+//      proved the active REF differed per attempt — it NEVER checked the root
+//      reached the exporter. The defect it missed: opening the root through the
+//      NO-EXPORT `contextTracer` installs an active ref but POSTs no span, so
+//      `session_loop.parentSpanId` dangles and the instance attrs never ship.
+//      Here a CAPTURING exporter sink records every closed span, so we assert on
+//      the exact `{traceId, spanId, parentSpanId, attributes}` that would hit
+//      OTLP. RED-ON-INJECTION: revert the fix to `contextTracer.withSpan` and no
+//      `quanta.bench.instance` span is captured ⇒ (a)/(b)/(c) all fail.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** A trivial live SpanSink — its mere presence flips `withBenchInstanceRoot` ON
- *  (the gate is `getSpanSink()`), so the active-context root is installed. */
-const noopLiveSink: SpanSink = { onStart: () => ({}), onEnd: () => {} }
+const BENCH_ROOT_NAME = QUANTA_SPAN_NAMES.benchInstance
+const INSTANCE_ID_KEY = QUANTA_ATTRS.instance.id
+const INSTANCE_ATTEMPT_KEY = QUANTA_ATTRS.instance.attempt
 
-describe("C5 bench-attempt root — Best-of-N attempts get DISTINCT traces + attempt attrs", () => {
-  test("live sink ⇒ two attempts of one instance carry DISTINCT trace ids (never merged)", async () => {
-    setSpanSink(noopLiveSink)
-    const traceOf = async (attempt: number): Promise<string | undefined> =>
-      withBenchInstanceRoot({ instanceId: "django-1", attempt }, async () => {
-        // Inside the root, the active ref IS this attempt's root span.
-        return getActiveTraceRef()?.traceId
-      })
-    const t0 = await traceOf(0)
-    const t1 = await traceOf(1)
-    expect(t0).toBeDefined()
-    expect(t1).toBeDefined()
-    // One trace per attempt — Best-of-N attempts are separate traces.
-    expect(t0).not.toBe(t1)
-    // W3C-shaped id (32 lowercase hex).
-    expect(t0).toMatch(/^[0-9a-f]{32}$/)
+/** A capturing exporter — every closed span lands in `spans` verbatim, so the
+ *  test sees the exact ExportSpan the OTLP POST would carry. */
+const capturingExporter = (): { exporter: OtelExporter; spans: ExportSpan[] } => {
+  const spans: ExportSpan[] = []
+  const exporter: OtelExporter = {
+    recordSpan: (s) => spans.push(s),
+    recordMetric: () => {},
+    flush: async () => {},
+    teardown: async () => {},
+  }
+  return { exporter, spans }
+}
+
+/** The REAL export sink (`createExporterSpanSink`) — its presence flips
+ *  `withBenchInstanceRoot` ON (gate is `getSpanSink()`) AND it EXPORTS the root,
+ *  so we can assert on the shipped span (not just the installed active ref). */
+const installCapturingSink = (): { spans: ExportSpan[] } => {
+  const { exporter, spans } = capturingExporter()
+  setSpanSink(createExporterSpanSink(exporter))
+  return { spans }
+}
+
+/** Read the string attr off an exported span (attributes are the merged
+ *  open+close bag the exporter records). */
+const attrOf = (s: ExportSpan | undefined, key: string): unknown =>
+  s?.attributes?.[key as keyof typeof s.attributes]
+
+describe("C5 bench-attempt root — the root is EXPORTED per attempt (not a dangling parent)", () => {
+  test("(a) a quanta.bench.instance span is EXPORTED per attempt carrying instance.id + attempt", async () => {
+    const { spans } = installCapturingSink()
+    await withBenchInstanceRoot({ instanceId: "django-1", attempt: 0 }, async () => undefined)
+
+    const roots = spans.filter((s) => s.name === BENCH_ROOT_NAME)
+    // The root ACTUALLY reached the exporter (the whole point — contextTracer
+    // exported nothing).
+    expect(roots.length).toBe(1)
+    const root = roots[0]
+    // Identity attrs ride the EXPORTED root, so a collector can filter by them.
+    expect(attrOf(root, INSTANCE_ID_KEY)).toBe("django-1")
+    expect(attrOf(root, INSTANCE_ATTEMPT_KEY)).toBe(0)
+    // Fresh trace root ⇒ no parent edge; W3C-shaped ids.
+    expect(root?.parentSpanId).toBeUndefined()
+    expect(root?.traceId).toMatch(/^[0-9a-f]{32}$/)
+    expect(root?.spanId).toMatch(/^[0-9a-f]{16}$/)
   })
 
-  test("live sink ⇒ the root installs an active ref (nested loop spans discover it as parent)", async () => {
-    setSpanSink(noopLiveSink)
-    // No enclosing scope ⇒ undefined; inside the root ⇒ a valid ref whose spanId
-    // becomes the parent of any nested `withActiveSpanScope(false)` span.
-    expect(getActiveTraceRef()).toBeUndefined()
-    const inner = await withBenchInstanceRoot({ instanceId: "django-1", attempt: 0 }, async () =>
-      getActiveTraceRef(),
-    )
-    expect(inner?.spanId).toMatch(/^[0-9a-f]{16}$/)
-    // The root is a fresh trace ⇒ no parent edge on it.
-    expect(inner?.parentSpanId).toBeUndefined()
+  test("(b) a child opened UNDER the root exports parentSpanId === the exported bench-root spanId", async () => {
+    const { spans } = installCapturingSink()
+    // Open a child span INSIDE the root scope, exactly as `runAgent`'s
+    // `session_loop` does (it reads the active ref installed by the root).
+    let childActiveParent: string | undefined
+    await withBenchInstanceRoot({ instanceId: "django-1", attempt: 0 }, async () => {
+      // The active ref inside the root === the exporter-issued root id.
+      childActiveParent = getActiveTraceRef()?.spanId
+      const child = startSpan(SPAN_NAMES.sessionLoop, {})
+      endSpan(child, "ok", {})
+    })
+
+    const root = spans.find((s) => s.name === BENCH_ROOT_NAME)
+    const child = spans.find((s) => s.name === SPAN_NAMES.sessionLoop)
+    expect(root).toBeDefined()
+    expect(child).toBeDefined()
+    // The child's parent is the EXPORTED root's real spanId — NOT dangling.
+    expect(child?.parentSpanId).toBe(root?.spanId)
+    // And that parent id is the active ref the child saw at open (the install
+    // put the exporter-issued id on the async context).
+    expect(childActiveParent).toBe(root?.spanId)
+    // One trace — child + root share the exported traceId.
+    expect(child?.traceId).toBe(root?.traceId)
   })
 
-  test("OFF (no sink) ⇒ NO span, NO active ref, body called directly (byte-identical)", async () => {
+  test("(c) distinct attempts ⇒ distinct EXPORTED traceIds (Best-of-N never merge)", async () => {
+    const { spans } = installCapturingSink()
+    await withBenchInstanceRoot({ instanceId: "django-1", attempt: 0 }, async () => undefined)
+    await withBenchInstanceRoot({ instanceId: "django-1", attempt: 1 }, async () => undefined)
+
+    const roots = spans.filter((s) => s.name === BENCH_ROOT_NAME)
+    expect(roots.length).toBe(2)
+    // Two distinct exported traces, one per attempt.
+    expect(roots[0]?.traceId).not.toBe(roots[1]?.traceId)
+    expect(new Set(roots.map((r) => r.traceId)).size).toBe(2)
+    // The attempt attr distinguishes them on the wire.
+    expect(new Set(roots.map((r) => attrOf(r, INSTANCE_ATTEMPT_KEY)))).toEqual(new Set([0, 1]))
+  })
+
+  test("OFF (no sink) ⇒ NO span exported, NO active ref, body called directly (byte-identical)", async () => {
     expect(getSpanSink()).toBeNull()
     let sawRef: unknown = "unset"
     const out = await withBenchInstanceRoot({ instanceId: "django-1", attempt: 0 }, async () => {

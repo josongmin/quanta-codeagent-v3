@@ -332,16 +332,11 @@ export const streamConsume = async (
   const visibleSpecs = filterSpecsByScope(specs, skillGate)
   const toolChoice = resolveToolChoice(consumeTurnSignals(toolChoiceState))
   session.ttfm?.markFirstDispatch()
-  emitLlmRequest(
-    config,
-    finalizeTurnPolicy({
-      promptPolicy: ctx.promptPolicy,
-      toolChoice,
-      ...(config.sessionId !== undefined ? { promptCacheKey: config.sessionId } : {}),
-    }),
-  )
   config.budgetMeter?.tick("model_call")
-  const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}))
+  // gen_ai.* semconv: the `chat`/sampling span calls an EXTERNAL LLM, so it is a
+  // CLIENT span (D3). Every other loop span stays INTERNAL (the `startSpan`
+  // default). Byte-identical when no sink is active (NOOP_SPAN ignores kind).
+  const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}), "client")
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
   // gen_ai.* span enrichment: capture the provider's usage (model + tokens) and
   // the finish reason so the sampling span answers which-model / how-many-tokens
@@ -384,8 +379,24 @@ export const streamConsume = async (
     // during the provider stream — and the OBSERVE recorder's llm_request/usage
     // events — attaches under THIS sampling span (parented to the turn). No-op
     // wrap when no sink is active (byte-identical default-OFF).
-    const outcome = await withActiveSpanScope(false, samplingSpan, () =>
-      streamingTurn({
+    const outcome = await withActiveSpanScope(false, samplingSpan, () => {
+      // D2: emit `llm_request` from INSIDE the sampling scope so its OBSERVE
+      // event samples the SAME active trace ref the paired `usage` events (fired
+      // inside `teeUsage` below) and the cassette (sampled at `stream()` start,
+      // also inside this scope) read — the sampling span, not the turn span. As
+      // the FIRST statement here it still precedes the response/usage events
+      // `streamingTurn` produces, preserving OBSERVE ordering. Off-path
+      // byte-identical: with no active ref the recorder omits traceId and the
+      // deterministic span ids are unchanged (this call moved, not its payload).
+      emitLlmRequest(
+        config,
+        finalizeTurnPolicy({
+          promptPolicy: ctx.promptPolicy,
+          toolChoice,
+          ...(config.sessionId !== undefined ? { promptCacheKey: config.sessionId } : {}),
+        }),
+      )
+      return streamingTurn({
         events: teeUsage(
           config,
           turnLlm.llm.stream({
@@ -414,8 +425,8 @@ export const streamConsume = async (
         onToolInput: buildToolInputSeam(config.registry),
         ...callbacks,
         signal: config.signal,
-      }),
-    )
+      })
+    })
     if (outcome.kind === "aborted") {
       samplingStatus = "aborted"
       return { aborted: true }

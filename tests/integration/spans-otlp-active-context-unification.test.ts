@@ -244,4 +244,45 @@ describe("OTLP ≡ active-context id unification (FINAL seam)", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  // D3 (GenAI semconv): the `run_sampling_request` (`chat`) span calls an
+  // EXTERNAL LLM, so it MUST export as CLIENT (`kind === "client"` ⇒ otlp code 3).
+  // Every SIBLING loop span (session/turn/tool) stays INTERNAL (`kind`
+  // undefined ⇒ otlp code 1). RED-ON-INJECTION: reverting the
+  // `startSpan(SPAN_NAMES.runSamplingRequest, attrs({}), "client")` back to the
+  // 2-arg form (or dropping the kind thread-through in spans.ts /
+  // otel-span-export.ts) leaves the sampling span's kind undefined and this
+  // `toBe("client")` fails.
+  test("chat/sampling span exports kind=client; session/turn/tool stay INTERNAL", async () => {
+    const { exporter, spans } = capturingExporter()
+    setSpanSink(createExporterSpanSink(exporter))
+
+    const dir = mkdtempSync(join(tmpdir(), "otlp-kind-"))
+    try {
+      const outcome = await runAgent(
+        cfgFor(toolTurnThenText("claude-k", "anthropic", join(dir, "k.txt"), "call-k"), "sK", dir),
+      )
+      expect(outcome.reason).toBe("completed")
+
+      const sampling = spans.filter((s) => s.name === SPAN_NAMES.runSamplingRequest)
+      expect(sampling.length).toBeGreaterThan(0)
+      // The chat span is CLIENT — the load-bearing assertion.
+      for (const s of sampling) expect(s.kind).toBe("client")
+
+      // Siblings carry NO kind ⇒ otlpKind maps undefined → INTERNAL (byte-identical
+      // to the pre-D3 flat sink). A leaked "client" onto a session/turn/tool span
+      // would fail here.
+      const siblings = spans.filter((s) => s.name !== SPAN_NAMES.runSamplingRequest)
+      const sessionTurnTool = siblings.filter(
+        (s) =>
+          s.name === SPAN_NAMES.sessionLoop ||
+          s.name === SPAN_NAMES.turn ||
+          s.name === SPAN_NAMES.handleToolCall,
+      )
+      expect(sessionTurnTool.length).toBeGreaterThan(0)
+      for (const s of siblings) expect(s.kind).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })

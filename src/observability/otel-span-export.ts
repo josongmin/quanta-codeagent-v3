@@ -29,7 +29,7 @@ import {
 } from "./otel-exporter"
 import { getSpanSink, type SpanName, type SpanSink, type SpanStatus, setSpanSink } from "./spans"
 import { getActiveTraceRef, type TraceRef } from "./tracing/active-context"
-import type { SpanAttributes, SpanStatusCode } from "./tracing/port"
+import type { SpanAttributes, SpanKind, SpanStatusCode } from "./tracing/port"
 
 /** Loop span status → OTLP status code. `aborted` is a non-OK terminal state,
  *  so it maps to `error` (the OTLP code set is unset/ok/error only). */
@@ -82,6 +82,11 @@ export const createExporterSpanSink = (
      *  never appeared in a trace. We now carry them and merge with the close
      *  attrs at `onEnd` (close wins on key collision). */
     readonly startAttrs: SpanAttributes
+    /** OTel SpanKind supplied at OPEN (D3) — CLIENT for the `chat` (sampling)
+     *  span, `undefined` (⇒ INTERNAL) for session/turn/tool spans. Carried here
+     *  so `onEnd` sets `ExportSpan.kind` and `otlpKind` emits the right OTLP enum
+     *  (undefined ⇒ INTERNAL, byte-identical to the pre-D3 flat sink). */
+    readonly kind?: SpanKind
   }
   // Open-span stack for parent linkage — the FALLBACK when no active
   // async-context ref encloses the open (the DIRECT-sink path: unit tests +
@@ -96,7 +101,7 @@ export const createExporterSpanSink = (
   const open: Frame[] = []
 
   return {
-    onStart(_name: SpanName, attrs): unknown {
+    onStart(_name: SpanName, attrs, kind?: SpanKind): unknown {
       // Parentage authority (jul-13 defect fix): the SOLE gate is the
       // per-context async-local ref (`getActiveTraceRef`). When the loop
       // installed the enclosing span as the active ref, THAT is the async-safe
@@ -120,6 +125,7 @@ export const createExporterSpanSink = (
         ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
         startEpochMs: now(),
         startAttrs: attrs as SpanAttributes,
+        ...(kind !== undefined ? { kind } : {}),
       }
       // Push ONLY the direct path onto the shared stack. A scoped span
       // (`activeParent` present) carries its parentage in its own async
@@ -155,6 +161,9 @@ export const createExporterSpanSink = (
         spanId: frame.spanId,
         ...(frame.parentSpanId !== undefined ? { parentSpanId: frame.parentSpanId } : {}),
         name,
+        // D3: carry the OPEN-time SpanKind onto the exported span (undefined ⇒
+        // `otlpKind` yields INTERNAL, byte-identical to every pre-D3 span).
+        ...(frame.kind !== undefined ? { kind: frame.kind } : {}),
         status: STATUS_MAP[status],
         startTimeEpochMs: frame.startEpochMs,
         endTimeEpochMs: frame.startEpochMs + durationMs,

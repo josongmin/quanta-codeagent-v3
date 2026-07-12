@@ -54,6 +54,7 @@
 
 import type { Attrs } from "./attrs"
 import type { TraceRef } from "./tracing/active-context"
+import type { SpanKind } from "./tracing/port"
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -143,8 +144,14 @@ export interface SpanSink {
    *  `{traceId, spanId, traceFlags, parentSpanId?}` (a {@link TraceRef} shape);
    *  {@link startSpan} surfaces it on `Span.ref`. A legacy sink returning an
    *  opaque token (number/symbol) simply issues no ref — `Span.ref` is
-   *  `undefined` and the loop falls back to minting a context id itself. */
-  onStart: (name: SpanName, attrs: Attrs) => unknown
+   *  `undefined` and the loop falls back to minting a context id itself.
+   *
+   *  `kind` (D3) is the OTel SpanKind for this span — CLIENT for the `chat`
+   *  (sampling) span that calls an external LLM, INTERNAL (the default, omitted)
+   *  for session/turn/tool spans. OPTIONAL: a sink that ignores it (a test double
+   *  keyed only on name/attrs) stays valid; the EXPORT sink carries it onto the
+   *  exported span so `otlpKind` emits the correct OTLP enum. */
+  onStart: (name: SpanName, attrs: Attrs, kind?: SpanKind) => unknown
   /** Close a span with a terminal {@link SpanStatus}. `durationMs` is the
    *  measured elapsed time computed by {@link endSpan} (monotonic clock).
    *  `attrs` is the FINAL attribute bag — sinks should merge it with the
@@ -222,12 +229,16 @@ export const getSpanSink = (): SpanSink | null => activeSink
  *
  *  A throw from the sink's `onStart` is caught + swallowed (observability
  *  bugs MUST NOT crash the loop). On such a failure this returns the no-op
- *  sentinel so the matching {@link endSpan} is also a no-op. */
-export const startSpan = (name: SpanName, attrs: Attrs): Span => {
+ *  sentinel so the matching {@link endSpan} is also a no-op.
+ *
+ *  `kind` (D3, OPTIONAL) is the OTel SpanKind. Omitted (`undefined`) ⇒ the sink
+ *  treats it as INTERNAL — every existing caller stays byte-identical. The `chat`
+ *  (sampling) span passes `"client"` so the exporter marks it CLIENT. */
+export const startSpan = (name: SpanName, attrs: Attrs, kind?: SpanKind): Span => {
   const sink = activeSink
   if (sink === null) return NOOP_SPAN
   try {
-    const token = sink.onStart(name, attrs)
+    const token = sink.onStart(name, attrs, kind)
     return { token, name, startedAt: performance.now(), ref: asTraceRef(token) }
   } catch {
     // Swallow — see comment above. The matching `endSpan` is also a no-op
