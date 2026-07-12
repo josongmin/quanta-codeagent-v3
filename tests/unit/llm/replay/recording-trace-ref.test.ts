@@ -168,3 +168,109 @@ describe("recordingLlmPort getActiveTraceRef (C4)", () => {
     expect(withRec.id).toBe(withoutRec.id)
   })
 })
+
+describe("recordingLlmPort ADR-0539 rule 5 (expected-but-missing trace context)", () => {
+  it("expected + ref undefined ⇒ stamps replay-neutral observabilityDegraded marker", async () => {
+    const store = memStore()
+    const port = recordingLlmPort({
+      inner: fakeLlm(),
+      store,
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => true,
+    })
+
+    await drain(port.stream(minimalInput()))
+
+    const { metadata } = store.records[0] as NonNullable<(typeof store.records)[0]>
+    // RED-ON-INJECTION: reverting the enforcement (silent fallback) drops this.
+    expect(metadata.observabilityDegraded?.reason).toBe("missing_trace_context")
+    expect(metadata.observabilityDegraded?.component).toBe("recordingLlmPort")
+    // No trace keys stamped (ref was undefined).
+    expect("traceId" in metadata).toBe(false)
+  })
+
+  it("off (traceContextExpected ⇒ false) + ref undefined ⇒ NO marker, byte-identical id", async () => {
+    const storeOff = memStore()
+    const storeBase = memStore()
+    const input = minimalInput()
+
+    const portOff = recordingLlmPort({
+      inner: fakeLlm(),
+      store: storeOff,
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => false,
+    })
+    const portBase = recordingLlmPort({ inner: fakeLlm(), store: storeBase })
+
+    await drain(portOff.stream(input))
+    await drain(portBase.stream(input))
+
+    const offRec = storeOff.records[0] as NonNullable<(typeof storeOff.records)[0]>
+    const baseRec = storeBase.records[0] as NonNullable<(typeof storeBase.records)[0]>
+    // No defect marker on the off path.
+    expect("observabilityDegraded" in offRec.metadata).toBe(false)
+    expect("observabilityDegraded" in baseRec.metadata).toBe(false)
+    // Cassette key unchanged.
+    expect(offRec.id).toBe(baseRec.id)
+  })
+
+  it("ref PRESENT (expected + installed) ⇒ NO marker, trace keys stamped", async () => {
+    const store = memStore()
+    const port = recordingLlmPort({
+      inner: fakeLlm(),
+      store,
+      getActiveTraceRef: () => TRACE,
+      traceContextExpected: () => true,
+    })
+
+    await drain(port.stream(minimalInput()))
+
+    const { metadata } = store.records[0] as NonNullable<(typeof store.records)[0]>
+    expect("observabilityDegraded" in metadata).toBe(false)
+    expect(metadata.traceId).toBe(TRACE.traceId)
+    expect(metadata.spanId).toBe(TRACE.spanId)
+  })
+
+  it("marker is REPLAY-NEUTRAL: id identical WITH vs WITHOUT the defect marker", async () => {
+    const storeDefect = memStore()
+    const storeClean = memStore()
+    const input = minimalInput()
+
+    const portDefect = recordingLlmPort({
+      inner: fakeLlm(),
+      store: storeDefect,
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => true,
+    })
+    const portClean = recordingLlmPort({ inner: fakeLlm(), store: storeClean })
+
+    await drain(portDefect.stream(input))
+    await drain(portClean.stream(input))
+
+    const defectRec = storeDefect.records[0] as NonNullable<(typeof storeDefect.records)[0]>
+    const cleanRec = storeClean.records[0] as NonNullable<(typeof storeClean.records)[0]>
+    // Proof the marker is genuinely present (guards against vacuous pass).
+    expect(defectRec.metadata.observabilityDegraded?.reason).toBe("missing_trace_context")
+    expect("observabilityDegraded" in cleanRec.metadata).toBe(false)
+    // LOAD-BEARING: despite the metadata delta, the cassette KEY is identical.
+    expect(defectRec.id).toBe(cleanRec.id)
+  })
+
+  it("a throwing traceContextExpected probe never fails the turn (no marker)", async () => {
+    const store = memStore()
+    const port = recordingLlmPort({
+      inner: fakeLlm(),
+      store,
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => {
+        throw new Error("probe boom")
+      },
+    })
+
+    // Must NOT throw — recording is a sidecar.
+    await drain(port.stream(minimalInput()))
+
+    const { metadata } = store.records[0] as NonNullable<(typeof store.records)[0]>
+    expect("observabilityDegraded" in metadata).toBe(false)
+  })
+})

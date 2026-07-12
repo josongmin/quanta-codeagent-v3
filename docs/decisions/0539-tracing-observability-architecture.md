@@ -34,7 +34,7 @@ no trace; the agent-stream tail lost on box crash.
 2. **Correlation tuple (mandatory on every layer): `{runId, instanceId, attempt, turn}`** plus a span id where spans exist.
    - OBSERVE stamps it via `RunContext` (already).
    - TRAJECTORY carries `runId/instanceId/attempt/lane` in `metadata` (already).
-   - OTEL now stamps `quanta.run.id` (resource) + `quanta.instance.id` (session span). `quanta.attempt` is supported end-to-end but not yet threaded by the driver (residual gap — same-instance discriminator only).
+   - OTEL now stamps `quanta.run.id` (resource) + `quanta.instance.id` + `quanta.instance.attempt` (per-attempt root span). The attempt IS now threaded by the driver (C5): `config-build.ts` `spanIdentity` carries `deps.observe.attempt` (the same 0-based index that names the `.<attempt>.jsonl` trajectory file), stamped on the `quanta.bench.instance` root by `withBenchInstanceRoot`. Absent (`observe` off / single-pass) ⇒ key omitted, join falls back to `{runId, instanceId}`.
    - The join key across all layers is therefore `{runId, instanceId}` → the file `<runId>/<instanceId>.<attempt>.jsonl`.
 
 3. **Redaction contract.** OBSERVE + metrics/summary are redacted via the shared
@@ -64,7 +64,8 @@ no trace; the agent-stream tail lost on box crash.
 
 ## Residual gaps (tracked, not yet fixed)
 
-- `quanta.attempt` not threaded onto spans (needs a multi-hop driver param).
+- ~~`quanta.attempt` not threaded onto spans~~ — DONE (C5, jul-13): threaded as
+  `quanta.instance.attempt` via `config-build spanIdentity` → `withBenchInstanceRoot`.
 - Dead trajectory kinds `patch_applied` / `patch_rejected` are declared but never
   emitted — RESERVED for a future patch-apply tracer; keep or emit, don't leave
   as silent no-ops without this note.
@@ -162,6 +163,10 @@ unit acceptance already exercises a real exporter sink over `runAgent`).
   ADDS the defect signal when a sink was live but no ref was installed. C7 legacy
   DELETION (removing the `t<turn>` synthetic-id scheme + SpanSink compat adapter
   entirely) stays deferred behind the declared compat window.
+- **Hex-id consolidation (jul-13)** — the four duplicate W3C hex-id mint helpers
+  (`toHex`/`randomHex`×2/`bridgeHex`) collapsed into one `@/observability/tracing`
+  `hexId(byteCount, gen?)` (default crypto CSPRNG, test-seam `gen` override).
+  Byte-identical output; the deterministic exporter test seam is unchanged.
 
 ## Rule for new observability features
 

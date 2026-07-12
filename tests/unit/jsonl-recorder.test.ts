@@ -158,7 +158,11 @@ describe("JsonlRecorder — RFC-0002 §5.2 new variants", () => {
       options: ["allow_once", "deny"],
       // NO justification ⇒ the key must be OMITTED, not serialized as undefined.
     })
-    rec.emit({ type: "permission_escalation_resolved", id: "esc-edit-1", decision: "allow_session" })
+    rec.emit({
+      type: "permission_escalation_resolved",
+      id: "esc-edit-1",
+      decision: "allow_session",
+    })
     rec.close()
 
     const [req1, req2, res] = readLines(path)
@@ -642,7 +646,11 @@ describe("JsonlRecorder — getActiveTraceRef DI seam (C3 compat window)", () =>
 
   test("live ref OVERRIDES deterministic ids and stamps traceId onto every event", () => {
     const path = join(dir, "c.0.jsonl")
-    const ref = { traceId: "abc123def456", spanId: "0f1e2d3c4b5a6978", parentSpanId: "aabbccddeeff0011" }
+    const ref = {
+      traceId: "abc123def456",
+      spanId: "0f1e2d3c4b5a6978",
+      parentSpanId: "aabbccddeeff0011",
+    }
     const lines = emitOne(path, { ctx: CTX, ...fixedClocks(), getActiveTraceRef: () => ref })
     // Every event carries the ref's hex ids — NOT the deterministic t3/tool:tu9.
     for (const e of lines) {
@@ -681,5 +689,108 @@ describe("JsonlRecorder — getActiveTraceRef DI seam (C3 compat window)", () =>
     expect(lines[0]?.traceId).toBeUndefined()
     expect(lines[1]?.spanId).toBe("S") // ref override
     expect(lines[1]?.traceId).toBe("T")
+  })
+})
+
+describe("JsonlRecorder — ADR-0539 rule 5 (expected-but-missing trace context)", () => {
+  const emitSeq = (
+    path: string,
+    opts: ConstructorParameters<typeof JsonlRecorder>[1],
+  ): TrajectoryEvent[] => {
+    const rec = new JsonlRecorder(path, opts)
+    rec.emit({ type: "turn_start", turn: 3 })
+    rec.emit({ type: "assistant_text", delta: "a" })
+    rec.emit({ type: "tool_call", id: "tu9", name: "bash", input: { cmd: "ls" } })
+    rec.close()
+    return readLines(path)
+  }
+
+  test("sink live (expected) + ref undefined ⇒ exactly ONE observability_degraded (missing_trace_context)", () => {
+    const path = join(dir, "defect.0.jsonl")
+    // getActiveTraceRef returns undefined (no ref installed) but a trace context
+    // WAS expected (sink live). This is the correlation DEFECT rule 5 enforces.
+    const lines = emitSeq(path, {
+      ctx: CTX,
+      ...fixedClocks(),
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => true,
+    })
+    const degraded = lines.filter((l) => l.kind === "observability_degraded")
+    // RED-ON-INJECTION: reverting the enforcement (silent fallback) yields 0 here.
+    expect(degraded).toHaveLength(1)
+    expect(degraded[0]?.data.reason).toBe("missing_trace_context")
+    expect(degraded[0]?.data.component).toBe("JsonlRecorder")
+    // Triage fields: the first offending kind/seq.
+    expect(degraded[0]?.data.offendingKind).toBe("turn_start")
+    expect(typeof degraded[0]?.data.offendingSeq).toBe("number")
+    // The deterministic fallback VALUE is still stamped on the real events
+    // (enforcement only ADDS the defect signal; consumers still get t3).
+    const turn = lines.find((l) => l.kind === "turn_start")
+    expect(turn?.spanId).toBe("t3")
+  })
+
+  test("strict: an expected-but-missing ref surfaces on the rail (emit throws)", () => {
+    const path = join(dir, "strict-defect.0.jsonl")
+    const rec = new JsonlRecorder(path, {
+      ctx: CTX,
+      strict: true,
+      ...fixedClocks(),
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => true,
+    })
+    // RED-ON-INJECTION: silent fallback makes this NOT throw.
+    expect(() => rec.emit({ type: "turn_start", turn: 1 })).toThrow(/missing_trace_context/)
+  })
+
+  test("off (traceContextExpected ⇒ false) + ref undefined ⇒ NO degraded, BYTE-IDENTICAL to baseline", () => {
+    const a = join(dir, "base.0.jsonl")
+    const b = join(dir, "off.0.jsonl")
+    // Baseline: no DI at all (today's off/unwired path).
+    const base = emitSeq(a, { ctx: CTX, ...fixedClocks() })
+    // Off: probe present but returns false, ref undefined.
+    const off = emitSeq(b, {
+      ctx: CTX,
+      ...fixedClocks(),
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => false,
+    })
+    // No degraded record on either.
+    expect(base.some((l) => l.kind === "observability_degraded")).toBe(false)
+    expect(off.some((l) => l.kind === "observability_degraded")).toBe(false)
+    // Deterministic ids present + BYTE-IDENTICAL to the no-DI baseline.
+    expect(off.find((l) => l.kind === "turn_start")?.spanId).toBe("t3")
+    expect(JSON.stringify(off)).toBe(JSON.stringify(base))
+  })
+
+  test("ref PRESENT (expected + installed) ⇒ NO degraded, ids stamped from ref", () => {
+    const path = join(dir, "present.0.jsonl")
+    const ref = { traceId: "aabbcc112233", spanId: "0f1e2d3c4b5a6978" }
+    const lines = emitSeq(path, {
+      ctx: CTX,
+      ...fixedClocks(),
+      getActiveTraceRef: () => ref,
+      traceContextExpected: () => true,
+    })
+    // Context was expected AND installed — no defect.
+    expect(lines.some((l) => l.kind === "observability_degraded")).toBe(false)
+    for (const e of lines) {
+      expect(e.traceId).toBe(ref.traceId)
+      expect(e.spanId).toBe(ref.spanId)
+    }
+  })
+
+  test("systemic missing context ⇒ degraded emitted at MOST ONCE across many events", () => {
+    const path = join(dir, "once.0.jsonl")
+    const rec = new JsonlRecorder(path, {
+      ctx: CTX,
+      ...fixedClocks(),
+      getActiveTraceRef: () => undefined,
+      traceContextExpected: () => true,
+    })
+    // Every event is missing the ref, but the degraded line must not spam.
+    for (let i = 0; i < 10; i++) rec.emit({ type: "assistant_text", delta: `d${i}` })
+    rec.close()
+    const degraded = readLines(path).filter((l) => l.kind === "observability_degraded")
+    expect(degraded).toHaveLength(1)
   })
 })

@@ -153,9 +153,7 @@ interface DegradedSentinelParams {
   readonly opts: RecordingLlmOpts
   readonly now: () => number
   /** Active OTel span identity captured at `stream()` START (C4). */
-  readonly traceRef:
-    | { traceId: string; spanId: string; parentSpanId?: string }
-    | undefined
+  readonly traceRef: { traceId: string; spanId: string; parentSpanId?: string } | undefined
 }
 
 /** F7 sentinel: a minimal degraded record so a swallowed commit failure on

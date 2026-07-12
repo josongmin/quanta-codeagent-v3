@@ -26,13 +26,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { costUsd, getActiveTraceRef, getSpanSink, Metrics, PRICING_VERSION } from "@/observability"
-import type {
-  PatchData,
-  RunContext,
-  SandboxData,
-  TrajectoryKind,
-  VerifyData,
-} from "@/shared"
+import type { PatchData, RunContext, SandboxData, TrajectoryKind, VerifyData } from "@/shared"
 import { makeEvent, redactValue } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { JsonlRecorder } from "@/stream"
