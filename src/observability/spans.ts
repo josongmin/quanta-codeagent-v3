@@ -156,6 +156,14 @@ export interface SpanSink {
     durationMs: number,
     attrs: Attrs,
   ) => void
+  /** OPTIONAL — signalled by {@link markSpanScoped} when a span's identity is
+   *  installed as the active async-context ref (`withActiveSpanScope`). A sink
+   *  that keeps a shared LIFO fallback stack for the DIRECT path uses this to
+   *  EVICT the now-scoped frame from that stack: a scoped span carries its
+   *  parentage in its own async context, so it must not linger on the shared
+   *  stack where a CONCURRENT session's root could cross-link to it. Legacy
+   *  sinks omit this (no-op). */
+  onScoped?: (token: unknown) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +245,24 @@ export const endSpan = (span: Span, status: SpanStatus, attrs: Attrs): void => {
     sink.onEnd(span.token, span.name, status, durationMs, attrs)
   } catch {
     // Swallow.
+  }
+}
+
+/** Signal to the active sink that `span`'s identity has just been installed as
+ *  the active async-context ref (the loop's `withActiveSpanScope`). A sink that
+ *  keeps a shared direct-path LIFO fallback stack EVICTS the frame here — the
+ *  span is now scoped, so its parentage lives in the async context and it must
+ *  NOT sit on the shared stack (that lingering is what let two concurrent
+ *  session roots cross-link into one trace). No-op for the sentinel, a sink
+ *  without `onScoped`, or when no sink is registered. Throws are swallowed
+ *  (observability MUST NOT crash the loop). */
+export const markSpanScoped = (span: Span): void => {
+  const sink = activeSink
+  if (sink === null || span === NOOP_SPAN || sink.onScoped === undefined) return
+  try {
+    sink.onScoped(span.token)
+  } catch {
+    // Swallow — see startSpan/endSpan for rationale.
   }
 }
 

@@ -40,53 +40,14 @@ export interface TraceRef extends SpanContext {
  *  child span opened in a descendant async frame see its enclosing parent. */
 const activeStore = new AsyncLocalStorage<TraceRef>()
 
-/** Count of currently-live `runWithActiveTraceRef` scopes across the whole
- *  process. Positive ⇒ SOMETHING is driving spans through the async-context
- *  regime (the agent loop's `withActiveSpanScope`), so a sink that finds NO
- *  active ref at open time is looking at a genuine ROOT (a new trace) — it must
- *  NOT fall back to a process-global LIFO stack (which would cross-link two
- *  concurrent session roots — the exact jul-12 audit hazard). Zero ⇒ nobody
- *  installs context (the direct `startSpan`/`endSpan` unit-test / host path),
- *  so a stack fallback is the only parentage signal available. */
-let activeScopeDepth = 0
-
-/** True while at least one `runWithActiveTraceRef` scope is live in the
- *  process. The exporter consults this to decide whether a missing active ref
- *  means "genuine root" (regime on) or "use the LIFO fallback" (regime off). */
-export const isActiveContextRegime = (): boolean => activeScopeDepth > 0
-
 /** Run `fn` with `ref` installed as the active trace ref for the entire async
  *  subtree of `fn`. Concurrent calls with different refs never see each other's
  *  ref (AsyncLocalStorage isolation), so interleaved `withSpan` roots stay
- *  disjoint. Maintains {@link isActiveContextRegime} across the scope's
- *  lifetime (sync-throw AND async-settle safe). */
-export const runWithActiveTraceRef = <T>(ref: TraceRef, fn: () => T): T => {
-  activeScopeDepth++
-  let out: T
-  try {
-    out = activeStore.run(ref, fn)
-  } catch (e) {
-    activeScopeDepth--
-    throw e
-  }
-  // Async body: decrement only after the returned promise settles so the regime
-  // stays "on" for the WHOLE async subtree (a nested root opened deep inside an
-  // awaited body still sees the regime as active). Sync body: decrement now.
-  const maybeThenable = out as unknown
-  if (
-    maybeThenable !== null &&
-    typeof maybeThenable === "object" &&
-    typeof (maybeThenable as PromiseLike<unknown>).then === "function"
-  ) {
-    const settle = (): void => {
-      activeScopeDepth--
-    }
-    ;(maybeThenable as Promise<unknown>).then(settle, settle)
-    return out
-  }
-  activeScopeDepth--
-  return out
-}
+ *  disjoint — the per-context async-local read (`getActiveTraceRef`) is the SOLE
+ *  parentage authority for scoped spans. The exporter keeps scoped spans OUT of
+ *  its shared LIFO stack entirely (see `otel-span-export.ts onStart`), so no
+ *  process-global counter is needed to guard cross-linking. */
+export const runWithActiveTraceRef = <T>(ref: TraceRef, fn: () => T): T => activeStore.run(ref, fn)
 
 /** The active span for the current async call chain, or `undefined` when no
  *  `withSpan(...)` scope encloses this frame (or the tracer is in `off` mode,

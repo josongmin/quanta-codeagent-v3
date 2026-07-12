@@ -105,6 +105,10 @@ const unifiedSink = (
       return token
     },
     onEnd: (token, name, status, durationMs, a) => inner.onEnd(token, name, status, durationMs, a),
+    // Forward the scoped-eviction signal so the wrapped exporter can drop a
+    // now-scoped frame from its shared direct-path stack (jul-13 fix: without
+    // this the session root lingers and a concurrent root cross-links to it).
+    onScoped: (token) => inner.onScoped?.(token),
   }
   return { sink, opens }
 }

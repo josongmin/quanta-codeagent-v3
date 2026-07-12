@@ -41,6 +41,7 @@ export {
   __resetSpanSink,
   endSpan,
   getSpanSink,
+  markSpanScoped,
   recordAttrs,
   SPAN_NAMES,
   type Span,

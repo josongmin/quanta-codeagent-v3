@@ -14,12 +14,7 @@
  *   const tracer = otelTracer({ tracerProvider: myProvider })
  */
 
-export {
-  getActiveTraceRef,
-  isActiveContextRegime,
-  runWithActiveTraceRef,
-  type TraceRef,
-} from "./active-context"
+export { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "./active-context"
 // Default export is the no-op tracer — surfaces opt in to OTel explicitly.
 export { contextTracer, noopTracer, noopTracer as defaultTracer } from "./noop-tracer"
 export { mapKind, type OtelTracerOpts, otelTracer } from "./otel-tracer"

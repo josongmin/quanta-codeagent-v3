@@ -1,4 +1,12 @@
-import { attrs, GEN_AI_ATTRS, getSpanSink, QUANTA_ATTRS, type Span, spanTraceRef } from "@/observability"
+import {
+  attrs,
+  GEN_AI_ATTRS,
+  getSpanSink,
+  markSpanScoped,
+  QUANTA_ATTRS,
+  type Span,
+  spanTraceRef,
+} from "@/observability"
 import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "@/observability/tracing"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
@@ -309,13 +317,18 @@ const bridgeHex = (byteCount: number): string => {
  *  `{traceId, spanId}`. OTLP ≡ OBSERVE ≡ cassette therefore share ONE identity.
  *
  *  Two sink shapes:
- *    · EXPORT sink — its `onStart` returns a `TraceRef`; we install it verbatim
- *      (parentage already resolved by the exporter from the enclosing active
- *      ref, so it is async-safe: concurrent roots never cross-link).
+ *    · EXPORT sink — its `onStart` returns a `TraceRef`; we install it verbatim.
+ *      Here `isRoot` is a NO-OP: parentage (and thus root-ness) was ALREADY
+ *      resolved by the exporter from the enclosing active ref — a fresh trace is
+ *      minted iff NO active ref encloses the `startSpan`. The caller arranges
+ *      that structurally (a bench attempt via `withBenchInstanceRoot`; a
+ *      standalone `runAgent` by being top-level). A NESTED `runAgent` (subagent
+ *      dispatched inside a tool scope) therefore — correctly, per OTel — nests as
+ *      a child span of the SAME trace, NOT a new one, even when `isRoot=true`.
  *    · CONTEXT-only sink (issues opaque tokens, no ref) — we FALL BACK to
- *      minting a valid W3C id here, inheriting the enclosing active ref as
- *      parent (`isRoot` starts a fresh trace). This preserves the Wave-1
- *      async-context isolation for a non-exporting sink.
+ *      minting a valid W3C id here; THIS is the only path `isRoot` governs
+ *      (`isRoot` ⇒ fresh trace, else inherit the enclosing active ref as parent).
+ *      Preserves the Wave-1 async-context isolation for a non-exporting sink.
  *
  *  DEFAULT-OFF byte-identity: when NO span sink is registered, this installs
  *  nothing (no `runWithActiveTraceRef`, no id mint) and calls `body()` directly
@@ -328,6 +341,12 @@ export const withActiveSpanScope = <T>(
   body: () => Promise<T>,
 ): Promise<T> => {
   if (getSpanSink() === null) return body()
+  // This span is about to become SCOPED — evict its frame from the sink's
+  // shared direct-path fallback stack (a no-op unless the span opened on the
+  // direct path, i.e. the SESSION ROOT, whose scope installs one call after its
+  // `startSpan`). Without this the root lingers on the shared stack and a
+  // CONCURRENT session's root adopts it, collapsing two traces into one.
+  markSpanScoped(span)
   // EXPORT path — install the EXACT id the exporter issued for this span, so
   // the active ref === what gets POSTed to OTLP. Parentage was already resolved
   // by the exporter's `onStart` (it read the enclosing active ref), so this ref
