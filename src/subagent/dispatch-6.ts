@@ -21,6 +21,7 @@ import {
   handleWaitAgent,
   handleWriteStdin,
   type InputChannelRegistry,
+  type MakeProcKill,
   type PtyTable,
   type WaitTimeoutPolicy,
 } from "./handlers-6"
@@ -53,6 +54,12 @@ export interface Subagent6Deps {
     readonly resolve: (requested: string, jailRoot: string) => string
     readonly jailRoot: string
   }
+  /** WS1 — tree-aware kill factory for exec_command timeout/abort. Injected by
+   *  the composition root (`tier1/subagent.ts`) as
+   *  `escalatingKill(proc, defaultPpidWalkKiller())`; kept structural so this
+   *  slice imports no @/runtime (mirrors {@link Subagent6Deps.cwdJail}). Absent
+   *  ⇒ legacy single-pid `proc.kill()` (byte-identical). */
+  makeKill?: MakeProcKill
   /** Required for send_input. */
   inputChannel?: InputChannelRegistry
   /** Forwarded to spawn_agent depth checks. */
@@ -144,6 +151,9 @@ const routeExecCommand: Route = (input, deps) =>
       // (c) Forward the path-jail port so a model-supplied cwd outside the
       // workspace is rejected fail-closed before spawn. Absent ⇒ no jail.
       ...(deps.cwdJail !== undefined ? { cwdJail: deps.cwdJail } : {}),
+      // WS1 — forward the tree-kill factory so timeout/abort reap the whole
+      // process tree. Absent ⇒ legacy single-pid kill.
+      ...(deps.makeKill !== undefined ? { makeKill: deps.makeKill } : {}),
     },
     deps.signal,
   )

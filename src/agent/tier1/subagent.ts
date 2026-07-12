@@ -12,6 +12,7 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
+import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
 import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
@@ -265,6 +266,15 @@ export const buildSubagentBlock = (
       ...(config.cwd !== undefined
         ? { cwdJail: { resolve: resolveJailed, jailRoot: config.cwd } }
         : {}),
+      // WS1 (jul-12 OmO absorption, self-audit 04 §5) — exec_command's
+      // timeout/abort previously did a single-pid `proc.kill()` on the `bash -lc`
+      // shell, orphaning any grandchild it forked (a LIVE 6-tool BASE leak, worse
+      // than the side-agent one). The composition root owns the @/runtime wiring
+      // (this slice may cross-import; handlers-6 may not) and injects the
+      // production-grade escalating tree-killer (SIGTERM→grace→SIGKILL over the
+      // whole process tree) — reusing `escalatingKill`, not reinventing a ladder.
+      // Always-on: this is a correctness leak-fix, not a measured quality lever.
+      makeKill: (proc) => escalatingKill(proc, defaultPpidWalkKiller()),
       // RFC-04 — when the host wired an AgentMetaRegistry, thread it so
       // spawn_agent records depth/label for list_agents. Absent ⇒ no write.
       ...(config.subagentAgentMeta !== undefined ? { agentMeta: config.subagentAgentMeta } : {}),

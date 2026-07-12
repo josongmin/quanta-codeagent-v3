@@ -26,6 +26,13 @@
  */
 import type { Subprocess } from "bun"
 import { errMessage } from "@/shared"
+import { legacyKillHandle, type MakeProcKill, type ProcKillHandle } from "./exec-kill"
+
+// Re-export so `dispatch-6` and the exec hellgates keep importing the kill
+// contract from the handler module (WS1 split it into `exec-kill.ts` to hold the
+// module under the god-MODULE ratchet; the public surface is unchanged).
+export type { MakeProcKill, ProcKillHandle } from "./exec-kill"
+
 // Reuse the foreground `agent` tool's PROVEN continue_from lineage gate +
 // checkpoint-path builder + per-registry owners ledger (T04 — no cross-lineage
 // disclosure). The ledger is keyed by TaskRegistry identity, and the 6-tool
@@ -230,6 +237,9 @@ interface ExecCommandDeps {
   /** Confine `input.cwd` to the session workspace before spawning. Absent ⇒
    *  no jail (legacy). See {@link CwdJailPort}. */
   cwdJail?: CwdJailPort
+  /** Tree-aware kill factory (WS1). Absent ⇒ legacy single-pid `proc.kill()`
+   *  on timeout/abort (byte-identical). See {@link MakeProcKill}. */
+  makeKill?: MakeProcKill
 }
 
 interface StreamPump {
@@ -369,24 +379,22 @@ export const handleExecCommand = async (
     return errExec(`Failed to spawn command: ${msg}`, "spawn_error")
   }
 
+  // WS1 — route timeout/abort kills through the injected escalating tree-killer
+  // so a `bash -lc` that forked a grandchild (backgrounded job, a build tool)
+  // has the WHOLE tree reaped, not just the shell pid. Absent ⇒ legacy
+  // single-pid `proc.kill()` (byte-identical). Both are no-op-safe after exit.
+  const killHandle: ProcKillHandle = deps.makeKill?.(proc) ?? legacyKillHandle(proc)
+
   let timedOut = false
   let aborted = false
   const timer = setTimeout(() => {
     timedOut = true
-    try {
-      proc.kill()
-    } catch {
-      // already dead
-    }
+    killHandle.kill()
   }, input.timeoutMs)
 
   const onAbort = () => {
     aborted = true
-    try {
-      proc.kill()
-    } catch {
-      // already dead
-    }
+    killHandle.kill()
   }
   signal?.addEventListener("abort", onAbort, { once: true })
 
@@ -455,6 +463,10 @@ export const handleExecCommand = async (
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener("abort", onAbort)
+    // Clear any pending SIGKILL grace timer so it never outlives this call
+    // (the PTY-attach handoff path returns through here too; disarm is a no-op
+    // when no kill was armed).
+    killHandle.disarm()
   }
 }
 
