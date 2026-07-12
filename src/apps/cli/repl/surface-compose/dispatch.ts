@@ -101,6 +101,10 @@ export const buildSurfaceDispatch = (args: {
    *  the admissibility gate consults) + the live thread id. Absent ⇒ slot
    *  omitted ⇒ the inspector renders its stateless (store-free) view. */
   readonly permissionInspect?: import("../../permission-explain").PermissionInspectSlashState
+  /** `/goal` (Codex parity) — the shared objective store + thread id. Present iff
+   *  the surface minted the store; absent ⇒ slot omitted ⇒ `/goal` prints "not
+   *  wired" (default-OFF byte-identical). */
+  readonly goal?: SlashContext["goal"]
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -183,6 +187,9 @@ export const buildSurfaceDispatch = (args: {
       ...(args.permissionInspect !== undefined
         ? { permissionInspect: args.permissionInspect }
         : {}),
+      // `/goal` (Codex parity) — shared objective store + thread id. Absent ⇒
+      // slot omitted ⇒ `/goal` prints "not wired" (default-OFF byte-identical).
+      ...(args.goal !== undefined ? { goal: args.goal } : {}),
     }
     await runSlashCommand(input, ctx)
     return true
