@@ -87,7 +87,7 @@ const buildDaemonBase = async (
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   // WS4 R5 (SECURITY) — daemon reviews UNTRUSTED host-created worktrees (PR /
   // webhook payloads), so the SSOT resolver deliberately does NOT auto-load the
-  // tree's AGENTS.md (see RULE_LESS_MODES). Stays undefined unless a trusted host
+  // tree's AGENTS.md (see MODE_REPO_RULES_POLICY). Stays undefined unless a trusted host
   // passes vetted rules via `req.base.repoRules`.
   const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()

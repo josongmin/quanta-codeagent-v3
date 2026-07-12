@@ -25,6 +25,7 @@ import {
   wireObservability,
 } from "@/agent/observability-wire"
 import { createInMemoryPlanStore, type PlanStore } from "@/agent/plan/state"
+import { loadRepoRules } from "@/agent/repo-rules"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { promptSurfaceProfileForRunMode, resolveCliDefaultEnvPosture } from "@/agent/system-prompt"
@@ -662,7 +663,7 @@ const mintInboundPorts = (
  * presence-only so an absent gate omits the slot (default-OFF byte-identical).
  * The `webEnvPosture` derivation rides along as an own-local off `env`.
  */
-const buildAgentConfigBase = ({
+const buildAgentConfigBase = async ({
   env,
   llm,
   artifactRegistry,
@@ -703,8 +704,14 @@ const buildAgentConfigBase = ({
     readonly handle: ObservabilityWireHandle
     readonly bus: HookBus | undefined
   }
-}): RuntimeAgentConfigBase => {
+}): Promise<RuntimeAgentConfigBase> => {
   const webEnvPosture = resolveCliDefaultEnvPosture(env)
+  // WS4 R7 — the web/Tauri surface runs on the user's OWN cwd (interactive-class
+  // trust), so it honors the repo's AGENTS.md/CLAUDE.md just like the CLI
+  // interactive preset. Loaded here (not via the mode-preset resolver: surface
+  // isolation forbids apps/web importing apps/agent — this MIRRORS the "load"
+  // policy in mode-presets/system.ts::MODE_REPO_RULES_POLICY). Fail-open.
+  const repoRules = await loadRepoRules(cwd).catch(() => undefined)
   const base: RuntimeAgentConfigBase = {
     llm,
     // A2 — the default tools with the SHARED artifact registry threaded in so
@@ -721,6 +728,7 @@ const buildAgentConfigBase = ({
     promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", {
       envPosture: webEnvPosture,
     }),
+    ...(repoRules !== undefined ? { repoRules } : {}),
     cwd,
     maxTurns: 200,
     signal: abort.signal,
@@ -835,7 +843,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // tools join the registry; clients stop on shutdown; the /mcp readout goes
     // live. NEVER throws (a broken config never crashes daemon boot).
     const { tools: mcpTools, clients: mcpClients, mcpAccessor } = await loadDaemonMcp(env, llm)
-    const base = buildAgentConfigBase({
+    const base = await buildAgentConfigBase({
       env,
       llm,
       artifactRegistry,

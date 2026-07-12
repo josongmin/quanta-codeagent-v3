@@ -6,7 +6,7 @@
  * a `.git`-less loose dir (shared-box hygiene) yet (b) NOT over-block a benign
  * in-repo symlinked directory (Round-5's lexical symlink-stop regressed this and
  * had bypasses of its own — see R6 audit; the real injection defense for
- * untrusted surfaces is RULE_LESS_MODES, and symlinked rule FILES stay rejected
+ * untrusted surfaces is MODE_REPO_RULES_POLICY (rule-less), and symlinked rule FILES stay rejected
  * by the loader's existing `lstat`).
  *
  *   §1 (M-C) a benign in-repo symlinked dir does NOT hide the repo-root rules.

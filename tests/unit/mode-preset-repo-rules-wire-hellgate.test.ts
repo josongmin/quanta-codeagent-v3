@@ -27,7 +27,10 @@ import { defaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "../../src/apps/agent/assemble"
 import { runMode as headlessRun } from "../../src/apps/agent/mode-presets/headless"
 import { runMode as ideRun } from "../../src/apps/agent/mode-presets/ide"
-import { resolveModePresetRepoRules } from "../../src/apps/agent/mode-presets/system"
+import {
+  MODE_REPO_RULES_POLICY,
+  resolveModePresetRepoRules,
+} from "../../src/apps/agent/mode-presets/system"
 
 const SENTINEL = "OMO-WS4-R3-PRESET-RULE-3af1"
 
@@ -55,6 +58,29 @@ beforeEach(() => {
 })
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+})
+
+// REGRESSION-PREVENTION DRIFT GUARD (R7) — `MODE_REPO_RULES_POLICY` is a
+// `Record<RunMode, …>`, so adding a new AgentMode fails to COMPILE until it is
+// classified load/rule-less (no surface silently skips the security decision).
+// This test closes the loop: the resolver must BEHAVE per every policy entry, so
+// a mis-classification or a resolver bug can't hide. Iterating the policy keys
+// means a newly-added mode is automatically exercised here too.
+describe("WS4 §0 — drift guard: the resolver honors MODE_REPO_RULES_POLICY for EVERY mode", () => {
+  test("every RunMode's resolver behavior matches its policy entry", async () => {
+    writeFileSync(join(dir, ".git"), "")
+    writeFileSync(join(dir, "AGENTS.md"), `# rules\n${SENTINEL}\n`)
+    const modes = Object.keys(MODE_REPO_RULES_POLICY) as RunMode[]
+    expect(modes.length).toBeGreaterThanOrEqual(6) // all AgentMode values present
+    for (const mode of modes) {
+      const rules = await resolveModePresetRepoRules(mode, undefined, dir)
+      if (MODE_REPO_RULES_POLICY[mode] === "load") {
+        expect(rules?.body ?? "", `${mode} must LOAD`).toContain(SENTINEL)
+      } else {
+        expect(rules, `${mode} must be RULE-LESS`).toBeUndefined()
+      }
+    }
+  })
 })
 
 describe("WS4 R3/R4/R5 §1 — resolveModePresetRepoRules policy SSOT", () => {

@@ -1,0 +1,38 @@
+/**
+ * WS4 R7 — the web/Tauri daemon is a TRUSTED user-repo surface (it runs on the
+ * user's OWN `process.cwd()`, and already publishes the "interactive" prompt
+ * surface profile), so it must honor the repo's AGENTS.md/CLAUDE.md exactly like
+ * the CLI interactive preset. R6's audit flagged that it was the one trusted
+ * surface still dropping repo rules (a surface-parity gap).
+ *
+ * `buildAgentConfigBase` binds `cwd` to `process.cwd()` and needs the full
+ * production dep bundle (LLM/env/registry/…), so — matching the established
+ * web-daemon wiring-hellgate idiom (runtime-factory.test.ts) — this pins the
+ * wiring at the source: the daemon loads repo rules and threads them into the
+ * assembled base. Remove either and this goes RED, so the trusted-surface parity
+ * cannot silently regress.
+ */
+
+import { describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
+
+const SRC = readFileSync(
+  join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"),
+  "utf8",
+)
+
+describe("WS4 R7 — web-daemon honors repo-local rules (trusted surface parity)", () => {
+  test("imports the repo-rules loader", () => {
+    expect(SRC).toMatch(/import\s*\{\s*loadRepoRules\s*\}\s*from\s*"@\/agent\/repo-rules"/)
+  })
+
+  test("loads rules from the session cwd, fail-open", () => {
+    expect(SRC).toMatch(/loadRepoRules\(cwd\)\.catch\(\(\)\s*=>\s*undefined\)/)
+  })
+
+  test("threads the loaded rules into the assembled base config", () => {
+    // Conditional spread so the absent case stays byte-identical.
+    expect(SRC).toMatch(/\.\.\.\(repoRules !== undefined \? \{ repoRules \} : \{\}\)/)
+  })
+})
