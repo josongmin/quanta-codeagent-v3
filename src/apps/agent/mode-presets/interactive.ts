@@ -8,6 +8,7 @@
 import * as readline from "node:readline/promises"
 import type { AgentConfig } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
+import { loadRepoRules } from "@/agent/repo-rules"
 import type { PermissionContext } from "@/permission"
 import { type ApprovalResolver, driveSessionTurn } from "@/runner/orchestrate"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -58,10 +59,10 @@ export const buildInteractiveApprovalResolver =
     return "deny"
   }
 
-const buildInteractiveBase = (
+const buildInteractiveBase = async (
   req: AssembleRequest,
   signal: AbortSignal,
-): Omit<AgentConfig, "modePolicy" | "budgetMeter"> => {
+): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.base.cwd ?? process.cwd()
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   const surfaceStream = new StdoutStream()
@@ -71,6 +72,16 @@ const buildInteractiveBase = (
     req.base.registry !== undefined && req.base.registry instanceof ToolRegistry
       ? req.base.registry
       : new ToolRegistry(buildDefaultTools())
+  // WS4 (jul-12 OmO absorption, self-audit 04 §4) — the interactive surface is a
+  // human driving a real repo, so it MUST honor repo-local rules (AGENTS.md /
+  // CLAUDE.md). The whole downstream render already exists (context-assembler →
+  // prompt.ts renderRepoRulesBlock → four-section project_md); only this seam was
+  // missing, so a repo's rules reached bench prompts but never the interactive
+  // model. A caller override on `req.base.repoRules` wins; else load from cwd.
+  // Fail-open: a broken/absent rule file must never break the session start.
+  // Bench sandboxes / agent forks intentionally do NOT go through this preset, so
+  // their byte-identical rule-less posture (AgentConfig.repoRules doc) is unchanged.
+  const repoRules = req.base.repoRules ?? (await loadRepoRules(cwd).catch(() => undefined))
   return {
     ...req.base,
     llm: req.base.llm,
@@ -80,6 +91,7 @@ const buildInteractiveBase = (
     messages: req.base.messages ?? [],
     system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
     ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
+    ...(repoRules !== undefined ? { repoRules } : {}),
     cwd,
     maxTurns: req.base.maxTurns ?? 200,
     signal,
@@ -101,7 +113,7 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   // the REPL loop. `AbortSignal.any` propagates the first to fire.
   const abort = new AbortController()
   const signal: AbortSignal = AbortSignal.any([req.base.signal, abort.signal])
-  const base = buildInteractiveBase(req, signal)
+  const base = await buildInteractiveBase(req, signal)
   const { base: _base, mode: _mode, ...assemblerReq } = req
   const { runtime: runtimeFacade } = await createRuntimeFromAgentConfigBase({
     base,
@@ -180,7 +192,7 @@ const runInteractiveTerminal = async (req: AssembleRequest): Promise<void> => {
   if (signal.aborted) throw makeAbortError()
 }
 
-const stubBase = (req: AssembleRequest): Omit<AgentConfig, "modePolicy" | "budgetMeter"> =>
+const stubBase = (req: AssembleRequest): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> =>
   // T01 (audit L5 M-6): the seam path (stubbed runner) reuses the composition-
   // root signal directly; the dead throwaway controller is removed.
   buildInteractiveBase(req, req.base.signal)
@@ -189,7 +201,7 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.mode !== "interactive") {
     throw new Error(`interactive.runMode: req.mode must be "interactive", got "${req.mode}"`)
   }
-  const cfg = assembleAgentConfig({ ...req, base: stubBase(req) })
+  const cfg = assembleAgentConfig({ ...req, base: await stubBase(req) })
   // ADR-0334 — interactive surface explicitly tags the cfg as ADR-0327-
   // family wired. `assembleAgentConfig` already attempted the install;
   // this redundant pass is documentary (idempotent — ADR-0332 §I).
