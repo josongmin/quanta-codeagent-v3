@@ -21,6 +21,7 @@
 
 import { ALL_INBOUND_MODES, invertInboundModeOnce, parseInboundMode } from "@/agent/inbound-mode"
 import { runDebugCmd } from "../debug-cmd"
+import { goalCmd } from "./goal-cmd"
 import { hooksCmd } from "../hooks-cmd"
 import { retryWithCmd } from "../retry-with"
 import { sideCmd } from "../side-cmd"
@@ -232,4 +233,5 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   inboundCmd,
   resumeTurnCmd,
   hooksCmd,
+  goalCmd,
 ]

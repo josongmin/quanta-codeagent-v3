@@ -1,0 +1,101 @@
+/**
+ * Goal-continuation ticker — the LIVE host binding that activates the
+ * previously-DEAD `@/agent/objective` continuation machine (H17, absorbed from
+ * Codex `core/src/goals.rs`).
+ *
+ * Codex's "Pursuing goal" behaviour: once an `active` goal is set, the agent
+ * keeps resuming work on it turn after turn — whenever the thread goes idle and
+ * no other work is pending — until the goal is `completed`, `blocked`, or a
+ * budget/usage limit trips. The pure decision + semaphore already live in
+ * `@/agent/objective` (`runIdleContinuation`); they were just never driven by a
+ * real clock. This module is that driver: a `setInterval` idle-poll that calls
+ * `runIdleContinuation` with host-bound probes and a `resume` sink.
+ *
+ * DEFAULT-OFF (byte-identical): `enabled: false` (or a missing `threadId`) makes
+ * {@link startGoalContinuationTicker} a no-op returning `undefined` — no timer
+ * is armed, so a session that has not opted into `QUANTA_GOAL_ENFORCE` behaves
+ * exactly as before.
+ *
+ * SLICE FENCE: imports ONLY the closed `@/agent/objective` barrel
+ * (`runIdleContinuation`, `ContinuationSemaphore`, and the `ContinuationDeps`
+ * probe/`resume` shape). No `@/agent` core, no reactor internals.
+ */
+
+import {
+  type ContinuationDeps,
+  ContinuationSemaphore,
+  runIdleContinuation,
+} from "@/agent/objective"
+
+/** The host-bound probes + resume sink (everything in `ContinuationDeps` except
+ *  the pieces this driver owns: `enabled`, `semaphore`, `now`). */
+export type GoalContinuationProbes = Omit<ContinuationDeps, "enabled" | "semaphore" | "now">
+
+export interface StartGoalContinuationOpts {
+  /** Gate — wire from `runtimeConfig().goalContinuationEnforce`
+   *  (`QUANTA_GOAL_ENFORCE`). OFF ⇒ no timer, `undefined` return. */
+  readonly enabled: boolean
+  /** The thread whose goal is pursued. `undefined` (ephemeral session) ⇒ no-op. */
+  readonly threadId: string | undefined
+  /** Host-bound probes + resume sink. */
+  readonly probes: GoalContinuationProbes
+  /** Idle-poll cadence. Default 15s — the continuation only fires when the
+   *  thread is genuinely idle, so this is the "how soon after you stop typing
+   *  does it pick the goal back up" latency, not a busy-loop. */
+  readonly intervalMs?: number
+  /** Injected timer factory (tests pass a fake). Defaults to real `setInterval`. */
+  readonly setIntervalFn?: (fn: () => void, ms: number) => ReturnType<typeof setInterval>
+  /** Injected clearer (paired with {@link setIntervalFn}). */
+  readonly clearIntervalFn?: (h: ReturnType<typeof setInterval>) => void
+}
+
+export interface GoalContinuationTicker {
+  /** Stop the idle-poll (idempotent). */
+  stop(): void
+}
+
+const DEFAULT_INTERVAL_MS = 15_000
+
+/**
+ * Arm the idle-poll that drives goal continuation. Returns `undefined` when the
+ * feature is off or the session is ephemeral (no persistent thread to pursue),
+ * so callers can `if (ticker !== undefined) closeStack.push(...)`.
+ *
+ * The timer is `.unref()`'d so it never keeps the process alive on its own.
+ * Each tick delegates to `runIdleContinuation`, which is NO-THROW and
+ * self-serializing via the single-permit semaphore — overlapping ticks (a slow
+ * resume) can never launch two continuations.
+ */
+export const startGoalContinuationTicker = (
+  opts: StartGoalContinuationOpts,
+): GoalContinuationTicker | undefined => {
+  const threadId = opts.threadId
+  if (!opts.enabled || threadId === undefined || threadId.length === 0) return undefined
+
+  const deps: ContinuationDeps = {
+    ...opts.probes,
+    enabled: true,
+    semaphore: new ContinuationSemaphore(),
+    now: () => Date.now(),
+  }
+
+  const setFn = opts.setIntervalFn ?? ((fn, ms) => setInterval(fn, ms))
+  const clearFn = opts.clearIntervalFn ?? ((h) => clearInterval(h))
+
+  const handle = setFn(() => {
+    // Fire-and-forget: runIdleContinuation is NO-THROW and the semaphore guards
+    // re-entrancy, so an unresolved resume simply skips the next tick.
+    void runIdleContinuation(threadId, deps)
+  }, opts.intervalMs ?? DEFAULT_INTERVAL_MS)
+  // Never hold the event loop open just for the poll.
+  ;(handle as { unref?: () => void }).unref?.()
+
+  let stopped = false
+  return {
+    stop: (): void => {
+      if (stopped) return
+      stopped = true
+      clearFn(handle)
+    },
+  }
+}

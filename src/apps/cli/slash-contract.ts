@@ -288,6 +288,17 @@ export interface SlashContext {
    *  `QUANTA_AUTOMATION` is on AND the engine is reachable; absent ⇒ the commands
    *  print the D-6 not-wired posture + exit 2 (hint names QUANTA_AUTOMATION). */
   readonly automation?: import("./slash/cron-cmd").AutomationSlashState | undefined
+  /** `/goal` (Codex parity) — the shared per-thread objective store + the thread
+   *  id it is keyed by. Present iff the surface minted/shared the objective store
+   *  (the SAME instance the LLM `objective_*` tools mutate and the idle
+   *  goal-continuation ticker reads). Absent ⇒ `/goal` prints the not-wired
+   *  posture + exit 0 (default-OFF byte-identical). */
+  readonly goal?:
+    | {
+        readonly port: import("@/agent/objective").ObjectivePort
+        readonly threadId: string
+      }
+    | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
