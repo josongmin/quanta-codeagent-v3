@@ -105,12 +105,16 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
   flex:1;display:flex;flex-direction:column;overflow:hidden;
   border-right:1px solid var(--border);min-width:0;background:#f9f9fb;
 }
-/* right prompt panel */
+/* raw-prompt popup — centered modal over the timeline */
 #prompt-panel{
-  width:360px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;
-  background:#fff;
+  position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;
+  background:rgba(28,28,48,.5);
 }
 #prompt-panel.hidden{display:none}
+.pp-modal{
+  width:min(920px,94vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;
+  background:#fff;border-radius:12px;box-shadow:0 16px 56px rgba(0,0,0,.34);
+}
 /* ─────────────────── INSTANCE HEADER ─────────────────── */
 #inst-header{
   flex-shrink:0;padding:12px 20px 10px;
@@ -615,13 +619,15 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
           <div id="tree-evidence"></div>
         </div>
       </div>
-      <div id="prompt-panel" class="hidden">
-        <div id="pp-header">
-          <span id="pp-title"></span>
-          <span id="pp-turn-label"></span>
-          <div id="pp-close" onclick="closePromptPanel()" title=""></div>
+      <div id="prompt-panel" class="hidden" onclick="if(event.target===this)closePromptPanel()">
+        <div class="pp-modal">
+          <div id="pp-header">
+            <span id="pp-title"></span>
+            <span id="pp-turn-label"></span>
+            <div id="pp-close" onclick="closePromptPanel()" title=""></div>
+          </div>
+          <div id="pp-scroll"><div id="pp-overlay"></div></div>
         </div>
-        <div id="pp-scroll"><div id="pp-overlay"></div></div>
       </div>
     </div>
   </main>
@@ -638,7 +644,7 @@ const LANGS={
     dropSub:'또는 상단 "파일 열기" 클릭',
     noData:'데이터 없음',
     metaLoaded:'메타 로드됨',
-    fullPrompt:'전체 프롬프트',
+    fullPrompt:'raw 프롬프트',
     close:'닫기',
     turns:'턴',
     turn:'턴',
@@ -655,7 +661,7 @@ const LANGS={
     sysRole:'시스템 · LLM 역할 지정',
     showMore:'더보기',
     showLess:'접기',
-    promptBtn:'프롬프트 ↗',
+    promptBtn:'raw ↗',
     thinking:'◈ 사고 과정',
     promptIn:'📨 에이전트 · 프롬프트 전달',
     modelSays:'💬 모델 응답 · 판단',
@@ -701,7 +707,7 @@ const LANGS={
     dropSub:'or click "Open JSONL" above',
     noData:'No data',
     metaLoaded:'meta loaded',
-    fullPrompt:'Full Prompt',
+    fullPrompt:'raw prompt',
     close:'Close',
     turns:'turns',
     turn:'Turn',
@@ -718,7 +724,7 @@ const LANGS={
     sysRole:'System · LLM role',
     showMore:'Show more',
     showLess:'Show less',
-    promptBtn:'prompt ↗',
+    promptBtn:'raw ↗',
     thinking:'◈ Thinking',
     promptIn:'📨 Agent · prompt to LLM',
     modelSays:'💬 Model response · reasoning',
@@ -1783,25 +1789,30 @@ function renderTurnGroup(turn,idx,preQuantaHtml){
   const parts=buildUserParts(turn,idx===0)
   const rows=[]
 
-  // 1) 나(User) — the human's task, right side
+  // 1) The BEAUTIFIED messages fed to the LLM this turn — the human task (🧑 나)
+  //    AND the agent-assembled context (📨 Quanta: localize framing, observations,
+  //    the environment's tool results). Readable inline; the full raw request is
+  //    behind the `raw ↗` button. (Previously only the user-role part rendered and
+  //    the rest lived solely in the raw dump — so most turns looked empty.)
   for(const p of parts){
-    if(p.role!=='user')continue
-    rows.push(chatRow({side:'me',cls:'me',avatar:'🧑',name:T('you'),time:ts,body:renderPartBody(p,'me')}))
+    const isUser=p.role==='user'
+    rows.push(chatRow({
+      side:'me',cls:isUser?'me':'quanta',avatar:isUser?'🧑':'📨',
+      name:isUser?T('you'):'Quanta',time:ts,
+      body:renderPartBody(p,isUser?'me':'quanta'),
+    }))
   }
 
   // 1.5) scaffold prep that runs BETWEEN the task and the LLM call (🌳 tree build)
   if(preQuantaHtml)rows.push(preQuantaHtml)
 
-  // 2) Quanta SENDS an LLM message — the raw request payload. Just a message
-  //    send: NO phase/intent tags (the phase lives on the band, not every
-  //    message; sending to the LLM is sending to the LLM regardless of intent).
-  const payloadHtml=renderRawPayload(turn)
-  if(payloadHtml){
-    rows.push(chatRow({
-      side:'me',cls:'quanta',avatar:'🛰',name:'Quanta',time:ts,
-      body:`<div class="msg-send-tag">📤 ${T('sentToLlm')}</div>`+payloadHtml,
-    }))
-  }
+  // 2) Quanta SENDS an LLM message — a CLEAN marker (beautified bubble). The FULL
+  //    raw request (system + messages + tool schemas + response) is one click away
+  //    via the `raw ↗` button → the raw-prompt popup, never dumped inline.
+  rows.push(chatRow({
+    side:'me',cls:'quanta',avatar:'🛰',name:'Quanta',time:ts,promptBtnIdx:idx,
+    body:`<div class="msg-send-tag">📤 ${T('sentToLlm')}</div>`,
+  }))
 
   // 3) LLM(model) — its reasoning: thinking + any text. The tool it DECIDES to
   //    use is EXECUTED by Quanta (below) as a distinct tool row.
@@ -1815,7 +1826,7 @@ function renderTurnGroup(turn,idx,preQuantaHtml){
     ?`<div class="resp-decided">🔧 ${T('modelDecided')}: ${turn.output.tools.map(t=>`<b>${esc(t.name||'tool')}</b>`).join(', ')}</div>`
     :''
   const bareDecision=decided&&!thinkHtml&&!respHtml
-  const llmBody=thinkHtml+respHtml+(bareDecision?`<div class="resp-label">${T('modelSays')}</div>`:'')+decided+renderRawResponse(turn)
+  const llmBody=thinkHtml+respHtml+(bareDecision?`<div class="resp-label">${T('modelSays')}</div>`:'')+decided
   if(llmBody){
     const meta=`${tokIn||tokOut?`<span class="chat-tok">↑${tokIn} ↓${tokOut}${cacheRead?` ⚡${fN(cacheRead)}`:''}</span>`:''}${dur?`<span class="chat-dur">⏱ ${dur}</span>`:''}`
     rows.push(chatRow({
@@ -1849,53 +1860,6 @@ function renderSysPrompt(turn){
     <div class="sys-inline-hd" onclick="toggle('${id}')"><span class="sys-inline-chev">▶</span>⚙ ${T('sysRole')} · ${esc(preview)}…</div>
     <pre class="sys-inline-body">${esc(t)}</pre>
   </div>`
-}
-
-// The RAW LLM request payload for this turn — system + full message array +
-// tools — exactly what gets POSTed to the model, verbatim. Clamped with 더보기
-// because the message history grows across a repair thread.
-function renderRawPayload(turn){
-  const seg=[]
-  const s=typeof turn.system==='string'?turn.system:Array.isArray(turn.system)?turn.system.map(b=>b.text??b.content??'').join('\n\n'):''
-  if(s.trim())seg.push('━━ system ━━\n'+s)
-  for(const m of (turn.allMsgs||[])){
-    const c=m.content
-    const txt=typeof c==='string'?c:Array.isArray(c)?c.map(b=>{
-      if(typeof b==='string')return b
-      if(b.type==='text')return b.text??''
-      if(b.type==='tool_use')return `⟦tool_use ${b.name??'?'} ${JSON.stringify(b.input??{})}⟧`
-      if(b.type==='tool_result'){const rc=b.content;const rt=typeof rc==='string'?rc:Array.isArray(rc)?rc.map(x=>x.text??'').join(''):'';return `⟦tool_result ${rt}⟧`}
-      return JSON.stringify(b)
-    }).join('\n'):''
-    seg.push(`━━ ${m.role??'user'} ━━\n${txt}`)
-  }
-  if(Array.isArray(turn.tools)&&turn.tools.length){
-    seg.push(`━━ tools (${turn.tools.length}) ━━\n`+turn.tools.map(t=>t.name??'?').join(', '))
-  }
-  const raw=seg.join('\n\n')
-  if(!raw.trim())return''
-  const id=uid()
-  return`<div class="payload-hd">📤 ${T('rawPayload')}</div>
-    <div class="chat-bubble quanta clamp" id="${id}">${esc(raw)}<span class="clamp-fade"></span></div>
-    <div class="more-btn" onclick="toggleClamp('${id}',this)">${T('showMore')} ▾</div>`
-}
-
-// The RAW LLM response for this turn — the assistant output verbatim: reasoning +
-// the tool_use block(s) with their FULL input args, exactly what the model
-// returned. Mirrors renderRawPayload (the request side) so BOTH directions of the
-// call are inspectable raw, not just the summarized decision line.
-function renderRawResponse(turn){
-  const o=turn.output||{}
-  const seg=[]
-  if(o.thinking&&o.thinking.trim())seg.push('◈ thinking\n'+o.thinking.trim())
-  if(o.text&&o.text.trim())seg.push(o.text.trim())
-  for(const t of (o.tools||[]))seg.push(`⟦tool_use ${t.name??'?'} ${JSON.stringify(t.input??{})}⟧`)
-  const raw=seg.join('\n\n')
-  if(!raw.trim())return''
-  const id=uid()
-  return`<div class="resp-label">📥 ${T('rawResponse')}</div>
-    <div class="chat-bubble llm clamp" id="${id}">${esc(raw)}<span class="clamp-fade"></span></div>
-    <div class="more-btn" onclick="toggleClamp('${id}',this)">${T('showMore')} ▾</div>`
 }
 
 // One group-chat row: avatar + name/time header + body. `me` rows mirror right.
@@ -2267,6 +2231,21 @@ function openPromptPanel(turnIdx){
     if(!raw)continue
     pushSeg(label,i,raw)
   }
+  // TOOLS — the full function schemas sent this turn (name + description +
+  // input_schema), not just the names. Part of the raw request the bubble hides.
+  if(Array.isArray(turn.tools)&&turn.tools.length){
+    const toolsRaw=turn.tools
+      .map((t)=>`## ${t.name??'?'}\n${t.description??''}\n${JSON.stringify(t.input_schema??t.parameters??{},null,2)}`)
+      .join('\n\n')
+    pushSeg(`TOOLS (${turn.tools.length})`,'tools',toolsRaw)
+  }
+  // RESPONSE — the model's raw output this turn: reasoning + tool_use(s) w/ input.
+  const _o=turn.output||{}
+  const _rs=[]
+  if(_o.thinking&&_o.thinking.trim())_rs.push('## thinking\n'+_o.thinking.trim())
+  if(_o.text&&_o.text.trim())_rs.push(_o.text.trim())
+  for(const _t of (_o.tools||[]))_rs.push(`⚙ ${_t.name??'?'} ${JSON.stringify(_t.input??{})}`)
+  if(_rs.length)pushSeg('RESPONSE','resp',_rs.join('\n\n'))
   const scroll=document.getElementById('pp-scroll')
   // keep the overlay node, replace only the raw body
   scroll.querySelector('.pm-raw')?.remove()

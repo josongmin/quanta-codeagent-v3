@@ -198,12 +198,24 @@ export const SpawnAgentInputSchema = z
      *  throwaway worktree). */
     checkpoint: z.boolean().optional(),
     /** Codex `fork_turns` (C5059-04) — how much of the parent transcript the
-     *  child inherits: `"none"` (cold start, default) / `"all"` (full) /
-     *  positive-N (last N user turns). Composed by the shared `forkPrompt`
-     *  closure so the child preamble is BYTE-IDENTICAL to the trio `agent` tool.
-     *  Absent ⇒ `"none"` (byte-identical legacy spawn path). ≤0 / non-integer /
-     *  numeric-string are rejected at parse. */
-    fork_turns: z.union([z.enum(["none", "all"]), z.number().int().positive()]).optional(),
+     *  child inherits: `"none"` (cold start, default) / `"all"` (full) / N (last
+     *  N turns). Composed by the shared `forkPrompt` closure so the child preamble
+     *  is BYTE-IDENTICAL to the trio `agent` tool. This schema is kept EXACTLY in
+     *  sync with the trio `agent` tool's `fork_turns` (`agent-tool.ts`) —
+     *  `min(0)` (not `positive()`) so `0` parses (≡ `"none"`, since
+     *  `selectForkTurns` maps ≤0 ⇒ []); a stricter 6-tool schema would break
+     *  ALBB-16 trio↔6-tool parity (the model could pass `0` to one and have only
+     *  the other reject). `.describe(...)` (mirrored from trio) is REQUIRED so the
+     *  field is model-visible in the generated JSON schema, not just a doc-comment.
+     *  Absent ⇒ `"none"` (byte-identical legacy spawn path). */
+    fork_turns: z
+      .union([z.literal("none"), z.literal("all"), z.number().int().min(0)])
+      .optional()
+      .describe(
+        "Inherit the parent's recent conversation: 'none' (cold start, default), " +
+          "'all', or N (the last N turns). The inherited transcript is REDACTED and " +
+          "framed as data; use it so the child starts with context instead of cold.",
+      ),
   })
   .strict()
 export type SpawnAgentInput = z.infer<typeof SpawnAgentInputSchema>

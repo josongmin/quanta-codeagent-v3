@@ -17,18 +17,21 @@ import { describe, expect, test } from "bun:test"
 import { SpawnAgentInputSchema } from "@/subagent/tools-6"
 
 describe("C5059-04 — fork_turns reachable through strict 6-tool schema", () => {
-  test("ACCEPTS the full Codex spec: none | all | positive integer", () => {
-    for (const spec of ["none", "all", 1, 2, 42] as const) {
+  // `0` is ACCEPTED, mirroring the trio `agent` tool's `z.number().int().min(0)`
+  // (adversarial-audit R1/F1): `0` ≡ `"none"` (selectForkTurns maps ≤0 ⇒ []). A
+  // stricter `.positive()` here would break ALBB-16 trio↔6-tool parity.
+  test("ACCEPTS the full Codex spec: none | all | non-negative integer (incl. 0, large N)", () => {
+    for (const spec of ["none", "all", 0, 1, 2, 42, 1_000_000] as const) {
       const r = SpawnAgentInputSchema.safeParse({ prompt: "x", fork_turns: spec })
-      expect(r.success).toBe(true)
+      expect(r.success, `expected accept for ${JSON.stringify(spec)}`).toBe(true)
       if (r.success) expect(r.data.fork_turns).toBe(spec)
     }
   })
 
-  test("REJECTS 0, negatives, fractions, non-finite, and numeric strings", () => {
-    for (const bad of [0, -1, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "2", "all "]) {
+  test("REJECTS negatives, fractions, non-finite, numeric strings, and booleans", () => {
+    for (const bad of [-1, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "2", "all ", true]) {
       const r = SpawnAgentInputSchema.safeParse({ prompt: "x", fork_turns: bad })
-      expect(r.success).toBe(false)
+      expect(r.success, `expected REJECT for ${JSON.stringify(bad)}`).toBe(false)
     }
   })
 
@@ -36,9 +39,21 @@ describe("C5059-04 — fork_turns reachable through strict 6-tool schema", () =>
     expect(SpawnAgentInputSchema.safeParse({ prompt: "x", bogus_key: 1 }).success).toBe(false)
   })
 
-  test("absent fork_turns parses and stays undefined (byte-identical legacy)", () => {
-    const r = SpawnAgentInputSchema.safeParse({ prompt: "x" })
-    expect(r.success).toBe(true)
-    if (r.success) expect(r.data.fork_turns).toBeUndefined()
+  test("absent AND explicit-undefined both parse to undefined (byte-identical legacy)", () => {
+    const absent = SpawnAgentInputSchema.safeParse({ prompt: "x" })
+    const explicit = SpawnAgentInputSchema.safeParse({ prompt: "x", fork_turns: undefined })
+    expect(absent.success).toBe(true)
+    expect(explicit.success).toBe(true)
+    if (absent.success) expect(absent.data.fork_turns).toBeUndefined()
+    if (explicit.success) expect(explicit.data.fork_turns).toBeUndefined()
+  })
+
+  test("is model-visible: the field renders a description into the generated schema", () => {
+    // F2 (R1): a doc-comment alone renders `{type:"object"}` with no prose; only
+    // `.describe(...)` survives zodToJsonSchema so the model learns none/all/N.
+    const shape = SpawnAgentInputSchema.shape.fork_turns
+    expect(shape.description).toBeDefined()
+    expect(shape.description).toContain("none")
+    expect(shape.description).toContain("last N turns")
   })
 })
