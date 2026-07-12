@@ -478,6 +478,31 @@ const editPreCommitDeny = async (
   return writeBudgetEvent(ctx)
 }
 
+/** jul-13 edit-fresh-hash — after a SUCCESSFUL commit, refresh the stale-read
+ *  guard baseline to the just-written mtime. WHY: a fresh-hash CHAINED edit skips
+ *  the re-read (that is the whole point), so `ctx.readFileState` still holds the
+ *  PRE-edit mtime; the DEFAULT-ON mtime guard (`editPreCommitDeny` → `guardWrite`)
+ *  would then see `currentMtime(post-write) > recorded` and veto the chained edit
+ *  with `stale_read` — defeating the feature even though the `expected_hash`
+ *  precondition passed. A successful edit IS a fresh read of its own output, so we
+ *  record the committed mtime under the SAME resolved path key `guardWrite` stats.
+ *  Gated by the SAME flag ⇒ byte-identical (no extra stat, no state mutation) when
+ *  off. Best-effort: the edit is already committed, so a stat failure must NEVER
+ *  fail it — the baseline just stays at its pre-edit value (the model re-reads). */
+const refreshStaleReadBaseline = async (
+  fs: FileSystemPort,
+  ctx: EditToolContext,
+  target: { readonly path: string; readonly base: string },
+): Promise<void> => {
+  if (ctx.readFileState === undefined) return
+  try {
+    const committed = await fs.statFile(target.path, target.base)
+    ctx.readFileState.record(committed.path, committed.mtimeMs)
+  } catch {
+    // Post-commit best-effort: leave the pre-edit baseline on a stat failure.
+  }
+}
+
 /** Build the `edit` tool against an injected {@link FileSystemPort} (#13).
  *  `fs` defaults to the real `@/storage`-backed port, so the exported
  *  {@link editTool} is byte-identical to the pre-port direct-call version;
@@ -564,6 +589,11 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // re-jail under the SESSION root → a restore to the wrong file). With NO
       // active worktree `target.path === input.path` (byte-identical legacy).
       captureFileHistory(ctx, target.path, planned.next)
+      // jul-13 edit-fresh-hash — keep the stale-read guard consistent with the
+      // fresh hash we are about to advertise: record the just-written mtime so a
+      // chained (no-re-read) edit is not vetoed as `stale_read` by the DEFAULT-ON
+      // mtime guard. Gated ⇒ byte-identical when the flag is off.
+      if (ctx.editFreshHash === true) await refreshStaleReadBaseline(fs, ctx, target)
       // jul-13 edit-fresh-hash — root-fix for self-inflicted staleness. A
       // successful edit changes the file, so the model's read-time `expected_hash`
       // is now stale for the NEXT edit to the same file (measured ~41% of edits on
