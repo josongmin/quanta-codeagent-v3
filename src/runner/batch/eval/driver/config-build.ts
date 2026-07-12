@@ -17,7 +17,7 @@ import {
 } from "@/agent/localize-phase-guard"
 import { extractIssueDeclaredExpected } from "@/agent/verification-plan"
 import { buildVerifyGuard } from "@/agent/verify-guard"
-import { laneLabeledPort, type LLMPort, type Message } from "@/llm"
+import { type LLMPort, laneLabeledPort, type Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { gateDisabled, gateOn, normalizePublicIssueText } from "@/shared"
 import { setKnobOverride } from "@/shared/knob-overrides"
@@ -491,6 +491,146 @@ const buildAgentMessages = (args: {
   return userPromptMessages(text)
 }
 
+/**
+ * SWE-bench bench `AgentConfig` base object (pre-knobs, pre-guards). Extracted
+ * verbatim from `buildConfig` so the closure stays under the god-function line
+ * cap — PURE relocation: every field, spread, and methodology comment moves here
+ * unchanged, and every closure variable the block referenced is now a parameter.
+ * The optional slots (`budgetMeter` / `turnContextMutator`) stay conditionally
+ * spread, so an absent value omits the key exactly as before (byte-identical).
+ * Guard fields are still NOT set here (`reconcileBenchGuards` remains the SSOT).
+ */
+const buildBaseConfig = (args: {
+  instance: Instance
+  deps: RunInstanceDeps
+  sandbox: string
+  signal: AbortSignal
+  stream: StreamPort
+  laneLlm: LLMPort | undefined
+  registry: ToolRegistry
+  permission: PermissionContext
+  messages: ReturnType<typeof userPromptMessages>
+  budgetMeter: BudgetMeter | undefined
+  sweVerify: NonNullable<NonNullable<AgentConfig["promptSurfaceProfile"]>["verifyStrategy"]>
+  promptStyle: NonNullable<
+    NonNullable<Parameters<typeof composeSystemPromptForSurface>[1]>["promptStyle"]
+  >
+  promptSurfaceProfile: NonNullable<AgentConfig["promptSurfaceProfile"]>
+}) => {
+  const {
+    instance,
+    deps,
+    sandbox,
+    signal,
+    stream,
+    laneLlm,
+    registry,
+    permission,
+    messages,
+    budgetMeter,
+    sweVerify,
+    promptStyle,
+    promptSurfaceProfile,
+  } = args
+  return {
+    // F3 — OTEL join key. The trajectory line for this instance is written to
+    // `<runId>/<instance.id>.<attempt>.jsonl` (BenchObserver keys on `instance.id`,
+    // NOT the upstream `swebench.instanceId`), so we stamp `instance.id` here.
+    // With the `quanta.run.id` resource attr the exporter already carries,
+    // `{runId, instanceId}` becomes the key that joins the top-level `session_loop`
+    // span back to its trajectory. `attempt` is NOT threaded to this driver seam
+    // (it lives in the batch-level retry/Best-of-N loop above the per-attempt
+    // buildConfig call — see observe.ts `RunContext`), so it is left unset here;
+    // the join still works on `runId+instanceId` (attempt is only a same-instance
+    // discriminator). Absent OTEL sink ⇒ span is a no-op sentinel ⇒ zero cost.
+    spanIdentity: { instanceId: instance.id },
+    // G1 cross-vendor diversity: the per-candidate lane port (when the driver
+    // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
+    // the model-lane-diversity knob is a REAL provider swap at the wire site —
+    // not a tag. Absent ⇒ deps.llm labeled with the "repair" phase lane (recorded
+    // as metadata.lane; pure decorator, replay-neutral, behavior byte-identical),
+    // so the main agent's edit turns group under one authoritative "repair" band.
+    llm: laneLlm ?? laneLabeledPort(deps.llm, "repair"),
+    registry,
+    stream,
+    permission,
+    messages,
+    // A2 (jul-3 strategy-audit): batch driver runs are graded by an external
+    // harness — declare the SWE surface profile so the system prompt carries the
+    // `batch` pack (R-NO-EXPLORE-OVER-EDIT: stop exploring once you have a coherent
+    // edit + verify step). Routed through the SurfaceProfile seam (jul-4) rather
+    // than a raw `buildSystemPrompt({ promptPack: "batch" })` so bench declares its
+    // surface like every other entry point — byte-identical to the prior call.
+    // VERIFY axis (jul-4, default-OFF `QUANTA_BENCH_REPRODUCE_FIRST`): on a SWE
+    // instance the knob adds the reproduce-first rule (reproduce the reported
+    // failure → fix → rerun). Absent ⇒ SWE_SURFACE_PROFILE unchanged ⇒ byte-identical.
+    // Measure-first (flat A/B ⇒ revert). CONFOUND WARNING: do NOT A/B this together with
+    // the reproTestK repro-hint path (`prepareReproTest` writes reproduce_issue.py + threads
+    // REPRO_HINT_MESSAGE) — that tells the model a reproduction ALREADY EXISTS, which overlaps
+    // /contradicts this "write your own reproduction" rule. Hold reproTestK fixed (ideally 0)
+    // when measuring this lever.
+    system: composeSystemPromptForSurface(
+      sweVerify === "none"
+        ? SWE_SURFACE_PROFILE
+        : { ...SWE_SURFACE_PROFILE, verifyStrategy: sweVerify },
+      { cwd: sandbox, promptStyle },
+    ),
+    promptSurfaceProfile,
+    cwd: sandbox,
+    // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
+    // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not
+    // leak a `pyright-langserver` child for the 30-min idle-TTL window (the
+    // idle-TTL is an interactive-reuse affordance, useless to a one-shot
+    // bench instance). Prewarm is DEFAULT-ON with nav (warm the localize-phase
+    // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
+    // (`gateDisabled` off-switch). The run `signal` is the warm abort so
+    // session end cancels an in-flight warm instead of riding the budget.
+    ...localEnvSlotOf(instance, sandbox),
+    maxTurns: deps.maxTurns,
+    signal,
+    ...(budgetMeter !== undefined ? { budgetMeter } : {}),
+    // Fork-experiment seam: present only when an experiment is wired ⇒
+    // byte-identical default-OFF (RFC jun-23 §3).
+    ...(deps.turnContextMutator !== undefined
+      ? { turnContextMutator: deps.turnContextMutator }
+      : {}),
+    onConfirm: async () => false,
+    // Real SWE-bench repos blow the context window over a long trajectory.
+    // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
+    // without this, large-repo instances PTL-die instead of compacting.
+    compaction: {},
+    // Verify-guard (ADR-0013): observed bench failure — agent edits a
+    // source file then declares "done" with 0 verification → wrong fix ships.
+    // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
+    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
+    //
+    // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
+    // showed the model can call `test_runner`, receive `ok:false`, and STILL
+    // declare "done"; the presence-only guard accepts the call as "verified"
+    // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
+    // gives one budget slot per branch (presence + must-pass) so a single run
+    // can hit both before the cap; SWE-bench prioritizes measurement integrity
+    // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
+    // Gated additionally on `"full"` execution: the noexec / repro-only
+    // postures deliberately avoid broad repo-test execution, so a must-verify
+    // guard would reintroduce the same host-env flail they are designed to
+    // avoid.
+    // Test-scope guard (RCA 2026-06-19, django-13417). ENFORCING — when ON, the
+    // dispatch pre-flight `consultTestScope` DENIES any mutating tool call whose
+    // target is a test path (edit/write/apply_patch); source-only is a benchmark
+    // invariant for ALL real swebench modes, not just full execution. This keeps
+    // the agent from editing existing tests, chasing its own modified tests, or
+    // gaming PASS_TO_PASS / the oracle. DEFAULT-ON (a defensible measurement
+    // safeguard): the guard is enforced for every swebench instance unless
+    // `QUANTA_BENCH_PROTECT_TESTS=0` is set, which disables it (advisory baseline).
+    // Guard fields (verifyGuard / lspPrewarm / protectTestPaths /
+    // evictLspPoolOnEnd) are NOT set here — `reconcileBenchGuards` is the single
+    // authority, applied AFTER knobs below (jun-28 SSOT: no driver/knob double-set).
+    // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
+    // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
+  }
+}
+
 export const buildConfig = (
   instance: Instance,
   deps: RunInstanceDeps,
@@ -593,108 +733,26 @@ export const buildConfig = (
   const promptStyle = gateOn(process.env, "QUANTA_BENCH_PROMPT_SECTIONED")
     ? ("sectioned" as const)
     : ("flat" as const)
-  const promptSurfaceProfile: AgentConfig["promptSurfaceProfile"] = {
+  const promptSurfaceProfile: NonNullable<AgentConfig["promptSurfaceProfile"]> = {
     envPosture: "frozen",
     promptPack: "batch",
     verifyStrategy: sweVerify,
   }
-  const baseConfig = {
-    // F3 — OTEL join key. The trajectory line for this instance is written to
-    // `<runId>/<instance.id>.<attempt>.jsonl` (BenchObserver keys on `instance.id`,
-    // NOT the upstream `swebench.instanceId`), so we stamp `instance.id` here.
-    // With the `quanta.run.id` resource attr the exporter already carries,
-    // `{runId, instanceId}` becomes the key that joins the top-level `session_loop`
-    // span back to its trajectory. `attempt` is NOT threaded to this driver seam
-    // (it lives in the batch-level retry/Best-of-N loop above the per-attempt
-    // buildConfig call — see observe.ts `RunContext`), so it is left unset here;
-    // the join still works on `runId+instanceId` (attempt is only a same-instance
-    // discriminator). Absent OTEL sink ⇒ span is a no-op sentinel ⇒ zero cost.
-    spanIdentity: { instanceId: instance.id },
-    // G1 cross-vendor diversity: the per-candidate lane port (when the driver
-    // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
-    // the model-lane-diversity knob is a REAL provider swap at the wire site —
-    // not a tag. Absent ⇒ deps.llm labeled with the "repair" phase lane (recorded
-    // as metadata.lane; pure decorator, replay-neutral, behavior byte-identical),
-    // so the main agent's edit turns group under one authoritative "repair" band.
-    llm: laneLlm ?? laneLabeledPort(deps.llm, "repair"),
-    registry,
+  const baseConfig = buildBaseConfig({
+    instance,
+    deps,
+    sandbox,
+    signal,
     stream,
+    laneLlm,
+    registry,
     permission,
     messages,
-    // A2 (jul-3 strategy-audit): batch driver runs are graded by an external
-    // harness — declare the SWE surface profile so the system prompt carries the
-    // `batch` pack (R-NO-EXPLORE-OVER-EDIT: stop exploring once you have a coherent
-    // edit + verify step). Routed through the SurfaceProfile seam (jul-4) rather
-    // than a raw `buildSystemPrompt({ promptPack: "batch" })` so bench declares its
-    // surface like every other entry point — byte-identical to the prior call.
-    // VERIFY axis (jul-4, default-OFF `QUANTA_BENCH_REPRODUCE_FIRST`): on a SWE
-    // instance the knob adds the reproduce-first rule (reproduce the reported
-    // failure → fix → rerun). Absent ⇒ SWE_SURFACE_PROFILE unchanged ⇒ byte-identical.
-    // Measure-first (flat A/B ⇒ revert). CONFOUND WARNING: do NOT A/B this together with
-    // the reproTestK repro-hint path (`prepareReproTest` writes reproduce_issue.py + threads
-    // REPRO_HINT_MESSAGE) — that tells the model a reproduction ALREADY EXISTS, which overlaps
-    // /contradicts this "write your own reproduction" rule. Hold reproTestK fixed (ideally 0)
-    // when measuring this lever.
-    system: composeSystemPromptForSurface(
-      sweVerify === "none"
-        ? SWE_SURFACE_PROFILE
-        : { ...SWE_SURFACE_PROFILE, verifyStrategy: sweVerify },
-      { cwd: sandbox, promptStyle },
-    ),
+    budgetMeter,
+    sweVerify,
+    promptStyle,
     promptSurfaceProfile,
-    cwd: sandbox,
-    // RFC jun-17 — pooled LSP workspace lifecycle for bench. When nav is on,
-    // ALWAYS hard-evict at session end: a per-instance sandbox cwd must not
-    // leak a `pyright-langserver` child for the 30-min idle-TTL window (the
-    // idle-TTL is an interactive-reuse affordance, useless to a one-shot
-    // bench instance). Prewarm is DEFAULT-ON with nav (warm the localize-phase
-    // workspace); the cold arm of the A/B is `QUANTA_LSP_PREWARM=0`
-    // (`gateDisabled` off-switch). The run `signal` is the warm abort so
-    // session end cancels an in-flight warm instead of riding the budget.
-    ...localEnvSlotOf(instance, sandbox),
-    maxTurns: deps.maxTurns,
-    signal,
-    ...(budgetMeter !== undefined ? { budgetMeter } : {}),
-    // Fork-experiment seam: present only when an experiment is wired ⇒
-    // byte-identical default-OFF (RFC jun-23 §3).
-    ...(deps.turnContextMutator !== undefined
-      ? { turnContextMutator: deps.turnContextMutator }
-      : {}),
-    onConfirm: async () => false,
-    // Real SWE-bench repos blow the context window over a long trajectory.
-    // Enable proactive + reactive compaction (RFC §8 / ADR-0004 robustness):
-    // without this, large-repo instances PTL-die instead of compacting.
-    compaction: {},
-    // Verify-guard (ADR-0013): observed bench failure — agent edits a
-    // source file then declares "done" with 0 verification → wrong fix ships.
-    // Gated exactly like SWEBENCH_DIRECTIVE (real SWE-bench only; custom-corpus
-    // byte-identical). Absent ⇒ guard OFF, loop unchanged.
-    //
-    // mustPass (outcome-gate) extension — sanity runs with skills/subagent ON
-    // showed the model can call `test_runner`, receive `ok:false`, and STILL
-    // declare "done"; the presence-only guard accepts the call as "verified"
-    // because it ran. mustPass = ALSO require the verify to PASS. maxTrips=2
-    // gives one budget slot per branch (presence + must-pass) so a single run
-    // can hit both before the cap; SWE-bench prioritizes measurement integrity
-    // over the over-correction risk that motivated DEFAULT_MAX_TRIPS=1.
-    // Gated additionally on `"full"` execution: the noexec / repro-only
-    // postures deliberately avoid broad repo-test execution, so a must-verify
-    // guard would reintroduce the same host-env flail they are designed to
-    // avoid.
-    // Test-scope guard (RCA 2026-06-19, django-13417). ENFORCING — when ON, the
-    // dispatch pre-flight `consultTestScope` DENIES any mutating tool call whose
-    // target is a test path (edit/write/apply_patch); source-only is a benchmark
-    // invariant for ALL real swebench modes, not just full execution. This keeps
-    // the agent from editing existing tests, chasing its own modified tests, or
-    // gaming PASS_TO_PASS / the oracle. DEFAULT-ON (a defensible measurement
-    // safeguard): the guard is enforced for every swebench instance unless
-    // `QUANTA_BENCH_PROTECT_TESTS=0` is set, which disables it (advisory baseline).
-    // Guard fields (verifyGuard / lspPrewarm / protectTestPaths /
-    // evictLspPoolOnEnd) are NOT set here — `reconcileBenchGuards` is the single
-    // authority, applied AFTER knobs below (jun-28 SSOT: no driver/knob double-set).
-    // Bench A/B opt-ins (default-OFF; all unset ⇒ keys omitted entirely,
-    // exactOptionalPropertyTypes-friendly, AgentConfig byte-identical).
-  }
+  })
   const knobApplied = applyBenchKnobs(baseConfig, state, { instance, sandbox })
   const guarded = reconcileBenchGuards(knobApplied, {
     instance,

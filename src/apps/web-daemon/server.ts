@@ -177,6 +177,83 @@ const attachCostAggregator = (
   }
 }
 
+/**
+ * god-code split — the `Bun.serve` listener construction (fetch + websocket
+ * wiring) plus its bound-address resolution and the startup log line, lifted
+ * VERBATIM out of `startWebDaemon` so the caller body stays under the
+ * god-function gate. Pure relocation: the `getServer: () => server` closure
+ * still references this function`s own `server` local (same TDZ-lazy pattern),
+ * so binding + request-time behaviour is byte-identical. Returns the listener
+ * and its resolved bound address for the caller`s handle + `stop` closure.
+ */
+const buildDaemonListener = (params: {
+  readonly config: WebDaemonServerConfig
+  readonly registry: ReturnType<typeof createSessionRegistry>
+  readonly startedAt: number
+  readonly threadStore: ReturnType<typeof setupThreadPersistence>["threadStore"]
+  readonly sharedSession: RuntimeSession
+  readonly readoutSources: WebReadoutSources
+  readonly transcriptPersist: ReturnType<typeof attachTranscriptPersistence>
+  readonly onAttachThread: ((threadId: string) => Promise<void>) | undefined
+  readonly followerApproval: ReturnType<typeof setupFollowerApproval>["followerApproval"]
+}): { server: Server<WSData>; boundPort: number; boundHost: string } => {
+  const {
+    config,
+    registry,
+    startedAt,
+    threadStore,
+    sharedSession,
+    readoutSources,
+    transcriptPersist,
+    onAttachThread,
+    followerApproval,
+  } = params
+  // `fetch` reads `server.port` (the `/network` route) but `server` is the
+  // `Bun.serve` result assigned HERE — `getServer` resolves it lazily at request
+  // time (after binding completes), so the closure may reference it before this
+  // `const` initializer returns without a TDZ hazard.
+  const server: Server<WSData> = Bun.serve<WSData, never>({
+    port: config.port,
+    hostname: config.bind,
+    fetch: buildFetchHandler({
+      config,
+      registry,
+      startedAt,
+      threadStore,
+      sharedSession,
+      readoutSources,
+      getServer: () => server,
+      ...(threadStore !== null ? { activeThreadId: () => transcriptPersist.activeThreadId() } : {}),
+      // A2 — the read-only preview resolver for `GET /artifact/:id`. Absent ⇒
+      // the route 404s (byte-identical). `void` marks the intentional unused when
+      // exactOptionalPropertyTypes strips it below.
+      ...(config.artifactPreviewResolver !== undefined
+        ? { artifactPreviewResolver: config.artifactPreviewResolver }
+        : {}),
+    }),
+    websocket: buildWebSocketHandlers({
+      config,
+      registry,
+      sharedSession,
+      followerApproval,
+      ...(onAttachThread !== undefined ? { onAttachThread } : {}),
+    }),
+  })
+
+  // Bun.serve binds synchronously when a port is requested — `port` is the
+  // OS-chosen port when `config.port === 0`. `hostname` is `undefined` only
+  // on unix sockets (we always bind to a host, so non-undefined here).
+  const boundPort = server.port ?? config.port
+  const boundHost = server.hostname ?? config.bind
+
+  logger.info("web-daemon: listening", {
+    port: boundPort,
+    hostname: boundHost,
+    auth: config.authToken !== undefined,
+  })
+  return { server, boundPort, boundHost }
+}
+
 export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<WebDaemonHandle> => {
   const runtime = await config.runtimeFactory()
   // ONE shared session for the whole daemon lifetime. New WS connections
@@ -246,48 +323,16 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     cost: costAggregator.totals,
   }
 
-  // `fetch` reads `server.port` (the `/network` route) but `server` is the
-  // `Bun.serve` result assigned HERE — `getServer` resolves it lazily at request
-  // time (after binding completes), so the closure may reference it before this
-  // `const` initializer returns without a TDZ hazard.
-  const server: Server<WSData> = Bun.serve<WSData, never>({
-    port: config.port,
-    hostname: config.bind,
-    fetch: buildFetchHandler({
-      config,
-      registry,
-      startedAt,
-      threadStore,
-      sharedSession,
-      readoutSources,
-      getServer: () => server,
-      ...(threadStore !== null ? { activeThreadId: () => transcriptPersist.activeThreadId() } : {}),
-      // A2 — the read-only preview resolver for `GET /artifact/:id`. Absent ⇒
-      // the route 404s (byte-identical). `void` marks the intentional unused when
-      // exactOptionalPropertyTypes strips it below.
-      ...(config.artifactPreviewResolver !== undefined
-        ? { artifactPreviewResolver: config.artifactPreviewResolver }
-        : {}),
-    }),
-    websocket: buildWebSocketHandlers({
-      config,
-      registry,
-      sharedSession,
-      followerApproval,
-      ...(onAttachThread !== undefined ? { onAttachThread } : {}),
-    }),
-  })
-
-  // Bun.serve binds synchronously when a port is requested — `port` is the
-  // OS-chosen port when `config.port === 0`. `hostname` is `undefined` only
-  // on unix sockets (we always bind to a host, so non-undefined here).
-  const boundPort = server.port ?? config.port
-  const boundHost = server.hostname ?? config.bind
-
-  logger.info("web-daemon: listening", {
-    port: boundPort,
-    hostname: boundHost,
-    auth: config.authToken !== undefined,
+  const { server, boundPort, boundHost } = buildDaemonListener({
+    config,
+    registry,
+    startedAt,
+    threadStore,
+    sharedSession,
+    readoutSources,
+    transcriptPersist,
+    onAttachThread,
+    followerApproval,
   })
 
   let stopped = false

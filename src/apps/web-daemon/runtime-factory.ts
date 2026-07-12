@@ -655,6 +655,127 @@ const mintInboundPorts = (
 }
 
 /**
+ * Assemble the {@link RuntimeAgentConfigBase} for a web-daemon session from the
+ * per-session collaborators the factory just minted. Extracted from the factory
+ * closure to keep it under the god-FN cap (mirrors {@link mintSessionCollaborators}
+ * / {@link mintInboundPorts}); a pure projection — every conditional field is
+ * presence-only so an absent gate omits the slot (default-OFF byte-identical).
+ * The `webEnvPosture` derivation rides along as an own-local off `env`.
+ */
+const buildAgentConfigBase = ({
+  env,
+  llm,
+  artifactRegistry,
+  askUserTools,
+  mcpTools,
+  permission,
+  cwd,
+  abort,
+  subagent,
+  skills,
+  planStore,
+  usageHolder,
+  canvasToolDiff,
+  agentState,
+  userInput,
+  controlRequest,
+  follower,
+  observability,
+}: {
+  readonly env: Record<string, string | undefined>
+  readonly llm: LLMPort
+  readonly artifactRegistry: ArtifactRegistry | undefined
+  readonly askUserTools: readonly Tool[]
+  readonly mcpTools: readonly Tool[]
+  readonly permission: PermissionContext
+  readonly cwd: string
+  readonly abort: AbortController
+  readonly subagent: ReturnType<typeof buildSubagentConfigCore>
+  readonly skills: ReturnType<typeof buildSkillsConfigCore>
+  readonly planStore: PlanStore | undefined
+  readonly usageHolder: CanvasUsageSourceHandle
+  readonly canvasToolDiff: CanvasToolDiffSourceHandle | undefined
+  readonly agentState: AgentStateSourceHandle | undefined
+  readonly userInput: WebUserInputPortHandle | undefined
+  readonly controlRequest: WebControlRequestPortHandle | undefined
+  readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
+  readonly observability: {
+    readonly handle: ObservabilityWireHandle
+    readonly bus: HookBus | undefined
+  }
+}): RuntimeAgentConfigBase => {
+  const webEnvPosture = resolveCliDefaultEnvPosture(env)
+  const base: RuntimeAgentConfigBase = {
+    llm,
+    // A2 — the default tools with the SHARED artifact registry threaded in so
+    // the gated `artifact_*` tools register into the SAME instance the turn-drain
+    // reads (single instance, no split-brain; reachable producer). See
+    // {@link buildDaemonToolRegistry}. A1 — plus the web `ask_user` tool (gated).
+    registry: buildDaemonToolRegistry(artifactRegistry, [...askUserTools, ...mcpTools]),
+    stream: new StdoutStream(),
+    permission,
+    messages: [],
+    // jul-9 — the web/Tauri surface is the user's OWN machine too, so honor
+    // QUANTA_ENV_DEFAULT (default-OFF ⇒ "frozen" ⇒ byte-identical).
+    system: buildSystemPrompt(cwd, { envPosture: webEnvPosture }),
+    promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", {
+      envPosture: webEnvPosture,
+    }),
+    cwd,
+    maxTurns: 200,
+    signal: abort.signal,
+    // SECURITY (jun-10) — enable the HITL 4-tier gate so `hand-off-required` ⇒
+    // HARD DENY and `always-confirm` ⇒ ask EVEN under bypass/acceptEdits (CLI
+    // parity; without it `session.permission.set("bypass")` blanket-allows).
+    hitl: { enabled: true },
+    ...(subagent !== undefined ? { subagent } : {}),
+    ...(skills !== undefined ? { skills } : {}),
+    // UUX-1-11 — the plan store rides `base.planStore` (the loop registers
+    // the plan tools when present; absent ⇒ omitted, tools not registered).
+    ...(planStore !== undefined ? { planStore } : {}),
+    // UUX-1-11 — the prompt-usage holder sink is always wired now: the
+    // `/context` readout needs `latest()` regardless of the canvas gate
+    // (pure observation; the canvas frames stay gated at the facade port).
+    onPromptAssembled: usageHolder.sink,
+    ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
+    // A2 — lift the SHARED registry onto the base ⇒ capability bit + the turn
+    // runner's `artifact.ready` producer drain. `{}` when off (byte-identical).
+    ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
+    ...(agentState !== undefined ? { onAgentState: agentState.sink } : {}),
+    // QUANTA_WEB_AGENT_STATE — wire the inbound port so the agent can ask on
+    // web (the tool registers iff this is present). Absent ⇒ tool not
+    // registered (byte-identical).
+    ...(userInput !== undefined ? { userInputPort: userInput.port } : {}),
+    // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — wire the control-request slot so
+    // the loop's turn-top `pollControlRequests` drains a browser/IDE control
+    // frame + applies the effect (set_permission_mode lands on the live
+    // `permission` cell). `env` is the daemon's own `process.env` so the
+    // load-bearing gate check inside the loop matches the mint gate. Absent ⇒
+    // no slot ⇒ the port is never polled (byte-identical).
+    ...(controlRequest !== undefined
+      ? {
+          controlRequest: {
+            port: controlRequest.port,
+            applier: controlRequest.applier,
+            context: controlRequest.context,
+            env,
+          },
+        }
+      : {}),
+    // T02 — wire the conversation-action port + active-turn ref so a web
+    // follower's steer lands as a mid-turn injection (the loop polls the port).
+    ...(follower !== undefined
+      ? {
+          conversationActionPort: follower.surface.port,
+          activeTurnRef: follower.surface.activeTurnRef,
+        }
+      : {}),
+    ...observabilitySlots(observability),
+  }
+  return base
+}
+
+/**
  * Build a `runtimeFactory` suitable for `WebDaemonConfig`. The LLM port is
  * resolved ONCE at boot (env-driven provider pick); each invocation of the
  * returned factory mints a fresh {@link ObservableRuntimeFacade} (= fresh
@@ -714,74 +835,26 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // tools join the registry; clients stop on shutdown; the /mcp readout goes
     // live. NEVER throws (a broken config never crashes daemon boot).
     const { tools: mcpTools, clients: mcpClients, mcpAccessor } = await loadDaemonMcp(env, llm)
-    const webEnvPosture = resolveCliDefaultEnvPosture(env)
-    const base: RuntimeAgentConfigBase = {
+    const base = buildAgentConfigBase({
+      env,
       llm,
-      // A2 — the default tools with the SHARED artifact registry threaded in so
-      // the gated `artifact_*` tools register into the SAME instance the turn-drain
-      // reads (single instance, no split-brain; reachable producer). See
-      // {@link buildDaemonToolRegistry}. A1 — plus the web `ask_user` tool (gated).
-      registry: buildDaemonToolRegistry(artifactRegistry, [...askUserTools, ...mcpTools]),
-      stream: new StdoutStream(),
+      artifactRegistry,
+      askUserTools,
+      mcpTools,
       permission,
-      messages: [],
-      // jul-9 — the web/Tauri surface is the user's OWN machine too, so honor
-      // QUANTA_ENV_DEFAULT (default-OFF ⇒ "frozen" ⇒ byte-identical).
-      system: buildSystemPrompt(cwd, { envPosture: webEnvPosture }),
-      promptSurfaceProfile: promptSurfaceProfileForRunMode("interactive", {
-        envPosture: webEnvPosture,
-      }),
       cwd,
-      maxTurns: 200,
-      signal: abort.signal,
-      // SECURITY (jun-10) — enable the HITL 4-tier gate so `hand-off-required` ⇒
-      // HARD DENY and `always-confirm` ⇒ ask EVEN under bypass/acceptEdits (CLI
-      // parity; without it `session.permission.set("bypass")` blanket-allows).
-      hitl: { enabled: true },
-      ...(subagent !== undefined ? { subagent } : {}),
-      ...(skills !== undefined ? { skills } : {}),
-      // UUX-1-11 — the plan store rides `base.planStore` (the loop registers
-      // the plan tools when present; absent ⇒ omitted, tools not registered).
-      ...(planStore !== undefined ? { planStore } : {}),
-      // UUX-1-11 — the prompt-usage holder sink is always wired now: the
-      // `/context` readout needs `latest()` regardless of the canvas gate
-      // (pure observation; the canvas frames stay gated at the facade port).
-      onPromptAssembled: usageHolder.sink,
-      ...(canvasToolDiff !== undefined ? { onToolDiff: canvasToolDiff.sink } : {}),
-      // A2 — lift the SHARED registry onto the base ⇒ capability bit + the turn
-      // runner's `artifact.ready` producer drain. `{}` when off (byte-identical).
-      ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
-      ...(agentState !== undefined ? { onAgentState: agentState.sink } : {}),
-      // QUANTA_WEB_AGENT_STATE — wire the inbound port so the agent can ask on
-      // web (the tool registers iff this is present). Absent ⇒ tool not
-      // registered (byte-identical).
-      ...(userInput !== undefined ? { userInputPort: userInput.port } : {}),
-      // QUANTA_CONTROL_REQUEST (ADR-0496 A1) — wire the control-request slot so
-      // the loop's turn-top `pollControlRequests` drains a browser/IDE control
-      // frame + applies the effect (set_permission_mode lands on the live
-      // `permission` cell). `env` is the daemon's own `process.env` so the
-      // load-bearing gate check inside the loop matches the mint gate. Absent ⇒
-      // no slot ⇒ the port is never polled (byte-identical).
-      ...(controlRequest !== undefined
-        ? {
-            controlRequest: {
-              port: controlRequest.port,
-              applier: controlRequest.applier,
-              context: controlRequest.context,
-              env,
-            },
-          }
-        : {}),
-      // T02 — wire the conversation-action port + active-turn ref so a web
-      // follower's steer lands as a mid-turn injection (the loop polls the port).
-      ...(follower !== undefined
-        ? {
-            conversationActionPort: follower.surface.port,
-            activeTurnRef: follower.surface.activeTurnRef,
-          }
-        : {}),
-      ...observabilitySlots(observability),
-    }
+      abort,
+      subagent,
+      skills,
+      planStore,
+      usageHolder,
+      canvasToolDiff,
+      agentState,
+      userInput,
+      controlRequest,
+      follower,
+      observability,
+    })
     const turnAssembler = buildInteractiveTurnAssembler()
     const { runtime } = await createRuntimeFromAgentConfigBase({
       base,

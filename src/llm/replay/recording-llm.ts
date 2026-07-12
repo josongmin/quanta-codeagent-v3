@@ -69,6 +69,52 @@ function safeDrain(
   }
 }
 
+interface DegradedSentinelParams {
+  readonly cause: unknown
+  readonly hashFn: (req: StreamInput) => string
+  readonly input: StreamInput
+  readonly startedAt: number
+  readonly captured: readonly StreamEvent[]
+  readonly stripEphemeralRequest: (input: StreamInput) => StreamInput
+  readonly opts: RecordingLlmOpts
+  readonly now: () => number
+}
+
+/** F7 sentinel: a minimal degraded record so a swallowed commit failure on
+ *  a successful turn leaves a VISIBLE hole-marker on the tape instead of
+ *  nothing. Deliberately BYPASSES `opts.scrubber` (the scrubber is a likely
+ *  culprit) — it carries no captured events, only the failing turn's key +
+ *  a `partial:true`/`error` marker, so no unscrubbed content can leak. */
+async function appendDegradedSentinel(params: DegradedSentinelParams): Promise<void> {
+  const { cause, hashFn, input, startedAt, captured, stripEphemeralRequest, opts, now } = params
+  let id: string
+  try {
+    id = hashFn(input)
+  } catch {
+    id = createHash("sha256")
+      .update(`degraded:${startedAt}:${captured.length}`)
+      .digest("hex")
+      .slice(0, 16)
+  }
+  const sentinel: RecordedInteraction = {
+    id,
+    request: stripEphemeralRequest(input),
+    events: [],
+    metadata: {
+      recordedAt: startedAt,
+      model: opts.inner.model ?? "unknown",
+      durationMs: now() - startedAt,
+      partial: true,
+      error: `commit-failed: ${errMessage(cause)}`,
+      ...(opts.callCtx?.instanceId !== undefined ? { instanceId: opts.callCtx.instanceId } : {}),
+      ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
+      ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
+      ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
+    },
+  }
+  await opts.store.append(sentinel)
+}
+
 export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
   const now = opts.now ?? Date.now
   const hashFn = opts.hashRequest ?? ((req: StreamInput) => defaultHashRequest(req, "exact"))
@@ -169,49 +215,22 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
             attempt: opts.callCtx?.attempt,
             capturedEvents: captured.length,
           })
-          await appendDegradedSentinel(commitErr).catch(() => {
+          await appendDegradedSentinel({
+            cause: commitErr,
+            hashFn,
+            input,
+            startedAt,
+            captured,
+            stripEphemeralRequest,
+            opts,
+            now,
+          }).catch(() => {
             // The sentinel is itself best-effort: if store.append is what broke,
             // this degraded append will break too. The `logger.warn` above is the
             // guaranteed non-silent signal; the sentinel is a bonus when the
             // failure was in the scrubber (append still works).
           })
         }
-      }
-
-      /** F7 sentinel: a minimal degraded record so a swallowed commit failure on
-       *  a successful turn leaves a VISIBLE hole-marker on the tape instead of
-       *  nothing. Deliberately BYPASSES `opts.scrubber` (the scrubber is a likely
-       *  culprit) — it carries no captured events, only the failing turn's key +
-       *  a `partial:true`/`error` marker, so no unscrubbed content can leak. */
-      async function appendDegradedSentinel(cause: unknown): Promise<void> {
-        let id: string
-        try {
-          id = hashFn(input)
-        } catch {
-          id = createHash("sha256")
-            .update(`degraded:${startedAt}:${captured.length}`)
-            .digest("hex")
-            .slice(0, 16)
-        }
-        const sentinel: RecordedInteraction = {
-          id,
-          request: stripEphemeralRequest(input),
-          events: [],
-          metadata: {
-            recordedAt: startedAt,
-            model: opts.inner.model ?? "unknown",
-            durationMs: now() - startedAt,
-            partial: true,
-            error: `commit-failed: ${errMessage(cause)}`,
-            ...(opts.callCtx?.instanceId !== undefined
-              ? { instanceId: opts.callCtx.instanceId }
-              : {}),
-            ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
-            ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
-            ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
-          },
-        }
-        await opts.store.append(sentinel)
       }
 
       async function* iterate(): AsyncIterable<StreamEvent> {

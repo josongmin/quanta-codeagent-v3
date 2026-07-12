@@ -12,7 +12,9 @@
 import { extractIssueHint, pytestReportPathFor } from "@/agent"
 import { type OwnerSibling, resolveOwnerSiblings } from "@/agent/closure"
 import { startBackgroundLspPrewarm } from "@/agent/lsp-bridge"
-import { laneLabeledPort, type LLMPort } from "@/llm"
+import { type LLMPort, laneLabeledPort } from "@/llm"
+import type { BenchObserver } from "../../observe"
+import { emitLocalize } from "../../report"
 import type { BenchReproTestTelemetry, Instance, InstanceResult } from "../../types"
 import { buildClosureSession, type ClosureSessionState } from "../closure-session"
 import { validateGoldPatch } from "../gold-sanity"
@@ -31,8 +33,6 @@ import {
   benchRunsRepairPhase,
   benchShouldRunRepairPhase,
 } from "../repair-phase-policy"
-import type { BenchObserver } from "../../observe"
-import { emitLocalize } from "../../report"
 import type { Wiring } from "../report"
 import type { ReproArtifactSink } from "../repro-artifacts-sink"
 import { filesFromPatch } from "../selection-executor"
@@ -251,6 +251,34 @@ const resolveRepairState = (args: {
   return { effectiveRepair, repairGateEligible, gateDecisionVerify, runRepair }
 }
 
+/** T3 — merge forward-localize consumer owners into the stage-1 candidate set.
+ *  Pure relocation of the localize-candidate → stage-1 assembly out of
+ *  `prepareAttemptContext` (byte-identical). Input = the localize candidates plus
+ *  the optional forward-localize owners; output = the deduped stage-1 file list. */
+const mergeForwardLocalizeStage1Files = (
+  hintRepro: { readonly localizeCandidates: readonly string[] },
+  forwardLocalizeOwners: readonly string[] | undefined,
+): readonly { file: string; score: number }[] => {
+  // T3 — forward-localize consumers enter as low-score ADDITIONAL owner candidates
+  // (they widen the set; ranking still prefers backward-localized owners). score 0
+  // keeps them below any positively-ranked stage-1 file. DEDUP against the stage-1
+  // set so a consumer already backward-localized is not double-listed (which would
+  // skew owner-coverage counts and waste a candidate-family slot).
+  const stage1Localized = stage1FilesOf(hintRepro.localizeCandidates)
+  // DEDUP by NORMALIZED path: stage1FilesOf keeps the raw localize-candidate paths
+  // while forwardLocalizeOwners are already `normalizeRepoPath`'d, so a raw-vs-raw
+  // Set compare silently never matches (audit R2). Normalize BOTH sides of the
+  // membership test so a consumer already backward-localized is truly dropped.
+  const stage1Seen = new Set(stage1Localized.map((entry) => normalizeRepoPath(entry.file)))
+  const stage1Files = [
+    ...stage1Localized,
+    ...(forwardLocalizeOwners ?? [])
+      .filter((file) => !stage1Seen.has(normalizeRepoPath(file)))
+      .map((file) => ({ file, score: 0 })),
+  ]
+  return stage1Files
+}
+
 export const prepareAttemptContext = async (
   instance: Instance,
   sandbox: string,
@@ -293,23 +321,7 @@ export const prepareAttemptContext = async (
     deps.reproArtifactSink,
     observer,
   )
-  // T3 — forward-localize consumers enter as low-score ADDITIONAL owner candidates
-  // (they widen the set; ranking still prefers backward-localized owners). score 0
-  // keeps them below any positively-ranked stage-1 file. DEDUP against the stage-1
-  // set so a consumer already backward-localized is not double-listed (which would
-  // skew owner-coverage counts and waste a candidate-family slot).
-  const stage1Localized = stage1FilesOf(hintRepro.localizeCandidates)
-  // DEDUP by NORMALIZED path: stage1FilesOf keeps the raw localize-candidate paths
-  // while forwardLocalizeOwners are already `normalizeRepoPath`'d, so a raw-vs-raw
-  // Set compare silently never matches (audit R2). Normalize BOTH sides of the
-  // membership test so a consumer already backward-localized is truly dropped.
-  const stage1Seen = new Set(stage1Localized.map((entry) => normalizeRepoPath(entry.file)))
-  const stage1Files = [
-    ...stage1Localized,
-    ...(forwardLocalizeOwners ?? [])
-      .filter((file) => !stage1Seen.has(normalizeRepoPath(file)))
-      .map((file) => ({ file, score: 0 })),
-  ]
+  const stage1Files = mergeForwardLocalizeStage1Files(hintRepro, forwardLocalizeOwners)
   const ownerResolved = await resolveOwnerResolved({
     instance,
     posture: hintRepro.posture,

@@ -36,10 +36,10 @@ import {
   deriveToolFilter,
   loadContinueFromForOwner,
   ownersForRegistry,
-  recordContinueFromOwner,
   ROOT_LINEAGE,
+  recordContinueFromOwner,
 } from "./agent-tool"
-import type { TaskOwnerToken, TaskRegistry } from "./registry"
+import type { TaskRegistry } from "./registry"
 import type {
   CloseAgentInput,
   CloseAgentOutput,
@@ -548,6 +548,82 @@ interface SpawnAgentDeps {
  *  only RUNNING records count against the cap (settled tasks free a slot). */
 const countRunning = (registry: TaskRegistry): number => registry.pendingIds().length
 
+/** Assemble the {@link SubagentRequest} handed to the runner from the parsed
+ *  spawn input + the freshly-minted task id / abort controller / resolved
+ *  child depth + prior-attempt text. Pure builder extracted from
+ *  {@link handleSpawnAgent} (god-function split); behaviour-preserving. */
+const buildSubagentRequest = (
+  input: SpawnAgentInput,
+  deps: SpawnAgentDeps,
+  taskId: string,
+  abort: AbortController,
+  childDepth: number,
+  priorAttempt: string | undefined,
+): SubagentRequest => {
+  // Per-child budget from the optional turn/token caps (parity with the
+  // foreground `agent` tool). Built only when at least one is set.
+  const budget =
+    input.max_turns !== undefined || input.max_tokens !== undefined
+      ? {
+          ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+          ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
+        }
+      : undefined
+
+  // `checkpoint` ⇒ tell the child to write interim findings to a parent-readable
+  // path. Skipped under `isolation:"worktree"` (parent cannot read inside a
+  // throwaway worktree) and when no cwd was injected (nowhere to point it).
+  const checkpointPath =
+    input.checkpoint === true && input.isolation !== "worktree" && deps.cwd !== undefined
+      ? buildCheckpointPath(deps.cwd, taskId)
+      : undefined
+
+  // ALBB-16 #2 — compose the fork_turns inherited-context preamble onto the
+  // child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
+  // The spec is read defensively (`fork_turns` is not on the frozen 6-tool schema
+  // yet, so it may be absent post-parse ⇒ "none" ⇒ the composer is identity).
+  // No `deps.forkPrompt` ⇒ raw prompt (byte-identical legacy path).
+  const forkSpec = (input as { fork_turns?: "none" | "all" | number }).fork_turns ?? "none"
+  const forkedPrompt =
+    deps.forkPrompt !== undefined ? deps.forkPrompt(input.prompt, forkSpec) : input.prompt
+
+  // jul-7 audit (Fix-C completeness): derive the tool allowlist from `task_kind` when no
+  // explicit `tool_filter` is given — PARITY with the trio `agent` tool. Without this a
+  // `task_kind:"read"` 6-tool spawn left `toolFilter` undefined ⇒ the child inherited the FULL
+  // parent registry + every feature tool (spawn_agent/team_*). Explicit `tool_filter` wins;
+  // both absent ⇒ undefined ⇒ unrestricted (byte-identical).
+  const effectiveToolFilter =
+    input.tool_filter ??
+    (input.task_kind !== undefined ? deriveToolFilter(input.task_kind) : undefined)
+
+  const req: SubagentRequest = {
+    prompt: forkedPrompt,
+    depth: childDepth,
+    signal: abort.signal,
+    // ADR-0437 follow-up — thread the registry task id so the runner can
+    // register a per-child turn waker under the SAME id `followup_task` uses.
+    taskId,
+    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
+    ...(effectiveToolFilter !== undefined ? { toolFilter: effectiveToolFilter } : {}),
+    // Parity passthroughs — the runner already honors each (buildChildConfig /
+    // buildSeedPrompt). Conditional-spread so an unset field is byte-identical.
+    ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
+    ...(input.owned_surfaces !== undefined ? { ownedSurfaces: input.owned_surfaces } : {}),
+    ...(input.forbidden_surfaces !== undefined
+      ? { forbiddenSurfaces: input.forbidden_surfaces }
+      : {}),
+    ...(input.task_kind !== undefined ? { taskKind: input.task_kind } : {}),
+    ...(input.result_shape !== undefined ? { resultShape: input.result_shape } : {}),
+    ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.role !== undefined ? { role: input.role } : {}),
+    ...(input.effort !== undefined ? { effort: input.effort } : {}),
+    ...(budget !== undefined ? { budget } : {}),
+    ...(priorAttempt !== undefined ? { priorAttempt } : {}),
+    ...(checkpointPath !== undefined ? { checkpointPath } : {}),
+  }
+  return req
+}
+
 /** Spawn a child subagent through the injected runner. Returns the registry
  *  task id which `wait_agent` / `close_agent` / `send_input` reference. The
  *  caller MUST stash the returned ownerToken to authorize a later close. */
@@ -634,66 +710,7 @@ export const handleSpawnAgent = async (
     label: input.agent_type ?? input.prompt.slice(0, 40),
   })
 
-  // Per-child budget from the optional turn/token caps (parity with the
-  // foreground `agent` tool). Built only when at least one is set.
-  const budget =
-    input.max_turns !== undefined || input.max_tokens !== undefined
-      ? {
-          ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
-          ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
-        }
-      : undefined
-
-  // `checkpoint` ⇒ tell the child to write interim findings to a parent-readable
-  // path. Skipped under `isolation:"worktree"` (parent cannot read inside a
-  // throwaway worktree) and when no cwd was injected (nowhere to point it).
-  const checkpointPath =
-    input.checkpoint === true && input.isolation !== "worktree" && deps.cwd !== undefined
-      ? buildCheckpointPath(deps.cwd, taskId)
-      : undefined
-
-  // ALBB-16 #2 — compose the fork_turns inherited-context preamble onto the
-  // child's seed prompt, mirroring the trio `agent` tool's `applyForkPromptIfNeeded`.
-  // The spec is read defensively (`fork_turns` is not on the frozen 6-tool schema
-  // yet, so it may be absent post-parse ⇒ "none" ⇒ the composer is identity).
-  // No `deps.forkPrompt` ⇒ raw prompt (byte-identical legacy path).
-  const forkSpec = (input as { fork_turns?: "none" | "all" | number }).fork_turns ?? "none"
-  const forkedPrompt =
-    deps.forkPrompt !== undefined ? deps.forkPrompt(input.prompt, forkSpec) : input.prompt
-
-  // jul-7 audit (Fix-C completeness): derive the tool allowlist from `task_kind` when no
-  // explicit `tool_filter` is given — PARITY with the trio `agent` tool. Without this a
-  // `task_kind:"read"` 6-tool spawn left `toolFilter` undefined ⇒ the child inherited the FULL
-  // parent registry + every feature tool (spawn_agent/team_*). Explicit `tool_filter` wins;
-  // both absent ⇒ undefined ⇒ unrestricted (byte-identical).
-  const effectiveToolFilter =
-    input.tool_filter ?? (input.task_kind !== undefined ? deriveToolFilter(input.task_kind) : undefined)
-
-  const req: SubagentRequest = {
-    prompt: forkedPrompt,
-    depth: childDepth,
-    signal: abort.signal,
-    // ADR-0437 follow-up — thread the registry task id so the runner can
-    // register a per-child turn waker under the SAME id `followup_task` uses.
-    taskId,
-    ...(input.agent_type !== undefined ? { agentType: input.agent_type } : {}),
-    ...(effectiveToolFilter !== undefined ? { toolFilter: effectiveToolFilter } : {}),
-    // Parity passthroughs — the runner already honors each (buildChildConfig /
-    // buildSeedPrompt). Conditional-spread so an unset field is byte-identical.
-    ...(input.isolation !== undefined ? { isolation: input.isolation } : {}),
-    ...(input.owned_surfaces !== undefined ? { ownedSurfaces: input.owned_surfaces } : {}),
-    ...(input.forbidden_surfaces !== undefined
-      ? { forbiddenSurfaces: input.forbidden_surfaces }
-      : {}),
-    ...(input.task_kind !== undefined ? { taskKind: input.task_kind } : {}),
-    ...(input.result_shape !== undefined ? { resultShape: input.result_shape } : {}),
-    ...(input.model !== undefined ? { model: input.model } : {}),
-    ...(input.role !== undefined ? { role: input.role } : {}),
-    ...(input.effort !== undefined ? { effort: input.effort } : {}),
-    ...(budget !== undefined ? { budget } : {}),
-    ...(priorAttempt !== undefined ? { priorAttempt } : {}),
-    ...(checkpointPath !== undefined ? { checkpointPath } : {}),
-  }
+  const req = buildSubagentRequest(input, deps, taskId, abort, childDepth, priorAttempt)
 
   // Fire-and-forget: the registry record settles when the runner returns.
   // On EITHER terminal path (complete/fail) drop the optional agentMeta entry
