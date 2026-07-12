@@ -88,6 +88,10 @@ export const buildSessionLoopOptions = async (deps: {
     // #8 — the live plan-queue store, threaded so the loop can build the
     // mid-turn capture facade over it when QUANTA_MIDTURN_CAPTURE=1.
     planQueueStore: wires.planQueueStore,
+    // `/goal` (Codex parity) — the surface-owned objective store, threaded so
+    // the loop can arm the idle goal-continuation ticker over the SAME instance
+    // `/goal` mutates (gated by QUANTA_GOAL_ENFORCE).
+    objectiveStore: wires.objectiveStore,
     // #8 last-mile (jun-6) — the stdin source for the in-turn reader (host-
     // injected; default-OFF unless the capture knob is set). Spread by-presence.
     ...(deps.inTurnStdin !== undefined ? { inTurnStdin: deps.inTurnStdin } : {}),

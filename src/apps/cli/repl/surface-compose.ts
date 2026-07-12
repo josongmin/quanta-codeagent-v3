@@ -9,6 +9,7 @@ import {
 } from "@/agent/conversation-checkpoint"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
+import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
 import {
   defaultPlanQueueStore,
   type PlanQueueStore,
@@ -178,6 +179,12 @@ export interface ReplSurfaceWires {
    *  mid-turn capture) enqueue into THIS instance; the slash inspects/mutates
    *  it. Exposed so the loop can also enqueue/drain against the same store. */
   readonly planQueueStore: PlanQueueStore
+  /** `/goal` (Codex "Pursuing goal" parity) — the surface-owned per-thread
+   *  objective store. The SAME instance backs the `/goal` slash slot (set/show)
+   *  and is threaded to the loop, which arms the idle goal-continuation ticker
+   *  over it when `QUANTA_GOAL_ENFORCE` is set. Always present; pursuit is gated,
+   *  not the store. */
+  readonly objectiveStore: ObjectivePort
   /** Install the `/queue` `sendNow` injection target once the loop owns its
    *  `ExternalPromptQueue`. Until installed, `sendNow` returns a typed
    *  "send-not-possible" (the entry is still removed — see `PlanQueueStore`). */
@@ -887,10 +894,21 @@ export const composeSurfaceWires = (
   const dreamSlot: DreamSlashState | undefined =
     dreamTrigger !== undefined ? { trigger: dreamTrigger } : undefined
 
+  // `/goal` (Codex parity) — mint the surface-owned objective store once. The
+  // slash command sets/shows the goal on it; the loop arms the idle-continuation
+  // ticker over the SAME instance (gated by QUANTA_GOAL_ENFORCE).
+  const objectiveStore = createObjectiveStore()
+
   const dispatchSlash = buildSurfaceDispatch({
     slashCtx,
     convCheckpointSlot,
     sessionIo,
+    // `/goal` — bind the shared store + thread id (only for a persistent
+    // session; ephemeral threads have no goal to pursue). Absent ⇒ `/goal`
+    // prints "not wired" (default-OFF byte-identical).
+    ...(typeof setup.sessionId === "string" && setup.sessionId.length > 0
+      ? { goal: { port: objectiveStore, threadId: setup.sessionId } }
+      : {}),
     // LIVE `/context` seam — the merged segmented view (prompt-assembly segments
     // + the S3 reasoning-token annotation). Reads the SAME `contextUsageHolder`
     // the loop's `onPromptAssembled` writes and the stream tee feeds reasoning
@@ -962,6 +980,7 @@ export const composeSurfaceWires = (
       : {}),
     setSideConversationStart,
     planQueueStore,
+    objectiveStore,
     setPlanQueueSendNow,
     // B2 (jul-04) — the loop calls this once it mints the automation engine to
     // install the live `/cron` slash slot (late-bind, mirrors setPlanQueueSendNow).

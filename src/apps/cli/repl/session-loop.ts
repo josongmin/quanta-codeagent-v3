@@ -21,6 +21,7 @@ import { loadSessionById } from "@/session"
 import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { readCliKnob } from "../cli-knobs-accessor"
+import { startGoalContinuationTicker } from "../goal-continuation-hook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { wireInboxBannerOntoSlot } from "./automation-banner"
 import type { ConvCheckpointWire } from "./conv-checkpoint-wire"
@@ -205,6 +206,11 @@ export interface RunSessionLoopDeps {
    *  when `QUANTA_MIDTURN_CAPTURE=1`. Absent ⇒ no capture wire (default-OFF
    *  byte-identical). */
   readonly planQueueStore?: import("@/agent/plan-queue").PlanQueueStore
+  /** `/goal` (Codex "Pursuing goal" parity) — the surface-owned objective store
+   *  (the SAME instance `/goal` mutates). When present, the loop arms the idle
+   *  goal-continuation ticker over it, gated by `QUANTA_GOAL_ENFORCE`. Absent ⇒
+   *  no ticker (default-OFF byte-identical). */
+  readonly objectiveStore?: import("@/agent/objective").ObjectivePort
   /** #8 last-mile (jun-6) — the live stdin source for the CONCURRENT in-turn
    *  keystroke reader (closed-port DI; the host binds `process.stdin`, tests bind
    *  a fake). Only consumed when the mid-turn-capture wire is PRESENT
@@ -268,6 +274,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     registerSideConversationStart,
     registerPlanQueueSendNow,
     registerAutomationSlash,
+    objectiveStore,
     runtimeFacadeCompose,
     playbookSeam,
     playbookCliFlag,
@@ -791,6 +798,41 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         : undefined
     if (reactorBridge !== undefined) {
       closeStack.push({ label: "reactorBridge.close", dispose: () => reactorBridge.close() })
+    }
+
+    // Codex "Pursuing goal" — arm the idle goal-continuation ticker over the
+    // shared objective store. This is the LIVE driver that activates the H17
+    // continuation machine (`@/agent/objective`): on each idle tick with an
+    // `active` goal, `resume` enqueues a turn carrying the goal text so the agent
+    // keeps working toward it until it is completed / paused / limited. Gated by
+    // QUANTA_GOAL_ENFORCE ⇒ OFF arms no timer (byte-identical).
+    const goalTicker =
+      objectiveStore !== undefined
+        ? startGoalContinuationTicker({
+            enabled: runtimeConfig().goalContinuationEnforce,
+            threadId: setup.sessionId,
+            probes: {
+              objective: objectiveStore,
+              threadIdle: () => setup.idleMonitor.isIdle(),
+              planModeActive: () => setup.planMode,
+              turnActive: () => false,
+              queuedInputPending: () => externalPromptQueue.size() > 0,
+              mailboxInputPending: () => (textInbox?.size() ?? 0) > 0,
+              isEphemeral: () => setup.sessionId === undefined,
+              resume: async (tid) => {
+                const goal = objectiveStore.get(tid)?.goal
+                await enqueueWithHeartbeat(
+                  goal !== undefined && goal.length > 0
+                    ? `Continue pursuing the active goal until it is fully complete. Before declaring it done, verify completion against the actual current state, requirement by requirement — do not stop merely because progress was made. Goal: ${goal}`
+                    : "Continue pursuing the active goal until it is fully complete.",
+                  {},
+                )
+              },
+            },
+          })
+        : undefined
+    if (goalTicker !== undefined) {
+      closeStack.push({ label: "goalTicker.stop", dispose: () => goalTicker.stop() })
     }
 
     // ADR-0468 — NDJSON live-introspection sink. Default-OFF: NullNdjsonSink
