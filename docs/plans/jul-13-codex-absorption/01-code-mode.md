@@ -1,5 +1,13 @@
 # RFC: code_mode (tools-as-code) — Codex 5059 흡수
 
+> ## ⚠️ 정정 (HEAD 검증 리뷰 2026-07-13, targeted rail 26 pass/0 fail — 본문 상충 시 이 블록 우선)
+> LANDED 판정은 맞으나 4곳 보정:
+> - **"no console"은 기술적으로 false.** no-op `console` 객체가 존재(log/info/warn/error/debug 정의되나 no-op, `src/codemode/runtime.ts:574`). 정확한 표현 = **"host-observable console output 없음"**.
+> - **in-process QuickJS-WASM ≠ 별도-프로세스 sandbox (보안 동급 아님).** JS capability escape는 잘 막지만 QuickJS/WASM/runtime-binding crash는 **agent host와 같은 failure domain**(freed VM 접근 = uncatchable WASM abort, 코드에도 방어 주석). 별도 host = v1 KILL이 맞되 "중복기능"이 아니라 **containment backlog** — 재검토 조건: (a) code_mode default-ON/untrusted workload, 또는 (b) VM crash가 전체 세션을 죽인 실제 trajectory. 학계·업계는 tools-as-code 지지(CodeAct ≤+20% 성공률, Anthropic code-exec) — 단 효과는 workload-dependent.
+> - **D1 store/load = 단순 Map 금지, 계약 필요.** session namespace 강제(cross-session 불가)·key수/길이/value·총 bytes quota·JSON-serializable closed type만·write/read 양쪽 redaction·session close 시 deterministic clear·key provenance+categorical audit·`__proto__`/prototype-pollution/reserved-key 방어. **persistence = prompt-injection persistence 경로**(AgentDojo/OWASP → persistent memory는 일반 캐시보다 고위험 취급).
+> - **D2 "pricing/usage seam 재사용" 부정확.** BudgetMeter/pricing은 provider 사후보고 usage를 누적할 뿐 arbitrary cell output을 **사전 tokenization하지 않음**(repo 일반 estimator = chars/4). 정확한 `max_output_tokens`엔 active-model별 **TokenCounterPort 필요** — 없으면 pragma를 reject하거나 기존 `max_output_bytes`로 정직 유지(chars/4를 조용히 token limit으로 쓰면 긴 JSON/코드/CJK에서 under-cap). **`text()/exit()`는 v1 true gap 아님**(return이 exit+single output 대체, multi-item 관측될 때만 추가).
+> - **권고 순서:** ON/OFF benchmark → bounded session store/load → (exact tokenizer port 있을 때만) max_output_tokens → process isolation은 production activation gate로 보류.
+
 - **상태**: Design / **implementation not started** (이 RFC 범위 한정). 단, ⚠️ **핵심 커널은 이미 LANDED**(§0 참조) — 이 문서는 그 위의 **델타 + 측정** 설계다.
 - **날짜**: 2026-07-13
 - **Provenance**: Codex build 5059 / codex-rs 0.144.0-alpha.4. 증거 SSOT = `.extracted_source/codex/_codex-bin-symbols.txt`(축자 인용). 라이선스: Codex는 OpenAI 사유 — **코드 복붙 금지, 패턴/설계만**.

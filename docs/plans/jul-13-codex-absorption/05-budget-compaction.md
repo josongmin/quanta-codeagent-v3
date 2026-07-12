@@ -1,5 +1,11 @@
 # RFC: Codex `rollout_budget` + `remote_compaction_v2` 흡수 판정 (LOW candidate)
 
+> ## ⚠️ 정정 (HEAD 검증 리뷰 2026-07-13 — 본문 상충 시 이 블록 우선)
+> - **budget = record-and-skip 맞음. 단 "USD가 항상 token budget의 superset"이라 쓰지 말 것.** cache pricing·model switching·reasoning-token 가격차 때문에 같은 token 수↔비용이 단조롭게 같은 정책이 아님. 정확한 표현 = **"비용 폭주 방지가 목적이면 USD가 더 적합"** 까지만.
+> - **compaction = "우리 것이 superset" 표현 낮춰야 함.** 우리는 trigger/breaker/background/salvage가 더 풍부하나, **장기실행 SOTA(append-only canonical session log → versioned context projection → compaction, 원본 보존으로 복구가능)의 superset은 아님.** 현 `ConversationSummaryArchive`는 session-local bounded recent window·FIFO 64·**event log of record 아님·version/provenance stamp 없음**(`src/agent/conversation-summary-archive.ts:107`).
+> - **comp_hash 단독 = detection만, recovery 불가.** 보강 시 단일 hash가 아니라 provenance envelope 필요: `source_event_range·source_digest·compactor_contract_version·static_authority_digest·model_id·summary_digest·created_at`. **hash 대상은 dynamic prompt(날짜·시각 포함 시 매턴 drift) 아니라 static compaction contract + repo/AGENTS authority digest + model/strategy version.** mismatch 시 재compact할 canonical source log 없으면 stale 표시만·수리 불가.
+> - **정확한 판정:** finite session만 목표 → comp_hash LOW ROI backlog. restart/resume 넘는 long-horizon managed agent 목표 → **versioned context projection + canonical log가 중간+ 우선순위.** hash 단독 구현 = 비추천.
+
 - **상태**: Evaluation / verdict = **거의 record-and-skip** (아래 §판정)
 - **날짜**: 2026-07-13
 - **North-star 제약**: measure-first. 이건 audit가 "이미 등가물 보유" 플래그를 단

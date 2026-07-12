@@ -1,5 +1,8 @@
 # RFC 03: execpolicy-amendment 흡수 — 모델이 승인규칙을 제안하고 영속화하는 패턴
 
+> ## ⚠️ 정정 (HEAD 검증 리뷰 2026-07-13 — NO-GO 강화)
+> NO-GO 권고 맞음. 추가할 것: 이건 편의기능이 아니라 **authorization model 변경**. 현 trust store는 파일기반·OS keyring 암호화는 follow-up·TTL optional(없으면 영구)·command-pattern/project/global cascade(`trust-scope-store.ts:1`). **"HARD_DENY 있으니 안전"은 충분조건 아님** — `bash|git` 같은 broad prefix는 push·remote 변경·credential helper·hook/config 미지 조합 포함. MCP/OWASP는 wildcard/omnibus scope 회피·최소권한·점진 elevation·명시 동의 권고. 재검토 조건 생겨도 **plain prefix amendment 금지** — 최소 grant identity = principal·tool·executable·argv constraint·cwd/repo identity·env constraints·expiry·granting user·justification·revocation id·policy version. 즉 **capability grant지 문자열 prefix allowlist 아님.** 현 pain은 session-prefix로 대부분 해결 → 지금 no-go 합리적.
+
 - **상태**: Draft / **USER SIGN-OFF 필요** (구현 착수 전 명시적 승인 없이는 진행 금지)
 - **날짜**: 2026-07-13
 - **출처**: Codex 5059 `ExecPolicyAmendment` 흡수 후보

@@ -1,5 +1,8 @@
 # RFC: Wall-clock time injection + `sleep` tool (Codex 5059 흡수)
 
+> ## ⚠️ 정정 (HEAD 검증 리뷰 2026-07-13 — BACKLOG 동의, 착수 시 분리 필수)
+> 핵심 = "bare sleep 만들기"가 아니라 **어떤 대기인가를 분리**하는 것. (a) 수 초 bounded polling → abortable sleep leaf tool 가능. (b) 수분~수일/worker restart 넘는 대기 → **persisted timer/checkpoint/resume 필요**(일반 setTimeout/sleep은 장기실행 SOTA 아님 — durable execution은 timer를 persistence layer에 기록·worker 미점유·재시작 후 resume; LangGraph는 interrupt 시 state checkpoint+외부입력 resume). (c) 외부 상태변화 대기 → polling보다 event/signal wakeup 우선. 착수 시: short sleep vs durable wait 별도 primitive · monotonic elapsed vs wall-clock timestamp 분리 · deadline/timezone typed value · **prompt time reminder는 interval-gated(dynamic timestamp가 매 turn prompt-cache key 깨지 않게 delivery condition 고정)** · new input은 abort signal 아니라 durable wake event로. finite-turn 벤치선 backlog 맞음.
+
 - **상태**: Draft / BACKLOG (조건부 — 착수 게이트는 §4)
 - **날짜**: 2026-07-13
 - **North-star 제약**:

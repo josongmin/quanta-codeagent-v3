@@ -372,6 +372,8 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 /* ── response text ── */
 .resp-block{border-left:2px solid #c8b8e8;padding-left:10px;margin-top:2px}
 .resp-label{font-size:9px;font-weight:700;color:#7755bb;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
+.resp-decided{font-size:12.5px;color:#6a4bb0;margin-top:3px;line-height:1.5}
+.resp-decided b{color:#4e2f9e;font-weight:600}
 .resp-text{
   font-size:13px;color:#2a2a3a;white-space:pre-wrap;line-height:1.7;word-break:break-word;
 }
@@ -657,6 +659,8 @@ const LANGS={
     thinking:'◈ 사고 과정',
     promptIn:'📨 에이전트 · 프롬프트 전달',
     modelSays:'💬 모델 응답 · 판단',
+    modelDecided:'도구 호출 결정',
+    rawResponse:'LLM 응답 페이로드 (raw · 호출 후)',
     toolResultsHdr:'↩ 도구 결과 · 환경 응답',
     debugIndex:'🐞 디버그 인덱스',
     anomalies:'이상 지점',
@@ -718,6 +722,8 @@ const LANGS={
     thinking:'◈ Thinking',
     promptIn:'📨 Agent · prompt to LLM',
     modelSays:'💬 Model response · reasoning',
+    modelDecided:'decided to call',
+    rawResponse:'LLM response payload (raw · post-call)',
     toolResultsHdr:'↩ Tool result · environment',
     debugIndex:'🐞 Debug index',
     anomalies:'anomalies',
@@ -1801,7 +1807,15 @@ function renderTurnGroup(turn,idx,preQuantaHtml){
   //    use is EXECUTED by Quanta (below) as a distinct tool row.
   const thinkHtml=turn.output.thinking?renderThinking(turn.output.thinking):''
   const respHtml=turn.output.text.trim()?renderResponse(turn.output.text,idx):''
-  const llmBody=thinkHtml+respHtml
+  // The tool(s) the model chose ARE its response — a bare tool_use with no prose
+  // still ANSWERED the request. Surface the decision on the LLM side (its args +
+  // result are executed by Quanta below); without this the request row was left
+  // with no visible response on every prose-less turn (the whole repair loop).
+  const decided=turn.output.tools.length
+    ?`<div class="resp-decided">🔧 ${T('modelDecided')}: ${turn.output.tools.map(t=>`<b>${esc(t.name||'tool')}</b>`).join(', ')}</div>`
+    :''
+  const bareDecision=decided&&!thinkHtml&&!respHtml
+  const llmBody=thinkHtml+respHtml+(bareDecision?`<div class="resp-label">${T('modelSays')}</div>`:'')+decided+renderRawResponse(turn)
   if(llmBody){
     const meta=`${tokIn||tokOut?`<span class="chat-tok">↑${tokIn} ↓${tokOut}${cacheRead?` ⚡${fN(cacheRead)}`:''}</span>`:''}${dur?`<span class="chat-dur">⏱ ${dur}</span>`:''}`
     rows.push(chatRow({
@@ -1863,6 +1877,24 @@ function renderRawPayload(turn){
   const id=uid()
   return`<div class="payload-hd">📤 ${T('rawPayload')}</div>
     <div class="chat-bubble quanta clamp" id="${id}">${esc(raw)}<span class="clamp-fade"></span></div>
+    <div class="more-btn" onclick="toggleClamp('${id}',this)">${T('showMore')} ▾</div>`
+}
+
+// The RAW LLM response for this turn — the assistant output verbatim: reasoning +
+// the tool_use block(s) with their FULL input args, exactly what the model
+// returned. Mirrors renderRawPayload (the request side) so BOTH directions of the
+// call are inspectable raw, not just the summarized decision line.
+function renderRawResponse(turn){
+  const o=turn.output||{}
+  const seg=[]
+  if(o.thinking&&o.thinking.trim())seg.push('◈ thinking\n'+o.thinking.trim())
+  if(o.text&&o.text.trim())seg.push(o.text.trim())
+  for(const t of (o.tools||[]))seg.push(`⟦tool_use ${t.name??'?'} ${JSON.stringify(t.input??{})}⟧`)
+  const raw=seg.join('\n\n')
+  if(!raw.trim())return''
+  const id=uid()
+  return`<div class="resp-label">📥 ${T('rawResponse')}</div>
+    <div class="chat-bubble llm clamp" id="${id}">${esc(raw)}<span class="clamp-fade"></span></div>
     <div class="more-btn" onclick="toggleClamp('${id}',this)">${T('showMore')} ▾</div>`
 }
 

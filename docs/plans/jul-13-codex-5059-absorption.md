@@ -1,5 +1,7 @@
 # 작업 명세 — Codex 5059(ChatGPT.app) 흡수 후보 (candidate별)
 
+> **Execution SSOT:** [`docs/tickets/jul-13-codex-5059/00-index.md`](../tickets/jul-13-codex-5059/00-index.md). 이 문서는 최초 후보 설계 기록이다. 현재 `HEAD` 재감사에서 정정된 분류, 실행 순서, no-go/skip 판정은 ticket index가 우선한다.
+
 - **Date:** 2026-07-13
 - **Provenance:** `.extracted_source/codex/`(build 5059 / codex-rs 0.144.0-alpha.4) 3-track 신규기능 어딧 → 엔진 후보 6개를 strings 스키마/프롬프트/config 수준으로 구체검증(REFRESH-DIFF-2026-07-13). 이 문서는 후보별 **흡수 작업명세**.
 - **증거 SSOT:** `.extracted_source/codex/_codex-bin-symbols.txt`(115K줄). 모든 Codex 인용은 거기 축자.

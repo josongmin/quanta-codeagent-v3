@@ -1,5 +1,11 @@
 # RFC: Codex `multi_agent_v2` 델타 흡수 (rebuild 아님)
 
+> ## ⚠️ 정정 (HEAD 검증 리뷰 2026-07-13, targeted rail 26 pass/0 fail — 아래 본문 상충 시 이 블록 우선)
+> **가장 먼저 고칠 문장 = "fork_turns 이미 있음 = 델타 없음". 틀렸다.**
+> - **fork_turns = ALREADY-HAVE core / XS activation gap (완전 already-have 아님).** core(`dispatch-6.ts` forkPrompt none|all|number, handler)는 있으나 **strict 6-tool `SpawnAgentInputSchema`(`tools-6.ts:139`)에 `fork_turns` 필드가 없어 모델 호출이 schema 단계에서 reject**된다(parse: `success:false, unrecognized key: fork_turns`). 기존 parity 테스트도 `as never`로 schema를 우회함을 명시(`subagent-6-fork-parity-hellgate.test.ts:60`). 즉 **모델-visible 경로가 inert.** 작업 = (1) `SpawnAgentInputSchema`에 optional `fork_turns` 추가, (2) schema parse→handler→live-WM last-N preamble end-to-end 테스트 추가, (3) 기존 cast 기반 parity는 보조 rail 유지.
+> - **slot accounting = already-have, 단 두 사실 분리.** registry slot 반환(running만 세고 terminal 즉시 반환 = Codex close-to-release보다 운영상 나음)이 green이라고 **child process/worktree/channel/resource가 실제 reaped됨을 자동 증명하지 않는다.** 후자는 OmO R-lane `StopReceipt`/Run Ledger가 소유(현 계획 유지).
+> - **delegation suppression = true gap (유일한 진짜 gap), 그리고 default-ON 후보.** 억제 문구를 tool description 2곳에 흩지 말고 **system-level delegation policy 1곳을 SSOT**로 두고 두 tool surface가 투영. spawn 허용조건 명시(explicit authorization ∧ independent subtasks ∧ write-set 분리/read-only ∧ 예상 wall-time 이득 > coordination cost). 메트릭을 unnecessary-spawn rate 하나로 끝내지 말 것 → task success·total tokens·wall time·duplicated exploration·write collision·child error propagation·parent synthesis failure. 현 프롬프트가 적극 fan-out 권장 + 외부근거(Google 180-config: sequential에서 multi-agent 39–70% 악화)가 single-agent-first 지지 → **eval corpus 회귀확인 후 default-ON 전환**이 default-OFF A/B보다 타당.
+
 - **상태**: Draft design / 구현 미착수
 - **범위**: 우리 기존 subagent orchestration 위에 Codex 5059 `multi_agent_v2`의 **델타 3개만** 얹는다. spawn/message/wait/registry 재구현 금지.
 - **관련 코드**:
