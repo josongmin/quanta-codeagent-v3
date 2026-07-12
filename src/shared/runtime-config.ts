@@ -641,6 +641,12 @@ const parseConfigTailSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
     // Default false ⇒ ctx.autoEscalateFuzzy unset ⇒ fuzzy runs ONLY on explicit
     // `input.fuzzy` ⇒ BYTE-IDENTICAL legacy edit path. Reversible / measurable.
     editAutoFuzzy: gateOnStrict(env, "QUANTA_EDIT_AUTO_FUZZY"),
+    // jul-13 edit-fresh-hash — strict `=== "1"` opt-in. When ON, a SUCCESSFUL
+    // `edit` appends the sha256 of the post-edit bytes so the model can chain a
+    // next same-file edit without a re-read (root-fixes self-inflicted staleness:
+    // measured ~41% of edits hit stale_precondition from the model's own prior
+    // edit). Default false ⇒ ctx.editFreshHash unset ⇒ BYTE-IDENTICAL output.
+    editFreshHash: gateOnStrict(env, "QUANTA_EDIT_FRESH_HASH"),
     // jun-7-misc 06 — operator-chosen apply-model id (mirrors QUANTA_COMPACT_MODEL).
     // Absent ⇒ no port built even when fastApplyMerge is on (both required —
     // advertise-iff-able). NO default model (no-heuristics rule: measure vs the

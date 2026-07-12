@@ -224,6 +224,13 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Auto-escalate edit to the whitespace-tolerant fuzzy ladder on exact-miss.",
   },
   {
+    envKey: "QUANTA_EDIT_FRESH_HASH",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe: "Append post-edit sha256 to a successful edit so the model chains same-file edits without a re-read.",
+  },
+  {
     envKey: "QUANTA_DEDUP_ENV_PREFIXES_EXTRA",
     kind: "string",
     default: "",

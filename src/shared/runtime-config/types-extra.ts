@@ -505,6 +505,16 @@ export interface RuntimeConfigPaths {
    *  write). Default false ⇒ ctx flag absent ⇒ fuzzy runs ONLY on `input.fuzzy`
    *  ⇒ BYTE-IDENTICAL legacy edit path. Reversible + measurable (A/B). */
   readonly editAutoFuzzy: boolean
+  /** jul-13 edit-fresh-hash (`QUANTA_EDIT_FRESH_HASH`). Strict opt-in (`=== "1"`).
+   *  When true the dispatch seam threads `ToolContext.editFreshHash = true`, so a
+   *  SUCCESSFUL `edit` appends `fresh sha256: <hex>` (the post-edit bytes' digest)
+   *  to its output. The model reuses it as the next same-file edit's
+   *  `expected_hash` WITHOUT a re-read. Root cause: sequential same-file edits
+   *  invalidate a read-time `expected_hash` (measured ~41% stale_precondition on
+   *  an edit-churn task, from the model's own prior edit). Default false ⇒ ctx
+   *  flag absent ⇒ BYTE-IDENTICAL legacy output. Reversible + measurable (A/B on
+   *  re-read-count / tokens-per-successful-edit). */
+  readonly editFreshHash: boolean
   /** jun-7-misc 06 — operator-chosen apply-model id for the fast-apply MERGE rung
    *  (`QUANTA_FAST_APPLY_MODEL`, mirrors `QUANTA_COMPACT_MODEL`). Absent ⇒ no
    *  `FastApplyPort` is built even when {@link fastApplyMerge} is on (both must be

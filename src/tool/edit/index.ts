@@ -564,7 +564,22 @@ export const makeEditTool = (fs: FileSystemPort = defaultFileSystemPort): Tool<I
       // re-jail under the SESSION root → a restore to the wrong file). With NO
       // active worktree `target.path === input.path` (byte-identical legacy).
       captureFileHistory(ctx, target.path, planned.next)
-      yield { type: "result", result: { ok: true, output: `${input.path}: ${planned.message}` } }
+      // jul-13 edit-fresh-hash — root-fix for self-inflicted staleness. A
+      // successful edit changes the file, so the model's read-time `expected_hash`
+      // is now stale for the NEXT edit to the same file (measured ~41% of edits on
+      // an edit-churn task hit stale_precondition purely from the model's own
+      // prior edit). Appending the post-edit digest lets the model chain the next
+      // edit's `expected_hash` WITHOUT a re-read — `planned.next` is already in
+      // memory, so no extra read. Gated by QUANTA_EDIT_FRESH_HASH; when the flag
+      // is absent the output is BYTE-IDENTICAL to the legacy success line.
+      const freshHashNote =
+        ctx.editFreshHash === true
+          ? `\nfresh sha256: ${sha256Hex(planned.next)} (pass as expected_hash for the next edit to this file — no re-read needed)`
+          : ""
+      yield {
+        type: "result",
+        result: { ok: true, output: `${input.path}: ${planned.message}${freshHashNote}` },
+      }
     } catch (e) {
       if (e instanceof FsJailError) {
         yield {

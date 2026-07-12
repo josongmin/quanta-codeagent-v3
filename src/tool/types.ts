@@ -290,6 +290,16 @@ export interface ToolContext {
    *  `input.fuzzy === true` ⇒ BYTE-IDENTICAL legacy path. The dispatch seam wires
    *  this from `runtimeConfig().editAutoFuzzy` (`QUANTA_EDIT_AUTO_FUZZY === "1"`). */
   autoEscalateFuzzy?: boolean
+  /** jul-13 edit-fresh-hash (self-inflicted-staleness fix, `QUANTA_EDIT_FRESH_HASH`).
+   *  When true, a SUCCESSFUL `edit` appends the sha256 of the POST-edit bytes to
+   *  its output so the model can chain a next edit to the same file WITHOUT a
+   *  re-read (the post-edit bytes are already in memory as `planned.next`, so the
+   *  hash costs no extra read). Root cause it fixes: sequential same-file edits
+   *  invalidate the model's `expected_hash` — measured ~41% of edits on an
+   *  edit-churn task hit `stale_precondition` purely from the model's OWN prior
+   *  edit. ABSENT / `false` (default) ⇒ output BYTE-IDENTICAL to legacy. The
+   *  dispatch seam wires this from `runtimeConfig().editFreshHash`. */
+  editFreshHash?: boolean
   /** ADR-0428 jun-02 wire — OPTIONAL socket-level egress proxy env. When the
    *  `network-proxy` knob is active, a composition root / `runAgent` constructs
    *  + `listen()`s a `LoopbackEgressProxy` and the dispatch seam surfaces the
@@ -525,6 +535,7 @@ export type EditToolContext = CoreToolContext &
     | "fastApplyFallback"
     | "fastApplyMerge"
     | "autoEscalateFuzzy"
+    | "editFreshHash"
     | "globWriteGuard"
     | "writeBudget"
     | "fileHistory"

@@ -1,3 +1,9 @@
+> **⚠️ UPDATE 2026-07-13 — 계측이 이 문서의 우선순위를 뒤집었다.** 실 트라젝토리 dedup 결과
+> edit 실패의 41%가 `stale_precondition`(not_found=0)이고, 근본원인은 "성공 edit이 fresh hash를
+> 안 돌려줘 연속 same-file edit이 자기유발 stale"임이 밝혀졌다. 더 싼 root-fix(`QUANTA_EDIT_FRESH_HASH`,
+> 성공시 post-edit sha256 반환)를 구현·검증 완료 — 아래 E1(keystone)은 **secondary로 강등**, E2는 보류.
+> 계측·근본원인·구현 전체는 [06-edit-fresh-hash-measured-fix.md](06-edit-fresh-hash-measured-fix.md).
+
 # jul-12 OmO absorption — #3: edit-mismatch REMAP self-correct (scoped slice only)
 
 North-star: **agent-state observability** — the model must SEE *why* an edit

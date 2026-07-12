@@ -149,6 +149,11 @@ export const buildToolContext = (args: {
     // an explicit `fuzzy:true`. Gated by QUANTA_EDIT_AUTO_FUZZY. OFF (default) ⇒
     // flag omitted ⇒ edit ladder byte-identical (fuzzy only on input.fuzzy).
     ...(runtimeConfig().editAutoFuzzy ? { autoEscalateFuzzy: true } : {}),
+    // jul-13 edit-fresh-hash — surface the flag so a SUCCESSFUL edit appends the
+    // post-edit sha256, letting the model chain a next same-file edit without a
+    // re-read. Gated by QUANTA_EDIT_FRESH_HASH. OFF (default) ⇒ flag omitted ⇒
+    // edit success output byte-identical.
+    ...(runtimeConfig().editFreshHash ? { editFreshHash: true } : {}),
     // ADR-0428 jun-02 wire — surface the LIVE proxy-env (bound loopback address)
     // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
     // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).
