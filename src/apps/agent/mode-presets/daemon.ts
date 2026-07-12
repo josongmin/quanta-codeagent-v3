@@ -85,7 +85,10 @@ const buildDaemonBase = async (
 ): Promise<Omit<AgentConfig, "modePolicy" | "budgetMeter">> => {
   const cwd = req.base.cwd ?? process.cwd()
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
-  // WS4 R3 — the daemon runs on a real per-instance repo → honor AGENTS.md.
+  // WS4 R5 (SECURITY) — daemon reviews UNTRUSTED host-created worktrees (PR /
+  // webhook payloads), so the SSOT resolver deliberately does NOT auto-load the
+  // tree's AGENTS.md (see RULE_LESS_MODES). Stays undefined unless a trusted host
+  // passes vetted rules via `req.base.repoRules`.
   const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
   // No human ⇒ auto/acceptEdits within the allowlist (network/gitWrite levers

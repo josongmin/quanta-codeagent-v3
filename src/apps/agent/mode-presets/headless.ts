@@ -13,9 +13,11 @@
  *
  * Required `AssembleRequest` extras: `req.headless.prompt` (non-empty string).
  *
- * Default-OFF byte-identical: the headless preset uses the same `buildSystemPrompt`
- * and `defaultTools` registry as a one-shot `quanta "..."` CLI call, so the
- * trajectory bytes match the legacy single-prompt path when invoked via Track A.
+ * The headless preset uses the same `buildSystemPrompt` and `defaultTools`
+ * registry as a one-shot `quanta "..."` CLI call (that IS this preset — no
+ * separate legacy path). Note (WS4 R3): a repo with an AGENTS.md/CLAUDE.md now
+ * gets a `project_md` rules section in the system prompt (headless is a trusted
+ * user-repo surface); absent any repo rules, the prompt is byte-identical.
  *
  * Slice boundary: this file may import `@/agent`, `@/llm`, `@/permission`,
  * `@/shared`, `@/tool`, `@/stream`, and the sibling assemble.ts. NO imports

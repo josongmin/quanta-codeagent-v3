@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs"
 import { lstat, readFile } from "node:fs/promises"
+import { homedir } from "node:os"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { sliceWholeChars } from "@/shared"
 
@@ -94,6 +95,11 @@ const MAX_DEPTH = 16
  *  delegates to `Date.now`. */
 export interface LoadRepoRulesOpts {
   readonly now?: () => number
+  /** Round-5 (M1) — the cwd→root walk-up STOPS at (and never reads at/above)
+   *  this boundary, so a `.git`-less loose dir can't absorb a shared parent's
+   *  ($HOME's) AGENTS.md on a multi-user box. Defaults to `os.homedir()`.
+   *  Injectable for tests. */
+  readonly homeDir?: string
 }
 
 /** Load repo-local rules by walking CWD → repo root. Returns `undefined` when
@@ -106,6 +112,9 @@ export const loadRepoRules = async (
 ): Promise<RepoRules | undefined> => {
   const now = opts.now ?? Date.now
   const resolvedCwd = resolve(cwd)
+  // Round-5 (M1) — the home boundary the walk-up must not cross. `resolve` so a
+  // relative/`~`-free comparison is exact against `dirname` output.
+  const homeBoundary = resolve(opts.homeDir ?? homedir())
   const collected: RepoRulesLayer[] = []
   let dir = resolvedCwd
   let depth = 0
@@ -120,6 +129,14 @@ export const loadRepoRules = async (
     if (existsSync(join(dir, ".git"))) break
     const parent = dirname(dir)
     if (parent === dir) break // filesystem root
+    // Round-5 (M1) — stop AT the home boundary: a rule file at/above $HOME
+    // belongs to no single project and, on a shared box, could be another
+    // user's. `.git`-rooted repos are unaffected (they break above first).
+    if (parent === homeBoundary) break
+    // Round-5 (H1) — a symlinked ANCESTOR redirects the walk OUT of the lexical
+    // repo tree (the final-component `lstat` in `tryRead` can't see it). Reading
+    // its AGENTS.md would inject out-of-repo content as trusted policy, so stop.
+    if (await isSymlinkDir(parent)) break
     dir = parent
     depth += 1
   }
@@ -173,6 +190,18 @@ const computeRelativePath = (cwd: string, sourcePath: string): string => {
   const normalized = rel.split(sep).join("/")
   if (normalized.startsWith("..")) return normalized
   return `./${normalized}`
+}
+
+/** Round-5 (H1) — is `dir` a symlink (as opposed to a real directory)? Used to
+ *  halt the walk-up at a symlinked ancestor that would redirect it out of the
+ *  lexical repo tree. Missing / unreadable ⇒ treat as non-symlink (the walk's
+ *  other bounds — `.git`, home, MAX_DEPTH, fs-root — still apply). */
+const isSymlinkDir = async (dir: string): Promise<boolean> => {
+  try {
+    return (await lstat(dir)).isSymbolicLink()
+  } catch {
+    return false
+  }
 }
 
 const tryRead = async (path: string): Promise<string | undefined> => {

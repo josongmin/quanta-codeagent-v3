@@ -21,16 +21,21 @@ export const resolveModePresetPromptSurfaceProfile = (
     : promptSurfaceProfileForRunMode(mode)
 
 /**
- * The modes that NEVER auto-load repo-local rules from the working tree:
+ * The modes that NEVER auto-load repo-local rules from the working tree. All are
+ * surfaces where the tree is NOT a repo the end user personally chose to trust:
  *   - `batch`  — hermetic bench sandbox: rule-less + byte-identical.
- *   - `ci-bot` — reviews an UNTRUSTED PR checkout. The PR author controls the
- *     tree, INCLUDING its AGENTS.md/CLAUDE.md; auto-loading them would smuggle
- *     attacker-authored text into the TRUSTED system-prompt `project_md` (rendered
- *     as authoritative "Rules"), defeating ci-bot's `<pr_untrusted_data>` fence
- *     (a malicious PR could self-approve). A trusted host may still inject vetted
- *     rules explicitly via `override`.
+ *   - `ci-bot` — reviews an UNTRUSTED PR checkout (the PR author controls the
+ *     tree, including its AGENTS.md/CLAUDE.md).
+ *   - `daemon` — a scheduled/webhook single-task executor whose documented job is
+ *     "review PR #42 / respond to webhook X" on a host-created per-instance
+ *     worktree (daemon.ts exterior-adapter contract) — same untrusted-input class
+ *     as ci-bot (hell-audit R5).
+ * Auto-loading their AGENTS.md would smuggle attacker-authored text into the
+ * TRUSTED system-prompt `project_md` (rendered as authoritative "Rules"),
+ * defeating ci-bot's `<pr_untrusted_data>` fence (a malicious PR could
+ * self-approve). A trusted host may still inject vetted rules via `override`.
  */
-const RULE_LESS_MODES: ReadonlySet<RunMode> = new Set<RunMode>(["batch", "ci-bot"])
+const RULE_LESS_MODES: ReadonlySet<RunMode> = new Set<RunMode>(["batch", "ci-bot", "daemon"])
 
 /**
  * WS4 (jul-12 OmO absorption + hell-audit R3/R4) — the ONE place that decides

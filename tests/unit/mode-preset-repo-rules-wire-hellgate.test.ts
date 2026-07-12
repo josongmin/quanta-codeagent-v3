@@ -25,7 +25,6 @@ import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
 import type { AssembleRequest } from "../../src/apps/agent/assemble"
-import { runMode as daemonRun } from "../../src/apps/agent/mode-presets/daemon"
 import { runMode as headlessRun } from "../../src/apps/agent/mode-presets/headless"
 import { runMode as ideRun } from "../../src/apps/agent/mode-presets/ide"
 import { resolveModePresetRepoRules } from "../../src/apps/agent/mode-presets/system"
@@ -58,19 +57,23 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe("WS4 R3/R4 §1 — resolveModePresetRepoRules policy SSOT", () => {
-  test("batch stays rule-less even with an on-disk AGENTS.md", async () => {
+describe("WS4 R3/R4/R5 §1 — resolveModePresetRepoRules policy SSOT", () => {
+  test("hermetic bench (batch) stays rule-less even with an on-disk AGENTS.md", async () => {
     expect(await resolveModePresetRepoRules("batch", undefined, dir)).toBeUndefined()
   })
 
-  test("SECURITY: ci-bot (untrusted PR tree) does NOT auto-load the cwd AGENTS.md", async () => {
-    // A malicious PR could ship an AGENTS.md; auto-loading it into the trusted
-    // system prompt would let it self-approve. The resolver must exclude ci-bot.
-    expect(await resolveModePresetRepoRules("ci-bot", undefined, dir)).toBeUndefined()
+  test("SECURITY: UNTRUSTED-tree modes (ci-bot / daemon) do NOT auto-load the cwd AGENTS.md", async () => {
+    // ci-bot reviews an untrusted PR; daemon reviews host-created PR/webhook
+    // worktrees (daemon.ts contract). A malicious tree's AGENTS.md would ride
+    // into the trusted system prompt as authoritative rules ⇒ self-approve. The
+    // resolver must exclude both.
+    for (const mode of ["ci-bot", "daemon"] as RunMode[]) {
+      expect(await resolveModePresetRepoRules(mode, undefined, dir)).toBeUndefined()
+    }
   })
 
-  test("a rules-loading mode (interactive/headless/ide/daemon) loads the cwd rules", async () => {
-    for (const mode of ["interactive", "headless", "ide", "daemon"] as RunMode[]) {
+  test("a rules-loading mode (interactive/headless/ide) loads the cwd rules", async () => {
+    for (const mode of ["interactive", "headless", "ide"] as RunMode[]) {
       const r = await resolveModePresetRepoRules(mode, undefined, dir)
       expect(r?.body ?? "").toContain(SENTINEL)
     }
@@ -96,7 +99,7 @@ describe("WS4 R3/R4 §1 — resolveModePresetRepoRules policy SSOT", () => {
   })
 })
 
-describe("WS4 R3 §2 — each human/automation preset routes through the resolver", () => {
+describe("WS4 R3 §2 — each TRUSTED user-repo preset routes through the resolver", () => {
   const drivers: ReadonlyArray<{
     mode: RunMode
     run: (req: AssembleRequest) => Promise<unknown>
@@ -104,7 +107,6 @@ describe("WS4 R3 §2 — each human/automation preset routes through the resolve
   }> = [
     { mode: "headless", run: headlessRun, extra: { headless: { prompt: "go" } } },
     { mode: "ide", run: ideRun, extra: {} },
-    { mode: "daemon", run: daemonRun, extra: {} },
   ]
 
   for (const d of drivers) {

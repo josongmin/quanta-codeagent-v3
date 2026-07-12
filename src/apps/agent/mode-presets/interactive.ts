@@ -203,13 +203,15 @@ export const runMode = async (req: AssembleRequest): Promise<RunOutcome> => {
   if (req.mode !== "interactive") {
     throw new Error(`interactive.runMode: req.mode must be "interactive", got "${req.mode}"`)
   }
-  const cfg = assembleAgentConfig({ ...req, base: await stubBase(req) })
-  // ADR-0334 — interactive surface explicitly tags the cfg as ADR-0327-
-  // family wired. `assembleAgentConfig` already attempted the install;
-  // this redundant pass is documentary (idempotent — ADR-0332 §I).
-  installCodexR2Wires(cfg, cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {})
-
+  // R5 (F1) — build the assembled cfg ONLY on the seam path. The live REPL path
+  // (`runInteractiveTerminal`) builds its own base, so constructing+discarding a
+  // stub cfg here doubled `buildInteractiveBase` — now a real `loadRepoRules` fs
+  // walk (WS4). Each path now walks exactly once.
   if (req.seams?.runAgent) {
+    const cfg = assembleAgentConfig({ ...req, base: await stubBase(req) })
+    // ADR-0334 — tag the cfg as ADR-0327-family wired. `assembleAgentConfig`
+    // already attempted the install; this pass is documentary (idempotent).
+    installCodexR2Wires(cfg, cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {})
     const runner = resolveRunAgent(req.seams)
     const outcome = await runner(cfg)
     return { exitCode: exitCodeForOutcome(outcome), outcome }
