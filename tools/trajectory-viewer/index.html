@@ -522,12 +522,64 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
 ::-webkit-scrollbar-thumb{background:#d0d0e0;border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:#b0b0c8}
 .empty-msg{color:#c0c0d0;font-size:12px;text-align:center;padding:40px}
+/* ─────────────────── SPAN TREE (C6 · unified OTel projection) ─────────────────── */
+/* view toggle in the topbar (group-chat ⇄ span-tree) */
+#view-switch{display:flex;gap:2px;border:1px solid #d8d8e8;border-radius:6px;overflow:hidden;margin-left:6px}
+#view-switch span{padding:3px 9px;font-size:10px;font-weight:600;cursor:pointer;color:#b0b0c8;transition:all .12s}
+#view-switch span:hover{background:#f0f0fa;color:#5555aa}
+#view-switch span.active{background:#eeeef8;color:#4455aa}
+#view-switch.hidden{display:none}
+/* the tree lives in a left rail inside the chat column when tree view is on */
+#tree-layout{display:flex;flex:1;overflow:hidden}
+#span-tree{width:320px;flex-shrink:0;overflow-y:auto;border-right:1px solid var(--border);background:#fbfbfe;padding:6px 0}
+#tree-evidence{flex:1;overflow-y:auto;padding:0 20px 60px}
+.tree-hd{padding:8px 12px 6px;font-size:9px;font-weight:700;color:#a0a0b8;text-transform:uppercase;letter-spacing:.1em;display:flex;align-items:center;gap:6px}
+.tree-corr{display:flex;flex-wrap:wrap;gap:4px;padding:0 12px 6px}
+.badge{font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:8px;padding:1px 7px;font-family:var(--mono)}
+.badge.b-legacy{background:#eef0f5;color:#8088a0;border:1px solid #d8dce8}
+.badge.b-redacted{background:#f3eefb;color:#8552b0;border:1px solid #e2d3f4}
+.badge.b-truncated{background:#fff3e8;color:#b0743a;border:1px solid #f4ddc4}
+.badge.b-degraded{background:#fdf1f1;color:#c0504a;border:1px solid #f0cccc}
+.badge.b-unified{background:#eafaf1;color:#2f8f5b;border:1px solid #c9ecd6}
+.tnode{display:flex;align-items:center;gap:6px;padding:4px 8px 4px 0;cursor:pointer;border-left:2px solid transparent;font-size:11.5px;white-space:nowrap;overflow:hidden}
+.tnode:hover{background:#f0f0f8}
+.tnode.sel{background:#eeeef8;border-left-color:#5566cc}
+.tnode .t-caret{width:12px;flex-shrink:0;text-align:center;color:#b0b0c8;font-size:8px;transition:transform .12s;cursor:pointer}
+.tnode.collapsed .t-caret{transform:rotate(-90deg)}
+.tnode .t-kind{font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;border-radius:4px;padding:1px 5px;flex-shrink:0}
+.tk-instance{background:#e2ecf7;color:#3f74b8}
+.tk-invoke{background:#f2eeff;color:#7744cc}
+.tk-turn{background:#eafaf1;color:#2f8f5b}
+.tk-chat{background:#e6f6f4;color:#1f8a86}
+.tk-tool{background:#fff8ee;color:#aa6600}
+.tk-span{background:#f0f0f5;color:#8088a0}
+.tnode .t-name{font-family:var(--mono);color:#3a3a55;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.tnode.sel .t-name{color:#2233aa;font-weight:600}
+.tnode .t-meta{font-family:var(--mono);font-size:9px;color:#b0b0c8;flex-shrink:0}
+.tnode .t-ev{font-family:var(--mono);font-size:9px;color:#8899bb;background:#eef0f8;border-radius:7px;padding:0 5px;flex-shrink:0}
+.tnode.hidden-node{display:none}
+.tree-empty{color:#c0c0d0;font-size:11px;padding:20px 14px;line-height:1.6}
+.tev-hd{font-size:9px;font-weight:700;color:#7a8aa0;letter-spacing:.08em;text-transform:uppercase;margin:14px 0 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tev-span-id{font-family:var(--mono);font-size:9px;color:#a0a8bc}
+.tev-card{border:1px solid #e2e6ee;border-radius:8px;background:#fff;margin-bottom:6px;overflow:hidden}
+.tev-card-hd{display:flex;align-items:center;gap:7px;padding:7px 11px;font-size:11px;font-weight:600;color:#4a5a70;background:#fafbfd;cursor:pointer}
+.tev-card-hd:hover{background:#f3f5f9}
+.tev-kind-tag{font-family:var(--mono);font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;border-radius:5px;padding:1px 6px;flex-shrink:0;background:#eef0f8;color:#6070a0}
+.tev-time{font-family:var(--mono);font-size:9px;color:#b0b8c8;margin-left:auto;flex-shrink:0}
+.tev-body{display:none;padding:8px 12px;font-family:var(--mono);font-size:10.5px;color:#4a5568;white-space:pre-wrap;overflow-x:auto;border-top:1px solid #eceef4;background:#fbfcfe}
+.tev-card.open .tev-body{display:block}
+.tev-cassette{border-color:#c5e6e2}
+.tev-cassette .tev-card-hd{background:#f4fbfa;color:#1f7a76}
 </style>
 </head>
 <body>
 <div id="topbar">
   <h1 id="ui-title"></h1>
   <span id="load-status"></span>
+  <div id="view-switch" class="hidden">
+    <span onclick="setView('chat')" id="vs-chat"></span>
+    <span onclick="setView('tree')" id="vs-tree"></span>
+  </div>
   <div id="lang-switch">
     <span onclick="setLang('ko')" id="ls-ko">한</span>
     <span onclick="setLang('en')" id="ls-en">EN</span>
@@ -556,6 +608,10 @@ body{display:flex;flex-direction:column;height:100vh;overflow:hidden;background:
         </div>
         <div id="run-meta-section" style="display:none"></div>
         <div id="chat-scroll"></div>
+        <div id="tree-layout" style="display:none">
+          <div id="span-tree"></div>
+          <div id="tree-evidence"></div>
+        </div>
       </div>
       <div id="prompt-panel" class="hidden">
         <div id="pp-header">
@@ -624,6 +680,14 @@ const LANGS={
     sessionN:(n)=>`세션-${n}`,
     sessionCount:(n)=>`${n}개 세션`,
     multiSession:'세션',
+    viewChat:'💬 그룹챗',
+    viewTree:'🌲 스팬트리',
+    spanTree:'스팬 트리',
+    spanEvidence:'스팬 증거 (OBSERVE + 카세트)',
+    treeEmpty:'이 세션엔 통합 traceId가 없음 (legacy 모드). 결정론적 t<turn> id는 트리 조인 불가 — 그룹챗 뷰를 쓰세요. 통합 트레이스가 있는 카세트/OBSERVE를 로드하면 트리가 채워집니다.',
+    selectSpan:'← 왼쪽에서 스팬을 선택하면 그 스팬의 증거(OBSERVE 이벤트 + chat 카세트 페이로드)만 보입니다.',
+    cassettePayload:'카세트 페이로드 (chat)',
+    corrLegacy:'legacy',corrRedacted:'redacted',corrTruncated:'truncated',corrDegraded:'degraded',corrUnified:'unified',
   },
   en:{
     title:'⚡ Trajectory',
@@ -677,6 +741,14 @@ const LANGS={
     sessionN:(n)=>`session-${n}`,
     sessionCount:(n)=>`${n} sessions`,
     multiSession:'sessions',
+    viewChat:'💬 Group-chat',
+    viewTree:'🌲 Span tree',
+    spanTree:'Span tree',
+    spanEvidence:'Span evidence (OBSERVE + cassette)',
+    treeEmpty:'No unified traceId in this session (legacy mode). Deterministic t<turn> ids can\'t be joined into a tree — use the group-chat view. Load a cassette/OBSERVE with unified traces to populate the tree.',
+    selectSpan:'← Select a span on the left to see only that span\'s evidence (OBSERVE events + the chat cassette payload).',
+    cassettePayload:'Cassette payload (chat)',
+    corrLegacy:'legacy',corrRedacted:'redacted',corrTruncated:'truncated',corrDegraded:'degraded',corrUnified:'unified',
   }
 }
 let lang='ko'
@@ -698,6 +770,11 @@ function initUI(){
   document.getElementById('pp-title').textContent=T('fullPrompt')
   document.getElementById('pp-close').textContent='✕'
   document.getElementById('pp-close').title=T('close')
+  // view switch (group-chat ⇄ span-tree)
+  document.getElementById('vs-chat').textContent=T('viewChat')
+  document.getElementById('vs-tree').textContent=T('viewTree')
+  document.getElementById('vs-chat').classList.toggle('active',viewMode==='chat')
+  document.getElementById('vs-tree').classList.toggle('active',viewMode==='tree')
   // lang switch active state
   document.getElementById('ls-ko').style.fontWeight=lang==='ko'?'700':'400'
   document.getElementById('ls-en').style.fontWeight=lang==='en'?'700':'400'
@@ -718,6 +795,18 @@ function setLang(l){
 // ──────────── STATE ────────────
 let instances=[], selInst=-1, openTurnForPrompt=-1
 let curPreset='' // agent preset for the selected session (shown on Quanta rows)
+// C6: which projection is showing — 'chat' (group-chat timeline, default) or
+// 'tree' (unified OTel span-tree join on {traceId,spanId}). The tree is
+// COMPLEMENTARY: the group-chat view is never deleted, only hidden.
+let viewMode='chat'
+let selSpanId=null // selected span node in the tree view (evidence filter)
+
+function setView(m){
+  viewMode=m
+  document.getElementById('vs-chat')?.classList.toggle('active',m==='chat')
+  document.getElementById('vs-tree')?.classList.toggle('active',m==='tree')
+  if(selInst>=0)renderChat()
+}
 // instanceId → meta object loaded from .meta.json
 const metaByInstance=new Map()
 
@@ -1024,10 +1113,106 @@ function buildInstance(id,records,meta){
   // scaffold ACTION stream (observe) for this instance — the non-LLM actions
   // (sandbox / repro-select / verify / patch / recovery) the cassette never sees.
   const observe=(typeof window!=='undefined'&&window.__OBSERVE__&&window.__OBSERVE__[id])||[]
-  return{id,records,turns,observe,stats:computeStats(turns),fileMap:buildFileMap(turns),
+  const inst={id,records,turns,observe,stats:computeStats(turns),fileMap:buildFileMap(turns),
     anomalies:detectAnomalies(turns),fileTimeline:buildFileTimeline(turns),
     runMeta:meta??metaByInstance.get(id)??null}
+  inst.spanTree=buildSpanTree(inst) // C6: unified OTel {traceId,spanId} join
+  return inst
 }
+// ──────────── SPAN TREE (C6 · unified OTel projection) ────────────
+// Join OBSERVE evidence + cassette turns on {traceId,spanId} into the span tree
+//   quanta.bench.instance → invoke_agent → session_task.turn → chat / execute_tool
+// built from parentSpanId links. Parallel spans render as SIBLINGS-by-parent
+// (not arrival order). Legacy files (deterministic `t<turn>` ids / no traceId)
+// have no join key ⇒ the tree is empty and we fall back to the group-chat view.
+
+// A real W3C span id is 16 lowercase-hex chars; a trace id is 32. The legacy
+// scheme emits `t0`,`llm:t0`,`tool:tu1` etc. — never pure hex — so we detect the
+// unified mode by the presence of ANY 32-hex traceId on the evidence.
+const HEX_TRACE=/^[0-9a-f]{32}$/i
+const HEX_SPAN=/^[0-9a-f]{16}$/i
+function isUnifiedId(x){return typeof x==='string'&&(HEX_TRACE.test(x)||HEX_SPAN.test(x))}
+
+// Classify a span node into the target-tree kind from its OTel span name (when an
+// OTLP-shaped node carries one) or from the trajectory event kind that anchored
+// it. Drives the color tag + ordering; unknown → generic 'span'.
+function spanKindLabel(name,evKind){
+  const n=String(name||'').toLowerCase()
+  if(n.includes('bench.instance')||n.includes('quanta.bench')||evKind==='session_start'||evKind==='sandbox')return'instance'
+  if(n.includes('invoke_agent')||n.includes('invoke agent')||evKind==='session_end')return'invoke'
+  if(n.includes('turn')||evKind==='turn_start')return'turn'
+  if(n.startsWith('chat')||n.includes('chat ')||n==='chat'||evKind==='llm_request'||evKind==='llm_usage'||evKind==='assistant_text')return'chat'
+  if(n.startsWith('execute_tool')||n.includes('tool')||evKind==='tool_call'||evKind==='tool_result'||evKind==='tool_progress')return'tool'
+  return'span'
+}
+const SPAN_KIND_TAG={instance:'tk-instance',invoke:'tk-invoke',turn:'tk-turn',chat:'tk-chat',tool:'tk-tool',span:'tk-span'}
+const SPAN_KIND_ORDER={instance:0,invoke:1,turn:2,chat:3,tool:4,span:5}
+
+// Build the join. Returns {nodes:Map<spanId,node>, roots:[node], unified:bool,
+//   corr:Set<badge>} where each node = {spanId,parentSpanId,traceId,kind,name,
+//   evidence:[{kind,ts,data,redaction,degraded}], cassette:turn|null, children:[]}.
+function buildSpanTree(inst){
+  const nodes=new Map()
+  const corr=new Set()
+  let sawTrace=false
+  const ensure=(spanId,parentSpanId,traceId,name,evKind)=>{
+    let node=nodes.get(spanId)
+    if(!node){node={spanId,parentSpanId:parentSpanId||null,traceId:traceId||null,name:name||'',kind:spanKindLabel(name,evKind),evidence:[],cassette:null,children:[]};nodes.set(spanId,node)}
+    else{
+      // enrich a synthesized node once its structural name/parent shows up
+      if(parentSpanId&&!node.parentSpanId)node.parentSpanId=parentSpanId
+      if(traceId&&!node.traceId)node.traceId=traceId
+      if(name&&(!node.name||node.kind==='span')){node.name=name;node.kind=spanKindLabel(name,evKind)}
+      else if(evKind&&node.kind==='span'){node.kind=spanKindLabel(node.name,evKind)}
+    }
+    return node
+  }
+  // (1) OBSERVE evidence — each event may define/attach to a span by its spanId
+  for(const ev of (inst.observe||[])){
+    if(!ev.spanId)continue
+    if(ev.traceId)sawTrace=true
+    // structural span-name lives in data.spanName / data.name when present
+    const name=ev.data?.spanName??ev.data?.name??ev.spanName??''
+    const node=ensure(ev.spanId,ev.parentSpanId,ev.traceId,name,ev.kind)
+    // a "required event missing its trace ref" ⇒ degraded correlation. OBSERVE
+    // events that carry a spanId but no traceId scope can't be globally joined.
+    const degraded=ev.kind==='observability_degraded'||(!ev.traceId)
+    if(ev.kind==='observability_degraded')corr.add('degraded')
+    if(!ev.traceId&&ev.spanId&&isUnifiedId(ev.spanId))corr.add('degraded')
+    if(ev.redaction&&ev.redaction.applied)corr.add('redacted')
+    if(ev.data&&(ev.data.truncated===true||ev.data.truncatedChars!=null))corr.add('truncated')
+    node.evidence.push({kind:ev.kind,ts:ev.ts,data:ev.data||{},redaction:ev.redaction,degraded})
+  }
+  // (2) cassette turns — each carries the chat span identity in metadata
+  for(const turn of inst.turns){
+    const sid=turn.meta?.spanId
+    if(!sid)continue
+    if(turn.meta?.traceId)sawTrace=true
+    const node=ensure(sid,turn.meta?.parentSpanId,turn.meta?.traceId,'chat','llm_request')
+    node.cassette=turn
+    if(!turn.meta?.traceId)corr.add('degraded')
+  }
+  const unified=sawTrace&&[...nodes.values()].some(n=>isUnifiedId(n.spanId))
+  if(!unified){
+    // legacy: no hex trace/span ids ⇒ no join key. Mark the badge; the tree UI
+    // shows the fall-back message and the user stays on group-chat.
+    if(nodes.size)corr.add('legacy')
+    return{nodes,roots:[],unified:false,corr}
+  }
+  // link children to parents; a node whose parent isn't in the map is a ROOT
+  // (the instance root, or an orphan when the parent span wasn't captured).
+  const roots=[]
+  for(const node of nodes.values()){
+    const p=node.parentSpanId&&nodes.get(node.parentSpanId)
+    if(p)p.children.push(node);else roots.push(node)
+  }
+  // SIBLINGS render by (kind order, then span id) — deterministic, parent-scoped,
+  // NOT arrival order, so parallel chat/tool spans sit side-by-side stably.
+  const sortSibs=arr=>{arr.sort((a,b)=>(SPAN_KIND_ORDER[a.kind]-SPAN_KIND_ORDER[b.kind])||String(a.spanId).localeCompare(String(b.spanId)));for(const n of arr)sortSibs(n.children)}
+  sortSibs(roots)
+  return{nodes,roots,unified:true,corr}
+}
+
 function fileNameToId(name){
   return String(name||'session').replace(/\.jsonl$/i,'').replace(/^\d{8}-\d{6}-/,'').replace(/^trajectory-/,'')
 }
@@ -1123,7 +1308,7 @@ function renderSidebar(){
 }
 
 function selectInstance(i){
-  selInst=i;openTurnForPrompt=-1
+  selInst=i;openTurnForPrompt=-1;selSpanId=null
   // Reflect the selection in the URL so the session is directly linkable by id.
   const id=instances[i]?.id
   if(id){const h='#'+encodeURIComponent(id);if(location.hash!==h){_suppressHash=true;location.hash=h}}
@@ -1196,8 +1381,28 @@ function renderChat(){
     metaEl.innerHTML='';metaEl.style.display='none'
   }
 
-  // render turns
+  // C6: expose the view switch only when a unified span tree is joinable; a
+  // legacy session (no traceId) has no tree so we keep it on group-chat and hide
+  // the toggle. The group-chat projection is NEVER deleted.
+  const tree=inst.spanTree
+  const vsw=document.getElementById('view-switch')
+  vsw.classList.toggle('hidden',!(tree&&tree.unified))
+  if(!(tree&&tree.unified)&&viewMode==='tree')viewMode='chat'
+  document.getElementById('vs-chat')?.classList.toggle('active',viewMode==='chat')
+  document.getElementById('vs-tree')?.classList.toggle('active',viewMode==='tree')
+
   const scroll=document.getElementById('chat-scroll')
+  const treeLayout=document.getElementById('tree-layout')
+  if(viewMode==='tree'&&tree&&tree.unified){
+    scroll.style.display='none'
+    treeLayout.style.display='flex'
+    renderSpanTreeView(inst)
+    return
+  }
+  scroll.style.display='block'
+  treeLayout.style.display='none'
+
+  // render turns
   scroll.innerHTML=''
 
   // NOTE: the system prompt is now shown PER-TURN inside each Quanta row (the
@@ -1260,6 +1465,143 @@ function renderChat(){
     el.innerHTML=renderTurnGroup(turn,i,preQuanta)
     scroll.appendChild(el)
   }
+}
+
+// ──────────── SPAN TREE VIEW (C6) ────────────
+// Left rail = the joined span tree; right pane = the evidence UNDER the selected
+// span (that span's OBSERVE events + the chat cassette payload). Nothing here
+// requires raw cassette content to render — a node with no cassette still shows
+// its OBSERVE evidence and its place in the tree.
+const SPAN_KIND_ICON={instance:'🏁',invoke:'🤖',turn:'🔁',chat:'💬',tool:'🔧',span:'•'}
+function renderSpanTreeView(inst){
+  const tree=inst.spanTree
+  // default selection = the first chat/tool leaf so the evidence pane isn't empty
+  if(!selSpanId||!tree.nodes.has(selSpanId)){
+    const leaf=[...tree.nodes.values()].find(n=>n.kind==='chat'||n.kind==='tool')
+    selSpanId=leaf?leaf.spanId:(tree.roots[0]?.spanId??null)
+  }
+  const railHtml=[]
+  railHtml.push(`<div class="tree-hd">🌲 ${T('spanTree')}</div>`)
+  // correlation-state badges for the WHOLE session
+  const badges=[]
+  const bmap={unified:['b-unified','corrUnified'],legacy:['b-legacy','corrLegacy'],redacted:['b-redacted','corrRedacted'],truncated:['b-truncated','corrTruncated'],degraded:['b-degraded','corrDegraded']}
+  if(tree.unified)tree.corr.add('unified')
+  for(const k of ['unified','legacy','redacted','truncated','degraded'])
+    if(tree.corr.has(k)){const[cls,tk]=bmap[k];badges.push(`<span class="badge ${cls}">${T(tk)}</span>`)}
+  if(badges.length)railHtml.push(`<div class="tree-corr">${badges.join('')}</div>`)
+  for(const root of tree.roots)railHtml.push(renderSpanNode(root,0))
+  document.getElementById('span-tree').innerHTML=railHtml.join('')
+  document.getElementById('tree-evidence').innerHTML=renderSpanEvidence(inst,selSpanId)
+}
+// One tree row + its subtree. Depth drives the indent; a node with children gets
+// a caret (collapse toggles the whole subtree via a data-parent chain).
+function renderSpanNode(node,depth){
+  const tag=SPAN_KIND_TAG[node.kind]||'tk-span'
+  const icon=SPAN_KIND_ICON[node.kind]||'•'
+  const label=node.name||(node.kind==='chat'?'chat':node.kind==='tool'?'execute_tool':node.spanId.slice(0,10))
+  const evCount=node.evidence.length+(node.cassette?1:0)
+  const degraded=node.evidence.some(e=>e.degraded)||!node.traceId
+  const sel=node.spanId===selSpanId?' sel':''
+  const hasKids=node.children.length>0
+  const row=`<div class="tnode${sel}" style="padding-left:${8+depth*14}px" data-span="${esc(node.spanId)}" onclick="selectSpan('${esc(node.spanId)}')">
+    ${hasKids?`<span class="t-caret" onclick="event.stopPropagation();toggleTreeNode('${esc(node.spanId)}')">▼</span>`:`<span class="t-caret"></span>`}
+    <span class="t-kind ${tag}">${icon} ${esc(node.kind)}</span>
+    <span class="t-name" title="${esc(node.spanId)}">${esc(label)}</span>
+    ${degraded?`<span class="badge b-degraded" title="missing trace ref">deg</span>`:''}
+    ${evCount?`<span class="t-ev" title="evidence under this span">${evCount}</span>`:''}
+  </div>`
+  const kids=node.children.map(c=>renderSpanNode(c,depth+1)).join('')
+  return row+(hasKids?`<div class="t-kids" data-parent="${esc(node.spanId)}">${kids}</div>`:'')
+}
+function selectSpan(spanId){selSpanId=spanId;if(selInst>=0)renderSpanTreeView(instances[selInst])}
+function toggleTreeNode(spanId){
+  const kids=document.querySelector(`.t-kids[data-parent="${cssEsc(spanId)}"]`)
+  const row=document.querySelector(`.tnode[data-span="${cssEsc(spanId)}"]`)
+  if(!kids)return
+  const hidden=kids.style.display==='none'
+  kids.style.display=hidden?'block':'none'
+  row?.classList.toggle('collapsed',!hidden)
+}
+function cssEsc(s){return String(s).replace(/["\\]/g,'\\$&')}
+
+// The evidence UNDER one span: its OBSERVE events + (for a chat span) the
+// cassette request/response payload. This is the {traceId,spanId} JOIN made
+// visible — selecting a chat/tool span shows ONLY that span's evidence.
+function renderSpanEvidence(inst,spanId){
+  const tree=inst.spanTree
+  const node=spanId&&tree.nodes.get(spanId)
+  if(!node)return`<div class="tree-empty">${T('selectSpan')}</div>`
+  const parts=[]
+  const traceShort=node.traceId?`<span class="tev-span-id">trace ${esc(String(node.traceId).slice(0,12))}…</span>`:`<span class="badge b-degraded">no traceId</span>`
+  parts.push(`<div class="tev-hd">${SPAN_KIND_ICON[node.kind]||'•'} ${esc(node.name||node.kind)} <span class="tev-span-id">span ${esc(String(node.spanId).slice(0,12))}…</span>${traceShort}</div>`)
+  // OBSERVE evidence rows (verify / patch / sandbox / tool_result / …)
+  const evs=[...node.evidence].sort((a,b)=>(a.ts||0)-(b.ts||0))
+  for(const ev of evs){
+    const id=uid()
+    const body=esc(JSON.stringify(ev.data,null,2))
+    const time=fTime(ev.ts)
+    const red=ev.redaction&&ev.redaction.applied?`<span class="badge b-redacted">redacted</span>`:''
+    const deg=ev.degraded?`<span class="badge b-degraded">degraded</span>`:''
+    parts.push(`<div class="tev-card" id="${id}">
+      <div class="tev-card-hd" onclick="toggle('${id}')">
+        <span class="tev-kind-tag">${esc(ev.kind)}</span>${red}${deg}
+        <span>${esc(evSummary(ev))}</span>
+        ${time?`<span class="tev-time">${time}</span>`:''}
+      </div>
+      <div class="tev-body">${body}</div>
+    </div>`)
+  }
+  // the cassette payload for a chat span (the LLM request+response) — but the
+  // tree NEVER requires it: absence just means no cassette row.
+  if(node.cassette){
+    const id=uid()
+    const t=node.cassette
+    const req=renderRawPayloadText(t)
+    const resp=(t.output?.text||'').trim()
+    const body=esc(req+(resp?`\n\n━━ response ━━\n${resp}`:''))
+    parts.push(`<div class="tev-card tev-cassette" id="${id}">
+      <div class="tev-card-hd" onclick="toggle('${id}')">
+        <span class="tev-kind-tag">chat</span>
+        <span>💬 ${T('cassettePayload')}${t.meta?.model?` · ${esc(t.meta.model)}`:''}</span>
+        ${t.ts?`<span class="tev-time">${fTime(t.ts)}</span>`:''}
+      </div>
+      <div class="tev-body">${body}</div>
+    </div>`)
+  }
+  if(evs.length===0&&!node.cassette)parts.push(`<div class="tree-empty">— (structural span · no leaf evidence)</div>`)
+  return parts.join('')
+}
+// short one-line summary of a leaf-evidence event for the collapsed card header
+function evSummary(ev){
+  const d=ev.data||{}
+  if(ev.kind==='verify')return`exit ${d.exitCode??'?'} · ${d.passed?'passed':'FAILED'}`
+  if(ev.kind==='patch_generated'||ev.kind==='patch_applied')return`${d.filesChanged??'?'}f/${d.hunks??'?'}h · ${d.applyStatus??''}`
+  if(ev.kind==='sandbox')return`base ${String(d.baseCommit||'').slice(0,8)}`
+  if(ev.kind==='localize')return`${d.treeFileCount??'?'} files → ${d.rankedCandidateCount??'?'} candidates${d.truncated?' · truncated':''}`
+  if(ev.kind==='tool_result')return`${d.name??'?'} · ${d.ok?'ok':'fail'}${d.exitCode!=null?` (exit ${d.exitCode})`:''}`
+  if(ev.kind==='tool_call')return`${d.name??d.tool??'?'}`
+  if(ev.kind==='llm_usage')return`↑${d.inputTokens??'?'} ↓${d.outputTokens??'?'}`
+  if(ev.kind==='error')return String(d.message||'').slice(0,80)
+  return String(JSON.stringify(d)).slice(0,80)
+}
+// verbatim request payload as plain text (reuses the group-chat payload logic
+// but returns a string for the evidence pane)
+function renderRawPayloadText(turn){
+  const seg=[]
+  const s=typeof turn.system==='string'?turn.system:Array.isArray(turn.system)?turn.system.map(b=>b.text??b.content??'').join('\n\n'):''
+  if(s.trim())seg.push('━━ system ━━\n'+s)
+  for(const m of (turn.allMsgs||[])){
+    const c=m.content
+    const txt=typeof c==='string'?c:Array.isArray(c)?c.map(b=>{
+      if(typeof b==='string')return b
+      if(b.type==='text')return b.text??''
+      if(b.type==='tool_use')return`⟦tool_use ${b.name??'?'} ${JSON.stringify(b.input??{})}⟧`
+      if(b.type==='tool_result'){const rc=b.content;const rt=typeof rc==='string'?rc:Array.isArray(rc)?rc.map(x=>x.text??'').join(''):'';return`⟦tool_result ${rt}⟧`}
+      return JSON.stringify(b)
+    }).join('\n'):''
+    seg.push(`━━ ${m.role??'user'} ━━\n${txt}`)
+  }
+  return seg.join('\n\n')
 }
 
 // Pinned run summary — the scaffold's key mechanical outcomes, hoisted out of

@@ -533,17 +533,27 @@ const buildBaseConfig = (args: {
     promptSurfaceProfile,
   } = args
   return {
-    // F3 — OTEL join key. The trajectory line for this instance is written to
-    // `<runId>/<instance.id>.<attempt>.jsonl` (BenchObserver keys on `instance.id`,
-    // NOT the upstream `swebench.instanceId`), so we stamp `instance.id` here.
-    // With the `quanta.run.id` resource attr the exporter already carries,
-    // `{runId, instanceId}` becomes the key that joins the top-level `session_loop`
-    // span back to its trajectory. `attempt` is NOT threaded to this driver seam
-    // (it lives in the batch-level retry/Best-of-N loop above the per-attempt
-    // buildConfig call — see observe.ts `RunContext`), so it is left unset here;
-    // the join still works on `runId+instanceId` (attempt is only a same-instance
-    // discriminator). Absent OTEL sink ⇒ span is a no-op sentinel ⇒ zero cost.
-    spanIdentity: { instanceId: instance.id },
+    // F3 / C5 — OTEL join key. The trajectory line for this instance is written
+    // to `<runId>/<instance.id>.<attempt>.jsonl` (BenchObserver keys on
+    // `instance.id`, NOT the upstream `swebench.instanceId`), so we stamp
+    // `instance.id` here. With the unified `quanta.run.id` resource attr the
+    // exporter carries (C5 run-id unification), `{runId, instanceId, attempt}`
+    // is the FULL key that joins the top-level `session_loop`/`invoke_agent` span
+    // back to its trajectory FILE.
+    //
+    // ATTEMPT NUMBERING (C5): we use the SAME 0-based index that names the
+    // trajectory file — `deps.observe.attempt` (the `AttemptObservation.attempt`
+    // the run-main Best-of-N / fork fan-out threads via `attemptObs(obs, a)`,
+    // 0-based, default 0). NOT the retry-policy 1-based counter: the span's
+    // `quanta.instance.attempt` MUST equal the `.<attempt>.` filename segment or
+    // the join breaks. Absent (`observe` off, or attempt unknown) ⇒ the key is
+    // OMITTED and the join still works on `runId+instanceId` (attempt is only a
+    // same-instance / Best-of-N discriminator). Absent OTEL sink ⇒ span is a
+    // no-op sentinel ⇒ zero cost.
+    spanIdentity: {
+      instanceId: instance.id,
+      ...(deps.observe?.attempt !== undefined ? { attempt: deps.observe.attempt } : {}),
+    },
     // G1 cross-vendor diversity: the per-candidate lane port (when the driver
     // resolved one via resolveLaneLlm) OVERRIDES the single shared port here, so
     // the model-lane-diversity knob is a REAL provider swap at the wire site —

@@ -76,7 +76,9 @@ describe("buildForwardedBenchEnv", () => {
     const out = buildForwardedBenchEnv({ QUANTA_MAX_TURNS: "120", QUANTA_BENCH_A: "1" })
     expect(out).toContain("QUANTA_MAX_TURNS='120' ")
     // still NOT a blanket widening — a sibling non-allowlisted var stays home.
-    expect(buildForwardedBenchEnv({ QUANTA_RUN_ID: "run-x" })).toBe("")
+    // (QUANTA_RUN_ID USED to be the example here, but C5 now forwards it — see
+    // FWD-11b — so pick a genuinely non-allowlisted var for the negative.)
+    expect(buildForwardedBenchEnv({ QUANTA_PROVIDER: "chatgpt-oauth" })).toBe("")
   })
 
   test("FWD-9: QUANTA_REASONING_SUMMARY override (non-BENCH allowlist) reaches the box", () => {
@@ -124,6 +126,20 @@ describe("buildForwardedBenchEnv", () => {
       QUANTA_OTEL_RUN_ID: "ab-closure-repair-A2",
     })
     expect(out).toContain("QUANTA_OTEL_RUN_ID='ab-closure-repair-A2' ")
+  })
+
+  test("FWD-11b: C5 — the ARTIFACT run id (QUANTA_RUN_ID) reaches the box too (observe==OTLP join)", () => {
+    // C5 run-id unification: the box's observe/cassette ctx.runId comes from
+    // QUANTA_RUN_ID (→ runtimeConfig().runId), and the operator side seeds it to
+    // the SAME value as QUANTA_OTEL_RUN_ID. Forwarding it makes the box's OTLP
+    // `quanta.run.id` and its trajectory `<runId>/...` one joinable id. Without
+    // this the box would mint its own `run-<ts>` and the join would break.
+    const out = buildForwardedBenchEnv({
+      QUANTA_RUN_ID: "campaign-A2",
+      QUANTA_OTEL_RUN_ID: "campaign-A2",
+    })
+    expect(out).toContain("QUANTA_RUN_ID='campaign-A2' ")
+    expect(out).toContain("QUANTA_OTEL_RUN_ID='campaign-A2' ")
   })
 
   test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {

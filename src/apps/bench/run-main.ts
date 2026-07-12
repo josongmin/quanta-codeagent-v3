@@ -71,6 +71,7 @@ import {
   readSwebenchTasks,
   resolveObserve,
   runPrepareImages,
+  withBenchInstanceRoot,
   withObserve,
   writeArtifacts,
 } from "./run-main-helpers"
@@ -167,7 +168,12 @@ const runForkBranches = async (
   let attempt = 0
   for (const exp of experiments) {
     const branchBase: RunCfg = { ...base, llm: freshLlm(), turnContextMutator: exp.mutator }
-    const result = await runInstance(instance, withObserve(branchBase, attemptObs(obs, attempt++)))
+    const a = attempt++
+    // C5 bench-attempt root: one root span (fresh trace) per fork branch, so each
+    // branch's sandbox→agent→verify sits under its own `quanta.bench.instance`.
+    const result = await withBenchInstanceRoot({ instanceId: instance.id, attempt: a }, () =>
+      runInstance(instance, withObserve(branchBase, attemptObs(obs, a))),
+    )
     if (baseline === undefined) baseline = result
     outcomes.push({
       name: exp.name,
@@ -204,7 +210,10 @@ const resolveInstance = async (
 
   if (n <= 1) {
     const cfg = freshLlm !== undefined ? { ...effBase, llm: freshLlm() } : effBase
-    return runInstance(instance, withObserve(cfg, attemptObs(obs, 0)))
+    // C5 bench-attempt root: single-pass ⇒ attempt 0 (the `.0.jsonl` file).
+    return withBenchInstanceRoot({ instanceId: instance.id, attempt: 0 }, () =>
+      runInstance(instance, withObserve(cfg, attemptObs(obs, 0))),
+    )
   }
 
   let attempt = 0
@@ -212,11 +221,16 @@ const resolveInstance = async (
     n,
     makeAttempt: () => {
       const a = attempt++
-      return runInstance(
-        instance,
-        withObserve(
-          freshLlm !== undefined ? { ...effBase, llm: freshLlm(a) } : effBase,
-          attemptObs(obs, a),
+      // C5 bench-attempt root: one root span (FRESH trace) per Best-of-N attempt,
+      // so N attempts of one instance carry DISTINCT trace ids (never merged) and
+      // each attempt's `quanta.instance.attempt` matches its `.<a>.jsonl` file.
+      return withBenchInstanceRoot({ instanceId: instance.id, attempt: a }, () =>
+        runInstance(
+          instance,
+          withObserve(
+            freshLlm !== undefined ? { ...effBase, llm: freshLlm(a) } : effBase,
+            attemptObs(obs, a),
+          ),
         ),
       )
     },
@@ -930,6 +944,14 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   // (which freezes `runId`): `benchRunId()` resolves `runtimeConfig().runId`,
   // so we seed env here when unset, then every later `benchRunId()` returns the
   // same pinned id from the frozen config.
+  //
+  // C5 run-id unification: when a trace sink is active (or an id was explicitly
+  // pinned), the `import.meta.main` boot wire (`bootBenchOtelExport`, which runs
+  // BEFORE this) has ALREADY seeded `QUANTA_RUN_ID` to the SAME value it fed the
+  // OTLP resource (`QUANTA_OTEL_RUN_ID`), so this `??=` is a no-op and the
+  // observe `ctx.runId` == the span `quanta.run.id` (one joinable id). With no
+  // sink and no explicit pin the boot wire left `QUANTA_RUN_ID` untouched, so
+  // this mints `run-<ts>` exactly as before (byte-identical Default-OFF).
   process.env.QUANTA_RUN_ID ??= `run-${Date.now()}`
   // maxTurns / timeoutMs flow through the runtime-config SSOT parser, which
   // rejects NaN-on-garbage (a raw `Number("abc")` used to yield NaN and silently

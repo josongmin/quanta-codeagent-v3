@@ -151,6 +151,15 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
   // that mixes many concurrent runs. Without forwarding it the box's spans carry
   // no run id and the operator's run-link shows nothing.
   "QUANTA_OTEL_RUN_ID",
+  // C5 run-id unification: forward the ARTIFACT/observe id too, so the box's
+  // observe/cassette `ctx.runId` (from `benchRunId()` → `runtimeConfig().runId`
+  // → QUANTA_RUN_ID) is the SAME value as its OTLP `quanta.run.id`
+  // (QUANTA_OTEL_RUN_ID). The operator side now seeds both to one authority
+  // (bootBenchOtelExport / ensureBenchTraceSink); without forwarding THIS key
+  // the box would mint its own `run-<ts>` and the OTLP span could not join its
+  // `<runId>/<instanceId>.<attempt>.jsonl` trajectory. Absent locally ⇒ not
+  // forwarded ⇒ box mints its own (byte-identical Default-OFF).
+  "QUANTA_RUN_ID",
   // jun-29 (RFC multi-dataset): buildBenchCommand hardcodes QUANTA_SWEBENCH_NAMESPACE
   // =swebench and defaults dataset_name to Verified. Live/Pro grade against a DIFFERENT
   // HF dataset + Docker namespace (Live: SWE-bench-Live/SWE-bench-Live + `starryzhang`).

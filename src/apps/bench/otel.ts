@@ -48,7 +48,8 @@ export const attachBenchOtelExport = (
 const RUN_ID_UNSAFE = /[^A-Za-z0-9._-]+/g
 
 /** Resolve the run id a bench process streams its spans under, or `undefined`
- *  when OTLP export is OFF (no endpoint) — leaving Default-OFF byte-identical.
+ *  when OTLP export is OFF (no endpoint) AND no explicit id was pinned — leaving
+ *  Default-OFF byte-identical.
  *
  *  THE HOLE THIS CLOSES: the run-id deep-link (`?run=<id>`) only works if spans
  *  carry `quanta.run.id`, which only happens if `QUANTA_OTEL_RUN_ID` is set.
@@ -56,17 +57,30 @@ const RUN_ID_UNSAFE = /[^A-Za-z0-9._-]+/g
  *  3-arm A/B) streams with NO run id and the link shows nothing. So:
  *    - explicit `QUANTA_OTEL_RUN_ID` (trimmed, non-blank) ALWAYS wins — the
  *      operator can pin a clean campaign/arm label;
+ *    - else an explicit `QUANTA_RUN_ID` (the artifact/observe/cassette pin) is
+ *      honored so the SAME id authors BOTH the OTLP resource and the observe
+ *      ctx (C5 run-id unification — kills the two-id divergence where the boot
+ *      wire minted `QUANTA_OTEL_RUN_ID` and `runMain` separately minted
+ *      `QUANTA_RUN_ID` in a different format);
  *    - else, when export is ON, AUTO-ISSUE `<preset-slug>-<base36 time>` so every
  *      run is linkable with zero manual steps and two runs never collide.
- *  Set the result back onto `process.env.QUANTA_OTEL_RUN_ID` at the boot wire so
- *  it (a) reaches the exporter AND (b) forwards to every full-remote box (one
- *  operator invocation ⇒ one shared id across all its boxes). */
+ *  Set the result back onto BOTH `process.env.QUANTA_OTEL_RUN_ID` AND
+ *  `process.env.QUANTA_RUN_ID` at the boot wire (see {@link bootBenchOtelExport})
+ *  so it (a) reaches the exporter, (b) reaches the observe/cassette ctx, AND
+ *  (c) forwards to every full-remote box (one operator invocation ⇒ one shared
+ *  id across all its boxes and both id namespaces). */
 export const resolveBenchRunId = (
   env: Readonly<Record<string, string | undefined>>,
   opts: { readonly now?: () => number; readonly rand?: () => number } = {},
 ): string | undefined => {
   const explicit = env.QUANTA_OTEL_RUN_ID
   if (explicit !== undefined && explicit.trim() !== "") return explicit.trim()
+  // An explicit artifact-pin (QUANTA_RUN_ID) is the SAME logical run — honor it
+  // as the authority so the OTLP resource and the observe ctx never diverge.
+  // This wins even with NO endpoint (the operator pre-labeled the run), matching
+  // the QUANTA_OTEL_RUN_ID explicit-precedence rule above.
+  const explicitRunId = env.QUANTA_RUN_ID
+  if (explicitRunId !== undefined && explicitRunId.trim() !== "") return explicitRunId.trim()
   // Auto-issue only when export is actually ON — no endpoint ⇒ nothing streams,
   // so minting an id would be a confusing no-op (and a non-OFF env mutation).
   if ((env.QUANTA_OTEL_ENDPOINT ?? "").trim() === "") return undefined
@@ -132,18 +146,37 @@ export interface BenchOtelBoot {
  *    1. resolves the run id ({@link resolveBenchRunId}) and writes it BACK onto
  *       `env` (process.env) BEFORE attach, so it both (a) reaches the exporter
  *       and (b) forwards to every full-remote box (buildForwardedBenchEnv reads
- *       process.env at box-launch) — one operator invocation ⇒ one shared id;
+ *       process.env at box-launch) — one operator invocation ⇒ one shared id.
+ *       C5 UNIFICATION: the SAME id is seeded onto BOTH `QUANTA_OTEL_RUN_ID`
+ *       (OTLP resource / span deep-link) AND `QUANTA_RUN_ID` (the observe /
+ *       cassette / artifact ctx that `runMain` would otherwise mint separately
+ *       as `run-<ts>`). Seeding `QUANTA_RUN_ID` here — BEFORE `runMain`'s
+ *       `??=` default and BEFORE the first `runtimeConfig()` freeze — makes the
+ *       OTLP `quanta.run.id` and the observe `ctx.runId` the exact same value,
+ *       so an OTLP span joins its `<runId>/<instanceId>.<attempt>.jsonl`
+ *       trajectory. When a run id is resolved but `QUANTA_RUN_ID` was already
+ *       pinned we leave it (the resolver already preferred that pin), so we
+ *       never clobber an operator's artifact label;
  *    2. attaches the exporter ({@link attachBenchOtelExport});
  *    3. computes the trace-viewer deep-link for the entry to print.
- *  Default-OFF byte-identical: no endpoint ⇒ runId/traceLink undefined, env
- *  untouched, no sink registered. `env` is mutated in place by design (the
- *  entries pass process.env); a test passes a throwaway record. */
+ *  Default-OFF byte-identical: no endpoint AND no explicit id ⇒ runId/traceLink
+ *  undefined, env untouched (NEITHER id key seeded — `runMain` mints
+ *  `QUANTA_RUN_ID=run-<ts>` exactly as before), no sink registered. The run-id
+ *  unification only bites when a sink is active OR an id was explicitly pinned.
+ *  `env` is mutated in place by design (the entries pass process.env); a test
+ *  passes a throwaway record. */
 export const bootBenchOtelExport = (
   env: Record<string, string | undefined>,
   overrides?: Partial<OtelExporterOpts> & ExporterSpanSinkOpts,
 ): BenchOtelBoot => {
   const runId = resolveBenchRunId(env)
-  if (runId !== undefined) env.QUANTA_OTEL_RUN_ID = runId
+  if (runId !== undefined) {
+    env.QUANTA_OTEL_RUN_ID = runId
+    // Seed the artifact/observe/cassette id too so BOTH namespaces share ONE
+    // authority. Use `??=` so an explicit QUANTA_RUN_ID pin (which the resolver
+    // already honored as the source) is never overwritten.
+    env.QUANTA_RUN_ID ??= runId
+  }
   const otelExport = attachBenchOtelExport(env, overrides)
   const traceLink =
     otelExport.exporter !== null && runId !== undefined

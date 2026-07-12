@@ -14,6 +14,8 @@
  */
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { getSpanSink, QUANTA_ATTRS } from "@/observability"
+import { contextTracer, type SpanAttributes } from "@/observability/tracing"
 import { matchesInstanceFilter, writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { logger } from "@/shared"
@@ -45,6 +47,55 @@ export const attemptObs = (
 
 export const withObserve = (base: RunCfg, o: AttemptObservation | undefined): RunCfg =>
   o === undefined ? base : { ...base, observe: o }
+
+/**
+ * C5 — Bench-attempt ROOT span. Today the OUTERMOST span of a bench instance is
+ * the agent-level `session_loop` (opened INSIDE `runInstance` by `runAgent`), so
+ * the whole sandbox-prep → localize → agent → verify pipeline runs OUTSIDE any
+ * span and the trace begins mid-solve. This opens a `quanta.bench.instance`
+ * INTERNAL root per instance ATTEMPT that wraps the ENTIRE `runInstance` call, so
+ * sandbox/localize/verify sit inside a trace and every attempt gets its OWN root.
+ *
+ * Identity: stamps `quanta.instance.id` + (when known) the 0-based
+ * `quanta.instance.attempt` — the SAME `{instanceId, attempt}` the driver stamps
+ * on `session_loop` (config-build `spanIdentity`) and that names the
+ * `<runId>/<instanceId>.<attempt>.jsonl` trajectory file, so the root, the loop
+ * span, and the trajectory all carry one join key.
+ *
+ * Trace-per-attempt: `contextTracer.withSpan` mints a FRESH trace id per call, so
+ * two Best-of-N attempts of one instance get DISTINCT trace ids (never merged).
+ * It installs the started span as the active `TraceRef` for the whole async
+ * subtree — the seam the C3 OBSERVE recorder + C4 cassette read via
+ * `getActiveTraceRef()` to bind this attempt's records to its root.
+ *
+ * Default-OFF byte-identical: GATED on a live span sink (`getSpanSink()`). With
+ * NO sink (the shipped default, and the whole OFF path) this installs NO span,
+ * NO async-context frame, and NO id allocation — it calls `run()` directly, so
+ * the bench loop is byte-identical to the pre-C5 path. `contextTracer` is the
+ * NO-EXPORT active-context tracer (valid ids, zero exporter egress); when a real
+ * OTel provider IS registered the surface can swap it for `otelTracer` without
+ * changing this seam.
+ */
+export const withBenchInstanceRoot = <T>(
+  identity: { readonly instanceId: string; readonly attempt?: number },
+  run: () => Promise<T>,
+): Promise<T> => {
+  if (getSpanSink() === null) return run()
+  // Canonical vocabulary keys (NOT raw string literals — the vocabulary-orphan
+  // scan enforces this). Built as a plain SpanAttributes record (all values
+  // string|number) rather than via `attrs()` because the tracing port's
+  // `SpanAttributes` excludes the array/undefined arms of the wider `Attrs`.
+  const attributes: SpanAttributes = {
+    [QUANTA_ATTRS.instance.id]: identity.instanceId,
+    ...(identity.attempt !== undefined
+      ? { [QUANTA_ATTRS.instance.attempt]: identity.attempt }
+      : {}),
+  }
+  return contextTracer.withSpan("quanta.bench.instance", () => run(), {
+    kind: "internal",
+    attributes,
+  })
+}
 
 /** `--prepare-images` worker: warm the Docker image pool for `instanceIds`
  *  via the official `prepare_images` harness, log the outcome, and return the

@@ -135,6 +135,12 @@ const durMs = (startNano: string | undefined, endNano: string | undefined): numb
 const KEY_ATTRS: ReadonlyArray<string> = [
   "quanta.instance.id",
   "instance",
+  // Wave-2 gen_ai.* span identity: operation.name distinguishes the span TYPE
+  // (invoke_agent / chat / execute_tool) in the tree, tool.name names the tool
+  // span. Surfaced inline so the terminal feed reads the tree without the UI.
+  "gen_ai.operation.name",
+  "gen_ai.tool.name",
+  "gen_ai.tool.call.id",
   "quanta.tool.name",
   "tool",
   "quanta.tool.call.status",
