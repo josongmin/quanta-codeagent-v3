@@ -131,7 +131,7 @@ export const dispatchTool = async (
     // with no parent. Concurrent tool dispatches get INDEPENDENT refs (each is a
     // sibling under the shared turn), so their nested emits never cross-link.
     // No-op wrap when no sink is active (byte-identical default-OFF).
-    const out = await withActiveSpanScope(false, () =>
+    const out = await withActiveSpanScope(false, toolSpan, () =>
       dispatchToolInner(call, config, permission, onProgress, autoClassifier, workingState),
     )
     // Map `ok` ⇒ "success", non-ok ⇒ "error". A "blocked" outcome would

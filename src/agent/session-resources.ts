@@ -1,4 +1,4 @@
-import { attrs, GEN_AI_ATTRS, getSpanSink, QUANTA_ATTRS } from "@/observability"
+import { attrs, GEN_AI_ATTRS, getSpanSink, QUANTA_ATTRS, type Span, spanTraceRef } from "@/observability"
 import { getActiveTraceRef, runWithActiveTraceRef, type TraceRef } from "@/observability/tracing"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import type { RunContext } from "@/shared"
@@ -288,8 +288,9 @@ export const turnSpanAttrs = (turnId: string): ReturnType<typeof attrs> =>
 // ───────────────────────────────────────────────────────────────────────────
 
 /** Crypto-strong lowercase hex of `byteCount` bytes (W3C id shape). Mirrors the
- *  tracing slice's `randomHex` so a bridge ref is indistinguishable in shape
- *  from a real OTel span id — the OBSERVE recorder stamps it verbatim. */
+ *  tracing slice's `randomHex`. Used ONLY on the CONTEXT-only fallback (a sink
+ *  that issues opaque tokens instead of a {@link TraceRef}); the EXPORT sink
+ *  path never reaches it — it installs the exporter-issued id verbatim. */
 const bridgeHex = (byteCount: number): string => {
   const bytes = new Uint8Array(byteCount)
   crypto.getRandomValues(bytes)
@@ -301,19 +302,40 @@ const bridgeHex = (byteCount: number): string => {
   return out
 }
 
-/** Run `body` inside a fresh active-context span scope that inherits the current
- *  enclosing ref as its parent — the async-context glue the legacy `SpanSink`
- *  path lacks. `isRoot` starts a NEW trace (session_loop); otherwise the trace id
- *  is inherited so the whole session shares one trace and each child records its
- *  `parentSpanId`.
+/** Run `body` inside the active-context span scope for the just-opened `span`.
+ *  This is THE unification seam (jul-12 OTel-GenAI): the id installed as the
+ *  active `TraceRef` is the SAME id the sink issued for `span` (surfaced on
+ *  `Span.ref`) — so `getActiveTraceRef()` inside `body` === the exported span's
+ *  `{traceId, spanId}`. OTLP ≡ OBSERVE ≡ cassette therefore share ONE identity.
+ *
+ *  Two sink shapes:
+ *    · EXPORT sink — its `onStart` returns a `TraceRef`; we install it verbatim
+ *      (parentage already resolved by the exporter from the enclosing active
+ *      ref, so it is async-safe: concurrent roots never cross-link).
+ *    · CONTEXT-only sink (issues opaque tokens, no ref) — we FALL BACK to
+ *      minting a valid W3C id here, inheriting the enclosing active ref as
+ *      parent (`isRoot` starts a fresh trace). This preserves the Wave-1
+ *      async-context isolation for a non-exporting sink.
  *
  *  DEFAULT-OFF byte-identity: when NO span sink is registered, this installs
- *  nothing (no `runWithActiveTraceRef`, no id mint) and calls `body()` directly —
- *  identical to the pre-C2 loop. The gate is `getSpanSink()` (the same sink the
- *  legacy span helpers consult), so context activation is coupled 1:1 to the
- *  spans actually being emitted. */
-export const withActiveSpanScope = <T>(isRoot: boolean, body: () => Promise<T>): Promise<T> => {
+ *  nothing (no `runWithActiveTraceRef`, no id mint) and calls `body()` directly
+ *  — identical to the pre-C2 loop. The gate is `getSpanSink()` (the same sink
+ *  the span helpers consult), so context activation is coupled 1:1 to the spans
+ *  actually being emitted. */
+export const withActiveSpanScope = <T>(
+  isRoot: boolean,
+  span: Span,
+  body: () => Promise<T>,
+): Promise<T> => {
   if (getSpanSink() === null) return body()
+  // EXPORT path — install the EXACT id the exporter issued for this span, so
+  // the active ref === what gets POSTed to OTLP. Parentage was already resolved
+  // by the exporter's `onStart` (it read the enclosing active ref), so this ref
+  // carries the correct `parentSpanId` and needs no further derivation.
+  const issued = spanTraceRef(span)
+  if (issued !== undefined) return runWithActiveTraceRef(issued, body)
+  // CONTEXT-only fallback — the sink issued an opaque token, so mint a valid id
+  // and inherit the enclosing active ref as parent (isolation preserved).
   const parent = isRoot ? undefined : getActiveTraceRef()
   const ref: TraceRef = {
     traceId: parent?.traceId ?? bridgeHex(16),

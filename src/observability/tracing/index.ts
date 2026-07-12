@@ -16,6 +16,7 @@
 
 export {
   getActiveTraceRef,
+  isActiveContextRegime,
   runWithActiveTraceRef,
   type TraceRef,
 } from "./active-context"

@@ -36,7 +36,9 @@ export const runAgent = async (config: AgentConfig): Promise<AgentOutcome> => {
     // async span (turn / sampling / tool) + the OBSERVE recorder discover this
     // session as their trace root. No-op (direct call) when no span sink is
     // active — byte-identical default-OFF.
-    const outcome = await withActiveSpanScope(true, () => runAgentInnerWithEgressProxy(config))
+    const outcome = await withActiveSpanScope(true, sessionSpan, () =>
+      runAgentInnerWithEgressProxy(config),
+    )
     spanStatus =
       outcome.reason === "aborted" ? "aborted" : outcome.reason === "error" ? "error" : "ok"
     if (spanStatus === "ok") {

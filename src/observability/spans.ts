@@ -53,6 +53,7 @@
  */
 
 import type { Attrs } from "./attrs"
+import type { TraceRef } from "./tracing/active-context"
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -100,13 +101,49 @@ export interface Span {
   readonly name: SpanName
   /** `performance.now()` at start. Used to compute `durationMs` on close. */
   readonly startedAt: number
+  /** The W3C identity the sink ISSUED for this span at `onStart`, or
+   *  `undefined` when the sink issues no identity (the no-op sentinel, or a
+   *  legacy sink whose `onStart` returns a non-{@link TraceRef} token).
+   *
+   *  This is the UNIFICATION seam (jul-12 OTel-GenAI): the EXPORT sink returns
+   *  the exact `{traceId, spanId, parentSpanId}` it will ship to OTLP, so the
+   *  loop can install THAT id as the active async-context ref
+   *  (`runWithActiveTraceRef`) — making `getActiveTraceRef()` === the exported
+   *  span id (OTLP ≡ OBSERVE ≡ cassette share one identity). Read via
+   *  {@link spanTraceRef}; loop control flow MUST NOT branch on it. */
+  readonly ref: TraceRef | undefined
 }
+
+/** Structural test for a sink-issued {@link TraceRef} token. The exporter's
+ *  `onStart` returns a frame carrying `traceId` + `spanId` (32/16 lowercase
+ *  hex); a legacy sink may return an opaque token (a number, a symbol) that is
+ *  NOT a ref. We duck-type rather than instanceof so any sink can opt into the
+ *  unified identity by simply returning a `{traceId, spanId}` shape. */
+const asTraceRef = (token: unknown): TraceRef | undefined => {
+  if (token === null || typeof token !== "object") return undefined
+  const t = token as { traceId?: unknown; spanId?: unknown; traceFlags?: unknown }
+  if (typeof t.traceId !== "string" || typeof t.spanId !== "string") return undefined
+  if (typeof t.traceFlags !== "number") return undefined
+  return t as TraceRef
+}
+
+/** The sink-issued {@link TraceRef} for a live span, or `undefined` when the
+ *  span is the no-op sentinel or its sink issued no ref. This is the accessor
+ *  the loop's `withActiveSpanScope` reads to install the EXPORT sink's exact
+ *  id as the active async-context ref. */
+export const spanTraceRef = (span: Span): TraceRef | undefined => span.ref
 
 /** Implement this to receive spans. Constructed lazily by the host (CLI/web
  *  surface) and wired in via {@link setSpanSink}. Absent ⇒ no-op (default). */
 export interface SpanSink {
-  /** Open a span. Return value is opaque to callers — passed back verbatim to
-   *  {@link onEnd} so the sink can correlate. */
+  /** Open a span. Return value is passed back verbatim to {@link onEnd} so the
+   *  sink can correlate. A sink that wants its issued identity to become the
+   *  active async-context ref (so `getActiveTraceRef()` === the exported span
+   *  id — the jul-12 OTel-GenAI unification) returns a value carrying
+   *  `{traceId, spanId, traceFlags, parentSpanId?}` (a {@link TraceRef} shape);
+   *  {@link startSpan} surfaces it on `Span.ref`. A legacy sink returning an
+   *  opaque token (number/symbol) simply issues no ref — `Span.ref` is
+   *  `undefined` and the loop falls back to minting a context id itself. */
   onStart: (name: SpanName, attrs: Attrs) => unknown
   /** Close a span with a terminal {@link SpanStatus}. `durationMs` is the
    *  measured elapsed time computed by {@link endSpan} (monotonic clock).
@@ -134,6 +171,7 @@ const NOOP_SPAN: Span = Object.freeze({
   token: null,
   name: SPAN_NAMES.sessionLoop,
   startedAt: 0,
+  ref: undefined,
 })
 
 // ---------------------------------------------------------------------------
@@ -172,7 +210,7 @@ export const startSpan = (name: SpanName, attrs: Attrs): Span => {
   if (sink === null) return NOOP_SPAN
   try {
     const token = sink.onStart(name, attrs)
-    return { token, name, startedAt: performance.now() }
+    return { token, name, startedAt: performance.now(), ref: asTraceRef(token) }
   } catch {
     // Swallow — see comment above. The matching `endSpan` is also a no-op
     // because the sentinel's `token === null` short-circuits below.

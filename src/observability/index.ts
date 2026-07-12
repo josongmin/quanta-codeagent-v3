@@ -48,6 +48,7 @@ export {
   type SpanSink,
   type SpanStatus,
   setSpanSink,
+  spanTraceRef,
   startSpan,
 } from "./spans"
 export {
@@ -68,7 +69,7 @@ export type {
   TimerStats,
   TimerStop,
 } from "./types"
-export { GEN_AI_ATTRS, QUANTA_ATTRS } from "./vocabulary"
+export { GEN_AI_ATTRS, QUANTA_ATTRS, QUANTA_SPAN_NAMES } from "./vocabulary"
 export {
   accumulateWorkMetrics,
   buildWorkMetrics,

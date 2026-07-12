@@ -28,6 +28,7 @@ import {
   type OtelExporterOpts,
 } from "./otel-exporter"
 import { getSpanSink, type SpanName, type SpanSink, type SpanStatus, setSpanSink } from "./spans"
+import { getActiveTraceRef, isActiveContextRegime, type TraceRef } from "./tracing/active-context"
 import type { SpanAttributes, SpanStatusCode } from "./tracing/port"
 
 /** Loop span status → OTLP status code. `aborted` is a non-OK terminal state,
@@ -67,10 +68,13 @@ export const createExporterSpanSink = (
   // a fresh trace is minted PER ROOT span (audit Q1 — a single per-sink traceId
   // collapsed every session/turn of the whole process into one unbounded trace).
   const fixedTraceId = opts.traceId
-  interface Frame {
-    readonly spanId: string
-    readonly traceId: string
-    readonly parentSpanId?: string
+  /** A Frame IS the {@link TraceRef} the exporter ISSUES for this span (the
+   *  jul-12 OTel-GenAI unification): `spans.ts` surfaces it verbatim on
+   *  `Span.ref`, and `withActiveSpanScope` installs it as the active
+   *  async-context ref — so `getActiveTraceRef()` returns the EXACT id this
+   *  exporter will POST to OTLP. `traceFlags` (sampled) is carried so the
+   *  frame satisfies the `TraceRef`/`SpanContext` shape structurally. */
+  interface Frame extends TraceRef {
     readonly startEpochMs: number
     /** Attributes supplied at span OPEN (`startSpan(name, attrs)`). The bridge
      *  used to DROP these — only `onEnd` attrs reached the exporter — so
@@ -79,21 +83,38 @@ export const createExporterSpanSink = (
      *  attrs at `onEnd` (close wins on key collision). */
     readonly startAttrs: SpanAttributes
   }
-  // Open-span stack for parent linkage. A token IS its frame, so onEnd removes
-  // the EXACT frame (`splice(idx, 1)`) — never the stragglers above it (audit
-  // Q2: a one-arg `splice(idx)` dropped concurrent siblings, corrupting the
-  // tree whenever tools/subagents close out of LIFO order). Parent + trace are
-  // captured at start, so a child still links correctly even under overlap.
+  // Open-span stack for parent linkage — the FALLBACK when no active
+  // async-context ref encloses the open (the direct-sink path: unit tests +
+  // hosts that call startSpan/endSpan without wrapping the body in
+  // `withActiveSpanScope`). A token IS its frame, so onEnd removes the EXACT
+  // frame (`splice(idx, 1)`) — never the stragglers above it (audit Q2: a
+  // one-arg `splice(idx)` dropped concurrent siblings, corrupting the tree
+  // whenever tools/subagents close out of LIFO order).
   const open: Frame[] = []
 
   return {
     onStart(_name: SpanName, attrs): unknown {
-      const parent = open.length > 0 ? open[open.length - 1] : undefined
-      // Root (no open parent) ⇒ a NEW trace; child ⇒ inherit the parent's trace.
+      // Parentage authority (jul-12): when the loop installed the enclosing
+      // span as the active async-context ref, THAT is the async-safe parent —
+      // two concurrently-interleaved sessions read their OWN active ref, so
+      // roots never cross-link. The LIFO stack is consulted ONLY on the direct
+      // `startSpan`/`endSpan` path (no `withActiveSpanScope` regime live): in
+      // the active-context regime a MISSING active ref means a genuine ROOT (a
+      // new trace), NOT "adopt whatever concurrent-session frame sits on the
+      // shared stack" — that stale-stack adoption is the exact cross-link the
+      // async-context replacement exists to kill.
+      const activeParent = getActiveTraceRef()
+      const stackFallback =
+        activeParent === undefined && !isActiveContextRegime() && open.length > 0
+          ? open[open.length - 1]
+          : undefined
+      const parent: TraceRef | Frame | undefined = activeParent ?? stackFallback
+      // Root (no parent) ⇒ a NEW trace; child ⇒ inherit the parent's trace.
       const traceId = parent?.traceId ?? fixedTraceId ?? toHex(16, gen)
       const frame: Frame = {
         spanId: toHex(8, gen),
         traceId,
+        traceFlags: parent?.traceFlags ?? 1,
         ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
         startEpochMs: now(),
         startAttrs: attrs as SpanAttributes,

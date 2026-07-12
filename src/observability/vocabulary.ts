@@ -290,6 +290,21 @@ export const QUANTA_ATTRS = {
   },
 } as const
 
+/**
+ * Canonical SPAN NAMES that live in the `quanta.*` namespace (as opposed to
+ * attribute KEYS in {@link QUANTA_ATTRS}). Kept here — the single vocabulary
+ * owner — so the orphan-literal scan (`vocabulary-migration.test.ts`) does not
+ * flag them as un-migrated raw `"quanta.*"` strings scattered across `src/`.
+ * NOT part of {@link ALL_ATTR_KEYS} (those are attribute keys); a span name is
+ * a different axis and must not inflate the attribute-count budget.
+ */
+export const QUANTA_SPAN_NAMES = {
+  /** INTERNAL root span opened once per bench instance ATTEMPT
+   *  (`withBenchInstanceRoot`) — the per-attempt trace root under which the
+   *  whole sandbox→agent→verify tree hangs. One trace per attempt. */
+  benchInstance: "quanta.bench.instance",
+} as const
+
 // ---------------------------------------------------------------------------
 // OpenTelemetry GenAI semantic conventions (`gen_ai.*`)
 // ---------------------------------------------------------------------------

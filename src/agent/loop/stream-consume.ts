@@ -384,7 +384,7 @@ export const streamConsume = async (
     // during the provider stream — and the OBSERVE recorder's llm_request/usage
     // events — attaches under THIS sampling span (parented to the turn). No-op
     // wrap when no sink is active (byte-identical default-OFF).
-    const outcome = await withActiveSpanScope(false, () =>
+    const outcome = await withActiveSpanScope(false, samplingSpan, () =>
       streamingTurn({
         events: teeUsage(
           config,

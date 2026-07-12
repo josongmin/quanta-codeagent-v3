@@ -14,7 +14,7 @@
  */
 import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { getSpanSink, QUANTA_ATTRS } from "@/observability"
+import { getSpanSink, QUANTA_ATTRS, QUANTA_SPAN_NAMES } from "@/observability"
 import { contextTracer, type SpanAttributes } from "@/observability/tracing"
 import { matchesInstanceFilter, writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
 import type { RunHealthSummary } from "@/runner/batch/report"
@@ -91,7 +91,7 @@ export const withBenchInstanceRoot = <T>(
       ? { [QUANTA_ATTRS.instance.attempt]: identity.attempt }
       : {}),
   }
-  return contextTracer.withSpan("quanta.bench.instance", () => run(), {
+  return contextTracer.withSpan(QUANTA_SPAN_NAMES.benchInstance, () => run(), {
     kind: "internal",
     attributes,
   })

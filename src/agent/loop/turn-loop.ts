@@ -90,7 +90,9 @@ export const executeTurnWithObservability = async (args: {
     // tool-call spans (opened deep inside `runTurn`) discover THIS turn as their
     // structural parent — replacing the old flat-sink LIFO-stack parentage.
     // No-op wrap when no sink is active (byte-identical default-OFF).
-    result = await withActiveSpanScope(false, () => runTurn(args.turn, args.ctx.session, state))
+    result = await withActiveSpanScope(false, turnSpan, () =>
+      runTurn(args.turn, args.ctx.session, state),
+    )
     flushKind = result.kind
     turnSpanStatus =
       result.kind === "aborted" || result.kind === "interrupted"
