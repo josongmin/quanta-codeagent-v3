@@ -124,7 +124,19 @@ export interface ToolResultData {
   fullLogPath?: string
 }
 
-/** `kind:"patch_generated" | "patch_applied" | "patch_rejected"` payload. */
+/**
+ * `kind:"patch_generated" | "patch_applied" | "patch_rejected"` payload.
+ *
+ * `applyStatus` is a small honest enum (kept as `string` for forward-compat):
+ *  - `"generated"`    — emitted with `patch_generated` (diff captured, not yet graded).
+ *  - `"applied"`      — the non-empty patch APPLIED to the grading tree and was graded
+ *    (derived from the grader's real apply-success bit, NOT patch non-emptiness).
+ *  - `"apply_failed"` — a non-empty patch reached the grader but FAILED to apply
+ *    (context drift / corrupt hunk); grading could not run against the change. Carried
+ *    on a `patch_rejected` line, so `probe/triage.ts` classifies it as `patch_rejected`.
+ *  - `"rejected"`     — no submittable patch reached the tree (empty submission /
+ *    hard-rejected winner / generation- or no-patch terminal).
+ */
 export interface PatchData {
   diffPath: string
   filesChanged: number

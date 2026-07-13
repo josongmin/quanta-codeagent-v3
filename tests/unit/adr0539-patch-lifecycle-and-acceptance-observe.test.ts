@@ -21,7 +21,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { TrajectoryEvent } from "@/shared"
 import { triage } from "../../src/apps/probe/triage"
-import { emitPatchOutcome } from "../../src/runner/batch/eval/report"
+import { applyStatusOf, emitPatchOutcome } from "../../src/runner/batch/eval/report"
 import { BenchObserver } from "../../src/runner/batch/observe"
 
 const withObserver = <T>(fn: (obs: BenchObserver, file: string) => T): T => {
@@ -55,9 +55,9 @@ describe("ADR-0539 R2 — patch_applied / patch_rejected emit", () => {
   const APPLIED_DIFF =
     "diff --git a/src/x.py b/src/x.py\n--- a/src/x.py\n+++ b/src/x.py\n@@ -1 +1 @@\n-a\n+b\n"
 
-  test("emitPatchOutcome(applied:true) writes a patch_applied line with the PatchData shape", () => {
+  test('emitPatchOutcome("applied") writes a patch_applied line with the PatchData shape', () => {
     const lines = withObserver((obs, file) => {
-      emitPatchOutcome(obs, "/obs/inst-1.0.patch", APPLIED_DIFF, true)
+      emitPatchOutcome(obs, "/obs/inst-1.0.patch", APPLIED_DIFF, "applied")
       obs.close()
       return readLines(file)
     })
@@ -73,9 +73,9 @@ describe("ADR-0539 R2 — patch_applied / patch_rejected emit", () => {
     expect(lines.some((e) => e.kind === "patch_rejected")).toBe(false)
   })
 
-  test("emitPatchOutcome(applied:false) writes a patch_rejected line triage classifies", () => {
+  test('emitPatchOutcome("rejected") writes a patch_rejected line triage classifies', () => {
     const lines = withObserver((obs, file) => {
-      emitPatchOutcome(obs, "/obs/inst-1.0.patch", APPLIED_DIFF, false)
+      emitPatchOutcome(obs, "/obs/inst-1.0.patch", APPLIED_DIFF, "rejected")
       obs.close()
       return readLines(file)
     })
@@ -90,18 +90,75 @@ describe("ADR-0539 R2 — patch_applied / patch_rejected emit", () => {
     expect(verdict.evidence.some((e) => e.includes("applyStatus=rejected"))).toBe(true)
   })
 
+  test('emitPatchOutcome("apply_failed") writes a patch_rejected line carrying applyStatus=apply_failed', () => {
+    // A non-empty diff that reached the grader but FAILED to apply must NOT be
+    // laundered into `applyStatus:"applied"`. It rides a `patch_rejected` line
+    // (so triage still classifies it) but keeps the honest `apply_failed` status.
+    const lines = withObserver((obs, file) => {
+      emitPatchOutcome(obs, "/obs/inst-1.0.patch", APPLIED_DIFF, "apply_failed")
+      obs.close()
+      return readLines(file)
+    })
+    // NEVER emitted as applied — the field name is not a lie.
+    expect(lines.some((e) => e.kind === "patch_applied")).toBe(false)
+    const rejected = lines.filter((e) => e.kind === "patch_rejected")
+    expect(rejected.length).toBe(1)
+    const d = rejected[0]?.data as Record<string, unknown>
+    expect(d.applyStatus).toBe("apply_failed")
+    // Triage still lands on patch_rejected AND surfaces the apply-fail nuance.
+    const verdict = triage(rejected)
+    expect(verdict.likely_failure_class).toBe("patch_rejected")
+    expect(verdict.evidence.some((e) => e.includes("applyStatus=apply_failed"))).toBe(true)
+    expect(verdict.triage_hint).toContain("failed to apply")
+  })
+
   test("OFF / byte-identical: observer undefined ⇒ NO patch-lifecycle line emitted", () => {
     // The whole eval driver skips these emits when `wiring.observer` is absent
     // (observe off). `emitPatchOutcome(undefined, …)` must be a no-op — proven by
     // an observer whose file stays free of applied/rejected lines.
     const lines = withObserver((obs, file) => {
       // Drive the OFF branch: pass `undefined` for the observer.
-      emitPatchOutcome(undefined, "/p", APPLIED_DIFF, true)
-      emitPatchOutcome(undefined, "/p", APPLIED_DIFF, false)
+      emitPatchOutcome(undefined, "/p", APPLIED_DIFF, "applied")
+      emitPatchOutcome(undefined, "/p", APPLIED_DIFF, "rejected")
       obs.close()
       return readLines(file)
     })
     expect(lines.some((e) => e.kind === "patch_applied" || e.kind === "patch_rejected")).toBe(false)
+  })
+})
+
+describe("ADR-0539 R2 — applyStatusOf derives from REAL apply-success, not emptiness", () => {
+  const NONEMPTY = "diff --git a/x b/x\n"
+  // (i) non-empty patch that GRADED (applied) → "applied".
+  test("non-empty + grader patchApplied:true → applied (even if tests failed)", () => {
+    expect(applyStatusOf({ patch: NONEMPTY, patchApplied: true, verifyPassed: false })).toBe(
+      "applied",
+    )
+    expect(applyStatusOf({ patch: NONEMPTY, patchApplied: true, verifyPassed: true })).toBe(
+      "applied",
+    )
+  })
+  // (ii) non-empty patch that FAILED TO APPLY → NOT "applied".
+  test("non-empty + grader patchApplied:false → apply_failed (RED if reverted to emptiness)", () => {
+    const status = applyStatusOf({ patch: NONEMPTY, patchApplied: false, verifyPassed: false })
+    expect(status).toBe("apply_failed")
+    expect(status).not.toBe("applied")
+  })
+  // Signal-unavailable honesty: a PASS proves apply; a non-pass cannot claim it.
+  test("non-empty + patchApplied undefined → applied iff verify passed, else apply_failed", () => {
+    expect(applyStatusOf({ patch: NONEMPTY, patchApplied: undefined, verifyPassed: true })).toBe(
+      "applied",
+    )
+    expect(applyStatusOf({ patch: NONEMPTY, patchApplied: undefined, verifyPassed: false })).toBe(
+      "apply_failed",
+    )
+  })
+  // (iii) empty patch → rejected (unchanged).
+  test("empty patch → rejected regardless of grader bits", () => {
+    expect(applyStatusOf({ patch: "   ", patchApplied: true, verifyPassed: true })).toBe("rejected")
+    expect(applyStatusOf({ patch: "", patchApplied: undefined, verifyPassed: false })).toBe(
+      "rejected",
+    )
   })
 })
 

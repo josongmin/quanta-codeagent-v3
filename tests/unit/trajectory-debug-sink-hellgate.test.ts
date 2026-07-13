@@ -442,12 +442,14 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
 
     // producer: the tap hands each edit's raw signals to the shaper.
     contributeEditTraceDebug({
+      name: "edit",
       file: "src/a.py",
       ok: true,
       preview: "src/a.py: Replaced 2 occurrence(s)",
       replaceAll: true,
     })
     contributeEditTraceDebug({
+      name: "edit",
       file: "src/b.py",
       ok: true,
       preview: "src/b.py: Replaced 1 occurrence(s) via whitespace-flexible match",
@@ -460,8 +462,16 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
     const records = await jsonlReplayStore({ path }).load()
     expect(records).toHaveLength(1)
     expect((records[0]?.metadata.debug as Record<string, unknown> | undefined)?.editTrace).toEqual([
-      { file: "src/a.py", mode: "exact", outcome: "matched", occurrences: 2, replaceAll: true },
       {
+        tool: "edit",
+        file: "src/a.py",
+        mode: "exact",
+        outcome: "matched",
+        occurrences: 2,
+        replaceAll: true,
+      },
+      {
+        tool: "edit",
         file: "src/b.py",
         mode: "fuzzy",
         outcome: "matched",
@@ -474,18 +484,21 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
   test("mode/outcome oracle: fast-apply, stale, failed, exact — derived from preview only", () => {
     process.env[RECORD_KEY] = "debug"
     contributeEditTraceDebug({
+      name: "edit",
       file: "f.py",
       ok: true,
       preview: "f.py: applied via fast-apply merge",
       replaceAll: false,
     })
     contributeEditTraceDebug({
+      name: "edit",
       file: "g.py",
       ok: false,
       preview: "stale_precondition: g.py sha256 aa != expected bb",
       replaceAll: false,
     })
     contributeEditTraceDebug({
+      name: "edit",
       file: "h.py",
       ok: false,
       preview: "h.py: old_string not found in file",
@@ -493,9 +506,63 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
     })
     expect(debugSink.drain()).toEqual({
       editTrace: [
-        { file: "f.py", mode: "fast-apply", outcome: "matched" },
-        { file: "g.py", mode: "exact", outcome: "stale" },
-        { file: "h.py", mode: "exact", outcome: "failed" },
+        { tool: "edit", file: "f.py", mode: "fast-apply", outcome: "matched" },
+        { tool: "edit", file: "g.py", mode: "exact", outcome: "stale" },
+        { tool: "edit", file: "h.py", mode: "exact", outcome: "failed" },
+      ],
+    })
+  })
+
+  test("SCOPE GUARD: a non-edit write tool (write) is NOT captured in editTrace (never mis-moded)", () => {
+    process.env[RECORD_KEY] = "debug"
+    // `write` fires onEditResult too (write_filesystem), but its output vocabulary
+    // ("Overwrote/Created … (N bytes)") is NOT the edit grammar. It must be dropped
+    // rather than silently tagged mode:"exact" with its byte count lost.
+    contributeEditTraceDebug({
+      name: "write",
+      file: "new.py",
+      ok: true,
+      preview: "new.py: Created new.py (42 bytes)",
+      replaceAll: false,
+    })
+    // scripted_replace / apply_patch likewise dropped — different vocabularies.
+    contributeEditTraceDebug({
+      name: "scripted_replace",
+      file: "s.py",
+      ok: true,
+      preview: "s.py: applied (replacements=3)",
+      replaceAll: false,
+    })
+    contributeEditTraceDebug({
+      name: "apply_patch",
+      file: "p.py",
+      ok: true,
+      preview: "updated: p.py",
+      replaceAll: false,
+    })
+    // No editTrace key at all — none of the three edit-mode slices leaked.
+    expect(debugSink.drain()).toBeUndefined()
+  })
+
+  test("SCOPE GUARD paired control: an edit interleaved with a write ⇒ ONLY the edit slice", () => {
+    process.env[RECORD_KEY] = "debug"
+    contributeEditTraceDebug({
+      name: "write",
+      file: "new.py",
+      ok: true,
+      preview: "new.py: Created new.py (10 bytes)",
+      replaceAll: false,
+    })
+    contributeEditTraceDebug({
+      name: "edit",
+      file: "real.py",
+      ok: true,
+      preview: "real.py: Replaced 1 occurrence(s)",
+      replaceAll: false,
+    })
+    expect(debugSink.drain()).toEqual({
+      editTrace: [
+        { tool: "edit", file: "real.py", mode: "exact", outcome: "matched", occurrences: 1 },
       ],
     })
   })
@@ -505,6 +572,7 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
     delete process.env[DEBUG_KEY]
 
     contributeEditTraceDebug({
+      name: "edit",
       file: "src/a.py",
       ok: true,
       preview: "src/a.py: Replaced 1 occurrence(s)",
@@ -524,6 +592,7 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
     process.env[RECORD_KEY] = "debug"
     const withEdit = capturingStore("/tmp/tds-edittrace-crown.jsonl")
     contributeEditTraceDebug({
+      name: "edit",
       file: "src/a.py",
       ok: true,
       preview: "src/a.py: Replaced 1 occurrence(s)",
@@ -541,6 +610,8 @@ describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
     expect(withEdit.appended[0]?.id).toBe(expectedId)
     expect(
       (withEdit.appended[0]?.metadata.debug as Record<string, unknown> | undefined)?.editTrace,
-    ).toEqual([{ file: "src/a.py", mode: "exact", outcome: "matched", occurrences: 1 }])
+    ).toEqual([
+      { tool: "edit", file: "src/a.py", mode: "exact", outcome: "matched", occurrences: 1 },
+    ])
   })
 })

@@ -14,6 +14,11 @@ import { exec } from "./exec"
 export interface PythonSwebenchResult {
   resolved: boolean
   gradingCompleted: boolean
+  /** Authoritative "did the model patch APPLY to the grading tree" bit from the
+   *  harness per-instance report (`patch_successfully_applied`); `undefined` when
+   *  no per-instance report was produced (signal unavailable). A `resolved:false`
+   *  with `patchApplied:false` is an APPLY-fail (diff never landed), NOT a test-fail. */
+  patchApplied?: boolean
   /** Regression-vs-didn't-fix breakdown from the harness (eval-only diagnostic). */
   breakdown?: GradeBreakdown
   log: string
@@ -35,6 +40,12 @@ export interface VerifyOutcome {
   failedTests: string[]
   logTail: string
   reportPath: string
+  /** Did the captured patch APPLY to the grading tree? Threaded from the swebench
+   *  harness `patch_successfully_applied` bit. `undefined` when the grader did not
+   *  expose it (local-testCmd path, infra crash before a per-instance report). The
+   *  observer maps this — NOT patch non-emptiness — to `applyStatus`: a non-empty
+   *  patch that FAILED to apply must never emit `applyStatus:"applied"`. */
+  patchApplied?: boolean
   /** Official-grade regression-vs-didn't-fix breakdown (swebench path only). */
   breakdown?: GradeBreakdown
 }
@@ -126,6 +137,12 @@ export const verify = async (
         failedTests: [],
         logTail: r.log.slice(-2000),
         reportPath: "",
+        // Authoritative apply-success bit — resolved implies applied even if the
+        // harness omitted the field; otherwise pass the report bit through so an
+        // apply-fail is not laundered into `applyStatus:"applied"` downstream.
+        ...(r.resolved || r.patchApplied !== undefined
+          ? { patchApplied: r.resolved || r.patchApplied === true }
+          : {}),
         ...(r.breakdown !== undefined ? { breakdown: r.breakdown } : {}),
       }
     }

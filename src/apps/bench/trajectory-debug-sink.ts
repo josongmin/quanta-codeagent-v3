@@ -10,11 +10,14 @@
  * - `"toolExec"` (driver.ts) — per-tool-result timing / outcome / edit target.
  * - `"verdict"` (contributeVerdictDebug) — the grade/verify outcome (pass/fail
  *   bit, patch size, any observation verdict / harness error decided there).
- * - `"editTrace"` (contributeEditTraceDebug) — the per-edit trace: target file,
- *   mode (exact/fuzzy/fast-apply), match outcome (matched/stale/failed),
- *   occurrence count, and any fuzzy-escalation flag, ALL derived from the edit
- *   tool's OWN output message (no recompute/re-read). APPEND-style, so multiple
- *   edits in a turn accumulate as a list.
+ * - `"editTrace"` (contributeEditTraceDebug) — the per-edit trace: tool (always
+ *   `"edit"`), target file, mode (exact/fuzzy/fast-apply), match outcome
+ *   (matched/stale/failed), occurrence count, and any fuzzy-escalation flag, ALL
+ *   derived from the edit tool's OWN output message (no recompute/re-read).
+ *   APPEND-style, so multiple edits in a turn accumulate as a list. SCOPE = the
+ *   `edit` tool ONLY: the tap fires for every `write_filesystem` tool, but the
+ *   grammar is edit-specific, so `write` / `scripted_replace` / `apply_patch` /
+ *   office+image writers are dropped rather than mis-moded (jul-13 honesty fix).
  * Enricher priority (jul-08 platform note): verdict > editTrace > toolExec. The
  * debug-sink contributor set is now COMPLETE — no enricher remains TODO.
  *

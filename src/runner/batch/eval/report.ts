@@ -116,12 +116,53 @@ export const emitPatch = (
 }
 
 /**
+ * The honest patch-LIFECYCLE terminal outcome (the `PatchData.applyStatus` value).
+ *
+ *  - `"applied"`      — a non-empty patch APPLIED to the grading tree and was graded.
+ *  - `"apply_failed"` — a non-empty patch reached the grader but FAILED to apply
+ *    (context drift / corrupt hunk); grading could not run against the change.
+ *  - `"rejected"`     — no submittable patch reached the tree (empty submission /
+ *    hard-rejected winner / a generation- or no-patch terminal).
+ *
+ * `applyStatus` is derived from the ACTUAL grader apply-success bit, never from
+ * patch non-emptiness. `apply_failed` is a distinct honest status (declared in the
+ * `PatchData` enum note, {@link file trajectory.ts}) so the `applied` field name is
+ * never a lie; `probe/triage.ts` still classifies it as `patch_rejected`.
+ */
+export type PatchApplyStatus = "applied" | "apply_failed" | "rejected"
+
+/**
+ * Map the ONE verify-and-finalize outcome to its honest `applyStatus`.
+ *
+ * An empty patch is unconditionally `rejected` (nothing to apply). A non-empty
+ * patch is `applied` ONLY when the grader's authoritative apply-success bit
+ * (`VerifyOutcome.patchApplied`, threaded from the swebench harness
+ * `patch_successfully_applied`) is `true`. When that bit is explicitly `false`
+ * the diff FAILED to land ⇒ `apply_failed`. When the grader did NOT expose the
+ * bit (`undefined` — local-testCmd path, or an infra crash before a per-instance
+ * report), the honest best-available signal is: verify PASSED ⇒ the patch must
+ * have applied (`applied`); otherwise we cannot claim apply-success, so
+ * `apply_failed` (never a false `applied`). Pure + exported for unit test.
+ */
+export const applyStatusOf = (args: {
+  readonly patch: string
+  readonly patchApplied: boolean | undefined
+  readonly verifyPassed: boolean
+}): PatchApplyStatus => {
+  if (args.patch.trim() === "") return "rejected"
+  if (args.patchApplied === true) return "applied"
+  if (args.patchApplied === false) return "apply_failed"
+  // Signal unavailable: a PASS proves the patch applied; anything else can't be
+  // honestly called "applied", so fall to the apply-unproven status.
+  return args.verifyPassed ? "applied" : "apply_failed"
+}
+
+/**
  * ADR-0539 R2 — emit the patch-LIFECYCLE outcome that mirrors `patch_generated`.
  *
- * `applied:true`  ⇒ `patch_applied`  (`applyStatus:"applied"`): the captured
- *   non-empty patch was applied to the grading tree and graded.
- * `applied:false` ⇒ `patch_rejected` (`applyStatus:"rejected"`): no submittable
- *   patch reached the tree (empty submission / hard-rejected winner).
+ * `status:"applied"` ⇒ `patch_applied`; `status:"apply_failed"` / `"rejected"` ⇒
+ * `patch_rejected` (both carry the honest `applyStatus` in the payload — triage's
+ * `patch_rejected` rule reads it back). ONE line per terminal.
  *
  * `diffPath` is the path `emitPatch` already wrote (same file — no re-write);
  * `filesChanged`/`hunks` are recomputed from the SAME redacted diff text so the
@@ -132,14 +173,14 @@ export const emitPatchOutcome = (
   observer: BenchObserver | undefined,
   diffPath: string,
   patch: string,
-  applied: boolean,
+  status: PatchApplyStatus,
 ): void => {
   if (observer === undefined) return
   const safePatch = redactValue(patch) as string
   const { filesChanged, hunks } = countDiff(safePatch)
-  const data = { diffPath, filesChanged, hunks, applyStatus: applied ? "applied" : "rejected" }
+  const data = { diffPath, filesChanged, hunks, applyStatus: status }
   try {
-    if (applied) observer.patchApplied(data)
+    if (status === "applied") observer.patchApplied(data)
     else observer.patchRejected(data)
   } catch (e) {
     throw new ObservationError(e)

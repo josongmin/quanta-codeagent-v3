@@ -414,8 +414,9 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
   },
   {
     // jul-13 (ADR-0539) — explicit escape-hatch gate for the trajectory DEBUG
-    // sidecar sink (the `verdict`/`toolExec` enrichers that ride ALONGSIDE the
-    // recorded LLM turn as `RecordedInteraction.metadata.debug`). The debug tier
+    // sidecar sink (the `verdict`/`toolExec`/`editTrace` enrichers — all three
+    // wired — that ride ALONGSIDE the recorded LLM turn as
+    // `RecordedInteraction.metadata.debug`). The debug tier
     // is primarily driven by `QUANTA_BENCH_RECORD_TRAJECTORY=debug` (one var, no
     // drift); THIS var is the standalone opt-in that enables the enrichers without
     // forcing the recording tier. Read DIRECTLY from env at the sink's gate
@@ -428,7 +429,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "observability",
     home: "bench",
     describe:
-      "Bench trajectory DEBUG sidecar gate (opt-in). When truthy, subsystems contribute keyed debug slices (grade/verify `verdict`, tool-exec `toolExec`) that ride ALONGSIDE the recorded LLM turn as `metadata.debug` — replay-neutral (the cassette match key is request-hash, so debug enrichment can never invalidate a replay hit). Also implicitly ON when QUANTA_BENCH_RECORD_TRAJECTORY=debug. OFF/unset ⇒ enrichers no-op, recording path byte-identical.",
+      "Bench trajectory DEBUG sidecar gate (opt-in). When truthy, subsystems contribute keyed debug slices (grade/verify `verdict`, tool-exec `toolExec`, edit-tool `editTrace` — all three enrichers wired) that ride ALONGSIDE the recorded LLM turn as `metadata.debug` — replay-neutral (the cassette match key is request-hash, so debug enrichment can never invalidate a replay hit). Also implicitly ON when QUANTA_BENCH_RECORD_TRAJECTORY=debug. OFF/unset ⇒ enrichers no-op, recording path byte-identical.",
     readSite: "apps/bench/trajectory-debug-sink.ts",
   },
   {

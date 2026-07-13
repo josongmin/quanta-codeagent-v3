@@ -171,16 +171,20 @@ export class BenchStreamTap implements StreamPort {
       durationMs?: number
       exitCode?: number
     }) => void,
-    /** Optional per-EDIT-result observer (jul-13 editTrace debug enricher,
-     *  ADR-0539). Called once per file-mutating tool_result with the target
-     *  `file` (raw, pre-relativization), the applied bit (`ok`), the edit tool's
-     *  own output message (`preview` — encodes the strategy/mode + occurrence
-     *  count the tool ALREADY decided), and the `replaceAll` intent from the
-     *  originating tool_call. The driver wires this to shape + `append` an
-     *  `editTrace` debug slice. NO recompute / re-read — every field is a signal
-     *  the edit already produced. Absent ⇒ byte-identical (no edit stash, no
-     *  emit). */
+    /** Optional per-WRITE-result observer (jul-13 editTrace debug enricher,
+     *  ADR-0539). Called once per file-mutating tool_result with the tool `name`
+     *  (so the shaper can restrict its EDIT-specific grammar to `name === "edit"`
+     *  and never silently mis-mode a different write tool — `write`,
+     *  `scripted_replace`, `apply_patch`, office/image writers all speak a
+     *  different output vocabulary), the target `file` (raw, pre-relativization),
+     *  the applied bit (`ok`), the tool's own output message (`preview` — for
+     *  `edit` this encodes the strategy/mode + occurrence count the tool ALREADY
+     *  decided), and the `replaceAll` intent from the originating tool_call. The
+     *  driver wires this to shape + `append` an `editTrace` debug slice. NO
+     *  recompute / re-read — every field is a signal the tool already produced.
+     *  Absent ⇒ byte-identical (no edit stash, no emit). */
     private readonly onEditResult?: (args: {
+      name: string
       file: string
       ok: boolean
       preview: string
@@ -274,6 +278,7 @@ export class BenchStreamTap implements StreamPort {
     })
     if (this.onEditResult !== undefined && file !== undefined) {
       this.onEditResult({
+        name: event.name,
         file,
         ok: event.ok,
         preview: event.preview,

@@ -113,7 +113,11 @@ const RULES: readonly Rule[] = [
     cls: "patch_rejected",
     confidence: 0.8,
     match: (e) => e.some((x) => x.kind === "patch_rejected"),
-    hint: () => "a patch_rejected event suggests the generated diff failed to apply cleanly",
+    hint: (e) =>
+      dataStr(lastOf(e, "patch_rejected") ?? ({ data: {} } as TrajectoryEvent), "applyStatus") ===
+      "apply_failed"
+        ? "a patch_rejected event with applyStatus=apply_failed suggests a non-empty diff reached the grader but failed to apply (context drift / corrupt hunk)"
+        : "a patch_rejected event suggests no submittable patch reached the grading tree (empty submission / hard-rejected winner)",
     evidence: (e) => {
       const p = lastOf(e, "patch_rejected")
       return [

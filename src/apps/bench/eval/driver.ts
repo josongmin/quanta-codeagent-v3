@@ -230,6 +230,19 @@ export const contributeVerdictDebug = (result: {
  * `metadata.debug.editTrace` — a LIST (multiple edits per turn accumulate, never
  * overwrite; mirrors `toolExec`'s `append`).
  *
+ * SCOPE: `edit` ONLY. The tap fires `onEditResult` for EVERY file-mutating
+ * tool_result (`write`, `scripted_replace`, `apply_patch`, and the office/image
+ * writers are all classified `write_filesystem` too), but the mode/outcome
+ * grammar below is the EDIT tool's output vocabulary specifically -- `write`
+ * ("Overwrote/Created ... (N bytes)"), `scripted_replace` ("... (replacements=N)"),
+ * `apply_patch` ("added:/updated:/deleted:") and the binary writers speak a
+ * different language. Applying the edit grammar to them would silently tag them
+ * `mode:"exact"` and drop their real counts -- dishonest debug data. So this
+ * shaper is a HARD no-op for any `name !== "edit"`; those writers are simply not
+ * captured in `editTrace` (their timing/outcome already ride `toolExec`). A
+ * `tool` field is stamped on every slice defensively so a future scope widening
+ * can never leave a slice mislabeled.
+ *
  * ZERO RECOMPUTE: every field is derived from a signal the edit tool ALREADY
  * produced — the target `file`, the applied bit (`ok`), the bulk-replace intent
  * (`replaceAll`), and the tool's own output message (`preview`, which encodes the
@@ -237,7 +250,7 @@ export const contributeVerdictDebug = (result: {
  * NO file re-read.
  *
  * The `preview` is `"<path>: <message>…"`; the `message` vocabulary (edit tool
- * SSOT) is the mode/outcome oracle:
+ * SSOT -- `src/tool/edit/**`) is the mode/outcome oracle:
  *   - `applied via fast-apply merge`               → mode `fast-apply`
  *   - `…via whitespace-flexible|anchored-trim match`
  *     · `…via scored-candidate best match (…)`     → mode `fuzzy` (escalated)
@@ -252,11 +265,17 @@ export const contributeVerdictDebug = (result: {
  * only then), and this shaper is only reached on that wired path.
  */
 export const contributeEditTraceDebug = (raw: {
+  readonly name: string
   readonly file: string
   readonly ok: boolean
   readonly preview: string
   readonly replaceAll: boolean
 }): void => {
+  // Scope guard: the mode/outcome grammar below is EDIT-tool-specific. Any other
+  // write tool (write / scripted_replace / apply_patch / office+image writers)
+  // would be silently mis-moded, so drop it -- it is NOT captured in editTrace
+  // (its timing/outcome already rides `toolExec`).
+  if (raw.name !== "edit") return
   const p = raw.preview
   const isStale = /stale_precondition|stale_read/.test(p)
   const outcome = raw.ok ? "matched" : isStale ? "stale" : "failed"
@@ -266,6 +285,7 @@ export const contributeEditTraceDebug = (raw: {
   const occ = p.match(/Replaced (\d+) occurrence/)
   const occurrences = occ?.[1] !== undefined ? Number.parseInt(occ[1], 10) : undefined
   debugSink.append("editTrace", {
+    tool: raw.name,
     file: raw.file,
     mode,
     outcome,

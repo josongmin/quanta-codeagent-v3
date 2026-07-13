@@ -109,8 +109,10 @@ notes: |
   invalidate a cross-box replay hit (replay-hash invariant proven in
   recording-trace-ref.test.ts); (b) @/stream + @/llm/replay never import
   @/observability — the active ref + traceContextExpected arrive via DI; (c) the
-  `t<turn>` synthetic fallback id + SpanSink compat adapter deletion (full C7 legacy
-  removal) stays deferred behind the declared compat window. LATENT rule-5 trigger
+  `t<turn>` synthetic id is the CORRECT OFF-mode identity (OFF consumers join on it;
+  deleting breaks the byte-identical OFF contract) — C7 RECLASSIFIED as won't-delete-
+  by-design, NOT deferred; no separate "SpanSink compat adapter" exists (audit found
+  none). In unified mode a real ref supersedes it and rule-5 flags its use. LATENT rule-5 trigger
   (audited clean): the "expected" gate is raw sink-liveness, correct today because
   every recorded bench emit descends from withBenchInstanceRoot / runAgent's
   withActiveSpanScope; a future bench-/run-LEVEL emit OUTSIDE that scope while the

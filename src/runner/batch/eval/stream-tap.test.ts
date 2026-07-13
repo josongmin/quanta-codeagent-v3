@@ -118,25 +118,39 @@ describe("BenchStreamTap — onToolResult", () => {
 })
 
 // ── onEditResult (6th param, jul-13 editTrace debug enricher, ADR-0539) ──────
-// Pins the per-edit observer: fires ONLY for file-mutating tools, carries the
-// raw edit signals (file / ok / preview / replaceAll) the driver shapes into an
-// editTrace slice, and is byte-identical when absent (no stash, no call).
+// Pins the per-write observer: fires for EVERY file-mutating tool, carries the
+// raw signals (name / file / ok / preview / replaceAll) the driver shapes into an
+// editTrace slice, and is byte-identical when absent (no stash, no call). The
+// `name` field is load-bearing: the driver's shaper restricts its EDIT-specific
+// grammar to `name === "edit"` so a different write tool is never mis-moded.
 describe("BenchStreamTap — onEditResult", () => {
   const editArgs = (calls: unknown[]) =>
     new BenchStreamTap(nullStream, undefined, undefined, undefined, undefined, (a) => calls.push(a))
 
-  test("fires once per edit tool_result with file + ok + preview + replaceAll", () => {
+  test("fires once per edit tool_result with name + file + ok + preview + replaceAll", () => {
     const calls: unknown[] = []
     const tap = editArgs(calls)
     tap.emit(toolCall("e1", "edit", { file_path: "src/foo.py", replace_all: true }))
     tap.emit(toolResult("e1", "edit", true, { preview: "src/foo.py: Replaced 3 occurrence(s)" }))
     expect(calls).toHaveLength(1)
     expect(calls[0]).toEqual({
+      name: "edit",
       file: "src/foo.py",
       ok: true,
       preview: "src/foo.py: Replaced 3 occurrence(s)",
       replaceAll: true,
     })
+  })
+
+  test("threads the TOOL NAME for a NON-edit write tool (so the shaper can scope-drop it)", () => {
+    const calls: unknown[] = []
+    const tap = editArgs(calls)
+    // `write` is also `write_filesystem`, so the tap fires — but the NAME it carries
+    // lets the driver's shaper distinguish it from `edit` and drop it (fix D1a).
+    tap.emit(toolCall("w1", "write", { path: "new.py" }))
+    tap.emit(toolResult("w1", "write", true, { preview: "new.py: Created new.py (42 bytes)" }))
+    expect(calls).toHaveLength(1)
+    expect((calls[0] as Record<string, unknown>).name).toBe("write")
   })
 
   test("replaceAll defaults to false when the tool_call omits it", () => {

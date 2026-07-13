@@ -120,6 +120,14 @@ export interface PySwebenchResult {
    *  crashes silently; this field reaches the caller for downstream
    *  classification (verdict.ts uses it to avoid the `harness_error` misname). */
   gradingCompleted: boolean
+  /** True/false iff the harness per-instance report EXPOSED whether the model
+   *  patch APPLIED to the grading tree (`patch_successfully_applied`); `undefined`
+   *  when no per-instance report was produced (infra fail / harness crash) so the
+   *  signal is unavailable. Distinguishes a genuine `resolved:false` test-fail
+   *  (patch applied, tests still red) from a `resolved:false` APPLY-fail (the diff
+   *  never landed — context drift / corrupt hunk). Callers must NOT infer "applied"
+   *  from patch non-emptiness; this is the authoritative apply-success bit. */
+  patchApplied?: boolean
   /** Per-instance regression-vs-didn't-fix breakdown from the harness output
    *  (see {@link GradeBreakdown}). Absent when grading did not produce a
    *  per-instance report (infra fail / empty patch) — the failure-mode signal
@@ -277,6 +285,52 @@ export const extractGradeBreakdowns = (report: unknown): Map<string, GradeBreakd
     })
   }
   return out
+}
+
+/**
+ * Pull per-instance `patch_successfully_applied` bits out of a parsed harness
+ * PER-INSTANCE report object: `{ "<iid>": { patch_successfully_applied: bool,
+ * resolved, tests_status:{…} } }`. Only entries that EXPLICITLY carry the boolean
+ * are recorded — a run-summary report (which omits it) yields nothing, so the
+ * caller keeps `patchApplied:undefined` (signal unavailable) rather than inventing
+ * a `false`. This is the authoritative "did the diff land on the grading tree" bit;
+ * an apply-fail is `false` even though the harness still reaches its summary
+ * (`gradingCompleted:true`), which is exactly why non-emptiness cannot stand in.
+ */
+export const extractPatchApplied = (report: unknown): Map<string, boolean> => {
+  const out = new Map<string, boolean>()
+  if (typeof report !== "object" || report === null) return out
+  for (const [iid, val] of Object.entries(report as Record<string, unknown>)) {
+    if (typeof val !== "object" || val === null) continue
+    const applied = (val as Record<string, unknown>).patch_successfully_applied
+    if (typeof applied === "boolean") out.set(iid, applied)
+  }
+  return out
+}
+
+/**
+ * Recursively scan `dir` for harness per-instance `report.json`s and merge their
+ * `patch_successfully_applied` bits. Same traversal as {@link collectGradeBreakdowns}.
+ * Tolerant: unreadable / non-report JSON is skipped. EVAL-ONLY.
+ */
+export const collectPatchApplied = async (dir: string): Promise<Map<string, boolean>> => {
+  const merged = new Map<string, boolean>()
+  let entries: string[]
+  try {
+    entries = (await readdir(dir, { recursive: true })) as unknown as string[]
+  } catch {
+    return merged
+  }
+  for (const rel of entries) {
+    if (!rel.endsWith("report.json")) continue
+    try {
+      const parsed = JSON.parse(await readFile(join(dir, rel), "utf8")) as unknown
+      for (const [iid, a] of extractPatchApplied(parsed)) merged.set(iid, a)
+    } catch {
+      // not a per-instance report / unreadable — skip
+    }
+  }
+  return merged
 }
 
 /**
@@ -535,6 +589,10 @@ export const evaluateWithPythonSwebench = async (
     // Capture the regression-vs-didn't-fix breakdown from the harness per-instance
     // report BEFORE the `finally` removes `work`. Best-effort: absent ⇒ omitted.
     const breakdown = (await collectGradeBreakdowns(work)).get(meta.instanceId)
+    // Authoritative apply-success bit from the SAME per-instance report — a
+    // `resolved:false` that FAILED to apply must never be laundered into
+    // `applyStatus:"applied"` downstream. Absent ⇒ undefined (signal unavailable).
+    const patchApplied = (await collectPatchApplied(work)).get(meta.instanceId)
     // `resolved_ids` is the harness's RAW verdict; the breakdown re-derives it EXCLUDING upstream
     // dataset-truncated test ids (non-existent tests pytest can't collect, which the harness wrongly
     // counts as PASS_TO_PASS failures and uses to veto resolution — even for GOLD). Honor EITHER
@@ -554,7 +612,13 @@ export const evaluateWithPythonSwebench = async (
       `stdout(tail): ${tail(run.stdout)}`,
       `stderr(tail): ${tail(run.stderr)}`,
     ].join("\n")
-    return { resolved, gradingCompleted, log, ...(breakdown !== undefined ? { breakdown } : {}) }
+    return {
+      resolved,
+      gradingCompleted,
+      log,
+      ...(patchApplied !== undefined ? { patchApplied } : {}),
+      ...(breakdown !== undefined ? { breakdown } : {}),
+    }
   } catch (e) {
     return {
       resolved: false,

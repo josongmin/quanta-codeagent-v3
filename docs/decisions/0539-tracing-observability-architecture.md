@@ -72,12 +72,20 @@ no trace; the agent-stream tail lost on box crash.
   `emitPatchOutcome` (`eval/report.ts`) → `BenchObserver.patchApplied`/`patchRejected`,
   carrying the declared `PatchData` (`{diffPath, filesChanged, hunks, applyStatus}`)
   that `probe/triage.ts` consumes. Emitted at the AUTHORITATIVE result-assembly sites
-  (`result-assembly.ts`): `patch_applied` on the ONE verify-and-finalize path
-  (`attachObservedSuccessBasics`, non-empty patch reached the grading tree,
-  `applyStatus:"applied"`); `patch_rejected` on the terminal failure paths
-  (`generationFailureResult` / `noPatchResult`, plus the empty-patch fail-closed grade,
-  `applyStatus:"rejected"`). ONE line per terminal (not per breadth/acceptance
-  candidate). Byte-identical when observe is off (`wiring.observer` undefined ⇒ no-op).
+  (`result-assembly.ts`): on the ONE verify-and-finalize path
+  (`attachObservedSuccessBasics`) `applyStatus` is now derived from the ACTUAL grader
+  apply-success bit (`VerifyOutcome.patchApplied`, threaded from the swebench harness
+  `patch_successfully_applied`), NOT patch non-emptiness (jul-13 apply-honesty fix): a
+  non-empty patch that APPLIED+graded ⇒ `patch_applied`/`applyStatus:"applied"`; a
+  non-empty patch that FAILED to apply (context drift / corrupt hunk) ⇒
+  `patch_rejected`/`applyStatus:"apply_failed"` (honest new enum value — the `applied`
+  field is never a lie); when the grader omits the bit, a verify PASS proves apply
+  (`applied`) and anything else is `apply_failed`. The terminal failure paths
+  (`generationFailureResult` / `noPatchResult`, plus the empty-patch fail-closed grade)
+  emit `patch_rejected`/`applyStatus:"rejected"`. `probe/triage.ts` classifies both
+  `apply_failed` and `rejected` as `patch_rejected`. ONE line per terminal (not per
+  breadth/acceptance candidate). Byte-identical when observe is off (`wiring.observer`
+  undefined ⇒ no-op).
 - ~~`onSelection` per-round acceptance observer is declared but bound nowhere~~ —
   DONE (R3, jul-13): the `onSelection` closure (already capturing `acceptanceTier` for
   the report) now ALSO records an OBSERVE `recovery` line (`reason:"acceptance_select"`,
@@ -108,10 +116,17 @@ no trace; the agent-stream tail lost on box crash.
     the grade outcome rides `metadata.debug.verdict` alongside the recorded turn.
   - `editTrace` (contributeEditTraceDebug): wired as `BenchStreamTap.onEditResult`
     (gated by `isTrajectoryDebugEnabled`). Per edit it `append`s a shaped trace
-    `{file, mode(exact/fuzzy/fast-apply), outcome(matched/stale/failed),
+    `{tool:"edit", file, mode(exact/fuzzy/fast-apply), outcome(matched/stale/failed),
     occurrences?, replaceAll?, fuzzyEscalated?}` — derived from the edit tool's OWN
     output message (no diff recompute / no re-read) — onto `metadata.debug.editTrace`
-    as a LIST, so multiple edits per turn accumulate.
+    as a LIST, so multiple edits per turn accumulate. SCOPE = `edit` ONLY (jul-13
+    honesty fix): the tap threads the tool NAME and fires `onEditResult` for EVERY
+    `write_filesystem` tool, but `write` ("Overwrote/Created … (N bytes)"),
+    `scripted_replace` ("… (replacements=N)"), `apply_patch` ("added:/updated:/
+    deleted:") and the office/image writers speak a DIFFERENT output vocabulary —
+    so the shaper hard-drops any `name !== "edit"` rather than silently mis-mode
+    them `exact` with their real counts lost (their timing/outcome already ride
+    `toolExec`). A `tool` field is stamped on every slice defensively.
   Both are metadata-only ⇒ replay-neutral (never touch the request hash) and no-op
   off the debug gate. The debug-sink contributor set is now complete.
 
