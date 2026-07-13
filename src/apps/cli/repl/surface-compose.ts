@@ -462,7 +462,15 @@ export const composeSurfaceWires = (
   const browserNetHolder = gateOn(envSource, "QUANTA_BROWSER_NETWORK")
     ? createBrowserNetHolder()
     : undefined
+  // `/goal` (Codex parity) — mint the surface-owned objective store ONCE. It
+  // backs the `/goal` slash slot (ctx.goal), the idle continuation ticker, and
+  // the status chip, and is threaded into the AgentConfig here (caller-override)
+  // so the LLM `objective_*` tools mutate the SAME store — the agent marking the
+  // goal complete then stops the pursuit.
+  const objectiveStore = createObjectiveStore()
+
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
+    objective: objectiveStore,
     // ADR-0231 — thread the producer block ONLY when the store is wired. The
     // idle source is adapted from the CLI idle monitor: when the monitor reports
     // idle, surface the resolved threshold as the idle-ms reading so the pure
@@ -893,11 +901,6 @@ export const composeSurfaceWires = (
   const dreamTrigger = setup.runtimeContext.dreamTrigger()
   const dreamSlot: DreamSlashState | undefined =
     dreamTrigger !== undefined ? { trigger: dreamTrigger } : undefined
-
-  // `/goal` (Codex parity) — mint the surface-owned objective store once. The
-  // slash command sets/shows the goal on it; the loop arms the idle-continuation
-  // ticker over the SAME instance (gated by QUANTA_GOAL_ENFORCE).
-  const objectiveStore = createObjectiveStore()
 
   const dispatchSlash = buildSurfaceDispatch({
     slashCtx,

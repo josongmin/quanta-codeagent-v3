@@ -22,6 +22,12 @@ export interface RuntimeAgentConfigAugments {
    *  `maybeWireBrowser`. Typed `unknown` at this SDK layer (the tool slice is not
    *  importable here). Absent ⇒ no mirror (byte-identical). */
   browserNet?: unknown
+  /** `/goal` (Codex parity) — surface-owned objective store threaded DOWN from
+   *  the CLI compose seam so the LLM `objective_*` tools mutate the SAME store
+   *  the `/goal` slash + idle continuation ticker read (agent can mark the goal
+   *  complete ⇒ pursuit auto-stops). Duck-typed `unknown` here; `maybeWireObjective`
+   *  preserves it (caller-override). Absent ⇒ assembler mints its own. */
+  objective?: unknown
   admissibility?: unknown
   planExitPort?: unknown
   userInputPort?: unknown

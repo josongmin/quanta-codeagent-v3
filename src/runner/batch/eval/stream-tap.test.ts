@@ -23,14 +23,14 @@ const toolResult = (
   id: string,
   name: string,
   ok: boolean,
-  opts: { durationMs?: number; exitCode?: number } = {},
+  opts: { durationMs?: number; exitCode?: number; preview?: string } = {},
 ): AgentEvent =>
   ({
     type: "tool_result",
     id,
     name,
     ok,
-    preview: "",
+    preview: opts.preview ?? "",
     content: [],
     ...opts,
   }) as unknown as AgentEvent
@@ -114,5 +114,70 @@ describe("BenchStreamTap — onToolResult", () => {
     tap.emit(toolResult("e1", "edit", false))
     expect((calls[0] as Record<string, unknown>).file).toBe("src/bar.py")
     expect((calls[0] as Record<string, unknown>).ok).toBe(false)
+  })
+})
+
+// ── onEditResult (6th param, jul-13 editTrace debug enricher, ADR-0539) ──────
+// Pins the per-edit observer: fires ONLY for file-mutating tools, carries the
+// raw edit signals (file / ok / preview / replaceAll) the driver shapes into an
+// editTrace slice, and is byte-identical when absent (no stash, no call).
+describe("BenchStreamTap — onEditResult", () => {
+  const editArgs = (calls: unknown[]) =>
+    new BenchStreamTap(nullStream, undefined, undefined, undefined, undefined, (a) => calls.push(a))
+
+  test("fires once per edit tool_result with file + ok + preview + replaceAll", () => {
+    const calls: unknown[] = []
+    const tap = editArgs(calls)
+    tap.emit(toolCall("e1", "edit", { file_path: "src/foo.py", replace_all: true }))
+    tap.emit(toolResult("e1", "edit", true, { preview: "src/foo.py: Replaced 3 occurrence(s)" }))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({
+      file: "src/foo.py",
+      ok: true,
+      preview: "src/foo.py: Replaced 3 occurrence(s)",
+      replaceAll: true,
+    })
+  })
+
+  test("replaceAll defaults to false when the tool_call omits it", () => {
+    const calls: unknown[] = []
+    const tap = editArgs(calls)
+    tap.emit(toolCall("e1", "edit", { file_path: "a.py" }))
+    tap.emit(toolResult("e1", "edit", true, { preview: "a.py: Replaced 1 occurrence(s)" }))
+    expect((calls[0] as Record<string, unknown>).replaceAll).toBe(false)
+  })
+
+  test("does NOT fire for a non-mutating tool_result", () => {
+    const calls: unknown[] = []
+    const tap = editArgs(calls)
+    tap.emit(toolCall("b1", "bash", { command: "pytest" }))
+    tap.emit(toolResult("b1", "bash", true, { preview: "ok" }))
+    tap.emit(toolCall("r1", "read", { path: "x.py" }))
+    tap.emit(toolResult("r1", "read", true, { preview: "file body" }))
+    expect(calls).toHaveLength(0)
+  })
+
+  test("multiple edits in a turn each fire (accumulation source)", () => {
+    const calls: unknown[] = []
+    const tap = editArgs(calls)
+    tap.emit(toolCall("e1", "edit", { file_path: "a.py" }))
+    tap.emit(toolResult("e1", "edit", true, { preview: "a.py: Replaced 1 occurrence(s)" }))
+    tap.emit(toolCall("e2", "edit", { file_path: "b.py" }))
+    tap.emit(
+      toolResult("e2", "edit", true, {
+        preview: "b.py: Replaced 1 occurrence(s) via whitespace-flexible match",
+      }),
+    )
+    expect(calls).toHaveLength(2)
+    expect((calls[0] as Record<string, unknown>).file).toBe("a.py")
+    expect((calls[1] as Record<string, unknown>).file).toBe("b.py")
+  })
+
+  test("absent callback ⇒ no throw, no stash growth (byte-identical)", () => {
+    const tap = new BenchStreamTap(nullStream)
+    tap.emit(toolCall("e1", "edit", { file_path: "a.py" }))
+    expect(() =>
+      tap.emit(toolResult("e1", "edit", true, { preview: "a.py: Replaced 1 occurrence(s)" })),
+    ).not.toThrow()
   })
 })

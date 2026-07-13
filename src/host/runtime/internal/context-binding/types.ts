@@ -67,6 +67,12 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  (`maybeWireBrowser`) reads it off `req.base` and attaches it to
    *  `config.browser.netHolder`. Absent ⇒ no mirror (byte-identical). */
   browserNet?: SnapshotBrowserNetSink
+  /** `/goal` (Codex parity) — surface-owned objective store threaded DOWN from
+   *  the CLI compose seam. Carried on the base so `maybeWireObjective` adopts it
+   *  as caller-override (LLM `objective_*` tools share the /goal + ticker store).
+   *  Duck-typed `unknown` (no cycle into the agent slice). Absent ⇒ assembler
+   *  mints its own. */
+  objective?: unknown
 }
 
 export interface RuntimeConfirmSlot {
@@ -144,6 +150,9 @@ export interface RuntimeContextSnapshot {
    *  typed (`{ set }`) to avoid a cycle back into the tool/SDK slices. Absent ⇒
    *  no mirror (byte-identical). */
   readonly browserNet?: SnapshotBrowserNetSink
+  /** `/goal` (Codex parity) — surface objective store on the snapshot so the
+   *  per-turn base carries it into `maybeWireObjective` (mirrors `browserNet`). */
+  readonly objective?: unknown
 }
 
 /** S1 (jul-04) — structural mirror of `@/tool/browser`'s `BrowserNetSink`, kept
@@ -195,6 +204,7 @@ export type RuntimeContextPatch = Partial<
     | "shadowVerify"
     | "radar"
     | "browserNet"
+    | "objective"
   >
 >
 

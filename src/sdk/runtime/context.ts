@@ -1,5 +1,6 @@
 import type { AgentConfig } from "@/agent"
 import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
+import type { ObjectivePort } from "@/agent/objective"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
   createRuntimeContextBindingFromAgentConfigBase,
@@ -97,6 +98,13 @@ export interface RuntimeFacadeComposeOptions {
    *  (single-instance, no split-brain). Absent ⇒ no mirror (byte-identical).
    *  Structurally typed (`{ set }`) so this SDK layer imports no CLI/tool value. */
   readonly browserNet?: RuntimeComposeBrowserNetSink
+  /** `/goal` (Codex parity) — the surface-owned objective store. The CLI mints
+   *  ONE store, backs the `/goal` slash + idle continuation ticker + status chip
+   *  with it, and threads it DOWN here so `maybeWireObjective` adopts it as
+   *  caller-override — the LLM `objective_*` tools then mutate the SAME store, so
+   *  the agent marking the goal complete stops the pursuit. Absent ⇒ the
+   *  assembler mints its own (byte-identical). */
+  readonly objective?: ObjectivePort
 }
 
 /** S1 (jul-04) — the write-only net-capture sink the CLI threads through
@@ -225,6 +233,7 @@ const PASS_THROUGH_COMPOSE_KEYS = [
   "activeTurnRef",
   "radar",
   "browserNet",
+  "objective",
 ] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]
 
 const applyRuntimeFacadeComposeOptions = (

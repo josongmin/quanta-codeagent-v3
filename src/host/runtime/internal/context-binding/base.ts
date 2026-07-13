@@ -437,6 +437,9 @@ const buildOptionalSnapshotFields = (
   // S1 (jul-04) `/browser-net` — surface the net-capture sink on the snapshot so
   // the per-turn base carries it into `maybeWireBrowser` (mirrors `radar`).
   ...whenDefined("browserNet", base.browserNet),
+  // `/goal` (Codex parity) — surface the objective store so the per-turn base
+  // carries it into `maybeWireObjective` (mirrors `browserNet`).
+  ...whenDefined("objective", base.objective),
 })
 
 export const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

@@ -6,12 +6,17 @@
  * contribute keyed debug slices that ride ALONGSIDE the recorded LLM turn as
  * `RecordedInteraction.metadata.debug`.
  *
- * WIRED CONTRIBUTORS (reality, 2026-07): LIVE contributors are the tool executor
- * (`"toolExec"`, driver.ts) and the grade/verify outcome (`"verdict"`, contributed
- * from the driver's verify-finalize sites — the pass/fail bit, patch size, and any
- * observation verdict / harness error already decided there). The edit tool's
- * per-edit trace is still a DESIGN TARGET, NOT yet wired. (Enricher order per the
- * jul-08 platform note: verdict > editTrace > toolExec; only `editTrace` remains TODO.)
+ * WIRED CONTRIBUTORS (reality, 2026-07 — ALL THREE LIVE, none pending):
+ * - `"toolExec"` (driver.ts) — per-tool-result timing / outcome / edit target.
+ * - `"verdict"` (contributeVerdictDebug) — the grade/verify outcome (pass/fail
+ *   bit, patch size, any observation verdict / harness error decided there).
+ * - `"editTrace"` (contributeEditTraceDebug) — the per-edit trace: target file,
+ *   mode (exact/fuzzy/fast-apply), match outcome (matched/stale/failed),
+ *   occurrence count, and any fuzzy-escalation flag, ALL derived from the edit
+ *   tool's OWN output message (no recompute/re-read). APPEND-style, so multiple
+ *   edits in a turn accumulate as a list.
+ * Enricher priority (jul-08 platform note): verdict > editTrace > toolExec. The
+ * debug-sink contributor set is now COMPLETE — no enricher remains TODO.
  *
  * DESIGN CONTRACT
  * - REPLAY-NEUTRAL: everything here lands in `metadata` only. The cassette match

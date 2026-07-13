@@ -23,7 +23,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
-import { contributeVerdictDebug } from "@/apps/bench/eval/driver"
+import { contributeEditTraceDebug, contributeVerdictDebug } from "@/apps/bench/eval/driver"
 import { maybeRecordTrajectory, resolveBenchTrajectoryMode } from "@/apps/bench/trajectory"
 import { debugSink, isTrajectoryDebugEnabled } from "@/apps/bench/trajectory-debug-sink"
 import { defaultHashRequest, jsonlReplayStore, recordingLlmPort } from "@/llm/replay"
@@ -415,5 +415,132 @@ describe("6. verdict enricher (contributeVerdictDebug)", () => {
     expect(
       (withVerdict.appended[0]?.metadata.debug as Record<string, unknown> | undefined)?.verdict,
     ).toEqual({ passed: true, patchBytes: 2, observationVerdict: "ok" })
+  })
+})
+
+// ── 7. EDITTRACE enricher (jul-13, ADR-0539) — the THIRD/final contributor ───
+// The bench SDK driver wires `contributeEditTraceDebug` as BenchStreamTap's
+// `onEditResult` (gated by isTrajectoryDebugEnabled). Per edit it APPENDS a
+// shaped trace (mode/outcome/occurrences/fuzzy-escalation, all from the edit's
+// OWN output message — no recompute) onto `metadata.debug.editTrace` as a LIST,
+// so multiple edits in a turn accumulate (never overwrite). Deleting the
+// `append("editTrace", …)` inside contributeEditTraceDebug makes the "editTrace
+// rides the record" assertion RED. Gate-off control + CROWN neutrality pin
+// default-off + replay-safety.
+describe("7. editTrace enricher (contributeEditTraceDebug)", () => {
+  const RECORD_KEY = "QUANTA_BENCH_RECORD_TRAJECTORY"
+  const DEBUG_KEY = "QUANTA_BENCH_TRAJECTORY_DEBUG"
+  const path = `/tmp/tds-edittrace-${process.pid}.jsonl`
+
+  afterEach(async () => {
+    await rm(path, { force: true })
+  })
+
+  test("ON ⇒ per-edit trace rides metadata.debug.editTrace as a LIST (multiple edits accumulate)", async () => {
+    process.env[RECORD_KEY] = path
+    process.env[DEBUG_KEY] = "1"
+
+    // producer: the tap hands each edit's raw signals to the shaper.
+    contributeEditTraceDebug({
+      file: "src/a.py",
+      ok: true,
+      preview: "src/a.py: Replaced 2 occurrence(s)",
+      replaceAll: true,
+    })
+    contributeEditTraceDebug({
+      file: "src/b.py",
+      ok: true,
+      preview: "src/b.py: Replaced 1 occurrence(s) via whitespace-flexible match",
+      replaceAll: false,
+    })
+
+    const port = maybeRecordTrajectory(stubInner([{ type: "text_delta", delta: "hi" }]))
+    await runToEnd(port.stream(req("edittrace-q")))
+
+    const records = await jsonlReplayStore({ path }).load()
+    expect(records).toHaveLength(1)
+    expect((records[0]?.metadata.debug as Record<string, unknown> | undefined)?.editTrace).toEqual([
+      { file: "src/a.py", mode: "exact", outcome: "matched", occurrences: 2, replaceAll: true },
+      {
+        file: "src/b.py",
+        mode: "fuzzy",
+        outcome: "matched",
+        occurrences: 1,
+        fuzzyEscalated: true,
+      },
+    ])
+  })
+
+  test("mode/outcome oracle: fast-apply, stale, failed, exact — derived from preview only", () => {
+    process.env[RECORD_KEY] = "debug"
+    contributeEditTraceDebug({
+      file: "f.py",
+      ok: true,
+      preview: "f.py: applied via fast-apply merge",
+      replaceAll: false,
+    })
+    contributeEditTraceDebug({
+      file: "g.py",
+      ok: false,
+      preview: "stale_precondition: g.py sha256 aa != expected bb",
+      replaceAll: false,
+    })
+    contributeEditTraceDebug({
+      file: "h.py",
+      ok: false,
+      preview: "h.py: old_string not found in file",
+      replaceAll: false,
+    })
+    expect(debugSink.drain()).toEqual({
+      editTrace: [
+        { file: "f.py", mode: "fast-apply", outcome: "matched" },
+        { file: "g.py", mode: "exact", outcome: "stale" },
+        { file: "h.py", mode: "exact", outcome: "failed" },
+      ],
+    })
+  })
+
+  test("control: DEBUG off ⇒ contributeEditTraceDebug is inert, no editTrace key", async () => {
+    process.env[RECORD_KEY] = path
+    delete process.env[DEBUG_KEY]
+
+    contributeEditTraceDebug({
+      file: "src/a.py",
+      ok: true,
+      preview: "src/a.py: Replaced 1 occurrence(s)",
+      replaceAll: false,
+    })
+    const port = maybeRecordTrajectory(stubInner([{ type: "text_delta", delta: "hi" }]))
+    await runToEnd(port.stream(req("edittrace-q")))
+
+    const records = await jsonlReplayStore({ path }).load()
+    expect(records[0]?.metadata).not.toHaveProperty("debug")
+  })
+
+  test("CROWN: editTrace enrichment does NOT perturb the request id hash", async () => {
+    const request = req("edittrace-neutral")
+    const expectedId = defaultHashRequest(request, "exact")
+
+    process.env[RECORD_KEY] = "debug"
+    const withEdit = capturingStore("/tmp/tds-edittrace-crown.jsonl")
+    contributeEditTraceDebug({
+      file: "src/a.py",
+      ok: true,
+      preview: "src/a.py: Replaced 1 occurrence(s)",
+      replaceAll: false,
+    })
+    await runToEnd(
+      recordingLlmPort({
+        inner: stubInner([{ type: "text_delta", delta: "x" }]),
+        store: withEdit.port,
+        debugDrain: () => debugSink.drain(),
+      }).stream(request),
+    )
+
+    // request hash is keyed off `request` only — the editTrace slice rides metadata.
+    expect(withEdit.appended[0]?.id).toBe(expectedId)
+    expect(
+      (withEdit.appended[0]?.metadata.debug as Record<string, unknown> | undefined)?.editTrace,
+    ).toEqual([{ file: "src/a.py", mode: "exact", outcome: "matched", occurrences: 1 }])
   })
 })

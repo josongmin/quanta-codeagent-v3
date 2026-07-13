@@ -83,32 +83,21 @@ describe("C5059-05 — ALL spawn surfaces project the SSOT atom (no drift)", () 
     "tool (its background:true gives the same async handle with simpler " +
     "task_output polling); reach for spawn_agent when you need multiple " +
     "concurrent children or mid-run control."
-  const BATCH_ORIG =
-    "Fan out one templated child subagent per item over a bounded worker pool. " +
-    "Provide items (inline array) OR items_path (.csv/.jsonl/.json) plus a " +
-    "prompt_template with {{placeholders}}. Returns per-item structured results; " +
-    "one item failing does NOT stop the rest. Use for bulk 'do X for each of these N things'."
-  const CSV_ORIG =
-    "Run a batch: fan ONE subagent out per CSV row with a shared instruction, " +
-    "collect each row's structured result, and return a results CSV. Use for " +
-    "repetitive per-row work (e.g. classify/transform N records). Bounded " +
-    "concurrency; EXPENSIVE (one child agent per row)."
-
-  /** All four spawn/delegation surfaces + their frozen OFF originals. */
+  // NOTE: `spawn_batch` / `spawn_agents_on_csv` are deliberately NOT gated — their
+  // fan-out IS the tool's literal purpose (bulk "do X for each of N"), not a
+  // general-analysis delegation bias, AND `@/tool/subagent-batch/batch.ts` sits in
+  // a latent features.ts import cycle that ANY added import exposes. The confound
+  // is fully addressed by the two general spawn tools + the system-prompt line.
   const surfaces = async () => {
     const { agentToolDescription } = await import("@/subagent/agent-tool")
     const { spawnAgent6Description } = await import("@/subagent/agent-tools-6")
-    const { spawnBatchDescription } = await import("@/tool/subagent-batch/batch")
-    const { spawnAgentsCsvDescription } = await import("@/tool/spawn-agents-csv")
     return [
       { render: agentToolDescription, orig: AGENT_ORIG },
       { render: spawnAgent6Description, orig: SPAWN6_ORIG },
-      { render: spawnBatchDescription, orig: BATCH_ORIG },
-      { render: spawnAgentsCsvDescription, orig: CSV_ORIG },
     ]
   }
 
-  test("ON ⇒ ALL FOUR surfaces lead with the identical SSOT policy", async () => {
+  test("ON ⇒ both general spawn surfaces lead with the identical SSOT policy", async () => {
     setSuppress(true)
     for (const s of await surfaces()) {
       expect(s.render().startsWith(DELEGATION_SUPPRESSION_POLICY), s.orig.slice(0, 24)).toBe(true)
@@ -116,7 +105,7 @@ describe("C5059-05 — ALL spawn surfaces project the SSOT atom (no drift)", () 
     }
   })
 
-  test("OFF ⇒ ALL FOUR surfaces EQUAL frozen originals (no leak, no extraction drift)", async () => {
+  test("OFF ⇒ both surfaces EQUAL frozen originals (no leak, no extraction drift)", async () => {
     setSuppress(false)
     for (const s of await surfaces()) {
       expect(s.render(), s.orig.slice(0, 24)).toBe(s.orig)
