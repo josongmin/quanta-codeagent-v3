@@ -48,6 +48,7 @@ import {
 } from "@/patch"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
+import { recordFreshBaseline } from "./_shared/fresh-hash"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
 import { guardWrite } from "./stale-read-guard"
 import type {
@@ -473,6 +474,44 @@ function formatApplyResult(r: ApplyResult): string {
 }
 
 /**
+ * jul-13 edit-fresh-hash — multi-file stale-read baseline refresh for apply_patch.
+ * A successful patch mutates N files and advances each one's mtime; without this,
+ * the DEFAULT-ON mtime guard would veto a chained (no-re-read) `edit` to a patched
+ * file with `stale_read` (the patch left `ctx.readFileState` at the pre-patch
+ * mtime) — the same defeat cured for edit/write/scripted_replace, now per touched
+ * file. Re-stats each ADDED/UPDATED/MOVED-to file POST-commit (deleted files are
+ * moot) and records the new mtime via the SHARED {@link recordFreshBaseline}
+ * chokepoint under `statTarget`'s canonical resolvedPath (byte-identical to the
+ * path the read tool / a later edit's guardWrite keys on). Gated once ⇒ ZERO stats
+ * when off (byte-identical). Best-effort per file: the patch is already committed.
+ *
+ * NOTE (deliberate scope): apply_patch does NOT emit a fresh-hash manifest (unlike
+ * the single-flat-file tools). Their post-write bytes are already in memory
+ * (`planned.next`/`input.content`/`r.next`) so the digest is FREE; apply_patch does
+ * not retain per-file content (the atomic temp+rename commit discards it), so
+ * hashing every touched file would require N re-reads — defeating the feature's
+ * zero-standing-cost invariant. The correctness refresh below has no such cost
+ * (a stat, not a read), so it ships; emission is intentionally out of scope.
+ */
+const refreshApplyBaselines = async (
+  port: FsJailFileSystemPort,
+  ctx: EditToolContext,
+  r: ApplyResult,
+): Promise<void> => {
+  if (ctx.editFreshHash !== true || ctx.readFileState === undefined) return
+  const touched = [...r.filesAdded, ...r.filesUpdated, ...r.filesMoved.map(([, to]) => to)]
+  for (const p of touched) {
+    try {
+      const s = await port.statTarget(p)
+      if (s.exists) recordFreshBaseline(ctx, s.resolvedPath, s.mtimeMs)
+    } catch {
+      // Post-commit best-effort per file: a stat failure leaves that file's
+      // baseline at its pre-patch value (the model re-reads it if needed).
+    }
+  }
+}
+
+/**
  * Parse + git-write-guard + apply a V4A patch text against the port. THROWS the
  * canonical typed errors (`PatchParseError` / `PatchApplyError` /
  * `PatchAnchorNotFoundError` / `FsJailViolationError`) on failure — exactly the
@@ -651,6 +690,7 @@ export const applyPatchTool: Tool<Input> = {
         yield applied.deny
         return
       }
+      await refreshApplyBaselines(port, ctx, applied.result)
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
       return
     }
@@ -665,6 +705,7 @@ export const applyPatchTool: Tool<Input> = {
         yield applied.deny
         return
       }
+      await refreshApplyBaselines(port, ctx, applied.result)
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
     } catch (err) {
       const rescued = await tryFastApplyFallback(
@@ -681,6 +722,7 @@ export const applyPatchTool: Tool<Input> = {
         rescued.modelUsed !== undefined
           ? ` (recovered via fast-apply fallback, model ${rescued.modelUsed})`
           : " (recovered via fast-apply fallback)"
+      await refreshApplyBaselines(port, ctx, rescued.result)
       yield {
         type: "result",
         result: { ok: true, output: `${formatApplyResult(rescued.result)}${note}` },

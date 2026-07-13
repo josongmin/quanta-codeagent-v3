@@ -47,6 +47,7 @@ evidence:
     - src/tool/edit/index.ts
     - src/tool/write/index.ts
     - src/tool/scripted-replace.ts
+    - src/tool/apply-patch.ts
     - src/tool/types.ts
     - src/shared/runtime-config.ts
     - src/shared/runtime-config/types-extra.ts
@@ -62,12 +63,14 @@ evidence:
       - tests/unit/edit-fresh-hash-owner-unit.test.ts
       - tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts
       - tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-apply-patch-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-agent-loop-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: QUANTA_EDIT_FRESH_HASH
-    default: 'unset (OFF)'
-    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ ctx.editFreshHash absent ⇒ a successful edit yields the legacy `<path>: <message>` output BYTE-IDENTICAL (no hash line, no sha256 cost). ON ⇒ the success output appends one line the model reuses as the next same-file edit''s expected_hash, eliminating the re-read that the 0398 precondition otherwise forces after every edit.'
+    default: 'DEFAULT-ON (opt-out)'
+    purpose: 'DEFAULT-ON via `!gateDisabledStrict` (off ONLY for the literal `off`, like the fs-jail / stale-read-guard kill-switches — a stray falsy token must not silently disable it). ON ⇒ a successful edit/write/scripted_replace appends `fresh sha256: <hex>` (the model reuses it as the next same-file edit''s expected_hash, eliminating the re-read the 0398 precondition otherwise forces) AND every mutating tool (incl. apply_patch, per touched file) refreshes the stale-read guard baseline so the chained edit is not vetoed stale_read. `=off` ⇒ ctx.editFreshHash absent ⇒ BYTE-IDENTICAL legacy output + no baseline refresh. Ships ON — removes a forced re-read (near-certain token win) and the baseline refresh is a correctness fix, not a speculative lever.'
 deliberate_hold: null
 notes: |
   jul-13. Complements 0398 (atomic-write-and-hash-precondition): 0398 added the
@@ -91,8 +94,16 @@ notes: |
   post-write sha256 AND refreshes the stale-read baseline, so the model chains a
   next edit to that file without a re-read regardless of which tool wrote it
   (write→edit and scripted_replace→edit cross-tool chains pinned). `apply_patch`
-  (multi-file) and `notebook_edit` (cell-JSON) do NOT fit the single-flat-file
-  fresh-hash contract and are deliberately out of scope.
+  (multi-file) shares the baseline-refresh HALF via the same `recordFreshBaseline`
+  chokepoint — `refreshApplyBaselines` re-stats each ADDED/UPDATED/MOVED-to file
+  post-commit and records the new mtime, so an edit chained onto a patched file
+  survives the guard (pinned per-file + multi-file). It intentionally OMITS the
+  hash EMISSION: the single-flat-file tools have their post-write bytes in memory
+  (free digest) but apply_patch's atomic temp+rename discards per-file content, so
+  emitting would need N re-reads — defeating the zero-standing-cost invariant. A
+  stat (refresh) has no such cost, so the correctness half ships; emission does
+  not. `notebook_edit` (cell-JSON, not a flat file the model chains via sha256) is
+  fully out of scope.
 
   DEFEAT-AND-CURE (found by adversarial hardening): the DEFAULT-ON mtime stale-read
   guard (ADR-0474) would veto a fresh-hash CHAINED edit with `stale_read` because a

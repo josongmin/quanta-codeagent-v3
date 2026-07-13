@@ -24,7 +24,10 @@ import type { EditToolContext } from "../types"
  *  reuses the digest as the next same-file edit's `expected_hash` WITHOUT a
  *  re-read. `bytes` is the POST-mutation file content already in memory (no extra
  *  read). Gated ⇒ `""` (BYTE-IDENTICAL legacy output) when the flag is off. */
-export const freshHashNote = (ctx: Pick<EditToolContext, "editFreshHash">, bytes: string): string =>
+export const freshHashNote = (
+  ctx: Pick<EditToolContext, "editFreshHash">,
+  bytes: string,
+): string =>
   ctx.editFreshHash === true
     ? `\nfresh sha256: ${sha256Hex(bytes)} (pass as expected_hash for the next edit to this file — no re-read needed)`
     : ""
@@ -37,6 +40,28 @@ export const freshHashNote = (ctx: Pick<EditToolContext, "editFreshHash">, bytes
  *  past what the mutation recorded, so TOCTOU protection is preserved. Gated by
  *  `ctx.editFreshHash` ⇒ no stat / no state mutation (byte-identical) when off.
  *  Records under the SAME resolved path key `guardWrite` stats. Best-effort. */
+/** The SINGLE gated record chokepoint: register `resolvedPath`'s post-mutation
+ *  mtime as the new stale-read baseline, so a subsequent chained edit (no re-read)
+ *  is not vetoed `stale_read` by the DEFAULT-ON mtime guard. Gated by
+ *  `ctx.editFreshHash` ⇒ no-op when off. `resolvedPath` MUST be the canonical
+ *  absolute path the guard/read tool keys on (the caller supplies it from its own
+ *  stat — `fs.statFile(...).path` for the single-file tools, `statTarget(...)`
+ *  .resolvedPath for the multi-file apply_patch; the two are byte-identical by
+ *  construction). Shared by edit/write/scripted_replace AND apply_patch — the stat
+ *  MECHANISM differs by port interface, but the record semantics live here once. */
+export const recordFreshBaseline = (
+  ctx: Pick<EditToolContext, "editFreshHash" | "readFileState">,
+  resolvedPath: string,
+  mtimeMs: number,
+): void => {
+  if (ctx.editFreshHash !== true || ctx.readFileState === undefined) return
+  ctx.readFileState.record(resolvedPath, mtimeMs)
+}
+
+/** Single-file convenience over {@link recordFreshBaseline}: stat the just-written
+ *  `target` via the standard port and record its post-write mtime. Gated early to
+ *  skip the stat entirely when off (byte-identical). Best-effort: the mutation is
+ *  already committed, so a stat failure must NEVER fail it. */
 export const refreshStaleReadBaseline = async (
   fs: FileSystemPort,
   ctx: EditToolContext,
@@ -45,7 +70,7 @@ export const refreshStaleReadBaseline = async (
   if (ctx.editFreshHash !== true || ctx.readFileState === undefined) return
   try {
     const committed = await fs.statFile(target.path, target.base)
-    ctx.readFileState.record(committed.path, committed.mtimeMs)
+    recordFreshBaseline(ctx, committed.path, committed.mtimeMs)
   } catch {
     // Post-commit best-effort: leave the pre-mutation baseline on a stat failure.
   }
