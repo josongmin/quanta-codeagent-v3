@@ -57,6 +57,7 @@
 
 import { errMessage } from "@/shared"
 import type { MetricSink } from "./metrics/port"
+import { otlpAttributes } from "./otlp-attr-value"
 import { hexId } from "./tracing/hex-id"
 import { noopTracer } from "./tracing/noop-tracer"
 import type {
@@ -281,45 +282,6 @@ const otlpStatusCode = (code: SpanStatusCode | undefined): number => {
       return 0
     }
   }
-}
-
-/** One scalar attribute value the exporter can tag. */
-type OtlpScalar = string | number | boolean
-/** Attribute value the exporter accepts: scalar OR a homogeneous array. The
- *  `attrs.ts` builder already validates homogeneity (`vocabulary.ts` AttrValue),
- *  so by the time a value reaches here an array is guaranteed single-typed. */
-type OtlpAttrValue = OtlpScalar | ReadonlyArray<OtlpScalar>
-
-/** Tag a single scalar as an OTLP `AnyValue`. number → doubleValue (collectors
- *  handle the cast). */
-const otlpScalarValue = (v: OtlpScalar): Record<string, unknown> => {
-  if (typeof v === "string") return { stringValue: v }
-  if (typeof v === "number") return { doubleValue: v }
-  return { boolValue: v }
-}
-
-/** Convert a typed attribute map → OTLP KeyValue list. OTLP attribute values
- *  are tagged unions (`stringValue` / `intValue` / `doubleValue` / `boolValue`
- *  / `arrayValue`). Homogeneous arrays (e.g. `gen_ai.response.finish_reasons`)
- *  serialize to `arrayValue.values` — each element re-tagged — rather than being
- *  silently dropped. */
-const otlpAttributes = (
-  attrs: Readonly<Record<string, OtlpAttrValue>> | undefined,
-): Array<Record<string, unknown>> => {
-  if (attrs === undefined) return []
-  const out: Array<Record<string, unknown>> = []
-  for (const k of Object.keys(attrs)) {
-    const v = attrs[k]
-    if (Array.isArray(v)) {
-      out.push({
-        key: k,
-        value: { arrayValue: { values: v.map((e) => otlpScalarValue(e)) } },
-      })
-    } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
-      out.push({ key: k, value: otlpScalarValue(v) })
-    }
-  }
-  return out
 }
 
 /** Convert epoch millis → string of unix nanos. OTLP requires nanos as a

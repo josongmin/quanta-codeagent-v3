@@ -11,6 +11,10 @@
  *          regression on the existing tag path).
  *   AV-03: a number[] attribute serializes to `arrayValue.values` of doubleValue
  *          entries.
+ *   AV-04: the registry-int gen_ai token/cap keys serialize as OTLP `intValue`
+ *          (string-encoded 64-bit) — every other numeric attr stays doubleValue
+ *          (paired control); a fractional value on an int key degrades to
+ *          doubleValue rather than truncating (AV-04b red-on-injection).
  */
 
 import { describe, expect, test } from "bun:test"
@@ -46,7 +50,10 @@ const firstSpan = (calls: CapturedCall[]): Record<string, unknown> => {
 }
 
 /** Find the OTLP KeyValue for `key` in a span's attribute list. */
-const attrOf = (span: Record<string, unknown>, key: string): Record<string, unknown> | undefined => {
+const attrOf = (
+  span: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | undefined => {
   const attrs = (span.attributes ?? []) as Array<{ key: string; value: Record<string, unknown> }>
   return attrs.find((a) => a.key === key)?.value
 }
@@ -94,7 +101,10 @@ describe("otel-exporter / OTLP arrayValue", () => {
 
     const span = firstSpan(calls)
     expect(attrOf(span, "gen_ai.request.model")).toEqual({ stringValue: "gpt-5" })
-    expect(attrOf(span, "gen_ai.usage.input_tokens")).toEqual({ doubleValue: 42 })
+    // gen_ai.usage.input_tokens is registry-int → OTLP `intValue` (string-encoded
+    // 64-bit), NOT `doubleValue`. Only the known-int gen_ai token keys take this
+    // arm; every other numeric attr stays doubleValue (see the AV-04 pair below).
+    expect(attrOf(span, "gen_ai.usage.input_tokens")).toEqual({ intValue: "42" })
     const arr = attrOf(span, "gen_ai.response.finish_reasons")?.arrayValue as
       | { values?: unknown[] }
       | undefined
@@ -120,6 +130,68 @@ describe("otel-exporter / OTLP arrayValue", () => {
       | { values?: unknown[] }
       | undefined
     expect(arr?.values).toEqual([{ doubleValue: 1 }, { doubleValue: 2 }, { doubleValue: 3 }])
+    await exp.teardown()
+  })
+
+  // AV-04 — registry-int token attrs on the WIRE (ADR-0539 int-typing fix). The
+  // OTel-GenAI registry types the token counts + request cap as `int`; the wire
+  // must carry them as OTLP `intValue` (string-encoded 64-bit), not `doubleValue`.
+  test("AV-04: known-int gen_ai token/cap keys serialize as intValue (string)", async () => {
+    const { fetch, calls } = makeFakeFetch()
+    const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
+    exp.recordSpan({
+      traceId: "0".repeat(31) + "4",
+      spanId: "0".repeat(15) + "4",
+      name: "run_sampling_request",
+      startTimeEpochMs: 1_000,
+      endTimeEpochMs: 2_000,
+      attributes: {
+        "gen_ai.usage.input_tokens": 42,
+        "gen_ai.usage.output_tokens": 7,
+        "gen_ai.usage.cache_read_input_tokens": 100,
+        "gen_ai.usage.cache_creation_input_tokens": 0,
+        "gen_ai.request.max_tokens": 4096,
+        // PAIRED CONTROL — a fractional gen_ai attr (TTFT ms) that is NOT in the
+        // int-key set must stay doubleValue; a whole-number non-int key too.
+        "gen_ai.response.time_to_first_token_ms": 12.5,
+        "gen_ai.request.temperature": 1,
+      },
+    })
+    await exp.flush()
+
+    const span = firstSpan(calls)
+    // The five registry-int keys → intValue as a STRING (OTLP 64-bit-in-JSON).
+    expect(attrOf(span, "gen_ai.usage.input_tokens")).toEqual({ intValue: "42" })
+    expect(attrOf(span, "gen_ai.usage.output_tokens")).toEqual({ intValue: "7" })
+    expect(attrOf(span, "gen_ai.usage.cache_read_input_tokens")).toEqual({ intValue: "100" })
+    expect(attrOf(span, "gen_ai.usage.cache_creation_input_tokens")).toEqual({ intValue: "0" })
+    expect(attrOf(span, "gen_ai.request.max_tokens")).toEqual({ intValue: "4096" })
+    // Paired control: a fractional non-int-key stays doubleValue; and a whole
+    // number on a NON-int key (temperature) also stays doubleValue — proving the
+    // fix is scoped to the key SET, not to "any integer-valued number".
+    expect(attrOf(span, "gen_ai.response.time_to_first_token_ms")).toEqual({ doubleValue: 12.5 })
+    expect(attrOf(span, "gen_ai.request.temperature")).toEqual({ doubleValue: 1 })
+    await exp.teardown()
+  })
+
+  // AV-04b — red-on-injection: if the int-typing were reverted (token key →
+  // doubleValue), THIS assertion fails. It is the mutation witness for the fix.
+  test("AV-04b: a non-integer value on an int key falls back to doubleValue (no truncation)", async () => {
+    const { fetch, calls } = makeFakeFetch()
+    const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
+    exp.recordSpan({
+      traceId: "0".repeat(31) + "5",
+      spanId: "0".repeat(15) + "5",
+      name: "run_sampling_request",
+      startTimeEpochMs: 1_000,
+      endTimeEpochMs: 2_000,
+      // Pathological: a fractional token count must NOT be silently truncated to
+      // an int — it degrades to doubleValue so no information is lost on the wire.
+      attributes: { "gen_ai.usage.input_tokens": 42.5 },
+    })
+    await exp.flush()
+    const span = firstSpan(calls)
+    expect(attrOf(span, "gen_ai.usage.input_tokens")).toEqual({ doubleValue: 42.5 })
     await exp.teardown()
   })
 })

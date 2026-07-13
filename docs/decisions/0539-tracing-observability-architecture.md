@@ -317,6 +317,70 @@ unit acceptance already exercises a real exporter sink over `runAgent`).
   `hexId(byteCount, gen?)` (default crypto CSPRNG, test-seam `gen` override).
   Byte-identical output; the deterministic exporter test seam is unchanged.
 
+### Conformance gap-sweep (jul-13, FINAL)
+
+A final "zero-gap" sweep after the 3-lens hellaudit conformance commit
+(`0d139a6e5`). Two classes: FIXED (with raw-OTLP wire proof + red-on-injection)
+and ACCEPTED-deviation (documented here with rationale).
+
+**FIXED:**
+
+- **Token counts now `intValue` on the wire** — `gen_ai.usage.{input,output,
+  cache_read_input,cache_creation_input}_tokens` + `gen_ai.request.max_tokens`
+  are typed `int` in the pinned registry but the exporter emitted ALL numbers as
+  OTLP `doubleValue`. `otlpScalarValue` now tags an EXACT-INTEGER value on one of
+  these KNOWN-INT keys as `intValue` (string-encoded per the OTLP 64-bit-in-JSON
+  rule). Scoped to a fixed key allowlist (`GEN_AI_INT_ATTR_KEYS`), so every other
+  numeric attr (TTFT ms, temperature, cost, sample latencies, the generic case)
+  stays `doubleValue` — the fix cannot mis-type a genuinely-fractional value that
+  lands on a whole number. A non-integer value on an int key degrades to
+  `doubleValue` (no silent truncation). Wire proof + paired control + red-on-
+  injection: `otlp-array-value.test.ts` AV-02/AV-04/AV-04b. (Histogram `sum`
+  stays `asDouble` — that is the correct OTLP shape for a histogram sum, and the
+  `count` is already the string `"1"`.)
+- **gen_ai span-name mapper positive paths wire-proven** — the fix commit shipped
+  `otlpSpanName` (`{operation} {model|tool.name|agent.name}`) with only the
+  model-LESS fallback under test. Added `otlp-span-name-mapper.test.ts`
+  (SN-01…SN-06): the three composed arms (`chat gpt-5` / `execute_tool bash` /
+  `invoke_agent root`), the request.model-wins precedence (red-on-injection
+  proven), the non-gen_ai passthrough (internal name verbatim), and the bare-
+  `{operation}` fallback (explicitly NOT `chat undefined`).
+
+**ACCEPTED deviations (rationale):**
+
+- **`server.address` / `server.port` NOT emitted on the chat span.** The pinned
+  gen-ai-spans.md marks these Conditionally-Required *"if the operation targets a
+  specific server."* For our managed provider APIs (OpenAI / Anthropic /
+  ChatGPT-OAuth) the endpoint host is the vendor default owned inside the LLM
+  adapter and is NOT surfaced on the `LLMPort` contract (`LLMPort` exposes only
+  `model` + `provider`; `baseURL` is consumed internally by `createLLM` and never
+  threaded out). Emitting a host would require extending the `LLMPort` interface
+  and threading it through `stream-consume` → `finalizeSamplingSpan` →
+  `buildSamplingSpanAttrs` — a cross-slice change to the LLM adapter surface,
+  higher-risk than the value for a common-endpoint managed API where the semconv
+  routinely omits it. Deferred: if a self-hosted / custom-`baseURL` transport
+  becomes a first-class provider, surface a `host`/`port` getter on `LLMPort` and
+  stamp `server.address`/`server.port` in `buildSamplingSpanAttrs` (the emit is a
+  one-liner once the value is available). CONFIRMED IN-SCOPE and correct: the
+  chat span DOES carry `gen_ai.request.model` (Required) when known
+  (`buildSamplingSpanAttrs` line ~505, sourced from `turnLlm.llm.model`), and
+  errored METRICS DO carry the Conditionally-Required `error.type` dim
+  (`instrument-genai.ts`, wire-proven `genai-client-metrics-hellgate.test.ts`).
+- **`normalizeProviderName` covers exactly `chatgpt-oauth`→`openai`.** Verified
+  COMPLETE for the span-reachable provider set: the span/metric `provider` value
+  originates from `LLMPort.provider`, typed `Provider = LLMProvider =
+  "anthropic" | "openai" | "chatgpt-oauth"` (`src/shared/errors.ts`) — a
+  3-member union. `providerOf(model)` only ever returns `openai`/`anthropic`.
+  The enterprise transport slugs `bedrock`/`vertex`/`foundry`/`mantle` live in
+  the SEPARATE ADR-0163 `LlmProvider` taxonomy (`llm/provider-types.ts`) used for
+  transport SELECTION; they are NOT accepted by `createLLM` and cannot reach
+  `LLMPort.provider`, so they never reach the span/metric. `chatgpt-oauth` is
+  therefore the ONLY non-enum slug that can reach the wire, and it is mapped.
+  Guard for the future: if a `bedrock`/`vertex`/… transport is ever wired into
+  `createLLM` (so its slug reaches `LLMPort.provider`), extend the normalizer
+  (`bedrock`→`aws.bedrock`, `vertex`→`gcp.vertex_ai`, `foundry`→`azure.ai.inference`,
+  `mantle`→its base vendor).
+
 ## Rule for new observability features
 
 Add to the SSOT (OBSERVE) as a typed `kind`, stamp the correlation tuple, and —
