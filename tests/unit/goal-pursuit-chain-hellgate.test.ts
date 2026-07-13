@@ -141,6 +141,50 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
     expect(enqueued.length).toBe(1) // no further pursuit after clear
   })
 
+  test("agent marking the SHARED goal complete stops the pursuit (Codex auto-stop)", async () => {
+    // The surface store is shared with the LLM objective_* tools (compose
+    // caller-override), so `objective_update(status:'completed')` lands on the
+    // SAME store the ticker reads. Simulate that write and prove the ticker stops.
+    const store = createObjectiveStore()
+    const enqueued: string[] = []
+    const timer = fakeTimer()
+
+    await goalCmd.run(["finish", "the", "migration"], ctxWith(store, () => {}))
+    startGoalContinuationTicker({
+      enabled: true,
+      threadId: TID,
+      probes: drivenBy(store, enqueued),
+      setIntervalFn: timer.setIntervalFn,
+      clearIntervalFn: timer.clearIntervalFn,
+    })
+    await timer.tick()
+    expect(enqueued.length).toBe(1) // pursued once while active
+
+    // the agent (via objective_update on the shared store) marks it done — needs
+    // a met success criterion for the store to derive "completed".
+    const withCriterion = createObjectiveStore()
+    withCriterion.set(TID, { goal: "finish the migration", successCriteria: ["migrated"] })
+    withCriterion.updateStatus(TID, "active")
+    const enq2: string[] = []
+    const timer2 = fakeTimer()
+    startGoalContinuationTicker({
+      enabled: true,
+      threadId: TID,
+      probes: drivenBy(withCriterion, enq2),
+      setIntervalFn: timer2.setIntervalFn,
+      clearIntervalFn: timer2.clearIntervalFn,
+    })
+    await timer2.tick()
+    expect(enq2.length).toBe(1)
+    // agent verifies + marks the criterion met ⇒ status derives to "completed"
+    const crit = withCriterion.get(TID)?.successCriteria[0]?.id
+    withCriterion.markCriterion(TID, crit ?? "", true)
+    expect(withCriterion.get(TID)?.status).toBe("completed")
+    await timer2.tick()
+    await timer2.tick()
+    expect(enq2.length).toBe(1) // pursuit stopped once the goal completed
+  })
+
   test("/goal with no arg reports the active objective", async () => {
     const store = createObjectiveStore()
     await goalCmd.run(["measure", "twice"], ctxWith(store, () => {}))
