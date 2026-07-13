@@ -92,7 +92,7 @@ import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
-import { childDepthOf, SpawnLineageError, spawnDepthCap } from "./spawn-depth"
+import { childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
 import {
   resolveChildEffort,
   resolveChildLlm,
@@ -102,18 +102,21 @@ import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
 
-// RFC jul-13 §6.5 B Phase 2 — the runner's depth ceiling now defaults to the
-// SAME policy the tier1 block builders gate on (`spawnDepthCap()`), so the
-// runner-holding bypass paths (background / delegate — they never pass through
-// a block builder) obey the identical cap. An explicit host `opts.maxDepth`
-// still wins (see the `?? spawnDepthCap()` fallback below).
+// RFC jul-13 §4.2 (rev.4 MIN-CAP) — the runner's depth ceiling is the SAME
+// `effectiveCap(opts.maxDepth) = min(spawnDepthCap() policy, opts.maxDepth ?? +∞)`
+// the tier1 block builders gate on, so the runner-holding bypass paths
+// (background / delegate — they never pass through a block builder) obey the
+// identical cap. An explicit host `opts.maxDepth` can only TIGHTEN the operator
+// policy, never RAISE it above the ceiling (see `effectiveCap(...)` below).
 
 /** Internal seam: tests inject a fake `runAgent` / git probes so the runner is
  *  unit-testable without a real LLM or a real git repo. Defaults are the real
  *  implementations. `isGitRepo`/`withWorktree` are injectable together because
  *  worktree isolation is otherwise an end-to-end-only path. */
 export interface SubagentRunnerOptions {
-  /** Hard recursion ceiling. `req.depth > maxDepth ⇒ denied`. Default 3. */
+  /** Per-config TIGHTENING-ONLY cap request (rev.4 min-cap). The effective
+   *  ceiling is `min(operator policy, maxDepth ?? +∞)`; the lineage-derived
+   *  child depth exceeding it ⇒ denied. Omitted ⇒ operator policy (default 1). */
   maxDepth?: number
   /** Override the loop entrypoint (tests). Defaults to the real `runAgent`. */
   run?: typeof runAgent
@@ -741,7 +744,7 @@ export const createSubagentRunner = (
   parent: AgentConfig,
   opts: SubagentRunnerOptions = {},
 ): SubagentRunner => {
-  const maxDepth = opts.maxDepth ?? spawnDepthCap()
+  const maxDepth = effectiveCap(opts.maxDepth)
   const run = opts.run ?? runAgent
   const gitProbe = opts.isGitRepo ?? isGitRepo
   const wt = opts.withWorktree ?? withWorktree
@@ -761,12 +764,13 @@ export const createSubagentRunner = (
   const localIdentity = { childOrdinal: 0, spawnSeq: 0 }
 
   return async (req: SubagentRequest): Promise<SubagentResult> => {
-    // RFC jul-13 §4.1/§4.2 (rev.3) — the recursion bound is on the
+    // RFC jul-13 §4.1/§4.2 (rev.4) — the recursion bound is on the
     // LINEAGE-DERIVED child depth (`childDepthOf(parent) > maxDepth`), NOT the
     // caller-asserted `req.depth`. Same authority as `buildChildConfig` below, so
-    // a forged `req.depth` cannot slip past. `maxDepth = opts.maxDepth ??
-    // spawnDepthCap()` (= `runtimeConfig().maxDescendantDepth`, default 3) — the
-    // SAME effective cap the tier1 gates expose on. A malformed `parent.depth`
+    // a forged `req.depth` cannot slip past. `maxDepth = effectiveCap(opts.maxDepth)`
+    // = `min(runtimeConfig().maxDescendantDepth policy [default 1], opts.maxDepth)`
+    // — the SAME min-cap the tier1 gates expose on (config can only tighten). A
+    // malformed `parent.depth`
     // ⇒ SpawnLineageError, converted HERE into a typed non-ok deny (fail-closed,
     // never a rejected Promise, never a depth:0 fallback). Honest path:
     // childDepthOf(parent) === req.depth, so byte-identical.

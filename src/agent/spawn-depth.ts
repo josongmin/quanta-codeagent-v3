@@ -16,13 +16,15 @@
  *      config IS the root); a malformed depth is a typed `SpawnLineageError`
  *      (fail-closed, never silently treated as root).
  *
- *   2. CAPABILITY PROJECTION (§4.2) — `canExposeSpawnTools` / `canAdmitChildDepth`
- *      are the two derived predicates over the session-pinned cap
- *      `maxDescendantDepth` (= max descendant depth a spawn may create). The tier1
- *      block builders gate a child's spawn-tool menu with `canExposeSpawnTools`;
- *      the runner reject bounds recursion with the same cap. Keeping the
- *      predicates here — not inlined at each gate — makes the policy a single
- *      testable, mutation-covered surface.
+ *   2. CAPABILITY PROJECTION (§4.2, rev.4 MIN-CAP) — `canExposeSpawnTools` /
+ *      `canAdmitChildDepth` are the two derived predicates over the effective cap
+ *      `effectiveCap(requested) = min(maxDescendantDepth policy, requested ?? +∞)`.
+ *      A per-config `requested` cap can only TIGHTEN the operator policy, never
+ *      raise it. The tier1 block builders gate a child's spawn-tool menu with
+ *      `canExposeSpawnTools`; the runner reject bounds recursion with the SAME
+ *      `effectiveCap`. Keeping the predicates + the min-cap resolution here — not
+ *      inlined at each gate — makes the policy a single testable, mutation-covered
+ *      surface with no split-brain between the two knobs.
  */
 import { runtimeConfig } from "@/shared/runtime-config"
 import type { AgentConfig } from "./types"
@@ -66,21 +68,40 @@ export const canExposeSpawnTools = (parentDepth: number, maxDescendantDepth: num
 export const canAdmitChildDepth = (childDepth: number, maxDescendantDepth: number): boolean =>
   childDepth <= maxDescendantDepth
 
-/** Max descendant agent depth a spawn may create (default 3; `1` = root-only,
- *  `0` = total kill switch). Sourced from the typed runtime-config
- *  `maxDescendantDepth` field (env `QUANTA_MAX_DESCENDANT_DEPTH`, parsed with
- *  `parseNonNegativeInt` so `0` is a valid kill-switch value; negative /
- *  non-integer / unset ⇒ default 3). */
+/** The OPERATOR POLICY ceiling: max descendant agent depth a spawn may create
+ *  (default 1 = root-only; `0` = total kill switch). Sourced from the typed
+ *  runtime-config `maxDescendantDepth` field (env `QUANTA_MAX_DESCENDANT_DEPTH`,
+ *  parsed with `parseNonNegativeInt` so `0` is a valid kill-switch value;
+ *  negative / non-integer / unset ⇒ default 1). This is THE authoritative
+ *  ceiling — see {@link effectiveCap}. */
 export const spawnDepthCap = (): number => runtimeConfig().maxDescendantDepth
 
+/** rev.4 MIN-CAP authority (§4.2, RFC line ~188): the effective recursion cap is
+ *  `min(operator policy, requested)`. A caller/per-config `requested` cap can
+ *  only ever TIGHTEN the operator policy, NEVER RAISE it above the policy ceiling.
+ *
+ *    effectiveCap(requested) = Math.min(spawnDepthCap(), requested ?? +∞)
+ *
+ *  This is the SINGLE resolution used by all three cap sources (the exposure
+ *  gate {@link spawnToolsAvailable}, the runner reject in subagent-runner.ts, and
+ *  the two `@/subagent` secondary pre-checks), so the 3-source agreement holds
+ *  structurally. It also RESOLVES R1's two-knob split-brain: `maxDescendantDepth`
+ *  (`QUANTA_MAX_DESCENDANT_DEPTH`) is the authoritative policy ceiling, and the
+ *  per-config `maxDepth` (legacy `QUANTA_SUBAGENT_MAX_DEPTH`) is a tightening-only
+ *  override that can never widen the cap above policy.
+ *
+ *  Examples: policy 1, requested 5 ⇒ min(1,5)=1 (config canNOT raise past policy);
+ *  policy 3, requested 1 ⇒ min(3,1)=1 (config tightens); no requested ⇒ policy. */
+export const effectiveCap = (requested?: number): number =>
+  Math.min(spawnDepthCap(), requested ?? Number.POSITIVE_INFINITY)
+
 /** Is THIS agent (`config.depth`) entitled to spawn tools? Derived predicate
- *  `canExposeSpawnTools(config.depth ?? 0, effectiveCap)` where the effective cap
- *  is `config.subagent?.maxDepth ?? spawnDepthCap()` — the IDENTICAL expression
- *  the runner uses to bound recursion (`opts.maxDepth ?? spawnDepthCap()` where
- *  `opts.maxDepth = config.subagent.maxDepth`). This keeps the capability gate
- *  and the runtime reject in lock-step: the pre-existing per-run knob
- *  `QUANTA_SUBAGENT_MAX_DEPTH` (→ `config.subagent.maxDepth`) widens BOTH surfaces
- *  together. Neither knob set ⇒ cap 3 (default), so depth 0/1/2 keep spawn tools
- *  (byte-identical to pre-landing) and depth ≥ 3 are leaves. */
+ *  `canExposeSpawnTools(config.depth ?? 0, effectiveCap(config.subagent?.maxDepth))`
+ *  — the IDENTICAL min-cap expression the runner uses to bound recursion
+ *  (`effectiveCap(opts.maxDepth)` where `opts.maxDepth = config.subagent.maxDepth`).
+ *  This keeps the capability gate and the runtime reject in lock-step: the
+ *  per-config knob `config.subagent.maxDepth` can only LOWER the cap below the
+ *  operator policy, never raise it. Neither knob set ⇒ cap = policy (default 1),
+ *  so only the root (depth 0) keeps spawn tools and depth ≥ 1 are leaves. */
 export const spawnToolsAvailable = (config: Pick<AgentConfig, "depth" | "subagent">): boolean =>
-  canExposeSpawnTools(config.depth ?? 0, config.subagent?.maxDepth ?? spawnDepthCap())
+  canExposeSpawnTools(config.depth ?? 0, effectiveCap(config.subagent?.maxDepth))

@@ -2,15 +2,18 @@
  * HELLGATE — FIX-A: single effective-cap SSOT for sub-agent nesting control.
  * RFC docs/plans/jul-13-subagent-nesting-control.md §4.5 / §6.5 B.
  *
- * The nesting control has THREE cap sources that must AGREE:
+ * The nesting control has THREE cap sources that must AGREE, all resolving the
+ * rev.4 MIN-CAP `effectiveCap(requested) = min(operator policy, requested ?? +∞)`
+ * (config can only TIGHTEN, never RAISE):
  *   1. Capability gate   — `spawnToolsAvailable` (spawn-depth.ts):
- *                          `(depth ?? 0) < (config.subagent?.maxDepth ?? spawnDepthCap())`
- *   2. Runner reject     — `createSubagentRunner` (subagent-runner.ts:736):
- *                          `req.depth > (opts.maxDepth ?? spawnDepthCap())`
+ *                          `(depth ?? 0) < effectiveCap(config.subagent?.maxDepth)`
+ *   2. Runner reject     — `createSubagentRunner` (subagent-runner.ts):
+ *                          `childDepthOf(parent) > effectiveCap(opts.maxDepth)`
  *   3. Secondary pre-checks — the `@/subagent` slice's `agent` tool
- *                          (agent-tool.ts:658 `opts.maxDepth ?? DEFAULT_MAX_DEPTH`)
- *                          and `spawn_agent` (handlers-6.ts:668
- *                          `deps.maxDepth ?? DEFAULT_MAX_DEPTH`).
+ *                          (agent-tool.ts `opts.maxDepth ?? DEFAULT_MAX_DEPTH`)
+ *                          and `spawn_agent` (handlers-6.ts
+ *                          `deps.maxDepth ?? DEFAULT_MAX_DEPTH`), which receive the
+ *                          RESOLVED effectiveCap threaded in from the @/agent caller.
  *
  * BEFORE FIX-A the secondary pre-checks fell back to a LOCAL LITERAL
  * `DEFAULT_MAX_DEPTH = 3` when the `@/agent` block builder omitted `maxDepth`
@@ -47,7 +50,7 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth"
+import { effectiveCap, spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import { buildSubagentBlock } from "@/agent/tier1/subagent"
 import type { AgentConfig } from "@/agent/types"
@@ -117,6 +120,11 @@ const driveLast = async (tool: Tool, input: unknown, c: ToolContext): Promise<To
  *  max-descendant-depth-config-pin.test.ts). */
 const withCap1 = (): void => {
   process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = "1"
+  __resetRuntimeConfig()
+}
+/** Pin the runtime operator policy to an arbitrary cap through the real env seam. */
+const withCap = (cap: number): void => {
+  process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = String(cap)
   __resetRuntimeConfig()
 }
 const clearCap = (): void => {
@@ -209,15 +217,31 @@ describe("A1 — block-built `agent` tool uses the resolved cap, NOT DEFAULT_MAX
     expect(spy.forks()).toBe(1)
   })
 
-  test("per-config maxDepth=2 widens the block's agent cap to 2 (all three agree)", async () => {
-    __resetRuntimeConfig()
-    // config.subagent.maxDepth=2 ⇒ resolved cap 2 ⇒ childDepth 3 (ctx.depth 2)
-    // STILL rejected (3 > 2), but childDepth 2 (ctx.depth 1) now admitted.
-    const block = buildSubagentBlock(cfg({ depth: 0, maxDepth: 2 }))!
+  test("rev.4 min-cap: per-config maxDepth=5 CANNOT widen above policy 1 (block agent cap stays 1)", async () => {
+    __resetRuntimeConfig() // default policy 1 (root-only)
+    // rev.3 override would make config.subagent.maxDepth=5 ⇒ cap 5; rev.4 min-cap
+    // ⇒ min(1,5)=1. So childDepth 2 (ctx.depth 1) is REJECTED at cap 1 — config
+    // did NOT raise the cap. RED-ON-INJECTION: reverting to `?? override` makes
+    // the cap 5 ⇒ this call ADMITS ⇒ the assertion below flips.
+    const block = buildSubagentBlock(cfg({ depth: 0, maxDepth: 5 }))!
     const agent = agentOf(block)
-    const denied = asResult(await driveLast(agent, { prompt: "x" }, ctxAtDepth(2)))
+    const denied = asResult(await driveLast(agent, { prompt: "x" }, ctxAtDepth(1)))
     expect(denied.ok).toBe(false)
-    expect(denied.output).toContain("maxDepth 2")
+    expect(denied.output).toContain("maxDepth 1") // resolved to policy, NOT 5
+    expect(denied.output).not.toContain("maxDepth 5")
+  })
+
+  test("rev.4 min-cap: per-config maxDepth=1 TIGHTENS an env policy 3 to 1", async () => {
+    process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = "3"
+    __resetRuntimeConfig()
+    // policy 3, requested 1 ⇒ min(3,1)=1. childDepth 2 (ctx.depth 1) now REJECTED
+    // (would be admitted at policy 3). Proves the config tightens.
+    const block = buildSubagentBlock(cfg({ depth: 0, maxDepth: 1 }))!
+    const agent = agentOf(block)
+    const denied = asResult(await driveLast(agent, { prompt: "x" }, ctxAtDepth(1)))
+    expect(denied.ok).toBe(false)
+    expect(denied.output).toContain("maxDepth 1")
+    clearCap()
   })
 })
 
@@ -253,7 +277,7 @@ describe("A2 — spawn_agent secondary pre-check receives the resolved cap", () 
     for (const depth of [0]) {
       const config = cfg({ depth })
       expect(spawnToolsAvailable(config)).toBe(true) // block builds
-      const resolvedCap = config.subagent?.maxDepth ?? spawnDepthCap()
+      const resolvedCap = effectiveCap(config.subagent?.maxDepth)
       const childDepth = depth + 1
       expect(childDepth).toBeLessThanOrEqual(resolvedCap) // never exceeds ⇒ inert
     }
@@ -262,71 +286,68 @@ describe("A2 — spawn_agent secondary pre-check receives the resolved cap", () 
 
 // ── A3 : 3-source cross-agreement (gate ⇔ runner ⇔ secondary pre-check) ───────
 
+/** One (policy already env-set) × requested × depth combo: assert the gate, the
+ *  runner reject, and the spawn_agent pre-check make the IDENTICAL admit/reject
+ *  decision. Extracted so the A3 matrix loop stays under the cognitive-complexity
+ *  cap. `requested` is driven RAW into the runner so its own `effectiveCap(...)`
+ *  re-mins against the policy (idempotent); the @/subagent pre-check (which does
+ *  NOT re-min — slice fence) gets the already-resolved `cap`. */
+const assertThreeSourceAgreement = async (
+  requested: number | undefined,
+  depth: number,
+): Promise<void> => {
+  const cap = effectiveCap(requested) // min(policy, requested ?? +∞)
+  const childDepth = depth + 1
+
+  // (1) Capability gate: is THIS agent (at `depth`) entitled to spawn tools?
+  const gateOpen = spawnToolsAvailable(
+    cfg({ depth, ...(requested !== undefined ? { maxDepth: requested } : {}) }),
+  )
+  expect(gateOpen).toBe(depth < cap) // gate opens ⇔ its forked child is admissible
+
+  // (2) Runner reject — LINEAGE-DERIVED (`childDepthOf(parent) > effectiveCap`),
+  //     the parent carries the real depth; runner re-mins the RAW requested.
+  const runner = createSubagentRunner({ ...parentCfg(), depth } as AgentConfig, {
+    run: (async () => ({
+      reason: "completed",
+      turns: 1,
+      messages: [{ role: "assistant", content: [{ type: "text", text: "x" }] }],
+    })) as never,
+    ...(requested !== undefined ? { maxDepth: requested } : {}),
+    isGitRepo: async () => false,
+  })
+  const runnerAdmits = (
+    await runner({ prompt: "p", depth: childDepth, isolation: "none" } as SubagentRequest)
+  ).ok
+  expect(runnerAdmits).toBe(childDepth <= cap)
+
+  // (3) Secondary pre-check (spawn_agent) — the @/agent caller threads the
+  //     already-RESOLVED `cap` in (FIX-A); the @/subagent slice does not re-min.
+  const spawn = createSubagent6Tools({
+    runner: async () => settledResult(),
+    registry: new TaskRegistry(),
+    parentDepth: depth,
+    maxDepth: cap,
+  }).tools.find((t) => t.name === "spawn_agent")!
+  const preAdmits = asResult(await driveLast(spawn, { prompt: "p" }, ctxAtDepth(0))).ok
+  await new Promise<void>((res) => setTimeout(res, 2))
+
+  // CROSS-SOURCE AGREEMENT: no (policy, requested, depth) where one admits and
+  // another rejects — no split-brain.
+  expect(preAdmits).toBe(runnerAdmits)
+  expect(gateOpen).toBe(runnerAdmits) // parent exposure ⇔ child admissibility
+}
+
 describe("A3 — all three cap sources agree for every (depth, effective-cap)", () => {
-  test("no (depth, cap) where the gate, runner reject, and pre-check disagree", async () => {
-    withCap1() // spawnDepthCap() === 1 (env cap)
-    // (parentDepth, per-config cap). effective cap = cap ?? spawnDepthCap().
-    const combos: ReadonlyArray<readonly [number, number | undefined]> = [
-      [0, undefined],
-      [1, undefined],
-      [2, undefined],
-      [0, 2],
-      [1, 2],
-      [2, 2],
-      [0, 3],
-      [2, 3],
-      [1, 0], // kill switch
-    ]
-    for (const [depth, cap] of combos) {
-      const effectiveCap = cap ?? spawnDepthCap()
-      const childDepth = depth + 1
-
-      // (1) Capability gate: is THIS agent (at `depth`) entitled to spawn tools?
-      const gateOpen = spawnToolsAvailable(
-        cfg({ depth, ...(cap !== undefined ? { maxDepth: cap } : {}) }),
-      )
-      // Gate opens ⇔ depth < effectiveCap ⇔ the child it would fork is admissible.
-      expect(gateOpen).toBe(depth < effectiveCap)
-
-      // (2) Runner reject: rev.3 §4.1/§4.2 — the reject is LINEAGE-DERIVED
-      //     (`childDepthOf(parent) > maxDepth`), NOT the caller-asserted req.depth.
-      //     So the runner's PARENT must carry the real depth; childDepthOf(parent)
-      //     === childDepth. The injected `run` short-circuits the loop.
-      const runner = createSubagentRunner({ ...parentCfg(), depth } as AgentConfig, {
-        run: (async () => ({
-          reason: "completed",
-          turns: 1,
-          messages: [{ role: "assistant", content: [{ type: "text", text: "x" }] }],
-        })) as never,
-        maxDepth: effectiveCap,
-        isGitRepo: async () => false,
-      })
-      const runnerResult = await runner({
-        prompt: "p",
-        depth: childDepth,
-        isolation: "none",
-      } as SubagentRequest)
-      const runnerAdmits = runnerResult.ok
-      expect(runnerAdmits).toBe(childDepth <= effectiveCap)
-
-      // (3) Secondary pre-check (spawn_agent): admitted iff childDepth <=
-      //     effectiveCap, GIVEN the resolved cap is threaded in (FIX-A).
-      const spawn = createSubagent6Tools({
-        runner: async () => settledResult(),
-        registry: new TaskRegistry(),
-        parentDepth: depth,
-        maxDepth: effectiveCap,
-      }).tools.find((t) => t.name === "spawn_agent")!
-      const pre = asResult(await driveLast(spawn, { prompt: "p" }, ctxAtDepth(0)))
-      const preAdmits = pre.ok
-      await new Promise<void>((res) => setTimeout(res, 2))
-
-      // CROSS-SOURCE AGREEMENT: the runner and the secondary pre-check make the
-      // IDENTICAL admit/reject decision for the forked child; the gate makes the
-      // matching tool-exposure decision for the parent. No depth where one admits
-      // and another rejects.
-      expect(preAdmits).toBe(runnerAdmits)
-      expect(gateOpen).toBe(runnerAdmits) // parent exposure ⇔ child admissibility
+  test("no (depth, policy×requested) where the gate, runner reject, and pre-check disagree", async () => {
+    // rev.4 min-cap matrix: {policy 0/1/2/3} × {requested none/1/2/5} × {depth 0..3}.
+    for (const policy of [0, 1, 2, 3]) {
+      withCap(policy) // spawnDepthCap() === policy (env)
+      for (const requested of [undefined, 1, 2, 5]) {
+        for (const depth of [0, 1, 2, 3]) {
+          await assertThreeSourceAgreement(requested, depth)
+        }
+      }
     }
     clearCap()
   })
@@ -355,11 +376,14 @@ describe("QUANTA_MAX_DESCENDANT_DEPTH=0 is a total kill-switch (root included)",
     }
   })
 
-  test("unset ⇒ default cap 3 ⇒ root DOES spawn (kill-switch is opt-in)", () => {
+  test("unset ⇒ rev.4 default cap 1 ⇒ root DOES spawn, depth-1 child does NOT (root-only)", () => {
     clearCap()
-    expect(spawnDepthCap()).toBe(3)
-    expect(spawnToolsAvailable(cfg({ depth: 0 }))).toBe(true) // 0 < 3
+    expect(spawnDepthCap()).toBe(1)
+    expect(spawnToolsAvailable(cfg({ depth: 0 }))).toBe(true) // 0 < 1 ⇒ root spawns
     expect(buildSubagentBlock(cfg({ depth: 0 }))).toBeDefined()
+    // depth-1 child is a LEAF at the default policy (root-only intent).
+    expect(spawnToolsAvailable(cfg({ depth: 1 }))).toBe(false) // 1 < 1 false
+    expect(buildSubagentBlock(cfg({ depth: 1 }))).toBeUndefined()
   })
 })
 
@@ -369,20 +393,20 @@ describe("A4 — @/agent caller threads the resolved cap UNCONDITIONALLY (struct
   test("tier1/subagent.ts resolves `effectiveMaxDepth` and passes it to all 3 constructors", () => {
     const here = dirname(fileURLToPath(import.meta.url))
     const src = readFileSync(resolve(here, "../../src/agent/tier1/subagent.ts"), "utf8")
-    // The resolved cap uses the SAME expression as the gate/runner.
-    expect(src).toContain("const effectiveMaxDepth = config.subagent.maxDepth ?? spawnDepthCap()")
+    // rev.4: the resolved cap is the MIN-CAP `effectiveCap(config.subagent.maxDepth)`
+    // — the SAME min-cap the gate/runner use. Reverting to the rev.3 `?? override`
+    // (`config.subagent.maxDepth ?? spawnDepthCap()`) lets a config widen past
+    // policy again ⇒ the min-cap red-on-injection tests turn RED.
+    expect(src).toContain("const effectiveMaxDepth = effectiveCap(config.subagent.maxDepth)")
     // Passed UNCONDITIONALLY (not the old conditional spread) to the runner,
     // the agent tool, and the 6-tool set. Reverting any of these to the
     // `config.subagent.maxDepth !== undefined ? { maxDepth: … } : {}` spread —
     // which drops maxDepth on the unset path → the @/subagent 3-fallback — turns
-    // A1/A2 RED (childDepth 3 admitted again).
+    // A1/A2 RED.
     const passes = src.match(/maxDepth: effectiveMaxDepth/g) ?? []
     expect(passes.length).toBeGreaterThanOrEqual(3)
-    // And the old conditional-spread of the RAW config value must NOT feed these
-    // constructors anymore (it would re-open the fallback on the unset path).
-    // `spawnDepthCap` is imported (slice-fence-respecting resolution at caller).
-    expect(src).toContain(
-      'import { spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth"',
-    )
+    // And `effectiveCap` is imported (slice-fence-respecting min-cap resolution at
+    // the @/agent caller boundary).
+    expect(src).toContain('import { effectiveCap, spawnToolsAvailable } from "@/agent/spawn-depth"')
   })
 })

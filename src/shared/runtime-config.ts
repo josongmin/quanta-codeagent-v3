@@ -343,18 +343,20 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
     // C5059-05 — opt-in single-agent-first delegation suppression. Default false
     // ⇒ byte-identical prompt (fan-out-biased). Measurement arm before default-ON.
     subagentDelegateSuppress: gateOn(env, "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"),
-    // RFC jul-13 §4.2/§6.5 A — MAX DESCENDANT DEPTH a spawn may create. NUMERIC
-    // POLICY (not a bool gate): default 3 (rev.3 canonical; Phase 0-2 are
-    // byte-identical — the real 3→1 flip is a gated Phase 4). The two derived
-    // predicates (`canExposeSpawnTools`/`canAdmitChildDepth`, @/agent/spawn-depth)
-    // read THIS as the cap: `1` = root-only, `0` = total KILL-SWITCH (parsed with
-    // `parseNonNegativeInt` so `0` is a valid value — no agent, incl. root, gets
-    // spawn tools). Unset / negative / non-integer ⇒ `undefined` ⇒ default 3.
-    // (Renamed from `maxSpawnDepth` / `QUANTA_MAX_SPAWN_DEPTH`, off-by-one fixed:
-    // the cap now names the max descendant depth, not the max depth that receives
-    // tools.)
+    // RFC jul-13 §4.2/§6.5 A (rev.4) — MAX DESCENDANT DEPTH a spawn may create.
+    // NUMERIC POLICY (not a bool gate): default 1 = root-only (rev.4 canonical,
+    // RFC line 273 "현재 default 1 유지" — the user's leaf intent). This is THE
+    // authoritative OPERATOR ceiling; the per-config `subagent.maxDepth` is a
+    // tightening-only override (`effectiveCap = min(policy, requested)`). The two
+    // derived predicates (`canExposeSpawnTools`/`canAdmitChildDepth`,
+    // @/agent/spawn-depth) read THIS as the policy: `1` = root-only, `0` = total
+    // KILL-SWITCH (parsed with `parseNonNegativeInt` so `0` is a valid value — no
+    // agent, incl. root, gets spawn tools). Unset / negative / non-integer ⇒
+    // `undefined` ⇒ default 1. (Renamed from `maxSpawnDepth`/`QUANTA_MAX_SPAWN_DEPTH`,
+    // off-by-one fixed: the cap names the max descendant depth, not the max depth
+    // that receives tools.)
     maxDescendantDepth:
-      parseNonNegativeInt(env["QUANTA_MAX_DESCENDANT_DEPTH"], "QUANTA_MAX_DESCENDANT_DEPTH") ?? 3,
+      parseNonNegativeInt(env["QUANTA_MAX_DESCENDANT_DEPTH"], "QUANTA_MAX_DESCENDANT_DEPTH") ?? 1,
     // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
     sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
     // N2 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP connector tools.

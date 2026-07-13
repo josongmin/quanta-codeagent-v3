@@ -121,10 +121,11 @@ describe("subagent nesting — operator kill-switch through the real loop", () =
     expect(finalText).toContain("PARENT-OBSERVED-KILLSWITCH")
   })
 
-  test("PAIRED CONTROL: default policy (env unset ⇒ cap 3) with the SAME cfg ⇒ the child DOES fork", async () => {
-    // Identical run, only the operator cap differs (unset ⇒ default 3). Now the
-    // root's `agent` tool IS minted and the child forks — proving the cap=0
-    // denial above was caused by the operator kill-switch, not the harness.
+  test("PAIRED CONTROL: default policy (env unset ⇒ rev.4 cap 1) with the SAME cfg ⇒ the child DOES fork", async () => {
+    // Identical run, only the operator cap differs (unset ⇒ rev.4 default 1 =
+    // root-only). The root's `agent` tool IS minted and its depth-1 child forks
+    // (childDepth 1 ≤ effectiveCap min(1,3)=1) — proving the cap=0 denial above
+    // was caused by the operator kill-switch, not the harness.
     // MUTATION: reverting `effectiveCap` from min() to a policy-ignoring resolve
     // would let cap=0 behave like this control ⇒ the kill-switch test flips RED.
     withCap(undefined)

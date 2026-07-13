@@ -4,8 +4,30 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, RecordingStream, withTimeout } from "./_harness"
+
+/**
+ * rev.4 MIN-CAP (RFC jul-13 §4.3): the effective spawn cap is
+ * `min(operator policy = runtimeConfig().maxDescendantDepth [default 1],
+ * requested = config.subagent?.maxDepth ?? +∞)`. A per-run `subagent.maxDepth`
+ * can only TIGHTEN the operator policy, NEVER raise it. The MULTI-LEVEL
+ * MECHANISM tests below (parent→child→grandchild…) need real depth HEADROOM to
+ * exercise the depth machinery, so they RAISE THE OPERATOR POLICY via
+ * `QUANTA_MAX_DESCENDANT_DEPTH` to the SAME value as their `subagent.maxDepth`
+ * (e.g. a `maxDepth:3` test pins the policy to 3 ⇒ `min(3,3)=3`). This restores
+ * the policy headroom the pre-rev.4 default 3 used to provide, WITHOUT changing
+ * what each test proves (recursion bounded at N, deny at the bound, cascade
+ * abort). runtimeConfig() is first-access-frozen, so each such test sets the env
+ * then calls `__resetRuntimeConfig()` BEFORE `runAgent`, and the afterEach in the
+ * owning describe restores it.
+ */
+const withPolicyCap = (value: string | undefined): void => {
+  if (value === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+  else process.env.QUANTA_MAX_DESCENDANT_DEPTH = value
+  __resetRuntimeConfig()
+}
 
 /**
  * GAP 6 — a REAL recursive subagent fork through `runAgent`.
@@ -152,6 +174,11 @@ describe("GAP 6 — real recursive subagent fork through runAgent", () => {
     // spawn a 4th-level loop, so a depth-guard regression cannot infinite-loop
     // — it would instead surface as an UNMATCHED fallback / spawn-count
     // assertion failure. maxTurns is also low per the cfg default.
+    // rev.4 min-cap: RAISE the operator policy to 2 so the intended
+    // `subagent.maxDepth:2` is EFFECTIVE (min(2,2)=2). Without this the default
+    // policy 1 would clamp to min(1,2)=1 and the depth-1 child would already be a
+    // leaf — the multi-level mechanism could not be exercised.
+    withPolicyCap("2")
     const llm = new RoutingLLM([
       // Parent (depth 0): spawn child once, then finish.
       { match: "PARENT-GO", events: agentCall("a1", "LEVEL1-TASK spawn child"), once: true },
@@ -160,7 +187,7 @@ describe("GAP 6 — real recursive subagent fork through runAgent", () => {
       { match: "LEVEL1-TASK", events: agentCall("a2", "LEVEL2-TASK spawn grandchild"), once: true },
       { match: "LEVEL1-TASK", events: text("CHILD-DONE") },
       // Grandchild (depth 2): attempt a 4th level — the `agent` tool denies it
-      // (childDepth 3 > maxDepth 2). Recover from the deny tool_result, finish.
+      // (childDepth 3 > effectiveCap 2). Recover from the deny tool_result, finish.
       {
         match: "LEVEL2-TASK",
         events: agentCall("a3", "LEVEL3-TASK must never spawn a real loop"),
@@ -171,19 +198,24 @@ describe("GAP 6 — real recursive subagent fork through runAgent", () => {
       // run — if this fires the depth bound regressed.
       { match: "LEVEL3-TASK", events: text("LEVEL4-RAN-ILLEGALLY") },
     ])
-    const out = await withTimeout(
-      runAgent(
-        cfg({
-          llm,
-          registry: new ToolRegistry(defaultTools),
-          messages: [{ role: "user", content: [{ type: "text", text: "PARENT-GO" }] }],
-          subagent: { maxDepth: 2 },
-          maxTurns: 6,
-        }),
-      ),
-      15_000,
-      "subagent-depth-multi",
-    )
+    let out: Awaited<ReturnType<typeof runAgent>>
+    try {
+      out = await withTimeout(
+        runAgent(
+          cfg({
+            llm,
+            registry: new ToolRegistry(defaultTools),
+            messages: [{ role: "user", content: [{ type: "text", text: "PARENT-GO" }] }],
+            subagent: { maxDepth: 2 },
+            maxTurns: 6,
+          }),
+        ),
+        15_000,
+        "subagent-depth-multi",
+      )
+    } finally {
+      withPolicyCap(undefined)
+    }
 
     expect(out.reason).toBe("completed")
 
@@ -263,12 +295,21 @@ const finishingRules = (label: string) => ({
 })
 
 describe("subagent hell-cases — recursion depth attack", () => {
+  afterEach(() => {
+    withPolicyCap(undefined)
+  })
+
   test("(SH1.a) 10-level nested fork attempt bottoms out at maxDepth=3, depth-bound surfaces as deny", async () => {
     // Each level tries to spawn the next. With maxDepth=3 the chain runs:
     // parent(0) → child(1) → grandchild(2) → great-grandchild(3) and the
     // FIFTH spawn (childDepth=4 > maxDepth=3) yields the recoverable deny.
     // The 10-level intent is captured by the script presence of LEVEL{4..9}
     // rules — they MUST never fire.
+    //
+    // rev.4 min-cap: RAISE the operator policy to 3 so `subagent.maxDepth:3` is
+    // EFFECTIVE (min(3,3)=3). Default policy 1 would clamp to 1 and bottom the
+    // chain at depth 1, defeating the 3-level mechanism under test.
+    withPolicyCap("3")
     const llm = new RoutingLLM([
       { match: "PARENT-GO", events: agentCall("a1", "LEVEL1-TASK spawn"), once: true },
       { match: "PARENT-GO", events: text("PARENT-DONE") },
@@ -329,6 +370,10 @@ describe("subagent hell-cases — recursion depth attack", () => {
     // surface a recoverable deny tool_result and not throw. (This is the
     // mirror of SH1.a at a tighter depth so the deny edge fires earlier and
     // we can pin the deny content shape precisely.)
+    //
+    // rev.4 min-cap: RAISE the operator policy to 2 so `subagent.maxDepth:2` is
+    // EFFECTIVE (min(2,2)=2); default policy 1 would clamp the grandchild away.
+    withPolicyCap("2")
     const llm = new RoutingLLM([
       { match: "PARENT-GO", events: agentCall("a1", "LEVEL1-TASK"), once: true },
       { match: "PARENT-GO", events: text("PARENT-DONE") },
@@ -371,6 +416,10 @@ describe("subagent hell-cases — recursion depth attack", () => {
 })
 
 describe("subagent hell-cases — cancellation storm", () => {
+  afterEach(() => {
+    withPolicyCap(undefined)
+  })
+
   test("(SH2.a) parent aborted before any child spawn → outcome.reason=aborted cleanly", async () => {
     // Cancellation storm baseline: parent's signal aborts BEFORE the first
     // turn streams. The whole fork tree collapses cleanly — no half-spawned
@@ -556,6 +605,12 @@ describe("subagent hell-cases — cancellation storm", () => {
     // Chain: parent(0) spawns child(1) which spawns grandchild(2). Root
     // signal trips while the grandchild is mid-stream. Both child and parent
     // must unwind cleanly via the chained signal.
+    //
+    // rev.4 min-cap: RAISE the operator policy to 2 so `subagent.maxDepth:2` is
+    // EFFECTIVE (min(2,2)=2) and the grandchild at depth 2 actually spawns — the
+    // whole point of this cascade-abort test. Default policy 1 would clamp the
+    // child to a leaf so the grandchild never streams and the abort never trips.
+    withPolicyCap("2")
     const ac = new AbortController()
     const baseLlm = new RoutingLLM([
       { match: "PARENT-GO", events: agentCall("a1", "L1-TASK"), once: true },

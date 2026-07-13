@@ -23,9 +23,11 @@ surface_integration:
     cli: "runs in the interactive CLI — 7/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "env gates not among the 6 web-writable CONFIG keys in KnobsPanel; subagent runs only appear read-only in RunColumn, no enable/depth control"
 purpose: |
-  서브에이전트 기본-OFF 게이트 + git worktree 격리 + 재귀 한도 (`_MAX_DEPTH`,
-  default 3). CLI surface는 `QUANTA_SUBAGENT` 세트로 enable, `QUANTA_SUBAGENT_MAX_DEPTH`
-  로 cap override. `buildSubagentConfigCore` 가 env → SubagentConfig 변환, `buildSubagentBlock`
+  서브에이전트 기본-OFF 게이트 + git worktree 격리 + 재귀 한도 (`_MAX_DEPTH`).
+  CLI surface는 `QUANTA_SUBAGENT` 세트로 enable, `QUANTA_SUBAGENT_MAX_DEPTH` 로
+  cap 을 TIGHTEN (rev.4 min-cap: `effectiveCap = min(operator policy, requested)`
+  — 정책 상한 `QUANTA_MAX_DESCENDANT_DEPTH`(default 1) 을 초과해 올릴 수 없고 낮추기만
+  가능). `buildSubagentConfigCore` 가 env → SubagentConfig 변환, `buildSubagentBlock`
   이 6 도구 + cleanup hook을 등록.
 evidence:
   code:

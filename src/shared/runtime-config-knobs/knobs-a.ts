@@ -458,10 +458,11 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
   {
     envKey: "QUANTA_MAX_DESCENDANT_DEPTH",
     kind: "int",
-    default: 3,
+    default: 1,
     group: "subagent",
     describe:
       "Max descendant agent depth (children a spawn may create). 1 = root-only, " +
-      "0 = no spawning. default 3.",
+      "0 = no spawning. default 1. Authoritative operator ceiling — per-config " +
+      "subagent.maxDepth can only tighten below this, never raise it (min-cap).",
   },
 ]

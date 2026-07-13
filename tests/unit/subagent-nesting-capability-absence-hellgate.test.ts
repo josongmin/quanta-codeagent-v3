@@ -1,8 +1,8 @@
 /**
  * HELLGATE — sub-agent nesting control (capability-absence + runtime
  * typed-defense). RFC docs/plans/jul-13-subagent-nesting-control.md §4.1/§4.2,
- * §6.5 B — rev.3 (lineage-derived depth authority; default cap 3, Phase 0-2
- * byte-identical, the real 3→1 flip is a gated Phase 4).
+ * §6.5 B — rev.4 (lineage-derived depth authority; default cap 1 = root-only,
+ * the user's leaf intent; per-config maxDepth can only TIGHTEN via min-cap).
  *
  * L1 (capability projection / tool ABSENCE) vs L2 (runtime admission / reject)
  * are ORTHOGONAL and BOTH necessary — this suite proves each catches what the
@@ -10,10 +10,10 @@
  *   - P1-b: the 4 tier1 block builders drop ALL spawn families for a child at/
  *     above the spawn-depth cap (`spawnToolsAvailable(config) === false`). A
  *     child NEVER SEES the tool → cheaper than a runtime bounce, but only covers
- *     paths that go through a block builder. Since the default cap is 3, absence
- *     is driven at a depth ≥ cap — here we pin BOTH the default cap 3 (depth 3
- *     leaf) AND a root-only env cap 1 (depth 1 leaf) so the byte-identical
- *     default AND the parameterization are both witnessed.
+ *     paths that go through a block builder. Since the rev.4 default cap is 1
+ *     (root-only), absence is driven at a depth ≥ cap — here we pin BOTH the
+ *     default cap 1 (depth 1 leaf) AND an env cap 3 (depth 3 leaf) so the
+ *     root-only default AND the parameterization are both witnessed.
  *   - P2-a: the runner-holding bypass paths (background / delegate) never pass
  *     through a block builder — a forced spawn there is caught ONLY by the
  *     runtime reject, now aligned to the SAME policy cap (`spawnDepthCap()`) AND
@@ -106,9 +106,9 @@ const LOADABLE_MARKERS = ["agent", "spawn_agent", "team_create", "delegate"] as 
 // ── P1-b : capability-absence at/above cap ──────────────────────────────────
 
 describe("P1-b — spawn-tool capability ABSENCE for a child at the depth cap", () => {
-  test("default cap 3: depth 0/1/2 KEEP all spawn families (byte-identical control)", () => {
-    clearCap() // default maxDescendantDepth === 3
-    for (const depth of [undefined, 0, 1, 2]) {
+  test("rev.4 default cap 1: ONLY the root (depth 0/undefined) KEEPS all spawn families", () => {
+    clearCap() // default maxDescendantDepth === 1 (root-only)
+    for (const depth of [undefined, 0]) {
       const present = loadableFamilyNames(cfg(depth))
       for (const marker of LOADABLE_MARKERS) {
         expect(present).toContain(marker)
@@ -116,10 +116,21 @@ describe("P1-b — spawn-tool capability ABSENCE for a child at the depth cap", 
     }
   })
 
-  test("default cap 3: depth 3 (== cap): EVERY spawn family ABSENT; each gate covered", () => {
+  test("env cap 3: depth 0/1/2 KEEP all spawn families (parameterization control)", () => {
+    withCap(3) // widen the operator policy to 3
+    for (const depth of [undefined, 0, 1, 2]) {
+      const present = loadableFamilyNames(cfg(depth))
+      for (const marker of LOADABLE_MARKERS) {
+        expect(present).toContain(marker)
+      }
+    }
     clearCap()
-    const child = cfg(3)
-    // At depth 3 with default cap 3 the predicate is FALSE ⇒ every gate fires.
+  })
+
+  test("rev.4 default cap 1: depth 1 (== cap): EVERY spawn family ABSENT; each gate covered", () => {
+    clearCap()
+    const child = cfg(1)
+    // At depth 1 with default cap 1 the predicate is FALSE ⇒ every gate fires.
     expect(spawnToolsAvailable(child)).toBe(false)
 
     // Per-builder absence — pinning EACH loadable gate independently so removing
@@ -173,38 +184,48 @@ describe("P1-b — spawn-tool capability ABSENCE for a child at the depth cap", 
   })
 })
 
-// ── R1 : capability gate honors the per-run QUANTA_SUBAGENT_MAX_DEPTH knob ────
+// ── R1 : min-cap — config.subagent.maxDepth can only TIGHTEN, never RAISE ─────
 
-describe("R1 — capability gate consults config.subagent.maxDepth (runner-agreement)", () => {
-  // The gate reads `config.subagent?.maxDepth ?? spawnDepthCap()` — the IDENTICAL
-  // expression the runner uses. These cases set QUANTA_MAX_DESCENDANT_DEPTH=1 so
-  // the env cap alone would say leaf for depth 1; the ONLY widening lever is
-  // config.subagent.maxDepth. Reverting the gate to `< spawnDepthCap()` (drop the
-  // config.subagent.maxDepth term) turns the maxDepth=2 depth-1 cases RED.
+describe("R1 — capability gate applies rev.4 min-cap (config tightens, never widens)", () => {
+  // rev.4: the gate reads `(depth ?? 0) < effectiveCap(config.subagent?.maxDepth)`
+  // = `< min(operator policy, requested ?? +∞)`. A per-config maxDepth can only
+  // LOWER the cap below policy, never raise it. This RESOLVES R1's two-knob
+  // split-brain (rev.3 override let a config widen past policy). Reverting the
+  // gate to the `?? override` turns the cap-raise-forbidden cases RED.
 
-  test("depth-1 child with config.subagent.maxDepth=2 KEEPS every spawn family (by name)", () => {
-    withCap(1) // spawnDepthCap()===1
+  test("min-cap: depth-1 child with config.subagent.maxDepth=5 is STILL a LEAF at policy 1", () => {
+    withCap(1) // operator policy 1 (root-only)
     try {
-      const child = cfg(1, 2) // depth 1, per-run cap 2
-      expect(spawnToolsAvailable(child)).toBe(true) // 1 < 2
-
-      const subBlock = buildSubagentBlock(child)
-      expect(subBlock).toBeDefined()
-      const present = loadableFamilyNames(child)
-      for (const marker of LOADABLE_MARKERS) {
-        expect(present).toContain(marker)
-      }
-      expect(present).toContain("agent")
-      expect(present).toContain("spawn_agent")
+      const child = cfg(1, 5) // depth 1, requested 5 — rev.3 override would ADMIT
+      // rev.4 min(1,5)=1 ⇒ 1 < 1 false ⇒ LEAF. Config CANNOT raise past policy.
+      expect(spawnToolsAvailable(child)).toBe(false)
+      expect(buildSubagentBlock(child)).toBeUndefined()
+      expect(buildTeamBlock(child)).toEqual([])
+      expect(buildDelegateBlock(child)).toEqual([])
+      expect(loadableFamilyNames(child)).toEqual([])
     } finally {
       clearCap()
     }
   })
 
-  test("depth-2 child with config.subagent.maxDepth=2 is a LEAF (tools absent)", () => {
-    withCap(1)
+  test("min-cap: config.subagent.maxDepth=1 TIGHTENS policy 3 ⇒ depth-1 child is a LEAF", () => {
+    withCap(3) // operator policy 3 — without the request, depth 1 would spawn
     try {
-      const grandchild = cfg(2, 2) // 2 < 2 === false ⇒ leaf, CONSISTENT with runner reject
+      const child = cfg(1, 1) // requested 1 ⇒ min(3,1)=1 ⇒ 1 < 1 false ⇒ leaf
+      expect(spawnToolsAvailable(child)).toBe(false)
+      expect(buildSubagentBlock(child)).toBeUndefined()
+      // paired control: at policy 3 WITHOUT the tightening request, depth 1 spawns.
+      const sibling = cfg(1)
+      expect(spawnToolsAvailable(sibling)).toBe(true) // 1 < 3
+    } finally {
+      clearCap()
+    }
+  })
+
+  test("depth-2 grandchild with config.subagent.maxDepth=2 at policy 3 is a LEAF", () => {
+    withCap(3)
+    try {
+      const grandchild = cfg(2, 2) // min(3,2)=2 ⇒ 2 < 2 false ⇒ leaf
       expect(spawnToolsAvailable(grandchild)).toBe(false)
       expect(buildSubagentBlock(grandchild)).toBeUndefined()
       expect(buildTeamBlock(grandchild)).toEqual([])
@@ -215,41 +236,39 @@ describe("R1 — capability gate consults config.subagent.maxDepth (runner-agree
     }
   })
 
-  test("env cap 1, NO per-config maxDepth ⇒ depth-1 child is root-only leaf", () => {
-    withCap(1)
-    try {
-      const child = cfg(1)
-      expect(spawnToolsAvailable(child)).toBe(false) // 1 < 1 === false
-      expect(buildSubagentBlock(child)).toBeUndefined()
-      expect(loadableFamilyNames(child)).toEqual([])
-    } finally {
-      clearCap()
-    }
+  test("default policy 1, NO per-config maxDepth ⇒ depth-1 child is root-only leaf", () => {
+    clearCap() // policy 1 (default)
+    const child = cfg(1)
+    expect(spawnToolsAvailable(child)).toBe(false) // 1 < 1 === false
+    expect(buildSubagentBlock(child)).toBeUndefined()
+    expect(loadableFamilyNames(child)).toEqual([])
   })
 
-  test("gate ↔ runner AGREE on the effective cap (no config where they disagree)", () => {
+  test("gate ↔ runner AGREE on the min-cap (no {policy,requested,depth} where they disagree)", () => {
     // Gate opens ⇔ child (depth+1) is admitted ⇔ depth < effectiveCap. Cross-check
-    // across every (depth, per-run cap) combo the runner sees.
-    withCap(1) // spawnDepthCap()===1
-    try {
+    // across every (policy, requested, depth) combo the runner sees. effectiveCap
+    // = min(policy, requested ?? +∞) — config tightens only.
+    for (const policy of [0, 1, 2, 3]) {
+      withCap(policy)
       const combos: ReadonlyArray<readonly [number, number | undefined]> = [
         [0, undefined],
         [1, undefined],
+        [2, undefined],
         [0, 2],
         [1, 2],
         [2, 2],
-        [1, 0], // kill switch
+        [1, 5], // requested 5 must NOT raise past policy
+        [1, 0], // kill-switch request
         [0, 0],
       ]
-      for (const [depth, cap] of combos) {
-        const effectiveCap = cap ?? 1 // spawnDepthCap() (env cap 1)
-        const gateOpen = spawnToolsAvailable(cfg(depth, cap))
-        const runnerAllowsSpawn = depth < effectiveCap
+      for (const [depth, requested] of combos) {
+        const effCap = Math.min(policy, requested ?? Number.POSITIVE_INFINITY)
+        const gateOpen = spawnToolsAvailable(cfg(depth, requested))
+        const runnerAllowsSpawn = depth < effCap
         expect(gateOpen).toBe(runnerAllowsSpawn)
       }
-    } finally {
-      clearCap()
     }
+    clearCap()
   })
 })
 
@@ -309,9 +328,9 @@ const parentCfg = (depth?: number): AgentConfig =>
 const req = (depth: number): SubagentRequest =>
   ({ prompt: "would recurse", depth }) as SubagentRequest
 
-describe("P2-a — runtime reject is LINEAGE-DERIVED and aligned to spawnDepthCap()", () => {
+describe("P2-a — runtime reject is LINEAGE-DERIVED and aligned to the min-cap", () => {
   test("deep PARENT ⇒ typed reject, loop NOT forked (reject is childDepthOf(parent), not req.depth)", async () => {
-    withCap(1) // spawnDepthCap() === 1 (env cap; default 3 would also reject a depth-3 parent)
+    withCap(1) // spawnDepthCap() === 1 (env cap; default 1 also rejects a depth-3 parent)
     try {
       const spy = capturingRun()
       // Parent at depth 3 ⇒ childDepthOf = 4 > cap 1 ⇒ deny. NO opts.maxDepth ⇒ the
@@ -331,7 +350,7 @@ describe("P2-a — runtime reject is LINEAGE-DERIVED and aligned to spawnDepthCa
 
   test("ANTI-FORGERY red-on-injection: forged req.depth:0 from a deep parent is STILL denied", async () => {
     // The core §4.1 pin. A malicious/legacy path forges req.depth=0 (root) at a
-    // parent that is actually depth 3. Under rev.3 the reject reads
+    // parent that is actually depth 3. Under rev.4 the reject reads
     // childDepthOf(parent)=4 > cap ⇒ DENY. Reverting the reject to `req.depth >
     // maxDepth` would ADMIT (0 > 1 false) → r.ok===true → RED.
     withCap(1)
@@ -360,20 +379,40 @@ describe("P2-a — runtime reject is LINEAGE-DERIVED and aligned to spawnDepthCa
     }
   })
 
-  test("explicit opts.maxDepth override still WINS over the policy cap", async () => {
+  test("rev.4 min-cap: explicit opts.maxDepth can only TIGHTEN the policy, NEVER raise it", async () => {
+    // rev.3 override let `opts.maxDepth:3` WIN over policy 1; rev.4 min-cap clamps
+    // it: effectiveCap(3) = min(policy 1, 3) = 1. So a parent at depth 1
+    // (childDepth 2 > 1) is REJECTED even with maxDepth:3. RED-ON-INJECTION:
+    // reverting to `opts.maxDepth ?? spawnDepthCap()` admits ⇒ r.ok flips true.
     withCap(1)
     try {
       const spy = capturingRun()
-      // Host explicitly widens to 3 → a parent at depth 2 (childDepth 3) is admitted.
-      const runner = createSubagentRunner(parentCfg(2), { run: spy.run, maxDepth: 3 })
-      expect((await runner(req(3))).ok).toBe(true)
-      // …and a parent at depth 4 (childDepth 5 > override 3) is rejected.
-      const deep = createSubagentRunner(parentCfg(4), { run: spy.run, maxDepth: 3 })
-      const denied = await deep(req(5))
+      const runner = createSubagentRunner(parentCfg(1), { run: spy.run, maxDepth: 3 })
+      const denied = await runner(req(2))
+      expect(denied.ok).toBe(false) // maxDepth 3 CANNOT raise past policy 1
+      expect(denied.finalText).toBe(
+        "max subagent depth (1) exceeded — complete this task yourself, do not spawn.",
+      )
+      expect(spy.forked()).toBe(0)
+    } finally {
+      clearCap()
+    }
+  })
+
+  test("rev.4 min-cap: opts.maxDepth TIGHTENS an env policy 3 to 1", async () => {
+    withCap(3) // policy 3
+    try {
+      const spy = capturingRun()
+      // Host tightens to 1 → parent at depth 1 (childDepth 2 > min(3,1)=1) rejected.
+      const runner = createSubagentRunner(parentCfg(1), { run: spy.run, maxDepth: 1 })
+      const denied = await runner(req(2))
       expect(denied.ok).toBe(false)
       expect(denied.finalText).toBe(
-        "max subagent depth (3) exceeded — complete this task yourself, do not spawn.",
+        "max subagent depth (1) exceeded — complete this task yourself, do not spawn.",
       )
+      // paired control: WITHOUT the tightening, policy 3 admits childDepth 2.
+      const loose = createSubagentRunner(parentCfg(1), { run: spy.run })
+      expect((await loose(req(2))).ok).toBe(true)
     } finally {
       clearCap()
     }

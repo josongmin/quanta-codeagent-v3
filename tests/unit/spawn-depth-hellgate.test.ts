@@ -1,26 +1,30 @@
 /**
- * SPAWN-DEPTH hellgate (RFC jul-13 §4.1/§4.2/§6.5, rev.3).
+ * SPAWN-DEPTH hellgate (RFC jul-13 §4.1/§4.2/§6.5, rev.4 MIN-CAP).
  *
  * `@/agent/spawn-depth` is the SSOT for two DETERMINISTIC (not heuristic) layers:
  *
  *   1. LINEAGE AUTHORITY — `childDepthOf(parent)` = `parent.depth + 1`. undefined
  *      parent depth = genuine root (child depth 1); malformed depth (NaN / -1 /
  *      0.5) ⇒ `SpawnLineageError` (fail-closed, NO depth:0 fallback).
- *   2. CAPABILITY PROJECTION — `canExposeSpawnTools`/`canAdmitChildDepth` +
- *      `spawnToolsAvailable(config)` = `(depth ?? 0) < effectiveCap`, where the
- *      cap is `config.subagent?.maxDepth ?? spawnDepthCap()` (= runtime-config
- *      `maxDescendantDepth`, default 3).
+ *   2. CAPABILITY PROJECTION (rev.4 MIN-CAP) — `canExposeSpawnTools` /
+ *      `canAdmitChildDepth` + `spawnToolsAvailable(config)` =
+ *      `(depth ?? 0) < effectiveCap(config.subagent?.maxDepth)`, where the
+ *      effective cap is `min(operator policy, requested ?? +∞)` (= min of
+ *      runtime-config `maxDescendantDepth` default 1 and any per-config request).
+ *      The per-config request can only TIGHTEN the policy, never RAISE it.
  *
  * This locks the truth-tables and proves mutation teeth (flip `<`→`<=`, revert
- * `childDepthOf` to `depth:0`), driving the cap through the real
- * `QUANTA_MAX_DESCENDANT_DEPTH` env + `__resetRuntimeConfig()` (not a stub) so the
- * config wiring is witnessed end-to-end.
+ * `childDepthOf` to `depth:0`, revert min-cap to the old `?? override`), driving
+ * the cap through the real `QUANTA_MAX_DESCENDANT_DEPTH` env +
+ * `__resetRuntimeConfig()` (not a stub) so the config wiring is witnessed
+ * end-to-end.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   canAdmitChildDepth,
   canExposeSpawnTools,
   childDepthOf,
+  effectiveCap,
   SpawnLineageError,
   spawnDepthCap,
   spawnToolsAvailable,
@@ -142,35 +146,72 @@ describe("spawnToolsAvailable — deterministic depth<cap truth-table", () => {
     expect(spawnToolsAvailable({ depth: 2 })).toBe(true)
   })
 
-  test("DEFAULT cap (no env) is the rev.3 canonical 3 ⇒ depth 0/1/2 spawn, depth 3 leaf", () => {
-    // no withCap: default runtimeConfig().maxDescendantDepth === 3
-    expect(spawnDepthCap()).toBe(3)
-    expect(spawnToolsAvailable({ depth: 0 })).toBe(true)
-    expect(spawnToolsAvailable({ depth: 1 })).toBe(true)
-    expect(spawnToolsAvailable({ depth: 2 })).toBe(true)
-    expect(spawnToolsAvailable({ depth: 3 })).toBe(false)
+  test("DEFAULT cap (no env) is the rev.4 canonical 1 ⇒ ONLY root spawns (depth ≥1 leaf)", () => {
+    // no withCap: default runtimeConfig().maxDescendantDepth === 1 (root-only)
+    expect(spawnDepthCap()).toBe(1)
+    expect(spawnToolsAvailable({ depth: 0 })).toBe(true) // root spawns
+    expect(spawnToolsAvailable({})).toBe(true) // absent depth = root
+    expect(spawnToolsAvailable({ depth: 1 })).toBe(false) // depth-1 child is a LEAF
+    expect(spawnToolsAvailable({ depth: 2 })).toBe(false)
   })
 })
 
-describe("spawnToolsAvailable — config.subagent.maxDepth overrides the env cap (R1)", () => {
-  // R1: the PRE-EXISTING per-run knob QUANTA_SUBAGENT_MAX_DEPTH flows to
-  // config.subagent.maxDepth and is honored by BOTH the runner reject and the
-  // capability gate. Effective cap === `config.subagent?.maxDepth ??
-  // spawnDepthCap()`. These cases set QUANTA_MAX_DESCENDANT_DEPTH=1 so the env cap
-  // alone would say leaf for depth 1 — the ONLY widening lever is subagent.maxDepth.
+// ── rev.4 §4.2 — effectiveCap = min(policy, requested); TIGHTEN-ONLY ──────────
 
-  // [subagent.maxDepth (undefined = absent), depth, expected]
-  const cases: ReadonlyArray<readonly [number | undefined, number, boolean]> = [
-    [2, 0, true], // per-run cap 2, root ⇒ spawns
-    [2, 1, true], // per-run cap 2, depth-1 child ⇒ STILL spawns (the R1 fix)
-    [2, 2, false], // per-run cap 2, depth-2 grandchild ⇒ leaf
-    [undefined, 1, false], // no per-run cap ⇒ falls back to env cap 1 ⇒ leaf
-    [0, 0, false], // kill switch: cap 0 ⇒ even root does not spawn
+describe("effectiveCap — min-cap authority (config can only TIGHTEN, never RAISE)", () => {
+  // [operator policy (env), requested (per-config), expected effectiveCap]
+  const cases: ReadonlyArray<readonly [number, number | undefined, number]> = [
+    [1, undefined, 1], // no request ⇒ policy
+    [1, 5, 1], // request 5 CANNOT raise above policy 1 ⇒ min(1,5)=1
+    [3, 1, 1], // request 1 tightens policy 3 ⇒ min(3,1)=1
+    [3, undefined, 3], // no request ⇒ policy 3
+    [2, 3, 2], // request 3 clamped to policy 2
+    [0, 5, 0], // kill-switch policy dominates
   ]
+  for (const [policy, requested, expected] of cases) {
+    test(`policy=${policy} requested=${String(requested)} ⇒ effectiveCap=${expected}`, () => {
+      withCap(policy)
+      expect(effectiveCap(requested)).toBe(expected)
+    })
+  }
+})
 
-  for (const [maxDepth, depth, expected] of cases) {
-    test(`subagent.maxDepth=${String(maxDepth)} depth=${depth} ⇒ ${expected}`, () => {
-      withCap(1) // env cap 1 (root-only) — subagent.maxDepth is the widening lever
+describe("spawnToolsAvailable — config.subagent.maxDepth TIGHTENS the policy (rev.4 min-cap)", () => {
+  // rev.4: per-config `subagent.maxDepth` (legacy QUANTA_SUBAGENT_MAX_DEPTH) can
+  // only LOWER the cap below the operator policy, NEVER raise it. Effective cap
+  // === `min(spawnDepthCap(), config.subagent?.maxDepth ?? +∞)`. This is the
+  // structural fix for R1's two-knob split-brain: a config can't widen past policy.
+
+  // Case group A — policy 1 (root-only). A requested maxDepth of 2 or 5 must NOT
+  // widen a depth-1 child back to a spawner (the rev.3 override bug).
+  const capRaiseAttempts: ReadonlyArray<readonly [number, number, boolean]> = [
+    [5, 0, true], // request 5, root ⇒ spawns (root always < any cap ≥1)
+    [5, 1, false], // request 5, depth-1 ⇒ STILL a LEAF (config canNOT raise past policy 1)
+    [2, 1, false], // request 2, depth-1 ⇒ LEAF (min(1,2)=1)
+    [1, 0, true], // request 1 == policy, root ⇒ spawns
+  ]
+  for (const [maxDepth, depth, expected] of capRaiseAttempts) {
+    test(`policy 1 + subagent.maxDepth=${maxDepth} depth=${depth} ⇒ ${expected}`, () => {
+      withCap(1) // operator policy 1 (root-only)
+      const config = { depth, subagent: { maxDepth } } as Pick<
+        AgentConfig,
+        "depth" | "subagent"
+      >
+      expect(spawnToolsAvailable(config)).toBe(expected)
+    })
+  }
+
+  // Case group B — policy 3, requested TIGHTENS to 1: depth-1 child becomes a leaf.
+  const tightenCases: ReadonlyArray<readonly [number | undefined, number, boolean]> = [
+    [1, 0, true], // request 1, root ⇒ spawns
+    [1, 1, false], // request 1 tightens: depth-1 is now a LEAF (min(3,1)=1)
+    [undefined, 2, true], // no request ⇒ policy 3 ⇒ depth-2 still spawns
+    [undefined, 3, false], // no request ⇒ policy 3 ⇒ depth-3 is a leaf
+    [0, 0, false], // kill-switch request 0 ⇒ even root does not spawn
+  ]
+  for (const [maxDepth, depth, expected] of tightenCases) {
+    test(`policy 3 + subagent.maxDepth=${String(maxDepth)} depth=${depth} ⇒ ${expected}`, () => {
+      withCap(3) // operator policy 3
       const config: Pick<AgentConfig, "depth" | "subagent"> = {
         depth,
         ...(maxDepth !== undefined
@@ -181,14 +222,22 @@ describe("spawnToolsAvailable — config.subagent.maxDepth overrides the env cap
     })
   }
 
-  test("MUTATION witness: dropping config.subagent.maxDepth (env-only gate) turns depth-1/cap-2 RED", () => {
-    withCap(1) // env cap alone would say leaf for depth 1…
-    const config = { depth: 1, subagent: { maxDepth: 2 } } as Pick<
+  test("RED-ON-INJECTION: reverting to `?? override` wrongly exposes (policy 1, requested 5) at depth 1", () => {
+    // The rev.3 bug: `config.subagent?.maxDepth ?? spawnDepthCap()` lets a config
+    // maxDepth=5 REPLACE the policy-1 ceiling ⇒ depth-1 would wrongly spawn. Under
+    // rev.4 min-cap `min(1,5)=1` ⇒ depth-1 is a LEAF. If someone reverts the min
+    // to the override, THIS assertion flips to true ⇒ RED.
+    withCap(1)
+    expect(spawnDepthCap()).toBe(1)
+    const config = { depth: 1, subagent: { maxDepth: 5 } } as Pick<
       AgentConfig,
       "depth" | "subagent"
     >
-    expect(spawnDepthCap()).toBe(1)
-    expect(spawnToolsAvailable(config)).toBe(true) // …but per-run cap 2 keeps tools
+    expect(spawnToolsAvailable(config)).toBe(false) // min-cap: config CANNOT raise past policy
+    // paired control: at policy 3, the SAME request 5 still clamps to 3 ⇒ depth-3 leaf.
+    withCap(3)
+    expect(spawnToolsAvailable({ depth: 3, subagent: { maxDepth: 5 } } as never)).toBe(false)
+    expect(spawnToolsAvailable({ depth: 2, subagent: { maxDepth: 5 } } as never)).toBe(true)
   })
 })
 

@@ -12,7 +12,7 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
-import { spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth"
+import { effectiveCap, spawnToolsAvailable } from "@/agent/spawn-depth"
 import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
 import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
@@ -134,20 +134,20 @@ export const buildSubagentBlock = (
   // heuristic. No-op at the root (depth 0/undefined < cap) ⇒ byte-identical.
   if (!spawnToolsAvailable(config)) return undefined
 
-  // FIX-A (jul-13 nesting-control, single effective-cap SSOT): resolve the
-  // effective recursion cap at THIS `@/agent` caller boundary — the SAME
-  // expression the exposure gate and the runner reject use
-  // (`config.subagent?.maxDepth ?? spawnDepthCap()`, spawn-depth.ts /
-  // subagent-runner.ts:736). Passing it EXPLICITLY (not a conditional spread)
-  // into the runner AND the two `@/subagent` secondary pre-checks
-  // (`createAgentTool` → agent-tool.ts:658, `createSubagent6Tools` →
-  // handlers-6.ts:668) means their `?? DEFAULT_MAX_DEPTH(=3)` fallback is never
-  // hit in practice — all three cap sources see the identical resolved value.
-  // The slice fence is respected: `@/subagent` never imports `spawnDepthCap`;
-  // the resolved number is threaded in as `opts.maxDepth`/`deps.maxDepth`.
-  // With no `subagent.maxDepth` set ⇒ `spawnDepthCap()` (default 1); with
-  // `QUANTA_SUBAGENT_MAX_DEPTH=2` ⇒ `config.subagent.maxDepth=2` ⇒ all three = 2.
-  const effectiveMaxDepth = config.subagent.maxDepth ?? spawnDepthCap()
+  // FIX-A (jul-13 nesting-control, rev.4 MIN-CAP SSOT): resolve the effective
+  // recursion cap at THIS `@/agent` caller boundary — the SAME min-cap the
+  // exposure gate and the runner reject use
+  // (`effectiveCap(config.subagent?.maxDepth) = min(operator policy, requested)`,
+  // spawn-depth.ts / subagent-runner.ts). Passing it EXPLICITLY (not a
+  // conditional spread) into the runner AND the two `@/subagent` secondary
+  // pre-checks (`createAgentTool`, `createSubagent6Tools`) means their
+  // `?? DEFAULT_MAX_DEPTH` fallback is never hit in practice — all three cap
+  // sources see the identical resolved value. The slice fence is respected:
+  // `@/subagent` never imports `effectiveCap`; the resolved number is threaded in
+  // as `opts.maxDepth`/`deps.maxDepth`. With no `subagent.maxDepth` set ⇒ operator
+  // policy (default 1 = root-only); `config.subagent.maxDepth` can only TIGHTEN
+  // below policy, never raise it (min-cap): policy 1 + maxDepth 5 ⇒ min(1,5)=1.
+  const effectiveMaxDepth = effectiveCap(config.subagent.maxDepth)
 
   // B1 — `toolNamespace` (when present) is threaded into the runner so forked
   // children expose SCOPED tool names. Absent ⇒ raw names (byte-identical):
@@ -192,8 +192,8 @@ export const buildSubagentBlock = (
   // delta and `createAgentTool` defaults to `new TaskRegistry()` when absent).
   const agentTool = createAgentTool({
     runner,
-    // FIX-A — resolved effective cap (see `effectiveMaxDepth` above), so the
-    // `agent-tool.ts` secondary pre-check receives `spawnDepthCap()` (default 1)
+    // FIX-A — resolved min-cap (see `effectiveMaxDepth` above), so the
+    // `agent-tool.ts` secondary pre-check receives the operator policy (default 1)
     // when no per-config `maxDepth` is set, NOT its `?? DEFAULT_MAX_DEPTH(=3)`.
     maxDepth: effectiveMaxDepth,
     ...(config.subagent.maxConcurrent !== undefined
@@ -268,9 +268,9 @@ export const buildSubagentBlock = (
     const set = createSubagent6Tools({
       runner,
       registry: reg,
-      // FIX-A — resolved effective cap (see `effectiveMaxDepth` above), so the
+      // FIX-A — resolved min-cap (see `effectiveMaxDepth` above), so the
       // `handlers-6.ts` secondary pre-check (`deps.maxDepth ?? DEFAULT_MAX_DEPTH`)
-      // receives `spawnDepthCap()` (default 1) when no per-config `maxDepth` is
+      // receives the operator policy (default 1) when no per-config `maxDepth` is
       // set, NOT its 3-fallback. Keeps spawn_agent's hostCap consistent with the
       // gate and the runner reject.
       maxDepth: effectiveMaxDepth,

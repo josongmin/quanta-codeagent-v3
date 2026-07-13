@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { runAgent } from "../../src/agent/loop"
 import { buildEffectiveConfig } from "../../src/agent/session-resources"
@@ -80,11 +80,28 @@ const capturing = (
   return { run, seen }
 }
 
-describe("createSubagentRunner — depth guard (rev.3 lineage-derived)", () => {
+describe("createSubagentRunner — depth guard (rev.4 lineage-derived, min-cap)", () => {
+  // rev.4 min-cap: the effective ceiling is `min(operator policy, opts.maxDepth)`.
+  // These cases pass `maxDepth: 3` and want it EFFECTIVE, so the operator policy
+  // (default 1 now) must be widened to ≥3 through the real env seam — otherwise
+  // `effectiveCap(3) = min(1,3) = 1` and the cap-3 assertions would fail. Set the
+  // policy to 3 for this block so `min(3,3)=3` and `opts.maxDepth:3` is honored.
+  let savedEnv: string | undefined
+  beforeEach(() => {
+    savedEnv = process.env.QUANTA_MAX_DESCENDANT_DEPTH
+    process.env.QUANTA_MAX_DESCENDANT_DEPTH = "3"
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+    else process.env.QUANTA_MAX_DESCENDANT_DEPTH = savedEnv
+    __resetRuntimeConfig()
+  })
+
   test("denies (never throws) when childDepthOf(parent) exceeds maxDepth", async () => {
     // RFC jul-13 §4.1/§4.2 — the reject is on the LINEAGE-DERIVED child depth
     // (`childDepthOf(parent) = parent.depth + 1`), NOT req.depth. Parent at depth
-    // 3 ⇒ childDepth 4 > cap 3 ⇒ deny.
+    // 3 ⇒ childDepth 4 > cap min(policy 3, maxDepth 3) = 3 ⇒ deny.
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig({ depth: 3 } as Partial<AgentConfig>), {
       run,
@@ -135,9 +152,11 @@ describe("createSubagentRunner — depth guard (rev.3 lineage-derived)", () => {
     expect(seen.length).toBe(0)
   })
 
-  test("default maxDepth follows the spawn-depth policy cap (spawnDepthCap ⇒ 3)", async () => {
-    // RFC jul-13 §4.2 — the runner default cap is `spawnDepthCap()` (=
-    // runtimeConfig().maxDescendantDepth, default 3). `opts.maxDepth` override wins.
+  test("default maxDepth follows the operator policy cap (no opts.maxDepth ⇒ min(policy,∞)=policy)", async () => {
+    // RFC jul-13 §4.2 (rev.4) — with no `opts.maxDepth`, the runner ceiling is
+    // `effectiveCap(undefined) = min(spawnDepthCap(), +∞) = spawnDepthCap()`. This
+    // block's env policy is 3, so the effective cap is 3. (rev.4 default policy is
+    // 1; here the env widens it to exercise the multi-level lineage bound.)
     __resetRuntimeConfig()
     const { run } = capturing()
     // Parent at depth 3 ⇒ childDepth 4 > cap 3 ⇒ denied.
@@ -268,19 +287,29 @@ describe("createSubagentRunner — child config overrides", () => {
   })
 
   test("ANTI-FORGERY: child config.depth is LINEAGE-DERIVED (childDepthOf(parent)), req.depth IGNORED", async () => {
-    // RFC jul-13 §4.1 (rev.3) — buildChildConfig sets `depth: childDepthOf(parent)`,
+    // RFC jul-13 §4.1 (rev.4) — buildChildConfig sets `depth: childDepthOf(parent)`,
     // NOT `req.depth`. A request forging a shallow `req.depth:0` from a depth-2
     // parent ⇒ the child config carries depth 3 (2 + 1), not 0. This is the
     // anti-forgery pin. Mutation: revert buildChildConfig to `depth: req.depth`
-    // ⇒ child.depth becomes 0 ⇒ RED. `maxDepth:3` gives headroom so the fork
-    // proceeds (childDepth 3 <= 3).
-    const { run, seen } = capturing()
-    const runner = createSubagentRunner(parentConfig({ depth: 2 } as Partial<AgentConfig>), {
-      run,
-      maxDepth: 3,
-    })
-    await runner(req({ depth: 0 })) // forged shallow req.depth
-    expect((seen[0] as unknown as { depth?: number }).depth).toBe(3) // childDepthOf(parent), NOT req.depth
+    // ⇒ child.depth becomes 0 ⇒ RED. Widen the operator policy to 3 (env) so the
+    // min-cap `min(3, maxDepth 3)=3` gives headroom and the fork proceeds
+    // (childDepth 3 <= 3) — the depth-derivation is what's under test here.
+    const saved = process.env.QUANTA_MAX_DESCENDANT_DEPTH
+    process.env.QUANTA_MAX_DESCENDANT_DEPTH = "3"
+    __resetRuntimeConfig()
+    try {
+      const { run, seen } = capturing()
+      const runner = createSubagentRunner(parentConfig({ depth: 2 } as Partial<AgentConfig>), {
+        run,
+        maxDepth: 3,
+      })
+      await runner(req({ depth: 0 })) // forged shallow req.depth
+      expect((seen[0] as unknown as { depth?: number }).depth).toBe(3) // childDepthOf(parent), NOT req.depth
+    } finally {
+      if (saved === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+      else process.env.QUANTA_MAX_DESCENDANT_DEPTH = saved
+      __resetRuntimeConfig()
+    }
   })
 
   // Round 2 fix: Codex-absorption safety contracts MUST propagate to forked

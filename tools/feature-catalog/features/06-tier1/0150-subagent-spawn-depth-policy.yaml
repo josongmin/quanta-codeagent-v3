@@ -19,7 +19,7 @@ surface_integration:
   web: unknown
   method: unverified
 purpose: |
-  RFC jul-13 §4.1/§4.2/§6.5 (rev.3) — lineage-derived depth + depth-parameterized
+  RFC jul-13 §4.1/§4.2/§6.5 (rev.4) — lineage-derived depth + depth-parameterized
   capability-absence for sub-agent nesting. SSOT policy module
   `src/agent/spawn-depth.ts` exposes `childDepthOf(parent)` (the ONLY authority
   for a child's depth = `parent.depth + 1`; the runner's `buildChildConfig` calls
@@ -27,12 +27,15 @@ purpose: |
   `depth:0` hardcodes are inert), `SpawnLineageError` (malformed parent depth ⇒
   fail-closed deny, no `depth:0` fallback), the two derived predicates
   `canExposeSpawnTools(parentDepth, cap)` / `canAdmitChildDepth(childDepth, cap)`,
-  and `spawnToolsAvailable(config)`. The cap is runtime-config `maxDescendantDepth`
-  = the max descendant depth a spawn may create; default 3 (rev.3 canonical —
-  Phase 0-2 byte-identical, the real 3→1 flip is a gated Phase 4), overridable via
-  `QUANTA_MAX_DESCENDANT_DEPTH` (`1` = root-only, `0` = no spawning). Not a
-  heuristic: a numeric threshold on the existing `AgentConfig.depth` (0 = root),
-  not a "usually leaf" estimate.
+  the rev.4 MIN-CAP resolver `effectiveCap(requested) = min(policy, requested ?? +∞)`,
+  and `spawnToolsAvailable(config)`. The authoritative operator policy is
+  runtime-config `maxDescendantDepth` = the max descendant depth a spawn may
+  create; default 1 = root-only (rev.4 canonical, the user's leaf intent),
+  overridable via `QUANTA_MAX_DESCENDANT_DEPTH` (`1` = root-only, `0` = no
+  spawning). Per-config `subagent.maxDepth` (legacy `QUANTA_SUBAGENT_MAX_DEPTH`)
+  can only TIGHTEN below policy, never raise it above the ceiling (min-cap — this
+  resolves the two-knob split-brain). Not a heuristic: a numeric threshold on the
+  existing `AgentConfig.depth` (0 = root), not a "usually leaf" estimate.
 evidence:
   code:
     - src/agent/spawn-depth.ts
@@ -49,7 +52,7 @@ evidence:
     contract: []
 knobs:
   - name: QUANTA_MAX_DESCENDANT_DEPTH
-    default: 3
-    purpose: 'Max descendant agent depth (children a spawn may create). 1 = root-only, 0 = no spawning. default 3.'
+    default: 1
+    purpose: 'Max descendant agent depth (children a spawn may create). 1 = root-only, 0 = no spawning. default 1. Authoritative operator ceiling — per-config subagent.maxDepth can only tighten below this, never raise it (min-cap).'
 deliberate_hold: null
 notes: ''
