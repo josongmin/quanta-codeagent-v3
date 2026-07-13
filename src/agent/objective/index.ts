@@ -20,6 +20,7 @@ export {
   evaluateContinuation,
   runIdleContinuation,
 } from "./continuation"
+export { buildPursuitContinuationPrompt, GOAL_PURSUIT_DISCIPLINE } from "./pursuit-prompt"
 export { createObjectiveStore } from "./store"
 export type {
   Blocker,

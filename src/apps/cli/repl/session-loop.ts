@@ -21,6 +21,7 @@ import { loadSessionById } from "@/session"
 import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { readCliKnob } from "../cli-knobs-accessor"
+import { buildPursuitContinuationPrompt } from "@/agent/objective"
 import { startGoalContinuationTicker } from "../goal-continuation-hook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { wireInboxBannerOntoSlot } from "./automation-banner"
@@ -820,11 +821,10 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
               mailboxInputPending: () => (textInbox?.size() ?? 0) > 0,
               isEphemeral: () => setup.sessionId === undefined,
               resume: async (tid) => {
-                const goal = objectiveStore.get(tid)?.goal
+                // SSOT pursuit discipline (anti-scope-shrink + verify-before-
+                // complete + blocked-hysteresis), goal fenced as user data.
                 await enqueueWithHeartbeat(
-                  goal !== undefined && goal.length > 0
-                    ? `Continue pursuing the active goal until it is fully complete. Before declaring it done, verify completion against the actual current state, requirement by requirement — do not stop merely because progress was made. Goal: ${goal}`
-                    : "Continue pursuing the active goal until it is fully complete.",
+                  buildPursuitContinuationPrompt(objectiveStore.get(tid)?.goal),
                   {},
                 )
               },
