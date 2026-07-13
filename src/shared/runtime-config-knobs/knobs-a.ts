@@ -456,12 +456,12 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
       "system-prompt tool-routing). Default-OFF = byte-identical fan-out-biased prompt.",
   },
   {
-    envKey: "QUANTA_MAX_SPAWN_DEPTH",
+    envKey: "QUANTA_MAX_DESCENDANT_DEPTH",
     kind: "int",
-    default: 1,
+    default: 3,
     group: "subagent",
     describe:
-      "Max agent depth that receives spawn tools. 1 = root-only (children are leaves); " +
-      "0 = kill-switch (NO agent, incl. root, gets spawn tools). Negative/non-integer ⇒ default 1.",
+      "Max descendant agent depth (children a spawn may create). 1 = root-only, " +
+      "0 = no spawning. default 3.",
   },
 ]

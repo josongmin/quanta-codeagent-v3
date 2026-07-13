@@ -312,7 +312,15 @@ export const isTerminal = (s: SubagentStatus): boolean => s !== "running" && s !
  *  background child could recurse without bound the instant the scheduler was
  *  wired. `modelOverride` maps onto the runner's existing `model` override,
  *  while `workspace` / `metadata` are preserved so resume/background control
- *  planes stay lossless. */
+ *  planes stay lossless.
+ *
+ *  rev.3 (§4.1/§4.3) UPDATE — `req.depth` is now ADVISORY-ONLY. The runner's
+ *  buildChildConfig + reject derive the child's depth from the REAL parent config
+ *  (`childDepthOf(parent)`), IGNORING `req.depth`. So this `parentDepth + 1` no
+ *  longer feeds the authority — the fail-open hole it closed can no longer reopen
+ *  regardless of what this passes. It is kept honest (still `parentDepth + 1`) for
+ *  run-id / metadata legibility and to keep the threading tests green; the
+ *  AUTHORITY is childDepthOf(parent). */
 export const specToRequest = (
   spec: SubagentSpec,
   signal: AbortSignal,

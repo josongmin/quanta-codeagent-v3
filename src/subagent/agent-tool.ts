@@ -11,7 +11,7 @@ import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskK
  *  the effective cap (`config.subagent?.maxDepth ?? spawnDepthCap()`, the SAME
  *  value the capability gate and the runner reject use) and threads it in as
  *  `opts.maxDepth`, so this literal only exists to honor the slice fence
- *  (`@/subagent` may not import `@/agent/spawn-depth-policy`) for a direct
+ *  (`@/subagent` may not import `@/agent/spawn-depth`) for a direct
  *  `@/subagent` caller that omits `maxDepth`. FIX-A, jul-13 nesting-control. */
 const DEFAULT_MAX_DEPTH = 3
 

@@ -16,7 +16,7 @@
  * registry into the tool factory at session-start.
  */
 
-import { spawnToolsAvailable } from "@/agent/spawn-depth-policy"
+import { spawnToolsAvailable } from "@/agent/spawn-depth"
 import type { Tool } from "@/tool"
 import { teamTools } from "@/tool/team"
 import type { AgentConfig } from "../types"

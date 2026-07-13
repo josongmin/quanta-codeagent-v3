@@ -31,7 +31,7 @@
  * runtime `req.depth > maxDepth` reject (previously dead: hardcoded 0).
  */
 
-import { spawnToolsAvailable } from "@/agent/spawn-depth-policy"
+import { spawnToolsAvailable } from "@/agent/spawn-depth"
 import type { Tool } from "@/tool"
 import { delegateTools, type DelegationPort as ToolDelegationPort } from "@/tool/delegate"
 import type { AgentConfig } from "../types"

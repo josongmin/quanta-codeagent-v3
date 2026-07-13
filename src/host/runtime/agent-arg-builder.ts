@@ -416,10 +416,14 @@ const resolveDelegation = (
   const runner = createSubagentRunner(base)
   // RFC jul-13 P0-b (correctness): thread THIS agent's depth (0 = root) so a
   // delegate child gets `parentDepth + 1`, NOT a hardcoded 0. `base.depth` is
-  // the AgentConfig.depth convention (`buildChildConfig` sets it on forks); the
-  // delegate spec depth feeds the delegation-runner MAX_DEPTH gate and the
-  // wrapped SubagentRequest depth feeds the runtime `req.depth > maxDepth`
-  // reject. Both were previously dead (always 0 → only top-level counted).
+  // the AgentConfig.depth convention (`buildChildConfig` sets it on forks).
+  //
+  // rev.3 (§4.1/§4.3) UPDATE — the runtime reject and buildChildConfig now derive
+  // the child depth from the REAL parent config (`childDepthOf(parent)`), so the
+  // `req.depth` this threads is ADVISORY-ONLY at the runner authority. It still
+  // feeds the delegation-runner's own MAX_DEPTH gate (kept honest = `parentDepth +
+  // 1`), and keeping it prevents the threading tests from regressing; but the
+  // fail-open hole cannot reopen regardless. The AUTHORITY is childDepthOf(parent).
   const parentDepth = base.depth ?? 0
   const typed = wrapSubagentRunner(runner, parentDepth)
   const real = defaultDelegationRunner({ runner: typed })

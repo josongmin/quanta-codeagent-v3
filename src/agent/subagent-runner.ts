@@ -92,7 +92,7 @@ import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
-import { spawnDepthCap } from "./spawn-depth-policy"
+import { childDepthOf, SpawnLineageError, spawnDepthCap } from "./spawn-depth"
 import {
   resolveChildEffort,
   resolveChildLlm,
@@ -634,12 +634,20 @@ const buildChildConfig = (
     // per-request signal (driven by `TaskRegistry.stop(id)` from `task_stop`).
     // Either source aborting unwinds the forked `runAgent`. See chainedSignal.
     signal: chainedSignal(parent.signal, req.signal),
-    // Recursion-depth marker; dispatch.ts surfaces it onto ToolContext so the
-    // child's `agent` tool computes `childDepth = depth+1`. With `subagent`
-    // propagated below, this is LOAD-BEARING: the maxDepth guard actually
-    // bounds real multi-level recursion. Duck-typed cast sets it
-    // unconditionally without tripping exactOptionalPropertyTypes.
-    ...({ depth: req.depth } as { depth: number }),
+    // RFC jul-13 §4.1 (rev.3) — the child's depth is LINEAGE-DERIVED from the
+    // REAL parent config (`childDepthOf(parent) = parent.depth + 1`), NOT the
+    // caller-asserted `req.depth`. This is the anti-forgery authority: a Bash /
+    // IPC / adapter / forced-injection path that forges `req.depth:0` cannot mint
+    // a shallow child — the background/delegate `depth:0` hardcodes are advisory
+    // now (§4.3). Malformed `parent.depth` ⇒ `SpawnLineageError` (caught by the
+    // runner's try, turned into a non-ok result — fail-closed, no depth:0
+    // fallback). In the honest path callers already set `req.depth = parentDepth +
+    // 1` and `parent.depth = parentDepth`, so this is byte-identical. dispatch.ts
+    // surfaces the marker onto ToolContext so the child's `agent` tool computes
+    // `childDepth = depth+1`; with `subagent` propagated below this is
+    // LOAD-BEARING. Duck-typed cast sets it unconditionally without tripping
+    // exactOptionalPropertyTypes.
+    ...({ depth: childDepthOf(parent) } as { depth: number }),
     // ADR-0416 sibling-identity fix — thread the DETERMINISTIC mailbox label
     // for this child (`parentLabel/seq`) + the parent's label. dispatch.ts
     // surfaces these onto ToolContext.agentLabel / parentAgentLabel so the
@@ -753,7 +761,25 @@ export const createSubagentRunner = (
   const localIdentity = { childOrdinal: 0, spawnSeq: 0 }
 
   return async (req: SubagentRequest): Promise<SubagentResult> => {
-    if (req.depth > maxDepth) {
+    // RFC jul-13 §4.1/§4.2 (rev.3) — the recursion bound is on the
+    // LINEAGE-DERIVED child depth (`childDepthOf(parent) > maxDepth`), NOT the
+    // caller-asserted `req.depth`. Same authority as `buildChildConfig` below, so
+    // a forged `req.depth` cannot slip past. `maxDepth = opts.maxDepth ??
+    // spawnDepthCap()` (= `runtimeConfig().maxDescendantDepth`, default 3) — the
+    // SAME effective cap the tier1 gates expose on. A malformed `parent.depth`
+    // ⇒ SpawnLineageError, converted HERE into a typed non-ok deny (fail-closed,
+    // never a rejected Promise, never a depth:0 fallback). Honest path:
+    // childDepthOf(parent) === req.depth, so byte-identical.
+    let childDepth: number
+    try {
+      childDepth = childDepthOf(parent)
+    } catch (e) {
+      if (e instanceof SpawnLineageError) {
+        return { ok: false, finalText: `spawn denied: ${e.message}`, turns: 0 }
+      }
+      throw e
+    }
+    if (childDepth > maxDepth) {
       return {
         ok: false,
         finalText: `max subagent depth (${maxDepth}) exceeded — complete this task yourself, do not spawn.`,

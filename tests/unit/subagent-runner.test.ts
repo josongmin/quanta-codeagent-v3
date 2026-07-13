@@ -6,6 +6,7 @@ import { createSubagentRunner } from "../../src/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "../../src/agent/types"
 import type { Message } from "../../src/llm"
 import type { isGitRepo, withWorktree } from "../../src/runtime/worktree"
+import { __resetRuntimeConfig } from "../../src/shared/runtime-config"
 import type { SubagentRequest } from "../../src/subagent/types"
 import type { Tool, ToolEvent } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
@@ -79,12 +80,18 @@ const capturing = (
   return { run, seen }
 }
 
-describe("createSubagentRunner — depth guard", () => {
-  test("denies (never throws) when req.depth exceeds maxDepth", async () => {
+describe("createSubagentRunner — depth guard (rev.3 lineage-derived)", () => {
+  test("denies (never throws) when childDepthOf(parent) exceeds maxDepth", async () => {
+    // RFC jul-13 §4.1/§4.2 — the reject is on the LINEAGE-DERIVED child depth
+    // (`childDepthOf(parent) = parent.depth + 1`), NOT req.depth. Parent at depth
+    // 3 ⇒ childDepth 4 > cap 3 ⇒ deny.
     const { run, seen } = capturing()
-    const runner = createSubagentRunner(parentConfig(), { run, maxDepth: 3 })
+    const runner = createSubagentRunner(parentConfig({ depth: 3 } as Partial<AgentConfig>), {
+      run,
+      maxDepth: 3,
+    })
     const r = await runner(req({ depth: 4 }))
-    // RFC jul-13 §6.5 B Phase 2 — Codex-style directive message, cap interpolated.
+    // Codex-style directive message, cap interpolated.
     expect(r).toEqual({
       ok: false,
       finalText: "max subagent depth (3) exceeded — complete this task yourself, do not spawn.",
@@ -93,20 +100,65 @@ describe("createSubagentRunner — depth guard", () => {
     expect(seen.length).toBe(0) // loop never forked
   })
 
-  test("default maxDepth follows the spawn-depth policy cap (spawnDepthCap ⇒ 1)", async () => {
-    // RFC jul-13 §6.5 B Phase 2 — the runner default cap is now `spawnDepthCap()`
-    // (= runtimeConfig().maxSpawnDepth, default 1), NOT the old local 3. This
-    // aligns the runner-holding bypass paths (background/delegate) with the same
-    // policy the tier1 block builders gate on. `opts.maxDepth` override still wins.
-    const { run } = capturing()
-    const runner = createSubagentRunner(parentConfig(), { run })
-    expect((await runner(req({ depth: 2 }))).ok).toBe(false) // > cap 1 ⇒ denied
-    expect((await runner(req({ depth: 1 }))).ok).toBe(true) // == cap 1 ⇒ allowed
+  test("ANTI-FORGERY: a forged req.depth is IGNORED; only childDepthOf(parent) decides", async () => {
+    // The §4.1 anti-forgery pin. Parent at depth 3 (childDepth 4 > cap 3) with a
+    // FORGED shallow req.depth:0 ⇒ STILL denied. Mutation: revert the reject to
+    // `req.depth > maxDepth` ⇒ 0 > 3 false ⇒ would ADMIT ⇒ RED.
+    const { run, seen } = capturing()
+    const runner = createSubagentRunner(parentConfig({ depth: 3 } as Partial<AgentConfig>), {
+      run,
+      maxDepth: 3,
+    })
+    expect((await runner(req({ depth: 0 }))).ok).toBe(false)
+    expect(seen.length).toBe(0)
+    // Paired control: a genuinely shallow parent (depth 0) with a FORGED deep
+    // req.depth:9 ⇒ ADMITTED (childDepthOf=1 <= 3). The forgery cannot deny either.
+    const shallow = capturing()
+    const rootRunner = createSubagentRunner(parentConfig({ depth: 0 } as Partial<AgentConfig>), {
+      run: shallow.run,
+      maxDepth: 3,
+    })
+    expect((await rootRunner(req({ depth: 9 }))).ok).toBe(true)
+    expect(shallow.seen.length).toBe(1)
   })
 
-  test("depth exactly at the limit is allowed", async () => {
+  test("malformed parent depth ⇒ typed deny (fail-closed, no depth:0 fallback, never throws)", async () => {
+    // §4.1 — a corrupt persisted parent depth ⇒ SpawnLineageError ⇒ typed non-ok
+    // result (NOT a rejected Promise, NOT a silent depth:0 spawn).
     const { run, seen } = capturing()
-    const runner = createSubagentRunner(parentConfig(), { run, maxDepth: 3 })
+    const runner = createSubagentRunner(parentConfig({ depth: -1 } as Partial<AgentConfig>), {
+      run,
+    })
+    const r = await runner(req({ depth: 1 }))
+    expect(r.ok).toBe(false)
+    expect(r.finalText).toContain("spawn denied")
+    expect(seen.length).toBe(0)
+  })
+
+  test("default maxDepth follows the spawn-depth policy cap (spawnDepthCap ⇒ 3)", async () => {
+    // RFC jul-13 §4.2 — the runner default cap is `spawnDepthCap()` (=
+    // runtimeConfig().maxDescendantDepth, default 3). `opts.maxDepth` override wins.
+    __resetRuntimeConfig()
+    const { run } = capturing()
+    // Parent at depth 3 ⇒ childDepth 4 > cap 3 ⇒ denied.
+    const denyRunner = createSubagentRunner(parentConfig({ depth: 3 } as Partial<AgentConfig>), {
+      run,
+    })
+    expect((await denyRunner(req({ depth: 99 }))).ok).toBe(false)
+    // Parent at depth 2 ⇒ childDepth 3 <= cap 3 ⇒ allowed.
+    const okRunner = createSubagentRunner(parentConfig({ depth: 2 } as Partial<AgentConfig>), {
+      run,
+    })
+    expect((await okRunner(req({ depth: 99 }))).ok).toBe(true)
+  })
+
+  test("childDepth exactly at the limit is allowed", async () => {
+    const { run, seen } = capturing()
+    // Parent at depth 2 ⇒ childDepth 3 === cap 3 ⇒ allowed.
+    const runner = createSubagentRunner(parentConfig({ depth: 2 } as Partial<AgentConfig>), {
+      run,
+      maxDepth: 3,
+    })
     expect((await runner(req({ depth: 3 }))).ok).toBe(true)
     expect(seen.length).toBe(1)
   })
@@ -215,15 +267,20 @@ describe("createSubagentRunner — child config overrides", () => {
     expect("subagent" in child).toBe(false) // omitted, never assigned undefined
   })
 
-  test("surfaces req.depth on the child config (the dispatch depth seam)", async () => {
+  test("ANTI-FORGERY: child config.depth is LINEAGE-DERIVED (childDepthOf(parent)), req.depth IGNORED", async () => {
+    // RFC jul-13 §4.1 (rev.3) — buildChildConfig sets `depth: childDepthOf(parent)`,
+    // NOT `req.depth`. A request forging a shallow `req.depth:0` from a depth-2
+    // parent ⇒ the child config carries depth 3 (2 + 1), not 0. This is the
+    // anti-forgery pin. Mutation: revert buildChildConfig to `depth: req.depth`
+    // ⇒ child.depth becomes 0 ⇒ RED. `maxDepth:3` gives headroom so the fork
+    // proceeds (childDepth 3 <= 3).
     const { run, seen } = capturing()
-    // This seam is about depth PROPAGATION onto the child, orthogonal to the cap.
-    // Give explicit `maxDepth` headroom so the fork proceeds at req.depth 2 (the
-    // default cap is now `spawnDepthCap()` === 1 after the RFC jul-13 §6.5 B
-    // Phase 2 alignment, which would otherwise DENY depth 2 before forking).
-    const runner = createSubagentRunner(parentConfig(), { run, maxDepth: 3 })
-    await runner(req({ depth: 2 }))
-    expect((seen[0] as unknown as { depth?: number }).depth).toBe(2)
+    const runner = createSubagentRunner(parentConfig({ depth: 2 } as Partial<AgentConfig>), {
+      run,
+      maxDepth: 3,
+    })
+    await runner(req({ depth: 0 })) // forged shallow req.depth
+    expect((seen[0] as unknown as { depth?: number }).depth).toBe(3) // childDepthOf(parent), NOT req.depth
   })
 
   // Round 2 fix: Codex-absorption safety contracts MUST propagate to forked

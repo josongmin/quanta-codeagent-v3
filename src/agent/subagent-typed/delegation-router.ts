@@ -87,9 +87,14 @@ export interface DelegationRouterOpts {
  *  carry `parentDepth + 1`, NOT a hardcoded 0. `parentDepth` is THIS agent's
  *  `AgentConfig.depth` (0 = root), threaded by the composition root
  *  (`agent-arg-builder.resolveDelegation`) from `base.depth`. Mirrors the
- *  foreground `buildChildConfig(parentDepth + 1)` convention so the runtime
- *  `req.depth > maxDepth` reject (subagent-runner) actually bounds delegate
- *  recursion instead of every delegate child running at real depth 0. */
+ *  foreground `buildChildConfig(parentDepth + 1)` convention.
+ *
+ *  rev.3 (§4.1/§4.3) UPDATE — the subagent-runner reject + buildChildConfig now
+ *  derive the child depth from the REAL parent config (`childDepthOf(parent)`),
+ *  IGNORING this `req.depth`. So the threaded `parentDepth + 1` is ADVISORY-ONLY
+ *  at the runner authority (kept honest for legibility + to keep the threading
+ *  tests green); the fail-open hole cannot reopen regardless. Authority =
+ *  childDepthOf(parent). */
 export const wrapSubagentRunner = (
   subagentRunner: SubagentRunner,
   parentDepth: number,

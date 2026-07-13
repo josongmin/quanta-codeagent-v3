@@ -515,15 +515,17 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  `agent`/`spawn_agent`/`spawn_batch`/`spawn_agents_on_csv` tool descriptions
    *  and the system-prompt tool-routing atom). */
   readonly subagentDelegateSuppress: boolean
-  /** RFC jul-13 §6.5 A — max agent depth that receives spawn tools
-   *  (`QUANTA_MAX_SPAWN_DEPTH`, positive integer). NUMERIC POLICY, not a
-   *  bool gate: default 1 = root-only (root spawns; its children, at depth ≥ 1,
-   *  are leaves whose menus omit the spawn tool families). The `spawnToolsAvailable`
-   *  predicate (`@/agent/spawn-depth-policy`) reads THIS as the cap: an agent at
-   *  `config.depth` gets spawn tools iff `(depth ?? 0) < maxSpawnDepth`. Raising
-   *  the cap is the escape hatch for genuinely deeper nesting; `0`/invalid ⇒ the
-   *  parser floors to the default 1. */
-  readonly maxSpawnDepth: number
+  /** RFC jul-13 §4.2/§6.5 A — MAX DESCENDANT DEPTH a spawn may create
+   *  (`QUANTA_MAX_DESCENDANT_DEPTH`, non-negative integer). NUMERIC POLICY, not a
+   *  bool gate: default 3 (rev.3 canonical; Phase 0-2 byte-identical — the real
+   *  3→1 flip is a gated Phase 4). The two derived predicates
+   *  (`canExposeSpawnTools`/`canAdmitChildDepth`, `@/agent/spawn-depth`) read THIS
+   *  as the cap: an agent at `config.depth` gets spawn tools iff
+   *  `(depth ?? 0) < maxDescendantDepth`; `1` = root-only, `0` = total kill switch
+   *  (non-negative parse; no agent, incl. root, spawns). Invalid / unset ⇒ the
+   *  parser floors to the default 3. (Renamed from `maxSpawnDepth`, off-by-one
+   *  fixed: names the max descendant depth, not the max depth that receives tools.) */
+  readonly maxDescendantDepth: number
   /** §4.3 — LIVE side-agent OS-PROCESS backer selector (`QUANTA_SIDE_AGENT_PROCESS`).
    *  Opt-in, and REQUIRES the master gate `QUANTA_SIDE_AGENT` (it only chooses the
    *  backer once side-agents are enabled). Default false ⇒ the side-agent registry

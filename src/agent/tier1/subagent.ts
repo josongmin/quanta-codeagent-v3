@@ -12,7 +12,7 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
-import { spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth-policy"
+import { spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth"
 import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
 import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
@@ -137,7 +137,7 @@ export const buildSubagentBlock = (
   // FIX-A (jul-13 nesting-control, single effective-cap SSOT): resolve the
   // effective recursion cap at THIS `@/agent` caller boundary — the SAME
   // expression the exposure gate and the runner reject use
-  // (`config.subagent?.maxDepth ?? spawnDepthCap()`, spawn-depth-policy.ts:39 /
+  // (`config.subagent?.maxDepth ?? spawnDepthCap()`, spawn-depth.ts /
   // subagent-runner.ts:736). Passing it EXPLICITLY (not a conditional spread)
   // into the runner AND the two `@/subagent` secondary pre-checks
   // (`createAgentTool` → agent-tool.ts:658, `createSubagent6Tools` →

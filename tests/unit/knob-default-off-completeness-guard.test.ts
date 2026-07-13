@@ -317,17 +317,17 @@ const NON_FALSY_DEFAULT_ALLOWLIST: Readonly<Record<string, AllowlistEntry>> = {
     reason:
       "full-remote box relaunch COUNT on empty result; default 1 = the resilience baseline (one transient spot/ssh loss self-heals). Bench-only, inert off the full-remote path. Not a feature gate.",
   },
-  // RFC jul-13 §6.5 A — sub-agent nesting policy cap. `maxSpawnDepth` is a
-  // NUMERIC POLICY value, not a bool ON/OFF gate: default 1 = root-only spawning
-  // (the user's intended nesting policy — children are leaves). "OFF" here means
-  // "the intended pre-Phase-1-gate default", i.e. the cap 1 that Phase-1 gates
-  // enforce; raising it is the escape hatch. Same class as the numeric
+  // RFC jul-13 §4.2/§6.5 A — sub-agent nesting policy cap. `maxDescendantDepth`
+  // is a NUMERIC POLICY value, not a bool ON/OFF gate: default 3 (rev.3 canonical;
+  // Phase 0-2 byte-identical — the real 3→1 flip is a gated Phase 4). "OFF" here
+  // means "the documented default cap", i.e. the max descendant depth a spawn may
+  // create; `1` = root-only, `0` = no spawning. Same class as the numeric
   // full-remote-relaunch(=1)/critical-section-max-ms(=5000) allowlist entries.
-  QUANTA_MAX_SPAWN_DEPTH: {
-    field: "maxSpawnDepth",
-    expectedDefault: 1,
+  QUANTA_MAX_DESCENDANT_DEPTH: {
+    field: "maxDescendantDepth",
+    expectedDefault: 3,
     reason:
-      "numeric nesting-policy cap (RFC jul-13 §6.5 A); default 1 = root-only spawn (children are leaves), the user's intended policy. Not a bool gate — 'off' is the documented default cap 1; the env raises it as an escape hatch.",
+      "numeric nesting-policy cap (RFC jul-13 §4.2/§6.5 A); default 3 = max descendant depth a spawn may create (rev.3 canonical, Phase 0-2 byte-identical). Not a bool gate — 'off' is the documented default cap 3; 1=root-only, 0=no spawning.",
   },
   QUANTA_BASH_AUTO_BACKGROUND: {
     field: "bashAutoBackground",

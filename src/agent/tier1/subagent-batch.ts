@@ -14,7 +14,7 @@
  */
 
 import { readFile as fsReadFile } from "node:fs/promises"
-import { spawnToolsAvailable } from "@/agent/spawn-depth-policy"
+import { spawnToolsAvailable } from "@/agent/spawn-depth"
 import { runtimeConfig } from "@/shared"
 import { createDagGate, type TaskNode } from "@/subagent/coordination"
 import type { Tool } from "@/tool"
