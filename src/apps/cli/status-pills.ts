@@ -80,8 +80,9 @@ export interface StatusPillsState {
   statusLine?: string
   /** `/goal` (Codex "Pursuing goal" parity) — the active objective + its
    *  elapsed-since-created time (precomputed by the driver so this stays pure).
-   *  Absent / empty text ⇒ no pill (byte-identical when no goal is active). */
-  goal?: { text: string; elapsedMs: number }
+   *  Absent / empty text ⇒ no pill (byte-identical when no goal is active).
+   *  Explicitly `| undefined` so the driver can CLEAR the chip via `update`. */
+  goal?: { text: string; elapsedMs: number } | undefined
 }
 
 export interface StatusPills {

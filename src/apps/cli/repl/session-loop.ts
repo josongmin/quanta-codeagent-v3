@@ -835,6 +835,30 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
       closeStack.push({ label: "goalTicker.stop", dispose: () => goalTicker.stop() })
     }
 
+    // `/goal` chip — keep the "🎯 <objective> · <elapsed>" status pill in sync
+    // with the active objective. Independent of QUANTA_GOAL_ENFORCE: the chip
+    // shows whenever a goal is ACTIVE (Codex parity), even if not auto-pursued.
+    // Change-guarded (text + elapsed-minute) so it only repaints on real change.
+    if (objectiveStore !== undefined) {
+      let lastGoalPillKey = ""
+      const refreshGoalPill = (): void => {
+        const active =
+          setup.sessionId !== undefined ? objectiveStore.get(setup.sessionId) : null
+        const view =
+          active !== null && active.status === "active" && active.goal.length > 0
+            ? { text: active.goal, elapsedMs: Date.now() - active.createdAt }
+            : undefined
+        const key = view === undefined ? "" : `${view.text}|${Math.floor(view.elapsedMs / 60_000)}`
+        if (key === lastGoalPillKey) return
+        lastGoalPillKey = key
+        setup.pills.update({ goal: view })
+      }
+      refreshGoalPill()
+      const goalPillTimer = setInterval(refreshGoalPill, 10_000)
+      ;(goalPillTimer as { unref?: () => void }).unref?.()
+      closeStack.push({ label: "goalPillTimer", dispose: () => clearInterval(goalPillTimer) })
+    }
+
     // ADR-0468 — NDJSON live-introspection sink. Default-OFF: NullNdjsonSink
     // (no socket/file/alloc) unless QUANTA_NDJSON_INGEST_PORT / _FILE is set.
     const ndjson = maybeCreateNdjsonSinkWire({ env: process.env, logger })
