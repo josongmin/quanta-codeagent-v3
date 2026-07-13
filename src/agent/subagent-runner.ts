@@ -89,6 +89,7 @@ import {
 } from "./coordination-broker-wire"
 import { runAgent } from "./loop"
 import { isMutatingMode } from "./mode"
+import { spawnDepthCap } from "./spawn-depth-policy"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
@@ -101,7 +102,11 @@ import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
 
-const DEFAULT_MAX_DEPTH = 3
+// RFC jul-13 §6.5 B Phase 2 — the runner's depth ceiling now defaults to the
+// SAME policy the tier1 block builders gate on (`spawnDepthCap()`), so the
+// runner-holding bypass paths (background / delegate — they never pass through
+// a block builder) obey the identical cap. An explicit host `opts.maxDepth`
+// still wins (see the `?? spawnDepthCap()` fallback below).
 
 /** Internal seam: tests inject a fake `runAgent` / git probes so the runner is
  *  unit-testable without a real LLM or a real git repo. Defaults are the real
@@ -728,7 +733,7 @@ export const createSubagentRunner = (
   parent: AgentConfig,
   opts: SubagentRunnerOptions = {},
 ): SubagentRunner => {
-  const maxDepth = opts.maxDepth ?? DEFAULT_MAX_DEPTH
+  const maxDepth = opts.maxDepth ?? spawnDepthCap()
   const run = opts.run ?? runAgent
   const gitProbe = opts.isGitRepo ?? isGitRepo
   const wt = opts.withWorktree ?? withWorktree
@@ -749,7 +754,11 @@ export const createSubagentRunner = (
 
   return async (req: SubagentRequest): Promise<SubagentResult> => {
     if (req.depth > maxDepth) {
-      return { ok: false, finalText: "max subagent depth exceeded", turns: 0 }
+      return {
+        ok: false,
+        finalText: `max subagent depth (${maxDepth}) exceeded — complete this task yourself, do not spawn.`,
+        turns: 0,
+      }
     }
 
     // Isolation guarantee (jul-7 audit F4, verified): when `isolate` holds, the child's

@@ -16,6 +16,7 @@
  * registry into the tool factory at session-start.
  */
 
+import { spawnToolsAvailable } from "@/agent/spawn-depth-policy"
 import type { Tool } from "@/tool"
 import { teamTools } from "@/tool/team"
 import type { AgentConfig } from "../types"
@@ -24,5 +25,8 @@ import type { AgentConfig } from "../types"
 export const buildTeamBlock = (config: AgentConfig): Tool[] => {
   const registry = config.teamRegistry
   if (registry === undefined) return []
+  // RFC jul-13 §4 L1 / §6.5 B Phase 1 — capability-absence: team tools absent for
+  // a child at/above the spawn-depth cap. No-op at root ⇒ byte-identical.
+  if (!spawnToolsAvailable(config)) return []
   return teamTools(registry)
 }

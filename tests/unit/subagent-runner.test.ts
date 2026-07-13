@@ -84,15 +84,24 @@ describe("createSubagentRunner — depth guard", () => {
     const { run, seen } = capturing()
     const runner = createSubagentRunner(parentConfig(), { run, maxDepth: 3 })
     const r = await runner(req({ depth: 4 }))
-    expect(r).toEqual({ ok: false, finalText: "max subagent depth exceeded", turns: 0 })
+    // RFC jul-13 §6.5 B Phase 2 — Codex-style directive message, cap interpolated.
+    expect(r).toEqual({
+      ok: false,
+      finalText: "max subagent depth (3) exceeded — complete this task yourself, do not spawn.",
+      turns: 0,
+    })
     expect(seen.length).toBe(0) // loop never forked
   })
 
-  test("default maxDepth is 3", async () => {
+  test("default maxDepth follows the spawn-depth policy cap (spawnDepthCap ⇒ 1)", async () => {
+    // RFC jul-13 §6.5 B Phase 2 — the runner default cap is now `spawnDepthCap()`
+    // (= runtimeConfig().maxSpawnDepth, default 1), NOT the old local 3. This
+    // aligns the runner-holding bypass paths (background/delegate) with the same
+    // policy the tier1 block builders gate on. `opts.maxDepth` override still wins.
     const { run } = capturing()
     const runner = createSubagentRunner(parentConfig(), { run })
-    expect((await runner(req({ depth: 4 }))).ok).toBe(false)
-    expect((await runner(req({ depth: 3 }))).ok).toBe(true)
+    expect((await runner(req({ depth: 2 }))).ok).toBe(false) // > cap 1 ⇒ denied
+    expect((await runner(req({ depth: 1 }))).ok).toBe(true) // == cap 1 ⇒ allowed
   })
 
   test("depth exactly at the limit is allowed", async () => {

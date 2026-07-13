@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-07-13"
   evidence:
-    cli: "runs in the interactive CLI — the fresh-hash line rides the edit tool_result output; dispatch seam wires ctx.editFreshHash from runtimeConfig().editFreshHash (src/agent/dispatch/tool-context.ts). Appears only when QUANTA_EDIT_FRESH_HASH=1 (default-OFF ⇒ byte-identical)."
+    cli: "runs in the interactive CLI — the fresh-hash line rides the edit tool_result output; dispatch seam wires ctx.editFreshHash from runtimeConfig().editFreshHash (src/agent/dispatch/tool-context.ts). DEFAULT-ON (active by default); set QUANTA_EDIT_FRESH_HASH=off ⇒ byte-identical legacy output."
     web: "Enhancement to the edit tool output; the edit tool_call/tool_result render as the generic tool card, so the appended `fresh sha256: <hex>` line surfaces in the result preview on the same surface as the 0398 stale_precondition failure it complements."
 purpose: |
   MEASURED root fix (bench trajectory dedup, django__django-14315 ×2 runs): ~41%

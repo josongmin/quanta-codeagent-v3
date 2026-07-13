@@ -256,6 +256,17 @@ const NON_FALSY_DEFAULT_ALLOWLIST: Readonly<Record<string, AllowlistEntry>> = {
     expectedDefault: true,
     reason: "default-ON: the safe posture is the fixed .ipynb render, not the broken raw dump",
   },
+  // jul-13 edit-fresh-hash: DEFAULT-ON opt-out (`!gateDisabledStrict`, off only for
+  // the literal `off`, like the fs-jail / stale-read-guard kill-switches). It
+  // removes a forced re-read on chained same-file mutations AND refreshes the
+  // stale-read baseline (a correctness fix, not a speculative lever) — the same
+  // justified non-falsy-default class as QUANTA_IPYNB_OUTPUTS.
+  QUANTA_EDIT_FRESH_HASH: {
+    field: "editFreshHash",
+    expectedDefault: true,
+    reason:
+      "default-ON opt-out: removes a forced re-read + refreshes the stale-read baseline (correctness); off only for the literal `off`",
+  },
   // Enum knobs whose OFF value is the documented pre-feature default, not false.
   QUANTA_LOG_LEVEL: {
     field: "logLevel",

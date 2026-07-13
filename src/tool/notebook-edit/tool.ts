@@ -16,6 +16,7 @@ import { errMessage } from "@/shared"
 import { globWriteGuardEvent, writeBudgetEvent } from "../_shared/exfil-rail-guards"
 import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
+import { refreshStaleReadBaseline } from "../_shared/fresh-hash"
 import { guardWrite } from "../stale-read-guard"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { editNotebook, type NotebookEditOp } from "./index"
@@ -155,6 +156,14 @@ export const makeNotebookEditTool = (fs: FileSystemPort = defaultFileSystemPort)
     // `file_history_rewind` / `/rewind-tool` can restore a notebook edit exactly
     // like an `edit`. No-throw; absent sink ⇒ no-op.
     captureFileHistory(ctx, input.path, edited.json)
+    // jul-13 edit-fresh-hash (EDIT PARITY, refresh-only) — notebook_edit mutates the
+    // .ipynb and uses the SAME DEFAULT-ON mtime stale-read guard as edit/write, so
+    // without refreshing the baseline a chained no-re-read notebook_edit/edit to the
+    // same file would be vetoed `stale_read`. Record the just-written mtime (gated ⇒
+    // byte-identical when off). No fresh-hash EMISSION: notebook_edit is cell-op
+    // based and does not consume `expected_hash`, so the single-flat-file chain
+    // contract does not apply (refresh-only, like apply_patch).
+    await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd })
     yield { type: "result", result: { ok: true, output: `notebook_edit: ${edited.summary} in ${input.path}` } }
   },
 })

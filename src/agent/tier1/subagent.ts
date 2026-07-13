@@ -13,6 +13,7 @@
  */
 
 import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
+import { spawnToolsAvailable } from "@/agent/spawn-depth-policy"
 import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
@@ -126,6 +127,12 @@ export const buildSubagentBlock = (
   deps: SubagentBlockDeps = {},
 ): SubagentBlock | undefined => {
   if (!config.subagent) return undefined
+  // RFC jul-13 §4 L1 / §6.5 B Phase 1 — capability-absence: a child at/above the
+  // spawn-depth cap does not even SEE the `agent` trio + 6-tool `spawn_agent`
+  // family (they are absent from its assembled tool set, not merely rejected at
+  // call time). Deterministic threshold on `config.depth` (0 = root), NOT a
+  // heuristic. No-op at the root (depth 0/undefined < cap) ⇒ byte-identical.
+  if (!spawnToolsAvailable(config)) return undefined
 
   // B1 — `toolNamespace` (when present) is threaded into the runner so forked
   // children expose SCOPED tool names. Absent ⇒ raw names (byte-identical):
