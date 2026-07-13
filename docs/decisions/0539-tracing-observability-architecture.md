@@ -199,8 +199,17 @@ unit acceptance already exercises a real exporter sink over `runAgent`).
   (`() => getSpanSink() !== null`). See rule 5 above. The deterministic `t<turn>`
   fallback VALUE is retained (existing consumers depend on it); enforcement only
   ADDS the defect signal when a sink was live but no ref was installed. C7 legacy
-  DELETION (removing the `t<turn>` synthetic-id scheme + SpanSink compat adapter
-  entirely) stays deferred behind the declared compat window.
+  DELETION — RECLASSIFIED (jul-13): NOT a deferred cleanup, a WON'T-DELETE by
+  design. The `t<turn>`/`llm:t<turn>`/`tool:<id>` scheme (`jsonl-recorder.ts`
+  `spanOf()`) is the CORRECT deterministic span-id for the OFF / OTel-never-wired
+  path — every OFF-mode OBSERVE/probe consumer joins on those stable ids, and
+  removing them would break the byte-identical OFF contract, not remove cruft.
+  It is only a "fallback" in unified mode (where a real ref supersedes it) and
+  there rule-5 already surfaces its use as a defect. There is NO separate
+  "SpanSink compat adapter" to remove (an earlier residual-note phrasing implied
+  one; the audit found none — the only legacy surface was the removed global
+  regime counter, gone since R1). So this residual is CLOSED: `spanOf()` stays as
+  the OFF-mode identity, unified mode never silently uses it, done.
   - Design choice + LATENT trigger (audited clean jul-13): the "expected" gate is
     raw sink-liveness (`getSpanSink() !== null`), NOT "am I inside a span scope."
     This is correct TODAY because every recorded bench emit is a descendant of
