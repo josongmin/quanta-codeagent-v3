@@ -838,7 +838,11 @@ export const createSubagentRunner = (
     // exec cwd; treat raw shell absolute-path writes as still able to reach the parent tree.
     const requestedCwd = req.workspace ?? parent.cwd
     const mailboxIds = allocateChildMailboxIds(parentMailboxLabel, sharedIdentity, localIdentity)
-    const subagentId = buildSubagentRunId(req.depth, mailboxIds.agentId, mailboxIds.spawnSeq, now)
+    // D3 (AUDIT-2026-07-14) — stamp the run id with the AUTHORITY-derived
+    // `childDepth` (`childDepthOf(parent)`), NOT the caller-asserted `req.depth`
+    // (a forged `req.depth:0` must not mislabel the run id; admission already used
+    // the derived depth above).
+    const subagentId = buildSubagentRunId(childDepth, mailboxIds.agentId, mailboxIds.spawnSeq, now)
 
     const wantsWorktree = req.isolation === "worktree"
     const isolate = wantsWorktree && (await gitProbe(requestedCwd))
@@ -865,7 +869,7 @@ export const createSubagentRunner = (
       parent.subagentAgentMeta,
       req.taskId,
       mailboxIds.agentId,
-      req.depth,
+      childDepth, // D3 — derived depth, not forgeable req.depth (list_agents metadata)
       req.agentType,
     )
 

@@ -46,6 +46,7 @@ export const SPAWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   "run_workflow", // each workflow `agent` step forks a child (tier1/subagent.ts)
   "delegate", // synchronous delegation child (tier1/delegate.ts)
   "team_create", // team spawn vector (tier1/team.ts) — NOT team_delete (§5.1)
+  "branch_search", // speculative candidate fork (ADR-0084, branch-search-runner.ts) — D1 defense-in-depth
 ])
 
 /** rev.4 §4.4 SINGLE capability-projection filter. Applied ONCE where

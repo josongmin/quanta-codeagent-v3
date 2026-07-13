@@ -19,7 +19,13 @@ import type { BranchCandidate, BranchSeed, BranchTraceEvent, Isolator } from "./
 /** The per-candidate agent run, abstracted as a port so `propose` is unit-
  *  testable without a real loop. The orchestrator binds this to `runAgent`
  *  with a candidate-scoped `AgentConfig` (cwd = workspace, depth+1, seeded
- *  llm/temperature/promptHint). */
+ *  llm/temperature/promptHint).
+ *
+ *  May also resolve to `{ kind: "failed", reason }` — WITHOUT throwing — so the
+ *  binder can DENY a candidate that the spawn-depth authority forbids (D1: a
+ *  cap-0 kill switch must yield 0 forks, mirroring the subagent-runner reject
+ *  rather than throwing into the propose loop). `oneCandidate` already folds a
+ *  non-`completed` outcome to a failed BranchCandidate (score 0 ⇒ never wins). */
 export type RunCandidate = (args: {
   id: string
   seed: BranchSeed
@@ -27,7 +33,10 @@ export type RunCandidate = (args: {
   task: string
   baseLlm: LLMPort
   signal: AbortSignal
-}) => Promise<{ kind: "completed"; turns: number; llmSelfConfidence?: number }>
+}) => Promise<
+  | { kind: "completed"; turns: number; llmSelfConfidence?: number }
+  | { kind: "failed"; reason: string }
+>
 
 export interface ProposeRequest {
   N: number

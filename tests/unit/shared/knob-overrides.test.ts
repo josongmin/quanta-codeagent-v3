@@ -100,4 +100,26 @@ describe("SECURITY carve-out — strict knobs are NOT session-settable (RFC §4.
     expect(setKnobOverride("QUANTA_BG_COMPACTION", "1")).toBe(true)
     expect(runtimeConfig().bgCompaction).toBe(true)
   })
+
+  // D2 (AUDIT-2026-07-14, INV-G6 / RFC jul-13 §6.1 rule 5) — the sub-agent nesting
+  // POLICY CEILING must be session-pinned: a mid-session widen must NOT raise the cap.
+  test("the nesting-policy knobs are session-FORBIDDEN (refused, not stored)", () => {
+    for (const k of [
+      "QUANTA_MAX_DESCENDANT_DEPTH",
+      "QUANTA_MAX_SPAWN_DEPTH",
+      "QUANTA_SUBAGENT_MAX_DEPTH",
+    ]) {
+      expect(setKnobOverride(k, "5")).toBe(false)
+      expect(getKnobOverride(k)).toBeUndefined()
+    }
+  })
+
+  test("a session set CANNOT widen maxDescendantDepth via runtimeConfig (kill-switch cannot be lifted)", () => {
+    // Default policy = 1 (root-only). A forged widen to 5 must NOT land.
+    expect(runtimeConfig().maxDescendantDepth).toBe(1)
+    // RED-ON-INJECTION: remove "QUANTA_MAX_DESCENDANT_DEPTH" from
+    // SESSION_FORBIDDEN_KNOBS and this override lands ⇒ cap becomes 5 ⇒ RED.
+    expect(setKnobOverride("QUANTA_MAX_DESCENDANT_DEPTH", "5")).toBe(false)
+    expect(runtimeConfig().maxDescendantDepth).toBe(1) // still pinned to policy
+  })
 })

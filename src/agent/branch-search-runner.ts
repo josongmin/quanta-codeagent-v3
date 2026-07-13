@@ -25,17 +25,46 @@ import {
 } from "./branch-search"
 import { runAgent } from "./loop"
 import { voterQuorumVerifier } from "./multi-voter"
+import { canAdmitChildDepth, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
 import type { AgentConfig } from "./types"
 
 /** Build a candidate-scoped `runAgent` fork. Each candidate runs in its own
  *  isolated workspace at depth+1 with the seed's model/promptHint applied, and
  *  with `branchSearch` STRIPPED so a candidate can never recursively fan out
- *  (negative invariant — prevents N^depth explosion). */
+ *  (negative invariant — prevents N^depth explosion).
+ *
+ *  D1 (AUDIT-2026-07-14) — the candidate fork is a SPAWN VECTOR and must obey the
+ *  SAME spawn-depth authority as every other vector (subagent-runner reject).
+ *  Before forking, the candidate's derived child depth (`childDepthOf(config)` —
+ *  the SSOT lineage math, NOT a re-implemented `+1`) is checked against the
+ *  `effectiveCap`. When the cap forbids it (e.g. `QUANTA_MAX_DESCENDANT_DEPTH=0`
+ *  kill switch ⇒ `canAdmitChildDepth(1, 0)` false) OR the parent depth is malformed
+ *  (`SpawnLineageError`), the candidate is DENIED as a failed outcome (mirroring the
+ *  runner reject — NO throw into the propose loop; the failed candidate folds to
+ *  score 0 and never wins). At the root under default cap 1, `canAdmitChildDepth(1,1)`
+ *  is true ⇒ candidates fork exactly as before (byte-identical). */
 export const bindBranchRunCandidate = (config: AgentConfig): RunCandidate => {
   // Strip `branchSearch` once (exactOptionalPropertyTypes: omit, never set
   // `undefined`). Reused for every candidate fork.
   const { branchSearch: _stripped, ...parentSansBranch } = config
   return async ({ workspace, seed, task, baseLlm, signal }) => {
+    // D1 — route the candidate depth through the AUTHORITY before forking.
+    let childDepth: number
+    try {
+      childDepth = childDepthOf(config)
+    } catch (e) {
+      if (e instanceof SpawnLineageError) {
+        return { kind: "failed", reason: `branch_search denied: ${e.message}` }
+      }
+      throw e
+    }
+    const cap = effectiveCap(config.subagent?.maxDepth)
+    if (!canAdmitChildDepth(childDepth, cap)) {
+      return {
+        kind: "failed",
+        reason: `branch_search denied: child depth ${childDepth} exceeds cap ${cap}`,
+      }
+    }
     const llm = seed.modelOverride?.port ?? baseLlm
     const hint = seed.promptHint ? `\n\n<branch-hint>${seed.promptHint}</branch-hint>` : ""
     const child: AgentConfig = {
@@ -43,7 +72,7 @@ export const bindBranchRunCandidate = (config: AgentConfig): RunCandidate => {
       llm,
       cwd: workspace,
       signal,
-      depth: (config.depth ?? 0) + 1,
+      depth: childDepth,
       messages: [{ role: "user", content: [{ type: "text", text: `${task}${hint}` }] }],
     }
     const outcome = await runAgent(child)

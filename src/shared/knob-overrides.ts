@@ -29,6 +29,16 @@ export const SESSION_FORBIDDEN_KNOBS: ReadonlySet<string> = new Set([
   "QUANTA_TLS_MITM_ACK",
   "QUANTA_CENTRAL_CONFIG",
   "QUANTA_LLM_CREDENTIAL_TRUSTED",
+  // D2 (AUDIT-2026-07-14, INV-G6 / RFC jul-13 §6.1 rule 5) — the sub-agent
+  // nesting policy ceiling. A mid-session `/knobs set QUANTA_MAX_DESCENDANT_DEPTH=5`
+  // would RAISE the descendant-depth cap (widening the spawn boundary), so the
+  // policy must be session-pinned like every other security-boundary knob.
+  // `QUANTA_MAX_SPAWN_DEPTH` is the legacy alias of the same policy; the per-config
+  // `QUANTA_SUBAGENT_MAX_DEPTH` can only TIGHTEN via `effectiveCap = min(policy, …)`,
+  // pinned here defensively so no session set can perturb the resolved cap.
+  "QUANTA_MAX_DESCENDANT_DEPTH",
+  "QUANTA_MAX_SPAWN_DEPTH",
+  "QUANTA_SUBAGENT_MAX_DEPTH",
 ])
 
 /** True if `envKey` is a security-boundary knob that a session override may NOT set. */

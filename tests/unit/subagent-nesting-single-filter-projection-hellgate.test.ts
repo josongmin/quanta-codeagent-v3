@@ -9,8 +9,8 @@
  * which pulls the ADR-0436 features.ts init-cycle — the enumeration is taken from
  * the composed `extraTools` instead). Two invariants:
  *
- *   PROJECTION (§4.4) — at a leaf (`canExposeSpawnTools === false`) the 7
- *   CREATION tools (`SPAWN_TOOL_NAMES`) are REMOVED and every management/observe
+ *   PROJECTION (§4.4) — at a leaf (`canExposeSpawnTools === false`) the CREATION
+ *   tools (`SPAWN_TOOL_NAMES`) are REMOVED and every management/observe
  *   and non-spawn tool SURVIVES (§5.1 N2 fix: `team_delete`, bash/edit, … stay).
  *   At the root under default cap 1 the filter is a no-op (byte-identical).
  *   Mutation coverage: dropping a name from the SET leaks that tool for a leaf
@@ -71,6 +71,14 @@ const fullCfg = (depth?: number): AgentConfig =>
       enableWorkflow: true,
       enableSpawnAgentsCsv: true,
     },
+    // Enable branch_search so the meta-pin exercises it as a REAL composed
+    // creation vector (D1: branch_search is a spawn vector in SPAWN_TOOL_NAMES).
+    branchSearch: {
+      defaultN: 2,
+      defaultVerifierKinds: [],
+      timeoutPerBranchMs: 1000,
+      isolation: "tmpdir",
+    },
     teamRegistry: createTeamRegistry(),
     delegation: { delegator: stubDelegator() },
     ...(depth !== undefined ? { depth } : {}),
@@ -89,6 +97,7 @@ const EXPECTED_CREATION_TOOLS = [
   "run_workflow",
   "delegate",
   "team_create",
+  "branch_search", // D1 — speculative candidate fork is a spawn vector (ADR-0084)
 ] as const
 
 /** Tools the builders emit that are MANAGEMENT/OBSERVE, NOT creation — these must
@@ -107,7 +116,7 @@ const EXPECTED_MANAGEMENT_TOOLS = [
 // ── SPAWN_TOOL_NAMES shape ────────────────────────────────────────────────────
 
 describe("SPAWN_TOOL_NAMES — the frozen CREATION-authority SSOT (§5.1)", () => {
-  test("contains exactly the 7 creation tools", () => {
+  test("contains exactly the 8 creation tools", () => {
     expect([...SPAWN_TOOL_NAMES].sort()).toEqual([...EXPECTED_CREATION_TOOLS].sort())
   })
 
@@ -171,7 +180,7 @@ describe("projectSpawnTools — root no-op, leaf strips CREATION tools only (§4
     for (const c of EXPECTED_CREATION_TOOLS) expect(names).toContain(c)
   })
 
-  test("default cap 1: a depth-1 CHILD loses the 7 creation tools, keeps management + a non-spawn tool", async () => {
+  test("default cap 1: a depth-1 CHILD loses the creation tools, keeps management + a non-spawn tool", async () => {
     withCap(undefined) // default cap 1 ⇒ depth 1 is a LEAF (1 < 1 false)
     const names = await composedNames(fullCfg(1))
 

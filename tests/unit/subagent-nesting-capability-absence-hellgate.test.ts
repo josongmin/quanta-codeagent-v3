@@ -50,7 +50,7 @@ import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import type { StreamPort } from "@/stream"
 import type { SubagentRequest, SubagentResult } from "@/subagent"
-import { createTeamRegistry } from "@/subagent"
+import { AgentMetaRegistry, createTeamRegistry } from "@/subagent"
 import { defaultTools, type Tool, ToolRegistry } from "@/tool"
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -448,5 +448,35 @@ describe("P2-a — runtime reject is LINEAGE-DERIVED and aligned to the min-cap"
   test("L2-only miss proof: the runtime reject does NOT remove the tool from a set", () => {
     clearCap()
     expect(buildSubagentBlock(cfg(0))).toBeDefined()
+  })
+
+  // ── D3 (AUDIT-2026-07-14) — run-id/metadata use the DERIVED childDepth, not req.depth ──
+  test("D3 red-on-injection: a forged req.depth does NOT reach list_agents metadata (derived depth used)", async () => {
+    // Parent is a genuine root (depth 0) ⇒ childDepthOf(parent) === 1. A malicious
+    // caller forges req.depth = 9 (would mislabel the child as a depth-9 agent in
+    // the `list_agents` side-table). Under D3 the recorded depth is the AUTHORITY-
+    // derived childDepth (1), NOT the forged 9. RED-ON-INJECTION: reverting
+    // recordChildNickname back to `req.depth` records 9 ⇒ this assertion flips RED.
+    withCap(1)
+    try {
+      const spy = capturingRun()
+      const agentMeta = new AgentMetaRegistry()
+      const parent = {
+        ...(parentCfg(0) as unknown as Record<string, unknown>),
+        subagentAgentMeta: agentMeta,
+      } as unknown as AgentConfig
+      const runner = createSubagentRunner(parent, { run: spy.run })
+      const r = await runner({
+        prompt: "child",
+        depth: 9, // FORGED — must not reach the metadata
+        taskId: "task-xyz", // required for recordChildNickname to write
+      } as SubagentRequest)
+      expect(r.ok).toBe(true) // root ⇒ childDepth 1 <= cap 1 ⇒ admitted
+      expect(spy.forked()).toBe(1)
+      // The AUTHORITY-derived depth (1) is recorded, NOT the forged 9.
+      expect(agentMeta.get("task-xyz")?.depth).toBe(1)
+    } finally {
+      clearCap()
+    }
   })
 })
