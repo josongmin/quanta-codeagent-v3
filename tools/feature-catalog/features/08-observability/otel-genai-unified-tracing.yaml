@@ -13,6 +13,13 @@ telemetry_keys:
   - gen_ai.response.finish_reasons
   - gen_ai.request.model
   - gen_ai.response.model
+  - gen_ai.conversation.id
+  - error.type
+  - gen_ai.client.operation.duration
+  - gen_ai.client.token.usage
+  - gen_ai.input.messages
+  - gen_ai.output.messages
+  - gen_ai.system_instructions
   - quanta.instance.id
   - quanta.instance.attempt
   - quanta.run.id
@@ -24,6 +31,7 @@ config_refs:
     - QUANTA_OTEL_RUN_ID
     - QUANTA_RUN_ID
     - QUANTA_TRACE_CONTEXT
+    - QUANTA_OTEL_CAPTURE_CONTENT
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:none"]
 depends_on: [otel-span-tree, otel-attribute-vocab, bench-live-trace-run-link, jsonl-span-correlation]
@@ -74,6 +82,9 @@ evidence:
     - src/observability/tracing/active-context.ts
     - src/observability/tracing/hex-id.ts
     - src/observability/otel-span-export.ts
+    - src/observability/metrics/instrument-genai.ts
+    - src/agent/loop-helpers.ts
+    - src/agent/loop/stream-consume.ts
     - src/agent/session-resources.ts
     - src/apps/bench/run-main-helpers.ts
     - src/stream/adapters/jsonl-recorder.ts
@@ -85,6 +96,9 @@ evidence:
       - tests/unit/observability/active-context.test.ts
       - tests/unit/observability/hex-id.test.ts
       - tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
+      - tests/unit/observability/sampling-span-error-conversation-hellgate.test.ts
+      - tests/unit/observability/genai-client-metrics-hellgate.test.ts
+      - tests/unit/observability/genai-content-capture-hellgate.test.ts
       - tests/unit/jsonl-recorder.test.ts
       - tests/unit/llm/replay/recording-trace-ref.test.ts
       - tests/unit/bench-run-id-and-attempt-root.test.ts
@@ -100,6 +114,12 @@ knobs:
   - name: QUANTA_RUN_ID
     default: 'undefined'
     purpose: 'infra: one run-id authority (≡ QUANTA_OTEL_RUN_ID) rides the OTLP resource as quanta.run.id and threads onto the per-attempt root.'
+  - name: QUANTA_TRACE_CONTEXT
+    default: 'undefined'
+    purpose: 'bench: install a context-only span sink (real trace ids, NO OTLP export) so OBSERVE+cassette carry a unified {traceId,spanId} for the trajectory viewer, endpoint-free. Default-OFF ⇒ byte-identical.'
+  - name: QUANTA_OTEL_CAPTURE_CONTENT
+    default: 'undefined'
+    purpose: 'opt-in GenAI content capture on the chat span (T-D0/T-D1, mirrors OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT): emit the pinned structured gen_ai.input/output.messages + gen_ai.system_instructions attrs and the prompt/completion previews, ALL redacted via redactSecrets. Default-OFF ⇒ no content emitted (byte-identical); the replay cassette (Plane A) stays unredacted + untouched. Off is the fix for the T-B preview leak.'
 deliberate_hold: null
 notes: |
   Runtime modes off | context | export — only `off` is byte-identical / zero-alloc

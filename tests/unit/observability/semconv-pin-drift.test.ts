@@ -73,11 +73,18 @@ const PINNED_SPAN_KEYS: readonly string[] = [
   // Opt-In structured content (pinned message schema, role + parts[]).
   "gen_ai.input.messages",
   "gen_ai.output.messages",
+  // Opt-In system prompt (underscore form) — D1 wires the (redacted) EMISSION.
+  "gen_ai.system_instructions",
   // invoke_agent / execute_tool span attrs.
   "gen_ai.agent.name",
   "gen_ai.tool.name",
   "gen_ai.tool.call.id",
   "gen_ai.tool.type",
+  // Metrics pin (T-C2) — the two Recommended client Histograms (names, carried in
+  // the vocabulary as SSOT) + the Required `gen_ai.token.type` dim on token.usage.
+  "gen_ai.client.operation.duration",
+  "gen_ai.client.token.usage",
+  "gen_ai.token.type",
 ]
 
 /** Keys carried in `GEN_AI_ATTRS` that are OURS (compat window / quanta preview
@@ -107,9 +114,9 @@ const LOCAL_EXTENSION_KEYS: readonly string[] = [
  *  living in `ERROR_ATTRS`, outside this guard's scope (see the namespace note
  *  above + the dedicated `error.type` test below). */
 const RESERVED_FUTURE_PINNED_KEYS: readonly string[] = [
-  // Opt-In system prompt (underscore form) — reserved until content capture (D1)
-  // wires it; pinned name is `gen_ai.system_instructions`.
-  "gen_ai.system_instructions",
+  // (empty) — all previously-reserved pinned keys have now landed:
+  //   · `gen_ai.system_instructions` moved into PINNED_SPAN_KEYS when D1 wired
+  //     the (redacted) system-prompt emission at `closeSamplingSpan`.
 ]
 
 /** The full expected `gen_ai.*` key SET = pinned-span ∪ local-extension. */

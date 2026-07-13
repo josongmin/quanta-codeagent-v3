@@ -364,6 +364,11 @@ export const GEN_AI_ATTRS = {
   output: {
     messages: "gen_ai.output.messages",
   },
+  /** OTel GenAI semconv `gen_ai.system_instructions` (UNDERSCORE form per the
+   *  pin) — the system prompt / developer instructions, Opt-In and kept SEPARATE
+   *  from the input/output message sequences. Emitted (redacted) only under the
+   *  content-capture knob (T-D0/T-D1); absent otherwise (byte-identical). */
+  systemInstructions: "gen_ai.system_instructions",
   response: {
     model: "gen_ai.response.model",
     finishReason: "gen_ai.response.finish_reasons",
@@ -390,6 +395,21 @@ export const GEN_AI_ATTRS = {
     output: "gen_ai.tool.output",
     name: "gen_ai.tool.name",
     type: "gen_ai.tool.type",
+  },
+  /** OTel GenAI semconv METRIC names (T-C2) — the two Recommended client
+   *  Histograms emitted at the sampling-span close. These are metric NAMES (not
+   *  span attribute keys), but they live in the vocabulary as the SSOT so no raw
+   *  `gen_ai.*` literal escapes into an emitter (the orphan-literal scan). */
+  metric: {
+    /** Histogram, unit `s` — GenAI client operation (chat) wall-clock. */
+    operationDuration: "gen_ai.client.operation.duration",
+    /** Histogram, unit `{token}` — GenAI client token usage (input/output). */
+    tokenUsage: "gen_ai.client.token.usage",
+  },
+  /** OTel GenAI semconv `gen_ai.token.type` — Required DIM on the token.usage
+   *  metric, enum `input` | `output`. */
+  token: {
+    type: "gen_ai.token.type",
   },
   /** `"openai" | "anthropic"`. */
   system: "gen_ai.system",

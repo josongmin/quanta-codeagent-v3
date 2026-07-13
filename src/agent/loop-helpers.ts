@@ -5,7 +5,7 @@ import {
   defaultEmitter,
   type GitDirectiveCollector,
 } from "@/git/directive-emit"
-import type { Message } from "@/llm"
+import type { Message, SystemBlock } from "@/llm"
 import {
   attrs,
   ERROR_ATTRS,
@@ -18,9 +18,13 @@ import {
   type SpanStatus,
   type TurnTiming,
 } from "@/observability"
+import {
+  emitGenAiClientMetrics,
+  type GenAiMetricInput,
+} from "@/observability/metrics/instrument-genai"
 import { type TickOutcome, tickScheduler } from "@/scheduler/automation-engine"
 import { type RedactionHit, type RedactionOrigin, redactSecrets } from "@/security"
-import { writeStderr, writeStdout } from "@/shared"
+import { gateOn, writeStderr, writeStdout } from "@/shared"
 import { defaultGitRunner } from "@/tool/git"
 import { buildCapEnforcer } from "./cap-enforcer"
 import { DedupGate } from "./dispatch-dedup"
@@ -502,12 +506,154 @@ export const buildSamplingSpanAttrs = (
   return out
 }
 
+/** T-D0/T-D1 content-capture knob. Mirrors the OTel-GenAI spec env
+ *  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` — DEFAULT-OFF opt-in
+ *  (`gateOn` ⇒ only a recognized truthy token arms it). When ON (and a span sink
+ *  is live) `closeSamplingSpan` attaches the REDACTED structured
+ *  `gen_ai.input.messages` / `gen_ai.output.messages` / `gen_ai.system_instructions`
+ *  content attrs AND the (also-redacted, also-knobbed) prompt/completion previews.
+ *  Unset / falsy ⇒ NO content leaves the process (byte-identical). */
+const CONTENT_CAPTURE_ENV = "QUANTA_OTEL_CAPTURE_CONTENT"
+const contentCaptureEnabled = (): boolean => gateOn(process.env, CONTENT_CAPTURE_ENV)
+
+/** Redact a text payload for the OBSERVE/OTLP content plane (Plane B). The
+ *  cassette (Plane A) stays UNredacted — this function is only reached on the
+ *  span-content path, never on the recording path. Origin `tool_result` is the
+ *  general content-observation origin the rollup already understands. */
+const redactForSpan = (text: string): string => redactSecrets(text, { origin: "tool_result" }).text
+
+/** Map a single content block to the pinned GenAI `parts[]` element
+ *  (`{type:"text",content}|{type:"tool_call",…}|{type:"tool_call_response",…}`).
+ *  Text/tool_result content is REDACTED; tool_call arguments are stringified +
+ *  redacted (they can carry secrets a model echoed). Non-text blocks the pin has
+ *  no shape for (image/document/thinking) collapse to a redaction-neutral marker
+ *  so no raw bytes leak. */
+const contentPart = (b: Message["content"][number]): Record<string, unknown> | undefined => {
+  if (b.type === "text") return { type: "text", content: redactForSpan(b.text) }
+  if (b.type === "tool_use")
+    return {
+      type: "tool_call",
+      id: b.id,
+      name: b.name,
+      arguments: redactForSpan(previewPayload(b.input)),
+    }
+  if (b.type === "tool_result")
+    return {
+      type: "tool_call_response",
+      id: b.tool_use_id,
+      response: redactForSpan(b.content),
+    }
+  // image / document / thinking — no pinned part shape; emit a typed marker
+  // (never the raw bytes) so the attr stays lossless-by-type but leak-free.
+  return { type: "text", content: `[${b.type}]` }
+}
+
+/** Build the pinned structured-message JSON string for a message list (the
+ *  `gen_ai.{input,output}.messages` value — on spans MAY be a JSON string per the
+ *  pin). Every text/arg/response leaf is redacted via {@link redactForSpan}. */
+const messagesToJson = (messages: readonly Message[]): string =>
+  JSON.stringify(
+    messages.map((m) => ({ role: m.role, parts: m.content.map(contentPart).filter(Boolean) })),
+  )
+
+/** T-D1 content-capture attrs (knob-gated + redacted). Returns the structured
+ *  `gen_ai.input.messages` / `gen_ai.output.messages` / `gen_ai.system_instructions`
+ *  attrs, all redacted. Empty-safe: omits any leg whose source was absent. The
+ *  caller only invokes this when the knob AND the sink are on, so an OFF run
+ *  never allocates here. */
+const buildContentCaptureAttrs = (
+  messages: readonly Message[],
+  responseMessage: unknown,
+  system: readonly SystemBlock[] | undefined,
+): Record<string, string> => {
+  const out: Record<string, string> = {}
+  if (messages.length > 0) out[GEN_AI_ATTRS.input.messages] = messagesToJson(messages)
+  // The response is a single assistant Message (structurally) — wrap it in the
+  // same output-messages array shape. Non-Message shapes (test doubles) fall back
+  // to a redacted preview so nothing raw leaks.
+  if (responseMessage !== undefined) {
+    const asMsg = responseMessage as Partial<Message>
+    out[GEN_AI_ATTRS.output.messages] =
+      Array.isArray(asMsg.content) && typeof asMsg.role === "string"
+        ? messagesToJson([asMsg as Message])
+        : JSON.stringify([
+            {
+              role: "assistant",
+              parts: [{ type: "text", content: redactForSpan(previewPayload(responseMessage)) }],
+            },
+          ])
+  }
+  if (system !== undefined && system.length > 0) {
+    out[GEN_AI_ATTRS.systemInstructions] = redactForSpan(system.map((s) => s.text).join("\n"))
+  }
+  return out
+}
+
+/** Resolve the `gen_ai.provider.name` dim/attr value: the adapter-reported slug
+ *  when present, else derived from the model name. `undefined` when neither a
+ *  provider nor a model is known (so the attr/dim is omitted). Shared by the span
+ *  attr and the T-C2 metric so both agree on the provider slug. */
+const resolveProviderSlug = (
+  requestModel: string | undefined,
+  provider: string | undefined,
+): string | undefined => {
+  if (provider !== undefined && provider !== "") return provider
+  if (requestModel !== undefined && requestModel !== "") return providerOf(requestModel)
+  return undefined
+}
+
+/** Build the T-C2 metric input from the close params. Extracted to keep
+ *  `closeSamplingSpan` under the cognitive-complexity cap. */
+const buildGenAiMetricInput = (
+  timing: TurnTiming,
+  status: SpanStatus,
+  usage: SamplingUsage | undefined,
+  requestModel: string | undefined,
+  provider: string | undefined,
+  errorKind: string | undefined,
+): GenAiMetricInput => {
+  const providerSlug = resolveProviderSlug(requestModel, provider)
+  return {
+    durationMs: timing.totalDurationMs,
+    status,
+    ...(requestModel !== undefined && requestModel !== "" ? { requestModel } : {}),
+    ...(providerSlug !== undefined ? { provider: providerSlug } : {}),
+    ...(errorKind !== undefined && errorKind !== "" ? { errorKind } : {}),
+    ...(usage !== undefined ? { inputTokens: usage.inputTokens } : {}),
+    ...(usage !== undefined ? { outputTokens: usage.outputTokens } : {}),
+  }
+}
+
+/** The redacted, knob-gated content bag for a span close: the truncated
+ *  prompt/completion previews (T-D1 leak fix) PLUS the pinned structured content
+ *  attrs (T-D1). Empty when the content-capture knob is OFF or the sink is
+ *  inactive — so an OFF run allocates nothing and emits no content. */
+const buildSpanContentBag = (
+  captureContent: boolean,
+  messages: readonly Message[],
+  responseMessage: unknown,
+  system: readonly SystemBlock[] | undefined,
+): { promptPreview?: string; completionPreview?: string; attrs: Record<string, string> } => {
+  if (!captureContent) return { attrs: {} }
+  const promptPreview =
+    messages.length > 0 ? redactForSpan(previewPayload(messages[messages.length - 1])) : undefined
+  const completionPreview =
+    responseMessage !== undefined ? redactForSpan(previewPayload(responseMessage)) : undefined
+  return {
+    ...(promptPreview !== undefined ? { promptPreview } : {}),
+    ...(completionPreview !== undefined ? { completionPreview } : {}),
+    attrs: buildContentCaptureAttrs(messages, responseMessage, system),
+  }
+}
+
 /** Close a `run_sampling_request` span with its full gen_ai.* attribute bag. Owns
- *  the trace-UI payload previews: when (and ONLY when) a span sink is active, it
- *  attaches a truncated preview of the last input message and the model's
- *  response so an operator can click the span and see what was asked / returned.
- *  Default-OFF path pays nothing (no `previewPayload` stringify). Extracted from
- *  `streamConsume` to keep that turn function under the god-FUNCTION size cap. */
+ *  the trace-UI payload previews: when (and ONLY when) a span sink is active AND
+ *  the content-capture knob is armed, it attaches a REDACTED truncated preview of
+ *  the last input message and the model's response so an operator can click the
+ *  span and see what was asked / returned — PLUS the pinned structured content
+ *  attrs (T-D1). Default-OFF path pays nothing (no stringify, no redact).
+ *  Extracted from `streamConsume` to keep that turn function under the
+ *  god-FUNCTION size cap. */
 export const closeSamplingSpan = (
   span: Span,
   status: SpanStatus,
@@ -528,29 +674,44 @@ export const closeSamplingSpan = (
   /** T-C3 — stable `gen_ai.conversation.id` (same for every turn of one
    *  instance/attempt). Omitted ⇒ key not stamped. */
   conversationId?: string,
+  /** T-D1 — the turn's system prompt blocks, used ONLY to build the (redacted)
+   *  `gen_ai.system_instructions` content attr under the content-capture knob.
+   *  Omitted ⇒ that attr is never stamped. */
+  system?: readonly SystemBlock[],
 ): void => {
-  const sinkActive = getSpanSink() !== null
-  const promptPreview =
-    sinkActive && messages.length > 0 ? previewPayload(messages[messages.length - 1]) : undefined
-  const completionPreview =
-    sinkActive && responseMessage !== undefined ? previewPayload(responseMessage) : undefined
+  // T-D1 preview-leak fix + content capture: the prompt/completion previews were
+  // gated on sink-active ONLY. Since T-B flips the sink true on ordinary
+  // (no-endpoint) runs, that emitted raw-ish truncated previews UN-KNOBBED.
+  // Re-gate them (and the pinned structured content attrs) behind the SAME
+  // content-capture knob AND redact them, so NO content leaves the process unless
+  // the operator opted in. Off ⇒ empty bag (byte-identical, zero-alloc).
+  const captureContent = getSpanSink() !== null && contentCaptureEnabled()
+  const content = buildSpanContentBag(captureContent, messages, responseMessage, system)
   endSpan(
     span,
     status,
-    attrs(
-      buildSamplingSpanAttrs(
+    attrs({
+      ...buildSamplingSpanAttrs(
         timing,
         usage,
         finishReason,
-        promptPreview,
-        completionPreview,
+        content.promptPreview,
+        content.completionPreview,
         requestModel,
         provider,
         status,
         errorKind,
         conversationId,
       ),
-    ),
+      ...content.attrs,
+    }),
+  )
+  // T-C2 — the two OTel-GenAI client Histograms (operation.duration `s` +
+  // token.usage `{token}`, the latter split by gen_ai.token.type input/output).
+  // Emitted to the process-default METRIC sink (a DIFFERENT plane from the span
+  // sink above), which is `null` on export-OFF runs ⇒ byte-identical no-op.
+  emitGenAiClientMetrics(
+    buildGenAiMetricInput(timing, status, usage, requestModel, provider, errorKind),
   )
 }
 

@@ -7,7 +7,7 @@ import {
   snapshotToNotice,
 } from "@/llm/ratelimit-snapshot"
 import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from "@/observability"
-import { abortReasonOf, errMessage, LLMError, logger } from "@/shared"
+import { abortReasonOf, classify, errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
 import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
@@ -290,13 +290,18 @@ const notifyTurnStreamInput = (
 type StreamTurnErrorOutcome =
   | { status: "aborted"; rethrow: true }
   | { status: "aborted"; result: StreamConsumeResult }
-  | { status: "error"; result: StreamConsumeResult }
+  | { status: "error"; result: StreamConsumeResult; errorKind: LLMErrorKind }
 
 /** Classify a thrown streaming-turn error into (sampling-span status, control
  *  flow). An approval-required PAUSE is an intentional HITL hand-off — record it
  *  as "aborted" (paused), NOT "error", and rethrow so the caller pauses the turn.
  *  Abort signals ⇒ soft aborted; anything else ⇒ a hard error result. Extracted
- *  to keep `streamConsume` under the god-FUNCTION cap — behavior identical. */
+ *  to keep `streamConsume` under the god-FUNCTION cap — behavior identical.
+ *
+ *  T-B5 wiring: the hard-error arm ALSO carries the classified `LLMErrorKind`
+ *  slug (`classify(e)` — the SAME closed-vocabulary classifier the recovery
+ *  router keys on), so the sampling-span close can stamp it verbatim as the
+ *  bounded low-cardinality `error.type`. Never a raw message. */
 const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErrorOutcome => {
   if (isSessionApprovalRequiredError(e)) return { status: "aborted", rethrow: true }
   const abortReason = abortReasonOf(e)
@@ -307,7 +312,7 @@ const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErr
   )
     return { status: "aborted", result: { aborted: true } }
   const message = e instanceof LLMError ? e.message : errMessage(e)
-  return { status: "error", result: { error: e, message } }
+  return { status: "error", result: { error: e, message }, errorKind: classify(e) }
 }
 
 export const streamConsume = async (
@@ -338,6 +343,10 @@ export const streamConsume = async (
   // default). Byte-identical when no sink is active (NOOP_SPAN ignores kind).
   const samplingSpan: Span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}), "client")
   let samplingStatus: "ok" | "error" | "aborted" = "ok"
+  // T-B5 — the classified error CLASS (a bounded `LLMErrorKind` slug), captured
+  // on the hard-error path so `closeSamplingSpan` can stamp it as `error.type`.
+  // Absent on ok/aborted ⇒ the attr is omitted (an abort is not an error).
+  let capturedErrorKind: LLMErrorKind | undefined
   // gen_ai.* span enrichment: capture the provider's usage (model + tokens) and
   // the finish reason so the sampling span answers which-model / how-many-tokens
   // / why-stopped — not just TTFT. Absent on early abort ⇒ omitted (empty-safe).
@@ -442,13 +451,27 @@ export const streamConsume = async (
     const outcome = classifyStreamTurnError(e, config)
     samplingStatus = outcome.status
     if ("rethrow" in outcome) throw e
+    if (outcome.status === "error") capturedErrorKind = outcome.errorKind
     return outcome.result
   } finally {
     stop?.()
     turnTimingCapture.markStreamEnd()
     const timing = turnTimingCapture.snapshot()
     onTurnTiming?.(timing)
-    // gen_ai.* attrs + trace-UI prompt/response previews (sink-gated).
+    // T-C3 stable conversation grouping id: the SAME source the session
+    // (`invoke_agent`) span stamps via `sessionGenAiAttrs` — `config.sessionId`
+    // when it is a REAL identity. The `"default"`/empty fallback is a
+    // non-identity (shared across unrelated sessions), so it is omitted rather
+    // than stamped as a bogus shared conversation id — keeping the chat span's
+    // `gen_ai.conversation.id` byte-consistent with the session root.
+    const conversationId =
+      config.sessionId !== undefined && config.sessionId !== "" && config.sessionId !== "default"
+        ? config.sessionId
+        : undefined
+    // gen_ai.* attrs + trace-UI prompt/response previews (sink-gated). T-B5/T-C3
+    // (this wave): the classified error CLASS + the stable conversation id now
+    // reach the wire in prod (previously the params existed but the call site
+    // never passed them ⇒ the attrs were dead).
     closeSamplingSpan(
       samplingSpan,
       samplingStatus,
@@ -459,6 +482,11 @@ export const streamConsume = async (
       capturedMessage,
       requestModel,
       requestProvider,
+      capturedErrorKind,
+      conversationId,
+      // T-D1 — the turn's system prompt, used ONLY for the (redacted, knobbed)
+      // `gen_ai.system_instructions` content attr. Absent knob ⇒ never read.
+      system,
     )
   }
 }

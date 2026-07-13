@@ -453,6 +453,29 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/otel.ts",
   },
   {
+    // jul-13 (ADR-0539, T-D0/T-D1) — opt-in GenAI CONTENT capture on the LLM
+    // sampling (chat) span. Mirrors the OTel-GenAI spec env
+    // `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`. When truthy AND a span
+    // sink is live, `closeSamplingSpan` (loop-helpers.ts) attaches the pinned
+    // STRUCTURED content attrs `gen_ai.input.messages` / `gen_ai.output.messages`
+    // (role + parts[]) + `gen_ai.system_instructions`, AND the trace-UI
+    // prompt/completion previews — ALL redacted via `redactSecrets` (Plane-B
+    // secret boundary; the replay cassette / Plane A stays unredacted, untouched).
+    // "likely PII": default-OFF. Unset/falsy ⇒ NO content leaves the process and
+    // the previews are NOT emitted even under a live sink (byte-identical, and the
+    // fix for the T-B preview leak). Read directly from env at the span-close gate,
+    // an agent-loop observability gate — declared here so the completeness ratchet
+    // (ADR-0503) sees the read.
+    envKey: "QUANTA_OTEL_CAPTURE_CONTENT",
+    kind: "bool",
+    default: undefined,
+    group: "observability",
+    home: "bench",
+    describe:
+      "Opt-in GenAI content capture on the chat span: emit the pinned structured `gen_ai.input.messages`/`gen_ai.output.messages` + `gen_ai.system_instructions` attrs and the prompt/completion previews, ALL redacted. Mirrors OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT. Default-OFF ⇒ no content emitted, byte-identical; the cassette (Plane A) stays unredacted and untouched.",
+    readSite: "agent/loop-helpers.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_WAIT_FOR_IDLE",
     kind: "bool",
     default: false,
