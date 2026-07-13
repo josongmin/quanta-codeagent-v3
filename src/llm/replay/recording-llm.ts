@@ -193,31 +193,188 @@ async function appendDegradedSentinel(params: DegradedSentinelParams): Promise<v
   await opts.store.append(sentinel)
 }
 
+/** Ephemeral request fields that must NOT be persisted (kept replay-neutral).
+ *  Module-scoped (pure) as part of the god-FUNCTION split that pulled the stream
+ *  implementation out of {@link recordingLlmPort}. */
+const stripEphemeralRequest = (input: StreamInput): StreamInput => {
+  const {
+    signal: _signal,
+    turnTimingCapture: _turnTimingCapture,
+    onChunk: _onChunk,
+    onCheckpoint: _onCheckpoint,
+    responsesContinuation: _responsesContinuation,
+    // recordingLane is a correlation label, NOT request content: strip it from
+    // the stored request (kept replay-neutral) and stamp it into metadata.lane.
+    recordingLane: _recordingLane,
+    ...rest
+  } = input
+  return rest
+}
+
+interface RecordingStreamCtx {
+  readonly opts: RecordingLlmOpts
+  readonly now: () => number
+  readonly hashFn: (req: StreamInput) => string
+  /** ADR-0539 rule 5 latch: a SYSTEMIC missing trace context affects every turn,
+   *  so warn ONCE per PORT instance. Threaded as a per-port ref (was a closure
+   *  `let missingRefReported`) so the stream impl can live at module scope. */
+  readonly missingRef: { reported: boolean }
+}
+
+/** The recording `stream()` implementation — extracted from `recordingLlmPort`
+ *  to keep both under the god-FUNCTION ratchet. Behavior-identical to the prior
+ *  inline closure; the only change is that the per-port warn-once latch is
+ *  `ctx.missingRef.reported` instead of a closure `let`. */
+function recordingStreamImpl(
+  input: StreamInput,
+  ctx: RecordingStreamCtx,
+): AsyncIterable<StreamEvent> {
+  const { opts, now, hashFn, missingRef } = ctx
+  const startedAt = now()
+  // C4: sample the ACTIVE OTel span identity HERE, at stream() START — the
+  // enclosing `chat` span. Captured once (not at commit, which runs later on
+  // the async iterator's frame where the active context may have unwound)
+  // and stamped into metadata so the cassette turn joins the trace tree.
+  const traceRef = safeActiveRef(opts.getActiveTraceRef)
+  // ADR-0539 rule 5 (NOW ENFORCED): a trace context was EXPECTED (span sink
+  // live) but the active ref is undefined ⇒ correlation DEFECT. Stamp a
+  // replay-neutral marker on the committed turn and warn ONCE. When no
+  // context was expected (probe absent / false) this is `false` ⇒
+  // byte-identical off path.
+  const traceContextMissing = traceRef === undefined && safeExpected(opts.traceContextExpected)
+  const captured: StreamEvent[] = []
+  const inner = opts.inner.stream(input)
+  // We delay `id` computation until after `now` is sampled so a custom
+  // hash that includes time can do so; the default hash ignores it.
+  let writeError: Error | null = null
+
+  async function commit(partial: boolean): Promise<void> {
+    const durationMs = now() - startedAt
+    let id: string
+    try {
+      id = hashFn(input)
+    } catch {
+      // Hash failures collapse to a degenerate-but-stable fallback id so
+      // append never aborts. Using a content-free constant would collide
+      // every miss; SHA-256 of stringified input length+timestamp is
+      // best-effort uniqueness.
+      id = createHash("sha256")
+        .update(`fallback:${startedAt}:${captured.length}`)
+        .digest("hex")
+        .slice(0, 16)
+    }
+    const model = opts.inner.model ?? "unknown"
+    // Drain debug slices (metadata-only, replay-neutral).
+    const debug = safeDrain(opts.debugDrain)
+    const baseRecord: RecordedInteraction = {
+      id,
+      request: stripEphemeralRequest(input),
+      events: captured.slice(),
+      metadata: {
+        recordedAt: startedAt,
+        model,
+        durationMs,
+        ...(partial ? { partial: true } : {}),
+        ...(partial && writeError !== null ? { error: writeError.message } : {}),
+        ...(opts.callCtx?.instanceId !== undefined ? { instanceId: opts.callCtx.instanceId } : {}),
+        ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
+        ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
+        // Per-call parallel-lane label (replay-neutral; see StreamInput.recordingLane).
+        ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
+        // C4: active OTel span identity (replay-neutral; joins the trace tree).
+        ...traceMeta(traceRef),
+        // ADR-0539 rule 5: expected-but-missing trace context DEFECT marker
+        // (replay-neutral — metadata is never hashed, so the cassette key is
+        // unchanged). Absent on the off/never-expected path ⇒ byte-identical.
+        ...(traceContextMissing
+          ? {
+              observabilityDegraded: {
+                component: "recordingLlmPort",
+                reason: "missing_trace_context",
+              },
+            }
+          : {}),
+        ...(debug !== undefined ? { debug } : {}),
+      },
+    }
+    // ADR-0539 rule 5: warn ONCE per port (systemic ⇒ no per-turn spam) —
+    // the durable, greppable operator signal that OTel correlation is broken.
+    if (traceContextMissing && !missingRef.reported) {
+      missingRef.reported = true
+      logger.warn("recording-llm: trace context expected but missing (observability degraded)", {
+        reason: "missing_trace_context",
+        instanceId: opts.callCtx?.instanceId,
+        runId: opts.callCtx?.runId,
+        attempt: opts.callCtx?.attempt,
+      })
+    }
+    const finalRecord = opts.scrubber !== undefined ? opts.scrubber(baseRecord) : baseRecord
+    await opts.store.append(finalRecord)
+  }
+
+  async function commitBestEffort(partial: boolean): Promise<void> {
+    try {
+      await commit(partial)
+    } catch (commitErr) {
+      // F7: recording is a sidecar after a successful live turn, so we must
+      // NEVER flip the already-successful stream into a surfaced LLM failure
+      // (that's the caller contract — unlike the partial:true path which
+      // rethrows). But swallowing the error SILENTLY turned a lost turn into
+      // an invisible hole: a scrubber or store.append that threw on a
+      // SUCCEEDED stream left no record and no signal. So we (1) warn — a
+      // durable, greppable operator signal — and (2) attempt a minimal
+      // degraded record so the lost turn is at least VISIBLE on the tape.
+      logger.warn("recording-llm: commit failed on a successful turn (turn NOT recorded)", {
+        error: errMessage(commitErr),
+        instanceId: opts.callCtx?.instanceId,
+        runId: opts.callCtx?.runId,
+        attempt: opts.callCtx?.attempt,
+        capturedEvents: captured.length,
+      })
+      await appendDegradedSentinel({
+        cause: commitErr,
+        hashFn,
+        input,
+        startedAt,
+        captured,
+        stripEphemeralRequest,
+        opts,
+        now,
+        traceRef,
+      }).catch(() => {
+        // The sentinel is itself best-effort: if store.append is what broke,
+        // this degraded append will break too. The `logger.warn` above is the
+        // guaranteed non-silent signal; the sentinel is a bonus when the
+        // failure was in the scrubber (append still works).
+      })
+    }
+  }
+
+  async function* iterate(): AsyncIterable<StreamEvent> {
+    try {
+      for await (const ev of inner) {
+        captured.push(ev)
+        yield ev
+      }
+    } catch (err) {
+      writeError = err instanceof Error ? err : new Error(String(err))
+      await commit(true).catch(() => {
+        // Swallow append failure — original error is the more important
+        // signal to surface.
+      })
+      throw writeError
+    }
+    await commitBestEffort(false)
+  }
+
+  return iterate()
+}
+
 export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
   const now = opts.now ?? Date.now
   const hashFn = opts.hashRequest ?? ((req: StreamInput) => defaultHashRequest(req, "exact"))
-  // ADR-0539 rule 5 latch: a SYSTEMIC missing trace context affects every turn,
-  // so warn ONCE per port instance (mirrors the recorder's `missingRefReported`
-  // / `capDone` guard). The replay-neutral metadata marker is still stamped on
-  // each defective turn for post-mortem, but the operator warn fires once.
-  let missingRefReported = false
-
-  const stripEphemeralRequest = (input: StreamInput): StreamInput => {
-    const {
-      signal: _signal,
-      turnTimingCapture: _turnTimingCapture,
-      onChunk: _onChunk,
-      onCheckpoint: _onCheckpoint,
-      responsesContinuation: _responsesContinuation,
-      // recordingLane is a correlation label, NOT request content: strip it from
-      // the stored request (kept replay-neutral) and stamp it into metadata.lane.
-      recordingLane: _recordingLane,
-      ...rest
-    } = input
-    return rest
-  }
-
-  const port: LLMPort = {
+  const missingRef = { reported: false }
+  return {
     ...(opts.inner.model !== undefined ? { model: opts.inner.model } : {}),
     // Forward contextWindowKey like every other decorator (with-temperature,
     // with-recording-lane, …) — a recording wrap must not silently drop the
@@ -229,151 +386,7 @@ export function recordingLlmPort(opts: RecordingLlmOpts): LLMPort {
     ...(opts.inner.surfaceId !== undefined ? { surfaceId: opts.inner.surfaceId } : {}),
     ...(opts.inner.transportId !== undefined ? { transportId: opts.inner.transportId } : {}),
     ...(opts.inner.authMode !== undefined ? { authMode: opts.inner.authMode } : {}),
-    stream(input: StreamInput): AsyncIterable<StreamEvent> {
-      const startedAt = now()
-      // C4: sample the ACTIVE OTel span identity HERE, at stream() START — the
-      // enclosing `chat` span. Captured once (not at commit, which runs later on
-      // the async iterator's frame where the active context may have unwound)
-      // and stamped into metadata so the cassette turn joins the trace tree.
-      const traceRef = safeActiveRef(opts.getActiveTraceRef)
-      // ADR-0539 rule 5 (NOW ENFORCED): a trace context was EXPECTED (span sink
-      // live) but the active ref is undefined ⇒ correlation DEFECT. Stamp a
-      // replay-neutral marker on the committed turn and warn ONCE. When no
-      // context was expected (probe absent / false) this is `false` ⇒
-      // byte-identical off path.
-      const traceContextMissing = traceRef === undefined && safeExpected(opts.traceContextExpected)
-      const captured: StreamEvent[] = []
-      const inner = opts.inner.stream(input)
-      // We delay `id` computation until after `now` is sampled so a custom
-      // hash that includes time can do so; the default hash ignores it.
-      let writeError: Error | null = null
-
-      async function commit(partial: boolean): Promise<void> {
-        const durationMs = now() - startedAt
-        let id: string
-        try {
-          id = hashFn(input)
-        } catch {
-          // Hash failures collapse to a degenerate-but-stable fallback id so
-          // append never aborts. Using a content-free constant would collide
-          // every miss; SHA-256 of stringified input length+timestamp is
-          // best-effort uniqueness.
-          id = createHash("sha256")
-            .update(`fallback:${startedAt}:${captured.length}`)
-            .digest("hex")
-            .slice(0, 16)
-        }
-        const model = opts.inner.model ?? "unknown"
-        // Drain debug slices (metadata-only, replay-neutral).
-        const debug = safeDrain(opts.debugDrain)
-        const baseRecord: RecordedInteraction = {
-          id,
-          request: stripEphemeralRequest(input),
-          events: captured.slice(),
-          metadata: {
-            recordedAt: startedAt,
-            model,
-            durationMs,
-            ...(partial ? { partial: true } : {}),
-            ...(partial && writeError !== null ? { error: writeError.message } : {}),
-            ...(opts.callCtx?.instanceId !== undefined
-              ? { instanceId: opts.callCtx.instanceId }
-              : {}),
-            ...(opts.callCtx?.runId !== undefined ? { runId: opts.callCtx.runId } : {}),
-            ...(opts.callCtx?.attempt !== undefined ? { attempt: opts.callCtx.attempt } : {}),
-            // Per-call parallel-lane label (replay-neutral; see StreamInput.recordingLane).
-            ...(input.recordingLane !== undefined ? { lane: input.recordingLane } : {}),
-            // C4: active OTel span identity (replay-neutral; joins the trace tree).
-            ...traceMeta(traceRef),
-            // ADR-0539 rule 5: expected-but-missing trace context DEFECT marker
-            // (replay-neutral — metadata is never hashed, so the cassette key is
-            // unchanged). Absent on the off/never-expected path ⇒ byte-identical.
-            ...(traceContextMissing
-              ? {
-                  observabilityDegraded: {
-                    component: "recordingLlmPort",
-                    reason: "missing_trace_context",
-                  },
-                }
-              : {}),
-            ...(debug !== undefined ? { debug } : {}),
-          },
-        }
-        // ADR-0539 rule 5: warn ONCE per port (systemic ⇒ no per-turn spam) —
-        // the durable, greppable operator signal that OTel correlation is broken.
-        if (traceContextMissing && !missingRefReported) {
-          missingRefReported = true
-          logger.warn(
-            "recording-llm: trace context expected but missing (observability degraded)",
-            {
-              reason: "missing_trace_context",
-              instanceId: opts.callCtx?.instanceId,
-              runId: opts.callCtx?.runId,
-              attempt: opts.callCtx?.attempt,
-            },
-          )
-        }
-        const finalRecord = opts.scrubber !== undefined ? opts.scrubber(baseRecord) : baseRecord
-        await opts.store.append(finalRecord)
-      }
-
-      async function commitBestEffort(partial: boolean): Promise<void> {
-        try {
-          await commit(partial)
-        } catch (commitErr) {
-          // F7: recording is a sidecar after a successful live turn, so we must
-          // NEVER flip the already-successful stream into a surfaced LLM failure
-          // (that's the caller contract — unlike the partial:true path which
-          // rethrows). But swallowing the error SILENTLY turned a lost turn into
-          // an invisible hole: a scrubber or store.append that threw on a
-          // SUCCEEDED stream left no record and no signal. So we (1) warn — a
-          // durable, greppable operator signal — and (2) attempt a minimal
-          // degraded record so the lost turn is at least VISIBLE on the tape.
-          logger.warn("recording-llm: commit failed on a successful turn (turn NOT recorded)", {
-            error: errMessage(commitErr),
-            instanceId: opts.callCtx?.instanceId,
-            runId: opts.callCtx?.runId,
-            attempt: opts.callCtx?.attempt,
-            capturedEvents: captured.length,
-          })
-          await appendDegradedSentinel({
-            cause: commitErr,
-            hashFn,
-            input,
-            startedAt,
-            captured,
-            stripEphemeralRequest,
-            opts,
-            now,
-            traceRef,
-          }).catch(() => {
-            // The sentinel is itself best-effort: if store.append is what broke,
-            // this degraded append will break too. The `logger.warn` above is the
-            // guaranteed non-silent signal; the sentinel is a bonus when the
-            // failure was in the scrubber (append still works).
-          })
-        }
-      }
-
-      async function* iterate(): AsyncIterable<StreamEvent> {
-        try {
-          for await (const ev of inner) {
-            captured.push(ev)
-            yield ev
-          }
-        } catch (err) {
-          writeError = err instanceof Error ? err : new Error(String(err))
-          await commit(true).catch(() => {
-            // Swallow append failure — original error is the more important
-            // signal to surface.
-          })
-          throw writeError
-        }
-        await commitBestEffort(false)
-      }
-
-      return iterate()
-    },
+    stream: (input: StreamInput): AsyncIterable<StreamEvent> =>
+      recordingStreamImpl(input, { opts, now, hashFn, missingRef }),
   }
-  return port
 }
