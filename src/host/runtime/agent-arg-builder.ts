@@ -414,7 +414,14 @@ const resolveDelegation = (
   | undefined => {
   if (delegateModes === undefined || delegateModes.length === 0) return undefined
   const runner = createSubagentRunner(base)
-  const typed = wrapSubagentRunner(runner)
+  // RFC jul-13 P0-b (correctness): thread THIS agent's depth (0 = root) so a
+  // delegate child gets `parentDepth + 1`, NOT a hardcoded 0. `base.depth` is
+  // the AgentConfig.depth convention (`buildChildConfig` sets it on forks); the
+  // delegate spec depth feeds the delegation-runner MAX_DEPTH gate and the
+  // wrapped SubagentRequest depth feeds the runtime `req.depth > maxDepth`
+  // reject. Both were previously dead (always 0 → only top-level counted).
+  const parentDepth = base.depth ?? 0
+  const typed = wrapSubagentRunner(runner, parentDepth)
   const real = defaultDelegationRunner({ runner: typed })
   const delegator: DelegationPort = {
     delegate: async (req) =>
@@ -424,7 +431,7 @@ const resolveDelegation = (
         ...(req.budget !== undefined ? { budget: req.budget } : {}),
         ...(req.parentSignal !== undefined ? { signal: req.parentSignal } : {}),
         ...(req.correlation !== undefined ? { correlation: req.correlation } : {}),
-        depth: 0,
+        depth: parentDepth + 1,
       }),
     listModes: () => delegateModes,
     describeMode: (mode) => lookupModeProfile(mode),

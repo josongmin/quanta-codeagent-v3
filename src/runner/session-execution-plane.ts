@@ -100,8 +100,14 @@ const adaptDelegation = (
   maxDepth: number | undefined,
 ): NonNullable<SessionDeps["delegation"]> => {
   const subagentRunner = createSubagentRunner(cfg, maxDepth !== undefined ? { maxDepth } : {})
+  // RFC jul-13 P0-b (correctness): thread THIS agent's depth (0 = root) so a
+  // delegate child gets `parentDepth + 1`, NOT a hardcoded 0 — mirrors
+  // `agent-arg-builder.resolveDelegation` + the foreground `buildChildConfig`
+  // convention. Feeds the delegation-runner MAX_DEPTH gate (spec.depth) AND the
+  // wrapped SubagentRequest depth (runtime `req.depth > maxDepth` reject).
+  const parentDepth = cfg.depth ?? 0
   const runner = defaultDelegationRunner({
-    runner: wrapSubagentRunner(subagentRunner),
+    runner: wrapSubagentRunner(subagentRunner, parentDepth),
     ...(maxDepth !== undefined ? { maxDepth } : {}),
   })
   const delegator: DelegationPort = {
@@ -112,7 +118,7 @@ const adaptDelegation = (
         ...(req.budget !== undefined ? { budget: req.budget } : {}),
         ...(req.parentSignal !== undefined ? { signal: req.parentSignal } : {}),
         ...(req.correlation !== undefined ? { correlation: req.correlation } : {}),
-        depth: 0,
+        depth: parentDepth + 1,
       }),
     listModes: () => AGENT_MODES,
     describeMode: (mode) => lookupModeProfile(mode),
@@ -167,6 +173,10 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   const maxQueued = parsePositiveInt(args.envSource.QUANTA_BG_MAX_QUEUED)
   const inner = defaultBackgroundSubagentScheduler({
     runner: childRunner,
+    // Phase 0-a (jul-13 nesting-control RFC §6.5): scheduler is built FROM the
+    // parent config, so background children run at `parentDepth + 1` (0 = root),
+    // reviving the runner's `req.depth > maxDepth` reject.
+    parentDepth: args.parentConfig.depth ?? 0,
     ...(maxConcurrent !== undefined ? { maxConcurrent } : {}),
     ...(maxRetained !== undefined ? { maxRetained } : {}),
     ...(admissionQueue ? { admissionQueue: true } : {}),

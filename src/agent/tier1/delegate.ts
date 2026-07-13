@@ -18,6 +18,17 @@
  *
  * EXPLORE NOTE: there is no `explore` method on the producer port — `explore`
  * is a MODE VALUE the LLM passes through `delegate({ mode: "explore", … })`.
+ *
+ * DEPTH (RFC jul-13 P0-b, correctness): a delegate CHILD runs at THIS agent's
+ * `config.depth + 1` (0 = root ⇒ child depth 1), mirroring the foreground
+ * `buildChildConfig(parentDepth + 1)` convention. The `+1` is threaded where
+ * the opaque `config.delegation.delegator` PORT is CONSTRUCTED — the composition
+ * root (`agent-arg-builder.resolveDelegation` / `session-execution-plane.
+ * adaptDelegation`) reads the parent `AgentConfig.depth` and feeds it into
+ * `wrapSubagentRunner(parentDepth)` + the delegate spec `depth`. This builder
+ * receives the ALREADY-BOUND port, so it does NOT re-thread depth; the spec
+ * `depth` it carries drives the delegation-runner `MAX_DEPTH` gate and the
+ * runtime `req.depth > maxDepth` reject (previously dead: hardcoded 0).
  */
 
 import type { Tool } from "@/tool"

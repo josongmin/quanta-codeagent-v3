@@ -1,0 +1,50 @@
+id: subagent-spawn-depth-policy
+title: Sub-agent spawn-depth policy (capability-absence foundation)
+section: 6
+subsystem: 서브에이전트
+order: 150
+maturity: L2
+status: new
+ui_surfaces: [cli]
+monitoring: n-a
+modes: [interactive, headless]
+configurable: integrated
+config_refs:
+  env: [QUANTA_MAX_SPAWN_DEPTH]
+owners: ['@songmin']
+labels: [surface:core, tier:1]
+depends_on: [quantasubagent-maxdepth, tier1-subagent-block]
+surface_integration:
+  cli: unknown
+  web: unknown
+  method: unverified
+purpose: |
+  RFC jul-13 §6.5 (Phase 1 foundation) — depth-parameterized capability-absence
+  for sub-agent nesting. SSOT policy module `src/agent/spawn-depth-policy.ts`
+  exposes `spawnDepthCap()` (= runtime-config `maxSpawnDepth`) and the
+  deterministic predicate `spawnToolsAvailable(config)` = `(depth ?? 0) < cap`.
+  `maxSpawnDepth` defaults to 1 (root-only spawn; children at depth ≥ 1 are
+  leaves), overridable via `QUANTA_MAX_SPAWN_DEPTH`. This is the config + policy
+  FOUNDATION only — the Phase-1 block-builder gates that CONSUME the predicate to
+  remove spawn tool families from a child's menu (and the Phase-2 typed-reject
+  alignment) land in a later wave. Not a heuristic: a numeric threshold on the
+  existing `AgentConfig.depth` (0 = root), not a "usually leaf" estimate.
+evidence:
+  code:
+    - src/agent/spawn-depth-policy.ts
+    - src/shared/runtime-config.ts
+    - src/shared/runtime-config/types.ts
+    - src/shared/runtime-config-knobs/knobs-a.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/spawn-depth-policy-hellgate.test.ts
+      - tests/unit/max-spawn-depth-config-pin.test.ts
+    integration: []
+    contract: []
+knobs:
+  - name: QUANTA_MAX_SPAWN_DEPTH
+    default: 1
+    purpose: 'Max agent depth that receives spawn tools. 1 = root-only (children are leaves).'
+deliberate_hold: null
+notes: ''

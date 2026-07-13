@@ -343,6 +343,11 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
     // C5059-05 — opt-in single-agent-first delegation suppression. Default false
     // ⇒ byte-identical prompt (fan-out-biased). Measurement arm before default-ON.
     subagentDelegateSuppress: gateOn(env, "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"),
+    // RFC jul-13 §6.5 A — max agent depth that receives spawn tools. NUMERIC
+    // POLICY (not a bool gate): default 1 = root-only (children are leaves). The
+    // escape hatch raises the cap; 0 is rejected by parsePositiveNumber ⇒ default 1.
+    maxSpawnDepth:
+      parsePositiveNumber(env["QUANTA_MAX_SPAWN_DEPTH"], "QUANTA_MAX_SPAWN_DEPTH") ?? 1,
     // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
     sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
     // N2 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP connector tools.

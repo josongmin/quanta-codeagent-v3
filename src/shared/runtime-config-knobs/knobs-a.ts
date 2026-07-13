@@ -454,4 +454,11 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
       "every spawn surface (agent/spawn_agent/spawn_batch/spawn_agents_on_csv + " +
       "system-prompt tool-routing). Default-OFF = byte-identical fan-out-biased prompt.",
   },
+  {
+    envKey: "QUANTA_MAX_SPAWN_DEPTH",
+    kind: "int",
+    default: 1,
+    group: "subagent",
+    describe: "Max agent depth that receives spawn tools. 1 = root-only (children are leaves).",
+  },
 ]

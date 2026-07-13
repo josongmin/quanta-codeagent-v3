@@ -181,6 +181,12 @@ export interface BackgroundSubagentSchedulerOpts {
   /** Cap on retained TERMINAL handles (LRU). Running handles are not counted
    *  against this cap. Default 32. */
   readonly maxRetained?: number
+  /** Depth of the PARENT agent that constructs this scheduler (0 = root;
+   *  Phase 0-a, jul-13 nesting-control RFC §6.5). Every background child forked
+   *  through this scheduler runs at `parentDepth + 1`, mirroring the foreground
+   *  `buildChildConfig` convention. Absent ⇒ 0 (treats the constructor as root),
+   *  so the default-OFF / single-level path is unchanged for a root spawn. */
+  readonly parentDepth?: number
   /** Injected clock; default `Date.now`. */
   readonly now?: () => number
   /** Injected id generator; default `randomBytes(8).toString("hex")`. */
@@ -292,15 +298,29 @@ export const isTerminal = (s: SubagentStatus): boolean => s !== "running" && s !
 /** Build the {@link SubagentRequest} the runner consumes from a caller-side
  *  {@link SubagentSpec}. The two surfaces are intentionally distinct:
  *  `SubagentSpec` is what the LLM-facing tool surfaces; `SubagentRequest` is
- *  the slice's port type. Background scheduler always passes `depth: 0` —
- *  the host bridge upstream of `runner` is responsible for any depth+1
- *  bookkeeping if it forks the agent loop. `modelOverride` maps onto the
- *  runner's existing `model` override, while `workspace` / `metadata` are
- *  preserved on the request so resume/background control planes stay lossless. */
-export const specToRequest = (spec: SubagentSpec, signal: AbortSignal): SubagentRequest => {
+ *  the slice's port type.
+ *
+ *  DEPTH (Phase 0-a, jul-13 nesting-control RFC §6.5): the child's `req.depth`
+ *  is `parentDepth + 1`, MIRRORING the foreground convention in
+ *  `subagent-runner.ts`'s `buildChildConfig` (child `config.depth = parentDepth
+ *  + 1`). The scheduler is constructed FROM the parent's `AgentConfig`, so the
+ *  host passes `parentDepth = config.depth ?? 0` at construction (0 = root).
+ *  This revives the previously-dead `req.depth > maxDepth` reject in the runner:
+ *  the prior hardcoded `depth: 0` meant a background child always ran at real
+ *  depth 0 (the "host bridge does depth+1 upstream" the old comment claimed does
+ *  NOT exist — the bg engine passes `req` straight to the runner), so a
+ *  background child could recurse without bound the instant the scheduler was
+ *  wired. `modelOverride` maps onto the runner's existing `model` override,
+ *  while `workspace` / `metadata` are preserved so resume/background control
+ *  planes stay lossless. */
+export const specToRequest = (
+  spec: SubagentSpec,
+  signal: AbortSignal,
+  parentDepth: number,
+): SubagentRequest => {
   const req: SubagentRequest = {
     prompt: spec.task,
-    depth: 0,
+    depth: parentDepth + 1,
     signal,
     ...(spec.modelOverride !== undefined ? { model: spec.modelOverride } : {}),
     ...(spec.maxTurns !== undefined ? { budget: { maxTurns: spec.maxTurns } } : {}),

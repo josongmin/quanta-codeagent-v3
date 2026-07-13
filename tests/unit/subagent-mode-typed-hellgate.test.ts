@@ -279,7 +279,8 @@ describe("mode-typed delegation — hellgate", () => {
       finalText: "subok",
       turns: 5,
     })
-    const wrapped = wrapSubagentRunner(sub)
+    // RFC jul-13 P0-b: wrapSubagentRunner now REQUIRES the parent depth (0 = root).
+    const wrapped = wrapSubagentRunner(sub, 0)
     const port = defaultDelegationRouter({ runner: wrapped })
     const r = await port.delegate({ mode: "explore", prompt: "x" })
     expect(r.ok).toBe(true)
@@ -293,7 +294,7 @@ describe("mode-typed delegation — hellgate", () => {
       finalText: "sub failed",
       turns: 1,
     })
-    const wrapped = wrapSubagentRunner(sub)
+    const wrapped = wrapSubagentRunner(sub, 0)
     const port = defaultDelegationRouter({ runner: wrapped })
     const r = await port.delegate({ mode: "explore", prompt: "x" })
     expect(r.ok).toBe(false)
@@ -307,13 +308,17 @@ describe("mode-typed delegation — hellgate", () => {
       observed = req
       return { ok: true, finalText: "", turns: 0 }
     }
-    const wrapped = wrapSubagentRunner(sub)
+    // Parent depth 2 ⇒ the wrapped child SubagentRequest carries depth 3
+    // (parentDepth + 1), NOT the pre-P0-b hardcoded 0.
+    const wrapped = wrapSubagentRunner(sub, 2)
     const port = defaultDelegationRouter({ runner: wrapped })
     await port.delegate({ mode: "editor", prompt: "x", budget: { maxTurns: 6 } })
     expect(observed).not.toBeNull()
     const req = observed as unknown as SubagentRequest
     expect(req.budget?.maxTurns).toBe(6)
     expect(req.budget?.maxTokens).toBe(DEFAULT_MODE_REGISTRY.editor.maxTokens)
+    // RFC jul-13 P0-b — the threaded depth reaches the child request.
+    expect(req.depth).toBe(3)
   })
 
   test("durationMs is non-negative for every outcome", async () => {

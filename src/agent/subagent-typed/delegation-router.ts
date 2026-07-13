@@ -81,12 +81,23 @@ export interface DelegationRouterOpts {
  *  profile + budget into a `SubagentRequest`, and projects the resulting
  *  `SubagentResult` into a `TypedRunnerOutcome`. Artifact extraction is
  *  intentionally left to the host — the bridge passes through `finalText`
- *  and lets a caller-supplied parser populate `artifacts` later. */
-export const wrapSubagentRunner = (subagentRunner: SubagentRunner): TypedDelegationRunner => {
+ *  and lets a caller-supplied parser populate `artifacts` later.
+ *
+ *  DEPTH (RFC jul-13 P0-b, correctness fix): the child SubagentRequest MUST
+ *  carry `parentDepth + 1`, NOT a hardcoded 0. `parentDepth` is THIS agent's
+ *  `AgentConfig.depth` (0 = root), threaded by the composition root
+ *  (`agent-arg-builder.resolveDelegation`) from `base.depth`. Mirrors the
+ *  foreground `buildChildConfig(parentDepth + 1)` convention so the runtime
+ *  `req.depth > maxDepth` reject (subagent-runner) actually bounds delegate
+ *  recursion instead of every delegate child running at real depth 0. */
+export const wrapSubagentRunner = (
+  subagentRunner: SubagentRunner,
+  parentDepth: number,
+): TypedDelegationRunner => {
   return async (input: TypedRunnerInput): Promise<TypedRunnerOutcome> => {
     const req = {
       prompt: input.prompt,
-      depth: 0,
+      depth: parentDepth + 1,
       signal: input.signal,
       budget: { maxTurns: input.budget.maxTurns, maxTokens: input.budget.maxTokens },
     }

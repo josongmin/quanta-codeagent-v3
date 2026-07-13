@@ -257,7 +257,11 @@ describe("BackgroundSubagentScheduler — B. runner integration", () => {
 
     expect(captured.req).toMatchObject({
       prompt: "review PR #42",
-      depth: 0,
+      // Phase 0-a (jul-13 nesting-control RFC §6.5): a root parent (no
+      // parentDepth ⇒ 0) forks a child at `parentDepth + 1 === 1`. Previously
+      // hardcoded 0 — the correctness bug this fix removes (revives the runner's
+      // `req.depth > maxDepth` reject).
+      depth: 1,
       model: "gpt-5",
       workspace: "/tmp/alt-workspace",
       metadata: { origin: "ci", priority: "high" },

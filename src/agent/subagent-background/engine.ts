@@ -210,6 +210,9 @@ interface RunCtx {
   readonly maxConcurrent: number
   readonly maxRetained: number
   readonly now: () => number
+  /** Depth of the parent agent (0 = root). Every forked child's `req.depth` is
+   *  `parentDepth + 1` (Phase 0-a, jul-13 nesting-control RFC §6.5). */
+  readonly parentDepth: number
 }
 
 /** The mutually-recursive run triad (`promote → startRun → drainQueue →
@@ -221,7 +224,7 @@ interface RunTriad {
 }
 
 const buildRunTriad = (ctx: RunCtx): RunTriad => {
-  const { store, runner, maxConcurrent, maxRetained, now } = ctx
+  const { store, runner, maxConcurrent, maxRetained, now, parentDepth } = ctx
 
   /** Promote a `queued` entry into a `running` one — the deferred half of
    *  `fork`'s body. Flips status, wires the real runner promise in place of the
@@ -251,7 +254,7 @@ const buildRunTriad = (ctx: RunCtx): RunTriad => {
   const startRun = (entry: Entry): Promise<void> => {
     return (async (): Promise<void> => {
       try {
-        const req = specToRequest(entry.spec, entry.abortCtrl.signal)
+        const req = specToRequest(entry.spec, entry.abortCtrl.signal, parentDepth)
         const out = await runner(req)
         applyRunnerSuccess(entry, out, now)
       } catch (e) {
@@ -278,6 +281,10 @@ export const createEngine = (opts: BackgroundSubagentSchedulerOpts): SchedulerEn
   const maxRetained = Math.max(1, Math.floor(opts.maxRetained ?? DEFAULT_MAX_RETAINED))
   const now = opts.now ?? Date.now
   const idGen = opts.idGen ?? ((): string => randomBytes(8).toString("hex"))
+  // Phase 0-a (jul-13 nesting-control RFC §6.5): the parent's depth (0 = root).
+  // Every child forked here runs at `parentDepth + 1` — reviving the runner's
+  // `req.depth > maxDepth` reject that the prior hardcoded `depth: 0` never hit.
+  const parentDepth = Math.max(0, Math.floor(opts.parentDepth ?? 0))
   // MACROTASK yield (not microtask): lets timers/IO run while await() spins on a
   // still-`queued` entry whose placeholder promise settles synchronously.
   const yieldMacrotask =
@@ -296,7 +303,14 @@ export const createEngine = (opts: BackgroundSubagentSchedulerOpts): SchedulerEn
   // fork; oldest-front = first eviction candidate.
   const store: Store = new Map()
 
-  const { startRun, promote } = buildRunTriad({ store, runner, maxConcurrent, maxRetained, now })
+  const { startRun, promote } = buildRunTriad({
+    store,
+    runner,
+    maxConcurrent,
+    maxRetained,
+    now,
+    parentDepth,
+  })
 
   // Auto-hydrate at construction (ADR-0153). When `opts.hydrateFrom` is present,
   // populate `store` BEFORE the scheduler is handed to the caller — the choice

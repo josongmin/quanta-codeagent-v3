@@ -444,6 +444,11 @@ const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void 
   slot.subagentBackground = {
     scheduler: defaultBackgroundSubagentScheduler({
       runner: createSubagentRunner(cfg),
+      // Phase 0-a (jul-13 nesting-control RFC §6.5): the scheduler is built FROM
+      // the parent's config, so background children run at `parentDepth + 1`
+      // (0 = root). Reviving the runner's `req.depth > maxDepth` reject that the
+      // prior hardcoded `depth: 0` never reached.
+      parentDepth: cfg.depth ?? 0,
       ...(subagentQueue ? { admissionQueue: true } : {}),
       ...(subagentQueue && maxQueued !== undefined ? { maxQueued } : {}),
     }),
