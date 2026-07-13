@@ -211,7 +211,16 @@ describe("patch-observer-fail-open — end-to-end through the apply_patch compos
     // Drives the REAL wiring: `applyPatchTool.execute` injects `PATCH_TRACE`
     // (the OTel-bound port) which routes through `recordAttrs` onto the active
     // span sink. A sink whose `onStart`/`onEnd` throw is a telemetry bug at the
-    // outermost layer; the apply must still fail-open end-to-end.
+    // OUTERMOST layer; the apply must still fail-open end-to-end.
+    //
+    // SCOPE (honest — do NOT read this as a wrapObserver localizer): a throwing
+    // span sink is swallowed by `recordAttrs` (spans.ts) BEFORE control returns
+    // to `wrapObserver`, so this case is guarded by TWO independent swallows in
+    // series (recordAttrs + wrapObserver) and reds only if BOTH break — it is a
+    // composition-root smoke proving the outer telemetry layer is also fail-open,
+    // NOT a single-point regression detector for `wrapObserver`. The wrapObserver
+    // catches themselves are localized (red-on-injection) by the direct-injection
+    // unit cases above, which rethrow one catch at a time.
     const jail = makeJailRoot()
     try {
       writeFileSync(join(jail, "edit.dat"), SEED)
