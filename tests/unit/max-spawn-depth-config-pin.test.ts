@@ -33,11 +33,20 @@ describe("runtime-config maxSpawnDepth", () => {
     expect(runtimeConfig().maxSpawnDepth).toBe(2)
   })
 
-  test("invalid / zero floors to the default 1 (positive-number parser)", () => {
-    for (const bad of ["0", "-3", "", "abc"]) {
+  test("negative / non-integer / empty floors to the default 1 (non-negative-int parser)", () => {
+    for (const bad of ["-3", "", "abc", "1.5", " ", "0x1"]) {
       process.env.QUANTA_MAX_SPAWN_DEPTH = bad
       __resetRuntimeConfig()
       expect(runtimeConfig().maxSpawnDepth).toBe(1)
     }
+  })
+
+  // FIX-B (jul-13 nesting-control): 0 is now a VALID kill-switch value, not
+  // floored to 1. `parseNonNegativeInt` accepts 0 (distinct from absent); the
+  // spawn predicate then reads `depth < 0` = false for EVERY agent incl. root.
+  test("kill-switch: QUANTA_MAX_SPAWN_DEPTH=0 ⇒ 0 (not floored to 1)", () => {
+    process.env.QUANTA_MAX_SPAWN_DEPTH = "0"
+    __resetRuntimeConfig()
+    expect(runtimeConfig().maxSpawnDepth).toBe(0)
   })
 })

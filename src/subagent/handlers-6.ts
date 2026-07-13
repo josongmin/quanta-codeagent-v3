@@ -69,12 +69,17 @@ import type { SubagentRequest, SubagentRunner } from "./types"
  *  error with cause:"pty_cap". */
 export const MAX_PTY = 32
 
-/** (d) Built-in recursion-depth ceiling for `spawn_agent` — applied when
+/** (d) Last-resort recursion-depth ceiling for `spawn_agent` — applied when
  *  NEITHER `input.maxDepth` NOR `deps.maxDepth` is supplied, so the fan-out
- *  path is never fail-open unbounded. Mirrors `subagent-runner`'s
- *  `DEFAULT_MAX_DEPTH` (kept as a local literal to honor the slice fence —
- *  handlers-6 imports no `@/agent` code). A child whose depth exceeds this is
- *  rejected with `cause:"depth_exceeded"`. */
+ *  path is never fail-open unbounded. NEVER hit in practice: the `@/agent`
+ *  caller (`tier1/subagent.ts`) resolves the effective cap
+ *  (`config.subagent?.maxDepth ?? spawnDepthCap()`, the SAME value the
+ *  capability gate and the runner reject use) and threads it in as
+ *  `deps.maxDepth`. This literal exists ONLY to honor the slice fence
+ *  (`@/subagent` may not import `@/agent` code, incl. `spawnDepthCap`) for a
+ *  direct `@/subagent` caller that omits `maxDepth`. FIX-A, jul-13
+ *  nesting-control. A child whose depth exceeds the cap is rejected with
+ *  `cause:"depth_exceeded"`. */
 export const DEFAULT_MAX_DEPTH = 3
 
 /** Soft default for `wait_agent` blocking timeouts. Mirrors `task_output`'s

@@ -459,6 +459,8 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "int",
     default: 1,
     group: "subagent",
-    describe: "Max agent depth that receives spawn tools. 1 = root-only (children are leaves).",
+    describe:
+      "Max agent depth that receives spawn tools. 1 = root-only (children are leaves); " +
+      "0 = kill-switch (NO agent, incl. root, gets spawn tools). Negative/non-integer ⇒ default 1.",
   },
 ]

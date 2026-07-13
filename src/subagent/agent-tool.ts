@@ -6,6 +6,13 @@ import { validateAgentType } from "./agent-type"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
 
+/** Last-resort recursion ceiling for the `agent` tool's depth pre-check —
+ *  NEVER hit in practice: the `@/agent` caller (`tier1/subagent.ts`) resolves
+ *  the effective cap (`config.subagent?.maxDepth ?? spawnDepthCap()`, the SAME
+ *  value the capability gate and the runner reject use) and threads it in as
+ *  `opts.maxDepth`, so this literal only exists to honor the slice fence
+ *  (`@/subagent` may not import `@/agent/spawn-depth-policy`) for a direct
+ *  `@/subagent` caller that omits `maxDepth`. FIX-A, jul-13 nesting-control. */
 const DEFAULT_MAX_DEPTH = 3
 
 /** Exported for the C5059-04 trio↔6-tool `fork_turns` accept-set parity guard

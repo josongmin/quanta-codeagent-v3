@@ -345,9 +345,15 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
     subagentDelegateSuppress: gateOn(env, "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"),
     // RFC jul-13 §6.5 A — max agent depth that receives spawn tools. NUMERIC
     // POLICY (not a bool gate): default 1 = root-only (children are leaves). The
-    // escape hatch raises the cap; 0 is rejected by parsePositiveNumber ⇒ default 1.
+    // escape hatch raises the cap. FIX-B (jul-13 nesting-control): parsed with
+    // `parseNonNegativeInt` (was `parsePositiveNumber`) so `0` is a valid value —
+    // a total KILL-SWITCH: `maxSpawnDepth=0` ⇒ `spawnToolsAvailable = depth < 0`
+    // is false for EVERY agent (incl. root at depth 0) ⇒ no agent gets spawn
+    // tools. Unset / negative / non-integer ⇒ `undefined` ⇒ default 1 (root
+    // spawns, byte-identical to before). The RFC (§4.2/§6.5 A) specified a
+    // non-negative parse for exactly this cap=0 kill-switch.
     maxSpawnDepth:
-      parsePositiveNumber(env["QUANTA_MAX_SPAWN_DEPTH"], "QUANTA_MAX_SPAWN_DEPTH") ?? 1,
+      parseNonNegativeInt(env["QUANTA_MAX_SPAWN_DEPTH"], "QUANTA_MAX_SPAWN_DEPTH") ?? 1,
     // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
     sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
     // N2 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP connector tools.
