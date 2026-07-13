@@ -17,9 +17,14 @@
  */
 import { afterEach, describe, expect, test } from "bun:test"
 import { buildSystemPrompt } from "@/agent/prompt"
+import {
+  BODY_AFTER_PERSONA_TOOL_ROUTING,
+  BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED,
+  FANOUT_ANCHOR,
+} from "@/agent/prompt-body"
 import { BODY_AFTER_PERSONA_ATOMS } from "@/agent/prompt-graph/atoms-body"
 import { reachableBodyContexts } from "@/agent/prompt-graph/contexts"
-import { renderAtoms } from "@/agent/prompt-graph/render"
+import { renderAtoms, selectAtoms } from "@/agent/prompt-graph/render"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
 const ctx0 = reachableBodyContexts()[0]
@@ -85,5 +90,49 @@ describe("C5059-05 — knob reaches the real buildSystemPrompt (not inert)", () 
 
   test("the knob genuinely changes the built prompt", () => {
     expect(build(false)).not.toBe(build(true))
+  })
+})
+
+// STRUCTURAL GUARDS (adversarial test-audit gaps): the `contains` assertions let
+// several mutations survive — a variant rendering in ZERO/BOTH contexts, an OFF
+// byte-drift, or the derived SUPPRESSED block dropping/keeping a stray line.
+describe("C5059-05 — tool-routing variant structural invariants", () => {
+  const TR = new Set(["BODY-TOOL-ROUTING", "BODY-TOOL-ROUTING-SUPPRESS"])
+
+  test("EVERY reachable ctx renders EXACTLY ONE tool-routing variant (never zero, never both)", () => {
+    // Load-bearing mutual-exclusivity: the two variants share atomId and gate on
+    // opposite facet values. Removing a `when`, or setting both to the same
+    // condition, breaks this — and the prompt-graph verifier (conflictsWith-only)
+    // does NOT catch it. This does.
+    for (const ctx of reachableBodyContexts()) {
+      const fired = selectAtoms(BODY_AFTER_PERSONA_ATOMS, ctx)
+        .map((a) => a.variantId)
+        .filter((v) => TR.has(v))
+      expect(fired.length, JSON.stringify({ suppress: ctx.hasDelegationSuppress })).toBe(1)
+    }
+  })
+
+  test("OFF render EXACTLY equals the frozen base tool-routing (byte-identical pin)", () => {
+    const offLines = selectAtoms(BODY_AFTER_PERSONA_ATOMS, { ...ctx0, hasDelegationSuppress: false })
+      .filter((a) => a.atomId === "BODY-TOOL-ROUTING")
+      .flatMap((a) => a.lines)
+    expect(offLines).toEqual([...BODY_AFTER_PERSONA_TOOL_ROUTING])
+  })
+
+  test("SUPPRESSED == base with ONLY the 3-line fan-out block swapped (no other line dropped/dup)", () => {
+    const i = BODY_AFTER_PERSONA_TOOL_ROUTING.indexOf(FANOUT_ANCHOR)
+    expect(i).toBeGreaterThanOrEqual(0)
+    const head = BODY_AFTER_PERSONA_TOOL_ROUTING.slice(0, i)
+    const tail = BODY_AFTER_PERSONA_TOOL_ROUTING.slice(i + 3)
+    // head + tail must be byte-identical in the suppressed variant — only the
+    // middle (3 fan-out lines → N authorization lines) differs.
+    expect(BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED.slice(0, i)).toEqual([...head])
+    expect(
+      BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED.slice(
+        BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED.length - tail.length,
+      ),
+    ).toEqual([...tail])
+    // and the swap actually removed the unconditional fan-out encouragement
+    expect(BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED).not.toContain(FANOUT_ANCHOR)
   })
 })

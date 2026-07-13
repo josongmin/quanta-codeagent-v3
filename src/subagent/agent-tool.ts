@@ -8,7 +8,9 @@ import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskK
 
 const DEFAULT_MAX_DEPTH = 3
 
-const agentSchema = z.object({
+/** Exported for the C5059-04 trio↔6-tool `fork_turns` accept-set parity guard
+ *  (`SpawnAgentInputSchema` must accept/reject the SAME values as this). */
+export const agentSchema = z.object({
   prompt: z.string().describe("The task for the subagent to carry out autonomously"),
   agent_type: z
     .string()

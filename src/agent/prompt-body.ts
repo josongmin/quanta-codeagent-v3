@@ -310,7 +310,7 @@ export const BODY_AFTER_PERSONA_TOOL_ROUTING: readonly string[] = [
  *  moves/renames it throws (fail-loud) rather than silently diverging. Rendered
  *  ONLY when `hasDelegationSuppress` is true; the base renders byte-identically
  *  when false. */
-const FANOUT_ANCHOR =
+export const FANOUT_ANCHOR =
   "- Need to fan out independent exploration subagents → emit multiple `agent`"
 export const BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED: readonly string[] = (() => {
   const i = BODY_AFTER_PERSONA_TOOL_ROUTING.indexOf(FANOUT_ANCHOR)

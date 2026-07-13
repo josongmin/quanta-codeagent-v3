@@ -15,6 +15,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { SpawnAgentInputSchema } from "@/subagent/tools-6"
+import { zodToJsonSchema } from "@/tool/schema"
 
 describe("C5059-04 — fork_turns reachable through strict 6-tool schema", () => {
   // `0` is ACCEPTED, mirroring the trio `agent` tool's `z.number().int().min(0)`
@@ -55,5 +56,19 @@ describe("C5059-04 — fork_turns reachable through strict 6-tool schema", () =>
     expect(shape.description).toBeDefined()
     expect(shape.description).toContain("none")
     expect(shape.description).toContain("last N turns")
+  })
+
+  test("the REAL model-facing JSON schema (zodToJsonSchema) carries the description", () => {
+    // The zod-level `.description` above is NOT the model-facing path — the
+    // converter (`@/tool/schema`) flattens the union; a `...desc`-dropping
+    // regression there would keep the zod test green but blind the model. Pin
+    // the actual rendered schema.
+    const rendered = zodToJsonSchema(SpawnAgentInputSchema) as {
+      properties?: { fork_turns?: { description?: string } }
+    }
+    const ft = rendered.properties?.fork_turns
+    expect(ft?.description).toBeDefined()
+    expect(ft?.description).toContain("none")
+    expect(ft?.description).toContain("last N turns")
   })
 })

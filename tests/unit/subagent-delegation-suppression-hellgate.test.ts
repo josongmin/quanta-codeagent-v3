@@ -18,7 +18,11 @@
  */
 import { afterEach, describe, expect, test } from "bun:test"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared/runtime-config"
-import { DELEGATION_SUPPRESSION_POLICY, withDelegationPolicy } from "@/shared/delegation-policy"
+import {
+  DELEGATION_SUPPRESSION_POLICY,
+  delegationSuppressEnabled,
+  withDelegationPolicy,
+} from "@/shared/delegation-policy"
 
 const KNOB = "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"
 
@@ -51,6 +55,32 @@ describe("C5059-05 — delegation suppression policy (pure)", () => {
     expect(DELEGATION_SUPPRESSION_POLICY).toContain("EXPLICITLY")
     expect(DELEGATION_SUPPRESSION_POLICY).toContain("NOT authorization")
     expect(DELEGATION_SUPPRESSION_POLICY.toLowerCase()).toContain("single")
+  })
+
+  test("policy pins the specific anti-gaming carve-out enumeration", () => {
+    // The whole POINT of the policy is that 'I need depth/research' is NOT
+    // authorization. A mutation collapsing the enumeration to a generic 'such
+    // requests are NOT authorization' would survive the test above — pin the
+    // concrete triggers AND their adjacency to 'NOT authorization'.
+    const p = DELEGATION_SUPPRESSION_POLICY.toLowerCase()
+    for (const trigger of ["depth", "research", "investigation", "thoroughness", "analysis"]) {
+      expect(p, trigger).toContain(trigger)
+    }
+    expect(DELEGATION_SUPPRESSION_POLICY).toMatch(
+      /depth, research, investigation, thoroughness,[^.]*NOT authorization/,
+    )
+  })
+
+  test("delegationSuppressEnabled pins the FULL gateOn vocab (not just '1')", () => {
+    // The consumers call THIS (not runtimeConfig) — narrowing it to `=== "1"`
+    // would silently break on/true/yes users and every other test stays green.
+    // Pure env-map arg ⇒ zero process.env leakage.
+    for (const on of ["1", "on", "true", "yes", "TRUE", "On", "  1  ", "Yes"]) {
+      expect(delegationSuppressEnabled({ [KNOB]: on }), on).toBe(true)
+    }
+    for (const off of ["0", "off", "false", "no", "", "garbage", undefined]) {
+      expect(delegationSuppressEnabled({ [KNOB]: off }), String(off)).toBe(false)
+    }
   })
 
   test("knob resolves through runtimeConfig, default-OFF, only '1' enables", () => {
@@ -102,6 +132,16 @@ describe("C5059-05 — ALL spawn surfaces project the SSOT atom (no drift)", () 
     for (const s of await surfaces()) {
       expect(s.render().startsWith(DELEGATION_SUPPRESSION_POLICY), s.orig.slice(0, 24)).toBe(true)
       expect(s.render().split("DELEGATION POLICY:").length - 1).toBe(1)
+    }
+  })
+
+  test("ON ⇒ both surfaces EQUAL exactly policy + \\n\\n + frozen base (no ON-path drift)", async () => {
+    // startsWith + count let a base corrupted ONLY on the ON path (or trailing
+    // garbage after the base) survive. Exact-assembly `.toBe` makes ON as strong
+    // as the OFF frozen-literal pin.
+    setSuppress(true)
+    for (const s of await surfaces()) {
+      expect(s.render(), s.orig.slice(0, 24)).toBe(`${DELEGATION_SUPPRESSION_POLICY}\n\n${s.orig}`)
     }
   })
 

@@ -21,6 +21,7 @@ import { describe, expect, test } from "bun:test"
 import { buildForkTurnsPreamble, composeForkedPrompt } from "@/agent/fork-turns"
 import { redactTranscript } from "@/agent/tier1/advisor"
 import type { Message } from "@/llm"
+import { agentSchema } from "@/subagent/agent-tool"
 import {
   createAgentTool,
   handleSpawnAgent,
@@ -108,5 +109,48 @@ describe("ALBB-16 #2 — 6-tool spawn_agent fork parity (shared source)", () => 
     expect(six).toContain("now do Z")
     expect(six).not.toContain("what is X?")
     expect(six).toBe(trio)
+  })
+})
+
+// C5059-04 STRENGTHENING (adversarial test-audit gaps): the two schemas are
+// hand-copied duplicates whose "EXACTLY in sync" contract had NO test — a
+// one-sided edit (e.g. 6-tool positive() while trio stays min(0)) silently
+// diverged and every parity test stayed green. These pin the real seams.
+describe("ALBB-16 / C5059-04 — fork_turns schema + default + boundary hardening", () => {
+  test("trio and 6-tool fork_turns accept-sets are IDENTICAL (permanent divergence guard)", () => {
+    const cases = ["none", "all", 0, 1, 2, 1_000_000_000, -1, 1.5, "2", true, Number.NaN, Number.POSITIVE_INFINITY]
+    for (const v of cases) {
+      const six = SpawnAgentInputSchema.safeParse({ prompt: "x", fork_turns: v }).success
+      const trio = agentSchema.safeParse({ prompt: "x", fork_turns: v }).success
+      expect(six, `divergence on ${JSON.stringify(v)}`).toBe(trio)
+    }
+  })
+
+  test("ABSENT fork_turns ⇒ cold start (default is 'none', NOT 'all')", async () => {
+    // Kills the `?? "all"` handler mutation — the existing helper always passes a
+    // spec, so the default-when-absent branch was untested.
+    const seen: string[] = []
+    const runner: SubagentRunner = async (req) => {
+      seen.push(req.prompt)
+      return { ok: true, finalText: "done", turns: 1 }
+    }
+    const parsed = SpawnAgentInputSchema.parse({ prompt: "plain" }) // no fork_turns key
+    await handleSpawnAgent(parsed, { runner, registry: new TaskRegistry(), forkPrompt } as never)
+    await new Promise<void>((r) => setTimeout(r, 5))
+    expect(seen.at(-1)).toBe("plain")
+    expect(seen.at(-1)).not.toContain("Inherited parent context")
+  })
+
+  test("fork_turns:0 is end-to-end byte-identical to 'none' (schema→handler)", async () => {
+    const zero = await sixToolChildPrompt("task", 0)
+    const none = await sixToolChildPrompt("task", "none")
+    expect(zero).toBe("task")
+    expect(zero).toBe(none)
+  })
+
+  test("large N (1e9) end-to-end clamps to all available turns", async () => {
+    const big = await sixToolChildPrompt("task", 1_000_000_000)
+    expect(big).toContain("what is X?") // inherited back to the first user turn
+    expect(big).toBe(await sixToolChildPrompt("task", "all"))
   })
 })
