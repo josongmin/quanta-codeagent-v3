@@ -73,3 +73,45 @@ describe("spawnToolsAvailable — deterministic depth<cap truth-table", () => {
     expect(spawnToolsAvailable({ depth: 1 })).toBe(false)
   })
 })
+
+describe("spawnToolsAvailable — config.subagent.maxDepth overrides the env cap (R1)", () => {
+  // R1: the PRE-EXISTING per-run knob QUANTA_SUBAGENT_MAX_DEPTH flows to
+  // config.subagent.maxDepth and is honored by BOTH the runner reject and (now)
+  // the capability gate. Effective cap === `config.subagent?.maxDepth ??
+  // spawnDepthCap()`. These cases leave QUANTA_MAX_SPAWN_DEPTH UNSET
+  // (spawnDepthCap()===1) so the ONLY lever is config.subagent.maxDepth.
+
+  // [subagent.maxDepth (undefined = absent), depth, expected]
+  const cases: ReadonlyArray<readonly [number | undefined, number, boolean]> = [
+    [2, 0, true], // per-run cap 2, root ⇒ spawns
+    [2, 1, true], // per-run cap 2, depth-1 child ⇒ STILL spawns (the R1 fix)
+    [2, 2, false], // per-run cap 2, depth-2 grandchild ⇒ leaf
+    [undefined, 1, false], // no per-run cap ⇒ falls back to env cap 1 ⇒ leaf
+    [0, 0, false], // kill switch: cap 0 ⇒ even root does not spawn
+  ]
+
+  for (const [maxDepth, depth, expected] of cases) {
+    test(`subagent.maxDepth=${String(maxDepth)} depth=${depth} ⇒ ${expected}`, () => {
+      // no withCap ⇒ spawnDepthCap() === 1 (default). subagent.maxDepth is the lever.
+      const config: Pick<AgentConfig, "depth" | "subagent"> = {
+        depth,
+        ...(maxDepth !== undefined
+          ? ({ subagent: { maxDepth } } as Pick<AgentConfig, "subagent">)
+          : {}),
+      }
+      expect(spawnToolsAvailable(config)).toBe(expected)
+    })
+  }
+
+  test("MUTATION witness: dropping config.subagent.maxDepth (env-only gate) turns depth-1/cap-2 RED", () => {
+    // If the gate reverts to `(depth ?? 0) < spawnDepthCap()` (ignoring
+    // config.subagent.maxDepth), this depth-1 child with per-run cap 2 would lose
+    // its tools (1 < 1 === false) — the exact HIGH regression. Pin it TRUE.
+    const config = { depth: 1, subagent: { maxDepth: 2 } } as Pick<
+      AgentConfig,
+      "depth" | "subagent"
+    >
+    expect(spawnDepthCap()).toBe(1) // env cap alone would say leaf…
+    expect(spawnToolsAvailable(config)).toBe(true) // …but per-run cap 2 keeps tools
+  })
+})

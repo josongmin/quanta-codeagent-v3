@@ -21,6 +21,19 @@ export const spawnDepthCap = (): number => runtimeConfig().maxSpawnDepth
 
 /** Is THIS agent (`config.depth`) entitled to spawn tools? depth 0 (root) ⇒ yes,
  *  depth ≥ cap ⇒ leaf. Deterministic (NOT a heuristic): `(depth ?? 0) < cap`.
- *  Absent depth ⇒ treated as 0 (root), matching the `AgentConfig.depth` contract. */
-export const spawnToolsAvailable = (config: Pick<AgentConfig, "depth">): boolean =>
-  (config.depth ?? 0) < spawnDepthCap()
+ *  Absent depth ⇒ treated as 0 (root), matching the `AgentConfig.depth` contract.
+ *
+ *  The effective cap is `config.subagent?.maxDepth ?? spawnDepthCap()` — the
+ *  IDENTICAL expression the runner uses to bound recursion
+ *  (`createSubagentRunner`: `opts.maxDepth ?? spawnDepthCap()` where
+ *  `opts.maxDepth = config.subagent.maxDepth`). This makes the capability gate
+ *  agree with the runtime reject: the PRE-EXISTING per-run knob
+ *  `QUANTA_SUBAGENT_MAX_DEPTH` (→ `config.subagent.maxDepth`, documented as
+ *  "Subagent recursion depth cap") widens BOTH surfaces together. A user who
+ *  sets `QUANTA_SUBAGENT_MAX_DEPTH=2` without `QUANTA_MAX_SPAWN_DEPTH` therefore
+ *  keeps spawn tools on a depth-1 child (consistent with the runner allowing
+ *  that child to spawn) instead of silently losing them. Neither knob set ⇒
+ *  cap 1 = root-only (`config.subagent?.maxDepth` undefined ⇒ falls back to
+ *  `spawnDepthCap()` = `maxSpawnDepth`, default 1). */
+export const spawnToolsAvailable = (config: Pick<AgentConfig, "depth" | "subagent">): boolean =>
+  (config.depth ?? 0) < (config.subagent?.maxDepth ?? spawnDepthCap())
