@@ -266,6 +266,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-config-assembler.ts",
   },
   {
+    envKey: "QUANTA_CONVERSATION_ACTIONS",
+    kind: "bool",
+    default: true,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Mid-turn typed control surface (/cancel, /summarize-now) + same-turn drain (jul-10 SOTA++ #3); CLI-seeded DEFAULT-ON, set =0 to disable.",
+    readSite: "apps/cli/cli-feature-gates.ts",
+  },
+  {
     envKey: "QUANTA_PROMPT_CACHE_STATUS",
     kind: "bool",
     default: false,

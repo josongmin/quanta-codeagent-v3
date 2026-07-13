@@ -164,6 +164,15 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "llm/factory.ts",
   },
   {
+    envKey: "QUANTA_REASONING_SUMMARY_DETAIL",
+    kind: "enum",
+    default: undefined,
+    group: "llm",
+    home: "runtime-config",
+    describe: "Reasoning summary detail level (auto|concise|detailed).",
+    readSite: "llm/factory.ts",
+  },
+  {
     envKey: "QUANTA_DEBUG_OAUTH",
     kind: "bool",
     default: false,

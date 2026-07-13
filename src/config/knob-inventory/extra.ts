@@ -659,6 +659,16 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "§7.3 ci_finding structured CI-investigation record tool (opt-in).",
     readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghTools opts.ciFindingStore)",
   },
+  {
+    envKey: "QUANTA_CI_BOT_GH_WRITE",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe:
+      "B3/B4 ci-bot gh write path — wire the guarded gitRunner into ghOpts so gh_pr_resolve_thread/gh_pr_open can issue bounded rebases (opt-in).",
+    readSite: "apps/agent/mode-presets/ci-bot.ts (buildCiBotWiring ghOpts gitRunner)",
+  },
   // TB lever #2 / v2 (RFC jul-2 TB levers/03) — the verify-gate v2
   // compare-to-reference gate in the terminal brain. AGENT-SIDE read via
   // `gateOn(env, "QUANTA_TB_VERIFY_GATE")` in `apps/terminal/brain-mode.ts` (a terminal-surface

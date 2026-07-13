@@ -201,6 +201,15 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
     readSite: "runner/diff-ops.ts",
   },
   {
+    envKey: "QUANTA_DIFF_HUNKS",
+    kind: "bool",
+    default: false,
+    group: "diff",
+    home: "runtime-config",
+    describe: "Hunk-mode diff rendering (per-hunk context windows instead of full-file; opt-in).",
+    readSite: "runner/diff-ops.ts",
+  },
+  {
     envKey: "QUANTA_GIT_BUDGET_MAX_COMMITS",
     kind: "int",
     default: undefined,
