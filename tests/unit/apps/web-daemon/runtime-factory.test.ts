@@ -83,6 +83,8 @@ describe("web-daemon runtime factory", () => {
 
   test("the production runtime base publishes the interactive prompt surface profile", () => {
     const src = readFileSync(join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"), "utf8")
-    expect(src).toMatch(/promptSurfaceProfile:\s*promptSurfaceProfileForRunMode\("interactive"\)/)
+    // `("interactive"` may be followed by `)` OR `, {envPosture…}` (the env-posture
+    // arg added later) — accept either so the pin tracks the call, not its arity.
+    expect(src).toMatch(/promptSurfaceProfile:\s*promptSurfaceProfileForRunMode\("interactive"[,)]/)
   })
 })
