@@ -48,6 +48,7 @@ evidence:
     - src/tool/write/index.ts
     - src/tool/scripted-replace.ts
     - src/tool/apply-patch.ts
+    - src/tool/notebook-edit/tool.ts
     - src/tool/types.ts
     - src/shared/runtime-config.ts
     - src/shared/runtime-config/types-extra.ts
@@ -65,6 +66,7 @@ evidence:
       - tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts
       - tests/unit/edit-fresh-hash-apply-patch-hellgate.test.ts
       - tests/unit/edit-fresh-hash-apply-patch-audit-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-notebook-hellgate.test.ts
       - tests/unit/edit-fresh-hash-agent-loop-e2e-hellgate.test.ts
     integration: []
     contract: []
@@ -103,8 +105,12 @@ notes: |
   (free digest) but apply_patch's atomic temp+rename discards per-file content, so
   emitting would need N re-reads — defeating the zero-standing-cost invariant. A
   stat (refresh) has no such cost, so the correctness half ships; emission does
-  not. `notebook_edit` (cell-JSON, not a flat file the model chains via sha256) is
-  fully out of scope.
+  not. `notebook_edit` gets the SAME refresh-only treatment: it mutates the .ipynb
+  and uses the same DEFAULT-ON mtime guard, so an adversarial completeness audit
+  found it would false-`stale_read` a chained notebook_edit/edit. It now calls
+  refreshStaleReadBaseline post-write (pinned) but OMITS emission — it is cell-op
+  based and does not consume `expected_hash`, so the single-flat-file chain
+  contract does not apply.
 
   DEFEAT-AND-CURE (found by adversarial hardening): the DEFAULT-ON mtime stale-read
   guard (ADR-0474) would veto a fresh-hash CHAINED edit with `stale_read` because a
@@ -112,8 +118,9 @@ notes: |
   the read-time value — silently defeating the "no re-read" promise in the default
   config. Cured by refreshStaleReadBaseline (a successful mutation IS a fresh read
   of its own output). An EXTERNAL modification still trips stale_read (TOCTOU
-  preserved — pinned). Suite: 7 files, ~54 tests, red-on-injection proven by
-  disabling the shared helper (6 mtime/cross-tool RED) and freshHashNote (3 emit RED).
+  preserved — pinned). Suite: 11 files, 85 tests, 1122 expect(), red-on-injection
+  proven per tool (disabling refreshStaleReadBaseline/refreshApplyBaselines flips
+  the mtime/cross-tool/apply/notebook chains RED; freshHashNote flips the emit RED).
 
   Ships DEFAULT-ON (jul-13): this is not a speculative lever — the emission removes
   a forced re-read (small fixed add vs a file-size-proportional re-read saved) and

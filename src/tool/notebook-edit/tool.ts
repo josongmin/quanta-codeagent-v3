@@ -11,12 +11,12 @@
  * is on (tool menu byte-identical otherwise).
  */
 import { z } from "zod"
-import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { errMessage } from "@/shared"
+import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
 import { globWriteGuardEvent, writeBudgetEvent } from "../_shared/exfil-rail-guards"
+import { refreshStaleReadBaseline } from "../_shared/fresh-hash"
 import { captureFileHistory } from "../file-history/capture"
 import { gitWriteGuardDeny } from "../git-write-guard-result"
-import { refreshStaleReadBaseline } from "../_shared/fresh-hash"
 import { guardWrite } from "../stale-read-guard"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { editNotebook, type NotebookEditOp } from "./index"
@@ -29,7 +29,10 @@ const schema = z.object({
   cell: z.number().int().optional().describe("0-based cell index (str_replace / delete)."),
   old_string: z.string().optional().describe("str_replace: text to find within the cell."),
   new_string: z.string().optional().describe("str_replace: replacement text."),
-  replace_all: z.boolean().optional().describe("str_replace: replace every occurrence in the cell."),
+  replace_all: z
+    .boolean()
+    .optional()
+    .describe("str_replace: replace every occurrence in the cell."),
   index: z.number().int().optional().describe("insert: 0-based position (0..cellCount)."),
   cell_type: z.enum(["code", "markdown"]).optional().describe("insert: new cell type."),
   source: z.string().optional().describe("insert: the new cell's source text."),
@@ -146,7 +149,8 @@ export const makeNotebookEditTool = (fs: FileSystemPort = defaultFileSystemPort)
       return
     }
     try {
-      if (fs.writeFileAtomic !== undefined) await fs.writeFileAtomic(input.path, edited.json, ctx.cwd)
+      if (fs.writeFileAtomic !== undefined)
+        await fs.writeFileAtomic(input.path, edited.json, ctx.cwd)
       else await fs.writeFile(input.path, edited.json, ctx.cwd)
     } catch (e) {
       yield err(`write failed: ${errMessage(e)}`)
@@ -164,7 +168,10 @@ export const makeNotebookEditTool = (fs: FileSystemPort = defaultFileSystemPort)
     // based and does not consume `expected_hash`, so the single-flat-file chain
     // contract does not apply (refresh-only, like apply_patch).
     await refreshStaleReadBaseline(fs, ctx, { path: input.path, base: ctx.cwd })
-    yield { type: "result", result: { ok: true, output: `notebook_edit: ${edited.summary} in ${input.path}` } }
+    yield {
+      type: "result",
+      result: { ok: true, output: `notebook_edit: ${edited.summary} in ${input.path}` },
+    }
   },
 })
 
