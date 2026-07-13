@@ -61,25 +61,26 @@ afterEach(() => {
   __resetRuntimeConfig()
 })
 
-describe("jul-13 edit-fresh-hash dispatch WIRE hellgate", () => {
-  test("(a) ON: QUANTA_EDIT_FRESH_HASH=1 ⇒ buildToolContext threads ctx.editFreshHash=true", () => {
-    const ctx = ctxWith("1")
+describe("jul-13 edit-fresh-hash dispatch WIRE hellgate (DEFAULT-ON opt-out)", () => {
+  test("(a) DEFAULT-ON (knob unset): buildToolContext threads ctx.editFreshHash=true", () => {
+    const ctx = ctxWith(undefined)
     // The exact line under test: the dispatch seam read runtimeConfig().editFreshHash
-    // and surfaced it. Deleting that spread makes this RED (feature inert).
+    // (now default-ON) and surfaced it. Deleting that spread makes this RED (inert).
     expect(ctx.editFreshHash).toBe(true)
   })
 
-  test("(b) OFF (knob unset): ctx.editFreshHash ABSENT (not false) — byte-identical shape", () => {
-    const ctx = ctxWith(undefined)
+  test("(b) OFF (=off kill-switch): ctx.editFreshHash ABSENT (not false)", () => {
+    const ctx = ctxWith("off")
     expect(ctx.editFreshHash).toBeUndefined()
     expect("editFreshHash" in ctx).toBe(false)
   })
 
-  test("(c) STRICT gate: loose-truthy values stay OFF", () => {
-    for (const loose of ["on", "true", "0", "yes", ""]) {
-      const ctx = ctxWith(loose)
-      expect(ctx.editFreshHash).toBeUndefined()
-      expect("editFreshHash" in ctx).toBe(false)
+  test("(c) STRICT opt-out: ONLY the literal `off` disables — every other value stays ON", () => {
+    // Mirror the fs-jail / stale-read-guard strict kill-switch vocabulary: a stray
+    // falsy token must NOT silently disable a default-ON feature.
+    for (const stayOn of ["1", "on", "true", "0", "yes", "", "OFF", " off"]) {
+      const ctx = ctxWith(stayOn)
+      expect(ctx.editFreshHash).toBe(true)
     }
   })
 })

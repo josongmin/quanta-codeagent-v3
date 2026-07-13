@@ -56,6 +56,7 @@ const verifyCtx = (verifyStrategy: VerifyStrategy): PromptContext => ({
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
   hasDirectives: false,
+  hasDelegationSuppress: false,
 })
 
 /** Rule constant kept for back-compat callers/tests — its `.lines` are the

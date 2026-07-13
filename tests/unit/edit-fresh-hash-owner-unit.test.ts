@@ -94,7 +94,8 @@ const run = async (
 // ─────────────────────────────────────────────────────────────────────────────
 describe("edit-fresh-hash · GATE STRICTNESS (runtimeConfig mutation table)", () => {
   // Snapshot → mutate env → reset cached config → read → restore. The gate is
-  // `gateOnStrict(env,"QUANTA_EDIT_FRESH_HASH")` === `env[...] === "1"`.
+  // DEFAULT-ON opt-out: `!gateDisabledStrict(env,"QUANTA_EDIT_FRESH_HASH")` ⇒ TRUE
+  // for everything EXCEPT the literal `off` (fs-jail / stale-read-guard vocabulary).
   const gateFor = (value: string | undefined): boolean => {
     const prev = process.env[KNOB]
     if (value === undefined) delete process.env[KNOB]
@@ -113,30 +114,30 @@ describe("edit-fresh-hash · GATE STRICTNESS (runtimeConfig mutation table)", ()
     __resetRuntimeConfig()
   })
 
-  test("exactly \"1\" ⇒ TRUE (the sole enabling literal)", () => {
-    expect(gateFor("1")).toBe(true)
+  test("exactly \"off\" ⇒ FALSE (the sole disabling literal)", () => {
+    expect(gateFor("off")).toBe(false)
   })
 
-  // Every neighbour a truthy-loosening regression would flip ON. `undefined`
-  // stands in for the UNSET env var. If gateOnStrict ever becomes truthy-based,
-  // "on"/"true"/"yes"/"2"/"01"/" 1" would flip TRUE and this table goes RED.
-  const OFF_CASES: ReadonlyArray<readonly [label: string, value: string | undefined]> = [
-    ["unset", undefined],
+  // DEFAULT-ON opt-out: a stray token must NOT silently disable the feature — only
+  // the literal `off` does. If the gate ever loosened to truthy/falsy vocabulary,
+  // "0"/""/"OFF"/" off" would flip FALSE and this table goes RED.
+  const ON_CASES: ReadonlyArray<readonly [label: string, value: string | undefined]> = [
+    ["unset (default-ON)", undefined],
     ["empty", ""],
     ["zero", "0"],
+    ["one", "1"],
     ["on", "on"],
     ["true", "true"],
-    ["TRUE", "TRUE"],
     ["yes", "yes"],
-    ["leading-space \" 1\"", " 1"],
-    ["trailing-space \"1 \"", "1 "],
-    ["zero-padded \"01\"", "01"],
+    ["OFF (case-sensitive, not disabling)", "OFF"],
+    ["leading-space \" off\"", " off"],
+    ["trailing-space \"off \"", "off "],
     ["two", "2"],
   ]
 
-  for (const [label, value] of OFF_CASES) {
-    test(`${label} ⇒ FALSE (strict \`=== "1"\`, not truthy)`, () => {
-      expect(gateFor(value)).toBe(false)
+  for (const [label, value] of ON_CASES) {
+    test(`${label} ⇒ TRUE (only literal \`off\` disables)`, () => {
+      expect(gateFor(value)).toBe(true)
     })
   }
 })
@@ -152,10 +153,10 @@ describe("edit-fresh-hash · KNOB CATALOG PARITY", () => {
     expect(entry).toBeDefined()
   })
 
-  test("catalog row has kind:\"bool\" and default:false (default-OFF opt-in)", () => {
+  test("catalog row has kind:\"bool\" and default:true (default-ON opt-out)", () => {
     const entry = RUNTIME_CONFIG_KNOBS.find((k) => k.envKey === KNOB)
     expect(entry?.kind).toBe("bool")
-    expect(entry?.default).toBe(false)
+    expect(entry?.default).toBe(true)
   })
 
   test("exactly ONE catalog row for the knob (no duplicate registration)", () => {

@@ -1,18 +1,19 @@
 # C5059-05 — Default-suppress unrequested delegation
 
-> ## 구현 상태 (2026-07-13, feat/codex-5059-absorption) + hellaudit 결과
-> **DONE (hellgate RED→GREEN, 3-lens 적대어딧):**
-> - SSOT 정책 원자 `src/subagent/delegation-policy.ts`(`DELEGATION_SUPPRESSION_POLICY` + `withDelegationPolicy` + knob `QUANTA_SUBAGENT_DELEGATE_SUPPRESS`, default-OFF).
-> - 2 primary 툴 배선: `agent`(`agent-tool.ts` `agentToolDescription()`) + 6-tool `spawn_agent`(`agent-tools-6.ts` `spawnAgent6Description()`). 둘 다 동일 SSOT 원자 project(패러프레이즈 0).
-> - 테스트 `tests/unit/subagent-delegation-suppression-hellgate.test.ts`(6/0). **OFF byte-identical 검증됨**(어딧 R1: 두 description char-단위로 HEAD와 동일, drift 0). 하드닝: ON 정확조립 `.toBe`(separator 잡음) + OFF frozen-literal `.toBe`(추출 드리프트 잡음). 뮤테이션-RED (a)(b)(c) 확인.
+> ## 구현 상태 (2026-07-13, feat/codex-5059-absorption) — hellaudit R2 완결성 갭 대부분 해소
+> **✅ DONE (hellgate + hellaudit iterated, 111/0 green, 내 파일 tsc-clean):**
+> - **SSOT를 @/shared로 이동**(slice 중립 leaf): `src/shared/delegation-policy.ts`(`DELEGATION_SUPPRESSION_POLICY` + pure `withDelegationPolicy`). @/subagent·@/tool·@/agent 전부 import 가능.
+> - **knob 정식 등록(F2 해소)**: `QUANTA_SUBAGENT_DELEGATE_SUPPRESS` → `runtime-config.ts` loadFromEnv(`subagentDelegateSuppress: gateOn`) + `runtime-config/types.ts` + `knobs-a.ts` 인벤토리. **default-off 완결성 가드 통과**(직접 env-read 아니라 runtimeConfig 단일소스).
+> - **팬아웃 툴 표면 4/4 배선(F1 대부분 해소)**: `agent`·`spawn_agent`·**spawn_batch**·**spawn_agents_on_csv** 전부 `*Description()`이 동일 SSOT 원자 project. 전부 default-OFF byte-identical(frozen-literal `.toBe` 4개로 추출드리프트 핀) + ON 정확조립.
+> - **fc 등록**: `tools/feature-catalog/features/06-tier1/5059-subagent-delegation-suppression.yaml`, `bun fc validate` 내 항목 clean + `bun fc build`(1024 features) 반영.
+> - 테스트 `subagent-delegation-suppression-hellgate.test.ts`(6/0): OFF byte-identical(4 surface frozen-literal)·ON 4-surface SSOT-lead·knob runtimeConfig·separator 정확조립. 뮤테이션-RED (a)(b)(c) 검증.
 >
-> **⛔ 미완 — hellaudit F1 완결성 갭 (A/B 전 필수, 안 하면 confounded):**
-> 정책이 팬아웃 표면 2/4만 커버. 나머지가 여전히 팬아웃 권장 → 모델이 안 눌린 쪽 사용 + A/B 오염:
-> 1. **🔴 시스템 프롬프트 본문 `BODY-TOOL-ROUTING` atom** (`src/agent/prompt-graph/atoms-body.ts:295-304`, `when:` 없어 무조건 렌더): "fan out ... `parallel_worker:true`"를 명시 권장 → **툴은 억제/프롬프트는 권장 = 직접 모순, 최우선 confound.** 단 prompt-graph는 byte-identical 스냅샷/ADR-0410 민감 → 자체 RED로 신중히.
-> 2. **spawn_batch** (`src/tool/subagent-batch/batch.ts:246`) + **spawn_agents_on_csv** (`src/tool/spawn-agents-csv/index.ts:79`): "Fan out one child per item/row" — 미배선. ⚠️ **@/tool은 @/subagent를 import 못 함(slice 경계)** → 이 둘 배선하려면 `delegation-policy.ts`를 `@/shared`(중립 leaf)로 이동해야 함(SSOT 유지 리팩터).
-> 3. **🟡 F2 knob 미등록**: `QUANTA_SUBAGENT_DELEGATE_SUPPRESS`가 runtime-config 인벤토리(`knobs-a.ts`) 미등록 → `knob-default-off-completeness-guard` 우회. 자매 knob `QUANTA_SUBAGENT_TYPED_KIND`처럼 등록 + `gateOn` 경유로 전환.
+> **✅ 완료 — 시스템 프롬프트 fan-out 줄 게이팅 (confound 해소, 173/0 green):**
+> facet `hasDelegationSuppress` 신설(`prompt-graph/types.ts` PromptContext+AtomMatcher, `contexts.ts` BASE 기본값 + body 크로스에 추가[288], `matches.ts` presenceKeys). `prompt-body.ts`에 `BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED`(base에서 fan-out 3줄만 anchor-치환 파생=SSOT, 앵커 없으면 fail-loud). `atoms-body.ts`: **동일 atomId 두 mutually-exclusive variant** — `A_TOOL_ROUTING`(`when:{hasDelegationSuppress:false}`=기본=byte-identical) / `A_TOOL_ROUTING_SUPPRESS`(`when:{true}`). **런타임 배선**: `bodyRenderCtx`(prompt.ts)가 `runtimeConfig().subagentDelegateSuppress` 읽음 — env=세션상수라 static-per-session prefix 안정(ADR-0003), 캐시 무해.
+> - **inert 아님 e2e 증명 + 영구 핀**: 실 `buildSystemPrompt()`가 OFF엔 `parallel_worker:true`, ON엔 `EXPLICITLY authorized` (synthetic 렌더는 inert여도 통과하므로 buildSystemPrompt 배선 테스트로 회귀 차단).
+> - byte-identical-OFF: prompt-graph 288-ctx 완전성 가드 + byte-equivalence 테스트 146/0 통과.
 >
-> **권고 순서:** SSOT를 @/shared 이동 → batch/csv 배선(4/4 툴) → prompt-atom knob-gate(자체 RED) → knob 등록. 이후에만 A/B 유효.
+> **C5059-05 완결 — 팬아웃 4/4 툴 + 시스템 프롬프트 줄 전부 한 knob(`QUANTA_SUBAGENT_DELEGATE_SUPPRESS`) 아래로. A/B confound 없음.**
 
 
 - **Priority:** P0

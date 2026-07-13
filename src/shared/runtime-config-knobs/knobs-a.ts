@@ -226,9 +226,9 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
   {
     envKey: "QUANTA_EDIT_FRESH_HASH",
     kind: "bool",
-    default: false,
+    default: true,
     group: "tool",
-    describe: "Append post-edit sha256 to a successful edit so the model chains same-file edits without a re-read.",
+    describe: "DEFAULT-ON. Append post-write sha256 + refresh stale-read baseline so edit/write/scripted_replace chain same-file edits without a re-read. Set =off to disable.",
   },
   {
     envKey: "QUANTA_DEDUP_ENV_PREFIXES_EXTRA",
@@ -443,5 +443,15 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     default: false,
     group: "subagent",
     describe: "§4.4 — typed agent_type boundary validation (normalise + miss-reject).",
+  },
+  {
+    envKey: "QUANTA_SUBAGENT_DELEGATE_SUPPRESS",
+    kind: "bool",
+    default: false,
+    group: "subagent",
+    describe:
+      "C5059-05 — single-agent-first: prepend a delegation-suppression policy to " +
+      "every spawn surface (agent/spawn_agent/spawn_batch/spawn_agents_on_csv + " +
+      "system-prompt tool-routing). Default-OFF = byte-identical fan-out-biased prompt.",
   },
 ]

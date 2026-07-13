@@ -1,8 +1,8 @@
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
 import { validateAgentType } from "./agent-type"
-import { delegationSuppressEnabled, withDelegationPolicy } from "./delegation-policy"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
 

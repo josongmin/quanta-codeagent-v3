@@ -505,15 +505,16 @@ export interface RuntimeConfigPaths {
    *  write). Default false ⇒ ctx flag absent ⇒ fuzzy runs ONLY on `input.fuzzy`
    *  ⇒ BYTE-IDENTICAL legacy edit path. Reversible + measurable (A/B). */
   readonly editAutoFuzzy: boolean
-  /** jul-13 edit-fresh-hash (`QUANTA_EDIT_FRESH_HASH`). Strict opt-in (`=== "1"`).
-   *  When true the dispatch seam threads `ToolContext.editFreshHash = true`, so a
-   *  SUCCESSFUL `edit` appends `fresh sha256: <hex>` (the post-edit bytes' digest)
-   *  to its output. The model reuses it as the next same-file edit's
-   *  `expected_hash` WITHOUT a re-read. Root cause: sequential same-file edits
-   *  invalidate a read-time `expected_hash` (measured ~41% stale_precondition on
-   *  an edit-churn task, from the model's own prior edit). Default false ⇒ ctx
-   *  flag absent ⇒ BYTE-IDENTICAL legacy output. Reversible + measurable (A/B on
-   *  re-read-count / tokens-per-successful-edit). */
+  /** jul-13 edit-fresh-hash (`QUANTA_EDIT_FRESH_HASH`). DEFAULT-ON opt-out (off
+   *  only for the literal `off`). When true the dispatch seam threads
+   *  `ToolContext.editFreshHash = true`, so a SUCCESSFUL edit/write/scripted_replace
+   *  appends `fresh sha256: <hex>` (the post-write bytes' digest) AND refreshes the
+   *  stale-read guard baseline. The model reuses the hex as the next same-file
+   *  edit's `expected_hash` WITHOUT a re-read. Root cause: sequential same-file
+   *  edits invalidate a read-time `expected_hash` (measured ~41% stale_precondition
+   *  from the model's own prior edit). Ships ON — it removes a forced re-read
+   *  (near-certain token win) and the baseline refresh is a correctness fix; set
+   *  `=off` to disable (⇒ ctx flag absent ⇒ byte-identical legacy output). */
   readonly editFreshHash: boolean
   /** jun-7-misc 06 — operator-chosen apply-model id for the fast-apply MERGE rung
    *  (`QUANTA_FAST_APPLY_MODEL`, mirrors `QUANTA_COMPACT_MODEL`). Absent ⇒ no

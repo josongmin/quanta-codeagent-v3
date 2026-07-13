@@ -15,6 +15,7 @@
  */
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 
 /** Outcome the composition-root adapter returns after running a batch. */
@@ -74,13 +75,22 @@ export const spawnAgentsCsvInputSchema = z.object({
 export type SpawnAgentsCsvInput = z.infer<typeof spawnAgentsCsvInputSchema>
 
 /** Build the `spawn_agents_on_csv` tool over a {@link BatchRunPort}. */
+/** Base (fan-out-mechanics) description of `spawn_agents_on_csv`, kept as a module
+ *  const so {@link spawnAgentsCsvDescription} can project the C5059-05 delegation
+ *  policy (SSOT) when the knob is set — default-OFF ⇒ byte-identical. */
+const SPAWN_AGENTS_CSV_BASE_DESCRIPTION =
+  "Run a batch: fan ONE subagent out per CSV row with a shared instruction, " +
+  "collect each row's structured result, and return a results CSV. Use for " +
+  "repetitive per-row work (e.g. classify/transform N records). Bounded " +
+  "concurrency; EXPENSIVE (one child agent per row)."
+
+/** Model-facing description of `spawn_agents_on_csv` (C5059-05 gated). */
+export const spawnAgentsCsvDescription = (): string =>
+  withDelegationPolicy(SPAWN_AGENTS_CSV_BASE_DESCRIPTION, delegationSuppressEnabled())
+
 export const spawnAgentsCsvTool = (port: BatchRunPort): Tool<SpawnAgentsCsvInput> => ({
   name: "spawn_agents_on_csv",
-  description:
-    "Run a batch: fan ONE subagent out per CSV row with a shared instruction, " +
-    "collect each row's structured result, and return a results CSV. Use for " +
-    "repetitive per-row work (e.g. classify/transform N records). Bounded " +
-    "concurrency; EXPENSIVE (one child agent per row).",
+  description: spawnAgentsCsvDescription(),
   inputSchema: spawnAgentsCsvInputSchema,
   // Spawns child agents (which may mutate) → NOT read-only; concurrency-unsafe
   // (it owns a bounded pool of its own). hitlTier escalates: a fan-out is a

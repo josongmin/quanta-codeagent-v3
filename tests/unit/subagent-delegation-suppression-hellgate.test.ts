@@ -3,24 +3,36 @@
  *
  * INVARIANTS:
  *  1. Default-OFF is BYTE-IDENTICAL — no policy bytes leak into any prompt when
- *     the knob is unset (measurement-arm rollout: opt-in first).
- *  2. When enabled, the policy appears EXACTLY ONCE and LEADS the description.
- *  3. Both spawn surfaces (trio `agent` + 6-tool `spawn_agent`) project the SAME
- *     SSOT atom — no paraphrase, no drift (grep of the two descriptions must both
- *     contain the identical `DELEGATION_SUPPRESSION_POLICY`).
- *  4. The policy actually gates on EXPLICIT authorization (not depth/thoroughness).
+ *     `QUANTA_SUBAGENT_DELEGATE_SUPPRESS` is unset. (Rollout: opt-in measurement
+ *     arm first.)
+ *  2. When enabled, the policy appears EXACTLY ONCE and LEADS the description,
+ *     assembled as `policy + "\n\n" + base` (exact — catches a changed separator).
+ *  3. Every spawn surface projects the SAME SSOT atom — no paraphrase, no drift.
+ *     OFF descriptions EQUAL their frozen originals (catches extraction drift).
+ *  4. The knob is resolved from runtimeConfig (registered), default-OFF.
  *
  * MUTATION (red-on-injection): a call site that hard-codes its own suppression
- * sentence instead of the SSOT atom (invariant 3), or that appends on the OFF
- * path (invariant 1), is caught here.
+ * sentence (invariant 3), appends on the OFF path (invariant 1), corrupts the
+ * base during extraction (frozen-literal pin), or a wrong separator (exact
+ * assembly) — each is caught here.
  */
-import { describe, expect, test } from "bun:test"
-import {
-  DELEGATION_SUPPRESS_ENV,
-  DELEGATION_SUPPRESSION_POLICY,
-  delegationSuppressEnabled,
-  withDelegationPolicy,
-} from "@/subagent/delegation-policy"
+import { afterEach, describe, expect, test } from "bun:test"
+import { __resetRuntimeConfig, runtimeConfig } from "@/shared/runtime-config"
+import { DELEGATION_SUPPRESSION_POLICY, withDelegationPolicy } from "@/shared/delegation-policy"
+
+const KNOB = "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"
+
+/** Set the knob and force runtimeConfig to re-read env. */
+const setSuppress = (on: boolean): void => {
+  if (on) process.env[KNOB] = "1"
+  else delete process.env[KNOB]
+  __resetRuntimeConfig()
+}
+
+afterEach(() => {
+  delete process.env[KNOB]
+  __resetRuntimeConfig()
+})
 
 describe("C5059-05 — delegation suppression policy (pure)", () => {
   test("OFF ⇒ description is byte-identical (no policy bytes)", () => {
@@ -31,11 +43,8 @@ describe("C5059-05 — delegation suppression policy (pure)", () => {
 
   test("ON ⇒ EXACT assembly (policy + double-newline + base), policy once", () => {
     const base = "Spawn a child."
-    // Exact-assembly `.toBe` (not startsWith/endsWith): catches a changed
-    // separator ("\n\n"→" "), reordering, or any middle-insertion.
     expect(withDelegationPolicy(base, true)).toBe(`${DELEGATION_SUPPRESSION_POLICY}\n\n${base}`)
-    const marker = "DELEGATION POLICY:"
-    expect(withDelegationPolicy(base, true).split(marker).length - 1).toBe(1)
+    expect(withDelegationPolicy(base, true).split("DELEGATION POLICY:").length - 1).toBe(1)
   })
 
   test("policy gates on EXPLICIT authorization, not depth/thoroughness", () => {
@@ -44,35 +53,19 @@ describe("C5059-05 — delegation suppression policy (pure)", () => {
     expect(DELEGATION_SUPPRESSION_POLICY.toLowerCase()).toContain("single")
   })
 
-  test("knob reads default-OFF and only '1' enables", () => {
-    expect(delegationSuppressEnabled({})).toBe(false)
-    expect(delegationSuppressEnabled({ [DELEGATION_SUPPRESS_ENV]: "0" })).toBe(false)
-    expect(delegationSuppressEnabled({ [DELEGATION_SUPPRESS_ENV]: "true" })).toBe(false)
-    expect(delegationSuppressEnabled({ [DELEGATION_SUPPRESS_ENV]: "1" })).toBe(true)
+  test("knob resolves through runtimeConfig, default-OFF, only '1' enables", () => {
+    setSuppress(false)
+    expect(runtimeConfig().subagentDelegateSuppress).toBe(false)
+    setSuppress(true)
+    expect(runtimeConfig().subagentDelegateSuppress).toBe(true)
+    process.env[KNOB] = "true"
+    __resetRuntimeConfig()
+    expect(runtimeConfig().subagentDelegateSuppress).toBe(true) // gateOn accepts 1/on/true/yes
   })
 })
 
-describe("C5059-05 — BOTH spawn surfaces project the SSOT atom (no drift)", () => {
-  test("trio `agent` + 6-tool `spawn_agent` descriptions both carry the identical policy when enabled", async () => {
-    // Wiring proof: build each tool's model-facing description with the knob ON
-    // and assert BOTH begin with the exact same SSOT string. A hard-coded
-    // per-surface paraphrase (drift) fails invariant 3.
-    const prev = process.env[DELEGATION_SUPPRESS_ENV]
-    process.env[DELEGATION_SUPPRESS_ENV] = "1"
-    try {
-      const { agentToolDescription } = await import("@/subagent/agent-tool")
-      const { spawnAgent6Description } = await import("@/subagent/agent-tools-6")
-      expect(agentToolDescription().startsWith(DELEGATION_SUPPRESSION_POLICY)).toBe(true)
-      expect(spawnAgent6Description().startsWith(DELEGATION_SUPPRESSION_POLICY)).toBe(true)
-    } finally {
-      if (prev === undefined) delete process.env[DELEGATION_SUPPRESS_ENV]
-      else process.env[DELEGATION_SUPPRESS_ENV] = prev
-    }
-  })
-
+describe("C5059-05 — ALL spawn surfaces project the SSOT atom (no drift)", () => {
   // Frozen originals (verified byte-identical to HEAD's inline descriptions).
-  // Pinning OFF output to these `.toBe(...)` catches EXTRACTION DRIFT — a dropped
-  // word in the base const during refactor stays green under `not.toContain`.
   const AGENT_ORIG =
     "Launch a subagent to autonomously handle ONE delegated task. " +
     "Foreground returns the subagent's summary; set background:true to get a " +
@@ -90,17 +83,43 @@ describe("C5059-05 — BOTH spawn surfaces project the SSOT atom (no drift)", ()
     "tool (its background:true gives the same async handle with simpler " +
     "task_output polling); reach for spawn_agent when you need multiple " +
     "concurrent children or mid-run control."
+  const BATCH_ORIG =
+    "Fan out one templated child subagent per item over a bounded worker pool. " +
+    "Provide items (inline array) OR items_path (.csv/.jsonl/.json) plus a " +
+    "prompt_template with {{placeholders}}. Returns per-item structured results; " +
+    "one item failing does NOT stop the rest. Use for bulk 'do X for each of these N things'."
+  const CSV_ORIG =
+    "Run a batch: fan ONE subagent out per CSV row with a shared instruction, " +
+    "collect each row's structured result, and return a results CSV. Use for " +
+    "repetitive per-row work (e.g. classify/transform N records). Bounded " +
+    "concurrency; EXPENSIVE (one child agent per row)."
 
-  test("OFF ⇒ both surfaces EQUAL their frozen originals (no leak, no extraction drift)", async () => {
-    const prev = process.env[DELEGATION_SUPPRESS_ENV]
-    delete process.env[DELEGATION_SUPPRESS_ENV]
-    try {
-      const { agentToolDescription } = await import("@/subagent/agent-tool")
-      const { spawnAgent6Description } = await import("@/subagent/agent-tools-6")
-      expect(agentToolDescription()).toBe(AGENT_ORIG)
-      expect(spawnAgent6Description()).toBe(SPAWN6_ORIG)
-    } finally {
-      if (prev !== undefined) process.env[DELEGATION_SUPPRESS_ENV] = prev
+  /** All four spawn/delegation surfaces + their frozen OFF originals. */
+  const surfaces = async () => {
+    const { agentToolDescription } = await import("@/subagent/agent-tool")
+    const { spawnAgent6Description } = await import("@/subagent/agent-tools-6")
+    const { spawnBatchDescription } = await import("@/tool/subagent-batch/batch")
+    const { spawnAgentsCsvDescription } = await import("@/tool/spawn-agents-csv")
+    return [
+      { render: agentToolDescription, orig: AGENT_ORIG },
+      { render: spawnAgent6Description, orig: SPAWN6_ORIG },
+      { render: spawnBatchDescription, orig: BATCH_ORIG },
+      { render: spawnAgentsCsvDescription, orig: CSV_ORIG },
+    ]
+  }
+
+  test("ON ⇒ ALL FOUR surfaces lead with the identical SSOT policy", async () => {
+    setSuppress(true)
+    for (const s of await surfaces()) {
+      expect(s.render().startsWith(DELEGATION_SUPPRESSION_POLICY), s.orig.slice(0, 24)).toBe(true)
+      expect(s.render().split("DELEGATION POLICY:").length - 1).toBe(1)
+    }
+  })
+
+  test("OFF ⇒ ALL FOUR surfaces EQUAL frozen originals (no leak, no extraction drift)", async () => {
+    setSuppress(false)
+    for (const s of await surfaces()) {
+      expect(s.render(), s.orig.slice(0, 24)).toBe(s.orig)
     }
   })
 })

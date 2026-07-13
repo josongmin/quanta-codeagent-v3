@@ -415,6 +415,7 @@ describe("ADR-0538 Phase 3 — channel chronology + static/dynamic separation he
       hasRepoRulesDynamic: false,
       hasTaskBudget: false,
       hasDirectives: false,
+      hasDelegationSuppress: false,
     }
     const original = renderAtoms(BODY_AFTER_PERSONA_ATOMS, anyCtx)
     // Reorder: push the FIRST atom (policy stack) to a huge order so it renders last.

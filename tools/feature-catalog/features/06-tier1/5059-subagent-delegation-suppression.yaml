@@ -1,0 +1,65 @@
+id: subagent-delegation-suppression
+title: Single-agent-first delegation suppression (C5059-05)
+section: 6
+subsystem: Subagent delegation policy (C5059-05 — Codex multi_agent_v2 absorption)
+order: 5059
+maturity: L1
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [interactive, headless, batch, daemon, ide, ci-bot]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "tier:1", "absorbed:codex"]
+depends_on: [background-subagent]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-13"
+  evidence:
+    cli: "prompt-only policy projected onto spawn tool descriptions reachable from the CLI import graph"
+    web: "pure prompt-text policy, no browser affordance; not an AgentEvent the bridge maps"
+purpose: |
+  Single-agent-first delegation default (Codex multi_agent_v2 absorption +
+  Google 180-config evidence: multi-agent regresses sequential reasoning
+  39–70%). One SSOT policy atom (@/shared/delegation-policy) is projected onto
+  EVERY spawn/delegation surface — the trio `agent`, the 6-tool `spawn_agent`,
+  `spawn_batch`, and `spawn_agents_on_csv` — so the model is told to complete
+  the task itself unless delegation is EXPLICITLY authorized (depth/thoroughness/
+  research do NOT count) and the work is structurally parallel (disjoint write
+  sets, explicit parent synthesis, wall-time benefit > coordination cost).
+  Knob-gated opt-in measurement arm (QUANTA_SUBAGENT_DELEGATE_SUPPRESS,
+  default-OFF ⇒ byte-identical fan-out-biased prompt); flip to default-ON only
+  after the eval-corpus A/B holds.
+evidence:
+  code:
+    - src/shared/delegation-policy.ts
+    - src/subagent/agent-tool.ts
+    - src/subagent/agent-tools-6.ts
+    - src/tool/subagent-batch/batch.ts
+    - src/tool/spawn-agents-csv/index.ts
+    - src/agent/prompt-body.ts
+    - src/agent/prompt-graph/atoms-body.ts
+    - src/agent/prompt.ts
+  adrs: []
+  tests:
+    unit:
+      - tests/unit/subagent-delegation-suppression-hellgate.test.ts
+      - tests/unit/prompt-delegation-suppress-atom-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: ["QUANTA_SUBAGENT_DELEGATE_SUPPRESS"]
+deliberate_hold: null
+notes: |
+  SSOT lives in @/shared (neutral leaf) so @/subagent, @/tool, and @/agent can
+  all project the SAME atom without a slice-boundary violation. Enablement is
+  resolved from runtimeConfig().subagentDelegateSuppress (knob registered in
+  runtime-config-knobs/knobs-a.ts + the default-off completeness guard). COMPLETE:
+  all FOUR spawn tool descriptions AND the system-prompt tool-routing fan-out line
+  are gated under the one knob. The prompt line uses a `hasDelegationSuppress`
+  facet (two mutually-exclusive variants of the same atomId); bodyRenderCtx reads
+  the session-constant knob so the static-per-session prefix stays byte-stable
+  (ADR-0003). Default-OFF byte-identical; ON swaps the unconditional fan-out
+  guidance for an authorization-conditioned one — proven against the real
+  buildSystemPrompt (not just synthetic render). No A/B confound.

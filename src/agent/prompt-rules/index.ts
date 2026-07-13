@@ -75,6 +75,7 @@ const postureCtx = (envPosture: PromptContext["envPosture"]): PromptContext => (
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
   hasDirectives: false,
+  hasDelegationSuppress: false,
 })
 
 /** POSTURE-BASE rules (env axis) — DERIVED from the ADR-0538 atom graph, NOT from

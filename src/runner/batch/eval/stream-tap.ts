@@ -138,6 +138,11 @@ export class BenchStreamTap implements StreamPort {
   /** id → raw file path, so tool_result can report the target alongside ok/fail. */
   private readonly pendingEdits = new Map<string, string>()
   private readonly pendingSourceEdits = new Set<string>()
+  /** id → the edit tool_call's `replace_all` flag, so the later tool_result can
+   *  ride the bulk-replace intent into the editTrace debug slice. Only populated
+   *  when `onEditResult` is wired (bench debug tier) — absent ⇒ empty ⇒
+   *  byte-identical to the pre-feature tap. */
+  private readonly pendingEditReplaceAll = new Map<string, boolean>()
   private verifySeq = 0
   /**
    * @param downstream  pass-through sink (NullStream for non-observed runs).
@@ -165,6 +170,21 @@ export class BenchStreamTap implements StreamPort {
       file?: string
       durationMs?: number
       exitCode?: number
+    }) => void,
+    /** Optional per-EDIT-result observer (jul-13 editTrace debug enricher,
+     *  ADR-0539). Called once per file-mutating tool_result with the target
+     *  `file` (raw, pre-relativization), the applied bit (`ok`), the edit tool's
+     *  own output message (`preview` — encodes the strategy/mode + occurrence
+     *  count the tool ALREADY decided), and the `replaceAll` intent from the
+     *  originating tool_call. The driver wires this to shape + `append` an
+     *  `editTrace` debug slice. NO recompute / re-read — every field is a signal
+     *  the edit already produced. Absent ⇒ byte-identical (no edit stash, no
+     *  emit). */
+    private readonly onEditResult?: (args: {
+      file: string
+      ok: boolean
+      preview: string
+      replaceAll: boolean
     }) => void,
   ) {}
 
@@ -218,6 +238,17 @@ export class BenchStreamTap implements StreamPort {
     if (isSource) this.sourceEditCount += 1
     this.pendingEdits.set(event.id, editPath)
     if (isSource) this.pendingSourceEdits.add(event.id)
+    // editTrace debug enricher (jul-13): stash the bulk-replace intent so the
+    // tool_result can ride it. Only when the enricher is wired ⇒ byte-identical
+    // otherwise (no map growth on the default path).
+    if (this.onEditResult !== undefined) {
+      this.pendingEditReplaceAll.set(
+        event.id,
+        typeof event.input === "object" &&
+          event.input !== null &&
+          (event.input as Record<string, unknown>).replace_all === true,
+      )
+    }
     if (this.firstEditFile !== undefined) return
     this.firstEditFile = editPath
     this.turnsToFirstEdit = this.currentTurn
@@ -225,6 +256,13 @@ export class BenchStreamTap implements StreamPort {
 
   private handleToolResult(event: ToolResultEvent): void {
     const file = this.pendingEdits.get(event.id)
+    // editTrace debug enricher (jul-13, ADR-0539): read the bulk-replace intent
+    // BEFORE trackAppliedEditResult clears the pending maps, then hand the raw
+    // edit signals (target + applied bit + the tool's own output message) to the
+    // driver's shaper. Only fires for a file-mutating tool (`file !== undefined`)
+    // and only when wired ⇒ default-OFF byte-identical.
+    const editReplaceAll = this.pendingEditReplaceAll.get(event.id)
+    this.pendingEditReplaceAll.delete(event.id)
     this.trackAppliedEditResult(event)
     this.trackVerifyResult(event)
     this.onToolResult?.({
@@ -234,6 +272,14 @@ export class BenchStreamTap implements StreamPort {
       ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
       ...(event.exitCode !== undefined ? { exitCode: event.exitCode } : {}),
     })
+    if (this.onEditResult !== undefined && file !== undefined) {
+      this.onEditResult({
+        file,
+        ok: event.ok,
+        preview: event.preview,
+        replaceAll: editReplaceAll ?? false,
+      })
+    }
   }
 
   private trackAppliedEditResult(event: ToolResultEvent): void {

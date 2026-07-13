@@ -106,6 +106,8 @@ export interface AtomMatcher {
    *  dynamic directives atom fires only when the selection is non-empty, so the
    *  manifest never reports it for a default-OFF (zero-byte) turn. */
   hasDirectives?: boolean
+  /** C5059-05 — gate for the tool-routing fan-out line. */
+  hasDelegationSuppress?: boolean
 }
 
 /**
@@ -185,6 +187,10 @@ export interface PromptContext {
   readonly hasRepoRulesDynamic: boolean
   readonly hasTaskBudget: boolean
   readonly hasDirectives: boolean
+  /** C5059-05 — `QUANTA_SUBAGENT_DELEGATE_SUPPRESS` resolved. Gates the
+   *  tool-routing fan-out line: false (default) ⇒ unconditional fan-out
+   *  guidance (byte-identical); true ⇒ authorization-conditioned variant. */
+  readonly hasDelegationSuppress: boolean
 }
 
 /** A rendered, cache-labelled system section (structurally the `PromptSection`

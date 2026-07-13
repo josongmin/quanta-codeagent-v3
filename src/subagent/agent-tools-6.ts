@@ -27,7 +27,7 @@
  */
 
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
-import { delegationSuppressEnabled, withDelegationPolicy } from "./delegation-policy"
+import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
 import { dispatchSubagent6, type Subagent6Deps } from "./dispatch-6"
 import { InputChannelRegistry, PtyTable } from "./handlers-6"
 import {

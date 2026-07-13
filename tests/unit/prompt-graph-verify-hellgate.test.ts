@@ -125,6 +125,7 @@ describe("prompt-graph — byte-equivalence with the render path", () => {
     hasRepoRulesDynamic: false,
     hasTaskBudget: false,
     hasDirectives: false,
+    hasDelegationSuppress: false,
   })
 
   test("renderPostureBase == graph render for every posture", () => {
@@ -202,8 +203,8 @@ const BODY_REACHABLE = reachableBodyContexts()
 const BODY_AND_NOTICE = [...BODY_ATOMS, ...NOTICE_ATOMS]
 
 describe("prompt-graph Phase 2 — BODY + NOTICE slice is sound", () => {
-  test("reachable body ctx surface is envPosture×verify×mode×brief (3×4×6×2=144)", () => {
-    expect(BODY_REACHABLE.length).toBe(144)
+  test("reachable body ctx surface is envPosture×verify×mode×brief×delegSuppress (3×4×6×2×2=288)", () => {
+    expect(BODY_REACHABLE.length).toBe(288)
   })
 
   test("ZERO violations over the full reachable body ctx set", () => {

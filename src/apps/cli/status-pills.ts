@@ -78,6 +78,10 @@ export interface StatusPillsState {
    *  it renders ALONGSIDE the built-in pills rather than clobbering them.
    *  Absent / empty ⇒ no segment (byte-identical to today). */
   statusLine?: string
+  /** `/goal` (Codex "Pursuing goal" parity) — the active objective + its
+   *  elapsed-since-created time (precomputed by the driver so this stays pure).
+   *  Absent / empty text ⇒ no pill (byte-identical when no goal is active). */
+  goal?: { text: string; elapsedMs: number }
 }
 
 export interface StatusPills {
@@ -105,6 +109,7 @@ export const PILL_ENV_VARS = [
   "QUANTA_PILL_SKILLS",
   "QUANTA_PILL_SANDBOX",
   "QUANTA_PILL_RULES",
+  "QUANTA_PILL_GOAL",
 ] as const
 
 /** Strip ANSI escapes — exposed for the test only. */
@@ -158,6 +163,22 @@ const formatRules = (rules: RulesPillState | undefined): string => {
   return `${DIM}${FG_CYAN}[rules: ${rules.activeCount}/${rules.totalCount} matched]${RESET}`
 }
 
+/** Elapsed ms → `2h 7m` / `7m` (minute resolution, matching Codex's goal chip). */
+const formatElapsed = (ms: number): string => {
+  const totalMin = Math.max(0, Math.floor(ms / 60_000))
+  const h = Math.floor(totalMin / 60)
+  const m = totalMin % 60
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+/** `/goal` chip: `🎯 <objective> · 2h 7m`. Absent / empty text ⇒ "" (no goal
+ *  active). Objective text is truncated (the status row itself also truncates). */
+const formatGoal = (goal: { text: string; elapsedMs: number } | undefined): string => {
+  if (goal === undefined || goal.text === "") return ""
+  const text = goal.text.length > 40 ? `${goal.text.slice(0, 39)}…` : goal.text
+  return `${BOLD}${FG_YELLOW}🎯 ${text} · ${formatElapsed(goal.elapsedMs)}${RESET}`
+}
+
 /** Sandbox badge. `default` ⇒ "" (no wire yet — catalog ADR-0012 placeholder). */
 const formatSandbox = (mode: SandboxMode | undefined): string => {
   if (mode === undefined || mode === "default") return ""
@@ -174,6 +195,7 @@ interface PillFlags {
   skills: boolean
   sandbox: boolean
   rules: boolean
+  goal: boolean
 }
 
 const readFlags = (
@@ -195,6 +217,7 @@ const readFlags = (
       skills: false,
       sandbox: false,
       rules: false,
+      goal: false,
     }
   const master = enabledOverride ?? parseEnvFlag(env.QUANTA_PILLS, true)
   return {
@@ -205,6 +228,9 @@ const readFlags = (
     sandbox: parseEnvFlag(env.QUANTA_PILL_SANDBOX, true),
     // Default OFF (jun-11): the rules pill is opt-in via QUANTA_PILL_RULES=1.
     rules: parseEnvFlag(env.QUANTA_PILL_RULES, false),
+    // `/goal` chip default ON: it only renders while a goal is ACTIVE (state.goal
+    // set), so there is no clutter when idle. Opt-out via QUANTA_PILL_GOAL=0.
+    goal: parseEnvFlag(env.QUANTA_PILL_GOAL, true),
   }
 }
 
@@ -233,6 +259,7 @@ const composeLine = (state: StatusPillsState, flags: PillFlags): string => {
   }
   if (flags.skills) pushIfNotEmpty(center, formatSkills(state.activeSkills))
   if (flags.rules) pushIfNotEmpty(center, formatRules(state.rules))
+  if (flags.goal) pushIfNotEmpty(center, formatGoal(state.goal))
   if (flags.sandbox) pushIfNotEmpty(right, formatSandbox(state.sandboxMode))
 
   // Layout: LEFT [3sp] CENTER [3sp] RIGHT — separators dropped when a side

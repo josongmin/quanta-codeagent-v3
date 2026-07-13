@@ -509,6 +509,12 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  named-agent name, and REJECTS an unknown type (Claude-Code
    *  `subagent_type_miss` parity). */
   readonly subagentTypedKind: boolean
+  /** C5059-05 — single-agent-first delegation suppression
+   *  (`QUANTA_SUBAGENT_DELEGATE_SUPPRESS`). Default-OFF ⇒ byte-identical prompt;
+   *  ON prepends the delegation policy to every spawn/delegation surface (the
+   *  `agent`/`spawn_agent`/`spawn_batch`/`spawn_agents_on_csv` tool descriptions
+   *  and the system-prompt tool-routing atom). */
+  readonly subagentDelegateSuppress: boolean
   /** §4.3 — LIVE side-agent OS-PROCESS backer selector (`QUANTA_SIDE_AGENT_PROCESS`).
    *  Opt-in, and REQUIRES the master gate `QUANTA_SIDE_AGENT` (it only chooses the
    *  backer once side-agents are enabled). Default false ⇒ the side-agent registry

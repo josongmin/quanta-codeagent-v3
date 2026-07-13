@@ -1,5 +1,6 @@
 import { basename } from "node:path"
 import type { Message, SystemBlock } from "@/llm"
+import { delegationSuppressEnabled } from "@/shared/delegation-policy"
 import type {
   AgentPromptMode,
   PromptActiveLeversSnapshot,
@@ -119,6 +120,11 @@ const bodyRenderCtx = (opts?: {
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
   hasDirectives: false,
+  // C5059-05 — session-CONSTANT env knob (not per-turn), so reading it at build
+  // time keeps the prefix byte-stable per session (the prompt is static per
+  // session, ADR-0003). Default-OFF ⇒ false ⇒ the base tool-routing atom renders
+  // byte-identically; ON ⇒ the authorization-conditioned variant.
+  hasDelegationSuppress: delegationSuppressEnabled(),
 })
 
 /** The static system prompt. No per-turn data — keep it byte-stable so the

@@ -65,6 +65,7 @@ export const matches = (when: AtomMatcher | undefined, ctx: PromptContext): bool
     "hasRepoRulesDynamic",
     "hasTaskBudget",
     "hasDirectives",
+    "hasDelegationSuppress",
   ] as const satisfies ReadonlyArray<keyof AtomMatcher & keyof PromptContext>
 
   for (const key of presenceKeys) {

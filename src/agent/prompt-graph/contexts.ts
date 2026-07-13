@@ -44,6 +44,7 @@ const BASE: Omit<PromptContext, "envPosture" | "verifyStrategy"> = {
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
   hasDirectives: false,
+  hasDelegationSuppress: false,
 }
 
 /**
@@ -77,7 +78,12 @@ export const reachableBodyContexts = (): readonly PromptContext[] => {
     for (const verifyStrategy of VERIFY_STRATEGIES) {
       for (const mode of MODES) {
         for (const brief of [false, true]) {
-          out.push({ ...BASE, envPosture, verifyStrategy, mode, brief })
+          // C5059-05 — `hasDelegationSuppress` shapes the BODY tool-routing atom
+          // (two mutually-exclusive variants), so it is crossed here (like `brief`)
+          // to keep both variants' coverage decidable over the body surface.
+          for (const hasDelegationSuppress of [false, true]) {
+            out.push({ ...BASE, envPosture, verifyStrategy, mode, brief, hasDelegationSuppress })
+          }
         }
       }
     }

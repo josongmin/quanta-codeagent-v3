@@ -32,6 +32,7 @@ import {
   BODY_AFTER_PERSONA_PRODUCTION_CODE_CONDUCT,
   BODY_AFTER_PERSONA_TOOL_FAILURES_AND_EXPLORATION,
   BODY_AFTER_PERSONA_TOOL_ROUTING,
+  BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED,
   BODY_AFTER_PROMPT_PACK_COMPLETION_BAR,
   BODY_AFTER_PROMPT_PACK_EXPLORATORY_QUESTIONS,
   BODY_AFTER_PROMPT_PACK_HONESTY_RAIL,
@@ -292,6 +293,11 @@ const A_TOOLFAIL_TAIL: InstructionAtom = {
   order: 194,
   lines: TOOLFAIL.tail,
 }
+// C5059-05 — two mutually-exclusive variants of the SAME atomId, selected by the
+// `hasDelegationSuppress` facet. Default (false) renders the base BYTE-IDENTICALLY
+// (the added `when` is satisfied by the default-false facet); true renders the
+// authorization-conditioned variant instead. Exactly one ever matches, so no
+// supersede/coverage conflict.
 const A_TOOL_ROUTING: InstructionAtom = {
   atomId: "BODY-TOOL-ROUTING",
   variantId: "BODY-TOOL-ROUTING",
@@ -299,8 +305,20 @@ const A_TOOL_ROUTING: InstructionAtom = {
   channel: "system.base",
   section: AFTER_PERSONA,
   order: 200,
+  when: { hasDelegationSuppress: false },
   lines: BODY_AFTER_PERSONA_TOOL_ROUTING,
   provenance: ["ADR-0410 few-shot anchor"],
+}
+const A_TOOL_ROUTING_SUPPRESS: InstructionAtom = {
+  atomId: "BODY-TOOL-ROUTING",
+  variantId: "BODY-TOOL-ROUTING-SUPPRESS",
+  authority: "L1_system",
+  channel: "system.base",
+  section: AFTER_PERSONA,
+  order: 200,
+  when: { hasDelegationSuppress: true },
+  lines: BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED,
+  provenance: ["ADR-0410 few-shot anchor", "C5059-05 delegation-suppress"],
 }
 
 /** The AFTER-PERSONA body atom set (policy stack → tool routing), rendered
@@ -324,6 +342,7 @@ export const BODY_AFTER_PERSONA_ATOMS: readonly InstructionAtom[] = [
   A_ANALYSIS_MULTISTEP,
   A_TOOLFAIL_TAIL,
   A_TOOL_ROUTING,
+  A_TOOL_ROUTING_SUPPRESS,
 ]
 
 // ─────────────────────────────────────────────────────────────────────────

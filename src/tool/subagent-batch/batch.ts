@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod"
+import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { loadItems } from "./load-items"
 import type { BatchItemResult, BatchRunResult, SubagentBatchDeps } from "./port"
@@ -241,13 +242,22 @@ const emptyRun: BatchRunResult = {
  * Build the `spawn_batch` tool against injected deps. Mirrors the `subagent-bg`
  * builder posture: a single factory taking the closed deps bundle.
  */
+/** Base (fan-out-mechanics) description of `spawn_batch`, kept as a module const
+ *  so {@link spawnBatchDescription} can project the C5059-05 delegation policy
+ *  (SSOT) when the knob is set — default-OFF ⇒ byte-identical. */
+const SPAWN_BATCH_BASE_DESCRIPTION =
+  "Fan out one templated child subagent per item over a bounded worker pool. " +
+  "Provide items (inline array) OR items_path (.csv/.jsonl/.json) plus a " +
+  "prompt_template with {{placeholders}}. Returns per-item structured results; " +
+  "one item failing does NOT stop the rest. Use for bulk 'do X for each of these N things'."
+
+/** Model-facing description of `spawn_batch` (C5059-05 delegation-policy gated). */
+export const spawnBatchDescription = (): string =>
+  withDelegationPolicy(SPAWN_BATCH_BASE_DESCRIPTION, delegationSuppressEnabled())
+
 export const spawnBatchTool = (deps: SubagentBatchDeps): Tool<SpawnBatchInput> => ({
   name: "spawn_batch",
-  description:
-    "Fan out one templated child subagent per item over a bounded worker pool. " +
-    "Provide items (inline array) OR items_path (.csv/.jsonl/.json) plus a " +
-    "prompt_template with {{placeholders}}. Returns per-item structured results; " +
-    "one item failing does NOT stop the rest. Use for bulk 'do X for each of these N things'.",
+  description: spawnBatchDescription(),
   inputSchema: spawnBatchInputSchema,
   // Spawning children is MUTATING (each child owns its own tool set) but the
   // batch as a whole shares no mutable state with sibling tool calls — mirror

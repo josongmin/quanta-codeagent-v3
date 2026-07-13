@@ -303,6 +303,34 @@ export const BODY_AFTER_PERSONA_TOOL_ROUTING: readonly string[] = [
   "</example>",
 ]
 
+/** C5059-05 — delegation-suppressed variant of the tool-routing block: identical
+ *  to {@link BODY_AFTER_PERSONA_TOOL_ROUTING} EXCEPT the unconditional fan-out
+ *  encouragement line is replaced with an authorization-conditioned one. Derived
+ *  from the base (SSOT) by anchor-matching the fan-out line — a base edit that
+ *  moves/renames it throws (fail-loud) rather than silently diverging. Rendered
+ *  ONLY when `hasDelegationSuppress` is true; the base renders byte-identically
+ *  when false. */
+const FANOUT_ANCHOR =
+  "- Need to fan out independent exploration subagents → emit multiple `agent`"
+export const BODY_AFTER_PERSONA_TOOL_ROUTING_SUPPRESSED: readonly string[] = (() => {
+  const i = BODY_AFTER_PERSONA_TOOL_ROUTING.indexOf(FANOUT_ANCHOR)
+  if (i < 0) {
+    throw new Error(
+      "C5059-05: fan-out anchor line missing from BODY_AFTER_PERSONA_TOOL_ROUTING — " +
+        "the suppressed variant can no longer be derived; re-sync the anchor.",
+    )
+  }
+  // The fan-out guidance spans exactly 3 array elements (bullet + 2 continuations).
+  return [
+    ...BODY_AFTER_PERSONA_TOOL_ROUTING.slice(0, i),
+    "- Need to fan out independent exploration subagents → ONLY when the user,",
+    "  repo rules, or an activated skill EXPLICITLY authorized parallel agents;",
+    "  otherwise complete the task yourself in this single agent (depth,",
+    "  thoroughness, and research do NOT authorize delegation).",
+    ...BODY_AFTER_PERSONA_TOOL_ROUTING.slice(i + 3),
+  ]
+})()
+
 /** Main policy/operating-principles body (between the persona splice and the
  *  prompt-pack splice). Everything from "Policy stack" through "Pick the
  *  cheapest tool whose output is sufficient evidence for the claim you intend

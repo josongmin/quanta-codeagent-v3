@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "default-off", "measure-first"]
+labels: ["surface:core", "default-on"]
 depends_on: [edit-tool, atomic-write-and-hash-precondition]
 surface_integration:
   cli: full
@@ -36,10 +36,11 @@ purpose: |
   `planned.next` verbatim (no EOL/encoding normalization) and the edit strategies
   preserve per-line EOL, so sha256(planned.next) == sha256(readFile after commit)
   — pinned on a REAL fs with CRLF + no-trailing-newline + multibyte content.
-  Gate QUANTA_EDIT_FRESH_HASH (strict `=== "1"`); unset ⇒ ctx.editFreshHash absent
-  ⇒ success output BYTE-IDENTICAL to legacy. Mirrors the QUANTA_EDIT_AUTO_FUZZY
-  8-site wiring (no reinvention). Efficacy A/B (re-read-count /
-  tokens-per-successful-edit) is measure-first pending on a bench box.
+  DEFAULT-ON opt-out QUANTA_EDIT_FRESH_HASH (off only for the literal `off`, like
+  the fs-jail / stale-read-guard kill-switches); `=off` ⇒ ctx.editFreshHash absent
+  ⇒ success output BYTE-IDENTICAL to legacy. Ships ON — it removes a forced re-read
+  (near-certain net-negative tokens) and the mtime-baseline refresh is a
+  correctness fix, so it is not a speculative measure-first lever.
 evidence:
   code:
     - src/tool/_shared/fresh-hash.ts
@@ -102,7 +103,10 @@ notes: |
   preserved — pinned). Suite: 7 files, ~54 tests, red-on-injection proven by
   disabling the shared helper (6 mtime/cross-tool RED) and freshHashNote (3 emit RED).
 
-  Remaining scope: efficacy A/B on a bench box (re-read-count drop /
-  tokens-per-successful-edit net-negative). Root-fix nature (removes a forced
-  re-read) makes a flat A/B unlikely, but it is measure-first-gated per the
-  no-heuristics rule — if flat, delete the gate.
+  Ships DEFAULT-ON (jul-13): this is not a speculative lever — the emission removes
+  a forced re-read (small fixed add vs a file-size-proportional re-read saved) and
+  the mtime-baseline refresh is a correctness fix. The only residual is model
+  ADOPTION (does the model reuse the advertised hash), which is observability, not
+  an on/off efficacy gate; monitor re-read-count on a bench box and set `=off` if
+  ever regressive. A full agent-loop e2e (read→edit→edit through the real runAgent
+  turn loop) pins that the chain works end-to-end via the real dispatch + prompt.

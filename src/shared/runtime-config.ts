@@ -340,6 +340,9 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
     sideAgent: gateOn(env, "QUANTA_SIDE_AGENT"),
     // §4.4 — opt-in. Default false ⇒ agent_type is the legacy free string.
     subagentTypedKind: gateOn(env, "QUANTA_SUBAGENT_TYPED_KIND"),
+    // C5059-05 — opt-in single-agent-first delegation suppression. Default false
+    // ⇒ byte-identical prompt (fan-out-biased). Measurement arm before default-ON.
+    subagentDelegateSuppress: gateOn(env, "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"),
     // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
     sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
     // N2 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP connector tools.
@@ -641,12 +644,14 @@ const parseConfigTailSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
     // Default false ⇒ ctx.autoEscalateFuzzy unset ⇒ fuzzy runs ONLY on explicit
     // `input.fuzzy` ⇒ BYTE-IDENTICAL legacy edit path. Reversible / measurable.
     editAutoFuzzy: gateOnStrict(env, "QUANTA_EDIT_AUTO_FUZZY"),
-    // jul-13 edit-fresh-hash — strict `=== "1"` opt-in. When ON, a SUCCESSFUL
-    // `edit` appends the sha256 of the post-edit bytes so the model can chain a
-    // next same-file edit without a re-read (root-fixes self-inflicted staleness:
-    // measured ~41% of edits hit stale_precondition from the model's own prior
-    // edit). Default false ⇒ ctx.editFreshHash unset ⇒ BYTE-IDENTICAL output.
-    editFreshHash: gateOnStrict(env, "QUANTA_EDIT_FRESH_HASH"),
+    // jul-13 edit-fresh-hash — DEFAULT-ON opt-out (off only for the literal `off`,
+    // like the fs-jail / stale-read-guard kill-switches). A SUCCESSFUL edit/write/
+    // scripted_replace appends the sha256 of the post-write bytes AND refreshes the
+    // stale-read baseline so the model chains the next same-file edit without a
+    // re-read (root-fixes the measured ~41% self-inflicted staleness). Not a
+    // speculative lever — it removes a forced re-read (near-certain net-negative
+    // tokens) and the mtime-baseline refresh is a correctness fix, so it ships ON.
+    editFreshHash: !gateDisabledStrict(env, "QUANTA_EDIT_FRESH_HASH"),
     // jun-7-misc 06 — operator-chosen apply-model id (mirrors QUANTA_COMPACT_MODEL).
     // Absent ⇒ no port built even when fastApplyMerge is on (both required —
     // advertise-iff-able). NO default model (no-heuristics rule: measure vs the

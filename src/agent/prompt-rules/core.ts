@@ -55,6 +55,7 @@ const posCtx = (envPosture: PromptContext["envPosture"]): PromptContext => ({
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
   hasDirectives: false,
+  hasDelegationSuppress: false,
 })
 
 /**

@@ -52,6 +52,7 @@ export const noticeCtx = (mode: GraphMode, brief: boolean): PromptContext => ({
   hasRepoRulesDynamic: false,
   hasTaskBudget: false,
   hasDirectives: false,
+  hasDelegationSuppress: false,
 })
 
 /**
@@ -78,6 +79,8 @@ export const dynamicReminderCtx = (
   hasTaskBudget: renderTaskBudgetBlock(input.taskBudget) !== undefined,
   hasDirectives:
     selectActiveDirectives(input.directiveConfig ?? resolveDirectiveConfig()).length > 0,
+  // C5059-05 — gate the tool-routing fan-out line on the delegation-suppress knob.
+  hasDelegationSuppress: runtimeConfig().subagentDelegateSuppress,
 })
 
 /** Render the active-skills catalogue + trigger-rule block (Codex

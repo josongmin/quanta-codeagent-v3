@@ -24,7 +24,10 @@ const SENIORITY_ROLE =
 const SRC_DIR = join(import.meta.dir, "../..") // src/
 const SHARED_REL = "agent/prompt-graph/shared.ts"
 const SCAN = "**/*.{ts,tsx}"
-const isTest = (p: string) => /\.(test|spec)\.[a-z]+$/.test(p) || p.includes("/__")
+// Exclude test files + the double-underscore DIR convention (`__tests__`,
+// `__mocks__`, …) — but NOT an arbitrary `__foo.ts` prod file, which must stay
+// in scope so a prompt can't evade the ratchet by an underscore-prefixed name.
+const isTest = (p: string) => /\.(test|spec)\.[a-z]+$/.test(p) || /\/__\w+__\//.test(p)
 
 describe("role-drift ratchet — seniority ROLE word is single-sourced in shared.ts", () => {
   test("no file outside shared.ts inlines a `<seniority> … engineer` role phrase", () => {

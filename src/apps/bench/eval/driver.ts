@@ -222,6 +222,59 @@ export const contributeVerdictDebug = (result: {
   })
 }
 
+/**
+ * DEBUG enricher `editTrace` (jul-13 platform, ADR-0539). The THIRD (and final)
+ * debug-sink contributor, mirroring `verdict` and `toolExec`: when the `edit`
+ * tool runs during a bench turn, shape a per-edit trace slice and APPEND it into
+ * the CURRENT lane's debug buffer so the recorder drains it onto
+ * `metadata.debug.editTrace` — a LIST (multiple edits per turn accumulate, never
+ * overwrite; mirrors `toolExec`'s `append`).
+ *
+ * ZERO RECOMPUTE: every field is derived from a signal the edit tool ALREADY
+ * produced — the target `file`, the applied bit (`ok`), the bulk-replace intent
+ * (`replaceAll`), and the tool's own output message (`preview`, which encodes the
+ * strategy/mode + occurrence count the edit already decided). NO diff recompute,
+ * NO file re-read.
+ *
+ * The `preview` is `"<path>: <message>…"`; the `message` vocabulary (edit tool
+ * SSOT) is the mode/outcome oracle:
+ *   - `applied via fast-apply merge`               → mode `fast-apply`
+ *   - `…via whitespace-flexible|anchored-trim match`
+ *     · `…via scored-candidate best match (…)`     → mode `fuzzy` (escalated)
+ *   - `Replaced N occurrence(s)[ within line_ranges]`
+ *     · `…via exact match`                          → mode `exact`
+ *   - `stale_precondition` / `stale_read`          → outcome `stale`
+ * A non-`ok` result with no stale marker is outcome `failed`; `ok` is `matched`.
+ *
+ * CONTRACT: metadata-only ⇒ REPLAY-NEUTRAL (rides `metadata`, never the request
+ * hash). `append` is itself a no-op off-gate, so the tap only builds/forwards the
+ * raw signals when `isTrajectoryDebugEnabled()` (the tap wires `onEditResult`
+ * only then), and this shaper is only reached on that wired path.
+ */
+export const contributeEditTraceDebug = (raw: {
+  readonly file: string
+  readonly ok: boolean
+  readonly preview: string
+  readonly replaceAll: boolean
+}): void => {
+  const p = raw.preview
+  const isStale = /stale_precondition|stale_read/.test(p)
+  const outcome = raw.ok ? "matched" : isStale ? "stale" : "failed"
+  const isFuzzy = /whitespace-flexible|anchored-trim|scored-candidate/.test(p)
+  const isFastApply = p.includes("fast-apply merge")
+  const mode = isFastApply ? "fast-apply" : isFuzzy ? "fuzzy" : "exact"
+  const occ = p.match(/Replaced (\d+) occurrence/)
+  const occurrences = occ?.[1] !== undefined ? Number.parseInt(occ[1], 10) : undefined
+  debugSink.append("editTrace", {
+    file: raw.file,
+    mode,
+    outcome,
+    ...(occurrences !== undefined ? { occurrences } : {}),
+    ...(raw.replaceAll ? { replaceAll: true } : {}),
+    ...(mode === "fuzzy" ? { fuzzyEscalated: true } : {}),
+  })
+}
+
 const capabilityManifestForConfig = (config: AgentConfig): CapabilityManifest => ({
   approvals: "none",
   tools: true,
@@ -451,6 +504,10 @@ const runAgentOnce = async (
     // debug-sink so the trajectory viewer can show a per-turn tool breakdown.
     // No-op unless QUANTA_BENCH_RECORD_TRAJECTORY=debug.
     isTrajectoryDebugEnabled() ? (args) => debugSink.append("toolExec", args) : undefined,
+    // editTrace debug enricher (jul-13): shape a per-edit trace (mode / outcome /
+    // occurrences / fuzzy-escalation) from the edit's own signals and append it to
+    // metadata.debug.editTrace. No-op off-gate (byte-identical).
+    isTrajectoryDebugEnabled() ? contributeEditTraceDebug : undefined,
   )
   // Knob telemetry: emit ONE `knobs_applied` event per runAgent invocation —
   // the greppable per-run marker of which knobs/preset actually ran. The runner
@@ -595,6 +652,9 @@ const runAgentPhase = async (
         // toolExec debug enricher: per-tool-result timing + file path (edit tools).
         // No-op unless QUANTA_BENCH_RECORD_TRAJECTORY=debug.
         isTrajectoryDebugEnabled() ? (args) => debugSink.append("toolExec", args) : undefined,
+        // editTrace debug enricher (jul-13): per-edit mode/outcome/occurrences from
+        // the edit's own signals → metadata.debug.editTrace. No-op off-gate.
+        isTrajectoryDebugEnabled() ? contributeEditTraceDebug : undefined,
       )
       // Knob telemetry: emit once per phase entry (matches the contract on
       // `emitKnobsApplied`). The single-pass path bypasses `runAgentOnce`, so
