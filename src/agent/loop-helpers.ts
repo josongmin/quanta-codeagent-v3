@@ -8,6 +8,7 @@ import {
 import type { Message } from "@/llm"
 import {
   attrs,
+  ERROR_ATTRS,
   endSpan,
   GEN_AI_ATTRS,
   getSpanSink,
@@ -392,6 +393,32 @@ export const samplingUsageFromEvent = (ev: {
   ...(ev.reasoningTokens !== undefined ? { reasoningTokens: ev.reasoningTokens } : {}),
 })
 
+/** Correlation + error-class attrs for the sampling span (T-C3 + T-B5), split
+ *  out to keep `buildSamplingSpanAttrs` under the cognitive-complexity cap.
+ *
+ *  · `gen_ai.conversation.id` (T-C3): a STABLE grouping id so a GenAI backend
+ *    folds every turn of one instance/attempt into a single session thread —
+ *    same across turns (identity is per-instance/attempt), different across
+ *    instances. Omitted when no identity is supplied (byte-identical).
+ *  · `error.type` (T-B5): Conditionally-Required on the chat span when the
+ *    operation errors. A GENERAL OTel attr (bare `error.type`, NOT
+ *    `gen_ai.error.type`), carrying the bounded error CLASS (a `LLMErrorKind`
+ *    slug) or the semconv `"_OTHER"` fallback — NEVER a raw message, so error
+ *    dashboards keyed on it stay low-cardinality. Only stamped on `"error"`
+ *    status (an `"aborted"` is a HITL hand-off / user cancel, not an error). */
+const samplingIdentityAttrs = (
+  status: SpanStatus,
+  errorKind: string | undefined,
+  conversationId: string | undefined,
+): Record<string, string> => {
+  const out: Record<string, string> = {}
+  if (conversationId !== undefined && conversationId !== "")
+    out[GEN_AI_ATTRS.conversation.id] = conversationId
+  if (status === "error")
+    out[ERROR_ATTRS.type] = errorKind !== undefined && errorKind !== "" ? errorKind : "_OTHER"
+  return out
+}
+
 /** gen_ai.* attributes for a `run_sampling_request` (`chat`, kind=CLIENT) span:
  *  TTFT (existing) PLUS the GenAI operation discriminator, the requested model +
  *  its provider, the response model, token usage, and the finish reason. The
@@ -420,11 +447,31 @@ export const buildSamplingSpanAttrs = (
    *  available, else derived from the model prefix). Both omitted when unknown. */
   requestModel?: string,
   provider?: string,
+  /** Terminal status of the sampling request. When `"error"` the semconv makes
+   *  `error.type` Conditionally-Required — we stamp it here (T-B5). `"ok"` /
+   *  `"aborted"` never carry `error.type` (an abort is a HITL hand-off / user
+   *  cancel, not an operation error). Defaulted to `"ok"` so existing callers
+   *  (and the empty-safe test doubles) stay byte-identical. */
+  status: SpanStatus = "ok",
+  /** T-B5 low-cardinality error CLASS (a `LLMErrorKind` slug like `"network"` /
+   *  `"rate_limit"`), used verbatim as `error.type` when `status==="error"`.
+   *  Absent ⇒ the semconv canonical fallback `"_OTHER"`. NEVER a raw error
+   *  message — the value is a bounded enum so error dashboards stay
+   *  low-cardinality. */
+  errorKind?: string,
+  /** T-B5 stable conversation grouping id (`gen_ai.conversation.id`): the SAME
+   *  value for every turn of one instance/attempt, DIFFERENT across instances
+   *  (sourced from the session/instance identity). Omitted (undefined / empty)
+   *  ⇒ key not stamped, so non-bench or identity-less callers stay
+   *  byte-identical. */
+  conversationId?: string,
 ): Record<string, string | number | readonly string[]> => {
   const out: Record<string, string | number | readonly string[]> = {
     // `chat` is the canonical GenAI operation for a provider sampling request.
     [GEN_AI_ATTRS.operation.name]: "chat",
     ...buildTtftAttrs(timing),
+    // T-C3 conversation grouping id + T-B5 error.type — see the helper.
+    ...samplingIdentityAttrs(status, errorKind, conversationId),
   }
   if (requestModel !== undefined && requestModel !== "") {
     out[GEN_AI_ATTRS.request.model] = requestModel
@@ -474,6 +521,13 @@ export const closeSamplingSpan = (
    *  test doubles that don't expose a model. */
   requestModel?: string,
   provider?: string,
+  /** T-B5 — low-cardinality error CLASS (a `LLMErrorKind` slug) when
+   *  `status==="error"`; forwarded verbatim to `error.type`. Absent ⇒ `"_OTHER"`.
+   *  Never a raw message. */
+  errorKind?: string,
+  /** T-C3 — stable `gen_ai.conversation.id` (same for every turn of one
+   *  instance/attempt). Omitted ⇒ key not stamped. */
+  conversationId?: string,
 ): void => {
   const sinkActive = getSpanSink() !== null
   const promptPreview =
@@ -492,6 +546,9 @@ export const closeSamplingSpan = (
         completionPreview,
         requestModel,
         provider,
+        status,
+        errorKind,
+        conversationId,
       ),
     ),
   )

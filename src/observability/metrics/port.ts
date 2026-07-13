@@ -31,6 +31,33 @@ import { QuantaError } from "@/shared"
  *  a compile-error update at every exhaustive switch site. */
 export type MetricKind = "counter" | "histogram" | "gauge"
 
+/**
+ * Typed instrument descriptor — the SSOT for a metric's wire metadata
+ * (ADR-0539 / T-C1). An emitter declares `{name, kind, unit, description}`
+ * ONCE and every sample it produces carries that metadata to the OTLP wire.
+ *
+ * OTel-GenAI conformance REQUIRES a `unit` on every metric (`s` for durations,
+ * `{token}` for token usage) — a bare name+number is non-conformant. This
+ * descriptor lets an emitter attach the UCUM unit + a human `description` at
+ * the declaration site so the OTLP metric descriptor object carries them.
+ *
+ * `unit`/`description` are OPTIONAL: an instrument that declares neither
+ * serializes EXACTLY as before (no `unit`/`description` key on the wire) — so
+ * every pre-existing metric stays byte-identical. Declaring a `unit` is purely
+ * additive.
+ */
+export interface InstrumentDescriptor {
+  readonly name: string
+  readonly kind: MetricKind
+  /** UCUM unit string (OTLP metric `unit` field). E.g. `"s"`, `"ms"`,
+   *  `"{token}"`, `"By"`. OMITTED ⇒ no `unit` key on the OTLP metric
+   *  (byte-identical to the pre-descriptor wire). */
+  readonly unit?: string
+  /** Human-readable metric description (OTLP metric `description` field).
+   *  OMITTED ⇒ no `description` key on the wire. */
+  readonly description?: string
+}
+
 /** One observation handed to a `MetricSink`. Immutable on the wire. */
 export interface MetricSample {
   readonly name: string
@@ -42,6 +69,14 @@ export interface MetricSample {
   readonly labels?: Readonly<Record<string, string>>
   /** Epoch ms when the sample was recorded (registry-supplied clock). */
   readonly at: number
+  /** Optional UCUM unit (OTLP metric `unit` field) — see `InstrumentDescriptor`.
+   *  OMITTED ⇒ the OTLP metric carries NO `unit` key (byte-identical to the
+   *  pre-descriptor wire). OTel-GenAI metrics REQUIRE this (`s`, `{token}`);
+   *  legacy metrics leave it unset and are unchanged. */
+  readonly unit?: string
+  /** Optional human-readable description (OTLP metric `description` field).
+   *  OMITTED ⇒ no `description` key on the wire. */
+  readonly description?: string
 }
 
 /** Sink adapter. Implementations MUST NOT throw — the registry catches

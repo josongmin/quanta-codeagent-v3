@@ -121,6 +121,13 @@ export interface ExportMetric {
   readonly value: number
   readonly attributes?: Readonly<Record<string, string | number | boolean>>
   readonly timeEpochMs: number
+  /** UCUM unit for the OTLP metric descriptor (`unit` field). OMITTED ⇒ no
+   *  `unit` key is serialized — byte-identical to the pre-T-C1 wire. Required
+   *  for OTel-GenAI metrics (`s`, `{token}`); legacy metrics leave it unset. */
+  readonly unit?: string
+  /** Human-readable description for the OTLP metric descriptor (`description`
+   *  field). OMITTED ⇒ no `description` key is serialized. */
+  readonly description?: string
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -409,9 +416,19 @@ const serializeMetrics = (
               timeUnixNano: nanos(m.timeEpochMs),
               asDouble: m.value,
             }
+            // Descriptor-level fields (`unit`/`description`) — spread ONLY when
+            // declared so a metric without them serializes byte-identical to
+            // the pre-T-C1 wire (no `unit`/`description` key appears). OTLP puts
+            // both at the metric object level, alongside `name` + the
+            // sum/histogram/gauge data. (audit T-C1)
+            const descriptor: Record<string, string> = {
+              name: m.name,
+              ...(m.unit !== undefined ? { unit: m.unit } : {}),
+              ...(m.description !== undefined ? { description: m.description } : {}),
+            }
             if (m.kind === "counter") {
               return {
-                name: m.name,
+                ...descriptor,
                 sum: {
                   dataPoints: [dp],
                   aggregationTemporality: AGG_TEMPORALITY_DELTA,
@@ -421,7 +438,7 @@ const serializeMetrics = (
             }
             if (m.kind === "histogram") {
               return {
-                name: m.name,
+                ...descriptor,
                 histogram: {
                   dataPoints: [
                     {
@@ -438,7 +455,7 @@ const serializeMetrics = (
             }
             // gauge — a gauge has NO temporality (it's a point-in-time value).
             return {
-              name: m.name,
+              ...descriptor,
               gauge: { dataPoints: [dp] },
             }
           }),
@@ -695,6 +712,10 @@ export const exporterMetricSink = (exporter: OtelExporter): MetricSink => ({
       value: sample.value,
       ...(sample.labels !== undefined ? { attributes: sample.labels } : {}),
       timeEpochMs: sample.at,
+      // Carry the descriptor-level metadata to the wire ONLY when declared, so
+      // legacy (unit-less) samples stay byte-identical. (T-C1)
+      ...(sample.unit !== undefined ? { unit: sample.unit } : {}),
+      ...(sample.description !== undefined ? { description: sample.description } : {}),
     })
   },
   async flush() {

@@ -71,7 +71,7 @@ export type {
   TimerStats,
   TimerStop,
 } from "./types"
-export { GEN_AI_ATTRS, QUANTA_ATTRS, QUANTA_SPAN_NAMES } from "./vocabulary"
+export { ERROR_ATTRS, GEN_AI_ATTRS, QUANTA_ATTRS, QUANTA_SPAN_NAMES } from "./vocabulary"
 export {
   accumulateWorkMetrics,
   buildWorkMetrics,

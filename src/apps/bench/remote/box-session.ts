@@ -160,6 +160,16 @@ const FORWARD_EXTRA_ENV: ReadonlySet<string> = new Set([
   // `<runId>/<instanceId>.<attempt>.jsonl` trajectory. Absent locally ⇒ not
   // forwarded ⇒ box mints its own (byte-identical Default-OFF).
   "QUANTA_RUN_ID",
+  // jul-13 (T-B4): context-only span-sink gate. The box's agent loop attaches the
+  // trace sink / stamps unified `{traceId,spanId}` on its cassettes+observe ONLY
+  // when QUANTA_TRACE_CONTEXT is in its env — and this knob is NOT QUANTA_BENCH_*-
+  // prefixed (naming decided in T-B3), so it would be SILENTLY DROPPED by the
+  // forward gate. Without forwarding it a full-remote run records with NO sink →
+  // no ids → the FETCHED per-box cassettes/observe the trajectory viewer loads
+  // (trajectories/<box>/ + observe-<box>.tar.b64) degrade to no-trace — exactly
+  // the runs the operator most wants to inspect (same env-forwarding bug class as
+  // QUANTA_OTEL_ENDPOINT). Absent locally ⇒ not forwarded ⇒ byte-identical Default-OFF.
+  "QUANTA_TRACE_CONTEXT",
   // jun-29 (RFC multi-dataset): buildBenchCommand hardcodes QUANTA_SWEBENCH_NAMESPACE
   // =swebench and defaults dataset_name to Verified. Live/Pro grade against a DIFFERENT
   // HF dataset + Docker namespace (Live: SWE-bench-Live/SWE-bench-Live + `starryzhang`).

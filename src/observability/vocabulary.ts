@@ -396,6 +396,29 @@ export const GEN_AI_ATTRS = {
 } as const
 
 // ---------------------------------------------------------------------------
+// General OpenTelemetry attributes (NOT `gen_ai.*`-namespaced)
+// ---------------------------------------------------------------------------
+
+/**
+ * Cross-cutting OTel attributes that are NOT part of the GenAI namespace.
+ *
+ * `error.type` is a GENERAL semconv attribute (registry `error`, applies to any
+ * signal) — it is deliberately the bare string `"error.type"`, NOT
+ * `gen_ai.error.type` (that key does not exist in the pin). GenAI's chat span
+ * and both GenAI metrics make it **Conditionally-Required when the operation
+ * errors**. Its value is a LOW-CARDINALITY class enum (the classified error
+ * kind, or the semconv fallback `"_OTHER"`) — NEVER a raw error message. Kept
+ * out of {@link GEN_AI_ATTRS} on purpose so the gen_ai-only pin-drift guard
+ * (`semconv-pin-drift.test.ts`) does not (and should not) cover it.
+ */
+export const ERROR_ATTRS = {
+  /** OTel general semconv `error.type` — bounded low-cardinality error class
+   *  (e.g. a `LLMErrorKind` slug) or the canonical fallback `"_OTHER"`. Set only
+   *  when a span/metric records an error. */
+  type: "error.type",
+} as const
+
+// ---------------------------------------------------------------------------
 // Compile-time key union derivation
 // ---------------------------------------------------------------------------
 
@@ -416,8 +439,11 @@ export type QuantaAttrKey = ExtractValues<typeof QUANTA_ATTRS>
 /** All canonical `gen_ai.*` attribute keys as a string-literal union. */
 export type GenAiAttrKey = ExtractValues<typeof GEN_AI_ATTRS>
 
+/** General (non-namespaced) OTel attribute keys — currently `error.type`. */
+export type ErrorAttrKey = ExtractValues<typeof ERROR_ATTRS>
+
 /** Union of every canonical attribute key — the only valid `Attrs` key set. */
-export type AttrKey = QuantaAttrKey | GenAiAttrKey
+export type AttrKey = QuantaAttrKey | GenAiAttrKey | ErrorAttrKey
 
 // ---------------------------------------------------------------------------
 // Attribute value typing (OTel spec)
@@ -460,6 +486,7 @@ const collectKeys = (): readonly string[] => {
   const out: string[] = []
   flatten(QUANTA_ATTRS, out)
   flatten(GEN_AI_ATTRS, out)
+  flatten(ERROR_ATTRS, out)
   return Object.freeze([...out].sort())
 }
 

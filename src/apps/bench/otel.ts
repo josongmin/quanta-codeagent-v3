@@ -23,12 +23,14 @@
  * (composition-root policy: a silent default would leak observations).
  */
 
+import { makeContextOnlySpanSink } from "@/observability/context-only-sink"
 import type { OtelExporterOpts } from "@/observability/otel-exporter"
 import {
   type ExporterSpanSinkOpts,
   type InstalledOtelExport,
   installOtelSpanExportFromEnv,
 } from "@/observability/otel-span-export"
+import { getSpanSink, setSpanSink } from "@/observability/spans"
 
 /** Attach the OTLP span/metric exporter for a bench process when
  *  `QUANTA_OTEL_ENDPOINT` is set on `env`. Returns the installed handle (with a
@@ -177,17 +179,38 @@ export const bootBenchOtelExport = (
     // already honored as the source) is never overwritten.
     env.QUANTA_RUN_ID ??= runId
   }
+  // ATTACH FIRST (T-B2 install-order guard): the OTLP exporter, when an endpoint
+  // IS set, installs ITS span sink here and must WIN. `attachBenchOtelExport`
+  // returns a non-null `exporter` exactly when it installed that sink, so gating
+  // the context-only branch on `exporter === null` guarantees context-only NEVER
+  // runs when the exporter is present (it cannot shadow it). Belt-and-braces: even
+  // if that read ever drifted, `installOtelSpanExportFromEnv`'s own idempotent
+  // guard (`getSpanSink() !== null`) means the exporter, once installed, owns the
+  // sink — but we re-check `getSpanSink() === null` below so we NEVER clobber an
+  // already-registered sink (exporter or a nested boot).
   const otelExport = attachBenchOtelExport(env, overrides)
-  // jul-13 (ADR-0539, T-B3) — INERT placeholder read of the context-only span-sink
-  // gate. T-B2 will replace this branch body with `setSpanSink(makeContextOnlySpanSink())`
-  // when truthy AND no OTLP endpoint is set (the exporter, when an endpoint IS set,
-  // installs its own sink above via attachBenchOtelExport and must WIN — context-only
-  // must never shadow it). Until then this is a pure no-op: reading the flag registers
-  // NO sink, so the knob is Default-OFF byte-identical AND the readsite-truthful
-  // ratchet sees the env.QUANTA_TRACE_CONTEXT read that the inventory point at this file.
+  // jul-13 (ADR-0539, T-B2) — CONTEXT-ONLY span sink. When the knob is set AND no
+  // OTLP endpoint is configured (no exporter installed above), install the
+  // context-only sink so `withActiveSpanScope` mints real `{traceId,spanId}` on
+  // every recorded unit — the trajectory viewer's span-tree becomes non-empty on
+  // ordinary (non-export) bench runs — while exporting NOTHING.
+  //
+  // ⚠️ INSTANCE-FATAL COUPLING (the reason this is HIGH-risk): installing ANY sink
+  // flips `traceContextExpected: () => getSpanSink() !== null` true
+  // (`runner/batch/observe.ts:179`). If a recorded event were ever emitted OUTSIDE
+  // `withActiveSpanScope` while the sink is live, the recorder would emit
+  // `observability_degraded` (reason `missing_trace_context`) and FAIL the strict
+  // rail → `verdict:"degraded"` → EXCLUDED from the eval denominator = a
+  // bench-correctness regression. The real loop wraps EVERY recorded unit
+  // (session/turn/tool/sampling) in `withActiveSpanScope`, so every emit sees a
+  // ref and this never triggers on the real path — proven by the wiring test's
+  // zero-spurious-degraded + LIVE-GATE red-on-injection cases.
   const traceContextOnly =
     otelExport.exporter === null && (env.QUANTA_TRACE_CONTEXT ?? "").trim() !== ""
-  void traceContextOnly // T-B2: install makeContextOnlySpanSink() here
+  // `getSpanSink() === null` is the final ownership guard: an already-registered
+  // sink (the exporter, or an outer boot) keeps control — context-only never
+  // shadows it. Combined with `exporter === null` this is doubly safe.
+  if (traceContextOnly && getSpanSink() === null) setSpanSink(makeContextOnlySpanSink())
   const traceLink =
     otelExport.exporter !== null && runId !== undefined
       ? traceViewerUrl(otelUiPort(env), runId)

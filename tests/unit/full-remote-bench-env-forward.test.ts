@@ -142,6 +142,26 @@ describe("buildForwardedBenchEnv", () => {
     expect(out).toContain("QUANTA_OTEL_RUN_ID='campaign-A2' ")
   })
 
+  test("FWD-12: T-B4 — QUANTA_TRACE_CONTEXT (context-only span-sink gate) reaches the box", () => {
+    // jul-13 T-B4: QUANTA_TRACE_CONTEXT gates the box's context-only span sink /
+    // unified {traceId,spanId} stamping on its cassettes+observe. It is NOT
+    // QUANTA_BENCH_*-prefixed, so it must be in the explicit FORWARD_EXTRA_ENV
+    // allowlist — otherwise a full-remote run records with NO sink and the FETCHED
+    // per-box cassettes/observe the trajectory viewer loads degrade to no-trace.
+    // Red-on-injection: remove "QUANTA_TRACE_CONTEXT" from FORWARD_EXTRA_ENV
+    // (box-session.ts) ⇒ this assertion goes RED (knob silently dropped on the box).
+    const out = buildForwardedBenchEnv({
+      QUANTA_TRACE_CONTEXT: "1",
+      QUANTA_BENCH_A: "1",
+    })
+    expect(out).toContain("QUANTA_TRACE_CONTEXT='1' ")
+    // shell-quoted (no injection) and still NOT a blanket widening — a sibling
+    // non-allowlisted var stays home.
+    const inj = buildForwardedBenchEnv({ QUANTA_TRACE_CONTEXT: "1; rm -rf /" })
+    expect(inj).toBe("QUANTA_TRACE_CONTEXT='1; rm -rf /' ")
+    expect(buildForwardedBenchEnv({ QUANTA_PROVIDER: "chatgpt-oauth" })).toBe("")
+  })
+
   test("FWD-8: local bench replay cassette path is rejected for full-remote/pool runs", () => {
     expect(() =>
       buildForwardedBenchEnv({

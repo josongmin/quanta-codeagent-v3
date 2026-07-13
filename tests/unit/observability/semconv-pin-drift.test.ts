@@ -15,12 +15,18 @@
  *     still expects it).
  *
  * The allowlist is DOCUMENTED, not silent: when a downstream ticket
- * deliberately adds a pinned key — B5 (`gen_ai.error.type` on failed spans) or
- * C3 (`gen_ai.conversation.id` EMISSION, key already declared) — the author
- * updates {@link PINNED_GEN_AI_KEYS} here (moving a RESERVED entry into the
- * live set), which forces the change through review rather than letting it
- * drift. Each entry carries its pin-provenance so an off-pin invention is
- * visible in the diff.
+ * deliberately adds a pinned `gen_ai.*` key the author updates the allowlist
+ * here (moving a RESERVED entry into the live set), which forces the change
+ * through review rather than letting it drift. Each entry carries its
+ * pin-provenance so an off-pin invention is visible in the diff.
+ *
+ * NAMESPACE NOTE (B5 reconcile): `error.type` is a GENERAL OTel attribute, NOT
+ * `gen_ai.*` — the pinned key is the bare string `error.type` (there is no
+ * `gen_ai.error.type`). B5 therefore adds it to `ERROR_ATTRS`, OUTSIDE
+ * `GEN_AI_ATTRS`, so this gen_ai-only drift guard neither covers nor should
+ * expect it (see the `error.type is a general attr, out of gen_ai scope` test).
+ * C3 (`gen_ai.conversation.id` EMISSION) adds NO new key — that key was already
+ * declared (and already allowlisted below); C3 only wires the emission site.
  *
  * See ADR-0539 (§ Amendment — GenAI semconv snapshot is PINNED) and
  * `docs/tickets/jul-13-tracing-ssot-sota-tickets.md`
@@ -34,7 +40,7 @@ import {
   SEMCONV_GEN_AI_SPANS_URL,
   SEMCONV_SNAPSHOT,
 } from "@/observability/semconv-pin"
-import { GEN_AI_ATTRS } from "@/observability/vocabulary"
+import { ATTR_KEY_SET, ERROR_ATTRS, GEN_AI_ATTRS } from "@/observability/vocabulary"
 
 // ---------------------------------------------------------------------------
 // The pinned `gen_ai.*` key allowlist. SET-equality against GEN_AI_ATTRS.
@@ -92,13 +98,15 @@ const LOCAL_EXTENSION_KEYS: readonly string[] = [
   "gen_ai.tool.output",
 ]
 
-/** Pinned keys tickets WILL add (emission or declaration). Kept OUT of the live
- *  allowlist so they cannot land silently; when B5/C3 declare them in
- *  `GEN_AI_ATTRS`, move the entry from here into {@link PINNED_SPAN_KEYS}. This
- *  list is documentation only — it is NOT part of the equality check. */
+/** Pinned `gen_ai.*` keys tickets WILL add (emission or declaration). Kept OUT
+ *  of the live allowlist so they cannot land silently; when a ticket declares
+ *  one in `GEN_AI_ATTRS`, move the entry from here into {@link PINNED_SPAN_KEYS}.
+ *  This list is documentation only — it is NOT part of the equality check.
+ *
+ *  B5's `error.type` is NOT here: it is a general (non-`gen_ai.*`) attribute
+ *  living in `ERROR_ATTRS`, outside this guard's scope (see the namespace note
+ *  above + the dedicated `error.type` test below). */
 const RESERVED_FUTURE_PINNED_KEYS: readonly string[] = [
-  // B5 — Conditionally-Required on the span + both metrics when errored.
-  "gen_ai.error.type",
   // Opt-In system prompt (underscore form) — reserved until content capture (D1)
   // wires it; pinned name is `gen_ai.system_instructions`.
   "gen_ai.system_instructions",
@@ -174,5 +182,16 @@ describe("semconv pin — drift guard", () => {
   test("the allowlist itself has no duplicate entries", () => {
     const all = [...PINNED_SPAN_KEYS, ...LOCAL_EXTENSION_KEYS]
     expect(new Set(all).size).toBe(all.length)
+  })
+
+  test("error.type is a GENERAL attr, out of gen_ai scope (B5 reconcile)", () => {
+    // The pinned key is the bare `error.type`, NOT `gen_ai.error.type`.
+    expect(ERROR_ATTRS.type).toBe("error.type")
+    // It is a valid canonical attribute key (so `attrs()` accepts it)…
+    expect(ATTR_KEY_SET.has("error.type")).toBe(true)
+    // …but it is NOT `gen_ai.*` — so it neither appears in the gen_ai key set
+    // nor is `gen_ai.error.type` (a non-existent key) ever emitted.
+    expect(new Set(liveGenAiKeys()).has("error.type")).toBe(false)
+    expect(ATTR_KEY_SET.has("gen_ai.error.type")).toBe(false)
   })
 })
