@@ -49,6 +49,7 @@ evidence:
     - src/tool/scripted-replace.ts
     - src/tool/apply-patch.ts
     - src/tool/notebook-edit/tool.ts
+    - src/tool/file-history/tool.ts
     - src/tool/types.ts
     - src/shared/runtime-config.ts
     - src/shared/runtime-config/types-extra.ts
@@ -67,6 +68,8 @@ evidence:
       - tests/unit/edit-fresh-hash-apply-patch-hellgate.test.ts
       - tests/unit/edit-fresh-hash-apply-patch-audit-hellgate.test.ts
       - tests/unit/edit-fresh-hash-notebook-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-file-history-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts
       - tests/unit/edit-fresh-hash-agent-loop-e2e-hellgate.test.ts
     integration: []
     contract: []
@@ -110,7 +113,22 @@ notes: |
   found it would false-`stale_read` a chained notebook_edit/edit. It now calls
   refreshStaleReadBaseline post-write (pinned) but OMITS emission — it is cell-op
   based and does not consume `expected_hash`, so the single-flat-file chain
-  contract does not apply.
+  contract does not apply. `file_history_rewind` (op:"restore") is the SIXTH
+  mutating tool — it overwrites a file with a prior version (mtime advances) and
+  was found by the completeness ratchet (below) to have the SAME missing-refresh
+  gap; it now refreshes post-restore (refresh-only). ALL six file-mutating tools
+  (edit/write/scripted_replace/apply_patch/notebook_edit/file_history_rewind) are
+  covered.
+
+  COMPLETENESS RATCHET (SOTA++, prevents recurrence):
+  edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts statically scans
+  src/tool/** for every tool that writes a file and asserts each CALLS a refresh
+  primitive (or is in an explicit REFRESH_EXEMPT allowlist with a reason). A NEW
+  mutating tool that forgets the refresh — the exact notebook_edit / file_history
+  class of gap — turns it RED at construction time (OmO single-writer static-audit
+  pattern). It requires a CALL not a bare import, so an import-but-inert refresh is
+  also caught; an anti-vacuum floor test pins the known 6 writers so a regex drift
+  cannot make it vacuously green.
 
   DEFEAT-AND-CURE (found by adversarial hardening): the DEFAULT-ON mtime stale-read
   guard (ADR-0474) would veto a fresh-hash CHAINED edit with `stale_read` because a
@@ -118,9 +136,10 @@ notes: |
   the read-time value — silently defeating the "no re-read" promise in the default
   config. Cured by refreshStaleReadBaseline (a successful mutation IS a fresh read
   of its own output). An EXTERNAL modification still trips stale_read (TOCTOU
-  preserved — pinned). Suite: 11 files, 85 tests, 1122 expect(), red-on-injection
-  proven per tool (disabling refreshStaleReadBaseline/refreshApplyBaselines flips
-  the mtime/cross-tool/apply/notebook chains RED; freshHashNote flips the emit RED).
+  preserved — pinned). Suite: 13 files, 92 tests, red-on-injection proven per tool
+  (disabling refreshStaleReadBaseline/refreshApplyBaselines flips the
+  mtime/cross-tool/apply/notebook/file-history chains RED; freshHashNote flips the
+  emit RED) + the static completeness ratchet flips RED on any missing-refresh.
 
   Ships DEFAULT-ON (jul-13): this is not a speculative lever — the emission removes
   a forced re-read (small fixed add vs a file-size-proportional re-read saved) and

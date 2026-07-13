@@ -25,6 +25,7 @@
 
 import { z } from "zod"
 import { type FileSystemPort, FsJailError, resolveJailed } from "@/storage"
+import { refreshStaleReadBaseline } from "../_shared/fresh-hash"
 import { defineTool } from "../factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import type { FileHistoryStore } from "./store"
@@ -194,6 +195,13 @@ const restore = async (
     }
     throw e
   }
+  // jul-13 edit-fresh-hash (EDIT PARITY, refresh-only) — a restore OVERWRITES the
+  // file (advancing its mtime), so without refreshing the stale-read baseline a
+  // chained no-re-read edit to the restored file would be falsely vetoed
+  // `stale_read` by the DEFAULT-ON mtime guard. Record the just-written mtime
+  // (gated ⇒ byte-identical when off). No emission (restore is not a chainable
+  // expected_hash text edit; content-match still guards a stale mental model).
+  await refreshStaleReadBaseline(fs, ctx, { path: key, base: ctx.cwd })
   return {
     ok: true,
     output: `Restored ${input.path} to v${target.version} (${target.byteLength} bytes, recordedAt=${target.recordedAt}).`,
