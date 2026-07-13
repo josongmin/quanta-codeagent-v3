@@ -88,12 +88,22 @@ const allSpans = (traces: Awaited<ReturnType<typeof captureOtlp>>["traces"]): Ot
 const attrOf = (span: OtlpSpan | undefined, key: string): string | undefined =>
   span?.attributes.find((a) => a.key === key)?.value.stringValue
 
+/** Find the chat (sampling) span on the WIRE. The internal `SPAN_NAMES` id
+ *  (`run_sampling_request`) is re-mapped to the pinned `{operation} {model}`
+ *  name (`chat gpt-5`) at the OTLP export boundary, so we key on the stable
+ *  `gen_ai.operation.name === "chat"` attribute (the pin's discriminator), not
+ *  the literal wire name. */
+const findChat = (
+  traces: Awaited<ReturnType<typeof captureOtlp>>["traces"],
+): OtlpSpan | undefined =>
+  allSpans(traces).find((s) => attrOf(s, GEN_AI_ATTRS.operation.name) === "chat")
+
 describe("T-B5 error.type on the chat span", () => {
   test("present (bounded class) on an errored close; key is bare error.type", async () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "error", errorKind: "network" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     expect(chat).toBeDefined()
     // Emitted under the BARE general key…
     expect(attrOf(chat, ERROR_ATTRS.type)).toBe("network")
@@ -110,7 +120,7 @@ describe("T-B5 error.type on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "error", errorKind: "rate_limit" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     const v = attrOf(chat, ERROR_ATTRS.type)
     expect(v).toBe("rate_limit")
     expect(v).not.toBe(rawLookingMessage)
@@ -123,7 +133,7 @@ describe("T-B5 error.type on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "error" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     expect(attrOf(chat, ERROR_ATTRS.type)).toBe("_OTHER")
   })
 
@@ -131,7 +141,7 @@ describe("T-B5 error.type on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "ok", errorKind: "network" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     expect(chat).toBeDefined()
     expect(attrOf(chat, ERROR_ATTRS.type)).toBeUndefined()
   })
@@ -140,7 +150,7 @@ describe("T-B5 error.type on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "aborted", errorKind: "aborted" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     expect(attrOf(chat, ERROR_ATTRS.type)).toBeUndefined()
   })
 
@@ -151,7 +161,7 @@ describe("T-B5 error.type on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "ok" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     const hasError = chat?.attributes.some((a) => a.key === ERROR_ATTRS.type) ?? false
     expect(hasError).toBe(false)
   })
@@ -162,7 +172,7 @@ describe("T-C3 gen_ai.conversation.id on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "ok", conversationId: "inst-A#0" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     expect(attrOf(chat, GEN_AI_ATTRS.conversation.id)).toBe("inst-A#0")
   })
 
@@ -172,7 +182,7 @@ describe("T-C3 gen_ai.conversation.id on the chat span", () => {
       closeChat({ status: "ok", conversationId: "inst-A#0" })
       closeChat({ status: "ok", conversationId: "inst-A#0" })
     })
-    const chats = allSpans(traces).filter((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chats = allSpans(traces).filter((s) => attrOf(s, GEN_AI_ATTRS.operation.name) === "chat")
     expect(chats.length).toBe(2)
     const ids = chats.map((c) => attrOf(c, GEN_AI_ATTRS.conversation.id))
     expect(ids[0]).toBe("inst-A#0")
@@ -184,7 +194,7 @@ describe("T-C3 gen_ai.conversation.id on the chat span", () => {
       closeChat({ status: "ok", conversationId: "inst-A#0" })
       closeChat({ status: "ok", conversationId: "inst-B#0" })
     })
-    const chats = allSpans(traces).filter((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chats = allSpans(traces).filter((s) => attrOf(s, GEN_AI_ATTRS.operation.name) === "chat")
     const ids = chats.map((c) => attrOf(c, GEN_AI_ATTRS.conversation.id))
     expect(new Set(ids).size).toBe(2) // two instances ⇒ two distinct ids
     expect(ids).toContain("inst-A#0")
@@ -195,7 +205,7 @@ describe("T-C3 gen_ai.conversation.id on the chat span", () => {
     const { traces } = await captureOtlp(async () => {
       closeChat({ status: "ok" })
     })
-    const chat = allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    const chat = findChat(traces)
     expect(attrOf(chat, GEN_AI_ATTRS.conversation.id)).toBeUndefined()
   })
 })

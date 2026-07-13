@@ -9,7 +9,7 @@ import {
 import { attrs, createTurnTimingCapture, SPAN_NAMES, type Span, startSpan } from "@/observability"
 import { abortReasonOf, classify, errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { estimateTokens, TokenBaselineBox } from "../compaction"
-import { closeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
+import { finalizeSamplingSpan, type SamplingUsage, samplingUsageFromEvent } from "../loop-helpers"
 import type { buildTurnContext } from "../prompt"
 import { withActiveSpanScope } from "../session-resources"
 import { createStreamDispatcher, type TurnTimingAnchors } from "../stream-callbacks"
@@ -315,13 +315,91 @@ const classifyStreamTurnError = (e: unknown, config: AgentConfig): StreamTurnErr
   return { status: "error", result: { error: e, message }, errorKind: classify(e) }
 }
 
+/** The sampling-turn stream execution: activate the `chat` span in async
+ *  context, emit `llm_request` INSIDE that scope (so its OBSERVE event + the
+ *  paired usage events + the cassette all sample the SAME sampling-span ref, not
+ *  the turn span), then drive the provider stream through `teeUsage` into
+ *  `streamingTurn`. Extracted VERBATIM from `streamConsume` (behavior
+ *  byte-identical, incl. the D2 emit-ordering and the no-op sink wrap) to keep
+ *  that hot turn function under the god-FUNCTION line cap. */
+const runSamplingScope = (args: {
+  session: TurnSession
+  state: TurnState
+  ctx: ReturnType<typeof buildTurnContext>
+  samplingSpan: Span
+  turnLlm: ReturnType<typeof applyEffortClassifierFloor>
+  visibleSpecs: TurnSession["specs"]
+  toolChoice: ReturnType<typeof resolveToolChoice>
+  callbacks: ReturnType<typeof createStreamDispatcher>
+  turnTimingCapture: ReturnType<typeof createTurnTimingCapture>
+  onResponseHeaders: ((get: (name: string) => string | null) => void) | undefined
+  captureUsage: (ev: Extract<StreamEvent, { type: "usage" }>) => void
+}): ReturnType<typeof streamingTurn> => {
+  const { session, state, ctx, samplingSpan, turnLlm, visibleSpecs, toolChoice } = args
+  const { config, recorder } = session
+  const { collector, taskSpend } = state
+  const { messages, system } = ctx
+  return withActiveSpanScope(false, samplingSpan, () => {
+    // D2: emit `llm_request` from INSIDE the sampling scope so its OBSERVE
+    // event samples the SAME active trace ref the paired `usage` events (fired
+    // inside `teeUsage` below) and the cassette (sampled at `stream()` start,
+    // also inside this scope) read — the sampling span, not the turn span. As
+    // the FIRST statement here it still precedes the response/usage events
+    // `streamingTurn` produces, preserving OBSERVE ordering. Off-path
+    // byte-identical: with no active ref the recorder omits traceId and the
+    // deterministic span ids are unchanged (this call moved, not its payload).
+    emitLlmRequest(
+      config,
+      finalizeTurnPolicy({
+        promptPolicy: ctx.promptPolicy,
+        toolChoice,
+        ...(config.sessionId !== undefined ? { promptCacheKey: config.sessionId } : {}),
+      }),
+    )
+    return streamingTurn({
+      events: teeUsage(
+        config,
+        turnLlm.llm.stream({
+          messages,
+          system,
+          tools: visibleSpecs,
+          ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
+          ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+          ...(config.sessionId !== undefined && config.sessionId.length > 0
+            ? { promptCacheKey: config.sessionId }
+            : {}),
+          signal: config.signal,
+          turnTimingCapture: args.turnTimingCapture,
+          ...(args.onResponseHeaders !== undefined
+            ? { onResponseHeaders: args.onResponseHeaders }
+            : {}),
+        }),
+        recorder,
+        collector,
+        taskSpend,
+        state.tokenBaseline,
+        estimateTokens(messages),
+        args.captureUsage,
+      ),
+      isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
+      isReadOnly: (name) => config.registry.isReadOnly(name),
+      isEarlyDispatchSafe: (name) => config.registry.isEarlyDispatchSafe(name),
+      onToolInput: buildToolInputSeam(config.registry),
+      ...args.callbacks,
+      signal: config.signal,
+    })
+  })
+}
+
 export const streamConsume = async (
   session: TurnSession,
   state: TurnState,
   ctx: ReturnType<typeof buildTurnContext>,
 ): Promise<StreamConsumeResult> => {
   const { config, specs, recorder, skillGate, rateLimitProactive } = session
-  const { collector, toolChoiceState, onTurnTiming, taskSpend } = state
+  // `collector` / `taskSpend` are consumed inside `runSamplingScope` (which
+  // re-destructures them from session/state), not here.
+  const { toolChoiceState, onTurnTiming } = state
   const { messages, system } = ctx
   // ADR-0512 L1 — availability filter. The model must never SEE a tool the
   // dispatch gate (`handleSkillScope` → `skillGate.allow`) will deny, or it
@@ -387,54 +465,21 @@ export const streamConsume = async (
     // Activate the `chat` (sampling) span in async context so anything opened
     // during the provider stream — and the OBSERVE recorder's llm_request/usage
     // events — attaches under THIS sampling span (parented to the turn). No-op
-    // wrap when no sink is active (byte-identical default-OFF).
-    const outcome = await withActiveSpanScope(false, samplingSpan, () => {
-      // D2: emit `llm_request` from INSIDE the sampling scope so its OBSERVE
-      // event samples the SAME active trace ref the paired `usage` events (fired
-      // inside `teeUsage` below) and the cassette (sampled at `stream()` start,
-      // also inside this scope) read — the sampling span, not the turn span. As
-      // the FIRST statement here it still precedes the response/usage events
-      // `streamingTurn` produces, preserving OBSERVE ordering. Off-path
-      // byte-identical: with no active ref the recorder omits traceId and the
-      // deterministic span ids are unchanged (this call moved, not its payload).
-      emitLlmRequest(
-        config,
-        finalizeTurnPolicy({
-          promptPolicy: ctx.promptPolicy,
-          toolChoice,
-          ...(config.sessionId !== undefined ? { promptCacheKey: config.sessionId } : {}),
-        }),
-      )
-      return streamingTurn({
-        events: teeUsage(
-          config,
-          turnLlm.llm.stream({
-            messages,
-            system,
-            tools: visibleSpecs,
-            ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
-            ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
-            ...(config.sessionId !== undefined && config.sessionId.length > 0
-              ? { promptCacheKey: config.sessionId }
-              : {}),
-            signal: config.signal,
-            turnTimingCapture,
-            ...(onResponseHeaders !== undefined ? { onResponseHeaders } : {}),
-          }),
-          recorder,
-          collector,
-          taskSpend,
-          state.tokenBaseline,
-          estimateTokens(messages),
-          captureUsage,
-        ),
-        isConcurrencySafe: (name, input) => config.registry.isConcurrencySafe(name, input),
-        isReadOnly: (name) => config.registry.isReadOnly(name),
-        isEarlyDispatchSafe: (name) => config.registry.isEarlyDispatchSafe(name),
-        onToolInput: buildToolInputSeam(config.registry),
-        ...callbacks,
-        signal: config.signal,
-      })
+    // wrap when no sink is active (byte-identical default-OFF). The scope body is
+    // extracted to `runSamplingScope` (byte-identical) so this function stays
+    // under the god-FUNCTION line cap.
+    const outcome = await runSamplingScope({
+      session,
+      state,
+      ctx,
+      samplingSpan,
+      turnLlm,
+      visibleSpecs,
+      toolChoice,
+      callbacks,
+      turnTimingCapture,
+      onResponseHeaders,
+      captureUsage,
     })
     if (outcome.kind === "aborted") {
       samplingStatus = "aborted"
@@ -454,39 +499,26 @@ export const streamConsume = async (
     if (outcome.status === "error") capturedErrorKind = outcome.errorKind
     return outcome.result
   } finally {
-    stop?.()
-    turnTimingCapture.markStreamEnd()
-    const timing = turnTimingCapture.snapshot()
-    onTurnTiming?.(timing)
-    // T-C3 stable conversation grouping id: the SAME source the session
-    // (`invoke_agent`) span stamps via `sessionGenAiAttrs` — `config.sessionId`
-    // when it is a REAL identity. The `"default"`/empty fallback is a
-    // non-identity (shared across unrelated sessions), so it is omitted rather
-    // than stamped as a bogus shared conversation id — keeping the chat span's
-    // `gen_ai.conversation.id` byte-consistent with the session root.
-    const conversationId =
-      config.sessionId !== undefined && config.sessionId !== "" && config.sessionId !== "default"
-        ? config.sessionId
-        : undefined
-    // gen_ai.* attrs + trace-UI prompt/response previews (sink-gated). T-B5/T-C3
-    // (this wave): the classified error CLASS + the stable conversation id now
-    // reach the wire in prod (previously the params existed but the call site
-    // never passed them ⇒ the attrs were dead).
-    closeSamplingSpan(
-      samplingSpan,
-      samplingStatus,
-      timing,
-      capturedUsage,
-      capturedFinish,
+    // gen_ai.* span close orchestration (stop-mark → timing snapshot →
+    // onTurnTiming fan-out → T-C3 conversation-id derivation → closeSamplingSpan).
+    // Extracted to `finalizeSamplingSpan` so this hot turn function stays under
+    // the god-FUNCTION line cap — behavior byte-identical. T-B5/T-C3 (this wave):
+    // the classified error CLASS + the stable conversation id reach the wire in
+    // prod; T-D1: `system` feeds the redacted, knobbed `gen_ai.system_instructions`.
+    finalizeSamplingSpan(samplingSpan, {
+      stop,
+      timingCapture: turnTimingCapture,
+      onTurnTiming,
+      status: samplingStatus,
+      usage: capturedUsage,
+      finishReason: capturedFinish,
       messages,
-      capturedMessage,
+      responseMessage: capturedMessage,
       requestModel,
-      requestProvider,
-      capturedErrorKind,
-      conversationId,
-      // T-D1 — the turn's system prompt, used ONLY for the (redacted, knobbed)
-      // `gen_ai.system_instructions` content attr. Absent knob ⇒ never read.
+      provider: requestProvider,
+      errorKind: capturedErrorKind,
+      sessionId: config.sessionId,
       system,
-    )
+    })
   }
 }

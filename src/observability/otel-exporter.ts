@@ -67,7 +67,7 @@ import type {
   SpanStatusCode,
   Tracer,
 } from "./tracing/port"
-import { QUANTA_ATTRS } from "./vocabulary"
+import { GEN_AI_ATTRS, QUANTA_ATTRS } from "./vocabulary"
 // ────────────────────────────────────────────────────────────────────────────
 // Export envelope shapes — the typed records that producers hand to the
 // exporter. Intentionally minimal: only the fields that survive the OTLP/JSON
@@ -339,6 +339,44 @@ const buildResource = (serviceName: string, runId?: string): Record<string, unkn
   }),
 })
 
+/** Read a span attribute as a plain string (the gen_ai discriminator attrs are
+ *  always scalar strings). Returns undefined for absent / non-string values so
+ *  the name mapper never stringifies an array/number into the span name. */
+const spanAttrString = (
+  attrs: SpanExportAttributes | undefined,
+  key: string,
+): string | undefined => {
+  const v = attrs?.[key]
+  return typeof v === "string" && v.length > 0 ? v : undefined
+}
+
+/**
+ * OTel-GenAI PINNED span name (`63f8200…`, gen-ai-spans.md). A gen_ai span's
+ * name on the wire is `{gen_ai.operation.name} {subject}` where the subject is
+ * the request model (chat), the tool name (execute_tool), or the agent name
+ * (invoke_agent). We keep the INTERNAL Codex-style `SPAN_NAMES` id
+ * (`run_sampling_request`) on the `ExportSpan` — the viewer joins on ids, not
+ * names — and only re-map at THIS export boundary so every collector sees the
+ * conformant name.
+ *
+ * Pure mapper over the span's own attributes:
+ *   - No `gen_ai.operation.name` attr ⇒ NOT a gen_ai span; return the internal
+ *     name verbatim (byte-identical for session_loop / turn / handle_tool_call…).
+ *   - operation.name present + a subject attr (request.model / tool.name /
+ *     agent.name, in that precedence) ⇒ `{operation} {subject}`.
+ *   - operation.name present but NO subject attr ⇒ bare `{operation}` (the pin's
+ *     fallback when the model/tool/agent is unavailable).
+ */
+const otlpSpanName = (s: ExportSpan): string => {
+  const operation = spanAttrString(s.attributes, GEN_AI_ATTRS.operation.name)
+  if (operation === undefined) return s.name
+  const subject =
+    spanAttrString(s.attributes, GEN_AI_ATTRS.request.model) ??
+    spanAttrString(s.attributes, GEN_AI_ATTRS.tool.name) ??
+    spanAttrString(s.attributes, GEN_AI_ATTRS.agent.name)
+  return subject !== undefined ? `${operation} ${subject}` : operation
+}
+
 /** Serialize an array of spans → OTLP/JSON `resourceSpans` envelope. */
 const serializeSpans = (
   spans: ReadonlyArray<ExportSpan>,
@@ -355,7 +393,7 @@ const serializeSpans = (
             const out: Record<string, unknown> = {
               traceId: s.traceId,
               spanId: s.spanId,
-              name: s.name,
+              name: otlpSpanName(s),
               kind: otlpKind(s.kind),
               startTimeUnixNano: nanos(s.startTimeEpochMs),
               endTimeUnixNano: nanos(s.endTimeEpochMs),

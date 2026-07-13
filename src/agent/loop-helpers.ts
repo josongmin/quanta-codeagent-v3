@@ -17,6 +17,7 @@ import {
   type Span,
   type SpanStatus,
   type TurnTiming,
+  type TurnTimingCapture,
 } from "@/observability"
 import {
   emitGenAiClientMetrics,
@@ -366,6 +367,30 @@ const defaultEmitterFor = (
 export const buildTtftAttrs = (timing: TurnTiming): Record<string, number> =>
   timing.ttftMs !== null ? { [GEN_AI_ATTRS.response.timeToFirstTokenMs]: timing.ttftMs } : {}
 
+/**
+ * Map an INTERNAL provider slug → the pinned `gen_ai.provider.name` enum
+ * (`63f8200…`, gen-ai-spans.md registry: `openai` / `anthropic` /
+ * `azure.ai.openai` / …). Our router emits auth-flavored slugs (e.g.
+ * `chatgpt-oauth`, the ChatGPT-OAuth subscription transport over the OpenAI API)
+ * that are NOT enum members — a backend keying `gen_ai.provider.name` on the
+ * enum would bucket them as an unknown provider.
+ *
+ * Known internal auth-flavored slugs are mapped to their base enum provider
+ * (`chatgpt-oauth` → `openai`; it speaks the OpenAI API). Every other slug is
+ * passed through UNCHANGED — the enum members (`openai`/`anthropic`) already
+ * conform, and for a genuinely unknown slug a truthful non-enum value beats a
+ * wrong guess. Shared by the span attr AND the T-C2 metric dim (both resolve the
+ * provider through this normalizer) so the two planes always agree.
+ */
+export const normalizeProviderName = (slug: string): string => {
+  switch (slug) {
+    case "chatgpt-oauth":
+      return "openai"
+    default:
+      return slug
+  }
+}
+
 /** Usage captured from the provider's `usage` stream event (model + tokens). */
 export interface SamplingUsage {
   readonly model: string
@@ -481,9 +506,13 @@ export const buildSamplingSpanAttrs = (
     out[GEN_AI_ATTRS.request.model] = requestModel
     // Provider: prefer the adapter-reported slug; else derive from the model
     // name (providerOf covers the openai/anthropic split). A caller-supplied
-    // provider wins so a chatgpt-oauth surface isn't mis-derived.
-    out[GEN_AI_ATTRS.provider.name] =
-      provider !== undefined && provider !== "" ? provider : providerOf(requestModel)
+    // provider wins so a chatgpt-oauth surface isn't mis-derived. NORMALIZED to
+    // the pinned `gen_ai.provider.name` enum (chatgpt-oauth → openai) so the wire
+    // value is a registry member — the SAME normalization the T-C2 metric dim
+    // applies via resolveProviderSlug, keeping span + metric in agreement.
+    out[GEN_AI_ATTRS.provider.name] = normalizeProviderName(
+      provider !== undefined && provider !== "" ? provider : providerOf(requestModel),
+    )
   }
   if (promptPreview !== undefined) out[GEN_AI_ATTRS.prompt] = promptPreview
   if (completionPreview !== undefined) out[GEN_AI_ATTRS.response.completion] = completionPreview
@@ -597,8 +626,9 @@ const resolveProviderSlug = (
   requestModel: string | undefined,
   provider: string | undefined,
 ): string | undefined => {
-  if (provider !== undefined && provider !== "") return provider
-  if (requestModel !== undefined && requestModel !== "") return providerOf(requestModel)
+  if (provider !== undefined && provider !== "") return normalizeProviderName(provider)
+  if (requestModel !== undefined && requestModel !== "")
+    return normalizeProviderName(providerOf(requestModel))
   return undefined
 }
 
@@ -712,6 +742,67 @@ export const closeSamplingSpan = (
   // sink above), which is `null` on export-OFF runs ⇒ byte-identical no-op.
   emitGenAiClientMetrics(
     buildGenAiMetricInput(timing, status, usage, requestModel, provider, errorKind),
+  )
+}
+
+/** The captured-during-the-turn inputs the `streamConsume.finally` block feeds
+ *  into the sampling-span close. Grouped so the orchestration below is one call
+ *  rather than a dozen inline statements in the hot turn function. */
+export interface FinalizeSamplingSpanArgs {
+  /** The recorder's `llmStream()` stop handle (idempotent; absent ⇒ no-op). */
+  readonly stop: (() => void) | undefined
+  readonly timingCapture: TurnTimingCapture
+  readonly onTurnTiming: ((timing: TurnTiming) => void) | undefined
+  readonly status: SpanStatus
+  readonly usage: SamplingUsage | undefined
+  readonly finishReason: string | undefined
+  readonly messages: readonly Message[]
+  readonly responseMessage: unknown
+  readonly requestModel: string | undefined
+  readonly provider: string | undefined
+  /** T-B5 classified error CLASS (present only on the hard-error path). */
+  readonly errorKind: string | undefined
+  /** The session identity used for the T-C3 conversation id (see below). */
+  readonly sessionId: string | undefined
+  readonly system: readonly SystemBlock[] | undefined
+}
+
+/**
+ * Orchestrate the sampling-span close at the end of a turn: stop the recorder's
+ * llm-stream mark, snapshot the turn timing (and fan it out to `onTurnTiming`),
+ * derive the stable T-C3 `gen_ai.conversation.id`, then hand everything to
+ * {@link closeSamplingSpan}. Extracted VERBATIM from `streamConsume.finally` so
+ * that hot turn function stays under the god-FUNCTION line cap — behavior is
+ * byte-identical.
+ *
+ * T-C3 conversation id: the SAME source the session (`invoke_agent`) span stamps
+ * — `sessionId` when it is a REAL identity. The `"default"`/empty fallback is a
+ * non-identity (shared across unrelated sessions), so it is OMITTED rather than
+ * stamped as a bogus shared conversation id, keeping the chat span's
+ * `gen_ai.conversation.id` byte-consistent with the session root.
+ */
+export const finalizeSamplingSpan = (span: Span, args: FinalizeSamplingSpanArgs): void => {
+  args.stop?.()
+  args.timingCapture.markStreamEnd()
+  const timing = args.timingCapture.snapshot()
+  args.onTurnTiming?.(timing)
+  const conversationId =
+    args.sessionId !== undefined && args.sessionId !== "" && args.sessionId !== "default"
+      ? args.sessionId
+      : undefined
+  closeSamplingSpan(
+    span,
+    args.status,
+    timing,
+    args.usage,
+    args.finishReason,
+    args.messages,
+    args.responseMessage,
+    args.requestModel,
+    args.provider,
+    args.errorKind,
+    conversationId,
+    args.system,
   )
 }
 

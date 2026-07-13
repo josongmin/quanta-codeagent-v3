@@ -44,8 +44,19 @@ describe("T-A0 raw-OTLP capture harness", () => {
     const spans = traces.flatMap((t) =>
       t.resourceSpans.flatMap((rs) => rs.scopeSpans.flatMap((ss) => ss.spans)),
     )
-    const chat = spans.find((s) => s.name === SPAN_NAMES.runSamplingRequest)
+    // The internal `SPAN_NAMES.runSamplingRequest` id is re-mapped at the OTLP
+    // export boundary to the pinned gen_ai span name. This span carries
+    // `gen_ai.operation.name="chat"` but NO model attr, so the pinned name is the
+    // BARE operation `"chat"` (the fallback when the model is unavailable). We key
+    // on the operation ATTRIBUTE — the pin's stable discriminator.
+    const chat = spans.find(
+      (s) =>
+        s.attributes.find((a) => a.key === GEN_AI_ATTRS.operation.name)?.value.stringValue ===
+        "chat",
+    )
     expect(chat).toBeDefined()
+    // The pinned wire name for a model-less chat span is the bare operation.
+    expect(chat?.name).toBe("chat")
 
     // (1) SPAN KIND reached the wire — CLIENT ⇒ OTLP enum 3.
     expect(chat?.kind).toBe(3)

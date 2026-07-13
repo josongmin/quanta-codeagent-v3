@@ -61,6 +61,20 @@ const asstMsg = (text: string): Message => ({
 })
 const sys = (text: string): SystemBlock[] => [{ type: "text", text }]
 
+/** An assistant turn that CALLS a tool — the secret rides inside the tool_call
+ *  `arguments` (a stringified `input`), the part-shape the pin serializes as
+ *  `{type:"tool_call",id,name,arguments}`. */
+const toolCallMsg = (id: string, name: string, input: unknown): Message => ({
+  role: "assistant",
+  content: [{ type: "tool_use", id, name, input }],
+})
+/** A user turn carrying a tool RESULT — the secret rides inside the
+ *  `tool_call_response` `response`, part-shape `{type:"tool_call_response",id,response}`. */
+const toolResultMsg = (id: string, content: string): Message => ({
+  role: "user",
+  content: [{ type: "tool_result", tool_use_id: id, content }],
+})
+
 const closeChat = (opts: {
   readonly messages?: readonly Message[]
   readonly response?: unknown
@@ -91,12 +105,17 @@ const closeChat = (opts: {
 const allSpans = (traces: Awaited<ReturnType<typeof captureOtlp>>["traces"]): OtlpSpan[] =>
   traces.flatMap((t) => t.resourceSpans.flatMap((rs) => rs.scopeSpans.flatMap((ss) => ss.spans)))
 
-const chatSpan = (
-  traces: Awaited<ReturnType<typeof captureOtlp>>["traces"],
-): OtlpSpan | undefined => allSpans(traces).find((s) => s.name === SPAN_NAMES.runSamplingRequest)
-
 const attrOf = (span: OtlpSpan | undefined, key: string): string | undefined =>
   span?.attributes.find((a) => a.key === key)?.value.stringValue
+
+/** Find the chat (sampling) span on the WIRE. The internal `SPAN_NAMES` id is
+ *  re-mapped to the pinned `{operation} {model}` name (`chat gpt-5`) at the OTLP
+ *  export boundary, so we key on the stable `gen_ai.operation.name === "chat"`
+ *  attribute (the pin's discriminator), not the literal internal wire name. */
+const chatSpan = (
+  traces: Awaited<ReturnType<typeof captureOtlp>>["traces"],
+): OtlpSpan | undefined =>
+  allSpans(traces).find((s) => attrOf(s, GEN_AI_ATTRS.operation.name) === "chat")
 
 let prev: string | undefined
 beforeEach(() => {
@@ -200,6 +219,48 @@ describe("T-D1 adversarial #2 — REDACTION (Plane B secret boundary)", () => {
     expect(placeholder).toBeDefined()
     expect(input).toContain(placeholder as string)
     expect(sysAttr).toContain(placeholder as string)
+  })
+
+  test("a secret inside tool_call arguments AND a tool_call_response is redacted on the wire", async () => {
+    // TEST-GAP pin: prior cases only covered text/system/preview parts. A secret
+    // can ALSO ride inside a tool_call's `arguments` (stringified input) or a
+    // tool_call_response's `response`. `contentPart` redacts BOTH — this pins it
+    // red-on-injection (drop either redactForSpan and this goes RED).
+    process.env[KNOB] = "1"
+    const CALL_ID = "call_42"
+    const { traces } = await captureOtlp(async () => {
+      closeChat({
+        // INPUT plane: the assistant's tool call args carry the secret; the
+        // following user message's tool result echoes it back.
+        messages: [
+          toolCallMsg(CALL_ID, "run_shell", { cmd: `export TOKEN=${SECRET}` }),
+          toolResultMsg(CALL_ID, `exported ${SECRET} ok`),
+        ],
+        // OUTPUT plane: the response is ALSO a tool call carrying the secret.
+        response: toolCallMsg(CALL_ID, "run_shell", { cmd: `echo ${SECRET}` }),
+      })
+    })
+    const chat = chatSpan(traces)
+    const input = attrOf(chat, GEN_AI_ATTRS.input.messages) ?? ""
+    const output = attrOf(chat, GEN_AI_ATTRS.output.messages) ?? ""
+
+    // Structural proof the secret rode in the tool_call / tool_call_response
+    // parts (not a text part) — so the assertion genuinely exercises those arms.
+    const parsedIn = JSON.parse(input) as Array<{ role: string; parts: Array<{ type: string }> }>
+    expect(parsedIn[0]?.parts[0]?.type).toBe("tool_call")
+    expect(parsedIn[1]?.parts[0]?.type).toBe("tool_call_response")
+    const parsedOut = JSON.parse(output) as Array<{ parts: Array<{ type: string }> }>
+    expect(parsedOut[0]?.parts[0]?.type).toBe("tool_call")
+
+    // The raw secret must NOT appear in EITHER the tool_call arguments (input) or
+    // the tool_call_response response (input) or the output tool_call arguments.
+    expect(input).not.toContain(SECRET)
+    expect(output).not.toContain(SECRET)
+    // …and the redaction placeholder DOES (scrubbed, not silently dropped).
+    const placeholder = redactSecrets(`x ${SECRET}`, { origin: "tool_result" }).hits[0]?.placeholder
+    expect(placeholder).toBeDefined()
+    expect(input).toContain(placeholder as string)
+    expect(output).toContain(placeholder as string)
   })
 })
 
