@@ -42,7 +42,7 @@ evidence:
     - src/host/runtime/session-host.ts
   adrs: [24]
   tests:
-    unit: []
+    unit: [tests/unit/cli/surface-wire-r2-hellgate.test.ts]
     integration:
       - tests/integration/cli-export-assembly.test.ts
     contract: []

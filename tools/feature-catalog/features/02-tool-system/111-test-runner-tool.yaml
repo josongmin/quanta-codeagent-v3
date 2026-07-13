@@ -39,7 +39,10 @@ evidence:
     - src/tool/index.ts
   adrs: []
   tests:
-    unit: []
+    unit:
+      - tests/unit/tool/test-runner-verdict-hellgate.test.ts
+      - tests/unit/test-runner-local-env-hellgate.test.ts
+      - tests/unit/test-runner-path-harddeny-hellgate.test.ts
     integration:
       - tests/integration/test-runner.test.ts
     contract: []

@@ -68,9 +68,9 @@ evidence:
       - tests/unit/agent/skill-scope-escalation.test.ts
       - tests/unit/agent/skill-scope-escalation-emit.test.ts
       - src/agent/loop/__tests__/skill-scope-view.test.ts
-      - apps/web-frontend/src/ws/pending-approvals.test.ts
       - tests/unit/apps/web-daemon/approval-scope-context-bridge.test.ts
-    integration: []
+    integration:
+      - apps/web-frontend/src/ws/pending-approvals.test.ts
     contract:
       - src/apps/cli/__tests__/state-skill-scope-e2e.hellgate.test.ts
       - src/host/runtime/internal/__tests__/approval-lease-escalation-decision.hellgate.test.ts

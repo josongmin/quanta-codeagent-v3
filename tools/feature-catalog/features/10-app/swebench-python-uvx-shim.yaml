@@ -39,7 +39,7 @@ evidence:
     - src/shared/runtime-config.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/swebench-buildargv-sphinx-ra.test.ts]
     integration: ["tests/integration/bench-eval.test.ts", "tests/integration/bench-python-harness-e2e.test.ts"]
     contract: []
 knobs:

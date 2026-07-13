@@ -42,6 +42,7 @@ evidence:
   tests:
     unit:
       - tests/unit/mcp/transport-port-hellgate.test.ts
+      - tests/unit/mcp/http-sse-pump-death-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

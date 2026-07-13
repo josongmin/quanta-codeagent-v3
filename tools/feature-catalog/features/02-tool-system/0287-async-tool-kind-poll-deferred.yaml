@@ -55,6 +55,8 @@ evidence:
   tests:
     unit:
       - tests/unit/tool/async-tool-dispatch-hellgate.test.ts
+      - tests/unit/tool/poll-deferred-registry-throw-hellgate.test.ts
+      - tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:

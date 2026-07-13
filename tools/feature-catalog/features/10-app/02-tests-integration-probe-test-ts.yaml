@@ -28,7 +28,7 @@ evidence:
     - src/apps/probe/render.ts
   adrs: [10]
   tests:
-    unit: []
+    unit: [tests/unit/probe-parse.test.ts]
     integration: [tests/unit/probe.test.ts]
     contract: []
 knobs: []

@@ -35,7 +35,7 @@ evidence:
     - src/apps/cli/internal.ts
   adrs: [7]
   tests:
-    unit: []
+    unit: [tests/unit/mcp-client-errors.test.ts, tests/unit/mcp/stdio-pump-death-hellgate.test.ts, tests/unit/mcp-inbound-adversarial-hellgate.test.ts, tests/unit/agent/mcp-bridge-annotations-hellgate.test.ts]
     integration: [tests/integration/mcp-client.test.ts, tests/integration/mcp-bridge.test.ts, tests/integration/mcp-e2e.test.ts]
     contract: []
 knobs:

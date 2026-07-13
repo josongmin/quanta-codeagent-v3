@@ -63,6 +63,10 @@ evidence:
   tests:
     unit:
       - tests/unit/stale-read-guard-hellgate.test.ts
+      - tests/unit/stale-read-guard-concurrency-r4-hellgate.test.ts
+      - tests/unit/staleness-default-on-hellgate.test.ts
+      - tests/unit/apply-patch-staleness-hellgate.test.ts
+      - src/tool/stale-read-guard/gate-contract.test.ts
     integration: []
     contract: []
 knobs:

@@ -42,7 +42,8 @@ evidence:
     - src/agent/loop.ts
   adrs: ["docs/decisions/0462-sticky-model-per-mode-loop-consume.md"]
   tests:
-    unit: []
+    unit:
+      - tests/unit/loop/sticky-model-precedence-hellgate.test.ts
     integration:
       - tests/integration/loop-sticky-model.test.ts
     contract: []

@@ -43,21 +43,11 @@ evidence:
     - src/apps/cli/snapshot-cmd.ts
   adrs: [122]
   tests:
-    unit: ["tests/unit/cli-rewind-slash-hellgate.test.ts"]
+    unit: ["tests/unit/cli-rewind-slash-hellgate.test.ts", "tests/unit/cli/snapshot-cmd-ordinal-hellgate.test.ts"]
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    No standalone snapshot-cmd unit test yet; coverage is via the broader
-    `shadow-odb-rewind-extensions-hellgate.test.ts` and `shadow-odb-hellgate
-    .test.ts` (tool-body level). The pure helpers (`parseSnapshotArgs`,
-    `renderSnapshotList`, `pickByOrdinal`) are unit-testable in isolation
-    and should get a focused suite.
-  promotion_path: |
-    Add `tests/unit/cli/snapshot-cmd.test.ts` exercising parse + render +
-    pickByOrdinal + dispatch with a stub ShadowOdb port; sample bad-ordinal
-    + missing-file + missing-yes paths.
+deliberate_hold: null
 notes: |
   Slice: `src/apps/cli` consuming `@/tool/shadow` indirectly via the tool
   dispatch — the surface itself does not import `ShadowOdb` directly so the

@@ -40,6 +40,12 @@ evidence:
   tests:
     unit:
       - tests/unit/edit-atomic-precondition-hellgate.test.ts
+      - src/storage/__tests__/atomic-write-fsync-hellgate.test.ts
+      - tests/unit/storage-atomic-mode-preserve.test.ts
+      - tests/unit/edit-write-atomic-default.test.ts
+      - tests/unit/edit-write-atomic-default-e2e.hellgate.test.ts
+      - tests/unit/scripted-replace-atomic-stale-hellgate.test.ts
+      - tests/unit/edittrace-real-edit-vocabulary-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

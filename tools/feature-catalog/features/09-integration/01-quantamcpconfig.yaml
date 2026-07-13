@@ -31,7 +31,7 @@ evidence:
     - src/mcp/types.ts
   adrs: [7]
   tests:
-    unit: []
+    unit: [tests/unit/mcp-client-errors.test.ts, tests/unit/mcp/stdio-pump-death-hellgate.test.ts]
     integration: [tests/integration/mcp-e2e.test.ts]
     contract: []
 knobs:

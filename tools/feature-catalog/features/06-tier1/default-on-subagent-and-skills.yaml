@@ -44,9 +44,9 @@ evidence:
   tests:
     unit:
       - tests/unit/env-knob-branches.test.ts
-      - tests/integration/cli-export-assembly.test.ts
       - tests/unit/features.test.ts
-    integration: []
+    integration:
+      - tests/integration/cli-export-assembly.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

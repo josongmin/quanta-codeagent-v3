@@ -28,7 +28,7 @@ evidence:
     - src/runner/knobs/knobs/retry-transient.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/kernel/derive-parity.test.ts]
     integration:
       - tests/integration/bench-retry-transient.test.ts
     contract: []

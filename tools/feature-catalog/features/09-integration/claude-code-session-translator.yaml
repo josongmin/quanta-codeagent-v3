@@ -39,7 +39,7 @@ evidence:
     - src/migration/translators/index.ts
   adrs: [38]
   tests:
-    unit: []
+    unit: [tests/unit/migration-import-redaction-hellgate.test.ts]
     integration:
       - tests/integration/migration-claude-code-translator.test.ts
       - tests/integration/migration-claude-code-fixture.test.ts

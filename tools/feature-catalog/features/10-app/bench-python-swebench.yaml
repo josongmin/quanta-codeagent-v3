@@ -46,7 +46,7 @@ evidence:
     - src/apps/bench/index.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/swebench-buildargv-sphinx-ra.test.ts]
     integration:
       - tests/integration/bench-python-harness-e2e.test.ts
     contract: []

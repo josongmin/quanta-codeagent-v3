@@ -31,7 +31,7 @@ evidence:
     - src/apps/cli/help-render.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/swebench-buildargv-sphinx-ra.test.ts]
     integration: [tests/integration/bench-python-harness-e2e.test.ts]
     contract: []
 knobs: []

@@ -67,7 +67,7 @@ evidence:
     - src/apps/agent/cli-args.ts         # 5 new flags + validation
     - src/apps/cli/slash-commands.ts     # /profile, /identity, /focus-chain
   tests:
-    unit: []
+    unit: [tests/unit/tool-profile-preset-hellgate.test.ts]
     integration:
       - tests/integration/composition-root-wire-hellgate.test.ts
     contract: []

@@ -45,6 +45,10 @@ evidence:
   tests:
     unit:
       - tests/unit/lsp-real-adapters-hellgate.test.ts
+      - tests/unit/lsp-default-rename-apply-hellgate.test.ts
+      - tests/unit/lsp-rename-rpc-hellgate.test.ts
+      - tests/unit/lsp-call-hierarchy-adapter-hellgate.test.ts
+      - tests/unit/lsp-atomic-write-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

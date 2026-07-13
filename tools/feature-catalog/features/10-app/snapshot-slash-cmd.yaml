@@ -41,7 +41,7 @@ evidence:
     - src/shared/runtime-config.ts
   adrs: [122]
   tests:
-    unit: [tests/unit/slash-commands.test.ts]
+    unit: [tests/unit/cli/snapshot-cmd-ordinal-hellgate.test.ts, tests/unit/slash-commands.test.ts]
     integration: []
     contract: []
 knobs: []
@@ -54,5 +54,6 @@ notes: |
   경로의 system skill (`src/skill/system-skills/rewind/`)은 여전히 트리거.
   슬라이스 컨트랙트: `src/apps/cli/**`에서 `@/storage/shadow-odb`(포트 +
   타입)를 직접 import하고 `@/tool/shadow`는 import 안 함 — 슬래시 surface를
-  도구 레지스트리 envelope에서 디커플링. 사용자 in-flight WIP — 테스트는
-  아직 미작성, slash-commands.ts 등록만 landed.
+  도구 레지스트리 envelope에서 디커플링. 표준 커버리지: registry 멤버십은
+  slash-commands.test.ts, ordinal rewind/restore/diff effect-receipt는
+  snapshot-cmd-ordinal-hellgate.test.ts(real defaultShadowOdb + git).

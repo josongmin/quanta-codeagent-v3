@@ -3,7 +3,7 @@ title: Shell-exec OTel observer — typed event stream → counter registry
 section: 8
 subsystem: 텔레메트리 — runShell typed stream fan-out
 order: 80
-maturity: L2
+maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -40,7 +40,7 @@ evidence:
     - src/shared/shell-exec-types.ts
   adrs: [81]
   tests:
-    unit: []
+    unit: [tests/unit/shell-exec-observers-surface.test.ts]
     integration: []
     contract: []
 knobs: []
@@ -50,5 +50,3 @@ notes: |
   `composeShellObservers(...)` — non-interactive modes (bench / ci-bot) wire
   only the OTel one. No new collection — feeds the same `Metrics` snapshot
   consumed by `cost-cache-dashboard` and `work-metrics`.
-
-  L4→L2: no test imports evidence.code paths

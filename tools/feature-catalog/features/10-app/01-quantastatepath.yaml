@@ -30,7 +30,7 @@ evidence:
     - src/session/store.ts
   adrs: []
   tests:
-    unit: []
+    unit: [tests/unit/apps/cli/resume-wire-hellgate.test.ts]
     integration: [tests/integration/cli-resume-e2e.test.ts, tests/integration/resume-e2e.test.ts]
     contract: []
 knobs:

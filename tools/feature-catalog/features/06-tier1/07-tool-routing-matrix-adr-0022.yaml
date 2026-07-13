@@ -34,7 +34,8 @@ evidence:
   adrs: [22]
   tests:
     unit:
-      - tests/unit/prompt-sections-hellgate.test.ts
+      - tests/unit/prompt-system.test.ts
+      - tests/unit/tool-steering-and-prompt-examples-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
