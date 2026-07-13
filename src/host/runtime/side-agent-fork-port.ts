@@ -18,12 +18,31 @@
 
 import { type ChildProcess, fork as nodeFork } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { defaultPpidWalkKiller, escalatingKill, type ProcessTreeKiller } from "@/runtime"
 import type {
   ChildProcessHandle,
   ProcessForkPort,
   ProcessForkSpec,
   SideAgentIpcMessage,
 } from "@/side-agent"
+
+/**
+ * Whole-tree killer for forked side-agents (D1 leak-fix — OmO R1-stopgap).
+ *
+ * A forked side-agent runs its OWN agent loop and can spawn descendants (bash
+ * trees, test runners, LSP servers). The old `kill()` sent a single-PID SIGTERM
+ * that hit ONLY the fork — its children reparented to init and LEAKED
+ * (ports/CPU/locks; the documented "state=running but no process" orphan class).
+ * Routing through {@link escalatingKill} + this ppid-walk killer signals the
+ * WHOLE descendant tree and escalates SIGTERM→SIGKILL. The module-singleton
+ * convention (ONE stateless ps-walker per surface; degrades to single-PID when
+ * `ps` is absent or the child has no descendants — wiring it is never wrong)
+ * matches `pty-backend`'s `PTY_TREE_KILLER`. NOTE: this surface is STRONGER than
+ * pty-backend — pty signals the tree ONCE with no escalation; the side-agent
+ * wraps the killer in `escalatingKill` (SIGTERM→grace→SIGKILL + reaped latch),
+ * because a forked side-agent can hold a TERM-trapping child tree.
+ */
+const SIDE_AGENT_TREE_KILLER: ProcessTreeKiller = defaultPpidWalkKiller()
 
 /**
  * Absolute path to the PRODUCTION side-agent child worker module
@@ -40,9 +59,40 @@ export const sideAgentWorkerModulePath = (): string =>
 
 /** Wrap a live `ChildProcess` as a {@link ChildProcessHandle}. NO-THROW —
  *  `send`/`kill` on a dead child are swallowed (the supervisor's `onExit` is the
- *  authoritative liveness signal, not a thrown EPIPE). */
-const wrapChild = (cp: ChildProcess): ChildProcessHandle => {
+ *  authoritative liveness signal, not a thrown EPIPE).
+ *
+ *  `killer` is INJECTED (DIP — the unit hellgate passes a spy; production uses
+ *  the module {@link SIDE_AGENT_TREE_KILLER}). Exported for that test.
+ *
+ *  ⚠️ node vs Bun: {@link escalatingKill} owns the SIGTERM→SIGKILL escalation and
+ *  self-disarms via `KillableChild.exited` (a `Promise`). `node:child_process`
+ *  has NO `.exited` promise (that is Bun.Subprocess), so we synthesize one from
+ *  the `'exit'` event — that promise IS the reaped/disarm signal, so a leaked
+ *  grace timer (the jun-28 bug class) cannot occur and a late kill() on a reaped
+ *  (possibly recycled) pid is a no-op. */
+export const wrapChild = (
+  cp: ChildProcess,
+  killer: ProcessTreeKiller = SIDE_AGENT_TREE_KILLER,
+): ChildProcessHandle => {
   let exited = false
+  // Adapt node ChildProcess → the KillableChild escalatingKill expects. The
+  // synthesized `exited` promise resolves on the child's `'exit'` event, which
+  // is what drives escalatingKill's reaped-latch + grace-timer disarm.
+  // FORWARD-DEDUP: this node-'exit'→Promise synthesis is currently the ONLY
+  // node-fork+escalatingKill site (the Bun sites use the native `.exited`). If a
+  // SECOND node-fork surface needs tree-kill, extract `nodeChildToKillable(cp)`
+  // to `@/runtime` rather than copy this block.
+  const esc = escalatingKill(
+    {
+      kill: (signal) => void cp.kill(signal),
+      exited: new Promise<number>((resolve) => cp.once("exit", (code) => resolve(code ?? 0))),
+      // `exactOptionalPropertyTypes`: omit `pid` entirely when absent (never pass
+      // an explicit `undefined`) — escalatingKill's `pid > 0` guard treats a
+      // missing pid as "no tree, single-PID fallback".
+      ...(cp.pid !== undefined ? { pid: cp.pid } : {}),
+    },
+    killer,
+  )
   return {
     pid: cp.pid ?? -1,
     send(msg: SideAgentIpcMessage): void {
@@ -74,11 +124,11 @@ const wrapChild = (cp: ChildProcess): ChildProcessHandle => {
     },
     kill(): void {
       if (exited) return
-      try {
-        cp.kill("SIGTERM")
-      } catch {
-        /* already dead */
-      }
+      // Whole-tree SIGTERM now + escalate to SIGKILL after the grace window
+      // unless the child (and its tree) exits first. escalatingKill is no-throw
+      // and reaped-safe; the raw single-PID `cp.kill` is gone (it leaked the
+      // fork's descendants).
+      esc.kill()
     },
   }
 }
