@@ -1,14 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { buildSystemPrompt } from "@/agent/prompt"
 import {
+  ALL_ATOMS,
   BODY_ATOMS,
   type InstructionAtom,
   NOTICE_ATOMS,
   POSTURE_ATOMS,
   type PromptContext,
+  reachableAllContexts,
   reachableBodyContexts,
   reachableToolUseContexts,
   renderAtoms,
+  selectAtoms,
   TOOL_USE_ATOMS,
   VERIFY_ATOMS,
   verifyRuleGraph,
@@ -213,6 +216,37 @@ describe("prompt-graph Phase 2 — BODY + NOTICE slice is sound", () => {
     const f = BODY_REACHABLE.filter((c) => c.hasDelegationSuppress === false).length
     const t = BODY_REACHABLE.filter((c) => c.hasDelegationSuppress === true).length
     expect({ f, t }).toEqual({ f: 144, t: 144 })
+  })
+
+  // SOTA++ generalization: several atomIds document "exactly one variant renders
+  // (disjoint `when`)" but only BODY-TOOL-ROUTING had a test — R-ENV / R-NO-SHIM
+  // relied on comments alone. Promote the partition invariant to a shared guard.
+  // These 3 are the PROVEN partitions (probed: exactly-one in every reachable
+  // ctx); the other multi-variant atomIds (BODY-OPERATING-PRINCIPLES / -BUDGET /
+  // -TOOL-FAILURES / -VISION / -COMPLETION-BAR) are additive-or-conditional and
+  // are DELIBERATELY excluded (blanket exactly-one would false-positive them).
+  const PARTITION_ATOM_IDS = ["R-ENV", "R-NO-SHIM", "BODY-TOOL-ROUTING"] as const
+
+  test("every documented PARTITION atomId fires EXACTLY ONCE in every reachable ctx", () => {
+    const allCtx = reachableAllContexts()
+    for (const atomId of PARTITION_ATOM_IDS) {
+      // sanity: the atomId actually has >1 variant (else the guard is vacuous)
+      expect(ALL_ATOMS.filter((a) => a.atomId === atomId).length, atomId).toBeGreaterThan(1)
+      for (const ctx of allCtx) {
+        const n = selectAtoms(ALL_ATOMS, ctx).filter((a) => a.atomId === atomId).length
+        expect(n, `${atomId} @ ${JSON.stringify({ posture: ctx.envPosture, mode: ctx.mode })}`).toBe(1)
+      }
+    }
+  })
+
+  test("the additive multi-variant atomIds are NOT partitions (classification pin)", () => {
+    // Pins WHY the excluded ones are excluded — if one silently became a partition
+    // (or a partition became additive), this flags the reclassification.
+    const allCtx = reachableAllContexts()
+    const renderCounts = (atomId: string) =>
+      new Set(allCtx.map((ctx) => selectAtoms(ALL_ATOMS, ctx).filter((a) => a.atomId === atomId).length))
+    // additive: at least one ctx renders ≥2 variants together
+    expect([...renderCounts("BODY-OPERATING-PRINCIPLES")].some((n) => n >= 2)).toBe(true)
   })
 
   test("ZERO violations over the full reachable body ctx set", () => {
