@@ -12,8 +12,8 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
-import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
 import { spawnToolsAvailable } from "@/agent/spawn-depth-policy"
+import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
 import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"

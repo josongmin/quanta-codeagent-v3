@@ -89,10 +89,10 @@ import {
 } from "./coordination-broker-wire"
 import { runAgent } from "./loop"
 import { isMutatingMode } from "./mode"
-import { spawnDepthCap } from "./spawn-depth-policy"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
+import { spawnDepthCap } from "./spawn-depth-policy"
 import {
   resolveChildEffort,
   resolveChildLlm,

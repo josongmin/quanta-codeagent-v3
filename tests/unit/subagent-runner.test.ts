@@ -217,7 +217,11 @@ describe("createSubagentRunner — child config overrides", () => {
 
   test("surfaces req.depth on the child config (the dispatch depth seam)", async () => {
     const { run, seen } = capturing()
-    const runner = createSubagentRunner(parentConfig(), { run })
+    // This seam is about depth PROPAGATION onto the child, orthogonal to the cap.
+    // Give explicit `maxDepth` headroom so the fork proceeds at req.depth 2 (the
+    // default cap is now `spawnDepthCap()` === 1 after the RFC jul-13 §6.5 B
+    // Phase 2 alignment, which would otherwise DENY depth 2 before forking).
+    const runner = createSubagentRunner(parentConfig(), { run, maxDepth: 3 })
     await runner(req({ depth: 2 }))
     expect((seen[0] as unknown as { depth?: number }).depth).toBe(2)
   })
