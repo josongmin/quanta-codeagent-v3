@@ -163,18 +163,33 @@ Plan: `docs/plans/jul-12-otel-genai-unified-tracing.md` (+ parallel-execution co
      `{traceId, spanId, parentSpanId?}` (`TraceRef`, reuse
      `tracing/port.ts` `SpanContext` + optional `parentSpanId`) plus
      `{runId, instanceId, attempt, turn, conversationId}`. It is **stamped onto
-     BOTH content planes** — OBSERVE carries `TrajectoryEvent.traceId?`; the
-     cassette stamps a replay-neutral `metadata.traceRef` (never hashed). It is
-     a coordinate that JOINS the two planes, not a third body of truth. `spanId`
-     alone is NOT a sufficient join key.
+     BOTH content planes** — OBSERVE carries `TrajectoryEvent.traceId?` on BOTH
+     its producer paths (the agent-stream recorder `frame()` AND the scaffold-
+     action `BenchObserver.append()` — jul-13 fix, so sandbox/localize/verify/
+     patch/recovery events JOIN the offline span-tree, not just the LLM chain);
+     the cassette stamps a replay-neutral `metadata.traceRef` (never hashed). It
+     is a coordinate that JOINS the two planes, not a third body of truth.
+     `spanId` alone is NOT a sufficient join key.
 
    - **OTLP = a DERIVED export of the coordinate + selected OBSERVE evidence,
      NOT a peer layer.** When an OTLP endpoint (or a context-only sink) is
      installed the exporter ISSUES the trace/span ids that both planes then
      stamp (C7-core id-unification); the `/v1/traces` + `/v1/metrics` payloads
      are a downstream projection for GenAI backends. Demoting OTel from "an
-     authority" to "the coordinate's export" is the point of this reframe: no
-     content lives ONLY in OTLP.
+     authority" to "the coordinate's export" is the point of this reframe.
+     HONEST SCOPE (offline vs endpoint): the trajectory viewer's HISTORY (the
+     default group-chat: prompts/responses/tool calls/verdict from cassette +
+     OBSERVE) and the joined span-TREE (structure + scaffold + LLM chain, once
+     both planes stamp the coordinate) are fully OFFLINE-reachable. But the
+     GenAI-semconv ATTRIBUTE re-projection — `gen_ai.input/output.messages`,
+     the low-cardinality `error.type` class, `gen_ai.response.finish_reasons`,
+     and the token-usage / duration METRIC histograms — is stamped ONLY on the
+     OTLP span/metric path (the context-only sink's `onEnd` is a no-op), so
+     those surface via a LIVE collector (Phoenix/Langfuse), NOT the offline
+     viewer. The offline viewer is not missing the DATA (raw req/resp is in the
+     cassette, token counts in the `llm_usage` OBSERVE event, error message in
+     the `error` event) — only the semconv-shaped attrs, which exist for
+     external backends. This asymmetry is by-design, not a gap.
 
 2. **Three purposes, mapped to the model.** Each of the three product purposes
    reads from a specific plane joined on the coordinate:

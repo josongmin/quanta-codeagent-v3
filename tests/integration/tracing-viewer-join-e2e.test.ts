@@ -29,6 +29,7 @@ import type { RecordedInteraction, ReplayStore } from "@/llm/replay/types"
 import type { StreamEvent, StreamInput } from "@/llm/types"
 import { getActiveTraceRef, getSpanSink } from "@/observability"
 import { __resetSpanSink, endSpan, SPAN_NAMES, type Span, startSpan } from "@/observability/spans"
+import { BenchObserver } from "@/runner/batch/observe"
 import type { RunContext } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { JsonlRecorder } from "@/stream/adapters/jsonl-recorder"
@@ -260,5 +261,54 @@ describe("tracing waves COMPOSE — cassette + OBSERVE join in buildSpanTree", (
       turns: [{ meta: meta as NonNullable<ViewerTurn["meta"]> }],
     })
     expect(tree.unified).toBe(false)
+  })
+
+  // ── FIX-1: SCAFFOLD ACTIONS join the span-tree ─────────────────────────────
+  // The REAL `BenchObserver.append()` (via `.verify()`) must stamp the active
+  // bench-instance ref onto scaffold events, so `buildSpanTree` (which DROPS any
+  // `!ev.spanId` line, index.html:1184) keeps them instead of leaving the offline
+  // tree LLM-chain-only.
+  test("scaffold action (verify) via REAL BenchObserver.append carries {traceId,spanId} and is NOT dropped by buildSpanTree", async () => {
+    const env: Record<string, string | undefined> = { QUANTA_TRACE_CONTEXT: "1" }
+    bootBenchOtelExport(env, bootOpts)
+    expect(getSpanSink()).not.toBeNull()
+
+    const dir = mkdtempSync(join(tmpdir(), "tvj-scaffold-"))
+    tmpDirs.push(dir)
+    const runId = "r-scaffold"
+    const instanceId = "django__django-2"
+
+    // Scaffold events fire INSIDE the bench-instance root — no turn/sampling span
+    // is opened for them, so the active ref IS the instance root.
+    let rootRef: { traceId: string; spanId: string } | undefined
+    await withBenchInstanceRoot({ instanceId, attempt: 0 }, async () => {
+      rootRef = getActiveTraceRef()
+      const obs = new BenchObserver({ dir, runId, now: () => 1_700_000_000_000 }, instanceId)
+      obs.verify({
+        command: "pytest -q",
+        exitCode: 0,
+        passed: true,
+        failedTests: [],
+        logTail: "1 passed",
+        reportPath: "/tmp/report.json",
+      })
+      obs.close()
+    })
+
+    const file = join(dir, runId, `${instanceId}.0.jsonl`)
+    const observe = readLines(file)
+    const verify = observe.find((l) => l.kind === "verify")
+    // The scaffold line carries the UNIFIED coordinate = the instance root ref.
+    expect(verify?.traceId).toMatch(HEX_TRACE)
+    expect(verify?.spanId).toMatch(HEX_SPAN)
+    expect(verify?.traceId).toBe(rootRef?.traceId)
+    expect(verify?.spanId).toBe(rootRef?.spanId)
+
+    // THE PAYOFF: buildSpanTree does NOT drop it (has a spanId) and unifies.
+    const tree = buildSpanTree({ observe, turns: [] })
+    expect(tree.unified).toBe(true)
+    expect(tree.nodes.has(verify?.spanId as string)).toBe(true)
+    // spanKindLabel classifies the instance-root name as "instance" (index.html:1153).
+    expect(spanKindLabel("bench.instance", "verify")).toBe("instance")
   })
 })

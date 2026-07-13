@@ -107,7 +107,7 @@ Flip `QUANTA_TRACE_CONTEXT` to default-ON for bench after: (i) confirm no trajec
 ## The trajectory viewer (purpose #3) — before / after
 
 - **Today**: group-chat timeline (🧑 me / 🛰 Quanta / 🤖 LLM, timestamp-merged OBSERVE+cassette) works for **every** run — this already satisfies "concrete history." The **span-tree** toggle only appears when the run had trace ids (OTel-on), else hidden.
-- **After P-B (knob on)**: span-tree toggle appears on ordinary runs too — the causal `instance → invoke_agent → turn → chat/tool` tree with full per-node evidence + debug-sink detail. Group-chat stays the default view.
+- **After P-B (knob on)**: span-tree toggle appears on ordinary runs too — the causal `instance → invoke_agent → turn → chat/tool` tree, with scaffold-action evidence (sandbox/localize/verify/patch) joined on the instance node (jul-13 `observe.append()` stamp fix) + debug-sink detail. Group-chat stays the default view. NOTE (honest scope): the offline tree shows STRUCTURE + scaffold + LLM chain + raw req/resp; the GenAI-semconv ATTRS (messages / `error.type` class / token+duration metric histograms / finish_reasons) are OTLP-span/metric-only → they need a LIVE collector (Phoenix), not the offline viewer. The underlying data (req/resp, token counts via `llm_usage`, error message) is still offline-visible — only the semconv re-projection needs an endpoint.
 - **After P-F (default-on)**: the above with no flag. Viewer code itself is unchanged across all phases (`buildSpanTree` already built).
 - OTLP `trace-viewer.html` (:4318) stays for **live** waterfall during a run; the offline trajectory viewer is the history tool.
 

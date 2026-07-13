@@ -193,10 +193,27 @@ export class BenchObserver {
       | "recovery",
     data: Record<string, unknown>,
   ): void {
+    // C3 (jul-13 OTel unification): stamp the ACTIVE OTel span identity onto the
+    // OBSERVE event so the scaffold action joins the trace tree on
+    // `{traceId,spanId}` — mirroring the recorder's `frame()`. Scaffold events
+    // fire INSIDE `withBenchInstanceRoot`, so the active ref is the bench-instance
+    // root. No active ref (sink off / no context) ⇒ ids omitted ⇒ byte-identical
+    // (same fallback the recorder uses; we do NOT synthesize a t<turn> id here).
+    const ref = getActiveTraceRef()
+    const ids = ref
+      ? {
+          traceId: ref.traceId,
+          spanId: ref.spanId,
+          ...(ref.parentSpanId !== undefined ? { parentSpanId: ref.parentSpanId } : {}),
+        }
+      : {}
     // "localize" (F1) is not yet in the shared TrajectoryKind union; makeEvent's
     // param is typed against that union, so cast the widened local kind. The
     // event is otherwise fully well-formed (schema/producer/redaction stamped).
-    const event = makeEvent(this.seq++, kind as TrajectoryKind, this.ctx, data, { ts: this.now() })
+    const event = makeEvent(this.seq++, kind as TrajectoryKind, this.ctx, data, {
+      ts: this.now(),
+      ...ids,
+    })
     appendFileSync(this.file, `${JSON.stringify(event)}\n`)
   }
 

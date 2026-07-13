@@ -12,6 +12,7 @@ import {
   endSpan,
   GEN_AI_ATTRS,
   getSpanSink,
+  PREVIEW_MAX,
   previewPayload,
   providerOf,
   type Span,
@@ -504,16 +505,16 @@ export const buildSamplingSpanAttrs = (
   }
   if (requestModel !== undefined && requestModel !== "") {
     out[GEN_AI_ATTRS.request.model] = requestModel
-    // Provider: prefer the adapter-reported slug; else derive from the model
-    // name (providerOf covers the openai/anthropic split). A caller-supplied
-    // provider wins so a chatgpt-oauth surface isn't mis-derived. NORMALIZED to
-    // the pinned `gen_ai.provider.name` enum (chatgpt-oauth → openai) so the wire
-    // value is a registry member — the SAME normalization the T-C2 metric dim
-    // applies via resolveProviderSlug, keeping span + metric in agreement.
-    out[GEN_AI_ATTRS.provider.name] = normalizeProviderName(
-      provider !== undefined && provider !== "" ? provider : providerOf(requestModel),
-    )
   }
+  // Provider: stamped INDEPENDENTLY of `requestModel` so the SPAN plane never
+  // diverges from the T-C2 METRIC dim (which emits provider whenever
+  // `resolveProviderSlug` yields a value — even on a model-less close). Both
+  // planes share the SAME `resolveProviderSlug`: caller-supplied slug wins (so a
+  // chatgpt-oauth surface isn't mis-derived), else derive from the model prefix
+  // (providerOf), NORMALIZED to the pinned `gen_ai.provider.name` enum
+  // (chatgpt-oauth → openai). Iff a provider is resolvable ⇒ both planes agree.
+  const providerSlug = resolveProviderSlug(requestModel, provider)
+  if (providerSlug !== undefined) out[GEN_AI_ATTRS.provider.name] = providerSlug
   if (promptPreview !== undefined) out[GEN_AI_ATTRS.prompt] = promptPreview
   if (completionPreview !== undefined) out[GEN_AI_ATTRS.response.completion] = completionPreview
   if (usage !== undefined) {
@@ -551,6 +552,16 @@ const contentCaptureEnabled = (): boolean => gateOn(process.env, CONTENT_CAPTURE
  *  general content-observation origin the rollup already understands. */
 const redactForSpan = (text: string): string => redactSecrets(text, { origin: "tool_result" }).text
 
+/** Redact a structured payload for the span-content plane, redacting the FULL
+ *  stringified value BEFORE truncating (T-D1 leak fix). `previewPayload(v,
+ *  Infinity)` gives the whitespace-collapsed, UNtruncated string; we redact THAT
+ *  (so a secret straddling the `PREVIEW_MAX` boundary is scrubbed as a whole —
+ *  never leaking its un-redacted head), then re-preview to `PREVIEW_MAX` to
+ *  restore the bounded `… (+N)` shape. Redact-before-truncate is the only order
+ *  that closes the boundary-straddle leak. */
+const redactThenPreview = (value: unknown): string =>
+  previewPayload(redactForSpan(previewPayload(value, Number.POSITIVE_INFINITY)), PREVIEW_MAX)
+
 /** Map a single content block to the pinned GenAI `parts[]` element
  *  (`{type:"text",content}|{type:"tool_call",…}|{type:"tool_call_response",…}`).
  *  Text/tool_result content is REDACTED; tool_call arguments are stringified +
@@ -564,7 +575,7 @@ const contentPart = (b: Message["content"][number]): Record<string, unknown> | u
       type: "tool_call",
       id: b.id,
       name: b.name,
-      arguments: redactForSpan(previewPayload(b.input)),
+      arguments: redactThenPreview(b.input),
     }
   if (b.type === "tool_result")
     return {
@@ -608,7 +619,7 @@ const buildContentCaptureAttrs = (
         : JSON.stringify([
             {
               role: "assistant",
-              parts: [{ type: "text", content: redactForSpan(previewPayload(responseMessage)) }],
+              parts: [{ type: "text", content: redactThenPreview(responseMessage) }],
             },
           ])
   }
@@ -666,9 +677,9 @@ const buildSpanContentBag = (
 ): { promptPreview?: string; completionPreview?: string; attrs: Record<string, string> } => {
   if (!captureContent) return { attrs: {} }
   const promptPreview =
-    messages.length > 0 ? redactForSpan(previewPayload(messages[messages.length - 1])) : undefined
+    messages.length > 0 ? redactThenPreview(messages[messages.length - 1]) : undefined
   const completionPreview =
-    responseMessage !== undefined ? redactForSpan(previewPayload(responseMessage)) : undefined
+    responseMessage !== undefined ? redactThenPreview(responseMessage) : undefined
   return {
     ...(promptPreview !== undefined ? { promptPreview } : {}),
     ...(completionPreview !== undefined ? { completionPreview } : {}),
