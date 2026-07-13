@@ -39,7 +39,9 @@ type EnvBag = Readonly<Record<string, string | undefined>>
  * declared (latent footgun). @/runner knobs are excluded (their default flows
  * through their own `resolveKnobs`, and importing them needs side-effect
  * registration). Built once, lazily. */
-let DEFAULTS: Map<string, NonNullable<CliKnob["default"]> | undefined> | undefined
+let DEFAULTS:
+  | Map<string, NonNullable<CliKnob["default"]> | readonly string[] | undefined>
+  | undefined
 const knobDefault = (envKey: string): string | undefined => {
   if (DEFAULTS === undefined) {
     DEFAULTS = new Map()

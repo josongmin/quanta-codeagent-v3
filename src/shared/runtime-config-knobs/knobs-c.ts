@@ -102,10 +102,10 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
   },
   {
     envKey: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",
-    kind: "string",
-    default: "",
+    kind: "list",
+    default: [],
     group: "bench",
-    describe: "Extra cache directory names appended.",
+    describe: "Extra cache directory names appended (delimited list; parseStringList).",
   },
   {
     envKey: "QUANTA_BENCH_TIMEOUT_MS",

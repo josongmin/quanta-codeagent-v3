@@ -228,14 +228,15 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     kind: "bool",
     default: true,
     group: "tool",
-    describe: "DEFAULT-ON. Append post-write sha256 + refresh stale-read baseline so edit/write/scripted_replace chain same-file edits without a re-read. Set =off to disable.",
+    describe:
+      "DEFAULT-ON. Append post-write sha256 + refresh stale-read baseline so edit/write/scripted_replace chain same-file edits without a re-read. Set =off to disable.",
   },
   {
     envKey: "QUANTA_DEDUP_ENV_PREFIXES_EXTRA",
-    kind: "string",
-    default: "",
+    kind: "list",
+    default: [],
     group: "tool",
-    describe: "Extra literal command prefixes appended.",
+    describe: "Extra literal command prefixes appended (delimited list; parseStringList).",
   },
   // ── code-mode (strict security)
   {

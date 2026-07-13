@@ -16,9 +16,10 @@
 /** The lowest-common-denominator knob shape every registry maps onto. */
 export interface UnifiedKnob {
   readonly envKey: string
-  readonly kind: "bool" | "int" | "float" | "string" | "enum"
-  /** Value when unset (`undefined` = no fixed default / value-bearing). */
-  readonly default: boolean | number | string | undefined
+  readonly kind: "bool" | "int" | "float" | "string" | "enum" | "list"
+  /** Value when unset (`undefined` = no fixed default / value-bearing). `list` ⇒
+   *  the delimited-string knobs whose runtime default is `[]`. */
+  readonly default: boolean | number | string | readonly string[] | undefined
   readonly describe: string
   /** UI bucket (cli render group, architectural layer, or @/runner category). */
   readonly group: string
