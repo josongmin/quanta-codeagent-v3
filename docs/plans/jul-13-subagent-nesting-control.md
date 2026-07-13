@@ -3,25 +3,27 @@
 | | |
 |---|---|
 | **상태** | Draft / implementation migration required |
-| **날짜** | 2026-07-14 (rev.4 — current-main 기반 SOTA++ authority 재설계) |
+| **날짜** | 2026-07-14 (rev.5 — live HEAD 재동기화 + 실행 티켓 패킷) |
 | **범위** | 모든 descendant agent 실행의 lineage, depth admission, tool projection, resume/persistence를 하나의 권위 모델로 통제 |
 | **선행 문맥** | ADR-0011(subagent), ADR-0158/0159(persistence/resume), ADR-0416(sibling identity), ADR-0437(followup), ADR-0503(knob control plane) |
+| **실행 SSOT** | [jul-13-subagent-nesting-control/00-index.md](jul-13-subagent-nesting-control/00-index.md) |
 
 ---
 
 ## 0. Executive decision
 
-현재 `origin/main`에는 이미 nesting-control Wave 1/2가 들어가 있다.
+현재 `HEAD`/`origin/main`에는 이미 nesting-control Wave 1/2와 후속 cap SSOT 보완이 들어가 있다.
 
-- `src/agent/spawn-depth-policy.ts`: `spawnDepthCap()` / `spawnToolsAvailable()`
-- `QUANTA_MAX_SPAWN_DEPTH`: default `1`, `0` = 새 descendant 생성 kill switch
+- `src/agent/spawn-depth.ts`: `childDepthOf()` / `spawnDepthCap()` / `spawnToolsAvailable()`
+- `QUANTA_MAX_DESCENDANT_DEPTH`: live default `3`, `0` = 새 descendant 생성 kill switch
 - `config.subagent.maxDepth` / `QUANTA_SUBAGENT_MAX_DEPTH`: 별도 legacy override
 - `tier1/subagent.ts`, `subagent-batch.ts`, `delegate.ts`, `team.ts`: builder-local capability gates
 - background/delegate caller: `parentDepth + 1` 전달
-- `subagent-runner.ts`: 여전히 `req.depth`를 child config, reject, run id, metadata에 사용
+- `subagent-runner.ts`: reject/child config는 parent-derived depth를 사용하지만 run id/meta는 여전히 `req.depth`를 사용
 
 따라서 이 RFC는 신규 기능안이 아니다. **부분 구현을 단일 authority로 마이그레이션하는 repair RFC**다.
-default를 `3`으로 되돌렸다가 다시 `1`로 flip하지 않는다. 현재 live default `1`을 유지한다.
+live default `3`은 authority migration 중 유지한다. 최종 root-only target `1` flip은 모든 authority/resume
+hellgate가 green인 뒤 `SNC-12`에서만 수행한다.
 
 최종 결정:
 
@@ -45,7 +47,7 @@ Capability projection은 최적화다. 권위 경계는 모든 descendant `runAg
 5. persisted background handle에는 depth/lineage가 없다. Resume은 저장된 depth를 복원하지 않고
    `scheduler.fork(spec)`를 다시 호출한다.
 6. `runtimeConfig()`는 `/knobs set` override에 의해 live invalidation된다. first-access immutable snapshot이 아니다.
-7. `QUANTA_MAX_SPAWN_DEPTH`, `QUANTA_SUBAGENT_MAX_DEPTH`, per-call `max_depth`의 역할과 우선순위가 분산돼 있다.
+7. `QUANTA_MAX_DESCENDANT_DEPTH`, `QUANTA_SUBAGENT_MAX_DEPTH`, per-call `max_depth`의 역할과 우선순위가 분산돼 있다.
 
 이 상태에서 builder filter만 강화하면 새로운 spawn surface, direct `runAgent`, resume, live knob 변경에서
 동일한 hole이 재발한다.
@@ -270,7 +272,8 @@ runtime authority가 아니지만 drift detector로 사용한다.
 
 ### 6.1 One canonical field
 
-내부 SSOT는 `maxDescendantDepth` 하나다. 현재 default `1`을 유지한다.
+내부 SSOT는 `maxDescendantDepth` 하나다. migration 중 live default `3`을 유지하고, 최종 closeout에서
+root-only target `1`로 한 번만 flip한다.
 
 ```ts
 readonly maxDescendantDepth: number // 1=root-only, 0=no new lineage edge
@@ -386,9 +389,12 @@ Metrics는 `source/decision/denyCode/depth bucket`만 label로 사용한다. raw
 
 ## 9. Implementation plan
 
+실행 상태, 의존성, worker handoff는 [티켓 상태 보드](jul-13-subagent-nesting-control/00-index.md)가 SSOT다.
+이 절은 설계 단계만 규정한다.
+
 ### Phase 0 — freeze current truth and RED rails
 
-- 현재 default `1`, legacy knobs, builder gates, direct agent forks를 inventory fixture로 고정.
+- 현재 default `3`, legacy knobs, builder gates, direct agent forks를 inventory fixture로 고정.
 - RED: undefined root, forged request depth, `subagent_fork` projection miss, `branch_search` cap-0 bypass,
   lineage-less resume, conflicting knobs, live override widening.
 - 기존 builder-local tests가 `team_create`를 spawn으로 오분류한 부분을 분리.
@@ -432,7 +438,8 @@ Metrics는 `source/decision/denyCode/depth bucket`만 label로 사용한다. raw
 ### Phase 6 — telemetry, catalog, cleanup
 
 - projection/admission events와 low-cardinality metrics.
-- 기존 `spawn-depth-policy.ts`, builder-local gate, duplicate default literal 제거.
+- 기존 `spawn-depth.ts`의 numeric-depth dual authority, builder-local gate, duplicate default literal 제거.
+- 모든 authority/resume hellgate가 green일 때만 default `3 → 1`을 한 번 flip.
 - 신규 feature YAML 추가 금지. 기존
   `tools/feature-catalog/features/06-tier1/0150-subagent-spawn-depth-policy.yaml`을 migration 완료 상태로 수정.
 - `bun fc validate`, `bun fc build`, `bun fc diff`, evidence check 실행.
@@ -467,7 +474,7 @@ Metrics는 `source/decision/denyCode/depth bucket`만 label로 사용한다. raw
 
 ### Policy
 
-- default `1`; cap `0/1/2` truth table.
+- migration baseline default `3`; final closeout default `1`; cap `0/1/2/3` truth table.
 - 세 alias 중 단일 값은 동일 snapshot 생성.
 - conflicting aliases → `policy_conflict`, silent precedence 없음.
 - `/knobs set`으로 세 depth knob 변경 시 거부.
@@ -496,7 +503,7 @@ Metrics는 `source/decision/denyCode/depth bucket`만 label로 사용한다. raw
 
 | Change | Compatibility | Risk |
 |---|---|---|
-| default `1` 유지 | 현재 main과 동일 | 낮음 |
+| default `3 → 1` 최종 flip | root-only 기본동작으로 변경 | 중 |
 | explicit root lineage | config/test fixture migration 필요 | 중 |
 | direct `runAgent` entry split | call-site 다수, AST fence 필요 | 중~높음 |
 | required tool effect metadata | Tool factories 전반 exhaustive annotation 필요 | 중~높음 |
@@ -535,7 +542,7 @@ call-site completeness, persistence codec, mutation tests다.
 
 ### Resolved
 
-- default는 현재 main과 같은 `1`.
+- live baseline default는 `3`, 최종 gated target은 `1`.
 - canonical semantics는 “생성 가능한 descendant의 최대 depth”.
 - root는 explicit lineage.
 - request depth는 authority 아님.
