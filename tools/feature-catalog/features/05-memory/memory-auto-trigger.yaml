@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
+labels: ["surface:core", "default-on", "absorbed:cursor", "absorbed:codex"]
 depends_on: [codex-2-phase-consolidator, stage1-store-agent-port, consolidator-session-hook]
 config_refs:
   env: [QUANTA_MEMORY_AUTO, QUANTA_MEMORY_THRESHOLD, QUANTA_MEMORY_MIN_USAGE]
@@ -40,9 +40,10 @@ purpose: |
   cancellation. Empty session (0 messages) skips the LLM call
   entirely.
 
-  Default-OFF: composition root's `assembleMemoryAuto(env)` returns
-  `null` unless `QUANTA_MEMORY_AUTO=on`; absent ⇒ no allocation,
-  byte-identical legacy.
+  Default-ON (ADR-0413): composition root's `assembleMemoryAuto(env)` returns the
+  wired trigger unless `QUANTA_MEMORY_AUTO=off` (parseEnvFlag defaultOn:true at
+  wire.ts:50 / agent-arg-builder.ts:228); only the explicit `=off` opt-out yields
+  `null` (no allocation, byte-identical legacy).
 evidence:
   code:
     - src/memory/auto-trigger/port.ts
@@ -61,8 +62,8 @@ evidence:
     contract: []
 knobs:
   - name: QUANTA_MEMORY_AUTO
-    default: 'off'
-    purpose: 'auto-trigger 활성 (on|off)'
+    default: 'on'
+    purpose: 'auto-trigger 활성; DEFAULT-ON (ADR-0413), `=off`로만 비활성'
   - name: QUANTA_MEMORY_THRESHOLD
     default: 'undefined'
     purpose: 'phase2 promote threshold (default 0.7, range 0..1 for default Jaccard)'

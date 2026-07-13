@@ -450,6 +450,21 @@ export function validateInvariants(features: readonly LoadedFeature[]): Invarian
         message: `multiple tier:* labels: [${tierLabels.join(", ")}] (single-valued axis)`,
       })
     }
+    // Invariant 1b: default-posture is single-axis — a feature must NOT claim BOTH
+    // `default-on` and `default-off` labels. When a knob's default flips, a stale
+    // opposite label is the exact doc-drift class the 0399 (edit-fresh-hash) and
+    // memory-auto-trigger entries hit; both markers on one entry is always drift.
+    const hasDefaultOn = feature.labels.some((l) => /^default-on\b/.test(l))
+    const hasDefaultOff = feature.labels.some((l) => /^default-off\b/.test(l))
+    if (hasDefaultOn && hasDefaultOff) {
+      violations.push({
+        invariant: "default-posture-single-axis",
+        featureId: feature.id,
+        path,
+        message:
+          "labels claim BOTH default-on and default-off — pick one (stale-opposite doc drift)",
+      })
+    }
     // Invariant 2: L4 owners non-empty (extends L5 gate).
     if (feature.maturity === "L4" && feature.owners.length === 0) {
       violations.push({

@@ -72,6 +72,28 @@ is the goal. Touching a god-file is the moment to decompose it into cohesive
 ports/adapters per the slice fence above. Regenerate the allowlist only to REMOVE
 fixed entries (re-run the detector), never to add.
 
+### Writing a ratchet / static-scan guard (non-vacuity is mandatory)
+
+A ratchet is only worth its file if it goes RED when the thing it guards is
+reverted. Source-scanning ratchets (`readFileSync` + regex/`includes` over `src/`)
+have a specific failure mode we have shipped before: matching a **bare identifier**
+(an `import`, a comment, a type) instead of a live **call/use**, so deleting the
+call leaves the ratchet green (vacuous). Any static-scan guard you write MUST:
+
+1. **Require a call/structural pattern, not a bare name** — e.g. `name\s*\(` for a
+   function obligation, not `name`. (An `import { refreshX }` that is never called
+   must still fail the "must call refreshX" ratchet.)
+2. **Have an anti-vacuum floor** — assert the scan found ≥N known items, so a regex
+   drift that matches nothing can't pass over the empty set.
+3. **Prove red-on-injection** — a self-test that mutates the guarded surface (a
+   catalog clone with one wrong value; a synthetic offending entry) and asserts the
+   check FAILS for exactly that item; and, where cheap, note the in-tree revert that
+   flips it RED. Reference exemplars: `edit-fresh-hash-mutating-tool-completeness-ratchet`,
+   `runtime-config-knobs-default-parity-hellgate`, `runtime-config-no-dead-knob-ratchet`.
+
+Reflecting the RUNTIME (`runtimeConfig()` under a synthetic env) beats scanning
+source text when you can — a value can't be a stale comment. Prefer it.
+
 ## When you edit features
 
 1. Edit the relevant YAML under `tools/feature-catalog/features/`.
