@@ -22,7 +22,12 @@ export {
   NOTICE_ATOMS,
   renderNoticeAtom,
 } from "./atoms-notices"
-export { reachableAllContexts, reachableBodyContexts, reachableToolUseContexts } from "./contexts"
+export {
+  DYNAMIC_PRESENCE_FACETS,
+  reachableAllContexts,
+  reachableBodyContexts,
+  reachableToolUseContexts,
+} from "./contexts"
 export { matches } from "./matches"
 export { renderAtoms, selectAtoms } from "./render"
 export type {

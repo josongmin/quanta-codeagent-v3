@@ -95,8 +95,15 @@ export const reachableBodyContexts = (): readonly PromptContext[] => {
  *  toggled INDEPENDENTLY (a single ctx per facet ON) on top of the body cross —
  *  the dynamic atoms are mutually independent (no conflict / supersede between
  *  them), so a per-facet ON ctx is sufficient to prove coverage without a full
- *  2^N cross. */
-const DYNAMIC_PRESENCE_FACETS: readonly (keyof PromptContext)[] = [
+ *  2^N cross.
+ *
+ *  LOAD-BEARING ASSUMPTION: this one-at-a-time enumeration is a sound stand-in for
+ *  the true reachable surface ONLY while no atom conditions on ≥2 of these facets
+ *  at once (a 2-facet `when` never fires in any single-facet ctx here, so the
+ *  coverage/conflict sweeps would silently under-exercise it). Exported so the
+ *  verifier hellgate can RATCHET that assumption — see the
+ *  "single-presence-facet coverage invariant" test. */
+export const DYNAMIC_PRESENCE_FACETS: readonly (keyof PromptContext)[] = [
   "hasLanguageHint",
   "hasEnvBlock",
   "hasRepoRulesDynamic",

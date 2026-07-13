@@ -3,6 +3,7 @@ import { buildSystemPrompt } from "@/agent/prompt"
 import {
   ALL_ATOMS,
   BODY_ATOMS,
+  DYNAMIC_PRESENCE_FACETS,
   type InstructionAtom,
   NOTICE_ATOMS,
   POSTURE_ATOMS,
@@ -426,5 +427,106 @@ describe("prompt-graph Phase 2 — RED on the four new checks", () => {
       (x) => x.kind === "manifest-completeness",
     )
     expect(man.length).toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// Coverage-ENUMERATION soundness — the load-bearing assumption behind
+// reachableAllContexts() (contexts.ts DYNAMIC_PRESENCE_FACETS). The whole-graph
+// coverage / conflict / supersede sweeps run over reachableAllContexts(), which
+// toggles each dynamic presence facet ON one-at-a-time (NO 2^N cross). That is a
+// SOUND stand-in for the true reachable surface ONLY while no atom conditions on
+// ≥2 dynamic facets at once: a 2-facet `when` fires in production (both facets
+// true) but in NO single-facet enumerated ctx, so a conflict that only manifests
+// when both are true would be silently missed. This ratchet turns that implicit
+// assumption into an explicit, named, RED-on-injection invariant.
+// ─────────────────────────────────────────────────────────────────────────
+describe("prompt-graph — single-presence-facet coverage invariant (contexts.ts SSOT)", () => {
+  const presenceFacetsOf = (a: InstructionAtom): string[] =>
+    DYNAMIC_PRESENCE_FACETS.filter(
+      (f) => (a.when as Record<string, unknown> | undefined)?.[f as string] !== undefined,
+    ).map(String)
+
+  test("no shipped atom conditions on ≥2 dynamic presence facets at once", () => {
+    const offenders = ALL_ATOMS.map((a) => ({
+      variantId: a.variantId,
+      facets: presenceFacetsOf(a),
+    })).filter((x) => x.facets.length >= 2)
+    // A ≥2-facet `when` never fires in reachableAllContexts()'s one-at-a-time
+    // enumeration → the coverage/conflict sweeps silently under-exercise it.
+    expect(offenders).toEqual([])
+  })
+
+  test("ANTI-VACUOUS: some shipped atom DOES condition on exactly one dynamic facet", () => {
+    // Without this, the guard above passes vacuously if NO atom ever reads a
+    // dynamic facet — the enumeration would be exercising nothing.
+    const single = ALL_ATOMS.filter((a) => presenceFacetsOf(a).length === 1)
+    expect(single.length).toBeGreaterThan(0)
+  })
+
+  test("RED-ON-INJECTION: a 2-facet atom trips the guard AND a real coverage violation", () => {
+    const twoFacet: InstructionAtom = {
+      atomId: "X-2FACET",
+      variantId: "X-2FACET#inert",
+      authority: "L1_system",
+      channel: "message.system_reminder",
+      section: "dynamic.reminder",
+      order: 993,
+      // BOTH facets required — never simultaneously ON in reachableAllContexts().
+      when: { hasImages: true, hasLanguageHint: true },
+      lines: [],
+      contentKey: "x-2facet",
+    }
+    // (a) the guard predicate flags it
+    expect(presenceFacetsOf(twoFacet).length).toBe(2)
+    // (b) and the verifier reports it as an (unreachable) dead rule over the full set
+    const cov = verifyRuleGraph([...ALL_ATOMS, twoFacet], reachableAllContexts()).filter(
+      (v) => v.kind === "coverage" && v.variantIds.includes("X-2FACET#inert"),
+    )
+    expect(cov.length).toBeGreaterThan(0)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// No-hidden-assumption lint — ANTI-VACUITY via RED-ON-INJECTION. verify.ts's
+// ASSUMPTION_TABLE is a deliberate SUPERSET (its docstring commissions some
+// keywords as forward tripwires for premise phrasings not yet written). The lint
+// is only meaningful while its keywords still match REAL shipped premise text —
+// a reword that drifted every premise atom away from the table would leave the
+// lint GREEN while guarding nothing.
+//
+// We prove liveness WITHOUT duplicating the keyword list (which would itself go
+// stale and pass while the lint's own table died — the exact failure mode this
+// guards): take a REAL shipped premise atom (R-ENV#frozen carries the
+// install-prohibition premise, scoped by `when.envPosture`), strip its scope, and
+// assert the lint fires. If the atom's text ever drifts off every table keyword,
+// the stripped atom stops tripping the lint → this goes RED. A paired control on
+// the unmodified atom proves the violation is caused by the missing facet, not
+// the text alone.
+// ─────────────────────────────────────────────────────────────────────────
+describe("prompt-graph — no-hidden-assumption lint fires on a real shipped premise (not inert)", () => {
+  const R_ENV_FROZEN_ID = "R-ENV#frozen"
+
+  test("stripping R-ENV#frozen's envPosture scope ⇒ a hidden-assumption violation", () => {
+    const rEnv = ALL_ATOMS.find((a) => a.variantId === R_ENV_FROZEN_ID)
+    expect(rEnv, `${R_ENV_FROZEN_ID} must exist (the shipped install-prohibition premise)`).toBeDefined()
+    // Drop `when` ⇒ the install-prohibition premise now renders unconditioned.
+    const { when: _dropped, ...unconditioned } = rEnv as InstructionAtom
+    const others = ALL_ATOMS.filter((a) => a.variantId !== R_ENV_FROZEN_ID)
+    const hidden = verifyRuleGraph(
+      [...others, unconditioned as InstructionAtom],
+      reachableAllContexts(),
+    ).filter((v) => v.kind === "hidden-assumption" && v.variantIds.includes(R_ENV_FROZEN_ID))
+    expect(hidden.length).toBeGreaterThan(0)
+  })
+
+  test("CONTROL: the unmodified R-ENV#frozen ⇒ no hidden-assumption violation", () => {
+    // Same atom, scope intact — proves the violation above comes from the stripped
+    // facet, not merely from the premise text (a text-only assertion would be a
+    // tautology; this pins it to the facet).
+    const hidden = verifyRuleGraph(ALL_ATOMS, reachableAllContexts()).filter(
+      (v) => v.kind === "hidden-assumption" && v.variantIds.includes(R_ENV_FROZEN_ID),
+    )
+    expect(hidden).toEqual([])
   })
 })
