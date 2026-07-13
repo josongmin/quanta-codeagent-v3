@@ -40,8 +40,6 @@ evidence:
   tests:
     unit: ["tests/unit/git-observability-wiring-hellgate.test.ts"]
     integration: ["tests/integration/git-observability-composite.test.ts"]
-    unit: [tests/unit/git-observability-wiring-hellgate.test.ts, tests/unit/next-action-cap-enforce.test.ts]
-    integration: [tests/integration/git-observability-composite.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

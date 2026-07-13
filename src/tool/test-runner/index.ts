@@ -191,3 +191,11 @@ export const testRunnerTool: Tool<Input> = {
     }
   },
 }
+
+/** Test-only re-exports. The two pure heuristics — `verdict` (output+exit→one
+ *  line) and `detectCommand` (marker-file probe order + path forwarding) — are
+ *  otherwise private, so the leaf-unit hellgate pins their boundary semantics
+ *  (word-boundary regex, exit/verdict interplay, probe precedence) directly
+ *  instead of driving them through `execute`. Logic is byte-identical; this is
+ *  export-only. */
+export const __test = { verdict, detectCommand }

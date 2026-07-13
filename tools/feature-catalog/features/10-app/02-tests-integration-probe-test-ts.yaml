@@ -1,5 +1,5 @@
 id: tests-integration-probe-test-ts
-title: tests/integration/probe.test.ts
+title: tests/unit/probe.test.ts
 section: 10
 subsystem: Probe (trajectory inspector) — `src/apps/probe/**` · `bun run probe` · RFC-0002 §7 / ADR-0010
 order: 2
@@ -29,7 +29,7 @@ evidence:
   adrs: [10]
   tests:
     unit: []
-    integration: [tests/integration/probe.test.ts]
+    integration: [tests/unit/probe.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

@@ -29,7 +29,6 @@ evidence:
   tests:
     unit: []
     integration: ["tests/integration/bench-eval.test.ts"]
-    integration: [tests/integration/bench-eval.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

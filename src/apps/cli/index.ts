@@ -10,6 +10,7 @@ import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
 import { installCliSandbox } from "./sandbox-wire"
 import { isSlashCommand } from "./slash-commands"
+import { installUnhandledRejectionDefense } from "./unhandled-rejection-defense"
 import { renderVersion } from "./version-cmd"
 import { QUANTA_VERSION } from "./welcome-banner"
 
@@ -270,10 +271,12 @@ const main = async (): Promise<void> => {
 // exit — the loop owns process lifetime, and exiting here would lose any
 // trajectory the loop is still finalising. If a rejection actually reaches
 // here it indicates a contract bug somewhere; the log line names it.
-process.on("unhandledRejection", (reason) => {
-  const msg = errMessage(reason)
-  logger.error(`unhandled rejection (defense-in-depth): ${msg}`)
-})
+//
+// The handler + its EXACTLY-once registration live in a pure leaf so the two
+// CRITICAL contracts (single diagnostic line, never `process.exit`; wired once
+// to the CLI entry) are fault-injectable in a unit hellgate
+// (`unhandled-rejection-defense-hellgate.test.ts`).
+installUnhandledRejectionDefense()
 
 main().catch((e) => {
   if (e instanceof SessionBootstrapError || e instanceof SessionStartupError) {

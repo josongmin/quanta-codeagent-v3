@@ -49,6 +49,13 @@ export interface ResolveResumeInput {
    *  terminal. Absent / false ⇒ the event fires unconditionally (default —
    *  pipes, CI, Web/Tauri, and any collector reading stderr stay byte-identical). */
   quietIdModeLog?: boolean
+  /** Path-mode transcript loader seam. Absent ⇒ the module-level {@link loadSession}
+   *  (real disk read) is used — so every production caller is byte-identical
+   *  default-OFF. Present ⇒ used verbatim, letting owner-local leaf-unit tests
+   *  stub the `--resume <path>` load without touching the filesystem or the
+   *  session store. Only the path-mode branch consults this; id-mode / new-session
+   *  keep their own store accessors. */
+  loadSessionFn?: (path: string) => Promise<{ sessionId: string; messages: Message[] } | null>
 }
 
 /** Resolved session-startup state. `idMeta` is `undefined` when the run is in
@@ -120,7 +127,8 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
   }
   if (resume !== undefined) {
     if (isPathLikeToken(resume)) {
-      const prior = await loadSession(resume)
+      const loadSessionAt = input.loadSessionFn ?? loadSession
+      const prior = await loadSessionAt(resume)
       if (prior !== null) {
         slog.info("state.resumed", { path: resume, messages: prior.messages.length })
         return {

@@ -44,7 +44,6 @@ evidence:
   adrs: [122]
   tests:
     unit: ["tests/unit/cli-rewind-slash-hellgate.test.ts"]
-    unit: [tests/unit/cli-rewind-slash-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

@@ -53,8 +53,6 @@ evidence:
   tests:
     unit: ["tests/unit/agent/guard-chain.test.ts", "tests/unit/bench-branch-search-wiring-hellgate.test.ts", "tests/unit/bench-branch-search-wiring.test.ts", "tests/unit/bench-issue-hint-agentless-wiring.test.ts", "tests/unit/bench-issue-hint-wiring.test.ts", "tests/unit/bench-opt-in.test.ts", "tests/unit/bench-repro-test-wiring.test.ts", "tests/unit/features.test.ts", "tests/unit/permission/trust-scope-wire.test.ts", "tests/unit/subagent-background-wire-hellgate.test.ts", "tests/unit/subagent-runner.test.ts", "tests/unit/subagent-seed-augmentation.test.ts", "tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts", "tests/unit/wire-audit-closeout-hellgate.test.ts", "tests/unit/wire-closeout-final-hellgate.test.ts"]
     integration: ["tests/integration/hexagonal-ports-closeout.test.ts", "tests/integration/multi-plane-e2e-hellgate.test.ts", "tests/integration/remember-patterns-cascade-hell.test.ts", "tests/integration/review-kind-gate-hell.test.ts", "tests/integration/trust-scope-persistent-e2e.test.ts"]
-    unit: [tests/unit/agent/guard-chain.test.ts, tests/unit/bench-branch-search-wiring-hellgate.test.ts, tests/unit/bench-branch-search-wiring.test.ts, tests/unit/bench-issue-hint-agentless-wiring.test.ts, tests/unit/bench-issue-hint-wiring.test.ts]
-    integration: [tests/integration/hexagonal-ports-closeout.test.ts, tests/integration/multi-plane-e2e-hellgate.test.ts, tests/integration/remember-patterns-cascade-hell.test.ts, tests/integration/review-kind-gate-hell.test.ts, tests/integration/trust-scope-persistent-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

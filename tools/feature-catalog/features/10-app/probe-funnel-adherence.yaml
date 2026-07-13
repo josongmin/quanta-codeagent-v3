@@ -44,7 +44,7 @@ evidence:
     unit:
       - tests/unit/probe-funnel.test.ts
     integration:
-      - tests/integration/probe.test.ts
+      - tests/unit/probe.test.ts
     contract: []
 knobs: []
 deliberate_hold: null

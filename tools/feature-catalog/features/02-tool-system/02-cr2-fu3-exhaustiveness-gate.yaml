@@ -28,7 +28,6 @@ evidence:
   adrs: [19]
   tests:
     unit: ["tests/unit/edit-recovery-hellgate.test.ts", "tests/unit/edit-strategy-hint.test.ts", "tests/unit/edit.test.ts"]
-    unit: [tests/unit/edit-recovery-hellgate.test.ts, tests/unit/edit-strategy-hint.test.ts, tests/unit/edit.test.ts]
     integration: []
     contract: []
 knobs: []

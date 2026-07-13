@@ -41,8 +41,6 @@ evidence:
   tests:
     unit: []
     integration: ["tests/integration/bench-eval.test.ts", "tests/integration/bench-python-harness-e2e.test.ts"]
-    unit: [tests/unit/next-action-cap-enforce.test.ts]
-    integration: [tests/integration/bench-eval.test.ts, tests/integration/bench-python-harness-e2e.test.ts]
     contract: []
 knobs:
   - name: QUANTA_SWEBENCH_PYTHON_BIN

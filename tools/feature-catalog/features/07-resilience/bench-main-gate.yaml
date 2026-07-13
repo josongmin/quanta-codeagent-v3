@@ -42,7 +42,7 @@ evidence:
   adrs: []
   tests:
     unit: [tests/unit/probe.test.ts]
-    integration: [tests/integration/probe.test.ts]
+    integration: [tests/unit/probe.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null

@@ -35,7 +35,6 @@ evidence:
   adrs: [8]
   tests:
     unit: ["tests/unit/memory-consolidate.test.ts", "tests/unit/memory-consolidator-hook-hellgate.test.ts", "tests/unit/memory-distill-redaction-hellgate.test.ts", "tests/unit/memory-distill.test.ts", "tests/unit/memory-phase2-wire-hellgate.test.ts"]
-    unit: [tests/unit/memory-consolidate.test.ts, tests/unit/memory-consolidator-hook-hellgate.test.ts, tests/unit/memory-distill-redaction-hellgate.test.ts, tests/unit/memory-distill.test.ts, tests/unit/memory-phase2-wire-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []

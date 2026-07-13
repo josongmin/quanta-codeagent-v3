@@ -43,7 +43,6 @@ evidence:
   adrs: []
   tests:
     unit: ["tests/unit/cost-dashboard.test.ts"]
-    unit: [tests/unit/cost-dashboard.test.ts, tests/unit/next-action-cap-enforce.test.ts]
     integration: []
     contract: []
 knobs:
