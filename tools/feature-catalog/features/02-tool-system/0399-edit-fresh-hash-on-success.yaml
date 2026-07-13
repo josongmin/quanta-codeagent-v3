@@ -64,6 +64,7 @@ evidence:
       - tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts
       - tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts
       - tests/unit/edit-fresh-hash-apply-patch-hellgate.test.ts
+      - tests/unit/edit-fresh-hash-apply-patch-audit-hellgate.test.ts
       - tests/unit/edit-fresh-hash-agent-loop-e2e-hellgate.test.ts
     integration: []
     contract: []
