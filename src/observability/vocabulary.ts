@@ -309,6 +309,15 @@ export const QUANTA_SPAN_NAMES = {
 // OpenTelemetry GenAI semantic conventions (`gen_ai.*`)
 // ---------------------------------------------------------------------------
 
+/**
+ * The `gen_ai.*` keys below conform to the PINNED semconv snapshot — see
+ * `src/observability/semconv-pin.ts` (`SEMCONV_SNAPSHOT`) for the normative
+ * commit + blob URLs. Requirement levels come from that pin, not upstream
+ * `main`. `tests/unit/observability/semconv-pin-drift.test.ts` guards this
+ * key SET against off-pin add/rename (RED on drift); when a ticket
+ * deliberately adds a pinned key (e.g. B5 `error.type`, C3 `conversation.id`
+ * emission), update THAT allowlist, not silently.
+ */
 export const GEN_AI_ATTRS = {
   /** OTel GenAI semconv `gen_ai.operation.name` — the logical operation the
    *  span represents (`chat` / `execute_tool` / `invoke_agent` / …). Canonical

@@ -178,6 +178,16 @@ export const bootBenchOtelExport = (
     env.QUANTA_RUN_ID ??= runId
   }
   const otelExport = attachBenchOtelExport(env, overrides)
+  // jul-13 (ADR-0539, T-B3) — INERT placeholder read of the context-only span-sink
+  // gate. T-B2 will replace this branch body with `setSpanSink(makeContextOnlySpanSink())`
+  // when truthy AND no OTLP endpoint is set (the exporter, when an endpoint IS set,
+  // installs its own sink above via attachBenchOtelExport and must WIN — context-only
+  // must never shadow it). Until then this is a pure no-op: reading the flag registers
+  // NO sink, so the knob is Default-OFF byte-identical AND the readsite-truthful
+  // ratchet sees the env.QUANTA_TRACE_CONTEXT read that the inventory point at this file.
+  const traceContextOnly =
+    otelExport.exporter === null && (env.QUANTA_TRACE_CONTEXT ?? "").trim() !== ""
+  void traceContextOnly // T-B2: install makeContextOnlySpanSink() here
   const traceLink =
     otelExport.exporter !== null && runId !== undefined
       ? traceViewerUrl(otelUiPort(env), runId)

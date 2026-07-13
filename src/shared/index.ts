@@ -161,6 +161,9 @@ export {
   makeEvent,
   REDACTION_POLICY,
   redactValue,
+  TRAJECTORY_CONTRACT_VERSION,
+  TRAJECTORY_KIND_CONTRACTS,
+  TRAJECTORY_KINDS,
   TRAJECTORY_SCHEMA,
 } from "./trajectory"
 export type {

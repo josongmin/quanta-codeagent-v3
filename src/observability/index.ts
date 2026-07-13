@@ -6,6 +6,7 @@ export {
   postDenialAttrs,
   workMetricsAttrs,
 } from "./attrs"
+export { makeContextOnlySpanSink } from "./context-only-sink"
 export {
   buildCostDashboard,
   type CostDashboard,
@@ -32,11 +33,6 @@ export {
   providerOf,
 } from "./pricing"
 export { buildShellOtelObserver } from "./shell-exec-otel"
-// C1: the async-safe active-span ref other clusters (recorder DI, cassette
-// metadata) import to stamp the enclosing span onto their events. Exported from
-// the parent barrel (not just the `tracing` sub-barrel) because the consumers
-// live outside the tracing slice and read the ref structurally.
-export { getActiveTraceRef, type TraceRef } from "./tracing/active-context"
 export {
   __resetSpanSink,
   endSpan,
@@ -52,6 +48,11 @@ export {
   spanTraceRef,
   startSpan,
 } from "./spans"
+// C1: the async-safe active-span ref other clusters (recorder DI, cassette
+// metadata) import to stamp the enclosing span onto their events. Exported from
+// the parent barrel (not just the `tracing` sub-barrel) because the consumers
+// live outside the tracing slice and read the ref structurally.
+export { getActiveTraceRef, type TraceRef } from "./tracing/active-context"
 export {
   createTurnTimingCapture,
   safeTtftMs,

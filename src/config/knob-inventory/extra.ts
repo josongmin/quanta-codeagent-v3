@@ -433,6 +433,26 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/bench/trajectory-debug-sink.ts",
   },
   {
+    // jul-13 (ADR-0539, T-B3) — bench observability gate that installs the
+    // CONTEXT-ONLY span sink (T-B1/T-B2): mints real W3C {traceId,spanId} ids and
+    // an active-context scope WITHOUT any OTLP export, so OBSERVE + the replay
+    // cassette carry ONE unified {traceId,spanId} per instance-attempt and the
+    // trajectory viewer's span-tree lights up on ordinary (no-endpoint) bench
+    // runs. Read at the bench OTLP boot seam (bootBenchOtelExport, apps/bench/otel.ts):
+    // truthy + no QUANTA_OTEL_ENDPOINT ⇒ context-only sink; endpoint set ⇒ the real
+    // exporter wins and this never shadows it. NOT `QUANTA_BENCH_`-prefixed ⇒ NOT
+    // auto-forwarded to full-remote boxes (T-B4 adds it to FORWARD_EXTRA_ENV).
+    // Default-OFF/unset ⇒ no sink registered ⇒ byte-identical, zero-alloc.
+    envKey: "QUANTA_TRACE_CONTEXT",
+    kind: "bool",
+    default: undefined,
+    group: "observability",
+    home: "bench",
+    describe:
+      "Bench: install a context-only span sink (real trace ids, NO OTLP export) so OBSERVE+cassette carry a unified {traceId,spanId} for the trajectory viewer's span-tree, without an OTLP endpoint. Default-OFF ⇒ byte-identical.",
+    readSite: "apps/bench/otel.ts",
+  },
+  {
     envKey: "QUANTA_BENCH_WAIT_FOR_IDLE",
     kind: "bool",
     default: false,

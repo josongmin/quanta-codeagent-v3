@@ -11,6 +11,21 @@ import type { RunContext } from "./run-context"
 export const TRAJECTORY_SCHEMA = "quanta.trajectory.v1" as const
 
 /**
+ * Declared schema version for the {@link TrajectoryKind} taxonomy + its per-kind
+ * `*Data` contracts (ADR-0539 Plane B / T-E3). SEPARATE from
+ * {@link TRAJECTORY_SCHEMA} (the on-disk line envelope): this pins the *contract
+ * surface* — the kind set and the kind→`*Data` mapping ({@link TRAJECTORY_KIND_CONTRACTS}).
+ *
+ * Bump this ONLY on a contract-surface change: adding/removing a
+ * {@link TrajectoryKind}, or adding/removing a per-kind `*Data` interface. The
+ * T-E3 drift-guard (`tests/unit/trajectory-kind-schema-guard.test.ts`) fails on
+ * ANY such change unless {@link TRAJECTORY_KIND_CONTRACTS} is updated in lockstep,
+ * so a new kind can never ship declared-without-a-contract-decision, nor a
+ * `*Data` interface land for an undeclared kind.
+ */
+export const TRAJECTORY_CONTRACT_VERSION = "quanta.trajectory.contracts.v1" as const
+
+/**
  * Redaction policy id stamped onto every event (single scrub source).
  *
  * Kept at `secrets.v1` despite the S1 value/key-set expansion: this id is
@@ -43,7 +58,9 @@ export type TrajectoryKind =
   | "error"
   | "observability_degraded"
 
-const TRAJECTORY_KINDS: ReadonlySet<string> = new Set<TrajectoryKind>([
+/** Runtime mirror of the {@link TrajectoryKind} union (RFC-0002 §5.2). Exported
+ *  so the T-E3 drift-guard can iterate the declared kind set. */
+export const TRAJECTORY_KINDS: ReadonlySet<string> = new Set<TrajectoryKind>([
   "session_start",
   "session_end",
   "turn_start",
@@ -178,6 +195,50 @@ export interface DegradedData {
   component: string
   reason: string
   droppedEvents: number
+}
+
+// --- Kind → `*Data` contract registry (T-E3 drift-guard SSOT) -------------
+
+/**
+ * The declared mapping from every {@link TrajectoryKind} to the name of its
+ * per-kind `*Data` contract, or `null` when the kind's `data` is intentionally
+ * an inline/ad-hoc shape with NO dedicated interface (governed by
+ * {@link TRAJECTORY_CONTRACT_VERSION}).
+ *
+ * This is the SSOT the T-E3 drift-guard cross-checks against
+ * {@link TRAJECTORY_KINDS} and the actually-exported `*Data` interfaces:
+ *
+ *  - EVERY member of {@link TRAJECTORY_KINDS} MUST appear here (a kind emitted
+ *    without a declaration ⇒ guard RED).
+ *  - EVERY exported `*Data` interface name MUST be a value here (a `*Data`
+ *    contract added without wiring it to a kind ⇒ guard RED).
+ *  - A `null` entry is an EXPLICIT decision that the kind carries inline data
+ *    (e.g. `session_start`, `tool_call`) — it is not an oversight.
+ *
+ * `patch_generated`/`patch_applied`/`patch_rejected` all share {@link PatchData};
+ * `llm_usage`→{@link LlmUsageData}, `tool_result`→{@link ToolResultData},
+ * `localize`→{@link LocalizeData}, `sandbox`→{@link SandboxData},
+ * `verify`→{@link VerifyData}, `observability_degraded`→{@link DegradedData}.
+ */
+export const TRAJECTORY_KIND_CONTRACTS: Readonly<Record<TrajectoryKind, string | null>> = {
+  session_start: null,
+  session_end: null,
+  turn_start: null,
+  llm_request: null,
+  llm_usage: "LlmUsageData",
+  assistant_text: null,
+  tool_call: null,
+  tool_progress: null,
+  tool_result: "ToolResultData",
+  recovery: null,
+  localize: "LocalizeData",
+  patch_generated: "PatchData",
+  patch_applied: "PatchData",
+  patch_rejected: "PatchData",
+  sandbox: "SandboxData",
+  verify: "VerifyData",
+  error: null,
+  observability_degraded: "DegradedData",
 }
 
 // --- Redaction (secrets.v1) ----------------------------------------------

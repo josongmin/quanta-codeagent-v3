@@ -23,6 +23,7 @@ config_refs:
     - QUANTA_OTEL_ENDPOINT
     - QUANTA_OTEL_RUN_ID
     - QUANTA_RUN_ID
+    - QUANTA_TRACE_CONTEXT
 owners: ["@songmin"]
 labels: ["surface:core", "observability-primitive", "absorbed:none"]
 depends_on: [otel-span-tree, otel-attribute-vocab, bench-live-trace-run-link, jsonl-span-correlation]

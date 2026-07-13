@@ -49,6 +49,65 @@ export interface ExporterSpanSinkOpts {
   readonly traceId?: string
 }
 
+/**
+ * SHARED parentage authority for every {@link SpanSink} that keeps a direct-path
+ * LIFO fallback stack (the exporter sink AND the context-only sink — T-B1).
+ *
+ * The rule (jul-13 defect fix): the SOLE parent gate is the per-context
+ * async-local ref (`getActiveTraceRef`). When a `withActiveSpanScope` installed
+ * the enclosing span as the active ref, THAT is the async-safe parent — two
+ * concurrently-interleaved sessions read their OWN active ref, so roots never
+ * cross-link. The shared LIFO `stack` is consulted ONLY when there is NO active
+ * ref for THIS async context (the direct `startSpan`/`endSpan` path), and a
+ * frame is PUSHED onto it ONLY on that direct path — a scoped span carries its
+ * parentage in its own async context and must NOT enter the shared stack (that
+ * lingering is what let concurrent scoped sessions cross-link before). The
+ * matching {@link evictScopedFrame} removes a now-scoped frame from the stack.
+ *
+ * Returns the ISSUED {@link TraceRef} core (`traceId`/`spanId`/`traceFlags`,
+ * plus `parentSpanId` iff parented). Both sinks build their own frame around it
+ * (the exporter adds start time/attrs/kind; the context-only sink adds nothing).
+ *
+ * @param stack the sink's shared open-span LIFO fallback (`push` happens here on
+ *   the direct path); each entry MUST carry a `TraceRef` shape (`traceId`,
+ *   `spanId`, `traceFlags`).
+ * @param frame the caller's frame object for THIS span — pushed onto `stack` on
+ *   the direct path so a later direct-path child (and {@link evictScopedFrame})
+ *   can find it. It MUST already carry the returned ref fields.
+ * @param gen CSPRNG byte source (id mint seam).
+ * @param fixedTraceId optional fixed root trace (exporter test seam only).
+ */
+export const resolveSpanParentage = (
+  stack: readonly TraceRef[],
+  gen: (len: number) => Uint8Array,
+  fixedTraceId?: string,
+): { readonly ref: TraceRef; readonly pushToStack: boolean } => {
+  const activeParent = getActiveTraceRef()
+  const parent: TraceRef | undefined =
+    activeParent ?? (stack.length > 0 ? stack[stack.length - 1] : undefined)
+  // Root (no parent) ⇒ a NEW trace; child ⇒ inherit the parent's trace.
+  const traceId = parent?.traceId ?? fixedTraceId ?? hexId(16, gen)
+  const ref: TraceRef = {
+    spanId: hexId(8, gen),
+    traceId,
+    traceFlags: parent?.traceFlags ?? 1,
+    ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
+  }
+  // Push ONLY the direct path (no active ref) onto the shared stack.
+  return { ref, pushToStack: activeParent === undefined }
+}
+
+/** Evict a now-scoped frame from a sink's shared direct-path LIFO stack (the
+ *  `onScoped` primitive). A token IS its frame; `lastIndexOf`+`splice(idx, 1)`
+ *  removes the EXACT frame — never the stragglers above it (a one-arg
+ *  `splice(idx)` dropped concurrent siblings). No-ops (idx=-1) for a frame that
+ *  was never pushed (a span already scoped at open). Shared by both sinks so the
+ *  concurrent-session eviction contract cannot drift between them. */
+export const evictScopedFrame = <T>(stack: T[], token: T): void => {
+  const idx = stack.lastIndexOf(token)
+  if (idx >= 0) stack.splice(idx, 1)
+}
+
 /** A {@link SpanSink} that forwards every closed span to an {@link OtelExporter}
  *  as an {@link ExportSpan}. Parent linkage is derived from a LIFO open-span
  *  stack (the loop nests sessionLoop > turn > stream), so the exported trace is
@@ -98,37 +157,21 @@ export const createExporterSpanSink = (
 
   return {
     onStart(_name: SpanName, attrs, kind?: SpanKind): unknown {
-      // Parentage authority (jul-13 defect fix): the SOLE gate is the
-      // per-context async-local ref (`getActiveTraceRef`). When the loop
-      // installed the enclosing span as the active ref, THAT is the async-safe
-      // parent — two concurrently-interleaved sessions read their OWN active
-      // ref, so roots never cross-link. The shared LIFO stack is consulted ONLY
-      // when there is NO active ref for THIS async context (the direct
-      // `startSpan`/`endSpan` path). The previous code gated the stack fallback
-      // on a PROCESS-GLOBAL scope-depth counter, which wrongly suppressed the
-      // fallback for a genuine direct-path child whenever an UNRELATED
-      // concurrent session held a scope open — orphaning the direct child. The
-      // counter is gone; scoped spans are simply kept OUT of the shared stack.
-      const activeParent = getActiveTraceRef()
-      const parent: TraceRef | Frame | undefined =
-        activeParent ?? (open.length > 0 ? open[open.length - 1] : undefined)
-      // Root (no parent) ⇒ a NEW trace; child ⇒ inherit the parent's trace.
-      const traceId = parent?.traceId ?? fixedTraceId ?? hexId(16, gen)
+      // Parentage authority (jul-13 defect fix) — the SOLE gate is the
+      // per-context async-local ref (see `resolveSpanParentage`, shared with the
+      // context-only sink so the two cannot drift). The shared LIFO stack is
+      // consulted ONLY on the direct path; scoped spans are kept OUT of it.
+      const { ref, pushToStack } = resolveSpanParentage(open, gen, fixedTraceId)
       const frame: Frame = {
-        spanId: hexId(8, gen),
-        traceId,
-        traceFlags: parent?.traceFlags ?? 1,
-        ...(parent !== undefined ? { parentSpanId: parent.spanId } : {}),
+        ...ref,
         startEpochMs: now(),
         startAttrs: attrs as SpanAttributes,
         ...(kind !== undefined ? { kind } : {}),
       }
-      // Push ONLY the direct path onto the shared stack. A scoped span
-      // (`activeParent` present) carries its parentage in its own async
-      // context, so it must NOT enter the shared stack — that is what let
-      // concurrent scoped sessions cross-link before. onEnd's
-      // `lastIndexOf`/`splice(idx>=0)` no-ops for frames never pushed.
-      if (activeParent === undefined) open.push(frame)
+      // Push ONLY the direct path onto the shared stack. A scoped span carries
+      // its parentage in its own async context, so it must NOT enter the shared
+      // stack — that is what let concurrent scoped sessions cross-link before.
+      if (pushToStack) open.push(frame)
       return frame
     },
     onScoped(token: unknown): void {
@@ -139,11 +182,9 @@ export const createExporterSpanSink = (
       // the shared stack — otherwise a CONCURRENT session's root, opening while
       // this root lingers, would adopt it as parent and collapse two independent
       // traces into one. (Under bench the root is ALREADY scoped by
-      // `withBenchInstanceRoot`, so it was never pushed and this `splice` no-ops
-      // via idx=-1 — harmless.) Evicting keeps scoped spans off the shared stack;
-      // their children already parent via the async-local ref, never the stack.
-      const idx = open.lastIndexOf(token as Frame)
-      if (idx >= 0) open.splice(idx, 1) // evict ONLY this frame — never siblings
+      // `withBenchInstanceRoot`, so it was never pushed and this evict no-ops
+      // via idx=-1 — harmless.) Shared with the context-only sink.
+      evictScopedFrame(open, token as Frame)
     },
     onEnd(token: unknown, name: SpanName, status: SpanStatus, durationMs: number, attrs): void {
       const frame = token as Frame

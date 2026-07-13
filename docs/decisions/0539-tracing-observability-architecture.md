@@ -23,6 +23,12 @@ no trace; the agent-stream tail lost on box crash.
 
 ## Decision
 
+> ⚠️ **REFRAMED (2026-07-13):** the "SSOT = OBSERVE / OTEL is a fourth layer"
+> model below is SUPERSEDED by the **2 content planes + 1 correlation
+> coordinate** model — see the Amendment §1 (OBSERVE = Plane B evidence,
+> cassette = Plane A replay, the trace tuple = a coordinate stamped on both,
+> OTLP = a derived export, NOT a peer authority). Retained here for history.
+
 1. **SSOT = the OBSERVE stream.** It is the only layer that already shares one
    event model (`TrajectoryEvent`/`makeEvent`/`RunContext`) across its two
    producers (`JsonlRecorder` + `BenchObserver`) and applies `redactValue`
@@ -134,20 +140,77 @@ no trace; the agent-stream tail lost on box crash.
 
 Plan: `docs/plans/jul-12-otel-genai-unified-tracing.md` (+ parallel-execution companion).
 
-1. **SSOT split (supersedes the "OBSERVE is SSOT" wording above).** OBSERVE
-   remains the typed, redacted EVIDENCE ssot; the replay cassette remains the
-   unredacted REPLAY ssot (secret artifact); **OTel span context becomes the
-   IDENTITY + CAUSALITY ssot.** These are three authorities, not one.
-2. **Correlation authority = `TraceRef {traceId, spanId, parentSpanId?}`** — reuse
-   `src/observability/tracing/port.ts` `SpanContext` + optional `parentSpanId`.
-   Full cross-layer tuple: `{traceId, spanId, runId, instanceId, attempt,
-   conversationId}`. `TrajectoryEvent.traceId?` (added 2026-07-13) carries it;
-   `spanId` alone is NOT a sufficient join key.
-3. **Trace scope = one trace per instance ATTEMPT.** Best-of-N/retry attempts get
+1. **SSOT reframe (supersedes BOTH the "OBSERVE is SSOT" base wording AND the
+   earlier "three authorities/layers" phrasing).** The truth model is **2
+   content planes + 1 correlation coordinate** — NOT three co-equal layers, and
+   OTel is NOT a peer authority:
+
+   - **Plane A — the replay CASSETTE (content).** `RecordedInteraction` per
+     `stream()` call. Content authority for deterministic **REPLAY** /
+     fork-from-failure. **Unredacted** (its match key is the request-hash;
+     redaction would break cross-box replay determinism) → a SECRET artifact,
+     operator-boundary only. `recording-llm.ts` / `apps/bench/trajectory.ts`.
+
+   - **Plane B — the OBSERVE stream (content).** `TrajectoryEvent`/`makeEvent`
+     over `RunContext`, one event model across both producers (`JsonlRecorder`
+     + `BenchObserver`). Content authority for **EVIDENCE** (the typed,
+     scaffold-action + agent-event stream the history viewer reads).
+     **Redacted** via the shared `redactValue`/`redactSecrets`. All NEW
+     scaffold-action tracing is still an OBSERVE `kind` with a declared `*Data`
+     contract (unchanged rule).
+
+   - **Coordinate — the correlation TUPLE (identity/causality, NOT content).**
+     `{traceId, spanId, parentSpanId?}` (`TraceRef`, reuse
+     `tracing/port.ts` `SpanContext` + optional `parentSpanId`) plus
+     `{runId, instanceId, attempt, turn, conversationId}`. It is **stamped onto
+     BOTH content planes** — OBSERVE carries `TrajectoryEvent.traceId?`; the
+     cassette stamps a replay-neutral `metadata.traceRef` (never hashed). It is
+     a coordinate that JOINS the two planes, not a third body of truth. `spanId`
+     alone is NOT a sufficient join key.
+
+   - **OTLP = a DERIVED export of the coordinate + selected OBSERVE evidence,
+     NOT a peer layer.** When an OTLP endpoint (or a context-only sink) is
+     installed the exporter ISSUES the trace/span ids that both planes then
+     stamp (C7-core id-unification); the `/v1/traces` + `/v1/metrics` payloads
+     are a downstream projection for GenAI backends. Demoting OTel from "an
+     authority" to "the coordinate's export" is the point of this reframe: no
+     content lives ONLY in OTLP.
+
+2. **Three purposes, mapped to the model.** Each of the three product purposes
+   reads from a specific plane joined on the coordinate:
+   - **(1) Troubleshoot** — the live/exported span TREE (coordinate → OTLP /
+     viewer `buildSpanTree`), joined to OBSERVE evidence.
+   - **(2) Replay** — Plane A cassette, keyed by request-hash; the coordinate
+     lets a replayed run re-link to its trajectory.
+   - **(3) History viewer** — Plane B OBSERVE joined to Plane A on the
+     coordinate (`{traceId,spanId}` + `{runId,instanceId,attempt}`), rendered as
+     the joined trajectory + span tree for every bench run.
+
+3. **Correlation coordinate = `TraceRef {traceId, spanId, parentSpanId?}`** +
+   `{runId, instanceId, attempt, turn, conversationId}` — stamped on both planes
+   (see plane definitions above); `spanId` alone is NOT a sufficient join key.
+
+4. **Requirement levels are read from the PIN, not upstream `main`** (see point
+   9 + `src/observability/semconv-pin.ts`, `SEMCONV_SNAPSHOT`
+   `63f8200…`): the GenAI **spans are at maturity Development** — this ADR and
+   its consumers MUST NOT describe them as "stable"; the two client metrics
+   (`gen_ai.client.operation.duration` unit `s`,
+   `gen_ai.client.token.usage` unit `{token}`) are **Recommended, NOT Required**.
+
+5. **LIMITATION — span timestamps are millisecond-granular (documented, not
+   fixed).** The OTLP exporter derives span start/end nanos from `Date.now()`
+   epoch-ms × `1e6` (`otel-exporter.ts:321` — `Math.trunc(epochMs * 1_000_000)`),
+   so the trailing 6 nanosecond digits are always zero: **the effective clock
+   resolution is 1 ms, not 1 ns**, and there is no monotonic-clock source. At
+   LLM latency scale (calls are ≥ tens of ms; even a fast tool span is ms-scale)
+   this is acceptable — sub-millisecond span ordering is not a use case we
+   serve. Recorded here as a KNOWN limitation so a future high-frequency-span
+   need re-opens it deliberately; it is NOT fixed by the tracing work.
+6. **Trace scope = one trace per instance ATTEMPT.** Best-of-N/retry attempts get
    distinct trace ids and share `{runId, instanceId}` with distinct `attempt`.
-4. **Runtime modes** `off | context | export` — only `off` is byte-identical /
+7. **Runtime modes** `off | context | export` — only `off` is byte-identical /
    zero-alloc. `context` allocates ids + async context (NOT "zero cost").
-5. **No per-event legacy fallback in unified mode (ENFORCED — jul-13).** A
+8. **No per-event legacy fallback in unified mode (ENFORCED — jul-13).** A
    missing active context WHILE a trace context is EXPECTED (a live span sink,
    `getSpanSink() !== null` — so `withActiveSpanScope` wraps every recorded unit
    and every emit should see a ref) is a correlation DEFECT → one
@@ -167,10 +230,22 @@ Plan: `docs/plans/jul-12-otel-genai-unified-tracing.md` (+ parallel-execution co
    depend on it) — enforcement only ADDS the degraded signal. When no sink is
    live (OFF / context-never-wired) `traceContextExpected` returns `false` ⇒ NO
    degraded record, output BYTE-IDENTICAL to the pre-enforcement path.
-6. **GenAI semconv snapshot is PINNED** (Development, not Stable) — the plan's
-   commit SHA is the normative contract; `main` is not.
-7. **Cassette stays unredacted** (request-hash/replay depends on exact content) —
-   outside the content-capture policy, inside the operator boundary. Unchanged.
+9. **GenAI semconv snapshot is PINNED** (Development, not Stable) — the normative
+   contract is the pinned upstream commit
+   **`63f8200eee093730ce845d26ce2aafb621b0807e`** (see
+   `src/observability/semconv-pin.ts` `SEMCONV_SNAPSHOT` + the three blob URLs
+   for chat spans / agent spans / metrics); `main` is NOT the contract.
+   Requirement levels (Required / Conditionally-Required / Recommended / Opt-In)
+   are read from THIS pin. A drift guard
+   (`tests/unit/observability/semconv-pin-drift.test.ts`) SET-equates the
+   `gen_ai.*` vocabulary keys against a checked-in pinned allowlist so an off-pin
+   add/rename goes RED. At the pin: gen_ai spans are at maturity **Development**
+   (never "stable"); both client metrics (`gen_ai.client.operation.duration`,
+   `gen_ai.client.token.usage`) are **Recommended** (NOT Required); provider is
+   `gen_ai.provider.name` (enum) and `gen_ai.system` is ABSENT upstream (retained
+   here only for a compat window, tracked by the drift allowlist).
+10. **Cassette stays unredacted** (request-hash/replay depends on exact content) —
+    outside the content-capture policy, inside the operator boundary. Unchanged.
 
 ### Amendment status (landed 2026-07-13)
 
