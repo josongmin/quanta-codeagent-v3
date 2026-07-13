@@ -143,6 +143,14 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     describe: "Rules pill (default OFF; =1 shows it).",
     readSite: "status-pills.ts",
   },
+  {
+    envKey: "QUANTA_PILL_GOAL",
+    kind: "bool",
+    default: true,
+    group: "status-ui",
+    describe: "`/goal` chip (default ON; renders only while a goal is active; =0 hides it).",
+    readSite: "status-pills.ts",
+  },
 
   // ── lifecycle pills (lifecycle-pills.ts) — bool, default-ON (=0 disables)
   {

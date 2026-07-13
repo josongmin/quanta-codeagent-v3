@@ -29,6 +29,7 @@ const KNOWN_KNOBS = new Set<string>([
   "QUANTA_PILL_SKILLS",
   "QUANTA_PILL_SANDBOX",
   "QUANTA_PILL_RULES",
+  "QUANTA_PILL_GOAL",
 ])
 
 /** Hermetic env builder. We do NOT set any of {@link PILL_ENV_VARS}; the

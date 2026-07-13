@@ -127,16 +127,16 @@ notes: |
 
   `src/agent/objective/continuation.ts` (`evaluateContinuation` /
   `runIdleContinuation` / `ContinuationSemaphore`) is the PURE idle
-  goal-continuation machine (Codex `core/src/goals.rs` parity) — but it is
-  CURRENTLY DEAD: barrel re-exported from `src/agent/objective/index.ts` with
-  ZERO production callers, and the `QUANTA_GOAL_ENFORCE` → `goalContinuationEnforce`
-  knob (`runtime-config.ts:212`) has ZERO readers. It is retained as a
-  hellgated primitive for a FUTURE idle-monitor / reactor wiring, NOT part of
-  the live budget gate. (It is symbol-level dead-API, not module-unreachable,
-  so `fc reachability --strict --symbols` sees it; the feature stays L3 because
-  its OTHER evidence.code files — store/loop/runtime-config/tool — are live.)
-  Promotion for the continuation half: bind `runIdleContinuation` off the
-  idle-monitor/reactor seam, make `goalContinuationEnforce` gate
-  `ContinuationDeps.enabled`, add a loop-turn-boundary `recordUsage({turns:1})`
-  so the turns budget is real (today `turnsUsed` only increments via the
-  model-invoked `objective_update {kind:"recordUsage"}` tool path), then A/B.
+  goal-continuation machine (Codex `core/src/goals.rs` parity). It was DEAD at
+  the time this budget entry landed, but was LIVE-WIRED on jul-13 — see the
+  sibling feature `objective-goal-continuation-live`: `surface-compose` mints +
+  shares the store, `session-loop` arms `startGoalContinuationTicker`, and
+  `src/apps/cli/goal-continuation-hook.ts` is the first production caller of
+  `runIdleContinuation`, so `QUANTA_GOAL_ENFORCE` → `goalContinuationEnforce`
+  now has its first reader. The LIVE BUDGET gate here
+  (`objectiveBudgetExhausted`) and the continuation ticker there are the two
+  live readers of the objective substrate; a budget-limited goal does NOT
+  auto-resume, so the two halves compose. Residual future work on the
+  continuation side: a loop-turn-boundary `recordUsage({turns:1})` so the turns
+  budget is real (today `turnsUsed` only increments via the model-invoked
+  `objective_update {kind:"recordUsage"}` tool path), then A/B on efficacy.
