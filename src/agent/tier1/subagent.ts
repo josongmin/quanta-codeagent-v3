@@ -12,7 +12,7 @@
  * the composer skips the block (byte-identical, RFC §1.2).
  */
 
-import { effectiveCap, spawnToolsAvailable } from "@/agent/spawn-depth"
+import { effectiveCap } from "@/agent/spawn-depth"
 import { defaultPpidWalkKiller, escalatingKill } from "@/runtime"
 import { runtimeConfig } from "@/shared"
 import { resolveJailed } from "@/storage"
@@ -127,12 +127,12 @@ export const buildSubagentBlock = (
   deps: SubagentBlockDeps = {},
 ): SubagentBlock | undefined => {
   if (!config.subagent) return undefined
-  // RFC jul-13 §4 L1 / §6.5 B Phase 1 — capability-absence: a child at/above the
-  // spawn-depth cap does not even SEE the `agent` trio + 6-tool `spawn_agent`
-  // family (they are absent from its assembled tool set, not merely rejected at
-  // call time). Deterministic threshold on `config.depth` (0 = root), NOT a
-  // heuristic. No-op at the root (depth 0/undefined < cap) ⇒ byte-identical.
-  if (!spawnToolsAvailable(config)) return undefined
+  // rev.4 §4.4 — capability projection is NO LONGER gated here. The single
+  // `projectSpawnTools` filter at the `features.ts` assembly seam (over the
+  // finalized `extraTools`) owns spawn-tool removal for a leaf (SSOT). This
+  // builder mints the trio/6-tool/workflow/CSV tools UNCONDITIONALLY; the leaf's
+  // creation tools are dropped once, downstream. The runner reject
+  // (`effectiveMaxDepth` below → subagent-runner) remains the authoritative bound.
 
   // FIX-A (jul-13 nesting-control, rev.4 MIN-CAP SSOT): resolve the effective
   // recursion cap at THIS `@/agent` caller boundary — the SAME min-cap the

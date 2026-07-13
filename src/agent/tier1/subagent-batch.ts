@@ -14,7 +14,6 @@
  */
 
 import { readFile as fsReadFile } from "node:fs/promises"
-import { spawnToolsAvailable } from "@/agent/spawn-depth"
 import { runtimeConfig } from "@/shared"
 import { createDagGate, type TaskNode } from "@/subagent/coordination"
 import type { Tool } from "@/tool"
@@ -31,9 +30,9 @@ import type { AgentConfig } from "../types"
 export const buildSubagentBatchBlock = (config: AgentConfig): Tool[] => {
   const sub = config.subagent
   if (sub === undefined || sub.enableBatchSpawn !== true) return []
-  // RFC jul-13 §4 L1 / §6.5 B Phase 1 — capability-absence: `spawn_batch` (+ csv)
-  // absent for a child at/above the spawn-depth cap. No-op at root ⇒ byte-identical.
-  if (!spawnToolsAvailable(config)) return []
+  // rev.4 §4.4 — capability projection moved to the single `projectSpawnTools`
+  // filter at the `features.ts` seam (SSOT). `spawn_batch` is minted here
+  // unconditionally and removed downstream for a leaf.
 
   // Reuse the SAME runner construction the trio/6-tool builders use so children
   // forked by the batch run through the identical depth-guarded `runAgent`

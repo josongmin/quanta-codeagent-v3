@@ -51,6 +51,7 @@ import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { effectiveCap, spawnDepthCap, spawnToolsAvailable } from "@/agent/spawn-depth"
+import { projectSpawnTools } from "@/agent/spawn-projection"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import { buildSubagentBlock } from "@/agent/tier1/subagent"
 import type { AgentConfig } from "@/agent/types"
@@ -356,19 +357,31 @@ describe("A3 — all three cap sources agree for every (depth, effective-cap)", 
 // ── B : cap=0 total kill-switch ──────────────────────────────────────────────
 
 describe("QUANTA_MAX_DESCENDANT_DEPTH=0 is a total kill-switch (root included)", () => {
-  test("cap 0: root (depth 0) gets NO spawn tools; block absent", () => {
+  // rev.4 §4.4: the block builder NO LONGER self-gates — it always mints its
+  // tools; the SINGLE `projectSpawnTools` filter (features.ts seam) removes them.
+  // So capability-absence is asserted through the filter over the built tools.
+  const spawnNamesAfterProjection = (opts: { depth?: number; maxDepth?: number }): string[] => {
+    const config = cfg(opts)
+    const block = buildSubagentBlock(config)
+    expect(block).toBeDefined() // builder unconditionally mints (SSOT moved out)
+    return projectSpawnTools(block!.extraTools, config)
+      .map((t) => t.name)
+      .filter((n) => n === "agent" || n === "spawn_agent")
+  }
+
+  test("cap 0: root (depth 0) gets NO spawn tools after projection", () => {
     const original = process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
     process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = "0"
     __resetRuntimeConfig()
     try {
       expect(spawnDepthCap()).toBe(0)
-      // spawnToolsAvailable at the ROOT: (0 ?? 0) < (undefined ?? 0) === 0 < 0
-      // === FALSE ⇒ even root loses spawn tools ⇒ the block is absent.
-      const rootConfig = cfg({ depth: 0 })
-      expect(spawnToolsAvailable(rootConfig)).toBe(false)
-      expect(buildSubagentBlock(rootConfig)).toBeUndefined()
+      // canExposeSpawnTools at the ROOT: (0 ?? 0) < (undefined ?? 0) === 0 < 0
+      // === FALSE ⇒ even root loses spawn tools ⇒ the filter strips agent/spawn_agent.
+      expect(spawnToolsAvailable(cfg({ depth: 0 }))).toBe(false)
+      expect(spawnNamesAfterProjection({ depth: 0 })).toEqual([])
       // Undefined depth (root contract) too.
       expect(spawnToolsAvailable(cfg({}))).toBe(false)
+      expect(spawnNamesAfterProjection({})).toEqual([])
     } finally {
       if (original === undefined) delete process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
       else process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = original
@@ -380,10 +393,11 @@ describe("QUANTA_MAX_DESCENDANT_DEPTH=0 is a total kill-switch (root included)",
     clearCap()
     expect(spawnDepthCap()).toBe(1)
     expect(spawnToolsAvailable(cfg({ depth: 0 }))).toBe(true) // 0 < 1 ⇒ root spawns
-    expect(buildSubagentBlock(cfg({ depth: 0 }))).toBeDefined()
-    // depth-1 child is a LEAF at the default policy (root-only intent).
+    expect(spawnNamesAfterProjection({ depth: 0 })).toEqual(["agent", "spawn_agent"])
+    // depth-1 child is a LEAF at the default policy (root-only intent): the filter
+    // strips the creation tools even though the builder minted them.
     expect(spawnToolsAvailable(cfg({ depth: 1 }))).toBe(false) // 1 < 1 false
-    expect(buildSubagentBlock(cfg({ depth: 1 }))).toBeUndefined()
+    expect(spawnNamesAfterProjection({ depth: 1 })).toEqual([])
   })
 })
 
@@ -406,7 +420,10 @@ describe("A4 — @/agent caller threads the resolved cap UNCONDITIONALLY (struct
     const passes = src.match(/maxDepth: effectiveMaxDepth/g) ?? []
     expect(passes.length).toBeGreaterThanOrEqual(3)
     // And `effectiveCap` is imported (slice-fence-respecting min-cap resolution at
-    // the @/agent caller boundary).
-    expect(src).toContain('import { effectiveCap, spawnToolsAvailable } from "@/agent/spawn-depth"')
+    // the @/agent caller boundary). rev.4 §4.4: this builder NO LONGER imports
+    // `spawnToolsAvailable` — capability projection moved to the single
+    // `projectSpawnTools` filter at the features.ts seam.
+    expect(src).toContain('import { effectiveCap } from "@/agent/spawn-depth"')
+    expect(src).not.toContain("spawnToolsAvailable")
   })
 })

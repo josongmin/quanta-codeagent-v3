@@ -16,7 +16,6 @@
  * registry into the tool factory at session-start.
  */
 
-import { spawnToolsAvailable } from "@/agent/spawn-depth"
 import type { Tool } from "@/tool"
 import { teamTools } from "@/tool/team"
 import type { AgentConfig } from "../types"
@@ -25,8 +24,10 @@ import type { AgentConfig } from "../types"
 export const buildTeamBlock = (config: AgentConfig): Tool[] => {
   const registry = config.teamRegistry
   if (registry === undefined) return []
-  // RFC jul-13 §4 L1 / §6.5 B Phase 1 — capability-absence: team tools absent for
-  // a child at/above the spawn-depth cap. No-op at root ⇒ byte-identical.
-  if (!spawnToolsAvailable(config)) return []
+  // rev.4 §4.4 / §5.1 — capability projection moved to the single
+  // `projectSpawnTools` filter at the `features.ts` seam (SSOT). Both team tools
+  // are minted here; for a leaf the filter removes ONLY `team_create` (the spawn
+  // vector) and KEEPS `team_delete` (management — the leaf must manage its own
+  // team sub-state). This is the §5.1 N2 fix vs the old blanket gate.
   return teamTools(registry)
 }

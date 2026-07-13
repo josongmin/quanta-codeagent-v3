@@ -31,7 +31,6 @@
  * runtime `req.depth > maxDepth` reject (previously dead: hardcoded 0).
  */
 
-import { spawnToolsAvailable } from "@/agent/spawn-depth"
 import type { Tool } from "@/tool"
 import { delegateTools, type DelegationPort as ToolDelegationPort } from "@/tool/delegate"
 import type { AgentConfig } from "../types"
@@ -40,12 +39,11 @@ import type { AgentConfig } from "../types"
 export const buildDelegateBlock = (config: AgentConfig): Tool[] => {
   const delegator = config.delegation?.delegator
   if (delegator === undefined) return []
-  // RFC jul-13 §4 L1 / §6.5 B Phase 1 — capability-absence: `delegate` absent for a
-  // child at/above the spawn-depth cap. No-op at root ⇒ byte-identical. This is the
-  // TOOL-EXPOSURE gate; the depth doc-comment above governs the SPEC depth thread
-  // (a different concern — what depth a delegate child runs at, not whether the
-  // tool is offered).
-  if (!spawnToolsAvailable(config)) return []
+  // rev.4 §4.4 — capability projection (TOOL-EXPOSURE) moved to the single
+  // `projectSpawnTools` filter at the `features.ts` seam (SSOT). `delegate` is
+  // minted here unconditionally and removed downstream for a leaf. (The depth
+  // doc-comment above governs the SPEC depth a delegate child runs at — a
+  // separate concern from whether the tool is offered.)
   // The producer `DelegationPort` (ADR-0218) is a structural superset of the
   // tool-side narrower `DelegationPort` mirror (`delegate` + `listModes`); the
   // assignment narrows it to the consumed surface.

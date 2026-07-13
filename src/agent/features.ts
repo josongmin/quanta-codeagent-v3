@@ -54,6 +54,7 @@ import type { AutoModeClassifier } from "@/permission"
 import type { Tool } from "@/tool"
 import type { TaskRegistry } from "../subagent"
 import type { SkillTurnOverride } from "./loop"
+import { projectSpawnTools } from "./spawn-projection"
 import {
   buildAdvisorBlock,
   buildAppshotBlock,
@@ -273,7 +274,14 @@ export const buildSessionFeatures = async (config: AgentConfig): Promise<Session
   extraTools.push(...appshotBlock.tools)
 
   return {
-    extraTools,
+    // rev.4 §4.4 — the SINGLE capability-projection seam. Applied ONCE where
+    // `extraTools` is finalized (SSOT), replacing the four removed per-builder
+    // `spawnToolsAvailable` gates. No-op for a root that may still spawn (default
+    // cap 1, depth 0 ⇒ byte-identical); for a leaf it removes ONLY the CREATION
+    // tools (`SPAWN_TOOL_NAMES`) and keeps management/observe tools (team_delete,
+    // task_output/stop, …) so the leaf still owns its own sub-state (§5.1). The
+    // authoritative boundary is still the subagent-runner reject (unchanged).
+    extraTools: projectSpawnTools(extraTools, config),
     ...optionalFeatureFields({
       classifier,
       taskRegistry: subagent?.taskRegistry,
