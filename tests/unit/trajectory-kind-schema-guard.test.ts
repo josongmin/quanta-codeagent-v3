@@ -22,14 +22,11 @@
  *  - add a kind to `TRAJECTORY_KINDS` without a registry entry → test 2 RED.
  *  - add `export interface FooData` without a registry value `"FooData"` → test 3 RED.
  */
+
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { describe, expect, test } from "bun:test"
-import {
-  TRAJECTORY_CONTRACT_VERSION,
-  TRAJECTORY_KIND_CONTRACTS,
-  TRAJECTORY_KINDS,
-} from "@/shared"
+import { TRAJECTORY_CONTRACT_VERSION, TRAJECTORY_KIND_CONTRACTS, TRAJECTORY_KINDS } from "@/shared"
 
 const trajectorySource = (): string => {
   const path = fileURLToPath(new URL("../../src/shared/trajectory.ts", import.meta.url))
@@ -40,7 +37,10 @@ const trajectorySource = (): string => {
 const declaredDataInterfaces = (src: string): string[] => {
   const names: string[] = []
   const re = /export interface (\w+Data)\b/g
-  for (let m = re.exec(src); m !== null; m = re.exec(src)) names.push(m[1])
+  for (let m = re.exec(src); m !== null; m = re.exec(src)) {
+    const name = m[1]
+    if (name !== undefined) names.push(name)
+  }
   return names
 }
 

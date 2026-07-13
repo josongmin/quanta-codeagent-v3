@@ -22,11 +22,12 @@
  * proving that if such a write were ever wired into the real OBSERVE path, the
  * wiring assertion above (which asserts the OPPOSITE) would flip RED.
  */
+
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { afterAll, describe, expect, test } from "bun:test"
 import { redactSecrets } from "@/security"
 import type { RunContext } from "@/shared"
 import { makeEvent, redactValue } from "@/shared"
@@ -36,8 +37,8 @@ import { JsonlRecorder } from "@/stream"
 const CTX: RunContext = { runId: "run-e1", instanceId: "inst-e1", attempt: 0, turn: 1 }
 
 /** A raw secret that BOTH `redactValue` (string-value scan) and `redactSecrets`
- *  recognize — an OpenAI-style key. */
-const SECRET = "sk-EleventySecretABCDEF0123456789"
+ *  recognize — an OpenAI project key (`sk-proj-` + ≥20 body). */
+const SECRET = "sk-proj-EleventySecretABCDEF0123456789ghij"
 
 const dir = mkdtempSync(join(tmpdir(), "plane-a-boundary-"))
 afterAll(() => rmSync(dir, { recursive: true, force: true }))
@@ -52,9 +53,16 @@ describe("T-E1 — Plane B (OBSERVE) recorder is wired onto the redacting factor
   test("a secret in an OBSERVE event's content is REDACTED on disk", () => {
     const file = join(dir, "observe.jsonl")
     const rec = new JsonlRecorder(file, { ctx: CTX, now: () => 1 })
-    // assistant_text.delta is raw model content — the exact class Plane B must
-    // scrub. The recorder routes it through makeEvent → redactValue.
-    const ev: AgentEvent = { type: "assistant_text", delta: `here is a key ${SECRET} done` }
+    // tool_call.input carries raw model content — the exact class Plane B must
+    // scrub. The secret rides one field; a benign field rides alongside so we
+    // prove the scrub is targeted (no over-redaction). The recorder routes the
+    // whole event through makeEvent → redactValue.
+    const ev: AgentEvent = {
+      type: "tool_call",
+      id: "tc-e1",
+      name: "bash",
+      input: { key: SECRET, benign: "run the tests please" },
+    }
     rec.emit(ev)
     rec.close()
 
@@ -62,8 +70,8 @@ describe("T-E1 — Plane B (OBSERVE) recorder is wired onto the redacting factor
     // Wiring proof: the OBSERVE writer scrubbed the secret …
     expect(raw.includes(SECRET)).toBe(false)
     expect(raw.includes("***REDACTED***")).toBe(true)
-    // … but did NOT over-redact the benign surrounding text.
-    expect(raw.includes("here is a key")).toBe(true)
+    // … but did NOT over-redact the benign sibling field.
+    expect(raw.includes("run the tests please")).toBe(true)
   })
 
   test("RED-on-injection: a raw-content write bypassing the factory DOES leak", () => {
@@ -161,5 +169,5 @@ describe("T-E1 — OTLP-content preview site (T-D1-owned gap)", () => {
     expect(previewPayload(`prompt ${SECRET}`).includes(SECRET)).toBe(true)
   })
 
-  test.todo("T-D1: promptPreview/completionPreview must pass through redactValue/redactSecrets")
+  test.todo("T-D1: promptPreview/completionPreview must pass through redactValue/redactSecrets", () => {})
 })

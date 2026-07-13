@@ -76,7 +76,10 @@ beforeAll(async () => {
 
   // STEP 1 — RECORD a 3-turn "failed" run to the cassette (the same
   // recordingLlmPort the bench composition wraps `resolveLLM` with).
-  const rec = recordingLlmPort({ inner: recordedModel("rec"), store: jsonlReplayStore({ path: tape }) })
+  const rec = recordingLlmPort({
+    inner: recordedModel("rec"),
+    store: jsonlReplayStore({ path: tape }),
+  })
   for (const n of [1, 2, 3]) await drain(rec, reqN(n))
 })
 
