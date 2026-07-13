@@ -24,6 +24,7 @@ import {
 } from "@/agent/prompt-body"
 import { BODY_AFTER_PERSONA_ATOMS } from "@/agent/prompt-graph/atoms-body"
 import { reachableBodyContexts } from "@/agent/prompt-graph/contexts"
+import { matches } from "@/agent/prompt-graph/matches"
 import { renderAtoms, selectAtoms } from "@/agent/prompt-graph/render"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 
@@ -104,12 +105,30 @@ describe("C5059-05 — tool-routing variant structural invariants", () => {
     // opposite facet values. Removing a `when`, or setting both to the same
     // condition, breaks this — and the prompt-graph verifier (conflictsWith-only)
     // does NOT catch it. This does.
-    for (const ctx of reachableBodyContexts()) {
+    const ctxs = reachableBodyContexts()
+    // Self-guard: the exactly-one check is HALF-BLIND if the reachable set never
+    // crosses hasDelegationSuppress:true (then only the base variant is exercised).
+    expect(ctxs.some((c) => c.hasDelegationSuppress === true)).toBe(true)
+    expect(ctxs.some((c) => c.hasDelegationSuppress === false)).toBe(true)
+    for (const ctx of ctxs) {
       const fired = selectAtoms(BODY_AFTER_PERSONA_ATOMS, ctx)
         .map((a) => a.variantId)
         .filter((v) => TR.has(v))
       expect(fired.length, JSON.stringify({ suppress: ctx.hasDelegationSuppress })).toBe(1)
     }
+  })
+
+  test("matches() honors boolean-false facet in isolation (false ≠ don't-care)", () => {
+    // The suppress split depends on `when:{hasDelegationSuppress:false}` matching
+    // ONLY when the ctx facet is false. `false` is a valid want (not absent), so
+    // the matcher's `want !== ctx[key]` must distinguish false-vs-true. Tested
+    // directly so it doesn't rely on A_TOOL_ROUTING being the only false-gated atom.
+    const base = reachableBodyContexts()[0]
+    if (base === undefined) throw new Error("no ctx")
+    expect(matches({ hasDelegationSuppress: false }, { ...base, hasDelegationSuppress: false })).toBe(true)
+    expect(matches({ hasDelegationSuppress: false }, { ...base, hasDelegationSuppress: true })).toBe(false)
+    expect(matches({ hasDelegationSuppress: true }, { ...base, hasDelegationSuppress: false })).toBe(false)
+    expect(matches({ hasDelegationSuppress: true }, { ...base, hasDelegationSuppress: true })).toBe(true)
   })
 
   test("OFF render EXACTLY equals the frozen base tool-routing (byte-identical pin)", () => {
@@ -122,6 +141,9 @@ describe("C5059-05 — tool-routing variant structural invariants", () => {
   test("SUPPRESSED == base with ONLY the 3-line fan-out block swapped (no other line dropped/dup)", () => {
     const i = BODY_AFTER_PERSONA_TOOL_ROUTING.indexOf(FANOUT_ANCHOR)
     expect(i).toBeGreaterThanOrEqual(0)
+    // indexOf finds only the FIRST anchor — a duplicate would make the derived
+    // SUPPRESSED silently wrong (head+tail would each carry a copy). Pin it once.
+    expect(BODY_AFTER_PERSONA_TOOL_ROUTING.filter((l) => l === FANOUT_ANCHOR).length).toBe(1)
     const head = BODY_AFTER_PERSONA_TOOL_ROUTING.slice(0, i)
     const tail = BODY_AFTER_PERSONA_TOOL_ROUTING.slice(i + 3)
     // head + tail must be byte-identical in the suppressed variant — only the

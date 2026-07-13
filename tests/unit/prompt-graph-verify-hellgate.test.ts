@@ -207,6 +207,14 @@ describe("prompt-graph Phase 2 — BODY + NOTICE slice is sound", () => {
     expect(BODY_REACHABLE.length).toBe(288)
   })
 
+  test("delegation-suppress cross is BALANCED 144/144 (not a skewed 287/1 that still totals 288)", () => {
+    // C5059-05: a mis-wired cross could keep the 288 count while barely exercising
+    // one facet value. Both A_TOOL_ROUTING variants need a full 144-ctx surface.
+    const f = BODY_REACHABLE.filter((c) => c.hasDelegationSuppress === false).length
+    const t = BODY_REACHABLE.filter((c) => c.hasDelegationSuppress === true).length
+    expect({ f, t }).toEqual({ f: 144, t: 144 })
+  })
+
   test("ZERO violations over the full reachable body ctx set", () => {
     const violations = verifyRuleGraph(BODY_AND_NOTICE, BODY_REACHABLE)
     expect(violations.map((v) => v.message)).toEqual([])

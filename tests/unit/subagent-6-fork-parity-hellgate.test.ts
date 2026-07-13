@@ -117,13 +117,25 @@ describe("ALBB-16 #2 — 6-tool spawn_agent fork parity (shared source)", () => 
 // one-sided edit (e.g. 6-tool positive() while trio stays min(0)) silently
 // diverged and every parity test stayed green. These pin the real seams.
 describe("ALBB-16 / C5059-04 — fork_turns schema + default + boundary hardening", () => {
-  test("trio and 6-tool fork_turns accept-sets are IDENTICAL (permanent divergence guard)", () => {
+  test("trio and 6-tool FORK_TURNS accept-sets are IDENTICAL (permanent divergence guard)", () => {
+    // Scope is the fork_turns FIELD (valid prompt held fixed) — the two schemas
+    // are hand-copied unions that must stay in lockstep. NOTE: the schemas
+    // intentionally DIFFER on the `prompt` field (below), so this parity is
+    // deliberately fork_turns-only, not whole-schema.
     const cases = ["none", "all", 0, 1, 2, 1_000_000_000, -1, 1.5, "2", true, Number.NaN, Number.POSITIVE_INFINITY]
     for (const v of cases) {
       const six = SpawnAgentInputSchema.safeParse({ prompt: "x", fork_turns: v }).success
       const trio = agentSchema.safeParse({ prompt: "x", fork_turns: v }).success
       expect(six, `divergence on ${JSON.stringify(v)}`).toBe(trio)
     }
+  })
+
+  test("6-tool prompt is STRICTER than trio (empty prompt rejected) — an intentional, pinned difference", () => {
+    // The audit flagged that a blanket "accept-sets identical" claim is false for
+    // the prompt field: 6-tool has .min(1).max(32768), trio has neither. Pin the
+    // intended asymmetry so it can't silently flip.
+    expect(SpawnAgentInputSchema.safeParse({ prompt: "" }).success).toBe(false)
+    expect(agentSchema.safeParse({ prompt: "" }).success).toBe(true)
   })
 
   test("ABSENT fork_turns ⇒ cold start (default is 'none', NOT 'all')", async () => {

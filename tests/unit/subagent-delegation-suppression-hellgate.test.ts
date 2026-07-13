@@ -23,6 +23,8 @@ import {
   delegationSuppressEnabled,
   withDelegationPolicy,
 } from "@/shared/delegation-policy"
+import { agentToolDescription } from "@/subagent/agent-tool"
+import { createAgentTool, TaskRegistry, type SubagentRunner } from "@/subagent"
 
 const KNOB = "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"
 
@@ -69,6 +71,22 @@ describe("C5059-05 — delegation suppression policy (pure)", () => {
     expect(DELEGATION_SUPPRESSION_POLICY).toMatch(
       /depth, research, investigation, thoroughness,[^.]*NOT authorization/,
     )
+  })
+
+  test("dual-resolution: runtimeConfig and delegationSuppressEnabled AGREE for every env", () => {
+    // The knob is resolved TWO ways (runtimeConfig().subagentDelegateSuppress for
+    // the reminder path; delegationSuppressEnabled(env) for tool descriptions +
+    // prompt body). Narrowing ONE would silently split the two prompt surfaces.
+    for (const v of ["1", "on", "true", "yes", "TRUE", "0", "off", "false", "no", "garbage"]) {
+      process.env[KNOB] = v
+      __resetRuntimeConfig()
+      expect(runtimeConfig().subagentDelegateSuppress, `env=${v}`).toBe(
+        delegationSuppressEnabled({ [KNOB]: v }),
+      )
+    }
+    delete process.env[KNOB]
+    __resetRuntimeConfig()
+    expect(runtimeConfig().subagentDelegateSuppress).toBe(delegationSuppressEnabled({}))
   })
 
   test("delegationSuppressEnabled pins the FULL gateOn vocab (not just '1')", () => {
@@ -149,6 +167,20 @@ describe("C5059-05 — ALL spawn surfaces project the SSOT atom (no drift)", () 
     setSuppress(false)
     for (const s of await surfaces()) {
       expect(s.render(), s.orig.slice(0, 24)).toBe(s.orig)
+    }
+  })
+
+  test("WIRING: the CONSTRUCTED agent tool's .description IS the gated function", () => {
+    // The `surfaces` tests call the description functions standalone. This pins
+    // the REAL construction path: createAgentTool must feed agentToolDescription()
+    // into tool.description. A refactor that hard-codes the base string (bypassing
+    // the gate) would keep the standalone tests green but fail here — ON and OFF.
+    const runner: SubagentRunner = async () => ({ ok: true, finalText: "", turns: 1 })
+    for (const on of [true, false]) {
+      setSuppress(on)
+      const tool = createAgentTool({ runner, registry: new TaskRegistry() })
+      expect(tool.description).toBe(agentToolDescription())
+      expect(tool.description.startsWith(DELEGATION_SUPPRESSION_POLICY)).toBe(on)
     }
   })
 })
