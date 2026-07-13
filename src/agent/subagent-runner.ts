@@ -92,7 +92,8 @@ import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
 import { buildOwnershipPolicy } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
-import { childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
+import { canExposeSpawnTools, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
+import { emitSpawnDepthDecision } from "./spawn-depth-telemetry"
 import {
   resolveChildEffort,
   resolveChildLlm,
@@ -774,22 +775,56 @@ export const createSubagentRunner = (
     // ⇒ SpawnLineageError, converted HERE into a typed non-ok deny (fail-closed,
     // never a rejected Promise, never a depth:0 fallback). Honest path:
     // childDepthOf(parent) === req.depth, so byte-identical.
+    // RFC jul-13 §4.5 (Phase 2 observability) — the EXPOSURE side of the
+    // split-brain invariant: would `projectSpawnTools` have exposed a spawn tool
+    // to THIS parent? Same `canExposeSpawnTools(parentDepth, effectiveCap)` the
+    // projection uses, so `emitSpawnDepthDecision` can prove exposure ⇔ admission
+    // at the reject. Reused (not recomputed) in all three decision branches below.
+    const parentDepth = parent.depth ?? 0
+    const toolExposed = canExposeSpawnTools(parentDepth, maxDepth)
     let childDepth: number
     try {
       childDepth = childDepthOf(parent)
     } catch (e) {
       if (e instanceof SpawnLineageError) {
+        // §4.5 — malformed parent depth ⇒ no valid child depth (`childDepth:null`).
+        emitSpawnDepthDecision({
+          parentDepth,
+          childDepth: null,
+          maxDescendantDepth: maxDepth,
+          toolExposed,
+          decision: "denied_malformed",
+        })
         return { ok: false, finalText: `spawn denied: ${e.message}`, turns: 0 }
       }
       throw e
     }
     if (childDepth > maxDepth) {
+      // §4.5 — depth reject. On the normal path this is only reached when the
+      // tool was NOT exposed (`toolExposed:false`); a `toolExposed && denied_by_depth`
+      // bumps the split-brain regression counter (must stay 0 in production).
+      emitSpawnDepthDecision({
+        parentDepth,
+        childDepth,
+        maxDescendantDepth: maxDepth,
+        toolExposed,
+        decision: "denied_by_depth",
+      })
       return {
         ok: false,
         finalText: `max subagent depth (${maxDepth}) exceeded — complete this task yourself, do not spawn.`,
         turns: 0,
       }
     }
+    // §4.5 — admitted: exposure ⇔ admission holds (toolExposed is true here on
+    // the normal path).
+    emitSpawnDepthDecision({
+      parentDepth,
+      childDepth,
+      maxDescendantDepth: maxDepth,
+      toolExposed,
+      decision: "admitted",
+    })
 
     // Isolation guarantee (jul-7 audit F4, verified): when `isolate` holds, the child's
     // `cwd` is the throwaway worktree path (below), and BOTH write surfaces are jailed to
