@@ -31,22 +31,27 @@ Key consequence: the trajectory viewer (purpose #3) reads **Plane B + Plane A**,
 The OTLP viewer (`otel-trace-sink.ts`/`trace-viewer.html`, :4318) is a **live** export view of the Coordinate for
 purpose #1 during a run — kept separate, NOT merged (it is redundant offline; the tree is reconstructable from B+A).
 
-## SOTA reference (2026-07) + why
+## SOTA reference — PINNED snapshot (normative), not upstream main
 
-Industry standard = **OpenTelemetry GenAI semantic conventions** (Phoenix/OpenInference, Langfuse, Braintrust all ingest OTel):
-- `chat {model}` **CLIENT** span is **STABLE** (graduated early 2026); `invoke_agent`/`create_agent`/`execute_tool` agent/tool spans are **Development** but stable in practice (v1.41).
-- **Required metric** `gen_ai.client.operation.duration` (histogram); recommended `gen_ai.client.token.usage` (histogram).
-- **Content capture**: default OFF (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false`); messages ride **span EVENTS** / `gen_ai.input.messages`·`gen_ai.output.messages` (NOT attributes) so a Collector can filter/redact without touching app code. Defense-in-depth: SDK gate + Collector redaction/transform.
-- Attribute names still shift (Development badges) → **PIN the semconv version** (ADR already does).
-- "One-schema" principle: whatever the harness, emit OTel-gen_ai-conformant output so any backend works with zero custom logic.
+Industry standard = **OpenTelemetry GenAI semantic conventions** (Phoenix/OpenInference, Langfuse, Braintrust ingest OTel). The requirement levels below are read from the **PINNED snapshot** — NOT from upstream `main` (upstream moves; the project's contract is the pin, for reproducibility). Upstream may have graduated client spans on main since, but that is irrelevant to conformance judged against the pin.
 
-Sources: OTel gen-ai-spans (stable client spans); OTel blog "Inside the LLM Call" (2026); GenAI Agent SemConv Cheat Sheet 2026; Braintrust "Agent observability 2026"; oneuptime "Capture GenAI prompt/completion events" + "Redact sensitive prompts".
+**Normative snapshot: commit `63f8200eee093730ce845d26ce2aafb621b0807e`** (same pin as [jul-12-otel-genai-unified-tracing.md](jul-12-otel-genai-unified-tracing.md)).
+- [GenAI client spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/63f8200eee093730ce845d26ce2aafb621b0807e/docs/gen-ai/gen-ai-spans.md) · [GenAI agent spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/63f8200eee093730ce845d26ce2aafb621b0807e/docs/gen-ai/gen-ai-agent-spans.md) · [OpenAI overrides](https://github.com/open-telemetry/semantic-conventions-genai/blob/63f8200eee093730ce845d26ce2aafb621b0807e/docs/gen-ai/openai.md)
+
+Facts from the pin (do NOT overstate):
+- `chat {model}` CLIENT span + `invoke_agent`/`create_agent`/`execute_tool` agent/tool spans are **ALL Development** (not Stable). Do not call any of them "stable" / "stable in practice" in the ADR or this plan.
+- `gen_ai.client.operation.duration` (histogram, **unit `s`/seconds**) and `gen_ai.client.token.usage` (histogram, **unit `{token}`**, split by required `gen_ai.token.type` = `input`|`output`) are both **Recommended** (NOT Required). Common metric dimensions: `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.operation.name`, and `error.type` on error.
+- **Content capture** default OFF. Two pinned representations exist and are DIFFERENT — pick ONE and cite the blob (see P-D): (a) opt-in **attributes** `gen_ai.input.messages` / `gen_ai.output.messages` (structured value), OR (b) a dedicated **span event** named `gen_ai.client.inference.operation.details` carrying them. `gen_ai.input.messages`/`output.messages` are attribute names, NOT event names.
+- Attribute names still shift (Development) → the **pinned SHA is the only reproducible authority**. Copying it into ADR-0539 + a code fixture is a P-A deliverable (below); it is NOT yet in the ADR.
+- "One-schema" principle: emit output conformant to the PIN so any backend works with zero custom logic.
+
+Sources (upstream, background only — the PIN governs): OTel gen-ai-spans; OTel blog "Inside the LLM Call" (2026); GenAI Agent SemConv Cheat Sheet 2026; Braintrust "Agent observability 2026"; oneuptime "Capture GenAI prompt/completion events" + "Redact sensitive prompts".
 
 Quanta's 2-plane model is AHEAD of the OTel baseline (OTel has only binary content-on/off; quanta separates replay-exact from evidence-redacted). So **SOTA-alignment work targets the Coordinate/OTLP export only**; the planes stay.
 
 ## Current state (landed this session, on main)
 
-- Coordinate: active-context (AsyncLocalStorage `TraceRef`), **id-unification** (OTLP≡OBSERVE≡cassette share one `{traceId,spanId}`), gen_ai attrs (operation/provider/model/usage/`finish_reasons` array), **CLIENT kind** for chat, `invoke_agent`/`execute_tool`, per-attempt `quanta.bench.instance` root, semconv version pinned, rule-5 missing-context enforcement.
+- Coordinate: active-context (AsyncLocalStorage `TraceRef`), **id-unification** (OTLP≡OBSERVE≡cassette share one `{traceId,spanId}`), gen_ai attrs (operation/provider/model/usage/`finish_reasons` array), **CLIENT kind** for chat, `invoke_agent`/`execute_tool`, per-attempt `quanta.bench.instance` root, rule-5 missing-context enforcement. ⚠️ The semconv SHA is pinned in jul-12's plan but **NOT yet copied into ADR-0539 or a code fixture** (P-A closes this).
 - Plane A: request-hash replay + metadata `traceRef` (hash-neutral, invariant proven), debug-sink **3 enrichers COMPLETE** (toolExec/verdict/editTrace).
 - Plane B: `TrajectoryEvent`/`makeEvent` SSOT, redaction, RunContext tuple + `traceId`, all dead-producer kinds closed (patch_applied/rejected, onSelection, phase-gate decision).
 - Viewer: `buildSpanTree` join on `{traceId,spanId,parentSpanId}`, group-chat + span-tree toggle, debug-sink surfaced.
@@ -54,9 +59,13 @@ Quanta's 2-plane model is AHEAD of the OTel baseline (OTel has only binary conte
 
 ## Plan (phased)
 
-### P-A — ADR-0539 reframe (docs only, code 0) — DO FIRST
-Rewrite the SSOT section to the **2 plane + 1 coordinate** model; demote OTel from "layer" to "coordinate / derived export"; state the SOTA conformance target + pinned semconv version; map the 3 purposes to the SSOTs. No behavior change.
-- Files: `docs/decisions/0539-tracing-observability-architecture.md`. Risk: none.
+### P-A — ADR-0539 reframe + PIN authority (docs + one code fixture) — DO FIRST
+Rewrite the SSOT section to the **2 plane + 1 coordinate** model; demote OTel from "layer" to "coordinate / derived export"; map the 3 purposes to the SSOTs. No behavior change.
+Deliverables (the pin authority the current docs LACK):
+1. Copy the normative SHA `63f8200eee093730ce845d26ce2aafb621b0807e` + the three blob links into ADR-0539 (it currently has none).
+2. Add a **code fixture** pinning the SHA (e.g. `src/observability/semconv-pin.ts` `SEMCONV_SNAPSHOT = "63f8200…"`) referenced by the vocabulary + a drift test, so "conformant to the pin" is machine-checkable, not prose.
+3. State requirement levels **as read from the pin**: client/agent/tool spans = Development; the two metrics = Recommended (NOT Required/Stable). Restore jul-12's SOTA-claim boundary — a conformance claim requires **raw-OTLP proof** (pinned names, kinds, keys, value-types) captured from `/v1/traces`+`/v1/metrics`, not just "tests pass."
+- Files: `docs/decisions/0539-…md`, `docs/plans/jul-13-tracing-ssot-sota.md`, `src/observability/semconv-pin.ts` (+ its drift test). Risk: none (docs + one const + one test).
 
 ### P-B — G3: context-only SpanSink (THE enabler for #1 offline + #3 tree) — default-OFF
 Decouple "issue real trace ids" from "OTLP export" so **every run** has a real Coordinate without an OTLP endpoint.
@@ -71,17 +80,22 @@ Decouple "issue real trace ids" from "OTLP export" so **every run** has a real C
 
 ### P-C — G1: standard OTel GenAI metrics
 Emit the required + recommended metrics so any OTel backend (Phoenix/Langfuse/Braintrust) shows latency/token dashboards.
-- `gen_ai.client.operation.duration` (histogram, REQUIRED) — per `chat`/LLM call, from the sampling-span duration.
-- `gen_ai.client.token.usage` (histogram, recommended) — input/output tokens, from the captured usage.
-- Emit through the existing metric sink; gated on the sink being live (byte-identical off).
-- Files: `src/observability/*` (metric emission at the chat span close in `stream-consume.ts`/`loop-helpers.ts`), vocabulary. Risk: low (observe-only).
+Both metrics are **Recommended** at the pin (not Required). Conformance = correct **units + dimensions**, not just name+number.
+- **Blocker (transport gap)**: `MetricSample` (`metrics/port.ts:35-44`) has NO `unit`/`description`, and the OTLP metric serializer (`otel-exporter.ts:394-449`) does NOT emit unit. So "emit the metric" alone produces a non-conformant series. FIRST add a **typed instrument descriptor** `{name, unit, description}` (or equivalent SSOT) to the metric port + serialize `unit` into OTLP.
+- `gen_ai.client.operation.duration` — histogram, **unit `s` (seconds)** — convert the sampling-span duration (ms→s). Dimensions: `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.operation.name`, `error.type` (on error).
+- `gen_ai.client.token.usage` — histogram, **unit `{token}`** — split into TWO series by required `gen_ai.token.type` = `input` | `output` (not one combined number). Same dimensions.
+- Gated on the sink being live (byte-identical off).
+- Acceptance: **raw `/v1/metrics` OTLP fixture** asserting name + unit + `gen_ai.token.type` split + dimensions (not just a value showing on a dashboard).
+- Files: `src/observability/metrics/port.ts` (descriptor + unit), `src/observability/otel-exporter.ts` (serialize unit), metric emission at chat-span close (`stream-consume.ts`/`loop-helpers.ts`), vocabulary. Risk: low-medium (touches the metric wire format).
 
-### P-D — G2: opt-in content capture, SOTA form (span events, default-OFF, redacted)
+### P-D — G2: opt-in content capture, PINNED form (default-OFF, redacted)
 Let Phoenix/Langfuse show messages when opted in, WITHOUT breaking the plane contracts.
-- `gen_ai.input.messages` / `gen_ai.output.messages` emitted as span **EVENTS** (not attributes), gated by a knob mirroring `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (default **OFF**).
-- Content on the OTLP export path is **redacted** (reuse Plane B `redactValue`) — the cassette stays unredacted (that's Plane A's contract, unchanged). No raw content leaks onto spans by default.
-- **No-leak adversarial audit required** (this touches content on an external-export surface): default-off proof, redaction proof, cassette-unredacted-unchanged proof.
-- Files: loop span sites + vocabulary + knob + fc. Risk: medium (content governance) → hellgate + ≥3 adversarial.
+- **Decide the pinned representation FIRST** (the two are different and the code supports only one today):
+  - **(a) ATTRIBUTE form — RECOMMENDED**: opt-in attributes `gen_ai.input.messages` / `gen_ai.output.messages` carrying a **structured value** (per the pin's message schema; specify the JSON encoding rail — these are NOT plain strings). Needs NO new transport — the exporter already serializes span attributes. Lowest cost.
+  - **(b) EVENT form**: a dedicated span event named `gen_ai.client.inference.operation.details` (NOT `gen_ai.input.messages` — that's an attribute name). **Blocker**: there is NO span-event transport today — `SpanSink` is `onStart/onEnd/onScoped` only (`spans.ts:139-184`), `ExportSpan` has no `events[]` (`otel-exporter.ts:96-114`), and the OTLP serializer emits no `events`. Choosing (b) REQUIRES building: a SpanEvent API on the sink + `ExportSpan.events` + OTLP `events[]` serializer + a raw-OTLP fixture. Defer unless a backend specifically needs the event form.
+- Gated by a knob mirroring `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (default **OFF**). Content on the OTLP path is **redacted** (reuse Plane B `redactValue`); the cassette stays unredacted (Plane A contract, unchanged).
+- **No-leak adversarial audit required**: default-off proof, redaction proof, cassette-unredacted-unchanged proof, + a **raw-OTLP fixture** showing the pinned representation on the wire.
+- Files (form a): loop span sites (attribute build + redaction) + structured-encoding helper + vocabulary + knob + fc. (form b additionally: `spans.ts` SpanSink event method, `otel-exporter.ts` ExportSpan.events + serializer.) Risk: medium (content governance) → hellgate + ≥3 adversarial.
 
 ### P-E — Plane A/B hardening (parallel, low risk)
 - Plane A: **secret-boundary drift-guard** (a test/lint asserting unredacted content is written ONLY by the cassette path — nothing else emits raw). Fork-from-failure entry-point documented as a first-class operation.
@@ -107,6 +121,10 @@ Flip `QUANTA_TRACE_CONTEXT` to default-ON for bench after: (i) confirm no trajec
 P-A (now) → P-B (enabler; unblocks #1 offline + #3 tree) → P-C, P-D, P-E (parallel) → P-F (measure-first, last).
 
 ## Open decisions
-- G2 content capture: confirm the knob name + whether to honor the OTel env var directly.
+- **P-D representation** (must decide before building): attribute form `gen_ai.input.messages`/`output.messages` (recommended — no new transport) vs event form `gen_ai.client.inference.operation.details` (needs a new SpanEvent transport end-to-end). Pick per the pinned blob + which backend consumes it.
+- P-D knob: confirm name + whether to honor the OTel env var `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` directly.
 - P-F default-ON: needs a measure-first A/B (does the added trace-field byte change break any downstream consumer?) before flipping.
 - Production box run (validate the OTLP tuple over a real network hop) — separate, needs auth + spend.
+
+## Audit corrections folded in (2026-07-13)
+An adversarial review of this plan (against pin `63f8200…` + HEAD interfaces) caught three P1 defects, now fixed above: (1) requirement levels were overstated as Stable/Required from upstream main — corrected to the pin's Development/Recommended + SHA/blob/fixture made a P-A deliverable; (2) P-D assumed a span-event transport that does not exist — now decides attribute-vs-event with the event-form transport gap enumerated; (3) P-C lacked units/dimensions and the metric port lacks a unit field — now specifies seconds/`{token}` units, `gen_ai.token.type` split, provider/model dimensions, a typed instrument descriptor, and a raw `/v1/metrics` fixture as acceptance.
