@@ -32,7 +32,7 @@ import {
   seedStoreFromSnapshot,
 } from "@/activity"
 import { errMessage, logger, runtimeConfig } from "@/shared"
-import { renderAgentFleet } from "../agents-fleet-panel"
+import { renderAgentFleet, renderAgentInspect } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
 import { formatBranchesPanel } from "../branch-search-progress"
 import { editMessageCmd } from "../edit-message-cmd"
@@ -516,7 +516,7 @@ const activityCmd: SlashCommand = {
 const agentsCmd: SlashCommand = {
   name: "/agents",
   describe:
-    "Live subagent fleet (ID/status/type/age/result). Flags: --format table|json|tree, --all",
+    "Live subagent fleet. Flags: --format table|json|tree, --all, --depth N; `inspect <id>` drills in",
   category: "loop",
   async run(args, ctx) {
     if (ctx.agents === undefined) {
@@ -525,6 +525,8 @@ const agentsCmd: SlashCommand = {
     }
     let format: "table" | "json" | "tree" = "table"
     let all = false
+    let maxDepth: number | undefined
+    let inspectId: string | undefined
     for (let i = 0; i < args.length; i++) {
       const a = args[i]
       if (a === "--all") {
@@ -537,13 +539,38 @@ const agentsCmd: SlashCommand = {
           return 1
         }
         format = v
+      } else if (a === "--depth") {
+        const v = args[i + 1]
+        i += 1
+        const n = Number(v)
+        if (v === undefined || !Number.isInteger(n) || n < 0) {
+          ctx.err(`/agents: --depth must be a non-negative integer (got ${v ?? "<nothing>"})\n`)
+          return 1
+        }
+        maxDepth = n
+        // `--depth` is a tree-only filter; default to the tree view for it.
+        if (format === "table") format = "tree"
+      } else if (a === "inspect") {
+        inspectId = args[i + 1]
+        i += 1
+      } else if (a !== undefined && !a.startsWith("--")) {
+        // Bare `/agents <id>` — drill into a single task.
+        inspectId = a
       } else {
-        ctx.err(`/agents: unknown argument '${a}' (try --format <table|json|tree> or --all)\n`)
+        ctx.err(
+          `/agents: unknown argument '${a}' (try --format <table|json|tree>, --all, --depth <N>, or inspect <id>)\n`,
+        )
         return 1
       }
     }
     const now = ctx.now?.() ?? Date.now()
-    ctx.out(`${renderAgentFleet(ctx.agents(), { format, now, all })}\n`)
+    if (inspectId !== undefined) {
+      ctx.out(`${renderAgentInspect(ctx.agents(), inspectId, { now })}\n`)
+      return 0
+    }
+    ctx.out(
+      `${renderAgentFleet(ctx.agents(), { format, now, all, ...(maxDepth !== undefined ? { maxDepth } : {}) })}\n`,
+    )
     return 0
   },
 }

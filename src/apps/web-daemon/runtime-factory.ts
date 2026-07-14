@@ -66,13 +66,14 @@ import {
   type RuntimeFacade,
 } from "@/sdk/runtime"
 import { checkSessionStoreHealth } from "@/session"
-import { gateOn } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import { discoverSkills, discoverSystemSkills } from "@/skill"
 import { StdoutStream } from "@/stream"
 import { TaskRegistry } from "@/subagent"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
+import { createSubagentSource, type SubagentSourceHandle } from "./subagent-source"
 import {
   type CanvasArtifactSourceHandle,
   createCanvasArtifactSource,
@@ -152,6 +153,13 @@ export interface ObservableRuntimeFacade extends RuntimeFacade {
    * `agentState` frames, byte-identical).
    */
   readonly agentState?: AgentStateSourceHandle
+  /**
+   * QUANTA_WEB_SUBAGENTS — Sub-Agents panel source fed by the session's
+   * `onSubagentEvent` seam (subagent spawn/settle transitions). Present only
+   * when `QUANTA_WEB_SUBAGENTS=1` (gate OFF ⇒ undefined ⇒ the server installs no
+   * `subagent` topic broadcast, byte-identical).
+   */
+  readonly subagentSource?: SubagentSourceHandle
   /**
    * QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (mirror of the
    * agent-state OUTBOUND tap). When present, `AgentConfig.userInputPort` is
@@ -635,12 +643,17 @@ const mintInboundPorts = (
   permission: PermissionContext,
 ): {
   readonly agentState: AgentStateSourceHandle | undefined
+  readonly subagentSource: SubagentSourceHandle | undefined
   readonly userInput: WebUserInputPortHandle | undefined
   readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
   readonly controlRequest: WebControlRequestPortHandle | undefined
   readonly askUserTools: Tool[]
 } => {
   const agentState = gateOn(env, "QUANTA_WEB_AGENT_STATE") ? createAgentStateSource() : undefined
+  // QUANTA_WEB_SUBAGENTS — the Sub-Agents panel source (mirror of agentState).
+  // Gate OFF ⇒ undefined ⇒ no `onSubagentEvent` sink, no facade port, no WS
+  // frames (byte-identical). Installed onto the Bun server topic in `server.ts`.
+  const subagentSource = gateOn(env, "QUANTA_WEB_SUBAGENTS") ? createSubagentSource() : undefined
   const userInput =
     agentState !== undefined
       ? createWebUserInputPort({ capture: (ev) => agentState.sink.capture(ev) })
@@ -653,7 +666,7 @@ const mintInboundPorts = (
     gateOn(env, "QUANTA_ASK_USER") && userInput !== undefined
       ? [askUserTool(createWebAskUserPort(userInput.port)) as Tool]
       : []
-  return { agentState, userInput, follower, controlRequest, askUserTools }
+  return { agentState, subagentSource, userInput, follower, controlRequest, askUserTools }
 }
 
 /**
@@ -679,6 +692,7 @@ const buildAgentConfigBase = async ({
   usageHolder,
   canvasToolDiff,
   agentState,
+  subagentSource,
   userInput,
   controlRequest,
   follower,
@@ -698,6 +712,7 @@ const buildAgentConfigBase = async ({
   readonly usageHolder: CanvasUsageSourceHandle
   readonly canvasToolDiff: CanvasToolDiffSourceHandle | undefined
   readonly agentState: AgentStateSourceHandle | undefined
+  readonly subagentSource: SubagentSourceHandle | undefined
   readonly userInput: WebUserInputPortHandle | undefined
   readonly controlRequest: WebControlRequestPortHandle | undefined
   readonly follower: ReturnType<typeof buildFollowerCoControlSlot>
@@ -714,7 +729,13 @@ const buildAgentConfigBase = async ({
   // the presets) so web can never drift from the security classification — if
   // "interactive" ever became rule-less, this stops loading too. Fail-open.
   const repoRules = modeLoadsRepoRules("interactive")
-    ? await loadRepoRules(cwd).catch(() => undefined)
+    ? await loadRepoRules(cwd).catch((e) => {
+        logger.warn("web daemon repo rules load failed; continuing without local rules", {
+          cwd,
+          error: errMessage(e),
+        })
+        return undefined
+      })
     : undefined
   const base: RuntimeAgentConfigBase = {
     llm,
@@ -754,6 +775,12 @@ const buildAgentConfigBase = async ({
     // runner's `artifact.ready` producer drain. `{}` when off (byte-identical).
     ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
     ...(agentState !== undefined ? { onAgentState: agentState.sink } : {}),
+    // QUANTA_WEB_SUBAGENTS — feed the Sub-Agents panel source. The runner
+    // projects each lifecycle transition to a `SubagentObservation` and calls
+    // this; the source fans it out to WS. Absent ⇒ no sink (byte-identical).
+    ...(subagentSource !== undefined
+      ? { onSubagentEvent: (ev) => subagentSource.sink.capture(ev) }
+      : {}),
     // QUANTA_WEB_AGENT_STATE — wire the inbound port so the agent can ask on
     // web (the tool registers iff this is present). Absent ⇒ tool not
     // registered (byte-identical).
@@ -838,10 +865,8 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
     // OUT-OF-BAND INBOUND port cluster (agent-state tap + user-input mirror +
     // T02 follower + ADR-0496 control-request + gated ask_user). Each keeps its
     // original gate; see {@link mintInboundPorts}.
-    const { agentState, userInput, follower, controlRequest, askUserTools } = mintInboundPorts(
-      env,
-      permission,
-    )
+    const { agentState, subagentSource, userInput, follower, controlRequest, askUserTools } =
+      mintInboundPorts(env, permission)
     // P4 (jul-11, UUX-4-14) — compose MCP from the surface-shared assembly
     // (@/host/mcp-composition). No .mcp.json ⇒ empty (byte-identical). Bridged
     // tools join the registry; clients stop on shutdown; the /mcp readout goes
@@ -862,6 +887,7 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       usageHolder,
       canvasToolDiff,
       agentState,
+      subagentSource,
       userInput,
       controlRequest,
       follower,
@@ -894,6 +920,10 @@ export const buildProductionRuntimeFactory = (): (() => Promise<ObservableRuntim
       artifactRegistry,
       artifactPreviewResolver,
       agentState,
+      // QUANTA_WEB_SUBAGENTS — expose the source so `index.ts` threads it into
+      // the server config; `server.ts` installs the topic broadcast. Absent ⇒
+      // getter reads undefined ⇒ no install (byte-identical).
+      ...(subagentSource !== undefined ? { subagentSource } : {}),
       ...(userInput !== undefined ? { userInput } : {}),
       // QUANTA_CONTROL_REQUEST — expose the control-request port so the daemon's
       // server can `enqueue(req)` a peeked `controlRequest` frame. Absent ⇒ no

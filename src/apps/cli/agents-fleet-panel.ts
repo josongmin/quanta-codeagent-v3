@@ -16,6 +16,13 @@
 
 import { sliceWholeChars } from "@/shared"
 import { bold, cyan, dim, green, red, renderBox, visibleWidth, yellow } from "@/ui/ui-helpers"
+import {
+  type AgentTreeNode,
+  directChildrenOf,
+  flattenTree,
+  pruneTreeToDepth,
+  rowsToTree,
+} from "./agents-fleet-tree"
 
 /** Structural mirror of `@/subagent`'s `TaskRecord` + the surfaced slice of
  *  `SubagentResult`. Kept local on purpose (no `@/subagent` value import). */
@@ -28,6 +35,16 @@ export interface AgentFleetRow {
   readonly endedAt?: number
   readonly result?: { readonly ok: boolean; readonly finalText: string; readonly turns: number }
   readonly error?: string
+  /** SUBSTRATE lineage (multi-agent panel). Registry task id of the agent that
+   *  spawned THIS task; `undefined` ⇒ root-level (spawned by the root session
+   *  agent). Consumed READ-ONLY by the `--tree` spawn-tree reconstruction. */
+  readonly parentTaskId?: string
+  /** SUBSTRATE — the child's spawn depth (root's direct child = 1). Surfaced in
+   *  the tree/inspect views. */
+  readonly depth?: number
+  /** SUBSTRATE — the deterministic mailbox label (`parentLabel/ordinal`), when
+   *  the runner minted one. Surfaced as a node's stable address in `inspect`. */
+  readonly mailboxLabel?: string
 }
 
 export interface RenderAgentFleetOpts {
@@ -38,6 +55,10 @@ export interface RenderAgentFleetOpts {
    *  changes presentation; it cannot resurrect LRU-evicted records (those are
    *  already gone from the registry Map before they ever reach this renderer). */
   readonly all?: boolean
+  /** `--depth N` — when `format === "tree"`, prune the spawn tree to render
+   *  depth ≤ this value (0 = roots only). Absent ⇒ no depth cap. Ignored by the
+   *  table/json paths (byte-identical). */
+  readonly maxDepth?: number
 }
 
 const FINAL_TEXT_MAX = 50
@@ -228,36 +249,97 @@ const renderJson = (rows: readonly AgentFleetRow[], now: number): string =>
     2,
   )
 
-const UNTYPED = "untyped"
+/** Bound a description to a 1-line preview capped at {@link TREE_DESC_MAX}
+ *  visible chars (first line only, ellipsised). Defends the tree/inspect rows
+ *  against a giant multi-line delegated-task string. */
+const descPreview = (description: string): string => {
+  const firstLine = description.split("\n")[0] ?? ""
+  return firstLine.length > TREE_DESC_MAX
+    ? `${sliceWholeChars(firstLine, TREE_DESC_MAX)}…`
+    : firstLine
+}
 
+const TREE_DESC_MAX = 44
+
+/** Node label for a tree/inspect row: nickname (`mailboxLabel`) or agentType,
+ *  falling back to the short id when neither is present. */
+const nodeLabel = (r: AgentFleetRow): string => r.mailboxLabel ?? r.agentType ?? shortId(r.id)
+
+/** One indented spawn-tree row: `<indent><status> <label> d<depth> — <preview>`.
+ *  The indent is 2 spaces per render level; an orphan is flagged so a re-rooted
+ *  (LRU-evicted parent) node is visibly distinct. */
+const treeRow = (node: AgentTreeNode): string => {
+  const r = node.row
+  const indent = "  ".repeat(node.renderDepth)
+  const orphanMark = node.orphan ? dim(" ⚠ orphan") : ""
+  const depthBadge = dim(`d${r.depth ?? node.renderDepth}`)
+  const preview = descPreview(r.description)
+  const previewCell = preview.length > 0 ? ` ${dim("—")} ${preview}` : ""
+  return `${indent}${statusCell(r.status)} ${bold(nodeLabel(r))} ${depthBadge}${orphanMark}${previewCell}`
+}
+
+/** `--tree` — render the reconstructed parent→child SPAWN tree (via
+ *  `parentTaskId`/`depth`), NOT a type-grouping. Root-level tasks at the top,
+ *  children indented under their parent; orphans (evicted parent) re-rooted with
+ *  a marker; cycles broken (each node emitted at most once). `--depth N` prunes
+ *  to render depth ≤ N. */
 const renderTree = (rows: readonly AgentFleetRow[], opts: RenderAgentFleetOpts): string => {
-  const sorted = ordered(rows)
-  const groups = new Map<string, AgentFleetRow[]>()
-  for (const r of sorted) {
-    const key = r.agentType ?? UNTYPED
-    const bucket = groups.get(key) ?? []
-    bucket.push(r)
-    groups.set(key, bucket)
-  }
-  const lines: string[] = []
-  // Deterministic group order: byte-sorted type names, UNTYPED last.
-  const keys = [...groups.keys()].sort((a, b) => {
-    if (a === UNTYPED) return 1
-    if (b === UNTYPED) return -1
-    return a < b ? -1 : a > b ? 1 : 0
-  })
-  for (const key of keys) {
-    const bucket = groups.get(key) ?? []
-    lines.push(`${bold(key)} ${dim(`(${bucket.length})`)}`)
-    for (const r of bucket) {
-      lines.push(`  ${statusCell(r.status)}  ${shortId(r.id)}  ${dim(rowAge(r, opts.now))}`)
-    }
-  }
+  const built = rowsToTree(rows)
+  const tree = opts.maxDepth !== undefined ? pruneTreeToDepth(built, opts.maxDepth) : built
+  const nodes = flattenTree(tree)
+  const lines = nodes.length === 0 ? [dim("(no agents at this depth)")] : nodes.map(treeRow)
   return renderBox(lines, {
-    title: "Agent fleet",
+    title: "Sub-agents",
     titleStyle: bold,
     footer: footerLine(countFleet(rows)),
   })
+}
+
+/**
+ * Drill-in `/agents inspect <id>` — one task's detail: delegated description,
+ * status, depth, parent (id + nickname when resolvable), mailbox label, a
+ * bounded final-response preview (from `result`/`error`), and its DIRECT
+ * children. PURE. Returns a "not found" box when the id is unknown/evicted.
+ */
+export const renderAgentInspect = (
+  rows: readonly AgentFleetRow[],
+  id: string,
+  opts: { readonly now: number },
+): string => {
+  const self = rows.find((r) => r.id === id)
+  if (self === undefined) {
+    return renderBox(
+      [`${red("✗")} task not found: ${id}`, dim("(unknown id, or evicted from the registry LRU)")],
+      { title: "Sub-agent detail", titleStyle: bold },
+    )
+  }
+  const parent =
+    self.parentTaskId !== undefined ? rows.find((r) => r.id === self.parentTaskId) : undefined
+  const parentCell =
+    self.parentTaskId === undefined
+      ? dim("root (spawned by session agent)")
+      : parent !== undefined
+        ? `${shortId(parent.id)} ${dim(`(${nodeLabel(parent)})`)}`
+        : `${shortId(self.parentTaskId)} ${dim("(evicted)")}`
+  const finalRaw = self.result?.finalText ?? self.error ?? ""
+  const finalPreview = finalRaw.length > 0 ? descPreview(finalRaw) : dim("(none yet)")
+  const kids = directChildrenOf(rows, id)
+  const kidLines =
+    kids.length === 0
+      ? [dim("  (no direct children)")]
+      : kids.map((k) => `  ${statusCell(k.status)} ${bold(nodeLabel(k))} ${dim(shortId(k.id))}`)
+  const lines = [
+    `${statusCell(self.status)}  ${bold(nodeLabel(self))}  ${dim(shortId(self.id))}`,
+    `${dim("age")}      ${rowAge(self, opts.now)}`,
+    `${dim("depth")}    ${self.depth ?? 0}`,
+    `${dim("parent")}   ${parentCell}`,
+    ...(self.mailboxLabel !== undefined ? [`${dim("mailbox")}  ${self.mailboxLabel}`] : []),
+    `${dim("task")}     ${descPreview(self.description)}`,
+    `${dim("result")}   ${finalPreview}`,
+    dim(`children (${kids.length}):`),
+    ...kidLines,
+  ]
+  return renderBox(lines, { title: "Sub-agent detail", titleStyle: bold })
 }
 
 /**

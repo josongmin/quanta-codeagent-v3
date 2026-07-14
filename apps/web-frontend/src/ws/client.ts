@@ -31,12 +31,12 @@ import type {
   CanvasMessage,
   ConnectionState,
   ObservabilityMessage,
-  SurfaceSubscription,
   SessionCommand,
   SessionEvent,
   SessionEventType,
   SessionRejectedFrame,
   SessionSnapshotLite,
+  SurfaceSubscription,
 } from "../types/protocol"
 import { DEFAULT_SESSION_CLIENT_SURFACE_SUBSCRIPTION } from "../types/protocol"
 import {
@@ -46,6 +46,7 @@ import {
   decodeObservabilityFromEnvelope,
   decodeRejectedFromEnvelope,
   decodeSnapshotFromEnvelope,
+  decodeSubagentFromEnvelope,
   encodeCommandFrame,
   encodeConnectFrame,
   parseEnvelope,
@@ -53,6 +54,7 @@ import {
   SESSION_PROTOCOL_VERSION,
 } from "./envelope"
 import { computeRetryDelayMs } from "./reconnect"
+import type { SubagentMessage } from "./subagent-model"
 
 /* ------------------------------------------------------------------ */
 /* Public types                                                        */
@@ -100,6 +102,7 @@ export type SnapshotHandler = (snapshot: SessionSnapshotLite) => void
 export type ObservabilityHandler = (message: ObservabilityMessage) => void
 export type CanvasHandler = (message: CanvasMessage) => void
 export type AgentStateHandler = (message: AgentStateMessage) => void
+export type SubagentHandler = (message: SubagentMessage) => void
 
 /**
  * Minimal interface SessionClient depends on — the global `WebSocket` ctor
@@ -193,6 +196,7 @@ export class SessionClient {
   readonly #observabilityHandlers = new Set<ObservabilityHandler>()
   readonly #canvasHandlers = new Set<CanvasHandler>()
   readonly #agentStateHandlers = new Set<AgentStateHandler>()
+  readonly #subagentHandlers = new Set<SubagentHandler>()
   readonly #wsCtor: WebSocketCtor
   readonly #setTimer: (cb: () => void, ms: number) => unknown
   readonly #clearTimer: (handle: unknown) => void
@@ -485,6 +489,21 @@ export class SessionClient {
     }
   }
 
+  /**
+   * Subscribe to Sub-Agents panel frames (QUANTA_WEB_SUBAGENTS). Unlike
+   * {@link onAgentState}, subagent frames are a STREAM (spawn/status events the
+   * panel reducer accumulates into a tree), NOT a snapshot — so there is NO
+   * stale last-frame replay to a late subscriber (that would surface only the
+   * final event, dropping the tree). This mirrors the daemon source, which fans
+   * out live with no history buffer. Returns an unsubscribe closure.
+   */
+  onSubagent(handler: SubagentHandler): () => void {
+    this.#subagentHandlers.add(handler)
+    return () => {
+      this.#subagentHandlers.delete(handler)
+    }
+  }
+
   onConnectionChange(handler: ConnectionHandler): () => void {
     this.#connectionHandlers.add(handler)
     // Replay current state so the subscriber renders immediately without
@@ -507,10 +526,7 @@ export class SessionClient {
     // P1 Phase 3a — a resume intent rides the WS URL as `?thread=<id>` so the
     // daemon's swap-on-attach fires (see `fetch-handler.ts` `?thread` read):
     // the requested thread becomes the ONE live session. Absent ⇒ byte-identical.
-    const finalUrl = this.#withAuthQuery(
-      this.#withThreadQuery(url, resumeThreadId),
-      auth?.token,
-    )
+    const finalUrl = this.#withAuthQuery(this.#withThreadQuery(url, resumeThreadId), auth?.token)
     this.#setState({ kind: "connecting", attempt: this.#attempt })
 
     let ws: WebSocketLike
@@ -641,6 +657,24 @@ export class SessionClient {
             handler(agentState)
           } catch (err) {
             this.#log("warn", `[SessionClient] agent-state handler threw: ${String(err)}`)
+          }
+        }
+      }
+      return
+    }
+    if (kind === "subagent") {
+      const subagent = decodeSubagentFromEnvelope(parsed)
+      if (subagent !== null) {
+        // A subagent frame is live streaming evidence — settle an events-only
+        // resume (mirrors the canvas / agent-state branches). No stale replay:
+        // the frame is dispatched to current subscribers only (stream, not
+        // snapshot), so a late panel misses earlier spawns (matches the daemon).
+        this.#settleResume()
+        for (const handler of [...this.#subagentHandlers]) {
+          try {
+            handler(subagent)
+          } catch (err) {
+            this.#log("warn", `[SessionClient] subagent handler threw: ${String(err)}`)
           }
         }
       }

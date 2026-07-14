@@ -2,15 +2,18 @@ import { describe, expect, it } from "vitest"
 import {
   CANVAS_PROTOCOL_VERSION,
   decodeCanvasFrame,
-  decodeObservabilityFrame,
-  decodeSnapshotFrame,
-  decodeRejectedFrame,
   decodeEventFrame,
-  encodeConnectFrame,
+  decodeObservabilityFrame,
+  decodeRejectedFrame,
+  decodeSnapshotFrame,
+  decodeSubagentFromEnvelope,
   encodeCommandFrame,
+  encodeConnectFrame,
   isEventEnvelope,
+  parseEnvelope,
   peekEnvelopeKind,
   SESSION_PROTOCOL_VERSION,
+  SUBAGENT_PROTOCOL_VERSION,
 } from "./envelope"
 
 describe("encodeCommandFrame", () => {
@@ -615,5 +618,65 @@ describe("decodeCanvasFrame", () => {
       payload: { kind: "context.usage", segments: [], total: 1, max: 10 },
     })
     expect(decodeCanvasFrame(raw)).toBeNull()
+  })
+})
+
+describe("decodeSubagentFromEnvelope", () => {
+  const decode = (obj: unknown) => {
+    const parsed = parseEnvelope(JSON.stringify(obj))
+    return parsed === null ? null : decodeSubagentFromEnvelope(parsed)
+  }
+  const spawnFrame = {
+    version: SUBAGENT_PROTOCOL_VERSION,
+    kind: "subagent",
+    payload: {
+      type: "subagent_spawn",
+      taskId: "t-1",
+      parentTaskId: "p-0",
+      depth: 2,
+      description: "explore repo",
+      agentType: "explorer",
+      at: 5,
+      emittedAt: 5,
+    },
+  }
+
+  it("decodes a subagent_spawn frame into its payload", () => {
+    const msg = decode(spawnFrame)
+    expect(msg?.type).toBe("subagent_spawn")
+    if (msg?.type === "subagent_spawn") {
+      expect(msg.taskId).toBe("t-1")
+      expect(msg.parentTaskId).toBe("p-0")
+      expect(msg.depth).toBe(2)
+    }
+  })
+
+  it("decodes a subagent_status frame into its payload", () => {
+    const msg = decode({
+      version: SUBAGENT_PROTOCOL_VERSION,
+      kind: "subagent",
+      payload: { type: "subagent_status", taskId: "t-1", status: "completed", at: 9, emittedAt: 9 },
+    })
+    expect(msg?.type).toBe("subagent_status")
+    if (msg?.type === "subagent_status") expect(msg.status).toBe("completed")
+  })
+
+  it("rejects a subagent frame carrying a non-matching protocol version", () => {
+    expect(decode({ ...spawnFrame, version: "subagent.v2" })).toBeNull()
+  })
+
+  it("returns null for non-subagent / malformed frames", () => {
+    expect(decode({ kind: "event" })).toBeNull()
+    // A subagent envelope whose payload fails the tag/`taskId`/`emittedAt` guard.
+    expect(
+      decode({ version: SUBAGENT_PROTOCOL_VERSION, kind: "subagent", payload: { type: "nope" } }),
+    ).toBeNull()
+    expect(
+      decode({
+        version: SUBAGENT_PROTOCOL_VERSION,
+        kind: "subagent",
+        payload: { type: "subagent_spawn", taskId: "t-1" },
+      }),
+    ).toBeNull()
   })
 })

@@ -38,6 +38,7 @@ import { attachTranscriptPersistence } from "./server/transcript-persist"
 import type { WSData } from "./server/ws-data"
 import { buildWebSocketHandlers } from "./server/ws-handlers"
 import { createSessionRegistry } from "./session-registry"
+import { installSubagentSource, type SubagentSourceHandle } from "./subagent-source"
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 export { parseFollowerApprovalTimeoutMs } from "./server/follower-approval"
@@ -111,6 +112,12 @@ export interface WebDaemonServerConfig extends WebDaemonConfig {
    * `QUANTA_WEB_AGENT_STATE=1`.
    */
   readonly agentStatePorts?: AgentStatePorts
+  /**
+   * QUANTA_WEB_SUBAGENTS — optional Sub-Agents panel source. Gate OFF ⇒ absent
+   * ⇒ the server installs no `subagent` topic broadcast + no socket subscribes
+   * (byte-identical). Populated by `./index.ts` from `facade.subagentSource`.
+   */
+  readonly subagentSource?: SubagentSourceHandle
   /**
    * QUANTA_WEB_AGENT_STATE — optional OUT-OF-BAND INBOUND port bundle. Gate
    * OFF ⇒ absent ⇒ no inbound `planInputAnswer` frame can resolve anything (and
@@ -239,6 +246,12 @@ const buildDaemonListener = (params: {
       ...(onAttachThread !== undefined ? { onAttachThread } : {}),
     }),
   })
+
+  // QUANTA_WEB_SUBAGENTS — install the Sub-Agents broadcast: each subagent
+  // observation captured by the source is published on `SUBAGENT_WS_TOPIC`, and
+  // every connection subscribes to that topic in the WS `open` handler. Gate OFF
+  // ⇒ `config.subagentSource` absent ⇒ no install, no topic (byte-identical).
+  if (config.subagentSource !== undefined) installSubagentSource(config.subagentSource, server)
 
   // Bun.serve binds synchronously when a port is requested — `port` is the
   // OS-chosen port when `config.port === 0`. `hostname` is `undefined` only

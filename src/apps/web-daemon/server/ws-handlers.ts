@@ -22,6 +22,7 @@ import { peekControlRequest } from "../control-request-frame"
 import { peekFollowerVerb } from "../follower-verb-frame"
 import type { WebDaemonServerConfig } from "../server"
 import type { RegisteredSession, SessionRegistry } from "../session-registry"
+import { SUBAGENT_WS_TOPIC } from "../subagent-source"
 import {
   type BunServerWebSocketLike,
   type BunWebSocketAdapter,
@@ -186,6 +187,10 @@ export const buildWebSocketHandlers = (deps: WsHandlerDeps): WsHandlers => {
       // historical full side-channel fan-out. A later `connect` frame can
       // narrow this set intentionally via `applySurfaceSubscription(...)`.
       applySurfaceSubscription(ws, config, undefined)
+      // QUANTA_WEB_SUBAGENTS — join the Sub-Agents broadcast topic so this
+      // connection receives every `subagent` frame the source publishes. Gate
+      // OFF ⇒ `config.subagentSource` absent ⇒ no subscribe (byte-identical).
+      if (config.subagentSource !== undefined) ws.subscribe(SUBAGENT_WS_TOPIC)
       try {
         await buildRegisteredSession(registry, ws, adapter, sharedSession)
         // P1 Phase 2 — swap the live session onto the opened thread (hydrate

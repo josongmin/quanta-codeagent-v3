@@ -25,6 +25,7 @@ import type {
   SessionSnapshotLite,
   SurfaceSubscription,
 } from "../types/protocol"
+import type { SubagentMessage } from "./subagent-model"
 
 /**
  * Mirror of `SESSION_PROTOCOL_VERSION` upstream. Keep in lock-step with
@@ -344,7 +345,10 @@ const isArtifactReadyShape = (rec: Record<string, unknown>): boolean =>
 /** Per-kind shape check — a closed switch on the (already-validated) tag so a
  *  future kind added to `CANVAS_MESSAGE_KINDS` without a shape branch is a
  *  compile-visible gap here (exhaustiveness), not a silent accept. */
-const isCanvasMessageShape = (kind: CanvasMessage["kind"], rec: Record<string, unknown>): boolean => {
+const isCanvasMessageShape = (
+  kind: CanvasMessage["kind"],
+  rec: Record<string, unknown>,
+): boolean => {
   switch (kind) {
     case "tool.diff":
       return isToolDiffShape(rec)
@@ -378,9 +382,7 @@ export const decodeCanvasFrame = (raw: unknown): CanvasMessage | null => {
 }
 
 /** Validation body for {@link decodeCanvasFrame} over a parsed envelope. */
-export const decodeCanvasFromEnvelope = (
-  parsed: Record<string, unknown>,
-): CanvasMessage | null => {
+export const decodeCanvasFromEnvelope = (parsed: Record<string, unknown>): CanvasMessage | null => {
   if (parsed.kind !== "canvas") return null
   if (!isString(parsed.version) || parsed.version.length === 0) return null
   // Gate the version we claim to carry: a v2 emitter read with the v1 schema
@@ -452,6 +454,34 @@ export const decodeAgentStateFromEnvelope = (
   // would be silently mis-rendered.
   if (parsed.version !== AGENT_STATE_PROTOCOL_VERSION) return null
   return isAgentStateMessage(parsed.payload) ? parsed.payload : null
+}
+
+/** Mirror of `@/protocol/subagent-frame#SUBAGENT_PROTOCOL_VERSION` upstream
+ *  (the daemon-side codec). Keep in lock-step — a mismatch is dropped. */
+export const SUBAGENT_PROTOCOL_VERSION = "subagent.v1" as const
+
+/** Best-effort structural guard for a Sub-Agents panel message payload. Tag
+ *  (`subagent_spawn` / `subagent_status`) + the universal `taskId`/`emittedAt`;
+ *  unknown fields are forward-compatible (no per-kind deep validation). */
+const isSubagentMessage = (value: unknown): value is SubagentMessage => {
+  if (!isRecord(value)) return false
+  if (value.type !== "subagent_spawn" && value.type !== "subagent_status") return false
+  return isString(value.taskId) && isNumber(value.emittedAt)
+}
+
+/**
+ * Decode a `subagent` wire frame over an already-parsed envelope (the client's
+ * single-parse dispatch calls this). Wire envelope mirrors the agent-state /
+ * canvas `{version, kind, payload}` shape: `{ version: "subagent.v1", kind:
+ * "subagent", payload }`. Returns null on any shape/version mismatch (NO-THROW:
+ * the client logs + drops on null).
+ */
+export const decodeSubagentFromEnvelope = (
+  parsed: Record<string, unknown>,
+): SubagentMessage | null => {
+  if (parsed.kind !== "subagent") return null
+  if (!isString(parsed.version) || parsed.version !== SUBAGENT_PROTOCOL_VERSION) return null
+  return isSubagentMessage(parsed.payload) ? parsed.payload : null
 }
 
 /**

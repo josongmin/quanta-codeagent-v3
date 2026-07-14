@@ -264,6 +264,11 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   // undefined ⇒ the server attaches no agent-state sink (byte-identical legacy).
   const agentStatePorts = buildAgentStatePorts(observableFacade)
 
+  // QUANTA_WEB_SUBAGENTS — the Sub-Agents panel source. Gate OFF ⇒ facade getter
+  // reads undefined ⇒ the server installs no `subagent` topic broadcast
+  // (byte-identical legacy).
+  const subagentSource = observableFacade?.subagentSource
+
   // QUANTA_WEB_AGENT_STATE — the OUT-OF-BAND INBOUND port (answer/cancel handle).
   // Gate OFF ⇒ undefined ⇒ the server has no port to resolve into AND the tool
   // was never registered (byte-identical legacy).
@@ -301,6 +306,7 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
     ...(canvasArtifactFeed !== undefined ? { canvasArtifactFeed } : {}),
     ...(artifactPreviewResolver !== undefined ? { artifactPreviewResolver } : {}),
     ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
+    ...(subagentSource !== undefined ? { subagentSource } : {}),
     ...(userInputPorts !== undefined ? { userInputPorts } : {}),
     ...(controlRequestPorts !== undefined ? { controlRequestPorts } : {}),
     ...(followerCoControl !== undefined ? { followerCoControl } : {}),

@@ -16,6 +16,7 @@ import { PlanPanel } from "./components/PlanPanel"
 import { PortBadge } from "./components/PortBadge"
 import type { SlashCommand, SlashCommandContext } from "./components/SlashPalette"
 import { StatusBar } from "./components/StatusBar"
+import { SubAgentsPanel, subagentHasContent } from "./components/SubAgentsPanel"
 import { assembleSlashCommands, resolveSlashCommandFrom } from "./components/slash-catalog"
 import type { KnobsEndpoint } from "./components/slash-knobs"
 import { httpUrlFromWsUrl } from "./components/slash-llm-config"
@@ -62,6 +63,7 @@ import {
   useSendTurn,
   useSessionEvents,
 } from "./ws/session-hooks"
+import { type SubagentMessage, type SubagentSource, useSubagentState } from "./ws/subagent-model"
 
 export type { PendingImageAttachment }
 
@@ -985,6 +987,30 @@ export const App = (): JSX.Element => {
   // empty state ⇒ the section self-hides (byte-identical).
   const itemStream = useItemStream(agentStateHub.source)
 
+  // QUANTA_WEB_SUBAGENTS — the Sub-Agents panel channel. A fan-out hub over
+  // `client.onSubagent` (mirror of `agentStateHub`, minus `inject` — subagent
+  // frames are a live stream, never synthetically injected). Daemon gate OFF ⇒
+  // no `subagent` frame decodes ⇒ the source never fires ⇒ `subagents` stays the
+  // EMPTY view ⇒ `SubAgentsPanel` self-hides (chat UI byte-identical).
+  const subagentSource = useMemo<SubagentSource>(() => {
+    const handlers = new Set<(msg: SubagentMessage) => void>()
+    let detachClient: (() => void) | null = null
+    return {
+      subscribe: (handler) => {
+        handlers.add(handler)
+        if (detachClient === null) {
+          detachClient = client.onSubagent((msg) => {
+            for (const h of [...handlers]) h(msg)
+          })
+        }
+        return () => {
+          handlers.delete(handler)
+        }
+      },
+    }
+  }, [client])
+  const subagents = useSubagentState(subagentSource)
+
   // QUANTA_WEB_AGENT_STATE — close the OUT-OF-BAND INBOUND loop: a WEB user
   // answers (or cancels) the paused agent's `request_user_input` prompt. Sends
   // the raw `planInputAnswer` frame (NOT a SessionCommand) + optimistically
@@ -1015,7 +1041,8 @@ export const App = (): JSX.Element => {
   // plan OR any agent-state axis (mode / tool-progress / compaction / ratelimit /
   // plan-prompt) ALSO opens the sidebar so the agent-state column is never
   // rendered into a collapsed pane.
-  const hasAgentState = agentState.plan !== null || agentStateHasContent(agentState)
+  const hasAgentState =
+    agentState.plan !== null || agentStateHasContent(agentState) || subagentHasContent(subagents)
   const hasObservabilityData = computeHasObservabilityData(
     observability,
     contextUsage,
@@ -1131,6 +1158,7 @@ export const App = (): JSX.Element => {
               >
                 <PlanPanel plan={agentState.plan} />
                 <AgentStatePanel state={agentState} onAnswer={onPlanInputAnswer} />
+                <SubAgentsPanel state={subagents} />
               </aside>
             ) : null}
             <ObservabilityPane

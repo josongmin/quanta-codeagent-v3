@@ -505,6 +505,10 @@ const toAgentFleetRow = (
   ...(r.result !== undefined
     ? { result: { ok: r.result.ok, finalText: r.result.finalText, turns: r.result.turns } }
     : {}),
+  // Lineage edges — the spawn TREE that `/agents --tree` reconstructs.
+  ...(r.parentTaskId !== undefined ? { parentTaskId: r.parentTaskId } : {}),
+  ...(r.depth !== undefined ? { depth: r.depth } : {}),
+  ...(r.mailboxLabel !== undefined ? { mailboxLabel: r.mailboxLabel } : {}),
 })
 
 /** jul-03 CLI-surfacing — the S2/A3/B4/S1/B2 read-only ctx slots. Extracted so
