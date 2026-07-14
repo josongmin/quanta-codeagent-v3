@@ -148,6 +148,163 @@ describe("PersistedHandle.depth codec round-trip", () => {
 })
 
 /* ====================================================================== */
+/* CODEC FAIL-CLOSED TRUTH TABLE — parseHandle read-path (jsonl-store.ts)   */
+/*                                                                          */
+/* The lever under test is the READ-path guard in `parseHandle`:            */
+/*   ...(typeof r.depth === "number" && Number.isInteger(r.depth)           */
+/*        && r.depth >= 0 ? { depth: r.depth } : {})                        */
+/* We exercise it through the REAL jsonl store by writing RAW JSONL lines    */
+/* (so we can express malformed depths JSON.stringify would otherwise       */
+/* normalise) and reading them back via `store.list`. A fixed workspace     */
+/* hasher pins the on-disk directory so we can drop raw per-handle files.   */
+/*                                                                          */
+/* Every REJECT case asserts BOTH depth===undefined AND that the rest of    */
+/* the handle still parsed (the malformed depth is DROPPED, not the whole   */
+/* record) — proving fail-CLOSED-on-depth, not fail-loud-drop-everything.   */
+/* ====================================================================== */
+
+import { mkdir, writeFile } from "node:fs/promises"
+
+const FIXED_HASH = "codecfixedhash00"
+
+/** Build a raw JSONL object line with `depth` spliced in verbatim (so callers
+ *  can inject values `JSON.stringify` would rewrite, e.g. a bare `null`). When
+ *  `depthLiteral` is undefined the `depth` key is omitted entirely (legacy). */
+const rawHandleLine = (id: string, depthLiteral: string | undefined): string => {
+  const fields: string[] = [
+    `"id":${JSON.stringify(id)}`,
+    `"spec":{"task":"codec"}`,
+    `"status":"interrupted"`,
+    `"startedAt":1000`,
+    `"turns":0`,
+    `"outputSummary":"(codec)"`,
+    `"workspace":"/ws/codec"`,
+  ]
+  if (depthLiteral !== undefined) fields.push(`"depth":${depthLiteral}`)
+  return `{${fields.join(",")}}\n`
+}
+
+describe("CODEC fail-closed truth table — PersistedHandle.depth read path", () => {
+  test("ACCEPT: non-negative integers round-trip (0, and a large int); REJECT: NaN/Inf/neg/frac/string/null → depth ABSENT (rest of handle intact)", async () => {
+    const base = await mkdtemp(join(tmpdir(), "resume-depth-codec-"))
+    try {
+      const store = defaultJsonlSchedulerStore({
+        baseDir: base,
+        workspaceHasher: () => FIXED_HASH,
+      })
+      const dir = join(base, FIXED_HASH)
+      await mkdir(dir, { recursive: true })
+
+      // id → { depthLiteral written raw, expected depth after read } .
+      // NaN / Infinity are not valid JSON literals, so a producer that tried to
+      // stringify them lands `null` on disk (JSON.stringify(NaN)==="null"); we
+      // assert that `null` reads back as ABSENT — the exact fail-closed the
+      // codec owes. A distinct `"NaN"`/`"Infinity"` string literal is a further
+      // string-typed reject case.
+      const cases: ReadonlyArray<{
+        id: string
+        raw: string
+        expect: number | undefined
+      }> = [
+        { id: "bg-accept-zero", raw: "0", expect: 0 }, // root boundary
+        { id: "bg-accept-one", raw: "1", expect: 1 },
+        { id: "bg-accept-large", raw: "9007199254740991", expect: 9007199254740991 },
+        { id: "bg-rej-neg", raw: "-1", expect: undefined },
+        { id: "bg-rej-neg-big", raw: "-42", expect: undefined },
+        { id: "bg-rej-frac", raw: "1.5", expect: undefined },
+        { id: "bg-rej-frac-small", raw: "0.0001", expect: undefined },
+        { id: "bg-rej-string-num", raw: '"2"', expect: undefined },
+        { id: "bg-rej-string-nan", raw: '"NaN"', expect: undefined },
+        { id: "bg-rej-string-inf", raw: '"Infinity"', expect: undefined },
+        { id: "bg-rej-null", raw: "null", expect: undefined }, // == stringify(NaN|Inf)
+        { id: "bg-rej-bool", raw: "true", expect: undefined },
+        { id: "bg-rej-array", raw: "[2]", expect: undefined },
+        { id: "bg-rej-object", raw: '{"n":2}', expect: undefined },
+      ]
+
+      for (const c of cases) {
+        await writeFile(join(dir, `${c.id}.jsonl`), rawHandleLine(c.id, c.raw))
+      }
+      const back = await store.list("/ws/codec")
+      const byId = new Map(back.map((h) => [h.id, h]))
+
+      // Every case survived as a handle (fail-closed on DEPTH only, never on the
+      // whole record). RED if a rejected depth aborted the parse (drop-record).
+      expect(back).toHaveLength(cases.length)
+      for (const c of cases) {
+        const h = byId.get(c.id)
+        expect(h).toBeDefined()
+        // Rest-of-handle intact — proves the record parsed, only depth was gated.
+        expect(h?.status).toBe("interrupted")
+        expect(h?.spec.task).toBe("codec")
+        // The load-bearing assertion. RED under any of these production mutations:
+        //   - drop `Number.isInteger(r.depth)`   → 1.5 / 0.0001 leak through
+        //   - drop `r.depth >= 0`                → -1 / -42 leak through
+        //   - drop `typeof r.depth === "number"` → "2" / null / [2] leak through
+        //   - relax to `r.depth != null`         → every reject leaks
+        expect(h?.depth).toBe(c.expect)
+      }
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  test("ROUND-TRIP via public save(): a producer's NaN/Infinity depth serialises to null and reads back ABSENT (fail-closed end-to-end)", async () => {
+    const base = await mkdtemp(join(tmpdir(), "resume-depth-codec-rt-"))
+    try {
+      const store = defaultJsonlSchedulerStore({ baseDir: base })
+      // Force a poisoned depth past the write-side omission by constructing the
+      // handle object directly (the public port type says number; a buggy
+      // producer could hand NaN). save() JSON.stringify's it → "null" on disk →
+      // the read codec must fail-close it to ABSENT.
+      const poisoned = {
+        ...mkHandle({ id: "bg-nan", workspace: "/ws/NAN", status: "interrupted" }),
+        depth: Number.NaN,
+      } as PersistedHandle
+      await store.save(poisoned)
+      const backNan = await store.list("/ws/NAN")
+      expect(backNan).toHaveLength(1)
+      expect(backNan[0]?.id).toBe("bg-nan")
+      // RED if the codec accepted a non-integer/NaN depth on read.
+      expect(backNan[0]?.depth).toBeUndefined()
+
+      const infPoisoned = {
+        ...mkHandle({ id: "bg-inf", workspace: "/ws/INF", status: "interrupted" }),
+        depth: Number.POSITIVE_INFINITY,
+      } as PersistedHandle
+      await store.save(infPoisoned)
+      const backInf = await store.list("/ws/INF")
+      expect(backInf).toHaveLength(1)
+      expect(backInf[0]?.depth).toBeUndefined()
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+
+  test("WRITE-SIDE omission: liveToPersisted drops a non-integer/negative childDepth (defense-in-depth twin of the read guard)", async () => {
+    // Capture through the REAL hydrating wrapper with a poisoned childDepth and
+    // assert the persisted running snapshot has NO depth. RED if the wrapper's
+    // liveToPersisted omission guard (Number.isInteger && >= 0) is weakened.
+    for (const bad of [1.5, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const { inner } = innerWithOneRunning()
+      const store = capturingStore()
+      const sched = await persistentBackgroundSubagentScheduler({
+        inner,
+        store,
+        workspace: "/ws/cap",
+        childDepth: bad,
+      })
+      sched.fork({ task: "work" })
+      await Promise.resolve()
+      await Promise.resolve()
+      const running = store.saved.find((h) => h.status === "running")
+      expect(running).toBeDefined()
+      expect(running?.depth).toBeUndefined()
+    }
+  })
+})
+
+/* ====================================================================== */
 /* PERSIST-TIME CAPTURE: hydrating-scheduler writes handle.depth            */
 /* ====================================================================== */
 
@@ -409,6 +566,10 @@ describe("INV-09 — resume preserves persisted lineage depth", () => {
     expect(fs.forks).toHaveLength(0)
     expect(outcomes[0]?.newId).toBeUndefined()
     expect(outcomes[0]?.errorMessage).toBeDefined()
+    // OLD handle must NOT be flipped to "resumed" on a DEEPER divergence either
+    // (symmetric side-effect to the shallower leg). RED if the guard forks-then-
+    // denies or writes markResumed before the depth check.
+    expect(store.saved).toHaveLength(0)
   })
 })
 
@@ -435,6 +596,32 @@ describe("INV-10 — legacy no-depth handle fails closed under a lineage guard",
     expect(outcomes[0]?.newId).toBeUndefined()
     expect(outcomes[0]?.errorMessage).toBeDefined()
     expect(store.saved).toHaveLength(0)
+  })
+
+  test("in-memory MALFORMED persisted depth (fractional) + guard → DENIED as legacy (resumer's own defense-in-depth, not just the codec)", async () => {
+    // The codec fail-closes malformed depths on disk read, but an in-memory port
+    // could hand the resumer a raw handle whose depth is a non-integer. The
+    // resumer's lineageDenyReason has its OWN `Number.isInteger && >= 0` gate
+    // (resumer.ts:282) that must treat such a value as ABSENT → INV-10 DENY,
+    // NOT compare 1.5 === resumeForkDepth (which would be a silent allow-miss).
+    for (const bad of [1.5, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const handle = { ...mkHandle({ id: "bg-badd", status: "interrupted" }), depth: bad }
+      const fs = fakeScheduler()
+      const store = fakeStore([handle])
+      const outcomes = await resumeInterruptedHandles({
+        scheduler: fs.scheduler,
+        store,
+        policy: alwaysResumePolicy,
+        workspace: "/ws/R",
+        // A guard whose depth EQUALS the malformed value's numeric form would
+        // wrongly allow if the resumer skipped the integer gate.
+        lineageGuard: { resumeForkDepth: bad },
+      })
+      expect(fs.forks).toHaveLength(0)
+      expect(outcomes[0]?.newId).toBeUndefined()
+      expect(outcomes[0]?.errorMessage).toBeDefined()
+      expect(store.saved).toHaveLength(0)
+    }
   })
 })
 

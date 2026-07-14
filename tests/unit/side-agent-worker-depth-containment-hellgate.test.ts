@@ -146,6 +146,46 @@ describe("worker-charter-runner assembleChildConfig — daemon depth containment
     }
   })
 
+  test("CONTAINMENT at daemon-depth BOUNDARIES 0,1,2: pinned cap forbids the pass's CHILDREN under a widened policy", () => {
+    withCap(9) // widened operator policy — the daemon must NOT inherit root budget
+    try {
+      for (const daemonDepth of [0, 1, 2]) {
+        const daemon = assembleChildConfig(stubLlm(), "/repo", daemonDepth)
+        const passDepth = childDepthOf(daemon) // daemonDepth + 1
+        expect(daemon.subagent?.maxDepth).toBe(passDepth) // pin tracks the boundary
+
+        // The pass ITSELF is admitted (childDepth == cap) — the one legit pass.
+        const pass = passConfigOf(daemon)
+        expect(spawnToolsAvailable(pass)).toBe(false) // …but is a LEAF (cannot spawn)
+
+        // The pass's OWN hypothetical child sits one deeper than the pinned cap, so
+        // even with policy 9 it is NOT admissible: childDepthOf(pass) > effectiveCap.
+        const grandchildDepth = childDepthOf(pass) // passDepth + 1
+        expect(grandchildDepth).toBeGreaterThan(effectiveCap(daemon.subagent?.maxDepth))
+        // The ceiling IS the pinned cap (min(9, pin) === pin), not the widened policy.
+        expect(effectiveCap(daemon.subagent?.maxDepth)).toBe(passDepth)
+      }
+    } finally {
+      withCap(undefined)
+    }
+  })
+
+  test("DEEPER spawner ⇒ deeper daemon ⇒ still BOUNDED (the pass stays a leaf, its children denied)", () => {
+    withCap(9)
+    try {
+      // A depth-5 spawner threads through to a depth-5 daemon; its pass is depth 6
+      // and pinned; the pass's children (depth 7) exceed the pin ⇒ denied. Deeper
+      // lineage scales the ceiling but never UN-bounds it under a widened policy.
+      const daemon = assemble({ [WORKER_PARENT_DEPTH_ENV]: "5" })
+      expect(daemon.depth).toBe(5)
+      const pass = passConfigOf(daemon)
+      expect(spawnToolsAvailable(pass)).toBe(false)
+      expect(childDepthOf(pass)).toBeGreaterThan(effectiveCap(daemon.subagent?.maxDepth))
+    } finally {
+      withCap(undefined)
+    }
+  })
+
   test("the single investigating pass is STILL ADMITTED under the default cap (no regression)", () => {
     withCap(undefined) // default operator policy cap = 1
     try {
@@ -174,12 +214,45 @@ describe("resolveDaemonDepth — fail-closed lineage resolution", () => {
     expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "5" })).toBe(5)
   })
 
-  test("a forged / malformed threaded value cannot grant a shallower budget (floored)", () => {
-    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "not-a-number" })).toBe(MIN_DAEMON_DEPTH)
-    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "-4" })).toBe(MIN_DAEMON_DEPTH)
-    for (const v of ["-4", "not-a-number", ""]) {
-      expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: v })).toBeGreaterThanOrEqual(0)
+  test("FAIL-CLOSED TABLE: every non-parseable / negative / non-finite value floors to MIN_DAEMON_DEPTH", () => {
+    // These are the forms that CANNOT yield a valid non-negative integer, so the
+    // resolver MUST fall to the floor (never NaN, never negative, never undefined).
+    // RED under the mutation `derived = parent` (drop the `Number.isInteger && >=0`
+    // guard) — "-1"/"-4" would then return a NEGATIVE depth (widening the budget),
+    // and "abc"/"NaN"/"" would return NaN (which fails every downstream cap check).
+    const floored = ["", "abc", "not-a-number", "NaN", "-1", "-4", "-0.5", "0x10", "  ", "+"]
+    for (const v of floored) {
+      expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: v })).toBe(MIN_DAEMON_DEPTH)
     }
+    // Absent key is the same fail-closed floor as an unparseable value.
+    expect(resolveDaemonDepth({})).toBe(MIN_DAEMON_DEPTH)
+  })
+
+  test("CONTAINMENT INVARIANT: NO env value (malformed OR lenient) can ever grant a depth below the floor", () => {
+    // The load-bearing security property regardless of parse leniency: the result
+    // is ALWAYS a non-negative integer >= the floor. A forged value can only
+    // DEEPEN the lineage (tighter budget), never widen it below MIN_DAEMON_DEPTH.
+    // RED under the mutation `Math.max` → `Math.min` (or dropping the `>= 0` clamp):
+    // a "-4" would then leak a negative/sub-floor depth.
+    const adversarial = ["-4", "-1", "abc", "NaN", "", "2.5", "3abc", "1e3", "  7 ", "999999999"]
+    for (const v of adversarial) {
+      const d = resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: v })
+      expect(Number.isInteger(d)).toBe(true)
+      expect(d).toBeGreaterThanOrEqual(MIN_DAEMON_DEPTH)
+    }
+  })
+
+  test("LENIENT-PARSE cases resolve to their truncated integer (still bounded, never sub-floor)", () => {
+    // parseInt truncation is the SHIPPED behavior — encode it honestly rather than
+    // pretend these floor. What matters for containment: each lands on a valid
+    // non-negative integer. RED if the parse base/radix changes (e.g. "0x10"→16)
+    // or the leading-int extraction is replaced by a strict Number() (NaN → floor,
+    // changing "3abc" from 3 to 0 — a behavior change this pins).
+    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "2.5" })).toBe(2) // truncates
+    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "3abc" })).toBe(3) // leading int
+    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "1e3" })).toBe(1) // base-10, not 1000
+    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "0x10" })).toBe(MIN_DAEMON_DEPTH) // base-10 "0x…" → 0
+    expect(resolveDaemonDepth({ [WORKER_PARENT_DEPTH_ENV]: "  7 " })).toBe(7) // whitespace-tolerant
   })
 
   test("a deeper daemon's pinned cap tracks its deeper pass (containment scales)", () => {
