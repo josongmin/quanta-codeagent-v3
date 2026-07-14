@@ -257,3 +257,91 @@ describe("§4.5 — telemetry never throws and changes no admit/deny behavior", 
     expect(spawnDepthSplitBrainCount()).toBe(0)
   })
 })
+
+// ── 5. OPERATOR-VISIBILITY (jul-15) — a split-brain surfaces WITHOUT debug ─────
+//
+// WHY: the split-brain counter + the `agent.spawn.admission.v1` line were read
+// ONLY by tests (counter) and gated at `debug` (line), suppressed at the default
+// `info` log level. So a REAL split-brain in production was operator-INVISIBLE —
+// the "a future hole surfaces in metrics" promise was half-realized. This block
+// pins the fix: a split-brain (and ONLY a split-brain) emits a `warn`-level
+// structured line, which the default `info` threshold LETS THROUGH.
+
+describe("§4.5 operator-visibility — split-brain emits a warn line at default (info) level", () => {
+  /** Capture the structured lines emitted at the DEFAULT (info) threshold — the
+   *  production log level. A `debug` line MUST NOT appear here; a `warn` line MUST. */
+  const captureAtInfoLevel = (fn: () => void): Array<Record<string, unknown>> => {
+    const lines: string[] = []
+    // Sink installed at level "info" — the production default. If the split-brain
+    // emit were `debug`-gated (the pre-fix state), nothing would land here.
+    __setSpawnDepthLogSink((line) => lines.push(line), "info")
+    fn()
+    return lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+  }
+
+  test("RED→GREEN: forced split-brain ⇒ a warn line is visible at info level", () => {
+    const records = captureAtInfoLevel(() => {
+      emitSpawnDepthDecision({
+        parentDepth: 1,
+        childDepth: 2,
+        maxDescendantDepth: 1, // 2 > cap 1 ⇒ denied_by_depth
+        toolExposed: true, // …yet exposed — the split-brain the invariant forbids
+        decision: "denied_by_depth",
+      })
+    })
+
+    // The counter caught it (existing behavior)…
+    expect(spawnDepthSplitBrainCount()).toBe(1)
+
+    // …AND — the fix — an OPERATOR-VISIBLE warn line surfaced at the default level.
+    const warns = records.filter((r) => r.level === "warn")
+    expect(warns.length).toBe(1)
+    const w = warns[0] as { event: string; fields: Record<string, unknown> }
+    expect(w.event).toBe("agent.spawn.admission.split_brain")
+    // The line carries the diagnostic depth fields for the operator.
+    expect(w.fields.toolExposed).toBe(true)
+    expect(w.fields.decision).toBe("denied_by_depth")
+    expect(w.fields.parentDepth).toBe(1)
+    expect(w.fields.childDepth).toBe(2)
+    expect(w.fields.maxDescendantDepth).toBe(1)
+  })
+
+  test("PAIRED CONTROL: normal path (0 split-brain) emits NO warn line — quiet", () => {
+    const records = captureAtInfoLevel(() => {
+      // Honest admitted spawn.
+      emitSpawnDepthDecision({
+        parentDepth: 0,
+        childDepth: 1,
+        maxDescendantDepth: 3,
+        toolExposed: true,
+        decision: "admitted",
+      })
+      // Honest depth reject — tool was NOT exposed ⇒ not a split-brain.
+      emitSpawnDepthDecision({
+        parentDepth: 1,
+        childDepth: 2,
+        maxDescendantDepth: 1,
+        toolExposed: false,
+        decision: "denied_by_depth",
+      })
+      // Malformed parent ⇒ denied_malformed, also not a split-brain.
+      emitSpawnDepthDecision({
+        parentDepth: 0,
+        childDepth: null,
+        maxDescendantDepth: 0,
+        toolExposed: false,
+        decision: "denied_malformed",
+      })
+    })
+
+    // No split-brain occurred…
+    expect(spawnDepthSplitBrainCount()).toBe(0)
+    // …so the operator surface stays SILENT: no warn line at info level.
+    const warns = records.filter((r) => r.level === "warn")
+    expect(warns.length).toBe(0)
+    // And the per-decision `.v1` line remains debug-gated (invisible at info),
+    // so the normal path produces ZERO operator noise.
+    const debugLines = records.filter((r) => r.level === "debug")
+    expect(debugLines.length).toBe(0)
+  })
+})

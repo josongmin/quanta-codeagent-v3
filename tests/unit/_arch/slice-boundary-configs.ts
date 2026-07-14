@@ -410,6 +410,10 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     allowImports: [
       "@/agent/side-agent-runner",
       "@/agent/subagent-runner",
+      // Reviewed: the OS-process worker charter derives its own spawn-depth
+      // containment (childDepthOf/effectiveCap) from the shared authority leaf so
+      // a forked daemon is never a fresh unbounded root (rev.4 §4 defense-in-depth).
+      "@/agent/spawn-depth",
       "@/llm",
       "@/llm/replay",
       "@/tool",

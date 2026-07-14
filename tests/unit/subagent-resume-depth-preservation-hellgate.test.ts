@@ -148,6 +148,201 @@ describe("PersistedHandle.depth codec round-trip", () => {
 })
 
 /* ====================================================================== */
+/* PERSIST-TIME CAPTURE: hydrating-scheduler writes handle.depth            */
+/* ====================================================================== */
+
+import type {
+  BackgroundSubagentScheduler as BgSched,
+  SubagentHandleId as HId,
+} from "@/agent/subagent-background"
+import {
+  type PersistentSchedulerStore as PStore,
+  persistentBackgroundSubagentScheduler,
+} from "@/agent/subagent-persistence-store"
+
+/** A minimal in-memory inner scheduler whose `fork` immediately registers a
+ *  running entry (so the wrapper's fork-time `saveLiveHandle` has a live record
+ *  to project). `await` never settles within the test window — we only observe
+ *  the fork-time running snapshot the wrapper persists. */
+const innerWithOneRunning = (): { inner: BgSched; forkedId: HId } => {
+  const id = "bg-cap-0001" as HId
+  const spec: SubagentSpec = { task: "work" }
+  const result: SubagentResult = {
+    status: "running",
+    outputSummary: "(running)",
+    startedAt: 5000,
+    turns: 0,
+  }
+  const entries = [{ id, spec, result }]
+  const inner: BgSched = {
+    fork: () => id,
+    poll: (q) => (q === id ? result : null),
+    await: () => new Promise<SubagentResult | null>(() => {}), // never settles
+    cancel: () => false,
+    list: () => entries,
+    prune: () => 0,
+    serialize: () => "",
+    hydrate: () => 0,
+    hydrateWithPrune: () => ({ restored: 0, pruned: 0 }),
+    forceBackground: () => "not_found",
+  }
+  return { inner, forkedId: id }
+}
+
+const capturingStore = (): PStore & { saved: PersistedHandle[] } => {
+  const saved: PersistedHandle[] = []
+  return {
+    saved,
+    async save(h) {
+      saved.push(h)
+    },
+    async load() {
+      return null
+    },
+    async list() {
+      return []
+    },
+    async delete() {},
+    async prune() {
+      return 0
+    },
+  }
+}
+
+describe("persist-time capture — hydrating scheduler records lineage depth", () => {
+  test("RED before wire: fork persists handle.depth = injected childDepth", async () => {
+    const { inner } = innerWithOneRunning()
+    const store = capturingStore()
+    const sched = await persistentBackgroundSubagentScheduler({
+      inner,
+      store,
+      workspace: "/ws/cap",
+      childDepth: 2, // the REAL depth bg children run at (= parentDepth+1)
+    })
+    sched.fork({ task: "work" })
+    // Let the fire-and-forget fork-time save drain.
+    await Promise.resolve()
+    await Promise.resolve()
+    const running = store.saved.find((h) => h.status === "running")
+    expect(running).toBeDefined()
+    // RED until liveToPersisted threads the injected childDepth.
+    expect(running?.depth).toBe(2)
+  })
+
+  test("backward-compatible: no childDepth ⇒ handle.depth ABSENT", async () => {
+    const { inner } = innerWithOneRunning()
+    const store = capturingStore()
+    const sched = await persistentBackgroundSubagentScheduler({
+      inner,
+      store,
+      workspace: "/ws/cap",
+      // childDepth omitted
+    })
+    sched.fork({ task: "work" })
+    await Promise.resolve()
+    await Promise.resolve()
+    const running = store.saved.find((h) => h.status === "running")
+    expect(running).toBeDefined()
+    expect(running?.depth).toBeUndefined()
+  })
+})
+
+describe("full round-trip — capture (wrapper+jsonl) → resume guard", () => {
+  test("depth-2 child persisted via wrapper → matching resume allowed, divergent+legacy denied", async () => {
+    const base = await mkdtemp(join(tmpdir(), "resume-depth-rt-"))
+    try {
+      const store = defaultJsonlSchedulerStore({ baseDir: base })
+      // 1) Persist a bg child at depth 2 through the REAL hydrating wrapper +
+      //    jsonl store (capture wire), then flip it to interrupted so the
+      //    resumer will consider it.
+      const { inner } = innerWithOneRunning()
+      const sched = await persistentBackgroundSubagentScheduler({
+        inner,
+        store,
+        workspace: "/ws/rt",
+        childDepth: 2,
+      })
+      sched.fork({ task: "work" })
+      // The wrapper's fork-time running save is fire-and-forget through an async
+      // jsonl disk write; poll deterministically until it lands (bounded).
+      let persistedRunning: PersistedHandle | null = null
+      for (let i = 0; i < 200 && persistedRunning === null; i += 1) {
+        persistedRunning = await store.load("bg-cap-0001")
+        if (persistedRunning === null) await new Promise((r) => setTimeout(r, 5))
+      }
+      // Read back the running snapshot the wrapper persisted and assert depth
+      // round-tripped through the jsonl codec.
+      expect(persistedRunning?.depth).toBe(2)
+      // Mark it interrupted (as hydration-on-restart would) so the resumer picks
+      // it up — preserving the captured depth.
+      await store.save({
+        ...(persistedRunning as PersistedHandle),
+        status: "interrupted",
+        endedAt: 6000,
+        outputSummary: "(interrupted)",
+      })
+
+      const forkSpy = fakeScheduler()
+
+      // 2a) Resume under a scheduler whose resume-fork depth MATCHES (2) → allowed.
+      const okOutcomes = await resumeInterruptedHandles({
+        scheduler: forkSpy.scheduler,
+        store,
+        policy: alwaysResumePolicy,
+        workspace: "/ws/rt",
+        lineageGuard: { resumeForkDepth: 2 },
+      })
+      expect(okOutcomes).toHaveLength(1)
+      expect(forkSpy.forks).toHaveLength(1)
+      expect(okOutcomes[0]?.newId).toBeDefined()
+
+      // Re-seed the interrupted record (the allowed resume flipped it to
+      // "resumed") so the divergent/legacy legs start from interrupted again.
+      const reseed = async (depth: number | undefined): Promise<void> => {
+        await store.save({
+          ...(persistedRunning as PersistedHandle),
+          status: "interrupted",
+          endedAt: 6000,
+          outputSummary: "(interrupted)",
+          ...(depth !== undefined ? { depth } : {}),
+        })
+      }
+
+      // 2b) Divergent resume-fork depth (1) → DENIED, no fork.
+      await reseed(2)
+      const divergent = fakeScheduler()
+      const divOutcomes = await resumeInterruptedHandles({
+        scheduler: divergent.scheduler,
+        store,
+        policy: alwaysResumePolicy,
+        workspace: "/ws/rt",
+        lineageGuard: { resumeForkDepth: 1 },
+      })
+      expect(divergent.forks).toHaveLength(0)
+      expect(divOutcomes[0]?.newId).toBeUndefined()
+      expect(divOutcomes[0]?.errorMessage).toBeDefined()
+
+      // 2c) Legacy (no depth) handle → DENIED even when resume-fork depth = 2.
+      // Build a fresh legacy interrupted handle (jsonl codec drops depth when
+      // absent — verified elsewhere).
+      const legacyStore = fakeStore([mkHandle({ id: "bg-legacy-rt", status: "interrupted" })])
+      const legacyFork = fakeScheduler()
+      const legacyOutcomes = await resumeInterruptedHandles({
+        scheduler: legacyFork.scheduler,
+        store: legacyStore,
+        policy: alwaysResumePolicy,
+        workspace: "/ws/R",
+        lineageGuard: { resumeForkDepth: 2 },
+      })
+      expect(legacyFork.forks).toHaveLength(0)
+      expect(legacyOutcomes[0]?.errorMessage).toBeDefined()
+    } finally {
+      await rm(base, { recursive: true, force: true })
+    }
+  })
+})
+
+/* ====================================================================== */
 /* INV-09: preserve persisted depth (deny divergent re-derivation)         */
 /* ====================================================================== */
 

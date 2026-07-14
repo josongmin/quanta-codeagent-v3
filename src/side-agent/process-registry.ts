@@ -59,6 +59,23 @@ const DEFAULT_MAX_CONCURRENT = 2
 const DEFAULT_MAX_FINDINGS = 1000
 const DEFAULT_MAX_RETAINED = 100
 
+/**
+ * LINEAGE ENV SEAM — the env key by which the SPAWNING agent's real depth is
+ * threaded across the OS-process fork boundary onto the forked worker. It is
+ * merged into the fork spec's `env` here; the real `nodeProcessForkPort` forks
+ * with `{ ...process.env, ...spec.env }`, so the worker inherits it and
+ * `worker-charter-runner.resolveDaemonDepth(process.env)` derives the daemon's
+ * own depth from it (absent ⇒ the fail-closed floor).
+ *
+ * MIRRORED (not imported) from `worker-charter-runner.WORKER_PARENT_DEPTH_ENV`
+ * on purpose: `worker-charter-runner.ts` is the CHILD composition root (it
+ * value-imports `@/agent`/`@/llm`/`@/tool`), so importing it here would drag
+ * those heavy deps into this PURE-LEAF registry and defeat its
+ * fakes-only testability. The two are kept in lock-step by a drift guard in the
+ * depth-containment hellgate test (asserts this === the exported const). Same
+ * duck-typed-mirror convention as `SideAgentIdleBarrierPort` in `./types`. */
+export const WORKER_PARENT_DEPTH_ENV_KEY = "QUANTA_SIDE_AGENT_PARENT_DEPTH" as const
+
 export interface ProcessSideAgentRegistryOpts {
   /** The OS layer — the real adapter is `nodeProcessForkPort`; tests pass a fake. */
   readonly fork: ProcessForkPort
@@ -71,6 +88,15 @@ export interface ProcessSideAgentRegistryOpts {
   /** Extra env merged onto each forked child (the child also inherits the
    *  parent's env via the fork adapter — model/provider/credentials). */
   readonly childEnv?: Readonly<Record<string, string>>
+  /** The SPAWNING agent's own lineage depth at daemon-creation time (the host
+   *  passes `cfg.depth`). Threaded across the fork boundary via
+   *  {@link WORKER_PARENT_DEPTH_ENV_KEY} so the forked worker's daemon config runs
+   *  at its TRUE lineage depth (its investigating pass is bounded one level
+   *  deeper) instead of the always-floor. FAIL-CLOSED: only a valid non-negative
+   *  integer is threaded; absent / malformed ⇒ the key is NOT set and the worker
+   *  falls back to `resolveDaemonDepth`'s floor (never a fabricated shallow depth,
+   *  which would WIDEN the daemon's descendant budget). */
+  readonly parentDepth?: number
   /** Working directory for the forked children. */
   readonly cwd?: string
   /** Runaway guard — max concurrent RUNNING daemons (default 2, matches the
@@ -135,6 +161,24 @@ export const createProcessSideAgentDaemonRegistry = (
   let idCounter = 0
   const mintId = (): string => opts.idGen?.() ?? `sa-${++idCounter}`
 
+  // Lineage env threaded onto EVERY forked child: the spawning agent's real depth
+  // (so the worker daemon config runs at its true lineage, not the floor). Merged
+  // AFTER any operator `childEnv` so lineage cannot be shadowed. FAIL-CLOSED: only
+  // a valid non-negative integer is threaded — an absent/malformed depth leaves
+  // the key unset and the worker floors (never a fabricated shallow budget).
+  const lineageEnv: Record<string, string> =
+    typeof opts.parentDepth === "number" &&
+    Number.isInteger(opts.parentDepth) &&
+    opts.parentDepth >= 0
+      ? { [WORKER_PARENT_DEPTH_ENV_KEY]: String(opts.parentDepth) }
+      : {}
+  // The env handed to the fork spec: operator childEnv (if any) THEN lineage
+  // (lineage wins). Undefined only when BOTH are empty (byte-identical legacy).
+  const forkEnv: Readonly<Record<string, string>> | undefined =
+    opts.childEnv !== undefined || Object.keys(lineageEnv).length > 0
+      ? { ...(opts.childEnv ?? {}), ...lineageEnv }
+      : undefined
+
   /** Effective registry-facing status of a daemon. */
   const statusOf = (d: ProcessDaemonState): SideAgentStatus =>
     d.stoppedByRequest ? "stopped" : mapStatus(d.supervisor.status())
@@ -184,7 +228,7 @@ export const createProcessSideAgentDaemonRegistry = (
         fork: opts.fork,
         forkSpec: {
           modulePath: opts.workerModulePath,
-          ...(opts.childEnv !== undefined ? { env: opts.childEnv } : {}),
+          ...(forkEnv !== undefined ? { env: forkEnv } : {}),
           ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
         },
         now: opts.now,

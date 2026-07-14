@@ -52,6 +52,18 @@ export interface HydratingSchedulerOpts {
   /** Test seam: host PID to embed into persisted handles. Default
    *  `process.pid`. */
   readonly hostPid?: () => number
+  /** OPTIONAL (INV-09/INV-10 — jul-14 resume-depth-preservation) the REAL
+   *  lineage depth every background child forked through this wrapper runs at
+   *  (= the inner scheduler's construction-time `parentDepth + 1`, 0 = root).
+   *  When present it is written onto every persisted `PersistedHandle.depth` so
+   *  a later resume can enforce that the re-forked child does NOT gain spawn
+   *  authority by being re-derived to a shallower depth. Every child forked by
+   *  ONE wrapper shares this depth (the inner scheduler's parentDepth is fixed
+   *  at its construction). ABSENT ⇒ `handle.depth` is OMITTED (backward
+   *  compatible / legacy record — the resume guard treats it as fail-closed). A
+   *  non-integer / negative value is OMITTED (defense-in-depth; the codec
+   *  fail-closes such values on read too). */
+  readonly childDepth?: number
   /** OPTIONAL out-of-band observability sink (DI observer). The store's
    *  `save` throws a typed {@link PersistenceError} `"io-failed"` on real disk
    *  failure — a signal the caller is meant to branch on. This scheduler
@@ -136,6 +148,7 @@ const liveToPersisted = (
   result: SubagentResult,
   hostPid: number,
   workspace: string,
+  childDepth: number | undefined,
 ): PersistedHandle => ({
   id,
   spec,
@@ -148,6 +161,12 @@ const liveToPersisted = (
   ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
   hostPid,
   workspace,
+  // INV-09/INV-10 lineage capture. OMITTED when absent (legacy record) or when
+  // the injected value is not a non-negative integer (defense-in-depth; the
+  // codec fail-closes such values on read anyway).
+  ...(childDepth !== undefined && Number.isInteger(childDepth) && childDepth >= 0
+    ? { depth: childDepth }
+    : {}),
 })
 
 /** Reclassify a persisted `"running"` handle whose PID is gone (or never
@@ -191,6 +210,7 @@ export const persistentBackgroundSubagentScheduler = async (
   const isProcessAlive = opts.isProcessAlive ?? defaultIsProcessAlive
   const now = opts.now ?? Date.now
   const hostPidFn = opts.hostPid ?? ((): number => process.pid)
+  const childDepth = opts.childDepth
   const onPersistError = opts.onPersistError
 
   /** Surface an already-SWALLOWED save failure out-of-band. Normalizes the
@@ -292,7 +312,7 @@ export const persistentBackgroundSubagentScheduler = async (
       // the existing tail so callers can still await a stable point.
       return lastWriteById.get(id) ?? Promise.resolve()
     }
-    const handle = liveToPersisted(id, entry.spec, entry.result, hostPidFn(), workspace)
+    const handle = liveToPersisted(id, entry.spec, entry.result, hostPidFn(), workspace, childDepth)
 
     const prev = lastWriteById.get(id) ?? Promise.resolve()
     const next = prev.then(async () => {

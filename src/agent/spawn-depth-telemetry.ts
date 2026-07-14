@@ -35,20 +35,31 @@
  *      `decision` (low cardinality) plus the `splitBrain` regression counter.
  *      A module-local `Metrics` (not the shared `metrics` singleton) keeps the
  *      snapshot deterministic for tests and avoids cross-test contamination.
+ *   3. OPERATOR VISIBILITY (jul-15): the `debug` line above is suppressed at the
+ *      default `info` log level, and the split-brain COUNTER was read only by
+ *      tests — so a REAL split-brain was operator-INVISIBLE in production. When
+ *      (and ONLY when) the invariant is violated we ALSO emit ONE `warn`-level
+ *      structured line (`agent.spawn.admission.split_brain`) through the SAME
+ *      `StructuredLogger` seam. `warn >= info`, so it surfaces at the default
+ *      level WITHOUT requiring `QUANTA_LOG_LEVEL=debug`. A split-brain is a rare,
+ *      high-signal regression event, so this cannot spam the normal (0) path —
+ *      the honest admit/deny path emits no `warn` at all.
  *
  * ── SAFETY ──
  *
  * Observability MUST NOT break the loop. Every public function is wrapped so it
  * NEVER throws — a logger/registry hiccup is swallowed. It is allocation-cheap
- * (one record object per spawn ATTEMPT, a low-frequency event) and gated on
- * nothing (the log line self-gates on the `debug` threshold).
+ * (one record object per spawn ATTEMPT, a low-frequency event); the `.v1` line
+ * self-gates on the `debug` threshold and the split-brain `warn` line self-gates
+ * on `warn` (emitted only when the invariant is violated).
  *
  * This is a LEAF module (imports only `@/observability` + local types), so it
  * cannot participate in the ADR-0436 `features.ts` import cycle that constrains
  * `spawn-depth.ts`.
  */
 
-import { log, Metrics } from "@/observability"
+import { log, Metrics, StructuredLogger } from "@/observability"
+import type { LogLevel } from "@/shared"
 
 /** The terminal decision for a single spawn attempt (§4.5). Closed union — a new
  *  decision kind forces every switch/Record over it to be updated. */
@@ -86,6 +97,13 @@ const decisionCounterName = (decision: SpawnDepthDecision): string =>
  *  normal production path this is always 0. */
 export const SPAWN_DEPTH_SPLIT_BRAIN_COUNTER = "agent.spawn.admission.split_brain"
 
+/** The OPERATOR-VISIBLE logger for the split-brain warn line (jul-15). Defaults
+ *  to the shared `log` (stderr, whose threshold is `runtimeConfig().logLevel` —
+ *  `warn >= info`, so it surfaces at the default level). Test-swappable via
+ *  `__setSpawnDepthLogSink` so the emitted line can be captured WITHOUT touching
+ *  the env or stderr — mirrors the `__reset*` seams elsewhere. */
+let splitBrainLogger: StructuredLogger = log
+
 /**
  * Emit the depth-flow decision at a spawn DECISION point (§4.5). Reuses the
  * childDepthOf/effectiveCap results already computed by the runner — it does NOT
@@ -102,6 +120,17 @@ export const emitSpawnDepthDecision = (record: SpawnDepthDecisionRecord): void =
     // depth — exposure ⇔ admission. This counter is the regression detector.
     if (record.toolExposed && record.decision === "denied_by_depth") {
       registry.counter(SPAWN_DEPTH_SPLIT_BRAIN_COUNTER).inc()
+      // OPERATOR VISIBILITY (jul-15): surface the regression at `warn` so it is
+      // visible at the default `info` log level (warn >= info) WITHOUT requiring
+      // debug. This branch is reached ONLY when the invariant is violated — a
+      // rare, high-signal event — so the normal (0 split-brain) path stays quiet.
+      splitBrainLogger.warn(SPAWN_DEPTH_SPLIT_BRAIN_COUNTER, {
+        parentDepth: record.parentDepth,
+        childDepth: record.childDepth,
+        maxDescendantDepth: record.maxDescendantDepth,
+        toolExposed: record.toolExposed,
+        decision: record.decision,
+      })
     }
     log.debug("agent.spawn.admission.v1", {
       parentDepth: record.parentDepth,
@@ -140,4 +169,21 @@ export const spawnDepthTelemetrySnapshot = (): Record<string, number> => {
  *  `__reset*` seams elsewhere). */
 export const __resetSpawnDepthTelemetry = (): void => {
   registry = new Metrics()
+}
+
+/** Redirect the split-brain warn line to a captured sink at a chosen threshold
+ *  (tests only). Lets a suite assert the operator-visible line surfaces at the
+ *  DEFAULT (`info`) level without touching env/stderr. `level` defaults to
+ *  `info` — the production default — so a `warn` line lands but a `debug` line
+ *  would not. */
+export const __setSpawnDepthLogSink = (
+  sink: (line: string) => void,
+  level: LogLevel = "info",
+): void => {
+  splitBrainLogger = new StructuredLogger({ level, sink })
+}
+
+/** Restore the split-brain logger to the shared production `log` (tests only). */
+export const __resetSpawnDepthLogSink = (): void => {
+  splitBrainLogger = log
 }

@@ -171,6 +171,15 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   // on the default-OFF path.
   const admissionQueue = gateOn(args.envSource, "QUANTA_SUBAGENT_QUEUE")
   const maxQueued = parsePositiveInt(args.envSource.QUANTA_BG_MAX_QUEUED)
+  // INV-09/INV-10 (jul-14 resume-depth-preservation): the REAL depth every bg
+  // child forked through this scheduler runs at. The inner scheduler is built
+  // FROM the parent config, so a child runs at `parentDepth + 1` (0 = root).
+  // This is BOTH the capture value (persist-time `handle.depth`) AND the
+  // resume-fork depth the lineage guard enforces against — SAME source, so a
+  // handle persisted by THIS process resumes iff the resume-time scheduler
+  // would re-derive the same depth. Under the shipping cap=1 default this is
+  // always 1 and the guard is inert-but-correct; it bites under cap>=2.
+  const childDepth = (args.parentConfig.depth ?? 0) + 1
   const inner = defaultBackgroundSubagentScheduler({
     runner: childRunner,
     // Phase 0-a (jul-13 nesting-control RFC §6.5): scheduler is built FROM the
@@ -191,6 +200,9 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
     inner,
     store,
     workspace: args.cwd,
+    // INV-09/INV-10 persist-time capture: stamp every persisted handle with the
+    // real lineage depth so a later resume can enforce depth preservation.
+    childDepth,
   })
   // ADR-0159 work-resume wiring (GROUP B1): if QUANTA_SUBAGENT_RESUME is on,
   // sweep interrupted handles from the previous process and re-fork them via
@@ -204,6 +216,14 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
       store,
       policy: defaultResumePolicy(),
       workspace: args.cwd,
+      // INV-09/INV-10 LIVE guard: enforce lineage-depth preservation at the
+      // resume trigger. `resumeForkDepth` is the SAME `childDepth` this process
+      // would re-derive a resumed fork at (= parentDepth+1), so a handle
+      // persisted by a shallower/deeper parent — or a legacy depth-less handle —
+      // is DENIED rather than silently re-derived to a possibly-shallower depth
+      // (spawn-authority escalation). NOT default-OFF: the guard is always
+      // wired; under cap=1 it is inert-but-correct (every child is depth-1).
+      lineageGuard: { resumeForkDepth: childDepth },
     })
     // Evict the stale "interrupted" cache entries only for handles where the
     // sweep actually forked a new handle (action === "resume").
